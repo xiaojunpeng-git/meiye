@@ -70,6 +70,8 @@ class StoreProduct extends AuthController
 			['activity_type', ''],//参与活动
 			['stock_range', ''],//库存区间[小,大]
 			['collect_range', ''],//收藏区间[小,大]
+			['is_inventory', ''],//是否参与库存管理
+			['allow_negative_stock', ''],//是否允许负库存
         ]);
 		$cateId = $where['cate_id'];
 		if ($cateId) {
@@ -235,6 +237,8 @@ class StoreProduct extends AuthController
 			['activity_type', ''],//参与活动
 			['stock_range', ''],//库存区间[小,大]
 			['collect_range', ''],//收藏区间[小,大]
+			['is_inventory', ''],//是否参与库存管理
+			['allow_negative_stock', ''],//是否允许负库存
 
         ]);
 		if ($where['supplier_id']) {
@@ -667,7 +671,7 @@ class StoreProduct extends AuthController
 			['card_cover', 1],//卡片封面 1:图片，2:颜色
 			['card_cover_image', ''],//卡片封面图片
 			['card_cover_color', ''],//卡片封面颜色
-			['is_sync_stock', 1],//库存同步到门店1：同步0：门店库存为0
+			['is_sync_stock', 0],//【已停用同步库存】固定 0：新门店商品/SKU 库存为 0；后端也会强制忽略同步库存
 			['is_sync_show', 1],//状态同步到门店1：同平台商品状态0：同步至门店为下架状态
             ['is_brokerage', 0],//是否参与返佣
             ['is_sub', 0],//是否单独返佣
@@ -893,28 +897,12 @@ class StoreProduct extends AuthController
      */
     public function saveProductAttrsStock(StoreProductAttrValueServices $services, $id)
     {
-        if (!$id) {
-            return $this->fail('缺少商品ID');
-        }
-        [$attrs] = $this->request->getMore([
-            ['attrs', []]
-        ], true);
-        if (!$attrs) {
-            return $this->fail('请重新修改规格库存');
-        }
-		$productInfo = $this->service->getCacheProductInfo((int)$id);
-		if (!$productInfo) {
-			return $this->fail('商品不存在或已删除');
-		}
-        foreach ($attrs as $attr) {
-            if (!isset($attr['unique']) || !isset($attr['pm']) || !isset($attr['stock'])) {
-                return $this->fail('请重新修改规格库存');
-            }
-			if ($productInfo['product_type'] == 6 && !isset($attr['reservation_time_data'])) {
-				return $this->fail('请修改规格时段划分库存');
-			}
-        }
-        return $this->success(['stock' => $services->saveProductAttrsStock((int)$id, $attrs, 0,0, (int)$this->adminId)]);
+        // 【库存铁律】商品页快捷改库存已停用；出入库单据内部仍可调用 Service
+        return $this->fail('已停用：不可在商品页快捷改库存，请到「库存管理」入库/出库/盘点操作');
+        // if (!$id) {
+        //     return $this->fail('缺少商品ID');
+        // }
+        // ...
     }
 
     /**

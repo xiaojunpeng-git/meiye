@@ -214,13 +214,26 @@ class ExportExcel extends AuthController
             return $this->fail('参数错误');
         }
         $type = $where['type'];
+        $recordId = (int)$where['record_id'];
+        $record = $recordServices->get($recordId);
+        if (!$record || (int)($record['is_del'] ?? 0) === 1) {
+            return $this->fail('导入记录不存在');
+        }
+        // 平台端仅可下载平台归属记录
+        if ((int)($record['type'] ?? -1) !== 0 || (int)($record['relation_id'] ?? -1) !== 0) {
+            return $this->fail('无权下载该导入记录');
+        }
         unset($where['type']);
         $data = $errorServices->getErrorList($where);
-        $recordServices->bcInc($where['record_id'], 'down_count', 1);
+        $recordServices->bcInc($recordId, 'down_count', 1);
+        $importType = (string)($record['import_type'] ?? '');
         if ($type == 'user') {
             return $this->success($this->service->importUser($data['list'] ?? []));
-        }else if($type == 'user_card'){
+        } else if ($type == 'user_card') {
             return $this->success($this->service->importUserCard($data['list'] ?? []));
+        } else if (in_array($importType, ['stock_initial_in', 'stock_in', 'stock_out'], true)
+            || in_array((string)$type, ['stock_initial_in', 'stock_in', 'stock_out'], true)) {
+            return $this->success($this->service->importStock($data['list'] ?? []));
         } else {
             return $this->success($this->service->importProduct($data['list'] ?? []));
         }

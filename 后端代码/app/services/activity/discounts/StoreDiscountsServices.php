@@ -346,21 +346,17 @@ class StoreDiscountsServices extends BaseServices
      * @param int $store_id
      * @return bool
      */
-    public function decDiscountStock(int $num, int $discountId, int $discount_product_id, int $product_id, string $unique, int $store_id = 0)
+    public function decDiscountStock(int $num, int $discountId, int $discount_product_id, int $product_id, string $unique, int $store_id = 0, bool $decProductStock = false)
     {
         if (!$discountId || !$discount_product_id || !$product_id) return true;
         $res = true;
-        if ($unique) {
+        if ($unique && $decProductStock) {
             /** @var StoreProductAttrValueServices $skuValueServices */
             $skuValueServices = app()->make(StoreProductAttrValueServices::class);
-			//套餐商品sku
-            $suk = $skuValueServices->value(['unique' => $unique, 'product_id' => $discount_product_id, 'type' => 5], 'suk');
-			//平台商品sku unique
+			$suk = $skuValueServices->value(['unique' => $unique, 'product_id' => $discount_product_id, 'type' => 5], 'suk');
             $productUnique = $skuValueServices->value(['suk' => $suk, 'product_id' => $product_id, 'type' => 0], 'unique');
-
 			/** @var StoreProductServices $services */
 			$services = app()->make(StoreProductServices::class);
-			//减掉普通商品sku的库存加销量
 			$res = false !== $services->decProductStock($num, $product_id, (string)$productUnique, $store_id);
         }
         return $res;
@@ -375,21 +371,18 @@ class StoreDiscountsServices extends BaseServices
      * @param string $unique
      * @return bool
      */
-    public function incDiscountStock(int $num, int $discountId, int $discount_product_id, int $product_id, string $unique, int $store_id = 0)
+    public function incDiscountStock(int $num, int $discountId, int $discount_product_id, int $product_id, string $unique, int $store_id = 0, bool $incProductStock = false)
     {
         if (!$discountId || !$discount_product_id || !$product_id) return true;
         $res = true;
-        if ($unique) {
+        // 【库存铁律】默认不回退实物库存
+        if ($unique && $incProductStock) {
             /** @var StoreProductAttrValueServices $skuValueServices */
             $skuValueServices = app()->make(StoreProductAttrValueServices::class);
-			//套餐商品sku
             $suk = $skuValueServices->value(['unique' => $unique, 'product_id' => $discount_product_id, 'type' => 5], 'suk');
-			//平台普通商品sku unique
             $productUnique = $skuValueServices->value(['suk' => $suk, 'product_id' => $product_id, 'type' => 0], 'unique');
-
-			/** @var StoreProductServices $services */
+            /** @var StoreProductServices $services */
             $services = app()->make(StoreProductServices::class);
-			//增加当前普通商品sku的库存,减去销量
             $res = $res && $services->incProductStock($num, $product_id, (string)$productUnique, $store_id);
         }
         return $res;

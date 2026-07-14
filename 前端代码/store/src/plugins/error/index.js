@@ -9,7 +9,6 @@
 // +----------------------------------------------------------------------
 import store from '@/store';
 import util from '@/libs/util';
-import axios from 'axios';
 
 export default {
     install (Vue, options) {
@@ -23,11 +22,6 @@ export default {
                         error
                         // instance
                     }
-                });
-                axios.post('http://shop.crmeb.net/api/error', { instance, error, info }).then(res => {
-                    console.log(res.msg || '错误已收集');
-                }).catch(() => {
-                    // console.log(err);
                 });
                 // 只在开发模式下打印 log
                 if (process.env.NODE_ENV === 'development') {

@@ -87,8 +87,7 @@ class Create implements ListenerInterface
 		ProductLogJob::dispatch(['order', ['uid' => $uid, 'order_id' => $oid]]);
 		//收集商品下单系统表单数据
 		SystemFormDataJob::dispatch([$oid]);
-		//订单创建生成销售出库单
-		ProductStockJob::dispatchDo('saveSaleOutOrder', [$orderInfo['id']]);
+		// 库存改造：销售出库单改到支付成功后同步生成，创建订单时不再写销售出库。
 
         //订单自动取消
         $this->pushJob($oid, (int)$activity['type']);

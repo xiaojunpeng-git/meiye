@@ -258,15 +258,8 @@ class Order extends AuthController
      */
     public function shareOrder()
     {
-        [$oid, $store_id] = $this->request->getMore([
-            ['oid', 0],
-            ['store_id', 0]
-        ], true);
-        if (!$oid || !$store_id) {
-            return $this->fail('缺少参数');
-        }
-        $this->services->shareOrder((int)$oid, (int)$store_id);
-        return $this->success('分配成功');
+        // 【门店归属】任何订单不可更改门店；接口直接拒绝
+        return $this->fail('已停用：订单只能在下单门店结算，不可更改门店');
     }
 
     /**

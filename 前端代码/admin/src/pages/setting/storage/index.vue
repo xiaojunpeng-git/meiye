@@ -24,9 +24,9 @@
 			  <p>若上传图片时未开启水印，则该图在开启水印之后依旧无水印效果。</p>
 			</template>
 			<template v-else>
-				<p v-if="currentTab == 3">阿里云oss开通方法：<a target="_blank"  href="https://doc.mohe.com/pro/crmebprov2/1213">点击查看</a></p>
-				<p v-if="currentTab == 4">腾讯云oss开通方法：<a target="_blank"  href="https://doc.mohe.com/pro/crmebprov2/1214">点击查看</a></p>
-				<p v-if="currentTab == 2">七牛云开通方法：<a target="_blank"  href="https://doc.mohe.com/pro/crmebprov2/1215">点击查看</a></p>
+				<p v-if="currentTab == 3">阿里云oss开通方法：<a target="_blank"  href="https://doc.mohe.com/pro/1213">点击查看</a></p>
+				<p v-if="currentTab == 4">腾讯云oss开通方法：<a target="_blank"  href="https://doc.mohe.com/pro/1214">点击查看</a></p>
+				<p v-if="currentTab == 2">七牛云开通方法：<a target="_blank"  href="https://doc.mohe.com/pro/1215">点击查看</a></p>
 				<p v-if="currentTab == 5">京东云cos开通方法：<a target="_blank"  href="https://doc.mohe.com/single/v5/8522">点击查看</a></p>
 				<p v-if="currentTab == 6">华为云cos开通方法：<a target="_blank"  href="https://doc.mohe.com/single/v5/8523">点击查看</a></p>
 				<p v-if="currentTab == 7">天翼云cos开通方法：<a target="_blank"  href="https://doc.mohe.com/single/v5/8524">点击查看</a></p>

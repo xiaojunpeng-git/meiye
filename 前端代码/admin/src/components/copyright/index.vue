@@ -3,7 +3,7 @@
   <GlobalFooter class="i-copyright" :links="links" :copyright="copyright" />
 </template>
 <script>
-import { getCrmebCopyRight } from '@/api/system';
+import { getCopyRight } from '@/api/system';
 export default {
   name: 'i-copyright',
   data() {
@@ -18,7 +18,7 @@ export default {
   methods: {
     // 获取版权信息
     getCopyRight() {
-      getCrmebCopyRight().then((res) => {
+      getCopyRight().then((res) => {
         if (res.data.copyrightContext) {
           this.links = [];
         } else {

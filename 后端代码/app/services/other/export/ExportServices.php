@@ -2043,6 +2043,47 @@ class ExportServices extends BaseServices
     }
 
     /**
+     * 库存导入错误记录导出
+     */
+    public function importStock(array $data, int $type = 1)
+    {
+        $header = ['Excel行号', '商品ID', 'SKU唯一值', '错误信息'];
+        $title = ['库存导入错误信息', '库存导入错误信息导出' . time(), '生成时间：' . date('Y-m-d H:i:s', time())];
+        $filename = '库存导入错误信息导出' . date('YmdHis', time());
+        $export = [];
+        $filekey = [];
+        if (!empty($data)) {
+            $i = 0;
+            foreach ($data as $item) {
+                $original = $item['original_data'] ?? [];
+                if (!is_array($original)) {
+                    $original = [];
+                }
+                $one_data = [
+                    'excel_row' => $original['excel_row'] ?? '',
+                    'product_id' => $original['product_id'] ?? '',
+                    'unique' => $original['unique'] ?? '',
+                    'fail_msg' => $item['fail_msg'] ?? ($original['fail_msg'] ?? ''),
+                ];
+                if ($type == 1) {
+                    $export[] = $one_data;
+                    if ($i == 0) {
+                        $filekey = array_keys($one_data);
+                    }
+                } else {
+                    $export[] = array_values($one_data);
+                }
+                $i++;
+            }
+        }
+        if ($type == 1) {
+            return compact('header', 'filekey', 'export', 'filename');
+        } else {
+            return $this->export($header, $title, $export, $filename);
+        }
+    }
+
+    /**
      * @param array $productList
      * @param int $type
      * @return array|mixed

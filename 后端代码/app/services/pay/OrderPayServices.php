@@ -13,6 +13,7 @@ namespace app\services\pay;
 
 
 use app\services\order\StoreOrderCartInfoServices;
+use app\services\product\inventory\ProductInventoryChangeServices;
 use app\services\wechat\WechatUserServices;
 use think\exception\ValidateException;
 
@@ -47,6 +48,14 @@ class OrderPayServices
         if ($orderInfo['pay_price'] <= 0) {
             throw new ValidateException('该支付无需支付!');
         }
+
+        /** @var ProductInventoryChangeServices $inventoryChange */
+        $inventoryChange = app()->make(ProductInventoryChangeServices::class);
+        $inventoryChange->assertOrderCanPay($orderInfo);
+
+        /** @var StoreOrderCartInfoServices $cartInfoServices */
+        $cartInfoServices = app()->make(StoreOrderCartInfoServices::class);
+
         $openid = '';
         if (!in_array($payType, ['weixinh5', 'pc', 'store']) && !request()->isApp()) {
             if ($payType === 'weixin') {
@@ -66,9 +75,7 @@ class OrderPayServices
             $body = substrUTf8($site_name . '--线下收银支付：' . $orderInfo['member_type'], 30);
             $successAction = "member";
         } else {
-            /** @var StoreOrderCartInfoServices $orderInfoServices */
-            $orderInfoServices = app()->make(StoreOrderCartInfoServices::class);
-            $body = $orderInfoServices->getCarIdByProductTitle((int)$orderInfo['id']);
+            $body = $cartInfoServices->getCarIdByProductTitle((int)$orderInfo['id']);
             $body = substrUTf8($site_name . '--' . $body, 30);
             $successAction = "product";
         }
@@ -93,6 +100,9 @@ class OrderPayServices
         if ($orderInfo['pay_price'] <= 0) {
             throw new ValidateException('该支付无需支付!');
         }
+        /** @var ProductInventoryChangeServices $inventoryChange */
+        $inventoryChange = app()->make(ProductInventoryChangeServices::class);
+        $inventoryChange->assertOrderCanPay($orderInfo);
         $site_name = sys_config('site_name');
         if (isset($orderInfo['member_type'])) {
             $body = substrUTf8($site_name . '--' . $orderInfo['member_type'], 30);

@@ -181,6 +181,9 @@ class StoreProductStockCountServices extends BaseServices
 		if ($id) {//修改
 			$info = $this->dao->get($id);
 			if (!$info) throw new ValidateException('盘点记录不存在');
+			if ((int)$info['status'] === 1) {
+				throw new ValidateException('盘点单已完成，禁止再次提交或修改');
+			}
 		}
 		$time = time();
 		//单号
@@ -202,9 +205,10 @@ class StoreProductStockCountServices extends BaseServices
 				}
 				$id = $res->id;
 			}
-			$count_stock = $count_defective_stock = -1;
-			$stock = $over_count_stock = $loss_count_stock = 0;
-			$defective_stock = $over_count_defective_stock = $loss_count_defective_stock = 0;
+			// 汇总从 0 起累加，禁止用 -1 作初始值（会导致少算 1）
+			$count_stock = $count_defective_stock = '0';
+			$stock = $over_count_stock = $loss_count_stock = '0';
+			$defective_stock = $over_count_defective_stock = $loss_count_defective_stock = '0';
 			$dataAll = [];
 			//整理盘点库存 盘盈||盘亏
 			$inProductDetailData = $outProductDetailData = [];
@@ -218,7 +222,12 @@ class StoreProductStockCountServices extends BaseServices
 			foreach ($productDetail as $productSku) {
 				$productInfo = $productServices->getCacheProductInfo((int)$productSku['product_id']);
 				$attrInfo = $productAttrValueServices->getOne(['product_id' => $productSku['product_id'], 'unique' => $productSku['unique'], 'type' => 0]);
-				if (!$productInfo || !$attrInfo) continue;
+				if (!$productInfo || !$attrInfo) {
+					if ((int)($data['status'] ?? 0) === 1) {
+						throw new ValidateException('存在无效商品或规格，无法完成盘点');
+					}
+					continue;
+				}
 				$detail = [
 					'type' => $type,
 					'relation_id' => $relation_id,
@@ -239,38 +248,38 @@ class StoreProductStockCountServices extends BaseServices
 					'add_time' => $time
 				];
 				$dataAll[] = $detail;
-				$stock = bcadd((string)$stock, (string)$productSku['stock']);
-				$defective_stock = bcadd((string)$defective_stock, (string)$productSku['defective_stock']);
+				$stock = bcadd((string)$stock, (string)$productSku['stock'], 4);
+				$defective_stock = bcadd((string)$defective_stock, (string)$productSku['defective_stock'], 4);
 				if ($detail['count_stock'] > -1) {//有盘点
-					$count_stock =  bcadd((string)$count_stock, (string)$productSku['count_stock']);
+					$count_stock = bcadd((string)$count_stock, (string)$productSku['count_stock'], 4);
 				}
 				if ($detail['count_defective_stock'] > -1) {//有盘点
-					$count_defective_stock = bcadd((string)$count_defective_stock, (string)$productSku['count_defective_stock']);
+					$count_defective_stock = bcadd((string)$count_defective_stock, (string)$productSku['count_defective_stock'], 4);
 				}
 				if ($data['status'] == 1) {//盘点完整 整理盘盈||盘亏
 					$productDetailOne = ['product_id' => $productSku['product_id'], 'unique' => $productSku['unique']];
 					if ($detail['count_stock'] > -1) {//良品盘点
-						//盘点盈亏计算
-						$changeStock = (int)bcsub((string)$detail['count_stock'], (string)$detail['stock'], 0);
-						if ($changeStock > 0) {//良品盘盈
-							$over_count_stock = bcadd((string)$over_count_stock, (string)$changeStock);
+						//盘点盈亏计算（保留小数，禁止 int 截断）
+						$changeStock = bcsub((string)$detail['count_stock'], (string)$detail['stock'], 4);
+						if (bccomp($changeStock, '0', 4) > 0) {//良品盘盈
+							$over_count_stock = bcadd((string)$over_count_stock, (string)$changeStock, 4);
 							$inProductDetailData[$inKey] = array_merge($productDetailOne, ['stock' => $changeStock]);
-						} else if ($changeStock < 0) {//良品盘亏
-							$loss_count_stock = bcadd((string)$over_count_stock, $changeStock);
+						} else if (bccomp($changeStock, '0', 4) < 0) {//良品盘亏（必须累加到 loss，禁止误用 over）
+							$loss_count_stock = bcadd((string)$loss_count_stock, $changeStock, 4);
 							$outProductDetailData[$outKey] = array_merge($productDetailOne, ['stock' => $changeStock]);
 						}
 					}
 					if ($detail['count_defective_stock'] > -1) {//残次品盘点
-						$changeDefectiveStock = (int)bcsub((string)$detail['count_defective_stock'], (string)$detail['defective_stock'], 0);
-						if ($changeDefectiveStock > 0) {//残次品盘盈 合并入一条sku详情
-							$over_count_defective_stock = bcadd((string)$over_count_defective_stock, (string)$changeDefectiveStock);
+						$changeDefectiveStock = bcsub((string)$detail['count_defective_stock'], (string)$detail['defective_stock'], 4);
+						if (bccomp($changeDefectiveStock, '0', 4) > 0) {//残次品盘盈 合并入一条sku详情
+							$over_count_defective_stock = bcadd((string)$over_count_defective_stock, (string)$changeDefectiveStock, 4);
 							if (isset($inProductDetailData[$inKey])) {
 								$inProductDetailData[$inKey]['defective_stock'] = $changeDefectiveStock;
 							} else {
 								$inProductDetailData[$inKey] = array_merge($productDetailOne, ['defective_stock' => $changeDefectiveStock]);
 							}
-						} elseif ($changeDefectiveStock < 0){//单独残次品出库单
-							$loss_count_defective_stock = bcadd((string)$loss_count_defective_stock, (string)$changeDefectiveStock);
+						} elseif (bccomp($changeDefectiveStock, '0', 4) < 0) {//单独残次品出库单
+							$loss_count_defective_stock = bcadd((string)$loss_count_defective_stock, (string)$changeDefectiveStock, 4);
 							if (isset($outProductDetailData[$outKey])) {
 								$outProductDetailData[$outKey]['defective_stock'] = $changeDefectiveStock;
 							} else {
@@ -288,16 +297,16 @@ class StoreProductStockCountServices extends BaseServices
 				$stockDetailServices->delete(['stock_type' => 3, 'order_id' => $id]);
 				$stockDetailServices->saveAll($dataAll);
 			}
-			//修改本次盘点良品、残次品盘点数量
+			//修改本次盘点良品、残次品盘点数量（保留 DECIMAL，禁止 int 截断）
 			$this->dao->update($id, [
-				'stock' => (int)$stock,
-				'count_stock' => (int)$count_stock,
-				'over_count_stock' => (int)$over_count_stock,
-				'loss_count_stock' => (int)$loss_count_stock,
-				'defective_stock' => (int)$defective_stock,
-				'count_defective_stock' => (int)$count_defective_stock,
-				'over_count_defective_stock' => (int)$over_count_defective_stock,
-				'loss_count_defective_stock' => (int)$loss_count_defective_stock
+				'stock' => $stock,
+				'count_stock' => $count_stock,
+				'over_count_stock' => $over_count_stock,
+				'loss_count_stock' => $loss_count_stock,
+				'defective_stock' => $defective_stock,
+				'count_defective_stock' => $count_defective_stock,
+				'over_count_defective_stock' => $over_count_defective_stock,
+				'loss_count_defective_stock' => $loss_count_defective_stock
 			]);
 			/** @var StoreProductStockOrderServices $stockOrderServices */
 			$stockOrderServices = app()->make(StoreProductStockOrderServices::class);

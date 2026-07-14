@@ -643,7 +643,15 @@ class StoreOrderCartInfoServices extends BaseServices
                 'is_card' => ($cart['cart_type'] ?? 0) == 2 ? 1 : 0,
                 'is_gift' => ($cart['cart_type'] ?? 0) == 1 ? 1 : 0,
                 'is_support_refund' => ($cart['cart_type'] ?? 0) > 0 ? 0 : ($cart['productInfo']['is_support_refund'] ?? 1),
-                'cart_info' => json_encode($cart),
+                'cart_info' => json_encode((function () use ($cart) {
+                    try {
+                        /** @var \app\services\product\inventory\ProductInventoryChangeServices $inventoryChange */
+                        $inventoryChange = app()->make(\app\services\product\inventory\ProductInventoryChangeServices::class);
+                        return $inventoryChange->enrichCartWithInventorySnapshot($cart);
+                    } catch (\Throwable $e) {
+                        return $cart;
+                    }
+                })()),
                 'cart_num' => $cart['cart_num'],
                 'total_price' => $cart['total_price'] ?? 0,//商品总价
 				'settle_price' => $cart['settle_price'] ?? 0,//商品结算总价

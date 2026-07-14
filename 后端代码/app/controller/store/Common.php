@@ -230,6 +230,16 @@ class Common extends AuthController
                 'url' => '/' . config('admin.store_prefix') . '/order/refund'
             ];
         }
+        /** @var \app\services\product\inventory\StoreStockRequestServices $stockRequestServices */
+        $stockRequestServices = app()->make(\app\services\product\inventory\StoreStockRequestServices::class);
+        $stockRequestPending = $stockRequestServices->pendingSupplyCount((int)$this->storeId);
+        if ($stockRequestPending) {
+            $value[] = [
+                'title' => '您有' . $stockRequestPending . '张请货单待调拨/处理',
+                'type' => 'bulb',
+                'url' => '/' . config('admin.store_prefix') . '/stock/request?status=1'
+            ];
+        }
         return $this->success($this->noticeData($value));
     }
 

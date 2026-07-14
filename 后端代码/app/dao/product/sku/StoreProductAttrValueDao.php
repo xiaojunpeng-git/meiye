@@ -59,7 +59,7 @@ class StoreProductAttrValueDao extends BaseDao
 		return $this->getModel()->alias('a')
 			->join('store_product p', 'a.product_id=p.id')
 			->where('p.is_del', 0)
-			->whereIn('a.product_type', [0, 3, 5])
+			->where('p.is_inventory', 1)
 			->where('a.type', 0)
 			->when(isset($where['type']) || isset($where['relation_id']), function ($query) use ($where) {
 				$query->where('p.type', $where['type'])->where('p.relation_id', $where['relation_id']);
@@ -217,6 +217,31 @@ class StoreProductAttrValueDao extends BaseDao
         return $this->search($where)->when($with, function ($query) use ($with) {
 			$query->with($with);
 		})->order('id asc')->select()->toArray();
+    }
+
+    /**
+     * 按 id 升序锁定 SKU 行（FOR UPDATE）
+     * 全局约定：实物库存写入口必须先锁 SKU，再更新商品表（与支付 changeSkuStock 一致）
+     * @param array $uniques
+     * @param int $productId 大于0时限定商品
+     * @return array
+     */
+    public function lockAttrValuesByUniques(array $uniques, int $productId = 0): array
+    {
+        $uniques = array_values(array_unique(array_filter(array_map('strval', $uniques))));
+        if (!$uniques) {
+            return [];
+        }
+        return $this->getModel()
+            ->whereIn('unique', $uniques)
+            ->where('type', 0)
+            ->when($productId > 0, function ($query) use ($productId) {
+                $query->where('product_id', $productId);
+            })
+            ->order('id', 'asc')
+            ->lock(true)
+            ->select()
+            ->toArray();
     }
 
     /**

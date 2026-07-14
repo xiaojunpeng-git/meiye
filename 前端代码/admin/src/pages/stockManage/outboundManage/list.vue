@@ -26,6 +26,7 @@
 				  <Option value="5">良品转残次品</Option>
 				  <Option value="6">其他出库</Option>
 				  <Option value="7">盘亏出库</Option>
+				  <Option value="9">调拨出库</Option>
 			    </Select>
 			  </FormItem>
 		      <FormItem label="出库单号：">
@@ -81,6 +82,10 @@
 				  @click="exports"
 			  >导出出库明细</Button>
 			</Tooltip>
+			<Button class="ml-10" @click="openImport">出库导入</Button>
+			<div class="op-tips mt10">
+				导入：须用系统模板，商品ID/SKU勿改；整表校验通过才入账，库存不足且不允许负库存时整单失败。导出：导出当前勾选单据明细，非导入模板。
+			</div>
 			<!-- 用户列表表格 -->
 			<vxe-table
 			    ref="xTable"
@@ -120,6 +125,7 @@
 					<div v-else-if="row.order_type == 5">良品转残次品</div>
 					<div v-else-if="row.order_type == 6">其他出库</div>
 					<div v-else-if="row.order_type == 7">盘亏出库</div>
+					<div v-else-if="row.order_type == 9">调拨出库</div>
 					<div v-if="row.order_type == 1" @click="getData(row.store_order_id)" class="fs-12 text-wlll-2d8cf0 cup">{{row.order_sn}}</div>
 				</template>
 			  </vxe-column>
@@ -153,6 +159,7 @@
       </div>
 		</Card>
 		<order-details ref="orderDetails"></order-details>
+		<stock-import ref="stockImport" stock-side="out" @success="getList"></stock-import>
 		<!-- 详情 -->
 		<details-from
 		  v-if="orderId>0"
@@ -179,12 +186,14 @@
 	} from "@/api/order";
 	import orderDetails from "../components/orderDetails.vue";
 	import detailsFrom from "../../order/orderList/handle/orderDetails";
+	import stockImport from "../components/stockImport.vue";
 	import exportExcel from "@/utils/newToExcel.js";
 	export default {
 		name: "outboundList",
 		components: {
 			orderDetails,
-			detailsFrom
+			detailsFrom,
+			stockImport
 		},
 		data() {
 			return {
@@ -341,6 +350,12 @@
 					this.$Message.error(err.msg);
 				})
 			},
+			openImport() {
+			  this.$refs.stockImport.open();
+			},
+			getList() {
+			  this.inventoryList();
+			},
 			pageChange(index) {
 			  this.formValidate.page = index;
 			  this.inventoryList();
@@ -433,4 +448,10 @@
 	/deep/.vxe-table--render-default{
 		font-size: 12px;
 	}
+	.op-tips {
+		color: #999;
+		font-size: 12px;
+		line-height: 1.6;
+	}
+	.mt10 { margin-top: 10px; }
 </style>

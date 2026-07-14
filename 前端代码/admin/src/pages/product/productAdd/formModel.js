@@ -127,6 +127,8 @@ export const defaultObj = {
   supplier_id: 0,
   is_sync_stock: 1, //库存同步
   is_sync_show: 1, //状态同步
+  is_inventory: 1, //是否参与库存管理（仅产品类型）
+  allow_negative_stock: 1, //是否允许负库存
 };
 
 export const GoodsTableHead = [

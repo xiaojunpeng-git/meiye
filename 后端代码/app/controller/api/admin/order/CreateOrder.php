@@ -344,6 +344,9 @@ class CreateOrder
                     return app('json')->status(PayServices::ALIAPY_PAY . '_pay', '订单创建成功', ['jsConfig' => $jsConfig, 'order_id' => $order['order_id'], 'pay_key' => $payKey, 'pay_price' => $order['pay_price']]);
                     break;
                 case PayServices::CASH_PAY://收银台现金支付
+                    /** @var \app\services\product\inventory\ProductInventoryChangeServices $inventoryChange */
+                    $inventoryChange = app()->make(\app\services\product\inventory\ProductInventoryChangeServices::class);
+                    $inventoryChange->assertOrderCanPay(is_array($order) ? $order : $order->toArray());
                     /** @var StoreOrderSuccessServices $orderService */
                     $orderService = app()->make(StoreOrderSuccessServices::class);
                     if (!$orderService->paySuccess($order, $order['pay_type'])) {

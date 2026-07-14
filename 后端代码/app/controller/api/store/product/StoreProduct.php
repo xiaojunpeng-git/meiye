@@ -226,6 +226,10 @@ class StoreProduct
 		if (!in_array($type, ['stock', 'price'])) {
 			return app('json')->fail('不允许的修改类型');
 		}
+		// 【库存铁律】规格库存改入口已停用
+		if ($type === 'stock') {
+			return app('json')->fail('已停用：不可在此修改库存，请到「库存管理」入库/出库/盘点操作');
+		}
         if (!$id) {
             return app('json')->fail('请选择商品');
         }

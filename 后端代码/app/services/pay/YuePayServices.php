@@ -42,6 +42,11 @@ class YuePayServices extends BaseServices
         if ($orderInfo['paid']) {
             throw new ValidateException('该订单已支付!');
         }
+        if (!isset($orderInfo['member_type'])) {
+            /** @var ProductInventoryChangeServices $inventoryChange */
+            $inventoryChange = app()->make(\app\services\product\inventory\ProductInventoryChangeServices::class);
+            $inventoryChange->assertOrderCanPay($orderInfo);
+        }
         $type = 'pay_product';
         if (isset($orderInfo['member_type'])) {
             $type = 'pay_member';

@@ -3581,132 +3581,16 @@ HTML;
     }
 
     /**
-     * 订单分配｜重新分配给你门店
+     * 订单分配｜重新分配给门店（已停用）
+     * 产品口径：任何订单只能在下单门店结算，已付/未付均不可更改门店。
      * @param int $id
      * @param int $store_id
      * @return mixed
-     * @throws \think\db\exception\DataNotFoundException
-     * @throws \think\db\exception\DbException
-     * @throws \think\db\exception\ModelNotFoundException
      */
     public function shareOrder(int $id, int $store_id)
     {
-        $orderInfo = $this->dao->get((int)$id);
-        if (!$orderInfo) {
-            throw new ValidateException('订单不存在');
-        }
-        //卡密商品
-        if ($orderInfo['product_type'] == 1) {
-            throw new ValidateException('订单中卡密商品门店暂不支持');
-        }
-        /** @var SystemStoreServices $storeServices */
-        $storeServices = app()->make(SystemStoreServices::class);
-        $storeInfo = $storeServices->getStoreInfo($store_id);
-        if ($orderInfo['status'] != 0) {
-            throw new ValidateException('订单已发货');
-        }
-        /** @var StoreOrderCartInfoServices $storeOrderCartInfoServices */
-        $storeOrderCartInfoServices = app()->make(StoreOrderCartInfoServices::class);
-        $cart_info = $storeOrderCartInfoServices->getSplitCartList($id, 'cart_info');
-        if (!$cart_info) {
-            throw new ValidateException('订单已发货');
-        }
-        /** @var StoreOrderRefundServices $storeOrderRefundServices */
-        $storeOrderRefundServices = app()->make(StoreOrderRefundServices::class);
-        if ($storeOrderRefundServices->count(['store_order_id' => $id, 'refund_type' => [1, 2, 4, 5, 6], 'is_cancel' => 0, 'is_del' => 0])) {
-            throw new ValidateException('订单有售后申请请先处理');
-        }
-        $platProductIds = [];
-        $platStoreProductIds = [];
-        $storeProductIds = [];
-        foreach ($cart_info as $cart) {
-            $productInfo = $cart['productInfo'] ?? [];
-            if (isset($productInfo['store_delivery']) && !$productInfo['store_delivery']) {//有商品不支持门店配送
-                return [[], $cart_info];
-            }
-            switch ($productInfo['type'] ?? 0) {
-                case 0://平台
-                case 2://供应商
-                    $platProductIds[] = $cart['product_id'];
-                    break;
-                case 1://门店
-                    if ($productInfo['pid']) {//门店自有商品
-                        $storeProductIds[] = $cart['product_id'];
-                    } else {
-                        $platStoreProductIds[] = $cart['product_id'];
-                    }
-                    break;
-            }
-        }
-        if ($storeProductIds && $store_id != $orderInfo['store_id']) {
-            throw new ValidateException('该门店商品未上架或未设置库存');
-        }
-        /** @var StoreBranchProductServices $branchProductServics */
-        $branchProductServics = app()->make(StoreBranchProductServices::class);
-        //转换成平台商品
-        if ($platStoreProductIds) {
-            $ids = $branchProductServics->getStoreProductIds($platStoreProductIds);
-            $platProductIds = array_merge($platProductIds, $ids);
-        }
-        $productCount = count($platProductIds);
-        //商品没下架 && 库存足够
-        if ($productCount != $branchProductServics->count(['pid' => $platProductIds, 'is_show' => 1, 'is_del' => 0, 'type' => 1, 'relation_id' => $store_id])) {
-            throw new ValidateException('该门店商品未上架或未设置库存');
-        }
-        /** @var StoreProductAttrValueServices $skuValueServices */
-        $skuValueServices = app()->make(StoreProductAttrValueServices::class);
-        foreach ($cart_info as $cart) {
-            if (isset($cart['productInfo']['store_delivery']) && !$cart['productInfo']['store_delivery']) {//有商品不支持门店配送
-                throw new ValidateException('有商品不支持门店配送');
-            }
-            $type=$cart['type'] ?? 0;
-            switch ($type) {
-                case 0:
-                case 6:
-                case 8:
-                case 9:
-                case 10:
-                    $suk = $skuValueServices->value(['unique' => $cart['product_attr_unique'], 'product_id' => $cart['product_id'], 'type' => 0], 'suk');
-                    break;
-                case 1:
-                case 2:
-                case 3:
-                case 5:
-                case 7:
-                    $suk = $skuValueServices->value(['unique' => $cart['product_attr_unique'], 'product_id' => $cart['activity_id'], 'type' => $cart['type']], 'suk');
-                    break;
-            }
-            $branchProductInfo = $branchProductServics->isValidStoreProduct((int)$cart['product_id'], $store_id);
-            if (!$branchProductInfo) {
-                throw new ValidateException('该门店商品库存不足');
-            }
-            $attrValue = $skuValueServices->get(['suk' => $suk, 'product_id' => $branchProductInfo['id'], 'type' => 0]);
-            if (!$attrValue) {
-                throw new ValidateException('该门店商品库存不足');
-            }
-        }
-        $res = $this->transaction(function () use ($id, $store_id, $orderInfo, $storeInfo, $cart_info, $branchProductServics) {
-
-            if ($orderInfo['store_id'] > 0) {//重新分配门店
-                //返还原来门店库存
-                $res = $branchProductServics->regressionBranchProductStock($orderInfo, $cart_info, -1, 0);
-            } else {
-                //返还平台库存
-                $res = $branchProductServics->regressionBranchProductStock($orderInfo, $cart_info, 0, -1);
-            }
-            //扣门店库存
-            $res = $branchProductServics->regressionBranchProductStock($orderInfo, $cart_info, -1, 1, $store_id);
-            $res = $res && $this->dao->update($id, ['store_id' => $storeInfo['id'], 'shipping_type' => $orderInfo['shipping_type'] == 1 ? 3 : $orderInfo['shipping_type']]);
-            return $res;
-        });
-        $orderInfo['store_id'] = $storeInfo['id'];
-        //删除之前的账单记录
-        /** @var StoreFinanceFlowServices $storeFinanceFlowServices */
-        $storeFinanceFlowServices = app()->make(StoreFinanceFlowServices::class);
-        $storeFinanceFlowServices->update(['link_id' => $orderInfo['order_id']], ['is_del' => 1]);
-        //分配后置方法
-        SpliteOrderAfterJob::dispatchDo('splitAfter', [$orderInfo, true]);
-        return $res;
+        // 【库存铁律 / 门店归属】禁止改派门店；旧逻辑会改 store_id 并依赖 regressionBranchProductStock，已整体停用
+        throw new ValidateException('已停用：订单只能在下单门店结算，不可更改门店');
     }
 
     /**

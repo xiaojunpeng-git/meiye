@@ -190,8 +190,15 @@ class StoreProductAttrServices extends BaseServices
 				'unique' => $unique,
 			];
 			$stock = $value['stock'];
-			if (isset($value['pm'])) {
-				//pm是 1 是增加 0 是减少
+			if ($type === 0 && !isset($value['pm'])) {
+				// 普通商品资料保存：已有 SKU 保留库内库存，新建 SKU 强制 0；禁止用前端库存覆盖
+				if (isset($skuArray[$sku])) {
+					$stock = $skuArray[$sku]['stock'];
+				} else {
+					$stock = 0;
+				}
+			} elseif (isset($value['pm'])) {
+				//pm是 1 是增加 0 是减少（库存管理快捷改库存）
 				if ($value['pm'] == 1) {
 					$stock = (int)$value['stock'] + (int)$value['inventory'];
 				} else {
@@ -206,7 +213,7 @@ class StoreProductAttrServices extends BaseServices
 				$stockDataOne['stock'] = abs($value['stock']);
 				$stockDataOne['pm'] = 1;
 			}
-			if ($stockDataOne['stock'] > 0) {
+			if ($type !== 0 && isset($stockDataOne['stock']) && $stockDataOne['stock'] > 0) {
 				$stockData[] = $stockDataOne;
 			}
             $valueGroup[$sku] = [
@@ -266,46 +273,59 @@ class StoreProductAttrServices extends BaseServices
      */
     public function saveProductAttr(array $data, int $id, int $type = 0)
     {
-        $this->setAttr($data['attrGroup'], $id, $type);
-        /** @var StoreProductAttrResultServices $storeProductAttrResultServices */
-        $storeProductAttrResultServices = app()->make(StoreProductAttrResultServices::class);
-        $storeProductAttrResultServices->setResult($data['result'], $id, $type);
         /** @var StoreProductAttrValueServices $storeProductAttrValueServices */
         $storeProductAttrValueServices = app()->make(StoreProductAttrValueServices::class);
 
-        $valueGroup = $data['valueGroup'] ?? [];
-        $updateSuks = array_column($valueGroup, 'suk');
-        $oldSuks = [];
-        $oldAttrValue = $storeProductAttrValueServices->getSkuArray(['product_id' => $id, 'type' => $type], '*', 'suk');
-        if ($oldAttrValue) $oldSuks = array_column($oldAttrValue, 'suk');
-        $delSuks = array_merge(array_diff($oldSuks, $updateSuks));
-        $dataAll = [];
-        $res1 = $res2 = $res3 = true;
-        foreach ($valueGroup as $item) {
-            if ($oldSuks && in_array($item['suk'], $oldSuks) && isset($oldAttrValue[$item['suk']])) {
-                $attrId = $oldAttrValue[$item['suk']]['id'];
-                unset($item['suk'], $item['unique']);
-                $item['virtual_list'] = json_encode($item['virtual_list']);
-                $res1 = $res1 && $storeProductAttrValueServices->update($attrId, $item);
-            } else {
-
-                $dataAll[] = $item;
+        // 校验→写 attr/result→删/增 SKU 同一事务，保证行锁覆盖到删除（含 ERP 等直调路径）
+        return $this->transaction(function () use ($data, $id, $type, $storeProductAttrValueServices) {
+            $valueGroup = $data['valueGroup'] ?? [];
+            $updateSuks = array_column($valueGroup, 'suk');
+            $oldSuks = [];
+            $oldAttrValue = $storeProductAttrValueServices->getSkuArray(['product_id' => $id, 'type' => $type], '*', 'suk');
+            if ($oldAttrValue) $oldSuks = array_column($oldAttrValue, 'suk');
+            $delSuks = array_merge(array_diff($oldSuks, $updateSuks));
+            // 普通商品：删除/改名规格前禁止静默丢库存（须在写 attr/result 之前拦截）
+            if ((int)$type === 0 && $delSuks) {
+                $storeProductAttrValueServices->assertSkusCanBeDeleted($id, $delSuks, $oldAttrValue ?: []);
             }
-        }
-        if ($delSuks) {
-            $res2 = $storeProductAttrValueServices->del($id, $type, $delSuks);
-        }
-        if ($dataAll) {
-            $res3 = $storeProductAttrValueServices->saveAll($dataAll);
-        }
-        if ($res1 && $res2 && $res3) {
-//            $unique = array_column($valueGroup, 'unique');
-//            $storeProductAttrValueServices->updateSumStock($unique ?? []);
-            return $valueGroup;
-        } else {
-            throw new AdminException('商品规格信息保存失败');
-        }
 
+            $this->setAttr($data['attrGroup'], $id, $type);
+            /** @var StoreProductAttrResultServices $storeProductAttrResultServices */
+            $storeProductAttrResultServices = app()->make(StoreProductAttrResultServices::class);
+            $storeProductAttrResultServices->setResult($data['result'], $id, $type);
+
+            $dataAll = [];
+            $res1 = $res2 = $res3 = true;
+            foreach ($valueGroup as $item) {
+                if ($oldSuks && in_array($item['suk'], $oldSuks) && isset($oldAttrValue[$item['suk']])) {
+                    $attrId = $oldAttrValue[$item['suk']]['id'];
+                    unset($item['suk'], $item['unique']);
+                    // 普通商品编辑：禁止覆盖实物库存
+                    if ((int)$type === 0) {
+                        unset($item['stock'], $item['defective_stock'], $item['sum_stock'], $item['old_stock']);
+                    }
+                    $item['virtual_list'] = json_encode($item['virtual_list']);
+                    $res1 = $res1 && $storeProductAttrValueServices->update($attrId, $item);
+                } else {
+                    if ((int)$type === 0) {
+                        $item['stock'] = 0;
+                        $item['defective_stock'] = $item['defective_stock'] ?? 0;
+                        $item['sum_stock'] = $item['sum_stock'] ?? 0;
+                    }
+                    $dataAll[] = $item;
+                }
+            }
+            if ($delSuks) {
+                $res2 = $storeProductAttrValueServices->del($id, $type, $delSuks);
+            }
+            if ($dataAll) {
+                $res3 = $storeProductAttrValueServices->saveAll($dataAll);
+            }
+            if ($res1 && $res2 && $res3) {
+                return $valueGroup;
+            }
+            throw new AdminException('商品规格信息保存失败');
+        });
     }
 
 

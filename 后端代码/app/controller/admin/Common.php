@@ -250,6 +250,9 @@ class Common extends AuthController
 		/** @var CommunityCommentServices $communityCommentServices */
 		$communityCommentServices = app()->make(CommunityCommentServices::class);
 		$data['unVerifyCommunityComment'] = $communityCommentServices->count(['is_verify' => 0, 'is_del' => 0]);
+		/** @var \app\services\product\inventory\StoreStockRequestServices $stockRequestServices */
+		$stockRequestServices = app()->make(\app\services\product\inventory\StoreStockRequestServices::class);
+		$data['unHandleStockRequest'] = $stockRequestServices->pendingSupplyCount(0);
 		return $this->success($data);
     }
 

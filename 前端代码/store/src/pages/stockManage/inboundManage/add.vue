@@ -128,9 +128,7 @@
 				</FormItem>
 			</Form>
 		</Card>
-		<Modal v-model="sattrModals" title="商品列表" footerHide  class="paymentFooter" scrollable width="900" @on-cancel="cancel">
-		  <goods-attr :chooseType="94"  ref="goodSattr" v-if="sattrModals" @getProductId="getAtterId"></goods-attr>
-		</Modal>
+		<selectGoodsBox v-model="sattrModals" @getProductId="getAtterId" @on-cancel="cancel"></selectGoodsBox>
 		<Modal v-model="orderModal" title="选择售后单" width="960" scrollable footer-hide>
 		  <refundOrder @getOrderId="getOrderId"></refundOrder>
 		</Modal>
@@ -147,7 +145,7 @@
 		refundInfoApi
 	} from "@/api/stockManage";
 	import Setting from "@/setting";
-	import goodsAttr from '@/components/goodsAttr';
+	import selectGoodsBox from '@/components/selectGoodsBox';
 	import refundOrder from '@/components/refundOrder/index';
 	import {
 	  purchase,
@@ -159,7 +157,7 @@
 	export default {
 		name: "inboundAdd",
 		components: {
-		  goodsAttr,
+		  selectGoodsBox,
 		  refundOrder
 		},
 		data() {
@@ -178,6 +176,11 @@
 					}
 				},
 				orderList: [{
+						id: '6',
+						name: '初始入库',
+						des: '指系统启用库存管理后的首次建账入库，用于登记期初良品/残次品库存。大批量建账请用列表页「初始入库导入」：须下载系统模板，勿改商品ID/SKU唯一值；整表校验通过才入账。'
+					},
+					{
 						id: '1',
 						name: '采购入库',
 						des: '指企业采购的商品运抵仓库后，正式登记并纳入库存管理'
@@ -195,7 +198,7 @@
 					{
 						id: '2',
 						name: '其他入库',
-						des: '指除常规的入库方式之外的特殊入库情况'
+						des: '指除常规的入库方式之外的特殊入库情况。调拨入库由调拨确认自动生成，不可在此手工创建。'
 					}
 				],
 				refundOrderId:'',
@@ -262,7 +265,7 @@
 					header = returnGoods
 				}else if(e==4){
 					header = spoiledGoods
-				}else if(e==2){
+				}else if(e==2 || e==6){
 					header = otherGoods
 				}
 				let that = this;
@@ -395,7 +398,7 @@
 							if(this.goodsData[i].inbound<=0 && ['1','4'].indexOf(this.formValidate.order_type) !=-1){
 								return this.$Message.error('请填写入库数量');
 							}
-							if(this.goodsData[i].goodProduct<=0 && this.goodsData[i].spoiledGoods<=0 && ['2','3'].indexOf(this.formValidate.order_type) !=-1){
+							if(this.goodsData[i].goodProduct<=0 && this.goodsData[i].spoiledGoods<=0 && ['2','3','6'].indexOf(this.formValidate.order_type) !=-1){
 								return this.$Message.error('良品与残次品入库数量不能同时为0');
 							}
 							if(this.formValidate.order_type == 3 && (parseInt(this.goodsData[i].goodProduct) + parseInt(this.goodsData[i].spoiledGoods)) > this.goodsData[i].stock){

@@ -142,6 +142,7 @@
 				routePre: Setting.routePre,
 				columns:inventoryDetails,
 				orderType:[
+					{name:'初始入库',val:'6'},
 					{name:'采购入库',val:'1'},
 					{name:'其他入库',val:'2'},
 					{name:'退货入库',val:'3'},

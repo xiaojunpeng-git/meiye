@@ -1164,6 +1164,10 @@
 			</FormItem>
 		  </div>
         </div>
+        <div v-show="currentTab === '11'">
+          <!-- 库存设置（仅产品类型） -->
+          <inventorySet :baseInfo="formData"></inventorySet>
+        </div>
         <div v-show="currentTab === '8'">
 			<!-- 预约设置 -->
 			<reservationSet
@@ -1487,6 +1491,7 @@ import {
 import freightTemplate from '@/components/freightTemplate';
 import stockSet from './components/stockSet.vue';
 import reservationSet from './components/reservationSet.vue';
+import inventorySet from './components/inventorySet.vue';
 import productBaseSet from './components/productBaseSet.vue';
 import marketingSet from './components/marketingSet.vue';
 import otherSet from './components/otherSet.vue';
@@ -1892,6 +1897,7 @@ export default {
     freightTemplate,
     productBaseSet,
 	reservationSet,
+	inventorySet,
     marketingSet,
     otherSet,
     cardFaceSet,
@@ -1961,6 +1967,7 @@ export default {
         headTab = [
           { title: '基础信息', name: '1' },
           { title: '规格库存', name: '2' },
+          { title: '库存设置', name: '11' },
           { title: '商品详情', name: '3' },
           { title: '会员价/佣金', name: '10' },
           { title: '适用门店', name: '7' },
@@ -3388,6 +3395,8 @@ export default {
       this.$set(formData, 'postage', this.formData.postage);
       this.$set(formData, 'temp_id', this.formData.temp_id);
       this.$set(formData, 'applicable_type', this.formData.applicable_type);
+	  this.$set(formData, 'is_inventory', this.formData.product_type == 0 ? (this.formData.is_inventory != null ? this.formData.is_inventory : 1) : 0);
+	  this.$set(formData, 'allow_negative_stock', this.formData.product_type == 0 ? (this.formData.allow_negative_stock != null ? this.formData.allow_negative_stock : 1) : 1);
 	  this.$set(formData, 'reservation_time_type', this.formData.reservation_time_type);
 	  this.$set(formData, 'reservation_times', this.formData.reservation_times);
 	  this.$set(formData, 'reservation_time_interval', this.formData.reservation_time_interval);

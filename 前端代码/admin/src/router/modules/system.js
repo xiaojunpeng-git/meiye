@@ -133,15 +133,6 @@ export default {
       component: () => import('@/pages/system/group/list')
     },
     {
-      path: 'maintain/auth',
-      name: `${pre}auth`,
-      meta: {
-        auth: ['system-maintain-auth'],
-        title: '商业授权'
-      },
-      component: () => import('@/pages/system/auth/index')
-    },
-    {
       path: `${Setting.roterPre}/out`,
       name: `out`,
       meta: {

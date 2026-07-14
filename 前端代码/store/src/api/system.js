@@ -36,3 +36,11 @@ export function getImportErrorDown(params) {
       params
   });
 }
+
+export function getImportList(params) {
+  return request({
+    url: '/export/import/list',
+    method: 'get',
+    params
+  });
+}

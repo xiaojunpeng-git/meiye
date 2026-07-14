@@ -284,14 +284,44 @@ class ExportExcel extends AuthController
             return $this->fail('参数错误');
         }
         $type = $where['type'];
+        $recordId = (int)$where['record_id'];
+        $record = $recordServices->get($recordId);
+        if (!$record || (int)($record['is_del'] ?? 0) === 1) {
+            return $this->fail('导入记录不存在');
+        }
+        // 门店仅可下载本店记录
+        if ((int)($record['type'] ?? -1) !== 1 || (int)($record['relation_id'] ?? -1) !== (int)$this->storeId) {
+            return $this->fail('无权下载该导入记录');
+        }
         unset($where['type']);
         $data = $errorServices->getErrorList($where);
-        $recordServices->bcInc($where['record_id'],'down_count',1);
-        if($type == 'user') {
+        $recordServices->bcInc($recordId, 'down_count', 1);
+        $importType = (string)($record['import_type'] ?? '');
+        if ($type == 'user') {
             return $this->success($this->service->importUser($data['list'] ?? []));
-        }else{
+        } else if (in_array($importType, ['stock_initial_in', 'stock_in', 'stock_out'], true)
+            || in_array((string)$type, ['stock_initial_in', 'stock_in', 'stock_out'], true)) {
+            return $this->success($this->service->importStock($data['list'] ?? []));
+        } else {
             return $this->success($this->service->importProduct($data['list'] ?? []));
         }
+    }
+
+    /**
+     * 门店导入记录列表（仅本店）
+     */
+    public function importUserList(ImportRecordServices $services)
+    {
+        $where = $this->request->getMore([
+            ['data', '', '', 'time'],
+            ['status', ''],
+            ['keyword', ''],
+            ['type', '', '', 'import_type'],
+        ]);
+        $where['type'] = 1;
+        $where['relation_id'] = (int)$this->storeId;
+        $where['is_del'] = 0;
+        return $this->success($services->getImportList($where));
     }
 
     /**

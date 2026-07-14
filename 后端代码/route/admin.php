@@ -2002,6 +2002,8 @@ Route::group('adminapi', function () {
 			Route::get('in/order/info/:id', 'v1.product.inventory.StoreProductStockInOrder/info')->option(['real_name' => '获取入库单详情']);
 			Route::get('in/order/remark/form/:id', 'v1.product.inventory.StoreProductStockInOrder/remarkForm')->option(['real_name' => '获取入库单备注表单']);
 			Route::post('in/order/remark/:id', 'v1.product.inventory.StoreProductStockInOrder/remark')->option(['real_name' => '保存入库单备注']);
+			Route::get('in/order/template', 'v1.product.inventory.StoreProductStockInOrder/downloadTemplate')->option(['real_name' => '下载入库导入模板']);
+			Route::post('in/order/import', 'v1.product.inventory.StoreProductStockInOrder/import')->option(['real_name' => '导入入库Excel']);
 
 			//出库
 			Route::get('out/order', 'v1.product.inventory.StoreProductStockOutOrder/index')->option(['real_name' => '获取所有出库单列表']);
@@ -2009,6 +2011,8 @@ Route::group('adminapi', function () {
 			Route::get('out/order/info/:id', 'v1.product.inventory.StoreProductStockOutOrder/info')->option(['real_name' => '获取出库单详情']);
 			Route::get('out/order/remark/form/:id', 'v1.product.inventory.StoreProductStockOutOrder/remarkForm')->option(['real_name' => '获取出库单备注表单']);
 			Route::post('out/order/remark/:id', 'v1.product.inventory.StoreProductStockOutOrder/remark')->option(['real_name' => '保存出库单备注']);
+			Route::get('out/order/template', 'v1.product.inventory.StoreProductStockOutOrder/downloadTemplate')->option(['real_name' => '下载出库导入模板']);
+			Route::post('out/order/import', 'v1.product.inventory.StoreProductStockOutOrder/import')->option(['real_name' => '导入出库Excel']);
 
 			//库存盘点
 			Route::get('count/list', 'v1.product.inventory.StoreProductStockCount/index')->option(['real_name' => '获取所有库存盘点列表']);
@@ -2028,6 +2032,27 @@ Route::group('adminapi', function () {
 			//出入库统计
 			Route::get('order/overall_statistics', 'v1.product.inventory.StoreProductStockDetail/stockOrderOverallStatistics')->option(['real_name' => '出入库顶部统计']);
 			Route::get('order/statistics', 'v1.product.inventory.StoreProductStockDetail/stockOrderStatistics')->option(['real_name' => '出入库统计']);
+
+			//请货
+			Route::get('request/list', 'v1.product.inventory.StoreStockRequest/index')->option(['real_name' => '请货单列表']);
+			Route::get('request/info/:id', 'v1.product.inventory.StoreStockRequest/info')->option(['real_name' => '请货单详情']);
+			Route::post('request/save/:id', 'v1.product.inventory.StoreStockRequest/save')->option(['real_name' => '保存请货草稿']);
+			Route::delete('request/:id', 'v1.product.inventory.StoreStockRequest/delete')->option(['real_name' => '删除请货草稿']);
+			Route::post('request/confirm/:id', 'v1.product.inventory.StoreStockRequest/confirmApply')->option(['real_name' => '确认请货申请']);
+			Route::post('request/reject/:id', 'v1.product.inventory.StoreStockRequest/reject')->option(['real_name' => '驳回请货']);
+			Route::post('request/cancel/:id', 'v1.product.inventory.StoreStockRequest/cancel')->option(['real_name' => '取消请货']);
+			Route::get('request/shared_skus', 'v1.product.inventory.StoreStockRequest/sharedSkus')->option(['real_name' => '双店同源SKU']);
+			Route::get('request/pending_badge', 'v1.product.inventory.StoreStockRequest/pendingBadge')->option(['real_name' => '请货待办角标']);
+			Route::post('request/retry_notice', 'v1.product.inventory.StoreStockRequest/retryNotice')->option(['real_name' => '请货通知重试']);
+
+			//调拨
+			Route::get('transfer/list', 'v1.product.inventory.StoreStockTransfer/index')->option(['real_name' => '调拨单列表']);
+			Route::get('transfer/info/:id', 'v1.product.inventory.StoreStockTransfer/info')->option(['real_name' => '调拨单详情']);
+			Route::post('transfer/save/:id', 'v1.product.inventory.StoreStockTransfer/save')->option(['real_name' => '保存调拨草稿']);
+			Route::delete('transfer/:id', 'v1.product.inventory.StoreStockTransfer/delete')->option(['real_name' => '删除调拨草稿']);
+			Route::post('transfer/cancel/:id', 'v1.product.inventory.StoreStockTransfer/cancel')->option(['real_name' => '取消调拨草稿']);
+			Route::post('transfer/confirm/:id', 'v1.product.inventory.StoreStockTransfer/confirm')->option(['real_name' => '确认调拨']);
+			Route::post('transfer/reverse/:id', 'v1.product.inventory.StoreStockTransfer/reverse')->option(['real_name' => '调拨冲销']);
 		});
     })->middleware([
         \app\http\middleware\admin\AdminAuthTokenMiddleware::class,

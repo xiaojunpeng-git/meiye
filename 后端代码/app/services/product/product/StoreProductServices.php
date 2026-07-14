@@ -986,7 +986,8 @@ class StoreProductServices extends BaseServices
         $relationData['ensure_id'] = $data['ensure_id'] ?? [];
         $relationData['specs_id'] = $data['specs_id'] ?? [];
         $relationData['coupon_ids'] = $data['coupon_ids'] ?? [];
-        $relationData['is_sync_stock'] = $data['is_sync_stock'] ?? 1;
+        $relationData['is_sync_stock'] = 0;// 【库存铁律】不同步实物库存；忽略前端传值
+        // $relationData['is_sync_stock'] = $data['is_sync_stock'] ?? 1;
         $relationData['is_sync_show'] = $data['is_sync_show'] ?? 1;
 
         $description = $data['description'];
@@ -1300,12 +1301,17 @@ class StoreProductServices extends BaseServices
                 $cardRelatedServices->handleCardRelated($id, $data['related']);
             }
             if (in_array($data['product_type'], [0, 3, 5]) && isset($skuList['stockData'])) {
-                //保存出入库单
-                ProductStockJob::dispatchDo('saveStockOrder', [$id, $skuList['stockData'], (int)$data['type'], (int)$data['relation_id'], $adminId]);
+                // 库存改造：商品资料保存不再因库存差额生成出入库单；库存仅由库存业务变更。
             }
-            //修改商品库存
+            //修改商品库存汇总：新建保持 SKU 写入值；编辑时由 attr 保存逻辑保留原库存后汇总
             $attrStockArr = array_column($valueGroup, 'stock');
-            $this->dao->update($id, ['stock' => array_sum($attrStockArr), 'is_sold' => min($attrStockArr) ? 0 : 1]);
+            $this->dao->update($id, [
+                'stock' => array_sum(array_map('floatval', $attrStockArr)),
+                'is_sold' => min(array_map('floatval', $attrStockArr)) > 0 ? 0 : 1,
+                'is_inventory' => ((int)$data['product_type'] === 0) ? (int)($data['is_inventory'] ?? 1) : 0,
+                'allow_negative_stock' => ((int)$data['product_type'] === 0) ? (int)($data['allow_negative_stock'] ?? 1) : 1,
+                'salon_stock_enabled' => ((int)$data['product_type'] === 0) ? (int)($data['salon_stock_enabled'] ?? 0) : 0,
+            ]);
             return [$skuList, $id, $is_new, $data];
         });
         //事件
@@ -1430,8 +1436,15 @@ class StoreProductServices extends BaseServices
         $productReservationTime = app()->make(StoreProductReservationTimeServices::class);
         /** @var StoreCardRelatedServices $relatedService */
         $relatedService = app()->make(StoreCardRelatedServices::class);
-        foreach ($ids as $id) {
-            try {
+        // 永久删除前统一校验（含门店子商品）；禁止静默丢库存；失败必须抛出
+        // 校验与物理删除同一事务，保证行锁覆盖到删除
+        $this->transaction(function () use (
+            $ids, $productAttrServices, $productAttrResultServices, $productAttrValueServices,
+            $productDescriptionServices, $productRelationServices, $productCoupon, $productRelation,
+            $productReply, $productReplyCommentServices, $productReservationTime, $relatedService
+        ) {
+            $productAttrValueServices->assertProductsSkusCanBeDeleted($ids);
+            foreach ($ids as $id) {
                 $where = ['product_id' => $id, 'type' => 0];
                 //清除规格表数据
                 $productAttrServices->delete($where);
@@ -1462,10 +1475,8 @@ class StoreProductServices extends BaseServices
                 $this->dao->delete($id);
 
                 event('product.delete', [$id]);
-            } catch (\Throwable $e) {
-
             }
-        }
+        });
         $this->dao->cacheTag()->clear();
         $productAttrServices->cacheTag()->clear();
         return true;
@@ -2993,41 +3004,22 @@ class StoreProductServices extends BaseServices
      */
     public function decProductStock(int $num, int $productId, string $unique = '', int $store_id = 0)
     {
-        $res = true;
-        /** @var StoreProductAttrValueServices $skuValueServices */
-        $skuValueServices = app()->make(StoreProductAttrValueServices::class);
-        if ($store_id) {
-            /** @var StoreBranchProductServices $branchProductServices */
-            $branchProductServices = app()->make(StoreBranchProductServices::class);
-            //查询门店商品
-            $info = $branchProductServices->isValidStoreProduct($productId, $store_id);
-            $storeProductId = $info['id'] ?? 0;
-            if ($productId && $storeProductId != $productId) {
-                //原商品sku
-                $suk = $skuValueServices->value(['unique' => $unique, 'product_id' => $productId, 'type' => 0], 'suk');
-                //门店商品ID
-                $productId = $storeProductId;
-                //门店商品sku unique
-                $unique = $skuValueServices->value(['suk' => $suk, 'product_id' => $productId, 'type' => 0], 'unique');
-            }
-            //平台该商品也增加销量
-            if ($info && isset($info['pid']) && $info['pid']) {
-                $this->dao->bcInc($info['pid'], 'sales', (string)$num);
-            }
-        }
-        if ($unique) {
-            $res = $res && $skuValueServices->decProductAttrStock($productId, (string)$unique, $num);
-        }
-//        $res = $res && $this->dao->decStockIncSales(['id' => $productId], $num);
-        $res = $res && $this->dao->decStockIncSales([
-                ['id', '=', $productId],
-                ['stock', '>=', $num]
-            ], $num);
-        if ($res) {
-            $this->workSendStock($productId);
-        }
-        $this->clearProductCache();
-        return $res;
+        // 【库存铁律】旧减库存加销量已停用；实物库存仅允许库存管理与销售出库/退货统一服务
+        throw new ValidateException('已停用：实物库存请通过「库存管理」或销售出库/退货统一服务处理');
+    }
+
+    /**
+     * 加库存,减销量（已停用直写实物库存）
+     * @param int $num
+     * @param int $productId
+     * @param string $unique
+     * @param int $store_id
+     * @return bool
+     */
+    public function incProductStock(int $num, int $productId, string $unique = '', int $store_id = 0)
+    {
+        // 【库存铁律】旧加库存减销量已停用
+        throw new ValidateException('已停用：实物库存请通过「库存管理」或销售出库/退货统一服务处理');
     }
 
     /**
@@ -3070,50 +3062,6 @@ class StoreProductServices extends BaseServices
             $res = $res && $skuValueServices->bcDec(['unique' => $unique, 'product_id' => $productId, 'type' => 0], 'sales', (string)$num);
         }
         $res = $res && $this->dao->bcDec($productId, 'sales', (string)$num);
-        $this->clearProductCache();
-        return $res;
-    }
-
-    /**
-     * 减销量，加库存
-     * @param int $num
-     * @param int $productId
-     * @param string $unique
-     * @param int $store_id
-     * @return bool
-     * @throws \think\db\exception\DataNotFoundException
-     * @throws \think\db\exception\DbException
-     * @throws \think\db\exception\ModelNotFoundException
-     */
-    public function incProductStock(int $num, int $productId, string $unique = '', int $store_id = 0)
-    {
-		if (!$productId) return true;
-        $res = true;
-        /** @var StoreProductAttrValueServices $skuValueServices */
-        $skuValueServices = app()->make(StoreProductAttrValueServices::class);
-        if ($store_id) {
-            /** @var StoreBranchProductServices $branchProductServices */
-            $branchProductServices = app()->make(StoreBranchProductServices::class);
-            //查询门店商品
-            $info = $branchProductServices->isValidStoreProduct($productId, $store_id);
-            $storeProductId = $info['id'] ?? 0;
-            if ($productId && $storeProductId != $productId) {
-                //原商品sku
-                $suk = $skuValueServices->value(['unique' => $unique, 'product_id' => $productId, 'type' => 0], 'suk');
-                //门店商品ID
-                $productId = $storeProductId;
-                //门店商品sku unique
-                $unique = $skuValueServices->value(['suk' => $suk, 'product_id' => $productId, 'type' => 0], 'unique');
-            }
-            //平台该商品也减少销量
-            if ($info && isset($info['pid']) && $info['pid']) {
-                $this->dao->bcDec($info['pid'], 'sales', (string)$num);
-            }
-        }
-        if ($unique) {
-            $res = $res && $skuValueServices->incProductAttrStock($productId, $unique, $num);
-        }
-        $res = $res && $this->dao->incStockDecSales(['id' => $productId], $num);
         $this->clearProductCache();
         return $res;
     }
@@ -3589,35 +3537,16 @@ class StoreProductServices extends BaseServices
     }
 
     /**
-     * 同步库存
+     * 同步库存（已停用直写）
+     * 【库存铁律】ERP/外部接口不得直接覆盖 SKU 余额
      * @param array $items
      * @return void
      */
     public function syncStock(array $items)
     {
-        return $this->transaction(function () use ($items) {
-            $goods = $saveData = [];
-            // 同步规格value库存
-            /** @var StoreProductAttrValueServices $storeProductAttrValueServices */
-            $storeProductAttrValueServices = app()->make(StoreProductAttrValueServices::class);
-            $list = $storeProductAttrValueServices->getColumn(['bar_code' => array_column($items, 'bar_code')], 'id, product_id, bar_code, stock', 'bar_code');
-
-            foreach ($items as $item) {
-                $value = $list[$item['bar_code']] ?? [];
-                if (!$value) continue;
-                if (!isset($goods[$value['product_id']])) $goods[$value['product_id']] = 1;
-                $saveData[] = ['id' => $value['id'], 'stock' => $item['qty']];
-            }
-
-            if ($saveData) {
-                $storeProductAttrValueServices->saveAll($saveData);
-            }
-
-            if ($goods) {
-                ProductStockJob::dispatch('distribute', [$goods]);
-            }
-            return true;
-        });
+        throw new AdminException('已停用：外部接口不可直接覆盖库存，请通过「库存管理」入库/出库调整（后续可对接带来源单号的调整单）');
+        // 原按条码直接 saveAll stock 逻辑已注释停用
+        // return $this->transaction(function () use ($items) { ... });
     }
 
     /**

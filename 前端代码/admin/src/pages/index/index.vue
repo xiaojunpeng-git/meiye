@@ -33,7 +33,6 @@ import agentPage from "./components/agentPage";
 import hotSearch from "./hot-search";
 import userPreference from "./user-preference";
 import { checkAuth } from "@/api/index";
-import { auth } from "@/api/system";
 import { Notice } from "iview";
 import util from "@/libs/util";
 
@@ -64,20 +63,8 @@ export default {
         .then((res) => {})
         .catch((res) => {});
     }
-    this.getAuth();
   },
   methods: {
-    getAuth() {
-      auth()
-        .then((res) => {
-          let data = res.data || {};
-          if (data.auth_code && data.auth) {
-            this.authCode = data.auth_code;
-            this.auth = true;
-          }
-        })
-        .catch((res) => {});
-    },
     clear() {
       this.openImage = false;
     },

@@ -7,26 +7,7 @@
         name: 'i-copyright',
         data () {
             return {
-                links: [
-                    {
-                        title: '官网',
-                        key: '官网',
-                        href: 'https://www.mohe.com',
-                        blankTarget: true
-                    },
-                    {
-                        title: '社区',
-                        key: '社区',
-                        href: 'http://q.crmeb.com',
-                        blankTarget: true
-                    },
-                    {
-                        title: '文档',
-                        key: '文档',
-                        href: 'http://doc.crmeb.com',
-                        blankTarget: true
-                    }
-                ],
+                links: [],
                 copyright: ''
             }
         },

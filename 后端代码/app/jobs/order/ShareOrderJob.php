@@ -108,14 +108,18 @@ class ShareOrderJob extends BaseJobs
                     }
                     $updateData['supplier_id'] = $suppplier_id;
                 } elseif ($store_id) {
-                    foreach ($cartInfo as $cart_id => $cart) {
-                        if ($cart['type'] == 1 && $cart['relation_id'] == $store_id) {//拆分
-                            $cart_ids[] = ['cart_id' => $cart_id, 'cart_num' => $cart['cart_num']];
-                        } else {
-                            $other_cart_ids[] = ['cart_id' => $cart_id, 'cart_num' => $cart['cart_num']];
-                        }
-                    }
-                    $updateData['store_id'] = $store_id;
+                    // 【门店归属】禁止支付后自动改派/写入门店；订单保持下单时的 store_id
+                    Log::warning('ShareOrderJob 跳过自动分配门店：订单只能在下单门店结算 order_id=' . ($orderInfo['order_id'] ?? $id));
+                    SpliteOrderAfterJob::dispatchDo('splitAfter', [$orderInfo]);
+                    return true;
+                    // foreach ($cartInfo as $cart_id => $cart) {
+                    //     if ($cart['type'] == 1 && $cart['relation_id'] == $store_id) {//拆分
+                    //         $cart_ids[] = ['cart_id' => $cart_id, 'cart_num' => $cart['cart_num']];
+                    //     } else {
+                    //         $other_cart_ids[] = ['cart_id' => $cart_id, 'cart_num' => $cart['cart_num']];
+                    //     }
+                    // }
+                    // $updateData['store_id'] = $store_id;
                 }
                 //下单商品都是某一个供应商|| 门店商品，不用拆分
                 if (!$other_cart_ids && (count($suppplierIds) == 1 || count($storeIds) == 1)) {

@@ -191,7 +191,7 @@ router.beforeEach((to, from, next) => {
     next();
 })
 
-// 添加crmeb chat 统计
+// 添加客服 chat 统计
 var __s = document.createElement('script');
 __s.src=`${Setting.apiBaseURL.replace(/storeapi/, "")}/api/get_script`;
 document.head.appendChild(__s);

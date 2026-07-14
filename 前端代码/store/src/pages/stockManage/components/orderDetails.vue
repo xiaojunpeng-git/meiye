@@ -15,11 +15,13 @@
 			<div class="section acea-row row-between pr-47 mt-15">
 			    <div v-if="activeRow.stock_type==1">
 			        <div class="text--w111-666 fs-13 mb-5">入库类型</div>
-			        <div v-if="orderInfo.order_type == 1" class="fs-14 text-wlll-000-85">采购入库</div>
+			        <div v-if="orderInfo.order_type == 6" class="fs-14 text-wlll-000-85">初始入库</div>
+			        <div v-else-if="orderInfo.order_type == 1" class="fs-14 text-wlll-000-85">采购入库</div>
 			        <div v-else-if="orderInfo.order_type == 2" class="fs-14 text-wlll-000-85">其他入库</div>
 			        <div v-else-if="orderInfo.order_type == 3" class="fs-14 text-wlll-000-85">退货入库</div>
 			        <div v-else-if="orderInfo.order_type == 5" class="fs-14 text-wlll-000-85">盘盈入库</div>
 			        <div v-else-if="orderInfo.order_type == 4" class="fs-14 text-wlll-000-85">残次品转良品</div>
+			        <div v-else-if="orderInfo.order_type == 8" class="fs-14 text-wlll-000-85">调拨入库</div>
 			    </div>
 				<div v-else-if="activeRow.stock_type==2">
 				    <div class="text--w111-666 fs-13 mb-5">出库类型</div>
@@ -30,6 +32,7 @@
 				    <div v-else-if="orderInfo.order_type == 5" class="fs-14 text-wlll-000-85">良品转残次品</div>
 					<div v-else-if="orderInfo.order_type == 6" class="fs-14 text-wlll-000-85">其他出库</div>
 					<div v-else-if="orderInfo.order_type == 7" class="fs-14 text-wlll-000-85">盘亏出库</div>
+					<div v-else-if="orderInfo.order_type == 9" class="fs-14 text-wlll-000-85">调拨出库</div>
 				</div>
 				<div v-else>
 					<div class="text--w111-666 fs-13 mb-5">盘点状态</div>

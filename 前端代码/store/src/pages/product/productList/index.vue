@@ -54,6 +54,22 @@
 				</Select>
 		    </FormItem>
 		  </Col>
+		  <Col>
+		    <FormItem label="参与库存：">
+				<Select v-model="formValidate.is_inventory" style="width:250px" placeholder="请选择" clearable @on-change="search">
+				  <Option :value="1">开启</Option>
+				  <Option :value="0">关闭</Option>
+				</Select>
+		    </FormItem>
+		  </Col>
+		  <Col>
+		    <FormItem label="允许负库存：">
+				<Select v-model="formValidate.allow_negative_stock" style="width:250px" placeholder="请选择" clearable @on-change="search">
+				  <Option :value="1">开启</Option>
+				  <Option :value="0">关闭</Option>
+				</Select>
+		    </FormItem>
+		  </Col>
           <Col>
             <FormItem label="商品搜索：" label-for="store_name">
               <Input enter-button style="width:250px"  placeholder="请输入商品名称,关键字,ID" v-model="formValidate.store_name" />
@@ -185,6 +201,18 @@
           <vxe-column field="price" title="商品售价" min-width="90"></vxe-column>
           <vxe-column field="branch_sales" title="销量" min-width="90"></vxe-column>
           <vxe-column field="branch_stock" title="库存" min-width="80"></vxe-column>
+          <vxe-column field="is_inventory" title="参与库存管理" min-width="110">
+            <template v-slot="{ row }">
+              <span v-if="row.product_type != 0">—</span>
+              <span v-else>{{ row.is_inventory == 1 ? '开启' : '关闭' }}</span>
+            </template>
+          </vxe-column>
+          <vxe-column field="allow_negative_stock" title="允许负库存" min-width="100">
+            <template v-slot="{ row }">
+              <span v-if="row.product_type != 0">—</span>
+              <span v-else>{{ row.allow_negative_stock == 1 ? '开启' : '关闭' }}</span>
+            </template>
+          </vxe-column>
           <vxe-column field="sort" title="排序" min-width="70"></vxe-column>
           <vxe-column field="state" title="状态" width="120">
             <template v-slot="{ row }">
@@ -213,7 +241,7 @@
 					  <DropdownMenu slot="list">
 						  <DropdownItem name="1">查看评论</DropdownItem>
 						  <DropdownItem name="7" v-if="changePriceStatus && row.pid>0">修改售价</DropdownItem>
-						  <DropdownItem name="2" v-if="!openErp">库存管理</DropdownItem>
+						  <DropdownItem name="2" v-if="!openErp && row.product_type == 0 && row.is_inventory == 1">库存管理</DropdownItem>
 						  <DropdownItem name="3" v-if="row.pid == 0">{{row.is_del ? '恢复商品' : '移入回收站' }}</DropdownItem>
 						  <DropdownItem name="8">商品显示</DropdownItem>
 						  <DropdownItem name="9" v-if="row.product_type == 0">配送方式</DropdownItem>
@@ -403,6 +431,8 @@ export default {
         page: 1,
         limit: 15,
         store_cate_id: "",
+        is_inventory: "",
+        allow_negative_stock: "",
       },
       product_status:1,
       detailsVisible: false,
@@ -771,6 +801,8 @@ export default {
       this.formValidate.cate_id = "";
       this.formValidate.store_cate_id = "";
 	  this.formValidate.product_type = "";
+	  this.formValidate.is_inventory = "";
+	  this.formValidate.allow_negative_stock = "";
 	  this.formValidate.type = "1";
       this.getHeader();
     },

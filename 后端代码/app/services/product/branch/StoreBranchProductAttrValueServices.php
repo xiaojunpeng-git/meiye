@@ -57,40 +57,10 @@ class StoreBranchProductAttrValueServices extends BaseServices
      */
     public function updataAll(int $id, array $data, int $store_id)
     {
-        /** @var StoreBranchProductServices $productServices */
-        $productServices = app()->make(StoreBranchProductServices::class);
-        $where = [];
-        $where['product_id'] = $id;
-        $where['store_id'] = $store_id;
-        $where['type'] = 0;
-
-        $this->transaction(function () use ($id, $store_id, $where, $data, $productServices) {
-            $attrArr = [];
-            $stock = 0;
-            $this->dao->delete($where);
-            foreach ($data['attrs'] as $key => $item) {
-                $attrArr[$key]['product_id'] = $id;
-                $attrArr[$key]['store_id'] = $store_id;
-                $attrArr[$key]['unique'] = $item['unique'] ?? '';
-                $attrArr[$key]['stock'] = intval($item['stock']) ?? 0;
-                $attrArr[$key]['bar_code'] = $item['bar_code'] ?? 0;
-                $attrArr[$key]['type'] = 0;
-                $stock += (int)($item['stock'] ?? 0);
-            }
-            $res1 = $this->dao->saveAll($attrArr);
-            $productServices->saveStoreProduct($id, $store_id, $stock, $data);
-            $unique = array_column($data['attrs'], 'unique');
-            /** @var StoreProductAttrValueServices $storeProductAttrValueServices */
-            $storeProductAttrValueServices = app()->make(StoreProductAttrValueServices::class);
-            $storeProductAttrValueServices->updateSumStock($unique);
-            //记录入出库
-            /** @var StoreProductStockDetailServices $storeProductStockDetailServices */
-            $storeProductStockDetailServices = app()->make(StoreProductStockDetailServices::class);
-			$storeProductStockDetailServices->handelProductStock($id, $attrArr, $store_id ? 1 : 0, $store_id);
-            if (!$res1) {
-                throw new AdminException('添加失败！');
-            }
-        });
+        // 【库存铁律】旧门店规格编辑（删光重建并写库存）已停用
+        throw new AdminException('已停用：不可在此编辑规格库存；资料请走商品编辑，库存请到「库存管理」操作');
+        // 原逻辑：delete 全部 type=0 后按请求库存重建 —— 已注释
+        // $this->transaction(function () use (...) { ... });
     }
 
     /**

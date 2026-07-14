@@ -1147,6 +1147,10 @@
 		     @weekData="weekData"
 		   ></reservationSet>
 		</div>
+		<!-- 库存设置（仅普通商品 product_type==0） -->
+		<div v-show="currentTab === '11'">
+		   <inventorySet :baseInfo="formValidate"></inventorySet>
+		</div>
 		<!-- 商品详情 -->
         <Row v-show="currentTab === '3'" class="mb10">
           <Col span="16">
@@ -1567,6 +1571,7 @@ import goodsAttr from '@/components/goodsAttr';
 import attrList from '../components/attrList';
 import stockSet from './components/stockSet.vue';
 import reservationSet from './components/reservationSet.vue';
+import inventorySet from './components/inventorySet.vue';
 import cardstyleSet from './components/cardstyleSet.vue';
 import {
   productInfoApi,
@@ -1601,6 +1606,7 @@ export default {
     draggable: vuedraggable,
 	stockSet,
 	reservationSet,
+	inventorySet,
 	cardstyleSet,
   goodsAttr
   },
@@ -1938,6 +1944,8 @@ export default {
         header: [],
         specs: [],
         product_type: 0,
+		is_inventory: 1, //参与库存管理（仅普通商品）
+		allow_negative_stock: 1, //允许负库存
 		reservation_time_type:1 ,//预约时段类型1:自动划分2:自定义
 		reservation_times: [], //[预约时间段开始，预约时间短结束]
 		reservation_time_interval:30, //预约时段自动类型：时间间隔（分钟）
@@ -2462,6 +2470,10 @@ export default {
 		     { title: '商品详情', name: '3' },
 		     { title: '其他设置', name: '4' },
 		   ]
+		   // 库存设置仅普通商品(product_type==0)可见，紧随「基础信息」之后
+		   if (this.formValidate.product_type == 0) {
+		     headTab.splice(1, 0, { title: '库存设置', name: '11' });
+		   }
 	   }
 	   return headTab;
 	}
@@ -3682,6 +3694,16 @@ export default {
             this.formValidate.card_cover_color = '';
           } else {
             this.formValidate.card_cover_image = '';
+          }
+          // 库存设置：仅普通商品(product_type==0)可参与库存；非产品强制关闭
+          if (this.formValidate.product_type == 0) {
+            this.formValidate.is_inventory =
+              this.formValidate.is_inventory != null ? this.formValidate.is_inventory : 1;
+            this.formValidate.allow_negative_stock =
+              this.formValidate.allow_negative_stock != null ? this.formValidate.allow_negative_stock : 1;
+          } else {
+            this.formValidate.is_inventory = 0;
+            this.formValidate.allow_negative_stock = 1;
           }
           productAddApi(this.formValidate)
             .then(async (res) => {

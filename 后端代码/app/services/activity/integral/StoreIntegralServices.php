@@ -305,7 +305,7 @@ class StoreIntegralServices extends BaseServices
      * @param $integralId
      * @return bool
      */
-    public function decIntegralStock(int $num, int $integralId, string $unique, int $store_id = 0)
+    public function decIntegralStock(int $num, int $integralId, string $unique, int $store_id = 0, bool $decProductStock = false)
     {
 		if (!$integralId) return true;
 		$product_id = $this->dao->value(['id' => $integralId], 'product_id');
@@ -314,16 +314,15 @@ class StoreIntegralServices extends BaseServices
 			if ($unique) {
 				/** @var StoreProductAttrValueServices $skuValueServices */
 				$skuValueServices = app()->make(StoreProductAttrValueServices::class);
-				//减去积分商品的sku库存增加销量
+				//减去积分商品的sku库存增加销量（活动额度）
 				$res = false !== $skuValueServices->decProductAttrStock($integralId, $unique, $num,4);
-				//积分商品sku
-				$suk = $skuValueServices->value(['unique' => $unique, 'product_id' => $integralId, 'type' => 4], 'suk');
-				//平台商品sku unique
-				$productUnique = $skuValueServices->value(['suk' => $suk, 'product_id' => $product_id, 'type' => 0], 'unique');
-				/** @var StoreProductServices $services */
-				$services = app()->make(StoreProductServices::class);
-				//减去普通商品库存
-				$res = $res && $services->decProductStock($num, $product_id, (string)$productUnique, $store_id);
+				if ($decProductStock) {
+					$suk = $skuValueServices->value(['unique' => $unique, 'product_id' => $integralId, 'type' => 4], 'suk');
+					$productUnique = $skuValueServices->value(['suk' => $suk, 'product_id' => $product_id, 'type' => 0], 'unique');
+					/** @var StoreProductServices $services */
+					$services = app()->make(StoreProductServices::class);
+					$res = $res && $services->decProductStock($num, $product_id, (string)$productUnique, $store_id);
+				}
 			}
 			//减去积分商品库存
 			$res = $res && false !== $this->dao->decStockIncSales(['id' => $integralId, 'type' => 4], $num);
@@ -339,7 +338,7 @@ class StoreIntegralServices extends BaseServices
 	 * @param int $store_id
 	 * @return bool
 	 */
-	public function incIntegralStock(int $num, int $integralId, string $unique, int $store_id = 0)
+	public function incIntegralStock(int $num, int $integralId, string $unique, int $store_id = 0, bool $incProductStock = false)
 	{
 		if (!$integralId) return true;
 		$product_id = $this->dao->value(['id' => $integralId], 'product_id');
@@ -358,7 +357,7 @@ class StoreIntegralServices extends BaseServices
 				/** @var StoreProductServices $services */
 				$services = app()->make(StoreProductServices::class);
 				//增加普通商品库存
-				$res = $res && $services->incProductStock($num, $product_id, (string)$productUnique, $store_id);
+				if ($incProductStock) { $res = $res && $services->incProductStock($num, $product_id, (string)$productUnique, $store_id); }
 			}
 			//增加积分库存
 			$res = $res && false !== $this->dao->incStockDecSales(['id' => $integralId, 'type' => 4], $num);

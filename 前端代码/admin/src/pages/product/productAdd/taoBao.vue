@@ -2,7 +2,7 @@
     <div class="Box">
         <Card>
             <div>生成的商品默认是没有上架的，请手动上架商品！
-                <a href="http://help.crmeb.net/crmeb-v4/1863579" v-if="copyConfig.copy_type == 2"  target="_blank">如何配置密钥</a>
+                <a href="https://doc.mohe.com" v-if="copyConfig.copy_type == 2"  target="_blank">如何配置密钥</a>
                 <span v-else>您当前剩余{{copyConfig.copy_num}}条采集次数，<a href="#" @click="mealPay('copy')">增加采集次数</a></span>
             </div>
             <div>商品采集设置：设置 > 系统设置 > 第三方接口设置 > 采集商品配置</div>

@@ -270,14 +270,10 @@ class StoreProduct extends AuthController
      */
     public function update($id = 0, StoreBranchProductAttrValueServices $services)
     {
-        $data = $this->request->postMore([
-            ['attrs', []],
-            ['label_id', []],
-            ['is_show', 1]
-        ]);
-        $storeId = $this->storeId;
-        $services->updataAll((int)$id, (array)$data, (int)$storeId);
-        return app('json')->success('保存商品信息成功');
+        // 【库存铁律】供应商端旧规格库存编辑已停用（与门店一致）
+        return app('json')->fail('已停用：不可在此编辑规格库存，请到「库存管理」操作');
+        // $data = $this->request->postMore([...]);
+        // $services->updataAll(...);
     }
 
 
@@ -454,21 +450,8 @@ class StoreProduct extends AuthController
      */
     public function saveProductAttrsStock(StoreProductAttrValueServices $services, $id)
     {
-        if (!$id) {
-            return $this->fail('缺少商品ID');
-        }
-        [$attrs] = $this->request->getMore([
-            ['attrs', []]
-        ], true);
-        if (!$attrs) {
-            return $this->fail('请重新修改规格库存');
-        }
-        foreach ($attrs as $attr) {
-            if (!isset($attr['unique']) || !isset($attr['pm']) || !isset($attr['stock'])) {
-                return $this->fail('请重新修改规格库存');
-            }
-        }
-        return $this->success(['stock' => $services->saveProductAttrsStock((int)$id, $attrs, 2, (int)$this->supplierId, (int)$this->supplierId)]);
+        // 【库存铁律】供应商端快捷改库存已停用
+        return $this->fail('已停用：不可在此快捷改库存，请到「库存管理」操作');
     }
 
 	/**

@@ -119,6 +119,8 @@ class StoreProduct extends AuthController
             ['store_label_id', ''],
             ['brand_id', ''],
             ['product_type', ''],//商品类型0:普通商品，1：卡密，2：优惠券，3：虚拟商品,4：次卡商品,5:卡项商品6：预约商品
+            ['is_inventory', ''],//是否参与库存管理
+            ['allow_negative_stock', ''],//是否允许负库存
         ]);
         $cateId = $where['cate_id'];
         if ($cateId) {
@@ -389,34 +391,36 @@ class StoreProduct extends AuthController
      */
     public function update($id = 0, StoreBranchProductAttrValueServices $services)
     {
-        $data = $this->request->postMore([
-            ['attrs', []],
-            ['label_id', []],
-            ['is_show', 1]
-        ]);
-        $storeId = $this->storeId;
-        $services->updataAll((int)$id, (array)$data, (int)$storeId);
-        return app('json')->success('保存商品信息成功');
+        // 【库存铁律】旧门店规格编辑（删光重建 SKU 并写库存）已停用
+        return app('json')->fail('已停用：不可在此编辑规格库存；资料请走商品编辑，库存请到「库存管理」操作');
+        // $data = $this->request->postMore([
+        //     ['attrs', []],
+        //     ['label_id', []],
+        //     ['is_show', 1]
+        // ]);
+        // $storeId = $this->storeId;
+        // $services->updataAll((int)$id, (array)$data, (int)$storeId);
+        // return app('json')->success('保存商品信息成功');
     }
 
     /**
-     * 门店同步库存
+     * 门店同步库存（已停用）
+     * 【库存铁律】禁止从平台覆盖门店库存；库存仅能通过库存管理与销售出入库变动
      * @return mixed
      */
     public function synchStocks()
     {
-        [$ids] = $this->request->postMore([
-            ['ids', []]
-        ], true);
-        if (!count($ids)) return $this->fail('请选择商品');
-        $storeId = $this->storeId;
-        //拆分大数组
-        $idsArr = array_chunk($ids, 5);
-        foreach ($idsArr as $syncIds) {
-            //加入同步
-            SynchStocksJob::dispatch([$syncIds, $storeId]);
-        }
-        return app('json')->success('库存同步已加入队列执行，请稍后查看');
+        return app('json')->fail('已停用：不可同步平台库存覆盖门店，请到「库存管理」入库/出库/盘点调整');
+        // [$ids] = $this->request->postMore([
+        //     ['ids', []]
+        // ], true);
+        // if (!count($ids)) return $this->fail('请选择商品');
+        // $storeId = $this->storeId;
+        // $idsArr = array_chunk($ids, 5);
+        // foreach ($idsArr as $syncIds) {
+        //     SynchStocksJob::dispatch([$syncIds, $storeId]);
+        // }
+        // return app('json')->success('库存同步已加入队列执行，请稍后查看');
     }
 
     /**
@@ -605,28 +609,12 @@ class StoreProduct extends AuthController
      */
     public function saveProductAttrsStock(StoreProductAttrValueServices $services, $id)
     {
-        if (!$id) {
-            return $this->fail('缺少商品ID');
-        }
-        [$attrs] = $this->request->getMore([
-            ['attrs', []]
-        ], true);
-        if (!$attrs) {
-            return $this->fail('请重新修改规格库存');
-        }
-        $productInfo = $this->services->getCacheProductInfo((int)$id);
-        if (!$productInfo) {
-            return $this->fail('商品不存在或已删除');
-        }
-        foreach ($attrs as $attr) {
-            if (!isset($attr['unique']) || !isset($attr['pm']) || !isset($attr['stock'])) {
-                return $this->fail('请重新修改规格库存');
-            }
-            if ($productInfo['product_type'] == 6 && !isset($attr['reservation_time_data'])) {
-                return $this->fail('请修改规格时段划分库存');
-            }
-        }
-        return $this->success(['stock' => $services->saveProductAttrsStock((int)$id, $attrs, 1, (int)$this->storeId, (int)$this->storeStaffId)]);
+        // 【库存铁律】商品页快捷改库存已停用；出入库单据内部仍可调用 Service
+        return $this->fail('已停用：不可在商品页快捷改库存，请到「库存管理」入库/出库/盘点操作');
+        // if (!$id) {
+        //     return $this->fail('缺少商品ID');
+        // }
+        // ...
     }
 
     /**

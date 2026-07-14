@@ -4,7 +4,7 @@
       <div>
         生成的商品默认是没有上架的，请手动上架商品！
         <a
-          href="http://help.crmeb.net/crmeb-v4/1863579"
+          href="https://doc.mohe.com"
           v-if="copyConfig.copy_type == 2"
           target="_blank"
           >如何配置密钥</a

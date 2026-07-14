@@ -291,76 +291,10 @@ class ProductSyncErp extends BaseJobs
      */
     public function stockFromErp(array $ids)
     {
-        try {
-            /** @var StoreProductServices $storeProductServices */
-            $storeProductServices = app()->make(StoreProductServices::class);
-
-            /** @var StoreProductAttrValueServices $storeProductAttrValueServices */
-            $storeProductAttrValueServices = app()->make(StoreProductAttrValueServices::class);
-
-            //查询ids下的所有规格对应的sku
-            $list = $storeProductAttrValueServices->getSkuArray(['product_id' => $ids, 'type' => 0], 'code', 'id');
-
-            $values = array_filter(array_values($list));
-            if (empty($values)) {
-                throw new AdminException('没有符合同步库存的商品');
-            }
-
-            $skuData = $skuMap = [];
-
-            $basic = 20; // 单次查询数量最多20
-            $num = count($values);
-            $rate = ceil($num / $basic);
-            for ($i = 0; $i < $rate; $i++) {
-                $code = array_slice($values, $i * $basic, $basic);
-                $codeStr = implode(',', $code);
-                $result = (new erpServices())->serviceDriver('product')->syncStock($codeStr);
-                if (!empty($result['inventorys'])) {
-                    foreach ($result['inventorys'] as $inventory) {
-                        $skuMap[$inventory['sku_id']] = $inventory['qty'] - $inventory['order_lock'];
-                    }
-                }
-            }
-
-            // 拼装规格数据
-            if (!empty($skuMap)) {
-                foreach ($skuMap as $key => $item) {
-                    if ($id = array_search($key, $list)) {
-                        $skuData[] = ['id' => $id, 'stock' => $item, 'sum_stock' => $item];
-                    }
-                }
-            }
-
-            // 同步库存
-            $storeProductServices->transaction(function () use ($ids, $skuData, $storeProductAttrValueServices, $storeProductServices) {
-                // 同步规格库存
-                $storeProductAttrValueServices->saveAll($skuData);
-                // 同步商品库存
-                $productData = $storeProductAttrValueServices->getProductStockByValues($ids);
-                $storeProductServices->saveAll($productData);
-            });
-
-            /** @var SystemStoreServices $systemStoreServices */
-            $systemStoreServices = app()->make(SystemStoreServices::class);
-            $systemStoreList = $systemStoreServices->getErpStore([['erp_shop_id', '>', 0]]);
-
-            // 同步门店商品库存
-            if (!empty($systemStoreList)) {
-                foreach ($systemStoreList as $store) {
-                    ProductSyncErp::dispatchDo('syncBranchProductStock', [$ids[0], $skuMap, $store['id']]);
-                }
-            }
-
-			//清除缓存
-			$storeProductServices->cacheTag()->clear();
-			/** @var StoreProductAttrServices $attrService */
-			$attrService = app()->make(StoreProductAttrServices::class);
-			$attrService->cacheTag()->clear();
-        } catch (\Exception $e) {
-            Log::error('库存获取失败, 原因: ' . $e->getMessage());
-        }
-
+        // 【库存铁律】ERP 拉取库存直写已停用
+        Log::error('stockFromErp 已停用：ERP 不可直接覆盖库存');
         return true;
+        // 原 saveAll 覆盖 SKU stock 逻辑已注释
     }
 
     /**
@@ -371,26 +305,9 @@ class ProductSyncErp extends BaseJobs
      */
     public function syncBranchProductStock(int $productId, array $data, int $storeId)
     {
-        /** @var StoreBranchProductAttrValueServices $branchProductAttrServices */
-        $branchProductAttrServices = app()->make(StoreBranchProductAttrValueServices::class);
-        $branchProductAttrServices->transaction(function () use ($productId, $storeId, $data, $branchProductAttrServices) {
-            $list = $branchProductAttrServices->getColumn(['store_id' => $storeId, 'product_id' => $productId, 'code' => array_keys($data)], '*', 'id');
-            if (!empty($list)) {
-                foreach ($list as $item) {
-                    $branchProductAttrServices->update($item['id'], ['stock' => $data[$item['code']]]);
-                }
-            }
-
-            $stock = (int)$branchProductAttrServices->sum(['product_id' => $productId, 'store_id' => $storeId], 'stock');
-
-            /** @var StoreBranchProductServices $branchProductServices */
-            $branchProductServices = app()->make(StoreBranchProductServices::class);
-            $branchProductId = $branchProductServices->value(['product_id' => $productId, 'store_id' => $storeId], 'id');
-            if ($branchProductId > 0) {
-                $branchProductServices->update($branchProductId, ['stock' => $stock]);
-            }
-        });
+        // 【库存铁律】ERP 覆盖门店库存已停用
         return true;
+        // 原直接 update stock 逻辑已注释
     }
 
     /**
@@ -418,95 +335,32 @@ class ProductSyncErp extends BaseJobs
      */
     public function updatePlatformStock(array $list): bool
     {
-        try {
-            /** @var StoreProductAttrValueServices $storeProductAttrValueServices */
-            $storeProductAttrValueServices = app()->make(StoreProductAttrValueServices::class);
-
-            $data = array_column($list, 'qty', 'sku_id');
-            $shopData = array_keys(array_column($list, 'shop_id', 'shop_id'));
-            $erpShopId = $shopData[0] ?? 0;
-            if ($erpShopId < 1) {
-                return true;
-            }
-
-            // 更新平台商品库存
-            $defaultShopId = (int)sys_config('jst_default_shopid');
-            if ($defaultShopId == $erpShopId) {
-                $this->updateStoreProductValueStock($data);
-            }
-
-            $attrs = $storeProductAttrValueServices->getColumn(['code' => array_keys($data)], 'id, product_id, suk, stock, sum_stock', 'code');
-            $productIds = array_unique(array_column($attrs, 'product_id'));
-
-            /** @var SystemStoreServices $systemStoreServices */
-            $systemStoreServices = app()->make(SystemStoreServices::class);
-            $systemStoreList = $systemStoreServices->getErpStore([['erp_shop_id', '=', $erpShopId]]);
-
-            // 同步门店商品规格库存
-            foreach ($systemStoreList as $store) {
-                ProductSyncErp::dispatchDo('updateStoreAttrStockByCode', [$data, $store['id']]);
-            }
-
-            // 同步门店商品库存
-            foreach ($systemStoreList as $store) {
-                ProductSyncErp::dispatchDo('updateStoreProductStock', [$productIds, $store['id']]);
-            }
-        } catch (\Exception $e) {
-            Log::error('更新门店库存失败, 原因: ' . $e->getMessage());
-        }
+        // 【库存铁律】ERP 推送库存直写已停用
+        Log::warning('updatePlatformStock 已停用：ERP 不可直接覆盖库存');
         return true;
     }
 
     /**
-     * 更新门店规格库存
+     * 更新门店规格库存（已停用）
      * @param array $data
      * @param int $storeId
      * @return bool
      */
     public function updateStoreAttrStockByCode(array $data, int $storeId): bool
     {
-        try {
-            /** @var StoreBranchProductAttrValueServices $branchProductAttrServices */
-            $branchProductAttrServices = app()->make(StoreBranchProductAttrValueServices::class);
-            $list = $branchProductAttrServices->getColumn(['store_id' => $storeId, 'code' => array_keys($data)], 'code', 'id');
-            $skuData = [];
-
-            // 同步规格库存
-            foreach ($data as $key => $item) {
-                if ($id = array_search($key, $list)) {
-                    $skuData[] = ['id' => $id, 'stock' => $item];
-                }
-            }
-            // 同步规格库存
-            $branchProductAttrServices->saveAll($skuData);
-        } catch (\Exception $e) {
-            Log::error('门店: ' . $storeId . ' 规格库存更新失败, 原因: ' . $e->getMessage());
-        }
+        // 【库存铁律】已停用
         return true;
     }
 
     /**
-     * 更新门店商品库存
+     * 更新门店商品库存（已停用）
      * @param array $productIds
      * @param int $storeId
      * @return bool
      */
     public function updateStoreProductStock(array $productIds, int $storeId): bool
     {
-        try {
-            /** @var StoreBranchProductAttrValueServices $branchProductAttrServices */
-            $branchProductAttrServices = app()->make(StoreBranchProductAttrValueServices::class);
-
-            /** @var StoreBranchProductServices $branchProductServices */
-            $branchProductServices = app()->make(StoreBranchProductServices::class);
-
-            $productData = $branchProductAttrServices->getProductStockByValues($productIds, $storeId);
-            foreach ($productData as $product) {
-                $branchProductServices->update(['product_id' => $product['product_id'], 'store_id' => $storeId], ['stock' => $product['stock']]);
-            }
-        } catch (\Exception $e) {
-            Log::error('门店: ' . $storeId . ' 商品库存更新失败, 原因: ' . $e->getMessage());
-        }
+        // 【库存铁律】已停用
         return true;
     }
 
@@ -517,42 +371,8 @@ class ProductSyncErp extends BaseJobs
      */
     public function updateStoreProductValueStock(array $data): bool
     {
-        try {
-            /** @var StoreProductServices $storeProductServices */
-            $storeProductServices = app()->make(StoreProductServices::class);
-
-            /** @var StoreProductAttrValueServices $storeProductAttrValueServices */
-            $storeProductAttrValueServices = app()->make(StoreProductAttrValueServices::class);
-
-            $skuList = $storeProductAttrValueServices->getSkuArray(['code' => array_keys($data), 'type' => 0], 'id, product_id,code', 'id');
-            if (empty($skuList)) {
-                throw new AdminException('没有符合同步库存的商品');
-            }
-
-            $ids = array_unique(array_column($skuList, 'product_id'));
-
-            $skuData = [];
-            foreach ($skuList as $key => $sku) {
-                if (array_key_exists($sku['code'], $data)) {
-                    $skuData[] = ['id' => $key, 'stock' => $data[$sku['code']]];
-                }
-            }
-
-            if (empty($skuData)) {
-                return true;
-            }
-
-            // 同步库存
-            $storeProductServices->transaction(function () use ($ids, $skuData, $storeProductAttrValueServices, $storeProductServices) {
-                // 同步规格库存
-                $storeProductAttrValueServices->saveAll($skuData);
-                // 同步商品库存
-                $productData = $storeProductAttrValueServices->getProductStockByValues($ids);
-                $storeProductServices->saveAll($productData);
-            });
-        } catch (\Exception $e) {
-            Log::error('平台商品库存更新失败, 原因: ' . $e->getMessage());
-        }
+        // 【库存铁律】ERP 覆盖平台库存已停用
         return true;
+        // 原 saveAll 覆盖 stock 逻辑已注释
     }
 }

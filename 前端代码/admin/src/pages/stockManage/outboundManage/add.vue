@@ -116,9 +116,7 @@
 				</FormItem>
 			</Form>
 		</Card>
-		<Modal v-model="sattrModals" title="商品列表" footerHide  class="paymentFooter" scrollable width="900" @on-cancel="cancel">
-		  <goods-attr :chooseType="94"  ref="goodSattr" v-if="sattrModals" @getProductId="getAtterId"></goods-attr>
-		</Modal>
+		<selectGoodsBox v-model="sattrModals" @getProductId="getAtterId" @on-cancel="cancel"></selectGoodsBox>
 	</div>
 </template>
 
@@ -131,7 +129,7 @@
 		outventoryAddApi
 	} from "@/api/stockManage";
 	import Setting from "@/setting";
-	import goodsAttr from '@/components/goodsAttr';
+	import selectGoodsBox from '@/components/selectGoodsBox';
 	import {
 	  outGoods,
 	  outGoodProduct,
@@ -140,7 +138,7 @@
 	export default {
 		name: "outboundAdd",
 		components: {
-		  goodsAttr
+		  selectGoodsBox
 		},
 		data() {
 			return {
@@ -180,7 +178,7 @@
 					{
 						id: '6',
 						name: '其他出库',
-						des: '除常规的出库方式之外的特殊出库情况'
+						des: '除常规的出库方式之外的特殊出库情况。调拨出库由调拨确认自动生成，不可在此手工创建。'
 					}
 				],
 				formValidate: {

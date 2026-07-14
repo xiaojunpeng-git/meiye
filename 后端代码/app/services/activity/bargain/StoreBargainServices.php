@@ -584,7 +584,7 @@ class StoreBargainServices extends BaseServices
      * @param int $store_id
      * @return bool
      */
-    public function decBargainStock(int $num, int $bargainId, string $unique, int $store_id = 0)
+    public function decBargainStock(int $num, int $bargainId, string $unique, int $store_id = 0, bool $decProductStock = false)
     {
 		if (!$bargainId) return true;
         $product_id = $this->dao->value(['id' => $bargainId], 'product_id');
@@ -593,18 +593,16 @@ class StoreBargainServices extends BaseServices
             if ($unique) {
                 /** @var StoreProductAttrValueServices $skuValueServices */
                 $skuValueServices = app()->make(StoreProductAttrValueServices::class);
-                //减去砍价商品sku的库存增加销量
+                //减去砍价商品sku的库存增加销量（活动额度）
                 $res = $res && $skuValueServices->decProductAttrStock($bargainId, $unique, $num, 2);
 
-				//砍价商品sku
-                $suk = $skuValueServices->value(['unique' => $unique, 'product_id' => $bargainId, 'type' => 2], 'suk');
-				//平台商品sku unique
-                $productUnique = $skuValueServices->value(['suk' => $suk, 'product_id' => $product_id, 'type' => 0], 'unique');
-
-                /** @var StoreProductServices $services */
-                $services = app()->make(StoreProductServices::class);
-                //减掉普通商品sku的库存加销量
-                $res = $res && $services->decProductStock($num, (int)$product_id, (string)$productUnique, $store_id);
+				if ($decProductStock) {
+					$suk = $skuValueServices->value(['unique' => $unique, 'product_id' => $bargainId, 'type' => 2], 'suk');
+					$productUnique = $skuValueServices->value(['suk' => $suk, 'product_id' => $product_id, 'type' => 0], 'unique');
+					/** @var StoreProductServices $services */
+					$services = app()->make(StoreProductServices::class);
+					$res = $res && $services->decProductStock($num, (int)$product_id, (string)$productUnique, $store_id);
+				}
             }
 			//减去砍价商品的库存和销量
 			$res = $res && $this->dao->decStockIncSales(['id' => $bargainId, 'type' => 2], $num);
@@ -620,7 +618,7 @@ class StoreBargainServices extends BaseServices
      * @param int $store_id
      * @return bool
      */
-    public function incBargainStock(int $num, int $bargainId, string $unique, int $store_id = 0)
+    public function incBargainStock(int $num, int $bargainId, string $unique, int $store_id = 0, bool $incProductStock = false)
     {
 		if (!$bargainId) return true;
         $product_id = $this->dao->value(['id' => $bargainId], 'product_id');
@@ -640,7 +638,7 @@ class StoreBargainServices extends BaseServices
 				/** @var StoreProductServices $services */
 				$services = app()->make(StoreProductServices::class);
 				//减掉普通商品的销量加库存
-				$res = $res && $services->incProductStock($num, (int)$product_id, (string)$productUnique, $store_id);
+				if ($incProductStock) { $res = $res && $services->incProductStock($num, (int)$product_id, (string)$productUnique, $store_id); }
 			}
 			//减去砍价商品的销量,增加库存
 			$res = $res && $this->dao->incStockDecSales(['id' => $bargainId, 'type' => 2], $num);

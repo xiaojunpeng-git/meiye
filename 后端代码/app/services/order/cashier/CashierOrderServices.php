@@ -1063,32 +1063,9 @@ class CashierOrderServices extends BaseServices
      */
     protected function decCashierGoodsStock(array $cartInfo, int $storeId, array $giveIds = []): void
     {
-        /** @var StoreProductServices $services */
-        $services = app()->make(StoreProductServices::class);
-        foreach ($cartInfo as $cart) {
-            if (isset($cart['cart_type']) && (int)$cart['cart_type'] > 0) {
-                continue;
-            }
-            $cartNum = (int)($cart['cart_num'] ?? 0);
-            $productId = (int)($cart['productInfo']['id'] ?? $cart['product_id'] ?? 0);
-            if ($cartNum <= 0 || $productId <= 0) {
-                continue;
-            }
-            $unique = (string)($cart['productInfo']['attrInfo']['unique'] ?? $cart['product_attr_unique'] ?? '');
-            if ($this->cashierShouldSkipStock($cart, $giveIds)) {
-                $incOk = $services->incProductSales($cartNum, $productId, $unique, $storeId);
-                if (!$incOk) {
-                    try {
-                        $services->dao->bcInc($productId, 'sales', (string)$cartNum);
-                    } catch (\Throwable $ignored) {
-                    }
-                }
-                continue;
-            }
-            if (!$services->decProductStock($cartNum, $productId, $unique, $storeId)) {
-                throw new ValidateException('库存不足!');
-            }
-        }
+        // 库存改造：收银台下单不扣实物库存、不加销量；支付成功后再处理。
+        // 活动 Redis 额度仍由下单前 popStock 处理。
+        return;
     }
 
     //添加赠送单
@@ -1905,6 +1882,9 @@ class CashierOrderServices extends BaseServices
             throw new ValidateException('订单已取消');
         }
 		$orderInfo = $orderInfo->toArray();
+		/** @var \app\services\product\inventory\ProductInventoryChangeServices $inventoryChange */
+		$inventoryChange = app()->make(\app\services\product\inventory\ProductInventoryChangeServices::class);
+		$inventoryChange->assertOrderCanPay($orderInfo);
 		if ($isNewOrderId) {
 			$updateData = ['pay_type' => $payType];
 			//只要重新支付就更新订单号

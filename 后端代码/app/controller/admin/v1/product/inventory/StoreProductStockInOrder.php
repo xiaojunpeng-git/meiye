@@ -199,4 +199,52 @@ class StoreProductStockInOrder extends AuthController
 			return app('json')->fail('备注失败');
     }
 
+	/**
+	 * 下载入库 Excel 模板（scene=initial_in|in）
+	 */
+	public function downloadTemplate(\app\services\product\inventory\StoreProductStockImportServices $importServices)
+	{
+		[$scene, $keyword] = $this->request->getMore([
+			['scene', 'in'],
+			['keyword', ''],
+		], true);
+		if (!in_array($scene, ['initial_in', 'in'], true)) {
+			return $this->fail('模板场景不正确');
+		}
+		$result = $importServices->downloadTemplate($scene, 0, 0, ['keyword' => $keyword]);
+		return $this->success($result);
+	}
+
+	/**
+	 * 导入入库 Excel（scene=initial_in|in）
+	 */
+	public function import(\app\services\product\inventory\StoreProductStockImportServices $importServices)
+	{
+		[$scene, $file, $realName] = $this->request->postMore([
+			['scene', 'in'],
+			['file', ''],
+			['real_name', ''],
+		], true);
+		if (!in_array($scene, ['initial_in', 'in'], true)) {
+			return $this->fail('导入场景不正确');
+		}
+		if (!$file) {
+			return $this->fail('请上传文件');
+		}
+		$path = public_path() . ltrim($file, '/');
+		if ($file[0] === '/') {
+			$path = public_path() . substr($file, 1);
+		}
+		$result = $importServices->importFile(
+			$scene,
+			$path,
+			0,
+			0,
+			(int)$this->adminId,
+			(string)($this->adminInfo['real_name'] ?? ''),
+			(string)$realName
+		);
+		return $this->success('导入成功', $result);
+	}
+
 }

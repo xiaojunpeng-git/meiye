@@ -510,6 +510,30 @@ class StoreProduct extends BaseModel
 		}
 	}
 
+	/**
+	 * 是否参与库存管理
+	 * @param $query
+	 * @param $value
+	 */
+	public function searchIsInventoryAttr($query, $value)
+	{
+		if ($value !== '') {
+			$query->where('is_inventory', $value);
+		}
+	}
+
+	/**
+	 * 是否允许负库存
+	 * @param $query
+	 * @param $value
+	 */
+	public function searchAllowNegativeStockAttr($query, $value)
+	{
+		if ($value !== '') {
+			$query->where('allow_negative_stock', $value);
+		}
+	}
+
     /**
      * 是否是svip商品搜索器
      * @param $query

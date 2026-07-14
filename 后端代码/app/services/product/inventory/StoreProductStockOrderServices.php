@@ -53,6 +53,8 @@ class StoreProductStockOrderServices extends BaseServices
 		3 => '退货入库',
 		4 => '残次品转良品',
 		5 => '盘盈入库',
+		8 => '调拨入库',
+		// 7 => '院装退回', // 阶段 4 再开放入口
 	];
 
 	/**
@@ -66,7 +68,9 @@ class StoreProductStockOrderServices extends BaseServices
 		4 => '报废出库',
 		5 => '良品转残次品',
 		6 => '其他出库',
-		7 => '盘亏出库'
+		7 => '盘亏出库',
+		9 => '调拨出库',
+		// 8 => '院装领用', // 阶段 4
 	];
 
     /**
@@ -212,7 +216,7 @@ class StoreProductStockOrderServices extends BaseServices
 	 * @throws \think\db\exception\DbException
 	 * @throws \think\db\exception\ModelNotFoundException
 	 */
-	public function saveData(int $stockType = 1, array $data = [], int $type = 0, int $relation_id = 0, int $adminId = 0, bool $isStock = true)
+	public function saveData(int $stockType = 1, array $data = [], int $type = 0, int $relation_id = 0, int $adminId = 0, bool $isStock = true, bool $isTran = true)
 	{
 		$time = time();
 		//入库单号
@@ -222,37 +226,167 @@ class StoreProductStockOrderServices extends BaseServices
 		$data['relation_id'] = $relation_id;
 		$data['admin_id'] = $adminId;
 		$data['add_time'] = $time;
-		$data['stock_time'] = strtotime($data['stock_time']);
+		$data['stock_time'] = is_numeric($data['stock_time']) ? (int)$data['stock_time'] : strtotime($data['stock_time']);
+		// 非 Excel 导入保持 import_key 为空，便于唯一索引允许多条 NULL
+		if (!isset($data['import_key']) || $data['import_key'] === '') {
+			$data['import_key'] = null;
+		}
+		$orderType = (int)($data['order_type'] ?? 0);
+		if ($stockType == 1) {
+			if (!isset($this->inOrderType[$orderType])) {
+				throw new ValidateException('入库类型不正确');
+			}
+		} else {
+			if (!isset($this->outOrderType[$orderType])) {
+				throw new ValidateException('出库类型不正确');
+			}
+		}
 		$productDetail = $data['in_product_detail'] ?? $data['out_product_detail'] ?? [];
 		unset($data['in_product_detail'], $data['out_product_detail']);
-		$this->transaction(function () use ($stockType, $data, $productDetail, $type, $relation_id, $adminId, $isStock, $time) {
+		if (!$productDetail) {
+			throw new ValidateException('请选择出入库商品');
+		}
+		$inId = 0;
+		$this->transaction(function () use ($stockType, $data, $productDetail, $type, $relation_id, $adminId, $isStock, $time, $orderType, &$inId) {
 			$dataAll = $productAttrData = [];
-			$res = $this->dao->save($data);
+			try {
+				$res = $this->dao->save($data);
+			} catch (\Throwable $e) {
+				$msg = $e->getMessage();
+				if (stripos($msg, 'Duplicate') !== false || stripos($msg, '1062') !== false) {
+					throw new ValidateException('相同导入文件已生成过库存单，请勿重复提交');
+				}
+				throw $e;
+			}
 			if (!$res) {
 				throw new ValidateException('入库单保存失败');
 			}
-			$inId = $res->id;
-			/** @var StoreProductServices $productServices */
-			$productServices = app()->make(StoreProductServices::class);
-			/** @var StoreProductAttrValueServices $productAttrValueServices */
-			$productAttrValueServices = app()->make(StoreProductAttrValueServices::class);
+			$inId = (int)$res->id;
+			// 销售出库 / 退货入库 才可豁免「参与库存管理」；禁止仅按 order_type=1/3 误判采购入库等
+			$isSaleOrRefund = ($stockType === 2 && $orderType === 1 && !empty($data['store_order_id']))
+				|| ($stockType === 1 && $orderType === 3 && !empty($data['refund_order_id']));
+
+			// 批量加载商品与 SKU，避免明细行 N+1
+			$productIds = [];
+			$uniques = [];
 			foreach ($productDetail as $productSku) {
-				$productInfo = $productServices->getCacheProductInfo((int)$productSku['product_id']);
-				$attrInfo = $productAttrValueServices->getOne(['product_id' => $productSku['product_id'], 'unique' => $productSku['unique'], 'type' => 0]);
-				if (!$productInfo || !$attrInfo) continue;
+				$pid = (int)($productSku['product_id'] ?? 0);
+				$uq = (string)($productSku['unique'] ?? '');
+				if ($pid > 0) {
+					$productIds[$pid] = $pid;
+				}
+				if ($uq !== '') {
+					$uniques[$uq] = $uq;
+				}
+			}
+			$productMap = [];
+			if ($productIds) {
+				$productRows = \app\model\product\product\StoreProduct::whereIn('id', array_values($productIds))->select()->toArray();
+				foreach ($productRows as $prow) {
+					$productMap[(int)$prow['id']] = $prow;
+				}
+			}
+			// 全局锁顺序：先按 SKU id 升序 FOR UPDATE，再改库存/写台账（与支付 changeSkuStock 一致）
+			$attrMap = [];
+			if ($uniques) {
+				$attrRows = app()->make(\app\dao\product\sku\StoreProductAttrValueDao::class)
+					->lockAttrValuesByUniques(array_values($uniques), 0);
+				foreach ($attrRows as $arow) {
+					$attrMap[(int)$arow['product_id'] . ':' . (string)$arow['unique']] = $arow;
+				}
+			}
+
+			$seenUnique = [];
+			foreach ($productDetail as $idx => $productSku) {
+				$productId = (int)($productSku['product_id'] ?? 0);
+				$unique = (string)($productSku['unique'] ?? '');
+				$excelRow = (int)($productSku['excel_row'] ?? 0);
+				$rowLabel = $excelRow > 0 ? ('第' . $excelRow . '行') : ('第' . ($idx + 1) . '行商品');
+				if (!$productId || $unique === '') {
+					throw new ValidateException($rowLabel . '格式错误：缺少商品ID或SKU');
+				}
+				if (isset($seenUnique[$unique])) {
+					throw new ValidateException($rowLabel . '：SKU 重复，同一单据不可重复同一规格');
+				}
+				$seenUnique[$unique] = true;
+				$productInfo = $productMap[$productId] ?? null;
+				$attrInfo = $attrMap[$productId . ':' . $unique] ?? null;
+				if (!$productInfo || !$attrInfo) {
+					throw new ValidateException(sprintf(
+						'%s规格不存在：商品ID %s / SKU %s',
+						$rowLabel,
+						(string)$productId,
+						$unique
+					));
+				}
+				// 平台/门店归属写死：商品 type、relation_id 必须与当前单据一致
+				if ((int)($productInfo['type'] ?? -1) !== (int)$type
+					|| (int)($productInfo['relation_id'] ?? -1) !== (int)$relation_id) {
+					throw new ValidateException($rowLabel . '：商品不属于当前平台/门店，禁止跨归属改库存');
+				}
+				if (!$isSaleOrRefund && (int)($productInfo['is_inventory'] ?? 0) !== 1) {
+					throw new ValidateException($rowLabel . '：商品未开启「参与库存管理」');
+				}
 				$stock = $productSku['stock'] ?? 0;
 				$defective_stock = $productSku['defective_stock'] ?? 0;
+				if (!is_numeric($stock) || !is_numeric($defective_stock)) {
+					throw new ValidateException($rowLabel . '：数量格式错误');
+				}
+				$stock = round((float)$stock, 4);
+				$defective_stock = round((float)$defective_stock, 4);
+				// 入库：普通/初始等禁止负数；转换类按业务方向单独处理
+				if ($stockType == 1) {
+					if ($orderType == 4) {
+						if ($stock <= 0) {
+							throw new ValidateException($rowLabel . '：转换数量必须大于0');
+						}
+					} else {
+						if ($stock < 0 || $defective_stock < 0) {
+							throw new ValidateException($rowLabel . '：入库数量不能为负数');
+						}
+						if ($stock == 0.0 && $defective_stock == 0.0) {
+							throw new ValidateException($rowLabel . '：良品与残次品数量不能同为0');
+						}
+					}
+				} else {
+					if ($orderType == 5) {
+						if ($stock <= 0) {
+							throw new ValidateException($rowLabel . '：转换数量必须大于0');
+						}
+					} else {
+						if ($stock < 0 || $defective_stock < 0) {
+							throw new ValidateException($rowLabel . '：出库数量不能为负数');
+						}
+						if ($stock == 0.0 && $defective_stock == 0.0) {
+							throw new ValidateException($rowLabel . '：良品与残次品数量不能同为0');
+						}
+					}
+				}
 				if ($stockType == 1) {//残次品转良品入库
-					if ($data['order_type'] == 4) {
+					if ($orderType == 4) {
 						$defective_stock = -abs($stock);
 					}
 				} else {//良品转残次品出库
-					if ($data['order_type'] == 5) {
+					if ($orderType == 5) {
 						$defective_stock = abs($stock);
 					} else {
 						$defective_stock = -abs($defective_stock);
 					}
 					$stock = -abs($stock);
+				}
+				// isStock=true：最终库存=锁后+本次变化；isStock=false（销售/退款台账）：库存已由 changeSkuStock 改完，取锁后当前值，禁止再叠加/再校验
+				if ($isStock) {
+					$balanceStock = bcadd((string)($attrInfo['stock'] ?? 0), (string)$stock, 4);
+					$balanceDefective = bcadd((string)($attrInfo['defective_stock'] ?? 0), (string)$defective_stock, 4);
+					$allowNegative = (int)($productInfo['allow_negative_stock'] ?? 1) === 1;
+					if (!$allowNegative && bccomp($balanceStock, '0', 4) < 0) {
+						throw new ValidateException($rowLabel . '：库存不足');
+					}
+					if (bccomp($balanceDefective, '0', 4) < 0) {
+						throw new ValidateException($rowLabel . '：残次品库存不足');
+					}
+				} else {
+					$balanceStock = bcadd((string)($attrInfo['stock'] ?? 0), '0', 4);
 				}
 				$dataAll[] = [
 					'type' => $type,
@@ -260,44 +394,47 @@ class StoreProductStockOrderServices extends BaseServices
 					'stock_type' => $data['stock_type'],//库存类型
 					'order_type' => $data['order_type'],//出入单类型
 					'order_id' => $inId,//出入库单ID
-					'product_id' => $productSku['product_id'],
+					'product_id' => $productId,
 					'product_name' => $productInfo['store_name'] ?? '',
 					'image' => $attrInfo['image'] ?? '',
 					'sku' => $attrInfo['suk'] ?? '',
-					'unique' => $productSku['unique'],
+					'unique' => $unique,
 					'code' => $attrInfo['code'] ?? '',
 					'bar_code' => $attrInfo['bar_code'] ?? '',
 					'stock' => $stock,
 					'defective_stock' => $defective_stock,
-					'balance_stock' => $attrInfo['stock'] ?? 0,
+					'balance_stock' => $balanceStock,
 					'admin_id' => $adminId,
 					'add_time' => $time
 				];
 				if ($isStock) {//出入库单 同步修改商品库存
-					$productAttrData[$productSku['product_id']][] = [
-						'product_id' => $productSku['product_id'],
-						'unique' => $productSku['unique'],
+					$productAttrData[$productId][] = [
+						'product_id' => $productId,
+						'unique' => $unique,
 						'pm' => 1,
 						'stock' => $stock,
 						'defective_stock' => $defective_stock,
 					];
 				}
 			}
-			if ($dataAll) {
-				/** @var StoreProductStockDetailServices $stockDetailServices */
-				$stockDetailServices = app()->make(StoreProductStockDetailServices::class);
-				$stockDetailServices->saveAll($dataAll);
+			if (!$dataAll) {
+				throw new ValidateException('有效出入库明细为空，整单已取消');
 			}
-			//出入库单 同步商品库存
+			/** @var StoreProductStockDetailServices $stockDetailServices */
+			$stockDetailServices = app()->make(StoreProductStockDetailServices::class);
+			$stockDetailServices->saveAll($dataAll);
+			//出入库单 同步商品库存（SKU 已在上方加锁；saveProductAttrsStock 内再次按 id 升序锁 SKU）
 			if ($isStock && $productAttrData) {
 				/** @var StoreProductAttrValueServices $attrServices */
 				$attrServices = app()->make(StoreProductAttrValueServices::class);
-				foreach ($productAttrData as $productId => $attrValue) {
-					$attrServices->saveProductAttrsStock((int)$productId, $attrValue, $type, $relation_id, $adminId, false);
+				$sortedProductIds = array_map('intval', array_keys($productAttrData));
+				sort($sortedProductIds, SORT_NUMERIC);
+				foreach ($sortedProductIds as $productId) {
+					$attrServices->saveProductAttrsStock((int)$productId, $productAttrData[$productId], $type, $relation_id, $adminId, false);
 				}
 			}
-		});
-		return true;
+		}, $isTran);
+		return $inId > 0 ? $inId : true;
 	}
 
 	/**

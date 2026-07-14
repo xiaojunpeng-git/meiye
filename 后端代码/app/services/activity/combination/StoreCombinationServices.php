@@ -423,7 +423,7 @@ class StoreCombinationServices extends BaseServices
      * @param int $store_id
      * @return bool
      */
-    public function decCombinationStock(int $num, int $CombinationId, string $unique, int $store_id = 0)
+    public function decCombinationStock(int $num, int $CombinationId, string $unique, int $store_id = 0, bool $decProductStock = false)
     {
 		if (!$CombinationId) return true;
         $product_id = $this->dao->value(['id' => $CombinationId], 'product_id');
@@ -432,18 +432,16 @@ class StoreCombinationServices extends BaseServices
 			if ($unique) {
 				/** @var StoreProductAttrValueServices $skuValueServices */
 				$skuValueServices = app()->make(StoreProductAttrValueServices::class);
-				//减去拼团商品的sku库存增加销量
+				//减去拼团商品的sku库存增加销量（活动额度）
 				$res = $res && $skuValueServices->decProductAttrStock($CombinationId, $unique, $num, 3);
 
-				//拼团商品sku
-				$sku = $skuValueServices->value(['product_id' => $CombinationId, 'unique' => $unique, 'type' => 3], 'suk');
-				//平台普通商品sku unique
-				$productUnique = $skuValueServices->value(['suk' => $sku, 'product_id' => $product_id, 'type' => 0], 'unique');
-
-				/** @var StoreProductServices $services */
-				$services = app()->make(StoreProductServices::class);
-				//减去当前普通商品、sku的库存增加销量
-				$res = $res && $services->decProductStock($num, (int)$product_id, (string)$productUnique, $store_id);
+				if ($decProductStock) {
+					$sku = $skuValueServices->value(['product_id' => $CombinationId, 'unique' => $unique, 'type' => 3], 'suk');
+					$productUnique = $skuValueServices->value(['suk' => $sku, 'product_id' => $product_id, 'type' => 0], 'unique');
+					/** @var StoreProductServices $services */
+					$services = app()->make(StoreProductServices::class);
+					$res = $res && $services->decProductStock($num, (int)$product_id, (string)$productUnique, $store_id);
+				}
 			}
 			//减去拼团商品库存
 			$res = $res && $this->dao->decStockIncSales(['id' => $CombinationId, 'type' => 3], $num);
@@ -459,7 +457,7 @@ class StoreCombinationServices extends BaseServices
      * @param int $store_id
      * @return bool
      */
-    public function incCombinationStock(int $num, int $CombinationId, string $unique, int $store_id = 0)
+    public function incCombinationStock(int $num, int $CombinationId, string $unique, int $store_id = 0, bool $incProductStock = false)
     {
 		if (!$CombinationId) return true;
         $product_id = $this->dao->value(['id' => $CombinationId], 'product_id');
@@ -479,7 +477,7 @@ class StoreCombinationServices extends BaseServices
 				/** @var StoreProductServices $services */
 				$services = app()->make(StoreProductServices::class);
 				//增加当前普通商品sku的库存,减去销量
-				$res = $res && $services->incProductStock($num, (int)$product_id, (string)$productUnique, $store_id);
+				if ($incProductStock) { $res = $res && $services->incProductStock($num, (int)$product_id, (string)$productUnique, $store_id); }
 			}
 			//增加拼团库存
 			$res = $res && $this->dao->incStockDecSales(['id' => $CombinationId, 'type' => 3], $num);

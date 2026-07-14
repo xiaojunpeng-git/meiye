@@ -97,6 +97,42 @@ export default {
 		        title: '库存统计'
 		    },
 		    component: () => import('@/pages/stockManage/inventoryStatistics/index')
+    },
+    {
+		    path: `${Setting.roterPre}/stock/request`,
+		    name: `stockRequestManage`,
+		    meta: {
+		        auth: ['admin-stock-request'],
+		        title: '请货管理'
+		    },
+		    component: () => import('@/pages/stockManage/stockRequestManage/list')
+    },
+    {
+		    path: `${Setting.roterPre}/stock/request/add/:id?`,
+		    name: `stockRequestAdd`,
+		    meta: {
+		        auth: ['admin-stock-request-add'],
+		        title: '请货单'
+		    },
+		    component: () => import('@/pages/stockManage/stockRequestManage/add')
+    },
+    {
+		    path: `${Setting.roterPre}/stock/transfer`,
+		    name: `stockTransferManage`,
+		    meta: {
+		        auth: ['admin-stock-transfer'],
+		        title: '调拨管理'
+		    },
+		    component: () => import('@/pages/stockManage/stockTransferManage/list')
+    },
+    {
+		    path: `${Setting.roterPre}/stock/transfer/add/:id?`,
+		    name: `stockTransferAdd`,
+		    meta: {
+		        auth: ['admin-stock-transfer-add'],
+		        title: '调拨单'
+		    },
+		    component: () => import('@/pages/stockManage/stockTransferManage/add')
     }
   ]
 };

@@ -42,7 +42,8 @@ class CreateSuccess implements ListenerInterface
 		// 0:平台 2:供应商
 		if (in_array($type, [0, 2])) {
 			//商品同步至门店
-			ProductSyncStoreJob::dispatchDo('syncProductToStores', [$id, $data['applicable_type'] ?? 0, $data['applicable_store_id'] ?? [], $relationData['is_sync_stock'] ?? 1, $relationData['is_sync_show'] ?? 1]);
+			ProductSyncStoreJob::dispatchDo('syncProductToStores', [$id, $data['applicable_type'] ?? 0, $data['applicable_store_id'] ?? [], 0, $relationData['is_sync_show'] ?? 1]);
+			// 第4参固定 0：【库存铁律】不同步实物库存；原 $relationData['is_sync_stock'] ?? 1 已停用
 		}
         $cate_id = [];
         if (isset($relationData['cate_id'])) {
@@ -116,7 +117,8 @@ class CreateSuccess implements ListenerInterface
             }
 
             if ($is_new) {
-                ProductSyncErp::dispatchDo('stockFromErp', [[$id]]);
+                // 【库存铁律】新品创建不再从 ERP 拉库存覆盖；原 stockFromErp 已停用
+                // ProductSyncErp::dispatchDo('stockFromErp', [[$id]]);
             }
         }
     }

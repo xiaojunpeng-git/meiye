@@ -292,3 +292,39 @@ export function productAttrStatisticsApi(data) {
   });
 }
 
+/** 入库导入模板 */
+export function stockInTemplateApi(data) {
+  return request({
+    url: `/product/inventory/in/order/template`,
+    method: 'get',
+    params: data
+  });
+}
+
+/** 入库 Excel 导入 */
+export function stockInImportApi(data) {
+  return request({
+    url: `/product/inventory/in/order/import`,
+    method: 'post',
+    data
+  });
+}
+
+/** 出库导入模板 */
+export function stockOutTemplateApi(data) {
+  return request({
+    url: `/product/inventory/out/order/template`,
+    method: 'get',
+    params: data
+  });
+}
+
+/** 出库 Excel 导入 */
+export function stockOutImportApi(data) {
+  return request({
+    url: `/product/inventory/out/order/import`,
+    method: 'post',
+    data
+  });
+}
+

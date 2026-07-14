@@ -615,7 +615,7 @@ class StoreSeckillServices extends BaseServices
      * @param int $store_id
      * @return bool
      */
-    public function decSeckillStock(int $num, int $seckillId, string $unique = '', int $store_id = 0)
+    public function decSeckillStock(int $num, int $seckillId, string $unique = '', int $store_id = 0, bool $decProductStock = false)
     {
 		if (!$seckillId) return true;
         $product_id = $this->dao->value(['id' => $seckillId], 'product_id');
@@ -624,18 +624,17 @@ class StoreSeckillServices extends BaseServices
 			if ($unique) {
 				/** @var StoreProductAttrValueServices $skuValueServices */
 				$skuValueServices = app()->make(StoreProductAttrValueServices::class);
-				//减去秒杀商品的sku库存增加销量
+				//减去秒杀商品的sku库存增加销量（活动额度）
 				$res = $res &&  $skuValueServices->decProductAttrStock($seckillId, $unique, $num, 1);
 
-				//减去当前普通商品sku的库存增加销量
-				//秒杀商品sku
-				$suk = $skuValueServices->value(['unique' => $unique, 'product_id' => $seckillId, 'type' => 1], 'suk');
-				//平台商品sku unique
-				$productUnique = $skuValueServices->value(['suk' => $suk, 'product_id' => $product_id, 'type' => 0], 'unique');
-				/** @var StoreProductServices $services */
-				$services = app()->make(StoreProductServices::class);
-				//减去普通商品库存
-				$res = $res && $services->decProductStock($num, (int)$product_id, (string)$productUnique, $store_id);
+				if ($decProductStock) {
+					//减去当前普通商品sku的库存增加销量
+					$suk = $skuValueServices->value(['unique' => $unique, 'product_id' => $seckillId, 'type' => 1], 'suk');
+					$productUnique = $skuValueServices->value(['suk' => $suk, 'product_id' => $product_id, 'type' => 0], 'unique');
+					/** @var StoreProductServices $services */
+					$services = app()->make(StoreProductServices::class);
+					$res = $res && $services->decProductStock($num, (int)$product_id, (string)$productUnique, $store_id);
+				}
 			}
 			//减去秒杀库存
 			$res = $res && $this->dao->decStockIncSales(['id' => $seckillId, 'type' => 1], $num);
@@ -657,7 +656,7 @@ class StoreSeckillServices extends BaseServices
      * @param int $store_id
      * @return bool
      */
-    public function incSeckillStock(int $num, int $seckillId, string $unique = '', int $store_id = 0)
+    public function incSeckillStock(int $num, int $seckillId, string $unique = '', int $store_id = 0, bool $incProductStock = false)
     {
 		if (!$seckillId) return true;
         $product_id = $this->dao->value(['id' => $seckillId], 'product_id');
@@ -666,19 +665,16 @@ class StoreSeckillServices extends BaseServices
 			if ($unique) {
 				/** @var StoreProductAttrValueServices $skuValueServices */
 				$skuValueServices = app()->make(StoreProductAttrValueServices::class);
-				//增加秒杀商品的sku库存减少销量
+				//增加秒杀商品的sku库存减少销量（活动额度）
 				$res = $res && $skuValueServices->incProductAttrStock($seckillId, $unique, $num, 1);
 
-				//减去当前普通商品sku的库存增加销量
-				//秒杀商品sku
-				$suk = $skuValueServices->value(['unique' => $unique, 'product_id' => $seckillId, 'type' => 1], 'suk');
-				//平台商品sku unique
-				$productUnique = $skuValueServices->value(['suk' => $suk, 'product_id' => $product_id, 'type' => 0], 'unique');
-
-				/** @var StoreProductServices $services */
-				$services = app()->make(StoreProductServices::class);
-				//减去普通商品库存
-				$res = $res && $services->incProductStock($num, (int)$product_id, (string)$productUnique, $store_id);
+				if ($incProductStock) {
+					$suk = $skuValueServices->value(['unique' => $unique, 'product_id' => $seckillId, 'type' => 1], 'suk');
+					$productUnique = $skuValueServices->value(['suk' => $suk, 'product_id' => $product_id, 'type' => 0], 'unique');
+					/** @var StoreProductServices $services */
+					$services = app()->make(StoreProductServices::class);
+					$res = $res && $services->incProductStock($num, (int)$product_id, (string)$productUnique, $store_id);
+				}
 			}
 			//增加秒杀库存减去销量
 			$res = $res &&  $this->dao->incStockDecSales(['id' => $seckillId, 'type' => 1], $num);

@@ -28,6 +28,7 @@ use app\services\user\UserCardHolderServices;
 use app\services\other\ExpressServices;
 use app\services\pay\PayServices;
 use app\services\product\product\StoreProductServices;
+use app\services\product\inventory\ProductInventoryChangeServices;
 use app\services\store\SystemStoreServices;
 use app\services\supplier\SystemSupplierServices;
 use app\services\user\UserBillServices;
@@ -42,6 +43,7 @@ use mohe\services\wechat\Payment;
 use mohe\traits\OptionTrait;
 use mohe\traits\ServicesTrait;
 use think\exception\ValidateException;
+use think\facade\Db;
 
 /**
  * 订单退款
@@ -778,19 +780,25 @@ class StoreOrderRefundServices extends BaseServices
             if (!$userBrokerageServices->orderRefundBrokerageBack($order)) {
                 throw new ValidateException('回退佣金失败');
             }
-            //回退库存
+            //回退库存（按退款单商品行；幂等写在退款单）
             if ($order['status'] == 0) {
                 /** @var StoreOrderStatusServices $services */
                 $services = app()->make(StoreOrderStatusServices::class);
                 if (!$services->count(['oid' => $order['id'], 'change_type' => 'refund_price'])) {
-                    $this->regressionStock($order);
+                    $this->regressionStock($order, (int)$id);
                 }
             } else {
 				//退款同步操作退货入库0:暂不入库1:良品入库2:残次品入库
 				$stock_in_type = $this->getItem('stock_in_type', 0);
 				if (in_array($stock_in_type, [1 ,2])) {
-					//生成退货入库单 发货后退款，入库单需要退库存
-					ProductStockJob::dispatchDo('saveRefundInOrder', [$order['id'], $stock_in_type == 1, true]);
+					// 已发货：先回销量，再按【退款单ID】同步回库存+写入库台账（禁止按整张销售单）
+					$this->regressionStock($order, (int)$id, false);
+					/** @var ProductInventoryChangeServices $inventoryChange */
+					$inventoryChange = app()->make(ProductInventoryChangeServices::class);
+					$inventoryChange->handleShippedRefundInbound((int)$id, $stock_in_type == 1, true);
+				} else {
+					// 仅回退销量/库存余额，同步写退货入库台账（不改库存二次）
+					$this->regressionStock($order, (int)$id, true);
 				}
 			}
 
@@ -1249,18 +1257,23 @@ class StoreOrderRefundServices extends BaseServices
     }
 
     /**
-     * 回退库存
+     * 回退库存与销量（按退款单商品行）
      * @param $order
+     * @param int $refundId 退款单ID（必填才能行级幂等）
+     * @param bool $writeRefundInbound 未发货退款写退货入库台账（库存已回退，isStock=false）
      * @return bool
      */
-    public function regressionStock($order)
+    public function regressionStock($order, int $refundId = 0, bool $writeRefundInbound = true)
     {
         if ($order['status'] == -2 || $order['is_del']) return true;
+        $orderArr = is_array($order) ? $order : $order->toArray();
+        $activity_id = (int)($orderArr['activity_id'] ?? 0);
+        $store_id = (int)($orderArr['store_id'] ?? 0);
+
+        // 活动额度/Redis 仍按订单全量回退（与旧逻辑一致）
         $res5 = true;
         /** @var StoreOrderCartInfoServices $cartServices */
         $cartServices = app()->make(StoreOrderCartInfoServices::class);
-        /** @var StoreProductServices $services */
-        $services = app()->make(StoreProductServices::class);
         /** @var StoreSeckillServices $seckillServices */
         $seckillServices = app()->make(StoreSeckillServices::class);
         /** @var StoreCombinationServices $pinkServices */
@@ -1273,62 +1286,111 @@ class StoreOrderRefundServices extends BaseServices
         $storeNewcomerServices = app()->make(StoreNewcomerServices::class);
 		/** @var StoreIntegralServices $storeIntegralServices */
 		$storeIntegralServices = app()->make(StoreIntegralServices::class);
-        $activity_id = (int)$order['activity_id'] ?? 0;
-        $store_id = (int)$order['store_id'] ?? 0;
-        $cartInfo = $cartServices->getCartInfoList(['oid' => $order['id'], 'cart_type' => [0, 1]], ['product_id', 'sku_unique', 'cart_num', 'cart_info']);
-        foreach ($cartInfo as $cart) {
-            //增库存减销量
-            $unique = $cart['sku_unique'];
-            $cart_num = (int)$cart['cart_num'];
-            $product_id = (int)$cart['product_id'] ?? 0;
-            switch ($order['type']) {
-                case 0://普通
-                case 6://预售
-                case 8://抽奖
-                case 9://拼单
-                case 10://桌码
-				case 11://卡项
-				case 12://预约 （仅-销量)
-					if (isset($cart['product_type']) && $cart['product_type'] == 6) {
-						$res5 = $res5 && $services->decProductSales($cart_num, $product_id, $unique, $store_id);
-					} else {//-销量+库存
-						$res5 = $res5 && $services->incProductStock($cart_num, $product_id, $unique, $store_id);
-					}
+
+        $refundCartLines = [];
+        if ($refundId > 0) {
+            $refund = $this->dao->get($refundId);
+            if (!$refund) {
+                throw new ValidateException('退款单不存在');
+            }
+            $refundArr = is_array($refund) ? $refund : $refund->toArray();
+            $raw = $refundArr['cart_info'] ?? [];
+            if (is_string($raw)) {
+                $raw = json_decode($raw, true) ?: [];
+            }
+            foreach ((array)$raw as $line) {
+                if (isset($line['cart_info']) && is_array($line['cart_info'])) {
+                    $line = $line['cart_info'];
+                }
+                $refundCartLines[] = $line;
+            }
+            // 有退款单 ID 时必须按退款单明细回退，禁止回退整张销售单
+            if (!$refundCartLines) {
+                throw new ValidateException('退款单无商品明细，禁止回退库存');
+            }
+        } else {
+            // 仅无退款单的旧取消订单调用：兼容用整单购物车
+            $rows = $cartServices->getCartInfoList(['oid' => $orderArr['id'], 'cart_type' => [0, 1]], ['product_id', 'sku_unique', 'cart_num', 'cart_info', 'product_type']);
+            foreach ($rows as $row) {
+                $info = is_string($row['cart_info'] ?? null) ? json_decode($row['cart_info'], true) : ($row['cart_info'] ?? []);
+                if (!is_array($info)) $info = [];
+                $info['cart_num'] = $row['cart_num'] ?? ($info['cart_num'] ?? 0);
+                $info['product_id'] = $row['product_id'] ?? ($info['product_id'] ?? 0);
+                $info['sku_unique'] = $row['sku_unique'] ?? '';
+                $info['product_type'] = $row['product_type'] ?? ($info['product_type'] ?? 0);
+                $refundCartLines[] = $info;
+            }
+        }
+
+        // 活动额度回退（不回实物，实物由统一服务处理）
+        foreach ($refundCartLines as $cart) {
+            $info = is_array($cart) ? $cart : [];
+            $unique = (string)($info['productInfo']['attrInfo']['unique'] ?? $info['product_attr_unique'] ?? $info['sku_unique'] ?? '');
+            $cart_num = (float)($info['cart_num'] ?? 0);
+            $cart_num_i = (int)ceil($cart_num);
+            switch ((int)($orderArr['type'] ?? 0)) {
+                case 1:
+                    $res5 = $res5 && $seckillServices->incSeckillStock($cart_num_i, $activity_id, $unique, $store_id, false);
                     break;
-                case 1://秒杀
-                    $res5 = $res5 && $seckillServices->incSeckillStock($cart_num, $activity_id, $unique, $store_id);
+                case 2:
+                    $res5 = $res5 && $bargainServices->incBargainStock($cart_num_i, $activity_id, $unique, $store_id, false);
                     break;
-                case 2://砍价
-                    $res5 = $res5 && $bargainServices->incBargainStock($cart_num, $activity_id, $unique, $store_id);
+                case 3:
+                    $res5 = $res5 && $pinkServices->incCombinationStock($cart_num_i, $activity_id, $unique, $store_id, false);
                     break;
-                case 3://拼团
-                    $res5 = $res5 && $pinkServices->incCombinationStock($cart_num, $activity_id, $unique, $store_id);
-                    break;
-				case 4://积分
-					$res5 = $res5 && $storeIntegralServices->incIntegralStock($cart_num, $activity_id, $unique, $store_id);
+				case 4:
+					$res5 = $res5 && $storeIntegralServices->incIntegralStock($cart_num_i, $activity_id, $unique, $store_id, false);
 					break;
-                case 5://套餐
+                case 5:
                     CacheService::setStock(md5($activity_id), 1, 5, false);
-					$cartInfo = is_array($cart['cart_info']) ? $cart['cart_info'] : json_decode($cart['cart_info'], true);
-                    $res5 = $res5 && $discountServices->incDiscountStock($cart_num, $activity_id, (int)($cartInfo['discount_product_id'] ?? 0), (int)($cart['cart_info']['product_id'] ?? 0), $unique, $store_id);
                     break;
-                case 7://新人专享
-                    $res5 = $res5 && $storeNewcomerServices->incNewcomerStock($cart_num, $activity_id, $unique, $store_id);
-                    break;
-                default:
-                    $res5 = $res5 && $services->incProductStock($cart_num, $product_id, $unique, $store_id);
+                case 7:
+                    // 新人礼额度不改实物
                     break;
             }
-            if (in_array($order['type'], [1, 2, 3])) CacheService::setStock($unique, $cart_num, (int)$order['type'], false);
+            if (in_array((int)($orderArr['type'] ?? 0), [1, 2, 3])) {
+                CacheService::setStock($unique, $cart_num_i, (int)$orderArr['type'], false);
+            }
         }
-        if ($order['type'] == 5) {
-            //改变套餐限量
+        if ((int)($orderArr['type'] ?? 0) == 5 && $activity_id) {
             $res5 = $res5 && $discountServices->changeDiscountLimit($activity_id, false);
         }
-        $this->regressionRedisStock($order);
-		//退款、订单取消回退库存
-		//生成退货入库单 发货前退款已经退过库存，入库单不在退库存
-		ProductStockJob::dispatchDo('saveRefundInOrder', [$order['id']]);
+        $this->regressionRedisStock($orderArr);
+
+        // 实物库存 + 销量：统一服务按退款单幂等处理
+        if ($refundId > 0) {
+            /** @var ProductInventoryChangeServices $inventoryChange */
+            $inventoryChange = app()->make(ProductInventoryChangeServices::class);
+            // writeRefundInbound=false：已发货路径只回销量；实物库存+入库台账由 handleShippedRefundInbound(refund_id) 处理
+            if ($writeRefundInbound) {
+                $inventoryChange->handleRefundInventory($orderArr, $refundCartLines, $refundId);
+            } else {
+                // 已发货且由入库 Job 改库存时：这里只回销量，库存交给入库单 isStock=true
+                $refund = Db::name('store_order_refund')->where('id', $refundId)->lock(true)->find();
+                if ($refund && (int)($refund['sales_refunded'] ?? 0) !== 1) {
+                    $paid = (int)($orderArr['paid'] ?? 0);
+                    $orderSalesHandled = (int)($orderArr['sales_handled'] ?? 0);
+                    if ($paid === 1 && $orderSalesHandled === 1) {
+                        /** @var StoreProductServices $productServices */
+                        $productServices = app()->make(StoreProductServices::class);
+                        foreach ($refundCartLines as $cart) {
+                            $cart = $inventoryChange->enrichCartWithInventorySnapshot(is_array($cart) ? $cart : []);
+                            try {
+                                [$productId, $unique] = $inventoryChange->resolveInventoryTarget($cart);
+                            } catch (\Throwable $e) {
+                                continue;
+                            }
+                            $num = (string)($cart['cart_num'] ?? 0);
+                            if ($productId <= 0 || bccomp($num, '0', 4) <= 0) continue;
+                            $productServices->decProductSales((int)ceil((float)$num), $productId, $unique, $store_id);
+                        }
+                        Db::name('store_order_refund')->where('id', $refundId)->update(['sales_refunded' => 1]);
+                    }
+                }
+            }
+        }
+
+        // 禁止重置订单 inventory_handled/sales_handled，以支持部分退款
         return $res5;
     }
 

@@ -361,94 +361,6 @@ export function replaceSiteUrlApi(data) {
 }
 
 /**
- *
- */
-export function auth() {
-  return request({
-    url: 'auth',
-    method: 'get'
-  });
-}
-
-/**
- * @description 申请授权
- * @param data
- */
-export function authApply(data) {
-  return request({
-    url: 'auth_apply',
-    method: 'post',
-    data
-  });
-}
-
-/**
- * @description 获取授权产品
- */
-export function crmebProduct(params) {
-  return request({
-    url: 'crmeb_product',
-    method: 'get',
-    params
-  });
-}
-
-/**
- * @description 授权验证码
- */
-export function crmebVerify(params) {
-  return request({
-    url: 'crmeb_verify',
-    method: 'get',
-    params
-  });
-}
-
-/**
- * @description 授权登录
- */
-export function crmebLogin(data) {
-  return request({
-    url: '/crmeb_login',
-    method: 'post',
-    data
-  });
-}
-
-/**
- * @description 授权订单
- */
-export function crmebOrder(data) {
-  return request({
-    url: 'crmeb_order',
-    method: 'post',
-    data
-  });
-}
-
-/**
- * @description 再次支付
- */
-export function crmebPay(data) {
-  return request({
-    url: `crmeb_pay`,
-    method: 'post',
-    data
-  });
-}
-
-/**
- * @description 获取授权订单
- */
-export function getCrmebOrder(id, params) {
-  return request({
-    url: `crmeb_order/${id}`,
-    method: 'get',
-    params
-  });
-}
-
-/**
  * @description 获取授权订单
  */
 export function getVersion() {
@@ -459,19 +371,9 @@ export function getVersion() {
 }
 
 /**
- * @description 申请版权
- */
-export function crmebCopyRight() {
-  return request({
-    url: `crmeb_copyright`,
-    method: 'get'
-  });
-}
-
-/**
  * @description 获取版权
  */
-export function getCrmebCopyRight() {
+export function getCopyRight() {
   return request({
     url: `copyright`,
     method: 'get'
@@ -481,7 +383,7 @@ export function getCrmebCopyRight() {
 /**
  * @description 保存版权
  */
-export function saveCrmebCopyRight(data) {
+export function saveCopyRight(data) {
   return request({
     url: `copyright`,
     method: 'post',

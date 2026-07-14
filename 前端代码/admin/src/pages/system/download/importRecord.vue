@@ -58,6 +58,9 @@
               <Option value="user">用户模块</Option>
               <Option value="user_card">用户卡项模块</Option>
               <Option value="goods">商品模块</Option>
+              <Option value="stock_initial_in">初始入库导入</Option>
+              <Option value="stock_in">入库导入</Option>
+              <Option value="stock_out">出库导入</Option>
             </Select>
             <Button type="primary" @click="searchHandle" class="ml-14"
               >查询</Button
@@ -87,7 +90,7 @@
           <a
             v-if="row.status && row.fail_count"
             :style="{ cursor: row.status ? '' : 'not-allowed' }"
-            @click="errorDownHandle({ record_id: row.id, type: row.import_type })"
+            @click="errorDownHandle({ record_id: row.id, type: row.import_type || row.type })"
             >下载失败记录</a
           >
         </template>
@@ -134,12 +137,18 @@ export default {
         {
           title: '业务模块',
           key: 'type',
-          minWidth: 100,
+          minWidth: 120,
           render: (h, params) => {
-            return h(
-              'span',
-               params.row.import_type === 'user' ? '用户模块' : params.row.import_type === 'user_card'?'用户卡项模块':'商品模块'
-            );
+            const map = {
+              user: '用户模块',
+              user_card: '用户卡项模块',
+              goods: '商品模块',
+              stock_initial_in: '初始入库导入',
+              stock_in: '入库导入',
+              stock_out: '出库导入',
+            };
+            const key = params.row.import_type || params.row.type;
+            return h('span', map[key] || key || '-');
           },
         },
         {

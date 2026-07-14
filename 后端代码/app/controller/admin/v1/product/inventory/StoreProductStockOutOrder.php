@@ -142,4 +142,41 @@ class StoreProductStockOutOrder extends AuthController
 		} else
 			return app('json')->fail('备注失败');
 	}
+
+	/**
+	 * 下载出库 Excel 模板
+	 */
+	public function downloadTemplate(\app\services\product\inventory\StoreProductStockImportServices $importServices)
+	{
+		[$keyword] = $this->request->getMore([
+			['keyword', ''],
+		], true);
+		$result = $importServices->downloadTemplate('out', 0, 0, ['keyword' => $keyword]);
+		return $this->success($result);
+	}
+
+	/**
+	 * 导入出库 Excel
+	 */
+	public function import(\app\services\product\inventory\StoreProductStockImportServices $importServices)
+	{
+		[$file, $realName] = $this->request->postMore([
+			['file', ''],
+			['real_name', ''],
+		], true);
+		if (!$file) {
+			return $this->fail('请上传文件');
+		}
+		$path = public_path() . (($file[0] ?? '') === '/' ? substr($file, 1) : ltrim($file, '/'));
+		$result = $importServices->importFile(
+			'out',
+			$path,
+			0,
+			0,
+			(int)$this->adminId,
+			(string)($this->adminInfo['real_name'] ?? ''),
+			(string)$realName
+		);
+		return $this->success('导入成功', $result);
+	}
 }

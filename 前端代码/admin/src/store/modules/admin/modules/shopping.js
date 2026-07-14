@@ -27,7 +27,7 @@ export default {
           max: 10,
           list: [
             {
-              img: 'http://kaifa.crmeb.net/uploads/attach/2020/03/20200319/a32307fd1043c350932a462839288d38.jpg',
+              img: '/uploads/attach/2020/03/20200319/a32307fd1043c350932a462839288d38.jpg',
               info: [
                 {
                   title: '标题',
@@ -44,7 +44,7 @@ export default {
               ]
             },
             {
-              img: 'http://kaifa.crmeb.net/uploads/attach/2020/03/20200319/906d46eb6f734eaf1fd820601893af0d.jpg',
+              img: '/uploads/attach/2020/03/20200319/906d46eb6f734eaf1fd820601893af0d.jpg',
               info: [
                 {
                   title: '标题',
@@ -72,7 +72,7 @@ export default {
           max: '',
           list: [
             {
-              img: 'http://kaifa.crmeb.net/uploads/attach/2020/03/20200319/a32307fd1043c350932a462839288d38.jpg',
+              img: '/uploads/attach/2020/03/20200319/a32307fd1043c350932a462839288d38.jpg',
               info: [
                 {
                   title: '标题',
@@ -89,7 +89,7 @@ export default {
               ]
             },
             {
-              img: 'http://kaifa.crmeb.net/uploads/attach/2020/03/20200319/906d46eb6f734eaf1fd820601893af0d.jpg',
+              img: '/uploads/attach/2020/03/20200319/906d46eb6f734eaf1fd820601893af0d.jpg',
               info: [
                 {
                   title: '标题',

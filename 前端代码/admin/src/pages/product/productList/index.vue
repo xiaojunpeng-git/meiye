@@ -158,6 +158,28 @@
                     <Option value="1">开启</Option>
                   </Select>
                 </FormItem>
+                <FormItem label="参与库存：">
+                  <Select
+                    v-model="artFrom.is_inventory"
+                    clearable
+                    class="input-add"
+                    @on-change="userSearchs"
+                  >
+                    <Option :value="1">开启</Option>
+                    <Option :value="0">关闭</Option>
+                  </Select>
+                </FormItem>
+                <FormItem label="允许负库存：">
+                  <Select
+                    v-model="artFrom.allow_negative_stock"
+                    clearable
+                    class="input-add"
+                    @on-change="userSearchs"
+                  >
+                    <Option :value="1">开启</Option>
+                    <Option :value="0">关闭</Option>
+                  </Select>
+                </FormItem>
                 <FormItem label="选择门店：">
                   <Select
                     v-model="artFrom.store_id"
@@ -599,6 +621,18 @@
           min-width="80"
           v-show="artFrom.type != 6"
         ></vxe-column>
+        <vxe-column field="is_inventory" title="参与库存管理" min-width="110">
+          <template v-slot="{ row }">
+            <span v-if="row.product_type != 0">—</span>
+            <span v-else>{{ row.is_inventory == 1 ? '开启' : '关闭' }}</span>
+          </template>
+        </vxe-column>
+        <vxe-column field="allow_negative_stock" title="允许负库存" min-width="100">
+          <template v-slot="{ row }">
+            <span v-if="row.product_type != 0">—</span>
+            <span v-else>{{ row.allow_negative_stock == 1 ? '开启' : '关闭' }}</span>
+          </template>
+        </vxe-column>
         <vxe-column field="sort" title="排序" min-width="70"></vxe-column>
         <vxe-column field="state" title="状态" width="120">
           <template v-slot="{ row }">
@@ -1481,6 +1515,8 @@ export default {
         price_range: "",
         stock_range: "",
         collect_range: "",
+        is_inventory: "",
+        allow_negative_stock: "",
       },
       list: [],
       tableList: [],
@@ -1724,6 +1760,8 @@ export default {
             delivery_type: "",
             spec_type: "",
             is_vip: "",
+            is_inventory: "",
+            allow_negative_stock: "",
           };
           vm.stockStart = null;
           vm.stockEnd = null;
@@ -2286,6 +2324,8 @@ export default {
         price_range: "",
         stock_range: "",
         collect_range: "",
+        is_inventory: "",
+        allow_negative_stock: "",
       };
       this.goodsDataLabel = [];
       this.timeVal = "";

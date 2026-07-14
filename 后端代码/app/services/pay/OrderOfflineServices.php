@@ -42,6 +42,9 @@ class OrderOfflineServices extends BaseServices
         if ($orderInfo->paid) {
             throw new ValidateException('订单已支付');
         }
+        /** @var \app\services\product\inventory\ProductInventoryChangeServices $inventoryChange */
+        $inventoryChange = app()->make(\app\services\product\inventory\ProductInventoryChangeServices::class);
+        $inventoryChange->assertOrderCanPay($orderInfo->toArray());
         /** @var StoreOrderSuccessServices $storeOrderSuccessServices */
         $storeOrderSuccessServices = app()->make(StoreOrderSuccessServices::class);
         $storeOrderSuccessServices->paySuccess($orderInfo->toArray(), PayServices::OFFLINE_PAY);

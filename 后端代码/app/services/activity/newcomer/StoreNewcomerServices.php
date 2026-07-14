@@ -402,22 +402,18 @@ class StoreNewcomerServices extends BaseServices
      * @param int $store_id
      * @return bool
      */
-    public function decNewcomerStock(int $num, int $newcomerId, string $unique = '', int $store_id = 0)
+    public function decNewcomerStock(int $num, int $newcomerId, string $unique = '', int $store_id = 0, bool $decProductStock = false)
     {
 		if (!$newcomerId) return true;
         $product_id = $this->dao->value(['id' => $newcomerId], 'product_id');
 		$res = true;
-        if ($product_id && $unique) {
+        if ($product_id && $unique && $decProductStock) {
             /** @var StoreProductAttrValueServices $skuValueServices */
             $skuValueServices = app()->make(StoreProductAttrValueServices::class);
-            //新人商品sku
             $suk = $skuValueServices->value(['unique' => $unique, 'product_id' => $newcomerId, 'type' => 7], 'suk');
-			//平台普通商品sku unique
             $productUnique = $skuValueServices->value(['suk' => $suk, 'product_id' => $product_id, 'type' => 0], 'unique');
-
 			/** @var StoreProductServices $services */
 			$services = app()->make(StoreProductServices::class);
-			//减去当前普通商品sku的库存增加销量
 			$res = false !== $services->decProductStock($num, (int)$product_id, (string)$productUnique, $store_id);
         }
 
@@ -432,22 +428,19 @@ class StoreNewcomerServices extends BaseServices
  	 * @param int $store_id
      * @return bool
      */
-    public function incNewcomerStock(int $num, int $newcomerId, string $unique = '', int $store_id = 0)
+    public function incNewcomerStock(int $num, int $newcomerId, string $unique = '', int $store_id = 0, bool $incProductStock = false)
     {
 		if (!$newcomerId) return true;
         $product_id = $this->dao->value(['id' => $newcomerId], 'product_id');
 		$res = true;
-        if ($product_id && $unique) {
+        // 【库存铁律】默认不回退实物库存；实物由统一退款服务处理
+        if ($product_id && $unique && $incProductStock) {
             /** @var StoreProductAttrValueServices $skuValueServices */
             $skuValueServices = app()->make(StoreProductAttrValueServices::class);
-            //新人商品sku
             $suk = $skuValueServices->value(['unique' => $unique, 'product_id' => $newcomerId, 'type' => 7], 'suk');
-			//平台商品sku unique
             $productUnique = $skuValueServices->value(['suk' => $suk, 'product_id' => $product_id, 'type' => 0], 'unique');
-
 			/** @var StoreProductServices $services */
 			$services = app()->make(StoreProductServices::class);
-			//减去当前普通商品sku的库存增加销量
 			$res = $services->incProductStock($num, (int)$product_id, (string)$productUnique, $store_id);
         }
         return $res;

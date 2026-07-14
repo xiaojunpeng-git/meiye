@@ -541,16 +541,11 @@ class StoreOrderCreateServices extends BaseServices
                     || ((int)($cart['cart_type'] ?? 0) > 0)
                     || bccomp((string)($cart['pay_price'] ?? '0'), '0', 2) === 0
                     || (array_key_exists('price', $cart) && bccomp((string)$cart['price'], '0', 2) === 0);
+                // 库存改造：下单不扣实物库存、不加销量；实物与销量在支付成功处理。
+                // 营销活动仍可在下单时扣活动额度（活动 SKU/主表），不得扣实物。
                 if ($skipStock) {
-                    if ($productId > 0 && $cart_num > 0) {
-                        try {
-                            $services->incProductSales($cart_num, $productId, $unique, $store_id);
-                        } catch (\Throwable $e) {
-                        }
-                    }
                     continue;
                 }
-                //减库存加销量
                 switch ($type) {
                     case 0://普通
                     case 6://预售
@@ -558,34 +553,28 @@ class StoreOrderCreateServices extends BaseServices
 					case 9://拼单
 					case 10://桌码
 					case 11://卡项
-					case 12://预约 （仅+销量)
-                        // 次卡(4)、卡项(5)、项目/预约(6)、收银台卡项/预约单(type 11/12)：无库存概念，仅加销量
-                        if (in_array($productType, [4, 5, 6], true) || in_array($cartItemType, [11, 12], true)) {
-                            $res5 = $res5 && $services->incProductSales($cart_num, $productId, $unique, $store_id);
-                        } else {//+销量-库存
-                            $res5 = $res5 && $services->decProductStock($cart_num, $productId, $unique, $store_id);
-                        }
+					case 12://预约
+                        // 普通销售：下单不动库存/销量
                         break;
-                    case 1://秒杀
-                        $res5 = $res5 && $seckillServices->decSeckillStock($cart_num, $activity_id, $unique, $store_id);
+                    case 1://秒杀（仅活动额度）
+                        $res5 = $res5 && $seckillServices->decSeckillStock($cart_num, $activity_id, $unique, $store_id, false);
                         break;
                     case 2://砍价
-                        $res5 = $res5 && $bargainServices->decBargainStock($cart_num, $activity_id, $unique, $store_id);
+                        $res5 = $res5 && $bargainServices->decBargainStock($cart_num, $activity_id, $unique, $store_id, false);
                         break;
                     case 3://拼团
-                        $res5 = $res5 && $pinkServices->decCombinationStock($cart_num, $activity_id, $unique, $store_id);
+                        $res5 = $res5 && $pinkServices->decCombinationStock($cart_num, $activity_id, $unique, $store_id, false);
                         break;
 					case 4://积分
-						$res5 = $res5 && $storeIntegralServices->decIntegralStock($cart_num, $activity_id, $unique, $store_id);
+						$res5 = $res5 && $storeIntegralServices->decIntegralStock($cart_num, $activity_id, $unique, $store_id, false);
 						break;
-                    case 5://套餐
-                        $res5 = $res5 && $discountServices->decDiscountStock($cart_num, $activity_id, (int)($cart['discount_product_id'] ?? 0), (int)($cart['product_id'] ?? 0), $unique, $store_id);
+                    case 5://套餐（套餐限量仍处理；实物延后）
+                        $res5 = $res5 && $discountServices->decDiscountStock($cart_num, $activity_id, (int)($cart['discount_product_id'] ?? 0), (int)($cart['product_id'] ?? 0), $unique, $store_id, false);
                         break;
                     case 7://新人专享
-                        $res5 = $res5 && $storeNewcomerServices->decNewcomerStock($cart_num, $activity_id, $unique, $store_id);
+                        $res5 = $res5 && $storeNewcomerServices->decNewcomerStock($cart_num, $activity_id, $unique, $store_id, false);
                         break;
                     default:
-						$res5 = $res5 && $services->decProductStock($cart_num, (int)$cart['productInfo']['id'], $unique, $store_id);
                         break;
                 }
             }

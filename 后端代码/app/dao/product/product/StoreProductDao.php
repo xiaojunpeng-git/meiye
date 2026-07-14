@@ -203,8 +203,8 @@ class StoreProductDao extends BaseDao
                     case 93://优惠活动赠送商品
                         $query->whereIn('type', [0, 2])->where('product_type', 0);
                         break;
-                    case 94://出入库选择商品 排除预约、卡密商品
-                        $query->whereIn('product_type', [0, 3, 5]);
+                    case 94://出入库选择商品：仅参与库存管理的商品（禁止用 product_type 硬编码）
+                        $query->where('is_inventory', 1);
                         break;
                     default:
                         $query->where('product_type', 0);

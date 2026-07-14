@@ -544,7 +544,7 @@ export default {
           like_num: 120,
           type_image: require('@/assets/images/yonghu.png'),
           type_name: '阿秋',
-          desc: '观看视频crmeb更多好礼等你来抢，每天都有哟～ 更多好礼请联…',
+          desc: '观看视频更多好礼等你来抢，每天都有哟～ 更多好礼请联…',
           product_num: 3
         }
       ];

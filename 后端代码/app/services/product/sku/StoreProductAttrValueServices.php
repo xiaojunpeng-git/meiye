@@ -29,6 +29,7 @@ use mohe\exceptions\AdminException;
 use mohe\services\CacheService;
 use mohe\traits\ServicesTrait;
 use think\exception\ValidateException;
+use think\facade\Db;
 
 /**
  * Class StoreProductAttrValueService
@@ -276,6 +277,143 @@ class StoreProductAttrValueServices extends BaseServices
     }
 
     /**
+     * 普通商品删除/改名规格前校验：有库存或未完成盘点则禁止删除（不得静默丢库存）
+     * @param int $productId
+     * @param array $delSuks 待删除的 suk 列表
+     * @param array $oldAttrValue 以 suk 为键的旧规格行
+     */
+    public function assertSkusCanBeDeleted(int $productId, array $delSuks, array $oldAttrValue): void
+    {
+        if ($productId <= 0 || !$delSuks) {
+            return;
+        }
+        foreach ($delSuks as $suk) {
+            $row = $oldAttrValue[$suk] ?? null;
+            if (!$row) {
+                continue;
+            }
+            $skuId = (int)($row['id'] ?? 0);
+            $unique = (string)($row['unique'] ?? '');
+            if ($skuId > 0) {
+                $locked = \think\facade\Db::name('store_product_attr_value')
+                    ->where('id', $skuId)
+                    ->lock(true)
+                    ->find();
+                if ($locked) {
+                    $row = $locked;
+                    $unique = (string)($locked['unique'] ?? $unique);
+                }
+            }
+            $stock = (string)($row['stock'] ?? '0');
+            $defective = (string)($row['defective_stock'] ?? '0');
+            if (bccomp($stock, '0', 4) !== 0 || bccomp($defective, '0', 4) !== 0) {
+                throw new AdminException(sprintf(
+                    '商品ID %d 规格「%s」仍有库存（良品 %s / 残次品 %s），请先清零后再删除、改名或同步；改规格名等于删除旧规格并新建',
+                    $productId,
+                    (string)$suk,
+                    $stock,
+                    $defective
+                ));
+            }
+            if ($unique === '') {
+                continue;
+            }
+            // 未完成盘点单（status=0）明细挂有该 SKU
+            $pendingCountId = \think\facade\Db::name('store_product_stock_detail')
+                ->alias('d')
+                ->join('store_product_stock_count c', 'c.id = d.order_id')
+                ->where('d.stock_type', 3)
+                ->where('d.product_id', $productId)
+                ->where('d.unique', $unique)
+                ->where('c.status', 0)
+                ->value('c.id');
+            if ($pendingCountId) {
+                throw new AdminException(sprintf(
+                    '商品ID %d 规格「%s」仍在未完成的盘点单（ID %s）中，请先完成或撤销盘点后再删除、改名或同步',
+                    $productId,
+                    (string)$suk,
+                    (string)$pendingCountId
+                ));
+            }
+            // 未完成请货（草稿/已申请/部分调拨）
+            $reqSn = \think\facade\Db::name('store_stock_request_detail')
+                ->alias('d')
+                ->join('store_stock_request r', 'r.id = d.request_id')
+                ->where(function ($q) use ($productId, $unique) {
+                    $q->where(function ($q2) use ($productId, $unique) {
+                        $q2->where('d.request_product_id', $productId)->where('d.request_unique', $unique);
+                    })->whereOr(function ($q2) use ($productId, $unique) {
+                        $q2->where('d.supply_product_id', $productId)->where('d.supply_unique', $unique);
+                    });
+                })
+                ->whereIn('r.status', [0, 1, 2])
+                ->order('r.id', 'desc')
+                ->value('r.order_sn');
+            if ($reqSn) {
+                throw new AdminException(sprintf(
+                    '商品ID %d 规格「%s」仍在未完成的请货单（%s）中，请先完成、取消或驳回后再删除、改名或同步',
+                    $productId,
+                    (string)$suk,
+                    (string)$reqSn
+                ));
+            }
+            // 调拨草稿，或已确认但仍可冲销（reversed_qty < qty）
+            $tfSn = \think\facade\Db::name('store_stock_transfer_detail')
+                ->alias('d')
+                ->join('store_stock_transfer t', 't.id = d.transfer_id')
+                ->where(function ($q) use ($productId, $unique) {
+                    $q->where(function ($q2) use ($productId, $unique) {
+                        $q2->where('d.from_product_id', $productId)->where('d.from_unique', $unique);
+                    })->whereOr(function ($q2) use ($productId, $unique) {
+                        $q2->where('d.to_product_id', $productId)->where('d.to_unique', $unique);
+                    });
+                })
+                ->where(function ($q) {
+                    $q->where('t.status', 0)
+                        ->whereOr(function ($q2) {
+                            $q2->where('t.status', 1)->whereRaw('d.reversed_qty < d.qty');
+                        });
+                })
+                ->order('t.id', 'desc')
+                ->value('t.order_sn');
+            if ($tfSn) {
+                throw new AdminException(sprintf(
+                    '商品ID %d 规格「%s」仍在调拨单（%s）中（草稿或仍可冲销），请先处理后再删除、改名或同步',
+                    $productId,
+                    (string)$suk,
+                    (string)$tfSn
+                ));
+            }
+        }
+    }
+
+    /**
+     * 永久删除/批量删除前：校验商品下全部 type=0 SKU 可否删除
+     * @param int $productId
+     */
+    public function assertAllType0SkusCanBeDeleted(int $productId): void
+    {
+        if ($productId <= 0) {
+            return;
+        }
+        $oldAttrValue = $this->getSkuArray(['product_id' => $productId, 'type' => 0], '*', 'suk');
+        if (!$oldAttrValue) {
+            return;
+        }
+        $this->assertSkusCanBeDeleted($productId, array_keys($oldAttrValue), $oldAttrValue);
+    }
+
+    /**
+     * @param array $productIds
+     */
+    public function assertProductsSkusCanBeDeleted(array $productIds): void
+    {
+        foreach ($productIds as $productId) {
+            $this->assertAllType0SkusCanBeDeleted((int)$productId);
+        }
+    }
+
+    /**
      * 批量保存
      * @param array $data
      */
@@ -351,6 +489,10 @@ class StoreProductAttrValueServices extends BaseServices
 	 */
     public function decProductAttrStock(int $productId, string $unique, int $num, int $type = 0)
     {
+        // 【库存铁律】type=0 实物库存禁止走旧增减接口；仅活动规格额度（type>0）可用
+        if ((int)$type === 0) {
+            throw new ValidateException('已停用：实物库存请通过「库存管理」或销售出库/退货统一服务处理');
+        }
         $res = $this->dao->decStockIncSales([
             'product_id' => $productId,
             'unique' => $unique,
@@ -371,6 +513,10 @@ class StoreProductAttrValueServices extends BaseServices
      */
     public function incProductAttrStock(int $productId, string $unique, int $num, int $type = 0)
     {
+        // 【库存铁律】type=0 实物库存禁止走旧增减接口
+        if ((int)$type === 0) {
+            throw new ValidateException('已停用：实物库存请通过「库存管理」或销售出库/退货统一服务处理');
+        }
         return $this->dao->incStockDecSales(['unique' => $unique, 'product_id' => $productId, 'type' => $type], $num);
     }
 
@@ -482,46 +628,88 @@ class StoreProductAttrValueServices extends BaseServices
     {
         /** @var StoreProductServices $productServices */
         $productServices = app()->make(StoreProductServices::class);
+        // 全局实物库存锁顺序（与 changeSkuStock 一致）：先按 id 升序锁 SKU，再更新商品表（不先锁商品）
+        $uniques = [];
+        foreach ($data as $attr) {
+            $uq = (string)($attr['unique'] ?? '');
+            if ($uq !== '') {
+                $uniques[$uq] = $uq;
+            }
+        }
+        $lockedRows = $this->dao->lockAttrValuesByUniques(array_values($uniques), $id);
+        $attrs = [];
+        foreach ($lockedRows as $row) {
+            $attrs[(string)$row['unique']] = $row;
+        }
         $product = $productServices->get($id);
         if (!$product) {
             throw new ValidateException('商品不存在');
         }
-        $attrs = $this->dao->getProductAttrValue(['product_id' => $id, 'type' => 0]);
-        if ($attrs) $attrs = array_combine(array_column($attrs, 'unique'), $attrs);
+        $product = is_object($product) ? $product->toArray() : $product;
 		/** @var StoreProductReservationTimeServices $productReservationTimeServices */
 		$productReservationTimeServices = app()->make(StoreProductReservationTimeServices::class);
 		$reservationTimes = $productReservationTimeServices->getColumn(['product_id' => $id], '*', 'id');
-		$stockDataAll = $update = [];
+		$stockDataAll = [];
         $time = time();
+        $deltaGoodTotal = '0';
+        $deltaDefTotal = '0';
         foreach ($data as $attr) {
             if (!isset($attrs[$attr['unique']])) continue;
+			$update = []; // 每行重置，避免上一 SKU 字段残留
 			if (isset($attr['reservation_time_data'])) {//预约商品
 				$skuStock = 0;//sku库存
+				$oldGood = (string)($attrs[$attr['unique']]['stock'] ?? 0);
 				foreach ($attr['reservation_time_data'] as $times) {
 					if (!isset($reservationTimes[$times['id']]))  continue;
 					$skuStock = bcadd((string)$skuStock, (string)$times['stock'], 0);
-					$update['stock'] = $times['stock'];
-					$update['service_price'] = $times['service_price'] ?? '0.00';
-					$productReservationTimeServices->update(['id' => $times['id']], $update);
+					$timeUpdate = [
+						'stock' => $times['stock'],
+						'service_price' => $times['service_price'] ?? '0.00',
+					];
+					$productReservationTimeServices->update(['id' => $times['id']], $timeUpdate);
 				}
 				$this->dao->update(['id' => $attrs[$attr['unique']]['id']], ['stock' => $skuStock]);
+				$deltaGoodTotal = bcadd($deltaGoodTotal, bcsub((string)$skuStock, $oldGood, 4), 4);
+				$attrs[$attr['unique']]['stock'] = $skuStock;
 			} else {
+				// 必须用锁后的最新余额计算，禁止使用事务外快照
+				$cur = $attrs[$attr['unique']];
+				$lineGood = '0';
+				$lineDef = '0';
 				if ($attr['pm']) {
-					$update['stock'] = bcadd((string)$attrs[$attr['unique']]['stock'], (string)$attr['stock'], 0);
+					$lineGood = (string)$attr['stock'];
+					$update['stock'] = bcadd((string)$cur['stock'], $lineGood, 4);
 					if (isset($attr['defective_stock'])) {//有残次品库存
-						$update['defective_stock'] = bcadd((string)$attrs[$attr['unique']]['defective_stock'], (string)$attr['defective_stock'], 0);
+						$lineDef = (string)$attr['defective_stock'];
+						$update['defective_stock'] = bcadd((string)$cur['defective_stock'], $lineDef, 4);
 					}
-					$update['sum_stock'] = bcadd((string)$attrs[$attr['unique']]['sum_stock'], (string)$attr['stock'], 0);
+					$update['sum_stock'] = bcadd((string)$cur['sum_stock'], $lineGood, 4);
 				} else {
-					$update['stock'] = bcsub((string)$attrs[$attr['unique']]['stock'], (string)$attr['stock'], 0);
+					$lineGood = bcsub('0', (string)$attr['stock'], 4);
+					$update['stock'] = bcadd((string)$cur['stock'], $lineGood, 4);
 					if (isset($attr['defective_stock'])) {//有残次品库存
-						$update['defective_stock'] = bcsub((string)$attrs[$attr['unique']]['defective_stock'], (string)$attr['defective_stock'], 0);
+						$lineDef = bcsub('0', (string)$attr['defective_stock'], 4);
+						$update['defective_stock'] = bcadd((string)$cur['defective_stock'], $lineDef, 4);
 					}
-					$update['sum_stock'] = bcsub((string)$attrs[$attr['unique']]['sum_stock'], (string)$attr['stock'], 0);
+					$update['sum_stock'] = bcadd((string)$cur['sum_stock'], $lineGood, 4);
 				}
-				$update['stock'] = (int)max($update['stock'], 0);
-				$update['defective_stock'] = (int)max($update['defective_stock'] ?? 0, 0);
+				// 库存改造：禁止 max(0)/int 静默截断；残次品不允许为负
+				if (isset($update['defective_stock']) && bccomp((string)$update['defective_stock'], '0', 4) < 0) {
+					throw new ValidateException('残次品库存不足');
+				}
+				$allowNegative = (int)($product['allow_negative_stock'] ?? 1) === 1;
+				if (!$allowNegative && bccomp((string)$update['stock'], '0', 4) < 0) {
+					throw new ValidateException('库存不足');
+				}
 				$this->dao->update(['id' => $attrs[$attr['unique']]['id']], $update);
+				$deltaGoodTotal = bcadd($deltaGoodTotal, $lineGood, 4);
+				$deltaDefTotal = bcadd($deltaDefTotal, $lineDef, 4);
+				// 同一商品多行改同一 SKU 时，后续行基于更新后余额
+				$attrs[$attr['unique']]['stock'] = $update['stock'];
+				if (isset($update['defective_stock'])) {
+					$attrs[$attr['unique']]['defective_stock'] = $update['defective_stock'];
+				}
+				$attrs[$attr['unique']]['sum_stock'] = $update['sum_stock'];
 			}
 			//同步出入库单
 			if ($isStockOrder) {
@@ -535,10 +723,9 @@ class StoreProductAttrValueServices extends BaseServices
 				];
 			}
         }
-		$stock = $this->dao->sum(['product_id' => $id, 'type' => 0], 'stock');
-		$defective_stock = $this->dao->sum(['product_id' => $id, 'type' => 0], 'defective_stock');
-        //修改商品库存
-        $productServices->update($id, ['stock' => $stock, 'defective_stock' => $defective_stock]);
+        // 商品主表按本次变化量原子增减，禁止 SUM 快照后绝对值覆盖（防并发丢汇总）
+        $this->applyProductStockDeltaAtomic($id, $deltaGoodTotal, $deltaDefTotal);
+        $stock = Db::name('store_product')->where('id', $id)->value('stock');
         //检测库存警戒和检测是否售罄
         ProductStockTips::dispatch([$id, 0]);
         //同步出入库单
@@ -555,6 +742,36 @@ class StoreProductAttrValueServices extends BaseServices
         $attrService->cacheTag()->clear();
 
         return $stock;
+    }
+
+    /**
+     * 商品主表库存原子增减（与支付 changeSkuStock 同一策略）
+     */
+    protected function applyProductStockDeltaAtomic(int $productId, string $deltaGood, string $deltaDefective): void
+    {
+        if ($productId <= 0) {
+            return;
+        }
+        if (!preg_match('/^-?\d+(\.\d{1,4})?$/', $deltaGood)) {
+            $deltaGood = bcadd($deltaGood, '0', 4);
+        }
+        if (!preg_match('/^-?\d+(\.\d{1,4})?$/', $deltaDefective)) {
+            $deltaDefective = bcadd($deltaDefective, '0', 4);
+        }
+        if (bccomp($deltaGood, '0', 4) === 0 && bccomp($deltaDefective, '0', 4) === 0) {
+            return;
+        }
+        $deltaGood = bcadd($deltaGood, '0', 4);
+        $deltaDefective = bcadd($deltaDefective, '0', 4);
+        if (!preg_match('/^-?\d+(\.\d{1,4})?$/', $deltaGood) || !preg_match('/^-?\d+(\.\d{1,4})?$/', $deltaDefective)) {
+            throw new ValidateException('库存数量格式错误');
+        }
+        Db::name('store_product')->where('id', $productId)->update([
+            'stock' => Db::raw('`stock`+(' . $deltaGood . ')'),
+            'defective_stock' => Db::raw('`defective_stock`+(' . $deltaDefective . ')'),
+            // MySQL 同句 UPDATE 中 stock 已先完成增减，is_sold 只按最终 stock 判断一次，禁止再 +delta
+            'is_sold' => Db::raw('IF(`stock`>0,0,1)'),
+        ]);
     }
 
     /**
@@ -591,9 +808,14 @@ class StoreProductAttrValueServices extends BaseServices
 		if (!$product) {
 			throw new ValidateException('商品不存在');
 		}
+		// 【库存铁律】库存只能由库存管理（入/出/盘）与销售出库/退货改动；规格页禁止改库存
+		// 原 type=stock / 同时改价库存 逻辑已停用
+		if ($type !== 'price') {
+			throw new ValidateException('已停用：不可在此修改库存，请到「库存管理」入库/出库/盘点操作');
+		}
 		//平台同步到门店商品 验证门店是否有自主定价权限
 		$isSyncStoreProduct = $product['type'] == 1 && $product['relation_id'] && $product['pid'] > 0;
-		if ($isSyncStoreProduct && $type == 'price') {
+		if ($isSyncStoreProduct) {
 			/** @var SystemStoreServices $systemStoreServices */
 			$systemStoreServices = app()->make(SystemStoreServices::class);
 			$storeInfo = $systemStoreServices->get((int)$product['relation_id'], ['id', 'product_change_price_status']);
@@ -604,106 +826,56 @@ class StoreProductAttrValueServices extends BaseServices
 
 		$attrs = $this->dao->getProductAttrValue(['product_id' => $id, 'type' => 0]);
 		$data = array_combine(array_column($data, 'unique'), $data);
-		$stockDataAll = $update = [];
-		$product_stock = $product_price = $product_ot_price = $product_cost = 0;
 		$product_price_arr = $product_ot_price_arr = $product_cost_arr = [];
-		$time = time();
 		foreach ($attrs as $item) {
 			$attr = $data[$item['unique']] ?? [];
 			if ($attr) {
-				if ($type == 'price') {//修改价格
-					if ($isSyncStoreProduct) {//同步到门店商品改价 验证改价区间
-						$price = (float)$attr['price'];
-						$min = (float)$item['price_range_min'];
-						$max = (float)$item['price_range_max'];
-						$oldPrice = (float)$item['price'];
-						if ($oldPrice == $min && $oldPrice == $max) {
-							if ($oldPrice != $price) throw new ValidateException($item['suk'] . ': 不允许改价');
-						} elseif ($min && $max) {//限制区间
-							if ($price < $min || $price > $max) {
-								throw new ValidateException($item['suk'] . ': 不在改价区间范围');
-							}
-						} elseif (!$min && $max) {//限制最大值
-							if ($price > $max) {
-								throw new ValidateException($item['suk'] . ': 不在改价区间范围');
-							}
-						} elseif ($min && !$max) {//限制最小值
-							if ($price < $min) {
-								throw new ValidateException($item['suk'] . ': 不在改价区间范围');
-							}
-						} else {//$min = max = 0 随意改价不限制
-
+				if ($isSyncStoreProduct) {//同步到门店商品改价 验证改价区间
+					$price = (float)$attr['price'];
+					$min = (float)$item['price_range_min'];
+					$max = (float)$item['price_range_max'];
+					$oldPrice = (float)$item['price'];
+					if ($oldPrice == $min && $oldPrice == $max) {
+						if ($oldPrice != $price) throw new ValidateException($item['suk'] . ': 不允许改价');
+					} elseif ($min && $max) {//限制区间
+						if ($price < $min || $price > $max) {
+							throw new ValidateException($item['suk'] . ': 不在改价区间范围');
+						}
+					} elseif (!$min && $max) {//限制最大值
+						if ($price > $max) {
+							throw new ValidateException($item['suk'] . ': 不在改价区间范围');
+						}
+					} elseif ($min && !$max) {//限制最小值
+						if ($price < $min) {
+							throw new ValidateException($item['suk'] . ': 不在改价区间范围');
 						}
 					}
-					$updateData = ['price' => $attr['price'], 'cost' => $attr['cost'] ?? $item['cost'], 'ot_price' => $attr['ot_price'] ?? $item['ot_price']];
-				} else {
-					if ($type == 'stock') {
-						$updateData = ['stock' => $attr['stock'], 'sum_stock' => $attr['stock']];
-					} else {//两个都改
-						$updateData = ['stock' => $attr['stock'], 'sum_stock' => $attr['stock'], 'price' => $attr['price'], 'cost' => $attr['cost'], 'ot_price' => $attr['ot_price']];
-					}
-					$number = bcsub((string)$attr['stock'], (string)$item['stock'], 0);
-					$stockDataAll[] = [
-						'product_id' => $id,
-						'unique' => $attr['unique'],
-						'cost_price' => $attr['cost'] ?? 0,
-						'stock' => abs($number),
-						'pm' => $number > 0 ? 1 : 0,
-						'add_time' => $time,
-					];
 				}
-				//修改
+				$updateData = ['price' => $attr['price'], 'cost' => $attr['cost'] ?? $item['cost'], 'ot_price' => $attr['ot_price'] ?? $item['ot_price']];
 				$this->dao->update($item['id'], $updateData);
 			}
-			// 计算商品库存
-			$product_stock = bcadd((string)$product_stock, (string)($attr['stock'] ?? $item['stock'] ?? 0), 0);
-			// 更新商品价格
+			// 更新商品价格（不改库存汇总）
 			$product_price_arr[] = $attr['price'] ?? $item['price'] ?? 0;
-			// 更新商品划线价
 			$product_ot_price_arr[] = $attr['ot_price'] ?? $item['ot_price'] ?? 0;
-			// 更新商品成本
-			$product_cost_arr[] = $attr['cost'] ?? $item['stock'] ?? 0;
+			$product_cost_arr[] = $attr['cost'] ?? $item['cost'] ?? 0;
 		}
-		//更新商品价格
 		$product_price = array_diff($product_price_arr, [0]) ? min(array_diff($product_price_arr, [0])) : 0;
-		// 更新商品划线价
 		$product_ot_price = array_diff($product_ot_price_arr, [0]) ? min(array_diff($product_ot_price_arr, [0])) : 0;
-		// 更新商品成本
 		$product_cost = array_diff($product_cost_arr, [0]) ? min(array_diff($product_cost_arr, [0])) : 0;
 
-		// 修改商品库存等信息
 		$productServices->update($id, [
-			'stock' => $product_stock,
-            'is_sold' => $product_stock > 0 ? 0 : 1,
 			'price' => $product_price,
 			'ot_price' => $product_ot_price,
 			'cost' => $product_cost,
 			'is_verify' => $is_verify
 		]);
-        /** @var StoreCardRelatedServices $relatedService */
-        $relatedService = app()->make(StoreCardRelatedServices::class);
-
-        if ($product_stock > 0 && $is_verify == 1 || $product['product_type'] == 6) {
-            $status = 1;
-        } else {
-            $status = 0;
-        }
-        $relatedService->setStatus([$id], $status);
-		//库存变动
-		if ($stockDataAll) {
-			/** @var StoreProductStockDetailServices $storeProductStockDetailServices */
-			$storeProductStockDetailServices = app()->make(StoreProductStockDetailServices::class);
-			$storeProductStockDetailServices->handelProductStock($id, $stockDataAll, $relation_type, $relation_id, $adminId);
-		}
-		//检测库存警戒和检测是否售罄
-		ProductStockTips::dispatch([$id, 0]);
 		// 清除缓存
 		$productServices->cacheTag()->clear();
 		/** @var StoreProductAttrServices $attrService */
 		$attrService = app()->make(StoreProductAttrServices::class);
 		$attrService->cacheTag()->clear();
 
-		return $type == 'price' ? $product_price : $product_stock;
+		return $product_price;
 	}
 
 	/**

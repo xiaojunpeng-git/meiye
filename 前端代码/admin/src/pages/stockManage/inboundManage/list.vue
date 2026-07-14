@@ -19,11 +19,13 @@
 			      @on-change="searchs"
 			      class="input-add"
 			    >
+			      <Option value="6">初始入库</Option>
 			      <Option value="1">采购入库</Option>
 			      <Option value="2">其他入库</Option>
 				  <Option value="3">退货入库</Option>
 				  <Option value="5">盘盈入库</Option>
 				  <Option value="4">残次品转良品</Option>
+				  <Option value="8">调拨入库</Option>
 			    </Select>
 			  </FormItem>
 		      <FormItem label="入库单号：">
@@ -79,6 +81,11 @@
 				  @click="exports"
 			  >导出入库明细</Button>
 			</Tooltip>
+			<Button class="ml-10" @click="openImport('initial_in')">初始入库导入</Button>
+			<Button class="ml-10" @click="openImport('in')">入库导入</Button>
+			<div class="op-tips mt10">
+				导入：须用系统模板，商品ID/SKU勿改；整表校验通过才入账，错误会提示第几行。导出：导出当前勾选单据明细，非导入模板。
+			</div>
 			<!-- 用户列表表格 -->
 			<vxe-table
 			    ref="xTable"
@@ -111,11 +118,13 @@
 			  <vxe-column field="order_id" title="入库单号" width="200"></vxe-column>
 			  <vxe-column field="order_type" title="入库类型" width="200">
 			    <template v-slot="{ row }">
-					<div v-if="row.order_type == 1">采购入库</div>
+					<div v-if="row.order_type == 6">初始入库</div>
+					<div v-else-if="row.order_type == 1">采购入库</div>
 					<div v-else-if="row.order_type == 2">其他入库</div>
 					<div v-else-if="row.order_type == 3">退货入库</div>
 					<div v-else-if="row.order_type == 5">盘盈入库</div>
 					<div v-else-if="row.order_type == 4">残次品转良品</div>
+					<div v-else-if="row.order_type == 8">调拨入库</div>
 					<div v-if="row.order_type == 3" @click="refundOrderInfo(row.refund_order_id)" class="fs-12 text-wlll-2d8cf0 cup">{{row.order_sn}}</div>
 				</template>
 			  </vxe-column>
@@ -149,6 +158,7 @@
       </div>
 		</Card>
 		<order-details ref="orderDetails"></order-details>
+		<stock-import ref="stockImport" stock-side="in" @success="getList"></stock-import>
 		<!-- 详情 -->
 		<details-from
 		  v-if="orderId>0"
@@ -173,12 +183,14 @@
 	} from "@/api/order";
 	import orderDetails from "../components/orderDetails.vue";
 	import detailsFrom from "../../order/orderList/handle/orderDetails";
+	import stockImport from "../components/stockImport.vue";
 	import exportExcel from "@/utils/newToExcel.js";
 	export default {
 		name: "inboundList",
 		components: {
 			orderDetails,
-			detailsFrom
+			detailsFrom,
+			stockImport
 		},
 		data() {
 			return {
@@ -330,6 +342,12 @@
 			  this.formValidate.page = index;
 			  this.inventoryList();
 			},
+			openImport(scene) {
+			  this.$refs.stockImport.open(scene || 'initial_in');
+			},
+			getList() {
+			  this.inventoryList();
+			},
 			// 添加
 			add () {
 			    this.$router.push({ path: this.roterPre + "/inbound/manage/add/" + 0 });
@@ -418,4 +436,10 @@
 	/deep/.vxe-table--render-default{
 		font-size: 12px;
 	}
+	.op-tips {
+		color: #999;
+		font-size: 12px;
+		line-height: 1.6;
+	}
+	.mt10 { margin-top: 10px; }
 </style>

@@ -282,19 +282,11 @@ class Product
      */
     public function uploadStock(Request $request)
     {
-        [$items] = $request->postMore([['items', []]], true);
-
-        foreach ($items as $item) {
-            if (!isset($item['bar_code']) || !isset($item['qty'])) {
-                return app('json')->fail('请检查属性编码或库存数量');
-            }
-        }
-
-        if (count($items) > 100) {
-            return app('json')->fail('同步条数不能超过100');
-        }
-
-        $this->productServices->syncStock($items);
-        return app('json')->success('操作成功');
+        // 【库存铁律】外部直写库存已停用
+        return app('json')->fail('已停用：外部接口不可直接覆盖库存，请通过「库存管理」操作');
+        // [$items] = $request->postMore([['items', []]], true);
+        // ...
+        // $this->productServices->syncStock($items);
+        // return app('json')->success('操作成功');
     }
 }

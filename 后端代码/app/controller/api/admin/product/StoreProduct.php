@@ -183,8 +183,10 @@ class StoreProduct
             }
         }
 
-        $services->updateAttrs($id, $attr_value);
-        return app('json')->success('修改成功');
+        // 【库存铁律】管理端此接口禁止改库存；仅保留改价（显式传 type=price）
+        return app('json')->fail('已停用：不可在此修改库存，请到「库存管理」入库/出库/盘点操作。若仅改价格请使用改价入口。');
+        // $services->updateAttrs($id, $attr_value);
+        // return app('json')->success('修改成功');
     }
 
 	/**

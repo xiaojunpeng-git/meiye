@@ -63,20 +63,9 @@ class Product
      */
     public function syncStock(Request $request)
     {
-        [$ids] = $request->getMore([
-            ['ids', ''],
-        ], true);
-
-        if (empty($ids)) {
-            return app('json')->fail('请选择商品');
-        }
-
-        $idArr = explode(',', $ids);
-        $data = array_chunk($idArr, 1);
-        foreach ($data as $item) {
-            // 获取库存
-            ProductSyncErp::dispatchDo('stockFromErp', [$item]);
-        }
-        return app('json')->success('正在同步中，请稍后查看');
+        // 【库存铁律】ERP 同步库存直写已停用
+        return app('json')->fail('已停用：不可从 ERP 直接覆盖库存，请通过「库存管理」操作');
+        // [$ids] = $request->getMore([['ids', '']], true);
+        // ...
     }
 }

@@ -113,4 +113,14 @@ class ImportRecord extends BaseModel
         }
     }
 
+    /**
+     * 归属门店/供应商
+     */
+    public function searchRelationIdAttr($query, $value)
+    {
+        if ($value !== '') {
+            $query->where('relation_id', $value);
+        }
+    }
+
 }
