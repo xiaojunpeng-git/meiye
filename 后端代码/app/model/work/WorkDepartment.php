@@ -1,0 +1,87 @@
+<?php
+// +----------------------------------------------------------------------
+// | MOHE [ MOHE赋能开发者，助力企业发展 ]
+// +----------------------------------------------------------------------
+// | Copyright (c) 2016~2020 https://www.mohe.com All rights reserved.
+// +----------------------------------------------------------------------
+// | Licensed MOHE并不是自由软件，未经许可不能去掉MOHE相关版权
+// +----------------------------------------------------------------------
+// | Author: MOHE Team <admin@mohe.com>
+// +----------------------------------------------------------------------
+
+namespace app\model\work;
+
+use mohe\basic\BaseModel;
+use mohe\traits\ModelTrait;
+
+/**
+ * 企业微信部门
+ * Class WorkDepartment
+ * @package app\model\work
+ */
+class WorkDepartment extends BaseModel
+{
+
+    use ModelTrait;
+
+    /**
+     * @var string
+     */
+    protected $name = 'work_department';
+
+    /**
+     * @var string
+     */
+    protected $key = 'id';
+
+    /**
+     * @var string
+     */
+    protected $autoWriteTimestamp = 'int';
+
+    /**
+     * 远程关联成员
+     * @return \think\model\relation\HasManyThrough
+     */
+    public function member()
+    {
+        return $this->hasManyThrough(
+            WorkMember::class,
+            WorkMemberRelation::class, 'department', 'id', 'department_id', 'member_id');
+    }
+
+    /**
+     * @param $query
+     * @param $value
+     */
+    public function searchMobileAttr($query, $value)
+    {
+        if (is_array($value)) {
+            $query->whereIn('mobile', $value);
+        } else {
+            $query->where('mobile', $value);
+        }
+    }
+
+
+    /**
+     * 企业微信id搜索
+     * @param $query
+     * @param $value
+     */
+    public function searchCorpIdAttr($query, $value)
+    {
+        $query->where('corp_id', $value);
+    }
+
+    /**
+     * @param $query
+     * @param $value
+     */
+    public function searchDepartmentIdAttr($query, $value)
+    {
+        if ('' !== $value) {
+            $query->where('department_id', $value);
+        }
+    }
+}

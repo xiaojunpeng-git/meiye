@@ -1,0 +1,1 @@
+<?phpuse mohe\basic\BaseAuth;use think\facade\Env;return [];

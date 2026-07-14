@@ -1,0 +1,57 @@
+<?php
+// +----------------------------------------------------------------------
+// | MOHE [ MOHE赋能开发者，助力企业发展 ]
+// +----------------------------------------------------------------------
+// | Copyright (c) 2016~2020 https://www.mohe.com All rights reserved.
+// +----------------------------------------------------------------------
+// | Licensed MOHE并不是自由软件，未经许可不能去掉MOHE相关版权
+// +----------------------------------------------------------------------
+// | Author: MOHE Team <admin@mohe.com>
+// +----------------------------------------------------------------------
+namespace app\validate\store;
+
+use think\Validate;
+
+class StoreStaffValidate extends Validate
+{
+    /**
+     * 定义验证规则
+     * 格式：'字段名'    =>    ['规则1','规则2'...]
+     *
+     * @var array
+     */
+    protected $rule = [
+        'account' => ['require', 'length:4,64'],
+//        'conf_pwd' => ['require', 'length:4,64'],
+        'pwd' => ['require', 'length:4,64'],
+        'staff_name' => 'require',
+		'phone' => 'require',
+        'roles' => ['require', 'array'],
+    ];
+
+    /**
+     * 定义错误信息
+     * 格式：'字段名.规则名'    =>    '错误信息'
+     *
+     * @var array
+     */
+    protected $message = [
+        'account.require' => '请填写门店店员账号',
+		'account.length' => '门店店员账号长度4-64位字符',
+//        'conf_pwd.require' => '请输入确认密码',
+//		'conf_pwd.length' => '确认密码长度4-64位字符',
+        'pwd.require' => '请输入密码',
+		'pwd.length' => '密码长度4-64位字符',
+        'staff_name.require' => '请输入门店店员姓名',
+		'phone.require' => '请输入门店店员电话',
+        'roles.require' => '请选择店员身份',
+        'roles.array' => '身份必须为数组',
+    ];
+
+    protected $scene = [
+        'save' => ['account', 'pwd', 'staff_name', 'phone', 'roles'],
+        'update' => ['account', 'staff_name', 'phone', 'roles'],
+    ];
+
+
+}

@@ -1,0 +1,5 @@
+vendor
+public
+runtime
+.env
+.idea

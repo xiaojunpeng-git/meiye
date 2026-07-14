@@ -1,0 +1,142 @@
+<?php
+// +----------------------------------------------------------------------
+// | MOHE [ MOHE赋能开发者，助力企业发展 ]
+// +----------------------------------------------------------------------
+// | Copyright (c) 2016~2020 https://www.mohe.com All rights reserved.
+// +----------------------------------------------------------------------
+// | Licensed MOHE并不是自由软件，未经许可不能去掉MOHE相关版权
+// +----------------------------------------------------------------------
+// | Author: MOHE Team <admin@mohe.com>
+// +----------------------------------------------------------------------
+namespace app\controller\store\file;
+
+use app\controller\store\AuthController;
+use app\services\system\attachment\SystemAttachmentCategoryServices;
+use think\facade\App;
+
+/**
+ * 图片分类管理类
+ * Class SystemAttachmentCategory
+ * @package app\controller\store\file
+ */
+class SystemAttachmentCategory extends AuthController
+{
+    /**
+    * @var SystemAttachmentCategoryServices
+    */
+    protected $service;
+
+    /**
+     * 构造方法
+     * SystemAttachmentCategory constructor.
+     * @param App $app
+     * @param SystemAttachmentCategoryServices $service
+     */
+    public function __construct(App $app, SystemAttachmentCategoryServices $service)
+    {
+        parent::__construct($app);
+        $this->service = $service;
+    }
+
+    /**
+     * 显示资源列表
+     *
+     * @return \think\Response
+     */
+    public function index()
+    {
+        $where = $this->request->getMore([
+            ['name', ''],
+            ['pid', 0],
+            ['file_type', 1]
+        ]);
+        $where['type'] = 1;
+        $where['relation_id'] = $this->storeId;
+        if ($where['name'] != '') $where['pid'] = '';
+        return app('json')->success($this->service->getAll($where));
+    }
+
+    /**
+     * 新增表单
+     * @return mixed
+     * @throws \FormBuilder\Exception\FormBuilderException
+     */
+    public function create($id)
+    {
+		[$file_type] = $this->request->postMore([
+            ['file_type', 1]
+        ], true);
+        return app('json')->success($this->service->createForm($id, 1, $this->storeId, (int)$file_type));
+    }
+
+    /**
+     * 保存新增
+     * @return mixed
+     */
+    public function save()
+    {
+        $data = $this->request->postMore([
+            ['pid', 0],
+            ['name', ''],
+            ['file_type', 1]
+        ]);
+        if (!$data['name']) {
+            return app('json')->fail('请输入分类名称');
+        }
+        $data['type'] = 1;
+        $data['relation_id'] = $this->storeId;
+        $this->service->save($data);
+        return app('json')->success('添加成功');
+    }
+
+    /**
+     * 编辑表单
+     * @param $id
+     * @return mixed
+     * @throws \FormBuilder\Exception\FormBuilderException
+     */
+    public function edit($id)
+    {
+		[$file_type] = $this->request->postMore([
+            ['file_type', 1]
+        ], true);
+        return app('json')->success($this->service->editForm($id, 1, $this->storeId, (int)$file_type));
+    }
+
+    /**
+     * 保存更新的资源
+     *
+     * @param \think\Request $request
+     * @param int $id
+     * @return \think\Response
+     */
+    public function update($id)
+    {
+        $data = $this->request->postMore([
+            ['pid', 0],
+            ['name', ''],
+            ['file_type', 1]
+        ]);
+        if (!$data['name']) {
+            return app('json')->fail('请输入分类名称');
+        }
+        $info = $this->service->get($id);
+        $data['relation_id'] = $this->storeId;
+        $count = $this->service->count(['pid' => $id]);
+        if ($count && $info['pid'] != $data['pid']) return app('json')->fail('该分类有下级分类，无法修改上级');
+        $this->service->update($id, $data);
+        return app('json')->success('分类编辑成功!');
+    }
+
+    /**
+     * 删除指定资源
+     *
+     * @param int $id
+     * @return \think\Response
+     */
+    public function delete($id)
+    {
+        $this->service->del($id);
+        return app('json')->success('删除成功!');
+    }
+}

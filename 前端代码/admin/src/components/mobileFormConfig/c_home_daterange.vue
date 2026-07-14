@@ -1,0 +1,105 @@
+<template>
+  <div class="mobile-config">
+    <div  v-for="(item,key) in rCom" :key="key">
+      <component :is="item.components.name" :configObj="configObj" ref="childData" :configNme="item.configNme" :key="key" @getConfig="getConfig" :index="activeIndex" :num="item.num"></component>
+    </div>
+    <rightBtn :activeIndex="activeIndex" :configObj="configObj"></rightBtn>
+  </div>
+</template>
+
+<script>
+import { formatDate } from '@/utils/validate';
+import toolCom from '@/components/mobileConfigRight/index.js';
+import rightBtn from '@/components/rightBtn/index.vue';
+import { mapState, mapMutations, mapActions } from 'vuex';
+export default {
+  name: 'c_home_daterange',
+  componentsName: 'home_daterange',
+  components: {
+    ...toolCom,
+    rightBtn
+  },
+  props: {
+    activeIndex: {
+      type: null
+    },
+    num: {
+      type: null
+    },
+    index: {
+      type: null
+    }
+  },
+  data() {
+    return {
+      configObj: {},
+      rCom: [
+        {
+          components: toolCom.c_input_item,
+          configNme: 'titleConfig'
+        },
+        {
+          components: toolCom.c_comb_data,
+          configNme: 'valConfig'
+        },
+        {
+          components: toolCom.c_input_item,
+          configNme: 'tipConfig'
+        },
+        {
+          components: toolCom.c_is_show,
+          configNme: 'titleShow'
+        }
+      ]
+    };
+  },
+  watch: {
+    num(nVal) {
+      const value = JSON.parse(JSON.stringify(this.$store.state.admin.mobildConfig.defaultArray[nVal]));
+      this.getChange(value);
+      this.configObj = value;
+    },
+    configObj: {
+      handler(nVal, oVal) {
+        this.$store.commit('admin/mobildConfig/UPDATEARR', { num: this.num, val: nVal });
+      },
+      deep: true
+    }
+  },
+  mounted() {
+    this.$nextTick(() => {
+      const value = JSON.parse(JSON.stringify(this.$store.state.admin.mobildConfig.defaultArray[this.num]));
+      this.getChange(value);
+      this.configObj = value;
+    });
+  },
+  methods: {
+    getChange(value) {
+      if (value.valConfig.specifyDate.length) {
+        const start = formatDate(new Date(value.valConfig.specifyDate[0]), 'yyyy/MM/dd');
+        const end = formatDate(new Date(value.valConfig.specifyDate[1]), 'yyyy/MM/dd');
+        const newArray = [];
+        newArray.push(start);
+        newArray.push(end);
+        value.valConfig.specifyDate = newArray;
+      }
+    },
+    // 获取组件参数
+    getConfig(data) {
+      if (data.type == 2) {
+        this.configObj.valConfig.specifyDate = data.val;
+      }
+    }
+  }
+};
+</script>
+
+<style scoped lang="stylus">
+.title-tips
+  padding-bottom 10px
+  font-size 14px
+  color #333
+  span
+    margin-right 14px
+    color #999
+</style>

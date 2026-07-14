@@ -1,0 +1,124 @@
+<?php
+// +----------------------------------------------------------------------
+// | MOHE [ MOHE赋能开发者，助力企业发展 ]
+// +----------------------------------------------------------------------
+// | Copyright (c) 2016~2020 https://www.mohe.com All rights reserved.
+// +----------------------------------------------------------------------
+// | Licensed MOHE并不是自由软件，未经许可不能去掉MOHE相关版权
+// +----------------------------------------------------------------------
+// | Author: MOHE Team <admin@mohe.com>
+// +----------------------------------------------------------------------
+
+namespace app\services\article;
+
+use app\dao\article\ArticleCategoryDao;
+use app\services\BaseServices;
+use app\services\wechat\WechatNewsCategoryServices;
+use mohe\exceptions\AdminException;
+use mohe\services\FormBuilder as Form;
+use think\facade\Route as Url;
+
+/**
+ * 文章分类
+ * Class ArticleCategoryServices
+ * @package app\services\article
+ * @mixin ArticleCategoryDao
+ */
+class ArticleCategoryServices extends BaseServices
+{
+    /**
+     * ArticleCategoryServices constructor.
+     * @param ArticleCategoryDao $dao
+     */
+    public function __construct(ArticleCategoryDao $dao)
+    {
+        $this->dao = $dao;
+    }
+
+    /**
+     * 获取文章分类列表
+     * @param array $where
+     * @return array
+     */
+    public function getList(array $where)
+    {
+        [$page, $limit] = $this->getPageValue();
+        $list = $this->dao->getList($where, $page, $limit);
+        $count = $this->dao->count($where);
+        return compact('list', 'count');
+    }
+
+	/**
+	 * 生成创建修改表单
+	 * @param int $id
+	 * @return mixed
+	 * @throws \think\db\exception\DataNotFoundException
+	 * @throws \think\db\exception\DbException
+	 * @throws \think\db\exception\ModelNotFoundException
+	 */
+    public function createForm(int $id)
+    {
+        $method = 'POST';
+        $url = '/cms/category';
+        if ($id) {
+            $info = $this->dao->get($id);
+            $method = 'PUT';
+            $url = $url . '/' . $id;
+        }
+        $f = array();
+        $f[] = Form::hidden('id', $info['id'] ?? 0);
+        $f[] = Form::input('title', '分类名称：', $info['title'] ?? '')->maxlength(20)->required();
+        $f[] = Form::input('intr', '分类简介：', $info['intr'] ?? '')->type('textarea')->required();
+        $f[] = Form::frameImage('image', '分类图片：', Url::buildUrl(config('admin.admin_prefix') .  '/widget.images/index', array('fodder' => 'image')), $info['image'] ?? '')->icon('ios-add')->width('960px')->height('505px')->modal(['footer-hide' => true]);
+        $f[] = Form::number('sort', '排序：', (int)($info['sort'] ?? 0))->min(0);
+        $f[] = Form::radio('status', '状态：', $info['status'] ?? 1)->options([['value' => 1, 'label' => '显示'], ['value' => 0, 'label' => '隐藏']]);
+        return create_form($id ? '编辑分类' : '添加分类', $f, Url::buildUrl($url), $method);
+    }
+
+    /**
+     * 保存
+     * @param array $data
+     */
+    public function save(array $data)
+    {
+        $this->dao->save($data);
+    }
+
+    /**
+     * 修改
+     * @param array $data
+     */
+    public function update(array $data)
+    {
+        $this->dao->update($data['id'], $data);
+    }
+
+    /**
+     * 删除
+     * @param int $id
+     */
+    public function del(int $id)
+    {
+		/** @var WechatNewsCategoryServices $services */
+		$services = app()->make(WechatNewsCategoryServices::class);
+		$ids = $services->getNewIds();
+        /** @var ArticleServices $articleService */
+        $articleService = app()->make(ArticleServices::class);
+        $count = $articleService->count(['cid' => $id, 'ids' => $ids]);
+        if ($count > 0) {
+            throw new AdminException('该分类下有文章，无法删除！');
+        } else {
+            $this->dao->delete($id);
+        }
+    }
+
+    /**
+     * 修改状态
+     * @param int $id
+     * @param int $status
+     */
+    public function setStatus(int $id, int $status)
+    {
+        $this->dao->update($id, ['status' => $status]);
+    }
+}

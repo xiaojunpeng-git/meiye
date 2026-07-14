@@ -1,0 +1,47 @@
+<?php
+// +----------------------------------------------------------------------
+// | MOHE [ MOHE赋能开发者，助力企业发展 ]
+// +----------------------------------------------------------------------
+// | Copyright (c) 2016~2020 https://www.mohe.com All rights reserved.
+// +----------------------------------------------------------------------
+// | Licensed MOHE并不是自由软件，未经许可不能去掉MOHE相关版权
+// +----------------------------------------------------------------------
+// | Author: MOHE Team <admin@mohe.com>
+// +----------------------------------------------------------------------
+
+namespace app\validate\api\user;
+
+
+use think\Validate;
+
+/**
+ * 话术验证
+ * Class StoreServiceFeedbackValidate
+ * @package app\validate\api\user
+ */
+class StoreServiceFeedbackValidate extends Validate
+{
+    /**
+     * @var string[]
+     */
+    protected $regex = ['phone' => '/^1[3456789]\d{9}$/'];
+
+    /**
+     * @var string[]
+     */
+    protected $rule = [
+        'phone' => 'require|regex:phone',
+        'rela_name' => 'require',
+        'content' => 'require',
+    ];
+
+    /**
+     * @var string[]
+     */
+    protected $message = [
+        'phone.require' => '请输入手机号',
+        'phone.regex' => '手机号格式错误',
+        'content.require' => '请填写反馈内容',
+        'rela_name.require' => '请填写真实姓名',
+    ];
+}

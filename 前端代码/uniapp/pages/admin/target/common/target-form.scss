@@ -1,0 +1,81 @@
+/* 目标管理模块：输入框、按钮统一触控高度 */
+$target-input-height: 88rpx;
+$target-input-font: 30rpx;
+$target-btn-height: 88rpx;
+
+@mixin target-text-input {
+	box-sizing: border-box;
+	min-height: $target-input-height;
+	height: $target-input-height;
+	line-height: $target-input-height;
+	font-size: $target-input-font;
+}
+
+@mixin target-primary-button {
+	box-sizing: border-box;
+	width: 100%;
+	height: $target-btn-height;
+	line-height: $target-btn-height;
+	padding: 0;
+	margin: 0;
+	font-size: 32rpx;
+	border: none;
+	border-radius: 16rpx;
+
+	&::after {
+		border: none;
+	}
+}
+
+@mixin target-chip-button {
+	box-sizing: border-box;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-height: 72rpx;
+	padding: 16rpx 32rpx;
+	font-size: 28rpx;
+	line-height: 1.4;
+}
+
+@mixin target-nav-button {
+	box-sizing: border-box;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-height: 64rpx;
+	padding: 12rpx 32rpx;
+	font-size: 30rpx;
+	line-height: 1.4;
+}
+
+@mixin target-nav-title {
+	flex: 1;
+	min-width: 0;
+	height: 100%;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	text-align: center;
+	font-size: 34rpx;
+	font-weight: 600;
+	line-height: 34rpx;
+}
+
+.h5-nav-confirm {
+	@include target-nav-button;
+	background: rgba(255, 255, 255, 0.2);
+	border-radius: 40rpx;
+	font-size: 28rpx;
+	color: #fff;
+	padding: 0 28rpx;
+	min-width: auto;
+}
+
+.h5-nav-cancel {
+	display: flex;
+	align-items: center;
+	min-width: 120rpx;
+	font-size: 30rpx;
+	color: #fff;
+}

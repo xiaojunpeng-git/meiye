@@ -1,0 +1,30 @@
+# ===== 依赖 / 生成物（不纳入版本库）=====
+# 后端 composer 依赖与运行时缓存
+/后端代码/vendor/
+/后端代码/runtime/
+
+# 后端前端编译产物（由各端 build 生成）
+/后端代码/public/view_admin/
+/后端代码/public/view_store/
+/后端代码/public/view_cashier/
+
+# 前端 node 依赖（各端）
+前端代码/*/node_modules/
+前端代码/*/dist/
+前端代码/*/unpackage/
+
+# ===== 环境 / 密钥 =====
+/后端代码/.env
+.env
+*.env.local
+
+# ===== 系统 / 日志 / 杂项 =====
+*.log
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+*.swp
+
+# 说明：前端 src/vendor 为项目内打包库，属源码，保持跟踪，勿忽略
