@@ -60,7 +60,7 @@
       </view>
       <view class="kuai_out">
           <view class="kuai" :class="show_type == 1?'kuai_choose':''" @click="changeType(1)">现金业绩</view>
-          <view class="kuai" :class="show_type == 7?'kuai_choose':''" @click="changeType(7)">实际业绩</view>
+          <view class="kuai" :class="show_type == 7?'kuai_choose':''" @click="changeType(7)">实收业绩</view>
           <view class="kuai" :class="show_type == 2?'kuai_choose':''" @click="changeType(2)">客户消耗金额</view>
           <view class="kuai" :class="show_type == 3?'kuai_choose':''" @click="changeType(3)">员工现金业绩</view>
           <view class="kuai" :class="show_type == 4?'kuai_choose':''" @click="changeType(4)">员工劳动业绩</view>

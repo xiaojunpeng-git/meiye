@@ -352,36 +352,10 @@ export default {
     gostore(item) {
       storeLogin(item.id)
         .then((res) => {
-          let data = res.data;
-          let expires = data.expires_time;
-          util.cookies.setStore("token", data.token, {
-            expires: expires,
-          });
-          util.cookies.setStore("uuid", data.user_info.id, {
-            expires: expires,
-          });
-          util.cookies.setStore("expires_time", expires, {
-            expires: expires,
-          });
-		  util.cookies.setStore('pageTitle', item.name);
-          util.makeMenu(`/${data.prefix}`, data.menus);
-          let storage = window.localStorage;
-          storage.setItem("menuListStore", JSON.stringify(data.menus));
-          storage.setItem("uniqueAuthStore", JSON.stringify(data.unique_auth));
-          let userInfoStore = {
-            account: data.user_info.account,
-            head_pic: data.user_info.avatar,
-            logo: data.logo,
-            logoSmall: data.logo_square,
-            version: data.version,
-          };
-          storage.setItem("userInfoStore", JSON.stringify(userInfoStore));
-          // menuListStore
-          this.BaseURL = Setting.apiBaseURL.replace(/adminapi/, `${item.prefix}/home/`);
-          window.open(this.BaseURL);
+          util.openStoreBackend(res.data, { pageTitle: item.name });
         })
         .catch((err) => {
-          this.$Message.error(err.msg);
+          this.$Message.error(err.msg || "进入门店失败");
         });
     },
     delte(row, tit, num) {

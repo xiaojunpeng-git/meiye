@@ -97,7 +97,7 @@ export default {
       name: `${pre}regionList`,
       meta: {
         auth: ['admin-store-region_list'],
-        title: '区域列表'
+        title: '组织架构'
       },
       component: () => import('@/pages/store/region/index')
     },
@@ -106,7 +106,7 @@ export default {
       name: `${pre}addRegion`,
       meta: {
         auth: ['admin-store-region_create'],
-        title: '添加区域'
+        title: '添加管理员'
       },
       component: () => import('@/pages/store/region/create')
     },

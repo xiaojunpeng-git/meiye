@@ -182,6 +182,11 @@ class SystemRegionAgentServices extends BaseServices
 	 */
 	public function getAgentStoreScopeIds(int $agentId): array
 	{
+		/** @var \app\services\organization\OrganizationScopeService $scopeService */
+		$scopeService = app()->make(\app\services\organization\OrganizationScopeService::class);
+		if ($scopeService->isMigrated()) {
+			return $scopeService->getResolvedStoreIdsByLegacyAgentId($agentId);
+		}
 		if ($agentId <= 0) {
 			return [];
 		}
@@ -459,7 +464,7 @@ class SystemRegionAgentServices extends BaseServices
 				} else {
 					unset($item['children']);
 				}
-				$item['store_id'] = $this->getManagedStoreIds((int)$item['id']);
+				$item['store_id'] = $this->getAgentStoreScopeIds((int)$item['id']);
 				$item['store_count'] = count($item['store_id']);
 				unset($item['admin']);
 			}

@@ -2469,9 +2469,9 @@ class StoreTargetServices extends BaseServices
             return [$storeId];
         }
         if ($objectType === 2 && $manageRegionId > 0) {
-            /** @var SystemRegionManageServices $manageServices */
-            $manageServices = app()->make(SystemRegionManageServices::class);
-            $ids = $manageServices->getStoreIdsByManageRegion($manageRegionId, true);
+            /** @var \app\services\organization\OrganizationScopeService $scopeService */
+            $scopeService = app()->make(\app\services\organization\OrganizationScopeService::class);
+            $ids = $scopeService->getOrgStoreIdsByLegacyManageRegionId($manageRegionId, true);
             if ($allowedStoreIds) {
                 $ids = array_values(array_intersect($ids, array_map('intval', $allowedStoreIds)));
             }

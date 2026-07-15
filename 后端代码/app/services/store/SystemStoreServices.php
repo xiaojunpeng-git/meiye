@@ -1061,6 +1061,25 @@ class SystemStoreServices extends BaseServices
             $storeBranchProducesServices = app()->make(StoreBranchProductServices::class);
             $storeBranchProducesServices->cancelProductChangePrice($id);
         }
+        if ($manageRegionId > 0 && $id) {
+            try {
+                /** @var \app\services\organization\OrganizationScopeService $scopeService */
+                $scopeService = app()->make(\app\services\organization\OrganizationScopeService::class);
+                if ($scopeService->isMigrated()) {
+                    /** @var \app\dao\organization\OrganizationDao $orgDao */
+                    $orgDao = app()->make(\app\dao\organization\OrganizationDao::class);
+                    $org = $orgDao->getOne(['legacy_manage_region_id' => $manageRegionId, 'is_del' => 0], 'id');
+                    if ($org) {
+                        $orgRow = is_object($org) ? $org->toArray() : $org;
+                        /** @var \app\services\organization\OrganizationManageServices $orgManage */
+                        $orgManage = app()->make(\app\services\organization\OrganizationManageServices::class);
+                        $orgManage->bindStoreToOrg((int)$id, (int)$orgRow['id']);
+                    }
+                }
+            } catch (\Throwable $e) {
+                // 双读期：组织绑定失败不阻断门店保存
+            }
+        }
         return $res;
     }
 

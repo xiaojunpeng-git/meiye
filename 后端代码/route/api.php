@@ -961,6 +961,21 @@ Route::group('api', function () {
 
 	})->middleware(AuthTokenMiddleware::class, true)->middleware(\app\http\middleware\SystemLogMiddleware::class, 'user');
 
+	/**
+	 * 指标字典
+	 */
+	Route::group('metric', function () {
+		Route::get('dictionary', 'v1.metric.MetricDictionary/index')->option(['real_name' => '指标字典']);
+		Route::get('dictionary/:code', 'v1.metric.MetricDictionary/tooltip')->option(['real_name' => '指标口径说明']);
+	})->middleware(AuthTokenMiddleware::class, true);
+
+	/**
+	 * 组织范围解析（手机端实时筛选，单次请求）
+	 */
+	Route::group('organization', function () {
+		Route::get('scope/resolve', 'v1.organization.OrganizationScope/resolve')->option(['real_name' => '解析门店范围']);
+	})->middleware(AuthTokenMiddleware::class, true);
+
 
 	/**
 	* 移动端门店中心 路由

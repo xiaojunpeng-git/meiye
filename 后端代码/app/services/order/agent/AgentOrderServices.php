@@ -106,9 +106,11 @@ class AgentOrderServices extends BaseServices
         $data['store_income'] = $branchOrderServices->sumStoreCashIncome($where);
         $oldYeji=$this->oldYeji($where,1);
         $data['store_income']=bcadd($data['store_income'],$oldYeji,2);
-        $data['store_writeoff_order_price']=$this->dao->sum($where + $hand_where, 'pay_price', true);
-        $oldYeji=$this->oldYeji($where,2);
-        $data['store_writeoff_order_price']=bcadd($data['store_writeoff_order_price'],$oldYeji,2);
+        /** @var \app\services\report\ReportServices $reportServices */
+        $reportServices = app()->make(\app\services\report\ReportServices::class);
+        $data['store_writeoff_order_price'] = $reportServices->activeYeji($where);
+        $oldYeji = $this->oldYeji($where, 2);
+        $data['store_writeoff_order_price'] = bcadd($data['store_writeoff_order_price'], $oldYeji, 2);
 		$storeIds = $where['store_id'] ?? [];
 		if (!is_array($storeIds)) {
 			$storeIds = $storeIds ? [(int)$storeIds] : [];
@@ -124,9 +126,9 @@ class AgentOrderServices extends BaseServices
 			$data['actual_performance'] = '0.00';
 		}
        	$result = [
-			['title' => '现金业绩', 'number' => $data['store_income'], 'growth_rate' => 0],
-			['title' => '实际业绩', 'number' => $data['actual_performance'], 'growth_rate' => 0],
-			['title' => '客户消耗金额', 'number' => $data['store_writeoff_order_price'], 'growth_rate' => 0],
+			['title' => '现金业绩', 'number' => $data['store_income'], 'growth_rate' => 0, 'metric_code' => 'cash_performance'],
+			['title' => '实收业绩', 'number' => $data['actual_performance'], 'growth_rate' => 0, 'metric_code' => 'actual_performance'],
+			['title' => '客户消耗金额', 'number' => $data['store_writeoff_order_price'], 'growth_rate' => 0, 'metric_code' => 'consume_amount'],
 		];
 		return $result;
 	}

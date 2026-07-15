@@ -1171,6 +1171,20 @@ Route::group('adminapi', function () {
 		Route::delete('manage/:id', 'v1.store.SystemRegionManage/delete')->option(['real_name' => '区域架构删除']);
 		Route::get('manage/agent_ids/:id', 'v1.store.SystemRegionManage/agent_ids')->option(['real_name' => '区域架构关联代理商']);
 
+		// 组织架构（新）— 静态路径必须写在 organization/:id 之前，避免 migrate/bind_store 被当成 id
+		Route::get('organization/tree', 'v1.organization.Organization/tree')->option(['real_name' => '组织架构树']);
+		Route::get('organization/counts', 'v1.organization.Organization/counts')->option(['real_name' => '组织架构数量']);
+		Route::get('organization/overview', 'v1.organization.Organization/overview')->option(['real_name' => '组织权限概况']);
+		Route::get('organization/change_log', 'v1.organization.Organization/change_log')->option(['real_name' => '组织架构操作记录']);
+		Route::post('organization/migrate', 'v1.organization.Organization/migrate')->option(['real_name' => '组织架构数据迁移']);
+		Route::post('organization/bind_store', 'v1.organization.Organization/bind_store')->option(['real_name' => '门店绑定组织']);
+		Route::get('organization/admin_excludes/:orgAdminId', 'v1.organization.Organization/admin_excludes')->option(['real_name' => '管理员排除门店']);
+		Route::get('organization/admin_excludes_by_agent/:legacyAgentId', 'v1.organization.Organization/admin_excludes_by_agent')->option(['real_name' => '按管理人员查排除门店']);
+		Route::post('organization/admin_excludes/:orgAdminId', 'v1.organization.Organization/save_admin_excludes')->option(['real_name' => '保存管理员排除门店']);
+		Route::post('organization/admin_excludes_by_agent/:legacyAgentId', 'v1.organization.Organization/save_admin_excludes_by_agent')->option(['real_name' => '按管理人员保存排除门店']);
+		Route::post('organization/:id', 'v1.organization.Organization/save')->option(['real_name' => '组织架构保存']);
+		Route::delete('organization/:id', 'v1.organization.Organization/delete')->option(['real_name' => '组织架构删除']);
+
 	})->middleware([
 		\app\http\middleware\admin\AdminAuthTokenMiddleware::class,
 		\app\http\middleware\admin\AdminCkeckRoleMiddleware::class

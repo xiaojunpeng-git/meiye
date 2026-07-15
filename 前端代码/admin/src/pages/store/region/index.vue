@@ -2,10 +2,10 @@
   <div>
   <Card :bordered="false" dis-hover :padding="16">
   <div class="region-mgmt">
-    <!-- 左侧区域树 -->
+    <!-- 左侧组织树 -->
     <div class="region-tree-panel">
       <div class="panel-header">
-        <h3 class="panel-title">区域架构</h3>
+        <h3 class="panel-title">组织架构</h3>
         <div class="panel-actions">
           <Tooltip content="展开全部" transfer>
             <span class="btn-icon" @click="expandAllTree"><Icon type="md-expand" /></span>
@@ -13,7 +13,7 @@
           <Tooltip content="收起全部" transfer>
             <span class="btn-icon" @click="collapseAllTree"><Icon type="md-contract" /></span>
           </Tooltip>
-          <Tooltip content="添加区域" transfer>
+          <Tooltip content="添加组织" transfer>
             <span class="btn-icon" @click="openAddRegionModal" v-auth="['admin-store-region_create']">
               <Icon type="md-add" />
             </span>
@@ -35,7 +35,7 @@
             @delete="confirmDeleteRegion"
           />
         </div>
-        <div v-if="!treeLoading && !regionTree.length" class="tree-empty">暂无区域数据</div>
+        <div v-if="!treeLoading && !regionTree.length" class="tree-empty">暂无组织数据</div>
       </div>
     </div>
 
@@ -46,6 +46,11 @@
           <div class="tab-bar">
             <span
               class="tab-item"
+              :class="{ active: activeTab === 'overview' }"
+              @click="switchTab('overview')"
+            >权限概况</span>
+            <span
+              class="tab-item"
               :class="{ active: activeTab === 'store' }"
               @click="switchTab('store')"
             >门店列表</span>
@@ -53,16 +58,66 @@
               class="tab-item"
               :class="{ active: activeTab === 'manager' }"
               @click="switchTab('manager')"
-            >管理人员</span>
+            >管理员</span>
+            <span
+              class="tab-item"
+              :class="{ active: activeTab === 'log' }"
+              @click="switchTab('log')"
+            >操作记录</span>
           </div>
         </div>
         <Button
+          v-if="activeTab === 'store' || activeTab === 'manager'"
           type="primary"
           v-auth="[activeTab === 'store' ? 'admin-store-add_store' : 'admin-store-region_create']"
           @click="addStoreOrManager"
         >
-          <Icon type="md-add" /> {{ activeTab === 'store' ? '添加门店' : '添加管理人员' }}
+          <Icon type="md-add" /> {{ activeTab === 'store' ? '添加门店' : '添加管理员' }}
         </Button>
+      </div>
+
+      <!-- 权限概况 -->
+      <div v-show="activeTab === 'overview'" class="table-wrap">
+        <Spin v-if="overviewLoading" size="large" fix></Spin>
+        <div v-if="!overviewLoading && selectedRegionId" class="overview-panel">
+          <div class="overview-header">
+            <div class="overview-header-main">
+              <h4>{{ overviewData.org_name || selectedRegionName }}</h4>
+              <p class="overview-desc">
+                {{ overviewData.need_migrate
+                  ? '当前仍在使用旧区域数据。请先「预演迁移」核对，再「正式迁移」后，权限概况与门店排除才会生效。'
+                  : '管理员默认拥有组织内全部门店权限；排除的门店不会自动恢复。' }}
+              </p>
+            </div>
+            <div class="overview-actions">
+              <Button size="small" @click="confirmMigrate(1)">预演迁移</Button>
+              <Button size="small" type="primary" @click="confirmMigrate(0)">正式迁移</Button>
+            </div>
+          </div>
+          <div v-if="overviewData.need_migrate" class="migrate-banner">
+            尚未执行组织架构数据迁移，左侧树仍是旧区域。迁移后本页会显示可管/排除门店。
+          </div>
+          <div class="overview-cards">
+            <div class="overview-card">
+              <div class="card-label">组织门店</div>
+              <div class="card-value">{{ overviewData.store_count || 0 }}</div>
+            </div>
+            <div class="overview-card">
+              <div class="card-label">管理员</div>
+              <div class="card-value">{{ overviewData.admin_count || 0 }}</div>
+            </div>
+          </div>
+          <Table
+            :columns="overviewAdminColumns"
+            :data="overviewData.admins || []"
+            no-data-text="暂无管理员"
+          >
+            <template slot-scope="{ row }" slot="overviewAction">
+              <span class="action-link" @click="openStorePermissionModal(row)">管理门店</span>
+            </template>
+          </Table>
+        </div>
+        <div v-if="!overviewLoading && !selectedRegionId" class="empty-tip">请先在左侧选择组织</div>
       </div>
 
       <!-- 门店筛选 -->
@@ -101,27 +156,27 @@
         <Button type="primary" @click="searchStore">查询</Button>
       </div>
 
-      <!-- 管理人员筛选 -->
+      <!-- 管理员筛选 -->
       <div class="filter-bar" v-show="activeTab === 'manager'">
         <div class="search-input">
           <Icon type="ios-search" />
           <Input
             v-model="regionFrom.keyword"
-            placeholder="搜索区域名称/ID"
+            placeholder="搜索所属组织"
             clearable
             @on-enter="searchManager"
           />
         </div>
         <Input
           v-model="regionFrom.agent_admin"
-          placeholder="搜索管理员姓名/手机号"
+          placeholder="搜索管理员名字/手机号"
           clearable
           class="filter-select-wide"
           @on-enter="searchManager"
         />
         <Select
           v-model="regionFrom.is_alone"
-          placeholder="区域隔离"
+          placeholder="组织隔离"
           clearable
           class="filter-select"
           @on-change="searchManager"
@@ -197,14 +252,14 @@
         </div>
       </div>
 
-      <!-- 管理人员表格 -->
+      <!-- 管理员表格 -->
       <div v-show="activeTab === 'manager'" class="table-wrap">
         <Table
           :columns="managerColumns"
           :data="managerList"
           :loading="managerLoading"
           highlight-row
-          no-data-text="暂无管理人员数据"
+          no-data-text="暂无管理员数据"
         >
           <template slot-scope="{ row }" slot="admin">
             <div class="manager-info">
@@ -226,8 +281,8 @@
           </template>
           <template slot-scope="{ row, index }" slot="managerAction">
             <div class="action-links">
-              <span class="action-link" @click="goAgent(row)">授权</span>
-              <span class="action-link" @click="edit(row.id)" v-auth="['admin-store-region_edit']">编辑</span>
+              <span class="action-link" @click="openStorePermissionModal(row)">管理门店</span>
+              <span class="action-link" @click="openManagerModal(row.id)" v-auth="['admin-store-region_edit']">编辑</span>
               <Dropdown @on-click="changeMenu(row, $event, index)" transfer>
                 <span class="action-link">更多 <Icon type="ios-arrow-down" size="12" /></span>
                 <DropdownMenu slot="list">
@@ -249,14 +304,34 @@
           />
         </div>
       </div>
+
+      <!-- 操作记录 -->
+      <div v-show="activeTab === 'log'" class="table-wrap">
+        <Table
+          :columns="changeLogColumns"
+          :data="changeLogList"
+          :loading="changeLogLoading"
+          no-data-text="暂无操作记录"
+        />
+        <div class="pagination">
+          <span class="page-info">共 {{ changeLogTotal }} 条</span>
+          <Page
+            :total="changeLogTotal"
+            :current="changeLogForm.page"
+            show-elevator
+            @on-change="changeLogPageChange"
+            :page-size="changeLogForm.limit"
+          />
+        </div>
+      </div>
     </div>
   </div>
   </Card>
 
-    <!-- 快捷添加/编辑区域 -->
+    <!-- 快捷添加/编辑组织 -->
     <Modal
       v-model="addRegionModal"
-      :title="editRegionId ? '编辑区域' : '添加区域'"
+      :title="editRegionId ? '编辑组织' : '添加组织'"
       footer-hide
       scrollable
       width="480"
@@ -266,14 +341,14 @@
         <div class="form-item">
           <label class="form-label">
             <span class="required">*</span>
-            上级区域：
+            上级组织：
           </label>
           <Select
             v-model="regionForm.pid"
             class="form-select"
-            placeholder="请选择上级区域"
+            placeholder="请选择上级组织"
           >
-            <Option :value="0">根区域</Option>
+            <Option :value="0">根组织</Option>
             <Option v-for="item in parentRegionOptions" :key="item.id" :value="item.id">
               {{ item.label }}
             </Option>
@@ -282,13 +357,13 @@
         <div class="form-item">
           <label class="form-label">
             <span class="required">*</span>
-            区域名称：
+            组织名称：
           </label>
           <div class="form-input-wrapper">
             <Input
               v-model="regionForm.name"
               class="form-input"
-              placeholder="请输入区域名称"
+              placeholder="请输入组织名称"
               :maxlength="20"
             />
             <span class="char-count">{{ (regionForm.name || '').length }}/20</span>
@@ -301,10 +376,61 @@
       </div>
     </Modal>
 
-    <!-- 管理门店 -->
+    <!-- 管理门店（排除模式） -->
+    <Modal
+      v-model="storePermissionModal"
+      title="管理门店"
+      scrollable
+      width="720"
+      @on-cancel="storePermissionModal = false"
+    >
+      <Spin v-if="storePermissionLoading" size="large" fix></Spin>
+      <div v-if="!storePermissionLoading" class="store-permission-modal">
+        <p class="permission-tip">
+          管理员「{{ storePermissionAdminName }}」默认拥有组织内全部门店权限，取消勾选即为排除。
+        </p>
+        <div class="permission-search">
+          <Input
+            v-model="storePermissionKeyword"
+            clearable
+            placeholder="搜索门店名称/电话/地址"
+          >
+            <Icon type="ios-search" slot="prefix" />
+          </Input>
+        </div>
+        <Table
+          :columns="storePermissionColumns"
+          :data="storePermissionDisplayList"
+          max-height="420"
+          :no-data-text="storePermissionKeyword ? '没有匹配的门店' : '该组织暂无门店'"
+        >
+          <template slot-scope="{ row }" slot="access">
+            <i-switch
+              :value="Number(row.has_access)"
+              :true-value="1"
+              :false-value="0"
+              size="large"
+              @on-change="(val) => toggleStorePermission(row.id, val)"
+            >
+              <span slot="open">可管</span>
+              <span slot="close">排除</span>
+            </i-switch>
+          </template>
+        </Table>
+        <div class="permission-summary">
+          可管 {{ storePermissionAccessCount }} 家 / 排除 {{ storePermissionExcludeCount }} 家
+        </div>
+      </div>
+      <div slot="footer">
+        <Button @click="storePermissionModal = false">取消</Button>
+        <Button type="primary" :loading="storePermissionSaving" @click="saveStorePermission">保存</Button>
+      </div>
+    </Modal>
+
+    <!-- 管理门店（迁移前兼容） -->
     <Modal
       v-model="manageStoreModal"
-      title="管理门店"
+      title="管理门店（旧模式）"
       scrollable
       width="720"
       @on-cancel="manageStoreModal = false"
@@ -385,6 +511,19 @@
         <Button type="primary" :disabled="pickerSelectedCount === 0" @click="confirmStorePicker">确定</Button>
       </div>
     </Modal>
+
+    <store-form-modal
+      v-model="storeFormModal"
+      :edit-id="storeFormEditId"
+      :default-region-id="selectedRegionId"
+      @success="onStoreFormSuccess"
+    />
+    <manager-form-modal
+      v-model="managerFormModal"
+      :edit-id="managerFormEditId"
+      :default-region-id="selectedRegionId"
+      @success="onManagerFormSuccess"
+    />
   </div>
 </template>
 
@@ -392,6 +531,8 @@
 import Setting from "@/setting";
 import util from "@/libs/util";
 import RegionTreeNode from "./components/RegionTreeNode";
+import StoreFormModal from "./components/StoreFormModal";
+import ManagerFormModal from "./components/ManagerFormModal";
 import {
   getRegionList,
   getRegionManageTree,
@@ -401,17 +542,23 @@ import {
   postRegionManage,
   deleteRegionManage,
   putRegionSetAlone,
-  getAgentLogin,
   getAgentManageStores,
   saveAgentManageStores,
   storeListApi,
   storeLogin,
   storeSetShowApi,
+  getOrganizationAdminExcludes,
+  getOrganizationAdminExcludesByAgent,
+  saveOrganizationAdminExcludes,
+  saveOrganizationAdminExcludesByAgent,
+  getOrganizationOverview,
+  getOrganizationChangeLog,
+  migrateOrganization,
 } from "@/api/store";
 
 export default {
   name: "regionList",
-  components: { RegionTreeNode },
+  components: { RegionTreeNode, StoreFormModal, ManagerFormModal },
   data() {
     return {
       roterPre: Setting.roterPre,
@@ -427,6 +574,52 @@ export default {
         name: "",
       },
       parentRegionOptions: [],
+      overviewLoading: false,
+      overviewData: {
+        org_name: "",
+        store_count: 0,
+        admin_count: 0,
+        admins: [],
+      },
+      overviewAdminColumns: [
+        { title: "管理员", key: "name", minWidth: 120 },
+        { title: "联系方式", key: "phone", minWidth: 120 },
+        { title: "可管门店", key: "access_store_count", minWidth: 90 },
+        { title: "排除门店", key: "excluded_store_count", minWidth: 90 },
+        { title: "操作", slot: "overviewAction", width: 100 },
+      ],
+      changeLogLoading: false,
+      changeLogList: [],
+      changeLogTotal: 0,
+      changeLogForm: {
+        page: 1,
+        limit: 15,
+      },
+      changeLogColumns: [
+        { title: "操作时间", key: "add_time_text", minWidth: 160 },
+        { title: "动作", key: "action", minWidth: 100 },
+        { title: "对象类型", key: "target_type", minWidth: 100 },
+        { title: "备注", key: "remark", ellipsis: true, minWidth: 200 },
+        { title: "操作人", key: "operator_name", minWidth: 100 },
+      ],
+      storeFormModal: false,
+      storeFormEditId: 0,
+      managerFormModal: false,
+      managerFormEditId: 0,
+      storePermissionModal: false,
+      storePermissionLoading: false,
+      storePermissionSaving: false,
+      storePermissionAdminName: "",
+      storePermissionOrgAdminId: 0,
+      storePermissionLegacyAgentId: 0,
+      storePermissionKeyword: "",
+      storePermissionList: [],
+      storePermissionColumns: [
+        { title: "门店名称", key: "name", minWidth: 160 },
+        { title: "联系电话", key: "phone", minWidth: 120 },
+        { title: "门店地址", key: "address", ellipsis: true, minWidth: 180 },
+        { title: "权限", slot: "access", width: 120 },
+      ],
       manageStoreModal: false,
       manageStoreLoading: false,
       manageStoreSaving: false,
@@ -464,18 +657,13 @@ export default {
         manage_region_id: "",
       },
       storeColumns: [
-        { title: "ID", key: "id", width: 70 },
-        { title: "门店信息", slot: "storeInfo", minWidth: 220 },
-        { title: "门店类型", key: "type_name", minWidth: 90 },
-        { title: "联系电话", key: "phone", minWidth: 120 },
-        { title: "门店地址", key: "address", ellipsis: true, minWidth: 160 },
-        { title: "营业时间", key: "day_time", minWidth: 120 },
+        { title: "门店信息", slot: "storeInfo", minWidth: 260 },
+        { title: "门店类型", key: "type_name", minWidth: 100 },
+        { title: "营业时间", key: "day_time", minWidth: 140 },
         { title: "营业状态", slot: "status", minWidth: 100 },
-        { title: "所属区域", key: "manage_region_name", minWidth: 100 },
-        { title: "管理人员", slot: "manager", minWidth: 120 },
         { title: "操作", slot: "storeAction", fixed: "right", minWidth: 200 },
       ],
-      // 管理人员（区域代理）
+      // 管理员（区域代理）
       managerLoading: false,
       managerList: [],
       managerTotal: 0,
@@ -488,14 +676,11 @@ export default {
         manage_region_id: 0,
       },
       managerColumns: [
-        { title: "ID", key: "id", width: 70 },
-        { title: "区域名称", key: "manage_region_name", minWidth: 120 },
-        { title: "联系人名称", key: "name", minWidth: 120 },
-        { title: "管理员", slot: "admin", minWidth: 140 },
-        { title: "联系方式", key: "phone", minWidth: 120 },
-        { title: "门店数量", key: "store_count", minWidth: 90 },
+        { title: "所属组织", key: "manage_region_name", minWidth: 140 },
+        { title: "管理员名字", key: "name", minWidth: 140 },
+        { title: "管理门店数", key: "store_count", minWidth: 110 },
         { title: "排序", key: "sort", width: 80 },
-        { title: "区域隔离", slot: "alone", minWidth: 110 },
+        { title: "组织隔离", slot: "alone", minWidth: 110 },
         { title: "操作", slot: "managerAction", fixed: "right", width: 200 },
       ],
     };
@@ -507,10 +692,30 @@ export default {
     treeCountField() {
       return this.activeTab === "manager" ? "agent_count" : "store_count";
     },
+    storePermissionAccessCount() {
+      return (this.storePermissionList || []).filter((item) => Number(item.has_access) === 1).length;
+    },
+    storePermissionExcludeCount() {
+      return (this.storePermissionList || []).filter((item) => Number(item.has_access) !== 1).length;
+    },
+    storePermissionDisplayList() {
+      const kw = (this.storePermissionKeyword || "").trim().toLowerCase();
+      if (!kw) return this.storePermissionList || [];
+      return (this.storePermissionList || []).filter((item) => {
+        const name = String(item.name || "").toLowerCase();
+        const phone = String(item.phone || "").toLowerCase();
+        const address = String(item.address || "").toLowerCase();
+        return name.includes(kw) || phone.includes(kw) || address.includes(kw);
+      });
+    },
   },
   created() {
     if (this.$route.query.tab === "manager") {
       this.activeTab = "manager";
+    } else if (this.$route.query.tab === "overview") {
+      this.activeTab = "overview";
+    } else if (this.$route.query.tab === "log") {
+      this.activeTab = "log";
     }
     this.loadRegionTree();
   },
@@ -527,6 +732,10 @@ export default {
       if ((this.$route.path || "").includes("/store/region/list")) {
         if (this.$route.query.tab === "manager") {
           this.activeTab = "manager";
+        } else if (this.$route.query.tab === "overview") {
+          this.activeTab = "overview";
+        } else if (this.$route.query.tab === "log") {
+          this.activeTab = "log";
         } else if (this.$route.query.tab === "store") {
           this.activeTab = "store";
         }
@@ -679,10 +888,15 @@ export default {
       this.regionFrom.page = 1;
       this.storeForm.manage_region_id = this.selectedRegionId > 0 ? this.selectedRegionId : "";
       this.storeForm.page = 1;
+      this.changeLogForm.page = 1;
       if (this.activeTab === "store") {
         this.getStoreList();
-      } else {
+      } else if (this.activeTab === "manager") {
         this.getManagerList();
+      } else if (this.activeTab === "overview") {
+        this.loadOverview();
+      } else if (this.activeTab === "log") {
+        this.loadChangeLog();
       }
     },
     expandAllTree() {
@@ -704,15 +918,19 @@ export default {
       this.refreshRegionTreeCounts();
       if (tab === "store") {
         this.getStoreList();
-      } else {
+      } else if (tab === "manager") {
         this.getManagerList();
+      } else if (tab === "overview") {
+        this.loadOverview();
+      } else if (tab === "log") {
+        this.loadChangeLog();
       }
     },
     addStoreOrManager() {
       if (this.activeTab === "store") {
-        this.addStore();
+        this.openStoreModal(0);
       } else {
-        this.addRegion();
+        this.openManagerModal(0);
       }
     },
     // ---------- 门店 ----------
@@ -749,40 +967,34 @@ export default {
       this.getStoreList();
     },
     addStore() {
-      const query = { from: "region" };
-      if (this.selectedRegionId) {
-        query.manage_region_id = this.selectedRegionId;
+      this.openStoreModal(0);
+    },
+    openStoreModal(id = 0) {
+      this.storeFormEditId = Number(id) || 0;
+      this.storeFormModal = true;
+    },
+    onStoreFormSuccess() {
+      this.getStoreList();
+      this.refreshRegionTreeCounts();
+    },
+    openManagerModal(id = 0) {
+      this.managerFormEditId = Number(id) || 0;
+      this.managerFormModal = true;
+    },
+    onManagerFormSuccess() {
+      this.getManagerList();
+      this.refreshRegionTreeCounts();
+      if (this.activeTab === "overview") {
+        this.loadOverview();
       }
-      this.$router.push({ path: `${this.roterPre}/store/add_store`, query });
     },
     gostore(item) {
       storeLogin(item.id)
         .then((res) => {
-          const data = res.data;
-          const expires = data.expires_time;
-          util.cookies.setStore("token", data.token, { expires });
-          util.cookies.setStore("uuid", data.user_info.id, { expires });
-          util.cookies.setStore("expires_time", expires, { expires });
-          util.cookies.setStore("pageTitle", item.name);
-          util.makeMenu(`/${data.prefix}`, data.menus);
-          const storage = window.localStorage;
-          storage.setItem("menuListStore", JSON.stringify(data.menus));
-          storage.setItem("uniqueAuthStore", JSON.stringify(data.unique_auth));
-          storage.setItem(
-            "userInfoStore",
-            JSON.stringify({
-              account: data.user_info.account,
-              head_pic: data.user_info.avatar,
-              logo: data.logo,
-              logoSmall: data.logo_square,
-              version: data.version,
-            })
-          );
-          const baseURL = Setting.apiBaseURL.replace(/adminapi/, `${item.prefix}/home/`);
-          window.open(baseURL);
+          util.openStoreBackend(res.data, { pageTitle: item.name });
         })
         .catch((err) => {
-          this.$Message.error(err.msg);
+          this.$Message.error(err.msg || "进入门店失败");
         });
     },
     operation(row) {
@@ -798,10 +1010,7 @@ export default {
     },
     changeStoreMenu(row, name, index) {
       if (name === "edit") {
-        this.$router.push({
-          path: `${this.roterPre}/store/add_store/${row.id}`,
-          query: { from: "region" },
-        });
+        this.openStoreModal(row.id);
       } else if (name === "del") {
         this.delStore(row, index);
       }
@@ -823,7 +1032,219 @@ export default {
           this.$Message.error(err.msg);
         });
     },
-    // ---------- 管理人员 ----------
+    // ---------- 权限概况 / 操作记录 ----------
+    loadOverview() {
+      if (!this.selectedRegionId) {
+        this.overviewData = {
+          org_name: "",
+          store_count: 0,
+          admin_count: 0,
+          admins: [],
+          need_migrate: true,
+        };
+        return;
+      }
+      this.overviewLoading = true;
+      getOrganizationOverview({ org_id: this.selectedRegionId })
+        .then((res) => {
+          const data = res.data || {};
+          this.overviewData = {
+            org_name: data.org_name || this.selectedRegionName,
+            store_count: data.store_count || 0,
+            admin_count: data.admin_count || 0,
+            admins: data.admins || [],
+            need_migrate: !!data.need_migrate,
+            org_id: data.org_id || 0,
+          };
+        })
+        .catch((err) => {
+          this.overviewData = {
+            org_name: this.selectedRegionName,
+            store_count: 0,
+            admin_count: 0,
+            admins: [],
+            need_migrate: true,
+          };
+          // 未迁移时后端已改为返回空数据；仅真实失败才提示
+          if (err && err.msg && err.msg !== "组织不存在") {
+            this.$Message.error(err.msg || "加载权限概况失败");
+          }
+        })
+        .finally(() => {
+          this.overviewLoading = false;
+        });
+    },
+    loadChangeLog() {
+      this.changeLogLoading = true;
+      const params = {
+        page: this.changeLogForm.page,
+        limit: this.changeLogForm.limit,
+      };
+      if (this.selectedRegionId) {
+        params.org_id = this.selectedRegionId;
+      }
+      getOrganizationChangeLog(params)
+        .then((res) => {
+          const data = res.data || {};
+          this.changeLogList = (data.list || []).map((item) => ({
+            ...item,
+            add_time_text: this.formatTime(item.add_time),
+          }));
+          this.changeLogTotal = data.count || 0;
+        })
+        .catch((err) => {
+          this.$Message.error(err.msg || "加载操作记录失败");
+        })
+        .finally(() => {
+          this.changeLogLoading = false;
+        });
+    },
+    changeLogPageChange(page) {
+      this.changeLogForm.page = page;
+      this.loadChangeLog();
+    },
+    formatTime(ts) {
+      if (!ts) return "-";
+      const d = new Date(Number(ts) * 1000);
+      const pad = (n) => (n < 10 ? `0${n}` : `${n}`);
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    },
+    confirmMigrate(dryRun = 1) {
+      const isDryRun = Number(dryRun) === 1;
+      this.$Modal.confirm({
+        title: isDryRun ? "预演数据迁移" : "正式数据迁移",
+        content: isDryRun
+          ? "将预演旧区域白名单数据迁移为「组织全量-排除」模式，不会写入数据库。"
+          : "确认正式迁移？迁移后请使用「管理门店」排除模式管理管理员门店范围。",
+        onOk: () => {
+          return migrateOrganization({ dry_run: isDryRun ? 1 : 0 })
+            .then((res) => {
+              this.$Message.success(res.msg || (isDryRun ? "预演完成" : "迁移完成"));
+              if (isDryRun) {
+                this.$Modal.info({
+                  title: "预演结果",
+                  content: JSON.stringify(res.data || {}, null, 2),
+                  width: 560,
+                });
+              } else {
+                this.loadRegionTree({ preserveExpand: true });
+                if (this.activeTab === "overview") {
+                  this.loadOverview();
+                }
+              }
+            })
+            .catch((err) => {
+              this.$Message.error(err.msg || "迁移失败");
+            });
+        },
+      });
+    },
+    // ---------- 门店权限 ----------
+    toggleStorePermission(storeId, hasAccess) {
+      const id = Number(storeId);
+      const list = this.storePermissionList || [];
+      const idx = list.findIndex((item) => Number(item.id) === id);
+      if (idx < 0) return;
+      this.$set(this.storePermissionList[idx], "has_access", Number(hasAccess) === 1 ? 1 : 0);
+    },
+    openStorePermissionModal(rowOrId, adminName) {
+      if (!this.selectedRegionId) {
+        this.$Message.warning("请先在左侧选择组织");
+        return;
+      }
+      let legacyAgentId = 0;
+      let orgAdminId = 0;
+      let name = adminName || "";
+      if (rowOrId && typeof rowOrId === "object") {
+        legacyAgentId = Number(rowOrId.legacy_agent_id || rowOrId.id || 0);
+        orgAdminId = Number(rowOrId.org_admin_id || 0);
+        name = rowOrId.name || rowOrId.admin_name || name;
+        // 管理员列表 row.id 是旧 agent id
+        if (!orgAdminId && rowOrId.id && !rowOrId.legacy_agent_id) {
+          legacyAgentId = Number(rowOrId.id);
+        }
+      } else {
+        legacyAgentId = Number(rowOrId || 0);
+      }
+      if (!legacyAgentId && !orgAdminId) {
+        this.$Message.error("管理人员无效，请先执行数据迁移");
+        return;
+      }
+      this.storePermissionLegacyAgentId = legacyAgentId;
+      this.storePermissionOrgAdminId = orgAdminId;
+      this.currentAgentId = legacyAgentId;
+      this.storePermissionAdminName = name;
+      this.storePermissionKeyword = "";
+      this.storePermissionModal = true;
+      this.storePermissionLoading = true;
+      const loader = orgAdminId
+        ? getOrganizationAdminExcludes(orgAdminId)
+        : getOrganizationAdminExcludesByAgent(legacyAgentId);
+      loader
+        .then((res) => {
+          const data = res.data || {};
+          if (!this.storePermissionOrgAdminId && data.org_admin_id) {
+            this.storePermissionOrgAdminId = Number(data.org_admin_id);
+          }
+          const stores = data.stores || [];
+          // 兼容仅返回 id 列表的旧结构
+          if (!stores.length && (data.org_store_ids || []).length) {
+            this.$Message.warning("门店详情加载不完整，请刷新后重试");
+          }
+          this.storePermissionList = stores.map((store) => ({
+            ...store,
+            has_access: Number(
+              store.has_access !== undefined ? store.has_access : store.excluded ? 0 : 1
+            ),
+          }));
+        })
+        .catch((err) => {
+          const msg = err.msg || "";
+          this.storePermissionModal = false;
+          if (msg.includes("迁移")) {
+            this.$Modal.confirm({
+              title: "需要数据迁移",
+              content: `${msg}。是否暂时使用旧版「管理门店」白名单模式？`,
+              onOk: () => {
+                this.openManageStoreModal({ id: legacyAgentId });
+              },
+            });
+          } else {
+            this.$Message.error(msg || "加载门店权限失败");
+          }
+        })
+        .finally(() => {
+          this.storePermissionLoading = false;
+        });
+    },
+    saveStorePermission() {
+      const excludedIds = (this.storePermissionList || [])
+        .filter((item) => Number(item.has_access) !== 1)
+        .map((item) => item.id);
+      this.storePermissionSaving = true;
+      const saver = this.storePermissionOrgAdminId
+        ? saveOrganizationAdminExcludes(this.storePermissionOrgAdminId, { store_ids: excludedIds })
+        : saveOrganizationAdminExcludesByAgent(this.storePermissionLegacyAgentId || this.currentAgentId, {
+            store_ids: excludedIds,
+          });
+      saver
+        .then((res) => {
+          this.$Message.success(res.msg || "保存成功");
+          this.storePermissionModal = false;
+          if (this.activeTab === "manager") {
+            this.getManagerList();
+          } else if (this.activeTab === "overview") {
+            this.loadOverview();
+          }
+        })
+        .catch((err) => {
+          this.$Message.error(err.msg || "保存失败");
+        })
+        .finally(() => {
+          this.storePermissionSaving = false;
+        });
+    },
+    // ---------- 管理员 ----------
     getManagerList() {
       this.managerLoading = true;
       const params = { ...this.regionFrom };
@@ -916,14 +1337,14 @@ export default {
     },
     changeMenu(row, name) {
       if (name === "1") {
-        this.openManageStoreModal(row);
+        this.openStorePermissionModal(row);
       } else if (name === "2") {
-        this.del(row, "删除该区域", name);
+        this.del(row, "删除该管理员", name);
       }
     },
     openManageStoreModal(row) {
       if (!this.selectedRegionId) {
-        this.$Message.warning("请先在左侧选择区域架构");
+        this.$Message.warning("请先在左侧选择组织");
         return;
       }
       const agentId = typeof row === "object" ? row.id : row;
@@ -976,7 +1397,7 @@ export default {
     },
     loadStorePickerList() {
       if (!this.currentManageRegionId) {
-        this.$Message.warning("请先选择区域架构");
+        this.$Message.warning("请先选择组织");
         return;
       }
       this.storePickerLoading = true;
@@ -1077,8 +1498,8 @@ export default {
     },
     confirmDeleteRegion(node) {
       this.$Modal.confirm({
-        title: "删除区域",
-        content: `确定删除区域「${node.name}」吗？请先删除下级区域及关联数据。`,
+        title: "删除组织",
+        content: `确定删除组织「${node.name}」吗？请先删除下级组织及关联数据。`,
         onOk: () => {
           return deleteRegionManage(node.id)
             .then((res) => {
@@ -1102,11 +1523,7 @@ export default {
       this.regionForm = { pid: 0, name: "" };
     },
     addRegion() {
-      const query = { tab: "manager" };
-      if (this.selectedRegionId) {
-        query.manage_region_id = this.selectedRegionId;
-      }
-      this.$router.push({ path: `${this.roterPre}/store/region/create`, query });
+      this.openManagerModal(0);
     },
     openAddRegionModal() {
       this.editRegionId = 0;
@@ -1140,7 +1557,7 @@ export default {
     },
     confirmAddRegion() {
       if (!this.regionForm.name.trim()) {
-        this.$Message.error("请输入区域名称");
+        this.$Message.error("请输入组织名称");
         return;
       }
       postRegionManage(this.regionForm, this.editRegionId || 0)
@@ -1154,10 +1571,7 @@ export default {
         });
     },
     edit(id) {
-      this.$router.push({
-        path: `${this.roterPre}/store/region/create/${id}`,
-        query: { tab: "manager" },
-      });
+      this.openManagerModal(id);
     },
     del(row, tit) {
       const delfromData = {
@@ -1810,5 +2224,81 @@ input:checked + .slider::before
   margin-right auto
   font-size 13px
   color #666
+
+.migrate-banner
+  margin-bottom 16px
+  padding 10px 14px
+  background #fff7e6
+  border 1px solid #ffd591
+  border-radius 6px
+  font-size 13px
+  color #ad6800
+  line-height 1.5
+
+.overview-panel
+  .overview-header
+    display flex
+    justify-content space-between
+    align-items flex-start
+    gap 16px
+    margin-bottom 20px
+  .overview-header-main
+    flex 1
+    min-width 0
+    h4
+      margin 0 0 8px
+      font-size 16px
+      font-weight 600
+      color #333
+  .overview-desc
+    margin 0
+    font-size 13px
+    color #999
+  .overview-actions
+    display flex
+    gap 8px
+    flex-shrink 0
+  .overview-cards
+    display flex
+    gap 16px
+    margin-bottom 20px
+  .overview-card
+    flex 1
+    max-width 200px
+    padding 16px 20px
+    background #f8fafc
+    border-radius 8px
+    border 1px solid #eef2f6
+  .card-label
+    font-size 13px
+    color #999
+    margin-bottom 8px
+  .card-value
+    font-size 24px
+    font-weight 600
+    color $theme-color
+
+.store-permission-modal
+  .permission-tip
+    margin 0 0 16px
+    padding 10px 12px
+    background #f0f9ff
+    border-radius 6px
+    font-size 13px
+    color #666
+    line-height 1.5
+  .permission-search
+    margin-bottom 12px
+  .permission-summary
+    margin-top 12px
+    font-size 13px
+    color #999
+    text-align right
+
+.empty-tip
+  text-align center
+  color #999
+  padding 40px 0
+  font-size 14px
 
 </style>

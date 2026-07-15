@@ -158,8 +158,17 @@ class SystemRegionAgent extends AuthController
 		$info = $info->toArray();
 		$agentAdmin = $this->getAgentAdminRecord($adminServices, $id);
 		$agentAdmin = $agentAdmin ?: [];
-		$info['account'] = $agentAdmin['account'] ?? '';
+        $info['account'] = $agentAdmin['account'] ?? '';
 		$info['admin_name'] = $agentAdmin['real_name'] ?? '';
+		if (empty($info['phone']) && !empty($agentAdmin['phone'])) {
+			$info['phone'] = $agentAdmin['phone'];
+		}
+		if (empty($info['name']) && !empty($agentAdmin['real_name'])) {
+			$info['name'] = $agentAdmin['real_name'];
+		}
+		$storedPwd = (string)($agentAdmin['pwd'] ?? '');
+		$info['pwd'] = $storedPwd;
+		$info['conf_pwd'] = $storedPwd;
 		$info['uid'] = (int)($agentAdmin['uid'] ?? 0);
 		$info['userInfo'] = [];
 		if ($info['uid'] > 0) {
@@ -349,6 +358,11 @@ class SystemRegionAgent extends AuthController
 			if ($bindUid > 0) {
 				$agentAdminData['uid'] = $bindUid;
 			}
+			$agentAdmin = $this->getAgentAdminRecord($adminServices, $agentId);
+			$editName = trim((string)($data['name'] ?? ''));
+			if ($id && $editName !== '') {
+				$agentAdminData['real_name'] = $editName;
+			}
 			if ($pwd !== '') {
 				if ($confPwd === '') {
 					throw new AdminException('请输入确认密码');
@@ -356,9 +370,11 @@ class SystemRegionAgent extends AuthController
 				if ($pwd != $confPwd) {
 					throw new AdminException('两次输入的密码不一致');
 				}
-				$agentAdminData['pwd'] = $this->services->passwordHash($pwd);
+				$existingPwd = $agentAdmin ? (string)($agentAdmin['pwd'] ?? '') : '';
+				if (!$agentAdmin || $pwd !== $existingPwd) {
+					$agentAdminData['pwd'] = $this->services->passwordHash($pwd);
+				}
 			}
-			$agentAdmin = $this->getAgentAdminRecord($adminServices, $agentId);
 			if ($agentAdmin) {
 				if (isset($agentAdminData['account']) && $agentAdminData['account'] != ($agentAdmin['account'] ?? '') && $adminServices->isAccountUsable($agentAdminData['account'], (int)$agentAdmin['id'], 3)) {
 					throw new AdminException('管理员账号已存在');
@@ -368,8 +384,12 @@ class SystemRegionAgent extends AuthController
 				}
 				$adminServices->update((int)$agentAdmin['id'], $agentAdminData);
 			} else {
+				// 账号非必填：未填时用手机号作为登录账号
 				if (empty($agentAdminData['account'])) {
-					throw new AdminException('请输入管理员账号');
+					$agentAdminData['account'] = (string)($data['phone'] ?? '');
+				}
+				if (empty($agentAdminData['account'])) {
+					throw new AdminException('请输入管理员账号或手机号');
 				}
 				if ($adminServices->count(['account' => $agentAdminData['account'], 'admin_type' => 3, 'is_del' => 0])) {
 					throw new AdminException('管理员账号已存在');

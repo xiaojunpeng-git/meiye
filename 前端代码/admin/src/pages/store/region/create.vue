@@ -9,7 +9,7 @@
 		          <span class="pl10">返回</span>
 		        </div>
 		      </router-link>
-		      <span v-text="$route.params.id ? '编辑管理人员' : '添加管理人员'" class="mr20 ml16"></span>
+		      <span v-text="$route.params.id ? '编辑管理员' : '添加管理员'" class="mr20 ml16"></span>
 		    </div>
 		  </PageHeader>
 		</div>
@@ -17,13 +17,13 @@
 			<Form ref="formItem" :model="formItem" :label-width="labelWidth" :label-position="labelPosition" :rules="ruleValidate" @submit.native.prevent>
 				<Row type="flex" :gutter="24" class="mt20">
 					<Col span="24">
-						<FormItem label="选择区域：" prop="manageRegion" label-for="manageRegion" required>
+						<FormItem label="选择组织：" prop="manageRegion" label-for="manageRegion" required>
 						  <Cascader
 						    :data="manageRegionTree"
 						    v-model="formItem.manage_region_path"
 						    change-on-select
 						    filterable
-						    placeholder="请选择区域"
+						    placeholder="请选择组织"
 						    class="inputW"
 						    @on-change="changeManageRegion"
 						  ></Cascader>
@@ -45,7 +45,7 @@
 							    <Icon type="ios-camera-outline" size="26" />
 							  </div>
 							</div>
-							<div class="tips">在选定商城用户后，该区域管理员能够在移动端的个人中心界面，看到区域统计的入口，进而查看区域统计数据。</div>
+							<div class="tips">在选定商城用户后，该组织管理员能够在移动端的个人中心界面，看到组织统计的入口，进而查看组织统计数据。</div>
 					    </FormItem>
 					</Col>
 					<Col span="24">
@@ -69,12 +69,12 @@
 					    </FormItem>
 					</Col>
 					<Col span="24" v-if="formItem.manage_region_id">
-						<FormItem label="区域隔离：" label-for="is_alone" prop="is_alone">
+						<FormItem label="组织隔离：" label-for="is_alone" prop="is_alone">
 							<Switch size="large" v-model="formItem.is_alone" :false-value="0" :true-value="1">
 								<span slot="open" :true-value="1">开启</span>
 								<span slot="close" :false-value="0">关闭</span>
 							</Switch>
-							<div class="tips">开启后，需于进店规则 > 用户定位处开启区域隔离推荐。当用户定位处于本区域设置的推荐地区时，系统会推荐区域内的最近门店，并且用户只能在本区域内切换门店。</div>
+							<div class="tips">开启后，需于进店规则 > 用户定位处开启组织隔离推荐。当用户定位处于本组织设置的推荐地区时，系统会推荐组织内的最近门店，并且用户只能在本组织内切换门店。</div>
 						</FormItem>
 					</Col>
 					<Col span="24">
@@ -130,7 +130,7 @@
 			};
 			let validateManageRegion = (rule, value, callback) => {
 				if (!this.formItem.manage_region_id) {
-					callback(new Error('请选择区域'))
+					callback(new Error('请选择组织'))
 				} else {
 					callback()
 				}
@@ -179,7 +179,7 @@
 			};
 			return{
 				routerPre: Setting.roterPre,
-				id:0, //区域id
+				id:0, // 管理员 id
 				formItem:{
 					manage_region_id: 0,
 					manage_region_path: [],

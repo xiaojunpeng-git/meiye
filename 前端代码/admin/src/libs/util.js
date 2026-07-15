@@ -67,6 +67,79 @@ util.makeMenu = function makeMenu(prefix, menus) {
   }
 };
 
+/**
+ * 平台端免密进入门店后台（写入门店端 cookie / localStorage 后打开门店首页）
+ * 开发预览 18081 与门店集成页 8080 不同端口时，通过 store_auto_login.html 桥接会话。
+ */
+util.openStoreBackend = function openStoreBackend(data, options = {}) {
+  if (!data || !data.token) {
+    throw new Error('门店登录信息无效');
+  }
+  const menus = JSON.parse(JSON.stringify(data.menus || []));
+  util.makeMenu(`/${data.prefix}`, menus);
+  const expires = data.expires_time;
+  const pageTitle = options.pageTitle || '';
+  util.cookies.setStore('token', data.token, { expires });
+  util.cookies.setStore('uuid', data.user_info.id, { expires });
+  util.cookies.setStore('expires_time', expires, { expires });
+  if (pageTitle) {
+    util.cookies.setStore('pageTitle', pageTitle, { expires });
+  }
+  const userInfoStore = {
+    account: data.user_info.account,
+    head_pic: data.user_info.avatar,
+    logo: data.logo,
+    logoSmall: data.logo_square,
+    version: data.version,
+  };
+  const storagePayload = {
+    menuListStore: JSON.stringify(menus),
+    uniqueAuthStore: JSON.stringify(data.unique_auth || []),
+    userInfoStore: JSON.stringify(userInfoStore),
+  };
+  try {
+    window.localStorage.setItem('menuListStore', storagePayload.menuListStore);
+    window.localStorage.setItem('uniqueAuthStore', storagePayload.uniqueAuthStore);
+    window.localStorage.setItem('userInfoStore', storagePayload.userInfoStore);
+  } catch (e) {
+    // ignore
+  }
+
+  const storeOrigin = Setting.apiBaseURL.replace(/\/adminapi\/?$/, '');
+  const sameOrigin = !storeOrigin || storeOrigin === window.location.origin;
+  if (sameOrigin) {
+    const baseURL = `${storeOrigin}/${data.prefix}/home/`;
+    window.open(baseURL);
+    return;
+  }
+
+  const bridgeUrl = `${storeOrigin}/store_auto_login.html`;
+  const win = window.open(bridgeUrl);
+  if (!win) {
+    throw new Error('请允许浏览器弹出窗口');
+  }
+  const payload = {
+    token: data.token,
+    uuid: String(data.user_info.id),
+    expires_time: expires,
+    pageTitle,
+    storage: storagePayload,
+  };
+  let tries = 0;
+  const timer = setInterval(() => {
+    tries += 1;
+    if (win.closed || tries > 60) {
+      clearInterval(timer);
+      return;
+    }
+    try {
+      win.postMessage({ type: 'MOHE_STORE_AUTO_LOGIN', payload }, storeOrigin);
+    } catch (e) {
+      // ignore
+    }
+  }, 100);
+};
+
 function requestAnimation(task) {
   if ('requestAnimationFrame' in window) {
     return window.requestAnimationFrame(task);

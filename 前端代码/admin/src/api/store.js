@@ -984,3 +984,87 @@ export function orderReissueOrderApi(id, params) {
 		  params
   });
 }
+
+/**
+ * @description 组织架构-完整树
+ */
+export function getOrganizationTree() {
+  return request({
+    url: '/region/organization/tree',
+    method: 'get'
+  });
+}
+
+/**
+ * @description 组织架构-保存
+ */
+export function saveOrganization(id, data) {
+  return request({
+    url: `/region/organization/${id || 0}`,
+    method: 'post',
+    data
+  });
+}
+
+/**
+ * @description 组织架构-迁移旧数据
+ */
+export function migrateOrganization(data) {
+  return request({
+    url: '/region/organization/migrate',
+    method: 'post',
+    data
+  });
+}
+
+/**
+ * @description 组织架构-管理员排除门店
+ */
+export function getOrganizationAdminExcludes(orgAdminId) {
+  return request({
+    url: `/region/organization/admin_excludes/${orgAdminId}`,
+    method: 'get'
+  });
+}
+
+export function getOrganizationAdminExcludesByAgent(legacyAgentId) {
+  return request({
+    url: `/region/organization/admin_excludes_by_agent/${legacyAgentId}`,
+    method: 'get'
+  });
+}
+
+export function saveOrganizationAdminExcludes(orgAdminId, data) {
+  return request({
+    url: `/region/organization/admin_excludes/${orgAdminId}`,
+    method: 'post',
+    data
+  });
+}
+
+export function saveOrganizationAdminExcludesByAgent(legacyAgentId, data) {
+  return request({
+    url: `/region/organization/admin_excludes_by_agent/${legacyAgentId}`,
+    method: 'post',
+    data
+  });
+}
+
+export function getOrganizationOverview(params) {
+  return request({
+    url: '/region/organization/overview',
+    method: 'get',
+    params
+  });
+}
+
+/**
+ * @description 组织架构-操作记录
+ */
+export function getOrganizationChangeLog(params) {
+  return request({
+    url: '/region/organization/change_log',
+    method: 'get',
+    params
+  });
+}
