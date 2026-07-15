@@ -2077,14 +2077,14 @@ Route::group('adminapi', function () {
 			Route::post('transfer/confirm/:id', 'v1.product.inventory.StoreStockTransfer/confirm')->option(['real_name' => '确认调拨']);
 			Route::post('transfer/reverse/:id', 'v1.product.inventory.StoreStockTransfer/reverse')->option(['real_name' => '调拨冲销']);
 
-			//院装·项目耗材配方
-			Route::get('recipe/list', 'v1.product.inventory.StoreProjectConsumableRecipe/index')->option(['real_name' => '项目耗材配方列表']);
-			Route::get('recipe/info/:id', 'v1.product.inventory.StoreProjectConsumableRecipe/info')->option(['real_name' => '项目耗材配方详情']);
-			Route::post('recipe/save/:id', 'v1.product.inventory.StoreProjectConsumableRecipe/save')->option(['real_name' => '保存项目耗材配方']);
-			Route::post('recipe/status/:id', 'v1.product.inventory.StoreProjectConsumableRecipe/setStatus')->option(['real_name' => '启用停用项目耗材配方']);
-			Route::delete('recipe/:id', 'v1.product.inventory.StoreProjectConsumableRecipe/delete')->option(['real_name' => '删除项目耗材配方']);
+			//院装·项目配方
+			Route::get('recipe/list', 'v1.product.inventory.StoreProjectConsumableRecipe/index')->option(['real_name' => '项目配方列表']);
+			Route::get('recipe/info/:id', 'v1.product.inventory.StoreProjectConsumableRecipe/info')->option(['real_name' => '项目配方详情']);
+			Route::post('recipe/save/:id', 'v1.product.inventory.StoreProjectConsumableRecipe/save')->option(['real_name' => '保存项目配方']);
+			Route::post('recipe/status/:id', 'v1.product.inventory.StoreProjectConsumableRecipe/setStatus')->option(['real_name' => '启用停用项目配方']);
+			Route::delete('recipe/:id', 'v1.product.inventory.StoreProjectConsumableRecipe/delete')->option(['real_name' => '删除项目配方']);
 
-			//院装·领用/退回明细与统计
+			//院装·院装管理（领用/退回明细与统计）
 			Route::get('salon/usage/list', 'v1.product.inventory.SalonStockReport/usageList')->option(['real_name' => '院装领用退回明细']);
 			Route::get('salon/usage/statistics', 'v1.product.inventory.SalonStockReport/statistics')->option(['real_name' => '院装耗材统计']);
 		});
@@ -2441,6 +2441,17 @@ Route::group('adminapi', function () {
         Route::put('system_out/set_status/:id/:status', 'v1.out.SystemOut/set_status')->option(['real_name' => '设置账号是否禁用']);
         //删除账号
         Route::delete('system_out/delete/:id', 'v1.out.SystemOut/delete')->option(['real_name' => '删除账号']);
+
+        //系统更新日志
+        Route::get('changelog', 'v1.system.SystemChangelog/index')->option(['real_name' => '更新日志列表']);
+        Route::post('changelog', 'v1.system.SystemChangelog/save')->option(['real_name' => '新增更新日志']);
+        Route::post('changelog/upsert_release', 'v1.system.SystemChangelog/upsertRelease')->option(['real_name' => '按release_key幂等写入更新日志']);
+        Route::post('changelog/copy/:id', 'v1.system.SystemChangelog/copy')->option(['real_name' => '复制更新日志为草稿']);
+        Route::put('changelog/publish/:id', 'v1.system.SystemChangelog/publish')->option(['real_name' => '发布更新日志']);
+        Route::put('changelog/offline/:id', 'v1.system.SystemChangelog/offline')->option(['real_name' => '下架更新日志']);
+        Route::put('changelog/:id', 'v1.system.SystemChangelog/update')->option(['real_name' => '编辑更新日志']);
+        Route::delete('changelog/:id', 'v1.system.SystemChangelog/delete')->option(['real_name' => '删除更新日志草稿']);
+        Route::get('changelog/:id', 'v1.system.SystemChangelog/read')->option(['real_name' => '更新日志详情']);
 
     })->middleware([
         \app\http\middleware\admin\AdminAuthTokenMiddleware::class,

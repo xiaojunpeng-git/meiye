@@ -106,6 +106,14 @@ export default {
 		      title: '排班'
 		  },
 		  component: () => import('@/pages/schedule/list')
+		},
+		{
+		  path: 'changelog/index',
+		  name: `${pre}changelog`,
+		  meta: {
+		      title: '更新日志'
+		  },
+		  component: () => import('@/pages/changelog/index')
 		}
     ]
 };

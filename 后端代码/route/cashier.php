@@ -100,6 +100,10 @@ Route::group('cashierapi', function () {
         //收银台用户储值
         Route::post('store/recharge', 'Recharge/recharge')->middleware(BlockerMiddleware::class, 'cashier')->option(['real_name' => '获取储值套餐']);
 
+        //系统更新日志（只读轻量）
+        Route::get('changelog/unread', 'SystemChangelog/unread')->option(['real_name' => '更新日志未读']);
+        Route::get('changelog', 'SystemChangelog/index')->option(['real_name' => '更新日志列表']);
+        Route::get('changelog/:id', 'SystemChangelog/read')->option(['real_name' => '更新日志详情']);
         //获取登录店员详情
         Route::get('user/cashier_info', 'User/getCashierInfo')->option(['real_name' => '获取登录店员详情']);
 		//获取当前门店店员列表和店员信息

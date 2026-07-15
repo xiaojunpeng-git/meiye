@@ -150,6 +150,9 @@ Route::group('storeapi', function () {
         Route::get('store/qrcode', 'system.Store/store_qrcode')->option(['real_name' => '获取门店二维码']);
         //获取门店列表
         Route::get('store/list', 'system.Store/store_list')->option(['real_name' => '获取门店列表']);
+        //系统更新日志（只读）
+        Route::get('changelog', 'system.SystemChangelog/index')->option(['real_name' => '更新日志列表']);
+        Route::get('changelog/:id', 'system.SystemChangelog/read')->option(['real_name' => '更新日志详情']);
     })->middleware([AuthTokenMiddleware::class, StoreCkeckRoleMiddleware::class]);
 
     /**
@@ -333,6 +336,10 @@ Route::group('storeapi', function () {
 		Route::get('staff', 'staff.StoreStaff/index')->option(['real_name' => '获取门店店员列表']);
         //获取门店店员详情
         Route::get('read/:id', 'staff.StoreStaff/read')->option(['real_name' => '获取门店店员详情']);
+        //店员专属客户（须在 staff/:id 之前，避免被 :id 吞掉）
+        Route::get('staff/customer/:id', 'staff.StoreStaff/getStaffCustomer')->option(['real_name' => '获取店员专属客户']);
+        //店员业绩订单
+        Route::get('staff/performance/:id', 'staff.StoreStaff/getStaffPerformance')->option(['real_name' => '获取店员业绩列表']);
         //获取门店店员详情
         Route::get('staff/:id', 'staff.StoreStaff/read')->option(['real_name' => '获取门店店员详情']);
 		//获取店员详情
@@ -603,14 +610,14 @@ Route::group('storeapi', function () {
 			Route::post('transfer/confirm/:id', 'product.inventory.StoreStockTransfer/confirm')->option(['real_name' => '确认调拨']);
 			Route::post('transfer/reverse/:id', 'product.inventory.StoreStockTransfer/reverse')->option(['real_name' => '调拨冲销']);
 
-			//院装·项目耗材配方
-			Route::get('recipe/list', 'product.inventory.StoreProjectConsumableRecipe/index')->option(['real_name' => '项目耗材配方列表']);
-			Route::get('recipe/info/:id', 'product.inventory.StoreProjectConsumableRecipe/info')->option(['real_name' => '项目耗材配方详情']);
-			Route::post('recipe/save/:id', 'product.inventory.StoreProjectConsumableRecipe/save')->option(['real_name' => '保存项目耗材配方']);
-			Route::post('recipe/status/:id', 'product.inventory.StoreProjectConsumableRecipe/setStatus')->option(['real_name' => '启用停用项目耗材配方']);
-			Route::delete('recipe/:id', 'product.inventory.StoreProjectConsumableRecipe/delete')->option(['real_name' => '删除项目耗材配方']);
+			//院装·项目配方
+			Route::get('recipe/list', 'product.inventory.StoreProjectConsumableRecipe/index')->option(['real_name' => '项目配方列表']);
+			Route::get('recipe/info/:id', 'product.inventory.StoreProjectConsumableRecipe/info')->option(['real_name' => '项目配方详情']);
+			Route::post('recipe/save/:id', 'product.inventory.StoreProjectConsumableRecipe/save')->option(['real_name' => '保存项目配方']);
+			Route::post('recipe/status/:id', 'product.inventory.StoreProjectConsumableRecipe/setStatus')->option(['real_name' => '启用停用项目配方']);
+			Route::delete('recipe/:id', 'product.inventory.StoreProjectConsumableRecipe/delete')->option(['real_name' => '删除项目配方']);
 
-			//院装·领用/退回明细与统计
+			//院装·院装管理（领用/退回明细与统计）
 			Route::get('salon/usage/list', 'product.inventory.SalonStockReport/usageList')->option(['real_name' => '院装领用退回明细']);
 			Route::get('salon/usage/statistics', 'product.inventory.SalonStockReport/statistics')->option(['real_name' => '院装耗材统计']);
 		});

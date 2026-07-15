@@ -1,5 +1,7 @@
 <script>
 import { getUserInfo, getLogout } from '@/api/user.js';
+import { getChangelogUnread } from '@/api/changelog.js';
+import { LAST_CHANGELOG_READ_TIME } from '@/config/cache';
 import { toLogin } from '@/libs/login.js';
 import { mapGetters, mapMutations } from 'vuex';
 import colors from '@/mixins/color.js';
@@ -16,6 +18,7 @@ export default {
 			loginType: 'h5',
 			showModal: false,
 			homeHide: false,
+			changelogUnread: false,
 		};
 	},
 	mixins: [colors],
@@ -23,6 +26,7 @@ export default {
 	onShow() {
 		if (this.isLogin) {
 			this.getUserInfo();
+			this.checkChangelogUnread();
 		} else {
 			toLogin();
 		}
@@ -45,6 +49,18 @@ export default {
 			getUserInfo().then((res) => {
 				that.userInfo = res.data;
 			});
+		},
+		checkChangelogUnread() {
+			getChangelogUnread()
+				.then((res) => {
+					const data = res.data || {};
+					const lastRead = Number(uni.getStorageSync(LAST_CHANGELOG_READ_TIME) || 0);
+					const latest = Number(data.latest_publish_time || 0);
+					this.changelogUnread = latest > lastRead;
+				})
+				.catch(() => {
+					this.changelogUnread = false;
+				});
 		},
 		autoplayChange(event) {
 			this.SET_AUTOPLAY(event.detail.value);
@@ -131,6 +147,13 @@ export default {
 				<navigator url="/pages/users/user_agreement_list/index" hover-class="none" class="item acea-row row-between-wrapper">
 					<view>政策协议</view>
 					<view class="input grab">
+						<text class="iconfont icon-ic_rightarrow"></text>
+					</view>
+				</navigator>
+				<navigator url="/pages/users/system_changelog/index" hover-class="none" class="item acea-row row-between-wrapper">
+					<view>系统更新日志</view>
+					<view class="grab acea-row row-middle">
+						<view class="changelog-dot" v-if="changelogUnread"></view>
 						<text class="iconfont icon-ic_rightarrow"></text>
 					</view>
 				</navigator>
@@ -236,6 +259,13 @@ export default {
 		height: 98rpx;
 		border-radius: 24rpx;
 		margin: 30rpx auto 0 auto;
+	}
+	.changelog-dot {
+		width: 16rpx;
+		height: 16rpx;
+		border-radius: 50%;
+		background-color: #e93323;
+		margin-right: 8rpx;
 	}
 }
 </style>

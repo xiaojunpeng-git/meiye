@@ -731,6 +731,15 @@ export default {
         typeMole: 'performance'
       },
       component: () => import('@/components/fromSubmit/commonForm.vue')
+    },
+    {
+      path: 'changelog',
+      name: `${pre}changelog`,
+      meta: {
+        auth: ['setting-system-changelog'],
+        title: '更新日志'
+      },
+      component: () => import('@/pages/setting/changelog/index')
     }
   ]
 };

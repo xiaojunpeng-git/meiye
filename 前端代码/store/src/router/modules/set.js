@@ -135,5 +135,14 @@ export default {
 			},
 			component: () => import('@/pages/setting/cityDelivery/index')
 		},
+		{
+			path: 'changelog',
+			name: `${pre}changelog`,
+			meta: {
+				title: '更新日志',
+				auth: ['store-set-changelog']
+			},
+			component: () => import('@/pages/setting/changelog/index')
+		},
 	]
 };
