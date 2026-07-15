@@ -2998,6 +2998,18 @@ Route::group('adminapi', function () {
         \app\http\middleware\admin\AdminAuthTokenMiddleware::class,
         \app\http\middleware\admin\AdminCkeckRoleMiddleware::class
     ])->middleware(\app\http\middleware\SystemLogMiddleware::class, 'admin');
+    /** 培训资料中心 */
+    Route::group('training/document', function () {
+        Route::get('list', 'v1.system.TrainingDocument/index')->option(['real_name' => '培训资料列表']);
+        Route::post('upload', 'v1.system.TrainingDocument/upload')->option(['real_name' => '上传培训资料']);
+        Route::post('save', 'v1.system.TrainingDocument/save')->option(['real_name' => '保存培训资料']);
+        Route::post('status/:id', 'v1.system.TrainingDocument/status')->option(['real_name' => '更新培训资料状态']);
+        Route::get('download/:id', 'v1.system.TrainingDocument/download')->option(['real_name' => '下载培训资料']);
+    })->middleware([
+        \app\http\middleware\admin\AdminAuthTokenMiddleware::class,
+        \app\http\middleware\admin\AdminCkeckRoleMiddleware::class
+    ])->middleware(\app\http\middleware\SystemLogMiddleware::class, 'admin');
+
     /**
      * miss 路由
      */

@@ -14,6 +14,22 @@ export function merchantHome(data) {
 	return request.get('merchant/home', data || {});
 }
 
+export function merchantTrainingDocuments(data) {
+	return request.get('merchant/training/document/list', data || {});
+}
+
+/** 受控下载：返回文件流；前端用带 token 的 downloadFile 拉取 */
+export function merchantTrainingDocumentDownloadUrl(id, data) {
+	const q = data || {};
+	const parts = [];
+	Object.keys(q).forEach((k) => {
+		if (q[k] === undefined || q[k] === null || q[k] === '') return;
+		parts.push(`${encodeURIComponent(k)}=${encodeURIComponent(q[k])}`);
+	});
+	const qs = parts.length ? `?${parts.join('&')}` : '';
+	return `merchant/training/document/download/${id}${qs}`;
+}
+
 export function merchantCustomerSegments(data) {
 	return request.get('merchant/customer/segments', data || {});
 }

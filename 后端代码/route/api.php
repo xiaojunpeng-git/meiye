@@ -972,6 +972,8 @@ Route::group('api', function () {
 		Route::get('access', 'v1.merchant.MerchantAccess/access')->option(['real_name' => '商家入口权限']);
 		Route::post('context/switch', 'v1.merchant.MerchantAccess/switchContext')->option(['real_name' => '切换商家身份上下文']);
 		Route::get('home', 'v1.merchant.MerchantBiz/home')->option(['real_name' => '商家首页聚合']);
+		Route::get('training/document/list', 'v1.merchant.MerchantBiz/trainingDocuments')->option(['real_name' => '商家培训资料列表']);
+		Route::get('training/document/download/:id', 'v1.merchant.MerchantBiz/trainingDocumentDownload')->option(['real_name' => '商家培训资料下载']);
 		Route::get('customer/segments', 'v1.merchant.MerchantBiz/customerSegments')->option(['real_name' => '客户客群']);
 		Route::get('customer/mine/summary', 'v1.merchant.MerchantBiz/customerMineSummary')->option(['real_name' => '我的客户汇总']);
 		Route::post('customer/create', 'v1.merchant.MerchantBiz/customerCreate')->option(['real_name' => '商家新增客户']);

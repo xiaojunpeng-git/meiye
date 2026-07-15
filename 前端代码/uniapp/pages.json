@@ -2598,6 +2598,13 @@
 						"navigationBarTitleText": "本人业绩",
 						"navigationBarBackgroundColor": "#ffffff"
 					}
+				},
+				{
+					"path": "training/index",
+					"style": {
+						"navigationBarTitleText": "培训资料",
+						"navigationBarBackgroundColor": "#ffffff"
+					}
 				}
 			]
 		}

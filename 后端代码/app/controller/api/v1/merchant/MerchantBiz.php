@@ -6,6 +6,7 @@ use app\services\merchant\MerchantAccessServices;
 use app\services\merchant\MerchantCustomerServices;
 use app\services\merchant\MerchantDataServices;
 use app\services\merchant\MerchantHomeServices;
+use app\services\system\TrainingDocumentServices;
 use app\services\merchant\MerchantYejiServices;
 use app\services\order\StoreDebtServices;
 use app\model\order\StoreDebt;
@@ -38,6 +39,72 @@ class MerchantBiz
         /** @var MerchantHomeServices $services */
         $services = app()->make(MerchantHomeServices::class);
         return app('json')->success($services->overview($uid, $access));
+    }
+
+    /** 商家手机端培训资料列表：当前门店 ∈ scope，按任职角色过滤。 */
+    public function trainingDocuments(Request $request)
+    {
+        [$uid, $access] = $this->access($request);
+        [$storeId, $roleIds] = $this->resolveTrainingContext($uid, $access);
+        $where = $request->getMore([
+            ['page', 1],
+            ['limit', 20],
+            ['keyword', ''],
+            ['category', ''],
+        ]);
+        /** @var TrainingDocumentServices $services */
+        $services = app()->make(TrainingDocumentServices::class);
+        return app('json')->success($services->userList('mobile', $storeId, $roleIds, $where));
+    }
+
+    /** 商家手机端受控下载：可见性与门店后台同源校验，并写下载审计。 */
+    public function trainingDocumentDownload(Request $request, $id = 0)
+    {
+        [$uid, $access] = $this->access($request);
+        $docId = (int)($id ?: $request->param('id', 0));
+        if ($docId <= 0) {
+            throw new \think\exception\ValidateException('参数错误');
+        }
+        [$storeId, $roleIds, $accountName] = $this->resolveTrainingContext($uid, $access, true);
+        /** @var TrainingDocumentServices $services */
+        $services = app()->make(TrainingDocumentServices::class);
+        $file = $services->download($docId, 'mobile', $uid, $accountName, $storeId, $roleIds);
+        return download($file['file_path'], $file['file_name']);
+    }
+
+    /**
+     * @return array{0:int,1:array,2?:string} storeId, roleIds[, accountName]
+     */
+    protected function resolveTrainingContext(int $uid, array $access, bool $withName = false): array
+    {
+        $storeId = (int)($access['active_store_id'] ?? 0);
+        $scope = array_values(array_unique(array_filter(array_map('intval', (array)($access['scope_store_ids'] ?? [])))));
+        if ($storeId <= 0) {
+            throw new \think\exception\ValidateException('请先选择门店');
+        }
+        // scope 为空也拒绝：禁止用任意 active_store_id 绕过授权门店
+        if (!$scope || !in_array($storeId, $scope, true)) {
+            throw new \think\exception\ValidateException('当前门店不在资料访问范围内');
+        }
+        $roleIds = [];
+        $accountName = '商家用户';
+        try {
+            /** @var \app\services\store\SystemStoreStaffServices $staffServices */
+            $staffServices = app()->make(\app\services\store\SystemStoreStaffServices::class);
+            $staffRow = $staffServices->getStaffInfoByUid($uid, $storeId);
+            $staff = $staffRow ? (is_array($staffRow) ? $staffRow : $staffRow->toArray()) : null;
+            if ($staff) {
+                $rolesRaw = $staff['roles'] ?? [];
+                if (is_string($rolesRaw)) {
+                    $rolesRaw = $rolesRaw === '' ? [] : explode(',', $rolesRaw);
+                }
+                $roleIds = array_values(array_unique(array_filter(array_map('intval', (array)$rolesRaw))));
+                $accountName = (string)($staff['staff_name'] ?? $accountName);
+            }
+        } catch (\Throwable $e) {
+            $roleIds = [];
+        }
+        return $withName ? [$storeId, $roleIds, $accountName] : [$storeId, $roleIds];
     }
 
     public function customerSegments(Request $request)

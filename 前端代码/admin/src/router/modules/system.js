@@ -167,6 +167,15 @@ export default {
         title: '导入记录'
       },
       component: () => import('@/pages/system/download/importRecord')
+    },
+    {
+      path: 'training/document',
+      name: `${pre}trainingDocument`,
+      meta: {
+        auth: ['system-training-document'],
+        title: '培训资料中心'
+      },
+      component: () => import('@/pages/system/trainingDocument/index')
     }
   ]
 };

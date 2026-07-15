@@ -58,6 +58,10 @@
 			<!-- 设置：复用买家端账号级消息/安全页（同一登录态） -->
 			<view class="card mt">
 				<view class="card__sub">设置</view>
+				<view class="menu-item" @click="goUrl('/pages/merchant/training/index')">
+					<text>培训资料</text>
+					<text class="arrow">›</text>
+				</view>
 				<view class="menu-item" @click="goUrl('/pages/users/message_center/index')">
 					<text>消息通知</text>
 					<text class="arrow">›</text>

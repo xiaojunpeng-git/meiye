@@ -1006,6 +1006,12 @@ Route::group('storeapi', function () {
 
     })->middleware([AuthTokenMiddleware::class, StoreCkeckRoleMiddleware::class])->middleware(\app\http\middleware\SystemLogMiddleware::class, 'store');
 
+    /** 培训资料中心 */
+    Route::group('training/document', function () {
+        Route::get('list', 'system.TrainingDocument/index')->option(['real_name' => '培训资料列表']);
+        Route::get('download/:id', 'system.TrainingDocument/download')->option(['real_name' => '下载培训资料']);
+    })->middleware([AuthTokenMiddleware::class, StoreCkeckRoleMiddleware::class])->middleware(\app\http\middleware\SystemLogMiddleware::class, 'store');
+
     /**
      * miss 路由
      */
@@ -1023,5 +1029,4 @@ Route::group('storeapi', function () {
 	AllowOriginMiddleware::class,
 	StationOpenMiddleware::class
 ]);
-
 
