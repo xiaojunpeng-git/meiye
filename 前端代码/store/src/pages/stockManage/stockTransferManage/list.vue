@@ -29,7 +29,7 @@
 							placeholder="请输入调拨单号"
 							class="input-add"
 						></Input>
-						<Button type="primary" class="ml14" @click="searchs">查询</Button>
+						<Button type="primary" class="ml14" @click="searchs">查询 <span class="enter-key">↵</span></Button>
 						<Button class="ml14" @click="reset">重置</Button>
 					</FormItem>
 				</Form>
@@ -37,7 +37,7 @@
 		</Card>
 		<Card :bordered="false" dis-hover class="ivu-mt">
 			<div class="op-tips">确认调拨才会改库存；冲销只能从已确认原单发起；双方门店须已有同源商品，不能自己调自己。</div>
-			<Button type="primary" class="mt10" @click="add">新建自由调拨</Button>
+			<Button type="primary" class="mt10" @click="openForm()">新建自由调拨</Button>
 			<Table class="mt25" :columns="columns" :data="orderList" :loading="loading" :border="false">
 				<template slot-scope="{ row }" slot="status">
 					<Tag :color="statusColor(row.status)" size="medium">{{ row.status_name || '-' }}</Tag>
@@ -51,7 +51,7 @@
 					<a @click="showInfo(row)">详情</a>
 					<template v-if="row.status == 0">
 						<Divider type="vertical" />
-						<a @click="edit(row)">编辑</a>
+						<a @click="openForm(row.id)">编辑</a>
 						<Divider type="vertical" />
 						<a @click="confirmRow(row)">确认</a>
 						<Divider type="vertical" />
@@ -83,6 +83,9 @@
 				<p>状态：{{ infoData.status_name }}</p>
 				<p>调出门店：{{ infoData.from_store_name }}</p>
 				<p>调入门店：{{ infoData.to_store_name }}</p>
+				<p>调拨人：{{ infoData.transfer_staff_name || '-' }}</p>
+				<p>调拨时间：{{ infoData.transfer_date || '-' }}</p>
+				<p>创建人：{{ infoData.create_admin_name || '-' }}</p>
 				<p>关联请货：{{ infoData.request_id || '-' }}</p>
 				<p>备注：{{ infoData.remark || '-' }}</p>
 				<p>创建时间：{{ infoData.add_time || '-' }}</p>
@@ -105,6 +108,13 @@
 				</template>
 			</Table>
 		</Modal>
+
+		<form-modal
+			v-model="formModal"
+			:edit-id="formEditId"
+			:request-id="formRequestId"
+			@success="getList"
+		/>
 	</div>
 </template>
 
@@ -119,9 +129,11 @@
 		stockTransferDeleteApi,
 		stockTransferReverseApi
 	} from '@/api/stockRequestTransfer';
+	import FormModal from './add';
 
 	export default {
 		name: 'stockTransferList',
+		components: { FormModal },
 		data() {
 			return {
 				routePre: Setting.routePre,
@@ -139,11 +151,17 @@
 				reverseModal: false,
 				reverseId: 0,
 				reverseDetails: [],
+				formModal: false,
+				formEditId: 0,
+				formRequestId: 0,
 				columns: [
 					{ title: '调拨单号', key: 'order_sn', minWidth: 160 },
 					{ title: '类型', slot: 'type', minWidth: 100 },
 					{ title: '调出门店', key: 'from_store_name', minWidth: 120 },
 					{ title: '调入门店', key: 'to_store_name', minWidth: 120 },
+					{ title: '调拨人', key: 'transfer_staff_name', minWidth: 100, render: (h, { row }) => h('span', row.transfer_staff_name || '-') },
+					{ title: '调拨时间', key: 'transfer_date', minWidth: 110, render: (h, { row }) => h('span', row.transfer_date || '-') },
+					{ title: '创建人', key: 'create_admin_name', minWidth: 100, render: (h, { row }) => h('span', row.create_admin_name || '-') },
 					{ title: '状态', slot: 'status', minWidth: 90 },
 					{ title: '备注', key: 'remark', minWidth: 120, render: (h, { row }) => h('span', row.remark || '-') },
 					{ title: '创建时间', key: 'add_time', minWidth: 150 },
@@ -178,11 +196,21 @@
 		},
 		created() {
 			this.getList();
+			this.openFromRouteQuery();
 		},
 		methods: {
 			statusColor(status) {
 				const map = { 0: 'default', 1: 'green', 2: 'red' };
 				return map[status] || 'default';
+			},
+			openFromRouteQuery() {
+				const requestId = Number(this.$route.query.request_id || 0);
+				if (requestId > 0) {
+					this.openForm(0, requestId);
+					const query = { ...this.$route.query };
+					delete query.request_id;
+					this.$router.replace({ path: this.$route.path, query }).catch(() => {});
+				}
 			},
 			getList() {
 				this.loading = true;
@@ -212,11 +240,10 @@
 				this.formValidate.page = page;
 				this.getList();
 			},
-			add() {
-				this.$router.push({ path: `${this.routePre}/stock/transfer/add/0` });
-			},
-			edit(row) {
-				this.$router.push({ path: `${this.routePre}/stock/transfer/add/${row.id}` });
+			openForm(id = 0, requestId = 0) {
+				this.formEditId = Number(id) || 0;
+				this.formRequestId = Number(requestId) || 0;
+				this.formModal = true;
 			},
 			showInfo(row) {
 				stockTransferInfoApi(row.id).then(res => {
@@ -318,4 +345,5 @@
 	.page { margin-top: 20px; }
 	.priceBox { width: 100px; }
 	.info-box p { margin-bottom: 6px; font-size: 13px; }
+	.enter-key { margin-left: 2px; font-weight: 600; }
 </style>

@@ -1364,6 +1364,8 @@ Route::group('adminapi', function () {
         Route::get('store_staff', 'v1.merchant.SystemStoreStaff/index')->option(['real_name' => '获取门店店员列表']);
         //获取店员列表
         Route::get('staff/list', 'v1.merchant.SystemStoreStaff/getStoreStaffList')->option(['real_name' => '获取门店店员列表']);
+        //获取门店店员下拉（轻量）
+        Route::get('staff/select', 'v1.merchant.SystemStoreStaff/getStaffSelect')->option(['real_name' => '获取门店店员下拉']);
         //获取店员专属客户
         Route::get('staff/customer/:id', 'v1.merchant.SystemStoreStaff/getStoreStaffCustomer')->option(['real_name' => '获取店员专属客户']);
         //获取店员业绩列表
@@ -2053,6 +2055,17 @@ Route::group('adminapi', function () {
 			Route::post('transfer/cancel/:id', 'v1.product.inventory.StoreStockTransfer/cancel')->option(['real_name' => '取消调拨草稿']);
 			Route::post('transfer/confirm/:id', 'v1.product.inventory.StoreStockTransfer/confirm')->option(['real_name' => '确认调拨']);
 			Route::post('transfer/reverse/:id', 'v1.product.inventory.StoreStockTransfer/reverse')->option(['real_name' => '调拨冲销']);
+
+			//院装·项目耗材配方
+			Route::get('recipe/list', 'v1.product.inventory.StoreProjectConsumableRecipe/index')->option(['real_name' => '项目耗材配方列表']);
+			Route::get('recipe/info/:id', 'v1.product.inventory.StoreProjectConsumableRecipe/info')->option(['real_name' => '项目耗材配方详情']);
+			Route::post('recipe/save/:id', 'v1.product.inventory.StoreProjectConsumableRecipe/save')->option(['real_name' => '保存项目耗材配方']);
+			Route::post('recipe/status/:id', 'v1.product.inventory.StoreProjectConsumableRecipe/setStatus')->option(['real_name' => '启用停用项目耗材配方']);
+			Route::delete('recipe/:id', 'v1.product.inventory.StoreProjectConsumableRecipe/delete')->option(['real_name' => '删除项目耗材配方']);
+
+			//院装·领用/退回明细与统计
+			Route::get('salon/usage/list', 'v1.product.inventory.SalonStockReport/usageList')->option(['real_name' => '院装领用退回明细']);
+			Route::get('salon/usage/statistics', 'v1.product.inventory.SalonStockReport/statistics')->option(['real_name' => '院装耗材统计']);
 		});
     })->middleware([
         \app\http\middleware\admin\AdminAuthTokenMiddleware::class,

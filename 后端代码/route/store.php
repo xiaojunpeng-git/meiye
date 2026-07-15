@@ -599,6 +599,17 @@ Route::group('storeapi', function () {
 			Route::post('transfer/cancel/:id', 'product.inventory.StoreStockTransfer/cancel')->option(['real_name' => '取消调拨草稿']);
 			Route::post('transfer/confirm/:id', 'product.inventory.StoreStockTransfer/confirm')->option(['real_name' => '确认调拨']);
 			Route::post('transfer/reverse/:id', 'product.inventory.StoreStockTransfer/reverse')->option(['real_name' => '调拨冲销']);
+
+			//院装·项目耗材配方
+			Route::get('recipe/list', 'product.inventory.StoreProjectConsumableRecipe/index')->option(['real_name' => '项目耗材配方列表']);
+			Route::get('recipe/info/:id', 'product.inventory.StoreProjectConsumableRecipe/info')->option(['real_name' => '项目耗材配方详情']);
+			Route::post('recipe/save/:id', 'product.inventory.StoreProjectConsumableRecipe/save')->option(['real_name' => '保存项目耗材配方']);
+			Route::post('recipe/status/:id', 'product.inventory.StoreProjectConsumableRecipe/setStatus')->option(['real_name' => '启用停用项目耗材配方']);
+			Route::delete('recipe/:id', 'product.inventory.StoreProjectConsumableRecipe/delete')->option(['real_name' => '删除项目耗材配方']);
+
+			//院装·领用/退回明细与统计
+			Route::get('salon/usage/list', 'product.inventory.SalonStockReport/usageList')->option(['real_name' => '院装领用退回明细']);
+			Route::get('salon/usage/statistics', 'product.inventory.SalonStockReport/statistics')->option(['real_name' => '院装耗材统计']);
 		});
 
     })->middleware([AuthTokenMiddleware::class, StoreCkeckRoleMiddleware::class])->middleware(\app\http\middleware\SystemLogMiddleware::class, 'store');

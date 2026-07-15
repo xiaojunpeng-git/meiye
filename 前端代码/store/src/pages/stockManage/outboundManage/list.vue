@@ -160,6 +160,7 @@
 		  :orderId="orderId"
 		  :formType="1"
 		></details-from>
+		<form-modal v-model="formModal" :edit-id="formEditId" @success="getList" />
 	</div>
 </template>
 
@@ -179,12 +180,14 @@
 	import detailsFrom from "../../order/orderList/components/orderDetails";
 	import stockImport from "../components/stockImport.vue";
 	import exportExcel from "@/utils/newToExcel.js";
+	import FormModal from './add';
 	export default {
 		name: "outboundList",
 		components: {
 			orderDetails,
 			detailsFrom,
-			stockImport
+			stockImport,
+			FormModal
 		},
 		data() {
 			return {
@@ -208,6 +211,8 @@
 				checkUidList: [],
 				orderDatalist:{},
 				orderId:0,
+				formModal: false,
+				formEditId: 0,
 			}
 		},
 		computed: {
@@ -356,7 +361,8 @@
 			},
 			// 添加
 			add () {
-			    this.$router.push({ path: this.routePre + "/outbound/manage/add/" + 0 });
+				this.formEditId = 0;
+				this.formModal = true;
 			},
 			onchangeTime(e) {
 			  this.timeVal = e;

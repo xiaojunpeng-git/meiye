@@ -1224,6 +1224,19 @@ export function merchantStaffList(data) {
 }
 
 /**
+ * 获取门店店员下拉（轻量）
+ * @param {*} data
+ * @returns
+ */
+export function merchantStaffSelect(data) {
+  return request({
+    url: `/merchant/staff/select`,
+    method: 'get',
+    params: data
+  });
+}
+
+/**
  * 获取店员专属客户
  * @param {*} id
  * @param {*} data

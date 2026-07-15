@@ -52,7 +52,7 @@
 		</Card>
 		<Card :bordered="false" dis-hover class="ivu-mt">
 			<div class="op-tips">确认申请不会变动库存；确认调拨后才会改双方库存。双方门店须已有同源商品。</div>
-			<Button type="primary" class="mt10" @click="add">新建请货</Button>
+			<Button type="primary" class="mt10" @click="openForm()">新建请货</Button>
 			<Table class="mt25" :columns="columns" :data="orderList" :loading="loading" :border="false">
 				<template slot-scope="{ row }" slot="status">
 					<Tag :color="statusColor(row.status)" size="medium">{{ row.status_name || '-' }}</Tag>
@@ -61,7 +61,7 @@
 					<a @click="showInfo(row)">详情</a>
 					<template v-if="row.status == 0 && isRequestStore(row)">
 						<Divider type="vertical" />
-						<a @click="edit(row)">编辑</a>
+						<a @click="openForm(row.id)">编辑</a>
 						<Divider type="vertical" />
 						<a @click="confirmApply(row)">确认申请</a>
 						<Divider type="vertical" />
@@ -101,6 +101,9 @@
 				<p>状态：{{ infoData.status_name }}</p>
 				<p>请货门店：{{ infoData.request_store_name }}</p>
 				<p>供货门店：{{ infoData.supply_store_name }}</p>
+				<p>请货时间：{{ infoData.request_date || '-' }}</p>
+				<p>请货人：{{ infoData.request_staff_name || infoData.admin_name || '-' }}</p>
+				<p>创建人：{{ infoData.create_admin_name || '-' }}</p>
 				<p>备注：{{ infoData.remark || '-' }}</p>
 				<p>创建时间：{{ infoData.add_time || '-' }}</p>
 				<p v-if="infoData.reject_reason">驳回原因：{{ infoData.reject_reason }}</p>
@@ -115,6 +118,8 @@
 				</FormItem>
 			</Form>
 		</Modal>
+
+		<form-modal v-model="formModal" :edit-id="formEditId" @success="getList" />
 	</div>
 </template>
 
@@ -131,9 +136,11 @@
 		stockRequestCancelApi,
 		stockRequestDeleteApi
 	} from '@/api/stockRequestTransfer';
+	import FormModal from './add';
 
 	export default {
 		name: 'stockRequestList',
+		components: { FormModal },
 		data() {
 			return {
 				routePre: Setting.routePre,
@@ -154,10 +161,15 @@
 				rejectModal: false,
 				rejectReason: '',
 				rejectId: 0,
+				formModal: false,
+				formEditId: 0,
 				columns: [
 					{ title: '请货单号', key: 'order_sn', minWidth: 160 },
 					{ title: '请货门店', key: 'request_store_name', minWidth: 120 },
 					{ title: '供货门店', key: 'supply_store_name', minWidth: 120 },
+					{ title: '请货时间', key: 'request_date', minWidth: 110 },
+					{ title: '请货人', key: 'request_staff_name', minWidth: 100, render: (h, { row }) => h('span', row.request_staff_name || row.admin_name || '-') },
+					{ title: '创建人', key: 'create_admin_name', minWidth: 100, render: (h, { row }) => h('span', row.create_admin_name || '-') },
 					{ title: '状态', slot: 'status', minWidth: 100 },
 					{ title: '备注', key: 'remark', minWidth: 120, render: (h, { row }) => h('span', row.remark || '-') },
 					{ title: '创建时间', key: 'add_time', minWidth: 150 },
@@ -240,15 +252,13 @@
 				this.formValidate.page = page;
 				this.getList();
 			},
-			add() {
-				this.$router.push({ path: `${this.routePre}/stock/request/add/0` });
-			},
-			edit(row) {
-				this.$router.push({ path: `${this.routePre}/stock/request/add/${row.id}` });
+			openForm(id = 0) {
+				this.formEditId = Number(id) || 0;
+				this.formModal = true;
 			},
 			toTransfer(row) {
 				this.$router.push({
-					path: `${this.routePre}/stock/transfer/add/0`,
+					path: `${this.routePre}/stock/transfer`,
 					query: { request_id: row.id }
 				});
 			},

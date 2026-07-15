@@ -24,6 +24,19 @@ const isKeepAlive = data => {
   return Setting.layout.tabs;
 };
 
+const maxOpenedTabs = () => Number(Setting.page.maxOpened) || 10;
+
+/** 页签超过上限时，从最早打开的（列表最前）依次释放 */
+const trimOpenedTabs = (state, commit) => {
+  const max = maxOpenedTabs();
+  while (state.opened.length > max) {
+    const removed = state.opened.shift();
+    if (removed && removed.name) {
+      commit('keepAliveRemove', removed.name);
+    }
+  }
+};
+
 export default {
   namespaced: true,
   state: {
@@ -88,6 +101,8 @@ export default {
             }
             return state;
           });
+        // 超过上限时从最早打开的页签开始释放
+        trimOpenedTabs(state, commit);
         // 根据 opened 数据生成缓存设置
         commit('keepAliveRefresh');
         // end
@@ -141,7 +156,11 @@ export default {
         newTag.query = query || newTag.query;
         newTag.fullPath = fullPath || newTag.fullPath;
         // 添加进当前显示的页面数组
-        if (typeof newTag.query.fodder === 'undefined') state.opened.push(newTag);
+        if (typeof newTag.query.fodder === 'undefined') {
+          state.opened.push(newTag);
+          // 超过上限时从最早打开的页签开始释放
+          trimOpenedTabs(state, commit);
+        }
         // 如果这个页面需要缓存 将其添加到缓存设置
         if (isKeepAlive(newTag)) {
           commit('keepAlivePush', tag.name);

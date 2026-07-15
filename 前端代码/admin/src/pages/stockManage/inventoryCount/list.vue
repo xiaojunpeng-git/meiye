@@ -50,7 +50,7 @@
 		  </div>
 		</Card>
 		<Card :bordered="false" dis-hover class="ivu-mt">
-			<Button type="primary" @click="add">新建盘点单</Button>
+			<Button type="primary" @click="openForm()">新建盘点单</Button>
 			<Tooltip
 			    content="本页至少选中一项"
 			    :disabled="!!checkUidList.length && isAll==0"
@@ -119,7 +119,7 @@
 			  </vxe-column>
 			  <vxe-column field="action" title="操作" width="160" fixed="right">
 			    <template v-slot="{ row }">
-				  <a @click="edit(row)" v-if="row.status == 0">继续盘点</a>
+				  <a @click="openForm(row.id)" v-if="row.status == 0">继续盘点</a>
 				  <Divider type="vertical" v-if="row.status == 0" />
 			      <a @click="orderInfo(row)">详情</a>
 				  <Divider type="vertical" />
@@ -141,11 +141,11 @@
       </div>
 		</Card>
 		<order-details ref="orderDetails"></order-details>
+		<form-modal v-model="formModal" :edit-id="formEditId" @success="inventoryList" />
 	</div>
 </template>
 
 <script>
-	import Setting from '@/setting';
 	import timeOptions from "@/utils/timeOptions";
 	import { mapState } from "vuex";
 	import {
@@ -155,14 +155,15 @@
 	} from "@/api/stockManage";
 	import orderDetails from "../components/orderDetails.vue";
 	import exportExcel from "@/utils/newToExcel.js";
+	import FormModal from './add';
 	export default {
 		name: "inventoryCountList",
 		components: {
-			orderDetails
+			orderDetails,
+			FormModal
 		},
 		data() {
 			return {
-				roterPre: Setting.roterPre,
 				options: timeOptions,
 				timeVal: '',
 				formValidate: {
@@ -177,7 +178,9 @@
 				loading:false,
 				isAll: 0,
 				isCheckBox: false,
-				checkUidList: []
+				checkUidList: [],
+				formModal: false,
+				formEditId: 0
 			}
 		},
 		computed: {
@@ -290,13 +293,9 @@
 			  this.formValidate.page = index;
 			  this.inventoryList();
 			},
-			// 添加
-			add () {
-			    this.$router.push({ path: this.roterPre + "/inventory/count/add/" + 0 });
-			},
-			// 编辑
-			edit(row) {
-				this.$router.push({ path: this.roterPre + "/inventory/count/add/" + row.id });
+			openForm(id = 0) {
+				this.formEditId = Number(id) || 0;
+				this.formModal = true;
 			},
 			onchangeTime(e) {
 			  this.timeVal = e;

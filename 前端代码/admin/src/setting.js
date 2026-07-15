@@ -117,7 +117,9 @@ const Setting = {
      * */
   page: {
     // 默认打开的页签
-    opened: [`${roterPre}/home/`]
+    opened: [`${roterPre}/home/`],
+    // 同时打开的页签上限，超出后从最早打开的开始关闭
+    maxOpened: 10
   },
   /**
      * 功能配置

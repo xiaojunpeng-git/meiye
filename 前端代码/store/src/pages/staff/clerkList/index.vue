@@ -39,7 +39,7 @@
 
     <Card :bordered="false" dis-hover class="ive-mt tablebox">
       <div class="btnbox">
-        <Button v-auth="['staff-staff-create']" type="primary" @click="add"
+        <Button v-auth="['staff-staff-create']" type="primary" @click="openForm()"
           >添加店员</Button
         >
         <Button class="ml10" @click="goSchedule">排班管理</Button>
@@ -84,7 +84,7 @@
           <template slot-scope="{ row, index }" slot="action">
             <a @click="goCashier(row)" v-if="row.status == 1 && row.delete_time == null">进入收银台</a>
             <Divider type="vertical" v-if="row.status == 1 && row.delete_time == null" />
-            <a @click="edit(row.id)" v-if="row.delete_time == null">编辑</a>
+            <a @click="openForm(row.id)" v-if="row.delete_time == null">编辑</a>
             <Divider type="vertical" v-if="row.delete_time == null" />
             <a @click="del(row.id, '删除该店员', index)" v-if="row.level > 0">删除</a>
             <Divider type="vertical" v-if="row.level > 0" />
@@ -104,6 +104,7 @@
       </div>
     </Card>
     <Details ref="userDetails" @edit="handleEdit"></Details>
+    <form-modal v-model="formModal" :edit-id="formEditId" @success="getList" />
     <!-- 修改业绩归属店员弹窗 -->
     <Modal
       v-model="editModal"
@@ -138,18 +139,18 @@ import Cookies from "js-cookie";
 import Setting from "@/setting";
 import {
   staffListInfo,
-  staffcreate,
-  staffEditApi,
   staffshowApi,
   cashierLogin,
   staffallInfo,
   orderStaff,
 } from "@/api/staff.js";
 import Details from "../components/details";
+import FormModal from "./add";
 export default {
   name: "clerkList",
   components: {
     Details,
+    FormModal,
   },
   data() {
     return {
@@ -157,6 +158,8 @@ export default {
       total: 0,
       a: 12,
       loading: false,
+      formModal: false,
+      formEditId: 0,
       columns: [
         {
           title: "ID",
@@ -329,15 +332,10 @@ export default {
           this.loading = false;
         });
     },
-    //添加
-    add() {
-		this.$router.push({ path: this.routePre + "/staff/clerkList/add/" + 0 });
-      // this.$modalForm(staffcreate()).then(() => this.getList());
-    },
-    //编辑
-    edit(id) {
-		this.$router.push({ path: this.routePre + "/staff/clerkList/add/" + id });
-      // this.$modalForm(staffEditApi(id)).then(() => this.getList());
+    //添加 / 编辑
+    openForm(id = 0) {
+      this.formEditId = Number(id) || 0;
+      this.formModal = true;
     },
     //删除
     del(id, tit, num) {

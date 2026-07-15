@@ -1,23 +1,15 @@
 <template>
   <div>
-    <div class="i-layout-page-header">
-      <PageHeader class="product_tabs" hidden-breadcrumb>
-        <div slot="title" class="acea-row row-middle">
-          <router-link :to="{ path: `${roterPre}/setting/staff/index` }">
-            <div class="font-sm after-line">
-              <span class="iconfont iconfanhui"></span>
-              <span class="pl10">返回</span>
-            </div>
-          </router-link>
-          <span
-              v-text="$route.params.id > 0 ? '编辑店员' : '添加店员'"
-              class="mr20 ml16 fs-18"
-          ></span>
-        </div>
-      </PageHeader>
-    </div>
-    <Card :bordered="false" dis-hover class="ivu-mt">
+    <Modal
+      :value="value"
+      :title="editId > 0 ? '编辑店员' : '添加店员'"
+      width="1274"
+      :mask-closable="false"
+      :styles="{ top: '40px' }"
+      @on-cancel="handleClose"
+    >
       <Form
+          v-if="value"
           ref="formInline"
           :model="formInline"
           :rules="ruleValidate"
@@ -30,6 +22,7 @@
               v-model="formInline.store_id"
               clearable
               filterable
+              transfer
               v-width="'50%'"
               placeholder="请选择所属门店"
               @on-change="onStoreChange"
@@ -63,7 +56,7 @@
         <FormItem label="店员账号：" prop="account">
           <Input v-model="formInline.account" placeholder="请输入店员账号" v-width="'50%'"></Input>
         </FormItem>
-        <FormItem label="店员密码：" :required='$route.params.id > 0?false:true'>
+        <FormItem label="店员密码：" :required="editId > 0 ? false : true">
           <Input type="password" v-model="formInline.pwd" placeholder="请输入店员密码" v-width="'50%'"></Input>
         </FormItem>
         <FormItem label="手机号码：" prop="phone">
@@ -74,6 +67,7 @@
               v-model="formInline.work_member_id"
               clearable
               filterable
+              transfer
               v-width="'50%'"
               placeholder="请选择企微员工"
           >
@@ -91,6 +85,7 @@
               v-model="formInline.roles"
               clearable
               filterable
+              transfer
               multiple
               v-width="'50%'"
               placeholder="请选择店员角色"
@@ -109,6 +104,7 @@
               v-model="formInline.position"
               clearable
               filterable
+              transfer
               v-width="'50%'"
               placeholder="请选择职位"
           >
@@ -126,6 +122,7 @@
               v-model="formInline.position_level"
               clearable
               filterable
+              transfer
               v-width="'50%'"
               placeholder="请选择职级"
           >
@@ -293,6 +290,7 @@
               class="mr15"
               placeholder="请选择生日类型"
               clearable
+              transfer
           >
             <Option :value="1">农历</Option>
             <Option :value="2">新历</Option>
@@ -323,35 +321,21 @@
           </i-switch>
         </FormItem>
       </Form>
-    </Card>
-    <div class="h-68"></div>
-    <Card
-        :bordered="false"
-        dis-hover
-        class="fixed-card"
-    >
-      <Form>
-        <FormItem>
-          <Button
-              type="primary"
-              class="submission"
-              @click="handleSubmit('formInline')"
-          >保存</Button
-          >
-        </FormItem>
-      </Form>
-    </Card>
-    <Modal v-model="modalPic" width="960px" scrollable footer-hide closable title='上传门店照片' :mask-closable="false" :z-index="99">
+      <div slot="footer">
+        <Button @click="handleClose">取消</Button>
+        <Button type="primary" class="ml14" @click="handleSubmit('formInline')">保存</Button>
+      </div>
+    </Modal>
+    <Modal v-model="modalPic" width="960px" scrollable footer-hide closable title='上传门店照片' :mask-closable="false" :z-index="1100">
       <uploadPictures :isChoice="isChoice" @getPic="getPic" v-if="modalPic"></uploadPictures>
     </Modal>
-    <Modal v-model="modalUser" width="960px" scrollable footer-hide closable title='请选择商城用户' :mask-closable="false" :z-index="99">
+    <Modal v-model="modalUser" width="960px" scrollable footer-hide closable title='请选择商城用户' :mask-closable="false" :z-index="1100">
       <customerInfo @imageObject='imageObject'></customerInfo>
     </Modal>
   </div>
 </template>
 
 <script>
-import Setting from "@/setting";
 import timeOptions from '@/utils/timeOptions';
 import { mapState } from 'vuex';
 import { systemRoleList, workMemberList, postStaff, getStaffInfo, position, positionLevel } from '@/api/staff.js';
@@ -361,6 +345,10 @@ import customerInfo from '@/components/customerInfo';
 export default {
   name: 'setting_staff_add',
   components: { uploadPictures, customerInfo },
+  props: {
+    value: { type: Boolean, default: false },
+    editId: { type: Number, default: 0 }
+  },
   data () {
     let validateUpload = (rule, value, callback) => {
       if (!this.formInline.avatar) {
@@ -393,8 +381,6 @@ export default {
       }
     };
     return {
-      roterPre: Setting.roterPre,
-      id:0, //店员id；
       modalPic: false,
       isChoice: '单选',
       picTit:'',
@@ -476,19 +462,72 @@ export default {
       return this.isMobile ? 'top' : 'right';
     },
   },
-  created() {
-    if (this.$route.params.id > 0) {
-      this.id = this.$route.params.id;
-      this.staffInfo();
-    } else {
-      this.$router.replace({ path: this.roterPre + '/setting/staff/index' });
+  watch: {
+    value(val) {
+      if (val) {
+        this.openForm();
+      }
     }
+  },
+  created() {
     this.positionList();
     this.positionLevelList();
     this.workMember();
     this.getStoreList();
   },
   methods: {
+    handleClose() {
+      this.$emit('input', false);
+    },
+    getDefaultForm() {
+      return {
+        store_id: '',
+        staff_name:'',
+        avatar:'',
+        uid:0,
+        account:'',
+        pwd:'',
+        phone:'',
+        work_member_id:'',
+        roles:[],
+        position:0,
+        position_level:0,
+        is_manager:0,
+        is_customer:0,
+        can_choose:0,
+        is_reservable:1,
+        is_butler:0,
+        customer_url:'',
+        status:1,
+        salary_status:1,
+        department:'',
+        employee_number:'',
+        join_date:'',
+        id_card:'',
+        birthday_date:'',
+        birthday_type:1,
+        age:0,
+        join_area:'',
+        birthday_area:'',
+        now_area:'',
+        contract_begin:'',
+        contract_end:''
+      };
+    },
+    resetForm() {
+      this.userName = '';
+      this.roleList = [];
+      this.formInline = this.getDefaultForm();
+      this.$nextTick(() => {
+        this.$refs.formInline && this.$refs.formInline.resetFields();
+      });
+    },
+    openForm() {
+      this.resetForm();
+      if (this.editId > 0) {
+        this.staffInfo();
+      }
+    },
     getStoreList() {
       merchantStoreListApi()
         .then((res) => {
@@ -518,7 +557,7 @@ export default {
       this.formInline.contract_end = date;
     },
     staffInfo() {
-      getStaffInfo(this.id).then((res) => {
+      getStaffInfo(this.editId).then((res) => {
         this.formInline = { ...this.formInline, ...(res.data.ps_info || {}) };
         this.userName = res.data.ps_info.nickname || '';
         this.formInline.pwd = '';
@@ -588,12 +627,13 @@ export default {
     handleSubmit (name) {
       this.$refs[name].validate((valid) => {
         if (valid) {
-          if(this.$route.params.id == 0 && !this.formInline.pwd){
+          if(this.editId == 0 && !this.formInline.pwd){
             return this.$Message.error('请输入店员密码');
           }
-          postStaff(this.formInline,this.id).then(res=>{
+          postStaff(this.formInline, this.editId).then(res=>{
             this.$Message.success(res.msg);
-            this.$router.push({ path: this.roterPre + '/setting/staff/index' });
+            this.$emit('success');
+            this.handleClose();
           }).catch(err=>{
             this.$Message.error(err.msg);
           })
@@ -616,31 +656,8 @@ export default {
   color: #999999;
   margin-top: 6px;
 }
-.fixed-card {
-  position: fixed;
-  right: 0;
-  bottom: 0;
-  left: 220px;
-  z-index: 99;
-  box-shadow: 0 -1px 2px rgb(240, 240, 240);
-
-/deep/ .ivu-card-body {
-  padding: 15px 16px 14px;
-}
-
-.ivu-form-item {
-  margin-bottom: 0;
-}
-
-/deep/ .ivu-form-item-content {
-  margin-right: 124px;
-  text-align: center;
-}
-
-.ivu-btn {
-  height: 36px;
-  padding: 0 20px;
-}
+.ml14 {
+  margin-left: 14px;
 }
 .picBox{
   display: inline-block;

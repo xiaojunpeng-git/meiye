@@ -16,6 +16,9 @@ class StoreStockRequest extends BaseModel
     protected $pk = 'id';
     protected $name = 'store_stock_request';
 
+    /** 表字段为 unix 整型，关闭 ORM 自动时间戳格式化，避免 toArray 触发 DateTime TypeError */
+    protected $updateTime = false;
+
     public function details()
     {
         return $this->hasMany(StoreStockRequestDetail::class, 'request_id', 'id');

@@ -718,12 +718,7 @@ export default {
     },
     {
       path: 'staff/add/:id?',
-      name: `${pre}staff_add`,
-      meta: {
-        auth: ['setting-staff-index'],
-        title: '编辑店员'
-      },
-      component: () => import('@/pages/setting/staff/add')
+      redirect: 'staff/index'
     },
     {
       path: 'staff/performance',

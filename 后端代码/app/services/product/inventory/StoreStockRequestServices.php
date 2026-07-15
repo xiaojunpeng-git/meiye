@@ -7,6 +7,8 @@ use app\dao\product\inventory\StoreStockRequestDao;
 use app\dao\product\inventory\StoreStockRequestDetailDao;
 use app\services\BaseServices;
 use app\services\store\SystemStoreServices;
+use app\services\store\SystemStoreStaffServices;
+use app\services\system\admin\SystemAdminServices;
 use mohe\traits\ServicesTrait;
 use think\exception\ValidateException;
 use think\facade\Db;
@@ -59,15 +61,7 @@ class StoreStockRequestServices extends BaseServices
         [$page, $limit] = $this->getPageValue();
         $list = $this->dao->getList($where, '*', $page, $limit);
         $count = $this->dao->count($where);
-        $storeNames = $this->storeNameMap($list);
-        foreach ($list as &$row) {
-            $row['status_name'] = $this->statusName[(int)$row['status']] ?? '';
-            $row['request_store_name'] = $storeNames[(int)$row['request_store_id']] ?? '';
-            $row['supply_store_name'] = $storeNames[(int)$row['supply_store_id']] ?? '';
-            $row['add_time'] = $row['add_time'] ? date('Y-m-d H:i:s', (int)$row['add_time']) : '';
-            $row['confirm_time'] = !empty($row['confirm_time']) ? date('Y-m-d H:i:s', (int)$row['confirm_time']) : '';
-        }
-        unset($row);
+        $this->enrichRows($list);
         return compact('list', 'count');
     }
 
@@ -84,18 +78,17 @@ class StoreStockRequestServices extends BaseServices
             $d['remain_qty'] = bcsub((string)$d['qty'], (string)$d['transferred_qty'], 4);
         }
         unset($d);
-        $storeNames = $this->storeNameMap([$info]);
-        $info['status_name'] = $this->statusName[(int)$info['status']] ?? '';
-        $info['request_store_name'] = $storeNames[(int)$info['request_store_id']] ?? '';
-        $info['supply_store_name'] = $storeNames[(int)$info['supply_store_id']] ?? '';
-        $info['add_time'] = $info['add_time'] ? date('Y-m-d H:i:s', (int)$info['add_time']) : '';
-        $info['confirm_time'] = !empty($info['confirm_time']) ? date('Y-m-d H:i:s', (int)$info['confirm_time']) : '';
+        $rows = [$info];
+        $this->enrichRows($rows);
+        $info = $rows[0];
         $info['details'] = $details;
         return $info;
     }
 
     /**
      * 保存草稿（新建或编辑）
+     * @param int $adminId 当前登录操作人（平台管理员或门店店员）
+     * @param int $storeScope 门店端门店ID，平台为0
      */
     public function saveDraft(int $id, array $data, int $adminId, int $storeScope = 0): int
     {
@@ -103,6 +96,8 @@ class StoreStockRequestServices extends BaseServices
         $supplyStoreId = (int)($data['supply_store_id'] ?? 0);
         $remark = trim((string)($data['remark'] ?? ''));
         $details = $data['details'] ?? [];
+        $requestDate = $this->parseRequestDate($data['request_date'] ?? '');
+        $requestStaffId = (int)($data['request_staff_id'] ?? 0);
         if ($storeScope > 0) {
             // 门店端只能以自己为请货门店新建/编辑
             $requestStoreId = $storeScope;
@@ -111,10 +106,12 @@ class StoreStockRequestServices extends BaseServices
         if ($requestStoreId === $supplyStoreId) {
             throw new ValidateException('请货门店与供货门店不能相同');
         }
+        $this->assertRequestStaff($requestStoreId, $requestStaffId);
         $normalized = $this->normalizeDetails($requestStoreId, $supplyStoreId, $details);
         $time = time();
+        $createType = $storeScope > 0 ? 1 : 0;
 
-        return (int)$this->transaction(function () use ($id, $requestStoreId, $supplyStoreId, $remark, $normalized, $adminId, $storeScope, $time) {
+        return (int)$this->transaction(function () use ($id, $requestStoreId, $supplyStoreId, $remark, $normalized, $adminId, $storeScope, $time, $requestDate, $requestStaffId, $createType) {
             if ($id > 0) {
                 $info = $this->dao->lockById($id);
                 if (!$info) {
@@ -130,7 +127,9 @@ class StoreStockRequestServices extends BaseServices
                 $this->dao->update($id, [
                     'request_store_id' => $requestStoreId,
                     'supply_store_id' => $supplyStoreId,
+                    'request_date' => $requestDate,
                     'remark' => $remark,
+                    'request_staff_id' => $requestStaffId,
                     'admin_id' => $adminId,
                     'update_time' => $time,
                     'version' => (int)$info['version'] + 1,
@@ -144,9 +143,13 @@ class StoreStockRequestServices extends BaseServices
                 'order_sn' => $orderSn,
                 'request_store_id' => $requestStoreId,
                 'supply_store_id' => $supplyStoreId,
+                'request_date' => $requestDate,
                 'status' => self::STATUS_DRAFT,
                 'remark' => $remark,
                 'admin_id' => $adminId,
+                'request_staff_id' => $requestStaffId,
+                'create_uid' => $adminId,
+                'create_type' => $createType,
                 'version' => 0,
                 'add_time' => $time,
                 'update_time' => $time,
@@ -453,6 +456,113 @@ class StoreStockRequestServices extends BaseServices
         }
     }
 
+    /**
+     * 请货人必须是请货门店在职店员
+     */
+    protected function assertRequestStaff(int $requestStoreId, int $staffId): void
+    {
+        if ($staffId <= 0) {
+            throw new ValidateException('请选择请货人');
+        }
+        /** @var SystemStoreStaffServices $staffServices */
+        $staffServices = app()->make(SystemStoreStaffServices::class);
+        $staff = $staffServices->get($staffId, ['id', 'store_id', 'staff_name', 'is_del', 'status']);
+        if (!$staff || (int)$staff['is_del'] === 1) {
+            throw new ValidateException('请货人不存在');
+        }
+        if ((int)$staff['store_id'] !== $requestStoreId) {
+            throw new ValidateException('请货人必须是请货门店的员工');
+        }
+        if (isset($staff['status']) && (int)$staff['status'] !== 1) {
+            throw new ValidateException('请货人已停用');
+        }
+    }
+
+    /**
+     * 填充列表/详情展示字段
+     */
+    protected function enrichRows(array &$list): void
+    {
+        if (!$list) {
+            return;
+        }
+        $storeNames = $this->storeNameMap($list);
+        $staffNames = $this->staffNameMap($list);
+        $creatorNames = $this->creatorNameMap($list);
+        foreach ($list as &$row) {
+            $row['status_name'] = $this->statusName[(int)$row['status']] ?? '';
+            $row['request_store_name'] = $storeNames[(int)$row['request_store_id']] ?? '';
+            $row['supply_store_name'] = $storeNames[(int)$row['supply_store_id']] ?? '';
+            $row['request_staff_name'] = $staffNames[(int)($row['request_staff_id'] ?? 0)] ?? '';
+            // 兼容旧字段：请货人优先用 request_staff_name
+            $row['admin_name'] = $row['request_staff_name'] !== ''
+                ? $row['request_staff_name']
+                : ($staffNames[(int)($row['admin_id'] ?? 0)] ?? '');
+            $row['create_admin_name'] = $creatorNames[$this->creatorKey($row)] ?? '';
+            $row['request_date'] = !empty($row['request_date']) ? date('Y-m-d', (int)$row['request_date']) : '';
+            $row['add_time'] = !empty($row['add_time']) ? date('Y-m-d H:i:s', (int)$row['add_time']) : '';
+            $row['confirm_time'] = !empty($row['confirm_time']) ? date('Y-m-d H:i:s', (int)$row['confirm_time']) : '';
+        }
+        unset($row);
+    }
+
+    protected function creatorKey(array $row): string
+    {
+        return (int)($row['create_type'] ?? 0) . ':' . (int)($row['create_uid'] ?? 0);
+    }
+
+    protected function staffNameMap(array $list): array
+    {
+        $ids = [];
+        foreach ($list as $row) {
+            $sid = (int)($row['request_staff_id'] ?? 0);
+            if ($sid > 0) {
+                $ids[$sid] = 1;
+            }
+        }
+        if (!$ids) {
+            return [];
+        }
+        /** @var SystemStoreStaffServices $staffServices */
+        $staffServices = app()->make(SystemStoreStaffServices::class);
+        return $staffServices->getColumn(['id' => array_keys($ids)], 'staff_name', 'id') ?: [];
+    }
+
+    protected function creatorNameMap(array $list): array
+    {
+        $adminIds = [];
+        $staffIds = [];
+        foreach ($list as $row) {
+            $uid = (int)($row['create_uid'] ?? 0);
+            if ($uid <= 0) {
+                continue;
+            }
+            if ((int)($row['create_type'] ?? 0) === 1) {
+                $staffIds[$uid] = 1;
+            } else {
+                $adminIds[$uid] = 1;
+            }
+        }
+        $map = [];
+        if ($adminIds) {
+            /** @var SystemAdminServices $systemAdminServices */
+            $systemAdminServices = app()->make(SystemAdminServices::class);
+            $names = $systemAdminServices->getColumn(['id' => array_keys($adminIds)], 'real_name', 'id') ?: [];
+            foreach ($names as $id => $name) {
+                $map['0:' . (int)$id] = (string)$name;
+            }
+        }
+        if ($staffIds) {
+            /** @var SystemStoreStaffServices $staffServices */
+            $staffServices = app()->make(SystemStoreStaffServices::class);
+            $names = $staffServices->getColumn(['id' => array_keys($staffIds)], 'staff_name', 'id') ?: [];
+            foreach ($names as $id => $name) {
+                $map['1:' . (int)$id] = (string)$name;
+            }
+        }
+        return $map;
+    }
+
     public function assertStoreAccess(array $info, int $storeScope): void
     {
         if ($storeScope <= 0) {
@@ -478,6 +588,49 @@ class StoreStockRequestServices extends BaseServices
         }
         $rows = Db::name('system_store')->whereIn('id', array_keys($ids))->column('name', 'id');
         return $rows ?: [];
+    }
+
+    protected function adminNameMap(array $list, int $operatorType = 0): array
+    {
+        $adminIds = [];
+        foreach ($list as $row) {
+            $adminId = (int)($row['admin_id'] ?? 0);
+            if ($adminId > 0) {
+                $adminIds[$adminId] = 1;
+            }
+        }
+        unset($adminIds[0]);
+        if (!$adminIds) {
+            return [];
+        }
+        $ids = array_keys($adminIds);
+        if ($operatorType === 1) {
+            /** @var SystemStoreStaffServices $staffServices */
+            $staffServices = app()->make(SystemStoreStaffServices::class);
+            return $staffServices->getColumn(['id' => $ids], 'staff_name', 'id') ?: [];
+        }
+        /** @var SystemAdminServices $systemAdminServices */
+        $systemAdminServices = app()->make(SystemAdminServices::class);
+        return $systemAdminServices->getColumn(['id' => $ids], 'real_name', 'id') ?: [];
+    }
+
+    protected function parseRequestDate($value): int
+    {
+        if ($value === null || $value === '') {
+            return strtotime(date('Y-m-d'));
+        }
+        if (is_numeric($value)) {
+            return (int)$value;
+        }
+        $value = trim((string)$value);
+        if ($value === '') {
+            return strtotime(date('Y-m-d'));
+        }
+        $ts = strtotime($value);
+        if ($ts === false) {
+            throw new ValidateException('请货日期格式不正确');
+        }
+        return (int)strtotime(date('Y-m-d', $ts));
     }
 
     protected function makeSn(string $prefix): string

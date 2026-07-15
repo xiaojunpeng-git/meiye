@@ -36,12 +36,7 @@ export default {
         },
 		{
 		    path: `clerkList/add/:id?`,
-		    name: `${pre}staffAdd`,
-		    meta: {
-		        title: '添加店员',
-		        auth: ['staff-clerkList-add'],
-		    },
-		    component: () => import('@/pages/staff/clerkList/add')
+		    redirect: 'index'
 		},
         {
             path: 'statistics',

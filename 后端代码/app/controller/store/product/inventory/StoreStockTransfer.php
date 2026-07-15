@@ -45,6 +45,7 @@ class StoreStockTransfer extends AuthController
             ['request_id', 0],
             ['from_store_id', 0],
             ['to_store_id', 0],
+            ['transfer_staff_id', 0],
             ['remark', ''],
             ['details', []],
         ]);

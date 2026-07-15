@@ -27,12 +27,7 @@ export default {
         },
 		{
 		    path: `${Setting.routePre}/inbound/manage/add/:id?`,
-		    name: `inboundAdd`,
-		    meta: {
-		        auth: ['store-inbound-manage-add'],
-		        title: '添加入库单'
-		    },
-		    component: () => import('@/pages/stockManage/inboundManage/add')
+		    redirect: `${Setting.routePre}/inbound/manage`
 		},
 		{
 		    path: `${Setting.routePre}/outbound/manage`,
@@ -45,12 +40,7 @@ export default {
 		},
 		{
 		    path: `${Setting.routePre}/outbound/manage/add/:id?`,
-		    name: `outboundAdd`,
-		    meta: {
-		        auth: ['store-outbound-manage-add'],
-		        title: '添加出库单'
-		    },
-		    component: () => import('@/pages/stockManage/outboundManage/add')
+		    redirect: `${Setting.routePre}/outbound/manage`
 		},
 		{
 		    path: `${Setting.routePre}/inventory/details`,
@@ -81,12 +71,7 @@ export default {
 		},
 		{
 		    path: `${Setting.routePre}/inventory/count/add/:id?`,
-		    name: `inventoryAdd`,
-		    meta: {
-		        auth: ['store-inventory-count-add'],
-		        title: '添加盘点单'
-		    },
-		    component: () => import('@/pages/stockManage/inventoryCount/add')
+		    redirect: `${Setting.routePre}/inventory/count`
 		},
 		{
 		    path: `${Setting.routePre}/inventory/statistics`,
@@ -110,37 +95,41 @@ export default {
 		    path: `${Setting.routePre}/stock/request`,
 		    name: `stockRequestManage`,
 		    meta: {
-		        auth: ['store-stock-request'],
+		        auth: ['store-stock-request', 'store-stock-manage'],
 		        title: '请货管理'
 		    },
 		    component: () => import('@/pages/stockManage/stockRequestManage/list')
 		},
 		{
-		    path: `${Setting.routePre}/stock/request/add/:id?`,
-		    name: `stockRequestAdd`,
-		    meta: {
-		        auth: ['store-stock-request-add'],
-		        title: '请货单'
-		    },
-		    component: () => import('@/pages/stockManage/stockRequestManage/add')
-		},
-		{
 		    path: `${Setting.routePre}/stock/transfer`,
 		    name: `stockTransferManage`,
 		    meta: {
-		        auth: ['store-stock-transfer'],
+		        auth: ['store-stock-transfer', 'store-stock-manage'],
 		        title: '调拨管理'
 		    },
 		    component: () => import('@/pages/stockManage/stockTransferManage/list')
 		},
 		{
-		    path: `${Setting.routePre}/stock/transfer/add/:id?`,
-		    name: `stockTransferAdd`,
+		    path: `${Setting.routePre}/stock/recipe`,
+		    name: `salonRecipeManage`,
 		    meta: {
-		        auth: ['store-stock-transfer-add'],
-		        title: '调拨单'
+		        auth: ['store-salon-recipe', 'store-stock-manage'],
+		        title: '项目耗材配方'
 		    },
-		    component: () => import('@/pages/stockManage/stockTransferManage/add')
+		    component: () => import('@/pages/stockManage/salonRecipe/list')
+		},
+		{
+		    path: `${Setting.routePre}/stock/recipe/add/:id?`,
+		    redirect: `${Setting.routePre}/stock/recipe`
+		},
+		{
+		    path: `${Setting.routePre}/stock/salon/usage`,
+		    name: `salonUsageReport`,
+		    meta: {
+		        auth: ['store-salon-usage', 'store-stock-manage'],
+		        title: '院装领用统计'
+		    },
+		    component: () => import('@/pages/stockManage/salonUsage/index')
 		}
     ]
 };

@@ -44,6 +44,8 @@ class StoreStockRequest extends AuthController
         $data = $this->request->postMore([
             ['request_store_id', 0],
             ['supply_store_id', 0],
+            ['request_date', ''],
+            ['request_staff_id', 0],
             ['remark', ''],
             ['details', []],
         ]);

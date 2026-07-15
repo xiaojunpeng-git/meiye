@@ -63,7 +63,7 @@
           </div>
         </template>
         <template slot-scope="{ row }" slot="action">
-          <a @click="edit(row.id)">编辑</a>
+          <a @click="openForm(row.id)">编辑</a>
           <Divider type="vertical" />
           <a @click="handleClick1(row.id)">专属客户</a>
           <Divider type="vertical" />
@@ -83,6 +83,7 @@
         />
       </div>
     </Card>
+    <form-modal v-model="formModal" :edit-id="formEditId" @success="getList" />
     <!-- 查看专属客户 -->
     <Modal
       v-model="modal1"
@@ -246,7 +247,6 @@
 
 <script>
 import { mapState } from 'vuex';
-import Setting from '@/setting';
 import {
   merchantStoreListApi,
   merchantStaffList,
@@ -256,11 +256,15 @@ import {
 } from '@/api/setting';
 import exportExcel from '@/utils/newToExcel.js';
 import timeOptions from '@/utils/timeOptions';
+import FormModal from './add';
 export default {
   name: 'setting_staff_index',
+  components: { FormModal },
   data() {
     return {
       options: timeOptions,
+      formModal: false,
+      formEditId: 0,
       formData: {
         keyword: '',
         store_id: 0,
@@ -467,8 +471,9 @@ export default {
     this.getList();
   },
   methods: {
-    edit(id) {
-      this.$router.push({ path: Setting.roterPre + '/setting/staff/add/' + id });
+    openForm(id = 0) {
+      this.formEditId = Number(id) || 0;
+      this.formModal = true;
     },
     orderSearch() {
       this.formData.page = 1;

@@ -54,7 +54,7 @@ class StoreProductStockOrderServices extends BaseServices
 		4 => '残次品转良品',
 		5 => '盘盈入库',
 		8 => '调拨入库',
-		// 7 => '院装退回', // 阶段 4 再开放入口
+		7 => '院装退回',
 	];
 
 	/**
@@ -70,7 +70,7 @@ class StoreProductStockOrderServices extends BaseServices
 		6 => '其他出库',
 		7 => '盘亏出库',
 		9 => '调拨出库',
-		// 8 => '院装领用', // 阶段 4
+		8 => '院装领用',
 	];
 
     /**
