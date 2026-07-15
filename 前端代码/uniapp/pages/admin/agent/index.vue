@@ -128,6 +128,7 @@ import { targetStoreOptionsTree } from '@/api/target.js';
 import {
 	initTargetObjectFilter,
 	buildStoreFilterApiParams,
+	openTargetMerchantStoreSelect,
 } from '../target/common/util.js';
 import qiunDataCharts from '../components/qiun-data-charts/components/qiun-data-charts/qiun-data-charts.vue';
 import emptyPage from '@/components/emptyPage.vue';
@@ -257,6 +258,8 @@ export default {
 	  filterStoreIds: [],
 	  filterManageRegionId: '',
 	  filterObjectType: '',
+	  filterOrgIds: [],
+	  filterExcludedStoreIds: [],
 	  ranking:[],
 	  orderby:'', //排序参数升序序 asc 降序 desc
       loading: false,
@@ -291,6 +294,9 @@ export default {
 			filterStoreIds: this.filterStoreIds,
 			filterManageRegionId: this.filterManageRegionId,
 			filterObjectType: this.filterObjectType,
+			org_ids: this.filterOrgIds,
+			excluded_store_ids: this.filterExcludedStoreIds,
+			resolved_store_ids: this.filterStoreIds,
 		});
 	},
 	async syncObjectFilter() {
@@ -302,6 +308,8 @@ export default {
 				this.filterStoreIds = filter.filterStoreIds || [];
 				this.filterManageRegionId = filter.filterManageRegionId;
 				this.filterObjectType = filter.filterObjectType;
+				this.filterOrgIds = filter.org_ids || [];
+				this.filterExcludedStoreIds = filter.excluded_store_ids || [];
 			},
 		});
 	},
@@ -315,7 +323,7 @@ export default {
 	},
 	goObjectSelect() {
 		this.dataShow = false;
-		uni.navigateTo({ url: '/pages/admin/target/select/object?mode=multiple&from=agent' });
+		openTargetMerchantStoreSelect({ mode: 'multiple', snapshot: false, realtime: true });
 	},
     changeType(type){
         this.page=1;

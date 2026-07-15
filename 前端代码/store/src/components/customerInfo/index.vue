@@ -98,11 +98,9 @@
 </template>
 <script>
 // import { kefucreateApi } from "@/api/setting";
-// import template from "../../pages/setting/devise/template.vue";
 import timeOptions from "@/utils/timeOptions";
 import { mapState } from 'vuex';
 export default {
-  components: { template },
   name: "index",
   data() {
     return {
@@ -220,7 +218,7 @@ export default {
     };
   },
   computed: {
-    ...mapState('admin/layout', [
+    ...mapState('store/layout', [
         'isMobile'
     ]),
     labelWidth () {

@@ -80,7 +80,9 @@
 	import {
 		mapGetters
 	} from "vuex";
+	import legacyMerchantRedirect from '@/mixins/legacyMerchantRedirect.js';
 	export default {
+		mixins: [legacyMerchantRedirect],
 		components: {
 			coupon,
 			emptyPage,
@@ -142,7 +144,11 @@
 		},
 		onShow() {
 		},
-		onLoad() {
+		async onLoad() {
+			// 有商家入口权限时，旧用户管理收藏 URL 过渡到商家客户页
+			if (await this.redirectLegacyToMerchant(() => this.legacyMerchantCustomerUrl())) {
+				return;
+			}
 			this.userList();
 			// this.groupList();
 		},

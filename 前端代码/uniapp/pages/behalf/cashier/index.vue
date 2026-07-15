@@ -152,7 +152,7 @@
 			},
 			backPage(){
 				uni.reLaunch({
-					url:'/pages/admin/work/index'
+					url:'/pages/merchant/home/index'
 				})
 			}
 		}

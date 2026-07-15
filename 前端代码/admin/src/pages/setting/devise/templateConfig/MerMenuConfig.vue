@@ -2,9 +2,12 @@
   <div class="main">
     <div class="main-header bg-fff">
       <div class="main-title">
-        <span>平台管理</span>
+        <span>平台管理（已停用）</span>
       </div>
     </div>
+    <Alert type="warning" show-icon class="mb-20">
+      已停用：买家端「我的」页不再展示本组商家菜单，入口已统一为商家端悬浮切换。配置暂保留便于回滚，稳定一个版本后将从装修器移除。接口侧已清空 merMenu 输出。
+    </Alert>
     <div class="main-content bg-fff">
       <div class="title">标题设置</div>
       <div class="form">

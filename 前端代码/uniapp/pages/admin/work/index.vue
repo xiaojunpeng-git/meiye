@@ -134,8 +134,10 @@
 	import {
 		getUserInfo,
 	} from '@/api/user.js';
+	import legacyMerchantRedirect from '@/mixins/legacyMerchantRedirect.js';
 
 	export default {
+		mixins: [legacyMerchantRedirect],
 		components: {
 			// #ifdef MP || APP-PLUS
 			NavBar,
@@ -164,7 +166,11 @@
 				isFooter:0
 			}
 		},
-		onShow() {
+		async onShow() {
+			// 有商家入口权限时，旧平台工作台收藏 URL 过渡到统一商家首页
+			if (await this.redirectLegacyToMerchant('/pages/merchant/home/index')) {
+				return;
+			}
 			this.getUserInfo();
 			this.getOrderTime();
 			this.getOrderStaging();

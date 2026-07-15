@@ -148,7 +148,6 @@ class PublicController extends BaseController
         $svipOpen = (bool)sys_config('member_card_status');
         $userService = $invoiceStatus = $deliveryUser = $isUserPromoter = $userVerifyStatus = $userOrder = $isStaff = $isDelivery = $levelStatus = $isAgent = true;
 		$isStoreManager = false;
-		$isStoreButlerOrManager = false;
 		$canTargetManage = false;
 
         if ($uid && $userInfo) {
@@ -187,10 +186,7 @@ class PublicController extends BaseController
 			}
 			$isStoreManager = is_array($isStaff) && !empty($isStaff)
 				&& (int)($isStaff['status'] ?? 0) === 1
-				&& (int)($isStaff['is_manager'] ?? 0) === 1;
-			$isStoreButlerOrManager = is_array($isStaff) && !empty($isStaff)
-				&& (int)($isStaff['status'] ?? 0) === 1
-				&& ((int)($isStaff['is_butler'] ?? 0) === 1 || (int)($isStaff['is_manager'] ?? 0) === 1);
+				&& \app\services\store\SystemStoreStaffServices::staffIsManager($isStaff);
 			$canTargetManage = $isAgent || $isStoreManager;
 
         }

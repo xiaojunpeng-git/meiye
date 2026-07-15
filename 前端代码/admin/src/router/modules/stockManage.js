@@ -106,7 +106,7 @@ export default {
 		    name: `salonRecipeManage`,
 		    meta: {
 		        auth: ['admin-salon-recipe', 'admin-stock-manage'],
-		        title: '项目耗材配方'
+		        title: '项目配方'
 		    },
 		    component: () => import('@/pages/stockManage/salonRecipe/list')
     },
@@ -119,7 +119,7 @@ export default {
 		    name: `salonUsageReport`,
 		    meta: {
 		        auth: ['admin-salon-usage', 'admin-stock-manage'],
-		        title: '院装领用统计'
+		        title: '院装管理'
 		    },
 		    component: () => import('@/pages/stockManage/salonUsage/index')
     }

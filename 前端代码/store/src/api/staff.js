@@ -130,6 +130,28 @@ export function saveStaffColumnSetting(data) {
 }
 
 /**
+ * 店员专属客户
+ */
+export function staffCustomerList(id, params) {
+    return request({
+        url: `staff/staff/customer/${id}`,
+        method: 'get',
+        params,
+    });
+}
+
+/**
+ * 店员业绩订单
+ */
+export function staffPerformanceList(id, params) {
+    return request({
+        url: `staff/staff/performance/${id}`,
+        method: 'get',
+        params,
+    });
+}
+
+/**
  * 添加店员-角色列表
  */
 export function position () {

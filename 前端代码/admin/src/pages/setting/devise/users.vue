@@ -75,7 +75,7 @@
           </Tooltip>
           <Tooltip
             :class="{ 'active-tip': active === 5 }"
-            content="平台管理"
+            content="平台管理（已停用）"
             placement="left-start"
             always
             theme="light"
@@ -89,7 +89,7 @@
           </Tooltip>
 		  <Tooltip
 		    :class="{ 'active-tip': active === 7 }"
-		    content="区域管理"
+		    content="区域管理（已停用）"
 		    placement="left-start"
 		    always
 		    theme="light"
@@ -103,7 +103,7 @@
 		  </Tooltip>
 		  <Tooltip
 		    :class="{ 'active-tip': active === 6 }"
-		    content="门店管理"
+		    content="门店管理（已停用）"
 		    placement="left-start"
 		    always
 		    theme="light"

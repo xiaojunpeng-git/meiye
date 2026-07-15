@@ -31,7 +31,14 @@ export function openYuyueSubscribe() {
 }
 
 /**
- * 管家接单订阅
+ * 店长接单订阅（模板键仍用历史命名，用户可见文案已改为店长）
+ */
+export function openManagerSubscribe() {
+	return openGuanjiaSubscribe();
+}
+
+/**
+ * 管家接单订阅（兼容旧调用名，等同 openManagerSubscribe）
  */
 export function openGuanjiaSubscribe() {
 	return subscribe([
@@ -64,7 +71,14 @@ export function goWithYuyueSubscribe(url, type = 'navigateTo') {
 }
 
 /**
- * 跳转前请求管家预约订阅（须在用户点击事件中调用）
+ * 跳转前请求店长预约订阅（须在用户点击事件中调用）
+ */
+export function goWithManagerSubscribe(url, type = 'navigateTo') {
+	return goWithGuanjiaSubscribe(url, type);
+}
+
+/**
+ * 跳转前请求店长预约订阅（兼容旧调用名）
  */
 export function goWithGuanjiaSubscribe(url, type = 'navigateTo') {
 	// #ifdef MP

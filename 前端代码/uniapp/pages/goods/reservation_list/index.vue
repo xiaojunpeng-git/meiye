@@ -64,7 +64,7 @@
 					<text class="remark-text">{{ item.mark }}</text>
 				</view>
 				<view class="card-footer">
-					<view class="action-btn outline" @tap.stop="makePhone(item.master_phone)">联系管家</view>
+					<view class="action-btn outline" @tap.stop="makePhone(item.master_phone)">联系店长</view>
 					<view class="action-btn outline" v-if="canCancelReservation(item)"
 						@tap.stop="doCancel(item.id, index)">取消预约</view>
 				</view>

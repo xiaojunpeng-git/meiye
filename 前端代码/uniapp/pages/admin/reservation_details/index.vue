@@ -237,7 +237,7 @@ export default{
 		},
 		canManageReservation() {
 			const info = this.$store.state.app.storeStaffInfo || {};
-			return Number(info.is_butler) === 1 || Number(info.is_manager) === 1;
+			return Number(info.is_manager) === 1 || Number(info.is_butler) === 1;
 		},
 		canStartService() {
 			if (this.fromButler) return false;

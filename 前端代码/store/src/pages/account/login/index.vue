@@ -124,7 +124,8 @@ export default {
             }).then(async res => {
                 this.$store.dispatch('store/account/setPageTitle')
                 msg();
-                let expires = res.data.expires_time;
+                // expires_time 为 unix 秒，js-cookie 的 number 按「天」算，需先换算
+                let expires = this.getExpiresTime(res.data.expires_time);
                 // 记录用户登陆信息
                 util.cookies.set('uuid', res.data.user_info.id, {
                     expires: expires
@@ -152,6 +153,7 @@ export default {
                 }
                 let storage = window.localStorage;
                 storage.setItem('userInfoStore', JSON.stringify(userInfoStore));
+                storage.setItem('uniqueAuthStore', JSON.stringify(res.data.unique_auth || []));
                 this.$store.commit('store/user/setProductCategoryStatus', res.data.product_category_status);
 
                 // 记录用户信息
@@ -164,7 +166,7 @@ export default {
                     version: res.data.version,
                     newOrderAudioLink: res.data.newOrderAudioLink
                 });
-                return this.$router.replace({ path: this.$route.query.redirect || '/' });
+                return this.$router.replace({ path: this.$route.query.redirect || `${Setting.routePre}/home/` });
             }).catch(res => {
                 msg();
                 let data = res === undefined ? {} : res;

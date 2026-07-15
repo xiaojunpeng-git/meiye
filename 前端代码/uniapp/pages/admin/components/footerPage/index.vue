@@ -1,6 +1,6 @@
 <template>
-	<!-- 底部导航 -->
-	<view class="page-footer">
+	<!-- 旧管理端底部导航：有商家入口权限时停用（保留组件一个版本周期） -->
+	<view v-if="footerEnabled" class="page-footer">
 		<view v-if="$util.auth(item.auth)" class="foot-item" :class="item.pagePath == activeRouter?'active':''" v-for="(item,index) in footerList" :key="index" @click="goRouter(item)">
 			<block v-if="item.pagePath == activeRouter">
 				<image :src="item.selectedIconPath"></image>
@@ -31,11 +31,13 @@
 			let routes = getCurrentPages(); //获取当前打开过的页面路由数组
 			let curRoute = routes[routes.length - 1].route //获取当前页面路由
 			this.activeRouter = '/' + curRoute
+			this.resolveFooterEnabled();
 		},
 		mounted() {},
 		data() {
 			return {
 				activeRouter:'',
+				footerEnabled: true,
 				footerList:[
 					{
 						pagePath: (this.storeNum || this.isWork)?"/pages/admin/work/index":"/pages/admin/work/store",
@@ -68,6 +70,20 @@
 			}
 		},
 		methods: {
+			async resolveFooterEnabled() {
+				if (!this.$store || !this.$store.dispatch) {
+					return;
+				}
+				try {
+					await this.$store.dispatch('merchant/fetchAccess', true);
+					if (this.$store.state.merchant.canEnter) {
+						// 统一商家端启用后停用旧 4 页 footer，商品/订单请从商家工作台进入
+						this.footerEnabled = false;
+					}
+				} catch (e) {
+					// 权限校验失败时不拦旧 footer，避免误伤
+				}
+			},
 			goRouter(item) {
 				var pages = getCurrentPages();
 				var page = (pages[pages.length - 1]).$page.fullPath;

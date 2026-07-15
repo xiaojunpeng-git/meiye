@@ -216,7 +216,7 @@
 			},
 			ensureStaffInfo() {
 				const cached = this.$store.state.app.storeStaffInfo || {};
-				if (cached && (cached.is_butler !== undefined || cached.is_manager !== undefined)) {
+				if (cached && (cached.is_manager !== undefined || cached.is_butler !== undefined)) {
 					this.staffInfo = cached;
 					this.staffInfoLoaded = true;
 					return Promise.resolve(cached);

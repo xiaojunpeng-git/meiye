@@ -191,12 +191,13 @@
 				return storeStaffInfo.store_id;
 			},
 			isButler() {
+				// 兼容历史命名：实际为店长权限（含历史管家）
 				const info = this.$store.state.app.storeStaffInfo || {};
-				return Number(info.is_butler) === 1;
+				return Number(info.is_manager) === 1 || Number(info.is_butler) === 1;
 			},
 			canManageReservation() {
 				const info = this.$store.state.app.storeStaffInfo || {};
-				return Number(info.is_butler) === 1 || Number(info.is_manager) === 1;
+				return Number(info.is_manager) === 1 || Number(info.is_butler) === 1;
 			},
 			roomLabels() {
 				return this.tableList.map(item => item.remarks || item.table_number || ('房间' + item.id));
@@ -208,7 +209,7 @@
 			this.orderList = [];
 			if (this.isLogin) {
 				this.ensureStaffInfo().then(() => {
-					if (!this.isButler) {
+					if (!this.canManageReservation) {
 						return this.$util.Tips({ title: '暂无权限' }, '/pages/admin/work/store');
 					}
 					this.loadTableList();

@@ -155,7 +155,9 @@
     saveUser,
 		postUserUpdate
 	} from "@/api/admin";
+	import legacyMerchantRedirect from '@/mixins/legacyMerchantRedirect.js';
 	export default {
+		mixins: [legacyMerchantRedirect],
 		components: {
 			coupon,
       emptyPage
@@ -188,8 +190,19 @@
 				types:1 //判断是门店页面还是平台页面
 			}
 		},
-		onLoad(options) {
-			this.uid = options.uid
+		async onLoad(options) {
+			this.uid = options.uid;
+			// 有商家入口权限时，旧用户详情收藏 URL 过渡到商家客户详情
+			if (await this.redirectLegacyToMerchant(() => {
+				const uid = options.uid || options.id || '';
+				const list = (this.$store.state.merchant.permissions) || [];
+				if (uid && Array.isArray(list) && list.indexOf('merchant.customer.view') !== -1) {
+					return `/pages/merchant/customer/detail?uid=${uid}`;
+				}
+				return this.legacyMerchantCustomerUrl();
+			})) {
+				return;
+			}
 			this.userInfo(this.types);
       this.agentStore();
 		},

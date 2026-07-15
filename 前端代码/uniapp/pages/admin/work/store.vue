@@ -189,7 +189,9 @@
 		deliveryInfo,
 	} from '@/api/admin.js';
 	import { goWithGuanjiaSubscribe, goWithYuyueSubscribe } from '@/utils/SubscribeMessage.js';
+	import legacyMerchantRedirect from '@/mixins/legacyMerchantRedirect.js';
 	export default {
+		mixins: [legacyMerchantRedirect],
 		components: {
 			// #ifdef MP || APP-PLUS
 			NavBar,
@@ -205,7 +207,8 @@
 				return !!(this.staffInfo && this.staffInfo.id);
 			},
 			isButler() {
-				return Number(this.staffInfo.is_butler) === 1;
+				// 兼容历史字段名：店长（含历史管家）可进预约管理
+				return Number(this.staffInfo.is_manager) === 1 || Number(this.staffInfo.is_butler) === 1;
 			},
 			showManageSection() {
 				if (this.isStoreStaff) {
@@ -242,7 +245,11 @@
 				isFooter:0
 			}
 		},
-		onShow() {
+		async onShow() {
+			// 有商家入口权限时，旧门店工作台收藏 URL 过渡到统一商家首页
+			if (await this.redirectLegacyToMerchant('/pages/merchant/home/index')) {
+				return;
+			}
 			this.getInfo();
 			this.$store.commit('SET_STORE', 0);
 			// #ifdef H5

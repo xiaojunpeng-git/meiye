@@ -626,14 +626,14 @@ export function storeReservationList(data) {
 }
 
 /**
- * 管家中心状态统计
+ * 店长中心状态统计
  */
 export function storeReservationStatistics(data) {
 	return request.get("store/reservation/statistics", data);
 }
 
 /**
- * 管家/店长修改预约
+ * 店长修改预约
  */
 export function storeReservationUpdate(id, data) {
 	return request.post(`store/reservation/update/${id}`, data);
@@ -670,7 +670,7 @@ export function storeReservationSetServiceTag(id, data) {
 }
 
 /**
- * 管家/店长接单确认
+ * 店长接单确认
  */
 export function storeReservationConfirm(id, data = {}) {
 	return request.post(`store/reservation/confirm/${id}`, data);
@@ -684,7 +684,7 @@ export function storeReservationTableList() {
 }
 
 /**
- * 管家/店长拒绝预约
+ * 店长拒绝预约
  */
 export function storeReservationRefuse(id, data) {
 	return request.post(`store/reservation/refuse/${id}`, data);

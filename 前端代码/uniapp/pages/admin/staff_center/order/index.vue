@@ -70,7 +70,7 @@
 						</text>
 					</view>
 					<view class="countdown-box" v-if="item.work_status == 2 && item.status == 2">已结束操作</view>
-					<view class="action-btn refuse" v-if="item.master_phone" @click.stop="callPhone(item.master_phone)">拨打管家</view>
+					<view class="action-btn refuse" v-if="item.master_phone" @click.stop="callPhone(item.master_phone)">拨打店长</view>
 				</view>
 			</view>
 			<emptyPage v-if="!orderList.length && !loading" title="暂无订单"></emptyPage>
