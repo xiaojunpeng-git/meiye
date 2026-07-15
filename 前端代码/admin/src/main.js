@@ -29,7 +29,7 @@ import store from '@/store/index';
 import VueLazyload from 'vue-lazyload';
 
 // iView 和 iView Pro
-import ViewUI from 'view-design';
+import ViewUI, { Message, Modal } from 'view-design';
 import iViewPro from '@/libs/iview-pro/iview-pro.min.js';
 
 import {
@@ -217,6 +217,20 @@ Vue.use(plugins);
 Vue.use(ViewUI, {
   i18n: (key, value) => i18n.t(key, value)
 });
+
+// 必填校验提示：确认弹窗，点「确认」后才能继续（见 .cursor/skills/ui-components/SKILL.md）
+function showRequiredAlert(content) {
+  const text = typeof content === 'string' ? content : ((content && content.content) || '');
+  return Modal.warning({
+    title: '提示',
+    content: text || '请检查并填写所有必填项',
+    okText: '确认',
+    maskClosable: false,
+    closable: false,
+  });
+}
+Message.required = showRequiredAlert;
+Modal.required = showRequiredAlert;
 
 Vue.use(iViewPro);
 Vue.component('i-link', iLink);

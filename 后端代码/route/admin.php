@@ -1388,6 +1388,13 @@ Route::group('adminapi', function () {
         Route::get('staff/read/:id', 'v1.merchant.SystemStoreStaff/read')->option(['real_name' => '获取店员详情']);
         //保存店员信息
         Route::post('staff/save/:id', 'v1.merchant.SystemStoreStaff/saveStaff')->option(['real_name' => '保存店员信息']);
+        //店员调店
+        Route::post('staff/transfer/:id', 'v1.merchant.SystemStoreStaff/transfer')->option(['real_name' => '店员调店']);
+        //调店记录
+        Route::get('staff/transfer_log', 'v1.merchant.SystemStoreStaff/transferLog')->option(['real_name' => '店员调店记录']);
+        //列表列配置
+        Route::get('staff/column_setting', 'v1.merchant.SystemStoreStaff/getColumnSetting')->option(['real_name' => '获取店员列表列配置']);
+        Route::post('staff/column_setting', 'v1.merchant.SystemStoreStaff/saveColumnSetting')->option(['real_name' => '保存店员列表列配置']);
         //店员编辑辅助数据
         Route::get('staff/roleList', 'v1.merchant.SystemStoreStaff/staffRoleList')->option(['real_name' => '获取店员角色列表']);
         Route::get('staff/position', 'v1.merchant.SystemStoreStaff/staffPosition')->option(['real_name' => '获取职位列表']);

@@ -335,7 +335,7 @@ class SystemStoreStaffServices extends BaseServices
      * @throws \think\db\exception\DbException
      * @throws \think\db\exception\ModelNotFoundException
      */
-    public function getStoreStaffList(array $where, array $with = [])
+    public function getStoreStaffList(array $where, array $with = [], bool $hideFencheng = false)
     {
         $with = array_merge($with, [
             'workMember' => function ($query) {
@@ -345,33 +345,13 @@ class SystemStoreStaffServices extends BaseServices
         [$page, $limit] = $this->getPageValue();
         $list = $this->dao->getStoreStaffList($where, '*', $page, $limit, $with);
         if ($list) {
-            /** @var SystemRoleServices $service */
-            $service = app()->make(SystemRoleServices::class);
+            $allRole = $this->loadRoleMapForStaffList($list);
             /** @var UserServices $userService */
             $userService = app()->make(UserServices::class);
-            $allRole = $service->getRoleArray(['type' => 1, 'store_id' => $where['store_id'], 'status' => 1]);
             foreach ($list as &$item) {
-                $item['position_label']=Position::where("id",$item['position'])->value("name");
-                $item['position_level_label']=PositionLevel::where("id",$item['position_level'])->value("name");
-                if ($item['level']) {
-                    if ($item['roles']) {
-                        $roles = [];
-                        foreach ($item['roles'] as $id) {
-                            if (isset($allRole[$id])) $roles[] = $allRole[$id];
-                        }
-                        if ($roles) {
-                            $item['roles'] = implode(',', $roles);
-                        } else {
-                            $item['roles'] = '';
-                        }
-                    } else {
-                        $item['roles'] = '';
-                    }
-                } else {
-                    $item['roles'] = '超级管理员';
-                }
-                $item['customer_num'] = $userService->getCount(['salesman_id' => $item['id']]);
+                $this->enrichStaffListItem($item, $allRole, $userService, $hideFencheng);
             }
+            unset($item);
         }
         $count = $this->dao->count($where);
         return compact('list', 'count');
@@ -386,39 +366,24 @@ class SystemStoreStaffServices extends BaseServices
      * @throws \think\db\exception\DbException
      * @throws \think\db\exception\ModelNotFoundException
      */
-    public function getStoreStaffListData(array $where, array $with = [])
+    public function getStoreStaffListData(array $where, array $with = [], bool $hideFencheng = false)
     {
         [$page, $limit] = $this->getPageValue();
         $list = $this->dao->getStoreStaffList($where, '*', $page, $limit, $with);
         if ($list) {
+            $allRole = $this->loadRoleMapForStaffList($list);
             /** @var StaffFlowingWaterServices $waterService */
             $waterService = app()->make(StaffFlowingWaterServices::class);
             /** @var UserServices $userService */
             $userService = app()->make(UserServices::class);
             foreach ($list as &$item) {
-                if ($item['level']) {
-                    if ($item['roles']) {
-                        $roles = [];
-                        foreach ($item['roles'] as $id) {
-                            if (isset($allRole[$id])) $roles[] = $allRole[$id];
-                        }
-                        if ($roles) {
-                            $item['roles'] = implode(',', $roles);
-                        } else {
-                            $item['roles'] = '';
-                        }
-                    } else {
-                        $item['roles'] = '';
-                    }
-                } else {
-                    $item['roles'] = '超级管理员';
-                }
-                $item['customer_num'] = $userService->getCount(['salesman_id' => $item['id']]);
+                $this->enrichStaffListItem($item, $allRole, $userService, $hideFencheng);
                 $orderData = $waterService->getStaffData($item['id']);
                 $item['order_num'] = $orderData['num'];
                 $item['order_price'] = $orderData['sum'];
                 $item['performance_price'] = $orderData['sum'];
             }
+            unset($item);
         }
         $count = $this->dao->count($where);
         return compact('list', 'count');
@@ -452,16 +417,20 @@ class SystemStoreStaffServices extends BaseServices
      * @throws \think\db\exception\DbException
      * @throws \think\db\exception\ModelNotFoundException
      */
-    public function read(int $id)
+    public function read(int $id, bool $hideFencheng = false)
     {
         $staffInfo = $this->getStaffInfo($id);
+        if (is_object($staffInfo)) {
+            $staffInfo = $staffInfo->toArray();
+        }
         /** @var UserServices $userService */
         $userService = app()->make(UserServices::class);
-        $staffInfo['nickname'] = $userService->value(['uid'=>$staffInfo['uid']],'nickname');
+        $staffInfo['nickname'] = $userService->value(['uid' => $staffInfo['uid']], 'nickname');
+        $staffInfo = $this->formatStaffRead($staffInfo, $hideFencheng);
         $info = [
             'id' => $id,
             'headerList' => $this->getHeaderList($id, $staffInfo),
-            'ps_info' => $staffInfo
+            'ps_info' => $staffInfo,
         ];
         return $info;
     }
@@ -1387,6 +1356,244 @@ class SystemStoreStaffServices extends BaseServices
             throw new ValidateException('记录不存在');
         }
         return $scheduleServices->deleteSchedule($storeId, $id);
+    }
+
+    /**
+     * 规范化店员默认头像（写入前）
+     * 默认男/女头像统一存相对路径，避免 request()->domain() 缺端口导致列表裂图
+     */
+    public function normalizeStaffAvatar(array &$data): void
+    {
+        $avatar = trim((string)($data['avatar'] ?? ''));
+        if ($avatar === '') {
+            $data['avatar'] = '/static/images/staff/avatar_male.png';
+            return;
+        }
+        if (preg_match('#/static/images/staff/avatar_(male|female)\.(svg|png)(?:\?|$)#i', $avatar, $m)) {
+            $data['avatar'] = '/static/images/staff/avatar_' . strtolower($m[1]) . '.png';
+        }
+    }
+
+    /**
+     * 规范化店员日期字段（写入前）
+     */
+    public function normalizeStaffDates(array &$data): void
+    {
+        foreach (['join_date', 'birthday_date', 'contract_begin', 'contract_end'] as $field) {
+            if (!array_key_exists($field, $data)) {
+                continue;
+            }
+            $value = $data[$field];
+            if ($value === null || $value === '' || $value === 0 || $value === '0') {
+                $data[$field] = null;
+                continue;
+            }
+            if (is_numeric($value)) {
+                $year = (int)date('Y', (int)$value);
+                if ($year <= 1899) {
+                    $data[$field] = null;
+                }
+                continue;
+            }
+            $str = trim((string)$value);
+            if ($str === '') {
+                $data[$field] = null;
+                continue;
+            }
+            $year = (int)substr($str, 0, 4);
+            if ($year <= 1899) {
+                $data[$field] = null;
+            }
+        }
+    }
+
+    /**
+     * 无效日期返回空字符串（读取展示）
+     */
+    public function formatInvalidDate($value): string
+    {
+        if ($value === null || $value === '' || $value === 0 || $value === '0') {
+            return '';
+        }
+        if (is_numeric($value)) {
+            $year = (int)date('Y', (int)$value);
+            return $year <= 1899 ? '' : date('Y-m-d', (int)$value);
+        }
+        $str = trim((string)$value);
+        if ($str === '') {
+            return '';
+        }
+        $year = (int)substr($str, 0, 4);
+        return $year <= 1899 ? '' : $str;
+    }
+
+    /**
+     * 手机号全局唯一校验
+     */
+    public function assertPhoneUnique(string $phone, int $excludeId = 0): void
+    {
+        $phone = trim($phone);
+        if ($phone === '') {
+            return;
+        }
+        $staff = $this->dao->getOne(['phone' => $phone, 'is_del' => 0]);
+        if (!$staff) {
+            return;
+        }
+        $staffId = is_object($staff) ? (int)$staff->id : (int)($staff['id'] ?? 0);
+        if ($excludeId > 0 && $staffId === $excludeId) {
+            return;
+        }
+        $row = is_object($staff) ? $staff->toArray() : (array)$staff;
+        /** @var SystemStoreServices $storeServices */
+        $storeServices = app()->make(SystemStoreServices::class);
+        $storeName = (string)$storeServices->value(['id' => (int)($row['store_id'] ?? 0)], 'name');
+        $staffName = (string)($row['staff_name'] ?? '');
+        $addTime = !empty($row['add_time']) ? date('Y-m-d H:i:s', is_numeric($row['add_time']) ? (int)$row['add_time'] : strtotime((string)$row['add_time'])) : '';
+        throw new AdminException('该手机号已存在于【' . $storeName . '】，店员名称【' . $staffName . '】，创建时间【' . $addTime . '】。');
+    }
+
+    /**
+     * 账号全局唯一校验（非空账号）
+     */
+    public function assertAccountUnique(string $account, int $excludeId = 0): void
+    {
+        $account = trim($account);
+        if ($account === '') {
+            return;
+        }
+        $query = $this->dao->getWhere()->where('account', $account)->where('is_del', 0);
+        if ($excludeId > 0) {
+            $query->where('id', '<>', $excludeId);
+        }
+        $staff = $query->find();
+        if (!$staff) {
+            return;
+        }
+        $staffId = is_object($staff) ? (int)$staff->id : (int)($staff['id'] ?? 0);
+        $row = is_object($staff) ? $staff->toArray() : (array)$staff;
+        /** @var SystemStoreServices $storeServices */
+        $storeServices = app()->make(SystemStoreServices::class);
+        $storeName = (string)$storeServices->value(['id' => (int)($row['store_id'] ?? 0)], 'name');
+        $staffName = (string)($row['staff_name'] ?? '');
+        throw new AdminException('该员工账号已经存在于【' . $storeName . '】，店员名称【' . $staffName . '】');
+    }
+
+    /**
+     * 列表项字段增强
+     */
+    public function enrichStaffListItem(array &$item, array $allRole = [], $userService = null, bool $hideFencheng = false): void
+    {
+        $item['has_pwd'] = !empty($item['pwd']) ? 1 : 0;
+        unset($item['pwd']);
+        $item['position_label'] = Position::where('id', $item['position'] ?? 0)->value('name') ?: '-';
+        $item['position_level_label'] = PositionLevel::where('id', $item['position_level'] ?? 0)->value('name') ?: '-';
+        if ($item['level']) {
+            if (!empty($item['roles'])) {
+                $roles = [];
+                foreach ($item['roles'] as $roleId) {
+                    if (isset($allRole[$roleId])) {
+                        $roles[] = $allRole[$roleId];
+                    }
+                }
+                $item['roles'] = $roles ? implode(',', $roles) : '-';
+            } else {
+                $item['roles'] = '-';
+            }
+        } else {
+            $item['roles'] = '超级管理员';
+        }
+        if (!$userService) {
+            /** @var UserServices $userService */
+            $userService = app()->make(UserServices::class);
+        }
+        if (empty($item['nickname']) && !empty($item['uid'])) {
+            $item['nickname'] = $userService->value(['uid' => $item['uid']], 'nickname') ?: '';
+        }
+        $item['customer_num'] = $userService->getCount(['salesman_id' => $item['id']]);
+        if (empty($item['name']) && !empty($item['store_id'])) {
+            /** @var SystemStoreServices $storeServices */
+            $storeServices = app()->make(SystemStoreServices::class);
+            $item['name'] = (string)$storeServices->value(['id' => (int)$item['store_id']], 'name');
+        }
+        $item['store_name'] = $item['name'] ?? '-';
+        $item['is_fencheng'] = (int)($item['is_fencheng'] ?? 0);
+        if ($hideFencheng) {
+            unset($item['is_fencheng']);
+        }
+        foreach (['join_date', 'birthday_date', 'contract_begin', 'contract_end'] as $dateField) {
+            if (array_key_exists($dateField, $item)) {
+                $formatted = $this->formatInvalidDate($item[$dateField]);
+                $item[$dateField] = $formatted !== '' ? $formatted : '-';
+            }
+        }
+    }
+
+    /**
+     * 详情读取格式化
+     */
+    public function formatStaffRead(array $staffInfo, bool $hideFencheng = false): array
+    {
+        $staffInfo['has_pwd'] = !empty($staffInfo['pwd']) ? 1 : 0;
+        unset($staffInfo['pwd']);
+        $staffInfo['is_fencheng'] = (int)($staffInfo['is_fencheng'] ?? 0);
+        if ($hideFencheng) {
+            unset($staffInfo['is_fencheng']);
+        }
+        foreach (['join_date', 'birthday_date', 'contract_begin', 'contract_end'] as $dateField) {
+            if (array_key_exists($dateField, $staffInfo)) {
+                $staffInfo[$dateField] = $this->formatInvalidDate($staffInfo[$dateField]);
+            }
+        }
+        return $staffInfo;
+    }
+
+    /**
+     * 根据角色计算 order_status / is_cashier
+     */
+    public function applyRolesFlags(array &$data): void
+    {
+        $data['order_status'] = 0;
+        $data['is_cashier'] = 0;
+        if (empty($data['roles']) || !is_array($data['roles'])) {
+            return;
+        }
+        /** @var SystemRoleServices $systemRoleService */
+        $systemRoleService = app()->make(SystemRoleServices::class);
+        $roles = $systemRoleService->getColumn(['id' => $data['roles']], '*');
+        if (!$roles) {
+            return;
+        }
+        foreach ($roles as $role) {
+            if (!empty($role['mall_rules'])) {
+                $data['order_status'] = 1;
+                break;
+            }
+            if (!empty($role['cashier_rules'])) {
+                $data['is_cashier'] = 1;
+            }
+        }
+    }
+
+    /**
+     * 加载列表涉及门店的角色映射
+     */
+    protected function loadRoleMapForStaffList(array $list): array
+    {
+        $storeIds = array_values(array_unique(array_filter(array_map('intval', array_column($list, 'store_id')))));
+        if (!$storeIds) {
+            return [];
+        }
+        /** @var SystemRoleServices $service */
+        $service = app()->make(SystemRoleServices::class);
+        $allRole = [];
+        foreach ($storeIds as $storeId) {
+            $roles = $service->getRoleArray(['type' => 1, 'store_id' => $storeId, 'status' => 1]);
+            if ($roles) {
+                $allRole = array_merge($allRole, $roles);
+            }
+        }
+        return $allRole;
     }
 
 }

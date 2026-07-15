@@ -5,7 +5,7 @@
     <!-- 左侧组织树 -->
     <div class="region-tree-panel">
       <div class="panel-header">
-        <h3 class="panel-title">组织架构</h3>
+        <h3 class="panel-title">组织</h3>
         <div class="panel-actions">
           <Tooltip content="展开全部" transfer>
             <span class="btn-icon" @click="expandAllTree"><Icon type="md-expand" /></span>
@@ -1606,7 +1606,7 @@ $theme-light = #ecf5ff
   align-items stretch
 
 .region-tree-panel
-  width 280px
+  width 250px
   flex-shrink 0
   background #fff
   border-radius 8px

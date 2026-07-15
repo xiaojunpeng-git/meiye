@@ -99,10 +99,33 @@ export function staffshowApi (id,status) {
 /**
  * 添加店员-角色列表
  */
-export function systemRoleList (id) {
+export function systemRoleList (storeId) {
     return request({
         url: `system/roleList`,
-        method: 'get'
+        method: 'get',
+        params: storeId ? { store_id: storeId } : {},
+    });
+}
+
+/**
+ * 获取店员列表列配置
+ */
+export function getStaffColumnSetting(params) {
+    return request({
+        url: 'staff/column_setting',
+        method: 'get',
+        params,
+    });
+}
+
+/**
+ * 保存店员列表列配置
+ */
+export function saveStaffColumnSetting(data) {
+    return request({
+        url: 'staff/column_setting',
+        method: 'post',
+        data,
     });
 }
 

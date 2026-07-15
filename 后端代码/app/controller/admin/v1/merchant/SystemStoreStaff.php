@@ -10,13 +10,16 @@
 // +----------------------------------------------------------------------
 namespace app\controller\admin\v1\merchant;
 
-use app\services\agent\SystemRegionAgentServices;
+use app\services\organization\OrganizationScopeService;
+use app\services\store\StoreStaffTransferServices;
 use app\services\store\SystemStoreServices;
 use app\services\store\SystemStoreStaffServices;
 use app\services\store\finance\StaffFlowingWaterServices;
+use app\services\system\AdminTableColumnServices;
 use app\services\system\SystemRoleServices;
 use app\services\user\UserServices;
 use app\services\work\WorkMemberServices;
+use mohe\exceptions\AdminException;
 use think\facade\App;
 use think\facade\Db;
 use app\controller\admin\AuthController;
@@ -40,55 +43,85 @@ class SystemStoreStaff extends AuthController
         $this->services = $services;
     }
 
+    /**
+     * 构建店员列表查询条件
+     * @return array|null null 表示无权限/无数据应返回空列表
+     */
+    protected function buildStaffListWhere(): ?array
+    {
+        $params = $this->request->getMore([
+            [['org_id', 'd'], 0],
+            [['store_id', 'd'], 0],
+            ['keyword', ''],
+            ['status', ''],
+        ]);
+        $orgId = (int)$params['org_id'];
+        $storeId = (int)$params['store_id'];
+        $allowed = null;
+        if ($this->adminType == 3 && $this->agentId) {
+            /** @var OrganizationScopeService $scopeService */
+            $scopeService = app()->make(OrganizationScopeService::class);
+            $allowed = $scopeService->getResolvedStoreIdsByLegacyAgentId((int)$this->agentId);
+            if (!$allowed) {
+                return null;
+            }
+        }
+        $storeIds = null;
+        if ($orgId > 0) {
+            /** @var OrganizationScopeService $scopeService */
+            $scopeService = app()->make(OrganizationScopeService::class);
+            $orgStoreIds = $scopeService->getOrgStoreIds($orgId, true);
+            $storeIds = $allowed !== null ? array_values(array_intersect($allowed, $orgStoreIds)) : $orgStoreIds;
+        } elseif ($allowed !== null) {
+            $storeIds = $allowed;
+        }
+        if ($storeId > 0) {
+            if ($storeIds === null) {
+                $storeIds = [$storeId];
+            } else {
+                $storeIds = in_array($storeId, $storeIds, true) ? [$storeId] : [];
+            }
+        }
+        if ($storeIds !== null && !$storeIds) {
+            return null;
+        }
+        $where = [
+            'keyword' => $params['keyword'],
+            'is_del' => 0,
+        ];
+        if ($params['status'] !== '') {
+            $where['status'] = (int)$params['status'];
+        }
+        if ($storeIds !== null) {
+            $where['store_id'] = $storeIds;
+        }
+        return $where;
+    }
+
 	/**
 	 * 获取店员列表
-	 * @param SystemRegionAgentServices $regionAgentServices
 	 * @return mixed
-	 * @throws \think\db\exception\DataNotFoundException
-	 * @throws \think\db\exception\DbException
-	 * @throws \think\db\exception\ModelNotFoundException
 	 */
-    public function index(SystemRegionAgentServices $regionAgentServices)
+    public function index()
     {
-        $where = $this->request->getMore([
-            [['store_id', 'd'], 0],
-        ]);
-		if (!$where['store_id'] && $this->adminType == 3 && $this->agentId) {//区域代理商登录
-			$storeIds = $regionAgentServices->getRegionAgentStoreId((int)$this->agentId);
-			if ($storeIds) {
-				$where['store_id'] = $storeIds;
-			} else {
-				return $this->success(['list' => [], 'count' => 0]);
-			}
-		}
+        $where = $this->buildStaffListWhere();
+        if ($where === null) {
+            return $this->success(['list' => [], 'count' => 0]);
+        }
         return $this->success($this->services->getStoreStaffList($where, ['store', 'user']));
     }
 
 	/**
 	 * 获取店员列表
-	 * @param SystemRegionAgentServices $regionAgentServices
 	 * @return mixed
-	 * @throws \think\db\exception\DataNotFoundException
-	 * @throws \think\db\exception\DbException
-	 * @throws \think\db\exception\ModelNotFoundException
 	 */
-    public function getStoreStaffList(SystemRegionAgentServices $regionAgentServices)
+    public function getStoreStaffList()
     {
-        $where = $this->request->getMore([
-            ['store_id', 0],
-            ['keyword', ''],
-        ]);
-        $where['status'] = 1;
-        $where['is_del'] = 0;
-		if (!$where['store_id'] && $this->adminType == 3 && $this->agentId) {//区域代理商登录
-			$storeIds = $regionAgentServices->getRegionAgentStoreId((int)$this->agentId);
-			if ($storeIds) {
-				$where['store_id'] = $storeIds;
-			} else {
-				return $this->success(['list' => [], 'count' => 0]);
-			}
-		}
-        return $this->success($this->services->getStoreStaffListData($where, ['store']));
+        $where = $this->buildStaffListWhere();
+        if ($where === null) {
+            return $this->success(['list' => [], 'count' => 0]);
+        }
+        return $this->success($this->services->getStoreStaffList($where, ['store', 'user']));
     }
 
     /**
@@ -105,6 +138,9 @@ class SystemStoreStaff extends AuthController
         if (!(int)$where['store_id']) {
             return $this->success([]);
         }
+        if (!$this->checkStaffStoreAccess((int)$where['store_id'])) {
+            return $this->success([]);
+        }
         return $this->success($this->services->getSelectList($where));
     }
 
@@ -113,9 +149,6 @@ class SystemStoreStaff extends AuthController
      * @param UserServices $userServices
      * @param $id
      * @return mixed
-     * @throws \think\db\exception\DataNotFoundException
-     * @throws \think\db\exception\DbException
-     * @throws \think\db\exception\ModelNotFoundException
      */
     public function getStoreStaffCustomer(UserServices $userServices, $id)
     {
@@ -155,17 +188,15 @@ class SystemStoreStaff extends AuthController
 	/**
 	 * 门店列表
 	 * @param SystemStoreServices $services
-	 * @param SystemRegionAgentServices $regionAgentServices
 	 * @return mixed
-	 * @throws \think\db\exception\DataNotFoundException
-	 * @throws \think\db\exception\DbException
-	 * @throws \think\db\exception\ModelNotFoundException
 	 */
-    public function store_list(SystemStoreServices $services, SystemRegionAgentServices $regionAgentServices)
+    public function store_list(SystemStoreServices $services)
     {
 		$where = ['status' => 1];
-		if ($this->adminType == 3 && $this->agentId) {//区域代理商登录
-			$storeIds = $regionAgentServices->getRegionAgentStoreId((int)$this->agentId);
+		if ($this->adminType == 3 && $this->agentId) {
+            /** @var OrganizationScopeService $scopeService */
+            $scopeService = app()->make(OrganizationScopeService::class);
+			$storeIds = $scopeService->getResolvedStoreIdsByLegacyAgentId((int)$this->agentId);
 			if ($storeIds) {
 				$where['id'] = $storeIds;
 			} else {
@@ -296,14 +327,13 @@ class SystemStoreStaff extends AuthController
     protected function checkStaffStoreAccess(int $storeId): bool
     {
         if ($this->adminType == 3 && $this->agentId) {
-            /** @var SystemRegionAgentServices $regionAgentServices */
-            $regionAgentServices = app()->make(SystemRegionAgentServices::class);
-            $storeIds = $regionAgentServices->getRegionAgentStoreId((int)$this->agentId);
+            /** @var OrganizationScopeService $scopeService */
+            $scopeService = app()->make(OrganizationScopeService::class);
+            $storeIds = $scopeService->getResolvedStoreIdsByLegacyAgentId((int)$this->agentId);
             if (!$storeIds) {
                 return false;
             }
-            $storeIds = is_array($storeIds) ? $storeIds : [$storeIds];
-            return in_array($storeId, $storeIds);
+            return in_array($storeId, $storeIds, true);
         }
         return true;
     }
@@ -326,7 +356,7 @@ class SystemStoreStaff extends AuthController
     }
 
     /**
-     * 保存店员信息（总后台编辑）
+     * 保存店员信息（总后台编辑/新建）
      * @param int $id
      * @return mixed
      */
@@ -354,6 +384,7 @@ class SystemStoreStaff extends AuthController
             ['can_choose', 0],
             ['is_reservable', 1],
             ['is_butler', 0],
+            ['is_fencheng', 0],
             ['customer_url', ''],
             [['work_member_id', 'd'], 0],
             ['department', ''],
@@ -370,24 +401,41 @@ class SystemStoreStaff extends AuthController
             ['contract_end', null],
             [['store_id', 'd'], 0],
         ]);
-        $this->validate($data, \app\validate\store\StoreStaffValidate::class, $id ? 'update' : 'save');
         $id = (int)$id;
+        $this->validate($data, \app\validate\store\StoreStaffValidate::class, $id ? 'update' : 'save');
+        $account = trim((string)$data['account']);
+        if ($account !== '') {
+            if (strlen($account) < 4 || strlen($account) > 64) {
+                return $this->fail('门店店员账号长度4-64位字符');
+            }
+            if (!$id && !$data['pwd']) {
+                return $this->fail('请输入密码');
+            }
+        }
         if ($id) {
             $staff = $this->services->get($id);
             if (!$staff) {
                 return $this->fail('店员不存在');
             }
-            if (!$this->checkStaffStoreAccess((int)$staff['store_id'])) {
+            $staffArr = is_object($staff) ? $staff->toArray() : (array)$staff;
+            if (!$this->checkStaffStoreAccess((int)$staffArr['store_id'])) {
                 return $this->fail('无权操作该店员');
             }
+            $data['store_id'] = (int)$staffArr['store_id'];
+        } else {
             if (!$data['store_id']) {
                 return $this->fail('请选择所属门店');
             }
             if (!$this->checkStaffStoreAccess((int)$data['store_id'])) {
-                return $this->fail('无权将该店员调整至所选门店');
+                return $this->fail('无权在该门店添加店员');
             }
-        } else {
-            return $this->fail('缺少店员id');
+            $data['is_fencheng'] = (int)($data['is_fencheng'] ?? 0);
+            $data['level'] = 1;
+            $data['add_time'] = time();
+            if (!empty($data['image']) && is_array($data['image'])) {
+                $data['uid'] = (int)($data['image']['uid'] ?? $data['uid']);
+                $data['avatar'] = (string)($data['image']['image'] ?? $data['avatar']);
+            }
         }
         $data['is_store'] = 1;
         if ($data['pwd']) {
@@ -395,14 +443,13 @@ class SystemStoreStaff extends AuthController
         } else {
             unset($data['pwd']);
         }
-        $accountStaff = $this->services->getOne(['account' => $data['account'], 'is_del' => 0]);
-        if ($accountStaff && $id != $accountStaff->id) {
-            return $this->fail('该员工账号已经存在');
+        try {
+            $this->services->assertAccountUnique($account, $id);
+            $this->services->assertPhoneUnique((string)$data['phone'], $id);
+        } catch (AdminException $e) {
+            return $this->fail($e->getMessage());
         }
-        $phoneStaff = $this->services->getOne(['store_id' => $data['store_id'], 'phone' => $data['phone'], 'is_del' => 0]);
-        if ($phoneStaff && $id != $phoneStaff['id']) {
-            return $this->fail('该手机号已经存在');
-        }
+        $data['account'] = $account;
         /** @var SystemStoreServices $storeServices */
         $storeServices = app()->make(SystemStoreServices::class);
         if ($data['uid']) {
@@ -433,29 +480,130 @@ class SystemStoreStaff extends AuthController
             }
         }
         unset($data['conf_pwd'], $data['image']);
-        $data['order_status'] = 0;
-        $data['is_cashier'] = 0;
-        if (count($data['roles']) > 0) {
-            /** @var SystemRoleServices $systemRoleService */
-            $systemRoleService = app()->make(SystemRoleServices::class);
-            $roles = $systemRoleService->getColumn(['id' => $data['roles']], '*');
-            if ($roles) {
-                foreach ($roles as $role) {
-                    if ($role['mall_rules']) {
-                        $data['order_status'] = 1;
-                        break;
-                    }
-                    if ($role['cashier_rules']) {
-                        $data['is_cashier'] = 1;
-                    }
-                }
+        $this->services->normalizeStaffAvatar($data);
+        $this->services->normalizeStaffDates($data);
+        $this->services->applyRolesFlags($data);
+        if ($id) {
+            $res = $this->services->update($id, $data);
+            $msg = $res ? '编辑成功' : '编辑失败，请稍后再试';
+        } else {
+            $res = $this->services->save($data);
+            $msg = $res ? '添加成功' : '添加失败，请稍后再试';
+        }
+        if ($res) {
+            return $this->success($msg);
+        }
+        return $this->fail($msg);
+    }
+
+    /**
+     * 店员调店
+     * @param int $id
+     * @return mixed
+     */
+    public function transfer($id = 0)
+    {
+        $id = (int)$id;
+        if (!$id) {
+            return $this->fail('缺少店员id');
+        }
+        $data = $this->request->postMore([
+            [['target_store_id', 'd'], 0],
+            ['roles', []],
+            ['reason', ''],
+            [['immediate', 'd'], 1],
+        ]);
+        if (!$data['target_store_id']) {
+            return $this->fail('请选择目标门店');
+        }
+        $staff = $this->services->getStaffInfo($id);
+        if (!$this->checkStaffStoreAccess((int)$staff['store_id'])) {
+            return $this->fail('无权操作该店员');
+        }
+        if (!$this->checkStaffStoreAccess((int)$data['target_store_id'])) {
+            return $this->fail('无权将店员调整至所选门店');
+        }
+        /** @var StoreStaffTransferServices $transferServices */
+        $transferServices = app()->make(StoreStaffTransferServices::class);
+        try {
+            $transferServices->transfer(
+                $id,
+                (int)$data['target_store_id'],
+                (array)$data['roles'],
+                (string)$data['reason'],
+                (int)$data['immediate'],
+                [
+                    'id' => (int)$this->adminId,
+                    'name' => (string)($this->adminInfo['real_name'] ?? $this->adminInfo['account'] ?? ''),
+                    'type' => 1,
+                ]
+            );
+        } catch (AdminException $e) {
+            return $this->fail($e->getMessage());
+        }
+        return $this->success('调店成功');
+    }
+
+    /**
+     * 调店记录
+     * @return mixed
+     */
+    public function transferLog()
+    {
+        $where = $this->request->getMore([
+            [['staff_id', 'd'], 0],
+            [['from_store_id', 'd'], 0],
+            [['to_store_id', 'd'], 0],
+            ['data', ''],
+        ]);
+        if ($this->adminType == 3 && $this->agentId) {
+            /** @var OrganizationScopeService $scopeService */
+            $scopeService = app()->make(OrganizationScopeService::class);
+            $allowed = $scopeService->getResolvedStoreIdsByLegacyAgentId((int)$this->agentId);
+            if (!$allowed) {
+                return $this->success(['list' => [], 'count' => 0]);
+            }
+            if (!empty($where['from_store_id']) && !in_array((int)$where['from_store_id'], $allowed, true)) {
+                return $this->success(['list' => [], 'count' => 0]);
+            }
+            if (!empty($where['to_store_id']) && !in_array((int)$where['to_store_id'], $allowed, true)) {
+                return $this->success(['list' => [], 'count' => 0]);
             }
         }
-        $res = $this->services->update($id, $data);
-        if ($res) {
-            return $this->success('编辑成功');
+        /** @var StoreStaffTransferServices $transferServices */
+        $transferServices = app()->make(StoreStaffTransferServices::class);
+        return $this->success($transferServices->getTransferLogList($where));
+    }
+
+    /**
+     * 获取列表列配置
+     * @param AdminTableColumnServices $columnServices
+     * @return mixed
+     */
+    public function getColumnSetting(AdminTableColumnServices $columnServices)
+    {
+        [$tableKey] = $this->request->getMore([['table_key', '']], true);
+        $tableKey = $tableKey ?: 'staff_list_admin';
+        return $this->success($columnServices->getColumnSetting(1, (int)$this->adminId, $tableKey));
+    }
+
+    /**
+     * 保存列表列配置
+     * @param AdminTableColumnServices $columnServices
+     * @return mixed
+     */
+    public function saveColumnSetting(AdminTableColumnServices $columnServices)
+    {
+        $data = $this->request->postMore([
+            ['table_key', 'staff_list_admin'],
+            ['columns', []],
+        ]);
+        try {
+            $columnServices->saveColumnSetting(1, (int)$this->adminId, (string)$data['table_key'], $data['columns']);
+        } catch (AdminException $e) {
+            return $this->fail($e->getMessage());
         }
-        return $this->fail('编辑失败，请稍后再试');
+        return $this->success('保存成功');
     }
 
     /**

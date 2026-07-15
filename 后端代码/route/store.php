@@ -339,6 +339,9 @@ Route::group('storeapi', function () {
 		Route::get('staff_info', 'staff.StoreStaff/info')->option(['real_name' => '获取店员详情']);
 		//添加、编辑店员
 		Route::post('staff/:id', 'staff.StoreStaff/save')->option(['real_name' => '添加、编辑店员']);
+        //列表列配置
+        Route::get('column_setting', 'staff.StoreStaff/getColumnSetting')->option(['real_name' => '获取店员列表列配置']);
+        Route::post('column_setting', 'staff.StoreStaff/saveColumnSetting')->option(['real_name' => '保存店员列表列配置']);
 		//删除门店店员
 		Route::delete('staff/:id', 'staff.StoreStaff/delete')->option(['real_name' => '删除门店店员']);
         //店员绑定uid

@@ -1,111 +1,127 @@
 <template>
-  <div>
-    <Card :bordered="false" dis-hover class="ivu-mt box">
-      <Form
-        ref="formValidate"
-        :model="formValidate"
-        :label-width="labelWidth"
-        :label-position="labelPosition"
-      >
-        <Row type="flex" :gutter="24">
-          <Col>
-            <FormItem label="店员搜索：" :labelWidth="80">
-              <Input
-                v-model="formValidate.keyword"
-                placeholder="请输入ID/手机号"
-                clearable
-              >
-                <Select
-                  v-model="formValidate.field_key"
-                  slot="prepend"
-                  style="width: 80px"
-                >
-                  <Option value="all">全部</Option>
-                  <Option value="id">ID</Option>
-                  <Option value="phone">手机号</Option>
-                </Select>
-              </Input>
-            </FormItem>
-          </Col>
-          <Col>
-            <div class="search" @click="search">搜索</div>
-          </Col>
-          <Col>
-            <div class="reset" @click="reset">重置</div>
-          </Col>
-        </Row>
-      </Form>
-    </Card>
-
-    <Card :bordered="false" dis-hover class="ive-mt tablebox">
-      <div class="btnbox">
-        <Button v-auth="['staff-staff-create']" type="primary" @click="openForm()"
-          >添加店员</Button
+  <div class="staff-page">
+    <Card :bordered="false" dis-hover :padding="16" class="staff-card">
+      <div class="filter-bar">
+        <Input
+          v-model="formData.keyword"
+          placeholder="请输入导购名称/ID/手机号"
+          clearable
+          class="search-input"
+          @on-enter="orderSearch"
+        />
+        <Select
+          v-model="formData.status"
+          clearable
+          class="filter-select"
+          placeholder="在职状态"
+          @on-change="orderSearch"
         >
-        <Button class="ml10" @click="goSchedule">排班管理</Button>
+          <Option :value="1">在职</Option>
+          <Option :value="0">离职</Option>
+        </Select>
+        <Button type="primary" @click="orderSearch">查询 <span class="enter-key">↵</span></Button>
+        <Button v-auth="['staff-staff-create']" type="primary" class="ml14" @click="openForm(0)">新建店员</Button>
+        <Button class="ml14" @click="goSchedule">排班管理</Button>
+        <Button class="ml14" @click="showColumnSetting = true">列设置</Button>
       </div>
-      <div class="table">
+
+      <div class="table-wrap">
+        <div class="table-body" ref="tableBody">
         <Table
-          :columns="columns"
-          :data="orderList"
-          ref="table"
-          class="mt25"
+          :columns="tableColumns"
+          :data="data"
           :loading="loading"
           highlight-row
-          no-userFrom-text="暂无数据"
-          no-filtered-userFrom-text="暂无筛选结果"
+          :max-height="tableBodyHeight"
+          :scroll="{ x: tableScrollX }"
+          no-data-text="暂无数据"
+          no-filtered-data-text="暂无筛选结果"
         >
-          <template slot-scope="{ row, index }" slot="avatars">
-            <viewer>
-              <div class="tabBox_img">
-                <img v-lazy="row.avatar" />
-              </div>
-            </viewer>
+          <template slot-scope="{ row }" slot="staff_name">
+            <div class="staff-cell">
+              <img class="staff-avatar" :src="resolveStaffAvatar(row.avatar)" alt="" />
+              <span>
+                {{ row.staff_name || '-' }}
+                <span v-if="row.delete_time != null" class="deleted-tag">(已注销)</span>
+              </span>
+            </div>
           </template>
-					<template slot-scope="{ row, index }" slot="staff_name">
-					  <div>{{row.staff_name}}<span style="color: #ed4014;" v-if="row.delete_time != null"> (已注销)</span></div>
-					</template>
-          <template slot-scope="{ row, index }" slot="label">
-            <div>{{row.workMember ? row.workMember.name : ''}}</div>
+          <template slot-scope="{ row }" slot="is_manager">
+            {{ row.is_manager == 1 ? '是' : '否' }}
           </template>
-          <template slot-scope="{ row, index }" slot="status">
-            <i-switch
-              v-model="row.status"
-              :value="row.status"
-              :true-value="1"
-              :false-value="0"
-              @on-change="changeSwitch(row)"
-              size="large"
-            >
-              <span slot="open">开启</span>
-              <span slot="close">关闭</span>
-            </i-switch>
+          <template slot-scope="{ row }" slot="can_choose">
+            {{ row.can_choose == 1 ? '是' : '否' }}
+          </template>
+          <template slot-scope="{ row }" slot="status">
+            {{ row.status == 1 ? '在职' : '离职' }}
+          </template>
+          <template slot-scope="{ row }" slot="has_pwd">
+            {{ row.has_pwd == 1 ? '已设置' : '未设置' }}
+          </template>
+          <template slot-scope="{ row }" slot="is_customer">
+            {{ row.is_customer == 1 ? '是' : '否' }}
+          </template>
+          <template slot-scope="{ row }" slot="is_reservable">
+            {{ row.is_reservable == 1 ? '是' : '否' }}
+          </template>
+          <template slot-scope="{ row }" slot="is_butler">
+            {{ row.is_butler == 1 ? '是' : '否' }}
+          </template>
+          <template slot-scope="{ row }" slot="salary_status">
+            {{ row.salary_status == 1 ? '是' : '否' }}
+          </template>
+          <template slot-scope="{ row }" slot="birthday_type">
+            {{ row.birthday_type == 1 ? '农历' : row.birthday_type == 2 ? '新历' : '-' }}
           </template>
           <template slot-scope="{ row, index }" slot="action">
-            <a @click="goCashier(row)" v-if="row.status == 1 && row.delete_time == null">进入收银台</a>
-            <Divider type="vertical" v-if="row.status == 1 && row.delete_time == null" />
-            <a @click="openForm(row.id)" v-if="row.delete_time == null">编辑</a>
-            <Divider type="vertical" v-if="row.delete_time == null" />
-            <a @click="del(row.id, '删除该店员', index)" v-if="row.level > 0">删除</a>
-            <Divider type="vertical" v-if="row.level > 0" />
+            <a
+              v-if="row.status == 1 && row.delete_time == null"
+              @click="goCashier(row)"
+            >进入收银台</a>
+            <Divider
+              v-if="row.status == 1 && row.delete_time == null"
+              type="vertical"
+            />
+            <a v-if="row.delete_time == null" @click="openForm(row.id)">编辑</a>
+            <Divider v-if="row.level > 0" type="vertical" />
+            <a v-if="row.level > 0" @click="del(row.id, '删除该店员', index)">删除</a>
+            <Divider type="vertical" />
             <a @click="details(row)">查看详情</a>
           </template>
         </Table>
+        </div>
         <div class="acea-row row-right page">
           <Page
             :total="total"
-            :current="formValidate.page"
+            :current="formData.page"
+            :page-size="formData.limit"
+            :page-size-opts="[10, 20, 50, 100]"
             show-elevator
             show-total
+            show-sizer
             @on-change="pageChange"
-            :page-size="formValidate.limit"
+            @on-page-size-change="limitChange"
           />
         </div>
       </div>
     </Card>
-    <Details ref="userDetails" @edit="handleEdit"></Details>
-    <form-modal v-model="formModal" :edit-id="formEditId" @success="getList" />
-    <!-- 修改业绩归属店员弹窗 -->
+
+    <Details ref="userDetails" @edit="handleEdit" />
+    <form-modal
+      v-model="formModal"
+      :edit-id="formEditId"
+      :current-store-id="currentStoreId"
+      :current-store-name="currentStoreName"
+      @success="getList"
+    />
+    <column-setting
+      v-model="showColumnSetting"
+      :columns-meta="columnsMeta"
+      :columns="columnConfig"
+      :default-columns="defaultColumnConfig"
+      @save="saveColumnConfig"
+    />
+
     <Modal
       v-model="editModal"
       scrollable
@@ -116,11 +132,11 @@
       width="550"
     >
       <Form :model="editForm" :label-width="80">
-        <FormItem label="业绩金额：">¥{{editRow.pay_price}}</FormItem>
-        <FormItem label="业绩订单：">{{editRow.order_id}}</FormItem>
+        <FormItem label="业绩金额：">¥{{ editRow.pay_price }}</FormItem>
+        <FormItem label="业绩订单：">{{ editRow.order_id }}</FormItem>
         <FormItem label="业绩归属：">
           <Select v-model="editForm.staff_id">
-            <Option :value="item.value" v-for="item in staffAll" :key="item.value">{{item.label}}</Option>
+            <Option :value="item.value" v-for="item in staffAll" :key="item.value">{{ item.label }}</Option>
           </Select>
         </FormItem>
       </Form>
@@ -133,148 +149,120 @@
 </template>
 
 <script>
-import { mapState } from "vuex";
-import util from "@/libs/util";
-import Cookies from "js-cookie";
-import Setting from "@/setting";
+import { mapState } from 'vuex';
+import Setting from '@/setting';
+import Cookies from 'js-cookie';
 import {
   staffListInfo,
-  staffshowApi,
-  cashierLogin,
   staffallInfo,
+  cashierLogin,
   orderStaff,
-} from "@/api/staff.js";
-import Details from "../components/details";
-import FormModal from "./add";
+  getStaffColumnSetting,
+  saveStaffColumnSetting,
+} from '@/api/staff.js';
+import { storeGetInfoApi } from '@/api/setting';
+import Details from '../components/details';
+import FormModal from './add';
+import ColumnSetting from './components/ColumnSetting';
+
+function resolveApiOrigin() {
+  return String(Setting.apiBaseURL || '')
+    .replace(/\/adminapi\/?$/i, '')
+    .replace(/\/storeapi\/?$/i, '')
+    .replace(/\/+$/, '');
+}
+
+function resolveStaffAvatar(url) {
+  if (!url) return '';
+  const origin = resolveApiOrigin();
+  const raw = String(url);
+  const m = raw.match(/\/static\/images\/staff\/avatar_(male|female)\.(svg|png)/i);
+  if (m) {
+    return `${origin}/static/images/staff/avatar_${m[1].toLowerCase()}.png`;
+  }
+  if (raw.startsWith('/')) {
+    return origin + raw;
+  }
+  if (/^https?:\/\/127\.0\.0\.1\/static\//i.test(raw)) {
+    return origin + raw.replace(/^https?:\/\/127\.0\.0\.1/i, '');
+  }
+  return raw;
+}
+
+const COLUMNS_META = [
+  { key: 'id', title: 'ID', minWidth: 60 },
+  { key: 'staff_name', title: '店员名称', minWidth: 150, slot: 'staff_name' },
+  { key: 'nickname', title: '昵称', minWidth: 100 },
+  { key: 'phone', title: '手机号', minWidth: 110 },
+  { key: 'roles', title: '店员身份', minWidth: 120 },
+  { key: 'position_label', title: '职位', minWidth: 100 },
+  { key: 'position_level_label', title: '职级', minWidth: 100 },
+  { key: 'is_manager', title: '店长', minWidth: 80, slot: 'is_manager' },
+  { key: 'can_choose', title: '允许被选中', minWidth: 100, slot: 'can_choose' },
+  { key: 'status', title: '在职状态', minWidth: 80, slot: 'status' },
+  { key: 'employee_number', title: '工号', minWidth: 100 },
+  { key: 'join_date', title: '入职日期', minWidth: 110 },
+  { key: 'id_card', title: '身份证号码', minWidth: 140 },
+  { key: 'birthday_date', title: '生日日期', minWidth: 110 },
+  { key: 'age', title: '年龄', minWidth: 70 },
+  { key: 'join_area', title: '劳动关系所在地', minWidth: 130 },
+  { key: 'birthday_area', title: '籍贯', minWidth: 100 },
+  { key: 'now_area', title: '现居地', minWidth: 100 },
+  { key: 'contract_begin', title: '合同起始日', minWidth: 110 },
+  { key: 'contract_end', title: '合同终止日', minWidth: 110 },
+  { key: 'uid', title: '商城用户ID', minWidth: 100 },
+  { key: 'account', title: '账号', minWidth: 100 },
+  { key: 'has_pwd', title: '密码', minWidth: 80, slot: 'has_pwd' },
+  { key: 'is_customer', title: '客服', minWidth: 80, slot: 'is_customer' },
+  { key: 'is_reservable', title: '可被预约', minWidth: 90, slot: 'is_reservable' },
+  { key: 'is_butler', title: '是否管家', minWidth: 90, slot: 'is_butler' },
+  { key: 'customer_num', title: '专属客户数', minWidth: 100 },
+  { key: 'department', title: '部门', minWidth: 100 },
+  { key: 'salary_status', title: '工资状态', minWidth: 90, slot: 'salary_status' },
+  { key: 'birthday_type', title: '生日类型', minWidth: 90, slot: 'birthday_type' },
+  { key: 'action', title: '操作', minWidth: 220, slot: 'action', fixed: 'right', fixedColumn: true },
+];
+
+const DEFAULT_COLUMN_CONFIG = [
+  { key: 'staff_name', show: true },
+  { key: 'nickname', show: true },
+  { key: 'phone', show: true },
+  { key: 'roles', show: true },
+  { key: 'position_label', show: true },
+  { key: 'position_level_label', show: true },
+  { key: 'is_manager', show: true },
+  { key: 'can_choose', show: true },
+  { key: 'status', show: true },
+  { key: 'action', show: true },
+];
+
 export default {
-  name: "clerkList",
+  name: 'clerkList',
   components: {
     Details,
     FormModal,
+    ColumnSetting,
   },
   data() {
     return {
-	  routePre:Setting.routePre,
-      total: 0,
-      a: 12,
-      loading: false,
+      routePre: Setting.routePre,
+      currentStoreId: 0,
+      currentStoreName: '',
       formModal: false,
       formEditId: 0,
-      columns: [
-        {
-          title: "ID",
-          key: "id",
-          width: 60,
-        },
-        {
-          title: "头像",
-          slot: "avatars",
-          minWidth: 80,
-        },
-        {
-          title: "昵称",
-          slot: "staff_name",
-          minWidth: 120,
-        },
-        {
-          title: "店员身份",
-          key: "roles",
-          minWidth: 120,
-        },
-        {
-          title: "职位",
-          key: "position_label",
-          minWidth: 120,
-        },
-        {
-          title: "职级",
-          key: "position_level_label",
-          minWidth: 120,
-        },
-        {
-          title: "工号",
-          key: "employee_number",
-          minWidth: 120,
-        },
-        {
-          title: "入职日期",
-          key: "join_date",
-          minWidth: 120,
-        },
-        {
-          title: "身份证号码",
-          key: "id_card",
-          minWidth: 120,
-        },
-        {
-          title: "生日日期",
-          key: "birthday_date",
-          minWidth: 120,
-        },
-        {
-          title: "年龄",
-          key: "age",
-          minWidth: 120,
-        },
-        {
-          title: "劳动关系所在地",
-          key: "join_area",
-          minWidth: 120,
-        },
-        {
-          title: "籍贯",
-          key: "birthday_area",
-          minWidth: 120,
-        },
-        {
-          title: "现居地",
-          key: "now_area",
-          minWidth: 120,
-        },
-        {
-          title: "合同起始日",
-          key: "contract_begin",
-          minWidth: 120,
-        },
-        {
-          title: "合同终止日",
-          key: "contract_end",
-          minWidth: 120,
-        },
-		{
-		  title: "企微员工",
-		  slot: "label",
-		  minWidth: 120,
-		},
-        {
-          title: "手机号",
-          key: "phone",
-          minWidth: 150,
-        },
-        {
-          title: "专属客户",
-          key: "customer_num",
-          minWidth: 150,
-        },
-        {
-          title: "账号状态",
-          slot: "status",
-          minWidth: 80,
-        },
-        {
-          title: "操作",
-          slot: "action",
-          fixed: "right",
-          minWidth: 250,
-        },
-      ],
-      orderList: [],
-      formValidate: {
-        field_key: "all",
-        keyword: "",
+      showColumnSetting: false,
+      columnsMeta: COLUMNS_META,
+      columnConfig: [...DEFAULT_COLUMN_CONFIG],
+      defaultColumnConfig: DEFAULT_COLUMN_CONFIG,
+      formData: {
+        keyword: '',
+        status: '',
         page: 1,
-        limit: 15,
+        limit: 10,
       },
+      loading: false,
+      data: [],
+      total: 0,
       staffRow: {},
       editForm: {
         order_id: '',
@@ -283,76 +271,160 @@ export default {
       editRow: {},
       editModal: false,
       staffAll: [],
+      tableBodyHeight: 420,
     };
   },
   computed: {
-    ...mapState("store/layout", ["isMobile"]),
-    labelWidth() {
-      return this.isMobile ? undefined : 80;
+    ...mapState('store/layout', ['isMobile']),
+    tableColumns() {
+      const cols = [];
+      this.columnConfig.forEach((item) => {
+        if (item.show === false || item.key === 'action') return;
+        const meta = COLUMNS_META.find((m) => m.key === item.key);
+        if (meta) cols.push(this.buildTableColumn(meta));
+      });
+      const actionItem = this.columnConfig.find((c) => c.key === 'action');
+      if (!actionItem || actionItem.show !== false) {
+        const actionMeta = COLUMNS_META.find((m) => m.key === 'action');
+        if (actionMeta) cols.push(this.buildTableColumn(actionMeta));
+      }
+      return cols;
     },
-    labelPosition() {
-      return this.isMobile ? "top" : "left";
+    tableScrollX() {
+      return this.tableColumns.reduce((sum, col) => sum + (col.minWidth || 100), 0);
     },
   },
-  mounted() {
+  created() {
+    this.loadCurrentStore();
+    this.loadColumnSetting();
     this.getList();
   },
+  mounted() {
+    this.updateTableHeight();
+    window.addEventListener('resize', this.updateTableHeight);
+  },
+  beforeDestroy() {
+    window.removeEventListener('resize', this.updateTableHeight);
+  },
   methods: {
+    resolveStaffAvatar,
+    updateTableHeight() {
+      this.$nextTick(() => {
+        const el = this.$refs.tableBody;
+        if (!el) return;
+        this.tableBodyHeight = Math.max(240, el.clientHeight || 420);
+      });
+    },
+    buildTableColumn(meta) {
+      const col = {
+        title: meta.title,
+        minWidth: meta.minWidth || 100,
+      };
+      if (meta.slot) {
+        col.slot = meta.slot;
+      } else {
+        col.key = meta.key;
+      }
+      if (meta.fixed) {
+        col.fixed = meta.fixed;
+      }
+      return col;
+    },
+    loadCurrentStore() {
+      storeGetInfoApi()
+        .then((res) => {
+          const info = res.data || {};
+          this.currentStoreId = info.id || 0;
+          this.currentStoreName = info.name || '';
+        })
+        .catch(() => {});
+    },
+    loadColumnSetting() {
+      getStaffColumnSetting({ table_key: 'staff_list_store' })
+        .then((res) => {
+          const columns = res.data && res.data.columns;
+          if (Array.isArray(columns) && columns.length) {
+            this.columnConfig = columns;
+          }
+        })
+        .catch(() => {});
+    },
+    saveColumnConfig(columns) {
+      saveStaffColumnSetting({
+        table_key: 'staff_list_store',
+        columns,
+      })
+        .then((res) => {
+          this.$Message.success(res.msg || '保存成功');
+          this.columnConfig = columns;
+        })
+        .catch((err) => {
+          this.$Message.error(err.msg);
+        });
+    },
     goSchedule() {
       this.$router.push({ path: `${this.routePre}/staff/schedule` });
     },
     goCashier(item) {
       cashierLogin(item.id)
         .then((res) => {
-          Cookies.set("cashierData", JSON.stringify(res));
+          Cookies.set('cashierData', JSON.stringify(res));
           window.open(
-            window.location.protocol +
-              "//" +
-              window.location.host +
-              "/" +
-              res.data.prefix +
-              "/login"
+            `${window.location.protocol}//${window.location.host}/${res.data.prefix}/login`
           );
         })
         .catch((err) => {
           this.$Message.error(err.msg);
         });
     },
-    //列表
-    getList() {
-      this.loading = true;
-      staffListInfo(this.formValidate)
-        .then((res) => {
-          this.total = res.data.count;
-          this.orderList = res.data.list;
-          this.loading = false;
-        })
-        .catch((err) => {
-          this.$Message.error(err.msg);
-          this.loading = false;
-        });
-    },
-    //添加 / 编辑
     openForm(id = 0) {
       this.formEditId = Number(id) || 0;
       this.formModal = true;
     },
-    //删除
+    orderSearch() {
+      this.formData.page = 1;
+      this.getList();
+    },
+    pageChange(index) {
+      this.formData.page = index;
+      this.getList();
+    },
+    limitChange(limit) {
+      this.formData.limit = limit;
+      this.formData.page = 1;
+      this.getList();
+    },
+    getList() {
+      this.loading = true;
+      const params = { ...this.formData };
+      if (params.status === '') delete params.status;
+      staffListInfo(params)
+        .then((res) => {
+          this.data = res.data.list || [];
+          this.total = res.data.count || 0;
+          this.updateTableHeight();
+        })
+        .catch((err) => {
+          this.$Message.error(err.msg);
+        })
+        .finally(() => {
+          this.loading = false;
+        });
+    },
     del(id, tit, num) {
-      let delfromData = {
+      const delfromData = {
         title: tit,
-        num: num,
+        num,
         url: `/staff/staff/${id}`,
-        method: "DELETE",
-        ids: "",
+        method: 'DELETE',
+        ids: '',
       };
       this.$modalSure(delfromData)
         .then((res) => {
           this.$Message.success(res.msg);
-          this.orderList.splice(num, 1);
-          if (!this.orderList.length) {
-            this.formValidate.page =
-                this.formValidate.page == 1 ? 1 : this.formValidate.page - 1;
+          this.data.splice(num, 1);
+          if (!this.data.length) {
+            this.formData.page = this.formData.page === 1 ? 1 : this.formData.page - 1;
           }
           this.getList();
         })
@@ -360,38 +432,11 @@ export default {
           this.$Message.error(res.msg);
         });
     },
-    //搜索
-    search() {
-      this.getList();
-    },
-    //重置
-    reset() {
-      this.formValidate.field_key = "all";
-      this.formValidate.keyword = "";
-      this.getList();
-    },
-    //状态
-    changeSwitch(row) {
-      staffshowApi(row.id, row.status)
-        .then((res) => {
-          this.$Message.success(res.msg);
-        })
-        .catch((err) => {
-          this.$Message.error(err.msg);
-        });
-    },
-    //分页
-    pageChange(status) {
-      this.formValidate.page = status;
-      this.getList();
-    },
-    //详情
     details(row) {
       this.staffRow = row;
       this.$refs.userDetails.modals = true;
       this.$refs.userDetails.getDetails(row.id);
     },
-    // 打开修改业绩归属店员弹窗
     handleEdit(row) {
       this.editRow = row;
       this.editForm.order_id = row.order_id;
@@ -399,30 +444,29 @@ export default {
       this.editModal = true;
       this.getStaffAll();
     },
-    // 获取全部店员
     getStaffAll() {
-      staffallInfo().then((res) => {
-        this.staffAll = res.data.filter((item) => {
-          return item.value != this.staffRow.id;
+      staffallInfo()
+        .then((res) => {
+          this.staffAll = (res.data || []).filter((item) => item.value !== this.staffRow.id);
+        })
+        .catch((err) => {
+          this.$Message.error(err.msg);
         });
-      }).catch((err) => {
-        this.$Message.error(err.msg);
-      });
     },
-    // 保存修改的业绩归属店员
     saveOrderStaff() {
       if (!this.editForm.staff_id) {
         return this.$Message.warning('请选择业绩归属店员');
       }
-      orderStaff(this.editForm).then((res) => {
-        this.$Message.success(res.msg);
-        this.editModal = false;
-        this.$refs.userDetails.refreshOrder();
-      }).catch((err) => {
-        this.$Message.error(err.msg);
-      });
+      orderStaff(this.editForm)
+        .then((res) => {
+          this.$Message.success(res.msg);
+          this.editModal = false;
+          this.$refs.userDetails.refreshOrder();
+        })
+        .catch((err) => {
+          this.$Message.error(err.msg);
+        });
     },
-    // 关闭修改业绩归属店员弹窗
     cancelEditModal() {
       this.editModal = false;
     },
@@ -430,80 +474,70 @@ export default {
 };
 </script>
 
-<style scoped lang="less">
-/deep/.ivu-form-label-left .ivu-form-item-label {
-  text-align: right;
-}
-/deep/.ivu-page-header,
-/deep/.ivu-tabs-bar {
-  border-bottom: 1px solid #ffffff;
-}
-/deep/.ivu-card-body {
-  padding: 0;
-}
-	/deep/.ivu-select-selected-value {
-	font-size: 12px !important;}
-/deep/.ivu-tabs-nav {
-  height: 45px;
-}
-.box {
-  padding: 20px;
-  padding-bottom: 1px;
-}
-.tablebox {
-  margin-top: 15px;
-}
-.btnbox {
-  padding: 20px 0px 0px 30px;
-  .btns {
-    width: 99px;
-    height: 32px;
-    background: #1890ff;
-    border-radius: 4px;
-    text-align: center;
-    line-height: 32px;
-    color: #ffffff;
-    cursor: pointer;
-  }
-}
-.table {
-  padding: 0px 30px 15px 30px;
-}
-.search {
-  width: 86px;
-  height: 32px;
-  background: #1890ff;
-  border-radius: 4px;
-  text-align: center;
-  line-height: 32px;
-  font-size: 13px;
-  font-family: PingFangSC-Regular, PingFang SC;
-  font-weight: 400;
-  color: #ffffff;
-  cursor: pointer;
-}
-.reset {
-  width: 86px;
-  height: 32px;
-  border-radius: 4px;
-  border: 1px solid rgba(151, 151, 151, 0.36);
-  text-align: center;
-  line-height: 32px;
-  font-size: 13px;
-  font-family: PingFangSC-Regular, PingFang SC;
-  font-weight: 400;
-  color: rgba(0, 0, 0, 0.85);
-  cursor: pointer;
-}
-.tabBox_img {
-  width: 36px;
-  height: 36px;
-  border-radius: 4px;
-  cursor: pointer;
+<style lang="stylus" scoped>
+.staff-page
+  height calc(100vh - 140px)
+  overflow hidden
 
-  img {
-    width: 100%;
-    height: 100%;
-  }
-}
+.staff-card
+  height 100%
+
+  >>> .ivu-card-body
+    height 100%
+    display flex
+    flex-direction column
+    overflow hidden
+    box-sizing border-box
+
+.filter-bar
+  display flex
+  flex-wrap wrap
+  align-items center
+  gap 10px
+  margin-bottom 12px
+  flex-shrink 0
+
+.search-input
+  width 220px
+
+.filter-select
+  width 160px
+
+.table-wrap
+  flex 1
+  min-height 0
+  display flex
+  flex-direction column
+  overflow hidden
+
+.table-body
+  flex 1
+  min-height 0
+  overflow hidden
+
+.staff-cell
+  display flex
+  align-items center
+  gap 10px
+
+.staff-avatar
+  width 50px
+  height 50px
+  object-fit cover
+  border-radius 4px
+  flex-shrink 0
+
+.deleted-tag
+  color #ed4014
+
+.page
+  margin-top 12px
+  flex-shrink 0
+
+.ml14
+  margin-left 14px
+
+.enter-key
+  margin-left 2px
+  font-weight 600
 </style>

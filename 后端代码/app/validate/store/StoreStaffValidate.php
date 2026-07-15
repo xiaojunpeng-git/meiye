@@ -27,6 +27,8 @@ class StoreStaffValidate extends Validate
         'staff_name' => 'require',
 		'phone' => 'require',
         'roles' => ['require', 'array'],
+        'position' => ['require', 'gt:0'],
+        'position_level' => ['require', 'gt:0'],
     ];
 
     /**
@@ -46,11 +48,15 @@ class StoreStaffValidate extends Validate
 		'phone.require' => '请输入门店店员电话',
         'roles.require' => '请选择店员身份',
         'roles.array' => '身份必须为数组',
+        'position.require' => '请选择职位',
+        'position.gt' => '请选择职位',
+        'position_level.require' => '请选择职级',
+        'position_level.gt' => '请选择职级',
     ];
 
     protected $scene = [
-        'save' => ['account', 'pwd', 'staff_name', 'phone', 'roles'],
-        'update' => ['account', 'staff_name', 'phone', 'roles'],
+        'save' => ['staff_name', 'phone', 'roles', 'position', 'position_level'],
+        'update' => ['staff_name', 'phone', 'roles', 'position', 'position_level'],
     ];
 
 

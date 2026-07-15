@@ -16,9 +16,11 @@ use app\services\store\finance\StoreFinanceFlowServices;
 use app\services\store\StoreStaffShiftHandoverServices;
 use app\services\store\StoreUserServices;
 use app\services\store\SystemStoreServices;
+use app\services\system\AdminTableColumnServices;
 use app\services\system\SystemRoleServices;
 use app\services\user\UserServices;
 use app\services\work\WorkMemberServices;
+use mohe\exceptions\AdminException;
 use think\facade\App;
 use app\controller\store\AuthController;
 use app\services\store\SystemStoreStaffServices;
@@ -70,6 +72,7 @@ class StoreStaff extends AuthController
         $where = $this->request->getMore([
             ['keyword', ''],
             ['field_key', ''],
+            ['status', ''],
         ]);
         if ($where['field_key'] == 'all') $where['field_key'] = '';
         $where['store_id'] = $this->storeId;
@@ -77,7 +80,12 @@ class StoreStaff extends AuthController
 //            $where['level'] = $this->level + 1;
 //        }
         $where['is_del'] = 0;
-        return app('json')->success($this->services->getStoreStaffList($where));
+        if ($where['status'] === '') {
+            unset($where['status']);
+        } else {
+            $where['status'] = (int)$where['status'];
+        }
+        return app('json')->success($this->services->getStoreStaffList($where, [], true));
     }
 
     /**
@@ -108,7 +116,7 @@ class StoreStaff extends AuthController
         if (!$id) {
             return app('json')->fail('缺少店员id');
         }
-        return app('json')->success($this->services->read((int)$id));
+        return app('json')->success($this->services->read((int)$id, true));
     }
 
     /**
@@ -182,6 +190,7 @@ class StoreStaff extends AuthController
             ['can_choose', 0],
             ['is_reservable', 1],
             ['is_butler', 0],
+            ['is_fencheng', 0],
             ['customer_url', ''],
             [['work_member_id', 'd'], 0],//关联企业微信员工ID
             ['department', ''],
@@ -197,6 +206,8 @@ class StoreStaff extends AuthController
             ['contract_begin',null],
             ['contract_end',null],
         ]);
+        unset($data['is_fencheng']);
+		$id = (int)$id;
 		$this->validate($data, \app\validate\store\StoreStaffValidate::class, $id ? 'update' : 'save');
 		if ($id) {//编辑
 			$staff = $this->services->get($id);
@@ -206,22 +217,27 @@ class StoreStaff extends AuthController
 		}
         $data['store_id'] = $this->storeId;
         $data['is_store'] = 1;
-		if (!$id && !$data['pwd']) {//
-			return app('json')->fail('请输入员工密码');
+		$account = trim((string)$data['account']);
+		if ($account !== '') {
+			if (strlen($account) < 4 || strlen($account) > 64) {
+				return app('json')->fail('门店店员账号长度4-64位字符');
+			}
+			if (!$id && !$data['pwd']) {
+				return app('json')->fail('请输入员工密码');
+			}
 		}
 		if ($data['pwd']) {//有修改密码
 			$data['pwd'] = $this->services->passwordHash($data['pwd']);
 		} else {
 			unset($data['pwd']);
 		}
-		$accountStaff = $this->services->getOne(['account' => $data['account'], 'is_del' => 0]);
-        if ($accountStaff && (!$id || $id != $accountStaff->id)) {
-            return app('json')->fail('该员工账号已经存在');
-        }
-        $phoneStaff = $this->services->getOne(['store_id' => $this->storeId, 'phone' => $data['phone'], 'is_del' => 0]);
-        if ($phoneStaff && $phoneStaff['id'] =! $id) {
-            return app('json')->fail('该手机号已经存在');
-        }
+		try {
+			$this->services->assertAccountUnique($account, $id);
+			$this->services->assertPhoneUnique((string)$data['phone'], $id);
+		} catch (AdminException $e) {
+			return app('json')->fail($e->getMessage());
+		}
+		$data['account'] = $account;
 		/** @var SystemStoreServices $storeServices */
 		$storeServices = app()->make(SystemStoreServices::class);
 		if ($data['uid']) {
@@ -250,48 +266,60 @@ class StoreStaff extends AuthController
 			/** @var WorkMemberServices $workMemberService */
 			$workMemberService = app()->make(WorkMemberServices::class);
 			$data['work_member_code'] = $workMemberService->value(['id' => $data['work_member_id']], 'qr_code');
-			$info = $this->services->get(['work_member_id' => $data['work_member_id']]);
-			if ($info) {
+			$info = $this->services->get(['work_member_id' => $data['work_member_id'], 'is_del' => 0]);
+			if ($info && (int)$info['id'] !== $id) {
 				return app('json')->fail('该员工已绑定店员，不能重复绑定！');
 			}
 		}
         unset($data['conf_pwd'], $data['image']);
-		$data['order_status'] = 0;
-		$data['is_cashier'] = 0;
-		//移动端管理
-		if (count($data['roles']) > 0) {
-			/** @var SystemRoleServices $systemRoleService */
-			$systemRoleService = app()->make(SystemRoleServices::class);
-			$roles = $systemRoleService->getColumn(['id' => $data['roles']], '*');
-			if ($roles) {
-				foreach ($roles as $role) {
-					if ($role['mall_rules']) {//角色有移动端权限
-						$data['order_status'] = 1;
-						break;
-					}
-					if ($role['cashier_rules']) {//有收银台权限
-						$data['is_cashier'] = 1;
-					}
-				}
-			}
-		}
+		$this->services->normalizeStaffAvatar($data);
+		$this->services->normalizeStaffDates($data);
+		$this->services->applyRolesFlags($data);
 
 		if ($id) {//编辑
 			$res = $this->services->update($id, $data);
 		} else {
 			$data['level'] = $this->storeStaffInfo['level'] + 1;
+			$data['is_fencheng'] = 0;
 			$data['add_time'] = time();
-			if ($accountStaff) {//修改
-				$res = $this->services->update($accountStaff['id'], $data);
-			} else {
-				$res = $this->services->save($data);
-			}
+			$res = $this->services->save($data);
 		}
         if ($res) {
-            return app('json')->success('添加成功');
+            return app('json')->success($id ? '编辑成功' : '添加成功');
         } else {
-            return app('json')->fail('添加失败，请稍后再试');
+            return app('json')->fail($id ? '编辑失败，请稍后再试' : '添加失败，请稍后再试');
         }
+    }
+
+    /**
+     * 获取列表列配置
+     * @param AdminTableColumnServices $columnServices
+     * @return mixed
+     */
+    public function getColumnSetting(AdminTableColumnServices $columnServices)
+    {
+        [$tableKey] = $this->request->getMore([['table_key', '']], true);
+        $tableKey = $tableKey ?: 'staff_list_store';
+        return app('json')->success($columnServices->getColumnSetting(2, (int)$this->storeStaffId, $tableKey));
+    }
+
+    /**
+     * 保存列表列配置
+     * @param AdminTableColumnServices $columnServices
+     * @return mixed
+     */
+    public function saveColumnSetting(AdminTableColumnServices $columnServices)
+    {
+        $data = $this->request->postMore([
+            ['table_key', 'staff_list_store'],
+            ['columns', []],
+        ]);
+        try {
+            $columnServices->saveColumnSetting(2, (int)$this->storeStaffId, (string)$data['table_key'], $data['columns']);
+        } catch (AdminException $e) {
+            return app('json')->fail($e->getMessage());
+        }
+        return app('json')->success('保存成功');
     }
 
     /**

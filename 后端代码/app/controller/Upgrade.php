@@ -2006,7 +2006,7 @@ INSERT INTO `@table` (`id`, `pid`, `type`, `icon`, `menu_name`, `module`, `contr
 (1562, 1561, 2, '', '电子面单打印', 'admin', '', '', '', '', '[]', 0, 1, 0, 1, '/store/set/index', '1070/1561', 1, '', 0, 'store-set-index', 0),
 (1563, 1561, 2, '', '小票打印', 'admin', '', '', '', '', '[]', 1, 1, 0, 1, '/store/set/hardware/ticket', '1070/1561', 1, '', 0, 'store-set-hardware-ticket', 0),
 (1564, 1041, 1, '', '添加门店', 'admin', '', '', '', '', '[]', 0, 1, 1, 1, '/admin/store/add_store', '1037/1041', 1, '', 0, 'admin-store-add_store', 0),
-(1565, 1587, 1, '', '区域管理', 'admin', '', '', '', '', '[]', 99, 1, 0, 1, '/admin/store/region/list', '7/1587', 1, '', 0, 'admin-store-region_list', 0),
+(1565, 1587, 1, '', '组织', 'admin', '', '', '', '', '[]', 99, 1, 0, 1, '/admin/store/region/list', '7/1587', 1, '', 0, 'admin-store-region_list', 0),
 (1566, 1565, 1, '', '添加区域', 'admin', '', '', '', '', '[]', 0, 1, 1, 1, '/admin/store/region/create', '1037/1565', 1, '', 0, 'admin-store-region_create', 0),
 (1567, 1590, 1, '', '进店规则', 'admin', '', '', '', '', '[]', 0, 1, 0, 1, '/setting/shop/entry_rules', '7/656/1590', 1, '', 0, 'setting-shop-entry_rules', 0),
 (1568, 656, 1, '', '悬浮按钮', 'admin', '', '', '', '', '[]', 0, 1, 0, 1, '/admin/setting/pages/fab', '7/656', 1, '', 0, 'setting-system-fab', 0),

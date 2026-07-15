@@ -61,3 +61,47 @@ export function workMemberList() {
     method: 'get',
   });
 }
+
+/**
+ * 店员调店
+ */
+export function staffTransfer(id, data) {
+  return request({
+    url: `merchant/staff/transfer/${id}`,
+    method: 'post',
+    data,
+  });
+}
+
+/**
+ * 店员调店记录
+ */
+export function staffTransferLog(params) {
+  return request({
+    url: 'merchant/staff/transfer_log',
+    method: 'get',
+    params,
+  });
+}
+
+/**
+ * 获取店员列表列配置
+ */
+export function getStaffColumnSetting(params) {
+  return request({
+    url: 'merchant/staff/column_setting',
+    method: 'get',
+    params,
+  });
+}
+
+/**
+ * 保存店员列表列配置
+ */
+export function saveStaffColumnSetting(data) {
+  return request({
+    url: 'merchant/staff/column_setting',
+    method: 'post',
+    data,
+  });
+}

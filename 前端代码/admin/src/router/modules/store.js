@@ -97,7 +97,7 @@ export default {
       name: `${pre}regionList`,
       meta: {
         auth: ['admin-store-region_list'],
-        title: '组织架构'
+        title: '组织'
       },
       component: () => import('@/pages/store/region/index')
     },

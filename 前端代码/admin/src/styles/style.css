@@ -912,6 +912,12 @@ justify-content: center;
 	z-index: 20000!important;
 }
 
+/* 日期/下拉挂到 body 后须高于 Modal，避免被弹窗裁切或盖住 */
+.ivu-date-picker-transfer,
+.ivu-select-dropdown {
+	z-index: 10050 !important;
+}
+
 .border-dcdee2 {
 	border: 1px solid #dcdee2;
 }
