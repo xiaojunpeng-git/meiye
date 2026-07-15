@@ -89,7 +89,7 @@ class UserListStatServices
      * @param int|null $storeId
      * @return array
      */
-    public static function getStatsByUids(array $uids, ?int $storeId = null, array $where = []): array
+    public static function getStatsByUids(array $uids, $storeIdOrIds = null, array $where = []): array
     {
         if (!$uids) {
             return [];
@@ -103,7 +103,8 @@ class UserListStatServices
             ];
         }
 
-        $orderQuery = self::orderConsumeQuery($storeId)->whereIn('uid', $uids);
+        $storeIds = self::normalizeStoreIds($storeIdOrIds);
+        $orderQuery = self::orderConsumeQuery($storeIds)->whereIn('uid', $uids);
         self::applySaleDateTimeFilter($orderQuery, $where);
         $cashExpr = ValidCashOrderServices::buildAmountExpr('o', 'o.cash_pay_price');
         $orderRows = $orderQuery
@@ -119,8 +120,12 @@ class UserListStatServices
         }
 
         $writeoffQuery = Db::name('store_order_writeoff')->whereIn('uid', $uids);
-        if ($storeId) {
-            $writeoffQuery->where('relation_id', $storeId);
+        if ($storeIds) {
+            if (count($storeIds) === 1) {
+                $writeoffQuery->where('relation_id', $storeIds[0]);
+            } else {
+                $writeoffQuery->whereIn('relation_id', $storeIds);
+            }
         }
         $writeoffRows = $writeoffQuery
             ->field('uid, COUNT(*) as cnt')
@@ -136,11 +141,28 @@ class UserListStatServices
     }
 
     /**
+     * @param int|int[]|null $storeIdOrIds
+     * @return int[]|null
+     */
+    protected static function normalizeStoreIds($storeIdOrIds): ?array
+    {
+        if ($storeIdOrIds === null || $storeIdOrIds === '' || $storeIdOrIds === []) {
+            return null;
+        }
+        if (is_array($storeIdOrIds)) {
+            $ids = array_values(array_unique(array_filter(array_map('intval', $storeIdOrIds))));
+            return $ids ?: null;
+        }
+        $id = (int)$storeIdOrIds;
+        return $id > 0 ? [$id] : null;
+    }
+
+    /**
      * 有效消费订单：普通订单 + 充值订单（不含核销 order_type=2）
-     * @param int|null $storeId
+     * @param int|int[]|null $storeIdOrIds
      * @return \think\db\Query
      */
-    protected static function orderConsumeQuery(?int $storeId = null)
+    protected static function orderConsumeQuery($storeIdOrIds = null)
     {
         $query = Db::name('store_order')->alias('o')
             ->where('paid', 1)
@@ -150,8 +172,13 @@ class UserListStatServices
             ->whereIn('order_type', [0, 1]);
         ValidCashOrderServices::applyScope($query, 'o');
         ValidCashOrderServices::applyHasValidCash($query, 'o');
-        if ($storeId) {
-            $query->where('store_id', $storeId);
+        $storeIds = self::normalizeStoreIds($storeIdOrIds);
+        if ($storeIds) {
+            if (count($storeIds) === 1) {
+                $query->where('store_id', $storeIds[0]);
+            } else {
+                $query->whereIn('store_id', $storeIds);
+            }
         }
         return $query;
     }

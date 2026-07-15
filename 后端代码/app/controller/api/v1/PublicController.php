@@ -205,10 +205,12 @@ class PublicController extends BaseController
         $auth['/pages/annex/vip_paid/index'] = !$vipCard || !$svipOpen;
         $auth['/kefu/mobile_list'] = !$userService || $uid == 0;
         $auth['/pages/admin/store/index'] = true;
-		$auth['/pages/admin/work/store'] = $uid == 0 || !$isStaff;
+		// 统一商家端后：买家端不再展示旧工作台/旧用户管理入口（改由悬浮「商家入口」进入）
+		$auth['/pages/admin/work/store'] = true;
 //        $auth['/pages/admin/distribution/index'] = $uid == 0 || !$isDelivery;
         $auth['/pages/store_spread/index'] =  $uid == 0 || !$isStaff;
-		$auth['/pages/admin/work/index'] = !$userOrder || $uid == 0;
+		$auth['/pages/admin/work/index'] = true;
+		$auth['/pages/admin/user/list'] = true;
 		$auth['/pages/admin/agent/index'] =  $uid == 0 || !$isAgent;
 		$auth['/pages/admin/target/management/index'] = $uid == 0 || !$canTargetManage;
         foreach ($menusInfo as $key => &$value) {
@@ -322,12 +324,7 @@ class PublicController extends BaseController
                     ];
                 }
                 $diy_data['storeMenu']['list'][]=$menusOne;
-                $menusOne=[
-                    'name'=>'用户管理',
-                    'pic'=>'https://qiniu007.cc3798.com/attach/2026/02/56502202602040002363341.png',
-                    'url'=>'/pages/admin/user/list',
-                ];
-                $diy_data['storeMenu']['list'][]=$menusOne;
+                // 旧「用户管理→/pages/admin/user/list」已停用：买家端 storeMenu 不再注入；客户能力走统一商家端
                 $menusOne=[
                     'name'=>'拼团管理',
                     'pic'=>'https://qiniu007.cc3798.com/attach/2026/02/38273202602122337378410.png',
@@ -354,10 +351,11 @@ class PublicController extends BaseController
                 }
             }
 		}
-		// 预约管理仅管家可从门店工作台进入，个人中心不展示该入口
+		// 预约管理仅管家可从门店工作台进入，个人中心不展示该入口；旧用户管理路由一并剔除
 		if (isset($diy_data['storeMenu']['list']) && is_array($diy_data['storeMenu']['list'])) {
 			foreach ($diy_data['storeMenu']['list'] as $key => $storeMenuItem) {
-				if (($storeMenuItem['url'] ?? '') === '/pages/admin/reservation_list/index') {
+				$url = (string)($storeMenuItem['url'] ?? '');
+				if ($url === '/pages/admin/reservation_list/index' || $url === '/pages/admin/user/list' || $url === '/pages/admin/user/index') {
 					unset($diy_data['storeMenu']['list'][$key]);
 				}
 			}
@@ -398,6 +396,19 @@ class PublicController extends BaseController
 			}
 			$diy_data['menu']['list'] = array_merge($diy_data['menu']['list']);
 		}
+		// 商家入口已收口至统一商家端，买家「我的」不再输出三组旧商家菜单
+		if (!isset($diy_data['merMenu']) || !is_array($diy_data['merMenu'])) {
+			$diy_data['merMenu'] = [];
+		}
+		if (!isset($diy_data['storeMenu']) || !is_array($diy_data['storeMenu'])) {
+			$diy_data['storeMenu'] = [];
+		}
+		if (!isset($diy_data['agentMenu']) || !is_array($diy_data['agentMenu'])) {
+			$diy_data['agentMenu'] = [];
+		}
+		$diy_data['merMenu']['list'] = [];
+		$diy_data['storeMenu']['list'] = [];
+		$diy_data['agentMenu']['list'] = [];
 		return app('json')->successful(['routine_my_menus' => array_merge($menusInfo), 'routine_my_banner' => $my_banner, 'routine_spread_banner' => $bannerInfo, 'routine_contact_type' => $routine_contact_type, 'diy_data' => $diy_data]);
 	}
 

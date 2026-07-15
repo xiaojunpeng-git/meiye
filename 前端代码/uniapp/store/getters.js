@@ -20,5 +20,7 @@ export default {
 	diyProduct: state => state.app.diyProduct,
 	diyCategory: state => state.app.diyCategory,
 	productVideoStatus: state => state.app.productVideoStatus,
-	storeNum: state => state.app.storeNum
+	storeNum: state => state.app.storeNum,
+	merchantCanEnter: state => state.merchant.canEnter,
+	merchantMode: state => state.merchant.mode,
 };

@@ -88,6 +88,10 @@ const mutations = {
 		state.token = undefined;
 		state.uid = undefined
 		state.userInfo = {}
+		try {
+			uni.removeStorageSync('MERCHANT_MODE');
+			uni.removeStorageSync('MERCHANT_CONTEXT');
+		} catch (e) {}
 	},
 	BACKGROUND_COLOR(state, color) {
 		state.color = color;

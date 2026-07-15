@@ -271,6 +271,22 @@
 					}
 				},
 				{
+					"path": "system_changelog/index",
+					"style": {
+						"navigationBarBackgroundColor":"#f5f5f5",
+						"navigationBarTextStyle":"black",
+						"navigationBarTitleText": "更新日志",
+						"enablePullDownRefresh": true,
+						"app-plus": {
+							// #ifdef APP-PLUS
+							"titleNView": {
+								"type": "default"
+							}
+							// #endif
+						}
+					}
+				},
+				{
 					"path": "user_info/index",
 					"style": {
 						"navigationBarBackgroundColor":"#f5f5f5",
@@ -2512,6 +2528,68 @@
 								"type": "default"
 							}
 						}
+					}
+				}
+			]
+		},
+		{
+			"root": "pages/merchant",
+			"name": "merchant",
+			"pages": [
+				{
+					"path": "home/index",
+					"style": {
+						"navigationBarTitleText": "商家首页",
+						"navigationBarBackgroundColor": "#ffffff"
+					}
+				},
+				{
+					"path": "customer/index",
+					"style": {
+						"navigationBarTitleText": "客户",
+						"navigationBarBackgroundColor": "#ffffff"
+					}
+				},
+				{
+					"path": "customer/detail",
+					"style": {
+						"navigationBarTitleText": "客户详情",
+						"navigationBarBackgroundColor": "#ffffff"
+					}
+				},
+				{
+					"path": "data/index",
+					"style": {
+						"navigationBarTitleText": "数仓",
+						"navigationBarBackgroundColor": "#ffffff"
+					}
+				},
+				{
+					"path": "target/index",
+					"style": {
+						"navigationBarTitleText": "目标",
+						"navigationBarBackgroundColor": "#ffffff"
+					}
+				},
+				{
+					"path": "profile/index",
+					"style": {
+						"navigationBarTitleText": "商家我的",
+						"navigationBarBackgroundColor": "#ffffff"
+					}
+				},
+				{
+					"path": "workbench/index",
+					"style": {
+						"navigationBarTitleText": "工作台",
+						"navigationBarBackgroundColor": "#ffffff"
+					}
+				},
+				{
+					"path": "debt/index",
+					"style": {
+						"navigationBarTitleText": "待还欠款",
+						"navigationBarBackgroundColor": "#ffffff"
 					}
 				}
 			]

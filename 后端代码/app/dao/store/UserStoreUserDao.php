@@ -157,8 +157,14 @@ class UserStoreUserDao extends BaseDao
             }
         }
         //门店
-        if (isset($where['store_id']) && $where['store_id'] !== '') {
+        if (isset($where['store_ids']) && is_array($where['store_ids']) && $where['store_ids']) {
+            $model = $model->whereIn($storeUserAlias . 'store_id', array_map('intval', $where['store_ids']));
+        } elseif (isset($where['store_id']) && $where['store_id'] !== '') {
             $model = $model->where($storeUserAlias . 'store_id', $where['store_id']);
+        }
+        // 归属店员（我的客户）
+        if (isset($where['salesman_id']) && (int)$where['salesman_id'] > 0) {
+            $model = $model->where($userAlias . 'salesman_id', (int)$where['salesman_id']);
         }
         // 用户访问时间
         if (isset($where['user_time_type']) && isset($where['user_time'])) {

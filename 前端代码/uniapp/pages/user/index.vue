@@ -11,9 +11,11 @@
 			></user-order-static>
 			<user-poster :posterData="diyData.poster"></user-poster>
 			<user-menu :menuData="diyData.menu" :routineContact='routineContact'></user-menu>
+			<!-- 旧商家入口已由统一商家端替代
 			<user-mer-menu v-if="diyData.merMenu.list.length" :merMenuData="diyData.merMenu"></user-mer-menu>
 			<user-agent-menu v-if="diyData.agentMenu.list.length" :agentMenuData="diyData.agentMenu"></user-agent-menu>
 			<user-store-menu v-if="diyData.storeMenu.list.length" :storeMenuData="diyData.storeMenu"></user-store-menu>
+			-->
 			<view class="m0ee4 pb-20">
 				<template v-if="m854f8">
 					<image :src="m6d38d" mode="aspectFill" class="m6d38d"></image>
@@ -42,6 +44,7 @@
 		</view>
 		<view class="fixed-lt bg-w111-000-s111-80 w-full h-full z-999" v-show="isextension" @touchmove.stop.prevent></view>
 		<pageFooter :style="colorStyle"></pageFooter>
+		<merchant-switch side="buyer" />
 		<ewcomerPop v-if="isComerGift" :comerGift="comerGift" @comerPop="comerPop"></ewcomerPop>
 		<!-- #ifdef MP -->
 		<editUserModal :isShow="editModal" @closeEdit="closeEdit" @editSuccess="editSuccess"></editUserModal>
@@ -74,10 +77,12 @@ import userMember from './components/member/index.vue';
 import userOrder from './components/order/index.vue';
 import userOrderStatic from './components/order_static/index.vue';
 import userMenu from './components/menus/index.vue';
-import userMerMenu from './components/merMenus/index.vue';
-import userAgentMenu from './components/agentMenus/index.vue';
-import userStoreMenu from './components/storeMenus/index.vue';
+// 旧商家入口组件保留目录，停止渲染
+// import userMerMenu from './components/merMenus/index.vue';
+// import userAgentMenu from './components/agentMenus/index.vue';
+// import userStoreMenu from './components/storeMenus/index.vue';
 import userPoster from './components/poster/index.vue';
+import merchantSwitch from '@/components/merchantSwitch/index.vue';
 
 export default {
 	components: {
@@ -85,11 +90,12 @@ export default {
 		userOrder,
 		userOrderStatic,
 		userMenu,
-		userMerMenu,
-		userAgentMenu,
-		userStoreMenu,
+		// userMerMenu,
+		// userAgentMenu,
+		// userStoreMenu,
 		userPoster,
 		pageFooter,
+		merchantSwitch,
 		ewcomerPop,
 		// #ifdef MP
 		editUserModal

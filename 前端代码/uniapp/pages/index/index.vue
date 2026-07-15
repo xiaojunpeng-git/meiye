@@ -107,6 +107,7 @@
 				<!-- #endif -->
 				<view class="pb-safe" :style="[pdHeights]" v-if="isFooter"></view>
 				<pageFooter  @newDataStatus="newDataStatus"></pageFooter>
+				<merchant-switch side="buyer" />
 			</view>
 		</view>
 		<view v-else>
@@ -201,6 +202,7 @@
 	import { toLogin } from '@/libs/login.js';
 	import { HTTP_REQUEST_URL } from '@/config/app';
 	import pageFooter from '@/components/pageFooter/index.vue';
+	import merchantSwitch from '@/components/merchantSwitch/index.vue';
 	import Loading from '@/components/Loading/index.vue';
 	import { silenceBindingSpread } from '@/utils/index.js';
 	export default {
@@ -232,6 +234,7 @@
 		components: {
 			Loading,
 			pageFooter,
+			merchantSwitch,
 			couponWindow,
 			homeComb,
 			newVip,

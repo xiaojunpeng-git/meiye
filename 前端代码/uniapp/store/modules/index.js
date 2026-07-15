@@ -11,8 +11,10 @@
 import app from "./app";
 import hotWords from "./hotWords";
 import indexData from './indexData.js'
+import merchant from "./merchant";
 export default {
   app,
   hotWords,
-	indexData
+	indexData,
+	merchant
 };

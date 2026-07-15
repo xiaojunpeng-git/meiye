@@ -65,6 +65,17 @@ class MetricDictionaryServices extends BaseServices
                 'time_field' => 'staff_yeji.created_time',
                 'aliases' => ['PK实际完成业绩'],
             ],
+            [
+                'code' => 'new_customer',
+                'name' => '新增客户数',
+                'formula' => 'COUNT(DISTINCT store_user.uid) WHERE store_id IN scope_store_ids AND add_time BETWEEN start AND end',
+                'include' => '范围内门店客户关联记录中去重后的用户',
+                'exclude' => '不以 COUNT(*) 计关联条数；同一客户多店只计 1 人',
+                'source' => 'MerchantCustomerMetricServices::newCustomerMetric',
+                'time_field' => 'store_user.add_time',
+                'aliases' => ['本月新增客户', '新增客户', 'new_month'],
+                'note' => '产品确认口径 A（2026-07-15）：去重客户数；客群/我的客户/数仓客户分析必须共用本出口',
+            ],
         ];
     }
 

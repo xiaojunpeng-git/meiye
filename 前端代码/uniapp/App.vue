@@ -46,6 +46,7 @@
 						// this.getCartNum()
 					} else {
 						this.$store.commit('indexData/setCartNum', '')
+						this.$store.dispatch('merchant/resetMerchant')
 					}
 				}
 			},
@@ -65,6 +66,10 @@
 		},
 		onLaunch: async function(option) {
 			uni.hideTabBar()
+			// 冷启动统一买家端模式
+			try {
+				this.$store.commit('merchant/SET_MODE', 'buyer');
+			} catch (e) {}
 			//#ifdef APP
 			plus.screen.lockOrientation("portrait-primary");
 			//#endif

@@ -30,6 +30,10 @@ Route::group('api', function () {
     Route::get('community/config', 'v1.community.Community/getConfig')->name('getConfig');//获取社区配置
 	Route::any('order_call_back', 'v1.order.StoreOrder/callBack');//商家寄件回调
 	Route::any('version', 'v1.PublicController/getVersion');//获取系统版本号
+	//系统更新日志（公开只读，小程序）
+	Route::get('changelog/list', 'v1.publics.SystemChangelog/lst')->name('changelogList');
+	Route::get('changelog/detail/:id', 'v1.publics.SystemChangelog/detail')->name('changelogDetail');
+	Route::get('changelog/unread', 'v1.publics.SystemChangelog/unread')->name('changelogUnread');
 
 	/**
 	 * 登录类
@@ -960,6 +964,26 @@ Route::group('api', function () {
 		Route::get('home/dianke', 'agent.SystemRegionAgent/dianke')->option(['real_name' => '点客']);
 
 	})->middleware(AuthTokenMiddleware::class, true)->middleware(\app\http\middleware\SystemLogMiddleware::class, 'user');
+
+	/**
+	 * 商家端身份与入口
+	 */
+	Route::group('merchant', function () {
+		Route::get('access', 'v1.merchant.MerchantAccess/access')->option(['real_name' => '商家入口权限']);
+		Route::post('context/switch', 'v1.merchant.MerchantAccess/switchContext')->option(['real_name' => '切换商家身份上下文']);
+		Route::get('home', 'v1.merchant.MerchantBiz/home')->option(['real_name' => '商家首页聚合']);
+		Route::get('customer/segments', 'v1.merchant.MerchantBiz/customerSegments')->option(['real_name' => '客户客群']);
+		Route::get('customer/mine/summary', 'v1.merchant.MerchantBiz/customerMineSummary')->option(['real_name' => '我的客户汇总']);
+		Route::post('customer/create', 'v1.merchant.MerchantBiz/customerCreate')->option(['real_name' => '商家新增客户']);
+		Route::get('customer/list', 'v1.merchant.MerchantBiz/customerList')->option(['real_name' => '商家客户列表']);
+		Route::get('customer/detail/:uid', 'v1.merchant.MerchantBiz/customerDetail')->option(['real_name' => '商家客户详情']);
+		Route::get('customer/orders', 'v1.merchant.MerchantBiz/customerOrders')->option(['real_name' => '商家客户订单记录']);
+		Route::post('customer/update', 'v1.merchant.MerchantBiz/customerUpdate')->option(['real_name' => '商家客户档案保存']);
+		Route::get('data/business', 'v1.merchant.MerchantBiz/dataBusiness')->option(['real_name' => '数仓经营概览']);
+		Route::get('data/customer', 'v1.merchant.MerchantBiz/dataCustomer')->option(['real_name' => '数仓客户分析']);
+		Route::get('data/staff/statistics', 'v1.merchant.MerchantBiz/dataStaffStats')->option(['real_name' => '数仓员工统计']);
+		Route::get('debt/list', 'v1.merchant.MerchantBiz/debtList')->option(['real_name' => '商家欠款列表']);
+	})->middleware(AuthTokenMiddleware::class, true);
 
 	/**
 	 * 指标字典
