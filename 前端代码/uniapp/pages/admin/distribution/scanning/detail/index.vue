@@ -428,14 +428,14 @@
 </script>
 
 <style scoped lang="scss">
-	/deep/ .tui-modal-btn-cancel {
+	::v-deep  .tui-modal-btn-cancel {
 		border:1px solid #2A7EFB !important;
 		color: #2A7EFB !important;
 	}
-	/deep/ .tui-modal-btn-confirm {
+	::v-deep  .tui-modal-btn-confirm {
 		background-color: #2A7EFB !important;
 	}
-	/deep/checkbox .uni-checkbox-input.uni-checkbox-input-checked {
+	::v-deep checkbox .uni-checkbox-input.uni-checkbox-input-checked {
 		border: 1px solid #007aff !important;
 		background-color: #007aff !important;
 	}
@@ -448,7 +448,7 @@
 		align-items: center;
 		justify-content: space-around;
 		width: 100%;
-		height: calc(98upx+ constant(safe-area-inset-bottom)); ///兼容 IOS<11.2/
+		height: calc(98upx + constant(safe-area-inset-bottom)); ///兼容 IOS<11.2/
 		height: calc(98upx + env(safe-area-inset-bottom)); ///兼容 IOS>11.2/
 		box-sizing: border-box;
 		border-top: solid 1upx #F3F3F3;
@@ -811,7 +811,7 @@
 		bottom: 0;
 		left: 0;
 		height: 96rpx;
-		height: calc(96rpx+ constant(safe-area-inset-bottom)); ///兼容 IOS<11.2/
+		height: calc(96rpx + constant(safe-area-inset-bottom)); ///兼容 IOS<11.2/
 		height: calc(96rpx + env(safe-area-inset-bottom)); ///兼容 IOS>11.2/
 		padding-bottom: constant(safe-area-inset-bottom); ///兼容 IOS<11.2/
 		padding-bottom: env(safe-area-inset-bottom); ///兼容 IOS>11.2/

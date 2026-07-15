@@ -773,7 +773,7 @@
 		font-size: 24rpx;
 		line-height: 22rpx;
 		text-align: center;
-		bottom: calc(52rpx+ constant(safe-area-inset-bottom)); ///兼容 IOS<11.2/
+		bottom: calc(52rpx + constant(safe-area-inset-bottom)); ///兼容 IOS<11.2/
 		bottom: calc(52rpx + env(safe-area-inset-bottom)); ///兼容 IOS>11.2/
 
 		.main-color {
@@ -785,32 +785,32 @@
 		}
 	}
 
-	/deep/ uni-checkbox .uni-checkbox-input {
+	::v-deep  uni-checkbox .uni-checkbox-input {
 		width: 28rpx;
 		height: 28rpx;
 	}
 
-	/deep/ uni-checkbox .uni-checkbox-input.uni-checkbox-input-checked::before {
+	::v-deep  uni-checkbox .uni-checkbox-input.uni-checkbox-input-checked::before {
 		font-size: 24rpx;
 	}
 
-	/deep/ uni-checkbox .uni-checkbox-wrapper {
+	::v-deep  uni-checkbox .uni-checkbox-wrapper {
 		margin-bottom: 1px;
 	}
 
 	/*checkbox 选项框大小  */
-	/deep/ checkbox .wx-checkbox-input {
+	::v-deep  checkbox .wx-checkbox-input {
 		width: 28rpx;
 		height: 28rpx;
 	}
 
 	/*checkbox选中后样式  */
-	/deep/ checkbox .wx-checkbox-input.wx-checkbox-input-checked {
+	::v-deep  checkbox .wx-checkbox-input.wx-checkbox-input-checked {
 		background: white;
 	}
 
 	/*checkbox选中后图标样式  */
-	/deep/ checkbox .wx-checkbox-input.wx-checkbox-input-checked::before {
+	::v-deep  checkbox .wx-checkbox-input.wx-checkbox-input-checked::before {
 		width: 28rpx;
 		height: 28rpx;
 		line-height: 28rpx;

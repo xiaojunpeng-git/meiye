@@ -218,10 +218,10 @@
 </script>
 
 <style lang="scss" scoped>
-	/deep/checkbox{
+	::v-deep checkbox{
 		margin-right: 13rpx;
 	}
-	/deep/uni-checkbox .uni-checkbox-input{
+	::v-deep uni-checkbox .uni-checkbox-input{
 		border-radius: 4rpx;
 		width: 28rpx;
 		height: 28rpx;

@@ -1,7 +1,8 @@
 <template>
-	<view class="main">
-		<guide v-if="guidePages" :advData="advData" @jumpPage='jumpPage'></guide>
-	</view>
+		<view class="main">
+			<guide v-if="guidePages" :advData="advData" @jumpPage='jumpPage'></guide>
+			<view v-else class="loading-tip">加载中...</view>
+		</view>
 </template>
 
 <script>
@@ -21,6 +22,14 @@
 				jump: 0
 			}
 		},
+		onLoad() {
+			this._guideFallbackTimer = setTimeout(() => {
+				this.goHome();
+			}, 5000);
+		},
+		onUnload() {
+			clearTimeout(this._guideFallbackTimer);
+		},
 		onShow() {
 			// #ifdef H5
 			if(this.$wechat.isWeixin()){
@@ -29,12 +38,16 @@
 			// #endif
 			this.loadExecution()
 			if(this.jump){
-				uni.switchTab({
-					url: '/pages/index/index'
-				});
+				this.goHome();
 			}
 		},
 		methods: {
+			goHome() {
+				clearTimeout(this._guideFallbackTimer);
+				uni.switchTab({
+					url: '/pages/index/index'
+				});
+			},
 			jumpPage(){
 				this.jump = 1
 			},
@@ -42,17 +55,14 @@
 				const tagDate = uni.getStorageSync('guideDate') || 0,
 					nowDate = new Date().getTime();
 				if ((nowDate - tagDate) <= uni.getStorageSync('intervalTime')) {
-					uni.switchTab({
-						url: '/pages/index/index'
-					});
+					this.goHome();
 					return
 				}
 				getOpenAdv().then(res => {
 					if (res.data.status == 0 || res.data.value.length == 0) {
-						uni.switchTab({
-							url: '/pages/index/index'
-						});
+						this.goHome();
 					} else if (res.data.status && (res.data.value.length || res.data.video_link)) {
+						clearTimeout(this._guideFallbackTimer);
 						this.advData = res.data
 						let intervalTime = parseFloat(res.data.interval_time)*60*60*1000 || 0;
 						uni.setStorageSync('intervalTime', intervalTime);
@@ -60,9 +70,7 @@
 						this.guidePages = true
 					}
 				}).catch(err => {
-					uni.switchTab({
-						url: '/pages/index/index'
-					});
+					this.goHome();
 				})
 			}
 		},
@@ -77,5 +85,14 @@
 	.main {
 		width: 100%;
 		height: 100%;
+	}
+	.loading-tip {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 100%;
+		height: 100%;
+		color: #999;
+		font-size: 28rpx;
 	}
 </style>

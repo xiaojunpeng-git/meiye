@@ -595,7 +595,7 @@
 		radio-group{
 			display: flex;
 		}
-		/deep/ uni-radio-input{
+		::v-deep  uni-radio-input{
 			margin-right: 12rpx;
 			.uni-radio-input.uni-radio-input-checked:before {
 				font-size: 26rpx;
@@ -631,7 +631,7 @@
 		input{
 			text-align: right;
 		}
-		/deep/.uni-input-input{
+		::v-deep .uni-input-input{
 			font-size: 30rpx;
 		}
 		.picker{

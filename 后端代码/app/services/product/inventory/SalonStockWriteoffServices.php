@@ -353,17 +353,8 @@ class SalonStockWriteoffServices extends BaseServices
             throw new ValidateException('原院装领用明细缺失，无法退料（核销#' . $writeoffId . '）');
         }
         // 统一锁序：与扣料一致，按 (SKU行ID 升序, 商品ID 升序, unique 升序) 处理，规避跨事务死锁
-        $skuIdMap = [];
-        foreach ($detailRows as $d) {
-            $mapKey = (int)$d['consumable_product_id'] . '|' . (string)$d['consumable_unique'];
-            if (!isset($skuIdMap[$mapKey])) {
-                $skuIdMap[$mapKey] = (int)Db::name('store_product_attr_value')
-                    ->where('product_id', (int)$d['consumable_product_id'])
-                    ->where('unique', (string)$d['consumable_unique'])
-                    ->where('type', 0)
-                    ->value('id');
-            }
-        }
+        // 批量查 SKU 行ID（单次 whereIn），避免逐条查询
+        $skuIdMap = $this->skuRowIdMap($detailRows);
         usort($detailRows, function ($a, $b) use ($skuIdMap) {
             $ka = (int)$a['consumable_product_id'] . '|' . (string)$a['consumable_unique'];
             $kb = (int)$b['consumable_product_id'] . '|' . (string)$b['consumable_unique'];
@@ -563,15 +554,13 @@ class SalonStockWriteoffServices extends BaseServices
      */
     protected function orderTargetsBySkuId(array $aggregated): array
     {
+        // 批量查 SKU 行ID（单次 whereIn），避免逐条查询
+        $idMap = $this->skuRowIdMap($aggregated);
         $skuIds = [];
         foreach ($aggregated as $key => $a) {
             $pid = (int)$a['final_pid'];
             $unique = (string)$a['final_unique'];
-            $id = (int)Db::name('store_product_attr_value')
-                ->where('product_id', $pid)
-                ->where('unique', $unique)
-                ->where('type', 0)
-                ->value('id');
+            $id = (int)($idMap[$pid . '|' . $unique] ?? 0);
             if ($id <= 0) {
                 throw new ValidateException(sprintf('门店缺少耗材规格副本（商品ID %d / SKU %s），请先同步后再核销', $pid, $unique));
             }
@@ -583,6 +572,45 @@ class SalonStockWriteoffServices extends BaseServices
                 <=> [(int)$skuIds[$b], (int)$aggregated[$b]['final_pid'], (string)$aggregated[$b]['final_unique']];
         });
         return $keys;
+    }
+
+    /**
+     * 批量查 SKU 行ID：入参含 final_pid/final_unique 的数组 → [ "product_id|unique" => sku_id ]
+     * 单次 whereIn(product_id) + whereIn(unique) 查询，限定到本次实际用到的 unique，避免逐条查询也避免拉回整商品全部 SKU。
+     */
+    protected function skuRowIdMap(array $rows): array
+    {
+        $pids = [];
+        $uniques = [];
+        foreach ($rows as $r) {
+            $pid = (int)($r['final_pid'] ?? $r['consumable_product_id'] ?? 0);
+            $unique = (string)($r['final_unique'] ?? $r['consumable_unique'] ?? '');
+            if ($pid > 0) {
+                $pids[$pid] = $pid;
+            }
+            if ($unique !== '') {
+                $uniques[$unique] = $unique;
+            }
+        }
+        if (!$pids) {
+            return [];
+        }
+        $query = Db::name('store_product_attr_value')
+            ->whereIn('product_id', array_values($pids))
+            ->where('type', 0);
+        // 限定到本次实际用到的 unique（组合键仍以 product_id|unique 精确匹配）
+        if ($uniques) {
+            $query->whereIn('unique', array_values($uniques));
+        }
+        $list = $query
+            ->field('id,product_id,unique')
+            ->select()
+            ->toArray();
+        $map = [];
+        foreach ($list as $row) {
+            $map[(int)$row['product_id'] . '|' . (string)$row['unique']] = (int)$row['id'];
+        }
+        return $map;
     }
 
     /**

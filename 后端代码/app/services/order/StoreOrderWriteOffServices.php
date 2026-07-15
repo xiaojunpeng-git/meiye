@@ -23,6 +23,7 @@ use app\model\order\StoreReservationOrder;
 use app\model\product\category\StoreProductCategory;
 use app\model\product\product\StoreProduct;
 use app\model\product\product\StoreProductRelation;
+use app\model\user\UserCardHolder;
 use app\model\yeji\StaffYeji;
 use app\services\BaseServices;
 use app\services\message\service\StoreServiceServices;
@@ -55,6 +56,71 @@ class StoreOrderWriteOffServices extends BaseServices
     {
         $this->dao = $dao;
         $this->orderDao = $orderDao;
+    }
+
+    /**
+     * 撤销核销（平台/门店共用）
+     *
+     * 一个事务内完成：撤销核销记录、失效业绩、恢复权益次数、恢复订单状态、院装退料并恢复库存。
+     * 平台与门店的撤销入口统一调用本方法，不再各自复制直改表逻辑。
+     *
+     * @param int $subOrderId 核销子订单ID（order_type=2；其 link_id 指向核销记录）
+     * @param string $remark  撤销原因
+     * @param int $storeScope 门店端传自身 store_id 做归属校验；平台端传 0
+     * @return bool
+     */
+    public function cancelWriteoff(int $subOrderId, string $remark = '', int $storeScope = 0): bool
+    {
+        if ($subOrderId <= 0) {
+            throw new ValidateException('缺少订单参数');
+        }
+        $order = $this->orderDao->get($subOrderId);
+        if (!$order) {
+            throw new ValidateException('订单不存在');
+        }
+        $order = is_array($order) ? $order : $order->toArray();
+        if ((int)($order['refund_status'] ?? 0) !== 0) {
+            throw new ValidateException('该订单状态不允许撤销！');
+        }
+        $linkId = (int)($order['link_id'] ?? 0);
+        if ($linkId <= 0) {
+            throw new ValidateException('核销记录不存在');
+        }
+        if ($storeScope > 0 && (int)($order['store_id'] ?? 0) !== $storeScope) {
+            throw new ValidateException('无权撤销其它门店的核销');
+        }
+
+        return (bool)$this->transaction(function () use ($subOrderId, $remark, $linkId) {
+            // 锁核销记录，防并发/重复撤销
+            $writeoffModel = StoreOrderWriteoff::where('id', $linkId)->lock(true)->find();
+            if (!$writeoffModel) {
+                throw new ValidateException('核销记录不存在');
+            }
+            $writeoff = $writeoffModel->toArray();
+            if ((int)($writeoff['status'] ?? 0) === 1) {
+                throw new ValidateException('该核销已撤销');
+            }
+
+            $this->orderDao->update($subOrderId, ['back_reason' => $remark, 'refund_status' => 2]);
+            StoreOrderWriteoff::where('id', $linkId)->update(['status' => 1]);
+            StaffYeji::where('link_id', $linkId)->where('type', 3)->update(['status' => 1]);
+
+            $cartId = (int)($writeoff['order_cart_id'] ?? 0);
+            $number = $writeoff['writeoff_num'] ?? 1;
+            if ($cartId > 0) {
+                StoreOrderCartInfo::where('id', $cartId)->inc('write_surplus_times', $number)->update();
+                StoreOrderCartInfo::where('id', $cartId)->update(['is_writeoff' => 0]);
+            }
+            UserCardHolder::where('uid', $writeoff['uid'])->where('oid', $writeoff['oid'])->inc('write_surplus_times', $number)->update();
+            StoreOrder::where('id', $writeoff['oid'])->update(['status' => 5]);
+
+            // 院装退料：按原扣料流水原量退回，幂等；无原扣料记录不凭空加库存。同事务，失败则整体回滚。
+            /** @var \app\services\product\inventory\SalonStockWriteoffServices $salonWriteoffServices */
+            $salonWriteoffServices = app()->make(\app\services\product\inventory\SalonStockWriteoffServices::class);
+            $salonWriteoffServices->returnForWriteoff($linkId);
+
+            return true;
+        });
     }
 
     /**
@@ -135,6 +201,64 @@ class StoreOrderWriteOffServices extends BaseServices
     }
 
     /**
+     * 取「本次实际核销商品行快照」（核销主事务须在改变权益状态前调用）。
+     *
+     * 口径与 WriteOffOrderServices::writeoffOrder 的实际核销完全一致：
+     * - 仅取未核销行 is_writeoff=0；
+     * - 卡项(type=11)：项目权益行固定 cart_type=2（整卡/部分一致；卡项头 product_type=5、项目行 product_type=6）；
+     * - 普通/几选几/赠送/补单：走 DAO 默认 cart_type IN(0,1,3)；
+     * - 部分核销再限定 cart_id ∈ 本次选中。
+     *
+     * 同一份返回结果既用于「是否含项目」检测，也直接传入 saveWriteOff 写核销记录+院装扣料，
+     * 禁止在权益状态变更后重查，从而杜绝「整卡核销落入默认 cart_type 导致不扣院装耗材」及
+     * 「后置重查选行漂移造成重复扣料」。
+     *
+     * @param array $orderInfo 需含 id、type
+     * @param array $cartIds 本次核销明细（[['cart_id'=>..,'cart_num'=>..],...]），空表示整单核销
+     */
+    public function getWriteoffCartRows(array $orderInfo, array $cartIds, string $field = '*', string $key = 'cart_id')
+    {
+        /** @var StoreOrderCartInfoServices $cartInfoServices */
+        $cartInfoServices = app()->make(StoreOrderCartInfoServices::class);
+        return $cartInfoServices->getCartColunm($this->buildWriteoffCartWhere($orderInfo, $cartIds), $field, $key);
+    }
+
+    /**
+     * 构造「本次实际核销行」查询条件（快照唯一真源）。
+     */
+    protected function buildWriteoffCartWhere(array $orderInfo, array $cartIds): array
+    {
+        $where = [
+            'oid' => (int)($orderInfo['id'] ?? 0),
+            'is_writeoff' => 0,
+        ];
+        // 卡项：项目权益行固定 cart_type=2；整卡不再用 is_card='' 落到默认 cart_type IN(0,1,3)
+        if ((int)($orderInfo['type'] ?? 0) == 11) {
+            $where['cart_type'] = 2;
+        }
+        if ($cartIds) {
+            $where['cart_id'] = array_values(array_unique(array_column($cartIds, 'cart_id')));
+        }
+        return $where;
+    }
+
+    /**
+     * 判断给定「本次实际核销行快照」是否包含项目(product_type=6)。
+     *
+     * 由核销主事务在改权益前用同一快照判断，据此决定 salon_sync 与同步扣料，
+     * 覆盖卡项(头5/行6)、几选几、赠送项目、补单。
+     */
+    public function snapshotContainsProject(array $cartSnapshot): bool
+    {
+        foreach ($cartSnapshot as $row) {
+            if ((int)($row['product_type'] ?? 0) === 6) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
      * 保存核销记录
      * @param int $oid
      * @param array $cartIds
@@ -202,35 +326,40 @@ class StoreOrderWriteOffServices extends BaseServices
                 return true;
             }
         }
+        // cart_id 可能是 string/number，无论是否外部传入快照都先归一化为 string→明细 映射，
+        // 保证下方 $cartIds[(string)$cart['cart_id']] 能匹配到本次核销数量/服务对象
+        if ($cartIds) {
+            $cartIdMap = [];
+            foreach ($cartIds as $ci) {
+                if (!isset($ci['cart_id'])) continue;
+                $cartIdMap[(string)$ci['cart_id']] = $ci;
+            }
+            $cartIds = $cartIdMap;
+        }
+        // $cartInfo 为空时才回表：异步 OrderWriteoffJob / 预约核销在权益变更后执行，须按原口径重查
+        // （不加 is_writeoff 过滤，否则查不到已置位的本次行）；
+        // 含项目的核销主事务由 WriteOffOrderServices 在改权益前取「本次实际核销行快照」并直接传入，禁止此处后置重查
         if (!$cartInfo) {
             $where = [];
             /** @var StoreOrderCartInfoServices $cartInfoServices */
             $cartInfoServices = app()->make(StoreOrderCartInfoServices::class);
             if ($cartIds) {//商城存在部分核销
-                // cart_id 可能是 string/number，统一用 string 做 key，避免映射不到导致 service_object 丢失
-                $cartIdMap = [];
-                foreach ($cartIds as $ci) {
-                    if (!isset($ci['cart_id'])) continue;
-                    $cartIdMap[(string)$ci['cart_id']] = $ci;
-                }
-                $ids = array_values(array_unique(array_keys($cartIdMap)));
-                $cartIds = $cartIdMap;
-                //订单下原商品信息
-                if ($orderInfo['type'] == 11) {
+                if ((int)$orderInfo['type'] == 11) {
                     $where['cart_type'] = 2;
                 }
-                $cartInfo = $cartInfoServices->getCartColunm(['oid' => $orderInfo['id'], 'cart_id' => $ids] + $where, '*', 'cart_id');
+                $cartInfo = $cartInfoServices->getCartColunm(['oid' => $orderInfo['id'], 'cart_id' => array_keys($cartIds)] + $where, '*', 'cart_id');
             } else {//整单核销
-                if ($orderInfo['type'] == 11) {
+                if ((int)$orderInfo['type'] == 11) {
                     $where['is_card'] = '';
                 }
                 $cartInfo = $cartInfoServices->getCartColunm(['oid' => $orderInfo['id']] + $where, '*', 'cart_id');
             }
         }
 
-        $writeOffDataAll = [];
-        $writeOffData = ['uid' => $orderInfo['uid'], 'oid' => $oid, 'reservation_oid' => $reservation_oid, 'writeoff_code' => $reservationOrderInfo['verify_code'] ?? $orderInfo['verify_code'], 'add_time' => time()];
         $setYejiAll=$data['sync_all'] ?? [];
+        // 核销记录 + 院装扣料同事务：任一步失败整体回滚，保证与核销权益一致；院装耗材不足由 consumeForWriteoff 抛出阻断核销
+        $this->transaction(function () use ($cartInfo, $cartIds, $orderInfo, $oid, $reservation_oid, $reservationOrderInfo, $data, $onePrice, $addTime, $isBudan, $isAuto, $setYejiAll) {
+        $writeOffData = ['uid' => $orderInfo['uid'], 'oid' => $oid, 'reservation_oid' => $reservation_oid, 'writeoff_code' => $reservationOrderInfo['verify_code'] ?? $orderInfo['verify_code'], 'add_time' => time()];
         foreach ($cartInfo as $cart) {
             $write = $cartIds[(string)$cart['cart_id']] ?? [];
             if (!$cartIds || $write) {
@@ -259,6 +388,18 @@ class StoreOrderWriteOffServices extends BaseServices
                 $res = $this->dao->save($writeOffData);
                 event('notice.notice', [$writeOffData, 'order_writeoff']);
                 $id = $res->id;
+                // 院装耗材同事务扣料：仅项目(product_type=6)且实际核销门店>0；幂等锚定核销记录ID
+                if ((int)($writeOffData['product_type'] ?? 0) === 6) {
+                    /** @var \app\services\product\inventory\SalonStockWriteoffServices $salonWriteoffServices */
+                    $salonWriteoffServices = app()->make(\app\services\product\inventory\SalonStockWriteoffServices::class);
+                    $salonWriteoffServices->consumeForWriteoff(
+                        (int)$id,
+                        (int)($writeOffData['relation_id'] ?? 0),
+                        (int)($cart['product_id'] ?? 0),
+                        (string)($cart['sku_unique'] ?? ''),
+                        (string)($writeOffData['writeoff_num'] ?? 0)
+                    );
+                }
 //                $writeOffDataAll[] = $writeOffData;
                 $syncHandled = false;
                 if($setYejiAll && !empty($setYejiAll)){
@@ -309,9 +450,7 @@ class StoreOrderWriteOffServices extends BaseServices
                 }
             }
         }
-//        if ($writeOffDataAll) {
-//            $this->dao->saveAll($writeOffDataAll);
-//        }
+        });
         //店员核销给店员写入业绩
         if (isset($data['staff_id']) && $data['staff_id'] && isset($data['price']) && $data['price']) {
             $orderInfo['staff_id'] = $data['staff_id'];

@@ -321,7 +321,7 @@
 	}
 </script>
 <style lang="scss">
-	/deep/uni-radio .uni-radio-wrapper{
+	::v-deep uni-radio .uni-radio-wrapper{
 		vertical-align: unset;
 	}
 	
@@ -432,34 +432,34 @@
 				line-height: 40rpx;
 				color: #333333;
 
-				/deep/uni-radio {
+				::v-deep uni-radio {
 					vertical-align: middle;
 					margin-right: 2rpx;
 				}
 
-				/deep/uni-radio .uni-radio-input {
+				::v-deep uni-radio .uni-radio-input {
 					width: 28rpx;
 					height: 28rpx;
 					border: 1px solid #E6993A;
 				}
 
-				/deep/uni-radio .uni-radio-input.uni-radio-input-checked {
+				::v-deep uni-radio .uni-radio-input.uni-radio-input-checked {
 					border: 1px solid #E6993A !important;
 					background-color: #E6993A !important;
 				}
 
-				/deep/.wx-radio-input {
+				::v-deep .wx-radio-input {
 					width: 29rpx;
 					height: 29rpx;
 					border: 1px solid #CCCCCC;
 				}
 
-				/deep/.wx-radio-input.wx-radio-input-checked {
+				::v-deep .wx-radio-input.wx-radio-input-checked {
 					border: 1px solid #E6993A !important;
 					background-color: #E6993A !important;
 				}
 
-				/deep/uni-radio .uni-radio-input.uni-radio-input-checked:before {
+				::v-deep uni-radio .uni-radio-input.uni-radio-input-checked:before {
 					font-size: 15rpx;
 				}
 

@@ -1843,11 +1843,11 @@
 	}
 </script>
 <style scoped lang="scss">
-	/deep/uni-checkbox .uni-checkbox-input {
+	::v-deep uni-checkbox .uni-checkbox-input {
 		width: 40rpx;
 		height: 40rpx;
 	}
-	/deep/.tui-swipeout-wrap{
+	::v-deep .tui-swipeout-wrap{
 		border-radius: 0 0 24rpx 0;
 	}
 	.text-primary-con {
@@ -1880,7 +1880,7 @@
 		padding: 0 20rpx;
 		box-sizing: border-box;
 		bottom: 192rpx;
-		bottom: calc(192rpx+ constant(safe-area-inset-bottom)); ///兼容 IOS<11.2/
+		bottom: calc(192rpx + constant(safe-area-inset-bottom)); ///兼容 IOS<11.2/
 		bottom: calc(192rpx + env(safe-area-inset-bottom)); ///兼容 IOS>11.2/
 
 		.iconfont {

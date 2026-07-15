@@ -348,7 +348,7 @@
 	.max-w-460 {
 		max-width: 460rpx;
 	}
-	.radio-input /deep/ uni-radio .uni-radio-input {
+	.radio-input ::v-deep  uni-radio .uni-radio-input {
 		width: 40rpx;
 		height: 40rpx;
 		margin-right: 0;

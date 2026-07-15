@@ -2162,28 +2162,28 @@
 		border-top-right-radius: 40rpx;
 	}
 
-	.discount /deep/uni-checkbox .uni-checkbox-input {
+	.discount ::v-deep uni-checkbox .uni-checkbox-input {
 		border-radius: 3px;
 	}
 
-	.discount /deep/wx-checkbox .wx-checkbox-input {
+	.discount ::v-deep wx-checkbox .wx-checkbox-input {
 		border-radius: 3px;
 	}
 
-	/deep/.uni-date-x--border {
+	::v-deep .uni-date-x--border {
 		border: 0;
 	}
 
-	/deep/.uni-icons {
+	::v-deep .uni-icons {
 		font-size: 0 !important;
 	}
 
-	/deep/.uni-date-x {
+	::v-deep .uni-date-x {
 		color: #999;
 		font-size: 15px;
 	}
 
-	/deep/.uni-date__x-input {
+	::v-deep .uni-date__x-input {
 		font-size: 15px;
 	}
 
@@ -2205,11 +2205,11 @@
 	}
 
 	// .height-add {
-	// 	height: calc(176rpx+ constant(safe-area-inset-bottom)); ///兼容 IOS<11.2/
+	// 	height: calc(176rpx + constant(safe-area-inset-bottom)); ///兼容 IOS<11.2/
 	// 	height: calc(176rpx + env(safe-area-inset-bottom)); ///兼容 IOS>11.2/
 	// }
 
-	/deep/uni-checkbox[disabled] .uni-checkbox-input {
+	::v-deep uni-checkbox[disabled] .uni-checkbox-input {
 		background-color: #eee;
 	}
 

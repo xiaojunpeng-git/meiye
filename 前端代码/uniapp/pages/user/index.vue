@@ -708,16 +708,16 @@ export default {
 </script>
 
 <style lang="scss" scoped>
-/deep/.uni-badge-left-margin .uni-badge--error {
+::v-deep .uni-badge-left-margin .uni-badge--error {
 	background-color: var(--view-theme) !important;
 }
 .footer-placeholder {
-	height: calc(98rpx+ constant(safe-area-inset-bottom));
+	height: calc(98rpx + constant(safe-area-inset-bottom));
 	height: calc(98rpx + env(safe-area-inset-bottom));
 	height: 98rpx;
 }
 .user-page {
-	padding-bottom: calc(100rpx+ constant(safe-area-inset-bottom));
+	padding-bottom: calc(100rpx + constant(safe-area-inset-bottom));
 	padding-bottom: calc(100rpx + env(safe-area-inset-bottom));
 	padding-bottom: 100rpx;
 }

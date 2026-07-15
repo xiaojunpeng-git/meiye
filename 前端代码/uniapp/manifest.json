@@ -4,8 +4,11 @@
     "description" : "邻邻柒",
     "versionName" : "3.4.0",
     "versionCode" : 343,
+    "uniStatistics" : {
+        "enable" : false
+    },
     "transformPx" : false,
-    "sassImplementationName" : "node-sass",
+    "sassImplementationName" : "dart-sass",
     /* 5+App特有相关 */
     "app-plus" : {
         "usingComponents" : true,

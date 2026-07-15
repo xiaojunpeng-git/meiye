@@ -437,7 +437,7 @@
 		}
 	}
 
-	/deep/.disabled .uni-radio-input {
+	::v-deep .disabled .uni-radio-input {
 		background-color: #F8F8F8;
 	}
 

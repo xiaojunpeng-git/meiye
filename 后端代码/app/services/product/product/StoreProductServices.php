@@ -570,6 +570,10 @@ class StoreProductServices extends BaseServices
                         $result['value'][$k]['stock'] = $attrItem['stock'] ?? 0;
                         $result['value'][$k]['cost'] = $attrItem['cost'] ?? 0;
                         $result['value'][$k]['ot_price'] = $attrItem['ot_price'] ?? 0;
+                        $result['value'][$k]['stock_unit'] = $attrItem['stock_unit'] ?? '';
+                        $result['value'][$k]['sale_unit'] = $attrItem['sale_unit'] ?? '';
+                        $result['value'][$k]['unit_convert'] = isset($attrItem['unit_convert']) ? (float)$attrItem['unit_convert'] : 1;
+                        $result['value'][$k]['decimal_scale'] = isset($attrItem['decimal_scale']) ? (int)$attrItem['decimal_scale'] : 0;
                     }
                 }
             }
@@ -608,6 +612,10 @@ class StoreProductServices extends BaseServices
                 'reservation_time_data' => $productInfo['product_type'] == 6 ? $reservationTimeServices->getProductReservationTimes($result['unique'] ?? '', $id) : [],
                 'weight' => isset($result['weight']) ? floatval($result['weight']) : 0,
                 'volume' => isset($result['volume']) ? floatval($result['volume']) : 0,
+                'stock_unit' => $result['stock_unit'] ?? '',
+                'sale_unit' => $result['sale_unit'] ?? '',
+                'unit_convert' => isset($result['unit_convert']) ? floatval($result['unit_convert']) : 1,
+                'decimal_scale' => isset($result['decimal_scale']) ? intval($result['decimal_scale']) : 0,
                 'brokerage' => isset($result['brokerage']) ? floatval($result['brokerage']) : 0,
                 'brokerage_two' => isset($result['brokerage_two']) ? floatval($result['brokerage_two']) : 0,
                 'disk_info' => $result['disk_info'] ?? [],
@@ -1305,12 +1313,14 @@ class StoreProductServices extends BaseServices
             }
             //修改商品库存汇总：新建保持 SKU 写入值；编辑时由 attr 保存逻辑保留原库存后汇总
             $attrStockArr = array_column($valueGroup, 'stock');
+            // 仅产品(product_type=0)参与库存；院装耗材开关须同时满足 product_type=0 && is_inventory=1，否则强制置 0
+            $resolvedIsInventory = ((int)$data['product_type'] === 0) ? (int)($data['is_inventory'] ?? 1) : 0;
             $this->dao->update($id, [
                 'stock' => array_sum(array_map('floatval', $attrStockArr)),
                 'is_sold' => min(array_map('floatval', $attrStockArr)) > 0 ? 0 : 1,
-                'is_inventory' => ((int)$data['product_type'] === 0) ? (int)($data['is_inventory'] ?? 1) : 0,
+                'is_inventory' => $resolvedIsInventory,
                 'allow_negative_stock' => ((int)$data['product_type'] === 0) ? (int)($data['allow_negative_stock'] ?? 1) : 1,
-                'salon_stock_enabled' => ((int)$data['product_type'] === 0) ? (int)($data['salon_stock_enabled'] ?? 0) : 0,
+                'salon_stock_enabled' => ($resolvedIsInventory === 1) ? (int)($data['salon_stock_enabled'] ?? 0) : 0,
             ]);
             return [$skuList, $id, $is_new, $data];
         });

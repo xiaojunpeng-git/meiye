@@ -46,10 +46,10 @@
 </script>
 
 <style lang="scss" scoped>
-/deep/.font-num{
+::v-deep .font-num{
 		color: #2A7EFB !important;
 	}
-	/deep/.bg-color{
+	::v-deep .bg-color{
 		background: #2A7EFB !important;
 	}
 </style>

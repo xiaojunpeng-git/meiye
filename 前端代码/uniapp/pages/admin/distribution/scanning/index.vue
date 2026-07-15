@@ -367,7 +367,7 @@
 			min-height: 0;
 			box-sizing: border-box;
 
-			/deep/.shoppingCart {
+			::v-deep .shoppingCart {
 				position: absolute;
 				top: 0;
 				right: 0;
@@ -484,11 +484,11 @@
 			}
 		}
 	}
-	/deep/ .tui-modal-btn-cancel {
+	::v-deep  .tui-modal-btn-cancel {
 		border:1px solid #2A7EFB !important;
 		color: #2A7EFB !important;
 	}
-	/deep/ .tui-modal-btn-confirm {
+	::v-deep  .tui-modal-btn-confirm {
 		background-color: #2A7EFB !important;
 	}
 </style>

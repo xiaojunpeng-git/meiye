@@ -1198,7 +1198,7 @@
 		background-size: 100% 100%;
 		width: 100%;
 		height: 116rpx;
-		/deep/.time{
+		::v-deep .time{
 			padding-top: 14px;
 			.styleAll{
 				background-color: #E93323;

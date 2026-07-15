@@ -278,7 +278,7 @@
 				padding: 0 30rpx 30rpx 30rpx;
 				word-wrap: break-word;
 				text-align: justify;
-				/deep/p{
+				::v-deep p{
 					margin-bottom: 8rpx;
 					line-height: 60rpx;
 				}

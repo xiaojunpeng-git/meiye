@@ -444,7 +444,7 @@
 	.bg-w111-EDF2F9{
 		background-color: #EDF2F9;
 	}
-	/deep/.empty-page{
+	::v-deep .empty-page{
 		border-radius: 0 0 24rpx 24rpx;
 	}
 	

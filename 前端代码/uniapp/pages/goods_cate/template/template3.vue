@@ -772,7 +772,7 @@
 </script>
 
 <style lang="scss" scoped>
-	/deep/.base-tag{
+	::v-deep .base-tag{
 		background-color: #f5f5f5;
 	}
 	.bntCon{
@@ -948,10 +948,10 @@
 		right: 0;
 		transform: translateX(50%);
 		margin-right: 10rpx;
-		/deep/ .uni-badge--error {
+		::v-deep  .uni-badge--error {
 			background-color: var(--view-theme) !important;
 		}
-		/deep/.uni-badge {
+		::v-deep .uni-badge {
 			// height: 32rpx;
 			// min-width: 32rpx;
 			// color: var(--view-theme);

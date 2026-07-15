@@ -349,7 +349,7 @@
 </style>
 
 <style lang="scss" scoped>
-	/deep/uni-radio .uni-radio-input.uni-radio-input-checked {
+	::v-deep uni-radio .uni-radio-input.uni-radio-input-checked {
 	    border: 1px solid #FDC383 !important;
 	    background-color: #FDC383 !important;
 	}

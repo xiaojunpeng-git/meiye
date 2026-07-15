@@ -2340,11 +2340,11 @@
 </script>
 
 <style lang="scss">
-	/deep/uni-video {
+	::v-deep uni-video {
 		width: 100% !important;
 	}
 
-	/deep/video {
+	::v-deep video {
 		width: 100% !important;
 	}
 	.z-99{

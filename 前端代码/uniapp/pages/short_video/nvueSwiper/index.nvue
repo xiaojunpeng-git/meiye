@@ -827,7 +827,7 @@
 				right: -14rpx;
 				top:-10rpx;
 			}
-			/deep/.uni-badge--error{
+			::v-deep .uni-badge--error{
 				background-color: #fff;
 				color: #E93323;
 				font-size: 22rpx;
@@ -1178,7 +1178,7 @@
 				top: 8px;
 				/* #endif */
 			}
-			/deep/.uni-badge{
+			::v-deep .uni-badge{
 				border: 1px solid #e93323;
 				background-color: #e93323;
 			}

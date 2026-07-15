@@ -28,6 +28,20 @@
         开启后库存不足仍允许完成出库，库存可能显示为负数；关闭后库存不足将阻止支付或出库。普通下单不改变库存；已通过支付前检查的订单，支付成功时仍直接扣减，极少数并发情况下可能形成负库存。残次品库存永远不允许为负数。
       </div>
     </FormItem>
+    <FormItem label="可作为院装耗材：" v-if="baseInfo.is_inventory == 1">
+      <i-switch
+        v-model="baseInfo.salon_stock_enabled"
+        :true-value="1"
+        :false-value="0"
+        size="large"
+      >
+        <span slot="open">开启</span>
+        <span slot="close">关闭</span>
+      </i-switch>
+      <div class="tips">
+        开启后，该商品（如面膜、精油）可被项目耗材配方选用，核销项目时按配方自动扣减、撤销核销时按原量退回；关闭后不能被新配方选择，历史耗材流水仍保留。仅参与库存管理的商品可开启。
+      </div>
+    </FormItem>
   </div>
 </template>
 

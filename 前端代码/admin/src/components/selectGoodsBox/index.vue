@@ -10,7 +10,7 @@
   >
     <goods-attr
       v-if="visible"
-      :chooseType="94"
+      :chooseType="chooseType"
       :ischeckbox="ischeckbox"
       @getProductId="onSelect"
     ></goods-attr>
@@ -35,6 +35,11 @@ export default {
     ischeckbox: {
       type: Boolean,
       default: true,
+    },
+    // 选择场景：94=库存商品(默认)、95=院装耗材、96=院装项目
+    chooseType: {
+      type: Number,
+      default: 94,
     },
   },
   computed: {

@@ -87,7 +87,7 @@ export default {
 			position: absolute;
 			top: -20rpx;
 			right: 26rpx;
-			/deep/ .uni-badge--error {
+			::v-deep  .uni-badge--error {
 				background-color: var(--view-theme) !important;
 			}
 			.uni-badge {

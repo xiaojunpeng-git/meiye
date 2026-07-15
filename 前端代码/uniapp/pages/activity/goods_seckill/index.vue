@@ -402,7 +402,7 @@
 		right: 30rpx;
 	}
 	.sel-last {
-		/deep/.uni-scroll-view{
+		::v-deep .uni-scroll-view{
 			
 		margin-right: -10rpx;
 		}

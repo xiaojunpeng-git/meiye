@@ -43,7 +43,7 @@
 </script>
 
 <style lang="scss" scoped>
-	/deep/.goods-list {
+	::v-deep .goods-list {
 		margin: 20rpx 30rpx;
 	}
 </style>

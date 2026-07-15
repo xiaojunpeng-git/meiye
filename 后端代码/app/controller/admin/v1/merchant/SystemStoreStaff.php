@@ -92,6 +92,23 @@ class SystemStoreStaff extends AuthController
     }
 
     /**
+     * 门店店员下拉（轻量，仅 id/名称）
+     */
+    public function getStaffSelect()
+    {
+        $where = $this->request->getMore([
+            ['store_id', 0],
+            ['keyword', ''],
+        ]);
+        $where['status'] = 1;
+        $where['is_del'] = 0;
+        if (!(int)$where['store_id']) {
+            return $this->success([]);
+        }
+        return $this->success($this->services->getSelectList($where));
+    }
+
+    /**
      * 获取店员专属客户
      * @param UserServices $userServices
      * @param $id

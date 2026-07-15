@@ -493,7 +493,7 @@
 		height: 120rpx;
 		padding: 0 20rpx;
 		box-sizing: border-box;
-		height: calc(106rpx+ constant(safe-area-inset-bottom)); ///兼容 IOS<11.2/
+		height: calc(106rpx + constant(safe-area-inset-bottom)); ///兼容 IOS<11.2/
 		height: calc(106rpx + env(safe-area-inset-bottom)); ///兼容 IOS>11.2/
 		padding-bottom: constant(safe-area-inset-bottom); ///兼容 IOS<11.2/
 		padding-bottom: env(safe-area-inset-bottom); ///兼容 IOS>11.2/

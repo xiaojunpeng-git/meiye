@@ -868,15 +868,15 @@
 		}
 	}
 
-	/deep/.dot0 .uni-swiper-dots-horizontal {
+	::v-deep .dot0 .uni-swiper-dots-horizontal {
 		left: 10%;
 	}
 
-	/deep/.dot1 .uni-swiper-dots-horizontal {
+	::v-deep .dot1 .uni-swiper-dots-horizontal {
 		left: 50%;
 	}
 
-	/deep/.dot2 .uni-swiper-dots-horizontal {
+	::v-deep .dot2 .uni-swiper-dots-horizontal {
 		left: 90%;
 	}
 </style>

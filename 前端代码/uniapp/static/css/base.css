@@ -609,17 +609,17 @@ uni-toast .uni-toast {
 	height: 140rpx;
 }
 
-.page-footer /deep/.uni-badge--x {
+.page-footer ::v-deep .uni-badge--x {
 	position: absolute !important;
 	top: -8rpx;
 }
 
-.page-footer /deep/.uni-badge {
+.page-footer ::v-deep .uni-badge {
 	right: unset !important;
 	top: unset !important;
 }
 
-.page-footer /deep/.uni-badge-left-margin .uni-badge--error {
+.page-footer ::v-deep .uni-badge-left-margin .uni-badge--error {
 	color: #fff !important;
 	background-color: var(--view-theme) !important;
 	z-index: 8;

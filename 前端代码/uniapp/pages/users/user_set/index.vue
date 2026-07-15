@@ -211,7 +211,7 @@ export default {
 				}
 			}
 
-			/deep/.uni-switch-input {
+			::v-deep .uni-switch-input {
 				width: 84rpx;
 				height: 48rpx;
 				margin: -8rpx 0;

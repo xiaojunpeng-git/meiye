@@ -157,6 +157,7 @@
 					is_new: this.is_new,
 					store_label_id: "",
 					product_type: "",
+					choose_type: this.chooseType,
 				},
 				total: 0,
 				loading: false,

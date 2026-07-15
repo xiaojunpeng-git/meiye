@@ -93,11 +93,11 @@ export default {
 </script>
 
 <style lang="scss" scoped>
-/deep/checkbox .wx-checkbox-input.wx-checkbox-input-checked {
+::v-deep checkbox .wx-checkbox-input.wx-checkbox-input-checked {
 	border: 1px solid #e93323 !important;
 	background-color: #e93323 !important;
 }
-/deep/checkbox .uni-checkbox-input.uni-checkbox-input-checked {
+::v-deep checkbox .uni-checkbox-input.uni-checkbox-input-checked {
 	border: 1px solid #e93323 !important;
 	background-color: #e93323 !important;
 }

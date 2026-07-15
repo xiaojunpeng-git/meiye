@@ -978,7 +978,7 @@
 	}
 
 	// #ifdef APP-PLUS || H5
-	.pro-card /deep/uni-swiper .uni-swiper-dots-horizontal .uni-swiper-dot {
+	.pro-card ::v-deep uni-swiper .uni-swiper-dots-horizontal .uni-swiper-dot {
 		width: 12rpx;
 		height: 12rpx;
 		border-radius: 50%;
@@ -986,7 +986,7 @@
 
 	// #endif
 	// #ifdef MP
-	.pro-card swiper /deep/.wx-swiper-dot {
+	.pro-card swiper ::v-deep .wx-swiper-dot {
 		width: 12rpx;
 		height: 12rpx;
 		border-radius: 50%;

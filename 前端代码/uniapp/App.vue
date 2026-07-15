@@ -159,7 +159,7 @@
 				);
 				return false;
 			}
-			if (option.query.hasOwnProperty('scene')) {
+			if (option.query && option.query.hasOwnProperty('scene')) {
 				let val = that.$util.getUrlParams(decodeURIComponent(option.query.scene));
 				switch (option.scene) {
 					//扫描小程序码
@@ -326,13 +326,13 @@
 		onShow(options) {
 			let that = this;
 			const enterOptions = uni.getEnterOptionsSync();
-			if (enterOptions.query.spid) {
+			if (enterOptions.query && enterOptions.query.spid) {
 				this.$Cache.set('spid', enterOptions.query.spid);
 				this.globalData.spid = enterOptions.query.spid;
 				silenceBindingSpread(this);
 			}
 			// #ifdef MP
-			if (enterOptions.query.scene) {
+			if (enterOptions.query && enterOptions.query.scene) {
 				const params = this.$util.getUrlParams(decodeURIComponent(enterOptions.query.scene));
 				if (params.spid) {
 					this.$Cache.set('spid', params.spid);

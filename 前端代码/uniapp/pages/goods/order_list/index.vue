@@ -440,7 +440,7 @@
 		position: absolute;
 		top: -16rpx;
 		right: -30rpx;
-		/deep/ .uni-badge--error {
+		::v-deep  .uni-badge--error {
 			background-color: var(--view-theme) !important;
 		}
 		.uni-badge {

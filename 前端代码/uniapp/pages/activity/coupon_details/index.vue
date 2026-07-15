@@ -348,7 +348,7 @@
 </script>
 
 <style lang="scss" scoped>
-	/deep/ .base-money .symbol {
+	::v-deep  .base-money .symbol {
 		font-weight: 600;
 	}
 

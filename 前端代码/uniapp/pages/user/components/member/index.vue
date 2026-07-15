@@ -113,7 +113,7 @@ export default {
 </template>
 
 <style lang="scss">
-/deep/ .bind-phone {
+::v-deep  .bind-phone {
 	margin-top: 12rpx;
 	background: rgba(255, 255, 255, 0.3);
 	border-radius: 30px;
@@ -125,7 +125,7 @@ export default {
 	line-height: 28rpx;
 	padding: 6rpx 16rpx;
 }
-/deep/ .tips::before {
+::v-deep  .tips::before {
 	content: '';
 	position: absolute;
 	bottom: -6rpx;

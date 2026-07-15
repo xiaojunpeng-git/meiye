@@ -369,13 +369,13 @@
 	}
 </script>
 <style lang="scss">
-	.record .list /deep/checkbox .uni-checkbox-input {
+	.record .list ::v-deep checkbox .uni-checkbox-input {
 		margin-right: 0;
 		background-color: rgba(0, 0, 0, 0.1);
 		border: 1px solid #eee;
 	}
 
-	.record .list /deep/checkbox .wx-checkbox-input {
+	.record .list ::v-deep checkbox .wx-checkbox-input {
 		background-color: rgba(0, 0, 0, 0.1);
 		border: 1px solid #eee;
 	}

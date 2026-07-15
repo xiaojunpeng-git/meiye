@@ -820,14 +820,14 @@ page{
 	}
 }
 // #ifdef APP-PLUS || H5
-/deep/uni-swiper .uni-swiper-dots-horizontal .uni-swiper-dot{
+::v-deep uni-swiper .uni-swiper-dots-horizontal .uni-swiper-dot{
 	width: 12rpx;
 	height: 12rpx;
 	border-radius: 50%;
 }
 // #endif
 // #ifdef MP
- swiper /deep/.wx-swiper-dot{
+ swiper ::v-deep .wx-swiper-dot{
 	width: 12rpx;
 	height: 12rpx;
 	border-radius: 50%;

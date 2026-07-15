@@ -493,6 +493,37 @@
                           clearable
                         ></InputNumber>
                       </template>
+                      <template v-else-if="item.slot === 'stock_unit'">
+                        <Input
+                          v-model="oneFormBatch[0].stock_unit"
+                          placeholder="如 片/ml/g"
+                        ></Input>
+                      </template>
+                      <template v-else-if="item.slot === 'sale_unit'">
+                        <Input
+                          v-model="oneFormBatch[0].sale_unit"
+                          placeholder="如 盒/瓶"
+                        ></Input>
+                      </template>
+                      <template v-else-if="item.slot === 'unit_convert'">
+                        <InputNumber
+                          :controls="false"
+                          v-model="oneFormBatch[0].unit_convert"
+                          :min="0"
+                          :max="9999999999"
+                          class="priceBox"
+                        ></InputNumber>
+                      </template>
+                      <template v-else-if="item.slot === 'decimal_scale'">
+                        <InputNumber
+                          :controls="false"
+                          v-model="oneFormBatch[0].decimal_scale"
+                          :min="0"
+                          :max="4"
+                          :precision="0"
+                          class="priceBox"
+                        ></InputNumber>
+                      </template>
                       <template v-else-if="item.slot === 'selected_spec'">
                         --
                       </template>
@@ -678,6 +709,37 @@
                           class="priceBox"
                         ></InputNumber>
                       </template>
+                      <template v-else-if="item.slot === 'stock_unit'">
+                        <Input
+                          v-model="manyFormValidate[scope.$index].stock_unit"
+                          placeholder="如 片/ml/g"
+                        ></Input>
+                      </template>
+                      <template v-else-if="item.slot === 'sale_unit'">
+                        <Input
+                          v-model="manyFormValidate[scope.$index].sale_unit"
+                          placeholder="如 盒/瓶"
+                        ></Input>
+                      </template>
+                      <template v-else-if="item.slot === 'unit_convert'">
+                        <InputNumber
+                          :controls="false"
+                          v-model="manyFormValidate[scope.$index].unit_convert"
+                          :min="0"
+                          :max="9999999999"
+                          class="priceBox"
+                        ></InputNumber>
+                      </template>
+                      <template v-else-if="item.slot === 'decimal_scale'">
+                        <InputNumber
+                          :controls="false"
+                          v-model="manyFormValidate[scope.$index].decimal_scale"
+                          :min="0"
+                          :max="4"
+                          :precision="0"
+                          class="priceBox"
+                        ></InputNumber>
+                      </template>
                       <template v-else-if="item.slot === 'fictitious'">
                         <Button
                           v-if="
@@ -859,6 +921,39 @@
                 :max="99999999"
                 v-width="'50%'"
               ></InputNumber>
+            </FormItem>
+            <FormItem label="库存基本单位：" v-if="formData.product_type == 0">
+              <Input
+                v-model.trim="formData.attr.stock_unit"
+                v-width="'50%'"
+                placeholder="如 片/ml/g，库存与院装配方按此单位记账"
+              ></Input>
+            </FormItem>
+            <FormItem label="销售/包装单位：" v-if="formData.product_type == 0">
+              <Input
+                v-model.trim="formData.attr.sale_unit"
+                v-width="'50%'"
+                placeholder="如 盒/瓶，可留空"
+              ></Input>
+            </FormItem>
+            <FormItem label="销售单位换算数：" v-if="formData.product_type == 0">
+              <InputNumber
+                v-model="formData.attr.unit_convert"
+                :min="0"
+                :max="99999999"
+                v-width="'50%'"
+              ></InputNumber>
+              <div class="tips">1 销售单位 = 换算数 × 基本单位（如 1 盒=10 片则填 10）；不用包装单位填 1</div>
+            </FormItem>
+            <FormItem label="允许小数位：" v-if="formData.product_type == 0">
+              <InputNumber
+                v-model="formData.attr.decimal_scale"
+                :min="0"
+                :max="4"
+                :precision="0"
+                v-width="'50%'"
+              ></InputNumber>
+              <div class="tips">库存数量允许的小数位（0~4）。按件/片等整数单位填 0；ml/g 等可填 1~4</div>
             </FormItem>
             <template v-if="formData.product_type == 1">
               <FormItem label="卡密设置：">
@@ -1610,6 +1705,10 @@ export default {
           stock: null,
           weight: null,
           volume: null,
+          stock_unit: '',
+          sale_unit: '',
+          unit_convert: null,
+          decimal_scale: null,
           virtual_list: [],
 		  pm: 1,
 		  inventory: 0
@@ -2296,6 +2395,10 @@ export default {
           code: '',
           bar_code: '',
           volume: 0,
+          stock_unit: '',
+          sale_unit: '',
+          unit_convert: 1,
+          decimal_scale: 0,
         };
         // 判断商品类型是卡密
         if (this.formData.product_type == 1) {
@@ -2335,6 +2438,10 @@ export default {
                 volume: manyItem.volume || 0,
                 code: manyItem.code || '',
                 bar_code: manyItem.bar_code || '',
+                stock_unit: manyItem.stock_unit || '',
+                sale_unit: manyItem.sale_unit || '',
+                unit_convert: manyItem.unit_convert != null ? manyItem.unit_convert : 1,
+                decimal_scale: manyItem.decimal_scale != null ? manyItem.decimal_scale : 0,
                 is_virtual: manyItem.is_virtual,
                 brokerage: manyItem.brokerage,
                 brokerage_two: manyItem.brokerage_two,
@@ -2590,6 +2697,10 @@ export default {
           stock: null,
           weight: null,
           volume: null,
+          stock_unit: '',
+          sale_unit: '',
+          unit_convert: null,
+          decimal_scale: null,
         },
       ];
     },
@@ -2665,6 +2776,18 @@ export default {
             if (this.oneFormBatch[0].volume !== null) {
               this.$set(val, 'volume', this.oneFormBatch[0].volume);
             }
+            if (this.oneFormBatch[0].stock_unit) {
+              this.$set(val, 'stock_unit', this.oneFormBatch[0].stock_unit);
+            }
+            if (this.oneFormBatch[0].sale_unit) {
+              this.$set(val, 'sale_unit', this.oneFormBatch[0].sale_unit);
+            }
+            if (this.oneFormBatch[0].unit_convert !== null) {
+              this.$set(val, 'unit_convert', this.oneFormBatch[0].unit_convert);
+            }
+            if (this.oneFormBatch[0].decimal_scale !== null) {
+              this.$set(val, 'decimal_scale', this.oneFormBatch[0].decimal_scale);
+            }
           }
         } else {
           if (this.oneFormBatch[0].pic) {
@@ -2701,6 +2824,18 @@ export default {
           }
           if (this.oneFormBatch[0].volume !== null) {
             this.$set(val, 'volume', this.oneFormBatch[0].volume);
+          }
+          if (this.oneFormBatch[0].stock_unit) {
+            this.$set(val, 'stock_unit', this.oneFormBatch[0].stock_unit);
+          }
+          if (this.oneFormBatch[0].sale_unit) {
+            this.$set(val, 'sale_unit', this.oneFormBatch[0].sale_unit);
+          }
+          if (this.oneFormBatch[0].unit_convert !== null) {
+            this.$set(val, 'unit_convert', this.oneFormBatch[0].unit_convert);
+          }
+          if (this.oneFormBatch[0].decimal_scale !== null) {
+            this.$set(val, 'decimal_scale', this.oneFormBatch[0].decimal_scale);
           }
           this.$set(val, 'bar_code', this.oneFormBatch[0].bar_code);
           this.$set(
@@ -3397,6 +3532,7 @@ export default {
       this.$set(formData, 'applicable_type', this.formData.applicable_type);
 	  this.$set(formData, 'is_inventory', this.formData.product_type == 0 ? (this.formData.is_inventory != null ? this.formData.is_inventory : 1) : 0);
 	  this.$set(formData, 'allow_negative_stock', this.formData.product_type == 0 ? (this.formData.allow_negative_stock != null ? this.formData.allow_negative_stock : 1) : 1);
+	  this.$set(formData, 'salon_stock_enabled', (this.formData.product_type == 0 && (this.formData.is_inventory != null ? this.formData.is_inventory : 1) == 1) ? (this.formData.salon_stock_enabled != null ? this.formData.salon_stock_enabled : 0) : 0);
 	  this.$set(formData, 'reservation_time_type', this.formData.reservation_time_type);
 	  this.$set(formData, 'reservation_times', this.formData.reservation_times);
 	  this.$set(formData, 'reservation_time_interval', this.formData.reservation_time_interval);

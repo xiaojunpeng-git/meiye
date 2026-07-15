@@ -26,6 +26,7 @@ use app\services\order\StoreOrderCartInfoServices;
 use app\services\order\StoreOrderCreateServices;
 use app\services\order\StoreOrderRefundServices;
 use app\services\order\StoreOrderTakeServices;
+use app\services\order\StoreOrderWriteOffServices;
 use app\services\activity\combination\StorePinkServices;
 use app\services\BaseServices;
 use app\services\order\StoreReservationOrderServices;
@@ -640,7 +641,27 @@ class WriteOffOrderServices extends BaseServices
         if (!CacheService::lock($key)) {
             throw new ValidateException('核销操作太过频繁，请稍后再试');
         }
-        $data = $this->transaction(function () use ($isEnd,$orderInfo, $staff_id, $data, $cartIds, $cartInfoServices, $cartData, $auth, $cartInfo, $price) {
+        /** @var StoreOrderWriteOffServices $writeOffRecordServices */
+        $writeOffRecordServices = app()->make(StoreOrderWriteOffServices::class);
+        // 在改变权益状态前，按核心核销条件取「本次实际核销商品行快照」（is_writeoff=0；卡项 cart_type=2；部分核销限 cart_id）。
+        // 同一份快照既用于「是否含项目」判断，也直接传入 saveWriteOff 写核销记录+院装扣料，禁止后置重查，
+        // 从而杜绝整卡核销落入默认 cart_type 导致不扣院装耗材、或后置重查选行漂移造成重复扣料。
+        $writeoffCartSnapshot = $writeOffRecordServices->getWriteoffCartRows($orderInfo, $cartIds, '*', 'cart_id');
+        // 按「本次实际核销行是否含项目(product_type=6)」判断，覆盖卡项(头5/行6)、几选几、赠送项目、补单
+        $salonHasProject = $writeOffRecordServices->snapshotContainsProject($writeoffCartSnapshot);
+        // 含项目行时：核销记录 + 院装扣料在核销主事务内同步完成的入参
+        $writeoffPayload = [
+            'staff_id' => $staff_id,
+            'store_id' => $store_id,
+            'price' => $price,
+            'service_type' => $data['service_type'] ?? 0,
+            'sync_all' => $syncAll,
+            'is_budan' => $is_budan,
+            'budan_time' => $budan_time,
+            'is_auto' => $isAuto,
+            'reservation_oid' => (int)$reservationOid,
+        ];
+        $data = $this->transaction(function () use ($isEnd,$orderInfo, $staff_id, $data, $cartIds, $cartInfoServices, $cartData, $auth, $cartInfo, $price, $writeoffPayload, $reservationOid, $salonHasProject, $writeOffRecordServices, $writeoffCartSnapshot) {
             if ($cartIds) {//选择商品、件数核销
                 $writeoffSum = 0;
                 foreach ($cartIds as $cart) {
@@ -722,6 +743,11 @@ class WriteOffOrderServices extends BaseServices
                 StoreOrderCartInfo::where("oid",$orderInfo['id'])->update(['write_surplus_times'=>0,'is_writeoff'=>1]);
                 UserCardHolder::where('oid',$orderInfo['id'])->update(['write_surplus_times'=>0]);
             }
+            if ($salonHasProject) {
+                // 含项目行：核销记录 + 院装耗材扣料同事务同步完成；传入改权益前取到的「本次实际核销行快照」，
+                // saveWriteOff 直接使用该快照、不再回表；院装不足/缺副本会抛异常，整单回滚
+                $writeOffRecordServices->saveWriteOff((int)$orderInfo['id'], (int)$writeoffPayload['reservation_oid'], $cartIds, $writeoffPayload, $orderInfo, $writeoffCartSnapshot);
+            }
             return $data;
         });
         unset($data['delivery_time']);
@@ -733,6 +759,8 @@ class WriteOffOrderServices extends BaseServices
         $data['budan_time']=$budan_time;
         $data['is_auto']=$isAuto;
         $data['reservation_oid'] = (int)$reservationOid;
+        // 含项目行已在主事务内同步写核销记录+扣料，通知监听器跳过异步 OrderWriteoffJob，避免重复写核销记录
+        $data['salon_sync'] = $salonHasProject ? 1 : 0;
         event('order.writeoff', [$orderInfo, $auth, $data, $cartIds, $cartInfo]);
         return $orderInfo;
     }

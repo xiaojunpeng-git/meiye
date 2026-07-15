@@ -628,32 +628,32 @@
 		font-size: 24rpx;
 		line-height: 22rpx;
 		text-align: center;
-		bottom: calc(52rpx+ constant(safe-area-inset-bottom)); ///兼容 IOS<11.2/
+		bottom: calc(52rpx + constant(safe-area-inset-bottom)); ///兼容 IOS<11.2/
 		bottom: calc(52rpx + env(safe-area-inset-bottom)); ///兼容 IOS>11.2/
 		
-		/deep/uni-checkbox .uni-checkbox-input {
+		::v-deep uni-checkbox .uni-checkbox-input {
 			width: 32rpx !important;
 			height: 32rpx !important;
 		}
 		
-		/deep/uni-checkbox .uni-checkbox-input.uni-checkbox-input-checked::before {
+		::v-deep uni-checkbox .uni-checkbox-input.uni-checkbox-input-checked::before {
 			font-size: 24rpx
 		}
 		
 		/*checkbox 选项框大小  */
-		/deep/checkbox .wx-checkbox-input {
+		::v-deep checkbox .wx-checkbox-input {
 			width: 32rpx;
 			height: 32rpx;
 			margin-bottom: 4rpx;
 		}
 		
 		/*checkbox选中后样式  */
-		/deep/checkbox .wx-checkbox-input.wx-checkbox-input-checked {
+		::v-deep checkbox .wx-checkbox-input.wx-checkbox-input-checked {
 			background: white;
 		}
 		
 		/*checkbox选中后图标样式  */
-		/deep/checkbox .wx-checkbox-input.wx-checkbox-input-checked::before {
+		::v-deep checkbox .wx-checkbox-input.wx-checkbox-input-checked::before {
 			width: 32rpx;
 			height: 32rpx;
 			line-height: 32rpx;

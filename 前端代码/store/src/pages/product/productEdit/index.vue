@@ -730,6 +730,37 @@
                           clearable
                         ></InputNumber>
                       </template>
+                      <template v-else-if="item.slot === 'stock_unit'">
+                        <Input
+                          v-model="oneFormBatch[0].stock_unit"
+                          placeholder="如 片/ml/g"
+                        ></Input>
+                      </template>
+                      <template v-else-if="item.slot === 'sale_unit'">
+                        <Input
+                          v-model="oneFormBatch[0].sale_unit"
+                          placeholder="如 盒/瓶"
+                        ></Input>
+                      </template>
+                      <template v-else-if="item.slot === 'unit_convert'">
+                        <InputNumber
+                          :controls="false"
+                          v-model="oneFormBatch[0].unit_convert"
+                          :min="0"
+                          :max="9999999999"
+                          class="priceBox"
+                        ></InputNumber>
+                      </template>
+                      <template v-else-if="item.slot === 'decimal_scale'">
+                        <InputNumber
+                          :controls="false"
+                          v-model="oneFormBatch[0].decimal_scale"
+                          :min="0"
+                          :max="4"
+                          :precision="0"
+                          class="priceBox"
+                        ></InputNumber>
+                      </template>
                       <template v-else-if="item.slot === 'selected_spec'">
                         --
                       </template>
@@ -842,6 +873,37 @@
                           v-model="manyFormValidate[scope.$index].volume"
                           :min="0"
                           :max="9999999999"
+                          class="priceBox"
+                        ></InputNumber>
+                      </template>
+                      <template v-else-if="item.slot === 'stock_unit'">
+                        <Input
+                          v-model="manyFormValidate[scope.$index].stock_unit"
+                          placeholder="如 片/ml/g"
+                        ></Input>
+                      </template>
+                      <template v-else-if="item.slot === 'sale_unit'">
+                        <Input
+                          v-model="manyFormValidate[scope.$index].sale_unit"
+                          placeholder="如 盒/瓶"
+                        ></Input>
+                      </template>
+                      <template v-else-if="item.slot === 'unit_convert'">
+                        <InputNumber
+                          :controls="false"
+                          v-model="manyFormValidate[scope.$index].unit_convert"
+                          :min="0"
+                          :max="9999999999"
+                          class="priceBox"
+                        ></InputNumber>
+                      </template>
+                      <template v-else-if="item.slot === 'decimal_scale'">
+                        <InputNumber
+                          :controls="false"
+                          v-model="manyFormValidate[scope.$index].decimal_scale"
+                          :min="0"
+                          :max="4"
+                          :precision="0"
                           class="priceBox"
                         ></InputNumber>
                       </template>
@@ -1038,6 +1100,39 @@
 			      :max="99999999"
 			      v-width="260"
 			    ></InputNumber>
+			  </FormItem>
+			  <FormItem label="库存基本单位：" v-if="formValidate.product_type==0">
+			    <Input
+			      v-model.trim="formValidate.attr.stock_unit"
+			      v-width="260"
+			      placeholder="如 片/ml/g，库存与院装配方按此单位记账"
+			    ></Input>
+			  </FormItem>
+			  <FormItem label="销售/包装单位：" v-if="formValidate.product_type==0">
+			    <Input
+			      v-model.trim="formValidate.attr.sale_unit"
+			      v-width="260"
+			      placeholder="如 盒/瓶，可留空"
+			    ></Input>
+			  </FormItem>
+			  <FormItem label="销售单位换算数：" v-if="formValidate.product_type==0">
+			    <InputNumber
+			      v-model="formValidate.attr.unit_convert"
+			      :min="0"
+			      :max="99999999"
+			      v-width="260"
+			    ></InputNumber>
+			    <div class="tips">1 销售单位 = 换算数 × 基本单位（如 1 盒=10 片则填 10）；不用包装单位填 1</div>
+			  </FormItem>
+			  <FormItem label="允许小数位：" v-if="formValidate.product_type==0">
+			    <InputNumber
+			      v-model="formValidate.attr.decimal_scale"
+			      :min="0"
+			      :max="4"
+			      :precision="0"
+			      v-width="260"
+			    ></InputNumber>
+			    <div class="tips">库存数量允许的小数位（0~4）。按件/片等整数单位填 0；ml/g 等可填 1~4</div>
 			  </FormItem>
         <FormItem label="卡项商品：" required v-if="formValidate.product_type==5">
           <Button type="primary" @click="goodsModal = true">添加商品</Button>
@@ -1745,6 +1840,10 @@ export default {
           code: '',
           weight: null,
           volume: null,
+          stock_unit: '',
+          sale_unit: '',
+          unit_convert: null,
+          decimal_scale: null,
 		  pm: 1,
 		  inventory: 0
         },
@@ -1808,6 +1907,30 @@ export default {
           slot: 'volume',
           align: 'center',
           minWidth: '95',
+        },
+        {
+          title: '库存单位',
+          slot: 'stock_unit',
+          align: 'center',
+          minWidth: '100',
+        },
+        {
+          title: '销售单位',
+          slot: 'sale_unit',
+          align: 'center',
+          minWidth: '100',
+        },
+        {
+          title: '换算数',
+          slot: 'unit_convert',
+          align: 'center',
+          minWidth: '110',
+        },
+        {
+          title: '小数位',
+          slot: 'decimal_scale',
+          align: 'center',
+          minWidth: '90',
         },
         {
           title: '默认选中规格',
@@ -1933,6 +2056,10 @@ export default {
           code: '', //商品编号
           weight: 0, //重量（KG）
           volume: 0, //体积
+          stock_unit: '', //库存基本单位
+          sale_unit: '', //销售/包装单位
+          unit_convert: 1, //销售单位换算数
+          decimal_scale: 0, //允许小数位0~4
 		  reservation_time_data: [], //预约时间段数组库存
       write_valid: 1, //核销时效
       days: 1, //核销时效-购买后几天有效
@@ -1946,6 +2073,7 @@ export default {
         product_type: 0,
 		is_inventory: 1, //参与库存管理（仅普通商品）
 		allow_negative_stock: 1, //允许负库存
+		salon_stock_enabled: 0, //可作为院装耗材（仅普通商品且参与库存）
 		reservation_time_type:1 ,//预约时段类型1:自动划分2:自定义
 		reservation_times: [], //[预约时间段开始，预约时间短结束]
 		reservation_time_interval:30, //预约时段自动类型：时间间隔（分钟）
@@ -3245,6 +3373,10 @@ export default {
           stock: null,
           weight: null,
           volume: null,
+          stock_unit: '',
+          sale_unit: '',
+          unit_convert: null,
+          decimal_scale: null,
         },
       ];
     },
@@ -3366,6 +3498,18 @@ export default {
             if (this.oneFormBatch[0].volume !== null) {
               this.$set(val, 'volume', this.oneFormBatch[0].volume);
             }
+            if (this.oneFormBatch[0].stock_unit) {
+              this.$set(val, 'stock_unit', this.oneFormBatch[0].stock_unit);
+            }
+            if (this.oneFormBatch[0].sale_unit) {
+              this.$set(val, 'sale_unit', this.oneFormBatch[0].sale_unit);
+            }
+            if (this.oneFormBatch[0].unit_convert !== null) {
+              this.$set(val, 'unit_convert', this.oneFormBatch[0].unit_convert);
+            }
+            if (this.oneFormBatch[0].decimal_scale !== null) {
+              this.$set(val, 'decimal_scale', this.oneFormBatch[0].decimal_scale);
+            }
           }
         } else {
           if (this.oneFormBatch[0].pic) {
@@ -3395,6 +3539,18 @@ export default {
           }
           if (this.oneFormBatch[0].volume !== null) {
             this.$set(val, 'volume', this.oneFormBatch[0].volume);
+          }
+          if (this.oneFormBatch[0].stock_unit) {
+            this.$set(val, 'stock_unit', this.oneFormBatch[0].stock_unit);
+          }
+          if (this.oneFormBatch[0].sale_unit) {
+            this.$set(val, 'sale_unit', this.oneFormBatch[0].sale_unit);
+          }
+          if (this.oneFormBatch[0].unit_convert !== null) {
+            this.$set(val, 'unit_convert', this.oneFormBatch[0].unit_convert);
+          }
+          if (this.oneFormBatch[0].decimal_scale !== null) {
+            this.$set(val, 'decimal_scale', this.oneFormBatch[0].decimal_scale);
           }
           this.$set(val, 'bar_code', this.oneFormBatch[0].bar_code);
           this.$set(
@@ -3701,9 +3857,15 @@ export default {
               this.formValidate.is_inventory != null ? this.formValidate.is_inventory : 1;
             this.formValidate.allow_negative_stock =
               this.formValidate.allow_negative_stock != null ? this.formValidate.allow_negative_stock : 1;
+            // 院装耗材开关：仅参与库存管理时可开启，否则强制关闭
+            this.formValidate.salon_stock_enabled =
+              this.formValidate.is_inventory == 1
+                ? (this.formValidate.salon_stock_enabled != null ? this.formValidate.salon_stock_enabled : 0)
+                : 0;
           } else {
             this.formValidate.is_inventory = 0;
             this.formValidate.allow_negative_stock = 1;
+            this.formValidate.salon_stock_enabled = 0;
           }
           productAddApi(this.formValidate)
             .then(async (res) => {
@@ -3836,6 +3998,10 @@ export default {
           bar_code: '',
           weight: 0,
           volume: 0,
+          stock_unit: '',
+          sale_unit: '',
+          unit_convert: 1,
+          decimal_scale: 0,
           is_default_select: 0,
           is_show: 1,
           unique: '',
@@ -3873,6 +4039,10 @@ export default {
                 bar_code: manyItem.bar_code || '',
                 weight: manyItem.weight || 0,
                 volume: manyItem.volume || 0,
+                stock_unit: manyItem.stock_unit || '',
+                sale_unit: manyItem.sale_unit || '',
+                unit_convert: manyItem.unit_convert != null ? manyItem.unit_convert : 1,
+                decimal_scale: manyItem.decimal_scale != null ? manyItem.decimal_scale : 0,
                 is_default_select: manyItem.is_default_select || 0,
                 is_show: manyItem.is_show || 1,
                 unique: manyItem.unique || '',

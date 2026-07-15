@@ -78,7 +78,7 @@ export default {
 		.uni-badge--error {
 			background-color: #fff !important;
 		}
-		/deep/ .uni-badge--error {
+		::v-deep  .uni-badge--error {
 			background-color: var(--view-theme) !important;
 		}
 		.uni-badge {

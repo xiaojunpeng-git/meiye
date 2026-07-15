@@ -977,7 +977,7 @@
 		}
 	}
 
-	.recommend /deep/ .fw-500 {
+	.recommend ::v-deep  .fw-500 {
 		font-weight: bold;
 	}
 </style>

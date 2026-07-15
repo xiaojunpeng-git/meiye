@@ -1066,7 +1066,7 @@
 		color: #fc4141;
 	}
 
-	.group-con .wrapper .title .name /deep/.time .styleAll {
+	.group-con .wrapper .title .name ::v-deep .time .styleAll {
 		text-align: center;
 		border-radius: 8rpx;
 		font-size: 24rpx;

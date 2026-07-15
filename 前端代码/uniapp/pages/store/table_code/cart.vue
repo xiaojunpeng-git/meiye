@@ -875,7 +875,7 @@
 		}
 	}
 
-	/deep/.product-window.joinCart {
+	::v-deep .product-window.joinCart {
 		z-index: 999;
 	}
 
@@ -891,11 +891,11 @@
 		height: 100vh;
 		background: #FFFFFF;
 
-		/deep/.mask {
+		::v-deep .mask {
 			z-index: 99;
 		}
 
-		/deep/.attrProduct {
+		::v-deep .attrProduct {
 			.mask {
 				z-index: 100;
 			}
@@ -1031,7 +1031,7 @@
 					margin-top: 0rpx;
 					padding: 0 30rpx 0 20rpx;
 
-					/deep/.item {
+					::v-deep .item {
 						margin-bottom: 33rpx !important;
 
 						.text {

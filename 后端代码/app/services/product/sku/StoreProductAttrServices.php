@@ -133,6 +133,13 @@ class StoreProductAttrServices extends BaseServices
             if (!isset($value['stock']) || !is_numeric($value['stock']) || intval($value['stock']) != $value['stock']) {
                 throw new AdminException('请填写正确的商品库存');
             }
+            // 库存单位换算与小数位（仅产品类型前端会传；其它类型不传则跳过）
+            if (isset($value['unit_convert']) && $value['unit_convert'] !== '' && (!is_numeric($value['unit_convert']) || (float)$value['unit_convert'] <= 0)) {
+                throw new AdminException('销售单位换算数必须为大于0的数字');
+            }
+            if (isset($value['decimal_scale']) && $value['decimal_scale'] !== '' && (!is_numeric($value['decimal_scale']) || intval($value['decimal_scale']) != $value['decimal_scale'] || (int)$value['decimal_scale'] < 0 || (int)$value['decimal_scale'] > 4)) {
+                throw new AdminException('允许小数位必须为0~4的整数');
+            }
 			//供应商结算价 不用成本价
             if (!($value['settle_price'] ?? 0) && (!isset($value['cost']) || !is_numeric($value['cost']) || floatval($value['cost']) != $value['cost'])) {
                 throw new AdminException('请填写正确的商品成本价格');
@@ -234,6 +241,10 @@ class StoreProductAttrServices extends BaseServices
                 'bar_code' => $value['bar_code'] ?? '',
                 'weight' => $value['weight'] ?? 0,
                 'volume' => $value['volume'] ?? 0,
+                'stock_unit' => mb_substr((string)($value['stock_unit'] ?? ''), 0, 32),
+                'sale_unit' => mb_substr((string)($value['sale_unit'] ?? ''), 0, 32),
+                'unit_convert' => (isset($value['unit_convert']) && is_numeric($value['unit_convert']) && (float)$value['unit_convert'] > 0) ? round((float)$value['unit_convert'], 4) : 1,
+                'decimal_scale' => max(0, min(4, (int)($value['decimal_scale'] ?? 0))),
                 'type' => $type,
                 'quota' => $value['quota'] ?? 0,
                 'quota_show' => $value['quota'] ?? 0,

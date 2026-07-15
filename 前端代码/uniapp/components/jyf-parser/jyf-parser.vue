@@ -613,7 +613,7 @@
 				if (!obj.id) Scroll('#top');
 				else {
 					// #ifndef MP-BAIDU || MP-ALIPAY || APP-PLUS
-					Scroll('#top >>> #' + obj.id + ', #top >>> .' + obj.id);
+					Scroll('#top ::v-deep #' + obj.id + ', #top ::v-deep .' + obj.id);
 					// #endif
 					// #ifdef MP-BAIDU || MP-ALIPAY || APP-PLUS
 					for (var anchor of this.anchors)

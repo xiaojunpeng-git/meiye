@@ -59,6 +59,10 @@ export const defaultObj = {
     code: "",
     weight: 0,
     volume: 0,
+    stock_unit: '',
+    sale_unit: '',
+    unit_convert: 1,
+    decimal_scale: 0,
     brokerage: 0,
     brokerage_two: 0,
     vip_price: 0,
@@ -129,6 +133,7 @@ export const defaultObj = {
   is_sync_show: 1, //状态同步
   is_inventory: 1, //是否参与库存管理（仅产品类型）
   allow_negative_stock: 1, //是否允许负库存
+  salon_stock_enabled: 0, //是否可作为院装耗材（仅产品类型且参与库存）
 };
 
 export const GoodsTableHead = [
@@ -188,6 +193,30 @@ export const GoodsTableHead = [
     slot: 'volume',
     align: 'center',
     minWidth: '100px',
+  },
+  {
+    title: '库存单位',
+    slot: 'stock_unit',
+    align: 'center',
+    minWidth: '100px',
+  },
+  {
+    title: '销售单位',
+    slot: 'sale_unit',
+    align: 'center',
+    minWidth: '100px',
+  },
+  {
+    title: '换算数',
+    slot: 'unit_convert',
+    align: 'center',
+    minWidth: '120px',
+  },
+  {
+    title: '小数位',
+    slot: 'decimal_scale',
+    align: 'center',
+    minWidth: '90px',
   },
   {
     title: '默认选中规格',

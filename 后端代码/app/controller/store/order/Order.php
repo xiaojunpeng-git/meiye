@@ -129,24 +129,10 @@ class Order extends AuthController
      */
     public function postChexiao($id){
         $data = $this->request->param('remarks', '');
-        $order=$this->services->get($id);
-        if($order['refund_status'] != 0){
-            return app('json')->fail('该订单状态不允许撤销！');
-        }
-        $this->services->update(['id' => $id], ['back_reason' => $data,'refund_status'=>2]);
-        //核销记录
-        StoreOrderWriteoff::where("id",$order['link_id'])->update(['status'=>1]);
-        //业绩失效
-        StaffYeji::where("link_id",$order['link_id'])->where("type",3)->update(['status'=>1]);
-        //退换次数
-        $writeoff=StoreOrderWriteoff::where("id",$order['link_id'])->find();
-        $cateId=$writeoff['order_cart_id'];
-        $number=$writeoff['writeoff_num'] ?? 1;
-        StoreOrderCartInfo::where("id",$cateId)->inc("write_surplus_times",$number)->update();
-        UserCardHolder::where("uid",$writeoff['uid'])->where("oid",$writeoff['oid'])->inc("write_surplus_times",$number)->update();
-        StoreOrderCartInfo::where("id",$cateId)->update(['is_writeoff'=>0]);
-        //修改订单状态为部分核销
-        StoreOrder::where("id",$writeoff['oid'])->update(['status'=>5]);
+        /** @var StoreOrderWriteOffServices $writeOffServices */
+        $writeOffServices = app()->make(StoreOrderWriteOffServices::class);
+        // 门店端撤销传本门店 store_id 做归属校验，禁止跨门店撤销；平台端才传 0
+        $writeOffServices->cancelWriteoff((int)$id, (string)$data, (int)$this->storeId);
         return $this->success('提交成功');
     }
 

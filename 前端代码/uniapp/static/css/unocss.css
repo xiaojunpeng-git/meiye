@@ -3531,7 +3531,7 @@
 .bg-cover{
 	background-size: cover;
 }
-/deep/.uni-system-preview-image{
+::v-deep .uni-system-preview-image{
 	background: rgba(0, 0, 0, 1);
 }
 

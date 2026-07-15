@@ -947,10 +947,10 @@
 		padding-left: 80rpx;
 	}
 	.pos-order-list {
-		padding-bottom: calc(0rpx+ constant(safe-area-inset-bottom)); ///兼容 IOS<11.2/
+		padding-bottom: calc(0rpx + constant(safe-area-inset-bottom)); ///兼容 IOS<11.2/
 		padding-bottom: calc(0rpx + env(safe-area-inset-bottom)); ///兼容 IOS>11.2/
 
-		/deep/.navbar {
+		::v-deep .navbar {
 			.content {
 				background: #F5F5F5 !important;
 			}
@@ -1053,7 +1053,7 @@
 		border-radius: 24rpx;
 		background-color: #fff;
 
-		/deep/.time {
+		::v-deep .time {
 			.title {
 				color: #FF7E00;
 			}

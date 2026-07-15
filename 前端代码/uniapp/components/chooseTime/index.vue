@@ -3,8 +3,8 @@
     <view class="container">
       <scroll-view class="scroll-view_H b-t b-b" scroll-x>
         <block v-for="(item,index) in dateArr" :key="index">
-          <view class="flex-box" @click="selectDateEvent(index,item)" :class="{ borderb: index==dateActive}" :style="index==dateActive ? { borderBottomColor: selectedTabColor } : {}">
-            <view class="date-box" :style="{color:index==dateActive?selectedTabColor:'#333'}">
+          <view class="flex-box" @click="selectDateEvent(index,item)" :class="{ borderb: index==dateActive}" :style="index==dateActive ? ('border-bottom-color:' + selectedTabColor) : ''">
+            <view class="date-box" :style="'color:' + (index==dateActive ? selectedTabColor : '#333')">
               <text>{{item.title}}</text>
               <text class="fontw">{{item.week}}</text>
             </view>

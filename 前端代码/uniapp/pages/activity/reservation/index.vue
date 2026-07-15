@@ -1565,7 +1565,7 @@ export default {
 	background: #f5f5f5;
 	padding-bottom: 20rpx;
 }
-	/deep/uni-checkbox .uni-checkbox-input{
+	::v-deep uni-checkbox .uni-checkbox-input{
 		border-radius: 3px;
 	}
 	.cell input{
@@ -1612,7 +1612,7 @@ export default {
 		bottom: 0;
 		left:0;
 		z-index: 20;
-		height: calc(108rpx+ constant(safe-area-inset-bottom)); ///兼容 IOS<11.2/
+		height: calc(108rpx + constant(safe-area-inset-bottom)); ///兼容 IOS<11.2/
 		height: calc(108rpx + env(safe-area-inset-bottom)); ///兼容 IOS>11.2/
 		padding-bottom: constant(safe-area-inset-bottom); ///兼容 IOS<11.2/
 		padding-bottom: env(safe-area-inset-bottom); ///兼容 IOS>11.2/

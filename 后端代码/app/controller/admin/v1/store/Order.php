@@ -24,6 +24,7 @@ use app\model\yeji\StaffYeji;
 use app\services\agent\SystemRegionAgentServices;
 use app\services\order\OtherOrderServices;
 use app\services\order\StoreOrderServices;
+use app\services\order\StoreOrderWriteOffServices;
 use app\services\pay\PayServices;
 use app\services\user\UserRechargeServices;
 use app\Request;
@@ -270,25 +271,10 @@ class Order extends AuthController
     public function postChexiao($id)
     {
         $data = $this->request->param('remarks', '');
-        $order = $this->services->get($id);
-        if (!$order) {
-            return $this->fail('订单不存在');
-        }
-        if ($order['refund_status'] != 0) {
-            return $this->fail('该订单状态不允许撤销！');
-        }
-        $this->services->update(['id' => $id], ['back_reason' => $data, 'refund_status' => 2]);
-        StoreOrderWriteoff::where('id', $order['link_id'])->update(['status' => 1]);
-        StaffYeji::where('link_id', $order['link_id'])->where('type', 3)->update(['status' => 1]);
-        $writeoff = StoreOrderWriteoff::where('id', $order['link_id'])->find();
-        if ($writeoff) {
-            $cateId = $writeoff['order_cart_id'];
-            $number = $writeoff['writeoff_num'] ?? 1;
-            StoreOrderCartInfo::where('id', $cateId)->inc('write_surplus_times', $number)->update();
-            UserCardHolder::where('uid', $writeoff['uid'])->where('oid', $writeoff['oid'])->inc('write_surplus_times', $number)->update();
-            StoreOrderCartInfo::where('id', $cateId)->update(['is_writeoff' => 0]);
-            StoreOrder::where('id', $writeoff['oid'])->update(['status' => 5]);
-        }
+        /** @var StoreOrderWriteOffServices $writeOffServices */
+        $writeOffServices = app()->make(StoreOrderWriteOffServices::class);
+        // 平台/门店统一走共享撤销服务：同事务撤核销、失效业绩、恢复次数、院装退料并恢复库存
+        $writeOffServices->cancelWriteoff((int)$id, (string)$data, 0);
         return $this->success('提交成功');
     }
 }

@@ -419,7 +419,7 @@
 					margin-right: 20rpx;
 				}
 
-				/deep/checkbox .uni-checkbox-input {
+				::v-deep checkbox .uni-checkbox-input {
 					margin-right: 0;
 				}
 
@@ -540,12 +540,12 @@
 					z-index: 9;
 				}
 
-				/deep/checkbox .uni-checkbox-input {
+				::v-deep checkbox .uni-checkbox-input {
 					margin-right: 0;
 					background-color: rgba(0, 0, 0, 0.16);
 				}
 
-				/deep/checkbox .wx-checkbox-input {
+				::v-deep checkbox .wx-checkbox-input {
 					background-color: rgba(0, 0, 0, 0.16);
 				}
 

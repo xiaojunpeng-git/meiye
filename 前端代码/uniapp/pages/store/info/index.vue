@@ -420,12 +420,12 @@
 		}
 	}
 
-	/deep/.tui-list-cell {
+	::v-deep .tui-list-cell {
 		padding: 40rpx 0 !important;
 
 	}
 
-	/deep/.open {
+	::v-deep .open {
 		top: 50% !important;
 		right: 20rpx !important;
 		transform: translateY(-50%);
@@ -433,7 +433,7 @@
 		color: #666666;
 	}
 
-	/deep/.tui-icon-arrow {
+	::v-deep .tui-icon-arrow {
 		right: 0 !important;
 		margin-top: -5px !important;
 	}
@@ -442,11 +442,11 @@
 		padding: 8rpx 0 40rpx;
 	}
 
-	/deep/.tui-collapse {
+	::v-deep .tui-collapse {
 		border-bottom: 2rpx solid #F8F8F8;
 	}
 
-	/deep/.tui-list-cell::after {
+	::v-deep .tui-list-cell::after {
 		display: none;
 	}
 </style>

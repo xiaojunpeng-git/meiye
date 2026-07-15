@@ -873,7 +873,7 @@
 <style scoped lang="scss">
 	.loadingicon{
 		height: 100rpx;
-		height: calc(100rpx + constant(safe-area-inset-bottom);
+		height: calc(100rpx + constant(safe-area-inset-bottom));
 		height: calc(100rpx + env(safe-area-inset-bottom));
 		margin-top: 0;
 	}

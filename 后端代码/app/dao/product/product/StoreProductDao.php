@@ -206,6 +206,12 @@ class StoreProductDao extends BaseDao
                     case 94://出入库选择商品：仅参与库存管理的商品（禁止用 product_type 硬编码）
                         $query->where('is_inventory', 1);
                         break;
+                    case 95://院装耗材选择：参与库存且已开启院装耗材的普通商品
+                        $query->where('is_inventory', 1)->where('salon_stock_enabled', 1)->where('product_type', 0);
+                        break;
+                    case 96://院装配方项目选择：仅项目（预约）商品
+                        $query->where('product_type', 6);
+                        break;
                     default:
                         $query->where('product_type', 0);
                         break;

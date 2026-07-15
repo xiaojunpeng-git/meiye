@@ -450,11 +450,11 @@ export default{
 		height: calc(140rpx + constant(safe-area-inset-bottom)); ///兼容 IOS<11.2/
 		height: calc(140rpx + env(safe-area-inset-bottom)); ///兼容 IOS>11.2/
 	}
-	/deep/.tui-modal-btn-cancel{
+	::v-deep .tui-modal-btn-cancel{
 		border:1px solid #2A7EFB;
 		color: #2A7EFB;
 	}
-	/deep/.tui-modal-btn-confirm{
+	::v-deep .tui-modal-btn-confirm{
 		background-color: #2A7EFB;
 	}
 	.project-img-placeholder {

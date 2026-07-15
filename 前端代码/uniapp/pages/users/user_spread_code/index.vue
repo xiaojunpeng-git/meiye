@@ -489,12 +489,12 @@
 		border-radius: 15rpx;
 	}
 
-	.distribution-posters /deep/.active {
+	.distribution-posters ::v-deep .active {
 		transform: none;
 		transition: all 0.2s ease-in 0s;
 	}
 
-	.distribution-posters /deep/ .quiet {
+	.distribution-posters ::v-deep  .quiet {
 		transform: scale(0.89);
 		transition: all 0.2s ease-in 0s;
 	}

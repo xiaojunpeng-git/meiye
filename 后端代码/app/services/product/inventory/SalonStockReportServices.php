@@ -95,7 +95,7 @@ class SalonStockReportServices extends BaseServices
                 . ', (' . $takenExpr . ' - ' . $returnedExpr . ') AS net_qty'
             )
             ->group('d.consumable_product_id, d.consumable_unique, d.stock_unit')
-            ->orderRaw('net_qty DESC')
+            ->orderRaw('net_qty DESC, d.consumable_product_id ASC, d.consumable_unique ASC')
             ->when($page != 0 && $limit != 0, function ($query) use ($page, $limit) {
                 $query->page($page, $limit);
             })

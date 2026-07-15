@@ -342,7 +342,7 @@
 				flex: 1;
 				margin-left: 20rpx;
 			}
-			/deep/.placeholders{
+			::v-deep .placeholders{
 				color: rgba(255,255,255,0.6);
 				font-size: 24rpx;
 			}

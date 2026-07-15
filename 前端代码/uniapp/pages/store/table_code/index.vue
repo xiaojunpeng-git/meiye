@@ -252,27 +252,27 @@
 	}
 </script>
 <style scoped lang="scss">
-	/deep/.scroll-list {
+	::v-deep .scroll-list {
 		margin-bottom: 60rpx !important;
 	}
 
-	/deep/.goodCate .uni-badge-left-margin .uni-badge--error {
+	::v-deep .goodCate .uni-badge-left-margin .uni-badge--error {
 		background-color: #fff !important;
 		color: var(--view-theme);
 		border-color: var(--view-theme);
 		z-index: 8;
 	}
 
-	/deep/.goodCate .footer .cartIcon .uni-badge-left-margin .uni-badge--error {
+	::v-deep .goodCate .footer .cartIcon .uni-badge-left-margin .uni-badge--error {
 		right: 0 !important;
 		top: 10px !important;
 	}
 
-	/deep/.mask {
+	::v-deep .mask {
 		z-index: 102;
 	}
 
-	/deep/.good-cate {
+	::v-deep .good-cate {
 		padding: 80rpx;
 	}
 
@@ -345,7 +345,7 @@
 		}
 	}
 
-	/deep/.cartList {
+	::v-deep .cartList {
 		z-index: 150 !important;
 	}
 
@@ -400,7 +400,7 @@
 			}
 		}
 
-		/deep/.input-placeholder {
+		::v-deep .input-placeholder {
 			font-weight: 500;
 			font-size: 28rpx;
 			color: #CCCCCC;

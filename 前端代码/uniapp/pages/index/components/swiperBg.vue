@@ -305,27 +305,27 @@
 
 			// 圆形指示点
 			&.circular {
-				/deep/.uni-swiper-dot {
+				::v-deep .uni-swiper-dot {
 					width: 10rpx !important;
 					height: 10rpx !important;
 					background: rgba(0, 0, 0, .4) !important
 				}
 
-				/deep/.uni-swiper-dot-active {
+				::v-deep .uni-swiper-dot-active {
 					background: #fff !important
 				}
 			}
 
 			// 方形指示点
 			&.square {
-				/deep/.uni-swiper-dot {
+				::v-deep .uni-swiper-dot {
 					width: 20rpx !important;
 					height: 5rpx !important;
 					border-radius: 3rpx;
 					background: rgba(0, 0, 0, .4) !important
 				}
 
-				/deep/.uni-swiper-dot-active {
+				::v-deep .uni-swiper-dot-active {
 					background: #fff !important
 				}
 			}

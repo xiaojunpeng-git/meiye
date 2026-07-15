@@ -330,7 +330,7 @@
 </script>
 
 <style lang="scss" scoped>
-	/deep/ .lucky-wheel .marquee-item {
+	::v-deep  .lucky-wheel .marquee-item {
 		text-align: center;
 		font-size: 20rpx !important;
 		color: #E93323 !important;
@@ -341,7 +341,7 @@
 		}
 	}
 
-	/deep/ .lottery .marquee-item {
+	::v-deep  .lottery .marquee-item {
 		letter-spacing: 2px;
 	}
 
@@ -359,7 +359,7 @@
 		width: 100%;
 	}
 
-	/deep/ .safe-area-inset-bottom {
+	::v-deep  .safe-area-inset-bottom {
 		height: 0;
 		height: constant(safe-area-inset-bottom);
 		height: env(safe-area-inset-bottom);

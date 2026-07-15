@@ -648,7 +648,7 @@
 						position: absolute;
 						top: -10rpx;
 						right: -12rpx;
-						/deep/ .uni-badge--error {
+						::v-deep  .uni-badge--error {
 							background-color: #E93323 !important;
 						}
 						.uni-badge {

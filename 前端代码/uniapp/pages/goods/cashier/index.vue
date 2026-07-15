@@ -459,7 +459,7 @@
 </script>
 
 <style lang="scss">
-/deep/ .styleAll{
+::v-deep  .styleAll{
 	padding: 0 6rpx;
 	border: 1rpx solid #DDDDDD;
 	border-radius: 8rpx;

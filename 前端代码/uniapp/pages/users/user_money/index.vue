@@ -247,7 +247,7 @@
 </script>
 
 <style scoped lang="scss">
-	/deep/.recommend{
+	::v-deep .recommend{
 		padding: 40rpx 20rpx 0 20rpx;
 	}
 	.my-account{

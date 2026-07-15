@@ -215,30 +215,30 @@
 		}
 	}
 	// #ifdef APP-PLUS || H5
-	.newsList /deep/uni-swiper .uni-swiper-dots-horizontal{
+	.newsList ::v-deep uni-swiper .uni-swiper-dots-horizontal{
 		bottom: 50rpx;
 	}
-	.newsList /deep/uni-swiper .uni-swiper-dots-horizontal .uni-swiper-dot{
+	.newsList ::v-deep uni-swiper .uni-swiper-dots-horizontal .uni-swiper-dot{
 		width: 10rpx;
 		height: 10rpx;
 		border-radius: 50%;
 	}
-	.newsList /deep/uni-swiper .uni-swiper-dots-horizontal .uni-swiper-dot-active{
+	.newsList ::v-deep uni-swiper .uni-swiper-dots-horizontal .uni-swiper-dot-active{
 		width: 18rpx;
 		height: 10rpx;
 		border-radius: 6rpx;
 		background-color: #fff;
 	}
 
-	.newsList .swiper /deep/.uni-swiper-dot ~ .uni-swiper-dot {
+	.newsList .swiper ::v-deep .uni-swiper-dot ~ .uni-swiper-dot {
 		margin-left: 5rpx;
 	}
 	// #endif
 	// #ifdef MP
-	.newsList /deep/wx-swiper .wx-swiper-dots-horizontal{
+	.newsList ::v-deep wx-swiper .wx-swiper-dots-horizontal{
 		bottom: 50rpx;
 	}
-	.newsList .swiper /deep/.wx-swiper-dot~.wx-swiper-dot {
+	.newsList .swiper ::v-deep .wx-swiper-dot~.wx-swiper-dot {
 		width: 10rpx;
 		height: 10rpx;
 		border-radius: 50%;

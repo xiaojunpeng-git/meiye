@@ -40,8 +40,10 @@ class Writeoff implements ListenerInterface
         $staff_id = $data['staff_id'] ?? 0;
         $oid = (int)$orderInfo['id'];
 
-        //核销记录
-        OrderWriteoffJob::dispatch([$oid, $cartIds, $data, $orderInfo]);
+        //核销记录：项目单(salon_sync=1)已在核销主事务内同步写入核销记录+院装扣料，此处不再异步派发以免重复
+        if (empty($data['salon_sync'])) {
+            OrderWriteoffJob::dispatch([$oid, $cartIds, $data, $orderInfo]);
+        }
 
         if ($data['status'] == 5) {
             $message = [];

@@ -270,7 +270,7 @@
 				background: linear-gradient(270deg, rgba(255, 255, 255, 0) 0%, rgba(255, 255, 255, 0.85) 49%, rgba(255, 255, 255, 0) 100%);
 			}
 
-			/deep/.marquee-item {
+			::v-deep .marquee-item {
 				font-size: 20rpx;
 				color: #E93323;
 

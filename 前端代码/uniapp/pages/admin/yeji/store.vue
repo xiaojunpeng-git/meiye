@@ -536,7 +536,7 @@ export default {
   text-align: right;
 }
   .footer{
-	  height: calc(30rpx+ constant(safe-area-inset-bottom)); ///兼容 IOS<11.2/
+	  height: calc(30rpx + constant(safe-area-inset-bottom)); ///兼容 IOS<11.2/
 	  height: calc(30rpx + env(safe-area-inset-bottom)); ///兼容 IOS>11.2/
   }
   .charts{

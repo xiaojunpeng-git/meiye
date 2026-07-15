@@ -290,7 +290,7 @@
 		font-size: 18rpx;
 		color: #e93323;
 	}
-	/deep/ .empty-box{
+	::v-deep  .empty-box{
 		width: 100%;
 		height: 280px;
 	}

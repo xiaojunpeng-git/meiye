@@ -1705,14 +1705,14 @@
 </script>
 
 <style lang="scss">
-	/deep/uni-video {
+	::v-deep uni-video {
 		width: 100% !important;
 	}
 
-	/deep/video {
+	::v-deep video {
 		width: 100% !important;
 	}
-	/deep/ .styleAll{
+	::v-deep  .styleAll{
 		display: inline-block;
 		min-width: 34rpx;
 		height: 36rpx;
@@ -1724,17 +1724,17 @@
 		padding: 0 2rpx;
 	}
 	.pink-cell{
-		/deep/ .styleAll{
+		::v-deep  .styleAll{
 			font-size: 26rpx;
 			font-family: unset;
 			height: unset;
 			line-height: unset;
 		}
-		/deep/ .timeTxt{
+		::v-deep  .timeTxt{
 			margin: 0;
 		}
 	}
-	.seckill-card /deep/ .timeTxt{
+	.seckill-card ::v-deep  .timeTxt{
 		padding: 0 6rpx;
 	}
 	.z-99{

@@ -39,6 +39,7 @@ use app\services\user\UserCardHolderServices;
 use app\services\yeji\SatffYejiServices;
 use mohe\traits\OptionTrait;
 use think\exception\ValidateException;
+use think\facade\Db;
 
 /**
  * 预约单
@@ -3239,6 +3240,24 @@ class StoreReservationOrderServices extends BaseServices
      * @return void
      */
     protected function consumeReservationOrder(int $id, array $reservationOrderInfo, array $update = [], array $appendData = []): void
+    {
+        // 外层共同事务 + 锁预约单：核销记录、院装耗材扣料、预约完成、原订单/权益状态整体提交或回滚；
+        // 任一步失败（含院装耗材不足/缺副本抛错）全部回滚，且并发/重试消耗被行锁串行化。
+        $this->transaction(function () use ($id, $reservationOrderInfo, $update, $appendData) {
+            $locked = Db::name('store_reservation_order')->where('id', $id)->lock(true)->find();
+            if (!$locked) {
+                throw new ValidateException('预约单不存在');
+            }
+            // 以锁定后的最新状态为准，避免并发读到旧状态重复消耗
+            $reservationOrderInfo = array_merge($reservationOrderInfo, $locked);
+            $this->doConsumeReservationOrder($id, $reservationOrderInfo, $update, $appendData);
+        });
+    }
+
+    /**
+     * 预约单消耗实体逻辑（须在 consumeReservationOrder 的外层事务 + 行锁内执行）
+     */
+    protected function doConsumeReservationOrder(int $id, array $reservationOrderInfo, array $update = [], array $appendData = []): void
     {
         if ((int)($reservationOrderInfo['status'] ?? 0) === 2) {
             return;

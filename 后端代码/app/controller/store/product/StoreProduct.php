@@ -310,6 +310,9 @@ class StoreProduct extends AuthController
             ['card_cover', 1],//卡片封面 1:图片，2:颜色
             ['card_cover_image', ''],//卡片封面图片
             ['card_cover_color', ''],//卡片封面颜色
+            ['is_inventory', 1],//是否参与库存管理（仅产品类型，服务层按 product_type 强制）
+            ['allow_negative_stock', 1],//是否允许良品负库存（仅产品类型）
+            ['salon_stock_enabled', 0],//是否可作为院装耗材（仅产品类型且参与库存）
         ]);
         //门店商品编辑 需要再次审核
         $storeId = (int)$this->storeId;

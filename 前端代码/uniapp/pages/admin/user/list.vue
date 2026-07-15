@@ -370,14 +370,14 @@
   background-color: $primary-admin;
   color: #fff;
 }
-	/deep/checkbox .uni-checkbox-input.uni-checkbox-input-checked {
+	::v-deep checkbox .uni-checkbox-input.uni-checkbox-input-checked {
 		border-color: #2A7EFB !important;
 		background-color: #2A7EFB !important;
 	}
-	/deep/checkbox:not([disabled]) .uni-checkbox-input:hover {
+	::v-deep checkbox:not([disabled]) .uni-checkbox-input:hover {
 		border-color: #d1d1d1 !important;
 	}
-	/deep/.empty-page{
+	::v-deep .empty-page{
 		margin-top: 20rpx;
 	}
 	.accountTitle{
@@ -446,11 +446,11 @@
 		.list{
 			padding-bottom: 20rpx;
 			margin-top: 32rpx;
-			/deep/uni-checkbox .uni-checkbox-input{
+			::v-deep uni-checkbox .uni-checkbox-input{
 				background-color: #f5f5f5;
 				margin: 0 20rpx 20rpx 0;
 			}
-			/deep/wx-checkbox .wx-checkbox-input{
+			::v-deep wx-checkbox .wx-checkbox-input{
 				background-color: #f5f5f5;
 				margin: 0 20rpx 20rpx 0;
 			}
@@ -587,7 +587,7 @@
 			width: 100%;
 			left: 0;
 
-			/deep/uni-checkbox .uni-checkbox-input{
+			::v-deep uni-checkbox .uni-checkbox-input{
 				margin-bottom: 6rpx;
 			}
 

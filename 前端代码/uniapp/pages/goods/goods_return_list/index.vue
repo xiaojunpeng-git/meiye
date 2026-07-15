@@ -134,11 +134,11 @@
 </script>
 
 <style scoped lang="scss">
-	/deep/.splitOrder uni-checkbox .uni-checkbox-input.uni-checkbox-input-checked{
+	::v-deep .splitOrder uni-checkbox .uni-checkbox-input.uni-checkbox-input-checked{
 		border: 1px solid var(--view-theme)!important;
 		background-color: var(--view-theme)!important;
 	}
-	/deep/.splitOrder checkbox .wx-checkbox-input.wx-checkbox-input-checked{
+	::v-deep .splitOrder checkbox .wx-checkbox-input.wx-checkbox-input-checked{
 		border: 1px solid var(--view-theme)!important;
 		background-color: var(--view-theme)!important;
 	}

@@ -294,15 +294,15 @@
 		background: #F5F5F5;
 	}
 
-	/deep/.uni-badge--error {
+	::v-deep .uni-badge--error {
 		background-color: var(--view-theme) !important;
 	}
 
-	/deep/.scroll-list {
+	::v-deep .scroll-list {
 		margin-bottom: 60rpx !important;
 	}
 
-	/deep/.footer {
+	::v-deep .footer {
 		position: fixed;
 		right: 20rpx;
 		left: 20rpx;
@@ -383,37 +383,37 @@
 		}
 	}
 
-	/deep/.goodCate .uni-badge-left-margin .uni-badge--error {
+	::v-deep .goodCate .uni-badge-left-margin .uni-badge--error {
 		background-color: #fff !important;
 		color: var(--view-theme);
 		border-color: var(--view-theme);
 		z-index: 8;
 	}
 
-	/deep/.goodCate .footer .cartIcon .uni-badge-left-margin .uni-badge--error {
+	::v-deep .goodCate .footer .cartIcon .uni-badge-left-margin .uni-badge--error {
 		right: 0 !important;
 		top: 10px !important;
 	}
 
-	/deep/.one .uni-badge-left-margin .uni-badge--error {
+	::v-deep .one .uni-badge-left-margin .uni-badge--error {
 		background-color: var(--view-theme) !important;
 		color: #fff;
 		border-color: #fff;
 		z-index: 8;
 	}
 
-	/deep/.mask {
+	::v-deep .mask {
 		z-index: 99;
 	}
 
-	/deep/.good-cate {
+	::v-deep .good-cate {
 		padding: 80rpx;
 	}
 
-	/deep/.address-window {
+	::v-deep .address-window {
 		/* #ifdef H5 */
 		bottom: 94rpx !important;
-		bottom: calc(94rpx+ constant(safe-area-inset-bottom)) !important; ///兼容 IOS<11.2/
+		bottom: calc(94rpx + constant(safe-area-inset-bottom)) !important; ///兼容 IOS<11.2/
 		bottom: calc(94rpx + env(safe-area-inset-bottom)) !important; ///兼容 IOS>11.2/
 		/* #endif */
 		/* #ifndef H5 */
@@ -429,11 +429,11 @@
 		}
 	}
 
-	/deep/.dialog_nav::before {
+	::v-deep .dialog_nav::before {
 		margin: 0;
 	}
 
-	/deep/.dialog_nav {
+	::v-deep .dialog_nav {
 		&.dialogIndex {
 			&::before {
 				left: -172rpx !important;
@@ -441,7 +441,7 @@
 		}
 	}
 
-	/deep/.menu_box {
+	::v-deep .menu_box {
 		width: 40rpx;
 		height: 40rpx;
 		margin-right: 20rpx;
@@ -452,12 +452,12 @@
 		}
 	}
 
-	/deep/.tui-drawer-container_right {
+	::v-deep .tui-drawer-container_right {
 		left: 80rpx !important;
 		border-radius: 50rpx 0 0 50rpx;
 	}
 
-	/deep/.tui-header {
+	::v-deep .tui-header {
 		.tui-list-cell {
 			padding: 24rpx 10rpx !important;
 			font-size: 24rpx !important;
@@ -475,7 +475,7 @@
 	}
 
 	.brand-box {
-		/deep/.tui-header {
+		::v-deep .tui-header {
 			.tui-list-cell {
 				padding: 24rpx 0 !important;
 				font-weight: 500;
@@ -484,7 +484,7 @@
 		}
 	}
 
-	/deep/.input-box.fixed {
+	::v-deep .input-box.fixed {
 		background: #FFFFFF;
 		top: 0;
 		right: 0;

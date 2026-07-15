@@ -397,7 +397,7 @@
 		position: fixed;
 		left:0;
 		bottom: 0;
-		padding-bottom: calc(0rpx+ constant(safe-area-inset-bottom)); ///兼容 IOS<11.2/
+		padding-bottom: calc(0rpx + constant(safe-area-inset-bottom)); ///兼容 IOS<11.2/
 		padding-bottom: calc(0rpx + env(safe-area-inset-bottom)); ///兼容 IOS>11.2/
 	}
 
@@ -461,7 +461,7 @@
 		align-self: flex-start;
 	}
 
-	.list /deep/ .uni-input-input {
+	.list ::v-deep  .uni-input-input {
 		text-align: right;
 	}
 </style>

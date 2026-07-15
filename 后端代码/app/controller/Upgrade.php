@@ -2404,7 +2404,15 @@ INSERT INTO `@table` (`id`, `pid`, `type`, `icon`, `menu_name`, `module`, `contr
 (1981, 1526, 4, '', '商品导出', 'admin', '', '', '', '', '[]', 0, 0, 1, 1, '/product/export', '1526', 1, '', 0, 'product-product-export', 0),
 (1982, 1526, 4, '', '商品导入', 'admin', '', '', '', '', '[]', 0, 0, 1, 1, '/product/import', '1526', 1, '', 0, 'product-product-import', 0),
 (1983, 1051, 2, '', '商品批量操作', 'admin', '', '', '', '', '[]', 0, 0, 1, 1, '/product/batch_operate', '1050/1051', 1, '', 0, 'product-product-batch_operate', 0),
-(1984, 1526, 4, '', '商品批量操作', 'admin', '', '', '', '', '[]', 0, 0, 1, 1, '/product/batch_operate', '1526', 1, '', 0, 'product-product-batch_operate', 0)
+(1984, 1526, 4, '', '商品批量操作', 'admin', '', '', '', '', '[]', 0, 0, 1, 1, '/product/batch_operate', '1526', 1, '', 0, 'product-product-batch_operate', 0),
+(1985, 1943, 1, '', '请货管理', 'admin', '', '', '', '', '[]', 10, 1, 0, 1, '/admin/stock/request', '7/1943', 1, '', 0, 'admin-stock-request', 0),
+(1986, 1985, 1, '', '请货单编辑', 'admin', '', '', '', '', '[]', 0, 1, 1, 1, '/admin/stock/request/add', '7/1943/1985', 1, '', 0, 'admin-stock-request-add', 0),
+(1987, 1943, 1, '', '调拨管理', 'admin', '', '', '', '', '[]', 9, 1, 0, 1, '/admin/stock/transfer', '7/1943', 1, '', 0, 'admin-stock-transfer', 0),
+(1988, 1987, 1, '', '调拨单编辑', 'admin', '', '', '', '', '[]', 0, 1, 1, 1, '/admin/stock/transfer/add', '7/1943/1987', 1, '', 0, 'admin-stock-transfer-add', 0),
+(1989, 1954, 2, '', '请货管理', 'admin', '', '', '', '', '[]', 10, 1, 0, 1, '/store/stock/request', '1050/1954', 1, '', 0, 'store-stock-request', 0),
+(1990, 1989, 2, '', '请货单编辑', 'admin', '', '', '', '', '[]', 0, 1, 1, 1, '/store/stock/request/add', '1050/1954/1989', 1, '', 0, 'store-stock-request-add', 0),
+(1991, 1954, 2, '', '调拨管理', 'admin', '', '', '', '', '[]', 9, 1, 0, 1, '/store/stock/transfer', '1050/1954', 1, '', 0, 'store-stock-transfer', 0),
+(1992, 1991, 2, '', '调拨单编辑', 'admin', '', '', '', '', '[]', 0, 1, 1, 1, '/store/stock/transfer/add', '1050/1954/1991', 1, '', 0, 'store-stock-transfer-add', 0)
 SQL
 			],
 		];

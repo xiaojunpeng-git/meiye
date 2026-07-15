@@ -393,7 +393,7 @@ page {
 		}
 	}
 	
-	/deep/uni-scroll-view{
+	::v-deep uni-scroll-view{
 		padding-bottom: 0!important;
 	}
 	.height-add {

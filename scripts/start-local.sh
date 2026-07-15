@@ -1,5 +1,5 @@
 #!/bin/bash
-# 本地启动「美容代码」后端（Colima + Docker + Nginx + Swoole）
+# 本地启动「美容源码」后端（Colima + Docker + Nginx + Swoole）
 set -euo pipefail
 
 export PATH="$HOME/bin:$PATH"
@@ -97,10 +97,44 @@ docker run -d --name mohe-nginx --platform linux/amd64 --network mohe-net \
   -v "$NGINX_CONF:/etc/nginx/conf.d/default.conf:ro" \
   docker.m.daocloud.io/library/nginx:1.25-alpine
 
+# 平台前端开发预览（18081，热更新；仅首次缺依赖时 install，避免每次启动重装）
+ADMIN_SRC="$ROOT/前端代码/admin"
+ADMIN_NM_VOLUME="mohe_admin_src_nm"
+ADMIN_DEV_CMD='if [ ! -x ./node_modules/.bin/vue-cli-service ]; then npm config set registry https://registry.npmmirror.com && npm install --no-audit --no-fund; fi && ./node_modules/.bin/vue-cli-service serve --mode=dev --host 0.0.0.0 --port 8081'
+
+ensure_admin_dev() {
+  if docker ps -a --format '{{.Names}}' | grep -qx mohe-admin-src; then
+    local cmd
+    cmd="$(docker inspect mohe-admin-src --format '{{join .Config.Cmd " "}}' 2>/dev/null || true)"
+    if echo "$cmd" | grep -q 'npm install --no-audit --no-fund --progress=false'; then
+      echo "移除旧版 mohe-admin-src（启动时会重复 npm install）..."
+      docker rm -f mohe-admin-src >/dev/null 2>&1 || true
+    elif docker ps --format '{{.Names}}' | grep -qx mohe-admin-src; then
+      return 0
+    else
+      docker start mohe-admin-src >/dev/null
+      return 0
+    fi
+  fi
+
+  docker volume create "$ADMIN_NM_VOLUME" >/dev/null 2>&1 || true
+  docker run -d --name mohe-admin-src --platform linux/amd64 \
+    -p 18081:8081 \
+    -v "$ADMIN_SRC:/app" \
+    -v "$ADMIN_NM_VOLUME:/app/node_modules" \
+    -w /app \
+    node:14-bullseye \
+    bash -lc "$ADMIN_DEV_CMD"
+}
+
+ensure_admin_dev
+
 echo
-echo "已启动（Nginx + Swoole，挂载：美容代码/后端代码）："
+echo "已启动（Nginx + Swoole，挂载：美容源码/后端代码）："
+echo "  平台开发预览: http://127.0.0.1:18081/admin/login  （改代码用，首次编译约 5-10 分钟）"
+echo "  平台集成预览: http://127.0.0.1:8080/admin/login    （build 产物，上线验证用）"
 echo "  前台 H5:     http://127.0.0.1:8080/"
-echo "  后台登录:    http://127.0.0.1:8080/admin/login"
 echo "  收银台:      http://127.0.0.1:8080/cashier.html"
 echo "  手机同网访问: http://$(ipconfig getifaddr en0 2>/dev/null || echo '你的Mac局域网IP'):8080"
-echo "  查看日志:    docker logs -f mohe-app"
+echo "  开发日志:    docker logs -f mohe-admin-src"
+echo "  后端日志:    docker logs -f mohe-app"
