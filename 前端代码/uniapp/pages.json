@@ -1679,6 +1679,24 @@
 					}
 				},
 				{
+					"path": "organization/store-select",
+					"style": {
+						"navigationBarTitleText": "选择门店",
+						"navigationBarBackgroundColor": "#8B5CF6",
+						"navigationBarTextStyle": "white",
+						// #ifdef H5
+						"navigationStyle": "custom",
+						// #endif
+						"app-plus": {
+							// #ifdef APP-PLUS
+							"titleNView": {
+								"type": "default"
+							}
+							// #endif
+						}
+					}
+				},
+				{
 					"path": "target/select/metric",
 					"style": {
 						"navigationBarTitleText": "选择指标",

@@ -973,7 +973,9 @@ Route::group('api', function () {
 	 * 组织范围解析（手机端实时筛选，单次请求）
 	 */
 	Route::group('organization', function () {
+		Route::get('scope/tree', 'v1.organization.OrganizationScope/tree')->option(['real_name' => '组织门店选择树']);
 		Route::get('scope/resolve', 'v1.organization.OrganizationScope/resolve')->option(['real_name' => '解析门店范围']);
+		Route::post('scope/resolve', 'v1.organization.OrganizationScope/resolve')->option(['real_name' => '解析门店范围(POST)']);
 	})->middleware(AuthTokenMiddleware::class, true);
 
 

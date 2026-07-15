@@ -278,6 +278,15 @@ class OrganizationScopeService extends BaseServices
      * @param mixed $value
      * @return int[]
      */
+    public function parseIdListPublic($value): array
+    {
+        return $this->parseIdList($value);
+    }
+
+    /**
+     * @param mixed $value
+     * @return int[]
+     */
     protected function parseIdList($value): array
     {
         if (is_array($value)) {
@@ -288,6 +297,262 @@ class OrganizationScopeService extends BaseServices
             return [];
         }
         return array_values(array_unique(array_filter(array_map('intval', explode(',', $str)))));
+    }
+
+    /**
+     * 手机端门店选择树（组织 + 门店叶子，按当前用户可管范围裁剪）
+     *
+     * 节点约定：
+     * - node_type=org：组织（含 children）
+     * - node_type=store：门店叶子
+     * - object_type 兼容旧目标树：2=组织/区域，1=门店
+     *
+     * @param int[] $allowedStoreIds 空数组表示无权限
+     */
+    public function buildPickerTree(array $allowedStoreIds): array
+    {
+        $allowedStoreIds = array_values(array_unique(array_filter(array_map('intval', $allowedStoreIds))));
+        if (!$allowedStoreIds) {
+            return [];
+        }
+        $allowedSet = array_flip($allowedStoreIds);
+
+        /** @var \app\dao\store\SystemStoreDao $storeDao */
+        $storeDao = app()->make(\app\dao\store\SystemStoreDao::class);
+        $storeRows = $storeDao->getStoreList(
+            ['id' => $allowedStoreIds, 'is_del' => 0],
+            ['id', 'name', 'phone', 'address'],
+            0,
+            0
+        ) ?: [];
+        $storeMap = [];
+        foreach ($storeRows as $row) {
+            $sid = (int)($row['id'] ?? 0);
+            if ($sid <= 0) {
+                continue;
+            }
+            $storeMap[$sid] = [
+                'id' => $sid,
+                'name' => (string)($row['name'] ?? ('门店' . $sid)),
+                'node_type' => 'store',
+                'object_type' => 1,
+                'label' => '门店',
+                'desc' => trim((string)(($row['phone'] ?? '') . ' ' . ($row['address'] ?? ''))),
+                'phone' => (string)($row['phone'] ?? ''),
+                'address' => (string)($row['address'] ?? ''),
+                'children' => [],
+                'disabled' => false,
+            ];
+        }
+
+        if (!$this->isMigrated()) {
+            return $this->buildLegacyPickerTree($allowedSet, $storeMap);
+        }
+
+        $orgList = $this->orgDao->getList(['is_del' => 0], 'id,pid,name,sort') ?: [];
+        $orgByPid = [];
+        foreach ($orgList as $org) {
+            $pid = (int)($org['pid'] ?? 0);
+            $orgByPid[$pid][] = $org;
+        }
+        foreach ($orgByPid as &$children) {
+            usort($children, function ($a, $b) {
+                $sa = (int)($a['sort'] ?? 0);
+                $sb = (int)($b['sort'] ?? 0);
+                if ($sa === $sb) {
+                    return (int)($a['id'] ?? 0) <=> (int)($b['id'] ?? 0);
+                }
+                return $sa <=> $sb;
+            });
+        }
+        unset($children);
+
+        $directStoresByOrg = [];
+        $bindings = $this->orgStoreDao->getList(['store_id' => $allowedStoreIds], 'org_id,store_id') ?: [];
+        foreach ($bindings as $bind) {
+            $oid = (int)($bind['org_id'] ?? 0);
+            $sid = (int)($bind['store_id'] ?? 0);
+            if ($oid > 0 && isset($storeMap[$sid])) {
+                $directStoresByOrg[$oid][] = $sid;
+            }
+        }
+
+        $usedStoreIds = [];
+        $tree = $this->buildOrgPickerNodes(0, $orgByPid, $directStoresByOrg, $storeMap, $usedStoreIds);
+
+        $orphanIds = array_values(array_filter($allowedStoreIds, function ($sid) use ($usedStoreIds, $storeMap) {
+            return isset($storeMap[$sid]) && !isset($usedStoreIds[$sid]);
+        }));
+        if ($orphanIds) {
+            $orphanChildren = [];
+            foreach ($orphanIds as $sid) {
+                $orphanChildren[] = $storeMap[$sid];
+                $usedStoreIds[$sid] = true;
+            }
+            $tree[] = [
+                'id' => 0,
+                'name' => '未归属组织门店',
+                'node_type' => 'org',
+                'object_type' => 2,
+                'label' => '组织',
+                'desc' => count($orphanChildren) . '家门店',
+                'store_count' => count($orphanChildren),
+                'children' => $orphanChildren,
+                'disabled' => false,
+            ];
+        }
+
+        return $tree;
+    }
+
+    /**
+     * @param array<int, array> $orgByPid
+     * @param array<int, int[]> $directStoresByOrg
+     * @param array<int, array> $storeMap
+     * @param array<int, bool> $usedStoreIds
+     */
+    protected function buildOrgPickerNodes(
+        int $pid,
+        array $orgByPid,
+        array $directStoresByOrg,
+        array $storeMap,
+        array &$usedStoreIds
+    ): array {
+        $nodes = [];
+        foreach ($orgByPid[$pid] ?? [] as $org) {
+            $orgId = (int)($org['id'] ?? 0);
+            if ($orgId <= 0) {
+                continue;
+            }
+            $childOrgs = $this->buildOrgPickerNodes($orgId, $orgByPid, $directStoresByOrg, $storeMap, $usedStoreIds);
+            $storeChildren = [];
+            foreach ($directStoresByOrg[$orgId] ?? [] as $sid) {
+                if (!isset($storeMap[$sid]) || isset($usedStoreIds[$sid])) {
+                    continue;
+                }
+                $storeChildren[] = $storeMap[$sid];
+                $usedStoreIds[$sid] = true;
+            }
+            $children = array_merge($childOrgs, $storeChildren);
+            if (!$children) {
+                continue;
+            }
+            $storeCount = $this->countPickerStoreNodes($children);
+            $nodes[] = [
+                'id' => $orgId,
+                'name' => (string)($org['name'] ?? ''),
+                'node_type' => 'org',
+                'object_type' => 2,
+                'label' => '组织',
+                'desc' => $storeCount . '家门店',
+                'store_count' => $storeCount,
+                'children' => $children,
+                'disabled' => false,
+            ];
+        }
+        return $nodes;
+    }
+
+    /**
+     * 未迁移时回退旧区域架构树
+     * @param array<int, bool> $allowedSet
+     * @param array<int, array> $storeMap
+     */
+    protected function buildLegacyPickerTree(array $allowedSet, array $storeMap): array
+    {
+        /** @var SystemRegionManageServices $manageServices */
+        $manageServices = app()->make(SystemRegionManageServices::class);
+        $usedStoreIds = [];
+        $tree = $this->buildLegacyRegionPickerNodes(0, $manageServices, $allowedSet, $storeMap, $usedStoreIds);
+        $orphanChildren = [];
+        foreach ($storeMap as $sid => $node) {
+            if (!isset($usedStoreIds[$sid])) {
+                $orphanChildren[] = $node;
+            }
+        }
+        if ($orphanChildren) {
+            $tree[] = [
+                'id' => 0,
+                'name' => '管辖门店',
+                'node_type' => 'org',
+                'object_type' => 2,
+                'label' => '组织',
+                'desc' => count($orphanChildren) . '家门店',
+                'store_count' => count($orphanChildren),
+                'children' => $orphanChildren,
+                'disabled' => false,
+            ];
+        }
+        return $tree;
+    }
+
+    /**
+     * @param array<int, bool> $allowedSet
+     * @param array<int, array> $storeMap
+     * @param array<int, bool> $usedStoreIds
+     */
+    protected function buildLegacyRegionPickerNodes(
+        int $pid,
+        SystemRegionManageServices $manageServices,
+        array $allowedSet,
+        array $storeMap,
+        array &$usedStoreIds
+    ): array {
+        $nodes = [];
+        foreach ($manageServices->getChildrenList($pid) as $regionRow) {
+            $regionId = (int)($regionRow['id'] ?? 0);
+            if ($regionId <= 0) {
+                continue;
+            }
+            $childOrgs = $this->buildLegacyRegionPickerNodes(
+                $regionId,
+                $manageServices,
+                $allowedSet,
+                $storeMap,
+                $usedStoreIds
+            );
+            $directIds = $manageServices->getStoreIdsByManageRegion($regionId, false) ?: [];
+            $storeChildren = [];
+            foreach ($directIds as $sid) {
+                $sid = (int)$sid;
+                if (!isset($allowedSet[$sid]) || !isset($storeMap[$sid]) || isset($usedStoreIds[$sid])) {
+                    continue;
+                }
+                $storeChildren[] = $storeMap[$sid];
+                $usedStoreIds[$sid] = true;
+            }
+            $children = array_merge($childOrgs, $storeChildren);
+            if (!$children) {
+                continue;
+            }
+            $storeCount = $this->countPickerStoreNodes($children);
+            $nodes[] = [
+                'id' => $regionId,
+                'name' => (string)($regionRow['name'] ?? ''),
+                'node_type' => 'org',
+                'object_type' => 2,
+                'label' => '组织',
+                'desc' => $storeCount . '家门店',
+                'store_count' => $storeCount,
+                'legacy_manage_region_id' => $regionId,
+                'children' => $children,
+                'disabled' => false,
+            ];
+        }
+        return $nodes;
+    }
+
+    protected function countPickerStoreNodes(array $nodes): int
+    {
+        $count = 0;
+        foreach ($nodes as $node) {
+            if (($node['node_type'] ?? '') === 'store' || (int)($node['object_type'] ?? 0) === 1) {
+                $count++;
+                continue;
+            }
+            $count += $this->countPickerStoreNodes($node['children'] ?? []);
+        }
+        return $count;
     }
 
     /**
