@@ -144,5 +144,14 @@ export default {
 			},
 			component: () => import('@/pages/setting/changelog/index')
 		},
+		{
+			path: 'training/document',
+			name: `${pre}trainingDocument`,
+			meta: {
+				title: '培训资料',
+				auth: ['store-set-training-document']
+			},
+			component: () => import('@/pages/setting/trainingDocument/index')
+		},
 	]
 };

@@ -31,7 +31,7 @@ class MerchantCustomerMetricServices extends BaseServices
      *   source: string,
      *   formula: string,
      *   time_field: string,
-     *   detail_api: null,
+     *   detail_api: string|null,
      *   detail_developing: bool,
      *   tooltip_api: string
      * }
@@ -70,6 +70,9 @@ class MerchantCustomerMetricServices extends BaseServices
                 ->count('DISTINCT uid');
             $out['number'] = $n;
             $out['developing'] = false;
+            $out['detail_developing'] = false;
+            // 明细：商家客户页按 store_user.add_time 日期窗下钻（前端带 start_date/end_date）
+            $out['detail_api'] = '/pages/merchant/customer/index';
             $out['note'] = '口径 A：store_user.add_time + COUNT(DISTINCT uid)，范围=scope_store_ids';
             return $out;
         } catch (\Throwable $e) {

@@ -402,7 +402,23 @@ export default {
 			}
 			if (m && m.detail_developing) {
 				uni.showToast({ title: '指标明细开发中', icon: 'none' });
+				return;
 			}
+			const code = m.metric_code || m.code || '';
+			const detail = String(m.detail_api || '');
+			if (code === 'new_customer' || detail.indexOf('/pages/merchant/customer') === 0) {
+				const title = encodeURIComponent(m.title || '新增客户');
+				const q = [
+					'tab=focus',
+					'segment=new_customer',
+					`start_date=${this.dateFilter.start_date || ''}`,
+					`end_date=${this.dateFilter.end_date || ''}`,
+					`title=${title}`,
+				].join('&');
+				uni.navigateTo({ url: `/pages/merchant/customer/index?${q}` });
+				return;
+			}
+			uni.showToast({ title: '指标明细开发中', icon: 'none' });
 		},
 		async onTooltip(m) {
 			if (!m || !m.tooltip_api) return;

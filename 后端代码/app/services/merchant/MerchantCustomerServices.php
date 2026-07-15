@@ -328,6 +328,7 @@ class MerchantCustomerServices extends BaseServices
 
         $keyword = trim((string)($filter['keyword'] ?? $filter['nickname'] ?? ''));
         $birthdayType = (int)($filter['birthday_type'] ?? 0);
+        $segment = trim((string)($filter['segment'] ?? ''));
         $where = [
             'is_filter_del' => 1,
             'nickname' => $keyword,
@@ -336,6 +337,23 @@ class MerchantCustomerServices extends BaseServices
         ];
         if ($birthdayType > 0) {
             $where['birthday_type'] = $birthdayType;
+        }
+        // 新增客户列表：按 store_user.add_time（与口径 A 一致）
+        // - new_month：自然月至今
+        // - new_customer：须带 start_date/end_date（数仓下钻）
+        if ($segment === 'new_month') {
+            $where['store_user_add_time'] = [strtotime(date('Y-m-01 00:00:00')), time()];
+        } elseif ($segment === 'new_customer') {
+            $startDate = trim((string)($filter['start_date'] ?? ''));
+            $endDate = trim((string)($filter['end_date'] ?? ''));
+            $startTs = $startDate !== '' ? strtotime($startDate . ' 00:00:00') : 0;
+            $endTs = $endDate !== '' ? strtotime($endDate . ' 23:59:59') : 0;
+            if ($startTs <= 0 || $endTs <= 0 || $endTs < $startTs) {
+                throw new \think\exception\ValidateException('请提供有效的新增客户时间范围');
+            }
+            $where['store_user_add_time'] = [$startTs, $endTs];
+        } elseif ($segment !== '') {
+            throw new \think\exception\ValidateException('该客群列表筛选尚未开放');
         }
 
         if ((string)($filter['field_key'] ?? '') === 'mine') {

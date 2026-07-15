@@ -153,6 +153,9 @@ class MerchantBiz
             ['nickname', ''],
             ['birthday_type', 0],
             ['field_key', ''],
+            ['segment', ''],
+            ['start_date', ''],
+            ['end_date', ''],
         ]);
         /** @var MerchantCustomerServices $services */
         $services = app()->make(MerchantCustomerServices::class);

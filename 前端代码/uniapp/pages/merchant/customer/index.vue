@@ -74,15 +74,15 @@
 		<!-- 我的客户 / 全部客户 -->
 		<template v-else>
 			<view class="summary" v-if="tab === 'mine' && mineSummary">
-				<view class="summary__item">
+				<view class="summary__item" @click="onMineFilter('all')">
 					<view class="summary__val">{{ formatNum(mineSummary.total) }}</view>
 					<view class="summary__label">客户总数</view>
 				</view>
-				<view class="summary__item">
+				<view class="summary__item" @click="onMineFilter('new_month')">
 					<view class="summary__val">{{ formatMineNew(mineSummary) }}</view>
 					<view class="summary__label">本月新增</view>
 				</view>
-				<view class="summary__item">
+				<view class="summary__item" @click="onMineFilter('birthday_today')">
 					<view class="summary__val">{{ formatNum(mineSummary.birthday_today) }}</view>
 					<view class="summary__label">今日生日</view>
 				</view>
@@ -164,6 +164,10 @@ export default {
 			focusMode: 'segments',
 			focusListTitle: '',
 			birthdayType: 0,
+			listSegment: '',
+			listStartDate: '',
+			listEndDate: '',
+			pendingDrill: null,
 			segments: [],
 			segLoading: false,
 			mineSummary: null,
@@ -198,6 +202,12 @@ export default {
 			this.pendingAdd = false;
 			this.openCreate();
 		}
+		if (this.pendingDrill) {
+			const d = this.pendingDrill;
+			this.pendingDrill = null;
+			this.openFocusList(d.title || '客户列表', d);
+			return;
+		}
 		this.refreshCurrent();
 	},
 	onLoad(opt) {
@@ -206,6 +216,20 @@ export default {
 		}
 		if (opt && opt.tab) {
 			this.tab = opt.tab;
+		}
+		if (opt && (opt.segment === 'new_month' || opt.segment === 'new_customer' || opt.birthday_type)) {
+			this.pendingDrill = {
+				title: opt.title ? decodeURIComponent(String(opt.title)) : '',
+				segment: opt.segment || '',
+				birthday_type: Number(opt.birthday_type || 0),
+				start_date: opt.start_date || '',
+				end_date: opt.end_date || '',
+			};
+			if (!this.pendingDrill.title) {
+				if (opt.segment === 'new_month') this.pendingDrill.title = '本月新增';
+				else if (opt.segment === 'new_customer') this.pendingDrill.title = '新增客户';
+				else if (Number(opt.birthday_type) === 1) this.pendingDrill.title = '今日生日';
+			}
 		}
 	},
 	methods: {
@@ -243,6 +267,9 @@ export default {
 			this.tab = key;
 			this.focusMode = 'segments';
 			this.birthdayType = 0;
+			this.listSegment = '';
+			this.listStartDate = '';
+			this.listEndDate = '';
 			this.refreshCurrent();
 		},
 		refreshCurrent() {
@@ -283,6 +310,39 @@ export default {
 				this.mineSummary = null;
 			}
 		},
+		onMineFilter(type) {
+			if (type === 'all') {
+				this.tab = 'all';
+				this.focusMode = 'segments';
+				this.birthdayType = 0;
+				this.listSegment = '';
+				this.listStartDate = '';
+				this.listEndDate = '';
+				this.refreshCurrent();
+				return;
+			}
+			if (type === 'new_month') {
+				if (this.mineSummary && this.mineSummary.new_month_developing) {
+					uni.showToast({ title: '本月新增口径开发中', icon: 'none' });
+					return;
+				}
+				this.openFocusList('本月新增', { segment: 'new_month' });
+				return;
+			}
+			if (type === 'birthday_today') {
+				this.openFocusList('今日生日', { birthday_type: 1 });
+			}
+		},
+		openFocusList(title, filter) {
+			this.tab = 'focus';
+			this.focusMode = 'list';
+			this.focusListTitle = title || '客户列表';
+			this.birthdayType = Number((filter && filter.birthday_type) || 0);
+			this.listSegment = String((filter && filter.segment) || '');
+			this.listStartDate = String((filter && filter.start_date) || '');
+			this.listEndDate = String((filter && filter.end_date) || '');
+			this.reload();
+		},
 		onSegment(s) {
 			if (!s) return;
 			if (s.developing || s.count === null || s.count === undefined) {
@@ -299,17 +359,11 @@ export default {
 			}
 			const bt = s.filter && s.filter.birthday_type;
 			if (bt) {
-				this.focusMode = 'list';
-				this.focusListTitle = s.name || '客户列表';
-				this.birthdayType = Number(bt) || 0;
-				this.reload();
+				this.openFocusList(s.name || '客户列表', { birthday_type: Number(bt) || 0 });
 				return;
 			}
-			if (s.key === 'new_month') {
-				uni.showToast({
-					title: `本月新增 ${s.count} 人（列表筛选开发中）`,
-					icon: 'none',
-				});
+			if (s.key === 'new_month' || (s.filter && s.filter.segment === 'new_month')) {
+				this.openFocusList(s.name || '本月新增', { segment: 'new_month' });
 				return;
 			}
 			uni.showToast({ title: s.action || '请到全部客户查看', icon: 'none' });
@@ -317,6 +371,9 @@ export default {
 		backToSegments() {
 			this.focusMode = 'segments';
 			this.birthdayType = 0;
+			this.listSegment = '';
+			this.listStartDate = '';
+			this.listEndDate = '';
 			this.userLists = [];
 			this.loadSegments();
 		},
@@ -334,11 +391,15 @@ export default {
 		fetchList() {
 			if (this.loading || this.loadend) return;
 			this.loading = true;
+			const inFocusList = this.tab === 'focus' && this.focusMode === 'list';
 			const data = {
 				page: this.page,
 				limit: this.limit,
 				keyword: this.keyword || '',
-				birthday_type: this.tab === 'focus' && this.focusMode === 'list' ? this.birthdayType : 0,
+				birthday_type: inFocusList ? this.birthdayType : 0,
+				segment: inFocusList ? (this.listSegment || '') : '',
+				start_date: inFocusList ? (this.listStartDate || '') : '',
+				end_date: inFocusList ? (this.listEndDate || '') : '',
 				...this.contextParams(),
 			};
 			if (this.tab === 'mine') {

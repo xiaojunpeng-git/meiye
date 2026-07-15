@@ -10,7 +10,7 @@
 						<text v-if="canSwitchContext" class="iconfont icon-ic_downarrow identity__arrow"></text>
 					</view>
 				</view>
-				<view class="identity__msg" @click.stop="developing">
+				<view class="identity__msg" @click.stop="goUrl('/pages/users/message_center/index')">
 					<text class="iconfont icon-ic_message"></text>
 				</view>
 			</view>

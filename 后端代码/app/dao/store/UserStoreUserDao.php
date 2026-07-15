@@ -162,6 +162,14 @@ class UserStoreUserDao extends BaseDao
         } elseif (isset($where['store_id']) && $where['store_id'] !== '') {
             $model = $model->where($storeUserAlias . 'store_id', $where['store_id']);
         }
+        // 门店客户归属时间（store_user.add_time，与新增客户口径一致；禁止误用 u.add_time）
+        if (!empty($where['store_user_add_time']) && is_array($where['store_user_add_time']) && count($where['store_user_add_time']) >= 2) {
+            $suStart = (int)$where['store_user_add_time'][0];
+            $suEnd = (int)$where['store_user_add_time'][1];
+            if ($suStart > 0 && $suEnd >= $suStart) {
+                $model = $model->whereBetween($storeUserAlias . 'add_time', [$suStart, $suEnd]);
+            }
+        }
         // 归属店员（我的客户）
         if (isset($where['salesman_id']) && (int)$where['salesman_id'] > 0) {
             $model = $model->where($userAlias . 'salesman_id', (int)$where['salesman_id']);
