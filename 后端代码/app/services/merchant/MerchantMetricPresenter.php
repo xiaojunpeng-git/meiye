@@ -59,24 +59,26 @@ class MerchantMetricPresenter extends BaseServices
         /** @var MetricDictionaryServices $dict */
         $dict = app()->make(MetricDictionaryServices::class);
         $defs = [
-            ['metric_code' => 'staff_sales_yeji', 'title' => '销售业绩', 'key' => 'moneyYeji'],
-            ['metric_code' => 'staff_labor_yeji', 'title' => '劳动业绩', 'key' => 'optionYeji'],
-            ['metric_code' => 'staff_service_num', 'title' => '客数', 'key' => 'service_num'],
-            ['metric_code' => 'staff_designated_num', 'title' => '指定客', 'key' => 'service_zd'],
-            ['metric_code' => 'staff_commission', 'title' => '提成', 'key' => 'service_commission'],
-            ['metric_code' => 'staff_project_num', 'title' => '项目数', 'key' => 'project_num'],
+            ['metric_code' => 'staff_sales_yeji', 'title' => '销售业绩', 'key' => 'moneyYeji', 'sum_type' => 1],
+            ['metric_code' => 'staff_labor_yeji', 'title' => '劳动业绩', 'key' => 'optionYeji', 'sum_type' => 2],
+            ['metric_code' => 'staff_service_num', 'title' => '客数', 'key' => 'service_num', 'sum_type' => 2],
+            ['metric_code' => 'staff_designated_num', 'title' => '指定客', 'key' => 'service_zd', 'sum_type' => 2],
+            ['metric_code' => 'staff_commission', 'title' => '提成', 'key' => 'service_commission', 'sum_type' => 2],
+            ['metric_code' => 'staff_project_num', 'title' => '项目数', 'key' => 'project_num', 'sum_type' => 2],
         ];
         $out = [];
         foreach ($defs as $def) {
             $code = $def['metric_code'];
             $dictItem = $dict->getByCode($code);
+            $sumType = (int)$def['sum_type'];
             $out[] = [
                 'metric_code' => $code,
                 'title' => (string)($dictItem['name'] ?? $def['title']),
                 'number' => $num($info[$def['key']] ?? 0),
                 'developing' => false,
-                'detail_api' => null,
-                'detail_developing' => true,
+                // 明细：商家本人业绩页（销售 sum_type=1 / 劳动侧 sum_type=2）
+                'detail_api' => '/pages/merchant/yeji/self?sum_type=' . $sumType,
+                'detail_developing' => false,
                 'tooltip_api' => 'metric/dictionary/' . $code,
                 'source' => (string)($dictItem['source'] ?? 'SatffYejiServices::staffInfo'),
                 'formula' => (string)($dictItem['formula'] ?? ''),

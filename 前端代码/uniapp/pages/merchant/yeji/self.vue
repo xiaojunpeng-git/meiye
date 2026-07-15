@@ -112,6 +112,25 @@ export default {
 		if (!ok) return;
 		this.reloadAll();
 	},
+	onLoad(opt) {
+		if (!opt) return;
+		const start = String(opt.start_date || '').trim();
+		const end = String(opt.end_date || '').trim();
+		if (start && end) {
+			this.dateFilter = {
+				date_type: String(opt.date_type || 'custom'),
+				start_date: start,
+				end_date: end,
+				display: opt.display
+					? decodeURIComponent(String(opt.display))
+					: `${start} ~ ${end}`,
+			};
+		}
+		const st = Number(opt.sum_type || 0);
+		if (st === 1 || st === 2) {
+			this.sumType = st;
+		}
+	},
 	methods: {
 		todayStr() {
 			const d = new Date();

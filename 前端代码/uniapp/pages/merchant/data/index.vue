@@ -39,6 +39,7 @@
 								:class="{ 'metrics__item--third': primaryMetrics.length > 3 }"
 								v-for="(m, i) in primaryMetrics"
 								:key="m.metric_code || i"
+								@click="onMetricTap(m)"
 							>
 								<view class="metrics__label">
 									{{ m.title }}
@@ -416,6 +417,23 @@ export default {
 					`title=${title}`,
 				].join('&');
 				uni.navigateTo({ url: `/pages/merchant/customer/index?${q}` });
+				return;
+			}
+			if (detail.indexOf('/pages/merchant/yeji/self') === 0 || String(code).indexOf('staff_') === 0) {
+				let sumType = 1;
+				const matched = /(?:\?|&)sum_type=(\d+)/.exec(detail);
+				if (matched) {
+					sumType = Number(matched[1]) === 2 ? 2 : 1;
+				} else if (code !== 'staff_sales_yeji') {
+					sumType = 2;
+				}
+				const q = [
+					`sum_type=${sumType}`,
+					`start_date=${this.dateFilter.start_date || ''}`,
+					`end_date=${this.dateFilter.end_date || ''}`,
+					`date_type=${this.dateFilter.date_type || 'custom'}`,
+				].join('&');
+				uni.navigateTo({ url: `/pages/merchant/yeji/self?${q}` });
 				return;
 			}
 			uni.showToast({ title: '指标明细开发中', icon: 'none' });

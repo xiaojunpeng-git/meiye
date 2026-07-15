@@ -27,6 +27,12 @@
 <script>
 import merchantGuard from '@/mixins/merchantGuard.js';
 
+/**
+ * 工作台入口裁剪：对齐首页 shortcutVisible +「我的」workMenus
+ * - 配送员：仅扫码核销、配送任务
+ * - 店员无店级数据权：隐藏订单/售后/商品
+ * - 平台客服：保留订单类，隐藏商品/预约/老师/推广
+ */
 export default {
 	mixins: [merchantGuard],
 	data() {
@@ -35,12 +41,12 @@ export default {
 				{
 					title: '店务经营',
 					items: [
-						{ name: '扫码核销', icon: 'icon-ic_Scan', url: '/pages/admin/order_cancellation/index?auth=4' },
-						{ name: '订单管理', icon: 'icon-ic_order', url: '/pages/admin/orderList/index' },
-						{ name: '售后维权', icon: 'icon-ic_order1', url: '/pages/admin/refundOrderList/index' },
-						{ name: '商品管理', icon: 'icon-ic_shop1', url: '/pages/admin/goods/index' },
-						{ name: '预约管理', icon: 'icon-ic_clock', url: '/pages/admin/reservation_list/index' },
-						{ name: '老师中心', icon: 'icon-ic_user1', url: '/pages/admin/staff_center/index' },
+						{ name: '扫码核销', icon: 'icon-ic_Scan', url: '/pages/admin/order_cancellation/index?auth=4', need: 'cancel' },
+						{ name: '订单管理', icon: 'icon-ic_order', url: '/pages/admin/orderList/index', need: 'order' },
+						{ name: '售后维权', icon: 'icon-ic_order1', url: '/pages/admin/refundOrderList/index', need: 'order' },
+						{ name: '商品管理', icon: 'icon-ic_shop1', url: '/pages/admin/goods/index', need: 'goods' },
+						{ name: '预约管理', icon: 'icon-ic_clock', url: '/pages/admin/reservation_list/index', need: 'rsv' },
+						{ name: '老师中心', icon: 'icon-ic_user1', url: '/pages/admin/staff_center/index', need: 'staff_center' },
 					],
 				},
 				{
@@ -50,13 +56,13 @@ export default {
 						{ name: '查找客户', icon: 'icon-ic_search', url: '/pages/merchant/customer/index' },
 						{ name: '添加客户', icon: 'icon-ic_user2', url: '/pages/merchant/customer/index?action=add', perm: 'merchant.customer.create' },
 						{ name: '补交欠款', icon: 'icon-ic_money', url: '/pages/merchant/debt/index', perm: 'merchant.debt.view' },
-						{ name: '客户回访', icon: 'icon-ic_message', action: 'developing' },
+						{ name: '客户回访', icon: 'icon-ic_message', action: 'developing', need: 'customer_follow' },
 					],
 				},
 				{
 					title: '数据与业绩',
 					items: [
-						{ name: '数仓', icon: 'icon-ic_order', url: '/pages/merchant/data/index', redirect: true },
+						{ name: '数仓', icon: 'icon-ic_order', url: '/pages/merchant/data/index', redirect: true, need: 'data_hub' },
 						{ name: '门店业绩', icon: 'icon-ic_star', url: '/pages/admin/yeji/store', perm: 'merchant.data.store' },
 						{ name: '个人业绩', icon: 'icon-ic_star1', url: '/pages/merchant/yeji/self', perm: 'merchant.data.self' },
 						{ name: '区域统计', icon: 'icon-ic_home', url: '/pages/admin/agent/index', perm: 'merchant.data.region' },
@@ -66,22 +72,39 @@ export default {
 				{
 					title: '配送与客服',
 					items: [
-						{ name: '配送任务', icon: 'icon-ic_Scan', url: '/pages/admin/distribution/index' },
-						{ name: '推广码', icon: 'icon-ic_QRcode', url: '/pages/admin/spread/index' },
+						{ name: '配送任务', icon: 'icon-ic_Scan', url: '/pages/admin/distribution/index', need: 'delivery' },
+						{ name: '推广码', icon: 'icon-ic_QRcode', url: '/pages/admin/spread/index', need: 'spread' },
 					],
 				},
 			],
 		};
 	},
 	computed: {
+		activeRole() {
+			return this.$store.state.merchant.activeRole || '';
+		},
+		perms() {
+			return this.$store.state.merchant.permissions || [];
+		},
+		canStoreData() {
+			return this.perms.some((p) =>
+				['merchant.data.store', 'merchant.data.region', 'merchant.warehouse.view'].includes(p)
+			);
+		},
+		canSelfData() {
+			return this.perms.includes('merchant.data.self');
+		},
+		isDeliveryOnly() {
+			return this.activeRole === 'delivery' && !this.canStoreData && !this.canSelfData;
+		},
+		showReservation() {
+			return ['store_manager', 'store_staff', 'region_agent'].includes(this.activeRole);
+		},
 		visibleGroups() {
 			return this.groups
 				.map((g) => {
 					if (g.perm && !this.hasMerchantPermission(g.perm)) return null;
-					const items = (g.items || []).filter((it) => {
-						if (it.perm && !this.hasMerchantPermission(it.perm)) return false;
-						return true;
-					});
+					const items = (g.items || []).filter((it) => this.itemVisible(it));
 					if (!items.length) return null;
 					return { ...g, items };
 				})
@@ -92,6 +115,41 @@ export default {
 		await this.ensureMerchantAccess();
 	},
 	methods: {
+		itemVisible(it) {
+			if (!it) return false;
+			if (this.isDeliveryOnly) {
+				return ['扫码核销', '配送任务'].includes(it.name);
+			}
+			if (it.perm && !this.hasMerchantPermission(it.perm)) return false;
+			const need = it.need || '';
+			if (need === 'cancel') return true;
+			if (need === 'order') {
+				return this.canStoreData || this.activeRole === 'platform_service' || this.activeRole === 'store_manager';
+			}
+			if (need === 'goods') {
+				return this.canStoreData || this.activeRole === 'store_manager';
+			}
+			if (need === 'rsv') return this.showReservation;
+			if (need === 'staff_center') {
+				return this.activeRole === 'store_manager' || this.activeRole === 'store_staff';
+			}
+			if (need === 'delivery') {
+				return ['delivery', 'store_manager', 'region_agent'].includes(this.activeRole);
+			}
+			if (need === 'spread') {
+				return this.activeRole === 'store_manager' || this.activeRole === 'store_staff' || this.activeRole === 'region_agent';
+			}
+			if (need === 'data_hub') {
+				return (
+					this.hasMerchantPermission('merchant.home.view') &&
+					(this.canStoreData || this.canSelfData)
+				);
+			}
+			if (need === 'customer_follow') {
+				return this.hasMerchantPermission('merchant.customer.view');
+			}
+			return true;
+		},
 		onItem(item) {
 			if (!item) return;
 			if (item.action === 'developing') {
