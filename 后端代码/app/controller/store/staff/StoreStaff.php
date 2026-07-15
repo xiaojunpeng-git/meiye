@@ -35,7 +35,6 @@ class StoreStaff extends AuthController
     protected $level = null;
 
     /**
-    /**
      * @var SystemStoreStaffServices
      */
     protected $services;
@@ -187,8 +186,9 @@ class StoreStaff extends AuthController
             ['position', 0],
             ['position_level', 0],
             ['is_customer', 0],
-            ['can_choose', 0],
+            ['can_choose', 1],
             ['is_reservable', 1],
+            // is_butler 已合并到店长：兼容期仍可读请求，normalizeStaffManagerFields 升 is_manager 后丢弃
             ['is_butler', 0],
             ['is_fencheng', 0],
             ['customer_url', ''],
@@ -274,6 +274,7 @@ class StoreStaff extends AuthController
         unset($data['conf_pwd'], $data['image']);
 		$this->services->normalizeStaffAvatar($data);
 		$this->services->normalizeStaffDates($data);
+		$this->services->normalizeStaffManagerFields($data);
 		$this->services->applyRolesFlags($data);
 
 		if ($id) {//编辑
@@ -289,6 +290,74 @@ class StoreStaff extends AuthController
         } else {
             return app('json')->fail($id ? '编辑失败，请稍后再试' : '添加失败，请稍后再试');
         }
+    }
+
+    /**
+     * 校验店员属于当前门店
+     * @param int $id
+     * @return array|\think\Model
+     */
+    protected function assertStaffInCurrentStore(int $id)
+    {
+        $staff = $this->services->get($id);
+        if (!$staff || (int)($staff['is_del'] ?? 0) === 1 || (int)$staff['store_id'] !== (int)$this->storeId) {
+            throw new AdminException('店员不存在');
+        }
+        return $staff;
+    }
+
+    /**
+     * 店员专属客户
+     * @param UserServices $userServices
+     * @param int $id
+     * @return mixed
+     */
+    public function getStaffCustomer(UserServices $userServices, $id = 0)
+    {
+        $id = (int)$id;
+        if (!$id) {
+            return app('json')->fail('参数有误！');
+        }
+        try {
+            $this->assertStaffInCurrentStore($id);
+        } catch (AdminException $e) {
+            return app('json')->fail($e->getMessage());
+        }
+        $where = $this->request->getMore([
+            ['keyword', ''],
+            ['data', ''],
+        ]);
+        $where['salesman_id'] = $id;
+        return app('json')->success($userServices->getStaffCustomerList($where));
+    }
+
+    /**
+     * 店员业绩订单
+     * @param StaffFlowingWaterServices $waterServices
+     * @param int $id
+     * @return mixed
+     */
+    public function getStaffPerformance(StaffFlowingWaterServices $waterServices, $id = 0)
+    {
+        $id = (int)$id;
+        if (!$id) {
+            return app('json')->fail('参数有误！');
+        }
+        try {
+            $this->assertStaffInCurrentStore($id);
+        } catch (AdminException $e) {
+            return app('json')->fail($e->getMessage());
+        }
+        $where = $this->request->getMore([
+            ['data', ''],
+            ['keyword', ''],
+            ['link_id', ''],
+            ['price', ''],
+            ['performance', ''],
+        ]);
+        $where['staff_id'] = $id;
+        $where['store_id'] = (int)$this->storeId;
+        return app('json')->success($waterServices->getgetStaffPerformanceData($where));
     }
 
     /**

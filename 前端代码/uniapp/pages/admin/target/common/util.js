@@ -586,15 +586,15 @@ export function collectStoreIdsFromNode(node) {
 }
 
 /** 多选门店 → 列表/统计筛选项 */
-export function getObjectFilterFromStoreIds(storeIds, storeNameMap = {}) {
+export function getObjectFilterFromStoreIds(storeIds, storeNameMap = {}, extra = {}) {
 	const ids = (storeIds || [])
 		.map((id) => Number(id))
 		.filter((id) => id > 0);
 	let objectLabel = '请选择';
 	if (ids.length === 1) {
-		objectLabel = storeNameMap[ids[0]] || `门店${ids[0]}`;
+		objectLabel = storeNameMap[ids[0]] || extra.summary || `门店${ids[0]}`;
 	} else if (ids.length > 1) {
-		objectLabel = `已选${ids.length}家门店`;
+		objectLabel = extra.summary || `已选${ids.length}家门店`;
 	}
 	return {
 		objectLabel,
@@ -603,13 +603,60 @@ export function getObjectFilterFromStoreIds(storeIds, storeNameMap = {}) {
 		filterManageRegionId: '',
 		filterObjectType: ids.length === 1 ? '1' : '',
 		isLastLevelStore: ids.length === 1,
+		org_ids: (extra.org_ids || []).map((id) => Number(id)).filter((id) => id > 0),
+		excluded_store_ids: (extra.excluded_store_ids || [])
+			.map((id) => Number(id))
+			.filter((id) => id > 0),
+		resolved_store_ids: ids,
+		realtime: !!extra.realtime,
+		snapshot: !!extra.snapshot,
 	};
 }
 
 export function isMultiStoreSelection(item) {
 	if (!item) return false;
 	if (item.mode === 'multiple') return true;
+	if (Array.isArray(item.resolved_store_ids) && item.resolved_store_ids.length) return true;
 	return Array.isArray(item.store_ids);
+}
+
+/**
+ * 阶段 C 门店选择结果 → 目标页兼容结构
+ */
+export function merchantPayloadToTargetSelect(payload) {
+	if (!payload || typeof payload !== 'object') return null;
+	if (payload.mode === 'single' || (!payload.mode && Number(payload.store_id) > 0)) {
+		const storeId = Number(payload.store_id || (payload.resolved_store_ids || [])[0] || 0);
+		if (!storeId) return null;
+		return {
+			id: storeId,
+			object_type: 1,
+			name: payload.summary || `门店${storeId}`,
+			mode: 'single',
+			store_id: storeId,
+			store_ids: [storeId],
+			resolved_store_ids: payload.resolved_store_ids || [storeId],
+			org_ids: [],
+			excluded_store_ids: [],
+			snapshot: true,
+			realtime: false,
+		};
+	}
+	const resolved = (payload.resolved_store_ids || payload.store_ids || [])
+		.map((id) => Number(id))
+		.filter((id) => id > 0);
+	return {
+		mode: 'multiple',
+		id: 0,
+		object_type: 0,
+		name: payload.summary || '',
+		store_ids: resolved,
+		resolved_store_ids: resolved,
+		org_ids: payload.org_ids || [],
+		excluded_store_ids: payload.excluded_store_ids || [],
+		realtime: payload.realtime !== false && !payload.snapshot,
+		snapshot: !!payload.snapshot,
+	};
 }
 
 export function getObjectFilterFromItem(item) {
@@ -621,10 +668,22 @@ export function getObjectFilterFromItem(item) {
 			filterManageRegionId: '',
 			filterObjectType: '',
 			isLastLevelStore: false,
+			org_ids: [],
+			excluded_store_ids: [],
+			resolved_store_ids: [],
+			realtime: false,
+			snapshot: false,
 		};
 	}
 	if (isMultiStoreSelection(item)) {
-		return getObjectFilterFromStoreIds(item.store_ids || []);
+		const ids = item.resolved_store_ids || item.store_ids || [];
+		return getObjectFilterFromStoreIds(ids, item._storeNameMap || {}, {
+			summary: item.name || item.summary || '',
+			org_ids: item.org_ids || [],
+			excluded_store_ids: item.excluded_store_ids || [],
+			realtime: item.realtime,
+			snapshot: item.snapshot,
+		});
 	}
 	const objectType = Number(item.object_type);
 	const id = item.id != null ? Number(item.id) : 0;
@@ -635,17 +694,25 @@ export function getObjectFilterFromItem(item) {
 		filterManageRegionId: objectType === 2 && id > 0 ? String(id) : '',
 		filterObjectType: objectType > 0 ? String(objectType) : '',
 		isLastLevelStore: objectType === 1 && id > 0,
+		org_ids: item.org_ids || [],
+		excluded_store_ids: item.excluded_store_ids || [],
+		resolved_store_ids: objectType === 1 && id > 0 ? [id] : item.resolved_store_ids || [],
+		realtime: !!item.realtime,
+		snapshot: !!item.snapshot,
 	};
 }
 
 /** 门店筛选参数（统计/列表接口） */
 export function buildStoreFilterApiParams(filter = {}) {
 	const params = {};
-	const storeIds = filter.filterStoreIds || [];
+	const storeIds = (filter.resolved_store_ids || filter.filterStoreIds || [])
+		.map((id) => Number(id))
+		.filter((id) => id > 0);
 	if (storeIds.length > 1) {
 		params.store_ids = storeIds.join(',');
 	} else if (storeIds.length === 1) {
 		params.store_id = storeIds[0];
+		params.store_ids = String(storeIds[0]);
 	} else if (filter.filterStoreId) {
 		params.store_id = filter.filterStoreId;
 	}
@@ -654,6 +721,16 @@ export function buildStoreFilterApiParams(filter = {}) {
 	}
 	if (filter.filterObjectType) {
 		params.object_type = filter.filterObjectType;
+	}
+	const orgIds = (filter.org_ids || []).map((id) => Number(id)).filter((id) => id > 0);
+	if (orgIds.length) {
+		params.org_ids = orgIds.join(',');
+	}
+	const excluded = (filter.excluded_store_ids || [])
+		.map((id) => Number(id))
+		.filter((id) => id > 0);
+	if (excluded.length) {
+		params.excluded_store_ids = excluded.join(',');
 	}
 	return params;
 }
@@ -756,6 +833,79 @@ export function consumeTargetObjectSelect() {
 	return null;
 }
 
+/**
+ * 打开阶段 C 共用门店选择（目标页统一入口）
+ * single + snapshot：创建目标；multiple + realtime：管理/分析筛选
+ */
+export function openTargetMerchantStoreSelect(options = {}) {
+	const mode = options.mode === 'single' ? 'single' : 'multiple';
+	const snapshot = mode === 'single' ? true : !!options.snapshot;
+	const realtime = mode === 'multiple' ? options.realtime !== false && !snapshot : false;
+	const cached = loadTargetObjectCache();
+	const preset = {
+		mode,
+		snapshot,
+		realtime,
+		org_ids: [],
+		store_ids: [],
+		excluded_store_ids: [],
+		resolved_store_ids: [],
+		store_id: 0,
+	};
+	if (cached) {
+		if (mode === 'single') {
+			const sid = Number(
+				cached.store_id ||
+					cached.id ||
+					(cached.resolved_store_ids || cached.store_ids || [])[0] ||
+					0
+			);
+			if (sid > 0) {
+				preset.store_id = sid;
+				preset.resolved_store_ids = [sid];
+				preset.store_ids = [sid];
+			}
+		} else if (isMultiStoreSelection(cached)) {
+			preset.resolved_store_ids = cached.resolved_store_ids || cached.store_ids || [];
+			preset.store_ids = cached.store_ids || preset.resolved_store_ids;
+			preset.org_ids = cached.org_ids || [];
+			preset.excluded_store_ids = cached.excluded_store_ids || [];
+		} else if (Number(cached.object_type) === 1 && Number(cached.id) > 0) {
+			preset.resolved_store_ids = [Number(cached.id)];
+			preset.store_ids = [Number(cached.id)];
+			preset.store_id = Number(cached.id);
+		}
+	}
+	try {
+		uni.setStorageSync('merchant_store_picker_preset', preset);
+	} catch (e) {
+		/* ignore */
+	}
+	const query = `mode=${mode}&snapshot=${snapshot ? 1 : 0}&realtime=${realtime ? 1 : 0}&from=target`;
+	uni.navigateTo({
+		url: `/pages/admin/organization/store-select?${query}`,
+		fail: () => {
+			uni.showToast({ title: '打开门店选择失败', icon: 'none' });
+		},
+	});
+}
+
+/**
+ * 消费阶段 C 选择结果，并转为目标页结构
+ */
+export function consumeMerchantPickerAsTargetSelect() {
+	let payload = null;
+	try {
+		payload = uni.getStorageSync('merchant_store_picker_result');
+		if (payload) {
+			uni.removeStorageSync('merchant_store_picker_result');
+		}
+	} catch (e) {
+		payload = null;
+	}
+	return merchantPayloadToTargetSelect(payload);
+}
+
 /** 根据门店选项接口推断默认选中项 */
 export function resolveDefaultObjectFromOptions(options) {
 	const list = options || [];
@@ -782,7 +932,7 @@ export function findObjectInOptions(options, cache) {
 }
 
 /**
- * 初始化目标筛选对象：URL 参数 > 本次选择 > 缓存 > 接口默认
+ * 初始化目标筛选对象：URL 参数 > 阶段C选择 > 旧选择 > 缓存 > 接口默认
  */
 export async function initTargetObjectFilter({ getOptions, applyFilter, urlOverride }) {
 	if (urlOverride) {
@@ -796,18 +946,22 @@ export async function initTargetObjectFilter({ getOptions, applyFilter, urlOverr
 		return;
 	}
 
-	const fromSelect = consumeTargetObjectSelect();
+	const fromMerchant = consumeMerchantPickerAsTargetSelect();
+	const fromSelect = fromMerchant || consumeTargetObjectSelect();
 	if (fromSelect) {
 		saveTargetObjectCache(fromSelect);
 		if (isMultiStoreSelection(fromSelect)) {
-			const selectIds = (fromSelect.store_ids || [])
+			const selectIds = (fromSelect.resolved_store_ids || fromSelect.store_ids || [])
 				.map((id) => Number(id))
 				.filter((id) => id > 0);
 			if (selectIds.length) {
-				const filter = getObjectFilterFromStoreIds(
-					selectIds,
-					fromSelect._storeNameMap || {}
-				);
+				const filter = getObjectFilterFromStoreIds(selectIds, fromSelect._storeNameMap || {}, {
+					summary: fromSelect.name || fromSelect.summary || '',
+					org_ids: fromSelect.org_ids || [],
+					excluded_store_ids: fromSelect.excluded_store_ids || [],
+					realtime: fromSelect.realtime,
+					snapshot: fromSelect.snapshot,
+				});
 				applyFilter(filter);
 				return;
 			}
@@ -825,7 +979,15 @@ export async function initTargetObjectFilter({ getOptions, applyFilter, urlOverr
 		const cached = loadTargetObjectCache();
 		if (cached) {
 			if (isMultiStoreSelection(cached)) {
-				applyFilter(getObjectFilterFromStoreIds(cached.store_ids || []));
+				applyFilter(
+					getObjectFilterFromStoreIds(cached.resolved_store_ids || cached.store_ids || [], {}, {
+						summary: cached.name || '',
+						org_ids: cached.org_ids || [],
+						excluded_store_ids: cached.excluded_store_ids || [],
+						realtime: cached.realtime,
+						snapshot: cached.snapshot,
+					})
+				);
 			} else {
 				applyFilter(getObjectFilterFromItem(cached));
 			}
@@ -839,12 +1001,20 @@ export async function initTargetObjectFilter({ getOptions, applyFilter, urlOverr
 	const cached = loadTargetObjectCache();
 	if (cached) {
 		if (isMultiStoreSelection(cached)) {
-			const cachedIds = (cached.store_ids || [])
+			const cachedIds = (cached.resolved_store_ids || cached.store_ids || [])
 				.map((id) => Number(id))
 				.filter((id) => id > 0);
 			if (cachedIds.length) {
 				const nameMap = buildStoreNameMapFromTree(tree);
-				applyFilter(getObjectFilterFromStoreIds(cachedIds, nameMap));
+				applyFilter(
+					getObjectFilterFromStoreIds(cachedIds, nameMap, {
+						summary: cached.name || '',
+						org_ids: cached.org_ids || [],
+						excluded_store_ids: cached.excluded_store_ids || [],
+						realtime: cached.realtime,
+						snapshot: cached.snapshot,
+					})
+				);
 				return;
 			}
 		}

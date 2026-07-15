@@ -1154,8 +1154,8 @@ class SystemStoreStaffServices extends BaseServices
             'is_reservable' => (int)($staffInfo['is_reservable'] ?? 1),
             'off_work_time' => (string)($staffInfo['off_work_time'] ?? ''),
             'staff_intro' => (string)($staffInfo['staff_intro'] ?? ''),
-            'is_manager' => (int)($staffInfo['is_manager'] ?? 0),
-            'is_butler' => (int)($staffInfo['is_butler'] ?? 0),
+            // 兼容期：历史管家等同店长；不再对外依赖 is_butler
+            'is_manager' => self::staffIsManager($staffInfo) ? 1 : 0,
         ];
     }
 
@@ -1546,6 +1546,55 @@ class SystemStoreStaffServices extends BaseServices
             }
         }
         return $staffInfo;
+    }
+
+    /**
+     * 店长判定（兼容期：历史 is_butler=1 等同店长，未删字段前仍可读）
+     * @param array|object|null $staff
+     */
+    public static function staffIsManager($staff): bool
+    {
+        if (!$staff) {
+            return false;
+        }
+        if (is_object($staff)) {
+            $staff = method_exists($staff, 'toArray') ? $staff->toArray() : (array)$staff;
+        }
+        if (!is_array($staff)) {
+            return false;
+        }
+        return (int)($staff['is_manager'] ?? 0) === 1
+            || (int)($staff['is_butler'] ?? 0) === 1;
+    }
+
+    /**
+     * 保存前归一：管家已合并店长。
+     * - 请求带 is_butler=1 → 升为店长
+     * - 只要本次保存带 is_manager（表单必带），同步写 is_butler=0，保证显式降级可撤销历史管家权限
+     */
+    public function normalizeStaffManagerFields(array &$data): void
+    {
+        if ((int)($data['is_butler'] ?? 0) === 1) {
+            $data['is_manager'] = 1;
+        }
+        if (array_key_exists('is_manager', $data)) {
+            $data['is_manager'] = (int)$data['is_manager'] === 1 ? 1 : 0;
+            // 显式保存店长字段时清除历史管家标记，否则关闭「店长」后 staffIsManager 仍因 is_butler=1 放行
+            $data['is_butler'] = 0;
+        } else {
+            unset($data['is_butler']);
+        }
+    }
+
+    /**
+     * 接口展示归一：管家视为店长；兼容期仍带回 is_butler 供排查，权限以 is_manager 为准
+     */
+    public static function presentStaffManagerFlags(array $staff): array
+    {
+        if (self::staffIsManager($staff)) {
+            $staff['is_manager'] = 1;
+        }
+        return $staff;
     }
 
     /**

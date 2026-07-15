@@ -64,9 +64,6 @@
           <template slot-scope="{ row }" slot="is_reservable">
             {{ row.is_reservable == 1 ? '是' : '否' }}
           </template>
-          <template slot-scope="{ row }" slot="is_butler">
-            {{ row.is_butler == 1 ? '是' : '否' }}
-          </template>
           <template slot-scope="{ row }" slot="salary_status">
             {{ row.salary_status == 1 ? '是' : '否' }}
           </template>
@@ -74,19 +71,28 @@
             {{ row.birthday_type == 1 ? '农历' : row.birthday_type == 2 ? '新历' : '-' }}
           </template>
           <template slot-scope="{ row, index }" slot="action">
-            <a
-              v-if="row.status == 1 && row.delete_time == null"
-              @click="goCashier(row)"
-            >进入收银台</a>
-            <Divider
-              v-if="row.status == 1 && row.delete_time == null"
-              type="vertical"
-            />
-            <a v-if="row.delete_time == null" @click="openForm(row.id)">编辑</a>
-            <Divider v-if="row.level > 0" type="vertical" />
-            <a v-if="row.level > 0" @click="del(row.id, '删除该店员', index)">删除</a>
-            <Divider type="vertical" />
-            <a @click="details(row)">查看详情</a>
+            <div class="action-ops">
+              <div class="action-row">
+                <a
+                  v-if="row.status == 1 && row.delete_time == null"
+                  @click="goCashier(row)"
+                >进入收银台</a>
+                <Divider
+                  v-if="row.status == 1 && row.delete_time == null"
+                  type="vertical"
+                />
+                <a v-if="row.delete_time == null" @click="openForm(row.id)">编辑</a>
+                <Divider v-if="row.level > 0" type="vertical" />
+                <a v-if="row.level > 0" @click="del(row.id, '删除该店员', index)">删除</a>
+                <Divider type="vertical" />
+                <a @click="details(row)">查看详情</a>
+              </div>
+              <div class="action-row">
+                <a @click="handleClick1(row.id)">专属客户</a>
+                <Divider type="vertical" />
+                <a @click="handleClick2(row.id)">业绩订单</a>
+              </div>
+            </div>
           </template>
         </Table>
         </div>
@@ -121,6 +127,137 @@
       :default-columns="defaultColumnConfig"
       @save="saveColumnConfig"
     />
+
+    <Modal
+      v-model="modal1"
+      :mask-closable="false"
+      title="查看专属客户"
+      footer-hide
+      width="1000"
+      @on-cancel="onModal1Cancel"
+    >
+      <Form
+        inline
+        ref="form1"
+        :model="formData1"
+        :label-width="labelWidth"
+        :label-position="labelPosition"
+        @submit.native.prevent
+      >
+        <FormItem label="客户查询：">
+          <Input
+            placeholder="请输入客户名称/ID/手机号"
+            v-model="formData1.keyword"
+            class="input-add"
+          />
+        </FormItem>
+        <FormItem label="绑定时间：">
+          <DatePicker
+            transfer
+            :editable="false"
+            @on-change="onDateChange1"
+            :value="timeVal1"
+            format="yyyy/MM/dd"
+            type="daterange"
+            placement="bottom-end"
+            placeholder="自定义时间"
+            class="input-add"
+            :options="options"
+          />
+        </FormItem>
+        <FormItem :label-width="0">
+          <Button type="primary" @click="handleSearch1">查询 <span class="enter-key">↵</span></Button>
+        </FormItem>
+      </Form>
+      <Table
+        highlight-row
+        no-data-text="暂无数据"
+        :columns="columns1"
+        :data="tableData1"
+      />
+      <div class="acea-row row-right page">
+        <Page
+          :total="total1"
+          show-elevator
+          show-total
+          :current="formData1.page"
+          @on-change="onPageChange1"
+          :page-size="formData1.limit"
+        />
+      </div>
+    </Modal>
+
+    <Modal
+      v-model="modal2"
+      :mask-closable="false"
+      title="业绩订单"
+      footer-hide
+      width="1000"
+      @on-cancel="onModal2Cancel"
+    >
+      <Form
+        inline
+        ref="form2"
+        :model="formData2"
+        :label-width="labelWidth"
+        :label-position="labelPosition"
+        @submit.native.prevent
+      >
+        <FormItem label="时间选择：">
+          <DatePicker
+            transfer
+            :editable="false"
+            @on-change="onDateChange2"
+            :value="timeVal2"
+            format="yyyy/MM/dd"
+            type="daterange"
+            placement="bottom-end"
+            placeholder="自定义时间"
+            class="input-add"
+            :options="options"
+          />
+        </FormItem>
+        <FormItem label="用户信息：">
+          <Input v-model="formData2.keyword" clearable class="input-add" />
+        </FormItem>
+        <FormItem label="订单号：">
+          <Input v-model="formData2.link_id" clearable class="input-add" />
+        </FormItem>
+        <FormItem label="业绩金额：">
+          <InputNumber v-model="performance.min" :max="9999999999" :min="0" placeholder="最小值" style="width: 109px" />
+          <span class="mr10 ml-10">一</span>
+          <InputNumber v-model="performance.max" :max="9999999999" :min="0" placeholder="最大值" style="width: 109px" />
+        </FormItem>
+        <FormItem label="订单金额：">
+          <InputNumber v-model="price.min" :max="9999999999" :min="0" placeholder="最小值" style="width: 109px" />
+          <span class="mr10 ml-10">一</span>
+          <InputNumber v-model="price.max" :max="9999999999" :min="0" placeholder="最大值" style="width: 109px" />
+        </FormItem>
+        <FormItem :label-width="0">
+          <Button type="primary" @click="handleSearch2">查询 <span class="enter-key">↵</span></Button>
+        </FormItem>
+      </Form>
+      <Table
+        highlight-row
+        no-data-text="暂无数据"
+        :columns="columns2"
+        :data="tableData2"
+      >
+        <template slot-scope="{ row }" slot="user">
+          <div>{{ row.user_nickname }}|{{ row.phone }}|ID:{{ row.uid }}</div>
+        </template>
+      </Table>
+      <div class="acea-row row-right page">
+        <Page
+          :total="total2"
+          show-elevator
+          show-total
+          :current="formData2.page"
+          @on-change="onPageChange2"
+          :page-size="formData2.limit"
+        />
+      </div>
+    </Modal>
 
     <Modal
       v-model="editModal"
@@ -159,8 +296,11 @@ import {
   orderStaff,
   getStaffColumnSetting,
   saveStaffColumnSetting,
+  staffCustomerList,
+  staffPerformanceList,
 } from '@/api/staff.js';
 import { storeGetInfoApi } from '@/api/setting';
+import timeOptions from '@/utils/timeOptions';
 import Details from '../components/details';
 import FormModal from './add';
 import ColumnSetting from './components/ColumnSetting';
@@ -198,7 +338,7 @@ const COLUMNS_META = [
   { key: 'position_label', title: '职位', minWidth: 100 },
   { key: 'position_level_label', title: '职级', minWidth: 100 },
   { key: 'is_manager', title: '店长', minWidth: 80, slot: 'is_manager' },
-  { key: 'can_choose', title: '允许被选中', minWidth: 100, slot: 'can_choose' },
+  { key: 'can_choose', title: '销售/手艺人', minWidth: 100, slot: 'can_choose' },
   { key: 'status', title: '在职状态', minWidth: 80, slot: 'status' },
   { key: 'employee_number', title: '工号', minWidth: 100 },
   { key: 'join_date', title: '入职日期', minWidth: 110 },
@@ -215,12 +355,11 @@ const COLUMNS_META = [
   { key: 'has_pwd', title: '密码', minWidth: 80, slot: 'has_pwd' },
   { key: 'is_customer', title: '客服', minWidth: 80, slot: 'is_customer' },
   { key: 'is_reservable', title: '可被预约', minWidth: 90, slot: 'is_reservable' },
-  { key: 'is_butler', title: '是否管家', minWidth: 90, slot: 'is_butler' },
   { key: 'customer_num', title: '专属客户数', minWidth: 100 },
   { key: 'department', title: '部门', minWidth: 100 },
   { key: 'salary_status', title: '工资状态', minWidth: 90, slot: 'salary_status' },
   { key: 'birthday_type', title: '生日类型', minWidth: 90, slot: 'birthday_type' },
-  { key: 'action', title: '操作', minWidth: 220, slot: 'action', fixed: 'right', fixedColumn: true },
+  { key: 'action', title: '操作', minWidth: 260, slot: 'action', fixed: 'right', fixedColumn: true },
 ];
 
 const DEFAULT_COLUMN_CONFIG = [
@@ -245,6 +384,7 @@ export default {
   },
   data() {
     return {
+      options: timeOptions,
       routePre: Setting.routePre,
       currentStoreId: 0,
       currentStoreName: '',
@@ -271,11 +411,57 @@ export default {
       editRow: {},
       editModal: false,
       staffAll: [],
+      currentId: 0,
+      modal1: false,
+      formData1: {
+        keyword: '',
+        data: '',
+        page: 1,
+        limit: 20,
+      },
+      timeVal1: [],
+      columns1: [
+        { title: 'ID', key: 'uid' },
+        { title: '客户昵称', key: 'nickname' },
+        { title: '客户手机号', key: 'phone' },
+        { title: '专属业绩', key: 'performance_price' },
+        { title: '绑定时间', key: 'salesman_time' },
+      ],
+      total1: 0,
+      tableData1: [],
+      modal2: false,
+      formData2: {
+        data: '',
+        keyword: '',
+        link_id: '',
+        price: '',
+        performance: '',
+        page: 1,
+        limit: 20,
+      },
+      timeVal2: [],
+      performance: { min: null, max: null },
+      price: { min: null, max: null },
+      columns2: [
+        { title: '订单号', key: 'link_id' },
+        { title: '用户信息', slot: 'user' },
+        { title: '订单金额', key: 'number' },
+        { title: '业绩金额', key: 'number' },
+        { title: '下单时间', key: 'add_time' },
+      ],
+      total2: 0,
+      tableData2: [],
       tableBodyHeight: 420,
     };
   },
   computed: {
     ...mapState('store/layout', ['isMobile']),
+    labelWidth() {
+      return this.isMobile ? undefined : 96;
+    },
+    labelPosition() {
+      return this.isMobile ? 'top' : 'right';
+    },
     tableColumns() {
       const cols = [];
       this.columnConfig.forEach((item) => {
@@ -470,6 +656,78 @@ export default {
     cancelEditModal() {
       this.editModal = false;
     },
+    getCustomerList() {
+      staffCustomerList(this.currentId, this.formData1)
+        .then((res) => {
+          this.tableData1 = res.data.list || [];
+          this.total1 = res.data.count || 0;
+        })
+        .catch((err) => {
+          this.$Message.error(err.msg);
+        });
+    },
+    getPerformanceList() {
+      staffPerformanceList(this.currentId, this.formData2)
+        .then((res) => {
+          this.tableData2 = res.data.list || [];
+          this.total2 = res.data.count || 0;
+        })
+        .catch((err) => {
+          this.$Message.error(err.msg);
+        });
+    },
+    handleClick1(id) {
+      this.modal1 = true;
+      this.currentId = id;
+      this.getCustomerList();
+    },
+    handleSearch1() {
+      this.formData1.page = 1;
+      this.getCustomerList();
+    },
+    onDateChange1(date) {
+      this.formData1.data = date[0] ? date.join('-') : '';
+    },
+    onPageChange1(page) {
+      this.formData1.page = page;
+      this.getCustomerList();
+    },
+    onModal1Cancel() {
+      this.formData1 = { keyword: '', data: '', page: 1, limit: 20 };
+      this.timeVal1 = [];
+    },
+    handleClick2(id) {
+      this.modal2 = true;
+      this.currentId = id;
+      this.getPerformanceList();
+    },
+    handleSearch2() {
+      this.formData2.page = 1;
+      this.formData2.performance = this.performance.min ? `${this.performance.min}-${this.performance.max}` : '';
+      this.formData2.price = this.price.min ? `${this.price.min}-${this.price.max}` : '';
+      this.getPerformanceList();
+    },
+    onDateChange2(date) {
+      this.formData2.data = date[0] ? date.join('-') : '';
+    },
+    onPageChange2(page) {
+      this.formData2.page = page;
+      this.getPerformanceList();
+    },
+    onModal2Cancel() {
+      this.formData2 = {
+        data: '',
+        keyword: '',
+        link_id: '',
+        price: '',
+        performance: '',
+        page: 1,
+        limit: 20,
+      };
+      this.timeVal2 = [];
+      this.performance = { min: null, max: null };
+      this.price = { min: null, max: null };
+    },
   },
 };
 </script>
@@ -530,12 +788,31 @@ export default {
 .deleted-tag
   color #ed4014
 
+.action-ops
+  display flex
+  flex-direction column
+  gap 4px
+  line-height 1.4
+  padding 4px 0
+
+.action-row
+  white-space nowrap
+
 .page
   margin-top 12px
   flex-shrink 0
 
 .ml14
   margin-left 14px
+
+.mr10
+  margin-right 10px
+
+.ml-10
+  margin-left 10px
+
+.input-add
+  width 200px
 
 .enter-key
   margin-left 2px

@@ -108,9 +108,6 @@
               <template slot-scope="{ row }" slot="is_reservable">
                 {{ row.is_reservable == 1 ? '是' : '否' }}
               </template>
-              <template slot-scope="{ row }" slot="is_butler">
-                {{ row.is_butler == 1 ? '是' : '否' }}
-              </template>
               <template slot-scope="{ row }" slot="salary_status">
                 {{ row.salary_status == 1 ? '是' : '否' }}
               </template>
@@ -349,7 +346,7 @@ const COLUMNS_META = [
   { key: 'position_label', title: '职位', minWidth: 100 },
   { key: 'position_level_label', title: '职级', minWidth: 100 },
   { key: 'is_manager', title: '店长', minWidth: 80, slot: 'is_manager' },
-  { key: 'can_choose', title: '允许被选中', minWidth: 100, slot: 'can_choose' },
+  { key: 'can_choose', title: '销售/手艺人', minWidth: 100, slot: 'can_choose' },
   { key: 'status', title: '在职状态', minWidth: 80, slot: 'status' },
   { key: 'is_fencheng', title: '参与分成', minWidth: 90, slot: 'is_fencheng' },
   { key: 'employee_number', title: '工号', minWidth: 100 },
@@ -367,7 +364,6 @@ const COLUMNS_META = [
   { key: 'has_pwd', title: '密码', minWidth: 80, slot: 'has_pwd' },
   { key: 'is_customer', title: '客服', minWidth: 80, slot: 'is_customer' },
   { key: 'is_reservable', title: '可被预约', minWidth: 90, slot: 'is_reservable' },
-  { key: 'is_butler', title: '是否管家', minWidth: 90, slot: 'is_butler' },
   { key: 'customer_num', title: '专属客户数', minWidth: 100 },
   { key: 'department', title: '部门', minWidth: 100 },
   { key: 'salary_status', title: '工资状态', minWidth: 90, slot: 'salary_status' },

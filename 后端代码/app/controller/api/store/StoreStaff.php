@@ -215,13 +215,14 @@ class StoreStaff
 			'mall-admin-reservation-start',
 			'mall-admin-reservation-end',
 		];
-		// 管家默认拥有预约管理移动端权限
-		if ((int)($staffInfo['is_butler'] ?? 0) === 1) {
+		// 店长（含历史管家）默认拥有预约管理移动端权限
+		if (\app\services\store\SystemStoreStaffServices::staffIsManager($staffInfo)) {
 			$uniqueAuths = array_values(array_unique(array_merge($uniqueAuths, $reservationAuths)));
 		} else {
 			$uniqueAuths = array_values(array_diff($uniqueAuths, $reservationAuths));
 		}
 		$staffInfo['mall_unique_auth'] = $uniqueAuths;
+		$staffInfo = \app\services\store\SystemStoreStaffServices::presentStaffManagerFlags($staffInfo);
         return app('json')->success($staffInfo);
     }
 

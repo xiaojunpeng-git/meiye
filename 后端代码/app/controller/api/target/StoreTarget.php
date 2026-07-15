@@ -5,6 +5,7 @@ use app\Request;
 use app\services\agent\SystemRegionAgentServices;
 use app\services\store\SystemStoreStaffServices;
 use app\services\target\StoreTargetServices;
+use app\services\organization\OrganizationScopeService;
 use think\exception\ValidateException;
 
 /**
@@ -74,10 +75,18 @@ class StoreTarget
         $this->staffServices = $staffServices;
         $this->targetServices = $targetServices;
         $this->uid = (int)$request->uid();
+        // 优先当前商家门店 / 请求门店，避免多店员工 getStaffInfoByUid 落到任意一条任职
+        $preferStoreId = (int)$request->param('active_store_id', 0);
+        if ($preferStoreId <= 0) {
+            $preferStoreId = (int)$request->param('store_id', 0);
+        }
         try {
-            $this->staffInfo = $staffServices->getStaffInfoByUid($this->uid);
-            if (!empty($this->staffInfo)) {
-                $this->staffInfo = $this->staffInfo->toArray();
+            $staffRow = $staffServices->getStaffInfoByUid($this->uid, $preferStoreId > 0 ? $preferStoreId : 0);
+            if (empty($staffRow) && $preferStoreId > 0) {
+                $staffRow = $staffServices->getStaffInfoByUid($this->uid, 0);
+            }
+            if (!empty($staffRow)) {
+                $this->staffInfo = is_array($staffRow) ? $staffRow : $staffRow->toArray();
             } else {
                 $this->staffInfo = [];
             }
@@ -114,17 +123,39 @@ class StoreTarget
     }
 
     /**
-     * 店长或区域管理员
+     * 查看权限：区域代理或本店有效员工（对齐商家端 merchant.target.view）
      */
-    protected function checkAccess(): void
+    protected function checkViewAccess(): void
     {
         if ($this->isRegionAgent && $this->regionStoreIds) {
             return;
         }
-        if ($this->store_id > 0 && (int)($this->staffInfo['is_manager'] ?? 0) === 1) {
+        if ($this->staff_id > 0 && $this->store_id > 0) {
+            return;
+        }
+        throw new ValidateException('暂无目标查看权限');
+    }
+
+    /**
+     * 管理权限：区域代理或店长含历史管家（对齐商家端 merchant.target.manage）
+     */
+    protected function checkManageAccess(): void
+    {
+        if ($this->isRegionAgent && $this->regionStoreIds) {
+            return;
+        }
+        if ($this->store_id > 0 && SystemStoreStaffServices::staffIsManager($this->staffInfo ?: [])) {
             return;
         }
         throw new ValidateException('暂无目标管理权限');
+    }
+
+    /**
+     * @deprecated 请区分 checkViewAccess / checkManageAccess；默认按管理权限
+     */
+    protected function checkAccess(): void
+    {
+        $this->checkManageAccess();
     }
 
     /**
@@ -201,30 +232,52 @@ class StoreTarget
     }
 
     /**
-     * 列表/分析筛选条件
+     * 列表/分析筛选条件（优先用组织范围解析二次校验）
      * @param array $where
      * @return array
      */
     protected function buildListWhere(array $where): array
     {
+        $allowed = [];
+        if ($this->isRegionAgent && $this->regionStoreIds) {
+            $allowed = $this->regionStoreIds;
+        } elseif ($this->store_id > 0) {
+            $allowed = [$this->store_id];
+        }
+
+        $hasOrgFilter = trim((string)($where['org_ids'] ?? '')) !== ''
+            || trim((string)($where['excluded_store_ids'] ?? '')) !== '';
         $parsedIds = $this->parseStoreIdsParam($where['store_ids'] ?? '');
-        if ($parsedIds) {
-            if ($this->isRegionAgent && $this->regionStoreIds) {
-                $parsedIds = array_values(array_intersect($parsedIds, $this->regionStoreIds));
-            } elseif ($this->store_id > 0) {
-                $parsedIds = array_values(array_intersect($parsedIds, [$this->store_id]));
+        if (!$parsedIds && !empty($where['store_id'])) {
+            $sid = (int)$where['store_id'];
+            if ($sid > 0) {
+                $parsedIds = [$sid];
             }
-            if ($parsedIds) {
-                if (count($parsedIds) === 1) {
-                    $where['store_id'] = (int)$parsedIds[0];
+        }
+
+        if ($hasOrgFilter || $parsedIds) {
+            /** @var OrganizationScopeService $scopeService */
+            $scopeService = app()->make(OrganizationScopeService::class);
+            $resolved = $scopeService->resolveStoreIdsFromFilter([
+                'store_ids' => $parsedIds ?: ($where['store_ids'] ?? ''),
+                'org_ids' => $where['org_ids'] ?? '',
+                'excluded_store_ids' => $where['excluded_store_ids'] ?? '',
+            ], $allowed);
+            if ($resolved) {
+                if (count($resolved) === 1) {
+                    $where['store_id'] = (int)$resolved[0];
                     unset($where['store_ids']);
                 } else {
-                    $where['store_ids'] = $parsedIds;
+                    $where['store_ids'] = $resolved;
                     unset($where['store_id']);
                 }
-                unset($where['object_type'], $where['manage_region_id']);
+                unset($where['object_type'], $where['manage_region_id'], $where['org_ids'], $where['excluded_store_ids']);
                 return $where;
             }
+            // 显式筛选但解析为空：无权限命中
+            $where['store_id'] = -1;
+            unset($where['store_ids'], $where['object_type'], $where['manage_region_id'], $where['org_ids'], $where['excluded_store_ids']);
+            return $where;
         }
 
         $reqStoreId = $where['store_id'] ?? '';
@@ -246,11 +299,13 @@ class StoreTarget
      */
     public function list(Request $request)
     {
-        $this->checkAccess();
+        $this->checkViewAccess();
         $where = $request->getMore([
             ['year', ''],
             ['store_id', ''],
             ['store_ids', ''],
+            ['org_ids', ''],
+            ['excluded_store_ids', ''],
             ['object_type', ''],
             ['manage_region_id', ''],
             ['keyword', ''],
@@ -267,7 +322,7 @@ class StoreTarget
      */
     public function detail(Request $request, int $id)
     {
-        $this->checkAccess();
+        $this->checkViewAccess();
         [$storeId] = $request->getMore([['store_id', 0]], true);
         $storeId = $this->resolveTargetAccessStoreId($storeId);
         return app('json')->success($this->targetServices->detail($id, $storeId, $this->regionStoreIds));
@@ -280,7 +335,7 @@ class StoreTarget
      */
     public function save(Request $request)
     {
-        $this->checkAccess();
+        $this->checkManageAccess();
         $data = $request->postMore([
             ['id', 0],
             ['store_id', 0],
@@ -309,7 +364,7 @@ class StoreTarget
      */
     public function copy(int $id, Request $request)
     {
-        $this->checkAccess();
+        $this->checkManageAccess();
         [$storeId] = $request->getMore([['store_id', 0]], true);
         $storeId = $this->resolveTargetAccessStoreId($storeId);
         return app('json')->success($this->targetServices->copy($id, $storeId, $this->regionStoreIds));
@@ -323,7 +378,7 @@ class StoreTarget
      */
     public function delete(int $id, Request $request)
     {
-        $this->checkAccess();
+        $this->checkManageAccess();
         [$storeId] = $request->getMore([['store_id', 0]], true);
         $storeId = $this->resolveTargetAccessStoreId($storeId);
         $this->targetServices->delete($id, $storeId, $this->regionStoreIds);
@@ -337,20 +392,22 @@ class StoreTarget
      */
     public function analysis(Request $request)
     {
-        $this->checkAccess();
+        $this->checkViewAccess();
         $where = $request->getMore([
             ['target_id', 0],
             ['id', 0],
             ['year', ''],
             ['store_id', ''],
             ['store_ids', ''],
+            ['org_ids', ''],
+            ['excluded_store_ids', ''],
             ['object_type', ''],
             ['manage_region_id', ''],
             ['start_month', ''],
             ['end_month', ''],
             ['metric_key', 'revenue'],
         ]);
-        if (!empty($where['store_ids'])) {
+        if (!empty($where['store_ids']) || !empty($where['org_ids']) || !empty($where['excluded_store_ids'])) {
             $where = $this->buildListWhere($where);
         } elseif (!empty($where['store_id'])) {
             $where['store_id'] = $this->resolveStoreId($where['store_id']);
@@ -368,6 +425,7 @@ class StoreTarget
      */
     public function metricOptions()
     {
+        $this->checkViewAccess();
         return app('json')->success([
             'core_metrics' => $this->targetServices->getMetricDefinitions(),
             'product_metric_types' => $this->targetServices->getProductMetricTypes(),
@@ -381,7 +439,7 @@ class StoreTarget
      */
     public function storeOptions(Request $request)
     {
-        $this->checkAccess();
+        $this->checkViewAccess();
         return app('json')->success($this->targetServices->storeOptions(
             $this->store_id,
             $this->regionStoreIds
@@ -395,7 +453,7 @@ class StoreTarget
      */
     public function storeOptionsTree(Request $request)
     {
-        $this->checkAccess();
+        $this->checkViewAccess();
         return app('json')->success($this->targetServices->storeOptionsTree(
             $this->store_id,
             $this->regionStoreIds
@@ -409,7 +467,7 @@ class StoreTarget
      */
     public function productSearch(Request $request)
     {
-        $this->checkAccess();
+        $this->checkManageAccess();
         [$keyword, $storeId] = $request->getMore([
             ['keyword', ''],
             ['store_id', 0],
@@ -425,7 +483,7 @@ class StoreTarget
      */
     public function productSelect(Request $request)
     {
-        $this->checkAccess();
+        $this->checkManageAccess();
         [$itemType, $keyword, $storeId, $scope, $categoryId, $page, $limit] = $request->getMore([
             ['item_type', 'project'],
             ['keyword', ''],
@@ -470,7 +528,7 @@ class StoreTarget
      */
     public function ranking(Request $request)
     {
-        $this->checkAccess();
+        $this->checkViewAccess();
         $where = $request->getMore([
             ['target_id', 0],
             ['metric_key', 'revenue'],
@@ -478,6 +536,8 @@ class StoreTarget
             ['asc', 0],
             ['store_id', ''],
             ['store_ids', ''],
+            ['org_ids', ''],
+            ['excluded_store_ids', ''],
             ['object_type', 3],
             ['manage_region_id', ''],
             ['start_month', ''],
@@ -490,7 +550,7 @@ class StoreTarget
         $limit = max(1, min(100, (int)($where['limit'] ?? 10)));
         $rankType = (string)($where['rank_type'] ?? 'employee');
 
-        if (!empty($where['store_ids'])) {
+        if (!empty($where['store_ids']) || !empty($where['org_ids']) || !empty($where['excluded_store_ids'])) {
             $where = $this->buildListWhere($where);
         } elseif (!empty($where['store_id']) && (int)$where['store_id'] > 0) {
             $where['store_id'] = $this->resolveStoreId($where['store_id']);
@@ -532,7 +592,7 @@ class StoreTarget
      */
     public function allocateInfo(Request $request)
     {
-        $this->checkAccess();
+        $this->checkManageAccess();
         $params = $request->getMore([
             ['store_id', 0],
             ['target_id', 0],
@@ -556,7 +616,7 @@ class StoreTarget
      */
     public function allocateSave(Request $request)
     {
-        $this->checkAccess();
+        $this->checkManageAccess();
         $data = $request->postMore([
             ['target_id', 0],
             ['store_id', 0],

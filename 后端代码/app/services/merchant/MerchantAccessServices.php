@@ -7,6 +7,7 @@ use app\services\BaseServices;
 use app\services\message\service\StoreServiceServices;
 use app\services\organization\OrganizationScopeService;
 use app\services\store\DeliveryServiceServices;
+use app\services\store\SystemStoreStaffServices;
 use app\services\system\SystemMenusServices;
 use app\services\system\SystemRoleServices;
 
@@ -76,8 +77,7 @@ class MerchantAccessServices extends BaseServices
             }
             $staffByStore[$sid] = $row;
             $identity['is_staff'] = true;
-            $isManager = (int)($row['is_manager'] ?? 0) === 1
-                || (int)($row['is_butler'] ?? 0) === 1;
+            $isManager = SystemStoreStaffServices::staffIsManager($row);
             if ($isManager) {
                 $identity['is_manager'] = true;
                 $roles[] = 'store_manager';
@@ -139,8 +139,7 @@ class MerchantAccessServices extends BaseServices
         $roleStoreIds = [];
         if (in_array($activeRole, ['store_manager', 'store_staff'], true)) {
             foreach ($staffByStore as $sid => $row) {
-                $isManager = (int)($row['is_manager'] ?? 0) === 1
-                    || (int)($row['is_butler'] ?? 0) === 1;
+                $isManager = SystemStoreStaffServices::staffIsManager($row);
                 if ($activeRole === 'store_manager' && $isManager) {
                     $roleStoreIds[] = $sid;
                 }
@@ -150,15 +149,14 @@ class MerchantAccessServices extends BaseServices
             }
             if ($activeRole === 'store_manager' && !$roleStoreIds) {
                 foreach ($staffByStore as $sid => $row) {
-                    if ((int)($row['is_manager'] ?? 0) === 1 || (int)($row['is_butler'] ?? 0) === 1) {
+                    if (SystemStoreStaffServices::staffIsManager($row)) {
                         $roleStoreIds[] = $sid;
                     }
                 }
             }
             if ($activeRole === 'store_staff' && !$roleStoreIds) {
                 foreach ($staffByStore as $sid => $row) {
-                    $isManager = (int)($row['is_manager'] ?? 0) === 1
-                        || (int)($row['is_butler'] ?? 0) === 1;
+                    $isManager = SystemStoreStaffServices::staffIsManager($row);
                     if (!$isManager) {
                         $roleStoreIds[] = $sid;
                     }
@@ -276,7 +274,7 @@ class MerchantAccessServices extends BaseServices
             return [];
         }
 
-        // 与 StoreStaff::info 一致：管家默认预约权限
+        // 与 StoreStaff::info 一致：店长（含历史管家）默认预约权限
         $reservationAuths = [
             'mall-admin-reservation',
             'mall-admin-reservation-list',
@@ -284,7 +282,7 @@ class MerchantAccessServices extends BaseServices
             'mall-admin-reservation-start',
             'mall-admin-reservation-end',
         ];
-        if ((int)($staff['is_butler'] ?? 0) === 1) {
+        if (SystemStoreStaffServices::staffIsManager($staff)) {
             $uniqueAuths = array_merge($uniqueAuths, $reservationAuths);
         } else {
             $uniqueAuths = array_values(array_diff($uniqueAuths, $reservationAuths));

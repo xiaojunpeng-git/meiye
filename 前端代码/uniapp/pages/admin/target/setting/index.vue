@@ -223,6 +223,8 @@ import {
 	getObjectDisplayName,
 	resolveDefaultObjectFromOptions,
 	consumeTargetObjectSelect,
+	consumeMerchantPickerAsTargetSelect,
+	openTargetMerchantStoreSelect,
 	loadTargetObjectCache,
 	isSpecificStoreObject,
 	applyTargetNativeNavBar,
@@ -272,6 +274,11 @@ export default {
 		},
 	},
 	onLoad(options) {
+		if (options && options.from === 'merchant') {
+			try {
+				this.$store.dispatch('merchant/enterMerchant');
+			} catch (e) {}
+		}
 		this.id = parseInt(options.id || 0, 10);
 		applyTargetNativeNavBar(this.id ? '编辑目标' : '设置目标');
 		this.loadProductMetricTypes();
@@ -284,7 +291,8 @@ export default {
 	},
 	onShow() {
 		applyTargetNativeNavBar(this.pageTitle);
-		const obj = consumeTargetObjectSelect();
+		const fromMerchant = consumeMerchantPickerAsTargetSelect();
+		const obj = fromMerchant || consumeTargetObjectSelect();
 		if (obj && isSpecificStoreObject(obj)) {
 			this.applyFormStoreObject(obj);
 		}
@@ -630,7 +638,7 @@ export default {
 			this.closeMonthModal();
 		},
 		goObjectSelect() {
-			uni.navigateTo({ url: '/pages/admin/target/select/object?mode=single&storeOnly=1' });
+			openTargetMerchantStoreSelect({ mode: 'single', snapshot: true });
 		},
 		getCardProductItems(card) {
 			if (!card) return [];

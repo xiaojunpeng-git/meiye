@@ -1,7 +1,8 @@
 <template>
 	<view class="target-page">
+		<merchant-target-tabs v-if="isMerchantMode" current="management" />
 		<!-- #ifdef H5 -->
-		<page-nav-bar title="目标管理" theme="purple" />
+		<page-nav-bar v-if="!isMerchantMode" title="目标管理" theme="purple" />
 		<!-- #endif -->
 		<view class="filter-bar">
 			<view class="filter-item" @click="pickYear">
@@ -30,7 +31,7 @@
 					</view>
 					<view class="card-right" @click.stop="noop">
 						<text class="card-badge">{{ card.period_label }}</text>
-						<view class="card-actions">
+						<view class="card-actions" v-if="canManageTarget">
 							<text class="action copy" @click.stop="onCopy(card.id)">复制</text>
 							<text class="action edit" @click.stop="onEdit(card.id)">编辑</text>
 							<text class="action del" @click.stop="onDelete(card.id)">删除</text>
@@ -55,9 +56,9 @@
 					<text class="expand-count">（共{{ displayMetrics(card).length }}项）</text>
 				</view>
 			</view>
-			<view v-if="!loading && !visibleCards.length" class="empty">暂无目标，点击右下角添加</view>
+			<view v-if="!loading && !visibleCards.length" class="empty">{{ canManageTarget ? '暂无目标，点击右下角添加' : '暂无目标' }}</view>
 		</scroll-view>
-		<view class="fab" @click="goSetting()">+</view>
+		<view class="fab" v-if="canManageTarget" @click="goSetting()">+</view>
 		<bottom-nav current="management" />
 	</view>
 </template>
@@ -67,6 +68,7 @@ import { targetList, targetCopy, targetDelete, targetStoreOptionsTree } from '@/
 import metricCard from '../components/metric-card.vue';
 import bottomNav from '../components/bottom-nav.vue';
 import pageNavBar from '../components/page-nav-bar.vue';
+import merchantTargetTabs from '@/components/merchantTargetTabs/index.vue';
 import {
 	mergeMetrics,
 	getTargetYearOptions,
@@ -76,10 +78,11 @@ import {
 	toTargetInt,
 	applyTargetNativeNavBar,
 	buildStoreFilterApiParams,
+	openTargetMerchantStoreSelect,
 } from '../common/util.js';
 
 export default {
-	components: { metricCard, bottomNav, pageNavBar },
+	components: { metricCard, bottomNav, pageNavBar, merchantTargetTabs },
 	data() {
 		return {
 			filterYear: clampTargetYear(new Date().getFullYear()),
@@ -88,6 +91,9 @@ export default {
 			filterStoreIds: [],
 			filterManageRegionId: '',
 			filterObjectType: '',
+			filterOrgIds: [],
+			filterExcludedStoreIds: [],
+			filterRealtime: true,
 			_urlObjectOverride: null,
 			page: 1,
 			limit: 10,
@@ -97,11 +103,32 @@ export default {
 		};
 	},
 	computed: {
+		isMerchantMode() {
+			try {
+				return this.$store.state.merchant.mode === 'merchant';
+			} catch (e) {
+				return false;
+			}
+		},
+		canManageTarget() {
+			try {
+				const perms = this.$store.state.merchant.permissions || [];
+				if (this.isMerchantMode) {
+					return perms.includes('merchant.target.manage');
+				}
+			} catch (e) {}
+			return true;
+		},
 		visibleCards() {
 			return this.cards.filter((card) => this.displayMetrics(card).length > 0);
 		},
 	},
 	onLoad(options) {
+		if (options && options.from === 'merchant') {
+			try {
+				this.$store.dispatch('merchant/enterMerchant');
+			} catch (e) {}
+		}
 		if (options.store || options.store_id) {
 			this._urlObjectOverride = {
 				name: options.store ? decodeURIComponent(options.store) : '',
@@ -115,7 +142,7 @@ export default {
 		}
 	},
 	async onShow() {
-		applyTargetNativeNavBar('目标管理');
+		applyTargetNativeNavBar(this.isMerchantMode ? '目标设置' : '目标管理');
 		await this.syncObjectFilter();
 		this._urlObjectOverride = null;
 		this.page = 1;
@@ -133,6 +160,9 @@ export default {
 					this.filterStoreIds = filter.filterStoreIds || [];
 					this.filterManageRegionId = filter.filterManageRegionId;
 					this.filterObjectType = filter.filterObjectType;
+					this.filterOrgIds = filter.org_ids || [];
+					this.filterExcludedStoreIds = filter.excluded_store_ids || [];
+					this.filterRealtime = filter.realtime !== false;
 				},
 			});
 		},
@@ -169,7 +199,7 @@ export default {
 			});
 		},
 		goObjectSelect() {
-			uni.navigateTo({ url: '/pages/admin/target/select/object?mode=multiple' });
+			openTargetMerchantStoreSelect({ mode: 'multiple', snapshot: false, realtime: true });
 		},
 		reload() {
 			this.page = 1;
@@ -190,6 +220,9 @@ export default {
 					filterStoreIds: this.filterStoreIds,
 					filterManageRegionId: this.filterManageRegionId,
 					filterObjectType: this.filterObjectType,
+					org_ids: this.filterOrgIds,
+					excluded_store_ids: this.filterExcludedStoreIds,
+					resolved_store_ids: this.filterStoreIds,
 				}),
 				page: this.page,
 				limit: this.limit,
@@ -216,8 +249,11 @@ export default {
 			});
 		},
 		goSetting(id) {
-			const q = id ? `?id=${id}` : '';
-			uni.navigateTo({ url: `/pages/admin/target/setting/index${q}` });
+			const q = [];
+			if (id) q.push(`id=${id}`);
+			if (this.isMerchantMode) q.push('from=merchant');
+			const qs = q.length ? `?${q.join('&')}` : '';
+			uni.navigateTo({ url: `/pages/admin/target/setting/index${qs}` });
 		},
 		onEdit(cardId) {
 			this.goSetting(cardId);

@@ -1,7 +1,8 @@
 <template>
 	<view class="analysis-page">
+		<merchant-target-tabs v-if="isMerchantMode" current="analysis" />
 		<!-- #ifdef H5 -->
-		<page-nav-bar title="目标分析" theme="purple" />
+		<page-nav-bar v-if="!isMerchantMode" title="目标分析" theme="purple" />
 		<!-- #endif -->
 		<view class="filter-bar">
 			<view class="filter-item" @click="openPeriodModal">
@@ -385,6 +386,7 @@ import uniIcons from '@/uni_modules/uni-icons/components/uni-icons/uni-icons.vue
 import metricCard from '../components/metric-card.vue';
 import bottomNav from '../components/bottom-nav.vue';
 import pageNavBar from '../components/page-nav-bar.vue';
+import merchantTargetTabs from '@/components/merchantTargetTabs/index.vue';
 import {
 	getTargetYearRange,
 	clampTargetYear,
@@ -402,13 +404,14 @@ import {
 	isTargetAchieved,
 	applyTargetNativeNavBar,
 	buildStoreFilterApiParams,
+	openTargetMerchantStoreSelect,
 } from '../common/util.js';
 
 const METRIC_CONFIG_KEY = 'target_analysis_metric_keys';
 const PERIOD_CONFIG_KEY = 'target_analysis_period';
 
 export default {
-	components: { uniIcons, metricCard, bottomNav, pageNavBar },
+	components: { uniIcons, metricCard, bottomNav, pageNavBar, merchantTargetTabs },
 	data() {
 		const { years, current } = getTargetYearRange();
 		const yi = years.indexOf(current) >= 0 ? years.indexOf(current) : 0;
@@ -420,6 +423,8 @@ export default {
 			filterStoreIds: [],
 			filterManageRegionId: '',
 			filterObjectType: '',
+			filterOrgIds: [],
+			filterExcludedStoreIds: [],
 			isLastLevelStore: false,
 			_urlObjectOverride: null,
 			primaryTargetId: 0,
@@ -456,6 +461,13 @@ export default {
 		};
 	},
 	computed: {
+		isMerchantMode() {
+			try {
+				return this.$store.state.merchant.mode === 'merchant';
+			} catch (e) {
+				return false;
+			}
+		},
 		periodFilterText() {
 			if (this.startYear === this.endYear) {
 				return `${this.startYear}年${this.startMonth}-${this.endMonth}月`;
@@ -607,14 +619,19 @@ export default {
 			if (tab === 'employee') this.loadEmployeeRanking();
 		},
 	},
-	onLoad() {
+	onLoad(options) {
+		if (options && options.from === 'merchant') {
+			try {
+				this.$store.dispatch('merchant/enterMerchant');
+			} catch (e) {}
+		}
 		this.restorePeriodConfig();
 	},
 	onReady() {
 		this.scheduleDrawTrendChart();
 	},
 	async onShow() {
-		applyTargetNativeNavBar('目标分析');
+		applyTargetNativeNavBar(this.isMerchantMode ? '目标看板' : '目标分析');
 		await this.syncObjectFilter();
 		this._urlObjectOverride = null;
 		this.loadAnalysis();
@@ -634,6 +651,8 @@ export default {
 					this.filterStoreIds = filter.filterStoreIds || [];
 					this.filterManageRegionId = filter.filterManageRegionId || '';
 					this.filterObjectType = filter.filterObjectType;
+					this.filterOrgIds = filter.org_ids || [];
+					this.filterExcludedStoreIds = filter.excluded_store_ids || [];
 					this.isLastLevelStore = filter.isLastLevelStore;
 				},
 			});
@@ -659,7 +678,7 @@ export default {
 			if (row) this.goStoreTarget(row);
 		},
 		goObjectSelect() {
-			uni.navigateTo({ url: '/pages/admin/target/select/object?mode=multiple' });
+			openTargetMerchantStoreSelect({ mode: 'multiple', snapshot: false, realtime: true });
 		},
 		goAddProduct() {
 			this.metricModalVisible = false;
@@ -749,6 +768,9 @@ export default {
 					filterStoreIds: this.filterStoreIds,
 					filterManageRegionId: this.filterManageRegionId,
 					filterObjectType: this.filterObjectType,
+					org_ids: this.filterOrgIds,
+					excluded_store_ids: this.filterExcludedStoreIds,
+					resolved_store_ids: this.filterStoreIds,
 				}),
 				metric_key: this.getAnalysisMetricKey(m),
 			};
@@ -992,6 +1014,9 @@ export default {
 					filterStoreIds: this.filterStoreIds,
 					filterManageRegionId: this.filterManageRegionId,
 					filterObjectType: this.filterObjectType,
+					org_ids: this.filterOrgIds,
+					excluded_store_ids: this.filterExcludedStoreIds,
+					resolved_store_ids: this.filterStoreIds,
 				}),
 				page: 1,
 				limit: 100,

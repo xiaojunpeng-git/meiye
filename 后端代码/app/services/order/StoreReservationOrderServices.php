@@ -552,6 +552,88 @@ class StoreReservationOrderServices extends BaseServices
     }
 
     /**
+     * 商家首页：今日待确认(3)+待服务(0)预约
+     * 口径（产品确认 2026-07-16）：今日、不含取消/退回/完成/服务中；店长全店、员工仅本人；最多 $limit 条
+     *
+     * @return array{count:int,list:array<int,array>}
+     */
+    public function getMerchantHomeTodayPending(int $storeId, int $serviceStaffId = 0, int $limit = 5): array
+    {
+        if ($storeId <= 0) {
+            return ['count' => 0, 'list' => []];
+        }
+        $limit = max(1, min(20, $limit));
+        $dayStart = strtotime(date('Y-m-d') . ' 00:00:00');
+        $dayEnd = strtotime(date('Y-m-d') . ' 23:59:59');
+        $where = [
+            'store_id' => $storeId,
+            'is_del' => 0,
+            'status' => [0, 3],
+            'reservation_time' => [$dayStart, $dayEnd],
+        ];
+        if ($serviceStaffId > 0) {
+            $where['service_staff_id'] = $serviceStaffId;
+        }
+        $count = (int)$this->dao->count($where);
+        $rows = $this->dao->search($where)
+            ->field('id,uid,store_id,status,reservation_time,reservation_start,reservation_name,reservation_phone,service_staff_id,cart_info_id,product_id')
+            ->with(['cartInfo', 'user'])
+            ->order('reservation_start asc,id asc')
+            ->limit($limit)
+            ->select()
+            ->toArray();
+        $list = [];
+        foreach ($rows as $row) {
+            $list[] = $this->formatMerchantHomeReservationRow(is_array($row) ? $row : (array)$row);
+        }
+        return ['count' => $count, 'list' => $list];
+    }
+
+    /**
+     * 商家首页预约卡片展示字段
+     */
+    protected function formatMerchantHomeReservationRow(array $item): array
+    {
+        $start = trim((string)($item['reservation_start'] ?? ''));
+        if ($start === '') {
+            $timeText = '--:--';
+        } else {
+            $timeText = strlen($start) >= 5 ? substr($start, 0, 5) : $start;
+        }
+        $userName = trim((string)($item['reservation_name'] ?? ''));
+        if ($userName === '') {
+            $userName = trim((string)($item['nickname'] ?? ''));
+        }
+        if ($userName === '') {
+            $userName = '客户';
+        }
+        $serviceName = '服务项目';
+        $cartInfo = $item['cart_info'] ?? null;
+        if (is_string($cartInfo)) {
+            $cartInfo = json_decode($cartInfo, true);
+        }
+        if (is_array($cartInfo)) {
+            $productInfo = $cartInfo['productInfo'] ?? [];
+            if (!is_array($productInfo)) {
+                $productInfo = [];
+            }
+            $name = trim((string)($productInfo['store_name'] ?? $productInfo['name'] ?? $cartInfo['store_name'] ?? ''));
+            if ($name !== '') {
+                $serviceName = $name;
+            }
+        }
+        $status = (int)($item['status'] ?? 0);
+        return [
+            'id' => (int)($item['id'] ?? 0),
+            'timeText' => $timeText,
+            'userName' => $userName,
+            'serviceName' => $serviceName,
+            'statusText' => $this->statusName[$status] ?? '',
+            'status' => $status,
+        ];
+    }
+
+    /**
      * 老师中心：订单统计（待服务/已完成）
      */
     public function getTeacherOrderStatistics(array $where): array
@@ -775,7 +857,8 @@ class StoreReservationOrderServices extends BaseServices
         }
         /** @var SystemStoreStaffServices $staffServices */
         $staffServices = app()->make(SystemStoreStaffServices::class);
-        foreach ([['is_butler' => 1], ['is_manager' => 1]] as $whereExtra) {
+        // 兼容期：优先店长，其次历史管家；迁移后仅留店长
+        foreach ([['is_manager' => 1], ['is_butler' => 1]] as $whereExtra) {
             $staff = $staffServices->getOne(array_merge(['store_id' => $storeId, 'is_del' => 0, 'status' => 1], $whereExtra), 'uid');
             if ($staff) {
                 $staff = is_object($staff) ? $staff->toArray() : (array)$staff;
@@ -1042,7 +1125,7 @@ class StoreReservationOrderServices extends BaseServices
     }
 
     /**
-     * 门店管家电话：优先管家/店长，否则门店电话
+     * 门店店长电话：优先店长，兼容期其次历史管家，否则门店电话
      */
     protected function resolveStoreMasterPhone(int $storeId): string
     {
@@ -1053,7 +1136,7 @@ class StoreReservationOrderServices extends BaseServices
         $storeServices = app()->make(SystemStoreServices::class);
         /** @var SystemStoreStaffServices $staffServices */
         $staffServices = app()->make(SystemStoreStaffServices::class);
-        foreach ([['is_butler' => 1], ['is_manager' => 1]] as $whereExtra) {
+        foreach ([['is_manager' => 1], ['is_butler' => 1]] as $whereExtra) {
             $staff = $staffServices->getOne(array_merge(['store_id' => $storeId, 'is_del' => 0], $whereExtra), 'phone');
             if ($staff) {
                 $staff = is_object($staff) ? $staff->toArray() : (array)$staff;
@@ -2762,20 +2845,17 @@ class StoreReservationOrderServices extends BaseServices
     }
 
     /**
-     * 校验管家/店长操作权限
+     * 校验店长操作权限（兼容期历史管家等同店长）
      */
     public function assertReservationManagePermission(array $staffInfo): void
     {
         if (!$staffInfo) {
             throw new ValidateException('无操作权限');
         }
-        if ((int)($staffInfo['is_manager'] ?? 0) === 1) {
+        if (\app\services\store\SystemStoreStaffServices::staffIsManager($staffInfo)) {
             return;
         }
-        if ((int)($staffInfo['is_butler'] ?? 0) === 1) {
-            return;
-        }
-        throw new ValidateException('仅管家或店长可执行此操作');
+        throw new ValidateException('仅店长可执行此操作');
     }
 
     /**

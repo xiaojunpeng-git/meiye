@@ -136,7 +136,7 @@
                 </FormItem>
               </Col>
               <Col :span="12">
-                <FormItem label="允许被选中：">
+                <FormItem label="销售/手艺人：">
                   <i-switch v-model="formInline.can_choose" :true-value="1" :false-value="0" size="large">
                     <span slot="open">是</span>
                     <span slot="close">否</span>
@@ -206,14 +206,6 @@
               <Col :span="12">
                 <FormItem label="可被预约：">
                   <i-switch v-model="formInline.is_reservable" :true-value="1" :false-value="0" size="large">
-                    <span slot="open">是</span>
-                    <span slot="close">否</span>
-                  </i-switch>
-                </FormItem>
-              </Col>
-              <Col :span="12">
-                <FormItem label="是否管家：">
-                  <i-switch v-model="formInline.is_butler" :true-value="1" :false-value="0" size="large">
                     <span slot="open">是</span>
                     <span slot="close">否</span>
                   </i-switch>
@@ -495,9 +487,8 @@ function getDefaultStaffForm() {
     position_level: 0,
     is_manager: 0,
     is_customer: 0,
-    can_choose: 0,
+    can_choose: 1,
     is_reservable: 1,
-    is_butler: 0,
     is_fencheng: 0,
     customer_url: '',
     status: 1,
@@ -690,6 +681,11 @@ export default {
       getStaffInfo(this.editId)
         .then((res) => {
           const info = res.data.ps_info || {};
+          // 兼容期：历史管家等同店长展示
+          if (Number(info.is_butler) === 1) {
+            info.is_manager = 1;
+          }
+          delete info.is_butler;
           this.formInline = { ...this.getDefaultForm(), ...info };
           this.userName = info.nickname || '';
           this.formInline.pwd = '';

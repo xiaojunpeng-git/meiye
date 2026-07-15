@@ -91,14 +91,13 @@ class StoreReservationOrder
 	public function reservationList(Request $request)
 	{
 		$where = $request->getMore([
-			['is_manager', 0],//是否是店长
+			['is_manager', 0],// 已废弃：全店范围仅以服务端 staffIsManager 判定，忽略前端参数
 			['teacher_mode', 0],//老师中心
 			['status', ''],//状态
 			[['search', 's'], ''],//筛选关键词
 			[['oid', 'd'], 0],//订单ID
 			['date', ''],//预约日期 Y-m-d
 		]);
-		$is_manager = $where['is_manager'];
 		$teacher_mode = (int)$where['teacher_mode'];
 		unset($where['is_manager'], $where['teacher_mode']);
 		if (!empty($where['date'])) {
@@ -110,7 +109,8 @@ class StoreReservationOrder
 		unset($where['date']);
 		if (!$where['oid']) {
 			$where['store_id'] = $this->store_id;
-			$canSeeAllStore = $is_manager || (int)($this->staffInfo['is_manager'] ?? 0) === 1 || (int)($this->staffInfo['is_butler'] ?? 0) === 1;
+			// 禁止信任请求参数 is_manager，防止普通员工伪造全店范围
+			$canSeeAllStore = \app\services\store\SystemStoreStaffServices::staffIsManager($this->staffInfo ?: []);
 			if ($teacher_mode) {
 				$where['teacher_staff_id'] = $this->staff_id;
 				if ($where['status'] !== '' && $where['status'] !== null) {
@@ -125,15 +125,16 @@ class StoreReservationOrder
 	}
 
 	/**
-	 * 管家中心 / 老师中心状态统计
+	 * 店长中心 / 老师中心状态统计
 	 */
 	public function statistics(Request $request)
 	{
 		[$is_manager, $date, $teacher_mode] = $request->getMore([
-			['is_manager', 0],
+			['is_manager', 0], // 已废弃，忽略
 			['date', ''],
 			['teacher_mode', 0],
 		], true);
+		unset($is_manager);
 		$where = ['store_id' => $this->store_id];
 		if ($date) {
 			$where['reservation_time'] = [
@@ -141,7 +142,7 @@ class StoreReservationOrder
 				strtotime($date . ' 23:59:59'),
 			];
 		}
-		$canSeeAllStore = $is_manager || (int)($this->staffInfo['is_manager'] ?? 0) === 1 || (int)($this->staffInfo['is_butler'] ?? 0) === 1;
+		$canSeeAllStore = \app\services\store\SystemStoreStaffServices::staffIsManager($this->staffInfo ?: []);
 		if ((int)$teacher_mode) {
 			$where['teacher_staff_id'] = $this->staff_id;
 			return app('json')->successful($this->services->getTeacherOrderStatistics($where));

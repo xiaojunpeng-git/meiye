@@ -1,11 +1,13 @@
 <template>
-	<view class="bottom-nav">
+	<!-- 商家端仅保留底部 TabBar；顶栏由目标页自行挂载 -->
+	<merchant-tab-bar v-if="isMerchant" current="target" />
+	<view v-else class="bottom-nav">
 		<view
 			class="nav-item"
 			:class="{ active: current === 'analysis' }"
 			@click="go('analysis')"
 		>
-			<text class="nav-icon">📊</text>
+			<text class="nav-icon iconfont icon-ic_order"></text>
 			<text>目标分析</text>
 		</view>
 		<view
@@ -13,16 +15,28 @@
 			:class="{ active: current === 'management' }"
 			@click="go('management')"
 		>
-			<text class="nav-icon">🎯</text>
+			<text class="nav-icon iconfont icon-ic_star"></text>
 			<text>目标管理</text>
 		</view>
 	</view>
 </template>
 
 <script>
+import merchantTabBar from '@/components/merchantTabBar/index.vue';
+
 export default {
+	components: { merchantTabBar },
 	props: {
 		current: { type: String, default: 'management' },
+	},
+	computed: {
+		isMerchant() {
+			try {
+				return this.$store.state.merchant.mode === 'merchant';
+			} catch (e) {
+				return false;
+			}
+		},
 	},
 	methods: {
 		go(tab) {
@@ -58,7 +72,7 @@ export default {
 	color: #999;
 }
 .nav-item.active {
-	color: #8b5cf6;
+	color: #e93323;
 }
 .nav-icon {
 	font-size: 40rpx;

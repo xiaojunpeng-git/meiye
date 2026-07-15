@@ -381,8 +381,9 @@ class SystemStoreStaff extends AuthController
             ['position', 0],
             ['position_level', 0],
             ['is_customer', 0],
-            ['can_choose', 0],
+            ['can_choose', 1],
             ['is_reservable', 1],
+            // is_butler 已合并到店长：兼容期仍可读请求，normalizeStaffManagerFields 升 is_manager 后丢弃
             ['is_butler', 0],
             ['is_fencheng', 0],
             ['customer_url', ''],
@@ -482,6 +483,7 @@ class SystemStoreStaff extends AuthController
         unset($data['conf_pwd'], $data['image']);
         $this->services->normalizeStaffAvatar($data);
         $this->services->normalizeStaffDates($data);
+        $this->services->normalizeStaffManagerFields($data);
         $this->services->applyRolesFlags($data);
         if ($id) {
             $res = $this->services->update($id, $data);
