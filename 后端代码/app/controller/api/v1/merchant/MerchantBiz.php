@@ -6,6 +6,7 @@ use app\services\merchant\MerchantAccessServices;
 use app\services\merchant\MerchantCustomerServices;
 use app\services\merchant\MerchantDataServices;
 use app\services\merchant\MerchantHomeServices;
+use app\services\merchant\MerchantYejiServices;
 use app\services\order\StoreDebtServices;
 use app\model\order\StoreDebt;
 
@@ -151,6 +152,7 @@ class MerchantBiz
         ]);
         /** @var MerchantDataServices $services */
         $services = app()->make(MerchantDataServices::class);
+        $access['uid'] = $uid;
         return app('json')->success($services->businessOverview($access, $filter));
     }
 
@@ -184,6 +186,51 @@ class MerchantBiz
         /** @var MerchantDataServices $services */
         $services = app()->make(MerchantDataServices::class);
         return app('json')->success($services->staffStatistics($access, $filter));
+    }
+
+    /**
+     * 本人业绩概览：服务端解析 staff_id，拒绝客户端 staff_id
+     */
+    public function yejiSelf(Request $request)
+    {
+        [$uid, $access, $accessServices] = $this->access($request);
+        $accessServices->requirePermissions($access, ['merchant.data.self'], '暂无本人业绩查看权限');
+        // 显式丢弃客户端 staff_id，防止越权
+        $filter = $request->getMore([
+            ['date_type', 'today'],
+            ['start_date', date('Y-m-d')],
+            ['end_date', date('Y-m-d')],
+        ]);
+        unset($filter['staff_id']);
+        /** @var MerchantYejiServices $services */
+        $services = app()->make(MerchantYejiServices::class);
+        return app('json')->success($services->selfOverview($uid, $access, $filter));
+    }
+
+    /**
+     * 本人业绩明细列表：强制本人 staff_id
+     */
+    public function yejiSelfDetail(Request $request)
+    {
+        [$uid, $access, $accessServices] = $this->access($request);
+        $accessServices->requirePermissions($access, ['merchant.data.self'], '暂无本人业绩查看权限');
+        $filter = $request->getMore([
+            ['date_type', 'today'],
+            ['start_date', date('Y-m-d')],
+            ['end_date', date('Y-m-d')],
+            ['sum_type', 1],
+            ['page', 1],
+            ['limit', 20],
+        ]);
+        // 拒绝信任请求中的 staff_id
+        if ($request->param('staff_id') !== null && $request->param('staff_id') !== '') {
+            // 不抛错也可，但明确拒绝更清晰
+            throw new \think\exception\ValidateException('不允许指定员工，仅可查看本人业绩');
+        }
+        unset($filter['staff_id']);
+        /** @var MerchantYejiServices $services */
+        $services = app()->make(MerchantYejiServices::class);
+        return app('json')->success($services->selfDetail($uid, $access, $filter));
     }
 
     public function debtList(Request $request)

@@ -54,6 +54,16 @@ export function merchantDataStaffStats(data) {
 	return request.get('merchant/data/staff/statistics', data || {});
 }
 
+/** 本人业绩概览（服务端解析 staff_id，勿传 staff_id） */
+export function merchantYejiSelf(data) {
+	return request.get('merchant/yeji/self', data || {});
+}
+
+/** 本人业绩明细（服务端强制本人，传 staff_id 会被拒绝） */
+export function merchantYejiSelfDetail(data) {
+	return request.get('merchant/yeji/self/detail', data || {});
+}
+
 export function merchantDebtList(data) {
 	return request.get('merchant/debt/list', data || {});
 }

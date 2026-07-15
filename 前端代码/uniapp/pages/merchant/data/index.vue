@@ -26,11 +26,20 @@
 					</view>
 					<view class="card">
 						<view class="card__head">
-							<text class="card__title">经营概览</text>
+							<text class="card__title">{{ businessTitle }}</text>
 							<text class="card__sub">{{ dateFilter.display }}</text>
 						</view>
-						<view class="metrics__row" v-if="primaryMetrics.length">
-							<view class="metrics__item" v-for="(m, i) in primaryMetrics" :key="m.metric_code || i">
+						<view
+							class="metrics__row"
+							:class="{ 'metrics__row--wrap': primaryMetrics.length > 3 }"
+							v-if="primaryMetrics.length"
+						>
+							<view
+								class="metrics__item"
+								:class="{ 'metrics__item--third': primaryMetrics.length > 3 }"
+								v-for="(m, i) in primaryMetrics"
+								:key="m.metric_code || i"
+							>
 								<view class="metrics__label">
 									{{ m.title }}
 									<text
@@ -45,7 +54,7 @@
 							</view>
 						</view>
 						<view class="hint" v-if="business.note || business.primary_developing">
-							{{ business.note || '当前身份仅可看本人数据，整店经营指标待个人口径确认' }}
+							{{ business.note || (isStaffSelfMetrics ? '口径与「个人业绩」页一致' : '当前身份仅可看本人数据') }}
 						</view>
 						<view class="empty" v-if="!primaryMetrics.length">暂无数据</view>
 					</view>
@@ -230,6 +239,12 @@ export default {
 		primaryMetrics() {
 			return (this.business && this.business.primary) || [];
 		},
+		isStaffSelfMetrics() {
+			return (this.business && this.business.metrics_mode) === 'staff_self';
+		},
+		businessTitle() {
+			return this.isStaffSelfMetrics ? '我的业绩' : '经营概览';
+		},
 		secondaryMetrics() {
 			return (this.business && this.business.secondary) || [];
 		},
@@ -252,7 +267,7 @@ export default {
 				list.push({ name: '门店业绩', desc: '门店现金/实收/消耗', url: '/pages/admin/yeji/store' });
 			}
 			if (this.perms.includes('merchant.data.self')) {
-				list.push({ name: '个人业绩', desc: '本人业绩明细', url: '/pages/admin/yeji/staff' });
+				list.push({ name: '个人业绩', desc: '本人业绩明细', url: '/pages/merchant/yeji/self' });
 			}
 			return list;
 		},
@@ -399,6 +414,7 @@ export default {
 					d.formula ? `公式：${d.formula}` : '',
 					d.include ? `包含：${d.include}` : '',
 					d.exclude ? `排除：${d.exclude}` : '',
+					d.source ? `来源：${d.source}` : '',
 					d.time_field ? `时间：${d.time_field}` : '',
 				].filter(Boolean);
 				uni.showModal({
@@ -488,9 +504,18 @@ export default {
 .metrics__row {
 	display: flex;
 }
+.metrics__row--wrap {
+	flex-wrap: wrap;
+}
 .metrics__item {
 	flex: 1;
 	padding-right: 8rpx;
+}
+.metrics__item--third {
+	flex: 0 0 33.33%;
+	width: 33.33%;
+	box-sizing: border-box;
+	padding: 8rpx 8rpx 16rpx 0;
 }
 .metrics__label {
 	font-size: 22rpx;

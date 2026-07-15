@@ -982,6 +982,8 @@ Route::group('api', function () {
 		Route::get('data/business', 'v1.merchant.MerchantBiz/dataBusiness')->option(['real_name' => '数仓经营概览']);
 		Route::get('data/customer', 'v1.merchant.MerchantBiz/dataCustomer')->option(['real_name' => '数仓客户分析']);
 		Route::get('data/staff/statistics', 'v1.merchant.MerchantBiz/dataStaffStats')->option(['real_name' => '数仓员工统计']);
+		Route::get('yeji/self', 'v1.merchant.MerchantBiz/yejiSelf')->option(['real_name' => '本人业绩概览']);
+		Route::get('yeji/self/detail', 'v1.merchant.MerchantBiz/yejiSelfDetail')->option(['real_name' => '本人业绩明细']);
 		Route::get('debt/list', 'v1.merchant.MerchantBiz/debtList')->option(['real_name' => '商家欠款列表']);
 	})->middleware(AuthTokenMiddleware::class, true);
 

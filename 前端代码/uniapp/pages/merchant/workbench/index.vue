@@ -58,7 +58,7 @@ export default {
 					items: [
 						{ name: '数仓', icon: 'icon-ic_order', url: '/pages/merchant/data/index', redirect: true },
 						{ name: '门店业绩', icon: 'icon-ic_star', url: '/pages/admin/yeji/store', perm: 'merchant.data.store' },
-						{ name: '个人业绩', icon: 'icon-ic_star1', url: '/pages/admin/yeji/staff', perm: 'merchant.data.self' },
+						{ name: '个人业绩', icon: 'icon-ic_star1', url: '/pages/merchant/yeji/self', perm: 'merchant.data.self' },
 						{ name: '区域统计', icon: 'icon-ic_home', url: '/pages/admin/agent/index', perm: 'merchant.data.region' },
 						{ name: '目标看板', icon: 'icon-ic_star', url: '/pages/merchant/target/index', redirect: true, perm: 'merchant.target.view' },
 					],

@@ -55,14 +55,14 @@
 				</view>
 			</view>
 
-			<!-- 设置 -->
+			<!-- 设置：复用买家端账号级消息/安全页（同一登录态） -->
 			<view class="card mt">
 				<view class="card__sub">设置</view>
-				<view class="menu-item" @click="developing">
+				<view class="menu-item" @click="goUrl('/pages/users/message_center/index')">
 					<text>消息通知</text>
 					<text class="arrow">›</text>
 				</view>
-				<view class="menu-item" @click="developing">
+				<view class="menu-item" @click="goUrl('/pages/users/user_set/index')">
 					<text>账号安全</text>
 					<text class="arrow">›</text>
 				</view>
@@ -164,7 +164,7 @@ export default {
 				return menus;
 			}
 			if (this.hasMerchantPermission('merchant.data.self')) {
-				menus.push({ name: '个人业绩', url: '/pages/admin/yeji/staff' });
+				menus.push({ name: '个人业绩', url: '/pages/merchant/yeji/self' });
 			}
 			if (this.hasMerchantPermission('merchant.data.store') || this.hasMerchantPermission('merchant.data.region')) {
 				menus.push({
@@ -199,6 +199,10 @@ export default {
 		},
 		developing() {
 			uni.showToast({ title: '该功能正在开发中，敬请期待', icon: 'none' });
+		},
+		goUrl(url) {
+			if (!url) return;
+			uni.navigateTo({ url });
 		},
 		onMenu(item) {
 			if (!item) return;

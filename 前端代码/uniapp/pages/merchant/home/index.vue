@@ -15,22 +15,34 @@
 				</view>
 			</view>
 
-			<!-- B. 今日经营 / 我的业绩 -->
+			<!-- B. 今日经营 / 我的业绩（本人为个人业绩 6 项，店级为 3 项） -->
 			<view
 				v-if="showMetrics"
 				class="card metrics"
-				@click="goData"
+				@click="goMetricsDetail"
 			>
 				<view class="card__head">
 					<text class="card__title">{{ metricsTitle }}</text>
 					<view class="metrics__actions">
 						<text class="metrics__eye" @click.stop="hideAmount = !hideAmount">{{ hideAmount ? '显示' : '隐藏' }}</text>
-						<text class="card__link">数仓 ›</text>
+						<text class="card__link">{{ metricsLinkText }}</text>
 					</view>
 				</view>
-				<view class="metrics__row">
-					<view class="metrics__item" v-for="(m, i) in metricList" :key="m.metric_code || i">
-						<view class="metrics__label">{{ m.title }}</view>
+				<view class="metrics__row" :class="{ 'metrics__row--wrap': metricList.length > 3 }">
+					<view
+						class="metrics__item"
+						:class="{ 'metrics__item--third': metricList.length > 3 }"
+						v-for="(m, i) in metricList"
+						:key="m.metric_code || i"
+					>
+						<view class="metrics__label">
+							{{ m.title }}
+							<text
+								v-if="m.tooltip_api"
+								class="tip"
+								@click.stop="onTooltip(m)"
+							>ⓘ</text>
+						</view>
 						<view class="metrics__value">{{ formatMetricValue(m) }}</view>
 						<view v-if="m.developing" class="metrics__sub">口径开发中</view>
 						<view v-else-if="m.detail_developing" class="metrics__sub">明细开发中</view>
@@ -122,6 +134,7 @@ import merchantGuard from '@/mixins/merchantGuard.js';
 import merchantSwitch from '@/components/merchantSwitch/index.vue';
 import merchantTabBar from '@/components/merchantTabBar/index.vue';
 import { merchantHome } from '@/api/merchant.js';
+import request from '@/utils/request.js';
 
 const ROLE_MAP = {
 	region_agent: '区域代理',
@@ -139,6 +152,7 @@ export default {
 			hideAmount: false,
 			metricList: [],
 			metricsExtra: '',
+			metricsMode: 'store',
 			todoCounts: {
 				reservation: null,
 				reservation_developing: true,
@@ -196,9 +210,13 @@ export default {
 			return this.canStoreData || this.canSelfData || this.metricList.length > 0;
 		},
 		metricsTitle() {
+			if (this.metricsMode === 'staff_self') return '我的今日业绩';
 			if (this.activeRole === 'region_agent') return '今日区域经营';
 			if (this.canStoreData) return '今日经营';
 			return '我的今日业绩';
+		},
+		metricsLinkText() {
+			return this.metricsMode === 'staff_self' ? '个人业绩 ›' : '数仓 ›';
 		},
 		isDeliveryOnly() {
 			return this.activeRole === 'delivery' && !this.canStoreData && !this.canSelfData;
@@ -212,14 +230,14 @@ export default {
 			if (this.showReservation) {
 				if (t.reservation_developing) {
 					list.push({
-						name: '待服务预约',
+						name: '今日预约待办',
 						count: 0,
 						developing: true,
 						url: '/pages/admin/reservation_list/index',
 					});
 				} else if (Number(t.reservation) > 0) {
 					list.push({
-						name: '待服务预约',
+						name: '今日预约待办',
 						count: Number(t.reservation),
 						url: '/pages/admin/reservation_list/index',
 					});
@@ -329,6 +347,35 @@ export default {
 		goData() {
 			uni.redirectTo({ url: '/pages/merchant/data/index' });
 		},
+		goMetricsDetail() {
+			if (this.metricsMode === 'staff_self') {
+				uni.navigateTo({ url: '/pages/merchant/yeji/self' });
+				return;
+			}
+			this.goData();
+		},
+		async onTooltip(m) {
+			if (!m || !m.tooltip_api) return;
+			try {
+				const res = await request.get(m.tooltip_api);
+				const d = (res && res.data) || {};
+				const lines = [
+					d.name || m.title || '',
+					d.formula ? `公式：${d.formula}` : '',
+					d.include ? `包含：${d.include}` : '',
+					d.exclude ? `排除：${d.exclude}` : '',
+					d.source ? `来源：${d.source}` : '',
+					d.time_field ? `时间：${d.time_field}` : '',
+				].filter(Boolean);
+				uni.showModal({
+					title: '指标口径',
+					content: lines.join('\n') || '暂无说明',
+					showCancel: false,
+				});
+			} catch (e) {
+				uni.showToast({ title: '口径说明加载失败', icon: 'none' });
+			}
+		},
 		goWorkbench() {
 			uni.navigateTo({ url: '/pages/merchant/workbench/index' });
 		},
@@ -370,7 +417,9 @@ export default {
 		},
 		applyHomePayload(data) {
 			const metrics = Array.isArray(data.metrics) ? data.metrics : [];
-			this.metricList = metrics.slice(0, 3).map((m) => ({
+			this.metricsMode = data.metrics_mode === 'staff_self' ? 'staff_self' : 'store';
+			// 本人：个人业绩 6 项全展示；店级：仍取三指标（接口本身 3 条）
+			this.metricList = metrics.map((m) => ({
 				...m,
 				developing: !!(m.developing || data.metrics_developing),
 			}));
@@ -481,12 +530,26 @@ export default {
 .metrics__row {
 	display: flex;
 }
+.metrics__row--wrap {
+	flex-wrap: wrap;
+}
 .metrics__item {
 	flex: 1;
+}
+.metrics__item--third {
+	flex: 0 0 33.33%;
+	width: 33.33%;
+	box-sizing: border-box;
+	padding: 8rpx 8rpx 16rpx 0;
 }
 .metrics__label {
 	font-size: 22rpx;
 	color: #999;
+}
+.tip {
+	margin-left: 6rpx;
+	color: #e93323;
+	font-size: 22rpx;
 }
 .metrics__value {
 	margin-top: 10rpx;

@@ -2591,6 +2591,13 @@
 						"navigationBarTitleText": "待还欠款",
 						"navigationBarBackgroundColor": "#ffffff"
 					}
+				},
+				{
+					"path": "yeji/self",
+					"style": {
+						"navigationBarTitleText": "本人业绩",
+						"navigationBarBackgroundColor": "#ffffff"
+					}
 				}
 			]
 		}

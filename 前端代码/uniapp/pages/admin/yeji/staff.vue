@@ -129,8 +129,10 @@ import {getAgentOrder, getStoreList} from "@/api/admin";
 import {detailYeji,yejiInfo} from "@/api/yeji";
 import qiunDataCharts from '../components/qiun-data-charts/components/qiun-data-charts/qiun-data-charts.vue';
 import emptyPage from '@/components/emptyPage.vue';
+import legacyMerchantRedirect from '@/mixins/legacyMerchantRedirect.js';
 export default {
   name: 'agent',
+  mixins: [legacyMerchantRedirect],
   components: {
 	storeList,
     emptyPage,
@@ -285,27 +287,43 @@ export default {
     this.staff_id=option.staff_id || 0;
     this.current=option.date_tap || 0;
     this.dataRange=option.dataRange || '';
-    //这里的 750 对应 css .charts 的 width
-    this.cWidth = uni.upx2px(710);
-    //这里的 500 对应 css .charts 的 height
-    this.cHeight = uni.upx2px(500);
-    if(this.dataRange == '') {
-      let todayRange = this.$util.getCurrentTodayRange();
-      this.dataRange = todayRange.start + '-' + todayRange.end;
-    }else{
-      this.customizeData = this.dataRange.split("-");
-    }
-    if(this.current > 0 && this.current != 4){
-        this.dataTap(this.current);
-    }else{
-      this.agentStore();
-      this.getInfo();
-    }
+    // 商家端本人业绩：无指定 staff_id 时收口到 Guard 页，禁止走旧 yejiInfo 任意 staff_id
+    this._legacyOption = option;
+    this.bootstrapAfterLegacyCheck();
   },
   onReachBottom: function() {
     this.agentStore();
   },
   methods: {
+    async bootstrapAfterLegacyCheck() {
+      const lookingOthers = this.staff_id && Number(this.staff_id) > 0;
+      if (!lookingOthers) {
+        const redirected = await this.redirectLegacyToMerchant(() => {
+          const perms = (this.$store && this.$store.state.merchant.permissions) || [];
+          if (Array.isArray(perms) && perms.indexOf('merchant.data.self') !== -1) {
+            return '/pages/merchant/yeji/self';
+          }
+          return '/pages/merchant/home/index';
+        });
+        if (redirected) return;
+      }
+      //这里的 750 对应 css .charts 的 width
+      this.cWidth = uni.upx2px(710);
+      //这里的 500 对应 css .charts 的 height
+      this.cHeight = uni.upx2px(500);
+      if(this.dataRange == '') {
+        let todayRange = this.$util.getCurrentTodayRange();
+        this.dataRange = todayRange.start + '-' + todayRange.end;
+      }else{
+        this.customizeData = this.dataRange.split("-");
+      }
+      if(this.current > 0 && this.current != 4){
+          this.dataTap(this.current);
+      }else{
+        this.agentStore();
+        this.getInfo();
+      }
+    },
     copyOrder(key){
       uni.setClipboardData({
         data: key, // 要复制的文本
