@@ -95,11 +95,60 @@ class MerchantDataServices extends BaseServices
             }
         }
 
-        $secondary = $metricsMode === 'staff_self' ? [] : [
-            ['title' => '开卡充值金额', 'number' => null, 'developing' => true, 'note' => '口径待确认'],
-            ['title' => '服务/产品收入', 'number' => null, 'developing' => true, 'note' => '口径待确认'],
-            ['title' => '退款金额', 'number' => null, 'developing' => true, 'note' => '口径待确认'],
-        ];
+        $secondary = [];
+        if ($metricsMode !== 'staff_self') {
+            $startTs = strtotime($start . ' 00:00:00');
+            $endTs = strtotime($end . ' 23:59:59');
+            if ($canStoreMetrics && $startTs > 0 && $endTs > 0 && $endTs >= $startTs) {
+                /** @var MerchantBusinessSecondaryMetricServices $secondaryMetrics */
+                $secondaryMetrics = app()->make(MerchantBusinessSecondaryMetricServices::class);
+                $packSecondary = static function (array $m): array {
+                    return [
+                        'title' => $m['title'],
+                        'number' => $m['number'],
+                        'code' => $m['metric_code'],
+                        'metric_code' => $m['metric_code'],
+                        'developing' => $m['developing'],
+                        'note' => $m['note'],
+                        'detail_api' => $m['detail_api'],
+                        'detail_developing' => $m['detail_developing'],
+                        'tooltip_api' => $m['tooltip_api'],
+                    ];
+                };
+                $secondary = [
+                    $packSecondary($secondaryMetrics->cardRechargeAmountMetric($scopeStoreIds, $startTs, $endTs)),
+                    $packSecondary($secondaryMetrics->productIncomeMetric($scopeStoreIds, $startTs, $endTs)),
+                    $packSecondary($secondaryMetrics->refundAmountMetric($scopeStoreIds, $startTs, $endTs)),
+                ];
+            } else {
+                $secondary = [
+                    [
+                        'title' => '开卡充值金额',
+                        'number' => null,
+                        'metric_code' => MerchantBusinessSecondaryMetricServices::CODE_CARD_RECHARGE_AMOUNT,
+                        'developing' => true,
+                        'detail_developing' => true,
+                        'tooltip_api' => 'metric/dictionary/' . MerchantBusinessSecondaryMetricServices::CODE_CARD_RECHARGE_AMOUNT,
+                    ],
+                    [
+                        'title' => '产品收入',
+                        'number' => null,
+                        'metric_code' => MerchantBusinessSecondaryMetricServices::CODE_PRODUCT_INCOME,
+                        'developing' => true,
+                        'detail_developing' => true,
+                        'tooltip_api' => 'metric/dictionary/' . MerchantBusinessSecondaryMetricServices::CODE_PRODUCT_INCOME,
+                    ],
+                    [
+                        'title' => '退款金额',
+                        'number' => null,
+                        'metric_code' => MerchantBusinessSecondaryMetricServices::CODE_REFUND_AMOUNT,
+                        'developing' => true,
+                        'detail_developing' => true,
+                        'tooltip_api' => 'metric/dictionary/' . MerchantBusinessSecondaryMetricServices::CODE_REFUND_AMOUNT,
+                    ],
+                ];
+            }
+        }
 
         // 多店范围才展示门店排行（复用已 PASS 的 storeChart 三指标口径）
         $storeRanking = [
@@ -182,47 +231,35 @@ class MerchantDataServices extends BaseServices
         /** @var MerchantCustomerMetricServices $customerMetrics */
         $customerMetrics = app()->make(MerchantCustomerMetricServices::class);
         $newCustomer = $customerMetrics->newCustomerMetric($scopeStoreIds, $start, $end);
+        $dealCustomer = $customerMetrics->dealCustomerMetric($scopeStoreIds, $start, $end);
+        $cardRechargeCustomer = $customerMetrics->cardRechargeCustomerMetric($scopeStoreIds, $start, $end);
         $reservationCustomer = $customerMetrics->reservationCustomerMetric($scopeStoreIds, $start, $end);
+        $visitCustomer = $customerMetrics->visitCustomerMetric($scopeStoreIds, $start, $end);
         $serviceVisit = $customerMetrics->serviceVisitMetric($scopeStoreIds, $start, $end);
+        $repurchaseCustomer = $customerMetrics->repurchaseCustomerMetric($scopeStoreIds, $start, $end);
+
+        $pack = static function (array $m): array {
+            return [
+                'title' => $m['title'],
+                'number' => $m['number'],
+                'code' => $m['metric_code'],
+                'metric_code' => $m['metric_code'],
+                'developing' => $m['developing'],
+                'note' => $m['note'],
+                'detail_api' => $m['detail_api'],
+                'detail_developing' => $m['detail_developing'],
+                'tooltip_api' => $m['tooltip_api'],
+            ];
+        };
 
         $metrics = [
-            [
-                'title' => $newCustomer['title'],
-                'number' => $newCustomer['number'],
-                'code' => $newCustomer['metric_code'],
-                'metric_code' => $newCustomer['metric_code'],
-                'developing' => $newCustomer['developing'],
-                'note' => $newCustomer['note'],
-                'detail_api' => $newCustomer['detail_api'],
-                'detail_developing' => $newCustomer['detail_developing'],
-                'tooltip_api' => $newCustomer['tooltip_api'],
-            ],
-            ['title' => '成交客户数', 'number' => null, 'developing' => true],
-            ['title' => '开卡充值客户数', 'number' => null, 'developing' => true],
-            [
-                'title' => $reservationCustomer['title'],
-                'number' => $reservationCustomer['number'],
-                'code' => $reservationCustomer['metric_code'],
-                'metric_code' => $reservationCustomer['metric_code'],
-                'developing' => $reservationCustomer['developing'],
-                'note' => $reservationCustomer['note'],
-                'detail_api' => $reservationCustomer['detail_api'],
-                'detail_developing' => $reservationCustomer['detail_developing'],
-                'tooltip_api' => $reservationCustomer['tooltip_api'],
-            ],
-            ['title' => '到店客户数', 'number' => null, 'developing' => true],
-            [
-                'title' => $serviceVisit['title'],
-                'number' => $serviceVisit['number'],
-                'code' => $serviceVisit['metric_code'],
-                'metric_code' => $serviceVisit['metric_code'],
-                'developing' => $serviceVisit['developing'],
-                'note' => $serviceVisit['note'],
-                'detail_api' => $serviceVisit['detail_api'],
-                'detail_developing' => $serviceVisit['detail_developing'],
-                'tooltip_api' => $serviceVisit['tooltip_api'],
-            ],
-            ['title' => '复购客户数', 'number' => null, 'developing' => true],
+            $pack($newCustomer),
+            $pack($dealCustomer),
+            $pack($cardRechargeCustomer),
+            $pack($reservationCustomer),
+            $pack($visitCustomer),
+            $pack($serviceVisit),
+            $pack($repurchaseCustomer),
             ['title' => '沉睡/召回客户数', 'number' => null, 'developing' => true],
         ];
 
@@ -234,25 +271,64 @@ class MerchantDataServices extends BaseServices
                 'end_date' => $filter['end_date'] ?? date('Y-m-d'),
             ],
             'scope_store_ids' => $scopeStoreIds,
-            'note' => '新增客户/预约客户/服务客次走 MerchantCustomerMetricServices；其余未核实指标 developing',
+            'note' => '新增/成交/开卡充值/预约/到店/服务客次/复购走 MerchantCustomerMetricServices；沉睡仍 developing',
             'updated_at' => date('Y-m-d H:i:s'),
         ];
     }
 
     public function staffStatistics(array $access, array $filter): array
     {
+        /** @var MerchantAccessServices $accessServices */
+        $accessServices = app()->make(MerchantAccessServices::class);
+        // 双重护栏：仅整店/区域权限可聚合；data.self 不得读到本店三项
+        if (!$accessServices->canAggregateStoreMetrics($access)) {
+            throw new \think\exception\ValidateException('暂无员工统计查看权限');
+        }
+        $scopeStoreIds = $accessServices->requireScopeStoreIds($access);
+        $start = strtotime(($filter['start_date'] ?? date('Y-m-d')) . ' 00:00:00');
+        $end = strtotime(($filter['end_date'] ?? date('Y-m-d')) . ' 23:59:59');
+
+        /** @var MerchantCustomerMetricServices $customerMetrics */
+        $customerMetrics = app()->make(MerchantCustomerMetricServices::class);
+        $newCustomer = $customerMetrics->newCustomerMetric($scopeStoreIds, $start, $end);
+        $serviceVisit = $customerMetrics->serviceVisitMetric($scopeStoreIds, $start, $end);
+        $reservationOrder = $customerMetrics->reservationOrderMetric($scopeStoreIds, $start, $end);
+
+        $pack = static function (array $m, ?string $titleOverride = null): array {
+            return [
+                'title' => $titleOverride !== null ? $titleOverride : ($m['title'] ?? ''),
+                'number' => $m['number'] ?? null,
+                'code' => $m['metric_code'] ?? '',
+                'metric_code' => $m['metric_code'] ?? '',
+                'developing' => (bool)($m['developing'] ?? true),
+                'note' => $m['note'] ?? '',
+                'detail_api' => $m['detail_api'] ?? null,
+                'detail_developing' => (bool)($m['detail_developing'] ?? true),
+                'tooltip_api' => $m['tooltip_api'] ?? null,
+            ];
+        };
+
+        $metrics = [
+            ['title' => '成交客户数', 'number' => null, 'developing' => true],
+            ['title' => '开卡充值客户数', 'number' => null, 'developing' => true],
+            $pack($newCustomer),
+            ['title' => '跟进客户数', 'number' => null, 'developing' => true],
+            ['title' => '成功邀约客户数', 'number' => null, 'developing' => true],
+            // 方案「服务次数」与客户分析「服务客次」同算法
+            $pack($serviceVisit, '服务次数'),
+            $pack($reservationOrder),
+        ];
+
         return [
-            'list' => [
-                ['title' => '成交客户数', 'developing' => true],
-                ['title' => '开卡充值客户数', 'developing' => true],
-                ['title' => '新增客户数', 'developing' => true],
-                ['title' => '跟进客户数', 'developing' => true],
-                ['title' => '成功邀约客户数', 'developing' => true],
-                ['title' => '服务次数', 'developing' => true],
-                ['title' => '预约单数', 'developing' => true],
+            'metrics' => $metrics,
+            'list' => $metrics, // 兼容旧字段名
+            'note' => '新增客户/服务次数/预约单数已接入既有口径；成交/开卡充值客户/跟进/邀约仍待产品确认',
+            'filter' => [
+                'date_type' => $filter['date_type'] ?? 'custom',
+                'start_date' => $filter['start_date'] ?? date('Y-m-d'),
+                'end_date' => $filter['end_date'] ?? date('Y-m-d'),
             ],
-            'note' => '员工统计指标待与报表口径核对后接入',
-            'filter' => $filter,
+            'scope_store_ids' => $scopeStoreIds,
             'updated_at' => date('Y-m-d H:i:s'),
         ];
     }

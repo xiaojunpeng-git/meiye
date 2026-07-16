@@ -63,13 +63,24 @@
 						<view class="card__title">其他指标</view>
 						<view
 							v-for="(m, i) in secondaryMetrics"
-							:key="i"
+							:key="m.metric_code || i"
 							class="menu__item"
-							@click="onDeveloping(m)"
+							@click="onMetricTap(m)"
 						>
 							<view>
-								<view class="menu__name">{{ m.title }}</view>
-								<view class="menu__desc">{{ m.developing ? '口径待确认' : formatMoney(m.number) }}</view>
+								<view class="menu__name">
+									{{ m.title }}
+									<text
+										v-if="m.tooltip_api && !m.developing"
+										class="tip"
+										@click.stop="onTooltip(m)"
+									>ⓘ</text>
+								</view>
+								<view class="menu__desc" v-if="m.developing">口径开发中</view>
+								<view class="menu__desc" v-else>
+									{{ formatMoney(m.number) }}
+									<text v-if="m.detail_developing" class="menu__sub"> · 明细开发中</text>
+								</view>
 							</view>
 							<text class="menu__arrow">›</text>
 						</view>
@@ -176,27 +187,35 @@
 				</view>
 			</template>
 
-			<!-- 员工统计 -->
+			<!-- 员工统计（仅 store/region；普通店员不展示页签） -->
 			<template v-else-if="tab === 'staff_stats'">
-				<view class="card" v-if="businessDenied">
+				<view class="card" v-if="staffStatsDenied">
 					<view class="empty">暂无员工统计权限</view>
 				</view>
 				<view class="card" v-else>
 					<view class="card__title">员工统计</view>
 					<view
-						v-for="(m, i) in (staffStats.metrics || [])"
+						v-for="(m, i) in staffStatMetrics"
 						:key="i"
 						class="menu__item"
-						@click="onDeveloping(m)"
+						@click="onMetricTap(m)"
 					>
 						<view>
-							<view class="menu__name">{{ m.title }}</view>
+							<view class="menu__name">
+								{{ m.title }}
+								<text
+									v-if="m.tooltip_api && !m.developing"
+									class="tip"
+									@click.stop="onTooltip(m)"
+								>ⓘ</text>
+							</view>
 							<view class="menu__desc">{{ m.developing !== false ? '开发中' : formatNum(m.number) }}</view>
+							<view class="menu__sub" v-if="!m.developing && m.detail_developing">明细开发中</view>
 						</view>
 						<text class="menu__arrow">›</text>
 					</view>
 					<view class="hint" v-if="staffStats.note">{{ staffStats.note }}</view>
-					<view class="empty" v-if="!(staffStats.metrics && staffStats.metrics.length)">暂无数据</view>
+					<view class="empty" v-if="!staffStatMetrics.length">暂无数据</view>
 				</view>
 			</template>
 
@@ -231,11 +250,11 @@ export default {
 		const s = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
 		return {
 			tab: 'business',
-			tabs: [
+			allTabs: [
 				{ key: 'business', name: '经营数据' },
 				{ key: 'customer', name: '客户分析' },
 				{ key: 'staff_perf', name: '员工业绩' },
-				{ key: 'staff_stats', name: '员工统计' },
+				{ key: 'staff_stats', name: '员工统计', needStoreAgg: true },
 				{ key: 'item', name: '品项分析' },
 			],
 			dateFilter: {
@@ -269,11 +288,22 @@ export default {
 				['merchant.data.self', 'merchant.data.store', 'merchant.data.region'].includes(p)
 			);
 		},
+		/** 整店/区域聚合：员工统计禁止仅 data.self */
+		canStaffStats() {
+			return this.perms.includes('merchant.data.store')
+				|| this.perms.includes('merchant.data.region');
+		},
 		canCustomerView() {
 			return this.perms.includes('merchant.customer.view');
 		},
 		businessDenied() {
 			return !this.canDataAny;
+		},
+		staffStatsDenied() {
+			return !this.canStaffStats;
+		},
+		tabs() {
+			return (this.allTabs || []).filter((t) => !t.needStoreAgg || this.canStaffStats);
 		},
 		primaryMetrics() {
 			return (this.business && this.business.primary) || [];
@@ -325,6 +355,11 @@ export default {
 		staffPerfMenus() {
 			return this.detailMenus;
 		},
+		staffStatMetrics() {
+			const data = this.staffStats || {};
+			const list = data.metrics || data.list || [];
+			return Array.isArray(list) ? list : [];
+		},
 	},
 	async onShow() {
 		const ok = await this.ensureMerchantAccess();
@@ -334,6 +369,10 @@ export default {
 			uni.showToast({ title: '暂无数仓权限', icon: 'none' });
 			uni.redirectTo({ url: '/pages/merchant/home/index' });
 			return;
+		}
+		// 仅 data.self 时若落在员工统计，收回本人页签
+		if (this.tab === 'staff_stats' && this.staffStatsDenied) {
+			this.tab = this.canDataAny ? 'business' : (this.canCustomerView ? 'customer' : 'business');
 		}
 		this.reload();
 	},
@@ -423,7 +462,7 @@ export default {
 			}
 		},
 		async loadStaffStats() {
-			if (this.businessDenied) {
+			if (this.staffStatsDenied) {
 				this.staffStats = {};
 				this.loading = false;
 				return;
@@ -457,11 +496,18 @@ export default {
 			}
 			const code = m.metric_code || m.code || '';
 			const detail = String(m.detail_api || '');
-			if (code === 'new_customer' || detail.indexOf('/pages/merchant/customer') === 0) {
-				const title = encodeURIComponent(m.title || '新增客户');
+			const customerSegments = {
+				new_customer: 'new_customer',
+				card_recharge_customer: 'card_recharge',
+				visit_customer: 'visit',
+				repurchase_customer: 'repurchase',
+			};
+			if (customerSegments[code] || detail.indexOf('/pages/merchant/customer') === 0) {
+				const segment = customerSegments[code] || 'new_customer';
+				const title = encodeURIComponent(m.title || '客户');
 				const q = [
 					'tab=focus',
-					'segment=new_customer',
+					`segment=${segment}`,
 					`start_date=${this.dateFilter.start_date || ''}`,
 					`end_date=${this.dateFilter.end_date || ''}`,
 					`title=${title}`,
@@ -469,7 +515,11 @@ export default {
 				uni.navigateTo({ url: `/pages/merchant/customer/index?${q}` });
 				return;
 			}
-			if (code === 'reservation_customer' || detail.indexOf('/pages/admin/reservation_list') === 0) {
+			if (
+				code === 'reservation_customer'
+				|| code === 'reservation_order'
+				|| detail.indexOf('/pages/admin/reservation_list') === 0
+			) {
 				const q = [
 					'merchant=1',
 					`start_date=${this.dateFilter.start_date || ''}`,

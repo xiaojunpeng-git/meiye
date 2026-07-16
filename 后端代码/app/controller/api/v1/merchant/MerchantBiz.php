@@ -247,11 +247,15 @@ class MerchantBiz
     public function dataStaffStats(Request $request)
     {
         [$uid, $access, $accessServices] = $this->access($request);
+        // 整店聚合：仅店长/区域；禁止 data.self 读取本店新增客户/服务次数/预约单数
         $accessServices->requireAnyPermission(
             $access,
-            ['merchant.data.store', 'merchant.data.region', 'merchant.data.self'],
+            ['merchant.data.store', 'merchant.data.region'],
             '暂无员工统计查看权限'
         );
+        if (!$accessServices->canAggregateStoreMetrics($access)) {
+            return app('json')->fail('暂无员工统计查看权限');
+        }
         $filter = $request->getMore([
             ['date_type', 'today'],
             ['start_date', date('Y-m-d')],

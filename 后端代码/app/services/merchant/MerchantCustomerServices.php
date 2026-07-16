@@ -366,6 +366,7 @@ class MerchantCustomerServices extends BaseServices
         // 新增客户列表：系统首次下单（与 MerchantCustomerMetricServices 同口径）
         // - new_month：自然月至今
         // - new_customer：须带 start_date/end_date（数仓下钻）
+        // 数仓下钻：card_recharge / visit / repurchase（成交不下钻）
         if ($segment === 'new_month' || $segment === 'new_customer') {
             if ($segment === 'new_month') {
                 $startTs = strtotime(date('Y-m-01 00:00:00'));
@@ -392,6 +393,36 @@ class MerchantCustomerServices extends BaseServices
                 ];
             }
             $where['uids'] = $firstUids;
+        } elseif (in_array($segment, ['card_recharge', 'visit', 'repurchase'], true)) {
+            $startDate = trim((string)($filter['start_date'] ?? ''));
+            $endDate = trim((string)($filter['end_date'] ?? ''));
+            $startTs = $startDate !== '' ? strtotime($startDate . ' 00:00:00') : 0;
+            $endTs = $endDate !== '' ? strtotime($endDate . ' 23:59:59') : 0;
+            if ($startTs <= 0 || $endTs <= 0 || $endTs < $startTs) {
+                throw new \think\exception\ValidateException('请提供有效的客户时间范围');
+            }
+            /** @var MerchantCustomerMetricServices $metricServices */
+            $metricServices = app()->make(MerchantCustomerMetricServices::class);
+            if ($segment === 'card_recharge') {
+                $segUids = $metricServices->listCardRechargeCustomerUids($scopeStoreIds, $startTs, $endTs);
+                $emptyNote = '当前范围暂无开卡或充值客户';
+            } elseif ($segment === 'visit') {
+                $segUids = $metricServices->listVisitCustomerUids($scopeStoreIds, $startTs, $endTs);
+                $emptyNote = '当前范围暂无到店客户';
+            } else {
+                $segUids = $metricServices->listRepurchaseCustomerUids($scopeStoreIds, $startTs, $endTs);
+                $emptyNote = '当前范围暂无复购客户';
+            }
+            if (!$segUids) {
+                return [
+                    'list' => [],
+                    'count' => 0,
+                    'scope_store_ids' => $scopeStoreIds,
+                    'segment' => $segment,
+                    'note' => $emptyNote,
+                ];
+            }
+            $where['uids'] = $segUids;
         } elseif ($segment === 'debt') {
             // 欠款客群：与 segments 计数同口径（scope 内 pending 欠款 DISTINCT uid）
             $accessServices->requirePermissions($access, ['merchant.debt.view'], '暂无欠款查看权限');

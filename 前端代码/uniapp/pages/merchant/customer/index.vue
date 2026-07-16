@@ -1,135 +1,13 @@
 <template>
 	<view class="merchant-page">
-		<view class="search-bar">
-			<view class="search-box">
-				<text class="iconfont icon-ic_search"></text>
-				<input
-					class="search-input"
-					v-model="keyword"
-					confirm-type="search"
-					placeholder="姓名/手机号"
-					@confirm="onSearch"
-				/>
+		<!-- 筛选/新增：整页切换，彻底避开 H5 scroll-view 盖住 fixed 弹层 -->
+		<view v-if="filterVisible" class="overlay-page">
+			<view class="overlay-page__bar">
+				<text class="overlay-page__link" @click="closeFilter">取消</text>
+				<text class="overlay-page__title">筛选客户</text>
+				<text class="overlay-page__link on" @click="applyFilter">确定</text>
 			</view>
-			<view class="search-btn" @click="onSearch">查询</view>
-			<view
-				v-if="showFilterEntry"
-				class="filter-btn"
-				:class="{ on: filterActiveCount > 0 }"
-				@click="openFilter"
-			>
-				筛选{{ filterActiveCount > 0 ? `(${filterActiveCount})` : '' }}
-			</view>
-		</view>
-		<view class="tabs">
-			<view
-				v-for="t in tabs"
-				:key="t.key"
-				class="tab"
-				:class="{ active: tab === t.key }"
-				@click="switchTab(t.key)"
-			>{{ t.name }}</view>
-		</view>
-
-		<!-- 重点客户：客群卡片 -->
-		<scroll-view v-if="tab === 'focus' && focusMode === 'segments'" scroll-y class="list">
-			<view
-				v-for="(s, i) in segments"
-				:key="s.key || i"
-				class="seg-card"
-				@click="onSegment(s)"
-			>
-				<view class="seg-card__main">
-					<view class="seg-card__name">{{ s.name }}</view>
-					<view class="seg-card__desc">{{ s.desc || s.action || '' }}</view>
-				</view>
-				<view class="seg-card__right">
-					<view class="seg-card__count">{{ formatSegCount(s) }}</view>
-					<text class="seg-card__arrow">›</text>
-				</view>
-			</view>
-			<view v-if="!segments.length && !segLoading" class="empty">暂无客群</view>
-			<view v-if="segLoading" class="empty">加载中...</view>
-			<view class="list-pad"></view>
-		</scroll-view>
-
-		<!-- 重点客户：下钻列表 -->
-		<template v-else-if="tab === 'focus' && focusMode === 'list'">
-			<view class="sub-bar">
-				<text class="sub-bar__back" @click="backToSegments">‹ 返回客群</text>
-				<text class="sub-bar__title">{{ focusListTitle }}</text>
-				<text
-					v-if="listSegment === 'debt'"
-					class="sub-bar__link"
-					@click="goDebtOrders"
-				>欠款单</text>
-			</view>
-			<scroll-view scroll-y class="list" @scrolltolower="loadMore">
-				<view
-					v-for="(item, index) in userLists"
-					:key="'f-' + index"
-					class="user-card"
-					@click="goDetail(item)"
-				>
-					<image class="avatar" :src="item.avatar || '/static/images/f.png'" mode="aspectFill" />
-					<view class="user-body">
-						<view class="user-name">{{ item.nickname || '客户' }}</view>
-						<view class="user-phone" @click.stop="callPhone(item.phone)">{{ maskPhone(item.phone) }}</view>
-						<view class="user-meta">余额 {{ item.now_money || 0 }} · 积分 {{ item.integral || 0 }}</view>
-					</view>
-				</view>
-				<view v-if="!userLists.length && !loading" class="empty">暂无客户</view>
-				<view v-if="loading" class="empty">加载中...</view>
-				<view class="list-pad"></view>
-			</scroll-view>
-		</template>
-
-		<!-- 我的客户 / 全部客户 -->
-		<template v-else>
-			<view class="summary" v-if="tab === 'mine' && mineSummary">
-				<view class="summary__item" @click="onMineFilter('all')">
-					<view class="summary__val">{{ formatNum(mineSummary.total) }}</view>
-					<view class="summary__label">客户总数</view>
-				</view>
-				<view class="summary__item" @click="onMineFilter('new_month')">
-					<view class="summary__val">{{ formatMineNew(mineSummary) }}</view>
-					<view class="summary__label">本月新增</view>
-				</view>
-				<view class="summary__item" @click="onMineFilter('birthday_today')">
-					<view class="summary__val">{{ formatNum(mineSummary.birthday_today) }}</view>
-					<view class="summary__label">今日生日</view>
-				</view>
-			</view>
-			<scroll-view scroll-y class="list" @scrolltolower="loadMore">
-				<view
-					v-for="(item, index) in userLists"
-					:key="index"
-					class="user-card"
-					@click="goDetail(item)"
-				>
-					<image class="avatar" :src="item.avatar || '/static/images/f.png'" mode="aspectFill" />
-					<view class="user-body">
-						<view class="user-name">{{ item.nickname || '客户' }}</view>
-						<view class="user-phone" @click.stop="callPhone(item.phone)">{{ maskPhone(item.phone) }}</view>
-						<view class="user-meta">余额 {{ item.now_money || 0 }} · 积分 {{ item.integral || 0 }}</view>
-						<view class="user-meta">手艺人 {{ item.shouyi || '-' }} · {{ item.belong_store || '' }}</view>
-						<view class="user-meta" v-if="item.order_time">上次服务 {{ item.order_time }}</view>
-					</view>
-				</view>
-				<view v-if="!userLists.length && !loading" class="empty">暂无客户</view>
-				<view v-if="loading" class="empty">加载中...</view>
-				<view class="list-pad"></view>
-			</scroll-view>
-		</template>
-
-		<view class="fab" @click="openCreate" v-if="canCreate">
-			<text class="fab__plus">＋</text>
-		</view>
-
-		<!-- 轻量筛选：生日 + 性别 + 余额（我的/全部） -->
-		<view class="mask" v-if="filterVisible" @click="closeFilter">
-			<view class="sheet filter-sheet" @click.stop>
-				<view class="sheet__title">筛选客户</view>
+			<scroll-view scroll-y class="overlay-page__body">
 				<view class="filter-label">生日</view>
 				<view class="chip-row">
 					<view
@@ -166,17 +44,21 @@
 						placeholder="最高"
 					/>
 				</view>
-				<view class="sheet__actions">
-					<view class="btn btn--ghost" @click="resetFilterDraft">重置</view>
-					<view class="btn btn--primary" @click="applyFilter">确定</view>
-				</view>
-			</view>
+				<view class="overlay-page__reset" @click="resetFilterDraft">重置条件</view>
+			</scroll-view>
 		</view>
 
-		<!-- 新增客户 -->
-		<view class="mask" v-if="createVisible" @click="closeCreate">
-			<view class="sheet" @click.stop>
-				<view class="sheet__title">新增客户</view>
+		<view v-else-if="createVisible" class="overlay-page">
+			<view class="overlay-page__bar">
+				<text class="overlay-page__link" @click="closeCreate">取消</text>
+				<text class="overlay-page__title">新增客户</text>
+				<text
+					class="overlay-page__link on"
+					:class="{ disabled: creating }"
+					@click="submitCreate"
+				>{{ creating ? '提交中…' : '确定' }}</text>
+			</view>
+			<view class="overlay-page__body">
 				<view class="form-row">
 					<text class="form-label">手机号</text>
 					<input class="form-input" type="number" maxlength="11" v-model="createForm.phone" placeholder="请输入手机号" />
@@ -189,14 +71,138 @@
 					<text class="form-label">备注</text>
 					<input class="form-input" v-model="createForm.mark" placeholder="选填" />
 				</view>
-				<view class="sheet__actions">
-					<view class="btn btn--ghost" @click="closeCreate">取消</view>
-					<view class="btn btn--primary" :class="{ disabled: creating }" @click="submitCreate">{{ creating ? '提交中…' : '确定' }}</view>
-				</view>
 			</view>
 		</view>
 
-		<merchant-tab-bar current="customer" />
+		<template v-else>
+			<view class="search-bar">
+				<view class="search-box">
+					<text class="iconfont icon-ic_search"></text>
+					<input
+						class="search-input"
+						v-model="keyword"
+						confirm-type="search"
+						placeholder="姓名/手机号"
+						@confirm="onSearch"
+					/>
+				</view>
+				<view class="search-btn" @click="onSearch">查询</view>
+				<view
+					v-if="showFilterEntry"
+					class="filter-btn"
+					:class="{ on: filterActiveCount > 0 }"
+					@click="openFilter"
+				>
+					筛选{{ filterActiveCount > 0 ? `(${filterActiveCount})` : '' }}
+				</view>
+			</view>
+			<view class="tabs">
+				<view
+					v-for="t in tabs"
+					:key="t.key"
+					class="tab"
+					:class="{ active: tab === t.key }"
+					@click="switchTab(t.key)"
+				>{{ t.name }}</view>
+			</view>
+
+			<!-- 重点客户：客群卡片 -->
+			<scroll-view v-if="tab === 'focus' && focusMode === 'segments'" scroll-y class="list">
+				<view
+					v-for="(s, i) in segments"
+					:key="s.key || i"
+					class="seg-card"
+					@click="onSegment(s)"
+				>
+					<view class="seg-card__main">
+						<view class="seg-card__name">{{ s.name }}</view>
+						<view class="seg-card__desc">{{ s.desc || s.action || '' }}</view>
+					</view>
+					<view class="seg-card__right">
+						<view class="seg-card__count">{{ formatSegCount(s) }}</view>
+						<text class="seg-card__arrow">›</text>
+					</view>
+				</view>
+				<view v-if="!segments.length && !segLoading" class="empty">暂无客群</view>
+				<view v-if="segLoading" class="empty">加载中...</view>
+				<view class="list-pad"></view>
+			</scroll-view>
+
+			<!-- 重点客户：下钻列表 -->
+			<template v-else-if="tab === 'focus' && focusMode === 'list'">
+				<view class="sub-bar">
+					<text class="sub-bar__back" @click="backToSegments">‹ 返回客群</text>
+					<text class="sub-bar__title">{{ focusListTitle }}</text>
+					<text
+						v-if="listSegment === 'debt'"
+						class="sub-bar__link"
+						@click="goDebtOrders"
+					>欠款单</text>
+				</view>
+				<scroll-view scroll-y class="list" @scrolltolower="loadMore">
+					<view
+						v-for="(item, index) in userLists"
+						:key="'f-' + index"
+						class="user-card"
+						@click="goDetail(item)"
+					>
+						<image class="avatar" :src="item.avatar || '/static/images/f.png'" mode="aspectFill" />
+						<view class="user-body">
+							<view class="user-name">{{ item.nickname || '客户' }}</view>
+							<view class="user-phone" @click.stop="callPhone(item.phone)">{{ maskPhone(item.phone) }}</view>
+							<view class="user-meta">余额 {{ item.now_money || 0 }} · 积分 {{ item.integral || 0 }}</view>
+						</view>
+					</view>
+					<view v-if="!userLists.length && !loading" class="empty">暂无客户</view>
+					<view v-if="loading" class="empty">加载中...</view>
+					<view class="list-pad"></view>
+				</scroll-view>
+			</template>
+
+			<!-- 我的客户 / 全部客户 -->
+			<template v-else>
+				<view class="summary" v-if="tab === 'mine' && mineSummary">
+					<view class="summary__item" @click="onMineFilter('all')">
+						<view class="summary__val">{{ formatNum(mineSummary.total) }}</view>
+						<view class="summary__label">客户总数</view>
+					</view>
+					<view class="summary__item" @click="onMineFilter('new_month')">
+						<view class="summary__val">{{ formatMineNew(mineSummary) }}</view>
+						<view class="summary__label">本月新增</view>
+					</view>
+					<view class="summary__item" @click="onMineFilter('birthday_today')">
+						<view class="summary__val">{{ formatNum(mineSummary.birthday_today) }}</view>
+						<view class="summary__label">今日生日</view>
+					</view>
+				</view>
+				<scroll-view scroll-y class="list" @scrolltolower="loadMore">
+					<view
+						v-for="(item, index) in userLists"
+						:key="index"
+						class="user-card"
+						@click="goDetail(item)"
+					>
+						<image class="avatar" :src="item.avatar || '/static/images/f.png'" mode="aspectFill" />
+						<view class="user-body">
+							<view class="user-name">{{ item.nickname || '客户' }}</view>
+							<view class="user-phone" @click.stop="callPhone(item.phone)">{{ maskPhone(item.phone) }}</view>
+							<view class="user-meta">余额 {{ item.now_money || 0 }} · 积分 {{ item.integral || 0 }}</view>
+							<view class="user-meta">手艺人 {{ item.shouyi || '-' }} · {{ item.belong_store || '' }}</view>
+							<view class="user-meta" v-if="item.order_time">上次服务 {{ item.order_time }}</view>
+						</view>
+					</view>
+					<view v-if="!userLists.length && !loading" class="empty">暂无客户</view>
+					<view v-if="loading" class="empty">加载中...</view>
+					<view class="list-pad"></view>
+				</scroll-view>
+			</template>
+
+			<view class="fab" @click="openCreate" v-if="canCreate">
+				<text class="fab__plus">＋</text>
+			</view>
+
+			<merchant-tab-bar current="customer" />
+		</template>
 	</view>
 </template>
 
@@ -314,7 +320,8 @@ export default {
 		if (opt && opt.tab) {
 			this.tab = opt.tab;
 		}
-		if (opt && (opt.segment === 'new_month' || opt.segment === 'new_customer' || opt.segment === 'debt' || opt.birthday_type)) {
+		const drillSegments = ['new_month', 'new_customer', 'debt', 'card_recharge', 'visit', 'repurchase'];
+		if (opt && (drillSegments.indexOf(opt.segment) >= 0 || opt.birthday_type)) {
 			this.pendingDrill = {
 				title: opt.title ? decodeURIComponent(String(opt.title)) : '',
 				segment: opt.segment || '',
@@ -326,6 +333,9 @@ export default {
 				if (opt.segment === 'new_month') this.pendingDrill.title = '本月新增';
 				else if (opt.segment === 'new_customer') this.pendingDrill.title = '新增客户';
 				else if (opt.segment === 'debt') this.pendingDrill.title = '欠款客户';
+				else if (opt.segment === 'card_recharge') this.pendingDrill.title = '开卡充值客户';
+				else if (opt.segment === 'visit') this.pendingDrill.title = '到店客户';
+				else if (opt.segment === 'repurchase') this.pendingDrill.title = '复购客户';
 				else if (Number(opt.birthday_type) === 1) this.pendingDrill.title = '今日生日';
 			}
 		}
@@ -879,29 +889,55 @@ export default {
 	font-size: 48rpx;
 	line-height: 1;
 }
-.mask {
-	position: fixed;
-	left: 0;
-	right: 0;
-	top: 0;
-	bottom: 0;
-	background: rgba(0, 0, 0, 0.45);
-	z-index: 100;
-	display: flex;
-	align-items: flex-end;
-}
-.sheet {
-	width: 100%;
+.overlay-page {
+	flex: 1;
+	min-height: 100vh;
 	background: #fff;
-	border-radius: 24rpx 24rpx 0 0;
-	padding: 32rpx 32rpx calc(32rpx + env(safe-area-inset-bottom));
+	display: flex;
+	flex-direction: column;
 	box-sizing: border-box;
+	padding-bottom: env(safe-area-inset-bottom);
 }
-.sheet__title {
+.overlay-page__bar {
+	display: flex;
+	align-items: center;
+	padding: 24rpx 28rpx;
+	border-bottom: 1rpx solid #f0f0f0;
+	background: #fff;
+}
+.overlay-page__title {
+	flex: 1;
+	text-align: center;
 	font-size: 32rpx;
 	font-weight: 600;
 	color: #222;
-	margin-bottom: 24rpx;
+}
+.overlay-page__link {
+	min-width: 80rpx;
+	font-size: 28rpx;
+	color: #666;
+}
+.overlay-page__link.on {
+	color: #e93323;
+	font-weight: 600;
+	text-align: right;
+}
+.overlay-page__link.disabled {
+	opacity: 0.55;
+}
+.overlay-page__body {
+	flex: 1;
+	height: 0;
+	padding: 28rpx 32rpx;
+	box-sizing: border-box;
+	background: #fff;
+}
+.overlay-page__reset {
+	margin-top: 40rpx;
+	text-align: center;
+	font-size: 28rpx;
+	color: #999;
+	padding: 20rpx;
 }
 .form-row {
 	display: flex;
@@ -917,27 +953,5 @@ export default {
 .form-input {
 	flex: 1;
 	font-size: 28rpx;
-}
-.sheet__actions {
-	display: flex;
-	justify-content: flex-end;
-	margin-top: 32rpx;
-}
-.btn {
-	padding: 16rpx 36rpx;
-	margin-left: 16rpx;
-	border-radius: 36rpx;
-	font-size: 28rpx;
-}
-.btn--ghost {
-	background: #f5f5f5;
-	color: #666;
-}
-.btn--primary {
-	background: #e93323;
-	color: #fff;
-}
-.btn.disabled {
-	opacity: 0.6;
 }
 </style>
