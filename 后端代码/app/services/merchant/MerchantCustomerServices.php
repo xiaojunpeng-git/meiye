@@ -47,7 +47,7 @@ class MerchantCustomerServices extends BaseServices
             [
                 'key' => 'new_month',
                 'name' => '本月新增客户',
-                'desc' => '本月去重新增客户（store_user.add_time，COUNT DISTINCT uid）',
+                'desc' => '本月第一次产生现金业绩有效下单的客户',
                 'count' => 0,
                 'action' => '首次回访',
                 'filter' => ['segment' => 'new_month'],
@@ -56,9 +56,9 @@ class MerchantCustomerServices extends BaseServices
             [
                 'key' => 'debt',
                 'name' => '欠款客户',
-                'desc' => '存在未结清欠款的去重客户数',
+                'desc' => '存在未结清欠款的去重客户（store_debt.status=待还）',
                 'count' => 0,
-                'action' => '补交欠款',
+                'action' => '查看名单',
                 'filter' => ['segment' => 'debt'],
             ],
             [
@@ -147,7 +147,7 @@ class MerchantCustomerServices extends BaseServices
         } catch (\Throwable $e) {
         }
 
-        // 本月新增：唯一出口 MerchantCustomerMetricServices（口径 A）
+        // 本月新增：唯一出口 MerchantCustomerMetricServices（系统首次下单）
         $monthStart = strtotime(date('Y-m-01 00:00:00'));
         $monthEnd = time();
         /** @var MerchantCustomerMetricServices $customerMetrics */
@@ -168,11 +168,24 @@ class MerchantCustomerServices extends BaseServices
         }
 
         try {
-            $list[3]['count'] = (int)Db::name('store_debt')
-                ->whereIn('store_id', $scopeStoreIds)
-                ->where('status', StoreDebt::STATUS_PENDING)
-                ->count('DISTINCT uid');
+            $perms = $access['permissions'] ?? [];
+            if (!in_array('merchant.debt.view', $perms, true)) {
+                // 无欠款权限：不泄露待还人数；勿标 developing
+                $list[3]['count'] = null;
+                $list[3]['no_permission'] = true;
+                $list[3]['action'] = '暂无权限';
+                $list[3]['desc'] = '暂无欠款查看权限';
+            } else {
+                $list[3]['count'] = (int)Db::name('store_debt')
+                    ->whereIn('store_id', $scopeStoreIds)
+                    ->where('status', StoreDebt::STATUS_PENDING)
+                    ->count('DISTINCT uid');
+                $list[3]['no_permission'] = false;
+            }
         } catch (\Throwable $e) {
+            $list[3]['count'] = null;
+            $list[3]['no_permission'] = true;
+            $list[3]['action'] = '暂无权限';
         }
 
         return $list;
@@ -306,7 +319,7 @@ class MerchantCustomerServices extends BaseServices
             'follow_developing' => true,
             'scope_store_ids' => $scopeStoreIds,
             'resolved_store_ids' => $access['resolved_store_ids'] ?? [],
-            'note' => '本月新增走 MerchantCustomerMetricServices（口径 A）；待回访未落地；范围=scope_store_ids',
+            'note' => '本月新增走 MerchantCustomerMetricServices（系统首次下单）；待回访未落地；范围=scope_store_ids',
         ];
     }
 
@@ -338,20 +351,71 @@ class MerchantCustomerServices extends BaseServices
         if ($birthdayType > 0) {
             $where['birthday_type'] = $birthdayType;
         }
-        // 新增客户列表：按 store_user.add_time（与口径 A 一致）
+        // 性别：0其他 1男 2女；空=不限（与 UserStoreUserDao sex 一致）
+        if (array_key_exists('sex', $filter) && $filter['sex'] !== '' && $filter['sex'] !== null) {
+            $sex = (int)$filter['sex'];
+            if (in_array($sex, [0, 1, 2], true)) {
+                $where['sex'] = $sex;
+            }
+        }
+        // 余额区间：与门店 PC 同参 now_money_peice（min-max，端可空）
+        $moneyPeice = trim((string)($filter['now_money_peice'] ?? ''));
+        if ($moneyPeice !== '' && $moneyPeice !== '-') {
+            $where['now_money_peice'] = $moneyPeice;
+        }
+        // 新增客户列表：系统首次下单（与 MerchantCustomerMetricServices 同口径）
         // - new_month：自然月至今
         // - new_customer：须带 start_date/end_date（数仓下钻）
-        if ($segment === 'new_month') {
-            $where['store_user_add_time'] = [strtotime(date('Y-m-01 00:00:00')), time()];
-        } elseif ($segment === 'new_customer') {
-            $startDate = trim((string)($filter['start_date'] ?? ''));
-            $endDate = trim((string)($filter['end_date'] ?? ''));
-            $startTs = $startDate !== '' ? strtotime($startDate . ' 00:00:00') : 0;
-            $endTs = $endDate !== '' ? strtotime($endDate . ' 23:59:59') : 0;
-            if ($startTs <= 0 || $endTs <= 0 || $endTs < $startTs) {
-                throw new \think\exception\ValidateException('请提供有效的新增客户时间范围');
+        if ($segment === 'new_month' || $segment === 'new_customer') {
+            if ($segment === 'new_month') {
+                $startTs = strtotime(date('Y-m-01 00:00:00'));
+                $endTs = time();
+            } else {
+                $startDate = trim((string)($filter['start_date'] ?? ''));
+                $endDate = trim((string)($filter['end_date'] ?? ''));
+                $startTs = $startDate !== '' ? strtotime($startDate . ' 00:00:00') : 0;
+                $endTs = $endDate !== '' ? strtotime($endDate . ' 23:59:59') : 0;
+                if ($startTs <= 0 || $endTs <= 0 || $endTs < $startTs) {
+                    throw new \think\exception\ValidateException('请提供有效的新增客户时间范围');
+                }
             }
-            $where['store_user_add_time'] = [$startTs, $endTs];
+            /** @var MerchantCustomerMetricServices $metricServices */
+            $metricServices = app()->make(MerchantCustomerMetricServices::class);
+            $firstUids = $metricServices->listFirstOrderCustomerUids($scopeStoreIds, $startTs, $endTs);
+            if (!$firstUids) {
+                return [
+                    'list' => [],
+                    'count' => 0,
+                    'scope_store_ids' => $scopeStoreIds,
+                    'segment' => $segment,
+                    'note' => '当前范围暂无首次下单客户',
+                ];
+            }
+            $where['uids'] = $firstUids;
+        } elseif ($segment === 'debt') {
+            // 欠款客群：与 segments 计数同口径（scope 内 pending 欠款 DISTINCT uid）
+            $accessServices->requirePermissions($access, ['merchant.debt.view'], '暂无欠款查看权限');
+            $debtUids = [];
+            try {
+                $debtUids = Db::name('store_debt')
+                    ->whereIn('store_id', $scopeStoreIds)
+                    ->where('status', StoreDebt::STATUS_PENDING)
+                    ->distinct(true)
+                    ->column('uid');
+            } catch (\Throwable $e) {
+                $debtUids = [];
+            }
+            $debtUids = array_values(array_unique(array_filter(array_map('intval', $debtUids ?: []))));
+            if (!$debtUids) {
+                return [
+                    'list' => [],
+                    'count' => 0,
+                    'scope_store_ids' => $scopeStoreIds,
+                    'segment' => 'debt',
+                    'note' => '当前范围暂无未结清欠款客户',
+                ];
+            }
+            $where['uids'] = $debtUids;
         } elseif ($segment !== '') {
             throw new \think\exception\ValidateException('该客群列表筛选尚未开放');
         }

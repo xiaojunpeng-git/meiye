@@ -97,8 +97,8 @@ class MerchantHomeServices extends BaseServices
                 $metricsNote = '当前身份无有效门店经营范围或无整店数据权限，不返回聚合数据';
                 $metrics = [
                     ['metric_code' => 'cash_performance', 'title' => '现金业绩', 'number' => null, 'developing' => true, 'detail_api' => null, 'detail_developing' => true],
-                    ['metric_code' => 'actual_performance', 'title' => '实收业绩', 'number' => null, 'developing' => true, 'detail_api' => null, 'detail_developing' => true],
-                    ['metric_code' => 'consume_amount', 'title' => '消耗金额', 'number' => null, 'developing' => true, 'detail_api' => null, 'detail_developing' => true],
+                    ['metric_code' => 'actual_performance', 'title' => '实际业绩', 'number' => null, 'developing' => true, 'detail_api' => null, 'detail_developing' => true],
+                    ['metric_code' => 'consume_amount', 'title' => '消耗业绩', 'number' => null, 'developing' => true, 'detail_api' => null, 'detail_developing' => true],
                 ];
             }
         } else {

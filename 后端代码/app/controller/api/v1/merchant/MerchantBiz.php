@@ -8,6 +8,8 @@ use app\services\merchant\MerchantDataServices;
 use app\services\merchant\MerchantHomeServices;
 use app\services\system\TrainingDocumentServices;
 use app\services\merchant\MerchantYejiServices;
+use app\services\merchant\MerchantStoreMetricServices;
+use app\services\merchant\MerchantReservationServices;
 use app\services\order\StoreDebtServices;
 use app\model\order\StoreDebt;
 
@@ -152,6 +154,8 @@ class MerchantBiz
             ['keyword', ''],
             ['nickname', ''],
             ['birthday_type', 0],
+            ['now_money_peice', ''],
+            ['sex', ''],
             ['field_key', ''],
             ['segment', ''],
             ['start_date', ''],
@@ -301,6 +305,199 @@ class MerchantBiz
         /** @var MerchantYejiServices $services */
         $services = app()->make(MerchantYejiServices::class);
         return app('json')->success($services->selfDetail($uid, $access, $filter));
+    }
+
+    /**
+     * 店级现金业绩明细：与 homeStatics 现金项同口径
+     */
+    public function metricCashDetail(Request $request)
+    {
+        [$uid, $access, $accessServices] = $this->access($request);
+        $filter = $request->getMore([
+            ['date_type', 'today'],
+            ['start_date', date('Y-m-d')],
+            ['end_date', date('Y-m-d')],
+            ['page', 1],
+            ['limit', 20],
+        ]);
+        /** @var MerchantStoreMetricServices $services */
+        $services = app()->make(MerchantStoreMetricServices::class);
+        return app('json')->success($services->cashDetail($access, $filter));
+    }
+
+    /**
+     * 店级实收业绩明细：逐店 max(0,现金−分成) 再求和，与 homeStatics 同口径
+     */
+    public function metricActualDetail(Request $request)
+    {
+        [$uid, $access, $accessServices] = $this->access($request);
+        $filter = $request->getMore([
+            ['date_type', 'today'],
+            ['start_date', date('Y-m-d')],
+            ['end_date', date('Y-m-d')],
+            ['page', 1],
+            ['limit', 20],
+        ]);
+        /** @var MerchantStoreMetricServices $services */
+        $services = app()->make(MerchantStoreMetricServices::class);
+        return app('json')->success($services->actualDetail($access, $filter));
+    }
+
+    /**
+     * 店级消耗金额明细：activeYeji + 旧店耗卡，与 homeStatics 消耗项同口径
+     */
+    public function metricConsumeDetail(Request $request)
+    {
+        [$uid, $access, $accessServices] = $this->access($request);
+        $filter = $request->getMore([
+            ['date_type', 'today'],
+            ['start_date', date('Y-m-d')],
+            ['end_date', date('Y-m-d')],
+            ['page', 1],
+            ['limit', 20],
+        ]);
+        /** @var MerchantStoreMetricServices $services */
+        $services = app()->make(MerchantStoreMetricServices::class);
+        return app('json')->success($services->consumeDetail($access, $filter));
+    }
+
+    /**
+     * 商家预约列表：active_store_id ∈ scope；普通员工仅本人服务单
+     */
+    public function reservationList(Request $request)
+    {
+        [$uid, $access] = $this->access($request);
+        $filter = $request->getMore([
+            ['status', ''],
+            ['search', ''],
+            ['date', ''],
+            ['start_date', ''],
+            ['end_date', ''],
+            ['oid', 0],
+            ['page', 1],
+            ['limit', 20],
+        ]);
+        /** @var MerchantReservationServices $services */
+        $services = app()->make(MerchantReservationServices::class);
+        return app('json')->success($services->listOrders($uid, $access, $filter));
+    }
+
+    /**
+     * 商家预约状态统计：与 list 同范围
+     */
+    public function reservationStatistics(Request $request)
+    {
+        [$uid, $access] = $this->access($request);
+        $filter = $request->getMore([
+            ['date', ''],
+            ['start_date', ''],
+            ['end_date', ''],
+        ]);
+        /** @var MerchantReservationServices $services */
+        $services = app()->make(MerchantReservationServices::class);
+        return app('json')->success($services->statistics($uid, $access, $filter));
+    }
+
+    /**
+     * 商家预约详情：校验 scope + 当前店 + 普通员工本人
+     */
+    public function reservationDetail(Request $request, $id = 0)
+    {
+        [$uid, $access] = $this->access($request);
+        $rid = (int)($id ?: $request->param('id', 0));
+        /** @var MerchantReservationServices $services */
+        $services = app()->make(MerchantReservationServices::class);
+        return app('json')->success($services->detail($uid, $access, $rid));
+    }
+
+    /** 商家预约房间列表（接单选房） */
+    public function reservationTables(Request $request)
+    {
+        [$uid, $access] = $this->access($request);
+        /** @var MerchantReservationServices $services */
+        $services = app()->make(MerchantReservationServices::class);
+        return app('json')->success($services->tableList($uid, $access));
+    }
+
+    /** 商家预约接单确认 */
+    public function reservationConfirm(Request $request, $id = 0)
+    {
+        [$uid, $access] = $this->access($request);
+        $rid = (int)($id ?: $request->param('id', 0));
+        [$tableId, $tableName] = $request->postMore([
+            [['table_id', 'd'], 0],
+            ['table_name', ''],
+        ], true);
+        /** @var MerchantReservationServices $services */
+        $services = app()->make(MerchantReservationServices::class);
+        $services->confirm($uid, $access, $rid, (int)$tableId, (string)$tableName);
+        return app('json')->success('接单成功');
+    }
+
+    /** 商家预约拒绝 */
+    public function reservationRefuse(Request $request, $id = 0)
+    {
+        [$uid, $access] = $this->access($request);
+        $rid = (int)($id ?: $request->param('id', 0));
+        [$refuseReason] = $request->postMore([
+            ['refuse_reason', ''],
+        ], true);
+        /** @var MerchantReservationServices $services */
+        $services = app()->make(MerchantReservationServices::class);
+        $services->refuse($uid, $access, $rid, (string)$refuseReason);
+        return app('json')->success('已拒绝');
+    }
+
+    /** 商家预约修改（店长；与 store update 字段对齐） */
+    public function reservationUpdate(Request $request, $id = 0)
+    {
+        [$uid, $access] = $this->access($request);
+        $rid = (int)($id ?: $request->param('id', 0));
+        if ($rid <= 0) {
+            return app('json')->fail('参数错误');
+        }
+        $data = $request->postMore([
+            ['reservation_name', ''],
+            ['reservation_phone', ''],
+            ['reservation_time', ''],
+            [['reservation_time_id', 'd'], 0],
+            ['reservation_start', ''],
+            ['reservation_end', ''],
+            [['service_duration_minutes', 'd'], 0],
+            ['service_staff_id', 0],
+            ['sync_all', []],
+            ['staff_choose', []],
+            ['reservation_address', ''],
+            ['addon_items', []],
+            ['custom_form', []],
+            ['mark', ''],
+        ]);
+        if (!empty($data['reservation_address'])) {
+            $data['reservation_address'] = str_replace('/', ' ', $data['reservation_address']);
+        }
+        /** @var MerchantReservationServices $services */
+        $services = app()->make(MerchantReservationServices::class);
+        $services->update($uid, $access, $rid, $data);
+        return app('json')->success('修改成功');
+    }
+
+    /** 商家预约开始/结束服务 */
+    public function reservationServiceSet(Request $request, $id = 0)
+    {
+        [$uid, $access] = $this->access($request);
+        $rid = (int)($id ?: $request->param('id', 0));
+        [$status, $serviceDescribe, $serviceImages] = $request->postMore([
+            ['status', 1],
+            ['service_describe', ''],
+            ['service_images', ''],
+        ], true);
+        /** @var MerchantReservationServices $services */
+        $services = app()->make(MerchantReservationServices::class);
+        $result = $services->setServiceStatus($uid, $access, $rid, (int)$status, [
+            'service_describe' => $serviceDescribe,
+            'service_images' => $serviceImages,
+        ]);
+        return app('json')->success('操作成功', $result);
     }
 
     public function debtList(Request $request)

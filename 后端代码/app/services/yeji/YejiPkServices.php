@@ -49,7 +49,7 @@ class YejiPkServices extends BaseServices
                 'name'=>$v['name'],
                 'goal'=>$pkOne['goal'] ?? 0,//本月目标
                 'bottom'=>$this->bottomPk($six,$v['id'],$fencheng,$where['date']),  //底标
-                'month'=>$this->monthYeji($monthRange,$v['id']),  //本月业绩
+                'month'=>$this->monthYeji($monthRange,$v['id']),  //现金业绩（原「本月业绩」）
                 'month_fencheng'=>$this->monthYejiFencheng($monthRange,$v['id'],$fencheng),  //本月分成款
                 'goal_per'=>0
             ];
@@ -67,7 +67,7 @@ class YejiPkServices extends BaseServices
         if($where['is_excel'] == 1){
             //导出
             $filekey =array_keys($export[0] ?? []);
-            $header=['门店','本月目标','本月底标','本月业绩','业绩分成款','完成率','本月实际完成','本月增长业绩'];
+            $header=['门店','本月目标','本月底标','现金业绩','业绩分成款','完成率','实际业绩','本月增长业绩'];
             $filename = '门店销售数据' . date('YmdHis', time());
             $list=compact('header', 'filekey', 'export', 'filename');
             return $list;
@@ -129,7 +129,7 @@ class YejiPkServices extends BaseServices
         return $result;
     }
 
-    //本月业绩
+    //现金业绩（PK 原称本月业绩）
     public function monthYeji($monthRange,$storeId){
         $payTypes=[
             PayServices::WEIXIN_PAY,

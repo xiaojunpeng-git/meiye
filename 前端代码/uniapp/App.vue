@@ -222,7 +222,10 @@
 			uni.getSystemInfo({
 				success(e) {
 					/* 窗口宽度大于420px且不在PC页面且不在移动设备时跳转至 PC.html 页面 */
-					if (e.windowWidth > 420 && !window.top.isPC && !/iOS|Android/i.test(e.system)) {
+					/* 本地联调（127.0.0.1/localhost）不跳 PC 壳：HBuilderX:8081 无后端，iframe 易空白 */
+					const host = (typeof location !== 'undefined' && location.hostname) || '';
+					const isLocal = host === '127.0.0.1' || host === 'localhost';
+					if (!isLocal && e.windowWidth > 420 && !window.top.isPC && !/iOS|Android/i.test(e.system)) {
 						window.location.pathname = '/static/html/pc.html';
 					}
 				}

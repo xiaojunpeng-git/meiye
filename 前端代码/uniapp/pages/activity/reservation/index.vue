@@ -406,6 +406,7 @@ import confirm from "@/mixins/confirm";
 import { Debounce } from '@/utils/validate.js'
 import {getReservationInfo,getReservationDate,getReservationTimes,postReservationCompute,postReservationSwitch,getReservationStaffList,getStaffAvailableTime,getBusyStaffAtTime,getStaffReservationConflicts} from '@/api/activity.js';
 import {postCartAdd, getProductslist, storeReservationDetail, storeReservationUpdate} from '@/api/store.js';
+import { merchantReservationDetail, merchantReservationUpdate } from '@/api/merchant.js';
 import { setCouponReceive } from '@/api/api.js';
 import {getReservationOrderInfo,postReservationOrderCreate,getUserPurchasedRemainItems} from '@/api/order.js';
 import { isMobileReservationOpen } from '@/utils/mobileReservation.js';
@@ -486,6 +487,7 @@ export default {
 			orderId:'',
 			bookUid: 0,
 			butlerEdit: false,
+			fromMerchant: false,
 			reservationId: 0,
 			reservationName:'',
 			maxCartNum:0,
@@ -590,7 +592,12 @@ export default {
 		},
 	},
 	onLoad(options){
-		if (!isMobileReservationOpen(this.configData)) {
+		this.fromMerchant = options.merchant === '1' || options.from === 'merchant'
+			|| (this.$store && this.$store.state.merchant && this.$store.state.merchant.mode === 'merchant');
+		this.butlerEdit = options.butlerEdit === '1' || options.butlerEdit === 1;
+		this.reservationId = Number(options.reservationId || 0);
+		// 商家端店长改预约不依赖买家端「预约功能开关」
+		if (!this.fromMerchant && !isMobileReservationOpen(this.configData)) {
 			return this.$util.Tips({ title: '预约功能未开启' }, () => {
 				uni.navigateBack();
 			});
@@ -605,8 +612,6 @@ export default {
 		this.orderId = options.orderId;
 		this.cartInfoId = options.cartInfoId;
 		this.bookUid = Number(options.book_uid || 0);
-		this.butlerEdit = options.butlerEdit === '1' || options.butlerEdit === 1;
-		this.reservationId = Number(options.reservationId || 0);
 		this.initPreselectedContext(options);
 		if (!this.storeId && this.preselectedStoreId) {
 			this.storeId = this.preselectedStoreId;
@@ -686,6 +691,12 @@ export default {
 				return this.$util.Tips({ title: err });
 			})
 		},
+		merchantContextParams() {
+			return {
+				active_store_id: (this.$store && this.$store.state.merchant && this.$store.state.merchant.activeStoreId) || 0,
+				active_role: (this.$store && this.$store.state.merchant && this.$store.state.merchant.activeRole) || '',
+			};
+		},
 		reservationButlerUpdate() {
 			if (!this.reservationId) return;
 			if (!this.selectedTimeRange || !this.selectedTimeRange.begin) {
@@ -705,7 +716,10 @@ export default {
 			// #ifdef MP
 			openGuanjiaSubscribe();
 			// #endif
-			storeReservationUpdate(this.reservationId, data).then(res => {
+			const req = this.fromMerchant
+				? merchantReservationUpdate(this.reservationId, { ...data, ...this.merchantContextParams() })
+				: storeReservationUpdate(this.reservationId, data);
+			req.then(res => {
 				this.$util.Tips({ title: res.msg || '修改成功' }, () => {
 					uni.navigateBack();
 				});
@@ -714,7 +728,10 @@ export default {
 			});
 		},
 		loadButlerEditReservation() {
-			return storeReservationDetail(this.reservationId).then(res => {
+			const req = this.fromMerchant
+				? merchantReservationDetail(this.reservationId, this.merchantContextParams())
+				: storeReservationDetail(this.reservationId);
+			return req.then(res => {
 				const detail = res.data || {};
 				this.orderId = detail.oid || this.orderId;
 				this.cartInfoId = detail.cart_info_id || this.cartInfoId;

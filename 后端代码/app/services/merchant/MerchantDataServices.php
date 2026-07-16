@@ -75,8 +75,8 @@ class MerchantDataServices extends BaseServices
             $note = '当前身份无有效门店经营范围或无整店数据权限，不返回聚合数据';
             $primary = [
                 ['metric_code' => 'cash_performance', 'title' => '现金业绩', 'number' => null, 'developing' => true, 'detail_api' => null, 'detail_developing' => true],
-                ['metric_code' => 'actual_performance', 'title' => '实收业绩', 'number' => null, 'developing' => true, 'detail_api' => null, 'detail_developing' => true],
-                ['metric_code' => 'consume_amount', 'title' => '消耗金额', 'number' => null, 'developing' => true, 'detail_api' => null, 'detail_developing' => true],
+                ['metric_code' => 'actual_performance', 'title' => '实际业绩', 'number' => null, 'developing' => true, 'detail_api' => null, 'detail_developing' => true],
+                ['metric_code' => 'consume_amount', 'title' => '消耗业绩', 'number' => null, 'developing' => true, 'detail_api' => null, 'detail_developing' => true],
             ];
         } else {
             try {
@@ -101,10 +101,54 @@ class MerchantDataServices extends BaseServices
             ['title' => '退款金额', 'number' => null, 'developing' => true, 'note' => '口径待确认'],
         ];
 
+        // 多店范围才展示门店排行（复用已 PASS 的 storeChart 三指标口径）
+        $storeRanking = [
+            'show' => false,
+            'cash' => [],
+            'actual' => [],
+            'consume' => [],
+            'note' => '',
+        ];
+        if ($canStoreMetrics && !$isStaffSelfOnly && count($scopeStoreIds) > 1) {
+            try {
+                /** @var AgentOrderServices $agentOrder */
+                $agentOrder = app()->make(AgentOrderServices::class);
+                $chartWhere = [
+                    'time' => $time,
+                    'store_id' => $scopeStoreIds,
+                ];
+                $mapRanking = static function (array $chart): array {
+                    $rows = $chart['ranking'] ?? [];
+                    $out = [];
+                    foreach ($rows as $row) {
+                        if (!is_array($row)) {
+                            continue;
+                        }
+                        $out[] = [
+                            'store_id' => (int)($row['store_id'] ?? 0),
+                            'name' => (string)($row['name'] ?? ''),
+                            'number' => $row['number'] ?? 0,
+                        ];
+                    }
+                    return $out;
+                };
+                $storeRanking = [
+                    'show' => true,
+                    'cash' => $mapRanking($agentOrder->storeChart($chartWhere + ['show_type' => 1], 'pay_price DESC')),
+                    'actual' => $mapRanking($agentOrder->storeChart($chartWhere + ['show_type' => 7], 'pay_price DESC')),
+                    'consume' => $mapRanking($agentOrder->storeChart($chartWhere + ['show_type' => 2], 'pay_price DESC')),
+                    'note' => '现金/实收/消耗均与首页同口径；实收=逐店 max(0,店现金−店分成) 再求和（与 storeChart show_type=7 一致）',
+                ];
+            } catch (\Throwable $e) {
+                $storeRanking['note'] = '门店排行加载失败';
+            }
+        }
+
         return [
             'primary' => $primary,
             'primary_developing' => $primaryDeveloping,
             'secondary' => $secondary,
+            'store_ranking' => $storeRanking,
             'metrics_mode' => $metricsMode,
             'filter' => [
                 'date_type' => $filter['date_type'] ?? 'custom',
@@ -138,6 +182,8 @@ class MerchantDataServices extends BaseServices
         /** @var MerchantCustomerMetricServices $customerMetrics */
         $customerMetrics = app()->make(MerchantCustomerMetricServices::class);
         $newCustomer = $customerMetrics->newCustomerMetric($scopeStoreIds, $start, $end);
+        $reservationCustomer = $customerMetrics->reservationCustomerMetric($scopeStoreIds, $start, $end);
+        $serviceVisit = $customerMetrics->serviceVisitMetric($scopeStoreIds, $start, $end);
 
         $metrics = [
             [
@@ -147,18 +193,35 @@ class MerchantDataServices extends BaseServices
                 'metric_code' => $newCustomer['metric_code'],
                 'developing' => $newCustomer['developing'],
                 'note' => $newCustomer['note'],
-                'source' => $newCustomer['source'],
-                'formula' => $newCustomer['formula'],
-                'time_field' => $newCustomer['time_field'],
                 'detail_api' => $newCustomer['detail_api'],
                 'detail_developing' => $newCustomer['detail_developing'],
                 'tooltip_api' => $newCustomer['tooltip_api'],
             ],
             ['title' => '成交客户数', 'number' => null, 'developing' => true],
             ['title' => '开卡充值客户数', 'number' => null, 'developing' => true],
-            ['title' => '预约客户数', 'number' => null, 'code' => 'reservation_customer', 'developing' => true],
+            [
+                'title' => $reservationCustomer['title'],
+                'number' => $reservationCustomer['number'],
+                'code' => $reservationCustomer['metric_code'],
+                'metric_code' => $reservationCustomer['metric_code'],
+                'developing' => $reservationCustomer['developing'],
+                'note' => $reservationCustomer['note'],
+                'detail_api' => $reservationCustomer['detail_api'],
+                'detail_developing' => $reservationCustomer['detail_developing'],
+                'tooltip_api' => $reservationCustomer['tooltip_api'],
+            ],
             ['title' => '到店客户数', 'number' => null, 'developing' => true],
-            ['title' => '服务客次', 'number' => null, 'developing' => true],
+            [
+                'title' => $serviceVisit['title'],
+                'number' => $serviceVisit['number'],
+                'code' => $serviceVisit['metric_code'],
+                'metric_code' => $serviceVisit['metric_code'],
+                'developing' => $serviceVisit['developing'],
+                'note' => $serviceVisit['note'],
+                'detail_api' => $serviceVisit['detail_api'],
+                'detail_developing' => $serviceVisit['detail_developing'],
+                'tooltip_api' => $serviceVisit['tooltip_api'],
+            ],
             ['title' => '复购客户数', 'number' => null, 'developing' => true],
             ['title' => '沉睡/召回客户数', 'number' => null, 'developing' => true],
         ];
@@ -171,7 +234,7 @@ class MerchantDataServices extends BaseServices
                 'end_date' => $filter['end_date'] ?? date('Y-m-d'),
             ],
             'scope_store_ids' => $scopeStoreIds,
-            'note' => '新增客户统一出口 MerchantCustomerMetricServices + 字典 new_customer（口径 A）；其余未核实指标 developing',
+            'note' => '新增客户/预约客户/服务客次走 MerchantCustomerMetricServices；其余未核实指标 developing',
             'updated_at' => date('Y-m-d H:i:s'),
         ];
     }

@@ -135,6 +135,13 @@
 		storeReservationRefuse,
 		storeReservationTableList
 	} from '@/api/store.js';
+	import {
+		merchantReservationList,
+		merchantReservationStatistics,
+		merchantReservationConfirm,
+		merchantReservationRefuse,
+		merchantReservationTables
+	} from '@/api/merchant.js';
 	import { openGuanjiaSubscribe } from '@/utils/SubscribeMessage.js';
 	import { userInfo } from '@/api/admin.js';
 	import uniCalendar from '@/components/uni-calendar/uni-calendar.vue';
@@ -172,6 +179,8 @@
 				keyword: '',
 				oid: 0,
 				filterDate: '',
+				filterStartDate: '',
+				filterEndDate: '',
 				dateLabel: '筛选日期',
 				storeName: '',
 				refuseVisible: false,
@@ -181,12 +190,34 @@
 				confirmItem: null,
 				tableList: [],
 				selectedRoomIndex: 0,
-				homeHide: false
+				homeHide: false,
+				fromMerchant: false
 			};
 		},
 		computed: {
 			...mapGetters(['isLogin']),
+			isMerchantContext() {
+				return this.fromMerchant || this.$store.state.merchant.mode === 'merchant';
+			},
+			/** 列表/统计共用的日期参数：区间优先（数仓下钻），否则单日 */
+			reservationDateParams() {
+				if (this.filterStartDate && this.filterEndDate) {
+					return {
+						start_date: this.filterStartDate,
+						end_date: this.filterEndDate,
+						date: '',
+					};
+				}
+				return {
+					date: this.filterDate || '',
+					start_date: '',
+					end_date: '',
+				};
+			},
 			store_id() {
+				if (this.isMerchantContext) {
+					return Number(this.$store.state.merchant.activeStoreId || 0);
+				}
 				const storeStaffInfo = this.$store.state.app.storeStaffInfo || {};
 				return storeStaffInfo.store_id;
 			},
@@ -196,8 +227,18 @@
 				return Number(info.is_manager) === 1 || Number(info.is_butler) === 1;
 			},
 			canManageReservation() {
+				if (this.isMerchantContext) {
+					const role = this.$store.state.merchant.activeRole || '';
+					return role === 'store_manager' || role === 'region_agent';
+				}
 				const info = this.$store.state.app.storeStaffInfo || {};
 				return Number(info.is_manager) === 1 || Number(info.is_butler) === 1;
+			},
+			merchantContextParams() {
+				return {
+					active_store_id: this.$store.state.merchant.activeStoreId || 0,
+					active_role: this.$store.state.merchant.activeRole || '',
+				};
 			},
 			roomLabels() {
 				return this.tableList.map(item => item.remarks || item.table_number || ('房间' + item.id));
@@ -208,6 +249,17 @@
 			this.loadend = false;
 			this.orderList = [];
 			if (this.isLogin) {
+				if (this.isMerchantContext) {
+					this.ensureMerchantContext().then((ok) => {
+						if (!ok) return;
+						if (this.canManageReservation) {
+							this.loadTableList();
+						}
+						this.getStatistics();
+						this.getOrderList();
+					});
+					return;
+				}
 				this.ensureStaffInfo().then(() => {
 					if (!this.canManageReservation) {
 						return this.$util.Tips({ title: '暂无权限' }, '/pages/admin/work/store');
@@ -232,6 +284,18 @@
 				this.orderStatus = parseInt(options.status);
 			}
 			this.oid = options.oid || 0;
+			this.fromMerchant = options.merchant === '1' || options.from === 'merchant';
+			const start = String(options.start_date || '').trim();
+			const end = String(options.end_date || '').trim();
+			if (start && end) {
+				this.filterStartDate = start;
+				this.filterEndDate = end;
+				this.filterDate = '';
+				this.dateLabel = start === end ? start : `${start}~${end}`;
+			} else if (options.date) {
+				this.filterDate = String(options.date);
+				this.dateLabel = this.filterDate;
+			}
 		},
 		onPullDownRefresh() {
 			this.page = 1;
@@ -245,6 +309,18 @@
 			this.getOrderList();
 		},
 		methods: {
+			ensureMerchantContext() {
+				const storeId = Number(this.$store.state.merchant.activeStoreId || 0);
+				const role = this.$store.state.merchant.activeRole || '';
+				if (storeId <= 0 || !role) {
+					this.$util.Tips({ title: '请先选择门店身份' }, '/pages/merchant/home/index');
+					return Promise.resolve(false);
+				}
+				const stores = this.$store.state.merchant.stores || [];
+				const hit = stores.find((s) => Number(s.id || s.store_id) === storeId);
+				this.storeName = (hit && (hit.name || hit.store_name)) || '当前门店';
+				return Promise.resolve(true);
+			},
 			ensureStaffInfo() {
 				const info = this.$store.state.app.storeStaffInfo || {};
 				if (info.store_id) {
@@ -263,6 +339,9 @@
 				this.$refs.calendar.open();
 			},
 			changeDate(e) {
+				// 选单日后退出区间模式，与日历交互一致
+				this.filterStartDate = '';
+				this.filterEndDate = '';
 				this.filterDate = e.fulldate || '';
 				this.dateLabel = this.filterDate || '筛选日期';
 				this.reloadList();
@@ -275,6 +354,14 @@
 				this.getOrderList();
 			},
 			getStatistics() {
+				if (this.isMerchantContext) {
+					return merchantReservationStatistics({
+						...this.merchantContextParams,
+						...this.reservationDateParams,
+					}).then(res => {
+						this.orderData = res.data || {};
+					}).catch(() => {});
+				}
 				return storeReservationStatistics({
 					is_manager: this.canManageReservation ? 1 : 0,
 					date: this.filterDate
@@ -306,7 +393,8 @@
 				return [];
 			},
 			canModify(item) {
-				return item.status == 3;
+				// 仅待确认且具备接单同级管理权限（商家端员工不可改他人/无权改）
+				return item.status == 3 && this.canManageReservation;
 			},
 			callPhone(phone) {
 				if (!phone) return;
@@ -314,8 +402,11 @@
 			},
 			goDetail(item) {
 				if (!item || !item.id) return;
+				const qs = this.isMerchantContext
+					? `id=${item.id}&merchant=1`
+					: `id=${item.id}&from=butler`;
 				uni.navigateTo({
-					url: `/pages/admin/reservation_details/index?id=${item.id}&from=butler`
+					url: `/pages/admin/reservation_details/index?${qs}`
 				});
 			},
 			goModify(item) {
@@ -325,6 +416,7 @@
 					if (item.cart_info_id) url += `&cartInfoId=${item.cart_info_id}`;
 					if (item.store_id) url += `&store_id=${item.store_id}`;
 					url += `&reservationId=${item.id}&butlerEdit=1`;
+					if (this.isMerchantContext) url += `&merchant=1`;
 					// #ifdef MP
 					openGuanjiaSubscribe().finally(() => {
 						uni.navigateTo({ url });
@@ -335,8 +427,11 @@
 					// #endif
 					return;
 				}
+				const qs = this.isMerchantContext
+					? `id=${item.id}&merchant=1`
+					: `id=${item.id}`;
 				uni.navigateTo({
-					url: '/pages/admin/reservation_details/index?id=' + item.id
+					url: '/pages/admin/reservation_details/index?' + qs
 				});
 			},
 			openRefuse(item) {
@@ -358,7 +453,13 @@
 				// #ifdef MP
 				openGuanjiaSubscribe();
 				// #endif
-				storeReservationRefuse(this.refuseItem.id, { refuse_reason: reason }).then(r => {
+				const req = this.isMerchantContext
+					? merchantReservationRefuse(this.refuseItem.id, {
+						...this.merchantContextParams,
+						refuse_reason: reason
+					})
+					: storeReservationRefuse(this.refuseItem.id, { refuse_reason: reason });
+				req.then(r => {
 					this.$util.Tips({ title: r.msg || '已拒绝' });
 					this.closeRefuse();
 					this.reloadList();
@@ -367,7 +468,10 @@
 				});
 			},
 			loadTableList() {
-				storeReservationTableList().then(res => {
+				const req = this.isMerchantContext
+					? merchantReservationTables(this.merchantContextParams)
+					: storeReservationTableList();
+				req.then(res => {
 					this.tableList = res.data || [];
 				}).catch(() => {
 					this.tableList = [];
@@ -398,10 +502,17 @@
 				// #ifdef MP
 				openGuanjiaSubscribe();
 				// #endif
-				storeReservationConfirm(this.confirmItem.id, {
+				const payload = {
 					table_id: room.id,
 					table_name: room.remarks || String(room.table_number || '')
-				}).then(res => {
+				};
+				const req = this.isMerchantContext
+					? merchantReservationConfirm(this.confirmItem.id, {
+						...this.merchantContextParams,
+						...payload
+					})
+					: storeReservationConfirm(this.confirmItem.id, payload);
+				req.then(res => {
 					this.$util.Tips({ title: res.msg || '接单成功' });
 					this.closeRoom();
 					this.reloadList();
@@ -428,15 +539,26 @@
 				if (status === 'evaluate') {
 					status = 999;
 				}
-				return storeReservationList({
-					status: status,
-					search: this.keyword,
-					oid: this.oid,
-					page: this.page,
-					limit: this.limit,
-					date: this.filterDate,
-					is_manager: this.canManageReservation ? 1 : 0
-				}).then(res => {
+				const req = this.isMerchantContext
+					? merchantReservationList({
+						...this.merchantContextParams,
+						...this.reservationDateParams,
+						status: status,
+						search: this.keyword,
+						oid: this.oid,
+						page: this.page,
+						limit: this.limit,
+					})
+					: storeReservationList({
+						status: status,
+						search: this.keyword,
+						oid: this.oid,
+						page: this.page,
+						limit: this.limit,
+						date: this.filterDate,
+						is_manager: this.canManageReservation ? 1 : 0
+					});
+				return req.then(res => {
 					const list = res.data || [];
 					const loadend = list.length < this.limit;
 					this.orderList = this.$util.SplitArray(list, this.orderList);

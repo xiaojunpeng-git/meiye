@@ -12,6 +12,14 @@
 				/>
 			</view>
 			<view class="search-btn" @click="onSearch">查询</view>
+			<view
+				v-if="showFilterEntry"
+				class="filter-btn"
+				:class="{ on: filterActiveCount > 0 }"
+				@click="openFilter"
+			>
+				筛选{{ filterActiveCount > 0 ? `(${filterActiveCount})` : '' }}
+			</view>
 		</view>
 		<view class="tabs">
 			<view
@@ -50,6 +58,11 @@
 			<view class="sub-bar">
 				<text class="sub-bar__back" @click="backToSegments">‹ 返回客群</text>
 				<text class="sub-bar__title">{{ focusListTitle }}</text>
+				<text
+					v-if="listSegment === 'debt'"
+					class="sub-bar__link"
+					@click="goDebtOrders"
+				>欠款单</text>
 			</view>
 			<scroll-view scroll-y class="list" @scrolltolower="loadMore">
 				<view
@@ -111,6 +124,53 @@
 
 		<view class="fab" @click="openCreate" v-if="canCreate">
 			<text class="fab__plus">＋</text>
+		</view>
+
+		<!-- 轻量筛选：生日 + 性别 + 余额（我的/全部） -->
+		<view class="mask" v-if="filterVisible" @click="closeFilter">
+			<view class="sheet filter-sheet" @click.stop>
+				<view class="sheet__title">筛选客户</view>
+				<view class="filter-label">生日</view>
+				<view class="chip-row">
+					<view
+						v-for="b in birthdayOptions"
+						:key="b.value"
+						class="chip"
+						:class="{ on: draftBirthdayType === b.value }"
+						@click="draftBirthdayType = b.value"
+					>{{ b.label }}</view>
+				</view>
+				<view class="filter-label">性别</view>
+				<view class="chip-row">
+					<view
+						v-for="s in sexOptions"
+						:key="'sex-' + s.value"
+						class="chip"
+						:class="{ on: draftSex === s.value }"
+						@click="draftSex = s.value"
+					>{{ s.label }}</view>
+				</view>
+				<view class="filter-label">余额区间</view>
+				<view class="money-row">
+					<input
+						class="money-input"
+						type="digit"
+						v-model="draftMoneyMin"
+						placeholder="最低"
+					/>
+					<text class="money-sep">—</text>
+					<input
+						class="money-input"
+						type="digit"
+						v-model="draftMoneyMax"
+						placeholder="最高"
+					/>
+				</view>
+				<view class="sheet__actions">
+					<view class="btn btn--ghost" @click="resetFilterDraft">重置</view>
+					<view class="btn btn--primary" @click="applyFilter">确定</view>
+				</view>
+			</view>
 		</view>
 
 		<!-- 新增客户 -->
@@ -185,11 +245,48 @@ export default {
 				mark: '',
 			},
 			pendingAdd: false,
+			filterVisible: false,
+			filterBirthdayType: 0,
+			filterSex: '',
+			filterMoneyMin: '',
+			filterMoneyMax: '',
+			draftBirthdayType: 0,
+			draftSex: '',
+			draftMoneyMin: '',
+			draftMoneyMax: '',
+			sexOptions: [
+				{ value: '', label: '不限' },
+				{ value: 1, label: '男' },
+				{ value: 2, label: '女' },
+				{ value: 0, label: '其他' },
+			],
+			birthdayOptions: [
+				{ value: 0, label: '全部' },
+				{ value: 1, label: '今天' },
+				{ value: 2, label: '明天' },
+				{ value: 3, label: '本月' },
+			],
 		};
 	},
 	computed: {
 		canCreate() {
 			return this.hasMerchantPermission('merchant.customer.create');
+		},
+		showFilterEntry() {
+			return this.tab === 'mine' || this.tab === 'all';
+		},
+		filterActiveCount() {
+			let n = 0;
+			if (Number(this.filterBirthdayType) > 0) n += 1;
+			if (this.filterSex !== '' && this.filterSex !== null && this.filterSex !== undefined) n += 1;
+			if (String(this.filterMoneyMin || '').trim() !== '' || String(this.filterMoneyMax || '').trim() !== '') n += 1;
+			return n;
+		},
+		nowMoneyPeiceParam() {
+			const min = String(this.filterMoneyMin || '').trim();
+			const max = String(this.filterMoneyMax || '').trim();
+			if (min === '' && max === '') return '';
+			return `${min}-${max}`;
 		},
 	},
 	async onShow() {
@@ -217,7 +314,7 @@ export default {
 		if (opt && opt.tab) {
 			this.tab = opt.tab;
 		}
-		if (opt && (opt.segment === 'new_month' || opt.segment === 'new_customer' || opt.birthday_type)) {
+		if (opt && (opt.segment === 'new_month' || opt.segment === 'new_customer' || opt.segment === 'debt' || opt.birthday_type)) {
 			this.pendingDrill = {
 				title: opt.title ? decodeURIComponent(String(opt.title)) : '',
 				segment: opt.segment || '',
@@ -228,6 +325,7 @@ export default {
 			if (!this.pendingDrill.title) {
 				if (opt.segment === 'new_month') this.pendingDrill.title = '本月新增';
 				else if (opt.segment === 'new_customer') this.pendingDrill.title = '新增客户';
+				else if (opt.segment === 'debt') this.pendingDrill.title = '欠款客户';
 				else if (Number(opt.birthday_type) === 1) this.pendingDrill.title = '今日生日';
 			}
 		}
@@ -250,6 +348,7 @@ export default {
 		},
 		formatSegCount(s) {
 			if (!s) return '-';
+			if (s.no_permission) return '暂无权限';
 			if (s.developing || s.count === null || s.count === undefined) return '开发中';
 			return String(s.count);
 		},
@@ -345,16 +444,20 @@ export default {
 		},
 		onSegment(s) {
 			if (!s) return;
+			if (s.no_permission) {
+				uni.showToast({ title: '暂无欠款查看权限', icon: 'none' });
+				return;
+			}
 			if (s.developing || s.count === null || s.count === undefined) {
 				uni.showToast({ title: '该客群规则开发中', icon: 'none' });
 				return;
 			}
-			if (s.key === 'debt') {
+			if (s.key === 'debt' || (s.filter && s.filter.segment === 'debt')) {
 				if (!this.hasMerchantPermission('merchant.debt.view')) {
 					uni.showToast({ title: '暂无欠款查看权限', icon: 'none' });
 					return;
 				}
-				uni.navigateTo({ url: '/pages/merchant/debt/index' });
+				this.openFocusList(s.name || '欠款客户', { segment: 'debt' });
 				return;
 			}
 			const bt = s.filter && s.filter.birthday_type;
@@ -367,6 +470,13 @@ export default {
 				return;
 			}
 			uni.showToast({ title: s.action || '请到全部客户查看', icon: 'none' });
+		},
+		goDebtOrders() {
+			if (!this.hasMerchantPermission('merchant.debt.view')) {
+				uni.showToast({ title: '暂无欠款查看权限', icon: 'none' });
+				return;
+			}
+			uni.navigateTo({ url: '/pages/merchant/debt/index' });
 		},
 		backToSegments() {
 			this.focusMode = 'segments';
@@ -388,6 +498,35 @@ export default {
 			this.page += 1;
 			this.fetchList();
 		},
+		openFilter() {
+			if (!this.showFilterEntry) return;
+			this.draftBirthdayType = Number(this.filterBirthdayType) || 0;
+			this.draftSex = this.filterSex === '' || this.filterSex === null || this.filterSex === undefined
+				? ''
+				: Number(this.filterSex);
+			this.draftMoneyMin = this.filterMoneyMin;
+			this.draftMoneyMax = this.filterMoneyMax;
+			this.filterVisible = true;
+		},
+		closeFilter() {
+			this.filterVisible = false;
+		},
+		resetFilterDraft() {
+			this.draftBirthdayType = 0;
+			this.draftSex = '';
+			this.draftMoneyMin = '';
+			this.draftMoneyMax = '';
+		},
+		applyFilter() {
+			this.filterBirthdayType = Number(this.draftBirthdayType) || 0;
+			this.filterSex = this.draftSex === '' || this.draftSex === null || this.draftSex === undefined
+				? ''
+				: Number(this.draftSex);
+			this.filterMoneyMin = String(this.draftMoneyMin || '').trim();
+			this.filterMoneyMax = String(this.draftMoneyMax || '').trim();
+			this.filterVisible = false;
+			this.reload();
+		},
 		fetchList() {
 			if (this.loading || this.loadend) return;
 			this.loading = true;
@@ -396,12 +535,18 @@ export default {
 				page: this.page,
 				limit: this.limit,
 				keyword: this.keyword || '',
-				birthday_type: inFocusList ? this.birthdayType : 0,
+				birthday_type: inFocusList ? this.birthdayType : (this.filterBirthdayType || 0),
 				segment: inFocusList ? (this.listSegment || '') : '',
 				start_date: inFocusList ? (this.listStartDate || '') : '',
 				end_date: inFocusList ? (this.listEndDate || '') : '',
 				...this.contextParams(),
 			};
+			if (!inFocusList && this.nowMoneyPeiceParam) {
+				data.now_money_peice = this.nowMoneyPeiceParam;
+			}
+			if (!inFocusList && this.filterSex !== '' && this.filterSex !== null && this.filterSex !== undefined) {
+				data.sex = Number(this.filterSex);
+			}
 			if (this.tab === 'mine') {
 				data.field_key = 'mine';
 			}
@@ -506,6 +651,58 @@ export default {
 	font-size: 28rpx;
 	color: #e93323;
 }
+.filter-btn {
+	margin-left: 8rpx;
+	padding: 0 16rpx;
+	height: 68rpx;
+	line-height: 68rpx;
+	font-size: 26rpx;
+	color: #666;
+	white-space: nowrap;
+}
+.filter-btn.on {
+	color: #e93323;
+	font-weight: 600;
+}
+.filter-label {
+	font-size: 26rpx;
+	color: #666;
+	margin: 8rpx 0 16rpx;
+}
+.chip-row {
+	display: flex;
+	flex-wrap: wrap;
+	margin-bottom: 16rpx;
+}
+.chip {
+	padding: 12rpx 28rpx;
+	margin: 0 16rpx 16rpx 0;
+	background: #f5f5f5;
+	border-radius: 28rpx;
+	font-size: 26rpx;
+	color: #333;
+}
+.chip.on {
+	background: rgba(233, 51, 35, 0.1);
+	color: #e93323;
+}
+.money-row {
+	display: flex;
+	align-items: center;
+	margin-bottom: 12rpx;
+}
+.money-input {
+	flex: 1;
+	height: 72rpx;
+	background: #f5f5f5;
+	border-radius: 12rpx;
+	padding: 0 20rpx;
+	font-size: 28rpx;
+}
+.money-sep {
+	margin: 0 16rpx;
+	color: #999;
+}
 .tabs {
 	display: flex;
 	background: #fff;
@@ -571,6 +768,12 @@ export default {
 	font-size: 28rpx;
 	color: #222;
 	font-weight: 600;
+	flex: 1;
+}
+.sub-bar__link {
+	font-size: 26rpx;
+	color: #e93323;
+	padding-left: 16rpx;
 }
 .list {
 	flex: 1;

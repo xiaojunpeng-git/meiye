@@ -74,6 +74,38 @@
 							<text class="menu__arrow">›</text>
 						</view>
 					</view>
+					<view class="card" v-if="showStoreRanking">
+						<view class="card__head">
+							<text class="card__title">门店排行</text>
+							<text class="card__sub">{{ dateFilter.display }}</text>
+						</view>
+						<view class="rank-tabs">
+							<view
+								v-for="t in rankingTabs"
+								:key="t.key"
+								class="rank-tab"
+								:class="{ active: rankingTab === t.key }"
+								@click="rankingTab = t.key"
+							>{{ t.name }}</view>
+						</view>
+						<view class="rank-head" v-if="currentRanking.length">
+							<text>门店</text>
+							<text>金额</text>
+						</view>
+						<view
+							v-for="(item, i) in currentRanking"
+							:key="(item.store_id || i) + '-' + rankingTab"
+							class="rank-row"
+						>
+							<view class="rank-row__name">
+								<text class="rank-row__idx">{{ i + 1 }}</text>
+								{{ item.name || ('门店#' + item.store_id) }}
+							</view>
+							<text class="rank-row__num">{{ formatMoney(item.number) }}</text>
+						</view>
+						<view class="hint" v-if="storeRanking.note">{{ storeRanking.note }}</view>
+						<view class="empty" v-if="!currentRanking.length">暂无排行</view>
+					</view>
 					<view class="card" v-if="detailMenus.length">
 						<view class="card__title">明细入口</view>
 						<view class="menu">
@@ -217,6 +249,12 @@ export default {
 			staffStats: {},
 			loading: false,
 			loadSeq: 0,
+			rankingTab: 'cash',
+			rankingTabs: [
+				{ key: 'cash', name: '现金业绩' },
+				{ key: 'actual', name: '实际业绩' },
+				{ key: 'consume', name: '客户消耗' },
+			],
 		};
 	},
 	computed: {
@@ -249,6 +287,17 @@ export default {
 		secondaryMetrics() {
 			return (this.business && this.business.secondary) || [];
 		},
+		storeRanking() {
+			return (this.business && this.business.store_ranking) || {};
+		},
+		showStoreRanking() {
+			return !!(this.storeRanking && this.storeRanking.show);
+		},
+		currentRanking() {
+			const key = this.rankingTab || 'cash';
+			const list = (this.storeRanking && this.storeRanking[key]) || [];
+			return Array.isArray(list) ? list : [];
+		},
 		scopeText() {
 			const scope = (this.business && this.business.scope) || {};
 			const ids = scope.scope_store_ids || [];
@@ -257,15 +306,16 @@ export default {
 			}
 			if (scope.store_id) return `门店 #${scope.store_id}`;
 			if (ids.length === 1) return `门店 #${ids[0]}`;
+			if (ids.length > 1) return `门店 ${ids.length} 家`;
 			return '';
 		},
 		detailMenus() {
 			const list = [];
 			if (this.perms.includes('merchant.data.region') || this.activeRole === 'region_agent') {
-				list.push({ name: '区域经营', desc: '门店排行与区域统计', url: '/pages/admin/agent/index' });
+				list.push({ name: '区域经营', desc: '区域统计工作台', url: '/pages/admin/agent/index' });
 			}
 			if (this.perms.includes('merchant.data.store') || this.activeRole === 'store_manager') {
-				list.push({ name: '门店业绩', desc: '门店现金/实收/消耗', url: '/pages/admin/yeji/store' });
+				list.push({ name: '员工业绩', desc: '员工业绩排行（非三指标明细）', url: '/pages/admin/yeji/store' });
 			}
 			if (this.perms.includes('merchant.data.self')) {
 				list.push({ name: '个人业绩', desc: '本人业绩明细', url: '/pages/merchant/yeji/self' });
@@ -419,6 +469,17 @@ export default {
 				uni.navigateTo({ url: `/pages/merchant/customer/index?${q}` });
 				return;
 			}
+			if (code === 'reservation_customer' || detail.indexOf('/pages/admin/reservation_list') === 0) {
+				const q = [
+					'merchant=1',
+					`start_date=${this.dateFilter.start_date || ''}`,
+					`end_date=${this.dateFilter.end_date || ''}`,
+				].join('&');
+				uni.navigateTo({
+					url: `/pages/admin/reservation_list/index?${q}`,
+				});
+				return;
+			}
 			if (detail.indexOf('/pages/merchant/yeji/self') === 0 || String(code).indexOf('staff_') === 0) {
 				let sumType = 1;
 				const matched = /(?:\?|&)sum_type=(\d+)/.exec(detail);
@@ -436,6 +497,33 @@ export default {
 				uni.navigateTo({ url: `/pages/merchant/yeji/self?${q}` });
 				return;
 			}
+			if (code === 'cash_performance' || detail.indexOf('/pages/merchant/metric/cash') === 0) {
+				const q = [
+					`start_date=${this.dateFilter.start_date || ''}`,
+					`end_date=${this.dateFilter.end_date || ''}`,
+					`date_type=${this.dateFilter.date_type || 'custom'}`,
+				].join('&');
+				uni.navigateTo({ url: `/pages/merchant/metric/cash?${q}` });
+				return;
+			}
+			if (code === 'actual_performance' || detail.indexOf('/pages/merchant/metric/actual') === 0) {
+				const q = [
+					`start_date=${this.dateFilter.start_date || ''}`,
+					`end_date=${this.dateFilter.end_date || ''}`,
+					`date_type=${this.dateFilter.date_type || 'custom'}`,
+				].join('&');
+				uni.navigateTo({ url: `/pages/merchant/metric/actual?${q}` });
+				return;
+			}
+			if (code === 'consume_amount' || detail.indexOf('/pages/merchant/metric/consume') === 0) {
+				const q = [
+					`start_date=${this.dateFilter.start_date || ''}`,
+					`end_date=${this.dateFilter.end_date || ''}`,
+					`date_type=${this.dateFilter.date_type || 'custom'}`,
+				].join('&');
+				uni.navigateTo({ url: `/pages/merchant/metric/consume?${q}` });
+				return;
+			}
 			uni.showToast({ title: '指标明细开发中', icon: 'none' });
 		},
 		async onTooltip(m) {
@@ -445,11 +533,11 @@ export default {
 				const d = (res && res.data) || {};
 				const lines = [
 					d.name || m.title || '',
-					d.formula ? `公式：${d.formula}` : '',
-					d.include ? `包含：${d.include}` : '',
-					d.exclude ? `排除：${d.exclude}` : '',
-					d.source ? `来源：${d.source}` : '',
-					d.time_field ? `时间：${d.time_field}` : '',
+					d.summary || '',
+					d.include || '',
+					d.exclude || '',
+					d.timing || '',
+					d.note || '',
 				].filter(Boolean);
 				uni.showModal({
 					title: '指标口径',
@@ -593,6 +681,58 @@ export default {
 .menu__arrow {
 	font-size: 32rpx;
 	color: #ccc;
+}
+.rank-tabs {
+	display: flex;
+	margin: 8rpx 0 16rpx;
+	gap: 12rpx;
+}
+.rank-tab {
+	padding: 10rpx 20rpx;
+	font-size: 24rpx;
+	color: #666;
+	background: #f5f6f8;
+	border-radius: 8rpx;
+}
+.rank-tab.active {
+	color: #e93323;
+	background: #fff1f0;
+	font-weight: 600;
+}
+.rank-head {
+	display: flex;
+	justify-content: space-between;
+	font-size: 22rpx;
+	color: #999;
+	padding: 8rpx 0 12rpx;
+}
+.rank-row {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 20rpx 0;
+	border-bottom: 1rpx solid #f3f3f3;
+}
+.rank-row:last-child {
+	border-bottom: none;
+}
+.rank-row__name {
+	flex: 1;
+	min-width: 0;
+	font-size: 28rpx;
+	color: #222;
+	padding-right: 16rpx;
+}
+.rank-row__idx {
+	display: inline-block;
+	width: 36rpx;
+	color: #999;
+	font-size: 24rpx;
+}
+.rank-row__num {
+	font-size: 28rpx;
+	font-weight: 600;
+	color: #222;
 }
 .grid {
 	display: flex;

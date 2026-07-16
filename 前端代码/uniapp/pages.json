@@ -2600,6 +2600,27 @@
 					}
 				},
 				{
+					"path": "metric/cash",
+					"style": {
+						"navigationBarTitleText": "现金业绩明细",
+						"navigationBarBackgroundColor": "#ffffff"
+					}
+				},
+				{
+					"path": "metric/actual",
+					"style": {
+						"navigationBarTitleText": "实收业绩明细",
+						"navigationBarBackgroundColor": "#ffffff"
+					}
+				},
+				{
+					"path": "metric/consume",
+					"style": {
+						"navigationBarTitleText": "消耗金额明细",
+						"navigationBarBackgroundColor": "#ffffff"
+					}
+				},
+				{
 					"path": "training/index",
 					"style": {
 						"navigationBarTitleText": "培训资料",

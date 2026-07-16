@@ -174,6 +174,15 @@ class UserStoreUserDao extends BaseDao
         if (isset($where['salesman_id']) && (int)$where['salesman_id'] > 0) {
             $model = $model->where($userAlias . 'salesman_id', (int)$where['salesman_id']);
         }
+        // 指定 uid 集合（欠款客群等）
+        if (array_key_exists('uids', $where) && is_array($where['uids'])) {
+            $uids = array_values(array_unique(array_filter(array_map('intval', $where['uids']))));
+            if ($uids) {
+                $model = $model->whereIn($userAlias . 'uid', $uids);
+            } else {
+                $model = $model->whereRaw('1=0');
+            }
+        }
         // 用户访问时间
         if (isset($where['user_time_type']) && isset($where['user_time'])) {
             //最后一次访问时间
@@ -208,8 +217,16 @@ class UserStoreUserDao extends BaseDao
         }
         //当前余额
         if (isset($where['now_money_peice']) && $where['now_money_peice'] != '-' && $where['now_money_peice'] != '') {
-            $now_money_peice = explode('-', $where['now_money_peice']);
-            $model = $model->whereBetween($userAlias . 'now_money', $now_money_peice);
+            $parts = explode('-', (string)$where['now_money_peice'], 2);
+            $min = isset($parts[0]) && $parts[0] !== '' ? $parts[0] : null;
+            $max = isset($parts[1]) && $parts[1] !== '' ? $parts[1] : null;
+            if ($min !== null && $max !== null) {
+                $model = $model->whereBetween($userAlias . 'now_money', [$min, $max]);
+            } elseif ($min !== null) {
+                $model = $model->where($userAlias . 'now_money', '>=', $min);
+            } elseif ($max !== null) {
+                $model = $model->where($userAlias . 'now_money', '<=', $max);
+            }
         }
 
         //用户等级

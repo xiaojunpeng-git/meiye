@@ -234,11 +234,11 @@ export default {
 				const d = (res && res.data) || {};
 				const lines = [
 					d.name || m.title || '',
-					d.formula ? `公式：${d.formula}` : '',
-					d.include ? `包含：${d.include}` : '',
-					d.exclude ? `排除：${d.exclude}` : '',
-					d.source ? `来源：${d.source}` : '',
-					d.time_field ? `时间：${d.time_field}` : '',
+					d.summary || '',
+					d.include || '',
+					d.exclude || '',
+					d.timing || '',
+					d.note || '',
 				].filter(Boolean);
 				uni.showModal({
 					title: '指标口径',

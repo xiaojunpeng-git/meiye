@@ -55,11 +55,11 @@
 			<view v-if="todoList.length || todoNote" class="card">
 				<view class="card__head">
 					<text class="card__title">待办提醒</text>
-					<text class="card__link" @click="goWorkbench">全部 ›</text>
+					<text class="card__link" @click="goAllTodos">全部 ›</text>
 				</view>
-				<view v-if="todoList.length" class="todo-row">
+				<view v-if="todoPreview.length" class="todo-row">
 					<view
-						v-for="(t, i) in todoList.slice(0, 4)"
+						v-for="(t, i) in todoPreview"
 						:key="i"
 						class="todo-item"
 						@click="goUrl(t.url)"
@@ -96,15 +96,15 @@
 			<view v-if="showReservation" class="card">
 				<view class="card__head">
 					<text class="card__title">今日预约</text>
-					<text class="card__link" @click="goUrl('/pages/admin/reservation_list/index')">全部 ›</text>
+					<text class="card__link" @click="goUrl('/pages/admin/reservation_list/index?merchant=1')">全部 ›</text>
 				</view>
 				<view v-if="reservationsDeveloping" class="empty-tip">预约列表口径开发中</view>
 				<template v-else-if="reservations.length">
 					<view
 						v-for="(r, i) in reservations"
-						:key="i"
+						:key="r.id || i"
 						class="rsv-item"
-						@click="goUrl('/pages/admin/reservation_list/index')"
+						@click="goReservationDetail(r)"
 					>
 						<view class="rsv-item__time">{{ r.timeText }}</view>
 						<view class="rsv-item__body">
@@ -227,36 +227,38 @@ export default {
 		todoList() {
 			const list = [];
 			const t = this.todoCounts;
+			// 1. 预约
 			if (this.showReservation) {
 				if (t.reservation_developing) {
 					list.push({
 						name: '今日预约待办',
 						count: 0,
 						developing: true,
-						url: '/pages/admin/reservation_list/index',
+						url: '/pages/admin/reservation_list/index?merchant=1',
 					});
 				} else if (Number(t.reservation) > 0) {
 					list.push({
 						name: '今日预约待办',
 						count: Number(t.reservation),
-						url: '/pages/admin/reservation_list/index',
+						url: '/pages/admin/reservation_list/index?merchant=1',
 					});
 				}
 			}
-			if (Number(t.refunding) > 0) {
+			// 2. 订单类合并：待售后 + 待发货 → 订单待处理（不扩新口径）
+			const refunding = Number(t.refunding) || 0;
+			const unshipped = Number(t.unshipped) || 0;
+			const orderPending = refunding + unshipped;
+			if (orderPending > 0) {
 				list.push({
-					name: '待售后',
-					count: Number(t.refunding),
-					url: '/pages/admin/refundOrderList/index',
+					name: '订单待处理',
+					count: orderPending,
+					url: refunding > 0
+						? '/pages/admin/refundOrderList/index'
+						: '/pages/admin/orderList/index?types=1',
+					meta: { refunding, unshipped },
 				});
 			}
-			if (Number(t.unshipped) > 0) {
-				list.push({
-					name: '待发货',
-					count: Number(t.unshipped),
-					url: '/pages/admin/orderList/index?types=1',
-				});
-			}
+			// 3. 库存预警
 			if (Number(t.policeforce) > 0) {
 				list.push({
 					name: '库存预警',
@@ -264,6 +266,7 @@ export default {
 					url: '/pages/admin/goods/index?type=5',
 				});
 			}
+			// 4. 欠款
 			if (this.hasMerchantPermission('merchant.debt.view')) {
 				if (t.debt_developing) {
 					list.push({
@@ -282,15 +285,21 @@ export default {
 			}
 			return list;
 		},
+		/** 首页主区最多露出 3 项；其余进「全部」 */
+		todoPreview() {
+			return this.todoList.slice(0, 3);
+		},
 		shortcuts() {
 			const badgeMap = {
 				workbench: Number(this.todoCounts.refunding || 0) + Number(this.todoCounts.policeforce || 0),
 			};
 			const all = [
 				{ name: '扫码核销', icon: 'icon-ic_Scan', action: 'scan', need: 'cancel' },
-				{ name: '开单收银', icon: 'icon-ic_order', action: 'url', url: '/pages/admin/order/store', need: 'order' },
+				// 代客下单旧链路无 merchant.scope_store_ids Guard，暂不可作商家收银入口（Codex FAIL）
+				{ name: '开单收银', icon: 'icon-ic_order', action: 'developing', need: '' },
+				// 开卡/充值/续卡真收银在 PC；移动端整链未就绪
 				{ name: '开卡充值', icon: 'icon-ic_user1', action: 'developing', need: '' },
-				{ name: '预约', icon: 'icon-ic_clock', action: 'url', url: '/pages/admin/reservation_list/index', need: 'rsv' },
+				{ name: '预约', icon: 'icon-ic_clock', action: 'url', url: '/pages/admin/reservation_list/index?merchant=1', need: 'rsv' },
 				{ name: '添加客户', icon: 'icon-ic_user', action: 'url', url: '/pages/merchant/customer/index?action=add', need: 'customer_create' },
 				{ name: '订单管理', icon: 'icon-ic_order1', action: 'url', url: '/pages/admin/orderList/index', need: 'order' },
 				{ name: '补交欠款', icon: 'icon-ic_money', action: 'url', url: '/pages/merchant/debt/index', need: 'debt' },
@@ -344,6 +353,14 @@ export default {
 			if (!url) return;
 			uni.navigateTo({ url });
 		},
+		goReservationDetail(r) {
+			const id = r && Number(r.id);
+			if (id > 0) {
+				uni.navigateTo({ url: `/pages/admin/reservation_details/index?id=${id}&merchant=1` });
+				return;
+			}
+			uni.navigateTo({ url: '/pages/admin/reservation_list/index?merchant=1' });
+		},
 		goData() {
 			uni.redirectTo({ url: '/pages/merchant/data/index' });
 		},
@@ -361,11 +378,11 @@ export default {
 				const d = (res && res.data) || {};
 				const lines = [
 					d.name || m.title || '',
-					d.formula ? `公式：${d.formula}` : '',
-					d.include ? `包含：${d.include}` : '',
-					d.exclude ? `排除：${d.exclude}` : '',
-					d.source ? `来源：${d.source}` : '',
-					d.time_field ? `时间：${d.time_field}` : '',
+					d.summary || '',
+					d.include || '',
+					d.exclude || '',
+					d.timing || '',
+					d.note || '',
 				].filter(Boolean);
 				uni.showModal({
 					title: '指标口径',
@@ -378,6 +395,24 @@ export default {
 		},
 		goWorkbench() {
 			uni.navigateTo({ url: '/pages/merchant/workbench/index' });
+		},
+		/** 全部待办：列出完整项并可跳转；无待办时回退工作台 */
+		goAllTodos() {
+			const list = this.todoList || [];
+			if (!list.length) {
+				this.goWorkbench();
+				return;
+			}
+			uni.showActionSheet({
+				itemList: list.map((t) => {
+					const n = t.developing ? '-' : (t.count > 99 ? '99+' : String(t.count));
+					return `${t.name}（${n}）`;
+				}),
+				success: (res) => {
+					const item = list[res.tapIndex];
+					if (item && item.url) this.goUrl(item.url);
+				},
+			});
 		},
 		openContextSheet() {
 			if (!this.canSwitchContext) return;
@@ -445,6 +480,7 @@ export default {
 			this.reservationsDeveloping = !!data.reservations_developing;
 			const rows = Array.isArray(data.reservations) ? data.reservations : [];
 			this.reservations = rows.slice(0, 5).map((item) => ({
+				id: Number(item.id || 0),
 				timeText: item.timeText || item.reservation_time || item.time || item.start_time || '--:--',
 				userName: item.userName || item.nickname || item.real_name || item.user_name || '客户',
 				serviceName: item.serviceName || item.product_name || item.service_name || item.title || '服务项目',

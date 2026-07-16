@@ -5,11 +5,11 @@
       <div class="area-set">
         本月目标：输入<br>
         本月底标：前6个月现金业绩的平均值(扣掉合作方等老师)<br>
-        本月业绩：现金业绩<br>
+        现金业绩：客户实际支付并已到账的金额<br>
         业绩分成款：销售业绩分配合作方等老师<br>
-        实际完成业绩：本月业绩-业绩分成款<br>
-        增长业绩：本月实际完成-本月底标<br>
-        完成率：实际完成业绩/本月目标<br>
+        实际业绩：现金业绩 − 分成款<br>
+        增长业绩：实际业绩 − 本月底标<br>
+        完成率：实际业绩 / 本月目标<br>
       </div>
       <span slot="footer" class="dialog-footer">
              <Button @click.stop="tip = false">确定</Button>
@@ -164,7 +164,7 @@ export default {
           minWidth: 100,
         },
         {
-          title: "本月业绩",
+          title: "现金业绩",
           key: "month",
           minWidth: 100,
         },
@@ -174,7 +174,7 @@ export default {
           minWidth: 100,
         },
         {
-          title: "本月实际完成",
+          title: "实际业绩",
           key: "complete",
           minWidth: 100,
         },

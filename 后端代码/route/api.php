@@ -986,6 +986,17 @@ Route::group('api', function () {
 		Route::get('data/staff/statistics', 'v1.merchant.MerchantBiz/dataStaffStats')->option(['real_name' => '数仓员工统计']);
 		Route::get('yeji/self', 'v1.merchant.MerchantBiz/yejiSelf')->option(['real_name' => '本人业绩概览']);
 		Route::get('yeji/self/detail', 'v1.merchant.MerchantBiz/yejiSelfDetail')->option(['real_name' => '本人业绩明细']);
+		Route::get('metric/cash/detail', 'v1.merchant.MerchantBiz/metricCashDetail')->option(['real_name' => '店级现金业绩明细']);
+		Route::get('metric/actual/detail', 'v1.merchant.MerchantBiz/metricActualDetail')->option(['real_name' => '店级实收业绩明细']);
+		Route::get('metric/consume/detail', 'v1.merchant.MerchantBiz/metricConsumeDetail')->option(['real_name' => '店级消耗金额明细']);
+		Route::get('reservation/list', 'v1.merchant.MerchantBiz/reservationList')->option(['real_name' => '商家预约列表']);
+		Route::get('reservation/statistics', 'v1.merchant.MerchantBiz/reservationStatistics')->option(['real_name' => '商家预约状态统计']);
+		Route::get('reservation/detail/:id', 'v1.merchant.MerchantBiz/reservationDetail')->option(['real_name' => '商家预约详情']);
+		Route::get('reservation/tables', 'v1.merchant.MerchantBiz/reservationTables')->option(['real_name' => '商家预约房间列表']);
+		Route::post('reservation/confirm/:id', 'v1.merchant.MerchantBiz/reservationConfirm')->option(['real_name' => '商家预约接单']);
+		Route::post('reservation/refuse/:id', 'v1.merchant.MerchantBiz/reservationRefuse')->option(['real_name' => '商家预约拒绝']);
+		Route::post('reservation/update/:id', 'v1.merchant.MerchantBiz/reservationUpdate')->option(['real_name' => '商家预约修改']);
+		Route::post('reservation/service/set/:id', 'v1.merchant.MerchantBiz/reservationServiceSet')->option(['real_name' => '商家预约服务状态']);
 		Route::get('debt/list', 'v1.merchant.MerchantBiz/debtList')->option(['real_name' => '商家欠款列表']);
 	})->middleware(AuthTokenMiddleware::class, true);
 

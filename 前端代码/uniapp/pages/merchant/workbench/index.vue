@@ -45,7 +45,7 @@ export default {
 						{ name: '订单管理', icon: 'icon-ic_order', url: '/pages/admin/orderList/index', need: 'order' },
 						{ name: '售后维权', icon: 'icon-ic_order1', url: '/pages/admin/refundOrderList/index', need: 'order' },
 						{ name: '商品管理', icon: 'icon-ic_shop1', url: '/pages/admin/goods/index', need: 'goods' },
-						{ name: '预约管理', icon: 'icon-ic_clock', url: '/pages/admin/reservation_list/index', need: 'rsv' },
+						{ name: '预约管理', icon: 'icon-ic_clock', url: '/pages/admin/reservation_list/index?merchant=1', need: 'rsv' },
 						{ name: '老师中心', icon: 'icon-ic_user1', url: '/pages/admin/staff_center/index', need: 'staff_center' },
 					],
 				},

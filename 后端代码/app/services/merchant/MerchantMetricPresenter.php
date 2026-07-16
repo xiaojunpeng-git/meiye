@@ -28,16 +28,26 @@ class MerchantMetricPresenter extends BaseServices
                 $code = $this->guessCodeByTitle((string)$row['title']);
             }
             $def = $code !== '' ? $dict->getByCode($code) : null;
+            $detailApi = null;
+            $detailDeveloping = true;
+            if ($code === 'cash_performance') {
+                $detailApi = '/pages/merchant/metric/cash';
+                $detailDeveloping = false;
+            } elseif ($code === 'actual_performance') {
+                $detailApi = '/pages/merchant/metric/actual';
+                $detailDeveloping = false;
+            } elseif ($code === 'consume_amount') {
+                $detailApi = '/pages/merchant/metric/consume';
+                $detailDeveloping = false;
+            }
             $out[] = [
                 'metric_code' => $code,
                 'title' => (string)($def['name'] ?? $row['title'] ?? ''),
                 'number' => $row['number'] ?? null,
                 'growth_rate' => $row['growth_rate'] ?? 0,
-                'source' => (string)($def['source'] ?? ''),
-                'formula' => (string)($def['formula'] ?? ''),
-                // 数值明细未建设：禁止误用字典说明当明细
-                'detail_api' => null,
-                'detail_developing' => true,
+                // 现金/实收/消耗：同口径明细页；禁止粗跳 yeji/store
+                'detail_api' => $detailApi,
+                'detail_developing' => $detailDeveloping,
                 'tooltip_api' => $code !== '' ? ('metric/dictionary/' . $code) : null,
             ];
         }
@@ -80,9 +90,6 @@ class MerchantMetricPresenter extends BaseServices
                 'detail_api' => '/pages/merchant/yeji/self?sum_type=' . $sumType,
                 'detail_developing' => false,
                 'tooltip_api' => 'metric/dictionary/' . $code,
-                'source' => (string)($dictItem['source'] ?? 'SatffYejiServices::staffInfo'),
-                'formula' => (string)($dictItem['formula'] ?? ''),
-                'time_field' => (string)($dictItem['time_field'] ?? 'staff_yeji.created_time'),
             ];
         }
         return $out;
@@ -95,7 +102,14 @@ class MerchantMetricPresenter extends BaseServices
             '实收业绩' => 'actual_performance',
             '实际业绩' => 'actual_performance',
             '消耗金额' => 'consume_amount',
+            '消耗业绩' => 'consume_amount',
             '客户消耗金额' => 'consume_amount',
+            '耗卡业绩' => 'card_consume_performance',
+            '耗卡' => 'card_consume_performance',
+            '预约客户数' => 'reservation_customer',
+            '预约客户' => 'reservation_customer',
+            '服务客次' => 'service_visit',
+            '服务次数' => 'service_visit',
         ];
         return $map[$title] ?? '';
     }

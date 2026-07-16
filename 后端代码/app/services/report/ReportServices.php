@@ -370,6 +370,35 @@ class ReportServices extends BaseServices
         return $yeji;
     }
 
+    /**
+     * 多门店消耗合计：逐店调用 activeYeji 再累加。
+     * homeStatics 与商家消耗明细必须共用本方法，避免 where(relation_id, array) 与逐店结果漂移。
+     *
+     * @param array $where 须含 time；store_id 可为 int|int[]
+     */
+    public function sumActiveYejiByStores(array $where): string
+    {
+        $storeIds = $where['store_id'] ?? [];
+        if (!is_array($storeIds)) {
+            $storeIds = $storeIds !== '' && $storeIds !== null ? [(int)$storeIds] : [];
+        }
+        $storeIds = array_values(array_filter(array_map('intval', $storeIds)));
+        if (!$storeIds) {
+            return '0.00';
+        }
+        $base = $where;
+        unset($base['store_id']);
+        $total = '0.00';
+        foreach ($storeIds as $sid) {
+            if ($sid <= 0) {
+                continue;
+            }
+            $sum = $this->activeYeji($base + ['store_id' => $sid]);
+            $total = bcadd($total, (string)($sum ?: 0), 2);
+        }
+        return $total;
+    }
+
     //消耗业绩--含合作类项目（不扣除）
     public function activeYejiAll($where){
         $dao=app()->make(StoreOrderWriteoffDao::class);

@@ -68,6 +68,13 @@
 			</view>
 		</template>
 		<view v-else class="state">客户不存在或无权查看</view>
+
+		<view v-if="info.uid" class="action-bar">
+			<view class="action-bar__btn" @click="callPhone(info.phone)">拨打</view>
+			<view class="action-bar__btn" @click="goReservation">预约</view>
+			<view class="action-bar__btn action-bar__btn--muted" @click="onDeveloping('开单')">开单</view>
+			<view class="action-bar__btn action-bar__btn--muted" @click="onDeveloping('补交')">补交</view>
+		</view>
 	</view>
 </template>
 
@@ -131,8 +138,20 @@ export default {
 			return p.replace(/(\d{3})\d{4}(\d+)/, '$1****$2');
 		},
 		callPhone(phone) {
-			if (!phone) return;
+			if (!phone) {
+				uni.showToast({ title: '暂无手机号', icon: 'none' });
+				return;
+			}
 			uni.makePhoneCall({ phoneNumber: String(phone) });
+		},
+		goReservation() {
+			uni.navigateTo({ url: '/pages/admin/reservation_list/index?merchant=1' });
+		},
+		onDeveloping(name) {
+			uni.showToast({
+				title: `${name || '该'}功能开发中`,
+				icon: 'none',
+			});
 		},
 		copyText(text) {
 			if (!text) return;
@@ -229,7 +248,7 @@ export default {
 .detail-page {
 	min-height: 100vh;
 	background: #f5f6f8;
-	padding-bottom: 40rpx;
+	padding-bottom: 140rpx;
 }
 .header {
 	display: flex;
@@ -341,5 +360,31 @@ export default {
 	text-align: center;
 	color: #aaa;
 	font-size: 26rpx;
+}
+.action-bar {
+	position: fixed;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	display: flex;
+	background: #fff;
+	border-top: 1rpx solid #eee;
+	padding: 16rpx 12rpx calc(16rpx + env(safe-area-inset-bottom));
+	z-index: 20;
+}
+.action-bar__btn {
+	flex: 1;
+	margin: 0 8rpx;
+	height: 72rpx;
+	line-height: 72rpx;
+	text-align: center;
+	font-size: 26rpx;
+	color: #fff;
+	background: #e93323;
+	border-radius: 36rpx;
+}
+.action-bar__btn--muted {
+	background: #ccc;
+	color: #fff;
 }
 </style>

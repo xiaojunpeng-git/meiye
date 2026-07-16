@@ -98,45 +98,24 @@
 				<view>服务凭证</view>
 				<view class="fs-24 text--w111-999">{{fontNum}}/100</view>
 			</view>
-			<textarea class="h-166 mt-24 fs-26" v-model="service_describe" placeholder='请填写服务说明，非必填' placeholder-class="placeholder" maxlength=100 @input="sumfontnum"></textarea>
-		</view>
-		<view class='acea-row row-between fs-28 text--w111-333 mt-32'>
-			<view class='acea-row row-middle'>
-				<view class='pictrue mt-22 mr-23 w-148 h-148 relative fs-24 text--w111-bbb rd-16' v-for="(item,index) in service_img" :key="index">
-					<image class="w-full h-full rd-16rpx" :src='item' mode="aspectFill"></image>
-					<view class='iconfont icon-ic_close abs-rt fs-24 w-32 h-32 bg-w111-999 rd-rt-16rpx rd-lb-16rpx text-center lh-32rpx text--w111-fff' @tap='DelPic(index)'></view>
+			<textarea class="mt-20 text--w111-333 fs-28" maxlength="100" :value="service_describe" @input="sumfontnum" placeholder-class="placeholder" placeholder="请填写服务凭证" name="service_describe" v-model="service_describe"></textarea>
+			<view class="acea-row row-middle mt-20">
+				<view class='pictrue mr-8' v-for="(item,index) in service_img" :key="index">
+					<image class="w-136 h-136 rd-16rpx" :src='item' mode="aspectFill"></image>
+					<text class='iconfont icon-ic_close' @click='DelPic(index)'></text>
 				</view>
-				<view class='acea-row row-center-wrapper row-column mt-22 w-148 h-148 relative fs-24 text--w111-333 rd-16rpx bg--w111-f5f5f5 border-CCCCCC' @tap='uploadpic'
-					v-if="service_img.length < 8">
-					<image class="w-48 h-48 mb-8" src="../static/ic_camera.png"></image>
-					<view>上传凭证</view>
+				<view class='pictrue acea-row row-center-wrapper row-column' @click='uploadpic' v-if="service_img.length < 8">
+					<text class='iconfont icon-icon_picture fs-50 text--w111-ccc'></text>
+					<view class="fs-24 text--w111-999 mt-8">上传凭证</view>
 				</view>
 			</view>
 		</view>
 	</view>
-	<view class="mt-20 bg--w111-fff rd-16rpx pt-32 pr-24 pl-24 pb-32" v-if="fromButler && serviceStarted">
-		<view class="cell acea-row row-between" v-if="info.service_time">
-			<text class="fs-28 w-200">服务开始时间</text>
-			<text class="fs-28 flex-1 pl-10 text-right">{{ info.service_time }}</text>
-		</view>
-		<view class="cell acea-row row-between" v-if="info.service_end_time">
-			<text class="fs-28 w-200">服务结束时间</text>
-			<text class="fs-28 flex-1 pl-10 text-right">{{ info.service_end_time }}</text>
-		</view>
-		<view class="fs-28 text--w111-333 fw-600" :class="{ 'mt-26': info.service_time || info.service_end_time }">服务凭证</view>
-		<view class="mt-24 fs-26 text--w111-666" v-if="service_describe">{{ service_describe }}</view>
-		<view class="acea-row row-middle flex-wrap mt-24" v-if="service_img.length">
-			<view class="w-148 h-148 mr-16 mb-16 rd-16" v-for="(item, index) in service_img" :key="index">
-				<image class="w-full h-full rd-16rpx" :src="item" mode="aspectFill"></image>
-			</view>
-		</view>
-		<view class="mt-24 fs-26 text--w111-999" v-if="!service_describe && !service_img.length">暂无服务凭证</view>
-	</view>
-	<view v-if="info.reservation_info && info.reservation_info.length" class="mt-20 bg--w111-fff rd-16rpx pt-32 pr-24 pl-24 pb-32">
-		<view class="cell fw-600">{{info.custom_form_title}}信息</view>
-		<view class="cell flex justify-between" v-for="(item,index) in info.reservation_info" :key="index">
-			<text class="fs-28">{{item.titleConfig.value}}</text>
-			<view v-if="item.name == 'uploadPicture' && item.value.length < 5"  class="w-462 flex justify-end">
+	<view class="mt-20 bg--w111-fff rd-16rpx pt-32 pr-24 pl-24 pb-32" v-if="info.custom_form && info.custom_form.length">
+		<view class="cell fw-600">补充信息</view>
+		<view class="cell acea-row row-between" v-for="(item,index) in info.custom_form" :key="index">
+			<text class="fs-28 w-200">{{item.title}}</text>
+			<view class='pictrue mr-8' v-if="item.name == 'uploadPicture' && item.value.length < 5">
 				<view class='pictrue mr-8' v-for="(items,indexs) in item.value" :key="indexs">
 				  <image class="w-88 h-88 rd-8rpx" :src='items' mode="aspectFill"></image>
 				</view>
@@ -157,7 +136,7 @@
 	<view class="heights"></view>
 	<view class="footer acea-row row-center-wrapper" v-if="info.status==3 && canManageReservation">
 		<view class="footer-btn refuse" @click="refuseOrder">拒绝</view>
-		<view class="footer-btn confirm ml-20" @click="confirmOrder">接单</view>
+		<view class="footer-btn confirm ml-20" @click="openRoomConfirm">接单</view>
 	</view>
 	<view class="footer bg-w111-2A7EFB acea-row row-center-wrapper" v-if="info.status==0 && canStartService && !fromButler" @click="showModalChange(1)">开始服务</view>
 	<view v-if="info.status==1 && canEndService && !fromButler">
@@ -178,6 +157,17 @@
 			></countDown>
 		</view>
 	</view>
+	<view class="mask" v-if="roomVisible" @click="closeRoom"></view>
+	<view class="refuse-panel room-panel" v-if="roomVisible">
+		<view class="room-title">选择服务房间</view>
+		<picker mode="selector" :range="roomLabels" @change="onRoomChange">
+			<view class="room-picker">{{ roomLabels[selectedRoomIndex] || '请选择房间' }}</view>
+		</picker>
+		<view class="refuse-btns acea-row row-center-wrapper">
+			<view class="refuse-btn cancel" @click="closeRoom">取消</view>
+			<view class="refuse-btn sure" @click="submitConfirm">确定接单</view>
+		</view>
+	</view>
 	<tuiModal
 		:show="showModal"
 		:title="modalTitle"
@@ -190,7 +180,14 @@
 
 <script>
 import colors from "@/mixins/color";
-import { storeReservationDetail,reservationServiceSet,storeReservationConfirm,storeReservationRefuse } from '@/api/store.js';
+import { storeReservationDetail,reservationServiceSet,storeReservationConfirm,storeReservationRefuse,storeReservationTableList } from '@/api/store.js';
+import {
+	merchantReservationDetail,
+	merchantReservationConfirm,
+	merchantReservationRefuse,
+	merchantReservationServiceSet,
+	merchantReservationTables
+} from '@/api/merchant.js';
 import { openGuanjiaSubscribe, openYuyueSubscribe } from '@/utils/SubscribeMessage.js';
 import tuiModal from "@/components/tui-modal/index.vue";
 import countDown from "@/components/countDown";
@@ -205,6 +202,7 @@ export default{
 			id:0,
 			fromTeacher: false,
 			fromButler: false,
+			fromMerchant: false,
 			info:{},
 			cartInfo:{},
 			productInfo:{},
@@ -216,10 +214,22 @@ export default{
 			stopTime:0,
 			fontNum:0,
 			service_img: [],
-			service_describe:''
+			service_describe:'',
+			roomVisible: false,
+			tableList: [],
+			selectedRoomIndex: 0,
 		}
 	},
 	computed: {
+		isMerchantContext() {
+			return this.fromMerchant || this.$store.state.merchant.mode === 'merchant';
+		},
+		merchantContextParams() {
+			return {
+				active_store_id: this.$store.state.merchant.activeStoreId || 0,
+				active_role: this.$store.state.merchant.activeRole || '',
+			};
+		},
 		projectList() {
 			if (Array.isArray(this.info.project_list) && this.info.project_list.length) {
 				return this.info.project_list;
@@ -236,16 +246,26 @@ export default{
 			return this.projectList.length > 1 ? this.projectList.slice(1) : [];
 		},
 		canManageReservation() {
+			if (this.isMerchantContext) {
+				return !!(this.info && this.info.can_manage);
+			}
 			const info = this.$store.state.app.storeStaffInfo || {};
 			return Number(info.is_manager) === 1 || Number(info.is_butler) === 1;
 		},
 		canStartService() {
 			if (this.fromButler) return false;
+			if (this.isMerchantContext) {
+				// 详情已过商家 Guard；勿依赖旧 mall_unique_auth 缓存
+				return !!(this.info && this.info.merchant_guard);
+			}
 			if (this.fromTeacher) return true;
 			return this.$util.auth('mall-admin-reservation-start');
 		},
 		canEndService() {
 			if (this.fromButler) return false;
+			if (this.isMerchantContext) {
+				return !!(this.info && this.info.merchant_guard);
+			}
 			if (this.fromTeacher) return true;
 			return this.$util.auth('mall-admin-reservation-end');
 		},
@@ -253,22 +273,21 @@ export default{
 			const status = Number(this.info.status);
 			return status === 1 || status === 2;
 		},
+		roomLabels() {
+			return this.tableList.map(item => item.remarks || item.table_number || ('房间' + item.id));
+		},
 	},
 	onLoad(options){
 		this.id = options.id
 		this.fromTeacher = options.from === 'teacher';
 		this.fromButler = options.from === 'butler';
+		this.fromMerchant = options.merchant === '1' || options.from === 'merchant';
 		this.reservationOrderDetail();
 	},
 	methods:{
-		// 限制文本框字数
 		sumfontnum(e) {
 			this.fontNum = e.detail.value.length
 		},
-		/**
-		 * 删除图片
-		 * 
-		 */
 		DelPic: function(e) {
 			let index = e,
 				that = this,
@@ -276,11 +295,6 @@ export default{
 			that.service_img.splice(index, 1);
 			that.$set(that, 'service_img', that.service_img);
 		},
-		
-		/**
-		 * 上传文件
-		 * 
-		 */
 		uploadpic: function() {
 			let that = this;
 			this.$util.uploadImageOne('upload/image', function(res) {
@@ -313,14 +327,19 @@ export default{
 				service_images: this.service_img
 			}
 			const run = () => {
-				reservationServiceSet(this.id,data).then(res=>{
+				const req = this.isMerchantContext
+					? merchantReservationServiceSet(this.id, { ...this.merchantContextParams, ...data })
+					: reservationServiceSet(this.id, data);
+				req.then(res=>{
 					if(status==1){
 						this.showModal = false;
 						this.reservationOrderDetail();
 					}else{
 						const redirectUrl = this.fromTeacher
 							? '/pages/admin/staff_center/order/index?status=1'
-							: '/pages/admin/reservation_list/index';
+							: (this.isMerchantContext
+								? '/pages/admin/reservation_list/index?merchant=1'
+								: '/pages/admin/reservation_list/index');
 						this.$util.Tips({
 							title: res.msg
 						}, redirectUrl);
@@ -349,9 +368,11 @@ export default{
 				this.showModal = false;
 			}
 		},
-		// 预约详情
 		reservationOrderDetail(){
-			storeReservationDetail(this.id).then(res=>{
+			const req = this.isMerchantContext
+				? merchantReservationDetail(this.id, this.merchantContextParams)
+				: storeReservationDetail(this.id);
+			req.then(res=>{
 				let data = res.data;
 				this.info = data;
 				this.cartInfo = data.cart_info;
@@ -366,12 +387,55 @@ export default{
 				})
 			})
 		},
-		confirmOrder() {
+		loadTableList() {
+			const req = this.isMerchantContext
+				? merchantReservationTables(this.merchantContextParams)
+				: storeReservationTableList();
+			return req.then(res => {
+				this.tableList = res.data || [];
+				return this.tableList;
+			}).catch(() => {
+				this.tableList = [];
+				return [];
+			});
+		},
+		openRoomConfirm() {
 			// #ifdef MP
 			openGuanjiaSubscribe();
 			// #endif
-			storeReservationConfirm(this.id).then(res => {
+			this.loadTableList().then((list) => {
+				if (!list.length) {
+					return this.$util.Tips({ title: '暂无可用房间，请先在后台配置房号' });
+				}
+				this.selectedRoomIndex = 0;
+				this.roomVisible = true;
+			});
+		},
+		closeRoom() {
+			this.roomVisible = false;
+			this.selectedRoomIndex = 0;
+		},
+		onRoomChange(e) {
+			this.selectedRoomIndex = Number(e.detail.value || 0);
+		},
+		submitConfirm() {
+			const room = this.tableList[this.selectedRoomIndex];
+			if (!room) {
+				return this.$util.Tips({ title: '请选择服务房间' });
+			}
+			const payload = {
+				table_id: room.id,
+				table_name: room.remarks || String(room.table_number || '')
+			};
+			const req = this.isMerchantContext
+				? merchantReservationConfirm(this.id, {
+					...this.merchantContextParams,
+					...payload
+				})
+				: storeReservationConfirm(this.id, payload);
+			req.then(res => {
 				this.$util.Tips({ title: res.msg || '接单成功' });
+				this.closeRoom();
 				this.reservationOrderDetail();
 			}).catch(err => {
 				this.$util.Tips({ title: err.msg || '操作失败' });
@@ -391,8 +455,17 @@ export default{
 					// #ifdef MP
 					openGuanjiaSubscribe();
 					// #endif
-					storeReservationRefuse(this.id, { refuse_reason: reason }).then(r => {
-						this.$util.Tips({ title: r.msg || '已拒绝' }, '/pages/admin/reservation_list/index');
+					const listUrl = this.isMerchantContext
+						? '/pages/admin/reservation_list/index?merchant=1'
+						: '/pages/admin/reservation_list/index';
+					const req = this.isMerchantContext
+						? merchantReservationRefuse(this.id, {
+							...this.merchantContextParams,
+							refuse_reason: reason
+						})
+						: storeReservationRefuse(this.id, { refuse_reason: reason });
+					req.then(r => {
+						this.$util.Tips({ title: r.msg || '已拒绝' }, listUrl);
 					}).catch(err => {
 						this.$util.Tips({ title: err.msg || '操作失败' });
 					});
@@ -424,8 +497,8 @@ export default{
 		left: 50%;
 		margin-left: -355rpx;
 		bottom: 20rpx;
-		bottom: calc(20rpx + constant(safe-area-inset-bottom)); ///兼容 IOS<11.2/
-		bottom: calc(20rpx + env(safe-area-inset-bottom)); ///兼容 IOS>11.2/
+		bottom: calc(20rpx + constant(safe-area-inset-bottom));
+		bottom: calc(20rpx + env(safe-area-inset-bottom));
 		z-index: 20;
 	}
 	.footer-btn{
@@ -447,8 +520,8 @@ export default{
 		border: 1rpx solid #FF7700;
 	}
 	.heights{
-		height: calc(140rpx + constant(safe-area-inset-bottom)); ///兼容 IOS<11.2/
-		height: calc(140rpx + env(safe-area-inset-bottom)); ///兼容 IOS>11.2/
+		height: calc(140rpx + constant(safe-area-inset-bottom));
+		height: calc(140rpx + env(safe-area-inset-bottom));
 	}
 	::v-deep .tui-modal-btn-cancel{
 		border:1px solid #2A7EFB;
@@ -462,5 +535,60 @@ export default{
 	}
 	.project-item {
 		align-items: flex-start;
+	}
+	.mask {
+		position: fixed;
+		left: 0;
+		right: 0;
+		top: 0;
+		bottom: 0;
+		background: rgba(0, 0, 0, 0.45);
+		z-index: 90;
+	}
+	.refuse-panel {
+		position: fixed;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		background: #fff;
+		border-radius: 24rpx 24rpx 0 0;
+		padding: 32rpx 30rpx calc(32rpx + env(safe-area-inset-bottom));
+		z-index: 100;
+	}
+	.room-title {
+		font-size: 30rpx;
+		font-weight: 600;
+		color: #333;
+		margin-bottom: 24rpx;
+		text-align: center;
+	}
+	.room-picker {
+		height: 80rpx;
+		line-height: 80rpx;
+		padding: 0 24rpx;
+		background: #f5f5f5;
+		border-radius: 12rpx;
+		font-size: 28rpx;
+		color: #333;
+	}
+	.refuse-btns {
+		margin-top: 32rpx;
+	}
+	.refuse-btn {
+		flex: 1;
+		height: 80rpx;
+		line-height: 80rpx;
+		text-align: center;
+		border-radius: 40rpx;
+		font-size: 28rpx;
+	}
+	.refuse-btn.cancel {
+		background: #f5f5f5;
+		color: #666;
+		margin-right: 20rpx;
+	}
+	.refuse-btn.sure {
+		background: #2A7EFB;
+		color: #fff;
 	}
 </style>
