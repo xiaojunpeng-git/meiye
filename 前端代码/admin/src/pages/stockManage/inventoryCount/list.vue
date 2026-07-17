@@ -11,6 +11,12 @@
 		      :label-position="labelPosition"
 		      @submit.native.prevent
 		    >
+			  <inventory-scope-bar
+			    ref="scopeBar"
+			    :scope="formValidate.scope"
+			    :store-id="formValidate.store_id"
+			    @change="onScopeChange"
+			  />
 			  <FormItem label="盘点单号：">
 			    <Input
 			      v-model="formValidate.keyword"
@@ -50,7 +56,8 @@
 		  </div>
 		</Card>
 		<Card :bordered="false" dis-hover class="ivu-mt">
-			<Button type="primary" @click="openForm()">新建盘点单</Button>
+			<Button v-if="formValidate.scope === 'hq'" type="primary" @click="openForm()">新建盘点单</Button>
+			<div class="op-tips mt10" v-if="formValidate.scope !== 'hq'">当前为监管查看：仅查看门店盘点单，新建仍在总部仓范围操作。</div>
 			<Tooltip
 			    content="本页至少选中一项"
 			    :disabled="!!checkUidList.length && isAll==0"
@@ -92,6 +99,9 @@
 			    </template>
 			  </vxe-column>
 			  <vxe-column field="order_id" title="盘点单号" width="200"></vxe-column>
+			  <vxe-column v-if="formValidate.scope !== 'hq'" field="store_name_label" title="归属门店" min-width="120">
+				<template v-slot="{ row }">{{ row.store_name_label || '-' }}</template>
+			  </vxe-column>
 			  <vxe-column field="status" title="盘点状态" width="100">
 			    <template v-slot="{ row }">
 					<Tag color="red" size="medium" v-if="row.status == 0">进行中</Tag>
@@ -154,13 +164,15 @@
 		productStockCountApi
 	} from "@/api/stockManage";
 	import orderDetails from "../components/orderDetails.vue";
+	import inventoryScopeBar from "../components/inventoryScopeBar.vue";
 	import exportExcel from "@/utils/newToExcel.js";
 	import FormModal from './add';
 	export default {
 		name: "inventoryCountList",
 		components: {
 			orderDetails,
-			FormModal
+			FormModal,
+			inventoryScopeBar,
 		},
 		data() {
 			return {
@@ -172,6 +184,8 @@
 					add_time:'',
 					page: 1,
 					limit: 15,
+					scope: 'hq',
+					store_id: '',
 				},
 				orderList:[],
 				total:0,
@@ -250,7 +264,20 @@
 			    this.checkUidList = [];
 			  }
 			},
+			onScopeChange(payload) {
+				this.formValidate.scope = payload.scope;
+				this.formValidate.store_id = payload.store_id;
+				this.formValidate.page = 1;
+				if (payload.scope === 'store' && !payload.store_id) {
+					this.orderList = [];
+					this.total = 0;
+					return;
+				}
+				this.inventoryList();
+				this.allReset();
+			},
 			inventoryList(){
+				if (this.formValidate.scope === 'store' && !this.formValidate.store_id) return;
 				this.loading = true;
 				inventoryCountListApi(this.formValidate).then(res=>{
 					let data = res.data;
@@ -317,6 +344,7 @@
 				});
 			},
 			searchs(){
+				if (this.$refs.scopeBar && !this.$refs.scopeBar.validate()) return;
 				this.formValidate.page = 1;
 				this.inventoryList();
 				this.allReset();
@@ -329,7 +357,9 @@
 					add_time:'',
 					page: 1,
 					limit: 15,
-				},
+					scope: 'hq',
+					store_id: '',
+				};
 				this.inventoryList();
 				this.allReset();
 			},

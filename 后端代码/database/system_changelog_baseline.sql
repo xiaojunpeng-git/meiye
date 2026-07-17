@@ -58,30 +58,48 @@ CREATE TABLE IF NOT EXISTS `eb_system_changelog_audit` (
   KEY `idx_create_time` (`create_time`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='系统更新日志审计';
 
--- ========== 4) 平台菜单：挂在 admin-setting 下 ==========
+-- ========== 4) 平台菜单：挂在「系统设置」(/admin/setting/base) 下 ==========
+SET NAMES utf8mb4;
+
+-- 修正已存在但 menu_name 乱码的菜单
+UPDATE `eb_system_menus` SET `menu_name` = '更新日志' WHERE `unique_auth` = 'setting-system-changelog' AND `is_del` = 0;
+UPDATE `eb_system_menus` SET `menu_name` = '新增更新日志' WHERE `unique_auth` = 'setting-system-changelog-add' AND `is_del` = 0;
+UPDATE `eb_system_menus` SET `menu_name` = '编辑更新日志' WHERE `unique_auth` = 'setting-system-changelog-edit' AND `is_del` = 0;
+UPDATE `eb_system_menus` SET `menu_name` = '发布更新日志' WHERE `unique_auth` = 'setting-system-changelog-publish' AND `is_del` = 0;
+UPDATE `eb_system_menus` SET `menu_name` = '下架更新日志' WHERE `unique_auth` = 'setting-system-changelog-offline' AND `is_del` = 0;
+UPDATE `eb_system_menus` SET `menu_name` = '删除更新日志草稿' WHERE `unique_auth` = 'setting-system-changelog-delete' AND `is_del` = 0;
+UPDATE `eb_system_menus` SET `menu_name` = '复制更新日志' WHERE `unique_auth` = 'setting-system-changelog-copy' AND `is_del` = 0;
+UPDATE `eb_system_menus` SET `menu_name` = '更新日志' WHERE `unique_auth` = 'store-set-changelog' AND `is_del` = 0;
+
 INSERT INTO `eb_system_menus`
 (`pid`, `type`, `icon`, `menu_name`, `module`, `controller`, `action`, `api_url`, `methods`, `params`, `sort`, `is_show`, `is_show_path`, `access`, `menu_path`, `path`, `auth_type`, `header`, `is_header`, `unique_auth`, `is_del`)
-SELECT p.`id`, 1, 'ios-paper', '更新日志', 'admin', '', '', '', '', '[]', 8, 1, 0, 1,
-  '/admin/setting/changelog', CONCAT(IFNULL(p.`path`, ''), '/', p.`id`), 1, 'setting', 0, 'setting-system-changelog', 0
+SELECT p.`id`, 1, '', '更新日志', 'admin', '', '', '', '', '[]', 8, 1, 0, 1,
+  '/admin/setting/changelog',
+  CASE WHEN IFNULL(p.`path`, '') = '' THEN CAST(p.`id` AS CHAR) ELSE CONCAT(p.`path`, '/', p.`id`) END,
+  1, 'setting', 1, 'setting-system-changelog', 0
 FROM `eb_system_menus` p
-WHERE p.`unique_auth` = 'admin-setting' AND p.`is_del` = 0
+WHERE p.`menu_path` = '/admin/setting/base' AND p.`type` = 1 AND p.`is_del` = 0
   AND NOT EXISTS (SELECT 1 FROM `eb_system_menus` x WHERE x.`unique_auth` = 'setting-system-changelog' AND x.`is_del` = 0 LIMIT 1)
 LIMIT 1;
 
--- 若 admin-setting 不存在，尝试挂到 menu_path=/admin/setting/base
+-- 若系统设置入口不存在，回退挂到 admin-setting
 INSERT INTO `eb_system_menus`
 (`pid`, `type`, `icon`, `menu_name`, `module`, `controller`, `action`, `api_url`, `methods`, `params`, `sort`, `is_show`, `is_show_path`, `access`, `menu_path`, `path`, `auth_type`, `header`, `is_header`, `unique_auth`, `is_del`)
-SELECT p.`id`, 1, 'ios-paper', '更新日志', 'admin', '', '', '', '', '[]', 8, 1, 0, 1,
-  '/admin/setting/changelog', CONCAT(IFNULL(p.`path`, ''), '/', p.`id`), 1, 'setting', 0, 'setting-system-changelog', 0
+SELECT p.`id`, 1, '', '更新日志', 'admin', '', '', '', '', '[]', 8, 1, 0, 1,
+  '/admin/setting/changelog',
+  CASE WHEN IFNULL(p.`path`, '') = '' THEN CAST(p.`id` AS CHAR) ELSE CONCAT(p.`path`, '/', p.`id`) END,
+  1, 'setting', 1, 'setting-system-changelog', 0
 FROM `eb_system_menus` p
-WHERE p.`menu_path` = '/admin/setting/base' AND p.`type` = 1 AND p.`is_del` = 0
+WHERE p.`unique_auth` = 'admin-setting' AND p.`is_del` = 0
   AND NOT EXISTS (SELECT 1 FROM `eb_system_menus` x WHERE x.`unique_auth` = 'setting-system-changelog' AND x.`is_del` = 0 LIMIT 1)
 LIMIT 1;
 
 -- 按钮权限
 INSERT INTO `eb_system_menus`
 (`pid`, `type`, `icon`, `menu_name`, `module`, `controller`, `action`, `api_url`, `methods`, `params`, `sort`, `is_show`, `is_show_path`, `access`, `menu_path`, `path`, `auth_type`, `header`, `is_header`, `unique_auth`, `is_del`)
-SELECT p.`id`, 1, '', '新增更新日志', 'admin', '', '', 'setting/changelog', 'POST', '[]', 0, 0, 0, 1, '', CONCAT(IFNULL(p.`path`, ''), '/', p.`id`), 2, '', 0, 'setting-system-changelog-add', 0
+SELECT p.`id`, 1, '', '新增更新日志', 'admin', '', '', 'setting/changelog', 'POST', '[]', 0, 0, 0, 1, '',
+  CONCAT(CASE WHEN IFNULL(p.`path`, '') = '' THEN CAST(p.`id` AS CHAR) ELSE p.`path` END, '/', p.`id`),
+  2, '', 0, 'setting-system-changelog-add', 0
 FROM `eb_system_menus` p
 WHERE p.`unique_auth` = 'setting-system-changelog' AND p.`is_del` = 0
   AND NOT EXISTS (SELECT 1 FROM `eb_system_menus` x WHERE x.`unique_auth` = 'setting-system-changelog-add' AND x.`is_del` = 0 LIMIT 1)
@@ -89,7 +107,7 @@ LIMIT 1;
 
 INSERT INTO `eb_system_menus`
 (`pid`, `type`, `icon`, `menu_name`, `module`, `controller`, `action`, `api_url`, `methods`, `params`, `sort`, `is_show`, `is_show_path`, `access`, `menu_path`, `path`, `auth_type`, `header`, `is_header`, `unique_auth`, `is_del`)
-SELECT p.`id`, 1, '', '编辑更新日志', 'admin', '', '', 'setting/changelog/<id>', 'PUT', '[]', 0, 0, 0, 1, '', CONCAT(IFNULL(p.`path`, ''), '/', p.`id`), 2, '', 0, 'setting-system-changelog-edit', 0
+SELECT p.`id`, 1, '', '编辑更新日志', 'admin', '', '', 'setting/changelog/<id>', 'PUT', '[]', 0, 0, 0, 1, '', CONCAT(CASE WHEN IFNULL(p.`path`, '') = '' THEN CAST(p.`id` AS CHAR) ELSE p.`path` END, '/', p.`id`), 2, '', 0, 'setting-system-changelog-edit', 0
 FROM `eb_system_menus` p
 WHERE p.`unique_auth` = 'setting-system-changelog' AND p.`is_del` = 0
   AND NOT EXISTS (SELECT 1 FROM `eb_system_menus` x WHERE x.`unique_auth` = 'setting-system-changelog-edit' AND x.`is_del` = 0 LIMIT 1)
@@ -97,7 +115,7 @@ LIMIT 1;
 
 INSERT INTO `eb_system_menus`
 (`pid`, `type`, `icon`, `menu_name`, `module`, `controller`, `action`, `api_url`, `methods`, `params`, `sort`, `is_show`, `is_show_path`, `access`, `menu_path`, `path`, `auth_type`, `header`, `is_header`, `unique_auth`, `is_del`)
-SELECT p.`id`, 1, '', '发布更新日志', 'admin', '', '', 'setting/changelog/publish/<id>', 'PUT', '[]', 0, 0, 0, 1, '', CONCAT(IFNULL(p.`path`, ''), '/', p.`id`), 2, '', 0, 'setting-system-changelog-publish', 0
+SELECT p.`id`, 1, '', '发布更新日志', 'admin', '', '', 'setting/changelog/publish/<id>', 'PUT', '[]', 0, 0, 0, 1, '', CONCAT(CASE WHEN IFNULL(p.`path`, '') = '' THEN CAST(p.`id` AS CHAR) ELSE p.`path` END, '/', p.`id`), 2, '', 0, 'setting-system-changelog-publish', 0
 FROM `eb_system_menus` p
 WHERE p.`unique_auth` = 'setting-system-changelog' AND p.`is_del` = 0
   AND NOT EXISTS (SELECT 1 FROM `eb_system_menus` x WHERE x.`unique_auth` = 'setting-system-changelog-publish' AND x.`is_del` = 0 LIMIT 1)
@@ -105,7 +123,7 @@ LIMIT 1;
 
 INSERT INTO `eb_system_menus`
 (`pid`, `type`, `icon`, `menu_name`, `module`, `controller`, `action`, `api_url`, `methods`, `params`, `sort`, `is_show`, `is_show_path`, `access`, `menu_path`, `path`, `auth_type`, `header`, `is_header`, `unique_auth`, `is_del`)
-SELECT p.`id`, 1, '', '下架更新日志', 'admin', '', '', 'setting/changelog/offline/<id>', 'PUT', '[]', 0, 0, 0, 1, '', CONCAT(IFNULL(p.`path`, ''), '/', p.`id`), 2, '', 0, 'setting-system-changelog-offline', 0
+SELECT p.`id`, 1, '', '下架更新日志', 'admin', '', '', 'setting/changelog/offline/<id>', 'PUT', '[]', 0, 0, 0, 1, '', CONCAT(CASE WHEN IFNULL(p.`path`, '') = '' THEN CAST(p.`id` AS CHAR) ELSE p.`path` END, '/', p.`id`), 2, '', 0, 'setting-system-changelog-offline', 0
 FROM `eb_system_menus` p
 WHERE p.`unique_auth` = 'setting-system-changelog' AND p.`is_del` = 0
   AND NOT EXISTS (SELECT 1 FROM `eb_system_menus` x WHERE x.`unique_auth` = 'setting-system-changelog-offline' AND x.`is_del` = 0 LIMIT 1)
@@ -113,7 +131,7 @@ LIMIT 1;
 
 INSERT INTO `eb_system_menus`
 (`pid`, `type`, `icon`, `menu_name`, `module`, `controller`, `action`, `api_url`, `methods`, `params`, `sort`, `is_show`, `is_show_path`, `access`, `menu_path`, `path`, `auth_type`, `header`, `is_header`, `unique_auth`, `is_del`)
-SELECT p.`id`, 1, '', '删除更新日志草稿', 'admin', '', '', 'setting/changelog/<id>', 'DELETE', '[]', 0, 0, 0, 1, '', CONCAT(IFNULL(p.`path`, ''), '/', p.`id`), 2, '', 0, 'setting-system-changelog-delete', 0
+SELECT p.`id`, 1, '', '删除更新日志草稿', 'admin', '', '', 'setting/changelog/<id>', 'DELETE', '[]', 0, 0, 0, 1, '', CONCAT(CASE WHEN IFNULL(p.`path`, '') = '' THEN CAST(p.`id` AS CHAR) ELSE p.`path` END, '/', p.`id`), 2, '', 0, 'setting-system-changelog-delete', 0
 FROM `eb_system_menus` p
 WHERE p.`unique_auth` = 'setting-system-changelog' AND p.`is_del` = 0
   AND NOT EXISTS (SELECT 1 FROM `eb_system_menus` x WHERE x.`unique_auth` = 'setting-system-changelog-delete' AND x.`is_del` = 0 LIMIT 1)
@@ -121,7 +139,7 @@ LIMIT 1;
 
 INSERT INTO `eb_system_menus`
 (`pid`, `type`, `icon`, `menu_name`, `module`, `controller`, `action`, `api_url`, `methods`, `params`, `sort`, `is_show`, `is_show_path`, `access`, `menu_path`, `path`, `auth_type`, `header`, `is_header`, `unique_auth`, `is_del`)
-SELECT p.`id`, 1, '', '复制更新日志', 'admin', '', '', 'setting/changelog/copy/<id>', 'POST', '[]', 0, 0, 0, 1, '', CONCAT(IFNULL(p.`path`, ''), '/', p.`id`), 2, '', 0, 'setting-system-changelog-copy', 0
+SELECT p.`id`, 1, '', '复制更新日志', 'admin', '', '', 'setting/changelog/copy/<id>', 'POST', '[]', 0, 0, 0, 1, '', CONCAT(CASE WHEN IFNULL(p.`path`, '') = '' THEN CAST(p.`id` AS CHAR) ELSE p.`path` END, '/', p.`id`), 2, '', 0, 'setting-system-changelog-copy', 0
 FROM `eb_system_menus` p
 WHERE p.`unique_auth` = 'setting-system-changelog' AND p.`is_del` = 0
   AND NOT EXISTS (SELECT 1 FROM `eb_system_menus` x WHERE x.`unique_auth` = 'setting-system-changelog-copy' AND x.`is_del` = 0 LIMIT 1)
@@ -131,7 +149,9 @@ LIMIT 1;
 INSERT INTO `eb_system_menus`
 (`pid`, `type`, `icon`, `menu_name`, `module`, `controller`, `action`, `api_url`, `methods`, `params`, `sort`, `is_show`, `is_show_path`, `access`, `menu_path`, `path`, `auth_type`, `header`, `is_header`, `unique_auth`, `is_del`)
 SELECT p.`id`, 2, 'ios-paper', '更新日志', 'admin', '', '', '', '', '[]', 5, 1, 0, 1,
-  '/store/set/changelog', CONCAT(IFNULL(p.`path`, ''), '/', p.`id`), 1, 'set', 0, 'store-set-changelog', 0
+  '/store/set/changelog',
+  CASE WHEN IFNULL(p.`path`, '') = '' THEN CAST(p.`id` AS CHAR) ELSE CONCAT(p.`path`, '/', p.`id`) END,
+  1, 'set', 0, 'store-set-changelog', 0
 FROM `eb_system_menus` p
 WHERE p.`unique_auth` = 'store-set' AND p.`is_del` = 0
   AND NOT EXISTS (SELECT 1 FROM `eb_system_menus` x WHERE x.`unique_auth` = 'store-set-changelog' AND x.`is_del` = 0 LIMIT 1)

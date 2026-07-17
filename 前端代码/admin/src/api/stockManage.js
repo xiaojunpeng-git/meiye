@@ -8,6 +8,8 @@
 // | Author: MOHE Team <admin@mohe.com>
 // +----------------------------------------------------------------------
 import request from '@/plugins/request';
+import Setting from '@/setting';
+import util from '@/libs/util';
 
 /**
  入库管理-添加表单-提交
@@ -292,13 +294,21 @@ export function productAttrStatisticsApi(data) {
   });
 }
 
-/** 入库导入模板 */
+/** 入库导入模板（POST 承载 product_ids） */
 export function stockInTemplateApi(data) {
   return request({
     url: `/product/inventory/in/order/template`,
-    method: 'get',
-    params: data
+    method: 'post',
+    data
   });
+}
+
+/**
+ * 入库模板文件流下载（鉴权 Blob，禁止直链 /phpExcel）
+ * @returns {Promise<{ blob: Blob, fileName: string, contentType: string }>}
+ */
+export function stockInTemplateFileApi(key, fileName) {
+  return stockTemplateFileBlob(`/product/inventory/in/order/template/file`, key, fileName);
 }
 
 /** 入库 Excel 导入 */
@@ -310,12 +320,78 @@ export function stockInImportApi(data) {
   });
 }
 
-/** 出库导入模板 */
+/** 出库导入模板（POST 承载 product_ids） */
 export function stockOutTemplateApi(data) {
   return request({
     url: `/product/inventory/out/order/template`,
-    method: 'get',
-    params: data
+    method: 'post',
+    data
+  });
+}
+
+/**
+ * 出库模板文件流下载（鉴权 Blob，禁止直链 /phpExcel）
+ * @returns {Promise<{ blob: Blob, fileName: string, contentType: string }>}
+ */
+export function stockOutTemplateFileApi(key, fileName) {
+  return stockTemplateFileBlob(`/product/inventory/out/order/template/file`, key, fileName);
+}
+
+function decodeArrayBufferText(buf) {
+  try {
+    if (typeof TextDecoder !== 'undefined') {
+      return new TextDecoder('utf-8').decode(buf);
+    }
+  } catch (e) {
+    /* fallthrough */
+  }
+  const view = new Uint8Array(buf);
+  let s = '';
+  const len = Math.min(view.length, 4000);
+  for (let i = 0; i < len; i++) s += String.fromCharCode(view[i]);
+  return s;
+}
+
+/**
+ * 库存模板二进制下载。
+ * 禁止走 axios@0.18 的 blob/arraybuffer（会把高位字节替换成 0xFD，Excel 损坏）。
+ * 使用原生 fetch().arrayBuffer() 保真。
+ */
+function stockTemplateFileBlob(urlPath, key, fileName) {
+  const token = util.cookies.get('token') || '';
+  const excelType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+  const name = fileName || 'stock-template.xlsx';
+  const qs = 'key=' + encodeURIComponent(key || '');
+  const url = `${Setting.apiBaseURL}${urlPath}${urlPath.indexOf('?') >= 0 ? '&' : '?'}${qs}`;
+  return fetch(url, {
+    method: 'GET',
+    credentials: 'include',
+    headers: {
+      'Authori-zation': token ? `Bearer ${token}` : '',
+      'X-Source': 'f76d38d0ee4f854f',
+    },
+  }).then((res) => {
+    return res.arrayBuffer().then((buf) => {
+      const bytes = new Uint8Array(buf);
+      const isPk = bytes.length >= 2 && bytes[0] === 0x50 && bytes[1] === 0x4b;
+      if (isPk) {
+        return { blob: new Blob([buf], { type: excelType }), fileName: name, contentType: excelType };
+      }
+      const text = decodeArrayBufferText(buf);
+      const head = (text || '').slice(0, 200).toLowerCase();
+      if (head.indexOf('<!doctype') !== -1 || head.indexOf('<html') !== -1) {
+        return Promise.reject({ msg: '下载失败：收到 HTML 而非 Excel（请勿直链 /phpExcel）' });
+      }
+      try {
+        const json = JSON.parse(text);
+        return Promise.reject({ msg: json.msg || json.message || '下载失败' });
+      } catch (e) {
+        return Promise.reject({ msg: '下载失败：文件不是有效的 Excel（xlsx）' });
+      }
+    });
+  }).catch((err) => {
+    if (err && err.msg) return Promise.reject(err);
+    return Promise.reject({ msg: (err && err.message) || '下载失败' });
   });
 }
 

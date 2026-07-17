@@ -74,8 +74,10 @@ class StoreStockRequestServices extends BaseServices
         $info = is_array($info) ? $info : $info->toArray();
         $this->assertStoreAccess($info, $storeScope);
         $details = $this->detailDao->getByRequestId($id);
+        $this->attachSkuDecimalScale($details, 'request_product_id', 'request_unique');
         foreach ($details as &$d) {
-            $d['remain_qty'] = bcsub((string)$d['qty'], (string)$d['transferred_qty'], 4);
+            $scale = (int)($d['decimal_scale'] ?? 0) > 0 ? 2 : 0;
+            $d['remain_qty'] = bcsub((string)$d['qty'], (string)$d['transferred_qty'], $scale);
         }
         unset($d);
         $rows = [$info];
@@ -92,6 +94,11 @@ class StoreStockRequestServices extends BaseServices
      */
     public function saveDraft(int $id, array $data, int $adminId, int $storeScope = 0): int
     {
+        /** @var StockPartyServices $partyServices */
+        $partyServices = app()->make(StockPartyServices::class);
+        // 请货方目前仅支持门店（门店向总部或其他店请货）
+        $requestPartyType = (string)($data['request_party_type'] ?? StockPartyServices::PARTY_STORE);
+        $supplyPartyType = (string)($data['supply_party_type'] ?? StockPartyServices::PARTY_STORE);
         $requestStoreId = (int)($data['request_store_id'] ?? 0);
         $supplyStoreId = (int)($data['supply_store_id'] ?? 0);
         $remark = trim((string)($data['remark'] ?? ''));
@@ -101,17 +108,33 @@ class StoreStockRequestServices extends BaseServices
         if ($storeScope > 0) {
             // 门店端只能以自己为请货门店新建/编辑
             $requestStoreId = $storeScope;
+            $requestPartyType = StockPartyServices::PARTY_STORE;
         }
-        $this->assertNormalStores($requestStoreId, $supplyStoreId);
-        if ($requestStoreId === $supplyStoreId) {
-            throw new ValidateException('请货门店与供货门店不能相同');
+        $requestParty = $partyServices->normalize($requestPartyType, $requestStoreId, '请货方');
+        $supplyParty = $partyServices->normalize($supplyPartyType, $supplyStoreId, '供货方');
+        if ($requestParty['party_type'] === StockPartyServices::PARTY_HQ) {
+            throw new ValidateException('请货方不能是总部仓');
         }
+        if ($requestParty['party_type'] === $supplyParty['party_type']
+            && $requestParty['store_id'] === $supplyParty['store_id']) {
+            throw new ValidateException('请货方与供货方不能相同');
+        }
+        $requestStoreId = $requestParty['store_id'];
+        $supplyStoreId = $supplyParty['store_id'];
+        $requestPartyType = $requestParty['party_type'];
+        $supplyPartyType = $supplyParty['party_type'];
         $this->assertRequestStaff($requestStoreId, $requestStaffId);
-        $normalized = $this->normalizeDetails($requestStoreId, $supplyStoreId, $details);
+        $normalized = $this->normalizeDetails(
+            $requestStoreId,
+            $supplyStoreId,
+            $details,
+            $requestPartyType,
+            $supplyPartyType
+        );
         $time = time();
         $createType = $storeScope > 0 ? 1 : 0;
 
-        return (int)$this->transaction(function () use ($id, $requestStoreId, $supplyStoreId, $remark, $normalized, $adminId, $storeScope, $time, $requestDate, $requestStaffId, $createType) {
+        return (int)$this->transaction(function () use ($id, $requestStoreId, $supplyStoreId, $requestPartyType, $supplyPartyType, $remark, $normalized, $adminId, $storeScope, $time, $requestDate, $requestStaffId, $createType) {
             if ($id > 0) {
                 $info = $this->dao->lockById($id);
                 if (!$info) {
@@ -126,7 +149,9 @@ class StoreStockRequestServices extends BaseServices
                 }
                 $this->dao->update($id, [
                     'request_store_id' => $requestStoreId,
+                    'request_party_type' => $requestPartyType,
                     'supply_store_id' => $supplyStoreId,
+                    'supply_party_type' => $supplyPartyType,
                     'request_date' => $requestDate,
                     'remark' => $remark,
                     'request_staff_id' => $requestStaffId,
@@ -142,7 +167,9 @@ class StoreStockRequestServices extends BaseServices
             $res = $this->dao->save([
                 'order_sn' => $orderSn,
                 'request_store_id' => $requestStoreId,
+                'request_party_type' => $requestPartyType,
                 'supply_store_id' => $supplyStoreId,
+                'supply_party_type' => $supplyPartyType,
                 'request_date' => $requestDate,
                 'status' => self::STATUS_DRAFT,
                 'remark' => $remark,
@@ -187,7 +214,8 @@ class StoreStockRequestServices extends BaseServices
     {
         $orderSn = '';
         $supplyStoreId = 0;
-        $this->transaction(function () use ($id, $adminId, $storeScope, &$orderSn, &$supplyStoreId) {
+        $supplyPartyType = StockPartyServices::PARTY_STORE;
+        $this->transaction(function () use ($id, $adminId, $storeScope, &$orderSn, &$supplyStoreId, &$supplyPartyType) {
             $info = $this->dao->lockById($id);
             if (!$info) {
                 throw new ValidateException('请货单不存在');
@@ -213,8 +241,11 @@ class StoreStockRequestServices extends BaseServices
             ]);
             $orderSn = (string)$info['order_sn'];
             $supplyStoreId = (int)$info['supply_store_id'];
+            /** @var StockPartyServices $partyServices */
+            $partyServices = app()->make(StockPartyServices::class);
+            $supplyPartyType = $partyServices->partyFromRow($info['supply_party_type'] ?? '', $info['supply_store_id'] ?? 0);
         });
-        $this->notifySupplyStore($supplyStoreId, $orderSn, $id);
+        $this->notifySupplyStore($supplyStoreId, $orderSn, $id, $supplyPartyType);
         return true;
     }
 
@@ -234,7 +265,14 @@ class StoreStockRequestServices extends BaseServices
             if (!in_array($status, [self::STATUS_APPLIED, self::STATUS_PARTIAL], true)) {
                 throw new ValidateException('当前状态不可驳回');
             }
-            if ($storeScope > 0 && (int)$info['supply_store_id'] !== $storeScope) {
+            /** @var StockPartyServices $partyServices */
+            $partyServices = app()->make(StockPartyServices::class);
+            $supParty = $partyServices->partyFromRow($info['supply_party_type'] ?? '', $info['supply_store_id'] ?? 0);
+            if ($supParty === StockPartyServices::PARTY_HQ) {
+                if ($storeScope > 0) {
+                    throw new ValidateException('供货方为总部仓时仅平台可驳回');
+                }
+            } elseif ($storeScope > 0 && (int)$info['supply_store_id'] !== $storeScope) {
                 throw new ValidateException('仅供货门店可驳回');
             }
             $this->dao->update($id, [
@@ -388,8 +426,13 @@ class StoreStockRequestServices extends BaseServices
         }
     }
 
-    protected function normalizeDetails(int $requestStoreId, int $supplyStoreId, array $details): array
-    {
+    protected function normalizeDetails(
+        int $requestStoreId,
+        int $supplyStoreId,
+        array $details,
+        string $requestParty = StockPartyServices::PARTY_STORE,
+        string $supplyParty = StockPartyServices::PARTY_STORE
+    ): array {
         if (!$details) {
             throw new ValidateException('请选择请货商品');
         }
@@ -397,20 +440,30 @@ class StoreStockRequestServices extends BaseServices
         $cross = app()->make(StoreStockCrossSkuServices::class);
         $cross->assertDetailLimit($details, '请货明细');
         $pairs = [];
-        $qtys = [];
+        $rawQtys = [];
         foreach ($details as $idx => $row) {
-            $rowLabel = '第' . ($idx + 1) . '行';
-            $pid = (int)($row['pid'] ?? 0);
-            $suk = trim((string)($row['suk'] ?? ''));
-            $qty = $cross->parseQty($row['qty'] ?? '', $rowLabel);
-            $pairs[] = ['pid' => $pid, 'suk' => $suk];
-            $qtys[] = $qty;
+            $pairs[] = [
+                'pid' => (int)($row['pid'] ?? 0),
+                'suk' => trim((string)($row['suk'] ?? '')),
+            ];
+            $rawQtys[] = $row['qty'] ?? '';
         }
-        $resolved = $cross->resolvePairsBatch($pairs, $requestStoreId, $supplyStoreId);
+        $resolved = $cross->resolvePairsBatch(
+            $pairs,
+            $requestStoreId,
+            $supplyStoreId,
+            '请货门店',
+            $supplyParty === StockPartyServices::PARTY_HQ ? '总部仓' : '供货门店',
+            $requestParty,
+            $supplyParty
+        );
         $out = [];
         foreach ($pairs as $i => $pair) {
+            $rowLabel = '第' . ($i + 1) . '行';
             $key = (int)$pair['pid'] . '|' . trim((string)$pair['suk']);
             $r = $resolved[$key];
+            $scale = (int)($r['decimal_scale'] ?? 0) > 0 ? 2 : 0;
+            $qty = $cross->parseQty($rawQtys[$i], $rowLabel, $scale);
             $out[] = [
                 'pid' => $r['pid'],
                 'suk' => $r['suk'],
@@ -420,7 +473,7 @@ class StoreStockRequestServices extends BaseServices
                 'supply_unique' => $r['supply_unique'],
                 'product_name' => $r['product_name'],
                 'stock_unit' => $r['stock_unit'],
-                'qty' => $qtys[$i],
+                'qty' => $qty,
                 'transferred_qty' => '0',
             ];
         }
@@ -438,21 +491,6 @@ class StoreStockRequestServices extends BaseServices
         }
         if ($rows) {
             $this->detailDao->saveAll($rows);
-        }
-    }
-
-    protected function assertNormalStores(int $a, int $b): void
-    {
-        if ($a <= 0 || $b <= 0) {
-            throw new ValidateException('请选择请货门店和供货门店');
-        }
-        /** @var SystemStoreServices $storeServices */
-        $storeServices = app()->make(SystemStoreServices::class);
-        foreach ([$a, $b] as $sid) {
-            $store = $storeServices->get($sid, ['id', 'name', 'is_show', 'is_del']);
-            if (!$store || (int)$store['is_del'] === 1 || (int)$store['is_show'] !== 1) {
-                throw new ValidateException('门店不存在或未营业：' . $sid);
-            }
         }
     }
 
@@ -489,10 +527,24 @@ class StoreStockRequestServices extends BaseServices
         $storeNames = $this->storeNameMap($list);
         $staffNames = $this->staffNameMap($list);
         $creatorNames = $this->creatorNameMap($list);
+        /** @var StockPartyServices $partyServices */
+        $partyServices = app()->make(StockPartyServices::class);
         foreach ($list as &$row) {
+            $reqParty = $partyServices->partyFromRow($row['request_party_type'] ?? '', $row['request_store_id'] ?? 0);
+            $supParty = $partyServices->partyFromRow($row['supply_party_type'] ?? '', $row['supply_store_id'] ?? 0);
+            $row['request_party_type'] = $reqParty;
+            $row['supply_party_type'] = $supParty;
             $row['status_name'] = $this->statusName[(int)$row['status']] ?? '';
-            $row['request_store_name'] = $storeNames[(int)$row['request_store_id']] ?? '';
-            $row['supply_store_name'] = $storeNames[(int)$row['supply_store_id']] ?? '';
+            $row['request_store_name'] = $partyServices->label(
+                $reqParty,
+                (int)$row['request_store_id'],
+                (string)($storeNames[(int)$row['request_store_id']] ?? '')
+            );
+            $row['supply_store_name'] = $partyServices->label(
+                $supParty,
+                (int)$row['supply_store_id'],
+                (string)($storeNames[(int)$row['supply_store_id']] ?? '')
+            );
             $row['request_staff_name'] = $staffNames[(int)($row['request_staff_id'] ?? 0)] ?? '';
             // 兼容旧字段：请货人优先用 request_staff_name
             $row['admin_name'] = $row['request_staff_name'] !== ''
@@ -568,7 +620,13 @@ class StoreStockRequestServices extends BaseServices
         if ($storeScope <= 0) {
             return;
         }
-        if ((int)$info['request_store_id'] !== $storeScope && (int)$info['supply_store_id'] !== $storeScope) {
+        /** @var StockPartyServices $partyServices */
+        $partyServices = app()->make(StockPartyServices::class);
+        $reqParty = $partyServices->partyFromRow($info['request_party_type'] ?? '', $info['request_store_id'] ?? 0);
+        $supParty = $partyServices->partyFromRow($info['supply_party_type'] ?? '', $info['supply_store_id'] ?? 0);
+        $isRequestStore = $reqParty === StockPartyServices::PARTY_STORE && (int)$info['request_store_id'] === $storeScope;
+        $isSupplyStore = $supParty === StockPartyServices::PARTY_STORE && (int)$info['supply_store_id'] === $storeScope;
+        if (!$isRequestStore && !$isSupplyStore) {
             throw new ValidateException('无权操作该请货单');
         }
     }
@@ -638,11 +696,11 @@ class StoreStockRequestServices extends BaseServices
         return $prefix . date('YmdHis') . substr((string)microtime(true), -4) . random_int(100, 999);
     }
 
-    protected function notifySupplyStore(int $storeId, string $orderSn, int $requestId): void
+    protected function notifySupplyStore(int $storeId, string $orderSn, int $requestId, string $supplyPartyType = StockPartyServices::PARTY_STORE): void
     {
         /** @var StoreStockRequestNoticeServices $noticeServices */
         $noticeServices = app()->make(StoreStockRequestNoticeServices::class);
-        $noticeServices->enqueueForRequest($requestId, $storeId, $orderSn);
+        $noticeServices->enqueueForRequest($requestId, $storeId, $orderSn, $supplyPartyType);
     }
 
     /**
@@ -653,5 +711,44 @@ class StoreStockRequestServices extends BaseServices
         /** @var StoreStockRequestNoticeServices $noticeServices */
         $noticeServices = app()->make(StoreStockRequestNoticeServices::class);
         return $noticeServices->pendingSupplyCount($storeId);
+    }
+
+    /**
+     * 为明细附加 SKU decimal_scale（院装 2 / 其它 0）
+     */
+    protected function attachSkuDecimalScale(array &$details, string $productIdKey, string $uniqueKey): void
+    {
+        if (!$details) {
+            return;
+        }
+        $productIds = [];
+        $uniques = [];
+        foreach ($details as $d) {
+            $pid = (int)($d[$productIdKey] ?? 0);
+            $unique = (string)($d[$uniqueKey] ?? '');
+            if ($pid > 0 && $unique !== '') {
+                $productIds[$pid] = $pid;
+                $uniques[$unique] = $unique;
+            }
+        }
+        if (!$productIds || !$uniques) {
+            return;
+        }
+        $rows = Db::name('store_product_attr_value')
+            ->whereIn('product_id', array_values($productIds))
+            ->whereIn('unique', array_values($uniques))
+            ->where('type', 0)
+            ->field('product_id,unique,decimal_scale')
+            ->select()
+            ->toArray();
+        $map = [];
+        foreach ($rows as $row) {
+            $map[(int)$row['product_id'] . '|' . (string)$row['unique']] = (int)($row['decimal_scale'] ?? 0) > 0 ? 2 : 0;
+        }
+        foreach ($details as &$d) {
+            $key = (int)($d[$productIdKey] ?? 0) . '|' . (string)($d[$uniqueKey] ?? '');
+            $d['decimal_scale'] = $map[$key] ?? 0;
+        }
+        unset($d);
     }
 }

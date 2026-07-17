@@ -149,7 +149,17 @@
 				},
 				ruleValidate: {
 					order_type: [{ required: true, message: '请选择出库类型', trigger: 'change' }],
-					stock_time: [{ required: true, type: 'date', message: '请选择出库日期', trigger: 'change' }]
+					stock_time: [{
+						required: true,
+						validator: (rule, value, callback) => {
+							if (value === '' || value === null || value === undefined) {
+								callback(new Error('请选择出库日期'));
+							} else {
+								callback();
+							}
+						},
+						trigger: 'change'
+					}]
 				},
 				tableHeader: outGoods,
 				goodsData: [],
@@ -191,12 +201,18 @@
 				this.sattrModals = false;
 				this.formValidate = {
 					order_type: '2',
-					stock_time: formatDate(new Date(Number(new Date().getTime())), 'yyyy-MM-dd'),
+					stock_time: new Date(),
 					remark: ''
 				};
 				this.$nextTick(() => {
-					this.$refs.formValidate && this.$refs.formValidate.resetFields();
+					this.$refs.formValidate && this.$refs.formValidate.clearValidate();
 				});
+			},
+			normalizeStockTime(val) {
+				if (!val) return '';
+				if (val instanceof Date) return formatDate(val, 'yyyy-MM-dd');
+				const s = String(val).replace(/\//g, '-');
+				return s.length >= 10 ? s.slice(0, 10) : s;
 			},
 			storeType(e) {
 				this.active = e;
@@ -280,9 +296,14 @@
 				}
 			},
 			handleSubmit(name) {
-				this.$refs[name].validate(valid => {
+				const form = this.$refs[name];
+				if (!form || typeof form.validate !== 'function') {
+					return this.$Message.error('表单未就绪，请关闭后重试');
+				}
+				if (this.openSubimit) return;
+				form.validate(valid => {
 					if (!valid) {
-						return this.$Message.error('请完善信息');
+						return this.$Message.error('请完善信息（含出库日期）');
 					}
 					if (!this.goodsData.length) {
 						return this.$Message.error('请选择商品');
@@ -306,17 +327,21 @@
 							defective_stock: this.goodsData[i].spoiledGoods
 						});
 					}
-					this.formValidate.out_product_detail = numArray;
-					outventoryAddApi(this.formValidate)
+					const payload = {
+						...this.formValidate,
+						stock_time: this.normalizeStockTime(this.formValidate.stock_time),
+						out_product_detail: numArray
+					};
+					this.openSubimit = true;
+					outventoryAddApi(payload)
 						.then(res => {
-							this.openSubimit = true;
 							this.$Message.success(res.msg);
 							this.handleClose();
 							this.$emit('success');
 						})
 						.catch(err => {
 							this.openSubimit = false;
-							return this.$Message.error(err.msg);
+							return this.$Message.error((err && err.msg) || '保存失败');
 						});
 				});
 			}

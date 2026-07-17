@@ -61,8 +61,27 @@ class StoreProductAttrValueDao extends BaseDao
 			->where('p.is_del', 0)
 			->where('p.is_inventory', 1)
 			->where('a.type', 0)
-			->when(isset($where['type']) || isset($where['relation_id']), function ($query) use ($where) {
+			->when(!empty($where['all_stores']), function ($query) {
+				// 全部门店汇总：仅 type=1 且有效门店 relation_id>0，不含总部仓
+				$query->where('p.type', 1)
+					->where('p.relation_id', '>', 0)
+					->whereIn('p.relation_id', function ($sub) {
+						$sub->name('system_store')->where('is_del', 0)->where('is_show', 1)->field('id');
+					});
+			})->when(empty($where['all_stores']) && (isset($where['type']) || isset($where['relation_id'])), function ($query) use ($where) {
 				$query->where('p.type', $where['type'])->where('p.relation_id', $where['relation_id']);
+			})->when(isset($where['product_type']) && $where['product_type'] !== '' && $where['product_type'] !== null, function ($query) use ($where) {
+				if (is_array($where['product_type'])) {
+					$query->whereIn('p.product_type', $where['product_type']);
+				} else {
+					$query->where('p.product_type', $where['product_type']);
+				}
+			})->when(!empty($where['is_show_in']) && is_array($where['is_show_in']), function ($query) use ($where) {
+				$query->whereIn('p.is_show', $where['is_show_in']);
+			})->when(!empty($where['exclude_supplier']), function ($query) {
+				$query->where('p.type', '<>', 2);
+			})->when(!empty($where['product_ids']) && is_array($where['product_ids']), function ($query) use ($where) {
+				$query->whereIn('p.id', $where['product_ids']);
 			})->when(isset($where['keyword']) && $where['keyword'] !== '', function ($query) use ($where) {
 				$query->where(function ($q) use ($where) {
 					$q->whereLike('a.bar_code|a.code|a.unique', '%' . trim($where['keyword']) . '%')
@@ -83,6 +102,16 @@ class StoreProductAttrValueDao extends BaseDao
 					} else {
 						$query->whereBetween('a.stock', $stock_range);
 					}
+				}
+			})
+			->when(isset($where['hide_zero']) && (int)$where['hide_zero'] === 1, function ($query) {
+				$query->where('a.stock', '>', 0);
+			})
+			->when(isset($where['salon_stock_enabled']) && $where['salon_stock_enabled'] !== '' && $where['salon_stock_enabled'] !== null, function ($query) use ($where) {
+				if ((int)$where['salon_stock_enabled'] === 1) {
+					$query->where('p.salon_stock_enabled', 1);
+				} else {
+					$query->whereRaw('IFNULL(p.salon_stock_enabled,0)=0');
 				}
 			});
 	}

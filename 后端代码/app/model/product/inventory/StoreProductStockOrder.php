@@ -152,28 +152,72 @@ class StoreProductStockOrder extends BaseModel
 
 	/**
 	 * 出入库类型
+	 * order_type=8 双语义：须与 stock_type 联用（入库=调拨入库，出库=院装领用）
+	 * 禁止裸筛 order_type（含数组 whereIn）：无方向会把调拨入库与院装领用混查
+	 * 单值/数组约定：
+	 * - 已带 stock_type：值均为该方向下的原始 order_type
+	 * - 未带 stock_type：入库用原值，出库用 20+order_type（与流水页一致）
 	 * @param Model $query
 	 * @param $value
+	 * @param array $data
 	 */
 	public function searchOrderTypeAttr($query, $value, $data)
 	{
+		if ($value === '' || $value === null || $value === []) {
+			return;
+		}
+		$hasStockType = isset($data['stock_type']) && $data['stock_type'] !== '' && $data['stock_type'] !== null;
+		$stockType = $hasStockType ? (int)$data['stock_type'] : 0;
+
 		if (is_array($value)) {
-			if ($value) {
-				$query->whereIn('order_type', $value);
+			$values = array_values(array_unique(array_map('intval', $value)));
+			if (!$values) {
+				return;
 			}
-		} else {
-			if ($value !== '') {
-				if (isset($data['stock_type'])) {//有出入库类型
-					$query->where('order_type', $value);
+			if ($hasStockType) {
+				// 入/出库列表已固定方向，数组仅表示该方向下的多个子类型
+				$query->where('stock_type', $stockType)->whereIn('order_type', $values);
+				return;
+			}
+			// 无 stock_type：按编码拆成入库组 / 出库组，禁止无方向 whereIn(order_type)
+			$inTypes = [];
+			$outTypes = [];
+			foreach ($values as $raw) {
+				if ($raw > 20) {
+					$outTypes[] = (int)bcsub((string)$raw, '20');
 				} else {
-					if ($value > 20) {
-						//出库类型会+20
-						$query->where('stock_type', 2)->where('order_type',  bcsub((string)$value,'20'));
-					} else {
-						$query->where('stock_type', 1)->where('order_type', $value);
-					}
+					$inTypes[] = $raw;
 				}
 			}
+			$inTypes = array_values(array_unique($inTypes));
+			$outTypes = array_values(array_unique($outTypes));
+			$query->where(function ($q) use ($inTypes, $outTypes) {
+				if ($inTypes && $outTypes) {
+					$q->where(function ($q2) use ($inTypes) {
+						$q2->where('stock_type', 1)->whereIn('order_type', $inTypes);
+					})->whereOr(function ($q2) use ($outTypes) {
+						$q2->where('stock_type', 2)->whereIn('order_type', $outTypes);
+					});
+				} elseif ($inTypes) {
+					$q->where('stock_type', 1)->whereIn('order_type', $inTypes);
+				} elseif ($outTypes) {
+					$q->where('stock_type', 2)->whereIn('order_type', $outTypes);
+				} else {
+					$q->whereRaw('1 = 0');
+				}
+			});
+			return;
+		}
+
+		$raw = (int)$value;
+		if ($hasStockType) {
+			$query->where('stock_type', $stockType)->where('order_type', $raw);
+			return;
+		}
+		if ($raw > 20) {
+			$query->where('stock_type', 2)->where('order_type', (int)bcsub((string)$raw, '20'));
+		} else {
+			$query->where('stock_type', 1)->where('order_type', $raw);
 		}
 	}
 

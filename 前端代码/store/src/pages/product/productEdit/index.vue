@@ -103,13 +103,13 @@
             </FormItem>
           </Col>
           <Col span="24">
-            <FormItem label="单位：" prop="unit_name">
+            <FormItem label="销售/包装单位：" prop="unit_name">
               <Select
                 v-model="formValidate.unit_name"
                 clearable
                 filterable
                 v-width="'50%'"
-                placeholder="请输入单位"
+                placeholder="请输入销售/包装单位"
               >
                 <Option
                   v-for="(item, index) in unitNameList"
@@ -601,8 +601,8 @@
                 border
               >
                 <el-table-column
-                  v-for="(item, index) in formData.header"
-                  :key="index"
+                  v-for="(item, index) in specTableHeader"
+                  :key="item.slot || item.key || item.title || index"
                   :label="item.title"
                   :min-width="item.minWidth || '100'"
                   :fixed="item.fixed"
@@ -679,7 +679,17 @@
                         ></InputNumber>
                       </template>
                       <template v-else-if="item.slot === 'stock'">
-						<div v-if="formValidate.product_type == 6 || $route.params.id">--</div>
+						<div v-if="formValidate.product_type == 6 || (formValidate.product_type != 1 && $route.params.id)">--</div>
+                        <InputNumber
+						  v-else-if="canEditInitialStock"
+                          :controls="false"
+                          v-model="oneFormBatch[0].stock"
+                          :min="0"
+                          :max="9999999999"
+                          :precision="stockInputPrecision"
+                          class="priceBox"
+                          clearable
+                        ></InputNumber>
                         <InputNumber
 						  v-else
                           :controls="false"
@@ -691,14 +701,6 @@
                           clearable
                         ></InputNumber>
                       </template>
-					  <template v-else-if="item.slot === 'inventory'">
-						  <Input v-model="oneFormBatch[0].inventory" type="number" @on-change="handleChange($event)" @on-keypress="handleKeyPress">
-						  	<Select v-model="oneFormBatch[0].pm" slot="prepend" style="width: 70px" transfer>
-						  		<Option :value="1" style="font-size: 12px !important;">入库</Option>
-						  		<Option :value="0" style="font-size: 12px !important;">出库</Option>
-						  	</Select>
-						  </Input>
-					  </template>
                       <template v-else-if="item.slot === 'fictitious'">
                         --
                       </template>
@@ -733,30 +735,15 @@
                       <template v-else-if="item.slot === 'stock_unit'">
                         <Input
                           v-model="oneFormBatch[0].stock_unit"
-                          placeholder="如 片/ml/g"
-                        ></Input>
-                      </template>
-                      <template v-else-if="item.slot === 'sale_unit'">
-                        <Input
-                          v-model="oneFormBatch[0].sale_unit"
-                          placeholder="如 盒/瓶"
+                          placeholder="如 片/ml/g，空则同销售单位"
                         ></Input>
                       </template>
                       <template v-else-if="item.slot === 'unit_convert'">
                         <InputNumber
                           :controls="false"
                           v-model="oneFormBatch[0].unit_convert"
-                          :min="0"
-                          :max="9999999999"
-                          class="priceBox"
-                        ></InputNumber>
-                      </template>
-                      <template v-else-if="item.slot === 'decimal_scale'">
-                        <InputNumber
-                          :controls="false"
-                          v-model="oneFormBatch[0].decimal_scale"
-                          :min="0"
-                          :max="4"
+                          :min="1"
+                          :max="99"
                           :precision="0"
                           class="priceBox"
                         ></InputNumber>
@@ -824,13 +811,24 @@
                       </template>
                       <template v-else-if="item.slot === 'stock'">
 						<div v-if="formValidate.product_type == 6" @click="setTimeStock(scope.$index)" class="text-wlll-2d8cf0 cup">设置预约数量</div>
-						<div v-else>
-							<div class="stock-input-box on" v-if="$route.params.id">{{ manyFormValidate[scope.$index].stock }}
-							  <span v-show="manyFormValidate[scope.$index].pm == 1">(调整后{{ manyFormValidate[scope.$index].stock + Number(manyFormValidate[scope.$index].inventory) }})</span>
-							  <span v-show="manyFormValidate[scope.$index].pm == 0">(调整后{{ manyFormValidate[scope.$index].stock - Number(manyFormValidate[scope.$index].inventory) }})</span>
-							</div>
+						<div v-else-if="formValidate.product_type == 0 && $route.params.id">
+							<div class="stock-input-box on">{{ manyFormValidate[scope.$index].stock }}</div>
+						</div>
+						<div v-else-if="canEditInitialStock">
 							<InputNumber
-							  v-else
+							  :controls="false"
+							  v-model="manyFormValidate[scope.$index].stock"
+							  :min="0"
+							  :max="9999999999"
+							  :precision="stockInputPrecision"
+							  class="priceBox"
+							></InputNumber>
+						</div>
+						<div v-else-if="isCopyMode && formValidate.product_type == 0">
+							<div class="stock-input-box on">0</div>
+						</div>
+						<div v-else>
+							<InputNumber
 							  :controls="false"
 							  v-model="manyFormValidate[scope.$index].stock"
 							  :min="0"
@@ -840,14 +838,6 @@
 							></InputNumber>
 						</div>
                       </template>
-					  <template v-else-if="item.slot === 'inventory'">
-						  <Input v-model="manyFormValidate[scope.$index].inventory" type="number" @on-change="handleChange($event,scope.$index,1)" @on-keypress="handleKeyPress">
-						  	<Select v-model="manyFormValidate[scope.$index].pm" slot="prepend" style="width: 70px" transfer>
-						  		<Option :value="1" style="font-size: 12px !important;">入库</Option>
-						  		<Option :value="0" style="font-size: 12px !important;">出库</Option>
-						  	</Select>
-						  </Input>
-					  </template>
                       <template v-else-if="item.slot === 'code'">
                         <Input
                           v-model="manyFormValidate[scope.$index].code"
@@ -879,30 +869,15 @@
                       <template v-else-if="item.slot === 'stock_unit'">
                         <Input
                           v-model="manyFormValidate[scope.$index].stock_unit"
-                          placeholder="如 片/ml/g"
-                        ></Input>
-                      </template>
-                      <template v-else-if="item.slot === 'sale_unit'">
-                        <Input
-                          v-model="manyFormValidate[scope.$index].sale_unit"
-                          placeholder="如 盒/瓶"
+                          placeholder="如 片/ml/g，空则同销售单位"
                         ></Input>
                       </template>
                       <template v-else-if="item.slot === 'unit_convert'">
                         <InputNumber
                           :controls="false"
                           v-model="manyFormValidate[scope.$index].unit_convert"
-                          :min="0"
-                          :max="9999999999"
-                          class="priceBox"
-                        ></InputNumber>
-                      </template>
-                      <template v-else-if="item.slot === 'decimal_scale'">
-                        <InputNumber
-                          :controls="false"
-                          v-model="manyFormValidate[scope.$index].decimal_scale"
-                          :min="0"
-                          :max="4"
+                          :min="1"
+                          :max="99"
                           :precision="0"
                           class="priceBox"
                         ></InputNumber>
@@ -1045,14 +1020,27 @@
             </Col>
 			<!-- 不同之处：普通(单规格) -->
             <Col span="24" v-if="formValidate.product_type==0 || formValidate.product_type==4 || formValidate.product_type==5">
-              <FormItem label="初始库存：" v-if="$route.params.id" prop="stock">
-              	<div class="stock-input-box">
-              		{{formValidate.attr.stock}}
-              		<span v-show="formValidate.attr.pm == 1">(调整后{{ formValidate.attr.stock + Number(formValidate.attr.inventory) }})</span>
-              		<span v-show="formValidate.attr.pm == 0">(调整后{{ formValidate.attr.stock - Number(formValidate.attr.inventory) }})</span>
-              	</div>
-              </FormItem>
-			  <FormItem label="库存：" v-else required prop="attr.stock">
+              <template v-if="formValidate.product_type==0">
+                <FormItem label="当前库存：" v-if="$route.params.id" prop="stock">
+                  <div class="stock-input-box">{{ formValidate.attr.stock }}</div>
+                </FormItem>
+                <FormItem
+                  label="初始库存："
+                  v-else-if="canEditInitialStock"
+                  prop="stock"
+                  key="stock1"
+                >
+                  <InputNumber
+                    v-model="formValidate.attr.stock"
+                    :min="0"
+                    :max="99999999"
+                    :precision="stockInputPrecision"
+                    v-width="260"
+                  ></InputNumber>
+                  <div class="tips">仅新建产品可填；保存后通过「初始入库」入账，编辑商品不能改库存</div>
+                </FormItem>
+              </template>
+              <FormItem label="库存：" v-else-if="!$route.params.id" required prop="attr.stock">
                 <InputNumber
                   v-model="formValidate.attr.stock"
                   :min="0"
@@ -1062,14 +1050,9 @@
                   v-width="260"
                 ></InputNumber>
               </FormItem>
-			  <FormItem label="调整库存：" v-if="$route.params.id">
-			  	<Input v-model="formValidate.attr.inventory" type="number" v-width="260" @on-change="handleChange($event)" @on-keypress="handleKeyPress">
-			  		<Select v-model="formValidate.attr.pm" slot="prepend" style="width: 70px">
-			  			<Option :value="1">入库</Option>
-			  			<Option :value="0">出库</Option>
-			  		</Select>
-			  	</Input>
-			  </FormItem>
+              <FormItem label="当前库存：" v-else-if="formValidate.product_type != 0" prop="stock">
+                <div class="stock-input-box">{{ formValidate.attr.stock }}</div>
+              </FormItem>
 			  <FormItem label="商品条形码：" v-if="formValidate.product_type==0">
 			    <Input
 			      v-model.trim="formValidate.attr.bar_code"
@@ -1101,38 +1084,23 @@
 			      v-width="260"
 			    ></InputNumber>
 			  </FormItem>
-			  <FormItem label="库存基本单位：" v-if="formValidate.product_type==0">
+			  <FormItem label="院装耗材单位：" v-if="showSalonUnitFields">
 			    <Input
 			      v-model.trim="formValidate.attr.stock_unit"
 			      v-width="260"
-			      placeholder="如 片/ml/g，库存与院装配方按此单位记账"
+			      placeholder="如 片/ml/g，空则默认与销售/包装单位相同"
 			    ></Input>
+			    <div class="tips">库存与院装配方按此单位记账；为空时默认等于销售/包装单位</div>
 			  </FormItem>
-			  <FormItem label="销售/包装单位：" v-if="formValidate.product_type==0">
-			    <Input
-			      v-model.trim="formValidate.attr.sale_unit"
-			      v-width="260"
-			      placeholder="如 盒/瓶，可留空"
-			    ></Input>
-			  </FormItem>
-			  <FormItem label="销售单位换算数：" v-if="formValidate.product_type==0">
+			  <FormItem label="销售单位换算数：" v-if="showSalonUnitFields">
 			    <InputNumber
 			      v-model="formValidate.attr.unit_convert"
-			      :min="0"
-			      :max="99999999"
-			      v-width="260"
-			    ></InputNumber>
-			    <div class="tips">1 销售单位 = 换算数 × 基本单位（如 1 盒=10 片则填 10）；不用包装单位填 1</div>
-			  </FormItem>
-			  <FormItem label="允许小数位：" v-if="formValidate.product_type==0">
-			    <InputNumber
-			      v-model="formValidate.attr.decimal_scale"
-			      :min="0"
-			      :max="4"
+			      :min="1"
+			      :max="99"
 			      :precision="0"
 			      v-width="260"
 			    ></InputNumber>
-			    <div class="tips">库存数量允许的小数位（0~4）。按件/片等整数单位填 0；ml/g 等可填 1~4</div>
+			    <div class="tips">示例：1 盒 = 10 片则填 10；不用换算填 1。销售/包装单位取基本信息中的设置。最小单位的换算不能超过99，意思就是一盒里面最多只能有99片。</div>
 			  </FormItem>
         <FormItem label="卡项商品：" required v-if="formValidate.product_type==5">
           <Button type="primary" @click="goodsModal = true">添加商品</Button>
@@ -1817,6 +1785,7 @@ export default {
       storeLabelShow: false,
       props: { emitPath: false, multiple: true, checkStrictly: true },
       type: 0,
+      create_request_key: '',
       off_show: 0,
       spinShow: false,
       openSubimit: false,
@@ -1909,14 +1878,8 @@ export default {
           minWidth: '95',
         },
         {
-          title: '库存单位',
+          title: '院装耗材单位',
           slot: 'stock_unit',
-          align: 'center',
-          minWidth: '100',
-        },
-        {
-          title: '销售单位',
-          slot: 'sale_unit',
           align: 'center',
           minWidth: '100',
         },
@@ -1925,12 +1888,6 @@ export default {
           slot: 'unit_convert',
           align: 'center',
           minWidth: '110',
-        },
-        {
-          title: '小数位',
-          slot: 'decimal_scale',
-          align: 'center',
-          minWidth: '90',
         },
         {
           title: '默认选中规格',
@@ -2056,7 +2013,7 @@ export default {
           code: '', //商品编号
           weight: 0, //重量（KG）
           volume: 0, //体积
-          stock_unit: '', //库存基本单位
+          stock_unit: '', //院装耗材单位
           sale_unit: '', //销售/包装单位
           unit_convert: 1, //销售单位换算数
           decimal_scale: 0, //允许小数位0~4
@@ -2091,6 +2048,8 @@ export default {
 		advance_time:1, //提前多少小时预约（小时）
 		is_cancel_reservation:0, //是否可以取消预约0：不允许1：可以 
 		cancel_reservation_time:1, //服务开始前多少小时允许取消（小时）
+    project_service_duration: 0, //项目服务时长（分钟）
+    addon_service_duration: 0, //增项服务时长（分钟）
     is_support_refund: 0, //支持退款
     card_cover: 1, //卡片封面
     card_cover_image: '', //卡片封面-图片
@@ -2131,7 +2090,7 @@ export default {
         unit_name: [
           {
             required: true,
-            message: '请输入单位',
+            message: '请输入销售/包装单位',
             trigger: 'change',
           },
         ],
@@ -2604,9 +2563,41 @@ export default {
 		   }
 	   }
 	   return headTab;
-	}
+	},
+    isCopyMode() {
+      return !!this.$route.query.copy || this.type === 1 || this.type === -1;
+    },
+    canEditInitialStock() {
+      return (
+        !this.$route.params.id &&
+        !this.$route.query.copy &&
+        this.type === 0 &&
+        Number(this.formValidate.product_type) === 0 &&
+        Number(this.formValidate.is_inventory) === 1
+      );
+    },
+    stockInputPrecision() {
+      return Number(this.formValidate.salon_stock_enabled) === 1 ? 2 : 0;
+    },
+    // 院装耗材开启时才展示院装耗材单位/换算数；关闭仅隐藏，不清空已有值
+    showSalonUnitFields() {
+      return Number(this.formValidate.product_type) === 0 && Number(this.formValidate.salon_stock_enabled) === 1;
+    },
+    specTableHeader() {
+      const header = (this.formData && this.formData.header) || [];
+      if (this.showSalonUnitFields) return header;
+      return header.filter((col) => col.slot !== 'stock_unit' && col.slot !== 'unit_convert');
+    },
+  },
+  watch: {
+    'formValidate.product_type'(val) {
+      if (Number(val) !== 6) {
+        this.formValidate.addon_service_duration = 0;
+      }
+    },
   },
   created() {
+    this.create_request_key = this.genCreateRequestKey();
     this.getToken();
     this.getErpConfig();
     this.productGetRule();
@@ -2617,6 +2608,9 @@ export default {
   },
   mounted() {
     this.setCopyrightShow({ value: false });
+    if (this.$route.query.copy) {
+      this.type = 1;
+    }
     if (
       (this.$route.params.id !== '0' && this.$route.params.id) ||
       this.$route.query.copy
@@ -2640,6 +2634,31 @@ export default {
   },
   methods: {
     ...mapMutations('store/layout', ['setCopyrightShow']),
+    genCreateRequestKey() {
+      if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+        return crypto.randomUUID();
+      }
+      return 'crk_' + Date.now() + '_' + Math.random().toString(36).slice(2, 12);
+    },
+    clearSkuStockFields() {
+      if (this.formValidate.attr) {
+        this.$set(this.formValidate.attr, 'stock', 0);
+        this.$set(this.formValidate.attr, 'sum_stock', 0);
+        this.$set(this.formValidate.attr, 'defective_stock', 0);
+        this.$set(this.formValidate.attr, 'old_stock', 0);
+        this.$set(this.formValidate.attr, 'inventory', 0);
+        this.$set(this.formValidate.attr, 'pm', 1);
+      }
+      (this.manyFormValidate || []).forEach((item) => {
+        if (!item) return;
+        this.$set(item, 'stock', 0);
+        this.$set(item, 'sum_stock', 0);
+        this.$set(item, 'defective_stock', 0);
+        this.$set(item, 'old_stock', 0);
+        this.$set(item, 'inventory', 0);
+        this.$set(item, 'pm', 1);
+      });
+    },
 	// 可售日期选择每周时数据更新
 	weekData(data){
 	   this.weekList = data;
@@ -3206,6 +3225,10 @@ export default {
 			}
 		})
         this.manyFormValidate = [...this.oneFormBatch, ...data.attrs];
+      }
+      if (this.$route.query.copy) {
+        this.type = 1;
+        this.clearSkuStockFields();
       }
 	  if(this.$route.params.id && [6].indexOf(this.formValidate.product_type) == -1) {
 	    this.$set(this.formValidate.attr, "inventory", 0);
@@ -3801,7 +3824,6 @@ export default {
           if (this.customBtn && this.formValidate.system_form_id == 0) {
             return this.$Message.warning('其他设置-请选择自定义表单模板');
           }
-          this.formValidate.type = this.type;
           if (this.formValidate.spec_type === 0) {
             this.formValidate.items = [];
           } else {
@@ -3837,7 +3859,11 @@ export default {
           if (this.$route.query.copy) {
             this.formValidate.id = 0;
             this.formValidate.soure_link = '';
+            this.type = 1;
+            this.clearSkuStockFields();
           }
+          this.formValidate.type = this.type;
+          this.formValidate.create_request_key = this.create_request_key || this.genCreateRequestKey();
           let weekId = [];
           this.weekList.forEach(item=>{
           if(item.selected){
@@ -3892,7 +3918,7 @@ export default {
           } else if (!this.formValidate.cate_id.length) {
             return this.$Message.warning('基础信息-商品分类不能为空');
           } else if (!this.formValidate.unit_name) {
-            return this.$Message.warning('基础信息-商品单位不能为空');
+            return this.$Message.warning('基础信息-销售/包装单位不能为空');
           } else if (!this.formValidate.slider_image.length) {
             return this.$Message.warning('基础信息-商品轮播图不能为空');
           }
@@ -4079,17 +4105,6 @@ export default {
 		this.formData.header = [...specificationsColumns, ...this.GoodsTableHead];
 	  }else if(this.formValidate.product_type == 6){
 		this.formData.header = [...specificationsColumns, ...this.ReservationTableHead];  
-	  }
-	  if(this.$route.params.id && [6].indexOf(this.formValidate.product_type) == -1){
-	    const stockIndex = this.formData.header.findIndex(
-	      (item) => item.slot === "stock"
-	    );
-	    this.formData.header.splice(stockIndex + 1, 0, {
-	      title: "调整库存",
-	      slot: "inventory",
-	      align: "center",
-	      minWidth: "180px",
-	    })
 	  }
     },
     // 生成列表 行 列 数据

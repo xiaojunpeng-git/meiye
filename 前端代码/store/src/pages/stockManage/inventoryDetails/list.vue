@@ -16,6 +16,7 @@
 			      v-model="formValidate.keyword"
 			      placeholder="请输入商品名称/ID/商品编码/条形码"
 			      class="input-add"
+			      @on-enter="searchs"
 			    ></Input>
 			  </FormItem>
 			  <FormItem label="当前库存：">
@@ -29,7 +30,7 @@
 			    />
 			    ~
 			    <InputNumber
-			      class="w-118 fs-12 mr14"
+			      class="w-118 fs-12"
 			      placeholder="结尾"
 			      :max="9999999999"
 			      :min="0"
@@ -50,8 +51,23 @@
 			      class="input-add"
 			      :options="options"
 			    ></DatePicker>
-				<Button type="primary" class="mr14 ml-14" @click="searchs">查询</Button>
-				<Button @click="reset">重置</Button>
+			  </FormItem>
+			  <FormItem label="院装产品：">
+			    <RadioGroup v-model="formValidate.salon_stock_enabled" @on-change="searchs">
+			      <Radio label="">全部</Radio>
+			      <Radio label="1">是</Radio>
+			      <Radio label="0">否</Radio>
+			    </RadioGroup>
+			  </FormItem>
+			  <FormItem label="库存展示：">
+			    <RadioGroup v-model="formValidate.hide_zero" @on-change="searchs">
+			      <Radio label="1">库存0不展示</Radio>
+			      <Radio label="0">全部</Radio>
+			    </RadioGroup>
+			  </FormItem>
+			  <FormItem :label-width="0">
+			    <Button type="primary" @click="searchs">查询 <span class="enter-key">↵</span></Button>
+			    <Button class="ml14" @click="reset">重置</Button>
 			  </FormItem>
 		    </Form>
 		  </div>
@@ -90,6 +106,12 @@
 			     <div class="line2">{{ row.suk }}</div>
 			   </Tooltip>
 			 </template>
+			 <template slot-scope="{ row }" slot="display_unit">
+			   <span>{{ formatStockUnit(row.display_unit != null ? row.display_unit : row.stock_unit) }}</span>
+			 </template>
+			 <template slot-scope="{ row }" slot="is_salon_product">
+			   <span>{{ row.is_salon_product ? '是' : '否' }}</span>
+			 </template>
 			 <template slot-scope="{ row }" slot="action">
 				 <a @click="details(row)">库存记录</a>
 			 </template>
@@ -119,6 +141,7 @@
 	} from '../components/tableName.js';
 	import cardsData from "@/components/cards/cards";
 	import timeOptions from "@/utils/timeOptions";
+	import { formatStockUnit } from "@/utils/formatStockQty";
 	import { mapState } from "vuex";
 	export default {
 		data () {
@@ -134,6 +157,8 @@
 					keyword:'',
 					stock_range:'',
 					stock_time:'',
+					hide_zero:'1',
+					salon_stock_enabled: '',
 				},
 				stockStart:null,
 				stockEnd:null,
@@ -166,6 +191,7 @@
 			this.productAttrStatistics();
 		},
 		methods: {
+			formatStockUnit,
 			onchangeTime(e){
 				this.timeVal = e;
 				this.formValidate.stock_time = this.timeVal[0] ? this.timeVal.join("-") : "";
@@ -214,7 +240,9 @@
 					limit:20,
 					keyword:'',
 					stock_range:'',
-					stock_time:''
+					stock_time:'',
+					hide_zero:'1',
+					salon_stock_enabled: '',
 				}
 				this.stockStart = null
 				this.stockEnd = null
@@ -227,6 +255,9 @@
 </script>
 
 <style lang="less" scoped>
+	.enter-key { margin-left: 2px; font-weight: 600; }
+	.ml14 { margin-left: 14px; }
+	.tips-inline { font-size: 12px; color: #999; line-height: 1.4; margin-top: 4px; }
 	/deep/.ivu-tooltip{
 		padding-top: 5px;
 	}

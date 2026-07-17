@@ -97,13 +97,13 @@
 								</Tooltip>
 							</template>
 							<template v-if="item.slot === 'inbound'">
-								<InputNumber :controls="false" v-model="row.inbound" :min="0" :max="9999999999" class="priceBox" />
+								<InputNumber :controls="false" v-model="row.inbound" :min="0" :max="9999999999" :precision="qtyPrecision(row)" :step="qtyPrecision(row) > 0 ? 0.01 : 1" class="priceBox" />
 							</template>
 							<template v-if="item.slot === 'goodProduct'">
-								<InputNumber :controls="false" v-model="row.goodProduct" :min="0" :max="9999999999" class="priceBox" />
+								<InputNumber :controls="false" v-model="row.goodProduct" :min="0" :max="9999999999" :precision="qtyPrecision(row)" :step="qtyPrecision(row) > 0 ? 0.01 : 1" class="priceBox" />
 							</template>
 							<template v-if="item.slot === 'spoiledGoods'">
-								<InputNumber :controls="false" v-model="row.spoiledGoods" :min="0" :max="9999999999" class="priceBox" />
+								<InputNumber :controls="false" v-model="row.spoiledGoods" :min="0" :max="9999999999" :precision="qtyPrecision(row)" :step="qtyPrecision(row) > 0 ? 0.01 : 1" class="priceBox" />
 							</template>
 							<template v-if="item.slot === 'action'">
 								<a @click="delGoods(row)">删除</a>
@@ -165,7 +165,17 @@
 				},
 				ruleValidate: {
 					order_type: [{ required: true, message: '请选择入库类型', trigger: 'change' }],
-					stock_time: [{ required: true, type: 'date', message: '请选择入库日期', trigger: 'change' }]
+					stock_time: [{
+						required: true,
+						validator: (rule, value, callback) => {
+							if (value === '' || value === null || value === undefined) {
+								callback(new Error('请选择入库日期'));
+							} else {
+								callback();
+							}
+						},
+						trigger: 'change'
+					}]
 				},
 				tableHeader: purchase,
 				goodsData: [],
@@ -212,12 +222,18 @@
 				this.orderModal = false;
 				this.formValidate = {
 					order_type: '1',
-					stock_time: formatDate(new Date(Number(new Date().getTime())), 'yyyy-MM-dd'),
+					stock_time: new Date(),
 					remark: ''
 				};
 				this.$nextTick(() => {
-					this.$refs.formValidate && this.$refs.formValidate.resetFields();
+					this.$refs.formValidate && this.$refs.formValidate.clearValidate();
 				});
+			},
+			normalizeStockTime(val) {
+				if (!val) return '';
+				if (val instanceof Date) return formatDate(val, 'yyyy-MM-dd');
+				const s = String(val).replace(/\//g, '-');
+				return s.length >= 10 ? s.slice(0, 10) : s;
 			},
 			storeType(e) {
 				this.active = e;
@@ -265,6 +281,9 @@
 			unique(arr) {
 				const res = new Map();
 				return arr.filter(item => !res.has(item.id) && res.set(item.id, 1));
+			},
+			qtyPrecision(row) {
+				return Number(row && row.decimal_scale) > 0 ? 2 : 0;
 			},
 			getAtterId(data) {
 				this.sattrModals = false;
@@ -330,9 +349,14 @@
 				}
 			},
 			handleSubmit(name) {
-				this.$refs[name].validate(valid => {
+				const form = this.$refs[name];
+				if (!form || typeof form.validate !== 'function') {
+					return this.$Message.error('表单未就绪，请关闭后重试');
+				}
+				if (this.openSubimit) return;
+				form.validate(valid => {
 					if (!valid) {
-						return this.$Message.error('请完善信息');
+						return this.$Message.error('请完善信息（含入库日期）');
 					}
 					if (!this.goodsData.length) {
 						if (this.formValidate.order_type == 3) {
@@ -352,11 +376,13 @@
 						) {
 							return this.$Message.error('良品与残次品入库数量不能同时为0');
 						}
-						if (
-							this.formValidate.order_type == 3 &&
-							parseInt(this.goodsData[i].goodProduct) + parseInt(this.goodsData[i].spoiledGoods) > this.goodsData[i].stock
-						) {
-							return this.$Message.error('残次品+良品数量小于等于可入库数量');
+						if (this.formValidate.order_type == 3) {
+							const goodQty = Number(this.goodsData[i].goodProduct) || 0;
+							const spoiledQty = Number(this.goodsData[i].spoiledGoods) || 0;
+							const maxStock = Number(this.goodsData[i].stock) || 0;
+							if (goodQty + spoiledQty > maxStock + 1e-9) {
+								return this.$Message.error('残次品+良品数量小于等于可入库数量');
+							}
 						}
 						numArray.push({
 							product_id: this.goodsData[i].product_id,
@@ -366,20 +392,26 @@
 							defective_stock: this.goodsData[i].spoiledGoods
 						});
 					}
-					this.formValidate.in_product_detail = numArray;
-					if (this.formValidate.order_type == 3) {
-						this.formValidate.refund_order_id = this.refundId;
+					const payload = {
+						...this.formValidate,
+						stock_time: this.normalizeStockTime(this.formValidate.stock_time),
+						in_product_detail: numArray,
+						scope: 'hq',
+						store_id: ''
+					};
+					if (payload.order_type == 3) {
+						payload.refund_order_id = this.refundId;
 					}
-					inventoryAddApi(this.formValidate)
+					this.openSubimit = true;
+					inventoryAddApi(payload)
 						.then(res => {
-							this.openSubimit = true;
 							this.$Message.success(res.msg);
 							this.handleClose();
 							this.$emit('success');
 						})
 						.catch(err => {
 							this.openSubimit = false;
-							return this.$Message.error(err.msg);
+							return this.$Message.error((err && err.msg) || '保存失败');
 						});
 				});
 			}

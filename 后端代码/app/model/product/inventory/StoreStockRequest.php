@@ -63,6 +63,15 @@ class StoreStockRequest extends BaseModel
         }
     }
 
+    /** hq=总部仓供货；store=门店供货（可与 supply_store_id 联用） */
+    public function searchSupplyPartyTypeAttr($query, $value)
+    {
+        $t = strtolower(trim((string)$value));
+        if ($t === 'hq' || $t === 'store') {
+            $query->where('supply_party_type', $t);
+        }
+    }
+
     public function searchKeywordAttr($query, $value)
     {
         if ($value !== '' && $value !== null) {

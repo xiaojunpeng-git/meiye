@@ -13,7 +13,8 @@ use think\facade\Db;
 /**
  * 项目耗材配方（院装 D2）
  *
- * 归属：type=0 平台(relation_id=0) / type=1 门店(relation_id=storeId)。
+ * 口径（P0）：仅总部（type=0, relation_id=0）可创建/编辑/启停；
+ * 门店端 API/Service 一律拒绝；存量门店配方停用保留，核销不读取。
  * 每个「归属 + 项目SKU」至多一条配方；编辑替换明细并递增 version。
  * 配方后续修改不影响历史核销（历史用量以院装流水快照为准）。
  */
@@ -38,10 +39,19 @@ class StoreProjectConsumableRecipeServices extends BaseServices
         $this->detailDao = $detailDao;
     }
 
-    /** 归属解析：$storeScope>0 门店，否则平台 */
+    /** 归属解析：P0 起仅允许总部；门店 scope 直接拒绝 */
     protected function owner(int $storeScope): array
     {
-        return $storeScope > 0 ? [1, $storeScope] : [0, 0];
+        $this->assertHqOnly($storeScope);
+        return [0, 0];
+    }
+
+    /** 门店不得维护配方（双保险；Controller 已拒绝） */
+    protected function assertHqOnly(int $storeScope): void
+    {
+        if ($storeScope > 0) {
+            throw new ValidateException('项目配方由总部统一维护，门店暂不可操作');
+        }
     }
 
     public function getList(array $where, int $storeScope = 0): array

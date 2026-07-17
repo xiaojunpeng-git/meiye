@@ -14,6 +14,12 @@
 		      :label-position="labelPosition"
 		      @submit.native.prevent
 		    >
+			  <inventory-scope-bar
+			    ref="scopeBar"
+			    :scope="formValidate.scope"
+			    :store-id="formValidate.store_id"
+			    @change="onScopeChange"
+			  />
 			  <FormItem label="商品信息：">
 			    <Input
 			      v-model="formValidate.keyword"
@@ -43,7 +49,7 @@
 		<cards-data :cardLists="statisticsData" v-if="statisticsData.length"></cards-data>
 		<Card :bordered="false" dis-hover :class="statisticsData.length?'':'ivu-mt'">
 			<Table
-			  :columns="columns"
+			  :columns="tableColumns"
 			  :data="goodsList"
 			  ref="table"
 			  class="ivu-mt"
@@ -103,6 +109,7 @@
 	import timeOptions from "@/utils/timeOptions";
 	import exportExcel from "@/utils/newToExcel.js";
 	import cardsData from "@/components/cards/cards";
+	import inventoryScopeBar from '../components/inventoryScopeBar.vue';
 	export default {
 		data () {
 			return {
@@ -121,14 +128,17 @@
 					limit:20,
 					keyword:'',
 					stock_time:'',
-					stock_type:1
+					stock_type:1,
+					scope: 'hq',
+					store_id: '',
 				},
 				total:0,
 				statisticsData:[]
 			}
 		},
 		components: {
-		  cardsData
+		  cardsData,
+		  inventoryScopeBar,
 		},
 		computed: {
 		  ...mapState("admin/layout", ["isMobile"]),
@@ -137,16 +147,42 @@
 		  },
 		  labelPosition() {
 		    return this.isMobile ? "top" : "right";
-		  }
+		  },
+		  tableColumns() {
+		    const base = this.columns.slice();
+		    if (this.formValidate.scope === 'all') {
+		      base.splice(1, 0, {
+		        title: '覆盖门店数',
+		        key: 'store_count',
+		        align: 'left',
+		        minWidth: 110,
+		      });
+		    }
+		    return base;
+		  },
 		},
 		created () {
 			this.inventoryproductList();
 			this.overallStatistics();
 		},
 		methods: {
+			onScopeChange(payload) {
+				this.formValidate.scope = payload.scope;
+				this.formValidate.store_id = payload.store_id;
+				this.formValidate.page = 1;
+				if (payload.scope === 'store' && !payload.store_id) {
+					this.goodsList = [];
+					this.total = 0;
+					this.statisticsData = [];
+					return;
+				}
+				this.inventoryproductList();
+				this.overallStatistics();
+			},
 			overallStatistics(){
+				if (this.formValidate.scope === 'store' && !this.formValidate.store_id) return;
 				overallStatisticsApi(this.formValidate).then(res=>{
-					res.data.forEach(item=>{
+					(res.data || []).forEach(item=>{
 						item.type = 1
 						if(this.formValidate.stock_type==1){
 							item.col = 4
@@ -154,7 +190,7 @@
 							item.col = 6
 						}
 					})
-					this.statisticsData = res.data;
+					this.statisticsData = res.data || [];
 				}).catch(err=>{
 					this.$Message.error(err.msg);
 				})
@@ -178,6 +214,7 @@
 				this.overallStatistics();
 			},
 			inventoryproductList(){
+				if (this.formValidate.scope === 'store' && !this.formValidate.store_id) return;
 				this.loading = true;
 				inventorystatisticsApi(this.formValidate).then(res=>{
 					this.goodsList = res.data.list;
@@ -193,6 +230,7 @@
 				this.inventoryproductList();
 			},
 			searchs(){
+				if (this.$refs.scopeBar && !this.$refs.scopeBar.validate()) return;
 				this.formValidate.page = 1;
 				this.inventoryproductList();
 				this.overallStatistics();

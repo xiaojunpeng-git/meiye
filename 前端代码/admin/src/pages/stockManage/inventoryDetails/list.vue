@@ -11,11 +11,18 @@
 		      :label-position="labelPosition"
 		      @submit.native.prevent
 		    >
+			  <inventory-scope-bar
+			    ref="scopeBar"
+			    :scope="formValidate.scope"
+			    :store-id="formValidate.store_id"
+			    @change="onScopeChange"
+			  />
 			  <FormItem label="商品信息：">
 			    <Input
 			      v-model="formValidate.keyword"
 			      placeholder="请输入商品名称/ID/商品编码/条形码"
 			      class="input-add"
+			      @on-enter="searchs"
 			    ></Input>
 			  </FormItem>
 			  <FormItem label="当前库存：">
@@ -29,7 +36,7 @@
 			    />
 			    ~
 			    <InputNumber
-			      class="w-118 fs-12 mr14"
+			      class="w-118 fs-12"
 			      placeholder="结尾"
 			      :max="9999999999"
 			      :min="0"
@@ -50,8 +57,23 @@
 			      class="input-add"
 			      :options="options"
 			    ></DatePicker>
-				<Button type="primary" class="mr14 ml-14" @click="searchs">查询</Button>
-				<Button @click="reset">重置</Button>
+			  </FormItem>
+			  <FormItem label="院装产品：">
+			    <RadioGroup v-model="formValidate.salon_stock_enabled" @on-change="searchs">
+			      <Radio label="">全部</Radio>
+			      <Radio label="1">是</Radio>
+			      <Radio label="0">否</Radio>
+			    </RadioGroup>
+			  </FormItem>
+			  <FormItem label="库存展示：">
+			    <RadioGroup v-model="formValidate.hide_zero" @on-change="searchs">
+			      <Radio label="1">库存0不展示</Radio>
+			      <Radio label="0">全部</Radio>
+			    </RadioGroup>
+			  </FormItem>
+			  <FormItem :label-width="0">
+			    <Button type="primary" @click="searchs">查询 <span class="enter-key">↵</span></Button>
+			    <Button class="ml14" @click="reset">重置</Button>
 			  </FormItem>
 		    </Form>
 		  </div>
@@ -68,6 +90,12 @@
 			  no-userFrom-text="暂无数据"
 			  no-filtered-userFrom-text="暂无筛选结果"
 			>
+			 <template slot-scope="{ row }" slot="owner_store">
+			   <span>{{ row.store_name_label || '-' }}</span>
+			 </template>
+			 <template slot-scope="{ row }" slot="store_count">
+			   <span>{{ row.store_count != null ? row.store_count : '-' }}</span>
+			 </template>
 			 <template slot-scope="{ row }" slot="store_name">
 			   <Tooltip
 			     :transfer="true"
@@ -90,8 +118,15 @@
 			     <div class="line2">{{ row.suk }}</div>
 			   </Tooltip>
 			 </template>
+			 <template slot-scope="{ row }" slot="display_unit">
+			   <span>{{ formatStockUnit(row.display_unit != null ? row.display_unit : row.stock_unit) }}</span>
+			 </template>
+			 <template slot-scope="{ row }" slot="is_salon_product">
+			   <span>{{ row.is_salon_product ? '是' : '否' }}</span>
+			 </template>
 			 <template slot-scope="{ row }" slot="action">
-				 <a @click="details(row)">库存记录</a>
+				 <a v-if="formValidate.scope !== 'all' && !row.aggregated" @click="details(row)">库存记录</a>
+				 <span v-else class="text-muted">汇总行</span>
 			 </template>
 			</Table>
 			<div class="acea-row row-right page">
@@ -118,14 +153,16 @@
 	  inventoryDetailsList
 	} from '../components/tableName.js';
 	import cardsData from "@/components/cards/cards";
+	import inventoryScopeBar from '../components/inventoryScopeBar.vue';
 	import timeOptions from "@/utils/timeOptions";
+	import { formatStockUnit } from "@/utils/formatStockQty";
 	import { mapState } from "vuex";
 	export default {
 		data () {
 			return {
 				options: timeOptions,
 				roterPre: Setting.roterPre,
-				columns:inventoryDetailsList,
+				baseColumns: inventoryDetailsList,
 				goodsList:[],
 				loading:false,
 				formValidate:{
@@ -134,6 +171,10 @@
 					keyword:'',
 					stock_range:'',
 					stock_time:'',
+					hide_zero:'1',
+					salon_stock_enabled: '',
+					scope: 'hq',
+					store_id: '',
 				},
 				stockStart:null,
 				stockEnd:null,
@@ -143,7 +184,8 @@
 			}
 		},
 		components: {
-		  cardsData
+		  cardsData,
+		  inventoryScopeBar,
 		},
 		computed: {
 		  ...mapState("admin/layout", ["isMobile"]),
@@ -160,30 +202,64 @@
 		      (this.stockEnd != null ? this.stockEnd : "")
 		    );
 		  },
+		  columns() {
+		    const cols = this.baseColumns.slice();
+		    if (this.formValidate.scope === 'all') {
+		      cols.splice(1, 0, {
+		        title: '覆盖门店数',
+		        slot: 'store_count',
+		        align: 'left',
+		        minWidth: 110,
+		      });
+		    } else if (this.formValidate.scope === 'store') {
+		      cols.splice(1, 0, {
+		        title: '归属门店',
+		        slot: 'owner_store',
+		        align: 'left',
+		        minWidth: 120,
+		      });
+		    }
+		    return cols;
+		  },
 		},
 		created () {
 			this.inventoryproductList();
 			this.productAttrStatistics();
 		},
 		methods: {
+			formatStockUnit,
+			onScopeChange(payload) {
+				this.formValidate.scope = payload.scope;
+				this.formValidate.store_id = payload.store_id;
+				this.formValidate.page = 1;
+				if (payload.scope === 'store' && !payload.store_id) {
+					this.goodsList = [];
+					this.total = 0;
+					this.statisticsData = [];
+					return;
+				}
+				this.inventoryproductList();
+				this.productAttrStatistics();
+			},
 			onchangeTime(e){
 				this.timeVal = e;
 				this.formValidate.stock_time = this.timeVal[0] ? this.timeVal.join("-") : "";
 				this.formValidate.page = 1;
-				//this.inventoryproductList();
 				this.productAttrStatistics();
 			},
 			productAttrStatistics(){
+				if (this.formValidate.scope === 'store' && !this.formValidate.store_id) return;
 				productAttrStatisticsApi(this.formValidate).then(res=>{
-					res.data.forEach(item=>{
+					(res.data || []).forEach(item=>{
 						item.type=1
 					})
-					this.statisticsData = res.data;
+					this.statisticsData = res.data || [];
 				}).catch(err=>{
 					this.$Message.error(err.msg);
 				})
 			},
 			inventoryproductList(){
+				if (this.formValidate.scope === 'store' && !this.formValidate.store_id) return;
 				this.loading = true;
 				this.formValidate.stock_range = this.stockRange;
 				inventoryAttrListApi(this.formValidate).then(res=>{
@@ -196,13 +272,22 @@
 				})
 			},
 			details(row){
-				this.$router.push({ path: this.roterPre + "/inventory/details/info",query: {product_id: row.product_id,unique:row.unique}});
+				this.$router.push({
+					path: this.roterPre + "/inventory/details/info",
+					query: {
+						product_id: row.product_id,
+						unique: row.unique,
+						scope: this.formValidate.scope,
+						store_id: this.formValidate.store_id || '',
+					}
+				});
 			},
 			pageChange(e){
 				this.formValidate.page = e;
 				this.inventoryproductList();
 			},
 			searchs(){
+				if (this.$refs.scopeBar && !this.$refs.scopeBar.validate()) return;
 				this.formValidate.page = 1;
 				this.inventoryproductList();
 				this.productAttrStatistics();
@@ -213,7 +298,11 @@
 					limit:20,
 					keyword:'',
 					stock_range:'',
-					stock_time:''
+					stock_time:'',
+					hide_zero:'1',
+					salon_stock_enabled: '',
+					scope: 'hq',
+					store_id: '',
 				}
 				this.stockStart = null
 				this.stockEnd = null
@@ -226,6 +315,9 @@
 </script>
 
 <style lang="less" scoped>
+	.enter-key { margin-left: 2px; font-weight: 600; }
+	.ml14 { margin-left: 14px; }
+	.tips-inline { font-size: 12px; color: #999; line-height: 1.4; margin-top: 4px; }
 	/deep/.ivu-tooltip{
 		padding-top: 5px;
 	}
@@ -236,4 +328,5 @@
 	/deep/.ivu-table-header thead tr th:nth-of-type(1){
 		padding-left:16px !important
 	}
+	.text-muted { color: #999; }
 </style>

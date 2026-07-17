@@ -6,7 +6,6 @@ namespace app\services\product\inventory;
 use app\dao\product\inventory\StoreStockTransferDao;
 use app\dao\product\inventory\StoreStockTransferDetailDao;
 use app\services\BaseServices;
-use app\services\store\SystemStoreServices;
 use app\services\store\SystemStoreStaffServices;
 use app\services\system\admin\SystemAdminServices;
 use mohe\traits\ServicesTrait;
@@ -72,8 +71,10 @@ class StoreStockTransferServices extends BaseServices
         $info = is_array($info) ? $info : $info->toArray();
         $this->assertStoreAccess($info, $storeScope);
         $details = $this->detailDao->getByTransferId($id);
+        $this->attachSkuDecimalScale($details, 'from_product_id', 'from_unique');
         foreach ($details as &$d) {
-            $d['reversible_qty'] = bcsub((string)$d['qty'], (string)$d['reversed_qty'], 4);
+            $scale = (int)($d['decimal_scale'] ?? 0) > 0 ? 2 : 0;
+            $d['reversible_qty'] = bcsub((string)$d['qty'], (string)$d['reversed_qty'], $scale);
         }
         unset($d);
         $rows = [$info];
@@ -88,9 +89,13 @@ class StoreStockTransferServices extends BaseServices
      */
     public function saveDraft(int $id, array $data, int $adminId, int $storeScope = 0): int
     {
+        /** @var StockPartyServices $partyServices */
+        $partyServices = app()->make(StockPartyServices::class);
         $requestId = (int)($data['request_id'] ?? 0);
         $fromStoreId = (int)($data['from_store_id'] ?? 0);
         $toStoreId = (int)($data['to_store_id'] ?? 0);
+        $fromPartyType = (string)($data['from_party_type'] ?? StockPartyServices::PARTY_STORE);
+        $toPartyType = (string)($data['to_party_type'] ?? StockPartyServices::PARTY_STORE);
         $remark = trim((string)($data['remark'] ?? ''));
         $details = $data['details'] ?? [];
         $originTransferId = (int)($data['origin_transfer_id'] ?? 0);
@@ -105,35 +110,58 @@ class StoreStockTransferServices extends BaseServices
             /** @var StoreStockRequestServices $reqServices */
             $reqServices = app()->make(StoreStockRequestServices::class);
             $req = $reqServices->detail($requestId, $storeScope);
+            // 请货转调拨：供货方→调出，请货方→调入
+            $fromPartyType = (string)($req['supply_party_type'] ?? StockPartyServices::PARTY_STORE);
+            $toPartyType = (string)($req['request_party_type'] ?? StockPartyServices::PARTY_STORE);
             $fromStoreId = (int)$req['supply_store_id'];
             $toStoreId = (int)$req['request_store_id'];
             $status = (int)$req['status'];
             if (!in_array($status, [StoreStockRequestServices::STATUS_APPLIED, StoreStockRequestServices::STATUS_PARTIAL], true)) {
                 throw new ValidateException('请货单当前状态不可转调拨');
             }
-            if ($storeScope > 0 && $fromStoreId !== $storeScope && $toStoreId !== $storeScope) {
-                throw new ValidateException('无权操作该请货单转调拨');
+            // 总部供货：仅平台可建请货转调拨；门店供货：供货门店或平台可建
+            if ($fromPartyType === StockPartyServices::PARTY_HQ && $storeScope > 0) {
+                throw new ValidateException('供货方为总部仓时，仅平台可创建调拨单');
             }
-            // 门店端：供货门店或平台可建请货转调拨；请货门店一般不直接建（平台可代建）
+            if ($storeScope > 0) {
+                $ok = ($fromPartyType === StockPartyServices::PARTY_STORE && $fromStoreId === $storeScope)
+                    || ($toPartyType === StockPartyServices::PARTY_STORE && $toStoreId === $storeScope);
+                if (!$ok) {
+                    throw new ValidateException('无权操作该请货单转调拨');
+                }
+            }
             $details = $this->normalizeFromRequest($req, $details);
         } else {
+            $fromParty = $partyServices->normalize($fromPartyType, $fromStoreId, '调出方');
+            $toParty = $partyServices->normalize($toPartyType, $toStoreId, '调入方');
+            $fromPartyType = $fromParty['party_type'];
+            $toPartyType = $toParty['party_type'];
+            $fromStoreId = $fromParty['store_id'];
+            $toStoreId = $toParty['store_id'];
+            if ($fromPartyType === $toPartyType && $fromStoreId === $toStoreId) {
+                throw new ValidateException('调出方与调入方不能相同');
+            }
+            // P2：自由调拨暂不允许总部作为调入方（仅总部→门店 / 门店↔门店）
+            if ($toPartyType === StockPartyServices::PARTY_HQ) {
+                throw new ValidateException('调入方暂不支持总部仓');
+            }
+            if ($fromPartyType === StockPartyServices::PARTY_HQ && $storeScope > 0) {
+                throw new ValidateException('调出方为总部仓时，仅平台可创建调拨单');
+            }
             if ($storeScope > 0) {
-                // 自由调拨：门店必须是调出或调入方之一
-                if ($fromStoreId !== $storeScope && $toStoreId !== $storeScope) {
+                $ok = ($fromPartyType === StockPartyServices::PARTY_STORE && $fromStoreId === $storeScope)
+                    || ($toPartyType === StockPartyServices::PARTY_STORE && $toStoreId === $storeScope);
+                if (!$ok) {
                     throw new ValidateException('门店只能创建与自己相关的调拨单');
                 }
             }
-            $this->assertNormalStores($fromStoreId, $toStoreId);
-            if ($fromStoreId === $toStoreId) {
-                throw new ValidateException('调出门店与调入门店不能相同');
-            }
-            $details = $this->normalizeFreeDetails($fromStoreId, $toStoreId, $details);
+            $details = $this->normalizeFreeDetails($fromStoreId, $toStoreId, $details, $fromPartyType, $toPartyType);
         }
 
-        $this->assertTransferStaff($fromStoreId, $toStoreId, $transferStaffId);
+        $this->assertTransferStaff($fromStoreId, $toStoreId, $transferStaffId, $fromPartyType, $toPartyType);
         $time = time();
         $createType = $storeScope > 0 ? 1 : 0;
-        return (int)$this->transaction(function () use ($id, $requestId, $fromStoreId, $toStoreId, $remark, $details, $adminId, $storeScope, $time, $transferStaffId, $transferDate, $createType) {
+        return (int)$this->transaction(function () use ($id, $requestId, $fromStoreId, $toStoreId, $fromPartyType, $toPartyType, $remark, $details, $adminId, $storeScope, $time, $transferStaffId, $transferDate, $createType) {
             if ($id > 0) {
                 $info = $this->dao->lockById($id);
                 if (!$info) {
@@ -149,7 +177,9 @@ class StoreStockTransferServices extends BaseServices
                 $this->dao->update($id, [
                     'request_id' => $requestId,
                     'from_store_id' => $fromStoreId,
+                    'from_party_type' => $fromPartyType,
                     'to_store_id' => $toStoreId,
+                    'to_party_type' => $toPartyType,
                     'remark' => $remark,
                     'transfer_staff_id' => $transferStaffId,
                     'transfer_date' => $transferDate,
@@ -166,7 +196,9 @@ class StoreStockTransferServices extends BaseServices
                 'request_id' => $requestId,
                 'origin_transfer_id' => 0,
                 'from_store_id' => $fromStoreId,
+                'from_party_type' => $fromPartyType,
                 'to_store_id' => $toStoreId,
+                'to_party_type' => $toPartyType,
                 'status' => self::STATUS_DRAFT,
                 'remark' => $remark,
                 'admin_id' => $adminId,
@@ -252,8 +284,16 @@ class StoreStockTransferServices extends BaseServices
                 throw new ValidateException('调拨明细为空');
             }
 
+            /** @var StockPartyServices $partyServices */
+            $partyServices = app()->make(StockPartyServices::class);
+            $fromPartyType = $partyServices->partyFromRow($info['from_party_type'] ?? '', $info['from_store_id'] ?? 0);
+            $toPartyType = $partyServices->partyFromRow($info['to_party_type'] ?? '', $info['to_store_id'] ?? 0);
             $fromStoreId = (int)$info['from_store_id'];
             $toStoreId = (int)$info['to_store_id'];
+            // 门店端仅调出方可确认；总部仓调出仅平台可确认
+            $this->assertConfirmPermission($fromPartyType, $fromStoreId, $storeScope);
+            $fromOwner = $partyServices->inventoryOwner($fromPartyType, $fromStoreId);
+            $toOwner = $partyServices->inventoryOwner($toPartyType, $toStoreId);
             $requestId = (int)$info['request_id'];
             $originId = (int)$info['origin_transfer_id'];
             $isReverse = $originId > 0;
@@ -336,19 +376,20 @@ class StoreStockTransferServices extends BaseServices
             }
 
             // 先出库再入库；外层已有事务，isTran=false；SKU+商品主表均已按全局顺序预锁
+            // 供货方=总部仓时出库挂 type=0,rid=0；入库挂请货门店 type=1
             $outOrderId = (int)$stockOrderServices->saveData(2, [
                 'order_type' => self::OUT_ORDER_TYPE_TRANSFER,
                 'stock_time' => $stockTime,
                 'remark' => '调拨出库#' . ($info['order_sn'] ?? $id),
                 'out_product_detail' => $outDetail,
-            ], 1, $fromStoreId, $adminId, true, false);
+            ], (int)$fromOwner['type'], (int)$fromOwner['relation_id'], $adminId, true, false);
 
             $inOrderId = (int)$stockOrderServices->saveData(1, [
                 'order_type' => self::IN_ORDER_TYPE_TRANSFER,
                 'stock_time' => $stockTime,
                 'remark' => '调拨入库#' . ($info['order_sn'] ?? $id),
                 'in_product_detail' => $inDetail,
-            ], 1, $toStoreId, $adminId, true, false);
+            ], (int)$toOwner['type'], (int)$toOwner['relation_id'], $adminId, true, false);
 
             if ($outOrderId <= 0 || $inOrderId <= 0) {
                 throw new ValidateException('生成调拨出入库单失败');
@@ -432,21 +473,35 @@ class StoreStockTransferServices extends BaseServices
             throw new ValidateException('请填写冲销明细');
         }
 
-        // 冲销：from=原to，to=原from（原调入门店出库、原调出门店入库）
+        // 冲销：from=原to，to=原from（主体类型一并互换）
+        /** @var StockPartyServices $partyServices */
+        $partyServices = app()->make(StockPartyServices::class);
+        $fromPartyType = $partyServices->partyFromRow($origin['to_party_type'] ?? '', $origin['to_store_id'] ?? 0);
+        $toPartyType = $partyServices->partyFromRow($origin['from_party_type'] ?? '', $origin['from_store_id'] ?? 0);
         $fromStoreId = (int)$origin['to_store_id'];
         $toStoreId = (int)$origin['from_store_id'];
+        // 冲销若调出为总部：仅平台可操作
+        if ($fromPartyType === StockPartyServices::PARTY_HQ && $storeScope > 0) {
+            throw new ValidateException('冲销涉及总部仓出库时，仅平台可操作');
+        }
         $normalized = [];
+        $originDetails = array_values($originMap);
+        $this->attachSkuDecimalScale($originDetails, 'from_product_id', 'from_unique');
+        $scaleMap = [];
+        foreach ($originDetails as $odScale) {
+            $scaleMap[(int)$odScale['id']] = (int)($odScale['decimal_scale'] ?? 0) > 0 ? 2 : 0;
+        }
+        /** @var StoreStockCrossSkuServices $cross */
+        $cross = app()->make(StoreStockCrossSkuServices::class);
         foreach ($lines as $idx => $line) {
             $detailId = (int)($line['detail_id'] ?? 0);
-            $qty = bcadd((string)($line['qty'] ?? '0'), '0', 4);
             if ($detailId <= 0 || !isset($originMap[$detailId])) {
                 throw new ValidateException('第' . ($idx + 1) . '行：冲销明细无效');
             }
             $od = $originMap[$detailId];
-            $reversible = bcsub((string)$od['qty'], (string)$od['reversed_qty'], 4);
-            if (bccomp($qty, '0', 4) <= 0) {
-                throw new ValidateException('第' . ($idx + 1) . '行：冲销数量必须大于0');
-            }
+            $scale = $scaleMap[$detailId] ?? 0;
+            $qty = $cross->parseQty($line['qty'] ?? '', '第' . ($idx + 1) . '行', $scale);
+            $reversible = bcsub((string)$od['qty'], (string)$od['reversed_qty'], $scale > 0 ? 2 : 0);
             if (bccomp($qty, $reversible, 4) > 0) {
                 throw new ValidateException('第' . ($idx + 1) . '行：冲销数量超过可冲销数量');
             }
@@ -466,14 +521,16 @@ class StoreStockTransferServices extends BaseServices
         }
 
         $time = time();
-        $newId = (int)$this->transaction(function () use ($originId, $origin, $fromStoreId, $toStoreId, $normalized, $adminId, $time) {
+        $newId = (int)$this->transaction(function () use ($originId, $origin, $fromStoreId, $toStoreId, $fromPartyType, $toPartyType, $normalized, $adminId, $time) {
             $orderSn = $this->makeSn('TFR');
             $res = $this->dao->save([
                 'order_sn' => $orderSn,
                 'request_id' => 0, // 冲销不直接挂请货，确认时按原单回退
                 'origin_transfer_id' => $originId,
                 'from_store_id' => $fromStoreId,
+                'from_party_type' => $fromPartyType,
                 'to_store_id' => $toStoreId,
+                'to_party_type' => $toPartyType,
                 'status' => self::STATUS_DRAFT,
                 'remark' => '冲销原单#' . ($origin['order_sn'] ?? $originId),
                 'admin_id' => $adminId,
@@ -548,6 +605,18 @@ class StoreStockTransferServices extends BaseServices
     protected function normalizeFromRequest(array $req, array $details): array
     {
         $reqDetails = $req['details'] ?? [];
+        $scaleRows = [];
+        foreach ($reqDetails as $d) {
+            $scaleRows[] = [
+                'from_product_id' => (int)($d['supply_product_id'] ?? 0),
+                'from_unique' => (string)($d['supply_unique'] ?? ''),
+            ];
+        }
+        $this->attachSkuDecimalScale($scaleRows, 'from_product_id', 'from_unique');
+        $scaleBySupply = [];
+        foreach ($scaleRows as $sr) {
+            $scaleBySupply[(int)$sr['from_product_id'] . '|' . (string)$sr['from_unique']] = (int)($sr['decimal_scale'] ?? 0);
+        }
         $map = [];
         foreach ($reqDetails as $d) {
             $map[(int)$d['id']] = $d;
@@ -565,7 +634,6 @@ class StoreStockTransferServices extends BaseServices
             $detailId = (int)($row['request_detail_id'] ?? $row['detail_id'] ?? 0);
             $pid = (int)($row['pid'] ?? 0);
             $suk = trim((string)($row['suk'] ?? ''));
-            $qty = $cross->parseQty($row['qty'] ?? '', '第' . ($idx + 1) . '行');
             $rd = null;
             if ($detailId > 0 && isset($map[$detailId])) {
                 $rd = $map[$detailId];
@@ -575,7 +643,10 @@ class StoreStockTransferServices extends BaseServices
             if (!$rd) {
                 throw new ValidateException('第' . ($idx + 1) . '行：不在请货明细内');
             }
-            $remain = bcsub((string)$rd['qty'], (string)$rd['transferred_qty'], 4);
+            $scaleKey = (int)$rd['supply_product_id'] . '|' . (string)$rd['supply_unique'];
+            $scale = $scaleBySupply[$scaleKey] ?? 0;
+            $qty = $cross->parseQty($row['qty'] ?? '', '第' . ($idx + 1) . '行', $scale);
+            $remain = bcsub((string)$rd['qty'], (string)$rd['transferred_qty'], $scale > 0 ? 2 : 0);
             if (bccomp($qty, $remain, 4) > 0) {
                 throw new ValidateException('第' . ($idx + 1) . '行：超过请货剩余数量（剩余 ' . $remain . '）');
             }
@@ -599,8 +670,13 @@ class StoreStockTransferServices extends BaseServices
         return $out;
     }
 
-    protected function normalizeFreeDetails(int $fromStoreId, int $toStoreId, array $details): array
-    {
+    protected function normalizeFreeDetails(
+        int $fromStoreId,
+        int $toStoreId,
+        array $details,
+        string $fromParty = StockPartyServices::PARTY_STORE,
+        string $toParty = StockPartyServices::PARTY_STORE
+    ): array {
         if (!$details) {
             throw new ValidateException('请选择调拨商品');
         }
@@ -608,20 +684,22 @@ class StoreStockTransferServices extends BaseServices
         $cross = app()->make(StoreStockCrossSkuServices::class);
         $cross->assertDetailLimit($details, '调拨明细');
         $pairs = [];
-        $qtys = [];
-        foreach ($details as $idx => $row) {
-            $rowLabel = '第' . ($idx + 1) . '行';
+        $rawQtys = [];
+        foreach ($details as $row) {
             $pairs[] = [
                 'pid' => (int)($row['pid'] ?? 0),
                 'suk' => trim((string)($row['suk'] ?? '')),
             ];
-            $qtys[] = $cross->parseQty($row['qty'] ?? '', $rowLabel);
+            $rawQtys[] = $row['qty'] ?? '';
         }
-        $resolved = $cross->resolveTransferPairsBatch($pairs, $fromStoreId, $toStoreId);
+        $resolved = $cross->resolveTransferPairsBatch($pairs, $fromStoreId, $toStoreId, $fromParty, $toParty);
         $out = [];
         foreach ($pairs as $i => $pair) {
+            $rowLabel = '第' . ($i + 1) . '行';
             $key = (int)$pair['pid'] . '|' . trim((string)$pair['suk']);
             $r = $resolved[$key];
+            $scale = (int)($r['decimal_scale'] ?? 0) > 0 ? 2 : 0;
+            $qty = $cross->parseQty($rawQtys[$i], $rowLabel, $scale);
             $out[] = [
                 'pid' => $r['pid'],
                 'suk' => $r['suk'],
@@ -629,7 +707,7 @@ class StoreStockTransferServices extends BaseServices
                 'from_unique' => $r['from_unique'],
                 'to_product_id' => $r['to_product_id'],
                 'to_unique' => $r['to_unique'],
-                'qty' => $qtys[$i],
+                'qty' => $qty,
                 'reversed_qty' => '0',
                 'stock_unit' => $r['stock_unit'],
             ];
@@ -660,24 +738,33 @@ class StoreStockTransferServices extends BaseServices
         }
     }
 
-    protected function assertNormalStores(int $a, int $b): void
+    /**
+     * 确认权限：
+     * - 平台可确认任意单
+     * - 总部仓调出：仅平台可确认
+     * - 门店调出：仅当前门店=调出方可确认（禁止调入店代确认扣他店库存）
+     */
+    protected function assertConfirmPermission(string $fromPartyType, int $fromStoreId, int $storeScope): void
     {
-        if ($a <= 0 || $b <= 0) {
-            throw new ValidateException('请选择调出和调入门店');
+        if ($storeScope <= 0) {
+            return;
         }
-        /** @var SystemStoreServices $storeServices */
-        $storeServices = app()->make(SystemStoreServices::class);
-        foreach ([$a, $b] as $sid) {
-            $store = $storeServices->get($sid, ['id', 'name', 'is_show', 'is_del']);
-            if (!$store || (int)$store['is_del'] === 1 || (int)$store['is_show'] !== 1) {
-                throw new ValidateException('门店不存在或未营业：' . $sid);
-            }
+        if ($fromPartyType === StockPartyServices::PARTY_HQ) {
+            throw new ValidateException('供货方/调出方为总部仓时，仅平台可确认调拨，门店不能扣减总部库存');
+        }
+        if ($fromPartyType !== StockPartyServices::PARTY_STORE || $fromStoreId !== $storeScope) {
+            throw new ValidateException('仅调出门店可确认调拨，调入门店不可扣减其他门店库存');
         }
     }
 
-    /** 调拨人必须是调出或调入门店的在职店员 */
-    protected function assertTransferStaff(int $fromStoreId, int $toStoreId, int $staffId): void
-    {
+    /** 调拨人必须是门店侧在职店员（总部侧无店员） */
+    protected function assertTransferStaff(
+        int $fromStoreId,
+        int $toStoreId,
+        int $staffId,
+        string $fromParty = StockPartyServices::PARTY_STORE,
+        string $toParty = StockPartyServices::PARTY_STORE
+    ): void {
         if ($staffId <= 0) {
             throw new ValidateException('请选择调拨人');
         }
@@ -688,7 +775,14 @@ class StoreStockTransferServices extends BaseServices
             throw new ValidateException('调拨人不存在');
         }
         $staffStoreId = (int)$staff['store_id'];
-        if ($staffStoreId !== $fromStoreId && $staffStoreId !== $toStoreId) {
+        $allowed = [];
+        if ($fromParty === StockPartyServices::PARTY_STORE && $fromStoreId > 0) {
+            $allowed[$fromStoreId] = 1;
+        }
+        if ($toParty === StockPartyServices::PARTY_STORE && $toStoreId > 0) {
+            $allowed[$toStoreId] = 1;
+        }
+        if (!$allowed || !isset($allowed[$staffStoreId])) {
             throw new ValidateException('调拨人必须是调出或调入门店的员工');
         }
         if (isset($staff['status']) && (int)$staff['status'] !== 1) {
@@ -704,10 +798,24 @@ class StoreStockTransferServices extends BaseServices
         $storeNames = $this->storeNameMap($list);
         $staffNames = $this->staffNameMap($list);
         $creatorNames = $this->creatorNameMap($list);
+        /** @var StockPartyServices $partyServices */
+        $partyServices = app()->make(StockPartyServices::class);
         foreach ($list as &$row) {
+            $fromParty = $partyServices->partyFromRow($row['from_party_type'] ?? '', $row['from_store_id'] ?? 0);
+            $toParty = $partyServices->partyFromRow($row['to_party_type'] ?? '', $row['to_store_id'] ?? 0);
+            $row['from_party_type'] = $fromParty;
+            $row['to_party_type'] = $toParty;
             $row['status_name'] = $this->statusName[(int)$row['status']] ?? '';
-            $row['from_store_name'] = $storeNames[(int)$row['from_store_id']] ?? '';
-            $row['to_store_name'] = $storeNames[(int)$row['to_store_id']] ?? '';
+            $row['from_store_name'] = $partyServices->label(
+                $fromParty,
+                (int)$row['from_store_id'],
+                (string)($storeNames[(int)$row['from_store_id']] ?? '')
+            );
+            $row['to_store_name'] = $partyServices->label(
+                $toParty,
+                (int)$row['to_store_id'],
+                (string)($storeNames[(int)$row['to_store_id']] ?? '')
+            );
             $row['is_reverse'] = (int)($row['origin_transfer_id'] ?? 0) > 0 ? 1 : 0;
             $row['transfer_staff_name'] = $staffNames[(int)($row['transfer_staff_id'] ?? 0)] ?? '';
             $row['create_admin_name'] = $creatorNames[$this->creatorKey($row)] ?? '';
@@ -799,7 +907,13 @@ class StoreStockTransferServices extends BaseServices
         if ($storeScope <= 0) {
             return;
         }
-        if ((int)$info['from_store_id'] !== $storeScope && (int)$info['to_store_id'] !== $storeScope) {
+        /** @var StockPartyServices $partyServices */
+        $partyServices = app()->make(StockPartyServices::class);
+        $fromParty = $partyServices->partyFromRow($info['from_party_type'] ?? '', $info['from_store_id'] ?? 0);
+        $toParty = $partyServices->partyFromRow($info['to_party_type'] ?? '', $info['to_store_id'] ?? 0);
+        $ok = ($fromParty === StockPartyServices::PARTY_STORE && (int)$info['from_store_id'] === $storeScope)
+            || ($toParty === StockPartyServices::PARTY_STORE && (int)$info['to_store_id'] === $storeScope);
+        if (!$ok) {
             throw new ValidateException('无权操作该调拨单');
         }
     }
@@ -821,5 +935,44 @@ class StoreStockTransferServices extends BaseServices
     protected function makeSn(string $prefix): string
     {
         return $prefix . date('YmdHis') . substr((string)microtime(true), -4) . random_int(100, 999);
+    }
+
+    /**
+     * 为明细附加 SKU decimal_scale（院装 2 / 其它 0）
+     */
+    protected function attachSkuDecimalScale(array &$details, string $productIdKey, string $uniqueKey): void
+    {
+        if (!$details) {
+            return;
+        }
+        $productIds = [];
+        $uniques = [];
+        foreach ($details as $d) {
+            $pid = (int)($d[$productIdKey] ?? 0);
+            $unique = (string)($d[$uniqueKey] ?? '');
+            if ($pid > 0 && $unique !== '') {
+                $productIds[$pid] = $pid;
+                $uniques[$unique] = $unique;
+            }
+        }
+        if (!$productIds || !$uniques) {
+            return;
+        }
+        $rows = Db::name('store_product_attr_value')
+            ->whereIn('product_id', array_values($productIds))
+            ->whereIn('unique', array_values($uniques))
+            ->where('type', 0)
+            ->field('product_id,unique,decimal_scale')
+            ->select()
+            ->toArray();
+        $map = [];
+        foreach ($rows as $row) {
+            $map[(int)$row['product_id'] . '|' . (string)$row['unique']] = (int)($row['decimal_scale'] ?? 0) > 0 ? 2 : 0;
+        }
+        foreach ($details as &$d) {
+            $key = (int)($d[$productIdKey] ?? 0) . '|' . (string)($d[$uniqueKey] ?? '');
+            $d['decimal_scale'] = $map[$key] ?? 0;
+        }
+        unset($d);
     }
 }

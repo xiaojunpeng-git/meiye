@@ -47,18 +47,25 @@ class StoreProductStockOrderServices extends BaseServices
 	 * 入库单类型
 	 * @var string[]
 	 */
+	/**
+	 * 入库单类型
+	 * 注意：order_type=8 双语义——入库=调拨入库，出库=院装领用；展示/筛选必须带 stock_type
+	 * @var string[]
+	 */
 	public $inOrderType = [
 		1 => '采购入库',
 		2 => '其他入库',
 		3 => '退货入库',
 		4 => '残次品转良品',
 		5 => '盘盈入库',
-		8 => '调拨入库',
+		6 => '初始入库',
 		7 => '院装退回',
+		8 => '调拨入库',
 	];
 
 	/**
 	 * 出库单类型
+	 * 注意：order_type=8 双语义——出库=院装领用，入库=调拨入库；展示/筛选必须带 stock_type
 	 * @var string[]
 	 */
 	public $outOrderType = [
@@ -69,9 +76,23 @@ class StoreProductStockOrderServices extends BaseServices
 		5 => '良品转残次品',
 		6 => '其他出库',
 		7 => '盘亏出库',
-		9 => '调拨出库',
 		8 => '院装领用',
+		9 => '调拨出库',
 	];
+
+	/**
+	 * 按出入库方向解析 order_type 文案（硬化双语义 8）
+	 */
+	public function resolveOrderTypeName(int $stockType, int $orderType): string
+	{
+		if ($stockType === 1) {
+			return (string)($this->inOrderType[$orderType] ?? '');
+		}
+		if ($stockType === 2) {
+			return (string)($this->outOrderType[$orderType] ?? '');
+		}
+		return '';
+	}
 
     /**
      * StoreProductStockInOrderServices constructor.
@@ -143,10 +164,20 @@ class StoreProductStockOrderServices extends BaseServices
 	 * @throws \think\db\exception\DbException
 	 * @throws \think\db\exception\ModelNotFoundException
 	 */
-	public function getStockOrderList(array $where, int $type = 0, int $relation_id = 0, array $with = [])
+	public function getStockOrderList(array $where, int $type = 0, $relation_id = 0, array $with = [], bool $allStores = false)
 	{
 		$where['type'] = $type;
-		$where['relation_id'] = $relation_id;
+		if ($allStores) {
+			unset($where['relation_id']);
+			// 全部门店：仅有效门店单据，relation_id>0
+			$where['relation_id'] = \think\facade\Db::name('system_store')
+				->where('is_del', 0)->where('is_show', 1)->column('id');
+			if (!$where['relation_id']) {
+				return ['count' => 0, 'list' => []];
+			}
+		} else {
+			$where['relation_id'] = $relation_id;
+		}
 		$count = $this->dao->count($where);
 		[$page, $limit] = $this->getPageValue();
 		if (isset($where['stock_type'])) {//有单独筛选
@@ -181,18 +212,25 @@ class StoreProductStockOrderServices extends BaseServices
 						break;
 				}
 			}
-			/** @var UserServices $userServices */
-			$userServices = app()->make(UserServices::class);
+			$storeNames = [];
+			if ((int)$type === 1 || $allStores) {
+				$storeIds = array_values(array_unique(array_filter(array_map('intval', array_column($list, 'relation_id')))));
+				if ($storeIds) {
+					$storeNames = \think\facade\Db::name('system_store')->whereIn('id', $storeIds)->column('name', 'id');
+				}
+			}
 			foreach ($list as &$item) {
 				if ($item['stock_type'] == 2 && $item['order_type'] == 1) {//销售出库 为用户行为
-					//$userInfo = $userServices->getUserCacheInfo($item['admin_id']);
-					//$item['admin_name'] = $userInfo['nickname'] ?? '';
 					$item['admin_name'] = '系统自动创建';
 				} else {
 					$item['admin_name'] = $admin[$item['admin_id']]['admin_name'] ?? '系统自动创建';
 				}
 				$item['stock_time'] = $item['stock_time'] ? date('Y-m-d', $item['stock_time']) : '';
 				$item['add_time'] = $item['add_time'] ? date('Y-m-d H:i:s', $item['add_time']) : '';
+				$rid = (int)($item['relation_id'] ?? 0);
+				$item['store_name_label'] = ((int)$type === 0 && $rid === 0)
+					? '总部仓'
+					: ($storeNames[$rid] ?? ($rid > 0 ? ('门店#' . $rid) : ''));
 				if (isset($item['detail'])) {
 					$item['stock'] = $item['detail'][0]['stock'] ?? 0;
 					$item['defective_stock'] = $item['detail'][0]['defective_stock'] ?? 0;
@@ -332,8 +370,21 @@ class StoreProductStockOrderServices extends BaseServices
 				if (!is_numeric($stock) || !is_numeric($defective_stock)) {
 					throw new ValidateException($rowLabel . '：数量格式错误');
 				}
-				$stock = round((float)$stock, 4);
-				$defective_stock = round((float)$defective_stock, 4);
+				/** @var StockQtyValidateServices $qtyValidate */
+				$qtyValidate = app()->make(StockQtyValidateServices::class);
+				$scale = $qtyValidate->resolveScale(
+					(int)($productInfo['product_type'] ?? 0),
+					(int)($productInfo['is_inventory'] ?? 0),
+					(int)($productInfo['salon_stock_enabled'] ?? 0)
+				);
+				$goodsLabel = (string)($productInfo['store_name'] ?? '') . '/' . (string)($attrInfo['suk'] ?? $unique);
+				$excelRowNum = $excelRow > 0 ? $excelRow : null;
+				try {
+					$stock = $qtyValidate->assertQty($stock, $scale, $goodsLabel, $excelRowNum);
+					$defective_stock = $qtyValidate->assertQty($defective_stock, $scale, $goodsLabel . '(残次)', $excelRowNum);
+				} catch (\mohe\exceptions\AdminException $e) {
+					throw new ValidateException($e->getMessage());
+				}
 				// 入库：普通/初始等禁止负数；转换类按业务方向单独处理
 				if ($stockType == 1) {
 					if ($orderType == 4) {

@@ -28,7 +28,7 @@
 			</div>
 		</Card>
 		<Card :bordered="false" dis-hover class="ivu-mt">
-			<div class="op-tips">配方按「项目规格」维护耗材用量；核销该项目时按配方自动扣减耗材，撤销核销时原量退回。仅「可作为院装耗材」的商品可被选用。配方修改不影响历史核销。门店未配置时将回退平台配方。</div>
+			<div class="op-tips">配方按「项目」维护耗材用量；核销该项目时按配方自动扣减耗材，撤销核销时原量退回。仅「可作为院装耗材」的商品可被选用。配方修改不影响历史核销。门店未配置时将回退平台配方。</div>
 			<Button type="primary" class="mt10" @click="openForm()">新建配方</Button>
 			<Table class="mt25" :columns="columns" :data="orderList" :loading="loading" :border="false">
 				<template slot-scope="{ row }" slot="status">
@@ -84,7 +84,6 @@
 				columns: [
 					{ title: 'ID', key: 'id', width: 80 },
 					{ title: '项目', key: 'project_name', minWidth: 180 },
-					{ title: '项目规格', key: 'project_unique', minWidth: 140 },
 					{ title: '耗材项数', key: 'consumable_count', width: 100 },
 					{ title: '版本', key: 'version', width: 80 },
 					{ title: '状态', slot: 'status', width: 100 },

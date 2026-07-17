@@ -52,8 +52,10 @@
 					<template v-if="row.status == 0">
 						<Divider type="vertical" />
 						<a @click="openForm(row.id)">编辑</a>
-						<Divider type="vertical" />
-						<a @click="confirmRow(row)">确认</a>
+						<template v-if="canConfirmTransfer(row)">
+							<Divider type="vertical" />
+							<a @click="confirmRow(row)">确认</a>
+						</template>
 						<Divider type="vertical" />
 						<a @click="cancelRow(row)">取消草稿</a>
 						<Divider type="vertical" />
@@ -102,7 +104,8 @@
 						v-model="row.reverse_qty"
 						:min="0"
 						:max="Number(row.reversible_qty) || 0"
-						:precision="0"
+						:precision="qtyPrecision(row)"
+						:step="qtyPrecision(row) > 0 ? 0.01 : 1"
 						class="priceBox"
 					/>
 				</template>
@@ -121,6 +124,7 @@
 <script>
 	import Setting from '@/setting';
 	import { mapState } from 'vuex';
+	import { storeGetInfoApi } from '@/api/setting';
 	import {
 		stockTransferListApi,
 		stockTransferInfoApi,
@@ -137,6 +141,7 @@
 		data() {
 			return {
 				routePre: Setting.routePre,
+				currentStoreId: 0,
 				formValidate: {
 					status: '',
 					keyword: '',
@@ -195,6 +200,7 @@
 			}
 		},
 		created() {
+			this.loadCurrentStore();
 			this.getList();
 			this.openFromRouteQuery();
 		},
@@ -202,6 +208,18 @@
 			statusColor(status) {
 				const map = { 0: 'default', 1: 'green', 2: 'red' };
 				return map[status] || 'default';
+			},
+			loadCurrentStore() {
+				storeGetInfoApi().then(res => {
+					const data = res.data || {};
+					this.currentStoreId = data.id || 0;
+				}).catch(() => {});
+			},
+			/** 仅调出方可确认；总部仓调出仅平台可确认 */
+			canConfirmTransfer(row) {
+				const fromParty = row.from_party_type || (Number(row.from_store_id) > 0 ? 'store' : 'hq');
+				if (fromParty === 'hq') return false;
+				return Number(row.from_store_id) === Number(this.currentStoreId) && Number(this.currentStoreId) > 0;
 			},
 			openFromRouteQuery() {
 				const requestId = Number(this.$route.query.request_id || 0);
@@ -295,12 +313,16 @@
 					}
 				});
 			},
+			qtyPrecision(row) {
+				return Number(row && row.decimal_scale) > 0 ? 2 : 0;
+			},
 			openReverse(row) {
 				stockTransferInfoApi(row.id).then(res => {
 					const data = res.data || {};
 					this.reverseId = data.id;
 					this.reverseDetails = (data.details || []).map(d => ({
 						...d,
+						decimal_scale: Number(d.decimal_scale) > 0 ? 2 : 0,
 						reverse_qty: Number(d.reversible_qty) > 0 ? Number(d.reversible_qty) : 0
 					}));
 					this.reverseModal = true;

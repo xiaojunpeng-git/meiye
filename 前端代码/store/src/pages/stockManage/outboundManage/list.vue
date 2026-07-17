@@ -26,6 +26,7 @@
 				  <Option value="5">良品转残次品</Option>
 				  <Option value="6">其他出库</Option>
 				  <Option value="7">盘亏出库</Option>
+				  <Option value="8">院装领用</Option>
 				  <Option value="9">调拨出库</Option>
 			    </Select>
 			  </FormItem>
@@ -126,6 +127,7 @@
 					<div v-else-if="row.order_type == 5">良品转残次品</div>
 					<div v-else-if="row.order_type == 6">其他出库</div>
 					<div v-else-if="row.order_type == 7">盘亏出库</div>
+					<div v-else-if="row.order_type == 8">院装领用</div>
 					<div v-else-if="row.order_type == 9">调拨出库</div>
 					<div v-if="row.order_type == 1" @click="getData(row.store_order_id)" class="fs-12 text-wlll-2d8cf0 cup">{{row.order_sn}}</div>
 				</template>

@@ -11,6 +11,12 @@
 		      :label-position="labelPosition"
 		      @submit.native.prevent
 		    >
+			  <inventory-scope-bar
+			    ref="scopeBar"
+			    :scope="formValidate.scope"
+			    :store-id="formValidate.store_id"
+			    @change="onScopeChange"
+			  />
 			  <FormItem label="出库类型：">
 			    <Select
 			      v-model="formValidate.order_type"
@@ -26,6 +32,7 @@
 				  <Option value="5">良品转残次品</Option>
 				  <Option value="6">其他出库</Option>
 				  <Option value="7">盘亏出库</Option>
+				  <Option value="8">院装领用</Option>
 				  <Option value="9">调拨出库</Option>
 			    </Select>
 			  </FormItem>
@@ -70,7 +77,10 @@
 		  </div>
 		</Card>
 		<Card :bordered="false" dis-hover class="ivu-mt">
-			<Button type="primary" @click="add">新建出库</Button>
+			<template v-if="formValidate.scope === 'hq'">
+				<Button type="primary" @click="add">新建出库</Button>
+				<Button class="ml-10" @click="openImport">出库导入</Button>
+			</template>
 			<Tooltip
 			    content="本页至少选中一项"
 			    :disabled="!!checkUidList.length && isAll==0"
@@ -82,10 +92,10 @@
 				  @click="exports"
 			  >导出出库明细</Button>
 			</Tooltip>
-			<Button class="ml-10" @click="openImport">出库导入</Button>
-			<div class="op-tips mt10">
+			<div class="op-tips mt10" v-if="formValidate.scope === 'hq'">
 				导入：须用系统模板，商品ID/SKU勿改；整表校验通过才入账，库存不足且不允许负库存时整单失败。导出：导出当前勾选单据明细，非导入模板。
 			</div>
+			<div class="op-tips mt10" v-else>当前为监管查看：仅查看门店出库流水，新建/导入仍在总部仓范围操作。</div>
 			<!-- 用户列表表格 -->
 			<vxe-table
 			    ref="xTable"
@@ -116,6 +126,9 @@
 			    </template>
 			  </vxe-column>
 			  <vxe-column field="order_id" title="出库单号" width="200"></vxe-column>
+			  <vxe-column v-if="formValidate.scope !== 'hq'" field="store_name_label" title="归属门店" min-width="120">
+				<template v-slot="{ row }">{{ row.store_name_label || '-' }}</template>
+			  </vxe-column>
 			  <vxe-column field="order_type" title="出库类型" width="200">
 			    <template v-slot="{ row }">
 					<div v-if="row.order_type == 1">销售出库</div>
@@ -125,6 +138,7 @@
 					<div v-else-if="row.order_type == 5">良品转残次品</div>
 					<div v-else-if="row.order_type == 6">其他出库</div>
 					<div v-else-if="row.order_type == 7">盘亏出库</div>
+					<div v-else-if="row.order_type == 8">院装领用</div>
 					<div v-else-if="row.order_type == 9">调拨出库</div>
 					<div v-if="row.order_type == 1" @click="getData(row.store_order_id)" class="fs-12 text-wlll-2d8cf0 cup">{{row.order_sn}}</div>
 				</template>
@@ -188,6 +202,7 @@
 	import orderDetails from "../components/orderDetails.vue";
 	import detailsFrom from "../../order/orderList/handle/orderDetails";
 	import stockImport from "../components/stockImport.vue";
+	import inventoryScopeBar from "../components/inventoryScopeBar.vue";
 	import exportExcel from "@/utils/newToExcel.js";
 	import FormModal from './add';
 	export default {
@@ -196,7 +211,8 @@
 			orderDetails,
 			detailsFrom,
 			stockImport,
-			FormModal
+			FormModal,
+			inventoryScopeBar,
 		},
 		data() {
 			return {
@@ -211,6 +227,8 @@
 					add_time:'',
 					page: 1,
 					limit: 15,
+					scope: 'hq',
+					store_id: '',
 				},
 				orderList:[],
 				total:0,
@@ -316,7 +334,20 @@
 			    this.checkUidList = [];
 			  }
 			},
+			onScopeChange(payload) {
+				this.formValidate.scope = payload.scope;
+				this.formValidate.store_id = payload.store_id;
+				this.formValidate.page = 1;
+				if (payload.scope === 'store' && !payload.store_id) {
+					this.orderList = [];
+					this.total = 0;
+					return;
+				}
+				this.inventoryList();
+				this.allReset();
+			},
 			inventoryList(){
+				if (this.formValidate.scope === 'store' && !this.formValidate.store_id) return;
 				this.loading = true;
 				outventoryListApi(this.formValidate).then(res=>{
 					let data = res.data;
@@ -396,6 +427,7 @@
 				});
 			},
 			searchs(){
+				if (this.$refs.scopeBar && !this.$refs.scopeBar.validate()) return;
 				this.formValidate.page = 1;
 				this.inventoryList();
 				this.allReset();
@@ -410,7 +442,9 @@
 					add_time:'',
 					page: 1,
 					limit: 15,
-				},
+					scope: 'hq',
+					store_id: '',
+				};
 				this.inventoryList();
 				this.allReset();
 			},

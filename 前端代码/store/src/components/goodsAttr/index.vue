@@ -17,7 +17,7 @@
 				</FormItem>
 				</Col>
 				<Col v-bind="grid">
-        <FormItem v-if="isCard" label="商品类型：">
+        <FormItem v-if="isCard && !lockProductType" label="商品类型：">
 					<Select v-model="formValidate.product_type" clearable
 						@on-change="userSearchs">
 						<Option v-for="item in productTypeSelect" :value="item.id" :key="item.id">{{ item.label_name }}
@@ -192,14 +192,28 @@
 			labelPosition() {
 				return this.isMobile ? "top" : "right";
 			},
+			lockProductType() {
+				return [94, 95, 96].includes(Number(this.chooseType));
+			},
 		},
-		created() {},
+		created() {
+			this.applyInventoryProductTypeLock();
+		},
 		mounted() {
 			this.goodsCategory();
 			this.getList();
 			// this.getAllLabelApi();
 		},
 		methods: {
+			applyInventoryProductTypeLock() {
+				const ct = Number(this.chooseType);
+				if (ct === 94 || ct === 95) {
+					this.formValidate.product_type = 0;
+				} else if (ct === 96) {
+					this.formValidate.product_type = 6;
+				}
+				this.formValidate.choose_type = ct || this.formValidate.choose_type;
+			},
 			// getAllLabelApi() {
 			// 	allLabelApi().then(res => {
 			// 		this.labelSelect = res.data
@@ -225,6 +239,7 @@
 			// 列表
 			getList() {
 				this.loading = true;
+				this.applyInventoryProductTypeLock();
 				if (this.goodsType) {
 					this.formValidate.is_presale_product = 0;
 					this.formValidate.is_vip_product = 0;
@@ -241,10 +256,11 @@
 						let list = res.data.list;
 						list.forEach(item=>{
 							item.attrValue.forEach(j=>{
-								j.store_name = j.suk,
-								j.store_names = item.store_name,
-								j.cate_name = item.cate_name,
-								j.store_label = item.store_label
+								j.store_name = j.suk;
+								j.store_names = item.store_name;
+								j.cate_name = item.cate_name;
+								j.store_label = item.store_label;
+								j.product_type = item.product_type;
 							})
 						})
 						this.tableList = list;
@@ -259,10 +275,12 @@
 			ok() {
 				 let selectRecords = this.$refs.xTree.getCheckboxRecords()
 				let goodsattr = [];
+				const ct = Number(this.chooseType);
 				selectRecords.forEach(function(item) {
-					if(item.hasOwnProperty('product_id')){
-						goodsattr.push(item)
-					}
+					if(!item.hasOwnProperty('product_id')) return;
+					if ((ct === 94 || ct === 95) && item.product_type != null && Number(item.product_type) !== 0) return;
+					if (ct === 96 && item.product_type != null && Number(item.product_type) !== 6) return;
+					goodsattr.push(item)
 				});
 				if (goodsattr.length > 0) {
 					this.$emit("getProductId", goodsattr);

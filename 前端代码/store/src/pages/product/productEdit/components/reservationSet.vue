@@ -95,6 +95,16 @@
 		   设置用户最晚可以取消预约的时间。示例：设置2h，用户预约12:00-14:00，则当天10:00之前允许用户取消预约
 		 </div>
 	   </FormItem>
+	   <FormItem label="项目服务时长：">
+	     <InputNumber :min="0" :max="9999" :precision="0" v-model="baseInfo.project_service_duration" class="w-160" />
+	     <span class="ml-10">分钟</span>
+	     <div class="fs-12 text--w111-999 mt10">主预约项目的服务时长，用于收银台预约单时长计算</div>
+	   </FormItem>
+	   <FormItem label="增项服务时长：">
+	     <InputNumber :min="0" :max="9999" :precision="0" v-model="baseInfo.addon_service_duration" class="w-160" />
+	     <span class="ml-10">分钟</span>
+	     <div class="fs-12 text--w111-999 mt10">作为加项服务被选中时计入预约总时长</div>
+	   </FormItem>
 	</div>
 </template>
 

@@ -23,6 +23,7 @@ use think\facade\App;
  */
 class StoreProductStockInOrder extends AuthController
 {
+	use AdminInventoryScope;
 
     public function __construct(App $app, StoreProductStockOrderServices $service)
     {
@@ -58,7 +59,14 @@ class StoreProductStockInOrder extends AuthController
         ]);
 		//入库单
 		$where['stock_type'] = 1;
-        return $this->success($this->services->getStockOrderList($where));
+		$scope = $this->inventoryScope();
+        return $this->success($this->services->getStockOrderList(
+			$where,
+			(int)$scope['type'],
+			$scope['relation_id'],
+			[],
+			(bool)$scope['all_stores']
+		));
     }
 
 	/**
@@ -113,6 +121,7 @@ class StoreProductStockInOrder extends AuthController
 	 */
     public function save(StoreProductAttrValueServices $attrValueServices, StoreOrderRefundServices $refundServices)
     {
+		$this->assertInventoryHqWrite();
         $data = $this->request->postMore([
             ['order_type', ''],//入库类型
 			['refund_order_id', ''],//退款入库关联退款表ID
@@ -201,18 +210,45 @@ class StoreProductStockInOrder extends AuthController
 
 	/**
 	 * 下载入库 Excel 模板（scene=initial_in|in）
+	 * 支持 GET 兼容与 POST（推荐）；product_ids 多选预填
 	 */
 	public function downloadTemplate(\app\services\product\inventory\StoreProductStockImportServices $importServices)
 	{
-		[$scene, $keyword] = $this->request->getMore([
+		$this->assertInventoryHqWrite();
+		$fields = [
 			['scene', 'in'],
 			['keyword', ''],
-		], true);
+			['product_ids', []],
+		];
+		[$scene, $keyword, $productIds] = $this->request->isPost()
+			? $this->request->postMore($fields, true)
+			: $this->request->getMore($fields, true);
 		if (!in_array($scene, ['initial_in', 'in'], true)) {
 			return $this->fail('模板场景不正确');
 		}
-		$result = $importServices->downloadTemplate($scene, 0, 0, ['keyword' => $keyword]);
+		try {
+			$result = $importServices->downloadTemplate($scene, 0, 0, [
+				'keyword' => $keyword,
+				'product_ids' => $productIds,
+			]);
+		} catch (\think\exception\ValidateException $e) {
+			return $this->fail($e->getMessage());
+		}
 		return $this->success($result);
+	}
+
+	/**
+	 * 流式下载已生成的入库 Excel 模板（鉴权接口，避免 /phpExcel 被 SPA 回退成 HTML）
+	 */
+	public function downloadTemplateFile(\app\services\product\inventory\StoreProductStockImportServices $importServices)
+	{
+		$this->assertInventoryHqWrite();
+		$key = (string)$this->request->param('key', '');
+		try {
+			return $importServices->streamTemplateFile($key, 0, 0);
+		} catch (\think\exception\ValidateException $e) {
+			return $this->fail($e->getMessage());
+		}
 	}
 
 	/**
@@ -220,6 +256,7 @@ class StoreProductStockInOrder extends AuthController
 	 */
 	public function import(\app\services\product\inventory\StoreProductStockImportServices $importServices)
 	{
+		$this->assertInventoryHqWrite();
 		[$scene, $file, $realName] = $this->request->postMore([
 			['scene', 'in'],
 			['file', ''],

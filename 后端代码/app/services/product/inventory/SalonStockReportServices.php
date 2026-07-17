@@ -145,6 +145,12 @@ class SalonStockReportServices extends BaseServices
             $query->where('u.store_id', $storeScope);
         } elseif (isset($where['store_id']) && $where['store_id'] !== '' && (int)$where['store_id'] > 0) {
             $query->where('u.store_id', (int)$where['store_id']);
+        } else {
+            // 全部门店汇总：仅有效门店 store_id>0（排除总部/脏数据）
+            $query->where('u.store_id', '>', 0)
+                ->whereIn('u.store_id', function ($sub) {
+                    $sub->name('system_store')->where('is_del', 0)->where('is_show', 1)->field('id');
+                });
         }
         if (isset($where['status']) && $where['status'] !== '') {
             $query->where('u.status', (int)$where['status']);
@@ -215,7 +221,8 @@ class SalonStockReportServices extends BaseServices
 
     protected function trimQty(string $qty): string
     {
-        $formatted = number_format((float)$qty, 4, '.', '');
+        // 院装报表展示最多 2 位小数（去尾零）
+        $formatted = bcadd($qty, '0', 2);
         if (str_contains($formatted, '.')) {
             $formatted = rtrim(rtrim($formatted, '0'), '.');
         }

@@ -296,8 +296,8 @@
                 border
               >
                 <el-table-column
-                  v-for="(item, index) in formData.header"
-                  :key="index"
+                  v-for="(item, index) in specTableHeader"
+                  :key="item.slot || item.key || item.title || index"
                   :label="item.title"
                   :min-width="item.minWidth || '100'"
                   :fixed="item.fixed"
@@ -509,8 +509,9 @@
                         <InputNumber
                           :controls="false"
                           v-model="oneFormBatch[0].unit_convert"
-                          :min="0"
-                          :max="9999999999"
+                          :min="1"
+                          :max="99"
+                          :precision="0"
                           class="priceBox"
                         ></InputNumber>
                       </template>
@@ -654,13 +655,24 @@
                       </template>
                       <template v-else-if="item.slot === 'stock'">
 						<div v-if="formData.product_type == 6" @click="setTimeStock(scope.$index)" class="text-wlll-2d8cf0 cup">设置预约数量</div>
-						<div v-else>
-							<div class="stock-input-box on" v-if="formData.product_type != 1 && formData.id">{{ manyFormValidate[scope.$index].stock }}
-							  <span v-show="manyFormValidate[scope.$index].pm == 1">(调整后{{ manyFormValidate[scope.$index].stock + Number(manyFormValidate[scope.$index].inventory) }})</span>
-							  <span v-show="manyFormValidate[scope.$index].pm == 0">(调整后{{ manyFormValidate[scope.$index].stock - Number(manyFormValidate[scope.$index].inventory) }})</span>
-							</div>
+						<div v-else-if="formData.product_type == 0 && formData.id">
+							<div class="stock-input-box on">{{ manyFormValidate[scope.$index].stock }}</div>
+						</div>
+						<div v-else-if="canEditInitialStock">
 							<InputNumber
-							  v-else
+							  :controls="false"
+							  v-model="manyFormValidate[scope.$index].stock"
+							  :min="0"
+							  :max="9999999999"
+							  :precision="stockInputPrecision"
+							  class="priceBox"
+							></InputNumber>
+						</div>
+						<div v-else-if="isCopyMode && formData.product_type == 0">
+							<div class="stock-input-box on">0</div>
+						</div>
+						<div v-else>
+							<InputNumber
 							  :controls="false"
 							  v-model="manyFormValidate[scope.$index].stock"
 							  :disabled="formData.product_type == 1"
@@ -725,8 +737,9 @@
                         <InputNumber
                           :controls="false"
                           v-model="manyFormValidate[scope.$index].unit_convert"
-                          :min="0"
-                          :max="9999999999"
+                          :min="1"
+                          :max="99"
+                          :precision="0"
                           class="priceBox"
                         ></InputNumber>
                       </template>
@@ -866,31 +879,40 @@
                 v-width="'50%'"
               ></InputNumber>
             </FormItem>
-			<FormItem label="初始库存：" v-if="formData.id && formData.product_type != 1" prop="stock">
-				<div class="stock-input-box">
-					{{formData.attr.stock}}
-					<span v-show="formData.attr.pm == 1">(调整后{{ formData.attr.stock + Number(formData.attr.inventory) }})</span>
-					<span v-show="formData.attr.pm == 0">(调整后{{ formData.attr.stock - Number(formData.attr.inventory) }})</span>
-				</div>
+			<FormItem label="当前库存：" v-if="formData.id && formData.product_type == 0" prop="stock">
+				<div class="stock-input-box">{{ formData.attr.stock }}</div>
 			</FormItem>
-            <FormItem label="库存：" v-else prop="stock" :rules="ruleValidate.stock" key="stock1">
+            <FormItem
+              label="初始库存："
+              v-else-if="canEditInitialStock"
+              prop="stock"
+              key="stock1"
+            >
               <InputNumber
                 v-model="formData.attr.stock"
                 :min="0"
                 :max="99999999"
-                :disabled="formData.product_type == 1 || openErp"
+                :precision="stockInputPrecision"
+                v-width="'50%'"
+              ></InputNumber>
+              <div class="tips">仅新建产品可填；保存后通过「初始入库」入账，编辑商品不能改库存</div>
+            </FormItem>
+            <FormItem
+              label="库存："
+              v-else-if="formData.product_type != 0 && formData.product_type != 1"
+              prop="stock"
+              :rules="ruleValidate.stock"
+              key="stock1b"
+            >
+              <InputNumber
+                v-model="formData.attr.stock"
+                :min="0"
+                :max="99999999"
+                :disabled="openErp"
                 :precision="0"
                 v-width="'50%'"
               ></InputNumber>
             </FormItem>
-			<FormItem label="调整库存：" v-if="formData.id && formData.product_type != 1">
-				<Input v-model="formData.attr.inventory" type="number" v-width="'50%'" @on-change="handleChange($event)" @on-keypress="handleKeyPress">
-					<Select v-model="formData.attr.pm" slot="prepend" style="width: 70px">
-						<Option :value="1">入库</Option>
-						<Option :value="0">出库</Option>
-					</Select>
-				</Input>
-			</FormItem>
             <FormItem label="商品编号：">
               <Input
                 v-model.trim="formData.attr.code"
@@ -922,38 +944,23 @@
                 v-width="'50%'"
               ></InputNumber>
             </FormItem>
-            <FormItem label="库存基本单位：" v-if="formData.product_type == 0">
+            <FormItem label="院装耗材单位：" v-if="showSalonUnitFields">
               <Input
                 v-model.trim="formData.attr.stock_unit"
                 v-width="'50%'"
-                placeholder="如 片/ml/g，库存与院装配方按此单位记账"
+                placeholder="如 片/ml/g，空则默认与销售/包装单位相同"
               ></Input>
+              <div class="tips">库存与院装配方按此单位记账；为空时默认等于销售/包装单位</div>
             </FormItem>
-            <FormItem label="销售/包装单位：" v-if="formData.product_type == 0">
-              <Input
-                v-model.trim="formData.attr.sale_unit"
-                v-width="'50%'"
-                placeholder="如 盒/瓶，可留空"
-              ></Input>
-            </FormItem>
-            <FormItem label="销售单位换算数：" v-if="formData.product_type == 0">
+            <FormItem label="销售单位换算数：" v-if="showSalonUnitFields">
               <InputNumber
                 v-model="formData.attr.unit_convert"
-                :min="0"
-                :max="99999999"
-                v-width="'50%'"
-              ></InputNumber>
-              <div class="tips">1 销售单位 = 换算数 × 基本单位（如 1 盒=10 片则填 10）；不用包装单位填 1</div>
-            </FormItem>
-            <FormItem label="允许小数位：" v-if="formData.product_type == 0">
-              <InputNumber
-                v-model="formData.attr.decimal_scale"
-                :min="0"
-                :max="4"
+                :min="1"
+                :max="99"
                 :precision="0"
                 v-width="'50%'"
               ></InputNumber>
-              <div class="tips">库存数量允许的小数位（0~4）。按件/片等整数单位填 0；ml/g 等可填 1~4</div>
+              <div class="tips">示例：1 盒 = 10 片则填 10；不用换算填 1。销售/包装单位取基本信息中的设置。最小单位的换算不能超过99，意思就是一盒里面最多只能有99片。</div>
             </FormItem>
             <template v-if="formData.product_type == 1">
               <FormItem label="卡密设置：">
@@ -1073,31 +1080,40 @@
                 v-width="'50%'"
               ></InputNumber>
             </FormItem>
-			<FormItem label="初始库存：" v-if="formData.id && formData.product_type != 1" prop="stock">
-				<div class="stock-input-box">
-					{{formData.attr.stock}}
-					<span v-show="formData.attr.pm == 1">(调整后{{ formData.attr.stock + Number(formData.attr.inventory) }})</span>
-					<span v-show="formData.attr.pm == 0">(调整后{{ formData.attr.stock - Number(formData.attr.inventory) }})</span>
-				</div>
+			<FormItem label="当前库存：" v-if="formData.id && formData.product_type == 0" prop="stock">
+				<div class="stock-input-box">{{ formData.attr.stock }}</div>
 			</FormItem>
-            <FormItem label="库存：" v-else prop="stock" :rules="ruleValidate.stock" key="stock2">
+            <FormItem
+              label="初始库存："
+              v-else-if="canEditInitialStock"
+              prop="stock"
+              key="stock2"
+            >
               <InputNumber
                 v-model="formData.attr.stock"
                 :min="0"
                 :max="99999999"
-                :disabled="formData.product_type == 1 || openErp"
+                :precision="stockInputPrecision"
+                v-width="'50%'"
+              ></InputNumber>
+              <div class="tips">仅新建产品可填；保存后通过「初始入库」入账</div>
+            </FormItem>
+            <FormItem
+              label="库存："
+              v-else-if="formData.product_type != 0 && formData.product_type != 1"
+              prop="stock"
+              :rules="ruleValidate.stock"
+              key="stock2b"
+            >
+              <InputNumber
+                v-model="formData.attr.stock"
+                :min="0"
+                :max="99999999"
+                :disabled="openErp"
                 :precision="0"
                 v-width="'50%'"
               ></InputNumber>
             </FormItem>
-			<FormItem label="调整库存：" v-if="formData.id">
-				<Input v-model="formData.attr.inventory" type="number" v-width="'50%'" @on-change="handleChange($event)" @on-keypress="handleKeyPress">
-					<Select v-model="formData.attr.pm" slot="prepend" style="width: 70px">
-						<Option :value="1">入库</Option>
-						<Option :value="0">出库</Option>
-					</Select>
-				</Input>
-			</FormItem>
             <FormItem v-if="formData.product_type == 5" label="几选几套餐：">
               <InputNumber
                   v-model="formData.card_num"
@@ -1624,7 +1640,14 @@ export default {
         stock: [
           {
             validator: (rule, value, callback) => {
-              if (this.formData.product_type != 1 && !this.$route.params.id && this.currentTab == '2' && (this.formData.attr.stock === null || !this.formData.attr.stock)) {
+              // 产品初始库存允许为 0；非产品类型仍按原规则校验
+              if (
+                this.formData.product_type != 0 &&
+                this.formData.product_type != 1 &&
+                !this.$route.params.id &&
+                this.currentTab == '2' &&
+                (this.formData.attr.stock === null || this.formData.attr.stock === '')
+              ) {
                 callback(new Error('请输入库存'));
               } else {
                 callback();
@@ -1747,6 +1770,7 @@ export default {
       tableIndex: '',
       modals: false,
       type: 0,
+      create_request_key: '',
 	  timeoutId: null, //定时器
 	  reservationTime: [],//时间区域
 	  timeCheckAll:true, //自动划分控制全选
@@ -2062,11 +2086,11 @@ export default {
           { title: '其他设置', name: '6' },
         ];
 	  } else {
-      // 产品等其他类型
+      // 产品等其他类型：先库存设置，再规格库存
         headTab = [
           { title: '基础信息', name: '1' },
-          { title: '规格库存', name: '2' },
           { title: '库存设置', name: '11' },
+          { title: '规格库存', name: '2' },
           { title: '商品详情', name: '3' },
           { title: '会员价/佣金', name: '10' },
           { title: '适用门店', name: '7' },
@@ -2081,9 +2105,36 @@ export default {
       }
       return headTab;
     },
+    isCopyMode() {
+      return !!this.$route.query.copy || this.type === 1 || this.type === -1;
+    },
+    canEditInitialStock() {
+      return (
+        !this.$route.params.id &&
+        !this.$route.query.copy &&
+        this.type === 0 &&
+        Number(this.formData.product_type) === 0 &&
+        Number(this.formData.is_inventory) === 1
+      );
+    },
+    stockInputPrecision() {
+      return Number(this.formData.salon_stock_enabled) === 1 ? 2 : 0;
+    },
+    // 院装耗材开启时才展示院装耗材单位/换算数；关闭仅隐藏，不清空已有值
+    showSalonUnitFields() {
+      return Number(this.formData.product_type) === 0 && Number(this.formData.salon_stock_enabled) === 1;
+    },
+    specTableHeader() {
+      const header = this.formData.header || [];
+      if (this.showSalonUnitFields) return header;
+      return header.filter((col) => col.slot !== 'stock_unit' && col.slot !== 'unit_convert');
+    },
   },
   destroyed() {
     this.setCopyrightShow({ value: true });
+  },
+  created() {
+    this.create_request_key = this.genCreateRequestKey();
   },
   mounted() {
     this.productGetRule();
@@ -2096,11 +2147,38 @@ export default {
     if (this.$route.query.type && this.$route.query.type == -1) {
       this.modals = true;
       this.type = -1;
+    } else if (this.$route.query.copy) {
+      this.type = 1;
     }
 	// window.addEventListener('click', this.handlePageClick);
   },
   methods: {
     ...mapMutations('admin/layout', ['setCopyrightShow']),
+    genCreateRequestKey() {
+      if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+        return crypto.randomUUID();
+      }
+      return 'crk_' + Date.now() + '_' + Math.random().toString(36).slice(2, 12);
+    },
+    clearSkuStockFields() {
+      if (this.formData.attr) {
+        this.$set(this.formData.attr, 'stock', 0);
+        this.$set(this.formData.attr, 'sum_stock', 0);
+        this.$set(this.formData.attr, 'defective_stock', 0);
+        this.$set(this.formData.attr, 'old_stock', 0);
+        this.$set(this.formData.attr, 'inventory', 0);
+        this.$set(this.formData.attr, 'pm', 1);
+      }
+      (this.manyFormValidate || []).forEach((item) => {
+        if (!item) return;
+        this.$set(item, 'stock', 0);
+        this.$set(item, 'sum_stock', 0);
+        this.$set(item, 'defective_stock', 0);
+        this.$set(item, 'old_stock', 0);
+        this.$set(item, 'inventory', 0);
+        this.$set(item, 'pm', 1);
+      });
+    },
 	// 单规格-调价区间
 	changePrice(e) {
 		if(!this.$route.params.id){
@@ -3090,6 +3168,10 @@ export default {
 		  }
         });
       }
+      if (this.$route.query.copy) {
+        this.type = 1;
+        this.clearSkuStockFields();
+      }
 	  if(this.$route.params.id && [1,6].indexOf(this.formData.product_type) == -1) {
 	    this.$set(this.formData.attr, "inventory", 0);
 	    this.$set(this.formData.attr, "pm", 1);
@@ -3215,17 +3297,7 @@ export default {
 		}
 		this.formData.header = headerList;
 	  }
-	  if(this.$route.params.id && [1,6].indexOf(this.formData.product_type) == -1){
-	    const stockIndex = this.formData.header.findIndex(
-	      (item) => item.slot === "stock"
-	    );
-	    this.formData.header.splice(stockIndex + 1, 0, {
-	      title: "调整库存",
-	      slot: "inventory",
-	      align: "center",
-	      minWidth: "180px",
-	    })
-	  }
+      // 产品库存仅由库存模块调整，编辑页不再插入「调整库存」列
       this.columnsInstalM = this.formData.header;
     },
 	// 单规格以及多规格验证区域价格
@@ -3515,9 +3587,12 @@ export default {
       let formData = { ...baseSetData, ...marketingSetData, ...otherSetData, ...cardFaceSet };
       if (this.$route.query.copy) {
         this.$set(formData, 'id', 0);
+        this.type = 1;
+        this.clearSkuStockFields();
       }
       this.$set(formData, "slider_image", this.formData.slider_image);
       this.$set(formData, "type", this.type);
+      this.$set(formData, 'create_request_key', this.create_request_key || this.genCreateRequestKey());
       this.$set(formData, "product_type", this.formData.product_type);
       this.$set(formData, 'spec_type', this.formData.spec_type);
       this.$set(formData, 'items', this.attrs);

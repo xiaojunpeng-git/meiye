@@ -51,8 +51,14 @@ class MerchantAccessServices extends BaseServices
 
         /** @var StoreServiceServices $storeService */
         $storeService = app()->make(StoreServiceServices::class);
+        // 停用客服（status≠1）不得获得商家入口；customer 标志不能绕过 status
         $isService = (bool)$storeService->checkoutIsService(['uid' => $uid, 'status' => 1, 'account_status' => 1]);
-        $isCustomerService = (bool)$storeService->checkoutIsService(['uid' => $uid, 'account_status' => 1, 'customer' => 1]);
+        $isCustomerService = (bool)$storeService->checkoutIsService([
+            'uid' => $uid,
+            'status' => 1,
+            'account_status' => 1,
+            'customer' => 1,
+        ]);
         if ($isService || $isCustomerService) {
             $identity['is_service'] = true;
             $roles[] = 'platform_service';

@@ -69,6 +69,22 @@ class StoreStockTransfer extends BaseModel
         }
     }
 
+    public function searchFromPartyTypeAttr($query, $value)
+    {
+        $t = strtolower(trim((string)$value));
+        if ($t === 'hq' || $t === 'store') {
+            $query->where('from_party_type', $t);
+        }
+    }
+
+    public function searchToPartyTypeAttr($query, $value)
+    {
+        $t = strtolower(trim((string)$value));
+        if ($t === 'hq' || $t === 'store') {
+            $query->where('to_party_type', $t);
+        }
+    }
+
     public function searchKeywordAttr($query, $value)
     {
         if ($value !== '' && $value !== null) {

@@ -80,8 +80,10 @@ class StoreProductStockCountServices extends BaseServices
 				$attrInfo = $productAttrValueServices->getOne(['product_id' => $detail['product_id'], 'unique' => $detail['unique'], 'type' => 0]);
 				if (!$productInfo || !$attrInfo) continue;
 				$detail['image'] = $productInfo['image'];
-				$detail['change_stock'] = $detail['count_stock'] > -1 ? (int)bcsub((string)$detail['count_stock'], (string)$detail['stock'], 0) : 0;
-				$detail['change_defective_stock'] = $detail['count_defective_stock'] > -1 ? (int)bcsub((string)$detail['count_defective_stock'], (string)$detail['defective_stock'], 0) : 0;
+				$detail['decimal_scale'] = (int)($attrInfo['decimal_scale'] ?? 0) > 0 ? 2 : 0;
+				$scale = (int)$detail['decimal_scale'];
+				$detail['change_stock'] = $detail['count_stock'] > -1 ? bcsub((string)$detail['count_stock'], (string)$detail['stock'], $scale) : 0;
+				$detail['change_defective_stock'] = $detail['count_defective_stock'] > -1 ? bcsub((string)$detail['count_defective_stock'], (string)$detail['defective_stock'], $scale) : 0;
 				$product[] = $detail;
 			}
 		}
@@ -97,10 +99,19 @@ class StoreProductStockCountServices extends BaseServices
 	 * @throws \think\db\exception\DbException
 	 * @throws \think\db\exception\ModelNotFoundException
 	 */
-	public function getStockCountList(array $where, int $type = 0, int $relation_id = 0)
+	public function getStockCountList(array $where, int $type = 0, $relation_id = 0, bool $allStores = false)
 	{
 		$where['type'] = $type;
-		$where['relation_id'] = $relation_id;
+		if ($allStores) {
+			unset($where['relation_id']);
+			$where['relation_id'] = \think\facade\Db::name('system_store')
+				->where('is_del', 0)->where('is_show', 1)->column('id');
+			if (!$where['relation_id']) {
+				return ['count' => 0, 'list' => []];
+			}
+		} else {
+			$where['relation_id'] = $relation_id;
+		}
 		$count = $this->dao->count($where);
 		[$page, $limit] = $this->getPageValue();
 		$list = $this->dao->getList($where, '*', $page, $limit);
@@ -129,11 +140,36 @@ class StoreProductStockCountServices extends BaseServices
 			}
 			/** @var StoreProductStockDetailServices $stockDetailServices */
 			$stockDetailServices = app()->make(StoreProductStockDetailServices::class);
+			$orderIds = array_values(array_unique(array_map('intval', array_column($list, 'id'))));
+			$detailsByOrder = [];
+			if ($orderIds) {
+				// 批量查明细，禁止逐单 N+1
+				$allDetails = $stockDetailServices->getList(
+					['stock_type' => 3, 'order_id' => $orderIds],
+					'id,order_id,stock_type,stock,count_stock,defective_stock,count_defective_stock'
+				);
+				foreach ($allDetails as $detail) {
+					$oid = (int)($detail['order_id'] ?? 0);
+					if ($oid <= 0) continue;
+					$detailsByOrder[$oid][] = $detail;
+				}
+			}
+			$storeNames = [];
+			if ((int)$type === 1 || $allStores) {
+				$storeIds = array_values(array_unique(array_filter(array_map('intval', array_column($list, 'relation_id')))));
+				if ($storeIds) {
+					$storeNames = \think\facade\Db::name('system_store')->whereIn('id', $storeIds)->column('name', 'id');
+				}
+			}
 			foreach ($list as &$item) {
 				$item['admin_name'] = $admin[$item['admin_id']]['admin_name'] ?? '系统自动创建';
 				$item['update_time'] = $item['update_time'] ? date('Y-m-d H:i:s', $item['update_time']) : '';
 				$item['add_time'] = $item['add_time'] ? date('Y-m-d H:i:s', $item['add_time']) : '';
-				$detailList = $stockDetailServices->getList(['stock_type' => 3, 'order_id' => $item['id']], 'id,stock_type,stock,count_stock,defective_stock,count_defective_stock');
+				$rid = (int)($item['relation_id'] ?? 0);
+				$item['store_name_label'] = ((int)$type === 0 && $rid === 0)
+					? '总部仓'
+					: ($storeNames[$rid] ?? ($rid > 0 ? ('门店#' . $rid) : ''));
+				$detailList = $detailsByOrder[(int)$item['id']] ?? [];
 				$over_count_stock = $loss_count_stock = $over_count_defective_stock = $loss_count_defective_stock = 0;
 				if ($detailList) {
 					foreach ($detailList as $detail) {

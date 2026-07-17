@@ -23,16 +23,17 @@
 							<Option value="2">已取消</Option>
 						</Select>
 					</FormItem>
-					<FormItem label="调出门店：">
+					<FormItem label="调出方：">
 						<Select
-							v-model="formValidate.from_store_id"
+							v-model="fromFilter"
 							placeholder="请选择"
 							clearable
 							filterable
-							@on-change="searchs"
+							@on-change="onFromFilterChange"
 							class="input-add"
 						>
-							<Option v-for="item in storeList" :value="item.id" :key="item.id">{{ item.name }}</Option>
+							<Option value="hq">总部仓</Option>
+							<Option v-for="item in storeList" :value="'s' + item.id" :key="'f' + item.id">{{ item.name }}</Option>
 						</Select>
 					</FormItem>
 					<FormItem label="调入门店：">
@@ -126,7 +127,8 @@
 						v-model="row.reverse_qty"
 						:min="0"
 						:max="Number(row.reversible_qty) || 0"
-						:precision="0"
+						:precision="qtyPrecision(row)"
+						:step="qtyPrecision(row) > 0 ? 0.01 : 1"
 						class="priceBox"
 					/>
 				</template>
@@ -163,9 +165,11 @@
 			return {
 				roterPre: Setting.roterPre,
 				storeList: [],
+				fromFilter: '',
 				formValidate: {
 					status: '',
 					from_store_id: '',
+					from_party_type: '',
 					to_store_id: '',
 					keyword: '',
 					page: 1,
@@ -185,7 +189,7 @@
 				columns: [
 					{ title: '调拨单号', key: 'order_sn', minWidth: 160 },
 					{ title: '类型', slot: 'type', minWidth: 100 },
-					{ title: '调出门店', key: 'from_store_name', minWidth: 120 },
+					{ title: '调出方', key: 'from_store_name', minWidth: 120 },
 					{ title: '调入门店', key: 'to_store_name', minWidth: 120 },
 					{ title: '调拨人', key: 'transfer_staff_name', minWidth: 100, render: (h, { row }) => h('span', row.transfer_staff_name || '-') },
 					{ title: '调拨时间', key: 'transfer_date', minWidth: 110, render: (h, { row }) => h('span', row.transfer_date || '-') },
@@ -259,14 +263,29 @@
 					this.$Message.error(err.msg || '加载失败');
 				});
 			},
+			onFromFilterChange(val) {
+				if (val === 'hq') {
+					this.formValidate.from_party_type = 'hq';
+					this.formValidate.from_store_id = '';
+				} else if (val && String(val).indexOf('s') === 0) {
+					this.formValidate.from_party_type = '';
+					this.formValidate.from_store_id = Number(String(val).slice(1)) || '';
+				} else {
+					this.formValidate.from_party_type = '';
+					this.formValidate.from_store_id = '';
+				}
+				this.searchs();
+			},
 			searchs() {
 				this.formValidate.page = 1;
 				this.getList();
 			},
 			reset() {
+				this.fromFilter = '';
 				this.formValidate = {
 					status: '',
 					from_store_id: '',
+					from_party_type: '',
 					to_store_id: '',
 					keyword: '',
 					page: 1,
@@ -333,12 +352,16 @@
 					}
 				});
 			},
+			qtyPrecision(row) {
+				return Number(row && row.decimal_scale) > 0 ? 2 : 0;
+			},
 			openReverse(row) {
 				stockTransferInfoApi(row.id).then(res => {
 					const data = res.data || {};
 					this.reverseId = data.id;
 					this.reverseDetails = (data.details || []).map(d => ({
 						...d,
+						decimal_scale: Number(d.decimal_scale) > 0 ? 2 : 0,
 						reverse_qty: Number(d.reversible_qty) > 0 ? Number(d.reversible_qty) : 0
 					}));
 					this.reverseModal = true;

@@ -25,7 +25,8 @@ if [ ! -f "$PROJECT/.env.docker" ]; then
   exit 1
 fi
 
-colima status >/dev/null 2>&1 || colima start --cpu 4 --memory 6 --disk 60
+# 平台/门店 webpack 热编译峰值高；6GiB 易 OOM 杀 mohe-admin-src（exit 137）
+colima status >/dev/null 2>&1 || colima start --cpu 4 --memory 10 --disk 60
 
 docker network create mohe-net >/dev/null 2>&1 || true
 
@@ -83,7 +84,13 @@ if ! docker image inspect mohe-app:local >/dev/null 2>&1; then
   docker build -t mohe-app:local -f "$ROOT/docker/Dockerfile" "$ROOT"
 fi
 
-docker run -d --name mohe-app --platform linux/amd64 --network mohe-net \
+# Apple Silicon 上本地构建的 mohe-app:local 为 arm64；强制 amd64 会误去 Docker Hub 拉不存在的 tag
+APP_PLATFORM=""
+if [ "$(uname -m)" = "x86_64" ]; then
+  APP_PLATFORM="--platform linux/amd64"
+fi
+# shellcheck disable=SC2086
+docker run -d --name mohe-app $APP_PLATFORM --network mohe-net \
   -p 20800:20800 \
   -v "$PROJECT:/var/www/html" \
   -w /var/www/html \
@@ -118,6 +125,11 @@ ensure_admin_dev() {
   fi
 
   docker volume create "$ADMIN_NM_VOLUME" >/dev/null 2>&1 || true
+  # 直连 Docker Hub 在国内易 EOF；优先 DaoCloud 镜像并打本地 tag
+  if ! docker image inspect node:14-bullseye >/dev/null 2>&1; then
+    docker pull --platform linux/amd64 docker.m.daocloud.io/library/node:14-bullseye
+    docker tag docker.m.daocloud.io/library/node:14-bullseye node:14-bullseye
+  fi
   docker run -d --name mohe-admin-src --platform linux/amd64 \
     -p 18081:8081 \
     -v "$ADMIN_SRC:/app" \
@@ -129,12 +141,78 @@ ensure_admin_dev() {
 
 ensure_admin_dev
 
+# 门店前端开发预览（18082，热更新）
+STORE_SRC="$ROOT/前端代码/store"
+STORE_NM_VOLUME="mohe_store_src_nm"
+STORE_DEV_CMD='if [ ! -x ./node_modules/.bin/vue-cli-service ]; then npm config set registry https://registry.npmmirror.com && npm install --no-audit --no-fund; fi && ./node_modules/.bin/vue-cli-service serve --mode=dev --host 0.0.0.0 --port 8082'
+
+ensure_store_dev() {
+  if docker ps -a --format '{{.Names}}' | grep -qx mohe-store-src; then
+    if docker ps --format '{{.Names}}' | grep -qx mohe-store-src; then
+      return 0
+    else
+      docker start mohe-store-src >/dev/null
+      return 0
+    fi
+  fi
+
+  docker volume create "$STORE_NM_VOLUME" >/dev/null 2>&1 || true
+  if ! docker image inspect node:14-bullseye >/dev/null 2>&1; then
+    docker pull --platform linux/amd64 docker.m.daocloud.io/library/node:14-bullseye
+    docker tag docker.m.daocloud.io/library/node:14-bullseye node:14-bullseye
+  fi
+  docker run -d --name mohe-store-src --platform linux/amd64 \
+    -p 18082:8082 \
+    -e VUE_APP_API_URL='http://127.0.0.1:8080/storeapi' \
+    -v "$STORE_SRC:/app" \
+    -v "$STORE_NM_VOLUME:/app/node_modules" \
+    -w /app \
+    node:14-bullseye \
+    bash -lc "$STORE_DEV_CMD"
+}
+
+ensure_store_dev
+
+# 收银台前端开发预览（18083，热更新）
+CASHIER_SRC="$ROOT/前端代码/cashier"
+CASHIER_NM_VOLUME="mohe_cashier_src_nm"
+CASHIER_DEV_CMD='if [ ! -x ./node_modules/.bin/vue-cli-service ]; then npm config set registry https://registry.npmjs.org && npm cache clean --force && npm install --no-audit --no-fund; fi && ./node_modules/.bin/vue-cli-service serve --mode=dev --host 0.0.0.0 --port 8083'
+
+ensure_cashier_dev() {
+  if docker ps -a --format '{{.Names}}' | grep -qx mohe-cashier-src; then
+    if docker ps --format '{{.Names}}' | grep -qx mohe-cashier-src; then
+      return 0
+    else
+      docker start mohe-cashier-src >/dev/null
+      return 0
+    fi
+  fi
+
+  docker volume create "$CASHIER_NM_VOLUME" >/dev/null 2>&1 || true
+  if ! docker image inspect node:14-bullseye >/dev/null 2>&1; then
+    docker pull --platform linux/amd64 docker.m.daocloud.io/library/node:14-bullseye
+    docker tag docker.m.daocloud.io/library/node:14-bullseye node:14-bullseye
+  fi
+  docker run -d --name mohe-cashier-src --platform linux/amd64 \
+    -p 18083:8083 \
+    -e VUE_APP_API_URL='http://127.0.0.1:8080/cashierapi' \
+    -v "$CASHIER_SRC:/app" \
+    -v "$CASHIER_NM_VOLUME:/app/node_modules" \
+    -w /app \
+    node:14-bullseye \
+    bash -lc "$CASHIER_DEV_CMD"
+}
+
+ensure_cashier_dev
+
 echo
 echo "已启动（Nginx + Swoole，挂载：美容源码/后端代码）："
 echo "  平台开发预览: http://127.0.0.1:18081/admin/login  （改代码用，首次编译约 5-10 分钟）"
+echo "  门店开发预览: http://127.0.0.1:18082/            （热更新）"
+echo "  收银台开发预览: http://127.0.0.1:18083/          （热更新，接口走本地 8080/cashierapi）"
 echo "  平台集成预览: http://127.0.0.1:8080/admin/login    （build 产物，上线验证用）"
 echo "  前台 H5:     http://127.0.0.1:8080/"
-echo "  收银台:      http://127.0.0.1:8080/cashier.html"
+echo "  收银台(构建): http://127.0.0.1:8080/cashier.html"
 echo "  手机同网访问: http://$(ipconfig getifaddr en0 2>/dev/null || echo '你的Mac局域网IP'):8080"
-echo "  开发日志:    docker logs -f mohe-admin-src"
+echo "  开发日志:    docker logs -f mohe-admin-src / mohe-cashier-src"
 echo "  后端日志:    docker logs -f mohe-app"

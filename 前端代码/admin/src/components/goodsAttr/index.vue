@@ -17,7 +17,7 @@
 				</FormItem>
 				</Col>
 				<Col v-bind="grid">
-        <FormItem v-if="isCard" label="商品类型：">
+        <FormItem v-if="isCard && !lockProductType" label="商品类型：">
 					<Select v-model="formValidate.product_type" clearable
 						@on-change="userSearchs">
 						<Option v-for="item in productTypeSelect" :value="item.id" :key="item.id">{{ item.label_name }}
@@ -121,7 +121,7 @@ export default {
     /**
        * 选择商品列表使用场景1：秒杀、2:砍价、3:拼团、4:积分、5:套餐、7:新人礼、8:抽奖、
 	   * 90:卡项关联商品、91：添加门店同步商品、92优惠活动参与商品、93优惠活动赠送商品、
-	   * 94：库存管理模块
+	   * 94：库存管理选品（仅产品）、95：院装耗材（仅产品）、96：院装项目（仅预约）
        */
     chooseType: {
       type: Number,
@@ -210,15 +210,30 @@ export default {
     },
     labelPosition() {
       return this.isMobile ? 'top' : 'right';
-    }
+    },
+    // 库存选品/院装耗材只锁产品；院装项目只锁预约
+    lockProductType() {
+      return [94, 95, 96].includes(Number(this.chooseType));
+    },
   },
-  created() {},
+  created() {
+    this.applyInventoryProductTypeLock();
+  },
   mounted() {
     this.goodsCategory();
     this.getList();
     this.getAllLabelApi();
   },
   methods: {
+    applyInventoryProductTypeLock() {
+      const ct = Number(this.chooseType);
+      if (ct === 94 || ct === 95) {
+        this.formValidate.product_type = 0;
+      } else if (ct === 96) {
+        this.formValidate.product_type = 6;
+      }
+      this.formValidate.choose_type = ct || this.formValidate.choose_type;
+    },
     getAllLabelApi() {
       allLabelApi().then(res => {
         this.labelSelect = res.data;
@@ -246,6 +261,7 @@ export default {
     // 列表
     getList() {
       this.loading = true;
+      this.applyInventoryProductTypeLock();
       if (this.goodsType) {
         this.formValidate.is_presale_product = 0;
         this.formValidate.is_vip_product = 0;
@@ -262,10 +278,11 @@ export default {
           const list = res.data.list;
           list.forEach(item => {
             item.attrValue.forEach(j => {
-              j.store_name = j.suk,
-              j.store_names = item.store_name,
-              j.cate_name = item.cate_name,
+              j.store_name = j.suk;
+              j.store_names = item.store_name;
+              j.cate_name = item.cate_name;
               j.store_label = item.store_label;
+              j.product_type = item.product_type;
             });
           });
           this.tableList = list;
@@ -316,10 +333,13 @@ export default {
         }
       });
       const goodsattr = [];
-      obj.forEach(function(item) {
-        if (item.hasOwnProperty('product_id')) {
-          goodsattr.push(item);
-        }
+      const ct = Number(this.chooseType);
+      obj.forEach((item) => {
+        if (!item.hasOwnProperty('product_id')) return;
+        // 库存选品/院装耗材：提交前再挡非产品
+        if ((ct === 94 || ct === 95) && item.product_type != null && Number(item.product_type) !== 0) return;
+        if (ct === 96 && item.product_type != null && Number(item.product_type) !== 6) return;
+        goodsattr.push(item);
       });
       if (goodsattr.length > 0) {
         this.$emit('getProductId', goodsattr);

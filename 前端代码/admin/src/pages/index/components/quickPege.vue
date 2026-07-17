@@ -115,6 +115,17 @@
 								</div>
 							</div>
 						</Col>
+						<Col v-bind="grid4">
+							<div class="item acea-row" @click="goPage(12)">
+								<div class="pictrue">
+									<img src="@/assets/images/home1.png"/>
+								</div>
+								<div class="text">
+									<div class="num">{{dataInfo.unHandleStockRequest || 0}}</div>
+									<div>总部仓请货待办</div>
+								</div>
+							</div>
+						</Col>
 					</Row>
 		        </Card>
 		    </Col>
@@ -495,6 +506,9 @@
 						break;
 					case 11:
 						this.$router.push({ path: this.roterPre + "/store/store/apply" });
+						break;
+					case 12:
+						this.$router.push({ path: this.roterPre + "/stock/request?status=1&supply_party_type=hq" });
 						break;
 					case 10:
 						this.$router.push({ path: this.roterPre + url });

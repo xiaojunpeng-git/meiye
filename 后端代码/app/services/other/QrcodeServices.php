@@ -342,8 +342,8 @@ class QrcodeServices extends BaseServices
 			if ($imageInfo['image_type'] == 1) $url = $siteUrl . $url;
 			return $url;
 		} catch (\Throwable $e) {
-            var_dump($e->getMessage());
-            die();
+			// 本地/无微信配置时拉小程序码会失败；不得 die 拖垮门店 info 等接口
+			\think\facade\Log::warning('getRoutineQrcodePath fail: ' . $e->getMessage());
 			return false;
 		}
 	}

@@ -9,6 +9,7 @@ use think\facade\App;
 
 /**
  * 门店端·项目耗材配方（院装）
+ * 口径：配方仅总部创建/编辑/启停；门店暂时不可见、不可修改。
  */
 class StoreProjectConsumableRecipe extends AuthController
 {
@@ -20,49 +21,26 @@ class StoreProjectConsumableRecipe extends AuthController
 
     public function index()
     {
-        $where = $this->request->getMore([
-            ['status', ''],
-            ['project_product_id', ''],
-        ]);
-        return $this->success($this->services->getList($where, (int)$this->storeId));
+        return $this->fail('项目配方由总部统一维护，门店暂不可查看');
     }
 
     public function info($id)
     {
-        if (!$id) {
-            return $this->fail('缺少参数');
-        }
-        return $this->success($this->services->detail((int)$id, (int)$this->storeId));
+        return $this->fail('项目配方由总部统一维护，门店暂不可查看');
     }
 
     public function save($id = 0)
     {
-        $data = $this->request->postMore([
-            ['project_product_id', 0],
-            ['project_unique', ''],
-            ['status', 1],
-            ['details', []],
-        ]);
-        $newId = $this->services->save((int)$id, $data, (int)$this->storeStaffId, (int)$this->storeId);
-        return $this->success('保存成功', ['id' => $newId]);
+        return $this->fail('项目配方由总部统一维护，门店暂不可修改');
     }
 
     public function setStatus($id)
     {
-        if (!$id) {
-            return $this->fail('缺少参数');
-        }
-        [$status] = $this->request->postMore([['status', 1]], true);
-        $this->services->setStatus((int)$id, (int)$status, (int)$this->storeId);
-        return $this->success('操作成功');
+        return $this->fail('项目配方由总部统一维护，门店暂不可修改');
     }
 
     public function delete($id)
     {
-        if (!$id) {
-            return $this->fail('缺少参数');
-        }
-        $this->services->delete((int)$id, (int)$this->storeId);
-        return $this->success('删除成功');
+        return $this->fail('项目配方由总部统一维护，门店暂不可修改');
     }
 }

@@ -15,6 +15,8 @@ export default {
   path: `${Setting.roterPre}/stock/manage`,
   name: 'stockManage',
   header: 'stockManage',
+  // 父菜单 path 无独立页面；落到空壳会白屏，默认进入库列表
+  redirect: `${Setting.roterPre}/inbound/manage`,
   component: BasicLayout,
   children: [
     {
@@ -93,6 +95,10 @@ export default {
 		    component: () => import('@/pages/stockManage/stockRequestManage/list')
     },
     {
+		    path: `${Setting.roterPre}/stock/request/add/:id?`,
+		    redirect: `${Setting.roterPre}/stock/request`
+    },
+    {
 		    path: `${Setting.roterPre}/stock/transfer`,
 		    name: `stockTransferManage`,
 		    meta: {
@@ -100,6 +106,10 @@ export default {
 		        title: '调拨管理'
 		    },
 		    component: () => import('@/pages/stockManage/stockTransferManage/list')
+    },
+    {
+		    path: `${Setting.roterPre}/stock/transfer/add/:id?`,
+		    redirect: `${Setting.roterPre}/stock/transfer`
     },
     {
 		    path: `${Setting.roterPre}/stock/recipe`,

@@ -201,18 +201,43 @@ class StoreProductStockInOrder extends AuthController
 
 	/**
 	 * 下载入库 Excel 模板（scene=initial_in|in）
+	 * 支持 GET 兼容与 POST（推荐）；product_ids 多选预填
 	 */
 	public function downloadTemplate(\app\services\product\inventory\StoreProductStockImportServices $importServices)
 	{
-		[$scene, $keyword] = $this->request->getMore([
+		$fields = [
 			['scene', 'in'],
 			['keyword', ''],
-		], true);
+			['product_ids', []],
+		];
+		[$scene, $keyword, $productIds] = $this->request->isPost()
+			? $this->request->postMore($fields, true)
+			: $this->request->getMore($fields, true);
 		if (!in_array($scene, ['initial_in', 'in'], true)) {
 			return $this->fail('模板场景不正确');
 		}
-		$result = $importServices->downloadTemplate($scene, 1, (int)$this->storeId, ['keyword' => $keyword]);
+		try {
+			$result = $importServices->downloadTemplate($scene, 1, (int)$this->storeId, [
+				'keyword' => $keyword,
+				'product_ids' => $productIds,
+			]);
+		} catch (\think\exception\ValidateException $e) {
+			return $this->fail($e->getMessage());
+		}
 		return $this->success($result);
+	}
+
+	/**
+	 * 流式下载已生成的入库 Excel 模板（鉴权接口，避免 /phpExcel 被 SPA 回退成 HTML）
+	 */
+	public function downloadTemplateFile(\app\services\product\inventory\StoreProductStockImportServices $importServices)
+	{
+		$key = (string)$this->request->param('key', '');
+		try {
+			return $importServices->streamTemplateFile($key, 1, (int)$this->storeId);
+		} catch (\think\exception\ValidateException $e) {
+			return $this->fail($e->getMessage());
+		}
 	}
 
 	/**

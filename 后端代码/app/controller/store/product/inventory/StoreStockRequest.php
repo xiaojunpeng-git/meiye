@@ -25,6 +25,7 @@ class StoreStockRequest extends AuthController
             ['status', ''],
             ['request_store_id', ''],
             ['supply_store_id', ''],
+            ['supply_party_type', ''],
             ['keyword', ''],
             ['order_sn', ''],
         ]);
@@ -43,7 +44,9 @@ class StoreStockRequest extends AuthController
     {
         $data = $this->request->postMore([
             ['request_store_id', 0],
+            ['request_party_type', 'store'],
             ['supply_store_id', 0],
+            ['supply_party_type', 'store'],
             ['request_date', ''],
             ['request_staff_id', 0],
             ['remark', ''],
@@ -92,20 +95,37 @@ class StoreStockRequest extends AuthController
 
     public function sharedSkus(StoreStockCrossSkuServices $cross)
     {
-        [$storeA, $storeB, $keyword, $page, $limit] = $this->request->getMore([
+        [$storeA, $storeB, $keyword, $page, $limit, $partyA, $partyB] = $this->request->getMore([
             ['store_a', 0],
             ['store_b', 0],
             ['keyword', ''],
             ['page', 1],
             ['limit', 20],
+            ['party_a', 'store'],
+            ['party_b', 'store'],
         ], true);
-        $storeA = (int)$storeA ?: (int)$this->storeId;
+        $partyA = strtolower(trim((string)$partyA)) ?: 'store';
+        $partyB = strtolower(trim((string)$partyB)) ?: 'store';
+        $storeA = (int)$storeA;
         $storeB = (int)$storeB;
-        // 门店端必须有一方是自己
-        if ($storeA !== (int)$this->storeId && $storeB !== (int)$this->storeId) {
-            return $this->fail('只能查询与本店相关的双店商品');
+        if ($partyA === 'store' && $storeA <= 0) {
+            $storeA = (int)$this->storeId;
         }
-        return $this->success($cross->listSharedSkus($storeA, $storeB, (string)$keyword, (int)$page, (int)$limit));
+        // 门店端：store 侧必须含本店；hq 侧 store=0
+        $self = (int)$this->storeId;
+        $touchSelf = ($partyA === 'store' && $storeA === $self) || ($partyB === 'store' && $storeB === $self);
+        if (!$touchSelf) {
+            return $this->fail('只能查询与本店相关的同源商品');
+        }
+        return $this->success($cross->listSharedSkus(
+            $storeA,
+            $storeB,
+            (string)$keyword,
+            (int)$page,
+            (int)$limit,
+            $partyA,
+            $partyB
+        ));
     }
 
     public function pendingBadge()

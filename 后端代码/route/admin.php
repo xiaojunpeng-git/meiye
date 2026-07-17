@@ -2026,6 +2026,8 @@ Route::group('adminapi', function () {
 			Route::get('in/order/remark/form/:id', 'v1.product.inventory.StoreProductStockInOrder/remarkForm')->option(['real_name' => '获取入库单备注表单']);
 			Route::post('in/order/remark/:id', 'v1.product.inventory.StoreProductStockInOrder/remark')->option(['real_name' => '保存入库单备注']);
 			Route::get('in/order/template', 'v1.product.inventory.StoreProductStockInOrder/downloadTemplate')->option(['real_name' => '下载入库导入模板']);
+			Route::post('in/order/template', 'v1.product.inventory.StoreProductStockInOrder/downloadTemplate')->option(['real_name' => '下载入库导入模板']);
+			Route::get('in/order/template/file', 'v1.product.inventory.StoreProductStockInOrder/downloadTemplateFile')->option(['real_name' => '流式下载入库导入模板']);
 			Route::post('in/order/import', 'v1.product.inventory.StoreProductStockInOrder/import')->option(['real_name' => '导入入库Excel']);
 
 			//出库
@@ -2035,6 +2037,8 @@ Route::group('adminapi', function () {
 			Route::get('out/order/remark/form/:id', 'v1.product.inventory.StoreProductStockOutOrder/remarkForm')->option(['real_name' => '获取出库单备注表单']);
 			Route::post('out/order/remark/:id', 'v1.product.inventory.StoreProductStockOutOrder/remark')->option(['real_name' => '保存出库单备注']);
 			Route::get('out/order/template', 'v1.product.inventory.StoreProductStockOutOrder/downloadTemplate')->option(['real_name' => '下载出库导入模板']);
+			Route::post('out/order/template', 'v1.product.inventory.StoreProductStockOutOrder/downloadTemplate')->option(['real_name' => '下载出库导入模板']);
+			Route::get('out/order/template/file', 'v1.product.inventory.StoreProductStockOutOrder/downloadTemplateFile')->option(['real_name' => '流式下载出库导入模板']);
 			Route::post('out/order/import', 'v1.product.inventory.StoreProductStockOutOrder/import')->option(['real_name' => '导入出库Excel']);
 
 			//库存盘点

@@ -11,12 +11,10 @@
 namespace app\controller\admin\v1\product\inventory;
 
 use app\controller\admin\AuthController;
-use app\services\order\StoreOrderRefundServices;
 use app\services\product\inventory\StoreProductStockDetailServices;
 use app\services\product\inventory\StoreProductStockOrderServices;
 use app\services\product\product\StoreProductServices;
 use app\services\product\sku\StoreProductAttrValueServices;
-use app\services\product\sku\StoreProductRuleServices;
 use think\facade\App;
 
 /**
@@ -26,6 +24,7 @@ use think\facade\App;
  */
 class StoreProductStockDetail extends AuthController
 {
+	use AdminInventoryScope;
 
     public function __construct(App $app, StoreProductStockDetailServices $service)
     {
@@ -49,7 +48,13 @@ class StoreProductStockDetail extends AuthController
 			['field_key', ''],//商品名称:store_name 商品ID：product_id 商品编码：code 商品条形码：bar_code
 			['keyword', ''],//关键字搜索
 		]);
-		return $this->success($this->services->getStockDetailList($where));
+		$scope = $this->inventoryScope();
+		return $this->success($this->services->getStockDetailList(
+			$where,
+			(int)$scope['type'],
+			$scope['relation_id'],
+			(bool)$scope['all_stores']
+		));
 	}
 
 	/**
@@ -62,9 +67,18 @@ class StoreProductStockDetail extends AuthController
 			['keyword', ''],//商品关键字
 			['stock_range', ''],//库存区间
 			['stock_time', '', '', 'time'],//业务时间
+			['hide_zero', 1],//1库存0不展示 0全部
+			['salon_stock_enabled', ''],//院装产品：''全部 1是 0否
 		]);
 		$where['product_type'] = [0, 3, 5];
-		return $this->success($this->services->getProductAttrStatistics($where));
+		$scope = $this->inventoryScope();
+		return $this->success($this->services->getProductAttrStatistics(
+			$where,
+			(int)$scope['type'],
+			$scope['relation_id'],
+			(bool)$scope['all_stores'],
+			0
+		));
 	}
 
 	/**
@@ -77,9 +91,17 @@ class StoreProductStockDetail extends AuthController
 		$where = $this->request->getMore([
 			['keyword', ''],//商品关键字
 			['stock_range', ''],//库存区间
+			['hide_zero', 1],//1库存0不展示 0全部
+			['salon_stock_enabled', ''],//院装产品：''全部 1是 0否
 		]);
 		$where['product_type'] = [0, 3, 5];
-		return $this->success($attrValueServices->getAttrValueList($where));
+		$scope = $this->inventoryScope();
+		return $this->success($attrValueServices->getAttrValueList(
+			$where,
+			(int)$scope['type'],
+			$scope['relation_id'],
+			(bool)$scope['all_stores']
+		));
 	}
 
 	/**
@@ -128,7 +150,14 @@ class StoreProductStockDetail extends AuthController
 			['add_time', '', '', 'time'],//创建时间
 			['unique', ''],//商品sku
 		]);
-		return $this->success($stockOrderServices->getStockOrderList($where));
+		$scope = $this->inventoryScope();
+		return $this->success($stockOrderServices->getStockOrderList(
+			$where,
+			(int)$scope['type'],
+			$scope['relation_id'],
+			[],
+			(bool)$scope['all_stores']
+		));
 	}
 
 	/**
@@ -144,7 +173,14 @@ class StoreProductStockDetail extends AuthController
 		]);
 		$stockType = (int)$where['stock_type'];
 		unset($where['stock_type']);
-		return $this->success($this->services->getStockOrderOverallStatistics($stockType, $where));
+		$scope = $this->inventoryScope();
+		return $this->success($this->services->getStockOrderOverallStatistics(
+			$stockType,
+			$where,
+			(int)$scope['type'],
+			$scope['relation_id'],
+			(bool)$scope['all_stores']
+		));
 	}
 
 
@@ -164,7 +200,14 @@ class StoreProductStockDetail extends AuthController
 		]);
 		$stockType = (int)$where['stock_type'];
 		unset($where['stock_type']);
-		return $this->success($this->services->getStockStatisticsList($stockType, $where));
+		$scope = $this->inventoryScope();
+		return $this->success($this->services->getStockStatisticsList(
+			$stockType,
+			$where,
+			(int)$scope['type'],
+			$scope['relation_id'],
+			(bool)$scope['all_stores']
+		));
 	}
 
 

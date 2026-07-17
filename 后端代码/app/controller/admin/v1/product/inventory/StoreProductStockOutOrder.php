@@ -22,6 +22,7 @@ use think\facade\App;
  */
 class StoreProductStockOutOrder extends AuthController
 {
+	use AdminInventoryScope;
 
     public function __construct(App $app, StoreProductStockOrderServices $service)
     {
@@ -57,7 +58,14 @@ class StoreProductStockOutOrder extends AuthController
 		]);
 		//出库
 		$where['stock_type'] = 2;
-		return $this->success($this->services->getStockOrderList($where));
+		$scope = $this->inventoryScope();
+		return $this->success($this->services->getStockOrderList(
+			$where,
+			(int)$scope['type'],
+			$scope['relation_id'],
+			[],
+			(bool)$scope['all_stores']
+		));
 	}
 
 	/**
@@ -70,6 +78,7 @@ class StoreProductStockOutOrder extends AuthController
 	 */
 	public function save(StoreProductAttrValueServices $attrValueServices)
 	{
+		$this->assertInventoryHqWrite();
 		$data = $this->request->postMore([
 			['order_type', ''],//出库类型
 			['refund_order_id', ''],//退款出库关联退款表ID
@@ -145,14 +154,41 @@ class StoreProductStockOutOrder extends AuthController
 
 	/**
 	 * 下载出库 Excel 模板
+	 * 支持 GET 兼容与 POST（推荐）；product_ids 多选预填
 	 */
 	public function downloadTemplate(\app\services\product\inventory\StoreProductStockImportServices $importServices)
 	{
-		[$keyword] = $this->request->getMore([
+		$this->assertInventoryHqWrite();
+		$fields = [
 			['keyword', ''],
-		], true);
-		$result = $importServices->downloadTemplate('out', 0, 0, ['keyword' => $keyword]);
+			['product_ids', []],
+		];
+		[$keyword, $productIds] = $this->request->isPost()
+			? $this->request->postMore($fields, true)
+			: $this->request->getMore($fields, true);
+		try {
+			$result = $importServices->downloadTemplate('out', 0, 0, [
+				'keyword' => $keyword,
+				'product_ids' => $productIds,
+			]);
+		} catch (\think\exception\ValidateException $e) {
+			return $this->fail($e->getMessage());
+		}
 		return $this->success($result);
+	}
+
+	/**
+	 * 流式下载已生成的出库 Excel 模板（鉴权接口，避免 /phpExcel 被 SPA 回退成 HTML）
+	 */
+	public function downloadTemplateFile(\app\services\product\inventory\StoreProductStockImportServices $importServices)
+	{
+		$this->assertInventoryHqWrite();
+		$key = (string)$this->request->param('key', '');
+		try {
+			return $importServices->streamTemplateFile($key, 0, 0);
+		} catch (\think\exception\ValidateException $e) {
+			return $this->fail($e->getMessage());
+		}
 	}
 
 	/**
@@ -160,6 +196,7 @@ class StoreProductStockOutOrder extends AuthController
 	 */
 	public function import(\app\services\product\inventory\StoreProductStockImportServices $importServices)
 	{
+		$this->assertInventoryHqWrite();
 		[$file, $realName] = $this->request->postMore([
 			['file', ''],
 			['real_name', ''],

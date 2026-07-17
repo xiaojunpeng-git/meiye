@@ -885,15 +885,116 @@ class StoreProductAttrValueServices extends BaseServices
 	 * @param int $relation_id
 	 * @return array
 	 */
-	public function getAttrValueList(array $where = [], int $type = 0, int $relation_id = 0)
+	public function getAttrValueList(array $where = [], int $type = 0, $relation_id = 0, bool $allStores = false)
 	{
 		$where['type'] = $type;
-		$where['relation_id'] = $relation_id;
+		if ($allStores) {
+			$where['all_stores'] = 1;
+			unset($where['relation_id']);
+		} else {
+			$where['relation_id'] = $relation_id;
+			unset($where['all_stores']);
+		}
 		[$page, $limit] = $this->getPageValue();
+		// 全部门店汇总：按平台 pid+suk 聚合，显示覆盖门店数（禁止逐店散行冒充汇总）
+		if ($allStores) {
+			return $this->getAttrValueListAllStoresAggregated($where, $page, $limit);
+		}
 		$query = $this->dao->joinAttrSearch($where);
 		$count = $query->count();
-		$list = $query->field('a.*,p.store_name')->page($page, $limit)->order('p.sort desc,p.id desc')->select()->toArray();
+		$list = $query->field('a.*,p.store_name,p.type as owner_type,p.relation_id as owner_relation_id,IFNULL(p.salon_stock_enabled,0) as salon_stock_enabled')
+			->page($page, $limit)
+			->order('p.sort desc,p.id desc')
+			->select()
+			->toArray();
+		$storeNames = [];
+		if ($list && (int)$type === 1) {
+			$storeIds = array_values(array_unique(array_filter(array_map('intval', array_column($list, 'owner_relation_id')))));
+			if ($storeIds) {
+				$storeNames = \think\facade\Db::name('system_store')->whereIn('id', $storeIds)->column('name', 'id');
+			}
+		}
+		foreach ($list as &$row) {
+			if ((int)$type === 1) {
+				$rid = (int)($row['owner_relation_id'] ?? 0);
+				$row['store_id'] = $rid;
+				$row['store_name_label'] = $storeNames[$rid] ?? ($rid > 0 ? ('门店#' . $rid) : '');
+				$row['store_count'] = 1;
+			}
+			$this->decorateInventoryAttrRow($row);
+		}
+		unset($row);
 		return compact('list', 'count');
+	}
+
+	/**
+	 * 全部门店汇总：按平台商品 pid + 规格 suk 聚合库存，附覆盖门店数
+	 */
+	protected function getAttrValueListAllStoresAggregated(array $where, int $page, int $limit): array
+	{
+		$platformPid = 'IF(p.pid > 0, p.pid, p.id)';
+		$base = $this->dao->joinAttrSearch($where);
+		$countSql = (clone $base)->field($platformPid . ' AS platform_pid, a.suk')->group($platformPid . ', a.suk')->buildSql();
+		$count = (int)\think\facade\Db::table([$countSql => 't'])->count();
+		$list = $base->field([
+				$platformPid . ' AS product_id',
+				$platformPid . ' AS platform_product_id',
+				'a.suk',
+				'MIN(a.bar_code) AS bar_code',
+				'MIN(a.code) AS code',
+				'MIN(a.image) AS image',
+				'MIN(p.store_name) AS store_name',
+				'MIN(a.stock_unit) AS stock_unit',
+				'MAX(IFNULL(p.salon_stock_enabled,0)) AS salon_stock_enabled',
+				'SUM(a.stock) AS stock',
+				'SUM(a.defective_stock) AS defective_stock',
+				'COUNT(DISTINCT p.relation_id) AS store_count',
+				'COUNT(DISTINCT IFNULL(p.salon_stock_enabled,0)) AS salon_flag_variants',
+			])
+			->group($platformPid . ', a.suk')
+			->when($page != 0 && $limit != 0, function ($query) use ($page, $limit) {
+				$query->page($page, $limit);
+			})
+			->order('product_id desc')
+			->select()
+			->toArray();
+		foreach ($list as &$row) {
+			$row['product_id'] = (int)($row['product_id'] ?? 0);
+			$row['platform_product_id'] = (int)($row['platform_product_id'] ?? 0);
+			$row['store_count'] = (int)($row['store_count'] ?? 0);
+			$row['unique'] = '';
+			$row['store_id'] = 0;
+			$row['store_name_label'] = '全部门店汇总';
+			$row['aggregated'] = 1;
+			if ((int)($row['salon_flag_variants'] ?? 0) > 1) {
+				\think\facade\Log::error([
+					'msg' => 'inventory attr aggregate salon_stock_enabled inconsistent',
+					'platform_product_id' => $row['platform_product_id'],
+					'suk' => $row['suk'] ?? '',
+				]);
+			}
+			$this->decorateInventoryAttrRow($row);
+		}
+		unset($row);
+		return compact('list', 'count');
+	}
+
+	/**
+	 * 库存查询列表行：单位、院装标识、数量展示格式
+	 */
+	protected function decorateInventoryAttrRow(array &$row): void
+	{
+		$unit = trim((string)($row['stock_unit'] ?? ''));
+		$row['stock_unit'] = $unit;
+		$row['display_unit'] = $unit; // 空由前端显示为 -
+		$isSalon = (int)($row['salon_stock_enabled'] ?? 0) === 1;
+		$row['is_salon_product'] = $isSalon;
+		$row['stock'] = $isSalon
+			? bcadd((string)($row['stock'] ?? 0), '0', 2)
+			: (string)(int)bcmul(bcadd((string)($row['stock'] ?? 0), '0', 4), '1', 0);
+		$row['defective_stock'] = $isSalon
+			? bcadd((string)($row['defective_stock'] ?? 0), '0', 2)
+			: (string)(int)bcmul(bcadd((string)($row['defective_stock'] ?? 0), '0', 4), '1', 0);
 	}
 
 }

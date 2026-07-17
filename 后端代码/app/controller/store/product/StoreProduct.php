@@ -164,12 +164,24 @@ class StoreProduct extends AuthController
             ['brand_id', ''],
             ['is_card', 0],//是否卡项获取关联商品
             ['product_type', ''],//商品类型0:普通商品，1：卡密，2：优惠券，3：虚拟商品,4：次卡商品,5:卡项商品6：预约商品
-            ['choose_type', ''],//选择商品列表使用场景1：秒杀、2:砍价、3:拼团、4:积分、5:套餐、7:新人礼、8:抽奖、 90:卡项关联商品、91：添加门店同步商品、92优惠活动参与商品、93优惠活动赠送商品
+            ['choose_type', ''],//选择商品列表使用场景1：秒杀、2:砍价、3:拼团、4:积分、5:套餐、7:新人礼、8:抽奖、 90:卡项关联商品、91：添加门店同步商品、92优惠活动参与商品、93优惠活动赠送商品、94:库存选品
         ]);
-        $where['is_show'] = 1;
         $where['is_del'] = 0;
         $where['type'] = 1;
         $where['relation_id'] = $this->storeId;
+        // 库存相关选品：强制商品类型，忽略客户端篡改
+        $chooseType = (int)($where['choose_type'] ?? 0);
+        if (in_array($chooseType, [94, 95], true)) {
+            $where['product_type'] = 0;
+        } elseif ($chooseType === 96) {
+            $where['product_type'] = 6;
+        }
+        // 94=库存选品：需可选上架+仓库中商品，取消默认仅上架（status=1 / is_show=1）；范围由 Dao case 94 收口
+        if ($chooseType === 94) {
+            unset($where['status'], $where['is_show']);
+        } else {
+            $where['is_show'] = 1;
+        }
         /** @var StoreProductCategoryServices $storeCategoryServices */
         $storeCategoryServices = app()->make(StoreProductCategoryServices::class);
         if ($where['cate_id'] !== '') {
@@ -313,6 +325,7 @@ class StoreProduct extends AuthController
             ['is_inventory', 1],//是否参与库存管理（仅产品类型，服务层按 product_type 强制）
             ['allow_negative_stock', 1],//是否允许良品负库存（仅产品类型）
             ['salon_stock_enabled', 0],//是否可作为院装耗材（仅产品类型且参与库存）
+            ['create_request_key', ''],//新建/复制请求幂等令牌
         ]);
         //门店商品编辑 需要再次审核
         $storeId = (int)$this->storeId;
@@ -357,9 +370,11 @@ class StoreProduct extends AuthController
         }
 
 
-        $this->services->saveData((int)$id, $data, 1, (int)$this->storeId, (int)$this->storeStaffId);
-
-        return $this->success($id ? '保存商品信息成功' : '添加商品成功!');
+        $result = $this->services->saveData((int)$id, $data, 1, (int)$this->storeId, (int)$this->storeStaffId);
+        if (is_array($result) && !empty($result['duplicated'])) {
+            return $this->success('商品已创建，请勿重复提交', ['product_id' => (int)$result['product_id'], 'duplicated' => 1]);
+        }
+        return $this->success($id ? '保存商品信息成功' : '添加商品成功!', is_array($result) ? ['product_id' => (int)$result['product_id']] : []);
     }
 
     /**

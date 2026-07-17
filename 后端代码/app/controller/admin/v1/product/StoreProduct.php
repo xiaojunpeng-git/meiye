@@ -680,6 +680,7 @@ class StoreProduct extends AuthController
             ['is_inventory', 1],//是否参与库存管理（仅产品类型，服务层按 product_type 强制）
             ['allow_negative_stock', 1],//是否允许良品负库存（仅产品类型）
             ['salon_stock_enabled', 0],//是否可作为院装耗材（仅产品类型且参与库存）
+            ['create_request_key', ''],//新建/复制请求幂等令牌
         ]);
 		if ($data['applicable_type'] == 1) {
 			$data['applicable_store_id'] = [];
@@ -688,9 +689,11 @@ class StoreProduct extends AuthController
 				return $this->fail('请选择要适用门店');
 			}
 		}
-        $this->service->saveData((int)$id, $data, 0, 0, (int)$this->adminId);
-
-        return $this->success($id ? '保存商品信息成功' : '添加商品成功!');
+        $result = $this->service->saveData((int)$id, $data, 0, 0, (int)$this->adminId);
+        if (is_array($result) && !empty($result['duplicated'])) {
+            return $this->success('商品已创建，请勿重复提交', ['product_id' => (int)$result['product_id'], 'duplicated' => 1]);
+        }
+        return $this->success($id ? '保存商品信息成功' : '添加商品成功!', is_array($result) ? ['product_id' => (int)$result['product_id']] : []);
     }
 
     /**
@@ -772,7 +775,7 @@ class StoreProduct extends AuthController
 			['is_community', 0],//社区关联商品 过滤下架等
 			['is_card', 0],//是否卡项获取关联商品
             ['product_type', ''],//商品类型0:普通商品，1：卡密，2：优惠券，3：虚拟商品,4：次卡商品,5:卡项商品6：预约商品
-			['choose_type', ''],//选择商品列表使用场景1：秒杀、2:砍价、3:拼团、4:积分、5:套餐、7:新人礼、8:抽奖、 90:卡项关联商品、91：添加门店同步商品、92优惠活动参与商品、93优惠活动赠送商品
+			['choose_type', ''],//选择商品列表使用场景1：秒杀、2:砍价、3:拼团、4:积分、5:套餐、7:新人礼、8:抽奖、 90:卡项关联商品、91：添加门店同步商品、92优惠活动参与商品、93优惠活动赠送商品、94:库存选品
         ]);
 //        $where['is_show'] = 1;
         $where['is_del'] = 0;
@@ -789,12 +792,28 @@ class StoreProduct extends AuthController
         if($where['is_community']) {
             $where['is_show'] = 1;
         }
-		$where['type'] = [0, 2];
-		if ($where['is_supplier'] == 1) {
-			$where['type'] = [2];
-		} elseif($where['is_supplier'] == 0) {
-			$where['type'] = [0];
-		}
+        // 库存相关选品：强制商品类型，忽略客户端篡改
+        $chooseType = (int)($where['choose_type'] ?? 0);
+        if (in_array($chooseType, [94, 95], true)) {
+            // 94=库存选品 / 95=院装耗材：仅产品
+            $where['product_type'] = 0;
+        } elseif ($chooseType === 96) {
+            // 96=院装配方项目：仅预约/项目
+            $where['product_type'] = 6;
+        }
+        // 94=库存选品：仅平台商品，排除供应商；取消 type=[0,2]；忽略客户端 status 以免只查上架
+        if ($chooseType === 94) {
+            unset($where['status'], $where['is_show']);
+            $where['type'] = 0;
+            $where['relation_id'] = 0;
+        } else {
+            $where['type'] = [0, 2];
+            if ($where['is_supplier'] == 1) {
+                $where['type'] = [2];
+            } elseif ($where['is_supplier'] == 0) {
+                $where['type'] = [0];
+            }
+        }
 		unset($where['cate_id'], $where['is_supplier']);
         $list = $this->service->searchList($where, true);
         return $this->success($list);

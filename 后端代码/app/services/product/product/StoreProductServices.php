@@ -982,6 +982,15 @@ class StoreProductServices extends BaseServices
         $detail = $data['spec_type'] == 0 ? [$data['attr']] : $data['attrs'];
         $attr = $data['items'];
         $coupon_ids = $data['coupon_ids'];
+        $is_copy = (int)($data['is_copy'] ?? 0);
+        $createRequestKey = trim((string)($data['create_request_key'] ?? ''));
+        unset($data['create_request_key']);
+        // 非项目强制清零增项服务时长
+        if ((int)($data['product_type'] ?? 0) !== 6) {
+            $data['addon_service_duration'] = 0;
+        } else {
+            $data['addon_service_duration'] = max(0, (int)($data['addon_service_duration'] ?? 0));
+        }
         //关联补充信息
         $relationData = [];
         $relationData['cate_id'] = $data['cate_id'] ?? [];
@@ -1201,11 +1210,63 @@ class StoreProductServices extends BaseServices
         $data['image'] = $data['slider_image'][0];//封面图
         $slider_image = $data['slider_image'];
         $data['slider_image'] = json_encode($data['slider_image']);
-        $data['stock'] = array_sum(array_column($detail, 'stock'));
-        $stock = min(array_column($detail, 'stock'));
+
+        /** @var \app\services\product\inventory\StockQtyValidateServices $qtyValidate */
+        $qtyValidate = app()->make(\app\services\product\inventory\StockQtyValidateServices::class);
+        $resolvedIsInventoryEarly = ((int)$data['product_type'] === 0) ? (int)($data['is_inventory'] ?? 1) : 0;
+        $salonEnabledEarly = ($resolvedIsInventoryEarly === 1) ? (int)($data['salon_stock_enabled'] ?? 0) : 0;
+        $decimalScale = $qtyValidate->resolveScale((int)$data['product_type'], $resolvedIsInventoryEarly, $salonEnabledEarly);
+        $unitName = mb_substr(trim((string)($data['unit_name'] ?? '件')) ?: '件', 0, 32);
+        $initialSkuQty = [];
+        // 产品：强制 sale_unit/decimal_scale；真实新建提取初始库存后 SKU 先写 0；复制强制库存 0
+        if ((int)$data['product_type'] === 0) {
+            foreach ($detail as $idx => $row) {
+                $stockUnit = trim((string)($row['stock_unit'] ?? ''));
+                $detail[$idx]['stock_unit'] = mb_substr($stockUnit !== '' ? $stockUnit : $unitName, 0, 32);
+                $detail[$idx]['sale_unit'] = $unitName;
+                $detail[$idx]['decimal_scale'] = $decimalScale;
+                if ($salonEnabledEarly === 1) {
+                    $uc = $row['unit_convert'] ?? 1;
+                    if ($uc === '' || $uc === null || !is_numeric($uc)
+                        || (float)$uc != (int)$uc
+                        || (int)$uc < 1 || (int)$uc > 99) {
+                        throw new AdminException('销售单位换算数必须为1～99的整数');
+                    }
+                    $detail[$idx]['unit_convert'] = (int)$uc;
+                } elseif (!isset($row['unit_convert']) || $row['unit_convert'] === '' || !is_numeric($row['unit_convert']) || (float)$row['unit_convert'] <= 0) {
+                    $detail[$idx]['unit_convert'] = 1;
+                } else {
+                    // 非院装：历史换算数只读保留；新填非法时回落为 1，不强制 1～99 阻断
+                    $uc = (float)$row['unit_convert'];
+                    $detail[$idx]['unit_convert'] = ($uc == (int)$uc && (int)$uc >= 1 && (int)$uc <= 99) ? (int)$uc : $uc;
+                }
+                $goodsLabel = (string)($data['store_name'] ?? '') . (isset($row['suk']) && $row['suk'] !== '' ? ('/' . $row['suk']) : '');
+                if (!$id && $is_copy === 0 && $resolvedIsInventoryEarly === 1) {
+                    $qty = $qtyValidate->assertQty($row['stock'] ?? 0, $decimalScale, $goodsLabel);
+                    if (bccomp($qty, '0', 4) > 0) {
+                        $initialSkuQty[$idx] = $qty;
+                    }
+                }
+                if (!$id) {
+                    // 新建/复制：SKU 余额一律先 0，初始库存走入库单
+                    $detail[$idx]['stock'] = 0;
+                    $detail[$idx]['sum_stock'] = 0;
+                    $detail[$idx]['defective_stock'] = 0;
+                    $detail[$idx]['old_stock'] = 0;
+                    unset($detail[$idx]['inventory'], $detail[$idx]['pm']);
+                }
+            }
+            if ($data['spec_type'] == 0) {
+                $data['attr'] = $detail[0];
+            } else {
+                $data['attrs'] = $detail;
+            }
+        }
+
+        $data['stock'] = array_sum(array_map('floatval', array_column($detail, 'stock')));
+        $stock = $detail ? min(array_map('floatval', array_column($detail, 'stock'))) : 0;
         //是否售罄
         $data['is_sold'] = $stock ? 0 : 1;
-        $is_copy = $data['is_copy'];
         unset($data['supplier_id'], $data['is_copy'], $data['description'], $data['coupon_ids'], $data['items'], $data['attrs'], $data['recommend'], $data['is_sync_stock'], $data['is_sync_show']);
         /** @var StoreDescriptionServices $storeDescriptionServices */
         $storeDescriptionServices = app()->make(StoreDescriptionServices::class);
@@ -1217,13 +1278,22 @@ class StoreProductServices extends BaseServices
         $storeDiscountProduct = app()->make(StoreDiscountsProductsServices::class);
         /** @var StoreCardRelatedServices $relatedService */
         $relatedService = app()->make(StoreCardRelatedServices::class);
+        /** @var ProductCreateIdempotentServices $createIdempotentServices */
+        $createIdempotentServices = app()->make(ProductCreateIdempotentServices::class);
 
         //同一链接不多次保存
         if (!$id && $data['soure_link']) {
             $productInfo = $this->dao->getOne(['soure_link' => $data['soure_link'], 'is_del' => 0], 'id');
             if ($productInfo) $id = (int)$productInfo['id'];
         }
-        [$skuList, $id, $is_new, $data] = $this->transaction(function () use ($id, $data, $description, $storeDescriptionServices, $storeProductAttrServices, $storeProductCouponServices, $detail, $attr, $coupon_ids, $storeDiscountProduct, $slider_image, $relatedService, $adminId) {
+        // 创建请求幂等：已成功创建过则直接返回
+        if (!$id && $createRequestKey !== '') {
+            $exist = $createIdempotentServices->findExisting((int)$data['type'], (int)$data['relation_id'], $createRequestKey);
+            if ($exist) {
+                return ['product_id' => (int)$exist['product_id'], 'duplicated' => true];
+            }
+        }
+        [$skuList, $id, $is_new, $data] = $this->transaction(function () use ($id, $data, $description, $storeDescriptionServices, $storeProductAttrServices, $storeProductCouponServices, $detail, $attr, $coupon_ids, $storeDiscountProduct, $slider_image, $relatedService, $adminId, $is_copy, $initialSkuQty, $createRequestKey, $createIdempotentServices, $resolvedIsInventoryEarly) {
 
             if ($id) {
                 //上下架处理
@@ -1311,8 +1381,42 @@ class StoreProductServices extends BaseServices
             if (in_array($data['product_type'], [0, 3, 5]) && isset($skuList['stockData'])) {
                 // 库存改造：商品资料保存不再因库存差额生成出入库单；库存仅由库存业务变更。
             }
+            // 真实新建产品：SKU 已按 0 落库后，同一事务生成一张 order_type=6 初始入库单
+            if ($is_new === 0 && (int)$is_copy === 0 && (int)$data['product_type'] === 0 && $resolvedIsInventoryEarly === 1 && $initialSkuQty) {
+                $inProductDetail = [];
+                $skuRows = array_values(is_array($valueGroup) ? $valueGroup : $valueGroup->toArray());
+                foreach ($skuRows as $idx => $skuRow) {
+                    if (!isset($initialSkuQty[$idx])) {
+                        continue;
+                    }
+                    $inProductDetail[] = [
+                        'product_id' => $id,
+                        'unique' => $skuRow['unique'] ?? '',
+                        'stock' => $initialSkuQty[$idx],
+                        'defective_stock' => 0,
+                    ];
+                }
+                if ($inProductDetail) {
+                    /** @var \app\services\product\inventory\StoreProductStockOrderServices $stockOrderServices */
+                    $stockOrderServices = app()->make(\app\services\product\inventory\StoreProductStockOrderServices::class);
+                    $stockOrderServices->saveData(1, [
+                        'order_type' => 6,
+                        'stock_time' => time(),
+                        'remark' => '商品创建初始库存',
+                        'import_key' => 'product_init:' . (int)$data['type'] . ':' . (int)$data['relation_id'] . ':' . $id,
+                        'in_product_detail' => $inProductDetail,
+                    ], (int)$data['type'], (int)$data['relation_id'], (int)$adminId, true, false);
+                    // 入账后重读 SKU 汇总
+                    $valueGroup = app()->make(\app\services\product\sku\StoreProductAttrValueServices::class)
+                        ->getSkuArray(['product_id' => $id, 'type' => 0], '*', 'unique');
+                    $valueGroup = array_values($valueGroup ?: []);
+                }
+            }
             //修改商品库存汇总：新建保持 SKU 写入值；编辑时由 attr 保存逻辑保留原库存后汇总
             $attrStockArr = array_column($valueGroup, 'stock');
+            if (!$attrStockArr) {
+                $attrStockArr = [0];
+            }
             // 仅产品(product_type=0)参与库存；院装耗材开关须同时满足 product_type=0 && is_inventory=1，否则强制置 0
             $resolvedIsInventory = ((int)$data['product_type'] === 0) ? (int)($data['is_inventory'] ?? 1) : 0;
             $this->dao->update($id, [
@@ -1322,14 +1426,17 @@ class StoreProductServices extends BaseServices
                 'allow_negative_stock' => ((int)$data['product_type'] === 0) ? (int)($data['allow_negative_stock'] ?? 1) : 1,
                 'salon_stock_enabled' => ($resolvedIsInventory === 1) ? (int)($data['salon_stock_enabled'] ?? 0) : 0,
             ]);
+            if ($is_new === 0 && $createRequestKey !== '') {
+                $createIdempotentServices->save((int)$data['type'], (int)$data['relation_id'], $createRequestKey, (int)$id);
+            }
             return [$skuList, $id, $is_new, $data];
         });
-        //事件
+        //事件（商品+初始入库全部提交成功后）
         event('product.create', [$id, $data, $skuList, $is_new, $slider_image, $description, $is_copy, $relationData]);
         //清空缓存
         $this->dao->cacheTag()->clear();
         $storeProductAttrServices->cacheTag()->clear();
-        return true;
+        return ['product_id' => (int)$id, 'duplicated' => false];
     }
 
     /**

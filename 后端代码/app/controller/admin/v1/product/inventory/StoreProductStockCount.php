@@ -23,6 +23,7 @@ use think\facade\App;
  */
 class StoreProductStockCount extends AuthController
 {
+	use AdminInventoryScope;
 
     public function __construct(App $app, StoreProductStockCountServices $service)
     {
@@ -55,7 +56,13 @@ class StoreProductStockCount extends AuthController
 			['status', ''],//0
 			['add_time', '', '', 'time'],//创建时间
         ]);
-        return $this->success($this->services->getStockCountList($where));
+		$scope = $this->inventoryScope();
+        return $this->success($this->services->getStockCountList(
+			$where,
+			(int)$scope['type'],
+			$scope['relation_id'],
+			(bool)$scope['all_stores']
+		));
     }
 
 
@@ -69,6 +76,7 @@ class StoreProductStockCount extends AuthController
 	 */
     public function save($id)
     {
+		$this->assertInventoryHqWrite();
         $data = $this->request->postMore([
 			['status', 1],//状态:0 草稿,1完成
 			['remark', ''],//入库备注

@@ -24,16 +24,17 @@
 					</FormItem>
 					<Row :gutter="16">
 						<Col :xs="24" :sm="12">
-							<FormItem label="调出门店：" prop="from_store_id">
+							<FormItem label="调出方：" prop="from_select">
 								<Select
-									v-model="formValidate.from_store_id"
-									placeholder="请选择调出门店"
+									v-model="formValidate.from_select"
+									placeholder="请选择调出门店或总部仓"
 									filterable
 									transfer
 									:disabled="requestId > 0 || editId > 0"
-									@on-change="onStoreChange"
+									@on-change="onFromSelectChange"
 								>
-									<Option v-for="item in storeList" :value="item.id" :key="item.id">{{ item.name }}</Option>
+									<Option value="hq" key="hq">总部仓</Option>
+									<Option v-for="item in storeList" :value="'s' + item.id" :key="'f' + item.id">{{ item.name }}</Option>
 								</Select>
 							</FormItem>
 						</Col>
@@ -61,7 +62,7 @@
 									filterable
 									clearable
 									transfer
-									:disabled="!formValidate.from_store_id || !formValidate.to_store_id"
+									:disabled="!formValidate.from_select || !formValidate.to_store_id"
 									:loading="staffLoading"
 								>
 									<Option v-for="item in staffList" :value="item.id" :key="item.id">{{ item.staff_name }}</Option>
@@ -107,7 +108,7 @@
 					/>
 					<Button type="primary" class="ml14" @click="searchSkus">查询 <span class="enter-key">↵</span></Button>
 					<Button class="ml14" :loading="skuLoading" @click="loadSharedSkus">加载同源商品</Button>
-					<span class="sku-tip">加载调出门店和调入门店都有的产品资料的产品</span>
+					<span class="sku-tip">加载调出方（门店或总部仓）与调入门店同源商品</span>
 				</div>
 				<Table :columns="skuColumns" :data="skuList" :loading="skuLoading" size="small" max-height="320">
 					<template slot-scope="{ row, index }" slot="qty">
@@ -115,7 +116,8 @@
 							:value="skuList[index] ? skuList[index].qty : 0"
 							:min="0"
 							:max="row.max_qty != null ? Number(row.max_qty) : 999999"
-							:precision="0"
+							:precision="qtyPrecision(row)"
+							:step="qtyPrecision(row) > 0 ? 0.01 : 1"
 							class="priceBox"
 							@on-change="val => onQtyChange(index, row, val)"
 						/>
@@ -174,8 +176,11 @@
 				selectedMap: {},
 				createAdminName: '',
 				formValidate: {
-					from_store_id: null,
+					from_select: null,
+					from_party_type: 'store',
+					from_store_id: 0,
 					to_store_id: null,
+					to_party_type: 'store',
 					transfer_staff_id: null,
 					transfer_date: new Date(),
 					remark: '',
@@ -183,7 +188,7 @@
 					limit: 50
 				},
 				ruleValidate: {
-					from_store_id: [{ required: true, type: 'number', message: '请选择调出门店', trigger: 'change' }],
+					from_select: [{ required: true, type: 'string', message: '请选择调出方', trigger: 'change' }],
 					to_store_id: [{ required: true, type: 'number', message: '请选择调入门店', trigger: 'change' }],
 					transfer_staff_id: [{ required: true, type: 'number', message: '请选择调拨人', trigger: 'change' }],
 					transfer_date: [{ required: true, type: 'date', message: '请选择调拨时间', trigger: 'change' }]
@@ -209,7 +214,7 @@
 					);
 				} else {
 					cols.push(
-						{ title: '调出店库存', key: 'store_a_stock', width: 100 },
+						{ title: '调出方库存', key: 'store_a_stock', width: 100 },
 						{ title: '调入店库存', key: 'store_b_stock', width: 100 }
 					);
 				}
@@ -238,8 +243,11 @@
 				this.createAdminName = '';
 				this.innerRequestId = Number(this.requestId) || 0;
 				this.formValidate = {
-					from_store_id: null,
+					from_select: null,
+					from_party_type: 'store',
+					from_store_id: 0,
 					to_store_id: null,
+					to_party_type: 'store',
 					transfer_staff_id: null,
 					transfer_date: new Date(),
 					remark: '',
@@ -266,16 +274,34 @@
 					this.$Message.error(err.msg || '门店列表加载失败');
 				});
 			},
+			applyFromParty(partyType, storeId) {
+				const party = partyType === 'hq' ? 'hq' : 'store';
+				this.formValidate.from_party_type = party;
+				this.formValidate.from_store_id = party === 'hq' ? 0 : (Number(storeId) || 0);
+				this.formValidate.from_select = party === 'hq' ? 'hq' : ('s' + this.formValidate.from_store_id);
+			},
+			onFromSelectChange(val) {
+				if (val === 'hq') {
+					this.applyFromParty('hq', 0);
+				} else if (val && String(val).indexOf('s') === 0) {
+					this.applyFromParty('store', String(val).slice(1));
+				} else {
+					this.applyFromParty('store', 0);
+					this.formValidate.from_select = null;
+				}
+				this.onStoreChange();
+			},
 			loadStaff(keepStaffId) {
-				const a = Number(this.formValidate.from_store_id) || 0;
+				const fromParty = this.formValidate.from_party_type || 'store';
+				const a = fromParty === 'hq' ? 0 : (Number(this.formValidate.from_store_id) || 0);
 				const b = Number(this.formValidate.to_store_id) || 0;
-				if (!a || !b) {
+				if (!b || (fromParty === 'store' && !a)) {
 					this.staffList = [];
 					this.formValidate.transfer_staff_id = null;
 					return Promise.resolve();
 				}
 				this.staffLoading = true;
-				const storeIds = Array.from(new Set([a, b]));
+				const storeIds = fromParty === 'hq' ? [b] : Array.from(new Set([a, b]));
 				return Promise.all(storeIds.map(storeId =>
 					merchantStaffSelect({ store_id: storeId }).then(res => this.normalizeStaffList(res.data)).catch(() => [])
 				)).then(lists => {
@@ -312,8 +338,9 @@
 				stockTransferInfoApi(this.editId).then(res => {
 					const data = res.data || {};
 					this.innerRequestId = Number(data.request_id || 0);
-					this.formValidate.from_store_id = data.from_store_id;
+					this.applyFromParty(data.from_party_type, data.from_store_id);
 					this.formValidate.to_store_id = data.to_store_id;
+					this.formValidate.to_party_type = 'store';
 					this.formValidate.remark = data.remark || '';
 					this.formValidate.transfer_date = data.transfer_date ? new Date(data.transfer_date) : new Date();
 					this.createAdminName = data.create_admin_name || '';
@@ -342,8 +369,9 @@
 				const rid = this.innerRequestId;
 				stockRequestInfoApi(rid).then(res => {
 					const data = res.data || {};
-					this.formValidate.from_store_id = data.supply_store_id;
+					this.applyFromParty(data.supply_party_type, data.supply_store_id);
 					this.formValidate.to_store_id = data.request_store_id;
+					this.formValidate.to_party_type = 'store';
 					if (!keepQty && !this.formValidate.remark) {
 						this.formValidate.remark = `请货转调拨：${data.order_sn || rid}`;
 					}
@@ -392,18 +420,21 @@
 				this.loadSharedSkus();
 			},
 			loadSharedSkus() {
-				const a = this.formValidate.from_store_id;
+				const fromParty = this.formValidate.from_party_type || 'store';
+				const a = fromParty === 'hq' ? 0 : this.formValidate.from_store_id;
 				const b = this.formValidate.to_store_id;
-				if (!a || !b) {
-					return this.$Message.warning('请先选择调出和调入门店');
+				if (!b || (fromParty === 'store' && !a)) {
+					return this.$Message.warning('请先选择调出方和调入门店');
 				}
-				if (a === b) {
+				if (fromParty === 'store' && a === b) {
 					return this.$Message.warning('调出门店与调入门店不能相同');
 				}
 				this.skuLoading = true;
 				stockRequestSharedSkusApi({
 					store_a: a,
 					store_b: b,
+					party_a: fromParty,
+					party_b: 'store',
 					keyword: this.skuKeyword,
 					page: this.formValidate.page,
 					limit: this.formValidate.limit
@@ -428,6 +459,9 @@
 				this.cacheQty();
 				this.formValidate.page = page;
 				this.loadSharedSkus();
+			},
+			qtyPrecision(row) {
+				return Number(row && row.decimal_scale) > 0 ? 2 : 0;
 			},
 			onQtyChange(index, row, val) {
 				const qty = Number(val) || 0;
@@ -496,10 +530,13 @@
 				return value;
 			},
 			saveDraft(details) {
+				const fromParty = this.formValidate.from_party_type || 'store';
 				return stockTransferSaveApi(this.editId || 0, {
 					request_id: this.innerRequestId || 0,
-					from_store_id: this.formValidate.from_store_id,
+					from_store_id: fromParty === 'hq' ? 0 : this.formValidate.from_store_id,
+					from_party_type: fromParty,
 					to_store_id: this.formValidate.to_store_id,
+					to_party_type: 'store',
 					transfer_staff_id: this.formValidate.transfer_staff_id,
 					transfer_date: this.parseTransferDate(this.formValidate.transfer_date),
 					remark: this.formValidate.remark,
@@ -512,7 +549,8 @@
 			handleSubmit(andConfirm) {
 				this.$refs.formValidate.validate(valid => {
 					if (!valid) return;
-					if (this.formValidate.from_store_id === this.formValidate.to_store_id) {
+					const fromParty = this.formValidate.from_party_type || 'store';
+					if (fromParty === 'store' && this.formValidate.from_store_id === this.formValidate.to_store_id) {
 						return this.$Message.warning('调出门店与调入门店不能相同');
 					}
 					const details = this.buildDetails();
@@ -544,7 +582,7 @@
 					if (andConfirm) {
 						this.$Modal.confirm({
 							title: '确认调拨',
-							content: '将先保存草稿并确认调拨，确认后将立即调整双方门店库存。确定继续？',
+							content: '将先保存草稿并确认调拨，确认后将立即调整双方库存（总部仓或门店）。确定继续？',
 							onOk: () => run()
 						});
 					} else {

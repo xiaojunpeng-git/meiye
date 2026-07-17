@@ -12,11 +12,10 @@
 			<FormItem label="项目：" required>
 				<div v-if="form.project_product_id" class="picked">
 					<span class="pk-name">{{ form.project_name || ('#' + form.project_product_id) }}</span>
-					<span class="pk-spec">{{ form.project_spec || form.project_unique }}</span>
 					<a class="ml14" @click="openProject" v-if="!isEdit">重新选择</a>
 				</div>
 				<Button v-else type="primary" ghost @click="openProject">选择项目</Button>
-				<div class="tips">院装配方绑定到具体的项目规格；同一项目规格在本门店只允许一条配方。</div>
+				<div class="tips">院装配方绑定到项目；同一项目在本门店只允许一条配方。</div>
 			</FormItem>
 
 			<FormItem label="状态：">
@@ -28,14 +27,15 @@
 
 			<FormItem label="耗材配方：" required>
 				<Button type="primary" ghost @click="openConsumable">添加耗材</Button>
-				<div class="tips">仅「可作为院装耗材」的商品可被选用；用量为「每核销1次」消耗的基本单位数量，支持最多4位小数。</div>
+				<div class="tips">仅「可作为院装耗材」的商品可被选用；用量为「每核销1次」消耗的基本单位数量，最多 2 位小数。</div>
 				<Table class="mt15" :columns="columns" :data="form.details" size="small" :border="true">
 					<template slot-scope="{ row, index }" slot="qty">
+						<!-- Table 的 row 是拷贝，必须绑 form.details[index] 才会写回 -->
 						<InputNumber
-							v-model="row.qty_per_writeoff"
-							:min="0"
-							:step="1"
-							:precision="4"
+							v-model="form.details[index].qty_per_writeoff"
+							:min="0.01"
+							:step="0.01"
+							:precision="2"
 							placeholder="单次用量"
 							style="width: 140px"
 						/>

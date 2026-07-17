@@ -8,9 +8,10 @@ use app\dao\product\sku\StoreProductAttrValueDao;
 use app\model\product\product\StoreProduct;
 use app\model\product\sku\StoreProductAttrValue;
 use app\services\BaseServices;
-use app\services\other\export\ExportServices;
 use app\services\other\Import\ImportRecordErrorServices;
 use app\services\other\Import\ImportRecordServices;
+use mohe\services\CacheService;
+use mohe\services\SpreadsheetExcelService;
 use think\exception\ValidateException;
 use think\facade\Db;
 
@@ -23,6 +24,8 @@ class StoreProductStockImportServices extends BaseServices
     public const TEMPLATE_SYNC_MAX = 2000;
     /** 单次导入最大数据行 */
     public const IMPORT_MAX_ROWS = 5000;
+    /** 预填多选商品上限 */
+    public const TEMPLATE_PRODUCT_IDS_MAX = 500;
 
     /** @var string[] 表头 */
     public const HEADERS = [
@@ -51,22 +54,48 @@ class StoreProductStockImportServices extends BaseServices
 
     /**
      * 下载预填模板
+     * 默认范围与 choose_type=94 对齐：产品、参与库存、上架/仓库、端归属、非供应商；
+     * product_ids 非空时只导出所选商品全部有效 SKU，并校验 ID 全部合法。
      */
     public function downloadTemplate(string $scene, int $type = 0, int $relationId = 0, array $filter = []): array
     {
         $this->assertScene($scene);
+        $productIds = $this->normalizeProductIds($filter['product_ids'] ?? []);
+        if (count($productIds) > self::TEMPLATE_PRODUCT_IDS_MAX) {
+            throw new ValidateException('一次最多选择 ' . self::TEMPLATE_PRODUCT_IDS_MAX . ' 个商品，请缩小选择后再下载');
+        }
+        if ($productIds) {
+            $validCount = (int)Db::name('store_product')
+                ->whereIn('id', $productIds)
+                ->where('type', $type)
+                ->where('relation_id', $relationId)
+                ->where('product_type', 0)
+                ->where('is_inventory', 1)
+                ->where('is_del', 0)
+                ->whereIn('is_show', [0, 1])
+                ->count();
+            if ($validCount !== count($productIds)) {
+                throw new ValidateException('存在无效、越权或不可导出的商品，请重新选择后再下载');
+            }
+        }
         $where = [
             'type' => $type,
             'relation_id' => $relationId,
             'keyword' => trim((string)($filter['keyword'] ?? '')),
+            'product_type' => 0,
+            'is_show_in' => [0, 1],
+            'exclude_supplier' => 1,
         ];
+        if ($productIds) {
+            $where['product_ids'] = $productIds;
+        }
         $query = $this->dao->joinAttrSearch($where);
         $count = (clone $query)->count();
         if ($count <= 0) {
             throw new ValidateException('当前筛选条件下没有可参与库存管理的商品规格，请调整筛选后再下载');
         }
         if ($count > self::TEMPLATE_SYNC_MAX) {
-            throw new ValidateException('符合条件的规格超过 ' . self::TEMPLATE_SYNC_MAX . ' 行，请缩小分类/关键字筛选后再下载模板（避免卡顿）');
+            throw new ValidateException('符合条件的规格超过 ' . self::TEMPLATE_SYNC_MAX . ' 行，请缩小商品选择/关键字后再下载模板（避免卡顿）');
         }
         $list = $query->field('a.product_id,a.unique,a.suk,a.code,a.bar_code,p.store_name,p.unit_name')
             ->order('a.product_id asc,a.id asc')
@@ -97,18 +126,134 @@ class StoreProductStockImportServices extends BaseServices
             self::SCENE_OUT => '出库导入模板',
         ];
         $title = $titleMap[$scene];
-        $filename = $title . '_' . date('YmdHis');
+        // 仅数字后缀，避免 microtime 小数点进入文件名（如 9.5443.xlsx）
+        $filename = $title . '_' . date('YmdHis') . '_' . substr(str_replace('.', '', (string)microtime(true)), -6);
         $notice = '仅填写数量等录入列；商品ID与SKU唯一值禁止修改；单次导入最多'
             . self::IMPORT_MAX_ROWS . '行；整表校验通过才入账；同文件内容成功后不可重复导入';
-        /** @var ExportServices $exportServices */
-        $exportServices = app()->make(ExportServices::class);
-        $paths = $exportServices->export(
-            self::HEADERS,
-            [$title, $title, $notice],
-            $export,
-            $filename
-        );
-        return ['path' => $paths[0] ?? '', 'count' => $count];
+        // 强制同步落盘，绕开 ExportServices::$maxLimit=1000 假异步分支
+        $filePath = SpreadsheetExcelService::instance()
+            ->setExcelHeader(self::HEADERS)
+            ->setExcelTile($title, $title, $notice)
+            ->setExcelContent($export)
+            ->excelSave($filename, 'xlsx', true);
+        $absolute = app()->getRootPath() . 'public' . $filePath;
+        if (!$filePath || !is_file($absolute)) {
+            throw new ValidateException('模板文件生成失败，请重试');
+        }
+        $fileName = basename((string)$filePath);
+        if ($fileName === '' || $fileName === '.' || $fileName === '..') {
+            $fileName = $filename . '.xlsx';
+        }
+        // 不直接暴露 /phpExcel/*.xlsx：Web 规则常回退到 pc.html，导致浏览器拿到 HTML
+        $downloadKey = $this->issueTemplateDownload($absolute, $fileName, $type, $relationId);
+        return [
+            'mode' => 'sync',
+            'download_key' => $downloadKey,
+            'file_name' => $fileName,
+            'count' => $count,
+            // 兼容旧前端；新前端必须走 template/file 接口拉 Blob，禁止 <a href> 直链
+            'path' => '',
+        ];
+    }
+
+    /**
+     * 签发短时下载凭证（缓存绝对路径，供鉴权接口流式返回）
+     */
+    protected function issueTemplateDownload(string $absolute, string $fileName, int $type, int $relationId): string
+    {
+        $key = md5(uniqid('stock_tpl_', true) . microtime(true));
+        $ok = CacheService::set($key, [
+            'path' => $absolute,
+            'fileName' => $fileName,
+            'type' => $type,
+            'relation_id' => $relationId,
+            'kind' => 'stock_import_template',
+        ], 600);
+        if (!$ok) {
+            throw new ValidateException('下载凭证生成失败，请重试');
+        }
+        return $key;
+    }
+
+    /**
+     * 鉴权后读取已生成模板并返回 Excel 下载响应（禁止 SPA/HTML 回退）
+     * @return \think\response\File
+     */
+    public function streamTemplateFile(string $key, int $type, int $relationId)
+    {
+        $key = trim($key);
+        if ($key === '') {
+            throw new ValidateException('缺少下载凭证');
+        }
+        // TagSet 无 get()；与 PublicController::download 一致走 CacheService::get
+        $file = CacheService::get($key);
+        if (!is_array($file) || ($file['kind'] ?? '') !== 'stock_import_template') {
+            throw new ValidateException('下载链接已失效，请重新导出');
+        }
+        if ((int)($file['type'] ?? -1) !== $type || (int)($file['relation_id'] ?? -1) !== $relationId) {
+            throw new ValidateException('无权下载该文件');
+        }
+        $path = (string)($file['path'] ?? '');
+        $fileName = (string)($file['fileName'] ?? '');
+        if ($path === '' || $fileName === '' || !is_file($path)) {
+            throw new ValidateException('文件不存在或已过期，请重新导出');
+        }
+        CacheService::delete($key);
+        // 中文 Content-Disposition 在 Swoole 下易导致头错乱/被标成 text/html；下载名用 ASCII，展示名由前端 file_name 决定
+        $asciiName = 'stock_import_template.xlsx';
+        return download($path, $asciiName)
+            ->mimeType('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+            ->force(true);
+    }
+
+    /**
+     * 规范化 product_ids：数组/逗号串 → 去重正整数
+     */
+    protected function normalizeProductIds($raw): array
+    {
+        if ($raw === null || $raw === '' || $raw === []) {
+            return [];
+        }
+        if (is_string($raw)) {
+            $raw = preg_split('/\s*,\s*/', $raw, -1, PREG_SPLIT_NO_EMPTY);
+        }
+        if (!is_array($raw)) {
+            return [];
+        }
+        $ids = [];
+        foreach ($raw as $id) {
+            $id = (int)$id;
+            if ($id > 0) {
+                $ids[$id] = $id;
+            }
+        }
+        return array_values($ids);
+    }
+
+    /**
+     * 本地相对路径拼接为可下载 URL；剥离 site_url 中的 /static/html/pc.html 等前端入口
+     */
+    protected function buildDownloadUrl(string $filePath): string
+    {
+        $filePath = trim($filePath);
+        if ($filePath === '') {
+            return '';
+        }
+        if (preg_match('#^https?://#i', $filePath)) {
+            return $filePath;
+        }
+        $site = (string)sys_config('site_url');
+        $parts = parse_url($site) ?: [];
+        $scheme = $parts['scheme'] ?? 'https';
+        $host = $parts['host'] ?? '';
+        if ($host === '') {
+            return rtrim($site, '/') . '/' . ltrim($filePath, '/');
+        }
+        $origin = $scheme . '://' . $host;
+        if (!empty($parts['port'])) {
+            $origin .= ':' . $parts['port'];
+        }
+        return rtrim($origin, '/') . '/' . ltrim($filePath, '/');
     }
 
     /**
@@ -500,7 +645,8 @@ class StoreProductStockImportServices extends BaseServices
             $typeLabel = trim((string)($data[10] ?? ''));
             $remark = trim((string)($data[11] ?? ''));
 
-            if ($productId <= 0 && $unique === '' && $goodQty === '' && $defQty === '') {
+            // 空行，或模板预填行未填任何数量：跳过（只导入填写了数量的规格）
+            if ($goodQty === '' && $defQty === '') {
                 continue;
             }
 
@@ -513,9 +659,6 @@ class StoreProductStockImportServices extends BaseServices
             }
             if ($unique !== '' && isset($seenUnique[$unique])) {
                 $rowErrors[] = 'SKU 与第' . $seenUnique[$unique] . '行重复';
-            }
-            if ($goodQty === '' && $defQty === '') {
-                $rowErrors[] = '良品数量与残次品数量至少填一项';
             }
             $good = $goodQty === '' ? 0.0 : (float)$goodQty;
             $def = $defQty === '' ? 0.0 : (float)$defQty;
@@ -653,11 +796,31 @@ class StoreProductStockImportServices extends BaseServices
             if ($row['remark'] !== '') {
                 $remarkParts[] = $row['remark'];
             }
+            /** @var StockQtyValidateServices $qtyValidate */
+            $qtyValidate = app()->make(StockQtyValidateServices::class);
+            $scale = $qtyValidate->resolveScale(
+                (int)($product['product_type'] ?? 0),
+                (int)($product['is_inventory'] ?? 0),
+                (int)($product['salon_stock_enabled'] ?? 0)
+            );
+            $goodsLabel = (string)($product['store_name'] ?? '') . '/' . (string)($attr['suk'] ?? $unique);
+            try {
+                $goodQty = $qtyValidate->assertQty($row['good'] === '' || $row['good'] === null ? 0 : $row['good'], $scale, $goodsLabel, $excelRow);
+                $defQty = $qtyValidate->assertQty($row['def'] === '' || $row['def'] === null ? 0 : $row['def'], $scale, $goodsLabel . '(残次)', $excelRow);
+            } catch (\mohe\exceptions\AdminException $e) {
+                $errors[] = [
+                    'excel_row' => $excelRow,
+                    'fail_msg' => $e->getMessage(),
+                    'product_id' => $productId,
+                    'unique' => $unique,
+                ];
+                continue;
+            }
             $details[] = [
                 'product_id' => $productId,
                 'unique' => $unique,
-                'stock' => round((float)$row['good'], 4),
-                'defective_stock' => round((float)$row['def'], 4),
+                'stock' => $goodQty,
+                'defective_stock' => $defQty,
                 'excel_row' => $excelRow,
             ];
         }
@@ -772,8 +935,9 @@ class StoreProductStockImportServices extends BaseServices
             }
             $headerRow = 1;
             for ($r = 1; $r <= min(5, $highestRow); $r++) {
-                $v = (string)$sheet->getCellByColumnAndRow(1, $r)->getValue();
-                if (strpos($v, '商品ID') !== false) {
+                $v = trim((string)$sheet->getCellByColumnAndRow(1, $r)->getValue());
+                // 须精确匹配表头「商品ID」；说明行文案也含「商品ID」不能用 strpos
+                if ($v === '商品ID') {
                     $headerRow = $r;
                     break;
                 }

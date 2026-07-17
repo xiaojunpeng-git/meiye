@@ -21,6 +21,7 @@ use app\services\activity\seckill\StoreSeckillServices;
 use app\services\agent\SystemRegionAgentServices;
 use app\services\order\store\BranchOrderServices;
 use app\services\order\StoreOrderWriteOffServices;
+use app\services\product\inventory\InventoryScopeServices;
 use app\services\product\inventory\StoreProductStockCountServices;
 use app\services\product\inventory\StoreProductStockDetailServices;
 use app\services\product\inventory\StoreProductStockOrderServices;
@@ -936,11 +937,21 @@ class ExportExcel extends AuthController
             ['add_time', '', '', 'time'],//创建时间
             ['ids', ''],//选择ID
             ['all', ''],//是否全选
+            ['scope', 'hq'],
+            ['store_id', ''],
         ]);
         if (!$where['ids'] && $where['all'] == 0) return $this->fail('请选择要导出入库单');
         $where['ids'] = stringToIntArray($where['ids']);
         $where['stock_type'] = 1;
-        $data = $services->getStockOrderList($where);
+        $scope = app()->make(InventoryScopeServices::class)->resolveFromRequest($where);
+        unset($where['scope'], $where['store_id']);
+        $data = $services->getStockOrderList(
+            $where,
+            (int)$scope['type'],
+            $scope['relation_id'],
+            [],
+            (bool)$scope['all_stores']
+        );
         return $this->success($this->service->productStockOrder(1, $data['list'] ?? []));
     }
 
@@ -961,11 +972,21 @@ class ExportExcel extends AuthController
             ['add_time', '', '', 'time'],//创建时间
             ['ids', ''],//选择ID
             ['all', ''],//是否全选
+            ['scope', 'hq'],
+            ['store_id', ''],
         ]);
         if (!$where['ids'] && $where['all'] == 0) return $this->fail('请选择要导出出库单');
         $where['ids'] = stringToIntArray($where['ids']);
         $where['stock_type'] = 2;
-        $data = $services->getStockOrderList($where);
+        $scope = app()->make(InventoryScopeServices::class)->resolveFromRequest($where);
+        unset($where['scope'], $where['store_id']);
+        $data = $services->getStockOrderList(
+            $where,
+            (int)$scope['type'],
+            $scope['relation_id'],
+            [],
+            (bool)$scope['all_stores']
+        );
         return $this->success($this->service->productStockOrder(2, $data['list'] ?? []));
     }
 
@@ -985,10 +1006,19 @@ class ExportExcel extends AuthController
             ['add_time', '', '', 'time'],//创建时间
             ['ids', ''],//选择ID
             ['all', ''],//是否全选
+            ['scope', 'hq'],
+            ['store_id', ''],
         ]);
         if (!$where['ids'] && $where['all'] == 0) return $this->fail('请选择要导出库存盘点');
         $where['ids'] = stringToIntArray($where['ids']);
-        $data = $services->getStockCountList($where);
+        $scope = app()->make(InventoryScopeServices::class)->resolveFromRequest($where);
+        unset($where['scope'], $where['store_id']);
+        $data = $services->getStockCountList(
+            $where,
+            (int)$scope['type'],
+            $scope['relation_id'],
+            (bool)$scope['all_stores']
+        );
         return $this->success($this->service->productStockCount($data['list'] ?? []));
     }
 
@@ -1008,8 +1038,18 @@ class ExportExcel extends AuthController
             ['stock_time', ''],//业务时间
             ['add_time', '', '', 'time'],//创建时间
             ['unique', ''],//商品sku
+            ['scope', 'hq'],
+            ['store_id', ''],
         ]);
-        $data = $services->getStockOrderList($where);
+        $scope = app()->make(InventoryScopeServices::class)->resolveFromRequest($where);
+        unset($where['scope'], $where['store_id']);
+        $data = $services->getStockOrderList(
+            $where,
+            (int)$scope['type'],
+            $scope['relation_id'],
+            [],
+            (bool)$scope['all_stores']
+        );
         return $this->success($this->service->productStockDetail($data['list'] ?? []));
     }
 
@@ -1027,10 +1067,20 @@ class ExportExcel extends AuthController
             ['keyword', ''],
             ['stock_type', ''],//1入库2出库
             ['stock_time', '', '', 'add_time'],//时间
+            ['scope', 'hq'],
+            ['store_id', ''],
         ]);
         $stockType = (int)$where['stock_type'];
         unset($where['stock_type']);
-        $data = $services->getStockStatisticsList($stockType, $where);
+        $scope = app()->make(InventoryScopeServices::class)->resolveFromRequest($where);
+        unset($where['scope'], $where['store_id']);
+        $data = $services->getStockStatisticsList(
+            $stockType,
+            $where,
+            (int)$scope['type'],
+            $scope['relation_id'],
+            (bool)$scope['all_stores']
+        );
         return $this->success($this->service->productStockOrderStatistics($stockType, $data['list'] ?? []));
     }
 

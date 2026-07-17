@@ -22,7 +22,8 @@ import goodsAttr from '@/components/goodsAttr';
 
 /**
  * 统一库存业务「选择商品框」
- * 仅展示 is_inventory=1 的商品（由 chooseType=94 后端过滤）
+ * 94=库存选品 / 95=院装耗材：仅产品(product_type=0)且参与库存
+ * 96=院装配方项目：仅预约/项目(product_type=6)
  */
 export default {
   name: 'selectGoodsBox',

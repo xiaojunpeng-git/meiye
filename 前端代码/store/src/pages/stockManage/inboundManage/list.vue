@@ -25,6 +25,7 @@
 			  <Option value="3">退货入库</Option>
 			  <Option value="5">盘盈入库</Option>
 			  <Option value="4">残次品转良品</Option>
+				  <Option value="7">院装退回</Option>
 				  <Option value="8">调拨入库</Option>
 			    </Select>
 			  </FormItem>
@@ -125,6 +126,7 @@
 					<div v-else-if="row.order_type == 3">退货入库</div>
 					<div v-else-if="row.order_type == 5">盘盈入库</div>
 					<div v-else-if="row.order_type == 4">残次品转良品</div>
+					<div v-else-if="row.order_type == 7">院装退回</div>
 					<div v-else-if="row.order_type == 8">调拨入库</div>
 					<div v-if="row.order_type == 3" @click="refundOrderInfo(row.refund_order_id)" class="fs-12 text-wlll-2d8cf0 cup">{{row.order_sn}}</div>
 				</template>

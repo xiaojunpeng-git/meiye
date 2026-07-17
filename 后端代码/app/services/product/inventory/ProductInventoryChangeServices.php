@@ -133,9 +133,29 @@ class ProductInventoryChangeServices extends BaseServices
                 throw new ValidateException('商品规格不存在');
             }
 
-            $scale = max(0, min(4, (int)($skuQuery['decimal_scale'] ?? 0)));
-            $newStock = bcadd((string)$skuQuery['stock'], $deltaStock, 4);
-            $newDefective = bcadd((string)($skuQuery['defective_stock'] ?? 0), $deltaDefective, 4);
+            // 业务精度：院装最多 2 位，其它整数；变化量禁止静默四舍五入
+            $scale = max(0, min(2, (int)($skuQuery['decimal_scale'] ?? 0)));
+            /** @var StockQtyValidateServices $qtyValidate */
+            $qtyValidate = app()->make(StockQtyValidateServices::class);
+            $goodsLabel = 'ID' . $productId . '/' . $unique;
+            try {
+                if (bccomp((string)$deltaStock, '0', 4) !== 0) {
+                    $abs = bccomp((string)$deltaStock, '0', 4) < 0
+                        ? bcmul((string)$deltaStock, '-1', 4)
+                        : (string)$deltaStock;
+                    $qtyValidate->assertQty($abs, $scale, $goodsLabel);
+                }
+                if (bccomp((string)$deltaDefective, '0', 4) !== 0) {
+                    $absDef = bccomp((string)$deltaDefective, '0', 4) < 0
+                        ? bcmul((string)$deltaDefective, '-1', 4)
+                        : (string)$deltaDefective;
+                    $qtyValidate->assertQty($absDef, $scale, $goodsLabel . '(残次)');
+                }
+            } catch (\mohe\exceptions\AdminException $e) {
+                throw new ValidateException($e->getMessage());
+            }
+            $newStock = bcadd((string)$skuQuery['stock'], (string)$deltaStock, 4);
+            $newDefective = bcadd((string)($skuQuery['defective_stock'] ?? 0), (string)$deltaDefective, 4);
 
             // 残次品永不为负
             if (bccomp($newDefective, '0', 4) < 0) {

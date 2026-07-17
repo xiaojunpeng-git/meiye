@@ -423,6 +423,18 @@ export const inventoryDetailsList = [
     minWidth: 200,
   },
   {
+    title: "单位",
+    slot: "display_unit",
+    align: "left",
+    minWidth: 80,
+  },
+  {
+    title: "院装产品",
+    slot: "is_salon_product",
+    align: "left",
+    minWidth: 90,
+  },
+  {
     title: "商品条形码",
     key: "bar_code",
     width: 160,

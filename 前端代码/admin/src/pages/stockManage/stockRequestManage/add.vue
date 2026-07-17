@@ -35,15 +35,16 @@
 							</FormItem>
 						</Col>
 						<Col :xs="24" :sm="12">
-							<FormItem label="供货门店：" prop="supply_store_id">
+							<FormItem label="供货方：" prop="supply_select">
 								<Select
-									v-model="formValidate.supply_store_id"
-									placeholder="请选择供货门店"
+									v-model="formValidate.supply_select"
+									placeholder="请选择供货门店或总部仓"
 									filterable
 									transfer
-									@on-change="onSupplyStoreChange"
+									@on-change="onSupplySelectChange"
 								>
-									<Option v-for="item in storeList" :value="item.id" :key="'s' + item.id">{{ item.name }}</Option>
+									<Option value="hq" key="hq">总部仓</Option>
+									<Option v-for="item in storeList" :value="'s' + item.id" :key="'s' + item.id">{{ item.name }}</Option>
 								</Select>
 							</FormItem>
 						</Col>
@@ -91,7 +92,7 @@
 					<Alert type="warning" show-icon class="tips-alert">
 						操作注意事项
 						<template slot="desc">
-							<div>1. 确认申请只通知供货门店，不会变动库存；确认调拨后才会改双方库存。</div>
+							<div>1. 确认申请：供货方为门店时通知供货门店；供货方为总部仓时生成平台待办。不会变动库存；确认调拨后才会改双方库存。</div>
 							<div>2. 只有输入申请数量的产品，才会有请货记录。</div>
 						</template>
 					</Alert>
@@ -107,7 +108,7 @@
 					/>
 					<Button type="primary" class="ml14" @click="searchSkus">查询 <span class="enter-key">↵</span></Button>
 					<Button class="ml14" :loading="skuLoading" @click="loadSharedSkus">加载同源商品</Button>
-					<span class="sku-tip">加载请货门店和供货门店都有的产品资料的产品</span>
+					<span class="sku-tip">加载请货门店与供货方（门店或总部仓）同源商品</span>
 				</div>
 				<Table :columns="skuColumns" :data="skuList" :loading="skuLoading" size="small" max-height="320">
 					<template slot-scope="{ row, index }" slot="qty">
@@ -115,7 +116,8 @@
 							:value="skuList[index] ? skuList[index].qty : 0"
 							:min="0"
 							:max="999999"
-							:precision="0"
+							:precision="qtyPrecision(row)"
+							:step="qtyPrecision(row) > 0 ? 0.01 : 1"
 							class="priceBox"
 							@on-change="val => onQtyChange(index, row, val)"
 						/>
@@ -172,7 +174,9 @@
 				createAdminName: '',
 				formValidate: {
 					request_store_id: null,
-					supply_store_id: null,
+					supply_select: null,
+					supply_party_type: 'store',
+					supply_store_id: 0,
 					request_staff_id: null,
 					request_date: new Date(),
 					remark: '',
@@ -181,7 +185,7 @@
 				},
 				ruleValidate: {
 					request_store_id: [{ required: true, type: 'number', message: '请选择请货门店', trigger: 'change' }],
-					supply_store_id: [{ required: true, type: 'number', message: '请选择供货门店', trigger: 'change' }],
+					supply_select: [{ required: true, type: 'string', message: '请选择供货方', trigger: 'change' }],
 					request_staff_id: [{ required: true, type: 'number', message: '请选择请货人', trigger: 'change' }],
 					request_date: [{ required: true, type: 'date', message: '请选择请货时间', trigger: 'change' }]
 				},
@@ -189,8 +193,8 @@
 					{ title: '商品', key: 'product_name', minWidth: 140 },
 					{ title: '规格', key: 'suk', minWidth: 90 },
 					{ title: '单位', key: 'stock_unit', width: 70 },
-					{ title: '请货店库存', key: 'store_a_stock', width: 100 },
-					{ title: '供货店库存', key: 'store_b_stock', width: 100 },
+					{ title: '请货方库存', key: 'store_a_stock', width: 100 },
+					{ title: '供货方库存', key: 'store_b_stock', width: 100 },
 					{ title: '申请数量', slot: 'qty', width: 120 },
 					{ title: '操作', slot: 'action', width: 70 }
 				]
@@ -216,7 +220,9 @@
 				this.createAdminName = '';
 				this.formValidate = {
 					request_store_id: null,
-					supply_store_id: null,
+					supply_select: null,
+					supply_party_type: 'store',
+					supply_store_id: 0,
 					request_staff_id: null,
 					request_date: new Date(),
 					remark: '',
@@ -274,10 +280,26 @@
 				this.skuTotal = 0;
 				this.loadStaff(val);
 			},
-			onSupplyStoreChange() {
+			onSupplySelectChange(val) {
+				if (val === 'hq') {
+					this.formValidate.supply_party_type = 'hq';
+					this.formValidate.supply_store_id = 0;
+				} else if (val && String(val).indexOf('s') === 0) {
+					this.formValidate.supply_party_type = 'store';
+					this.formValidate.supply_store_id = Number(String(val).slice(1)) || 0;
+				} else {
+					this.formValidate.supply_party_type = 'store';
+					this.formValidate.supply_store_id = 0;
+				}
 				this.skuList = [];
 				this.selectedMap = {};
 				this.skuTotal = 0;
+			},
+			applySupplyParty(partyType, storeId) {
+				const party = partyType === 'hq' ? 'hq' : 'store';
+				this.formValidate.supply_party_type = party;
+				this.formValidate.supply_store_id = party === 'hq' ? 0 : (Number(storeId) || 0);
+				this.formValidate.supply_select = party === 'hq' ? 'hq' : ('s' + this.formValidate.supply_store_id);
 			},
 			parseRequestDate(value) {
 				if (!value) return '';
@@ -293,7 +315,7 @@
 				stockRequestInfoApi(this.editId).then(res => {
 					const data = res.data || {};
 					this.formValidate.request_store_id = data.request_store_id;
-					this.formValidate.supply_store_id = data.supply_store_id;
+					this.applySupplyParty(data.supply_party_type, data.supply_store_id);
 					this.formValidate.remark = data.remark || '';
 					this.formValidate.request_date = data.request_date ? new Date(data.request_date) : new Date();
 					this.createAdminName = data.create_admin_name || '';
@@ -303,6 +325,7 @@
 						suk: d.suk,
 						product_name: d.product_name,
 						stock_unit: d.stock_unit,
+						decimal_scale: Number(d.decimal_scale) > 0 ? 2 : 0,
 						store_a_stock: '-',
 						store_b_stock: '-',
 						qty: Number(d.qty) || 0
@@ -321,17 +344,23 @@
 			},
 			loadSharedSkus() {
 				const a = this.formValidate.request_store_id;
-				const b = this.formValidate.supply_store_id;
-				if (!a || !b) {
-					return this.$Message.warning('请先选择请货门店和供货门店');
+				const supplyParty = this.formValidate.supply_party_type || 'store';
+				const b = supplyParty === 'hq' ? 0 : this.formValidate.supply_store_id;
+				if (!a) {
+					return this.$Message.warning('请先选择请货门店');
 				}
-				if (a === b) {
+				if (supplyParty === 'store' && !b) {
+					return this.$Message.warning('请先选择供货门店或总部仓');
+				}
+				if (supplyParty === 'store' && a === b) {
 					return this.$Message.warning('请货门店与供货门店不能相同');
 				}
 				this.skuLoading = true;
 				stockRequestSharedSkusApi({
 					store_a: a,
 					store_b: b,
+					party_a: 'store',
+					party_b: supplyParty,
 					keyword: this.skuKeyword,
 					page: this.formValidate.page,
 					limit: this.formValidate.limit
@@ -355,6 +384,9 @@
 				this.cacheQty();
 				this.formValidate.page = page;
 				this.loadSharedSkus();
+			},
+			qtyPrecision(row) {
+				return Number(row && row.decimal_scale) > 0 ? 2 : 0;
 			},
 			onQtyChange(index, row, val) {
 				const qty = Number(val) || 0;
@@ -397,8 +429,13 @@
 				return details;
 			},
 			validateBeforeSave() {
-				if (this.formValidate.request_store_id === this.formValidate.supply_store_id) {
+				const supplyParty = this.formValidate.supply_party_type || 'store';
+				if (supplyParty === 'store' && this.formValidate.request_store_id === this.formValidate.supply_store_id) {
 					this.$Message.warning('请货门店与供货门店不能相同');
+					return null;
+				}
+				if (supplyParty === 'store' && !this.formValidate.supply_store_id) {
+					this.$Message.warning('请选择供货门店或总部仓');
 					return null;
 				}
 				if (!this.formValidate.request_staff_id) {
@@ -413,9 +450,12 @@
 				return finalDetails;
 			},
 			saveDraft(finalDetails) {
+				const supplyParty = this.formValidate.supply_party_type || 'store';
 				return stockRequestSaveApi(this.editId || 0, {
 					request_store_id: this.formValidate.request_store_id,
-					supply_store_id: this.formValidate.supply_store_id,
+					request_party_type: 'store',
+					supply_store_id: supplyParty === 'hq' ? 0 : this.formValidate.supply_store_id,
+					supply_party_type: supplyParty,
 					request_staff_id: this.formValidate.request_staff_id,
 					request_date: this.parseRequestDate(this.formValidate.request_date),
 					remark: this.formValidate.remark,
@@ -449,7 +489,7 @@
 					if (!finalDetails) return;
 					this.$Modal.confirm({
 						title: '确认申请',
-						content: '将先保存草稿并确认申请，通知供货门店，不会变动库存。确定继续？',
+						content: '将先保存草稿并确认申请：供货方为门店时通知供货门店，为总部仓时生成平台待办；不会变动库存。确定继续？',
 						onOk: () => {
 							this.confirming = true;
 							return this.saveDraft(finalDetails).then(({ id }) => {

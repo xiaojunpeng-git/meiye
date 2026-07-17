@@ -15,4 +15,9 @@ class StoreProjectConsumableRecipeDetail extends BaseModel
 
     protected $pk = 'id';
     protected $name = 'store_project_consumable_recipe_detail';
+
+    /** add_time 为整型时间戳，禁止 ORM 按日期字符串格式化 */
+    protected $autoWriteTimestamp = false;
+    protected $createTime = false;
+    protected $updateTime = false;
 }

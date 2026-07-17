@@ -140,9 +140,11 @@
               </DropdownMenu>
             </template>
           </Dropdown>
+        <Button class="mr15" @click="showColumnSetting = true">列设置</Button>
         <vxe-table
             ref="xTable"
             class="mt25"
+            :key="'product-cols-' + visibleColumnKey"
             :loading="loading"
             row-id="id"
             :checkbox-config="{reserve: true}"
@@ -167,66 +169,67 @@
               </div>
             </template>
           </vxe-column>
-          <vxe-column field="id" title="商品ID" width="70"></vxe-column>
-          <vxe-column field="image" title="商品图" width="70">
+          <vxe-column
+            v-for="col in visibleDataColumns"
+            :key="col.key"
+            :field="col.key"
+            :title="col.title"
+            :width="col.width"
+            :min-width="col.minWidth"
+          >
             <template v-slot="{ row }">
-              <viewer>
+              <viewer v-if="col.key === 'image'">
                 <div class="tabBox_img">
                   <img v-lazy="row.image" />
                 </div>
               </viewer>
-            </template>
-          </vxe-column>
-          <vxe-column field="store_name" title="商品名称" min-width="250">
-            <template v-slot="{ row }">
-              <Tooltip
-			      :transfer="true"
-                  theme="dark"
-                  max-width="300"
-                  :delay="600"
-                  :content="row.store_name"
-              >
-                <div class="line2"><span class="text-wlll-2d8cf0">【{{row.spec_type?'多规格':'单规格'}}】</span>{{ row.store_name }}</div>
-              </Tooltip>
-            </template>
-          </vxe-column>
-		  <vxe-column field="price" title="商品类型" min-width="90">
-			  <template v-slot="{ row }">
-				  <div v-if="row.product_type == 0">普通商品</div>
-				  <div v-else-if="row.product_type == 4">次卡商品</div>
-				  <div v-else-if="row.product_type == 5">卡项商品</div>
-				  <div v-else-if="row.product_type == 6">预约商品</div>
-			  </template>
-		  </vxe-column>
-          <vxe-column field="price" title="商品售价" min-width="90"></vxe-column>
-          <vxe-column field="branch_sales" title="销量" min-width="90"></vxe-column>
-          <vxe-column field="branch_stock" title="库存" min-width="80"></vxe-column>
-          <vxe-column field="is_inventory" title="参与库存管理" min-width="110">
-            <template v-slot="{ row }">
-              <span v-if="row.product_type != 0">—</span>
-              <span v-else>{{ row.is_inventory == 1 ? '开启' : '关闭' }}</span>
-            </template>
-          </vxe-column>
-          <vxe-column field="allow_negative_stock" title="允许负库存" min-width="100">
-            <template v-slot="{ row }">
-              <span v-if="row.product_type != 0">—</span>
-              <span v-else>{{ row.allow_negative_stock == 1 ? '开启' : '关闭' }}</span>
-            </template>
-          </vxe-column>
-          <vxe-column field="sort" title="排序" min-width="70"></vxe-column>
-          <vxe-column field="state" title="状态" width="120">
-            <template v-slot="{ row }">
-              <i-switch v-model="row.is_show" :value="row.is_show" :true-value="1" :false-value="0" :disabled="row.is_verify == 1? false:true"
-                        @on-change="changeSwitch(row)" size="large" v-if="formValidate.type != 7">
-                <span slot="open">上架</span>
-                <span slot="close">下架</span>
-              </i-switch>
-              <div v-else>{{ row.is_del ? '已删除' : !row.is_show ? '已下架' : '' }}</div>
+              <div v-else-if="col.key === 'store_name'" class="product-name-cell">
+                {{ row.store_name }}
+              </div>
+              <template v-else-if="col.key === 'product_type'">
+                <span v-if="row.product_type == 0">普通商品</span>
+                <span v-else-if="row.product_type == 4">次卡商品</span>
+                <span v-else-if="row.product_type == 5">卡项商品</span>
+                <span v-else-if="row.product_type == 6">预约商品</span>
+                <span v-else>—</span>
+              </template>
+              <span v-else-if="col.key === 'stock'">{{ row.branch_stock != null ? row.branch_stock : row.stock }}</span>
+              <span v-else-if="col.key === 'sales'">{{ row.branch_sales != null ? row.branch_sales : row.sales }}</span>
+              <span v-else-if="col.key === 'spec_type'">{{ row.spec_type ? '多规格' : '单规格' }}</span>
+              <span v-else-if="col.key === 'is_inventory'">
+                <template v-if="row.product_type != 0">—</template>
+                <template v-else>{{ row.is_inventory == 1 ? '开启' : '关闭' }}</template>
+              </span>
+              <span v-else-if="col.key === 'allow_negative_stock'">
+                <template v-if="row.product_type != 0">—</template>
+                <template v-else>{{ row.allow_negative_stock == 1 ? '开启' : '关闭' }}</template>
+              </span>
+              <span v-else-if="col.key === 'is_vip'">{{ row.is_vip ? '开启' : '关闭' }}</span>
+              <span v-else-if="col.key === 'add_time'">{{ formatTime(row.add_time) }}</span>
+              <span v-else-if="col.key === 'brand_com'">{{ formatBrand(row) }}</span>
+              <span v-else-if="col.key === 'store_label_id'">{{ formatStoreLabel(row.store_label_id) }}</span>
+              <template v-else-if="col.key === 'state'">
+                <i-switch
+                  v-model="row.is_show"
+                  :value="row.is_show"
+                  :true-value="1"
+                  :false-value="0"
+                  :disabled="row.is_verify == 1 ? false : true"
+                  @on-change="changeSwitch(row)"
+                  size="large"
+                  v-if="formValidate.type != 7"
+                >
+                  <span slot="open">上架</span>
+                  <span slot="close">下架</span>
+                </i-switch>
+                <div v-else>{{ row.is_del ? '已删除' : !row.is_show ? '已下架' : '' }}</div>
+              </template>
+              <span v-else>{{ row[col.key] }}</span>
             </template>
           </vxe-column>
           <vxe-column field="refusal" title="拒绝原因" min-width="150" v-if="formValidate.type == -1"></vxe-column>
           <vxe-column field="refusal" title="下架原因" min-width="150" v-if="formValidate.type == -2"></vxe-column>
-          <vxe-column field="action" title="操作" align="center" min-width="150" fixed="right">
+          <vxe-column field="action" title="操作" align="center" width="150" fixed="right">
             <template #default="{ row, rowIndex }">
 			  <a @click="detail(row.id)">详情</a>
 			  <Divider type="vertical" />
@@ -344,6 +347,13 @@
     >
       <goodsImport v-if="importShow" @close="importShow = false"></goodsImport>
     </Modal>
+    <column-setting
+      v-model="showColumnSetting"
+      :columns-meta="columnsMeta"
+      :columns="columnConfig"
+      :default-columns="defaultColumnConfig"
+      @save="saveColumnConfig"
+    />
   </div>
 </template>
 
@@ -356,6 +366,7 @@ import productDetails from '../components/productDetails.vue';
 import batchSet from '../components/batchSet.vue';
 import adjustPrice from '../components/adjustPrice.vue';
 import goodsImport from '../components/goodsImport.vue';
+import ColumnSetting from "./components/ColumnSetting.vue";
 import {
   productListInfo,
   productHeaderInfo,
@@ -371,9 +382,61 @@ import {
   productObtainDataApi,
   productModifyDataApi,
 } from "@/api/product.js";
+import { getStaffColumnSetting, saveStaffColumnSetting } from "@/api/staff";
 import { erpConfig } from "@/api/erp";
 import { deliveryConfigApi, storeGetInfoApi } from '@/api/setting';
 import exportExcel from '@/utils/newToExcel.js';
+
+const PRODUCT_COLUMNS_META = [
+  { key: "id", title: "商品ID", width: 70 },
+  { key: "image", title: "商品图", width: 70 },
+  { key: "store_name", title: "商品名称", minWidth: 200 },
+  { key: "product_type", title: "商品类型", minWidth: 100 },
+  { key: "price", title: "商品售价", minWidth: 90 },
+  { key: "cost", title: "成本价", minWidth: 90 },
+  { key: "is_inventory", title: "参与库存管理", minWidth: 110 },
+  { key: "allow_negative_stock", title: "允许负库存", minWidth: 100 },
+  { key: "sort", title: "排序", minWidth: 70 },
+  { key: "state", title: "状态", width: 120 },
+  { key: "plate_name", title: "商品来源", minWidth: 150 },
+  { key: "sales", title: "销量", minWidth: 90 },
+  { key: "spec_type", title: "商品规格", minWidth: 90 },
+  { key: "cate_name", title: "商品分类", minWidth: 140 },
+  { key: "ot_price", title: "市场价格", minWidth: 90 },
+  { key: "collect", title: "收藏", minWidth: 80 },
+  { key: "ficti", title: "虚拟销量", minWidth: 90 },
+  { key: "is_vip", title: "付费会员", minWidth: 90 },
+  { key: "add_time", title: "创建时间", minWidth: 140 },
+  { key: "brand_com", title: "商品品牌", minWidth: 120 },
+  { key: "store_label_id", title: "商品标签", minWidth: 140 },
+  { key: "action", title: "操作", width: 150, fixed: true },
+];
+
+const PRODUCT_DEFAULT_COLUMN_CONFIG = [
+  { key: "id", show: true },
+  { key: "image", show: true },
+  { key: "store_name", show: true },
+  { key: "product_type", show: true },
+  { key: "price", show: true },
+  { key: "cost", show: true },
+  { key: "is_inventory", show: true },
+  { key: "allow_negative_stock", show: true },
+  { key: "sort", show: true },
+  { key: "state", show: true },
+  { key: "plate_name", show: false },
+  { key: "sales", show: false },
+  { key: "spec_type", show: false },
+  { key: "cate_name", show: false },
+  { key: "ot_price", show: false },
+  { key: "collect", show: false },
+  { key: "ficti", show: false },
+  { key: "is_vip", show: false },
+  { key: "add_time", show: false },
+  { key: "brand_com", show: false },
+  { key: "store_label_id", show: false },
+  { key: "action", show: true },
+];
+
 const allOptions = [
   {
     label: "批量上架",
@@ -410,9 +473,14 @@ export default {
     batchSet,
     adjustPrice,
     goodsImport,
+    ColumnSetting,
   },
   data() {
     return {
+      showColumnSetting: false,
+      columnsMeta: PRODUCT_COLUMNS_META,
+      columnConfig: PRODUCT_DEFAULT_COLUMN_CONFIG.map((item) => ({ ...item })),
+      defaultColumnConfig: PRODUCT_DEFAULT_COLUMN_CONFIG,
       routePre:Setting.routePre,
 	  props: { emitPath: false, multiple: true, checkStrictly: true },
       openErp:false,
@@ -494,6 +562,18 @@ export default {
     labelPosition() {
       return this.isMobile ? "top" : "right";
     },
+    visibleDataColumns() {
+      const cols = [];
+      this.columnConfig.forEach((item) => {
+        if (item.show === false || item.key === "action" || item.key === "stock") return;
+        const meta = PRODUCT_COLUMNS_META.find((m) => m.key === item.key);
+        if (meta) cols.push(meta);
+      });
+      return cols;
+    },
+    visibleColumnKey() {
+      return this.visibleDataColumns.map((c) => c.key).join(",");
+    },
     batchOptions() {
       return allOptions.filter((item) => {
         return item.value.includes(this.formValidate.type);
@@ -509,9 +589,87 @@ export default {
     this.getErpConfig();
     this.getDeliveryConfig();
     this.getStoreInfo();
+    this.loadColumnSetting();
   },
   methods: {
     ...mapMutations('store/user', ['setStoreCateList']),
+    formatTime(value) {
+      if (!value) return "";
+      const num = Number(value);
+      if (!num) return value;
+      const ms = num > 1e12 ? num : num * 1000;
+      const d = new Date(ms);
+      if (Number.isNaN(d.getTime())) return "";
+      const pad = (n) => (n < 10 ? "0" + n : "" + n);
+      return (
+        d.getFullYear() +
+        "-" +
+        pad(d.getMonth() + 1) +
+        "-" +
+        pad(d.getDate()) +
+        " " +
+        pad(d.getHours()) +
+        ":" +
+        pad(d.getMinutes())
+      );
+    },
+    formatBrand(row) {
+      if (Array.isArray(row.brand_name) && row.brand_name.length) {
+        return row.brand_name.map((b) => b.brand_name || b.label || b.name).filter(Boolean).join(",");
+      }
+      return row.brand_com || "";
+    },
+    formatStoreLabel(storeLabelId) {
+      if (!Array.isArray(storeLabelId)) return "";
+      return storeLabelId.map((item) => item.label_name).filter(Boolean).join(",");
+    },
+    loadColumnSetting() {
+      getStaffColumnSetting({ table_key: "product_list_store" })
+        .then((res) => {
+          const columns = res.data && res.data.columns;
+          if (Array.isArray(columns) && columns.length) {
+            this.columnConfig = this.mergeColumnConfig(columns);
+          }
+        })
+        .catch(() => {});
+    },
+    mergeColumnConfig(saved) {
+      const keySet = new Set(saved.map((c) => c.key));
+      const merged = saved
+        .filter((item) => item.key !== "stock" && PRODUCT_COLUMNS_META.some((m) => m.key === item.key))
+        .map((item) => {
+          const meta = PRODUCT_COLUMNS_META.find((m) => m.key === item.key) || {};
+          return {
+            key: item.key,
+            show: meta.fixed ? true : item.show !== false,
+          };
+        });
+      PRODUCT_DEFAULT_COLUMN_CONFIG.forEach((item) => {
+        if (item.key === "stock") return;
+        if (!keySet.has(item.key)) {
+          merged.push({ ...item });
+        }
+      });
+      return merged;
+    },
+    saveColumnConfig(columns) {
+      saveStaffColumnSetting({
+        table_key: "product_list_store",
+        columns,
+      })
+        .then((res) => {
+          this.$Message.success(res.msg || "保存成功");
+          this.columnConfig = columns;
+          this.$nextTick(() => {
+            if (this.$refs.xTable && this.$refs.xTable.refreshColumn) {
+              this.$refs.xTable.refreshColumn();
+            }
+          });
+        })
+        .catch((err) => {
+          this.$Message.error(err.msg || "保存失败");
+        });
+    },
 	changeMenu(row, name, rowIndex){
 		switch (name) {
 		  case "1":
@@ -1148,6 +1306,13 @@ export default {
     width: 100%;
     height: 100%;
   }
+}
+
+.product-name-cell {
+  white-space: normal;
+  word-break: break-all;
+  line-height: 1.4;
+  padding: 4px 0;
 }
 
 .search {

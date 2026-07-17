@@ -25,6 +25,8 @@ class StoreStockTransfer extends AuthController
             ['request_id', ''],
             ['from_store_id', ''],
             ['to_store_id', ''],
+            ['from_party_type', ''],
+            ['to_party_type', ''],
             ['keyword', ''],
             ['order_sn', ''],
         ]);
@@ -44,7 +46,9 @@ class StoreStockTransfer extends AuthController
         $data = $this->request->postMore([
             ['request_id', 0],
             ['from_store_id', 0],
+            ['from_party_type', 'store'],
             ['to_store_id', 0],
+            ['to_party_type', 'store'],
             ['transfer_staff_id', 0],
             ['remark', ''],
             ['details', []],

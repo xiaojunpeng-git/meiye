@@ -141,6 +141,8 @@
 			return {
 				routePre: Setting.routePre,
 				columns:inventoryDetails,
+				// 出入库共用筛：入库用原始 order_type；出库用 20+order_type（后端按 stock_type 解码）
+				// order_type=8 双语义：入库=调拨入库，出库编码 28=院装领用
 				orderType:[
 					{name:'初始入库',val:'6'},
 					{name:'采购入库',val:'1'},
@@ -148,13 +150,17 @@
 					{name:'退货入库',val:'3'},
 					{name:'盘盈入库',val:'5'},
 					{name:'残次品转良品',val:'4'},
+					{name:'院装退回',val:'7'},
+					{name:'调拨入库',val:'8'},
 					{name:'销售出库',val:'21'},
 					{name:'过期退货',val:'22'},
 					{name:'试用出库',val:'23'},
 					{name:'报废出库',val:'24'},
 					{name:'良品转残次品',val:'25'},
 					{name:'其他出库',val:'26'},
-					{name:'盘亏出库',val:'27'}
+					{name:'盘亏出库',val:'27'},
+					{name:'院装领用',val:'28'},
+					{name:'调拨出库',val:'29'}
 				],
 				goodsInfo:{},
 				product_id:0, //商品id

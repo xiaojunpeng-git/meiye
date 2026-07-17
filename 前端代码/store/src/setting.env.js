@@ -14,8 +14,8 @@
 const env = process.env.NODE_ENV;
 
 const Setting = {
-    // 是否使用 Mock 的数据，默认 开发环境为 true，生产环境为 false
-    isMock: env === 'development',
+    // 本地联调必须关闭：Mock 的 /api/login 会误匹配 storeapi/login，导致登录后异常
+    isMock: false,
     // 部署应用包时的基本 URL
     //publicPath: env === 'development' ? '/store/' : '/store/',
     publicPath: '/',

@@ -80,7 +80,8 @@
 							    :min="0"
 							    :max="9999999999"
 							    class="priceBox"
-								:precision="0"
+								:precision="qtyPrecision(row)"
+								:step="qtyPrecision(row) > 0 ? 0.01 : 1"
 								@on-change="goodsChange"
 							  ></InputNumber>
 							</template>
@@ -96,7 +97,8 @@
 							    :min="0"
 							    :max="9999999999"
 							    class="priceBox"
-								:precision="0"
+								:precision="qtyPrecision(row)"
+								:step="qtyPrecision(row) > 0 ? 0.01 : 1"
 								@on-change="defectiveChange"
 							  ></InputNumber>
 							</template>
@@ -210,6 +212,9 @@
 				}).catch(err=>{
 					this.$Message.error(err.msg);
 				})
+			},
+			qtyPrecision(row) {
+				return Number(row && row.decimal_scale) > 0 ? 2 : 0;
 			},
 			goodsChange(e){
 				this.goodsData.forEach(item=>{

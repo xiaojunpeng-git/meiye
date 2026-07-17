@@ -2941,6 +2941,10 @@ class ExportServices extends BaseServices
                 $filename = '商品出入库统计导出_' . date('YmdHis', time());
                 break;
         }
+        $hasStoreCount = !empty($data) && array_key_exists('store_count', $data[0] ?? []);
+        if ($hasStoreCount) {
+            array_splice($header, 1, 0, ['覆盖门店数']);
+        }
         $export = [];
         $filekey = [];
         if (!empty($data)) {
@@ -2952,6 +2956,9 @@ class ExportServices extends BaseServices
             $outStockTypes = $stockDetailServices->outStockTypes;
             foreach ($data as $key => $item) {
                 $one_data['product_id'] = $item['product_id'];
+                if ($hasStoreCount) {
+                    $one_data['store_count'] = $item['store_count'] ?? 0;
+                }
                 $one_data['product_name'] = $item['product_name'];
                 $one_data['sku'] = $item['sku'];
                 $one_data['code'] = $item['code'];

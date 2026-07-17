@@ -61,6 +61,7 @@ class StoreProductStockDetail extends AuthController
 		$where = $this->request->getMore([
 			['keyword', ''],//商品关键字
 			['stock_range', ''],//库存区间
+			['hide_zero', 1],//1库存0不展示 0全部
 		]);
 		$where['product_type'] = 0;
 		return $this->success($this->services->getProductAttrStatistics($where, 2, (int)$this->supplierId));
@@ -77,6 +78,7 @@ class StoreProductStockDetail extends AuthController
 		$where = $this->request->getMore([
 			['keyword', ''],//商品关键字
 			['stock_range', ''],//库存区间
+			['hide_zero', 1],//1库存0不展示 0全部
 		]);
 		$where['product_type'] = 0;
 		return $this->success($attrValueServices->getAttrValueList($where, 2, (int)$this->supplierId));

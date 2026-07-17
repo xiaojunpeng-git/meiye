@@ -62,9 +62,11 @@ class StoreProductStockDetail extends AuthController
 		$where = $this->request->getMore([
 			['keyword', ''],//商品关键字
 			['stock_range', ''],//库存区间
+			['hide_zero', 1],//1库存0不展示 0全部
+			['salon_stock_enabled', ''],//院装产品：''全部 1是 0否
 		]);
 		$where['product_type'] = 0;
-		return $this->success($this->services->getProductAttrStatistics($where, 1, (int)$this->storeId));
+		return $this->success($this->services->getProductAttrStatistics($where, 1, (int)$this->storeId, false, 0));
 	}
 
 	/**
@@ -77,6 +79,8 @@ class StoreProductStockDetail extends AuthController
 		$where = $this->request->getMore([
 			['keyword', ''],//商品关键字
 			['stock_range', ''],//库存区间
+			['hide_zero', 1],//1库存0不展示 0全部
+			['salon_stock_enabled', ''],//院装产品：''全部 1是 0否
 		]);
 		$where['product_type'] = 0;
 		return $this->success($attrValueServices->getAttrValueList($where, 1, (int)$this->storeId));

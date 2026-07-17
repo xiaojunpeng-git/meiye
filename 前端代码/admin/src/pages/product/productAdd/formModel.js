@@ -195,28 +195,16 @@ export const GoodsTableHead = [
     minWidth: '100px',
   },
   {
-    title: '库存单位',
+    title: '院装耗材单位',
     slot: 'stock_unit',
     align: 'center',
-    minWidth: '100px',
-  },
-  {
-    title: '销售单位',
-    slot: 'sale_unit',
-    align: 'center',
-    minWidth: '100px',
+    minWidth: '110px',
   },
   {
     title: '换算数',
     slot: 'unit_convert',
     align: 'center',
     minWidth: '120px',
-  },
-  {
-    title: '小数位',
-    slot: 'decimal_scale',
-    align: 'center',
-    minWidth: '90px',
   },
   {
     title: '默认选中规格',

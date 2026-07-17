@@ -93,11 +93,18 @@ class SalonStockWriteoffServices extends BaseServices
         // - aggregated：按最终门店 SKU 聚合用量，供统一锁序 / 扣料 / 台账 / 明细
         $snapshotLines = [];
         $aggregated = [];
+        /** @var StockQtyValidateServices $qtyValidate */
+        $qtyValidate = app()->make(StockQtyValidateServices::class);
         foreach ($details as $d) {
             $recipePid = (int)$d['consumable_product_id'];
             $recipeUnique = (string)$d['consumable_unique'];
-            $per = (string)$d['qty_per_writeoff'];
-            $qty = bcmul($per, $writeoffCount, 4);
+            // 院装耗材：单次用量与合计扣料均最多 2 位小数，禁止静默截断
+            try {
+                $per = $qtyValidate->assertQty($d['qty_per_writeoff'] ?? 0, 2, '院装配方用量');
+                $qty = $qtyValidate->assertQty(bcmul($per, (string)$writeoffCount, 4), 2, '院装扣料数量');
+            } catch (\mohe\exceptions\AdminException $e) {
+                throw new ValidateException($e->getMessage());
+            }
 
             if ($ownerType === 1) {
                 $finalPid = $recipePid;
@@ -130,7 +137,7 @@ class SalonStockWriteoffServices extends BaseServices
                     'stock_unit' => (string)($d['stock_unit'] ?? ''),
                 ];
             }
-            $aggregated[$key]['qty'] = bcadd($aggregated[$key]['qty'], $qty, 4);
+            $aggregated[$key]['qty'] = bcadd($aggregated[$key]['qty'], $qty, 2);
         }
         if (!$aggregated) {
             return; // 无有效扣料明细：不占用幂等键
@@ -172,7 +179,7 @@ class SalonStockWriteoffServices extends BaseServices
                 if (!$product || (int)($product['is_inventory'] ?? 0) !== 1) {
                     throw new ValidateException(sprintf('耗材未参与库存管理（商品ID %d），请先同步后再核销', $finalPid));
                 }
-                $scale = max(0, min(4, (int)($sku['decimal_scale'] ?? 0)));
+                $scale = max(0, min(2, (int)($sku['decimal_scale'] ?? 0)));
                 $available = (string)($sku['stock'] ?? '0');
                 $allowNegative = (int)($product['allow_negative_stock'] ?? 1) === 1;
                 if (!$allowNegative && bccomp($available, $qty, 4) < 0) {
@@ -457,8 +464,9 @@ class SalonStockWriteoffServices extends BaseServices
     }
 
     /**
-     * 解析启用配方（门店配方优先，回退平台配方）。
-     * 入参为订单购物车中的平台项目商品ID + 平台SKU unique；门店分支自动做平台→门店映射。
+     * 解析启用中的项目耗材配方。
+     * P0 口径：仅读取总部启用配方（type=0,relation_id=0）；忽略门店配方。
+     * $storeId 保留入参兼容，不参与选方（扣料仍只扣核销门店库存，见扣料主流程）。
      *
      * @return array{recipe:array,details:array,owner_type:int}|array
      */
@@ -469,21 +477,7 @@ class SalonStockWriteoffServices extends BaseServices
             return [];
         }
 
-        // 门店配方优先
-        if ($storeId > 0) {
-            [$storePid, $storeUnique] = $this->mapPlatformProjectToStore($platformProjectId, $platformUnique, $storeId);
-            if ($storePid > 0 && $storeUnique !== '') {
-                $recipe = $this->dao->findByOwnerProject(1, $storeId, $storePid, $storeUnique);
-                if ($recipe && (int)$recipe['status'] === StoreProjectConsumableRecipeServices::STATUS_ENABLED) {
-                    $detailRows = $this->detailDao->getByRecipeId((int)$recipe['id']);
-                    if ($detailRows) {
-                        return ['recipe' => $recipe, 'details' => $detailRows, 'owner_type' => 1];
-                    }
-                }
-            }
-        }
-
-        // 平台配方
+        // 口径：配方仅总部维护；门店配方忽略，核销统一执行总部启用配方（$storeId 不参与选方）
         $recipe = $this->dao->findByOwnerProject(0, 0, $platformProjectId, $platformUnique);
         if ($recipe && (int)$recipe['status'] === StoreProjectConsumableRecipeServices::STATUS_ENABLED) {
             $detailRows = $this->detailDao->getByRecipeId((int)$recipe['id']);
@@ -639,10 +633,10 @@ class SalonStockWriteoffServices extends BaseServices
         return stripos($msg, 'Duplicate') !== false || stripos($msg, '1062') !== false;
     }
 
-    protected function trimQty(string $qty, int $scale = 4): string
+    protected function trimQty(string $qty, int $scale = 2): string
     {
-        $scale = max(0, min(4, $scale));
-        $formatted = number_format((float)$qty, $scale, '.', '');
+        $scale = max(0, min(2, $scale));
+        $formatted = bcadd($qty, '0', $scale);
         if (str_contains($formatted, '.')) {
             $formatted = rtrim(rtrim($formatted, '0'), '.');
         }

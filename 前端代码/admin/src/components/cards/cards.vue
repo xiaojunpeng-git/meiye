@@ -45,8 +45,16 @@
               </div>
             </div>
             <div class="card_box_txt">
-              <span class="sp1" v-text="item.count || 0"></span>
-              <span class="sp2" v-text="item.name"></span>
+              <template v-if="item.split_display">
+                <span class="sp1">{{ item.normal_count != null ? item.normal_count : (item.count || 0) }}</span>
+                <span class="sp-sub">院：{{ item.salon_count != null ? item.salon_count : 0 }}</span>
+                <span class="sp-sub">合：{{ item.total_count != null ? item.total_count : (item.count || 0) }}</span>
+                <span class="sp2" v-text="item.name"></span>
+              </template>
+              <template v-else>
+                <span class="sp1" v-text="item.count || 0"></span>
+                <span class="sp2" v-text="item.name"></span>
+              </template>
             </div>
           </div>
         </Card>
@@ -75,7 +83,8 @@ export default {
 <style scoped lang="stylus">
 
 /deep/.ivu-card-body{
-	height: 110px;
+	min-height: 110px;
+	height: auto;
 }
 /deep/.card_box{
 	padding: 0 25px;
@@ -160,12 +169,23 @@ export default {
       display: block;
       color: #252631;
       font-size: 24px;
+      line-height: 1.2;
+      word-break: break-all;
+    }
+
+    .sp-sub {
+      display: block;
+      color: #667085;
+      font-size: 13px;
+      line-height: 1.35;
+      margin-top: 2px;
     }
 
     .sp2 {
       display: block;
       color: #98A9BC;
       font-size: 12px;
+      margin-top: 4px;
     }
   }
 }

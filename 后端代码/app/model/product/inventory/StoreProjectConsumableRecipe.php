@@ -16,6 +16,11 @@ class StoreProjectConsumableRecipe extends BaseModel
     protected $pk = 'id';
     protected $name = 'store_project_consumable_recipe';
 
+    /** add_time/update_time 为整型时间戳，禁止 ORM 按日期字符串格式化（否则 PHP7.4 DateTime 报错） */
+    protected $autoWriteTimestamp = false;
+    protected $createTime = false;
+    protected $updateTime = false;
+
     public function details()
     {
         return $this->hasMany(StoreProjectConsumableRecipeDetail::class, 'recipe_id', 'id');

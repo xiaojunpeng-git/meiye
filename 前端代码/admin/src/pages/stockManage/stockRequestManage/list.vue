@@ -38,16 +38,17 @@
 							<Option v-for="item in storeList" :value="item.id" :key="item.id">{{ item.name }}</Option>
 						</Select>
 					</FormItem>
-					<FormItem label="供货门店：">
+					<FormItem label="供货方：">
 						<Select
-							v-model="formValidate.supply_store_id"
+							v-model="supplyFilter"
 							placeholder="请选择"
 							clearable
 							filterable
-							@on-change="searchs"
+							@on-change="onSupplyFilterChange"
 							class="input-add"
 						>
-							<Option v-for="item in storeList" :value="item.id" :key="'s' + item.id">{{ item.name }}</Option>
+							<Option value="hq">总部仓</Option>
+							<Option v-for="item in storeList" :value="'s' + item.id" :key="'s' + item.id">{{ item.name }}</Option>
 						</Select>
 					</FormItem>
 					<FormItem label="单号：">
@@ -152,10 +153,12 @@
 			return {
 				roterPre: Setting.roterPre,
 				storeList: [],
+				supplyFilter: '',
 				formValidate: {
 					status: '',
 					request_store_id: '',
 					supply_store_id: '',
+					supply_party_type: '',
 					keyword: '',
 					page: 1,
 					limit: 15
@@ -173,7 +176,7 @@
 				columns: [
 					{ title: '请货单号', key: 'order_sn', minWidth: 160 },
 					{ title: '请货门店', key: 'request_store_name', minWidth: 120 },
-					{ title: '供货门店', key: 'supply_store_name', minWidth: 120 },
+					{ title: '供货方', key: 'supply_store_name', minWidth: 120 },
 					{ title: '请货时间', key: 'request_date', minWidth: 110 },
 					{ title: '请货人', key: 'request_staff_name', minWidth: 100, render: (h, { row }) => h('span', row.request_staff_name || row.admin_name || '-') },
 					{ title: '创建人', key: 'create_admin_name', minWidth: 100, render: (h, { row }) => h('span', row.create_admin_name || '-') },
@@ -203,12 +206,25 @@
 		},
 		created() {
 			this.getStores();
+			this.applyRouteQuery();
 			this.getList();
 		},
 		methods: {
 			statusColor(status) {
 				const map = { 0: 'default', 1: 'blue', 2: 'orange', 3: 'green', 4: 'red', 5: 'default' };
 				return map[status] || 'default';
+			},
+			applyRouteQuery() {
+				const status = this.$route.query.status;
+				const supplyParty = this.$route.query.supply_party_type;
+				if (status !== undefined && status !== null && status !== '') {
+					this.formValidate.status = String(status);
+				}
+				if (supplyParty === 'hq') {
+					this.supplyFilter = 'hq';
+					this.formValidate.supply_party_type = 'hq';
+					this.formValidate.supply_store_id = '';
+				}
 			},
 			getStores() {
 				merchantStoreListApi().then(res => {
@@ -228,15 +244,30 @@
 					this.$Message.error(err.msg || '加载失败');
 				});
 			},
+			onSupplyFilterChange(val) {
+				if (val === 'hq') {
+					this.formValidate.supply_party_type = 'hq';
+					this.formValidate.supply_store_id = '';
+				} else if (val && String(val).indexOf('s') === 0) {
+					this.formValidate.supply_party_type = '';
+					this.formValidate.supply_store_id = Number(String(val).slice(1)) || '';
+				} else {
+					this.formValidate.supply_party_type = '';
+					this.formValidate.supply_store_id = '';
+				}
+				this.searchs();
+			},
 			searchs() {
 				this.formValidate.page = 1;
 				this.getList();
 			},
 			reset() {
+				this.supplyFilter = '';
 				this.formValidate = {
 					status: '',
 					request_store_id: '',
 					supply_store_id: '',
+					supply_party_type: '',
 					keyword: '',
 					page: 1,
 					limit: 15
@@ -268,7 +299,7 @@
 			confirmApply(row) {
 				this.$Modal.confirm({
 					title: '确认申请',
-					content: '确认后将通知供货门店，不会变动库存。确定继续？',
+					content: '确认后：供货方为门店时通知供货门店，为总部仓时生成平台待办；不会变动库存。确定继续？',
 					onOk: () => {
 						stockRequestConfirmApi(row.id).then(res => {
 							this.$Message.success(res.msg || '已确认申请');

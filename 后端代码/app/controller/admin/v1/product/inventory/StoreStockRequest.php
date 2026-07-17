@@ -25,6 +25,7 @@ class StoreStockRequest extends AuthController
             ['status', ''],
             ['request_store_id', ''],
             ['supply_store_id', ''],
+            ['supply_party_type', ''],
             ['keyword', ''],
             ['order_sn', ''],
         ]);
@@ -43,7 +44,9 @@ class StoreStockRequest extends AuthController
     {
         $data = $this->request->postMore([
             ['request_store_id', 0],
+            ['request_party_type', 'store'],
             ['supply_store_id', 0],
+            ['supply_party_type', 'store'],
             ['request_date', ''],
             ['request_staff_id', 0],
             ['remark', ''],
@@ -95,17 +98,27 @@ class StoreStockRequest extends AuthController
      */
     public function sharedSkus(StoreStockCrossSkuServices $cross)
     {
-        [$storeA, $storeB, $keyword, $page, $limit] = $this->request->getMore([
+        [$storeA, $storeB, $keyword, $page, $limit, $partyA, $partyB] = $this->request->getMore([
             ['store_a', 0],
             ['store_b', 0],
             ['keyword', ''],
             ['page', 1],
             ['limit', 20],
+            ['party_a', 'store'],
+            ['party_b', 'store'],
         ], true);
-        return $this->success($cross->listSharedSkus((int)$storeA, (int)$storeB, (string)$keyword, (int)$page, (int)$limit));
+        return $this->success($cross->listSharedSkus(
+            (int)$storeA,
+            (int)$storeB,
+            (string)$keyword,
+            (int)$page,
+            (int)$limit,
+            (string)$partyA,
+            (string)$partyB
+        ));
     }
 
-    /** 请货待办角标 */
+    /** 请货待办角标（总部仓=平台首页待办，非站内信） */
     public function pendingBadge()
     {
         $count = $this->services->pendingSupplyCount(0);
@@ -114,16 +127,23 @@ class StoreStockRequest extends AuthController
         return $this->success([
             'pending_supply' => $count,
             'failed_notice' => $notice->failedNoticeCount(0),
+            // 总部仓通知渠道：仅平台首页待办，不伪造 system_message
+            'hq_notice_channel' => 'platform_homepage_todo',
         ]);
     }
 
-    /** 手动触发通知重试扫描（含最终失败可再投） */
+    /** 手动触发门店站内信重试扫描（总部仓无站内信，queued_failed 恒为 0） */
     public function retryNotice()
     {
         /** @var \app\services\product\inventory\StoreStockRequestNoticeServices $notice */
         $notice = app()->make(\app\services\product\inventory\StoreStockRequestNoticeServices::class);
         $pending = $notice->retryDue(50);
+        // storeId=0：明确不重试总部仓（无站内信通道）
         $failed = $notice->retryFailed(50, 0);
-        return $this->success('已投递重试', ['queued_pending' => $pending, 'queued_failed' => $failed]);
+        return $this->success('已投递重试', [
+            'queued_pending' => $pending,
+            'queued_failed' => $failed,
+            'hq_notice_channel' => 'platform_homepage_todo',
+        ]);
     }
 }

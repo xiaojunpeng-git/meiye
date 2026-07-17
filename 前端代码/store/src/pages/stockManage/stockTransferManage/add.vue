@@ -114,7 +114,8 @@
 							:value="skuList[index] ? skuList[index].qty : 0"
 							:min="0"
 							:max="row.max_qty != null ? Number(row.max_qty) : 999999"
-							:precision="0"
+							:precision="qtyPrecision(row)"
+							:step="qtyPrecision(row) > 0 ? 0.01 : 1"
 							class="priceBox"
 							@on-change="val => onQtyChange(index, row, val)"
 						/>
@@ -437,6 +438,9 @@
 				this.cacheQty();
 				this.formValidate.page = page;
 				this.loadSharedSkus();
+			},
+			qtyPrecision(row) {
+				return Number(row && row.decimal_scale) > 0 ? 2 : 0;
 			},
 			onQtyChange(index, row, val) {
 				const qty = Number(val) || 0;

@@ -93,9 +93,19 @@ class SystemStoreServices extends BaseServices
         $weixinFileName = "wechat_store_cate_id_" . $id . ".png";
         /** @var QrcodeServices $QrcodeService */
         $QrcodeService = app()->make(QrcodeServices::class);
-        $wechatQrcode = $QrcodeService->getWechatQrcodePath($weixinFileName, $weixinPage, false, false);
-        //生成小程序地址
-        $routineQrcode = $QrcodeService->getRoutineQrcodePath($id, 0, 10, $weixinFileName, true, ['staff_id' => $staff_id]);
+        $wechatQrcode = '';
+        $routineQrcode = '';
+        try {
+            $wechatQrcode = $QrcodeService->getWechatQrcodePath($weixinFileName, $weixinPage, false, false) ?: '';
+        } catch (\Throwable $e) {
+            $wechatQrcode = '';
+        }
+        try {
+            //生成小程序地址（本地无外网/微信配置时返回 false，不得中断门店 info）
+            $routineQrcode = $QrcodeService->getRoutineQrcodePath($id, 0, 10, $weixinFileName, true, ['staff_id' => $staff_id]) ?: '';
+        } catch (\Throwable $e) {
+            $routineQrcode = '';
+        }
         return ['wechat' => $wechatQrcode, 'routine' => $routineQrcode, 'url' => $weixinPage];
     }
 
@@ -121,7 +131,12 @@ class SystemStoreServices extends BaseServices
             $storeInfo['store_svip_order_rate'] = sys_config('store_svip_order_rate');
             $storeInfo['store_recharge_order_rate'] = sys_config('store_recharge_order_rate');
         }
-        $storeInfo['qrcode'] = $this->getStoreQrcode($id);
+        try {
+            $storeInfo['qrcode'] = $this->getStoreQrcode($id);
+        } catch (\Throwable $e) {
+            // 二维码依赖微信/外网；失败不影响门店基础信息（请货/调拨等页依赖本接口）
+            $storeInfo['qrcode'] = ['wechat' => '', 'routine' => '', 'url' => ''];
+        }
         $storeInfo['day_time'] = $storeInfo['day_time'] ? explode('-', $storeInfo['day_time']) : [];
         $storeInfo['addressSelect'] = [$storeInfo['province'], $storeInfo['city'], $storeInfo['area'], $storeInfo['street']];
         return $storeInfo;

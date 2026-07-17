@@ -35,13 +35,13 @@
         <span class="addClass" @click="addBrand">新增品牌</span>
       </div>
     </FormItem>
-    <FormItem label="单位：" prop="unit_name" :rules="ruleValidate.unit_name">
+    <FormItem label="销售/包装单位：" prop="unit_name" :rules="ruleValidate.unit_name">
       <Select
         v-model="formValidate.unit_name"
         clearable
         filterable
         v-width="'50%'"
-        placeholder="请输入单位"
+        placeholder="请输入销售/包装单位"
         @on-change="unitChange"
       >
         <Option
@@ -52,6 +52,7 @@
         >
       </Select>
       <span class="addClass" @click="addUnit">新增单位</span>
+      <div class="tips">对外销售或包装计量单位，如盒、瓶；库存按基本单位记账时与换算数配合使用</div>
     </FormItem>
     <FormItem label="商品编码：" prop="" v-if="baseInfo.product_type !=6 && baseInfo.product_type !=5">
       <Input
@@ -59,11 +60,6 @@
         placeholder="请输入商品编码"
         v-width="'50%'"
       />
-    </FormItem>
-    <FormItem label="增项服务时长：" v-if="baseInfo.product_type == 0">
-      <InputNumber :min="0" :max="9999" :precision="0" v-model="formValidate.addon_service_duration" class="w-160" />
-      <span class="ml-10">分钟</span>
-      <div class="tips">作为预约加项被选中时计入预约总时长</div>
     </FormItem>
     <FormItem label="商品轮播图：" prop="slider_image" :rules="ruleValidate.slider_image">
       <div class="acea-row">
@@ -343,7 +339,7 @@ export default {
           {
             validator: (rule, value, callback) => {
               if (this.currentTab == '1' && !this.formValidate.unit_name) {
-                callback(new Error('请输入单位'));
+                callback(new Error('请输入销售/包装单位'));
               } else {
                 callback();
               }
