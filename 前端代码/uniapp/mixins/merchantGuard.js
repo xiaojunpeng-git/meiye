@@ -1,8 +1,5 @@
 import { mapGetters } from 'vuex';
 
-/**
- * 商家端页面守卫：无商家入口权限回买家首页；有入口但缺页权限由页面自行处理
- */
 export default {
 	computed: {
 		...mapGetters(['isLogin']),
@@ -56,7 +53,7 @@ export default {
 			if (permission && permission !== 'merchant.enter' && !this.hasMerchantPermission(permission)) {
 				if (fallbackMerchantHome) {
 					uni.showToast({ title: '暂无该功能权限', icon: 'none' });
-					uni.redirectTo({ url: '/pages/merchant/home/index' });
+					uni.redirectTo({ url: '/pages/merchant/data/index' });
 				}
 				return false;
 			}

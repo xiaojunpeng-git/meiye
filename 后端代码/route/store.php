@@ -820,7 +820,7 @@ Route::group('storeapi', function () {
         Route::get('vip/status/:id', 'order.PayVipOrder/status')->name('getStatusList')->option(['real_name' => '获取会员状态']);
         //保存会员备注
         Route::put('vip/remark/:id', 'order.PayVipOrder/remark')->name('remarkSave')->option(['real_name' => '保存会员备注']);
-        Route::put('postChexiao/:id', 'order.order/postChexiao')->name('postChexiao')->option(['real_name' => '保存会员备注']);
+        Route::put('postChexiao/:id', 'order.order/postChexiao')->name('postChexiao')->option(['real_name' => '撤销本次核销（兼容旧入口）']);
         Route::put('getCash', 'order.order/getCash')->name('getCash')->option(['real_name' => '保存会员备注']);
         //打印订单
         Route::get('print/:id', 'order.Order/order_print')->name('StoreOrderPrint')->option(['real_name' => '打印订单']);
@@ -874,8 +874,17 @@ Route::group('storeapi', function () {
         Route::get('refund/:id', 'order.Order/refund')->name('StoreOrderRefund')->option(['real_name' => '订单退款表单']);
         //订单退款
         Route::put('refund/:id', 'order.Order/update_refund')->name('StoreOrderUpdateRefund')->option(['real_name' => '订单退款']);
-        //后台拆单退款
+        //后台拆单退款（兼容：已收口为整单退款+终态）
         Route::put('open/refund/:id', 'order.Order/open_order_refund')->name('StoreOrderUpdateRefund')->option(['real_name' => '后台拆单退款']);
+        //整单退款（阶段2）：本分组前缀已是 order，勿再写 order/ 以免变成 order/order/:id/...
+        Route::post(':id/refund', 'order.Order/terminal_order_refund')->option(['real_name' => '整单退款']);
+        //整单作废（阶段3）
+        Route::post(':id/void', 'order.Order/terminal_order_void')->option(['real_name' => '整单作废']);
+        //重新开单草稿（阶段4）
+        Route::post(':id/reopen', 'order.Order/terminal_order_reopen')->option(['real_name' => '创建或获取重开草稿']);
+        Route::get('reopen/:token', 'order.Order/terminal_order_reopen_load')->option(['real_name' => '加载重开草稿']);
+        //撤销本次核销（阶段3明确入口；旧 postChexiao 保留）
+        Route::put('writeoff/:subOrderId/cancel', 'order.Order/cancel_writeoff')->option(['real_name' => '撤销本次核销']);
         //快递公司电子面单模版
         Route::get('express/temp', 'order.Order/express_temp')->option(['real_name' => '快递公司电子面单模版']);
         //获取物流信息

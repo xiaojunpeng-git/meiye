@@ -1,7 +1,7 @@
 <template>
 	<view class="merchant-page">
 		<view class="merchant-page__body">
-			<!-- A. 身份栏 -->
+			
 			<view class="identity" @click="openContextSheet">
 				<view class="identity__main">
 					<view class="identity__name">{{ storeTitle }}</view>
@@ -15,7 +15,7 @@
 				</view>
 			</view>
 
-			<!-- B. 今日经营 / 我的业绩（本人为个人业绩 6 项，店级为 3 项） -->
+			
 			<view
 				v-if="showMetrics"
 				class="card metrics"
@@ -51,7 +51,7 @@
 				<view v-if="metricsExtra" class="metrics__extra">{{ metricsExtra }}</view>
 			</view>
 
-			<!-- C. 待办 -->
+			
 			<view v-if="todoList.length || todoNote" class="card">
 				<view class="card__head">
 					<text class="card__title">待办提醒</text>
@@ -71,7 +71,7 @@
 				<view v-if="todoNote" class="metrics__extra">{{ todoNote }}</view>
 			</view>
 
-			<!-- D. 高频操作 -->
+			
 			<view class="card">
 				<view class="card__head">
 					<text class="card__title">高频操作</text>
@@ -92,7 +92,7 @@
 				</view>
 			</view>
 
-			<!-- E. 今日预约 -->
+			
 			<view v-if="showReservation" class="card">
 				<view class="card__head">
 					<text class="card__title">今日预约</text>
@@ -117,7 +117,7 @@
 				<view v-else class="empty-tip">今日暂无预约</view>
 			</view>
 
-			<!-- 配送员裁剪提示 -->
+			
 			<view v-if="isDeliveryOnly" class="card">
 				<view class="card__title">配送工作</view>
 				<view class="empty-tip">请从工作台进入配送任务</view>
@@ -125,7 +125,7 @@
 			</view>
 		</view>
 		<merchant-switch side="merchant" />
-		<merchant-tab-bar current="home" />
+		<merchant-tab-bar current="workbench" />
 	</view>
 </template>
 
@@ -227,7 +227,7 @@ export default {
 		todoList() {
 			const list = [];
 			const t = this.todoCounts;
-			// 1. 预约
+			
 			if (this.showReservation) {
 				if (t.reservation_developing) {
 					list.push({
@@ -244,7 +244,7 @@ export default {
 					});
 				}
 			}
-			// 2. 订单类合并：待售后 + 待发货 → 订单待处理（不扩新口径）
+			
 			const refunding = Number(t.refunding) || 0;
 			const unshipped = Number(t.unshipped) || 0;
 			const orderPending = refunding + unshipped;
@@ -258,7 +258,7 @@ export default {
 					meta: { refunding, unshipped },
 				});
 			}
-			// 3. 库存预警
+			
 			if (Number(t.policeforce) > 0) {
 				list.push({
 					name: '库存预警',
@@ -266,7 +266,7 @@ export default {
 					url: '/pages/admin/goods/index?type=5',
 				});
 			}
-			// 4. 欠款
+			
 			if (this.hasMerchantPermission('merchant.debt.view')) {
 				if (t.debt_developing) {
 					list.push({
@@ -285,7 +285,7 @@ export default {
 			}
 			return list;
 		},
-		/** 首页主区最多露出 3 项；其余进「全部」 */
+		
 		todoPreview() {
 			return this.todoList.slice(0, 3);
 		},
@@ -295,15 +295,13 @@ export default {
 			};
 			const all = [
 				{ name: '扫码核销', icon: 'icon-ic_Scan', action: 'scan', need: 'cancel' },
-				// 代客下单旧链路无 merchant.scope_store_ids Guard，暂不可作商家收银入口（Codex FAIL）
 				{ name: '开单收银', icon: 'icon-ic_order', action: 'developing', need: '' },
-				// 开卡/充值/续卡真收银在 PC；移动端整链未就绪
 				{ name: '开卡充值', icon: 'icon-ic_user1', action: 'developing', need: '' },
 				{ name: '预约', icon: 'icon-ic_clock', action: 'url', url: '/pages/admin/reservation_list/index?merchant=1', need: 'rsv' },
-				{ name: '添加客户', icon: 'icon-ic_user', action: 'url', url: '/pages/merchant/customer/index?action=add', need: 'customer_create' },
+				{ name: '添加客户', icon: 'icon-ic_user', action: 'developing', need: 'customer_create' },
 				{ name: '订单管理', icon: 'icon-ic_order1', action: 'url', url: '/pages/admin/orderList/index', need: 'order' },
 				{ name: '补交欠款', icon: 'icon-ic_money', action: 'url', url: '/pages/merchant/debt/index', need: 'debt' },
-				{ name: '工作台', icon: 'icon-ic_home', action: 'url', url: '/pages/merchant/workbench/index', need: '', badge: badgeMap.workbench },
+				{ name: '全部功能', icon: 'icon-ic_home', action: 'url', url: '/pages/merchant/workbench/index', need: '', badge: badgeMap.workbench },
 			];
 			return all.filter((s) => this.shortcutVisible(s)).slice(0, 8);
 		},
@@ -396,7 +394,7 @@ export default {
 		goWorkbench() {
 			uni.navigateTo({ url: '/pages/merchant/workbench/index' });
 		},
-		/** 全部待办：列出完整项并可跳转；无待办时回退工作台 */
+		
 		goAllTodos() {
 			const list = this.todoList || [];
 			if (!list.length) {
@@ -453,7 +451,7 @@ export default {
 		applyHomePayload(data) {
 			const metrics = Array.isArray(data.metrics) ? data.metrics : [];
 			this.metricsMode = data.metrics_mode === 'staff_self' ? 'staff_self' : 'store';
-			// 本人：个人业绩 6 项全展示；店级：仍取三指标（接口本身 3 条）
+			
 			this.metricList = metrics.map((m) => ({
 				...m,
 				developing: !!(m.developing || data.metrics_developing),

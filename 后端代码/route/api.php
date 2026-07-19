@@ -127,10 +127,10 @@ Route::group('api', function () {
 		Route::get('products', 'v1.product.StoreProduct/lst')->name('products');//商品列表
 		Route::get('product/hot', 'v1.product.StoreProduct/product_hot')->name('productHot');//为你推荐
 		Route::get('reply/comment/:id', 'v1.product.StoreProductReply/commentList')->name('commentList');//评价回复列表
-		//预约商品
-		Route::get('reservation/product/detail/:id', 'v1.product.StoreProductReservation/getReservationProductInfo')->name('getReservationProductInfo');//预约商品、sku详情
-		Route::get('reservation/product/date/:id','v1.product.StoreProductReservation/getReservationProductDate')->name('getReservationProductDate');//获取预约商品可预约日期时间
-		Route::get('reservation/product/times_stock/:id','v1.product.StoreProductReservation/getReservationProductTimeStock')->name('getReservationProductTimeStock');//预约商品时段划分库存
+		//项目
+		Route::get('reservation/product/detail/:id', 'v1.product.StoreProductReservation/getReservationProductInfo')->name('getReservationProductInfo');//项目、sku详情
+		Route::get('reservation/product/date/:id','v1.product.StoreProductReservation/getReservationProductDate')->name('getReservationProductDate');//获取项目可预约日期时间
+		Route::get('reservation/product/times_stock/:id','v1.product.StoreProductReservation/getReservationProductTimeStock')->name('getReservationProductTimeStock');//项目时段划分库存
 		Route::post('reservation/product/compute', 'v1.product.StoreProductReservation/reservationCompute')->name('reservationCompute'); //购物车列表重新计算
 		Route::get('reservation/staff/list', 'v1.reservation.ReservationStaff/list')->name('reservationStaffList');//预约服务人员列表（按门店，无距离筛选）
 		Route::get('reservation/staff/available_time', 'v1.reservation.ReservationStaff/availableTime')->name('reservationStaffAvailableTime');//员工已被占用时段
@@ -918,7 +918,8 @@ Route::group('api', function () {
 			Route::get('export_all', 'admin.order.StoreOrder/getExportAll')->name('getExportAll');//获取物流公司
 			Route::get('split_cart_info/:id', 'admin.order.StoreOrder/split_cart_info')->name('StoreOrderSplitCartInfo')->option(['real_name' => '获取订单可拆分商品列表']);//获取订单可拆分商品列表
 			Route::put('split_delivery/:id', 'admin.order.StoreOrder/split_delivery')->middleware(BlockerMiddleware::class)->name('StoreOrderSplitDelivery')->option(['real_name' => '拆单发送货']);//拆单发送货
-			Route::post('open/refund/:id', 'admin.order.StoreOrder/open_order_refund')->middleware(BlockerMiddleware::class)->name('openOrderRefund')->option(['real_name' => '拆单退款']);//拆单退款
+			Route::post('open/refund/:id', 'admin.order.StoreOrder/open_order_refund')->middleware(BlockerMiddleware::class)->name('openOrderRefund')->option(['real_name' => '拆单退款']);//拆单退款（兼容：后端收口整单）
+			Route::post(':id/refund', 'admin.order.StoreOrder/terminal_order_refund')->middleware(BlockerMiddleware::class)->option(['real_name' => '手机管理端整单退款']);
 			//订单核销
 			Route::post('order_verific', 'admin.order.StoreOrder/order_verific')->middleware(BlockerMiddleware::class)->name('order');//订单核销
 			Route::post('writeoff/records/:id', 'admin.order.StoreOrder/writeOffRecords')->middleware(BlockerMiddleware::class)->name('writeOffRecords')->option(['real_name' => '订单核销记录']);//订单核销记录

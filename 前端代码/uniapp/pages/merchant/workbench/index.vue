@@ -27,12 +27,6 @@
 <script>
 import merchantGuard from '@/mixins/merchantGuard.js';
 
-/**
- * 工作台入口裁剪：对齐首页 shortcutVisible +「我的」workMenus
- * - 配送员：仅扫码核销、配送任务
- * - 店员无店级数据权：隐藏订单/售后/商品
- * - 平台客服：保留订单类，隐藏商品/预约/老师/推广
- */
 export default {
 	mixins: [merchantGuard],
 	data() {
@@ -62,7 +56,7 @@ export default {
 				{
 					title: '数据与业绩',
 					items: [
-						{ name: '数仓', icon: 'icon-ic_order', url: '/pages/merchant/data/index', redirect: true, need: 'data_hub' },
+						{ name: '首页', icon: 'icon-ic_order', url: '/pages/merchant/data/index', redirect: true, need: 'data_hub' },
 						{ name: '门店业绩', icon: 'icon-ic_star', url: '/pages/admin/yeji/store', perm: 'merchant.data.store' },
 						{ name: '个人业绩', icon: 'icon-ic_star1', url: '/pages/merchant/yeji/self', perm: 'merchant.data.self' },
 						{ name: '区域统计', icon: 'icon-ic_home', url: '/pages/admin/agent/index', perm: 'merchant.data.region' },

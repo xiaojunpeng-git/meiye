@@ -12,132 +12,34 @@
 		</view>
 
 		<view class="merchant-page__body">
-			<view v-if="loading" class="state">加载中…</view>
-
-			<!-- 经营数据 -->
-			<template v-else-if="tab === 'business'">
-				<view class="card" v-if="businessDenied">
-					<view class="empty">暂无经营数据权限</view>
-				</view>
-				<template v-else>
-					<view class="scope-bar" v-if="scopeText">
-						<text>范围：{{ scopeText }}</text>
-						<text v-if="business.updated_at"> · 更新于 {{ business.updated_at }}</text>
-					</view>
-					<view class="card">
-						<view class="card__head">
-							<text class="card__title">{{ businessTitle }}</text>
-							<text class="card__sub">{{ dateFilter.display }}</text>
-						</view>
+			<template v-if="tab === 'business'">
+				<business-board
+					ref="businessBoard"
+					:date-filter="dateFilter"
+					:active="tab === 'business'"
+				/>
+				<view class="card" v-if="detailMenus.length">
+					<view class="card__title">明细入口</view>
+					<view class="menu">
 						<view
-							class="metrics__row"
-							:class="{ 'metrics__row--wrap': primaryMetrics.length > 3 }"
-							v-if="primaryMetrics.length"
-						>
-							<view
-								class="metrics__item"
-								:class="{ 'metrics__item--third': primaryMetrics.length > 3 }"
-								v-for="(m, i) in primaryMetrics"
-								:key="m.metric_code || i"
-								@click="onMetricTap(m)"
-							>
-								<view class="metrics__label">
-									{{ m.title }}
-									<text
-										v-if="m.tooltip_api"
-										class="tip"
-										@click.stop="onTooltip(m)"
-									>ⓘ</text>
-								</view>
-								<view class="metrics__value">{{ formatMetric(m) }}</view>
-								<view class="metrics__sub" v-if="m.developing">口径开发中</view>
-								<view class="metrics__sub" v-else-if="m.detail_developing">明细开发中</view>
-							</view>
-						</view>
-						<view class="hint" v-if="business.note || business.primary_developing">
-							{{ business.note || (isStaffSelfMetrics ? '口径与「个人业绩」页一致' : '当前身份仅可看本人数据') }}
-						</view>
-						<view class="empty" v-if="!primaryMetrics.length">暂无数据</view>
-					</view>
-					<view class="card" v-if="secondaryMetrics.length">
-						<view class="card__title">其他指标</view>
-						<view
-							v-for="(m, i) in secondaryMetrics"
-							:key="m.metric_code || i"
+							v-for="(item, i) in detailMenus"
+							:key="i"
 							class="menu__item"
-							@click="onMetricTap(m)"
+							@click="onMenu(item)"
 						>
 							<view>
-								<view class="menu__name">
-									{{ m.title }}
-									<text
-										v-if="m.tooltip_api && !m.developing"
-										class="tip"
-										@click.stop="onTooltip(m)"
-									>ⓘ</text>
-								</view>
-								<view class="menu__desc" v-if="m.developing">口径开发中</view>
-								<view class="menu__desc" v-else>
-									{{ formatMoney(m.number) }}
-									<text v-if="m.detail_developing" class="menu__sub"> · 明细开发中</text>
-								</view>
+								<view class="menu__name">{{ item.name }}</view>
+								<view class="menu__desc">{{ item.desc }}</view>
 							</view>
 							<text class="menu__arrow">›</text>
 						</view>
 					</view>
-					<view class="card" v-if="showStoreRanking">
-						<view class="card__head">
-							<text class="card__title">门店排行</text>
-							<text class="card__sub">{{ dateFilter.display }}</text>
-						</view>
-						<view class="rank-tabs">
-							<view
-								v-for="t in rankingTabs"
-								:key="t.key"
-								class="rank-tab"
-								:class="{ active: rankingTab === t.key }"
-								@click="rankingTab = t.key"
-							>{{ t.name }}</view>
-						</view>
-						<view class="rank-head" v-if="currentRanking.length">
-							<text>门店</text>
-							<text>金额</text>
-						</view>
-						<view
-							v-for="(item, i) in currentRanking"
-							:key="(item.store_id || i) + '-' + rankingTab"
-							class="rank-row"
-						>
-							<view class="rank-row__name">
-								<text class="rank-row__idx">{{ i + 1 }}</text>
-								{{ item.name || ('门店#' + item.store_id) }}
-							</view>
-							<text class="rank-row__num">{{ formatMoney(item.number) }}</text>
-						</view>
-						<view class="hint" v-if="storeRanking.note">{{ storeRanking.note }}</view>
-						<view class="empty" v-if="!currentRanking.length">暂无排行</view>
-					</view>
-					<view class="card" v-if="detailMenus.length">
-						<view class="card__title">明细入口</view>
-						<view class="menu">
-							<view
-								v-for="(item, i) in detailMenus"
-								:key="i"
-								class="menu__item"
-								@click="onMenu(item)"
-							>
-								<view>
-									<view class="menu__name">{{ item.name }}</view>
-									<view class="menu__desc">{{ item.desc }}</view>
-								</view>
-								<text class="menu__arrow">›</text>
-							</view>
-						</view>
-					</view>
-				</template>
+				</view>
 			</template>
 
-			<!-- 客户分析 -->
+			<view v-else-if="loading" class="state">加载中…</view>
+
+
 			<template v-else-if="tab === 'customer'">
 				<view class="card" v-if="!canCustomerView">
 					<view class="empty">暂无客户分析权限</view>
@@ -165,7 +67,7 @@
 				</view>
 			</template>
 
-			<!-- 员工业绩 -->
+
 			<template v-else-if="tab === 'staff_perf'">
 				<view class="card">
 					<view class="card__title">员工业绩</view>
@@ -187,7 +89,7 @@
 				</view>
 			</template>
 
-			<!-- 员工统计（仅 store/region；普通店员不展示页签） -->
+
 			<template v-else-if="tab === 'staff_stats'">
 				<view class="card" v-if="staffStatsDenied">
 					<view class="empty">暂无员工统计权限</view>
@@ -219,14 +121,15 @@
 				</view>
 			</template>
 
-			<!-- 品项分析 -->
+
 			<template v-else>
 				<view class="card">
 					<view class="empty">品项分析聚合层尚未统一，功能开发中</view>
 				</view>
 			</template>
 		</view>
-		<merchant-tab-bar current="data" />
+		<merchant-switch side="merchant" />
+		<merchant-tab-bar current="home" />
 	</view>
 </template>
 
@@ -234,8 +137,9 @@
 import merchantGuard from '@/mixins/merchantGuard.js';
 import merchantTabBar from '@/components/merchantTabBar/index.vue';
 import merchantDateFilter from '@/components/merchantDateFilter/index.vue';
+import merchantSwitch from '@/components/merchantSwitch/index.vue';
+import BusinessBoard from './components/BusinessBoard.vue';
 import {
-	merchantDataBusiness,
 	merchantDataCustomer,
 	merchantDataStaffStats,
 } from '@/api/merchant.js';
@@ -243,7 +147,7 @@ import request from '@/utils/request.js';
 
 export default {
 	mixins: [merchantGuard],
-	components: { merchantTabBar, merchantDateFilter },
+	components: { merchantTabBar, merchantDateFilter, merchantSwitch, BusinessBoard },
 	data() {
 		const today = new Date();
 		const pad = (n) => (n < 10 ? '0' + n : '' + n);
@@ -263,17 +167,10 @@ export default {
 				end_date: s,
 				display: '今天',
 			},
-			business: {},
 			customer: {},
 			staffStats: {},
 			loading: false,
 			loadSeq: 0,
-			rankingTab: 'cash',
-			rankingTabs: [
-				{ key: 'cash', name: '现金业绩' },
-				{ key: 'actual', name: '实际业绩' },
-				{ key: 'consume', name: '客户消耗' },
-			],
 		};
 	},
 	computed: {
@@ -288,7 +185,7 @@ export default {
 				['merchant.data.self', 'merchant.data.store', 'merchant.data.region'].includes(p)
 			);
 		},
-		/** 整店/区域聚合：员工统计禁止仅 data.self */
+
 		canStaffStats() {
 			return this.perms.includes('merchant.data.store')
 				|| this.perms.includes('merchant.data.region');
@@ -296,48 +193,11 @@ export default {
 		canCustomerView() {
 			return this.perms.includes('merchant.customer.view');
 		},
-		businessDenied() {
-			return !this.canDataAny;
-		},
 		staffStatsDenied() {
 			return !this.canStaffStats;
 		},
 		tabs() {
 			return (this.allTabs || []).filter((t) => !t.needStoreAgg || this.canStaffStats);
-		},
-		primaryMetrics() {
-			return (this.business && this.business.primary) || [];
-		},
-		isStaffSelfMetrics() {
-			return (this.business && this.business.metrics_mode) === 'staff_self';
-		},
-		businessTitle() {
-			return this.isStaffSelfMetrics ? '我的业绩' : '经营概览';
-		},
-		secondaryMetrics() {
-			return (this.business && this.business.secondary) || [];
-		},
-		storeRanking() {
-			return (this.business && this.business.store_ranking) || {};
-		},
-		showStoreRanking() {
-			return !!(this.storeRanking && this.storeRanking.show);
-		},
-		currentRanking() {
-			const key = this.rankingTab || 'cash';
-			const list = (this.storeRanking && this.storeRanking[key]) || [];
-			return Array.isArray(list) ? list : [];
-		},
-		scopeText() {
-			const scope = (this.business && this.business.scope) || {};
-			const ids = scope.scope_store_ids || [];
-			if (scope.scope_mode === 'resolved_all') {
-				return ids.length ? `授权门店 ${ids.length} 家` : '区域范围';
-			}
-			if (scope.store_id) return `门店 #${scope.store_id}`;
-			if (ids.length === 1) return `门店 #${ids[0]}`;
-			if (ids.length > 1) return `门店 ${ids.length} 家`;
-			return '';
 		},
 		detailMenus() {
 			const list = [];
@@ -364,17 +224,33 @@ export default {
 	async onShow() {
 		const ok = await this.ensureMerchantAccess();
 		if (!ok) return;
-		// 数仓页签固定展示；无任何数据权限时提示，仍可看客户分析（若有权限）
+
 		if (!this.canDataAny && !this.canCustomerView) {
-			uni.showToast({ title: '暂无数仓权限', icon: 'none' });
+			uni.showToast({ title: '暂无首页数据权限', icon: 'none' });
 			uni.redirectTo({ url: '/pages/merchant/home/index' });
 			return;
 		}
-		// 仅 data.self 时若落在员工统计，收回本人页签
+
 		if (this.tab === 'staff_stats' && this.staffStatsDenied) {
 			this.tab = this.canDataAny ? 'business' : (this.canCustomerView ? 'customer' : 'business');
 		}
+		if (this.tab === 'business') {
+			this.$nextTick(() => {
+				const board = this.$refs.businessBoard;
+				if (!board) return;
+				if (typeof board.onHostShow === 'function' && board.onHostShow()) return;
+				if (board.switchingStore) return;
+				if (board.scheduleReload) board.scheduleReload(true);
+			});
+			return;
+		}
 		this.reload();
+	},
+	onReachBottom() {
+		const board = this.$refs.businessBoard;
+		if (this.tab === 'business' && board && board.loadMore) {
+			board.loadMore();
+		}
 	},
 	methods: {
 		formatMoney(n) {
@@ -411,34 +287,21 @@ export default {
 		},
 		onDateChange(payload) {
 			this.dateFilter = payload || this.dateFilter;
+			if (this.tab === 'business') return;
 			this.reload();
 		},
 		reload() {
-			if (this.tab === 'business') this.loadBusiness();
-			else if (this.tab === 'customer') this.loadCustomer();
-			else if (this.tab === 'staff_stats') this.loadStaffStats();
-			else this.loading = false;
-		},
-		async loadBusiness() {
-			if (this.businessDenied) {
-				this.business = {};
+			if (this.tab === 'business') {
 				this.loading = false;
+				this.$nextTick(() => {
+					const board = this.$refs.businessBoard;
+					if (board && board.scheduleReload) board.scheduleReload(true);
+				});
 				return;
 			}
-			const seq = ++this.loadSeq;
-			this.loading = true;
-			try {
-				const res = await merchantDataBusiness(this.filterParams());
-				if (seq !== this.loadSeq) return;
-				this.business = (res && res.data) || {};
-			} catch (e) {
-				if (seq !== this.loadSeq) return;
-				this.business = {};
-				const msg = (e && (e.msg || e.message)) || '加载失败';
-				uni.showToast({ title: String(msg).slice(0, 40), icon: 'none' });
-			} finally {
-				if (seq === this.loadSeq) this.loading = false;
-			}
+			if (this.tab === 'customer') this.loadCustomer();
+			else if (this.tab === 'staff_stats') this.loadStaffStats();
+			else this.loading = false;
 		},
 		async loadCustomer() {
 			if (!this.canCustomerView) {

@@ -155,40 +155,48 @@ class Refund extends AuthController
             $this->services->refuseRefund((int)$orderRefund['id'], $data, $orderRefund);
             return app('json')->successful('修改退款状态成功!');
         } else {
-            //0元退款
             if ($orderRefund['refund_price'] == 0) {
                 $refund_price = 0;
             } else {
                 if (!$data['refund_price']) {
                     return app('json')->fail('请输入退款金额');
                 }
-                if ($orderRefund['refund_price'] == $orderRefund['refunded_price']) {
-                    return app('json')->fail('已退完支付金额!不能再退款了');
-                }
                 $refund_price = $data['refund_price'];
-
-                $data['refunded_price'] = bcadd($data['refund_price'], $orderRefund['refunded_price'], 2);
-                $bj = bccomp((string)$orderRefund['refund_price'], (string)$data['refunded_price'], 2);
-                if ($bj < 0) {
-                    return app('json')->fail('退款金额大于支付金额，请修改退款金额');
-                }
             }
 
             unset($data['type']);
-            $refund_data['pay_price'] = $order['pay_price'];
-            $refund_data['refund_price'] = $refund_price;
-
-            //修改订单退款状态
-            unset($data['refund_price']);
-			$this->services->setItem('change_manager_type', 'cashier')
-				->setItem('change_manager_id', $request->cashierId())
-				->setItem('stock_in_type', $data['stock_in_type'] ?? 0);
-            $this->services->agreeRefund($id, $refund_data);
-			$this->services->reset();
-
-			//退款处理
-			$this->services->update($id, $data);
-			return app('json')->success('退款成功');
+            try {
+                $raw = $request->post();
+                /** @var \app\services\order\StoreOrderRefundDomainServices $domain */
+                $domain = app()->make(\app\services\order\StoreOrderRefundDomainServices::class);
+                $result = $domain->agreeAfterSaleRefund((int)$id, [
+                    'refund_amount' => $refund_price,
+                    'refund_ben' => array_key_exists('refund_ben', $raw) ? $raw['refund_ben'] : null,
+                    'refund_give' => array_key_exists('refund_give', $raw) ? $raw['refund_give'] : null,
+                    'bookkeeping_confirmed' => (int)($raw['bookkeeping_confirmed'] ?? 0),
+                    'bookkeeping_remark' => (string)($raw['bookkeeping_remark'] ?? ''),
+                    'refund_business_date' => (string)$request->post('refund_business_date', ''),
+                    'request_token' => (string)$request->post('request_token', ''),
+                    'stock_in_type' => $data['stock_in_type'] ?? 0,
+                    'return_coupon' => $request->post('return_coupon', 1),
+                    'store_scope' => (int)($request->storeId ?? 0),
+                    'source_type' => \app\model\order\StoreOrderTerminalOperation::SOURCE_CASHIER,
+                    'operator_type' => 'cashier',
+                    'operator_id' => (int)$request->cashierId(),
+                    'is_split_order' => $request->post('is_split_order', 0),
+                    'cart_ids' => $request->post('cart_ids', []),
+                    'merge_refund_id' => $request->post('merge_refund_id', 0),
+                    'refund_num' => $request->post('refund_num', ''),
+                    'cart_num' => $request->post('cart_num', ''),
+                ]);
+                unset($data['refund_price']);
+                $this->services->update($id, $data);
+                return app('json')->success($result['message'] ?? '退款成功', $result);
+            } catch (\think\exception\ValidateException $e) {
+                return app('json')->fail($e->getMessage());
+            } catch (\Throwable $e) {
+                return app('json')->fail('操作未成功，订单状态未改变，请核对后重试或联系负责人。');
+            }
         }
     }
 

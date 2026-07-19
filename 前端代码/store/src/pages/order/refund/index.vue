@@ -43,7 +43,7 @@
           </FormItem>
         </Col>
           <Col class="ml15 mr">
-            <FormItem label="退款时间：">
+            <FormItem label="申请时间：">
               <DatePicker
                 :editable="false"
                 @on-change="onchangeTime"
@@ -348,104 +348,7 @@
     ></order-remark>
     <!-- 记录 -->
     <order-record ref="record"></order-record>
-    <Modal
-      v-model="refundModal"
-      title="手动退款"
-      width="960"
-      class-name="refund-modal"
-      @on-visible-change="visibleChange"
-    >
-      <Form ref="formValidateRefund" :label-width="100" :rules="refundBalanceFormRules" :model="formValidateRefund">
-        <FormItem label="卡项情况：" v-if="rowActive.type == 11 && benefitsInfo && Object.keys(benefitsInfo).length">
-          <Card dis-hover>
-            <div slot="title" class="acea-row row-middle">
-              <div class="flex-1">{{ benefitsInfo.card_name }}</div>
-              <div v-if="benefitsInfo.write_valid == 1">永久有效</div>
-              <div v-else-if="benefitsInfo.write_valid == 2">购买后{{ benefitsInfo.write_days }}天有效</div>
-              <div v-else-if="benefitsInfo.write_valid == 3">{{ benefitsInfo.write_start | timeFormat }} -
-                {{ benefitsInfo.write_end | timeFormat }}
-              </div>
-            </div>
-            <div class="acea-row flex-wrap">
-              <div class="flex-33">购卡实付金额：￥{{ benefitsInfo.pay_price }}</div>
-              <div class="flex-33">数量：1</div>
-              <div class="flex-33">剩余金额：￥{{ remainingPrice }}</div>
-              <div class="flex-33">已核销：{{ writeTimes - writeSurplusTimes }}/{{ writeTimes }}</div>
-              <div class="flex-33">
-                卡项权益：
-                <Poptip placement="bottom" width="300">
-                  <div class="cup text-wlll-1890FF">查看</div>
-                  <div slot="content">
-                    <div v-for="item in cardBenefits" :key="item.id" class="acea-row row-middle pt-4 pb-4 fs-12">
-                      <div class="flex-1 min-w-0 pr-8 white-space-normal line2">{{
-                          item.cart_info.productInfo.store_name
-                        }}{{ item.cart_info.productInfo.attrInfo.suk }}
-                      </div>
-                      <div>{{ item.write_times }}次（已使用{{ item.write_times - item.write_surplus_times }}次）</div>
-                    </div>
-                  </div>
-                </Poptip>
-              </div>
-            </div>
-          </Card>
-        </FormItem>
-        <FormItem label="基础信息：" v-if="rowActive.product_type == 4 && benefitsInfo && Object.keys(benefitsInfo).length">
-          <Card dis-hover>
-            <div slot="title" class="acea-row row-middle">
-              <div class="flex-1">{{ benefitsInfo.card_name }}</div>
-              <div v-if="benefitsInfo.write_valid == 1">永久有效</div>
-              <div v-else-if="benefitsInfo.write_valid == 2">购买后{{ benefitsInfo.write_days }}天有效</div>
-              <div v-else-if="benefitsInfo.write_valid == 3">{{ benefitsInfo.write_start | timeFormat }} -
-                {{ benefitsInfo.write_end | timeFormat }}
-              </div>
-            </div>
-            <div class="flex flex-wrap">
-              <div class="flex-33">购卡实付金额：￥{{ benefitsInfo.pay_price }}</div>
-              <div class="flex-33">总次数：{{ writeTimes }}</div>
-              <div class="flex-33">已核销次数：{{ writeTimes - writeSurplusTimes }}</div>
-              <div class="flex-33">剩余次数：{{ writeSurplusTimes }}</div>
-              <div class="flex-33">剩余金额：￥{{ remainingPrice }}</div>
-            </div>
-          </Card>
-        </FormItem>
-        <FormItem label="退款金额：">
-          <InputNumber v-model="refundMoney" class="w-408"></InputNumber>
-          <div class="refund-tips" v-if="rowActive.pay_type == 'combination' || rowActive.pay_type == 'yue'">
-            <div style="color: red">如果是开错单，退款金额输入0</div>
-            <div>请注意：退款金额作为记录使用；【退本金】【退赠金】是用于退回用户余额的值</div>
-          </div>
-        </FormItem>
-        <FormItem v-if="showRefundBalanceInputs" label="退本金：" required prop="refundBen">
-          <Input v-model="formValidateRefund.refundBen" class="w-408" placeholder="请输入退还本金"></Input>
-        </FormItem>
-        <FormItem v-if="showRefundBalanceInputs" label="退赠金：" required prop="refundGive">
-          <Input v-model="formValidateRefund.refundGive" class="w-408" placeholder="请输入退还赠金"></Input>
-        </FormItem>
-        <FormItem label="退款说明：">
-          <Input v-model="refund_explain" placeholder="请输入退款说明" class="w-408"/>
-        </FormItem>
-        <FormItem v-if="showReturnCouponRefundOption" label="优惠券：">
-          <RadioGroup v-model="returnCoupon">
-            <Radio :label="1">退回优惠券给用户</Radio>
-            <Radio :label="0">不退回</Radio>
-          </RadioGroup>
-          <div class="tips">该订单使用了优惠券；选择「退回」将把用户该张券恢复为未使用。</div>
-        </FormItem>
-        <!-- 售后合并退款走 merge_refund_id，与订单列表「撤销」拆单接口不同，此处不展示分单表格 -->
-        <FormItem label="售后入库：" v-if="orderDatalist && orderDatalist.orderInfo && orderDatalist.orderInfo.status >= 1">
-          <RadioGroup v-model="stockInType">
-            <Radio :label="0">暂不入库</Radio>
-            <Radio :label="1">入良品库</Radio>
-            <Radio :label="2">入残次品库</Radio>
-          </RadioGroup>
-          <div class="tips">选择售后商品是否需要执行入库操作，若需存入不同仓库，请于入库管理模块中操作退货入库。</div>
-        </FormItem>
-      </Form>
-      <div slot="footer">
-        <Button @click="cancelRefundModal">取消</Button>
-        <Button type="primary" @click="putOpenRefundSubmit">提交</Button>
-      </div>
-    </Modal>
+    <!-- 阶段5：旧「手动退款」弹窗已拆除，售后同意退款请回订单列表用「退款」整单办理 -->
   </div>
 </template>
 
@@ -504,9 +407,19 @@ export default {
           minWidth: 70,
         },
         {
-          title: '发起退款时间',
+          title: '申请时间',
           key: 'add_time',
           minWidth: 100,
+        },
+        {
+          title: '退款日期',
+          key: 'refund_business_date',
+          minWidth: 100,
+        },
+        {
+          title: '实际操作时间',
+          key: 'operated_at_text',
+          minWidth: 150,
         },
         {
           title: '订单状态',
@@ -896,178 +809,26 @@ export default {
         this.openManualRefundModal(row)
       }
     },
-    openManualRefundModal(row) {
-      const needBenefits =
-        row.type == 11 ||
-        (row.cartInfo && row.cartInfo[0] && row.cartInfo[0].product_type == 4)
-      const benefitsP = needBenefits
-        ? this.getOrderBenefits(row)
-        : Promise.resolve().then(() => {
-            this.benefitsInfo = {}
-            this.writeSurplusTimes = 0
-            this.writeTimes = 0
-            this.remainingPrice = 0
-            this.cardBenefits = []
-          })
-      benefitsP
-        .then(() => getRefundDataInfo(row.id))
-        .then((res) => {
-          this.orderDatalist = res.data
-          this.storeOrderIdForOpenRefund = row.store_order_id
-          this.formValidateRefund = { refundBen: '0', refundGive: '0' }
-          if (row.pay_type === 'combination') {
-            try {
-              getRemak({ order_id: row.store_order_id, type: this.remarkType })
-                .then((r) => {
-                  const info = r && r.data ? r.data : {}
-                  const list = Array.isArray(info.list) ? info.list : []
-                  let yueSum = 0
-                  list.forEach((it) => {
-                    const activePay = Number(it.activePay || it.active_pay || 0)
-                    const subType = it.pay_sub_type || it.paySubType || ''
-                    if (activePay === 3 && subType !== 'card_upgrade') {
-                      const p = Number(it.price || 0)
-                      if (!isNaN(p)) yueSum += p
-                    }
-                  })
-                  this.formValidateRefund.refundBen = String(Number(yueSum.toFixed(2)))
-                })
-                .catch(() => {})
-            } catch (e) {}
-          }
-          this.rowActive = { ...row }
-          if (row.cartInfo && row.cartInfo[0]) {
-            this.rowActive.product_type = row.cartInfo[0].product_type
-          }
-          const oi = res.data.orderInfo
-          if (oi && oi.pay_type != null && oi.pay_type !== '') {
-            this.rowActive.pay_type = oi.pay_type
-          }
-          this.refund_explain = ''
-          this.stockInType = 0
-          this.returnCoupon = 1
-          this.getOnlyRefundDataFromRow(row, res.data.orderInfo)
-          this.refundModal = true
-        })
-        .catch((res) => {
-          this.$Message.error(res.msg || '加载失败')
-        })
+    openManualRefundModal() {
+      // 阶段5：旧手动退款弹窗已拆除，禁止再组装/提交拆单参数
+      this.refundModal = false
+      this.$Message.error('旧退款入口已停用，请到订单列表使用「退款」办理整单退款')
     },
-    visibleChange(visible) {
-      this.stockInType = 0
-      if (!visible) this.returnCoupon = 1
-    },
+    visibleChange() {},
     cancelRefundModal() {
       this.refundModal = false
     },
-    extractRefundCartLines(row, orderInfo) {
-      const out = []
-      if (orderInfo && Array.isArray(orderInfo.cartInfo) && orderInfo.cartInfo.length) {
-        orderInfo.cartInfo.forEach((c) => {
-          if (!c.is_gift) out.push(c)
-        })
-        return out
-      }
-      const src = row._info || []
-      Object.values(src).forEach((pack) => {
-        if (pack.cart_info && !pack.cart_info.is_gift) {
-          out.push(pack.cart_info)
-        }
-      })
-      return out
+    extractRefundCartLines() {
+      return []
     },
-    getOnlyRefundDataFromRow(row, orderInfo) {
-      const cartInfo = this.extractRefundCartLines(row, orderInfo)
-      let total = 0
-      cartInfo.forEach((value) => {
-        const cartNum = Number(value.cart_num) || 0
-        const refundedNum = Number(value.refund_num) || 0
-        const refundNum = Math.max(0, cartNum - refundedNum)
-        const lineRefundTotal = parseFloat(value.refund_price)
-        let unitPrice
-        if (
-          !isNaN(lineRefundTotal) &&
-          lineRefundTotal >= 0 &&
-          cartNum > 0
-        ) {
-          unitPrice = parseFloat(this.$computes.Div(lineRefundTotal, cartNum))
-        } else {
-          unitPrice = Number(value.truePrice)
-        }
-        if (isNaN(unitPrice)) unitPrice = 0
-        value.refundPrice = unitPrice
-        value.refundNum = refundNum
-        value._disabled = !refundNum
-        const sub = this.$computes.Mul(unitPrice, refundNum)
-        total = this.$computes.Add(total, isNaN(sub) ? 0 : sub)
-      })
-      if (isNaN(total) || !cartInfo.length) {
-        const req = parseFloat(row.refund_price)
-        const done = parseFloat(row.refunded_price || 0)
-        if (!isNaN(req)) {
-          total = Math.max(0, req - (isNaN(done) ? 0 : done))
-        }
-      }
-      if (isNaN(total)) total = 0
-      this.refundMoney = Number(Number(total).toFixed(2))
+    getOnlyRefundDataFromRow() {
+      this.openManualRefundModal()
     },
     putOpenRefundSubmit() {
-      if (this.showRefundBalanceInputs) {
-        this.$refs['formValidateRefund'].validate((valid) => {
-          if (valid) {
-            const ben = parseFloat(this.formValidateRefund.refundBen) || 0
-            const give = parseFloat(this.formValidateRefund.refundGive) || 0
-            const needConfirm = this.rowActive.pay_type == 'yue' || this.rowActive.pay_type == 'combination' || ben > 0 || give > 0
-            if (needConfirm) {
-              this.$Modal.confirm({
-                title: '操作退款',
-                content:
-                  '您本次退款的本金【' +
-                  this.formValidateRefund.refundBen +
-                  '】元和赠金【' +
-                  this.formValidateRefund.refundGive +
-                  '】元，是否确认退回用户余额？',
-                okText: '确认退款',
-                cancelText: '取消操作',
-                onOk: () => {
-                  this.doOpenRefund()
-                },
-              })
-            } else {
-              this.doOpenRefund()
-            }
-          } else {
-            this.$Message.warning('请填写本金和赠金！')
-          }
-        })
-      } else {
-        this.doOpenRefund()
-      }
+      this.openManualRefundModal()
     },
     doOpenRefund() {
-      const data = {
-        id: this.storeOrderIdForOpenRefund,
-        merge_refund_id: this.orderId,
-        refund_price: this.refundMoney,
-        refund_ben: this.showRefundBalanceInputs ? this.formValidateRefund.refundBen : '0',
-        refund_give: this.showRefundBalanceInputs ? this.formValidateRefund.refundGive : '0',
-        type: 1,
-        is_split_order: 0,
-        refund_explain: this.refund_explain,
-        stock_in_type: this.stockInType,
-        return_coupon: this.showReturnCouponRefundOption ? this.returnCoupon : 1,
-      }
-      putOpenRefund(data)
-        .then((res) => {
-          this.$Message.success(res.msg)
-          this.refundModal = false
-          this.getOrderList()
-          this.getData(this.orderId, 1)
-          this.$emit('changeGetTabs')
-        })
-        .catch((err) => {
-          this.$Message.error(err.msg)
-        })
+      this.openManualRefundModal()
     },
     //同意退货
     getRefundGoodsData(id) {

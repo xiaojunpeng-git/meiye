@@ -11,7 +11,7 @@
               :label-position="labelPosition"
               @submit.native.prevent
             >
-              <FormItem label="退款时间：">
+              <FormItem label="申请时间：">
                 <DatePicker
                   :editable="false"
                   @on-change="onchangeTime"
@@ -286,9 +286,19 @@
               minWidth: 70,
             },
             {
-              title: '发起退款时间',
+              title: '申请时间',
               key: 'add_time',
               minWidth: 110,
+            },
+            {
+              title: '退款日期',
+              key: 'refund_business_date',
+              minWidth: 100,
+            },
+            {
+              title: '实际操作时间',
+              key: 'operated_at_text',
+              minWidth: 150,
             },
             {
               title: '门店名称',

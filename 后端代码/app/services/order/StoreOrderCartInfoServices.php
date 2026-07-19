@@ -72,9 +72,17 @@ class StoreOrderCartInfoServices extends BaseServices
             $info = [];
             foreach ($cart_info as $k => $v) {
                 $_info = is_string($v) ? json_decode($v, true) : $v;
+                if (!is_array($_info) || $_info === []) {
+                    continue;
+                }
                 if (!isset($_info['productInfo'])) $_info['productInfo'] = [];
+                $cartNum = (int)($_info['cart_num'] ?? 1);
+                if ($cartNum <= 0) {
+                    $cartNum = 1;
+                }
+                $_info['cart_num'] = $cartNum;
 				if (!isset($_info['settle_price'])) {
-					$_info['settle_price'] = bcmul((string)($_info['productInfo']['attrInfo']['settle_price'] ?? 0), (string)$_info['cart_num'], 2);
+					$_info['settle_price'] = bcmul((string)($_info['productInfo']['attrInfo']['settle_price'] ?? 0), (string)$cartNum, 2);
 				}
                 //缩略图处理
                 if (isset($_info['productInfo']['attrInfo'])) {

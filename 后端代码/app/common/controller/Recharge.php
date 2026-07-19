@@ -79,11 +79,44 @@ trait Recharge
     public function refund_update($id)
     {
         $data = $this->request->postMore([
-            'price',
-            'give_price'
+            ['price', 0],
+            ['give_price', 0],
+            ['refund_business_date', ''],
+            ['request_token', ''],
+            ['is_split_order', 0],
+            ['cart_ids', []],
+            ['merge_refund_id', 0],
+            ['refund_num', ''],
+            ['cart_num', ''],
         ]);
-        if (!$id) return $this->fail('数据不存在');
-        return $this->success($this->services->refund_update((int)$id, $data) ? '退款成功' : '退款失败');
+        if (!$id) {
+            return $this->fail('数据不存在');
+        }
+        $operatorType = 'admin';
+        $operatorId = (int)$this->request->adminId();
+        $storeScope = 0;
+        $sourceType = \app\model\order\StoreOrderTerminalOperation::SOURCE_ADMIN;
+        if (!empty($this->request->storeStaffId)) {
+            $operatorType = 'store';
+            $operatorId = (int)$this->request->storeStaffId;
+            $storeScope = (int)($this->request->storeId ?? 0);
+            $sourceType = \app\model\order\StoreOrderTerminalOperation::SOURCE_STORE;
+        }
+        try {
+            /** @var \app\services\order\StoreOrderRefundDomainServices $domain */
+            $domain = app()->make(\app\services\order\StoreOrderRefundDomainServices::class);
+            $result = $domain->refundRecharge((int)$id, array_merge($data, [
+                'operator_type' => $operatorType,
+                'operator_id' => $operatorId,
+                'store_scope' => $storeScope,
+                'source_type' => $sourceType,
+            ]));
+            return $this->success($result['message'] ?? '退款成功', $result);
+        } catch (\think\exception\ValidateException $e) {
+            return $this->fail($e->getMessage());
+        } catch (\Throwable $e) {
+            return $this->fail('操作未成功，订单状态未改变，请核对后重试或联系负责人。');
+        }
     }
 
 }

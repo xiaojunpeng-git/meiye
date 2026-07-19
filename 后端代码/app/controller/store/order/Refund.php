@@ -179,20 +179,36 @@ class Refund extends AuthController
             }
 
             unset($data['type']);
-            $refund_data['pay_price'] = $order['pay_price'];
-            $refund_data['refund_price'] = $refund_price;
-
-            //修改订单退款状态
-            unset($data['refund_price']);
-			$this->services->setItem('change_manager_type', 'store')
-				->setItem('change_manager_id', $request->storeStaffId())
-				->setItem('stock_in_type', $data['stock_in_type'] ?? 0);
-            $this->services->agreeRefund($id, $refund_data);
-			$this->services->reset();
-
-			//退款处理
-			$this->services->update($id, $data);
-			return app('json')->success('退款成功');
+            try {
+                $raw = $request->post();
+                /** @var \app\services\order\StoreOrderRefundDomainServices $domain */
+                $domain = app()->make(\app\services\order\StoreOrderRefundDomainServices::class);
+                $result = $domain->agreeAfterSaleRefund((int)$id, [
+                    'refund_amount' => $refund_price,
+                    'refund_ben' => array_key_exists('refund_ben', $raw) ? $raw['refund_ben'] : null,
+                    'refund_give' => array_key_exists('refund_give', $raw) ? $raw['refund_give'] : null,
+                    'bookkeeping_confirmed' => (int)($raw['bookkeeping_confirmed'] ?? 0),
+                    'bookkeeping_remark' => (string)($raw['bookkeeping_remark'] ?? ''),
+                    'refund_business_date' => (string)$request->post('refund_business_date', ''),
+                    'request_token' => (string)$request->post('request_token', ''),
+                    'stock_in_type' => $data['stock_in_type'] ?? 0,
+                    'return_coupon' => $request->post('return_coupon', 1),
+                    'store_scope' => (int)($request->storeId ?? 0),
+                    'source_type' => \app\model\order\StoreOrderTerminalOperation::SOURCE_STORE,
+                    'operator_type' => 'store',
+                    'operator_id' => (int)$request->storeStaffId,
+                    'is_split_order' => $request->post('is_split_order', 0),
+                    'cart_ids' => $request->post('cart_ids', []),
+                    'merge_refund_id' => $request->post('merge_refund_id', 0),
+                ]);
+                unset($data['refund_price']);
+                $this->services->update($id, $data);
+                return app('json')->success($result['message'] ?? '退款成功', $result);
+            } catch (\think\exception\ValidateException $e) {
+                return app('json')->fail($e->getMessage());
+            } catch (\Throwable $e) {
+                return app('json')->fail('操作未成功，订单状态未改变，请核对后重试或联系负责人。');
+            }
         }
     }
 

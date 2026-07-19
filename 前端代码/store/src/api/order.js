@@ -684,6 +684,15 @@ export function refundRecharge(id) {
     });
 }
 
+/** 充值整单退款 PUT order/recharge/:id */
+export function putRechargeRefund(id, data) {
+  return request({
+    url: `order/recharge/${id}`,
+    method: 'put',
+    data
+  });
+}
+
 /**
  * @description 打印配货单
  * @param {Number} param id {Number} 订单id
@@ -707,7 +716,7 @@ export function orderWriteForm(id) {
 }
 
 /**
- * 后台拆单退款
+ * 后台拆单退款（旧接口，阶段5起勿再用于主动退款）
  * @param {*} data
  * @returns
  */
@@ -718,6 +727,55 @@ export function putOpenRefund(data) {
       data
   });
 };
+
+/** 整单退款 POST order/:id/refund */
+export function postOrderTerminalRefund(id, data) {
+  return request({
+    url: `order/${id}/refund`,
+    method: 'post',
+    data
+  });
+}
+
+/** 整单作废 POST order/:id/void */
+export function postOrderTerminalVoid(id, data) {
+  return request({
+    url: `order/${id}/void`,
+    method: 'post',
+    data
+  });
+}
+
+/** 重新开单草稿 POST order/:id/reopen */
+export function postOrderReopen(id, data = {}) {
+  return request({
+    url: `order/${id}/reopen`,
+    method: 'post',
+    data
+  });
+}
+
+/** 加载重开草稿 GET order/reopen/:token */
+export function getOrderReopenDraft(token) {
+  return request({
+    url: `order/reopen/${token}`,
+    method: 'get'
+  });
+}
+
+/** 撤销本次核销 PUT order/writeoff/:subOrderId/cancel */
+export function putWriteoffCancel(subOrderId, data) {
+  return request({
+    url: `order/writeoff/${subOrderId}/cancel`,
+    method: 'put',
+    data
+  });
+}
+
+/** 生成终态请求幂等 token */
+export function makeTerminalRequestToken(prefix = 'st') {
+  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+}
 
 /**
  * 核销记录

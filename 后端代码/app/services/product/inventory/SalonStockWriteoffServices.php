@@ -5,6 +5,7 @@ namespace app\services\product\inventory;
 
 use app\dao\product\inventory\StoreProjectConsumableRecipeDao;
 use app\dao\product\inventory\StoreProjectConsumableRecipeDetailDao;
+use app\jobs\order\OrderStatusJob;
 use app\services\BaseServices;
 use app\services\product\branch\StoreBranchProductServices;
 use app\services\product\sku\StoreProductAttrValueServices;
@@ -49,16 +50,17 @@ class SalonStockWriteoffServices extends BaseServices
      *
      * @param int $writeoffId       核销记录ID（store_order_writeoff.id）
      * @param int $storeId          实际核销门店ID（0 表示平台/无门店，不扣料）
-     * @param int $projectProductId 项目商品ID（订单购物车中的平台商品ID）
-     * @param string $projectUnique 项目SKU unique
+     * @param int $projectProductId 项目商品ID（购物车可能是门店副本ID，内部会映射到平台）
+     * @param string $projectUnique 项目SKU unique（同上，可能是门店规格）
      * @param string $writeoffCount 本次核销次数（>0）
+     * @param int $orderId          销售订单ID（oid），用于无配方跳过时写订单操作记录
      */
-    public function consumeForWriteoff(int $writeoffId, int $storeId, int $projectProductId, string $projectUnique, string $writeoffCount): void
+    public function consumeForWriteoff(int $writeoffId, int $storeId, int $projectProductId, string $projectUnique, string $writeoffCount, int $orderId = 0): void
     {
-        $this->doConsume($writeoffId, $storeId, $projectProductId, trim($projectUnique), $writeoffCount);
+        $this->doConsume($writeoffId, $storeId, $projectProductId, trim($projectUnique), $writeoffCount, $orderId);
     }
 
-    protected function doConsume(int $writeoffId, int $storeId, int $projectProductId, string $projectUnique, string $writeoffCount): void
+    protected function doConsume(int $writeoffId, int $storeId, int $projectProductId, string $projectUnique, string $writeoffCount, int $orderId = 0): void
     {
         // a2：关键字段缺失不得静默 return，改抛错——项目行核销必须可解析并落到具体门店
         if ($writeoffId <= 0) {
@@ -80,9 +82,27 @@ class SalonStockWriteoffServices extends BaseServices
             return;
         }
 
-        $resolved = $this->resolveEnabledRecipe($projectProductId, $projectUnique, $storeId);
+        // 收银/门店核销常传门店项目ID+门店SKU；总部配方按平台ID+平台SKU维护，须先映射
+        [$platformProjectId, $platformUnique] = $this->resolvePlatformProjectKey($projectProductId, $projectUnique);
+        if ($platformProjectId <= 0 || $platformUnique === '') {
+            throw new ValidateException(sprintf(
+                '院装扣料无法将门店项目映射到平台规格（门店商品ID %d / SKU %s），请确认商品已同步',
+                $projectProductId,
+                $projectUnique
+            ));
+        }
+
+        $resolved = $this->resolveEnabledRecipe($platformProjectId, $platformUnique, $storeId);
         if (!$resolved) {
-            return; // 无启用配方：该项目本身不需扣料（非错误）
+            // 无总部启用配方：不阻断核销，写入订单操作记录说明原因（避免静默无痕迹）
+            $this->logSalonSkipToOrder($orderId, sprintf(
+                '院装未扣料：无总部启用配方。核销项目门店ID%s/规格%s，已映射平台ID%s/规格%s。请在项目配方中配置并启用。',
+                $projectProductId,
+                $projectUnique,
+                $platformProjectId,
+                $platformUnique
+            ));
+            return;
         }
         $ownerType = (int)$resolved['owner_type'];
         $recipe = $resolved['recipe'];
@@ -98,10 +118,11 @@ class SalonStockWriteoffServices extends BaseServices
         foreach ($details as $d) {
             $recipePid = (int)$d['consumable_product_id'];
             $recipeUnique = (string)$d['consumable_unique'];
-            // 院装耗材：单次用量与合计扣料均最多 2 位小数，禁止静默截断
+            // 院装耗材：单次用量与合计扣料均最多 2 位小数；bcmul 须用 scale=2，
+            // 若用 4 会得到如 1.0000，被 assertQty 误判为超过 2 位小数，进而整笔自动核销失败
             try {
                 $per = $qtyValidate->assertQty($d['qty_per_writeoff'] ?? 0, 2, '院装配方用量');
-                $qty = $qtyValidate->assertQty(bcmul($per, (string)$writeoffCount, 4), 2, '院装扣料数量');
+                $qty = $qtyValidate->assertQty(bcmul($per, (string)$writeoffCount, 2), 2, '院装扣料数量');
             } catch (\mohe\exceptions\AdminException $e) {
                 throw new ValidateException($e->getMessage());
             }
@@ -140,6 +161,12 @@ class SalonStockWriteoffServices extends BaseServices
             $aggregated[$key]['qty'] = bcadd($aggregated[$key]['qty'], $qty, 2);
         }
         if (!$aggregated) {
+            $this->logSalonSkipToOrder($orderId, sprintf(
+                '院装未扣料：总部配方明细用量均为0（平台项目ID%s/规格%s，核销门店项目ID%s）。',
+                $platformProjectId,
+                $platformUnique,
+                $projectProductId
+            ));
             return; // 无有效扣料明细：不占用幂等键
         }
 
@@ -248,6 +275,8 @@ class SalonStockWriteoffServices extends BaseServices
                     'store_id' => 0,
                     'biz_type' => ProductInventoryChangeServices::BIZ_SALON,
                     'change_sales' => false,
+                    // 阶段1已按统一锁序 FOR UPDATE；禁止再开事务/清全量商品缓存
+                    'assume_locked' => true,
                 ]);
                 $balance = (string)($res['stock'] ?? '0');
 
@@ -269,14 +298,14 @@ class SalonStockWriteoffServices extends BaseServices
                 ];
             }
 
-            // 院装领用出库台账（order_type=8；库存已由 changeSkuStock 扣完，isStock=false）
+            // 院装领用出库台账（order_type=8；库存已由 changeSkuStock 扣完，isStock=false；SKU 已阶段1加锁）
             $outOrderId = $stockOrderServices->saveData(2, [
                 'store_order_id' => 0,
                 'order_type' => 8,
                 'stock_time' => date('Y-m-d', $time),
                 'remark' => '院装领用·核销#' . $writeoffId,
                 'out_product_detail' => $outDetail,
-            ], 1, $storeId, 0, false, false);
+            ], 1, $storeId, 0, false, false, true);
             $outOrderId = is_numeric($outOrderId) ? (int)$outOrderId : 0;
 
             // a7：回填库存明细追踪ID（store_product_stock_detail），按 (product_id,unique) 定位
@@ -466,6 +495,7 @@ class SalonStockWriteoffServices extends BaseServices
     /**
      * 解析启用中的项目耗材配方。
      * P0 口径：仅读取总部启用配方（type=0,relation_id=0）；忽略门店配方。
+     * 入参须为平台项目商品ID + 平台 SKU unique（门店ID请先经 resolvePlatformProjectKey 映射）。
      * $storeId 保留入参兼容，不参与选方（扣料仍只扣核销门店库存，见扣料主流程）。
      *
      * @return array{recipe:array,details:array,owner_type:int}|array
@@ -486,6 +516,71 @@ class SalonStockWriteoffServices extends BaseServices
             }
         }
         return [];
+    }
+
+    /**
+     * 购物车项目商品ID+SKU → 平台项目商品ID+平台SKU（总部配方定位键）
+     * - 平台商品：原样返回
+     * - 门店副本：按 pid + suk 映射到平台 unique
+     * @return array{0:int,1:string}
+     */
+    protected function resolvePlatformProjectKey(int $productId, string $unique): array
+    {
+        $unique = trim($unique);
+        if ($productId <= 0 || $unique === '') {
+            return [0, ''];
+        }
+        $product = Db::name('store_product')
+            ->where('id', $productId)
+            ->where('is_del', 0)
+            ->field('id,pid,type')
+            ->find();
+        if (!$product) {
+            return [0, ''];
+        }
+        // 平台商品（或无父级）：配方即按此 ID/unique 维护
+        $platformPid = (int)($product['pid'] ?? 0);
+        if ((int)($product['type'] ?? 0) === 0 || $platformPid <= 0) {
+            return [$productId, $unique];
+        }
+
+        /** @var StoreProductAttrValueServices $skuServices */
+        $skuServices = app()->make(StoreProductAttrValueServices::class);
+        $suk = $skuServices->value(['unique' => $unique, 'product_id' => $productId, 'type' => 0], 'suk');
+        if ($suk === null || $suk === '') {
+            return [0, ''];
+        }
+        $platformUnique = (string)$skuServices->value([
+            'suk' => $suk,
+            'product_id' => $platformPid,
+            'type' => 0,
+        ], 'unique');
+        if ($platformUnique === '') {
+            return [0, ''];
+        }
+        return [$platformPid, $platformUnique];
+    }
+
+    /**
+     * 无配方/无有效用量时写入订单操作记录（不阻断核销）
+     */
+    protected function logSalonSkipToOrder(int $orderId, string $message): void
+    {
+        if ($orderId <= 0 || $message === '') {
+            return;
+        }
+        // change_message 字段 varchar(256)
+        if (mb_strlen($message) > 250) {
+            $message = mb_substr($message, 0, 247) . '...';
+        }
+        OrderStatusJob::dispatch([
+            $orderId,
+            'salon_skip',
+            [
+                'change_message' => $message,
+                'change_manager_type' => 'system',
+            ],
+        ]);
     }
 
     /**

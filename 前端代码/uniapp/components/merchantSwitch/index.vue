@@ -15,7 +15,7 @@ import { mapGetters } from 'vuex';
 export default {
 	name: 'MerchantSwitch',
 	props: {
-		/** buyer | merchant */
+		
 		side: {
 			type: String,
 			default: 'buyer',
@@ -86,7 +86,7 @@ export default {
 					return;
 				}
 				await this.$store.dispatch('merchant/enterMerchant');
-				uni.reLaunch({ url: '/pages/merchant/home/index' });
+				uni.reLaunch({ url: '/pages/merchant/data/index' });
 			} catch (e) {
 				uni.showToast({ title: '切换失败，请稍后重试', icon: 'none' });
 			} finally {

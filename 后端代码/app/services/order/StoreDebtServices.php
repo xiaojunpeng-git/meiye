@@ -8,6 +8,7 @@ use app\dao\order\StoreDebtRepayDao;
 use app\jobs\order\OrderStatusJob;
 use app\model\order\StoreDebt;
 use app\model\order\StoreOrder;
+use app\model\order\StoreOrderTerminalOperation;
 use app\model\user\UserCardHolder;
 use app\model\yeji\CashType;
 use app\model\yeji\StaffYeji;
@@ -893,9 +894,14 @@ class StoreDebtServices extends BaseServices
             }
         }
 
+        // 渠道补交：order_id 使用 repay_no，便于回调按商户单号从 DB 恢复待入账信息
+        $orderSn = !empty($params['repay_no'])
+            ? (string)$params['repay_no']
+            : $orderCreateServices->getUniqueId();
+
         $orderInfo = [
             'uid' => (int)$debt['uid'],
-            'order_id' => $orderCreateServices->getUniqueId(),
+            'order_id' => $orderSn,
             'real_name' => $userInfo['nickname'] ?? '',
             'user_phone' => $userInfo['phone'] ?? '',
             'user_address' => '',
@@ -1157,14 +1163,22 @@ class StoreDebtServices extends BaseServices
     }
 
     /**
-     * 欠款还款支付
+     * 欠款主表行锁（须在事务内调用）
      */
-    public function repayPay(int $debtId, float $amount, string $payType, array $params = []): array
+    protected function lockDebtForUpdate(int $debtId): array
     {
-        $debt = $this->dao->get($debtId);
+        $debt = Db::name('store_debt')->where('id', $debtId)->lock(true)->find();
         if (!$debt) {
             throw new ValidateException('欠款记录不存在');
         }
+        return $debt;
+    }
+
+    /**
+     * 锁后校验可还金额（可选锁明细行）
+     */
+    protected function assertDebtRepayableLocked(array $debt, float $amount, int $debtItemId = 0): void
+    {
         if ((int)$debt['status'] !== StoreDebt::STATUS_PENDING) {
             throw new ValidateException('当前欠款不可还款');
         }
@@ -1172,10 +1186,9 @@ class StoreDebtServices extends BaseServices
         if ($amount <= 0 || bccomp((string)$amount, (string)$pending, 2) > 0) {
             throw new ValidateException('还款金额不正确');
         }
-        $debtItemId = (int)($params['debt_item_id'] ?? 0);
         if ($debtItemId > 0) {
-            $item = $this->itemDao->get($debtItemId);
-            if (!$item || (int)$item['debt_id'] !== $debtId) {
+            $item = Db::name('store_debt_item')->where('id', $debtItemId)->lock(true)->find();
+            if (!$item || (int)$item['debt_id'] !== (int)$debt['id']) {
                 throw new ValidateException('欠款明细不存在');
             }
             $itemPending = (float)bcsub((string)$item['debt_amount'], (string)$item['repaid_debt'], 2);
@@ -1183,15 +1196,206 @@ class StoreDebtServices extends BaseServices
                 throw new ValidateException('还款金额超过该明细待还金额');
             }
         }
-        $uid = (int)$debt['uid'];
-        $combinationInfo = $params['combination_info'] ?? [];
-        $userCode = (string)($params['user_code'] ?? '');
-        $authCode = (string)($params['auth_code'] ?? '');
-        $payStoreId = (int)($params['pay_store_id'] ?? 0);
-        $staffId = (int)($params['staff_id'] ?? 0);
-        $repayNo = !empty($params['repay_no']) ? (string)$params['repay_no'] : $this->generateRepayNo();
-        $params['repay_no'] = $repayNo;
+    }
 
+    /**
+     * 同债务下是否已有未支付补交单（渠道进行中）
+     */
+    protected function assertNoInFlightDebtRepayOrder(int $originOrderId): void
+    {
+        if ($originOrderId <= 0) {
+            return;
+        }
+        $exists = (int)Db::name('store_order')
+            ->where('is_debt_repay', 1)
+            ->where('debt_repay_origin_order_id', $originOrderId)
+            ->where('paid', 0)
+            ->where('is_del', 0)
+            ->count();
+        if ($exists > 0) {
+            throw new ValidateException('已有进行中的补交支付，请勿重复提交');
+        }
+    }
+
+    /**
+     * 渠道补交待入账信息持久化（DB 为主，Redis 为辅）
+     * 必须含：repay_no、debt_id、金额、repay_order_id、支付方式
+     */
+    protected function rememberDebtRepayPending(array $pending): array
+    {
+        $repayNo = trim((string)($pending['repay_no'] ?? ''));
+        $repayOrderId = (int)($pending['repay_order_id'] ?? 0);
+        $debtId = (int)($pending['debt_id'] ?? 0);
+        $amount = (float)($pending['amount'] ?? 0);
+        if ($repayNo === '' || $repayOrderId <= 0 || $debtId <= 0 || $amount <= 0) {
+            throw new ValidateException('补交待入账信息缺失');
+        }
+        $payload = [
+            'debt_id' => $debtId,
+            'debt_item_id' => (int)($pending['debt_item_id'] ?? 0),
+            'amount' => $amount,
+            'pay_type' => (string)($pending['pay_type'] ?? PayServices::WEIXIN_PAY),
+            'pay_store_id' => (int)($pending['pay_store_id'] ?? 0),
+            'staff_id' => (int)($pending['staff_id'] ?? 0),
+            'repay_order_id' => $repayOrderId,
+            'repay_no' => $repayNo,
+        ];
+        $order = Db::name('store_order')->where('id', $repayOrderId)->where('is_debt_repay', 1)->find();
+        if (!$order) {
+            throw new ValidateException('补交订单不存在');
+        }
+        $notify = [];
+        $raw = (string)($order['notify_data'] ?? '');
+        if ($raw !== '') {
+            $decoded = json_decode($raw, true);
+            if (is_array($decoded)) {
+                $notify = $decoded;
+            }
+        }
+        $notify['debt_repay_pending'] = $payload;
+        $update = [
+            'notify_data' => json_encode($notify, JSON_UNESCAPED_UNICODE),
+        ];
+        // 保证商户单号=repay_no，回调可按 order_id 找回
+        if ((string)($order['order_id'] ?? '') !== $repayNo) {
+            $update['order_id'] = $repayNo;
+        }
+        Db::name('store_order')->where('id', $repayOrderId)->update($update);
+        Cache::set('debt_repay_pending_' . $repayNo, $payload, 86400);
+        return $payload;
+    }
+
+    /**
+     * 从补交订单 DB 恢复待入账信息（不依赖 Redis）
+     * 仅按可索引字段 order_id=repay_no 定位；禁止 notify_data 无索引模糊扫描。
+     */
+    protected function loadDebtRepayPendingFromDb(string $repayNo): ?array
+    {
+        $repayNo = trim($repayNo);
+        if ($repayNo === '') {
+            return null;
+        }
+        // 渠道建单时已将 order_id 设为 repay_no（见 createRepayOrder / rememberDebtRepayPending）
+        $order = Db::name('store_order')
+            ->where('is_debt_repay', 1)
+            ->where('order_id', $repayNo)
+            ->order('id', 'desc')
+            ->find();
+        if (!$order) {
+            return null;
+        }
+        $notify = json_decode((string)($order['notify_data'] ?? ''), true);
+        $pending = is_array($notify['debt_repay_pending'] ?? null) ? $notify['debt_repay_pending'] : null;
+        if (!is_array($pending) || (int)($pending['debt_id'] ?? 0) <= 0) {
+            // notify_data 损坏时：用补交单+欠款主表最小字段重建
+            $originOid = (int)($order['debt_repay_origin_order_id'] ?? 0);
+            $debt = $originOid > 0
+                ? Db::name('store_debt')->where('order_id', $originOid)->order('id', 'desc')->find()
+                : null;
+            if (!$debt) {
+                return null;
+            }
+            $pending = [
+                'debt_id' => (int)$debt['id'],
+                'debt_item_id' => (int)($order['debt_repay_item_id'] ?? 0),
+                'amount' => (float)($order['pay_price'] ?? 0),
+                'pay_type' => (string)(($order['pay_type'] ?? '') ?: PayServices::WEIXIN_PAY),
+                'pay_store_id' => (int)($order['store_id'] ?? 0),
+                'staff_id' => (int)($order['staff_id'] ?? 0),
+                'repay_order_id' => (int)$order['id'],
+                'repay_no' => $repayNo,
+            ];
+        }
+        $pending['repay_order_id'] = (int)($pending['repay_order_id'] ?? $order['id']);
+        $pending['repay_no'] = $repayNo;
+        if ((int)($pending['debt_id'] ?? 0) <= 0 || (float)($pending['amount'] ?? 0) <= 0) {
+            return null;
+        }
+        return $pending;
+    }
+
+    /**
+     * 入账成功后清理待入账标记（保留其它 notify_data）
+     */
+    protected function clearDebtRepayPendingMark(int $repayOrderId, string $repayNo): void
+    {
+        if ($repayOrderId > 0) {
+            $raw = (string)Db::name('store_order')->where('id', $repayOrderId)->value('notify_data');
+            if ($raw !== '') {
+                $notify = json_decode($raw, true);
+                if (is_array($notify) && isset($notify['debt_repay_pending'])) {
+                    unset($notify['debt_repay_pending']);
+                    Db::name('store_order')->where('id', $repayOrderId)->update([
+                        'notify_data' => $notify ? json_encode($notify, JSON_UNESCAPED_UNICODE) : null,
+                    ]);
+                }
+            }
+        }
+        if ($repayNo !== '') {
+            Cache::delete('debt_repay_pending_' . $repayNo);
+        }
+    }
+
+    /**
+     * 现金/余额/组合：欠款 FOR UPDATE + 同事务创建补交单/扣款/paySuccess/applyRepay
+     */
+    protected function repayPayImmediateLocked(int $debtId, float $amount, string $payType, array $params = []): array
+    {
+        return $this->transaction(function () use ($debtId, $amount, $payType, $params) {
+            $debt = $this->lockDebtForUpdate($debtId);
+            $debtItemId = (int)($params['debt_item_id'] ?? 0);
+            $this->assertDebtRepayableLocked($debt, $amount, $debtItemId);
+
+            $combinationInfo = $params['combination_info'] ?? [];
+            $userCode = (string)($params['user_code'] ?? '');
+            $payStoreId = (int)($params['pay_store_id'] ?? 0);
+            $staffId = (int)($params['staff_id'] ?? 0);
+            $repayNo = !empty($params['repay_no']) ? (string)$params['repay_no'] : $this->generateRepayNo();
+            $params['repay_no'] = $repayNo;
+
+            if ($payType === PayServices::COMBINATION_PAY) {
+                CashType::validateCombinationInfo($combinationInfo);
+                ValidCashOrderServices::validateCombinationTotal($combinationInfo, $amount);
+            }
+
+            $repayOrder = $this->createRepayOrder($debtId, $amount, array_merge($params, [
+                'pay_type' => $payType,
+                'debt_item_id' => $debtItemId,
+                'pay_store_id' => $payStoreId,
+                'staff_id' => $staffId,
+            ]));
+            $applyExtra = $this->buildRepayApplyExtra($debtId, $amount, $payType, array_merge($params, [
+                'combination_info' => $combinationInfo,
+            ]), $repayOrder);
+
+            $finalizeParams = [];
+            if ($payType === PayServices::COMBINATION_PAY) {
+                $finalizeParams = [
+                    'combination_info' => $combinationInfo,
+                    'user_code' => $userCode,
+                ];
+            } elseif (!empty($params['trade_no'])) {
+                $finalizeParams = ['other' => ['trade_no' => (string)$params['trade_no']]];
+            }
+
+            $this->finalizeRepayPayment($repayOrder, $payType, $finalizeParams);
+            $this->applyRepay($debtId, $amount, $applyExtra);
+
+            return [
+                'status' => 'SUCCESS',
+                'message' => '还款成功',
+                'repay_order_id' => (int)$repayOrder['id'],
+                'repay_no' => $repayNo,
+            ];
+        });
+    }
+
+    /**
+     * 欠款还款支付
+     */
+    public function repayPay(int $debtId, float $amount, string $payType, array $params = []): array
+    {
+        $combinationInfo = $params['combination_info'] ?? [];
         // 组合支付若明细全部为余额（不含卡升级），按余额支付落单
         if ($payType === PayServices::COMBINATION_PAY && is_array($combinationInfo) && $combinationInfo !== []) {
             CashType::validateCombinationInfo($combinationInfo);
@@ -1202,43 +1406,49 @@ class StoreDebtServices extends BaseServices
             }
         }
 
-        $repayOrder = $this->createRepayOrder($debtId, $amount, array_merge($params, [
-            'pay_type' => $payType,
-            'debt_item_id' => $debtItemId,
-            'pay_store_id' => $payStoreId,
-            'staff_id' => $staffId,
-        ]));
-        $applyExtra = $this->buildRepayApplyExtra($debtId, $amount, $payType, array_merge($params, [
-            'combination_info' => $combinationInfo,
-        ]), $repayOrder);
-
-        if ($payType === PayServices::COMBINATION_PAY) {
-            CashType::validateCombinationInfo($combinationInfo);
-            ValidCashOrderServices::validateCombinationTotal($combinationInfo, $amount);
-            $this->finalizeRepayPayment($repayOrder, $payType, [
-                'combination_info' => $combinationInfo,
-                'user_code' => $userCode,
-            ]);
-            $this->applyRepay($debtId, $amount, $applyExtra);
-            return ['status' => 'SUCCESS', 'message' => '还款成功', 'repay_order_id' => (int)$repayOrder['id']];
+        if (in_array($payType, [PayServices::YUE_PAY, PayServices::CASH_PAY, PayServices::COMBINATION_PAY], true)) {
+            return $this->repayPayImmediateLocked($debtId, $amount, $payType, $params);
         }
 
-        if ($payType === PayServices::YUE_PAY) {
-            $this->finalizeRepayPayment($repayOrder, $payType);
-            $this->applyRepay($debtId, $amount, $applyExtra);
-            return ['status' => 'SUCCESS', 'message' => '还款成功', 'repay_order_id' => (int)$repayOrder['id']];
-        }
-
-        if ($payType === PayServices::CASH_PAY) {
-            $this->finalizeRepayPayment($repayOrder, $payType);
-            $this->applyRepay($debtId, $amount, $applyExtra);
-            return ['status' => 'SUCCESS', 'message' => '还款成功', 'repay_order_id' => (int)$repayOrder['id']];
-        }
-
-        if (in_array($payType, [PayServices::WEIXIN_PAY, PayServices::ALIAPY_PAY])) {
+        if (in_array($payType, [PayServices::WEIXIN_PAY, PayServices::ALIAPY_PAY], true)) {
+            $authCode = (string)($params['auth_code'] ?? '');
             if (!$authCode) {
                 throw new ValidateException('缺少支付付款二维码');
             }
+            $debtItemId = (int)($params['debt_item_id'] ?? 0);
+            $payStoreId = (int)($params['pay_store_id'] ?? 0);
+            $staffId = (int)($params['staff_id'] ?? 0);
+            $repayNo = !empty($params['repay_no']) ? (string)$params['repay_no'] : $this->generateRepayNo();
+            $params['repay_no'] = $repayNo;
+
+            // 创建未付补交单：欠款行锁 + DB 持久化待入账（不依赖 Redis）
+            $prepared = $this->transaction(function () use ($debtId, $amount, $payType, $params, $debtItemId, $payStoreId, $staffId, $repayNo) {
+                $debt = $this->lockDebtForUpdate($debtId);
+                $this->assertDebtRepayableLocked($debt, $amount, $debtItemId);
+                $this->assertNoInFlightDebtRepayOrder((int)$debt['order_id']);
+                $repayOrder = $this->createRepayOrder($debtId, $amount, array_merge($params, [
+                    'pay_type' => $payType,
+                    'debt_item_id' => $debtItemId,
+                    'pay_store_id' => $payStoreId,
+                    'staff_id' => $staffId,
+                    'repay_no' => $repayNo,
+                ]));
+                $this->rememberDebtRepayPending([
+                    'debt_id' => $debtId,
+                    'debt_item_id' => $debtItemId,
+                    'amount' => $amount,
+                    'pay_type' => $payType,
+                    'pay_store_id' => $payStoreId,
+                    'staff_id' => $staffId,
+                    'repay_order_id' => (int)$repayOrder['id'],
+                    'repay_no' => $repayNo,
+                ]);
+                return [$debt, $repayOrder];
+            });
+            /** @var array $debt */
+            /** @var array $repayOrder */
+            [$debt, $repayOrder] = $prepared;
+
             $pay = new PayServices();
             $body = '欠款还款-' . ($debt['order_sn'] ?: $repayNo);
             try {
@@ -1246,23 +1456,28 @@ class StoreDebtServices extends BaseServices
             } catch (\Throwable $e) {
                 throw new ValidateException('支付失败：' . $e->getMessage());
             }
-            $applyExtra['repay_no'] = $repayNo;
+
             if (!empty($response['paid'])) {
-                $this->finalizeRepayPayment($repayOrder, $payType, ['other' => ['trade_no' => $response['trade_no'] ?? '']]);
-                $this->applyRepay($debtId, $amount, $applyExtra);
-                return ['status' => 'SUCCESS', 'message' => '还款成功', 'repay_no' => $repayNo, 'repay_order_id' => (int)$repayOrder['id']];
+                // 渠道已扣款：同事务锁欠款后只入账一次（repay_no 幂等）
+                $ok = $this->completeRepayFromNotify($repayNo, (string)($response['trade_no'] ?? ''), $payType);
+                if (!$ok) {
+                    throw new ValidateException('渠道已扣款但补交入账失败，请联系平台处理');
+                }
+                $repayOid = (int)Db::name('store_debt_repay')->where('repay_no', $repayNo)->value('repay_order_id');
+                return [
+                    'status' => 'SUCCESS',
+                    'message' => '还款成功',
+                    'repay_no' => $repayNo,
+                    'repay_order_id' => $repayOid ?: (int)$repayOrder['id'],
+                ];
             }
-            Cache::set('debt_repay_pending_' . $repayNo, [
-                'debt_id' => $debtId,
-                'debt_item_id' => $debtItemId,
-                'amount' => $amount,
-                'pay_type' => $payType,
-                'pay_store_id' => $payStoreId,
-                'staff_id' => $staffId,
+
+            return [
+                'status' => 'PAY_ING',
+                'message' => $response['message'] ?? '等待支付',
+                'repay_no' => $repayNo,
                 'repay_order_id' => (int)$repayOrder['id'],
-                'params' => $params,
-            ], 600);
-            return ['status' => 'PAY_ING', 'message' => $response['message'] ?? '等待支付', 'repay_no' => $repayNo, 'repay_order_id' => (int)$repayOrder['id']];
+            ];
         }
 
         throw new ValidateException('不支持的支付方式');
@@ -1336,19 +1551,11 @@ class StoreDebtServices extends BaseServices
         }
 
         if ($payType === PayServices::YUE_PAY || $payType === 'yue') {
-            $repayOrder = $this->createRepayOrder($debtId, $amount, [
-                'pay_type' => PayServices::YUE_PAY,
-                'debt_item_id' => 0,
+            $res = $this->repayPay($debtId, $amount, PayServices::YUE_PAY, [
                 'pay_store_id' => (int)($order['store_id'] ?? 0),
             ]);
-            $this->finalizeRepayPayment($repayOrder, PayServices::YUE_PAY);
-            $this->applyRepay($debtId, $amount, [
-                'pay_type' => PayServices::YUE_PAY,
-                'pay_store_id' => (int)($order['store_id'] ?? 0),
-                'repay_order_id' => (int)$repayOrder['id'],
-                'repay_no' => $this->generateRepayNo(),
-            ]);
-            return ['status' => 'SUCCESS', 'message' => '还款成功', 'order_id' => $orderSn, 'repay_order_id' => (int)$repayOrder['id']];
+            $res['order_id'] = $orderSn;
+            return $res;
         }
 
         if (in_array($payType, [PayServices::WEIXIN_PAY, 'weixin', 'routine'])) {
@@ -1362,31 +1569,40 @@ class StoreDebtServices extends BaseServices
             }
             $repayNo = $this->generateRepayNo();
             $body = '欠款补交-' . ($debt['order_sn'] ?: $repayNo);
+            $payStoreId = (int)($order['store_id'] ?? 0);
+            // 先锁欠款创建未付补交单并 DB 持久化待入账，再调起渠道
+            $repayOrder = $this->transaction(function () use ($debtId, $amount, $payStoreId, $repayNo) {
+                $locked = $this->lockDebtForUpdate($debtId);
+                $this->assertDebtRepayableLocked($locked, $amount, 0);
+                $this->assertNoInFlightDebtRepayOrder((int)$locked['order_id']);
+                $created = $this->createRepayOrder($debtId, $amount, [
+                    'pay_type' => PayServices::WEIXIN_PAY,
+                    'debt_item_id' => 0,
+                    'pay_store_id' => $payStoreId,
+                    'repay_no' => $repayNo,
+                ]);
+                $this->rememberDebtRepayPending([
+                    'debt_id' => $debtId,
+                    'debt_item_id' => 0,
+                    'amount' => $amount,
+                    'pay_type' => PayServices::WEIXIN_PAY,
+                    'pay_store_id' => $payStoreId,
+                    'staff_id' => 0,
+                    'repay_order_id' => (int)$created['id'],
+                    'repay_no' => $repayNo,
+                ]);
+                return $created;
+            });
             $pay = new PayServices();
             try {
                 $jsConfig = $pay->pay($payTypeKey, $openid, $repayNo, (string)$amount, 'debt_repay', substrUTf8($body, 30));
             } catch (\Throwable $e) {
                 throw new ValidateException('支付失败：' . $e->getMessage());
             }
-            $repayOrder = $this->createRepayOrder($debtId, $amount, [
-                'pay_type' => PayServices::WEIXIN_PAY,
-                'debt_item_id' => 0,
-                'pay_store_id' => (int)($order['store_id'] ?? 0),
-            ]);
-            Cache::set('debt_repay_pending_' . $repayNo, [
-                'debt_id' => $debtId,
-                'debt_item_id' => 0,
-                'amount' => $amount,
-                'pay_type' => PayServices::WEIXIN_PAY,
-                'pay_store_id' => (int)($order['store_id'] ?? 0),
-                'staff_id' => 0,
-                'repay_order_id' => (int)$repayOrder['id'],
-                'params' => [],
-            ], 3600);
             if ($from === 'weixinh5') {
-                return ['status' => 'wechat_h5_pay', 'jsConfig' => $jsConfig, 'order_id' => $orderSn, 'repay_no' => $repayNo];
+                return ['status' => 'wechat_h5_pay', 'jsConfig' => $jsConfig, 'order_id' => $orderSn, 'repay_no' => $repayNo, 'repay_order_id' => (int)$repayOrder['id']];
             }
-            return ['status' => 'wechat_pay', 'jsConfig' => $jsConfig, 'order_id' => $orderSn, 'repay_no' => $repayNo];
+            return ['status' => 'wechat_pay', 'jsConfig' => $jsConfig, 'order_id' => $orderSn, 'repay_no' => $repayNo, 'repay_order_id' => (int)$repayOrder['id']];
         }
 
         if (in_array($payType, [PayServices::ALIAPY_PAY, 'alipay'])) {
@@ -1395,6 +1611,29 @@ class StoreDebtServices extends BaseServices
             }
             $repayNo = $this->generateRepayNo();
             $body = '欠款补交-' . ($debt['order_sn'] ?: $repayNo);
+            $payStoreId = (int)($order['store_id'] ?? 0);
+            $repayOrder = $this->transaction(function () use ($debtId, $amount, $payStoreId, $repayNo) {
+                $locked = $this->lockDebtForUpdate($debtId);
+                $this->assertDebtRepayableLocked($locked, $amount, 0);
+                $this->assertNoInFlightDebtRepayOrder((int)$locked['order_id']);
+                $created = $this->createRepayOrder($debtId, $amount, [
+                    'pay_type' => PayServices::ALIAPY_PAY,
+                    'debt_item_id' => 0,
+                    'pay_store_id' => $payStoreId,
+                    'repay_no' => $repayNo,
+                ]);
+                $this->rememberDebtRepayPending([
+                    'debt_id' => $debtId,
+                    'debt_item_id' => 0,
+                    'amount' => $amount,
+                    'pay_type' => PayServices::ALIAPY_PAY,
+                    'pay_store_id' => $payStoreId,
+                    'staff_id' => 0,
+                    'repay_order_id' => (int)$created['id'],
+                    'repay_no' => $repayNo,
+                ]);
+                return $created;
+            });
             $pay = new PayServices();
             $isCode = $from === 'routine' || $from === 'pc';
             try {
@@ -1402,69 +1641,130 @@ class StoreDebtServices extends BaseServices
             } catch (\Throwable $e) {
                 throw new ValidateException('支付失败：' . $e->getMessage());
             }
-            $repayOrder = $this->createRepayOrder($debtId, $amount, [
-                'pay_type' => PayServices::ALIAPY_PAY,
-                'debt_item_id' => 0,
-                'pay_store_id' => (int)($order['store_id'] ?? 0),
-            ]);
-            Cache::set('debt_repay_pending_' . $repayNo, [
-                'debt_id' => $debtId,
-                'debt_item_id' => 0,
-                'amount' => $amount,
-                'pay_type' => PayServices::ALIAPY_PAY,
-                'pay_store_id' => (int)($order['store_id'] ?? 0),
-                'staff_id' => 0,
+            return [
+                'status' => PayServices::ALIAPY_PAY . '_pay',
+                'jsConfig' => $jsConfig,
+                'order_id' => $orderSn,
+                'repay_no' => $repayNo,
                 'repay_order_id' => (int)$repayOrder['id'],
-                'params' => [],
-            ], 3600);
-            return ['status' => PayServices::ALIAPY_PAY . '_pay', 'jsConfig' => $jsConfig, 'order_id' => $orderSn, 'repay_no' => $repayNo];
+            ];
         }
 
         throw new ValidateException('不支持的支付方式');
     }
 
     /**
-     * 支付回调完成欠款还款
+     * 支付回调完成欠款还款（模拟/真实渠道成功回调入口）
+     * - 优先 Redis，缺失则从补交单 DB（notify_data / order_id=repay_no）恢复
+     * - DB 也找不到则返回 false（禁止假装成功）
+     * - 欠款主表 FOR UPDATE + repay_no/trade_no 幂等，只入账一次
      */
     public function completeRepayFromNotify(string $repayNo, string $tradeNo = '', string $payType = ''): bool
     {
-        $cacheKey = 'debt_repay_pending_' . $repayNo;
-        $pending = Cache::get($cacheKey);
-        if (!$pending) {
-            return true;
-        }
-        $debtId = (int)($pending['debt_id'] ?? 0);
-        $amount = (float)($pending['amount'] ?? 0);
-        if (!$debtId || $amount <= 0) {
-            Cache::delete($cacheKey);
+        $repayNo = trim($repayNo);
+        if ($repayNo === '') {
             return false;
         }
-        $debt = $this->dao->get($debtId);
-        if (!$debt) {
-            Cache::delete($cacheKey);
+        $cacheKey = 'debt_repay_pending_' . $repayNo;
+
+        // 已入账：重复回调成功（幂等）
+        $existed = Db::name('store_debt_repay')->where('repay_no', $repayNo)->find();
+        if ($existed) {
+            $this->clearDebtRepayPendingMark((int)($existed['repay_order_id'] ?? 0), $repayNo);
             return true;
         }
-        $repayOrderId = (int)($pending['repay_order_id'] ?? 0);
-        if ($repayOrderId > 0) {
-            /** @var StoreOrderServices $orderServices */
-            $orderServices = app()->make(StoreOrderServices::class);
-            $repayOrder = $orderServices->get($repayOrderId);
-            if ($repayOrder && !(int)($repayOrder['paid'] ?? 0)) {
-                $repayOrder = is_array($repayOrder) ? $repayOrder : $repayOrder->toArray();
-                $payType = (string)($pending['pay_type'] ?? $payType ?: PayServices::WEIXIN_PAY);
-                $this->finalizeRepayPayment($repayOrder, $payType, [
-                    'other' => ['trade_no' => $tradeNo],
-                ]);
+        if ($tradeNo !== '') {
+            $paidByTrade = (int)Db::name('store_order')
+                ->where('is_debt_repay', 1)
+                ->where('trade_no', $tradeNo)
+                ->where('paid', 1)
+                ->value('id');
+            if ($paidByTrade > 0) {
+                $existByOrder = Db::name('store_debt_repay')->where('repay_order_id', $paidByTrade)->find();
+                if ($existByOrder) {
+                    $this->clearDebtRepayPendingMark($paidByTrade, $repayNo);
+                    return true;
+                }
             }
         }
-        $this->applyRepay($debtId, $amount, [
-            'debt_item_id' => (int)($pending['debt_item_id'] ?? 0),
-            'pay_type' => (string)($pending['pay_type'] ?? $payType ?: PayServices::WEIXIN_PAY),
-            'pay_store_id' => (int)($pending['pay_store_id'] ?? 0),
-            'staff_id' => (int)($pending['staff_id'] ?? 0),
-            'repay_no' => $repayNo,
-            'repay_order_id' => $repayOrderId,
-        ]);
+
+        $pending = Cache::get($cacheKey);
+        if (!is_array($pending) || (int)($pending['debt_id'] ?? 0) <= 0) {
+            $pending = $this->loadDebtRepayPendingFromDb($repayNo);
+        }
+        // Redis/DB 都找不到待入账记录：渠道已扣款但本系统无法闭环 → 失败（禁止 return true）
+        if (!is_array($pending) || (int)($pending['debt_id'] ?? 0) <= 0 || (float)($pending['amount'] ?? 0) <= 0) {
+            return false;
+        }
+
+        $debtId = (int)$pending['debt_id'];
+        $amount = (float)$pending['amount'];
+        $repayOrderId = (int)($pending['repay_order_id'] ?? 0);
+
+        try {
+            $this->transaction(function () use ($debtId, $amount, $pending, $repayNo, $tradeNo, $payType, $repayOrderId) {
+                $exist = Db::name('store_debt_repay')->where('repay_no', $repayNo)->lock(true)->find();
+                if ($exist) {
+                    return;
+                }
+                if ($tradeNo !== '') {
+                    $paidByTrade = (int)Db::name('store_order')
+                        ->where('is_debt_repay', 1)
+                        ->where('trade_no', $tradeNo)
+                        ->where('paid', 1)
+                        ->lock(true)
+                        ->value('id');
+                    if ($paidByTrade > 0 && Db::name('store_debt_repay')->where('repay_order_id', $paidByTrade)->value('id')) {
+                        return;
+                    }
+                }
+
+                $debt = $this->lockDebtForUpdate($debtId);
+                $resolvedPayType = (string)($pending['pay_type'] ?? $payType ?: PayServices::WEIXIN_PAY);
+
+                if ($repayOrderId > 0) {
+                    /** @var StoreOrderServices $orderServices */
+                    $orderServices = app()->make(StoreOrderServices::class);
+                    $repayOrder = $orderServices->get($repayOrderId);
+                    if ($repayOrder && !(int)($repayOrder['paid'] ?? 0)) {
+                        $repayOrder = is_array($repayOrder) ? $repayOrder : $repayOrder->toArray();
+                        $this->finalizeRepayPayment($repayOrder, $resolvedPayType, [
+                            'other' => ['trade_no' => $tradeNo],
+                        ]);
+                    }
+                }
+
+                // 锁后重新读取：已结清则不再 apply（防超额）；是否已有本 repay_no 由事务外二次确认（避免 RR 快照看不到他事务已提交行）
+                $debt = $this->lockDebtForUpdate($debtId);
+                if ((int)$debt['status'] !== StoreDebt::STATUS_PENDING) {
+                    return;
+                }
+
+                $this->applyRepay($debtId, $amount, [
+                    'debt_item_id' => (int)($pending['debt_item_id'] ?? 0),
+                    'pay_type' => $resolvedPayType,
+                    'pay_store_id' => (int)($pending['pay_store_id'] ?? 0),
+                    'staff_id' => (int)($pending['staff_id'] ?? 0),
+                    'repay_no' => $repayNo,
+                    'repay_order_id' => $repayOrderId,
+                    'trade_no' => $tradeNo,
+                ]);
+                $this->clearDebtRepayPendingMark($repayOrderId, $repayNo);
+            });
+        } catch (ValidateException $e) {
+            if (Db::name('store_debt_repay')->where('repay_no', $repayNo)->value('id')) {
+                $this->clearDebtRepayPendingMark($repayOrderId, $repayNo);
+                return true;
+            }
+            return false;
+        } catch (\Throwable $e) {
+            return false;
+        }
+
+        // 二次确认：必须已写出补交记录，否则视为失败（禁止假成功）
+        if (!Db::name('store_debt_repay')->where('repay_no', $repayNo)->value('id')) {
+            return false;
+        }
         Cache::delete($cacheKey);
         return true;
     }
@@ -1499,25 +1799,34 @@ class StoreDebtServices extends BaseServices
 
     protected function deductUserBalance(int $uid, float $amount, int $linkId = 0): void
     {
-        /** @var UserServices $userServices */
-        $userServices = app()->make(UserServices::class);
-        $userInfo = $userServices->getUserInfo($uid);
-        if (!$userInfo) {
-            throw new ValidateException('用户不存在');
-        }
-        if ((float)$userInfo['now_money'] < $amount) {
-            throw new ValidateException('余额不足');
-        }
-        $this->transaction(function () use ($userServices, $userInfo, $amount, $linkId) {
-            $res = false !== $userServices->bcDec($userInfo['uid'], 'now_money', $amount, 'uid');
-            $nowMoney = bcsub((string)$userInfo['now_money'], (string)$amount, 2);
-            /** @var UserMoneyServices $userMoneyServices */
-            $userMoneyServices = app()->make(UserMoneyServices::class);
-            $res = $res && $userMoneyServices->income('debt_repay', $userInfo['uid'], $amount, $nowMoney, $linkId);
-            if (!$res) {
-                throw new ValidateException('余额扣减失败');
+        $doDeduct = function () use ($uid, $amount, $linkId) {
+            /** @var \app\services\user\UserBalanceAtomicServices $balanceAtomic */
+            $balanceAtomic = app()->make(\app\services\user\UserBalanceAtomicServices::class);
+            $deduct = $balanceAtomic->deductPreferBen($uid, (string)$amount, 'debt_repay', $linkId);
+            if ($linkId > 0) {
+                $balanceAtomic->writeOrderPaidSnapshot(
+                    $linkId,
+                    (string)$deduct['paid_ben'],
+                    (string)$deduct['paid_give']
+                );
             }
-        });
+        };
+        // 已在外层补交事务内则并入，避免提前提交
+        if ($this->isInDbTransaction()) {
+            $doDeduct();
+        } else {
+            $this->transaction($doDeduct);
+        }
+    }
+
+    protected function isInDbTransaction(): bool
+    {
+        try {
+            $pdo = Db::getPdo();
+            return $pdo && $pdo->inTransaction();
+        } catch (\Throwable $e) {
+            return false;
+        }
     }
 
     public function checkRepayPayStatus(string $repayNo): array
@@ -1525,6 +1834,11 @@ class StoreDebtServices extends BaseServices
         $cacheKey = 'debt_repay_pending_' . $repayNo;
         $pending = Cache::get($cacheKey);
         if (!$pending) {
+            // 已入账则视为成功
+            $exist = Db::name('store_debt_repay')->where('repay_no', $repayNo)->find();
+            if ($exist) {
+                return ['status' => true, 'message' => '还款成功'];
+            }
             return ['status' => false, 'message' => '还款单不存在或已处理'];
         }
         // 简化：轮询时若缓存仍在则继续等待；支付回调场景可扩展
@@ -1532,70 +1846,111 @@ class StoreDebtServices extends BaseServices
     }
 
     /**
-     * 还款（支付成功后调用）
+     * 还款（支付成功后调用）：欠款主表 FOR UPDATE + repay_no 幂等
      */
     public function applyRepay(int $debtId, float $amount, array $extra = []): array
     {
-        $debt = $this->dao->get($debtId);
-        if (!$debt) {
-            throw new ValidateException('欠款记录不存在');
-        }
-        $debt = is_array($debt) ? $debt : $debt->toArray();
-        if ((int)$debt['status'] !== StoreDebt::STATUS_PENDING) {
-            throw new ValidateException('当前欠款不可还款');
-        }
-        $pending = (float)bcsub((string)$debt['total_debt'], (string)$debt['repaid_debt'], 2);
-        if ($amount <= 0 || bccomp((string)$amount, (string)$pending, 2) > 0) {
-            throw new ValidateException('还款金额不正确');
-        }
-        $debtItemId = (int)($extra['debt_item_id'] ?? 0);
-        $now = time();
-        $repayModel = $this->repayDao->save([
-            'repay_no' => !empty($extra['repay_no']) ? (string)$extra['repay_no'] : $this->generateRepayNo(),
-            'debt_id' => $debtId,
-            'debt_item_id' => $debtItemId,
-            'order_id' => (int)$debt['order_id'],
-            'order_sn' => (string)$debt['order_sn'],
-            'repay_order_id' => (int)($extra['repay_order_id'] ?? 0),
-            'uid' => (int)$debt['uid'],
-            'repay_amount' => $amount,
-            'pay_type' => (string)($extra['pay_type'] ?? ''),
-            'pay_store_id' => (int)($extra['pay_store_id'] ?? 0),
-            'debt_store_id' => (int)$debt['store_id'],
-            'staff_id' => (int)($extra['staff_id'] ?? 0),
-            'combination_info' => json_encode($extra['combination_info'] ?? [], JSON_UNESCAPED_UNICODE),
-            'add_time' => $now,
-        ]);
-        $repayId = (int)$repayModel->id;
-        $newRepaid = (float)bcadd((string)$debt['repaid_debt'], (string)$amount, 2);
-        $status = bccomp((string)$newRepaid, (string)$debt['total_debt'], 2) >= 0
-            ? StoreDebt::STATUS_SETTLED
-            : StoreDebt::STATUS_PENDING;
-        $this->dao->update($debtId, [
-            'repaid_debt' => $newRepaid,
-            'status' => $status,
-            'update_time' => $now,
-        ]);
-        /** @var StoreOrderDao $orderDao - use StoreOrderServices */
-        /** @var StoreOrderServices $orderServices */
-        $orderServices = app()->make(StoreOrderServices::class);
-        $order = $orderServices->get((int)$debt['order_id']);
-        if ($order) {
-            $orderRepaid = (float)bcadd((string)($order['repaid_debt_amount'] ?? 0), (string)$amount, 2);
-            $orderServices->update((int)$debt['order_id'], ['repaid_debt_amount' => $orderRepaid]);
-            if ((int)($order['order_type'] ?? 0) === 1 && (int)($order['link_id'] ?? 0) > 0) {
-                /** @var UserRechargeDao $rechargeDao */
-                $rechargeDao = app()->make(UserRechargeDao::class);
-                $recharge = $rechargeDao->get((int)$order['link_id']);
-                if ($recharge) {
-                    $rechargeRepaid = (float)bcadd((string)($recharge['repaid_debt_amount'] ?? 0), (string)$amount, 2);
-                    $rechargeDao->update((int)$order['link_id'], ['repaid_debt_amount' => $rechargeRepaid]);
+        $runner = function () use ($debtId, $amount, $extra) {
+            $debt = $this->lockDebtForUpdate($debtId);
+            $repayNo = !empty($extra['repay_no']) ? (string)$extra['repay_no'] : $this->generateRepayNo();
+            $exist = Db::name('store_debt_repay')->where('repay_no', $repayNo)->lock(true)->find();
+            if ($exist) {
+                return [
+                    'repay_id' => (int)$exist['id'],
+                    'status' => (int)$debt['status'],
+                    'idempotent' => true,
+                ];
+            }
+            // 交易号幂等：同一渠道交易号已关联补交单则不再入账
+            $tradeNo = trim((string)($extra['trade_no'] ?? ''));
+            if ($tradeNo !== '') {
+                $byTrade = (int)Db::name('store_order')
+                    ->where('is_debt_repay', 1)
+                    ->where('trade_no', $tradeNo)
+                    ->where('paid', 1)
+                    ->value('id');
+                if ($byTrade > 0) {
+                    $existByOrder = Db::name('store_debt_repay')->where('repay_order_id', $byTrade)->find();
+                    if ($existByOrder) {
+                        return [
+                            'repay_id' => (int)$existByOrder['id'],
+                            'status' => (int)$debt['status'],
+                            'idempotent' => true,
+                        ];
+                    }
                 }
             }
+
+            $this->assertDebtRepayableLocked($debt, $amount, (int)($extra['debt_item_id'] ?? 0));
+            $debtItemId = (int)($extra['debt_item_id'] ?? 0);
+            $now = time();
+            try {
+                $repayModel = $this->repayDao->save([
+                    'repay_no' => $repayNo,
+                    'debt_id' => $debtId,
+                    'debt_item_id' => $debtItemId,
+                    'order_id' => (int)$debt['order_id'],
+                    'order_sn' => (string)$debt['order_sn'],
+                    'repay_order_id' => (int)($extra['repay_order_id'] ?? 0),
+                    'uid' => (int)$debt['uid'],
+                    'repay_amount' => $amount,
+                    'pay_type' => (string)($extra['pay_type'] ?? ''),
+                    'pay_store_id' => (int)($extra['pay_store_id'] ?? 0),
+                    'debt_store_id' => (int)$debt['store_id'],
+                    'staff_id' => (int)($extra['staff_id'] ?? 0),
+                    'combination_info' => json_encode($extra['combination_info'] ?? [], JSON_UNESCAPED_UNICODE),
+                    'add_time' => $now,
+                ]);
+            } catch (\Throwable $e) {
+                // uniq_repay_no：并发下后到者视为幂等成功
+                $exist = Db::name('store_debt_repay')->where('repay_no', $repayNo)->find();
+                if ($exist) {
+                    return [
+                        'repay_id' => (int)$exist['id'],
+                        'status' => (int)Db::name('store_debt')->where('id', $debtId)->value('status'),
+                        'idempotent' => true,
+                    ];
+                }
+                throw $e;
+            }
+            $repayId = (int)$repayModel->id;
+            $newRepaid = (float)bcadd((string)$debt['repaid_debt'], (string)$amount, 2);
+            if (bccomp((string)$newRepaid, (string)$debt['total_debt'], 2) > 0) {
+                throw new ValidateException('还款金额不正确');
+            }
+            $status = bccomp((string)$newRepaid, (string)$debt['total_debt'], 2) >= 0
+                ? StoreDebt::STATUS_SETTLED
+                : StoreDebt::STATUS_PENDING;
+            $this->dao->update($debtId, [
+                'repaid_debt' => $newRepaid,
+                'status' => $status,
+                'update_time' => $now,
+            ]);
+            /** @var StoreOrderServices $orderServices */
+            $orderServices = app()->make(StoreOrderServices::class);
+            $order = $orderServices->get((int)$debt['order_id']);
+            if ($order) {
+                $orderRepaid = (float)bcadd((string)($order['repaid_debt_amount'] ?? 0), (string)$amount, 2);
+                $orderServices->update((int)$debt['order_id'], ['repaid_debt_amount' => $orderRepaid]);
+                if ((int)($order['order_type'] ?? 0) === 1 && (int)($order['link_id'] ?? 0) > 0) {
+                    /** @var UserRechargeDao $rechargeDao */
+                    $rechargeDao = app()->make(UserRechargeDao::class);
+                    $recharge = $rechargeDao->get((int)$order['link_id']);
+                    if ($recharge) {
+                        $rechargeRepaid = (float)bcadd((string)($recharge['repaid_debt_amount'] ?? 0), (string)$amount, 2);
+                        $rechargeDao->update((int)$order['link_id'], ['repaid_debt_amount' => $rechargeRepaid]);
+                    }
+                }
+            }
+            $this->allocateRepayToItems($debtId, $debtItemId, $amount);
+            $this->allocateRepayToOrderCart($debt, $debtItemId, $amount);
+            return ['repay_id' => $repayId, 'status' => $status];
+        };
+
+        if ($this->isInDbTransaction()) {
+            return $runner();
         }
-        $this->allocateRepayToItems($debtId, $debtItemId, $amount);
-        $this->allocateRepayToOrderCart($debt, $debtItemId, $amount);
-        return ['repay_id' => $repayId, 'status' => $status];
+        return $this->transaction($runner);
     }
 
     protected function allocateRepayToItems(int $debtId, int $debtItemId, float $amount): void
@@ -1687,36 +2042,87 @@ class StoreDebtServices extends BaseServices
     }
 
     /**
-     * 主订单退款时联动作废关联补交订单
+     * 主订单退款/作废时联动处理关联补交订单
+     *
+     * @param bool $forVoid true=作废语义（统一作废编排）；false=退款语义（历史 refund_status）
+     * @param string $parentOperationNo 作废时父终态操作号（派生 token / 幂等）
      */
-    public function voidRepayOrdersByOriginOrderId(int $originOrderId, string $reason = '主订单退款'): void
-    {
+    public function voidRepayOrdersByOriginOrderId(
+        int $originOrderId,
+        string $reason = '主订单退款',
+        bool $forVoid = false,
+        string $parentOperationNo = ''
+    ): void {
         if ($originOrderId <= 0) {
             return;
         }
-        $orderIds = StoreOrder::where('debt_repay_origin_order_id', $originOrderId)
+        $q = StoreOrder::where('debt_repay_origin_order_id', $originOrderId)
             ->where('is_debt_repay', 1)
-            ->where('paid', 1)
-            ->where('refund_status', 0)
-            ->column('id');
+            ->where('paid', 1);
+        if ($forVoid) {
+            $q->where('terminal_action', 0)->where('refund_status', 0);
+        } else {
+            $q->where('refund_status', 0);
+        }
+        $orderIds = $q->column('id');
         foreach ($orderIds as $orderId) {
-            $this->voidRepayOrder((int)$orderId, $reason);
+            $this->voidRepayOrder((int)$orderId, $reason, $forVoid, $parentOperationNo);
         }
     }
 
     /**
-     * 作废单个补交订单（联动作废，不走支付退款）
+     * 处理单个补交订单：作废走统一编排；退款联动仍写退款状态（兼容旧退款事件）
      */
-    public function voidRepayOrder(int $orderId, string $reason = '主订单退款'): void
-    {
+    public function voidRepayOrder(
+        int $orderId,
+        string $reason = '主订单退款',
+        bool $forVoid = false,
+        string $parentOperationNo = ''
+    ): void {
         if ($orderId <= 0) {
             return;
         }
         $order = StoreOrder::where('id', $orderId)->find();
-        if (!$order || (int)$order['paid'] !== 1 || (int)$order['refund_status'] !== 0) {
+        if (!$order || (int)$order['paid'] !== 1) {
             return;
         }
         if (empty($order['is_debt_repay'])) {
+            return;
+        }
+        $order = is_array($order) ? $order : $order->toArray();
+
+        if ($forVoid) {
+            if ((int)($order['terminal_action'] ?? 0) === StoreOrderTerminalOperation::ACTION_VOID) {
+                return;
+            }
+            if ((int)($order['refund_status'] ?? 0) !== 0) {
+                return;
+            }
+            /** @var StoreOrderVoidServices $voidSvc */
+            $voidSvc = app()->make(StoreOrderVoidServices::class);
+            $token = $parentOperationNo !== ''
+                ? ('void-repay:' . $parentOperationNo . ':' . $orderId)
+                : ('void-repay-direct:' . $orderId);
+            $result = $voidSvc->voidWholeOrder([
+                'store_order_id' => $orderId,
+                'store_scope' => 0,
+                'request_token' => $token,
+                'reason' => $reason,
+                'operator_type' => 'system',
+                'operator_id' => 0,
+                'source_type' => StoreOrderTerminalOperation::SOURCE_ADMIN,
+                'parent_operation_no' => $parentOperationNo,
+            ]);
+            $childOpNo = (string)($result['operation_no'] ?? '');
+            if ($childOpNo !== '') {
+                /** @var \app\services\order\terminal\RefundSideEffectOutboxServices $outbox */
+                $outbox = app()->make(\app\services\order\terminal\RefundSideEffectOutboxServices::class);
+                $outbox->flushPending($childOpNo);
+            }
+            return;
+        }
+
+        if ((int)($order['refund_status'] ?? 0) !== 0) {
             return;
         }
         StoreOrder::where('id', $orderId)->update([

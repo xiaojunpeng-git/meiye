@@ -232,6 +232,11 @@ Route::group('cashierapi', function () {
         Route::put('order/refund/:id', 'Order/update_refund')->middleware(BlockerMiddleware::class, 'cashier')->name('StoreOrderUpdateRefund')->option(['real_name' => '订单退款']);
         //收银台拆单退款
         Route::post('open/refund/:id', 'Order/open_order_refund')->middleware(BlockerMiddleware::class, 'cashier')->name('StoreOrderUpdateRefund')->option(['real_name' => '后台拆单退款']);
+        Route::post('order/:id/refund', 'Order/terminal_order_refund')->middleware(BlockerMiddleware::class, 'cashier')->option(['real_name' => '整单退款']);
+        Route::post('order/:id/void', 'Order/terminal_order_void')->middleware(BlockerMiddleware::class, 'cashier')->option(['real_name' => '整单作废']);
+        Route::post('order/:id/reopen', 'Order/terminal_order_reopen')->middleware(BlockerMiddleware::class, 'cashier')->option(['real_name' => '创建或获取重开草稿']);
+        Route::get('order/reopen/:token', 'Order/terminal_order_reopen_load')->middleware(BlockerMiddleware::class, 'cashier')->option(['real_name' => '加载重开草稿']);
+        Route::put('order/writeoff/:subOrderId/cancel', 'Order/cancel_writeoff')->middleware(BlockerMiddleware::class, 'cashier')->option(['real_name' => '撤销本次核销']);
         //收银台退款订单列表
         Route::get('order/get_refund_list', 'Refund/getRefundList')->option(['real_name' => '收银台退款订单列表']);
         //收银台退款订单详情

@@ -410,7 +410,7 @@ class WriteOffOrderServices extends BaseServices
             }
             $item['surplus_num'] = $item['write_surplus_times'];
             $item['unservice_num'] = 0;
-            if ($item['product_type'] == 6) {//预约商品
+            if ($item['product_type'] == 6) {//项目
                 $item['unservice_num'] = $reservationOrderServices->count(['oid' => $orderInfo['id'], 'cart_info_id' => $item['id'], 'status' => [0, 1, 3], 'is_del' => 0, 'is_system_del' => 0]);
             }
             $item['writeoffed_num'] = max((int)bcsub((string)$writeoffed_num, (string)$item['unservice_num']), 0);
@@ -472,23 +472,31 @@ class WriteOffOrderServices extends BaseServices
             throw new ValidateException('失效卡不可被核销');
         }
         $key = md5('lock_order_writeoff_' . $orderInfo['id']);
-        $cross_store_verification = (int)sys_config('cross_store_verification', 1);//跨店核销
+        $isAutoWriteoff = (int)$isAuto === 1;
+        // 收银自动核销：刚支付成功同事务，无售后/拆单；跳过跨店配置与售后全表扫描以缩短持锁
+        $cross_store_verification = $isAutoWriteoff ? 1 : (int)sys_config('cross_store_verification', 1);
         //默认正常订单
         $orderInfo['order_type'] = $orderInfo['order_type'] ?? 'order';
         $time = time();
-        //验证核销权限
-        $auth = $this->checkWriteoffAuth($uid ?: $staff_id, (int)$orderInfo['id'], $orderType);
+        //验证核销权限（自动核销：收银员路径 auth=4，避免重复查店员）
+        if ($isAutoWriteoff && $orderType === 'cashier' && $staff_id > 0) {
+            $auth = 4;
+        } else {
+            $auth = $this->checkWriteoffAuth($uid ?: $staff_id, (int)$orderInfo['id'], $orderType);
+        }
 
-		if ($this->dao->count(['pid' => $orderInfo['id']])) {//订单已拆分
+		if (!$isAutoWriteoff && $this->dao->count(['pid' => $orderInfo['id']])) {//订单已拆分
 			throw new ValidateException('该订单已拆分，请使用子订单核销');
 		}
         if (!$orderInfo['verify_code'] || ($orderInfo['shipping_type'] != 2 && $orderInfo['delivery_type'] != 'send')) {
             throw new ValidateException('此订单不能被核销');
         }
-        /** @var StoreOrderRefundServices $storeOrderRefundServices */
-        $storeOrderRefundServices = app()->make(StoreOrderRefundServices::class);
-        if ($storeOrderRefundServices->count(['store_order_id' => $orderInfo['id'], 'refund_type' => [0, 1, 2, 4, 5, 6], 'is_cancel' => 0, 'is_del' => 0])) {
-            throw new ValidateException('订单有售后申请请先处理');
+        if (!$isAutoWriteoff) {
+            /** @var StoreOrderRefundServices $storeOrderRefundServices */
+            $storeOrderRefundServices = app()->make(StoreOrderRefundServices::class);
+            if ($storeOrderRefundServices->count(['store_order_id' => $orderInfo['id'], 'refund_type' => [0, 1, 2, 4, 5, 6], 'is_cancel' => 0, 'is_del' => 0])) {
+                throw new ValidateException('订单有售后申请请先处理');
+            }
         }
         if (isset($orderInfo['pinkStatus']) && $orderInfo['pinkStatus'] != 2) {
             throw new ValidateException('拼团未完成暂不能核销!');
@@ -591,51 +599,60 @@ class WriteOffOrderServices extends BaseServices
             $data['service_type'] = 3;
         } else if ($auth == 4) {//店员
             $data['service_type'] = 0;
-            /** @var SystemStoreStaffServices $storeStaffServices */
-            $storeStaffServices = app()->make(SystemStoreStaffServices::class);
-            if ($uid) {//商城前端
-                try {
-                    $staffInfo = $storeStaffServices->getStaffInfoByUid($uid, $store_id);
-                } catch (\Throwable $e) {
-                    $staffInfo = $storeStaffServices->getStaffInfoByUid($uid);
+            if ($isAutoWriteoff && !$uid && $staff_id > 0) {
+                // 收银支付后自动核销：结账员已在收银鉴权，直接落 staff_id
+                $data['staff_id'] = $staff_id;
+                $cartData['staff_id'] = $staff_id;
+                $data['clerk_id'] = 0;
+            } else {
+                /** @var SystemStoreStaffServices $storeStaffServices */
+                $storeStaffServices = app()->make(SystemStoreStaffServices::class);
+                if ($uid) {//商城前端
+                    try {
+                        $staffInfo = $storeStaffServices->getStaffInfoByUid($uid, $store_id);
+                    } catch (\Throwable $e) {
+                        $staffInfo = $storeStaffServices->getStaffInfoByUid($uid);
+                    }
+                } else {//门店后台
+                    $staffInfo = $storeStaffServices->getStaffInfo($staff_id);
+                    if ($store_id != $staffInfo['store_id'] && !$cross_store_verification) {
+                        throw new ValidateException('订单不存在');
+                    }
+                    if ($staffInfo['verify_status'] != 1) {
+                        throw new ValidateException('您暂无核销权限');
+                    }
+                    $data['clerk_id'] = $staffInfo['uid'];
                 }
-            } else {//门店后台
-                $staffInfo = $storeStaffServices->getStaffInfo($staff_id);
-                if ($store_id != $staffInfo['store_id'] && !$cross_store_verification) {
-                    throw new ValidateException('订单不存在');
+                if ($store_id != $staffInfo['store_id'] && $cross_store_verification) {
+                    $store_id = $staffInfo['store_id'];
                 }
-                if ($staffInfo['verify_status'] != 1) {
-                    throw new ValidateException('您暂无核销权限');
-                }
-                $data['clerk_id'] = $staffInfo['uid'];
+                $data['staff_id'] = $staffInfo['id'] ?? 0;
+                $cartData['staff_id'] = $staffInfo['id'] ?? 0;
             }
-            if ($store_id != $staffInfo['store_id'] && $cross_store_verification) {
-                $store_id = $staffInfo['store_id'];
-            }
-            $data['staff_id'] = $staffInfo['id'] ?? 0;
-            $cartData['staff_id'] = $staffInfo['id'] ?? 0;
         } else {
             $data['service_type'] = 2;
         }
         $staff_id = $data['staff_id'];
         unset($data['staff_id']);
-        //判断商品类型
-        $productId=StoreOrderCartInfo::where("oid",$orderInfo['id'])->where("cart_type",0)->value("product_id");
+        //判断商品类型（自动核销项目单不走几选几卡次累计）
         $isEnd=false;
-        if(!empty($productId)){
-            $productInfo=StoreProduct::where("id",$productId)->find();
-            if($productInfo['card_num'] > 0 && $productInfo['card_num_type'] == 1){
-                  //几选几套餐按次数  判断核销次数是否大于
-                 $need=StoreOrderWriteoff::where("oid",$orderInfo['id'])->where("status",0)->sum("writeoff_num");
-                 foreach ($cartIds as $cartOne) {
-                     $need=$need+$cartOne['cart_num'];
-                 }
-                 if($need > $productInfo['card_num']){
-                     throw new ValidateException('该项目累计核销次数不能超过：'.$productInfo['card_num']."次");
-                 }
-                 if($need == $productInfo['card_num']){
-                     $isEnd=true;
-                 }
+        if (!$isAutoWriteoff) {
+            $productId=StoreOrderCartInfo::where("oid",$orderInfo['id'])->where("cart_type",0)->value("product_id");
+            if(!empty($productId)){
+                $productInfo=StoreProduct::where("id",$productId)->find();
+                if($productInfo['card_num'] > 0 && $productInfo['card_num_type'] == 1){
+                      //几选几套餐按次数  判断核销次数是否大于
+                     $need=StoreOrderWriteoff::where("oid",$orderInfo['id'])->where("status",0)->sum("writeoff_num");
+                     foreach ($cartIds as $cartOne) {
+                         $need=$need+$cartOne['cart_num'];
+                     }
+                     if($need > $productInfo['card_num']){
+                         throw new ValidateException('该项目累计核销次数不能超过：'.$productInfo['card_num']."次");
+                     }
+                     if($need == $productInfo['card_num']){
+                         $isEnd=true;
+                     }
+                }
             }
         }
         if (!CacheService::lock($key)) {
@@ -661,7 +678,7 @@ class WriteOffOrderServices extends BaseServices
             'is_auto' => $isAuto,
             'reservation_oid' => (int)$reservationOid,
         ];
-        $data = $this->transaction(function () use ($isEnd,$orderInfo, $staff_id, $data, $cartIds, $cartInfoServices, $cartData, $auth, $cartInfo, $price, $writeoffPayload, $reservationOid, $salonHasProject, $writeOffRecordServices, $writeoffCartSnapshot) {
+        $data = $this->transaction(function () use ($isEnd,$orderInfo, $staff_id, $data, $cartIds, $cartInfoServices, $cartData, $auth, $cartInfo, $price, $writeoffPayload, $reservationOid, $salonHasProject, $writeOffRecordServices, $writeoffCartSnapshot, $isAuto) {
             if ($cartIds) {//选择商品、件数核销
                 $writeoffSum = 0;
                 foreach ($cartIds as $cart) {
@@ -714,11 +731,17 @@ class WriteOffOrderServices extends BaseServices
                     $data['status'] = 2;
 					$data['delivery_time'] = time();
                 }
-                /** @var StoreOrderTakeServices $storeOrdeTask */
-                $storeOrdeTask = app()->make(StoreOrderTakeServices::class);
-                $re = $storeOrdeTask->storeProductOrderUserTakeDelivery($orderInfo, false);
-                if (!$re) {
-                    throw new ValidateException('Write off failure');
+                // 收银自动核销：收货/返佣/通知延后到支付事务提交后，避免拉长 store_order 持锁
+                // 订单 status/核销记录/院装扣料仍在本事务内完成，失败仍整单回滚
+                if ((int)$isAuto === 1) {
+                    \app\services\order\cashier\DeferredCashierPostWriteoff::pushTake($orderInfo);
+                } else {
+                    /** @var StoreOrderTakeServices $storeOrdeTask */
+                    $storeOrdeTask = app()->make(StoreOrderTakeServices::class);
+                    $re = $storeOrdeTask->storeProductOrderUserTakeDelivery($orderInfo, false);
+                    if (!$re) {
+                        throw new ValidateException('Write off failure');
+                    }
                 }
                 if ($orderInfo['type'] == 12) {//预约单
                     $data['reservation_status'] = 2;

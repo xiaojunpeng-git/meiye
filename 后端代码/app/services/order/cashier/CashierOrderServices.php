@@ -1198,6 +1198,14 @@ class CashierOrderServices extends BaseServices
                 $addressInfo[$key] = '';
             }
         }
+        CashierIntegerMoney::assertRequestAmounts([
+            'change_price' => $changePrice,
+            'cart_info' => $changeCartInfo,
+            'combination_info' => $combinationInfo,
+        ]);
+        $computeData = CashierIntegerMoney::normalizeComputeData($computeData);
+        CashierIntegerMoney::assertComputeData($computeData);
+
         $cartGroup = $computeData['cartGroup'] ?? [];
         $cartInfo = $computeData['cartInfo'];
         $totalPrice = $computeData['totalPrice'];
@@ -1234,7 +1242,7 @@ class CashierOrderServices extends BaseServices
         if ($changeCartInfo) {
             foreach ($changeCartInfo as $row) {
                 if (!isset($row['id'])) continue;
-                $yuePayMap[(int)$row['id']] = isset($row['yue_pay_amount']) ? (float)$row['yue_pay_amount'] : 0.00;
+                $yuePayMap[(int)$row['id']] = (float)CashierIntegerMoney::toIntegerString($row['yue_pay_amount'] ?? 0);
             }
         }
 
@@ -1243,7 +1251,7 @@ class CashierOrderServices extends BaseServices
         if ($changeCartInfo) {
             foreach ($changeCartInfo as $row) {
                 if (!isset($row['id'])) continue;
-                $cardUpgradeMap[(int)$row['id']] = isset($row['card_upgrade_amount']) ? (float)$row['card_upgrade_amount'] : 0.00;
+                $cardUpgradeMap[(int)$row['id']] = (float)CashierIntegerMoney::toIntegerString($row['card_upgrade_amount'] ?? 0);
             }
         }
 
@@ -1252,7 +1260,7 @@ class CashierOrderServices extends BaseServices
         if ($changeCartInfo) {
             foreach ($changeCartInfo as $row) {
                 if (!isset($row['id'])) continue;
-                $debtPayMap[(int)$row['id']] = isset($row['debt_pay_amount']) ? (float)$row['debt_pay_amount'] : 0.00;
+                $debtPayMap[(int)$row['id']] = (float)CashierIntegerMoney::toIntegerString($row['debt_pay_amount'] ?? 0);
             }
         }
 

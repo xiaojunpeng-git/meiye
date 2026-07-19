@@ -357,8 +357,9 @@ class StoreOrderWriteOffServices extends BaseServices
         }
 
         $setYejiAll=$data['sync_all'] ?? [];
-        // 核销记录 + 院装扣料同事务：任一步失败整体回滚，保证与核销权益一致；院装耗材不足由 consumeForWriteoff 抛出阻断核销
-        $this->transaction(function () use ($cartInfo, $cartIds, $orderInfo, $oid, $reservation_oid, $reservationOrderInfo, $data, $onePrice, $addTime, $isBudan, $isAuto, $setYejiAll) {
+        // 核销记录 + 院装扣料同事务：任一步失败整体回滚；通知必须在事务提交后再发
+        $writeoffNoticePayloads = [];
+        $this->transaction(function () use ($cartInfo, $cartIds, $orderInfo, $oid, $reservation_oid, $reservationOrderInfo, $data, $onePrice, $addTime, $isBudan, $isAuto, $setYejiAll, &$writeoffNoticePayloads) {
         $writeOffData = ['uid' => $orderInfo['uid'], 'oid' => $oid, 'reservation_oid' => $reservation_oid, 'writeoff_code' => $reservationOrderInfo['verify_code'] ?? $orderInfo['verify_code'], 'add_time' => time()];
         foreach ($cartInfo as $cart) {
             $write = $cartIds[(string)$cart['cart_id']] ?? [];
@@ -386,8 +387,10 @@ class StoreOrderWriteOffServices extends BaseServices
                 $writeOffData['service_type'] = $data['service_type'] ?? 0;
                 $writeOffData['add_time']=$addTime;
                 $res = $this->dao->save($writeOffData);
-                event('notice.notice', [$writeOffData, 'order_writeoff']);
                 $id = $res->id;
+                $noticeRow = $writeOffData;
+                $noticeRow['id'] = $id;
+                $writeoffNoticePayloads[] = $noticeRow;
                 // 院装耗材同事务扣料：仅项目(product_type=6)且实际核销门店>0；幂等锚定核销记录ID
                 if ((int)($writeOffData['product_type'] ?? 0) === 6) {
                     /** @var \app\services\product\inventory\SalonStockWriteoffServices $salonWriteoffServices */
@@ -397,11 +400,13 @@ class StoreOrderWriteOffServices extends BaseServices
                         (int)($writeOffData['relation_id'] ?? 0),
                         (int)($cart['product_id'] ?? 0),
                         (string)($cart['sku_unique'] ?? ''),
-                        (string)($writeOffData['writeoff_num'] ?? 0)
+                        (string)($writeOffData['writeoff_num'] ?? 0),
+                        (int)$oid
                     );
                 }
 //                $writeOffDataAll[] = $writeOffData;
                 $syncHandled = false;
+                $deferYeji = !empty($data['is_auto']) || (int)$isAuto === 1;
                 if($setYejiAll && !empty($setYejiAll)){
                     foreach ($setYejiAll as $k=>$v){
                         $syncCartId = (string)($v['cart_id'] ?? '');
@@ -410,7 +415,6 @@ class StoreOrderWriteOffServices extends BaseServices
                         }
                         $lineCartId = (string)($cart['cart_id'] ?? '');
                         if ($syncCartId === '' || $syncCartId === $lineCartId) {
-                            $staffYeji = app()->make(SatffYejiServices::class);
                             $v['link_id'] = $id;
                             $v['order_id'] = $oid;
                             $v['is_budan']=$isBudan;
@@ -426,13 +430,17 @@ class StoreOrderWriteOffServices extends BaseServices
                             if (empty($v['type'])) {
                                 $v['type'] = 3;
                             }
-                            $staffYeji->saveYeji($v);
+                            // 收银自动核销：业绩入账延后到支付提交后，缩短院装持锁
+                            if ($deferYeji) {
+                                \app\services\order\cashier\DeferredCashierPostWriteoff::pushYeji('saveYeji', $v);
+                            } else {
+                                app()->make(SatffYejiServices::class)->saveYeji($v);
+                            }
                             $syncHandled = true;
                         }
                     }
                 }
                 if (!$syncHandled) {
-                    $staffYeji = app()->make(SatffYejiServices::class);
                      $addOrder=[
                          'order_id'=>$oid,
                          'link_id'=>$id,
@@ -443,7 +451,11 @@ class StoreOrderWriteOffServices extends BaseServices
                          'store_id' => (int)($data['store_id'] ?? ($orderInfo['store_id'] ?? 0)),
                          'service_object' => $writeOffData['service_object'] ?? '本人'
                      ];
-                    $staffYeji->saveOrder($addOrder);
+                    if ($deferYeji) {
+                        \app\services\order\cashier\DeferredCashierPostWriteoff::pushYeji('saveOrder', $addOrder);
+                    } else {
+                        app()->make(SatffYejiServices::class)->saveOrder($addOrder);
+                    }
                 }
                 if ($reservation_oid > 0) {
                     $this->ensureWriteoffSubOrder($id, $oid, $writeOffData, $data, $isAuto, $isBudan, $addTime);
@@ -451,6 +463,15 @@ class StoreOrderWriteOffServices extends BaseServices
             }
         }
         });
+        // 通知：外层若仍在支付事务中则延后（收银 is_auto）；否则即时发，避免回滚后仍推送
+        $deferNotice = !empty($data['is_auto']);
+        foreach ($writeoffNoticePayloads as $noticePayload) {
+            if ($deferNotice) {
+                \app\services\order\cashier\DeferredCashierPostWriteoff::pushNotice($noticePayload, 'order_writeoff');
+            } else {
+                event('notice.notice', [$noticePayload, 'order_writeoff']);
+            }
+        }
         //店员核销给店员写入业绩
         if (isset($data['staff_id']) && $data['staff_id'] && isset($data['price']) && $data['price']) {
             $orderInfo['staff_id'] = $data['staff_id'];

@@ -338,11 +338,14 @@ class StoreOrderServices extends BaseServices
                 }
                 foreach ($item['_info'] as &$items) {
                     if (isset($items['cart_info']['cart_type']) && $items['cart_info']['cart_type'] > 0) continue;
-                    $cart_num = $items['cart_info']['cart_num'];
+                    $cart_num = (int)($items['cart_info']['cart_num'] ?? 1);
+                    if ($cart_num <= 0) {
+                        $cart_num = 1;
+                    }
                     $settle_price = $items['cart_info']['productInfo']['attrInfo']['settle_price'] ?? 0;
                     $total_cart_num += $cart_num;
                     $cart_ids = [];
-                    $cart_ids[] = ['cart_id' => $items['cart_info']['id'], 'cart_num' => $items['cart_info']['cart_num']];
+                    $cart_ids[] = ['cart_id' => $items['cart_info']['id'] ?? 0, 'cart_num' => $cart_num];
                     /** @var StoreOrderSplitServices $storeOrderSpliteServices */
                     $storeOrderSpliteServices = app()->make(StoreOrderSplitServices::class);
                     $cartInfos = $storeOrderSpliteServices->getSplitOrderCartInfo($item['id'], $cart_ids, $item);
@@ -431,9 +434,13 @@ class StoreOrderServices extends BaseServices
                 $cart_num = 0;
                 foreach ($item['_info'] as &$items) {
                     if (isset($items['cart_info']['cart_type']) && $items['cart_info']['cart_type'] > 0) continue;
-                    $cart_num += $items['cart_info']['cart_num'];
+                    $lineCartNum = (int)($items['cart_info']['cart_num'] ?? 1);
+                    if ($lineCartNum <= 0) {
+                        $lineCartNum = 1;
+                    }
+                    $cart_num += $lineCartNum;
                     $cart_ids = [];
-                    $cart_ids[] = ['cart_id' => $items['cart_info']['id'], 'cart_num' => $items['cart_info']['cart_num']];
+                    $cart_ids[] = ['cart_id' => $items['cart_info']['id'] ?? 0, 'cart_num' => $lineCartNum];
                     /** @var StoreOrderSplitServices $storeOrderSpliteServices */
                     $storeOrderSpliteServices = app()->make(StoreOrderSplitServices::class);
                     $cartInfos = $storeOrderSpliteServices->getSplitOrderCartInfo($item['id'], $cart_ids, $item);

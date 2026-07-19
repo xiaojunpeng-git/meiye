@@ -343,6 +343,8 @@ class Common extends AuthController
                 return app('json')->fail('暂不支持该类型订单查询');
         }
 		$data['status'] = (bool)$orderServices->count(['order_id' => $order_id, 'paid' => 1]);
+		$data['channel_paid_pending'] = false;
+		$data['channel_paid_pending_message'] = '';
 		if (!$data['status']) {//未支付
 			//查询订单支付状态
 			$response = Payment::queryOrder($order_id);
@@ -351,6 +353,16 @@ class Common extends AuthController
 			} elseif ($response['paid'] && ($response['payInfo']['trade_state'] ?? '') == 'PAYERROR') {
 				return app('json')->fail('支付失败，请重新支付');
 			}
+		} elseif ((int)$type === 3) {
+            $oid = (int)$orderServices->value(['order_id' => $order_id], 'id');
+            if ($oid > 0) {
+                $alert = app()->make(\app\services\order\cashier\CashierChannelPayPendingServices::class)
+                    ->resolveCashierAlert($oid);
+                if (!empty($alert['alert'])) {
+                    $data['channel_paid_pending'] = true;
+                    $data['channel_paid_pending_message'] = (string)($alert['message'] ?? '');
+                }
+            }
 		}
         $time = $end_time - time();
         $data['time'] = $time > 0 ? $time : 0;

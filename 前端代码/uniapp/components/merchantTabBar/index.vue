@@ -15,9 +15,9 @@
 
 <script>
 const TABS = [
-	{ key: 'home', name: '首页', path: '/pages/merchant/home/index', icon: 'icon-ic_home' },
+	{ key: 'home', name: '首页', path: '/pages/merchant/data/index', icon: 'icon-ic_order' },
 	{ key: 'customer', name: '客户', path: '/pages/merchant/customer/index', icon: 'icon-ic_user' },
-	{ key: 'data', name: '数仓', path: '/pages/merchant/data/index', icon: 'icon-ic_order' },
+	{ key: 'workbench', name: '工作台', path: '/pages/merchant/home/index', icon: 'icon-ic_home' },
 	{ key: 'target', name: '目标', path: '/pages/merchant/target/index', icon: 'icon-ic_star' },
 	{ key: 'profile', name: '我的', path: '/pages/merchant/profile/index', icon: 'icon-ic_user1' },
 ];

@@ -147,6 +147,23 @@ class StoreOrderStatusServices extends BaseServices
             }
         }
         if (!isset($statusData['change_manager'])) $statusData['change_manager'] = '管理员操作';
+        $idemKey = trim((string)($data['terminal_idempotency_key'] ?? $data['idempotency_key'] ?? ''));
+        if ($idemKey !== '') {
+            /** @var \app\services\order\terminal\RefundSideEffectOnceServices $once */
+            $once = app()->make(\app\services\order\terminal\RefundSideEffectOnceServices::class);
+            $once->runOnce($idemKey, function () use ($statusData, $idemKey) {
+                $statusData['idempotency_key'] = $idemKey;
+                try {
+                    $this->dao->save($statusData);
+                } catch (\Throwable $e) {
+                    $msg = $e->getMessage();
+                    if (stripos($msg, 'Duplicate') === false && stripos($msg, '1062') === false) {
+                        throw $e;
+                    }
+                }
+            });
+            return true;
+        }
         $this->dao->save($statusData);
         return true;
     }

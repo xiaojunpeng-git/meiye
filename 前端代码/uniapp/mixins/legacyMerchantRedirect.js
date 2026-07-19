@@ -18,7 +18,7 @@ export default {
 				return false;
 			}
 			this.$store.dispatch('merchant/enterMerchant');
-			let url = '/pages/merchant/home/index';
+			let url = '/pages/merchant/data/index';
 			if (typeof targetUrlOrFn === 'function') {
 				url = targetUrlOrFn() || url;
 			} else if (targetUrlOrFn) {
@@ -32,7 +32,7 @@ export default {
 			if (Array.isArray(list) && list.indexOf('merchant.customer.view') !== -1) {
 				return '/pages/merchant/customer/index';
 			}
-			return '/pages/merchant/home/index';
+			return '/pages/merchant/data/index';
 		},
 	},
 };

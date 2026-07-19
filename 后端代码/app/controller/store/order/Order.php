@@ -89,7 +89,7 @@ class Order extends AuthController
             ['search_verify_code', ''],
             ['search_product', ''],
             ['search_user', ''],
-            ['product_type', ''],//商品类型0:普通商品，1：卡密，2：优惠券，3：虚拟商品,4：次卡商品,5:卡项商品6：预约商品
+            ['product_type', ''],//商品类型0:普通商品，1：卡密，2：优惠券，3：虚拟商品,4：次卡商品,5:卡项商品6：项目
             ['service_object', ''],//服务对象：本人/朋友（核销订单）
         ]);
         //里面不使用pay_type了 因为这里搜索付款方式有次卡支付
@@ -133,7 +133,7 @@ class Order extends AuthController
         $writeOffServices = app()->make(StoreOrderWriteOffServices::class);
         // 门店端撤销传本门店 store_id 做归属校验，禁止跨门店撤销；平台端才传 0
         $writeOffServices->cancelWriteoff((int)$id, (string)$data, (int)$this->storeId);
-        return $this->success('提交成功');
+        return $this->success('撤销本次核销成功');
     }
 
     /**
@@ -149,7 +149,7 @@ class Order extends AuthController
             ['pay_type', ''],
             ['staff_id', ''],
             ['order_type', ''],
-            ['product_type', ''],//商品类型0:普通商品，1：卡密，2：优惠券，3：虚拟商品,4：次卡商品,5:卡项商品6：预约商品
+            ['product_type', ''],//商品类型0:普通商品，1：卡密，2：优惠券，3：虚拟商品,4：次卡商品,5:卡项商品6：项目
             ['real_name', ''],
             ['search_order_id', ''],
             ['search_verify_code', ''],
@@ -240,7 +240,7 @@ class Order extends AuthController
                     ['search_product', ''],
                     ['search_user', ''],
                     ['service_object', ''],
-                    ['product_type', ''],//商品类型0:普通商品，1：卡密，2：优惠券，3：虚拟商品,4：次卡商品,5:卡项商品6：预约商品
+                    ['product_type', ''],//商品类型0:普通商品，1：卡密，2：优惠券，3：虚拟商品,4：次卡商品,5:卡项商品6：项目
                     ['ids', ''],
                 ]);
                 $where['is_system_del'] = 0;

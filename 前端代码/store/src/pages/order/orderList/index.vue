@@ -279,9 +279,41 @@
           >重新发单</a>
           <a v-if="row.order_type != 2" @click="changeMenu(row, '2')">详情</a>
           <a v-if="canOrderRepay(row)" class="action-link-gap" @click="openOrderRepay(row)">还款</a>
-          <a v-if="row.order_type == 2 && row.refund_status == 0" class="action-link-gap" @click="changeMenu(row, '14')">撤销</a>
-          <a v-if="row.order_type == 0 && row.refund_status == 0" class="action-link-gap" @click="changeMenu(row, '5')">撤销</a>
-          <a v-if="row.order_type == 1 && row.refund_status == 0" class="action-link-gap" @click="changeMenu(row, '555')">撤销</a>
+          <a
+            v-if="row.order_type == 2 && row.refund_status == 0 && Number(row.terminal_action || 0) === 0"
+            v-auth="['store-order-writeoff-cancel']"
+            class="action-link-gap"
+            @click="changeMenu(row, '14')"
+          >撤销本次核销</a>
+          <a
+            v-if="canShowTerminalRefund(row)"
+            v-auth="['store-order-terminal-refund']"
+            class="action-link-gap"
+            @click="openTerminalRefund(row)"
+          >退款</a>
+          <a
+            v-if="canShowTerminalVoid(row)"
+            v-auth="['store-order-terminal-void']"
+            class="action-link-gap"
+            @click="openTerminalVoid(row)"
+          >作废</a>
+          <a
+            v-if="canShowReopen(row)"
+            v-auth="['store-order-reopen']"
+            class="action-link-gap"
+            @click="doReopen(row)"
+          >重新开单</a>
+          <a
+            v-if="row.order_type == 1 && row.refund_status == 0 && Number(row.terminal_action || 0) === 0"
+            v-auth="['store-order-terminal-refund']"
+            class="action-link-gap"
+            @click="changeMenu(row, '555')"
+          >退款</a>
+          <span
+            v-if="Number(row.terminal_action || 0) === 2 && !row.can_reopen && row.reopen_deny_reason"
+            class="action-link-gap"
+            style="color:#999;font-size:12px;"
+          >{{ row.reopen_deny_reason }}</span>
         </template>
       </store-order-card-list>
       <div class="acea-row row-right page">
@@ -364,115 +396,7 @@
         </div>
       </div>
     </Modal>
-    <Modal v-model="refundModal" title="手动退款" width="960" class-name="refund-modal" @on-visible-change="visibleChange">
-      <Form ref="formValidate" :label-width="100" :rules="refundFormRules" :model="formValidate">
-        <FormItem label="卡项情况：" v-if="rowActive.type == 11 && benefitsInfo">
-          <Card dis-hover>
-            <div slot="title" class="acea-row row-middle">
-              <div class="flex-1">{{ benefitsInfo.card_name }}</div>
-              <div v-if="benefitsInfo.write_valid == 1">永久有效</div>
-              <div v-else-if="benefitsInfo.write_valid == 2">购买后{{ benefitsInfo.write_days }}天有效</div>
-              <div v-else-if="benefitsInfo.write_valid == 3">{{ benefitsInfo.write_start | timeFormat }} -
-                {{ benefitsInfo.write_end | timeFormat }}
-              </div>
-            </div>
-            <div class="acea-row flex-wrap">
-              <div class="flex-33">购卡实付金额：￥{{ benefitsInfo.pay_price }}</div>
-              <div class="flex-33">数量：1</div>
-              <div class="flex-33">剩余金额：￥{{ remainingPrice }}</div>
-              <div class="flex-33">已核销：{{ writeTimes - writeSurplusTimes }}/{{ writeTimes }}</div>
-              <div class="flex-33">
-                卡项权益：
-                <Poptip placement="bottom" width="300">
-                  <div class="cup text-wlll-1890FF">查看</div>
-                  <div slot="content">
-                    <div v-for="item in cardBenefits" :key="item.id" class="acea-row row-middle pt-4 pb-4 fs-12">
-                      <div class="flex-1 min-w-0 pr-8 white-space-normal line2">{{
-                          item.cart_info.productInfo.store_name
-                        }}<template v-if="orderListSpecSuk(item)"> | {{ orderListSpecSuk(item) }}</template>
-                      </div>
-                      <div>{{ item.write_times }}次（已使用{{ item.write_times - item.write_surplus_times }}次）</div>
-                    </div>
-                  </div>
-                </Poptip>
-              </div>
-            </div>
-          </Card>
-        </FormItem>
-        <FormItem label="基础信息：" v-if="rowActive.product_type == 4 && benefitsInfo">
-          <Card dis-hover>
-            <div slot="title" class="flex-y-center">
-              <div class="flex-1">{{ benefitsInfo.card_name }}</div>
-              <div v-if="benefitsInfo.write_valid == 1">永久有效</div>
-              <div v-else-if="benefitsInfo.write_valid == 2">购买后{{ benefitsInfo.write_days }}天有效</div>
-              <div v-else-if="benefitsInfo.write_valid == 3">{{ benefitsInfo.write_start | timeFormat }} -
-                {{ benefitsInfo.write_end | timeFormat }}
-              </div>
-            </div>
-            <div class="flex flex-wrap">
-              <div class="flex-33">购卡实付金额：￥{{ benefitsInfo.pay_price }}</div>
-              <div class="flex-33">总次数：{{ writeTimes }}</div>
-              <div class="flex-33">已核销次数：{{ writeTimes - writeSurplusTimes }}</div>
-              <div class="flex-33">剩余次数：{{ writeSurplusTimes }}</div>
-              <div class="flex-33">剩余金额：￥{{ remainingPrice }}</div>
-            </div>
-          </Card>
-        </FormItem>
-        <FormItem label="退款金额：">
-          <InputNumber v-model="refundMoney" class="w-408"></InputNumber>
-          <div class="refund-tips" v-if="showRefundBalanceInputs">
-            <div style="color: red">如果是开错单，退款金额输入0</div>
-            <div>请注意：退款金额作为记录使用；【退本金】【退赠金】是用于退回用户余额的值</div>
-          </div>
-        </FormItem>
-        <FormItem v-if="showRefundBalanceInputs" label="退本金：" required prop="refundBen">
-          <Input v-model="formValidate.refundBen" class="w-408" placeholder="请输入退还本金"></Input>
-        </FormItem>
-        <FormItem v-if="showRefundBalanceInputs" label="退赠金：" required prop="refundGive">
-          <Input v-model="formValidate.refundGive" class="w-408" placeholder="请输入退还赠金"></Input>
-        </FormItem>
-        <FormItem label="退款说明：">
-          <Input v-model="refund_explain" placeholder="请输入退款说明" class="w-408"/>
-        </FormItem>
-        <FormItem v-if="showReturnCouponOption" label="优惠券：">
-          <RadioGroup v-model="returnCoupon">
-            <Radio :label="1">退回优惠券给用户</Radio>
-            <Radio :label="0">不退回</Radio>
-          </RadioGroup>
-          <div class="tips">该订单使用了优惠券；选择「退回」将把用户优惠券恢复为未使用。</div>
-        </FormItem>
-        <FormItem v-if="this.refundProductNum > 1" label="分单退款：">
-          <i-switch v-model="is_split_order" :true-value="1" :false-value="0" size="large">
-            <span slot="open">开启</span>
-            <span slot="close">关闭</span>
-          </i-switch>
-          <div class="tips">可选择表格中的商品单独退款，退款后且不能撤回，请谨慎操作！</div>
-          <Table v-show="is_split_order" ref="refundTable" max-height="500" :columns="refundColumns"
-                 :data="refundProduct" @on-selection-change="refundSelectionChange">
-            <template slot-scope="{ row }" slot="product">
-              <div class="image-wrap" v-viewer><img :src="row.productInfo.attrInfo.image" class="image"></div>
-              <div class="title">{{ row.productInfo.store_name }}</div>
-            </template>
-            <template slot-scope="{ row }" slot="action">
-              <InputNumber v-model="row.refundNum" :max="row.cart_num - row.refund_num" :min="1" :precision="0"
-                           controls-outside @on-change="refundNumChange(row)"></InputNumber>
-            </template>
-          </Table>
-        </FormItem>
-        <FormItem label="售后入库：" v-if="orderDatalist && orderDatalist.orderInfo.status>=1">
-          <RadioGroup v-model="stockInType">
-            <Radio :label="0">暂不入库</Radio>
-            <Radio :label="1">入良品库</Radio>
-            <Radio :label="2">入残次品库</Radio>
-          </RadioGroup>
-          <div class="tips">选择售后商品是否需要执行入库操作，若需存入不同仓库，请于入库管理模块中操作退货入库。</div>
-        </FormItem>
-      </Form>
-      <div slot="footer">
-        <Button @click="cancelRefundModal">取消</Button>
-        <Button type="primary" @click="putOpenRefund">提交</Button>
-      </div>
-    </Modal>
+    <!-- 阶段5：旧「手动退款/分单退款」弹窗已移除，统一走 TerminalOrderModals -->
     <changePrice ref="changePrice" @submitSuccess="submitSuccessHandle"></changePrice>
     <!-- 派单-配送员弹窗 -->
     <Modal v-model="modal3" :mask-closable="false" title="选择配送员" width="657" ok-text="确认" class-name="delivery-modal"
@@ -496,6 +420,7 @@
     <changeSource ref="changeSource" :orderId="orderId"></changeSource>
     <changeGendan ref="changeGendan"></changeGendan>
     <debt-repay-flow ref="debtRepayFlow" @success="getList" />
+    <terminal-order-modals ref="terminalModals" @success="onTerminalSuccess" />
   </div>
 </template>
 
@@ -520,6 +445,7 @@ import changeSource from '@/components/yeji/changeSource';
 import changeGendan from '@/components/yeji/changeGendan';
 import yeji from '@/components/yeji';
 import debtRepayFlow from '@/components/debtRepayFlow';
+import TerminalOrderModals from './components/TerminalOrderModals'
 import { debtOrderDetailApi } from '@/api/debt';
 import {
   orderList,
@@ -534,6 +460,7 @@ import {
   refundRecharge,
   orderWriteForm,
   putOpenRefund,
+  postOrderReopen,
   orderBenefits,
   deliveryReassignApi,
   putDelivery,
@@ -566,6 +493,7 @@ export default {
     changeGendan,
     yeji,
     debtRepayFlow,
+    TerminalOrderModals,
   },
   filters: {
     timeFormat: (value) => dayjs(value * 1000).format("YYYY-MM-DD HH:mm"),
@@ -1072,6 +1000,146 @@ export default {
         }
       })
     },
+    canShowTerminalRefund(row) {
+      return Number(row.order_type) === 0
+        && Number(row.paid) === 1
+        && Number(row.refund_status) === 0
+        && Number(row.terminal_action || 0) === 0
+        && !row.is_debt_repay;
+    },
+    canShowTerminalVoid(row) {
+      return Number(row.order_type) === 0
+        && Number(row.paid) === 1
+        && Number(row.refund_status) === 0
+        && Number(row.terminal_action || 0) === 0
+        && !row.is_debt_repay;
+    },
+    canShowReopen(row) {
+      return Number(row.terminal_action || 0) === 2 && !!row.can_reopen;
+    },
+    openTerminalRefund(row) {
+      this.rowActive = row;
+      this.orderId = row.id;
+      let refundBen = '0';
+      if (row.pay_type === 'combination') {
+        try {
+          getRemak({ order_id: row.id, type: this.remarkType }).then((res) => {
+            const list = (res && res.data && Array.isArray(res.data.list)) ? res.data.list : [];
+            let yueSum = 0;
+            list.forEach((it) => {
+              const activePay = Number(it.activePay || it.active_pay || 0);
+              const subType = it.pay_sub_type || it.paySubType || '';
+              if (activePay === 3 && subType !== 'card_upgrade') {
+                const p = Number(it.price || 0);
+                if (!isNaN(p)) yueSum += p;
+              }
+            });
+            this.$refs.terminalModals.openRefund(row, {
+              refundBen: String(Number(yueSum.toFixed(2))),
+              showReturnCoupon: this.showReturnCouponOption,
+            });
+          }).catch(() => {
+            this.$refs.terminalModals.openRefund(row, { showReturnCoupon: this.showReturnCouponOption });
+          });
+          return;
+        } catch (e) { /* fallthrough */ }
+      }
+      this.$refs.terminalModals.openRefund(row, {
+        refundBen,
+        showReturnCoupon: this.showReturnCouponOption,
+      });
+    },
+    openTerminalVoid(row) {
+      this.rowActive = row;
+      this.orderId = row.id;
+      this.$refs.terminalModals.openVoid(row, { showReturnCoupon: this.showReturnCouponOption });
+    },
+    openRechargeTerminalRefund(row) {
+      const linkId = Number(row && row.link_id);
+      if (!linkId) {
+        return this.$Message.error('充值单不存在，请刷新后重试');
+      }
+      refundRecharge(linkId)
+        .then((res) => {
+          const rules = ((res && res.data) || {}).rules || [];
+          let refundBen = '0';
+          let refundGive = '0';
+          rules.forEach((rule) => {
+            if (rule.field === 'price') refundBen = String(rule.value != null ? rule.value : '0');
+            if (rule.field === 'give_price') refundGive = String(rule.value != null ? rule.value : '0');
+          });
+          this.$refs.terminalModals.openRechargeRefund(row, {
+            rechargeId: linkId,
+            refundBen,
+            refundGive,
+          });
+        })
+        .catch((err) => {
+          this.$Message.error((err && err.msg) || '无法打开充值退款');
+        });
+    },
+    onTerminalSuccess(payload) {
+      this.getList();
+      if (this.orderId) this.getData(this.orderId);
+      if (payload && payload.action === 'void' && payload.can_reopen && payload.row) {
+        this.$Modal.confirm({
+          title: '作废成功',
+          content: '订单已作废。是否立即重新开单？',
+          okText: '重新开单',
+          cancelText: '稍后',
+          onOk: () => this.doReopen(payload.row),
+        });
+      }
+    },
+    doReopen(row) {
+      postOrderReopen(row.id)
+        .then((res) => {
+          const data = (res && res.data) || {};
+          const token = data.draft_token || '';
+          if (!token) {
+            return this.$Message.error(res.msg || '重新开单未成功');
+          }
+          const payload = {
+            draft_token: token,
+            uid: data.uid || row.uid,
+            source_order_id: data.source_order_id || row.id,
+            pending_pay: !!data.pending_pay,
+            pending_pay_order_id: data.pending_pay_order_id || 0,
+            messages: data.messages || [],
+          };
+          try {
+            window.localStorage.setItem('mohe_reopen_draft', JSON.stringify(payload));
+          } catch (e) { /* ignore */ }
+          const tips = (payload.messages || []).filter(Boolean).join('；');
+          const content = payload.pending_pay
+            ? `已有待支付重开订单（编号 ${payload.pending_pay_order_id}），请到收银台继续支付。${tips ? ' ' + tips : ''}`
+            : `重开草稿已准备好，请打开收银台继续结账。${tips ? ' ' + tips : ''}`;
+          this.$Modal.confirm({
+            title: '重新开单',
+            content,
+            okText: '打开收银台',
+            cancelText: '我知道了',
+            onOk: () => this.openCashierForReopen(token),
+          });
+          this.getList();
+        })
+        .catch((err) => {
+          this.$Message.error((err && err.msg) || '重新开单未成功，请核对后重试');
+        });
+    },
+    openCashierForReopen(token) {
+      const host = window.location.hostname;
+      const port = window.location.port;
+      let url = '';
+      if (port === '18082' || port === '8082') {
+        url = `${window.location.protocol}//${host}:18083/?reopen_token=${encodeURIComponent(token)}`;
+      } else if (port === '18081') {
+        url = `${window.location.protocol}//${host}:18083/?reopen_token=${encodeURIComponent(token)}`;
+      } else {
+        url = `${window.location.protocol}//${window.location.host}/cashier/?reopen_token=${encodeURIComponent(token)}`;
+      }
+      window.open(url, '_blank');
+    },
     showRemark(row) {
       this.orderId = row.id
       this.$refs.remarkInfo.modals = true;
@@ -1099,65 +1167,13 @@ export default {
       this.refundModal = false;
     },
     putOpenRefund() {
-      if (this.showRefundBalanceInputs) {
-        this.$refs['formValidate'].validate((valid) => {
-          if (valid) {
-            const ben = parseFloat(this.formValidate.refundBen) || 0;
-            const give = parseFloat(this.formValidate.refundGive) || 0;
-            const needConfirm = this.rowActive.pay_type == 'yue' || this.rowActive.pay_type == 'combination' || ben > 0 || give > 0;
-            if (needConfirm) {
-              this.$Modal.confirm({
-                title: '操作退款',
-                content: '您本次退款的本金【' + this.formValidate.refundBen + '】元和赠金【' + this.formValidate.refundGive + '】元，是否确认退回用户余额？',
-                okText: '确认退款',
-                cancelText: '取消操作',
-                onOk: () => {
-                  this.doOpen();
-                },
-              });
-            } else {
-              this.doOpen();
-            }
-          } else {
-            this.$Message.warning("请填写本金和赠金！");
-          }
-        })
-      } else {
-        this.doOpen();
-      }
+      this.$Message.error('旧退款入口已停用，请使用操作列「退款」办理整单退款');
+      this.refundModal = false;
     },
-      doOpen()
-        {
-          let data = {
-            id: this.orderId,
-            refund_price: this.refundMoney,
-            refund_ben: this.showRefundBalanceInputs ? this.formValidate.refundBen : '0',
-            refund_give: this.showRefundBalanceInputs ? this.formValidate.refundGive : '0',
-            type: 1,
-            is_split_order: this.is_split_order,
-            refund_explain: this.refund_explain,
-            stock_in_type: this.stockInType,
-            return_coupon: this.showReturnCouponOption ? this.returnCoupon : 1,
-          };
-          if (this.is_split_order) {
-            if (!this.refundSelection.length) {
-              return this.$Message.error('请选择需要退款的商品');
-            }
-            data.cart_ids = this.refundSelection.map(({id, refundNum}) => ({
-              cart_id: id,
-              cart_num: refundNum
-            }));
-          }
-          putOpenRefund(data).then(res => {
-            this.$Message.success(res.msg);
-            this.refundModal = false;
-            this.getData(this.orderId);
-            this.getList();
-          }).catch(err => {
-            this.$Message.error(err.msg);
-          });
-        }
-      ,
+    doOpen() {
+      this.putOpenRefund();
+    },
+
         refundSelectionChange(selection)
         {
           this.refundSelection = selection;
@@ -1306,36 +1322,20 @@ export default {
               this.$refs.remarks.formValidate.remark = row.remark
               break
             case '5':
-              this.rowActive = row;
-              if (row.type == 11 || row.product_type == 4) {
-                this.getOrderBenefits()
-              }
-              // 组合支付：默认退本金=组合明细中的“余额支付”合计（不包含卡升级金额）
-              if (row.pay_type === 'combination') {
-                try {
-                  getRemak({order_id: row.id, type: this.remarkType}).then((res) => {
-                    const info = res && res.data ? res.data : {};
-                    const list = Array.isArray(info.list) ? info.list : [];
-                    let yueSum = 0;
-                    list.forEach((it) => {
-                      const activePay = Number(it.activePay || it.active_pay || 0);
-                      const subType = it.pay_sub_type || it.paySubType || '';
-                      if (activePay === 3 && subType !== 'card_upgrade') {
-                        const p = Number(it.price || 0);
-                        if (!isNaN(p)) yueSum += p;
-                      }
-                    });
-                    this.formValidate.refundBen = String(Number(yueSum.toFixed(2)));
-                  }).catch(() => {});
-                } catch (e) {}
-              }
-              this.getOnlyRefundData(row.id, row.refund_type)
+              // 阶段5：详情「立即退款」改为整单退款入口
+              this.openTerminalRefund(row);
+              break
+            case 'void':
+              this.openTerminalVoid(row);
+              break
+            case 'reopen':
+              this.doReopen(row);
               break
             case '55':
               this.getRefundData(row.id, row.refund_type)
               break;
             case '555':
-              this.$modalForm(refundRecharge(row.link_id)).then(() => this.getList())
+              this.openRechargeTerminalRefund(row);
               break
               // case "6":
               // 	this.getRefundIntegral(row.id);
@@ -1421,24 +1421,13 @@ export default {
           }
         }
       ,
-        // 仅退款
+        // 仅退款（阶段5：禁止旧弹窗，改走整单终态）
         getOnlyRefundData(id, refund_type)
         {
-          this.returnCoupon = 1;
-          const cartInfo = [];
-          Object.values(this.rowActive._info).forEach(value => {
-            if (!value.cart_info.is_gift) {
-              cartInfo.push(value.cart_info);
-            }
-          });
-          cartInfo.forEach((value) => {
-            value.refundPrice = this.$computes.Div(value.refund_price, value.cart_num);
-            value.refundNum = value.cart_num - value.refund_num;
-            value._disabled = !value.refundNum;
-          });
-          this.refundProduct = cartInfo;
-          this.refundSelection = cartInfo;
-          this.refundModal = true;
+          const row = this.rowActive && this.rowActive.id === id
+            ? this.rowActive
+            : { id, refund_type, paid: 1, refund_status: 0, order_type: 0, terminal_action: 0 };
+          this.openTerminalRefund(row);
         }
       ,
         // 获取退款表单数据

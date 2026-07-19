@@ -27,6 +27,7 @@ use app\services\activity\coupon\StoreCouponUserServices;
 use app\services\order\OtherOrderServices;
 use app\services\activity\coupon\StoreCouponIssueServices;
 use app\services\cashier\OrderServices;
+use app\services\order\cashier\CashierIntegerMoney;
 use app\services\order\cashier\CashierOrderServices;
 use app\services\order\cashier\StoreHangOrderServices;
 use app\services\order\store\WriteOffOrderServices;
@@ -452,6 +453,14 @@ class Order extends AuthController
         if (!$cartIds) {
             return $this->fail('缺少购物车ID');
         }
+        try {
+            CashierIntegerMoney::assertRequestAmounts([
+                'change_price' => $changePrice,
+                'cart_info' => $changeCartInfo,
+            ]);
+        } catch (ValidateException $e) {
+            return $this->fail($e->getMessage());
+        }
 
         $socket = $request->post('socket', '');
         //发送消息
@@ -472,7 +481,7 @@ class Order extends AuthController
             ], 'cashier']);
         }
 
-        return $this->success($services->computeOrder(
+        $computeData = $services->computeOrder(
             (int)$uid,
             (int)$this->storeId,
             $cartIds,
@@ -491,7 +500,10 @@ class Order extends AuthController
             !!$isPrice,
             (float)$changePrice,
             (array)$cartCoupons
-        ));
+        );
+        $computeData = CashierIntegerMoney::normalizeComputeData($computeData);
+        CashierIntegerMoney::assertComputeData($computeData);
+        return $this->success($computeData);
     }
 
     public function cashType(){
@@ -562,6 +574,15 @@ class Order extends AuthController
         }
         if (!$cartIds) {
             return $this->fail('缺少购物车ID');
+        }
+        try {
+            CashierIntegerMoney::assertRequestAmounts([
+                'change_price' => $changePrice,
+                'cart_info' => $changeCartInfo,
+                'combination_info' => $combinationInfo,
+            ]);
+        } catch (ValidateException $e) {
+            return $this->fail($e->getMessage());
         }
         /** @var StoreCartServices $storeCartServices */
         $storeCartServices = app()->make(StoreCartServices::class);
@@ -647,6 +668,9 @@ class Order extends AuthController
                 (float)$changePrice,
                 (array)$cartCoupons
             );
+            // 结算后统一整数落库：订单总额优先，尾差落最后一行
+            $computeData = CashierIntegerMoney::normalizeComputeData($computeData);
+            CashierIntegerMoney::assertComputeData($computeData);
             $cartInfo = $computeData['cartInfo'];
             if(!empty($sendCart)){
                $payPrice=0;
@@ -669,6 +693,9 @@ class Order extends AuthController
                 $computeData['totalPrice']=$totalPrice;
                 $computeData['sumPrice']=$sumPrice;
                 $computeData['cartInfo']=$cartInfo;
+                $computeData = CashierIntegerMoney::normalizeComputeData($computeData);
+                CashierIntegerMoney::assertComputeData($computeData);
+                $cartInfo = $computeData['cartInfo'];
             }
             $cartGroup = $computeData['cartGroup'] ?? [];
             $other = $cartGroup['other'];

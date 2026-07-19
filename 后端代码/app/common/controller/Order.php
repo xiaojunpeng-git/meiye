@@ -596,96 +596,19 @@ trait Order
      */
     public function update_refund(Request $request, StoreOrderRefundServices $services, StoreOrderCartInfoServices $storeOrderCartInfoServices, $id)
     {
-        return $this->fail('暂不支持！');
-        $data = $request->postMore([
-            ['refund_price', 0],
-            ['type', 1],
-            ['refund_reason', ''],//退款原因
-            ['refund_explain', ''],//退款说明
-            ['stock_in_type', '0'],//退款同步操作退货入库0:暂不入库1:良品入库2:残次品入库
-        ]);
-        if (!$id) {
-            return $this->fail('Data does not exist!');
-        }
-        $data['refund_price'] = sprintf("%.2f", $data['refund_price']);
-        $order = $this->services->get($id);
-        if (!$order) {
-            return $this->fail('Data does not exist!');
-        }
-        if ($order['refund_status'] == 2) {
-            return app('json')->fail('订单已完成退款，请勿重复操作!');
-        }
-        if ($services->count(['store_order_id' => $id, 'refund_type' => [0, 1, 2, 4, 5], 'is_cancel' => 0, 'is_del' => 1])) {
-            return $this->fail('请先处理售后申请');
-        }
-        //0元退款
-        if ($order['pay_price'] == 0) {
-            $refund_price = 0;
-            if ($data['refund_price'] > $order['pay_price']) {
-                return $this->fail('退款金额大于支付金额，请修改退款金额');
+        $type = (int)$request->post('type', 1);
+        if ($type === 2) {
+            if (!$id) {
+                return $this->fail('Data does not exist!');
             }
-        } else {
-            $refund_price = $data['refund_price'];
-        }
-        if ($data['type'] == 1) {
-            $data['refund_status'] = 2;
-            $data['refund_type'] = 6;
-        } else if ($data['type'] == 2) {
-            $data['refund_status'] = 0;
-            $data['refund_type'] = 3;
-        }
-        $type = $data['type'];
-        //拒绝退款
-        if ($type == 2) {
+            $order = $this->services->get($id);
+            if (!$order) {
+                return $this->fail('Data does not exist!');
+            }
             $this->services->update((int)$order['id'], ['refund_status' => 0, 'refund_type' => 3]);
             return app('json')->successful('修改退款状态成功!');
-        } else {
-            unset($data['type']);
-            $refund_data['pay_price'] = $order['pay_price'];
-            $refund_data['refund_price'] = $refund_price;
-            if ($order['refund_price'] > 0) {
-                mt_srand();
-                $refund_data['refund_id'] = $order['order_id'] . rand(100, 999);
-            }
-
-            //生成退款订单
-            $refundOrderData['uid'] = $order['uid'];
-            $refundOrderData['store_id'] = $order['store_id'];
-            $refundOrderData['supplier_id'] = $order['supplier_id'];
-            $refundOrderData['store_order_id'] = $id;
-            $refundOrderData['refund_num'] = $order['total_num'];
-            $refundOrderData['refund_type'] = $data['refund_type'];
-            $refundOrderData['refund_price'] = $order['pay_price'];
-            $refundOrderData['refunded_price'] = $refund_price;
-            $refundOrderData['refund_reason'] = '管理员手动退款，原因：' . $data['refund_reason'] ?? '无';
-            $refundOrderData['refund_explain'] = $data['refund_explain'];
-            $refundOrderData['order_id'] = $services->getUniqueId('re');
-            $refundOrderData['refunded_time'] = time();
-            $refundOrderData['add_time'] = time();
-            $cartInfos = $storeOrderCartInfoServices->getCartColunm(['oid' => $id, 'cart_type' => 0], 'id,cart_id,cart_num,cart_info');
-            $settlePrice = 0;
-            foreach ($cartInfos as &$cartInfo) {
-                $cartInfo['cart_info'] = $cart = is_string($cartInfo['cart_info']) ? json_decode($cartInfo['cart_info'], true) : $cartInfo['cart_info'];
-                $settle_price = bcmul((string)($cart['productInfo']['attrInfo']['settle_price'] ?? 0), (string)$cart['cart_num'], 2);
-                $settlePrice = bcadd((string)$settlePrice, (string)$settle_price, 2);
-            }
-            $refundOrderData['settle_price'] = $settlePrice;
-            $refundOrderData['cart_info'] = json_encode(array_column($cartInfos, 'cart_info'));
-            $res = $services->save($refundOrderData);
-
-
-            $services->setItem('change_manager_type', 'admin')
-                ->setItem('change_manager_id', $request->adminId())
-                ->setItem('stock_in_type', $data['stock_in_type'] ?? 0);
-            //同意退款
-            $services->agreeRefund((int)$res->id, $refund_data);
-            $services->reset();
-
-            //主动退款清楚原本退款单
-//                $services->delete(['store_order_id' => $id]);
-            $services->update((int)$res->id, $data);
-            return app('json')->success('退款成功');
         }
+        return $this->terminal_order_refund($request, $id);
     }
 
     /**
@@ -702,141 +625,284 @@ trait Order
      */
     public function open_order_refund(Request $request, StoreOrderRefundServices $services, $id)
     {
+        // 兼容旧路由：拒绝拆单/合并/部分退，整单退款走统一终态编排
+        return $this->terminal_order_refund($request, $id);
+    }
+
+    /**
+     * 整单退款（阶段 2）
+     * POST order/:id/refund
+     */
+    public function terminal_order_refund(Request $request, $id)
+    {
         $data = $request->postMore([
-            ['refund_price', 0],
-            ['refund_ben', 0],
-            ['refund_give', 0],
+            ['refund_price', null],
+            ['refund_amount', null],
+            ['refund_ben', null],
+            ['refund_give', null],
             ['type', 1],
             ['is_split_order', 0],
             ['cart_ids', []],
             ['refund_reason', ''],
             ['refund_explain', ''],
-            ['stock_in_type', '0'],//退款同步操作退货入库0:暂不入库1:良品入库2:残次品入库
+            ['refund_business_date', ''],
+            ['request_token', ''],
+            ['stock_in_type', '0'],
             ['merge_refund_id', 0],
-            ['return_coupon', 1], // 1=退回用户优惠券 0=不退回（订单曾用券时由前端展示选择）
+            ['refund_num', ''],
+            ['cart_num', ''],
+            ['return_coupon', 1],
+            ['bookkeeping_confirmed', 0],
+            ['bookkeeping_remark', ''],
         ]);
         if (!$id) {
-            return app('json')->fail('Data does not exist!');
+            return app('json')->fail('订单不存在，请核对后再操作。');
         }
-        $data['refund_price'] = sprintf("%.2f", $data['refund_price']);
-        $mergeRefundId = (int)($data['merge_refund_id'] ?? 0);
-        $order = $this->services->get($id);
-        if (!$order) {
-            return $this->fail('Data does not exist!');
-        }
-        if ($order['refund_status'] == 2) {
-            return app('json')->fail('订单已完成退款，请勿重复操作!');
-        }
-        $mergeRefund = null;
-        if ($mergeRefundId > 0) {
-            $mergeRefund = $services->get($mergeRefundId);
-            if (!$mergeRefund || (int)$mergeRefund['store_order_id'] !== (int)$id) {
-                return app('json')->fail('售后单不存在');
+        // 拒绝退款仍走旧状态（非整单退款执行）
+        if ((int)$data['type'] === 2) {
+            $order = $this->services->get($id);
+            if (!$order) {
+                return app('json')->fail('订单不存在，请核对后再操作。');
             }
-            if ((int)$mergeRefund['is_cancel'] === 1) {
-                return app('json')->fail('用户已取消申请');
-            }
-            $rt = (int)$mergeRefund['refund_type'];
-            if (!in_array($rt, [0, 1, 2, 5], true) && !($rt === 4 && (int)$mergeRefund['apply_type'] === 3)) {
-                return app('json')->fail('售后订单状态不支持该操作');
-            }
-        } elseif ($services->count(['store_order_id' => $id, 'refund_type' => [0, 1, 2, 4, 5], 'is_cancel' => 0, 'is_del' => 1])) {
-            return $this->fail('请先处理售后申请');
-        }
-        //0元退款
-        if ($order['pay_price'] == 0) {
-            $refund_price = 0;
-            if ($data['refund_price'] > 0) {
-                return app('json')->fail('退款金额大于支付金额，请修改退款金额');
-            }
-        } else {
-            $refund_price = $data['refund_price'];
-        }
-        if ($data['type'] != 2) {
-            try {
-                /** @var \app\services\order\StoreDebtServices $debtServices */
-                $debtServices = app()->make(\app\services\order\StoreDebtServices::class);
-                $orderArr = is_array($order) ? $order : $order->toArray();
-                if ($mergeRefundId > 0 && $mergeRefund) {
-                    $debtServices->validateRepayOrderRefundAmount(
-                        $orderArr,
-                        (float)$refund_price,
-                        (float)($mergeRefund['refunded_price'] ?? 0)
-                    );
-                } else {
-                    $debtServices->validateRepayOrderRefundAmount($orderArr, (float)$refund_price);
-                }
-            } catch (\think\exception\ValidateException $e) {
-                return app('json')->fail($e->getMessage());
-            }
-        }
-        if ($data['type'] == 1) {
-            $data['refund_status'] = 2;
-            $data['refund_type'] = 6;
-        } else if ($data['type'] == 2) {
-            $data['refund_status'] = 0;
-            $data['refund_type'] = 3;
-        }
-        $type = $data['type'];
-        if ($mergeRefundId <= 0 && $data['is_split_order']) {
-            if (!$data['cart_ids']) {
-                return app('json')->fail('请选择商品');
-            }
-            foreach ($data['cart_ids'] as $cart) {
-                if (!isset($cart['cart_id']) || !$cart['cart_id'] || !isset($cart['cart_num']) || !$cart['cart_num']) {
-                    return app('json')->fail('请重新选择商品，或件数');
-                }
-            }
-        }
-        //拒绝退款
-        if ($type == 2) {
             $this->services->update((int)$order['id'], ['refund_status' => 0, 'refund_type' => 3]);
             return app('json')->successful('修改退款状态成功!');
-        } else {
-            unset($data['type']);
-            $refund_data['pay_price'] = $order['pay_price'];
-            $refund_data['refund_price'] = $refund_price;
-            if ($order['refund_price'] > 0) {
-                mt_srand();
-                $refund_data['refund_id'] = $order['order_id'] . rand(100, 999);
-            }
-            if ($mergeRefundId > 0) {
-                $refundId = $mergeRefundId;
-                if ((float)$mergeRefund['refund_price'] > 0) {
-                    if ((float)$refund_price <= 0) {
-                        return app('json')->fail('请输入退款金额');
-                    }
-                    $newRefunded = bcadd((string)$refund_price, (string)($mergeRefund['refunded_price'] ?? 0), 2);
-                    if (bccomp((string)$mergeRefund['refund_price'], $newRefunded, 2) < 0) {
-                        return app('json')->fail('退款金额大于支付金额，请修改退款金额');
-                    }
-                    $data['refunded_price'] = $newRefunded;
-                }
-                $data['refunded_time'] = time();
-            } else {
-                $refundId = $services->splitApplyRefund((int)$id, $order, $data['cart_ids'], $data['refund_type'], $refund_price, $data);
-            }
+        }
 
-            //修改订单退款状态
-            $changeManagerType = 'admin';
-            $changeManagerId = (int)$request->adminId();
-            if (method_exists($request, 'storeStaffId') && $request->storeStaffId()) {
-                $changeManagerType = 'store';
-                $changeManagerId = (int)$request->storeStaffId();
-            }
-            $recoverCoupon = isset($data['return_coupon']) && (int)$data['return_coupon'] === 0 ? 0 : 1;
-            $services->setItem('change_manager_type', $changeManagerType)
-                ->setItem('change_manager_id', $changeManagerId)
-                ->setItem('stock_in_type', $data['stock_in_type'] ?? 0)
-                ->setItem('recover_coupon', $recoverCoupon);
-            $services->agreeRefund($refundId, $refund_data, $data['refund_ben'], $data['refund_give'], $recoverCoupon);
-            $services->reset();
+        $changeManagerType = 'admin';
+        $changeManagerId = (int)$request->adminId();
+        $storeScope = 0;
+        $sourceType = \app\model\order\StoreOrderTerminalOperation::SOURCE_ADMIN;
+        if (!empty($request->storeStaffId)) {
+            $changeManagerType = 'store';
+            $changeManagerId = (int)$request->storeStaffId;
+            $storeScope = (int)($request->storeId ?? 0);
+            $sourceType = \app\model\order\StoreOrderTerminalOperation::SOURCE_STORE;
+        }
+        if (!empty($request->cashierId)) {
+            $changeManagerType = 'cashier';
+            $changeManagerId = (int)$request->cashierId;
+            $storeScope = (int)($request->storeId ?? $storeScope);
+            $sourceType = \app\model\order\StoreOrderTerminalOperation::SOURCE_CASHIER;
+        }
 
-            //主动退款清楚原本退款单
-//          $services->delete(['store_order_id' => $id]);
-            unset($data['merge_refund_id'], $data['cart_ids'], $data['is_split_order'], $data['refund_ben'], $data['refund_give'], $data['refund_reason'], $data['return_coupon']);
-            $services->update($refundId, $data);
-            return app('json')->success('退款成功');
+        $raw = $request->post();
+        $refundAmount = array_key_exists('refund_amount', $raw) ? $raw['refund_amount'] : null;
+        $refundPrice = array_key_exists('refund_price', $raw) ? $raw['refund_price'] : null;
+        $refundBen = array_key_exists('refund_ben', $raw) ? $raw['refund_ben'] : null;
+        $refundGive = array_key_exists('refund_give', $raw) ? $raw['refund_give'] : null;
+        $refundAmountProvided = array_key_exists('refund_amount', $raw) || array_key_exists('refund_price', $raw);
+        $refundPriceProvided = array_key_exists('refund_price', $raw);
+
+        try {
+            /** @var \app\services\order\StoreOrderRefundDomainServices $domain */
+            $domain = app()->make(\app\services\order\StoreOrderRefundDomainServices::class);
+            $result = $domain->refundWholeOrder([
+                'store_order_id' => (int)$id,
+                'store_scope' => $storeScope,
+                'request_token' => (string)$data['request_token'],
+                'refund_amount' => $refundAmount !== null ? $refundAmount : $refundPrice,
+                'refund_price' => $refundPrice,
+                'refund_ben' => $refundBen,
+                'refund_give' => $refundGive,
+                'refund_amount_provided' => $refundAmountProvided,
+                'refund_price_provided' => $refundPriceProvided,
+                'refund_business_date' => (string)$data['refund_business_date'],
+                'refund_reason' => (string)$data['refund_reason'],
+                'refund_explain' => (string)$data['refund_explain'],
+                'stock_in_type' => $data['stock_in_type'],
+                'return_coupon' => $data['return_coupon'],
+                'bookkeeping_confirmed' => $data['bookkeeping_confirmed'],
+                'bookkeeping_remark' => $data['bookkeeping_remark'],
+                'source_type' => $sourceType,
+                'operator_type' => $changeManagerType,
+                'operator_id' => $changeManagerId,
+                // 旧拆单参数原样传入，由 assertWholeOrderOnly 明确拒绝
+                'is_split_order' => $data['is_split_order'],
+                'cart_ids' => $data['cart_ids'],
+                'merge_refund_id' => $data['merge_refund_id'],
+                'refund_num' => $data['refund_num'],
+                'cart_num' => $data['cart_num'],
+            ]);
+            return app('json')->success($result['message'] ?? '退款成功', $result);
+        } catch (\think\exception\ValidateException $e) {
+            return app('json')->fail($e->getMessage());
+        } catch (\Throwable $e) {
+            return app('json')->fail('操作未成功，订单状态未改变，请核对后重试或联系负责人。');
+        }
+    }
+
+    /**
+     * 整单作废（阶段 3）
+     * POST order/:id/void
+     * 不计入退款统计；不写退款申请表；不对微信/支付宝/现金自动原路退。
+     */
+    public function terminal_order_void(Request $request, $id)
+    {
+        $data = $request->postMore([
+            ['void_reason', ''],
+            ['refund_reason', ''],
+            ['reason', ''],
+            ['request_token', ''],
+            ['return_coupon', 1],
+            ['stock_in_type', '0'],
+            ['bookkeeping_confirmed', 0],
+            ['bookkeeping_remark', ''],
+        ]);
+        if (!$id) {
+            return app('json')->fail('订单不存在，请核对后再操作。');
+        }
+
+        $changeManagerType = 'admin';
+        $changeManagerId = (int)$request->adminId();
+        $storeScope = 0;
+        $sourceType = \app\model\order\StoreOrderTerminalOperation::SOURCE_ADMIN;
+        if (!empty($request->storeStaffId)) {
+            $changeManagerType = 'store';
+            $changeManagerId = (int)$request->storeStaffId;
+            $storeScope = (int)($request->storeId ?? 0);
+            $sourceType = \app\model\order\StoreOrderTerminalOperation::SOURCE_STORE;
+        }
+        if (!empty($request->cashierId)) {
+            $changeManagerType = 'cashier';
+            $changeManagerId = (int)$request->cashierId;
+            $storeScope = (int)($request->storeId ?? $storeScope);
+            $sourceType = \app\model\order\StoreOrderTerminalOperation::SOURCE_CASHIER;
+        }
+
+        $reason = trim((string)$data['void_reason']);
+        if ($reason === '') {
+            $reason = trim((string)$data['reason']);
+        }
+        if ($reason === '') {
+            $reason = trim((string)$data['refund_reason']);
+        }
+
+        try {
+            /** @var \app\services\order\StoreOrderVoidServices $voidServices */
+            $voidServices = app()->make(\app\services\order\StoreOrderVoidServices::class);
+            $result = $voidServices->voidWholeOrder([
+                'store_order_id' => (int)$id,
+                'store_scope' => $storeScope,
+                'request_token' => (string)$data['request_token'],
+                'reason' => $reason,
+                'void_reason' => $reason,
+                'return_coupon' => $data['return_coupon'],
+                'stock_in_type' => (int)$data['stock_in_type'],
+                'bookkeeping_confirmed' => $data['bookkeeping_confirmed'],
+                'bookkeeping_remark' => $data['bookkeeping_remark'],
+                'source_type' => $sourceType,
+                'operator_type' => $changeManagerType,
+                'operator_id' => $changeManagerId,
+            ]);
+            return app('json')->success($result['message'] ?? '作废成功', $result);
+        } catch (\think\exception\ValidateException $e) {
+            return app('json')->fail($e->getMessage());
+        } catch (\Throwable $e) {
+            return app('json')->fail('操作未成功，订单状态未改变，请核对后重试或联系负责人。');
+        }
+    }
+
+    /**
+     * 创建或获取重开草稿（阶段 4）
+     * POST order/:id/reopen
+     */
+    public function terminal_order_reopen(Request $request, $id)
+    {
+        if (!$id) {
+            return app('json')->fail('订单不存在，请核对后再操作。');
+        }
+        $operatorType = 'admin';
+        $operatorId = (int)$request->adminId();
+        $storeScope = 0;
+        $sourceType = \app\model\order\StoreOrderTerminalOperation::SOURCE_ADMIN;
+        if (!empty($request->storeStaffId)) {
+            $operatorType = 'store';
+            $operatorId = (int)$request->storeStaffId;
+            $storeScope = (int)($request->storeId ?? 0);
+            $sourceType = \app\model\order\StoreOrderTerminalOperation::SOURCE_STORE;
+        }
+        if (!empty($request->cashierId)) {
+            $operatorType = 'cashier';
+            $operatorId = (int)$request->cashierId;
+            $storeScope = (int)($request->storeId ?? $storeScope);
+            $sourceType = \app\model\order\StoreOrderTerminalOperation::SOURCE_CASHIER;
+        }
+        try {
+            /** @var \app\services\order\StoreOrderReopenServices $reopen */
+            $reopen = app()->make(\app\services\order\StoreOrderReopenServices::class);
+            $result = $reopen->createOrGetDraft([
+                'store_order_id' => (int)$id,
+                'store_scope' => $storeScope,
+                'operator_type' => $operatorType,
+                'operator_id' => $operatorId,
+                'source_type' => $sourceType,
+            ]);
+            return app('json')->success($result['created'] ? '已创建重开草稿' : '已返回现有重开草稿', $result);
+        } catch (\think\exception\ValidateException $e) {
+            return app('json')->fail($e->getMessage());
+        } catch (\Throwable $e) {
+            return app('json')->fail('重新开单未成功，请核对后重试或联系负责人。');
+        }
+    }
+
+    /**
+     * 收银台加载重开草稿（阶段 4）
+     * GET order/reopen/:token
+     */
+    public function terminal_order_reopen_load(Request $request, $token)
+    {
+        $token = trim((string)$token);
+        if ($token === '') {
+            return app('json')->fail('重开草稿不存在或已失效，请重新发起。');
+        }
+        $storeScope = 0;
+        $staffId = 0;
+        if (!empty($request->storeStaffId) || !empty($request->cashierId)) {
+            $storeScope = (int)($request->storeId ?? 0);
+        }
+        if (!empty($request->cashierId)) {
+            $staffId = (int)$request->cashierId;
+        } elseif (!empty($request->storeStaffId)) {
+            $staffId = (int)$request->storeStaffId;
+        }
+        try {
+            /** @var \app\services\order\StoreOrderReopenServices $reopen */
+            $reopen = app()->make(\app\services\order\StoreOrderReopenServices::class);
+            $result = $reopen->loadDraft($token, [
+                'store_scope' => $storeScope,
+                'staff_id' => $staffId,
+            ]);
+            return app('json')->success('重开草稿已加载', $result);
+        } catch (\think\exception\ValidateException $e) {
+            return app('json')->fail($e->getMessage());
+        } catch (\Throwable $e) {
+            return app('json')->fail('加载重开草稿未成功，请核对后重试或联系负责人。');
+        }
+    }
+
+    /**
+     * 撤销本次核销（阶段 3 明确入口；旧 postChexiao 仍可用）
+     * PUT order/writeoff/:subOrderId/cancel
+     */
+    public function cancel_writeoff(Request $request, $subOrderId)
+    {
+        if (!$subOrderId) {
+            return app('json')->fail('核销单据不存在，请核对后再操作。');
+        }
+        $remark = (string)$request->param('remarks', $request->param('remark', '撤销本次核销'));
+        $storeScope = 0;
+        if (!empty($request->storeStaffId) || !empty($request->cashierId)) {
+            $storeScope = (int)($request->storeId ?? 0);
+        }
+        try {
+            /** @var \app\services\order\StoreOrderWriteOffServices $writeOffServices */
+            $writeOffServices = app()->make(\app\services\order\StoreOrderWriteOffServices::class);
+            $writeOffServices->cancelWriteoff((int)$subOrderId, $remark !== '' ? $remark : '撤销本次核销', $storeScope);
+            return app('json')->success('撤销本次核销成功');
+        } catch (\think\exception\ValidateException $e) {
+            return app('json')->fail($e->getMessage());
+        } catch (\Throwable $e) {
+            return app('json')->fail('撤销核销未成功，请核对后重试或联系负责人。');
         }
     }
 

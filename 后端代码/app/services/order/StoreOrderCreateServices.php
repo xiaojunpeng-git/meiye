@@ -190,7 +190,7 @@ class StoreOrderCreateServices extends BaseServices
 			//订单商品营销设置：赠送积分
 			$cartInfoGainIntegral = isset($cart['productInfo']['give_integral']) ? bcmul((string)$cart['cart_num'], (string)$cart['productInfo']['give_integral'], 0) : 0;
 			$gainIntegral = bcadd((string)$gainIntegral, (string)$cartInfoGainIntegral, 0);
-			if (isset($cart['productInfo']['product_type']) && $cart['productInfo']['product_type'] == 6) {//预约商品
+			if (isset($cart['productInfo']['product_type']) && $cart['productInfo']['product_type'] == 6) {//项目
 				$reservationNum += $cart['cart_num'];
 			}
         }

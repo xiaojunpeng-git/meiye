@@ -74,7 +74,7 @@ class Cart extends AuthController
             ['tourist_uid', ''],//虚拟用户uid
             [['secKillId', 'd'], 0],//秒杀商品编号
 			['reservation_time', ''],//预约日期
-			[['reservation_time_id', 'd'], 0],//预约商品时段ID
+			[['reservation_time_id', 'd'], 0],//项目时段ID
 			['real_name', ''],//预约用户昵称
 			['phone', ''],//预约用户手机号
 			['service_staff_id', 0],//服务人员ID

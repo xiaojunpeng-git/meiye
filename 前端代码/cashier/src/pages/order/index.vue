@@ -114,17 +114,24 @@
           </div>
           <div
             class="btn pay"
-            @click="getRefundData"
-            v-if="
-              [0, 1, 2, 5].includes(selectOrderData.refund_type) &&
-                (parseFloat(selectOrderData.pay_price) >
-                  parseFloat(selectOrderData.refund_price) ||
-                  selectOrderData.pay_price == 0) &&
-                !selectOrderData.refund.length &&
-                selectOrderData.paid == 1
-            "
+            @click="openTerminalRefund"
+            v-if="canCashierTerminalRefund()"
           >
-            {{ selectOrderData.refund_type == 2 ? "同意退货" : "立即退款" }}
+            退款
+          </div>
+          <div
+            class="btn pay"
+            @click="openTerminalVoid"
+            v-if="canCashierTerminalVoid()"
+          >
+            作废
+          </div>
+          <div
+            class="btn pay"
+            @click="doCashierReopen"
+            v-if="canCashierReopen()"
+          >
+            重新开单
           </div>
           <div
             class="btn pay"
@@ -136,6 +143,7 @@
         </div>
       </div>
     </div>
+    <terminal-order-modals ref="terminalModals" @success="onCashierTerminalSuccess" />
     <!-- 备注 -->
     <order-remark
       ref="remarks"
@@ -157,41 +165,7 @@
         @on-ok="payOffline">
         <Icon type="ios-alert" />确认该笔订单要使用线下支付吗？
     </Modal>
-    <Modal v-model="refundModal" title="手动退款" width="960" class-name="refund-modal" @on-visible-change="visibleChange">
-      <Form :label-width="100">
-        <FormItem label="退款金额：" required>
-          <InputNumber v-model="refundMoney" style="width: 408px;"></InputNumber>
-        </FormItem>
-        <FormItem v-if="refundProductNum > 1" label="分单退款：">
-          <i-switch v-model="isSplitOrder" :true-value="1" :false-value="0" size="large">
-            <span slot="open">开启</span>
-            <span slot="close">关闭</span>
-          </i-switch>
-          <div class="tips">可选择表格中的商品单独退款，退款后且不能撤回，请谨慎操作！</div>
-          <Table v-show="isSplitOrder" ref="refundTable" max-height="500" :columns="refundColumns" :data="refundProduct" @on-selection-change="selectionChange">
-            <template slot-scope="{ row }" slot="product">
-              <div class="image-wrap" v-viewer="{navbar:false,toolbar:false}"><img :src="row.productInfo.attrInfo.image" class="image"></div>
-              <div class="title">{{ row.productInfo.store_name }}</div>
-            </template>
-            <template slot-scope="{ row, index }" slot="action">
-              <InputNumber v-model="refundProduct[index].refundNum" :max="row.cart_num - row.refund_num" :min="1" :precision="0" controls-outside @on-change="numChange"></InputNumber>
-            </template>
-          </Table>
-        </FormItem>
-		<FormItem label="售后入库：" v-if="selectOrderData.status>=1">
-			<RadioGroup v-model="stockInType">
-			  <Radio :label="0">暂不入库</Radio>
-			  <Radio :label="1">入良品库</Radio>
-			  <Radio :label="2">入残次品库</Radio>
-			</RadioGroup>
-			<div class="tips">选择售后商品是否需要执行入库操作，若需存入不同仓库，请于入库管理模块中操作退货入库。</div>
-		</FormItem>
-      </Form>
-      <div slot="footer">
-        <Button @click="cancelRefundModal">取消</Button>
-        <Button type="primary" @click="submitRefund">提交</Button>
-      </div>
-    </Modal>
+    <!-- 阶段5：旧手动/分单退款弹窗已移除，统一走 TerminalOrderModals -->
   </div>
 </template>
 
@@ -211,7 +185,9 @@ import {
   erpConfig,
   payOffline,
   openRefund,
+  postOrderReopen,
 } from "@/api/order";
+import TerminalOrderModals from "@/components/TerminalOrderModals";
 
 export default {
   components: {
@@ -223,6 +199,7 @@ export default {
     orderRecord,
     filterModal,
     orderSend,
+    TerminalOrderModals,
   },
   data() {
     return {
@@ -422,7 +399,7 @@ export default {
     submitFail(remark) {
       this.selectOrderData.remark=remark;
     },
-    // 获取退款表单数据
+    // 获取退款表单数据（阶段5：禁止旧分单弹窗）
     getRefundData() {
       if (this.selectOrderData.refund_type === 2) {
         this.delfromData = {
@@ -438,20 +415,7 @@ export default {
             this.$Message.error(err.msg);
           });
       } else {
-        const cartInfo = Object.values(this.selectOrderData._info).map(({ cart_info }) => {
-          const refundNum = cart_info.cart_num - cart_info.refund_num;
-          return {
-            ...cart_info,
-            refundPrice: this.$computes.Div(cart_info.refund_price, cart_info.cart_num),
-            refundNum,
-            _disabled: !refundNum,
-          };
-        });
-        this.refundProduct = cartInfo;
-        if (this.refundProductNum === 1) {
-          this.refundSelection = cartInfo;
-        }
-        this.refundModal = true;
+        this.openTerminalRefund();
       }
     },
     // 订单详情
@@ -530,37 +494,62 @@ export default {
         this.refundSelection = [];
       }
     },
+    canCashierTerminalRefund() {
+      const row = this.selectOrderData || {};
+      return Number(row.paid) === 1
+        && Number(row.refund_status) === 0
+        && Number(row.terminal_action || 0) === 0
+        && Number(row.order_type || 0) === 0;
+    },
+    canCashierTerminalVoid() {
+      return this.canCashierTerminalRefund();
+    },
+    canCashierReopen() {
+      const row = this.selectOrderData || {};
+      return Number(row.terminal_action || 0) === 2 && !!row.can_reopen;
+    },
+    openTerminalRefund() {
+      this.$refs.terminalModals.openRefund(this.selectOrderData || {}, {});
+    },
+    openTerminalVoid() {
+      this.$refs.terminalModals.openVoid(this.selectOrderData || {}, {});
+    },
+    onCashierTerminalSuccess() {
+      this.reloading = true;
+      this.limitTemp = this.orderData.limit;
+      this.pageTemp = this.orderData.page;
+      this.orderData.limit *= this.orderData.page;
+      this.orderData.page = 1;
+      this.orderListData = [];
+      this.getOrderList();
+    },
+    doCashierReopen() {
+      const row = this.selectOrderData || {};
+      postOrderReopen(row.id).then((res) => {
+        const data = (res && res.data) || {};
+        const token = data.draft_token || '';
+        if (!token) return this.$Message.error(res.msg || '重新开单未成功');
+        try {
+          window.localStorage.setItem('mohe_reopen_draft', JSON.stringify({
+            draft_token: token,
+            uid: data.uid || row.uid,
+            pending_pay: !!data.pending_pay,
+            pending_pay_order_id: data.pending_pay_order_id || 0,
+            messages: data.messages || [],
+          }));
+        } catch (e) { /* ignore */ }
+        this.$Message.success(res.msg || '重开草稿已准备好');
+        this.$router.push({ path: '/cashier', query: { reopen_token: token, uid: data.uid || row.uid } });
+      }).catch((err) => {
+        this.$Message.error((err && err.msg) || '重新开单未成功');
+      });
+    },
     cancelRefundModal() {
       this.refundModal = false;
     },
     submitRefund() {
-      let data = {
-        refund_price: this.refundMoney,
-        is_split_order: this.isSplitOrder,
-		stock_in_type: this.stockInType
-      };
-      if (this.isSplitOrder) {
-        if (!this.refundSelection.length) {
-          return this.$Message.warning('请选择需要退款的商品');
-        }
-        // 组装退款商品
-        data.cart_ids = this.productSelection.map(({ id, refundNum }) => {
-          return { cart_id: id, cart_num: refundNum };
-        });
-      }
-      openRefund(this.selectOrderData.id, data).then(res => {
-        this.$Message.success(res.msg);
-        this.refundModal = false;
-        this.reloading = true;
-        this.limitTemp = this.orderData.limit;
-        this.pageTemp = this.orderData.page;
-        this.orderData.limit *= this.orderData.page;
-        this.orderData.page = 1;
-        this.orderListData = [];
-        this.getOrderList();
-      }).catch(res => {
-        this.$Message.error(res.msg);
-      });
+      this.$Message.error('旧退款入口已停用，请使用「退款」办理整单退款');
+      this.refundModal = false;
     },
     // 选择商品
     selectionChange(selection) {

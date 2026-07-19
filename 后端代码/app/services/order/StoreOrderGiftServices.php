@@ -121,7 +121,7 @@ class StoreOrderGiftServices extends BaseServices
     }
 
     /**
-     * 主订单退款/撤销时联动撤销赠送子订单（赠送单单独撤销时不反向联动）
+     * 主订单退款时联动撤销赠送子订单（退款语义：refund_status=2）
      */
     public function revokeLinkedGiftOrders(int $mainOrderId, string $reason = '主订单退款'): void
     {
@@ -129,30 +129,63 @@ class StoreOrderGiftServices extends BaseServices
             return;
         }
         foreach ($this->getLinkedGiftOrderIds($mainOrderId) as $giftOrderId) {
-            $this->revokeGiftOrder($giftOrderId, $reason);
+            $this->revokeGiftOrder($giftOrderId, $reason, false);
+        }
+    }
+
+    /**
+     * 主订单作废时联动撤销赠送子订单（作废语义：terminal_action=2，不写退款状态）
+     */
+    public function revokeLinkedGiftOrdersForVoid(int $mainOrderId, string $reason = '主订单作废'): void
+    {
+        if ($mainOrderId <= 0 || $this->isGiftOnlyOrder($mainOrderId)) {
+            return;
+        }
+        foreach ($this->getLinkedGiftOrderIds($mainOrderId) as $giftOrderId) {
+            $this->revokeGiftOrder($giftOrderId, $reason, true);
         }
     }
 
     /**
      * 撤销单个赠送订单（0 元，不走支付退款）
+     * @param bool $forVoid true=作废语义；false=退款语义
      */
-    public function revokeGiftOrder(int $orderId, string $reason = '主订单退款'): void
+    public function revokeGiftOrder(int $orderId, string $reason = '主订单退款', bool $forVoid = false): void
     {
         if ($orderId <= 0) {
             return;
         }
         $order = StoreOrder::where('id', $orderId)->find();
-        if (!$order || (int)$order['paid'] !== 1 || (int)$order['refund_status'] !== 0) {
+        if (!$order || (int)$order['paid'] !== 1) {
             return;
         }
         if (!$this->isGiftOnlyOrder($orderId)) {
             return;
         }
-        StoreOrder::where('id', $orderId)->update([
-            'back_reason' => $reason,
-            'refund_status' => 2,
-            'refund_type' => 6,
-        ]);
+        if ($forVoid) {
+            if ((int)($order['terminal_action'] ?? 0) === \app\model\order\StoreOrderTerminalOperation::ACTION_VOID) {
+                return;
+            }
+            StoreOrder::where('id', $orderId)->update([
+                'back_reason' => $reason,
+                'terminal_action' => \app\model\order\StoreOrderTerminalOperation::ACTION_VOID,
+                'terminal_action_time' => time(),
+                // 作废不得伪写退款状态
+                'refund_status' => 0,
+                'refund_type' => 0,
+            ]);
+            $changeType = 'order_void';
+        } else {
+            if ((int)$order['refund_status'] !== 0) {
+                return;
+            }
+            StoreOrder::where('id', $orderId)->update([
+                'back_reason' => $reason,
+                'refund_status' => 2,
+                'refund_type' => 6,
+            ]);
+            $changeType = 'refund_split';
+        }
         if ((int)($order['type'] ?? 0) === 11) {
             app()->make(UserCardHolderServices::class)->update(['oid' => $orderId], ['is_del' => 1]);
         }
@@ -160,7 +193,7 @@ class StoreOrderGiftServices extends BaseServices
             app()->make(StoreReservationOrderServices::class)->delete(['oid' => $orderId]);
         }
         StaffYeji::where('link_id', $orderId)->where('type', 2)->update(['status' => 1]);
-        OrderStatusJob::dispatch([$orderId, 'refund_split', [
+        OrderStatusJob::dispatch([$orderId, $changeType, [
             'change_message' => $reason,
             'change_manager_type' => 'system',
         ]]);
