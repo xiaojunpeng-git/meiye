@@ -30,3 +30,8 @@ desktop.ini
 *.swp
 
 # 说明：前端 src/vendor 为项目内打包库，属源码，保持跟踪，勿忽略
+
+# local DB dumps / accidental exports (do not commit)
+database/*.sql
+database/*.sql.gz
+后端代码/pem/
