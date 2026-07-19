@@ -268,10 +268,7 @@ export default {
         });
     },
     getChilden(data) {
-      if (data.length && data[0].children) {
-        return this.getChilden(data[0].children);
-      }
-      return data[0].path;
+      return util.resolveDefaultMenuPath(data);
     },
     getCopyright() {
       copyrightInfoApi()

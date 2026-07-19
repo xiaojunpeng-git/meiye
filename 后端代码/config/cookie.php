@@ -28,7 +28,8 @@ return [
     // 跨域header
     'header'    => [
         'Access-Control-Allow-Origin'       => '*',
-        'Access-Control-Allow-Headers'      => 'Client-Userid,Authori-zation,Authorization, Content-Type, If-Match, If-Modified-Since, If-None-Match, If-Unmodified-Since, X-Requested-With, Form-type, X-Source',
+        // X-Request-Token：组织架构等工作台写接口幂等令牌（18081 跨域预检必须放行，否则浏览器报 Network Error）
+        'Access-Control-Allow-Headers'      => 'Client-Userid,Authori-zation,Authorization, Content-Type, If-Match, If-Modified-Since, If-None-Match, If-Unmodified-Since, X-Requested-With, Form-type, X-Source, X-Request-Token',
         'Access-Control-Allow-Methods'      => 'GET,POST,PATCH,PUT,DELETE,OPTIONS,DELETE',
         'Access-Control-Max-Age'            =>  '1728000',
         'Access-Control-Allow-Credentials'  => 'true',

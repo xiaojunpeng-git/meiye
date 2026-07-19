@@ -1175,13 +1175,22 @@ Route::group('adminapi', function () {
 		Route::get('organization/tree', 'v1.organization.Organization/tree')->option(['real_name' => '组织架构树']);
 		Route::get('organization/counts', 'v1.organization.Organization/counts')->option(['real_name' => '组织架构数量']);
 		Route::get('organization/overview', 'v1.organization.Organization/overview')->option(['real_name' => '组织权限概况']);
+		Route::get('organization/stores', 'v1.organization.Organization/stores')->option(['real_name' => '组织工作台门店分页']);
+		Route::get('organization/employees', 'v1.organization.Organization/employees')->option(['real_name' => '组织工作台人员分页']);
+		Route::get('organization/leader_candidates', 'v1.organization.Organization/leader_candidates')->option(['real_name' => '组织负责人候选分页']);
 		Route::get('organization/change_log', 'v1.organization.Organization/change_log')->option(['real_name' => '组织架构操作记录']);
+		Route::get('organization/source_status', 'v1.organization.Organization/source_status')->option(['real_name' => '组织数据源状态']);
+		Route::get('organization/migrate_readiness', 'v1.organization.Organization/migrate_readiness')->option(['real_name' => '组织迁移就绪检查']);
+		Route::get('organization/write_status', 'v1.organization.Organization/write_status')->option(['real_name' => '组织工作台写状态']);
+		Route::get('organization/:id/permissions', 'v1.organization.Organization/permissions')->option(['real_name' => '组织工作台权限只读']);
 		Route::post('organization/migrate', 'v1.organization.Organization/migrate')->option(['real_name' => '组织架构数据迁移']);
 		Route::post('organization/bind_store', 'v1.organization.Organization/bind_store')->option(['real_name' => '门店绑定组织']);
 		Route::get('organization/admin_excludes/:orgAdminId', 'v1.organization.Organization/admin_excludes')->option(['real_name' => '管理员排除门店']);
 		Route::get('organization/admin_excludes_by_agent/:legacyAgentId', 'v1.organization.Organization/admin_excludes_by_agent')->option(['real_name' => '按管理人员查排除门店']);
 		Route::post('organization/admin_excludes/:orgAdminId', 'v1.organization.Organization/save_admin_excludes')->option(['real_name' => '保存管理员排除门店']);
 		Route::post('organization/admin_excludes_by_agent/:legacyAgentId', 'v1.organization.Organization/save_admin_excludes_by_agent')->option(['real_name' => '按管理人员保存排除门店']);
+		Route::post('organization/admin_permission/:orgAdminId', 'v1.organization.Organization/save_admin_permission')->option(['real_name' => '保存组织权限范围']);
+		Route::post('organization/:id/leaders', 'v1.organization.Organization/save_leaders')->option(['real_name' => '保存组织负责人']);
 		Route::post('organization/:id', 'v1.organization.Organization/save')->option(['real_name' => '组织架构保存']);
 		Route::delete('organization/:id', 'v1.organization.Organization/delete')->option(['real_name' => '组织架构删除']);
 
@@ -1290,7 +1299,7 @@ Route::group('adminapi', function () {
         //订单分配
         Route::post('share/order', 'v1.store.Order/shareOrder')->option(['real_name' => '订单分配']);
         //撤销核销订单
-        Route::put('order/postChexiao/:id', 'v1.store.Order/postChexiao')->option(['real_name' => '撤销核销订单']);
+        Route::put('order/postChexiao/:id', 'v1.store.Order/postChexiao')->option(['real_name' => '撤销本次核销（兼容旧入口）']);
 
 		/**
 		 * 售后 相关路由
@@ -1576,6 +1585,7 @@ Route::group('adminapi', function () {
      */
     Route::group('report', function () {
         Route::get('reportSale', 'v1.report.ReportData/reportSale')->name('reportColumn')->option(['real_name' => '报表列信息']);
+        Route::get('operating_screen', 'v1.report.ReportData/operatingScreen')->name('operatingScreen')->option(['real_name' => '总部经营数据大屏']);
         Route::get('reportList', 'v1.report.ReportData/reportList')->name('reportList')->option(['real_name' => '报表列表']);
         Route::get('fenxiList', 'v1.report.ReportData/fenxiList')->name('fenxiList')->option(['real_name' => '项目分析列表']);
         Route::get('xnList', 'v1.report.ReportData/xnList')->name('xnList')->option(['real_name' => '门店效能分析']);
@@ -1636,6 +1646,10 @@ Route::group('adminapi', function () {
         Route::get('print/:id', 'v1.order.StoreOrder/order_print')->name('StoreOrderPrint')->option(['real_name' => '打印订单']);
         //订单列表
         Route::get('list', 'v1.order.StoreOrder/lst')->name('StoreOrderList')->option(['real_name' => '订单列表']);
+        //渠道已扣款待人工处理
+        Route::get('channel_pay_pending/list', 'v1.order.CashierChannelPayPending/index')->option(['real_name' => '渠道已扣款待处理列表']);
+        Route::get('channel_pay_pending/:id', 'v1.order.CashierChannelPayPending/info')->option(['real_name' => '渠道已扣款待处理详情']);
+        Route::put('channel_pay_pending/done/:id', 'v1.order.CashierChannelPayPending/markDone')->option(['real_name' => '渠道已扣款待处理完成']);
         //欠款管理
         Route::get('debt/list', 'v1.order.StoreDebt/index')->option(['real_name' => '欠款列表']);
         Route::get('debt/user/:uid', 'v1.order.StoreDebt/userList')->option(['real_name' => '用户欠款记录']);
@@ -1703,6 +1717,9 @@ Route::group('adminapi', function () {
         Route::put('refund/:id', 'v1.order.StoreOrder/update_refund')->name('StoreOrderUpdateRefund')->option(['real_name' => '订单退款']);
         //后台拆单退款
         Route::post('open/refund/:id', 'v1.order.StoreOrder/open_order_refund')->name('StoreOrderUpdateRefund')->option(['real_name' => '后台拆单退款']);
+        Route::post('order/:id/refund', 'v1.order.StoreOrder/terminal_order_refund')->option(['real_name' => '整单退款']);
+        Route::post('order/:id/void', 'v1.order.StoreOrder/terminal_order_void')->option(['real_name' => '整单作废']);
+        Route::put('order/writeoff/:subOrderId/cancel', 'v1.order.StoreOrder/cancel_writeoff')->option(['real_name' => '撤销本次核销']);
         //快递公司电子面单模版
         Route::get('express/temp', 'v1.order.StoreOrder/express_temp')->option(['real_name' => '快递公司电子面单模版']);
         //获取物流信息

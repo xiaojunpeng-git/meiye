@@ -45,7 +45,27 @@ class OrganizationMigrateServices extends BaseServices
         return 0;
     }
 
+    /** @var bool 仅测试：正式迁移写完后故意破坏门店归属，触发对账失败回滚 */
+    protected static $testCorruptBeforeReconcile = false;
+
+    public static function setTestCorruptBeforeReconcile(bool $flag): void
+    {
+        self::$testCorruptBeforeReconcile = $flag;
+    }
+
     public function migrateFromLegacy(bool $dryRun = false): array
+    {
+        /** @var OrganizationManageServices $orgManage */
+        $orgManage = app()->make(OrganizationManageServices::class);
+        return $orgManage->withOrganizationStructureLock(function () use ($dryRun) {
+            return $this->migrateFromLegacyLocked($dryRun);
+        });
+    }
+
+    /**
+     * 结构锁内：事务写迁移数据 → 强制对账 → 失败整单回滚；成功才写批次并提交。
+     */
+    protected function migrateFromLegacyLocked(bool $dryRun = false): array
     {
         $report = [
             'organizations' => 0,
@@ -53,6 +73,8 @@ class OrganizationMigrateServices extends BaseServices
             'admins' => 0,
             'excludes' => 0,
             'skipped' => [],
+            'dry_run' => $dryRun,
+            'source_mode_auto_switched' => false,
         ];
 
         /** @var SystemRegionManageDao $legacyManageDao */
@@ -72,6 +94,15 @@ class OrganizationMigrateServices extends BaseServices
         /** @var OrganizationScopeService $scopeService */
         $scopeService = app()->make(OrganizationScopeService::class);
 
+        $readiness = $scopeService->getMigrateReadiness($dryRun);
+        $report['readiness'] = $readiness;
+        $report['source_mode'] = $readiness['source_mode'] ?? $scopeService->getSourceMode();
+        $report['half_migrated'] = !empty($readiness['half_migrated']);
+        if (!$dryRun && empty($readiness['can_migrate'])) {
+            $reason = implode('；', $readiness['blockers'] ?? []);
+            throw new \Exception($reason !== '' ? $reason : '当前不具备正式迁移条件');
+        }
+
         $legacyRegions = $legacyManageDao->getList(['is_del' => 0]);
         if (!$legacyRegions) {
             throw new \Exception('旧区域架构表无数据，无法迁移');
@@ -79,6 +110,7 @@ class OrganizationMigrateServices extends BaseServices
 
         $legacyIdToOrgId = [];
         $time = time();
+        $failMessage = '';
 
         Db::startTrans();
         try {
@@ -248,17 +280,136 @@ class OrganizationMigrateServices extends BaseServices
             }
 
             if ($dryRun) {
+                // dry_run：只读预演，回滚事务，绝不改库、绝不改 source mode
                 Db::rollback();
             } else {
+                if (self::$testCorruptBeforeReconcile) {
+                    $one = Db::name('organization_store')->order('id asc')->find();
+                    if ($one) {
+                        $otherOrg = (int)Db::name('organization')
+                            ->where('is_del', 0)
+                            ->where('id', '<>', (int)$one['org_id'])
+                            ->value('id');
+                        if ($otherOrg > 0) {
+                            Db::name('organization_store')->where('id', (int)$one['id'])->update(['org_id' => $otherOrg]);
+                        }
+                    }
+                }
+                // 强制最新对账；失败抛错并由外层 rollback，禁止提交坏数据
+                $reconcile = $scopeService->reconcileLegacyMigration(true, false);
+                if (empty($reconcile['passed'])) {
+                    throw new \Exception('迁移对账失败：' . implode('；', $reconcile['blockers'] ?? ['未知对账错误']));
+                }
+                $batchId = 'mig_' . date('YmdHis') . '_' . substr(md5(uniqid((string)mt_rand(), true)), 0, 8);
+                $batchPayload = [
+                    'batch_id' => $batchId,
+                    'reconcile_ok' => true,
+                    'legacy_hash' => (string)($reconcile['legacy_hash'] ?? ''),
+                    'new_projection_hash' => (string)($reconcile['new_projection_hash'] ?? ''),
+                    'organizations' => $report['organizations'],
+                    'stores' => $report['stores'],
+                    'admins' => $report['admins'],
+                    'excludes' => $report['excludes'],
+                    'anomaly' => $reconcile['anomaly'] ?? [],
+                    'finished_at' => time(),
+                ];
+                Db::name('organization_change_log')->insert([
+                    'org_id' => 0,
+                    'action' => OrganizationReconcileServices::MIGRATE_BATCH_ACTION,
+                    'target_type' => 'migrate',
+                    'target_id' => 0,
+                    'before_data' => '',
+                    'after_data' => json_encode($batchPayload, JSON_UNESCAPED_UNICODE),
+                    'remark' => '正式迁移批次对账成功',
+                    'operator_id' => 0,
+                    'operator_name' => 'system',
+                    'add_time' => time(),
+                ]);
                 Db::commit();
                 OrganizationScopeService::clearCache();
+                OrganizationScopeService::clearIntegrityCache();
+                $report['migrate_batch'] = $batchPayload;
             }
         } catch (\Throwable $e) {
             Db::rollback();
+            $failMessage = $e->getMessage();
             throw $e;
+        } finally {
+            // 失败审计必须在主事务回滚后单独写，不能冒充成功批次
+            if (!$dryRun && $failMessage !== '') {
+                try {
+                    Db::name('organization_change_log')->insert([
+                        'org_id' => 0,
+                        'action' => OrganizationReconcileServices::MIGRATE_FAIL_ACTION,
+                        'target_type' => 'migrate',
+                        'target_id' => 0,
+                        'before_data' => '',
+                        'after_data' => json_encode(['reconcile_ok' => false, 'error' => $failMessage], JSON_UNESCAPED_UNICODE),
+                        'remark' => mb_substr($failMessage, 0, 200),
+                        'operator_id' => 0,
+                        'operator_name' => 'system',
+                        'add_time' => time(),
+                    ]);
+                } catch (\Throwable $ignore) {
+                    // ignore fail-audit write errors
+                }
+            }
         }
 
-        $report['migrated'] = !$dryRun && $scopeService->isMigrated();
+        // 正式迁移完成也不得自动切换 organization_source_mode
+        $report['data_written'] = !$dryRun;
+        $report['source_mode'] = $scopeService->getSourceMode();
+        $report['source_mode_auto_switched'] = false;
+        $report['is_organization_source'] = $scopeService->isUsingOrganizationSource();
+        $report['migrated'] = false;
         return $report;
+    }
+
+    /**
+     * 测试用：结构锁+事务内执行写入，强制对账；失败整单回滚。
+     *
+     * @param callable():void $writeFn
+     */
+    public function runTransactionalWriteWithReconcile(callable $writeFn): array
+    {
+        /** @var OrganizationManageServices $orgManage */
+        $orgManage = app()->make(OrganizationManageServices::class);
+        /** @var OrganizationScopeService $scopeService */
+        $scopeService = app()->make(OrganizationScopeService::class);
+        return $orgManage->withOrganizationStructureLock(function () use ($writeFn, $scopeService) {
+            Db::startTrans();
+            try {
+                $writeFn();
+                $reconcile = $scopeService->reconcileLegacyMigration(true, false);
+                if (empty($reconcile['passed'])) {
+                    throw new \Exception('迁移对账失败：' . implode('；', $reconcile['blockers'] ?? ['未知对账错误']));
+                }
+                $batchId = 'mig_test_' . substr(md5(uniqid('', true)), 0, 8);
+                Db::name('organization_change_log')->insert([
+                    'org_id' => 0,
+                    'action' => OrganizationReconcileServices::MIGRATE_BATCH_ACTION,
+                    'target_type' => 'migrate',
+                    'target_id' => 0,
+                    'before_data' => '',
+                    'after_data' => json_encode([
+                        'batch_id' => $batchId,
+                        'reconcile_ok' => true,
+                        'legacy_hash' => (string)($reconcile['legacy_hash'] ?? ''),
+                        'new_projection_hash' => (string)($reconcile['new_projection_hash'] ?? ''),
+                        'finished_at' => time(),
+                    ], JSON_UNESCAPED_UNICODE),
+                    'remark' => '测试迁移批次',
+                    'operator_id' => 0,
+                    'operator_name' => 'system',
+                    'add_time' => time(),
+                ]);
+                Db::commit();
+                OrganizationScopeService::clearIntegrityCache();
+                return ['ok' => true, 'reconcile' => $reconcile, 'batch_id' => $batchId];
+            } catch (\Throwable $e) {
+                Db::rollback();
+                throw $e;
+            }
+        });
     }
 }

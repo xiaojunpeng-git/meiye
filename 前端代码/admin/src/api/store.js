@@ -8,6 +8,40 @@
 // | Author: MOHE Team <admin@mohe.com>
 // +----------------------------------------------------------------------
 import request from '@/plugins/request';
+import {
+  classifyOrgWriteResolved,
+  classifyOrgWriteRejected,
+} from './orgWriteHelpers';
+
+/**
+ * 组织写专用响应包装：不改全平台 request。
+ * - 明确 200 → resolve
+ * - 明确业务拒绝(400*) → reject business_fail（可废弃 token）
+ * - undefined / 网络 / 超时 / 5xx → reject unknown（保留 token，不报成功）
+ */
+function wrapOrgWriteResponse(promise) {
+  return Promise.resolve(promise).then(
+    (res) => {
+      const c = classifyOrgWriteResolved(res);
+      if (c.kind === 'success') return c.res;
+      return Promise.reject({
+        __orgWriteKind: 'unknown',
+        status: c.status,
+        msg: c.msg,
+      });
+    },
+    (err) => {
+      const c = classifyOrgWriteRejected(err);
+      return Promise.reject({
+        ...(err && typeof err === 'object' ? err : {}),
+        __orgWriteKind: c.kind,
+        status: c.status || (err && err.status) || 0,
+        msg: c.msg,
+      });
+    }
+  );
+}
+
 /**
  *店员列表-获取门店
  */
@@ -996,14 +1030,63 @@ export function getOrganizationTree() {
 }
 
 /**
- * @description 组织架构-保存
+ * @description 组织架构-保存（O4：需 X-Request-Token）
  */
-export function saveOrganization(id, data) {
-  return request({
+export function saveOrganization(id, data, headers = {}) {
+  return wrapOrgWriteResponse(request({
     url: `/region/organization/${id || 0}`,
     method: 'post',
-    data
+    data,
+    headers
+  }));
+}
+
+/** 组织工作台写状态 */
+export function getOrganizationWriteStatus() {
+  return request({
+    url: '/region/organization/write_status',
+    method: 'get'
   });
+}
+
+/** 删除组织 */
+export function deleteOrganization(id, data = {}, headers = {}) {
+  return wrapOrgWriteResponse(request({
+    url: `/region/organization/${id}`,
+    method: 'delete',
+    data,
+    headers
+  }));
+}
+
+/** 门店绑定组织 */
+export function bindOrganizationStore(data, headers = {}) {
+  return wrapOrgWriteResponse(request({
+    url: '/region/organization/bind_store',
+    method: 'post',
+    data,
+    headers
+  }));
+}
+
+/** 保存组织负责人 */
+export function saveOrganizationLeaders(orgId, data, headers = {}) {
+  return wrapOrgWriteResponse(request({
+    url: `/region/organization/${orgId}/leaders`,
+    method: 'post',
+    data,
+    headers
+  }));
+}
+
+/** 保存权限范围（scope_mode + allowed_store_ids） */
+export function saveOrganizationAdminPermission(orgAdminId, data, headers = {}) {
+  return wrapOrgWriteResponse(request({
+    url: `/region/organization/admin_permission/${orgAdminId}`,
+    method: 'post',
+    data,
+    headers
+  }));
 }
 
 /**
@@ -1034,20 +1117,22 @@ export function getOrganizationAdminExcludesByAgent(legacyAgentId) {
   });
 }
 
-export function saveOrganizationAdminExcludes(orgAdminId, data) {
-  return request({
+export function saveOrganizationAdminExcludes(orgAdminId, data, headers = {}) {
+  return wrapOrgWriteResponse(request({
     url: `/region/organization/admin_excludes/${orgAdminId}`,
     method: 'post',
-    data
-  });
+    data,
+    headers
+  }));
 }
 
-export function saveOrganizationAdminExcludesByAgent(legacyAgentId, data) {
-  return request({
+export function saveOrganizationAdminExcludesByAgent(legacyAgentId, data, headers = {}) {
+  return wrapOrgWriteResponse(request({
     url: `/region/organization/admin_excludes_by_agent/${legacyAgentId}`,
     method: 'post',
-    data
-  });
+    data,
+    headers
+  }));
 }
 
 export function getOrganizationOverview(params) {
@@ -1055,6 +1140,46 @@ export function getOrganizationOverview(params) {
     url: '/region/organization/overview',
     method: 'get',
     params
+  });
+}
+
+/** 组织工作台概况（强制 scene=workspace，不走旧 overview 语义） */
+export function getOrganizationWorkspaceOverview(params) {
+  return request({
+    url: '/region/organization/overview',
+    method: 'get',
+    params: Object.assign({}, params || {}, { scene: 'workspace' })
+  });
+}
+
+export function getOrganizationWorkspaceStores(params) {
+  return request({
+    url: '/region/organization/stores',
+    method: 'get',
+    params
+  });
+}
+
+export function getOrganizationWorkspaceEmployees(params) {
+  return request({
+    url: '/region/organization/employees',
+    method: 'get',
+    params
+  });
+}
+
+export function getOrganizationLeaderCandidates(params) {
+  return request({
+    url: '/region/organization/leader_candidates',
+    method: 'get',
+    params
+  });
+}
+
+export function getOrganizationWorkspacePermissions(orgId) {
+  return request({
+    url: `/region/organization/${orgId}/permissions`,
+    method: 'get'
   });
 }
 

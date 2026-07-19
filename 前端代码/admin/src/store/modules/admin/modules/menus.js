@@ -15,6 +15,49 @@ import Setting from '@/setting';
 import util from '@/libs/util';
 import { isAgentPath } from '@/utils/pathUtils';
 
+// 数据大屏作为总部下的普通菜单项，紧跟“概况”；同时补齐旧登录缓存。
+function withOperatingScreenMenu(menuData) {
+  if (!Array.isArray(menuData)) return [];
+  const routePrefix = isAgentPath() ? Setting.routePreAgent : Setting.roterPre;
+  const screenPath = `${routePrefix}/operating-screen`;
+  const homeMenu = menuData.find(item => item && item.header === 'home');
+  if (!homeMenu || !Array.isArray(homeMenu.children)) return menuData;
+
+  const overviewIndex = homeMenu.children.findIndex(item => item && (
+    item.unique_auth === 'admin-index-index' || item.title === '概况'
+  ));
+  const existedIndex = homeMenu.children.findIndex(item => item && (
+    item.unique_auth === 'admin-operating-screen' ||
+    /\/operating-screen\/?$/.test(item.path || '')
+  ));
+  if (existedIndex >= 0) {
+    const screenMenu = homeMenu.children.splice(existedIndex, 1)[0];
+    screenMenu.target = '_blank';
+    // 与“概况”保持同一套标准菜单结构；旧缓存里没有图标时在这里补齐。
+    screenMenu.icon = screenMenu.icon || 'md-podium';
+    const currentOverviewIndex = homeMenu.children.findIndex(item => item && (
+      item.unique_auth === 'admin-index-index' || item.title === '概况'
+    ));
+    homeMenu.children.splice(currentOverviewIndex >= 0 ? currentOverviewIndex + 1 : 0, 0, screenMenu);
+    return menuData;
+  }
+
+  homeMenu.children.splice(overviewIndex >= 0 ? overviewIndex + 1 : 0, 0, {
+    id: 'operating-screen',
+    pid: homeMenu.id,
+    title: '数据大屏',
+    menu_name: '数据大屏',
+    icon: 'md-podium',
+    path: screenPath,
+    target: '_blank',
+    header: '',
+    is_header: 0,
+    is_show_path: 0,
+    unique_auth: 'admin-operating-screen'
+  });
+  return menuData;
+}
+
 function getMenusName() {
   let menuList, roterPre;
   let storage = window.localStorage,
@@ -29,16 +72,7 @@ function getMenusName() {
   try {
     menuData = menuList !== undefined ? JSON.parse(menuList) : [];
   } catch (e) {}
-  return menuData;
-}
-
-// 递归处理顶部菜单问题
-function getChilden(data) {
-  if (data.children) {
-    return getChilden(data.children[0]);
-  }
-
-  return data.path;
+  return withOperatingScreenMenu(menuData);
 }
 
 export default {
@@ -51,6 +85,7 @@ export default {
   mutations: {
     getmenusNav(state, menuList) {
       const storage = window.localStorage;
+      menuList = withOperatingScreenMenu(menuList);
       state.menusName = menuList;
       if (isAgentPath()) {
         storage.setItem('agent_menuList', JSON.stringify(menuList));
@@ -62,6 +97,7 @@ export default {
     },
     getAgentMenusNav(state, menuList) {
       const storage = window.localStorage;
+      menuList = withOperatingScreenMenu(menuList);
       //   state.menusName = menuList;
       storage.setItem('agent_menuList', JSON.stringify(menuList));
       storage.setItem('agent_roterPre', 'agent');
@@ -79,16 +115,9 @@ export default {
     indexPath(state, getters) {
       const menus = state.menusName;
       if (menus.length && !state.indexPath) {
-        const getChilden = function(data) {
-          if (data.length && data[0].children) {
-            return getChilden(data[0].children);
-          }
-          return data[0].path;
-        };
-        const toPath = getChilden(menus);
-        state.indexPath = toPath;
+        state.indexPath = util.resolveDefaultMenuPath(menus);
       } else if (!menus.length && !state.indexPath) {
-        return `${Setting.roterPre}/home`;
+        return `${Setting.roterPre}/home/`;
       }
       return state.indexPath;
     }

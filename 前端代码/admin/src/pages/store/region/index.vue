@@ -1281,10 +1281,7 @@ export default {
       this.getManagerList();
     },
     getChilden(data) {
-      if (data.length && data[0].children) {
-        return this.getChilden(data[0].children);
-      }
-      return data[0].path;
+      return util.resolveDefaultMenuPath(data);
     },
     goAgent(row) {
       getAgentLogin(row.id)

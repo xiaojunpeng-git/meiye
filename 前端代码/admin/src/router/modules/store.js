@@ -99,7 +99,18 @@ export default {
         auth: ['admin-store-region_list'],
         title: '组织'
       },
-      component: () => import('@/pages/store/region/index')
+      // O5：正式菜单入口切到已验收 workspace（旧 region/index 源码保留，便于回滚）
+      component: () => import('@/pages/store/region/workspace/index')
+    },
+    {
+      path: 'region/prototype',
+      name: `${pre}regionPrototype`,
+      meta: {
+        auth: ['admin-store-region_list'],
+        title: '组织架构（新）'
+      },
+      // 兼容旧书签/直链，与正式入口同一页面
+      component: () => import('@/pages/store/region/workspace/index')
     },
     {
       path: 'region/create/:id?',

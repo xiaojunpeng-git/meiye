@@ -67,6 +67,54 @@ util.makeMenu = function makeMenu(prefix, menus) {
   }
 };
 
+function isOverviewMenu(item) {
+  if (!item) return false;
+  return item.unique_auth === 'admin-index-index' ||
+    item.title === '概况' ||
+    item.menu_name === '概况';
+}
+
+/**
+ * 解析登录/顶栏默认落地路径：优先「概况」，避免菜单数组顺序把「组织架构」等排在前面时误进业务页。
+ * @param {Array|Object} menus 顶层菜单数组，或单个带 children 的菜单节点
+ * @returns {string}
+ */
+util.resolveDefaultMenuPath = function resolveDefaultMenuPath(menus) {
+  const fallback = `${Setting.roterPre}/home/`;
+  if (!menus) return fallback;
+
+  const pickLeaf = (node) => {
+    if (!node) return '';
+    if (node.children && node.children.length) {
+      const overviewChild = node.children.find(isOverviewMenu);
+      if (overviewChild) return pickLeaf(overviewChild);
+      return pickLeaf(node.children[0]);
+    }
+    return node.path || '';
+  };
+
+  if (Array.isArray(menus)) {
+    if (!menus.length) return fallback;
+    for (let i = 0; i < menus.length; i++) {
+      const hit = (function findOverview(list) {
+        for (let j = 0; j < list.length; j++) {
+          const item = list[j];
+          if (isOverviewMenu(item)) return item;
+          if (item.children && item.children.length) {
+            const nested = findOverview(item.children);
+            if (nested) return nested;
+          }
+        }
+        return null;
+      })(menus[i].children && menus[i].children.length ? menus[i].children : [menus[i]]);
+      if (hit) return pickLeaf(hit) || fallback;
+    }
+    return pickLeaf(menus[0]) || fallback;
+  }
+
+  return pickLeaf(menus) || fallback;
+};
+
 /**
  * 平台端免密进入门店后台（写入门店端 cookie / localStorage 后打开门店首页）
  * 开发预览 18081 与门店集成页 8080 不同端口时，通过 store_auto_login.html 桥接会话。

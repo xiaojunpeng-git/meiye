@@ -12,6 +12,7 @@
  * */
 import { cloneDeep } from 'lodash';
 import { includeArray } from '@/libs/system';
+import util from '@/libs/util';
 
 // 根据 menu 配置的权限，过滤菜单
 function filterMenu(menuList, access, lastList) {
@@ -31,12 +32,9 @@ function filterMenu(menuList, access, lastList) {
   });
   return lastList;
 }
-// 递归处理顶部菜单问题
+// 递归处理顶部菜单问题（优先概况，避免误进组织架构等）
 function getChilden(data) {
-  if (data.children) {
-    return getChilden(data.children[0]);
-  }
-  return data.path;
+  return util.resolveDefaultMenuPath(data);
 }
 
 export default {
