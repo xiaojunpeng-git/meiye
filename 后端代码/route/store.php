@@ -71,7 +71,16 @@ Route::group('storeapi', function () {
      */
     Route::group(function () {
         //首页头部统计数据
-        Route::get('home/header', 'Common/homeStatics')->option(['real_name' => '首页头部统计数据']);
+                // 经营看板（阶段1）
+        Route::get('home/statistics/overview', 'BusinessDashboard/overview')->option(['real_name' => '经营看板概览']);
+        Route::get('home/statistics/trend', 'BusinessDashboard/trend')->option(['real_name' => '经营看板趋势']);
+        Route::get('home/statistics/staff-ranking', 'BusinessDashboard/staffRanking')->option(['real_name' => '经营看板员工排行']);
+        Route::get('home/statistics/reservation-detail', 'BusinessDashboard/reservationDetail')->option(['real_name' => '经营看板预约明细']);
+        Route::get('home/statistics/new-profile-detail', 'BusinessDashboard/newProfileDetail')->option(['real_name' => '经营看板新建档明细']);
+        Route::get('home/statistics/source-customer-detail', 'BusinessDashboard/sourceCustomerDetail')->option(['real_name' => '经营看板散客新客明细']);
+        Route::get('home/statistics/money-detail', 'BusinessDashboard/moneyDetail')->option(['real_name' => '经营看板金额明细']);
+
+Route::get('home/header', 'Common/homeStatics')->option(['real_name' => '首页头部统计数据']);
         //首页营业趋势图表
         Route::get('home/operate', 'Common/operateChart')->option(['real_name' => '首页营业趋势图表']);
         //首页交易图表

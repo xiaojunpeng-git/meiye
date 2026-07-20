@@ -228,10 +228,85 @@ class MerchantCustomerMetricServices extends BaseServices
     }
 
     /**
+     * 预约客按店去重人数 map（与 listReservationCustomerUids 同底，按店 GROUP）。
+     *
+     * @param int[] $scopeStoreIds
+     * @return array<int, int>
+     */
+    public function mapReservationCustomerByStores(array $scopeStoreIds, int $startTs, int $endTs): array
+    {
+        $scopeStoreIds = array_values(array_unique(array_filter(array_map('intval', $scopeStoreIds))));
+        $out = [];
+        foreach ($scopeStoreIds as $sid) {
+            if ($sid > 0) {
+                $out[$sid] = 0;
+            }
+        }
+        if (!$out || $startTs <= 0 || $endTs <= 0 || $endTs < $startTs) {
+            return $out;
+        }
+        $rows = Db::name('store_reservation_order')
+            ->whereIn('store_id', array_keys($out))
+            ->where('is_del', 0)
+            ->where('uid', '>', 0)
+            ->whereBetween('reservation_time', [$startTs, $endTs])
+            ->field('store_id, COUNT(DISTINCT uid) AS cnt')
+            ->group('store_id')
+            ->select()
+            ->toArray();
+        foreach ($rows as $row) {
+            $sid = (int)($row['store_id'] ?? 0);
+            if (isset($out[$sid])) {
+                $out[$sid] = (int)($row['cnt'] ?? 0);
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * 预约经营明细：按 (store_id, uid) 去重后服务端分页；count 对齐 map 求和。
+     *
+     * @param int[] $scopeStoreIds
+     * @return array{list:array,count:int}
+     */
+    public function listReservationCustomerDetail(array $scopeStoreIds, int $startTs, int $endTs, int $page, int $limit): array
+    {
+        $scopeStoreIds = array_values(array_unique(array_filter(array_map('intval', $scopeStoreIds))));
+        $page = max(1, $page);
+        $limit = max(1, min(100, $limit));
+        if (!$scopeStoreIds || $startTs <= 0 || $endTs <= 0 || $endTs < $startTs) {
+            return ['list' => [], 'count' => 0];
+        }
+        $table = Db::name('store_reservation_order')->getTable();
+        $inList = implode(',', $scopeStoreIds);
+        $count = (int)(Db::query(
+            'SELECT COUNT(1) AS c FROM ('
+            . 'SELECT store_id, uid FROM ' . $table
+            . ' WHERE store_id IN (' . $inList . ')'
+            . ' AND is_del=0 AND uid>0 AND reservation_time BETWEEN ? AND ?'
+            . ' GROUP BY store_id, uid'
+            . ') t',
+            [$startTs, $endTs]
+        )[0]['c'] ?? 0);
+        $offset = ($page - 1) * $limit;
+        $list = Db::query(
+            'SELECT store_id, uid, MIN(reservation_time) AS earliest_time FROM '
+            . $table
+            . ' WHERE store_id IN (' . $inList . ')'
+            . ' AND is_del=0 AND uid>0 AND reservation_time BETWEEN ? AND ?'
+            . ' GROUP BY store_id, uid'
+            . ' ORDER BY earliest_time DESC, uid ASC'
+            . ' LIMIT ' . (int)$offset . ',' . (int)$limit,
+            [$startTs, $endTs]
+        );
+        return ['list' => is_array($list) ? $list : [], 'count' => $count];
+    }
+
+    /**
      * @param int[] $scopeStoreIds
      * @return \think\db\BaseQuery|\think\db\Query
      */
-    protected function buildReservationCustomerUidQuery(array $scopeStoreIds, int $startTs, int $endTs)
+    public function buildReservationCustomerUidQuery(array $scopeStoreIds, int $startTs, int $endTs)
     {
         // 按预约日期 reservation_time；含已退回等状态（产生过预约即计）；按客户去重
         return Db::name('store_reservation_order')

@@ -33,6 +33,9 @@ use app\services\BaseServices;
  */
 class ReportServices extends BaseServices
 {
+    /** @var array{sourceAttr:int[],productIds:int[],hezuofangStaffIds:int[]}|null */
+    protected $reportSaleSourceContextCache = null;
+
     //门店效能分析
     public function xnList($where){
         $range=$where['date'];
@@ -371,32 +374,254 @@ class ReportServices extends BaseServices
     }
 
     /**
-     * 多门店消耗合计：逐店调用 activeYeji 再累加。
-     * homeStatics 与商家消耗明细必须共用本方法，避免 where(relation_id, array) 与逐店结果漂移。
+     * 多门店消耗合计：对 mapActiveYejiByStores 求和（与逐店 activeYeji 语义一致）。
      *
      * @param array $where 须含 time；store_id 可为 int|int[]
      */
     public function sumActiveYejiByStores(array $where): string
     {
+        $map = $this->mapActiveYejiByStores($where);
+        $total = '0.00';
+        foreach ($map as $sum) {
+            $total = bcadd($total, (string)($sum ?: 0), 2);
+        }
+        return $total;
+    }
+
+    /**
+     * 多门店消耗业绩按店 map：一次 GROUP BY relation_id（与 activeYeji 同口径）。
+     *
+     * @param array $where 须含 time；store_id 可为 int|int[]
+     * @return array<int, string> store_id => writeoff 合计
+     */
+    public function mapActiveYejiByStores(array $where): array
+    {
         $storeIds = $where['store_id'] ?? [];
         if (!is_array($storeIds)) {
             $storeIds = $storeIds !== '' && $storeIds !== null ? [(int)$storeIds] : [];
         }
-        $storeIds = array_values(array_filter(array_map('intval', $storeIds)));
-        if (!$storeIds) {
-            return '0.00';
+        $storeIds = array_values(array_unique(array_filter(array_map('intval', $storeIds))));
+        $out = [];
+        foreach ($storeIds as $sid) {
+            if ($sid > 0) {
+                $out[$sid] = '0.00';
+            }
         }
+        if (!$out) {
+            return [];
+        }
+        $productIds = $this->buildReportSaleSourceContext()['productIds'] ?? [];
         $base = $where;
         unset($base['store_id']);
-        $total = '0.00';
+        /** @var StoreOrderWriteoffDao $dao */
+        $dao = app()->make(StoreOrderWriteoffDao::class);
+        $rows = $dao->search($base)
+            ->whereIn('relation_id', array_keys($out))
+            ->when(!empty($productIds), function ($q) use ($productIds) {
+                $q->whereNotIn('product_id', $productIds);
+            })
+            ->field('relation_id, SUM(writeoff_price) AS total')
+            ->group('relation_id')
+            ->select()
+            ->toArray();
+        foreach ($rows as $row) {
+            $sid = (int)($row['relation_id'] ?? 0);
+            if ($sid > 0 && isset($out[$sid])) {
+                $out[$sid] = bcadd('0', (string)($row['total'] ?? 0), 2);
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * 销售数据表 report_sale 共用上下文（来源排除 / 合作类商品 / 合作方员工）。
+     *
+     * @return array{sourceAttr:int[],productIds:int[],hezuofangStaffIds:int[]}
+     */
+    public function buildReportSaleSourceContext(): array
+    {
+        if ($this->reportSaleSourceContextCache !== null) {
+            return $this->reportSaleSourceContextCache;
+        }
+        $this->reportSaleSourceContextCache = [
+            'sourceAttr' => CashSource::whereNotIn('id', [1, 2, 6, 7, 11, 12])->column('id') ?: [],
+            'productIds' => StoreProductRelation::where('relation_id', 78)->where('type', 1)->column('product_id') ?: [],
+            'hezuofangStaffIds' => SystemStoreStaff::where('is_hezuofang', 1)->column('id') ?: [],
+        ];
+        return $this->reportSaleSourceContextCache;
+    }
+
+    /**
+     * 与 sourceOrder(isCount 路径) 同过滤的多店基础查询（不含 isCount 去重）。
+     *
+     * @param int[] $storeIds
+     * @param int[]|int $sourceAttr
+     * @param int $isNew 0=散客 1=新客
+     * @param array $range [startTs, endTs]
+     * @param int[]|null $hezuofangStaffIds 传入则不再查库
+     * @return mixed
+     */
+    public function buildSourceOrderBaseQuery(array $storeIds, $sourceAttr, int $isNew, array $range, ?array $hezuofangStaffIds = null)
+    {
+        $storeIds = array_values(array_unique(array_filter(array_map('intval', $storeIds))));
+        $query = StoreOrder::alias('a')
+            ->where('a.paid', 1)
+            ->where(function ($q) {
+                $q->whereIn('a.pid', [0, -2])->whereOr('a.pid', '>', 0);
+            })
+            ->where('a.refund_status', 0)
+            ->where('a.is_system_del', 0)
+            ->whereIn('a.store_id', $storeIds ?: [0])
+            ->whereIn('a.order_type', [0, 1]);
+        if (is_array($sourceAttr)) {
+            $query->whereIn('a.source', $sourceAttr ?: [0]);
+        } else {
+            $query->where('a.source', (int)$sourceAttr);
+        }
+        $hezuofang = $hezuofangStaffIds;
+        if ($hezuofang === null) {
+            $hezuofang = SystemStoreStaff::where('is_hezuofang', 1)->column('id') ?: [];
+        }
+        if (!empty($hezuofang)) {
+            // 与单店 sourceOrder 同语义：仅排除「同店」合作人员业绩行（sy.store_id = a.store_id）
+            $yejiTable = Db::name('staff_yeji')->getTable();
+            $staffIdList = implode(',', array_map('intval', $hezuofang));
+            $query->whereRaw(
+                "NOT EXISTS (SELECT 1 FROM {$yejiTable} sy WHERE sy.order_id = a.id AND sy.store_id = a.store_id AND sy.status = 0 AND sy.staff_id IN ({$staffIdList}) AND sy.type IN (1,2))"
+            );
+        }
+        if ($isNew) {
+            $query->where('a.uid', '>', 0)->where('a.cash_pay_price', '>=', 298);
+        } else {
+            $query->where(function ($d) {
+                $d->whereOr(function ($q) {
+                    $q->where('a.uid', 0);
+                })->whereOr(function ($q) {
+                    $q->where('a.cash_pay_price', '<', 298);
+                });
+            });
+        }
+        if (!empty($range) && isset($range[0], $range[1])) {
+            $query->whereBetween('a.add_time', $range);
+        }
+        ValidCashOrderServices::applyScope($query, 'a');
+        return $query;
+    }
+
+    /**
+     * 生产固定：SQL 批量分组统计散客/新客人数（策略 B）。
+     * 会员：uid>0 且非「朋友」→ 按店对 DISTINCT(自然日+uid) 计数；
+     * 游客/朋友：uid=0 或 service_object='朋友' → COUNT(*) 按店。
+     *
+     * @param int[] $storeIds
+     * @param int $isNew
+     * @param array $range
+     * @return array<int, int> store_id => 人数
+     */
+    public function countSourceOrderByStores(array $storeIds, int $isNew, array $range): array
+    {
+        $storeIds = array_values(array_unique(array_filter(array_map('intval', $storeIds))));
+        $out = [];
         foreach ($storeIds as $sid) {
-            if ($sid <= 0) {
+            if ($sid > 0) {
+                $out[$sid] = 0;
+            }
+        }
+        if (!$out) {
+            return [];
+        }
+        $ctx = $this->buildReportSaleSourceContext();
+        $sourceAttr = $ctx['sourceAttr'] ?? [];
+        $hezuofang = $ctx['hezuofangStaffIds'] ?? [];
+        $baseIds = array_keys($out);
+
+        $memberRows = $this->buildSourceOrderBaseQuery($baseIds, $sourceAttr, $isNew, $range, $hezuofang)
+            ->where('a.uid', '>', 0)
+            ->whereRaw("TRIM(IFNULL(a.service_object,'')) <> '朋友'")
+            ->field("a.store_id, COUNT(DISTINCT CONCAT(FROM_UNIXTIME(a.add_time, '%Y%m%d'), '_', a.uid)) AS cnt")
+            ->group('a.store_id')
+            ->select()
+            ->toArray();
+        foreach ($memberRows as $row) {
+            $sid = (int)($row['store_id'] ?? 0);
+            if (isset($out[$sid])) {
+                $out[$sid] += (int)($row['cnt'] ?? 0);
+            }
+        }
+
+        $guestRows = $this->buildSourceOrderBaseQuery($baseIds, $sourceAttr, $isNew, $range, $hezuofang)
+            ->where(function ($q) {
+                $q->where('a.uid', 0)->whereOrRaw("TRIM(IFNULL(a.service_object,'')) = '朋友'");
+            })
+            ->field('a.store_id, COUNT(*) AS cnt')
+            ->group('a.store_id')
+            ->select()
+            ->toArray();
+        foreach ($guestRows as $row) {
+            $sid = (int)($row['store_id'] ?? 0);
+            if (isset($out[$sid])) {
+                $out[$sid] += (int)($row['cnt'] ?? 0);
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * 对 countSourceOrderByStores 结果求和。
+     *
+     * @param int[] $storeIds
+     * @param int $isNew
+     * @param array $range
+     */
+    public function sumSourceOrderCountsByStores(array $storeIds, int $isNew, array $range): int
+    {
+        return (int)array_sum($this->countSourceOrderByStores($storeIds, $isNew, $range));
+    }
+
+    /**
+     * 【仅小样本对账】PHP 去重，与旧 sourceOrder(isCount=1) 逐店逻辑一致。
+     * 禁止生产路径（看板/reportList）调用。
+     *
+     * @param int[] $storeIds
+     * @param int $isNew
+     * @param array $range
+     * @return array<int, int>
+     */
+    public function countSourceOrderByStoresViaPhp(array $storeIds, int $isNew, array $range): array
+    {
+        $storeIds = array_values(array_unique(array_filter(array_map('intval', $storeIds))));
+        $out = [];
+        foreach ($storeIds as $sid) {
+            if ($sid > 0) {
+                $out[$sid] = 0;
+            }
+        }
+        if (!$out) {
+            return [];
+        }
+        $ctx = $this->buildReportSaleSourceContext();
+        $rows = $this->buildSourceOrderBaseQuery(array_keys($out), $ctx['sourceAttr'] ?? [], $isNew, $range)
+            ->field('a.id,a.store_id,a.uid,a.add_time,a.service_object')
+            ->select()
+            ->toArray();
+        $seen = [];
+        foreach ($rows as $nv) {
+            $sid = (int)($nv['store_id'] ?? 0);
+            if (!isset($out[$sid])) {
                 continue;
             }
-            $sum = $this->activeYeji($base + ['store_id' => $sid]);
-            $total = bcadd($total, (string)($sum ?: 0), 2);
+            $svcObj = trim((string)($nv['service_object'] ?? ''));
+            if ((int)($nv['uid'] ?? 0) === 0 || $svcObj === '朋友') {
+                $out[$sid]++;
+            } else {
+                $key = $sid . '_' . date('Ymd', (int)$nv['add_time']) . '_' . (int)$nv['uid'];
+                if (!isset($seen[$key])) {
+                    $seen[$key] = 1;
+                    $out[$sid]++;
+                }
+            }
         }
-        return $total;
+        return $out;
     }
 
     //消耗业绩--含合作类项目（不扣除）
@@ -443,9 +668,17 @@ class ReportServices extends BaseServices
         ];
         $count=count($works);
         [$page, $limit] = $this->getPageValue();
-        $productIds=StoreProductRelation::where("relation_id",78)->where("type",1)->column("product_id");
+        $ctx = $this->buildReportSaleSourceContext();
+        $productIds = $ctx['productIds'];
+        $sourceAttr = $ctx['sourceAttr'];
         $shop=SystemStore::where("is_del",0)->where("name","<>","总部")->select();
-        $sourceAttr=CashSource::whereNotIn("id",[1,2,6,7,11,12])->column("id");
+        $shopIds = [];
+        foreach ($shop as $sv) {
+            $shopIds[] = (int)$sv['id'];
+        }
+        // 散客/新客人数：一次批量 SQL，禁止 foreach 门店 × sourceOrder
+        $casualCountByStore = $this->countSourceOrderByStores($shopIds, 0, $range);
+        $newCountByStore = $this->countSourceOrderByStores($shopIds, 1, $range);
         $list=[];
         $total=[];
         foreach ($works as $kk=>$vv){
@@ -454,7 +687,7 @@ class ReportServices extends BaseServices
             foreach ($shop as $k=>$v) {
                 switch ($kk){
                     case 0:
-                        $result[$v['id']] =$this->sourceOrder($sourceAttr,0,$range,1,$v['id'],$productIds);
+                        $result[$v['id']] = (int)($casualCountByStore[(int)$v['id']] ?? 0);
                         $total=$this->addTotal($result[$v['id']],$v['id'],1,$total);
                         break;
                     case 1:
@@ -462,7 +695,7 @@ class ReportServices extends BaseServices
                         $total=$this->addTotal($result[$v['id']],$v['id'],0,$total);
                         break;
                     case 2:
-                        $result[$v['id']] =$this->sourceOrder($sourceAttr,1,$range,1,$v['id'],$productIds);
+                        $result[$v['id']] = (int)($newCountByStore[(int)$v['id']] ?? 0);
                         $total=$this->addTotal($result[$v['id']],$v['id'],1,$total);
                         break;
                     case 3:

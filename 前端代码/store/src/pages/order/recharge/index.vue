@@ -55,7 +55,7 @@
                     placeholder="请输入用户名"
                     v-model="rechargeData.nickname"
                     style="width:250px"
-               
+
                   />
                     <Button type="primary" class="ml20 search"  @click="userSearchs">搜索</Button>
 					<Button
@@ -222,6 +222,14 @@ export default {
     },
   },
   created() {
+    const q = this.$route.query || {};
+    if (q.data || q.from === 'business_dashboard') {
+      const range = q.data || q.dateRange || '';
+      if (range) {
+        this.rechargeData.data = range;
+        this.timeVal = String(range).split('-');
+      }
+    }
 	this.getRecharge();
     this.staffList();
   },
@@ -335,7 +343,7 @@ export default {
 
 <style lang="stylus" scoped>
 /deep/.ivu-form-item{
-	margin: 12px 0 !important; 
+	margin: 12px 0 !important;
 }
 /deep/.ivu-tabs-nav {
   height: 45px;

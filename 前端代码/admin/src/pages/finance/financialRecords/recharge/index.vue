@@ -298,6 +298,14 @@ export default {
     },
   },
   mounted() {
+    const q = this.$route.query || {};
+    if (q.data || q.from === 'business_dashboard') {
+      const range = q.data || q.dateRange || '';
+      if (range) {
+        this.formValidate.data = range;
+        this.timeVal = String(range).split('-');
+      }
+    }
     this.getList();
     this.getUserRecharge();
   },

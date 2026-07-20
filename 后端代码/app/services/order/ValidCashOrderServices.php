@@ -316,6 +316,68 @@ class ValidCashOrderServices
     }
 
     /**
+     * 有效现金按店 GROUP BY（与 sumStoreCashIncome 同口径）。
+     *
+     * @param array $where 须含 store_id(int|int[])、time
+     * @return array<int, string> store_id => 金额
+     */
+    public static function mapStoreCashIncomeByStores(array $where): array
+    {
+        $storeIds = $where['store_id'] ?? [];
+        if (!is_array($storeIds)) {
+            $storeIds = $storeIds !== '' && $storeIds !== null ? [(int)$storeIds] : [];
+        }
+        $storeIds = array_values(array_unique(array_filter(array_map('intval', $storeIds))));
+        $out = [];
+        foreach ($storeIds as $sid) {
+            if ($sid > 0) {
+                $out[$sid] = '0.00';
+            }
+        }
+        if (!$out) {
+            return [];
+        }
+        $orderWhere = [
+            'paid' => 1,
+            'valid_cash_only' => 1,
+            'pid' => -3,
+            'is_system_del' => 0,
+            'refund_status' => 0,
+            'store_id' => $storeIds,
+        ];
+        if (isset($where['link_type'])) {
+            $orderWhere['link_type'] = $where['link_type'];
+        } else {
+            $orderWhere['link_type'] = [0, 1];
+        }
+        if (!empty($where['time'])) {
+            $orderWhere['time'] = $where['time'];
+        } elseif (!empty($where['date_range_time'])) {
+            $orderWhere['date_range_time'] = $where['date_range_time'];
+        } elseif (!empty($where['data'])) {
+            $orderWhere['data'] = $where['data'];
+        }
+        if (!empty($where['agent_time'])) {
+            $orderWhere['agent_time'] = $where['agent_time'];
+        }
+        /** @var StoreOrderDao $orderDao */
+        $orderDao = app()->make(StoreOrderDao::class);
+        $amountExpr = self::buildAmountExpr('', 'cash_pay_price');
+        $rows = $orderDao->search($orderWhere)
+            ->field('store_id, SUM(' . $amountExpr . ') AS total')
+            ->group('store_id')
+            ->select()
+            ->toArray();
+        foreach ($rows as $row) {
+            $sid = (int)($row['store_id'] ?? 0);
+            if (isset($out[$sid])) {
+                $out[$sid] = bcadd('0', (string)($row['total'] ?? 0), 2);
+            }
+        }
+        return $out;
+    }
+
+    /**
      * 按支付方式(cash_choose)汇总现金收入（收款报表 order_data，与 store_income 同口径）
      * @param array $where 须含 cash_choose；支持 store_id、time、data
      */

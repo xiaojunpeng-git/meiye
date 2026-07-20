@@ -608,6 +608,83 @@ export function operateApi(data) {
   });
 }
 
+/**
+ * 经营看板-概览（10 卡）
+ */
+export function businessDashboardOverview(data) {
+  return request({
+    url: 'store/statistics/overview',
+    method: 'get',
+    params: data
+  });
+}
+
+/**
+ * 经营看板-单指标趋势
+ */
+export function businessDashboardTrend(data) {
+  return request({
+    url: 'store/statistics/trend',
+    method: 'get',
+    params: data
+  });
+}
+
+/**
+ * 经营看板-门店排行
+ */
+export function businessDashboardStoreRanking(data) {
+  return request({
+    url: 'store/statistics/store-ranking',
+    method: 'get',
+    params: data
+  });
+}
+
+/**
+ * 经营看板-预约明细
+ */
+export function businessDashboardReservationDetail(data) {
+  return request({
+    url: 'store/statistics/reservation-detail',
+    method: 'get',
+    params: data
+  });
+}
+
+/**
+ * 经营看板-新建档明细
+ */
+export function businessDashboardNewProfileDetail(data) {
+  return request({
+    url: 'store/statistics/new-profile-detail',
+    method: 'get',
+    params: data
+  });
+}
+
+/**
+ * 经营看板-散客/新客明细
+ */
+export function businessDashboardSourceCustomerDetail(data) {
+  return request({
+    url: 'store/statistics/source-customer-detail',
+    method: 'get',
+    params: data
+  });
+}
+
+/**
+ * 经营看板-金额类明细（现金/实际/消耗/退款/储值/余额）
+ */
+export function businessDashboardMoneyDetail(data) {
+  return request({
+    url: 'store/statistics/money-detail',
+    method: 'get',
+    params: data
+  });
+}
+
 export function resetApi(id) {
   return request({
     url: `store/store/reset_admin/${id}`,
@@ -1181,6 +1258,35 @@ export function getOrganizationWorkspacePermissions(orgId) {
     url: `/region/organization/${orgId}/permissions`,
     method: 'get'
   });
+}
+
+/** 组织权限授权候选（精确 employee_id 关联） */
+export function getOrganizationAdminCandidates(orgId, params) {
+  return request({
+    url: `/region/organization/${orgId}/admin_candidates`,
+    method: 'get',
+    params
+  });
+}
+
+/** 授权组织权限人员 */
+export function grantOrganizationAdmin(orgId, data, headers = {}) {
+  return wrapOrgWriteResponse(request({
+    url: `/region/organization/${orgId}/admin_grants`,
+    method: 'post',
+    data,
+    headers
+  }));
+}
+
+/** 撤销组织权限人员 */
+export function revokeOrganizationAdminGrant(orgId, orgAdminId, data = {}, headers = {}) {
+  return wrapOrgWriteResponse(request({
+    url: `/region/organization/${orgId}/admin_grants/${orgAdminId}`,
+    method: 'delete',
+    data,
+    headers
+  }));
 }
 
 /**

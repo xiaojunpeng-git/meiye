@@ -84,3 +84,66 @@ export function operateApi (data) {
 		params: data
     });
 }
+
+/** 经营看板-概览 */
+export function businessDashboardOverview(data) {
+  return request({
+    url: 'home/statistics/overview',
+    method: 'get',
+    params: data
+  });
+}
+
+/** 经营看板-趋势 */
+export function businessDashboardTrend(data) {
+  return request({
+    url: 'home/statistics/trend',
+    method: 'get',
+    params: data
+  });
+}
+
+/** 经营看板-员工排行 */
+export function businessDashboardStaffRanking(data) {
+  return request({
+    url: 'home/statistics/staff-ranking',
+    method: 'get',
+    params: data
+  });
+}
+
+/** 经营看板-预约明细 */
+export function businessDashboardReservationDetail(data) {
+  return request({
+    url: 'home/statistics/reservation-detail',
+    method: 'get',
+    params: data
+  });
+}
+
+/** 经营看板-新建档明细 */
+export function businessDashboardNewProfileDetail(data) {
+  return request({
+    url: 'home/statistics/new-profile-detail',
+    method: 'get',
+    params: data
+  });
+}
+
+/** 经营看板-散客/新客明细 */
+export function businessDashboardSourceCustomerDetail(data) {
+  return request({
+    url: 'home/statistics/source-customer-detail',
+    method: 'get',
+    params: data
+  });
+}
+
+/** 经营看板-金额类明细 */
+export function businessDashboardMoneyDetail(data) {
+  return request({
+    url: 'home/statistics/money-detail',
+    method: 'get',
+    params: data
+  });
+}

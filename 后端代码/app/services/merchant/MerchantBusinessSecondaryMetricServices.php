@@ -134,19 +134,49 @@ class MerchantBusinessSecondaryMetricServices extends BaseServices
      */
     public function sumRefundAmount(array $scopeStoreIds, int $startTs, int $endTs): float
     {
-        $scopeStoreIds = array_values(array_unique(array_filter(array_map('intval', $scopeStoreIds))));
-        if (!$scopeStoreIds || $startTs <= 0 || $endTs <= 0 || $endTs < $startTs) {
-            return 0.0;
+        $map = $this->mapRefundAmountByStores($scopeStoreIds, $startTs, $endTs);
+        $total = 0.0;
+        foreach ($map as $v) {
+            $total = round($total + (float)$v, 2);
         }
+        return $total;
+    }
 
-        $sum = Db::name('store_order_refund')
-            ->whereIn('store_id', $scopeStoreIds)
+    /**
+     * 退款金额按店 map（与 sumRefundAmount 同口径）。
+     *
+     * @param int[] $scopeStoreIds
+     * @return array<int, float>
+     */
+    public function mapRefundAmountByStores(array $scopeStoreIds, int $startTs, int $endTs): array
+    {
+        $scopeStoreIds = array_values(array_unique(array_filter(array_map('intval', $scopeStoreIds))));
+        $out = [];
+        foreach ($scopeStoreIds as $sid) {
+            if ($sid > 0) {
+                $out[$sid] = 0.0;
+            }
+        }
+        if (!$out || $startTs <= 0 || $endTs <= 0 || $endTs < $startTs) {
+            return $out;
+        }
+        $rows = Db::name('store_order_refund')
+            ->whereIn('store_id', array_keys($out))
             ->where('refund_type', 6)
             ->where('is_cancel', 0)
             ->where('is_del', 0)
             ->whereBetween('refunded_time', [$startTs, $endTs])
-            ->sum('refunded_price');
-        return round((float)$sum, 2);
+            ->field('store_id, SUM(refunded_price) AS total')
+            ->group('store_id')
+            ->select()
+            ->toArray();
+        foreach ($rows as $row) {
+            $sid = (int)($row['store_id'] ?? 0);
+            if (isset($out[$sid])) {
+                $out[$sid] = round((float)($row['total'] ?? 0), 2);
+            }
+        }
+        return $out;
     }
 
     /**

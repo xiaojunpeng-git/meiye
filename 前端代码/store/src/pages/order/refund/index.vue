@@ -77,12 +77,12 @@
             <Col  class="ivu-text-left ml15">
             <FormItem label="订单搜索：" label-for="title">
               <Input
-               
+
                 enter-button
                 v-model="pagination.order_id"
                 placeholder="请输入订单号"
                  style="width: 250px"
-               
+
               />
          <Button type="primary" class="ml10 search"  @click="orderSearch">搜索</Button>
             </FormItem>
@@ -92,7 +92,7 @@
       </Form>
     </Card>
     <Card :bordered="false" dis-hover class="ivu-mt mt15">
-    
+
       <Table
         :columns="thead"
         :data="tbody"
@@ -654,6 +654,14 @@ export default {
     },
   },
   created() {
+    const q = this.$route.query || {};
+    if (q.data || q.from === 'business_dashboard') {
+      const range = q.data || q.dateRange || '';
+      if (range) {
+        this.pagination.time = range;
+        this.timeVal = String(range).split('-');
+      }
+    }
     this.refundReason();
     this.getOrderList()
   },
@@ -939,7 +947,7 @@ export default {
           this.tbody = list
     //       num.forEach((item, index) => {
     //  num[index]=( (Object.assign({}, item, { value: index })))
-             
+
     //       })
           this.num = num
           list.forEach((item) => {

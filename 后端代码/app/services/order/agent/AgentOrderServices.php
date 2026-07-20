@@ -67,6 +67,119 @@ class AgentOrderServices extends BaseServices
     }
 
     /**
+     * 旧店业绩按店 GROUP BY。
+     *
+     * @param array $where 含 store_id、time
+     * @param int $type 1=现金 cash_money 2=耗卡 use_money
+     * @return array<int, string>
+     */
+    public function mapOldYejiByStores(array $where, int $type): array
+    {
+        $both = $this->mapOldYejiCashAndConsumeByStores($where);
+        return $type == 2 ? $both['consume'] : $both['cash'];
+    }
+
+    /**
+     * 旧店现金+耗卡一次按店聚合（口径同分别调用 mapOldYejiByStores(type=1/2)）。
+     *
+     * @param array $where 含 store_id、time
+     * @return array{cash: array<int,string>, consume: array<int,string>}
+     */
+    public function mapOldYejiCashAndConsumeByStores(array $where): array
+    {
+        $storeIds = $where['store_id'] ?? [];
+        if (!is_array($storeIds)) {
+            $storeIds = $storeIds !== '' && $storeIds !== null ? [(int)$storeIds] : [];
+        }
+        $storeIds = array_values(array_unique(array_filter(array_map('intval', $storeIds))));
+        $cash = [];
+        $consume = [];
+        foreach ($storeIds as $sid) {
+            if ($sid > 0) {
+                $cash[$sid] = '0.00';
+                $consume[$sid] = '0.00';
+            }
+        }
+        if (!$cash) {
+            return ['cash' => [], 'consume' => []];
+        }
+        $rows = Db::name('old_shop_money')
+            ->whereIn('store_id', array_keys($cash))
+            ->when(!empty($where['time']), function ($query) use ($where) {
+                $query->whereBetween('add_time', $where['time']);
+            })
+            ->field('store_id, SUM(cash_money) AS cash_total, SUM(use_money) AS use_total')
+            ->group('store_id')
+            ->select()
+            ->toArray();
+        foreach ($rows as $row) {
+            $sid = (int)($row['store_id'] ?? 0);
+            if (isset($cash[$sid])) {
+                $cash[$sid] = bcadd('0', (string)($row['cash_total'] ?? 0), 2);
+                $consume[$sid] = bcadd('0', (string)($row['use_total'] ?? 0), 2);
+            }
+        }
+        return ['cash' => $cash, 'consume' => $consume];
+    }
+
+    /**
+     * 有效现金按店 map（委托 ValidCash）。
+     *
+     * @return array<int, string>
+     */
+    public function mapStoreCashIncomeByStores(array $where): array
+    {
+        return ValidCashOrderServices::mapStoreCashIncomeByStores($where);
+    }
+
+    /**
+     * 分成员工 staff_yeji 按店合计（type∈[1,2]）。
+     *
+     * @param int[] $storeIds
+     * @return array<int, string>
+     */
+    public function mapFenchengYejiByStores(array $storeIds, string $fenchengRangeStr): array
+    {
+        $storeIds = array_values(array_unique(array_filter(array_map('intval', $storeIds))));
+        $out = [];
+        foreach ($storeIds as $sid) {
+            if ($sid > 0) {
+                $out[$sid] = '0.00';
+            }
+        }
+        if (!$out || $fenchengRangeStr === '') {
+            return $out;
+        }
+        $times = explode('-', $fenchengRangeStr);
+        $timeStart = trim((string)($times[0] ?? ''));
+        if ($timeStart === '') {
+            return $out;
+        }
+        $timeEnd = isset($times[1])
+            ? (date('Y/m/d', strtotime(trim((string)$times[1]))) . ' 23:59:59')
+            : date('Y/m/d H:i:s');
+        // 一次 JOIN：分成员工 + staff_yeji 聚合（口径同先查 is_fencheng=1 再按 type∈[1,2]/status=0 汇总）
+        $rows = Db::name('staff_yeji')->alias('y')
+            ->join('system_store_staff s', 's.id = y.staff_id')
+            ->where('s.is_fencheng', 1)
+            ->whereIn('y.store_id', array_keys($out))
+            ->whereIn('y.type', [1, 2])
+            ->where('y.status', 0)
+            ->whereTime('y.created_time', 'between', [$timeStart, $timeEnd])
+            ->field('y.store_id, SUM(y.yeji) AS total')
+            ->group('y.store_id')
+            ->select()
+            ->toArray();
+        foreach ($rows as $row) {
+            $sid = (int)($row['store_id'] ?? 0);
+            if (isset($out[$sid])) {
+                $out[$sid] = bcadd('0', (string)($row['total'] ?? 0), 2);
+            }
+        }
+        return $out;
+    }
+
+    /**
      * 门店分成款业绩合计（is_fencheng=1 员工的销售/充值业绩 type∈[1,2]）
      * 实收明细扣减行 / 单店扣减共用；多店实收总额请用 sumActualPerformanceByStores（逐店封顶再求和）。
      *
@@ -82,23 +195,9 @@ class AgentOrderServices extends BaseServices
         if (!$storeIds) {
             return '0.00';
         }
-        $fenchengStaffIds = SystemStoreStaff::where('is_fencheng', 1)->column('id');
-        if (!$fenchengStaffIds) {
-            return '0.00';
-        }
-        /** @var StaffYejiDao $yejiDao */
-        $yejiDao = app()->make(StaffYejiDao::class);
+        $map = $this->mapFenchengYejiByStores($storeIds, $timeRange);
         $total = '0.00';
-        foreach ($storeIds as $storeId) {
-            if ($storeId <= 0) {
-                continue;
-            }
-            $sum = $yejiDao->search([
-                'store_id' => $storeId,
-                'staff_id' => $fenchengStaffIds,
-                'created_time' => $timeRange,
-                'type' => [1, 2],
-            ])->sum('yeji');
+        foreach ($map as $sum) {
             $total = bcadd($total, (string)($sum ?: 0), 2);
         }
         return $total;
@@ -149,6 +248,49 @@ class AgentOrderServices extends BaseServices
     }
 
     /**
+     * 实际业绩按店 map：预取现金/旧店/分成后逐店 max(0, cash−fencheng)。
+     *
+     * @param int|int[] $storeIdOrIds
+     * @param array $cashWhere 与现金同口径的 where（须含 time）
+     * @param string $fenchengRangeStr staff_yeji 时间串，如 2026/07/01-2026/07/16
+     * @param array|null $prefetched 可选预取：['cash'=>map,'old'=>map,'fencheng'=>map]，避免排行重复查现金
+     * @return array<int, string>
+     */
+    public function mapActualPerformanceByStores($storeIdOrIds, array $cashWhere, string $fenchengRangeStr, ?array $prefetched = null): array
+    {
+        $storeIds = is_array($storeIdOrIds) ? $storeIdOrIds : [(int)$storeIdOrIds];
+        $storeIds = array_values(array_unique(array_filter(array_map('intval', $storeIds))));
+        $out = [];
+        foreach ($storeIds as $sid) {
+            if ($sid > 0) {
+                $out[$sid] = '0.00';
+            }
+        }
+        if (!$out || $fenchengRangeStr === '') {
+            return $out;
+        }
+        $cashWhere['store_id'] = array_keys($out);
+        $cashMap = isset($prefetched['cash']) && is_array($prefetched['cash'])
+            ? $prefetched['cash']
+            : $this->mapStoreCashIncomeByStores($cashWhere);
+        $oldMap = isset($prefetched['old']) && is_array($prefetched['old'])
+            ? $prefetched['old']
+            : $this->mapOldYejiByStores($cashWhere, 1);
+        $fenchengMap = isset($prefetched['fencheng']) && is_array($prefetched['fencheng'])
+            ? $prefetched['fencheng']
+            : $this->mapFenchengYejiByStores(array_keys($out), $fenchengRangeStr);
+        foreach ($out as $sid => $_) {
+            $cash = bcadd((string)($cashMap[$sid] ?? '0'), (string)($oldMap[$sid] ?? '0'), 2);
+            $actual = bcsub($cash, (string)($fenchengMap[$sid] ?? '0'), 2);
+            if (bccomp($actual, '0', 2) < 0) {
+                $actual = '0.00';
+            }
+            $out[$sid] = $actual;
+        }
+        return $out;
+    }
+
+    /**
      * 实收业绩权威聚合（产品 2026-07-16 拍板）：
      * 逐店 max(0, 现金业绩 − 分成员工业绩)，再对授权门店求和。
      * 首页 / 数仓总额 / 明细 header_number / storeChart(show_type=7) 单店行必须同此口径；
@@ -160,28 +302,10 @@ class AgentOrderServices extends BaseServices
      */
     public function sumActualPerformanceByStores($storeIdOrIds, array $cashWhere, string $fenchengRangeStr): string
     {
-        $storeIds = is_array($storeIdOrIds) ? $storeIdOrIds : [(int)$storeIdOrIds];
-        $storeIds = array_values(array_filter(array_map('intval', $storeIds)));
-        if (!$storeIds || $fenchengRangeStr === '') {
-            return '0.00';
-        }
-        /** @var BranchOrderServices $branchOrderServices */
-        $branchOrderServices = app()->make(BranchOrderServices::class);
+        $map = $this->mapActualPerformanceByStores($storeIdOrIds, $cashWhere, $fenchengRangeStr);
         $total = '0.00';
-        foreach ($storeIds as $storeId) {
-            if ($storeId <= 0) {
-                continue;
-            }
-            $storeWhere = $cashWhere;
-            $storeWhere['store_id'] = $storeId;
-            $cash = $branchOrderServices->sumStoreCashIncome($storeWhere);
-            $cash = bcadd((string)$cash, (string)$this->oldYeji($storeWhere, 1), 2);
-            $fencheng = $this->sumStoreFenchengYeji($storeId, $fenchengRangeStr);
-            $actual = bcsub($cash, $fencheng, 2);
-            if (bccomp($actual, '0', 2) < 0) {
-                $actual = '0.00';
-            }
-            $total = bcadd($total, $actual, 2);
+        foreach ($map as $actual) {
+            $total = bcadd($total, (string)$actual, 2);
         }
         return $total;
     }
@@ -196,27 +320,63 @@ class AgentOrderServices extends BaseServices
 		$timeRangeStr = (string)($where['time'] ?? '');
 		[$start, $end, $beforeStart, $beforeEnd] = $this->timeHandle($where['time'], false, true);
         $where['time'] = [$start, $end];
-        $order_where = ['paid' => 1,'not_old'=>1,'pid' =>-3, 'is_system_del' => 0, 'refund_status' =>0,'link_type'=>[0,1]];
-        $hand_where = ['paid' => 1, 'pid' =>-2, 'is_system_del' => 0, 'refund_status' => [0, 3],'link_type'=>2];
-        /** @var BranchOrderServices $branchOrderServices */
-        $branchOrderServices = app()->make(BranchOrderServices::class);
-        $data['store_income'] = $branchOrderServices->sumStoreCashIncome($where);
-        $oldYeji=$this->oldYeji($where,1);
-        $data['store_income']=bcadd($data['store_income'],$oldYeji,2);
-        /** @var \app\services\report\ReportServices $reportServices */
-        $reportServices = app()->make(\app\services\report\ReportServices::class);
-        $data['store_writeoff_order_price'] = $reportServices->sumActiveYejiByStores($where);
-        $oldYeji = $this->oldYeji($where, 2);
-        $data['store_writeoff_order_price'] = bcadd($data['store_writeoff_order_price'], $oldYeji, 2);
 		$storeIds = $where['store_id'] ?? [];
 		if (!is_array($storeIds)) {
 			$storeIds = $storeIds ? [(int)$storeIds] : [];
 		}
 		$storeIds = array_values(array_filter(array_map('intval', $storeIds)));
 		$rangeStr = $timeRangeStr !== '' ? $timeRangeStr : (date('Y/m/d', $start) . '-' . date('Y/m/d', $end));
-		// 实收：逐店封顶后再求和（与排行 show_type=7 同口径）
-		$data['actual_performance'] = $this->sumActualPerformanceByStores($storeIds, $where, $rangeStr);
-       	$result = [
+
+        // 批量：现金 = ValidCash map + 旧店；实际 = 逐店封顶 map 求和；消耗 = activeYeji map + 旧店耗卡
+        $cashMap = $this->mapStoreCashIncomeByStores($where);
+        $oldBoth = $this->mapOldYejiCashAndConsumeByStores($where);
+        $oldCashMap = $oldBoth['cash'] ?? [];
+        $oldConsumeMap = $oldBoth['consume'] ?? [];
+        $storeIncome = '0.00';
+        foreach ($storeIds as $sid) {
+            $storeIncome = bcadd(
+                $storeIncome,
+                bcadd((string)($cashMap[$sid] ?? '0'), (string)($oldCashMap[$sid] ?? '0'), 2),
+                2
+            );
+        }
+        // 无门店列表时回退合计（兼容旧调用）
+        if (!$storeIds) {
+            /** @var BranchOrderServices $branchOrderServices */
+            $branchOrderServices = app()->make(BranchOrderServices::class);
+            $storeIncome = bcadd((string)$branchOrderServices->sumStoreCashIncome($where), (string)$this->oldYeji($where, 1), 2);
+        }
+        $data['store_income'] = $storeIncome;
+
+        /** @var \app\services\report\ReportServices $reportServices */
+        $reportServices = app()->make(\app\services\report\ReportServices::class);
+        $activeMap = $reportServices->mapActiveYejiByStores($where);
+        $writeoff = '0.00';
+        foreach ($storeIds as $sid) {
+            $writeoff = bcadd(
+                $writeoff,
+                bcadd((string)($activeMap[$sid] ?? '0'), (string)($oldConsumeMap[$sid] ?? '0'), 2),
+                2
+            );
+        }
+        if (!$storeIds) {
+            $writeoff = bcadd((string)$reportServices->sumActiveYejiByStores($where), (string)$this->oldYeji($where, 2), 2);
+        }
+        $data['store_writeoff_order_price'] = $writeoff;
+
+		// 实收：复用已预取现金 map，避免再查一遍 ValidCash
+		$fenchengMap = $this->mapFenchengYejiByStores($storeIds, $rangeStr);
+		$actualTotal = '0.00';
+		foreach ($storeIds as $sid) {
+			$cash = bcadd((string)($cashMap[$sid] ?? '0'), (string)($oldCashMap[$sid] ?? '0'), 2);
+			$actual = bcsub($cash, (string)($fenchengMap[$sid] ?? '0'), 2);
+			if (bccomp($actual, '0', 2) < 0) {
+				$actual = '0.00';
+			}
+			$actualTotal = bcadd($actualTotal, $actual, 2);
+		}
+		$data['actual_performance'] = $actualTotal;
+		$result = [
 			['title' => '现金业绩', 'number' => $data['store_income'], 'growth_rate' => 0, 'metric_code' => 'cash_performance'],
 			['title' => '实际业绩', 'number' => $data['actual_performance'], 'growth_rate' => 0, 'metric_code' => 'actual_performance'],
 			['title' => '消耗业绩', 'number' => $data['store_writeoff_order_price'], 'growth_rate' => 0, 'metric_code' => 'consume_amount'],

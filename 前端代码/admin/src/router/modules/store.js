@@ -66,6 +66,42 @@ export default {
       component: () => import('@/pages/store/statistics/index')
     },
     {
+      path: 'statistics/reservation-detail',
+      name: `${pre}statisticsReservationDetail`,
+      meta: {
+        auth: ['admin-store-store_statistics'],
+        title: '经营明细-预约客'
+      },
+      component: () => import('@/pages/store/statistics/reservation-detail')
+    },
+    {
+      path: 'statistics/new-profile-detail',
+      name: `${pre}statisticsNewProfileDetail`,
+      meta: {
+        auth: ['admin-store-store_statistics'],
+        title: '经营明细-新建档'
+      },
+      component: () => import('@/pages/store/statistics/new-profile-detail')
+    },
+    {
+      path: 'statistics/source-customer-detail',
+      name: `${pre}statisticsSourceCustomerDetail`,
+      meta: {
+        auth: ['admin-store-store_statistics'],
+        title: '经营明细-散客新客'
+      },
+      component: () => import('@/pages/store/statistics/source-customer-detail')
+    },
+    {
+      path: 'statistics/money-detail',
+      name: `${pre}statisticsMoneyDetail`,
+      meta: {
+        auth: ['admin-store-store_statistics'],
+        title: '经营明细-金额'
+      },
+      component: () => import('@/pages/store/statistics/money-detail')
+    },
+    {
       path: 'store/index',
       name: `${pre}storeList`,
       meta: {

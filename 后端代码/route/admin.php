@@ -1206,6 +1206,16 @@ Route::group('adminapi', function () {
 
         //门店首页头部统计数据
         Route::get('home/header', 'v1.store.Common/homeStatics')->option(['real_name' => '门店首页头部统计数据']);
+
+        // 经营看板
+        Route::get('statistics/overview', 'v1.store.BusinessDashboard/overview')->option(['real_name' => '经营看板概览']);
+        Route::get('statistics/trend', 'v1.store.BusinessDashboard/trend')->option(['real_name' => '经营看板趋势']);
+        Route::get('statistics/store-ranking', 'v1.store.BusinessDashboard/storeRanking')->option(['real_name' => '经营看板门店排行']);
+        Route::get('statistics/reservation-detail', 'v1.store.BusinessDashboard/reservationDetail')->option(['real_name' => '经营看板预约明细']);
+        Route::get('statistics/new-profile-detail', 'v1.store.BusinessDashboard/newProfileDetail')->option(['real_name' => '经营看板新建档明细']);
+        Route::get('statistics/source-customer-detail', 'v1.store.BusinessDashboard/sourceCustomerDetail')->option(['real_name' => '经营看板散客新客明细']);
+        Route::get('statistics/money-detail', 'v1.store.BusinessDashboard/moneyDetail')->option(['real_name' => '经营看板金额明细']);
+
         //门店首页营业趋势图表
         Route::get('home/operate', 'v1.store.Common/operateChart')->option(['real_name' => '门店首页营业趋势图表']);
         //门店首页交易图表

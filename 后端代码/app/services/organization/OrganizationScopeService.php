@@ -1317,6 +1317,69 @@ class OrganizationScopeService extends BaseServices
     }
 
     /**
+     * 解析集团根组织 ID（禁止硬编码 id=1）。
+     * 迁移未完成返回 0；已切源则取 pid=0 且未删除的根，按 sort/id 取第一个。
+     */
+    public function resolveGroupRootOrgId(): int
+    {
+        if (!$this->isMigrated()) {
+            return 0;
+        }
+        try {
+            $row = Db::name('organization')
+                ->where('pid', 0)
+                ->where('is_del', 0)
+                ->order('sort', 'asc')
+                ->order('id', 'asc')
+                ->field('id')
+                ->find();
+            return (int)($row['id'] ?? 0);
+        } catch (\Throwable $e) {
+            Log::warning('resolveGroupRootOrgId 失败：' . $e->getMessage());
+            return 0;
+        }
+    }
+
+    /**
+     * 经营看板门店范围：org 展开 ∩ allowed；若传 store_id 须在交集内，否则空（越权不回退）。
+     *
+     * @param int $orgId 0=不按组织再收窄（仅用 allowed）
+     * @param int $storeId 0=不单店收窄
+     * @param int[] $allowedStoreIds
+     * @return int[]
+     */
+    public function resolveDashboardStoreIds(int $orgId, int $storeId, array $allowedStoreIds): array
+    {
+        $allowed = array_values(array_unique(array_filter(array_map('intval', $allowedStoreIds))));
+        if (!$allowed) {
+            return [];
+        }
+        $resolved = $allowed;
+        if ($orgId > 0) {
+            $orgStores = $this->getOrgStoreIds($orgId, true);
+            if (!$orgStores) {
+                return [];
+            }
+            $allowedFlip = array_flip($allowed);
+            $resolved = [];
+            foreach ($orgStores as $sid) {
+                $sid = (int)$sid;
+                if ($sid > 0 && isset($allowedFlip[$sid])) {
+                    $resolved[] = $sid;
+                }
+            }
+            $resolved = array_values(array_unique($resolved));
+        }
+        if ($storeId > 0) {
+            if (!in_array($storeId, $resolved, true)) {
+                return [];
+            }
+            return [$storeId];
+        }
+        return $resolved;
+    }
+
+    /**
      * 在有效范围内解析前端筛选；有效范围空则空；交集空则空（绝不回退全量）。
      *
      * @param array $allowedStoreIds

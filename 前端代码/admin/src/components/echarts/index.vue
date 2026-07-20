@@ -146,8 +146,10 @@ export default {
 					    toolbox: {},
 					    legend: {
             icon: 'line',
-            left: 'left',
+            top: 0,
+            left: 'center',
             fontWeight: '100',
+            show: (this.infoLists.legend || []).length > 0,
 					        data: this.infoLists.legend || []
 					    },
 					    color: ['#1495EB', '#00CC66', '#F9D249', '#ff9900', '#9860DF'],
@@ -155,7 +157,7 @@ export default {
 					        left: 16,
 					        right: 25,
 					        bottom: 10,
-					        top: 40,
+					        top: (this.infoLists.legend || []).length > 0 ? 40 : 16,
 					        containLabel: true
 					    },
 					    xAxis: [
