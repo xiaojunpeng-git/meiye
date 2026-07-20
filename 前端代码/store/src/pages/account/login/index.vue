@@ -25,6 +25,23 @@
             <!--<div class="info" v-if="copyrightContext">{{copyrightContext}}</div>-->
             <!--<div class="info" v-else>Copyright ©2014-2024 <a class="infoUrl" href="https://www.mohe.com" target="_blank">{{version}}</a></div>-->
         </div>
+        <Modal
+            v-model="showStoreSelect"
+            title="选择门店"
+            :mask-closable="false"
+            :closable="true"
+            width="480"
+            @on-cancel="showStoreSelect=false"
+        >
+            <div class="store-select-tip">该账号绑定多个门店，请选择要登录的门店</div>
+            <RadioGroup v-model="selectedStoreId" vertical class="store-select-list">
+                <Radio v-for="s in storeOptions" :key="s.id" :label="s.id">{{ s.name }}</Radio>
+            </RadioGroup>
+            <div slot="footer">
+                <Button @click="showStoreSelect=false">取消</Button>
+                <Button type="primary" :loading="storeSelectLoading" @click="confirmSelectStore">进入门店</Button>
+            </div>
+        </Modal>
         <div class="footer">
             <div class="pull-right" v-if="copyrightContext">{{copyrightContext}}</div>
             <div class="pull-right" v-else>Copyright ©2014-2024 <a class="infoUrl" href="https://www.mohe.com" target="_blank">{{version}}</a></div>
@@ -69,7 +86,12 @@ export default {
             site_name: '',
             site_url: '',
             copyrightContext:'',
-            version:''
+            version:'',
+            showStoreSelect: false,
+            storeOptions: [],
+            selectedStoreId: 0,
+            storeSelectLoading: false,
+            pendingCaptcha: null
         }
     },
     created() {
@@ -110,69 +132,96 @@ export default {
                 this.$Message.error(err.msg)
             })
         },
-        // 关闭模态框
+        // 关闭模态框 / 提交登录
         closeModel(params) {
+            this.pendingCaptcha = params || null;
+            this.doLogin(0, params);
+        },
+        doLogin(storeId, captchaParams) {
             let msg = this.$Message.loading({
                 content: '登录中...',
                 duration: 0
             });
-            AccountLogin({
+            const payload = {
                 account: this.formInline.username,
                 pwd: this.formInline.password,
-                captchaType: params ? 'clickWord' : '',
-                captchaVerification: params ? params.captchaVerification : ''
-            }).then(async res => {
-                this.$store.dispatch('store/account/setPageTitle')
+                store_id: storeId || 0,
+                captchaType: captchaParams ? 'clickWord' : '',
+                captchaVerification: captchaParams ? captchaParams.captchaVerification : ''
+            };
+            AccountLogin(payload).then(async res => {
                 msg();
-                // expires_time 为 unix 秒，js-cookie 的 number 按「天」算，需先换算
-                let expires = this.getExpiresTime(res.data.expires_time);
-                // 记录用户登陆信息
-                util.cookies.set('uuid', res.data.user_info.id, {
-                    expires: expires
-                });
-                util.cookies.set('token', res.data.token, {
-                    expires: expires
-                });
-                util.cookies.set('expires_time', res.data.expires_time, {
-                    expires: expires
-                });
-                const db = await this.$store.dispatch('store/db/database', {
-                    user: true
-                });
-                // 保存菜单信息
-                // db.set('menus', res.data.menus).set('unique_auth', res.data.unique_auth).set('user_info', res.data.user_info).write();
-                db.set('unique_auth', res.data.unique_auth).set('user_info', res.data.user_info).write();
-
-                this.$store.commit('store/menus/getmenusNav', res.data.menus);
-
-                let userInfoStore = {
-                    'account': res.data.user_info.account,
-                    'avatar': res.data.user_info.avatar,
-                    'logo': res.data.logo,
-                    'logoSmall': res.data.logo_square
+                const data = res.data || {};
+                if (data.need_select_store) {
+                    // 验证码已在首次密码校验时消费；选店不再携带
+                    this.pendingCaptcha = null;
+                    this.storeOptions = data.stores || [];
+                    this.selectedStoreId = this.storeOptions.length ? this.storeOptions[0].id : 0;
+                    this.showStoreSelect = true;
+                    return;
                 }
-                let storage = window.localStorage;
-                storage.setItem('userInfoStore', JSON.stringify(userInfoStore));
-                storage.setItem('uniqueAuthStore', JSON.stringify(res.data.unique_auth || []));
-                this.$store.commit('store/user/setProductCategoryStatus', res.data.product_category_status);
-
-                // 记录用户信息
-                this.$store.dispatch('store/user/set', {
-                    name: res.data.user_info.account,
-                    avatar: res.data.user_info.avatar,
-                    access: res.data.unique_auth,
-                    logo: res.data.logo,
-                    logoSmall: res.data.logo_square,
-                    version: res.data.version,
-                    newOrderAudioLink: res.data.newOrderAudioLink
-                });
-                return this.$router.replace({ path: this.$route.query.redirect || `${Setting.routePre}/home/` });
+                await this.applyLoginSuccess(data);
             }).catch(res => {
                 msg();
+                this.storeSelectLoading = false;
                 let data = res === undefined ? {} : res;
                 this.errorNum++;
                 this.$Message.error(data.msg || '登录失败');
             });
+        },
+        confirmSelectStore() {
+            if (!this.selectedStoreId) {
+                this.$Message.warning('请选择门店');
+                return;
+            }
+            this.storeSelectLoading = true;
+            // 选店阶段不得再次提交已使用的一次性验证码
+            this.doLogin(this.selectedStoreId, null);
+        },
+        async applyLoginSuccess(data) {
+            this.showStoreSelect = false;
+            this.storeSelectLoading = false;
+            this.$store.dispatch('store/account/setPageTitle')
+            // expires_time 为 unix 秒，js-cookie 的 number 按「天」算，需先换算
+            let expires = this.getExpiresTime(data.expires_time);
+            // 记录用户登陆信息
+            util.cookies.set('uuid', data.user_info.id, {
+                expires: expires
+            });
+            util.cookies.set('token', data.token, {
+                expires: expires
+            });
+            util.cookies.set('expires_time', data.expires_time, {
+                expires: expires
+            });
+            const db = await this.$store.dispatch('store/db/database', {
+                user: true
+            });
+            db.set('unique_auth', data.unique_auth).set('user_info', data.user_info).write();
+
+            this.$store.commit('store/menus/getmenusNav', data.menus);
+
+            let userInfoStore = {
+                'account': data.user_info.account,
+                'avatar': data.user_info.avatar,
+                'logo': data.logo,
+                'logoSmall': data.logo_square
+            }
+            let storage = window.localStorage;
+            storage.setItem('userInfoStore', JSON.stringify(userInfoStore));
+            storage.setItem('uniqueAuthStore', JSON.stringify(data.unique_auth || []));
+            this.$store.commit('store/user/setProductCategoryStatus', data.product_category_status);
+
+            this.$store.dispatch('store/user/set', {
+                name: data.user_info.account,
+                avatar: data.user_info.avatar,
+                access: data.unique_auth,
+                logo: data.logo,
+                logoSmall: data.logo_square,
+                version: data.version,
+                newOrderAudioLink: data.newOrderAudioLink
+            });
+            return this.$router.replace({ path: this.$route.query.redirect || `${Setting.routePre}/home/` });
         },
         getExpiresTime(expiresTime) {
             let nowTimeNum = Math.round(new Date() / 1000);
@@ -313,6 +362,16 @@ export default {
     .btn {
       height: 40px
         background: #1890FF !important;
+    }
+
+    .store-select-tip {
+        margin-bottom: 12px;
+        color: #666;
+        font-size: 13px;
+    }
+
+    .store-select-list {
+        width: 100%;
     }
 
     .captchaBox {

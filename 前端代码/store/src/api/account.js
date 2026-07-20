@@ -31,6 +31,17 @@ export function AccountLogin (data) {
 }
 
 /**
+ * 已登录店员切换授权门店
+ */
+export function SwitchStore (data) {
+    return request({
+        url: '/login/switch_store',
+        method: 'post',
+        data
+    });
+}
+
+/**
  * 退出登陆
  * @constructor
  */

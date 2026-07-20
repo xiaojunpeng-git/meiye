@@ -56,9 +56,7 @@ class Login
             'account',
         ], true);
 
-        $key = 'store_login_captcha_' . $account;
-
-        return app('json')->success(['is_captcha' => Cache::get($key) > 2]);
+        return app('json')->success(['is_captcha' => $this->services->isCaptchaRequired((string)$account)]);
     }
 
 	/**
@@ -113,28 +111,43 @@ class Login
      */
     public function login(Request $request)
     {
-        [$account, $password, $captchaType, $captchaVerification] = $request->postMore([
+        [$account, $password, $storeId, $captchaType, $captchaVerification] = $request->postMore([
             'account',
             'pwd',
+            ['store_id', 0],
             ['captchaType', ''],
             ['captchaVerification', '']
         ], true);
 
 		validate(\app\validate\store\StoreAdminValidate::class)->scene('get')->check(['account' => $account, 'pwd' => $password]);
 
-        $key = 'store_login_captcha_' . $account;
-
-        if (Cache::has($key) && Cache::get($key) > 2) {
-            if (!$captchaType || !$captchaVerification) {
-                return app('json')->fail('请拖动滑块验证');
-            }
-            //二次验证
-			aj_captcha_check_two($captchaType, $captchaVerification);
-        }
-		$res = $this->services->login($account, $password, 'store');
-		if ($res) {
-			Cache::delete($key);
+		try {
+			$this->services->assertLoginCaptcha(
+				(string)$account,
+				(int)$storeId,
+				(string)$captchaType,
+				(string)$captchaVerification
+			);
+		} catch (ValidateException $e) {
+			return app('json')->fail($e->getMessage());
 		}
+
+		$res = $this->services->login($account, $password, 'store', (int)$storeId);
+		// 密码已通过（含返回门店列表）：清除失败计数；选店阶段靠短期放行，不再复验一次性验证码
+		$this->services->afterPasswordLoginSuccess((string)$account, is_array($res) ? $res : []);
+        return app('json')->success($res);
+    }
+
+    /**
+     * 已登录店员切换授权门店
+     */
+    public function switchStore(Request $request)
+    {
+        [$storeId] = $request->postMore([
+            ['store_id', 0],
+        ], true);
+        $staffId = (int)$request->storeStaffId();
+        $res = $this->services->switchStore($staffId, (int)$storeId, 'store');
         return app('json')->success($res);
     }
 

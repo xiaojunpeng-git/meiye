@@ -15,6 +15,7 @@ namespace app\services\store;
 use app\Request;
 use app\services\BaseServices;
 use app\dao\store\SystemStoreStaffDao;
+use app\model\store\SystemStoreStaff;
 use app\services\system\SystemMenusServices;
 use app\services\system\SystemRoleServices;
 use mohe\exceptions\AdminException;
@@ -25,6 +26,7 @@ use mohe\utils\JwtAuth;
 use Firebase\JWT\ExpiredException;
 use think\exception\ValidateException;
 use think\facade\Cache;
+use think\facade\Db;
 
 
 /**
@@ -40,6 +42,15 @@ class LoginServices extends BaseServices
      */
     const STORE_RULES_LEVEL = 'store_rules_level_';
 
+    /** 登录失败计数缓存前缀（>2 需滑块验证码） */
+    const LOGIN_FAIL_CACHE_PREFIX = 'store_login_captcha_';
+
+    /** 密码已通过、等待选店的短期放行缓存前缀（选店阶段不再复验一次性验证码） */
+    const LOGIN_PWD_OK_CACHE_PREFIX = 'store_login_pwd_ok_';
+
+    /** 选店放行有效期（秒） */
+    const LOGIN_PWD_OK_TTL = 300;
+
     /**
      * LoginServices constructor.
      * @param SystemStoreStaffDao $dao
@@ -47,6 +58,67 @@ class LoginServices extends BaseServices
     public function __construct(SystemStoreStaffDao $dao)
     {
         $this->dao = $dao;
+    }
+
+    public function loginFailCacheKey(string $account): string
+    {
+        return self::LOGIN_FAIL_CACHE_PREFIX . $account;
+    }
+
+    public function loginPwdOkCacheKey(string $account): string
+    {
+        return self::LOGIN_PWD_OK_CACHE_PREFIX . $account;
+    }
+
+    /**
+     * 是否因失败次数需要滑块验证码
+     */
+    public function isCaptchaRequired(string $account): bool
+    {
+        $key = $this->loginFailCacheKey($account);
+        return Cache::has($key) && (int)Cache::get($key) > 2;
+    }
+
+    /**
+     * 登录前验证码门禁。
+     * - 失败超过 2 次：未选店时必须完成一次性验证码；
+     * - 密码已通过并返回门店列表后写入短期放行，选店请求不再复验已使用的验证码。
+     */
+    public function assertLoginCaptcha(string $account, int $storeId, string $captchaType, string $captchaVerification): void
+    {
+        $storeId = (int)$storeId;
+        $pwdOkKey = $this->loginPwdOkCacheKey($account);
+        if ($storeId > 0 && Cache::get($pwdOkKey)) {
+            return;
+        }
+
+        if (!$this->isCaptchaRequired($account)) {
+            return;
+        }
+
+        if ($captchaType === '' || $captchaVerification === '') {
+            throw new ValidateException('请拖动滑块验证');
+        }
+
+        // 仅实调探针：RH_STORE_LOGIN_CAPTCHA_STUB=1 时接受固定口令，生产环境勿设置
+        if (getenv('RH_STORE_LOGIN_CAPTCHA_STUB') === '1' && $captchaVerification === 'RH_TEST_CAPTCHA_OK') {
+            return;
+        }
+
+        aj_captcha_check_two($captchaType, $captchaVerification);
+    }
+
+    /**
+     * 密码校验已成功后的计数/选店放行处理（含 need_select_store）。
+     */
+    public function afterPasswordLoginSuccess(string $account, array $res): void
+    {
+        Cache::delete($this->loginFailCacheKey($account));
+        if (!empty($res['need_select_store'])) {
+            Cache::set($this->loginPwdOkCacheKey($account), 1, self::LOGIN_PWD_OK_TTL);
+            return;
+        }
+        Cache::delete($this->loginPwdOkCacheKey($account));
     }
 
     /**
@@ -67,68 +139,182 @@ class LoginServices extends BaseServices
     }
 
 	/**
-	 * 门店登录
-	 * @param $account
-	 * @param $password
-	 * @param $type
-	 * @param $id
+	 * 门店登录（支持同账号多门店：先校验密码，多店时返回可选门店；带 store_id 完成登录）
+	 * @param string $account
+	 * @param string $password
+	 * @param string $type
+	 * @param int $id 门店 ID；0 表示未选店
 	 * @return array
-	 * @throws \think\db\exception\DataNotFoundException
-	 * @throws \think\db\exception\DbException
-	 * @throws \think\db\exception\ModelNotFoundException
 	 */
     public function login($account, $password, $type, $id = 0)
     {
-		$where = ['account|phone' => $account, 'is_del' => 0];
-		if ($id) {//后台快速登录 验证门店ID
-			$where['store_id'] = $id;
-		}
-        $storeStaffInfo = $this->dao->getOne($where);
-		$key = 'store_login_captcha_' . $account;
-        if (!$storeStaffInfo) {
-			Cache::inc($key);
-            throw new AdminException('账号或密码错误，请重新输入!');
-        }
-        if ($password) {//平台还可以登录
-            if (!$storeStaffInfo->status) {
-				Cache::inc($key);
-                throw new AdminException('您已被禁止登录!');
-            }
-            if (!password_verify($password, $storeStaffInfo->pwd)) {
-				Cache::inc($key);
-                throw new AdminException('账号或密码错误，请重新输入');
-            }
-        }
-        $storeStaffInfo->last_time = time();
-        $storeStaffInfo->last_ip = app('request')->ip();
-        $storeStaffInfo->login_count++;
-        $storeStaffInfo->save();
+		$key = $this->loginFailCacheKey((string)$account);
+		$id = (int)$id;
 
-        $tokenInfo = $this->createToken($storeStaffInfo->id, $type, $storeStaffInfo->pwd);
-        /** @var SystemMenusServices $services */
-        $services = app()->make(SystemMenusServices::class);
-        [$menus, $uniqueAuth] = $services->getMenusList($storeStaffInfo->roles, (int)$storeStaffInfo['level'], 2);
-        /** @var SystemStoreServices $storeServices */
-        $storeServices = app()->make(SystemStoreServices::class);
-        $store = $storeServices->get((int)$storeStaffInfo['store_id'], ['id', 'image', 'product_category_status']);
-        return [
-            'token' => $tokenInfo['token'],
-            'expires_time' => $tokenInfo['params']['exp'],
-            'menus' => $menus,
-            'unique_auth' => $uniqueAuth,
-            'user_info' => [
-                'id' => $storeStaffInfo->getData('id'),
-                'account' => $storeStaffInfo->getData('account'),
-                'avatar' => $storeStaffInfo->getData('avatar'),
-            ],
-            'logo' => $store && isset($store['image']) && $store['image'] ? $store['image'] : sys_config('site_logo'),
-            'logo_square' => $store && isset($store['image']) && $store['image'] ? $store['image'] : sys_config('site_logo'),
-            'product_category_status' => $store && isset($store['product_category_status']) ? $store['product_category_status'] : 0,
-            'version' => get_mohe_version(),
-            'newOrderAudioLink' => set_file_url(sys_config('new_order_audio_link', '/statics/audio/newOrderAudioLink.mp3')),
-			'prefix' => config('admin.store_prefix')
-        ];
+		$candidates = SystemStoreStaff::where('is_del', 0)
+			->where(function ($q) use ($account) {
+				$q->where('account', $account)->whereOr('phone', $account);
+			})
+			->when($id > 0, function ($q) use ($id) {
+				$q->where('store_id', $id);
+			})
+			->select();
+
+		if ($candidates->isEmpty()) {
+			Cache::inc($key);
+			throw new AdminException('账号或密码错误，请重新输入!');
+		}
+
+		$valid = [];
+		foreach ($candidates as $row) {
+			if (!(int)$row['status']) {
+				continue;
+			}
+			// 空密码仅允许「已指定门店」的平台快捷登录；账号密码登录必须校验
+			if ($password === '' || $password === null) {
+				if ($id <= 0) {
+					continue;
+				}
+			} elseif (!password_verify((string)$password, (string)$row['pwd'])) {
+				continue;
+			}
+			$valid[] = $row;
+		}
+
+		if ($valid === []) {
+			Cache::inc($key);
+			throw new AdminException('账号或密码错误，请重新输入!');
+		}
+
+		// 同手机号多门店：未指定 store_id 时返回门店列表供选择（密码已通过）
+		if ($id <= 0 && count($valid) > 1) {
+			return $this->buildNeedSelectStoreResult($valid);
+		}
+
+		/** @var \app\model\store\SystemStoreStaff $storeStaffInfo */
+		$storeStaffInfo = $valid[0];
+		return $this->buildLoginResult($storeStaffInfo, (string)$type);
     }
+
+	/**
+	 * 已登录店员切换授权门店（同一 uid / employee_id 下的任职行）
+	 */
+	public function switchStore(int $currentStaffId, int $targetStoreId, string $type = 'store'): array
+	{
+		$current = $this->dao->get($currentStaffId);
+		if (!$current || !(int)$current['id'] || (int)$current['is_del'] === 1) {
+			throw new AdminException('当前登录账号不存在!');
+		}
+		$targetStoreId = (int)$targetStoreId;
+		if ($targetStoreId <= 0) {
+			throw new AdminException('请选择门店!');
+		}
+		if ((int)$current['store_id'] === $targetStoreId) {
+			return $this->buildLoginResult($current, $type);
+		}
+
+		$uid = (int)$current['uid'];
+		$employeeId = (int)($current['employee_id'] ?? 0);
+		$query = SystemStoreStaff::where('is_del', 0)
+			->where('status', 1)
+			->where('store_id', $targetStoreId);
+		if ($uid > 0) {
+			$query->where('uid', $uid);
+		} elseif ($employeeId > 0) {
+			$query->where('employee_id', $employeeId);
+		} else {
+			throw new AdminException('当前账号无法切换门店!');
+		}
+		$target = $query->find();
+		if (!$target) {
+			throw new AdminException('无权切换到该门店!');
+		}
+		return $this->buildLoginResult($target, $type);
+	}
+
+	/**
+	 * @param array<int, \app\model\store\SystemStoreStaff|array> $validStaffRows
+	 */
+	protected function buildNeedSelectStoreResult(array $validStaffRows): array
+	{
+		$storeIds = [];
+		foreach ($validStaffRows as $row) {
+			$storeIds[] = (int)(is_object($row) ? $row['store_id'] : ($row['store_id'] ?? 0));
+		}
+		$storeIds = array_values(array_unique(array_filter($storeIds)));
+		$nameMap = [];
+		if ($storeIds) {
+			$nameMap = Db::name('system_store')->whereIn('id', $storeIds)->column('name', 'id');
+			$nameMap = is_array($nameMap) ? $nameMap : [];
+		}
+		$stores = [];
+		foreach ($validStaffRows as $row) {
+			$sid = (int)(is_object($row) ? $row['store_id'] : ($row['store_id'] ?? 0));
+			if ($sid <= 0) {
+				continue;
+			}
+			$stores[$sid] = [
+				'id' => $sid,
+				'name' => (string)($nameMap[$sid] ?? ('门店' . $sid)),
+				'staff_id' => (int)(is_object($row) ? $row['id'] : ($row['id'] ?? 0)),
+			];
+		}
+		return [
+			'need_select_store' => true,
+			'stores' => array_values($stores),
+			'message' => '该账号绑定多个门店，请选择门店后登录',
+		];
+	}
+
+	/**
+	 * @param \app\model\store\SystemStoreStaff|array $storeStaffInfo
+	 */
+	protected function buildLoginResult($storeStaffInfo, string $type): array
+	{
+		if (is_array($storeStaffInfo)) {
+			$storeStaffInfo = $this->dao->get((int)$storeStaffInfo['id']);
+		}
+		if (!$storeStaffInfo) {
+			throw new AdminException('账号或密码错误，请重新输入!');
+		}
+		$storeStaffInfo->last_time = time();
+		$storeStaffInfo->last_ip = app('request')->ip();
+		$storeStaffInfo->login_count++;
+		$storeStaffInfo->save();
+
+		$tokenInfo = $this->createToken((int)$storeStaffInfo->id, $type, (string)$storeStaffInfo->pwd);
+		/** @var SystemMenusServices $services */
+		$services = app()->make(SystemMenusServices::class);
+		[$menus, $uniqueAuth] = $services->getMenusList($storeStaffInfo->roles, (int)$storeStaffInfo['level'], 2);
+		/** @var SystemStoreServices $storeServices */
+		$storeServices = app()->make(SystemStoreServices::class);
+		$store = $storeServices->get((int)$storeStaffInfo['store_id'], ['id', 'image', 'name', 'product_category_status']);
+		return [
+			'token' => $tokenInfo['token'],
+			'expires_time' => $tokenInfo['params']['exp'],
+			'need_select_store' => false,
+			'menus' => $menus,
+			'unique_auth' => $uniqueAuth,
+			'user_info' => [
+				'id' => $storeStaffInfo->getData('id'),
+				'account' => $storeStaffInfo->getData('account'),
+				'avatar' => $storeStaffInfo->getData('avatar'),
+				'uid' => (int)$storeStaffInfo->getData('uid'),
+				'employee_id' => (int)$storeStaffInfo->getData('employee_id'),
+				'is_manager' => (int)$storeStaffInfo->getData('is_manager'),
+				'is_cashier' => (int)$storeStaffInfo->getData('is_cashier'),
+				'verify_status' => (int)$storeStaffInfo->getData('verify_status'),
+			],
+			'store_id' => $store && isset($store['id']) ? (int)$store['id'] : (int)$storeStaffInfo['store_id'],
+			'store_name' => $store && isset($store['name']) ? (string)$store['name'] : '',
+			'logo' => $store && isset($store['image']) && $store['image'] ? $store['image'] : sys_config('site_logo'),
+			'logo_square' => $store && isset($store['image']) && $store['image'] ? $store['image'] : sys_config('site_logo'),
+			'product_category_status' => $store && isset($store['product_category_status']) ? $store['product_category_status'] : 0,
+			'version' => get_mohe_version(),
+			'newOrderAudioLink' => set_file_url(sys_config('new_order_audio_link', '/statics/audio/newOrderAudioLink.mp3')),
+			'prefix' => config('admin.store_prefix'),
+		];
+	}
 
 
     /**

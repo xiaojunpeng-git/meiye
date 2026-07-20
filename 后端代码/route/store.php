@@ -57,6 +57,8 @@ Route::group('storeapi', function () {
         Route::put('update_store', 'Login/updateStore')->name('updateStore')->option(['real_name' => '修改当前登录店员信息']);
         //退出登录
         Route::get('logout', 'Login/logOut')->option(['real_name' => '退出登录']);
+        //同账号多门店切换
+        Route::post('login/switch_store', 'Login/switchStore')->option(['real_name' => '切换授权门店']);
         //修改密码
         Route::put('updatePwd', 'staff.StoreStaff/updateStaffPwd')->option(['real_name' => '修改密码']);
 		//解析（导入地图城市地址）
