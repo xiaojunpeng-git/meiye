@@ -276,6 +276,23 @@ class LoginServices extends BaseServices
             }
             throw new AuthException(ApiErrorCode::ERR_LOGIN_STATUS);
         }
+        // 停职/禁用：现有 token 必须即时失效（不得仅阻止下一次登录）
+        if (!(int)$storeStaffInfo->status) {
+            if (!request()->isCli()) {
+                $cacheService->clearToken($md5Token);
+            }
+            throw new AuthException(ApiErrorCode::ERR_LOGIN_STATUS);
+        }
+        $employeeId = (int)($storeStaffInfo['employee_id'] ?? 0);
+        if ($employeeId > 0) {
+            $emp = \think\facade\Db::name('employee')->where('id', $employeeId)->field('id,status,is_del')->find();
+            if (!$emp || (int)$emp['is_del'] === 1 || (int)$emp['status'] !== 1) {
+                if (!request()->isCli()) {
+                    $cacheService->clearToken($md5Token);
+                }
+                throw new AuthException(ApiErrorCode::ERR_LOGIN_STATUS);
+            }
+        }
 
         if ($auth !== md5($storeStaffInfo['pwd'])) {
             throw new AuthException(ApiErrorCode::ERR_LOGIN_INVALID);
