@@ -80,8 +80,8 @@
           <col v-if="colVisible.action" class="col-action" />
         </colgroup>
         <tbody>
-          <tr v-for="(line, lineIdx) in getOrderLines(row)" :key="lineIdx">
-            <td class="td-check" v-if="lineIdx === 0" :rowspan="getOrderLines(row).length"></td>
+          <tr v-for="(line, lineIdx) in orderLinesOf(row)" :key="lineIdx">
+            <td class="td-check" v-if="lineIdx === 0" :rowspan="orderLinesOf(row).length"></td>
             <td class="td-product" v-if="colVisible.product">
               <div class="product-cell">
                 <div class="product-img" v-viewer v-if="line.image">
@@ -125,7 +125,7 @@
             <td
               class="td-customer"
               v-if="colVisible.customer && lineIdx === 0"
-              :rowspan="getOrderLines(row).length"
+              :rowspan="orderLinesOf(row).length"
             >
               <template v-if="hasUserId(row)">
                 <a
@@ -150,7 +150,7 @@
             <td
               class="td-amount"
               v-if="colVisible.amount && lineIdx === 0"
-              :rowspan="getOrderLines(row).length"
+              :rowspan="orderLinesOf(row).length"
             >
               <div class="amount-main">¥ {{ getPayAmount(row) }}</div>
               <div class="amount-pay-type">
@@ -169,7 +169,7 @@
             <td
               class="td-source"
               v-if="colVisible.source && lineIdx === 0"
-              :rowspan="getOrderLines(row).length"
+              :rowspan="orderLinesOf(row).length"
             >
               <template v-if="editableSource && row.refund_status == 0 && row.order_type != 2">
                 <a @click="$emit('source', row)" v-if="row.source_name">{{ row.source_name }}</a>
@@ -180,25 +180,28 @@
             <td
               class="td-store"
               v-if="colVisible.store && lineIdx === 0"
-              :rowspan="getOrderLines(row).length"
+              :rowspan="orderLinesOf(row).length"
             >{{ row.store_name || '-' }}</td>
             <td
               class="td-status"
               v-if="colVisible.status && lineIdx === 0"
-              :rowspan="getOrderLines(row).length"
+              :rowspan="orderLinesOf(row).length"
             >
-              <Tag color="success" size="medium" v-show="row.status == 3">{{ row.status_name.status_name }}</Tag>
-              <Tag color="success" size="medium" v-show="row.status == 4">{{ row.status_name.status_name }}</Tag>
-              <Tag color="success" size="medium" v-show="row.status == 2 && row.refund_status == 0">{{ row.status_name.status_name }}</Tag>
-              <Tag color="success" size="medium" v-show="(row.status == 1 || row.status == 5 || row.status == 0) && row.refund_status == 0">{{ row.status_name.status_name }}</Tag>
-              <Tag color="error" size="medium" v-show="(row.status == 1 || row.status == 2 || row.status == 5 || row.status == 0) && row.refund_status != 0">{{ row.status_name.status_name }}</Tag>
-              <Tag color="error" size="medium" v-if="!row.is_all_refund && row.refund.length">部分退款中</Tag>
-              <Tag color="error" size="medium" v-if="row.is_all_refund && row.refund.length && row.refund_type != 6">退款中</Tag>
+              <Tag color="error" size="medium" v-if="Number(row.terminal_action || 0) === 2">{{ (row.status_name && row.status_name.status_name) || '已作废' }}</Tag>
+              <template v-else>
+                <Tag color="success" size="medium" v-show="row.status == 3">{{ (row.status_name && row.status_name.status_name) || '' }}</Tag>
+                <Tag color="success" size="medium" v-show="row.status == 4">{{ (row.status_name && row.status_name.status_name) || '' }}</Tag>
+                <Tag color="success" size="medium" v-show="row.status == 2 && row.refund_status == 0">{{ (row.status_name && row.status_name.status_name) || '' }}</Tag>
+                <Tag color="success" size="medium" v-show="(row.status == 1 || row.status == 5 || row.status == 0) && row.refund_status == 0">{{ (row.status_name && row.status_name.status_name) || '' }}</Tag>
+                <Tag color="error" size="medium" v-show="(row.status == 1 || row.status == 2 || row.status == 5 || row.status == 0) && row.refund_status != 0">{{ (row.status_name && row.status_name.status_name) || '' }}</Tag>
+                <Tag color="error" size="medium" v-if="!row.is_all_refund && row.refund && row.refund.length">部分退款中</Tag>
+                <Tag color="error" size="medium" v-if="row.is_all_refund && row.refund && row.refund.length && row.refund_type != 6">退款中</Tag>
+              </template>
             </td>
             <td
               class="td-action"
               v-if="colVisible.action && lineIdx === 0"
-              :rowspan="getOrderLines(row).length"
+              :rowspan="orderLinesOf(row).length"
             >
               <slot name="action" :row="row"></slot>
             </td>
@@ -223,7 +226,29 @@ export default {
     total: { type: Number, default: 0 },
     editableSource: { type: Boolean, default: false },
   },
+  data() {
+    return {
+      orderLinesCache: typeof WeakMap !== 'undefined' ? new WeakMap() : null,
+    };
+  },
+  watch: {
+    list() {
+      this.orderLinesCache = typeof WeakMap !== 'undefined' ? new WeakMap() : null;
+    },
+  },
   methods: {
+    orderLinesOf(row) {
+      if (!row) return [];
+      if (this.orderLinesCache) {
+        const cached = this.orderLinesCache.get(row);
+        if (cached) return cached;
+      }
+      const lines = this.getOrderLines(row);
+      if (this.orderLinesCache) {
+        this.orderLinesCache.set(row, lines);
+      }
+      return lines;
+    },
     isOrderChecked(id) {
       const oid = parseInt(id);
       if (this.isAll === 1) {
@@ -292,6 +317,9 @@ export default {
       return 0;
     },
     getPendingDebt(row) {
+      if (Number(row.terminal_action || 0) !== 0 || Number(row.refund_status || 0) !== 0) {
+        return 0;
+      }
       const pending = row.pending_debt_amount != null
         ? Number(row.pending_debt_amount)
         : Math.max(0, Number(row.debt_amount || 0) - Number(row.repaid_debt_amount || 0));

@@ -247,6 +247,7 @@
         @source="showSource"
       >
         <template #action="{ row }">
+          <!-- 产品要求：订单列表暂不显示「发送货」
           <a
               @click="sendOrder(row)"
               v-if="
@@ -256,6 +257,7 @@
                 row.store_delivery_type !== 2
               "
           >发送货</a>
+          -->
           <a
               @click="openModal3(row)"
               v-if="
@@ -897,12 +899,17 @@ export default {
   created() {
     this.loadColumnVisible();
     this.loadUserGroupList();
-    this.orderData.date_range = this.$route.query.dateRange || '';
+    const q = this.$route.query || {};
+    this.orderData.date_range = q.dateRange || q.data || '';
     if (this.orderData.date_range != '') {
       this.timeVal = this.orderData.date_range.split("-");
+      // 经营看板下钻：时间落到服务端 time 筛选
+      if (q.from === 'business_dashboard' || q.data) {
+        this.orderData.time = this.orderData.date_range;
+      }
     }
     this.getCash()
-    this.orderData.status = this.$route.query.status || ''
+    this.orderData.status = q.status || ''
     this.staffList()
     this.getList()
   },
@@ -1081,22 +1088,23 @@ export default {
     onTerminalSuccess(payload) {
       this.getList();
       if (this.orderId) this.getData(this.orderId);
-      if (payload && payload.action === 'void' && payload.can_reopen && payload.row) {
-        this.$Modal.confirm({
-          title: '作废成功',
-          content: '订单已作废。是否立即重新开单？',
-          okText: '重新开单',
-          cancelText: '稍后',
-          onOk: () => this.doReopen(payload.row),
-        });
-      }
+      // 产品要求：作废成功后不再弹「是否立即重新开单」
     },
-    doReopen(row) {
-      postOrderReopen(row.id)
+    doReopen(row, options = {}) {
+      if (Number(row.terminal_action || 0) !== 2) {
+        if (options.targetWin && !options.targetWin.closed) options.targetWin.close();
+        return this.$Message.error('只有作废的单据才能重新开单');
+      }
+      if (!row.can_reopen) {
+        if (options.targetWin && !options.targetWin.closed) options.targetWin.close();
+        return this.$Message.error(row.reopen_deny_reason || '该订单不能重新开单');
+      }
+      return postOrderReopen(row.id)
         .then((res) => {
           const data = (res && res.data) || {};
           const token = data.draft_token || '';
           if (!token) {
+            if (options.targetWin && !options.targetWin.closed) options.targetWin.close();
             return this.$Message.error(res.msg || '重新开单未成功');
           }
           const payload = {
@@ -1110,6 +1118,13 @@ export default {
           try {
             window.localStorage.setItem('mohe_reopen_draft', JSON.stringify(payload));
           } catch (e) { /* ignore */ }
+          this.getList();
+          if (options && options.openCashierDirect) {
+            const tips = (payload.messages || []).filter(Boolean).join('；');
+            if (tips) this.$Message.info(tips);
+            this.openCashierForReopen(token, payload.uid, options.targetWin);
+            return;
+          }
           const tips = (payload.messages || []).filter(Boolean).join('；');
           const content = payload.pending_pay
             ? `已有待支付重开订单（编号 ${payload.pending_pay_order_id}），请到收银台继续支付。${tips ? ' ' + tips : ''}`
@@ -1119,24 +1134,29 @@ export default {
             content,
             okText: '打开收银台',
             cancelText: '我知道了',
-            onOk: () => this.openCashierForReopen(token),
+            onOk: () => this.openCashierForReopen(token, payload.uid),
           });
-          this.getList();
         })
         .catch((err) => {
+          if (options.targetWin && !options.targetWin.closed) options.targetWin.close();
           this.$Message.error((err && err.msg) || '重新开单未成功，请核对后重试');
         });
     },
-    openCashierForReopen(token) {
+    openCashierForReopen(token, uid, targetWin) {
       const host = window.location.hostname;
       const port = window.location.port;
+      const qs = `reopen_token=${encodeURIComponent(token)}${uid ? `&uid=${encodeURIComponent(uid)}` : ''}`;
       let url = '';
-      if (port === '18082' || port === '8082') {
-        url = `${window.location.protocol}//${host}:18083/?reopen_token=${encodeURIComponent(token)}`;
-      } else if (port === '18081') {
-        url = `${window.location.protocol}//${host}:18083/?reopen_token=${encodeURIComponent(token)}`;
+      if (port === '18082' || port === '8082' || port === '18081') {
+        // 开发预览：必须落到收银页完整路径，否则 /?token 会进登录且丢失 query
+        url = `${window.location.protocol}//${host}:18083/cashier/cashier/index?${qs}`;
       } else {
-        url = `${window.location.protocol}//${window.location.host}/cashier/?reopen_token=${encodeURIComponent(token)}`;
+        url = `${window.location.protocol}//${window.location.host}/cashier/cashier/index?${qs}`;
+      }
+      if (targetWin && !targetWin.closed) {
+        targetWin.location.href = url;
+        try { targetWin.focus(); } catch (e) { /* ignore */ }
+        return;
       }
       window.open(url, '_blank');
     },
@@ -1624,6 +1644,8 @@ export default {
         canOrderRepay(row) {
           if (!row || row.is_debt_repay) return false;
           if (Number(row.refund_status) !== 0) return false;
+          // 作废单禁止补交/还款
+          if (Number(row.terminal_action || 0) !== 0) return false;
           const pending = row.pending_debt_amount != null
             ? Number(row.pending_debt_amount)
             : Math.max(0, Number(row.debt_amount || 0) - Number(row.repaid_debt_amount || 0));
@@ -1713,19 +1735,23 @@ export default {
           this.loading = true
           orderList(this.orderData)
               .then((res) => {
-                let data = res.data
-                data.data.forEach((item) => {
+                const data = (res && res.data) || {}
+                const rows = Array.isArray(data.data) ? data.data : []
+                rows.forEach((item) => {
                   if (item.id == this.orderId) {
                     this.rowActive = item
                   }
                 })
-                this.tableList = data.data
-                this.total = data.count
+                // 冻结行对象，避免 Vue2 深度观测上百字段导致门店开发预览卡死
+                this.tableList = rows.map((item) => Object.freeze(item))
+                this.total = data.count || 0
                 this.loading = false
               })
               .catch((err) => {
                 this.loading = false
-                this.$Message.error(err.msg)
+                this.tableList = []
+                this.total = 0
+                this.$Message.error((err && err.msg) || '订单列表加载失败')
               })
         }
       ,

@@ -146,6 +146,11 @@ Vue.use(ViewUI, {
     i18n: (key, value) => i18n.t(key, value)
 });
 
+// 操作提示（成功/失败/警告）统一停留 3 秒后再消失
+ViewUI.Message.config({
+    duration: 3,
+});
+
 Vue.use(iViewPro);
 Vue.component('i-link', iLink);
 
@@ -190,6 +195,10 @@ new Vue({
     watch: {
         // 监听路由 控制侧边栏显示 标记当前顶栏菜单（如需要）
         '$route'(to, from) {
+            // 纯前端交互预览不依赖登录态、菜单和后端接口
+            if (to.meta && to.meta.preview) {
+                return;
+            }
             if (to.meta.kefu) {
                 document.body.classList.add('kf_mobile')
             } else {

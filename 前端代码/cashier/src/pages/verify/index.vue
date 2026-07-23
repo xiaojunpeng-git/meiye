@@ -1,184 +1,41 @@
 <template>
-  <div>
-    <div v-show="currentPage === 1" class="page1">
-      <div class="title">消耗项目</div>
-      <div>
-        <Input v-model="orderData.keyword" search autofocus enter-button="查询" placeholder="输入/扫描消耗码进行消耗" @on-search="search" />
-      </div>
-      <div class="btn">
-        <Button type="text" @click="goAll">查看消耗订单</Button>
-      </div>
-    </div>
-    <div v-show="currentPage === 2" class="order">
-      <div class="left">
-        <div class="left-top">
-          <div class="title">
-            <Button type="text" icon="ios-arrow-back" @click="goBack">返回</Button>
-            <span class="line">丨</span>
-            消耗项目
-          </div>
-          <div class="sx" @click="filterModal = !filterModal">
-            {{ filterModal ? "关闭" : "筛选" }}
-            <Icon
-              v-if="!filterModal"
-              class="ios-funnel-outline"
-              color="#666"
-              type="ios-funnel-outline"
-            />
-          </div>
-        </div>
-        <div class="order-box">
-          <div v-show="!filterModal" class="search">
-            <Input
-              v-model="orderData.keyword"
-              enter-button="搜索"
-              placeholder="搜索订单编号"
-              search
-              size="large"
-              @on-search="search"
-            />
-          </div>
-          <div class="qukuai_out">
-             <div class="qukuai" :class="orderData.search_type == 2?'qukuai-active':''"  @click="chooseType(2)">有效卡</div>
-             <div class="qukuai" :class="orderData.search_type == 1?'qukuai-active':''" @click="chooseType(1)">全部</div>
-          </div>
-          <orderList
-            v-if="orderListData.length"
-            v-show="!filterModal"
-            :orderData="orderListData"
-            :total="count"
-            class="order-list"
-            orderType="verify"
-            @addPage="addPage"
-            @selectOrder="selectOrder"
-            showSx="1"
-          ></orderList>
-          <div v-else-if="!orderListData.length && !filterModal" class="no-order">
-            <img alt="" src="../../assets/images/no-order.png" />
-            <span class="trip">噢～目前暂无订单</span>
-          </div>
-          <filter-modal
-            v-show="filterModal"
-            order-type="verify"
-            @search="searchList"
-          ></filter-modal>
-        </div>
-      </div>
-      <div class="order-data">
-        <div class="header">
-          <div
-            v-for="(tab, index) in tabs"
-            :key="index"
-            :class="
-              sle === index
-                ? 'sel'
-                : index === sle - 1
-                ? 'neighbor-left'
-                : index === sle + 1
-                ? 'neighbor-right'
-                : 'def'
-            "
-            class="item"
-            @click="tabClick(index)"
-          >
-            <div class="item-wrap">
-              {{ tab }}
-            </div>
-          </div>
-          <div :class="sle === 2 ? 'neighbor-right' : ''" class="box"></div>
-        </div>
-        <div class="content" :class="{ 'border-radius': sle }">
-          <userOrder
-            ref="userOrder"
-            v-if="sle === 0 && selectOrderData.order_id"
-            :orderNumId="selectOrderData.order_id"
-            :selectData="selectOrderData"
-            :is-card-num="is_card_num"
-            class="orders"
-            @remarks="remarks"
-            @selectData="selectData"
-            @debt-limit="showDebtRepayConfirm"
-            @repay-debt="openDebtRepay"
-          ></userOrder>
-          <div v-else-if="!selectOrderData.order_id" class="no-order">
-            <img alt="" src="../../assets/images/no-record.png" />
-            <span class="trip">噢～目前暂无订单</span>
-          </div>
-          <orderDetails
-            v-if="sle === 1 && selectOrderData.order_id"
-            :id="selectOrderData.id"
-            class="orders"
-          ></orderDetails>
-          <orderRecord
-            v-if="sle === 2 && selectOrderData.order_id"
-            :key="recordRefreshKey"
-            :id="selectOrderData.id"
-          ></orderRecord>
-        </div>
-        <div v-if="selectOrderData.order_id" class="footer">
-          <div class="footer-top">
-            <div class="order_time_out">
-              <div class="combine-pay-switch">
-                <span class="handle-title">补单</span>
-                <Switch size="large" v-model="budan" :false-value="0" :true-value="1"></Switch>
-              </div>
-              <DatePicker
-                v-if="budan == 1"
-                class="order_time"
-                format="yyyy/MM/dd HH:mm:ss"
-                @on-change="changeBudanTime"
-                :transfer="true"
-                type="datetime"
-                placeholder="设置核销时间"
-              />
-            </div>
-            <div class="footer-right">
-              <div
-                v-if="canCancelOrder"
-                class="btn cancel-btn"
-                @click="openCancelOrder"
-              >撤销</div>
-              <div
-                v-if="canOpenReservation"
-                class="btn reservation-btn"
-                @click="openReservation"
-              >预约</div>
-              <div
-                v-if="canCardOps"
-                class="btn card-op-btn"
-                @click="openTransferModal"
-              >卡转让</div>
-              <div
-                v-if="canCardOps"
-                class="btn card-op-btn"
-                @click="openExtendModal"
-              >卡延期</div>
-              <div class="btn" @click="remarks">订单备注</div>
-              <div class="btn" @click="point">小票打印</div>
-              <div
-                v-if="canShowWriteoff"
-                class="btn pay"
-                @click="getVerifyData"
-              >
-                立即消耗
-              </div>
-            </div>
-          </div>
-          <div class="footer-info">
-            <div class="footer-left">
-              <span class="clerk" v-if="selectOrderData.clerk_name">收银员：{{ selectOrderData.clerk_name }}</span>
-              <span class="pay">实付：</span>
-              <span class="num">¥{{ selectOrderData.pay_price || 0 }}</span>
-              <span class="pay">剩余金额：</span>
-              <span class="num">¥{{ cha || 0 }}</span>
-              <template v-if="is_card_num == 1">
-                <span class="pay">剩余次数：</span>
-                <span class="num">{{ yuNum || 0 }}</span>
-              </template>
-            </div>
-          </div>
-        </div>
-      </div>
+  <div class="verify-page verify-page--workbench">
+    <writeoffWorkbench
+      class="batch-workbench"
+      :uid="workbenchUid"
+      :member="workbenchMember"
+      @exit="onWorkbenchExit"
+      @member-change="onWorkbenchMemberChange"
+      @active-card="onWorkbenchActiveCard"
+      @legacy-action="handleWorkbenchLegacy"
+      @done="onWorkbenchSuccess"
+      @success="onWorkbenchSuccess"
+    />
+      <Modal
+        v-model="legacyDetailVisible"
+        title="订单详情"
+        width="960"
+        :footer-hide="true"
+        class-name="verify-legacy-modal"
+      >
+        <orderDetails
+          v-if="legacyDetailVisible && selectOrderData.id"
+          :id="selectOrderData.id"
+        />
+      </Modal>
+      <Modal
+        v-model="legacyRecordVisible"
+        title="核销记录"
+        width="960"
+        :footer-hide="true"
+        class-name="verify-legacy-modal"
+      >
+        <orderRecord
+          v-if="legacyRecordVisible && selectOrderData.id"
+          :key="'legacy-rec-' + recordRefreshKey + '-' + selectOrderData.id"
+          :id="selectOrderData.id"
+        />
+      </Modal>
       <!-- 备注 -->
       <order-remark
         ref="remarks"
@@ -249,6 +106,23 @@
         </div>
       </Modal>
 
+      <Modal v-model="writeoffSuccessVisible" title="项目核销成功" width="460" :mask-closable="false">
+        <p>已完成本次所选卡项和项目的核销</p>
+        <p v-if="lastWriteoffCancels.length" style="margin-top: 8px; color: #808695;">
+          本次生成 {{ lastWriteoffCancels.length }} 条核销记录，可直接撤销。
+        </p>
+        <div slot="footer">
+          <Button
+            v-if="lastWriteoffCancels.length"
+            type="error"
+            ghost
+            :loading="writeoffCancelLoading"
+            @click="cancelLastWriteoffs"
+          >撤销本次核销</Button>
+          <Button type="primary" @click="closeWriteoffSuccess">完成</Button>
+        </div>
+      </Modal>
+
       <memberSet
         ref="memberSet"
         hide-guest
@@ -277,7 +151,6 @@
           <Button type="primary" :loading="extendLoading" @click="submitCardExtend">确认延期</Button>
         </div>
       </Modal>
-    </div>
   </div>
 </template>
 
@@ -285,6 +158,7 @@
 import orderList from "@/components/orderList";
 import goodsList from "@/pages/hang/components/goodsList";
 import userOrder from "./components/userOrder";
+import writeoffWorkbench from "./components/writeoffWorkbench";
 import orderDetails from "./components/orderDetails";
 import orderRecord from "@/components/orderRecord";
 import orderRemark from "@/components/orderRemark";
@@ -296,14 +170,16 @@ import filterModal from "@/components/filterModal";
 import memberSet from "@/pages/cashier/components/memberSet";
 import addReservation from "@/pages/reservation/components/addReservation";
 
-import { getVerifyList, putWriteUpdate, orderWriteForm, getPrice, openRefund, orderBenefits, cardTransfer, cardExtend } from "@/api/order";
+import { getVerifyList, putWriteUpdate, putWriteoffCancel, orderWriteForm, getPrice, openRefund, orderBenefits, cardTransfer, cardExtend } from "@/api/order";
 import { debtOrderItemsApi, debtRepayPayApi } from '@/api/debt';
+import Setting from '@/setting';
 
 export default {
   components: {
     orderList,
     goodsList,
     userOrder,
+    writeoffWorkbench,
     orderDetails,
     orderRemark,
     orderRecord,
@@ -316,6 +192,11 @@ export default {
   },
   data() {
     return {
+      workbenchUid: 0,
+      workbenchMember: null,
+      pageMode: 'batch',
+      legacyDetailVisible: false,
+      legacyRecordVisible: false,
       orderId: 0,
       orderListData: [],
       tabs: ["商品信息", "订单详情", "订单记录"],
@@ -367,6 +248,10 @@ export default {
       extendModal: false,
       extendDate: '',
       extendLoading: false,
+      verifySubmitting: false,
+      writeoffSuccessVisible: false,
+      writeoffCancelLoading: false,
+      lastWriteoffCancels: [],
       recordRefreshKey: 0,
       debtLimitMsg: '你当前订单还有欠款，可用次数已用完，是否去还款？',
       fullDebtLimitMsg: '你当前订单还有欠款，可用次数已用完，是否去还款？',
@@ -457,6 +342,23 @@ export default {
       }
       return false;
     },
+    batchUid() {
+      return Number(this.workbenchUid || (this.selectOrderData && this.selectOrderData.uid) || 0);
+    },
+    batchMember() {
+      if (this.workbenchMember && this.workbenchMember.uid) {
+        return this.workbenchMember;
+      }
+      const row = this.selectOrderData || {};
+      if (!row.uid) return null;
+      return {
+        uid: Number(row.uid),
+        real_name: row.real_name || '',
+        nickname: row.nickname || '',
+        phone: row.phone || row.user_phone || '',
+        avatar: row.avatar || '',
+      };
+    },
   },
   watch: {
     'orderData.keyword'(value) {
@@ -464,16 +366,72 @@ export default {
     }
   },
   created() {
-    let data= this.getUrlParams();
-    let keyword=data.keyword;
-    if(keyword && keyword !=''){
-      this.orderData.keyword = keyword;
-      this.search();
-    }else{
-      this.getVerifyList();
+    const data = this.$route.query && Object.keys(this.$route.query).length
+      ? this.$route.query
+      : this.getUrlParams();
+    const uid = Number(data.uid || 0);
+    if (uid > 0) {
+      this.workbenchUid = uid;
+      this.workbenchMember = {
+        uid,
+        phone: data.phone || '',
+        nickname: data.nickname || '',
+        real_name: data.real_name || '',
+      };
+      this.currentPage = 2;
+      this.pageMode = 'batch';
+      return;
     }
+    // 菜单进入：直接空状态工作台，不查旧会员列表、不默认会员
+    this.workbenchUid = 0;
+    this.workbenchMember = null;
+    this.currentPage = 2;
+    this.pageMode = 'batch';
   },
   methods: {
+    syncWorkbenchRouteQuery(member) {
+      const query = member && member.uid
+        ? {
+            uid: member.uid,
+            phone: member.phone || '',
+            nickname: member.nickname || '',
+            real_name: member.real_name || '',
+          }
+        : {};
+      this.$router.replace({
+        path: `${Setting.roterPre}/verify/index`,
+        query,
+      }).catch(() => {});
+    },
+    onWorkbenchMemberChange(member) {
+      if (!member || !member.uid) return;
+      this.workbenchUid = Number(member.uid);
+      this.workbenchMember = { ...member };
+      this.selectOrderData = {
+        ...(this.selectOrderData || {}),
+        uid: this.workbenchUid,
+        phone: member.phone || '',
+        nickname: member.nickname || '',
+        real_name: member.real_name || '',
+      };
+      this.syncWorkbenchRouteQuery(this.workbenchMember);
+    },
+    onWorkbenchActiveCard(card) {
+      if (!card) return;
+      this.selectOrderData = {
+        ...(this.selectOrderData || {}),
+        id: card.oid || this.selectOrderData.id,
+        order_id: card.order_id || this.selectOrderData.order_id,
+        uid: card.uid || this.workbenchUid,
+      };
+    },
+    onWorkbenchExit() {
+      this.$router.push({
+        path: `${Setting.roterPre}/cashier/index`,
+      }).catch(() => {
+        this.$router.back();
+      });
+    },
     changeBudanTime(e){
       this.order_time=e;
     },
@@ -507,6 +465,7 @@ export default {
       this.selectOrderData = {};
       this.orderData.page = 1;
       this.sle = 0;
+      this.pageMode = 'batch';
       this.getVerifyList();
     },
     //搜索
@@ -519,6 +478,92 @@ export default {
     remarks() {
       this.$refs.remarks.modals = true;
       this.$refs.remarks.formValidate.remark = this.selectOrderData.remark;
+    },
+    clearSelectedMember() {
+      this.workbenchUid = 0;
+      this.workbenchMember = null;
+      this.selectOrderData = {};
+      this.legacyDetailVisible = false;
+      this.legacyRecordVisible = false;
+      this.syncWorkbenchRouteQuery(null);
+    },
+    openWorkbench() {
+      // 已统一为工作台主入口，保留方法兼容旧调用
+    },
+    switchPageMode() {
+      // 已统一为项目核销工作台，保留方法兼容旧调用
+      this.pageMode = 'batch';
+    },
+    handleWorkbenchLegacy(actionKey) {
+      const payload = typeof actionKey === 'string' ? { key: actionKey } : (actionKey || {});
+      const key = payload.key;
+      if (!key) return;
+      if (payload.oid) {
+        this.selectOrderData = {
+          ...(this.selectOrderData || {}),
+          id: payload.oid,
+          order_id: payload.order_id || '',
+          uid: payload.uid || this.workbenchUid,
+        };
+      }
+      if (key === 'order_detail') {
+        if (!this.selectOrderData || !this.selectOrderData.id) {
+          return this.$Message.warning('请先选中一张卡后再查看详情');
+        }
+        this.legacyDetailVisible = true;
+        return;
+      }
+      if (key === 'writeoff_record') {
+        if (!this.selectOrderData || !this.selectOrderData.id) {
+          return this.$Message.warning('请先在左侧选中卡项订单后再查看核销记录');
+        }
+        this.legacyRecordVisible = true;
+        return;
+      }
+      if (key === 'cancel') {
+        if (!this.canCancelOrder) {
+          return this.$Message.warning('当前订单不可撤销，请先在左侧选中可撤销订单');
+        }
+        return this.openCancelOrder();
+      }
+      if (key === 'reservation') {
+        if (!this.canOpenReservation) {
+          return this.$Message.warning('请先在左侧选中会员订单后再预约');
+        }
+        return this.openReservation();
+      }
+      if (key === 'transfer') {
+        if (!this.canCardOps) {
+          return this.$Message.warning('请先在左侧选中可转让的卡项订单');
+        }
+        return this.openTransferModal();
+      }
+      if (key === 'extend') {
+        if (!this.canCardOps) {
+          return this.$Message.warning('请先在左侧选中可延期的卡项订单');
+        }
+        return this.openExtendModal();
+      }
+      if (key === 'remark') {
+        if (!this.selectOrderData || !this.selectOrderData.id) {
+          return this.$Message.warning('请先在左侧选中订单后再备注');
+        }
+        return this.remarks();
+      }
+      if (key === 'print') {
+        if (!this.selectOrderData || !this.selectOrderData.id) {
+          return this.$Message.warning('请先在左侧选中订单后再打印');
+        }
+        return this.point();
+      }
+    },
+    onWorkbenchSuccess() {
+      // 工作台自行 reloadOptions；此处仅刷新更多操作依赖的当前订单上下文
+      if (this.selectOrderData && this.selectOrderData.id) {
+        this.refreshCurrentOrder();
+        this.getPrice();
+        this.recordRefreshKey += 1;
+      }
     },
     openCancelOrder() {
       const row = this.selectOrderData;
@@ -678,21 +723,26 @@ export default {
       this.orderListData = [];
       this.orderData.page = 1;
       getVerifyList(this.orderData).then((res) => {
-        res.data.data = (res.data.data || []).map((item) => {
+        if (!res || !res.data) {
+          return;
+        }
+        const list = Array.isArray(res.data.data) ? res.data.data : [];
+        this.orderListData = list.map((item) => {
           const infoArr = [];
-          for (const key in item._info) {
+          for (const key in (item._info || {})) {
             infoArr.push(item._info[key]);
           }
           this.$set(item, '_infoData', infoArr);
           return item;
         });
-        this.orderListData = res.data.data;
-        this.count = res.data.count;
+        this.count = res.data.count || 0;
         const found = this.orderListData.find((item) => item.id === currentId);
         this.selectOrderData = found || this.orderListData[0] || {};
         if (this.selectOrderData.id) {
           this.getPrice();
         }
+      }).catch((err) => {
+        this.$Message.error((err && (err.msg || err.message)) || '刷新卡项失败，请重试');
       });
     },
     // 备注修改成功
@@ -723,6 +773,7 @@ export default {
     },
     // 立即消耗
     getVerifyData() {
+      if (this.verifySubmitting) return;
       const userOrder = this.$refs.userOrder;
       if (!userOrder) return;
       const writeOffData = userOrder.writeOffData || [];
@@ -746,6 +797,46 @@ export default {
           service_object: item.service_object || '本人',
         };
       });
+      // 仅提交本次实际核销的非赠送项目；前端过滤不替代服务端对订单、门店和员工的校验。
+      const selectedByCartId = new Map(selectedItems.map((item) => [String(item.cart_id), item]));
+      const syncAll = (userOrder.syncAll || [])
+        .filter((item) => {
+          const selectedItem = selectedByCartId.get(String(item.cart_id));
+          // 替换生成权益 cart_id 可能为 rpl* 字符串，不能用 Number()>0 判断
+          const cartKey = String((selectedItem && selectedItem.cart_id) || '').trim();
+          return selectedItem
+            && userOrder.isWritableProjectRow(selectedItem)
+            && cartKey !== ''
+            && cartKey !== '0';
+        })
+        .map((item) => {
+          const selectedItem = selectedByCartId.get(String(item.cart_id));
+          const value = Number(selectedItem.value || 0);
+          const oncePrice = Number(item.once_price || 0);
+          // once_price 为耗卡业绩单价；commission 按此分摊，writeoff_amount 由后端覆盖
+          const price = Math.round((oncePrice * value + Number.EPSILON) * 100) / 100;
+          const staffChoose = JSON.parse(JSON.stringify(item.staffChoose || []));
+          return {
+            ...item,
+            value,
+            price,
+            staffChoose: staffChoose.length
+              ? userOrder.buildEqualStaffAllocation(staffChoose, price)
+              : [],
+          };
+        });
+      // 可核销项目必须先分配手艺人，禁止只写核销记录却不落人员业绩。
+      const missingStaff = selectedItems.some((item) => {
+        const cartKey = String((item && item.cart_id) || '').trim();
+        if (!userOrder.isWritableProjectRow(item) || cartKey === '' || cartKey === '0') {
+          return false;
+        }
+        const syncItem = syncAll.find((row) => String(row.cart_id) === String(item.cart_id));
+        return !(syncItem && Array.isArray(syncItem.staffChoose) && syncItem.staffChoose.length);
+      });
+      if (missingStaff) {
+        return this.$Message.error('请先为核销项目选择手艺人');
+      }
       if(this.selectOrderData.product_type == 4){
         this.$modalForm(orderWriteForm(this.selectOrderData.id, { cart_num: this.selectOrderDatas[0].value,is_budan:this.budan,budan_time:this.order_time })).then((res) => {
           this.$Message.success(res.msg);
@@ -755,36 +846,33 @@ export default {
           this.selectOrderData.status = 2;
         });
       }else{
+        this.verifySubmitting = true;
         let data={
           cart_ids:cart_ids,
           is_budan:this.budan,
           budan_time:this.order_time,
-          syncAll: this.$refs.userOrder.syncAll
+          syncAll
         }
         var selectOrderData=this.selectOrderData;
         let that=this;
         putWriteUpdate(this.selectOrderData.id,data)
             .then((res) => {
-              this.$Modal.confirm({
-                title: '消耗成功',
-                content: '消耗成功！',
-                onOk: () => {
-                   this.selectOrderDatas=[];
-                   this.$refs.userOrder.getWriteOff({oid: this.selectOrderData.id}, true);
-                   clearTimeout(that.timer);
-                   timer = setTimeout(() => {
-                      that.getPrice();
-                   }, 1000);
-                },onCancel: () => {
-                  this.selectOrderDatas=[];
-                  this.$refs.userOrder.getWriteOff({oid: this.selectOrderData.id}, true);
-                  this.getPrice();
-                 }
-              });
-              // this.$Message.success(res.msg);
-              // this.search();
+              that.verifySubmitting = false;
+              that.selectOrderDatas = [];
+              const payload = (res && res.data) || {};
+              const writeoffs = Array.isArray(payload.writeoffs) ? payload.writeoffs : [];
+              that.lastWriteoffCancels = writeoffs.filter((row) => Number(row.sub_order_id) > 0);
+              that.writeoffSuccessVisible = true;
+              if (that.$refs.userOrder) {
+                that.$refs.userOrder.getWriteOff({ oid: that.selectOrderData.id }, true);
+              }
+              clearTimeout(that.timer);
+              that.timer = setTimeout(() => {
+                that.getPrice();
+              }, 1000);
             })
             .catch((err) => {
+              that.verifySubmitting = false;
               const msg = err.msg || '';
               if (msg === this.debtLimitMsg || msg === this.fullDebtLimitMsg) {
                 this.showDebtRepayConfirm(msg === this.fullDebtLimitMsg);
@@ -792,6 +880,32 @@ export default {
               }
               this.$Message.error(msg);
             });
+      }
+    },
+    closeWriteoffSuccess() {
+      this.writeoffSuccessVisible = false;
+      this.writeoffCancelLoading = false;
+    },
+    async cancelLastWriteoffs() {
+      const rows = (this.lastWriteoffCancels || []).filter((row) => Number(row.sub_order_id) > 0);
+      if (!rows.length || this.writeoffCancelLoading) return;
+      this.writeoffCancelLoading = true;
+      try {
+        for (let i = 0; i < rows.length; i++) {
+          await putWriteoffCancel(rows[i].sub_order_id, { remarks: '核销页成功弹窗撤销' });
+        }
+        this.$Message.success('撤销本次核销成功');
+        this.lastWriteoffCancels = [];
+        this.writeoffSuccessVisible = false;
+        if (this.$refs.userOrder && this.selectOrderData && this.selectOrderData.id) {
+          this.$refs.userOrder.getWriteOff({ oid: this.selectOrderData.id }, true);
+        }
+        this.getPrice();
+        this.recordRefreshKey += 1;
+      } catch (err) {
+        this.$Message.error((err && (err.msg || err.message)) || '撤销核销未成功');
+      } finally {
+        this.writeoffCancelLoading = false;
       }
     },
     openDebtRepay() {
@@ -1005,25 +1119,28 @@ export default {
       this.loading=true;
       getVerifyList(this.orderData)
         .then((res) => {
-          this.loading=false;
-          res.data.data = res.data.data.map((item) => {
+          if (!res || !res.data) {
+            return;
+          }
+          const list = Array.isArray(res.data.data) ? res.data.data : [];
+          const mapped = list.map((item) => {
             let infoArr = [];
-            for (let key in item._info) {
+            for (let key in (item._info || {})) {
               let obj = item._info[key];
               infoArr.push(obj);
             }
             this.$set(item, "_infoData", infoArr);
             return item;
           });
-          this.orderListData = this.orderListData.concat(res.data.data);
-          this.count = res.data.count;
-          if (this.orderData.page == 1) {
-            this.selectOrderData = this.orderListData[0] || {};
-            this.getPrice();
-          }
+          this.orderListData = this.orderListData.concat(mapped);
+          this.count = res.data.count || 0;
+          // 前置消耗页仅展示查询结果，不自动进入工作台；须用户点击会员卡
         })
         .catch((err) => {
-          this.$Message.error(err.msg);
+          this.$Message.error((err && (err.msg || err.message)) || '查询超时，请稍后重试');
+        })
+        .finally(() => {
+          this.loading = false;
         });
     },
     onSearch() {
@@ -1033,6 +1150,7 @@ export default {
       }
     },
     goBack() {
+      this.pageMode = 'batch';
       this.currentPage = 1;
       this.orderData.keyword = '';
       this.orderData.type = '';
@@ -1051,6 +1169,21 @@ export default {
 };
 </script>
 <style lang="stylus" scoped>
+.verify-page--workbench
+  /* 顶栏约 66px；必须锁死可视高度，否则项目列表撑高后底栏被 overflow 裁切 */
+  height calc(100vh - 66px)
+  max-height calc(100vh - 66px)
+  min-height 0
+  display flex
+  flex-direction column
+  overflow hidden
+  .batch-workbench
+    flex 1
+    min-height 0
+    width 100%
+    height 100%
+    overflow hidden
+
 .handle-title {
   margin-right: 10px;
   font-size: 14px;
@@ -1093,6 +1226,12 @@ export default {
   display: flex;
   flex-wrap: wrap;
 }
+.left-hint {
+  margin: 8px 16px 4px;
+  font-size: 12px;
+  color: #8c8c8c;
+  line-height: 1.5;
+}
 .qukuai-active{
   border: 1px solid #1890ff;
   background-color: #fff;
@@ -1116,6 +1255,25 @@ export default {
   display: flex;
   padding: 20px;
   background: #F5F5F5;
+
+  &.order--selecting {
+    .left {
+      flex: 1;
+      width: auto;
+      max-width: 720px;
+      margin: 0 auto;
+    }
+  }
+
+  &.order--workbench {
+    padding: 12px 16px 16px;
+
+    .order-data--full {
+      flex: 1;
+      width: 100%;
+      margin-left: 0;
+    }
+  }
 
   .left {
     display: flex;
@@ -1212,6 +1370,49 @@ export default {
     display: flex;
     flex-direction: column;
     margin-left: 20px;
+    min-width: 0;
+    min-height: 0;
+
+    &.order-data--full {
+      margin-left: 0;
+    }
+
+    .page-mode-tabs {
+      flex: 0 0 auto;
+      display: flex;
+      gap: 8px;
+      padding: 12px 16px;
+      margin-bottom: 0;
+      background: #fff;
+      border-radius: 20px 20px 0 0;
+
+      button {
+        height: 36px;
+        padding: 0 18px;
+        border: 1px solid #e8eaed;
+        border-radius: 18px;
+        color: #606266;
+        background: #f5f7fa;
+        cursor: pointer;
+        font-size: 14px;
+      }
+
+      button.active {
+        color: #1890ff;
+        border-color: #91caff;
+        background: #eaf4ff;
+        font-weight: 600;
+      }
+    }
+
+    .batch-workbench {
+      flex: 1;
+      min-height: 0;
+      width: 100%;
+      border-radius: 20px;
+      overflow: hidden;
+      background: #f5f7fa;
+    }
 
     .content {
       flex: 1;
@@ -1229,6 +1430,8 @@ export default {
       display: flex;
       background: #FFFFFF;
       font-size: 18px;
+      align-items: stretch;
+      position: relative;
 
       .box {
         flex: 1;
@@ -1351,6 +1554,10 @@ export default {
     .pay {
       color: #FFFFFF;
       background: #FF7700;
+    }
+    .is-disabled {
+      opacity: .6;
+      cursor: not-allowed;
     }
     .cancel-btn {
       color: #FFFFFF;
