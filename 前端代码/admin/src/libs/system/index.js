@@ -53,7 +53,7 @@ function transferMenu(menu, headerName) {
   }
 }
 
-export { getHeaderName };
+export { getHeaderName, getPath };
 
 /**
  * @description 根据当前路由，找打顶部菜单名称

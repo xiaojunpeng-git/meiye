@@ -1158,6 +1158,16 @@ export function printList(data) {
 }
 
 /**
+ * 打印机添加/编辑表单
+ */
+export function printForm(id) {
+  return request({
+    url: `/print/form/${id || 0}`,
+    method: 'get'
+  });
+}
+
+/**
  * 打印机状态切换
  * @param {*} data
  * @returns

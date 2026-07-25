@@ -797,3 +797,20 @@ export function cashSource(data) {
     data,
   });
 }
+
+/** 兼容客服发货页旧导入名 */
+export function orderSendApi(data) {
+  return request({
+    url: 'order/delivery/keep',
+    method: 'post',
+    data,
+  });
+}
+
+/** 兼容客服发货页旧导入名 */
+export function orderDetailApi(id) {
+  return request({
+    url: `order/info/${id}`,
+    method: 'get',
+  });
+}

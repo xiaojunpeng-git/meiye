@@ -51,3 +51,10 @@ export function discountsGetDetails(id) {
     method: 'get'
   });
 }
+
+/**
+ * @description 兼容套餐创建页旧导入名（详情）
+ */
+export function lotteryDetailApi(id) {
+  return discountsGetDetails(id);
+}

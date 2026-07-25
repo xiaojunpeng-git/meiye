@@ -137,6 +137,16 @@ export function liveAuchorAdd(id) {
 }
 
 /**
+ * @description 主播删除
+ */
+export function liveAuchorDel(id) {
+  return request({
+    url: 'live/anchor/del/' + id,
+    method: 'DELETE'
+  });
+}
+
+/**
  * @description 直播商品详情
  */
 export function liveGoodsDetail(id) {

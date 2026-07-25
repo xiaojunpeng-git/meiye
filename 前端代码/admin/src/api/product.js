@@ -286,6 +286,11 @@ export function generateAttrApi(data, id, type) {
   });
 }
 
+/** 兼容套餐创建页旧导入名 */
+export function generateIdGetAttrApi(data, id, type) {
+  return generateAttrApi(data, id, type);
+}
+
 /**
  * @description 商品属性 -- 列表
  * @param {Object} param params {Object} 传值参数
