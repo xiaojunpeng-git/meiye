@@ -1679,6 +1679,11 @@ export default {
   },
   beforeDestroy() {
     document.removeEventListener('keydown', this.handleKeydown);
+    // 收银首页曾直接覆盖 document.onkeydown。离开首页进入核销等页面后，
+    // 旧闭包仍会拦截 Enter，进而调用已销毁页面的结算逻辑。
+    if (document.onkeydown === this.cashierKeyboardHandler) {
+      document.onkeydown = null;
+    }
   },
   methods: {
     reopenConsumedKey() {
@@ -5603,7 +5608,7 @@ export default {
         }
       }
 
-      document.onkeydown = function (event) {
+      const cashierKeyboardHandler = function (event) {
         let e = event || window.event;
         let key = e.keyCode;
         if (that.modalCash) {
@@ -5667,6 +5672,8 @@ export default {
             break;
         }
       };
+      this.cashierKeyboardHandler = cashierKeyboardHandler;
+      document.onkeydown = cashierKeyboardHandler;
     },
     startCheckoutBusy() {
       this.checkoutBusy = true;
