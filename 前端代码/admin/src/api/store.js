@@ -1245,6 +1245,89 @@ export function getOrganizationWorkspaceEmployees(params) {
   });
 }
 
+/** I1：组织直属人员 */
+export function getOrganizationOrgEmployees(params) {
+  return request({
+    url: '/region/organization/org_employees',
+    method: 'get',
+    params
+  });
+}
+
+export function saveOrganizationOrgEmployee(data, headers = {}) {
+  return wrapOrgWriteResponse(request({
+    url: '/region/organization/org_employees',
+    method: 'post',
+    data,
+    headers
+  }));
+}
+
+export function deleteOrganizationOrgEmployee(id, headers = {}) {
+  return wrapOrgWriteResponse(request({
+    url: `/region/organization/org_employees/${id}`,
+    method: 'delete',
+    headers
+  }));
+}
+
+/** I1：员工全局离职 */
+export function leaveOrganizationEmployee(id, data = {}, headers = {}) {
+  return wrapOrgWriteResponse(request({
+    url: `/region/organization/employees/${id}/leave`,
+    method: 'post',
+    data,
+    headers
+  }));
+}
+
+/** 软删除人员档案（保留订单/工资/任职历史） */
+export function softDeleteOrganizationEmployeeArchive(id, data = {}, headers = {}) {
+  return wrapOrgWriteResponse(request({
+    url: `/region/organization/employees/${id}/archive_delete`,
+    method: 'post',
+    data,
+    headers
+  }));
+}
+
+/** I1：调店申请 */
+export function getOrganizationTransferApplies(params) {
+  return request({
+    url: '/region/organization/transfer_applies',
+    method: 'get',
+    params
+  });
+}
+
+/** 总部发起调店申请 */
+export function createOrganizationTransferApply(data = {}, headers = {}) {
+  return wrapOrgWriteResponse(request({
+    url: '/region/organization/transfer_applies',
+    method: 'post',
+    data,
+    headers
+  }));
+}
+
+export function approveOrganizationTransferApply(id, data = {}, headers = {}) {
+  return wrapOrgWriteResponse(request({
+    url: `/region/organization/transfer_applies/${id}/approve`,
+    method: 'post',
+    data,
+    headers
+  }));
+}
+
+export function rejectOrganizationTransferApply(id, data = {}, headers = {}) {
+  return wrapOrgWriteResponse(request({
+    url: `/region/organization/transfer_applies/${id}/reject`,
+    method: 'post',
+    data,
+    headers
+  }));
+}
+
 export function getOrganizationLeaderCandidates(params) {
   return request({
     url: '/region/organization/leader_candidates',
@@ -1298,4 +1381,237 @@ export function getOrganizationChangeLog(params) {
     method: 'get',
     params
   });
+}
+
+/** I2：组织资源选择 */
+export function getOrganizationResourceSelector(params) {
+  return request({
+    url: '/region/organization/resource_selector',
+    method: 'get',
+    params
+  });
+}
+
+/** I2：员工授权聚合 */
+export function getEmployeeAuthBundle(employeeId) {
+  return request({
+    url: `/region/organization/employee_auth/${employeeId}`,
+    method: 'get'
+  });
+}
+
+export function getEmployeeAuthAudits(employeeId, params) {
+  return request({
+    url: `/region/organization/employee_auth/${employeeId}/audits`,
+    method: 'get',
+    params
+  });
+}
+
+export function saveEmployeeAuthPlatform(employeeId, data, headers = {}) {
+  return wrapOrgWriteResponse(request({
+    url: `/region/organization/employee_auth/${employeeId}/platform`,
+    method: 'post',
+    data,
+    headers
+  }));
+}
+
+export function saveEmployeeAuthStore(employeeId, data, headers = {}) {
+  return wrapOrgWriteResponse(request({
+    url: `/region/organization/employee_auth/${employeeId}/store`,
+    method: 'post',
+    data,
+    headers
+  }));
+}
+
+export function saveEmployeeAuthCashier(employeeId, data, headers = {}) {
+  return wrapOrgWriteResponse(request({
+    url: `/region/organization/employee_auth/${employeeId}/cashier`,
+    method: 'post',
+    data,
+    headers
+  }));
+}
+
+export function saveEmployeeAuthMobile(employeeId, data, headers = {}) {
+  return wrapOrgWriteResponse(request({
+    url: `/region/organization/employee_auth/${employeeId}/mobile`,
+    method: 'post',
+    data,
+    headers
+  }));
+}
+
+export function getRoleTemplates(params) {
+  return request({
+    url: '/region/organization/role_templates',
+    method: 'get',
+    params
+  });
+}
+
+export function getRoleTemplateMenus() {
+  return request({
+    url: '/region/organization/role_templates/menus',
+    method: 'get'
+  });
+}
+
+export function getRoleTemplateDetail(id) {
+  return request({
+    url: `/region/organization/role_templates/${id}`,
+    method: 'get'
+  });
+}
+
+export function saveRoleTemplate(data, headers = {}) {
+  return wrapOrgWriteResponse(request({
+    url: '/region/organization/role_templates/save',
+    method: 'post',
+    data,
+    headers
+  }));
+}
+
+export function disableRoleTemplate(id, data = {}, headers = {}) {
+  return wrapOrgWriteResponse(request({
+    url: `/region/organization/role_templates/${id}/disable`,
+    method: 'post',
+    data,
+    headers
+  }));
+}
+
+export function publishRoleTemplate(data, headers = {}) {
+  return wrapOrgWriteResponse(request({
+    url: '/region/organization/role_templates/publish',
+    method: 'post',
+    data,
+    headers
+  }));
+}
+
+export function disableRolePublish(id, data = {}, headers = {}) {
+  return wrapOrgWriteResponse(request({
+    url: `/region/organization/role_publishes/${id}/disable`,
+    method: 'post',
+    data,
+    headers
+  }));
+}
+
+export function getRolePublishes(params) {
+  return request({
+    url: '/region/organization/role_publishes',
+    method: 'get',
+    params
+  });
+}
+
+/** I2：岗位策略列表 */
+export function getJobPositions(params) {
+  return request({
+    url: '/region/organization/job_positions',
+    method: 'get',
+    params
+  });
+}
+
+export function getJobPositionMenus() {
+  return request({
+    url: '/region/organization/job_positions/menus',
+    method: 'get'
+  });
+}
+
+export function getJobPositionDetail(id) {
+  return request({
+    url: `/region/organization/job_positions/${id}`,
+    method: 'get'
+  });
+}
+
+export function saveJobPosition(data, headers = {}) {
+  return wrapOrgWriteResponse(request({
+    url: '/region/organization/job_positions',
+    method: 'post',
+    data,
+    headers
+  }));
+}
+
+export function publishJobPosition(data, headers = {}) {
+  return wrapOrgWriteResponse(request({
+    url: '/region/organization/job_positions/publish',
+    method: 'post',
+    data,
+    headers
+  }));
+}
+
+export function disableJobPositionPublish(id, data = {}, headers = {}) {
+  return wrapOrgWriteResponse(request({
+    url: `/region/organization/job_positions/publishes/${id}/disable`,
+    method: 'post',
+    data,
+    headers
+  }));
+}
+
+/** I2：人员岗位 / 四端入口 / 数据权限 / 任职 */
+export function saveEmployeeAuthJobs(employeeId, data, headers = {}) {
+  return wrapOrgWriteResponse(request({
+    url: `/region/organization/employee_auth/${employeeId}/jobs`,
+    method: 'post',
+    data,
+    headers
+  }));
+}
+
+export function saveEmployeeAuthDataScope(employeeId, data, headers = {}) {
+  return wrapOrgWriteResponse(request({
+    url: `/region/organization/employee_auth/${employeeId}/data_scope`,
+    method: 'post',
+    data,
+    headers
+  }));
+}
+
+export function saveEmployeeAuthEntries(employeeId, data, headers = {}) {
+  return wrapOrgWriteResponse(request({
+    url: `/region/organization/employee_auth/${employeeId}/entries`,
+    method: 'post',
+    data,
+    headers
+  }));
+}
+
+export function saveEmployeeAuthTenure(employeeId, data, headers = {}) {
+  return wrapOrgWriteResponse(request({
+    url: `/region/organization/employee_auth/${employeeId}/tenure`,
+    method: 'post',
+    data,
+    headers
+  }));
+}
+
+/** I2：组织 / 门店运营停用恢复 */
+export function saveOrganizationOpsStatus(id, data, headers = {}) {
+  return wrapOrgWriteResponse(request({
+    url: `/region/organization/${id}/ops_status`,
+    method: 'post',
+    data,
+    headers
+  }));
+}
+
+export function saveStoreOpsStatus(id, data, headers = {}) {
+  return wrapOrgWriteResponse(request({
+    url: `/region/organization/stores/${id}/ops_status`,
+    method: 'post',
+    data,
+    headers
+  }));
 }

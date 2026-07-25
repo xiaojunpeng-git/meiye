@@ -1602,22 +1602,28 @@ class OrganizationScopeService extends BaseServices
      *
      * @param int[] $allowedStoreIds 空数组表示无权限
      */
-    public function buildPickerTree(array $allowedStoreIds): array
+    /**
+     * @param int[] $allowedStoreIds 空数组表示无门店权限；配合 $includeEmptyOrgs 仍可返回纯组织树
+     * @param bool $includeEmptyOrgs 为 true 时保留无下级门店/组织的组织节点（人员选所属组织需要）
+     */
+    public function buildPickerTree(array $allowedStoreIds, bool $includeEmptyOrgs = false): array
     {
         $allowedStoreIds = array_values(array_unique(array_filter(array_map('intval', $allowedStoreIds))));
-        if (!$allowedStoreIds) {
+        if (!$allowedStoreIds && !$includeEmptyOrgs) {
             return [];
         }
         $allowedSet = array_flip($allowedStoreIds);
 
         /** @var \app\dao\store\SystemStoreDao $storeDao */
         $storeDao = app()->make(\app\dao\store\SystemStoreDao::class);
-        $storeRows = $storeDao->getStoreList(
-            ['id' => $allowedStoreIds, 'is_del' => 0],
-            ['id', 'name', 'phone', 'address'],
-            0,
-            0
-        ) ?: [];
+        $storeRows = $allowedStoreIds
+            ? ($storeDao->getStoreList(
+                ['id' => $allowedStoreIds, 'is_del' => 0],
+                ['id', 'name', 'phone', 'address'],
+                0,
+                0
+            ) ?: [])
+            : [];
         $storeMap = [];
         foreach ($storeRows as $row) {
             $sid = (int)($row['id'] ?? 0);
@@ -1661,17 +1667,20 @@ class OrganizationScopeService extends BaseServices
         unset($children);
 
         $directStoresByOrg = [];
-        $bindings = $this->orgStoreDao->getList(['store_id' => $allowedStoreIds], 'org_id,store_id') ?: [];
-        foreach ($bindings as $bind) {
-            $oid = (int)($bind['org_id'] ?? 0);
-            $sid = (int)($bind['store_id'] ?? 0);
-            if ($oid > 0 && isset($storeMap[$sid])) {
-                $directStoresByOrg[$oid][] = $sid;
+        if ($allowedStoreIds) {
+            $bindings = $this->orgStoreDao->getList(['store_id' => $allowedStoreIds], 'org_id,store_id') ?: [];
+            foreach ($bindings as $bind) {
+                $oid = (int)($bind['org_id'] ?? 0);
+                $sid = (int)($bind['store_id'] ?? 0);
+                if ($oid > 0 && isset($storeMap[$sid])) {
+                    $directStoresByOrg[$oid][] = $sid;
+                    $storeMap[$sid]['org_id'] = $oid;
+                }
             }
         }
 
         $usedStoreIds = [];
-        $tree = $this->buildOrgPickerNodes(0, $orgByPid, $directStoresByOrg, $storeMap, $usedStoreIds);
+        $tree = $this->buildOrgPickerNodes(0, $orgByPid, $directStoresByOrg, $storeMap, $usedStoreIds, [], $includeEmptyOrgs);
 
         $orphanIds = array_values(array_filter($allowedStoreIds, function ($sid) use ($usedStoreIds, $storeMap) {
             return isset($storeMap[$sid]) && !isset($usedStoreIds[$sid]);
@@ -1710,7 +1719,8 @@ class OrganizationScopeService extends BaseServices
         array $directStoresByOrg,
         array $storeMap,
         array &$usedStoreIds,
-        array $ancestors = []
+        array $ancestors = [],
+        bool $includeEmptyOrgs = false
     ): array {
         $nodes = [];
         foreach ($orgByPid[$pid] ?? [] as $org) {
@@ -1728,7 +1738,8 @@ class OrganizationScopeService extends BaseServices
                 $directStoresByOrg,
                 $storeMap,
                 $usedStoreIds,
-                $nextAncestors
+                $nextAncestors,
+                $includeEmptyOrgs
             );
             $storeChildren = [];
             foreach ($directStoresByOrg[$orgId] ?? [] as $sid) {
@@ -1739,7 +1750,7 @@ class OrganizationScopeService extends BaseServices
                 $usedStoreIds[$sid] = true;
             }
             $children = array_merge($childOrgs, $storeChildren);
-            if (!$children) {
+            if (!$children && !$includeEmptyOrgs) {
                 continue;
             }
             $storeCount = $this->countPickerStoreNodes($children);

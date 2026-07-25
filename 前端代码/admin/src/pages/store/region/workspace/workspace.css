@@ -299,6 +299,23 @@
 
 .org-prototype .hero-actions { position: relative; display: flex; align-items: center; gap: 8px; }
 
+.org-prototype .hero-actions .person-locate-shell {
+  width: 148px;
+  min-height: 38px;
+  flex: none;
+}
+
+.org-prototype .hero-actions .person-locate-shell input {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.org-prototype .hero-actions .person-locate-shell input::-webkit-search-decoration,
+.org-prototype .hero-actions .person-locate-shell input::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
 .org-prototype .popover-menu { position: absolute; top: 44px; right: 0; z-index: 12; display: none; min-width: 164px; padding: 6px; border: 1px solid var(--line); border-radius: 10px; background: #fff; box-shadow: var(--shadow-md); }
 
 .org-prototype .popover-menu.open { display: block; animation: menuIn .14s ease; }

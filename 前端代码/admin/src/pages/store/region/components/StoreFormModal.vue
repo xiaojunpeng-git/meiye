@@ -6,11 +6,13 @@
       width="1274"
       :mask-closable="false"
       :styles="{ top: '40px' }"
+      class-name="store-form-modal"
       @on-cancel="handleClose"
     >
       <Form
         v-if="value"
         ref="formItem"
+        class="store-form-modal-body"
         :model="formItem"
         :rules="ruleValidate"
         :label-width="labelWidth"
@@ -60,15 +62,20 @@
             </FormItem>
           </Col>
           <Col span="12">
-            <FormItem label="所属组织：" prop="manage_region_path">
-              <Cascader
-                :data="manageRegionTree"
-                v-model="formItem.manage_region_path"
-                change-on-select
-                filterable
-                transfer
-                placeholder="请选择所属组织"
-                style="width: 100%"
+            <FormItem label="所属组织：" prop="manage_region_id">
+              <OrganizationResourceSelector
+                v-model="formItem.manage_region_id"
+                resource="organization"
+                picker-mode="modal"
+                :tree-mode="true"
+                selection-mode="org_only"
+                modal-title="选择所属组织"
+                trigger-placeholder="请选择所属组织"
+                placeholder="搜索组织名称"
+                :multiple="false"
+                :disabled-ids="[]"
+                :clearable="false"
+                @change="onOrgPick"
               />
             </FormItem>
           </Col>
@@ -130,16 +137,26 @@
           </Col>
           <Col span="24">
             <FormItem label="详细地址：" prop="detailed_address">
-              <div class="acea-row row-middle">
-                <Input v-if="storeAddress" disabled v-model="storeAddress" class="w-240" />
-                <Input
-                  search
-                  enter-button="查找位置"
-                  v-model="formItem.detailed_address"
-                  placeholder="输入详细地址"
-                  class="w-300 ml-6"
-                  @on-search="onSearch"
-                />
+              <div class="store-address-query">
+                <div v-if="storeAddress" class="input-shell address-prefix">
+                  <input :value="storeAddress" type="text" disabled tabindex="-1" />
+                </div>
+                <div class="input-shell address-detail">
+                  <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+                    <circle cx="11" cy="11" r="7" />
+                    <path d="m20 20-4-4" />
+                  </svg>
+                  <input
+                    v-model.trim="formItem.detailed_address"
+                    type="search"
+                    maxlength="100"
+                    placeholder="输入详细地址"
+                    @keyup.enter="onSearch"
+                  />
+                </div>
+                <button class="shell-btn" type="button" @click="onSearch">
+                  查找位置 <span class="enter-key">↵</span>
+                </button>
               </div>
             </FormItem>
           </Col>
@@ -186,17 +203,17 @@
 import { mapState } from "vuex";
 import uploadPictures from "@/components/uploadPictures";
 import Maps from "@/components/map/map.vue";
+import OrganizationResourceSelector from "@/components/organization/OrganizationResourceSelector.vue";
 import {
   keyApi,
   storeGetInfoApi,
   cityApi,
   storeUpdateApi,
-  getRegionManageCascader,
 } from "@/api/store";
 
 export default {
   name: "StoreFormModal",
-  components: { uploadPictures, Maps },
+  components: { uploadPictures, Maps, OrganizationResourceSelector },
   props: {
     value: { type: Boolean, default: false },
     editId: { type: [Number, String], default: 0 },
@@ -214,6 +231,10 @@ export default {
       if (!this.formItem.image) callback(new Error("请上传门店照片"));
       else callback();
     };
+    const validateOrg = (rule, value, callback) => {
+      if (!Number(value)) return callback(new Error("请选择所属组织"));
+      callback();
+    };
     return {
       spinShow: false,
       saving: false,
@@ -223,21 +244,12 @@ export default {
       mapKey: "",
       storeAddress: "",
       addresData: [],
-      manageRegionTree: [],
       formItem: this.emptyForm(),
       ruleValidate: {
         image: [{ required: true, validator: validateUpload, trigger: "change" }],
         name: [{ required: true, message: "请输入门店名称", trigger: "blur" }],
         phone: [{ required: true, validator: validatePhone, trigger: "blur" }],
-        manage_region_path: [
-          {
-            required: true,
-            type: "array",
-            min: 1,
-            message: "请选择所属组织",
-            trigger: "change",
-          },
-        ],
+        manage_region_id: [{ required: true, validator: validateOrg, trigger: "change" }],
         store_account: [
           {
             validator: (rule, value, callback) => {
@@ -286,7 +298,6 @@ export default {
         name: "",
         space_num: "",
         introduction: "",
-        manage_region_path: [],
         manage_region_id: 0,
         is_show: 1,
         day_time: [],
@@ -316,19 +327,11 @@ export default {
       this.isApi = 0;
       this.cityInfo({ pid: 0 });
       this.getKey();
-      getRegionManageCascader()
-        .then((res) => {
-          this.manageRegionTree = res.data || [];
-          if (this.editId) {
-            this.loadInfo(this.editId);
-          } else if (this.defaultRegionId) {
-            this.formItem.manage_region_path = this.buildPath(
-              Number(this.defaultRegionId),
-              this.manageRegionTree
-            );
-          }
-        })
-        .catch((err) => this.$Message.error(err.msg || "加载组织失败"));
+      if (this.editId) {
+        this.loadInfo(this.editId);
+      } else if (this.defaultRegionId) {
+        this.formItem.manage_region_id = Number(this.defaultRegionId) || 0;
+      }
     },
     loadInfo(id) {
       this.spinShow = true;
@@ -346,16 +349,10 @@ export default {
             ...info,
             addressSelect,
             day_time: info.timeVal || info.day_time || [],
-            manage_region_path: info.manage_region_path || [],
+            manage_region_id: Number(info.manage_region_id || 0),
             type: Number(info.type || 1),
             is_show: Number(info.is_show != null ? info.is_show : 1),
           };
-          if (!this.formItem.manage_region_path.length && info.manage_region_id) {
-            this.formItem.manage_region_path = this.buildPath(
-              Number(info.manage_region_id),
-              this.manageRegionTree
-            );
-          }
           this.storeAddress = info.address || "";
           this.$nextTick(() => this.onSearch());
         })
@@ -364,17 +361,11 @@ export default {
           this.spinShow = false;
         });
     },
-    buildPath(id, tree, prefix = []) {
-      for (let i = 0; i < (tree || []).length; i++) {
-        const node = tree[i];
-        const path = prefix.concat([node.value]);
-        if (Number(node.value) === Number(id)) return path;
-        if (node.children && node.children.length) {
-          const child = this.buildPath(id, node.children, path);
-          if (child.length) return child;
-        }
+    onOrgPick(id) {
+      this.formItem.manage_region_id = Number(id || 0);
+      if (this.$refs.formItem) {
+        this.$refs.formItem.validateField("manage_region_id");
       }
-      return [];
     },
     handleClose() {
       this.$emit("input", false);
@@ -436,8 +427,12 @@ export default {
         if (!this.formItem.day_time || !this.formItem.day_time[0]) {
           this.formItem.day_time = ["00:00:00", "23:59:59"];
         }
-        const path = this.formItem.manage_region_path || [];
-        this.formItem.manage_region_id = path.length ? Number(path[path.length - 1]) : 0;
+        this.formItem.manage_region_id = Number(this.formItem.manage_region_id || 0);
+        if (!this.formItem.manage_region_id) {
+          if (this.$Message && this.$Message.required) this.$Message.required("所属组织未选择");
+          else this.$Message.error("请选择所属组织");
+          return;
+        }
         this.saving = true;
         storeUpdateApi(this.editId || 0, this.formItem)
           .then((res) => {
@@ -483,10 +478,114 @@ export default {
 .map-sty
   width 100%
   height 320px
-.w-240
+.store-address-query
+  display flex
+  align-items center
+  flex-wrap wrap
+  gap 10px
+  width 100%
+.input-shell
+  display flex
+  align-items center
+  gap 8px
+  min-height 38px
+  padding 0 11px
+  border 1px solid #e7eaf0
+  border-radius 9px
+  background #fff
+  transition .18s
+  .icon
+    flex none
+    width 16px
+    height 16px
+    color #929bad
+    fill none
+    stroke currentColor
+    stroke-width 1.8
+    stroke-linecap round
+    stroke-linejoin round
+  input
+    min-width 0
+    width 100%
+    border 0
+    outline 0
+    color #172033
+    background transparent
+    font inherit
+    &::placeholder
+      color #a4abba
+    &:disabled
+      color #5e687b
+      cursor default
+  &:focus-within
+    border-color #b5b5ee
+    box-shadow 0 0 0 3px rgba(91, 91, 214, .09)
+.address-prefix
   width 240px
-.w-300
-  width 300px
-.ml-6
-  margin-left 6px
+  max-width 100%
+  background #f8fafc
+.address-detail
+  flex 1
+  min-width 220px
+.shell-btn
+  display inline-flex
+  align-items center
+  justify-content center
+  gap 4px
+  min-height 38px
+  padding 0 15px
+  border 1px solid #d9dee8
+  border-radius 9px
+  color #172033
+  background #fff
+  font inherit
+  font-weight 570
+  white-space nowrap
+  cursor pointer
+  transition .18s
+  &:hover
+    color #5b5bd6
+    border-color #bdbdf2
+    background #fafaff
+.enter-key
+  margin-left 2px
+  font-weight 600
+</style>
+
+<style lang="stylus">
+/* Modal 挂到 body，需非 scoped 才能作用到弹层内 iView 控件 */
+.store-form-modal
+  .ivu-modal-body
+    padding 20px 24px 8px
+  .store-form-modal-body
+    .ivu-input
+      min-height 38px
+      border-radius 9px
+      border-color #e7eaf0
+      color #172033
+      &:hover, &:focus
+        border-color #b5b5ee
+      &:focus
+        box-shadow 0 0 0 3px rgba(91, 91, 214, .09)
+    .ivu-input-wrapper
+      .ivu-input
+        border-radius 9px
+    .ivu-cascader
+      .ivu-input
+        min-height 38px
+        border-radius 9px
+        border-color #e7eaf0
+    textarea.ivu-input
+      min-height 78px
+      padding-top 9px
+      border-radius 9px
+.ivu-cascader-transfer, .ivu-select-dropdown
+  .ivu-cascader-menu-item, .ivu-cascader-menu
+    font-family Inter, "PingFang SC", "Microsoft YaHei", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif
+  .ivu-input, .ivu-cascader .ivu-input
+    border-radius 9px
+    border-color #e7eaf0
+    &:focus
+      border-color #b5b5ee
+      box-shadow 0 0 0 3px rgba(91, 91, 214, .09)
 </style>
