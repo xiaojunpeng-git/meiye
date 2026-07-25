@@ -13,26 +13,46 @@
 import { menusApi } from '@/api/account';
 import Setting from '@/setting';
 
+function normalizeMenuPath (path) {
+    const pre = Setting.routePre || '';
+    const p = typeof path === 'string' ? path : '';
+    if (!pre) {
+        return p;
+    }
+    if (p === pre || p.startsWith(`${pre}/`)) {
+        return p;
+    }
+    return `${pre}${p}`;
+}
+
+function mapMenusNav (menuList) {
+    if (!Array.isArray(menuList)) {
+        return [];
+    }
+    return menuList.map((item) => {
+        if (Array.isArray(item.children)) {
+            item.children = mapMenusNav(item.children);
+        }
+        item.path = normalizeMenuPath(item.path);
+        item.isShow = true;
+        return item;
+    });
+}
+
 function getMenusName () {
     let storage = window.localStorage, menuList = storage.getItem('menuListStore'), menuData = []
     try {
-        menuData = menuList !== undefined ? JSON.parse(menuList) : [];
+        menuData = menuList !== undefined && menuList !== null ? JSON.parse(menuList) : [];
     } catch (e) {}
-    if (typeof menuData !== 'object' || menuData === null) {
+    if (!Array.isArray(menuData)) {
         menuData = []
     }
-    return menuData
-}
-
-function mapMenusNav(menuList) {
-  return menuList.map((item) => {
-    if (Array.isArray(item.children)) {
-      item.children = mapMenusNav(item.children);
-    }
-    item.path = `${Setting.routePre}${item.path}`;
-    item.isShow = true;
-    return item;
-  });
+    // 启动读缓存时补齐 isShow，并避免路径重复加前缀
+    const normalized = mapMenusNav(menuData);
+    try {
+        storage.setItem('menuListStore', JSON.stringify(normalized));
+    } catch (e) {}
+    return normalized
 }
 
 export default {
@@ -47,7 +67,7 @@ export default {
           storage.setItem('menuListStore', JSON.stringify(state.menusName));
         },
         setmenusNav(state, menuList) {
-          state.menusName = menuList;
+          state.menusName = mapMenusNav(menuList);
           let storage = window.localStorage;
           storage.setItem('menuListStore', JSON.stringify(state.menusName));
         }
@@ -57,9 +77,8 @@ export default {
             return new Promise((resolve, reject) => {
                 menusApi().then(async res => {
                     resolve(res);
+                    // 只走 getmenusNav（已 map + 写缓存），禁止再用原始 menus 覆盖
                     commit('getmenusNav', res.data.menus);
-                    let storage = window.localStorage;
-                    storage.setItem('menuListStore', JSON.stringify(res.data.menus));
                 }).catch(res => {
                     reject(res);
                 })
