@@ -10,14 +10,75 @@
 			<div class="w-176 h-46 rd-30px fs-16 bg-w111-1890FF text-wlll-FFFFFF acea-row row-center-wrapper ml20 mt-24 pointer" @click="searchUserInfo(0)">查询会员</div>
 	     </div>
 	   </Modal>
-	   <Modal v-model="modal2" footer-hide :title="isPhone?'完善手机号':'添加会员'" class-name="member-modal" width="528" @on-cancel='clear'>
+	   <Modal v-model="modal2" footer-hide :title="isPhone?'完善手机号':'添加会员'" class-name="member-modal" :width="fullProfile ? 920 : 528" @on-cancel='clear'>
 		  <Form ref="formValidate" :model="formValidate" :label-width="90">
-			  <FormItem label="用户昵称：">
-			    <Input v-model="formValidate.nickname" :disabled="isPhone?true:false" placeholder="请输入用户昵称" class="w-408"></Input>
-			  </FormItem>
-			  <FormItem label="手机号：" required>
-			    <Input v-model="formValidate.phone" placeholder="请输入手机号" class="w-408"></Input>
-			  </FormItem>
+			  <template v-if="!fullProfile || isPhone">
+				  <FormItem label="用户昵称：">
+				    <Input v-model="formValidate.nickname" :disabled="isPhone?true:false" placeholder="请输入用户昵称" class="w-408"></Input>
+				  </FormItem>
+				  <FormItem label="手机号：" required>
+				    <Input v-model="formValidate.phone" placeholder="请输入手机号" class="w-408"></Input>
+				  </FormItem>
+			  </template>
+        <div v-if="!isPhone" class="mb-12">
+          <Button type="text" class="full-profile-toggle" @click="toggleFullProfile">{{ fullProfile ? '收起完整资料' : '录入完整资料' }}</Button>
+        </div>
+        <div v-if="fullProfile && !isPhone" class="full-profile-box">
+          <Tabs v-model="fullActiveTab">
+            <TabPane label="基本信息" name="basic">
+              <FormItem label="姓名：">
+                <Input v-model="formValidate.real_name" placeholder="请输入姓名" class="w-408" />
+              </FormItem>
+              <FormItem label="昵称：">
+                <Input v-model="formValidate.nickname" placeholder="请输入昵称" class="w-408" />
+              </FormItem>
+              <FormItem label="手机号：" required>
+                <Input v-model="formValidate.phone" placeholder="请输入手机号" class="w-408" />
+              </FormItem>
+              <FormItem label="性别：">
+                <Select v-model="formValidate.sex" transfer class="w-408" placeholder="请选择">
+                  <Option :value="0">保密</Option>
+                  <Option :value="1">男</Option>
+                  <Option :value="2">女</Option>
+                </Select>
+              </FormItem>
+              <FormItem label="生日：">
+                <DatePicker
+                  :value="formValidate.birthday"
+                  type="date"
+                  transfer
+                  class="w-408"
+                  placeholder="请选择生日"
+                  @on-change="(v) => (formValidate.birthday = v || '')"
+                />
+              </FormItem>
+              <FormItem label="身份证：">
+                <Input v-model="formValidate.card_id" placeholder="请输入身份证号" class="w-408" />
+              </FormItem>
+              <FormItem label="地址：">
+                <Input v-model="formValidate.addres" placeholder="请输入地址" class="w-408" />
+              </FormItem>
+              <FormItem label="备注：">
+                <Input v-model="formValidate.mark" type="textarea" :rows="2" placeholder="请输入备注" class="w-408" />
+              </FormItem>
+            </TabPane>
+            <TabPane label="档案信息" name="archive">
+              <div class="archive-scroll">
+                <Alert v-if="!profileFields.length" type="warning" show-icon>
+                  暂无已启用的档案字段
+                </Alert>
+                <CustomerProfileFields
+                  v-else
+                  ref="profileFields"
+                  :fields="profileFields"
+                  :groups="profileGroups"
+                  v-model="extendValues"
+                  :skip-params="builtinSkipParams"
+                />
+              </div>
+            </TabPane>
+          </Tabs>
+        </div>
 		  </Form>
 		  <div v-if="isPhone" class="w-480 h-50 rd-30px fs-16 bg-w111-1890FF text-wlll-FFFFFF acea-row row-center-wrapper pointer auto" @click="registerUser">确定</div>
 		  <div v-else class="acea-row row-center-wrapper">
@@ -44,7 +105,7 @@
        </div>
        </div>
        <div>
-            <Button class="searchLog" v-for="(item,index) in searchHistory" @click="doSearch(item)" >{{ item }}</Button>
+            <Button class="searchLog" v-for="(item,index) in searchHistory" :key="index" @click="doSearch(item)" >{{ item }}</Button>
        </div>
 		   <Table :columns="columns" :data="memberInfo" border no-data-text="暂无数据"
               @on-row-dblclick="handleRowClick"
@@ -93,10 +154,13 @@
 import {
 	postSearchUserInfo,
 	postRegisterUser,
-	userListApi
+	userListApi,
+	getCashierProfileFields,
 } from '@/api/user';
+import CustomerProfileFields from '@/components/customerProfileFields';
 export default {
   name: 'memberSet',
+  components: { CustomerProfileFields },
   props: {
     attr: {
       type: Object,
@@ -120,50 +184,26 @@ export default {
 	  formValidate:{
 		  nickname:'',
 		  phone:'',
-		  uid:0
+		  uid:0,
+      real_name: '',
+      sex: 0,
+      birthday: '',
+      card_id: '',
+      addres: '',
+      mark: '',
 	  },
+    fullProfile: false,
+    fullActiveTab: 'basic',
+    profileFields: [],
+    profileGroups: [],
+    extendValues: {},
+    builtinSkipParams: ['real_name', 'phone', 'sex', 'birthday', 'card_id', 'address', 'addres', 'mark'],
 	  isPhone:0,
 	  modal3:false,
 	  isRegister:false,
 	  modal4:false,
 	  currentid: 0,
 	  columns: [
-		// {
-		//   title: " ",
-		//   key: "chose",
-		//   width: 50,
-		//   align: "center",
-		//   render: (h, params) => {
-		//     let uid = params.row.uid;
-		//     let flag = false;
-		//     if (this.currentid === uid) {
-		//       flag = true;
-		//     } else {
-		//       flag = false;
-		//     }
-		//     let self = this;
-		//     return h("div", [
-		//       h("Radio", {
-		//         props: {
-		//           value: flag,
-		// 		  size:'large'
-		//         },
-		//         on: {
-		//           "on-change": () => {
-		//             self.currentid = uid;
-		//             if (params.row.uid) {
-		// 				this.$emit("submitSuccess", params.row);
-		// 				this.modal4 = false;
-		// 				this.clear();
-		//             } else {
-		//               this.$Message.warning("请先选择会员");
-		//             }
-		//           },
-		//         },
-		//       }),
-		//     ]);
-		//   },
-		// },
 	  	{
 	  		title: "用户信息",
 	  		slot: "info",
@@ -201,15 +241,64 @@ export default {
     this.getSearchHistory();
   },
   methods: {
+    toggleFullProfile() {
+      this.fullProfile = !this.fullProfile;
+      if (this.fullProfile) {
+        this.fullActiveTab = 'basic';
+        if (!this.profileFields.length) this.loadProfileFields();
+      }
+    },
+    loadProfileFields() {
+      getCashierProfileFields({ uid: 0 }).then((res) => {
+        const data = res.data || {};
+        this.profileFields = data.fields || [];
+        this.profileGroups = data.groups || [];
+        const vals = { ...this.extendValues };
+        this.profileFields.forEach((f) => {
+          if (vals[f.field_key] === undefined) {
+            vals[f.field_key] = f.value !== undefined && f.value !== null ? f.value : '';
+          }
+        });
+        this.extendValues = vals;
+      }).catch(() => {
+        this.profileFields = [];
+        this.profileGroups = [];
+      });
+    },
+    customRequiredFields() {
+      return (this.profileFields || []).filter((f) => {
+        if (!f || !f.use || !f.required) return false;
+        if (f.param && this.builtinSkipParams.includes(f.param)) return false;
+        return true;
+      });
+    },
+    mergeBuiltinIntoExtend(extendInfo) {
+      const out = { ...(extendInfo || {}) };
+      (this.profileFields || []).forEach((f) => {
+        if (!f || !f.use || !f.param) return;
+        if (!this.builtinSkipParams.includes(f.param)) return;
+        let v = '';
+        if (f.param === 'real_name') v = this.formValidate.real_name || this.formValidate.nickname;
+        else if (f.param === 'phone') v = this.formValidate.phone;
+        else if (f.param === 'sex') v = this.formValidate.sex;
+        else if (f.param === 'birthday') v = this.formValidate.birthday;
+        else if (f.param === 'card_id') v = this.formValidate.card_id;
+        else if (f.param === 'address' || f.param === 'addres') v = this.formValidate.addres;
+        else if (f.param === 'mark') v = this.formValidate.mark;
+        else return;
+        if (f.field_key) out[f.field_key] = v;
+        out[f.param] = v;
+        if (f.info) out[f.info] = v;
+      });
+      return out;
+    },
     handleRowClick(row) {
       if(row.real_name !== ''){
           this.addSearchHistory(row.real_name+"/"+row.phone);
       }else{
           this.addSearchHistory(row.phone);
       }
-      // 1. 把当前点击行的uid赋值给currentid，实现单选框的选中状态联动
       this.currentid = row.uid;
-      // 2. 执行你原有的全部业务逻辑，和点击单选框的逻辑完全一致
       if (row.uid) {
         this.$emit("submitSuccess", row);
         this.modal4 = false;
@@ -238,10 +327,21 @@ export default {
 		this.formValidate={
 			nickname:'',
 			phone:'',
-			uid:0
+			uid:0,
+      real_name: '',
+      sex: 0,
+      birthday: '',
+      card_id: '',
+      addres: '',
+      mark: '',
 		}
 		this.search = ''
 		this.isPhone = 0
+    this.fullProfile = false
+    this.fullActiveTab = 'basic'
+    this.extendValues = {}
+    this.profileFields = []
+    this.profileGroups = []
 	},
 	addUserInfo(){
 		this.clear();
@@ -252,12 +352,42 @@ export default {
 		if(!/^1(3|4|5|7|8|9|6)\d{9}$/.test(this.formValidate.phone)){
 			return this.$Message.error('请输入正确的手机号');
 		}
-		postRegisterUser(this.formValidate).then(res=>{
+    if (this.fullProfile) {
+      const customs = this.customRequiredFields();
+      for (let i = 0; i < customs.length; i++) {
+        const f = customs[i];
+        const v = this.extendValues[f.field_key];
+        if (v === '' || v === null || v === undefined) {
+          this.fullActiveTab = 'archive';
+          return this.$Message.warning(f.tip || `请填写${f.info}`);
+        }
+      }
+    }
+    const payload = {
+      phone: this.formValidate.phone,
+      nickname: this.formValidate.nickname || this.formValidate.real_name,
+      uid: this.formValidate.uid || 0,
+      full_profile: this.fullProfile ? 1 : 0,
+    };
+    if (this.fullProfile) {
+      let extend_info = this.$refs.profileFields
+        ? this.$refs.profileFields.getExtendInfoPayload()
+        : { ...this.extendValues };
+      extend_info = this.mergeBuiltinIntoExtend(extend_info);
+      payload.extend_info = extend_info;
+      payload.real_name = this.formValidate.real_name || this.formValidate.nickname;
+      payload.sex = this.formValidate.sex;
+      payload.birthday = this.formValidate.birthday;
+      payload.card_id = this.formValidate.card_id;
+      payload.addres = this.formValidate.addres;
+      payload.mark = this.formValidate.mark;
+    }
+		postRegisterUser(payload).then(res=>{
 			this.modal2 = false;
 			this.modal4 = false;
 			this.$emit("submitSuccess", res.data);
 			this.clear();
-			this.$refs['formValidate'].resetFields();
+			this.$refs['formValidate'] && this.$refs['formValidate'].resetFields();
 		}).catch(err=>{
 			this.$Message.error(this.apiErrMsg(err));
 		})
@@ -266,23 +396,15 @@ export default {
 		if (!err) return '操作失败，请稍后重试';
 		return err.msg || err.message || '操作失败，请稍后重试';
 	},
-    // 1. 读取本地存储的搜索记录
     getSearchHistory() {
       const history = localStorage.getItem('searchHistory');
       this.searchHistory = history ? JSON.parse(history) : [];
     },
-
-    // 2. 新增搜索记录（核心方法）
     addSearchHistory(keyword) {
-      if (!keyword.trim()) return; // 空值不存储
-
-      // 步骤1：去重（过滤掉和当前关键词相同的记录）
+      if (!keyword.trim()) return;
       const newHistory = this.searchHistory.filter(item => item !== keyword.trim());
-      // 步骤2：将新关键词插入到数组头部（最新的在最前）
       newHistory.unshift(keyword.trim());
-      // 步骤3：截取前10条，保证最多10条
       this.searchHistory = newHistory.slice(0, 10);
-      // 步骤4：存入localStorage
       localStorage.setItem('searchHistory', JSON.stringify(this.searchHistory));
     },
     doSearch(key){
@@ -298,10 +420,6 @@ export default {
 		this.searchUserInfo(1);
 	},
 	searchUserInfo(num){
-		// if(!this.search){
-		//    return this.$Message.error('请输入手机号或会员编码');
-		// }
-		// num 为真：列表弹窗(modal4)；为假：快捷查询（0/1/多结果分流）
 		const listMode = !!num;
 		if(!listMode){
 			this.page = 1;
@@ -335,8 +453,7 @@ export default {
 					this.modal4 = true;
 					this.currentid = 0;
 				}else{
-					// 仅用 modal3 展示无结果；旧代码另调 $Modal.confirm 且引用未定义 flag，
-					// ReferenceError 落入 catch 后 $Message.error(undefined) 触发 reading 'content'
+					// 仅用 modal3 展示无结果；禁止未定义 flag 的 $Modal.confirm
 					this.modal3 = true;
 					this.isRegister = /^1(3|4|5|7|8|9|6)\d{9}$/.test(this.search);
 				}
@@ -423,6 +540,8 @@ export default {
   font-weight: 500;
   font-size: 16px !important;
 }
+.full-profile-toggle
+  padding-left 0
 /deep/tr{
     cursor: pointer;
 }
@@ -470,6 +589,16 @@ export default {
 			padding-bottom: 20px;
 		}
 	}
+  .full-profile-box
+    max-height 56vh
+    overflow-y auto
+  .archive-scroll
+    min-height 180px
+    padding-right 4px
+  .mb-12
+    margin-bottom 12px
+  .w-408
+    width 408px
 	/deep/.ivu-table{
 		border-radius: 10px;
 	}
