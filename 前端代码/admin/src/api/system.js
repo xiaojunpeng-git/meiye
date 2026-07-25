@@ -627,3 +627,19 @@ export function getImportErrorDown(params) {
     params
   });
 }
+
+/** 总部统一核销业绩计算方式（路由挂在 setting 组） */
+export function getWriteoffPerformanceMode() {
+  return request({
+    url: 'setting/writeoff-performance-mode',
+    method: 'get'
+  });
+}
+
+export function saveWriteoffPerformanceMode(data) {
+  return request({
+    url: 'setting/writeoff-performance-mode',
+    method: 'put',
+    data
+  });
+}
