@@ -1,13 +1,30 @@
 import request from '@/plugins/request';
 
 /**
- * 保存店员信息
+ * 保存店员信息（人员完整保存：档案+岗位+数据权限）
+ * @param {object} data
+ * @param {number|string} id staff_id；无店直属编辑可为 employee_id；新建传 0
+ * @param {object} [headers] 须含 X-Request-Token / Request-Token（与 body.request_token 一致）
  */
-export function postStaff(data, id) {
+export function postStaff(data, id, headers = {}) {
   return request({
     url: `merchant/staff/save/${id}`,
     method: 'post',
     data,
+    headers,
+  });
+}
+
+/**
+ * 人员完整详情（含岗位与数据权限）
+ * @param {number|string} id employee_id（总部 personComplete 路径参数）
+ * @param {object} [params] 可选 { staff_id }
+ */
+export function getPersonComplete(id, params = {}) {
+  return request({
+    url: `merchant/staff/person_complete/${id}`,
+    method: 'get',
+    params,
   });
 }
 
