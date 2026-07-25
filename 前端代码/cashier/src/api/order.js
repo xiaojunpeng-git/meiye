@@ -628,6 +628,13 @@ export function writeCartList(data) {
 }
 
 /**
+ * @description 订单-核销/消耗商品列表（orderWriteOff 兼容导出名）
+ */
+export function writeOffList(data) {
+    return writeCartList(data);
+}
+
+/**
  * @description 订单-消耗订单提交
  */
 export function putWriteUpdate(id, data) {

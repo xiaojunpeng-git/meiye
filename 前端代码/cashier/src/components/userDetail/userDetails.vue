@@ -132,7 +132,7 @@
 </template>
 
 <script>
-import { detailsApi, infoApi, spreadList } from "@/api/user";
+import { detailsApi, infoApi } from "@/api/user";
 import userInfo from "./userInfo";
 import userDebtRecord from "./userDebtRecord";
 import Setting from '@/setting';
