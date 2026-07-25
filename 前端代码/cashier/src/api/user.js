@@ -341,6 +341,18 @@ export function postSearchUserInfo(data) {
 }
 
 /**
+ * 收银台会员档案字段、分组和统计信息。
+ * 只读接口；会员详情抽屉切换客户时由组件负责竞态丢弃。
+ */
+export function getCashierProfileFields(params) {
+  return request({
+      url: 'user/profile_fields',
+      method: 'get',
+      params
+  });
+}
+
+/**
  * 收银台注册用户
  * @param {*} data
  * @returns
