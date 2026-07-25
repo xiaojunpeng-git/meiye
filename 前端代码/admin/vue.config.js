@@ -33,9 +33,10 @@ module.exports = {
 
   // 打包优化
   configureWebpack: (config) => {
-    const pluginsPro = [
+    // 仅 ANALYZE=true 时启动分析器；生产发布必须 ANALYZE=false，否则门禁失败
+    const pluginsPro = process.env.ANALYZE === "true" ? [
       new BundleAnalyzerPlugin()
-    ];
+    ] : [];
 
      pluginsPro.push(
         new CompressionPlugin({
