@@ -1,27 +1,12 @@
 <template>
   <Layout class="i-layout">
-    <transition name="fade-quick">
-      <Header
-          class="i-layout-header"
-          :style="headerStyle"
-          v-resize="handleHeaderWidthChange"
-      >
-        <i-header-logo/>
-        <i-header-breadcrumb ref="breadcrumb"/>
-        <div class="i-layout-header-right">
-          <!-- <i-header-fullscreen v-if="isDesktop && showFullscreen" /> -->
-          <!-- <i-header-notice v-if="showNotice" /> -->
-          <i-header-user/>
-          <Button type="primary" size="small" class="mr-16" @click="handoverHandle">交接班</Button>
-        </div>
-      </Header>
-    </transition>
+    <!-- 顶部黑色栏已移除：Logo / 账号迁至左侧导航；交接班仅取消入口展示，方法与弹窗保留 -->
     <Layout
         class="i-layout-inside"
         :class="isChildren ? 'bodyBig' : 'bodySmall'"
     >
       <Sider class="i-layout-sider" :class="siderClasses" :width="menuWidth">
-        <i-menu-side :hide-logo="isHeaderStick && headerFix && showHeader"/>
+        <i-menu-side :hide-logo="false"/>
       </Sider>
       <main>
         <Content class="i-layout-content" :class="contentClasses">
@@ -31,7 +16,6 @@
             </keep-alive>
           </div>
         </Content>
-        <!-- <i-copyright /> -->
       </main>
     </Layout>
     <Modal
@@ -419,6 +403,9 @@ export default {
 /deep/ .i-layout {
   display: flex;
   flex-direction: column;
+  height: 100vh !important;
+  min-height: 100vh !important;
+  overflow: hidden;
 }
 
 /deep/ .i-layout-header-fix {
@@ -426,7 +413,15 @@ export default {
 }
 
 /deep/ .i-layout-sider {
-  margin-top: 66px;
+  margin-top: 0 !important;
+  height: 100vh !important;
+}
+
+/deep/ .i-layout-inside {
+  height: 100vh !important;
+  min-height: 100vh !important;
+  flex: 1;
+  min-height: 0;
 }
 
 /deep/ .i-layout-menu-head-title-text {
@@ -437,8 +432,11 @@ export default {
 }
 
 /deep/ .ivu-layout-header {
-  height: 66px;
-  line-height: 66px;
+  height: 0 !important;
+  line-height: 0 !important;
+  display: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
 }
 
 /deep/ .bodyBig {
@@ -457,39 +455,42 @@ export default {
 }
 
 .i-layout-content-main {
-  // height: calc(100% - 66px);
+  height: 100% !important;
+  min-height: 0;
 }
 
 .i-layout-header {
-  // position: fixed !important;
-  color: #fff;
-  // top: 0;
-  // width: 100% !important;
+  display: none !important;
+  height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
   background-color: #001529;
   z-index: 15;
 }
 
-.i-layout-content-fix-with-header {
-  padding-top: 0px;
+/deep/ .i-layout-content-fix-with-header {
+  padding-top: 0 !important;
+}
+
+/deep/ .i-layout-content {
+  height: 100% !important;
+  min-height: 0;
 }
 
 main {
-  display: -webkit-box; /* Chrome 4+, Safari 3.1, iOS Safari 3.2+ */
-  display: -moz-box; /* Firefox 17- */
-  display: -webkit-flex; /* Chrome 21+, Safari 6.1+, iOS Safari 7+, Opera 15/16 */
-  display: -moz-flex; /* Firefox 18+ */
-  display: -ms-flexbox; /* IE 10 */
-  display: flex; /* Chrome 29+, Firefox 22+, IE 11+, Opera 12.1/17/18, Android 4.4+ */
+  display: flex;
   flex-direction: column;
   border-top-left-radius: 30px;
   margin-left: -20px;
   width: calc(100% - 90px);
-  height: calc(100% - 66px);
+  height: 100vh !important;
+  max-height: 100vh !important;
   background-color: #fff;
-  overflow hidden
+  overflow: hidden;
   z-index: 9;
   position: absolute;
   right: 0;
+  top: 0;
   bottom: 0;
 }
 
@@ -501,10 +502,11 @@ main {
   background: rgba(#001529, 0.3);
 }
 .i-layout-sider-fix {
-  top: 66px;
-  bottom: 0;
+  top: 0 !important;
+  bottom: 0 !important;
+  height: 100vh !important;
   min-height: 0;
-  margin-top: 0;
+  margin-top: 0 !important;
 }
 .grid-box {
   display: grid;

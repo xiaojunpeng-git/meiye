@@ -61,7 +61,8 @@ if (settingenv.isAPP) {
 // 创建一个 axios 实例
 const service = axios.create({
     baseURL: apiUrl,
-    timeout: 10000 // 请求超时时间
+    // 核销列表在本地 qemu/脏库上偶发 4～15s；过短会触发 Network Error 并叠出二次前端异常
+    timeout: 30000
 });
 
 axios.defaults.withCredentials = true;// 携带cookie
@@ -159,14 +160,13 @@ service.interceptors.response.use(
 								});
 								// 清空 vuex 用户信息
                                 store.dispatch('cashier/user/set', {}, { root: true });
-                break;
+                return Promise.reject(response.data || { msg: '请重新登录' });
             case 410003:
                 window.router.replace('/kefu');
-                break;
+                return Promise.reject(response.data || { msg: '请重新登录' });
             default:
-                // 不是正确的 code
-                // errorCreate(`${dataAxios.msg}: ${response.config.url}`);
-                break;
+                // 非 200 必须 reject，避免业务 then() 读到 undefined 再抛 reading 'data'
+                return Promise.reject(response.data || { msg: '请求失败' });
         }
     },
     error => {
@@ -184,7 +184,9 @@ service.interceptors.response.use(
                 case 404:
                     if(settingenv.isAPP && (localStorage.getItem('api-url') != null || localStorage.getItem('api-url'))){
                     }else{
-                        return false
+                        error.message = `请求地址出错: ${error.response.config.url}`;
+                        errorLog(error);
+                        return Promise.reject(error);
                     }
                     error.message =  `请求地址出错: ${error.response.config.url}`;
                     break;
@@ -214,7 +216,8 @@ service.interceptors.response.use(
             }
         }
         errorLog(error);
-        // return Promise.reject(error);
+        // 必须继续 reject：否则 Network Error 后 then() 仍执行，出现 reading 'data'
+        return Promise.reject(error);
     }
 );
 

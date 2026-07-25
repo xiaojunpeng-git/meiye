@@ -49,15 +49,24 @@
         <div>{{ item.value }}{{ item.key }}</div>
       </div>
     </div>
-    <Tabs v-model="activeName" @on-click="onTabClick">
+    <Tabs v-model="activeName" :animated="false" @on-click="onTabClick">
       <TabPane
         v-for="(item, index) in list"
-        :key="index"
+        :key="item.val"
         :label="item.label"
         :name="item.val"
       >
         <template v-if="item.val === 'info'">
-          <user-info v-show="!isEdit" :ps-info="psInfo"></user-info>
+          <user-info
+            v-show="!isEdit"
+            :ps-info="psInfo"
+            :profile-fields="profileFields"
+            :profile-groups="profileGroups"
+            :stats="profileStats"
+            :age="profileAge"
+            :profile-loading="profileLoading"
+            :profile-error="profileError"
+          ></user-info>
         </template>
         <template v-else-if="item.val === 'debt_record'">
           <user-debt-record
@@ -132,7 +141,7 @@
 </template>
 
 <script>
-import { detailsApi, infoApi } from "@/api/user";
+import { detailsApi, infoApi, spreadList, getCashierProfileFields } from "@/api/user";
 import userInfo from "./userInfo";
 import userDebtRecord from "./userDebtRecord";
 import Setting from '@/setting';
@@ -150,6 +159,13 @@ export default {
   },
   data() {
     return {
+      profileFields: [],
+      profileGroups: [],
+      profileStats: {},
+      profileAge: '',
+      profileLoading: false,
+      profileError: '',
+      profileReqId: 0,
       editMoneyVisible:false,
       theme2: "light",
       list: [
@@ -206,11 +222,63 @@ export default {
         this.$nextTick(() => {
           this.refreshActiveDebtTab();
         });
+      } else {
+        this.clearProfileState();
+      }
+    },
+    uid(val) {
+      if (this.modals && val) {
+        this.loadProfileFields(val);
+      } else if (!val) {
+        this.clearProfileState();
       }
     },
   },
   created() {},
   methods: {
+    clearProfileState() {
+      this.profileReqId += 1;
+      this.profileFields = [];
+      this.profileGroups = [];
+      this.profileStats = {};
+      this.profileAge = '';
+      this.profileLoading = false;
+      this.profileError = '';
+    },
+    loadProfileFields(uid) {
+      const id = Number(uid) || 0;
+      if (!id) {
+        this.clearProfileState();
+        return;
+      }
+      const reqId = ++this.profileReqId;
+      this.profileLoading = true;
+      this.profileError = '';
+      // 切换客户时先清空，避免残留上一位
+      this.profileFields = [];
+      this.profileGroups = [];
+      this.profileStats = {};
+      this.profileAge = '';
+      getCashierProfileFields({ uid: id })
+        .then((res) => {
+          if (reqId !== this.profileReqId) return;
+          const data = (res && res.data) || {};
+          this.profileFields = data.fields || [];
+          this.profileGroups = data.groups || [];
+          this.profileStats = data.stats || {};
+          this.profileAge = data.age || '';
+          this.profileLoading = false;
+        })
+        .catch((err) => {
+          if (reqId !== this.profileReqId) return;
+          this.profileFields = [];
+          this.profileGroups = [];
+          this.profileStats = {};
+          this.profileAge = '';
+          this.profileLoading = false;
+          this.profileError = (err && err.msg) || '客户档案加载失败';
+        });
+    },
     getDebtTabRef(refName) {
       const ref = this.$refs[refName];
       if (Array.isArray(ref)) {
@@ -250,6 +318,9 @@ export default {
         this.$nextTick(() => {
           this.reloadRepayList(true);
         });
+      } else if (name === 'info' && this.userId && !this.profileFields.length && !this.profileLoading) {
+        // 切到用户信息时若档案未加载则补拉，避免只见基础资料
+        this.loadProfileFields(this.userId);
       }
     },
     close(){
@@ -260,18 +331,18 @@ export default {
           this.$emit("changeSuccess");
     },
     toPay(){
-      const uid = Number(this.psInfo && this.psInfo.uid);
-      if (!uid) {
-        this.$Message.warning('请先选择会员后再进入消耗');
+      const user = this.psInfo || {};
+      if (!user.uid) {
+        this.$Message.warning('请先选择会员');
         return;
       }
       this.$router.push({
         path: `${Setting.roterPre}/verify/index`,
         query: {
-          uid,
-          phone: this.psInfo.phone || '',
-          nickname: this.psInfo.nickname || '',
-          real_name: this.psInfo.real_name || '',
+          uid: user.uid,
+          phone: user.phone || '',
+          nickname: user.nickname || '',
+          real_name: user.real_name || '',
         },
       });
     },
@@ -287,31 +358,27 @@ export default {
     getDetails(id) {
       this.userId = id;
       this.spinShow = true;
+      this.psInfo = {};
+      this.loadProfileFields(id);
       detailsApi(id)
         .then(async (res) => {
           if (res.status === 200) {
             let data = res.data;
             this.detailsData = data.headerList;
-            // if (this.fromType !== "order") {
-            //   let groupItem = this.groupList.find(
-            //     (item) => item.id == data.ps_info.group_id
-            //   );
-            //   if (groupItem) {
-            //     data.ps_info.group_name = groupItem.group_name;
-            //   }
-            // }
-            this.psInfo = data.ps_info;
+            this.psInfo = data.ps_info || {};
             this.spinShow = false;
             this.$nextTick(() => {
               this.refreshActiveDebtTab(true);
             });
           } else {
             this.spinShow = false;
+            this.psInfo = {};
             this.$Message.error(res.msg);
           }
         })
         .catch((res) => {
           this.spinShow = false;
+          this.psInfo = {};
           this.$Message.error(res.msg);
         });
     },
@@ -405,9 +472,30 @@ export default {
                         minWidth: 150,
                       },
                       {
-                        title: '核销时间',
-                        key: 'add_time',
-                        minWidth: 150,
+                        title: '业务时间',
+                        key: 'business_time',
+                        minWidth: 160,
+                        render: (h, params) => {
+                          const text = params.row.business_time || params.row.add_time || '-';
+                          return h('span', text);
+                        },
+                      },
+                      {
+                        title: '操作时间',
+                        key: 'operate_time',
+                        minWidth: 160,
+                        render: (h, params) => {
+                          const text = params.row.operate_time || params.row.add_time || '-';
+                          return h('span', text);
+                        },
+                      },
+                      {
+                        title: '补单',
+                        key: 'is_budan',
+                        minWidth: 70,
+                        render: (h, params) => {
+                          return h('span', Number(params.row.is_budan) === 1 ? '是' : '否');
+                        },
                       },
                     ];
                     break;
@@ -1073,6 +1161,8 @@ export default {
 
 .ivu-tabs {
   color: rgba(0, 0, 0, 0.85);
+  /* 避免内容被裁切；滚动交给抽屉 body */
+  overflow: visible;
 
   /deep/ .ivu-tabs-bar {
     border-bottom: 0;
@@ -1110,8 +1200,15 @@ export default {
   }
 
   /deep/ .ivu-tabs-content {
+    /* 禁止 LESS 把 calc(100vh - 260px) 算成 calc(-160vh) 导致 max-height:0 整页空白 */
+    transform: none !important;
+    height: auto !important;
+    max-height: none;
+    overflow: visible;
     .ivu-tabs-tabpane {
       padding: 25px 35px;
+      min-height: 160px;
+      height: auto !important;
 
       &:first-child {
         padding: 0 35px;

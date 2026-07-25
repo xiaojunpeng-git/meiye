@@ -389,7 +389,10 @@
                       </div>
                     </div>
                     <div class="footer-bottom">
-                      <Button :disabled="!cartList.length" @click="tryOpenSettle"
+                      <Button
+                        :disabled="!cartList.length || checkoutBusy"
+                        :loading="checkoutBusy"
+                        @click="tryOpenSettle"
                         >立即结账</Button
                       >
                     </div>
@@ -596,13 +599,13 @@
                                 alt="商品图"
                                 style="width: 100%"
                             />
-                            <div v-if="!item.stock && !item.cart_num && item.product_type == 0" class="absolute rd-8 top-0 left-0 right-0 bottom-0 fs-13 text-wlll-FFFFFF bg-w111-303133-60 acea-row row-center-wrapper">暂无库存</div>
+                            <div v-if="!item.stock && !item.cart_num && item.product_type == 0 && !Number(item.allow_negative_stock)" class="absolute rd-8 top-0 left-0 right-0 bottom-0 fs-13 text-wlll-FFFFFF bg-w111-303133-60 acea-row row-center-wrapper">暂无库存</div>
                           </div>
                           <div class='ml-12 fs-16 txtCon'>
-                            <div class="name text-wlll-303133 line2 fs-15" :class="!item.stock && !item.cart_num?'text-wlll-303133-50':''">
+                            <div class="name text-wlll-303133 line2 fs-15" :class="!item.stock && !item.cart_num && !Number(item.allow_negative_stock)?'text-wlll-303133-50':''">
                               {{ item.store_name || item.title }}
                             </div>
-                            <div class="stock text-wlll-f5222d mt-10 fw-600" :class="!item.stock && !item.cart_num?'text-wlll-F5222D-50':''">¥{{ item.price }}</div>
+                            <div class="stock text-wlll-f5222d mt-10 fw-600" :class="!item.stock && !item.cart_num && !Number(item.allow_negative_stock)?'text-wlll-F5222D-50':''">¥{{ item.price }}</div>
                           </div>
                           <div
                               v-if="item.cart_num && cartList.length"
@@ -1099,6 +1102,12 @@
       @confirm="onGendanConfirm"
       @close="gendanVisible = false"
     ></gendan-staff>
+    <div v-if="checkoutBusy" class="cashier-checkout-loading">
+      <div class="cashier-checkout-loading__box">
+        <div class="loading-spinner"></div>
+        <div class="cashier-checkout-loading__text">正在结账请稍等</div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -1146,7 +1155,8 @@ import {
   staffYeji,
   getService,
   cashierValidCardUpgradeList,
-  cashierCouponList
+  cashierCouponList,
+  getOrderReopenDraft,
 } from '@/api/order';
 import { checkOrderApi, getUserInfo, userSaveApi } from '@/api/user';
 import { activityList, activityTypeList, cardRelated } from '@/api/product';
@@ -1506,6 +1516,13 @@ export default {
       debtRepayInitialSource: 0,
       debtRepayData: {},
       debtPaySetPriceTimer: null,
+      reopenLoading: false,
+      reopenLoadedToken: '',
+      /** 重开刚加载完成：避免店员信息回调的空购物车 clear 冲掉结果 */
+      reopenCartGuardUntil: 0,
+      cartListFetchSeq: 0,
+      /** 结账准备/下单进行中：全屏「正在结账请稍等」 */
+      checkoutBusy: false,
     };
   },
   computed: {
@@ -1565,7 +1582,20 @@ export default {
         this.debtRepayInitialSource = 0;
         this.debtRepayData = {};
       }
-    }
+    },
+    '$route.query.reopen_token'(token) {
+      if (token && !this.isReopenTokenConsumed(token)) {
+        this.tryLoadReopenDraft(token);
+      }
+    },
+    'storeInfos.id'(id, oldId) {
+      // 店员信息晚于重开草稿就绪时，再刷一次购物车，避免首次 staff 未就绪显示空白
+      if (!id || id === oldId || !this.reopenLoadedToken) return;
+      if (Date.now() > this.reopenCartGuardUntil) return;
+      this.$nextTick(() => {
+        this.getCartList();
+      });
+    },
   },
   async created() {
     let clientWidth = document.documentElement.clientWidth;
@@ -1592,7 +1622,10 @@ export default {
     this.cateList();
     this.cateListMore();
     this.goodList();
-    if (this.$route.query.uid || this.$route.query.tourist_uid) {
+    const reopenToken = this.resolveReopenToken();
+    if (reopenToken) {
+      await this.tryLoadReopenDraft(reopenToken);
+    } else if (this.$route.query.uid || this.$route.query.tourist_uid) {
       let uid = this.$route.query.uid,
           touristId = this.$route.query.tourist_uid,
           staffId = this.$route.query.staff_id,
@@ -1631,6 +1664,12 @@ export default {
     }catch (e){
     }
   },
+  activated() {
+    const token = this.resolveReopenToken();
+    if (token && token !== this.reopenLoadedToken) {
+      this.tryLoadReopenDraft(token);
+    }
+  },
   mounted() {
     this.$nextTick(() => {
       this.$refs.input.focus();
@@ -1642,6 +1681,171 @@ export default {
     document.removeEventListener('keydown', this.handleKeydown);
   },
   methods: {
+    reopenConsumedKey() {
+      return 'mohe_reopen_consumed_tokens';
+    },
+    isReopenTokenConsumed(token) {
+      const t = String(token || '').trim();
+      if (!t) return false;
+      try {
+        const raw = window.sessionStorage.getItem(this.reopenConsumedKey());
+        const list = raw ? JSON.parse(raw) : [];
+        return Array.isArray(list) && list.indexOf(t) >= 0;
+      } catch (e) {
+        return false;
+      }
+    },
+    markReopenTokenConsumed(token) {
+      const t = String(token || '').trim();
+      if (!t) return;
+      try {
+        const raw = window.sessionStorage.getItem(this.reopenConsumedKey());
+        const list = raw ? JSON.parse(raw) : [];
+        const next = Array.isArray(list) ? list.slice() : [];
+        if (next.indexOf(t) < 0) next.push(t);
+        // 仅保留最近 30 个，避免 sessionStorage 膨胀
+        window.sessionStorage.setItem(this.reopenConsumedKey(), JSON.stringify(next.slice(-30)));
+      } catch (e) { /* ignore */ }
+    },
+    finishReopenSession() {
+      const token = this.reopenLoadedToken || this.resolveReopenToken(true);
+      if (token) this.markReopenTokenConsumed(token);
+      this.reopenLoadedToken = '';
+      this.reopenCartGuardUntil = 0;
+      try {
+        window.localStorage.removeItem('mohe_reopen_draft');
+      } catch (e) { /* ignore */ }
+      if (this.$route.query && this.$route.query.reopen_token) {
+        const query = { ...this.$route.query };
+        delete query.reopen_token;
+        this.$router.replace({ path: this.$route.path, query }).catch(() => {});
+      }
+    },
+    resolveReopenToken(ignoreConsumed) {
+      let token = '';
+      const q = (this.$route.query && this.$route.query.reopen_token) || '';
+      if (q) {
+        token = String(q);
+      } else {
+        try {
+          const raw = window.localStorage.getItem('mohe_reopen_draft');
+          if (raw) {
+            const payload = JSON.parse(raw);
+            token = (payload && payload.draft_token) ? String(payload.draft_token) : '';
+          }
+        } catch (e) {
+          token = '';
+        }
+      }
+      if (!ignoreConsumed && token && this.isReopenTokenConsumed(token)) {
+        try {
+          window.localStorage.removeItem('mohe_reopen_draft');
+        } catch (e) { /* ignore */ }
+        return '';
+      }
+      return token;
+    },
+    isReopenCartGuarded() {
+      return this.reopenLoading || Date.now() < this.reopenCartGuardUntil;
+    },
+    async tryLoadReopenDraft(token) {
+      const draftToken = String(token || '').trim();
+      if (!draftToken || this.reopenLoading) return;
+      // 同一 token 本会话已加载过：结账清空购物车后也禁止再次 loadDraft 重建
+      if (draftToken === this.reopenLoadedToken) return;
+      if (this.isReopenTokenConsumed(draftToken)) return;
+      this.reopenLoading = true;
+      this.reopenCartGuardUntil = Date.now() + 8000;
+      try {
+        const res = await getOrderReopenDraft(draftToken);
+        const data = (res && res.data) || {};
+        const uid = Number(data.uid || this.$route.query.uid || 0);
+        if (!uid) {
+          this.$Message.error('重开草稿缺少会员信息，请重新发起');
+          return;
+        }
+        this.checkOut = 0;
+        await this.applyReopenDraftToCashier(uid, data);
+        this.reopenLoadedToken = draftToken;
+        try {
+          window.localStorage.removeItem('mohe_reopen_draft');
+        } catch (e) { /* ignore */ }
+        const msgs = (data.messages || []).filter(Boolean);
+        if (msgs.length) {
+          this.$Modal.info({
+            title: '重新开单提示',
+            content: msgs.map((m) => `<p>${m}</p>`).join(''),
+          });
+        } else {
+          this.$Message.success('重开草稿已加载到收银台');
+        }
+        if (this.$route.query && this.$route.query.reopen_token) {
+          const query = { ...this.$route.query };
+          delete query.reopen_token;
+          this.$router.replace({ path: this.$route.path, query }).catch(() => {});
+        }
+      } catch (err) {
+        this.$Message.error((err && err.msg) || '加载重开草稿未成功，请重新发起');
+      } finally {
+        this.reopenLoading = false;
+      }
+    },
+    async applyReopenDraftToCashier(uid, data) {
+      const res = await cashierUser({ uid });
+      this.userInfo = res.data || {};
+      try {
+        window.localStorage.setItem('cashierUser', JSON.stringify(this.userInfo));
+      } catch (e) { /* ignore */ }
+      this.getSwithUser({ uid });
+      if (data.remark) {
+        this.createOrder.remarks = data.remark;
+      }
+      if (data.coupon_id) {
+        this.couponId = Number(data.coupon_id) || 0;
+        this.coupon = this.couponId > 0;
+      }
+      if (data.send_all && typeof data.send_all === 'object') {
+        this.createOrder.sendAll = {
+          product: Array.isArray(data.send_all.product) ? data.send_all.product : [],
+          coupon: Array.isArray(data.send_all.coupon) ? data.send_all.coupon : [],
+        };
+        this.sendAllDirty = true;
+      }
+      if (Array.isArray(data.selected_product) && data.selected_product.length) {
+        this.giftProjectSelectedProducts = data.selected_product.slice();
+        this.createOrder.selectedProduct = data.selected_product.slice();
+      }
+      if (Array.isArray(data.give_ids)) {
+        this.createOrder.giveIds = data.give_ids.slice();
+      }
+      this.applyReopenYeji(data);
+      if (typeof this.checkUserDebtReminder === 'function') {
+        this.checkUserDebtReminder();
+      }
+      this.goodListRefresh();
+      // 先刷购物车；店员信息可能稍后才到，再补刷一次
+      await this.$nextTick();
+      await this.getCartList();
+      this.hangDataList();
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      await this.getCartList();
+      if (!(this.cartList || []).length) {
+        await new Promise((resolve) => setTimeout(resolve, 280));
+        await this.getCartList();
+      }
+    },
+    applyReopenYeji(data) {
+      // 订单级 yeji 快照可能不含新 cart_id；有 cart_id 时直接挂上，否则留给店员重选
+      const sales = Array.isArray(data.yeji) ? data.yeji : [];
+      const crafts = Array.isArray(data.service_yeji) ? data.service_yeji : [];
+      const hasCartId = (row) => row && (row.cart_id != null && Number(row.cart_id) > 0);
+      if (sales.length && sales.every(hasCartId)) {
+        this.setYejiAll = sales.slice();
+      }
+      if (crafts.length && crafts.every(hasCartId)) {
+        this.serviceYejiAll = crafts.slice();
+      }
+    },
     isCardLikeProduct(item) {
       // 仅“卡项/次卡”走“只能单独购买”的限制
       if (!item) return false;
@@ -2540,18 +2744,18 @@ export default {
       this.createOrder.is_gendan = data.is_gendan || 0;
     },
     toPay(){
-      const uid = Number(this.userInfo && this.userInfo.uid);
-      if (!uid) {
-        this.$Message.warning('请先选择会员后再进入消耗');
+      const user = this.userInfo || {};
+      if (!user.uid) {
+        this.$Message.warning('请先选择会员');
         return;
       }
       this.$router.push({
         path: `${Setting.roterPre}/verify/index`,
         query: {
-          uid,
-          phone: this.userInfo.phone || '',
-          nickname: this.userInfo.nickname || '',
-          real_name: this.userInfo.real_name || '',
+          uid: user.uid,
+          phone: user.phone || '',
+          nickname: user.nickname || '',
+          real_name: user.real_name || '',
         },
       });
     },
@@ -2944,7 +3148,7 @@ export default {
       this.$refs.memberSet.modal2 = true;
     },
     memberTap(){
-      // 完整「选择会员」列表（modal4）；禁止打开小型「会员查询」（modal）
+      // 始终关闭旧的小型查询窗，避免与完整“选择会员”列表叠层。
       this.$refs.memberSet.modal = false;
       this.$refs.memberSet.modal4 = true;
       this.$refs.memberSet.searchUser();
@@ -3036,6 +3240,7 @@ export default {
         'product':[],
         'coupon':[]
       };
+      this.createOrder.reopen_draft_token = '';
       this.coupon = false;
       this.couponId = 0;
       this.couponTargetItem = null;
@@ -3044,6 +3249,11 @@ export default {
       this.giftProjectSelectedProducts = [];
       this.activityFrom.type = 0;
       this.goodFrom.cate_id = '';
+    },
+    /** 支付成功后结束重开会话（勿在 clear 内调用：重开保护期内也可能 clear） */
+    clearAfterPaySuccess() {
+      this.finishReopenSession();
+      this.clear();
     },
     cancel() {
       this.collection = 0;
@@ -3288,7 +3498,7 @@ export default {
     },
     closePay(){
       this.activeHangon = -1;
-      this.clear();
+      this.clearAfterPaySuccess();
       this.setUp();
       this.paySuccess=false;
       this.$refs.memberSet.currentid=0;
@@ -3296,7 +3506,7 @@ export default {
     },
     jixuPay(){
       this.activeHangon = -1;
-      this.clear();
+      this.clearAfterPaySuccess();
       this.setUp();
       this.$refs.memberSet.currentid=0;
       this.paySuccess=false;
@@ -3326,7 +3536,7 @@ export default {
               this.changePoints();
               let storage = window.localStorage;
               storage.setItem('cashierUser', JSON.stringify(this.userInfo));
-              this.clear();
+              this.clearAfterPaySuccess();
             }
           })
           .catch((err) => {
@@ -3407,6 +3617,7 @@ export default {
       }
     },
     getCashierPay(payType) {
+      if (this.checkoutBusy) return;
       let data = {
         payType: payType,
         userCode: this.payNum,
@@ -3417,6 +3628,7 @@ export default {
           return this.$Message.error('您付款金额不足');
         }
       }
+      this.startCheckoutBusy();
       cashierPay(this.orderId, data)
           .then((res) => {
             this.payNum = '';
@@ -3436,7 +3648,7 @@ export default {
               this.changePoints();
               let storage = window.localStorage;
               storage.setItem('cashierUser', JSON.stringify(this.userInfo));
-              this.clear();
+              this.clearAfterPaySuccess();
               this.goodList();
               //现金收款打开钱箱
               if (payType == 'cash') {
@@ -3466,6 +3678,9 @@ export default {
             this.errorInfo = err.msg;
             this.payStatus = true;
             // this.$Message.error(err.msg);
+          })
+          .finally(() => {
+            this.stopCheckoutBusy();
           });
     },
     changeSuccess(){
@@ -3493,6 +3708,7 @@ export default {
     },
     // 创建订单
     orderCreate() {
+      if (this.checkoutBusy) return;
       if (this.payType == 'cash') {
         if (parseFloat(this.priceInfo.payPrice) > parseFloat(this.collection)) {
           return this.$Message.error('您付款金额不足');
@@ -3528,6 +3744,9 @@ export default {
       }
       this.createOrder.setYejiAll=this.setYejiAll;
       this.createOrder.serviceYejiAll=this.serviceYejiAll;
+      // 重开草稿：下单时绑定，支付成功后后端关闭草稿，避免再次 loadDraft
+      this.createOrder.reopen_draft_token = this.reopenLoadedToken || '';
+      this.startCheckoutBusy();
       cashierCreate(this.userInfo.uid, this.createOrder)
           .then((res) => {
             let storage = window.localStorage;
@@ -3562,7 +3781,7 @@ export default {
                 // storage.setItem('cashierUser', JSON.stringify(this.userInfo));
                 if(!this.createOrder.new){
                   this.changePoints();
-                  this.clear();
+                  this.clearAfterPaySuccess();
                 }
               } else {
                 this.isOrderCreate = 1;
@@ -3604,7 +3823,7 @@ export default {
                   if (this.userInfo.uid) {
                     this.changePoints();
                   }
-                  this.clear();
+                  this.clearAfterPaySuccess();
                 }
                 this.payTypeModal = false;
                 this.settleVisible = false;
@@ -3643,7 +3862,7 @@ export default {
                 this.settleVisible = false;
                 if(!this.createOrder.new){
                   this.changePoints();
-                  this.clear();
+                  this.clearAfterPaySuccess();
                 }
               } else {
                 this.isOrderCreate = 1;
@@ -3659,6 +3878,9 @@ export default {
             this.errorInfo = err.msg;
             this.payStatus = true;
             // this.$Message.error(err.msg);
+          })
+          .finally(() => {
+            this.stopCheckoutBusy();
           });
     },
     rePay(){
@@ -4253,9 +4475,18 @@ export default {
             this.$Message.error(err.msg);
           });
     },
+    resolveCartUid(item) {
+      const fromItem = Number(item && item.uid);
+      if (fromItem > 0) return fromItem;
+      const fromUser = Number(this.userInfo && this.userInfo.uid);
+      if (fromUser > 0) return fromUser;
+      return 0;
+    },
     // 购物车加减
     cartChange(item) {
-      let uid = item.uid;
+      const uid = this.resolveCartUid(item);
+      if (!uid) return this.$Message.error('请添加或选择用户');
+      if (!item.uid) this.$set(item, 'uid', uid);
       let data = {
         number: item.cart_num,
         id: item.id,
@@ -4265,11 +4496,14 @@ export default {
             this.cartCompute();
           })
           .catch((err) => {
-            this.$Message.error(err.msg);
+            this.$Message.error((err && (err.msg || err.message)) || '修改数量未成功');
           });
     },
     changeCart(e, item) {
-      let uid = item.uid;
+      const uid = this.resolveCartUid(item);
+      if (!uid) return this.$Message.error('请添加或选择用户');
+      if (!item.uid) this.$set(item, 'uid', uid);
+      const prevNum = Number(item.cart_num) || 1;
       let data = {
         number: item.cart_num,
         id: item.id,
@@ -4281,12 +4515,8 @@ export default {
             this.goodListRefresh();
           })
           .catch((err) => {
-            if (type === 'reduce' && item.cart_num > 1) {
-              item.cart_num++;
-            } else if (type === 'add' && item.cart_num < item.branch_stock) {
-              item.cart_num--;
-            }
-            this.$Message.error(err.msg);
+            item.cart_num = prevNum;
+            this.$Message.error((err && (err.msg || err.message)) || '修改数量未成功');
           });
     },
     calculate(item, type) {
@@ -4294,16 +4524,37 @@ export default {
          return
       }
       if (this.cumping) return;
+      const uid = this.resolveCartUid(item);
+      if (!uid) return this.$Message.error('请添加或选择用户');
+      if (!item.uid) this.$set(item, 'uid', uid);
+      const stockRaw = item.branch_stock != null
+        ? item.branch_stock
+        : (item.productInfo && item.productInfo.attrInfo && item.productInfo.attrInfo.stock);
+      const stock = Number(stockRaw);
+      const hasStockLimit = Number.isFinite(stock) && stock > 0;
+      const allowNeg = Number(
+        item.allow_negative_stock != null
+          ? item.allow_negative_stock
+          : (item.productInfo && item.productInfo.allow_negative_stock)
+      ) === 1;
+      const productType = Number(
+        item.product_type != null
+          ? item.product_type
+          : (item.productInfo && item.productInfo.product_type)
+      );
+      const skipStockCap = productType === 0 && allowNeg;
       if (type === 'reduce' && item.cart_num > 1) {
         item.cart_num--;
-      } else if (type === 'add' && (item.cart_num < item.branch_stock || item.cart_type == 3)) {
+      } else if (type === 'add') {
+        if (item.cart_type != 3 && hasStockLimit && !skipStockCap && item.cart_num >= stock) {
+          return this.$Message.error('库存不足');
+        }
         item.cart_num++;
       } else {
         return this.$Message.error(
             item.cart_num === 1 ? '数量最小为1' : '库存不足'
         );
       }
-      let uid = item.uid;
       let data = {
         number: item.cart_num,
         id: item.id,
@@ -4316,12 +4567,13 @@ export default {
             this.goodListRefresh();
           })
           .catch((err) => {
-            if (type === 'reduce' && item.cart_num > 1) {
+            if (type === 'reduce') {
               item.cart_num++;
-            } else if (type === 'add' && item.cart_num < item.branch_stock) {
+            } else if (type === 'add' && item.cart_num > 1) {
               item.cart_num--;
             }
-            this.$Message.error(err.msg);
+            this.cumping = false;
+            this.$Message.error((err && (err.msg || err.message)) || '修改数量未成功');
           });
     },
     changeCartAttr() {
@@ -4436,46 +4688,59 @@ export default {
     getCartList() {
       let uid = this.userInfo.uid || 0;
       let staffId = this.storeInfos.id || 0;
-      if (uid >= 0) {
-        let data = { tourist_uid: this.userInfo.touristId };
-        cashierCartList(uid, staffId, data)
-            .then((res) => {
-              this.cartList = res.data.valid;
-              this.cartList.forEach((item2) => {
-                (item2.cart || []).forEach((item3) => {
-                  const qty = Math.max(Number(item3.cart_num || 1), 1);
-                  const unit = this.resolveBundleItemUnitPrice(item3);
-                  const lineAmount = Number((unit * qty).toFixed(2));
-                  item3.before_price = item3.change_price != null && item3.change_price !== ''
-                    ? this.normalizeBundleLineTotal(item3, item3.change_price)
-                    : lineAmount;
-                  if (typeof item3.show_yue_pay === 'undefined') this.$set(item3, 'show_yue_pay', false);
-                  if (typeof item3.yue_pay_amount === 'undefined') this.$set(item3, 'yue_pay_amount', '');
-                  this.ensureCardUpgradeFields(item3);
-                  if (Number(item3.product_type) === 6 && typeof item3.service_object === 'undefined') {
-                    this.$set(item3, 'service_object', '本人');
-                  }
-                });
-              });
-              this.invalidList = res.data.invalid;
-              this.cartSum = res.data.count;
-              this.setDingzhi();
-              this.applyProductSendPreset();
-              if (res.data.valid.length) {
-                this.cartCompute();
-              } else {
-                this.clear();
-              }
-            })
-            .catch((err) => {
-              this.$Message.error(err.msg);
-            })
-            .finally((e) => {
-              this.cumping = false;
-            });
-      } else {
+      if (uid < 0) {
         this.$Message.error('请添加或选择用户');
+        return Promise.resolve();
       }
+      const seq = ++this.cartListFetchSeq;
+      const reqUid = Number(uid) || 0;
+      let data = { tourist_uid: this.userInfo.touristId };
+      return cashierCartList(uid, staffId, data)
+          .then((res) => {
+            // 丢弃过期响应，避免游客/旧会员空车 clear 冲掉重开结果
+            if (seq !== this.cartListFetchSeq) return;
+            if (reqUid !== Number(this.userInfo.uid || 0)) return;
+            const valid = (res.data && res.data.valid) || [];
+            this.cartList = valid;
+            const fallbackUid = Number(this.userInfo && this.userInfo.uid) || 0;
+            this.cartList.forEach((item2) => {
+              (item2.cart || []).forEach((item3) => {
+                if (!(Number(item3.uid) > 0) && fallbackUid > 0) {
+                  this.$set(item3, 'uid', fallbackUid);
+                }
+                const qty = Math.max(Number(item3.cart_num || 1), 1);
+                const unit = this.resolveBundleItemUnitPrice(item3);
+                const lineAmount = Number((unit * qty).toFixed(2));
+                item3.before_price = item3.change_price != null && item3.change_price !== ''
+                  ? this.normalizeBundleLineTotal(item3, item3.change_price)
+                  : lineAmount;
+                if (typeof item3.show_yue_pay === 'undefined') this.$set(item3, 'show_yue_pay', false);
+                if (typeof item3.yue_pay_amount === 'undefined') this.$set(item3, 'yue_pay_amount', '');
+                this.ensureCardUpgradeFields(item3);
+                if (Number(item3.product_type) === 6 && typeof item3.service_object === 'undefined') {
+                  this.$set(item3, 'service_object', '本人');
+                }
+              });
+            });
+            this.invalidList = (res.data && res.data.invalid) || [];
+            this.cartSum = (res.data && res.data.count) || 0;
+            this.setDingzhi();
+            this.applyProductSendPreset();
+            if (valid.length) {
+              this.cartCompute();
+            } else if (!this.isReopenCartGuarded()) {
+              this.clear();
+            }
+          })
+          .catch((err) => {
+            if (seq !== this.cartListFetchSeq) return;
+            this.$Message.error(err.msg);
+          })
+          .finally(() => {
+            if (seq === this.cartListFetchSeq) {
+              this.cumping = false;
+            }
+          });
     },
     //判断是否定制卡
     setDingzhi(){
@@ -4830,7 +5095,10 @@ export default {
     },
     // 当前选中门店店员信息
     getStoreId(e) {
-      this.clear();
+      // 重开加载窗口内禁止 clear，否则会把刚写入的购物车冲掉
+      if (!this.isReopenCartGuarded()) {
+        this.clear();
+      }
       this.storeList.forEach((i) => {
         if (i.id == e.id) {
           sessionStorage.setItem('staffInfo', JSON.stringify(e));
@@ -4851,7 +5119,7 @@ export default {
       sessionStorage.setItem('staffInfo', JSON.stringify(e.users));
       if (this.userInfo) {
         this.getCartList();
-      } else {
+      } else if (!this.isReopenCartGuarded()) {
         this.setUp();
       }
       this.hangDataList();
@@ -5400,20 +5668,37 @@ export default {
         }
       };
     },
+    startCheckoutBusy() {
+      this.checkoutBusy = true;
+    },
+    stopCheckoutBusy() {
+      this.checkoutBusy = false;
+    },
+    /** 打开结算抽屉并展示结账等待（同步准备阶段） */
+    openSettleWithBusy() {
+      this.startCheckoutBusy();
+      try {
+        this.openSettle();
+      } finally {
+        this.$nextTick(() => {
+          this.stopCheckoutBusy();
+        });
+      }
+    },
     /** 结账前：未使用优惠券且存在可用券时提示（与原先逻辑一致） */
     tryOpenSettle() {
-      if (!this.cartList.length) {
+      if (!this.cartList.length || this.checkoutBusy) {
         return;
       }
       if (this.cartHasGiftProjectShell() && !this.getGiftProjectSelectedProducts().length) {
         return this.$Message.error('请选择赠送哪些项目');
       }
       if (!this.userInfo || !this.userInfo.uid) {
-        this.openSettle();
+        this.openSettleWithBusy();
         return;
       }
       if (this.buildCartCoupons().length > 0) {
-        this.openSettle();
+        this.openSettleWithBusy();
         return;
       }
       const ids = [];
@@ -5423,7 +5708,7 @@ export default {
         });
       });
       if (!ids.length) {
-        this.openSettle();
+        this.openSettleWithBusy();
         return;
       }
       const data = { cart_id: ids };
@@ -5432,14 +5717,17 @@ export default {
         data.change_price = Number(this.createOrder.change_price) || 0;
         data.cart_info = this.createOrder.cart_info;
       }
+      this.startCheckoutBusy();
       cashierCouponList(this.userInfo.uid, data)
         .then((res) => {
           const list = res.data || [];
           const hasUsable = list.some((item) => item.can_use !== false);
           if (!hasUsable) {
             this.openSettle();
+            this.$nextTick(() => this.stopCheckoutBusy());
             return;
           }
+          this.stopCheckoutBusy();
           this.$Modal.confirm({
             title: '提示',
             content: '有可以使用的优惠券，是否重新选择？',
@@ -5449,12 +5737,13 @@ export default {
               this.openFirstItemCouponPicker();
             },
             onCancel: () => {
-              this.openSettle();
+              this.openSettleWithBusy();
             },
           });
         })
         .catch(() => {
           this.openSettle();
+          this.$nextTick(() => this.stopCheckoutBusy());
         });
     },
     /** 打开第一个未使用优惠券的商品行选券弹窗 */

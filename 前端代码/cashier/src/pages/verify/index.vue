@@ -1170,9 +1170,9 @@ export default {
 </script>
 <style lang="stylus" scoped>
 .verify-page--workbench
-  /* 顶栏约 66px；必须锁死可视高度，否则项目列表撑高后底栏被 overflow 裁切 */
-  height calc(100vh - 66px)
-  max-height calc(100vh - 66px)
+  /* 公共顶栏已移除：占满主内容区完整高度，底部不再预留 66px */
+  height 100%
+  max-height 100%
   min-height 0
   display flex
   flex-direction column
