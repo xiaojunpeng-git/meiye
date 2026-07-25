@@ -91,6 +91,15 @@
           >{{ item.label }}</button>
         </div>
 
+        <div v-if="hasMember" class="card-search">
+          <Input
+            v-model="cardKeyword"
+            clearable
+            prefix="ios-search"
+            placeholder="搜索卡名称、卡号或项目名称"
+          />
+        </div>
+
         <div class="card-list">
           <template v-if="hasMember">
             <article
@@ -115,7 +124,7 @@
             </article>
             <div v-if="!filteredCards.length" class="empty-state">
               <Icon type="ios-folder-open-outline" />
-              <p>{{ cards.length ? '当前筛选下没有卡项' : '该会员暂无可核销卡项' }}</p>
+              <p>{{ cardListEmptyText }}</p>
             </div>
           </template>
           <div v-else class="empty-state empty-state--member">
@@ -1078,13 +1087,20 @@ export default {
       return '可跨多张卡选择项目，一次核对并提交';
     },
     filteredCards() {
-      // 卡搜索框已删除：不再按 cardKeyword 过滤，仅保留快捷筛选
+      const kw = String(this.cardKeyword || '').trim().toLowerCase();
       return this.cards.filter((card) => {
-        if (this.cardFilter === 'available') return this.remainingTimes(card) > 0;
-        if (this.cardFilter === 'expiring') return card.expiring;
-        if (this.cardFilter === 'selected') return this.selectedCount(card) > 0;
-        return true;
+        if (this.cardFilter === 'available' && this.remainingTimes(card) <= 0) return false;
+        if (this.cardFilter === 'expiring' && !card.expiring) return false;
+        if (this.cardFilter === 'selected' && this.selectedCount(card) <= 0) return false;
+        if (!kw) return true;
+        // 卡名/卡号命中：整卡保留；仅项目命中：仍显示该卡（右侧按项目再滤）
+        return this.cardMatchesKeyword(card, kw) || this.filteredProjects(card).length > 0;
       });
+    },
+    cardListEmptyText() {
+      if (!this.cards.length) return '该会员暂无可核销卡项';
+      if (String(this.cardKeyword || '').trim()) return '没有匹配的卡项';
+      return '当前筛选下没有卡项';
     },
     visibleProjectCards() {
       return this.filteredCards.filter((card) => this.filteredProjects(card).length > 0);
@@ -1486,10 +1502,26 @@ export default {
     selectedTimes(card) {
       return (card.projects || []).reduce((sum, item) => sum + (item.selected ? Number(item.qty || 0) : 0), 0);
     },
+    cardMatchesKeyword(card, kw) {
+      const key = String(kw || '').trim().toLowerCase();
+      if (!key) return true;
+      const name = String(card.card_name || card.name || '').toLowerCase();
+      const no = String(card.card_no || card.no || '').toLowerCase();
+      return name.indexOf(key) >= 0 || no.indexOf(key) >= 0;
+    },
+    projectMatchesKeyword(project, kw) {
+      const key = String(kw || '').trim().toLowerCase();
+      if (!key) return true;
+      return String(project.product_name || '').toLowerCase().indexOf(key) >= 0;
+    },
     filteredProjects(card) {
+      const kw = String(this.cardKeyword || '').trim().toLowerCase();
+      const cardHit = !kw || this.cardMatchesKeyword(card, kw);
       return (card.projects || []).filter((project) => {
         if (this.onlySelected && !project.selected) return false;
-        return true;
+        if (!kw) return true;
+        // 卡名/卡号命中：展示该卡全部项目；否则只展示项目名命中的行
+        return cardHit || this.projectMatchesKeyword(project, kw);
       });
     },
     formatStaffLabels(staffChoose) {
@@ -2344,9 +2376,12 @@ button { border: 0; }
 .stat-total span { font-size: 11px; opacity: 1; color: #ffffff; font-weight: 600; text-shadow: 0 1px 1px rgba(0, 0, 0, 0.2); }
 .stat-total strong { font-size: 16px; line-height: 1; font-weight: 700; letter-spacing: .2px; }
 .link-btn { padding: 4px; color: @blue; background: transparent; cursor: pointer; }
-.filter-chips { display: flex; gap: 7px; margin: 10px 0; }
+.filter-chips { display: flex; gap: 7px; margin: 10px 0 8px; }
 .filter-chips button { flex: 1; height: 30px; border-radius: 8px; color: #606266; background: #f4f6f8; cursor: pointer; font-size: 12px; }
 .filter-chips button.active { color: @blue; background: #eaf4ff; font-weight: 600; }
+.card-search { margin: 0 0 8px; }
+.card-search .ivu-input-wrapper { width: 100%; }
+.card-search .ivu-input { border-radius: 8px; }
 .card-list { flex: 1; min-height: 0; overflow-y: auto; padding: 1px 2px 8px; }
 .card-item {
   padding: 14px;
