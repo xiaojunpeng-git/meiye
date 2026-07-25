@@ -259,8 +259,12 @@ export default {
 			this.clear();
 			this.$refs['formValidate'].resetFields();
 		}).catch(err=>{
-			this.$Message.error(err.msg);
+			this.$Message.error(this.apiErrMsg(err));
 		})
+	},
+	apiErrMsg(err) {
+		if (!err) return '操作失败，请稍后重试';
+		return err.msg || err.message || '操作失败，请稍后重试';
 	},
     // 1. 读取本地存储的搜索记录
     getSearchHistory() {
@@ -297,7 +301,9 @@ export default {
 		// if(!this.search){
 		//    return this.$Message.error('请输入手机号或会员编码');
 		// }
-		if(!num){
+		// num 为真：列表弹窗(modal4)；为假：快捷查询（0/1/多结果分流）
+		const listMode = !!num;
+		if(!listMode){
 			this.page = 1;
 		}
 		userListApi({
@@ -305,42 +311,38 @@ export default {
 		   page:this.page,
 		   limit:this.limit
 		}).then(res=>{
-			let data = res.data;
-			this.total = data.count;
-			if(num){
-				this.memberInfo = res.data.list;
+			const data = res && res.data;
+			if (!data || typeof data !== 'object') {
+				this.$Message.error('会员查询返回异常，请稍后重试');
+				return;
+			}
+			const list = Array.isArray(data.list) ? data.list : [];
+			const count = Number(data.count || 0);
+			this.total = count;
+			if(listMode){
+				this.memberInfo = list;
 				this.modal = false;
 				// 列表查询路径必须打开完整「选择会员」弹窗（modal4），不能依赖父组件抢先赋值
 				this.modal4 = true;
 			}else{
-				if(data.count == 1){
+				if(count == 1 && list[0]){
 					this.modal = false
-					this.$emit("submitSuccess", res.data.list[0]);
+					this.$emit("submitSuccess", list[0]);
 					this.clear();
-				}else if(data.count>1){
-					this.memberInfo = res.data.list;
+				}else if(count>1){
+					this.memberInfo = list;
 					this.modal = false
 					this.modal4 = true;
 					this.currentid = 0;
 				}else{
+					// 仅用 modal3 展示无结果；旧代码另调 $Modal.confirm 且引用未定义 flag，
+					// ReferenceError 落入 catch 后 $Message.error(undefined) 触发 reading 'content'
 					this.modal3 = true;
 					this.isRegister = /^1(3|4|5|7|8|9|6)\d{9}$/.test(this.search);
-					this.$Modal.confirm({
-					    title: '查询结果',
-					    content: '<p>用户'+this.search+'不存在</p>',
-						okText: flag?'注册':'确定',
-						onOk: () => {
-							if(flag){
-								this.formValidate.phone = this.search;
-								this.modal = false
-								this.modal2 = true
-							}
-						}
-					});
 				}
 			}
 		}).catch(err=>{
-			this.$Message.error(err.msg);
+			this.$Message.error(this.apiErrMsg(err));
 		})
 	},
 	registerBnt(){
