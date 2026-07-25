@@ -547,7 +547,8 @@ class BatchWriteoffServices extends BaseServices
                         StoreOrderWriteoff::where('id', (int)$wo['id'])->update([
                             'batch_id' => $batchId,
                             'performance_mode' => $mode,
-                            'rights_version' => (int)preg_replace('/\D/', '', (string)$item['rights_version']) ?: 0,
+                            // DB 列为 INT：禁止把 "surplus_end_id" 去非数字后整串强转（会超 INT 上限）
+                            'rights_version' => $this->rightsVersionToStorageInt((string)($item['rights_version'] ?? '')),
                         ]);
                         $amount = WriteoffIntegerAmount::truncate($wo['writeoff_price'] ?? 0);
                         $times = (int)($wo['writeoff_num'] ?? $item['cart_num']);
@@ -1164,6 +1165,19 @@ class BatchWriteoffServices extends BaseServices
         return (int)($cart['write_surplus_times'] ?? 0)
             . '_' . (int)($cart['write_end'] ?? 0)
             . '_' . (int)($cart['id'] ?? 0);
+    }
+
+    /**
+     * 将乐观锁字符串落入 eb_store_order_writeoff.rights_version（SIGNED INT）。
+     * 比较仍用字符串 buildRightsVersion；落库仅存可容纳的稳定哈希。
+     */
+    protected function rightsVersionToStorageInt(string $version): int
+    {
+        $version = trim($version);
+        if ($version === '') {
+            return 0;
+        }
+        return (int)(crc32($version) & 0x7FFFFFFF);
     }
 
     protected function lineError(array $line, string $msg): string
