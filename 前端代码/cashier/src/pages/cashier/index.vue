@@ -2937,6 +2937,8 @@ export default {
       this.$refs.memberSet.modal2 = true;
     },
     memberTap(){
+      // 完整「选择会员」列表（modal4）；禁止打开小型「会员查询」（modal）
+      this.$refs.memberSet.modal = false;
       this.$refs.memberSet.modal4 = true;
       this.$refs.memberSet.searchUser();
     },

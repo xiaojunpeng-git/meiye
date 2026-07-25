@@ -1074,6 +1074,76 @@ export function putWriteoffCancel(subOrderId, data) {
     });
 }
 
+/** 批量核销可选项 */
+export function writeoffBatchOptions(params) {
+    return request({
+        url: 'writeoff/batch/options',
+        method: 'get',
+        params
+    });
+}
+
+/** 批量核销试算 */
+export function writeoffBatchPreview(data) {
+    return request({
+        url: 'writeoff/batch/preview',
+        method: 'post',
+        data
+    });
+}
+
+/** 批量核销提交 */
+export function writeoffBatchCommit(data) {
+    return request({
+        url: 'writeoff/batch/commit',
+        method: 'post',
+        data
+    });
+}
+
+/** 批量核销撤销 */
+export function writeoffBatchCancel(batchId, data) {
+    return request({
+        url: `writeoff/batch/${batchId}/cancel`,
+        method: 'put',
+        data
+    });
+}
+
+/** 项目替换可选项 */
+export function projectReplacementOptions(holderId) {
+    return request({
+        url: `card/${holderId}/project-replacement/options`,
+        method: 'get'
+    });
+}
+
+/** 项目替换试算 */
+export function projectReplacementPreview(holderId, data) {
+    return request({
+        url: `card/${holderId}/project-replacement/preview`,
+        method: 'post',
+        data
+    });
+}
+
+/** 项目替换提交 */
+export function projectReplacementCommit(holderId, data) {
+    return request({
+        url: `card/${holderId}/project-replacement/commit`,
+        method: 'post',
+        data
+    });
+}
+
+/** 项目替换记录 */
+export function projectReplacementRecords(holderId) {
+    return request({
+        url: `card/${holderId}/project-replacement/records`,
+        method: 'get'
+    });
+}
+
 export function makeTerminalRequestToken(prefix = 'cs') {
     return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 }

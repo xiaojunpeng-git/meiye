@@ -50,15 +50,25 @@
               @on-row-dblclick="handleRowClick"
 		          highlight-row no-filtered-data-text="暂无筛选结果" max-height="350" class="mt-20">
 		   	<template slot-scope="{ row, index }" slot="info">
-				<div class="acea-row row-middle">
-					<div class="w-40 h-40 rd-50 mr-10">
-						<img :src="row.avatar" class="w-full h-full rd-50"/>
+				<div class="member-info-cell acea-row row-middle">
+					<div class="member-avatar">
+						<img :src="row.avatar" class="member-avatar__img" alt="" />
+						<img
+							v-if="row.is_money_level"
+							src="@/assets/images/svip.png"
+							class="member-avatar__svip"
+							alt="SVIP"
+						/>
 					</div>
-					<div>
-						<div class="acea-row row-middle">
+					<div class="member-meta">
+						<div class="member-meta__name acea-row row-middle">
 							<div class="line1 max-w-124">{{row.nickname}}</div>
-							<img src="@/assets/images/svip.png" class="w-39 h-17 ml-5"/>
-							<div v-if="row.level" class="iconfont h-19 m-w-39 pl-6 pr-6 border-1-FACC7D rd-50 lh-15 fs-12 text-center bg-w111-FEF0D9 text-wlll-DFA541 ml-5"><span class="iconfont iconhuiyuandengji fs-12 mr-4"></span>V{{row.level}}</div>
+							<div
+								v-if="row.level"
+								class="member-level h-19 m-w-39 pl-6 pr-6 border-1-FACC7D rd-50 lh-15 fs-12 text-center bg-w111-FEF0D9 text-wlll-DFA541 ml-5"
+							>
+								<span class="iconfont iconhuiyuandengji fs-12 mr-4"></span>V{{row.level}}
+							</div>
 						</div>
 						<div class="fs-14 text-wlll-909399 mt-5">ID：{{row.uid}}</div>
 					</div>
@@ -299,7 +309,9 @@ export default {
 			this.total = data.count;
 			if(num){
 				this.memberInfo = res.data.list;
-				this.modal = false
+				this.modal = false;
+				// 列表查询路径必须打开完整「选择会员」弹窗（modal4），不能依赖父组件抢先赋值
+				this.modal4 = true;
 			}else{
 				if(data.count == 1){
 					this.modal = false
@@ -349,6 +361,40 @@ export default {
 </script>
 
 <style lang="stylus" scoped>
+.member-info-cell
+	flex-wrap nowrap
+.member-avatar
+	position relative
+	width 48px
+	height 48px
+	border-radius 50%
+	margin-right 12px
+	flex-shrink 0
+	.member-avatar__img
+		width 100%
+		height 100%
+		border-radius 50%
+		display block
+		object-fit cover
+	.member-avatar__svip
+		position absolute
+		width 39px
+		height 17px
+		left 50%
+		bottom -1px
+		margin-left -19px
+		display block
+		border-radius 0
+		object-fit contain
+		pointer-events none
+		z-index 1
+.member-meta
+	min-width 0
+.member-meta__name
+	flex-wrap nowrap
+.member-level
+	flex-shrink 0
+	white-space nowrap
 .searchLog{
   margin-top: 20px;
   margin-right: 10px;
