@@ -327,6 +327,86 @@ class OrganizationWorkspaceWriteServices
     }
 
     /**
+     * 新增组织权限授权关系（不改账号密码角色）
+     * @param int[] $allowedStoreIds
+     * @return array{msg:string,data:array,replay:bool}
+     */
+    public function grantAdmin(
+        int $orgId,
+        int $employeeId,
+        int $adminId,
+        string $scopeMode,
+        array $allowedStoreIds,
+        array $adminInfo,
+        array $requestCtx
+    ): array {
+        $allowedStoreIds = array_values(array_unique(array_filter(array_map('intval', $allowedStoreIds))));
+        sort($allowedStoreIds);
+        $payload = [
+            'org_id' => $orgId,
+            'employee_id' => $employeeId,
+            'admin_id' => $adminId,
+            'scope_mode' => strtolower(trim($scopeMode)),
+            'allowed_store_ids' => $allowedStoreIds,
+        ];
+        return $this->runWrite(
+            'org_grant_admin',
+            'org:' . $orgId,
+            $payload,
+            $adminInfo,
+            $requestCtx,
+            function (array $auditMeta) use ($orgId, $employeeId, $adminId, $scopeMode, $allowedStoreIds) {
+                $ret = $this->manage->applyGrantAdmin(
+                    $orgId,
+                    $employeeId,
+                    $adminId,
+                    $scopeMode,
+                    $allowedStoreIds,
+                    (int)$auditMeta['operator_id'],
+                    (string)$auditMeta['operator_name'],
+                    $auditMeta
+                );
+                return [
+                    'msg' => !empty($ret['idempotent']) ? '已授权' : '授权成功',
+                    'data' => $ret,
+                ];
+            }
+        );
+    }
+
+    /**
+     * 撤销组织权限授权关系
+     * @return array{msg:string,data:array,replay:bool}
+     */
+    public function revokeAdminGrant(int $orgId, int $orgAdminId, array $adminInfo, array $requestCtx): array
+    {
+        $payload = [
+            'org_id' => $orgId,
+            'org_admin_id' => $orgAdminId,
+        ];
+        return $this->runWrite(
+            'org_revoke_admin_grant',
+            'org:' . $orgId,
+            $payload,
+            $adminInfo,
+            $requestCtx,
+            function (array $auditMeta) use ($orgId, $orgAdminId) {
+                $ret = $this->manage->applyRevokeAdminGrant(
+                    $orgId,
+                    $orgAdminId,
+                    (int)$auditMeta['operator_id'],
+                    (string)$auditMeta['operator_name'],
+                    $auditMeta
+                );
+                return [
+                    'msg' => !empty($ret['changed']) ? '已撤销' : '已撤销',
+                    'data' => $ret,
+                ];
+            }
+        );
+    }
+
+    /**
      * @param callable(array):array{msg:string,data:array} $business
      * @return array{msg:string,data:array,replay:bool}
      */

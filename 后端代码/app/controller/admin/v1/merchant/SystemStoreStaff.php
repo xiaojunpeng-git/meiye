@@ -83,12 +83,25 @@ class SystemStoreStaff extends AuthController
             }
         }
         if ($storeIds !== null && !$storeIds) {
-            return null;
+            // 组织部门可以没有下属门店，但仍可能有直属员工；给门店查询一个空范围，
+            // 由列表服务继续合并 organization_employee，不能在控制器提前返回空结果。
+            if ($orgId <= 0) {
+                return null;
+            }
+            $storeIds = [-1];
         }
         $where = [
             'keyword' => $params['keyword'],
             'is_del' => 0,
         ];
+        // 保留组织 ID 给列表服务合并“组织直属员工”；该关系不等同门店任职。
+        if ($orgId > 0) {
+            $where['organization_id'] = $orgId;
+        }
+        // 仅当用户实际点选了具体门店时，直属人员才应从结果中排除。
+        if ($storeId > 0) {
+            $where['organization_selected_store_id'] = $storeId;
+        }
         if ($params['status'] !== '') {
             $where['status'] = (int)$params['status'];
         }
@@ -253,38 +266,45 @@ class SystemStoreStaff extends AuthController
         if ($data['phone'] == '') {
             return $this->fail('请填写核销员电话');
         }
-        if ($data['uid'] == 0) {
-            return $this->fail('请选择用户');
-        }
+        // I1：核销员不再强制绑定商城用户，禁止新写/回写 staff.uid
         if (!$id) {
-            if ($data['image'] == '') {
-                return $this->fail('请选择用户');
-            }
-            if ($this->services->count(['uid' => $data['uid'], 'store_id' => $data['store_id'], 'is_del' => 0])) {
-                return $this->fail('添加的核销员用户已存在!');
-            }
-            $data['uid'] = $data['image']['uid'];
-            $data['avatar'] = $data['image']['image'];
-        } else {
-            $data['avatar'] = $data['image'];
-        }
-        unset($data['image']);
-        if ($id) {
-            $res = $this->services->update($id, $data);
-            if ($res) {
-                return $this->success('编辑成功');
-            } else {
-                return $this->fail('编辑失败');
+            if (is_array($data['image']) && !empty($data['image']['image'])) {
+                $data['avatar'] = (string)$data['image']['image'];
             }
         } else {
-            $data['add_time'] = time();
-            $res = $this->services->save($data);
-            if ($res) {
-                return $this->success('核销员添加成功');
-            } else {
-                return $this->fail('核销员添加失败，请稍后再试');
+            if (is_string($data['image']) && $data['image'] !== '') {
+                $data['avatar'] = $data['image'];
+            } elseif (is_array($data['image']) && !empty($data['image']['image'])) {
+                $data['avatar'] = (string)$data['image']['image'];
             }
         }
+        unset($data['image'], $data['uid']);
+        $data['is_store'] = 1;
+        $data['roles'] = $data['roles'] ?? [];
+        if (!$this->checkStaffStoreAccess((int)$data['store_id'])) {
+            return $this->fail('无权在该门店操作核销员');
+        }
+        try {
+            app()->make(\app\services\organization\OrganizationWorkspaceWriteGate::class)->assertCanWrite();
+            /** @var \app\services\employee\EmployeeStaffWriteServices $write */
+            $write = app()->make(\app\services\employee\EmployeeStaffWriteServices::class);
+            $ret = $write->saveStaffAssignment((int)$id, $data, [
+                'operator_id' => (int)$this->adminId,
+                'operator_name' => (string)($this->adminInfo['real_name'] ?? $this->adminInfo['account'] ?? ''),
+                'operator_ip' => (string)$this->request->ip(),
+                'source' => 'admin',
+                'reason' => $id ? '总后台编辑核销员' : '总后台新建核销员',
+                'allow_profile_update' => (int)$id > 0,
+            ]);
+        } catch (AdminException $e) {
+            return $this->fail($e->getMessage());
+        } catch (\Throwable $e) {
+            return $this->fail($e->getMessage() ?: '保存失败');
+        }
+        return $this->success($id ? '编辑成功' : '核销员添加成功', [
+            'staff_id' => (int)$ret['staff_id'],
+            'employee_id' => (int)$ret['employee_id'],
+        ]);
     }
 
     /**
@@ -295,28 +315,73 @@ class SystemStoreStaff extends AuthController
      */
     public function set_show($is_show = '', $id = '')
     {
-        if ($is_show == '' || $id == '') {
-            $this->fail('缺少参数');
+        if ($is_show === '' || $id === '') {
+            return $this->fail('缺少参数');
         }
-        $res = $this->services->update($id, ['status' => (int)$is_show]);
-        if ($res) {
-            return $this->success($is_show == 1 ? '开启成功' : '关闭成功');
-        } else {
-            return $this->fail($is_show == 1 ? '开启失败' : '关闭失败');
+        $id = (int)$id;
+        $isShow = (int)$is_show;
+        if ($isShow === 1) {
+            return $this->fail('请通过编辑员工重新启用并选择门店角色');
+        }
+        if ($isShow !== 0) {
+            return $this->fail('参数有误');
+        }
+        try {
+            // H3：写门禁 → 管理员范围校验 → leaveStoreAssignment
+            app()->make(\app\services\organization\OrganizationWorkspaceWriteGate::class)->assertCanWrite();
+            $staff = $this->services->getStaffInfo($id);
+            if (!$this->checkStaffStoreAccess((int)$staff['store_id'])) {
+                return $this->fail('无权操作该店员');
+            }
+            /** @var \app\services\employee\EmployeeStaffWriteServices $write */
+            $write = app()->make(\app\services\employee\EmployeeStaffWriteServices::class);
+            $write->leaveStoreAssignment($id, [
+                'operator_id' => (int)$this->adminId,
+                'operator_name' => (string)($this->adminInfo['real_name'] ?? $this->adminInfo['account'] ?? ''),
+                'operator_ip' => (string)$this->request->ip(),
+                'source' => 'admin',
+                'reason' => '总后台关闭门店任职',
+            ], false);
+            return $this->success('关闭成功');
+        } catch (AdminException $e) {
+            return $this->fail($e->getMessage());
+        } catch (\Throwable $e) {
+            return $this->fail($e->getMessage() ?: '关闭失败');
         }
     }
 
     /**
-     * 删除店员
+     * 删除店员（软删：单店离职清权后 is_del=1，保留历史身份）
      * @param $id
      */
     public function delete($id)
     {
-        if (!$id) return $this->fail('数据不存在');
-        if (!$this->services->delete($id))
-            return $this->fail('删除失败,请稍候再试!');
-        else
+        $id = (int)$id;
+        if (!$id) {
+            return $this->fail('数据不存在');
+        }
+        try {
+            // H3：写门禁 → 管理员范围校验 → leaveStoreAssignment
+            app()->make(\app\services\organization\OrganizationWorkspaceWriteGate::class)->assertCanWrite();
+            $staff = $this->services->getStaffInfo($id);
+            if (!$this->checkStaffStoreAccess((int)$staff['store_id'])) {
+                return $this->fail('无权操作该店员');
+            }
+            /** @var \app\services\employee\EmployeeStaffWriteServices $write */
+            $write = app()->make(\app\services\employee\EmployeeStaffWriteServices::class);
+            $write->leaveStoreAssignment($id, [
+                'operator_id' => (int)$this->adminId,
+                'operator_name' => (string)($this->adminInfo['real_name'] ?? $this->adminInfo['account'] ?? ''),
+                'operator_ip' => (string)$this->request->ip(),
+                'source' => 'admin',
+                'reason' => '总后台删除门店任职',
+            ], true);
             return $this->success('删除成功!');
+        } catch (AdminException $e) {
+            return $this->fail($e->getMessage());
+        } catch (\Throwable $e) {
+            return $this->fail($e->getMessage() ?: '删除失败,请稍候再试!');
+        }
     }
 
     /**
@@ -356,146 +421,198 @@ class SystemStoreStaff extends AuthController
     }
 
     /**
-     * 保存店员信息（总后台编辑/新建）
-     * @param int $id
+     * 保存店员信息（总后台编辑/新建）——委托人员完整保存编排
+     * @param int $id staff_id；无店直属新建可为 0，编辑可传 employee_id
      * @return mixed
      */
     public function saveStaff($id = 0)
     {
-        $data = $this->request->postMore([
-            ['image', ''],
-            ['account', ''],
-            ['uid', 0],
-            ['avatar', ''],
-            ['staff_name', ''],
-            ['roles', []],
-            ['phone', ''],
-            ['verify_status', 1],
-            ['is_manager', 0],
-            ['is_cashier', 0],
-            ['status', 1],
-            ['salary_status', 1],
-            ['conf_pwd', ''],
-            ['pwd', ''],
-            ['notify', 0],
-            ['position', 0],
-            ['position_level', 0],
-            ['is_customer', 0],
-            ['can_choose', 1],
-            ['is_reservable', 1],
-            // is_butler 已合并到店长：兼容期仍可读请求，normalizeStaffManagerFields 升 is_manager 后丢弃
-            ['is_butler', 0],
-            ['is_fencheng', 0],
-            ['customer_url', ''],
-            [['work_member_id', 'd'], 0],
-            ['department', ''],
-            ['employee_number', ''],
-            ['join_date', null],
-            ['id_card', ''],
-            ['birthday_date', ''],
-            ['birthday_type', 1],
-            ['age', 0],
-            ['join_area', ''],
-            ['birthday_area', ''],
-            ['now_area', ''],
-            ['contract_begin', null],
-            ['contract_end', null],
-            [['store_id', 'd'], 0],
-        ]);
-        $id = (int)$id;
-        $this->validate($data, \app\validate\store\StoreStaffValidate::class, $id ? 'update' : 'save');
-        $account = trim((string)$data['account']);
-        if ($account !== '') {
-            if (strlen($account) < 4 || strlen($account) > 64) {
-                return $this->fail('门店店员账号长度4-64位字符');
-            }
-            if (!$id && !$data['pwd']) {
-                return $this->fail('请输入密码');
-            }
-        }
-        if ($id) {
-            $staff = $this->services->get($id);
-            if (!$staff) {
-                return $this->fail('店员不存在');
-            }
-            $staffArr = is_object($staff) ? $staff->toArray() : (array)$staff;
-            if (!$this->checkStaffStoreAccess((int)$staffArr['store_id'])) {
-                return $this->fail('无权操作该店员');
-            }
-            $data['store_id'] = (int)$staffArr['store_id'];
-        } else {
-            if (!$data['store_id']) {
-                return $this->fail('请选择所属门店');
-            }
-            if (!$this->checkStaffStoreAccess((int)$data['store_id'])) {
-                return $this->fail('无权在该门店添加店员');
-            }
-            $data['is_fencheng'] = (int)($data['is_fencheng'] ?? 0);
-            $data['level'] = 1;
-            $data['add_time'] = time();
-            if (!empty($data['image']) && is_array($data['image'])) {
-                $data['uid'] = (int)($data['image']['uid'] ?? $data['uid']);
-                $data['avatar'] = (string)($data['image']['image'] ?? $data['avatar']);
-            }
-        }
-        $data['is_store'] = 1;
-        if ($data['pwd']) {
-            $data['pwd'] = $this->services->passwordHash($data['pwd']);
-        } else {
-            unset($data['pwd']);
+        $raw = $this->request->post();
+        if (!is_array($raw)) {
+            $raw = [];
         }
         try {
-            $this->services->assertAccountUnique($account, $id);
-            $this->services->assertPhoneUnique((string)$data['phone'], $id);
+            \app\services\store\SystemStoreStaffServices::assertNoLegacyStaffAuthBypass($raw);
         } catch (AdminException $e) {
             return $this->fail($e->getMessage());
         }
-        $data['account'] = $account;
-        /** @var SystemStoreServices $storeServices */
-        $storeServices = app()->make(SystemStoreServices::class);
-        if ($data['uid']) {
-            $userStaff = $this->services->getOne(['uid' => $data['uid'], 'is_del' => 0]);
-            if ($userStaff && (int)$userStaff['store_id'] !== (int)$data['store_id'] && (int)$userStaff['id'] !== $id) {
-                $store = $storeServices->get($userStaff['store_id']);
-                return $this->fail('该用户已在（' . ($store['name'] ?? '') . '）门店存在!');
+
+        $id = (int)$id;
+        $employeeId = (int)($raw['employee_id'] ?? 0);
+        $storeId = (int)($raw['store_id'] ?? 0);
+        $orgId = (int)($raw['org_id'] ?? 0);
+        if ($orgId <= 0 && $employeeId > 0) {
+            $orgId = (int)Db::name('organization_employee')
+                ->where('employee_id', $employeeId)->where('is_del', 0)->order('id', 'desc')->value('org_id');
+        }
+        if ($id > 0) {
+            $staff = $this->services->get($id);
+            if (!$staff) {
+                // 兼容：URL id 为 employee_id（无店直属）
+                $emp = Db::name('employee')->where('id', $id)->where('is_del', 0)->find();
+                if ($emp) {
+                    $employeeId = $id;
+                    $id = 0;
+                } else {
+                    return $this->fail('店员不存在');
+                }
+            } else {
+                $staffArr = is_object($staff) ? $staff->toArray() : (array)$staff;
+                if ((int)($staffArr['store_id'] ?? 0) > 0 && !$this->checkStaffStoreAccess((int)$staffArr['store_id'])) {
+                    return $this->fail('无权操作该店员');
+                }
+                $storeId = (int)$staffArr['store_id'];
+                $employeeId = (int)($staffArr['employee_id'] ?? $employeeId);
+                if ($orgId <= 0 && $employeeId > 0) {
+                    $orgId = (int)Db::name('organization_employee')
+                        ->where('employee_id', $employeeId)->where('is_del', 0)->order('id', 'desc')->value('org_id');
+                }
+                if ($orgId <= 0 && $storeId > 0) {
+                    $orgId = (int)Db::name('organization_store')->where('store_id', $storeId)->value('org_id');
+                }
+            }
+        } elseif ($storeId > 0) {
+            if (!$this->checkStaffStoreAccess($storeId)) {
+                return $this->fail('无权在该门店添加店员');
             }
         }
-        $data['customer_phone'] = $data['phone'];
-        if ($data['is_customer']) {
-            $storeInfo = $storeServices->getStoreInfo((int)$data['store_id']);
-            if ($storeInfo['customer_type'] == 1 && !$data['customer_phone']) {
-                return $this->fail('请输入客服电话');
+
+        $avatar = trim((string)($raw['avatar'] ?? ''));
+        if ($avatar === '' && !empty($raw['image']) && is_array($raw['image'])) {
+            $avatar = (string)($raw['image']['image'] ?? '');
+        }
+
+        $headerToken = trim((string)$this->request->header('X-Request-Token', ''));
+        if ($headerToken === '') {
+            $headerToken = trim((string)$this->request->header('Request-Token', ''));
+        }
+        $bodyToken = trim((string)($raw['request_token'] ?? $this->request->param('request_token', '')));
+
+        $positionIds = array_key_exists('position_ids', $raw) ? ($raw['position_ids'] ?? []) : null;
+        if ($positionIds === null) {
+            if ($id > 0) {
+                $positionIds = array_map(static function ($j) {
+                    return (int)($j['position_id'] ?? 0);
+                }, app()->make(\app\services\organization\StaffJobPositionServices::class)->listActiveJobs($id));
+            } elseif ($employeeId > 0) {
+                $positionIds = array_map(static function ($j) {
+                    return (int)($j['position_id'] ?? 0);
+                }, app()->make(\app\services\organization\StaffJobPositionServices::class)->listActiveJobs(0, $employeeId));
+            } else {
+                $positionIds = [];
             }
-            if ($storeInfo['customer_type'] == 2 && !$data['customer_url']) {
-                return $this->fail('请选择客服二维码');
+        }
+        $scopeMode = array_key_exists('scope_mode', $raw)
+            ? trim((string)$raw['scope_mode'])
+            : '';
+        $orgIds = array_key_exists('org_ids', $raw) ? ($raw['org_ids'] ?? []) : null;
+        $storeIdsScope = array_key_exists('store_ids', $raw) ? ($raw['store_ids'] ?? []) : null;
+        if ($scopeMode === '' && $employeeId > 0) {
+            $scopes = app()->make(\app\services\organization\EmployeeDataScopeServices::class)->listScopes($employeeId, 0);
+            $scopeMode = 'personal';
+            $orgIds = [];
+            $storeIdsScope = [];
+            foreach ($scopes as $sc) {
+                if ((string)($sc['source_type'] ?? '') === 'hq') {
+                    $scopeMode = (string)($sc['scope_mode'] ?? 'personal');
+                    $orgIds = $sc['org_ids'] ?? [];
+                    $storeIdsScope = $sc['store_ids'] ?? [];
+                    break;
+                }
             }
         }
-        $data['work_member_code'] = '';
-        if (isset($data['work_member_id']) && $data['work_member_id']) {
-            /** @var WorkMemberServices $workMemberService */
-            $workMemberService = app()->make(WorkMemberServices::class);
-            $data['work_member_code'] = $workMemberService->value(['id' => $data['work_member_id']], 'qr_code');
-            $info = $this->services->get(['work_member_id' => $data['work_member_id'], 'is_del' => 0]);
-            if ($info && (int)$info['id'] !== $id) {
-                return $this->fail('该员工已绑定店员，不能重复绑定！');
+        if ($scopeMode === '') {
+            $scopeMode = 'personal';
+        }
+        if ($orgIds === null) {
+            $orgIds = [];
+        }
+        if ($storeIdsScope === null) {
+            $storeIdsScope = [];
+        }
+        $account = trim((string)($raw['account'] ?? ''));
+        if ($account === '' && $employeeId > 0) {
+            $account = trim((string)Db::name('employee_internal_account')
+                ->where('employee_id', $employeeId)->where('is_del', 0)->value('account'));
+        }
+
+        $input = [
+            'employee_id' => $employeeId,
+            'staff_id' => $id,
+            'org_id' => $orgId,
+            'store_id' => $storeId,
+            'staff_name' => trim((string)($raw['staff_name'] ?? '')),
+            'phone' => trim((string)($raw['phone'] ?? '')),
+            'avatar' => $avatar,
+            'account' => $account,
+            'pwd' => (string)($raw['pwd'] ?? ''),
+            'position_ids' => is_array($positionIds) ? $positionIds : [],
+            'scope_mode' => $scopeMode,
+            'org_ids' => $orgIds,
+            'store_ids' => $storeIdsScope,
+            'can_choose' => (int)($raw['can_choose'] ?? 1),
+            'is_fencheng' => (int)($raw['is_fencheng'] ?? 0),
+            'is_reservable' => (int)($raw['is_reservable'] ?? 1),
+            'verify_status' => (int)($raw['verify_status'] ?? 1),
+            'is_cashier' => (int)($raw['is_cashier'] ?? 0),
+            'is_customer' => (int)($raw['is_customer'] ?? 0),
+            'status' => (int)($raw['status'] ?? 1),
+            'request_token' => $bodyToken,
+        ];
+        foreach (['roles', 'role_ids', 'save_roles', 'is_manager', 'is_butler', 'position', 'position_level'] as $k) {
+            if (array_key_exists($k, $raw)) {
+                $input[$k] = $raw[$k];
             }
         }
-        unset($data['conf_pwd'], $data['image']);
-        $this->services->normalizeStaffAvatar($data);
-        $this->services->normalizeStaffDates($data);
-        $this->services->normalizeStaffManagerFields($data);
-        $this->services->applyRolesFlags($data);
-        if ($id) {
-            $res = $this->services->update($id, $data);
-            $msg = $res ? '编辑成功' : '编辑失败，请稍后再试';
-        } else {
-            $res = $this->services->save($data);
-            $msg = $res ? '添加成功' : '添加失败，请稍后再试';
+
+        try {
+            /** @var \app\services\employee\EmployeePersonCompleteWriteServices $complete */
+            $complete = app()->make(\app\services\employee\EmployeePersonCompleteWriteServices::class);
+            $ret = $complete->saveComplete(
+                $input,
+                [
+                    'id' => (int)$this->adminId,
+                    'account' => (string)($this->adminInfo['account'] ?? ''),
+                    'real_name' => (string)($this->adminInfo['real_name'] ?? ''),
+                    'level' => (int)($this->adminInfo['level'] ?? 0),
+                    'admin_type' => (int)($this->adminInfo['admin_type'] ?? $this->adminType ?? 0),
+                ],
+                [
+                    'header_token' => $headerToken,
+                    'body_token' => $bodyToken,
+                    'operator_ip' => (string)$this->request->ip(),
+                ],
+                'hq'
+            );
+            $data = is_array($ret['data'] ?? null) ? $ret['data'] : [];
+        } catch (AdminException $e) {
+            return $this->fail($e->getMessage());
+        } catch (\Throwable $e) {
+            return $this->fail($e->getMessage() ?: '保存失败');
         }
-        if ($res) {
-            return $this->success($msg);
+        return $this->success($id || $employeeId ? '编辑成功' : '添加成功', $data);
+    }
+
+    /**
+     * 人员完整详情（含岗位与数据权限）
+     * @param int $id employee_id；可选 query staff_id
+     */
+    public function personComplete($id = 0)
+    {
+        $id = (int)$id;
+        if ($id <= 0) {
+            return $this->fail('缺少员工id');
         }
-        return $this->fail($msg);
+        $staffId = (int)$this->request->get('staff_id', 0);
+        try {
+            /** @var \app\services\employee\EmployeePersonCompleteWriteServices $complete */
+            $complete = app()->make(\app\services\employee\EmployeePersonCompleteWriteServices::class);
+            return $this->success($complete->getComplete($id, $staffId, 'hq'));
+        } catch (AdminException $e) {
+            return $this->fail($e->getMessage());
+        } catch (\Throwable $e) {
+            return $this->fail($e->getMessage() ?: '读取失败');
+        }
     }
 
     /**

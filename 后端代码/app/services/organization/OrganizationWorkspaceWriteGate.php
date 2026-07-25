@@ -17,7 +17,11 @@ class OrganizationWorkspaceWriteGate
     public const REASON_LEGACY_BLOCKED = 'LEGACY_WRITE_BLOCKED';
     public const REASON_NOT_SUPER_ADMIN = 'NOT_SUPER_ADMIN';
     public const REASON_IDENTITY_UNKNOWN = 'IDENTITY_UNKNOWN';
+    public const REASON_NO_STAFF_MAINTAIN = 'NO_STAFF_MAINTAIN';
     public const REASON_OK = 'OK';
+
+    /** 人员维护功能权限标识（与前端 v-auth 一致） */
+    public const AUTH_STAFF_MAINTAIN = 'setting-staff-index';
 
     /**
      * 读取平台门禁配置（恰好一条才 ok）
@@ -171,6 +175,108 @@ class OrganizationWorkspaceWriteGate
     public function isSuperAdmin(array $adminInfo): bool
     {
         return $this->assertSuperAdmin($adminInfo)['ok'];
+    }
+
+    /**
+     * 平台人员新建/编辑保存权限：岗位功能权限，不要求 level=0。
+     * - 账号须有效、未删除
+     * - 仅平台后台账号；admin_type=3 代理拒绝
+     * - 须具备 setting-staff-index（角色 rules → menus.unique_auth）
+     * - 禁止信任前端传来的角色/权限字段
+     *
+     * @return array{ok:bool,reason_code:string,reason_text:string}
+     */
+    public function assertPlatformStaffMaintainPermission(array $adminInfo): array
+    {
+        if (!is_array($adminInfo)
+            || !array_key_exists('id', $adminInfo)
+            || !array_key_exists('level', $adminInfo)
+            || !array_key_exists('admin_type', $adminInfo)
+        ) {
+            return [
+                'ok' => false,
+                'reason_code' => self::REASON_IDENTITY_UNKNOWN,
+                'reason_text' => '无法确认登录身份，禁止写入',
+            ];
+        }
+        if (!$this->isNonNegativeIntLike($adminInfo['id'])
+            || !$this->isIntLike($adminInfo['level'])
+            || !$this->isIntLike($adminInfo['admin_type'])
+        ) {
+            return [
+                'ok' => false,
+                'reason_code' => self::REASON_IDENTITY_UNKNOWN,
+                'reason_text' => '无法确认登录身份，禁止写入',
+            ];
+        }
+        $id = (int)$adminInfo['id'];
+        $adminType = (int)$adminInfo['admin_type'];
+        if ($id <= 0) {
+            return [
+                'ok' => false,
+                'reason_code' => self::REASON_IDENTITY_UNKNOWN,
+                'reason_text' => '无法确认登录身份，禁止写入',
+            ];
+        }
+        if ($adminType === 3) {
+            return [
+                'ok' => false,
+                'reason_code' => self::REASON_NO_STAFF_MAINTAIN,
+                'reason_text' => '当前岗位未配置“人员维护”权限，请联系总部管理员授权。',
+            ];
+        }
+
+        $row = Db::name('system_admin')->where('id', $id)->where('is_del', 0)->find();
+        if (!$row) {
+            return [
+                'ok' => false,
+                'reason_code' => self::REASON_IDENTITY_UNKNOWN,
+                'reason_text' => '无法确认登录身份，禁止写入',
+            ];
+        }
+        if ((int)($row['status'] ?? 0) !== 1) {
+            return [
+                'ok' => false,
+                'reason_code' => self::REASON_IDENTITY_UNKNOWN,
+                'reason_text' => '账号已停用，禁止写入',
+            ];
+        }
+        if ((int)($row['admin_type'] ?? 0) === 3) {
+            return [
+                'ok' => false,
+                'reason_code' => self::REASON_NO_STAFF_MAINTAIN,
+                'reason_text' => '当前岗位未配置“人员维护”权限，请联系总部管理员授权。',
+            ];
+        }
+
+        $level = (int)($row['level'] ?? 1);
+        // level=0 超管：平台菜单全集，具备人员维护
+        if ($level === 0) {
+            return ['ok' => true, 'reason_code' => self::REASON_OK, 'reason_text' => ''];
+        }
+
+        $roleIds = array_values(array_filter(array_map('intval', explode(',', (string)($row['roles'] ?? '')))));
+        if (!$roleIds) {
+            return [
+                'ok' => false,
+                'reason_code' => self::REASON_NO_STAFF_MAINTAIN,
+                'reason_text' => '当前岗位未配置“人员维护”权限，请联系总部管理员授权。',
+            ];
+        }
+
+        /** @var \app\services\system\SystemMenusServices $menusSvc */
+        $menusSvc = app()->make(\app\services\system\SystemMenusServices::class);
+        [, $uniqueAuth] = $menusSvc->getMenusList($roleIds, $level, 1, (int)($row['admin_type'] ?? 0));
+        $uniqueAuth = is_array($uniqueAuth) ? $uniqueAuth : [];
+        $ok = in_array(self::AUTH_STAFF_MAINTAIN, $uniqueAuth, true);
+        if (!$ok) {
+            return [
+                'ok' => false,
+                'reason_code' => self::REASON_NO_STAFF_MAINTAIN,
+                'reason_text' => '当前岗位未配置“人员维护”权限，请联系总部管理员授权。',
+            ];
+        }
+        return ['ok' => true, 'reason_code' => self::REASON_OK, 'reason_text' => ''];
     }
 
     /**

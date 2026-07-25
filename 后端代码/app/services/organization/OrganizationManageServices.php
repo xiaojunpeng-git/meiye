@@ -1352,6 +1352,271 @@ class OrganizationManageServices extends BaseServices
         return $result;
     }
 
+    /**
+     * 授权组织权限人员（仅建/复活 organization_admin 关系，不改 system_admin 账号密码角色）
+     * @param int[] $allowedStoreIds
+     * @return array{changed:bool,idempotent:bool,org_id:int,org_admin_id:int,employee_id:int,admin_id:int,scope_mode:string,allowed_store_ids:array}
+     */
+    public function applyGrantAdmin(
+        int $orgId,
+        int $employeeId,
+        int $adminId,
+        string $scopeMode,
+        array $allowedStoreIds,
+        int $operatorId = 0,
+        string $operatorName = '',
+        array $auditMeta = []
+    ): array {
+        $orgId = (int)$orgId;
+        $employeeId = (int)$employeeId;
+        $adminId = (int)$adminId;
+        $scopeMode = strtolower(trim($scopeMode));
+        if ($orgId <= 0 || $employeeId <= 0 || $adminId <= 0) {
+            throw new \Exception('授权参数不完整');
+        }
+        if (!in_array($scopeMode, ['inherit', 'custom'], true)) {
+            throw new \Exception('权限范围模式无效');
+        }
+
+        $org = Db::name('organization')->where('id', $orgId)->where('is_del', 0)->lock(true)->find();
+        if (!$org) {
+            throw new \Exception('组织不存在');
+        }
+        $employee = Db::name('employee')->where('id', $employeeId)->lock(true)->find();
+        if (!$employee || (int)($employee['is_del'] ?? 0) === 1 || (int)($employee['status'] ?? 0) !== 1) {
+            throw new \Exception('员工不存在或非在职');
+        }
+        $sysAdmin = Db::name('system_admin')->where('id', $adminId)->lock(true)->find();
+        if (!$sysAdmin || (int)($sysAdmin['is_del'] ?? 0) === 1) {
+            throw new \Exception('后台账号不存在或已删除');
+        }
+        if ((int)($sysAdmin['status'] ?? 0) !== 1) {
+            throw new \Exception('后台账号已停用');
+        }
+        if ((int)($sysAdmin['employee_id'] ?? 0) !== $employeeId) {
+            throw new \Exception('后台账号未精确绑定该员工，禁止授权');
+        }
+
+        $orgStoreIds = $this->getValidOrgStoreIdsForWrite($orgId);
+        $orgFlip = array_flip($orgStoreIds);
+        $allowedStoreIds = array_values(array_unique(array_filter(array_map('intval', $allowedStoreIds))));
+        sort($allowedStoreIds);
+        if ($scopeMode === 'inherit') {
+            if ($allowedStoreIds !== []) {
+                throw new \Exception('继承组织范围时请勿传入可管理门店');
+            }
+        } else {
+            if ($allowedStoreIds === []) {
+                // custom 允许空 allowed（即全部排除），与范围保存一致按 store 校验
+            }
+            foreach ($allowedStoreIds as $sid) {
+                if (!isset($orgFlip[$sid])) {
+                    throw new \Exception('可管理门店超出组织范围');
+                }
+            }
+        }
+
+        $existing = Db::name('organization_admin')
+            ->where('org_id', $orgId)
+            ->where('admin_id', $adminId)
+            ->lock(true)
+            ->find();
+        $time = time();
+        $snapshotName = (string)($employee['name'] ?? '');
+        $snapshotPhone = (string)($employee['phone'] ?? '');
+        $snapshotUid = (int)($employee['uid'] ?? 0);
+        $changed = false;
+        $idempotent = false;
+
+        if ($existing) {
+            $orgAdminId = (int)$existing['id'];
+            if ((int)($existing['is_del'] ?? 0) === 0
+                && (int)($existing['employee_id'] ?? 0) === $employeeId
+            ) {
+                $idempotent = true;
+            } else {
+                Db::name('organization_admin')->where('id', $orgAdminId)->update([
+                    'employee_id' => $employeeId,
+                    'name' => $snapshotName,
+                    'phone' => $snapshotPhone,
+                    'uid' => $snapshotUid > 0 ? $snapshotUid : 0,
+                    'admin_id' => $adminId,
+                    'is_del' => 0,
+                    'update_time' => $time,
+                ]);
+                $changed = true;
+            }
+        } else {
+            $orgAdminId = (int)Db::name('organization_admin')->insertGetId([
+                'employee_id' => $employeeId,
+                'org_id' => $orgId,
+                'name' => $snapshotName,
+                'phone' => $snapshotPhone,
+                'admin_id' => $adminId,
+                'uid' => $snapshotUid > 0 ? $snapshotUid : 0,
+                'legacy_agent_id' => 0,
+                'is_del' => 0,
+                'scope_mode' => 'inherit',
+                'add_time' => $time,
+                'update_time' => $time,
+            ]);
+            if ($orgAdminId <= 0) {
+                throw new \Exception('创建组织权限关系失败');
+            }
+            $changed = true;
+        }
+
+        $scopeRet = $this->applySaveAdminPermissionScope(
+            $orgAdminId,
+            $scopeMode,
+            $allowedStoreIds,
+            $operatorId,
+            $operatorName,
+            $auditMeta
+        );
+        if (!empty($scopeRet['changed'])) {
+            $changed = true;
+            $idempotent = false;
+        }
+
+        if ($changed) {
+            $this->writeLog(
+                $orgId,
+                $existing && (int)($existing['is_del'] ?? 0) === 1 ? 'revive_admin_grant' : 'grant_admin',
+                'org_admin',
+                $orgAdminId,
+                $existing ? [
+                    'org_admin_id' => $orgAdminId,
+                    'employee_id' => (int)($existing['employee_id'] ?? 0),
+                    'admin_id' => (int)($existing['admin_id'] ?? 0),
+                    'is_del' => (int)($existing['is_del'] ?? 0),
+                ] : [],
+                [
+                    'org_admin_id' => $orgAdminId,
+                    'employee_id' => $employeeId,
+                    'admin_id' => $adminId,
+                    'scope_mode' => $scopeMode,
+                    'allowed_store_ids' => $scopeMode === 'inherit' ? [] : $allowedStoreIds,
+                ],
+                $existing && (int)($existing['is_del'] ?? 0) === 1 ? '复活组织权限人员' : '授权组织权限人员',
+                $operatorId,
+                $operatorName,
+                $auditMeta
+            );
+            $this->writeEmployeeChangeLog(
+                $employeeId,
+                'org_admin_grant',
+                'org_admin',
+                $orgAdminId,
+                [],
+                [
+                    'org_id' => $orgId,
+                    'admin_id' => $adminId,
+                    'scope_mode' => $scopeMode,
+                    'allowed_store_ids' => $scopeMode === 'inherit' ? [] : $allowedStoreIds,
+                ],
+                '授权组织后台权限',
+                $operatorId,
+                $operatorName,
+                $auditMeta
+            );
+        }
+
+        return [
+            'changed' => $changed,
+            'idempotent' => $idempotent && !$changed,
+            'org_id' => $orgId,
+            'org_admin_id' => $orgAdminId,
+            'employee_id' => $employeeId,
+            'admin_id' => $adminId,
+            'scope_mode' => (string)$scopeRet['scope_mode'],
+            'allowed_store_ids' => $scopeRet['allowed_store_ids'],
+        ];
+    }
+
+    /**
+     * 撤销组织权限：仅软删 organization_admin，清理排除明细；不删员工/后台账号/系统角色
+     * @return array{changed:bool,org_id:int,org_admin_id:int,employee_id:int,admin_id:int}
+     */
+    public function applyRevokeAdminGrant(
+        int $orgId,
+        int $orgAdminId,
+        int $operatorId = 0,
+        string $operatorName = '',
+        array $auditMeta = []
+    ): array {
+        $orgId = (int)$orgId;
+        $orgAdminId = (int)$orgAdminId;
+        if ($orgId <= 0 || $orgAdminId <= 0) {
+            throw new \Exception('撤销参数不完整');
+        }
+        $org = Db::name('organization')->where('id', $orgId)->where('is_del', 0)->lock(true)->find();
+        if (!$org) {
+            throw new \Exception('组织不存在');
+        }
+        $row = Db::name('organization_admin')->where('id', $orgAdminId)->lock(true)->find();
+        if (!$row || (int)($row['org_id'] ?? 0) !== $orgId) {
+            throw new \Exception('组织权限关系不存在');
+        }
+        if ((int)($row['is_del'] ?? 0) === 1) {
+            return [
+                'changed' => false,
+                'org_id' => $orgId,
+                'org_admin_id' => $orgAdminId,
+                'employee_id' => (int)($row['employee_id'] ?? 0),
+                'admin_id' => (int)($row['admin_id'] ?? 0),
+            ];
+        }
+        $employeeId = (int)($row['employee_id'] ?? 0);
+        $adminId = (int)($row['admin_id'] ?? 0);
+        $beforeExclude = array_map('intval', $this->excludeDao->getColumn(['org_admin_id' => $orgAdminId], 'store_id') ?: []);
+        sort($beforeExclude);
+        $this->excludeDao->delete(['org_admin_id' => $orgAdminId]);
+        Db::name('organization_admin')->where('id', $orgAdminId)->update([
+            'is_del' => 1,
+            'update_time' => time(),
+        ]);
+        $this->writeLog(
+            $orgId,
+            'revoke_admin_grant',
+            'org_admin',
+            $orgAdminId,
+            [
+                'employee_id' => $employeeId,
+                'admin_id' => $adminId,
+                'scope_mode' => (string)($row['scope_mode'] ?? ''),
+                'excluded_store_ids' => $beforeExclude,
+                'is_del' => 0,
+            ],
+            ['is_del' => 1],
+            '撤销组织权限人员',
+            $operatorId,
+            $operatorName,
+            $auditMeta
+        );
+        if ($employeeId > 0) {
+            $this->writeEmployeeChangeLog(
+                $employeeId,
+                'org_admin_revoke',
+                'org_admin',
+                $orgAdminId,
+                ['org_id' => $orgId, 'admin_id' => $adminId, 'is_del' => 0],
+                ['is_del' => 1],
+                '撤销组织后台权限',
+                $operatorId,
+                $operatorName,
+                $auditMeta
+            );
+        }
+        return [
+            'changed' => true,
+            'org_id' => $orgId,
+            'org_admin_id' => $orgAdminId,
+            'employee_id' => $employeeId,
+            'admin_id' => $adminId,
+        ];
+    }
+
     public function writeLog(
         int $orgId,
         string $action,

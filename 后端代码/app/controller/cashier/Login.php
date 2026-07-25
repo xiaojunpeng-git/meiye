@@ -133,31 +133,35 @@ class Login
      */
     public function login(Request $request)
     {
-        [$account, $password, $captchaType, $captchaVerification] = $request->postMore([
+        [$account, $password, $captchaType, $captchaVerification, $storeId, $loginTicket] = $request->postMore([
             'account',
             'pwd',
             ['captchaType', ''],
-            ['captchaVerification', '']
+            ['captchaVerification', ''],
+            ['store_id', 0],
+            ['login_ticket', ''],
         ], true);
 
-        validate(\app\validate\cashier\LoginValidate::class)->check(['account' => $account, 'pwd' => $password]);
+        $loginTicket = trim((string)$loginTicket);
+        if ($loginTicket === '') {
+            validate(\app\validate\cashier\LoginValidate::class)->check(['account' => $account, 'pwd' => $password]);
+        }
 
         $key = 'cashier_login_captcha_' . $account;
 
-        if (Cache::has($key) && Cache::get($key) > 2) {
+        if ($loginTicket === '' && Cache::has($key) && Cache::get($key) > 2) {
             if (!$captchaType || !$captchaVerification) {
                 return app('json')->fail('请拖动滑块验证');
             }
             //二次验证
             aj_captcha_check_two($captchaType, $captchaVerification);
         }
-        $res = $this->services->login($account, $password, 'cashier');
-        if ($res) {
+        $res = $this->services->login($account, $password, 'cashier', (int)$storeId, $loginTicket);
+        if ($res && empty($res['need_select_store'])) {
             Cache::delete($key);
         }
         return app('json')->success($res);
     }
-
     /**
      * 微信扫码登录
      * @return mixed

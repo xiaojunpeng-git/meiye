@@ -32,6 +32,7 @@ use app\services\user\UserSpreadServices;
 use mohe\exceptions\AdminException;
 use mohe\services\FormBuilder as Form;
 use think\exception\ValidateException;
+use think\facade\Db;
 
 /**
  * 门店店员
@@ -337,6 +338,11 @@ class SystemStoreStaffServices extends BaseServices
      */
     public function getStoreStaffList(array $where, array $with = [], bool $hideFencheng = false)
     {
+        $organizationId = (int)($where['organization_id'] ?? 0);
+        unset($where['organization_id']);
+        if ($organizationId > 0) {
+            return $this->getStoreStaffListWithOrganizationMembers($where, $organizationId, $with, $hideFencheng);
+        }
         $with = array_merge($with, [
             'workMember' => function ($query) {
                 $query->field(['id', 'uid', 'name', 'position', 'qr_code', 'external_position']);
@@ -355,6 +361,124 @@ class SystemStoreStaffServices extends BaseServices
         }
         $count = $this->dao->count($where);
         return compact('list', 'count');
+    }
+
+    /**
+     * 平台“店员列表”同时展示门店任职和组织直属人员。
+     * 直属人员没有 system_store_staff，不能编辑、调店、收银或产生任何门店权限。
+     */
+    protected function getStoreStaffListWithOrganizationMembers(array $where, int $organizationId, array $with, bool $hideFencheng): array
+    {
+        $selectedStoreId = (int)($where['organization_selected_store_id'] ?? 0);
+        unset($where['organization_selected_store_id']);
+        $with = array_merge($with, [
+            'workMember' => function ($query) {
+                $query->field(['id', 'uid', 'name', 'position', 'qr_code', 'external_position']);
+            }
+        ]);
+        [$page, $limit] = $this->getPageValue();
+        // 当前正式员工目录规模为千级；先在组织范围内合并，再统一分页，避免直属员工永远被门店行挤出第一页。
+        $storeRows = $this->dao->getStoreStaffList($where, '*', 0, 0, $with);
+        $allRole = $storeRows ? $this->loadRoleMapForStaffList($storeRows) : [];
+        /** @var UserServices $userService */
+        $userService = app()->make(UserServices::class);
+        $byEmployee = [];
+        foreach ($storeRows as &$row) {
+            $this->enrichStaffListItem($row, $allRole, $userService, $hideFencheng);
+            $row['is_organization_direct'] = 0;
+            $employeeId = (int)($row['employee_id'] ?? 0);
+            $byEmployee[$employeeId > 0 ? $employeeId : ('staff:' . (int)$row['id'])] = $row;
+        }
+        unset($row);
+
+        // 组织树选择范围默认包含下级，和门店列表的 org_id 语义保持一致。
+        $orgIds = $this->collectOrganizationIds($organizationId);
+        $directQuery = Db::name('organization_employee')->alias('oe')
+            ->join('employee e', 'e.id = oe.employee_id')
+            ->leftJoin('organization o', 'o.id = oe.org_id')
+            ->leftJoin('user u', 'u.uid = e.uid AND u.is_del=0')
+            ->whereIn('oe.org_id', $orgIds)
+            ->where('oe.is_del', 0)
+            ->where('e.is_del', 0);
+        if (isset($where['status']) && $where['status'] !== '') {
+            $directQuery->where('e.status', (int)$where['status']);
+        }
+        $keyword = trim((string)($where['keyword'] ?? ''));
+        if ($keyword !== '') {
+            $like = '%' . $keyword . '%';
+            $directQuery->where(function ($query) use ($keyword, $like) {
+                $query->where('e.id', $keyword)
+                    ->whereOr('e.uid', $keyword)
+                    ->whereOr('e.name', 'like', $like)
+                    ->whereOr('e.phone', 'like', $like);
+            });
+        }
+        // 选择具体门店时仅查看该店任职，直属人员不应伪装为门店员工。
+        if ($selectedStoreId > 0) {
+            $directRows = [];
+        } else {
+            $directRows = $directQuery
+                ->field('oe.org_id,oe.employee_id,oe.job_title,oe.source,e.id,e.uid,e.name,e.phone,e.avatar,e.status,u.nickname,o.name as org_name')
+                ->order('e.id', 'asc')
+                ->select()
+                ->toArray();
+        }
+        foreach ($directRows as $row) {
+            $employeeId = (int)$row['employee_id'];
+            // 同一人员已有当前组织内门店任职时保留真实门店行，避免重复；其直属关系仍保存在组织工作台。
+            if (isset($byEmployee[$employeeId])) {
+                continue;
+            }
+            $byEmployee[$employeeId] = [
+                // 负 ID 为只读占位，防止历史编辑/调店/业绩接口误把直属人员当店员。
+                'id' => -$employeeId,
+                'employee_id' => $employeeId,
+                'store_id' => 0,
+                'store_name' => (string)($row['org_name'] ?? '组织直属'),
+                'department' => (string)($row['org_name'] ?? ''),
+                'staff_name' => (string)($row['name'] ?? ''),
+                'nickname' => (string)($row['nickname'] ?? ''),
+                'phone' => (string)($row['phone'] ?? ''),
+                'avatar' => (string)($row['avatar'] ?? ''),
+                'roles' => '组织直属（无门店权限）',
+                'position_label' => (string)($row['job_title'] ?? '未设职位'),
+                'position_level_label' => '-',
+                'status' => (int)($row['status'] ?? 0),
+                'is_manager' => 0,
+                'can_choose' => 0,
+                'is_fencheng' => 0,
+                'has_pwd' => 0,
+                'is_customer' => 0,
+                'is_reservable' => 0,
+                'customer_num' => 0,
+                'is_organization_direct' => 1,
+            ];
+        }
+        $list = array_values($byEmployee);
+        usort($list, static function (array $left, array $right): int {
+            return ((int)($left['is_organization_direct'] ?? 0) <=> (int)($right['is_organization_direct'] ?? 0))
+                ?: ((int)($left['id'] ?? 0) <=> (int)($right['id'] ?? 0));
+        });
+        $count = count($list);
+        $list = array_slice($list, ($page - 1) * $limit, $limit);
+        return compact('list', 'count');
+    }
+
+    /** @return int[] */
+    protected function collectOrganizationIds(int $organizationId): array
+    {
+        $rows = Db::name('organization')->where('is_del', 0)->field('id,pid')->select()->toArray();
+        $children = [];
+        foreach ($rows as $row) $children[(int)$row['pid']][] = (int)$row['id'];
+        $ids = [];
+        $stack = [$organizationId];
+        while ($stack) {
+            $id = (int)array_pop($stack);
+            if ($id <= 0 || isset($ids[$id])) continue;
+            $ids[$id] = true;
+            foreach ($children[$id] ?? [] as $childId) $stack[] = $childId;
+        }
+        return array_keys($ids);
     }
 
     /**
@@ -600,13 +724,13 @@ class SystemStoreStaffServices extends BaseServices
 	 */
     public function createStaffForm(array $formData = [])
     {
-        if ($formData) {
-            $field[] = Form::frameImage('image', '更换头像', $this->url(config('admin.admin_prefix') . '/widget.images/index', array('fodder' => 'image'), true), $formData['avatar'] ?? '')->icon('ios-add')->width('960px')->height('505px')->modal(['footer-hide' => true]);
-        } else {
-            $field[] = Form::frameImage('image', '商城用户', $this->url(config('admin.admin_prefix') . '/system.User/list', ['fodder' => 'image'], true))->icon('ios-add')->width('960px')->height('550px')->modal(['footer-hide' => true])->Props(['srcKey' => 'image']);
-        }
-        $field[] = Form::hidden('uid', $formData['uid'] ?? 0);
-        $field[] = Form::hidden('avatar', $formData['avatar'] ?? '');
+        // I1/G6：核销员不再选择商城用户；仅普通头像上传
+        $field[] = Form::frameImage(
+            'avatar',
+            '头像：',
+            $this->url(config('admin.admin_prefix') . '/widget.images/index', ['fodder' => 'avatar'], true),
+            $formData['avatar'] ?? ''
+        )->icon('ios-add')->width('960px')->height('505px')->modal(['footer-hide' => true]);
         $field[] = Form::select('store_id', '所属门店：', ($formData['store_id'] ?? 0))->setOptions($this->getStoreSelectFormData())->filterable(true);
         $field[] = Form::input('staff_name', '核销员名称：', $formData['staff_name'] ?? '')->col(24)->required();
         $field[] = Form::input('phone', '手机号码：', $formData['phone'] ?? '')->col(24)->required();
@@ -746,32 +870,33 @@ class SystemStoreStaffServices extends BaseServices
 	 */
     public function createStoreStaffForm(int $store_id, $level)
     {
+        // I1/G6：门店端仅基础资料 + 门店角色；移除商城用户/店长/收银/订单管理等总部字段
         $field[] = Form::input('staff_name', '店员名称：')->col(24)->required('请输入门店店员名称');
-        $field[] = Form::frameImage('image', '商城用户：', $this->url(config('admin.store_prefix') . '/system.User/list', ['fodder' => 'image'], true))->icon('ios-add')->width('960px')->height('450px')->modal(['footer-hide' => true])->Props(['srcKey' => 'image']);
-        $field[] = Form::hidden('uid', 0);
-        $field[] = Form::hidden('avatar', '');
+        $field[] = Form::frameImage('avatar', '店员头像：', $this->url(config('admin.store_prefix') . '/widget.images/index', ['fodder' => 'avatar'], true))->icon('ios-add')->width('960px')->height('505px')->modal(['footer-hide' => true]);
         $field[] = Form::input('account', '店员账号：')->maxlength(35)->required('请填写门店店员账号');
         $field[] = Form::input('pwd', '店员密码：')->type('password')->required('请填写门店店员密码');
         $field[] = Form::input('conf_pwd', '确认密码：')->type('password')->required('请输入确认密码');
         $field[] = Form::input('phone', '手机号码：')->col(24)->required('请输入手机号');
         /** @var SystemRoleServices $service */
         $service = app()->make(SystemRoleServices::class);
-        $options = $service->getRoleFormSelect($level, 1, $store_id);
+        // I2：门店端仅可选总部已发布且允许本店选择的后台角色
+        try {
+            $options = app()->make(\app\services\organization\SystemRolePublishServices::class)
+                ->listStoreSelectableRoles($store_id);
+            if (!$options) {
+                $options = $service->getRoleFormSelect($level, 1, $store_id);
+            }
+        } catch (\Throwable $e) {
+            $options = $service->getRoleFormSelect($level, 1, $store_id);
+        }
         $roles = [];
         $field[] = Form::select('roles', '店员身份：', $roles)->setOptions(Form::setOptions($options))->multiple(true)->required('请选择店员身份');
-        $field[] = Form::radio('is_manager', '是否是店长：', 0)->options([['value' => 1, 'label' => '开启'], ['value' => 0, 'label' => '关闭']]);
-        $field[] = Form::radio('order_status', '订单管理：', 1)->options([['value' => 1, 'label' => '开启'], ['value' => 0, 'label' => '关闭']]);
-        $field[] = Form::radio('verify_status', '核销开关：', 1)->options([['value' => 1, 'label' => '开启'], ['value' => 0, 'label' => '关闭']]);
-        $field[] = Form::radio('is_cashier', '是否是收银员：', 1)->options([['value' => 1, 'label' => '开启'], ['value' => 0, 'label' => '关闭']]);
         /** @var WorkMemberServices $workMemberService */
         $workMemberService = app()->make(WorkMemberServices::class);
         $work = 0;
         $workList = $workMemberService->getMemberList(['status' => 1, 'enable' => 1], ['id', 'name', 'qr_code']);
-        $field[] = Form::radio('is_customer', '是否是客服：', 1)->options([['value' => 1, 'label' => '开启'], ['value' => 0, 'label' => '关闭']])->appendControl(1, [
-            Form::input('customer_phone', '客服手机号码：')->col(24),
-            Form::frameImage('customer_url', '客服二维码：', $this->url(config('admin.store_prefix') . '/widget.images/index', ['fodder' => 'customer_url'], true))->icon('ios-add')->width('960px')->height('505px')->modal(['footer-hide' => true]),
-            Form::select('work_member_id', '企微员工：', $work)->setOptions(Form::setOptions($workList))->multiple(false),
-        ]);
+        // I1/H1：门店端仅可选总部角色；核销/客服/可预约等总部字段禁止出现在门店表单
+        $field[] = Form::select('work_member_id', '企微员工：', $work)->setOptions(Form::setOptions($workList))->multiple(false);
         $field[] = Form::radio('notify', '通知开关：', 0)->options([['value' => 1, 'label' => '开启'], ['value' => 0, 'label' => '关闭']]);
         $field[] = Form::radio('status', '状态：', 1)->options([['value' => 1, 'label' => '开启'], ['value' => 0, 'label' => '关闭']]);
         return create_form('添加门店店员', $field, $this->url('/staff/staff'));
@@ -796,20 +921,24 @@ class SystemStoreStaffServices extends BaseServices
             throw new AdminException('门店店员已经删除');
         }
         $field[] = Form::input('staff_name', '店员名称：', $staffInfo['staff_name'])->col(24)->required('请填写门店店员名称');
-        if ($staffInfo['uid']) {
-            $field[] = Form::frameImage('avatar', '店员头像：', $this->url(config('admin.store_prefix') . '/widget.images/index', ['fodder' => 'avatar'], true), $staffInfo['avatar'] ?? '')->icon('ios-add')->width('960px')->height('505px')->modal(['footer-hide' => true]);
-        } else {//没绑定过商城用户
-            $field[] = Form::frameImage('image', '商城用户：', $this->url(config('admin.store_prefix') . '/system.User/list', ['fodder' => 'image'], true))->icon('ios-add')->width('960px')->height('450px')->modal(['footer-hide' => true])->Props(['srcKey' => 'image']);
-            $field[] = Form::hidden('uid', 0);
-            $field[] = Form::hidden('avatar', '');
-        }
+        // I1/G6：门店编辑仅头像上传，不再选商城用户；不展示店长/收银/订单管理
+        $field[] = Form::frameImage('avatar', '店员头像：', $this->url(config('admin.store_prefix') . '/widget.images/index', ['fodder' => 'avatar'], true), $staffInfo['avatar'] ?? '')->icon('ios-add')->width('960px')->height('505px')->modal(['footer-hide' => true]);
         $field[] = Form::input('account', '店员账号：', $staffInfo['account'])->maxlength(35)->required('请填写门店店员账号');
         $field[] = Form::input('pwd', '店员密码：')->placeholder('不更改密码请留空')->type('password');
         $field[] = Form::input('conf_pwd', '确认密码：')->placeholder('不更改密码请留空')->type('password');
         $field[] = Form::input('phone', '手机号码：', $staffInfo['phone'])->col(24)->required('请输入手机号');
         /** @var SystemRoleServices $service */
         $service = app()->make(SystemRoleServices::class);
-        $options = $service->getRoleFormSelect($level, 1, (int)$staffInfo['store_id']);
+        $storeId = (int)$staffInfo['store_id'];
+        try {
+            $options = app()->make(\app\services\organization\SystemRolePublishServices::class)
+                ->listStoreSelectableRoles($storeId);
+            if (!$options) {
+                $options = $service->getRoleFormSelect($level, 1, $storeId);
+            }
+        } catch (\Throwable $e) {
+            $options = $service->getRoleFormSelect($level, 1, $storeId);
+        }
         $roles = [];
         if ($staffInfo && isset($staffInfo['roles']) && $staffInfo['roles']) {
             foreach ($staffInfo['roles'] as $role) {
@@ -817,19 +946,12 @@ class SystemStoreStaffServices extends BaseServices
             }
         }
         $field[] = Form::select('roles', '店员身份：', $roles)->setOptions(Form::setOptions($options))->multiple(true)->required('请选择店员身份');
-        $field[] = Form::radio('is_manager', '是否是店长：', (int)$staffInfo['is_manager'])->options([['value' => 1, 'label' => '开启'], ['value' => 0, 'label' => '关闭']]);
-        $field[] = Form::radio('order_status', '订单管理：', (int)$staffInfo['order_status'])->options([['value' => 1, 'label' => '开启'], ['value' => 0, 'label' => '关闭']]);
-        $field[] = Form::radio('verify_status', '核销开关：', (int)$staffInfo['verify_status'])->options([['value' => 1, 'label' => '开启'], ['value' => 0, 'label' => '关闭']]);
-        $field[] = Form::radio('is_cashier', '是否是收银员：', (int)$staffInfo['is_cashier'])->options([['value' => 1, 'label' => '开启'], ['value' => 0, 'label' => '关闭']]);
         /** @var WorkMemberServices $workMemberService */
         $workMemberService = app()->make(WorkMemberServices::class);
         $work = (int)$staffInfo['work_member_id'];
         $workList = $workMemberService->getMemberList(['status' => 1, 'enable' => 1], ['id', 'name', 'qr_code']);
-        $field[] = Form::radio('is_customer', '是否是客服：',  (int)$staffInfo['is_customer'])->options([['value' => 1, 'label' => '开启'], ['value' => 0, 'label' => '关闭']])->appendControl(1, [
-            Form::input('customer_phone', '客服手机号码：',$staffInfo['customer_phone'])->col(24),
-            Form::frameImage('customer_url', '客服二维码：', $this->url(config('admin.store_prefix') . '/widget.images/index', ['fodder' => 'customer_url'], true), $staffInfo['customer_url'] ?? '')->icon('ios-add')->width('960px')->height('505px')->modal(['footer-hide' => true]),
-            Form::select('work_member_id', '企微员工：', $work)->setOptions(Form::setOptions($workList))->multiple(false),
-        ]);
+        // I1/H1：门店端仅可选总部角色；核销/客服等总部字段禁止出现在门店表单
+        $field[] = Form::select('work_member_id', '企微员工：', $work)->setOptions(Form::setOptions($workList))->multiple(false);
         $field[] = Form::radio('notify', '通知开关：', (int)$staffInfo['notify'])->options([['value' => 1, 'label' => '开启'], ['value' => 0, 'label' => '关闭']]);
         $field[] = Form::radio('status', '状态：', (int)$staffInfo['status'])->options([['value' => 1, 'label' => '开启'], ['value' => 0, 'label' => '关闭']]);
         return create_form('编辑门店店员', $field, $this->url('/staff/staff/' . $id), 'put');
@@ -1430,38 +1552,52 @@ class SystemStoreStaffServices extends BaseServices
     /**
      * 手机号全局唯一校验
      */
+    /**
+     * @deprecated I1：禁止 staff 手机号全局唯一。手机号唯一以 employee.phone 为准；同店有效任职由 EmployeeStaffWriteServices 校验。
+     * 保留空实现避免历史调用误阻断多店任职。
+     */
     public function assertPhoneUnique(string $phone, int $excludeId = 0): void
     {
-        $phone = trim($phone);
-        if ($phone === '') {
-            return;
-        }
-        $staff = $this->dao->getOne(['phone' => $phone, 'is_del' => 0]);
-        if (!$staff) {
-            return;
-        }
-        $staffId = is_object($staff) ? (int)$staff->id : (int)($staff['id'] ?? 0);
-        if ($excludeId > 0 && $staffId === $excludeId) {
-            return;
-        }
-        $row = is_object($staff) ? $staff->toArray() : (array)$staff;
-        /** @var SystemStoreServices $storeServices */
-        $storeServices = app()->make(SystemStoreServices::class);
-        $storeName = (string)$storeServices->value(['id' => (int)($row['store_id'] ?? 0)], 'name');
-        $staffName = (string)($row['staff_name'] ?? '');
-        $addTime = !empty($row['add_time']) ? date('Y-m-d H:i:s', is_numeric($row['add_time']) ? (int)$row['add_time'] : strtotime((string)$row['add_time'])) : '';
-        throw new AdminException('该手机号已存在于【' . $storeName . '】，店员名称【' . $staffName . '】，创建时间【' . $addTime . '】。');
+        // I1：不再做 staff 全局手机号唯一断言
     }
 
     /**
      * 账号全局唯一校验（非空账号）
+     * 同一 employee_id 的多条任职投影可共用同一统一账号；不同员工之间仍全局唯一。
      */
-    public function assertAccountUnique(string $account, int $excludeId = 0): void
+    public function assertAccountUnique(string $account, int $excludeId = 0, int $allowEmployeeId = 0): void
     {
         $account = trim($account);
         if ($account === '') {
             return;
         }
+        // 统一内部账号表优先
+        try {
+            $eia = Db::name('employee_internal_account')
+                ->where('account', $account)
+                ->where('is_del', 0)
+                ->find();
+            if ($eia) {
+                $eid = (int)($eia['employee_id'] ?? 0);
+                if ($allowEmployeeId > 0 && $eid === $allowEmployeeId) {
+                    // ok
+                } elseif ($excludeId > 0) {
+                    $selfEmp = (int)$this->dao->value(['id' => $excludeId], 'employee_id');
+                    if ($selfEmp > 0 && $eid === $selfEmp) {
+                        // ok
+                    } else {
+                        throw new AdminException('该登录账号已被其他员工使用');
+                    }
+                } else {
+                    throw new AdminException('该登录账号已被其他员工使用');
+                }
+            }
+        } catch (AdminException $e) {
+            throw $e;
+        } catch (\Throwable $e) {
+            // 表未升级时忽略，走 staff 校验
+        }
+
         $query = $this->dao->getWhere()->where('account', $account)->where('is_del', 0);
         if ($excludeId > 0) {
             $query->where('id', '<>', $excludeId);
@@ -1470,8 +1606,17 @@ class SystemStoreStaffServices extends BaseServices
         if (!$staff) {
             return;
         }
-        $staffId = is_object($staff) ? (int)$staff->id : (int)($staff['id'] ?? 0);
         $row = is_object($staff) ? $staff->toArray() : (array)$staff;
+        $otherEmp = (int)($row['employee_id'] ?? 0);
+        if ($allowEmployeeId > 0 && $otherEmp === $allowEmployeeId) {
+            return;
+        }
+        if ($excludeId > 0) {
+            $selfEmp = (int)$this->dao->value(['id' => $excludeId], 'employee_id');
+            if ($selfEmp > 0 && $otherEmp === $selfEmp) {
+                return;
+            }
+        }
         /** @var SystemStoreServices $storeServices */
         $storeServices = app()->make(SystemStoreServices::class);
         $storeName = (string)$storeServices->value(['id' => (int)($row['store_id'] ?? 0)], 'name');
@@ -1568,9 +1713,43 @@ class SystemStoreStaffServices extends BaseServices
     }
 
     /**
-     * 保存前归一：管家已合并店长。
-     * - 请求带 is_butler=1 → 升为店长
-     * - 只要本次保存带 is_manager（表单必带），同步写 is_butler=0，保证显式降级可撤销历史管家权限
+     * 拒绝旧人员权限绕过：店员权限/角色、手工店长开关
+     * @param array $raw 原始请求体（未 postMore 默认值污染前）
+     */
+    public static function assertNoLegacyStaffAuthBypass(array $raw): void
+    {
+        $hasNonEmptyList = static function ($v): bool {
+            if ($v === null || $v === '' || $v === []) {
+                return false;
+            }
+            if (!is_array($v)) {
+                return trim((string)$v) !== '';
+            }
+            foreach ($v as $item) {
+                if ($item === null || $item === '') {
+                    continue;
+                }
+                if (is_numeric($item) && (int)$item === 0) {
+                    continue;
+                }
+                return true;
+            }
+            return false;
+        };
+        if ($hasNonEmptyList($raw['roles'] ?? null) || $hasNonEmptyList($raw['role_ids'] ?? null)) {
+            throw new AdminException('人员功能权限由岗位决定，不能单独选择角色或店员权限');
+        }
+        if (array_key_exists('save_roles', $raw) && (int)$raw['save_roles'] === 1) {
+            throw new AdminException('人员功能权限由岗位决定，不能单独选择角色或店员权限');
+        }
+        if (array_key_exists('is_manager', $raw) || array_key_exists('is_butler', $raw)) {
+            throw new AdminException('店长身份由岗位属性决定，不能手工设置店长开关');
+        }
+    }
+
+    /**
+     * 保存前归一：管家已合并店长（兼容历史内部调用）。
+     * 新建/编辑人员接口已禁止客户端传 is_manager/is_butler；店长身份改由岗位投影。
      */
     public function normalizeStaffManagerFields(array &$data): void
     {
@@ -1579,7 +1758,6 @@ class SystemStoreStaffServices extends BaseServices
         }
         if (array_key_exists('is_manager', $data)) {
             $data['is_manager'] = (int)$data['is_manager'] === 1 ? 1 : 0;
-            // 显式保存店长字段时清除历史管家标记，否则关闭「店长」后 staffIsManager 仍因 is_butler=1 放行
             $data['is_butler'] = 0;
         } else {
             unset($data['is_butler']);

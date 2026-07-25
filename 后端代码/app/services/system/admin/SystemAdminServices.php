@@ -113,6 +113,67 @@ class SystemAdminServices extends BaseServices
      */
     public function login(string $account, string $password, string $type, bool $is_mobile = false, int $adminType = 0)
     {
+        // 统一内部账号优先：解析到 employee_id 后再校验平台入口
+        if (!$is_mobile && $adminType === 0 && $password !== '') {
+            try {
+                /** @var \app\services\employee\EmployeeInternalAccountServices $acctSvc */
+                $acctSvc = app()->make(\app\services\employee\EmployeeInternalAccountServices::class);
+                $unified = $acctSvc->resolveByLoginInput($account);
+                if ($unified) {
+                    $auth = $acctSvc->authenticateByPassword($account, $password);
+                    /** @var \app\services\employee\EmployeeInternalLoginServices $loginSvc */
+                    $loginSvc = app()->make(\app\services\employee\EmployeeInternalLoginServices::class);
+                    if (!$loginSvc->employeeHasPlatformEntry((int)$auth['employee_id'])) {
+                        throw new AdminException('当前账号无平台后台权限');
+                    }
+                    $adminArr = $loginSvc->resolvePlatformAdmin(
+                        (int)$auth['employee_id'],
+                        $auth['account_row'],
+                        $auth['employee']
+                    );
+                    $adminInfo = $this->dao->get((int)$adminArr['id']);
+                    if (!$adminInfo) {
+                        throw new AdminException('平台账号投影无效');
+                    }
+                    $acctSvc->touchLogin((int)$unified['id'], (string)app('request')->ip());
+                    $adminInfo->last_time = time();
+                    $adminInfo->last_ip = app('request')->ip();
+                    $adminInfo->login_count++;
+                    $adminInfo->save();
+                    $tokenInfo = $this->createToken($adminInfo->id, $type, $adminInfo['pwd']);
+                    /** @var SystemMenusServices $services */
+                    $services = app()->make(SystemMenusServices::class);
+                    [$menus, $uniqueAuth] = $services->getMenusList($adminInfo->roles, (int)$adminInfo['level'], 1, $adminType);
+                    return [
+                        'token' => $tokenInfo['token'],
+                        'expires_time' => $tokenInfo['params']['exp'],
+                        'menus' => $menus,
+                        'unique_auth' => $uniqueAuth,
+                        'user_info' => [
+                            'id' => $adminInfo['id'],
+                            'account' => $adminInfo['account'],
+                            'real_name' => $adminInfo['real_name'] ?? '',
+                            'admin_type' => $adminInfo['admin_type'] ?? 0,
+                            'employee_id' => (int)$auth['employee_id'],
+                            'head_pic' => $adminInfo['head_pic'],
+                        ],
+                        'logo' => sys_config('site_logo', ''),
+                        'logo_square' => sys_config('site_logo', ''),
+                        'version' => get_mohe_version(),
+                        'newOrderAudioLink' => set_file_url(sys_config('new_order_audio_link', '/statics/audio/newOrderAudioLink.mp3')),
+                        'prefix' => $type == 'agent' ? config('admin.agent_prefix') : config('admin.admin_prefix'),
+                    ];
+                }
+            } catch (AdminException $e) {
+                // 统一账号存在时直接抛错；不存在则走 root/旧账号兼容
+                if (strpos($e->getMessage(), '账号或密码错误') === false
+                    || app()->make(\app\services\employee\EmployeeInternalAccountServices::class)->getByAccount($account)
+                ) {
+                    throw $e;
+                }
+            }
+        }
+
         $adminInfo = $this->verifyLogin($account, $password, $is_mobile, $adminType);
         $tokenInfo = $this->createToken($adminInfo->id, $type, $adminInfo['pwd']);
         /** @var SystemMenusServices $services */
@@ -126,7 +187,9 @@ class SystemAdminServices extends BaseServices
             'user_info' => [
                 'id' => $adminInfo['id'],
                 'account' => $adminInfo['account'],
+                'real_name' => $adminInfo['real_name'] ?? '',
 				'admin_type' => $adminInfo['admin_type'] ?? 0,
+                'employee_id' => (int)($adminInfo['employee_id'] ?? 0),
                 'head_pic' => $adminInfo['head_pic'],
             ],
             'logo' => sys_config('site_logo', ''),
@@ -197,7 +260,7 @@ class SystemAdminServices extends BaseServices
     public function createAdminForm(int $level, array $formData = [], int $admin_type = 0, int $relation_id = 0)
     {
 		$f = [];
-		if ((!$formData || !$formData['uid']) && $admin_type == 3) {//代理商需要关联商城用户
+		if ((!$formData || empty($formData['uid'])) && $admin_type == 3) {//代理商需要关联商城用户
 			$f[] = Form::frameImage('image', '商城用户：', $this->url(config('admin.admin_prefix') . '/system.user/list', ['fodder' => 'image'], true))->icon('ios-add')->width('960px')->height('550px')->modal(['footer-hide' => true])->Props(['srcKey' => 'image']);
 			$f[] = Form::hidden('uid', 0);
 			$f[] = Form::hidden('head_pic', '');
@@ -216,6 +279,40 @@ class SystemAdminServices extends BaseServices
 
         $f[] = Form::input('real_name', '管理员姓名：', $formData['real_name'] ?? '')->required('请输入管理员姓名');
         $f[] = Form::input('phone', '管理员电话：', $formData['phone'] ?? '')->required('请输入管理员电话');
+
+        // 显式绑定员工主档（禁止手机号猜测）；根账号允许为空
+        $employeeId = (int)($formData['employee_id'] ?? 0);
+        $lockEmployee = !empty($formData['_lock_employee']) && $employeeId > 0;
+        $empOptions = [['value' => 0, 'label' => '不关联员工']];
+        $empRows = \think\facade\Db::name('employee')
+            ->where('is_del', 0)
+            ->where('status', 1)
+            ->field('id,name,phone')
+            ->order('id', 'desc')
+            ->limit(500)
+            ->select()
+            ->toArray();
+        foreach ($empRows as $er) {
+            $empOptions[] = [
+                'value' => (int)$er['id'],
+                'label' => (string)($er['name'] ?? '') . ' / ' . (string)($er['phone'] ?? '') . ' (#' . (int)$er['id'] . ')',
+            ];
+        }
+        if ($lockEmployee) {
+            $lockedLabel = '员工#' . $employeeId;
+            foreach ($empOptions as $opt) {
+                if ((int)$opt['value'] === $employeeId) {
+                    $lockedLabel = (string)$opt['label'];
+                    break;
+                }
+            }
+            $f[] = Form::hidden('employee_id', $employeeId);
+            $f[] = Form::input('employee_locked_label', '关联员工：', $lockedLabel)->disabled(true);
+        } else {
+            $f[] = Form::select('employee_id', '关联员工：', $employeeId > 0 ? $employeeId : 0)
+                ->setOptions(Form::setOptions($empOptions))
+                ->filterable(true);
+        }
 
         /** @var SystemRoleServices $service */
         $service = app()->make(SystemRoleServices::class);
@@ -241,8 +338,15 @@ class SystemAdminServices extends BaseServices
 	 * @param int $relation_id
 	 * @return mixed
 	 */
-    public function createForm(int $id, int $level, string $url = '/setting/admin', int $admin_type = 0, int $relation_id = 0)
-    {
+    public function createForm(
+        int $id,
+        int $level,
+        string $url = '/setting/admin',
+        int $admin_type = 0,
+        int $relation_id = 0,
+        int $presetEmployeeId = 0,
+        bool $lockEmployee = false
+    ) {
 		$adminInfo = [];
 		if ($id) {//编辑
 			$adminInfo = $this->dao->get($id);
@@ -253,7 +357,27 @@ class SystemAdminServices extends BaseServices
 				throw new AdminException('管理员已经删除');
 			}
 			$adminInfo = $adminInfo->toArray();
-		}
+		} elseif ($presetEmployeeId > 0) {
+            $adminInfo = [
+                'employee_id' => $presetEmployeeId,
+                '_lock_employee' => $lockEmployee,
+            ];
+            $emp = \think\facade\Db::name('employee')
+                ->where('id', $presetEmployeeId)
+                ->where('is_del', 0)
+                ->where('status', 1)
+                ->field('id,name,phone')
+                ->find();
+            if (!$emp) {
+                throw new AdminException('关联员工不存在或非在职');
+            }
+            if (empty($adminInfo['real_name'])) {
+                $adminInfo['real_name'] = (string)($emp['name'] ?? '');
+            }
+            if (empty($adminInfo['phone'])) {
+                $adminInfo['phone'] = (string)($emp['phone'] ?? '');
+            }
+        }
         return create_form('管理员添加', $this->createAdminForm($level, $adminInfo, $admin_type, $relation_id), $this->url($url), $id ? 'PUT' : 'POST');
     }
 
@@ -304,6 +428,16 @@ class SystemAdminServices extends BaseServices
 			$adminInfo->account = $data['account'] ?? $adminInfo->account;
 			$adminInfo->head_pic = $data['head_pic'] ?? $adminInfo->head_pic;
 			$adminInfo->status = $data['status'];
+            if (array_key_exists('employee_id', $data)) {
+                $eid = $data['employee_id'] === null ? 0 : (int)$data['employee_id'];
+                if ($eid > 0) {
+                    $this->assertEmployeeBindable($eid);
+                    $adminInfo->employee_id = $eid;
+                } else {
+                    // 根账号等允许清空；禁止按手机号回填
+                    $adminInfo->employee_id = null;
+                }
+            }
 			if ($adminInfo->save()) {
 				return true;
 			} else {
@@ -325,6 +459,13 @@ class SystemAdminServices extends BaseServices
 			$data['pwd'] = $this->passwordHash($data['pwd']);
 			$data['add_time'] = time();
 			$data['roles'] = implode(',', $data['roles']);
+            $eid = isset($data['employee_id']) ? (int)$data['employee_id'] : 0;
+            if ($eid > 0) {
+                $this->assertEmployeeBindable($eid);
+                $data['employee_id'] = $eid;
+            } else {
+                $data['employee_id'] = null;
+            }
 
 			return $this->transaction(function () use ($data) {
 				if ($this->dao->save($data)) {
@@ -334,6 +475,22 @@ class SystemAdminServices extends BaseServices
 				}
 			});
 		}
+    }
+
+    /**
+     * 显式校验员工主档，禁止手机号猜测绑定
+     */
+    protected function assertEmployeeBindable(int $employeeId): void
+    {
+        $emp = \think\facade\Db::name('employee')
+            ->where('id', $employeeId)
+            ->where('is_del', 0)
+            ->where('status', 1)
+            ->field('id')
+            ->find();
+        if (!$emp) {
+            throw new AdminException('关联员工不存在或非在职');
+        }
     }
 
     /**

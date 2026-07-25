@@ -266,20 +266,82 @@ class OrganizationWorkspaceReadServices extends BaseServices
             $this->applyRoleFilter($base, $role);
         }
 
-        $count = (int)(clone $base)->count('DISTINCT e.id');
+        // 门店任职 + 组织直属：SQL UNION 去重后 COUNT/LIMIT（禁止全量 PHP array_slice）
+        $includeDirectMembers = $storeId <= 0 && $role === '';
+        $orgIdSql = implode(',', array_map('intval', $orgIds));
+        if ($orgIdSql === '') {
+            return ['list' => [], 'count' => 0, 'page' => $page, 'limit' => $limit];
+        }
 
-        // 先分页取得当页 employee_id（稳定排序）
-        $idRows = (clone $base)
-            ->field('e.id as employee_id, MIN(s.id) as min_staff_id')
-            ->group('e.id')
-            ->order('e.id', 'asc')
-            ->order('min_staff_id', 'asc')
-            ->page($page, $limit)
-            ->select()
-            ->toArray();
+        $staffWhere = "st.is_del=0 AND s.status=1 AND s.is_del=0 AND s.employee_id>0 AND e.status=1 AND e.is_del=0 AND os.org_id IN ({$orgIdSql})";
+        if ($storeId > 0) {
+            $staffWhere .= ' AND s.store_id=' . (int)$storeId;
+        }
+        $binds = [];
+        $kwSql = '';
+        if ($keyword !== '') {
+            $kwSql = ' AND (e.name LIKE :kw1 OR e.phone LIKE :kw2 OR st.name LIKE :kw3)';
+            $like = '%' . $keyword . '%';
+            $binds['kw1'] = $like;
+            $binds['kw2'] = '%' . $keyword . '%';
+            $binds['kw3'] = $like;
+        }
+        $roleJoin = '';
+        $roleSql = '';
+        if ($role !== '') {
+            $roleJoin = ' LEFT JOIN eb_position p ON p.id = s.position ';
+            if ($role === '收银员') {
+                $roleSql = ' AND s.is_cashier=1 ';
+            } elseif ($role === '客服') {
+                $roleSql = ' AND s.is_customer=1 ';
+            } elseif (in_array($role, ['店长', '副店长', '副店'], true)) {
+                $roleSql = " AND (s.is_manager=1 OR s.is_butler=1 OR p.name IN ('店长','副店','副店长')) ";
+            } elseif ($role === '手艺人') {
+                $roleSql = " AND (p.name LIKE '%手艺人%' OR p.name LIKE '%美容师%') ";
+            } else {
+                $roleSql = ' AND p.name LIKE :role_name ';
+                $binds['role_name'] = '%' . $role . '%';
+            }
+        }
+
+        $staffPart = "SELECT e.id AS employee_id
+            FROM eb_employee e
+            INNER JOIN eb_system_store_staff s ON s.employee_id = e.id
+            INNER JOIN eb_system_store st ON st.id = s.store_id
+            INNER JOIN eb_organization_store os ON os.store_id = st.id
+            {$roleJoin}
+            WHERE {$staffWhere}{$kwSql}{$roleSql}";
+
+        if ($includeDirectMembers) {
+            $directKw = '';
+            if ($keyword !== '') {
+                $directKw = ' AND (e2.name LIKE :dkw1 OR e2.phone LIKE :dkw2)';
+                $binds['dkw1'] = '%' . $keyword . '%';
+                $binds['dkw2'] = '%' . $keyword . '%';
+            }
+            $statusFilter = $this->organizationEmployeeHasStatusColumn()
+                ? ' AND oe.status=1'
+                : '';
+            $directPart = "SELECT oe.employee_id AS employee_id
+                FROM eb_organization_employee oe
+                INNER JOIN eb_employee e2 ON e2.id = oe.employee_id
+                WHERE oe.org_id IN ({$orgIdSql}) AND oe.is_del=0{$statusFilter}
+                  AND e2.status=1 AND e2.is_del=0{$directKw}";
+            $unionSql = "({$staffPart}) UNION ({$directPart})";
+        } else {
+            $unionSql = "({$staffPart})";
+        }
+
+        $countRow = Db::query("SELECT COUNT(*) AS cnt FROM (SELECT DISTINCT employee_id FROM ({$unionSql}) u) c", $binds);
+        $count = (int)($countRow[0]['cnt'] ?? 0);
+        $offset = ($page - 1) * $limit;
+        $pageRows = Db::query(
+            "SELECT DISTINCT employee_id FROM ({$unionSql}) u ORDER BY employee_id ASC LIMIT {$offset}, {$limit}",
+            $binds
+        );
         $pageEmployeeIds = array_map(static function ($r) {
             return (int)$r['employee_id'];
-        }, $idRows);
+        }, $pageRows ?: []);
         if (!$pageEmployeeIds) {
             return ['list' => [], 'count' => $count, 'page' => $page, 'limit' => $limit];
         }
@@ -304,7 +366,7 @@ class OrganizationWorkspaceReadServices extends BaseServices
             ->where('s.status', 1)
             ->where('s.is_del', 0)
             ->where('s.employee_id', '>', 0)
-            ->field('s.id as staff_id,s.store_id,s.employee_id,s.position,s.is_manager,s.is_butler,s.is_cashier,s.is_customer,st.name as store_name')
+            ->field('s.id as staff_id,s.store_id,s.employee_id,s.position,s.is_manager,s.is_butler,s.is_cashier,s.is_customer,st.name as store_name,os.org_id')
             ->order('s.employee_id', 'asc')
             ->order('s.id', 'asc')
             ->select()
@@ -342,6 +404,7 @@ class OrganizationWorkspaceReadServices extends BaseServices
                     'status' => (int)($emp['status'] ?? 0) === 1 ? 1 : 0,
                     'roles' => [],
                     'assignments' => [],
+                    'direct_memberships' => [],
                 ];
             }
             $posName = $this->normalizePositionLabel(
@@ -357,10 +420,75 @@ class OrganizationWorkspaceReadServices extends BaseServices
                 'staff_id' => (int)$row['staff_id'],
                 'store_id' => (int)$row['store_id'],
                 'store_name' => (string)($row['store_name'] ?? ''),
+                'org_id' => (int)($row['org_id'] ?? 0),
                 'position' => $posName,
                 'roles' => $roles,
                 'is_manager' => SystemStoreStaffServices::staffIsManager($row),
             ];
+        }
+
+        if ($includeDirectMembers) {
+            $directMembershipQuery = Db::name('organization_employee')->alias('oe')
+                ->join('organization o', 'o.id = oe.org_id')
+                ->whereIn('oe.org_id', $orgIds)
+                ->whereIn('oe.employee_id', $pageEmployeeIds)
+                ->where('oe.is_del', 0)
+                ->where('o.is_del', 0);
+            if ($this->organizationEmployeeHasStatusColumn()) {
+                $directMembershipQuery->where('oe.status', 1);
+            }
+            $directMembershipRows = $directMembershipQuery
+                ->field('oe.org_id,oe.employee_id,oe.job_title,oe.source,o.name as org_name')
+                ->order('oe.employee_id', 'asc')
+                ->order('oe.id', 'asc')
+                ->select()
+                ->toArray();
+            foreach ($directMembershipRows as $row) {
+                $eid = (int)$row['employee_id'];
+                if (!isset($byEmployee[$eid])) {
+                    $emp = $empMap[$eid] ?? [];
+                    $byEmployee[$eid] = [
+                        'employee_id' => $eid,
+                        'name' => (string)($emp['name'] ?? ''),
+                        'avatar' => (string)($emp['avatar'] ?? ''),
+                        'avatar_type' => (int)($emp['avatar_type'] ?? 0),
+                        'phone_masked' => $this->maskPhone((string)($emp['phone'] ?? '')),
+                        'status' => (int)($emp['status'] ?? 0) === 1 ? 1 : 0,
+                        'roles' => [],
+                        'assignments' => [],
+                        'direct_memberships' => [],
+                    ];
+                }
+                $byEmployee[$eid]['direct_memberships'][] = [
+                    'org_id' => (int)$row['org_id'],
+                    'org_name' => (string)($row['org_name'] ?? ''),
+                    'job_title' => (string)($row['job_title'] ?? ''),
+                    'source' => (string)($row['source'] ?? ''),
+                ];
+            }
+        }
+
+        // 精确按 employee_id 判断后台账号（禁止手机号猜测）
+        $accountByEmployee = [];
+        if ($pageEmployeeIds) {
+            $accRows = Db::name('system_admin')
+                ->whereIn('employee_id', $pageEmployeeIds)
+                ->where('is_del', 0)
+                ->field('id,employee_id,account,status')
+                ->order('id', 'asc')
+                ->select()
+                ->toArray();
+            foreach ($accRows as $ar) {
+                $eid = (int)$ar['employee_id'];
+                if (!isset($accountByEmployee[$eid])) {
+                    $accountByEmployee[$eid] = [
+                        'has_account' => true,
+                        'account' => (string)($ar['account'] ?? ''),
+                        'admin_id' => (int)$ar['id'],
+                        'account_status' => (int)($ar['status'] ?? 0),
+                    ];
+                }
+            }
         }
 
         $list = [];
@@ -371,6 +499,12 @@ class OrganizationWorkspaceReadServices extends BaseServices
             $item = $byEmployee[$eid];
             $scopeCount = count($item['assignments']);
             $total = (int)($totalAssignCount[$eid] ?? $scopeCount);
+            $acc = $accountByEmployee[$eid] ?? [
+                'has_account' => false,
+                'account' => '',
+                'admin_id' => 0,
+                'account_status' => 0,
+            ];
             $list[] = [
                 'employee_id' => $item['employee_id'],
                 'name' => $item['name'],
@@ -380,9 +514,13 @@ class OrganizationWorkspaceReadServices extends BaseServices
                 'status' => $item['status'],
                 'roles' => $item['roles'],
                 'assignments' => $item['assignments'],
+                'direct_memberships' => $item['direct_memberships'],
                 'scope_assignment_count' => $scopeCount,
                 'total_assignment_count' => $total,
                 'has_out_of_scope_assignments' => $total > $scopeCount,
+                'has_account' => (bool)$acc['has_account'],
+                'account' => (string)$acc['account'],
+                'admin_id' => (int)$acc['admin_id'],
             ];
         }
 
@@ -887,6 +1025,70 @@ class OrganizationWorkspaceReadServices extends BaseServices
         ];
     }
 
+    /**
+     * 组织权限授权候选：仅在职员工 + system_admin.employee_id 精确关联的有效账号。
+     * 禁止手机号匹配。
+     */
+    public function getAdminCandidates(int $orgId, string $keyword = '', int $page = 1, int $limit = self::DEFAULT_LIMIT): array
+    {
+        $orgId = $this->assertOrgId($orgId);
+        [$page, $limit] = $this->normalizePage($page, $limit);
+        $keyword = trim($keyword);
+
+        $grantedAdminIds = array_map('intval', Db::name('organization_admin')
+            ->where('org_id', $orgId)
+            ->where('is_del', 0)
+            ->where('admin_id', '>', 0)
+            ->column('admin_id') ?: []);
+        $grantedFlip = array_flip($grantedAdminIds);
+
+        $query = Db::name('system_admin')->alias('a')
+            ->join('employee e', 'e.id = a.employee_id')
+            ->where('a.is_del', 0)
+            ->where('a.status', 1)
+            ->where('a.employee_id', '>', 0)
+            ->where('e.is_del', 0)
+            ->where('e.status', 1);
+        if ($keyword !== '') {
+            $like = '%' . $keyword . '%';
+            $query->where(function ($q) use ($like) {
+                $q->where('e.name', 'like', $like)
+                    ->whereOr('a.account', 'like', $like)
+                    ->whereOr('a.real_name', 'like', $like)
+                    ->whereOr('e.phone', 'like', $like);
+            });
+        }
+        $count = (int)(clone $query)->count();
+        $rows = $query
+            ->field('a.id as admin_id,a.account,a.real_name,a.employee_id,e.name as employee_name,e.phone')
+            ->order('a.id', 'asc')
+            ->page($page, $limit)
+            ->select()
+            ->toArray();
+
+        $list = [];
+        foreach ($rows as $row) {
+            $adminId = (int)$row['admin_id'];
+            $list[] = [
+                'admin_id' => $adminId,
+                'account' => (string)($row['account'] ?? ''),
+                'real_name' => (string)($row['real_name'] ?? ''),
+                'employee_id' => (int)$row['employee_id'],
+                'employee_name' => (string)($row['employee_name'] ?? ''),
+                'phone_masked' => $this->maskPhone((string)($row['phone'] ?? '')),
+                'already_granted' => isset($grantedFlip[$adminId]),
+            ];
+        }
+
+        return [
+            'org_id' => $orgId,
+            'list' => $list,
+            'count' => $count,
+            'page' => $page,
+            'limit' => $limit,
+        ];
+    }
+
     public function getChangeLog(
         int $orgId = 0,
         string $keyword = '',
@@ -1093,6 +1295,20 @@ class OrganizationWorkspaceReadServices extends BaseServices
         $allStoreIds = array_keys($storeMeta);
         $staffBundle = $this->loadStaffBundleForStores($allStoreIds);
 
+        // 组织直属人员（按 org 及下级汇总，employee_id 去重）
+        $directEmpByOrg = [];
+        $directQuery = Db::name('organization_employee')->alias('oe')
+            ->join('employee e', 'e.id = oe.employee_id')
+            ->where('oe.is_del', 0)
+            ->where('e.status', 1)
+            ->where('e.is_del', 0);
+        if ($this->organizationEmployeeHasStatusColumn()) {
+            $directQuery->where('oe.status', 1);
+        }
+        foreach ($directQuery->field('oe.org_id,oe.employee_id')->select()->toArray() as $row) {
+            $directEmpByOrg[(int)$row['org_id']][(int)$row['employee_id']] = true;
+        }
+
         $employeeCount = [];
         $noManagerStoreCount = [];
         foreach ($orgIds as $oid) {
@@ -1107,6 +1323,11 @@ class OrganizationWorkspaceReadServices extends BaseServices
                     if (empty($staffBundle['managersByStore'][$sid])) {
                         $noMgr++;
                     }
+                }
+            }
+            foreach ($descendantsIncl[$oid] as $did) {
+                foreach (array_keys($directEmpByOrg[$did] ?? []) as $eid) {
+                    $empSet[$eid] = true;
                 }
             }
             $employeeCount[$oid] = count($empSet);
@@ -1640,5 +1861,20 @@ class OrganizationWorkspaceReadServices extends BaseServices
             'migrate' => '组织数据迁移',
         ];
         return $map[$action] ?? ($action !== '' ? $action : '组织变更');
+    }
+
+    protected function organizationEmployeeHasStatusColumn(): bool
+    {
+        static $cached = null;
+        if ($cached !== null) {
+            return $cached;
+        }
+        try {
+            $cols = Db::query("SHOW COLUMNS FROM `eb_organization_employee` LIKE 'status'");
+            $cached = !empty($cols);
+        } catch (\Throwable $e) {
+            $cached = false;
+        }
+        return $cached;
     }
 }
