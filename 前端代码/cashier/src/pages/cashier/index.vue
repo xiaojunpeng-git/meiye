@@ -2540,11 +2540,18 @@ export default {
       this.createOrder.is_gendan = data.is_gendan || 0;
     },
     toPay(){
-      let that=this;
+      const uid = Number(this.userInfo && this.userInfo.uid);
+      if (!uid) {
+        this.$Message.warning('请先选择会员后再进入消耗');
+        return;
+      }
       this.$router.push({
         path: `${Setting.roterPre}/verify/index`,
         query: {
-          keyword: that.userInfo.phone,
+          uid,
+          phone: this.userInfo.phone || '',
+          nickname: this.userInfo.nickname || '',
+          real_name: this.userInfo.real_name || '',
         },
       });
     },

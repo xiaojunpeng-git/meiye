@@ -260,11 +260,18 @@ export default {
           this.$emit("changeSuccess");
     },
     toPay(){
-      let that=this;
+      const uid = Number(this.psInfo && this.psInfo.uid);
+      if (!uid) {
+        this.$Message.warning('请先选择会员后再进入消耗');
+        return;
+      }
       this.$router.push({
         path: `${Setting.roterPre}/verify/index`,
         query: {
-          keyword: that.psInfo.phone,
+          uid,
+          phone: this.psInfo.phone || '',
+          nickname: this.psInfo.nickname || '',
+          real_name: this.psInfo.real_name || '',
         },
       });
     },
