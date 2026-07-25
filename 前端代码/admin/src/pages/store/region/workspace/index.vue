@@ -1003,16 +1003,12 @@
           <div class="permission-note"><strong>做什么</strong><span>岗位决定员工可以操作哪些功能，人员数据权限决定员工可以看到哪些数据。人员只选择岗位，不再单独选择角色模板。</span></div>
           <div class="permission-note"><strong>门店可用</strong><span>开启后，门店在新建或编辑本店员工时可以选择这个岗位；关闭后，只有总部可以配置，已经绑定的人员不会自动失去权限。平台后台权限只在总部平台生效。</span></div>
           <div class="jp-toolbar">
-            <div class="jp-toolbar-left">
-              <div class="input-shell small jp-search">
-                <svg-icon name="search" />
-                <input v-model.trim="jobPositionModal.keyword" type="search" placeholder="搜索岗位名称" @keyup.enter="loadJobPositionList" />
-              </div>
-              <button class="button secondary compact-button" type="button" @click="loadJobPositionList">查询 <span class="enter-key">↵</span></button>
+            <div class="input-shell small jp-search">
+              <svg-icon name="search" />
+              <input v-model.trim="jobPositionModal.keyword" type="search" placeholder="搜索岗位名称" @keyup.enter="loadJobPositionList" />
             </div>
-            <div class="jp-toolbar-right">
-              <button class="button primary compact-button" type="button" :disabled="!canWrite || writeSubmitting" @click="openCreateJobPosition">新建岗位</button>
-            </div>
+            <button class="button primary compact-button" type="button" @click="loadJobPositionList">查询 <span class="enter-key">↵</span></button>
+            <button class="button primary compact-button" type="button" :disabled="!canWrite || writeSubmitting" @click="openCreateJobPosition">新建岗位</button>
           </div>
           <div class="job-list-scroll">
             <table class="data-table">

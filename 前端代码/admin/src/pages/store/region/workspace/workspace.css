@@ -131,6 +131,25 @@
 
 .org-prototype .compact-button { min-height: 34px; padding: 0 11px; font-size: 13px; }
 
+/* 岗位策略管理：搜索框 + 查询 + 新建岗位 同一行 */
+.org-prototype .jp-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: nowrap;
+  margin: 12px 0;
+}
+
+.org-prototype .jp-toolbar .jp-search {
+  flex: 0 1 280px;
+  width: 280px;
+  max-width: 40%;
+}
+
+.org-prototype .jp-toolbar .compact-button {
+  flex: none;
+}
+
 .org-prototype .text-button { display: inline-flex; align-items: center; gap: 4px; padding: 4px 0; color: var(--primary); background: transparent; font-size: 13px; font-weight: 570; }
 
 .org-prototype .text-button .icon { width: 14px; height: 14px; }
