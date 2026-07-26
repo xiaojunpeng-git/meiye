@@ -19,6 +19,16 @@ export default [
     },
     component: () => import('@/pages/account/login')
   },
+  // 总部经营数据大屏（菜单新开页；须在 frameOut，避免进布局后 404）
+  {
+    path: `${Setting.roterPre}/operating-screen`,
+    name: 'operatingScreen',
+    meta: {
+      auth: true,
+      title: '总部经营数据大屏'
+    },
+    component: () => import('@/pages/dashboard/operatingScreen')
+  },
   // 登录
   //   {
   //     path: `${Setting.routePreAgent}`,
