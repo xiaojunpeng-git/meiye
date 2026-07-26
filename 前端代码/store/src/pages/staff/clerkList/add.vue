@@ -145,6 +145,24 @@
             </Row>
           </TabPane>
 
+          <TabPane label="数据权限" name="scope">
+            <Alert show-icon>
+              门店只能设置「个人」或「门店（本店）」。选个人只取消本店扩展查看范围，不影响总部或其他门店授权。
+            </Alert>
+            <FormItem label="数据范围：">
+              <RadioGroup v-model="formInline.scope_mode">
+                <Radio label="personal">个人</Radio>
+                <Radio label="store">门店</Radio>
+              </RadioGroup>
+            </FormItem>
+            <FormItem v-if="formInline.scope_mode === 'personal'" label="说明：">
+              <div class="form-tip scope-tip">可查看本人在本店产生的相关数据。</div>
+            </FormItem>
+            <FormItem v-if="formInline.scope_mode === 'store'" label="说明：">
+              <div class="form-tip scope-tip">可查看本店范围内的数据（自动按当前所属门店计算，无需再选门店）。</div>
+            </FormItem>
+          </TabPane>
+
           <TabPane label="登录设置" name="login">
             <Alert show-icon>需要操作收银台的人才需要设置</Alert>
             <Row :gutter="24">
@@ -372,6 +390,7 @@ import {
   workMemberList,
   postStaff,
   getStaffInfo,
+  getPersonComplete,
   position,
   positionLevel,
 } from '@/api/staff.js';
@@ -478,6 +497,8 @@ function getDefaultStaffForm() {
     now_area: '',
     contract_begin: '',
     contract_end: '',
+    // UI 用 personal/store；提交时 store → store_self
+    scope_mode: 'personal',
   };
 }
 
@@ -642,6 +663,30 @@ export default {
           this.$Message.error(err.msg);
         });
     },
+    mapScopeModeToUi(mode) {
+      const m = String(mode || 'personal');
+      // 后端门店存 store_self；表单仅认 personal / store
+      if (m === 'store_self' || m === 'store') return 'store';
+      return 'personal';
+    },
+    mapScopeModeToApi(mode) {
+      return String(mode) === 'store' ? 'store_self' : 'personal';
+    },
+    loadScopeMode() {
+      if (!(this.editId > 0)) {
+        this.formInline.scope_mode = 'personal';
+        return Promise.resolve();
+      }
+      return getPersonComplete(this.editId)
+        .then((res) => {
+          const scope = (res.data && res.data.scope) || {};
+          this.formInline.scope_mode = this.mapScopeModeToUi(scope.scope_mode);
+        })
+        .catch(() => {
+          // 无主档/接口失败时默认个人，不阻断编辑
+          this.formInline.scope_mode = 'personal';
+        });
+    },
     staffInfo() {
       getStaffInfo(this.editId)
         .then((res) => {
@@ -666,6 +711,7 @@ export default {
             this.formInline.avatar = this.defaultAvatars.male;
           }
           this.loadRoles();
+          return this.loadScopeMode();
         })
         .catch((err) => {
           this.$Message.error(err.msg);
@@ -748,6 +794,10 @@ export default {
       if (!payload.pwd) {
         delete payload.pwd;
       }
+      // 门店后端只认 personal / store_self，禁止传 org
+      payload.scope_mode = this.mapScopeModeToApi(this.formInline.scope_mode);
+      payload.org_ids = [];
+      payload.store_ids = [];
       return payload;
     },
     handleSubmit() {
@@ -794,6 +844,14 @@ export default {
   font-size 12px
   color #999
   margin-top 6px
+
+.form-tip
+  font-size 12px
+  color #999
+  line-height 1.6
+
+.scope-tip
+  max-width 640px
 
 .ml14
   margin-left 14px

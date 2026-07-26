@@ -33,6 +33,17 @@ export function getStaffInfo(id) {
 }
 
 /**
+ * 人员完整详情（含数据权限 scope）
+ * @param {number|string} id staff_id
+ */
+export function getPersonComplete(id) {
+    return request({
+        url: `staff/person_complete/${id}`,
+        method: 'get',
+    });
+}
+
+/**
  *店员列表-获取列表
  */
 export function staffallInfo() {
