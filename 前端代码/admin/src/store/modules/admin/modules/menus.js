@@ -30,19 +30,28 @@ function withOperatingScreenMenu(menuData) {
     item.unique_auth === 'admin-operating-screen' ||
     /\/operating-screen\/?$/.test(item.path || '')
   ));
+  const insertScreenAt = (screenMenu) => {
+    screenMenu.target = '_blank';
+    screenMenu.icon = screenMenu.icon || 'md-podium';
+    // 有「概况」则紧跟其后；没有则追加到末尾，禁止插到首位以免登录误进大屏
+    const idx = overviewIndex >= 0 ? overviewIndex + 1 : homeMenu.children.length;
+    homeMenu.children.splice(idx, 0, screenMenu);
+  };
+
   if (existedIndex >= 0) {
     const screenMenu = homeMenu.children.splice(existedIndex, 1)[0];
-    screenMenu.target = '_blank';
-    // 与“概况”保持同一套标准菜单结构；旧缓存里没有图标时在这里补齐。
-    screenMenu.icon = screenMenu.icon || 'md-podium';
     const currentOverviewIndex = homeMenu.children.findIndex(item => item && (
       item.unique_auth === 'admin-index-index' || item.title === '概况'
     ));
-    homeMenu.children.splice(currentOverviewIndex >= 0 ? currentOverviewIndex + 1 : 0, 0, screenMenu);
+    // 重新计算概况下标后再插入
+    const insertIdx = currentOverviewIndex >= 0 ? currentOverviewIndex + 1 : homeMenu.children.length;
+    screenMenu.target = '_blank';
+    screenMenu.icon = screenMenu.icon || 'md-podium';
+    homeMenu.children.splice(insertIdx, 0, screenMenu);
     return menuData;
   }
 
-  homeMenu.children.splice(overviewIndex >= 0 ? overviewIndex + 1 : 0, 0, {
+  insertScreenAt({
     id: 'operating-screen',
     pid: homeMenu.id,
     title: '数据大屏',

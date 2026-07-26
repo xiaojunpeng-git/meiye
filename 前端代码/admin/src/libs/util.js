@@ -74,6 +74,14 @@ function isOverviewMenu(item) {
     item.menu_name === '概况';
 }
 
+/** 数据大屏等新开页，禁止作为登录/顶栏默认落地 */
+function isExternalOrScreenMenu(item) {
+  if (!item) return false;
+  if (item.target === '_blank') return true;
+  if (item.unique_auth === 'admin-operating-screen') return true;
+  return /\/operating-screen\/?$/.test(String(item.path || ''));
+}
+
 /**
  * 解析登录/顶栏默认落地路径：优先「概况」，避免菜单数组顺序把「组织架构」等排在前面时误进业务页。
  * @param {Array|Object} menus 顶层菜单数组，或单个带 children 的菜单节点
@@ -88,8 +96,11 @@ util.resolveDefaultMenuPath = function resolveDefaultMenuPath(menus) {
     if (node.children && node.children.length) {
       const overviewChild = node.children.find(isOverviewMenu);
       if (overviewChild) return pickLeaf(overviewChild);
-      return pickLeaf(node.children[0]);
+      const firstInApp = node.children.find((c) => c && !isExternalOrScreenMenu(c));
+      if (firstInApp) return pickLeaf(firstInApp);
+      return '';
     }
+    if (isExternalOrScreenMenu(node)) return '';
     return node.path || '';
   };
 
