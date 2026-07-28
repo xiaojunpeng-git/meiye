@@ -1,0 +1,17 @@
+{
+	"pages": [
+		{
+			"path": "src/app/pages/bootstrap/index",
+			"style": {
+				"navigationStyle": "custom"
+			}
+		}
+	],
+	"globalStyle": {
+		"navigationBarTextStyle": "black",
+		"navigationBarTitleText": "手机端",
+		"navigationBarBackgroundColor": "#F4F7F5",
+		"backgroundColor": "#F4F7F5"
+	},
+	"uniIdRouter": {}
+}

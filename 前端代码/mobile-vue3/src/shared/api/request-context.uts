@@ -1,0 +1,10 @@
+export function merchantContextIsComplete(
+	activeContextId : string,
+	stateContextId : string
+) : boolean {
+	return activeContextId.length > 0 && stateContextId.length > 0
+}
+
+export function injectedRequestMetadataFieldCount() : number {
+	return 7
+}

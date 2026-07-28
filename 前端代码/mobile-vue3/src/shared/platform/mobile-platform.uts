@@ -1,0 +1,35 @@
+export function currentMobilePlatform() : string {
+	let platform = 'UNKNOWN'
+
+	// #ifdef MP-WEIXIN
+	platform = 'MP_WEIXIN'
+	// #endif
+
+	// #ifdef APP-ANDROID
+	platform = 'APP_ANDROID'
+	// #endif
+
+	// #ifdef APP-IOS
+	platform = 'APP_IOS'
+	// #endif
+
+	// #ifdef APP-HARMONY
+	platform = 'APP_HARMONY'
+	// #endif
+
+	return platform
+}
+
+export function declaredPlatformCapabilityCount() : number {
+	return declaredPlatformCapabilities().length
+}
+
+export function declaredPlatformCapabilities() : string[] {
+	return [
+		'STORAGE',
+		'SAFE_AREA',
+		'CLIPBOARD',
+		'PHONE_CALL',
+		'SCAN_CODE'
+	]
+}

@@ -1,0 +1,11 @@
+export function merchantStateIdentifiersAreCleared(
+	merchantToken : string,
+	activeContextId : string,
+	stateContextId : string,
+	stateRevision : string
+) : boolean {
+	return merchantToken.length == 0 &&
+		activeContextId.length == 0 &&
+		stateContextId.length == 0 &&
+		stateRevision.length == 0
+}

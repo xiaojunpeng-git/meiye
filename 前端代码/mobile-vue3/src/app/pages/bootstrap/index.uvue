@@ -1,0 +1,86 @@
+<template>
+	<view class="page">
+		<view class="hero">
+			<text class="platform">{{ platformCode }}</text>
+			<text class="title">手机端</text>
+			<text class="subtitle">基础环境已就绪</text>
+		</view>
+		<view class="status-row">
+			<view class="status-dot"></view>
+			<text class="status-text">{{ foundationReady ? '等待身份服务接入' : '基础校验未通过' }}</text>
+		</view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	import { merchantContextIsComplete } from '../../../shared/api/request-context.uts'
+	import { currentMobilePlatform, declaredPlatformCapabilityCount } from '../../../shared/platform/mobile-platform.uts'
+	import { merchantStateIdentifiersAreCleared } from '../../state/root-state.uts'
+
+	const platformCode = ref(currentMobilePlatform())
+	const foundationReady = ref(
+		declaredPlatformCapabilityCount() == 5 &&
+		!merchantContextIsComplete('', '') &&
+		merchantStateIdentifiersAreCleared('', '', '', '')
+	)
+</script>
+
+<style>
+	.page {
+		display: flex;
+		flex: 1;
+		flex-direction: column;
+		justify-content: space-between;
+		padding: 72px 28px 44px 28px;
+		background-color: #f4f7f5;
+	}
+
+	.hero {
+		display: flex;
+		flex-direction: column;
+		margin-top: 64px;
+	}
+
+	.platform {
+		font-size: 12px;
+		font-weight: 600;
+		letter-spacing: 1px;
+		color: #668073;
+	}
+
+	.title {
+		margin-top: 18px;
+		font-size: 42px;
+		font-weight: 700;
+		color: #173326;
+	}
+
+	.subtitle {
+		margin-top: 14px;
+		font-size: 18px;
+		color: #53675d;
+	}
+
+	.status-row {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		padding-top: 20px;
+		border-top-width: 1px;
+		border-top-style: solid;
+		border-top-color: #d8e1dc;
+	}
+
+	.status-dot {
+		width: 8px;
+		height: 8px;
+		border-radius: 4px;
+		background-color: #2f7d58;
+	}
+
+	.status-text {
+		margin-left: 10px;
+		font-size: 14px;
+		color: #53675d;
+	}
+</style>

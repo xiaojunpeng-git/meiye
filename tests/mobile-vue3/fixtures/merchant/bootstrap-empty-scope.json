@@ -1,0 +1,35 @@
+{
+	"expectedInstallable": false,
+	"root": {
+		"contractVersion": "mobile-merchant-v1",
+		"merchantToken": "opaque-denied-session-fixture",
+		"expiresAt": "2026-07-28T19:00:00+08:00",
+		"employee": {
+			"id": "employee-fixture-002",
+			"name": "Denied Employee",
+			"avatar": "",
+			"status": "ACTIVE"
+		},
+		"authVersion": 1,
+		"activeContextId": "active-context-denied-001",
+		"activeContext": {
+			"contextId": "context-denied-001"
+		},
+		"contexts": [
+			{
+				"contextId": "context-denied-001",
+				"label": "Denied Context"
+			}
+		],
+		"capabilities": [],
+		"dataScope": {
+			"authorized": false,
+			"scopeEntryCount": 0,
+			"scopeDigest": ""
+		},
+		"availableActions": [],
+		"reasonCode": "NO_VALID_ASSIGNMENT",
+		"stateContextId": "state-context-denied-001",
+		"stateRevision": "1"
+	}
+}

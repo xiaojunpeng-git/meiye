@@ -1,0 +1,54 @@
+{
+	"task": "MOBILE-M0-00001",
+	"phase": "M0-A",
+	"requirements": [
+		{
+			"id": "M0A-ROOT",
+			"level": "AUTOMATED",
+			"evidence": [
+				"source-boundary.test.mjs"
+			]
+		},
+		{
+			"id": "M0A-CONTRACTS",
+			"level": "AUTOMATED",
+			"evidence": [
+				"contracts.test.mjs",
+				"mode-machine.test.mjs",
+				"root-policy.test.mjs"
+			]
+		},
+		{
+			"id": "M0A-MP-WEIXIN",
+			"level": "COMPILE_REQUIRED",
+			"expectedResult": "COMPILE_PASS"
+		},
+		{
+			"id": "M0A-ANDROID",
+			"level": "CONFIG_GENERATED",
+			"blockedBy": "LOCAL_ANDROID_TOOLCHAIN"
+		},
+		{
+			"id": "M0A-IOS",
+			"level": "CONFIG_GENERATED",
+			"blockedBy": "FULL_XCODE_AND_SIGNING"
+		},
+		{
+			"id": "M0A-HARMONY",
+			"level": "CONFIG_GENERATED",
+			"blockedBy": "DEVECO_HARMONY_SDK_AND_SIGNING"
+		},
+		{
+			"id": "MOBILE-AUTH-SERVER-BEHAVIOR",
+			"level": "CONTRACT_FROZEN",
+			"blockedBy": "MOBILE-AUTH-00001",
+			"notProvenHere": [
+				"challenge atomic consumption",
+				"idempotent replay",
+				"provider result handling",
+				"verification revocation",
+				"old context server rejection"
+			]
+		}
+	]
+}

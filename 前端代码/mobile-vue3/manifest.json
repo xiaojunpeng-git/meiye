@@ -1,0 +1,59 @@
+{
+	"name": "mobile-vue3",
+	"appid": "",
+	"description": "Single mobile application for member and merchant modes",
+	"versionName": "0.1.0",
+	"versionCode": "1",
+	"uni-app-x": {
+		"styleIsolationVersion": "2"
+	},
+	"vueVersion": "3",
+	"uniStatistics": {
+		"enable": false
+	},
+	"mp-weixin": {
+		"appid": "",
+		"setting": {
+			"urlCheck": false
+		},
+		"usingComponents": true
+	},
+	"app": {
+		"distribute": {
+			"icons": {
+				"android": {
+					"hdpi": "",
+					"xhdpi": "",
+					"xxhdpi": "",
+					"xxxhdpi": ""
+				}
+			}
+		}
+	},
+	"app-android": {
+		"distribute": {
+			"modules": {},
+			"icons": {
+				"hdpi": "",
+				"xhdpi": "",
+				"xxhdpi": "",
+				"xxxhdpi": ""
+			},
+			"splashScreens": {
+				"default": {}
+			}
+		}
+	},
+	"app-ios": {
+		"distribute": {
+			"modules": {},
+			"icons": {},
+			"splashScreens": {}
+		}
+	},
+	"app-harmony": {
+		"distribute": {
+			"modules": {}
+		}
+	}
+}

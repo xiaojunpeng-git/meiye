@@ -1,0 +1,7 @@
+{
+	"contractVersion": "mobile-auth-v1",
+	"challengeId": "challenge-fixture-001",
+	"maskedPhone": "1**********",
+	"expiresAt": "2026-07-28T18:05:00+08:00",
+	"resendAfterSeconds": 60
+}

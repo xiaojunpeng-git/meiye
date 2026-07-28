@@ -1,0 +1,45 @@
+{
+	"contractVersion": "mobile-platform-v1",
+	"platforms": [
+		"MP_WEIXIN",
+		"APP_ANDROID",
+		"APP_IOS",
+		"APP_HARMONY"
+	],
+	"capabilities": [
+		{
+			"code": "STORAGE",
+			"operations": [
+				"READ",
+				"WRITE",
+				"REMOVE"
+			]
+		},
+		{
+			"code": "SAFE_AREA",
+			"operations": [
+				"READ_INSETS"
+			]
+		},
+		{
+			"code": "CLIPBOARD",
+			"operations": [
+				"COPY_TEXT"
+			]
+		},
+		{
+			"code": "PHONE_CALL",
+			"operations": [
+				"DIAL"
+			]
+		},
+		{
+			"code": "SCAN_CODE",
+			"operations": [
+				"SCAN"
+			]
+		}
+	],
+	"implementationStatus": "INTERFACE_ONLY",
+	"businessPagesMayCallPlatformApisDirectly": false
+}

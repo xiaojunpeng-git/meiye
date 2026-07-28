@@ -1,0 +1,43 @@
+{
+	"contractVersion": "mobile-merchant-v1",
+	"merchantToken": "opaque-merchant-session-fixture",
+	"expiresAt": "2026-07-28T19:00:00+08:00",
+	"employee": {
+		"id": "employee-fixture-001",
+		"name": "Fixture Employee",
+		"avatar": "",
+		"status": "ACTIVE"
+	},
+	"authVersion": 3,
+	"activeContextId": "active-context-session-001",
+	"activeContext": {
+		"contextId": "context-store-001",
+		"storeId": "store-fixture-001",
+		"organizationId": "organization-fixture-001",
+		"staffId": "staff-fixture-001"
+	},
+	"contexts": [
+		{
+			"contextId": "context-store-001",
+			"label": "Store A"
+		},
+		{
+			"contextId": "context-store-002",
+			"label": "Store B"
+		}
+	],
+	"capabilities": [
+		"NAV_WORKBENCH"
+	],
+	"dataScope": {
+		"authorized": true,
+		"scopeEntryCount": 1,
+		"scopeDigest": "sha256:scope-fixture-store-001"
+	},
+	"availableActions": [
+		"VIEW_WORKBENCH"
+	],
+	"reasonCode": null,
+	"stateContextId": "state-context-session-001",
+	"stateRevision": "1"
+}

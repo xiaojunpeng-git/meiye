@@ -1,0 +1,12 @@
+{
+	"scenario": {
+		"onlyLegacyDeliveryRole": true
+	},
+	"projection": {
+		"contractVersion": "mobile-auth-v1",
+		"availableModes": {
+			"member": true,
+			"merchant": false
+		}
+	}
+}

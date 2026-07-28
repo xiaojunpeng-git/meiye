@@ -1,0 +1,27 @@
+{
+	"activeRoot": {
+		"activeContextId": "active-context-multi-001",
+		"activeContext": {
+			"contextId": "context-store-001"
+		},
+		"contexts": [
+			{
+				"contextId": "context-store-001",
+				"label": "Store A"
+			},
+			{
+				"contextId": "context-store-002",
+				"label": "Store B"
+			}
+		],
+		"capabilities": [
+			"NAV_WORKBENCH"
+		]
+	},
+	"inactiveContextServerOnlyCapabilities": [
+		"VIEW_WAREHOUSE"
+	],
+	"expectedActiveCapabilities": [
+		"NAV_WORKBENCH"
+	]
+}

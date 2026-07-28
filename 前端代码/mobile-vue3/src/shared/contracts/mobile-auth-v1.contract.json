@@ -1,0 +1,89 @@
+{
+	"contractVersion": "mobile-auth-v1",
+	"errorContract": "mobile-api-errors-v1",
+	"phoneVerificationMethods": [
+		"SMS",
+		"WECHAT_MINI_PROGRAM"
+	],
+	"endpoints": {
+		"createSmsChallenge": {
+			"method": "POST",
+			"path": "/mobile/auth/sms/challenges",
+			"request": {
+				"required": [
+					"phone",
+					"purpose",
+					"deviceId",
+					"captchaProof"
+				],
+				"purposeEnum": [
+					"APP_LOGIN"
+				],
+				"phonePattern": "^1[3-9][0-9]{9}$"
+			},
+			"success": {
+				"required": [
+					"contractVersion",
+					"challengeId",
+					"maskedPhone",
+					"expiresAt",
+					"resendAfterSeconds"
+				],
+				"forbidden": [
+					"code",
+					"verificationCode",
+					"providerPayload",
+					"resendAfter"
+				]
+			},
+			"clientRules": {
+				"resendAfterSecondsType": "NON_NEGATIVE_INTEGER",
+				"resendAuthority": "SERVER_RELATIVE_SECONDS",
+				"expiresAtUse": "DISPLAY_ONLY"
+			}
+		},
+		"verifySmsChallenge": {
+			"method": "POST",
+			"path": "/mobile/auth/sms/verify",
+			"request": {
+				"required": [
+					"challengeId",
+					"code",
+					"idempotencyKey"
+				],
+				"codeType": "STRING",
+				"codePattern": "^[0-9]{6}$"
+			},
+			"success": {
+				"required": [
+					"contractVersion",
+					"appSession",
+					"phoneVerification",
+					"availableModes"
+				],
+				"appSessionRequired": [
+					"accessToken",
+					"expiresAt"
+				],
+				"phoneVerificationRequired": [
+					"status",
+					"maskedPhone",
+					"verifiedAt",
+					"method",
+					"verificationVersion"
+				],
+				"availableModesRequired": [
+					"member",
+					"merchant"
+				]
+			}
+		}
+	},
+	"security": {
+		"ordinaryUserTokenProvesPhoneVerification": false,
+		"clientPhoneParameterIsTrusted": false,
+		"legacyPhoneConflictFailsClosed": true,
+		"verificationVersionMustBePositive": true,
+		"providerUnknownCreatesVerification": false
+	}
+}
