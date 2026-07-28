@@ -24,6 +24,7 @@ class CashierV3C5MemberOrderModule implements CashierV3ActionModule
     /** 选择器策略 ID（非单一 feature） */
     private const POLICY_MEMBER_SELECTOR = 'selector:member';
     private const POLICY_QUERY_ENTITIES = 'selector:query_entities';
+    private const POLICY_UNIFIED_QUERY_PAGE = 'policy:unified_query_page';
 
     public function owner(): string
     {
@@ -90,7 +91,20 @@ class CashierV3C5MemberOrderModule implements CashierV3ActionModule
         $command['save-reservation-query-settings'] = self::FEATURE_RESERVATION;
         $command['save-hang-order-query-settings'] = self::FEATURE_HANG;
         $command['save-order-center-query-settings'] = self::FEATURE_ORDER_CENTER;
-        $command['save-member-query-settings'] = self::FEATURE_MEMBER;
+        $command['save-member-query-settings'] = self::POLICY_UNIFIED_QUERY_PAGE;
+        foreach ([
+            'save-unified-query-field-aliases',
+            'save-unified-query-custom-field',
+            'change-unified-query-custom-field-status',
+            'archive-unified-query-custom-field',
+            'upgrade-unified-query-field-reference',
+            'create-unified-query-export',
+        ] as $action) {
+            $command[$action] = self::POLICY_UNIFIED_QUERY_PAGE;
+        }
+
+        $projection['query-unified-query-capabilities'] = self::POLICY_UNIFIED_QUERY_PAGE;
+        $projection['query-unified-query-export-task'] = self::POLICY_UNIFIED_QUERY_PAGE;
 
         $projection['open-order-gifts'] = self::FEATURE_ORDER_CENTER;
         $projection['open-gift-records'] = self::FEATURE_ORDER_CENTER;

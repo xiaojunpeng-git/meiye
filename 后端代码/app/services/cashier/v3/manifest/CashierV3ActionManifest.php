@@ -85,7 +85,7 @@ class CashierV3ActionManifest
     {
         $policyId = $permission;
         $feature = $permission;
-        if (strpos($permission, 'selector:') === 0) {
+        if (strpos($permission, 'selector:') === 0 || strpos($permission, 'policy:') === 0) {
             $feature = null; // 选择器策略无单一 feature
         } elseif (strpos($permission, 'feature:') === 0) {
             $feature = substr($permission, strlen('feature:'));
@@ -146,6 +146,7 @@ class CashierV3ActionManifest
         $inactiveWriteoff = '当前核销领域 handler 未激活；激活时必须同批登记核销、消耗业绩及劳动业绩事件。';
         $selection = '仅改变当前工作台的会员或游客选择，不改变会员权益。';
         $queryPreference = '仅保存当前账号的查询偏好，不是经营业务事件。';
+        $queryMetadata = '仅维护统一查询字段、显示名称或导出任务元数据，不改变经营事实。';
         $inactiveOrder = '当前订单变更 handler 未激活；激活时必须同批登记退款、作废、重开或升级事件。';
 
         $eventless = static function (string $reason): array {
@@ -259,6 +260,12 @@ class CashierV3ActionManifest
             'save-hang-order-query-settings' => $eventless($queryPreference),
             'save-order-center-query-settings' => $eventless($queryPreference),
             'save-member-query-settings' => $eventless($queryPreference),
+            'save-unified-query-field-aliases' => $eventless($queryMetadata),
+            'save-unified-query-custom-field' => $eventless($queryMetadata),
+            'change-unified-query-custom-field-status' => $eventless($queryMetadata),
+            'archive-unified-query-custom-field' => $eventless($queryMetadata),
+            'upgrade-unified-query-field-reference' => $eventless($queryPreference),
+            'create-unified-query-export' => $eventless($queryMetadata),
         ];
     }
 
@@ -279,6 +286,7 @@ class CashierV3ActionManifest
             'submit-writeoff' => 'query-writeoff-result',
             'create-reservation' => 'query-reservation-result',
             'update-reservation' => 'query-reservation-result',
+            'create-unified-query-export' => 'query-unified-query-export-task',
         ];
         if (isset($queryMap[$action])) {
             return [

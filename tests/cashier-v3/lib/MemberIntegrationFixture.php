@@ -264,6 +264,112 @@ final class MemberIntegrationFixture
               `level_status` tinyint NOT NULL DEFAULT 0,
               PRIMARY KEY (`uid`), KEY `idx_phone` (`phone`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci",
+            "CREATE TABLE IF NOT EXISTS `eb_user_card_holder` (
+              `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+              `uid` int unsigned NOT NULL DEFAULT 0,
+              `oid` bigint unsigned NOT NULL DEFAULT 0,
+              `card_name` varchar(128) NOT NULL DEFAULT '',
+              `card_no` varchar(32) NOT NULL DEFAULT '',
+              `store_id` int unsigned NOT NULL DEFAULT 0,
+              `product_type` tinyint NOT NULL DEFAULT 0,
+              `write_times` int unsigned NOT NULL DEFAULT 0,
+              `write_surplus_times` int unsigned NOT NULL DEFAULT 0,
+              `write_start` int unsigned NOT NULL DEFAULT 0,
+              `write_end` int unsigned NOT NULL DEFAULT 0,
+              `is_del` tinyint NOT NULL DEFAULT 0,
+              PRIMARY KEY (`id`),
+              UNIQUE KEY `uk_uid_oid` (`uid`,`oid`),
+              KEY `idx_oid` (`oid`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci",
+            "CREATE TABLE IF NOT EXISTS `eb_store_order` (
+              `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+              `uid` int unsigned NOT NULL DEFAULT 0,
+              `store_id` int unsigned NOT NULL DEFAULT 0,
+              `paid` tinyint NOT NULL DEFAULT 0,
+              `is_del` tinyint NOT NULL DEFAULT 0,
+              `is_system_del` tinyint NOT NULL DEFAULT 0,
+              `is_user_del` tinyint NOT NULL DEFAULT 0,
+              `refund_status` tinyint NOT NULL DEFAULT 0,
+              `terminal_action` tinyint NOT NULL DEFAULT 0,
+              `card_upgrade_use_oid` bigint unsigned NOT NULL DEFAULT 0,
+              `pid` int NOT NULL DEFAULT 0,
+              `order_type` tinyint NOT NULL DEFAULT 0,
+              `is_debt_repay` tinyint NOT NULL DEFAULT 0,
+              `order_id` varchar(64) NOT NULL DEFAULT '',
+              `mark` varchar(512) NOT NULL DEFAULT '',
+              `pay_price` decimal(12,2) NOT NULL DEFAULT 0,
+              `cash_pay_price` decimal(12,2) NOT NULL DEFAULT 0,
+              `yue_pay_price` decimal(12,2) NOT NULL DEFAULT 0,
+              `debt_amount` decimal(12,2) NOT NULL DEFAULT 0,
+              `repaid_debt_amount` decimal(12,2) NOT NULL DEFAULT 0,
+              `add_time` int unsigned NOT NULL DEFAULT 0,
+              `pay_time` int unsigned NOT NULL DEFAULT 0,
+              PRIMARY KEY (`id`),
+              KEY `idx_uid_state` (`uid`,`paid`,`is_del`),
+              KEY `idx_store` (`store_id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci",
+            "CREATE TABLE IF NOT EXISTS `eb_store_order_cart_info` (
+              `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+              `oid` bigint unsigned NOT NULL DEFAULT 0,
+              `cart_id` varchar(64) NOT NULL DEFAULT '',
+              `product_id` int unsigned NOT NULL DEFAULT 0,
+              `cart_type` tinyint NOT NULL DEFAULT 0,
+              `product_type` tinyint NOT NULL DEFAULT 0,
+              `cart_info` mediumtext,
+              `write_times` int unsigned NOT NULL DEFAULT 0,
+              `write_surplus_times` int unsigned NOT NULL DEFAULT 0,
+              `is_writeoff` tinyint NOT NULL DEFAULT 0,
+              `write_start` int unsigned NOT NULL DEFAULT 0,
+              `write_end` int unsigned NOT NULL DEFAULT 0,
+              `pay_price` decimal(12,2) NOT NULL DEFAULT 0,
+              `debt_amount` decimal(12,2) NOT NULL DEFAULT 0,
+              `repaid_debt_amount` decimal(12,2) NOT NULL DEFAULT 0,
+              `is_gift` tinyint NOT NULL DEFAULT 0,
+              PRIMARY KEY (`id`),
+              KEY `idx_oid_role` (`oid`,`cart_type`,`product_type`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci",
+            "CREATE TABLE IF NOT EXISTS `eb_store_reservation_order` (
+              `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+              `cart_info_id` bigint unsigned NOT NULL DEFAULT 0,
+              `status` tinyint NOT NULL DEFAULT 0,
+              `is_del` tinyint NOT NULL DEFAULT 0,
+              `is_system_del` tinyint NOT NULL DEFAULT 0,
+              PRIMARY KEY (`id`),
+              KEY `idx_cart_status` (`cart_info_id`,`status`,`is_del`,`is_system_del`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci",
+            "CREATE TABLE IF NOT EXISTS `eb_store_debt` (
+              `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+              `order_id` bigint unsigned NOT NULL DEFAULT 0,
+              `uid` int unsigned NOT NULL DEFAULT 0,
+              `store_id` int unsigned NOT NULL DEFAULT 0,
+              `status` tinyint NOT NULL DEFAULT 0,
+              `total_debt` decimal(12,2) NOT NULL DEFAULT 0,
+              `repaid_debt` decimal(12,2) NOT NULL DEFAULT 0,
+              PRIMARY KEY (`id`),
+              KEY `idx_order_id` (`order_id`),
+              KEY `idx_uid_status_store` (`uid`,`status`,`store_id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci",
+            "CREATE TABLE IF NOT EXISTS `eb_store_order_writeoff` (
+              `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+              `uid` int unsigned NOT NULL DEFAULT 0,
+              `relation_id` int unsigned NOT NULL DEFAULT 0,
+              `add_time` int unsigned NOT NULL DEFAULT 0,
+              `status` tinyint NOT NULL DEFAULT 0,
+              `staff_id` int unsigned NOT NULL DEFAULT 0,
+              PRIMARY KEY (`id`),
+              KEY `idx_uid_status_store_time` (`uid`,`status`,`relation_id`,`add_time`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci",
+            "CREATE TABLE IF NOT EXISTS `eb_staff_yeji` (
+              `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+              `staff_id` int unsigned NOT NULL DEFAULT 0,
+              `staff_name` varchar(64) NOT NULL DEFAULT '',
+              `type` tinyint NOT NULL DEFAULT 0,
+              `status` tinyint NOT NULL DEFAULT 0,
+              `link_id` bigint unsigned NOT NULL DEFAULT 0,
+              `store_id` int unsigned NOT NULL DEFAULT 0,
+              PRIMARY KEY (`id`),
+              KEY `idx_link_snapshot` (`link_id`,`type`,`status`,`id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci",
             "CREATE TABLE IF NOT EXISTS `eb_store_user` (
               `id` int unsigned NOT NULL AUTO_INCREMENT,
               `store_id` int unsigned NOT NULL,
@@ -310,6 +416,16 @@ final class MemberIntegrationFixture
         self::ensureColumn('eb_system_store', 'is_show', "tinyint NOT NULL DEFAULT 1");
         self::ensureColumn('eb_system_store', 'is_del', "tinyint NOT NULL DEFAULT 0");
         self::ensureColumn('eb_employee', 'name', "varchar(64) NOT NULL DEFAULT ''");
+        self::ensureColumn('eb_user_card_holder', 'product_type', "tinyint NOT NULL DEFAULT 0");
+        self::ensureColumn('eb_user_card_holder', 'write_times', "int unsigned NOT NULL DEFAULT 0");
+        self::ensureColumn('eb_store_order', 'pid', "int NOT NULL DEFAULT 0");
+        self::ensureColumn('eb_store_order', 'order_type', "tinyint NOT NULL DEFAULT 0");
+        self::ensureColumn('eb_store_order', 'is_debt_repay', "tinyint NOT NULL DEFAULT 0");
+        self::ensureColumn('eb_store_order', 'mark', "varchar(512) NOT NULL DEFAULT ''");
+        self::ensureColumn('eb_store_order', 'add_time', "int unsigned NOT NULL DEFAULT 0");
+        self::ensureColumn('eb_store_order', 'pay_time', "int unsigned NOT NULL DEFAULT 0");
+        self::ensureColumn('eb_store_debt', 'uid', "int unsigned NOT NULL DEFAULT 0");
+        self::ensureColumn('eb_store_debt', 'store_id', "int unsigned NOT NULL DEFAULT 0");
     }
 
     public static function resetAndSeed(): void
@@ -321,6 +437,13 @@ final class MemberIntegrationFixture
             Db::execute('TRUNCATE TABLE `eb_' . $table . '`');
         }
         foreach ([
+            'staff_yeji',
+            'store_order_writeoff',
+            'store_reservation_order',
+            'store_debt',
+            'store_order_cart_info',
+            'user_card_holder',
+            'store_order',
             'cashier_v3_consumer_once',
             'cashier_v3_outbox_attempt',
             'cashier_v3_outbox',

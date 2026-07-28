@@ -26,5 +26,6 @@ return [
 		'get:version' => \app\command\GetVersion::class,
         'reservationJindu' => \app\command\ReservationJindu::class,
         'migrate' => \app\command\Migrate::class,
+        'unified-query:export-worker' => \app\command\UnifiedQueryExportWorker::class,
     ],
 ];

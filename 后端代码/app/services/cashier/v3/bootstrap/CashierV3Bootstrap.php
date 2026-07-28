@@ -22,6 +22,7 @@ use app\services\cashier\v3\projection\CashierV3RootDomainAssembler;
 use app\services\cashier\v3\projection\CashierV3RootProjector;
 use app\services\cashier\v3\readiness\CashierV3TableReadinessGuard;
 use app\services\cashier\v3\member\CashierV3MemberModule;
+use app\services\cashier\v3\query\UnifiedQueryModule;
 use app\services\cashier\v3\registry\CashierV3ContextPolicyRegistry;
 use app\services\cashier\v3\registry\CashierV3HandlerRegistry;
 use app\services\cashier\v3\registry\CashierV3PermissionGuard;
@@ -61,6 +62,7 @@ class CashierV3Bootstrap
         self::$lastSelfCheck = null;
         self::$frozen = false;
         self::$moduleInstallers = [];
+        UnifiedQueryModule::resetForTests();
         CashierV3ActionManifest::flushCache();
         if (function_exists('app')) {
             try {
@@ -267,6 +269,9 @@ class CashierV3Bootstrap
         foreach (self::$moduleInstallers as $installer) {
             call_user_func($installer, $dispatcher, $assembler);
         }
+
+        // 统一查询先接管 query-members；会员模块随后只补充选择器与建档能力。
+        UnifiedQueryModule::install($dispatcher, $assembler);
 
         // C5 会员选择／收银建档的基础闭环由 Codex 维护；其余业务模块仍按
         // 各自 installer 接入，未就绪的根分区继续保持 fail-closed。

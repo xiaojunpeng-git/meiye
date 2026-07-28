@@ -9,6 +9,7 @@ import { fileURLToPath } from 'url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const TESTS = path.resolve(__dirname, '..')
+const ALL_TESTS = path.resolve(TESTS, '..')
 const MATRIX = path.join(TESTS, 'requirements-matrix.json')
 
 let failed = 0
@@ -141,7 +142,12 @@ function walk(dir) {
   }
 }
 
-for (const r of [path.join(TESTS, 'php'), path.join(TESTS, 'js'), path.join(TESTS, 'sql')]) {
+for (const r of [
+  path.join(TESTS, 'php'),
+  path.join(TESTS, 'js'),
+  path.join(TESTS, 'sql'),
+  path.join(ALL_TESTS, 'unified-query')
+]) {
   walk(r)
 }
 
@@ -151,7 +157,10 @@ scanFile(path.join(TESTS, 'run-all.sh'))
 const matrix = JSON.parse(fs.readFileSync(MATRIX, 'utf8'))
 const requiredRunners = [...new Set(matrix.gates.filter((g) => g.required).map((g) => g.runner))].sort()
 for (const runner of requiredRunners) {
-  scanFile(path.join(TESTS, runner))
+  const runnerFile = runner.startsWith('unified-query/')
+    ? path.join(ALL_TESTS, runner)
+    : path.join(TESTS, runner)
+  scanFile(runnerFile)
 }
 console.log('LITERAL_SCAN_REQUIRED_RUNNERS=' + requiredRunners.join(','))
 console.log('LITERAL_SCAN_FILE_COUNT=' + scanned.size)

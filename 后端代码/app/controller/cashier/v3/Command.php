@@ -6,6 +6,9 @@ use app\services\cashier\v3\CashierV3ActionDispatcher;
 use app\services\cashier\v3\CashierV3CommandException;
 use app\services\cashier\v3\CashierV3ResultCode;
 use app\services\cashier\v3\bootstrap\CashierV3Bootstrap;
+use app\services\cashier\v3\query\UnifiedQueryModule;
+use app\services\query\UnifiedQueryException;
+use app\services\query\UnifiedQueryExportWorkerServices;
 use think\facade\App;
 
 /**
@@ -46,6 +49,47 @@ class Command extends AuthController
                     ? $exception->getDetail()
                     : null,
             ]);
+        }
+    }
+
+    /**
+     * GET /cashierapi/v3/unified-query/exports/:taskNo/download
+     */
+    public function downloadUnifiedQueryExport(string $taskNo)
+    {
+        try {
+            $runtime = UnifiedQueryModule::runtime();
+            $operatorScope = $this->dispatcher->scopeResolver()->operatorScope(
+                (int)$this->storeId,
+                (int)$this->cashierId
+            );
+            $dataScope = $this->dispatcher->dataScopeFactory()->build(
+                (int)$this->storeId,
+                (int)$this->cashierId,
+                is_array($this->cashierInfo) ? $this->cashierInfo : [],
+                $operatorScope->tenantId(),
+                $operatorScope->organizationId()
+            );
+            $context = $runtime['contextFactory']->make($operatorScope, $dataScope);
+            $descriptor = $runtime['exports']->resolveDownloadDescriptor($context, $taskNo);
+            $worker = new UnifiedQueryExportWorkerServices(
+                $this->dispatcher,
+                $runtime['exports'],
+                $runtime['memberProvider'],
+                $runtime['contextFactory']
+            );
+            $path = $worker->absolutePath((string)$descriptor['storageKey']);
+            if (!is_file($path) || !is_readable($path)) {
+                return app('json')->fail('导出文件不存在或已过期。');
+            }
+            return download($path, (string)$descriptor['fileName'])
+                ->mimeType('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        } catch (UnifiedQueryException $exception) {
+            return app('json')->fail($exception->getMessage(), [
+                'code' => $exception->getErrorCode(),
+            ]);
+        } catch (\Throwable $exception) {
+            return app('json')->fail('导出文件暂时无法下载，请稍后重试。');
         }
     }
 

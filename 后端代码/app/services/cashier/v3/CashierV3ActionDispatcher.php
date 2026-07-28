@@ -242,7 +242,9 @@ class CashierV3ActionDispatcher
 
         if (self::isResultQueryAction($canonical)) {
             $originalKey = trim((string)($payload['originalIdempotencyKey'] ?? ''));
-            if ($originalKey === '') {
+            $directExportTask = $canonical === 'query-unified-query-export-task'
+                && trim((string)($payload['taskId'] ?? $payload['task_id'] ?? '')) !== '';
+            if ($originalKey === '' && !$directExportTask) {
                 throw new CashierV3CommandException(
                     CashierV3ResultCode::ORIGINAL_IDEMPOTENCY_KEY_REQUIRED,
                     '结果追查缺少原命令标识，请刷新当前工作台后重试。',
@@ -342,6 +344,39 @@ class CashierV3ActionDispatcher
             'correlationId' => $correlationId,
             'boundCorrelationId' => $correlationId,
         ];
+        $originalKey = trim((string)($payload['originalIdempotencyKey'] ?? ''));
+        if (self::isResultQueryAction($canonical) && $originalKey !== '') {
+            $envelope['boundOriginalIdempotencyKey'] = $originalKey;
+        }
+        if (isset($result['versions'])) {
+            if (!is_array($result['versions'])) {
+                throw new CashierV3CommandException(
+                    CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
+                    '该查看功能返回的对象版本无效，请稍后重试。',
+                    CashierV3ResultCode::STATUS_FAILED,
+                    ['action' => $canonical, 'reason' => 'projection_versions_not_array']
+                );
+            }
+            $versions = [];
+            foreach ($result['versions'] as $row) {
+                $kind = trim((string)($row['kind'] ?? ''));
+                $id = trim((string)($row['id'] ?? ''));
+                $version = (int)($row['version'] ?? 0);
+                if ($kind === '' || $id === '' || $version <= 0
+                    || !CashierV3ResourceKindCatalog::isKnown($kind)) {
+                    throw new CashierV3CommandException(
+                        CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
+                        '该查看功能返回的对象版本无效，请稍后重试。',
+                        CashierV3ResultCode::STATUS_FAILED,
+                        ['action' => $canonical, 'reason' => 'projection_version_invalid']
+                    );
+                }
+                $versions[] = ['kind' => $kind, 'id' => $id, 'version' => $version];
+            }
+            if ($versions) {
+                $envelope['versions'] = $versions;
+            }
+        }
 
         // 完整根只能走 RootProjector；分区未齐时不得空壳返回
         $wantRoot = !empty($result['return_root_state']);
@@ -541,6 +576,7 @@ class CashierV3ActionDispatcher
             'query-hang-order-result',
             'query-writeoff-result',
             'query-reservation-result',
+            'query-unified-query-export-task',
         ], true);
     }
 }
