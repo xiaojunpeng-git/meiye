@@ -1,0 +1,539 @@
+<?php
+
+namespace C1A\CashierV3\Test;
+
+use app\services\cashier\v3\CashierV3DataScopeContext;
+use app\services\cashier\v3\CashierV3OperatorScope;
+use app\services\cashier\v3\bootstrap\CashierV3Bootstrap;
+use app\services\user\UserServices;
+use app\services\user\label\UserLabelRelationServices;
+use app\services\user\level\UserLevelServices;
+use app\services\organization\EmployeeDataScopeServices;
+use think\facade\Db;
+
+/**
+ * C5 会员集成测试只替换旧 UserServices 的外围写适配，会员 V3 模块、事务、
+ * 幂等、锁、编号、专属服务人和统一业务事件均运行生产代码。
+ */
+final class MemberTestUserServices extends UserServices
+{
+    public function __construct()
+    {
+    }
+
+    public function handelExtendInfo(array $inputExtendInfo, bool $isAll = false)
+    {
+        return $inputExtendInfo;
+    }
+
+    public function save(array $data)
+    {
+        $signal = trim((string)getenv('C5_MEMBER_LOCK_SIGNAL'));
+        if ($signal !== '') {
+            file_put_contents($signal, 'phone-lock-held');
+        }
+        $holdUs = max(0, (int)getenv('C5_MEMBER_HOLD_US'));
+        if ($holdUs > 0) {
+            usleep($holdUs);
+        }
+
+        $row = [];
+        foreach ([
+            'nickname', 'real_name', 'phone', 'bar_code', 'avatar', 'user_type',
+            'belong_store_id', 'status', 'add_time', 'extend_info', 'sex',
+            'birthday', 'card_id', 'addres', 'mark',
+        ] as $field) {
+            if (array_key_exists($field, $data)) {
+                $row[$field] = $data[$field];
+            }
+        }
+        $row['adminid'] = (int)($data['adminId'] ?? $data['adminid'] ?? 0);
+        $row['is_del'] = 0;
+        $row['delete_time'] = null;
+        if (isset($row['extend_info']) && is_array($row['extend_info'])) {
+            $row['extend_info'] = json_encode($row['extend_info'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        }
+
+        $uid = (int)Db::name('user')->insertGetId($row);
+        return new MemberTestSavedUser($uid);
+    }
+}
+
+final class MemberTestSavedUser
+{
+    /** @var int */
+    public $uid;
+
+    public function __construct(int $uid)
+    {
+        $this->uid = $uid;
+    }
+}
+
+final class MemberTestUserLevelServices extends UserLevelServices
+{
+    public function __construct()
+    {
+    }
+
+    public function setUserLevel(int $uid, int $levelId, $vipinfo = [])
+    {
+        Db::name('user_level')->where('uid', $uid)->update(['status' => 0, 'is_del' => 1]);
+        if ($levelId > 0) {
+            Db::name('user_level')->insert([
+                'uid' => $uid,
+                'level_id' => $levelId,
+                'status' => 1,
+                'is_del' => 0,
+                'add_time' => time(),
+            ]);
+        }
+        Db::name('user')->where('uid', $uid)->update([
+            'level' => $levelId,
+            'level_status' => $levelId > 0 ? 1 : 0,
+        ]);
+        return true;
+    }
+}
+
+final class MemberTestUserLabelRelationServices extends UserLabelRelationServices
+{
+    public function __construct()
+    {
+    }
+
+    public function setUserLable($uids, array $labels, int $type = 0, int $relationId = 0, bool $group = false)
+    {
+        $uids = is_array($uids) ? $uids : [$uids];
+        foreach ($uids as $uid) {
+            $uid = (int)$uid;
+            if ($group) {
+                Db::name('user_label_relation')->where([
+                    'uid' => $uid,
+                    'type' => $type,
+                    'relation_id' => $relationId,
+                ])->delete();
+            }
+            foreach (array_values(array_unique(array_map('intval', $labels))) as $labelId) {
+                Db::name('user_label_relation')->insert([
+                    'uid' => $uid,
+                    'label_id' => $labelId,
+                    'type' => $type,
+                    'relation_id' => $relationId,
+                ]);
+            }
+        }
+        return true;
+    }
+}
+
+final class MemberTestSystemConfig
+{
+    public function get(string $name)
+    {
+        return $name === 'h5_avatar' ? '/test/member-avatar.png' : '';
+    }
+}
+
+final class MemberIntegrationFixture
+{
+    public const STORE_ID = 8;
+    public const ORGANIZATION_ID = '3';
+
+    /** @var string[] */
+    public const REQUIRED_C5_TABLES = [
+        'eb_cashier_v3_member_phone_lock',
+        'eb_cashier_v3_member_number_sequence',
+        'eb_member_exclusive_service',
+        'eb_member_exclusive_service_change',
+    ];
+
+    /** @var string[] */
+    public const REQUIRED_EVENT_TABLES = [
+        'eb_cashier_v3_business_event',
+        'eb_cashier_v3_outbox',
+        'eb_cashier_v3_outbox_attempt',
+        'eb_cashier_v3_consumer_once',
+    ];
+
+    public static function bindTestAdapters(): void
+    {
+        $container = app();
+        $employeeScope = TestGraphFactory::mockEmployeeDataScope();
+        foreach ([
+            EmployeeDataScopeServices::class => $employeeScope,
+            UserServices::class => new MemberTestUserServices(),
+            UserLevelServices::class => new MemberTestUserLevelServices(),
+            UserLabelRelationServices::class => new MemberTestUserLabelRelationServices(),
+            'sysConfig' => new MemberTestSystemConfig(),
+        ] as $abstract => $instance) {
+            if (method_exists($container, 'instance')) {
+                $container->instance($abstract, $instance);
+            } elseif (method_exists($container, 'bindTo')) {
+                $container->bindTo($abstract, $instance);
+            } else {
+                throw new \RuntimeException('TEST_CONTAINER_BIND_UNAVAILABLE');
+            }
+        }
+        CashierV3Bootstrap::resetForTests();
+    }
+
+    public static function ensureLegacySchema(): void
+    {
+        $statements = [
+            "CREATE TABLE IF NOT EXISTS `eb_system_store` (
+              `id` int unsigned NOT NULL,
+              `name` varchar(64) NOT NULL DEFAULT '',
+              `is_show` tinyint NOT NULL DEFAULT 1,
+              `is_del` tinyint NOT NULL DEFAULT 0,
+              PRIMARY KEY (`id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci",
+            "CREATE TABLE IF NOT EXISTS `eb_system_store_staff` (
+              `id` int unsigned NOT NULL,
+              `store_id` int unsigned NOT NULL DEFAULT 0,
+              `employee_id` int unsigned NOT NULL DEFAULT 0,
+              `account` varchar(64) NOT NULL DEFAULT '',
+              `staff_name` varchar(64) NOT NULL DEFAULT '',
+              `roles` varchar(255) NOT NULL DEFAULT '',
+              `level` int NOT NULL DEFAULT 1,
+              `status` tinyint NOT NULL DEFAULT 1,
+              `is_del` tinyint NOT NULL DEFAULT 0,
+              PRIMARY KEY (`id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci",
+            "CREATE TABLE IF NOT EXISTS `eb_employee` (
+              `id` int unsigned NOT NULL,
+              `name` varchar(64) NOT NULL DEFAULT '',
+              `status` tinyint NOT NULL DEFAULT 1,
+              `is_del` tinyint NOT NULL DEFAULT 0,
+              PRIMARY KEY (`id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci",
+            "CREATE TABLE IF NOT EXISTS `eb_employee_data_scope` (
+              `id` int unsigned NOT NULL AUTO_INCREMENT,
+              `employee_id` int unsigned NOT NULL,
+              `scope_mode` varchar(32) NOT NULL DEFAULT 'personal',
+              `source_store_id` int unsigned NOT NULL DEFAULT 0,
+              `org_ids` text,
+              `store_ids` text,
+              `status` tinyint NOT NULL DEFAULT 1,
+              `is_del` tinyint NOT NULL DEFAULT 0,
+              PRIMARY KEY (`id`), KEY `idx_emp` (`employee_id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci",
+            "CREATE TABLE IF NOT EXISTS `eb_employee_store_isolation` (
+              `id` int unsigned NOT NULL AUTO_INCREMENT,
+              `employee_id` int unsigned NOT NULL,
+              `store_id` int unsigned NOT NULL,
+              `status` tinyint NOT NULL DEFAULT 1,
+              `is_del` tinyint NOT NULL DEFAULT 0,
+              PRIMARY KEY (`id`), KEY `idx_emp` (`employee_id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci",
+            "CREATE TABLE IF NOT EXISTS `eb_organization` (
+              `id` int unsigned NOT NULL,
+              `pid` int unsigned NOT NULL DEFAULT 0,
+              `name` varchar(64) NOT NULL DEFAULT '',
+              `is_del` tinyint NOT NULL DEFAULT 0,
+              PRIMARY KEY (`id`), KEY `idx_pid` (`pid`,`is_del`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci",
+            "CREATE TABLE IF NOT EXISTS `eb_organization_store` (
+              `id` int unsigned NOT NULL AUTO_INCREMENT,
+              `org_id` int unsigned NOT NULL,
+              `store_id` int unsigned NOT NULL,
+              PRIMARY KEY (`id`), UNIQUE KEY `uk_store_id` (`store_id`), KEY `idx_org` (`org_id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci",
+            "CREATE TABLE IF NOT EXISTS `eb_user` (
+              `uid` int unsigned NOT NULL AUTO_INCREMENT,
+              `nickname` varchar(60) NOT NULL DEFAULT '',
+              `real_name` varchar(25) NOT NULL DEFAULT '',
+              `phone` char(15) NOT NULL DEFAULT '',
+              `bar_code` varchar(32) NOT NULL DEFAULT '',
+              `avatar` varchar(256) NOT NULL DEFAULT '',
+              `user_type` varchar(32) NOT NULL DEFAULT '',
+              `belong_store_id` int NOT NULL DEFAULT 0,
+              `status` tinyint NOT NULL DEFAULT 1,
+              `is_del` tinyint NOT NULL DEFAULT 0,
+              `delete_time` timestamp NULL DEFAULT NULL,
+              `add_time` int unsigned NOT NULL DEFAULT 0,
+              `extend_info` longtext,
+              `sex` tinyint NOT NULL DEFAULT 0,
+              `birthday` int NOT NULL DEFAULT 0,
+              `card_id` varchar(20) NOT NULL DEFAULT '',
+              `addres` varchar(255) NOT NULL DEFAULT '',
+              `mark` varchar(255) NOT NULL DEFAULT '',
+              `adminid` int unsigned NOT NULL DEFAULT 0,
+              `level` int NOT NULL DEFAULT 0,
+              `exp` decimal(12,2) NOT NULL DEFAULT 0,
+              `level_status` tinyint NOT NULL DEFAULT 0,
+              PRIMARY KEY (`uid`), KEY `idx_phone` (`phone`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci",
+            "CREATE TABLE IF NOT EXISTS `eb_store_user` (
+              `id` int unsigned NOT NULL AUTO_INCREMENT,
+              `store_id` int unsigned NOT NULL,
+              `uid` int unsigned NOT NULL,
+              `label_id` text,
+              `status` tinyint NOT NULL DEFAULT 1,
+              `add_time` int unsigned NOT NULL DEFAULT 0,
+              PRIMARY KEY (`id`), UNIQUE KEY `uk_store_uid` (`store_id`,`uid`), KEY `idx_uid` (`uid`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci",
+            "CREATE TABLE IF NOT EXISTS `eb_system_user_level` (
+              `id` int unsigned NOT NULL,
+              `is_show` tinyint NOT NULL DEFAULT 1,
+              `is_del` tinyint NOT NULL DEFAULT 0,
+              PRIMARY KEY (`id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci",
+            "CREATE TABLE IF NOT EXISTS `eb_user_label` (
+              `id` int unsigned NOT NULL,
+              `label_name` varchar(64) NOT NULL DEFAULT '',
+              `type` tinyint NOT NULL DEFAULT 0,
+              `relation_id` int unsigned NOT NULL DEFAULT 0,
+              PRIMARY KEY (`id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci",
+            "CREATE TABLE IF NOT EXISTS `eb_user_label_relation` (
+              `id` int unsigned NOT NULL AUTO_INCREMENT,
+              `uid` int unsigned NOT NULL,
+              `label_id` int unsigned NOT NULL,
+              `type` tinyint NOT NULL DEFAULT 0,
+              `relation_id` int unsigned NOT NULL DEFAULT 0,
+              PRIMARY KEY (`id`), UNIQUE KEY `uk_member_label` (`uid`,`label_id`,`type`,`relation_id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci",
+            "CREATE TABLE IF NOT EXISTS `eb_user_level` (
+              `id` int unsigned NOT NULL AUTO_INCREMENT,
+              `uid` int unsigned NOT NULL,
+              `level_id` int unsigned NOT NULL,
+              `status` tinyint NOT NULL DEFAULT 1,
+              `is_del` tinyint NOT NULL DEFAULT 0,
+              `add_time` int unsigned NOT NULL DEFAULT 0,
+              PRIMARY KEY (`id`), KEY `idx_uid` (`uid`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci",
+        ];
+        foreach ($statements as $sql) {
+            Db::execute($sql);
+        }
+        self::ensureColumn('eb_system_store', 'is_show', "tinyint NOT NULL DEFAULT 1");
+        self::ensureColumn('eb_system_store', 'is_del', "tinyint NOT NULL DEFAULT 0");
+        self::ensureColumn('eb_employee', 'name', "varchar(64) NOT NULL DEFAULT ''");
+    }
+
+    public static function resetAndSeed(): void
+    {
+        foreach ([
+            'user_label_relation', 'user_level', 'store_user', 'user',
+            'organization_store', 'organization',
+        ] as $table) {
+            Db::execute('TRUNCATE TABLE `eb_' . $table . '`');
+        }
+        foreach ([
+            'cashier_v3_consumer_once',
+            'cashier_v3_outbox_attempt',
+            'cashier_v3_outbox',
+            'cashier_v3_business_event',
+            'cashier_v3_member_phone_lock',
+            'member_exclusive_service_change',
+            'member_exclusive_service',
+        ] as $table) {
+            if (self::tableExists('eb_' . $table)) {
+                Db::execute('DELETE FROM `eb_' . $table . '`');
+            }
+        }
+
+        Db::execute("REPLACE INTO `eb_system_store` (`id`,`name`,`is_show`,`is_del`) VALUES
+          (8,'本店',1,0),(9,'同组织店',1,0),(10,'上级组织店',1,0),
+          (11,'集团店',1,0),(12,'其他事业部店',1,0)");
+        Db::execute("REPLACE INTO `eb_system_store_staff`
+          (`id`,`store_id`,`employee_id`,`account`,`staff_name`,`roles`,`level`,`status`,`is_del`) VALUES
+          (1,8,1,'operator1','操作员一','1',0,1,0),
+          (2,8,2,'operator2','操作员二','1',0,1,0),
+          (20,8,20,'artisan20','专属服务人甲','1',1,1,0)");
+        Db::execute("REPLACE INTO `eb_employee` (`id`,`name`,`status`,`is_del`) VALUES
+          (1,'操作员一',1,0),(2,'操作员二',1,0),(20,'专属服务人甲',1,0)");
+        Db::execute('DELETE FROM `eb_employee_data_scope`');
+        Db::execute('DELETE FROM `eb_employee_store_isolation`');
+
+        Db::execute("INSERT INTO `eb_organization` (`id`,`pid`,`name`,`is_del`) VALUES
+          (1,0,'集团',0),(2,1,'事业部',0),(3,2,'当前组织',0),(4,1,'其他事业部',0)");
+        Db::execute("INSERT INTO `eb_organization_store` (`org_id`,`store_id`) VALUES
+          (3,8),(3,9),(2,10),(1,11),(4,12)");
+        Db::execute("REPLACE INTO `eb_system_user_level` (`id`,`is_show`,`is_del`) VALUES (1,1,0)");
+        Db::execute("REPLACE INTO `eb_user_label` (`id`,`label_name`,`type`,`relation_id`) VALUES
+          (11,'高价值',0,0),(12,'重点跟进',0,0)");
+    }
+
+    public static function seedMember(
+        int $uid,
+        string $name,
+        string $phone,
+        int $storeId,
+        int $status = 1,
+        int $isDel = 0,
+        $deleteTime = null
+    ): void {
+        Db::name('user')->insert([
+            'uid' => $uid,
+            'nickname' => $name,
+            'real_name' => $name,
+            'phone' => $phone,
+            'bar_code' => sprintf('%09d', $uid),
+            'belong_store_id' => $storeId,
+            'status' => $status,
+            'is_del' => $isDel,
+            'delete_time' => $deleteTime,
+            'add_time' => time(),
+        ]);
+        Db::name('store_user')->insert([
+            'uid' => $uid,
+            'store_id' => $storeId,
+            'status' => 1,
+            'add_time' => time(),
+        ]);
+    }
+
+    public static function dispatcher()
+    {
+        return CashierV3Bootstrap::dispatcher();
+    }
+
+    public static function operatorProfile(int $operatorId): array
+    {
+        return [
+            'id' => $operatorId,
+            'level' => 0,
+            'roles' => [1],
+            'employee_id' => $operatorId,
+            'account' => 'operator' . $operatorId,
+        ];
+    }
+
+    public static function operatorScope(int $operatorId): CashierV3OperatorScope
+    {
+        return new CashierV3OperatorScope(
+            self::STORE_ID,
+            $operatorId,
+            self::ORGANIZATION_ID,
+            '0'
+        );
+    }
+
+    public static function dataScope($dispatcher, int $operatorId): CashierV3DataScopeContext
+    {
+        return $dispatcher->dataScopeFactory()->build(
+            self::STORE_ID,
+            $operatorId,
+            self::operatorProfile($operatorId),
+            '0',
+            self::ORGANIZATION_ID
+        );
+    }
+
+    public static function directCommand(
+        $dispatcher,
+        string $action,
+        array $payload,
+        int $operatorId = 1,
+        string $idempotencyKey = ''
+    ): array {
+        $handler = $dispatcher->handlers()->requireCommand($action);
+        $op = self::operatorScope($operatorId);
+        $scope = self::dataScope($dispatcher, $operatorId);
+        return Db::transaction(function () use ($handler, $action, $payload, $operatorId, $idempotencyKey, $op, $scope) {
+            return $handler([
+                'action' => $action,
+                'payload' => $payload,
+                'operator_scope' => $op,
+                'data_scope' => $scope,
+                'operator' => self::operatorProfile($operatorId),
+                'idempotency_key' => $idempotencyKey !== '' ? $idempotencyKey : 'CMD-' . self::uuid(),
+            ]);
+        });
+    }
+
+    public static function projectionSession(int $operatorId = 1): array
+    {
+        return [
+            'store_id' => self::STORE_ID,
+            'operator_id' => $operatorId,
+            'operator_profile' => self::operatorProfile($operatorId),
+            'client_session_id' => 'SESSION-' . self::uuid(),
+            'operator_ip' => '127.0.0.1',
+        ];
+    }
+
+    /**
+     * @return array{body:array,session:array,workspace_id:string,version:int}
+     */
+    public static function commandRequest($dispatcher, string $action, array $payload, int $operatorId = 1, string $idempotencyKey = ''): array
+    {
+        $session = self::projectionSession($operatorId);
+        $keyServices = app()->make(\app\services\cashier\v3\CashierV3IdempotencyKeyServices::class);
+        $stateContexts = new \app\services\cashier\v3\CashierV3StateContextServices($keyServices);
+        $state = $stateContexts->resolve(
+            self::STORE_ID,
+            $operatorId,
+            $session['client_session_id'],
+            ''
+        );
+        $session['state_context_id'] = $state['state_context_id'];
+        $workspaceId = sprintf('ws:%d:%d:%s', self::STORE_ID, $operatorId, $state['state_context_id']);
+        Db::transaction(function () use ($dispatcher, $workspaceId) {
+            $scope = \app\services\cashier\v3\CashierV3ResourceScope::of('store', (string)self::STORE_ID);
+            $dispatcher->versionServices()->ensureRegistered($scope, 'cashier_workspace', $workspaceId);
+        });
+        $version = (int)Db::name('cashier_v3_resource_version')
+            ->where('resource_kind', 'cashier_workspace')
+            ->where('resource_id', $workspaceId)
+            ->value('current_version');
+        $command = [
+            'action' => $action,
+            'idempotencyKey' => $idempotencyKey !== '' ? $idempotencyKey : 'CMD-' . self::uuid(),
+            'contexts' => [[
+                'kind' => 'cashier_workspace',
+                'id' => $workspaceId,
+                'expectedVersion' => $version,
+            ]],
+        ];
+        return [
+            'body' => array_merge($payload, [
+                'action' => $action,
+                'clientSessionId' => $session['client_session_id'],
+                'stateContextId' => $state['state_context_id'],
+                'correlationId' => 'CORR-' . self::uuid(),
+                'command' => $command,
+            ]),
+            'session' => $session,
+            'workspace_id' => $workspaceId,
+            'version' => $version,
+        ];
+    }
+
+    public static function tableExists(string $table): bool
+    {
+        $rows = Db::query(
+            'SELECT COUNT(*) AS c FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=?',
+            [$table]
+        );
+        return (int)($rows[0]['c'] ?? 0) === 1;
+    }
+
+    private static function ensureColumn(string $table, string $column, string $definition): void
+    {
+        $rows = Db::query(
+            'SELECT COUNT(*) AS c FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME=?',
+            [$table, $column]
+        );
+        if ((int)($rows[0]['c'] ?? 0) === 0) {
+            Db::execute(sprintf(
+                'ALTER TABLE `%s` ADD COLUMN `%s` %s',
+                str_replace('`', '``', $table),
+                str_replace('`', '``', $column),
+                $definition
+            ));
+        }
+    }
+
+    public static function uuid(): string
+    {
+        $bytes = random_bytes(16);
+        $bytes[6] = chr((ord($bytes[6]) & 0x0f) | 0x40);
+        $bytes[8] = chr((ord($bytes[8]) & 0x3f) | 0x80);
+        $hex = bin2hex($bytes);
+        return substr($hex, 0, 8) . '-' . substr($hex, 8, 4) . '-' . substr($hex, 12, 4)
+            . '-' . substr($hex, 16, 4) . '-' . substr($hex, 20);
+    }
+}
