@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict'
+import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import test from 'node:test'
 
-import { exactSorted, listFiles, mobileRoot, readJson, sourceRoot, testRoot } from './helpers.mjs'
+import { exactSorted, listFiles, mobileRoot, readJson, repoRoot, sourceRoot, testRoot } from './helpers.mjs'
 
 const textExtensions = new Set([
 	'.css',
@@ -137,9 +138,14 @@ test('local ignores cover every generated dependency and evidence directory', ()
 	for (const required of ['unpackage/', '**/node_modules/', '.hbuilderx/', '*.log', '.env']) {
 		assert.equal(sourceIgnore.includes(required), true, required)
 	}
-	for (const required of ['node_modules/', '.cache/', 'tmp/', 'evidence/', '*.log']) {
+	for (const required of ['node_modules/', '.cache/', 'tmp/', 'evidence/', '*.log', '.generated/']) {
 		assert.equal(testIgnore.includes(required), true, required)
 	}
+	const generatedFiles = execFileSync('git', ['ls-files', '--', 'tests/mobile-vue3/.generated'], {
+		cwd: repoRoot,
+		encoding: 'utf8'
+	}).trim()
+	assert.equal(generatedFiles, '')
 })
 
 test('source and test package manifests stay dependency-free on Node 22', () => {

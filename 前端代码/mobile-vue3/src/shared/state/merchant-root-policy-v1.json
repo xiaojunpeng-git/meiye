@@ -4,6 +4,11 @@
 	"stateContextIdMustBeNonEmpty": true,
 	"stateRevisionType": "STRING",
 	"stateRevisionPattern": "^[1-9][0-9]*$",
+	"successRootReasonCodes": [
+		"READY",
+		"BOOTSTRAPPED",
+		"CONTEXT_SWITCHED"
+	],
 	"decisionOrder": [
 		"REQUIRE_COMPLETE_ROOT_RESPONSE",
 		"REQUIRE_SUPPORTED_CONTRACT_VERSION",

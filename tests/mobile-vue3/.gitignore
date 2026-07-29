@@ -4,3 +4,4 @@ tmp/
 evidence/
 *.log
 .DS_Store
+.generated/

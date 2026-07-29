@@ -13,9 +13,8 @@
 </template>
 
 <script setup lang="uts">
-	import { merchantContextIsComplete } from '../../../shared/api/request-context.uts'
 	import { currentMobilePlatform, declaredPlatformCapabilityCount } from '../../../shared/platform/mobile-platform.uts'
-	import { merchantStateIdentifiersAreCleared } from '../../state/root-state.uts'
+	import { merchantContextIsComplete, merchantStateIdentifiersAreCleared } from '../../state/root-state.uts'
 
 	const platformCode = ref(currentMobilePlatform())
 	const foundationReady = ref(

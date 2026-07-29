@@ -1,136 +1,19 @@
 {
-	"contractVersion": "mobile-merchant-v1",
-	"errorContract": "mobile-api-errors-v1",
-	"requestMetadata": {
-		"transport": "HEADERS",
-		"appliesTo": "AUTHENTICATED_MERCHANT_REQUESTS_AFTER_SESSION_EXCHANGE",
-		"required": {
-			"Authorization": "merchantToken",
-			"X-Mobile-Contract-Version": "contractVersion",
-			"X-Mobile-Client-Session-Id": "clientSessionId",
-			"X-Mobile-Platform": "platform",
-			"X-Mobile-Request-Id": "requestId",
-			"X-Mobile-Active-Context-Id": "activeContextId",
-			"X-Mobile-State-Context-Id": "stateContextId"
-		},
-		"emptyContextValuesAllowed": false
-	},
-	"endpoints": {
-		"createMerchantSession": {
-			"method": "POST",
-			"path": "/mobile/merchant/session",
-			"preContextExchange": true,
-			"authentication": "APP_SESSION_AND_PHONE_VERIFICATION",
-			"merchantContextRequired": false,
-			"response": "merchantRoot"
-		},
-		"bootstrap": {
-			"method": "GET",
-			"path": "/mobile/merchant/bootstrap",
-			"merchantContextRequired": true,
-			"response": "merchantRoot"
-		},
-		"switchContext": {
-			"method": "POST",
-			"path": "/mobile/merchant/context/switch",
-			"merchantContextRequired": true,
-			"requestBodyRequired": [
-				"targetContextId",
-				"expectedAuthVersion",
-				"idempotencyKey"
-			],
-			"expectedAuthVersionMustBePositive": true,
-			"response": "merchantRoot"
-		}
-	},
-	"merchantRoot": {
-		"required": [
-			"contractVersion",
-			"merchantToken",
-			"expiresAt",
-			"employee",
-			"authVersion",
-			"activeContextId",
-			"activeContext",
-			"contexts",
-			"capabilities",
-			"dataScope",
-			"availableActions",
-			"reasonCode",
-			"stateContextId",
-			"stateRevision"
-		],
-		"employeeRequired": [
-			"id",
-			"name",
-			"avatar",
-			"status"
-		],
-		"activeContextRequired": [
-			"contextId"
-		],
-		"activeContextOptional": [
-			"storeId",
-			"organizationId",
-			"staffId"
-		],
-		"contractVersionMustEqual": "mobile-merchant-v1",
-		"merchantTokenMustBeOpaqueNonEmpty": true,
-		"expiresAtMustBeNonEmpty": true,
-		"employeeIdMustBeNonEmpty": true,
-		"employeeStatusAllowedForMerchantReady": [
-			"ACTIVE"
-		],
-		"authVersionMustBePositive": true,
-		"activeContextIdMustBeOpaqueNonEmpty": true,
-		"activeBusinessContextIdMustBeOpaqueNonEmpty": true,
-		"stateContextIdMustBeOpaqueNonEmpty": true,
-		"stateRevisionType": "STRING",
-		"stateRevisionPattern": "^[1-9][0-9]*$",
-		"newStateContextInitialRevision": "1",
-		"contextsMustHaveUniqueContextIds": true,
-		"capabilitiesMustBeArray": true,
-		"availableActionsMustBeArray": true
-	},
-	"contextSummary": {
-		"required": [
-			"contextId",
-			"label"
-		],
-		"forbidden": [
-			"capabilities",
-			"dataScope",
-			"availableActions"
-		],
-		"contextIdsMustBeUnique": true
-	},
-	"dataScope": {
-		"required": [
-			"authorized",
-			"scopeEntryCount",
-			"scopeDigest"
-		],
-		"authorizedMustBeTrueForMerchantReady": true,
-		"scopeEntryCountMustBePositiveForMerchantReady": true,
-		"scopeDigestMustBeNonEmptyForMerchantReady": true
-	},
-	"authorizationSemantics": {
-		"effectiveScopeIntersection": [
-			"VALID_ASSIGNMENT",
-			"MOBILE_AUTHORIZATION_SCOPE",
-			"EMPLOYEE_DATA_SCOPE",
-			"OPERATING_ORGANIZATION_OR_STORE"
-		],
-		"emptyCapabilitiesMeansNoCapability": true,
-		"emptyAvailableActionsMeansNoAction": true,
-		"emptyScopeMeansNoAccess": true,
-		"mergeAcrossContexts": false,
-		"deliveryOnlyMerchantAccess": false
-	},
-	"contextSwitchSemantics": {
-		"rotateActiveContextId": true,
-		"rotateStateContextId": true,
-		"activeContextMustMatchTargetContext": true,
-		"oldContextRequestsFailWith": "ACTIVE_CONTEXT_MISMATCH"
-	}
+  "contractVersion": "mobile-merchant-v1",
+  "errorContract": "mobile-api-errors-v1",
+  "requestMetadataProfiles": {
+    "APP_SESSION_EXCHANGE": {"required": {"X-Mobile-Contract-Version": "contractVersion", "X-Mobile-Client-Session-Id": "clientSessionId", "X-Mobile-Platform": "platform", "X-Mobile-Request-Id": "requestId", "X-Mobile-App-Session": "appSession"}, "forbidden": ["Authorization", "X-Mobile-Active-Context-Id", "X-Mobile-State-Context-Id", "Cookie", "queryToken", "bodyToken", "headerAlias"], "emptyContextValuesAllowed": false},
+    "MERCHANT_SESSION": {"required": {"X-Mobile-Contract-Version": "contractVersion", "X-Mobile-Client-Session-Id": "clientSessionId", "X-Mobile-Platform": "platform", "X-Mobile-Request-Id": "requestId", "Authorization": "Bearer <merchantToken>", "X-Mobile-Active-Context-Id": "activeContextId", "X-Mobile-State-Context-Id": "stateContextId"}, "forbidden": ["X-Mobile-App-Session", "Cookie", "queryToken", "bodyToken", "headerAlias"], "emptyContextValuesAllowed": false}
+  },
+  "endpoints": {
+    "createMerchantSession": {"method": "POST", "path": "/mobile/merchant/session", "requestMetadataProfile": "APP_SESSION_EXCHANGE", "preContextExchange": true, "authentication": "APP_SESSION_AND_PHONE_VERIFICATION", "merchantContextRequired": false, "response": "merchantRoot"},
+    "bootstrap": {"method": "GET", "path": "/mobile/merchant/bootstrap", "requestMetadataProfile": "MERCHANT_SESSION", "merchantContextRequired": true, "response": "merchantRoot"},
+    "switchContext": {"method": "POST", "path": "/mobile/merchant/context/switch", "requestMetadataProfile": "MERCHANT_SESSION", "merchantContextRequired": true, "requestBodyRequired": ["targetContextId", "expectedAuthVersion", "idempotencyKey"], "expectedAuthVersionMustBePositive": true, "response": "merchantRoot"},
+    "logout": {"method": "POST", "path": "/mobile/merchant/logout", "requestMetadataProfile": "MERCHANT_SESSION", "requestBodyRequired": ["idempotencyKey"], "response": "successEnvelope"}
+  },
+  "merchantRoot": {"required": ["contractVersion", "merchantToken", "expiresAt", "employee", "authVersion", "activeContextId", "activeContext", "contexts", "capabilities", "dataScope", "availableActions", "reasonCode", "stateContextId", "stateRevision"], "employeeRequired": ["id", "name", "avatar", "status"], "activeContextRequired": ["contextId"], "activeContextOptional": ["storeId", "organizationId", "staffId"], "contractVersionMustEqual": "mobile-merchant-v1", "merchantTokenMustBeOpaqueNonEmpty": true, "expiresAtMustBeNonEmpty": true, "employeeIdMustBeNonEmpty": true, "employeeStatusAllowedForMerchantReady": ["ACTIVE"], "authVersionMustBePositive": true, "activeContextIdMustBeOpaqueNonEmpty": true, "activeBusinessContextIdMustBeOpaqueNonEmpty": true, "stateContextIdMustBeOpaqueNonEmpty": true, "stateRevisionType": "STRING", "stateRevisionPattern": "^[1-9][0-9]*$", "newStateContextInitialRevision": "1", "contextsMustHaveUniqueContextIds": true, "capabilitiesMustBeArray": true, "availableActionsMustBeArray": true, "reasonCodeEnum": ["READY", "BOOTSTRAPPED", "CONTEXT_SWITCHED"]},
+  "contextSummary": {"required": ["contextId", "label"], "forbidden": ["capabilities", "dataScope", "availableActions"], "contextIdsMustBeUnique": true},
+  "dataScope": {"required": ["authorized", "scopeEntryCount", "scopeDigest"], "authorizedMustBeTrueForMerchantReady": true, "scopeEntryCountMustBePositiveForMerchantReady": true, "scopeDigestMustBeNonEmptyForMerchantReady": true},
+  "authorizationSemantics": {"effectiveScopeIntersection": ["VALID_ASSIGNMENT", "MOBILE_JOB_FUNCTION", "MOBILE_AUTHORIZATION_SCOPE", "EMPLOYEE_DATA_SCOPE", "EMPLOYEE_STORE_ISOLATION", "OPERATING_ORGANIZATION_OR_STORE"], "emptyCapabilitiesMeansNoCapability": true, "emptyAvailableActionsMeansNoAction": true, "emptyScopeMeansNoAccess": true, "mergeAcrossContexts": false, "deliveryOnlyMerchantAccess": false},
+  "contextSwitchSemantics": {"rotateActiveContextId": true, "rotateStateContextId": true, "activeContextMustMatchTargetContext": true, "oldContextRequestsFailWith": "ACTIVE_CONTEXT_MISMATCH"}
 }

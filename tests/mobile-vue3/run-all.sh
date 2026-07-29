@@ -10,4 +10,5 @@ if [ ! -x "$NODE_BIN" ]; then
 	exit 1
 fi
 
+"$SCRIPT_DIR/scripts/compile-production-uts.sh"
 "$NODE_BIN" --test "$SCRIPT_DIR"/js/*.test.mjs

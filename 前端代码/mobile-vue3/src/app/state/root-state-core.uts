@@ -1,0 +1,175 @@
+export function merchantStateIdentifiersAreCleared(
+	merchantToken : string,
+	activeContextId : string,
+	stateContextId : string,
+	stateRevision : string
+) : boolean {
+	return merchantToken.length == 0 && activeContextId.length == 0 &&
+		stateContextId.length == 0 && stateRevision.length == 0
+}
+
+export function merchantContextIsComplete(activeContextId : string, stateContextId : string) : boolean {
+	return activeContextId.length > 0 && stateContextId.length > 0
+}
+
+function hasFields(value : any, fields : any) : boolean {
+	if (value == null || !Array.isArray(fields)) {
+		return false
+	}
+	for (let index = 0; index < fields.length; index++) {
+		if (!Object.hasOwn(value, fields[index])) {
+			return false
+		}
+	}
+	return true
+}
+
+function validRevision(value : any) : boolean {
+	return typeof value == 'string' && /^[1-9][0-9]*$/.test(value)
+}
+
+function compareRevision(left : string, right : string) : number {
+	if (left.length < right.length) {
+		return -1
+	}
+	if (left.length > right.length) {
+		return 1
+	}
+	if (left < right) {
+		return -1
+	}
+	if (left > right) {
+		return 1
+	}
+	return 0
+}
+
+export function hasCompleteMerchantRoot(contract : any, incoming : any) : boolean {
+	if (incoming == null || contract == null || contract.merchantRoot == null) {
+		return false
+	}
+	if (!hasFields(incoming, contract.merchantRoot.required) || !hasFields(incoming.employee, contract.merchantRoot.employeeRequired)) {
+		return false
+	}
+	if (typeof incoming.merchantToken != 'string' || incoming.merchantToken.length == 0 ||
+		typeof incoming.expiresAt != 'string' || incoming.expiresAt.length == 0 ||
+		!Number.isInteger(incoming.authVersion) || incoming.authVersion <= 0 ||
+		incoming.activeContext == null || typeof incoming.activeContext.contextId != 'string' ||
+		incoming.activeContext.contextId.length == 0 || !Array.isArray(incoming.contexts) ||
+		!Array.isArray(incoming.capabilities) || !Array.isArray(incoming.availableActions) || incoming.dataScope == null) {
+		return false
+	}
+	return true
+}
+
+export function evaluateMerchantRootUpdate(
+	policy : any,
+	contract : any,
+	current : any,
+	incoming : any,
+	switchIntent : boolean,
+	explicitSwitch : boolean,
+	targetContextId : string,
+	requestGeneration : number,
+	currentGeneration : number
+) : string {
+	if (!hasCompleteMerchantRoot(contract, incoming)) {
+		return 'INCOMPLETE_ROOT_STATE'
+	}
+	if (incoming.contractVersion != contract.contractVersion) {
+		return 'CONTRACT_VERSION_MISMATCH'
+	}
+	if (typeof incoming.employee.id != 'string' || incoming.employee.id.length == 0 ||
+		contract.merchantRoot.employeeStatusAllowedForMerchantReady.indexOf(incoming.employee.status) < 0) {
+		return 'UNAUTHORIZED_ROOT_STATE'
+	}
+	if (!merchantContextIsComplete(incoming.activeContextId, incoming.stateContextId)) {
+		return 'MISSING_STATE_CONTEXT'
+	}
+	if (!validRevision(incoming.stateRevision)) {
+		return 'INVALID_STATE_REVISION'
+	}
+	if (switchIntent && !explicitSwitch) {
+		return 'CONTEXT_SWITCH_IN_PROGRESS'
+	}
+	if (explicitSwitch && current == null) {
+		return 'INVALID_CONTEXT_SWITCH_ROOT'
+	}
+
+	let stateContextChanged = current != null && current.stateContextId != incoming.stateContextId
+	let activeContextChanged = current != null && current.activeContextId != incoming.activeContextId
+	let businessContextChanged = current != null && current.activeContext.contextId != incoming.activeContext.contextId
+	if (current != null && (stateContextChanged || activeContextChanged || businessContextChanged) && !explicitSwitch) {
+		return stateContextChanged ? 'STATE_CONTEXT_MISMATCH' : 'ACTIVE_ROOT_CONTEXT_MISMATCH'
+	}
+	if (current != null && explicitSwitch && (!stateContextChanged || !activeContextChanged || !businessContextChanged ||
+		targetContextId.length == 0 || incoming.activeContext.contextId != targetContextId)) {
+		return 'INVALID_CONTEXT_SWITCH_ROOT'
+	}
+	if ((current == null || stateContextChanged) && incoming.stateRevision != policy.contextRules.newStateContextInitialRevision) {
+		return 'INVALID_STATE_REVISION'
+	}
+	if (incoming.dataScope.authorized != true || !Number.isInteger(incoming.dataScope.scopeEntryCount) ||
+		incoming.dataScope.scopeEntryCount <= 0 || typeof incoming.dataScope.scopeDigest != 'string' ||
+		incoming.dataScope.scopeDigest.length == 0) {
+		return 'UNAUTHORIZED_ROOT_STATE'
+	}
+
+	let activeMatches = 0
+	let contextIds : Array<string> = []
+	for (let index = 0; index < incoming.contexts.length; index++) {
+		let context = incoming.contexts[index]
+		if (!hasFields(context, contract.contextSummary.required)) {
+			return 'INCOMPLETE_ROOT_STATE'
+		}
+		if (context.contextId == incoming.activeContext.contextId) {
+			activeMatches++
+		}
+		if (contextIds.indexOf(context.contextId) >= 0) {
+			return 'INCOMPLETE_ROOT_STATE'
+		}
+		contextIds.push(context.contextId)
+		for (let forbiddenIndex = 0; forbiddenIndex < contract.contextSummary.forbidden.length; forbiddenIndex++) {
+			if (Object.hasOwn(context, contract.contextSummary.forbidden[forbiddenIndex])) {
+				return 'INCOMPLETE_ROOT_STATE'
+			}
+		}
+	}
+	if (activeMatches != 1) {
+		return 'INCOMPLETE_ROOT_STATE'
+	}
+	if (current != null && !stateContextChanged) {
+		let revisionOrder = compareRevision(incoming.stateRevision, current.stateRevision)
+		if (revisionOrder < 0) {
+			return 'STALE_ROOT_STATE'
+		}
+		if (revisionOrder == 0) {
+			return 'DUPLICATE_ROOT_STATE'
+		}
+	}
+	if (!Number.isInteger(requestGeneration) || requestGeneration <= 0 || !Number.isInteger(currentGeneration) || currentGeneration <= 0) {
+		return 'INVALID_REQUEST_GENERATION'
+	}
+	if (requestGeneration < currentGeneration) {
+		return 'STALE_REQUEST_GENERATION'
+	}
+	return explicitSwitch ? 'ACCEPT_SWITCH' : 'ACCEPT'
+}
+
+export function merchantRootInstallDecision(
+	contractVersion : string,
+	expectedContractVersion : string,
+	employeeActive : boolean,
+	authVersion : number,
+	activeContextId : string,
+	stateContextId : string,
+	stateRevision : string,
+	authorized : boolean,
+	scopeEntryCount : number,
+	scopeDigest : string
+) : string {
+	if (contractVersion != expectedContractVersion) return 'CONTRACT_VERSION_MISMATCH'
+	if (!employeeActive || authVersion <= 0 || !authorized || scopeEntryCount <= 0 || scopeDigest.length == 0) return 'UNAUTHORIZED_ROOT_STATE'
+	if (!merchantContextIsComplete(activeContextId, stateContextId)) return 'MISSING_STATE_CONTEXT'
+	return validRevision(stateRevision) ? 'ACCEPT' : 'INVALID_STATE_REVISION'
+}
