@@ -8,6 +8,7 @@ use app\dao\product\inventory\StoreProjectConsumableRecipeDetailDao;
 use app\jobs\order\OrderStatusJob;
 use app\services\BaseServices;
 use app\services\product\branch\StoreBranchProductServices;
+use app\services\product\product\StoreProductSkuWriteLock;
 use app\services\product\sku\StoreProductAttrValueServices;
 use mohe\traits\ServicesTrait;
 use think\exception\ValidateException;
@@ -170,8 +171,7 @@ class SalonStockWriteoffServices extends BaseServices
             return; // 无有效扣料明细：不占用幂等键
         }
 
-        // 统一锁序：先查各最终门店 SKU 行ID（不加锁）→ 按 (SKU行ID 升序, 商品ID 升序, unique 升序) 排序
-        // 扣料与退料共用同一锁序，规避跨事务交叉加锁死锁
+        // 业务处理顺序保持稳定；真正行锁由 42(商品) -> 43(SKU) 批量守卫统一执行。
         $orderedKeys = $this->orderTargetsBySkuId($aggregated);
 
         /** @var ProductInventoryChangeServices $changeServices */
@@ -185,7 +185,22 @@ class SalonStockWriteoffServices extends BaseServices
         ) {
             $time = time();
 
-            // ===== 阶段1：按统一锁序预锁全部最终门店 SKU + 汇总不足清单 =====
+            // ===== 阶段1：先锁全部商品，再锁全部 SKU，然后汇总不足清单 =====
+            $lockTargets = [];
+            foreach ($orderedKeys as $key) {
+                $lockTargets[] = [
+                    'product_id' => (int)$aggregated[$key]['final_pid'],
+                    'unique' => (string)$aggregated[$key]['final_unique'],
+                ];
+            }
+            /** @var StoreProductSkuWriteLock $catalogWriteLock */
+            $catalogWriteLock = app()->make(StoreProductSkuWriteLock::class);
+            $lockedCatalog = $catalogWriteLock->lock($lockTargets);
+            $lockedSkus = [];
+            foreach ($lockedCatalog['skus'] as $lockedSku) {
+                $lockedSkus[(int)$lockedSku['product_id'] . '|' . (string)$lockedSku['unique']] = $lockedSku;
+            }
+
             $plan = [];       // key => 待扣料计划（最终门店 SKU + 聚合数量 + 固化名称）
             $shortages = [];  // 不足清单
             foreach ($orderedKeys as $key) {
@@ -193,16 +208,11 @@ class SalonStockWriteoffServices extends BaseServices
                 $finalUnique = (string)$aggregated[$key]['final_unique'];
                 $qty = (string)$aggregated[$key]['qty'];
 
-                $sku = Db::name('store_product_attr_value')
-                    ->where('product_id', $finalPid)
-                    ->where('unique', $finalUnique)
-                    ->where('type', 0)
-                    ->lock(true)
-                    ->find();
+                $sku = $lockedSkus[$finalPid . '|' . $finalUnique] ?? null;
                 if (!$sku) {
                     throw new ValidateException(sprintf('门店缺少耗材规格副本（商品ID %d / SKU %s），请先同步后再核销', $finalPid, $finalUnique));
                 }
-                $product = Db::name('store_product')->where('id', $finalPid)->field('store_name,allow_negative_stock,is_inventory')->find();
+                $product = $lockedCatalog['products'][$finalPid] ?? null;
                 if (!$product || (int)($product['is_inventory'] ?? 0) !== 1) {
                     throw new ValidateException(sprintf('耗材未参与库存管理（商品ID %d），请先同步后再核销', $finalPid));
                 }
@@ -275,7 +285,7 @@ class SalonStockWriteoffServices extends BaseServices
                     'store_id' => 0,
                     'biz_type' => ProductInventoryChangeServices::BIZ_SALON,
                     'change_sales' => false,
-                    // 阶段1已按统一锁序 FOR UPDATE；禁止再开事务/清全量商品缓存
+                    // 阶段1已按商品 42 -> SKU 43 统一锁序 FOR UPDATE。
                     'assume_locked' => true,
                 ]);
                 $balance = (string)($res['stock'] ?? '0');
@@ -298,7 +308,7 @@ class SalonStockWriteoffServices extends BaseServices
                 ];
             }
 
-            // 院装领用出库台账（order_type=8；库存已由 changeSkuStock 扣完，isStock=false；SKU 已阶段1加锁）
+            // 院装领用出库台账（order_type=8；库存已由 changeSkuStock 扣完，isStock=false）
             $outOrderId = $stockOrderServices->saveData(2, [
                 'store_order_id' => 0,
                 'order_type' => 8,
@@ -388,8 +398,7 @@ class SalonStockWriteoffServices extends BaseServices
         if (!$detailRows) {
             throw new ValidateException('原院装领用明细缺失，无法退料（核销#' . $writeoffId . '）');
         }
-        // 统一锁序：与扣料一致，按 (SKU行ID 升序, 商品ID 升序, unique 升序) 处理，规避跨事务死锁
-        // 批量查 SKU 行ID（单次 whereIn），避免逐条查询
+        // 处理顺序继续固定；事务内锁序改由商品 42 -> SKU 43 批量守卫负责。
         $skuIdMap = $this->skuRowIdMap($detailRows);
         usort($detailRows, function ($a, $b) use ($skuIdMap) {
             $ka = (int)$a['consumable_product_id'] . '|' . (string)$a['consumable_unique'];
@@ -424,8 +433,8 @@ class SalonStockWriteoffServices extends BaseServices
                 throw $e;
             }
 
-            $inDetail = [];
-            $usageDetailRows = [];
+            $preparedDetails = [];
+            $lockTargets = [];
             foreach ($detailRows as $d) {
                 $pid = (int)$d['consumable_product_id'];
                 $unique = (string)$d['consumable_unique'];
@@ -434,6 +443,30 @@ class SalonStockWriteoffServices extends BaseServices
                 if ($pid <= 0 || $unique === '' || !is_numeric($qty) || bccomp($qty, '0', 4) <= 0) {
                     throw new ValidateException('原院装领用明细非法（商品ID ' . $pid . '/SKU ' . $unique . '），退料终止');
                 }
+                $preparedDetails[] = [
+                    'row' => $d,
+                    'product_id' => $pid,
+                    'unique' => $unique,
+                    'qty' => $qty,
+                ];
+                $lockTargets[] = [
+                    'product_id' => $pid,
+                    'unique' => $unique,
+                    'require_sku' => true,
+                ];
+            }
+
+            /** @var StoreProductSkuWriteLock $catalogWriteLock */
+            $catalogWriteLock = app()->make(StoreProductSkuWriteLock::class);
+            $catalogWriteLock->lock($lockTargets);
+
+            $inDetail = [];
+            $usageDetailRows = [];
+            foreach ($preparedDetails as $prepared) {
+                $d = $prepared['row'];
+                $pid = (int)$prepared['product_id'];
+                $unique = (string)$prepared['unique'];
+                $qty = (string)$prepared['qty'];
                 // 原扣料商品/SKU 已是扣减时的门店商品，store_id=0 直接回加良品库存
                 $res = $changeServices->changeSkuStock([
                     'product_id' => $pid,
@@ -442,6 +475,7 @@ class SalonStockWriteoffServices extends BaseServices
                     'store_id' => 0,
                     'biz_type' => ProductInventoryChangeServices::BIZ_SALON,
                     'change_sales' => false,
+                    'assume_locked' => true,
                 ]);
                 $balance = (string)($res['stock'] ?? '0');
                 $inDetail[] = [

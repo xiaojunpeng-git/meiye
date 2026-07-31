@@ -2083,6 +2083,14 @@ Route::group('adminapi', function () {
 
 			//库存明细
 			Route::get('detail/list', 'v1.product.inventory.StoreProductStockDetail/index')->option(['real_name' => '库存明细列表']);
+			// Vue3 平台库存：仓库范围与批次库存均由服务端限定
+			Route::get('v3/locations', 'v1.product.inventory.InventoryPlatformWarehouse/locations')->option(['real_name' => '平台库存仓库列表']);
+			Route::post('v3/locations', 'v1.product.inventory.InventoryPlatformWarehouse/createLocation')->option(['real_name' => '平台库存创建仓库']);
+			Route::get('v3/batch-stock', 'v1.product.inventory.InventoryPlatformWarehouse/batchStock')->option(['real_name' => '平台批次库存查询']);
+			Route::get('v3/unified-query/batch-stock', 'v1.product.inventory.InventoryPlatformWarehouse/unifiedBatchStock')->option(['real_name' => '平台统一查询批次库存']);
+			Route::get('v3/unified-query/capabilities', 'v1.product.inventory.InventoryPlatformWarehouse/unifiedCapabilities')->option(['real_name' => '平台库存统一查询能力']);
+			Route::post('v3/unified-query/commands', 'v1.product.inventory.InventoryPlatformWarehouse/unifiedCommand')->option(['real_name' => '平台库存统一查询操作']);
+			Route::get('v3/unified-query/export-task/:taskNo', 'v1.product.inventory.InventoryPlatformWarehouse/unifiedExportTask')->option(['real_name' => '平台库存统一查询导出任务']);
 			//出入库统计
 			Route::get('order/overall_statistics', 'v1.product.inventory.StoreProductStockDetail/stockOrderOverallStatistics')->option(['real_name' => '出入库顶部统计']);
 			Route::get('order/statistics', 'v1.product.inventory.StoreProductStockDetail/stockOrderStatistics')->option(['real_name' => '出入库统计']);

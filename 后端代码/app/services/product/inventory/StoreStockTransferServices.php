@@ -6,6 +6,7 @@ namespace app\services\product\inventory;
 use app\dao\product\inventory\StoreStockTransferDao;
 use app\dao\product\inventory\StoreStockTransferDetailDao;
 use app\services\BaseServices;
+use app\services\product\product\StoreProductSkuWriteLock;
 use app\services\store\SystemStoreStaffServices;
 use app\services\system\admin\SystemAdminServices;
 use mohe\traits\ServicesTrait;
@@ -322,7 +323,7 @@ class StoreStockTransferServices extends BaseServices
 
             $outDetail = [];
             $inDetail = [];
-            $allUniques = [];
+            $lockTargets = [];
             foreach ($details as $d) {
                 $qty = bcadd((string)$d['qty'], '0', 4);
                 if (bccomp($qty, '0', 4) <= 0) {
@@ -330,12 +331,16 @@ class StoreStockTransferServices extends BaseServices
                 }
                 $fromUnique = (string)$d['from_unique'];
                 $toUnique = (string)$d['to_unique'];
-                if ($fromUnique !== '') {
-                    $allUniques[$fromUnique] = $fromUnique;
-                }
-                if ($toUnique !== '') {
-                    $allUniques[$toUnique] = $toUnique;
-                }
+                $lockTargets[] = [
+                    'product_id' => (int)$d['from_product_id'],
+                    'unique' => $fromUnique,
+                    'require_sku' => true,
+                ];
+                $lockTargets[] = [
+                    'product_id' => (int)$d['to_product_id'],
+                    'unique' => $toUnique,
+                    'require_sku' => true,
+                ];
                 $outDetail[] = [
                     'product_id' => (int)$d['from_product_id'],
                     'unique' => $fromUnique,
@@ -350,32 +355,12 @@ class StoreStockTransferServices extends BaseServices
                 ];
             }
 
-            // 防死锁：先统一按 SKU id 升序锁定双方全部 SKU，再按商品 id 升序锁定全部商品主表，最后出入库
-            $allProductIds = [];
-            foreach ($details as $d) {
-                $fp = (int)$d['from_product_id'];
-                $tp = (int)$d['to_product_id'];
-                if ($fp > 0) {
-                    $allProductIds[$fp] = $fp;
-                }
-                if ($tp > 0) {
-                    $allProductIds[$tp] = $tp;
-                }
-            }
-            if ($allUniques) {
-                app()->make(\app\dao\product\sku\StoreProductAttrValueDao::class)
-                    ->lockAttrValuesByUniques(array_values($allUniques), 0);
-            }
-            if ($allProductIds) {
-                $pids = array_values($allProductIds);
-                sort($pids, SORT_NUMERIC);
-                // 按 id 升序逐行锁，保证并发方向无关时锁序一致
-                foreach ($pids as $pid) {
-                    Db::name('store_product')->where('id', $pid)->lock(true)->field('id')->find();
-                }
-            }
+            // 防死锁：双边全部商品 id 升序锁完后，再统一按 SKU id 升序锁定。
+            /** @var StoreProductSkuWriteLock $catalogWriteLock */
+            $catalogWriteLock = app()->make(StoreProductSkuWriteLock::class);
+            $catalogWriteLock->lock($lockTargets);
 
-            // 先出库再入库；外层已有事务，isTran=false；SKU+商品主表均已按全局顺序预锁
+            // 先出库再入库；外层已有事务，isTran=false；商品+SKU 均已按全局顺序预锁
             // 供货方=总部仓时出库挂 type=0,rid=0；入库挂请货门店 type=1
             $outOrderId = (int)$stockOrderServices->saveData(2, [
                 'order_type' => self::OUT_ORDER_TYPE_TRANSFER,

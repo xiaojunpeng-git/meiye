@@ -27,6 +27,17 @@ class CashierV3FeatureResolver
         'cashier.v3.management_center',
         'cashier.v3.member.create',
         'cashier.v3.member.batch',
+        'cashier.v3.inventory.overview',
+        'cashier.v3.inventory.inbound',
+        'cashier.v3.inventory.outbound',
+        'cashier.v3.inventory.stock',
+        'cashier.v3.inventory.count',
+        'cashier.v3.inventory.movement',
+        'cashier.v3.inventory.statistics',
+        'cashier.v3.inventory.request',
+        'cashier.v3.inventory.transfer',
+        'cashier.v3.inventory.usage',
+        'cashier.v3.inventory.import',
     ];
 
     public const UNIQUE_AUTH_TO_FEATURE = [
@@ -36,6 +47,17 @@ class CashierV3FeatureResolver
         'cashier-verify-index' => 'cashier.v3.writeoff',
         'cashier-reservation-list' => 'cashier.v3.reservation',
         'cashier-recharge-index' => 'cashier.v3.member',
+        'cashier-inventory-overview' => 'cashier.v3.inventory.overview',
+        'cashier-inventory-inbound' => 'cashier.v3.inventory.inbound',
+        'cashier-inventory-outbound' => 'cashier.v3.inventory.outbound',
+        'cashier-inventory-stock' => 'cashier.v3.inventory.stock',
+        'cashier-inventory-count' => 'cashier.v3.inventory.count',
+        'cashier-inventory-movement' => 'cashier.v3.inventory.movement',
+        'cashier-inventory-statistics' => 'cashier.v3.inventory.statistics',
+        'cashier-inventory-request' => 'cashier.v3.inventory.request',
+        'cashier-inventory-transfer' => 'cashier.v3.inventory.transfer',
+        'cashier-inventory-usage' => 'cashier.v3.inventory.usage',
+        'cashier-inventory-import' => 'cashier.v3.inventory.import',
     ];
 
     public const SUPER_ADMIN_LEVEL_RULE = 'level_0_super_admin_all_features';

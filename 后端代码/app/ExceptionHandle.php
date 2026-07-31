@@ -11,6 +11,7 @@
 
 namespace app;
 
+use app\services\product\inventory\InventoryErrorMessage;
 use mohe\exceptions\AdminException;
 use mohe\exceptions\ApiException;
 use mohe\exceptions\AuthException;
@@ -73,6 +74,14 @@ class ExceptionHandle extends Handle
      */
     public function render($request, Throwable $e): Response
     {
+        $inventoryFailure = InventoryErrorMessage::from($e);
+        if ($inventoryFailure !== null) {
+            return json([
+                'data' => ['code' => $inventoryFailure['code']],
+                'msg' => $inventoryFailure['message'],
+                'status' => 400,
+            ]);
+        }
         // 添加自定义异常处理机制
         $massageData = Env::get('app_debug', false) ? [
             'file'     => $e->getFile(),

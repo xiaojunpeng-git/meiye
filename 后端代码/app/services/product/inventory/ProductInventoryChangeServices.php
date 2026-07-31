@@ -6,6 +6,7 @@ namespace app\services\product\inventory;
 use app\services\BaseServices;
 use app\services\order\cashier\PaidOrderLockLease;
 use app\services\product\product\StoreProductServices;
+use app\services\product\product\StoreProductSkuWriteLock;
 use app\services\product\sku\StoreProductAttrValueServices;
 use mohe\traits\ServicesTrait;
 use think\exception\ValidateException;
@@ -129,12 +130,13 @@ class ProductInventoryChangeServices extends BaseServices
             $productServices, $skuServices, $productId, $unique, $deltaStock, $deltaDefective,
             $allowNegative, $changeSales, $salesNum, $platformPid, $product, $assumeLocked
         ) {
-            // 全局锁序：先 SKU id 升序，再商品 id 升序（assume_locked 时外层已批量加锁）
+            // 全局锁序：先商品 id 升序，再 SKU id 升序（assume_locked 时外层已批量加锁）
             if (!$assumeLocked) {
-                $this->lockSkuThenProducts([[
+                $this->lockProductsThenSkus([[
                     'product_id' => $productId,
                     'unique' => $unique,
                     'platform_pid' => (int)$platformPid,
+                    'require_sku' => true,
                 ]]);
             }
             $skuQuery = Db::name('store_product_attr_value')
@@ -241,7 +243,7 @@ class ProductInventoryChangeServices extends BaseServices
             ];
         };
 
-        // 已在支付/院装外层事务且 SKU 已加锁：禁止再开 savepoint，减少嵌套事务开销
+        // 已在支付/院装外层事务且商品+SKU 已按全局顺序加锁：禁止再开 savepoint。
         if ($assumeLocked) {
             try {
                 $pdo = Db::getPdo();
@@ -506,7 +508,7 @@ class ProductInventoryChangeServices extends BaseServices
             ? $opts['ops']
             : $this->buildPaidOrderInventoryOps($cartInfo, $storeId, $inventoryHandled !== 1, $buildDoSales);
         if ($ops['lock_targets']) {
-            $this->lockSkuThenProducts($ops['lock_targets']);
+            $this->lockProductsThenSkus($ops['lock_targets']);
         }
         foreach ($ops['lines'] as $line) {
             if (!empty($line['do_stock'])) {
@@ -607,7 +609,7 @@ class ProductInventoryChangeServices extends BaseServices
             $skuAlreadyLocked = false;
         }
         if ($ops['lock_targets'] && !$skuAlreadyLocked) {
-            $this->lockSkuThenProducts($ops['lock_targets']);
+            $this->lockProductsThenSkus($ops['lock_targets']);
         }
         foreach ($ops['lines'] as $line) {
             if (!empty($line['do_sales'])) {
@@ -693,7 +695,11 @@ class ProductInventoryChangeServices extends BaseServices
         $storeId = (int)($orderInfo['store_id'] ?? 0);
         /** @var StoreProductServices $productServices */
         $productServices = app()->make(StoreProductServices::class);
+        /** @var StoreProductAttrValueServices $skuServices */
+        $skuServices = app()->make(StoreProductAttrValueServices::class);
         $inboundDetail = [];
+        $preparedLines = [];
+        $lockTargets = [];
 
         foreach ($refundCartLines as $cart) {
             $cart = $this->enrichCartWithInventorySnapshot(is_array($cart) ? $cart : []);
@@ -714,25 +720,79 @@ class ProductInventoryChangeServices extends BaseServices
                 continue;
             }
             $basicQty = $this->calcBasicQty($productId, $unique, $num);
+            $resolvedTarget = [
+                'product_id' => $productId,
+                'unique' => $unique,
+                'platform_pid' => 0,
+                'source_product_id' => $productId,
+                'source_unique' => $unique,
+                'store_id' => $storeId,
+            ];
+            if ($storeId > 0 && (($restorePhysical && !$skipInv) || $restoreSales)) {
+                $mapped = $this->mapStoreSku($productServices, $skuServices, $productId, $unique, $storeId);
+                $resolvedTarget['product_id'] = (int)$mapped['product_id'];
+                $resolvedTarget['unique'] = (string)$mapped['unique'];
+                $resolvedTarget['platform_pid'] = (int)$mapped['platform_pid'];
+            }
+            if (($restorePhysical && !$skipInv) || $restoreSales) {
+                $lockTargets[] = [
+                    'product_id' => (int)$resolvedTarget['product_id'],
+                    'unique' => (string)$resolvedTarget['unique'],
+                    'platform_pid' => (int)$resolvedTarget['platform_pid'],
+                    'require_sku' => $restorePhysical && !$skipInv,
+                ];
+                if ($restorePhysical && !$skipInv
+                    && ((int)$resolvedTarget['product_id'] !== $productId
+                        || (string)$resolvedTarget['unique'] !== $unique)) {
+                    $lockTargets[] = [
+                        'product_id' => $productId,
+                        'unique' => $unique,
+                        'require_sku' => true,
+                    ];
+                }
+            }
+            $preparedLines[] = compact(
+                'productId',
+                'unique',
+                'num',
+                'basicQty',
+                'skipInv',
+                'resolvedTarget'
+            );
+        }
 
-            if ($restorePhysical && !$skipInv) {
+        if ($lockTargets) {
+            $this->lockProductsThenSkus($lockTargets);
+        }
+        foreach ($preparedLines as $line) {
+            if ($restorePhysical && !$line['skipInv']) {
                 $this->changeSkuStock([
-                    'product_id' => $productId,
-                    'unique' => $unique,
-                    'delta_stock' => $basicQty,
-                    'store_id' => $storeId,
+                    'product_id' => (int)$line['resolvedTarget']['product_id'],
+                    'unique' => (string)$line['resolvedTarget']['unique'],
+                    'delta_stock' => (string)$line['basicQty'],
+                    'store_id' => 0,
+                    'platform_pid' => (int)$line['resolvedTarget']['platform_pid'],
+                    'skip_store_map' => true,
                     'biz_type' => self::BIZ_SALE_REFUND,
                     'change_sales' => false,
+                    'assume_locked' => true,
                 ]);
                 $inboundDetail[] = [
-                    'product_id' => $productId,
-                    'unique' => $unique,
-                    'stock' => $basicQty, // 台账按基本单位
-                    'sale_qty' => $num,   // 销售单位快照（明细表无此列时仅随数组传入，saveData 会忽略未知键）
+                    'product_id' => (int)$line['productId'],
+                    'unique' => (string)$line['unique'],
+                    'stock' => (string)$line['basicQty'], // 台账按基本单位
+                    'sale_qty' => (string)$line['num'],   // 销售单位快照（明细表无此列时仅随数组传入，saveData 会忽略未知键）
                 ];
             }
             if ($restoreSales) {
-                $productServices->decProductSales((int)ceil((float)$num), $productId, $unique, $storeId);
+                $productServices->decProductSales(
+                    (int)ceil((float)$line['num']),
+                    (int)$line['productId'],
+                    (string)$line['unique'],
+                    $storeId,
+                    true,
+                    $line['resolvedTarget']
+                );
             }
         }
 
@@ -788,8 +848,12 @@ class ProductInventoryChangeServices extends BaseServices
         $storeId = (int)($orderInfo['store_id'] ?? 0);
         /** @var StoreProductServices $productServices */
         $productServices = app()->make(StoreProductServices::class);
+        /** @var StoreProductAttrValueServices $skuServices */
+        $skuServices = app()->make(StoreProductAttrValueServices::class);
         $inboundDetail = [];
         $useDefective = ($stockInType === 2);
+        $preparedLines = [];
+        $lockTargets = [];
 
         foreach ($cartLines as $cart) {
             $cart = $this->enrichCartWithInventorySnapshot(is_array($cart) ? $cart : []);
@@ -810,26 +874,80 @@ class ProductInventoryChangeServices extends BaseServices
                 continue;
             }
             $basicQty = $this->calcBasicQty($productId, $unique, $num);
+            $resolvedTarget = [
+                'product_id' => $productId,
+                'unique' => $unique,
+                'platform_pid' => 0,
+                'source_product_id' => $productId,
+                'source_unique' => $unique,
+                'store_id' => $storeId,
+            ];
+            if ($storeId > 0 && (($restorePhysical && !$skipInv) || $restoreSales)) {
+                $mapped = $this->mapStoreSku($productServices, $skuServices, $productId, $unique, $storeId);
+                $resolvedTarget['product_id'] = (int)$mapped['product_id'];
+                $resolvedTarget['unique'] = (string)$mapped['unique'];
+                $resolvedTarget['platform_pid'] = (int)$mapped['platform_pid'];
+            }
+            if (($restorePhysical && !$skipInv) || $restoreSales) {
+                $lockTargets[] = [
+                    'product_id' => (int)$resolvedTarget['product_id'],
+                    'unique' => (string)$resolvedTarget['unique'],
+                    'platform_pid' => (int)$resolvedTarget['platform_pid'],
+                    'require_sku' => $restorePhysical && !$skipInv,
+                ];
+                if ($restorePhysical && !$skipInv
+                    && ((int)$resolvedTarget['product_id'] !== $productId
+                        || (string)$resolvedTarget['unique'] !== $unique)) {
+                    $lockTargets[] = [
+                        'product_id' => $productId,
+                        'unique' => $unique,
+                        'require_sku' => true,
+                    ];
+                }
+            }
+            $preparedLines[] = compact(
+                'productId',
+                'unique',
+                'num',
+                'basicQty',
+                'skipInv',
+                'resolvedTarget'
+            );
+        }
 
-            if ($restorePhysical && !$skipInv) {
+        if ($lockTargets) {
+            $this->lockProductsThenSkus($lockTargets);
+        }
+        foreach ($preparedLines as $line) {
+            if ($restorePhysical && !$line['skipInv']) {
                 $this->changeSkuStock([
-                    'product_id' => $productId,
-                    'unique' => $unique,
-                    'delta_stock' => $useDefective ? '0' : $basicQty,
-                    'delta_defective' => $useDefective ? $basicQty : '0',
-                    'store_id' => $storeId,
+                    'product_id' => (int)$line['resolvedTarget']['product_id'],
+                    'unique' => (string)$line['resolvedTarget']['unique'],
+                    'delta_stock' => $useDefective ? '0' : (string)$line['basicQty'],
+                    'delta_defective' => $useDefective ? (string)$line['basicQty'] : '0',
+                    'store_id' => 0,
+                    'platform_pid' => (int)$line['resolvedTarget']['platform_pid'],
+                    'skip_store_map' => true,
                     'biz_type' => self::BIZ_SALE_VOID,
                     'change_sales' => false,
+                    'assume_locked' => true,
                 ]);
                 $inboundDetail[] = [
-                    'product_id' => $productId,
-                    'unique' => $unique,
-                    'stock' => $basicQty,
-                    'sale_qty' => $num,
+                    'product_id' => (int)$line['productId'],
+                    'unique' => (string)$line['unique'],
+                    'stock' => (string)$line['basicQty'],
+                    'sale_qty' => (string)$line['num'],
                 ];
             }
             if ($restoreSales) {
-                $productServices->decProductSales((int)ceil((float)$num), $productId, $unique, $storeId);
+                $productServices->decProductSales(
+                    (int)ceil((float)$line['num']),
+                    (int)$line['productId'],
+                    (string)$line['unique'],
+                    $storeId,
+                    true,
+                    $line['resolvedTarget']
+                );
             }
         }
 
@@ -901,7 +1019,13 @@ class ProductInventoryChangeServices extends BaseServices
                 throw new ValidateException('退款单无商品明细，禁止入库');
             }
 
+            /** @var StoreProductServices $productServices */
+            $productServices = app()->make(StoreProductServices::class);
+            /** @var StoreProductAttrValueServices $skuServices */
+            $skuServices = app()->make(StoreProductAttrValueServices::class);
             $inboundDetail = [];
+            $preparedLines = [];
+            $lockTargets = [];
             foreach ($lines as $cart) {
                 $cart = $this->enrichCartWithInventorySnapshot($cart);
                 $skipInv = $this->shouldSkipInventoryCart($cart);
@@ -929,26 +1053,69 @@ class ProductInventoryChangeServices extends BaseServices
                 if (!($isStock && $orderInventoryHandled === 1)) {
                     continue;
                 }
-                $params = [
+                $resolvedTarget = [
                     'product_id' => $productId,
                     'unique' => $unique,
-                    'store_id' => $storeId,
+                    'platform_pid' => 0,
+                ];
+                if ($storeId > 0) {
+                    $mapped = $this->mapStoreSku($productServices, $skuServices, $productId, $unique, $storeId);
+                    $resolvedTarget = [
+                        'product_id' => (int)$mapped['product_id'],
+                        'unique' => (string)$mapped['unique'],
+                        'platform_pid' => (int)$mapped['platform_pid'],
+                    ];
+                }
+                $lockTargets[] = [
+                    'product_id' => (int)$resolvedTarget['product_id'],
+                    'unique' => (string)$resolvedTarget['unique'],
+                    'platform_pid' => (int)$resolvedTarget['platform_pid'],
+                    'require_sku' => true,
+                ];
+                if ((int)$resolvedTarget['product_id'] !== $productId
+                    || (string)$resolvedTarget['unique'] !== $unique) {
+                    $lockTargets[] = [
+                        'product_id' => $productId,
+                        'unique' => $unique,
+                        'require_sku' => true,
+                    ];
+                }
+                $preparedLines[] = compact(
+                    'productId',
+                    'unique',
+                    'num',
+                    'basicQty',
+                    'resolvedTarget'
+                );
+            }
+
+            if ($lockTargets) {
+                $this->lockProductsThenSkus($lockTargets);
+            }
+            foreach ($preparedLines as $line) {
+                $params = [
+                    'product_id' => (int)$line['resolvedTarget']['product_id'],
+                    'unique' => (string)$line['resolvedTarget']['unique'],
+                    'store_id' => 0,
+                    'platform_pid' => (int)$line['resolvedTarget']['platform_pid'],
+                    'skip_store_map' => true,
                     'biz_type' => self::BIZ_SALE_REFUND,
                     'change_sales' => false,
+                    'assume_locked' => true,
                 ];
                 if ($isGood) {
-                    $params['delta_stock'] = $basicQty;
+                    $params['delta_stock'] = (string)$line['basicQty'];
                 } else {
-                    $params['delta_defective'] = $basicQty;
+                    $params['delta_defective'] = (string)$line['basicQty'];
                 }
                 $this->changeSkuStock($params);
 
                 $inboundDetail[] = [
-                    'product_id' => $productId,
-                    'unique' => $unique,
-                    'stock' => $isGood ? $basicQty : '0',
-                    'defective_stock' => $isGood ? '0' : $basicQty,
-                    'sale_qty' => $num,
+                    'product_id' => (int)$line['productId'],
+                    'unique' => (string)$line['unique'],
+                    'stock' => $isGood ? (string)$line['basicQty'] : '0',
+                    'defective_stock' => $isGood ? '0' : (string)$line['basicQty'],
+                    'sale_qty' => (string)$line['num'],
                 ];
             }
 
@@ -1243,64 +1410,16 @@ class ProductInventoryChangeServices extends BaseServices
     }
 
     /**
-     * 全局锁序：先批量无锁查 SKU id 并校验全集，再按 SKU id 升序逐条 FOR UPDATE，再按商品 id 升序逐条 FOR UPDATE。
-     * 禁止 whereIn(...)->lock(true)。平台 platform_pid 不参与 FOR UPDATE。
+     * 全局锁序：全部商品 id 升序逐条 FOR UPDATE，再解析并按 SKU id 升序逐条 FOR UPDATE。
+     * 平台 platform_pid 与门店商品一起参与商品锁排序，禁止 SKU 后再隐式取商品锁。
      * @param array<int, array{product_id:int,unique:string,platform_pid?:int}> $targets
+     * @return array{products:array<int,array>,skus:array<string,array>}
      */
-    public function lockSkuThenProducts(array $targets): void
+    public function lockProductsThenSkus(array $targets): array
     {
-        if (!$targets) {
-            return;
-        }
-        $productIds = [];
-        $needSku = [];
-        foreach ($targets as $t) {
-            $pid = (int)($t['product_id'] ?? 0);
-            $unique = (string)($t['unique'] ?? '');
-            $requireSku = !empty($t['require_sku']);
-            if ($pid > 0) {
-                $productIds[] = $pid;
-            }
-            if ($pid > 0 && $unique !== '') {
-                $key = $pid . '|' . $unique;
-                if (!isset($needSku[$key])) {
-                    $needSku[$key] = [
-                        'product_id' => $pid,
-                        'unique' => $unique,
-                        'require_sku' => $requireSku,
-                    ];
-                } elseif ($requireSku) {
-                    $needSku[$key]['require_sku'] = true;
-                }
-            } elseif ($requireSku) {
-                throw new ValidateException('商品规格不存在，禁止漏锁');
-            }
-        }
-        $skuIds = [];
-        if ($needSku) {
-            $skuMap = $this->prefetchSkusByProductUnique(array_values($needSku), ['id', 'product_id', 'unique']);
-            foreach ($needSku as $key => $pair) {
-                $row = $skuMap[$key] ?? null;
-                if (!$row || (int)($row['id'] ?? 0) <= 0) {
-                    // 应管库存路径 require_sku=true 必须找到；销量-only/项目行保持原「无 SKU 则只锁商品」
-                    if (!empty($pair['require_sku'])) {
-                        throw new ValidateException('商品规格不存在，禁止漏锁');
-                    }
-                    continue;
-                }
-                $skuIds[] = (int)$row['id'];
-            }
-        }
-        $skuIds = array_values(array_unique($skuIds));
-        sort($skuIds, SORT_NUMERIC);
-        foreach ($skuIds as $sid) {
-            Db::name('store_product_attr_value')->where('id', $sid)->lock(true)->field('id')->find();
-        }
-        $productIds = array_values(array_unique(array_filter($productIds)));
-        sort($productIds, SORT_NUMERIC);
-        foreach ($productIds as $pid) {
-            Db::name('store_product')->where('id', $pid)->lock(true)->field('id')->find();
-        }
+        /** @var StoreProductSkuWriteLock $writeLock */
+        $writeLock = app()->make(StoreProductSkuWriteLock::class);
+        return $writeLock->lock($targets);
     }
 
     /**
@@ -1422,6 +1541,14 @@ class ProductInventoryChangeServices extends BaseServices
                     // 仅应管库存扣减要求 SKU 全集；销量-only 允许无 type=0 SKU（项目等）
                     'require_sku' => $willStock,
                 ];
+                // 销售出入库台账仍以原商品/SKU 记录，映射前后 SKU 必须在同一批次排序锁定。
+                if (($willStock || $doSales) && ($mappedPid !== $productId || $mappedUnique !== $unique)) {
+                    $lockTargets[] = [
+                        'product_id' => $productId,
+                        'unique' => $unique,
+                        'require_sku' => $willStock,
+                    ];
+                }
             }
         }
         return ['lines' => $lines, 'lock_targets' => $lockTargets];
@@ -1633,25 +1760,26 @@ class ProductInventoryChangeServices extends BaseServices
         if ($n <= 0) {
             return;
         }
-        $this->lockSkuThenProducts([[
-            'product_id' => $productId,
-            'unique' => $unique,
-            'platform_pid' => $platformPid,
-        ]]);
-        if ($unique !== '' && $unique !== '0') {
-            Db::name('store_product_attr_value')->where([
+        Db::transaction(function () use ($productId, $unique, $platformPid, $n) {
+            $this->lockProductsThenSkus([[
                 'product_id' => $productId,
                 'unique' => $unique,
-                'type' => 0,
-            ])->inc('sales', $n)->update();
-        }
-        // 门店行可能已在外层 FOR UPDATE；平台行仅原子 INC
-        $productIds = array_values(array_unique(array_filter([(int)$productId, (int)$platformPid])));
-        sort($productIds, SORT_NUMERIC);
-        foreach ($productIds as $pid) {
-            Db::name('store_product')->where('id', $pid)->inc('sales', $n)->update();
-        }
-        // applySalesOnly 仅在已持锁路径调用；跳过全量缓存清扫
+                'platform_pid' => $platformPid,
+            ]]);
+            if ($unique !== '' && $unique !== '0') {
+                Db::name('store_product_attr_value')->where([
+                    'product_id' => $productId,
+                    'unique' => $unique,
+                    'type' => 0,
+                ])->inc('sales', $n)->update();
+            }
+            $productIds = array_values(array_unique(array_filter([(int)$productId, (int)$platformPid])));
+            sort($productIds, SORT_NUMERIC);
+            foreach ($productIds as $pid) {
+                Db::name('store_product')->where('id', $pid)->inc('sales', $n)->update();
+            }
+        });
+        // 销量-only 路径保持原行为：跳过全量缓存清扫。
     }
 
     /**

@@ -71,6 +71,7 @@ class ForceStoreSessionMiddleware implements MiddlewareInterface
         try {
             $get = $request->get();
             if (is_array($get)) {
+                $request->forceStoreSessionInjectedGetStoreId = !array_key_exists('store_id', $get);
                 foreach (['store_id', 'storeId', 'selected_store_id', 'current_store_id'] as $k) {
                     if (array_key_exists($k, $get) || $k === 'store_id') {
                         $get[$k] = $sessionStoreId;
@@ -84,6 +85,7 @@ class ForceStoreSessionMiddleware implements MiddlewareInterface
         try {
             $post = $request->post();
             if (is_array($post)) {
+                $request->forceStoreSessionInjectedPostStoreId = !array_key_exists('store_id', $post);
                 foreach (['store_id', 'storeId', 'selected_store_id', 'current_store_id'] as $k) {
                     if (array_key_exists($k, $post) || $k === 'store_id') {
                         $post[$k] = $sessionStoreId;

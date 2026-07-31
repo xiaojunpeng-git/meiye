@@ -16,6 +16,7 @@ use app\dao\product\inventory\StoreProductStockOrderDao;
 use app\services\BaseServices;
 use app\services\user\UserServices;
 use app\services\product\product\StoreProductServices;
+use app\services\product\product\StoreProductSkuWriteLock;
 use app\services\product\sku\StoreProductAttrValueServices;
 use app\services\store\SystemStoreStaffServices;
 use app\services\supplier\SystemSupplierServices;
@@ -304,34 +305,26 @@ class StoreProductStockOrderServices extends BaseServices
 			$isSaleOrRefund = ($stockType === 2 && $orderType === 1 && !empty($data['store_order_id']))
 				|| ($stockType === 1 && $orderType === 3 && !empty($data['refund_order_id']));
 
-			// 批量加载商品与 SKU，避免明细行 N+1
-			$productIds = [];
-			$uniques = [];
+			// 同一张单先锁完全部商品，再按 SKU id 升序锁规格。
+			$lockTargets = [];
 			foreach ($productDetail as $productSku) {
 				$pid = (int)($productSku['product_id'] ?? 0);
 				$uq = (string)($productSku['unique'] ?? '');
-				if ($pid > 0) {
-					$productIds[$pid] = $pid;
-				}
-				if ($uq !== '') {
-					$uniques[$uq] = $uq;
-				}
-			}
-			$productMap = [];
-			if ($productIds) {
-				$productRows = \app\model\product\product\StoreProduct::whereIn('id', array_values($productIds))->select()->toArray();
-				foreach ($productRows as $prow) {
-					$productMap[(int)$prow['id']] = $prow;
+				if ($pid > 0 && $uq !== '') {
+					$lockTargets[] = [
+						'product_id' => $pid,
+						'unique' => $uq,
+						'require_sku' => true,
+					];
 				}
 			}
-			// 全局锁顺序：先按 SKU id 升序 FOR UPDATE，再改库存/写台账（与支付 changeSkuStock 一致）
+			/** @var StoreProductSkuWriteLock $catalogWriteLock */
+			$catalogWriteLock = app()->make(StoreProductSkuWriteLock::class);
+			$lockedCatalog = $catalogWriteLock->lock($lockTargets);
+			$productMap = $lockedCatalog['products'];
 			$attrMap = [];
-			if ($uniques) {
-				$attrRows = app()->make(\app\dao\product\sku\StoreProductAttrValueDao::class)
-					->lockAttrValuesByUniques(array_values($uniques), 0);
-				foreach ($attrRows as $arow) {
-					$attrMap[(int)$arow['product_id'] . ':' . (string)$arow['unique']] = $arow;
-				}
+			foreach ($lockedCatalog['skus'] as $attrRow) {
+				$attrMap[(int)$attrRow['product_id'] . ':' . (string)$attrRow['unique']] = $attrRow;
 			}
 
 			$seenUnique = [];
@@ -474,7 +467,7 @@ class StoreProductStockOrderServices extends BaseServices
 			/** @var StoreProductStockDetailServices $stockDetailServices */
 			$stockDetailServices = app()->make(StoreProductStockDetailServices::class);
 			$stockDetailServices->saveAll($dataAll);
-			//出入库单 同步商品库存（SKU 已在上方加锁；saveProductAttrsStock 内再次按 id 升序锁 SKU）
+			// 出入库单同步商品库存（上方已按商品 42 -> SKU 43 批量加锁）
 			if ($isStock && $productAttrData) {
 				/** @var StoreProductAttrValueServices $attrServices */
 				$attrServices = app()->make(StoreProductAttrValueServices::class);

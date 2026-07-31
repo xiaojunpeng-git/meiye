@@ -4,6 +4,7 @@
 use app\http\middleware\AllowOriginMiddleware;
 use app\http\middleware\InstallMiddleware;
 use app\http\middleware\store\AuthTokenMiddleware;
+use app\http\middleware\store\ForceStoreSessionMiddleware;
 use app\http\middleware\store\StoreCkeckRoleMiddleware;
 use app\http\middleware\StationOpenMiddleware;
 use think\facade\Config;
@@ -599,8 +600,31 @@ Route::get('home/header', 'Common/homeStatics')->option(['real_name' => '首页�
 			Route::get('productAttr/info', 'product.inventory.StoreProductStockDetail/getProductAttrInfo')->option(['real_name' => '商品sku信息']);
 			Route::get('productAttr/order/list', 'product.inventory.StoreProductStockDetail/getProductAttrStockOrderList')->option(['real_name' => 'sku出入库明细']);
 
-			//库存明细
-			Route::get('detail/list', 'product.inventory.StoreProductStockDetail/index')->option(['real_name' => '库存明细列表']);
+		//库存明细
+		Route::get('detail/list', 'product.inventory.StoreProductStockDetail/index')->option(['real_name' => '库存明细列表']);
+		//批次库存权威查询（Vue3 库存页，门店范围由服务端强制）
+		Route::get('v3/batch-stock', 'product.inventory.InventoryBatchStockQuery/index')->option(['real_name' => '批次库存查询']);
+		Route::get('v3/batch-analysis', 'product.inventory.InventoryBatchStockQuery/analysis')->option(['real_name' => '批次临期与库龄分析']);
+		Route::get('v3/unified-query/batch-stock', 'product.inventory.InventoryUnifiedQuery/batchStock')->option(['real_name' => '统一查询批次库存']);
+		Route::get('v3/unified-query/capabilities', 'product.inventory.InventoryUnifiedQuery/capabilities')->option(['real_name' => '库存统一查询能力']);
+		Route::post('v3/unified-query/commands', 'product.inventory.InventoryUnifiedQuery/command')->option(['real_name' => '库存统一查询操作']);
+		Route::get('v3/unified-query/export-task/:taskNo', 'product.inventory.InventoryUnifiedQuery/exportTask')->option(['real_name' => '库存统一查询导出任务']);
+		Route::get('v3/catalog', 'product.inventory.InventoryStoreCatalog/search')->option(['real_name' => '库存商品条码搜索']);
+		Route::get('v3/locations', 'product.inventory.InventoryStoreWarehouse/index')->option(['real_name' => '门店可用库存仓库列表']);
+		Route::post('v3/inbound', 'product.inventory.InventoryManualInbound/create')->option(['real_name' => '批次手工入库']);
+		Route::post('v3/outbound', 'product.inventory.InventoryManualOutbound/create')->option(['real_name' => '批次手工出库']);
+		Route::get('v3/movement', 'product.inventory.InventoryMovementQuery/index')->option(['real_name' => '批次事实出入库记录查询']);
+		Route::get('v3/movement-statistics', 'product.inventory.InventoryMovementAnalytics/index')->option(['real_name' => '批次事实出入库统计']);
+		Route::post('v3/count/confirm', 'product.inventory.InventoryStockCount/confirm')->option(['real_name' => '批次库存盘点确认']);
+		Route::get('v3/count', 'product.inventory.InventoryStockCountQuery/index')->option(['real_name' => '批次库存盘点单查询']);
+		Route::get('v3/request', 'product.inventory.InventoryStockRequestQuery/index')->option(['real_name' => '批次库存请货单查询']);
+		Route::post('v3/request/apply', 'product.inventory.InventoryStockRequest/apply')->option(['real_name' => '批次库存请货申请']);
+		Route::post('v3/request/cancel/:id', 'product.inventory.InventoryStockRequest/cancel')->option(['real_name' => '批次库存请货取消']);
+		Route::get('v3/transfer', 'product.inventory.InventoryBatchTransfer/index')->option(['real_name' => '批次库存调拨单查询']);
+		Route::post('v3/transfer', 'product.inventory.InventoryBatchTransfer/create')->option(['real_name' => '批次库存调拨确认']);
+		Route::get('v3/salon-usage', 'product.inventory.InventorySalonUsage/index')->option(['real_name' => '院装耗材记录查询']);
+		Route::post('v3/salon-usage/issue', 'product.inventory.InventorySalonUsage/issue')->option(['real_name' => '院装耗材领用']);
+		Route::post('v3/salon-usage/return', 'product.inventory.InventorySalonUsage/returnToDefault')->option(['real_name' => '院装耗材退回']);
 			//出入库统计
 			Route::get('order/overall_statistics', 'product.inventory.StoreProductStockDetail/stockOrderOverallStatistics')->option(['real_name' => '出入库顶部统计']);
 			Route::get('order/statistics', 'product.inventory.StoreProductStockDetail/stockOrderStatistics')->option(['real_name' => '出入库统计']);
@@ -637,7 +661,7 @@ Route::get('home/header', 'Common/homeStatics')->option(['real_name' => '首页�
 			Route::get('salon/usage/statistics', 'product.inventory.SalonStockReport/statistics')->option(['real_name' => '院装耗材统计']);
 		});
 
-    })->middleware([AuthTokenMiddleware::class, StoreCkeckRoleMiddleware::class])->middleware(\app\http\middleware\SystemLogMiddleware::class, 'store');
+    })->middleware([AuthTokenMiddleware::class, ForceStoreSessionMiddleware::class, StoreCkeckRoleMiddleware::class])->middleware(\app\http\middleware\SystemLogMiddleware::class, 'store');
 
 	/**
      * 优惠卷相关路由

@@ -15,10 +15,15 @@ export default {
   path: `${Setting.roterPre}/stock/manage`,
   name: 'stockManage',
   header: 'stockManage',
-  // 父菜单 path 无独立页面；落到空壳会白屏，默认进入库列表
-  redirect: `${Setting.roterPre}/inbound/manage`,
+  // 新库存 Vue3 工作台承接平台库存菜单；旧 Vue2 页面保留冻结，不再承载新功能。
+  redirect: `${Setting.roterPre}/stock/manage/home`,
   component: BasicLayout,
   children: [
+    {
+      path: `${Setting.roterPre}/stock/manage/home`, name: 'stockManageV3Home',
+      meta: { auth: ['admin-stock-manage'], title: '库存首页' },
+      component: () => import('@/pages/stockManage/InventoryV3Bridge')
+    },
     {
       path: `${Setting.roterPre}/inbound/manage`,
       name: `inboundManage`,
@@ -26,7 +31,7 @@ export default {
         auth: ['admin-inbound-manage'],
         title: '入库管理'
       },
-      component: () => import('@/pages/stockManage/inboundManage/list')
+      component: () => import('@/pages/stockManage/InventoryV3Bridge')
     },
     {
 		    path: `${Setting.roterPre}/inbound/manage/add/:id?`,
@@ -39,7 +44,7 @@ export default {
 		        auth: ['admin-outbound-manage'],
 		        title: '出库管理'
 		    },
-		    component: () => import('@/pages/stockManage/outboundManage/list')
+		    component: () => import('@/pages/stockManage/InventoryV3Bridge')
     },
     {
 		    path: `${Setting.roterPre}/outbound/manage/add/:id?`,
@@ -52,7 +57,7 @@ export default {
 		        auth: ['admin-inventory-details'],
 		        title: '出入库明细列表'
 		    },
-		    component: () => import('@/pages/stockManage/inventoryDetails/list')
+		    component: () => import('@/pages/stockManage/InventoryV3Bridge')
     },
     {
 		    path: `${Setting.roterPre}/inventory/details/info`,
@@ -61,7 +66,7 @@ export default {
 		        auth: ['admin-inventory-details-info'],
 		        title: '出入库明细'
 		    },
-		    component: () => import('@/pages/stockManage/inventoryDetails/details')
+		    component: () => import('@/pages/stockManage/InventoryV3Bridge')
     },
     {
 		    path: `${Setting.roterPre}/inventory/count`,
@@ -70,7 +75,7 @@ export default {
 		        auth: ['admin-inventory-count'],
 		        title: '库存盘点'
 		    },
-		    component: () => import('@/pages/stockManage/inventoryCount/list')
+		    component: () => import('@/pages/stockManage/InventoryV3Bridge')
     },
     {
 		    path: `${Setting.roterPre}/inventory/count/add/:id?`,
@@ -83,7 +88,7 @@ export default {
 		        auth: ['admin-inventory-statistics'],
 		        title: '库存统计'
 		    },
-		    component: () => import('@/pages/stockManage/inventoryStatistics/index')
+		    component: () => import('@/pages/stockManage/InventoryV3Bridge')
     },
     {
 		    path: `${Setting.roterPre}/stock/request`,
@@ -92,7 +97,7 @@ export default {
 		        auth: ['admin-stock-request', 'admin-stock-manage'],
 		        title: '请货管理'
 		    },
-		    component: () => import('@/pages/stockManage/stockRequestManage/list')
+		    component: () => import('@/pages/stockManage/InventoryV3Bridge')
     },
     {
 		    path: `${Setting.roterPre}/stock/request/add/:id?`,
@@ -105,7 +110,7 @@ export default {
 		        auth: ['admin-stock-transfer', 'admin-stock-manage'],
 		        title: '调拨管理'
 		    },
-		    component: () => import('@/pages/stockManage/stockTransferManage/list')
+		    component: () => import('@/pages/stockManage/InventoryV3Bridge')
     },
     {
 		    path: `${Setting.roterPre}/stock/transfer/add/:id?`,
@@ -118,7 +123,7 @@ export default {
 		        auth: ['admin-salon-recipe', 'admin-stock-manage'],
 		        title: '项目配方'
 		    },
-		    component: () => import('@/pages/stockManage/salonRecipe/list')
+		    component: () => import('@/pages/stockManage/InventoryV3Bridge')
     },
     {
 		    path: `${Setting.roterPre}/stock/recipe/add/:id?`,
@@ -131,7 +136,7 @@ export default {
 		        auth: ['admin-salon-usage', 'admin-stock-manage'],
 		        title: '院装管理'
 		    },
-		    component: () => import('@/pages/stockManage/salonUsage/index')
+		    component: () => import('@/pages/stockManage/InventoryV3Bridge')
     }
   ]
 };
