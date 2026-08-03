@@ -1,0 +1,217 @@
+#!/usr/bin/env node
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const dirname = path.dirname(fileURLToPath(import.meta.url))
+const repo = path.resolve(dirname, '../../..')
+const frontend = path.join(repo, '前端代码/cashier-v3/src')
+const viewPath = path.join(frontend, 'views/RoutePlaceholderView.vue')
+const detailPath = path.join(frontend, 'components/care/CareTaskDetailDrawer.vue')
+const recordDetailPath = path.join(frontend, 'components/care/CareRecordDetailDrawer.vue')
+const metricDetailPath = path.join(frontend, 'components/care/CareMetricDetailDrawer.vue')
+const commandPath = path.join(frontend, 'components/care/CareCommandDrawer.vue')
+const memberSelectorPath = path.join(frontend, 'components/common/MemberSelectorOverlay.vue')
+const shellPath = path.join(frontend, 'layouts/CashierShell.vue')
+const previewPath = path.join(frontend, 'dev/customerCarePreviewData.js')
+const apiPath = path.join(frontend, 'services/customerCareApi.js')
+
+let passed = 0
+let failed = 0
+function ok(name, condition, detail = '') {
+  if (condition) {
+    passed += 1
+    console.log(`  PASS  ${name}`)
+  } else {
+    failed += 1
+    console.log(`  FAIL  ${name}${detail ? ` -> ${detail}` : ''}`)
+  }
+}
+
+for (const target of [viewPath, detailPath, recordDetailPath, metricDetailPath, commandPath, memberSelectorPath, shellPath, previewPath]) {
+  ok(`客情专属文件存在：${path.basename(target)}`, fs.existsSync(target), target)
+}
+
+const view = fs.readFileSync(viewPath, 'utf8')
+const detail = fs.readFileSync(detailPath, 'utf8')
+const recordDetail = fs.readFileSync(recordDetailPath, 'utf8')
+const metricDetail = fs.readFileSync(metricDetailPath, 'utf8')
+const command = fs.readFileSync(commandPath, 'utf8')
+const memberSelector = fs.readFileSync(memberSelectorPath, 'utf8')
+const shell = fs.readFileSync(shellPath, 'utf8')
+const preview = fs.readFileSync(previewPath, 'utf8')
+const api = fs.readFileSync(apiPath, 'utf8')
+const combined = `${view}\n${detail}\n${command}\n${preview}`
+
+console.log('== customer care views ==')
+for (const label of ['跟进任务', '客户视图', '客情记录', '跟进统计']) {
+  ok(`固定页签：${label}`, view.includes(`label: '${label}'`))
+}
+ok('回访设置明确标记待开发并禁止进入', view.includes("label: '回访设置（待开发）'")
+  && view.includes('disabled: true')
+  && view.includes(':disabled="tab.disabled"')
+  && view.includes('服务完成后的自动回访规则尚未接入'))
+ok('首次查询由后端决定管理员或员工默认范围', view.includes("const activeTaskScope = ref('')")
+  && view.includes('syncServerQueryControls')
+  && view.includes('taskQuery.scope'))
+for (const bucket of ['today', 'overdue', 'future', 'completed', 'all']) {
+  ok(`服务端任务分桶入口：${bucket}`, view.includes(`key: '${bucket}'`))
+}
+ok('查询区最多两行', view.includes('care-query__row--filters') && !view.includes('care-query__row--third'))
+ok('任务详情使用右侧抽屉', view.includes('CareTaskDetailDrawer') && detail.includes('grid-column:2'))
+ok('详情动作只读取 availableActions', detail.includes('props.task.availableActions') && detail.includes("emit('action', action)"))
+
+console.log('== backend authority guards ==')
+ok('只接受固定 customerCare projection 根', view.includes('response?.projection?.customerCare'))
+ok('固定 contractVersion', view.includes('candidate.contractVersion !== CUSTOMER_CARE_CONTRACT_VERSION'))
+ok('无权威投影保持空态', view.includes('客情服务尚未接入') && view.includes('projection.value = null'))
+ok('任务状态直接使用后端字段', view.includes('task.statusLabel') && view.includes('task.status'))
+ok('逾期直接使用后端 isOverdue', view.includes('task.isOverdue'))
+ok('分桶只比较后端 bucket', view.includes('task.bucket !== activeTaskBucket.value'))
+ok('生产源码没有日期逾期重算', !/(new\s+Date\s*\(|Date\.now\s*\(|\.getTime\s*\(|plannedAt\s*[<>]=?)/.test(view), '发现前端时间比较')
+ok('统计值直接读取后端 metrics', view.includes('statistics.metrics || []') && view.includes('metric.value'))
+ok('统计卡片和员工数值可打开只读明细', view.includes('openStatisticsDetail(metric.code)')
+  && view.includes("openStatisticsDetail('employee_current_open_workload', employee.staffId)")
+  && view.includes("openStatisticsDetail('employee_completed_by_actual_follower', employee.staffId)")
+  && view.includes("openStatisticsDetail('employee_current_overdue', employee.staffId)")
+  && view.includes('CareMetricDetailDrawer'))
+ok('统计明细由后端重新查询且支持分页', view.includes("view: 'statistics'")
+  && view.includes('query-care-workbench')
+  && view.includes('paginationCursor')
+  && metricDetail.includes('加载更多')
+  && !metricDetail.includes('availableActions'))
+ok('统计明细行可直接打开统一详情操作面板', metricDetail.includes("emit('open-task', task)")
+  && metricDetail.includes("emit('open-record', record)")
+  && view.includes('@open-task="openTask"')
+  && view.includes('@open-record="openRecord"'))
+ok('客户视图下一任务是后端结构化引用并可打开', view.includes('openTaskByReference(customer.nextTask)')
+  && view.includes('customer.nextTask?.canOpen')
+  && view.includes('customer.nextTask.taskNo'))
+ok('新增任务将日期和时间分开选择，列表提供时间范围查询', view.includes('plannedDate')
+  && view.includes('plannedTime')
+  && view.includes('type="date"')
+  && view.includes('type="time"')
+  && view.includes('taskPlannedFrom')
+  && view.includes('recordFollowedFrom')
+  && view.includes('计划开始日期')
+  && view.includes('跟进开始日期')
+  && view.includes('@change="$event.target.blur()"'))
+ok('任务和记录时间范围只提交后端查询条件', view.includes('plannedFrom: taskPlannedFrom.value')
+  && view.includes('plannedTo: taskPlannedTo.value')
+  && view.includes('followedFrom: recordFollowedFrom.value')
+  && view.includes('followedTo: recordFollowedTo.value'))
+ok('新增任务保持当前查询范围，完成任务保留来源工作台',
+  view.includes("const showCreatedTaskRequest = { view: 'tasks', query: currentQueryPayload() }")
+    && view.includes("const completedTask = commandMode.value === 'complete-care-task'")
+    && view.includes("const origin = commandOrigin.value")
+    && view.includes("origin.tab === 'customers'")
+    && view.includes("view: 'customers'")
+    && view.includes("activeTab.value = workbenchRequest.view")
+    && !view.includes("activeTab.value = 'records'")
+    && view.includes('closeTask()'))
+ok('完成任务从客户视图回读同一会员且可清除定位',
+  view.includes('const customerMemberId = ref')
+    && view.includes('memberId: origin.memberId')
+    && view.includes('function clearCustomerMemberFilter')
+    && view.includes('已定位会员')
+    && view.includes('清除会员定位'))
+ok('客户视图只提交正整数会员定位，后端零值不会回写为筛选条件',
+  view.includes('function validCustomerMemberId')
+    && view.includes('/^[1-9][0-9]*$/.test(memberId)')
+    && view.includes('customerMemberId.value = validCustomerMemberId(customerQuery.memberId)')
+    && view.includes('...(memberId ? { memberId } : {})'))
+ok('会员选择器输入自动查询且旧响应不能覆盖新关键字',
+  memberSelector.includes('watch(keyword, scheduleKeywordQuery)')
+    && memberSelector.includes('setTimeout(() => runQuery(1), 300)')
+    && memberSelector.includes('let querySequence = 0')
+    && memberSelector.includes('sequence === querySequence')
+    && shell.includes('let memberSelectorQuerySequence = 0')
+    && shell.includes('querySequence !== memberSelectorQuerySequence'))
+ok('未确认统计解释保持待确认', view.includes("metric.userReady ? metric.description : '口径说明待产品确认'"))
+
+console.log('== immutable records and action boundaries ==')
+ok('正式记录只提供作废合同', combined.includes('void-care-record'))
+ok('不存在编辑正式记录 action', !combined.includes('edit-care-record') && !combined.includes('update-care-record'))
+ok('不存在修改正式记录入口', !/<button[^>]*>[\s\S]{0,40}修改(?:记录)?<\/button>/.test(view))
+ok('人工记录与预约动态分轨', view.includes("record.stream !== recordStream.value") && view.includes("recordStream === 'human'"))
+ok('预约动态切换暂不展示', !view.includes('aria-label="记录类型"') && !view.includes('预约动态</button>'))
+ok('管理转派表单不提供代办动作', command.includes('只变更当前负责人，不代替新负责人执行任务。'))
+ok('跨店转派明确关闭', command.includes('跨门店转派不开放'))
+ok('完成表单具备三项必填', command.includes('跟进方式') && command.includes('跟进内容') && command.includes('跟进结果'))
+ok('可选下一任务需要时间和负责人', command.includes('createNextTask') && command.includes('nextPlannedAt') && command.includes('nextOwnerId'))
+ok('预约成功作为纯客情结果可选择', command.includes('预约成功”仅记录本次沟通结果')
+  && !command.includes('requiresAppointment')
+  && !preview.includes('requiresAppointment'))
+ok('手工记录复用客情会员选择器且不允许手输编号', view.includes("context: 'customer-care-record'")
+  && command.includes('会员姓名')
+  && command.includes("emit('request-member-selector')")
+  && !/<template v-else-if="mode === 'create-care-record'">[\s\S]{0,600}v-model\.trim="draft\.memberId"/.test(command))
+ok('客情记录具备只读详情和作废审计展示', view.includes('查看详情')
+  && view.includes('CareRecordDetailDrawer')
+  && recordDetail.includes('跟进内容')
+  && recordDetail.includes('作废原因')
+  && recordDetail.includes('操作时间')
+  && recordDetail.includes('正式单号待加载')
+  && !recordDetail.includes('record.recordNo || record.recordId'))
+ok('详情页只展示正式客情单号，不展示内部幂等键', detail.includes('task.taskNo')
+  && recordDetail.includes('record.recordNo')
+  && !detail.includes('task.taskId ||')
+  && !recordDetail.includes('record.recordId ||'))
+ok('失败不关闭表单并保留输入', view.includes("code === 'CARE_VERSION_CONFLICT'") && view.includes('当前输入已保留') && !/if\s*\(!resultSucceeded\(response\)\)[\s\S]{0,300}closeCommand\(/.test(view))
+ok('写命令成功也必须返回完整权威投影', (view.match(/if \(!nextProjection\) \{/g) || []).length >= 2
+  && view.includes('操作结果缺少完整客情数据'))
+ok('命令已落账但投影缺失时自动对账并关闭旧界面',
+  view.includes("CARE_PROJECTION_REFRESH_REQUIRED")
+    && view.includes('reconcileCommandProjection')
+    && view.includes('recoverAppliedCommand')
+    && view.includes('closeStaleCommandSurfaces')
+    && view.includes('页面暂时无法刷新。已关闭旧详情，请重新加载后继续操作。'))
+ok('客情写命令复用同一幂等标识，避免重试另起命令',
+  view.includes('commandIdempotencyKeyForCurrentDialog')
+    && view.includes('directActionIdempotencyKeys')
+    && view.includes('suppliedIdempotencyKey'))
+ok('版本冲突自动读取最新任务，不把刷新理解交给用户',
+  view.includes('recoverVersionConflict')
+    && view.includes('response?.result?.latestTask')
+    && view.includes('该任务已更新为${statusLabel}，已为你刷新。'))
+ok('动作回读保持当前统计明细筛选',
+  view.includes("view === 'statistics' && statisticsDetail.value?.metric")
+    && view.includes('workbenchRequestForAction'))
+ok('写操作后统计明细必须重新取权威投影或关闭旧明细',
+  view.includes('refreshStatisticsDetailAfterMutation')
+    && view.includes('refreshOpenStatisticsDetail')
+    && view.includes("view: 'statistics'")
+    && view.includes('if (!refreshed) closeStatisticsDetail()'))
+ok('新投影不得复用旧统计明细覆盖任务详情',
+  !view.includes('nextProjection.statistics?.detail || statisticsDetail.value')
+    && view.includes('const detail = nextProjection.statistics?.detail || {}'))
+ok('版本冲突向用户展示任务已刷新后的状态，不自动重放旧动作',
+  view.includes('该任务已更新为${statusLabel}，已为你刷新。')
+    && view.includes('response?.result?.latestTask')
+    && !view.includes('runDirectAction(action.code, latestTask)'))
+ok('生产列表只接纳后端投影且预览筛选显式隔离', view.includes('acceptCareProjection(nextProjection, { applyPreviewFilters: isPreview })')
+  && view.includes('if (applyPreviewFilters)')
+  && view.includes('displayedTasks.value = Array.isArray(nextProjection.taskView?.records)'))
+ok('后续查询失败保留已加载客情投影并释放处理中状态', view.includes('const hasProjection = Boolean(projection.value)')
+  && view.includes("if (hasProjection) {")
+  && view.includes("showFeedback('error', message)")
+  && view.includes("else failCareProjection(message)")
+  && /finally \{\s*pendingAction\.value = ''\s*\}/.test(view)
+  && /finally \{\s*isCommandSubmitting\.value = false\s*\}/.test(view))
+ok('成功查询会清除历史瞬时失败提示',
+  /acceptCareProjection\(nextProjection\)[\s\S]{0,160}feedback\.value = null[\s\S]{0,80}loadState\.value = 'ready'/.test(view))
+
+console.log('== preview isolation ==')
+ok('preview 同时受 DEV 门禁', preview.includes('import.meta.env.DEV'))
+ok('preview 仅允许本机 host', preview.includes("'127.0.0.1'") && preview.includes("'localhost'"))
+ok('preview 必须显式 preview=1', preview.includes("params.get('preview') === '1'"))
+ok('页面明确标记本机演示数据', view.includes('本机演示数据') && view.includes('不代表客情后端'))
+ok('生产查询走门店 PC 客情正式端点', view.includes("requestCareAction('query-care-workbench'")
+  && view.includes('requestCustomerCareAction')
+  && api.includes("endpoint: '/cashierapi/v3/customer-care/actions'"))
+ok('preview 不注册或修改共享 action manifest', !combined.includes('cashierV3ActionManifest'))
+ok('服务后反馈统一使用后端白名单代码', combined.includes('SERVICE_FEEDBACK') && !combined.includes('SERVICE_FOLLOWUP'))
+ok('本页面不实现手机端或真实推送', !combined.includes('mobile-vue3') && !combined.includes('sendNotification'))
+
+console.log(`\ncustomer-care-frontend-contract: ${passed} passed, ${failed} failed`)
+if (failed > 0) process.exit(1)
