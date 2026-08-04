@@ -17,6 +17,19 @@ class CashierV3CommandContextServices
         $required = array_values((array)($contract['required'] ?? []));
         $allowed = array_values((array)($contract['allowed'] ?? []));
         $identities = array_values((array)($contract['identities'] ?? []));
+        $deferredIdentityKinds = array_values(array_unique(array_map(
+            'strval',
+            (array)($contract['deferred_identity_kinds'] ?? [])
+        )));
+        foreach ($deferredIdentityKinds as $kind) {
+            CashierV3ResourceKindCatalog::assertKnown($kind);
+            if (!in_array($kind, $allowed, true)) {
+                throw new \LogicException(sprintf(
+                    'deferred identity kind %s 未包含在 allowed 合同中',
+                    $kind
+                ));
+            }
+        }
 
         if (!$rawContexts) {
             throw CashierV3CommandException::invalidContext(
@@ -57,7 +70,12 @@ class CashierV3CommandContextServices
 
         // ---- 精确身份合同：contexts 必须与 identities 逐项相等 ----
         if ($identities) {
-            $normalized = $this->bindIdentities($normalized, $identities, $action);
+            $normalized = $this->bindIdentities(
+                $normalized,
+                $identities,
+                $action,
+                $deferredIdentityKinds
+            );
         } else {
             // 无精确身份时仍做 kind 级必需／数量校验（兼容旧合同）
             $presentKinds = [];
@@ -105,7 +123,12 @@ class CashierV3CommandContextServices
      * @param array<int,array> $identities
      * @return array<int,array>
      */
-    protected function bindIdentities(array $normalized, array $identities, string $action): array
+    protected function bindIdentities(
+        array $normalized,
+        array $identities,
+        string $action,
+        array $deferredIdentityKinds = []
+    ): array
     {
         $byKey = [];
         foreach ($normalized as $item) {
@@ -160,6 +183,11 @@ class CashierV3CommandContextServices
         // 多传同 kind 的无关对象：contexts 中有 identities 未声明的 key → 拒绝
         foreach ($byKey as $key => $item) {
             if (!isset($bound[$key]) && !isset($requiredKeys[$key])) {
+                if (in_array($item['kind'], $deferredIdentityKinds, true)) {
+                    $item['role'] = $item['kind'];
+                    $bound[$key] = $item;
+                    continue;
+                }
                 // 检查是否有任何 identity 声明了该 kind+id
                 $declared = false;
                 foreach ($identities as $identity) {
@@ -187,13 +215,13 @@ class CashierV3CommandContextServices
 
     public function sortForLocking(array $contexts): array
     {
-        usort($contexts, function (array $left, array $right) {
-            $leftOrder = CashierV3ResourceKindCatalog::lockOrderOf($left['kind']);
-            $rightOrder = CashierV3ResourceKindCatalog::lockOrderOf($right['kind']);
-            if ($leftOrder !== $rightOrder) {
-                return $leftOrder < $rightOrder ? -1 : 1;
-            }
-            return strcmp($left['id'], $right['id']);
+        usort($contexts, static function (array $left, array $right): int {
+            return CashierV3ResourceKindCatalog::compareResources(
+                (string)$left['kind'],
+                (string)$left['id'],
+                (string)$right['kind'],
+                (string)$right['id']
+            );
         });
         return array_values($contexts);
     }

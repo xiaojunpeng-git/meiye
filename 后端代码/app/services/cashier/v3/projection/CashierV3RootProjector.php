@@ -5,6 +5,7 @@ use app\services\cashier\v3\CashierV3DataScopeContext;
 use app\services\cashier\v3\CashierV3OperatorScope;
 use app\services\cashier\v3\CashierV3StateContextServices;
 use think\facade\Db;
+use think\facade\Log;
 
 /**
  * 当前根投影重建器。
@@ -123,6 +124,14 @@ class CashierV3RootProjector
                 ];
             });
         } catch (\Throwable $e) {
+            // 投影失败必须继续 fail-closed；保留受限诊断信息，避免菜单空白时无从定位。
+            Log::error('[cashier_v3_root_projection_failed] ' . json_encode([
+                'state_context_id' => $stateContextId,
+                'store_id' => $operatorScope->storeId(),
+                'operator_id' => $operatorScope->operatorId(),
+                'error' => $e->getMessage(),
+                'exception' => get_class($e),
+            ], JSON_UNESCAPED_UNICODE));
             return null;
         }
     }

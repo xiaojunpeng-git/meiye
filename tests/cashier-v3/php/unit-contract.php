@@ -12,6 +12,7 @@ function section(string $title): void
 }
 
 use app\services\cashier\v3\CashierV3AliasResolver;
+use app\services\cashier\v3\CashierV3CommandContextServices;
 use app\services\cashier\v3\CashierV3CommandException;
 use app\services\cashier\v3\CashierV3DataScopeFactory;
 use app\services\cashier\v3\CashierV3IdempotencyKeyServices;
@@ -72,8 +73,8 @@ ok(
     'EO-15-02'
 );
 $deferredCheckoutContract = CashierV3BusinessEventContractRegistry::normalize(
-    CashierV3ActionManifest::requireAction('submit-checkout'),
-    'submit-checkout'
+    CashierV3ActionManifest::requireAction('submit-debt-repayment'),
+    'submit-debt-repayment'
 );
 $workspaceDraftContract = CashierV3BusinessEventContractRegistry::normalize(
     CashierV3ActionManifest::requireAction('choose-catalog-item'),
@@ -99,8 +100,8 @@ $blockedAtRuntime = false;
 $blockedMissing = [];
 try {
     $runtimeActivationGate->assertExecutable(
-        CashierV3ActionManifest::requireAction('submit-checkout'),
-        'submit-checkout'
+        CashierV3ActionManifest::requireAction('submit-debt-repayment'),
+        'submit-debt-repayment'
     );
 } catch (CashierV3CommandException $exception) {
     $blockedAtRuntime = $exception->getResultCode() === CashierV3ResultCode::ACTION_NOT_IMPLEMENTED;
@@ -199,6 +200,7 @@ $granted = $resolver->resolveGrantedFeatures([
         'cashier-hang-index',
         'cashier-order-index',
         'cashier-recharge-index',
+        'cashier-inventory-transfer',
         'cashier-index',
         'cashier-reservation',
         'cashier.v3.cashier',
@@ -207,6 +209,9 @@ $granted = $resolver->resolveGrantedFeatures([
 ok('maps cashier-cashier-index', in_array('cashier.v3.cashier', $granted, true), '', 'PM-7-01');
 ok('maps cashier-verify-index', in_array('cashier.v3.writeoff', $granted, true), '', 'PM-7-01');
 ok('maps cashier-reservation-list', in_array('cashier.v3.reservation', $granted, true), '', 'PM-7-01');
+ok('maps only the explicitly granted inventory submenu capability',
+    in_array('cashier.v3.inventory.transfer', $granted, true)
+    && !in_array('cashier.v3.inventory.inbound', $granted, true), '', 'PM-7-01');
 ok('ignores fake cashier-index', !in_array('cashier.v3.room', $granted, true), '', 'PM-7-01');
 ok('ignores direct cashier.v3.* spoof for non-super', !in_array('cashier.v3.management_center', $granted, true), '', 'PM-7-01');
 ok('no room without real menu', !in_array('cashier.v3.room', $granted, true), '', 'PM-7-01');
@@ -400,7 +405,7 @@ section('checkout follow-up rejects client source payload');
 $policiesFollow = new CashierV3ContextPolicyRegistry(true);
 $followThrew = '';
 try {
-    $policiesFollow->requirePolicy('submit-checkout')->resolve(
+    $policiesFollow->requirePolicy('add-payment-method')->resolve(
         [
             'checkoutRequestId' => 'CR1',
             'serviceOrderId' => 'SO1',
@@ -412,13 +417,42 @@ try {
     $followThrew = (string)($e->getDetail()['reason'] ?? $e->getResultCode());
 }
 ok('follow-up 拒绝客户端夹带来源', $followThrew === 'follow_up_source_must_come_from_checkout_request', $followThrew, 'CP-8-02');
-$followOk = $policiesFollow->requirePolicy('submit-checkout')->resolve(
+$followOk = $policiesFollow->requirePolicy('add-payment-method')->resolve(
     ['checkoutRequestId' => 'CR1'],
     ['store_id' => 8, 'operator_id' => 1, 'state_context_id' => 'ctx-x']
 );
 ok('follow-up 仅 checkout_request', !empty($followOk['expand_from_checkout_request'])
     && in_array('checkout_request', $followOk['required_touched_roles'], true), json_encode($followOk), 'CP-8-02');
 ok('follow-up 无 service_order identity', !in_array('service_order', array_column($followOk['identities'], 'kind'), true), '', 'CP-8-02');
+$followContexts = (new CashierV3CommandContextServices())->validate([
+    ['kind' => 'cashier_workspace', 'id' => 'ws:8:1:ctx-x', 'expectedVersion' => 3],
+    ['kind' => 'checkout_request', 'id' => 'CR1', 'expectedVersion' => 2],
+    ['kind' => 'service_order', 'id' => 'SO-FROM-CR', 'expectedVersion' => 7],
+], $followOk);
+ok(
+    'follow-up 允许来源版本延迟到 checkout_request 权威绑定',
+    count($followContexts) === 3
+        && in_array('service_order', array_column($followContexts, 'kind'), true)
+        && in_array('service_order', $followOk['deferred_identity_kinds'] ?? [], true),
+    json_encode($followContexts),
+    'CP-8-02'
+);
+$undeclaredDeferredRejected = '';
+try {
+    (new CashierV3CommandContextServices())->validate([
+        ['kind' => 'cashier_workspace', 'id' => 'ws:8:1:ctx-x', 'expectedVersion' => 3],
+        ['kind' => 'checkout_request', 'id' => 'CR1', 'expectedVersion' => 2],
+        ['kind' => 'member', 'id' => '99', 'expectedVersion' => 1],
+    ], $followOk);
+} catch (CashierV3CommandException $e) {
+    $undeclaredDeferredRejected = (string)($e->getDetail()['reason'] ?? $e->getResultCode());
+}
+ok(
+    'follow-up 未声明的延迟来源仍 fail-closed',
+    $undeclaredDeferredRejected === 'kind_not_allowed',
+    $undeclaredDeferredRejected,
+    'CP-8-02'
+);
 
 section('register freeze / duplicate zero side-effect');
 $handlers = new CashierV3HandlerRegistry();

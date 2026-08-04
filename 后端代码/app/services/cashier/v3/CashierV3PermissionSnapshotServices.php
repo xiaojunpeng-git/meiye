@@ -71,6 +71,7 @@ class CashierV3PermissionSnapshotServices
         $status = (int)($staff['status'] ?? 0);
         $staffStoreId = (int)($staff['store_id'] ?? 0);
         $employeeId = (int)($staff['employee_id'] ?? 0);
+        $internalAccount = '';
 
         if ($isDel !== 0 || $status !== 1) {
             throw new CashierV3CommandException(
@@ -94,7 +95,12 @@ class CashierV3PermissionSnapshotServices
             );
         }
 
-        if ($employeeId <= 0) {
+        // 平台通过“进入门店”签发的 level=0 门店管理员会话沿用旧逻辑：
+        // 它仅可在令牌绑定的当前门店操作，不能因历史员工档案未绑定而退化成
+        // 一个只能浏览、不能执行命令的半可用会话。DataScopeFactory 会把该身份
+        // 固定为 forcedStoreId 的 MODE_STORES，绝不扩大成跨门店权限。
+        $isCurrentStoreMenuSuper = (int)($staff['level'] ?? -1) === 0;
+        if ($employeeId <= 0 && !$isCurrentStoreMenuSuper) {
             throw new CashierV3CommandException(
                 CashierV3ResultCode::PERMISSION_DENIED,
                 '当前账号未绑定有效员工档案，已拒绝。',
@@ -119,6 +125,14 @@ class CashierV3PermissionSnapshotServices
                         CashierV3ResultCode::STATUS_FAILED,
                         ['reason' => 'employee_disabled']
                     );
+                }
+                $accountRow = Db::name('employee_internal_account')
+                    ->where('employee_id', $employeeId)
+                    ->where('is_del', 0)
+                    ->lock(true)
+                    ->find();
+                if ($accountRow && (int)($accountRow['status'] ?? 0) === 1) {
+                    $internalAccount = trim((string)($accountRow['account'] ?? ''));
                 }
             } catch (CashierV3CommandException $e) {
                 throw $e;
@@ -159,7 +173,7 @@ class CashierV3PermissionSnapshotServices
         }
 
         // 用锁后权威行重建 profile；禁止继续使用事务外旧 operatorProfile
-        $rebuiltProfile = $this->rebuildOperatorProfile($staff, $operatorProfile);
+        $rebuiltProfile = $this->rebuildOperatorProfile($staff, $operatorProfile, $internalAccount);
 
         $dataScope = $this->factory->build(
             $operatorScope->storeId(),
@@ -219,7 +233,7 @@ class CashierV3PermissionSnapshotServices
     /**
      * 从锁定的 system_store_staff 行重建 operatorProfile（parseToken 形状）。
      */
-    protected function rebuildOperatorProfile(array $staff, array $sessionHint = []): array
+    protected function rebuildOperatorProfile(array $staff, array $sessionHint = [], string $internalAccount = ''): array
     {
         $roles = $staff['roles'] ?? [];
         if (is_string($roles)) {
@@ -233,7 +247,9 @@ class CashierV3PermissionSnapshotServices
 
         $profile = [
             'id' => (int)($staff['id'] ?? 0),
-            'account' => (string)($staff['account'] ?? $staff['staff_name'] ?? ''),
+            'account' => $internalAccount !== ''
+                ? $internalAccount
+                : trim((string)($staff['account'] ?? '')),
             'staff_name' => (string)($staff['staff_name'] ?? ''),
             'store_id' => (int)($staff['store_id'] ?? 0),
             'employee_id' => (int)($staff['employee_id'] ?? 0),

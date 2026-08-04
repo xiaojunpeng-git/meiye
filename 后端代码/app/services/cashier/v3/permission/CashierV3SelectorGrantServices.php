@@ -29,7 +29,7 @@ class CashierV3SelectorGrantServices
     /** 实体类型允许的 entry 集合 */
     public const ENTITY_ALLOWED_ENTRIES = [
         'member' => ['cashier', 'writeoff', 'reservation', 'member', 'hang', 'order_center'],
-        'query_entity' => ['cashier', 'management_center', 'order_center', 'member'],
+        'query_entity' => ['cashier', 'reservation', 'management_center', 'order_center', 'member'],
     ];
 
     /** @var bool */

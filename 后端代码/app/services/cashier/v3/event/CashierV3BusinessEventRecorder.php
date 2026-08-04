@@ -83,10 +83,13 @@ final class CashierV3BusinessEventRecorder
         $operatorScope = $execution->operatorScope();
         $occurredAt = (int)($event['occurred_at'] ?? time());
         $settledAt = (int)($event['settled_at'] ?? $occurredAt);
-        $recordedAt = time();
-        if ($occurredAt <= 0 || $settledAt <= 0 || $recordedAt <= 0) {
+        $recordedAt = (int)($event['recorded_at'] ?? time());
+        if ($occurredAt <= 0 || $settledAt < $occurredAt || $recordedAt < $occurredAt) {
             throw self::failure(CashierV3ResultCode::COMMAND_EVENT_PERSISTENCE_INCOMPLETE, 'time_invalid', $execution, $type);
         }
+        $businessDate = array_key_exists('business_date', $event)
+            ? $this->explicitBusinessDate($event['business_date'], $execution, $type)
+            : $this->businessDate($occurredAt);
         $sourceType = trim((string)($event['source_type'] ?? $execution->action()));
         $sourceId = trim((string)($event['source_id'] ?? $aggregateId));
         if (!preg_match('/^[a-z][a-z0-9_.-]{1,63}$/', $sourceType)
@@ -115,7 +118,7 @@ final class CashierV3BusinessEventRecorder
             'store_id' => $operatorScope->storeId(),
             'member_id' => (int)($event['member_id'] ?? 0),
             'operator_id' => $operatorScope->operatorId(),
-            'business_date' => $this->businessDate($occurredAt),
+            'business_date' => $businessDate,
             'occurred_at' => $occurredAt,
             'settled_at' => $settledAt,
             'recorded_at' => $recordedAt,
@@ -154,18 +157,18 @@ final class CashierV3BusinessEventRecorder
         $alreadyEmitted = $this->executionDescriptorByEventKey($execution, $eventKey);
         if ($alreadyEmitted !== null) {
             $this->assertDescriptorEqualsStored($alreadyEmitted, $descriptor, $execution);
-            return ['event_id' => $eventId, 'event_no' => $eventNo, 'event_key' => $eventKey, 'event_type' => $type];
+            return $this->recordedEventResult($eventId, $eventNo, $eventKey, $type, $row);
         }
         if ($reusedExistingEvent) {
             $this->assertOutboxRoutesPersisted($eventId, $type, $contract, $execution);
             $execution->addEvent($descriptor);
-            return ['event_id' => $eventId, 'event_no' => $eventNo, 'event_key' => $eventKey, 'event_type' => $type];
+            return $this->recordedEventResult($eventId, $eventNo, $eventKey, $type, $row);
         }
         foreach ((array)($contract['consumers'][$type] ?? []) as $consumerCode) {
             $this->insertOutbox($eventId, $eventNo, $consumerCode, $operatorScope, $row, $recordedAt);
         }
         $execution->addEvent($descriptor);
-        return ['event_id' => $eventId, 'event_no' => $eventNo, 'event_key' => $eventKey, 'event_type' => $type];
+        return $this->recordedEventResult($eventId, $eventNo, $eventKey, $type, $row);
     }
 
     public function assertRequiredPersistedInTx(
@@ -435,7 +438,7 @@ final class CashierV3BusinessEventRecorder
             'command_idempotency_key', 'reversal_of',
             'tenant_id', 'organization_id', 'organization_path',
             'store_id', 'member_id', 'operator_id', 'business_date',
-            'occurred_at', 'settled_at', 'aggregate_name_snapshot',
+            'occurred_at', 'settled_at', 'recorded_at', 'aggregate_name_snapshot',
             'organization_name_snapshot', 'store_name_snapshot',
             'operator_name_snapshot', 'payload', 'payload_sha256',
             'route_fingerprint',
@@ -467,6 +470,7 @@ final class CashierV3BusinessEventRecorder
             'business_date' => (string)($row['business_date'] ?? ''),
             'occurred_at' => (int)($row['occurred_at'] ?? 0),
             'settled_at' => (int)($row['settled_at'] ?? 0),
+            'recorded_at' => (int)($row['recorded_at'] ?? 0),
             'aggregate_name_snapshot' => (string)($row['aggregate_name_snapshot'] ?? ''),
             'organization_name_snapshot' => (string)($row['organization_name_snapshot'] ?? ''),
             'store_name_snapshot' => (string)($row['store_name_snapshot'] ?? ''),
@@ -722,6 +726,54 @@ final class CashierV3BusinessEventRecorder
                 CashierV3ResultCode::STATUS_FAILED
             );
         }
+    }
+
+    private function recordedEventResult(
+        int $eventId,
+        string $eventNo,
+        string $eventKey,
+        string $eventType,
+        array $row
+    ): array {
+        return [
+            'event_id' => $eventId,
+            'event_no' => $eventNo,
+            'event_key' => $eventKey,
+            'event_type' => $eventType,
+            'business_date' => (string)($row['business_date'] ?? ''),
+            'occurred_at' => (int)($row['occurred_at'] ?? 0),
+            'settled_at' => (int)($row['settled_at'] ?? 0),
+            'recorded_at' => (int)($row['recorded_at'] ?? 0),
+        ];
+    }
+
+    private function explicitBusinessDate(
+        $value,
+        CashierV3BusinessEventExecution $execution,
+        string $eventType
+    ): string {
+        if (!is_string($value) || preg_match('/^\d{4}-\d{2}-\d{2}$/D', $value) !== 1) {
+            throw self::failure(
+                CashierV3ResultCode::COMMAND_EVENT_PERSISTENCE_INCOMPLETE,
+                'business_date_invalid',
+                $execution,
+                $eventType
+            );
+        }
+        $date = \DateTimeImmutable::createFromFormat(
+            '!Y-m-d',
+            $value,
+            new \DateTimeZone('Asia/Shanghai')
+        );
+        if (!$date || $date->format('Y-m-d') !== $value) {
+            throw self::failure(
+                CashierV3ResultCode::COMMAND_EVENT_PERSISTENCE_INCOMPLETE,
+                'business_date_invalid',
+                $execution,
+                $eventType
+            );
+        }
+        return $value;
     }
 
     private function businessDate(int $timestamp): string

@@ -73,6 +73,8 @@ class UserCardHolderServices extends BaseServices
         /** @var StoreProductCategoryServices $categoryServices */
         $categoryServices = app()->make(StoreProductCategoryServices::class);
         foreach ($list as $key => &$item) {
+            // 统一返回完整 7 位卡号字段；无值时为空串（不回落订单核销码）
+            $item['card_no'] = trim((string)($item['card_no'] ?? ''));
             $order = $orderServices->get($item['oid'], ['order_id', 'card_upgrade_use_oid']);
             if (!$order) {
                 unset($list[$key]);
@@ -433,7 +435,12 @@ class UserCardHolderServices extends BaseServices
         $data['write_start']=$info['write_start'];
         $data['write_end']=$info['write_end'];
         $data['add_time'] = time();
-        return $this->dao->save($data);
+        /** @var CardNumberServices $cardNumberServices */
+        $cardNumberServices = app()->make(CardNumberServices::class);
+        return $cardNumberServices->withAllocateRetry(function (string $cardNo) use (&$data) {
+            $data['card_no'] = $cardNo;
+            return $this->dao->save($data);
+        }, null, 'purchase');
     }
 
     /**

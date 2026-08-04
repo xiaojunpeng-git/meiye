@@ -53,6 +53,8 @@ Route::group('cashierapi/v3', function () {
         // 统一命令网关：白名单 action + 幂等键 + 多对象 contexts 严格校验
         Route::post('workbenches/actions', 'Command/dispatchAction')
             ->option(['real_name' => '收银V3命令网关']);
+        Route::post('customer-care/actions', 'CustomerCare/action')
+            ->option(['real_name' => '门店PC客情工作台']);
         Route::get('unified-query/exports/:taskNo/download', 'Command/downloadUnifiedQueryExport')
             ->option(['real_name' => '统一查询导出下载']);
     })->middleware([

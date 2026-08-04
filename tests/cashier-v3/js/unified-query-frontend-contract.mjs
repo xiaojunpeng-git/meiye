@@ -7,7 +7,55 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const repo = path.resolve(__dirname, '../../..')
 const frontend = path.join(repo, '前端代码/cashier-v3/src')
-const contract = await import(pathToFileURL(path.join(frontend, 'services/unifiedQueryContract.js')).href)
+const sharedFrontend = path.join(repo, '前端代码/shared/unified-query-vue3/src')
+
+const facadeFiles = {
+  QueryEntitySelectorOverlay: 'components/query/QueryEntitySelectorOverlay.vue',
+  UnifiedQueryCustomFieldDrawer: 'components/query/UnifiedQueryCustomFieldDrawer.vue',
+  UnifiedQueryExportDrawer: 'components/query/UnifiedQueryExportDrawer.vue',
+  UnifiedQueryFieldRenameDrawer: 'components/query/UnifiedQueryFieldRenameDrawer.vue',
+  UnifiedQuerySettingsDrawer: 'components/query/UnifiedQuerySettingsDrawer.vue',
+  UnifiedQueryToolbar: 'components/query/UnifiedQueryToolbar.vue',
+  useUnifiedQueryPage: 'composables/useUnifiedQueryPage.js',
+  unifiedQueryContract: 'services/unifiedQueryContract.js'
+}
+const facadeSources = Object.fromEntries(Object.entries(facadeFiles).map(([name, relativePath]) => {
+  const filePath = path.join(frontend, relativePath)
+  assert.equal(fs.existsSync(filePath), true, `cashier 兼容路径仍存在：${relativePath}`)
+  return [name, fs.readFileSync(filePath, 'utf8')]
+}))
+
+for (const name of [
+  'QueryEntitySelectorOverlay',
+  'UnifiedQueryCustomFieldDrawer',
+  'UnifiedQueryExportDrawer',
+  'UnifiedQueryFieldRenameDrawer',
+  'UnifiedQuerySettingsDrawer'
+]) {
+  const source = facadeSources[name]
+  assert.ok(source.split('\n').length <= 12, `${name} 仅保留薄组件 facade`)
+  assert.match(source, /from '@mohe\/unified-query-vue3'/, `${name} 从唯一共享包导入实现`)
+  assert.match(source, /v-bind="\$attrs"/, `${name} 原样转发宿主属性与事件`)
+  assert.doesNotMatch(source, /defineProps|computed\(|reactive\(|watch\(/, `${name} 不保留平行业务实现`)
+}
+
+assert.ok(facadeSources.UnifiedQueryToolbar.split('\n').length <= 40, '工具栏 facade 仅保留宿主适配')
+assert.match(facadeSources.UnifiedQueryToolbar, /UnifiedQueryToolbar as SharedUnifiedQueryToolbar/, '工具栏实现来自唯一共享包')
+assert.match(facadeSources.UnifiedQueryToolbar, /openCashierV3QueryEntitySelector/, 'cashier 只在 facade 注入既有实体选择能力')
+assert.match(facadeSources.UnifiedQueryToolbar, /v-bind="\$attrs"/, '工具栏 facade 转发原页面合同')
+assert.doesNotMatch(facadeSources.UnifiedQueryToolbar, /dataScope|buildQueryPayload|isSettingsOpen/, '工具栏 facade 不复制查询状态机')
+
+assert.ok(facadeSources.useUnifiedQueryPage.split('\n').length <= 3, 'composable 原路径仅保留 re-export')
+assert.match(facadeSources.useUnifiedQueryPage, /export \{ useUnifiedQueryPage \} from '@mohe\/unified-query-vue3\/composable'/, 'composable 指向共享唯一实现')
+assert.ok(facadeSources.unifiedQueryContract.split('\n').length <= 10, 'contract 原路径仅保留 re-export 与会员适配')
+assert.match(facadeSources.unifiedQueryContract, /export \* from '@mohe\/unified-query-vue3\/contract'/, '通用 contract 从共享包导出')
+assert.match(
+  facadeSources.unifiedQueryContract,
+  /extractUnifiedQueryProjection\(raw, \['memberCenter', 'member_center'\]\)/,
+  '会员 facade 只声明领域 projection 别名，不复制通用解析逻辑'
+)
+
+const contract = await import(pathToFileURL(path.join(sharedFrontend, 'contracts/unifiedQueryContract.js')).href)
 
 const memberKeys = [
   'member_name', 'phone', 'member_no', 'member_status', 'member_level', 'member_tag', 'store',
@@ -219,7 +267,7 @@ assert.equal(
   '导出优先使用成功执行查询的截止日期快照，而不是之后重新加载的能力日期'
 )
 
-const toolbarSource = fs.readFileSync(path.join(frontend, 'components/query/UnifiedQueryToolbar.vue'), 'utf8')
+const toolbarSource = fs.readFileSync(path.join(sharedFrontend, 'components/UnifiedQueryToolbar.vue'), 'utf8')
 assert.match(toolbarSource, /dataScope === 'all'/, '其他状态仅在全部数据范围出现')
 assert.match(toolbarSource, /businessStatus\.value = ''/, '切回正常数据会清空不兼容业务状态')
 assert.match(toolbarSource, /unified-query-scope__thumb[\s\S]*?unified-query-scope__thumb--all/, '正常数据／全部数据使用左右滑动分段控件')
@@ -255,7 +303,7 @@ const previewHeaderSource = previewSource.match(/<header>[\s\S]*?<\/header>/)?.[
 assert.doesNotMatch(previewHeaderSource, /<button/, '确认稿页头删除重复的查询设置入口')
 assert.equal((previewSource.match(/@click="isSettingsOpen = true">查询设置<\/button>/g) || []).length, 1, '确认稿只保留工具栏当前位置的查询设置入口')
 
-const composableSource = fs.readFileSync(path.join(frontend, 'composables/useUnifiedQueryPage.js'), 'utf8')
+const composableSource = fs.readFileSync(path.join(sharedFrontend, 'composables/useUnifiedQueryPage.js'), 'utf8')
 for (const action of [
   'query-unified-query-capabilities',
   'save-unified-query-field-aliases',
@@ -273,7 +321,7 @@ assert.match(composableSource, /\.\.\.fieldPayload/, '自定义字段命令把�
 assert.doesNotMatch(composableSource, /field:\s*fieldPayload/, '自定义字段命令不得套入后端不识别的 field 对象')
 assert.match(composableSource, /fieldKey\s*\}/, '状态和归档命令统一提交稳定 fieldKey')
 
-const customFieldSource = fs.readFileSync(path.join(frontend, 'components/query/UnifiedQueryCustomFieldDrawer.vue'), 'utf8')
+const customFieldSource = fs.readFileSync(path.join(sharedFrontend, 'components/UnifiedQueryCustomFieldDrawer.vue'), 'utf8')
 assert.doesNotMatch(customFieldSource, /\beval\s*\(|new Function|expressionSql|expressionJs|expressionPhp/, '前端不执行任意脚本或 SQL')
 assert.match(customFieldSource, /v-if="previewMode"[^>]*>[\s\S]*?复制/, '复制字段只保留在确认稿，不在生产开放')
 assert.match(customFieldSource, /option value="tenant">全商户/, '全商户共享使用后端 tenant 合同')
@@ -404,7 +452,7 @@ assert.deepEqual(
   '服务端 between 数组可完整回显为起止输入'
 )
 
-const memberProjection = contract.extractUnifiedQueryMemberProjection({
+const memberProjection = contract.extractUnifiedQueryProjection({
   result: { status: 'success', code: '', message: 'ok' },
   data: {
     rows: [{ member_id: 9, member_name: '林女士' }],
@@ -413,7 +461,7 @@ const memberProjection = contract.extractUnifiedQueryMemberProjection({
     groups: [{ values: { member_level: '金卡' }, count: 1 }],
     dataAsOf: '2026-07-28 19:20:00'
   }
-})
+}, ['memberCenter', 'member_center'])
 assert.deepEqual(
   { total: memberProjection.total, page: memberProjection.page, pageSize: memberProjection.pageSize },
   { total: 61, page: 2, pageSize: 30 },
@@ -444,7 +492,7 @@ assert.equal((memberSource.match(/<UnifiedQueryToolbar/g) || []).length, 1, '会
 assert.match(memberSource, /settings-button-label="查询设置"/, '会员列表把唯一工具栏入口命名为查询设置')
 assert.doesNotMatch(memberSource, /@click="isSettingsOpen = true"/, '会员列表不另建重复的页面级查询设置按钮')
 
-const settingsSource = fs.readFileSync(path.join(frontend, 'components/query/UnifiedQuerySettingsDrawer.vue'), 'utf8')
+const settingsSource = fs.readFileSync(path.join(sharedFrontend, 'components/UnifiedQuerySettingsDrawer.vue'), 'utf8')
 assert.match(settingsSource, /unresolvedInvalidReferences/, '失效引用必须显式提示并阻断静默保存')
 assert.match(settingsSource, /移除此引用/, '用户可明确移除失效引用')
 assert.match(settingsSource, /isUpgradeAvailable\(reference\)/, '仅可升级的版本引用展示升级操作')
@@ -462,7 +510,7 @@ for (const visibleTemplate of ['比较判断', '区间判断', '如果／否则'
 }
 assert.doesNotMatch(customFieldSource, /<textarea[^>]*(?:expression|formula)|contenteditable/, '生产界面不提供任意表达式或公式输入框')
 
-const exportSource = fs.readFileSync(path.join(frontend, 'components/query/UnifiedQueryExportDrawer.vue'), 'utf8')
+const exportSource = fs.readFileSync(path.join(sharedFrontend, 'components/UnifiedQueryExportDrawer.vue'), 'utf8')
 assert.doesNotMatch(exportSource, /2026-07-28 17:30/, '导出不得展示固定假更新时间')
 assert.match(exportSource, /safeDownloadUrl/, '下载入口必须经过同源 URL 校验')
 assert.match(exportSource, /task\.value\?\.frozenFields/, '任务结果读取服务端冻结字段而不是当前页面字段')

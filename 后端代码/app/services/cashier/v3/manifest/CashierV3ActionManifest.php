@@ -168,12 +168,96 @@ class CashierV3ActionManifest
         return [
             // C2 | workspace/cart
             'choose-catalog-item' => $eventless($workspaceDraft),
+            'create-custom-card-configuration' => $eventless($workspaceDraft),
+            'add-checkout-entitlement-lines' => $eventless($workspaceDraft),
+            'update-cart-line-service-settings' => $eventless($workspaceDraft),
             'remove-cart-line' => $eventless($workspaceDraft),
             'change-cart-line-quantity' => $eventless($workspaceDraft),
             'select-cashier-member' => $eventless($selection),
             'set-guest-order' => $eventless($selection),
             'change-supplement-date' => $eventless($workspaceDraft),
             'exit-supplement' => $eventless($workspaceDraft),
+            'submit-card-operation' => [
+                'required_event_types' => ['card.operation.recorded'],
+                'allowed_event_types' => ['card.operation.recorded'],
+                'event_rules' => [
+                    'card.operation.recorded' => [
+                        'min_count' => 1,
+                        'max_count' => 1,
+                        'aggregate_type' => 'card_operation',
+                        'source_type' => 'submit-card-operation',
+                        'aggregate_version' => null,
+                    ],
+                ],
+                'eventless_reason' => '',
+                'activation_blocked_until_event_contract' => false,
+                'consumers' => [],
+            ],
+
+            'submit-recharge' => [
+                'required_event_types' => ['recharge.completed'],
+                'allowed_event_types' => ['recharge.completed', 'debt.recorded', 'gift.issued'],
+                'event_rules' => [
+                    'recharge.completed' => [
+                        'min_count' => 1,
+                        'max_count' => 1,
+                        'aggregate_type' => 'recharge_order',
+                        'source_type' => 'submit-recharge',
+                        'aggregate_version' => 1,
+                    ],
+                    'debt.recorded' => [
+                        'min_count' => 0,
+                        'max_count' => 1,
+                        'aggregate_type' => 'store_debt',
+                        'source_type' => 'submit-recharge',
+                        'aggregate_version' => 1,
+                    ],
+                    'gift.issued' => [
+                        'min_count' => 0,
+                        'max_count' => 100,
+                        'aggregate_type' => 'recharge_gift',
+                        'source_type' => 'submit-recharge',
+                        'aggregate_version' => 1,
+                    ],
+                ],
+                'eventless_reason' => '',
+                'activation_blocked_until_event_contract' => false,
+                'consumers' => [],
+            ],
+
+            'submit-recharge-debt-repayment' => [
+                'required_event_types' => ['debt.repaid'],
+                'allowed_event_types' => ['debt.repaid'],
+                'event_rules' => [
+                    'debt.repaid' => [
+                        'min_count' => 1,
+                        'max_count' => 1,
+                        'aggregate_type' => 'recharge_debt_repayment',
+                        'source_type' => 'submit-recharge-debt-repayment',
+                        'aggregate_version' => 1,
+                    ],
+                ],
+                'eventless_reason' => '',
+                'activation_blocked_until_event_contract' => false,
+                'consumers' => ['debt.repaid' => []],
+            ],
+
+            'submit-direct-gift' => [
+                'required_event_types' => ['gift.issued'],
+                'allowed_event_types' => ['gift.issued'],
+                'event_rules' => [
+                    'gift.issued' => [
+                        'min_count' => 1,
+                        'max_count' => 100,
+                        'aggregate_type' => 'direct_gift',
+                        'source_type' => 'submit-direct-gift',
+                        'aggregate_version' => 1,
+                    ],
+                ],
+                'eventless_reason' => '',
+                'activation_blocked_until_event_contract' => false,
+                'consumers' => ['gift.issued' => ['cashier_v3.direct_gift.reconcile']],
+            ],
 
             // C2 | checkout request preparation and inactive settlement
             'prepare-checkout' => $eventless($checkoutPreparation),
@@ -184,9 +268,138 @@ class CashierV3ActionManifest
             'add-payment-method' => $eventless($checkoutPreparation),
             'update-payment-line' => $eventless($checkoutPreparation),
             'remove-payment-line' => $eventless($checkoutPreparation),
+            // 余额支付在此阶段仅写入结账草稿；实际余额扣减和
+            // balance_changed 事实必须随 submit-checkout 的同一事务产生。
+            'apply-balance-payment' => $eventless($checkoutPreparation),
+            'remove-balance-payment' => $eventless($checkoutPreparation),
+            'update-balance-payment' => $eventless($checkoutPreparation),
+            'prepare-checkout-submission' => $eventless($checkoutPreparation),
             'confirm-debt-warning' => $eventless($checkoutPreparation),
             'confirm-checkout-final-changes' => $eventless($checkoutPreparation),
-            'submit-checkout' => $deferred($inactiveCheckout),
+            'submit-checkout' => [
+                'required_event_types' => ['checkout.completed'],
+                'allowed_event_types' => [
+                    'checkout.completed',
+                    'entitlement.writeoff.completed',
+                    'service.completed',
+                    'performance.consumption.recorded',
+                    'performance.labor.allocated',
+                    'gift.consumed',
+                    'inventory.batch.consumed',
+                    'inventory.sale.deducted',
+                    'inventory.shortage.recorded',
+                    'inventory.service_consumption.resolved',
+                    'hang_order.settled',
+                    'debt.recorded',
+                ],
+                'event_rules' => [
+                    'checkout.completed' => [
+                        'min_count' => 1,
+                        'max_count' => 1,
+                        // Sale, entitlement-only and mixed checkout use
+                        // different domain authorities for the same terminal
+                        // checkout result.
+                        'aggregate_type' => '',
+                        'source_type' => 'submit-checkout',
+                        'aggregate_version' => 1,
+                    ],
+                    'entitlement.writeoff.completed' => [
+                        'min_count' => 0,
+                        'max_count' => 100,
+                        'aggregate_type' => 'entitlement_source_detail',
+                        'source_type' => 'submit-checkout',
+                        'aggregate_version' => 1,
+                    ],
+                    'service.completed' => [
+                        'min_count' => 0,
+                        'max_count' => 100,
+                        'aggregate_type' => 'service_line',
+                        'source_type' => 'submit-checkout',
+                        'aggregate_version' => 1,
+                    ],
+                    'performance.consumption.recorded' => [
+                        'min_count' => 0,
+                        'max_count' => 100,
+                        'aggregate_type' => 'service_line',
+                        'source_type' => 'submit-checkout',
+                        'aggregate_version' => 1,
+                    ],
+                    'performance.labor.allocated' => [
+                        'min_count' => 0,
+                        'max_count' => 2000,
+                        'aggregate_type' => 'service_line_staff',
+                        'source_type' => 'submit-checkout',
+                        'aggregate_version' => 1,
+                    ],
+                    'gift.consumed' => [
+                        'min_count' => 0,
+                        'max_count' => 100,
+                        'aggregate_type' => 'entitlement_source_detail',
+                        'source_type' => 'submit-checkout',
+                        'aggregate_version' => 1,
+                    ],
+                    'inventory.batch.consumed' => [
+                        'min_count' => 0,
+                        'max_count' => 5000,
+                        'aggregate_type' => 'service_line_inventory_batch',
+                        'source_type' => 'submit-checkout',
+                        'aggregate_version' => 1,
+                    ],
+                    'inventory.sale.deducted' => [
+                        'min_count' => 0,
+                        'max_count' => 5000,
+                        'aggregate_type' => 'sales_order_line_inventory_batch',
+                        'source_type' => 'submit-checkout',
+                        'aggregate_version' => 1,
+                    ],
+                    'inventory.shortage.recorded' => [
+                        'min_count' => 0,
+                        'max_count' => 1000,
+                        'aggregate_type' => 'service_line_inventory_shortage',
+                        'source_type' => 'submit-checkout',
+                        'aggregate_version' => 1,
+                    ],
+                    'inventory.service_consumption.resolved' => [
+                        'min_count' => 0,
+                        'max_count' => 1,
+                        'aggregate_type' => 'entitlement_completion',
+                        'source_type' => 'submit-checkout',
+                        'aggregate_version' => 1,
+                    ],
+                    'hang_order.settled' => [
+                        'min_count' => 0,
+                        'max_count' => 1,
+                        'aggregate_type' => 'hang_order',
+                        'source_type' => 'submit-checkout',
+                        'aggregate_version' => null,
+                    ],
+                    'debt.recorded' => [
+                        'min_count' => 0,
+                        'max_count' => 1,
+                        'aggregate_type' => 'store_debt',
+                        'source_type' => 'submit-checkout',
+                        'aggregate_version' => 1,
+                    ],
+                ],
+                'eventless_reason' => '',
+                'activation_blocked_until_event_contract' => false,
+                // Current facts are written synchronously in the checkout
+                // transaction, so no asynchronous consumer is required yet.
+                'consumers' => [
+                    'checkout.completed' => [],
+                    'entitlement.writeoff.completed' => [],
+                    'service.completed' => [],
+                    'performance.consumption.recorded' => [],
+                    'performance.labor.allocated' => [],
+                    'gift.consumed' => [],
+                    'inventory.batch.consumed' => [],
+                    'inventory.sale.deducted' => [],
+                    'inventory.shortage.recorded' => [],
+                    'inventory.service_consumption.resolved' => [],
+                    'hang_order.settled' => [],
+                    'debt.recorded' => [],
+                ],
+            ],
             'submit-debt-repayment' => $deferred($inactiveCheckout),
             'return-to-payment-edit' => $eventless($checkoutPreparation),
             'retry-checkout' => $deferred($inactiveCheckout),
@@ -213,13 +426,94 @@ class CashierV3ActionManifest
             'cancel-reservation' => $deferred($inactiveReservation),
             'reject-reservation' => $deferred($inactiveReservation),
             'mark-reservation-no-show' => $deferred($inactiveReservation),
-            'create-reservation' => $deferred($inactiveReservation),
+            'create-reservation' => [
+                'required_event_types' => ['reservation.created'],
+                'allowed_event_types' => ['reservation.created'],
+                'event_rules' => [
+                    'reservation.created' => [
+                        'min_count' => 1,
+                        'max_count' => 1,
+                        'aggregate_type' => 'reservation',
+                        'source_type' => 'create-reservation',
+                        'aggregate_version' => 1,
+                    ],
+                ],
+                'eventless_reason' => '',
+                'activation_blocked_until_event_contract' => false,
+                'consumers' => ['reservation.created' => []],
+            ],
             'update-reservation' => $deferred($inactiveReservation),
             'select-reservation-member' => $eventless($selection),
 
             // C3 | hang order
-            'submit-hang-order' => $deferred($inactiveHang),
-            'resume-hang-order' => $deferred($inactiveHang),
+            'submit-hang-order' => [
+                'required_event_types' => ['hang_order.created'],
+                'allowed_event_types' => ['hang_order.created', 'room.occupied'],
+                'event_rules' => [
+                    'hang_order.created' => [
+                        'min_count' => 1,
+                        'max_count' => 1,
+                        'aggregate_type' => 'hang_order',
+                        'source_type' => 'submit-hang-order',
+                        'aggregate_version' => 1,
+                    ],
+                    'room.occupied' => [
+                        'min_count' => 0,
+                        'max_count' => 1,
+                        'aggregate_type' => 'room',
+                        'source_type' => 'submit-hang-order',
+                        'aggregate_version' => 1,
+                    ],
+                ],
+                'eventless_reason' => '',
+                'activation_blocked_until_event_contract' => false,
+                'consumers' => [
+                    'hang_order.created' => [],
+                    'room.occupied' => [],
+                ],
+            ],
+            'resume-hang-order' => [
+                'required_event_types' => ['hang_order.resumed'],
+                'allowed_event_types' => ['hang_order.resumed'],
+                'event_rules' => [
+                    'hang_order.resumed' => [
+                        'min_count' => 1,
+                        'max_count' => 1,
+                        'aggregate_type' => 'hang_order',
+                        'source_type' => 'resume-hang-order',
+                        'aggregate_version' => null,
+                    ],
+                ],
+                'eventless_reason' => '',
+                'activation_blocked_until_event_contract' => false,
+                'consumers' => ['hang_order.resumed' => []],
+            ],
+            'void-hang-order' => [
+                'required_event_types' => ['hang_order.voided'],
+                'allowed_event_types' => ['hang_order.voided', 'room.released'],
+                'event_rules' => [
+                    'hang_order.voided' => [
+                        'min_count' => 1,
+                        'max_count' => 1,
+                        'aggregate_type' => 'hang_order',
+                        'source_type' => 'void-hang-order',
+                        'aggregate_version' => null,
+                    ],
+                    'room.released' => [
+                        'min_count' => 0,
+                        'max_count' => 1,
+                        'aggregate_type' => 'room',
+                        'source_type' => 'void-hang-order',
+                        'aggregate_version' => 1,
+                    ],
+                ],
+                'eventless_reason' => '',
+                'activation_blocked_until_event_contract' => false,
+                'consumers' => [
+                    'hang_order.voided' => [],
+                    'room.released' => [],
+                ],
+            ],
 
             // C3 | writeoff
             'submit-writeoff' => $deferred($inactiveWriteoff),
@@ -249,6 +543,36 @@ class CashierV3ActionManifest
                 'activation_blocked_until_event_contract' => false,
                 'consumers' => ['member.created' => []],
             ],
+            'update-member' => [
+                'required_event_types' => ['member.updated'],
+                'allowed_event_types' => ['member.updated'],
+                'event_rules' => [
+                    'member.updated' => [
+                        'min_count' => 1,
+                        'max_count' => 1,
+                        'aggregate_type' => 'member',
+                        'source_type' => 'update-member',
+                    ],
+                ],
+                'eventless_reason' => '',
+                'activation_blocked_until_event_contract' => false,
+                'consumers' => ['member.updated' => []],
+            ],
+            'deactivate-member' => [
+                'required_event_types' => ['member.deactivated'],
+                'allowed_event_types' => ['member.deactivated'],
+                'event_rules' => [
+                    'member.deactivated' => [
+                        'min_count' => 1,
+                        'max_count' => 1,
+                        'aggregate_type' => 'member',
+                        'source_type' => 'deactivate-member',
+                    ],
+                ],
+                'eventless_reason' => '',
+                'activation_blocked_until_event_contract' => false,
+                'consumers' => ['member.deactivated' => []],
+            ],
 
             // C5 | order mutation and account query preferences
             'refund-sales-order' => $deferred($inactiveOrder),
@@ -260,6 +584,7 @@ class CashierV3ActionManifest
             'save-hang-order-query-settings' => $eventless($queryPreference),
             'save-order-center-query-settings' => $eventless($queryPreference),
             'save-member-query-settings' => $eventless($queryPreference),
+            'save-unified-query-settings' => $eventless($queryPreference),
             'save-unified-query-field-aliases' => $eventless($queryMetadata),
             'save-unified-query-custom-field' => $eventless($queryMetadata),
             'change-unified-query-custom-field-status' => $eventless($queryMetadata),

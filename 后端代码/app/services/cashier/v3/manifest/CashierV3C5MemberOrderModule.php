@@ -37,6 +37,10 @@ class CashierV3C5MemberOrderModule implements CashierV3ActionModule
         $projection = [];
 
         $command['create-member'] = self::FEATURE_MEMBER_CREATE;
+        $command['update-member'] = self::FEATURE_MEMBER;
+        $command['deactivate-member'] = self::FEATURE_MEMBER;
+        $command['submit-recharge'] = self::FEATURE_MEMBER;
+        $command['submit-recharge-debt-repayment'] = self::FEATURE_MEMBER;
 
         foreach ([
             'query-members' => self::FEATURE_MEMBER,
@@ -92,7 +96,9 @@ class CashierV3C5MemberOrderModule implements CashierV3ActionModule
         $command['save-hang-order-query-settings'] = self::FEATURE_HANG;
         $command['save-order-center-query-settings'] = self::FEATURE_ORDER_CENTER;
         $command['save-member-query-settings'] = self::POLICY_UNIFIED_QUERY_PAGE;
+        $command['submit-direct-gift'] = self::FEATURE_MEMBER;
         foreach ([
+            'save-unified-query-settings',
             'save-unified-query-field-aliases',
             'save-unified-query-custom-field',
             'change-unified-query-custom-field-status',
@@ -113,6 +119,7 @@ class CashierV3C5MemberOrderModule implements CashierV3ActionModule
         $projection['open-card-benefits'] = self::FEATURE_MEMBER;
 
         $projection['query-query-entities'] = self::POLICY_QUERY_ENTITIES;
+        $projection['query-staff'] = self::FEATURE_MANAGEMENT;
         $projection['open-management-entry'] = self::FEATURE_MANAGEMENT;
 
         return CashierV3ActionManifest::buildModuleActions(self::OWNER, $command, $projection);

@@ -181,6 +181,7 @@ const C3_ACTIONS = {
     'select-writeoff-member': FEATURE_WRITEOFF,
     'submit-hang-order': FEATURE_HANG,
     'resume-hang-order': FEATURE_HANG,
+    'void-hang-order': FEATURE_HANG,
     'submit-writeoff': FEATURE_WRITEOFF,
     'toggle-writeoff-project': FEATURE_WRITEOFF,
     'change-writeoff-project-times': FEATURE_WRITEOFF,

@@ -7,11 +7,17 @@ use app\services\cashier\v3\CashierV3CommandException;
 use app\services\cashier\v3\CashierV3DataScopeContext;
 use app\services\cashier\v3\CashierV3OperatorScope;
 use app\services\cashier\v3\CashierV3ResultCode;
+use app\services\cashier\v3\cashier\CashierV3MemberDebtProjectionServices;
 use app\services\cashier\v3\CashierV3TransactionGuard;
 use app\services\cashier\v3\event\CashierV3BusinessEventExecution;
 use app\services\cashier\v3\event\CashierV3BusinessEventRecorder;
 use app\services\cashier\v3\projection\CashierV3RootDomainAssembler;
 use app\services\cashier\v3\registry\CashierV3ContextPolicy;
+use app\services\cashier\v3\cashier\CashierV3CashierReadinessGuard;
+use app\services\cashier\v3\cashier\CashierV3EntitlementResourceVersionProvider;
+use app\services\cashier\v3\cashier\CashierV3CashierWorkspaceServices;
+use app\services\cashier\v3\cashier\CashierV3SaleCatalogServices;
+use app\services\cashier\v3\checkout\provider\CashierV3MemberBalanceProvider;
 use think\facade\Db;
 
 /**
@@ -31,15 +37,75 @@ final class CashierV3MemberModule
     private const MEMBER_NUMBER_MAX = 999999999;
     private const MEMBER_NUMBER_MAX_SKIP = 10000;
 
-    public static function install(CashierV3ActionDispatcher $dispatcher, CashierV3RootDomainAssembler $assembler): void
+    public static function install(
+        CashierV3ActionDispatcher $dispatcher,
+        CashierV3RootDomainAssembler $assembler,
+        CashierV3CashierWorkspaceServices $cashierWorkspace,
+        ?CashierV3EntitlementResourceVersionProvider $memberVersions = null
+    ): void
     {
+        // 会员建档完成后必须在同一事务内初始化 member 资源版本。否则后续
+        // prepare-checkout 无法把新会员加入最终锁集合，会把一笔本可结账的卡项
+        // 订单错误地拦截为资料不完整。
+        $memberVersions = $memberVersions ?: new CashierV3EntitlementResourceVersionProvider(
+            new CashierV3CashierReadinessGuard()
+        );
         self::registerPolicy($dispatcher, 'create-member');
         self::registerPolicy($dispatcher, 'set-guest-order');
+        self::registerMemberMutationPolicy($dispatcher, 'update-member');
+        self::registerMemberMutationPolicy($dispatcher, 'deactivate-member');
+        self::registerDirectGiftPolicy($dispatcher);
         self::registerPolicy($dispatcher, 'select-cashier-member');
         self::registerSelectionPolicy($dispatcher, 'select-writeoff-member', 'writeoff');
         self::registerSelectionPolicy($dispatcher, 'select-reservation-member', 'reservation');
 
         $handlers = $dispatcher->handlers();
+        $memberDetails = new CashierV3MemberDetailQueryServices();
+        $memberDebtDetails = new CashierV3MemberDebtProjectionServices();
+        foreach (['open-member-detail', 'load-member-detail-tab'] as $action) {
+            if (!$handlers->hasProjection($action)) {
+                $handlers->registerProjection($action, function (array $scope) use ($memberDetails, $memberDebtDetails): array {
+                    $payload = is_array($scope['payload'] ?? null) ? $scope['payload'] : [];
+                    $memberId = (int)($payload['memberId'] ?? $payload['member_id'] ?? 0);
+                    $detail = $memberDetails->read(
+                        $memberId,
+                        $scope['operator_scope'],
+                        $scope['data_scope']
+                    );
+                    if ((string)($payload['tab'] ?? '') === 'debt') {
+                        $debtSnapshot = $memberDebtDetails->read(
+                            $memberId,
+                            $scope['operator_scope'],
+                            $scope['data_scope']
+                        );
+                        $detail['debtRecords'] = array_map(static function (array $record): array {
+                            $record['actions'] = [[
+                                'code' => 'open-debt-settlements',
+                                'label' => '补交',
+                            ]];
+                            return $record;
+                        }, (array)($debtSnapshot['records'] ?? []));
+                        $detail['summary']['outstandingDebtAmount'] = (string)($debtSnapshot['outstandingDebtAmount'] ?? '0.00');
+                        $detail['summary']['outstandingDebtCount'] = (int)($debtSnapshot['outstandingDebtCount'] ?? 0);
+                    }
+                    return [
+                        'data' => ['detail' => $detail],
+                    ];
+                });
+            }
+        }
+        if (!$handlers->hasProjection('query-query-entities')) {
+            $entitySelector = new CashierV3QueryEntitySelectorServices();
+            $handlers->registerProjection('query-query-entities', function (array $scope) use ($entitySelector): array {
+                return [
+                    'data' => $entitySelector->query(
+                        is_array($scope['payload'] ?? null) ? $scope['payload'] : [],
+                        $scope['operator_scope'],
+                        $scope['data_scope']
+                    ),
+                ];
+            });
+        }
         if (!$handlers->hasProjection('query-member-selector')) {
             $handlers->registerProjection('query-member-selector', function (array $scope): array {
                 return [
@@ -81,8 +147,142 @@ final class CashierV3MemberModule
                 return ['data' => ['ready' => true, 'creator' => 'member']];
             });
         }
+        if (!$handlers->hasProjection('open-recharge')) {
+            $handlers->registerProjection('open-recharge', function (array $scope) use ($cashierWorkspace, $memberVersions): array {
+                $payload = is_array($scope['payload'] ?? null) ? $scope['payload'] : [];
+                $memberId = (int)($payload['memberId'] ?? $payload['member_id'] ?? 0);
+                if ($memberId <= 0) {
+                    throw CashierV3CommandException::invalidContext('请先选择需要充值的会员。');
+                }
+                // 充值弹窗是只读准备动作，因此不会携带写命令的 contexts。
+                // 工作台 ID 由受控账号、强制门店和服务端 state context 唯一派生，
+                // 不能改为信任浏览器提交的 workspace ID。
+                $workspaceId = self::workspaceIdForProjection($scope);
+                return Db::transaction(function () use ($scope, $cashierWorkspace, $memberVersions, $memberId, $workspaceId): array {
+                    $cashierWorkspace->assertSelectedMemberInTx(
+                        $workspaceId,
+                        (string)($scope['state_context_id'] ?? ''),
+                        $scope['operator_scope'],
+                        $memberId
+                    );
+                    $member = self::findSelectableMember((string)$memberId, $scope['operator_scope']);
+                    $memberVersion = $memberVersions->synchronizeProjectionVersion(
+                        'member',
+                        (string)$memberId,
+                        $scope['operator_scope'],
+                        $scope['data_scope']
+                    );
+                    $balance = (new CashierV3MemberBalanceProvider())->lockSnapshotInTx(
+                        $memberId,
+                        $scope['operator_scope'],
+                        $scope['data_scope']
+                    );
+                    $rechargeOptions = self::rechargeOptions($member);
+                    return [
+                        'data' => [
+                            'member' => $member,
+                            'balance' => $balance,
+                            'rechargeOptions' => $rechargeOptions,
+                        ],
+                        // Projection envelope 只会公开顶层 overlay；不能把它塞进
+                        // data._overlay 后期待命令分支的解包逻辑代为处理。
+                        'overlay' => [
+                            'name' => 'recharge',
+                            'member' => $member,
+                            'balance' => $balance,
+                            'rechargeOptions' => $rechargeOptions,
+                        ],
+                        'versions' => [
+                            ['kind' => 'member', 'id' => (string)$memberId, 'version' => $memberVersion],
+                            ['kind' => 'member_balance', 'id' => (string)$memberId, 'version' => (int)$balance['accountVersion']],
+                        ],
+                    ];
+                });
+            });
+        }
+        if (!$handlers->hasProjection('open-gift')) {
+            $handlers->registerProjection('open-gift', function (array $scope) use ($cashierWorkspace, $memberVersions): array {
+                $payload = is_array($scope['payload'] ?? null) ? $scope['payload'] : [];
+                $memberId = (int)($payload['memberId'] ?? $payload['member_id'] ?? 0);
+                if ($memberId <= 0) {
+                    throw CashierV3CommandException::invalidContext('请先选择需要赠送的会员。');
+                }
+                $workspaceId = self::workspaceIdForProjection($scope);
+                return Db::transaction(function () use ($scope, $cashierWorkspace, $memberVersions, $memberId, $workspaceId): array {
+                    $cashierWorkspace->assertSelectedMemberInTx($workspaceId, (string)($scope['state_context_id'] ?? ''), $scope['operator_scope'], $memberId);
+                    $member = self::findSelectableMember((string)$memberId, $scope['operator_scope']);
+                    $memberVersion = $memberVersions->synchronizeProjectionVersion('member', (string)$memberId, $scope['operator_scope'], $scope['data_scope']);
+                    $catalog = (new CashierV3SaleCatalogServices())->catalog($scope['operator_scope'], $scope['data_scope']);
+                    // Direct gifts have no inventory movement authority yet. Do
+                    // not offer inventory-managed products in this workflow;
+                    // the issuer repeats this check after locking the product.
+                    $catalogItems = array_values(array_filter((array)($catalog['items'] ?? []), static function (array $item): bool {
+                        return (int)($item['productType'] ?? -1) !== 0
+                            || trim((string)($item['stockText'] ?? '')) === '';
+                    }));
+                    $store = (array)Db::name('system_store')->where('id', $scope['operator_scope']->storeId())
+                        ->field('id,name')->find();
+                    if ((int)($store['id'] ?? 0) !== $scope['operator_scope']->storeId()) {
+                        throw CashierV3CommandException::invalidContext('当前办理门店不存在，请刷新后重试。');
+                    }
+                    // 券的归属门店必须是总部或当前办理门店。适用范围仍由券模板
+                    // 原样保存到会员券；不允许从本店直接发放其他门店的券。
+                    $coupons = Db::name('store_coupon_issue')->where('status', 1)->where('is_del', 0)
+                        ->whereIn('relation_id', [0, $scope['operator_scope']->storeId()])
+                        ->field('id,title,coupon_price,use_min_price,applicable_type,applicable_store_id,coupon_issue_type,relation_id')
+                        ->order('id desc')->limit(500)->select()->toArray();
+                    $applicableIds = [];
+                    foreach ($coupons as $coupon) {
+                        foreach (self::directGiftApplicableStoreIds($coupon['applicable_store_id'] ?? '') as $storeId) {
+                            $applicableIds[$storeId] = $storeId;
+                        }
+                    }
+                    $storeNames = $applicableIds === [] ? [] : Db::name('system_store')->whereIn('id', array_values($applicableIds))
+                        ->column('name', 'id');
+                    $coupons = array_map(static function (array $coupon) use ($storeNames): array {
+                        $names = [];
+                        foreach (self::directGiftApplicableStoreIds($coupon['applicable_store_id'] ?? '') as $storeId) {
+                            if (isset($storeNames[$storeId])) $names[] = (string)$storeNames[$storeId];
+                        }
+                        $coupon['applicableStoreLabel'] = $names === []
+                            ? '适用门店以券模板设置为准'
+                            : '适用门店：' . implode('、', $names);
+                        return $coupon;
+                    }, $coupons);
+                    return [
+                        'data' => ['member' => $member, 'store' => $store, 'catalogItems' => $catalogItems, 'coupons' => $coupons],
+                        'overlay' => ['name' => 'direct-gift', 'member' => $member, 'store' => $store, 'catalogItems' => $catalogItems, 'coupons' => $coupons],
+                        'versions' => [['kind' => 'member', 'id' => (string)$memberId, 'version' => $memberVersion]],
+                    ];
+                });
+            });
+        }
+        if (!$handlers->hasProjection('open-member-editor')) {
+            $handlers->registerProjection('open-member-editor', function (array $scope) use ($memberVersions): array {
+                $payload = is_array($scope['payload'] ?? null) ? $scope['payload'] : [];
+                return Db::transaction(function () use ($payload, $scope, $memberVersions): array {
+                    $member = self::findManageableMember(
+                        (string)($payload['memberId'] ?? $payload['member_id'] ?? ''),
+                        $scope['operator_scope'],
+                        $scope['data_scope'],
+                        false
+                    );
+                    $memberId = (int)$member['uid'];
+                    $version = $memberVersions->synchronizeProjectionVersion(
+                        'member',
+                        (string)$memberId,
+                        $scope['operator_scope'],
+                        $scope['data_scope']
+                    );
+                    return [
+                        'data' => ['member' => self::editableMember($member)],
+                        'versions' => [['kind' => 'member', 'id' => (string)$memberId, 'version' => $version]],
+                    ];
+                });
+            });
+        }
         if (!$handlers->hasCommand('create-member')) {
-            $handlers->registerCommand('create-member', function (array $scope): array {
+            $handlers->registerCommand('create-member', function (array $scope) use ($memberVersions): array {
                 $payload = is_array($scope['payload'] ?? null) ? $scope['payload'] : [];
                 $member = self::createMember(
                     $payload,
@@ -94,6 +294,21 @@ final class CashierV3MemberModule
                     $scope['event_execution'] ?? null,
                     is_array($scope['event_contract'] ?? null) ? $scope['event_contract'] : []
                 );
+                $memberId = (int)($member['memberId'] ?? $member['id'] ?? 0);
+                if ($memberId <= 0) {
+                    throw new CashierV3CommandException(
+                        CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
+                        '会员建档结果不完整，本次操作已取消。',
+                        CashierV3ResultCode::STATUS_FAILED,
+                        ['reason' => 'member_create_result_id_missing']
+                    );
+                }
+                $memberVersions->synchronizeProjectionVersion(
+                    'member',
+                    (string)$memberId,
+                    $scope['operator_scope'],
+                    $scope['data_scope']
+                );
                 return [
                     'data' => ['member' => $member],
                     'business_no' => (string)($member['memberNo'] ?? ''),
@@ -102,30 +317,106 @@ final class CashierV3MemberModule
                 ];
             });
         }
+        if (!$handlers->hasCommand('update-member')) {
+            $handlers->registerCommand('update-member', function (array $scope): array {
+                $member = self::updateMember(
+                    is_array($scope['payload'] ?? null) ? $scope['payload'] : [],
+                    $scope['operator_scope'],
+                    $scope['data_scope'],
+                    (string)($scope['idempotency_key'] ?? ''),
+                    $scope['event_recorder'] ?? null,
+                    $scope['event_execution'] ?? null,
+                    is_array($scope['event_contract'] ?? null) ? $scope['event_contract'] : []
+                );
+                return [
+                    'data' => ['member' => $member],
+                    'business_no' => (string)($member['memberNo'] ?? ''),
+                    'touched' => ['member', 'cashier_workspace'],
+                    'message' => '会员资料已保存。',
+                ];
+            });
+        }
+        if (!$handlers->hasCommand('deactivate-member')) {
+            $handlers->registerCommand('deactivate-member', function (array $scope): array {
+                $member = self::deactivateMember(
+                    is_array($scope['payload'] ?? null) ? $scope['payload'] : [],
+                    $scope['operator_scope'],
+                    $scope['data_scope'],
+                    (string)($scope['idempotency_key'] ?? ''),
+                    $scope['event_recorder'] ?? null,
+                    $scope['event_execution'] ?? null,
+                    is_array($scope['event_contract'] ?? null) ? $scope['event_contract'] : []
+                );
+                return [
+                    'data' => ['member' => $member],
+                    'business_no' => (string)($member['memberNo'] ?? ''),
+                    'touched' => ['member', 'cashier_workspace'],
+                    'message' => '会员已注销，历史业务记录已保留。',
+                ];
+            });
+        }
+        if (!$handlers->hasCommand('submit-direct-gift')) {
+            $handlers->registerCommand('submit-direct-gift', function (array $scope) use ($cashierWorkspace): array {
+                $payload = is_array($scope['payload'] ?? null) ? $scope['payload'] : [];
+                self::assertSelectorEntry($payload, 'cashier', '赠送只能从当前收银工作台发起。');
+                $memberId = (int)($payload['memberId'] ?? $payload['member_id'] ?? 0);
+                $workspaceId = self::workspaceContextId((array)($scope['contexts'] ?? []));
+                $cashierWorkspace->assertSelectedMemberInTx($workspaceId, (string)($scope['state_context_id'] ?? ''), $scope['operator_scope'], $memberId);
+                $member = self::findSelectableMember((string)$memberId, $scope['operator_scope']);
+                $result = (new CashierV3DirectGiftIssuanceServices())->issueInTx(
+                    $payload, $member, $scope['operator_scope'], $scope['data_scope'], (string)$scope['idempotency_key'],
+                    $scope['event_recorder'], $scope['event_execution'], (array)$scope['event_contract']
+                );
+                // The member identity is a locked read dependency.  Direct gifts create
+                // new entitlement resources, but do not mutate the legacy member row.
+                // Advancing the member-row version here would make the provider reject
+                // a correctly-committed gift after all authority rows have been written.
+                return ['data' => $result, 'business_no' => (string)$result['giftNo'], 'touched' => ['cashier_workspace'], 'message' => '赠送已生效。'];
+            });
+        }
         if (!$handlers->hasCommand('set-guest-order')) {
-            $handlers->registerCommand('set-guest-order', function (array $scope): array {
+            $handlers->registerCommand('set-guest-order', function (array $scope) use ($cashierWorkspace): array {
                 self::assertSelectorEntry(
                     is_array($scope['payload'] ?? null) ? $scope['payload'] : [],
                     'cashier',
                     '游客只能用于结账收款。'
                 );
+                $draft = $cashierWorkspace->selectGuestInTx(
+                    self::workspaceContextId((array)($scope['contexts'] ?? [])),
+                    (string)($scope['state_context_id'] ?? ''),
+                    $scope['operator_scope']
+                );
                 return [
-                    'data' => ['customerMode' => 'guest', 'member' => null],
+                    'data' => ['customerMode' => 'guest', 'member' => null, 'cashierDraft' => $draft],
                     'touched' => ['cashier_workspace'],
                     'message' => '已切换为游客开单。',
                 ];
             });
         }
         if (!$handlers->hasCommand('select-cashier-member')) {
-            $handlers->registerCommand('select-cashier-member', function (array $scope): array {
+            $handlers->registerCommand('select-cashier-member', function (array $scope) use ($cashierWorkspace, $memberVersions): array {
                 $payload = is_array($scope['payload'] ?? null) ? $scope['payload'] : [];
                 self::assertSelectorEntry($payload, 'cashier');
                 $member = self::findSelectableMember(
                     (string)($payload['memberId'] ?? $payload['member_id'] ?? ''),
                     $scope['operator_scope']
                 );
+                // 历史会员没有经过 V3 建档流程时，首次选中即在本事务内补齐
+                // 权威投影版本，使后续结账可以稳定锁定会员资源。
+                $memberVersions->synchronizeProjectionVersion(
+                    'member',
+                    (string)($member['id'] ?? $member['memberId'] ?? 0),
+                    $scope['operator_scope'],
+                    $scope['data_scope']
+                );
+                $draft = $cashierWorkspace->selectMemberInTx(
+                    self::workspaceContextId((array)($scope['contexts'] ?? [])),
+                    (string)($scope['state_context_id'] ?? ''),
+                    $scope['operator_scope'],
+                    (int)($member['id'] ?? $member['memberId'] ?? 0)
+                );
                 return [
-                    'data' => ['customerMode' => 'member', 'member' => $member],
+                    'data' => ['customerMode' => 'member', 'member' => $member, 'cashierDraft' => $draft],
                     'touched' => ['cashier_workspace'],
                     'message' => '已选择会员。',
                 ];
@@ -168,6 +459,76 @@ final class CashierV3MemberModule
             [],
             null,
             ['cashier_workspace']
+        ));
+    }
+
+    private static function registerMemberMutationPolicy(CashierV3ActionDispatcher $dispatcher, string $action): void
+    {
+        if ($dispatcher->policies()->has($action)) {
+            return;
+        }
+        $dispatcher->policies()->register(new CashierV3ContextPolicy(
+            $action,
+            ['cashier_workspace', 'member'],
+            [],
+            static function (array $payload, array $base): array {
+                $workspaceId = trim((string)($base['session']['workspace_id'] ?? ''));
+                $memberId = trim((string)($payload['memberId'] ?? $payload['member_id'] ?? ''));
+                if ($workspaceId === '' || preg_match('/^[1-9][0-9]*$/D', $memberId) !== 1) {
+                    throw CashierV3CommandException::invalidContext(
+                        '会员资料或当前工作台版本无效，请刷新后重试。',
+                        ['reason' => 'member_mutation_identity_invalid']
+                    );
+                }
+                return [
+                    'required' => ['cashier_workspace', 'member'],
+                    'allowed' => [],
+                    'identities' => [
+                        ['role' => 'cashier_workspace', 'kind' => 'cashier_workspace', 'id' => $workspaceId, 'required' => true],
+                        ['role' => 'member', 'kind' => 'member', 'id' => $memberId, 'required' => true],
+                    ],
+                    'required_read_roles' => ['cashier_workspace', 'member'],
+                    'required_touched_roles' => ['cashier_workspace', 'member'],
+                ];
+            },
+            ['cashier_workspace', 'member'],
+            ['cashier_workspace', 'member'],
+            ['cashier_workspace', 'member']
+        ));
+    }
+
+    private static function registerDirectGiftPolicy(CashierV3ActionDispatcher $dispatcher): void
+    {
+        if ($dispatcher->policies()->has('submit-direct-gift')) {
+            return;
+        }
+        $dispatcher->policies()->register(new CashierV3ContextPolicy(
+            'submit-direct-gift',
+            ['cashier_workspace', 'member'],
+            [],
+            static function (array $payload, array $base): array {
+                $workspaceId = trim((string)($base['session']['workspace_id'] ?? ''));
+                $memberId = trim((string)($payload['memberId'] ?? $payload['member_id'] ?? ''));
+                if ($workspaceId === '' || preg_match('/^[1-9][0-9]*$/D', $memberId) !== 1) {
+                    throw CashierV3CommandException::invalidContext(
+                        '赠送会员或当前工作台版本无效，请刷新后重试。',
+                        ['reason' => 'direct_gift_identity_invalid']
+                    );
+                }
+                return [
+                    'required' => ['cashier_workspace', 'member'],
+                    'allowed' => [],
+                    'identities' => [
+                        ['role' => 'cashier_workspace', 'kind' => 'cashier_workspace', 'id' => $workspaceId, 'required' => true],
+                        ['role' => 'member', 'kind' => 'member', 'id' => $memberId, 'required' => true],
+                    ],
+                    'required_read_roles' => ['cashier_workspace', 'member'],
+                    'required_touched_roles' => ['cashier_workspace'],
+                ];
+            },
+            ['cashier_workspace'],
+            ['cashier_workspace', 'member'],
+            ['cashier_workspace', 'member']
         ));
     }
 
@@ -219,6 +580,110 @@ final class CashierV3MemberModule
                 ['reason' => 'selector_entry_mismatch', 'expected' => $expected, 'actual' => $entry]
             );
         }
+    }
+
+    private static function workspaceContextId(array $contexts): string
+    {
+        foreach ($contexts as $context) {
+            if ((string)($context['kind'] ?? '') === 'cashier_workspace') {
+                $id = trim((string)($context['id'] ?? ''));
+                if ($id !== '') {
+                    return $id;
+                }
+            }
+        }
+        throw new CashierV3CommandException(
+            CashierV3ResultCode::INVALID_COMMAND_CONTEXT,
+            '本次操作缺少当前工作台版本，请刷新页面后重试。',
+            CashierV3ResultCode::STATUS_FAILED
+        );
+    }
+
+    /**
+     * 只读准备动作没有写命令 contexts，工作台身份只能由服务端已解析的 scope 生成。
+     */
+    private static function workspaceIdForProjection(array $scope): string
+    {
+        $operatorScope = $scope['operator_scope'] ?? null;
+        $stateContextId = trim((string)($scope['state_context_id'] ?? ''));
+        if (!$operatorScope instanceof CashierV3OperatorScope || $stateContextId === '') {
+            throw new CashierV3CommandException(
+                CashierV3ResultCode::CLIENT_SESSION_REQUIRED,
+                '当前收银工作台会话无效，请刷新页面后重试。',
+                CashierV3ResultCode::STATUS_FAILED
+            );
+        }
+        return sprintf(
+            'ws:%d:%d:%s',
+            $operatorScope->storeId(),
+            $operatorScope->operatorId(),
+            $stateContextId
+        );
+    }
+
+    /**
+     * Reuse the legacy recharge configuration as a read-only policy source.
+     * The submit command resolves a selected package again, so this projection
+     * is never the authority for a package price or its gifts.
+     */
+    private static function rechargeOptions(array $member): array
+    {
+        $quotas = is_array(sys_data('user_recharge_quota')) ? sys_data('user_recharge_quota') : [];
+        $quotaIds = array_values(array_filter(array_map(static function ($quota): int {
+            return is_array($quota) ? (int)($quota['id'] ?? 0) : 0;
+        }, $quotas)));
+        $giftConfig = [];
+        if ($quotaIds) {
+            /** @var \app\services\other\StoreGiftConfigServices $giftService */
+            $giftService = app()->make(\app\services\other\StoreGiftConfigServices::class);
+            $giftConfig = $giftService->getConfigMap(
+                \app\services\other\StoreGiftConfigServices::GIFT_TYPE_RECHARGE,
+                $quotaIds
+            );
+        }
+
+        $packages = [];
+        foreach ($quotas as $quota) {
+            if (!is_array($quota)) {
+                continue;
+            }
+            $id = (int)($quota['id'] ?? 0);
+            $price = self::normalizeRechargeMoney($quota['price'] ?? null);
+            $bonus = self::normalizeRechargeMoney($quota['give_money'] ?? 0);
+            if ($id <= 0 || $price === null || $price <= 0 || $bonus === null) {
+                continue;
+            }
+            $preset = is_array($giftConfig[$id] ?? null) ? $giftConfig[$id] : [];
+            $products = is_array($preset['product'] ?? null) ? $preset['product'] : [];
+            $coupons = is_array($preset['coupon'] ?? null) ? $preset['coupon'] : [];
+            $packages[] = [
+                'id' => $id,
+                'price' => $price,
+                'bonus' => $bonus,
+                'giftProductCount' => count($products),
+                'giftCouponCount' => count($coupons),
+            ];
+        }
+
+        return [
+            'packages' => $packages,
+            'operatorGiftEnabled' => (int)sys_config('cashier_operator_gift_switch', 1) === 1,
+            'debtPaymentEnabled' => (int)sys_config('cashier_debt_pay_switch', 0) === 1,
+            'minimumAmount' => max(0, (float)sys_config('store_user_min_recharge', 0)),
+            'maximumBonusPercent' => max(0, (float)($member['recharge_per'] ?? 0)),
+        ];
+    }
+
+    private static function normalizeRechargeMoney($value): ?float
+    {
+        if (!is_int($value) && !is_float($value) && !is_string($value)) {
+            return null;
+        }
+        $raw = trim((string)$value);
+        if (preg_match('/^(0|[1-9][0-9]*)(?:\.[0-9]{1,2})?$/D', $raw) !== 1) {
+            return null;
+        }
+        return (float)$raw;
     }
 
     /**
@@ -554,6 +1019,18 @@ final class CashierV3MemberModule
         );
     }
 
+    /** @return int[] */
+    private static function directGiftApplicableStoreIds($value): array
+    {
+        $raw = is_array($value) ? $value : explode(',', (string)$value);
+        $ids = [];
+        foreach ($raw as $storeId) {
+            $storeId = (int)$storeId;
+            if ($storeId > 0) $ids[$storeId] = $storeId;
+        }
+        return array_values($ids);
+    }
+
     private static function createMember(
         array $payload,
         CashierV3OperatorScope $operatorScope,
@@ -708,6 +1185,197 @@ final class CashierV3MemberModule
         return self::formatMemberRow($row ?: ['uid' => $uid, 'real_name' => $name, 'phone' => $phone, 'belong_store_id' => $operatorScope->storeId()], $operatorScope->storeId());
     }
 
+    private static function updateMember(
+        array $payload,
+        CashierV3OperatorScope $operatorScope,
+        CashierV3DataScopeContext $dataScope,
+        string $idempotencyKey,
+        $eventRecorder,
+        $eventExecution,
+        array $eventContract
+    ): array {
+        $member = self::findManageableMember(
+            (string)($payload['memberId'] ?? $payload['member_id'] ?? ''),
+            $operatorScope,
+            $dataScope,
+            true
+        );
+        $name = trim((string)($payload['name'] ?? $payload['real_name'] ?? ''));
+        if ($name === '') {
+            throw self::validation('name', '请填写会员姓名。');
+        }
+        $sex = (int)($payload['sex'] ?? $member['sex'] ?? 0);
+        if (!in_array($sex, [0, 1, 2], true)) {
+            throw self::validation('sex', '会员性别参数无效。');
+        }
+        $updates = [
+            'nickname' => $name,
+            'real_name' => $name,
+            'sex' => $sex,
+            'birthday' => self::normalizeBirthday(array_key_exists('birthday', $payload)
+                ? $payload['birthday']
+                : ((int)($member['birthday'] ?? 0) > 0 ? date('Y-m-d', (int)$member['birthday']) : '')),
+            'addres' => trim((string)($payload['address'] ?? $payload['addres'] ?? ($member['addres'] ?? ''))),
+            'mark' => trim((string)($payload['note'] ?? $payload['mark'] ?? ($member['mark'] ?? ''))),
+        ];
+        if ((int)Db::name('user')->where('uid', (int)$member['uid'])->update($updates) !== 1) {
+            throw new CashierV3CommandException(
+                CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
+                '会员资料保存失败，本次操作已取消。',
+                CashierV3ResultCode::STATUS_FAILED
+            );
+        }
+        $current = Db::name('user')->where('uid', (int)$member['uid'])->lock(true)->find();
+        self::recordMemberMutationEvent(
+            'member.updated',
+            'update-member',
+            $current ?: $member,
+            $operatorScope,
+            $dataScope,
+            $idempotencyKey,
+            [
+                'changed_fields' => ['name', 'sex', 'birthday', 'address', 'note'],
+                'source' => 'cashier_v3',
+            ],
+            $eventRecorder,
+            $eventExecution,
+            $eventContract
+        );
+        return self::formatMemberRow($current ?: $member, $operatorScope->storeId());
+    }
+
+    private static function deactivateMember(
+        array $payload,
+        CashierV3OperatorScope $operatorScope,
+        CashierV3DataScopeContext $dataScope,
+        string $idempotencyKey,
+        $eventRecorder,
+        $eventExecution,
+        array $eventContract
+    ): array {
+        $member = self::findManageableMember(
+            (string)($payload['memberId'] ?? $payload['member_id'] ?? ''),
+            $operatorScope,
+            $dataScope,
+            true
+        );
+        $now = time();
+        if ((int)Db::name('user')->where('uid', (int)$member['uid'])->update([
+            'status' => 0,
+            'is_del' => 1,
+            'delete_time' => date('Y-m-d H:i:s', $now),
+        ]) !== 1) {
+            throw new CashierV3CommandException(
+                CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
+                '会员注销失败，本次操作已取消。',
+                CashierV3ResultCode::STATUS_FAILED
+            );
+        }
+        $current = Db::name('user')->where('uid', (int)$member['uid'])->lock(true)->find();
+        self::recordMemberMutationEvent(
+            'member.deactivated',
+            'deactivate-member',
+            $current ?: $member,
+            $operatorScope,
+            $dataScope,
+            $idempotencyKey,
+            ['reason' => trim((string)($payload['reason'] ?? '门店端会员注销')), 'source' => 'cashier_v3'],
+            $eventRecorder,
+            $eventExecution,
+            $eventContract
+        );
+        return self::formatMemberRow($current ?: $member, $operatorScope->storeId());
+    }
+
+    private static function findManageableMember(
+        string $memberId,
+        CashierV3OperatorScope $operatorScope,
+        CashierV3DataScopeContext $dataScope,
+        bool $lock
+    ): array {
+        if (preg_match('/^[1-9][0-9]*$/D', trim($memberId)) !== 1) {
+            throw new CashierV3CommandException(CashierV3ResultCode::RESOURCE_NOT_FOUND, '该会员不存在或当前不可编辑。', CashierV3ResultCode::STATUS_FAILED);
+        }
+        $query = Db::name('user')->where('uid', (int)$memberId);
+        if ($lock) {
+            $query->lock(true);
+        }
+        $member = $query->find();
+        if (!$member || !self::memberState($member)['selectable']) {
+            throw new CashierV3CommandException(CashierV3ResultCode::RESOURCE_NOT_FOUND, '该会员不存在、已停用或已注销，不能继续编辑。', CashierV3ResultCode::STATUS_FAILED);
+        }
+        $stores = self::visibleStoreIds($dataScope);
+        if ($stores !== null) {
+            if (!$stores || !Db::name('store_user')->where('uid', (int)$member['uid'])->where('status', 1)->whereIn('store_id', $stores)->value('uid')) {
+                throw new CashierV3CommandException(CashierV3ResultCode::PERMISSION_DENIED, '当前账号没有编辑该会员的权限。', CashierV3ResultCode::STATUS_FAILED);
+            }
+        }
+        return $member;
+    }
+
+    private static function editableMember(array $member): array
+    {
+        return [
+            'id' => (string)($member['uid'] ?? ''),
+            'memberId' => (int)($member['uid'] ?? 0),
+            'name' => trim((string)($member['real_name'] ?? '')) ?: trim((string)($member['nickname'] ?? '')),
+            'phone' => (string)($member['phone'] ?? ''),
+            'sex' => (int)($member['sex'] ?? 0),
+            'birthday' => (int)($member['birthday'] ?? 0) > 0 ? date('Y-m-d', (int)$member['birthday']) : '',
+            'address' => (string)($member['addres'] ?? ''),
+            'note' => (string)($member['mark'] ?? ''),
+        ];
+    }
+
+    private static function recordMemberMutationEvent(
+        string $eventType,
+        string $sourceType,
+        array $member,
+        CashierV3OperatorScope $operatorScope,
+        CashierV3DataScopeContext $dataScope,
+        string $idempotencyKey,
+        array $payload,
+        $eventRecorder,
+        $eventExecution,
+        array $eventContract
+    ): void {
+        if (!$eventRecorder instanceof CashierV3BusinessEventRecorder
+            || !$eventExecution instanceof CashierV3BusinessEventExecution) {
+            throw new CashierV3CommandException(CashierV3ResultCode::EVENT_OUTBOX_NOT_READY, '会员事件底座尚未就绪，本次操作已取消。', CashierV3ResultCode::STATUS_FAILED);
+        }
+        $memberId = (int)($member['uid'] ?? 0);
+        if ($memberId <= 0 || trim($idempotencyKey) === '') {
+            throw new CashierV3CommandException(CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE, '会员操作幂等标识缺失，本次操作已取消。', CashierV3ResultCode::STATUS_FAILED);
+        }
+        $lastVersion = (int)Db::name('cashier_v3_business_event')
+            ->where('aggregate_type', 'member')
+            ->where('aggregate_id', (string)$memberId)
+            ->max('aggregate_version');
+        $now = time();
+        $name = trim((string)($member['real_name'] ?? '')) ?: trim((string)($member['nickname'] ?? ''));
+        $payload = array_merge($payload, [
+            'member_id' => $memberId,
+            'member_no' => (string)($member['bar_code'] ?? ''),
+            'name' => $name,
+            'phone' => (string)($member['phone'] ?? ''),
+        ]);
+        $eventRecorder->recordInTx($eventExecution, $eventContract, [
+            'event_type' => $eventType,
+            'aggregate_type' => 'member',
+            'aggregate_id' => (string)$memberId,
+            'aggregate_version' => max(1, $lastVersion + 1),
+            'member_id' => $memberId,
+            'source_type' => $sourceType,
+            'source_id' => (string)$memberId,
+            'occurred_at' => $now,
+            'settled_at' => $now,
+            'aggregate_name_snapshot' => $name,
+            'store_name_snapshot' => (string)Db::name('system_store')->where('id', $operatorScope->storeId())->value('name'),
+            'organization_path' => (string)$operatorScope->organizationId(),
+            'payload' => $payload,
+        ]);
+    }
+
     /**
      * 校验并规范化完整建档中的可落库选择项。
      * @return array{level_id:int,tag_ids:int[],exclusive_service_person:?array}
@@ -783,13 +1451,14 @@ final class CashierV3MemberModule
                 ->where('ss.status', 1)
                 ->where('ss.is_del', 0)
                 ->where('ss.employee_id', '>', 0)
+                ->where('ss.cashier_craftsman_enabled', 1)
                 ->where('e.status', 1)
                 ->where('e.is_del', 0)
                 ->field('ss.id,ss.employee_id,ss.store_id,ss.staff_name,e.name as employee_name')
                 ->lock(true)
                 ->find();
             if (!$staff) {
-                throw self::validation('exclusiveServicePersonId', '所选人员已停用、离职或不属于当前门店。');
+                throw self::validation('exclusiveServicePersonId', '所选人员已停用、离职、不属于当前门店或已关闭手艺人资格。');
             }
             $exclusiveServicePerson = [
                 'staff_id' => (int)$staff['id'],
@@ -960,13 +1629,14 @@ final class CashierV3MemberModule
             ->where('ss.store_id', $storeId)
             ->where('ss.status', 1)
             ->where('ss.is_del', 0)
+            ->where('ss.cashier_craftsman_enabled', 1)
             ->where('e.status', 1)
             ->where('e.is_del', 0)
             ->field('ss.id,ss.employee_id,ss.store_id,ss.staff_name,e.name as employee_name')
             ->lock(true)
             ->find();
         if (!$staff) {
-            throw self::validation('exclusiveServicePersonId', '所选人员已停用、离职或不属于当前门店。');
+            throw self::validation('exclusiveServicePersonId', '所选人员已停用、离职、不属于当前门店或已关闭手艺人资格。');
         }
         $staffName = trim((string)($staff['employee_name'] ?? ''))
             ?: trim((string)($staff['staff_name'] ?? ''));
@@ -1258,6 +1928,8 @@ final class CashierV3MemberModule
         $name = trim((string)($row['real_name'] ?? '')) ?: trim((string)($row['nickname'] ?? ''));
         return [
             'id' => (string)($row['uid'] ?? 0),
+            // 下游写入（如独立赠送兼容权益）使用 user.uid 作为权威会员外键。
+            'uid' => (int)($row['uid'] ?? 0),
             'memberId' => (int)($row['uid'] ?? 0),
             'name' => $name !== '' ? $name : '未命名会员',
             'phone' => (string)($row['phone'] ?? ''),

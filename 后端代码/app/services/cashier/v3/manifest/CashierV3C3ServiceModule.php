@@ -127,12 +127,13 @@ class CashierV3C3ServiceModule implements CashierV3ActionModule
             'open-room-next-reservation',
             'open-room-service-session',
             'open-unassigned-room-list',
+            'prepare-empty-room-cashier',
         ] as $action) {
             $projection[$action] = self::FEATURE_ROOM;
         }
 
         // ---- 挂单 ----
-        foreach (['submit-hang-order', 'resume-hang-order'] as $action) {
+        foreach (['submit-hang-order', 'resume-hang-order', 'void-hang-order'] as $action) {
             $command[$action] = self::FEATURE_HANG;
         }
         foreach ([

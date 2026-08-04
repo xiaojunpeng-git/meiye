@@ -1,0 +1,21 @@
+{
+  "name": "mohe-cashier-v3",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 18087 --strictPort",
+    "build": "vite build",
+    "preview": "vite preview --host 127.0.0.1 --port 18087 --strictPort"
+  },
+  "dependencies": {
+    "@mohe/unified-query-vue3": "file:../shared/unified-query-vue3",
+    "@lucide/vue": "^1.27.0",
+    "vue": "^3.4.38",
+    "vue-router": "^4.4.3"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^4.6.2",
+    "vite": "^4.5.3"
+  }
+}

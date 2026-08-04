@@ -7,6 +7,7 @@ use app\services\cashier\v3\manifest\CashierV3ActionManifest;
 use app\services\cashier\v3\permission\CashierV3FeatureResolver;
 use app\services\cashier\v3\permission\CashierV3PermissionPolicyRegistry;
 use app\services\cashier\v3\projection\CashierV3RootProjector;
+use app\services\cashier\v3\settlement\CashierV3CheckoutProjectionServices;
 use app\services\cashier\v3\projection\CashierV3RootStateContract;
 use app\services\cashier\v3\readiness\CashierV3TableReadinessGuard;
 use app\services\cashier\v3\registry\CashierV3ContextPolicyRegistry;
@@ -403,8 +404,18 @@ class CashierV3ActionDispatcher
             $envelope['stateContextId'] = $rebuilt['stateContextId'];
             $envelope['state']['stateContextId'] = $rebuilt['stateContextId'];
             $envelope['state']['stateRevision'] = $rebuilt['stateRevision'];
-            if ($rebuilt['versions']) {
-                $envelope['versions'] = $rebuilt['versions'];
+            $projectionVersions = array_merge(
+                is_array($rebuilt['versions'] ?? null) ? $rebuilt['versions'] : [],
+                // Projection handlers may add preparation-specific versions.
+                // Keep those alongside the rebuilt root versions; `$result` is
+                // the handler output in this scope.
+                is_array($result['versions'] ?? null) ? $result['versions'] : []
+            );
+            if ($projectionVersions) {
+                // 某些只读准备动作会在同一权威快照中取得后续写命令所需的
+                // 版本。根投影只公开当前草稿相关版本，不能因此吞掉准备动作
+                // 的版本回执，否则前端会在提交前无声地拒绝该命令。
+                $envelope['versions'] = $projectionVersions;
             }
         }
         if (isset($result['overlay']) && is_array($result['overlay'])) {
@@ -507,6 +518,24 @@ class CashierV3ActionDispatcher
             $envelope['idempotencyKey'] = (string)$outcome['idempotency_key'];
         }
 
+        // Payment-draft edits only need the same persisted checkout request.
+        // Rebuilding every workbench partition here also reloads the complete
+        // sale catalog, which makes a simple payment-line edit take seconds.
+        // The projection is deliberately read after the gateway transaction
+        // commits, so its workspace/request command contexts contain the
+        // versions advanced by this command.
+        $checkoutDraftProjection = $this->readCheckoutDraftProjection(
+            $outcome,
+            $operatorScope,
+            $dataScope
+        );
+        if ($checkoutDraftProjection !== null) {
+            $envelope['data'] = $this->attachCheckoutDraftProjection(
+                $envelope['data'],
+                $checkoutDraftProjection
+            );
+        }
+
         // 撤权重放：最小结果，不重建投影、不夹带业务副作用字段
         if (!empty($outcome['permission_denied_on_replay'])) {
             $envelope['requiresRefresh'] = true;
@@ -515,6 +544,7 @@ class CashierV3ActionDispatcher
 
         $shouldProject = (!$outcome['replay'] || $wantCurrentState)
             && $outcome['status'] === CashierV3ResultCode::STATUS_SUCCESS
+            && $checkoutDraftProjection === null
             && $this->rootProjector !== null
             && $this->rootProjector->isReadyForFullRoot()
             && $dataScope instanceof CashierV3DataScopeContext;
@@ -554,6 +584,71 @@ class CashierV3ActionDispatcher
         }
 
         return $envelope;
+    }
+
+    /**
+     * Return a narrow, authority-checked checkout projection after a payment
+     * draft mutation. The marker is persisted with the idempotency receipt so
+     * a replay receives the same current projection without duplicating the
+     * original business mutation.
+     */
+    protected function readCheckoutDraftProjection(
+        array $outcome,
+        CashierV3OperatorScope $operatorScope,
+        $dataScope
+    ): ?array {
+        $data = is_array($outcome['data'] ?? null) ? $outcome['data'] : [];
+        $edit = is_array($data['checkoutDraftEdit'] ?? null)
+            ? $data['checkoutDraftEdit']
+            : [];
+        $requestId = trim((string)($edit['_checkoutProjectionRequestId'] ?? ''));
+        if ($outcome['status'] !== CashierV3ResultCode::STATUS_SUCCESS
+            || $requestId === ''
+            || !($dataScope instanceof CashierV3DataScopeContext)) {
+            return null;
+        }
+
+        try {
+            $stateContextId = trim((string)($outcome['state_context_id'] ?? ''));
+            if ($stateContextId === '') {
+                return null;
+            }
+            $workspaceId = sprintf(
+                'ws:%d:%d:%s',
+                $operatorScope->storeId(),
+                $operatorScope->operatorId(),
+                $stateContextId
+            );
+            $projection = (new CashierV3CheckoutProjectionServices())->readCurrent(
+                $workspaceId,
+                $stateContextId,
+                $operatorScope,
+                $dataScope
+            );
+            if (!is_array($projection)
+                || !hash_equals($requestId, (string)($projection['checkoutRequestId'] ?? ''))
+                || !is_array($projection['commandContexts'] ?? null)) {
+                return null;
+            }
+            return $projection;
+        } catch (\Throwable $exception) {
+            // A projection issue must not hide a committed draft mutation.
+            // The normal full-root path below remains the safe automatic
+            // fallback when this narrow read is unavailable.
+            return null;
+        }
+    }
+
+    protected function attachCheckoutDraftProjection(array $data, array $projection): array
+    {
+        unset($data['_checkout_draft_projection']);
+        $edit = is_array($data['checkoutDraftEdit'] ?? null)
+            ? $data['checkoutDraftEdit']
+            : [];
+        unset($edit['_checkoutProjectionRequestId']);
+        $edit['checkoutProjection'] = $projection;
+        $data['checkoutDraftEdit'] = $edit;
+        return $data;
     }
 
     public static function projectionRebuildFallback(array $committedEnvelope): array

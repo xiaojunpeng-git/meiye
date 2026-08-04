@@ -62,6 +62,14 @@ let cashierV3PublicVersionStore = {
 /** 显式 context switch 意图：仅匹配最新 epoch／token 的响应可切换 */
 let contextSwitchIntent = null
 let contextSwitchEpoch = 0
+// A workspace identity belongs to one live page instance. sessionStorage is
+// copied when a browser tab is duplicated, so it cannot be used here.
+let clientSessionId = ''
+// A browser tab must retain its workspace identity across a reload so an
+// unfinished checkout can be recovered. sessionStorage is deliberately
+// tab-scoped and is cleared when that tab closes; it is not shared with other
+// cashier tabs or persisted as a user/account preference.
+const CASHIER_V3_CLIENT_SESSION_STORAGE_KEY = 'cashier-v3.client-session-id'
 
 const TRUSTED_V3_RESULT_STATUSES = new Set(['success', 'failed', 'conflict', 'result_unknown'])
 
@@ -298,7 +306,18 @@ const EMPTY_BOOTSTRAP = {
     'cashier.v3.order_center': false,
     'cashier.v3.management_center': false,
     'cashier.v3.member.create': false,
-    'cashier.v3.member.batch': false
+    'cashier.v3.member.batch': false,
+    'cashier.v3.inventory.overview': false,
+    'cashier.v3.inventory.inbound': false,
+    'cashier.v3.inventory.outbound': false,
+    'cashier.v3.inventory.stock': false,
+    'cashier.v3.inventory.count': false,
+    'cashier.v3.inventory.movement': false,
+    'cashier.v3.inventory.statistics': false,
+    'cashier.v3.inventory.request': false,
+    'cashier.v3.inventory.transfer': false,
+    'cashier.v3.inventory.usage': false,
+    'cashier.v3.inventory.import': false
   },
   workspace: {
     id: null,
@@ -439,7 +458,18 @@ const DEV_PREVIEW_BOOTSTRAP = {
     'cashier.v3.order_center': true,
     'cashier.v3.management_center': true,
     'cashier.v3.member.create': true,
-    'cashier.v3.member.batch': true
+    'cashier.v3.member.batch': true,
+    'cashier.v3.inventory.overview': true,
+    'cashier.v3.inventory.inbound': true,
+    'cashier.v3.inventory.outbound': true,
+    'cashier.v3.inventory.stock': true,
+    'cashier.v3.inventory.count': true,
+    'cashier.v3.inventory.movement': true,
+    'cashier.v3.inventory.statistics': true,
+    'cashier.v3.inventory.request': true,
+    'cashier.v3.inventory.transfer': true,
+    'cashier.v3.inventory.usage': true,
+    'cashier.v3.inventory.import': true
   },
   workspace: {
     id: 'ws:store-1:operator-preview:preview-state-context-1',
@@ -2432,16 +2462,25 @@ function isReadOnlyAction(canonicalAction) {
 }
 
 function getClientSessionId() {
-  const storageKey = 'cashier-v3:client-session-id'
+  if (clientSessionId) return clientSessionId
+  let persisted = ''
   try {
-    const existing = window.sessionStorage?.getItem(storageKey)
-    if (existing) return existing
-    const created = createCashierV3CommandId('SESSION')
-    window.sessionStorage?.setItem(storageKey, created)
-    return created
-  } catch (error) {
-    return createCashierV3CommandId('SESSION')
+    persisted = String(window.sessionStorage?.getItem(CASHIER_V3_CLIENT_SESSION_STORAGE_KEY) || '')
+  } catch (_) {
+    // Storage can be disabled by the browser. A page-lifetime identity still
+    // preserves normal command serialization in that constrained case.
   }
+  clientSessionId = /^SESSION-[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(persisted)
+    ? persisted
+    : createCashierV3CommandId('SESSION')
+  if (clientSessionId !== persisted) {
+    try {
+      window.sessionStorage?.setItem(CASHIER_V3_CLIENT_SESSION_STORAGE_KEY, clientSessionId)
+    } catch (_) {
+      // See the read-side fallback above.
+    }
+  }
+  return clientSessionId
 }
 
 function hasInvalidWriteContexts(contexts = []) {
@@ -2565,6 +2604,7 @@ function isCashierWorkspaceAction(action) {
     'open-hang-order',
     'submit-hang-order',
     'resume-hang-order',
+    'void-hang-order',
     'prepare-service-completion',
     'prepare-checkout',
     'prepare-debt-repayment',
@@ -2658,7 +2698,7 @@ function resolveCommandContexts(action, payload) {
 
   // The backend discovers and version-locks the hang from its stable ID.
   // A list-row revision is display data, never a trusted command context.
-  if (payload.hangOrderId && action !== 'resume-hang-order') {
+  if (payload.hangOrderId && !['resume-hang-order', 'void-hang-order'].includes(action)) {
     contexts.push(buildCommandContext('hang_order', payload.hangOrderId))
   }
 
@@ -2672,6 +2712,14 @@ function resolveCommandContexts(action, payload) {
   // would be rejected before the command can reach that server-side guard.
   if ((payload.debtRecordId || payload.debtItemId) && action !== 'submit-recharge-debt-repayment') {
     contexts.push(buildCommandContext('debt_record', payload.debtRecordId || payload.debtItemId))
+  }
+
+  // Reopening an existing editing checkout makes its persisted request a
+  // required command identity. The current root projection has already
+  // published that version; carry it with the workspace rather than asking
+  // the server to accept an unversioned checkout request.
+  if (payload.checkoutRequestId) {
+    contexts.push(buildCommandContext('checkout_request', payload.checkoutRequestId))
   }
 
   if ((action === 'submit-recharge' || action === 'submit-recharge-debt-repayment' || action === 'submit-direct-gift') && payload.memberId) {
@@ -3331,6 +3379,7 @@ export async function requestCashierV3Action(action, payload = {}) {
     stateContextId: ignoredStateContextId,
     contextSwitchToken,
     contextSwitchEpoch: requestSwitchEpoch,
+    __contextRecoveryAttempted: contextRecoveryAttempted = false,
     ...requestBody
   } = payload
 
@@ -3422,6 +3471,29 @@ export async function requestCashierV3Action(action, payload = {}) {
     return invalidPreparationRequest
   }
   if (!readOnly && (resolvedContexts.invalid || hasInvalidWriteContexts(contexts))) {
+    // No command has been sent yet, so a single automatic root recovery is
+    // safe. This covers the narrow interval after entering the cashier where
+    // the UI is visible but the root's authoritative versions are still
+    // loading. Final settlement and any command already sent are never
+    // replayed through this path.
+    if (!contextRecoveryAttempted && canonicalAction !== 'open-cashier-workbench') {
+      const hasCurrentRoot = Boolean(stateContextIdOf(cashierV3State))
+      const recovered = hasCurrentRoot
+        ? await requestCashierV3Action('open-cashier-workbench', { silent: true })
+        : await requestCashierV3ContextSwitch({
+            reason: 'command_context_recovery',
+            action: 'open-cashier-workbench',
+            silent: true
+          })
+      const recoveryResult = recovered?.result || recovered?.data?.result || {}
+      if (['success', 'succeeded'].includes(String(recoveryResult.status || '').toLowerCase())) {
+        return requestCashierV3Action(action, {
+          ...payload,
+          idempotencyKey: resolvedIdempotencyKey,
+          __contextRecoveryAttempted: true
+        })
+      }
+    }
     const invalidCommandContext = {
       result: {
         status: 'failed',

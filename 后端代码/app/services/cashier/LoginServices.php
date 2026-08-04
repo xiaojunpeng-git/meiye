@@ -140,7 +140,6 @@ class LoginServices extends BaseServices
         if (!$storeStaffInfo) {
             throw new AdminException('账号不存在!');
         }
-
         return $this->getLoginResult((int)$storeStaffInfo['id'], 'cashier', $storeStaffInfo);
     }
 
@@ -163,6 +162,23 @@ class LoginServices extends BaseServices
         if (!$storeStaffInfo) {
             throw new AdminException('账号不存在!');
         }
+        $v3Features = [];
+        $v3Account = '';
+        if ($type === 'cashier_v3') {
+            /** @var \app\services\cashier\v3\permission\CashierV3FeatureResolver $resolver */
+            $resolver = app()->make(\app\services\cashier\v3\permission\CashierV3FeatureResolver::class);
+            $profile = is_array($storeStaffInfo) ? $storeStaffInfo : $storeStaffInfo->toArray();
+            $v3Account = $this->cashierV3AccountForProfile($profile);
+            if ($v3Account !== '') {
+                // The staff row is a store assignment, while the employee's
+                // internal account is the authoritative login identity.
+                $profile['account'] = $v3Account;
+            }
+            $v3Features = $resolver->resolveGrantedFeatures($profile);
+            if (!$v3Features) {
+                throw new AdminException('当前账号无门店端权限，请联系管理员配置岗位和门店端入口');
+            }
+        }
         $token_login = 'is_staff_user_cashier_login_' . $storeStaffInfo->id . '_' . $type . '_' . $storeStaffInfo->pwd;
 //        if (Cache::has($token_login)) {
 //            throw new AdminException('当前登录账号已登录，无法再次登录！');
@@ -174,6 +190,27 @@ class LoginServices extends BaseServices
 
         $tokenInfo = $this->createToken($storeStaffInfo->id, $type, $storeStaffInfo->pwd);
         Cache::set($token_login, $tokenInfo['token']);
+        if ($type === 'cashier_v3') {
+            /** @var SystemStoreServices $storeServices */
+            $storeServices = app()->make(SystemStoreServices::class);
+            $store = $storeServices->get((int)$storeStaffInfo['store_id'], ['id', 'image', 'name', 'product_category_status']);
+            return [
+                'token' => $tokenInfo['token'],
+                'expires_time' => $tokenInfo['params']['exp'],
+                'features' => $v3Features,
+                'user_info' => [
+                    'id' => $storeStaffInfo->getData('id'),
+                    'employee_id' => (int)($storeStaffInfo->getData('employee_id') ?? 0),
+                    'account' => $v3Account !== '' ? $v3Account : $storeStaffInfo->getData('account'),
+                    'avatar' => $storeStaffInfo->getData('avatar'),
+                    'shift_start_time' => time(),
+                ],
+                'store_id' => $store && isset($store['id']) ? (int)$store['id'] : 0,
+                'store_name' => $store && isset($store['name']) ? (string)$store['name'] : '',
+                'version' => get_mohe_version(),
+                'prefix' => config('admin.cashier_prefix'),
+            ];
+        }
         /** @var SystemMenusServices $services */
         $services = app()->make(SystemMenusServices::class);
         [$menus, $uniqueAuth] = $services->getMenusList($storeStaffInfo->roles, (int)($storeStaffInfo['level'] ?? 0), 3);
@@ -299,7 +336,34 @@ class LoginServices extends BaseServices
         }
 
         $storeStaffInfo->type = $type;
-        return $storeStaffInfo->hidden(['pwd', 'is_del', 'status'])->toArray();
+        $profile = $storeStaffInfo->hidden(['pwd', 'is_del', 'status'])->toArray();
+        if ($type === 'cashier_v3') {
+            $account = $this->cashierV3AccountForProfile($profile);
+            if ($account !== '') {
+                $profile['account'] = $account;
+            }
+        }
+        return $profile;
+    }
+
+    /**
+     * 门店任职记录可保留历史手机号或为空；V3 会话展示必须使用员工统一账号。
+     * 此处只补会话展示身份，不参与门店资格、岗位或数据范围判定。
+     */
+    protected function cashierV3AccountForProfile(array $profile): string
+    {
+        $employeeId = (int)($profile['employee_id'] ?? 0);
+        if ($employeeId > 0) {
+            $account = trim((string)\think\facade\Db::name('employee_internal_account')
+                ->where('employee_id', $employeeId)
+                ->where('status', 1)
+                ->where('is_del', 0)
+                ->value('account'));
+            if ($account !== '') {
+                return $account;
+            }
+        }
+        return trim((string)($profile['account'] ?? ''));
     }
 
     /**

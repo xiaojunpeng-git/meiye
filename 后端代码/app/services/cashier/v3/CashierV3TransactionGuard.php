@@ -39,15 +39,21 @@ class CashierV3TransactionGuard
 
     /**
      * 读取当前默认连接的真实事务状态。
+     *
+     * Think-Swoole uses a dynamic connection proxy. The proxy exposes getPdo()
+     * through __call(), so method_exists() is false even when the underlying
+     * PDO has an active transaction. Call it directly and fail closed when the
+     * proxy cannot resolve the real PDO.
      */
     public static function isInTransaction(): bool
     {
         $connection = Db::connect();
-        if (!method_exists($connection, 'getPdo')) {
+        try {
+            $pdo = $connection->getPdo();
+        } catch (\Throwable $exception) {
             // 无法确认事务状态时按「不在事务内」处理：宁可拒绝，也不放行无锁写入
             return false;
         }
-        $pdo = $connection->getPdo();
         // 尚未建立连接时 getPdo() 返回 false，此时必然不在事务内
         return $pdo instanceof \PDO && $pdo->inTransaction();
     }

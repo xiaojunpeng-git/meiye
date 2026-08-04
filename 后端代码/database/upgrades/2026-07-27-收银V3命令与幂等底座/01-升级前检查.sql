@@ -11,23 +11,23 @@ SELECT @db AS db_name, VERSION() AS mysql_version, @@innodb_large_prefix AS larg
 -- ---------------------------------------------------------------------------
 DROP TEMPORARY TABLE IF EXISTS _c1a_exp_col;
 CREATE TEMPORARY TABLE _c1a_exp_col (
-  tbl VARCHAR(64) NOT NULL,
-  col VARCHAR(64) NOT NULL,
-  col_type VARCHAR(128) NOT NULL,
+  tbl VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  col VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  col_type VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   nullable ENUM('YES','NO') NOT NULL,
-  col_default VARCHAR(256) NULL,
-  charset VARCHAR(32) NULL,
-  collation VARCHAR(32) NULL,
-  extra_need VARCHAR(64) NOT NULL DEFAULT '',
+  col_default VARCHAR(256) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL,
+  charset VARCHAR(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL,
+  collation VARCHAR(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL,
+  extra_need VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '',
   PRIMARY KEY (tbl, col)
 ) ENGINE=Memory;
 
 DROP TEMPORARY TABLE IF EXISTS _c1a_exp_idx;
 CREATE TEMPORARY TABLE _c1a_exp_idx (
-  tbl VARCHAR(64) NOT NULL,
-  idx_cols VARCHAR(512) NOT NULL,
+  tbl VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  idx_cols VARCHAR(512) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   non_unique TINYINT NOT NULL,
-  sub_part VARCHAR(128) NOT NULL DEFAULT '',
+  sub_part VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '',
   PRIMARY KEY (tbl, idx_cols, non_unique)
 ) ENGINE=Memory;
 
@@ -118,14 +118,14 @@ INSERT INTO _c1a_exp_idx VALUES
 DROP TEMPORARY TABLE IF EXISTS _c1a_act_col;
 CREATE TEMPORARY TABLE _c1a_act_col AS
 SELECT
-  c.TABLE_NAME AS tbl,
-  c.COLUMN_NAME AS col,
-  c.COLUMN_TYPE AS col_type,
+  CONVERT(c.TABLE_NAME USING utf8mb4) COLLATE utf8mb4_bin AS tbl,
+  CONVERT(c.COLUMN_NAME USING utf8mb4) COLLATE utf8mb4_bin AS col,
+  CONVERT(c.COLUMN_TYPE USING utf8mb4) COLLATE utf8mb4_bin AS col_type,
   c.IS_NULLABLE AS nullable,
   c.COLUMN_DEFAULT AS col_default,
   c.CHARACTER_SET_NAME AS charset,
   c.COLLATION_NAME AS collation,
-  c.EXTRA AS extra
+  CONVERT(IFNULL(c.EXTRA, '') USING utf8mb4) COLLATE utf8mb4_bin AS extra
 FROM information_schema.COLUMNS c
 WHERE c.TABLE_SCHEMA = @db
   AND c.TABLE_NAME IN (
@@ -138,11 +138,11 @@ WHERE c.TABLE_SCHEMA = @db
 DROP TEMPORARY TABLE IF EXISTS _c1a_act_idx;
 CREATE TEMPORARY TABLE _c1a_act_idx AS
 SELECT
-  s.TABLE_NAME AS tbl,
-  GROUP_CONCAT(s.COLUMN_NAME ORDER BY s.SEQ_IN_INDEX) AS idx_cols,
+  CONVERT(s.TABLE_NAME USING utf8mb4) COLLATE utf8mb4_bin AS tbl,
+  CONVERT(GROUP_CONCAT(s.COLUMN_NAME ORDER BY s.SEQ_IN_INDEX) USING utf8mb4) COLLATE utf8mb4_bin AS idx_cols,
   MAX(s.NON_UNIQUE) AS non_unique,
   -- 无前缀索引时 GROUP_CONCAT(空,空) 会变成「,」；归一为空串后再与合同比较
-  IF(SUM(s.SUB_PART IS NOT NULL) = 0, '', GROUP_CONCAT(IFNULL(s.SUB_PART,'') ORDER BY s.SEQ_IN_INDEX)) AS sub_part
+  CONVERT(IF(SUM(s.SUB_PART IS NOT NULL) = 0, '', GROUP_CONCAT(IFNULL(s.SUB_PART,'') ORDER BY s.SEQ_IN_INDEX)) USING utf8mb4) COLLATE utf8mb4_bin AS sub_part
 FROM information_schema.STATISTICS s
 WHERE s.TABLE_SCHEMA = @db
   AND s.TABLE_NAME IN (

@@ -15,6 +15,7 @@ use app\services\query\StructuredExpressionEvaluator;
 use app\services\query\StructuredExpressionValidator;
 use app\services\query\UnifiedQueryAccessPolicy;
 use app\services\query\UnifiedQueryCapabilityServices;
+use app\services\query\UnifiedQueryCommandCoordinator;
 use app\services\query\UnifiedQueryContextFactory;
 use app\services\query\UnifiedQueryCustomFieldServices;
 use app\services\query\UnifiedQueryException;
@@ -25,7 +26,10 @@ use app\services\query\UnifiedQueryFieldReferenceServices;
 use app\services\query\UnifiedQueryJson;
 use app\services\query\UnifiedQueryPageRegistry;
 use app\services\query\UnifiedQueryPreferenceServices;
+use app\services\query\UnifiedQueryRuntime;
+use app\services\query\provider\MemberUnifiedQueryContextFactory;
 use app\services\query\provider\MemberUnifiedQueryProvider;
+use app\services\query\provider\StaffUnifiedQueryProvider;
 use think\facade\Db;
 
 /**
@@ -33,12 +37,15 @@ use think\facade\Db;
  */
 final class UnifiedQueryModule
 {
+    private const LEGACY_SAVE_MEMBER_SETTINGS = 'save-member-query-settings';
+
     /** @var array<string,object>|null */
     private static $runtime;
 
     public static function resetForTests(): void
     {
         self::$runtime = null;
+        UnifiedQueryRuntime::resetForTests();
     }
 
     public static function install(
@@ -57,69 +64,18 @@ final class UnifiedQueryModule
         if (self::$runtime !== null) {
             return self::$runtime;
         }
-        /** @var MetricDictionaryServices $metricDictionary */
-        $metricDictionary = app()->make(MetricDictionaryServices::class);
-        $definitions = $metricDictionary->getDefinitions();
-        if (!$definitions) {
-            throw new \LogicException('统一查询启动失败：系统指标字典为空');
-        }
-
-        $registry = UnifiedQueryPageRegistry::withDefaults($definitions);
-        $access = new UnifiedQueryAccessPolicy();
-        $validator = new StructuredExpressionValidator($registry);
-        $evaluator = new StructuredExpressionEvaluator();
-        $references = new UnifiedQueryFieldReferenceServices();
-        $customFields = new UnifiedQueryCustomFieldServices(
-            $registry,
-            $validator,
-            $access,
-            $references
+        self::$runtime = UnifiedQueryRuntime::runtime();
+        $coreContextFactory = self::$runtime['contextFactory'];
+        // 旧收银下载入口没有 pageCode；只在该明确会员适配层补 member_list。
+        self::$runtime['contextFactory'] = new MemberUnifiedQueryContextFactory(
+            $coreContextFactory
         );
-        $execution = new UnifiedQueryExecutionServices($registry, $validator, $evaluator);
-        $preferences = new UnifiedQueryPreferenceServices(
-            $registry,
-            $customFields,
-            $execution,
-            $access,
-            $references
+        self::$runtime['memberProvider'] = self::$runtime['providers']->resolve(
+            MemberUnifiedQueryProvider::PAGE_CODE
         );
-        $aliases = new UnifiedQueryFieldAliasServices($registry, $customFields, $access);
-        $exports = new UnifiedQueryExportTaskServices(
-            $registry,
-            $customFields,
-            $aliases,
-            $references,
-            $execution,
-            $preferences,
-            $access
+        self::$runtime['staffProvider'] = self::$runtime['providers']->resolve(
+            StaffUnifiedQueryProvider::PAGE_CODE
         );
-        $capabilities = new UnifiedQueryCapabilityServices(
-            $registry,
-            $customFields,
-            $aliases,
-            $exports,
-            $preferences,
-            $access
-        );
-        $contextFactory = new UnifiedQueryContextFactory();
-        $memberProvider = new MemberUnifiedQueryProvider($execution, $customFields, $preferences);
-
-        self::$runtime = compact(
-            'registry',
-            'access',
-            'validator',
-            'evaluator',
-            'references',
-            'customFields',
-            'execution',
-            'preferences',
-            'aliases',
-            'exports',
-            'capabilities',
-            'contextFactory',
-            'memberProvider'
-        );
-        self::bindRuntime(self::$runtime);
         return self::$runtime;
     }
 
@@ -136,6 +92,7 @@ final class UnifiedQueryModule
     {
         foreach ([
             'save-member-query-settings',
+            'save-unified-query-settings',
             'save-unified-query-field-aliases',
             'save-unified-query-custom-field',
             'change-unified-query-custom-field-status',
@@ -216,6 +173,18 @@ final class UnifiedQueryModule
                 });
             });
         }
+        if (!$handlers->hasProjection('query-staff')) {
+            $handlers->registerProjection('query-staff', function (array $scope) use ($runtime): array {
+                return self::translate(function () use ($scope, $runtime): array {
+                    $payload = self::payload($scope);
+                    $payload['pageCode'] = StaffUnifiedQueryProvider::PAGE_CODE;
+                    $context = self::queryContext($runtime, $scope, $payload);
+                    return [
+                        'data' => $runtime['staffProvider']->query($context, $payload),
+                    ];
+                });
+            });
+        }
         if (!$handlers->hasProjection('query-unified-query-export-task')) {
             $handlers->registerProjection('query-unified-query-export-task', function (array $scope) use ($runtime): array {
                 return self::translate(function () use ($scope, $runtime): array {
@@ -245,35 +214,22 @@ final class UnifiedQueryModule
         array $runtime
     ): void {
         $handlers = $dispatcher->handlers();
-        $definitions = [
-            'save-member-query-settings' => function (array $context, array $payload) use ($runtime): array {
-                return $runtime['preferences']->save($context, $payload);
-            },
-            'save-unified-query-field-aliases' => function (array $context, array $payload) use ($runtime): array {
-                return $runtime['aliases']->save($context, $payload);
-            },
-            'save-unified-query-custom-field' => function (array $context, array $payload) use ($runtime): array {
-                return $runtime['customFields']->save($context, $payload);
-            },
-            'change-unified-query-custom-field-status' => function (array $context, array $payload) use ($runtime): array {
-                return $runtime['customFields']->changeStatus($context, $payload);
-            },
-            'archive-unified-query-custom-field' => function (array $context, array $payload) use ($runtime): array {
-                return $runtime['customFields']->archive($context, $payload);
-            },
-            'upgrade-unified-query-field-reference' => function (array $context, array $payload) use ($runtime): array {
-                return $runtime['preferences']->upgradeReference($context, $payload);
-            },
-            'create-unified-query-export' => function (array $context, array $payload) use ($runtime): array {
-                return ['exportTask' => $runtime['exports']->create($context, $payload)];
-            },
+        $actions = [
+            self::LEGACY_SAVE_MEMBER_SETTINGS,
+            UnifiedQueryCommandCoordinator::SAVE_SETTINGS,
+            UnifiedQueryCommandCoordinator::SAVE_ALIASES,
+            UnifiedQueryCommandCoordinator::SAVE_CUSTOM_FIELD,
+            UnifiedQueryCommandCoordinator::CHANGE_CUSTOM_FIELD_STATUS,
+            UnifiedQueryCommandCoordinator::ARCHIVE_CUSTOM_FIELD,
+            UnifiedQueryCommandCoordinator::UPGRADE_FIELD_REFERENCE,
+            UnifiedQueryCommandCoordinator::CREATE_EXPORT,
         ];
-        foreach ($definitions as $action => $business) {
+        foreach ($actions as $action) {
             if ($handlers->hasCommand($action)) {
                 continue;
             }
-            $handlers->registerCommand($action, function (array $scope) use ($runtime, $business, $action): array {
-                return self::translate(function () use ($scope, $runtime, $business, $action): array {
+            $handlers->registerCommand($action, function (array $scope) use ($runtime, $action): array {
+                return self::translate(function () use ($scope, $runtime, $action): array {
                     $payload = self::payload($scope);
                     $payload['pageCode'] = self::pageCode($payload);
                     $context = self::queryContext($runtime, $scope, $payload);
@@ -281,14 +237,25 @@ final class UnifiedQueryModule
                         $scope,
                         $payload['pageCode']
                     );
-                    $data = $business($context, $payload);
-                    $taskNo = (string)($data['exportTask']['taskId'] ?? '');
-                    return [
-                        'data' => $data,
-                        'business_no' => $taskNo,
-                        'touched' => ['query_preference'],
-                        'message' => self::successMessage($action),
-                    ];
+                    $coordinatorAction = $action;
+                    if ($action === self::LEGACY_SAVE_MEMBER_SETTINGS) {
+                        if ($payload['pageCode'] !== MemberUnifiedQueryProvider::PAGE_CODE) {
+                            throw new UnifiedQueryException(
+                                'UNIFIED_QUERY_COMMAND_PAGE_MISMATCH',
+                                '会员查询设置操作不能用于其他页面。',
+                                [
+                                    'action' => $action,
+                                    'page_code' => $payload['pageCode'],
+                                ]
+                            );
+                        }
+                        $coordinatorAction = UnifiedQueryCommandCoordinator::SAVE_SETTINGS;
+                    }
+                    return $runtime['commandCoordinator']->dispatch(
+                        $coordinatorAction,
+                        $context,
+                        $payload
+                    );
                 });
             });
         }
@@ -388,13 +355,7 @@ final class UnifiedQueryModule
     protected static function pageCode(array $payload): string
     {
         $pageCode = trim((string)($payload['pageCode'] ?? ($payload['page_code'] ?? '')));
-        if ($pageCode !== MemberUnifiedQueryProvider::PAGE_CODE) {
-            throw new UnifiedQueryException(
-                'UNIFIED_QUERY_PAGE_NOT_ALLOWED',
-                '当前页面尚未开放统一查询。',
-                ['page_code' => $pageCode]
-            );
-        }
+        self::runtime()['registry']->page($pageCode);
         return $pageCode;
     }
 

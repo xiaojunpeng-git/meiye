@@ -7,15 +7,20 @@
 
 namespace app\services\cashier\v3;
 
+use think\facade\Log;
+
 use app\services\BaseServices;
 use app\services\cashier\v3\event\CashierV3ActionActivationGate;
 use app\services\cashier\v3\event\CashierV3BusinessEventContractRegistry;
 use app\services\cashier\v3\event\CashierV3BusinessEventRecorder;
 use app\services\cashier\v3\event\CashierV3BusinessEventExecution;
 use app\services\cashier\v3\event\CashierV3EventOutboxReadinessGuard;
+use app\services\cashier\v3\checkout\CashierV3EntitlementCompletionAuthorityException;
 use app\services\cashier\v3\manifest\CashierV3ActionManifest;
 use app\services\cashier\v3\readiness\CashierV3TableReadinessGuard;
 use app\services\cashier\v3\registry\CashierV3ContextPolicyRegistry;
+use app\services\cashier\v3\settlement\CashierV3CheckoutResourcePlanRepository;
+use app\services\cashier\v3\settlement\CashierV3CheckoutSettlementContractException;
 use think\facade\Db;
 
 /**
@@ -61,6 +66,12 @@ class CashierV3CommandGatewayServices extends BaseServices
         'contextSwitchToken',
         'context_switch_epoch',
         'context_switch_token',
+        // ForceStoreSessionMiddleware injects the trusted session store into
+        // every POST. It is transport context, never a command payload field.
+        'store_id',
+        'storeId',
+        'selected_store_id',
+        'current_store_id',
     ];
 
     /** @var CashierV3IdempotencyKeyServices */
@@ -93,8 +104,20 @@ class CashierV3CommandGatewayServices extends BaseServices
     /** @var CashierV3DataScopeFactory|null */
     protected $dataScopeFactory;
 
-    /** @var callable|null function(string $checkoutRequestId): array sources */
+    /**
+     * @var callable|null function(string $checkoutRequestId): array sources
+     *
+     * The loader is read-only. Follow-up checkout sources are discovered
+     * before the canonical resource locks, then loaded again after every
+     * declared context has been locked. The second read must match exactly.
+     */
     protected $checkoutSourceLoader;
+
+    /** @var callable|null function(string $checkoutRequestId): array */
+    protected $checkoutResourcePlanLoader;
+
+    /** @var CashierV3CheckoutResourcePlanRepository|null */
+    protected $checkoutResourcePlanRepository;
 
     /** @var CashierV3BusinessEventRecorder|null */
     protected $eventRecorder;
@@ -165,6 +188,14 @@ class CashierV3CommandGatewayServices extends BaseServices
     public function setCheckoutSourceLoader(callable $loader): void
     {
         $this->checkoutSourceLoader = $loader;
+    }
+
+    public function setCheckoutResourcePlanServices(
+        callable $loader,
+        CashierV3CheckoutResourcePlanRepository $repository
+    ): void {
+        $this->checkoutResourcePlanLoader = $loader;
+        $this->checkoutResourcePlanRepository = $repository;
     }
 
     /**
@@ -344,12 +375,20 @@ class CashierV3CommandGatewayServices extends BaseServices
             $operatorProfile = $permPack['operator_profile'];
 
             if ($existing) {
+                $replayContextsHash = $contextsHash;
+                if (!empty($contract['expand_from_checkout_resource_plan'])) {
+                    $replayContextsHash = $this->resourcePlanReplayContextsHash(
+                        $existing,
+                        $contexts,
+                        $canonicalAction
+                    );
+                }
                 return $this->replay(
                     $existing,
                     $canonicalAction,
                     $operatorScope,
                     $requestHash,
-                    $contextsHash,
+                    $replayContextsHash,
                     $stateContext,
                     $txnDataScope,
                     $actionDefinition,
@@ -362,13 +401,43 @@ class CashierV3CommandGatewayServices extends BaseServices
                 $this->permissionGuard->assertAllowed($actionDefinition, $txnDataScope, $payload);
             }
 
-            // 3) 结账后续：从持久化 checkout_request 反推真实来源，并与客户端 contexts 精确对齐
-            if (!empty($contract['expand_from_checkout_request'])) {
+            // 3) Cart mutations and checkout preparation may depend on resources
+            // that the client must not enumerate. Discover them from server
+            // authorities before any business resource is locked.
+            if (!empty($contract['expand_from_server_resource_discovery'])) {
+                $expanded = $this->expandFromServerResourceDiscovery(
+                    $contexts,
+                    $contract,
+                    $canonicalAction,
+                    $payload,
+                    $operatorScope,
+                    $txnDataScope,
+                    (string)$stateContext['state_context_id']
+                );
+                $contexts = $expanded['contexts'];
+                $contract = $expanded['contract'];
+            }
+
+            // Final checkout accepts only the two client-visible contexts;
+            // hidden resources come from the immutable server plan.
+            if (!empty($contract['expand_from_checkout_resource_plan'])) {
+                $expanded = $this->expandFollowUpFromCheckoutResourcePlan(
+                    (string)$contract['checkout_request_id'],
+                    $contexts,
+                    $contract,
+                    $canonicalAction,
+                    $txnDataScope
+                );
+                $contexts = $expanded['contexts'];
+                $contract = $expanded['contract'];
+            } elseif (!empty($contract['expand_from_checkout_request'])) {
+                // 其它结账后续仍只从持久化 checkout_request 反推导航来源。
                 $expanded = $this->expandFollowUpFromCheckoutRequest(
                     (string)$contract['checkout_request_id'],
                     $contexts,
                     $rawContexts,
-                    $canonicalAction
+                    $canonicalAction,
+                    $contract
                 );
                 $contexts = $expanded['contexts'];
                 $contract = $expanded['contract'];
@@ -384,6 +453,13 @@ class CashierV3CommandGatewayServices extends BaseServices
                 $ctx['data_scope'] = $txnDataScope;
             }
             unset($ctx);
+            if (!empty($contract['server_checkout_resource_plan'])) {
+                $this->assertCheckoutResourcePlanScopes($contexts, $contract['server_checkout_resource_plan']);
+                $contextsHash = $this->effectiveCheckoutResourcePlanContextsHash(
+                    $contexts,
+                    $contract['server_checkout_resource_plan']
+                );
+            }
 
             $now = time();
             $placeholder = [
@@ -429,6 +505,41 @@ class CashierV3CommandGatewayServices extends BaseServices
             }
 
             $lockedVersions = $this->versionServices->lockAndAssert($contexts);
+            if (!empty($contract['server_resource_discovery_recheck_required'])) {
+                $contract = $this->revalidateServerResourceDiscovery(
+                    $contexts,
+                    $contract,
+                    $canonicalAction,
+                    $payload,
+                    $operatorScope,
+                    $txnDataScope,
+                    (string)$stateContext['state_context_id']
+                );
+            }
+            if (!empty($contract['checkout_resource_plan_recheck_required'])) {
+                $contract = $this->revalidateFollowUpCheckoutResourcePlan(
+                    (string)$contract['checkout_request_id'],
+                    $contract,
+                    $canonicalAction
+                );
+            } elseif (!empty($contract['checkout_source_recheck_required'])) {
+                $contract = $this->revalidateFollowUpCheckoutSources(
+                    (string)$contract['checkout_request_id'],
+                    $contract,
+                    $canonicalAction
+                );
+            }
+            // A final checkout handler must advance checkout_request N -> N+1.
+            // Consume the immutable plan while the request is still at N; the
+            // caller-owned transaction rolls this marker back if any later
+            // order, payment, event, fact, version or receipt write fails.
+            if (!empty($contract['server_checkout_resource_plan'])) {
+                $this->consumeCheckoutResourcePlanInTx(
+                    (string)$contract['checkout_request_id'],
+                    $contract['server_checkout_resource_plan'],
+                    $txnDataScope
+                );
+            }
             $eventExecution = null;
             if ($this->eventRecorder !== null) {
                 $eventExecution = $this->eventRecorder->newExecution(
@@ -451,6 +562,9 @@ class CashierV3CommandGatewayServices extends BaseServices
                     'state_context_id' => $stateContext['state_context_id'],
                     'correlation_id' => $correlationId,
                     'checkout_sources' => $contract['server_checkout_sources'] ?? [],
+                    'checkout_resource_plan' => $contract['server_checkout_resource_plan'] ?? [],
+                    'server_resource_discovery' => $contract['server_resource_discovery'] ?? [],
+                    'effective_contexts_hash' => $contextsHash,
                     'event_recorder' => $this->eventRecorder,
                     'event_execution' => $eventExecution,
                     'event_contract' => $eventContract,
@@ -523,7 +637,849 @@ class CashierV3CommandGatewayServices extends BaseServices
     }
 
     /**
-     * 事务内：锁定 checkout_request，反推来源，并要求客户端 contexts 精确一致。
+     * Expand client-visible contexts with an exact resource set discovered by
+     * server authority. Discovery is read-only and happens before any business
+     * resource lock; the same discoverer is called after all locks and must
+     * return the identical normalized set.
+     *
+     * @return array{contexts:array,contract:array}
+     */
+    protected function expandFromServerResourceDiscovery(
+        array $validatedContexts,
+        array $baseContract,
+        string $canonicalAction,
+        array $payload,
+        CashierV3OperatorScope $operatorScope,
+        CashierV3DataScopeContext $dataScope,
+        string $stateContextId
+    ): array {
+        $discoverer = $baseContract['server_resource_discoverer'] ?? null;
+        if (!is_callable($discoverer)) {
+            throw new CashierV3CommandException(
+                CashierV3ResultCode::ACTION_DEPENDENCY_NOT_READY,
+                '本次操作的资源发现服务尚未就绪，请稍后重试。',
+                CashierV3ResultCode::STATUS_FAILED,
+                ['action' => $canonicalAction, 'reason' => 'server_resource_discoverer_missing']
+            );
+        }
+
+        $discovery = $this->callServerResourceDiscoverer(
+            $discoverer,
+            'discover',
+            $canonicalAction,
+            $payload,
+            $validatedContexts,
+            $operatorScope,
+            $dataScope,
+            $stateContextId
+        );
+        $resources = $discovery['resources'];
+
+        $contextsByPhysical = [];
+        $roleOwners = [];
+        foreach ($validatedContexts as $context) {
+            $physical = (string)$context['kind'] . ':' . (string)$context['id'];
+            $role = trim((string)($context['role'] ?? $context['kind']));
+            $context['roles'] = $role !== '' ? [$role] : [];
+            $contextsByPhysical[$physical] = $context;
+            if ($role !== '') {
+                $roleOwners[$role] = $physical;
+            }
+        }
+
+        $identities = array_values((array)($baseContract['identities'] ?? []));
+        $readRoles = array_values((array)($baseContract['required_read_roles'] ?? []));
+        $touchedRoles = array_values((array)($baseContract['required_touched_roles'] ?? []));
+        foreach ($resources as $resource) {
+            $physical = $resource['kind'] . ':' . $resource['id'];
+            foreach ($resource['roles'] as $role) {
+                if (isset($roleOwners[$role]) && $roleOwners[$role] !== $physical) {
+                    throw CashierV3CommandException::invalidContext(
+                        '本次操作的服务端资源角色发生冲突，请刷新后重试。',
+                        [
+                            'action' => $canonicalAction,
+                            'reason' => 'server_resource_role_conflict',
+                            'role' => $role,
+                        ]
+                    );
+                }
+                $roleOwners[$role] = $physical;
+                $readRoles[] = $role;
+                if ($resource['accessMode'] === 'mutate') {
+                    $touchedRoles[] = $role;
+                }
+                $identities[] = [
+                    'role' => $role,
+                    'kind' => $resource['kind'],
+                    'id' => $resource['id'],
+                    'required' => true,
+                ];
+            }
+
+            if (isset($contextsByPhysical[$physical])) {
+                if ((int)$contextsByPhysical[$physical]['expected_version'] !== $resource['expectedVersion']) {
+                    throw CashierV3CommandException::invalidContext(
+                        '本次操作的资源版本不一致，请刷新后重试。',
+                        [
+                            'action' => $canonicalAction,
+                            'reason' => 'server_resource_duplicate_version_mismatch',
+                            'kind' => $resource['kind'],
+                            'id' => $resource['id'],
+                        ]
+                    );
+                }
+                $roles = array_values(array_unique(array_merge(
+                    (array)($contextsByPhysical[$physical]['roles'] ?? []),
+                    $resource['roles']
+                )));
+                sort($roles, SORT_STRING);
+                $contextsByPhysical[$physical]['roles'] = $roles;
+                continue;
+            }
+            $contextsByPhysical[$physical] = [
+                'kind' => $resource['kind'],
+                'id' => $resource['id'],
+                'expected_version' => $resource['expectedVersion'],
+                'roles' => $resource['roles'],
+                'server_resource_access_mode' => $resource['accessMode'],
+                'server_resource_provider_contract_version' => $resource['providerContractVersion'],
+                'server_resource_authority_fingerprint' => $resource['authorityFingerprint'],
+            ];
+        }
+
+        $contexts = $this->contextServices->sortForLocking(array_values($contextsByPhysical));
+        $contract = $baseContract;
+        $contract['required'] = array_values(array_unique(array_column($contexts, 'kind')));
+        $contract['allowed'] = [];
+        $contract['identities'] = $identities;
+        $contract['required_read_roles'] = array_values(array_unique($readRoles));
+        $contract['required_touched_roles'] = array_values(array_unique($touchedRoles));
+        $contract['server_resource_discovery'] = $discovery;
+        $contract['server_resource_discovery_recheck_required'] = true;
+        $contract['expand_from_server_resource_discovery'] = false;
+        return ['contexts' => $contexts, 'contract' => $contract];
+    }
+
+    protected function revalidateServerResourceDiscovery(
+        array $lockedContexts,
+        array $contract,
+        string $canonicalAction,
+        array $payload,
+        CashierV3OperatorScope $operatorScope,
+        CashierV3DataScopeContext $dataScope,
+        string $stateContextId
+    ): array {
+        $discoverer = $contract['server_resource_discoverer'] ?? null;
+        $before = $contract['server_resource_discovery'] ?? null;
+        if (!is_callable($discoverer) || !is_array($before)) {
+            throw CashierV3CommandException::invalidContext(
+                '本次操作的资源校验状态不完整，请刷新后重试。',
+                ['action' => $canonicalAction, 'reason' => 'server_resource_recheck_state_missing']
+            );
+        }
+        $after = $this->callServerResourceDiscoverer(
+            $discoverer,
+            'revalidate',
+            $canonicalAction,
+            $payload,
+            $lockedContexts,
+            $operatorScope,
+            $dataScope,
+            $stateContextId
+        );
+        if (!hash_equals((string)$before['fingerprint'], (string)$after['fingerprint'])) {
+            Log::warning('[cashier_v3_resource_discovery_drift] ' . json_encode([
+                'action' => $canonicalAction,
+                'before' => $before['resources'] ?? [],
+                'after' => $after['resources'] ?? [],
+            ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+            throw CashierV3CommandException::versionConflict(
+                '本次操作依赖的商品或权益刚刚发生变化，请刷新后重试。',
+                [
+                    'action' => $canonicalAction,
+                    'reason' => 'server_resource_discovery_drift',
+                    'before' => (string)$before['fingerprint'],
+                    'after' => (string)$after['fingerprint'],
+                ]
+            );
+        }
+        $contract['server_resource_discovery'] = $after;
+        $contract['server_resource_discovery_recheck_required'] = false;
+        return $contract;
+    }
+
+    /** @return array{contractVersion:string,resources:array,fingerprint:string} */
+    protected function callServerResourceDiscoverer(
+        callable $discoverer,
+        string $phase,
+        string $canonicalAction,
+        array $payload,
+        array $contexts,
+        CashierV3OperatorScope $operatorScope,
+        CashierV3DataScopeContext $dataScope,
+        string $stateContextId
+    ): array {
+        try {
+            $raw = call_user_func($discoverer, [
+                'phase' => $phase,
+                'action' => $canonicalAction,
+                'payload' => $payload,
+                'contexts' => $contexts,
+                'operator_scope' => $operatorScope,
+                'data_scope' => $dataScope,
+                'state_context_id' => $stateContextId,
+            ]);
+        } catch (CashierV3CommandException $exception) {
+            throw $exception;
+        } catch (CashierV3EntitlementCompletionAuthorityException $exception) {
+            $reason = $exception->reason();
+            $detail = $exception->detail();
+            $detail['action'] = $canonicalAction;
+            $detail['phase'] = $phase;
+            $detail['reason'] = $reason;
+            if ($reason === 'authority_service_intent_craftsman_required') {
+                throw CashierV3CommandException::invalidContext(
+                    '请先为本次服务选择手艺人后再确认完成服务。',
+                    $detail
+                );
+            }
+            throw $exception;
+        } catch (\Throwable $exception) {
+            // Keep the log actionable without persisting a full client payload
+            // or member data. Request identity and context metadata are enough
+            // to correlate this failure with the immutable checkout draft.
+            Log::error('[cashier_v3_resource_discovery] ' . json_encode([
+                'action' => $canonicalAction,
+                'phase' => $phase,
+                'checkoutRequestId' => $this->discoveryCheckoutRequestId($payload),
+                'checkoutRequestVersion' => $this->discoveryCheckoutRequestVersion($payload),
+                'stateContextId' => $stateContextId,
+                'inputContexts' => $this->discoveryContextMetadata($contexts),
+                'exceptionClass' => get_class($exception),
+                'exceptionMessage' => $exception->getMessage(),
+                'exceptionFile' => basename($exception->getFile()),
+                'exceptionLine' => $exception->getLine(),
+            ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+            throw new CashierV3CommandException(
+                CashierV3ResultCode::ACTION_DEPENDENCY_NOT_READY,
+                '本次操作的资源发现失败，请稍后重试。',
+                CashierV3ResultCode::STATUS_FAILED,
+                [
+                    'action' => $canonicalAction,
+                    'phase' => $phase,
+                    'reason' => 'server_resource_discovery_failed',
+                ]
+            );
+        }
+        if (!is_array($raw) || !isset($raw['resources']) || !is_array($raw['resources'])) {
+            throw CashierV3CommandException::invalidContext(
+                '本次操作的服务端资源集合不完整，请刷新后重试。',
+                ['action' => $canonicalAction, 'phase' => $phase, 'reason' => 'server_resource_pack_invalid']
+            );
+        }
+        $resources = $this->normalizeServerDiscoveredResources(
+            $raw['resources'],
+            $canonicalAction,
+            $phase
+        );
+        if (!$resources) {
+            throw CashierV3CommandException::invalidContext(
+                '本次操作没有找到可校验的服务端资源，请刷新后重试。',
+                ['action' => $canonicalAction, 'phase' => $phase, 'reason' => 'server_resource_set_empty']
+            );
+        }
+        return [
+            'contractVersion' => 'cashier-v3-server-resource-discovery-v1',
+            'resources' => $resources,
+            'fingerprint' => hash('sha256', $this->encodeJson($resources)),
+        ];
+    }
+
+    private function discoveryCheckoutRequestId(array $payload): string
+    {
+        $value = trim((string)($payload['checkoutRequestId'] ?? ''));
+        return preg_match('/^CKR-[0-9a-f]{40}$/D', $value) === 1 ? $value : '';
+    }
+
+    private function discoveryCheckoutRequestVersion(array $payload): int
+    {
+        $value = $payload['checkoutRequestVersion'] ?? null;
+        if (is_string($value) && preg_match('/^[1-9][0-9]*$/D', $value) === 1) {
+            $value = (int)$value;
+        }
+        return is_int($value) && $value > 0 ? $value : 0;
+    }
+
+    private function discoveryContextMetadata(array $contexts): array
+    {
+        $metadata = [];
+        foreach ($contexts as $context) {
+            if (!is_array($context)) {
+                continue;
+            }
+            $metadata[] = [
+                'kind' => trim((string)($context['kind'] ?? '')),
+                'id' => trim((string)($context['id'] ?? '')),
+                'expectedVersion' => (int)($context['expected_version']
+                    ?? $context['expectedVersion'] ?? 0),
+            ];
+        }
+        return $metadata;
+    }
+
+    /** @return array<int,array> */
+    protected function normalizeServerDiscoveredResources(
+        array $rawResources,
+        string $canonicalAction,
+        string $phase
+    ): array {
+        if (array_keys($rawResources) !== ($rawResources ? range(0, count($rawResources) - 1) : [])
+            || count($rawResources) > 10000) {
+            throw CashierV3CommandException::invalidContext(
+                '本次操作的服务端资源数量无效，请刷新后重试。',
+                ['action' => $canonicalAction, 'phase' => $phase, 'reason' => 'server_resource_count_invalid']
+            );
+        }
+        $byPhysical = [];
+        $roleOwners = [];
+        foreach ($rawResources as $index => $raw) {
+            if (!is_array($raw)) {
+                throw CashierV3CommandException::invalidContext(
+                    '本次操作的服务端资源格式无效，请刷新后重试。',
+                    ['action' => $canonicalAction, 'phase' => $phase, 'index' => $index]
+                );
+            }
+            $kind = trim((string)($raw['kind'] ?? ''));
+            $id = trim((string)($raw['id'] ?? ''));
+            $version = $raw['expectedVersion'] ?? $raw['expected_version'] ?? $raw['version'] ?? null;
+            $accessMode = trim((string)($raw['accessMode'] ?? 'read'));
+            $rolesRaw = $raw['roles'] ?? (isset($raw['role']) ? [$raw['role']] : []);
+            CashierV3ResourceKindCatalog::assertKnown($kind);
+            if ($id === '' || strlen($id) > 64
+                || preg_match('/^[A-Za-z0-9_.:-]+$/D', $id) !== 1
+                || is_bool($version) || is_array($version) || !is_numeric($version)
+                || (int)$version <= 0
+                || !in_array($accessMode, ['read', 'mutate'], true)
+                || !is_array($rolesRaw) || !$rolesRaw) {
+                throw CashierV3CommandException::invalidContext(
+                    '本次操作的服务端资源格式无效，请刷新后重试。',
+                    [
+                        'action' => $canonicalAction,
+                        'phase' => $phase,
+                        'index' => $index,
+                        'reason' => 'server_resource_row_invalid',
+                    ]
+                );
+            }
+            $roles = [];
+            foreach ($rolesRaw as $roleValue) {
+                $role = trim((string)$roleValue);
+                if ($role === '' || strlen($role) > 128
+                    || preg_match('/^[A-Za-z0-9_.:-]+$/D', $role) !== 1) {
+                    throw CashierV3CommandException::invalidContext(
+                        '本次操作的服务端资源角色无效，请刷新后重试。',
+                        ['action' => $canonicalAction, 'phase' => $phase, 'index' => $index]
+                    );
+                }
+                $roles[$role] = $role;
+            }
+            $roles = array_values($roles);
+            sort($roles, SORT_STRING);
+            $physical = $kind . ':' . $id;
+            foreach ($roles as $role) {
+                if (isset($roleOwners[$role]) && $roleOwners[$role] !== $physical) {
+                    throw CashierV3CommandException::invalidContext(
+                        '本次操作的服务端资源角色重复，请刷新后重试。',
+                        ['action' => $canonicalAction, 'phase' => $phase, 'role' => $role]
+                    );
+                }
+                $roleOwners[$role] = $physical;
+            }
+            $providerContract = trim((string)($raw['providerContractVersion'] ?? 'server-authority-v1'));
+            if ($providerContract === '' || strlen($providerContract) > 128
+                || preg_match('/^[A-Za-z0-9_.:-]+$/D', $providerContract) !== 1) {
+                throw CashierV3CommandException::invalidContext(
+                    '本次操作的资源提供器版本无效，请刷新后重试。',
+                    ['action' => $canonicalAction, 'phase' => $phase, 'index' => $index]
+                );
+            }
+            $authorityFingerprint = trim((string)($raw['authorityFingerprint'] ?? ''));
+            if ($authorityFingerprint === '') {
+                $authorityFingerprint = hash('sha256', $kind . '|' . $id . '|' . (int)$version);
+            }
+            if (preg_match('/^[a-f0-9]{64}$/D', $authorityFingerprint) !== 1) {
+                throw CashierV3CommandException::invalidContext(
+                    '本次操作的资源权威指纹无效，请刷新后重试。',
+                    ['action' => $canonicalAction, 'phase' => $phase, 'index' => $index]
+                );
+            }
+            $normalized = [
+                'kind' => $kind,
+                'id' => $id,
+                'expectedVersion' => (int)$version,
+                'roles' => $roles,
+                'accessMode' => $accessMode,
+                'providerContractVersion' => $providerContract,
+                'authorityFingerprint' => $authorityFingerprint,
+            ];
+            if (isset($byPhysical[$physical])) {
+                $existing = $byPhysical[$physical];
+                foreach (['expectedVersion', 'providerContractVersion', 'authorityFingerprint'] as $field) {
+                    if ($existing[$field] !== $normalized[$field]) {
+                        throw CashierV3CommandException::invalidContext(
+                            '本次操作的同一服务端资源不一致，请刷新后重试。',
+                            [
+                                'action' => $canonicalAction,
+                                'phase' => $phase,
+                                'kind' => $kind,
+                                'id' => $id,
+                                'field' => $field,
+                            ]
+                        );
+                    }
+                }
+                $existing['roles'] = array_values(array_unique(array_merge($existing['roles'], $roles)));
+                sort($existing['roles'], SORT_STRING);
+                if ($accessMode === 'mutate') {
+                    $existing['accessMode'] = 'mutate';
+                }
+                $byPhysical[$physical] = $existing;
+                continue;
+            }
+            $byPhysical[$physical] = $normalized;
+        }
+        $resources = array_values($byPhysical);
+        usort($resources, static function (array $left, array $right): int {
+            return CashierV3ResourceKindCatalog::compareResources(
+                $left['kind'],
+                $left['id'],
+                $right['kind'],
+                $right['id']
+            );
+        });
+        return $resources;
+    }
+
+    /**
+     * Expand the two client-visible checkout contexts with one immutable,
+     * server-built resource plan. No resource identity or version comes from
+     * the client beyond workspace and checkout_request.
+     *
+     * @return array{contexts:array,contract:array}
+     */
+    protected function expandFollowUpFromCheckoutResourcePlan(
+        string $checkoutRequestId,
+        array $validatedContexts,
+        array $baseContract,
+        string $canonicalAction,
+        CashierV3DataScopeContext $dataScope
+    ): array {
+        $plan = $this->loadCheckoutResourcePlan($checkoutRequestId, $canonicalAction);
+        $checkoutContext = null;
+        $contextsByPhysical = [];
+        $roleOwners = [];
+        foreach ($validatedContexts as $context) {
+            $key = (string)$context['kind'] . ':' . (string)$context['id'];
+            $role = (string)($context['role'] ?? $context['kind']);
+            $context['roles'] = [$role];
+            $context['resource_plan_access_mode'] = 'mutate';
+            $contextsByPhysical[$key] = $context;
+            $roleOwners[$role] = $key;
+            if ($context['kind'] === 'checkout_request') {
+                $checkoutContext = $context;
+            }
+        }
+        if ($checkoutContext === null
+            || (string)$checkoutContext['id'] !== $checkoutRequestId
+            || (int)$checkoutContext['expected_version'] <= 0) {
+            throw CashierV3CommandException::invalidContext(
+                '结账请求版本无效，请刷新收银台后重试。',
+                ['action' => $canonicalAction, 'reason' => 'checkout_resource_plan_request_context_invalid']
+            );
+        }
+
+        $boundVersion = (int)($plan['boundRequestVersion'] ?? 0);
+        if ((string)($plan['requestId'] ?? '') !== $checkoutRequestId
+            || (string)($plan['requestStatus'] ?? '') !== 'ready_for_submit'
+            || (int)($plan['requestVersion'] ?? 0) !== $boundVersion
+            || $boundVersion !== (int)$checkoutContext['expected_version']) {
+            throw CashierV3CommandException::invalidContext(
+                '结账内容刚刚发生变化，请重新确认后再收款。',
+                [
+                    'action' => $canonicalAction,
+                    'reason' => 'checkout_resource_plan_bound_version_mismatch',
+                    'expectedVersion' => (int)$checkoutContext['expected_version'],
+                    'boundRequestVersion' => $boundVersion,
+                ]
+            );
+        }
+        if (!hash_equals($dataScope->tenantId(), (string)($plan['tenantId'] ?? $dataScope->tenantId()))
+            || $dataScope->forcedStoreId() !== (int)($plan['storeId'] ?? $dataScope->forcedStoreId())) {
+            throw CashierV3CommandException::invalidContext(
+                '结账资源不属于当前门店，请刷新收银台后重试。',
+                ['action' => $canonicalAction, 'reason' => 'checkout_resource_plan_data_scope_mismatch']
+            );
+        }
+
+        $resources = $plan['resources'] ?? null;
+        if (!is_array($resources) || !$resources
+            || count($resources) !== (int)($plan['resourceCount'] ?? -1)) {
+            throw CashierV3CommandException::invalidContext(
+                '结账资源计划不完整，请重新确认后再收款。',
+                ['action' => $canonicalAction, 'reason' => 'checkout_resource_plan_resources_invalid']
+            );
+        }
+
+        $readRoles = array_values((array)($baseContract['required_read_roles'] ?? []));
+        $touchedRoles = array_values((array)($baseContract['required_touched_roles'] ?? []));
+        $identities = array_values((array)($baseContract['identities'] ?? []));
+        foreach ($resources as $index => $resource) {
+            if (!is_array($resource)) {
+                throw CashierV3CommandException::invalidContext(
+                    '结账资源计划不完整，请重新确认后再收款。',
+                    ['action' => $canonicalAction, 'reason' => 'checkout_resource_plan_resource_invalid', 'index' => $index]
+                );
+            }
+            $kind = trim((string)($resource['kind'] ?? ''));
+            $id = trim((string)($resource['id'] ?? ''));
+            $expectedVersion = (int)($resource['expectedVersion'] ?? 0);
+            $lockOrder = (int)($resource['lockOrder'] ?? 0);
+            $scopeType = (string)($resource['scopeType'] ?? '');
+            $scopeId = (string)($resource['scopeId'] ?? '');
+            $accessMode = (string)($resource['accessMode'] ?? '');
+            $roles = $resource['roles'] ?? null;
+            CashierV3ResourceKindCatalog::assertKnown($kind);
+            if ($id === '' || $expectedVersion <= 0
+                || $lockOrder !== CashierV3ResourceKindCatalog::lockOrderOf($kind)
+                || $scopeType !== CashierV3ResourceKindCatalog::scopeTypeOf($kind)
+                || $scopeId === ''
+                || !in_array($accessMode, ['read', 'mutate'], true)
+                || !is_array($roles) || !$roles) {
+                throw CashierV3CommandException::invalidContext(
+                    '结账资源计划不完整，请重新确认后再收款。',
+                    ['action' => $canonicalAction, 'reason' => 'checkout_resource_plan_resource_contract_invalid', 'index' => $index]
+                );
+            }
+            $physical = $kind . ':' . $id;
+            $normalizedRoles = [];
+            foreach ($roles as $role) {
+                $role = trim((string)$role);
+                if ($role === '' || strlen($role) > 128
+                    || preg_match('/^[A-Za-z0-9_.:-]+$/D', $role) !== 1) {
+                    throw CashierV3CommandException::invalidContext(
+                        '结账资源计划角色无效，请重新确认后再收款。',
+                        ['action' => $canonicalAction, 'reason' => 'checkout_resource_plan_role_invalid', 'index' => $index]
+                    );
+                }
+                if (isset($roleOwners[$role]) && $roleOwners[$role] !== $physical) {
+                    throw CashierV3CommandException::invalidContext(
+                        '结账资源计划角色冲突，请重新确认后再收款。',
+                        ['action' => $canonicalAction, 'reason' => 'checkout_resource_plan_role_conflict', 'role' => $role]
+                    );
+                }
+                $roleOwners[$role] = $physical;
+                $normalizedRoles[$role] = $role;
+                $readRoles[] = $role;
+                if ($accessMode === 'mutate') {
+                    $touchedRoles[] = $role;
+                }
+                $identities[] = [
+                    'role' => $role,
+                    'kind' => $kind,
+                    'id' => $id,
+                    'required' => true,
+                ];
+            }
+            $normalizedRoles = array_values($normalizedRoles);
+            sort($normalizedRoles, SORT_STRING);
+
+            if (isset($contextsByPhysical[$physical])) {
+                if ((int)$contextsByPhysical[$physical]['expected_version'] !== $expectedVersion) {
+                    throw CashierV3CommandException::invalidContext(
+                        '结账请求版本与服务端资源计划不一致，请刷新后重试。',
+                        ['action' => $canonicalAction, 'reason' => 'checkout_resource_plan_duplicate_version_mismatch']
+                    );
+                }
+                $normalizedRoles = array_values(array_unique(array_merge(
+                    (array)($contextsByPhysical[$physical]['roles'] ?? []),
+                    $normalizedRoles
+                )));
+                sort($normalizedRoles, SORT_STRING);
+            }
+            $contextsByPhysical[$physical] = array_merge(
+                $contextsByPhysical[$physical] ?? [],
+                [
+                    'kind' => $kind,
+                    'id' => $id,
+                    'expected_version' => $expectedVersion,
+                    'roles' => $normalizedRoles,
+                    'resource_plan_access_mode' => $accessMode,
+                    'resource_plan_scope_type' => $scopeType,
+                    'resource_plan_scope_id' => $scopeId,
+                    'resource_plan_provider_contract_version' => (string)($resource['providerContractVersion'] ?? ''),
+                    'resource_plan_authority_fingerprint' => (string)($resource['authorityFingerprint'] ?? ''),
+                    'resource_plan_row_fingerprint' => (string)($resource['rowFingerprint'] ?? ''),
+                ]
+            );
+        }
+
+        $contexts = $this->contextServices->sortForLocking(array_values($contextsByPhysical));
+        $planFingerprint = (string)($plan['resourcePlanFingerprint'] ?? '');
+        $planContractVersion = (string)($plan['planContractVersion'] ?? '');
+        foreach ($contexts as &$context) {
+            $context['checkout_resource_plan_fingerprint'] = $planFingerprint;
+            $context['checkout_resource_plan_contract_version'] = $planContractVersion;
+            $context['checkout_resource_plan_bound_request_version'] = $boundVersion;
+        }
+        unset($context);
+
+        $contract = $baseContract;
+        $contract['required'] = array_values(array_unique(array_column($contexts, 'kind')));
+        $contract['allowed'] = [];
+        $contract['identities'] = $identities;
+        $contract['required_read_roles'] = array_values(array_unique($readRoles));
+        $contract['required_touched_roles'] = array_values(array_unique($touchedRoles));
+        $contract['server_checkout_resource_plan'] = $plan;
+        $contract['checkout_resource_plan_recheck_required'] = true;
+        $contract['expand_from_checkout_resource_plan'] = false;
+        return ['contexts' => $contexts, 'contract' => $contract];
+    }
+
+    protected function loadCheckoutResourcePlan(string $checkoutRequestId, string $canonicalAction): array
+    {
+        if ($this->checkoutResourcePlanLoader === null
+            || !($this->checkoutResourcePlanRepository instanceof CashierV3CheckoutResourcePlanRepository)) {
+            throw new CashierV3CommandException(
+                CashierV3ResultCode::ACTION_DEPENDENCY_NOT_READY,
+                '结账资源计划尚未就绪，请联系管理员。',
+                CashierV3ResultCode::STATUS_FAILED,
+                ['action' => $canonicalAction, 'reason' => 'checkout_resource_plan_services_missing']
+            );
+        }
+        try {
+            $loaded = call_user_func($this->checkoutResourcePlanLoader, $checkoutRequestId);
+        } catch (CashierV3CheckoutSettlementContractException $exception) {
+            throw CashierV3CommandException::invalidContext(
+                '结账资源计划校验失败，请重新确认后再收款。',
+                [
+                    'action' => $canonicalAction,
+                    'reason' => $exception->reason(),
+                    'contractDetail' => $exception->detail(),
+                ]
+            );
+        }
+        if (!is_array($loaded) || !$loaded) {
+            throw CashierV3CommandException::invalidContext(
+                '结账内容尚未确认或已经变化，请重新确认后再收款。',
+                ['action' => $canonicalAction, 'reason' => 'checkout_resource_plan_missing']
+            );
+        }
+        return $loaded;
+    }
+
+    protected function assertCheckoutResourcePlanScopes(array $contexts, array $plan): void
+    {
+        $expected = [];
+        foreach ((array)($plan['resources'] ?? []) as $resource) {
+            if (is_array($resource)) {
+                $expected[(string)$resource['kind'] . ':' . (string)$resource['id']] = [
+                    'type' => (string)$resource['scopeType'],
+                    'id' => (string)$resource['scopeId'],
+                ];
+            }
+        }
+        $seen = [];
+        foreach ($contexts as $context) {
+            $key = (string)$context['kind'] . ':' . (string)$context['id'];
+            if (!isset($expected[$key])) {
+                continue;
+            }
+            $scope = $context['scope'] ?? null;
+            if (!($scope instanceof CashierV3ResourceScope)
+                || $scope->type() !== $expected[$key]['type']
+                || $scope->id() !== $expected[$key]['id']) {
+                throw CashierV3CommandException::invalidContext(
+                    '结账资源归属刚刚发生变化，请刷新后重试。',
+                    ['reason' => 'checkout_resource_plan_scope_drift', 'resource' => $key]
+                );
+            }
+            $seen[$key] = true;
+        }
+        if (count($seen) !== count($expected)) {
+            throw CashierV3CommandException::invalidContext(
+                '结账资源计划不完整，请刷新后重试。',
+                ['reason' => 'checkout_resource_plan_scope_missing']
+            );
+        }
+    }
+
+    protected function effectiveCheckoutResourcePlanContextsHash(array $contexts, array $plan): string
+    {
+        $planFingerprint = (string)($plan['resourcePlanFingerprint'] ?? '');
+        $planContract = (string)($plan['planContractVersion'] ?? '');
+        $boundVersion = (int)($plan['boundRequestVersion'] ?? 0);
+        if (preg_match('/^[a-f0-9]{64}$/D', $planFingerprint) !== 1
+            || $planContract === '' || $boundVersion <= 0) {
+            throw CashierV3CommandException::invalidContext(
+                '结账资源计划指纹无效，请重新确认后再收款。',
+                ['reason' => 'checkout_resource_plan_fingerprint_invalid']
+            );
+        }
+        return hash(
+            'sha256',
+            $this->contextServices->fingerprint($contexts)
+                . '|' . $planContract . '|' . $planFingerprint . '|' . $boundVersion
+        );
+    }
+
+    protected function resourcePlanReplayContextsHash(
+        array $existing,
+        array $clientContexts,
+        string $canonicalAction
+    ): string {
+        $stored = json_decode((string)($existing['contexts_json'] ?? ''), true);
+        if (!is_array($stored) || !$stored) {
+            throw new CashierV3CommandException(
+                CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
+                '历史结账结果缺少资源快照，请联系管理员对账。',
+                CashierV3ResultCode::STATUS_RESULT_UNKNOWN,
+                ['action' => $canonicalAction, 'reason' => 'checkout_resource_plan_receipt_contexts_missing']
+            );
+        }
+        $clientBase = [];
+        foreach ($clientContexts as $context) {
+            $clientBase[(string)$context['kind']] = [
+                'id' => (string)$context['id'],
+                'expected_version' => (int)$context['expected_version'],
+            ];
+        }
+        $storedBase = [];
+        $parts = [];
+        $planFingerprint = '';
+        $planContract = '';
+        $boundVersion = 0;
+        foreach ($stored as $context) {
+            if (!is_array($context)) {
+                throw CashierV3CommandException::invalidContext(
+                    '历史结账资源快照无效，请联系管理员对账。',
+                    ['action' => $canonicalAction, 'reason' => 'checkout_resource_plan_receipt_context_invalid']
+                );
+            }
+            $kind = (string)($context['kind'] ?? '');
+            $id = (string)($context['id'] ?? '');
+            $version = (int)($context['expected_version'] ?? 0);
+            $scope = (string)($context['scope'] ?? '');
+            if ($kind === '' || $id === '' || $version <= 0 || $scope === '') {
+                throw CashierV3CommandException::invalidContext(
+                    '历史结账资源快照无效，请联系管理员对账。',
+                    ['action' => $canonicalAction, 'reason' => 'checkout_resource_plan_receipt_context_invalid']
+                );
+            }
+            if (in_array($kind, ['cashier_workspace', 'checkout_request'], true)) {
+                $storedBase[$kind] = ['id' => $id, 'expected_version' => $version];
+            }
+            $parts[] = $scope . '|' . $kind . '|' . $id . '|' . $version;
+            $rowPlanFingerprint = (string)($context['checkout_resource_plan_fingerprint'] ?? '');
+            $rowPlanContract = (string)($context['checkout_resource_plan_contract_version'] ?? '');
+            $rowBoundVersion = (int)($context['checkout_resource_plan_bound_request_version'] ?? 0);
+            if ($planFingerprint === '') {
+                $planFingerprint = $rowPlanFingerprint;
+                $planContract = $rowPlanContract;
+                $boundVersion = $rowBoundVersion;
+            } elseif (!hash_equals($planFingerprint, $rowPlanFingerprint)
+                || $planContract !== $rowPlanContract || $boundVersion !== $rowBoundVersion) {
+                throw CashierV3CommandException::invalidContext(
+                    '历史结账资源计划不一致，请联系管理员对账。',
+                    ['action' => $canonicalAction, 'reason' => 'checkout_resource_plan_receipt_metadata_drift']
+                );
+            }
+        }
+        if ($clientBase !== $storedBase
+            || preg_match('/^[a-f0-9]{64}$/D', $planFingerprint) !== 1
+            || $planContract === '' || $boundVersion <= 0) {
+            throw CashierV3CommandException::invalidContext(
+                '本次重试与原结账请求不一致，请刷新后重试。',
+                ['action' => $canonicalAction, 'reason' => 'checkout_resource_plan_replay_context_mismatch']
+            );
+        }
+        $effective = hash(
+            'sha256',
+            hash('sha256', implode(';', $parts))
+                . '|' . $planContract . '|' . $planFingerprint . '|' . $boundVersion
+        );
+        if (!hash_equals((string)($existing['contexts_hash'] ?? ''), $effective)) {
+            throw new CashierV3CommandException(
+                CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
+                '历史结账资源指纹不一致，请联系管理员对账。',
+                CashierV3ResultCode::STATUS_RESULT_UNKNOWN,
+                ['action' => $canonicalAction, 'reason' => 'checkout_resource_plan_receipt_hash_drift']
+            );
+        }
+        return $effective;
+    }
+
+    protected function revalidateFollowUpCheckoutResourcePlan(
+        string $checkoutRequestId,
+        array $contract,
+        string $canonicalAction
+    ): array {
+        $before = (array)($contract['server_checkout_resource_plan'] ?? []);
+        $after = $this->loadCheckoutResourcePlan($checkoutRequestId, $canonicalAction);
+        foreach ([
+            'requestId', 'requestVersion', 'requestStatus', 'boundRequestVersion',
+            'planContractVersion', 'resourcePlanFingerprint', 'resourceCount', 'roleCount',
+        ] as $field) {
+            if (($before[$field] ?? null) !== ($after[$field] ?? null)) {
+                throw CashierV3CommandException::invalidContext(
+                    '结账资源刚刚发生变化，请重新确认后再收款。',
+                    ['action' => $canonicalAction, 'reason' => 'checkout_resource_plan_changed_after_lock', 'field' => $field]
+                );
+            }
+        }
+        $contract['server_checkout_resource_plan'] = $after;
+        $contract['checkout_resource_plan_recheck_required'] = false;
+        return $contract;
+    }
+
+    protected function consumeCheckoutResourcePlanInTx(
+        string $checkoutRequestId,
+        array $plan,
+        CashierV3DataScopeContext $dataScope
+    ): void {
+        if (!($this->checkoutResourcePlanRepository instanceof CashierV3CheckoutResourcePlanRepository)) {
+            throw new CashierV3CommandException(
+                CashierV3ResultCode::ACTION_DEPENDENCY_NOT_READY,
+                '结账资源计划仓储未就绪，请联系管理员。',
+                CashierV3ResultCode::STATUS_FAILED,
+                ['reason' => 'checkout_resource_plan_repository_missing']
+            );
+        }
+        try {
+            $result = $this->checkoutResourcePlanRepository->markConsumedInTx(
+                $checkoutRequestId,
+                $dataScope->tenantId(),
+                $dataScope->forcedStoreId(),
+                (int)($plan['boundRequestVersion'] ?? 0),
+                (string)($plan['resourcePlanFingerprint'] ?? '')
+            );
+        } catch (CashierV3CheckoutSettlementContractException $exception) {
+            throw CashierV3CommandException::invalidContext(
+                '结账资源计划已失效，请重新确认后再收款。',
+                ['reason' => $exception->reason(), 'contractDetail' => $exception->detail()]
+            );
+        }
+        if (!is_array($result) || (string)($result['status'] ?? '') !== 'consumed') {
+            throw CashierV3CommandException::invalidContext(
+                '结账资源计划消费失败，请重新确认后再收款。',
+                ['reason' => 'checkout_resource_plan_consumption_invalid']
+            );
+        }
+    }
+
+    /**
+     * 事务内第一阶段：无锁发现 checkout_request 来源，并要求客户端 contexts
+     * 精确一致。这里禁止提前锁 checkout_request；完整 contexts 会交给统一资源
+     * 锁按全序锁定，锁后再由 revalidateFollowUpCheckoutSources 二次核对。
      *
      * @param array<int,array> $validatedContexts
      * @param array<int,array> $rawContexts
@@ -533,7 +1489,8 @@ class CashierV3CommandGatewayServices extends BaseServices
         string $checkoutRequestId,
         array $validatedContexts,
         array $rawContexts,
-        string $canonicalAction
+        string $canonicalAction,
+        array $baseContract = []
     ): array {
         if ($this->checkoutSourceLoader === null) {
             throw new CashierV3CommandException(
@@ -543,25 +1500,7 @@ class CashierV3CommandGatewayServices extends BaseServices
                 ['action' => $canonicalAction, 'reason' => 'checkout_source_loader_missing']
             );
         }
-        $loaded = call_user_func($this->checkoutSourceLoader, $checkoutRequestId);
-        if (!is_array($loaded) || empty($loaded['sources']) || !is_array($loaded['sources'])) {
-            throw CashierV3CommandException::invalidContext(
-                '结账请求不存在或来源已失效，请刷新当前工作台后重试。',
-                ['action' => $canonicalAction, 'reason' => 'checkout_request_sources_missing']
-            );
-        }
-        $serverSources = [];
-        foreach ($loaded['sources'] as $src) {
-            if (!is_array($src)) {
-                continue;
-            }
-            $kind = (string)($src['kind'] ?? '');
-            $id = trim((string)($src['id'] ?? ''));
-            if ($kind === '' || $id === '') {
-                continue;
-            }
-            $serverSources[] = ['kind' => $kind, 'id' => $id];
-        }
+        $serverSources = $this->loadCheckoutSources($checkoutRequestId, $canonicalAction);
 
         // 客户端 contexts 除 workspace／checkout_request 外必须与服务器反推精确一致
         $clientExtra = [];
@@ -594,14 +1533,19 @@ class CashierV3CommandGatewayServices extends BaseServices
             );
         }
 
-        $contract = [
-            'required' => ['cashier_workspace', 'checkout_request'],
-            'allowed' => [],
-            'identities' => [],
-            'required_read_roles' => ['cashier_workspace', 'checkout_request'],
-            'required_touched_roles' => ['cashier_workspace', 'checkout_request'],
-            'server_checkout_sources' => $serverSources,
-        ];
+        // Preserve an earlier server-resource discovery pack. Submission
+        // preparation composes both expansions and must revalidate the exact
+        // discovered resources after checkout_request sources are attached.
+        $contract = $baseContract;
+        $contract['required'] = ['cashier_workspace', 'checkout_request'];
+        $contract['allowed'] = [];
+        $contract['identities'] = [];
+        $contract['required_read_roles'] = ['cashier_workspace', 'checkout_request'];
+        $contract['required_touched_roles'] = ['cashier_workspace', 'checkout_request'];
+        $contract['server_checkout_sources'] = $serverSources;
+        $contract['checkout_request_id'] = $checkoutRequestId;
+        $contract['checkout_source_recheck_required'] = true;
+        $contract['expand_from_checkout_request'] = false;
         foreach ($validatedContexts as $ctx) {
             $contract['identities'][] = [
                 'role' => (string)($ctx['role'] ?? $ctx['kind']),
@@ -615,6 +1559,88 @@ class CashierV3CommandGatewayServices extends BaseServices
         }
         $contract['required_read_roles'] = array_values(array_unique($contract['required_read_roles']));
         return ['contexts' => $validatedContexts, 'contract' => $contract];
+    }
+
+    /**
+     * Second phase of checkout-source binding. All declared contexts have
+     * already been locked in canonical order, including checkout_request.
+     * A changed source set is a concurrency conflict and must roll back.
+     */
+    protected function revalidateFollowUpCheckoutSources(
+        string $checkoutRequestId,
+        array $contract,
+        string $canonicalAction
+    ): array {
+        $before = $this->checkoutSourceMap((array)($contract['server_checkout_sources'] ?? []));
+        $afterSources = $this->loadCheckoutSources($checkoutRequestId, $canonicalAction);
+        $after = $this->checkoutSourceMap($afterSources);
+        if (count($before) !== count($after)
+            || array_diff_key($before, $after)
+            || array_diff_key($after, $before)) {
+            throw CashierV3CommandException::invalidContext(
+                '结账来源刚刚发生变化，请刷新当前工作台后重试。',
+                [
+                    'action' => $canonicalAction,
+                    'reason' => 'checkout_sources_changed_after_lock',
+                    'discovered' => array_values($before),
+                    'locked' => array_values($after),
+                ]
+            );
+        }
+        $contract['server_checkout_sources'] = $afterSources;
+        $contract['checkout_source_recheck_required'] = false;
+        return $contract;
+    }
+
+    /** @return array<int,array{kind:string,id:string}> */
+    protected function loadCheckoutSources(string $checkoutRequestId, string $canonicalAction): array
+    {
+        if ($this->checkoutSourceLoader === null) {
+            throw new CashierV3CommandException(
+                CashierV3ResultCode::ACTION_DEPENDENCY_NOT_READY,
+                '结账来源权威尚未接入，请联系管理员。',
+                CashierV3ResultCode::STATUS_FAILED,
+                ['action' => $canonicalAction, 'reason' => 'checkout_source_loader_missing']
+            );
+        }
+        $loaded = call_user_func($this->checkoutSourceLoader, $checkoutRequestId);
+        if (!is_array($loaded)
+            || (string)($loaded['contractVersion'] ?? '') === ''
+            || !array_key_exists('sources', $loaded)
+            || !is_array($loaded['sources'])) {
+            throw CashierV3CommandException::invalidContext(
+                '结账请求不存在或来源已失效，请刷新当前工作台后重试。',
+                ['action' => $canonicalAction, 'reason' => 'checkout_request_sources_missing']
+            );
+        }
+        $sources = array_values($this->checkoutSourceMap($loaded['sources']));
+        return $sources;
+    }
+
+    /** @return array<string,array{kind:string,id:string}> */
+    protected function checkoutSourceMap(array $sources): array
+    {
+        $map = [];
+        foreach ($sources as $source) {
+            if (!is_array($source)) {
+                continue;
+            }
+            $kind = trim((string)($source['kind'] ?? ''));
+            $id = trim((string)($source['id'] ?? ''));
+            if ($kind === '' || $id === '') {
+                continue;
+            }
+            CashierV3ResourceKindCatalog::assertKnown($kind);
+            if (in_array($kind, ['cashier_workspace', 'checkout_request'], true)) {
+                throw CashierV3CommandException::invalidContext(
+                    '结账来源包含非法对象，请刷新当前工作台后重试。',
+                    ['reason' => 'checkout_source_kind_forbidden', 'kind' => $kind]
+                );
+            }
+            $map[$kind . ':' . $id] = ['kind' => $kind, 'id' => $id];
+        }
+        ksort($map, SORT_STRING);
+        return $map;
     }
 
     /**
@@ -873,6 +1899,13 @@ class CashierV3CommandGatewayServices extends BaseServices
         $touched = array_values(array_unique(array_map('strval', $touched)));
 
         $roleToKey = [];
+        $kindCounts = [];
+        foreach ($contexts as $ctx) {
+            $kind = (string)($ctx['kind'] ?? '');
+            if ($kind !== '') {
+                $kindCounts[$kind] = (int)($kindCounts[$kind] ?? 0) + 1;
+            }
+        }
         foreach ($contexts as $ctx) {
             if (!isset($ctx['scope']) || !($ctx['scope'] instanceof CashierV3ResourceScope)) {
                 continue;
@@ -881,8 +1914,16 @@ class CashierV3CommandGatewayServices extends BaseServices
             if (isset($ctx['role'])) {
                 $roleToKey[(string)$ctx['role']] = $key;
             }
-            // kind 本身也可作为 touched 声明（单资源）
-            $roleToKey[(string)$ctx['kind']] = $key;
+            foreach ((array)($ctx['roles'] ?? []) as $role) {
+                $role = (string)$role;
+                if ($role !== '') {
+                    $roleToKey[$role] = $key;
+                }
+            }
+            // kind 本身只在该 kind 恰好一个物理资源时可用。
+            if ((int)($kindCounts[(string)$ctx['kind']] ?? 0) === 1) {
+                $roleToKey[(string)$ctx['kind']] = $key;
+            }
             // 也允许用 kind:id 声明
             $roleToKey[$ctx['kind'] . ':' . $ctx['id']] = $key;
         }
@@ -1113,7 +2154,18 @@ class CashierV3CommandGatewayServices extends BaseServices
                 'id' => $context['id'],
                 'expected_version' => $context['expected_version'],
                 'scope' => $scope instanceof CashierV3ResourceScope ? $scope->signature() : '',
-            ];
+            ] + array_filter([
+                'roles' => isset($context['roles']) ? array_values((array)$context['roles']) : null,
+                'resource_plan_access_mode' => $context['resource_plan_access_mode'] ?? null,
+                'resource_plan_provider_contract_version' => $context['resource_plan_provider_contract_version'] ?? null,
+                'resource_plan_authority_fingerprint' => $context['resource_plan_authority_fingerprint'] ?? null,
+                'resource_plan_row_fingerprint' => $context['resource_plan_row_fingerprint'] ?? null,
+                'checkout_resource_plan_fingerprint' => $context['checkout_resource_plan_fingerprint'] ?? null,
+                'checkout_resource_plan_contract_version' => $context['checkout_resource_plan_contract_version'] ?? null,
+                'checkout_resource_plan_bound_request_version' => $context['checkout_resource_plan_bound_request_version'] ?? null,
+            ], static function ($value): bool {
+                return $value !== null;
+            });
         }
         return $out;
     }

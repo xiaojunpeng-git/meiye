@@ -62,6 +62,18 @@ class CashierV3DataScopeFactory
             $authorizationMode = CashierV3DataScopeContext::MODE_ALL;
             $employeeScopeMeta = ['mode' => 'all'];
             $dataSuperBasis = 'EmployeeDataScopeServices::isSuperAdmin(level===0 && admin_type!==3)';
+        } elseif ($isMenuSuper) {
+            // 门店端 level=0 是当前门店的一级管理员。平台“进入门店”会签发
+            // 该门店管理员会话；这类账号可能没有 employee_id，不能因此退化成
+            // NONE 并让收银根投影回落成占位页。令牌所属门店仍由 middleware
+            // 强制注入，所以这里只放行 forcedStoreId，绝不扩大为跨门店 ALL。
+            $visibleStoreIds = [$forcedStoreId];
+            $authorizationMode = CashierV3DataScopeContext::MODE_STORES;
+            $employeeScopeMeta = [
+                'mode' => 'stores',
+                'store_ids' => $visibleStoreIds,
+                'reason' => 'cashier_level_0_current_store_admin',
+            ];
         } elseif ($employeeId > 0) {
             $resolved = $this->employeeDataScope->resolveEffectiveStoreIds($employeeId, $forcedStoreId, $adminInfoForScope);
             if ($resolved === null) {

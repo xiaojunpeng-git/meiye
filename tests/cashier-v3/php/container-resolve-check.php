@@ -29,13 +29,13 @@ echo "== container resolve + composition root ==\n";
 try {
     CashierV3Bootstrap::registerModuleInstaller(function ($dispatcher): void {
         $dispatcher->policies()->register(new CashierV3ContextPolicy(
-            'submit-checkout',
+            'submit-debt-repayment',
             ['cashier_workspace'],
             [],
             null,
             ['cashier_workspace']
         ));
-        $dispatcher->handlers()->registerCommand('submit-checkout', function (): array {
+        $dispatcher->handlers()->registerCommand('submit-debt-repayment', function (): array {
             return ['data' => ['mustNotRun' => true], 'touched' => ['cashier_workspace']];
         });
     });
@@ -67,7 +67,7 @@ try {
     $directBusinessRan = false;
     try {
         $gateway->execute(
-            'submit-checkout',
+            'submit-debt-repayment',
             [],
             [],
             new CashierV3OperatorScope(8, 1, '3', '0'),

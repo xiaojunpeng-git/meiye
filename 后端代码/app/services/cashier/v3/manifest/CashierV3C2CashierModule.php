@@ -34,6 +34,7 @@ class CashierV3C2CashierModule implements CashierV3ActionModule
         // ---- 购物车与会员选择 ----
         foreach ([
             'choose-catalog-item',
+            'create-custom-card-configuration',
             'remove-cart-line',
             'change-cart-line-quantity',
             'select-cashier-member',
@@ -43,6 +44,9 @@ class CashierV3C2CashierModule implements CashierV3ActionModule
         ] as $action) {
             $command[$action] = self::FEATURE_CASHIER;
         }
+        $command['add-checkout-entitlement-lines'] = 'policy:checkout_entitlement';
+        $command['update-cart-line-service-settings'] = self::FEATURE_CASHIER;
+        $command['submit-card-operation'] = self::FEATURE_CASHIER;
 
         // ---- 结账流程 ----
         foreach ([
@@ -54,6 +58,10 @@ class CashierV3C2CashierModule implements CashierV3ActionModule
             'add-payment-method',
             'update-payment-line',
             'remove-payment-line',
+            'apply-balance-payment',
+            'remove-balance-payment',
+            'update-balance-payment',
+            'prepare-checkout-submission',
             'confirm-debt-warning',
             'confirm-checkout-final-changes',
             'submit-checkout',
@@ -82,13 +90,13 @@ class CashierV3C2CashierModule implements CashierV3ActionModule
             'open-payment-note',
             'open-checkout-source-selector',
             'open-add-service-consumption',
-            'open-add-card-service-project',
             'query-checkout-result',
             'open-member-debt-repayment',
             'query-debt-repayment-result',
         ] as $action) {
             $projection[$action] = self::FEATURE_CASHIER;
         }
+        $projection['open-add-card-service-project'] = 'policy:checkout_entitlement';
 
         return CashierV3ActionManifest::buildModuleActions(self::OWNER, $command, $projection);
     }

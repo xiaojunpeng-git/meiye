@@ -4,11 +4,10 @@ namespace app\controller\cashier\v3;
 use app\controller\cashier\AuthController;
 use app\services\cashier\v3\CashierV3ActionDispatcher;
 use app\services\cashier\v3\CashierV3CommandException;
-use app\services\cashier\v3\CashierV3ResultCode;
+use app\services\cashier\v3\CashierV3CommandFailureEnvelopeServices;
 use app\services\cashier\v3\bootstrap\CashierV3Bootstrap;
 use app\services\cashier\v3\query\UnifiedQueryModule;
 use app\services\query\UnifiedQueryException;
-use app\services\query\UnifiedQueryExportWorkerServices;
 use think\facade\App;
 
 /**
@@ -39,16 +38,8 @@ class Command extends AuthController
         try {
             return $this->respond($this->dispatcher->dispatch($body, $this->sessionContext($body)));
         } catch (CashierV3CommandException $exception) {
-            return $this->respond([
-                'result' => [
-                    'status' => $exception->getResultStatus(),
-                    'code' => $exception->getResultCode(),
-                    'message' => $exception->getMessage(),
-                ],
-                'conflict' => $exception->getResultStatus() === CashierV3ResultCode::STATUS_CONFLICT
-                    ? $exception->getDetail()
-                    : null,
-            ]);
+            return $this->respond((new CashierV3CommandFailureEnvelopeServices())
+                ->fromException($body, $exception));
         }
     }
 
@@ -72,13 +63,9 @@ class Command extends AuthController
             );
             $context = $runtime['contextFactory']->make($operatorScope, $dataScope);
             $descriptor = $runtime['exports']->resolveDownloadDescriptor($context, $taskNo);
-            $worker = new UnifiedQueryExportWorkerServices(
-                $this->dispatcher,
-                $runtime['exports'],
-                $runtime['memberProvider'],
-                $runtime['contextFactory']
+            $path = $runtime['exportStorage']->absolutePath(
+                (string)$descriptor['storageKey']
             );
-            $path = $worker->absolutePath((string)$descriptor['storageKey']);
             if (!is_file($path) || !is_readable($path)) {
                 return app('json')->fail('导出文件不存在或已过期。');
             }

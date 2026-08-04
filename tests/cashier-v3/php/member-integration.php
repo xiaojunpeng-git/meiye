@@ -52,6 +52,17 @@ function c5Projection($dispatcher, string $action, array $payload, array $sessio
     return is_array($envelope['data'] ?? null) ? $envelope['data'] : [];
 }
 
+function c5Command($dispatcher, string $action, array $payload, int $operatorId = 1): array
+{
+    $request = MemberIntegrationFixture::commandRequest(
+        $dispatcher,
+        $action,
+        $payload,
+        $operatorId
+    );
+    return $dispatcher->dispatch($request['body'], $request['session']);
+}
+
 function c5WorkerResult(string $output): array
 {
     if (preg_match('/^C5_WORKER_RESULT=(\{.*\})$/m', $output, $matches)) {
@@ -220,6 +231,54 @@ try {
         'C5-MEM-01'
     );
 
+    c5Section('current-store personnel selector');
+    $salespeople = c5Projection($dispatcher, 'query-query-entities', [
+        'selectorEntry' => 'cashier',
+        'entityType' => 'person',
+        'selectorContext' => ['scope' => 'sales_performance_assignees', 'storeId' => 9],
+        'keyword' => '人员查询销售',
+        'page' => 1,
+        'pageSize' => 20,
+    ], $projectionSession);
+    $salespersonIds = array_map('intval', array_column((array)($salespeople['records'] ?? []), 'staffId'));
+    ok(
+        '销售人选择器只返回当前门店启用且人员类型有效的员工',
+        (int)($salespeople['total'] ?? -1) === 1
+            && $salespersonIds === [30]
+            && (int)(($salespeople['records'][0]['storeId'] ?? 0)) === MemberIntegrationFixture::STORE_ID,
+        json_encode($salespeople, JSON_UNESCAPED_UNICODE),
+        'C5-ENTITY-01'
+    );
+    $craftsmen = c5Projection($dispatcher, 'query-query-entities', [
+        'selectorEntry' => 'cashier',
+        'entityType' => 'person',
+        'selectorContext' => ['scope' => 'service_actual_craftsmen'],
+        'keyword' => '人员查询销售',
+        'page' => 1,
+        'pageSize' => 20,
+    ], $projectionSession);
+    $craftsmanIds = array_map('intval', array_column((array)($craftsmen['records'] ?? []), 'staffId'));
+    ok(
+        '手艺人选择器仍可显示当前门店未分类的有效任职',
+        (int)($craftsmen['total'] ?? -1) === 2 && $craftsmanIds === [30, 31],
+        json_encode($craftsmen, JSON_UNESCAPED_UNICODE),
+        'C5-ENTITY-02'
+    );
+    $invalidEntityDetail = [];
+    $invalidEntityCode = c5CommandCode(function () use ($dispatcher, $projectionSession) {
+        c5Projection($dispatcher, 'query-query-entities', [
+            'selectorEntry' => 'cashier',
+            'entityType' => 'store',
+            'selectorContext' => ['scope' => 'sales_performance_assignees'],
+        ], $projectionSession);
+    }, $invalidEntityDetail);
+    ok(
+        '未知对象类型被后端拒绝，不能回退为全量查询',
+        $invalidEntityCode === CashierV3ResultCode::INVALID_COMMAND_CONTEXT,
+        json_encode($invalidEntityDetail, JSON_UNESCAPED_UNICODE),
+        'C5-ENTITY-03'
+    );
+
     c5Section('disabled and cancelled members remain visible but not selectable');
     $statusData = c5Projection($dispatcher, 'query-member-selector', [
         'selectorEntry' => 'cashier',
@@ -251,7 +310,7 @@ try {
     ] as $blockedMemberId => $expectedReason) {
         $blockedDetail = [];
         $blockedCode = c5CommandCode(function () use ($dispatcher, $blockedMemberId) {
-            MemberIntegrationFixture::directCommand($dispatcher, 'select-cashier-member', [
+            c5Command($dispatcher, 'select-cashier-member', [
                 'selectorEntry' => 'cashier',
                 'memberId' => $blockedMemberId,
             ]);
@@ -301,10 +360,18 @@ try {
         'pageSize' => 20,
     ], $projectionSession);
     $multiStoreRecord = (array)(($multiStoreData['records'] ?? [])[0] ?? []);
-    $selectedMultiStore = MemberIntegrationFixture::directCommand($dispatcher, 'select-cashier-member', [
+    $legacyMemberVersionBefore = (int)Db::name('cashier_v3_entitlement_resource_version')
+        ->where('resource_kind', 'member')
+        ->where('resource_id', '108')
+        ->count();
+    $selectedMultiStore = c5Command($dispatcher, 'select-cashier-member', [
         'selectorEntry' => 'cashier',
         'memberId' => 108,
     ]);
+    $legacyMemberVersion = (array)Db::name('cashier_v3_entitlement_resource_version')
+        ->where('resource_kind', 'member')
+        ->where('resource_id', '108')
+        ->find();
     ok(
         '多门店会员按账号组织优先级展示本店且选中后不跳回旧归属门店',
         (int)($multiStoreRecord['storeId'] ?? 0) === 8
@@ -315,9 +382,18 @@ try {
         ], JSON_UNESCAPED_UNICODE),
         'C5-MEM-03'
     );
+    ok(
+        '选择历史会员会在同一命令事务补齐结账资源版本',
+        $legacyMemberVersionBefore === 0
+            && (int)($legacyMemberVersion['member_id'] ?? 0) === 108
+            && (int)($legacyMemberVersion['current_version'] ?? 0) === 1
+            && (string)($legacyMemberVersion['last_action'] ?? '') === 'legacy_sync_init',
+        json_encode($legacyMemberVersion, JSON_UNESCAPED_UNICODE),
+        'C5-MEM-03A'
+    );
 
     c5Section('guest is cashier-only');
-    $guest = MemberIntegrationFixture::directCommand($dispatcher, 'set-guest-order', [
+    $guest = c5Command($dispatcher, 'set-guest-order', [
         'selectorEntry' => 'cashier',
         'selectorContext' => 'cashier',
     ]);
@@ -332,7 +408,7 @@ try {
     foreach (['writeoff', 'reservation'] as $invalidEntry) {
         $detail = [];
         $code = c5CommandCode(function () use ($dispatcher, $invalidEntry) {
-            MemberIntegrationFixture::directCommand($dispatcher, 'set-guest-order', [
+            c5Command($dispatcher, 'set-guest-order', [
                 'selectorEntry' => $invalidEntry,
                 'selectorContext' => $invalidEntry,
             ]);

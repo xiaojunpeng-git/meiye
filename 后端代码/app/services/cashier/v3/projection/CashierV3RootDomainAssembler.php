@@ -118,10 +118,7 @@ class CashierV3RootDomainAssembler
             throw new \RuntimeException('root_assembler_store_unavailable');
         }
 
-        $operatorName = trim((string)($dataScope->operatorProfile()['account']
-            ?? $dataScope->operatorProfile()['staff_name']
-            ?? $dataScope->operatorProfile()['name']
-            ?? ''));
+        $operatorName = $this->operatorDisplayName($dataScope->operatorProfile());
         if ($operatorName === '') {
             // 禁止伪造「操作员」展示名；档案缺失即权威不可用
             throw new \RuntimeException('root_assembler_operator_name_unavailable');
@@ -211,6 +208,20 @@ class CashierV3RootDomainAssembler
         } catch (\Throwable $e) {
             return null;
         }
+    }
+
+    /**
+     * 空字符串不是有效展示值，不能用 ?? 阻断 staff_name/name 的权威回退。
+     */
+    protected function operatorDisplayName(array $profile): string
+    {
+        foreach (['account', 'staff_name', 'name'] as $field) {
+            $value = trim((string)($profile[$field] ?? ''));
+            if ($value !== '') {
+                return $value;
+            }
+        }
+        return '';
     }
 
     protected function ensureWorkspaceVersion(string $workspaceId, CashierV3OperatorScope $operatorScope): int

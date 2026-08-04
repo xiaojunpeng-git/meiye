@@ -121,6 +121,13 @@ if (typeof bridge.resetCashierV3BridgeForTests === 'function') {
 
 ok('导出 requestCashierV3ContextSwitch', typeof bridge.requestCashierV3ContextSwitch === 'function', '', 'CS-9-01')
 ok('导出 requestCashierV3Action', typeof bridge.requestCashierV3Action === 'function', '', 'FE-11-01')
+ok(
+  'clientSessionId is restored from tab-scoped sessionStorage after a browser reload',
+  /const CASHIER_V3_CLIENT_SESSION_STORAGE_KEY = 'cashier-v3\.client-session-id'/.test(fs.readFileSync(BRIDGE_SRC, 'utf8'))
+    && /function getClientSessionId\(\)\s*\{[\s\S]*?window\.sessionStorage\?\.getItem\(CASHIER_V3_CLIENT_SESSION_STORAGE_KEY\)[\s\S]*?window\.sessionStorage\?\.setItem\(CASHIER_V3_CLIENT_SESSION_STORAGE_KEY, clientSessionId\)/.test(fs.readFileSync(BRIDGE_SRC, 'utf8')),
+  '',
+  'CS-9-01'
+)
 
 function minimalRoot(ctx, rev, extras = {}) {
   return {
@@ -185,6 +192,40 @@ const noStore = await bridge.requestCashierV3Action('submit-checkout', {
   commandContexts: [{ kind: 'cashier_workspace', id: 'ws:1:1:ctx-S', expectedVersion: 99 }]
 })
 ok('仓内无版本时拒绝发送', (noStore?.result?.code || '') === 'INVALID_COMMAND_CONTEXT', JSON.stringify(noStore?.result), 'CS-9-02')
+
+console.log('== 定制卡工作台上下文 ==')
+if (typeof bridge.resetCashierV3BridgeForTests === 'function') bridge.resetCashierV3BridgeForTests()
+bridge.replaceCashierV3StateForContextSwitch(minimalRoot('ctx-custom-card', 1))
+bridge.mergeCashierV3PublicVersions(
+  [{ kind: 'cashier_workspace', id: 'ws:1:1:ctx-custom-card', version: 1 }],
+  'ctx-custom-card',
+  { requestStateContextId: 'ctx-custom-card' }
+)
+let customCardRequest = null
+window.__CASHIER_V3_ADAPTER__ = {
+  async request(action, payload) {
+    customCardRequest = { action, payload }
+    return { result: { status: 'success', code: '', message: 'ok' }, data: {} }
+  }
+}
+const customCardWrite = await bridge.requestCashierV3Action('create-custom-card-configuration', {
+  silent: true,
+  cardName: '配置卡合同测试',
+  validityEnd: '2027-12-31',
+  activateOnPurchase: true,
+  components: [{ skuId: 1, times: 1, amount: '1' }]
+})
+ok(
+  '定制卡配置携带工作台版本',
+  customCardWrite?.result?.status !== 'failed'
+    && customCardRequest?.action === 'create-custom-card-configuration'
+    && customCardRequest?.payload?.command?.contexts?.length === 1
+    && customCardRequest.payload.command.contexts[0]?.kind === 'cashier_workspace'
+    && customCardRequest.payload.command.contexts[0]?.id === 'ws:1:1:ctx-custom-card'
+    && customCardRequest.payload.command.contexts[0]?.expectedVersion === 1,
+  JSON.stringify(customCardRequest?.payload?.command?.contexts),
+  'C2-CC-01'
+)
 
 console.log('== 根状态 schema 严格嵌套类型 ==')
 if (typeof bridge.resetCashierV3BridgeForTests === 'function') bridge.resetCashierV3BridgeForTests()
@@ -461,7 +502,11 @@ console.log('== 切换开始清空完整旧根 ==')
 if (typeof bridge.resetCashierV3BridgeForTests === 'function') bridge.resetCashierV3BridgeForTests()
 if (typeof bridge.replaceCashierV3StateForContextSwitch === 'function') {
   bridge.replaceCashierV3StateForContextSwitch(minimalRoot('ctx-full', 2, {
-    cashier: { member: { id: 'M1', name: '旧会员' }, cart: { lines: [{ id: 1 }] }, checkout: { id: 'CK1' } },
+    cashier: {
+      member: { id: 'M1', name: '旧会员' },
+      cart: { lines: [{ id: 'SALE-1', name: '旧销售行', lineRole: 'sale', quantity: 1 }] },
+      checkout: { id: 'CK1' }
+    },
     reservation: { records: [{ id: 'R1' }] }
   }))
 }

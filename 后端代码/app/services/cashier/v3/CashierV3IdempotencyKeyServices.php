@@ -50,6 +50,12 @@ class CashierV3IdempotencyKeyServices
         // 核销
         'WRITEOFF',
         'WRITEOFF_PREPARE',
+        'ADD_ENTITLEMENT',
+        'REMOVE_CART_LINE',
+        'CHANGE_CART_QUANTITY',
+        'CART_SERVICE_SETTINGS',
+        // 卡操作（转让、延期、停用、启用及后续升级/替换）
+        'CARD_OPERATION',
         // 统一查询
         'QUERY_ENTITY',
     ];

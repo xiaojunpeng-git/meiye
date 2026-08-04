@@ -1,9 +1,15 @@
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import TablePagination from '@/components/common/TablePagination.vue'
+import MemberCreatorPanel from '@/components/member/MemberCreatorPanel.vue'
 import UnifiedQueryToolbar from '@/components/query/UnifiedQueryToolbar.vue'
 import { useUnifiedQueryPage } from '@/composables/useUnifiedQueryPage'
-import { formatMoney, requestCashierV3Action, useCashierV3State } from '@/services/cashierV3Bridge'
+import {
+  formatMoney,
+  openCashierV3QueryEntitySelector,
+  requestCashierV3Action,
+  useCashierV3State
+} from '@/services/cashierV3Bridge'
 import {
   cloneUnifiedQuerySnapshot,
   extractUnifiedQueryMemberProjection,
@@ -13,6 +19,10 @@ import {
 
 const state = useCashierV3State()
 const selectedMemberIds = ref([])
+const isMemberCreatorOpen = ref(false)
+const editingMember = ref(null)
+const deletingMember = ref(null)
+const isMemberMutationSaving = ref(false)
 
 const EMPTY_MEMBER_QUERY_PROJECTION = Object.freeze({
   records: [],
@@ -36,6 +46,7 @@ const memberCenter = computed(() => ({
 }))
 const records = computed(() => Array.isArray(memberCenter.value.records) ? memberCenter.value.records : [])
 const statusOptions = computed(() => Array.isArray(memberCenter.value.statusOptions) ? memberCenter.value.statusOptions : [])
+const creatorSchema = computed(() => state.memberCenter?.creatorSchema || {})
 const hasSuccessfulQuery = computed(() => Boolean(lastSuccessfulQuery.value) && Boolean(memberQueryProjection.value) && !queryError.value)
 const canBatchOperate = computed(() => hasSuccessfulQuery.value && !isQueryLoading.value && Boolean(memberCenter.value.canBatchOperate))
 const isAllSelected = computed(() => records.value.length > 0 && selectedMemberIds.value.length === records.value.length)
@@ -183,6 +194,49 @@ async function requestAction(action, payload = {}) {
   return requestCashierV3Action(action, payload)
 }
 
+function openMemberCreator() {
+  isMemberCreatorOpen.value = true
+}
+
+function closeMemberCreator() {
+  isMemberCreatorOpen.value = false
+}
+
+async function createMemberFromList(payload = {}) {
+  // 头像文件不进入 JSON 命令；会员归属门店和组织继续由后端当前会话强制决定。
+  const { avatarFile: _avatarFile, ...serializablePayload } = payload && typeof payload === 'object'
+    ? payload
+    : {}
+  return requestAction('create-member', serializablePayload)
+}
+
+async function selectMemberCreatorServicePerson({ selectedRecord = null } = {}) {
+  const selection = await openCashierV3QueryEntitySelector({
+    entityType: 'person',
+    title: '选择专属服务人',
+    description: '只显示当前门店有效任职的人员。',
+    multiple: false,
+    selectedRecords: selectedRecord ? [selectedRecord] : [],
+    scope: 'member_exclusive_service_staff',
+    selectionContext: {
+      storeScope: 'current_store',
+      memberCreate: true
+    }
+  })
+  return selection?.selected || null
+}
+
+async function handleMemberCreated({ member = null, payload = {} } = {}) {
+  closeMemberCreator()
+  // 新建会员一定归属当前门店；用唯一手机号刷新默认列表，避免此前的筛选条件
+  // 把已成功建档的记录隐藏掉。
+  const keyword = String(member?.phone || payload?.phone || '').trim()
+  await queryMembers({
+    ...initialQueryPayload(queryCapability.value),
+    ...(keyword ? { keyword } : {})
+  }, true)
+}
+
 async function saveMemberQuerySettings(settings, options = {}) {
   const commandContext = queryCapability.value?.commandContext
   if (!commandContext) {
@@ -313,6 +367,14 @@ watch(
   { immediate: true }
 )
 
+onMounted(() => {
+  window.addEventListener('cashier-v3:open-member-list-creator', openMemberCreator)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('cashier-v3:open-member-list-creator', openMemberCreator)
+})
+
 async function openMemberDetail(record) {
   const memberId = memberRecordId(record)
   window.dispatchEvent(new CustomEvent('cashier-v3:open-member-detail', {
@@ -322,6 +384,74 @@ async function openMemberDetail(record) {
     memberId,
     recordVersion: record.revision
   })
+}
+
+function resultData(response) {
+  if (response?.data && typeof response.data === 'object') return response.data
+  if (response?.result?.data && typeof response.result.data === 'object') return response.result.data
+  return {}
+}
+
+function memberCommandContexts(memberId) {
+  return [
+    { kind: 'cashier_workspace', id: state.workspace?.id },
+    { kind: 'member', id: memberId }
+  ]
+}
+
+async function openMemberEditor(record) {
+  const memberId = memberRecordId(record)
+  const response = await requestAction('open-member-editor', { memberId })
+  if (!unifiedQueryActionSucceeded(response)) return response
+  const member = resultData(response).member
+  if (member && member.memberId) editingMember.value = { ...member }
+  return response
+}
+
+async function saveMemberEdit() {
+  const member = editingMember.value
+  if (!member || isMemberMutationSaving.value) return
+  isMemberMutationSaving.value = true
+  try {
+    const response = await requestAction('update-member', {
+      memberId: member.memberId,
+      name: member.name,
+      sex: Number(member.sex) || 0,
+      birthday: member.birthday || '',
+      address: member.address || '',
+      note: member.note || '',
+      commandContexts: memberCommandContexts(member.memberId)
+    })
+    if (unifiedQueryActionSucceeded(response)) {
+      editingMember.value = null
+      await queryMembers({}, false)
+    }
+  } finally {
+    isMemberMutationSaving.value = false
+  }
+}
+
+async function confirmMemberDelete() {
+  const member = deletingMember.value
+  if (!member || isMemberMutationSaving.value) return
+  isMemberMutationSaving.value = true
+  try {
+    // 编辑成功会重建完整工作台状态，公开版本仓只保留根分区资源。
+    // 注销前重新读取目标会员，重新签发该会员的当前版本，不能用列表旧版本写入。
+    const prepared = await requestAction('open-member-editor', { memberId: memberRecordId(member) })
+    if (!unifiedQueryActionSucceeded(prepared)) return
+    const response = await requestAction('deactivate-member', {
+      memberId: memberRecordId(member),
+      reason: '门店端会员列表注销',
+      commandContexts: memberCommandContexts(memberRecordId(member))
+    })
+    if (unifiedQueryActionSucceeded(response)) {
+      deletingMember.value = null
+      await queryMembers({}, false)
+    }
+  } finally {
+    isMemberMutationSaving.value = false
+  }
 }
 
 async function openBatchAction() {
@@ -403,8 +533,8 @@ async function openBatchAction() {
             <td>
               <div class="member-row-actions">
                 <button type="button" class="button button--text" @click="openMemberDetail(record)">查看</button>
-                <button v-if="record.status !== '已注销'" type="button" class="button button--text" @click="requestAction('open-member-editor', { memberId: memberRecordId(record) })">编辑</button>
-                <button type="button" class="button button--text" @click="requestAction('open-member-more-actions', { memberId: memberRecordId(record) })">更多</button>
+                <button v-if="record.status !== '已注销'" type="button" class="button button--text" @click="openMemberEditor(record)">编辑</button>
+                <button v-if="record.status !== '已注销'" type="button" class="button button--text button--danger" @click="deletingMember = record">注销</button>
               </div>
             </td>
           </tr>
@@ -413,6 +543,51 @@ async function openBatchAction() {
       <div v-if="!records.length" class="member-list-empty">暂无符合条件的会员，请调整查询条件或新增会员。</div>
     </main>
     <TablePagination :total="total" :page="page" :page-size="pageSize" @change="changeMemberPage" />
+
+    <Teleport to="body">
+      <div v-if="isMemberCreatorOpen" class="member-mutation-modal" role="dialog" aria-modal="true" aria-label="新增会员">
+        <div class="member-mutation-modal__backdrop" />
+        <section class="member-mutation-modal__card member-mutation-modal__card--creator">
+          <header><h2>新增会员</h2></header>
+          <MemberCreatorPanel
+            initial-profile-mode="full"
+            lock-profile-mode
+            cancel-label="取消"
+            submit-label="保存"
+            :allow-select-existing="false"
+            :current-store-name="state.storeName || ''"
+            :profile-fields="creatorSchema.profileFields || creatorSchema.fields || []"
+            :member-levels="creatorSchema.memberLevels || creatorSchema.levels || []"
+            :member-tags="creatorSchema.memberTags || creatorSchema.tags || []"
+            :on-submit="createMemberFromList"
+            :on-select-service-person="selectMemberCreatorServicePerson"
+            @cancel="closeMemberCreator"
+            @created="handleMemberCreated"
+          />
+        </section>
+      </div>
+      <div v-if="editingMember" class="member-mutation-modal" role="dialog" aria-modal="true" aria-label="编辑会员">
+        <div class="member-mutation-modal__backdrop" @click="!isMemberMutationSaving && (editingMember = null)" />
+        <form class="member-mutation-modal__card" @submit.prevent="saveMemberEdit">
+          <header><h2>编辑会员</h2><button type="button" class="button button--text" :disabled="isMemberMutationSaving" @click="editingMember = null">关闭</button></header>
+          <label>会员姓名<input v-model.trim="editingMember.name" required maxlength="64"></label>
+          <label>手机号<input :value="editingMember.phone" disabled></label>
+          <label>性别<select v-model.number="editingMember.sex"><option :value="0">未填写</option><option :value="1">男</option><option :value="2">女</option></select></label>
+          <label>生日<input v-model="editingMember.birthday" type="date"></label>
+          <label>详细地址<input v-model.trim="editingMember.address" maxlength="255"></label>
+          <label>备注<textarea v-model.trim="editingMember.note" rows="3" maxlength="500" /></label>
+          <footer><button type="button" class="button button--secondary" :disabled="isMemberMutationSaving" @click="editingMember = null">取消</button><button type="submit" class="button button--primary" :disabled="isMemberMutationSaving">{{ isMemberMutationSaving ? '保存中…' : '保存' }}</button></footer>
+        </form>
+      </div>
+      <div v-if="deletingMember" class="member-mutation-modal" role="dialog" aria-modal="true" aria-label="注销会员">
+        <div class="member-mutation-modal__backdrop" @click="!isMemberMutationSaving && (deletingMember = null)" />
+        <section class="member-mutation-modal__card member-mutation-modal__card--confirm">
+          <h2>注销会员</h2>
+          <p>注销 {{ deletingMember.name || '该会员' }} 后不可再办理新业务，但历史订单、卡项、收款和权益记录会完整保留。</p>
+          <footer><button type="button" class="button button--secondary" :disabled="isMemberMutationSaving" @click="deletingMember = null">取消</button><button type="button" class="button button--danger" :disabled="isMemberMutationSaving" @click="confirmMemberDelete">{{ isMemberMutationSaving ? '注销中…' : '确认注销' }}</button></footer>
+        </section>
+      </div>
+    </Teleport>
   </section>
 </template>
 
@@ -432,4 +607,16 @@ async function openBatchAction() {
   background: #fff2f0;
   color: #cf1322;
 }
+
+.member-mutation-modal { position: fixed; inset: 0; z-index: 1200; display: grid; place-items: center; padding: 20px; }
+.member-mutation-modal__backdrop { position: absolute; inset: 0; background: rgba(15, 23, 42, .45); }
+.member-mutation-modal__card { position: relative; width: min(520px, 100%); display: grid; gap: 14px; padding: 20px; border-radius: 8px; background: #fff; box-shadow: 0 18px 48px rgba(15, 23, 42, .25); }
+.member-mutation-modal__card header, .member-mutation-modal__card footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.member-mutation-modal__card h2 { margin: 0; font-size: 18px; }
+.member-mutation-modal__card p { margin: 0; color: #4b5563; line-height: 1.65; }
+.member-mutation-modal__card label { display: grid; gap: 6px; color: #374151; font-size: 13px; }
+.member-mutation-modal__card input, .member-mutation-modal__card select, .member-mutation-modal__card textarea { width: 100%; min-height: 34px; box-sizing: border-box; padding: 7px 9px; border: 1px solid #d1d5db; border-radius: 4px; font: inherit; }
+.member-mutation-modal__card textarea { resize: vertical; }
+.member-mutation-modal__card--creator { width: min(980px, 100%); max-height: min(820px, calc(100vh - 40px)); overflow: auto; padding: 24px; }
+.member-mutation-modal__card--creator > header { padding-bottom: 4px; border-bottom: 1px solid #edf0f5; }
 </style>

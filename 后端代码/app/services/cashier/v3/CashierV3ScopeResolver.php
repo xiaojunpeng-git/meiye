@@ -7,6 +7,8 @@
 
 namespace app\services\cashier\v3;
 
+use think\facade\Log;
+
 use think\facade\Db;
 
 /**
@@ -215,6 +217,13 @@ class CashierV3ScopeResolver
      */
     public static function notFound(string $kind, string $resourceId): CashierV3CommandException
     {
+        // Keep the client response non-enumerable while preserving an actionable
+        // server-side audit key for scope and version-provider failures.
+        Log::warning(sprintf(
+            '[cashier_v3_resource_not_found] kind=%s id=%s',
+            $kind,
+            $resourceId
+        ));
         return new CashierV3CommandException(
             CashierV3ResultCode::RESOURCE_NOT_FOUND,
             '该对象不存在或已被移除，请刷新当前工作台后重试。',

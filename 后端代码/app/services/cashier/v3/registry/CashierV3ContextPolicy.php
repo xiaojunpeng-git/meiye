@@ -26,6 +26,9 @@ class CashierV3ContextPolicy
     /** @var string[] 机器可读：动态 resolver 可能引入的 kind */
     protected $declaredDynamicKinds = [];
 
+    /** @var callable|null */
+    protected $serverResourceDiscoverer;
+
     /**
      * @param string[] $staticRequired
      * @param string[] $staticAllowed
@@ -85,6 +88,32 @@ class CashierV3ContextPolicy
             'roles' => $this->declaredDynamicRoles,
             'kinds' => $this->declaredDynamicKinds,
         ];
+    }
+
+    /**
+     * Domain installers may attach one server-only resource discoverer before
+     * the dispatcher freezes. Client context validation remains unchanged.
+     */
+    public function configureServerResourceDiscovery(
+        callable $discoverer,
+        array $declaredRoles,
+        array $declaredKinds
+    ): void {
+        if ($this->serverResourceDiscoverer !== null) {
+            throw new \LogicException(sprintf('%s 的服务端资源发现器重复配置', $this->action));
+        }
+        foreach ($declaredKinds as $kind) {
+            CashierV3ResourceKindCatalog::assertKnown((string)$kind);
+        }
+        $this->serverResourceDiscoverer = $discoverer;
+        $this->declaredDynamicRoles = array_values(array_unique(array_merge(
+            $this->declaredDynamicRoles,
+            array_map('strval', $declaredRoles)
+        )));
+        $this->declaredDynamicKinds = array_values(array_unique(array_merge(
+            $this->declaredDynamicKinds,
+            array_map('strval', $declaredKinds)
+        )));
     }
 
     /**
@@ -187,7 +216,11 @@ class CashierV3ContextPolicy
         if ($this->dynamicResolver !== null && isset($extra) && is_array($extra)) {
             foreach ([
                 'expand_from_checkout_request',
+                'expand_from_checkout_resource_plan',
+                'expand_from_server_resource_discovery',
+                'server_resource_discoverer',
                 'checkout_request_id',
+                'deferred_identity_kinds',
                 'normalized_payload',
                 'server_checkout_sources',
             ] as $passKey) {
@@ -195,6 +228,10 @@ class CashierV3ContextPolicy
                     $out[$passKey] = $extra[$passKey];
                 }
             }
+        }
+        if ($this->serverResourceDiscoverer !== null) {
+            $out['expand_from_server_resource_discovery'] = true;
+            $out['server_resource_discoverer'] = $this->serverResourceDiscoverer;
         }
         return $out;
     }

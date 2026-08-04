@@ -18,10 +18,28 @@ class CashierV3ResourceKindCatalog
         'member' => ['scope' => CashierV3ResourceScope::TYPE_TENANT, 'lock' => 10, 'ownership' => self::OWNERSHIP_DOMAIN],
         'member_balance' => ['scope' => CashierV3ResourceScope::TYPE_TENANT, 'lock' => 20, 'ownership' => self::OWNERSHIP_DOMAIN],
         'member_benefit_pool' => ['scope' => CashierV3ResourceScope::TYPE_TENANT, 'lock' => 30, 'ownership' => self::OWNERSHIP_DOMAIN],
+        // 权益明细的集合串行点；C3 服务占用与兼容期旧写路径必须共锁。
+        'entitlement_occupation_guard' => ['scope' => CashierV3ResourceScope::TYPE_TENANT, 'lock' => 31, 'ownership' => self::OWNERSHIP_DOMAIN],
+        'member_gift' => ['scope' => CashierV3ResourceScope::TYPE_TENANT, 'lock' => 35, 'ownership' => self::OWNERSHIP_DOMAIN],
         'card_holder' => ['scope' => CashierV3ResourceScope::TYPE_TENANT, 'lock' => 40, 'ownership' => self::OWNERSHIP_DOMAIN],
+        // 销售目录按“卡项组成集合 -> 商品 -> SKU”锁定，禁止按卡内项目顺序取锁。
+        'catalog_card_definition' => ['scope' => CashierV3ResourceScope::TYPE_STORE, 'lock' => 41, 'ownership' => self::OWNERSHIP_DOMAIN],
+        'catalog_product' => ['scope' => CashierV3ResourceScope::TYPE_STORE, 'lock' => 42, 'ownership' => self::OWNERSHIP_DOMAIN],
+        'catalog_sku' => ['scope' => CashierV3ResourceScope::TYPE_STORE, 'lock' => 43, 'ownership' => self::OWNERSHIP_DOMAIN],
+        // 定制卡配置在创建后成为结账来源；配置、商品和 SKU 固定按此顺序锁定。
+        'custom_card_configuration' => ['scope' => CashierV3ResourceScope::TYPE_STORE, 'lock' => 44, 'ownership' => self::OWNERSHIP_DOMAIN],
+        'performance_rule' => ['scope' => CashierV3ResourceScope::TYPE_TENANT, 'lock' => 45, 'ownership' => self::OWNERSHIP_DOMAIN],
+        'inventory_policy' => ['scope' => CashierV3ResourceScope::TYPE_TENANT, 'lock' => 46, 'ownership' => self::OWNERSHIP_DOMAIN],
+        'inventory_recipe' => ['scope' => CashierV3ResourceScope::TYPE_TENANT, 'lock' => 47, 'ownership' => self::OWNERSHIP_DOMAIN],
 
         'inventory_stock' => ['scope' => CashierV3ResourceScope::TYPE_STORE, 'lock' => 50, 'ownership' => self::OWNERSHIP_DOMAIN],
+        'inventory_batch' => ['scope' => CashierV3ResourceScope::TYPE_STORE, 'lock' => 55, 'ownership' => self::OWNERSHIP_DOMAIN],
+        'inventory_shortage_cursor' => ['scope' => CashierV3ResourceScope::TYPE_STORE, 'lock' => 56, 'ownership' => self::OWNERSHIP_DOMAIN],
+        'checkout_debt_policy' => ['scope' => CashierV3ResourceScope::TYPE_STORE, 'lock' => 57, 'ownership' => self::OWNERSHIP_DOMAIN],
+        'member_debt_guard' => ['scope' => CashierV3ResourceScope::TYPE_TENANT, 'lock' => 58, 'ownership' => self::OWNERSHIP_DOMAIN],
         'sales_order' => ['scope' => CashierV3ResourceScope::TYPE_STORE, 'lock' => 60, 'ownership' => self::OWNERSHIP_DOMAIN],
+        // 按原始权益订单稳定存在的欠款并发门闩；建欠与还款路径必须共锁。
+        'entitlement_debt_guard' => ['scope' => CashierV3ResourceScope::TYPE_TENANT, 'lock' => 64, 'ownership' => self::OWNERSHIP_DOMAIN],
         'debt_record' => ['scope' => CashierV3ResourceScope::TYPE_TENANT, 'lock' => 65, 'ownership' => self::OWNERSHIP_DOMAIN],
         'service_order' => ['scope' => CashierV3ResourceScope::TYPE_STORE, 'lock' => 70, 'ownership' => self::OWNERSHIP_DOMAIN],
         'writeoff_draft' => ['scope' => CashierV3ResourceScope::TYPE_STORE, 'lock' => 80, 'ownership' => self::OWNERSHIP_DOMAIN],
@@ -29,6 +47,8 @@ class CashierV3ResourceKindCatalog
         'reservation' => ['scope' => CashierV3ResourceScope::TYPE_STORE, 'lock' => 100, 'ownership' => self::OWNERSHIP_DOMAIN],
         'room' => ['scope' => CashierV3ResourceScope::TYPE_STORE, 'lock' => 110, 'ownership' => self::OWNERSHIP_DOMAIN],
         'room_time_slot' => ['scope' => CashierV3ResourceScope::TYPE_STORE, 'lock' => 120, 'ownership' => self::OWNERSHIP_DOMAIN],
+        // 员工档案／门店任职资源；不得用 staff_time_slot 代替员工身份。
+        'staff_profile' => ['scope' => CashierV3ResourceScope::TYPE_STORE, 'lock' => 125, 'ownership' => self::OWNERSHIP_DOMAIN],
         'staff_time_slot' => ['scope' => CashierV3ResourceScope::TYPE_STORE, 'lock' => 130, 'ownership' => self::OWNERSHIP_DOMAIN],
         'checkout_request' => ['scope' => CashierV3ResourceScope::TYPE_STORE, 'lock' => 140, 'ownership' => self::OWNERSHIP_DOMAIN],
         // C1 底座：工作台与账号级查询方案可由 C1 内置 provider 负责
@@ -61,6 +81,38 @@ class CashierV3ResourceKindCatalog
     {
         self::assertKnown($kind);
         return self::KINDS[$kind]['lock'];
+    }
+
+    /**
+     * Stable same-kind resource ordering shared by Gateway and domain planners.
+     * Canonical positive decimal IDs follow numeric order without integer casts;
+     * opaque IDs and decimal strings with leading zeroes follow byte order.
+     */
+    public static function compareResourceIds(string $left, string $right): int
+    {
+        $leftDecimal = preg_match('/^[1-9][0-9]*$/D', $left) === 1;
+        $rightDecimal = preg_match('/^[1-9][0-9]*$/D', $right) === 1;
+        if ($leftDecimal && $rightDecimal) {
+            $lengthOrder = strlen($left) <=> strlen($right);
+            if ($lengthOrder !== 0) {
+                return $lengthOrder;
+            }
+        }
+        return strcmp($left, $right);
+    }
+
+    public static function compareResources(
+        string $leftKind,
+        string $leftId,
+        string $rightKind,
+        string $rightId
+    ): int {
+        $order = self::lockOrderOf($leftKind) <=> self::lockOrderOf($rightKind);
+        if ($order !== 0) {
+            return $order;
+        }
+        $kindOrder = strcmp($leftKind, $rightKind);
+        return $kindOrder !== 0 ? $kindOrder : self::compareResourceIds($leftId, $rightId);
     }
 
     public static function ownershipOf(string $kind): string

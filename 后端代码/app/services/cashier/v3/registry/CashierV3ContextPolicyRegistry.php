@@ -149,8 +149,8 @@ class CashierV3ContextPolicyRegistry
         $this->register(new CashierV3ContextPolicy(
             'submit-checkout',
             ['cashier_workspace', 'checkout_request'],
-            ['service_order', 'hang_order', 'reservation', 'room'],
-            [$this, 'resolveCheckoutFollowUpBranch'],
+            [],
+            [$this, 'resolveCheckoutSubmitBranch'],
             ['cashier_workspace', 'checkout_request'],
             ['service_order', 'hang_order', 'reservation', 'room'],
             ['service_order', 'hang_order', 'reservation', 'room']
@@ -270,6 +270,13 @@ class CashierV3ContextPolicyRegistry
                 'required_touched_roles' => array_values(array_unique($touchedRoles)),
                 'expand_from_checkout_request' => true,
                 'checkout_request_id' => $checkoutId,
+                // These contexts carry client-observed versions only. Their
+                // identities are bound later, inside the transaction, to the
+                // persisted checkout_request source set.
+                'deferred_identity_kinds' => array_values(array_diff(
+                    $staticAllowed,
+                    ['cashier_workspace', 'checkout_request']
+                )),
             ];
         } else {
             // 入口步：discovered 来源进入读依赖；touched 仅 workspace（prepare 试算不推进来源版本）
@@ -325,6 +332,23 @@ class CashierV3ContextPolicyRegistry
         $base['required'] = ['cashier_workspace', 'checkout_request'];
         $base['allowed'] = ['service_order', 'hang_order', 'reservation', 'room', 'checkout_request'];
         return $this->resolveCheckoutSourceBranch($payload, $base);
+    }
+
+    /**
+     * Final checkout accepts only the client-visible workspace and request.
+     * Every hidden authority resource is supplied later by the persisted
+     * server-built resource plan.
+     */
+    public function resolveCheckoutSubmitBranch(array $payload, array $base): array
+    {
+        $base['required'] = ['cashier_workspace', 'checkout_request'];
+        $base['allowed'] = ['cashier_workspace', 'checkout_request'];
+        $resolved = $this->resolveCheckoutSourceBranch($payload, $base);
+        $resolved['allowed'] = [];
+        $resolved['deferred_identity_kinds'] = [];
+        unset($resolved['expand_from_checkout_request']);
+        $resolved['expand_from_checkout_resource_plan'] = true;
+        return $resolved;
     }
 
     /**

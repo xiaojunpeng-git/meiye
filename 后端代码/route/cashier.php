@@ -13,6 +13,7 @@ use app\http\middleware\AllowOriginMiddleware;
 use app\http\middleware\InstallMiddleware;
 use app\http\middleware\BlockerMiddleware;
 use app\http\middleware\cashier\AuthTokenMiddleware;
+use app\http\middleware\cashier\ForceStoreSessionMiddleware;
 use app\http\middleware\cashier\CashierCheckRoleMiddleware;
 use app\http\middleware\StationOpenMiddleware;
 use think\facade\Config;
@@ -78,7 +79,7 @@ Route::group('cashierapi', function () {
         //公共类
         Route::post('upload/image', 'Common/upload_image')->name('uploadImage');//图片上传
 
-    })->middleware(AuthTokenMiddleware::class)->middleware(\app\http\middleware\SystemLogMiddleware::class, 'cashier');
+    })->middleware([AuthTokenMiddleware::class, ForceStoreSessionMiddleware::class])->middleware(\app\http\middleware\SystemLogMiddleware::class, 'cashier');
 
     /**
      * 需登录验证权限
@@ -121,6 +122,7 @@ Route::group('cashierapi', function () {
 		Route::post('user/search_user_info', 'User/searchUserInfo')->option(['real_name' => '搜索、获取用户信息']);
 		//收银台注册用户
 		Route::post('user/register_user', 'User/saveUser')->middleware(BlockerMiddleware::class, 'cashier')->option(['real_name' => '收银台注册用户']);
+		Route::get('user/profile_fields', 'User/profileFields')->option(['real_name' => '收银台客户档案字段']);
         //获取收银台用户信息
         Route::post('user/user_Info', 'User/getUserInfo')->option(['real_name' => '获取收银台用户信息']);
 		//收银台修改用户信息
@@ -237,6 +239,17 @@ Route::group('cashierapi', function () {
         Route::post('order/:id/reopen', 'Order/terminal_order_reopen')->middleware(BlockerMiddleware::class, 'cashier')->option(['real_name' => '创建或获取重开草稿']);
         Route::get('order/reopen/:token', 'Order/terminal_order_reopen_load')->middleware(BlockerMiddleware::class, 'cashier')->option(['real_name' => '加载重开草稿']);
         Route::put('order/writeoff/:subOrderId/cancel', 'Order/cancel_writeoff')->middleware(BlockerMiddleware::class, 'cashier')->option(['real_name' => '撤销本次核销']);
+
+        // RH-GAP-WRITEOFF-WORKBENCH 多卡批量核销
+        Route::get('writeoff/batch/options', 'WriteoffBatch/options')->option(['real_name' => '批量核销可选项']);
+        Route::post('writeoff/batch/preview', 'WriteoffBatch/preview')->option(['real_name' => '批量核销试算']);
+        Route::post('writeoff/batch/commit', 'WriteoffBatch/commit')->middleware(BlockerMiddleware::class, 'cashier')->option(['real_name' => '批量核销提交']);
+        Route::put('writeoff/batch/:batchId/cancel', 'WriteoffBatch/cancel')->middleware(BlockerMiddleware::class, 'cashier')->option(['real_name' => '批量核销撤销']);
+        // RH-GAP-WRITEOFF-WORKBENCH 同卡项目替换
+        Route::get('card/:holder_id/project-replacement/options', 'ProjectReplacement/options')->option(['real_name' => '项目替换可选项']);
+        Route::post('card/:holder_id/project-replacement/preview', 'ProjectReplacement/preview')->option(['real_name' => '项目替换试算']);
+        Route::post('card/:holder_id/project-replacement/commit', 'ProjectReplacement/commit')->middleware(BlockerMiddleware::class, 'cashier')->option(['real_name' => '项目替换提交']);
+        Route::get('card/:holder_id/project-replacement/records', 'ProjectReplacement/records')->option(['real_name' => '项目替换记录']);
         //收银台退款订单列表
         Route::get('order/get_refund_list', 'Refund/getRefundList')->option(['real_name' => '收银台退款订单列表']);
         //收银台退款订单详情
@@ -364,7 +377,7 @@ Route::group('cashierapi', function () {
 		//桌码订单改价
 		Route::post('table/update', 'Table/tableUpdate')->name('StoreOrderUpdate')->option(['real_name' => '订单改价']);
 
-    })->middleware([AuthTokenMiddleware::class, CashierCheckRoleMiddleware::class])->middleware(\app\http\middleware\SystemLogMiddleware::class, 'cashier');
+    })->middleware([AuthTokenMiddleware::class, ForceStoreSessionMiddleware::class, CashierCheckRoleMiddleware::class])->middleware(\app\http\middleware\SystemLogMiddleware::class, 'cashier');
 
 
     /**

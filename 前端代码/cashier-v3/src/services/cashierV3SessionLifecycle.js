@@ -11,6 +11,7 @@ import {
   requestCashierV3Action,
   requestCashierV3ContextSwitch
 } from './cashierV3Bridge'
+import { readStoreV3SessionToken } from './storeV3SessionToken.js'
 export { CASHIER_V3_CONTEXT_SWITCH_CALL_SITES } from './cashierV3ContextSwitchCallSites'
 
 /**
@@ -62,84 +63,8 @@ function applyBootstrapFeatureSnapshot(result) {
   if (Array.isArray(features)) applyCashierV3LoginFeatures(features)
 }
 
-function browserSessionValue(browserWindow, key) {
-  try {
-    return String(browserWindow?.localStorage?.getItem?.(key) || '')
-  } catch {
-    return ''
-  }
-}
-
-function browserCookieToken(browserWindow) {
-  const cookie = String(browserWindow?.document?.cookie || '')
-  for (const part of cookie.split(';')) {
-    const separator = part.indexOf('=')
-    if (separator < 0) continue
-    const name = part.slice(0, separator).trim()
-    if (!['cashier_token', 'token'].includes(name)) continue
-    return part.slice(separator + 1).trim()
-  }
-  return ''
-}
-
-function browserSessionMarker(browserWindow) {
-  return JSON.stringify([
-    browserCookieToken(browserWindow) || browserSessionValue(browserWindow, 'token'),
-    browserSessionValue(browserWindow, 'store_id')
-  ])
-}
-
-/**
- * Detects an account/store change made by another tab. Values are used only as
- * change markers; the backend session remains the authority for the new scope.
- */
-export function observeCashierV3BrowserSession(options = {}) {
-  const browserWindow = options.window || (typeof window !== 'undefined' ? window : null)
-  if (!browserWindow?.addEventListener || !browserWindow?.removeEventListener) return () => {}
-
-  const onContextChanged = typeof options.onContextChanged === 'function'
-    ? options.onContextChanged
-    : onCashierStoreOrAccountChanged
-  let currentMarker = browserSessionMarker(browserWindow)
-  let timer = null
-  let disposed = false
-  let pendingReason = 'session'
-
-  const scheduleCheck = (reason) => {
-    pendingReason = reason || pendingReason
-    if (timer !== null) browserWindow.clearTimeout(timer)
-    timer = browserWindow.setTimeout(async () => {
-      timer = null
-      if (disposed) return
-      const nextMarker = browserSessionMarker(browserWindow)
-      if (nextMarker === currentMarker) return
-      try {
-        const result = await onContextChanged({ reason: pendingReason, silent: true })
-        const response = result?.data?.result && typeof result.data.result === 'object' ? result.data : result
-        const status = String(response?.result?.status || '').toLowerCase()
-        if (['success', 'succeeded'].includes(status)) currentMarker = nextMarker
-      } catch {
-        // Keep the previous marker so the next visible/storage check retries safely.
-      }
-    }, 30)
-  }
-  const handleStorage = (event) => {
-    if (event?.key !== null && !['token', 'store_id'].includes(String(event?.key || ''))) return
-    scheduleCheck(event?.key === 'store_id' ? 'store' : 'account')
-  }
-  const handleVisibility = () => {
-    if (browserWindow.document?.visibilityState === 'hidden') return
-    scheduleCheck('session')
-  }
-
-  browserWindow.addEventListener('storage', handleStorage)
-  browserWindow.document?.addEventListener?.('visibilitychange', handleVisibility)
-  return () => {
-    disposed = true
-    if (timer !== null) browserWindow.clearTimeout(timer)
-    browserWindow.removeEventListener('storage', handleStorage)
-    browserWindow.document?.removeEventListener?.('visibilitychange', handleVisibility)
-  }
+export function hasCashierV3Session(browserWindow = typeof window !== 'undefined' ? window : null) {
+  return Boolean(readStoreV3SessionToken(browserWindow))
 }
 
 export { requestCashierV3ContextSwitch, requestCashierV3Action }

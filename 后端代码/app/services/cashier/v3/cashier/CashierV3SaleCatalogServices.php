@@ -1,0 +1,1795 @@
+<?php
+
+namespace app\services\cashier\v3\cashier;
+
+use app\services\cashier\v3\CashierV3CommandException;
+use app\services\cashier\v3\CashierV3DataScopeContext;
+use app\services\cashier\v3\CashierV3OperatorScope;
+use app\services\cashier\v3\CashierV3ResultCode;
+use app\services\cashier\v3\CashierV3TransactionGuard;
+
+/** 门店销售目录、购物车 sale 行及结账来源的统一服务端口径。 */
+final class CashierV3SaleCatalogServices
+{
+    public const CONTRACT_VERSION = 'cashier-sale-catalog-v1';
+    public const CHECKOUT_SOURCE_CONTRACT_VERSION = 'cashier-sale-checkout-source-v1';
+
+    private const CUSTOM_CARD_SHELL_PRODUCT_ID = 8154;
+    private const MAX_CATALOG_ITEMS = 5000;
+    private const MAX_QUANTITY = 1000000;
+
+    /** @var CashierV3SaleCatalogAuthority */
+    private $authority;
+
+    /** @var CashierV3CashierReadinessGuard|null */
+    private $readiness;
+
+    public function __construct(
+        CashierV3SaleCatalogAuthority $authority = null,
+        CashierV3CashierReadinessGuard $readiness = null
+    ) {
+        $this->authority = $authority ?: new ThinkPhpCashierV3SaleCatalogAuthority();
+        $this->readiness = $readiness;
+    }
+
+    public function catalog(
+        CashierV3OperatorScope $operatorScope,
+        CashierV3DataScopeContext $dataScope
+    ): array {
+        $this->assertStoreScope($operatorScope, $dataScope);
+        $rows = $this->authority->listStoreItems($operatorScope->storeId());
+        if (count($rows) > self::MAX_CATALOG_ITEMS) {
+            throw self::failure(
+                CashierV3ResultCode::ACTION_DEPENDENCY_NOT_READY,
+                '当前门店可售品项过多，收银目录暂时无法完整加载，请联系管理员优化分类。',
+                'cashier_catalog_item_limit_exceeded',
+                ['limit' => self::MAX_CATALOG_ITEMS]
+            );
+        }
+
+        $catalogItems = [];
+        $categories = [];
+        foreach ($rows as $row) {
+            $normalized = $this->normalizeAuthorityRow($row, false);
+            // 定制卡壳是隐藏的配置依赖，不是普通目录商品。页面只提供一个
+            // “新建定制卡”入口，避免把价格为零的旧壳再次展示给收银员。
+            if ($normalized['kindCode'] === 'custom_card') {
+                continue;
+            }
+            $cardUnavailableReason = '';
+            $catalogItem = $normalized;
+            if ($normalized['productType'] === 5) {
+                try {
+                    // 目录与“加入购物车”必须使用同一张卡项及卡内项目快照；
+                    // 否则下架或跨店的卡内项目会在点击后才失败。
+                    $cardForSale = $this->normalizeAuthorityRow($row, true);
+                    $this->assertPurchasable($cardForSale, 1);
+                    $catalogItem = $cardForSale;
+                } catch (CashierV3CommandException $exception) {
+                    $cardUnavailableReason = $exception->getMessage();
+                }
+            }
+            $catalogItems[] = [
+                'item' => $catalogItem,
+                'cardUnavailableReason' => $cardUnavailableReason,
+            ];
+            foreach ($normalized['categoryNames'] as $name) {
+                $categories[$name] = true;
+            }
+        }
+
+        // Retail products use V3 stock and batch balances at checkout. The
+        // catalog must project that same source instead of the retired SKU
+        // stock column; otherwise a visible positive stock can still fail on
+        // the first add-to-cart command.
+        $inventoryAvailability = $this->catalogInventoryAvailability($catalogItems, $dataScope);
+        $items = [];
+        foreach ($catalogItems as $entry) {
+            $catalogItem = $entry['item'];
+            $inventory = $inventoryAvailability[self::inventoryItemKey($catalogItem)] ?? null;
+            $publicItem = $this->publicCatalogItem($catalogItem, $inventory);
+            if ($entry['cardUnavailableReason'] !== '') {
+                $publicItem['disabled'] = true;
+                $publicItem['disabledReason'] = $entry['cardUnavailableReason'];
+            }
+            $items[] = $publicItem;
+        }
+        return [
+            'contractVersion' => self::CONTRACT_VERSION,
+            // 销售目录按用户可理解的结算品类展示。历史次卡、时间规则卡
+            // 仍保留各自的 kindCode，不能据此改写既有订单／权益事实；它们
+            // 在收银入口统一归入“卡项”。
+            'types' => ['项目', '产品', '卡项', '定制卡'],
+            'categories' => array_merge(['全部'], array_keys($categories)),
+            'items' => $items,
+            'itemCount' => count($items),
+            'complete' => true,
+            'priceAuthority' => 'store_product_attr_value.price',
+            'dataScope' => ['storeId' => $operatorScope->storeId()],
+        ];
+    }
+
+    public function selectSaleLineInTx(
+        $itemId,
+        string $idempotencyKey,
+        CashierV3OperatorScope $operatorScope,
+        CashierV3DataScopeContext $dataScope
+    ): array {
+        CashierV3TransactionGuard::assertInTransaction('cashierSaleCatalogSelect');
+        $this->assertStoreScope($operatorScope, $dataScope);
+        $skuId = self::positiveId($itemId, 'itemId');
+        $idempotencyKey = trim($idempotencyKey);
+        if ($idempotencyKey === '' || strlen($idempotencyKey) > 128 || strpos($idempotencyKey, "\0") !== false) {
+            throw self::failure(
+                CashierV3ResultCode::INVALID_IDEMPOTENCY_KEY,
+                '本次添加请求标识无效，请重新操作。',
+                'cashier_sale_idempotency_key_invalid'
+            );
+        }
+        $normalized = $this->lockedActiveItem($operatorScope->storeId(), $skuId);
+        $this->assertPurchasable($normalized, 1);
+
+        return $this->saleLineFromItem($normalized, $idempotencyKey);
+    }
+
+    /**
+     * Read-only server discovery used before Gateway locks any business row.
+     * Resource identities and versions never come from HTTP contexts.
+     */
+    public function discoverItemResources(
+        $itemId,
+        CashierV3OperatorScope $operatorScope,
+        CashierV3DataScopeContext $dataScope
+    ): array {
+        $this->assertStoreScope($operatorScope, $dataScope);
+        $normalized = $this->readActiveItem(
+            $operatorScope->storeId(),
+            self::positiveId($itemId, 'itemId')
+        );
+        $this->assertPurchasable($normalized, 1);
+        return $this->serverResources($normalized);
+    }
+
+    /** Resources for the configured-card host. The host itself is never directly sellable. */
+    public function discoverCustomCardShellResources(
+        CashierV3OperatorScope $operatorScope,
+        CashierV3DataScopeContext $dataScope
+    ): array {
+        return $this->serverResources($this->readCustomCardShell($operatorScope, $dataScope, false));
+    }
+
+    /**
+     * Build a priced custom-card sale line only after the Gateway has locked
+     * the shell and every selected project resource. $configuration is already
+     * persisted in the same transaction and is the immutable sales source.
+     */
+    public function customCardSaleLineAfterGatewayLocksInTx(
+        array $configuration,
+        string $idempotencyKey,
+        array $lockedContexts,
+        CashierV3OperatorScope $operatorScope,
+        CashierV3DataScopeContext $dataScope
+    ): array {
+        CashierV3TransactionGuard::assertInTransaction('cashierCustomCardSelectAfterGatewayLocks');
+        $shell = $this->readCustomCardShell($operatorScope, $dataScope, true);
+        $current = $this->customCardCurrentFromConfiguration($shell, $configuration);
+        // The configuration is created by this command, so it correctly has
+        // no pre-existing command.context. The shell and every selected
+        // project remain Gateway-locked before the insert.
+        $this->assertLockedContextsCover($current, $lockedContexts, ['custom_card_configuration']);
+        if ((int)($configuration['total_amount_cents'] ?? 0) <= 0) {
+            throw self::failure(CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE, '定制卡金额必须大于 0。', 'custom_card_total_invalid');
+        }
+        return $this->saleLineFromItem($current, $idempotencyKey);
+    }
+
+    /** Final issuer re-read for a custom-card configuration already Gateway-locked by checkout. */
+    public function customCardIssuanceLineInTx(
+        array $configuration,
+        CashierV3OperatorScope $operatorScope,
+        CashierV3DataScopeContext $dataScope
+    ): array {
+        CashierV3TransactionGuard::assertInTransaction('cashierCustomCardIssuanceLine');
+        $shell = $this->readCustomCardShell($operatorScope, $dataScope, true);
+        return $this->saleLineFromItem($this->customCardCurrentFromConfiguration($shell, $configuration), 'custom-card-issue:' . (string)$configuration['configuration_id']);
+    }
+
+    /** Read-only discovery for a persisted sale line. */
+    public function discoverStoredLineResources(
+        array $storedLine,
+        int $quantity,
+        CashierV3OperatorScope $operatorScope,
+        CashierV3DataScopeContext $dataScope
+    ): array {
+        $current = $this->currentForStoredLine(
+            $storedLine,
+            $quantity,
+            $operatorScope,
+            $dataScope,
+            false
+        );
+        return $this->serverResources($current);
+    }
+
+    public function readResourceVersion(
+        string $kind,
+        int $resourceId,
+        int $representativeSkuId,
+        CashierV3OperatorScope $operatorScope,
+        CashierV3DataScopeContext $dataScope
+    ): int {
+        if (!in_array($kind, ['catalog_card_definition', 'catalog_product', 'catalog_sku'], true)
+            || $resourceId <= 0 || $representativeSkuId <= 0) {
+            throw self::failure(
+                CashierV3ResultCode::INVALID_COMMAND_CONTEXT,
+                '商品资源身份无效，请刷新后重试。',
+                'cashier_sale_resource_identity_invalid'
+            );
+        }
+        $this->assertStoreScope($operatorScope, $dataScope);
+        // Gateway 已先精确锁定资源行。卡项会把卡内项目与规格一起纳入资源
+        // 集合；这些项目随后下架时仍必须能参与版本校验，否则父卡明明在售却
+        // 会在加购前被错误拒绝。真正的“可售”判定仍在目录发现及加购最终重读
+        // 父卡时执行，不能由这里把组件当作独立销售品再判一次上架状态。
+        $row = $this->authority->readStoreItemBySkuId($operatorScope->storeId(), $representativeSkuId);
+        if (!is_array($row)) {
+            throw self::notAvailable($representativeSkuId);
+        }
+        $item = $this->normalizeAuthorityRow(
+            $row,
+            $kind === 'catalog_card_definition'
+        );
+        foreach ((array)$item['authoritySnapshot']['resourceSources'] as $resource) {
+            if ((string)($resource['kind'] ?? '') === $kind
+                && (string)($resource['id'] ?? '') === (string)$resourceId
+                && (int)($resource['version'] ?? 0) > 0) {
+                return (int)$resource['version'];
+            }
+        }
+        throw self::notAvailable($representativeSkuId);
+    }
+
+    public function selectSaleLineAfterGatewayLocksInTx(
+        $itemId,
+        string $idempotencyKey,
+        array $lockedContexts,
+        CashierV3OperatorScope $operatorScope,
+        CashierV3DataScopeContext $dataScope
+    ): array {
+        CashierV3TransactionGuard::assertInTransaction('cashierSaleCatalogSelectAfterGatewayLocks');
+        $this->assertStoreScope($operatorScope, $dataScope);
+        $idempotencyKey = trim($idempotencyKey);
+        if ($idempotencyKey === '' || strlen($idempotencyKey) > 128 || strpos($idempotencyKey, "\0") !== false) {
+            throw self::failure(
+                CashierV3ResultCode::INVALID_IDEMPOTENCY_KEY,
+                '本次添加请求标识无效，请重新操作。',
+                'cashier_sale_idempotency_key_invalid'
+            );
+        }
+        $normalized = $this->readActiveItem(
+            $operatorScope->storeId(),
+            self::positiveId($itemId, 'itemId')
+        );
+        $this->assertLockedContextsCover($normalized, $lockedContexts);
+        $this->assertPurchasable($normalized, 1);
+        $this->assertInventoryAvailableForSale($normalized, 1, $dataScope);
+        return $this->saleLineFromItem($normalized, $idempotencyKey);
+    }
+
+    /**
+     * Build the one server-managed sale line for a pending card/project
+     * upgrade. The target's normal catalogue price remains the original
+     * amount; the consumed old-right value is represented as a frozen discount
+     * and the payable amount is the calculated settlement delta.
+     */
+    public function cardOperationUpgradeSaleLineAfterGatewayLocksInTx(
+        array $plan,
+        string $idempotencyKey,
+        array $lockedContexts,
+        CashierV3OperatorScope $operatorScope,
+        CashierV3DataScopeContext $dataScope
+    ): array {
+        CashierV3TransactionGuard::assertInTransaction('cashierCardOperationUpgradeSaleLine');
+        $this->assertStoreScope($operatorScope, $dataScope);
+        $operationId = trim((string)($plan['operationId'] ?? ''));
+        $operationType = trim((string)($plan['operationType'] ?? ''));
+        $target = is_array($plan['target'] ?? null) ? $plan['target'] : [];
+        $settlement = is_array($plan['checkoutSettlement'] ?? null) ? $plan['checkoutSettlement'] : [];
+        $source = is_array($plan['sourceCard'] ?? null) ? $plan['sourceCard'] : [];
+        $targetSkuId = (int)($target['skuId'] ?? 0);
+        $targetProductId = (int)($target['catalogId'] ?? 0);
+        $targetPriceCents = $settlement['targetPriceCents'] ?? null;
+        $sourceValueCents = $settlement['sourceRemainingValueCents'] ?? null;
+        $deltaCents = $settlement['settlementDeltaCents'] ?? null;
+        if (preg_match('/^COP-[A-F0-9]{40}$/D', $operationId) !== 1
+            || !in_array($operationType, ['card_upgrade', 'project_upgrade'], true)
+            || $targetSkuId <= 0 || $targetProductId <= 0
+            || !is_int($targetPriceCents) || !is_int($sourceValueCents) || !is_int($deltaCents)
+            || $targetPriceCents < 0 || $sourceValueCents < 0 || $deltaCents < 0
+            || $targetPriceCents - $sourceValueCents !== $deltaCents
+            || (int)($source['holderId'] ?? 0) <= 0
+            || (int)($source['holderVersion'] ?? 0) <= 0
+            || !preg_match('/^[a-f0-9]{64}$/D', (string)($plan['immutableFingerprint'] ?? ''))) {
+            throw self::failure(
+                CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
+                '升级结算资料不完整，请重新打开后办理。',
+                'card_operation_upgrade_plan_invalid'
+            );
+        }
+        $idempotencyKey = trim($idempotencyKey);
+        if ($idempotencyKey === '' || strlen($idempotencyKey) > 128 || strpos($idempotencyKey, "\0") !== false) {
+            throw self::failure(
+                CashierV3ResultCode::INVALID_IDEMPOTENCY_KEY,
+                '本次升级请求标识无效，请重新操作。',
+                'card_operation_upgrade_idempotency_invalid'
+            );
+        }
+        $current = $this->lockedActiveItem($operatorScope->storeId(), $targetSkuId);
+        $this->assertLockedContextsCover($current, $lockedContexts);
+        $requiredProductType = $operationType === 'card_upgrade' ? 5 : 6;
+        if ((int)$current['productId'] !== $targetProductId
+            || (int)$current['productType'] !== $requiredProductType
+            || (int)$current['unitPriceCents'] !== $targetPriceCents) {
+            throw CashierV3CommandException::versionConflict(
+                '目标项目或卡项的资料已经变化，请重新打开后办理。',
+                ['reason' => 'card_operation_upgrade_target_changed']
+            );
+        }
+        $this->assertPurchasable($current, 1);
+        $this->assertInventoryAvailableForSale($current, 1, $dataScope);
+
+        $extraResources = [[
+            'kind' => 'card_holder',
+            'id' => (string)(int)$source['holderId'],
+            'version' => (int)$source['holderVersion'],
+        ]];
+        $projectMutations = [];
+        foreach ((array)($plan['stateMutation']['projectMutations'] ?? []) as $mutation) {
+            if (!is_array($mutation)) {
+                throw self::failure(CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE, '项目升级来源资料不完整，请重新打开后办理。', 'card_operation_project_upgrade_mutation_invalid');
+            }
+            $detailId = (int)($mutation['sourceDetailId'] ?? 0);
+            $detailVersion = (int)($mutation['sourceDetailVersion'] ?? 0);
+            if ($operationType !== 'project_upgrade' || $detailId <= 0 || $detailVersion <= 0) {
+                throw self::failure(CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE, '项目升级来源资料不完整，请重新打开后办理。', 'card_operation_project_upgrade_mutation_missing');
+            }
+            $projectMutations[] = $mutation;
+            $extraResources[] = [
+                'kind' => 'member_benefit_pool',
+                'id' => (string)$detailId,
+                'version' => $detailVersion,
+            ];
+        }
+        if ($operationType === 'project_upgrade' && $projectMutations === []) {
+            throw self::failure(CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE, '项目升级来源资料不完整，请重新打开后办理。', 'card_operation_project_upgrade_sources_missing');
+        }
+        $binding = [
+            'contractVersion' => 'cashier-v3-card-operation-upgrade-sale-v1',
+            'operationId' => $operationId,
+            'operationType' => $operationType,
+            'operationFingerprint' => (string)$plan['immutableFingerprint'],
+            'sourceCardHolderId' => (int)$source['holderId'],
+            'sourceCardHolderVersion' => (int)$source['holderVersion'],
+            'originOrderId' => (int)($source['originOrderId'] ?? 0),
+            'memberId' => (int)($source['currentMemberId'] ?? 0),
+            'targetProductId' => $targetProductId,
+            'targetSkuId' => $targetSkuId,
+            'targetPriceCents' => $targetPriceCents,
+            'sourceRemainingValueCents' => $sourceValueCents,
+            'settlementDeltaCents' => $deltaCents,
+            'projectMutations' => $projectMutations,
+            'sourceResources' => $extraResources,
+        ];
+        $snapshot = (array)$current['authoritySnapshot'];
+        $snapshot['resourceSources'] = self::uniqueResources(array_merge(
+            (array)($snapshot['resourceSources'] ?? []),
+            $extraResources
+        ));
+        $snapshot['cardOperationUpgrade'] = $binding;
+        $line = $current;
+        $line['unitPriceCents'] = $deltaCents;
+        $line['originalUnitPriceCents'] = $targetPriceCents;
+        $line['authoritySnapshot'] = $snapshot;
+        $line['authorityFingerprint'] = hash('sha256', self::canonicalJson($snapshot));
+        $line['displaySnapshot'] = $this->displaySnapshot($line);
+        return $this->saleLineFromItem($line, $idempotencyKey);
+    }
+
+    public function assertStoredSaleQuantityAfterGatewayLocksInTx(
+        array $storedLine,
+        int $quantity,
+        array $lockedContexts,
+        CashierV3OperatorScope $operatorScope,
+        CashierV3DataScopeContext $dataScope
+    ): void {
+        $current = $this->currentForStoredLine(
+            $storedLine,
+            $quantity,
+            $operatorScope,
+            $dataScope,
+            false
+        );
+        $this->assertLockedContextsCover($current, $lockedContexts);
+    }
+
+    public function checkoutSourceLineAfterGatewayLocksInTx(
+        array $storedLine,
+        array $lockedContexts,
+        CashierV3OperatorScope $operatorScope,
+        CashierV3DataScopeContext $dataScope
+    ): array {
+        $quantity = (int)($storedLine['quantity'] ?? 0);
+        $current = $this->currentForStoredLine(
+            $storedLine,
+            $quantity,
+            $operatorScope,
+            $dataScope,
+            false
+        );
+        $this->assertLockedContextsCover($current, $lockedContexts);
+        return $this->checkoutSourceFromCurrent($storedLine, $current, $quantity);
+    }
+
+    private function saleLineFromItem(array $normalized, string $idempotencyKey): array
+    {
+        return [
+            'line_key' => 'sale:' . substr(hash('sha256', $idempotencyKey), 0, 48),
+            'line_role' => 'sale',
+            'catalog_product_id' => $normalized['productId'],
+            'catalog_sku_id' => $normalized['skuId'],
+            'catalog_product_type' => $normalized['productType'],
+            'project_id' => $normalized['productType'] === 6 ? $normalized['productId'] : 0,
+            'quantity' => 1,
+            'source_version' => $normalized['productVersion'],
+            'detail_version' => $normalized['skuVersion'],
+            'unit_price_cents' => $normalized['unitPriceCents'],
+            'original_unit_price_cents' => $normalized['originalUnitPriceCents'],
+            'authority_fingerprint' => $normalized['authorityFingerprint'],
+            'authority_snapshot' => $normalized['authoritySnapshot'],
+            'display_snapshot' => $this->displaySnapshot($normalized),
+            'service_object' => $normalized['productType'] === 6 ? 'self' : '',
+            'is_experience' => 0,
+        ];
+    }
+
+    public function assertStoredSaleQuantityInTx(
+        array $storedLine,
+        int $quantity,
+        CashierV3OperatorScope $operatorScope,
+        CashierV3DataScopeContext $dataScope
+    ): void {
+        $this->lockedCurrentForStoredLine($storedLine, $quantity, $operatorScope, $dataScope);
+    }
+
+    /**
+     * prepare-checkout 可直接消费的单行 DTO。该方法只重验并返回来源，不写正式事实。
+     */
+    public function checkoutSourceLineInTx(
+        array $storedLine,
+        CashierV3OperatorScope $operatorScope,
+        CashierV3DataScopeContext $dataScope
+    ): array {
+        $quantity = (int)($storedLine['quantity'] ?? 0);
+        $current = $this->lockedCurrentForStoredLine(
+            $storedLine,
+            $quantity,
+            $operatorScope,
+            $dataScope
+        );
+        return $this->checkoutSourceFromCurrent($storedLine, $current, $quantity);
+    }
+
+    private function checkoutSourceFromCurrent(array $storedLine, array $current, int $quantity): array
+    {
+        $lineAmountCents = self::multiplyCents($current['unitPriceCents'], $quantity);
+        $originalLineAmountCents = self::multiplyCents($current['originalUnitPriceCents'], $quantity);
+        return [
+            'contractVersion' => self::CHECKOUT_SOURCE_CONTRACT_VERSION,
+            'lineId' => (string)($storedLine['line_key'] ?? ''),
+            'sortNo' => (int)($storedLine['sort_no'] ?? 0),
+            'lineRole' => 'sale',
+            'memberId' => (int)($storedLine['member_id'] ?? 0),
+            'catalogItemId' => $current['skuId'],
+            'productId' => $current['productId'],
+            'skuId' => $current['skuId'],
+            'skuUnique' => $current['skuUnique'],
+            'productType' => $current['productType'],
+            'kindCode' => $current['kindCode'],
+            'kind' => $current['kind'],
+            'nameSnapshot' => $current['name'],
+            'skuNameSnapshot' => $current['specification'],
+            'categoryIdSnapshot' => $current['categoryId'],
+            'categoryNameSnapshot' => $current['categoryName'],
+            'productVersion' => $current['productVersion'],
+            'skuVersion' => $current['skuVersion'],
+            'definitionFingerprint' => $current['authorityFingerprint'],
+            'quantity' => $quantity,
+            'unitPriceCents' => $current['unitPriceCents'],
+            'originalUnitPriceCents' => $current['originalUnitPriceCents'],
+            'lineAmountCents' => $lineAmountCents,
+            'originalLineAmountCents' => $originalLineAmountCents,
+            'unitPrice' => self::centsToMoney($current['unitPriceCents']),
+            'originalUnitPrice' => self::centsToMoney($current['originalUnitPriceCents']),
+            'lineAmount' => self::centsToMoney($lineAmountCents),
+            'originalLineAmount' => self::centsToMoney($originalLineAmountCents),
+            'serviceObject' => (string)($storedLine['service_object'] ?? ''),
+            'craftsmen' => self::decodeStoredList((string)($storedLine['craftsmen_json'] ?? ''), 'craftsmen_json'),
+            'isExperience' => (int)($storedLine['is_experience'] ?? 0) === 1,
+            'cardPurchaseSnapshot' => $current['authoritySnapshot']['cardPurchase'],
+            'resourceSources' => $current['authoritySnapshot']['resourceSources'],
+        ];
+    }
+
+    public static function itemId($value): int
+    {
+        return self::positiveId($value, 'itemId');
+    }
+
+    private function lockedCurrentForStoredLine(
+        array $storedLine,
+        int $quantity,
+        CashierV3OperatorScope $operatorScope,
+        CashierV3DataScopeContext $dataScope
+    ): array {
+        return $this->currentForStoredLine(
+            $storedLine,
+            $quantity,
+            $operatorScope,
+            $dataScope,
+            true
+        );
+    }
+
+    private function currentForStoredLine(
+        array $storedLine,
+        int $quantity,
+        CashierV3OperatorScope $operatorScope,
+        CashierV3DataScopeContext $dataScope,
+        bool $lock
+    ): array {
+        CashierV3TransactionGuard::assertInTransaction('cashierSaleCatalogRevalidate');
+        $this->assertStoreScope($operatorScope, $dataScope);
+        if ((string)($storedLine['line_role'] ?? '') !== 'sale' || $quantity <= 0 || $quantity > self::MAX_QUANTITY) {
+            throw self::failure(
+                CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
+                '购物车商品资料不完整，请删除后重新选择。',
+                'cashier_sale_line_contract_invalid'
+            );
+        }
+        $storedSnapshot = self::decodeStoredObject(
+            (string)($storedLine['authority_snapshot_json'] ?? ''),
+            'authority_snapshot_json'
+        );
+        $storedPurchase = is_array($storedSnapshot['cardPurchase'] ?? null)
+            ? $storedSnapshot['cardPurchase'] : [];
+        if ((string)($storedPurchase['sourceKind'] ?? '') === 'custom_card') {
+            if ($quantity !== 1) {
+                throw self::failure(CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE, '定制卡数量固定为 1。', 'custom_card_quantity_invalid');
+            }
+            $configuration = $this->readStoredCustomCardConfiguration($storedSnapshot, $operatorScope, $dataScope, $lock);
+            $shell = $this->readCustomCardShell($operatorScope, $dataScope, $lock);
+            $current = $this->customCardCurrentFromConfiguration($shell, $configuration);
+            $this->assertStoredAuthorityMatches($storedLine, $current);
+            return $current;
+        }
+        $skuId = (int)($storedLine['catalog_sku_id'] ?? 0);
+        $current = $lock
+            ? $this->lockedActiveItem($operatorScope->storeId(), $skuId)
+            : $this->readActiveItem($operatorScope->storeId(), $skuId);
+        if (is_array($storedSnapshot['cardOperationUpgrade'] ?? null)) {
+            $current = $this->cardOperationUpgradeCurrentForStoredLine(
+                $storedLine,
+                $current,
+                (array)$storedSnapshot['cardOperationUpgrade']
+            );
+        }
+        $this->assertStoredAuthorityMatches($storedLine, $current);
+        $this->assertPurchasable($current, $quantity);
+        $this->assertInventoryAvailableForSale($current, $quantity, $dataScope);
+        return $current;
+    }
+
+    private function cardOperationUpgradeCurrentForStoredLine(
+        array $storedLine,
+        array $current,
+        array $binding
+    ): array {
+        $operationId = trim((string)($binding['operationId'] ?? ''));
+        $operationType = trim((string)($binding['operationType'] ?? ''));
+        $targetPrice = $binding['targetPriceCents'] ?? null;
+        $sourceValue = $binding['sourceRemainingValueCents'] ?? null;
+        $delta = $binding['settlementDeltaCents'] ?? null;
+        $sourceResources = is_array($binding['sourceResources'] ?? null) ? $binding['sourceResources'] : [];
+        if (preg_match('/^COP-[A-F0-9]{40}$/D', $operationId) !== 1
+            || !in_array($operationType, ['card_upgrade', 'project_upgrade'], true)
+            || !preg_match('/^[a-f0-9]{64}$/D', (string)($binding['operationFingerprint'] ?? ''))
+            || !is_int($targetPrice) || !is_int($sourceValue) || !is_int($delta)
+            || $targetPrice < 0 || $sourceValue < 0 || $delta < 0
+            || $targetPrice - $sourceValue !== $delta
+            || (int)($binding['targetProductId'] ?? 0) !== (int)$current['productId']
+            || (int)($binding['targetSkuId'] ?? 0) !== (int)$current['skuId']
+            || (int)$current['unitPriceCents'] !== $targetPrice
+            || (int)$storedLine['unit_price_cents'] !== $delta
+            || (int)$storedLine['original_unit_price_cents'] !== $targetPrice
+            || (int)$current['productType'] !== ($operationType === 'card_upgrade' ? 5 : 6)
+            || $sourceResources === []) {
+            throw CashierV3CommandException::versionConflict(
+                '升级结算资料已经变化，请删除后重新办理。',
+                ['reason' => 'card_operation_upgrade_line_changed']
+            );
+        }
+        $snapshot = (array)$current['authoritySnapshot'];
+        $snapshot['resourceSources'] = self::uniqueResources(array_merge(
+            (array)($snapshot['resourceSources'] ?? []),
+            $sourceResources
+        ));
+        $snapshot['cardOperationUpgrade'] = $binding;
+        $result = $current;
+        $result['unitPriceCents'] = $delta;
+        $result['originalUnitPriceCents'] = $targetPrice;
+        $result['authoritySnapshot'] = $snapshot;
+        $result['authorityFingerprint'] = hash('sha256', self::canonicalJson($snapshot));
+        return $result;
+    }
+
+    private function readCustomCardShell(
+        CashierV3OperatorScope $operatorScope,
+        CashierV3DataScopeContext $dataScope,
+        bool $lock
+    ): array {
+        $this->assertStoreScope($operatorScope, $dataScope);
+        $rows = $this->authority->listStoreItems($operatorScope->storeId());
+        foreach ($rows as $row) {
+            $item = $this->normalizeAuthorityRow($row, false);
+            if ($item['kindCode'] !== 'custom_card') {
+                continue;
+            }
+            $raw = $lock
+                ? $this->authority->lockStoreItemBySkuId($operatorScope->storeId(), (int)$item['skuId'])
+                : $this->authority->readStoreItemBySkuId($operatorScope->storeId(), (int)$item['skuId']);
+            if (!is_array($raw)) {
+                continue;
+            }
+            $current = $this->normalizeAuthorityRow($raw, false);
+            if ($current['kindCode'] !== 'custom_card'
+                || (int)($current['authoritySnapshot']['product']['isDeleted'] ?? 1) !== 0
+                || (int)($current['authoritySnapshot']['product']['isVerified'] ?? 0) !== 1) {
+                continue;
+            }
+            return $current;
+        }
+        throw self::failure(CashierV3ResultCode::RESOURCE_NOT_FOUND, '当前门店未配置可用的定制卡入口。', 'custom_card_shell_not_available');
+    }
+
+    private function readStoredCustomCardConfiguration(
+        array $storedSnapshot,
+        CashierV3OperatorScope $operatorScope,
+        CashierV3DataScopeContext $dataScope,
+        bool $lock
+    ): array {
+        $meta = is_array($storedSnapshot['customCardConfiguration'] ?? null)
+            ? $storedSnapshot['customCardConfiguration'] : [];
+        $configurationId = trim((string)($meta['id'] ?? ''));
+        if (preg_match('/^CCD-[A-F0-9]{40}$/D', $configurationId) !== 1) {
+            throw self::failure(CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE, '定制卡配置已失效，请重新配置。', 'custom_card_configuration_identity_invalid');
+        }
+        $query = \think\facade\Db::name('cashier_v3_custom_card_configuration')
+            ->where('configuration_id', $configurationId)
+            ->where('tenant_id', $dataScope->tenantId())
+            ->where('store_id', $operatorScope->storeId())
+            ->where('status', 'in_cart');
+        if ($lock) {
+            $query->lock(true);
+        }
+        $row = $query->find();
+        $row = is_object($row) && method_exists($row, 'toArray') ? $row->toArray() : (array)$row;
+        if (!$row || (int)($row['resource_version'] ?? 0) <= 0
+            || !hash_equals((string)($meta['fingerprint'] ?? ''), (string)($row['immutable_fingerprint'] ?? ''))) {
+            throw self::failure(CashierV3ResultCode::RESOURCE_VERSION_CONFLICT, '定制卡配置已经变化，请重新配置。', 'custom_card_configuration_changed');
+        }
+        $snapshot = json_decode((string)($row['configuration_snapshot_json'] ?? ''), true);
+        if (!is_array($snapshot) || (int)($snapshot['totalAmountCents'] ?? 0) <= 0) {
+            throw self::failure(CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE, '定制卡配置内容不完整，请重新配置。', 'custom_card_configuration_snapshot_invalid');
+        }
+        $row['configuration_snapshot'] = $snapshot;
+        return $row;
+    }
+
+    private function customCardCurrentFromConfiguration(array $shell, array $configuration): array
+    {
+        $snapshot = is_array($configuration['configuration_snapshot'] ?? null)
+            ? $configuration['configuration_snapshot']
+            : (is_array($configuration['snapshot'] ?? null) ? $configuration['snapshot'] : []);
+        $components = is_array($snapshot['components'] ?? null) ? $snapshot['components'] : [];
+        $total = (int)($snapshot['totalAmountCents'] ?? $configuration['total_amount_cents'] ?? 0);
+        $end = (int)($snapshot['validityEnd'] ?? $configuration['validity_end_at'] ?? 0);
+        if ($total <= 0 || $end <= time() || !$components) {
+            throw self::failure(CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE, '定制卡配置已失效，请重新配置。', 'custom_card_configuration_expired_or_invalid');
+        }
+        $resourceSources = (array)($shell['authoritySnapshot']['resourceSources'] ?? []);
+        foreach ($components as $component) {
+            foreach ((array)($component['resourceSources'] ?? []) as $resource) {
+                $resourceSources[] = $resource;
+            }
+        }
+        $resourceSources[] = [
+            'kind' => 'custom_card_configuration',
+            'id' => (string)$configuration['configuration_id'],
+            'version' => (int)$configuration['resource_version'],
+        ];
+        $resourceSources = self::uniqueResources($resourceSources);
+        $purchase = [
+            'sourceKind' => 'custom_card',
+            'productId' => $shell['productId'],
+            // A configuration is created before checkout.  Its authority
+            // snapshot must therefore not contain the read-time clock: that
+            // would alter the fingerprint between cart and checkout.  The
+            // issuer resolves this sentinel to the successful settlement time.
+            'validity' => ['writeValid' => 3, 'writeDays' => 0, 'writeStart' => 0, 'writeEnd' => $end],
+            'components' => $components,
+            'definitionVersion' => self::fingerprintVersion($snapshot),
+            'cardNameSnapshot' => (string)($snapshot['cardName'] ?? ''),
+            'activateOnPurchase' => !empty($snapshot['activateOnPurchase']),
+        ];
+        $authoritySnapshot = $shell['authoritySnapshot'];
+        $authoritySnapshot['sku']['priceCents'] = $total;
+        $authoritySnapshot['sku']['originalPriceCents'] = $total;
+        $authoritySnapshot['cardPurchase'] = $purchase;
+        $authoritySnapshot['resourceSources'] = $resourceSources;
+        $authoritySnapshot['customCardConfiguration'] = [
+            'id' => (string)$configuration['configuration_id'],
+            'version' => (int)$configuration['resource_version'],
+            'fingerprint' => (string)$configuration['immutable_fingerprint'],
+        ];
+        $result = $shell;
+        $result['unitPriceCents'] = $total;
+        $result['originalUnitPriceCents'] = $total;
+        $result['name'] = (string)($snapshot['cardName'] ?? $shell['name']);
+        $result['authoritySnapshot'] = $authoritySnapshot;
+        $result['authorityFingerprint'] = hash('sha256', self::canonicalJson($authoritySnapshot));
+        return $result;
+    }
+
+    private function lockedActiveItem(int $storeId, int $skuId): array
+    {
+        if ($this->readiness !== null) {
+            $this->readiness->assertSaleCatalogReady();
+        }
+        $row = $this->authority->lockStoreItemBySkuId($storeId, $skuId);
+        if (!is_array($row)) {
+            throw self::notAvailable($skuId);
+        }
+        $normalized = $this->normalizeAuthorityRow($row, true);
+        if (!$normalized['active']) {
+            throw self::notAvailable($skuId);
+        }
+        return $normalized;
+    }
+
+    private function readActiveItem(int $storeId, int $skuId): array
+    {
+        if ($this->readiness !== null) {
+            $this->readiness->assertSaleCatalogReady();
+        }
+        $row = $this->authority->readStoreItemBySkuId($storeId, $skuId);
+        if (!is_array($row)) {
+            throw self::notAvailable($skuId);
+        }
+        $normalized = $this->normalizeAuthorityRow($row, true);
+        if (!$normalized['active']) {
+            throw self::notAvailable($skuId);
+        }
+        return $normalized;
+    }
+
+    /** @return array<int,array> */
+    private function serverResources(array $item): array
+    {
+        $resources = [];
+        foreach ((array)($item['authoritySnapshot']['resourceSources'] ?? []) as $source) {
+            $kind = trim((string)($source['kind'] ?? ''));
+            $id = trim((string)($source['id'] ?? ''));
+            $version = (int)($source['version'] ?? 0);
+            if ($kind === '' || $id === '' || $version <= 0) {
+                throw self::failure(
+                    CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
+                    '商品资源快照不完整，请重新选择。',
+                    'cashier_sale_resource_snapshot_invalid'
+                );
+            }
+            $resources[] = [
+                'kind' => $kind,
+                'id' => $id,
+                'expectedVersion' => $version,
+                'roles' => [$kind . ':' . $id],
+                'accessMode' => 'read',
+                'providerContractVersion' => 'cashier-sale-catalog-resource-v1',
+                'authorityFingerprint' => hash('sha256', $kind . '|' . $id . '|' . $version),
+            ];
+        }
+        return $resources;
+    }
+
+    private function assertLockedContextsCover(array $item, array $contexts, array $ignoreKinds = []): void
+    {
+        $contextMap = [];
+        foreach ($contexts as $context) {
+            $kind = trim((string)($context['kind'] ?? ''));
+            $id = trim((string)($context['id'] ?? ''));
+            $version = (int)($context['expected_version'] ?? $context['expectedVersion'] ?? 0);
+            if ($kind !== '' && $id !== '') {
+                $contextMap[$kind . ':' . $id] = $version;
+            }
+        }
+        foreach ($this->serverResources($item) as $resource) {
+            if (in_array($resource['kind'], $ignoreKinds, true)) {
+                continue;
+            }
+            $key = $resource['kind'] . ':' . $resource['id'];
+            if (($contextMap[$key] ?? 0) !== $resource['expectedVersion']) {
+                throw CashierV3CommandException::invalidContext(
+                    '商品资源版本已经变化，请刷新后重新选择。',
+                    ['reason' => 'cashier_sale_locked_context_mismatch', 'resource' => $key]
+                );
+            }
+        }
+    }
+
+    private function assertStoredAuthorityMatches(array $stored, array $current): void
+    {
+        $matches = (int)($stored['catalog_product_id'] ?? 0) === $current['productId']
+            && (int)($stored['catalog_sku_id'] ?? 0) === $current['skuId']
+            && (int)($stored['catalog_product_type'] ?? -1) === $current['productType']
+            && (int)($stored['source_version'] ?? 0) === $current['productVersion']
+            && (int)($stored['detail_version'] ?? 0) === $current['skuVersion']
+            && (int)($stored['unit_price_cents'] ?? -1) === $current['unitPriceCents']
+            && (int)($stored['original_unit_price_cents'] ?? -1) === $current['originalUnitPriceCents'];
+        $fingerprint = (string)($stored['authority_fingerprint'] ?? '');
+        $snapshot = self::decodeStoredObject(
+            (string)($stored['authority_snapshot_json'] ?? ''),
+            'authority_snapshot_json'
+        );
+        $storedFingerprint = hash('sha256', self::canonicalJson($snapshot));
+        if (!$matches
+            || preg_match('/^[a-f0-9]{64}$/D', $fingerprint) !== 1
+            || !hash_equals($fingerprint, $storedFingerprint)
+            || !hash_equals($fingerprint, $current['authorityFingerprint'])) {
+            throw new CashierV3CommandException(
+                CashierV3ResultCode::RESOURCE_VERSION_CONFLICT,
+                '商品资料或价格已经变化，请删除该行后重新选择。',
+                CashierV3ResultCode::STATUS_CONFLICT,
+                [
+                    'line_id' => (string)($stored['line_key'] ?? ''),
+                    'reason' => 'cashier_sale_authority_changed',
+                    'current_product_version' => $current['productVersion'],
+                    'current_sku_version' => $current['skuVersion'],
+                ]
+            );
+        }
+    }
+
+    private function assertPurchasable(array $item, int $quantity): void
+    {
+        if ($quantity <= 0 || $quantity > self::MAX_QUANTITY) {
+            throw self::failure(
+                CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
+                '购物车数量无效，请重新操作。',
+                'cashier_sale_quantity_invalid'
+            );
+        }
+        if ($item['kindCode'] === 'custom_card') {
+            throw self::failure(
+                CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
+                '定制卡需要先完成卡内项目配置，不能直接加入购物车。',
+                'custom_card_configuration_required'
+            );
+        }
+        if ($item['productType'] === 5 && empty($item['authoritySnapshot']['cardPurchase']['components'])) {
+            throw self::failure(
+                CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
+                '该卡项没有有效的卡内项目配置，请联系管理员核对。',
+                'card_components_missing'
+            );
+        }
+        // `stock` is the legacy SKU display value. Inventory-managed retail
+        // products must be validated against the V3 default-store stock row
+        // and active batch balances in assertInventoryAvailableForSale().
+    }
+
+    /**
+     * Legacy SKU stock is a display-era value. A V3 inventory-managed retail
+     * sale must have a real default-store stock row and an active batch balance
+     * before it can enter the cart; final checkout re-locks these rows again.
+     */
+    private function assertInventoryAvailableForSale(
+        array $item,
+        int $quantity,
+        CashierV3DataScopeContext $dataScope
+    ): void {
+        if ((int)($item['productType'] ?? -1) !== 0 || empty($item['isInventory'])) {
+            return;
+        }
+        $storeId = (int)($item['storeId'] ?? 0);
+        $productId = (int)($item['productId'] ?? 0);
+        $skuId = (int)($item['skuId'] ?? 0);
+        if ($storeId <= 0 || $productId <= 0 || $skuId <= 0 || $quantity <= 0
+            || $storeId !== $dataScope->forcedStoreId()) {
+            throw self::failure(
+                CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
+                '当前门店库存资料不完整，不能销售该产品。',
+                'cashier_sale_inventory_scope_invalid'
+            );
+        }
+
+        $locations = \think\facade\Db::name('inventory_location')
+            ->where('tenant_id', $dataScope->tenantId())
+            ->where('store_id', $storeId)
+            ->where('location_type', 'STORE')
+            ->where('is_default', 1)
+            ->where('location_status', 'ACTIVE')
+            ->field('id')
+            ->order('id asc')
+            ->limit(2)
+            ->select()
+            ->toArray();
+        if (count($locations) !== 1 || (int)($locations[0]['id'] ?? 0) <= 0) {
+            throw self::inventoryUnavailable('cashier_sale_inventory_location_not_ready');
+        }
+
+        $stocks = \think\facade\Db::name('inventory_stock')
+            ->where('tenant_id', $dataScope->tenantId())
+            ->where('store_id', $storeId)
+            ->where('location_id', (int)$locations[0]['id'])
+            ->where('consumable_product_id', $productId)
+            ->where('sku_id', $skuId)
+            ->where('stock_status', 'GOOD')
+            ->field('id,quantity_scale,available_quantity_units')
+            ->order('id asc')
+            ->limit(2)
+            ->select()
+            ->toArray();
+        if (count($stocks) !== 1) {
+            throw self::inventoryUnavailable('cashier_sale_inventory_stock_not_ready');
+        }
+        $scale = (int)($stocks[0]['quantity_scale'] ?? -1);
+        $factor = 1;
+        for ($index = 0; $index < $scale; $index++) {
+            $factor *= 10;
+        }
+        if ($scale < 0 || $scale > 4 || $quantity > intdiv(PHP_INT_MAX, $factor)
+            || (int)($stocks[0]['available_quantity_units'] ?? -1) < $quantity * $factor) {
+            throw self::inventoryUnavailable('cashier_sale_inventory_shortage');
+        }
+        $batchAvailable = (int)\think\facade\Db::name('inventory_batch')
+            ->where('stock_id', (int)$stocks[0]['id'])
+            ->where('batch_status', 'ACTIVE')
+            ->sum('available_quantity_units');
+        if ($batchAvailable < $quantity * $factor
+            || $batchAvailable !== (int)$stocks[0]['available_quantity_units']) {
+            throw self::inventoryUnavailable('cashier_sale_inventory_batch_not_ready');
+        }
+    }
+
+    private static function inventoryUnavailable(string $reason): CashierV3CommandException
+    {
+        return self::failure(
+            CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
+            '当前门店尚未入库或库存不足，不能销售该产品。',
+            $reason
+        );
+    }
+
+    private function normalizeAuthorityRow(array $row, bool $withComponents): array
+    {
+        $productId = (int)($row['product_id'] ?? 0);
+        $skuId = (int)($row['sku_id'] ?? 0);
+        $skuProductId = (int)($row['sku_product_id'] ?? 0);
+        $productType = (int)($row['product_product_type'] ?? -1);
+        $skuProductType = (int)($row['sku_product_type'] ?? -1);
+        $storeId = (int)($row['product_relation_id'] ?? 0);
+        $name = trim((string)($row['product_store_name'] ?? ''));
+        $skuUnique = trim((string)($row['sku_unique'] ?? ''));
+        $specification = trim((string)($row['sku_suk'] ?? ''));
+        // 历史普通卡项（product_type=5）的一部分 SKU 仍沿用 product_type=0。
+        // 它不是跨商品或跨门店关系，主商品、SKU、门店和 SKU 唯一标识仍须完整一致；
+        // 因此只兼容这一种已验证的旧列形态，其他类型不一致继续拒绝。
+        $isLegacyCardSkuType = $productType === 5 && $skuProductType === 0;
+        if ($productId <= 0 || $skuId <= 0 || $skuProductId !== $productId || $storeId <= 0
+            || !in_array($productType, [0, 4, 5, 6], true)
+            || ($skuProductType !== $productType && !$isLegacyCardSkuType) || $name === '' || $skuUnique === '') {
+            throw self::failure(
+                CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
+                '门店商品资料不完整，请联系管理员核对。',
+                'cashier_catalog_authority_invalid',
+                ['product_id' => $productId, 'sku_id' => $skuId]
+            );
+        }
+        $unitPriceCents = self::moneyToCents($row['sku_price'] ?? null, 'price');
+        $originalUnitPriceCents = self::moneyToCents($row['sku_ot_price'] ?? null, 'ot_price');
+        if ($originalUnitPriceCents < $unitPriceCents) {
+            $originalUnitPriceCents = $unitPriceCents;
+        }
+        $categoryNames = [];
+        foreach ((array)($row['category_names'] ?? []) as $categoryName) {
+            $categoryName = trim((string)$categoryName);
+            if ($categoryName !== '' && !in_array($categoryName, $categoryNames, true)) {
+                $categoryNames[] = $categoryName;
+            }
+        }
+        $categoryIds = self::positiveIds((string)($row['product_cate_id'] ?? ''));
+        $kind = self::kind($productType, $productId, (int)($row['product_pid'] ?? 0));
+        $stock = self::nonnegativeDecimal($row['sku_stock'] ?? 0, 'stock', true);
+        $active = (int)($row['product_type'] ?? 0) === 1
+            && (int)($row['product_is_del'] ?? 1) === 0
+            && (int)($row['product_is_show'] ?? 0) === 1
+            && (int)($row['product_is_verify'] ?? 0) === 1
+            && (int)($row['sku_type'] ?? -1) === 0
+            && (int)($row['sku_is_show'] ?? 0) === 1;
+
+        $productVersionPayload = [
+            'id' => $productId,
+            'pid' => (int)($row['product_pid'] ?? 0),
+            'storeId' => $storeId,
+            'productType' => $productType,
+            'name' => $name,
+            'categoryIds' => $categoryIds,
+            'isShow' => (int)($row['product_is_show'] ?? 0),
+            'isDeleted' => (int)($row['product_is_del'] ?? 0),
+            'isVerified' => (int)($row['product_is_verify'] ?? 0),
+            'isInventory' => (int)($row['product_is_inventory'] ?? 0),
+            'allowNegativeStock' => (int)($row['product_allow_negative_stock'] ?? 0),
+            'cardNum' => (int)($row['product_card_num'] ?? 0),
+            'cardNumType' => (int)($row['product_card_num_type'] ?? 0),
+            'cardRuleType' => trim((string)($row['product_card_rule_type'] ?? '')),
+            'cardRuleVersion' => (int)($row['product_card_rule_version'] ?? 0),
+            'cardChoiceLimit' => (int)($row['product_card_choice_limit'] ?? 0),
+            'cardSharedTimes' => (int)($row['product_card_shared_times'] ?? 0),
+        ];
+        $skuVersionPayload = [
+            'id' => $skuId,
+            'productId' => $productId,
+            'productType' => $skuProductType,
+            'unique' => $skuUnique,
+            'name' => $specification,
+            'code' => trim((string)($row['sku_code'] ?? '')),
+            'barCode' => trim((string)($row['sku_bar_code'] ?? '')),
+            'priceCents' => $unitPriceCents,
+            'originalPriceCents' => $originalUnitPriceCents,
+            'isShow' => (int)($row['sku_is_show'] ?? 0),
+            'writeTimes' => (int)($row['sku_write_times'] ?? 0),
+            'writeValid' => (int)($row['sku_write_valid'] ?? 0),
+            'writeDays' => (int)($row['sku_write_days'] ?? 0),
+            'writeStart' => (int)($row['sku_write_start'] ?? 0),
+            'writeEnd' => (int)($row['sku_write_end'] ?? 0),
+        ];
+        $productVersion = self::fingerprintVersion($productVersionPayload);
+        $skuVersion = self::fingerprintVersion($skuVersionPayload);
+        $resourceSources = [
+            ['kind' => 'catalog_product', 'id' => (string)$productId, 'version' => $productVersion],
+            ['kind' => 'catalog_sku', 'id' => (string)$skuId, 'version' => $skuVersion],
+        ];
+        $cardPurchase = $this->cardPurchaseSnapshot(
+            $row,
+            $kind['code'],
+            $productId,
+            $withComponents,
+            $resourceSources
+        );
+        if (!empty($cardPurchase['resourceSources'])) {
+            foreach ($cardPurchase['resourceSources'] as $resource) {
+                $resourceSources[] = $resource;
+            }
+        }
+        $resourceSources = self::uniqueResources($resourceSources);
+        unset($cardPurchase['resourceSources']);
+        $authoritySnapshot = [
+            'contractVersion' => self::CHECKOUT_SOURCE_CONTRACT_VERSION,
+            'storeId' => $storeId,
+            'product' => $productVersionPayload,
+            'sku' => $skuVersionPayload,
+            'productVersion' => $productVersion,
+            'skuVersion' => $skuVersion,
+            'cardPurchase' => $cardPurchase,
+            'resourceSources' => $resourceSources,
+        ];
+        $authorityFingerprint = hash('sha256', self::canonicalJson($authoritySnapshot));
+
+        return [
+            'active' => $active,
+            'storeId' => $storeId,
+            'productId' => $productId,
+            'skuId' => $skuId,
+            'skuUnique' => $skuUnique,
+            'productType' => $productType,
+            'kindCode' => $kind['code'],
+            'kind' => $kind['label'],
+            'cardRuleType' => trim((string)($row['product_card_rule_type'] ?? '')),
+            'name' => $name,
+            'specification' => $specification === '默认' ? '' : $specification,
+            'code' => trim((string)($row['sku_code'] ?? $row['sku_bar_code'] ?? '')),
+            'categoryId' => $categoryIds[0] ?? 0,
+            'categoryName' => $categoryNames[0] ?? '全部',
+            'categoryNames' => $categoryNames,
+            'unitPriceCents' => $unitPriceCents,
+            'originalUnitPriceCents' => $originalUnitPriceCents,
+            'stock' => $stock,
+            'isInventory' => (int)($row['product_is_inventory'] ?? 0) === 1,
+            'allowNegativeStock' => (int)($row['product_allow_negative_stock'] ?? 0) === 1,
+            'productVersion' => $productVersion,
+            'skuVersion' => $skuVersion,
+            'authoritySnapshot' => $authoritySnapshot,
+            'authorityFingerprint' => $authorityFingerprint,
+        ];
+    }
+
+    private function cardPurchaseSnapshot(
+        array $row,
+        string $kindCode,
+        int $productId,
+        bool $withComponents,
+        array $mainResources
+    ): array {
+        $isCard = in_array($kindCode, ['count_card', 'card_package', 'custom_card'], true);
+        if (!$isCard) {
+            return [
+                'sourceKind' => 'none',
+                'validity' => null,
+                'components' => [],
+                'definitionVersion' => 0,
+                'resourceSources' => [],
+            ];
+        }
+        $ruleType = trim((string)($row['product_card_rule_type'] ?? ''));
+        $ruleVersion = (int)($row['product_card_rule_version'] ?? 0);
+        $choiceLimit = (int)($row['product_card_choice_limit'] ?? 0);
+        $sharedTimes = (int)($row['product_card_shared_times'] ?? 0);
+        $this->assertCardRuleHeader($kindCode, $ruleType, $ruleVersion, $choiceLimit, $sharedTimes);
+        $validity = self::validitySnapshot($row, $kindCode, $ruleType);
+        $components = [];
+        $resources = [];
+        if ($withComponents && $kindCode === 'card_package') {
+            foreach ((array)($row['card_components'] ?? []) as $wrapper) {
+                $relation = is_array($wrapper['relation'] ?? null) ? $wrapper['relation'] : [];
+                $item = is_array($wrapper['item'] ?? null) ? $wrapper['item'] : null;
+                if (!$item || (int)($relation['card_product_id'] ?? 0) !== $productId
+                    || (int)($relation['status'] ?? 0) !== 1) {
+                    throw self::failure(
+                        CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
+                        '卡内项目配置不完整，请联系管理员核对。',
+                        'card_component_authority_missing',
+                        ['relation_id' => (int)($relation['id'] ?? 0)]
+                    );
+                }
+                $component = $this->normalizeAuthorityRow($item, false);
+                if (!$this->isCardComponentSnapshotEligible($component)
+                    || (int)($relation['product_id'] ?? 0) !== $component['productId']
+                    || (int)($relation['product_type'] ?? -1) !== $component['productType']
+                    || !in_array($component['productType'], [0, 6], true)
+                    || trim((string)($relation['product_attr_unique'] ?? '')) !== $component['skuUnique']) {
+                    throw self::failure(
+                        CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
+                        '卡内项目资料不完整或不属于当前门店，请联系管理员核对。',
+                        'card_component_not_available',
+                        ['relation_id' => (int)($relation['id'] ?? 0)]
+                    );
+                }
+                $writeTimes = (int)($relation['write_times'] ?? 0);
+                $writeoffAmountCents = self::moneyToCents(
+                    $relation['writeoff_amount'] ?? '0.00',
+                    'card_component_writeoff_amount'
+                );
+                if (($ruleType === '' || in_array($ruleType, ['normal', 'choice_kind'], true))
+                    && $writeTimes <= 0) {
+                    throw self::failure(
+                        CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
+                        '卡内项目次数无效，请联系管理员核对。',
+                        'card_component_write_times_invalid',
+                        ['relation_id' => (int)($relation['id'] ?? 0)]
+                    );
+                }
+                if (in_array($ruleType, ['choice_count', 'time'], true) && $writeTimes !== 0) {
+                    throw self::failure(
+                        CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
+                        '卡内项目次数与卡项规则不一致，请联系管理员核对。',
+                        'card_component_write_times_rule_mismatch',
+                        ['relation_id' => (int)($relation['id'] ?? 0)]
+                    );
+                }
+                if ($ruleType !== '' && $ruleType !== 'time' && $writeoffAmountCents !== 0) {
+                    throw self::failure(
+                        CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
+                        '卡内项目核销金额与卡项规则不一致，请联系管理员核对。',
+                        'card_component_writeoff_amount_rule_mismatch',
+                        ['relation_id' => (int)($relation['id'] ?? 0)]
+                    );
+                }
+                $components[] = [
+                    'relationId' => (int)$relation['id'],
+                    'productId' => $component['productId'],
+                    'skuId' => $component['skuId'],
+                    'skuUnique' => $component['skuUnique'],
+                    'productType' => $component['productType'],
+                    'nameSnapshot' => $component['name'],
+                    'skuNameSnapshot' => $component['specification'],
+                    'categoryIdSnapshot' => $component['categoryId'],
+                    'categoryNameSnapshot' => $component['categoryName'],
+                    'writeTimes' => $writeTimes,
+                    'writeoffAmountCents' => $writeoffAmountCents,
+                    'configuredPriceCents' => self::moneyToCents($relation['price'] ?? null, 'card_component_price'),
+                    'configuredCostCents' => self::moneyToCents($relation['cost'] ?? null, 'card_component_cost'),
+                    'productVersion' => $component['productVersion'],
+                    'skuVersion' => $component['skuVersion'],
+                ];
+                foreach ($component['authoritySnapshot']['resourceSources'] as $resource) {
+                    $resources[] = $resource;
+                }
+            }
+        }
+        if ($withComponents && $ruleType === 'choice_kind' && $choiceLimit > count($components)) {
+            throw self::failure(
+                CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
+                '任选项目种数超过卡内项目总数，请联系管理员核对。',
+                'card_choice_limit_exceeds_components'
+            );
+        }
+        // Validity is SKU authority and already participates in skuVersion.
+        // The product-level definition guard must have one stable version even
+        // when a card product has multiple sale SKUs.
+        $definitionPayload = [
+            'sourceKind' => $kindCode,
+            'ruleType' => $ruleType,
+            'ruleVersion' => $ruleVersion,
+            'choiceLimit' => $choiceLimit,
+            'sharedTimes' => $sharedTimes,
+            'components' => $components,
+        ];
+        $definitionVersion = self::fingerprintVersion($definitionPayload);
+        $resources[] = [
+            'kind' => 'catalog_card_definition',
+            'id' => (string)$productId,
+            'version' => $definitionVersion,
+        ];
+        return [
+            'sourceKind' => $kindCode,
+            'productId' => $productId,
+            'cardNameSnapshot' => trim((string)($row['product_store_name'] ?? '')),
+            'ruleType' => $ruleType,
+            'ruleVersion' => $ruleVersion,
+            'choiceLimit' => $choiceLimit,
+            'sharedTimes' => $sharedTimes,
+            'validity' => $validity,
+            'components' => $components,
+            'definitionVersion' => $definitionVersion,
+            'resourceSources' => self::uniqueResources(array_merge($mainResources, $resources)),
+        ];
+    }
+
+    private function assertCardRuleHeader(
+        string $kindCode,
+        string $ruleType,
+        int $ruleVersion,
+        int $choiceLimit,
+        int $sharedTimes
+    ): void {
+        if ($kindCode !== 'card_package' || $ruleType === '') {
+            return;
+        }
+        if (!in_array($ruleType, ['normal', 'choice_kind', 'choice_count', 'time'], true)
+            || $ruleVersion <= 0
+            || ($ruleType === 'choice_kind' ? $choiceLimit <= 0 : $choiceLimit !== 0)
+            || ($ruleType === 'choice_count' ? $sharedTimes <= 0 : $sharedTimes !== 0)) {
+            throw self::failure(
+                CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
+                '卡项规则配置不完整，请联系管理员核对。',
+                'card_rule_header_invalid'
+            );
+        }
+    }
+
+    private static function validitySnapshot(array $row, string $kindCode, string $ruleType = ''): array
+    {
+        $mode = (int)($row['sku_write_valid'] ?? 0);
+        $days = max(0, (int)($row['sku_write_days'] ?? 0));
+        $start = max(0, (int)($row['sku_write_start'] ?? 0));
+        $end = max(0, (int)($row['sku_write_end'] ?? 0));
+        $times = max(0, (int)($row['sku_write_times'] ?? 0));
+        if ($kindCode === 'count_card' && $times <= 0) {
+            throw self::failure(
+                CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
+                '次卡可用次数配置无效，请联系管理员核对。',
+                'count_card_write_times_invalid'
+            );
+        }
+        if (!in_array($mode, [1, 2, 3], true)
+            || ($ruleType === 'time' && $mode === 1)
+            || ($mode === 2 && $days <= 0)
+            || ($mode === 3 && ($start <= 0 || $end <= $start))) {
+            throw self::failure(
+                CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
+                '卡项有效期配置无效，请联系管理员核对。',
+                'card_validity_invalid'
+            );
+        }
+        return [
+            'writeValid' => $mode,
+            'writeDays' => $mode === 2 ? $days : 0,
+            'writeStart' => $mode === 3 ? $start : 0,
+            'writeEnd' => $mode === 3 ? $end : 0,
+            'writeTimes' => $times,
+        ];
+    }
+
+    /**
+     * 父卡是否可售只由父卡上架状态决定；卡内项目后来被隐藏时，仍应以本次
+     * 购卡冻结的项目、次数和金额签发权益。这里仍拒绝删除、未审核、跨店或
+     * 身份不一致的配置，避免把损坏定义写入新的正式权益。
+     */
+    private function isCardComponentSnapshotEligible(array $component): bool
+    {
+        $snapshot = is_array($component['authoritySnapshot'] ?? null)
+            ? $component['authoritySnapshot'] : [];
+        $product = is_array($snapshot['product'] ?? null) ? $snapshot['product'] : [];
+        return (int)($product['isDeleted'] ?? 1) === 0
+            && (int)($product['isVerified'] ?? 0) === 1;
+    }
+
+    /**
+     * Builds the catalog stock projection from the same V3 default-location
+     * stock and active batches used by add-to-cart and final settlement.
+     *
+     * @param array<int,array{item:array,cardUnavailableReason:string}> $catalogItems
+     * @return array<string,array{available:bool,quantity:string}>
+     */
+    private function catalogInventoryAvailability(array $catalogItems, CashierV3DataScopeContext $dataScope): array
+    {
+        $managed = [];
+        foreach ($catalogItems as $entry) {
+            $item = is_array($entry['item'] ?? null) ? $entry['item'] : [];
+            if ((int)($item['productType'] ?? -1) !== 0 || empty($item['isInventory'])) {
+                continue;
+            }
+            if ((int)($item['storeId'] ?? 0) !== $dataScope->forcedStoreId()) {
+                continue;
+            }
+            $key = self::inventoryItemKey($item);
+            if ($key !== '') {
+                $managed[$key] = $item;
+            }
+        }
+        if (!$managed) {
+            return [];
+        }
+
+        $unavailable = [];
+        foreach ($managed as $key => $_item) {
+            $unavailable[$key] = ['available' => false, 'quantity' => '0'];
+        }
+        $storeId = $dataScope->forcedStoreId();
+        if ($storeId <= 0) {
+            return $unavailable;
+        }
+        $locations = \think\facade\Db::name('inventory_location')
+            ->where('tenant_id', $dataScope->tenantId())
+            ->where('store_id', $storeId)
+            ->where('location_type', 'STORE')
+            ->where('is_default', 1)
+            ->where('location_status', 'ACTIVE')
+            ->field('id')
+            ->order('id asc')
+            ->limit(2)
+            ->select()
+            ->toArray();
+        if (count($locations) !== 1 || (int)($locations[0]['id'] ?? 0) <= 0) {
+            return $unavailable;
+        }
+
+        $productIds = [];
+        $skuIds = [];
+        foreach ($managed as $item) {
+            $productIds[] = (int)$item['productId'];
+            $skuIds[] = (int)$item['skuId'];
+        }
+        $rows = \think\facade\Db::name('inventory_stock')->alias('stock')
+            ->leftJoin('inventory_batch batch', 'batch.stock_id = stock.id AND batch.batch_status = "ACTIVE"')
+            ->where('stock.tenant_id', $dataScope->tenantId())
+            ->where('stock.store_id', $storeId)
+            ->where('stock.location_id', (int)$locations[0]['id'])
+            ->where('stock.stock_status', 'GOOD')
+            ->whereIn('stock.consumable_product_id', array_values(array_unique($productIds)))
+            ->whereIn('stock.sku_id', array_values(array_unique($skuIds)))
+            ->field('stock.id,stock.consumable_product_id,stock.sku_id,stock.quantity_scale,stock.available_quantity_units,'
+                . 'COALESCE(SUM(batch.available_quantity_units), 0) AS batch_available_quantity_units')
+            ->group('stock.id,stock.consumable_product_id,stock.sku_id,stock.quantity_scale,stock.available_quantity_units')
+            ->select()
+            ->toArray();
+
+        $byItem = [];
+        foreach ($rows as $row) {
+            $key = (int)($row['consumable_product_id'] ?? 0) . '|' . (int)($row['sku_id'] ?? 0);
+            if (!isset($managed[$key])) {
+                continue;
+            }
+            if (isset($byItem[$key])) {
+                $byItem[$key] = null;
+                continue;
+            }
+            $byItem[$key] = $row;
+        }
+        foreach ($managed as $key => $_item) {
+            $row = $byItem[$key] ?? null;
+            if (!is_array($row)) {
+                continue;
+            }
+            $scale = (int)($row['quantity_scale'] ?? -1);
+            $availableUnits = (int)($row['available_quantity_units'] ?? -1);
+            $batchUnits = (int)($row['batch_available_quantity_units'] ?? -1);
+            if ($scale < 0 || $scale > 4 || $availableUnits < 0 || $batchUnits !== $availableUnits) {
+                continue;
+            }
+            $unavailable[$key] = [
+                'available' => $availableUnits > 0,
+                'quantity' => self::inventoryUnitsToDecimal($availableUnits, $scale),
+            ];
+        }
+        return $unavailable;
+    }
+
+    private static function inventoryItemKey(array $item): string
+    {
+        $productId = (int)($item['productId'] ?? 0);
+        $skuId = (int)($item['skuId'] ?? 0);
+        return $productId > 0 && $skuId > 0 ? $productId . '|' . $skuId : '';
+    }
+
+    private static function inventoryUnitsToDecimal(int $units, int $scale): string
+    {
+        if ($units < 0 || $scale < 0 || $scale > 4) {
+            return '0';
+        }
+        if ($scale === 0) {
+            return (string)$units;
+        }
+        $digits = str_pad((string)$units, $scale + 1, '0', STR_PAD_LEFT);
+        $integer = substr($digits, 0, -$scale);
+        $decimal = rtrim(substr($digits, -$scale), '0');
+        return $decimal === '' ? $integer : $integer . '.' . $decimal;
+    }
+
+    private function publicCatalogItem(array $item, ?array $inventory = null): array
+    {
+        $isInventoryProduct = $item['productType'] === 0 && $item['isInventory'];
+        $inventoryAvailable = !$isInventoryProduct || !empty($inventory['available']);
+        $disabled = !$item['active'] || $item['kindCode'] === 'custom_card' || !$inventoryAvailable;
+        $reason = '';
+        if (!$item['active']) {
+            $reason = '该品项已下架或不可售';
+        } elseif ($item['kindCode'] === 'custom_card') {
+            $reason = '定制卡需先配置卡内项目';
+        } elseif (!$inventoryAvailable) {
+            $reason = '库存不足';
+        }
+        return [
+            'id' => $item['skuId'],
+            'catalogItemId' => $item['skuId'],
+            'productId' => $item['productId'],
+            'skuId' => $item['skuId'],
+            'productType' => $item['productType'],
+            'kindCode' => $item['kindCode'],
+            'kind' => $item['kind'],
+            'cardRuleType' => $item['cardRuleType'],
+            'cardRuleLabel' => self::cardRuleLabel($item['cardRuleType']),
+            // 目录只需要展示购卡前确认的规则内容；权威快照、资源版本和
+            // 指纹仍只在服务端选品及结账事务内使用，不能由页面回传。
+            'cardPreview' => self::publicCardPreview($item),
+            'name' => $item['name'],
+            'specification' => $item['specification'],
+            'code' => $item['code'],
+            'category' => $item['categoryName'],
+            'categoryId' => $item['categoryId'],
+            'price' => self::centsToMoney($item['unitPriceCents']),
+            'originalPrice' => self::centsToMoney($item['originalUnitPriceCents']),
+            'productVersion' => $item['productVersion'],
+            'skuVersion' => $item['skuVersion'],
+            'stockText' => $isInventoryProduct
+                ? '库存 ' . (string)($inventory['quantity'] ?? '0')
+                : '',
+            'stockWarning' => $disabled && $reason === '库存不足',
+            'disabled' => $disabled,
+            'disabledReason' => $reason,
+        ];
+    }
+
+    private static function publicCardPreview(array $item): ?array
+    {
+        if (($item['kindCode'] ?? '') !== 'card_package'
+            || !in_array($item['cardRuleType'] ?? '', ['normal', 'choice_kind', 'choice_count', 'time'], true)) {
+            return null;
+        }
+
+        $purchase = (array)($item['authoritySnapshot']['cardPurchase'] ?? []);
+        $validity = (array)($purchase['validity'] ?? []);
+        $components = [];
+        foreach ((array)($purchase['components'] ?? []) as $component) {
+            $components[] = [
+                'name' => (string)($component['nameSnapshot'] ?? ''),
+                'specification' => (string)($component['skuNameSnapshot'] ?? ''),
+                'writeTimes' => (int)($component['writeTimes'] ?? 0),
+                'writeoffAmountCents' => (int)($component['writeoffAmountCents'] ?? 0),
+            ];
+        }
+
+        return [
+            'ruleType' => (string)($purchase['ruleType'] ?? ''),
+            'ruleVersion' => (int)($purchase['ruleVersion'] ?? 0),
+            'choiceLimit' => (int)($purchase['choiceLimit'] ?? 0),
+            'sharedTimes' => (int)($purchase['sharedTimes'] ?? 0),
+            'validity' => [
+                'writeValid' => (int)($validity['writeValid'] ?? 0),
+                'writeDays' => (int)($validity['writeDays'] ?? 0),
+                'writeStart' => (int)($validity['writeStart'] ?? 0),
+                'writeEnd' => (int)($validity['writeEnd'] ?? 0),
+            ],
+            'components' => $components,
+        ];
+    }
+
+    private static function cardRuleLabel(string $ruleType): string
+    {
+        $labels = [
+            'normal' => '普通卡',
+            'choice_kind' => '任选种数卡',
+            'choice_count' => '任选次数卡',
+            'time' => '时间卡',
+        ];
+        return $labels[$ruleType] ?? '';
+    }
+
+    private function displaySnapshot(array $item): array
+    {
+        return [
+            'catalogItemId' => $item['skuId'],
+            'productId' => $item['productId'],
+            'skuId' => $item['skuId'],
+            'productType' => $item['productType'],
+            'kindCode' => $item['kindCode'],
+            'kind' => $item['kind'],
+            'name' => $item['name'],
+            'specification' => $item['specification'],
+            'code' => $item['code'],
+            'categoryId' => $item['categoryId'],
+            'category' => $item['categoryName'],
+            'unitPrice' => self::centsToMoney($item['unitPriceCents']),
+            'originalUnitPrice' => self::centsToMoney($item['originalUnitPriceCents']),
+            'serviceSource' => '本次购买',
+        ];
+    }
+
+    private static function kind(int $productType, int $productId, int $pid): array
+    {
+        // 历史定制卡壳是 pid=8154 的隐藏项目副本。必须在“项目”分支前
+        // 识别它，才能让定制配置走卡项签发而非项目服务流程。
+        if ($productId === self::CUSTOM_CARD_SHELL_PRODUCT_ID || $pid === self::CUSTOM_CARD_SHELL_PRODUCT_ID) {
+            return ['code' => 'custom_card', 'label' => '定制卡'];
+        }
+        if ($productType === 6) {
+            return ['code' => 'project', 'label' => '项目'];
+        }
+        if ($productType === 0) {
+            return ['code' => 'product', 'label' => '产品'];
+        }
+        if ($productType === 4) {
+            return ['code' => 'count_card', 'label' => '卡项'];
+        }
+        // 旧商品表没有时间卡/普通卡项的权威子类型列，不能按名称猜测。
+        return ['code' => 'card_package', 'label' => '卡项'];
+    }
+
+    private function assertStoreScope(
+        CashierV3OperatorScope $operatorScope,
+        CashierV3DataScopeContext $dataScope
+    ): void {
+        $storeId = $operatorScope->storeId();
+        if ($storeId <= 0 || (!$dataScope->allowsStore($storeId) && !$dataScope->isSuperAdmin())) {
+            throw self::failure(
+                CashierV3ResultCode::PERMISSION_DENIED,
+                '当前账号没有在本店查看或选择商品的权限。',
+                'cashier_catalog_store_scope_denied'
+            );
+        }
+    }
+
+    private static function positiveId($value, string $field): int
+    {
+        if (is_bool($value) || is_array($value) || is_object($value) || $value === null) {
+            throw self::invalidField($field);
+        }
+        $raw = trim((string)$value);
+        if (preg_match('/^[1-9][0-9]*$/D', $raw) !== 1 || (string)(int)$raw !== $raw) {
+            throw self::invalidField($field);
+        }
+        return (int)$raw;
+    }
+
+    private static function positiveIds(string $csv): array
+    {
+        $ids = [];
+        foreach (explode(',', $csv) as $raw) {
+            $raw = trim($raw);
+            if (preg_match('/^[1-9][0-9]*$/D', $raw) === 1) {
+                $ids[(int)$raw] = true;
+            }
+        }
+        return array_keys($ids);
+    }
+
+    private static function moneyToCents($value, string $field): int
+    {
+        if (is_bool($value) || is_array($value) || is_object($value) || $value === null) {
+            throw self::invalidAuthorityField($field);
+        }
+        $raw = trim((string)$value);
+        if (preg_match('/^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,2})?$/D', $raw) !== 1) {
+            throw self::invalidAuthorityField($field);
+        }
+        $parts = explode('.', $raw, 2);
+        $whole = $parts[0];
+        $fraction = str_pad($parts[1] ?? '', 2, '0');
+        $cents = $whole . substr($fraction, 0, 2);
+        $cents = ltrim($cents, '0');
+        $cents = $cents === '' ? '0' : $cents;
+        if (strlen($cents) > 18 || (strlen($cents) === 18 && strcmp($cents, (string)PHP_INT_MAX) > 0)) {
+            throw self::invalidAuthorityField($field);
+        }
+        return (int)$cents;
+    }
+
+    private static function nonnegativeDecimal($value, string $field, bool $allowNegative): string
+    {
+        if (is_bool($value) || is_array($value) || is_object($value) || $value === null) {
+            throw self::invalidAuthorityField($field);
+        }
+        $raw = trim((string)$value);
+        $pattern = $allowNegative
+            ? '/^-?(?:0|[1-9][0-9]*)(?:\.[0-9]{1,4})?$/D'
+            : '/^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,4})?$/D';
+        if (preg_match($pattern, $raw) !== 1) {
+            throw self::invalidAuthorityField($field);
+        }
+        return bcadd($raw, '0', 4);
+    }
+
+    private static function fingerprintVersion(array $value): int
+    {
+        $hex = substr(hash('sha256', self::canonicalJson($value)), 0, 15);
+        $version = intval($hex, 16);
+        return $version > 0 ? $version : 1;
+    }
+
+    private static function canonicalJson(array $value): string
+    {
+        $canonical = self::canonicalize($value);
+        $json = json_encode($canonical, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        if (!is_string($json)) {
+            throw self::invalidAuthorityField('authority_json');
+        }
+        return $json;
+    }
+
+    private static function canonicalize($value)
+    {
+        if (!is_array($value)) {
+            return $value;
+        }
+        if (array_keys($value) === ($value ? range(0, count($value) - 1) : [])) {
+            return array_map([self::class, 'canonicalize'], $value);
+        }
+        ksort($value, SORT_STRING);
+        foreach ($value as $key => $item) {
+            $value[$key] = self::canonicalize($item);
+        }
+        return $value;
+    }
+
+    private static function multiplyCents(int $unit, int $quantity): int
+    {
+        if ($unit < 0 || $quantity <= 0 || ($unit > 0 && $quantity > intdiv(PHP_INT_MAX, $unit))) {
+            throw self::invalidAuthorityField('line_amount');
+        }
+        return $unit * $quantity;
+    }
+
+    private static function centsToMoney(int $cents): string
+    {
+        return bcdiv((string)$cents, '100', 2);
+    }
+
+    private static function trimDecimal(string $value): string
+    {
+        $value = rtrim(rtrim($value, '0'), '.');
+        return $value === '' || $value === '-0' ? '0' : $value;
+    }
+
+    private static function decodeStoredObject(string $json, string $field): array
+    {
+        $decoded = $json !== '' ? json_decode($json, true) : null;
+        if (!is_array($decoded) || ($decoded !== [] && array_keys($decoded) === range(0, count($decoded) - 1))) {
+            throw self::invalidAuthorityField($field);
+        }
+        return $decoded;
+    }
+
+    private static function decodeStoredList(string $json, string $field): array
+    {
+        $decoded = $json === '' ? [] : json_decode($json, true);
+        if (!is_array($decoded) || array_keys($decoded) !== ($decoded ? range(0, count($decoded) - 1) : [])) {
+            throw self::invalidAuthorityField($field);
+        }
+        return $decoded;
+    }
+
+    private static function uniqueResources(array $resources): array
+    {
+        $result = [];
+        $seen = [];
+        foreach ($resources as $resource) {
+            $key = (string)($resource['kind'] ?? '') . ':' . (string)($resource['id'] ?? '');
+            if ($key === ':') {
+                continue;
+            }
+            $version = (int)($resource['version'] ?? 0);
+            if (isset($seen[$key])) {
+                if ($seen[$key] !== $version) {
+                    throw self::invalidAuthorityField('resource_version_conflict');
+                }
+                continue;
+            }
+            $seen[$key] = $version;
+            $result[] = $resource;
+        }
+        return $result;
+    }
+
+    private static function invalidField(string $field): CashierV3CommandException
+    {
+        return self::failure(
+            CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
+            '请选择有效商品后再加入购物车。',
+            'cashier_catalog_input_invalid',
+            ['field' => $field]
+        );
+    }
+
+    private static function invalidAuthorityField(string $field): CashierV3CommandException
+    {
+        return self::failure(
+            CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
+            '门店商品资料不完整，请联系管理员核对。',
+            'cashier_catalog_authority_field_invalid',
+            ['field' => $field]
+        );
+    }
+
+    private static function notAvailable(int $skuId): CashierV3CommandException
+    {
+        return self::failure(
+            CashierV3ResultCode::RESOURCE_NOT_FOUND,
+            '该商品已下架、不属于当前门店或规格已失效，请重新选择。',
+            'cashier_catalog_item_not_available',
+            ['item_id' => $skuId]
+        );
+    }
+
+    private static function failure(
+        string $code,
+        string $message,
+        string $reason,
+        array $extra = []
+    ): CashierV3CommandException {
+        return new CashierV3CommandException(
+            $code,
+            $message,
+            CashierV3ResultCode::STATUS_FAILED,
+            ['reason' => $reason] + $extra
+        );
+    }
+}

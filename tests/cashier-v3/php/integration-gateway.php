@@ -9,6 +9,7 @@ require __DIR__ . '/../lib/_lib.php';
 require __DIR__ . '/../lib/TestGraphFactory.php';
 
 use app\services\cashier\v3\CashierV3CommandException;
+use app\services\cashier\v3\CashierV3CommandContextServices;
 use app\services\cashier\v3\CashierV3DataScopeFactory;
 use app\services\cashier\v3\CashierV3IdempotencyKeyServices;
 use app\services\cashier\v3\CashierV3OperatorScope;
@@ -1024,23 +1025,125 @@ $expandOk = $policiesExpand->requirePolicy('submit-checkout')->resolve(
     ['store_id' => 8, 'operator_id' => 1, 'state_context_id' => $session['state_context_id']]
 );
 ok('结账后续标记从 checkout_request 反推', !empty($expandOk['expand_from_checkout_request']), json_encode($expandOk), 'CP-8-02');
-$loaderSeen = '';
+$loaderSeen = [];
 $gwLoader = CashierV3Bootstrap::dispatcher()->gateway();
 $gwLoader->setCheckoutSourceLoader(function (string $id) use (&$loaderSeen) {
-    $loaderSeen = $id;
+    $loaderSeen[] = $id;
     return [
-        'checkout_request_id' => $id,
-        'service_order_id' => 'SO-FROM-CR',
-        'reservation_id' => 'RSV-FROM-CR',
-        'store_id' => 8,
-        'version' => 2,
-        'identities' => [
-            ['kind' => 'checkout_request', 'id' => $id, 'role' => 'checkout_request'],
-            ['kind' => 'service_order', 'id' => 'SO-FROM-CR', 'role' => 'service_order'],
+        'sources' => [
+            ['kind' => 'service_order', 'id' => 'SO-FROM-CR'],
         ],
+        'version' => 2,
     ];
 });
 ok('checkoutSourceLoader 可注入', is_callable([$gwLoader, 'setCheckoutSourceLoader']), '', 'CP-8-02');
+$rawFollowContexts = [
+    ['kind' => 'cashier_workspace', 'id' => 'ws:8:1:' . $session['state_context_id'], 'expectedVersion' => 3],
+    ['kind' => 'checkout_request', 'id' => 'CR-EXPAND-1', 'expectedVersion' => 2],
+    ['kind' => 'service_order', 'id' => 'SO-FROM-CR', 'expectedVersion' => 7],
+];
+$validatedFollowContexts = (new CashierV3CommandContextServices())->validate(
+    $rawFollowContexts,
+    $expandOk
+);
+$expandMethod = new ReflectionMethod($gwLoader, 'expandFollowUpFromCheckoutRequest');
+$expandMethod->setAccessible(true);
+$expandedFollow = $expandMethod->invoke(
+    $gwLoader,
+    'CR-EXPAND-1',
+    $validatedFollowContexts,
+    $rawFollowContexts,
+    'submit-checkout'
+);
+ok(
+    'checkout_request 来源延迟绑定后保留完整版本上下文',
+    $loaderSeen === ['CR-EXPAND-1']
+        && count($expandedFollow['contexts'] ?? []) === 3
+        && ($expandedFollow['contract']['server_checkout_sources'][0]['id'] ?? '') === 'SO-FROM-CR',
+    json_encode($expandedFollow),
+    'CP-8-02'
+);
+$revalidateMethod = new ReflectionMethod($gwLoader, 'revalidateFollowUpCheckoutSources');
+$revalidateMethod->setAccessible(true);
+$revalidatedContract = $revalidateMethod->invoke(
+    $gwLoader,
+    'CR-EXPAND-1',
+    $expandedFollow['contract'],
+    'submit-checkout'
+);
+ok(
+    'checkout_request 统一锁后来源二次核对通过',
+    $loaderSeen === ['CR-EXPAND-1', 'CR-EXPAND-1']
+        && empty($revalidatedContract['checkout_source_recheck_required'])
+        && ($revalidatedContract['server_checkout_sources'][0]['id'] ?? '') === 'SO-FROM-CR',
+    json_encode(['seen' => $loaderSeen, 'contract' => $revalidatedContract]),
+    'CP-8-02'
+);
+$driftLoads = 0;
+$gwLoader->setCheckoutSourceLoader(function (string $id) use (&$driftLoads) {
+    $driftLoads++;
+    return [
+        'sources' => [[
+            'kind' => 'service_order',
+            'id' => $driftLoads === 1 ? 'SO-FROM-CR' : 'SO-CHANGED',
+        ]],
+        'version' => 2,
+    ];
+});
+$driftExpanded = $expandMethod->invoke(
+    $gwLoader,
+    'CR-EXPAND-1',
+    $validatedFollowContexts,
+    $rawFollowContexts,
+    'submit-checkout'
+);
+$sourceDriftReason = '';
+try {
+    $revalidateMethod->invoke(
+        $gwLoader,
+        'CR-EXPAND-1',
+        $driftExpanded['contract'],
+        'submit-checkout'
+    );
+} catch (ReflectionException $e) {
+    $sourceDriftReason = 'reflection:' . $e->getMessage();
+} catch (CashierV3CommandException $e) {
+    $sourceDriftReason = (string)($e->getDetail()['reason'] ?? $e->getResultCode());
+}
+ok(
+    'checkout_request 统一锁前后来源变化 fail-closed',
+    $sourceDriftReason === 'checkout_sources_changed_after_lock',
+    $sourceDriftReason,
+    'CP-8-02'
+);
+$gwLoader->setCheckoutSourceLoader(function (string $id) {
+    return [
+        'sources' => [['kind' => 'service_order', 'id' => 'SO-FROM-CR']],
+        'version' => 2,
+    ];
+});
+$followMismatchReason = '';
+try {
+    $wrongRawFollowContexts = $rawFollowContexts;
+    $wrongRawFollowContexts[2]['id'] = 'SO-HIJACK';
+    $expandMethod->invoke(
+        $gwLoader,
+        'CR-EXPAND-1',
+        (new CashierV3CommandContextServices())->validate($wrongRawFollowContexts, $expandOk),
+        $wrongRawFollowContexts,
+        'submit-checkout'
+    );
+} catch (ReflectionException $e) {
+    $followMismatchReason = 'reflection:' . $e->getMessage();
+} catch (CashierV3CommandException $e) {
+    $followMismatchReason = (string)($e->getDetail()['reason'] ?? $e->getResultCode());
+}
+ok(
+    'checkout_request 延迟来源身份不一致 fail-closed',
+    $followMismatchReason === 'checkout_contexts_mismatch',
+    $followMismatchReason,
+    'CP-8-02'
+);
 
 section('route regression cashier-v3 not swallowed');
 $routeV3 = file_get_contents('/var/www/html/route/cashier-v3.php');

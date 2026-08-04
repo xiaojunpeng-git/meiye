@@ -10,6 +10,8 @@ UPGRADES="$BACKEND/database/upgrades"
 UPG="$UPGRADES/2026-07-27-收银V3命令与幂等底座"
 EVENT_UPG="$UPGRADES/2026-07-28-收银V3统一事件与Outbox"
 C5_UPG="$UPGRADES/2026-07-28-C5会员建档一致性"
+UQ_UPG="$UPGRADES/2026-07-28-统一查询自定义字段"
+C2_UPG="$UPGRADES/2026-07-28-收银V3权益购物车草稿"
 EVIDENCE_ROOT="${C1A_EVIDENCE_ROOT:-$TESTS/_evidence}"
 RUN_ID="${C1A_RUN_ID:-$(date '+%Y%m%d-%H%M%S')-$$-${RANDOM}}"
 if [ -n "${C1A_EVIDENCE_DIR:-}" ]; then
@@ -37,7 +39,19 @@ HTML_VOL=c1a-v3-html-$$
 # 固定不可变镜像：5.6.51；调用方不得覆盖兼容基线。
 MYSQL_IMAGE="docker.m.daocloud.io/library/mysql:5.6.51"
 EXPECTED_MYSQL_DIGEST="sha256:20575ecebe6216036d25dab5903808211f1e9ba63dc7825ac20cb975e34cfcae"
-APP_IMAGE="${APP_IMAGE:-docker.m.daocloud.io/phpswoole/swoole:4.8.13-php7.4-alpine}"
+PHP_RUNTIME_DOCKERFILE="$TESTS/docker/php74-runtime.Dockerfile"
+PHP_RUNTIME_SHA=$(shasum -a 256 "$PHP_RUNTIME_DOCKERFILE" | awk '{print substr($1,1,12)}')
+if [ -z "${PHP_RUNTIME_PLATFORM:-}" ]; then
+  DOCKER_SERVER_ARCH=$(docker version --format '{{.Server.Arch}}' 2>/dev/null || true)
+  case "$DOCKER_SERVER_ARCH" in
+    amd64|x86_64) PHP_RUNTIME_PLATFORM="linux/amd64" ;;
+    arm64|aarch64) PHP_RUNTIME_PLATFORM="linux/arm64" ;;
+    *) echo "FAIL: unsupported Docker server architecture: ${DOCKER_SERVER_ARCH:-unknown}" >&2; exit 1 ;;
+  esac
+fi
+PHP_RUNTIME_ARCH_TAG=${PHP_RUNTIME_PLATFORM#linux/}
+DEFAULT_APP_IMAGE="c1a-cashier-v3-php74:${PHP_RUNTIME_SHA}-${PHP_RUNTIME_ARCH_TAG}"
+APP_IMAGE="${APP_IMAGE:-$DEFAULT_APP_IMAGE}"
 ALPINE_IMAGE="${ALPINE_IMAGE:-docker.m.daocloud.io/library/alpine:3.18}"
 
 mkdir -p "$EV"
@@ -164,7 +178,7 @@ docker_php() {
   # 宿主真实 .env 从不进入该 volume（准备阶段从源头排除）。
   docker run --rm --entrypoint sh \
     --network "$NET" \
-    --platform linux/amd64 \
+    --platform "$PHP_RUNTIME_PLATFORM" \
     -e DB_HOST="$MY" -e DB_PORT=3306 -e DB_DATABASE=lin8 \
     -e DB_USERNAME=root -e DB_PASSWORD=localdev123 \
     -e HOSTNAME="$MY" -e HOSTPORT=3306 -e DATABASE=lin8 \
@@ -174,6 +188,7 @@ docker_php() {
     -e C1A_TEMP_ENV_MARKER="$MY" \
     -v "$HTML_VOL:/var/www/html:ro" \
     -v "$TESTS:/tests:ro" \
+    -v "$REPO/tests:/all-tests:ro" \
     -v "$UPG:/upgrade:ro" \
     -v "$EV:/evidence:rw" \
     --tmpfs /tmp/c1a:rw,size=64m \
@@ -194,7 +209,7 @@ fi
 echo "== prepare isolated html volume (exclude real .env from source) =="
 docker volume create "$HTML_VOL" >/dev/null
 docker pull "$ALPINE_IMAGE" >/dev/null 2>&1 || true
-PREP_OUT=$(docker run --rm --platform linux/amd64 \
+PREP_OUT=$(docker run --rm --platform "$PHP_RUNTIME_PLATFORM" \
   -v "$BACKEND:/src:ro" \
   -v "$TEMP_ENV_DIR:/tmp/c1a-env:ro" \
   -v "$HTML_VOL:/dst" \
@@ -230,6 +245,25 @@ echo "GATE_PASS=ISO-3-02"
 echo "== npm ci (test deps) =="
 if [ ! -d "$TESTS/node_modules" ]; then
   ( cd "$TESTS" && npm ci --no-audit --no-fund )
+fi
+
+echo "== PHP 7.4 test runtime =="
+echo "PHP_RUNTIME_PLATFORM=$PHP_RUNTIME_PLATFORM"
+if [ "$APP_IMAGE" = "$DEFAULT_APP_IMAGE" ] \
+  && ! docker image inspect "$APP_IMAGE" >/dev/null 2>&1; then
+  docker build --platform "$PHP_RUNTIME_PLATFORM" \
+    -f "$PHP_RUNTIME_DOCKERFILE" \
+    -t "$APP_IMAGE" "$TESTS/docker"
+fi
+PHP_EXTENSION_OUT=$(docker run --rm --platform "$PHP_RUNTIME_PLATFORM" --entrypoint php \
+  "$APP_IMAGE" -r '$required=["bcmath","zip","mbstring","pdo_mysql"]; $missing=[]; foreach($required as $extension){if(!extension_loaded($extension)){$missing[]=$extension;}} echo "PHP_VERSION=".PHP_VERSION."\n"; echo "PHP_REQUIRED_EXTENSIONS=".implode(",",$required)."\n"; echo "PHP_MISSING_EXTENSIONS=".implode(",",$missing)."\n"; exit($missing?1:0);') || true
+echo "$PHP_EXTENSION_OUT" | tee "$EV/php-runtime.out"
+if echo "$PHP_EXTENSION_OUT" | grep -q '^PHP_VERSION=7\.4\.' \
+  && echo "$PHP_EXTENSION_OUT" | grep -q '^PHP_MISSING_EXTENSIONS=$'; then
+  echo "GATE_PASS=UQ-ENV-01"
+else
+  echo "FAIL: PHP 7.4 bcmath/zip/mbstring/pdo_mysql runtime not ready"
+  OVERALL=1
 fi
 
 echo "== MySQL $MYSQL_IMAGE =="
@@ -328,6 +362,22 @@ echo "$PREPARE_C5_OUT" | grep -q 'C5_LEGACY_SCHEMA_READY=1' || {
   echo "FAIL: C5 legacy member schema fixture was not prepared"
   exit 1
 }
+if [ ! -s "$C2_UPG/02-正式升级.sql" ]; then
+  echo "FAIL: missing C2 entitlement draft migration at $C2_UPG/02-正式升级.sql"
+  OVERALL=1
+else
+  docker exec -i "$MY" mysql -uroot -plocaldev123 lin8 < "$C2_UPG/01-升级前检查.sql"
+  docker exec -i "$MY" mysql -uroot -plocaldev123 lin8 < "$C2_UPG/02-正式升级.sql"
+  docker exec -i "$MY" mysql -uroot -plocaldev123 lin8 < "$C2_UPG/02-正式升级.sql"
+  docker exec -i "$MY" mysql -uroot -plocaldev123 lin8 < "$C2_UPG/03-升级后验证.sql"
+  C2_UPGRADE_SHA=$(shasum -a 256 "$C2_UPG/02-正式升级.sql" | awk '{print $1}')
+  docker exec "$MY" mysql -uroot -plocaldev123 lin8 -e "
+    INSERT INTO eb_database_upgrade_log
+      (upgrade_key,title,task_file,sql_checksum,code_version,executed_at,executed_by,result_note)
+    VALUES
+      ('20260728-005-cashier-v3-entitlement-draft','test dependency','02-正式升级.sql','${C2_UPGRADE_SHA}','local-test',NOW(),'codex-test','local gate dependency');
+  "
+fi
 if [ ! -s "$EVENT_UPG/02-正式升级.sql" ]; then
   echo "FAIL: missing event migration at $EVENT_UPG/02-正式升级.sql"
   OVERALL=1
@@ -352,6 +402,40 @@ else
   docker exec -i "$MY" mysql -uroot -plocaldev123 lin8 < "$C5_UPG/02-正式升级.sql"
   docker exec -i "$MY" mysql -uroot -plocaldev123 lin8 < "$C5_UPG/02-正式升级.sql"
   docker exec -i "$MY" mysql -uroot -plocaldev123 lin8 < "$C5_UPG/03-升级后验证.sql"
+fi
+if [ ! -s "$UQ_UPG/02-正式升级.sql" ]; then
+  echo "FAIL: missing unified query migration at $UQ_UPG/02-正式升级.sql"
+  OVERALL=1
+else
+  docker exec -i "$MY" mysql -uroot -plocaldev123 lin8 < "$UQ_UPG/01-升级前检查.sql"
+  docker exec -i "$MY" mysql -uroot -plocaldev123 lin8 < "$UQ_UPG/02-正式升级.sql"
+  docker exec -i "$MY" mysql -uroot -plocaldev123 lin8 < "$UQ_UPG/02-正式升级.sql"
+  docker exec -i "$MY" mysql -uroot -plocaldev123 lin8 < "$UQ_UPG/03-升级后验证.sql"
+  UQ_UPGRADE_SHA=$(shasum -a 256 "$UQ_UPG/02-正式升级.sql" | awk '{print $1}')
+  docker exec "$MY" mysql -uroot -plocaldev123 lin8 -e "
+    INSERT INTO eb_database_upgrade_log
+      (upgrade_key,title,task_file,sql_checksum,code_version,executed_at,executed_by,result_note)
+    VALUES
+      ('20260728-004-unified-query-custom-fields','unified query custom fields','02-正式升级.sql','${UQ_UPGRADE_SHA}','local-test',NOW(),'codex-test','local gate registration');
+  "
+  UQ_REGISTRATION_COUNT=$(docker exec "$MY" mysql -uroot -plocaldev123 -N -B lin8 -e "
+    SELECT COUNT(*)
+    FROM eb_database_upgrade_log
+    WHERE upgrade_key='20260728-004-unified-query-custom-fields'
+      AND title='unified query custom fields'
+      AND task_file='02-正式升级.sql'
+      AND sql_checksum='${UQ_UPGRADE_SHA}'
+      AND code_version='local-test';
+  ")
+  if [ "$UQ_REGISTRATION_COUNT" != "1" ]; then
+    echo "FAIL: unified query migration registration invalid: $UQ_REGISTRATION_COUNT"
+    OVERALL=1
+  elif docker exec -i "$MY" mysql -uroot -plocaldev123 lin8 < "$UQ_UPG/01-升级前检查.sql" > "$EV/unified-query-reapply-precheck.out" 2>&1; then
+    echo "FAIL: registered unified query migration reapply was not rejected"
+    OVERALL=1
+  else
+    echo "GATE_PASS=UQ-MIGRATION-REGISTRATION-01"
+  fi
 fi
 
 LEGACY_MEMBER_OUTBOX_TABLES=$(docker exec "$MY" mysql -uroot -plocaldev123 -N -B lin8 -e "
@@ -398,13 +482,27 @@ C5_SQL_RC=${PIPESTATUS[0]}
 set -e
 mark_runner "c5-member-sql-matrix.sh" "$C5_SQL_RC"
 
+echo "== unified query SQL matrix =="
+set +e
+bash "$REPO/tests/unified-query/sql-matrix.sh" | tee "$EV/UNIFIED-QUERY-SQL-MATRIX.log"
+UQ_SQL_RC=${PIPESTATUS[0]}
+set -e
+mark_runner "unified-query/sql-matrix.sh" "$UQ_SQL_RC"
+
+echo "== C2 entitlement draft SQL matrix =="
+set +e
+bash "$TESTS/c2-entitlement-sql-matrix.sh" | tee "$EV/C2-ENTITLEMENT-SQL-MATRIX.log"
+C2_SQL_RC=${PIPESTATUS[0]}
+set -e
+mark_runner "c2-entitlement-sql-matrix.sh" "$C2_SQL_RC"
+
 echo "== SHA256SUMS =="
 set +e
 ( cd "$UPG" && shasum -a 256 -c SHA256SUMS.txt ) | tee "$EV/sha256.out"
 SHA_RC=${PIPESTATUS[0]}
 set -e
 [ "$SHA_RC" = "0" ] || OVERALL=1
-for checksum_dir in "$EVENT_UPG" "$C5_UPG"; do
+for checksum_dir in "$EVENT_UPG" "$C5_UPG" "$UQ_UPG" "$C2_UPG"; do
   if [ ! -s "$checksum_dir/SHA256SUMS.txt" ]; then
     echo "FAIL: missing SHA256SUMS.txt in $checksum_dir"
     OVERALL=1
@@ -442,6 +540,13 @@ FE_RC=${PIPESTATUS[0]}
 set -e
 mark_runner "js/frontend-manifest-sync.mjs" "$FE_RC"
 
+echo "== C2 entitlement frontend contract =="
+set +e
+( cd "$TESTS" && node js/c2-entitlement-frontend-contract.mjs ) | tee "$EV/c2-entitlement-frontend.out"
+C2_FE_RC=${PIPESTATUS[0]}
+set -e
+mark_runner "js/c2-entitlement-frontend-contract.mjs" "$C2_FE_RC"
+
 echo "== bridge contract =="
 set +e
 ( cd "$TESTS" && C1A_TMP_DIR="$TEMP_TMP" C1A_EVIDENCE_DIR="$EV" node js/bridge-contract.mjs ) | tee "$EV/bridge-contract.out"
@@ -449,15 +554,33 @@ BR_RC=${PIPESTATUS[0]}
 set -e
 mark_runner "js/bridge-contract.mjs" "$BR_RC"
 
+echo "== unified query frontend contract =="
+set +e
+( cd "$TESTS" && node js/unified-query-frontend-contract.mjs ) | tee "$EV/unified-query-frontend.out"
+UQ_FE_RC=${PIPESTATUS[0]}
+set -e
+mark_runner "js/unified-query-frontend-contract.mjs" "$UQ_FE_RC"
+
 echo "== PHP syntax =="
 set +e
-docker run --rm --platform linux/amd64 --entrypoint php \
+docker run --rm --platform "$PHP_RUNTIME_PLATFORM" --entrypoint php \
   -v "$BACKEND:/var/www/html:ro" \
   -w /var/www/html "$APP_IMAGE" \
-  -r '$dirs=["/var/www/html/app/services/cashier/v3","/var/www/html/app/controller/cashier/v3","/var/www/html/app/model/cashier/v3"]; $fail=0; foreach($dirs as $d){$it=new RecursiveIteratorIterator(new RecursiveDirectoryIterator($d)); foreach($it as $f){if(!$f->isFile()||$f->getExtension()!=="php")continue; $c=0; exec("php -l ".escapeshellarg($f->getPathname())." 2>&1",$o,$c); if($c!==0){$fail++; echo implode("\n",$o),"\n";}}} echo "PHP_LINT_FAIL=$fail\n"; exit($fail>0?1:0);'
+  -r '$dirs=["/var/www/html/app/services/cashier/v3","/var/www/html/app/controller/cashier/v3","/var/www/html/app/model/cashier/v3","/var/www/html/app/services/query","/var/www/html/app/dao/query","/var/www/html/app/model/query"]; $files=["/var/www/html/app/command/UnifiedQueryExportWorker.php"]; $fail=0; foreach($dirs as $d){$it=new RecursiveIteratorIterator(new RecursiveDirectoryIterator($d)); foreach($it as $f){if(!$f->isFile()||$f->getExtension()!=="php")continue; $files[]=$f->getPathname();}} foreach(array_values(array_unique($files)) as $file){$o=[];$c=0;exec("php -l ".escapeshellarg($file)." 2>&1",$o,$c);if($c!==0){$fail++;echo implode("\n",$o),"\n";}} echo "PHP_LINT_FAIL=$fail\n"; exit($fail>0?1:0);'
 LINT_RC=$?
 set -e
 [ "$LINT_RC" = "0" ] || OVERALL=1
+
+echo "== unified query pure contract =="
+set +e
+docker_php 'php /all-tests/unified-query/php/contract.php' | tee "$EV/unified-query-contract.out"
+UQ_CONTRACT_RC=${PIPESTATUS[0]}
+set -e
+if ! grep -q 'ASSERT_FAILED=0' "$EV/unified-query-contract.out" 2>/dev/null \
+  || ! grep -q 'RUNNER_OK=unified-query-contract' "$EV/unified-query-contract.out" 2>/dev/null; then
+  UQ_CONTRACT_RC=1
+fi
+mark_runner "unified-query/php/contract.php" "$UQ_CONTRACT_RC"
 
 echo "== unit contract =="
 set +e
@@ -517,6 +640,62 @@ if ! grep -q 'ASSERT_PASSED=' "$EV/event-contract-integration.out" 2>/dev/null \
   EC_RC=1
 fi
 mark_runner "php/event-contract-integration.php" "$EC_RC"
+
+echo "== C2 entitlement draft integration =="
+set +e
+docker_php 'php /tests/php/c2-entitlement-integration.php' | tee "$EV/c2-entitlement-integration.out"
+C2_BE_RC=${PIPESTATUS[0]}
+set -e
+if ! grep -q 'ASSERT_PASSED=' "$EV/c2-entitlement-integration.out" 2>/dev/null \
+  || ! grep -q 'ASSERT_FAILED=0' "$EV/c2-entitlement-integration.out" 2>/dev/null \
+  || ! grep -q 'RUNNER_OK=C2-entitlement-integration' "$EV/c2-entitlement-integration.out" 2>/dev/null; then
+  echo "FAIL: C2 entitlement integration produced no clean assertion summary"
+  C2_BE_RC=1
+fi
+mark_runner "php/c2-entitlement-integration.php" "$C2_BE_RC"
+
+echo "== unified query metadata integration =="
+set +e
+docker_php 'php /all-tests/unified-query/php/metadata-integration.php' | tee "$EV/unified-query-metadata.out"
+UQ_META_RC=${PIPESTATUS[0]}
+set -e
+if ! grep -q 'ASSERT_FAILED=0' "$EV/unified-query-metadata.out" 2>/dev/null \
+  || ! grep -q 'RUNNER_OK=unified-query-metadata-integration' "$EV/unified-query-metadata.out" 2>/dev/null; then
+  UQ_META_RC=1
+fi
+mark_runner "unified-query/php/metadata-integration.php" "$UQ_META_RC"
+
+echo "== unified query real Gateway and XLSX worker =="
+set +e
+docker_php 'php /all-tests/unified-query/php/gateway-integration.php' | tee "$EV/unified-query-gateway.out"
+UQ_GW_RC=${PIPESTATUS[0]}
+set -e
+if ! grep -q 'ASSERT_FAILED=0' "$EV/unified-query-gateway.out" 2>/dev/null \
+  || ! grep -q 'RUNNER_OK=unified-query-gateway-integration' "$EV/unified-query-gateway.out" 2>/dev/null \
+  || [ ! -s "$EV/unified-query-gateway-samples.json" ]; then
+  UQ_GW_RC=1
+fi
+mark_runner "unified-query/php/gateway-integration.php" "$UQ_GW_RC"
+
+echo "== unified query member provider authoritative metrics =="
+set +e
+docker_php 'php /all-tests/unified-query/php/member-provider-integration.php' | tee "$EV/unified-query-member-provider.out"
+UQ_MEMBER_RC=${PIPESTATUS[0]}
+set -e
+if ! grep -q 'ASSERT_FAILED=0' "$EV/unified-query-member-provider.out" 2>/dev/null \
+  || ! grep -q 'RUNNER_OK=unified-query-member-provider-integration' "$EV/unified-query-member-provider.out" 2>/dev/null; then
+  UQ_MEMBER_RC=1
+fi
+mark_runner "unified-query/php/member-provider-integration.php" "$UQ_MEMBER_RC"
+
+echo "== unified query PHP Gateway to production bridge =="
+set +e
+( cd "$TESTS" && C1A_TMP_DIR="$TEMP_TMP" C1A_EVIDENCE_DIR="$EV" \
+  node ../unified-query/js/gateway-envelope-contract.mjs \
+  "$EV/unified-query-gateway-samples.json" ) | tee "$EV/unified-query-gateway-bridge.out"
+UQ_XEND_RC=${PIPESTATUS[0]}
+set -e
+mark_runner "unified-query/js/gateway-envelope-contract.mjs" "$UQ_XEND_RC"
 
 echo "== envelope bridge =="
 set +e
@@ -581,13 +760,23 @@ const runnerOut = {
   'php/member-integration.php': safe(path.join(ev, 'member-integration.out')),
   'php/event-outbox-integration.php': safe(path.join(ev, 'event-outbox-integration.out')),
   'php/event-contract-integration.php': safe(path.join(ev, 'event-contract-integration.out')),
+  'php/c2-entitlement-integration.php': safe(path.join(ev, 'c2-entitlement-integration.out')),
   'js/frontend-manifest-sync.mjs': safe(path.join(ev, 'frontend-sync.out')),
+  'js/c2-entitlement-frontend-contract.mjs': safe(path.join(ev, 'c2-entitlement-frontend.out')),
   'js/bridge-contract.mjs': safe(path.join(ev, 'bridge-contract.out')),
   'js/envelope-bridge-check.mjs': safe(path.join(ev, 'envelope-bridge.out')),
   'js/scan-literal-gates.mjs': safe(path.join(ev, 'literal-gates.out')),
   'sql/run-sql-matrix.sh': safe(path.join(ev, 'SQL-MATRIX.log')),
   'event-outbox-sql-matrix.sh': safe(path.join(ev, 'EVENT-OUTBOX-SQL-MATRIX.log')),
   'c5-member-sql-matrix.sh': safe(path.join(ev, 'C5-MEMBER-SQL-MATRIX.log')),
+  'c2-entitlement-sql-matrix.sh': safe(path.join(ev, 'C2-ENTITLEMENT-SQL-MATRIX.log')),
+  'unified-query/sql-matrix.sh': safe(path.join(ev, 'UNIFIED-QUERY-SQL-MATRIX.log')),
+  'unified-query/php/contract.php': safe(path.join(ev, 'unified-query-contract.out')),
+  'unified-query/php/metadata-integration.php': safe(path.join(ev, 'unified-query-metadata.out')),
+  'unified-query/php/gateway-integration.php': safe(path.join(ev, 'unified-query-gateway.out')),
+  'unified-query/php/member-provider-integration.php': safe(path.join(ev, 'unified-query-member-provider.out')),
+  'unified-query/js/gateway-envelope-contract.mjs': safe(path.join(ev, 'unified-query-gateway-bridge.out')),
+  'js/unified-query-frontend-contract.mjs': safe(path.join(ev, 'unified-query-frontend.out')),
   'migration-mirror-contract.sh': safe(path.join(ev, 'migration-mirror-contract.out')),
 }
 function safe(p) { try { return fs.readFileSync(p, 'utf8') } catch { return '' } }
@@ -618,14 +807,14 @@ set -e
 
 echo ""
 echo "==== SUMMARY ===="
-echo "MIG_RC=$MIG_RC SQL_RC=$SQL_RC EO_SQL_RC=$EO_SQL_RC C5_SQL_RC=$C5_SQL_RC UNIT_RC=$UNIT_RC INT_RC=$INT_RC MEM_RC=$MEM_RC EO_RC=$EO_RC EC_RC=$EC_RC FE_RC=$FE_RC BR_RC=$BR_RC ENV_RC=$ENV_RC CR_RC=$CR_RC LIT_RC=$LIT_RC MAT_RC=$MAT_RC OVERALL=$OVERALL"
+echo "MIG_RC=$MIG_RC SQL_RC=$SQL_RC EO_SQL_RC=$EO_SQL_RC C5_SQL_RC=$C5_SQL_RC UQ_SQL_RC=$UQ_SQL_RC C2_SQL_RC=$C2_SQL_RC UNIT_RC=$UNIT_RC INT_RC=$INT_RC MEM_RC=$MEM_RC EO_RC=$EO_RC EC_RC=$EC_RC C2_BE_RC=$C2_BE_RC FE_RC=$FE_RC C2_FE_RC=$C2_FE_RC BR_RC=$BR_RC UQ_FE_RC=$UQ_FE_RC UQ_CONTRACT_RC=$UQ_CONTRACT_RC UQ_META_RC=$UQ_META_RC UQ_GW_RC=$UQ_GW_RC UQ_MEMBER_RC=$UQ_MEMBER_RC UQ_XEND_RC=$UQ_XEND_RC ENV_RC=$ENV_RC CR_RC=$CR_RC LIT_RC=$LIT_RC MAT_RC=$MAT_RC OVERALL=$OVERALL"
 echo "REAL_ENV_SHA_START=$ENV_SHA_START"
 echo "REAL_ENV_SHA_END=$ENV_SHA_END"
 echo "MYSQL_IMAGE=$MYSQL_IMAGE"
 echo "MYSQL_DIGEST=${MYSQL_DIGEST:-unknown}"
 echo "MYSQL_REPO_DIGEST=${MYSQL_REPO:-unknown}"
 
-if [ "$OVERALL" = "0" ] && [ "$MIG_RC" = "0" ] && [ "$SQL_RC" = "0" ] && [ "$EO_SQL_RC" = "0" ] && [ "$C5_SQL_RC" = "0" ] && [ "$UNIT_RC" = "0" ] && [ "$INT_RC" = "0" ] && [ "$MEM_RC" = "0" ] && [ "$EO_RC" = "0" ] && [ "$EC_RC" = "0" ] && [ "$FE_RC" = "0" ] && [ "$BR_RC" = "0" ] && [ "$ENV_RC" = "0" ] && [ "$CR_RC" = "0" ] && [ "${LIT_RC:-1}" = "0" ] && [ "$MAT_RC" = "0" ]; then
+if [ "$OVERALL" = "0" ] && [ "$MIG_RC" = "0" ] && [ "$SQL_RC" = "0" ] && [ "$EO_SQL_RC" = "0" ] && [ "$C5_SQL_RC" = "0" ] && [ "$UQ_SQL_RC" = "0" ] && [ "$C2_SQL_RC" = "0" ] && [ "$UNIT_RC" = "0" ] && [ "$INT_RC" = "0" ] && [ "$MEM_RC" = "0" ] && [ "$EO_RC" = "0" ] && [ "$EC_RC" = "0" ] && [ "$C2_BE_RC" = "0" ] && [ "$FE_RC" = "0" ] && [ "$C2_FE_RC" = "0" ] && [ "$BR_RC" = "0" ] && [ "$UQ_FE_RC" = "0" ] && [ "$UQ_CONTRACT_RC" = "0" ] && [ "$UQ_META_RC" = "0" ] && [ "$UQ_GW_RC" = "0" ] && [ "$UQ_MEMBER_RC" = "0" ] && [ "$UQ_XEND_RC" = "0" ] && [ "$ENV_RC" = "0" ] && [ "$CR_RC" = "0" ] && [ "${LIT_RC:-1}" = "0" ] && [ "$MAT_RC" = "0" ]; then
   echo "==== ALL GATES PASSED ===="
   exit 0
 fi
