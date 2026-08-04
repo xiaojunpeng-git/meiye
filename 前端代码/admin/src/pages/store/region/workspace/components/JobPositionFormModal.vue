@@ -62,19 +62,15 @@
           </div>
 
           <div class="jp-summary">
-            <div class="jp-summary-title">四端权限摘要</div>
+            <div class="jp-summary-title">三端权限摘要</div>
             <ul>
               <li>
                 <span>平台后台</span>
                 <b>{{ Number(form.use_platform) === 1 ? ((ruleIds.platform || []).length + ' 项') : '入口关' }}</b>
               </li>
               <li>
-                <span>门店后台</span>
-                <b>{{ Number(form.use_store) === 1 ? ((ruleIds.store || []).length + ' 项') : '入口关' }}</b>
-              </li>
-              <li>
-                <span>收银台</span>
-                <b>{{ Number(form.use_cashier) === 1 ? ((ruleIds.cashier || []).length + ' 项') : '入口关' }}</b>
+                <span>门店端</span>
+                <b>{{ Number(form.use_store) === 1 ? ((ruleIds.store_v3 || []).length + ' 项') : '入口关' }}</b>
               </li>
               <li>
                 <span>手机端</span>
@@ -125,7 +121,7 @@ export default {
   data() {
     return {
       menus: {},
-      ruleIds: { platform: [], store: [], cashier: [], mobile: [] },
+      ruleIds: { platform: [], store_v3: [], mobile: [] },
       form: {
         id: 0,
         name: '',
@@ -135,7 +131,6 @@ export default {
         is_store_manager: 0,
         use_platform: 0,
         use_store: 0,
-        use_cashier: 0,
         use_mobile: 0,
       },
     };
@@ -148,8 +143,7 @@ export default {
     entryValue() {
       return {
         platform: Number(this.form.use_platform) === 1 ? 1 : 0,
-        store: Number(this.form.use_store) === 1 ? 1 : 0,
-        cashier: Number(this.form.use_cashier) === 1 ? 1 : 0,
+        store_v3: Number(this.form.use_store) === 1 ? 1 : 0,
         mobile: Number(this.form.use_mobile) === 1 ? 1 : 0,
       };
     },
@@ -173,12 +167,12 @@ export default {
         is_store_manager: 0,
         use_platform: 0,
         use_store: 0,
-        use_cashier: 0,
         use_mobile: 0,
       };
-      this.ruleIds = { platform: [], store: [], cashier: [], mobile: [] };
-      this.loadMenus()
-        .then(() => (this.form.id > 0 ? this.loadDetail(this.form.id) : null))
+      this.ruleIds = { platform: [], store_v3: [], mobile: [] };
+      const detail = this.form.id > 0 ? this.loadDetail(this.form.id) : Promise.resolve();
+      const menus = this.loadMenus();
+      Promise.all([menus, detail])
         .catch((err) => {
           this.$Message && this.$Message.error((err && err.msg) || '加载失败');
         });
@@ -201,13 +195,11 @@ export default {
           is_store_manager: Number(p.is_store_manager) === 1 ? 1 : 0,
           use_platform: Number(p.use_platform) === 1 ? 1 : 0,
           use_store: Number(p.use_store) === 1 ? 1 : 0,
-          use_cashier: Number(p.use_cashier) === 1 ? 1 : 0,
           use_mobile: Number(p.use_mobile) === 1 ? 1 : 0,
         };
         this.ruleIds = {
           platform: Number(this.form.use_platform) === 1 ? (d.platform_rules_ids || []).map(Number) : [],
-          store: Number(this.form.use_store) === 1 ? (d.store_rules_ids || []).map(Number) : [],
-          cashier: Number(this.form.use_cashier) === 1 ? (d.cashier_rules_ids || []).map(Number) : [],
+          store_v3: Number(this.form.use_store) === 1 ? (d.store_v3_rules_ids || []).map(Number) : [],
           mobile: Number(this.form.use_mobile) === 1 ? (d.mobile_rules_ids || []).map(Number) : [],
         };
       });
@@ -217,7 +209,6 @@ export default {
       if (entries) {
         this.form.use_platform = Number(entries.use_platform) === 1 ? 1 : 0;
         this.form.use_store = Number(entries.use_store) === 1 ? 1 : 0;
-        this.form.use_cashier = Number(entries.use_cashier) === 1 ? 1 : 0;
         this.form.use_mobile = Number(entries.use_mobile) === 1 ? 1 : 0;
       }
     },
@@ -236,10 +227,9 @@ export default {
         : {
           use_platform: Number(this.form.use_platform) === 1 ? 1 : 0,
           use_store: Number(this.form.use_store) === 1 ? 1 : 0,
-          use_cashier: Number(this.form.use_cashier) === 1 ? 1 : 0,
           use_mobile: Number(this.form.use_mobile) === 1 ? 1 : 0,
         };
-      if (!entries.use_platform && !entries.use_store && !entries.use_cashier && !entries.use_mobile) {
+      if (!entries.use_platform && !entries.use_store && !entries.use_mobile) {
         this.$Message.error('请至少开启一端入口');
         return;
       }
@@ -252,11 +242,9 @@ export default {
         is_store_manager: Number(this.form.is_store_manager) === 1 ? 1 : 0,
         use_platform: Number(entries.use_platform) === 1 ? 1 : 0,
         use_store: Number(entries.use_store) === 1 ? 1 : 0,
-        use_cashier: Number(entries.use_cashier) === 1 ? 1 : 0,
         use_mobile: Number(entries.use_mobile) === 1 ? 1 : 0,
         platform_rules: Number(entries.use_platform) === 1 ? (rules.platform || []) : [],
-        store_rules: Number(entries.use_store) === 1 ? (rules.store || []) : [],
-        cashier_rules: Number(entries.use_cashier) === 1 ? (rules.cashier || []) : [],
+        store_v3_rules: Number(entries.use_store) === 1 ? (rules.store_v3 || []) : [],
         mobile_rules: Number(entries.use_mobile) === 1 ? (rules.mobile || []) : [],
       });
     },

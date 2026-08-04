@@ -37,10 +37,19 @@ use think\facade\Route;
  */
 Route::group('cashierapi/v3', function () {
 
+    // 门店端独立登录：统一员工账号 → 可进入门店列表 → 门店绑定会话。
+    Route::post('login', 'StoreLogin/login')->option(['real_name' => '门店端账号登录']);
+
     /**
      * 需登录、强制门店、按角色校验
      */
     Route::group(function () {
+        Route::post('session/switch-store', 'StoreLogin/switchStore')
+            ->option(['real_name' => '门店端切换门店']);
+        Route::post('session/change-password', 'StoreLogin/changePassword')
+            ->option(['real_name' => '门店端修改当前账号密码']);
+        Route::post('session/logout', 'StoreLogin/logout')
+            ->option(['real_name' => '门店端退出登录']);
         // 统一命令网关：白名单 action + 幂等键 + 多对象 contexts 严格校验
         Route::post('workbenches/actions', 'Command/dispatchAction')
             ->option(['real_name' => '收银V3命令网关']);

@@ -20,12 +20,26 @@ use app\services\cashier\v3\permission\CashierV3PermissionPolicyRegistry;
 use app\services\cashier\v3\permission\CashierV3SelectorGrantServices;
 use app\services\cashier\v3\projection\CashierV3RootDomainAssembler;
 use app\services\cashier\v3\projection\CashierV3RootProjector;
+use app\services\cashier\v3\projection\CashierV3StructuredEmptyRootPartitionModule;
 use app\services\cashier\v3\readiness\CashierV3TableReadinessGuard;
 use app\services\cashier\v3\member\CashierV3MemberModule;
+use app\services\cashier\v3\member\CashierV3DirectGiftReconciliationConsumer;
+use app\services\cashier\v3\member\CashierV3RechargeModule;
+use app\services\cashier\v3\settlement\CashierV3RechargeDebtRepaymentServices;
+use app\services\cashier\v3\cashier\CashierV3CashierModule;
+use app\services\cashier\v3\card\CashierV3CardOperationModule;
+use app\services\cashier\v3\hang\CashierV3HangModule;
+use app\services\cashier\v3\reservation\CashierV3ReservationModule;
+use app\services\cashier\v3\order\CashierV3OrderQueryModule;
+use app\services\cashier\v3\dashboard\CashierV3BusinessDashboardModule;
 use app\services\cashier\v3\query\UnifiedQueryModule;
 use app\services\cashier\v3\registry\CashierV3ContextPolicyRegistry;
 use app\services\cashier\v3\registry\CashierV3HandlerRegistry;
 use app\services\cashier\v3\registry\CashierV3PermissionGuard;
+use app\services\cashier\v3\settlement\CashierV3CheckoutRequestVersionProvider;
+use app\services\cashier\v3\settlement\CashierV3CheckoutResourcePlanLoader;
+use app\services\cashier\v3\settlement\CashierV3CheckoutSourceAuthorityLoader;
+use app\services\cashier\v3\settlement\ThinkPhpCashierV3CheckoutResourcePlanRepository;
 use app\services\organization\EmployeeDataScopeServices;
 
 /**
@@ -174,7 +188,15 @@ class CashierV3Bootstrap
         $policies = new CashierV3ContextPolicyRegistry(false);
         $scopeResolver = new CashierV3ScopeResolver();
         $versionServices = new CashierV3ResourceVersionServices($scopeResolver);
+        $versionServices->registerProvider(
+            CashierV3CheckoutRequestVersionProvider::KIND,
+            new CashierV3CheckoutRequestVersionProvider()
+        );
         $consumerRegistry = new CashierV3EventConsumerRegistry();
+        $consumerRegistry->register(
+            'cashier_v3.direct_gift.reconcile',
+            new CashierV3DirectGiftReconciliationConsumer()
+        );
         $activationGate = new CashierV3ActionActivationGate($consumerRegistry);
         $outbox = new CashierV3OutboxServices($consumerRegistry);
 
@@ -194,6 +216,11 @@ class CashierV3Bootstrap
             new CashierV3EventOutboxReadinessGuard()
         );
         $gateway->setActionActivationGate($activationGate);
+        $gateway->setCheckoutSourceLoader(new CashierV3CheckoutSourceAuthorityLoader());
+        $gateway->setCheckoutResourcePlanServices(
+            new CashierV3CheckoutResourcePlanLoader(),
+            new ThinkPhpCashierV3CheckoutResourcePlanRepository()
+        );
         $gateway->bindSharedServices($versionServices, null, $scopeResolver, $policies);
         $gateway->setPermissionServices($permissionGuard, $permissionSnapshots, $dataScopeFactory);
         self::$gateway = $gateway;
@@ -228,6 +255,9 @@ class CashierV3Bootstrap
                 'visibleStoreIds' => $dataScope->visibleStoreIds(),
                 'authorizationMode' => $dataScope->authorizationMode(),
                 'permissionVersion' => $dataScope->permissionVersion(),
+                // 轻量 bootstrap 尚未返回完整根投影时，也必须带回服务端已解析
+                // 的门店端功能码；客户端只把它用于当前会话的页面可见性。
+                'features' => array_values($dataScope->grantedFeatures()),
             ];
             $result = [
                 'message' => 'ok',
@@ -273,9 +303,25 @@ class CashierV3Bootstrap
         // 统一查询先接管 query-members；会员模块随后只补充选择器与建档能力。
         UnifiedQueryModule::install($dispatcher, $assembler);
 
-        // C5 会员选择／收银建档的基础闭环由 Codex 维护；其余业务模块仍按
-        // 各自 installer 接入，未就绪的根分区继续保持 fail-closed。
-        CashierV3MemberModule::install($dispatcher, $assembler);
+        // C2 权益购物车与 C5 会员选择共用同一 workspace 草稿；先安装 C2，
+        // 再把唯一草稿服务注入会员模块。未齐根分区仍保持 fail-closed。
+        $cashierWorkspace = CashierV3CashierModule::install($dispatcher, $assembler);
+        CashierV3CardOperationModule::install($dispatcher);
+        CashierV3MemberModule::install($dispatcher, $assembler, $cashierWorkspace);
+        CashierV3RechargeModule::install($dispatcher);
+        CashierV3RechargeDebtRepaymentServices::install($dispatcher);
+        CashierV3HangModule::install($dispatcher, $cashierWorkspace, $assembler);
+        CashierV3ReservationModule::install($dispatcher, $assembler);
+
+        // C5-O1 只读销售订单查询在生产 composition root 显式接入。
+        CashierV3OrderQueryModule::install($dispatcher, $assembler);
+
+        // C4 经营看板读取 V3 事实与权威欠款映射，不回退旧报表聚合。
+        CashierV3BusinessDashboardModule::install($dispatcher, $assembler);
+
+        // 已实现的 cashier/orderCenter 继续使用真实 provider；其他尚未激活的
+        // 领域只返回显式“未加载／未激活”结构，不将空列表冒充经营事实。
+        CashierV3StructuredEmptyRootPartitionModule::install($assembler);
 
         return $dispatcher;
     }

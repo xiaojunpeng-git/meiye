@@ -3,6 +3,7 @@ namespace app\services\organization;
 
 use app\services\BaseServices;
 use app\services\employee\EmployeeStaffWriteServices;
+use app\services\mobile\merchant\MobileMerchantCapabilityCatalog;
 use mohe\exceptions\AdminException;
 use think\facade\Db;
 
@@ -121,16 +122,11 @@ class EmployeeAuthCenterServices extends BaseServices
             $cashierRoleOptions[$sid] = $pubSvc->listCashierSelectableRoles($sid);
         }
 
-        $mobileRuleOptions = Db::name('system_menus')
-            ->whereIn('type', [3, 4])
-            ->where('is_del', 0)
-            ->field('id,menu_name')
-            ->order('id', 'asc')
-            ->limit(300)
-            ->select()->toArray();
-        $mobileRuleOptions = array_map(static function ($r) {
-            return ['value' => (int)$r['id'], 'label' => (string)$r['menu_name']];
-        }, $mobileRuleOptions);
+        /** @var MobileMerchantCapabilityCatalog $mobileCatalog */
+        $mobileCatalog = app()->make(MobileMerchantCapabilityCatalog::class);
+        $mobileRuleOptions = array_map(static function (array $feature): array {
+            return ['value' => (int)$feature['id'], 'label' => (string)$feature['title']];
+        }, $mobileCatalog->features());
 
         $dataScopes = $scopeSvc->listScopes($employeeId);
         $platformPreview = $jobSvc->buildEmployeePlatformPreview($employeeId);

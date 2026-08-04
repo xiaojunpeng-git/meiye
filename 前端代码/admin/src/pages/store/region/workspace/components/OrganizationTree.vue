@@ -18,7 +18,6 @@
       </button>
       <span class="tree-folder"><svg-icon :name="isRoot ? 'home' : 'branch'" /></span>
       <span class="tree-label" :title="node.name">{{ node.name }}</span>
-      <span class="tree-count">{{ node.stores }}</span>
       <button class="tree-more" aria-label="更多操作" @click.stop="$emit('more', { node, event: $event })"><svg-icon name="more" /></button>
     </div>
     <div v-if="hasChildren && isOpen" class="tree-children">

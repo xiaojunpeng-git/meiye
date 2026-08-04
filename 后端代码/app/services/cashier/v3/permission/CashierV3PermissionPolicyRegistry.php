@@ -88,6 +88,61 @@ class CashierV3PermissionPolicyRegistry
             });
         }
 
+        // 会话 bootstrap 不是收银权限：只要服务端已解析出任一真实的
+        // store_v3 功能，即可装载当前门店的根投影。具体页面与业务 action
+        // 继续逐项走 feature policy，不能借 bootstrap 越权执行收银操作。
+        $this->register('policy:store_v3_session', function (CashierV3DataScopeContext $scope, array $payload, string $action) {
+            if ($scope->grantedFeatures()) {
+                return;
+            }
+            throw new CashierV3CommandException(
+                CashierV3ResultCode::PERMISSION_DENIED,
+                '当前账号没有可进入的门店端功能权限，请联系管理员。',
+                CashierV3ResultCode::STATUS_FAILED,
+                ['action' => $action]
+            );
+        });
+
+        $this->register('policy:checkout_entitlement', function (CashierV3DataScopeContext $scope, array $payload, string $action) {
+            if ($scope->hasFeature('cashier.v3.cashier') || $scope->hasFeature('cashier.v3.writeoff')) {
+                return;
+            }
+            throw new CashierV3CommandException(
+                CashierV3ResultCode::PERMISSION_DENIED,
+                '当前账号缺少收银或项目核销权限，不能把会员权益加入本次购物车。',
+                CashierV3ResultCode::STATUS_FAILED,
+                [
+                    'action' => $action,
+                    'required_any_of' => ['cashier.v3.cashier', 'cashier.v3.writeoff'],
+                ]
+            );
+        });
+
+        $this->register('policy:unified_query_page', function (CashierV3DataScopeContext $scope, array $payload, string $action) {
+            $pageCode = trim((string)($payload['pageCode'] ?? $payload['page_code'] ?? ''));
+            $pageFeatures = [
+                'member_list' => 'cashier.v3.member',
+                'staff_list' => 'cashier.v3.management_center',
+            ];
+            $feature = $pageFeatures[$pageCode] ?? '';
+            if ($feature === '') {
+                throw new CashierV3CommandException(
+                    CashierV3ResultCode::PERMISSION_DENIED,
+                    '当前页面尚未接入统一查询权限策略。',
+                    CashierV3ResultCode::STATUS_FAILED,
+                    ['action' => $action, 'page_code' => $pageCode, 'feature' => $feature]
+                );
+            }
+            if (!$scope->hasFeature($feature)) {
+                throw new CashierV3CommandException(
+                    CashierV3ResultCode::PERMISSION_DENIED,
+                    '当前账号没有该页面的查询权限，请联系管理员。',
+                    CashierV3ResultCode::STATUS_FAILED,
+                    ['action' => $action, 'page_code' => $pageCode, 'feature' => $feature]
+                );
+            }
+        });
+
         $grants = $this->selectorGrants;
 
         // 会员选择器：canonical selectorEntry → feature

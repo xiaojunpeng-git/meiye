@@ -2,6 +2,7 @@
 namespace app\services\organization;
 
 use app\services\BaseServices;
+use app\services\mobile\merchant\MobileAuthRevocationServices;
 use mohe\exceptions\AdminException;
 use think\facade\Db;
 
@@ -266,7 +267,13 @@ class StaffJobPositionServices extends BaseServices
      */
     public function computeChannelRulesUnion(int $staffId, string $channel): array
     {
-        if ($staffId <= 0 || !in_array($channel, JobPositionPolicyServices::CHANNELS, true)) {
+        if ($staffId <= 0 || !in_array($channel, [
+            JobPositionPolicyServices::CHANNEL_PLATFORM,
+            JobPositionPolicyServices::CHANNEL_STORE_V3,
+            JobPositionPolicyServices::CHANNEL_STORE_BACKEND,
+            JobPositionPolicyServices::CHANNEL_CASHIER,
+            JobPositionPolicyServices::CHANNEL_MOBILE,
+        ], true)) {
             return [];
         }
         /** @var JobPositionPolicyServices $policy */
@@ -320,10 +327,10 @@ class StaffJobPositionServices extends BaseServices
         $policy = app()->make(JobPositionPolicyServices::class);
         $label = $policy->channelLabel($channel);
 
-        $employeeLevel = in_array($channel, [
-            JobPositionPolicyServices::CHANNEL_PLATFORM,
-            JobPositionPolicyServices::CHANNEL_MOBILE,
-        ], true) && ($staffId <= 0 || $channel === JobPositionPolicyServices::CHANNEL_PLATFORM);
+        // 手机端由“当前任职 + 员工总开关”共同决定。即使未来存在多任职，
+        // 也不能用另一门店的岗位功能替当前门店开启手机入口。
+        $employeeLevel = $channel === JobPositionPolicyServices::CHANNEL_PLATFORM
+            && ($staffId <= 0 || $channel === JobPositionPolicyServices::CHANNEL_PLATFORM);
 
         if ($employeeLevel) {
             if ($employeeId <= 0 && $staffId > 0) {
@@ -803,7 +810,7 @@ class StaffJobPositionServices extends BaseServices
         if ($employeeId <= 0) {
             return 0;
         }
-        return (int)Db::name('employee_merchant_session')
+        $legacyInvalidated = (int)Db::name('employee_merchant_session')
             ->where('employee_id', $employeeId)
             ->where('is_del', 0)
             ->where('status', 1)
@@ -811,6 +818,10 @@ class StaffJobPositionServices extends BaseServices
                 'status' => 0,
                 'update_time' => time(),
             ]);
+        /** @var MobileAuthRevocationServices $mobileSessions */
+        $mobileSessions = app()->make(MobileAuthRevocationServices::class);
+        $mobileSessions->revokeAllInCurrentTransaction($employeeId, 'AUTH_CHANGED');
+        return $legacyInvalidated;
     }
 
     /**
@@ -849,7 +860,13 @@ class StaffJobPositionServices extends BaseServices
      */
     public function computeEmployeeChannelRulesUnion(int $employeeId, string $channel): array
     {
-        if ($employeeId <= 0 || !in_array($channel, JobPositionPolicyServices::CHANNELS, true)) {
+        if ($employeeId <= 0 || !in_array($channel, [
+            JobPositionPolicyServices::CHANNEL_PLATFORM,
+            JobPositionPolicyServices::CHANNEL_STORE_V3,
+            JobPositionPolicyServices::CHANNEL_STORE_BACKEND,
+            JobPositionPolicyServices::CHANNEL_CASHIER,
+            JobPositionPolicyServices::CHANNEL_MOBILE,
+        ], true)) {
             return [];
         }
         /** @var JobPositionPolicyServices $policy */
@@ -895,7 +912,7 @@ class StaffJobPositionServices extends BaseServices
     }
 
     /**
-     * 保存本店渠道入口（store_backend|cashier|mobile）
+     * 保存本店渠道入口（store_v3|mobile）；历史渠道不再参与新授权。
      * @return array{msg:string,data:array,replay:bool}
      */
     public function saveChannelEntries(
@@ -960,8 +977,7 @@ class StaffJobPositionServices extends BaseServices
             $ch = trim((string)($e['channel'] ?? ''));
             $st = (int)($e['status'] ?? 0) === 1 ? 1 : 0;
             if (!in_array($ch, [
-                JobPositionPolicyServices::CHANNEL_STORE_BACKEND,
-                JobPositionPolicyServices::CHANNEL_CASHIER,
+                JobPositionPolicyServices::CHANNEL_STORE_V3,
                 JobPositionPolicyServices::CHANNEL_MOBILE,
             ], true)) {
                 throw new AdminException('不支持的渠道入口');
@@ -1055,6 +1071,54 @@ class StaffJobPositionServices extends BaseServices
     }
 
     /**
+     * 员工档案中的唯一“手机端”开关。
+     *
+     * 任职入口和员工手机授权是同一业务结果的两份权威投影，必须在同一事务内
+     * 一起更新，避免页面显示已开通而登录会话被另一层拒绝。
+     *
+     * @return array{staff_id:int,enabled:int,entries:array,mobile:array,auth_version:int}
+     */
+    public function setEmployeeMobileAccessInTx(
+        int $employeeId,
+        int $staffId,
+        int $enabled,
+        array $adminInfo,
+        array $auditMeta = [],
+        string $source = 'hq'
+    ): array {
+        $enabled = $enabled === 1 ? 1 : 0;
+        $this->assertEmployee($employeeId);
+        $staff = Db::name('system_store_staff')
+            ->where('id', $staffId)->where('employee_id', $employeeId)->where('is_del', 0)
+            ->lock(true)->find();
+        if (!$staff || (int)($staff['status'] ?? 0) !== 1 || (int)($staff['store_id'] ?? 0) <= 0) {
+            throw new AdminException('手机端授权需要有效的门店任职');
+        }
+
+        $entry = $this->bindChannelEntriesInTx(
+            $employeeId,
+            $staffId,
+            [JobPositionPolicyServices::CHANNEL_MOBILE => $enabled],
+            $adminInfo,
+            $auditMeta,
+            $source,
+            false
+        );
+        // 开启时 project 会再次校验岗位能力；关闭时保留 status=0 记录，
+        // 防止之后岗位再次具备手机端能力时把员工手工关闭的授权自动打开。
+        $mobile = $this->projectMobileAuthRules($employeeId, $enabled);
+        $after = $this->afterEmployeeAuthChanged($employeeId);
+
+        return [
+            'staff_id' => $staffId,
+            'enabled' => $enabled,
+            'entries' => $entry['entries'],
+            'mobile' => $mobile,
+            'auth_version' => (int)($after['auth_version'] ?? 0),
+        ];
+    }
+
+    /**
      * @return array<int, array>
      */
     public function listEntries(int $staffId): array
@@ -1075,8 +1139,7 @@ class StaffJobPositionServices extends BaseServices
     public function buildFunctionPreview(int $staffId): array
     {
         $channels = [
-            JobPositionPolicyServices::CHANNEL_STORE_BACKEND,
-            JobPositionPolicyServices::CHANNEL_CASHIER,
+            JobPositionPolicyServices::CHANNEL_STORE_V3,
             JobPositionPolicyServices::CHANNEL_MOBILE,
         ];
         $out = [

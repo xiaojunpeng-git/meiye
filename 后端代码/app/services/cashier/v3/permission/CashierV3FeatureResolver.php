@@ -1,16 +1,18 @@
 <?php
 namespace app\services\cashier\v3\permission;
 
+use app\services\organization\JobPositionPolicyServices;
+use think\facade\Db;
+
 /**
  * 从真实收银会话解析功能入口权限码。
  *
  * 权威链路（普通账号）：
- * AuthTokenMiddleware → LoginServices::parseToken() → cashierInfo(roles/level)
- * → SystemMenusServices::getMenusList(roles, level, type=3) → unique_auth
- * → UNIQUE_AUTH_TO_FEATURE → cashier.v3.* feature codes
+ * AuthTokenMiddleware → 已绑定门店的员工任职 → 员工渠道覆盖（如有）
+ * → 岗位 store_v3 规则 → cashier.v3.* feature codes。
  *
- * 独立超级管理员规则（level=0）：
- * 与 getMenusList 一致不过滤 rules，功能入口全开。
+ * 平台超级管理员也必须拥有当前门店的有效任职和 store_v3 授权；
+ * 平台级别不能绕过门店会话边界。
  *
  * 菜单服务不可用时零权限，不得凭普通 profile.unique_auth 放行。
  */
@@ -44,6 +46,7 @@ class CashierV3FeatureResolver
         'cashier-cashier-index' => 'cashier.v3.cashier',
         'cashier-order-index' => 'cashier.v3.order_center',
         'cashier-hang-index' => 'cashier.v3.hang',
+        'cashier-table-index' => 'cashier.v3.room',
         'cashier-verify-index' => 'cashier.v3.writeoff',
         'cashier-reservation-list' => 'cashier.v3.reservation',
         'cashier-recharge-index' => 'cashier.v3.member',
@@ -91,26 +94,99 @@ class CashierV3FeatureResolver
      */
     public function resolveGrantedFeatures(array $operatorProfile): array
     {
-        if ($this->isSuperAdminLevelRule($operatorProfile)) {
-            return self::FEATURE_CODES;
+        // V3 never consumes legacy cashier/store_backend menu rules. The
+        // current active staff assignment and V3 position rule must exist.
+        // An employee-level entry row is an explicit override: absence inherits
+        // the position entry, while an explicit disabled row denies access.
+        $granted = $this->storeV3GrantedFeatures($operatorProfile);
+        // This marker is produced only by the mobile merchant-session adapter.
+        // It re-reads the active mobile menu grants server-side; client input
+        // can neither set it nor widen the returned feature set.
+        if (!empty($operatorProfile['_trusted_mobile_merchant_session'])) {
+            $granted = array_merge($granted, $this->mobileMerchantFeatures((int)($operatorProfile['employee_id'] ?? 0)));
         }
+        return array_values(array_unique($granted));
+    }
 
-        $uniqueAuths = $this->resolveUniqueAuths($operatorProfile);
-        if ($uniqueAuths === null) {
+    /** @return string[] */
+    private function storeV3GrantedFeatures(array $operatorProfile): array
+    {
+        $staffId = (int)($operatorProfile['id'] ?? $operatorProfile['staff_id'] ?? 0);
+        $employeeId = (int)($operatorProfile['employee_id'] ?? 0);
+        $storeId = (int)($operatorProfile['store_id'] ?? 0);
+        if ($staffId <= 0 || $employeeId <= 0 || $storeId <= 0) {
             return [];
         }
+        try {
+            $staff = Db::name('system_store_staff')
+                ->where('id', $staffId)->where('employee_id', $employeeId)->where('store_id', $storeId)
+                ->where('status', 1)->where('is_del', 0)->find();
+            if (!$staff) {
+                return [];
+            }
+            $entry = Db::name('staff_channel_entry')
+                ->where('staff_id', $staffId)->where('employee_id', $employeeId)->where('store_id', $storeId)
+                ->where('channel', JobPositionPolicyServices::CHANNEL_STORE_V3)
+                ->where('is_del', 0)->find();
+            if ($entry && (int)($entry['status'] ?? 0) !== 1) {
+                return [];
+            }
+            $ruleRows = Db::name('staff_job_position')->alias('job')
+                ->join('position position', 'position.id = job.position_id')
+                ->join('job_position_channel_rule rule', 'rule.position_id = job.position_id')
+                ->where('job.staff_id', $staffId)->where('job.employee_id', $employeeId)
+                ->where('job.status', 1)->where('job.is_del', 0)->where('job.end_time', 0)
+                ->where('position.status', 1)->where('position.use_store', 1)
+                ->where('rule.channel', JobPositionPolicyServices::CHANNEL_STORE_V3)
+                ->where('rule.status', 1)
+                ->column('rule.rules');
+            $ruleIds = [];
+            foreach ($ruleRows as $rules) {
+                foreach (explode(',', (string)$rules) as $ruleId) {
+                    $ruleId = (int)$ruleId;
+                    if ($ruleId > 0) $ruleIds[$ruleId] = $ruleId;
+                }
+            }
+            return JobPositionPolicyServices::storeV3FeaturesFromRuleIds(array_values($ruleIds));
+        } catch (\Throwable $exception) {
+            return [];
+        }
+    }
 
+    /** @return string[] */
+    private function featuresFromUniqueAuths(array $uniqueAuths): array
+    {
         $granted = [];
         foreach ($uniqueAuths as $auth) {
             $auth = trim((string)$auth);
-            if ($auth === '') {
-                continue;
-            }
-            if (isset(self::UNIQUE_AUTH_TO_FEATURE[$auth])) {
+            if ($auth !== '' && isset(self::UNIQUE_AUTH_TO_FEATURE[$auth])) {
                 $granted[] = self::UNIQUE_AUTH_TO_FEATURE[$auth];
             }
         }
         return array_values(array_unique($granted));
+    }
+
+    /** @return string[] */
+    private function mobileMerchantFeatures(int $employeeId): array
+    {
+        if ($employeeId <= 0) return [];
+        try {
+            $rules = (string)\think\facade\Db::name('employee_mobile_auth')
+                ->where('employee_id', $employeeId)->where('status', 1)->where('is_del', 0)->value('rules');
+            $ids = [];
+            foreach (explode(',', $rules) as $rule) {
+                $id = (int)$rule;
+                if ($id > 0) $ids[$id] = $id;
+            }
+            if (!$ids) return [];
+            $rows = \think\facade\Db::name('system_menus')->whereIn('id', array_values($ids))
+                ->field('unique_auth')->select()->toArray();
+            return $this->featuresFromUniqueAuths(array_map(static function (array $row): string {
+                return (string)($row['unique_auth'] ?? '');
+            }, $rows));
+        } catch (\Throwable $exception) {
+            return [];
+        }
     }
 
     /**

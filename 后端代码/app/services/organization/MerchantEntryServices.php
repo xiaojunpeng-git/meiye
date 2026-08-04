@@ -244,11 +244,22 @@ class MerchantEntryServices extends BaseServices
         /** @var StaffJobPositionServices $jobSvc */
         $jobSvc = app()->make(StaffJobPositionServices::class);
 
-        $legacyMobileOk = (int)Db::name('employee_mobile_auth')
+        // 商家入口展示必须与正式手机端会话使用同一授权条件。
+        // 不能再以旧 employee_mobile_auth 单层记录代替任职入口校验。
+        $mobileAuthOn = (int)Db::name('employee_mobile_auth')
             ->where('employee_id', $employeeId)
             ->where('is_del', 0)
             ->where('status', 1)
             ->count() > 0;
+
+        if (!$mobileAuthOn) {
+            return [
+                'show_merchant_entry' => false,
+                'reason' => self::REASON_NO_MOBILE_ENTRY,
+                'employee_id' => $employeeId,
+                'qualifying_store_ids' => [],
+            ];
+        }
 
         $qualifying = [];
         $sawMobileEntry = false;
@@ -269,7 +280,7 @@ class MerchantEntryServices extends BaseServices
                 ->where('is_del', 0)
                 ->where('status', 1)
                 ->count() > 0;
-            if (!$entryOn && !$legacyMobileOk) {
+            if (!$entryOn) {
                 continue;
             }
             $sawMobileEntry = true;
@@ -279,20 +290,6 @@ class MerchantEntryServices extends BaseServices
             }
             $sawMobileJob = true;
             $qualifying[] = $storeId;
-        }
-
-        if (!$qualifying && $hasOrgDirect && $legacyMobileOk) {
-            try {
-                $jobSvc->assertChannelCoveredByJobs(0, JobPositionPolicyServices::CHANNEL_MOBILE, $employeeId);
-                return [
-                    'show_merchant_entry' => true,
-                    'reason' => self::REASON_OK,
-                    'employee_id' => $employeeId,
-                    'qualifying_store_ids' => [],
-                ];
-            } catch (\Throwable $e) {
-                $sawMobileEntry = true;
-            }
         }
 
         if (!$qualifying) {

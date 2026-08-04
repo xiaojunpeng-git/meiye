@@ -530,11 +530,11 @@ class SystemStoreStaff extends AuthController
         if ($storeIdsScope === null) {
             $storeIdsScope = [];
         }
-        $account = trim((string)($raw['account'] ?? ''));
-        if ($account === '' && $employeeId > 0) {
-            $account = trim((string)Db::name('employee_internal_account')
-                ->where('employee_id', $employeeId)->where('is_del', 0)->value('account'));
-        }
+        // 账号字段缺失表示完整档案编辑未改登录设置；不得回填后再触发账号写入。
+        // 只有前端明确提交 account 时，才让完整保存服务处理账号命令。
+        $account = array_key_exists('account', $raw)
+            ? trim((string)$raw['account'])
+            : '';
 
         $input = [
             'employee_id' => $employeeId,
@@ -551,6 +551,8 @@ class SystemStoreStaff extends AuthController
             'org_ids' => $orgIds,
             'store_ids' => $storeIdsScope,
             'can_choose' => (int)($raw['can_choose'] ?? 1),
+            'cashier_salesperson_enabled' => (int)($raw['cashier_salesperson_enabled'] ?? 1),
+            'cashier_craftsman_enabled' => (int)($raw['cashier_craftsman_enabled'] ?? 1),
             'is_fencheng' => (int)($raw['is_fencheng'] ?? 0),
             'is_reservable' => (int)($raw['is_reservable'] ?? 1),
             'verify_status' => (int)($raw['verify_status'] ?? 1),
@@ -563,6 +565,14 @@ class SystemStoreStaff extends AuthController
             if (array_key_exists($k, $raw)) {
                 $input[$k] = $raw[$k];
             }
+        }
+        foreach (['employment_type_code', 'employment_type_version'] as $k) {
+            if (array_key_exists($k, $raw)) {
+                $input[$k] = $raw[$k];
+            }
+        }
+        if (array_key_exists('mobile_enabled', $raw)) {
+            $input['mobile_enabled'] = (int)$raw['mobile_enabled'] === 1 ? 1 : 0;
         }
 
         try {
@@ -607,7 +617,16 @@ class SystemStoreStaff extends AuthController
         try {
             /** @var \app\services\employee\EmployeePersonCompleteWriteServices $complete */
             $complete = app()->make(\app\services\employee\EmployeePersonCompleteWriteServices::class);
-            return $this->success($complete->getComplete($id, $staffId, 'hq'));
+            /** @var \app\services\employee\EmployeeTypeAuthorityServices $typeAuthority */
+            $typeAuthority = app()->make(\app\services\employee\EmployeeTypeAuthorityServices::class);
+            $canReadEmploymentType = $typeAuthority->canManagePermission([
+                'id' => (int)$this->adminId,
+                'account' => (string)($this->adminInfo['account'] ?? ''),
+                'real_name' => (string)($this->adminInfo['real_name'] ?? ''),
+                'level' => (int)($this->adminInfo['level'] ?? 0),
+                'admin_type' => (int)($this->adminInfo['admin_type'] ?? $this->adminType ?? 0),
+            ]);
+            return $this->success($complete->getComplete($id, $staffId, 'hq', $canReadEmploymentType));
         } catch (AdminException $e) {
             return $this->fail($e->getMessage());
         } catch (\Throwable $e) {

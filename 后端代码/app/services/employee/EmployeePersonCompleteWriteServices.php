@@ -17,6 +17,7 @@ use think\facade\Db;
 class EmployeePersonCompleteWriteServices extends BaseServices
 {
     public const ACTION = 'employee_person_complete_save';
+    public const ACTION_DEFAULT_INTERNAL = 'employee_employment_type_default_internal';
     public const FAIL_INJECT_FLAG = 'ALLOW_PERSON_WRITE_FAIL_INJECT';
 
     /**
@@ -26,6 +27,23 @@ class EmployeePersonCompleteWriteServices extends BaseServices
     {
         $source = $source === 'store' ? 'store' : 'hq';
         $this->assertNoLegacyFields($input);
+
+        $typeCodePresent = array_key_exists('employment_type_code', $input);
+        $typeVersionPresent = array_key_exists('employment_type_version', $input);
+        if ($typeCodePresent !== $typeVersionPresent) {
+            throw new AdminException('人员类型与版本必须同时提交');
+        }
+        $employmentTypeCode = null;
+        $employmentTypeVersion = null;
+        if ($typeCodePresent) {
+            /** @var EmployeeTypeAuthorityServices $typeAuthority */
+            $typeAuthority = app()->make(EmployeeTypeAuthorityServices::class);
+            $employmentTypeCode = $typeAuthority->normalizeTypeCode($input['employment_type_code']);
+            $employmentTypeVersion = $typeAuthority->normalizeExpectedVersion($input['employment_type_version']);
+            if ($source === 'hq') {
+                $typeAuthority->assertManagePermission($adminInfo);
+            }
+        }
 
         $employeeIdHint = (int)($input['employee_id'] ?? 0);
         $staffIdHint = (int)($input['staff_id'] ?? 0);
@@ -46,6 +64,8 @@ class EmployeePersonCompleteWriteServices extends BaseServices
         $staffName = trim((string)($input['staff_name'] ?? $input['name'] ?? ''));
         $phone = trim((string)($input['phone'] ?? ''));
         $avatar = trim((string)($input['avatar'] ?? ''));
+        $mobileEnabledPresent = array_key_exists('mobile_enabled', $input);
+        $mobileEnabled = $mobileEnabledPresent && (int)$input['mobile_enabled'] === 1 ? 1 : 0;
 
         $payload = [
             'employee_id' => $employeeIdHint,
@@ -63,7 +83,14 @@ class EmployeePersonCompleteWriteServices extends BaseServices
             'store_ids' => $storeIds,
             'source' => $source,
             'can_choose' => (int)($input['can_choose'] ?? 1),
+            'cashier_salesperson_enabled' => (int)($input['cashier_salesperson_enabled'] ?? 1),
+            'cashier_craftsman_enabled' => (int)($input['cashier_craftsman_enabled'] ?? 1),
             'is_fencheng' => (int)($input['is_fencheng'] ?? 0),
+            'mobile_enabled_present' => $mobileEnabledPresent ? 1 : 0,
+            'mobile_enabled' => $mobileEnabledPresent ? $mobileEnabled : null,
+            'employment_type_present' => $typeCodePresent ? 1 : 0,
+            'employment_type_code' => $employmentTypeCode,
+            'employment_type_version' => $employmentTypeVersion,
         ];
 
         if (empty($requestCtx['body_token']) && isset($input['request_token'])) {
@@ -108,7 +135,12 @@ class EmployeePersonCompleteWriteServices extends BaseServices
                 $positionIds,
                 $scopeMode,
                 $orgIds,
-                $storeIds
+                $storeIds,
+                $typeCodePresent,
+                $employmentTypeCode,
+                $employmentTypeVersion,
+                $mobileEnabledPresent,
+                $mobileEnabled
             ) {
                 return [
                     'msg' => '保存成功',
@@ -129,7 +161,12 @@ class EmployeePersonCompleteWriteServices extends BaseServices
                         $positionIds,
                         $scopeMode,
                         $orgIds,
-                        $storeIds
+                        $storeIds,
+                        $typeCodePresent,
+                        $employmentTypeCode,
+                        $employmentTypeVersion,
+                        $mobileEnabledPresent,
+                        $mobileEnabled
                     ),
                 ];
             },
@@ -140,7 +177,12 @@ class EmployeePersonCompleteWriteServices extends BaseServices
     /**
      * 编辑回显
      */
-    public function getComplete(int $employeeId, int $staffId = 0, string $source = 'hq'): array
+    public function getComplete(
+        int $employeeId,
+        int $staffId = 0,
+        string $source = 'hq',
+        bool $includeEmploymentType = false
+    ): array
     {
         $source = $source === 'store' ? 'store' : 'hq';
         if ($employeeId <= 0 && $staffId > 0) {
@@ -242,7 +284,7 @@ class EmployeePersonCompleteWriteServices extends BaseServices
             }
         }
 
-        return [
+        $result = [
             'employee_id' => $employeeId,
             'staff_id' => $staffId,
             'org_id' => $orgId,
@@ -256,9 +298,40 @@ class EmployeePersonCompleteWriteServices extends BaseServices
             'jobs' => $jobs,
             'scope' => $scope,
             'can_choose' => $staff ? (int)($staff['can_choose'] ?? 1) : 1,
+            'cashier_salesperson_enabled' => $staff
+                ? (int)($staff['cashier_salesperson_enabled'] ?? 1) : 1,
+            'cashier_craftsman_enabled' => $staff
+                ? (int)($staff['cashier_craftsman_enabled'] ?? 1) : 1,
             'is_fencheng' => $staff ? (int)($staff['is_fencheng'] ?? 0) : 0,
             'status' => (int)($emp['status'] ?? 1),
         ];
+        // 档案只暴露一个手机端状态：必须同时满足员工授权与当前任职入口。
+        // 读取失败或任一投影关闭时均回显关闭，避免编辑保存时误把授权状态猜成开启。
+        $mobileAuthOn = (int)Db::name('employee_mobile_auth')
+            ->where('employee_id', $employeeId)->where('is_del', 0)->where('status', 1)->count() > 0;
+        $mobileEntryOn = $staffId > 0 && (int)Db::name('staff_channel_entry')
+            ->where('staff_id', $staffId)->where('channel', 'mobile')->where('is_del', 0)->where('status', 1)->count() > 0;
+        $result['mobile_enabled'] = $mobileAuthOn && $mobileEntryOn ? 1 : 0;
+        if ($staff) {
+            foreach ([
+                'work_member_id', 'notify', 'is_customer', 'customer_url', 'is_reservable',
+                'employee_number', 'id_card', 'age', 'join_area', 'join_date', 'birthday_date',
+                'birthday_type', 'birthday_area', 'now_area', 'contract_begin', 'contract_end',
+                'salary_status', 'department',
+            ] as $field) {
+                $result[$field] = $staff[$field] ?? null;
+            }
+        }
+        if ($source === 'hq' && $includeEmploymentType) {
+            /** @var EmployeeTypeAuthorityServices $typeAuthority */
+            $typeAuthority = app()->make(EmployeeTypeAuthorityServices::class);
+            $result = array_merge($result, $typeAuthority->readSnapshot($employeeId, 'hq'));
+        } elseif ($source === 'store') {
+            /** @var EmployeeTypeAuthorityServices $typeAuthority */
+            $typeAuthority = app()->make(EmployeeTypeAuthorityServices::class);
+            $result = array_merge($result, $typeAuthority->readSnapshot($employeeId, 'store', $staffId, $storeId));
+        }
+        return $result;
     }
 
     /**
@@ -283,7 +356,12 @@ class EmployeePersonCompleteWriteServices extends BaseServices
         array $positionIds,
         string $scopeMode,
         array $orgIds,
-        array $storeIds
+        array $storeIds,
+        bool $typeCodePresent,
+        ?string $employmentTypeCode,
+        ?int $employmentTypeVersion,
+        bool $mobileEnabledPresent,
+        int $mobileEnabled
     ): array {
         /** @var EmployeeStaffWriteServices $staffWrite */
         $staffWrite = app()->make(EmployeeStaffWriteServices::class);
@@ -366,7 +444,7 @@ class EmployeePersonCompleteWriteServices extends BaseServices
 
         // 1) employee
         $this->maybeFail('employee', $input);
-        $employeeId = $this->upsertEmployee($employeeIdHint, $phone, $staffName, $avatar, $opCtx);
+        $employeeId = $this->upsertEmployee($employeeIdHint, $phone, $staffName, $avatar, $opCtx, $source);
 
         // 2) organization_employee
         $this->maybeFail('org_employee', $input);
@@ -412,6 +490,8 @@ class EmployeePersonCompleteWriteServices extends BaseServices
                 'avatar' => $avatar,
                 'status' => (int)($input['status'] ?? 1) === 1 ? 1 : 0,
                 'can_choose' => (int)($input['can_choose'] ?? 1) === 1 ? 1 : 0,
+                'cashier_salesperson_enabled' => (int)($input['cashier_salesperson_enabled'] ?? 1) === 1 ? 1 : 0,
+                'cashier_craftsman_enabled' => (int)($input['cashier_craftsman_enabled'] ?? 1) === 1 ? 1 : 0,
                 'is_fencheng' => (int)($input['is_fencheng'] ?? 0) === 1 ? 1 : 0,
                 'is_reservable' => array_key_exists('is_reservable', $input)
                     ? ((int)$input['is_reservable'] === 1 ? 1 : 0) : 1,
@@ -423,14 +503,21 @@ class EmployeePersonCompleteWriteServices extends BaseServices
                     ? ((int)$input['salary_status'] === 1 ? 1 : 0) : 1,
                 'account' => $account,
             ];
+            foreach ([
+                'work_member_id', 'notify', 'is_customer', 'customer_url', 'is_reservable',
+                'employee_number', 'id_card', 'age', 'join_area', 'join_date', 'birthday_date',
+                'birthday_type', 'birthday_area', 'now_area', 'contract_begin', 'contract_end',
+                'salary_status', 'department',
+            ] as $field) {
+                if (array_key_exists($field, $input)) {
+                    $staffPayload[$field] = $input[$field];
+                }
+            }
             if ($source === 'store') {
                 unset(
-                    $staffPayload['can_choose'],
                     $staffPayload['is_fencheng'],
-                    $staffPayload['is_reservable'],
                     $staffPayload['verify_status'],
-                    $staffPayload['is_cashier'],
-                    $staffPayload['is_customer']
+                    $staffPayload['is_cashier']
                 );
             }
             $ret = $staffWrite->saveStaffAssignment($staffId, $staffPayload, $opCtx, [
@@ -440,6 +527,23 @@ class EmployeePersonCompleteWriteServices extends BaseServices
             $employeeId = (int)$ret['employee_id'];
         } elseif ($staffIdHint > 0) {
             throw new AdminException('无店直属不可绑定伪造门店任职');
+        }
+
+        $employmentTypeOut = null;
+        if ($typeCodePresent) {
+            $this->maybeFail('employment_type', $input);
+            /** @var EmployeeTypeAuthorityServices $typeAuthority */
+            $typeAuthority = app()->make(EmployeeTypeAuthorityServices::class);
+            $employmentTypeOut = $typeAuthority->saveTypeInTx(
+                $employeeId,
+                (string)$employmentTypeCode,
+                (int)$employmentTypeVersion,
+                $adminInfo,
+                $auditMeta,
+                $source,
+                $staffId,
+                $storeId
+            );
         }
 
         // 4) 统一内部账号
@@ -482,10 +586,6 @@ class EmployeePersonCompleteWriteServices extends BaseServices
             $jobSvc->projectStaffRoles($staffId);
             $jobSvc->syncManagerFlagFromJobs($staffId);
         }
-        $jobSvc->projectPlatformAdminRoles($employeeId);
-        $jobSvc->bumpEmployeeAuthVersion($employeeId);
-        $jobSvc->projectMobileAuthRules($employeeId);
-        $jobSvc->invalidateMerchantSessions($employeeId);
 
         // 6) 数据权限
         $this->maybeFail('scope', $input);
@@ -525,6 +625,30 @@ class EmployeePersonCompleteWriteServices extends BaseServices
             }
         }
 
+        // 6c) 员工档案的唯一手机端开关：任职入口和员工授权在本事务内同时落地。
+        // 未提交该字段的旧调用只重投影岗位，绝不根据岗位擅自把历史关闭授权重新打开。
+        $mobileAccessOut = null;
+        if ($mobileEnabledPresent) {
+            if ($staffId <= 0) {
+                if ($mobileEnabled === 1) {
+                    throw new AdminException('开通手机端前请先配置有效的门店任职和岗位');
+                }
+                $authProjection = $jobSvc->afterEmployeeAuthChanged($employeeId);
+            } else {
+                $mobileAccessOut = $jobSvc->setEmployeeMobileAccessInTx(
+                    $employeeId,
+                    $staffId,
+                    $mobileEnabled,
+                    $adminInfo,
+                    $auditMeta,
+                    $source
+                );
+                $authProjection = ['auth_version' => $mobileAccessOut['auth_version']];
+            }
+        } else {
+            $authProjection = $jobSvc->afterEmployeeAuthChanged($employeeId);
+        }
+
         // 7) 编排审计
         $this->maybeFail('audit', $input);
         $out = [
@@ -539,9 +663,26 @@ class EmployeePersonCompleteWriteServices extends BaseServices
                 ? $jobSvc->listActiveJobs($staffId)
                 : $jobSvc->listActiveJobs(0, $employeeId)),
             'scope' => $scope,
+            'cashier_salesperson_enabled' => $staffId > 0
+                ? (int)Db::name('system_store_staff')->where('id', $staffId)->value('cashier_salesperson_enabled')
+                : 1,
+            'cashier_craftsman_enabled' => $staffId > 0
+                ? (int)Db::name('system_store_staff')->where('id', $staffId)->value('cashier_craftsman_enabled')
+                : 1,
+            'mobile_enabled' => $mobileAccessOut !== null
+                ? (int)$mobileAccessOut['enabled']
+                : ((int)Db::name('employee_mobile_auth')->where('employee_id', $employeeId)->where('is_del', 0)->where('status', 1)->count() > 0 ? 1 : 0),
+            'auth_version' => (int)($authProjection['auth_version'] ?? 0),
         ];
+        if ($employmentTypeOut !== null) {
+            $out['employment_type_code'] = (string)$employmentTypeOut['employment_type_code'];
+            $out['employment_type_version'] = (int)$employmentTypeOut['employment_type_version'];
+        }
         if ($entriesOut !== null) {
             $out['entries'] = $entriesOut['entries'] ?? [];
+        }
+        if ($mobileAccessOut !== null) {
+            $out['mobile_access'] = $mobileAccessOut;
         }
         $json = json_encode($out, JSON_UNESCAPED_UNICODE);
         if ($json === false) {
@@ -572,7 +713,8 @@ class EmployeePersonCompleteWriteServices extends BaseServices
         string $phone,
         string $name,
         string $avatar,
-        array $opCtx
+        array $opCtx,
+        string $source
     ): int {
         $now = time();
         $avatarType = strpos($avatar, 'http') === 0 ? 2 : 1;
@@ -611,7 +753,7 @@ class EmployeePersonCompleteWriteServices extends BaseServices
             return $employeeId;
         }
 
-        return (int)Db::name('employee')->insertGetId([
+        $employeeData = [
             'name' => $name,
             'phone' => $phone,
             'avatar' => $avatar,
@@ -621,7 +763,31 @@ class EmployeePersonCompleteWriteServices extends BaseServices
             'is_del' => 0,
             'add_time' => $now,
             'update_time' => $now,
-        ]);
+        ];
+        if ($source === 'store') {
+            $employeeData['employment_type_code'] = 'internal';
+            $employeeData['employment_type_version'] = 1;
+        }
+        $employeeId = (int)Db::name('employee')->insertGetId($employeeData);
+        if ($source === 'store') {
+            Db::name('employee_change_log')->insert([
+                'employee_id' => $employeeId,
+                'action' => self::ACTION_DEFAULT_INTERNAL,
+                'target_type' => 'employee_employment_type',
+                'target_id' => $employeeId,
+                'source' => 'store',
+                'before_data' => '{"employment_type_code":null,"employment_type_version":0}',
+                'after_data' => '{"employment_type_code":"internal","employment_type_version":1}',
+                'reason' => '门店新建员工默认归类为内部员工',
+                'operator_type' => 'admin',
+                'operator_id' => (int)($opCtx['operator_id'] ?? 0),
+                'operator_name' => (string)($opCtx['operator_name'] ?? ''),
+                'operator_ip' => (string)($opCtx['operator_ip'] ?? ''),
+                'request_id' => (string)($opCtx['request_id'] ?? ''),
+                'add_time' => $now,
+            ]);
+        }
+        return $employeeId;
     }
 
     protected function assertNoLegacyFields(array $input): void

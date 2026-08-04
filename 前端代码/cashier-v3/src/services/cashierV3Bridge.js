@@ -7,6 +7,7 @@ import {
   isCashierV3CommandAction,
   PREPARATION_PROJECTION_ACTIONS
 } from './cashierV3ActionManifest'
+import { isCompleteCheckoutCompositionContract } from './cashierV3EntitlementDraftContract'
 
 /** 三个去结账映射后的规范写命令名 */
 const CHECKOUT_COMMAND_ACTIONS = CHECKOUT_ACTION_ALIASES
@@ -69,7 +70,8 @@ const RESULT_QUERY_ACTIONS = new Set([
   'query-service-completion-result',
   'query-hang-order-result',
   'query-writeoff-result',
-  'query-reservation-result'
+  'query-reservation-result',
+  'query-unified-query-export-task'
 ])
 
 const QUERY_RESULT_ACTION_BY_COMMAND = Object.freeze({
@@ -80,8 +82,14 @@ const QUERY_RESULT_ACTION_BY_COMMAND = Object.freeze({
   'submit-hang-order': 'query-hang-order-result',
   'submit-writeoff': 'query-writeoff-result',
   'create-reservation': 'query-reservation-result',
-  'update-reservation': 'query-reservation-result'
+  'update-reservation': 'query-reservation-result',
+  'create-unified-query-export': 'query-unified-query-export-task'
 })
+
+function allowsDirectResultLookup(action, payload = {}) {
+  return action === 'query-unified-query-export-task'
+    && Boolean(String(payload.taskId || payload.task_id || '').trim())
+}
 
 function currentPublicVersionContextId() {
   return String(cashierV3PublicVersionStore.stateContextId || '')
@@ -256,6 +264,8 @@ const EMPTY_CASHIER = {
     lines: [],
     summary: EMPTY_SUMMARY
   },
+  entitlementSelector: null,
+  checkoutComposition: null,
   checkout: null,
   serviceOrder: null,
   supplement: null
@@ -399,6 +409,8 @@ const EMPTY_BOOTSTRAP = {
     projectReplacementRecords: [],
     cardUpgradeRecords: [],
     projectUpgradeRecords: [],
+    cardOperationRecords: [],
+    countsByType: {},
     recordsByType: {},
     pagesByType: {},
     querySettingsByType: {},
@@ -460,12 +472,12 @@ const DEV_PREVIEW_BOOTSTRAP = {
       debtDataAsOf: '2026-07-27 10:35:00'
     },
     catalog: {
-      types: ['项目', '产品', '次卡', '时间卡', '定制卡'],
+      types: ['项目', '产品', '卡项', '定制卡'],
       categories: ['全部', '面部', '身体', '头疗', '其他'],
       items: [
         { id: 'preview-project-1', name: '康养大师-热力通', kind: '项目', category: '面部', price: 300 },
         { id: 'preview-project-2', name: '康养大师-筋养通', kind: '项目', category: '面部', price: 180 },
-        { id: 'preview-card-1', name: '康养大师-筋膜通', kind: '次卡', category: '全部', price: 1000 },
+        { id: 'preview-card-1', name: '康养大师-筋膜通', kind: '卡项', category: '全部', price: 1000 },
         { id: 'preview-product-1', name: '古法姜疗+清源平衡', kind: '产品', category: '其他', price: 260 },
         { id: 'preview-project-3', name: '脏腑灸+古法姜疗+臀疗', kind: '项目', category: '面部', price: 220 },
         { id: 'preview-project-4', name: '古法姜疗+脏腑灸', kind: '项目', category: '身体', price: 380 }
@@ -475,6 +487,7 @@ const DEV_PREVIEW_BOOTSTRAP = {
       lines: [
         {
           id: 'preview-line-1',
+          lineRole: 'sale',
           name: '康养大师-热力通',
           kind: '项目',
           quantity: 1,
@@ -485,10 +498,11 @@ const DEV_PREVIEW_BOOTSTRAP = {
           couponSummary: '未选择',
           debtSummary: '未设置',
           serviceRole: '主项目',
-          serviceSource: '本次新买'
+          serviceSource: '本次购买'
         },
         {
           id: 'preview-line-2',
+          lineRole: 'sale',
           name: '康养大师-筋膜通',
           kind: '次卡',
           quantity: 1,
@@ -500,6 +514,19 @@ const DEV_PREVIEW_BOOTSTRAP = {
         },
         {
           id: 'preview-line-3',
+          lineRole: 'entitlement_service',
+          entitlementInstanceId: 'preview-card-1',
+          entitlementInstanceType: 'card_project',
+          entitlementSourceDetailId: 'preview-card-project-detail-1',
+          entitlementSourceVersion: 3,
+          projectId: 'preview-writeoff-project-1',
+          projectVersion: 2,
+          entitlementSourceName: '年度护理卡',
+          fullCardNo: 'K202607270001',
+          remainingTimes: 3,
+          occupiedTimes: 0,
+          availableTimes: 3,
+          validThroughLabel: '有效期至 2026-12-31',
           name: '康养大师-热力通',
           kind: '项目',
           quantity: 1,
@@ -516,6 +543,7 @@ const DEV_PREVIEW_BOOTSTRAP = {
         },
         {
           id: 'preview-line-4',
+          lineRole: 'sale',
           name: '康养大师-筋养通',
           kind: '项目',
           quantity: 1,
@@ -525,10 +553,11 @@ const DEV_PREVIEW_BOOTSTRAP = {
           salespersonSummary: '李四(售前)',
           couponSummary: '未选择',
           debtSummary: '未设置',
-          serviceSource: '本次新买'
+          serviceSource: '本次购买'
         },
         {
           id: 'preview-line-5',
+          lineRole: 'sale',
           name: '古法姜疗+清源平衡',
           kind: '产品',
           quantity: 1,
@@ -537,10 +566,11 @@ const DEV_PREVIEW_BOOTSTRAP = {
           salespersonSummary: '王五',
           couponSummary: '未选择',
           debtSummary: '未设置',
-          serviceSource: '本次新买'
+          serviceSource: '本次购买'
         },
         {
           id: 'preview-line-6',
+          lineRole: 'sale',
           name: '脏腑灸+古法姜疗+臀疗',
           kind: '项目',
           quantity: 1,
@@ -550,7 +580,7 @@ const DEV_PREVIEW_BOOTSTRAP = {
           salespersonSummary: '李四(售前)',
           couponSummary: '未选择',
           debtSummary: '未设置',
-          serviceSource: '本次新买'
+          serviceSource: '本次购买'
         }
       ],
       summary: {
@@ -558,14 +588,29 @@ const DEV_PREVIEW_BOOTSTRAP = {
         originalAmount: 1960,
         discountAmount: 0,
         receivableAmount: 1960
-      }
+      },
+      primaryAction: 'collect_and_complete',
+      primaryActionLabel: '收款并完成服务'
+    },
+    checkoutComposition: {
+      lineRoles: ['entitlement_service', 'sale'],
+      hasSale: true,
+      hasEntitlement: true,
+      primaryAction: 'collect_and_complete',
+      primaryActionLabel: '收款并完成服务',
+      steps: [
+        { key: 'order', number: 1, label: '确认本次内容' },
+        { key: 'payment', number: 2, label: '收款信息' },
+        { key: 'final', number: 3, label: '收款并完成服务' },
+        { key: 'result', number: 4, label: '处理结果' }
+      ]
     },
     checkout: {
       businessDate: '2026-07-27',
       sourceEnabled: true,
       sourceLabel: '到店',
       debtAmount: 0,
-      actualReceivedAmount: 1300,
+      cashPerformanceAmount: 1300,
       balancePaymentAmount: 0,
       payment: {
         availableBalance: 2000,
@@ -585,12 +630,17 @@ const DEV_PREVIEW_BOOTSTRAP = {
           validationMessage: '收款金额以结账前后端最终试算为准。'
         },
         methods: [
-          { id: 'wechat', name: '微信支付' },
+          { id: 'unionpay', name: '银联' },
+          { id: 'wechat', name: '微信' },
           { id: 'alipay', name: '支付宝' },
-          { id: 'cash', name: '现金' }
+          { id: 'dianping_voucher', name: '大众验券' },
+          { id: 'douyin_voucher', name: '抖音验券' },
+          { id: 'partner_collection', name: '合作方收款' },
+          { id: 'other_collection', name: '其他收款' },
+          { id: 'old_card_entry', name: '旧卡录入', canAdd: false, disabledReason: '旧卡录入需单独办理，不能与其他收款方式组合。', cashPerformanceEligible: false }
         ],
         selectedLines: [
-          { id: 'preview-payment-1', name: '微信支付', amount: 1300, status: '待收款', canEdit: true, canRemove: true, noteSummary: '未填写备注' }
+          { id: 'preview-payment-1', name: '微信', amount: 1300, status: '待收款', canEdit: true, canRemove: true, noteSummary: '未填写备注' }
         ]
       }
     },
@@ -603,7 +653,7 @@ const DEV_PREVIEW_BOOTSTRAP = {
       confirmationRequired: true,
       sections: [
         { key: 'card-reservation', label: '卡内／预约项目', description: '服务完成后按实际完成情况核销。', lineIds: ['preview-line-3'] },
-        { key: 'new-purchase', label: '本次新买', description: '本次新增消费，服务确认后再继续结账。', lineIds: ['preview-line-1', 'preview-line-2', 'preview-line-4', 'preview-line-5', 'preview-line-6'] }
+        { key: 'new-purchase', label: '本次购买', description: '本次新增消费，服务确认后再继续结账。', lineIds: ['preview-line-1', 'preview-line-2', 'preview-line-4', 'preview-line-5', 'preview-line-6'] }
       ],
       completion: {
         status: 'editing',
@@ -635,51 +685,100 @@ const DEV_PREVIEW_BOOTSTRAP = {
     sources: [
       {
         id: 'preview-card-1',
+        entitlementInstanceId: 'preview-card-1',
+        entitlementInstanceType: 'card_project',
+        version: 3,
         sourceType: 'card',
+        sourceTypeLabel: '次卡',
+        sourceKind: 'count_card',
+        sourceKindLabel: '次卡',
         name: '年度护理卡',
         reference: 'K202607270001',
+        fullCardNo: 'K202607270001',
         status: '可用',
         expiryText: '有效期至 2026-12-31',
+        expiryDate: '2026-12-31',
         availableProjectCount: 1,
         remainingTimes: 3,
+        occupiedTimes: 0,
+        availableTimes: 3,
         remainingAmount: 300,
+        purchaseTimes: 10,
+        purchaseAmount: 1000,
+        orderRemark: '首次到店体验套餐',
         selectedProjectCount: 1,
         projects: [
           {
             id: 'preview-writeoff-project-1',
+            projectId: 'preview-writeoff-project-1',
+            entitlementSourceDetailId: 'preview-card-project-detail-1',
+            version: 2,
             name: '水光护理',
             remainingTimes: 3,
             totalTimes: 10,
+            remainingAmount: 300,
+            purchaseTimes: 10,
+            purchaseAmount: 1000,
+            actualUnitAmount: '100.0000',
+            amountCalculationVersion: 'preview-allocated-purchase-v1',
             reservedTimes: 0,
+            occupiedTimes: 0,
             availableTimes: 3,
+            expiryDate: '2026-12-31',
             selectedTimes: 1,
             writeoffAmount: 100,
             selected: true,
             serviceObject: '本人',
+            craftsmen: [
+              { id: 'staff-1', name: '肖君鹏', code: '0010', positionName: '手艺人', storeName: '瑞昊一店', selectable: true }
+            ],
             craftsmenSummary: '肖君鹏(点)'
           }
         ]
       },
       {
         id: 'preview-gift-1',
+        entitlementInstanceId: 'preview-gift-1',
+        entitlementInstanceType: 'independent_gift',
+        version: 4,
         sourceType: 'independent_gift',
+        sourceTypeLabel: '赠送',
+        sourceKind: 'gift',
+        sourceKindLabel: '赠送',
         name: '赠送水光护理',
         reference: 'ZS202607270001',
+        fullCardNo: 'ZS202607270001',
         status: '可用',
         expiryText: '有效期至 2026-08-15',
+        expiryDate: '2026-08-15',
         expiring: true,
         availableProjectCount: 1,
         remainingTimes: 1,
+        occupiedTimes: 0,
+        availableTimes: 1,
         remainingAmount: 0,
+        purchaseTimes: 1,
+        purchaseAmount: 0,
+        orderRemark: '到店礼',
         selectedProjectCount: 0,
         projects: [
           {
             id: 'preview-writeoff-project-2',
+            projectId: 'preview-writeoff-project-2',
+            entitlementSourceDetailId: 'preview-gift-project-detail-1',
+            version: 1,
             name: '水光护理',
             remainingTimes: 1,
             totalTimes: 1,
+            remainingAmount: 0,
+            purchaseTimes: 1,
+            purchaseAmount: 0,
+            actualUnitAmount: '0.0000',
+            amountCalculationVersion: 'preview-allocated-purchase-v1',
             reservedTimes: 0,
+            occupiedTimes: 0,
             availableTimes: 1,
+            expiryDate: '2026-08-15',
             selectedTimes: 0,
             writeoffAmount: 0,
             selected: false,
@@ -840,7 +939,7 @@ const DEV_PREVIEW_BOOTSTRAP = {
         memberName: '王女士',
         phone: '13900000003',
         projectSummary: '身体护理',
-        projectSource: '本次新买',
+        projectSource: '本次购买',
         craftsmanSummary: '肖君鹏',
         roomName: '普通房 03',
         status: '待结账',
@@ -1015,13 +1114,13 @@ const DEV_PREVIEW_BOOTSTRAP = {
       forcedRangeLabel: '当前登录门店：瑞昊一店'
     },
     cards: [
-      { metricCode: 'salesperson_performance', name: '销售人业绩', value: 16800, unit: '元', description: '正式销售订单中已确定销售人的分配业绩。' },
-      { metricCode: 'cash_performance', name: '现金业绩', value: 22860, unit: '元', description: '本次新收到的现金类收款与储值充值，余额支付不计入。' },
-      { metricCode: 'actual_performance', name: '实际业绩', value: 18340, unit: '元', description: '分成分配最终确定后的实际业绩结果。' },
-      { metricCode: 'consumption_performance', name: '消耗业绩', value: 9360, unit: '元', description: '项目实际完成服务或核销后按项目配置产生。' },
+      { metricCode: 'salesperson_performance', name: '销售人业绩', value: 16800, unit: '元', description: '销售商品明细按最终分配规则归属给所选销售人的现金业绩。' },
+      { metricCode: 'cash_performance', name: '现金业绩', value: 22860, unit: '元', description: '银联、微信、支付宝、大众验券、抖音验券、合作方收款、其他收款。' },
+      { metricCode: 'actual_performance', name: '实际业绩', value: 18340, unit: '元', description: '现金业绩减去分配给“合作方”或“外包”销售人的业绩。销售人在员工管理中设置人员类型；普通内部员工分配的销售人业绩不扣。员工类型和分配结果按业务发生时保存，后来改人员类型不反改历史数据。' },
+      { metricCode: 'consumption_performance', name: '消耗业绩', value: 9360, unit: '元', description: '项目真正完成服务并核销后才产生的项目消耗业绩。' },
       { metricCode: 'refund_amount', name: '退款金额', value: 300, unit: '元', description: '退款成功后形成的反向调整金额。' },
-      { metricCode: 'recharge_amount', name: '储值金额', value: 7600, unit: '元', description: '储值充值成功金额。' },
-      { metricCode: 'balance_deduction', name: '余额扣款', value: 4200, unit: '元', description: '订单支付导致的会员储值余额扣减。' },
+      { metricCode: 'recharge_amount', name: '储值金额', value: 7600, unit: '元', description: '充值成功写入会员账户的本金，赠送金额单独记录；使用七种记账方式充值时产生现金业绩。' },
+      { metricCode: 'balance_deduction', name: '余额扣款', value: 4200, unit: '元', description: '使用会员已有储值余额支付订单的金额，不属于现金业绩。' },
       { metricCode: 'casual_customer_count', name: '散客数量', value: 12, unit: '人', description: '未绑定会员的到店消费人数。' },
       { metricCode: 'new_customer_count', name: '新客数量', value: 9, unit: '人', description: '统计期内首次形成有效消费的会员人数。' },
       { metricCode: 'reservation_customer_count', name: '预约客数', value: 26, unit: '人', description: '按预约服务日期和会员去重统计。' }
@@ -1120,7 +1219,7 @@ const DEV_PREVIEW_BOOTSTRAP = {
         discountAmount: 0,
         debtAmount: 0,
         actualReceivedAmount: 1300,
-        paymentSummary: '微信支付',
+        paymentSummary: '微信',
         salespersonSummary: '李四、王五',
         cashierName: '肖君鹏',
         sourcePrimary: '到店',
@@ -1157,14 +1256,14 @@ const DEV_PREVIEW_BOOTSTRAP = {
     rechargeOrders: [{
       id: 'recharge-1', rechargeOrderNo: 'CZ202607270006', businessDate: '2026-07-27',
       memberName: '陈女士', phone: '13900000002', storeName: '瑞昊一店', rechargePlan: '充 1000 赠 100',
-      rechargeAmount: '1000', giftAmount: '100', actualReceivedAmount: '1000', paymentMethod: '微信支付',
+      rechargeAmount: '1000', giftAmount: '100', actualReceivedAmount: '1000', paymentMethod: '微信',
       salespersonName: '李美容师', operatorName: '肖君鹏', paymentStatus: '已支付', orderStatus: '正常',
       paymentCompletedAt: '2026-07-27 09:42'
     }],
     supplementOrders: [{
       id: 'supplement-1', supplementOrderNo: 'BJ202607270003', businessDate: '2026-07-27',
       debtNo: 'QK202607180009-01', sourceOrderNo: 'XS202607180021', memberName: '陈女士', phone: '13900000002',
-      debtSummary: '年度护理卡首笔欠款', supplementAmount: '300', paymentMethod: '现金', storeName: '瑞昊一店',
+      debtSummary: '年度护理卡首笔欠款', supplementAmount: '300', paymentMethod: '银联', storeName: '瑞昊一店',
       operatorName: '肖君鹏', paymentStatus: '已支付', paymentCompletedAt: '2026-07-27 11:06'
     }],
     refundOrders: [{
@@ -1371,6 +1470,91 @@ export function validateRootStateSchema(state = {}) {
     if (isRecord(cashier.cart)) {
       checkArrayField(cashier.cart, 'lines', 'cashier_cart_lines')
       checkObjectField(cashier.cart, 'summary', 'cashier_cart_summary')
+      if (Array.isArray(cashier.cart.lines)) {
+        cashier.cart.lines.forEach((line, index) => {
+          if (!isRecord(line)) {
+            problems.push(`cashier_cart_line_${index}_not_object`)
+            return
+          }
+          if (!['sale', 'entitlement_service'].includes(line.lineRole)) {
+            problems.push(`cashier_cart_line_${index}_role_invalid`)
+          }
+          if (!line.id || !line.name || !Number.isInteger(Number(line.quantity)) || Number(line.quantity) < 1) {
+            problems.push(`cashier_cart_line_${index}_identity_invalid`)
+          }
+          if (line.lineRole === 'entitlement_service') {
+            const sourceVersion = Number(line.entitlementSourceVersion ?? line.sourceVersion)
+            const projectVersion = Number(line.projectVersion)
+            if (!line.entitlementInstanceId || !line.entitlementSourceDetailId) {
+              problems.push(`cashier_cart_line_${index}_entitlement_source_missing`)
+            }
+            if (!Number.isInteger(sourceVersion) || sourceVersion < 1) {
+              problems.push(`cashier_cart_line_${index}_entitlement_version_invalid`)
+            }
+            if (!Number.isInteger(projectVersion) || projectVersion < 1) {
+              problems.push(`cashier_cart_line_${index}_project_version_invalid`)
+            }
+          }
+        })
+      }
+    }
+    checkObjectField(cashier, 'entitlementSelector', 'cashier_entitlementSelector')
+    checkObjectField(cashier, 'checkoutComposition', 'cashier_checkoutComposition')
+    if (isRecord(cashier.checkoutComposition)) {
+      checkArrayField(cashier.checkoutComposition, 'lineRoles', 'cashier_checkoutComposition_lineRoles')
+      const action = cashier.checkoutComposition.primaryAction
+      if (action !== undefined && !['', 'collect_payment', 'complete_service', 'collect_and_complete'].includes(action)) {
+        problems.push('cashier_checkoutComposition_primaryAction_invalid')
+      }
+      if (isRecord(cashier.cart)
+        && Array.isArray(cashier.cart.lines)
+        && !isCompleteCheckoutCompositionContract(cashier.checkoutComposition, cashier.cart.lines)) {
+        problems.push('cashier_checkoutComposition_contract_mismatch')
+      }
+    }
+    if (isRecord(cashier.entitlementSelector)) {
+      const selector = cashier.entitlementSelector
+      if (typeof selector.ready !== 'boolean') problems.push('cashier_entitlementSelector_ready_invalid')
+      checkArrayField(selector, 'sources', 'cashier_entitlementSelector_sources')
+      checkArrayField(selector, 'commandContexts', 'cashier_entitlementSelector_commandContexts')
+      if (selector.ready === true) {
+        const selectorMember = isRecord(selector.member) ? selector.member : null
+        if (!selector.selectorRequestId || !selector.selectorToken || !selectorMember || !(selectorMember.id || selectorMember.memberId)) {
+          problems.push('cashier_entitlementSelector_identity_incomplete')
+        }
+        ;(Array.isArray(selector.sources) ? selector.sources : []).forEach((source, sourceIndex) => {
+          if (!isRecord(source)) {
+            problems.push(`cashier_entitlementSelector_source_${sourceIndex}_not_object`)
+            return
+          }
+          const sourceId = source.entitlementInstanceId || source.id
+          const sourceVersion = Number(source.version ?? source.revision)
+          if (!sourceId || !Number.isInteger(sourceVersion) || sourceVersion < 1) {
+            problems.push(`cashier_entitlementSelector_source_${sourceIndex}_identity_invalid`)
+          }
+          if (!Array.isArray(source.projects)) {
+            problems.push(`cashier_entitlementSelector_source_${sourceIndex}_projects_not_array`)
+            return
+          }
+          source.projects.forEach((project, projectIndex) => {
+            const prefix = `cashier_entitlementSelector_source_${sourceIndex}_project_${projectIndex}`
+            if (!isRecord(project)) {
+              problems.push(`${prefix}_not_object`)
+              return
+            }
+            const projectId = project.projectId || project.id
+            const detailId = project.entitlementSourceDetailId || project.sourceDetailId
+            const projectVersion = Number(project.version ?? project.revision)
+            if (!projectId || !detailId || !Number.isInteger(projectVersion) || projectVersion < 1) {
+              problems.push(`${prefix}_identity_invalid`)
+            }
+            ;['remainingTimes', 'occupiedTimes', 'availableTimes'].forEach((key) => {
+              const value = Number(project[key] ?? (key === 'occupiedTimes' ? project.reservedTimes : NaN))
+              if (!Number.isFinite(value) || value < 0) problems.push(`${prefix}_${key}_invalid`)
+            })
+          })
+        })
+      }
     }
   }
 
@@ -1480,6 +1664,8 @@ export function validateRootStateSchema(state = {}) {
     checkArrayField(orderCenter, 'projectReplacementRecords', 'orderCenter_projectReplacementRecords')
     checkArrayField(orderCenter, 'cardUpgradeRecords', 'orderCenter_cardUpgradeRecords')
     checkArrayField(orderCenter, 'projectUpgradeRecords', 'orderCenter_projectUpgradeRecords')
+    checkArrayField(orderCenter, 'cardOperationRecords', 'orderCenter_cardOperationRecords')
+    checkObjectField(orderCenter, 'countsByType', 'orderCenter_countsByType')
     checkObjectField(orderCenter, 'recordsByType', 'orderCenter_recordsByType')
     checkObjectField(orderCenter, 'pagesByType', 'orderCenter_pagesByType')
     checkObjectField(orderCenter, 'querySettingsByType', 'orderCenter_querySettingsByType')
@@ -1579,6 +1765,9 @@ function normalizeBootstrap(rawBootstrap = {}) {
   const incomingCart = incomingCashier.cart && typeof incomingCashier.cart === 'object'
     ? incomingCashier.cart
     : {}
+  const incomingEntitlementSelector = incomingCashier.entitlementSelector && typeof incomingCashier.entitlementSelector === 'object'
+    ? incomingCashier.entitlementSelector
+    : null
   const incomingWorkspace = raw.workspace && typeof raw.workspace === 'object'
     ? raw.workspace
     : {}
@@ -1687,7 +1876,16 @@ function normalizeBootstrap(rawBootstrap = {}) {
           ...EMPTY_SUMMARY,
           ...(incomingCart.summary && typeof incomingCart.summary === 'object' ? incomingCart.summary : {})
         }
-      }
+      },
+      entitlementSelector: incomingEntitlementSelector
+        ? {
+            ...incomingEntitlementSelector,
+            sources: Array.isArray(incomingEntitlementSelector.sources) ? incomingEntitlementSelector.sources : [],
+            commandContexts: Array.isArray(incomingEntitlementSelector.commandContexts)
+              ? incomingEntitlementSelector.commandContexts
+              : []
+          }
+        : null
     },
     serviceCompletion: {
       ...base.serviceCompletion,
@@ -1861,6 +2059,10 @@ function normalizeBootstrap(rawBootstrap = {}) {
       projectReplacementRecords: Array.isArray(incomingOrderCenter.projectReplacementRecords) ? incomingOrderCenter.projectReplacementRecords : [],
       cardUpgradeRecords: Array.isArray(incomingOrderCenter.cardUpgradeRecords) ? incomingOrderCenter.cardUpgradeRecords : [],
       projectUpgradeRecords: Array.isArray(incomingOrderCenter.projectUpgradeRecords) ? incomingOrderCenter.projectUpgradeRecords : [],
+      cardOperationRecords: Array.isArray(incomingOrderCenter.cardOperationRecords) ? incomingOrderCenter.cardOperationRecords : [],
+      countsByType: incomingOrderCenter.countsByType && typeof incomingOrderCenter.countsByType === 'object'
+        ? incomingOrderCenter.countsByType
+        : {},
       recordsByType: incomingOrderCenter.recordsByType && typeof incomingOrderCenter.recordsByType === 'object'
         ? incomingOrderCenter.recordsByType
         : {},
@@ -1909,8 +2111,8 @@ function readInitialBootstrap() {
         ...clone(previewCartLines.get('preview-line-1')),
         isServiceProject: true,
         serviceRole: '主项目',
-        serviceSource: '本次新买',
-        entitlementSource: '本次新买项目（待支付后正式完成）',
+        serviceSource: '本次购买',
+        entitlementSource: '本次购买项目（待支付后正式完成）',
         completionStatus: '本次已完成',
         actualCompletedQuantity: 1,
         actualCraftsmen: [{ id: 'staff-1', name: '肖君鹏', isPrimary: true }],
@@ -1951,6 +2153,22 @@ export function useCashierV3State() {
 }
 
 /**
+ * 登录接口已在服务端完成员工任职、门店端入口和岗位规则三重校验。
+ * 在首个工作台根投影回来前，路由只能使用这份登录响应决定可进入的首屏；
+ * 仅接受已登记功能码，且不把客户端传入的未知码扩展成 UI 权限。
+ */
+export function applyCashierV3LoginFeatures(features = []) {
+  const granted = new Set(Array.isArray(features)
+    ? features.filter((feature) => typeof feature === 'string')
+    : [])
+  const known = Object.keys(EMPTY_BOOTSTRAP.featurePermissions)
+  cashierV3State.featurePermissions = Object.fromEntries(known.map((feature) => [
+    feature,
+    granted.has(feature)
+  ]))
+}
+
+/**
  * 打开统一查询使用的人员／门店／组织选择器。
  *
  * 选择器只帮助用户录入筛选值；最终查询仍由后端基于当前账号权限重新裁剪。
@@ -1963,6 +2181,12 @@ export function openCashierV3QueryEntitySelector(options = {}) {
   }
 
   const requestId = options.requestId || createCashierV3CommandId('QUERY_ENTITY')
+  const scope = options.scope || options.selectionContext?.scope || 'query_filter'
+  const selectorEntryByScope = {
+    reservation_craftsmen: 'reservation',
+    member_exclusive_service_staff: 'member'
+  }
+  const selectorEntry = options.selectorEntry || selectorEntryByScope[scope] || 'cashier'
   return new Promise((resolve) => {
     let settled = false
     const cleanup = () => {
@@ -1996,12 +2220,13 @@ export function openCashierV3QueryEntitySelector(options = {}) {
       detail: {
         requestId,
         entityType,
+        selectorEntry,
         title: options.title || '',
         multiple: options.multiple === true,
         selectedRecords: Array.isArray(options.selectedRecords) ? options.selectedRecords : [],
         selectionContext: {
           ...(options.selectionContext && typeof options.selectionContext === 'object' ? options.selectionContext : {}),
-          scope: options.scope || options.selectionContext?.scope || 'query_filter',
+          scope,
           fieldKey: options.field?.key || options.fieldKey || '',
           currentValue: options.currentValue || null
         }
@@ -2313,10 +2538,20 @@ function isCashierWorkspaceAction(action) {
     'choose-catalog-item',
     'open-member-selector',
     'select-cashier-member',
+    // 预约选择会员同样只读取／校验当前收银工作台上下文；后端策略要求
+    // cashier_workspace 版本，不能因入口不在收银页就漏传。
+    'select-reservation-member',
     'create-member',
+    'update-member',
+    'deactivate-member',
     'set-guest-order',
+    // 定制卡配置先由后端发现并锁定项目资源；客户端仍必须提交当前
+    // 收银工作台版本，避免配置写入绕开工作台并发保护。
+    'create-custom-card-configuration',
     'remove-cart-line',
     'change-cart-line-quantity',
+    'update-cart-line-service-settings',
+    'add-checkout-entitlement-lines',
     'open-line-assignment',
     'open-line-coupon',
     'open-line-debt',
@@ -2329,6 +2564,7 @@ function isCashierWorkspaceAction(action) {
     'exit-supplement',
     'open-hang-order',
     'submit-hang-order',
+    'resume-hang-order',
     'prepare-service-completion',
     'prepare-checkout',
     'prepare-debt-repayment',
@@ -2341,6 +2577,9 @@ function isCashierWorkspaceAction(action) {
     'open-payment-note',
     'update-payment-line',
     'remove-payment-line',
+    'apply-balance-payment',
+    'remove-balance-payment',
+    'update-balance-payment',
     'open-checkout-source-selector',
     'confirm-debt-warning',
     'confirm-checkout-final-changes',
@@ -2355,6 +2594,9 @@ function isCashierWorkspaceAction(action) {
     'finish-checkout-and-return'
   ]
   return cashierWorkspaceActions.includes(action)
+    || action === 'submit-recharge'
+    || action === 'submit-recharge-debt-repayment'
+    || action === 'submit-direct-gift'
 }
 
 /**
@@ -2414,7 +2656,9 @@ function resolveCommandContexts(action, payload) {
     contexts.push(buildCommandContext('writeoff_draft', payload.writeoffDraftId || writeoff.draftId))
   }
 
-  if (payload.hangOrderId) {
+  // The backend discovers and version-locks the hang from its stable ID.
+  // A list-row revision is display data, never a trusted command context.
+  if (payload.hangOrderId && action !== 'resume-hang-order') {
     contexts.push(buildCommandContext('hang_order', payload.hangOrderId))
   }
 
@@ -2422,8 +2666,17 @@ function resolveCommandContexts(action, payload) {
     contexts.push(buildCommandContext('room', payload.roomId))
   }
 
-  if (payload.debtRecordId || payload.debtItemId) {
+  // Recharge-debt repayment locks and revalidates the authoritative debt row
+  // inside its transaction. Its declared context policy contains the workspace,
+  // member and member balance only, so sending a synthetic debt_record context
+  // would be rejected before the command can reach that server-side guard.
+  if ((payload.debtRecordId || payload.debtItemId) && action !== 'submit-recharge-debt-repayment') {
     contexts.push(buildCommandContext('debt_record', payload.debtRecordId || payload.debtItemId))
+  }
+
+  if ((action === 'submit-recharge' || action === 'submit-recharge-debt-repayment' || action === 'submit-direct-gift') && payload.memberId) {
+    contexts.push(buildCommandContext('member', payload.memberId))
+    if (action !== 'submit-direct-gift') contexts.push(buildCommandContext('member_balance', payload.memberId))
   }
 
   if (isCashierWorkspaceAction(action)) {
@@ -2943,9 +3196,6 @@ function buildStateIgnoredResult(originalResult, envelopeOutcome = {}) {
   if (response?.idempotencyKey) preserved.idempotencyKey = response.idempotencyKey
   if (response?.businessNo) preserved.businessNo = response.businessNo
   if (resultBlock?.businessNo) preserved.businessNo = resultBlock.businessNo
-  if (originalResult?.data && typeof originalResult.data === 'object') {
-    preserved.data = originalResult.data
-  }
   delete preserved.overlay
   delete preserved.navigation
   delete preserved.versions
@@ -3104,7 +3354,7 @@ export async function requestCashierV3Action(action, payload = {}) {
   // 结果追查：必须带 originalIdempotencyKey；禁止猜测或创建新键
   if (RESULT_QUERY_ACTIONS.has(canonicalAction)) {
     const originalKey = String(requestBody.originalIdempotencyKey || '').trim()
-    if (!originalKey) {
+    if (!originalKey && !allowsDirectResultLookup(canonicalAction, requestBody)) {
       const missing = {
         result: {
           status: 'failed',
@@ -3138,8 +3388,9 @@ export async function requestCashierV3Action(action, payload = {}) {
   }
   const correlationId = `CORR-${fallbackUuidV4()}`
   requestPayload.correlationId = correlationId
-  if (RESULT_QUERY_ACTIONS.has(canonicalAction)) {
-    requestPayload.originalIdempotencyKey = String(requestBody.originalIdempotencyKey || '').trim()
+  const originalResultKey = String(requestBody.originalIdempotencyKey || '').trim()
+  if (RESULT_QUERY_ACTIONS.has(canonicalAction) && originalResultKey) {
+    requestPayload.originalIdempotencyKey = originalResultKey
   }
   const requestMeta = {
     contextSwitchToken,
@@ -3152,8 +3403,8 @@ export async function requestCashierV3Action(action, payload = {}) {
     correlationId,
     requireCorrelationBinding: true,
     stateContextId: stateContextIdOf(cashierV3State) || '',
-    requireOriginalIdempotencyKey: RESULT_QUERY_ACTIONS.has(canonicalAction),
-    originalIdempotencyKey: String(requestBody.originalIdempotencyKey || '').trim()
+    requireOriginalIdempotencyKey: RESULT_QUERY_ACTIONS.has(canonicalAction) && Boolean(originalResultKey),
+    originalIdempotencyKey: originalResultKey
   }
   const preparationKind = preparationKindForAction(canonicalAction)
   const preparationIntent = registerPreparationIntent(canonicalAction, requestPayload)
@@ -3322,17 +3573,22 @@ function isTrustedV3Envelope(result) {
 
 function emitCommandResultUnknown(idempotencyKey, canonicalAction, silent, detailMessage) {
   const queryResultAction = QUERY_RESULT_ACTION_BY_COMMAND[canonicalAction] || null
+  const recoveryMode = CASHIER_V3_ACTION_MANIFEST[canonicalAction]?.recovery?.mode || ''
+  const canRetryWithSameKey = !queryResultAction && recoveryMode === 'same_idempotency_retry'
+  const message = canRetryWithSameKey
+    ? '操作结果未知，请回到原操作重试；系统必须沿用原内容和原请求标识，不能新建请求。'
+    : '操作结果未知，请查询原结果后再决定是否重试，请勿更换请求标识重复提交。'
   const unknown = {
     result: {
       status: 'result_unknown',
       code: 'COMMAND_RESULT_UNKNOWN',
-      message: '操作结果未知，请查询原结果后再决定是否重试，请勿更换请求标识重复提交。',
+      message,
       detail: detailMessage || ''
     },
     idempotencyKey: idempotencyKey || '',
     queryResultAction,
     canClose: false,
-    canRetry: false,
+    canRetry: canRetryWithSameKey,
     retryIdempotencyMode: 'same'
   }
   if (!silent) {
@@ -3340,14 +3596,14 @@ function emitCommandResultUnknown(idempotencyKey, canonicalAction, silent, detai
       detail: {
         status: 'result_unknown',
         code: 'COMMAND_RESULT_UNKNOWN',
-        message: unknown.result.message,
+        message,
         feedback: null,
         navigation: null,
         overlay: null,
         latestState: null,
         conflict: null,
         canClose: false,
-        canRetry: false,
+        canRetry: canRetryWithSameKey,
         retryIdempotencyMode: 'same',
         queryResultAction,
         idempotencyKey: idempotencyKey || ''

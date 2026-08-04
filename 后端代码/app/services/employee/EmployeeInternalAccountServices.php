@@ -309,6 +309,39 @@ class EmployeeInternalAccountServices extends BaseServices
         ]);
     }
 
+    /**
+     * 当前登录员工修改自己的统一内部账号密码。
+     * 账号、任职与权限不由客户端传入，调用方只能传入已认证会话中的 employee_id。
+     */
+    public function changeOwnPassword(int $employeeId, string $currentPassword, string $newPassword, array $operatorContext = []): array
+    {
+        $currentPassword = (string)$currentPassword;
+        $newPassword = (string)$newPassword;
+        if ($employeeId <= 0) {
+            throw new AdminException('当前登录身份无效，请重新登录');
+        }
+        if ($currentPassword === '' || !password_verify($currentPassword, (string)($this->getByEmployeeId($employeeId)['pwd'] ?? ''))) {
+            throw new AdminException('原密码错误');
+        }
+        if (strlen($newPassword) < 4 || strlen($newPassword) > 64) {
+            throw new AdminException('新密码必须为4到64位');
+        }
+        if ($currentPassword === $newPassword) {
+            throw new AdminException('新密码不能与原密码相同');
+        }
+        $account = $this->getByEmployeeId($employeeId);
+        if (!$account || (int)($account['status'] ?? 0) !== 1) {
+            throw new AdminException('当前账号已失效，请重新登录');
+        }
+        return $this->saveAccount(
+            $employeeId,
+            (string)$account['account'],
+            $newPassword,
+            1,
+            $operatorContext
+        );
+    }
+
     public function passwordHash(string $plainPwd): string
     {
         $plainPwd = (string)$plainPwd;

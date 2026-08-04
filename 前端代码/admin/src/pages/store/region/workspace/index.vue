@@ -694,11 +694,10 @@
                 </div>
                 <div v-for="row in ((personAuth.function_preview && personAuth.function_preview.by_staff) || [])" :key="`fp-${row.staff_id}`" class="auth-write-box">
                   <div class="permission-note"><strong>{{ storeNameByStaffId(row.staff_id) }}</strong><span>按有效岗位计算</span></div>
-                  <div class="permission-note"><strong>门店后台</strong><span>{{ previewCoverText(row.preview && row.preview.channels && row.preview.channels.store_backend) }} · {{ entryStatusText(row.staff_id, 'store_backend') }}</span></div>
-                  <div class="permission-note"><strong>收银台</strong><span>{{ previewCoverText(row.preview && row.preview.channels && row.preview.channels.cashier) }} · {{ entryStatusText(row.staff_id, 'cashier') }}</span></div>
+                  <div class="permission-note"><strong>Vue 3 门店端</strong><span>{{ previewCoverText(row.preview && row.preview.channels && row.preview.channels.store_v3) }} · {{ entryStatusText(row.staff_id, 'store_v3') }}</span></div>
                   <div class="permission-note"><strong>手机端</strong><span>{{ previewCoverText(row.preview && row.preview.channels && row.preview.channels.mobile) }} · {{ entryStatusText(row.staff_id, 'mobile') }}</span></div>
                 </div>
-                <div v-if="!((personAuth.function_preview && personAuth.function_preview.by_staff) || []).length" class="empty-inline">暂无门店端入口预览</div>
+                <div v-if="!((personAuth.function_preview && personAuth.function_preview.by_staff) || []).length" class="empty-inline">暂无 Vue 3 门店端入口预览</div>
               </div>
 
               <div class="form-section">
@@ -859,7 +858,7 @@
           <button class="icon-button" type="button" @click="closeRolePublishModal"><svg-icon name="x" /></button>
         </div>
         <div class="modal-body">
-          <div class="permission-note"><strong>功能说明</strong><span>岗位决定能操作哪些功能，人员数据权限决定能看到哪些数据。在此新建总部门店角色模板（门店后台 / 收银台 / 手机端），再发布到组织或门店供门店选用。不含平台后台权限。</span></div>
+          <div class="permission-note"><strong>功能说明</strong><span>这里保留历史角色模板的发布记录；门店端权限请在「岗位策略」按门店端功能配置，历史模板不会授予门店端权限。</span></div>
           <div class="permission-note"><strong>使用步骤</strong><span>① 新建或编辑模板并配置三端功能 → ② 发布到门店或组织 → ③ 门店人员页面选择已允许的模板。停用后不可新增选择，已绑定人员不会自动清权。</span></div>
           <div class="list-toolbar" style="margin:12px 0;gap:8px;display:flex;flex-wrap:wrap;align-items:center;">
             <input v-model.trim="rolePublishModal.keyword" type="text" placeholder="搜索模板名称" style="min-width:180px" @keyup.enter="loadRoleTemplates" />
@@ -887,7 +886,7 @@
           </table>
           <div v-if="!rolePublishModal.templates.length" class="empty-inline role-empty-box">
             <p>暂无总部门店角色模板。</p>
-            <p class="muted">请点击「新建总部门店角色模板」配置门店后台、收银台、手机端功能后，再发布到门店。</p>
+            <p class="muted">历史模板不再用于门店端授权；请到「岗位策略」配置门店端和手机端权限。</p>
             <div style="margin-top:12px;display:flex;gap:8px;justify-content:center;">
               <button class="button primary compact-button" type="button" :disabled="!canWrite" @click="openRoleTemplateCreate">新建总部门店角色模板</button>
               <button class="button secondary compact-button" type="button" @click="loadRoleTemplates">刷新列表</button>
@@ -943,8 +942,8 @@
           <div class="auth-row">
             <label>渠道</label>
             <select v-model="rolePublishModal.channel" :disabled="writeSubmitting">
-              <option value="store_backend">统一模板（门店后台+收银台+手机端）</option>
-              <option value="cashier">仅收银台通道（兼容）</option>
+              <option value="store_backend">历史门店模板</option>
+              <option value="cashier">历史收银模板</option>
             </select>
           </div>
           <div class="auth-row">
@@ -975,7 +974,7 @@
               <tr v-for="p in rolePublishModal.publishes" :key="p.id">
                 <td>{{ p.id }}</td>
                 <td>{{ p.store_name || ('门店#' + p.store_id) }}</td>
-                <td>{{ p.channel === 'cashier' ? '收银台' : '门店后台' }}</td>
+                <td>{{ p.channel === 'cashier' ? '历史收银模板' : '历史门店模板' }}</td>
                 <td>{{ p.store_role_name || p.store_role_id }}</td>
                 <td>{{ Number(p.status)===1?'有效':'停用' }}</td>
                 <td>
@@ -1520,7 +1519,6 @@ export default {
           allow_store_select: 0,
           use_platform: 0,
           use_store: 1,
-          use_cashier: 0,
           use_mobile: 0,
           channel_rules: {},
         },
@@ -1747,7 +1745,7 @@ export default {
       if (m.target === 'store') {
         return Number(m.status) === 1
           ? `确认恢复门店「${name}」？恢复后，原任职与授权按各自有效状态继续生效；若所属组织仍停用，业务仍不可用。历史数据不受影响。`
-          : `确认停用门店「${name}」？停用后门店后台、收银台、手机端业务入口立即不可用，禁止新增业务写入；历史数据保留，总部仍可查询并恢复。`;
+          : `确认停用门店「${name}」？停用后门店端、手机端业务入口立即不可用，禁止新增业务写入；历史数据保留，总部仍可查询并恢复。`;
       }
       return Number(m.status) === 1
         ? `确认恢复组织「${name}」？恢复上级后，原本单独停用的下级组织和门店仍保持停用，不会一并自动恢复。`
@@ -2681,11 +2679,11 @@ export default {
           id,
           parentId: parentId == null ? null : Number(parentId),
           name: node.name,
-          stores: node.all_store_count != null ? node.all_store_count : (node.store_count || 0),
-          directStores: node.direct_store_count != null ? node.direct_store_count : (node.store_count || 0),
-          employees: node.employee_count || 0,
-          attention: node.attention_count || 0,
-          leaders: node.leader_count || 0,
+          stores: 0,
+          directStores: 0,
+          employees: 0,
+          attention: 0,
+          leaders: 0,
           sort: node.sort != null ? Number(node.sort) : 0,
           updated: node.update_time_text || '',
           open: prev != null ? prev : (parentId == null),
@@ -2943,9 +2941,6 @@ export default {
       const entries = Array.isArray(a.channel_entries) ? a.channel_entries : [];
       const hit = entries.find((e) => String(e.channel || e.entry || '') === String(channel));
       if (!hit) {
-        // 兼容旧字段
-        if (channel === 'store_backend') return Number(a.is_store) === 1 ? '入口已开通' : '入口未开通';
-        if (channel === 'cashier') return Number(a.is_cashier) === 1 ? '入口已开通' : '入口未开通';
         return '入口未开通';
       }
       return Number(hit.status) === 1 ? '入口已开通' : '入口未开通';
@@ -3436,18 +3431,13 @@ export default {
         const sid = Number(a.id);
         const jobIds = ((a.job_positions || []).map((j) => Number(j.position_id || j.id || 0)).filter((x) => x > 0));
         this.$set(jobsMap, sid, jobIds);
-        const entryState = { store_backend: 0, cashier: 0, mobile: 0 };
+        const entryState = { store_v3: 0, mobile: 0 };
         ((a.channel_entries || [])).forEach((e) => {
           const ch = String(e.channel || '');
           if (Object.prototype.hasOwnProperty.call(entryState, ch)) {
             entryState[ch] = Number(e.status) === 1 ? 1 : 0;
           }
         });
-        // 兼容投影字段回显
-        if (!((a.channel_entries || []).length)) {
-          entryState.store_backend = Number(a.is_store) === 1 ? 1 : 0;
-          entryState.cashier = Number(a.is_cashier) === 1 ? 1 : 0;
-        }
         this.$set(entriesMap, sid, entryState);
       });
       this.authForms.jobs = jobsMap;
@@ -3548,8 +3538,7 @@ export default {
     saveStaffEntries(a) {
       const state = this.authForms.entries[a.id] || {};
       const entries = [
-        { channel: 'store_backend', status: Number(state.store_backend) === 1 ? 1 : 0 },
-        { channel: 'cashier', status: Number(state.cashier) === 1 ? 1 : 0 },
+        { channel: 'store_v3', status: Number(state.store_v3) === 1 ? 1 : 0 },
         { channel: 'mobile', status: Number(state.mobile) === 1 ? 1 : 0 },
       ];
       this.resetWriteToken();
@@ -3712,7 +3701,6 @@ export default {
         allow_store_select: 0,
         use_platform: 0,
         use_store: 1,
-        use_cashier: 0,
         use_mobile: 0,
         channel_rules: {},
       };
@@ -3761,11 +3749,9 @@ export default {
         is_store_manager: Number(formPayload.is_store_manager) === 1 ? 1 : 0,
         use_platform: Number(formPayload.use_platform) === 1 ? 1 : 0,
         use_store: Number(formPayload.use_store) === 1 ? 1 : 0,
-        use_cashier: Number(formPayload.use_cashier) === 1 ? 1 : 0,
         use_mobile: Number(formPayload.use_mobile) === 1 ? 1 : 0,
         platform_rules: Number(formPayload.use_platform) === 1 ? (formPayload.platform_rules || []) : [],
-        store_rules: Number(formPayload.use_store) === 1 ? (formPayload.store_rules || []) : [],
-        cashier_rules: Number(formPayload.use_cashier) === 1 ? (formPayload.cashier_rules || []) : [],
+        store_v3_rules: Number(formPayload.use_store) === 1 ? (formPayload.store_v3_rules || []) : [],
         mobile_rules: Number(formPayload.use_mobile) === 1 ? (formPayload.mobile_rules || []) : [],
       };
       const headers = this.writeHeadersFor('job_position_save', payload);
@@ -3807,8 +3793,7 @@ export default {
     jobPositionChannelsLabel(row) {
       const parts = [];
       if (Number(row.use_platform) === 1) parts.push('平台');
-      if (Number(row.use_store) === 1) parts.push('门店');
-      if (Number(row.use_cashier) === 1) parts.push('收银');
+      if (Number(row.use_store) === 1) parts.push('门店端');
       if (Number(row.use_mobile) === 1) parts.push('手机');
       return parts.length ? parts.join(' / ') : '—';
     },
@@ -3832,7 +3817,7 @@ export default {
     normalizeJobChannelRules(channelRules) {
       const src = channelRules && typeof channelRules === 'object' ? channelRules : {};
       const out = {};
-      ['platform', 'store_backend', 'cashier', 'mobile'].forEach((ch) => {
+      ['platform', 'store_v3', 'mobile'].forEach((ch) => {
         const item = src[ch];
         if (item == null) {
           out[ch] = { rules: '' };
@@ -3857,7 +3842,6 @@ export default {
         is_store_manager: Number(src.is_store_manager) === 1 ? 1 : 0,
         use_platform: Number(src.use_platform) === 1 ? 1 : 0,
         use_store: Number(src.use_store) === 1 ? 1 : 0,
-        use_cashier: Number(src.use_cashier) === 1 ? 1 : 0,
         use_mobile: Number(src.use_mobile) === 1 ? 1 : 0,
         channel_rules: this.normalizeJobChannelRules(src.channel_rules),
       };
@@ -3925,7 +3909,6 @@ export default {
           is_store_manager: Number(p.is_store_manager) === 1 ? 1 : 0,
           use_platform: Number(p.use_platform) === 1 ? 1 : 0,
           use_store: Number(p.use_store) === 1 ? 1 : 0,
-          use_cashier: Number(p.use_cashier) === 1 ? 1 : 0,
           use_mobile: Number(p.use_mobile) === 1 ? 1 : 0,
           channel_rules: data.channel_rules || row.channel_rules || {},
         }, patch);
@@ -3965,7 +3948,6 @@ export default {
             allow_store_select: Number(p.allow_store_select) === 1 ? 1 : 0,
             use_platform: Number(p.use_platform) === 1 ? 1 : 0,
             use_store: Number(p.use_store) === 1 ? 1 : 0,
-            use_cashier: Number(p.use_cashier) === 1 ? 1 : 0,
             use_mobile: Number(p.use_mobile) === 1 ? 1 : 0,
             channel_rules: this.normalizeJobChannelRules(data.channel_rules || {}),
           };

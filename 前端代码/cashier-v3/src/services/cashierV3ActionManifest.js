@@ -47,12 +47,16 @@ function entries(owner, type, table) {
     'submit-hang-order': 'query-hang-order-result',
     'submit-writeoff': 'query-writeoff-result',
     'create-reservation': 'query-reservation-result',
-    'update-reservation': 'query-reservation-result'
+    'update-reservation': 'query-reservation-result',
+    'create-unified-query-export': 'query-unified-query-export-task'
   }
   for (const [action, permission] of Object.entries(table)) {
     let permissionPolicyId = permission
     let feature = permission
     if (typeof permission === 'string' && permission.startsWith('selector:')) {
+      feature = null
+      permissionPolicyId = permission
+    } else if (typeof permission === 'string' && permission.startsWith('policy:')) {
       feature = null
       permissionPolicyId = permission
     } else if (typeof permission === 'string' && permission.startsWith('feature:')) {
@@ -99,8 +103,12 @@ export const PREPARATION_PROJECTION_ACTIONS = [
 const C2_ACTIONS = {
   ...entries(C2, ACTION_TYPE_COMMAND, {
     'choose-catalog-item': FEATURE_CASHIER,
+    'create-custom-card-configuration': FEATURE_CASHIER,
+    'add-checkout-entitlement-lines': 'policy:checkout_entitlement',
     'remove-cart-line': FEATURE_CASHIER,
     'change-cart-line-quantity': FEATURE_CASHIER,
+    'update-cart-line-service-settings': FEATURE_CASHIER,
+    'submit-card-operation': FEATURE_CASHIER,
     'select-cashier-member': FEATURE_CASHIER,
     'set-guest-order': FEATURE_CASHIER,
     'change-supplement-date': FEATURE_CASHIER,
@@ -113,6 +121,11 @@ const C2_ACTIONS = {
     'add-payment-method': FEATURE_CASHIER,
     'update-payment-line': FEATURE_CASHIER,
     'remove-payment-line': FEATURE_CASHIER,
+    // 余额按钮在页面层会映射为草稿写命令；实际扣款仍只发生在正式结账事务。
+    'apply-balance-payment': FEATURE_CASHIER,
+    'remove-balance-payment': FEATURE_CASHIER,
+    'update-balance-payment': FEATURE_CASHIER,
+    'prepare-checkout-submission': FEATURE_CASHIER,
     'confirm-debt-warning': FEATURE_CASHIER,
     'confirm-checkout-final-changes': FEATURE_CASHIER,
     'submit-checkout': FEATURE_CASHIER,
@@ -137,7 +150,7 @@ const C2_ACTIONS = {
     'open-payment-note': FEATURE_CASHIER,
     'open-checkout-source-selector': FEATURE_CASHIER,
     'open-add-service-consumption': FEATURE_CASHIER,
-    'open-add-card-service-project': FEATURE_CASHIER,
+    'open-add-card-service-project': 'policy:checkout_entitlement',
     'query-checkout-result': FEATURE_CASHIER,
     'open-member-debt-repayment': FEATURE_CASHIER,
     'query-debt-repayment-result': FEATURE_CASHIER
@@ -199,6 +212,7 @@ const C3_ACTIONS = {
     'open-room-next-reservation': FEATURE_ROOM,
     'open-room-service-session': FEATURE_ROOM,
     'open-unassigned-room-list': FEATURE_ROOM,
+    'prepare-empty-room-cashier': FEATURE_ROOM,
     'query-hang-orders': FEATURE_HANG,
     'open-hang-order': FEATURE_HANG,
     'open-hang-order-void-confirmation': FEATURE_HANG,
@@ -224,6 +238,11 @@ const C4_ACTIONS = entries(C4, ACTION_TYPE_PROJECTION, {
 const C5_ACTIONS = {
   ...entries(C5, ACTION_TYPE_COMMAND, {
     'create-member': FEATURE_MEMBER_CREATE,
+    'update-member': FEATURE_MEMBER,
+    'deactivate-member': FEATURE_MEMBER,
+    'submit-recharge': FEATURE_MEMBER,
+    'submit-recharge-debt-repayment': FEATURE_MEMBER,
+    'submit-direct-gift': FEATURE_MEMBER,
     'refund-sales-order': FEATURE_ORDER_CENTER,
     'void-sales-order': FEATURE_ORDER_CENTER,
     'reopen-sales-order': FEATURE_ORDER_CENTER,
@@ -232,10 +251,19 @@ const C5_ACTIONS = {
     'save-reservation-query-settings': FEATURE_RESERVATION,
     'save-hang-order-query-settings': FEATURE_HANG,
     'save-order-center-query-settings': FEATURE_ORDER_CENTER,
-    'save-member-query-settings': FEATURE_MEMBER
+    'save-member-query-settings': 'policy:unified_query_page',
+    'save-unified-query-settings': 'policy:unified_query_page',
+    'save-unified-query-field-aliases': 'policy:unified_query_page',
+    'save-unified-query-custom-field': 'policy:unified_query_page',
+    'change-unified-query-custom-field-status': 'policy:unified_query_page',
+    'archive-unified-query-custom-field': 'policy:unified_query_page',
+    'upgrade-unified-query-field-reference': 'policy:unified_query_page',
+    'create-unified-query-export': 'policy:unified_query_page'
   }),
   ...entries(C5, ACTION_TYPE_PROJECTION, {
     'query-members': FEATURE_MEMBER,
+    'query-unified-query-capabilities': 'policy:unified_query_page',
+    'query-unified-query-export-task': 'policy:unified_query_page',
     'query-member-selector': 'selector:member',
     'open-member-selector': FEATURE_CASHIER,
     'open-member-detail': FEATURE_MEMBER,
@@ -270,6 +298,7 @@ const C5_ACTIONS = {
     'open-card-batch': FEATURE_MEMBER,
     'open-card-benefits': FEATURE_MEMBER,
     'query-query-entities': 'selector:query_entities',
+    'query-staff': FEATURE_MANAGEMENT,
     'open-management-entry': FEATURE_MANAGEMENT
   })
 }
@@ -278,7 +307,9 @@ const C1 = 'C1'
 
 const C1_ACTIONS = {
   ...entries(C1, ACTION_TYPE_PROJECTION, {
-    'open-cashier-workbench': FEATURE_CASHIER
+    // 根投影只建立已登录门店端会话，不等同于进入收银。实际页面和动作仍
+    // 各自按功能码校验，避免“仅会员”账号因无法初始化而被错误拒绝登录。
+    'open-cashier-workbench': 'policy:store_v3_session'
   })
 }
 

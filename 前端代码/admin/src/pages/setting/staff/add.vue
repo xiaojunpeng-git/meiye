@@ -128,26 +128,46 @@
                     >{{ item.label }}</Option>
                   </Select>
                   <div class="form-tip">
-                    总部可选全部启用岗位；是否能进门店后台/收银由岗位入口与任职门店决定。
+                    总部可选全部启用岗位；是否能进入门店端由岗位入口与任职门店共同决定。
                   </div>
                 </FormItem>
               </Col>
             </Row>
             <Row :gutter="24">
               <Col :span="12">
-                <FormItem label="销售/手艺人：">
-                  <i-switch v-model="formInline.can_choose" :true-value="1" :false-value="0" size="large">
+                <FormItem label="可作为销售人：">
+                  <i-switch v-model="formInline.cashier_salesperson_enabled" :true-value="1" :false-value="0" size="large">
                     <span slot="open">是</span>
                     <span slot="close">否</span>
                   </i-switch>
                 </FormItem>
               </Col>
               <Col :span="12">
-                <FormItem label="参与分成：">
-                  <i-switch v-model="formInline.is_fencheng" :true-value="1" :false-value="0" size="large">
-                    <span slot="open">参与</span>
-                    <span slot="close">不参与</span>
+                <FormItem label="可作为手艺人：">
+                  <i-switch v-model="formInline.cashier_craftsman_enabled" :true-value="1" :false-value="0" size="large">
+                    <span slot="open">是</span>
+                    <span slot="close">否</span>
                   </i-switch>
+                </FormItem>
+              </Col>
+            </Row>
+            <Row :gutter="24">
+              <Col :span="12">
+                <FormItem label="人员类型：">
+                  <RadioGroup v-model="formInline.employment_type_code" type="button">
+                    <Radio label="internal" :disabled="!canEditEmploymentType">内部员工</Radio>
+                    <Radio label="partner" :disabled="!canEditEmploymentType">合作方</Radio>
+                    <Radio label="outsourced" :disabled="!canEditEmploymentType">外包</Radio>
+                  </RadioGroup>
+                  <div v-if="!canManageEmploymentType" class="form-tip">
+                    当前账号无人员类型管理权限。
+                  </div>
+                  <div v-else-if="editId > 0 && !employmentTypeLoaded" class="form-tip scope-warn">
+                    人员类型未能安全加载，本次不会修改该字段。
+                  </div>
+                  <div v-else-if="!formInline.employment_type_code" class="form-tip scope-warn">
+                    该员工尚未分类，请选择人员类型。
+                  </div>
                 </FormItem>
               </Col>
             </Row>
@@ -202,11 +222,33 @@
               />
               <div class="form-tip">可多选组织；将查看所选组织及其下级组织、门店的数据（取并集）。不能直接选门店。</div>
             </FormItem>
+            <FormItem label="手机端：">
+              <i-switch
+                v-model="formInline.mobile_enabled"
+                :true-value="1"
+                :false-value="0"
+                :disabled="submitting || (editId > 0 && !mobileAuthLoaded) || !hasMobileCapablePosition"
+                size="large"
+                @on-change="onMobileEnabledChange"
+              >
+                <span slot="open">启用</span>
+                <span slot="close">关闭</span>
+              </i-switch>
+              <div v-if="editId > 0 && !mobileAuthLoaded" class="form-tip scope-warn">
+                手机端授权状态未能安全加载，本次保存不会修改该项。
+              </div>
+              <div v-else-if="!hasMobileCapablePosition" class="form-tip scope-warn">
+                所选岗位未配置手机端功能，不能启用手机端。
+              </div>
+              <div v-else class="form-tip">
+                岗位决定可使用的商家端功能；此开关只控制该员工是否实际开通手机端。
+              </div>
+            </FormItem>
           </TabPane>
 
           <TabPane label="登录设置" name="login">
             <Alert show-icon>
-              统一内部账号：用于平台后台 / 门店后台 / 收银台登录。账号禁止使用纯 11 位手机号格式。
+              统一内部账号：用于平台后台和门店端登录。手机端使用手机验证与手机端权限，不使用内部账号密码。账号禁止使用纯 11 位手机号格式。
             </Alert>
             <Row :gutter="24">
               <Col :span="12">
@@ -525,8 +567,13 @@ function getDefaultStaffForm() {
     staff_id: 0,
     is_customer: 0,
     can_choose: 1,
+    cashier_salesperson_enabled: 1,
+    cashier_craftsman_enabled: 1,
     is_reservable: 1,
     is_fencheng: 0,
+    mobile_enabled: 0,
+    employment_type_code: 'internal',
+    employment_type_version: 0,
     customer_url: '',
     status: 1,
     salary_status: 1,
@@ -605,6 +652,12 @@ export default {
       picTit: '',
       submitting: false,
       detailLoaded: false,
+      employmentTypeLoaded: true,
+      /** 编辑人员时必须由完整详情回显授权状态，防止读取失败后误撤权。 */
+      mobileAuthLoaded: true,
+      /** 新建人员自动默认值只应用一次，员工手工关闭后不再被岗位选择覆盖。 */
+      mobileEnabledTouched: false,
+      originalInternalAccount: '',
       /** 详情加载序号：连续切换人员时丢弃过期响应，防止串人 */
       loadSeq: 0,
       jobOptions: [],
@@ -633,6 +686,16 @@ export default {
       const access = info.access;
       if (!Array.isArray(access) || access.length === 0) return false;
       return access.indexOf('setting-staff-index') !== -1;
+    },
+    canManageEmploymentType() {
+      const info = this.userInfo || {};
+      if (this.isExplicitHqSuperAdmin(info)) return true;
+      const access = info.access;
+      return Array.isArray(access) && access.indexOf('setting-staff-employment-type') !== -1;
+    },
+    canEditEmploymentType() {
+      return this.canManageEmploymentType
+        && (!(Number(this.editId) > 0) || this.employmentTypeLoaded);
     },
     staffSaveDenyTip() {
       if (!this.canSaveStaff) {
@@ -681,6 +744,11 @@ export default {
     hasAppointmentStore() {
       return Number(this.formInline.store_id) > 0;
     },
+    hasMobileCapablePosition() {
+      const selected = new Set((this.formInline.position_ids || []).map((id) => Number(id)));
+      return this.jobOptions.some((position) => selected.has(Number(position.value))
+        && Number(position.use_mobile) === 1);
+    },
   },
   watch: {
     value(val) {
@@ -702,6 +770,13 @@ export default {
       if (this.value && Number(this.editId) > 0) {
         this.openForm();
       }
+    },
+    'formInline.position_ids': {
+      deep: true,
+      handler() {
+        this.syncNewStaffMobileDefault();
+        this.forceMobileOffWithoutEligibleJob();
+      },
     },
   },
   mounted() {
@@ -769,7 +844,11 @@ export default {
     resetForm() {
       this.activeTab = 'basic';
       this.submitting = false;
+      this.originalInternalAccount = '';
       this.formInline = this.getDefaultForm();
+      this.employmentTypeLoaded = !(Number(this.editId) > 0);
+      this.mobileAuthLoaded = !(Number(this.editId) > 0);
+      this.mobileEnabledTouched = false;
       this.$nextTick(() => {
         this.$refs.formInline && this.$refs.formInline.clearValidate();
       });
@@ -854,6 +933,11 @@ export default {
       if (!['personal', 'store', 'org'].includes(scopeMode)) {
         scopeMode = 'personal';
       }
+      const employmentTypeLoaded = !!(data
+        && Object.prototype.hasOwnProperty.call(data, 'employment_type_code')
+        && Object.prototype.hasOwnProperty.call(data, 'employment_type_version'));
+      const mobileAuthLoaded = !!(data
+        && Object.prototype.hasOwnProperty.call(data, 'mobile_enabled'));
       this.formInline = {
         ...base,
         employee_id: Number((data && data.employee_id) || 0),
@@ -870,9 +954,32 @@ export default {
         org_ids: (scope.org_ids || []).map(Number).filter((n) => n > 0),
         store_ids: (scope.store_ids || []).map(Number).filter((n) => n > 0),
         can_choose: Number((data && data.can_choose) != null ? data.can_choose : base.can_choose),
+        cashier_salesperson_enabled: Number(
+          (data && data.cashier_salesperson_enabled) != null
+            ? data.cashier_salesperson_enabled
+            : base.cashier_salesperson_enabled,
+        ),
+        cashier_craftsman_enabled: Number(
+          (data && data.cashier_craftsman_enabled) != null
+            ? data.cashier_craftsman_enabled
+            : base.cashier_craftsman_enabled,
+        ),
         is_fencheng: Number((data && data.is_fencheng) != null ? data.is_fencheng : base.is_fencheng),
+        mobile_enabled: mobileAuthLoaded
+          ? (Number(data.mobile_enabled) === 1 ? 1 : 0)
+          : base.mobile_enabled,
+        employment_type_code: employmentTypeLoaded && typeof data.employment_type_code === 'string'
+          ? data.employment_type_code
+          : '',
+        employment_type_version: employmentTypeLoaded
+          ? Number(data.employment_type_version || 0)
+          : 0,
         status: Number((data && data.status) != null ? data.status : base.status),
       };
+      this.employmentTypeLoaded = employmentTypeLoaded;
+      this.mobileAuthLoaded = mobileAuthLoaded;
+      this.mobileEnabledTouched = false;
+      this.originalInternalAccount = String((data && data.account) || base.account || '');
       DATE_FIELDS.forEach((field) => {
         this.formInline[field] = this.normalizeDate(this.formInline[field]);
       });
@@ -968,6 +1075,8 @@ export default {
                   position_ids: [],
                   scope: { scope_mode: 'personal', org_ids: [], store_ids: [] },
                   can_choose: info.can_choose,
+                  cashier_salesperson_enabled: info.cashier_salesperson_enabled,
+                  cashier_craftsman_enabled: info.cashier_craftsman_enabled,
                   is_fencheng: info.is_fencheng,
                   status: info.status,
                 }, info);
@@ -1033,10 +1142,25 @@ export default {
               use_mobile: Number(row.use_mobile) === 1 ? 1 : 0,
             }));
           this.pruneJobsForStore();
+          this.syncNewStaffMobileDefault();
+          this.forceMobileOffWithoutEligibleJob();
         })
         .catch((err) => {
           this.$Message.error((err && err.msg) || '加载岗位失败');
         });
+    },
+    onMobileEnabledChange(enabled) {
+      this.mobileEnabledTouched = true;
+      this.formInline.mobile_enabled = enabled ? 1 : 0;
+    },
+    syncNewStaffMobileDefault() {
+      if (Number(this.editId) > 0 || this.mobileEnabledTouched) return;
+      this.formInline.mobile_enabled = this.hasMobileCapablePosition ? 1 : 0;
+    },
+    forceMobileOffWithoutEligibleJob() {
+      if (this.hasMobileCapablePosition || !this.mobileAuthLoaded) return;
+      // 岗位失去手机端能力时，员工总开关必须随之关闭；保存时后端会同步撤销两层授权。
+      this.formInline.mobile_enabled = 0;
     },
     buildSubmitPayload() {
       const payload = { ...this.formInline };
@@ -1064,6 +1188,11 @@ export default {
       payload.staff_name = String(this.formInline.staff_name || '').trim();
       payload.phone = String(this.formInline.phone || '').trim();
       payload.account = String(this.formInline.account || '').trim();
+      if (Number(this.formInline.employee_id) > 0
+        && payload.account === this.originalInternalAccount) {
+        // 账号未改：后端保留现有统一账号，完整资料保存不触发账号/密码写入。
+        delete payload.account;
+      }
       payload.position_ids = Array.isArray(this.formInline.position_ids)
         ? this.formInline.position_ids.map((x) => Number(x)).filter((n) => n > 0)
         : [];
@@ -1075,8 +1204,25 @@ export default {
         : [];
       // 门店范围由服务端按任职自动计算，前端不再提交人工 store_ids（防扩权）
       payload.store_ids = [];
-      payload.can_choose = Number(this.formInline.can_choose) === 1 ? 1 : 0;
+      payload.cashier_salesperson_enabled = Number(this.formInline.cashier_salesperson_enabled) === 1 ? 1 : 0;
+      payload.cashier_craftsman_enabled = Number(this.formInline.cashier_craftsman_enabled) === 1 ? 1 : 0;
+      // Legacy consumers still read can_choose. Keep it as an OR projection
+      // while V3 uses the two role-specific authoritative switches.
+      payload.can_choose = payload.cashier_salesperson_enabled === 1
+        || payload.cashier_craftsman_enabled === 1 ? 1 : 0;
       payload.is_fencheng = Number(this.formInline.is_fencheng) === 1 ? 1 : 0;
+      if (!(Number(this.editId) > 0) || this.mobileAuthLoaded) {
+        payload.mobile_enabled = Number(this.formInline.mobile_enabled) === 1 ? 1 : 0;
+      } else {
+        delete payload.mobile_enabled;
+      }
+      if (this.canEditEmploymentType) {
+        payload.employment_type_code = String(this.formInline.employment_type_code || '');
+        payload.employment_type_version = Number(this.formInline.employment_type_version || 0);
+      } else {
+        delete payload.employment_type_code;
+        delete payload.employment_type_version;
+      }
       payload.request_token = newRequestToken();
       return payload;
     },
@@ -1084,6 +1230,12 @@ export default {
       if (this.submitting) return;
       if (!this.canSaveStaff) {
         this.$Message.error(this.staffSaveDenyTip);
+        return;
+      }
+      if (this.canEditEmploymentType
+        && !['internal', 'partner', 'outsourced'].includes(this.formInline.employment_type_code)) {
+        this.activeTab = 'basic';
+        this.$Message.required('请选择人员类型');
         return;
       }
       const first = findFirstRequiredError(REQUIRED_CHECK_ORDER, this.formInline);

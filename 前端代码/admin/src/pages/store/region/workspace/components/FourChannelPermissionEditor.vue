@@ -163,8 +163,7 @@ function normalizeEntries(src) {
   };
   return {
     platform: pick('platform', 'use_platform'),
-    store: pick('store', 'use_store'),
-    cashier: pick('cashier', 'use_cashier'),
+    store_v3: pick('store_v3', 'use_store'),
     mobile: pick('mobile', 'use_mobile'),
   };
 }
@@ -175,15 +174,14 @@ export default {
     includePlatform: { type: Boolean, default: true },
     platformLocked: { type: Boolean, default: false },
     disabled: { type: Boolean, default: false },
-    /** 是否展示四端入口开关；角色模板等场景可关闭 */
+    /** 是否展示三端入口开关；角色模板等场景可关闭 */
     showEntrySwitch: { type: Boolean, default: true },
     menus: {
       type: Object,
       default() {
         return {
           platform_menus: [],
-          store_menus: [],
-          cashier_menus: [],
+          store_v3_menus: [],
           mobile_menus: [],
         };
       },
@@ -193,8 +191,7 @@ export default {
       default() {
         return {
           platform: [],
-          store: [],
-          cashier: [],
+          store_v3: [],
           mobile: [],
         };
       },
@@ -204,8 +201,7 @@ export default {
       default() {
         return {
           platform: 0,
-          store: 0,
-          cashier: 0,
+          store_v3: 0,
           mobile: 0,
         };
       },
@@ -213,20 +209,18 @@ export default {
   },
   data() {
     return {
-      current: 'store',
+      current: 'store_v3',
       keyword: '',
       treeEpoch: 0,
       treeReady: false,
       localEntries: {
         platform: 0,
-        store: 0,
-        cashier: 0,
+        store_v3: 0,
         mobile: 0,
       },
       trees: {
         platform: [],
-        store: [],
-        cashier: [],
+        store_v3: [],
         mobile: [],
       },
     };
@@ -235,8 +229,7 @@ export default {
     visibleTabs() {
       const tabs = [
         { key: 'platform', label: '平台后台', locked: this.platformLocked || !this.includePlatform },
-        { key: 'store', label: '门店后台', locked: false },
-        { key: 'cashier', label: '收银台', locked: false },
+        { key: 'store_v3', label: '门店端', locked: false },
         { key: 'mobile', label: '手机端', locked: false },
       ];
       if (!this.includePlatform && this.platformLocked) return tabs;
@@ -258,8 +251,7 @@ export default {
     counts() {
       return {
         platform: this.isEntryOn('platform') ? countChecked(this.trees.platform) : 0,
-        store: this.isEntryOn('store') ? countChecked(this.trees.store) : 0,
-        cashier: this.isEntryOn('cashier') ? countChecked(this.trees.cashier) : 0,
+        store_v3: this.isEntryOn('store_v3') ? countChecked(this.trees.store_v3) : 0,
         mobile: this.isEntryOn('mobile') ? countChecked(this.trees.mobile) : 0,
       };
     },
@@ -304,8 +296,8 @@ export default {
     includePlatform: {
       immediate: true,
       handler(v) {
-        if (!v && this.current === 'platform') this.current = 'store';
-        if (v && !this.visibleTabs.some((t) => t.key === this.current)) this.current = 'store';
+        if (!v && this.current === 'platform') this.current = 'store_v3';
+        if (v && !this.visibleTabs.some((t) => t.key === this.current)) this.current = 'store_v3';
       },
     },
   },
@@ -322,23 +314,15 @@ export default {
       const m = this.menus || {};
       const hasAny = !!(
         (m.platform_menus && m.platform_menus.length)
-        || (m.store_menus && m.store_menus.length)
-        || (m.cashier_menus && m.cashier_menus.length)
+        || (m.store_v3_menus && m.store_v3_menus.length)
         || (m.mobile_menus && m.mobile_menus.length)
-        || (m.mall_menus && m.mall_menus.length)
       );
       this.treeReady = false;
-      const empty = { platform: [], store: [], cashier: [], mobile: [] };
+      const empty = { platform: [], store_v3: [], mobile: [] };
       this.trees = empty;
-      ['store', 'cashier', 'mobile', 'platform'].forEach((key) => {
-        if (key === 'platform' && this.current !== 'platform') {
-          this.trees[key] = [];
-          return;
-        }
-        if (key !== this.current && key !== 'store') {
-          this.trees[key] = [];
-          return;
-        }
+      // Build every channel before applying props. Detail data commonly
+      // arrives just after menus; lazy hidden trees previously lost checks.
+      ['platform', 'store_v3', 'mobile'].forEach((key) => {
         this.trees[key] = this.cloneChannelMenus(key, m);
       });
       this.applyValue(true);
@@ -347,7 +331,7 @@ export default {
       this.$nextTick(() => {
         this.ensureChannelTree(this.current);
         this.treeReady = hasAny;
-        ['platform', 'store', 'cashier', 'mobile'].forEach((key) => {
+        ['platform', 'store_v3', 'mobile'].forEach((key) => {
           if (key === this.current) return;
           this.ensureChannelTree(key);
         });
@@ -356,9 +340,10 @@ export default {
     cloneChannelMenus(key, menus) {
       const m = menus || this.menus || {};
       if (key === 'platform') return cloneMenus(m.platform_menus || m.platform || []);
-      if (key === 'store') return cloneMenus(m.store_menus || m.store || []);
-      if (key === 'cashier') return cloneMenus(m.cashier_menus || m.cashier || []);
-      return cloneMenus(m.mobile_menus || m.mall_menus || m.mobile || []);
+      if (key === 'store_v3') return cloneMenus(m.store_v3_menus || m.store_v3 || []);
+      // 手机端岗位权限必须由后端返回当前 Vue 3 商家端能力目录。
+      // 不回退旧 mall_menus，避免旧菜单重新出现在岗位“全选”里。
+      return cloneMenus(m.mobile_menus || []);
     },
     ensureChannelTree(key) {
       if (!key) return;
@@ -371,7 +356,7 @@ export default {
     },
     applyValue(silent) {
       const v = this.value || {};
-      ['platform', 'store', 'cashier', 'mobile'].forEach((key) => {
+      ['platform', 'store_v3', 'mobile'].forEach((key) => {
         if (!(this.trees[key] && this.trees[key].length)) return;
         const ids = this.isEntryOn(key) ? (v[key] || []) : [];
         markChecked(this.trees[key], new Set(ids.map(Number)));
@@ -386,7 +371,7 @@ export default {
       this.trees[key] = cloneMenus(this.trees[key]);
     },
     applyEntryLocks(silent) {
-      ['platform', 'store', 'cashier', 'mobile'].forEach((key) => {
+      ['platform', 'store_v3', 'mobile'].forEach((key) => {
         if (!this.isEntryOn(key)) this.clearChannel(key);
       });
       this.treeEpoch += 1;
@@ -459,16 +444,14 @@ export default {
     collectRules() {
       return {
         platform: this.isEntryOn('platform') ? collectIds(this.trees.platform, []) : [],
-        store: this.isEntryOn('store') ? collectIds(this.trees.store, []) : [],
-        cashier: this.isEntryOn('cashier') ? collectIds(this.trees.cashier, []) : [],
+        store_v3: this.isEntryOn('store_v3') ? collectIds(this.trees.store_v3, []) : [],
         mobile: this.isEntryOn('mobile') ? collectIds(this.trees.mobile, []) : [],
       };
     },
     getEntries() {
       return {
         use_platform: this.isEntryOn('platform') ? 1 : 0,
-        use_store: this.isEntryOn('store') ? 1 : 0,
-        use_cashier: this.isEntryOn('cashier') ? 1 : 0,
+        use_store: this.isEntryOn('store_v3') ? 1 : 0,
         use_mobile: this.isEntryOn('mobile') ? 1 : 0,
       };
     },

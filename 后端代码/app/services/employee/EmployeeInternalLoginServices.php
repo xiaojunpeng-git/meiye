@@ -8,12 +8,12 @@ use mohe\exceptions\AdminException;
 use think\facade\Db;
 
 /**
- * 统一登录：凭证 → employee_id → 端口资格 → 当前唯一任职（不做多店选择）
+ * 统一登录：凭证 → employee_id → 端口资格 → 合法门店任职。
  */
 class EmployeeInternalLoginServices extends BaseServices
 {
     /**
-     * 当前唯一有效门店任职（本阶段不做多店选店）
+     * 全部有效门店任职，供调用方按端口资格筛选并选择门店。
      */
     public function resolveCurrentStaff(int $employeeId): ?array
     {
@@ -31,8 +31,37 @@ class EmployeeInternalLoginServices extends BaseServices
         if (!$rows) {
             return null;
         }
-        // 禁止 store_id=0 占位；多条有效真实任职取最新一条（本阶段不做多店选择）
+        // 兼容旧调用者：返回最新任职；新门店端登录必须调用 listEligibleStoreV3Staff。
         return $rows[0];
+    }
+
+    /** @return array<int, array> */
+    public function listEligibleStoreV3Staff(int $employeeId): array
+    {
+        if ($employeeId <= 0) {
+            return [];
+        }
+        $rows = Db::name('system_store_staff')->alias('staff')
+            ->join('system_store store', 'store.id = staff.store_id')
+            ->leftJoin('organization_store org_store', 'org_store.store_id = staff.store_id')
+            ->leftJoin('organization org', 'org.id = org_store.org_id')
+            ->where('staff.employee_id', $employeeId)
+            ->where('staff.status', 1)->where('staff.is_del', 0)->where('staff.store_id', '>', 0)
+            ->where('store.is_del', 0)->where('store.is_show', 1)
+            ->where(function ($query) {
+                $query->whereNull('org.id')->whereOr(function ($or) {
+                    $or->where('org.is_del', 0);
+                });
+            })
+            ->field('staff.id,staff.employee_id,staff.store_id,staff.staff_name,store.name AS store_name')
+            ->order('staff.id', 'desc')->select()->toArray();
+        $out = [];
+        foreach ($rows as $row) {
+            if ($this->staffHasChannelEntry((int)$row['id'], JobPositionPolicyServices::CHANNEL_STORE_V3)) {
+                $out[] = $row;
+            }
+        }
+        return $out;
     }
 
     /**
@@ -41,6 +70,16 @@ class EmployeeInternalLoginServices extends BaseServices
     public function staffHasChannelEntry(int $staffId, string $channel): bool
     {
         if ($staffId <= 0) {
+            return false;
+        }
+        // 渠道入口是员工级显式覆盖，不建记录时应继承有效岗位的入口和功能规则。
+        // 只有管理员明确关闭该员工的入口，才阻止其进入门店端。
+        $entry = Db::name('staff_channel_entry')
+            ->where('staff_id', $staffId)
+            ->where('channel', $channel)
+            ->where('is_del', 0)
+            ->find();
+        if ($entry && (int)($entry['status'] ?? 0) !== 1) {
             return false;
         }
         /** @var StaffJobPositionServices $jobSvc */
@@ -162,6 +201,7 @@ class EmployeeInternalLoginServices extends BaseServices
     {
         $map = [
             JobPositionPolicyServices::CHANNEL_PLATFORM => 'use_platform',
+            JobPositionPolicyServices::CHANNEL_STORE_V3 => 'use_store',
             JobPositionPolicyServices::CHANNEL_STORE_BACKEND => 'use_store',
             JobPositionPolicyServices::CHANNEL_CASHIER => 'use_cashier',
             JobPositionPolicyServices::CHANNEL_MOBILE => 'use_mobile',

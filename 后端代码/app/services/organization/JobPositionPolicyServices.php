@@ -2,6 +2,7 @@
 namespace app\services\organization;
 
 use app\services\BaseServices;
+use app\services\mobile\merchant\MobileMerchantCapabilityCatalog;
 use app\services\system\SystemMenusServices;
 use mohe\exceptions\AdminException;
 use think\facade\Db;
@@ -12,15 +13,41 @@ use think\facade\Db;
 class JobPositionPolicyServices extends BaseServices
 {
     public const CHANNEL_PLATFORM = 'platform';
+    /** Vue 3 门店端；不得与旧门店后台菜单编号混用。 */
+    public const CHANNEL_STORE_V3 = 'store_v3';
+    /** 以下两个仅用于读取历史记录和兼容旧页面，不再是新岗位策略渠道。 */
     public const CHANNEL_STORE_BACKEND = 'store_backend';
     public const CHANNEL_CASHIER = 'cashier';
     public const CHANNEL_MOBILE = 'mobile';
 
     public const CHANNELS = [
         self::CHANNEL_PLATFORM,
-        self::CHANNEL_STORE_BACKEND,
-        self::CHANNEL_CASHIER,
+        self::CHANNEL_STORE_V3,
         self::CHANNEL_MOBILE,
+    ];
+
+    /** @var array<int, array{id:int,title:string,feature_code:string,children?:array}> */
+    public const STORE_V3_MENU_TREE = [
+        ['id' => 301001, 'title' => '收银', 'feature_code' => 'cashier.v3.cashier'],
+        ['id' => 301002, 'title' => '挂单', 'feature_code' => 'cashier.v3.hang'],
+        ['id' => 301003, 'title' => '房间', 'feature_code' => 'cashier.v3.room'],
+        ['id' => 301004, 'title' => '预约', 'feature_code' => 'cashier.v3.reservation'],
+        ['id' => 301005, 'title' => '会员', 'feature_code' => 'cashier.v3.member'],
+        ['id' => 301008, 'title' => '客情', 'feature_code' => 'cashier.v3.member'],
+        ['id' => 301006, 'title' => '订单中心', 'feature_code' => 'cashier.v3.order_center'],
+        ['id' => 301007, 'title' => '管理', 'feature_code' => 'cashier.v3.management_center'],
+        ['id' => 301100, 'title' => '库存管理', 'feature_code' => 'cashier.v3.inventory.overview', 'children' => [
+            ['id' => 301101, 'title' => '入库', 'feature_code' => 'cashier.v3.inventory.inbound'],
+            ['id' => 301102, 'title' => '出库', 'feature_code' => 'cashier.v3.inventory.outbound'],
+            ['id' => 301103, 'title' => '库存查询', 'feature_code' => 'cashier.v3.inventory.stock'],
+            ['id' => 301104, 'title' => '盘点', 'feature_code' => 'cashier.v3.inventory.count'],
+            ['id' => 301105, 'title' => '库存明细', 'feature_code' => 'cashier.v3.inventory.movement'],
+            ['id' => 301106, 'title' => '库存统计', 'feature_code' => 'cashier.v3.inventory.statistics'],
+            ['id' => 301107, 'title' => '请货', 'feature_code' => 'cashier.v3.inventory.request'],
+            ['id' => 301108, 'title' => '调拨', 'feature_code' => 'cashier.v3.inventory.transfer'],
+            ['id' => 301109, 'title' => '院装', 'feature_code' => 'cashier.v3.inventory.usage'],
+            ['id' => 301110, 'title' => '导入', 'feature_code' => 'cashier.v3.inventory.import'],
+        ]],
     ];
 
     public function listPositions(array $where = []): array
@@ -73,19 +100,16 @@ class JobPositionPolicyServices extends BaseServices
             $row['is_store_manager'] = (int)($row['is_store_manager'] ?? 0);
             $row['use_platform'] = (int)($row['use_platform'] ?? 0);
             $row['use_store'] = (int)($row['use_store'] ?? 0);
-            $row['use_cashier'] = (int)($row['use_cashier'] ?? 0);
             $row['use_mobile'] = (int)($row['use_mobile'] ?? 0);
-            // 兼容历史数据：use_* 未回填时按有效渠道规则推断展示
-            if ($row['use_platform'] + $row['use_store'] + $row['use_cashier'] + $row['use_mobile'] === 0) {
+            // 新岗位模型不会把历史门店后台/收银台规则映射为 Vue 3。
+            $row['use_store'] = $row['use_store'] === 1 && !empty($row['channel_rules'][self::CHANNEL_STORE_V3]['rules']) ? 1 : 0;
+            if ($row['use_platform'] + $row['use_store'] + $row['use_mobile'] === 0) {
                 $rules = $row['channel_rules'];
                 if (!empty($rules[self::CHANNEL_PLATFORM]['rules'])) {
                     $row['use_platform'] = 1;
                 }
-                if (!empty($rules[self::CHANNEL_STORE_BACKEND]['rules'])) {
+                if (!empty($rules[self::CHANNEL_STORE_V3]['rules'])) {
                     $row['use_store'] = 1;
-                }
-                if (!empty($rules[self::CHANNEL_CASHIER]['rules'])) {
-                    $row['use_cashier'] = 1;
                 }
                 if (!empty($rules[self::CHANNEL_MOBILE]['rules'])) {
                     $row['use_mobile'] = 1;
@@ -123,8 +147,7 @@ class JobPositionPolicyServices extends BaseServices
             ->limit(200)
             ->select()->toArray();
         $platformRules = (string)($channelRules[self::CHANNEL_PLATFORM]['rules'] ?? '');
-        $storeRules = (string)($channelRules[self::CHANNEL_STORE_BACKEND]['rules'] ?? '');
-        $cashierRules = (string)($channelRules[self::CHANNEL_CASHIER]['rules'] ?? '');
+        $storeV3Rules = (string)($channelRules[self::CHANNEL_STORE_V3]['rules'] ?? '');
         $mobileRules = (string)($channelRules[self::CHANNEL_MOBILE]['rules'] ?? '');
         return [
             'position' => [
@@ -134,8 +157,7 @@ class JobPositionPolicyServices extends BaseServices
                 'allow_store_select' => (int)($row['allow_store_select'] ?? 0),
                 'is_store_manager' => (int)($row['is_store_manager'] ?? 0),
                 'use_platform' => (int)($row['use_platform'] ?? 0),
-                'use_store' => (int)($row['use_store'] ?? 0),
-                'use_cashier' => (int)($row['use_cashier'] ?? 0),
+                'use_store' => (int)($row['use_store'] ?? 0) === 1 && $storeV3Rules !== '' ? 1 : 0,
                 'use_mobile' => (int)($row['use_mobile'] ?? 0),
                 'remark' => (string)($row['remark'] ?? ''),
                 'version' => (int)($row['version'] ?? 1),
@@ -143,12 +165,10 @@ class JobPositionPolicyServices extends BaseServices
             ],
             'channel_rules' => $channelRules,
             'platform_rules' => $platformRules,
-            'store_rules' => $storeRules,
-            'cashier_rules' => $cashierRules,
+            'store_v3_rules' => $storeV3Rules,
             'mobile_rules' => $mobileRules,
             'platform_rules_ids' => $this->rulesToIds($platformRules),
-            'store_rules_ids' => $this->rulesToIds($storeRules),
-            'cashier_rules_ids' => $this->rulesToIds($cashierRules),
+            'store_v3_rules_ids' => $this->rulesToIds($storeV3Rules),
             'mobile_rules_ids' => $this->rulesToIds($mobileRules),
             'publishes' => $publishes,
             'help' => [
@@ -162,17 +182,19 @@ class JobPositionPolicyServices extends BaseServices
     }
 
     /**
-     * 四端菜单树（总部后台用；门店端不得调用）
+     * 三端菜单树（总部后台用；门店端不得调用）
      */
     public function getPositionMenus(): array
     {
         /** @var SystemMenusServices $menus */
         $menus = app()->make(SystemMenusServices::class);
+        /** @var MobileMerchantCapabilityCatalog $mobileCatalog */
+        $mobileCatalog = app()->make(MobileMerchantCapabilityCatalog::class);
         return [
             'platform_menus' => $menus->getList(['type' => 0, 'is_del' => 0]),
-            'store_menus' => $menus->getList(['type' => 2, 'is_del' => 0]),
-            'cashier_menus' => $menus->getList(['type' => 3, 'is_del' => 0]),
-            'mobile_menus' => $menus->tidyMenuTier(false, $menus->getMallMenus(1)),
+            'store_v3_menus' => self::STORE_V3_MENU_TREE,
+            // 岗位手机端权限与当前 Vue 3 商家端共用同一能力目录，禁止回读旧手机菜单。
+            'mobile_menus' => $mobileCatalog->menuTree(),
             'help' => '岗位决定员工能操作哪些功能。平台后台权限只在总部平台生效；门店可用只决定门店能不能选择该岗位。',
         ];
     }
@@ -190,24 +212,20 @@ class JobPositionPolicyServices extends BaseServices
         $isStoreManager = (int)($data['is_store_manager'] ?? 0) === 1 ? 1 : 0;
 
         $channelRules = $this->resolveChannelRulesPayload($data);
-        // use_* = 四端入口开关（与功能树解耦）：关闭入口则该端功能不可用且清空规则
+        // use_* = 三端入口开关（与功能树解耦）：关闭入口则该端功能不可用且清空规则
         $usePlatform = array_key_exists('use_platform', $data)
             ? ((int)$data['use_platform'] === 1 ? 1 : 0)
             : ($this->rulesNonEmpty($channelRules[self::CHANNEL_PLATFORM] ?? null) ? 1 : 0);
         $useStore = array_key_exists('use_store', $data)
             ? ((int)$data['use_store'] === 1 ? 1 : 0)
-            : ($this->rulesNonEmpty($channelRules[self::CHANNEL_STORE_BACKEND] ?? null) ? 1 : 0);
-        $useCashier = array_key_exists('use_cashier', $data)
-            ? ((int)$data['use_cashier'] === 1 ? 1 : 0)
-            : ($this->rulesNonEmpty($channelRules[self::CHANNEL_CASHIER] ?? null) ? 1 : 0);
+            : ($this->rulesNonEmpty($channelRules[self::CHANNEL_STORE_V3] ?? null) ? 1 : 0);
         $useMobile = array_key_exists('use_mobile', $data)
             ? ((int)$data['use_mobile'] === 1 ? 1 : 0)
             : ($this->rulesNonEmpty($channelRules[self::CHANNEL_MOBILE] ?? null) ? 1 : 0);
 
         $normalizedRules = $this->normalizeChannelRulesInput($channelRules, [
             self::CHANNEL_PLATFORM => $usePlatform,
-            self::CHANNEL_STORE_BACKEND => $useStore,
-            self::CHANNEL_CASHIER => $useCashier,
+            self::CHANNEL_STORE_V3 => $useStore,
             self::CHANNEL_MOBILE => $useMobile,
         ]);
         // 入口关闭：强制清空该端规则；入口开启：保留规则（可为空树）
@@ -215,10 +233,7 @@ class JobPositionPolicyServices extends BaseServices
             $normalizedRules[self::CHANNEL_PLATFORM] = '';
         }
         if ($useStore === 0) {
-            $normalizedRules[self::CHANNEL_STORE_BACKEND] = '';
-        }
-        if ($useCashier === 0) {
-            $normalizedRules[self::CHANNEL_CASHIER] = '';
+            $normalizedRules[self::CHANNEL_STORE_V3] = '';
         }
         if ($useMobile === 0) {
             $normalizedRules[self::CHANNEL_MOBILE] = '';
@@ -233,11 +248,9 @@ class JobPositionPolicyServices extends BaseServices
             'is_store_manager' => $isStoreManager,
             'use_platform' => $usePlatform,
             'use_store' => $useStore,
-            'use_cashier' => $useCashier,
             'use_mobile' => $useMobile,
             'platform_rules' => $normalizedRules[self::CHANNEL_PLATFORM],
-            'store_rules' => $normalizedRules[self::CHANNEL_STORE_BACKEND],
-            'cashier_rules' => $normalizedRules[self::CHANNEL_CASHIER],
+            'store_v3_rules' => $normalizedRules[self::CHANNEL_STORE_V3],
             'mobile_rules' => $normalizedRules[self::CHANNEL_MOBILE],
             'channel_rules' => $normalizedRules,
         ];
@@ -259,17 +272,16 @@ class JobPositionPolicyServices extends BaseServices
                 $isStoreManager,
                 $usePlatform,
                 $useStore,
-                $useCashier,
                 $useMobile,
                 $normalizedRules
             ) {
                 if ($name === '') {
                     throw new AdminException('请填写岗位名称');
                 }
-                if ($usePlatform === 0 && $useStore === 0 && $useCashier === 0 && $useMobile === 0) {
-                    throw new AdminException('请至少开启平台后台、门店后台、收银台或手机端其中一端入口');
+                if ($usePlatform === 0 && $useStore === 0 && $useMobile === 0) {
+                    throw new AdminException('请至少开启平台后台、门店端或手机端其中一端入口');
                 }
-                // 门店可用与平台权限可并存：门店选用时只下发门店/收银/手机端规则，不下发平台入口
+                // 门店可用与平台权限可并存：门店选用时只下发门店端/手机端规则，不下发平台入口。
                 $now = time();
                 if ($positionId > 0) {
                     $row = Db::name('position')->where('id', $positionId)->lock(true)->find();
@@ -289,7 +301,6 @@ class JobPositionPolicyServices extends BaseServices
                         'is_store_manager' => $isStoreManager,
                         'use_platform' => $usePlatform,
                         'use_store' => $useStore,
-                        'use_cashier' => $useCashier,
                         'use_mobile' => $useMobile,
                         'version' => $ver,
                         'update_time' => $now,
@@ -307,7 +318,7 @@ class JobPositionPolicyServices extends BaseServices
                         'is_store_manager' => $isStoreManager,
                         'use_platform' => $usePlatform,
                         'use_store' => $useStore,
-                        'use_cashier' => $useCashier,
+                        'use_cashier' => 0,
                         'use_mobile' => $useMobile,
                         'remark' => $remark,
                         'version' => 1,
@@ -471,8 +482,8 @@ class JobPositionPolicyServices extends BaseServices
     }
 
     /**
-     * 门店可选岗位：启用 + 门店可用 + 至少一端非平台功能
-     * 含平台规则的岗位也可选，但门店侧只使用门店/收银/手机端规则，不下发平台入口。
+     * 门店可选岗位：启用 + 门店可用 + 至少一端门店端/手机端功能。
+     * 含平台规则的岗位也可选，但门店侧只使用门店端/手机端规则，不下发平台入口。
      * @return array<int, array{value:int,label:string,allow_store_select:int}>
      */
     public function listStoreSelectablePositions(int $storeId): array
@@ -485,22 +496,17 @@ class JobPositionPolicyServices extends BaseServices
             ->where('status', 1)
             ->where('allow_store_select', 1)
             ->where(function ($q) {
-                $q->where('use_store', 1)
-                    ->whereOr('use_cashier', 1)
-                    ->whereOr('use_mobile', 1);
+                $q->where('use_store', 1)->whereOr('use_mobile', 1);
             })
-            ->field('id,name,allow_store_select,use_store,use_cashier,use_mobile,use_platform')
+            ->field('id,name,allow_store_select,use_store,use_mobile,use_platform')
             ->order('id', 'asc')
             ->select()->toArray();
 
         $out = [];
         foreach ($rows as $row) {
             $pid = (int)$row['id'];
-            // 再按 channel_rules 确认至少有一端非平台规则（兼容 use_* 未回填）
-            $hasStoreSide = ((int)($row['use_store'] ?? 0) === 1)
-                || ((int)($row['use_cashier'] ?? 0) === 1)
-                || ((int)($row['use_mobile'] ?? 0) === 1)
-                || $this->positionHasStoreSideRules($pid);
+            // 再按 channel_rules 确认至少有一端门店侧规则，不映射历史旧菜单。
+            $hasStoreSide = $this->positionHasStoreSideRules($pid);
             if (!$hasStoreSide) {
                 continue;
             }
@@ -511,7 +517,6 @@ class JobPositionPolicyServices extends BaseServices
                 'allow_store_select' => (int)($row['allow_store_select'] ?? 0),
                 'use_platform' => (int)($row['use_platform'] ?? 0),
                 'use_store' => (int)($row['use_store'] ?? 0),
-                'use_cashier' => (int)($row['use_cashier'] ?? 0),
                 'use_mobile' => (int)($row['use_mobile'] ?? 0),
             ];
         }
@@ -527,8 +532,7 @@ class JobPositionPolicyServices extends BaseServices
             ->where('position_id', $positionId)
             ->where('status', 1)
             ->whereIn('channel', [
-                self::CHANNEL_STORE_BACKEND,
-                self::CHANNEL_CASHIER,
+                self::CHANNEL_STORE_V3,
                 self::CHANNEL_MOBILE,
             ])
             ->where('rules', '<>', '')
@@ -562,15 +566,14 @@ class JobPositionPolicyServices extends BaseServices
     }
 
     /**
-     * 统一解析四端权限入参：优先 platform_rules/store_rules/cashier_rules/mobile_rules，兼容 channel_rules
+     * 新岗位策略只接受 platform_rules/store_v3_rules/mobile_rules，兼容 channel_rules。
      * @return array<string, mixed>
      */
     protected function resolveChannelRulesPayload(array $data): array
     {
         $map = [
             self::CHANNEL_PLATFORM => 'platform_rules',
-            self::CHANNEL_STORE_BACKEND => 'store_rules',
-            self::CHANNEL_CASHIER => 'cashier_rules',
+            self::CHANNEL_STORE_V3 => 'store_v3_rules',
             self::CHANNEL_MOBILE => 'mobile_rules',
         ];
         $hasSplit = false;
@@ -659,6 +662,12 @@ class JobPositionPolicyServices extends BaseServices
                 }
             }
             $rules = $this->normalizeRulesString($raw);
+            if ($ch === self::CHANNEL_STORE_V3 && $rules !== '') {
+                $this->assertStoreV3RuleIds($this->rulesToIds($rules));
+            }
+            if ($ch === self::CHANNEL_MOBILE && $rules !== '') {
+                $rules = implode(',', $this->normalizeMobileRuleIds($this->rulesToIds($rules)));
+            }
             if ((int)($useFlags[$ch] ?? 0) === 1 && $rules === '') {
                 throw new AdminException($this->channelLabel($ch) . '已启用，请配置功能权限');
             }
@@ -682,6 +691,67 @@ class JobPositionPolicyServices extends BaseServices
         $ids = array_values(array_unique(array_filter(array_map('intval', explode(',', $rules)))));
         sort($ids);
         return $ids ? implode(',', $ids) : '';
+    }
+
+    /** @return array<int, string> stable policy-rule ID => Vue 3 feature code */
+    public static function storeV3FeatureMap(): array
+    {
+        $map = [];
+        $walk = static function (array $nodes) use (&$walk, &$map): void {
+            foreach ($nodes as $node) {
+                $id = (int)($node['id'] ?? 0);
+                $code = trim((string)($node['feature_code'] ?? ''));
+                if ($id > 0 && $code !== '') {
+                    $map[$id] = $code;
+                }
+                $walk((array)($node['children'] ?? []));
+            }
+        };
+        $walk(self::STORE_V3_MENU_TREE);
+        return $map;
+    }
+
+    /** @return string[] */
+    public static function storeV3FeaturesFromRuleIds(array $ruleIds): array
+    {
+        $catalog = self::storeV3FeatureMap();
+        $features = [];
+        foreach ($ruleIds as $ruleId) {
+            $feature = $catalog[(int)$ruleId] ?? '';
+            if ($feature !== '') {
+                $features[$feature] = true;
+            }
+        }
+        return array_keys($features);
+    }
+
+    /** @param int[] $ruleIds */
+    protected function assertStoreV3RuleIds(array $ruleIds): void
+    {
+        $catalog = self::storeV3FeatureMap();
+        foreach ($ruleIds as $ruleId) {
+            if (!isset($catalog[(int)$ruleId])) {
+                throw new AdminException('门店端功能权限无效，请重新加载后再保存');
+            }
+        }
+    }
+
+    /**
+     * 手机端岗位规则只允许写入当前 Vue 3 商家端能力目录中的叶子功能。
+     * 历史 system_menus 编号只读兼容，不可再通过新岗位保存写入。
+     *
+     * @param int[] $ruleIds
+     * @return int[]
+     */
+    protected function normalizeMobileRuleIds(array $ruleIds): array
+    {
+        /** @var MobileMerchantCapabilityCatalog $catalog */
+        $catalog = app()->make(MobileMerchantCapabilityCatalog::class);
+        try {
+            return $catalog->normalizeRuleIds($ruleIds);
+        } catch (\InvalidArgumentException $e) {
+            throw new AdminException('手机端功能权限无效，请重新加载当前商家端功能后再保存');
+        }
     }
 
     /**
@@ -721,8 +791,9 @@ class JobPositionPolicyServices extends BaseServices
     {
         $map = [
             self::CHANNEL_PLATFORM => '平台后台',
-            self::CHANNEL_STORE_BACKEND => '门店后台',
-            self::CHANNEL_CASHIER => '收银台',
+            self::CHANNEL_STORE_V3 => '门店端',
+            self::CHANNEL_STORE_BACKEND => '旧门店后台',
+            self::CHANNEL_CASHIER => '旧收银台',
             self::CHANNEL_MOBILE => '手机端',
         ];
         return $map[$channel] ?? $channel;
@@ -732,6 +803,7 @@ class JobPositionPolicyServices extends BaseServices
     {
         $map = [
             self::CHANNEL_PLATFORM => 'use_platform',
+            self::CHANNEL_STORE_V3 => 'use_store',
             self::CHANNEL_STORE_BACKEND => 'use_store',
             self::CHANNEL_CASHIER => 'use_cashier',
             self::CHANNEL_MOBILE => 'use_mobile',

@@ -10,7 +10,7 @@ class CashierV3C1WorkbenchModule implements CashierV3ActionModule
 {
     public const OWNER = 'C1';
 
-    private const FEATURE_CASHIER = 'cashier.v3.cashier';
+    private const POLICY_STORE_V3_SESSION = 'policy:store_v3_session';
 
     public function owner(): string
     {
@@ -23,7 +23,9 @@ class CashierV3C1WorkbenchModule implements CashierV3ActionModule
             self::OWNER,
             [],
             [
-                'open-cashier-workbench' => self::FEATURE_CASHIER,
+                // 仅建立已经过门店任职、入口与岗位规则校验的 V3 会话；
+                // 不授予收银动作，后续每个页面／action 仍按自身 feature 拦截。
+                'open-cashier-workbench' => self::POLICY_STORE_V3_SESSION,
             ]
         );
     }
