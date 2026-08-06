@@ -145,7 +145,7 @@ const displayedPaymentSummary = computed(() => {
   for (const line of selectedPaymentLines.value) {
     const draft = drafts[paymentLineAmountKey(line)]
     if (!draft) continue
-    const currentAmount = wholeYuanAmount(line.amount)
+    const currentAmount = authoritativeWholeYuanAmount(line.amount)
     const draftAmount = wholeYuanAmount(draft.value)
     if (currentAmount === null || draftAmount === null) continue
     selectedDelta += draftAmount - currentAmount
@@ -161,6 +161,17 @@ const displayedPaymentSummary = computed(() => {
   }
 })
 const hasPendingPaymentLineAmountDraft = computed(() => Object.keys(paymentLineAmountDrafts.value).length > 0)
+const hasNonPositivePaymentLine = computed(() => selectedPaymentLines.value.some((line) => {
+  const amount = authoritativeWholeYuanAmount(line?.amount)
+  return amount === null || amount <= 0
+}))
+const isPaymentDraftReady = computed(() => (
+  hasAuthoritativePaymentSnapshot.value
+  && !hasPendingPaymentLineAmountDraft.value
+  && !hasNonPositivePaymentLine.value
+  && Number(paymentSummary.value.remainingAmount) === 0
+  && Number(paymentSummary.value.overpaidAmount || 0) === 0
+))
 const paymentResultLines = computed(() => Array.isArray(payment.value.resultLines) ? payment.value.resultLines : selectedPaymentLines.value)
 const finalChanges = computed(() => Array.isArray(props.checkout.finalChanges) ? props.checkout.finalChanges : [])
 const childResults = computed(() => isRecord(props.checkout.childResults) ? props.checkout.childResults : {})
@@ -427,8 +438,12 @@ function toggleCombinationMode() {
 function addPaymentMethod(method = {}) {
   if (method.canAdd === false || !method.id) return
 
-  // Without combined collection, choosing another method replaces the
-  // existing route. The parent serializes removal before adding the new line.
+  // A cashier who has not chosen combined collection is changing the payment
+  // route, not adding a second route. This matters for members: an already
+  // selected balance payment may cover the whole receivable, which would
+  // otherwise make the newly selected bookkeeping method start at zero and
+  // reject any entered amount as an overpayment. The parent serializes these
+  // commands, so every removal advances the checkout version before the add.
   const isCombinedCollection = combinationMode.value || selectedPaymentLines.value.length > 1
   if (!isCombinedCollection) {
     for (const line of selectedPaymentLines.value) {
@@ -440,7 +455,6 @@ function addPaymentMethod(method = {}) {
       }
     }
   }
-
   request('add-payment-method', { paymentMethodId: method.id })
 }
 
@@ -500,27 +514,33 @@ function paymentLineAmountKey(line = {}) {
 }
 
 function wholeYuanAmount(value) {
-  const amount = Number(value)
-  return Number.isFinite(amount) && amount >= 0 ? Math.trunc(amount) : null
+  const raw = String(value ?? '').trim()
+  if (!/^(0|[1-9]\d*)$/.test(raw)) return null
+  const amount = Number(raw)
+  return Number.isSafeInteger(amount) ? amount : null
+}
+
+function authoritativeWholeYuanAmount(value) {
+  const raw = String(value ?? '').trim()
+  const match = raw.match(/^(0|[1-9]\d*)(?:\.00)?$/)
+  if (!match) return null
+  const amount = Number(match[1])
+  return Number.isSafeInteger(amount) ? amount : null
 }
 
 function wholeYuanString(value) {
-  const amount = wholeYuanAmount(value)
+  const amount = authoritativeWholeYuanAmount(value)
   return amount === null ? '' : String(amount)
 }
 
 function normalizeWholeYuanInput(value) {
-  const raw = String(value ?? '').trim()
-  if (!raw) return ''
-  const integerPart = raw.match(/^\d+/)?.[0] || ''
-  return integerPart.replace(/^0+(?=\d)/, '')
+  return String(value ?? '').trim()
 }
 
 function updatePaymentLineAmountDraft(line, event) {
   const key = paymentLineAmountKey(line)
   if (!key || paymentLineAmountDrafts.value[key]?.pending === true) return
   const normalizedAmount = normalizeWholeYuanInput(event?.target?.value)
-  if (event?.target && event.target.value !== normalizedAmount) event.target.value = normalizedAmount
   paymentLineAmountDrafts.value = {
     ...paymentLineAmountDrafts.value,
     [key]: {
@@ -557,7 +577,11 @@ function handleCheckoutDraftMutationResult(event) {
     : String(detail.payload?.paymentLineId || '')
   const draft = paymentLineAmountDrafts.value[key]
   if (!draft || draft.pending !== true) return
-  if (['success', 'succeeded'].includes(String(detail.status || ''))) return
+  if (['success', 'succeeded'].includes(String(detail.status || ''))) {
+    clearPaymentLineAmountDraft(key)
+    clearPaymentLineAmountError(key)
+    return
+  }
   clearPaymentLineAmountDraft(key)
   setPaymentLineAmountError(key, detail.message || '收款金额没有保存，已恢复原金额。')
 }
@@ -607,7 +631,7 @@ function goNext() {
   // Do not let the final-preparation command race a just-finished amount
   // edit. The parent serializes each draft write and this component resumes
   // navigation as soon as its authoritative projection arrives.
-  if (currentStep.value === 2 && hasPendingPaymentLineAmountDraft.value) return
+  if (currentStep.value === 2 && !isPaymentDraftReady.value) return
   const currentIndex = editableSteps.value.findIndex((step) => step.number === currentStep.value)
   const nextStep = currentIndex >= 0 ? editableSteps.value[currentIndex + 1] : null
   if (nextStep) {
@@ -989,7 +1013,7 @@ onBeforeUnmount(() => {
                 <span v-if="paymentLineAmountErrors[paymentLineAmountKey(line)]" class="checkout-payment-line__amount-error" role="alert">
                   {{ paymentLineAmountErrors[paymentLineAmountKey(line)] }}
                 </span>
-                <strong v-else>{{ formatMoney(line.amount) }}</strong>
+                <strong v-if="!canEditPaymentLine(line)">{{ formatMoney(line.amount) }}</strong>
                 <button v-if="canEditPaymentLineDetails(line)" type="button" class="button button--text" @click="openPaymentLineEditor(line)">编辑流水与备注</button>
                 <button v-if="canRemovePaymentLine(line)" type="button" class="button button--text checkout-payment-line__remove" @click="removePaymentLine(line)">{{ line.kind === 'balance_deduction' ? '取消余额支付' : '删除' }}</button>
               </div>
@@ -1124,7 +1148,7 @@ onBeforeUnmount(() => {
       </template>
       <template v-else>
         <button type="button" class="button button--secondary" :disabled="currentStepPosition === 0" @click="goPrevious">上一步</button>
-        <button type="button" class="button button--primary" :disabled="isSubmissionLocked || !hasCurrentStepSnapshot || (currentStep === 2 && hasPendingPaymentLineAmountDraft)" @click="goNext">{{ nextLabel }}</button>
+        <button type="button" class="button button--primary" :disabled="isSubmissionLocked || !hasCurrentStepSnapshot || (currentStep === 2 && !isPaymentDraftReady)" @click="goNext">{{ nextLabel }}</button>
       </template>
     </footer>
   </section>

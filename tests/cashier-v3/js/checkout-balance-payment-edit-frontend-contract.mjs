@@ -48,21 +48,47 @@ ok(
     && !overlay.includes('@change="savePaymentLineAmount(line, $event.target.value)"')
 )
 ok(
+  'fractional input is preserved for explicit rejection and is never truncated',
+  overlay.includes("return String(value ?? '').trim()")
+    && overlay.includes("if (!/^(0|[1-9]\\d*)$/.test(raw)) return null")
+    && !overlay.includes("raw.match(/^\\d+/)")
+    && !overlay.includes('Math.trunc(amount)')
+)
+ok(
+  'authoritative whole-yuan decimal strings populate the integer-only cashier input',
+  overlay.includes('function authoritativeWholeYuanAmount(value)')
+    && overlay.includes("raw.match(/^(0|[1-9]\\d*)(?:\\.00)?$/)")
+    && overlay.includes('const amount = authoritativeWholeYuanAmount(value)')
+    && overlay.includes('const draftAmount = wholeYuanAmount(draft.value)')
+)
+ok(
+  'editable payment rows render the input as the only amount display',
+  overlay.includes('<strong v-if="!canEditPaymentLine(line)">{{ formatMoney(line.amount) }}</strong>')
+    && !overlay.includes('<strong v-else>{{ formatMoney(line.amount) }}</strong>')
+)
+ok(
   'a balance edit remains the dedicated balance draft command',
   overlay.includes("request('update-balance-payment', { amount: normalizedAmount })")
     && overlay.includes("if (line.kind === 'balance_deduction')")
 )
 ok(
-  'checkout cannot advance while an amount draft has not received its authoritative result',
+  'checkout advances only after every retained payment line is positive and the authoritative total balances',
   overlay.includes('const hasPendingPaymentLineAmountDraft = computed(() =>')
-    && overlay.includes('if (currentStep.value === 2 && hasPendingPaymentLineAmountDraft.value) return')
-    && overlay.includes('(currentStep === 2 && hasPendingPaymentLineAmountDraft)')
+    && overlay.includes('const hasNonPositivePaymentLine = computed(() =>')
+    && overlay.includes('const isPaymentDraftReady = computed(() =>')
+    && overlay.includes('Number(paymentSummary.value.remainingAmount) === 0')
+    && overlay.includes('Number(paymentSummary.value.overpaidAmount || 0) === 0')
+    && overlay.includes('if (currentStep.value === 2 && !isPaymentDraftReady.value) return')
+    && overlay.includes('(currentStep === 2 && !isPaymentDraftReady)')
 )
 ok(
-  'the serialized parent queue reports draft failures so the field rolls back to authority',
+  'the serialized parent queue settles successful drafts and rolls failed drafts back to authority',
   workbench.includes("new CustomEvent('cashier-v3:checkout-draft-mutation-result'")
     && overlay.includes("window.addEventListener('cashier-v3:checkout-draft-mutation-result', handleCheckoutDraftMutationResult)")
     && overlay.includes("window.removeEventListener('cashier-v3:checkout-draft-mutation-result', handleCheckoutDraftMutationResult)")
+    && overlay.includes("if (['success', 'succeeded'].includes(String(detail.status || ''))) {")
+    && overlay.includes('clearPaymentLineAmountDraft(key)')
+    && overlay.includes('clearPaymentLineAmountError(key)')
     && overlay.includes("setPaymentLineAmountError(key, detail.message || '收款金额没有保存，已恢复原金额。')")
 )
 
