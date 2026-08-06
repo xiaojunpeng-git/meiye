@@ -25,7 +25,6 @@ final class CashierV3CheckoutBalanceAuthorityDiscovery
 
     private const ACTION_PREPARE_SUBMISSION = 'prepare-checkout-submission';
     private const ACTION_APPLY = 'apply-balance-payment';
-    private const ACTION_REMOVE = 'remove-balance-payment';
     private const ACTION_UPDATE = 'update-balance-payment';
 
     /** @var CashierV3MemberBalanceProvider */
@@ -44,7 +43,6 @@ final class CashierV3CheckoutBalanceAuthorityDiscovery
             if (!in_array($action, [
                 self::ACTION_PREPARE_SUBMISSION,
                 self::ACTION_APPLY,
-                self::ACTION_REMOVE,
                 self::ACTION_UPDATE,
             ], true)) {
                 throw self::failure('checkout_balance_discovery_action_invalid');
@@ -95,8 +93,7 @@ final class CashierV3CheckoutBalanceAuthorityDiscovery
                 $request['balance_deduction_amount_cents'] ?? null,
                 'checkout_balance_discovery_amount_invalid'
             );
-            if ($action === self::ACTION_REMOVE
-                || ($action === self::ACTION_PREPARE_SUBMISSION && $amount === 0)) {
+            if ($action === self::ACTION_PREPARE_SUBMISSION && $amount === 0) {
                 return [
                     'contractVersion' => self::CONTRACT_VERSION,
                     'resources' => [],

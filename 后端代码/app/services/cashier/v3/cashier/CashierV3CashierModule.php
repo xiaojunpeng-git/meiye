@@ -845,11 +845,17 @@ final class CashierV3CashierModule
                 ['service_order', 'hang_order', 'reservation', 'room', 'debt_record'],
                 ['service_order', 'hang_order', 'reservation', 'room', 'debt_record']
             );
-            $policy->configureServerResourceDiscovery(
-                [$discovery, 'discover'],
-                ['checkout_member_balance'],
-                ['member_balance']
-            );
+            // Removing a balance-payment draft only clears the intention on
+            // the checkout request. It neither reads nor mutates the member
+            // balance row, so requiring a discovered balance resource would
+            // turn the correct empty discovery set into INVALID_COMMAND_CONTEXT.
+            if ($action !== 'remove-balance-payment') {
+                $policy->configureServerResourceDiscovery(
+                    [$discovery, 'discover'],
+                    ['checkout_member_balance'],
+                    ['member_balance']
+                );
+            }
             $dispatcher->policies()->register($policy);
         }
     }

@@ -29,11 +29,14 @@ import {
 } from '@/services/cashierV3OrderProjectionContract'
 import CashierCheckoutOverlay from '@/components/cashier/CashierCheckoutOverlay.vue'
 import CashierGuidedBusinessPanel from '@/components/cashier/CashierGuidedBusinessPanel.vue'
+import CheckoutBusinessSourceOverlay from '@/components/cashier/CheckoutBusinessSourceOverlay.vue'
 import RechargeOverlay from '@/components/member/RechargeOverlay.vue'
 import EntitlementSelectorOverlay from '@/components/cashier/EntitlementSelectorOverlay.vue'
 import HangOrderOverlay from '@/components/cashier/HangOrderOverlay.vue'
 import PersonnelPerformanceOverlay from '@/components/cashier/PersonnelPerformanceOverlay.vue'
 
+import { loadCheckoutBusinessCatalog } from '@/services/cashierBusinessConfigApi'
+import { useRechargeCheckout } from '@/composables/useRechargeCheckout'
 const state = useCashierV3State()
 const route = useRoute()
 const router = useRouter()
@@ -68,6 +71,8 @@ const hangOrderPreparationId = ref(null)
 const hangOrderSession = ref(null)
 const isPreparingServiceCompletion = ref(false)
 const serviceCompletionPreparationId = ref(null)
+const checkoutBusinessSourceSelector = ref(null)
+const isSavingCheckoutBusinessSource = ref(false)
 const isPreparingCheckout = ref(false)
 const checkoutPreparationId = ref(null)
 const checkoutSession = ref(null)
@@ -103,6 +108,18 @@ const cardRuleTypes = [
 const cashier = computed(() => state.cashier || {})
 const member = computed(() => cashier.value.member || null)
 const currentMemberId = computed(() => member.value?.id || member.value?.memberId || '')
+const {
+  rechargeCheckout,
+  acceptPreparedCheckout,
+  closeRechargeCheckout,
+  requestRechargeCheckoutAction,
+  enqueueRechargeCheckoutAction
+} = useRechargeCheckout({
+  member,
+  currentMemberId,
+  stateContextId: computed(() => state.stateContextId || ''),
+  openSourceSelector: (kind) => openCheckoutBusinessSourceSelector(kind)
+})
 const cashierScopeIdentity = computed(() => ({
   stateContextId: state.stateContextId || '',
   storeId: state.currentStore?.id || '',
@@ -750,7 +767,8 @@ const checkoutDraftMutationActions = new Set([
   'remove-payment-line',
   'apply-balance-payment',
   'update-balance-payment',
-  'remove-balance-payment'
+  'remove-balance-payment',
+  'update-checkout-business-source'
 ])
 let checkoutDraftMutationTail = Promise.resolve()
 
@@ -762,6 +780,85 @@ function isProjectLine(line) {
 
 function cartLineRole(line = {}) {
   return ['sale', 'entitlement_service'].includes(line.lineRole) ? line.lineRole : 'unknown'
+}
+
+function checkoutSourceSelectorError(error) {
+  return error instanceof Error ? error.message : '业务来源加载失败，请稍后重试。'
+}
+
+async function openCheckoutBusinessSourceSelector(kind) {
+  const current = kind === 'recharge' ? rechargeCheckout.value : checkout.value
+  if (!current || current.sourceSelectable === false) {
+    return { result: { status: 'failed', code: 'BUSINESS_SOURCE_NOT_SELECTABLE', message: '本次补交继承原订单来源，不能修改。' } }
+  }
+  const selector = {
+    kind,
+    sources: [],
+    primarySourceId: Number(current.primarySourceId || 0),
+    secondarySourceId: Number(current.secondarySourceId || 0),
+    loadError: ''
+  }
+  checkoutBusinessSourceSelector.value = selector
+  try {
+    const catalog = await loadCheckoutBusinessCatalog()
+    if (checkoutBusinessSourceSelector.value !== selector) return { result: { status: 'failed', code: 'BUSINESS_SOURCE_SELECTOR_CLOSED', message: '业务来源选择已关闭。' } }
+    selector.sources = catalog.sources
+  } catch (error) {
+    if (checkoutBusinessSourceSelector.value === selector) selector.loadError = checkoutSourceSelectorError(error)
+  }
+  return { result: { status: 'success', message: '业务来源已加载。' } }
+}
+
+async function reloadCheckoutBusinessSourceCatalog() {
+  const selector = checkoutBusinessSourceSelector.value
+  if (!selector) return
+  selector.loadError = ''
+  try {
+    const catalog = await loadCheckoutBusinessCatalog()
+    if (checkoutBusinessSourceSelector.value === selector) selector.sources = catalog.sources
+  } catch (error) {
+    if (checkoutBusinessSourceSelector.value === selector) selector.loadError = checkoutSourceSelectorError(error)
+  }
+}
+
+function closeCheckoutBusinessSourceSelector() {
+  if (!isSavingCheckoutBusinessSource.value) checkoutBusinessSourceSelector.value = null
+}
+
+async function saveCheckoutBusinessSource(selection = {}) {
+  const selector = checkoutBusinessSourceSelector.value
+  if (!selector || isSavingCheckoutBusinessSource.value) return
+  const current = selector.kind === 'recharge' ? rechargeCheckout.value : checkout.value
+  const primarySourceId = Number(selection.primarySourceId || 0)
+  const secondarySourceId = Number(selection.secondarySourceId || 0)
+  if (!current || primarySourceId <= 0 || secondarySourceId < 0) return
+  isSavingCheckoutBusinessSource.value = true
+  try {
+    let result
+    if (selector.kind === 'recharge') {
+      result = await requestRechargeCheckoutAction({
+        action: 'update-checkout-business-source',
+        payload: {
+          primarySourceId,
+          secondarySourceId,
+          sourceSelectionVersion: Number(current.sourceSelectionVersion || 0)
+        }
+      })
+    } else {
+      result = await enqueueCheckoutAction({
+        action: 'update-checkout-business-source',
+        payload: {
+          primarySourceId,
+          secondarySourceId,
+          sourceSelectionVersion: Number(current.sourceSelectionVersion || 0),
+          idempotencyKey: createCashierV3CommandId('CHECKOUT_SOURCE')
+        }
+      })
+    }
+    if (['success', 'succeeded'].includes(resultStatus(result))) checkoutBusinessSourceSelector.value = null
+  } finally {
+    isSavingCheckoutBusinessSource.value = false
+  }
 }
 
 function positiveVersion(value) {
@@ -2012,11 +2109,14 @@ async function submitRecharge(payload = {}) {
   if (isRechargeSubmitting.value || !rechargeSession.value) return
   isRechargeSubmitting.value = true
   try {
-    const response = await requestCashierV3Action('submit-recharge', {
+    const response = await requestCashierV3Action('prepare-recharge-checkout', {
       ...payload,
       memberId: payload.memberId || currentMemberId.value
     })
-    if (resultStatus(response) === 'success') rechargeSession.value = null
+    const prepared = acceptPreparedCheckout(response)
+    if (resultStatus(response) === 'success' && prepared) {
+      rechargeSession.value = null
+    }
     return response
   } finally {
     isRechargeSubmitting.value = false
@@ -2634,6 +2734,8 @@ async function requestCheckoutDraftMutationWithSingleConflictReplay(event = {}) 
 }
 
 async function requestCheckoutAction({ action, payload }) {
+  if (action === 'open-checkout-source-selector') return openCheckoutBusinessSourceSelector('sale')
+
   if (!checkoutRequestActions.has(action) && !checkoutExternalActions.has(action)) {
     return {
       result: {
@@ -2743,6 +2845,21 @@ async function requestCheckoutAction({ action, payload }) {
     preparationRequestId: session.preparationRequestId,
     preparationToken: String(checkoutPreparationToken(checkout.value) || ''),
     commandContexts: current.commandContexts
+  }
+  if (checkoutDraftMutationActions.has(action)) {
+    const draftContexts = checkoutSubmissionCommandContexts(current.commandContexts)
+    if (!draftContexts) {
+      return {
+        result: {
+          status: 'failed',
+          code: 'CHECKOUT_DRAFT_CONTEXT_STALE',
+          message: '收款编辑版本不完整，请关闭后重新打开本次结账。'
+        }
+      }
+    }
+    // Follow-up draft edits expose only the workspace and checkout request.
+    // Other authorities are rebuilt from persisted state in the transaction.
+    approvedPayload.commandContexts = draftContexts
   }
   if (action === 'query-checkout-result' && !approvedPayload.originalIdempotencyKey) {
     return {
@@ -3595,6 +3712,28 @@ onBeforeUnmount(() => {
         @close="closeCheckoutOverlay"
         @completed="closeSucceededCheckoutAndRefreshWorkbench"
         @request="enqueueCheckoutAction"
+      />
+    </Teleport>
+
+    <CheckoutBusinessSourceOverlay
+      v-if="checkoutBusinessSourceSelector"
+      :sources="checkoutBusinessSourceSelector.sources"
+      :primary-source-id="checkoutBusinessSourceSelector.primarySourceId"
+      :secondary-source-id="checkoutBusinessSourceSelector.secondarySourceId"
+      :saving="isSavingCheckoutBusinessSource"
+      :load-error="checkoutBusinessSourceSelector.loadError"
+      @close="closeCheckoutBusinessSourceSelector"
+      @confirm="saveCheckoutBusinessSource"
+      @retry="reloadCheckoutBusinessSourceCatalog"
+    />
+
+    <Teleport to="body">
+      <CashierCheckoutOverlay
+        v-if="rechargeCheckout"
+        :checkout="rechargeCheckout"
+        @close="closeRechargeCheckout"
+        @completed="closeRechargeCheckout"
+        @request="enqueueRechargeCheckoutAction"
       />
     </Teleport>
 

@@ -35,14 +35,19 @@ final class CashierV3CheckoutProjectionServices
     private $memberBalances;
 
     public function __construct(
+    /** @var CashierV3CheckoutBusinessConfigProjectionServices */
+    private $businessConfigProjection;
+
         CashierV3CheckoutRequestRepository $requests = null,
         CashierV3CheckoutResultReadRepository $completedResults = null,
-        CashierV3MemberBalanceProvider $memberBalances = null
+        CashierV3MemberBalanceProvider $memberBalances = null,
+        CashierV3CheckoutBusinessConfigProjectionServices $businessConfigProjection = null
     ) {
         $this->requests = $requests ?: new ThinkPhpCashierV3CheckoutRequestRepository();
         $this->completedResults = $completedResults;
         $this->memberBalances = $memberBalances ?: new CashierV3MemberBalanceProvider();
     }
+        $this->businessConfigProjection = $businessConfigProjection ?: new CashierV3CheckoutBusinessConfigProjectionServices();
 
     public function readCurrent(
         string $workspaceId,
@@ -58,7 +63,11 @@ final class CashierV3CheckoutProjectionServices
         );
         if ($aggregate !== null) {
             return $this->withCurrentMemberBalance(
-                self::projectPersistedAggregate($aggregate),
+                $this->businessConfigProjection->apply(
+                    self::projectPersistedAggregate($aggregate),
+                    CashierV3CheckoutBusinessSourceSelectionServices::KIND_SALE,
+                    (array)$aggregate['request']
+                ),
                 $operatorScope,
                 $dataScope
             );

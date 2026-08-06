@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace app\services\cashier\v3\member;
 
+use app\services\cashier\v3\config\CashierV3BusinessConfigServices;
 use app\services\cashier\v3\CashierV3ActionDispatcher;
 use app\services\cashier\v3\CashierV3BusinessDocumentNumberServices;
 use app\services\cashier\v3\CashierV3CommandException;
@@ -89,6 +90,7 @@ final class CashierV3RechargeModule
             throw self::failure('recharge_command_scope_incomplete', '充值服务尚未就绪，请刷新后重试。');
         }
         $input = $this->normalizeInput($payload);
+        $input['businessSource'] = $this->normalizeBusinessSource((array)($scope['business_source'] ?? []));
         $member = $this->lockedMember($input['memberId'], $operator, $dataScope);
         // 套餐金额和赠金必须在服务端按当前有效配置重算，不能信任页面
         // 在准备浮层时取得的历史数值。
@@ -104,6 +106,11 @@ final class CashierV3RechargeModule
             (array)($input['paymentLines'] ?? []),
             $input['creditedPrincipalCents']
         );
+        $accountingConfig = new CashierV3BusinessConfigServices();
+        foreach ($input['paymentLines'] as $index => $paymentLine) {
+            $snapshot = $accountingConfig->resolveAccountingMethodSnapshot((string)$paymentLine['paymentMethod'], true);
+            $input['paymentLines'][$index]['paymentMethodNameSnapshot'] = (string)$snapshot['displayNameSnapshot'];
+        }
         $input['salespeople'] = $this->resolveSalespeople(
             (array)($input['salespersonAllocations'] ?? []),
             $input['creditedPrincipalCents'],
@@ -136,6 +143,11 @@ final class CashierV3RechargeModule
             'staff_choose' => json_encode($this->legacySalespeopleSnapshot($input['salespeople']), JSON_UNESCAPED_UNICODE),
             'debt_amount' => $this->centsToMoney($input['debtCents']),
             'repaid_debt_amount' => '0.00',
+            'business_source_primary_id' => (int)$input['businessSource']['primarySourceId'],
+            'business_source_primary_name_snapshot' => (string)$input['businessSource']['primarySourceNameSnapshot'],
+            'business_source_secondary_id' => (int)$input['businessSource']['secondarySourceId'],
+            'business_source_secondary_name_snapshot' => (string)$input['businessSource']['secondarySourceNameSnapshot'],
+            'business_source_label_snapshot' => (string)$input['businessSource']['displayNameSnapshot'],
         ]);
         if ($rechargeId <= 0) {
             throw self::failure('recharge_order_create_failed', '充值订单创建失败，本次操作已取消。');
@@ -416,6 +428,17 @@ final class CashierV3RechargeModule
             'performanceFacts' => $performanceFacts,
         ];
         return CashierV3CheckoutFactPlanV1::fromInternalAuthority($plan);
+    }
+
+    private function normalizeBusinessSource(array $source): array
+    {
+        if (!$source || (int)($source['primarySourceId'] ?? 0) <= 0) {
+            return ['primarySourceId'=>0,'primarySourceNameSnapshot'=>'','secondarySourceId'=>0,'secondarySourceNameSnapshot'=>'','displayNameSnapshot'=>''];
+        }
+        $primaryId=(int)$source['primarySourceId']; $secondaryId=(int)($source['secondarySourceId']??0);
+        $primary=trim((string)($source['primarySourceNameSnapshot']??'')); $secondary=trim((string)($source['secondarySourceNameSnapshot']??'')); $label=trim((string)($source['displayNameSnapshot']??''));
+        if ($primaryId<=0 || $secondaryId<0 || $primary==='' || $label==='' || mb_strlen($primary)>64 || mb_strlen($secondary)>64 || mb_strlen($label)>140 || ($secondaryId>0 && $secondary==='')) throw self::failure('recharge_business_source_invalid','业务来源资料无效，请重新选择。');
+        return ['primarySourceId'=>$primaryId,'primarySourceNameSnapshot'=>$primary,'secondarySourceId'=>$secondaryId,'secondarySourceNameSnapshot'=>$secondary,'displayNameSnapshot'=>$label];
     }
 
     private function normalizeInput(array $payload): array

@@ -50,6 +50,8 @@ Route::group('cashierapi/v3', function () {
             ->option(['real_name' => '门店端修改当前账号密码']);
         Route::post('session/logout', 'StoreLogin/logout')
             ->option(['real_name' => '门店端退出登录']);
+        Route::get('business-config/checkout-catalog', 'BusinessConfig/checkoutCatalog')
+            ->option(['real_name' => '读取收银来源与记账方式']);
         // 统一命令网关：白名单 action + 幂等键 + 多对象 contexts 严格校验
         Route::post('workbenches/actions', 'Command/dispatchAction')
             ->option(['real_name' => '收银V3命令网关']);

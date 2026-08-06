@@ -426,6 +426,21 @@ function toggleCombinationMode() {
 
 function addPaymentMethod(method = {}) {
   if (method.canAdd === false || !method.id) return
+
+  // Without combined collection, choosing another method replaces the
+  // existing route. The parent serializes removal before adding the new line.
+  const isCombinedCollection = combinationMode.value || selectedPaymentLines.value.length > 1
+  if (!isCombinedCollection) {
+    for (const line of selectedPaymentLines.value) {
+      if (!canRemovePaymentLine(line)) continue
+      if (line.removalAction === 'remove-balance-payment' || line.kind === 'balance_deduction') {
+        request('remove-balance-payment')
+      } else {
+        request('remove-payment-line', { paymentLineId: line.id })
+      }
+    }
+  }
+
   request('add-payment-method', { paymentMethodId: method.id })
 }
 

@@ -3,6 +3,7 @@
 namespace app\services\cashier\v3\settlement\payment;
 
 use app\services\cashier\v3\CashierV3BusinessDocumentNumberServices;
+use app\services\cashier\v3\config\CashierV3BusinessConfigServices;
 use app\services\cashier\v3\order\settlement\CashierV3SalesOrderPlanV1;
 use app\services\cashier\v3\settlement\CashierV3CheckoutSettlementCanonicalizer;
 use app\services\cashier\v3\settlement\CashierV3CheckoutVerifiedSourceSet;
@@ -159,7 +160,14 @@ final class CashierV3PaymentCollectionPlanV1
         foreach ($payments as $index => $payment) {
             $row = [
                 'collection_id' => $ids->collectionId(
+        $businessConfig = new CashierV3BusinessConfigServices();
                     $request['tenant_id'],
+            // The immutable collection keeps the name as of settlement. The
+            // transaction lock also rejects a method disabled mid-checkout.
+            $methodSnapshot = $businessConfig->resolveAccountingMethodSnapshot(
+                $payment['payment_method'],
+                true
+            );
                     $request['request_id'],
                     $payment['payment_draft_id']
                 ),
@@ -195,9 +203,7 @@ final class CashierV3PaymentCollectionPlanV1
                 'payment_line_no' => $index + 1,
                 'checkout_payment_sort_no' => $payment['sort_no'],
                 'payment_method' => $payment['payment_method'],
-                'payment_method_name_snapshot' => self::PAYMENT_METHOD_LABELS[
-                    $payment['payment_method']
-                ],
+                'payment_method_name_snapshot' => $methodSnapshot['displayNameSnapshot'],
                 'amount_cents' => $payment['amount_cents'],
                 'cash_performance_amount_cents' => $payment['amount_cents'],
                 'business_date' => $request['business_date'],

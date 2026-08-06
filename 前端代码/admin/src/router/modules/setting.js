@@ -61,6 +61,24 @@ export default {
       component: () => import('@/pages/setting/shop/pay')
     },
     {
+      path: 'shop/business-source',
+      name: `${pre}shop_business_source`,
+      meta: {
+        auth: ['setting-shop-business-source'],
+        title: '来源设置'
+      },
+      component: () => import('@/pages/product/businessConfig/source')
+    },
+    {
+      path: 'shop/accounting',
+      name: `${pre}shop_accounting`,
+      meta: {
+        auth: ['setting-shop-accounting'],
+        title: '记账设置'
+      },
+      component: () => import('@/pages/product/businessConfig/accounting')
+    },
+    {
 		    path: 'shop/eshop',
 		    name: `${pre}shop_eshop`,
 		    meta: {

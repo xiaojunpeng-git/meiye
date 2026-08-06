@@ -232,6 +232,25 @@ class CashierV3ActionManifest
                     'debt.repaid' => [
                         'min_count' => 1,
                         'max_count' => 1,
+            'prepare-recharge-checkout' => $eventless($checkoutPreparation),
+            'add-recharge-checkout-payment-method' => $eventless($checkoutPreparation),
+            'update-recharge-checkout-payment-line' => $eventless($checkoutPreparation),
+            'remove-recharge-checkout-payment-line' => $eventless($checkoutPreparation),
+            'update-recharge-checkout-business-source' => $eventless($checkoutPreparation),
+            'reload-recharge-checkout' => $eventless($checkoutPreparation),
+            // The checkout protocol is separate, while the successful domain
+            // event remains recharge.completed from the same recharge authority.
+            'submit-recharge-checkout' => [
+                'required_event_types' => ['recharge.completed'],
+                'allowed_event_types' => ['recharge.completed', 'debt.recorded', 'gift.issued'],
+                'event_rules' => [
+                    'recharge.completed' => ['min_count'=>1,'max_count'=>1,'aggregate_type'=>'recharge_order','source_type'=>'submit-recharge','aggregate_version'=>1],
+                    'debt.recorded' => ['min_count'=>0,'max_count'=>1,'aggregate_type'=>'store_debt','source_type'=>'submit-recharge','aggregate_version'=>1],
+                    'gift.issued' => ['min_count'=>0,'max_count'=>100,'aggregate_type'=>'recharge_gift','source_type'=>'submit-recharge','aggregate_version'=>1],
+                ],
+                'eventless_reason' => '', 'activation_blocked_until_event_contract' => false, 'consumers' => [],
+            ],
+
                         'aggregate_type' => 'recharge_debt_repayment',
                         'source_type' => 'submit-recharge-debt-repayment',
                         'aggregate_version' => 1,

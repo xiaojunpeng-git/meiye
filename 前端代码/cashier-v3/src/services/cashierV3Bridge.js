@@ -155,12 +155,20 @@ export function mergeCashierV3PublicVersions(versions, stateContextId, options =
   return { merged, refused }
 }
 
-/** 完整根投影原子替换当前 context 的版本仓 */
+/**
+ * 完整根投影只在工作台上下文真实改变时重置版本仓。
+ *
+ * 某些只读详情会预先返回其命令资源版本，而随后一次完整工作台投影
+ * 不会重复携带该版本。若同一 context 的根替换也清仓，下一条写命令
+ * 会失去刚读取的对象版本，继而错误进入恢复循环。
+ */
 function replaceCashierV3PublicVersionStore(stateContextId, versions = null) {
   const contextId = String(stateContextId || '')
-  cashierV3PublicVersionStore = {
-    stateContextId: contextId,
-    versions: new Map()
+  if (currentPublicVersionContextId() !== contextId) {
+    cashierV3PublicVersionStore = {
+      stateContextId: contextId,
+      versions: new Map()
+    }
   }
   if (Array.isArray(versions) && versions.length) {
     mergeCashierV3PublicVersions(versions, contextId, { requestStateContextId: contextId })
@@ -2627,6 +2635,7 @@ function isCashierWorkspaceAction(action) {
     'submit-debt-repayment',
     'return-to-payment-edit',
     'retry-checkout',
+    'update-checkout-business-source',
     'query-checkout-result',
     'continue-partial-payment-recovery',
     'go-to-writeoff-after-checkout',
@@ -2635,6 +2644,13 @@ function isCashierWorkspaceAction(action) {
   ]
   return cashierWorkspaceActions.includes(action)
     || action === 'submit-recharge'
+    || action === 'prepare-recharge-checkout'
+    || action === 'add-recharge-checkout-payment-method'
+    || action === 'update-recharge-checkout-payment-line'
+    || action === 'remove-recharge-checkout-payment-line'
+    || action === 'update-recharge-checkout-business-source'
+    || action === 'reload-recharge-checkout'
+    || action === 'submit-recharge-checkout'
     || action === 'submit-recharge-debt-repayment'
     || action === 'submit-direct-gift'
 }
@@ -2722,7 +2738,15 @@ function resolveCommandContexts(action, payload) {
     contexts.push(buildCommandContext('checkout_request', payload.checkoutRequestId))
   }
 
-  if ((action === 'submit-recharge' || action === 'submit-recharge-debt-repayment' || action === 'submit-direct-gift') && payload.memberId) {
+  if (payload.rechargeCheckoutRequestId) {
+    contexts.push(buildCommandContext('recharge_checkout_request', payload.rechargeCheckoutRequestId))
+  }
+
+  if ((action === 'submit-recharge' || action === 'prepare-recharge-checkout'
+    || action === 'add-recharge-checkout-payment-method' || action === 'update-recharge-checkout-payment-line'
+    || action === 'remove-recharge-checkout-payment-line' || action === 'update-recharge-checkout-business-source'
+    || action === 'submit-recharge-checkout' || action === 'reload-recharge-checkout'
+    || action === 'submit-recharge-debt-repayment' || action === 'submit-direct-gift') && payload.memberId) {
     contexts.push(buildCommandContext('member', payload.memberId))
     if (action !== 'submit-direct-gift') contexts.push(buildCommandContext('member_balance', payload.memberId))
   }

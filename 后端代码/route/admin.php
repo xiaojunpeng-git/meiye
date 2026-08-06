@@ -1885,6 +1885,13 @@ Route::group('adminapi', function () {
         //获取商品规格
         Route::get('product/attrs/:id/:type', 'v1.product.StoreProduct/get_attrs')->option(['real_name' => '获取商品规格']);
         //商品列表头部数据
+        // 收银 V3 来源与记账设置（总部统一配置）
+        Route::get('business-config/sources', 'v1.product.CashierV3BusinessConfig/sources')->option(['real_name' => '读取收银来源设置']);
+        Route::post('business-config/sources', 'v1.product.CashierV3BusinessConfig/createSource')->option(['real_name' => '新增收银来源']);
+        Route::put('business-config/sources/:id', 'v1.product.CashierV3BusinessConfig/updateSource')->option(['real_name' => '修改收银来源']);
+        Route::get('business-config/accounting-methods', 'v1.product.CashierV3BusinessConfig/accountingMethods')->option(['real_name' => '读取记账设置']);
+        Route::put('business-config/accounting-methods/:code', 'v1.product.CashierV3BusinessConfig/updateAccountingMethod')->option(['real_name' => '修改记账设置']);
+        Route::post('business-config/accounting-methods/restore-defaults', 'v1.product.CashierV3BusinessConfig/restoreAccountingDefaults')->option(['real_name' => '恢复记账默认名称']);
         Route::get('product/type_header', 'v1.product.StoreProduct/type_header')->option(['real_name' => '商品列表头部数据']);
         //商品放入回收站
         Route::delete('product/:id', 'v1.product.StoreProduct/delete')->option(['real_name' => '商品放入回收站']);

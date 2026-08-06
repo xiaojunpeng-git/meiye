@@ -71,35 +71,240 @@ function resetSelection() {
 
 <template>
   <main class="store-login">
-    <form class="store-login__panel" @submit.prevent="submit">
-      <h1>门店端登录</h1>
-      <template v-if="!needsStoreSelection">
-        <label>登录账号<input v-model.trim="account" autocomplete="username" /></label>
-        <label>登录密码<input v-model="password" type="password" autocomplete="current-password" /></label>
-      </template>
-      <template v-else>
-        <label>进入门店
-          <select v-model.number="selectedStoreId">
-            <option :value="0" disabled>请选择门店</option>
-            <option v-for="store in stores" :key="store.store_id" :value="Number(store.store_id)">{{ store.store_name }}</option>
-          </select>
+    <section class="store-login__layout">
+      <div class="store-login__message">
+        <p class="store-login__eyebrow">门店经营工作台</p>
+        <h2 aria-label="你亲手雕琢细腻美好，我留存全部暖心操作">
+          <span aria-hidden="true">你亲手雕琢细腻美好，</span>
+          <span aria-hidden="true">我留存全部暖心操作</span>
+        </h2>
+      </div>
+
+      <form class="store-login__panel" @submit.prevent="submit">
+        <header>
+          <p>欢迎回来</p>
+          <h1>门店端登录</h1>
+        </header>
+        <label>
+          <span>登录账号</span>
+          <input v-model.trim="account" autocomplete="username" />
         </label>
-        <button class="store-login__text" type="button" :disabled="submitting" @click="resetSelection">返回账号登录</button>
-      </template>
-      <p v-if="error" class="store-login__error" role="alert">{{ error }}</p>
-      <button class="store-login__submit" type="submit" :disabled="submitting">{{ submitting ? '处理中…' : (needsStoreSelection ? '进入门店' : '登录') }}</button>
-    </form>
+        <label>
+          <span>登录密码</span>
+          <input v-model="password" type="password" autocomplete="current-password" />
+        </label>
+        <p v-if="error" class="store-login__error" role="alert">{{ error }}</p>
+        <button class="store-login__submit" type="submit" :disabled="submitting">{{ submitting ? '处理中…' : '登录' }}</button>
+      </form>
+    </section>
+
+    <footer class="store-login__footer">厦门魔核方舟科技有限公司提供支持</footer>
   </main>
 </template>
 
 <style scoped>
-.store-login { min-height: 100vh; display: grid; place-items: center; padding: 24px; background: #eef2f5; color: #18222d; }
-.store-login__panel { width: min(400px, 100%); display: grid; gap: 18px; padding: 32px; border: 1px solid #d6dce2; border-radius: 8px; background: #fff; }
-h1 { margin: 0 0 8px; font-size: 24px; font-weight: 600; }
-label { display: grid; gap: 8px; font-size: 14px; color: #435160; }
-input, select { min-height: 40px; padding: 8px 10px; border: 1px solid #b9c3cd; border-radius: 4px; color: #18222d; background: #fff; }
-.store-login__submit { min-height: 42px; border: 0; border-radius: 4px; background: #1677c8; color: #fff; font-size: 15px; cursor: pointer; }
+:global(html:has(.store-login)),
+:global(body:has(.store-login)),
+:global(#app:has(> .store-login)) {
+  min-width: 0;
+}
+
+:global(body:has(.store-login)) { overflow-x: hidden; }
+
+.store-login,
+.store-login * { box-sizing: border-box; }
+
+.store-login {
+  position: relative;
+  width: 100%;
+  min-height: 100vh;
+  min-height: 100dvh;
+  overflow-x: hidden;
+  display: grid;
+  align-items: center;
+  padding: 56px clamp(24px, 5vw, 80px) 72px;
+  color: #202b33;
+  background-color: #f7fafc;
+  background-image: url('@/assets/login-beauty-quiet.png');
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: cover;
+}
+
+.store-login__layout {
+  width: min(1240px, 100%);
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(360px, 420px);
+  align-items: center;
+  gap: clamp(48px, 8vw, 120px);
+}
+
+.store-login__message {
+  align-self: center;
+  padding: 40px 0 0 clamp(8px, 2vw, 30px);
+}
+
+.store-login__eyebrow {
+  margin: 0 0 18px;
+  color: #6e7f88;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.store-login__message h2 {
+  margin: 0;
+  color: #25333a;
+  font-size: clamp(25px, 2.2vw, 34px);
+  line-height: 1.55;
+  font-weight: 600;
+}
+
+.store-login__message h2 span {
+  display: block;
+  opacity: 0;
+  transform: translateY(10px);
+  animation: store-login-title .7s ease-out forwards;
+}
+
+.store-login__message h2 span:last-child { animation-delay: .12s; }
+
+.store-login__panel {
+  width: 100%;
+  display: grid;
+  gap: 20px;
+  padding: 38px 40px 40px;
+  border: 1px solid rgba(178, 191, 198, .72);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, .94);
+  box-shadow: 0 18px 50px rgba(40, 58, 67, .12);
+  backdrop-filter: blur(8px);
+}
+
+.store-login__panel header p {
+  margin: 0 0 8px;
+  color: #b05d6d;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.store-login__panel h1 {
+  margin: 0 0 6px;
+  color: #202b33;
+  font-size: 26px;
+  line-height: 1.3;
+  font-weight: 650;
+}
+
+.store-login__panel label {
+  display: grid;
+  gap: 9px;
+  color: #4d5d65;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.store-login__panel input {
+  width: 100%;
+  min-width: 0;
+  min-height: 46px;
+  padding: 10px 13px;
+  border: 1px solid #bdc8ce;
+  border-radius: 4px;
+  outline: none;
+  color: #202b33;
+  background: #fff;
+  font: inherit;
+  transition: border-color .18s ease, box-shadow .18s ease;
+}
+
+.store-login__panel input:focus {
+  border-color: #6f9286;
+  box-shadow: 0 0 0 3px rgba(111, 146, 134, .16);
+}
+
+.store-login__submit {
+  min-height: 46px;
+  margin-top: 2px;
+  border: 0;
+  border-radius: 4px;
+  background: #315d52;
+  color: #fff;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color .18s ease, transform .18s ease;
+}
+
+.store-login__submit:hover:not(:disabled) { background: #284d44; }
+.store-login__submit:active:not(:disabled) { transform: translateY(1px); }
 .store-login__submit:disabled { opacity: .6; cursor: wait; }
-.store-login__text { justify-self: start; padding: 0; border: 0; color: #1677c8; background: transparent; cursor: pointer; }
-.store-login__error { margin: -6px 0 0; color: #b42318; font-size: 14px; }
+
+.store-login__error {
+  margin: -4px 0 0;
+  color: #b42318;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.store-login__footer {
+  position: absolute;
+  right: 24px;
+  bottom: 22px;
+  left: 24px;
+  color: #7d8a91;
+  font-size: 13px;
+  text-align: center;
+}
+
+@keyframes store-login-title {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (max-width: 860px) {
+  .store-login {
+    align-items: start;
+    min-height: 100dvh;
+    padding: 48px 18px 76px;
+    background-position: 31% center;
+  }
+
+  .store-login__layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 28px;
+  }
+
+  .store-login__message {
+    width: min(480px, 100%);
+    margin: 0 auto;
+    padding: 0;
+  }
+
+  .store-login__message h2 { font-size: 24px; }
+
+  .store-login__panel {
+    width: min(440px, 100%);
+    margin: 0 auto;
+    padding: 30px 26px 32px;
+    background: rgba(255, 255, 255, .97);
+  }
+}
+
+@media (max-width: 460px) {
+  .store-login { padding: 34px 14px 70px; }
+  .store-login__eyebrow { margin-bottom: 10px; }
+  .store-login__message h2 { font-size: 20px; line-height: 1.5; }
+  .store-login__panel { gap: 17px; padding: 26px 20px 28px; }
+  .store-login__panel h1 { font-size: 23px; }
+  .store-login__footer { right: 12px; bottom: 16px; left: 12px; font-size: 12px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .store-login__message h2 span {
+    opacity: 1;
+    transform: none;
+    animation: none;
+  }
+}
 </style>

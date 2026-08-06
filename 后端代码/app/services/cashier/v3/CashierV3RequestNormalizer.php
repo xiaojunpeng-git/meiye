@@ -56,6 +56,10 @@ class CashierV3RequestNormalizer
             $out = self::normalizeCheckoutPaymentDraft($canonicalAction, $out);
         }
 
+        if ($canonicalAction === 'update-checkout-business-source') {
+            $out = self::normalizeCheckoutBusinessSource($out);
+        }
+
         if (in_array($canonicalAction, [
             'prepare-checkout-submission',
             'submit-checkout',
@@ -293,6 +297,41 @@ class CashierV3RequestNormalizer
             $normalized['remark'] = trim($payload['remark']);
         }
         return $normalized;
+    }
+
+    private static function normalizeCheckoutBusinessSource(array $payload): array
+    {
+        $allowed = ['checkoutRequestId', 'checkoutRequestVersion', 'preparationRequestId', 'preparationToken', 'primarySourceId', 'secondarySourceId', 'sourceSelectionVersion'];
+        $actual = array_keys($payload);
+        sort($allowed, SORT_STRING);
+        sort($actual, SORT_STRING);
+        if ($actual !== $allowed) {
+            throw CashierV3CommandException::invalidContext('业务来源资料无效，请刷新结账页面后重试。', ['action' => 'update-checkout-business-source', 'reason' => 'checkout_business_source_payload_shape_invalid']);
+        }
+        $requestId = trim((string)$payload['checkoutRequestId']);
+        if (preg_match('/^CKR-[0-9a-f]{40}$/D', $requestId) !== 1) {
+            throw self::invalidCheckoutPayment('update-checkout-business-source', 'checkout_request_id_invalid');
+        }
+        $preparationRequestId = trim((string)$payload['preparationRequestId']);
+        $preparationToken = trim((string)$payload['preparationToken']);
+        if ($preparationRequestId === '' || strlen($preparationRequestId) > 128 || preg_match('/^[A-Za-z0-9_.:-]+$/D', $preparationRequestId) !== 1 || preg_match('/^CKPT-[0-9a-f]{64}$/D', $preparationToken) !== 1) {
+            throw self::invalidCheckoutPayment('update-checkout-business-source', 'checkout_preparation_identity_invalid');
+        }
+        $primary = self::strictPositiveInt($payload['primarySourceId'], 'primarySourceId', 'update-checkout-business-source');
+        foreach (['secondarySourceId', 'sourceSelectionVersion'] as $field) {
+            if (!is_int($payload[$field]) && !is_string($payload[$field]) || !preg_match('/^(?:0|[1-9][0-9]*)$/D', (string)$payload[$field])) {
+                throw self::invalidCheckoutPayment('update-checkout-business-source', $field . '_invalid');
+            }
+        }
+        return [
+            'checkoutRequestId' => $requestId,
+            'checkoutRequestVersion' => self::strictPositiveInt($payload['checkoutRequestVersion'], 'checkoutRequestVersion', 'update-checkout-business-source'),
+            'preparationRequestId' => $preparationRequestId,
+            'preparationToken' => $preparationToken,
+            'primarySourceId' => $primary,
+            'secondarySourceId' => (int)$payload['secondarySourceId'],
+            'sourceSelectionVersion' => (int)$payload['sourceSelectionVersion'],
+        ];
     }
 
     private static function normalizeCheckoutSubmissionPreparation(

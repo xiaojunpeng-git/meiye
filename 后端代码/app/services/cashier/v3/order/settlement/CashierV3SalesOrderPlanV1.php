@@ -113,7 +113,8 @@ final class CashierV3SalesOrderPlanV1
         int $settledAt,
         int $recordedAt,
         string $serverNamespaceSecret,
-        string $businessDocumentNo = ''
+        string $businessDocumentNo = '',
+        array $businessSource = []
     ): self {
         self::assertExactKeys(
             $lockedAggregate,
@@ -135,6 +136,7 @@ final class CashierV3SalesOrderPlanV1
         if ($occurredAt <= 0
             || $settledAt < $occurredAt
             || $recordedAt < $settledAt
+        $businessSource = self::normalizeBusinessSource($businessSource);
             || $occurredAt < $request['operation_occurred_at']
             || $occurredAt < $request['recorded_at']) {
             throw self::failure('sales_order_final_times_invalid');
@@ -293,6 +295,11 @@ final class CashierV3SalesOrderPlanV1
         $header['immutable_fingerprint'] = self::canonicalFingerprint($headerFingerprintInput);
         return new self($header, $orderLines, $header['immutable_fingerprint']);
     }
+            'business_source_primary_id' => $businessSource['primarySourceId'],
+            'business_source_primary_name_snapshot' => $businessSource['primarySourceNameSnapshot'],
+            'business_source_secondary_id' => $businessSource['secondarySourceId'],
+            'business_source_secondary_name_snapshot' => $businessSource['secondarySourceNameSnapshot'],
+            'business_source_label_snapshot' => $businessSource['displayNameSnapshot'],
 
     public function header(): array
     {
@@ -339,6 +346,38 @@ final class CashierV3SalesOrderPlanV1
                 true
             ),
             'workspace_id' => self::token($request['workspace_id'], 64, 'checkout_workspace_id_invalid'),
+    private static function normalizeBusinessSource(array $source): array
+    {
+        if ($source === []) {
+            return [
+                'primarySourceId' => 0,
+                'primarySourceNameSnapshot' => '',
+                'secondarySourceId' => 0,
+                'secondarySourceNameSnapshot' => '',
+                'displayNameSnapshot' => '',
+            ];
+        }
+        $primaryId = (int)($source['primarySourceId'] ?? 0);
+        $secondaryId = (int)($source['secondarySourceId'] ?? 0);
+        $primaryName = trim((string)($source['primarySourceNameSnapshot'] ?? ''));
+        $secondaryName = trim((string)($source['secondarySourceNameSnapshot'] ?? ''));
+        $label = trim((string)($source['displayNameSnapshot'] ?? ''));
+        if ($primaryId <= 0 || $secondaryId < 0 || $primaryName === '' || $label === ''
+            || mb_strlen($primaryName) > 64 || mb_strlen($secondaryName) > 64 || mb_strlen($label) > 140) {
+            throw self::failure('sales_order_business_source_invalid');
+        }
+        if ($secondaryId > 0 && $secondaryName === '') {
+            throw self::failure('sales_order_business_source_secondary_snapshot_missing');
+        }
+        return [
+            'primarySourceId' => $primaryId,
+            'primarySourceNameSnapshot' => $primaryName,
+            'secondarySourceId' => $secondaryId,
+            'secondarySourceNameSnapshot' => $secondaryName,
+            'displayNameSnapshot' => $label,
+        ];
+    }
+
             'store_id' => self::positiveInt($request['store_id'], 'checkout_store_id_invalid'),
             'store_name_snapshot' => self::text(
                 $request['store_name_snapshot'],
