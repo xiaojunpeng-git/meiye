@@ -14,12 +14,17 @@ import CareMetricDetailDrawer from '@/components/care/CareMetricDetailDrawer.vue
 import CareRecordDetailDrawer from '@/components/care/CareRecordDetailDrawer.vue'
 import CareTaskDetailDrawer from '@/components/care/CareTaskDetailDrawer.vue'
 import { requestCustomerCareAction } from '@/services/customerCareApi'
-import {
-  CUSTOMER_CARE_CONTRACT_VERSION,
-  cloneCustomerCarePreview,
-  createCustomerCarePreviewProjection,
-  isLocalCustomerCarePreview
-} from '@/dev/customerCarePreviewData'
+// Preview data is intentionally loaded below only for an explicit local
+// preview request. Keeping it out of the module graph lets production builds
+// work from a clean checkout where dev fixtures are not present.
+const CUSTOMER_CARE_CONTRACT_VERSION = 'customer-care.v1'
+const previewRequested = typeof window !== 'undefined'
+  && import.meta.env.DEV
+  && new Set(['127.0.0.1', 'localhost', '::1']).has(window.location.hostname)
+  && new URLSearchParams(window.location.search).get('preview') === '1'
+const previewModulePath = '/src/dev/customerCarePreviewData.js'
+
+const cloneCustomerCarePreview = (value) => JSON.parse(JSON.stringify(value))
 
 const tabs = [
   { key: 'tasks', label: '跟进任务', icon: ClipboardCheck },
@@ -42,7 +47,7 @@ const taskBuckets = [
   { key: 'all', label: '全部' }
 ]
 
-const isPreview = isLocalCustomerCarePreview()
+const isPreview = ref(false)
 const activeTab = ref('tasks')
 const activeTaskScope = ref('')
 const activeTaskBucket = ref('')
@@ -57,11 +62,11 @@ const recordFollowedFrom = ref('')
 const recordFollowedTo = ref('')
 const recordStream = ref('human')
 const recordDataScope = ref('normal')
-const projection = ref(isPreview ? createCustomerCarePreviewProjection() : null)
+const projection = ref(null)
 const displayedTasks = ref([])
 const displayedCustomers = ref([])
 const displayedRecords = ref([])
-const loadState = ref(isPreview ? 'ready' : 'idle')
+const loadState = ref('idle')
 const pageError = ref('')
 const feedback = ref(null)
 const selectedTaskId = ref('')
@@ -234,7 +239,7 @@ function hasMatchingStatisticsDetail(nextProjection, identity) {
 async function refreshOpenStatisticsDetail() {
   const openedDetail = statisticsDetail.value
   const identity = statisticsDetailIdentity(openedDetail)
-  if (!identity || isPreview) return true
+  if (!identity || isPreview.value) return true
 
   statisticsDetailLoading.value = true
   statisticsDetailError.value = ''
@@ -285,7 +290,7 @@ function failCareProjection(message) {
 }
 
 async function requestCareAction(action, payload = {}) {
-  if (isPreview) return applyPreviewAction(action, payload)
+  if (isPreview.value) return applyPreviewAction(action, payload)
   const isQuery = action === 'query-care-workbench'
   const suppliedIdempotencyKey = String(payload.idempotencyKey || '').trim()
   const idempotencyKey = isQuery ? '' : (suppliedIdempotencyKey || newIdempotencyKey())
@@ -293,7 +298,7 @@ async function requestCareAction(action, payload = {}) {
 }
 
 async function loadCareProjection() {
-  if (isPreview) {
+  if (isPreview.value) {
     applyPreviewQuery()
     loadState.value = 'ready'
     return
@@ -385,7 +390,7 @@ function workbenchRequestForAction(action) {
 }
 
 async function reconcileCommandProjection(workbenchRequest) {
-  if (isPreview) {
+  if (isPreview.value) {
     applyPreviewQuery()
     return true
   }
@@ -493,7 +498,7 @@ function applyPreviewQuery() {
 async function switchTab(tabKey) {
   activeTab.value = tabKey
   pageError.value = ''
-  if (isPreview) applyPreviewQuery()
+  if (isPreview.value) applyPreviewQuery()
   else await loadCareProjection()
 }
 
@@ -572,7 +577,7 @@ async function openTaskByReference(nextTask) {
 }
 
 async function openStatisticsDetail(metric, staffId = '') {
-  if (isPreview) {
+  if (isPreview.value) {
     feedback.value = { type: 'error', message: '本机演示数据不提供统计明细，请在正式客情入口查看。' }
     return
   }
@@ -786,7 +791,7 @@ async function runDirectAction(action, subject = {}) {
       showFeedback('error', '操作结果缺少完整客情数据，请刷新页面确认实际状态。')
       return
     }
-    acceptCareProjection(nextProjection, { applyPreviewFilters: isPreview })
+    acceptCareProjection(nextProjection, { applyPreviewFilters: isPreview.value })
     const statisticsRefreshed = await refreshStatisticsDetailAfterMutation(nextProjection)
     clearDirectActionIdempotencyKey(action, subject)
     showFeedback('success', successMessageWithStatisticsState(resultMessage(response, '操作已完成。'), statisticsRefreshed))
@@ -829,7 +834,7 @@ async function submitCommand(payload) {
       commandError.value = '操作结果缺少完整客情数据，当前输入已保留；请刷新页面确认实际状态。'
       return
     }
-    acceptCareProjection(nextProjection, { applyPreviewFilters: isPreview })
+    acceptCareProjection(nextProjection, { applyPreviewFilters: isPreview.value })
     const statisticsRefreshed = await refreshStatisticsDetailAfterMutation(nextProjection)
     const successMessage = resultMessage(response, '操作已完成。')
     commandMode.value = ''
@@ -1029,9 +1034,28 @@ function createPreviewTask(payload) {
   })
 }
 
+async function initializeCareWorkbench() {
+  if (previewRequested) {
+    try {
+      // Vite must not resolve this optional development-only module at build time.
+      const candidate = await import(/* @vite-ignore */ previewModulePath)
+      if (typeof candidate.createCustomerCarePreviewProjection === 'function') {
+        isPreview.value = true
+        projection.value = candidate.createCustomerCarePreviewProjection()
+        applyPreviewQuery()
+        loadState.value = 'ready'
+        return
+      }
+    } catch (_) {
+      // A clean checkout has no preview fixture; continue through the real API.
+    }
+  }
+  await loadCareProjection()
+}
+
 onMounted(() => {
   window.addEventListener('cashier-v3:member-selector-selected', careMemberSelected)
-  loadCareProjection()
+  initializeCareWorkbench()
 })
 onBeforeUnmount(() => window.removeEventListener('cashier-v3:member-selector-selected', careMemberSelected))
 </script>
