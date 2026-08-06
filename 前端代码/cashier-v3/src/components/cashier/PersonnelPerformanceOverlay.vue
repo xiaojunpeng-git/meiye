@@ -11,9 +11,10 @@ const props = defineProps({
   selectedCraftsmen: { type: Array, default: () => [] },
   selectedSalespeople: { type: Array, default: () => [] },
   loading: { type: Boolean, default: false },
+  saving: { type: Boolean, default: false },
   loadError: { type: String, default: '' }
 })
-const emit = defineEmits(['close', 'confirm', 'retry'])
+const emit = defineEmits(['close', 'confirm', 'apply-all', 'retry'])
 
 const mode = ref('simple')
 const activeTab = ref(props.showCraftsmen ? props.initialTab : 'salespeople')
@@ -114,23 +115,10 @@ const filteredSalespeople = computed(() => salespeople.value.filter(matchesKeywo
 const activeRecords = computed(() => activeTab.value === 'craftsmen' ? craftsmen.value : salespeople.value)
 const selectedRecords = computed(() => activeRecords.value.filter((item) => item.selected))
 const activeTotal = computed(() => selectedRecords.value.reduce((total, item) => total + Number(item.performance || 0), 0))
-
 function selectRecord(item) {
   item.selected = !item.selected
   if (!item.selected) item.marked = false
   equalWeights(item.role === 'craftsmen' ? craftsmen.value : salespeople.value)
-  validationMessage.value = ''
-}
-
-function applyAll(role) {
-  const records = role === 'craftsmen' ? craftsmen.value : salespeople.value
-  records.forEach((item) => { item.selected = true })
-  // "售前" remains a single-person flag even when every salesperson is applied.
-  if (role === 'salespeople') {
-    const marked = records.filter((item) => item.marked)
-    marked.slice(1).forEach((item) => { item.marked = false })
-  }
-  equalWeights(records)
   validationMessage.value = ''
 }
 
@@ -155,6 +143,55 @@ function activateInvalidTab(tab, message) {
   activeTab.value = tab
   mode.value = 'full'
   validationMessage.value = message
+}
+
+function selectedSalespersonPayload() {
+  return salespeople.value.filter((item) => item.selected).map((item) => ({
+    id: item.id,
+    staffId: item.id,
+    name: item.name,
+    marked: Boolean(item.marked),
+    isPreSale: Boolean(item.marked),
+    allocationWeight: Number(item.performance)
+  }))
+}
+
+function selectedCraftsmenPayload() {
+  return craftsmen.value.filter((item) => item.selected).map((item, index) => ({
+    id: item.id,
+    staffId: item.id,
+    name: item.name,
+    marked: Boolean(item.marked),
+    isPointCustomer: Boolean(item.marked),
+    laborWeight: Number(item.performance),
+    isPrimary: index === 0,
+    sequence: index + 1
+  }))
+}
+
+function applySelectionToAll() {
+  const selectedCraftsmen = props.showCraftsmen ? craftsmen.value.filter((item) => item.selected) : []
+  const selectedSalespeople = props.showSalespeople ? salespeople.value.filter((item) => item.selected) : []
+  if (!selectedCraftsmen.length && !selectedSalespeople.length) {
+    activateInvalidTab(props.showCraftsmen ? 'craftsmen' : 'salespeople', '请先选择要应用到购物车的人员。')
+    return
+  }
+  if (selectedCraftsmen.length && !allocationIsValid(selectedCraftsmen)) {
+    activateInvalidTab('craftsmen', '手艺人分配比例必须为正整数，合计为 100%。')
+    return
+  }
+  if (selectedSalespeople.length && !allocationIsValid(selectedSalespeople)) {
+    activateInvalidTab('salespeople', '销售人分配比例必须为正整数，合计为 100%。')
+    return
+  }
+  validationMessage.value = ''
+  emit('apply-all', {
+    role: selectedCraftsmen.length && selectedSalespeople.length
+      ? 'personnel'
+      : selectedCraftsmen.length ? 'craftsmen' : 'salespeople',
+    craftsmen: selectedCraftsmenPayload(),
+    salespeople: selectedSalespersonPayload()
+  })
 }
 
 function confirm() {
@@ -186,14 +223,7 @@ function confirm() {
     }))
   }
   if (props.showSalespeople) {
-    assignment.salespeople = selectedSalespeople.map((item) => ({
-      id: item.id,
-      staffId: item.id,
-      name: item.name,
-      marked: Boolean(item.marked),
-      isPreSale: Boolean(item.marked),
-      allocationWeight: Number(item.performance)
-    }))
+    assignment.salespeople = selectedSalespersonPayload()
   }
   emit('confirm', assignment)
 }
@@ -223,7 +253,7 @@ function confirm() {
 
       <div v-else-if="mode === 'simple'" class="personnel-simple-grid" :class="{ 'is-single': !showCraftsmen || !showSalespeople }">
         <section v-if="showCraftsmen">
-          <div class="personnel-role-heading"><h3>手艺人</h3><button type="button" class="button button--text" @click="applyAll('craftsmen')">应用全部人</button></div>
+          <div class="personnel-role-heading"><h3>手艺人</h3></div>
           <button v-for="item in filteredCraftsmen" :key="item.id" type="button" class="personnel-simple-item" :class="{ 'is-selected': item.selected }" @click="selectRecord(item)">
             <span>{{ item.name }}</span>
             <label @click.stop><input :checked="item.marked" type="checkbox" :disabled="!item.selected" @change="setMarked(item, $event.target.checked)">点客</label>
@@ -231,7 +261,7 @@ function confirm() {
           <p v-if="!filteredCraftsmen.length" class="personnel-empty">暂无可选择的手艺人</p>
         </section>
         <section v-if="showSalespeople">
-          <div class="personnel-role-heading"><h3>销售人</h3><button type="button" class="button button--text" @click="applyAll('salespeople')">应用全部人</button></div>
+          <div class="personnel-role-heading"><h3>销售人</h3></div>
           <button v-for="item in filteredSalespeople" :key="item.id" type="button" class="personnel-simple-item" :class="{ 'is-selected': item.selected }" @click="selectRecord(item)">
             <span>{{ item.name }}</span>
             <label @click.stop><input :checked="item.marked" type="checkbox" :disabled="!item.selected" @change="setMarked(item, $event.target.checked)">售前</label>
@@ -247,7 +277,6 @@ function confirm() {
         </div>
         <div class="personnel-full-summary">
           <button type="button" class="button button--primary" @click="mode = 'simple'">添加人员</button>
-          <button type="button" class="button button--text" @click="applyAll(activeTab)">应用全部人</button>
           <strong>已选择 {{ selectedRecords.length }} 人，分配合计 {{ activeTotal }}%</strong>
         </div>
         <div class="personnel-full-table" role="table" aria-label="完整人员分配">
@@ -264,8 +293,9 @@ function confirm() {
 
       <footer>
         <p v-if="validationMessage" role="alert">{{ validationMessage }}</p>
-        <button type="button" class="button button--secondary" @click="emit('close')">取消</button>
-        <button type="button" class="button button--primary" :disabled="loading || Boolean(loadError)" @click="confirm">确认</button>
+        <button type="button" class="button button--secondary" :disabled="saving" @click="emit('close')">取消</button>
+        <button type="button" class="button button--secondary" :disabled="loading || saving || Boolean(loadError)" @click="applySelectionToAll">应用全部人</button>
+        <button type="button" class="button button--primary" :disabled="loading || saving || Boolean(loadError)" @click="confirm">确认</button>
       </footer>
     </section>
   </div>

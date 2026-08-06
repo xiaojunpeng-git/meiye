@@ -525,6 +525,113 @@ final class CashierV3CashierWorkspaceServices
         return $this->readDraft($workspaceId, $stateContextId, $operatorScope, true);
     }
 
+    /** Apply one confirmed salesperson allocation to every current-purchase line atomically. */
+    public function applySalespeopleToAllSaleLinesInTx(
+        string $workspaceId,
+        string $stateContextId,
+        CashierV3OperatorScope $operatorScope,
+        array $salespeople
+    ): array {
+        CashierV3TransactionGuard::assertInTransaction('cashierWorkspaceApplySalespeopleToAllSaleLines');
+        $draft = $this->lockOrCreateDraft($workspaceId, $stateContextId, $operatorScope);
+        $this->assertNotResumedHangMutation($draft);
+        $rows = $this->lineRows($workspaceId, true);
+        $saleIds = [];
+        foreach ($rows as $row) {
+            if ((string)($row['line_role'] ?? '') !== self::ROLE_SALE) {
+                continue;
+            }
+            if ($this->isCardOperationUpgradeSaleRow((array)$row)) {
+                throw $this->cardOperationUpgradeCartLocked();
+            }
+            $saleIds[] = (int)($row['id'] ?? 0);
+        }
+        $saleIds = array_values(array_filter($saleIds));
+        if (!$saleIds) {
+            throw new CashierV3CommandException(
+                CashierV3ResultCode::RESOURCE_NOT_FOUND,
+                '当前没有可应用销售人的本次购买商品。',
+                CashierV3ResultCode::STATUS_FAILED,
+                ['reason' => 'sale_lines_missing_for_apply_all']
+            );
+        }
+        $normalized = $this->authoritativeSalespeopleInTx($salespeople, $operatorScope);
+        if (!$normalized) {
+            throw new CashierV3CommandException(
+                CashierV3ResultCode::ENTITLEMENT_LINE_INVALID,
+                '请先选择要应用到全部商品的销售人。',
+                CashierV3ResultCode::STATUS_FAILED,
+                ['reason' => 'salespeople_missing_for_apply_all']
+            );
+        }
+        Db::name(self::LINE_TABLE)
+            ->where('workspace_id', $workspaceId)
+            ->whereIn('id', $saleIds)
+            ->update([
+                'salespeople_json' => $this->encodeJson($normalized),
+                'update_time' => time(),
+            ]);
+        $this->updateDraft($workspaceId, []);
+        return $this->readDraft($workspaceId, $stateContextId, $operatorScope, true);
+    }
+
+    /** Apply one confirmed craftsman allocation to every current service-project line atomically. */
+    public function applyCraftsmenToAllServiceLinesInTx(
+        string $workspaceId,
+        string $stateContextId,
+        CashierV3OperatorScope $operatorScope,
+        array $craftsmen
+    ): array {
+        CashierV3TransactionGuard::assertInTransaction('cashierWorkspaceApplyCraftsmenToAllServiceLines');
+        $draft = $this->lockOrCreateDraft($workspaceId, $stateContextId, $operatorScope);
+        $this->assertNotResumedHangMutation($draft);
+        $serviceLineIds = [];
+        foreach ($this->lineRows($workspaceId, true) as $row) {
+            $lineRole = (string)($row['line_role'] ?? '');
+            $authoritySnapshot = json_decode((string)($row['authority_snapshot_json'] ?? ''), true);
+            $isCustomCard = is_array($authoritySnapshot)
+                && (string)($authoritySnapshot['cardPurchase']['sourceKind'] ?? '') === 'custom_card';
+            $isSaleProject = $lineRole === self::ROLE_SALE
+                && (int)($row['project_id'] ?? 0) > 0
+                && !$isCustomCard;
+            $isEntitlementService = $lineRole === self::ROLE_ENTITLEMENT;
+            if (!$isSaleProject && !$isEntitlementService) {
+                continue;
+            }
+            if ($isSaleProject && $this->isCardOperationUpgradeSaleRow((array)$row)) {
+                throw $this->cardOperationUpgradeCartLocked();
+            }
+            $serviceLineIds[] = (int)($row['id'] ?? 0);
+        }
+        $serviceLineIds = array_values(array_filter($serviceLineIds));
+        if (!$serviceLineIds) {
+            throw new CashierV3CommandException(
+                CashierV3ResultCode::RESOURCE_NOT_FOUND,
+                '当前没有可应用手艺人的服务项目。',
+                CashierV3ResultCode::STATUS_FAILED,
+                ['reason' => 'service_lines_missing_for_apply_all']
+            );
+        }
+        $normalized = $this->authoritativeCraftsmenInTx($craftsmen, $operatorScope);
+        if (!$normalized) {
+            throw new CashierV3CommandException(
+                CashierV3ResultCode::ENTITLEMENT_LINE_INVALID,
+                '请先选择要应用到全部服务项目的手艺人。',
+                CashierV3ResultCode::STATUS_FAILED,
+                ['reason' => 'craftsmen_missing_for_apply_all']
+            );
+        }
+        Db::name(self::LINE_TABLE)
+            ->where('workspace_id', $workspaceId)
+            ->whereIn('id', $serviceLineIds)
+            ->update([
+                'craftsmen_json' => $this->encodeJson($normalized),
+                'update_time' => time(),
+            ]);
+        $this->updateDraft($workspaceId, []);
+        return $this->readDraft($workspaceId, $stateContextId, $operatorScope, true);
+    }
+
     public function assertSelectedMemberInTx(
         string $workspaceId,
         string $stateContextId,

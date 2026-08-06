@@ -56,6 +56,7 @@ const isMemberRequiredOpen = ref(false)
 const pendingCardPurchase = ref(null)
 const isConfirmingCardPurchase = ref(false)
 const personnelOverlay = ref(null)
+const isSavingPersonnelAssignment = ref(false)
 const localPersonnelAssignments = ref({})
 const debtEditor = ref(null)
 const debtEditorAmount = ref('')
@@ -1912,9 +1913,61 @@ function checkoutDebtSummary() {
     : ''
 }
 
+function reportPersonnelAssignmentFailure(result, fallback) {
+  const status = resultStatus(result)
+  window.dispatchEvent(new CustomEvent('cashier-v3:ui-result', {
+    detail: {
+      status: status === 'conflict' ? 'conflict' : 'failed',
+      message: resultMessage(result, fallback)
+    }
+  }))
+}
+
 async function confirmPersonnelAssignment(result = {}) {
+  if (isSavingPersonnelAssignment.value) return
   const line = personnelOverlay.value?.line
   if (!line?.id) return
+  isSavingPersonnelAssignment.value = true
+  try {
+    const craftsmen = (result.craftsmen || []).map((record) => ({
+      staffId: record.staffId || record.id,
+      laborWeight: Number(record.laborWeight),
+      isPointCustomer: Boolean(record.isPointCustomer ?? record.marked)
+    }))
+    const salespeople = (result.salespeople || []).map((record) => ({
+      staffId: record.staffId || record.id,
+      allocationWeight: Number(record.allocationWeight)
+    }))
+    const payload = {}
+    if (isProjectLine(line)) payload.craftsmen = craftsmen
+    if (!isEntitlementLine(line)) payload.salespeople = salespeople
+    let savedResult = await mutateCashierDraft('update-cart-line-service-settings', line, payload)
+    if (resultStatus(savedResult) === 'result_unknown') {
+      const recovered = await recoverPendingDraftCommand()
+      if (!recovered) {
+        reportPersonnelAssignmentFailure(savedResult, '人员分配保存结果仍在确认中，请稍后重试。')
+        return
+      }
+      savedResult = await mutateCashierDraft('update-cart-line-service-settings', line, payload)
+    }
+    if (!['success', 'succeeded'].includes(resultStatus(savedResult))) {
+      reportPersonnelAssignmentFailure(savedResult, '人员分配保存失败，请保留当前选择后重试。')
+      return
+    }
+    localPersonnelAssignments.value = {
+      ...localPersonnelAssignments.value,
+      [line.id]: isEntitlementLine(line)
+        ? { craftsmen: clonePlain(result.craftsmen || []) }
+        : clonePlain(result)
+    }
+    personnelOverlay.value = null
+  } finally {
+    isSavingPersonnelAssignment.value = false
+  }
+}
+
+async function applyPersonnelAssignmentToAll(result = {}) {
+  if (isSavingPersonnelAssignment.value) return
   const craftsmen = (result.craftsmen || []).map((record) => ({
     staffId: record.staffId || record.id,
     laborWeight: Number(record.laborWeight),
@@ -1924,23 +1977,40 @@ async function confirmPersonnelAssignment(result = {}) {
     staffId: record.staffId || record.id,
     allocationWeight: Number(record.allocationWeight)
   }))
-  const payload = {}
-  if (isProjectLine(line)) payload.craftsmen = craftsmen
-  if (!isEntitlementLine(line)) payload.salespeople = salespeople
-  let savedResult = await mutateCashierDraft('update-cart-line-service-settings', line, payload)
-  if (resultStatus(savedResult) === 'result_unknown') {
-    const recovered = await recoverPendingDraftCommand()
-    if (!recovered) return
-    savedResult = await mutateCashierDraft('update-cart-line-service-settings', line, payload)
+  if (!craftsmen.length && !salespeople.length) return
+  isSavingPersonnelAssignment.value = true
+  try {
+    const requestScopeKey = currentCashierDraftScopeKey.value
+    const response = await requestAction('apply-cashier-personnel-to-all-lines', {
+      craftsmen,
+      salespeople,
+      idempotencyKey: createCashierV3CommandId('CASHIER_APPLY_PERSONNEL_ALL')
+    })
+    if (!['success', 'succeeded'].includes(resultStatus(response))) {
+      reportPersonnelAssignmentFailure(response, '应用全部人员失败，请保留当前选择后重试。')
+      return
+    }
+    const draft = responseDataBlock(response).cashierDraft
+    if (!await applyCommittedCashierDraft(draft, requestScopeKey)) {
+      reportPersonnelAssignmentFailure(null, '人员分配已提交，但权威购物车未完整返回，系统正在刷新。')
+      return
+    }
+    const assignments = { ...localPersonnelAssignments.value }
+    for (const line of Array.isArray(draft?.lines) ? draft.lines : []) {
+      const current = { ...(assignments[line.id] || {}) }
+      if (craftsmen.length && isProjectLine(line) && !isCustomCardPurchase(line)) {
+        current.craftsmen = clonePlain(result.craftsmen || [])
+      }
+      if (salespeople.length && !isEntitlementLine(line)) {
+        current.salespeople = clonePlain(result.salespeople || [])
+      }
+      assignments[line.id] = current
+    }
+    localPersonnelAssignments.value = assignments
+    personnelOverlay.value = null
+  } finally {
+    isSavingPersonnelAssignment.value = false
   }
-  if (!['success', 'succeeded'].includes(resultStatus(savedResult))) return
-  localPersonnelAssignments.value = {
-    ...localPersonnelAssignments.value,
-    [line.id]: isEntitlementLine(line)
-      ? { craftsmen: clonePlain(result.craftsmen || []) }
-      : clonePlain(result)
-  }
-  personnelOverlay.value = null
 }
 
 function craftsmenDisplaySummary(line = {}) {
@@ -3749,9 +3819,11 @@ onBeforeUnmount(() => {
         :selected-craftsmen="personnelOverlay.selectedCraftsmen"
         :selected-salespeople="personnelOverlay.selectedSalespeople"
         :loading="personnelOverlay.loading"
+        :saving="isSavingPersonnelAssignment"
         :load-error="personnelOverlay.loadError"
         @close="personnelOverlay = null"
         @confirm="confirmPersonnelAssignment"
+        @apply-all="applyPersonnelAssignmentToAll"
         @retry="retryPersonnelOverlay"
       />
     </Teleport>

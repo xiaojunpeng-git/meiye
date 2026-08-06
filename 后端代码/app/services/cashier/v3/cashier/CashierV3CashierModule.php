@@ -437,6 +437,78 @@ final class CashierV3CashierModule
             ];
         });
 
+        if ($handlers->hasCommand('apply-cashier-salespeople-to-all-sale-lines')) {
+            throw new \LogicException('C2 cashier module: apply salespeople to all sale lines duplicate handler');
+        }
+        $handlers->registerCommand('apply-cashier-salespeople-to-all-sale-lines', function (array $scope) use ($workspace): array {
+            $payload = is_array($scope['payload'] ?? null) ? $scope['payload'] : [];
+            $draft = $workspace->applySalespeopleToAllSaleLinesInTx(
+                self::workspaceContextId((array)($scope['contexts'] ?? [])),
+                (string)($scope['state_context_id'] ?? ''),
+                $scope['operator_scope'],
+                is_array($payload['salespeople'] ?? null) ? $payload['salespeople'] : []
+            );
+            return [
+                'data' => ['cashierDraft' => $draft],
+                'touched' => ['cashier_workspace'],
+                'message' => '销售人已应用到全部本次购买商品。',
+            ];
+        });
+
+        if ($handlers->hasCommand('apply-cashier-craftsmen-to-all-service-lines')) {
+            throw new \LogicException('C2 cashier module: apply craftsmen to all service lines duplicate handler');
+        }
+        $handlers->registerCommand('apply-cashier-craftsmen-to-all-service-lines', function (array $scope) use ($workspace): array {
+            $payload = is_array($scope['payload'] ?? null) ? $scope['payload'] : [];
+            $draft = $workspace->applyCraftsmenToAllServiceLinesInTx(
+                self::workspaceContextId((array)($scope['contexts'] ?? [])),
+                (string)($scope['state_context_id'] ?? ''),
+                $scope['operator_scope'],
+                is_array($payload['craftsmen'] ?? null) ? $payload['craftsmen'] : []
+            );
+            return [
+                'data' => ['cashierDraft' => $draft],
+                'touched' => ['cashier_workspace'],
+                'message' => '手艺人已应用到全部服务项目。',
+            ];
+        });
+
+        if ($handlers->hasCommand('apply-cashier-personnel-to-all-lines')) {
+            throw new \LogicException('C2 cashier module: apply personnel to all lines duplicate handler');
+        }
+        $handlers->registerCommand('apply-cashier-personnel-to-all-lines', function (array $scope) use ($workspace): array {
+            $payload = is_array($scope['payload'] ?? null) ? $scope['payload'] : [];
+            $craftsmen = is_array($payload['craftsmen'] ?? null) ? $payload['craftsmen'] : [];
+            $salespeople = is_array($payload['salespeople'] ?? null) ? $payload['salespeople'] : [];
+            if (!$craftsmen && !$salespeople) {
+                throw CashierV3CommandException::invalidContext('请先选择要应用到购物车的人员。');
+            }
+            $workspaceId = self::workspaceContextId((array)($scope['contexts'] ?? []));
+            $stateContextId = (string)($scope['state_context_id'] ?? '');
+            $draft = null;
+            if ($craftsmen) {
+                $draft = $workspace->applyCraftsmenToAllServiceLinesInTx(
+                    $workspaceId,
+                    $stateContextId,
+                    $scope['operator_scope'],
+                    $craftsmen
+                );
+            }
+            if ($salespeople) {
+                $draft = $workspace->applySalespeopleToAllSaleLinesInTx(
+                    $workspaceId,
+                    $stateContextId,
+                    $scope['operator_scope'],
+                    $salespeople
+                );
+            }
+            return [
+                'data' => ['cashierDraft' => $draft],
+                'touched' => ['cashier_workspace'],
+                'message' => '手艺人和销售人已应用到购物车全部适用项目。',
+            ];
+        });
+
         if ($handlers->hasCommand('prepare-checkout')) {
             throw new \LogicException('C2 cashier module: prepare-checkout duplicate handler');
         }
@@ -679,6 +751,7 @@ final class CashierV3CashierModule
         self::registerRemoveLinePolicy($dispatcher);
         self::registerChangeQuantityPolicy($dispatcher, $readiness, $saleCatalog);
         self::registerUpdateServiceSettingsPolicy($dispatcher, $readiness);
+        self::registerPersonnelAssignmentPolicies($dispatcher, $readiness);
         self::registerPrepareCheckoutPolicy($dispatcher, $checkoutPreparation);
         self::registerSubmissionPreparationPolicy(
             $dispatcher,
@@ -1265,6 +1338,33 @@ final class CashierV3CashierModule
             ['cashier_workspace', 'member', 'member_benefit_pool', 'card_holder'],
             ['member', 'member_benefit_pool', 'card_holder']
         ));
+    }
+
+    private static function registerPersonnelAssignmentPolicies(
+        CashierV3ActionDispatcher $dispatcher,
+        CashierV3CashierReadinessGuard $readiness
+    ): void {
+        foreach ([
+            'apply-cashier-salespeople-to-all-sale-lines',
+            'apply-cashier-craftsmen-to-all-service-lines',
+            'apply-cashier-personnel-to-all-lines',
+        ] as $action) {
+            if ($dispatcher->policies()->has($action)) {
+                throw new \LogicException('C2 cashier module: personnel apply-all policy duplicate');
+            }
+            $dispatcher->policies()->register(new CashierV3ContextPolicy(
+                $action,
+                ['cashier_workspace'],
+                [],
+                static function (array $payload, array $base) use ($readiness): array {
+                    $readiness->assertReady();
+                    return self::workspaceOnlyPolicyResult($base);
+                },
+                ['cashier_workspace'],
+                ['cashier_workspace'],
+                []
+            ));
+        }
     }
 
     private static function workspaceOnlyPolicyResult(array $base): array
