@@ -22,6 +22,7 @@ namespace {
     require $backend . '/CashierV3DataScopeContext.php';
     require $backend . '/settlement/CashierV3CheckoutSettlementContractException.php';
     require $backend . '/settlement/CashierV3CheckoutSettlementCanonicalizer.php';
+    require $backend . '/settlement/CashierV3CheckoutCraftsmenSnapshot.php';
     require $backend . '/settlement/CashierV3CheckoutSettlementStateMachine.php';
     require $backend . '/settlement/CashierV3CheckoutSettlementIdFactory.php';
     require $backend . '/settlement/CashierV3CheckoutSettlementKernel.php';
@@ -98,6 +99,16 @@ namespace {
             return null;
         }
 
+        public function readEditingProjectionByRequestId(
+            string $requestId,
+            string $workspaceId,
+            string $stateContextId,
+            CashierV3OperatorScope $operatorScope,
+            CashierV3DataScopeContext $dataScope
+        ) {
+            return null;
+        }
+
         public function lockCurrentForKernelInTx(
             string $requestId,
             string $creationIdempotencyKey,
@@ -158,6 +169,14 @@ namespace {
             'businessTimezone' => 'Asia/Shanghai',
             'occurredAt' => 1785258000,
             'recordedAt' => 1785258000,
+            'orderNote' => '',
+            'supplement' => [
+                'enabled' => false,
+                'reason' => '',
+                'operatorId' => 0,
+                'operatorNameSnapshot' => '',
+                'operatedAt' => 0,
+            ],
             'sourceDocument' => [
                 'type' => 'cashier_workspace',
                 'id' => 'ws:7:21:payment-draft-state',
@@ -173,11 +192,18 @@ namespace {
                 'originalAmountCents' => 11000,
                 'discountAmountCents' => 1000,
                 'saleAmountCents' => 10000,
+                'debtAmountCents' => 1000,
                 'sourceNameSnapshot' => '历史项目名称',
                 'sourceCodeSnapshot' => 'PROJECT-501',
                 'categoryIdSnapshot' => 51,
                 'categoryNameSnapshot' => '历史分类名称',
+                'configuredCostCents' => 0,
+                'priceChangeReason' => '',
+                'priceChangedBy' => 0,
+                'priceChangedByNameSnapshot' => '',
+                'priceChangedAt' => 0,
                 'serviceObject' => 'self',
+                'craftsmen' => [],
                 'isExperience' => 0,
             ]],
             'entitlementLines' => [],
@@ -233,6 +259,12 @@ namespace {
             'businessTimezone' => 'business_timezone',
             'operationOccurredAt' => 'operation_occurred_at',
             'recordedAt' => 'recorded_at',
+            'orderNote' => 'order_note',
+            'supplementEnabled' => 'supplement_enabled',
+            'supplementReason' => 'supplement_reason',
+            'supplementOperatorId' => 'supplement_operator_id',
+            'supplementOperatorNameSnapshot' => 'supplement_operator_name_snapshot',
+            'supplementOperatedAt' => 'supplement_operated_at',
             'sourceDocumentType' => 'source_document_type',
             'sourceDocumentId' => 'source_document_id',
             'sourceDocumentNo' => 'source_document_no',
@@ -277,6 +309,7 @@ namespace {
                 'source_kind' => $line['sourceKind'],
                 'source_type' => $line['sourceType'],
                 'source_id' => $line['sourceId'],
+                'catalog_sku_id' => $line['catalogSkuId'],
                 'entitlement_source_detail_id' => $line['entitlementSourceDetailId'],
                 'source_version' => $line['sourceVersion'],
                 'project_id' => $line['projectId'],
@@ -285,14 +318,21 @@ namespace {
                 'original_amount_cents' => $line['originalAmountCents'],
                 'discount_amount_cents' => $line['discountAmountCents'],
                 'sale_amount_cents' => $line['saleAmountCents'],
+                'debt_amount_cents' => $line['debtAmountCents'],
                 'entitlement_actual_amount_cents' => $line['entitlementActualAmountCents'],
                 'source_name_snapshot' => $line['sourceNameSnapshot'],
                 'source_code_snapshot' => $line['sourceCodeSnapshot'],
                 'project_name_snapshot' => $line['projectNameSnapshot'],
                 'category_id_snapshot' => $line['categoryIdSnapshot'],
                 'category_name_snapshot' => $line['categoryNameSnapshot'],
+                'configured_cost_cents' => $line['configuredCostCents'],
+                'price_change_reason' => $line['priceChangeReason'],
+                'price_changed_by' => $line['priceChangedBy'],
+                'price_changed_by_name_snapshot' => $line['priceChangedByNameSnapshot'],
+                'price_changed_at' => $line['priceChangedAt'],
                 'service_object' => $line['serviceObject'],
                 'is_experience' => $line['isExperience'],
+                'craftsmen_snapshot_json' => $line['craftsmenSnapshotJson'],
                 'line_fingerprint' => $line['lineFingerprint'],
                 'sort_no' => $line['sortNo'],
             ];
@@ -432,6 +472,15 @@ namespace {
         $rebuilt['businessDate'] === '2026-07-20'
         && $rebuilt['memberName'] === '历史会员名称'
         && $rebuilt['saleLines'][0]['sourceNameSnapshot'] === '历史项目名称');
+
+    $rebuiltAfterWorkspaceOnlyEdit = (new CashierV3CheckoutDraftAuthorityRebuilder())->rebuild(
+        $emptyAggregate,
+        9,
+        'roles:' . str_repeat('b', 32),
+        $rebuiltAt
+    );
+    paymentDraftAssert('exact request rebuild accepts a workspace-only business-source advance',
+        $rebuiltAfterWorkspaceOnlyEdit['authoritySnapshotVersion'] === 9);
 
     $balanceProjection = CashierV3CheckoutProjectionServices::projectPersistedAggregate([
         'request' => $emptyAggregate['request'],

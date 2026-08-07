@@ -136,11 +136,12 @@ final class ThinkPhpCashierV3CheckoutFactRepository
         $sourceDocumentType = (string)$context['source_document_type'];
         $isRecharge = $sourceDocumentType === 'recharge';
         $isRechargeDebtRepayment = $sourceDocumentType === 'recharge_debt_repayment';
+        $isSalesDebtRepayment = $sourceDocumentType === 'debt_repayment';
         $expected = [
-            'event_type' => $isRecharge ? 'recharge.completed' : ($isRechargeDebtRepayment ? 'debt.repaid' : 'checkout.completed'),
-            'aggregate_type' => $isRecharge ? 'recharge_order' : ($isRechargeDebtRepayment ? 'recharge_debt_repayment' : 'sales_order'),
+            'event_type' => $isRecharge ? 'recharge.completed' : (($isRechargeDebtRepayment || $isSalesDebtRepayment) ? 'debt.repaid' : 'checkout.completed'),
+            'aggregate_type' => $isRecharge ? 'recharge_order' : ($isRechargeDebtRepayment ? 'recharge_debt_repayment' : ($isSalesDebtRepayment ? 'debt_repayment' : 'sales_order')),
             'aggregate_id' => $context['order_id'],
-            'source_type' => $isRecharge ? 'submit-recharge' : ($isRechargeDebtRepayment ? 'submit-recharge-debt-repayment' : 'submit-checkout'),
+            'source_type' => $isRecharge ? 'submit-recharge' : ($isRechargeDebtRepayment ? 'submit-recharge-debt-repayment' : ($isSalesDebtRepayment ? 'submit-debt-repayment' : 'submit-checkout')),
             'source_id' => $context['checkout_request_id'],
             'command_idempotency_key' => $plan->commandIdempotencyKey(),
             'organization_id' => $context['organization_id'],

@@ -52,6 +52,7 @@ final class CashierV3SaleOnlyCheckoutSubmissionServices
         'eb_store_debt',
         'eb_store_debt_item',
         'eb_cashier_v3_debt_authority',
+        'eb_cashier_v3_debt_item_personnel_authority',
         'eb_cashier_v3_workspace_draft',
         'eb_cashier_v3_workspace_line',
         'eb_cashier_v3_sale_inventory_receipt',
@@ -249,10 +250,6 @@ final class CashierV3SaleOnlyCheckoutSubmissionServices
                 $dataScope
             );
             $inventoryResult = $this->saleInventory->persistInTx($inventoryPlan);
-            $debtAmount = (int)($aggregate['request']['debt_amount_cents'] ?? 0);
-            $debtAllocations = $debtAmount > 0
-                ? CashierV3CheckoutDebtAuthorityServices::allocate($debtAmount, $salesPlan->lines())
-                : [];
             // Card sale has no inventory movement.  Its current holder and
             // benefit pools are signed only after sales/payment persistence,
             // but before the outer transaction exposes any terminal fact.
@@ -263,18 +260,17 @@ final class CashierV3SaleOnlyCheckoutSubmissionServices
                 $commandKey,
                 $now,
                 $operatorScope,
-                $dataScope,
-                $debtAllocations
+                $dataScope
             );
             $debtResult = $this->debts->persistInTx(
                 (array)$aggregate['request'],
                 $salesPlan,
                 $salesResult,
+                $salespeopleByCheckoutLine,
                 $commandKey,
                 $now,
                 $operatorScope,
-                $dataScope,
-                $cardPurchaseResult
+                $dataScope
             );
             $balanceMutation = null;
             $balanceAmount = (int)($aggregate['request']['balance_deduction_amount_cents'] ?? 0);

@@ -11,16 +11,46 @@ const props = defineProps({
   isServiceOrder: {
     type: Boolean,
     default: false
+  },
+  businessSources: {
+    type: Array,
+    default: () => []
+  },
+  businessSourcesLoading: {
+    type: Boolean,
+    default: false
+  },
+  businessSourcesLoadError: {
+    type: String,
+    default: ''
+  },
+  businessSourceSaving: {
+    type: Boolean,
+    default: false
+  },
+  salesDateMax: {
+    type: String,
+    default: ''
+  },
+  salesDateSaving: {
+    type: Boolean,
+    default: false
   }
 })
 
-const emit = defineEmits(['close', 'completed', 'request'])
+const emit = defineEmits([
+  'close',
+  'completed',
+  'request',
+  'business-source-change',
+  'retry-business-sources',
+  'sales-date-change'
+])
 
 const localStep = ref(1)
 const submitCommandId = ref(null)
 const isSubmitRequested = ref(false)
 const editingPaymentLineId = ref(null)
-const combinationMode = ref(false)
 const dialogRoot = ref(null)
 const resultHeading = ref(null)
 const paymentLineDraft = ref({
@@ -34,7 +64,11 @@ const paymentLineDraft = ref({
 // mutation has returned its rebuilt checkout projection.
 const paymentLineAmountDrafts = ref({})
 const paymentLineAmountErrors = ref({})
+const balancePaymentPromptOpen = ref(false)
 const receiptPrintError = ref('')
+const pendingPrimarySourceId = ref(0)
+const salesDateDraft = ref('')
+const salesDateReason = ref('')
 let previouslyFocusedElement = null
 let backgroundShell = null
 let backgroundShellWasInert = false
@@ -130,8 +164,49 @@ const hasAuthoritativeOrderSnapshot = computed(() => (
   && hasOwn(checkoutSummary.value, 'discountAmount')
 ))
 const payment = computed(() => props.checkout.payment || {})
+const businessSourceRoots = computed(() => Array.isArray(props.businessSources)
+  ? props.businessSources.filter((source) => Number(source?.id) > 0)
+  : [])
+const selectedPrimarySourceId = computed(() => Number(pendingPrimarySourceId.value || props.checkout.primarySourceId || 0))
+const selectedPrimarySource = computed(() => businessSourceRoots.value.find((source) => Number(source.id) === selectedPrimarySourceId.value) || null)
+const selectedSecondarySourceId = computed(() => (
+  pendingPrimarySourceId.value
+  && Number(pendingPrimarySourceId.value) !== Number(props.checkout.primarySourceId || 0)
+    ? 0
+    : Number(props.checkout.secondarySourceId || 0)
+))
+const selectedSecondarySources = computed(() => Array.isArray(selectedPrimarySource.value?.children)
+  ? selectedPrimarySource.value.children.filter((source) => Number(source?.id) > 0)
+  : [])
+const selectedPrimaryRequiresSecondary = computed(() => (
+  selectedPrimarySource.value?.requireSecondary === true
+  || Number(selectedPrimarySource.value?.requireSecondary) === 1
+))
+const customerSourceRequired = computed(() => (
+  (props.checkout.sourceEnabled === true || Number(props.checkout.sourceEnabled) === 1)
+  && props.checkout.sourceSelectable !== false
+))
+const customerSourceMissing = computed(() => (
+  customerSourceRequired.value
+  && (!selectedPrimarySourceId.value
+    || (selectedPrimaryRequiresSecondary.value && !selectedSecondarySourceId.value))
+))
+const salesDateIsHistorical = computed(() => (
+  salesDateDraft.value !== ''
+  && props.salesDateMax !== ''
+  && salesDateDraft.value < props.salesDateMax
+))
+const salesDateIsDirty = computed(() => salesDateDraft.value !== String(props.checkout.businessDate || ''))
+const canSaveSalesDate = computed(() => (
+  salesDateIsDirty.value
+  && /^\d{4}-\d{2}-\d{2}$/.test(salesDateDraft.value)
+  && (!props.salesDateMax || salesDateDraft.value <= props.salesDateMax)
+  && (!salesDateIsHistorical.value || salesDateReason.value.trim() !== '')
+  && !props.salesDateSaving
+))
 const selectedPaymentLines = computed(() => Array.isArray(payment.value.selectedLines) ? payment.value.selectedLines : [])
 const hasBalancePayment = computed(() => selectedPaymentLines.value.some((line) => line?.kind === 'balance_deduction'))
+const hasNonBalancePayment = computed(() => selectedPaymentLines.value.some((line) => line?.kind !== 'balance_deduction'))
 const paymentMethods = computed(() => Array.isArray(payment.value.methods) ? payment.value.methods : [])
 const paymentSummary = computed(() => payment.value.summary || props.checkout.paymentSummary || {})
 const displayedPaymentSummary = computed(() => {
@@ -167,12 +242,40 @@ const hasNonPositivePaymentLine = computed(() => selectedPaymentLines.value.some
   const amount = authoritativeWholeYuanAmount(line?.amount)
   return amount === null || amount <= 0
 }))
+const paymentAmountValidation = computed(() => {
+  const summary = displayedPaymentSummary.value
+  const receivable = Number(summary.receivableAmount)
+  const selected = Number(summary.selectedAmount)
+  if (!Number.isFinite(receivable) || !Number.isFinite(selected)) {
+    return { state: 'unavailable', message: '' }
+  }
+  const delta = receivable - selected
+  if (delta > 0) return { state: 'underpaid', message: `还差 ${formatMoney(delta)}` }
+  if (delta < 0) return { state: 'overpaid', message: `超出 ${formatMoney(Math.abs(delta))}` }
+  if (hasNonPositivePaymentLine.value) return { state: 'invalid', message: '每种收款方式的金额必须大于 0。' }
+  return { state: 'balanced', message: '收款金额已与应收金额相等。' }
+})
+const toggleBalancePayment = () => {
+  if (hasBalancePayment.value) {
+    request('remove-balance-payment')
+    return
+  }
+  const remaining = Number(displayedPaymentSummary.value.remainingAmount)
+  if (hasNonBalancePayment.value && Number.isFinite(remaining) && remaining <= 0) {
+    balancePaymentPromptOpen.value = true
+    return
+  }
+  request('open-balance-payment')
+}
+
+function closeBalancePaymentPrompt() {
+  balancePaymentPromptOpen.value = false
+}
 const isPaymentDraftReady = computed(() => (
   hasAuthoritativePaymentSnapshot.value
   && !hasPendingPaymentLineAmountDraft.value
   && !hasNonPositivePaymentLine.value
-  && Number(paymentSummary.value.remainingAmount) === 0
-  && Number(paymentSummary.value.overpaidAmount || 0) === 0
+  && paymentAmountValidation.value.state === 'balanced'
 ))
 const paymentResultLines = computed(() => Array.isArray(payment.value.resultLines) ? payment.value.resultLines : selectedPaymentLines.value)
 const finalChanges = computed(() => Array.isArray(props.checkout.finalChanges) ? props.checkout.finalChanges : [])
@@ -346,8 +449,52 @@ watch(
   { immediate: true }
 )
 
+watch(
+  () => [props.checkout.primarySourceId, props.checkout.secondarySourceId],
+  () => {
+    pendingPrimarySourceId.value = 0
+  }
+)
+
+watch(
+  () => props.checkout.businessDate,
+  (businessDate) => {
+    salesDateDraft.value = String(businessDate || '')
+    salesDateReason.value = String(props.checkout.supplement?.reason || '')
+  },
+  { immediate: true }
+)
+
 function request(action, payload = {}) {
   emit('request', { action, payload })
+}
+
+function chooseBusinessSourcePrimary(source) {
+  if (props.businessSourceSaving || Number(source?.id) <= 0) return
+  pendingPrimarySourceId.value = Number(source.id)
+  const children = Array.isArray(source.children) ? source.children.filter((item) => Number(item?.id) > 0) : []
+  const requiresSecondary = source.requireSecondary === true || Number(source.requireSecondary) === 1
+  if (!requiresSecondary) {
+    emit('business-source-change', { primarySourceId: Number(source.id), secondarySourceId: 0 })
+  } else if (!children.length) {
+    pendingPrimarySourceId.value = 0
+  }
+}
+
+function chooseBusinessSourceSecondary(secondarySourceId) {
+  if (props.businessSourceSaving || !selectedPrimarySourceId.value) return
+  emit('business-source-change', {
+    primarySourceId: selectedPrimarySourceId.value,
+    secondarySourceId: Number(secondarySourceId || 0)
+  })
+}
+
+function saveSalesDate() {
+  if (!canSaveSalesDate.value) return
+  emit('sales-date-change', {
+    businessDate: salesDateDraft.value,
+    reason: salesDateIsHistorical.value ? salesDateReason.value.trim() : ''
+  })
 }
 
 function paymentLineStatus(line = {}) {
@@ -431,30 +578,11 @@ function closePaymentLineEditor() {
   paymentLineDraft.value = { amount: '', externalTransactionNo: '', remark: '' }
 }
 
-function toggleCombinationMode() {
-  combinationMode.value = !combinationMode.value
-}
-
 function addPaymentMethod(method = {}) {
   if (method.canAdd === false || !method.id) return
-
-  // A cashier who has not chosen combined collection is changing the payment
-  // route, not adding a second route. This matters for members: an already
-  // selected balance payment may cover the whole receivable, which would
-  // otherwise make the newly selected bookkeeping method start at zero and
-  // reject any entered amount as an overpayment. The parent serializes these
-  // commands, so every removal advances the checkout version before the add.
-  const isCombinedCollection = combinationMode.value || selectedPaymentLines.value.length > 1
-  if (!isCombinedCollection) {
-    for (const line of selectedPaymentLines.value) {
-      if (!canRemovePaymentLine(line)) continue
-      if (line.removalAction === 'remove-balance-payment' || line.kind === 'balance_deduction') {
-        request('remove-balance-payment')
-      } else {
-        request('remove-payment-line', { paymentLineId: line.id })
-      }
-    }
-  }
+  // Selecting a method always adds an editable draft line. The cashier chooses
+  // all methods first and then adjusts their amounts; the only gate is the
+  // aggregate amount check before advancing to final confirmation.
   request('add-payment-method', { paymentMethodId: method.id })
 }
 
@@ -623,6 +751,20 @@ function goPrevious() {
 
 function goNext() {
   if (!hasCurrentStepSnapshot.value) return
+  if (currentStep.value === 1) {
+    if (customerSourceMissing.value) {
+      window.dispatchEvent(new CustomEvent('cashier-v3:ui-result', {
+        detail: { status: 'failed', message: '请选择客户来源后再继续。' }
+      }))
+      return
+    }
+    if (salesDateIsDirty.value) {
+      window.dispatchEvent(new CustomEvent('cashier-v3:ui-result', {
+        detail: { status: 'failed', message: '销售日期已修改，请先保存销售日期。' }
+      }))
+      return
+    }
+  }
   // Do not let the final-preparation command race a just-finished amount
   // edit. The parent serializes each draft write and this component resumes
   // navigation as soon as its authoritative projection arrives.
@@ -751,7 +893,6 @@ watch(
 watch(
   selectedPaymentLines,
   (lines) => {
-    if (lines.length > 1) combinationMode.value = true
     if (editingPaymentLineId.value && !lines.some((line) => line.id === editingPaymentLineId.value)) {
       closePaymentLineEditor()
     }
@@ -876,6 +1017,75 @@ onBeforeUnmount(() => {
 
         <div v-if="hasEntitlementLines" class="checkout-service-hint">本次包含会员已有权益；权益服务与销售收款分别处理，权益行不计入本次应付。</div>
 
+        <section v-if="checkout.sourceEnabled" class="checkout-business-sources" aria-label="客户来源">
+          <div class="checkout-business-sources__heading">
+            <strong>客户来源</strong>
+            <span v-if="checkout.sourceSelectable === false">{{ checkout.sourceLabel || '继承原订单来源' }}</span>
+            <span v-else-if="businessSourceSaving">正在保存…</span>
+            <span v-else>{{ checkout.sourceLabel || '请选择客户来源' }}</span>
+          </div>
+          <template v-if="checkout.sourceSelectable !== false">
+            <div v-if="businessSourcesLoading" class="checkout-business-sources__state">正在加载客户来源…</div>
+            <div v-else-if="businessSourcesLoadError" class="checkout-business-sources__state checkout-business-sources__state--error" role="alert">
+              <span>{{ businessSourcesLoadError }}</span>
+              <button type="button" class="button button--text" @click="emit('retry-business-sources')">重新加载</button>
+            </div>
+            <div v-else-if="businessSourceRoots.length" class="checkout-business-sources__choices" aria-label="客户来源">
+              <button
+                v-for="source in businessSourceRoots"
+                :key="source.id"
+                type="button"
+                :class="{ 'is-selected': Number(source.id) === selectedPrimarySourceId }"
+                :disabled="businessSourceSaving"
+                @click="chooseBusinessSourcePrimary(source)"
+              >{{ source.name }}</button>
+            </div>
+            <div v-else class="checkout-business-sources__state">当前没有可用的客户来源，请联系平台管理员配置后重试。</div>
+            <div v-if="selectedPrimarySource && selectedSecondarySources.length" class="checkout-business-sources__secondary">
+              <strong>二级来源<span v-if="selectedPrimaryRequiresSecondary">（必选）</span></strong>
+              <div class="checkout-business-sources__choices" aria-label="二级客户来源">
+                <button
+                  v-if="!selectedPrimaryRequiresSecondary"
+                  type="button"
+                  :class="{ 'is-selected': !selectedSecondarySourceId }"
+                  :disabled="businessSourceSaving"
+                  @click="chooseBusinessSourceSecondary(0)"
+                >不选二级</button>
+                <button
+                  v-for="source in selectedSecondarySources"
+                  :key="source.id"
+                  type="button"
+                  :class="{ 'is-selected': Number(source.id) === selectedSecondarySourceId }"
+                  :disabled="businessSourceSaving"
+                  @click="chooseBusinessSourceSecondary(source.id)"
+                >{{ source.name }}</button>
+              </div>
+            </div>
+          </template>
+        </section>
+
+        <dl class="checkout-order-details checkout-order-details--source-date">
+          <div v-if="checkout.businessDate" class="checkout-sales-date">
+            <dt>销售日期</dt>
+            <dd>
+              <input v-model="salesDateDraft" type="date" :max="salesDateMax || undefined" :disabled="salesDateSaving" aria-label="销售日期">
+              <input
+                v-if="salesDateIsHistorical"
+                v-model.trim="salesDateReason"
+                type="text"
+                maxlength="255"
+                :disabled="salesDateSaving"
+                aria-label="补单原因"
+                placeholder="历史日期请填写补单原因"
+                @keydown.enter.prevent="saveSalesDate"
+              >
+              <button v-if="salesDateIsDirty" type="button" class="button button--secondary" :disabled="!canSaveSalesDate" @click="saveSalesDate">
+                {{ salesDateSaving ? '保存中…' : '保存日期' }}
+              </button>
+            </dd>
+          </div>
+        </dl>
+
         <div class="checkout-order-lines">
           <article v-for="line in checkoutOrderLines" :key="line.id" class="checkout-order-line">
             <div>
@@ -892,21 +1102,12 @@ onBeforeUnmount(() => {
         </div>
 
         <dl class="checkout-order-details">
-          <div v-if="checkout.sourceEnabled">
-            <dt>业务来源</dt>
-            <dd>
-              <span>{{ checkout.sourceLabel || '待选择' }}</span>
-              <button v-if="checkout.sourceSelectable !== false" type="button" class="button button--text" @click="request('open-checkout-source-selector')">选择来源</button>
-            </dd>
-          </div>
           <div v-if="checkout.orderNote"><dt>订单备注</dt><dd>{{ checkout.orderNote }}</dd></div>
-          <div v-if="checkout.businessDate"><dt>业务日期</dt><dd>{{ checkout.businessDate }}</dd></div>
         </dl>
 
         <section v-if="checkout.sourceInvalidMessage" class="checkout-change-warning">
           <strong>业务来源需要重新确认</strong>
           <span>{{ checkout.sourceInvalidMessage }}</span>
-          <button type="button" class="button button--text" @click="request('open-checkout-source-selector')">重新选择</button>
         </section>
 
         <section v-if="checkout.serviceStartResolutionRequired" class="checkout-service-start-resolution">
@@ -930,7 +1131,7 @@ onBeforeUnmount(() => {
         <section class="checkout-card checkout-payment-methods">
           <div class="checkout-card__title">
             <h3>收款信息</h3>
-            <span>可选择一种或组合收款。</span>
+            <span>可先选择全部收款方式，再调整金额；合计必须等于应收。</span>
           </div>
 
           <section v-if="checkoutMember && payment.balanceAvailable !== false && Number(payment.availableBalance) > 0" class="checkout-balance-section">
@@ -943,7 +1144,7 @@ onBeforeUnmount(() => {
                 type="button"
                 class="button button--secondary"
                 :disabled="payment.balanceAvailable === false"
-                @click="request(hasBalancePayment ? 'remove-balance-payment' : 'open-balance-payment')"
+                @click="toggleBalancePayment"
               >{{ hasBalancePayment ? '取消余额支付' : '使用余额支付' }}</button>
               <button
                 v-if="payment.balanceVerification?.required"
@@ -959,9 +1160,7 @@ onBeforeUnmount(() => {
 
           <div class="checkout-payment-methods__header">
             <strong>记账收款</strong>
-            <button type="button" class="button button--text" @click="toggleCombinationMode">
-              {{ combinationMode || payment.isCombination ? '组合收款已开启' : '组合收款' }}
-            </button>
+            <span v-if="selectedPaymentLines.length > 1" class="checkout-payment-methods__combination-label">组合收款</span>
           </div>
           <div class="checkout-payment-methods__grid">
             <button
@@ -1034,7 +1233,7 @@ onBeforeUnmount(() => {
             <div v-if="displayedPaymentSummary.receivableAmount !== undefined"><dt>应收</dt><dd>{{ formatMoney(displayedPaymentSummary.receivableAmount) }}</dd></div>
             <div v-if="displayedPaymentSummary.selectedAmount !== undefined"><dt>已选收款</dt><dd>{{ formatMoney(displayedPaymentSummary.selectedAmount) }}</dd></div>
             <div v-if="displayedPaymentSummary.remainingAmount !== undefined"><dt>待收</dt><dd>{{ formatMoney(displayedPaymentSummary.remainingAmount) }}</dd></div>
-            <div v-if="displayedPaymentSummary.validationMessage"><dt>校验提示</dt><dd>{{ displayedPaymentSummary.validationMessage }}</dd></div>
+            <div v-if="paymentAmountValidation.message" :class="`checkout-payment-summary__validation checkout-payment-summary__validation--${paymentAmountValidation.state}`"><dt>校验提示</dt><dd>{{ paymentAmountValidation.message }}</dd></div>
           </dl>
         </section>
       </section>
@@ -1053,7 +1252,7 @@ onBeforeUnmount(() => {
           <div v-if="hasEntitlementLines"><dt>权益服务</dt><dd>{{ checkoutOrderLines.filter(isEntitlementCheckoutLine).length }} 项</dd></div>
           <div v-if="checkout.cardUpgradeDeductionAmount !== undefined"><dt>卡升级抵扣</dt><dd>{{ formatMoney(checkout.cardUpgradeDeductionAmount) }}</dd></div>
           <div v-if="checkout.projectUpgradeDeductionAmount !== undefined"><dt>项目升级抵扣</dt><dd>{{ formatMoney(checkout.projectUpgradeDeductionAmount) }}</dd></div>
-          <div v-if="checkout.businessDate"><dt>业务日期</dt><dd>{{ checkout.businessDate }}</dd></div>
+          <div v-if="checkout.businessDate"><dt>销售日期</dt><dd>{{ checkout.businessDate }}</dd></div>
         </dl>
         <section v-if="finalChanges.length || checkout.finalValidationMessage" class="checkout-final-changes">
           <div>
@@ -1108,6 +1307,29 @@ onBeforeUnmount(() => {
       </section>
     </main>
 
+    <div
+      v-if="balancePaymentPromptOpen"
+      class="checkout-inline-modal-backdrop"
+      role="presentation"
+      @click.self="closeBalancePaymentPrompt"
+    >
+      <section
+        class="checkout-inline-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="balance-payment-prompt-title"
+      >
+        <header>
+          <h3 id="balance-payment-prompt-title">无法使用余额支付</h3>
+          <button type="button" class="button button--text" aria-label="关闭" @click="closeBalancePaymentPrompt">×</button>
+        </header>
+        <p>当前收款方式已填满应收，请先调整其他收款金额后再使用余额支付。</p>
+        <footer>
+          <button type="button" class="button button--primary" @click="closeBalancePaymentPrompt">知道了</button>
+        </footer>
+      </section>
+    </div>
+
     <footer class="checkout-overlay__footer">
       <template v-if="isSucceeded">
         <button v-if="!isDebtRepayment && checkout.salesOrderId" type="button" class="button button--secondary" @click="request('view-sales-order')">查看销售订单</button>
@@ -1143,3 +1365,171 @@ onBeforeUnmount(() => {
     </footer>
   </section>
 </template>
+
+<style scoped>
+.checkout-payment-methods__combination-label {
+  color: #2563eb;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.checkout-payment-summary__validation dd {
+  font-weight: 600;
+}
+
+.checkout-payment-summary__validation--balanced dd {
+  color: #16803c;
+}
+
+.checkout-payment-summary__validation--underpaid dd,
+.checkout-payment-summary__validation--overpaid dd,
+.checkout-payment-summary__validation--invalid dd {
+  color: #c2410c;
+}
+
+.checkout-business-sources {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+  padding: 13px 14px;
+  border: 1px solid #e3e8ef;
+  border-radius: 7px;
+  background: #fafbfc;
+}
+
+.checkout-business-sources__heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.checkout-business-sources__heading strong,
+.checkout-business-sources__secondary > strong {
+  color: #303133;
+  font-size: 13px;
+}
+
+.checkout-business-sources__heading span,
+.checkout-business-sources__state,
+.checkout-business-sources__secondary > strong span {
+  color: #7b8798;
+  font-size: 12px;
+}
+
+.checkout-business-sources__choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.checkout-business-sources__choices button {
+  min-height: 34px;
+  max-width: 100%;
+  padding: 6px 13px;
+  border: 1px solid #cfd7e3;
+  border-radius: 5px;
+  background: #fff;
+  color: #3f4c5c;
+  cursor: pointer;
+  line-height: 20px;
+  overflow-wrap: anywhere;
+}
+
+.checkout-business-sources__choices button:hover:not(:disabled) {
+  border-color: #409eff;
+  color: #1677cc;
+}
+
+.checkout-business-sources__choices button.is-selected {
+  border-color: #2981e5;
+  background: #eaf4ff;
+  color: #175fb3;
+}
+
+.checkout-business-sources__choices button:disabled {
+  cursor: wait;
+  opacity: .65;
+}
+
+.checkout-business-sources__secondary {
+  display: grid;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid #e5eaf0;
+}
+
+.checkout-business-sources__state {
+  min-height: 34px;
+  line-height: 34px;
+}
+
+.checkout-business-sources__state--error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: #c63434;
+  line-height: 1.5;
+}
+
+.checkout-order-details > .checkout-sales-date {
+  grid-column: 1 / -1;
+  align-items: flex-start;
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+
+.checkout-sales-date dd {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+  overflow: visible;
+  white-space: normal;
+}
+
+.checkout-sales-date input {
+  min-height: 34px;
+  box-sizing: border-box;
+  border: 1px solid #cfd7e3;
+  border-radius: 5px;
+  background: #fff;
+  color: #303133;
+  font: inherit;
+}
+
+.checkout-sales-date input[type='date'] {
+  width: 156px;
+  padding: 0 9px;
+}
+
+.checkout-sales-date input[type='text'] {
+  flex: 1 1 240px;
+  min-width: 180px;
+  padding: 0 10px;
+}
+
+@media (max-width: 640px) {
+  .checkout-business-sources__heading,
+  .checkout-business-sources__state--error {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .checkout-business-sources__choices button {
+    flex: 1 1 calc(50% - 8px);
+  }
+
+  .checkout-order-details > .checkout-sales-date {
+    flex-direction: column;
+  }
+
+  .checkout-sales-date dd,
+  .checkout-sales-date input[type='date'],
+  .checkout-sales-date input[type='text'] {
+    width: 100%;
+  }
+}
+</style>

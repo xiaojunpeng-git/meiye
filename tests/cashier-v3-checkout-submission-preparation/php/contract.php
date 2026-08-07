@@ -114,6 +114,16 @@ namespace {
             return null;
         }
 
+        public function readEditingProjectionByRequestId(
+            string $requestId,
+            string $workspaceId,
+            string $stateContextId,
+            CashierV3OperatorScope $operatorScope,
+            CashierV3DataScopeContext $dataScope
+        ) {
+            return null;
+        }
+
         public function lockCurrentForKernelInTx(
             string $requestId,
             string $creationIdempotencyKey,

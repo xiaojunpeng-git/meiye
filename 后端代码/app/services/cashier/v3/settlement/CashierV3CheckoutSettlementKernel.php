@@ -503,6 +503,8 @@ final class CashierV3CheckoutSettlementKernel
                 'businessTimezone',
                 'occurredAt',
                 'recordedAt',
+                'orderNote',
+                'supplement',
                 'sourceDocument',
                 'saleLines',
                 'entitlementLines',
@@ -564,6 +566,45 @@ final class CashierV3CheckoutSettlementKernel
         }
         $balance = self::normalizeBalance($snapshot['balanceDeduction'], $memberId);
         $debt = self::normalizeDebt($snapshot['debt'], $memberId);
+        if (self::sumField($saleLines, 'debtAmountCents') !== $debt['amountCents']) {
+            throw self::failure('sale_line_debt_total_mismatch');
+        }
+        $orderNote = self::text($snapshot['orderNote'], 500, 'authoritySnapshot.orderNote', true);
+        $supplement = $snapshot['supplement'];
+        self::assertExactKeys(
+            $supplement,
+            ['enabled', 'reason', 'operatorId', 'operatorNameSnapshot', 'operatedAt'],
+            [],
+            'authoritySnapshot.supplement'
+        );
+        $supplementEnabled = $supplement['enabled'] === true;
+        $supplementReason = self::text(
+            $supplement['reason'],
+            255,
+            'authoritySnapshot.supplement.reason',
+            true
+        );
+        $supplementOperatorId = self::nonNegativeInt(
+            $supplement['operatorId'],
+            'authoritySnapshot.supplement.operatorId'
+        );
+        $supplementOperatorName = self::text(
+            $supplement['operatorNameSnapshot'],
+            128,
+            'authoritySnapshot.supplement.operatorNameSnapshot',
+            true
+        );
+        $supplementOperatedAt = self::nonNegativeInt(
+            $supplement['operatedAt'],
+            'authoritySnapshot.supplement.operatedAt'
+        );
+        if ($supplementEnabled
+            ? ($supplementReason === '' || $supplementOperatorId <= 0
+                || $supplementOperatorName === '' || $supplementOperatedAt <= 0)
+            : ($supplementReason !== '' || $supplementOperatorId !== 0
+                || $supplementOperatorName !== '' || $supplementOperatedAt !== 0)) {
+            throw self::failure('supplement_audit_invalid');
+        }
 
         return [
             'contractVersion' => self::AUTHORITY_CONTRACT_VERSION,
@@ -611,6 +652,14 @@ final class CashierV3CheckoutSettlementKernel
             'businessTimezone' => $timezone,
             'occurredAt' => $occurredAt,
             'recordedAt' => $recordedAt,
+            'orderNote' => $orderNote,
+            'supplement' => [
+                'enabled' => $supplementEnabled,
+                'reason' => $supplementReason,
+                'operatorId' => $supplementOperatorId,
+                'operatorNameSnapshot' => $supplementOperatorName,
+                'operatedAt' => $supplementOperatedAt,
+            ],
             'sourceDocument' => self::normalizeSourceDocument($snapshot['sourceDocument']),
             'saleLines' => $saleLines,
             'entitlementLines' => $entitlementLines,
@@ -641,10 +690,16 @@ final class CashierV3CheckoutSettlementKernel
                 'originalAmountCents',
                 'discountAmountCents',
                 'saleAmountCents',
+                'debtAmountCents',
                 'sourceNameSnapshot',
                 'sourceCodeSnapshot',
                 'categoryIdSnapshot',
                 'categoryNameSnapshot',
+                'configuredCostCents',
+                'priceChangeReason',
+                'priceChangedBy',
+                'priceChangedByNameSnapshot',
+                'priceChangedAt',
                 'craftsmen',
             ], ['catalogSkuId', 'serviceObject', 'isExperience'], 'saleLines[' . $index . ']');
             if ($line['saleClassification'] !== 'formal_sale') {
@@ -661,8 +716,33 @@ final class CashierV3CheckoutSettlementKernel
             $original = self::money($line['originalAmountCents'], 'saleLine.originalAmountCents');
             $discount = self::money($line['discountAmountCents'], 'saleLine.discountAmountCents');
             $sale = self::money($line['saleAmountCents'], 'saleLine.saleAmountCents');
-            if ($discount > $original || $sale !== $original - $discount) {
+            $lineDebt = self::money($line['debtAmountCents'], 'saleLine.debtAmountCents');
+            $quantity = self::boundedQuantity($line['quantity'], 'saleLine.quantity');
+            $configuredCost = self::money($line['configuredCostCents'], 'saleLine.configuredCostCents');
+            $priceChangeReason = self::text(
+                $line['priceChangeReason'],
+                255,
+                'saleLine.priceChangeReason',
+                true
+            );
+            $priceChangedBy = self::nonNegativeInt($line['priceChangedBy'], 'saleLine.priceChangedBy');
+            $priceChangedByName = self::text(
+                $line['priceChangedByNameSnapshot'],
+                128,
+                'saleLine.priceChangedByNameSnapshot',
+                true
+            );
+            $priceChangedAt = self::nonNegativeInt($line['priceChangedAt'], 'saleLine.priceChangedAt');
+            if ($discount > $original || $sale !== $original - $discount || $lineDebt > $sale) {
                 throw self::failure('sale_line_amount_equation_invalid', ['authorityKey' => $authorityKey]);
+            }
+            $costOverflow = $configuredCost > 0
+                && $quantity > intdiv(PHP_INT_MAX, $configuredCost);
+            if ($priceChangedAt === 0
+                ? ($priceChangeReason !== '' || $priceChangedBy !== 0 || $priceChangedByName !== '')
+                : ($priceChangeReason === '' || $priceChangedBy <= 0 || $priceChangedByName === ''
+                    || $costOverflow || $sale < $configuredCost * $quantity)) {
+                throw self::failure('sale_line_price_audit_invalid', ['authorityKey' => $authorityKey]);
             }
             $categoryId = self::nonNegativeInt($line['categoryIdSnapshot'], 'saleLine.categoryIdSnapshot');
             $categoryName = self::text(
@@ -715,10 +795,11 @@ final class CashierV3CheckoutSettlementKernel
                 'sourceId' => self::positiveInt($line['sourceId'], 'saleLine.sourceId'),
                 'catalogSkuId' => $catalogSkuId,
                 'sourceVersion' => self::positiveInt($line['sourceVersion'], 'saleLine.sourceVersion'),
-                'quantity' => self::boundedQuantity($line['quantity'], 'saleLine.quantity'),
+                'quantity' => $quantity,
                 'originalAmountCents' => $original,
                 'discountAmountCents' => $discount,
                 'saleAmountCents' => $sale,
+                'debtAmountCents' => $lineDebt,
                 'sourceNameSnapshot' => self::text(
                     $line['sourceNameSnapshot'],
                     128,
@@ -733,6 +814,11 @@ final class CashierV3CheckoutSettlementKernel
                 ),
                 'categoryIdSnapshot' => $categoryId,
                 'categoryNameSnapshot' => $categoryName,
+                'configuredCostCents' => $configuredCost,
+                'priceChangeReason' => $priceChangeReason,
+                'priceChangedBy' => $priceChangedBy,
+                'priceChangedByNameSnapshot' => $priceChangedByName,
+                'priceChangedAt' => $priceChangedAt,
                 'serviceObject' => $serviceObject,
                 'craftsmen' => $craftsmen,
                 'isExperience' => $isExperience,
@@ -1112,6 +1198,7 @@ final class CashierV3CheckoutSettlementKernel
                 'originalAmountCents' => $line['originalAmountCents'],
                 'discountAmountCents' => $line['discountAmountCents'],
                 'saleAmountCents' => $line['saleAmountCents'],
+                'debtAmountCents' => $line['debtAmountCents'],
                 'entitlementActualAmountCents' => 0,
                 'sourceNameSnapshot' => $line['sourceNameSnapshot'],
                 'sourceCodeSnapshot' => $line['sourceCodeSnapshot'],
@@ -1120,6 +1207,11 @@ final class CashierV3CheckoutSettlementKernel
                     : '',
                 'categoryIdSnapshot' => $line['categoryIdSnapshot'],
                 'categoryNameSnapshot' => $line['categoryNameSnapshot'],
+                'configuredCostCents' => $line['configuredCostCents'],
+                'priceChangeReason' => $line['priceChangeReason'],
+                'priceChangedBy' => $line['priceChangedBy'],
+                'priceChangedByNameSnapshot' => $line['priceChangedByNameSnapshot'],
+                'priceChangedAt' => $line['priceChangedAt'],
                 'craftsmenSnapshotJson' => CashierV3CheckoutCraftsmenSnapshot::encode(
                     $line['craftsmen']
                 ),
@@ -1161,12 +1253,18 @@ final class CashierV3CheckoutSettlementKernel
                 'originalAmountCents' => 0,
                 'discountAmountCents' => 0,
                 'saleAmountCents' => 0,
+                'debtAmountCents' => 0,
                 'entitlementActualAmountCents' => $line['actualEntitlementAmountCents'],
                 'sourceNameSnapshot' => $line['sourceNameSnapshot'],
                 'sourceCodeSnapshot' => $line['sourceCodeSnapshot'],
                 'projectNameSnapshot' => $line['projectNameSnapshot'],
                 'categoryIdSnapshot' => $line['projectCategoryIdSnapshot'],
                 'categoryNameSnapshot' => $line['projectCategoryNameSnapshot'],
+                'configuredCostCents' => 0,
+                'priceChangeReason' => '',
+                'priceChangedBy' => 0,
+                'priceChangedByNameSnapshot' => '',
+                'priceChangedAt' => 0,
                 'craftsmenSnapshotJson' => '[]',
                 'lineFingerprint' => $line['lineFingerprint'],
                 'sortNo' => ++$sortNo,
@@ -1255,6 +1353,12 @@ final class CashierV3CheckoutSettlementKernel
             'businessTimezone' => $snapshot['businessTimezone'],
             'operationOccurredAt' => $snapshot['occurredAt'],
             'recordedAt' => $snapshot['recordedAt'],
+            'orderNote' => $snapshot['orderNote'],
+            'supplementEnabled' => $snapshot['supplement']['enabled'] ? 1 : 0,
+            'supplementReason' => $snapshot['supplement']['reason'],
+            'supplementOperatorId' => $snapshot['supplement']['operatorId'],
+            'supplementOperatorNameSnapshot' => $snapshot['supplement']['operatorNameSnapshot'],
+            'supplementOperatedAt' => $snapshot['supplement']['operatedAt'],
             'sourceDocumentType' => $snapshot['sourceDocument']['type'],
             'sourceDocumentId' => $snapshot['sourceDocument']['id'],
             'sourceDocumentNo' => $snapshot['sourceDocument']['no'],

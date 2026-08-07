@@ -174,12 +174,17 @@ class CashierV3ActionManifest
             'apply-cashier-salespeople-to-all-sale-lines' => $eventless($workspaceDraft),
             'apply-cashier-craftsmen-to-all-service-lines' => $eventless($workspaceDraft),
             'apply-cashier-personnel-to-all-lines' => $eventless($workspaceDraft),
+            'update-cashier-line-debt' => $eventless($workspaceDraft),
             'remove-cart-line' => $eventless($workspaceDraft),
+            'clear-cart-lines' => $eventless($workspaceDraft),
             'change-cart-line-quantity' => $eventless($workspaceDraft),
             'select-cashier-member' => $eventless($selection),
             'set-guest-order' => $eventless($selection),
             'change-supplement-date' => $eventless($workspaceDraft),
             'exit-supplement' => $eventless($workspaceDraft),
+            'update-cashier-order-note' => $eventless($workspaceDraft),
+            'update-cashier-line-price' => $eventless($workspaceDraft),
+            'update-cashier-supplement' => $eventless($workspaceDraft),
             'submit-card-operation' => [
                 'required_event_types' => ['card.operation.recorded'],
                 'allowed_event_types' => ['card.operation.recorded'],
@@ -228,13 +233,6 @@ class CashierV3ActionManifest
                 'consumers' => [],
             ],
 
-            'submit-recharge-debt-repayment' => [
-                'required_event_types' => ['debt.repaid'],
-                'allowed_event_types' => ['debt.repaid'],
-                'event_rules' => [
-                    'debt.repaid' => [
-                        'min_count' => 1,
-                        'max_count' => 1,
             'prepare-recharge-checkout' => $eventless($checkoutPreparation),
             'add-recharge-checkout-payment-method' => $eventless($checkoutPreparation),
             'update-recharge-checkout-payment-line' => $eventless($checkoutPreparation),
@@ -254,6 +252,13 @@ class CashierV3ActionManifest
                 'eventless_reason' => '', 'activation_blocked_until_event_contract' => false, 'consumers' => [],
             ],
 
+            'submit-recharge-debt-repayment' => [
+                'required_event_types' => ['debt.repaid'],
+                'allowed_event_types' => ['debt.repaid'],
+                'event_rules' => [
+                    'debt.repaid' => [
+                        'min_count' => 1,
+                        'max_count' => 1,
                         'aggregate_type' => 'recharge_debt_repayment',
                         'source_type' => 'submit-recharge-debt-repayment',
                         'aggregate_version' => 1,
@@ -296,6 +301,7 @@ class CashierV3ActionManifest
             'remove-balance-payment' => $eventless($checkoutPreparation),
             'update-balance-payment' => $eventless($checkoutPreparation),
             'update-checkout-business-source' => $eventless($checkoutPreparation),
+            'update-checkout-sales-date' => $eventless($checkoutPreparation),
             'prepare-checkout-submission' => $eventless($checkoutPreparation),
             'confirm-debt-warning' => $eventless($checkoutPreparation),
             'confirm-checkout-final-changes' => $eventless($checkoutPreparation),
@@ -423,7 +429,22 @@ class CashierV3ActionManifest
                     'debt.recorded' => [],
                 ],
             ],
-            'submit-debt-repayment' => $deferred($inactiveCheckout),
+            'submit-debt-repayment' => [
+                'required_event_types' => ['debt.repaid'],
+                'allowed_event_types' => ['debt.repaid'],
+                'event_rules' => [
+                    'debt.repaid' => [
+                        'min_count' => 1,
+                        'max_count' => 1,
+                        'aggregate_type' => 'debt_repayment',
+                        'source_type' => 'submit-debt-repayment',
+                        'aggregate_version' => 1,
+                    ],
+                ],
+                'eventless_reason' => '',
+                'activation_blocked_until_event_contract' => false,
+                'consumers' => ['debt.repaid' => []],
+            ],
             'return-to-payment-edit' => $eventless($checkoutPreparation),
             'retry-checkout' => $deferred($inactiveCheckout),
             'continue-partial-payment-recovery' => $deferred($inactiveCheckout),
@@ -614,6 +635,20 @@ class CashierV3ActionManifest
                 'event_rules' => ['sales_order.voided' => ['min_count' => 1, 'max_count' => 1, 'aggregate_type' => 'sales_order', 'source_type' => 'void-sales-order']],
                 'eventless_reason' => '', 'activation_blocked_until_event_contract' => false, 'consumers' => ['sales_order.voided' => []],
             ],
+            'refund-recharge-order' => [
+                'required_event_types' => ['recharge.refunded'], 'allowed_event_types' => ['recharge.refunded'],
+                'event_rules' => ['recharge.refunded' => ['min_count' => 1, 'max_count' => 1, 'aggregate_type' => 'recharge_order', 'source_type' => 'refund-recharge-order']],
+                'eventless_reason' => '', 'activation_blocked_until_event_contract' => false, 'consumers' => ['recharge.refunded' => []],
+            ],
+            'void-recharge-order' => [
+                'required_event_types' => ['recharge.voided'], 'allowed_event_types' => ['recharge.voided', 'gift.voided'],
+                'event_rules' => [
+                    'recharge.voided' => ['min_count' => 1, 'max_count' => 1, 'aggregate_type' => 'recharge_order', 'source_type' => 'void-recharge-order'],
+                    'gift.voided' => ['min_count' => 0, 'max_count' => 100, 'aggregate_type' => 'recharge_gift', 'source_type' => 'void-recharge-order'],
+                ],
+                'eventless_reason' => '', 'activation_blocked_until_event_contract' => false,
+                'consumers' => ['recharge.voided' => [], 'gift.voided' => []],
+            ],
             'reopen-sales-order' => [
                 'required_event_types' => ['sales_order.reopened'], 'allowed_event_types' => ['sales_order.reopened'],
                 'event_rules' => ['sales_order.reopened' => ['min_count' => 1, 'max_count' => 1, 'aggregate_type' => 'sales_order', 'source_type' => 'reopen-sales-order']],
@@ -646,6 +681,7 @@ class CashierV3ActionManifest
         static $queryMap = [
             'submit-checkout' => 'query-checkout-result',
             'retry-checkout' => 'query-checkout-result',
+            'submit-debt-repayment' => 'query-debt-repayment-result',
             'confirm-service-completion' => 'query-service-completion-result',
             'retry-service-completion' => 'query-service-completion-result',
             'submit-hang-order' => 'query-hang-order-result',

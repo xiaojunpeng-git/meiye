@@ -118,6 +118,14 @@ function checkoutSnapshot(): array
         'businessTimezone' => 'Asia/Shanghai',
         'occurredAt' => 1785258000,
         'recordedAt' => 1785258002,
+        'orderNote' => '结账备注',
+        'supplement' => [
+            'enabled' => true,
+            'reason' => '补录历史经营日',
+            'operatorId' => 21,
+            'operatorNameSnapshot' => '收银员甲',
+            'operatedAt' => 1785258001,
+        ],
         'sourceDocument' => [
             'type' => 'cashier_workspace',
             'id' => 'workspace-001',
@@ -133,10 +141,16 @@ function checkoutSnapshot(): array
             'originalAmountCents' => 10000,
             'discountAmountCents' => 1000,
             'saleAmountCents' => 9000,
+            'debtAmountCents' => 3000,
             'sourceNameSnapshot' => '深层护理',
             'sourceCodeSnapshot' => 'PROJECT-501',
             'categoryIdSnapshot' => 51,
             'categoryNameSnapshot' => '面部护理',
+            'configuredCostCents' => 5000,
+            'priceChangeReason' => '会员折扣',
+            'priceChangedBy' => 21,
+            'priceChangedByNameSnapshot' => '收银员甲',
+            'priceChangedAt' => 1785258001,
             'serviceObject' => 'self',
             'craftsmen' => [],
             'isExperience' => 0,
@@ -226,6 +240,12 @@ function checkoutProjectionAggregate(array $result): array
         'request_status' => $request['requestStatus'],
         'composition' => $request['composition'],
         'business_date' => $request['businessDate'],
+        'order_note' => $request['orderNote'],
+        'supplement_enabled' => $request['supplementEnabled'],
+        'supplement_reason' => $request['supplementReason'],
+        'supplement_operator_id' => $request['supplementOperatorId'],
+        'supplement_operator_name_snapshot' => $request['supplementOperatorNameSnapshot'],
+        'supplement_operated_at' => $request['supplementOperatedAt'],
         'source_document_type' => $request['sourceDocumentType'],
         'source_document_id' => $request['sourceDocumentId'],
         'source_document_no' => $request['sourceDocumentNo'],
@@ -269,12 +289,18 @@ function checkoutProjectionAggregate(array $result): array
             'original_amount_cents' => $line['originalAmountCents'],
             'discount_amount_cents' => $line['discountAmountCents'],
             'sale_amount_cents' => $line['saleAmountCents'],
+            'debt_amount_cents' => $line['debtAmountCents'],
             'entitlement_actual_amount_cents' => $line['entitlementActualAmountCents'],
             'source_name_snapshot' => $line['sourceNameSnapshot'],
             'source_code_snapshot' => $line['sourceCodeSnapshot'],
             'project_name_snapshot' => $line['projectNameSnapshot'],
             'category_id_snapshot' => $line['categoryIdSnapshot'],
             'category_name_snapshot' => $line['categoryNameSnapshot'],
+            'configured_cost_cents' => $line['configuredCostCents'],
+            'price_change_reason' => $line['priceChangeReason'],
+            'price_changed_by' => $line['priceChangedBy'],
+            'price_changed_by_name_snapshot' => $line['priceChangedByNameSnapshot'],
+            'price_changed_at' => $line['priceChangedAt'],
             'line_fingerprint' => $line['lineFingerprint'],
             'sort_no' => $line['sortNo'],
         ];
@@ -584,6 +610,7 @@ checkoutAssert('stale expected version is rejected',
 
 $unbalanced = $snapshot;
 $unbalanced['debt']['amountCents'] = 2000;
+$unbalanced['saleLines'][0]['debtAmountCents'] = 2000;
 checkoutResign($unbalanced);
 $unbalancedDraft = CashierV3CheckoutSettlementKernel::saveDraft(
     checkoutCommand(CashierV3CheckoutSettlementKernel::OPERATION_SAVE_DRAFT, 4),
@@ -763,6 +790,13 @@ $paymentInitialAmount = new ReflectionMethod(
     CashierV3CheckoutPaymentDraftServices::class,
     'nextPaymentInitialAmount'
 );
+checkoutAssert('the first bookkeeping method receives the entire authoritative remaining receivable',
+    $paymentInitialAmount->invoke(null, [
+        'saleLines' => [['saleAmountCents' => 9000]],
+        'paymentDetails' => [],
+        'balanceDeduction' => ['amountCents' => 0],
+        'debt' => ['amountCents' => 0],
+    ]) === 9000);
 checkoutAssert('a further bookkeeping-method click is retained as a zero-value draft after the current total is allocated',
     $paymentInitialAmount->invoke(null, [
         'saleLines' => [['saleAmountCents' => 9000]],
@@ -824,6 +858,38 @@ checkoutAssert('formal sale amount equation is enforced',
             $secret
         );
     }) === 'sale_line_amount_equation_invalid');
+
+$belowCost = $snapshot;
+$belowCost['saleLines'][0]['discountAmountCents'] = 6000;
+$belowCost['saleLines'][0]['saleAmountCents'] = 4000;
+checkoutResign($belowCost);
+checkoutAssert('audited price change cannot settle below configured cost',
+    checkoutReason(static function () use ($belowCost, $secret): void {
+        CashierV3CheckoutSettlementKernel::saveDraft(
+            checkoutCommand(CashierV3CheckoutSettlementKernel::OPERATION_SAVE_DRAFT, 31),
+            $belowCost,
+            null,
+            $secret
+        );
+    }) === 'sale_line_price_audit_invalid');
+
+$atCost = $snapshot;
+$atCost['saleLines'][0]['discountAmountCents'] = 5000;
+$atCost['saleLines'][0]['saleAmountCents'] = 5000;
+$atCost['paymentDetails'][0]['amountCents'] = 0;
+$atCost['paymentDetails'][1]['amountCents'] = 0;
+$atCost['balanceDeduction']['amountCents'] = 2000;
+$atCost['debt']['amountCents'] = 3000;
+checkoutResign($atCost);
+checkoutAssert('audited price change equal to configured cost is accepted',
+    checkoutReason(static function () use ($atCost, $secret): void {
+        CashierV3CheckoutSettlementKernel::saveDraft(
+            checkoutCommand(CashierV3CheckoutSettlementKernel::OPERATION_SAVE_DRAFT, 32),
+            $atCost,
+            null,
+            $secret
+        );
+    }) === '');
 
 $fractionalCents = $snapshot;
 $fractionalCents['saleLines'][0]['saleAmountCents'] = 8901;

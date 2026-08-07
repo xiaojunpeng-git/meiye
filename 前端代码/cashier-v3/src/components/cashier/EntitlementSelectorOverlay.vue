@@ -80,7 +80,7 @@ function validActualAmountAllocation(project = {}) {
   const consumedTimes = Number(project.consumedTimesAtSelection)
   const sourceVersion = Number(project.amountSourceVersion ?? project.version ?? project.revision)
   return typeof purchaseAmount === 'string'
-    && /^(?:0|[1-9]\d*)(?:\.\d{1,2})?$/.test(purchaseAmount)
+    && /^(?:0|[1-9]\d*)(?:\.0{1,2})?$/.test(purchaseAmount)
     && Number.isInteger(totalPurchaseTimes)
     && totalPurchaseTimes > 0
     && Number.isInteger(consumedTimes)
@@ -88,7 +88,7 @@ function validActualAmountAllocation(project = {}) {
     && consumedTimes <= totalPurchaseTimes
     && positiveVersion(sourceVersion) !== null
     && typeof project.amountCalculationVersion === 'string'
-    && project.amountCalculationVersion.endsWith('cumulative-half-up-cent-v2')
+    && project.amountCalculationVersion.endsWith('whole-yuan-floor-final-remainder-v1')
 }
 
 function sourceContractReady(source = {}) {
@@ -179,8 +179,7 @@ const visibleSources = computed(() => {
       && String(source.statusCode || '').trim().toLocaleLowerCase() !== 'disabled') {
       return false
     }
-    const filterMatched = sourceFilter.value === 'all'
-      || (sourceFilter.value === 'selected' ? sourceHasAddedProject(source) : isSourceAvailable(source))
+    const filterMatched = sourceFilter.value === 'all' || isSourceAvailable(source)
     return filterMatched && sourceMatchesKeyword(source, normalizedKeyword)
   })
 })
@@ -201,6 +200,32 @@ function displayNumber(value) {
   const number = Number(value)
   if (!Number.isFinite(number)) return '—'
   return new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 2 }).format(number)
+}
+
+// 任选次数卡的次数是卡级共享额度，不能同时展示到每个子项目上。
+// 父行展示共享剩余次数，项目行用短横线避免误解为每个项目各有同样次数。
+function isSharedChoiceCountSource(source = {}) {
+  return String(source.cardRuleType || '').trim() === 'choice_count'
+}
+
+function isTimeCardSource(source = {}) {
+  return String(source.sourceKind || '').trim() === 'time_card'
+    || String(source.cardRuleType || '').trim() === 'time'
+    || source.unlimited === true
+}
+
+function displaySourceRemainingTimes(source = {}) {
+  return isTimeCardSource(source) ? '—' : displayNumber(source.remainingTimes)
+}
+
+function displayProjectRemainingTimes(source = {}, project = {}) {
+  return isTimeCardSource(source) || isSharedChoiceCountSource(source)
+    ? '—'
+    : displayNumber(project.remainingTimes)
+}
+
+function displayProjectRemainingAmount(source = {}, project = {}) {
+  return isTimeCardSource(source) ? '—' : displayNumber(project.remainingAmount)
 }
 
 function sourceCardNo(source = {}) {
@@ -370,12 +395,6 @@ function addButtonLabel(source = {}, project = {}) {
           <button
             type="button"
             class="button button--secondary cashier-entitlement-selector__filter-button"
-            :class="{ 'is-active': sourceFilter === 'selected' }"
-            @click="sourceFilter = 'selected'"
-          >只看已选</button>
-          <button
-            type="button"
-            class="button button--secondary cashier-entitlement-selector__filter-button"
             :class="{ 'is-active': sourceFilter === 'all' }"
             @click="sourceFilter = 'all'"
           >全部</button>
@@ -388,8 +407,6 @@ function addButtonLabel(source = {}, project = {}) {
             <span>卡项名称</span>
             <span>余次</span>
             <span>余额</span>
-            <span>购买次数</span>
-            <span>购买金额</span>
             <span>有效期</span>
             <span aria-label="操作" />
           </div>
@@ -407,10 +424,8 @@ function addButtonLabel(source = {}, project = {}) {
                 </div>
                 <small :title="sourceCardNo(source)">{{ sourceCardNo(source) }}</small>
               </div>
-              <span>{{ displayNumber(source.remainingTimes) }}</span>
+              <span>{{ displaySourceRemainingTimes(source) }}</span>
               <span>{{ displayNumber(source.remainingAmount) }}</span>
-              <span>{{ displayNumber(source.purchaseTimes) }}</span>
-              <span>{{ displayNumber(source.purchaseAmount) }}</span>
               <span>{{ sourceExpiryDate(source) }}</span>
               <button
                 v-if="sourceOperationLabel()"
@@ -436,10 +451,8 @@ function addButtonLabel(source = {}, project = {}) {
                 <strong :title="project.name || '项目'">{{ project.name || '项目' }}</strong>
                 <small v-if="project.disabledReason || project.unavailableReason">{{ project.disabledReason || project.unavailableReason }}</small>
               </div>
-              <span>{{ displayNumber(project.remainingTimes) }}</span>
-              <span>{{ displayNumber(project.remainingAmount) }}</span>
-              <span>{{ displayNumber(project.purchaseTimes) }}</span>
-              <span>{{ displayNumber(project.purchaseAmount) }}</span>
+              <span>{{ displayProjectRemainingTimes(source, project) }}</span>
+              <span>{{ displayProjectRemainingAmount(source, project) }}</span>
               <span aria-hidden="true" />
               <button
                 v-if="!sourceOperationLabel()"

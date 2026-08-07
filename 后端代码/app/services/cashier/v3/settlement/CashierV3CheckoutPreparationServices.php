@@ -154,7 +154,6 @@ final class CashierV3CheckoutPreparationServices
         $contexts = array_values((array)($scope['contexts'] ?? []));
         $idempotencyKey = trim((string)($scope['idempotency_key'] ?? ''));
         $payload = is_array($scope['payload'] ?? null) ? $scope['payload'] : [];
-        $debtAmountCents = self::debtIntentAmountCents($payload['debtAmountCents'] ?? 0);
         $editingRequestId = trim((string)($payload['checkoutRequestId'] ?? ''));
         $editingRequestVersion = self::editingRequestVersion($payload['checkoutRequestVersion'] ?? null);
         if (($editingRequestId === '') !== ($editingRequestVersion === null)) {
@@ -176,9 +175,11 @@ final class CashierV3CheckoutPreparationServices
             }
         );
         $publicDraft = (array)($authority['publicDraft'] ?? []);
+        $storedDraft = (array)($authority['storedDraft'] ?? []);
         $storedRows = array_values((array)($authority['storedRows'] ?? []));
+        $debtAmountCents = $this->saleDebtAmountCents((array)($authority['lines'] ?? []));
         $this->hangBindings->assertWorkspaceBindingInTx(
-            (array)($authority['storedDraft'] ?? []),
+            $storedDraft,
             $contexts,
             $operatorScope,
             $dataScope
@@ -293,6 +294,12 @@ final class CashierV3CheckoutPreparationServices
             }
         }
         $now = time();
+        $supplementEnabled = (int)($authority['storedDraft']['supplement_enabled'] ?? 0) === 1;
+        $supplementBusinessDate = (string)($authority['storedDraft']['supplement_business_date'] ?? '');
+        if ($supplementEnabled
+            && preg_match('/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/D', $supplementBusinessDate) !== 1) {
+            throw self::incomplete('checkout_supplement_business_date_invalid');
+        }
         $snapshot = [
             'contractVersion' => CashierV3CheckoutSettlementKernel::AUTHORITY_CONTRACT_VERSION,
             'authorityOrigin' => 'server_final_lock_snapshot',
@@ -311,10 +318,18 @@ final class CashierV3CheckoutPreparationServices
             'memberName' => $memberName,
             'operatorId' => $operatorScope->operatorId(),
             'operatorName' => $dimensions['operatorName'],
-            'businessDate' => date('Y-m-d', $now),
+            'businessDate' => $supplementEnabled ? $supplementBusinessDate : date('Y-m-d', $now),
             'businessTimezone' => 'Asia/Shanghai',
             'occurredAt' => $now,
             'recordedAt' => $now,
+            'orderNote' => (string)($authority['storedDraft']['order_note'] ?? ''),
+            'supplement' => [
+                'enabled' => $supplementEnabled,
+                'reason' => (string)($authority['storedDraft']['supplement_reason'] ?? ''),
+                'operatorId' => (int)($authority['storedDraft']['supplement_operator_id'] ?? 0),
+                'operatorNameSnapshot' => (string)($authority['storedDraft']['supplement_operator_name_snapshot'] ?? ''),
+                'operatedAt' => (int)($authority['storedDraft']['supplement_operated_at'] ?? 0),
+            ],
             'sourceDocument' => $this->sourceDocument($contexts, $workspaceId),
             'saleLines' => $saleLines,
             'entitlementLines' => $entitlementLines,
@@ -397,6 +412,12 @@ final class CashierV3CheckoutPreparationServices
             'originalAmountCents' => $original,
             'discountAmountCents' => $original - $sale,
             'saleAmountCents' => $sale,
+            'debtAmountCents' => $this->saleLineDebtAmountCents($line, $sale),
+            'configuredCostCents' => (int)($line['configuredCostCents'] ?? 0),
+            'priceChangeReason' => (string)($line['priceChangeReason'] ?? ''),
+            'priceChangedBy' => (int)($line['priceChangedBy'] ?? 0),
+            'priceChangedByNameSnapshot' => (string)($line['priceChangedByNameSnapshot'] ?? ''),
+            'priceChangedAt' => (int)($line['priceChangedAt'] ?? 0),
             'sourceNameSnapshot' => (string)($line['nameSnapshot'] ?? ''),
             'sourceCodeSnapshot' => (string)($line['skuUnique'] ?? ''),
             'categoryIdSnapshot' => (int)($line['categoryIdSnapshot'] ?? 0),
@@ -405,6 +426,29 @@ final class CashierV3CheckoutPreparationServices
             'craftsmen' => $craftsmen,
             'isExperience' => !empty($line['isExperience']) ? 1 : 0,
         ];
+    }
+
+    private function saleDebtAmountCents(array $saleLines): int
+    {
+        $total = 0;
+        foreach ($saleLines as $line) {
+            $sale = (int)($line['lineAmountCents'] ?? -1);
+            $debt = $this->saleLineDebtAmountCents((array)$line, $sale);
+            if ($total > PHP_INT_MAX - $debt) {
+                throw self::incomplete('checkout_line_debt_total_overflow');
+            }
+            $total += $debt;
+        }
+        return $total;
+    }
+
+    private function saleLineDebtAmountCents(array $line, int $saleAmountCents): int
+    {
+        $debt = (int)($line['debtAmountCents'] ?? 0);
+        if ($debt < 0 || $saleAmountCents < 0 || $debt > $saleAmountCents) {
+            throw self::incomplete('checkout_line_debt_invalid');
+        }
+        return $debt;
     }
 
     private function entitlementSnapshotLine(array $line): array

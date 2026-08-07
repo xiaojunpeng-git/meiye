@@ -28,6 +28,9 @@ final class CashierV3SaleOnlyFactAssembler
         'store_name_snapshot', 'member_id', 'member_name_snapshot', 'operator_id',
         'operator_name_snapshot', 'request_version', 'request_status', 'composition',
         'business_date', 'business_timezone', 'operation_occurred_at', 'recorded_at',
+        'order_note', 'supplement_enabled', 'supplement_reason',
+        'supplement_operator_id', 'supplement_operator_name_snapshot',
+        'supplement_operated_at',
         'source_document_type', 'source_document_id', 'source_document_no',
         'sales_amount_cents', 'receivable_amount_cents', 'selected_payment_amount_cents',
         'balance_deduction_amount_cents', 'balance_authority_key', 'balance_account_id',
@@ -45,9 +48,11 @@ final class CashierV3SaleOnlyFactAssembler
         'source_type', 'source_id', 'entitlement_source_detail_id', 'source_version',
         'catalog_sku_id',
         'project_id', 'project_version', 'service_object', 'is_experience', 'quantity', 'original_amount_cents',
-        'discount_amount_cents', 'sale_amount_cents', 'entitlement_actual_amount_cents',
+        'discount_amount_cents', 'sale_amount_cents', 'debt_amount_cents', 'entitlement_actual_amount_cents',
         'source_name_snapshot', 'source_code_snapshot', 'project_name_snapshot',
         'category_id_snapshot', 'category_name_snapshot', 'line_fingerprint',
+        'configured_cost_cents', 'price_change_reason', 'price_changed_by',
+        'price_changed_by_name_snapshot', 'price_changed_at',
         'craftsmen_snapshot_json',
         'sort_no', 'add_time', 'update_time',
     ];
@@ -176,6 +181,7 @@ final class CashierV3SaleOnlyFactAssembler
                 'originalAmountCents' => (int)$line['original_amount_cents'],
                 'discountAmountCents' => (int)$line['discount_amount_cents'],
                 'saleAmountCents' => (int)$line['sale_amount_cents'],
+                'debtAmountCents' => (int)$line['debt_amount_cents'],
             ];
         }
 
@@ -535,6 +541,13 @@ final class CashierV3SaleOnlyFactAssembler
             || (int)$order['store_id'] !== (int)$request['store_id']
             || (int)$order['member_id'] !== (int)$request['member_id']
             || (string)$order['composition'] !== (string)$request['composition']
+            || (string)$order['order_note'] !== (string)$request['order_note']
+            || (int)$order['supplement_enabled'] !== (int)$request['supplement_enabled']
+            || (string)$order['supplement_reason'] !== (string)$request['supplement_reason']
+            || (int)$order['supplement_operator_id'] !== (int)$request['supplement_operator_id']
+            || (string)$order['supplement_operator_name_snapshot']
+                !== (string)$request['supplement_operator_name_snapshot']
+            || (int)$order['supplement_operated_at'] !== (int)$request['supplement_operated_at']
             || (string)$order['order_status'] !== 'settled'
             || (string)$order['order_direction'] !== 'forward'
             || (int)$order['order_version'] !== 1
@@ -566,6 +579,13 @@ final class CashierV3SaleOnlyFactAssembler
                 || (int)$line['original_amount_cents'] !== (int)$locked['original_amount_cents']
                 || (int)$line['discount_amount_cents'] !== (int)$locked['discount_amount_cents']
                 || (int)$line['sale_amount_cents'] !== (int)$locked['sale_amount_cents']
+                || (int)$line['debt_amount_cents'] !== (int)$locked['debt_amount_cents']
+                || (int)$line['configured_cost_cents'] !== (int)$locked['configured_cost_cents']
+                || (string)$line['price_change_reason'] !== (string)$locked['price_change_reason']
+                || (int)$line['price_changed_by'] !== (int)$locked['price_changed_by']
+                || (string)$line['price_changed_by_name_snapshot']
+                    !== (string)$locked['price_changed_by_name_snapshot']
+                || (int)$line['price_changed_at'] !== (int)$locked['price_changed_at']
                 || (string)$line['item_name_snapshot'] !== (string)$locked['source_name_snapshot']
                 || (string)$line['item_code_snapshot'] !== (string)$locked['source_code_snapshot']
                 || (string)$line['category_id_snapshot'] !== (string)$locked['category_id_snapshot']
@@ -740,6 +760,7 @@ final class CashierV3SaleOnlyFactAssembler
         $original = self::sum($orderLines, 'original_amount_cents');
         $discount = self::sum($orderLines, 'discount_amount_cents');
         $sale = self::sum($orderLines, 'sale_amount_cents');
+        $lineDebt = self::sum($orderLines, 'debt_amount_cents');
         $collected = self::sum($collections, 'amount_cents');
         $balance = (int)$request['balance_deduction_amount_cents'];
         $debt = (int)$request['debt_amount_cents'];
@@ -753,6 +774,7 @@ final class CashierV3SaleOnlyFactAssembler
             || $collected !== (int)$request['selected_payment_amount_cents']
             || $collected !== (int)$request['cash_performance_amount_cents']
             || $collected + $balance + $debt !== $sale
+            || $lineDebt !== $debt
             || $collected !== (int)$batch['collected_amount_cents']
             || $collected !== (int)$batch['cash_performance_amount_cents']
             || $sale !== (int)$batch['receivable_amount_cents']) {
@@ -760,6 +782,8 @@ final class CashierV3SaleOnlyFactAssembler
         }
         foreach ($orderLines as $index => $line) {
             if ((int)$line['sale_amount_cents'] <= 0
+                || (int)$line['debt_amount_cents'] < 0
+                || (int)$line['debt_amount_cents'] > (int)$line['sale_amount_cents']
                 || (int)$line['original_amount_cents'] - (int)$line['discount_amount_cents']
                     !== (int)$line['sale_amount_cents']) {
                 throw self::failure('sale_only_fact_line_amount_equation_mismatch', ['index' => $index]);

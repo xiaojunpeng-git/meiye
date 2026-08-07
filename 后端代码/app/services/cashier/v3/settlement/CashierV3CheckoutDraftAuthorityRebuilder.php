@@ -70,6 +70,10 @@ final class CashierV3CheckoutDraftAuthorityRebuilder
                         $row['sale_amount_cents'] ?? null,
                         'sale.sale_amount_cents'
                     ),
+                    'debtAmountCents' => self::nonNegativeInt(
+                        $row['debt_amount_cents'] ?? null,
+                        'sale.debt_amount_cents'
+                    ),
                     'sourceNameSnapshot' => (string)($row['source_name_snapshot'] ?? ''),
                     'sourceCodeSnapshot' => (string)($row['source_code_snapshot'] ?? ''),
                     'categoryIdSnapshot' => self::nonNegativeInt(
@@ -77,6 +81,20 @@ final class CashierV3CheckoutDraftAuthorityRebuilder
                         'sale.category_id_snapshot'
                     ),
                     'categoryNameSnapshot' => (string)($row['category_name_snapshot'] ?? ''),
+                    'configuredCostCents' => self::nonNegativeInt(
+                        $row['configured_cost_cents'] ?? null,
+                        'sale.configured_cost_cents'
+                    ),
+                    'priceChangeReason' => (string)($row['price_change_reason'] ?? ''),
+                    'priceChangedBy' => self::nonNegativeInt(
+                        $row['price_changed_by'] ?? null,
+                        'sale.price_changed_by'
+                    ),
+                    'priceChangedByNameSnapshot' => (string)($row['price_changed_by_name_snapshot'] ?? ''),
+                    'priceChangedAt' => self::nonNegativeInt(
+                        $row['price_changed_at'] ?? null,
+                        'sale.price_changed_at'
+                    ),
                     'serviceObject' => (string)($row['service_object'] ?? ''),
                     'isExperience' => self::nonNegativeInt(
                         $row['is_experience'] ?? null,
@@ -186,6 +204,20 @@ final class CashierV3CheckoutDraftAuthorityRebuilder
             'businessTimezone' => (string)($request['business_timezone'] ?? ''),
             'occurredAt' => $serverTime,
             'recordedAt' => $serverTime,
+            'orderNote' => (string)($request['order_note'] ?? ''),
+            'supplement' => [
+                'enabled' => (int)($request['supplement_enabled'] ?? 0) === 1,
+                'reason' => (string)($request['supplement_reason'] ?? ''),
+                'operatorId' => self::nonNegativeInt(
+                    $request['supplement_operator_id'] ?? null,
+                    'request.supplement_operator_id'
+                ),
+                'operatorNameSnapshot' => (string)($request['supplement_operator_name_snapshot'] ?? ''),
+                'operatedAt' => self::nonNegativeInt(
+                    $request['supplement_operated_at'] ?? null,
+                    'request.supplement_operated_at'
+                ),
+            ],
             'sourceDocument' => [
                 'type' => (string)($request['source_document_type'] ?? ''),
                 'id' => (string)($request['source_document_id'] ?? ''),

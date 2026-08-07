@@ -9,6 +9,7 @@ use app\services\cashier\v3\CashierV3ResultCode;
 use app\services\cashier\v3\CashierV3TransactionGuard;
 use app\services\cashier\v3\checkout\provider\CashierV3MemberBalanceContractException;
 use app\services\cashier\v3\checkout\provider\CashierV3MemberBalanceProvider;
+use think\facade\Db;
 
 /**
  * Edits a checkout's balance-payment intention without moving money.
@@ -25,6 +26,7 @@ final class CashierV3CheckoutBalanceDraftServices
     private const ACTION_APPLY = 'apply-balance-payment';
     private const ACTION_REMOVE = 'remove-balance-payment';
     private const ACTION_UPDATE = 'update-balance-payment';
+    private const ACTION_UPDATE_SALES_DATE = 'update-checkout-sales-date';
     private const ACTION_RETURN_TO_PAYMENT_EDIT = 'return-to-payment-edit';
 
     /** @var CashierV3CheckoutRequestRepository */
@@ -55,7 +57,12 @@ final class CashierV3CheckoutBalanceDraftServices
     {
         CashierV3TransactionGuard::assertInTransaction('checkoutBalanceDraftMutation');
         try {
-            if (!in_array($action, [self::ACTION_APPLY, self::ACTION_REMOVE, self::ACTION_UPDATE], true)) {
+            if (!in_array($action, [
+                self::ACTION_APPLY,
+                self::ACTION_REMOVE,
+                self::ACTION_UPDATE,
+                self::ACTION_UPDATE_SALES_DATE,
+            ], true)) {
                 throw self::invalid('checkout_balance_draft_action_invalid', '余额支付操作无效。');
             }
             $payload = is_array($scope['payload'] ?? null) ? $scope['payload'] : [];
@@ -94,7 +101,16 @@ final class CashierV3CheckoutBalanceDraftServices
                 $dataScope->permissionVersion(),
                 $now
             );
-            if ($action === self::ACTION_REMOVE) {
+            if ($action === self::ACTION_UPDATE_SALES_DATE) {
+                self::applySalesDate(
+                    $snapshot,
+                    $payload,
+                    $workspaceId,
+                    $stateContextId,
+                    $operator,
+                    $dataScope
+                );
+            } elseif ($action === self::ACTION_REMOVE) {
                 $snapshot['balanceDeduction'] = self::emptyBalance();
             } else {
                 self::applyBalance(
@@ -138,9 +154,14 @@ final class CashierV3CheckoutBalanceDraftServices
                 ],
                 'totals' => (array)$kernel['totals'],
                 'replayed' => !empty($kernel['replayed']) || !empty($persisted['replayed']),
+                'businessDate' => (string)$snapshot['businessDate'],
                 'message' => $action === self::ACTION_APPLY
                     ? '已使用会员余额支付本单待收金额。'
-                    : ($action === self::ACTION_UPDATE ? '已更新本单余额支付金额。' : '已取消本单余额支付。'),
+                    : ($action === self::ACTION_UPDATE
+                        ? '已更新本单余额支付金额。'
+                        : ($action === self::ACTION_UPDATE_SALES_DATE
+                            ? '销售日期已更新。'
+                            : '已取消本单余额支付。')),
             ];
         } catch (CashierV3CheckoutSettlementContractException $exception) {
             throw self::translateContractFailure($exception);
@@ -260,13 +281,16 @@ final class CashierV3CheckoutBalanceDraftServices
         }
         $remaining = self::receivableAmount($snapshot)
             - self::paymentAndDebtAmount($snapshot);
-        if ($remaining <= 0) {
-            throw self::invalid('checkout_balance_no_remaining_receivable', '本单已没有待收金额。');
-        }
-        $account = $balances->lockSnapshotInTx($memberId, $operator, $dataScope);
+        // Draft selection only reads the current balance. The member row is
+        // locked and revalidated by prepare/submit-checkout immediately
+        // before the real debit; selecting a method must never hold that lock.
+        $account = $balances->readSnapshot($memberId, $operator, $dataScope);
         $availableWholeCents = intdiv(max(0, (int)$account['totalCents']), 100) * 100;
         if ($availableWholeCents <= 0) {
             throw self::invalid('checkout_balance_insufficient', '会员可用余额不足。');
+        }
+        if ($remaining <= 0) {
+            throw self::invalid('checkout_balance_no_remaining_receivable', '本单已无待收金额，请先调整其他收款方式。');
         }
         $requestedCents = $requestedAmountYuan === null
             ? min($remaining, $availableWholeCents)
@@ -345,6 +369,78 @@ final class CashierV3CheckoutBalanceDraftServices
         }
     }
 
+    private static function applySalesDate(
+        array &$snapshot,
+        array $payload,
+        string $workspaceId,
+        string $stateContextId,
+        CashierV3OperatorScope $operator,
+        CashierV3DataScopeContext $dataScope
+    ): void {
+        $businessDate = (string)$payload['businessDate'];
+        $timezone = new \DateTimeZone('Asia/Shanghai');
+        $parsed = \DateTimeImmutable::createFromFormat('!Y-m-d', $businessDate, $timezone);
+        $today = (new \DateTimeImmutable('now', $timezone))->format('Y-m-d');
+        if (!$parsed || $parsed->format('Y-m-d') !== $businessDate || $businessDate > $today) {
+            throw self::invalid('checkout_sales_date_invalid', '销售日期无效或晚于今天。');
+        }
+        $historical = $businessDate < $today;
+        $reason = trim((string)$payload['reason']);
+        if (($historical && $reason === '') || mb_strlen($reason) > 255 || strpos($reason, "\0") !== false) {
+            throw self::invalid('checkout_sales_date_reason_invalid', '历史销售日期必须填写补单原因。');
+        }
+        $operatorName = self::operatorName($dataScope->operatorProfile());
+        $now = time();
+        $supplement = $historical
+            ? [
+                'enabled' => true,
+                'reason' => $reason,
+                'operatorId' => $dataScope->operatorId(),
+                'operatorNameSnapshot' => $operatorName,
+                'operatedAt' => $now,
+            ]
+            : [
+                'enabled' => false,
+                'reason' => '',
+                'operatorId' => 0,
+                'operatorNameSnapshot' => '',
+                'operatedAt' => 0,
+            ];
+        $affected = Db::name('cashier_v3_workspace_draft')
+            ->where('workspace_id', $workspaceId)
+            ->where('state_context_id', $stateContextId)
+            ->where('store_id', $operator->storeId())
+            ->where('operator_id', $operator->operatorId())
+            ->where('draft_status', 'editing')
+            ->update([
+                'supplement_enabled' => $historical ? 1 : 0,
+                'supplement_business_date' => $historical ? $businessDate : null,
+                'supplement_reason' => $historical ? $reason : '',
+                'supplement_operator_id' => $historical ? $dataScope->operatorId() : 0,
+                'supplement_operator_name_snapshot' => $historical ? $operatorName : '',
+                'supplement_operated_at' => $historical ? $now : 0,
+                'update_time' => $now,
+            ]);
+        if ((int)$affected < 0) {
+            throw self::invalid('checkout_sales_date_workspace_update_failed', '销售日期保存失败，请重试。');
+        }
+        $snapshot['businessDate'] = $businessDate;
+        $snapshot['supplement'] = $supplement;
+        foreach ((array)($snapshot['paymentDetails'] ?? []) as $index => $payment) {
+            $snapshot['paymentDetails'][$index]['businessDate'] = $businessDate;
+            $snapshot['paymentDetails'][$index]['businessTimezone'] = 'Asia/Shanghai';
+        }
+    }
+
+    private static function operatorName(array $profile): string
+    {
+        foreach (['staff_name', 'real_name', 'name', 'account'] as $field) {
+            $name = trim((string)($profile[$field] ?? ''));
+            if ($name !== '') return mb_substr($name, 0, 128);
+        }
+        throw self::invalid('checkout_sales_date_operator_missing', '当前操作人资料不完整。');
+    }
+
     private static function emptyBalance(): array
     {
         return [
@@ -403,6 +499,10 @@ final class CashierV3CheckoutBalanceDraftServices
             'preparationRequestId', 'preparationToken',
         ];
         if ($action === self::ACTION_UPDATE) $expected[] = 'amount';
+        if ($action === self::ACTION_UPDATE_SALES_DATE) {
+            $expected[] = 'businessDate';
+            $expected[] = 'reason';
+        }
         $actual = array_keys($payload);
         sort($expected, SORT_STRING);
         sort($actual, SORT_STRING);
@@ -414,8 +514,17 @@ final class CashierV3CheckoutBalanceDraftServices
             || !is_string($payload['preparationRequestId'])
             || !is_string($payload['preparationToken'])
             || ($action === self::ACTION_UPDATE
-                && (!is_string($payload['amount']) || preg_match('/^[1-9][0-9]*$/D', $payload['amount']) !== 1))) {
-            throw self::invalid('checkout_balance_payload_invalid', '本次余额支付资料无效。');
+                && (!is_string($payload['amount']) || preg_match('/^[1-9][0-9]*$/D', $payload['amount']) !== 1))
+            || ($action === self::ACTION_UPDATE_SALES_DATE
+                && (!is_string($payload['businessDate']) || !is_string($payload['reason'])))) {
+            throw self::invalid(
+                $action === self::ACTION_UPDATE_SALES_DATE
+                    ? 'checkout_sales_date_payload_invalid'
+                    : 'checkout_balance_payload_invalid',
+                $action === self::ACTION_UPDATE_SALES_DATE
+                    ? '本次销售日期资料无效。'
+                    : '本次余额支付资料无效。'
+            );
         }
     }
 

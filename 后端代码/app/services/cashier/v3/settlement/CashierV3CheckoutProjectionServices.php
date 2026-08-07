@@ -7,6 +7,7 @@ use app\services\cashier\v3\CashierV3DataScopeContext;
 use app\services\cashier\v3\CashierV3OperatorScope;
 use app\services\cashier\v3\checkout\provider\CashierV3MemberBalanceContractException;
 use app\services\cashier\v3\checkout\provider\CashierV3MemberBalanceProvider;
+use think\facade\Db;
 
 /** Read-only projection of the current eventless checkout request. */
 final class CashierV3CheckoutProjectionServices
@@ -72,6 +73,15 @@ final class CashierV3CheckoutProjectionServices
                 $dataScope
             );
         }
+        $debtRepayment = $this->readLatestSucceededDebtRepayment(
+            $workspaceId,
+            $stateContextId,
+            $operatorScope,
+            $dataScope
+        );
+        if ($debtRepayment !== null) {
+            return $debtRepayment;
+        }
         if ($this->completedResults === null) {
             return null;
         }
@@ -114,6 +124,68 @@ final class CashierV3CheckoutProjectionServices
         );
     }
 
+    private function readLatestSucceededDebtRepayment(
+        string $workspaceId,
+        string $stateContextId,
+        CashierV3OperatorScope $operator,
+        CashierV3DataScopeContext $scope
+    ): ?array {
+        $request = (array)Db::name('cashier_v3_checkout_request')
+            ->where('tenant_id', $scope->tenantId())
+            ->where('store_id', $operator->storeId())
+            ->where('operator_id', $operator->operatorId())
+            ->where('workspace_id', $workspaceId)
+            ->where('state_context_id', $stateContextId)
+            ->order('recorded_at desc,id desc')->find();
+        if (!$request) return null;
+        // Only the latest request may drive the current overlay. An older debt
+        // repayment must never hide a newer normal checkout result.
+        if ((string)($request['source_document_type'] ?? '') !== 'debt_repayment'
+            || (string)($request['request_status'] ?? '') !== 'succeeded') return null;
+        $requestId = (string)($request['request_id'] ?? '');
+        $repayment = (array)Db::name('cashier_v3_debt_repayment')
+            ->where('tenant_id', $scope->tenantId())
+            ->where('store_id', $operator->storeId())
+            ->where('natural_key', 'debt_repayment:' . $requestId)
+            ->where('status', 'succeeded')->find();
+        if (!$repayment) throw self::failure('debt_repayment_succeeded_projection_missing');
+        $collections = Db::name('cashier_v3_debt_repayment_collection')
+            ->where('repayment_id', (string)$repayment['repayment_id'])
+            ->where('collection_status', 'succeeded')->order('payment_line_no asc,id asc')->select()->toArray();
+        $resultLines = [];
+        foreach ($collections as $row) {
+            $method = (string)$row['payment_method'];
+            if (!isset(self::PAYMENT_NAMES[$method])) throw self::failure('debt_repayment_collection_method_invalid');
+            $resultLines[] = [
+                'id' => (string)$row['collection_id'], 'kind' => 'bookkeeping_collection',
+                'method' => $method, 'name' => (string)($row['payment_method_name_snapshot'] ?? self::PAYMENT_NAMES[$method]),
+                'amount' => self::money((int)$row['amount_cents']), 'status' => 'succeeded',
+                'externalTransactionNo' => (string)$row['external_transaction_no_snapshot'],
+                'remark' => (string)$row['remark_snapshot'], 'canEdit' => false, 'canRemove' => false,
+            ];
+        }
+        $amount = (int)$repayment['repayment_amount_cents'];
+        return [
+            'contractVersion' => self::CONTRACT_VERSION, 'businessType' => 'debt_repayment',
+            'status' => 'succeeded', 'requestStatus' => 'succeeded',
+            'checkoutRequestId' => $requestId, 'requestId' => $requestId,
+            'requestNo' => (string)$repayment['repayment_no'],
+            'checkoutRequestVersion' => (int)$request['request_version'], 'revision' => (int)$request['request_version'],
+            'originalIdempotencyKey' => (string)$repayment['command_idempotency_key'],
+            'settledAt' => (int)$repayment['settled_at'], 'completionKind' => 'debt_repayment_completed',
+            'completionLabel' => '欠款补交成功', 'completionDescription' => '本次欠款补交与收款明细已保存。',
+            'canClose' => true, 'canRetry' => false, 'resumeOnLoad' => false,
+            'recoveryReady' => false, 'preparationReady' => false, 'snapshotReady' => false,
+            'orderLines' => [],
+            'summary' => ['selectedCount'=>0,'originalAmount'=>self::money($amount),'discountAmount'=>0,'receivableAmount'=>self::money($amount),'entitlementActualAmount'=>0],
+            'compositionCode' => 'sale_only',
+            'composition' => ['code'=>'sale_only','lineRoles'=>[],'hasSale'=>false,'hasEntitlement'=>false,'primaryAction'=>'collect_payment','primaryActionLabel'=>'确认还款'],
+            'debtAmount' => 0, 'cashPerformanceAmount' => self::money($amount), 'balancePaymentAmount' => 0,
+            'payment' => ['methods'=>[],'selectedLines'=>[],'resultLines'=>$resultLines,'summary'=>['receivableAmount'=>self::money($amount),'selectedAmount'=>self::money($amount),'remainingAmount'=>0,'overpaidAmount'=>0]],
+            'finalChanges' => [], 'commandContexts' => [],
+        ];
+    }
+
     /**
      * Payment drafts carry only a frozen balance authority after the member
      * chooses balance payment. The editable checkout projection must expose
@@ -127,6 +199,14 @@ final class CashierV3CheckoutProjectionServices
         $memberId = (int)($projection['member']['id'] ?? 0);
         if (!isset($projection['payment']) || !is_array($projection['payment'])) {
             throw self::failure('checkout_projection_payment_missing');
+        }
+        // Sales-debt repayment accepts only the seven bookkeeping collection
+        // methods. It must not silently turn an old receivable into a balance
+        // deduction, for which the repayment authority has no ledger fields.
+        if ((string)($projection['businessType'] ?? '') === 'debt_repayment') {
+            $projection['payment']['balanceAvailable'] = false;
+            $projection['payment']['availableBalance'] = 0;
+            return $projection;
         }
         if ($memberId <= 0) {
             $projection['payment']['balanceAvailable'] = false;
@@ -366,6 +446,7 @@ final class CashierV3CheckoutProjectionServices
         $saleOriginal = 0;
         $saleDiscount = 0;
         $saleAmount = 0;
+        $saleDebt = 0;
         $entitlementActual = 0;
         foreach ($rows as $row) {
             if (!is_array($row)) {
@@ -446,7 +527,34 @@ final class CashierV3CheckoutProjectionServices
                     $row['sale_amount_cents'] ?? null,
                     'line.sale_amount_cents'
                 );
+                $lineDebt = self::nonNegativeInt(
+                    $row['debt_amount_cents'] ?? null,
+                    'line.debt_amount_cents'
+                );
+                $configuredCost = self::nonNegativeInt(
+                    $row['configured_cost_cents'] ?? 0,
+                    'line.configured_cost_cents'
+                );
+                $priceChangeReason = self::text(
+                    $row['price_change_reason'] ?? '',
+                    255,
+                    'line.price_change_reason'
+                );
+                $priceChangedBy = self::nonNegativeInt(
+                    $row['price_changed_by'] ?? 0,
+                    'line.price_changed_by'
+                );
+                $priceChangedByName = self::text(
+                    $row['price_changed_by_name_snapshot'] ?? '',
+                    128,
+                    'line.price_changed_by_name_snapshot'
+                );
+                $priceChangedAt = self::nonNegativeInt(
+                    $row['price_changed_at'] ?? 0,
+                    'line.price_changed_at'
+                );
                 if ($original !== self::safeAdd($discount, $amount, 'sale_line_amount')
+                    || $lineDebt > $amount
                     || self::nonNegativeInt(
                         $row['entitlement_actual_amount_cents'] ?? null,
                         'line.entitlement_actual_amount_cents'
@@ -483,10 +591,16 @@ final class CashierV3CheckoutProjectionServices
                     'originalAmountCents' => $original,
                     'discountAmountCents' => $discount,
                     'saleAmountCents' => $amount,
+                    'debtAmountCents' => $lineDebt,
                     'sourceNameSnapshot' => $sourceName,
                     'sourceCodeSnapshot' => $sourceCode,
                     'categoryIdSnapshot' => $categoryId,
                     'categoryNameSnapshot' => $categoryName,
+                    'configuredCostCents' => $configuredCost,
+                    'priceChangeReason' => $priceChangeReason,
+                    'priceChangedBy' => $priceChangedBy,
+                    'priceChangedByNameSnapshot' => $priceChangedByName,
+                    'priceChangedAt' => $priceChangedAt,
                     'serviceObject' => $serviceObject,
                     'isExperience' => $isExperience,
                 ];
@@ -500,12 +614,23 @@ final class CashierV3CheckoutProjectionServices
                     unset($fingerprintInput['catalogSkuId']);
                 }
                 $expectedFingerprint = CashierV3CheckoutSettlementCanonicalizer::fingerprint($fingerprintInput);
-                if (!hash_equals($storedFingerprint, $expectedFingerprint)) {
+                if (!hash_equals($storedFingerprint, $expectedFingerprint)
+                    && !self::matchesLegacyUnchangedPriceFingerprint(
+                        $storedFingerprint,
+                        $fingerprintInput,
+                        $configuredCost,
+                        $priceChangeReason,
+                        $priceChangedBy,
+                        $priceChangedByName,
+                        $priceChangedAt,
+                        $lineDebt
+                    )) {
                     throw self::failure('checkout_projection_line_fingerprint_drift');
                 }
                 $saleOriginal = self::safeAdd($saleOriginal, $original, 'sale_original_total');
                 $saleDiscount = self::safeAdd($saleDiscount, $discount, 'sale_discount_total');
                 $saleAmount = self::safeAdd($saleAmount, $amount, 'sale_total');
+                $saleDebt = self::safeAdd($saleDebt, $lineDebt, 'sale_debt_total');
                 $lines[] = [
                     'id' => $lineId,
                     'lineRole' => 'sale',
@@ -521,6 +646,7 @@ final class CashierV3CheckoutProjectionServices
                     'finalAmount' => self::money($amount),
                     'amount' => self::money($amount),
                     'amountRole' => 'sale_receivable',
+                    'debtAmountCents' => $lineDebt,
                     'serviceSource' => '本次购买',
                     'sourceCode' => $sourceCode,
                     'categoryId' => $categoryId,
@@ -737,7 +863,9 @@ final class CashierV3CheckoutProjectionServices
             'request.balance_deduction_amount_cents'
         );
         $debt = self::nonNegativeInt($request['debt_amount_cents'] ?? null, 'request.debt_amount_cents');
-        if ($selectedPayment !== $selectedPaymentExpected || $cashPerformance !== $selectedPayment) {
+        if ($selectedPayment !== $selectedPaymentExpected
+            || $cashPerformance !== $selectedPayment
+            || $saleDebt !== $debt) {
             throw self::failure('checkout_projection_payment_total_drift');
         }
         // 余额扣款也是本单的已选结算方式。它没有独立的 payment_draft
@@ -808,10 +936,23 @@ final class CashierV3CheckoutProjectionServices
             64,
             'request.source_document_id'
         );
+        $businessType = $sourceDocumentType === 'debt_repayment'
+            ? 'debt_repayment'
+            : 'checkout';
         $compositionProjection = $composition['projection'];
+        if ($businessType === 'debt_repayment') {
+            $compositionProjection['primaryAction'] = 'collect_payment';
+            $compositionProjection['primaryActionLabel'] = '确认还款';
+            foreach ($compositionProjection['steps'] as &$step) {
+                if (($step['key'] ?? '') === 'final') {
+                    $step['label'] = '确认还款';
+                }
+            }
+            unset($step);
+        }
         $projection = [
             'contractVersion' => self::CONTRACT_VERSION,
-            'businessType' => 'checkout',
+            'businessType' => $businessType,
             'status' => 'editing',
             'requestStatus' => $requestStatus,
             'checkoutRequestId' => $requestId,
@@ -831,6 +972,14 @@ final class CashierV3CheckoutProjectionServices
             'workspaceId' => $workspaceId,
             'stateContextId' => $stateContextId,
             'businessDate' => (string)($request['business_date'] ?? ''),
+            'supplement' => [
+                'enabled' => (int)($request['supplement_enabled'] ?? 0) === 1,
+                'businessDate' => (string)($request['supplement_business_date'] ?? ''),
+                'reason' => (string)($request['supplement_reason'] ?? ''),
+                'operatorId' => (int)($request['supplement_operator_id'] ?? 0),
+                'operatorNameSnapshot' => (string)($request['supplement_operator_name_snapshot'] ?? ''),
+                'operatedAt' => (int)($request['supplement_operated_at'] ?? 0),
+            ],
             'sourceDocumentType' => $sourceDocumentType,
             'sourceDocumentId' => $sourceDocumentId,
             'sourceDocumentNo' => (string)($request['source_document_no'] ?? ''),
@@ -886,6 +1035,46 @@ final class CashierV3CheckoutProjectionServices
             $projection['serviceOrderId'] = $sourceDocumentId;
         }
         return $projection;
+    }
+
+    private static function matchesLegacyUnchangedPriceFingerprint(
+        string $storedFingerprint,
+        array $fingerprintInput,
+        int $configuredCost,
+        string $priceChangeReason,
+        int $priceChangedBy,
+        string $priceChangedByName,
+        int $priceChangedAt,
+        int $lineDebt
+    ): bool {
+        if ($lineDebt !== 0) {
+            return false;
+        }
+        unset($fingerprintInput['debtAmountCents']);
+        if (hash_equals(
+            $storedFingerprint,
+            CashierV3CheckoutSettlementCanonicalizer::fingerprint($fingerprintInput)
+        )) {
+            return true;
+        }
+        if ($configuredCost !== 0
+            || $priceChangeReason !== ''
+            || $priceChangedBy !== 0
+            || $priceChangedByName !== ''
+            || $priceChangedAt !== 0) {
+            return false;
+        }
+        unset(
+            $fingerprintInput['configuredCostCents'],
+            $fingerprintInput['priceChangeReason'],
+            $fingerprintInput['priceChangedBy'],
+            $fingerprintInput['priceChangedByNameSnapshot'],
+            $fingerprintInput['priceChangedAt']
+        );
+        return hash_equals(
+            $storedFingerprint,
+            CashierV3CheckoutSettlementCanonicalizer::fingerprint($fingerprintInput)
+        );
     }
 
     /**

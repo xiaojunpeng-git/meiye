@@ -10,6 +10,7 @@ const rechargeCheckout = read('前端代码/cashier-v3/src/composables/useRechar
 const manifest = read('前端代码/cashier-v3/src/services/cashierV3ActionManifest.js')
 const bridge = read('前端代码/cashier-v3/src/services/cashierV3Bridge.js')
 const selector = read('前端代码/cashier-v3/src/components/cashier/CheckoutBusinessSourceOverlay.vue')
+const checkoutOverlay = read('前端代码/cashier-v3/src/components/cashier/CashierCheckoutOverlay.vue')
 
 assert.match(workbench, /loadCheckoutBusinessCatalog/, '来源选择器必须只读取正式收银配置目录')
 assert.match(workbench, /update-checkout-business-source/, '销售结账必须提交正式来源更新命令')
@@ -21,4 +22,9 @@ assert.match(manifest, /'update-recharge-checkout-business-source': FEATURE_MEMB
 assert.match(bridge, /action === 'update-recharge-checkout-business-source'/, '充值来源更新必须带会员和余额版本上下文')
 assert.match(selector, /requiresSecondary/, '来源选择器必须执行后端下发的二级必选规则')
 assert.match(selector, /emit\('confirm', \{ primarySourceId: primaryId.value, secondarySourceId: secondaryId.value \}\)/, '前端只能提交来源 ID，名称由后端快照')
+assert.doesNotMatch(checkoutOverlay, />选择来源<\//, '销售结账不得再通过“选择来源”按钮打开二次弹层')
+assert.match(checkoutOverlay, /v-for="source in businessSourceRoots"/, '销售结账必须直接平铺一级来源')
+assert.match(checkoutOverlay, /selectedPrimaryRequiresSecondary/, '销售结账内联来源必须保留二级来源必选规则')
+assert.match(checkoutOverlay, /emit\('business-source-change', \{ primarySourceId:/, '销售结账内联来源只能向工作台提交来源 ID')
+assert.match(workbench, /@business-source-change="saveInlineCheckoutBusinessSource"/, '销售结账内联来源必须接入正式保存命令')
 console.log('cashier business-source checkout frontend contract: PASS')

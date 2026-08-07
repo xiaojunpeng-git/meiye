@@ -154,7 +154,7 @@ export function responseDataBlock(response = {}) {
   return {}
 }
 
-export function isCompleteCheckoutCompositionContract(composition, lines = []) {
+export function isCompleteCheckoutCompositionContract(composition, lines = [], options = {}) {
   if (!composition || typeof composition !== 'object' || Array.isArray(composition) || !Array.isArray(lines)) return false
   if (!Array.isArray(composition.lineRoles) || !Array.isArray(composition.steps)) return false
 
@@ -175,11 +175,12 @@ export function isCompleteCheckoutCompositionContract(composition, lines = []) {
       : hasSale
         ? 'collect_payment'
         : ''
-  const primaryActionLabel = {
+  const defaultPrimaryActionLabel = {
     collect_payment: '确认收款',
     complete_service: '确认完成服务',
     collect_and_complete: '收款并完成服务'
   }[primaryAction] || ''
+  const primaryActionLabel = String(options.primaryActionLabel || defaultPrimaryActionLabel)
   const expectedSteps = primaryAction
     ? [
         { key: 'order', number: 1, label: hasEntitlement ? '确认本次内容' : '确认订单' },

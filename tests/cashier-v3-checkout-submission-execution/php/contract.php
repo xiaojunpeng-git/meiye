@@ -337,6 +337,13 @@ submissionExecutionAssert(
     ) !== false
         && strpos($portSource, '| CashierV3EntitlementProviderContractException') !== false
 );
+submissionExecutionAssert(
+    'C2-EXEC-14 zero balance deduction remains a valid optional checkout slice',
+    submissionExecutionInvoke($port, 'domainCall', [static function (): ?array {
+        return null;
+    }]) === null
+        && (new ReflectionMethod($port, 'domainCall'))->getReturnType()->allowsNull()
+);
 
 echo "C2 checkout submission execution: {$passed} passed, {$failed} failed\n";
 exit($failed === 0 ? 0 : 1);

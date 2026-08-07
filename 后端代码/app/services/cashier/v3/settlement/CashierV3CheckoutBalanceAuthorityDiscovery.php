@@ -103,7 +103,14 @@ final class CashierV3CheckoutBalanceAuthorityDiscovery
                 $request['member_id'] ?? null,
                 'checkout_balance_discovery_member_required'
             );
-            $snapshot = $this->balances->lockSnapshotInTx($memberId, $operator, $dataScope);
+            // Applying/updating a balance draft is read-only. Final
+            // submission preparation also only verifies and records the
+            // account version; it does not debit money. The immutable plan
+            // upgrades this dependency to mutate when submit-checkout locks
+            // the plan, so preparation must not report a balance mutation.
+            $snapshot = $action === self::ACTION_PREPARE_SUBMISSION
+                ? $this->balances->lockSnapshotInTx($memberId, $operator, $dataScope)
+                : $this->balances->readSnapshot($memberId, $operator, $dataScope);
             if ($action === self::ACTION_PREPARE_SUBMISSION) {
                 $expectedKey = (string)($request['balance_authority_key'] ?? '');
                 $expectedAccountId = (string)($request['balance_account_id'] ?? '');
@@ -129,7 +136,7 @@ final class CashierV3CheckoutBalanceAuthorityDiscovery
                     'id' => (string)$snapshot['accountId'],
                     'expectedVersion' => (int)$snapshot['accountVersion'],
                     'roles' => ['checkout_member_balance'],
-                    'accessMode' => 'mutate',
+                    'accessMode' => 'read',
                     'providerContractVersion' => CashierV3MemberBalanceProvider::CONTRACT_VERSION,
                     'authorityFingerprint' => self::fingerprint(
                         $snapshot,

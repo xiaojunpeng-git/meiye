@@ -18,7 +18,7 @@ if (in_array('--self-check', $argv, true)) {
     $required = [
         'C2-PW-01', 'C2-PW-02', 'C2-PW-03', 'C2-PW-04', 'C2-PW-05',
         'C2-PW-06', 'C2-PW-07', 'C2-PW-08', 'C2-PW-09', 'C2-PW-10',
-        'C2-PW-11', 'C2-PW-12', 'C2-PW-13', 'C2-PW-14', 'C2-PW-15',
+        'C2-PW-11', 'C2-PW-12', 'C2-PW-13', 'C2-PW-14', 'C2-PW-15', 'C2-PW-16',
         'CashierV3CheckoutSubmissionOrchestrator',
         'ThinkPhpCashierV3CheckoutSubmissionExecutionPort',
         'CashierV3CheckoutSubmissionResourceDiscoveryComposite',
@@ -243,6 +243,11 @@ $submitBlock = cpwBlock(
     "registerCommand('submit-checkout'",
     "if (\$handlers->hasProjection('query-checkout-result'))"
 );
+$prepareSubmissionBlock = cpwBlock(
+    $module,
+    "registerCommand('prepare-checkout-submission'",
+    "if (\$handlers->hasCommand('submit-checkout'))"
+);
 cpwCheck('C2-PW-10', 'submit handler delegates only through the final orchestrator',
     $submitBlock !== ''
     && $submissionVariable !== ''
@@ -284,6 +289,9 @@ if ($touchedOffset === false) {
 }
 cpwCheck('C2-PW-14', 'domain resources are mutated by their owners and never Gateway-bumped',
     $touchedOnlyTechnical);
+cpwCheck('C2-PW-16', 'submission preparation verifies balance without advancing its version',
+    strpos($prepareSubmissionBlock, $touchedBalanceBranch) === false
+    && strpos($prepareSubmissionBlock, "'touched' => ['cashier_workspace', 'checkout_request']") !== false);
 
 echo "C2_CHECKOUT_PRODUCTION_WIRING_CONTRACT passed={$passed} failed={$failed}\n";
 exit($failed === 0 ? 0 : 1);

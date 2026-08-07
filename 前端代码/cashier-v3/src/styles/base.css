@@ -1455,11 +1455,33 @@ button:disabled {
 }
 
 .catalog-categories {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 2px 8px;
   color: #909399;
+  font-size: 13px;
+}
+
+.catalog-category-options {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0 8px;
+  max-height: 38px;
+  overflow: hidden;
+}
+
+.catalog-categories.is-expanded .catalog-category-options {
+  max-height: none;
+}
+
+.catalog-categories__toggle {
+  min-width: 48px;
+  min-height: 32px;
+  border: 0;
+  background: transparent;
+  color: #1677cc;
   font-size: 13px;
 }
 
@@ -2320,7 +2342,7 @@ button:disabled {
   grid-column: 1 / -1;
   display: grid;
   grid-template-columns:
-    minmax(48px, .55fr)
+    max-content
     minmax(62px, .75fr)
     minmax(80px, 1.1fr)
     minmax(90px, 1.2fr)
@@ -2378,10 +2400,17 @@ button:disabled {
   text-align: left;
 }
 
+.cart-line__meta-slot--debt .cart-line__meta-action {
+  width: auto;
+  max-width: none;
+  overflow: visible;
+  white-space: nowrap;
+}
+
 .cart-line__meta-slot--coupon {
   /* Keep the grid track width intact so the label never gets clipped. */
   position: relative;
-  left: 50px;
+  left: 20px;
   z-index: 1;
 }
 
@@ -2389,6 +2418,21 @@ button:disabled {
   position: relative;
   left: 30px;
   z-index: 1;
+}
+
+/* 游客没有欠款能力：移除该格后，后续操作从最左侧连续排布。 */
+.cart-line__secondary-meta.is-guest-order {
+  grid-template-columns:
+    minmax(62px, .75fr)
+    minmax(80px, 1.1fr)
+    minmax(90px, 1.2fr)
+    minmax(140px, 1.15fr)
+    auto;
+}
+
+.cart-line__secondary-meta.is-guest-order .cart-line__meta-slot--coupon,
+.cart-line__secondary-meta.is-guest-order .cart-line__meta-slot--salesperson {
+  left: 0;
 }
 
 .cart-line .quantity-stepper--editable {
@@ -2617,6 +2661,7 @@ button:disabled {
   color: #1890ff;
 }
 
+.cashier-checkout-actions__clear,
 .cashier-checkout-actions__hang {
   width: 100px;
   min-width: 100px;
@@ -2624,12 +2669,20 @@ button:disabled {
   height: 40px;
 }
 
+.cashier-checkout-actions__clear {
+  width: 120px;
+  min-width: 120px;
+  white-space: nowrap;
+}
+
 .cashier-more-actions__trigger,
+.cashier-checkout-actions__clear,
 .cashier-checkout-actions__hang {
   border-color: #91add0;
 }
 
 .cashier-more-actions__trigger:hover:not(:disabled),
+.cashier-checkout-actions__clear:hover:not(:disabled),
 .cashier-checkout-actions__hang:hover:not(:disabled) {
   border-color: #5f91c9;
 }
@@ -4140,7 +4193,7 @@ button:disabled {
 .personnel-performance-overlay {
   position: fixed;
   inset: 0;
-  z-index: 110;
+  z-index: 1700;
   display: grid;
   place-items: center;
   padding: 24px;
@@ -4588,6 +4641,13 @@ button:disabled {
 
 .cashier-guided-panel__search {
   display: block;
+  min-width: 0;
+}
+
+.cashier-guided-panel__search-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) auto auto;
+  gap: 8px;
   margin-bottom: 12px;
 }
 
@@ -4599,6 +4659,16 @@ button:disabled {
   padding: 0 10px;
   color: #1d2939;
   background: #fff;
+}
+
+@media (max-width: 720px) {
+  .cashier-guided-panel__search-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .cashier-guided-panel__search {
+    grid-column: 1 / -1;
+  }
 }
 
 .cashier-guided-option.is-selected,
@@ -4771,13 +4841,11 @@ button:disabled {
 .cashier-entitlement-selector-panel .cashier-entitlement-table__head,
 .cashier-entitlement-selector-panel .cashier-entitlement-table__row {
   grid-template-columns:
-    minmax(0, 1.55fr)
-    minmax(0, .42fr)
-    minmax(0, .42fr)
-    minmax(0, .62fr)
-    minmax(0, .65fr)
-    minmax(88px, .9fr)
-    52px;
+    minmax(160px, 1.75fr)
+    minmax(56px, .52fr)
+    minmax(76px, .72fr)
+    minmax(96px, 1fr)
+    56px;
   min-width: 0;
 }
 
@@ -5376,7 +5444,7 @@ button:disabled {
 
 .checkout-payment-line {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, auto);
   align-items: start;
 }
 
@@ -5413,9 +5481,53 @@ button:disabled {
 
 .checkout-payment-line__amount {
   display: flex !important;
+  min-width: 320px;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: flex-start;
   gap: 7px;
+}
+
+.checkout-inline-modal-backdrop {
+  position: absolute;
+  z-index: 20;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgb(15 23 42 / 35%);
+}
+
+.checkout-inline-modal {
+  width: min(420px, 100%);
+  padding: 20px;
+  border: 1px solid #dfe5ec;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 16px 48px rgb(15 23 42 / 22%);
+}
+
+.checkout-inline-modal header,
+.checkout-inline-modal footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.checkout-inline-modal h3 {
+  margin: 0;
+  color: #20252b;
+  font-size: 16px;
+}
+
+.checkout-inline-modal p {
+  margin: 16px 0;
+  color: #5f6b7a;
+  line-height: 1.6;
+}
+
+.checkout-inline-modal footer {
+  justify-content: flex-end;
 }
 
 .checkout-payment-line__amount > strong {
@@ -5433,7 +5545,7 @@ button:disabled {
   color: #cf1322;
   font: inherit;
   font-weight: 700;
-  text-align: right;
+  text-align: left;
 }
 
 .checkout-payment-line__amount-error {
@@ -5441,7 +5553,7 @@ button:disabled {
   color: #cf1322;
   font-size: 11px;
   line-height: 1.35;
-  text-align: right;
+  text-align: left;
 }
 
 .checkout-payment-line__remove {
@@ -5806,10 +5918,15 @@ button:disabled {
   }
 
   .checkout-payment-layout,
+  .checkout-payment-line,
   .checkout-payment-line-editor,
   .checkout-order-details,
   .checkout-final-summary {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .checkout-payment-line__amount {
+    min-width: 0;
   }
 
   .checkout-payment-layout {
@@ -6482,7 +6599,7 @@ button:disabled {
   gap: 10px;
 }
 
-/* 预约：默认列表，日历只做当天资源安排查看，不允许直接拖拽改期。 */
+/* 预约：默认日历，日历只做当天资源安排查看，不允许直接拖拽改期。 */
 .reservation-page {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
@@ -6771,15 +6888,17 @@ button:disabled {
 .reservation-calendar {
   --reservation-resource-count: 1;
   --reservation-slot-height: 44px;
-  min-width: max-content;
+  width: 100%;
+  min-width: 0;
   min-height: 0;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .reservation-calendar__header,
 .reservation-calendar__row {
   display: grid;
-  grid-template-columns: 82px repeat(var(--reservation-resource-count), minmax(218px, 1fr));
+  grid-template-columns: 82px repeat(var(--reservation-resource-count), minmax(0, 1fr));
 }
 
 .reservation-calendar__header {

@@ -80,8 +80,8 @@ ok(
 )
 ok(
   'editing balance drafts restore at confirmation only after their authoritative payment is fully balanced',
-  workbench.includes('const isEditingBalanceDraft = String(snapshot.requestStatus || \'\') === \'editing\'')
-    && workbench.includes('Number(snapshot.balancePaymentAmount || 0) > 0')
+  workbench.includes('const isEditingPaymentDraft = String(snapshot.requestStatus || \'\') === \'editing\'')
+    && workbench.includes('Number(paymentSummary.selectedAmount || 0) > 0')
     && workbench.includes('const isFullyPaid = Number(paymentSummary.remainingAmount) === 0')
     && workbench.includes('checkoutRecoveryActiveStep.value = isFullyPaid')
     && workbench.includes('? 3')

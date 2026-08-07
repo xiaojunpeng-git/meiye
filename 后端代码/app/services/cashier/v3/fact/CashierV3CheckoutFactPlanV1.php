@@ -60,7 +60,7 @@ final class CashierV3CheckoutFactPlanV1
     private const SALE_KEYS = [
         'sourceType', 'itemId', 'itemCodeSnapshot', 'itemNameSnapshot',
         'categoryIdSnapshot', 'categoryNameSnapshot', 'quantity',
-        'originalAmountCents', 'discountAmountCents', 'saleAmountCents',
+        'originalAmountCents', 'discountAmountCents', 'saleAmountCents', 'debtAmountCents',
     ];
 
     private const PAYMENT_KEYS = [
@@ -278,8 +278,10 @@ final class CashierV3CheckoutFactPlanV1
                 'original_amount_cents' => self::signedMoney($fact['originalAmountCents'], $direction, 'sale_original_amount_invalid'),
                 'discount_amount_cents' => self::signedMoney($fact['discountAmountCents'], $direction, 'sale_discount_amount_invalid', true),
                 'sale_amount_cents' => self::signedMoney($fact['saleAmountCents'], $direction, 'sale_amount_invalid'),
+                'debt_amount_cents' => self::signedMoney($fact['debtAmountCents'], $direction, 'sale_debt_amount_invalid', true),
             ];
-            if ($row['original_amount_cents'] - $row['discount_amount_cents'] !== $row['sale_amount_cents']) {
+            if ($row['original_amount_cents'] - $row['discount_amount_cents'] !== $row['sale_amount_cents']
+                || abs($row['debt_amount_cents']) > abs($row['sale_amount_cents'])) {
                 throw self::failure('sale_amount_equation_invalid');
             }
             return $row;

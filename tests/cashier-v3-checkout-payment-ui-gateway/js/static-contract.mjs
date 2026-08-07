@@ -205,7 +205,6 @@ check(
 console.log('== local-only checkout navigation ==')
 const goPrevious = functionSource(overlayScript, overlayAst, 'goPrevious')
 const goNext = functionSource(overlayScript, overlayAst, 'goNext')
-const toggleCombination = functionSource(overlayScript, overlayAst, 'toggleCombinationMode')
 const finishCheckoutAndReturn = functionSource(overlayScript, overlayAst, 'finishCheckoutAndReturn')
 check(
   'previous checkout step changes only local state',
@@ -221,9 +220,9 @@ check(
   JSON.stringify(goNextActions),
 )
 check(
-  'combination-payment toggle changes only local state',
-  toggleCombination.includes('combinationMode.value = !combinationMode.value')
-    && requestActions(toggleCombination).length === 0,
+  '组合收款由多条草稿明细自动表达，不再要求额外开关',
+  !overlayScript.includes('toggleCombinationMode')
+    && !overlayScript.includes('request(\'toggle-combination-payment\''),
 )
 check(
   'overlay never emits checkout-step or combination-toggle business actions',
@@ -266,11 +265,13 @@ check(
     && !workbenchScript.includes("'次卡'"),
 )
 check(
-  'the synthetic all-category button is absent while real categories remain optional filters',
+  'catalog provides an all-category entry and a one-row expandable category list',
   workbenchScript.includes("const selectedCategory = ref('')")
-    && workbenchScript.includes(".filter((category) => category !== '全部')")
+    && workbenchScript.includes("'全部',")
+    && workbenchScript.includes("category === '全部' ? '' : category")
     && workbenchScript.includes("const categoryMatched = !selectedCategory.value || item.category === selectedCategory.value")
-    && workbenchSource.includes('<div v-if="categories.length" class="catalog-categories" aria-label="商品分类">'),
+    && workbenchSource.includes('class="catalog-category-options"')
+    && workbenchSource.includes("{{ areCategoriesExpanded ? '收起' : '展开' }}"),
 )
 check(
   'custom cards remain a dedicated configuration entry instead of a normal card catalog item',
@@ -289,6 +290,11 @@ check(
     && JSON.stringify(requestActions(updatePayment)) === JSON.stringify(['update-payment-line'])
     && JSON.stringify(requestActions(removePayment))
       === JSON.stringify(['remove-balance-payment', 'remove-payment-line']),
+)
+check(
+  '选择收款方式只追加草稿明细，不自动删除已有方式',
+  !addPayment.includes('remove-payment-line')
+    && !addPayment.includes('remove-balance-payment'),
 )
 const currentContexts = functionSource(
   workbenchScript,

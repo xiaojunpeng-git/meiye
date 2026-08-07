@@ -3,6 +3,7 @@
 namespace app\services\cashier\v3\checkout\persistence;
 
 use app\services\cashier\v3\card\CashierV3CardRuleEntitlementAuthorityServices;
+use app\services\cashier\v3\CashierV3BusinessDocumentNumberServices;
 use app\services\cashier\v3\CashierV3TransactionGuard;
 use think\facade\Db;
 
@@ -56,9 +57,13 @@ final class ThinkPhpCashierV3EntitlementCompletionWriter
         $occupation = $this->convertOccupationInTx($plan);
         $ruleDeductions = $this->cardRules()->applyDeductionsInTx($plan->deductions(), $plan->context());
         $versions = $this->applyDeductions($plan, $authorities, $ruleDeductions);
+        // Service document numbers are allocated only after this command has
+        // claimed its completion receipt. A replay returns above without
+        // creating document mappings for historical ESF rows.
+        $serviceRows = $this->allocateServiceDocumentNumbersInTx($plan->serviceRows(), $context);
         $inserted = [
             'writeoff' => $this->persistRows(self::WRITEOFF_TABLE, 'writeoff', $plan->writeoffRows()),
-            'service' => $this->persistRows(self::SERVICE_TABLE, 'service', $plan->serviceRows()),
+            'service' => $this->persistRows(self::SERVICE_TABLE, 'service', $serviceRows),
             'performance' => $this->persistRows(self::PERFORMANCE_TABLE, 'performance', $plan->performanceRows()),
         ];
 
@@ -523,6 +528,35 @@ final class ThinkPhpCashierV3EntitlementCompletionWriter
             $inserted++;
         }
         return $inserted;
+    }
+
+    /**
+     * @param array<int,array<string,mixed>> $serviceRows
+     * @param array<string,mixed> $context
+     * @return array<int,array<string,mixed>>
+     */
+    private function allocateServiceDocumentNumbersInTx(array $serviceRows, array $context): array
+    {
+        if ($serviceRows === []) {
+            return [];
+        }
+        $numbers = new CashierV3BusinessDocumentNumberServices();
+        foreach ($serviceRows as $index => $row) {
+            $technicalId = trim((string)($row['service_fact_id'] ?? ''));
+            if ($technicalId === '') {
+                throw self::failure('completion_service_fact_id_missing');
+            }
+            $row['service_record_no'] = $numbers->allocateForSourceInTx(
+                (string)$context['tenant_id'],
+                CashierV3BusinessDocumentNumberServices::SERVICE,
+                'entitlement_service_fact',
+                $technicalId,
+                (string)$context['business_date'],
+                (int)$context['recorded_at']
+            );
+            $serviceRows[$index] = $row;
+        }
+        return $serviceRows;
     }
 
     private function assertImmutableReplay(string $domain, array $expected, array $existing): void

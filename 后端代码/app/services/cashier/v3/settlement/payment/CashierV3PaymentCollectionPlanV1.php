@@ -45,6 +45,9 @@ final class CashierV3PaymentCollectionPlanV1
         'store_name_snapshot', 'member_id', 'member_name_snapshot', 'operator_id',
         'operator_name_snapshot', 'request_version', 'request_status', 'composition',
         'business_date', 'business_timezone', 'operation_occurred_at', 'recorded_at',
+        'order_note', 'supplement_enabled', 'supplement_reason',
+        'supplement_operator_id', 'supplement_operator_name_snapshot',
+        'supplement_operated_at',
         'source_document_type', 'source_document_id', 'source_document_no',
         'sales_amount_cents', 'receivable_amount_cents', 'selected_payment_amount_cents',
         'balance_deduction_amount_cents', 'balance_authority_key', 'balance_account_id',
@@ -157,17 +160,17 @@ final class CashierV3PaymentCollectionPlanV1
         $ids = new CashierV3PaymentCollectionIdFactory($serverNamespaceSecret);
         $batchId = $ids->batchId($request['tenant_id'], $request['request_id']);
         $collectionRows = [];
-        foreach ($payments as $index => $payment) {
-            $row = [
-                'collection_id' => $ids->collectionId(
         $businessConfig = new CashierV3BusinessConfigServices();
-                    $request['tenant_id'],
+        foreach ($payments as $index => $payment) {
             // The immutable collection keeps the name as of settlement. The
             // transaction lock also rejects a method disabled mid-checkout.
             $methodSnapshot = $businessConfig->resolveAccountingMethodSnapshot(
                 $payment['payment_method'],
                 true
             );
+            $row = [
+                'collection_id' => $ids->collectionId(
+                    $request['tenant_id'],
                     $request['request_id'],
                     $payment['payment_draft_id']
                 ),

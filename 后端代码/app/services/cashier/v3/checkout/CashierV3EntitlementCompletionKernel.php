@@ -17,6 +17,7 @@ use app\services\cashier\v3\CashierV3ResourceKindCatalog;
 final class CashierV3EntitlementCompletionKernel
 {
     public const CONTRACT_VERSION = 'c2-entitlement-completion-v3';
+    public const AMOUNT_CALCULATION_VERSION = 'whole-yuan-floor-final-remainder-v1';
     public const ACTION = 'complete-entitlement-service';
 
     public const COMPOSITION_EMPTY = 'empty';
@@ -393,6 +394,9 @@ final class CashierV3EntitlementCompletionKernel
         int $quantity
     ): int {
         self::assertNonnegativeInt($purchaseAmountCents, 'purchaseAmountCents', self::MAX_MONEY_CENTS);
+        if ($purchaseAmountCents % 100 !== 0) {
+            throw self::failure('entitlement_purchase_amount_not_whole_yuan');
+        }
         self::assertPositiveInt($totalPurchaseTimes, 'totalPurchaseTimes', self::MAX_TIMES);
         self::assertNonnegativeInt($consumedTimes, 'consumedTimes', $totalPurchaseTimes);
         self::assertPositiveInt($quantity, 'quantity', self::MAX_TIMES);
@@ -811,6 +815,12 @@ final class CashierV3EntitlementCompletionKernel
         }
         self::assertPositiveInt($line['totalPurchaseTimes'], 'totalPurchaseTimes', self::MAX_TIMES);
         self::assertToken($line['amountCalculationVersion'], 'amountCalculationVersion', 128);
+        if (substr(
+            $line['amountCalculationVersion'],
+            -strlen(self::AMOUNT_CALCULATION_VERSION)
+        ) !== self::AMOUNT_CALCULATION_VERSION) {
+            throw self::failure('entitlement_amount_calculation_version_stale', ['lineId' => $line['lineId']]);
+        }
         self::assertNonnegativeInt($line['physicalRemainingTimes'], 'physicalRemainingTimes', $line['totalPurchaseTimes']);
         self::assertNonnegativeInt($line['debtLimitedUsableTimes'], 'debtLimitedUsableTimes', $line['physicalRemainingTimes']);
         self::assertToken($line['debtGuardId'], 'debtGuardId', 128);
@@ -2312,10 +2322,8 @@ final class CashierV3EntitlementCompletionKernel
         if ($completed >= $times) {
             return $total;
         }
-        $numerator = $total * $completed;
-        $whole = intdiv($numerator, $times);
-        $remainder = $numerator % $times;
-        return $whole + (($remainder * 2 >= $times) ? 1 : 0);
+        $regularWholeYuan = intdiv(intdiv($total, 100), $times);
+        return $regularWholeYuan * 100 * $completed;
     }
 
     private static function scaledCostCents(int $quantityUnits, int $unitCostCents, int $scale): int

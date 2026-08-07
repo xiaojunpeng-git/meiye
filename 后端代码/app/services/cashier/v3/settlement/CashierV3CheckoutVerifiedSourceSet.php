@@ -14,6 +14,7 @@ final class CashierV3CheckoutVerifiedSourceSet
     public const CONTRACT_VERSION = 'cashier-v3-checkout-verified-sources-v2';
 
     private const KIND_ORDER = [
+        'debt_record' => 65,
         'service_order' => 70,
         'hang_order' => 90,
         'reservation' => 100,

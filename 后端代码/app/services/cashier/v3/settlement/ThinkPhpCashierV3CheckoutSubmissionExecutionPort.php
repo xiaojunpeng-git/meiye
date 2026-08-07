@@ -80,6 +80,9 @@ final class ThinkPhpCashierV3CheckoutSubmissionExecutionPort
     /** @var CashierV3MemberBalanceWriterAdapter */
     private $balances;
 
+    /** @var CashierV3CheckoutBusinessSourceSelectionServices */
+    private $businessSources;
+
     /** @var string */
     private $serverNamespaceSecret;
 
@@ -95,7 +98,8 @@ final class ThinkPhpCashierV3CheckoutSubmissionExecutionPort
         ?ThinkPhpCashierV3EntitlementCompletionWriter $entitlements = null,
         string $serverNamespaceSecret = '',
         ?CashierV3CheckoutDebtAuthorityServices $debts = null,
-        ?CashierV3MemberBalanceWriterAdapter $balances = null
+        ?CashierV3MemberBalanceWriterAdapter $balances = null,
+        ?CashierV3CheckoutBusinessSourceSelectionServices $businessSources = null
     ) {
         $this->workspace = $workspace;
         $this->requests = $requests ?: new ThinkPhpCashierV3CheckoutRequestRepository();
@@ -106,6 +110,7 @@ final class ThinkPhpCashierV3CheckoutSubmissionExecutionPort
         $this->entitlements = $entitlements ?: new ThinkPhpCashierV3EntitlementCompletionWriter();
         $this->debts = $debts ?: new CashierV3CheckoutDebtAuthorityServices();
         $this->balances = $balances ?: new CashierV3MemberBalanceWriterAdapter();
+        $this->businessSources = $businessSources ?: new CashierV3CheckoutBusinessSourceSelectionServices();
         $this->entitlementAuthority = $entitlementAuthority;
         $this->serverNamespaceSecret = $serverNamespaceSecret;
         $this->saleOnly = $saleOnly ?: new CashierV3SaleOnlyCheckoutSubmissionServices(
@@ -280,10 +285,18 @@ final class ThinkPhpCashierV3CheckoutSubmissionExecutionPort
         return $this->domainCall(function () use ($authority, $salesOrder): array {
             $context = $this->context($authority);
             $salesPlan = $this->salesPlan($context, $authority);
+            $aggregate = $context->aggregate();
+            $request = (array)$aggregate['request'];
+            $salespeopleByCheckoutLine = $this->workspace->lockedSalespeopleByCheckoutLineInTx(
+                (string)$request['workspace_id'],
+                (array)$aggregate['lines'],
+                $context->operatorScope()
+            );
             $result = $this->debts->persistInTx(
-                (array)$context->aggregate()['request'],
+                $request,
                 $salesPlan,
                 $salesOrder,
+                $salespeopleByCheckoutLine,
                 $authority['commandIdempotencyKey'],
                 $authority['settledAt'],
                 $context->operatorScope(),
@@ -644,6 +657,12 @@ final class ThinkPhpCashierV3CheckoutSubmissionExecutionPort
             (string)($request['business_date'] ?? ''),
             (int)$authority['settledAt']
         );
+        $businessSource = $this->businessSources->lockResolvedForSettlementInTx(
+            CashierV3CheckoutBusinessSourceSelectionServices::KIND_SALE,
+            (string)($request['request_id'] ?? ''),
+            (string)($request['tenant_id'] ?? ''),
+            (int)($request['store_id'] ?? 0)
+        );
         return CashierV3SalesOrderPlanV1::fromLockedCheckoutAggregate(
             $context->aggregate(),
             $authority['commandIdempotencyKey'],
@@ -651,7 +670,8 @@ final class ThinkPhpCashierV3CheckoutSubmissionExecutionPort
             $authority['settledAt'],
             $authority['settledAt'],
             $this->serverNamespaceSecret(),
-            $documentNo
+            $documentNo,
+            $businessSource['primarySourceId'] > 0 ? $businessSource : []
         );
     }
 
@@ -1133,7 +1153,7 @@ final class ThinkPhpCashierV3CheckoutSubmissionExecutionPort
         return $value;
     }
 
-    private function domainCall(callable $operation): array
+    private function domainCall(callable $operation): ?array
     {
         try {
             return $operation();

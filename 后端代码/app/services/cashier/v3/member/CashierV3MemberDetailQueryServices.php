@@ -524,7 +524,7 @@ final class CashierV3MemberDetailQueryServices
         $this->applyStoreScope($holderQuery, 'h.store_id', $dataScope);
         $this->applyDetailKeyword($holderQuery, $keyword, ['h.card_name', 'h.card_no']);
         $holders = $holderQuery
-            ->field('h.id,h.oid,h.card_name,h.card_no,h.store_id,h.write_start,h.write_end,h.add_time')
+            ->field('h.id,h.oid,h.card_name,h.card_no,h.store_id,h.write_start,h.write_end,h.add_time,o.pay_price as order_pay_price')
             ->order('h.id', 'asc')
             ->select()
             ->toArray();
@@ -617,6 +617,11 @@ final class CashierV3MemberDetailQueryServices
                 $remainingAmount = bcadd($remainingAmount, (string)$project['remainingAmount'], 2);
             }
             $holderId = (int)($holder['id'] ?? 0);
+            $cardRuleType = (string)($cardRuleTypeByHolder[$holderId] ?? '');
+            $isTimeCard = $cardRuleType === 'time';
+            if ($isTimeCard) {
+                $remainingAmount = $this->money($holder['order_pay_price'] ?? 0);
+            }
             $statusCode = (string)($cardStatusByHolder[$holderId] ?? 'enabled');
             $cards[] = [
                 'id' => (string)($holder['id'] ?? ''),
@@ -624,7 +629,8 @@ final class CashierV3MemberDetailQueryServices
                 'cardName' => trim((string)($holder['card_name'] ?? '')) ?: '会员卡项',
                 'statusCode' => $statusCode,
                 'statusLabel' => $statusCode === 'disabled' ? '已停用' : '有效',
-                'cardRuleType' => (string)($cardRuleTypeByHolder[$holderId] ?? ''),
+                'cardRuleType' => $cardRuleType,
+                'isTimeCard' => $isTimeCard,
                 'storeName' => (string)($stores[(int)$holder['store_id']] ?? ''),
                 'openedAt' => $this->dateTime($holder['add_time'] ?? 0),
                 'expiresAt' => $this->dateTime($holder['write_end'] ?? 0, '长期有效'),

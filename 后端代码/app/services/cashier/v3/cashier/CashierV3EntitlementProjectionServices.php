@@ -878,8 +878,10 @@ final class CashierV3EntitlementProjectionServices
                 $remaining = (int)$holderRuleAuthority['remainingTimes'];
                 $purchaseTimes = (int)$holderRuleAuthority['totalTimes'];
             }
-            $sourceAmounts = $this->sourceAmounts($projects);
             $order = $orders[(int)$holder['oid']] ?? [];
+            $sourceAmounts = $kind['code'] === 'time_card'
+                ? $this->timeCardSourceAmounts($order)
+                : $this->sourceAmounts($projects);
             $sourceValidity = $this->effectiveValidity($holder, []);
             $sources[] = [
                 'id' => $holderId,
@@ -921,7 +923,8 @@ final class CashierV3EntitlementProjectionServices
         $purchaseCents = (int)($authority['purchaseAmountCents'] ?? -1);
         $totalTimes = (int)($authority['totalTimes'] ?? 0);
         $remainingTimes = (int)($authority['remainingTimes'] ?? -1);
-        if ($purchaseCents < 0 || $totalTimes <= 0 || $remainingTimes < 0 || $remainingTimes > $totalTimes) {
+        if ($purchaseCents < 0 || $purchaseCents % 100 !== 0
+            || $totalTimes <= 0 || $remainingTimes < 0 || $remainingTimes > $totalTimes) {
             return [
                 'purchaseAmount' => null,
                 'remainingAmount' => null,
@@ -1072,6 +1075,24 @@ final class CashierV3EntitlementProjectionServices
         ];
     }
 
+    /** @return array{purchaseAmount:?string,remainingAmount:?string,calculationVersion:string} */
+    private function timeCardSourceAmounts(array $order): array
+    {
+        $paid = $this->nonnegativeMoney($order['pay_price'] ?? null);
+        if ($paid === null) {
+            return [
+                'purchaseAmount' => null,
+                'remainingAmount' => null,
+                'calculationVersion' => 'time-card-order-paid-v1-invalid',
+            ];
+        }
+        return [
+            'purchaseAmount' => $paid,
+            'remainingAmount' => $paid,
+            'calculationVersion' => 'time-card-order-paid-v1',
+        ];
+    }
+
     /** @return array{code:string,label:?string} */
     private function sourceKind(array $holder, array $projects): array
     {
@@ -1117,7 +1138,7 @@ final class CashierV3EntitlementProjectionServices
             return null;
         }
         $raw = trim((string)$value);
-        if (preg_match('/^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,2})?$/', $raw) !== 1) {
+        if (preg_match('/^(?:0|[1-9][0-9]*)(?:\.0{1,2})?$/D', $raw) !== 1) {
             return null;
         }
         return bcadd($raw, '0', 2);

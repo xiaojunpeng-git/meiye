@@ -140,6 +140,26 @@ const latestVisit = computed(() => {
 const careReminder = computed(() => firstObjectFrom([profile.value, detail.value], ['careReminder', 'customerCare', 'reminder']))
 
 const cards = computed(() => readList(detail.value, ['cards', 'cardBenefits', 'memberCards', 'cardItems']))
+
+function isTimeCard(record = {}) {
+  return String(record.cardRuleType || '').trim() === 'time'
+    || String(record.sourceKind || '').trim() === 'time_card'
+    || record.unlimited === true
+    || record.isTimeCard === true
+}
+
+function cardRemainingTimesDisplay(card = {}) {
+  return isTimeCard(card) ? '—' : numberText(firstValue(card, ['remainingTimes', 'leftTimes']), ' 次')
+}
+
+function cardProjectTimesDisplay(card = {}, project = {}, keys = []) {
+  return isTimeCard(card) ? '—' : numberText(firstValue(project, keys), ' 次')
+}
+
+function cardProjectAmountDisplay(card = {}, project = {}) {
+  return isTimeCard(card) ? '—' : money(firstValue(project, ['remainingAmount', 'leftAmount']))
+}
+
 const cardOperations = computed(() => readList(detail.value, ['cardOperations', 'cardOperationRecords', 'cardOperationHistory']))
 const balanceChanges = computed(() => readList(detail.value, ['balanceChanges', 'balanceChangeRecords', 'balanceHistory']))
 const coupons = computed(() => readList(detail.value, ['coupons', 'couponRecords', 'memberCoupons']))
@@ -856,7 +876,7 @@ async function triggerAction(action, context = {}) {
                 <div><dt>所属门店</dt><dd>{{ text(firstValue(card, ['storeName', 'belongStoreName'])) }}</dd></div>
                 <div><dt>开卡时间</dt><dd>{{ text(firstValue(card, ['openedAt', 'activatedAt', 'openAt'])) }}</dd></div>
                 <div><dt>有效期至</dt><dd>{{ text(firstValue(card, ['expiresAt', 'expireAt', 'validUntil'])) }}</dd></div>
-                <div><dt>剩余次数</dt><dd>{{ numberText(firstValue(card, ['remainingTimes', 'leftTimes']), ' 次') }}</dd></div>
+                <div><dt>剩余次数</dt><dd>{{ cardRemainingTimesDisplay(card) }}</dd></div>
                 <div><dt>剩余金额</dt><dd>{{ money(firstValue(card, ['remainingAmount', 'leftAmount'])) }}</dd></div>
                 <div><dt>购卡批号</dt><dd>{{ text(firstValue(card, ['purchaseBatchNo', 'batchNo'])) }}</dd></div>
               </dl>
@@ -868,10 +888,10 @@ async function triggerAction(action, context = {}) {
                   <tbody>
                     <tr v-for="(project, projectIndex) in cardProjects(card)" :key="recordKey(project, `card-project-${cardIndex}`, projectIndex)">
                       <td>{{ cardProjectName(project) }}</td>
-                      <td>{{ numberText(firstValue(project, ['purchaseTimes', 'totalTimes', 'boughtTimes']), ' 次') }}</td>
-                      <td>{{ numberText(firstValue(project, ['usedTimes', 'consumedTimes']), ' 次') }}</td>
-                      <td>{{ numberText(firstValue(project, ['remainingTimes', 'leftTimes']), ' 次') }}</td>
-                      <td>{{ money(firstValue(project, ['remainingAmount', 'leftAmount'])) }}</td>
+                      <td>{{ cardProjectTimesDisplay(card, project, ['purchaseTimes', 'totalTimes', 'boughtTimes']) }}</td>
+                      <td>{{ cardProjectTimesDisplay(card, project, ['usedTimes', 'consumedTimes']) }}</td>
+                      <td>{{ cardProjectTimesDisplay(card, project, ['remainingTimes', 'leftTimes']) }}</td>
+                      <td>{{ cardProjectAmountDisplay(card, project) }}</td>
                     </tr>
                     <tr v-if="!cardProjects(card).length"><td colspan="5" class="member-detail-overlay__table-empty">该卡暂未返回项目权益明细</td></tr>
                   </tbody>

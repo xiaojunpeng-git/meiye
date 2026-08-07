@@ -431,6 +431,7 @@ const EMPTY_BOOTSTRAP = {
     rechargeOrders: [],
     supplementOrders: [],
     refundOrders: [],
+    debtRecords: [],
     serviceRecords: [],
     giftRecords: [],
     projectReplacementRecords: [],
@@ -1697,6 +1698,7 @@ export function validateRootStateSchema(state = {}) {
     checkArrayField(orderCenter, 'rechargeOrders', 'orderCenter_rechargeOrders')
     checkArrayField(orderCenter, 'supplementOrders', 'orderCenter_supplementOrders')
     checkArrayField(orderCenter, 'refundOrders', 'orderCenter_refundOrders')
+    checkArrayField(orderCenter, 'debtRecords', 'orderCenter_debtRecords')
     checkArrayField(orderCenter, 'serviceRecords', 'orderCenter_serviceRecords')
     checkArrayField(orderCenter, 'giftRecords', 'orderCenter_giftRecords')
     checkArrayField(orderCenter, 'projectReplacementRecords', 'orderCenter_projectReplacementRecords')
@@ -2092,6 +2094,7 @@ function normalizeBootstrap(rawBootstrap = {}) {
       rechargeOrders: Array.isArray(incomingOrderCenter.rechargeOrders) ? incomingOrderCenter.rechargeOrders : [],
       supplementOrders: Array.isArray(incomingOrderCenter.supplementOrders) ? incomingOrderCenter.supplementOrders : [],
       refundOrders: Array.isArray(incomingOrderCenter.refundOrders) ? incomingOrderCenter.refundOrders : [],
+      debtRecords: Array.isArray(incomingOrderCenter.debtRecords) ? incomingOrderCenter.debtRecords : [],
       serviceRecords: Array.isArray(incomingOrderCenter.serviceRecords) ? incomingOrderCenter.serviceRecords : [],
       giftRecords: Array.isArray(incomingOrderCenter.giftRecords) ? incomingOrderCenter.giftRecords : [],
       projectReplacementRecords: Array.isArray(incomingOrderCenter.projectReplacementRecords) ? incomingOrderCenter.projectReplacementRecords : [],
@@ -2596,11 +2599,16 @@ function isCashierWorkspaceAction(action) {
     // 收银工作台版本，避免配置写入绕开工作台并发保护。
     'create-custom-card-configuration',
     'remove-cart-line',
+    'clear-cart-lines',
     'change-cart-line-quantity',
     'update-cart-line-service-settings',
     'apply-cashier-salespeople-to-all-sale-lines',
     'apply-cashier-craftsmen-to-all-service-lines',
     'apply-cashier-personnel-to-all-lines',
+    'update-cashier-line-debt',
+    'update-cashier-order-note',
+    'update-cashier-line-price',
+    'update-cashier-supplement',
     'add-checkout-entitlement-lines',
     'open-line-assignment',
     'open-line-coupon',
@@ -2753,10 +2761,16 @@ function resolveCommandContexts(action, payload) {
     contexts.push(buildCommandContext('sales_order', payload.orderId))
   }
 
+  if (['refund-recharge-order', 'void-recharge-order'].includes(action) && payload.rechargeId && payload.memberId) {
+    contexts.push(buildCommandContext('recharge_order', payload.rechargeId))
+    contexts.push(buildCommandContext('member_balance', payload.memberId))
+  }
+
   if ((action === 'submit-recharge' || action === 'prepare-recharge-checkout'
     || action === 'add-recharge-checkout-payment-method' || action === 'update-recharge-checkout-payment-line'
     || action === 'remove-recharge-checkout-payment-line' || action === 'update-recharge-checkout-business-source'
-    || action === 'submit-recharge-checkout' || action === 'reload-recharge-checkout'
+    || action === 'submit-recharge-checkout'
+    || action === 'reload-recharge-checkout'
     || action === 'submit-recharge-debt-repayment' || action === 'submit-direct-gift') && payload.memberId) {
     contexts.push(buildCommandContext('member', payload.memberId))
     if (action !== 'submit-direct-gift') contexts.push(buildCommandContext('member_balance', payload.memberId))
