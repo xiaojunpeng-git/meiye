@@ -295,6 +295,7 @@ class CashierV3ActionManifest
             'apply-balance-payment' => $eventless($checkoutPreparation),
             'remove-balance-payment' => $eventless($checkoutPreparation),
             'update-balance-payment' => $eventless($checkoutPreparation),
+            'update-checkout-business-source' => $eventless($checkoutPreparation),
             'prepare-checkout-submission' => $eventless($checkoutPreparation),
             'confirm-debt-warning' => $eventless($checkoutPreparation),
             'confirm-checkout-final-changes' => $eventless($checkoutPreparation),
@@ -597,9 +598,27 @@ class CashierV3ActionManifest
             ],
 
             // C5 | order mutation and account query preferences
-            'refund-sales-order' => $deferred($inactiveOrder),
-            'void-sales-order' => $deferred($inactiveOrder),
-            'reopen-sales-order' => $deferred($inactiveOrder),
+            'adjust-sales-order-personnel' => [
+                'required_event_types' => ['sales_order.personnel_adjusted'],
+                'allowed_event_types' => ['sales_order.personnel_adjusted'],
+                'event_rules' => ['sales_order.personnel_adjusted' => ['min_count' => 1, 'max_count' => 1, 'aggregate_type' => 'sales_order', 'source_type' => 'adjust-sales-order-personnel']],
+                'eventless_reason' => '', 'activation_blocked_until_event_contract' => false, 'consumers' => ['sales_order.personnel_adjusted' => []],
+            ],
+            'refund-sales-order' => [
+                'required_event_types' => ['sales_order.refunded'], 'allowed_event_types' => ['sales_order.refunded'],
+                'event_rules' => ['sales_order.refunded' => ['min_count' => 1, 'max_count' => 1, 'aggregate_type' => 'sales_order', 'source_type' => 'refund-sales-order']],
+                'eventless_reason' => '', 'activation_blocked_until_event_contract' => false, 'consumers' => ['sales_order.refunded' => []],
+            ],
+            'void-sales-order' => [
+                'required_event_types' => ['sales_order.voided'], 'allowed_event_types' => ['sales_order.voided'],
+                'event_rules' => ['sales_order.voided' => ['min_count' => 1, 'max_count' => 1, 'aggregate_type' => 'sales_order', 'source_type' => 'void-sales-order']],
+                'eventless_reason' => '', 'activation_blocked_until_event_contract' => false, 'consumers' => ['sales_order.voided' => []],
+            ],
+            'reopen-sales-order' => [
+                'required_event_types' => ['sales_order.reopened'], 'allowed_event_types' => ['sales_order.reopened'],
+                'event_rules' => ['sales_order.reopened' => ['min_count' => 1, 'max_count' => 1, 'aggregate_type' => 'sales_order', 'source_type' => 'reopen-sales-order']],
+                'eventless_reason' => '', 'activation_blocked_until_event_contract' => false, 'consumers' => ['sales_order.reopened' => []],
+            ],
             'upgrade-sales-order' => $deferred($inactiveOrder),
             'print-sales-order-receipt' => $eventless('仅触发已存在订单的打印输出，不改变订单或资金状态。'),
             'save-reservation-query-settings' => $eventless($queryPreference),

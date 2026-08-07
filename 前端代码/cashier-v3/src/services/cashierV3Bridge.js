@@ -2628,6 +2628,7 @@ function isCashierWorkspaceAction(action) {
     'open-payment-note',
     'update-payment-line',
     'remove-payment-line',
+    'update-checkout-business-source',
     'apply-balance-payment',
     'remove-balance-payment',
     'update-balance-payment',
@@ -2638,7 +2639,9 @@ function isCashierWorkspaceAction(action) {
     'submit-debt-repayment',
     'return-to-payment-edit',
     'retry-checkout',
-    'update-checkout-business-source',
+    // 重开会把当前订单快照重新装入当前购物车，必须与普通购物车写入
+    // 使用同一 cashier_workspace 版本锁，防止覆盖并发中的购物车编辑。
+    'reopen-sales-order',
     'query-checkout-result',
     'continue-partial-payment-recovery',
     'go-to-writeoff-after-checkout',
@@ -2743,6 +2746,11 @@ function resolveCommandContexts(action, payload) {
 
   if (payload.rechargeCheckoutRequestId) {
     contexts.push(buildCommandContext('recharge_checkout_request', payload.rechargeCheckoutRequestId))
+  }
+
+  if (['adjust-sales-order-personnel', 'refund-sales-order', 'void-sales-order', 'reopen-sales-order'].includes(action)
+    && payload.orderId) {
+    contexts.push(buildCommandContext('sales_order', payload.orderId))
   }
 
   if ((action === 'submit-recharge' || action === 'prepare-recharge-checkout'

@@ -33,6 +33,7 @@ use app\services\cashier\v3\card\CashierV3CardOperationModule;
 use app\services\cashier\v3\hang\CashierV3HangModule;
 use app\services\cashier\v3\reservation\CashierV3ReservationModule;
 use app\services\cashier\v3\order\CashierV3OrderQueryModule;
+use app\services\cashier\v3\order\CashierV3OrderLifecycleModule;
 use app\services\cashier\v3\dashboard\CashierV3BusinessDashboardModule;
 use app\services\cashier\v3\query\UnifiedQueryModule;
 use app\services\cashier\v3\registry\CashierV3ContextPolicyRegistry;
@@ -322,6 +323,7 @@ class CashierV3Bootstrap
 
         // C5-O1 只读销售订单查询在生产 composition root 显式接入。
         CashierV3OrderQueryModule::install($dispatcher, $assembler);
+        CashierV3OrderLifecycleModule::install($dispatcher, $cashierWorkspace);
 
         // C4 经营看板读取 V3 事实与权威欠款映射，不回退旧报表聚合。
         CashierV3BusinessDashboardModule::install($dispatcher, $assembler);

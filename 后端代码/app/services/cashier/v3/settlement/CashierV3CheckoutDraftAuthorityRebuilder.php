@@ -35,6 +35,11 @@ final class CashierV3CheckoutDraftAuthorityRebuilder
             'payments' => array_values($aggregate['payments']),
             'sources' => array_values($aggregate['sources']),
             'workspaceCurrentVersion' => $workspaceExpectedVersion,
+            // The aggregate was locked by its exact checkout request ID. A
+            // workspace-only edit such as business-source selection may have
+            // advanced the workspace more than once without changing this
+            // request version; that is valid for this exact-request rebuild.
+            'exactRequestProjection' => true,
         ]);
 
         $request = $aggregate['request'];

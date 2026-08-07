@@ -74,6 +74,7 @@ class CashierV3C5MemberOrderModule implements CashierV3ActionModule
             'open-operation-logs' => self::FEATURE_ORDER_CENTER,
             'open-order-debt-settlements' => self::FEATURE_ORDER_CENTER,
             'open-debt-settlements' => self::FEATURE_ORDER_CENTER,
+            'open-sales-order-personnel-adjustment' => self::FEATURE_ORDER_CENTER,
             'open-order-refunds' => self::FEATURE_ORDER_CENTER,
             'open-refunds' => self::FEATURE_ORDER_CENTER,
             'open-order-void' => self::FEATURE_ORDER_CENTER,
@@ -89,6 +90,7 @@ class CashierV3C5MemberOrderModule implements CashierV3ActionModule
             $projection[$action] = $feature;
         }
         foreach ([
+            'adjust-sales-order-personnel',
             'refund-sales-order',
             'void-sales-order',
             'reopen-sales-order',

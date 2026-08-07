@@ -25,7 +25,7 @@ final class CashierV3OrderQueryModule
             }
         }
 
-        $handlers->registerProjection('query-sales-orders', function (array $scope) use ($queries): array {
+        $handlers->registerProjection('query-sales-orders', function (array $scope) use ($queries, $recordQueries): array {
             $page = $queries->querySalesOrders(
                 is_array($scope['payload'] ?? null) ? $scope['payload'] : [],
                 $scope['operator_scope'],
@@ -33,6 +33,8 @@ final class CashierV3OrderQueryModule
             );
             return [
                 'data' => ['orderCenter' => self::pagePartition($page)],
+                'versions' => (new CashierV3OrderCenterPartitionProvider($queries, $recordQueries))
+                    ->salesOrderPublicVersions(['salesOrders' => $page['records']], $scope['data_scope']),
                 'message' => '销售订单已重新读取。',
             ];
         });
@@ -49,7 +51,7 @@ final class CashierV3OrderQueryModule
             ];
         });
 
-        $handlers->registerProjection('open-sales-order-detail', function (array $scope) use ($queries): array {
+        $handlers->registerProjection('open-sales-order-detail', function (array $scope) use ($queries, $recordQueries): array {
             $detail = $queries->salesOrderDetail(
                 is_array($scope['payload'] ?? null) ? $scope['payload'] : [],
                 $scope['operator_scope'],
@@ -66,6 +68,8 @@ final class CashierV3OrderQueryModule
                     'contractVersion' => CashierV3SalesOrderQueryServices::CONTRACT_VERSION,
                     'salesOrderDetail' => $detail,
                 ]],
+                'versions' => (new CashierV3OrderCenterPartitionProvider($queries, $recordQueries))
+                    ->salesOrderPublicVersions(['salesOrderDetail' => $detail], $scope['data_scope']),
                 'message' => '销售订单详情已读取。',
             ];
         });

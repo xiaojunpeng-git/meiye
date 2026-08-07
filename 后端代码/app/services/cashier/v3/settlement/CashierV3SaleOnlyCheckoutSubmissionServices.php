@@ -102,6 +102,9 @@ final class CashierV3SaleOnlyCheckoutSubmissionServices
     /** @var CashierV3CardOperationCheckoutSettlementServices */
     private $cardOperationSettlements;
 
+    /** @var CashierV3CheckoutBusinessSourceSelectionServices */
+    private $businessSources;
+
     /** @var string */
     private $serverNamespaceSecret;
 
@@ -117,7 +120,8 @@ final class CashierV3SaleOnlyCheckoutSubmissionServices
         CashierV3CardPurchaseIssuanceServices $cardPurchases = null,
         CashierV3MemberBalanceWriterAdapter $balances = null,
         CashierV3CheckoutDebtAuthorityServices $debts = null,
-        ?CashierV3CardOperationCheckoutSettlementServices $cardOperationSettlements = null
+        ?CashierV3CardOperationCheckoutSettlementServices $cardOperationSettlements = null,
+        ?CashierV3CheckoutBusinessSourceSelectionServices $businessSources = null
     ) {
         $this->workspace = $workspace;
         $this->requests = $requests ?: new ThinkPhpCashierV3CheckoutRequestRepository();
@@ -132,6 +136,8 @@ final class CashierV3SaleOnlyCheckoutSubmissionServices
         $this->debts = $debts ?: new CashierV3CheckoutDebtAuthorityServices();
         $this->cardOperationSettlements = $cardOperationSettlements
             ?: new CashierV3CardOperationCheckoutSettlementServices();
+        $this->businessSources = $businessSources
+            ?: new CashierV3CheckoutBusinessSourceSelectionServices();
     }
 
     public function submitInTx(array $scope): array
@@ -200,6 +206,12 @@ final class CashierV3SaleOnlyCheckoutSubmissionServices
                 (string)$aggregate['request']['business_date'],
                 $now
             );
+            $businessSource = $this->businessSources->lockResolvedForSettlementInTx(
+                CashierV3CheckoutBusinessSourceSelectionServices::KIND_SALE,
+                (string)$aggregate['request']['request_id'],
+                (string)$aggregate['request']['tenant_id'],
+                (int)$aggregate['request']['store_id']
+            );
             $salesPlan = CashierV3SalesOrderPlanV1::fromLockedCheckoutAggregate(
                 $aggregate,
                 $commandKey,
@@ -207,7 +219,8 @@ final class CashierV3SaleOnlyCheckoutSubmissionServices
                 $now,
                 $now,
                 $secret,
-                $salesOrderNo
+                $salesOrderNo,
+                $businessSource['primarySourceId'] > 0 ? $businessSource : []
             );
             $inventoryPlan = $this->saleInventory->planInTx(
                 (array)$aggregate['request'],

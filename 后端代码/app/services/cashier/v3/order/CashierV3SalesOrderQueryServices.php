@@ -542,7 +542,8 @@ final class CashierV3SalesOrderQueryServices
         CashierV3DataScopeContext $dataScope
     ): array {
         $criteria = $this->resolveAuthorityQueryCursor($criteria, $payload, $operatorScope, $dataScope);
-        if ((int)$criteria['snapshotMaxOrderId'] === 0 || !in_array((string)$criteria['status'], ['', 'normal'], true)) {
+        if ((int)$criteria['snapshotMaxOrderId'] === 0
+            || !in_array((string)$criteria['status'], ['', 'normal', 'refunded', 'voided'], true)) {
             return $this->authorityPagePayload($criteria, [], 0);
         }
 
@@ -665,6 +666,7 @@ final class CashierV3SalesOrderQueryServices
         $query = $this->authorityOrderBaseQuery($criteria)
             ->where('o.settled_at', '<=', (int)$criteria['queryCutoffTimestamp'])
             ->where('o.id', '<=', (int)$criteria['snapshotMaxOrderId']);
+        $this->applyAuthorityStatusFilter($query, (string)$criteria['status']);
         if ($criteria['afterPayTime'] !== null && $criteria['afterOrderId'] !== null) {
             $query->where(function ($anchor) use ($criteria) {
                 $anchor->where('o.settled_at', '<', (int)$criteria['afterPayTime'])
@@ -692,6 +694,33 @@ final class CashierV3SalesOrderQueryServices
                 });
         }
         return $query;
+    }
+
+    private function applyAuthorityStatusFilter($query, string $status): void
+    {
+        if ($status === '') {
+            return;
+        }
+        if ($status === 'normal') {
+            $query->whereNotExists(function ($operation) {
+                $operation->name(CashierV3OrderLifecycleServices::OPERATION_TABLE)->alias('olo')
+                    ->whereRaw('olo.source_order_id = o.order_id')
+                    ->whereRaw('olo.tenant_id = o.tenant_id')
+                    ->where('olo.source_type', 'sales')
+                    ->where('olo.status', 'succeeded')
+                    ->whereIn('olo.operation_type', ['refund', 'void']);
+            });
+            return;
+        }
+        $operationType = $status === 'voided' ? 'void' : 'refund';
+        $query->whereExists(function ($operation) use ($operationType) {
+            $operation->name(CashierV3OrderLifecycleServices::OPERATION_TABLE)->alias('olo')
+                ->whereRaw('olo.source_order_id = o.order_id')
+                ->whereRaw('olo.tenant_id = o.tenant_id')
+                ->where('olo.source_type', 'sales')
+                ->where('olo.status', 'succeeded')
+                ->where('olo.operation_type', $operationType);
+        });
     }
 
     private function authorityOrderFields(): string
@@ -1067,14 +1096,29 @@ final class CashierV3SalesOrderQueryServices
                 $requestsById[(string)$request['request_id']] = $request;
             }
         }
+        $tenantIds = array_values(array_unique(array_map(static function (array $header): string {
+            return trim((string)($header['tenant_id'] ?? ''));
+        }, $headers)));
+        if (count($tenantIds) !== 1 || $tenantIds[0] === '') {
+            throw new \RuntimeException('sales_order_authority_tenant_scope_invalid');
+        }
         $salespeopleByOrderAndLine = [];
-        foreach (Db::name('cashier_v3_performance_fact')->whereIn('order_id', $orderIds)
-            ->where('fact_type', 'sales_performance_allocated')
-            ->where('performance_type', 'sales_performance_allocated')
-            ->where('status', 'effective')->where('fact_direction', 'forward')
-            ->field('fact_id,order_id,source_line_id,employee_id,employee_name_snapshot,employee_type_snapshot,allocation_weight_numerator,allocation_weight_denominator,amount_cents')
-            ->order('id', 'asc')->select()->toArray() as $fact) {
-            $salespeopleByOrderAndLine[(string)$fact['order_id']][(string)$fact['source_line_id']][] = $fact;
+        $craftsmenByOrderAndLine = [];
+        foreach ($this->effectivePersonnelFacts($orderIds, $tenantIds[0]) as $fact) {
+            $lineKey = (string)$fact['source_line_id'];
+            if ((string)$fact['performance_type'] === 'sales_performance_allocated') {
+                $salespeopleByOrderAndLine[(string)$fact['order_id']][$lineKey][] = $fact;
+            } elseif ((string)$fact['performance_type'] === 'labor_performance_allocated') {
+                $craftsmenByOrderAndLine[(string)$fact['order_id']][$lineKey][] = $fact;
+            }
+        }
+        $operationsByOrder = [];
+        foreach (Db::name(CashierV3OrderLifecycleServices::OPERATION_TABLE)
+            ->where('tenant_id', $tenantIds[0])->where('source_type', 'sales')
+            ->whereIn('source_order_id', $orderIds)->where('status', 'succeeded')
+            ->field('operation_id,operation_no,source_order_id,operation_type,reason_snapshot,cash_refund_cents,reversed_cash_cents,restored_principal_cents,restored_bonus_cents,operator_id,business_date,occurred_at,status')
+            ->order('id', 'asc')->select()->toArray() as $operation) {
+            $operationsByOrder[(string)$operation['source_order_id']][] = $operation;
         }
         $snapshots = [];
         foreach ($headersByOrder as $orderId => $header) {
@@ -1092,6 +1136,8 @@ final class CashierV3SalesOrderQueryServices
                 'lines' => $linesByOrder[$orderId],
                 'collections' => $collectionsByOrder[$orderId] ?? [],
                 'salespeopleByLine' => $salespeopleByOrderAndLine[$orderId] ?? [],
+                'craftsmenByLine' => $craftsmenByOrderAndLine[$orderId] ?? [],
+                'lifecycleOperations' => $operationsByOrder[$orderId] ?? [],
             ];
         }
         return $snapshots;
@@ -1115,7 +1161,11 @@ final class CashierV3SalesOrderQueryServices
         $items = [];
         $salespersonNames = [];
         foreach ($snapshot['lines'] as $line) {
-            $items[] = $this->mapAuthorityLine($line, $snapshot['salespeopleByLine'][(string)$line['order_line_id']] ?? []);
+            $items[] = $this->mapAuthorityLine(
+                $line,
+                $snapshot['salespeopleByLine'][(string)$line['order_line_id']] ?? [],
+                $snapshot['craftsmenByLine'][(string)$line['order_line_id']] ?? []
+            );
             foreach ($snapshot['salespeopleByLine'][(string)$line['order_line_id']] ?? [] as $person) {
                 $name = trim((string)($person['employee_name_snapshot'] ?? ''));
                 if ($name !== '') $salespersonNames[$name] = true;
@@ -1129,9 +1179,22 @@ final class CashierV3SalesOrderQueryServices
         $paymentNames = [];
         foreach ($snapshot['collections'] as $collection) $paymentNames[$this->paymentMethodName($collection)] = true;
         $memberName = trim((string)$header['member_name_snapshot']);
+        $operations = (array)($snapshot['lifecycleOperations'] ?? []);
+        $hasProduct = false;
+        foreach ((array)$snapshot['lines'] as $sourceLine) {
+            if (strtolower((string)($sourceLine['item_type'] ?? '')) === 'product') {
+                $hasProduct = true;
+                break;
+            }
+        }
+        $terminal = null;
+        foreach ($operations as $operation) {
+            if (in_array((string)$operation['operation_type'], ['refund', 'void'], true)) $terminal = $operation;
+        }
+        $orderStatus = $terminal ? ((string)$terminal['operation_type'] === 'void' ? '已作废' : '已退款') : '正常';
         $mapped = [
             'id' => (string)$header['order_id'], 'orderId' => (string)$header['order_id'],
-            'revision' => (int)$header['order_version'],
+            'revision' => 1 + count($operations),
             'salesOrderNo' => (string)$header['order_no'], 'sales_order_no' => (string)$header['order_no'],
             'memberId' => (int)$header['member_id'], 'memberName' => $memberName !== '' ? $memberName : '游客',
             'member_name' => $memberName !== '' ? $memberName : '游客', 'phone' => '',
@@ -1146,7 +1209,7 @@ final class CashierV3SalesOrderQueryServices
             'itemSummary' => $itemSummary, 'item_summary' => $itemSummary,
             'itemCount' => array_sum(array_map(function (array $item): int { return (int)$item['quantity']; }, $items)),
             'item_count' => array_sum(array_map(function (array $item): int { return (int)$item['quantity']; }, $items)),
-            'orderStatus' => '正常', 'order_status' => '正常',
+            'orderStatus' => $orderStatus, 'order_status' => $orderStatus,
             'paymentStatus' => $debtCents > 0 ? '部分支付（含欠款）' : '已支付',
             'payment_status' => $debtCents > 0 ? '部分支付（含欠款）' : '已支付',
             'receivableAmount' => $this->moneyFromCents($receivableCents), 'receivable_amount' => $this->moneyFromCents($receivableCents),
@@ -1157,7 +1220,15 @@ final class CashierV3SalesOrderQueryServices
             'salespersonSummary' => implode('、', array_keys($salespersonNames)), 'cashierName' => (string)$header['operator_name_snapshot'],
             'sourcePrimary' => '收银台', 'sourceSecondary' => 'V3 结账',
             'economicsDataStatus' => 'ready', 'cashPerformanceDataStatus' => 'ready',
-            'contractVersion' => self::CONTRACT_VERSION, 'availableActions' => [],
+            'contractVersion' => self::CONTRACT_VERSION,
+            'availableActions' => $terminal ? ['reopen-sales-order'] : array_values(array_filter([
+                'open-sales-order-personnel-adjustment', 'adjust-sales-order-personnel',
+                'reopen-sales-order',
+                // 游客没有会员欠款账户，不能进入补交链路。
+                (int)$header['member_id'] > 0 ? 'open-order-debt-settlements' : null,
+                $hasProduct ? null : 'refund-sales-order',
+                $hasProduct ? null : 'void-sales-order',
+            ])),
         ];
         if (!$detail) return $mapped;
         $mapped['orderNote'] = '';
@@ -1178,12 +1249,33 @@ final class CashierV3SalesOrderQueryServices
         }, $snapshot['collections']);
         $mapped['paymentDetailsDataStatus'] = 'ready';
         $mapped['cardBatches'] = [];
-        $mapped['related'] = ['debtSettlements' => [], 'refunds' => [], 'voids' => [], 'reopenings' => [], 'upgrades' => [], 'gifts' => [], 'services' => [], 'writeoffs' => [], 'operationLogs' => []];
+        $operationRecords = array_map(function (array $operation): array {
+            $labels = ['personnel_adjustment' => '人员调整', 'refund' => '退款', 'void' => '作废', 'reopen' => '重开'];
+            $type = (string)$operation['operation_type'];
+            return ['id' => (string)$operation['operation_id'], 'operationNo' => (string)$operation['operation_no'],
+                'operationType' => (string)$operation['operation_type'], 'status' => (string)$operation['status'],
+                'actionLabel' => $labels[$type] ?? '订单操作',
+                'reason' => (string)$operation['reason_snapshot'], 'content' => (string)$operation['reason_snapshot'],
+                'cashRefundAmount' => $this->moneyFromCents((int)$operation['cash_refund_cents']),
+                'reversedCashAmount' => $this->moneyFromCents((int)$operation['reversed_cash_cents']),
+                'restoredPrincipalAmount' => $this->moneyFromCents((int)$operation['restored_principal_cents']),
+                'restoredBonusAmount' => $this->moneyFromCents((int)$operation['restored_bonus_cents']),
+                'operatorId' => (int)$operation['operator_id'], 'operatorName' => '操作人#' . (int)$operation['operator_id'],
+                'businessDate' => (string)$operation['business_date'],
+                'occurredAt' => $this->formatTimestamp((int)$operation['occurred_at'], 'Y-m-d H:i:s')];
+        }, $operations);
+        $mapped['related'] = [
+            'debtSettlements' => [],
+            'refunds' => array_values(array_filter($operationRecords, static function (array $row): bool { return $row['operationType'] === 'refund'; })),
+            'voids' => array_values(array_filter($operationRecords, static function (array $row): bool { return $row['operationType'] === 'void'; })),
+            'reopenings' => array_values(array_filter($operationRecords, static function (array $row): bool { return $row['operationType'] === 'reopen'; })),
+            'upgrades' => [], 'gifts' => [], 'services' => [], 'writeoffs' => [], 'operationLogs' => $operationRecords,
+        ];
         $mapped['relatedDataStatus'] = 'ready';
         return $mapped;
     }
 
-    private function mapAuthorityLine(array $line, array $salespeople): array
+    private function mapAuthorityLine(array $line, array $salespeople, array $craftsmen = []): array
     {
         $quantity = max(0, (int)$line['quantity']);
         $type = strtolower((string)$line['item_type']) === 'card' ? '卡项' : (strtolower((string)$line['item_type']) === 'project' ? '项目' : '商品');
@@ -1201,8 +1293,60 @@ final class CashierV3SalesOrderQueryServices
                 return ['id' => (string)$person['fact_id'], 'employeeId' => (int)$person['employee_id'], 'name' => (string)$person['employee_name_snapshot'],
                     'employeeType' => (string)$person['employee_type_snapshot'], 'allocationWeight' => (int)$person['allocation_weight_numerator'],
                     'allocationWeightDenominator' => (int)$person['allocation_weight_denominator'], 'salesPerformanceAmount' => $this->moneyFromCents((int)$person['amount_cents'])];
-            }, $salespeople), 'craftsmen' => $this->craftsmenForLine($line),
+            }, $salespeople), 'craftsmen' => $craftsmen !== []
+                ? array_map(function (array $person): array {
+                    return [
+                        'id' => (string)$person['fact_id'],
+                        'employeeId' => (int)$person['employee_id'],
+                        'name' => (string)$person['employee_name_snapshot'],
+                        'isPointCustomer' => strpos((string)($person['role_snapshot'] ?? ''), ':point') !== false,
+                        'laborPerformanceAmount' => $this->moneyFromCents((int)$person['amount_cents']),
+                    ];
+                }, $craftsmen)
+                : $this->craftsmenForLine($line),
         ];
+    }
+
+    /**
+     * Only a personnel-adjustment reversal replaces the displayed assignment.
+     * Refund and void reversals affect accounting totals but must preserve the
+     * last salesperson and craftsman snapshots on the immutable source order.
+     *
+     * @return array<int,array<string,mixed>>
+     */
+    private function effectivePersonnelFacts(array $orderIds, string $tenantId): array
+    {
+        $adjustmentCommandKeys = [];
+        foreach (Db::name(CashierV3OrderLifecycleServices::OPERATION_TABLE)
+            ->where('tenant_id', $tenantId)->where('source_type', 'sales')
+            ->whereIn('source_order_id', $orderIds)->where('operation_type', 'personnel_adjustment')
+            ->where('status', 'succeeded')->field('command_idempotency_key')->select()->toArray() as $operation) {
+            $commandKey = trim((string)($operation['command_idempotency_key'] ?? ''));
+            if ($commandKey !== '') $adjustmentCommandKeys[$commandKey] = true;
+        }
+        $rows = Db::name('cashier_v3_performance_fact')->where('tenant_id', $tenantId)->whereIn('order_id', $orderIds)
+            ->whereIn('performance_type', ['sales_performance_allocated', 'labor_performance_allocated'])
+            ->where('status', 'effective')
+            ->whereIn('fact_direction', ['forward', 'reversal'])
+            ->field('id,fact_id,order_id,source_line_id,performance_type,employee_id,employee_name_snapshot,employee_type_snapshot,role_snapshot,allocation_weight_numerator,allocation_weight_denominator,amount_cents,fact_direction,reversal_of,command_idempotency_key')
+            ->order('id', 'asc')->select()->toArray();
+        return $this->displayedPersonnelFacts($rows, $adjustmentCommandKeys);
+    }
+
+    /** @return array<int,array<string,mixed>> */
+    private function displayedPersonnelFacts(array $rows, array $adjustmentCommandKeys): array
+    {
+        $reversed = [];
+        foreach ($rows as $row) {
+            if ((string)$row['fact_direction'] === 'reversal'
+                && isset($adjustmentCommandKeys[(string)($row['command_idempotency_key'] ?? '')])
+                && (string)($row['reversal_of'] ?? '') !== '') {
+                $reversed[(string)$row['reversal_of']] = true;
+            }
+        }
+        return array_values(array_filter($rows, static function (array $row) use ($reversed): bool {
+            return (string)$row['fact_direction'] === 'forward' && !isset($reversed[(string)$row['fact_id']]);
+        }));
     }
 
     private function authorityPagePayload(array $criteria, array $records, int $total): array

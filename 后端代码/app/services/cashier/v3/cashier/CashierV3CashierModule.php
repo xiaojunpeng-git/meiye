@@ -31,6 +31,7 @@ use app\services\cashier\v3\settlement\CashierV3CheckoutPaymentDraftServices;
 use app\services\cashier\v3\settlement\CashierV3CheckoutBalanceAuthorityDiscovery;
 use app\services\cashier\v3\settlement\CashierV3CheckoutBalanceDraftServices;
 use app\services\cashier\v3\settlement\CashierV3CheckoutProjectionServices;
+use app\services\cashier\v3\settlement\CashierV3CheckoutBusinessSourceSelectionServices;
 use app\services\cashier\v3\settlement\CashierV3CheckoutResultQueryServices;
 use app\services\cashier\v3\settlement\CashierV3CheckoutSubmissionOrchestrator;
 use app\services\cashier\v3\settlement\CashierV3CheckoutSubmissionPreparationServices;
@@ -183,6 +184,7 @@ final class CashierV3CashierModule
             $checkoutRequests,
             $checkoutResultReads
         );
+        $checkoutBusinessSources = new CashierV3CheckoutBusinessSourceSelectionServices();
         $memberDebtProjection = new CashierV3MemberDebtProjectionServices();
 
         $handlers = $dispatcher->handlers();
@@ -544,6 +546,32 @@ final class CashierV3CashierModule
             });
         }
 
+        if ($handlers->hasCommand('update-checkout-business-source')) {
+            throw new \LogicException('C2 cashier module: checkout business source handler duplicate');
+        }
+        $handlers->registerCommand('update-checkout-business-source', function (array $scope) use ($checkoutBusinessSources): array {
+            $edited = $checkoutBusinessSources->mutateSaleInTx($scope);
+            $payload = (array)($scope['payload'] ?? []);
+            $requestId = (string)($payload['checkoutRequestId'] ?? '');
+            $requestVersion = (int)($payload['checkoutRequestVersion'] ?? 0);
+            return [
+                'data' => ['checkoutDraftEdit' => [
+                    'businessSource' => $edited,
+                    'checkoutRequestId' => $requestId,
+                    'checkoutRequestVersion' => $requestVersion,
+                    // The dispatcher reads this projection only after the command
+                    // transaction has committed, so it contains the new workspace
+                    // context needed by the following payment-draft command.
+                    '_checkoutProjectionRequestId' => $requestId,
+                ]],
+                // The selection write advances the workspace only. The projection
+                // itself is intentionally deferred to ActionDispatcher post-commit.
+                'business_no' => $requestId,
+                'touched' => ['cashier_workspace'],
+                'message' => '业务来源已更新。',
+            ];
+        });
+
         foreach (['apply-balance-payment', 'remove-balance-payment', 'update-balance-payment'] as $action) {
             if ($handlers->hasCommand($action)) {
                 throw new \LogicException('C2 cashier module: checkout balance draft handler duplicate');
@@ -758,6 +786,7 @@ final class CashierV3CashierModule
             $submissionDiscovery
         );
         self::registerPaymentDraftPolicies($dispatcher);
+        self::registerCheckoutBusinessSourcePolicy($dispatcher);
         self::registerBalanceDraftPolicies(
             $dispatcher,
             new CashierV3CheckoutBalanceAuthorityDiscovery($memberBalances)
@@ -899,6 +928,28 @@ final class CashierV3CashierModule
                 ['service_order', 'hang_order', 'reservation', 'room', 'debt_record']
             ));
         }
+    }
+
+    private static function registerCheckoutBusinessSourcePolicy(CashierV3ActionDispatcher $dispatcher): void
+    {
+        $action = 'update-checkout-business-source';
+        if ($dispatcher->policies()->has($action)) {
+            throw new \LogicException('C2 cashier module: checkout business source context policy duplicate');
+        }
+        $dispatcher->policies()->register(new CashierV3ContextPolicy(
+            $action,
+            ['cashier_workspace', 'checkout_request'],
+            ['service_order', 'hang_order', 'reservation', 'room', 'debt_record'],
+            static function (array $payload, array $base) use ($dispatcher): array {
+                $resolved = $dispatcher->policies()->resolveCheckoutFollowUpBranch($payload, $base);
+                // 来源选择只写独立 selection_version；checkout_request 仅用于同版本锁读。
+                $resolved['required_touched_roles'] = ['cashier_workspace'];
+                return $resolved;
+            },
+            ['cashier_workspace'],
+            ['service_order', 'hang_order', 'reservation', 'room', 'debt_record'],
+            ['service_order', 'hang_order', 'reservation', 'room', 'debt_record']
+        ));
     }
 
     private static function registerBalanceDraftPolicies(

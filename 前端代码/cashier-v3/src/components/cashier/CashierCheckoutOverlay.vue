@@ -1,6 +1,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { createCashierV3CommandId, formatMoney } from '@/services/cashierV3Bridge'
+import { openSalesOrderReceiptPrint, salesOrderReceiptFromCheckout } from '@/services/salesOrderReceiptPrint'
 
 const props = defineProps({
   checkout: {
@@ -33,6 +34,7 @@ const paymentLineDraft = ref({
 // mutation has returned its rebuilt checkout projection.
 const paymentLineAmountDrafts = ref({})
 const paymentLineAmountErrors = ref({})
+const receiptPrintError = ref('')
 let previouslyFocusedElement = null
 let backgroundShell = null
 let backgroundShellWasInert = false
@@ -203,7 +205,6 @@ const checkoutSnapshotWarning = computed(() => {
   return isDebtRepayment.value ? '最终还款金额和变更结果' : '最终结账金额和变更结果'
 })
 const serviceStartOptions = computed(() => Array.isArray(props.checkout.serviceStartOptions) ? props.checkout.serviceStartOptions : [])
-const completionActions = computed(() => Array.isArray(props.checkout.completionActions) ? props.checkout.completionActions : [])
 const allowedServiceStartOptionIds = new Set([
   'return_to_start_service',
   'complete_service_and_checkout'
@@ -214,13 +215,12 @@ const safeServiceStartOptions = computed(() => serviceStartOptions.value.filter(
   && typeof option.label === 'string'
   && option.label.trim()
 )))
-const allowedCompletionActionCodes = new Set(['print-sales-order-receipt'])
-const safeCompletionActions = computed(() => completionActions.value.filter((action) => (
-  isRecord(action)
-  && allowedCompletionActionCodes.has(String(action.code || action.action || ''))
-  && typeof action.label === 'string'
-  && action.label.trim()
-)))
+const canPrintReceipt = computed(() => (
+  isSucceeded.value
+  && !isDebtRepayment.value
+  && Boolean(String(props.checkout.salesOrderNo || '').trim())
+  && hasAuthoritativeOrderSnapshot.value
+))
 const hasResultLockedPaymentLine = computed(() => selectedPaymentLines.value.some((line) => paymentLineIsLocked(line)))
 const canReturnToPaymentEdit = computed(() => (
   isFailed.value
@@ -595,15 +595,10 @@ function removePaymentLine(line) {
   request('remove-payment-line', { paymentLineId: line.id })
 }
 
-function runCompletionAction(action) {
-  const code = action?.code || action?.action
-  if (code === 'print-sales-order-receipt') {
-    request('print-sales-order-receipt', {
-      completionAction: action.id || code,
-      salesOrderId: props.checkout.salesOrderId || props.checkout.salesOrderNo,
-      idempotencyKey: createCashierV3CommandId()
-    })
-  }
+function printReceipt() {
+  receiptPrintError.value = ''
+  const result = openSalesOrderReceiptPrint(salesOrderReceiptFromCheckout(props.checkout))
+  if (!result.ok) receiptPrintError.value = result.message
 }
 
 function handleServiceStartOption(option) {
@@ -1109,19 +1104,14 @@ onBeforeUnmount(() => {
             <em :class="paymentLineStatusClass(line)">{{ paymentLineStatus(line) }}</em>
           </div>
         </div>
+        <p v-if="receiptPrintError" class="checkout-result__print-error" role="alert">{{ receiptPrintError }}</p>
       </section>
     </main>
 
     <footer class="checkout-overlay__footer">
       <template v-if="isSucceeded">
         <button v-if="!isDebtRepayment && checkout.salesOrderId" type="button" class="button button--secondary" @click="request('view-sales-order')">查看销售订单</button>
-        <button
-          v-for="action in safeCompletionActions"
-          :key="action.id || action.code || action.action"
-          type="button"
-          class="button button--secondary"
-          @click="runCompletionAction(action)"
-        >{{ action.label }}</button>
+        <button v-if="canPrintReceipt" type="button" class="button button--secondary" @click="printReceipt">打印小票</button>
         <button type="button" class="button button--primary" @click="finishCheckoutAndReturn">
           {{ isServiceOrder || hasEntitlementLines ? '完成并返回收银台' : '返回收银台' }}
         </button>

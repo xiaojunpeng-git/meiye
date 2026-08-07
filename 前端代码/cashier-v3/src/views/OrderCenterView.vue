@@ -1,5 +1,6 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import BusinessRecordDetailOverlay from '@/components/order/BusinessRecordDetailOverlay.vue'
 import SalesOrderDetailOverlay from '@/components/order/SalesOrderDetailOverlay.vue'
 import TablePagination from '@/components/common/TablePagination.vue'
@@ -181,6 +182,7 @@ const FIELD_ALIASES = {
 }
 
 const state = useCashierV3State()
+const router = useRouter()
 const orderCenter = computed(() => state.orderCenter || {})
 const activeTabKey = ref('sales')
 const availableTabs = computed(() => {
@@ -248,10 +250,12 @@ const allowedSalesOrderDetailActions = new Set([
   'print-sales-order-receipt', 'open-card-batch', 'open-card-benefits', 'open-order-debt-settlements',
   'open-order-refunds', 'open-order-void', 'open-order-reopenings', 'open-order-upgrades', 'open-order-gifts',
   'open-order-services', 'open-order-writeoffs', 'open-order-operation-logs', 'refund-sales-order',
-  'void-sales-order', 'reopen-sales-order', 'upgrade-sales-order'
+  'void-sales-order', 'reopen-sales-order', 'upgrade-sales-order', 'open-sales-order-personnel-adjustment',
+  'adjust-sales-order-personnel'
 ])
 const salesOrderDetailCommandActions = new Set([
-  'print-sales-order-receipt', 'refund-sales-order', 'void-sales-order', 'reopen-sales-order', 'upgrade-sales-order'
+  'print-sales-order-receipt', 'refund-sales-order', 'void-sales-order', 'reopen-sales-order', 'upgrade-sales-order',
+  'adjust-sales-order-personnel'
 ])
 
 watch(
@@ -435,6 +439,17 @@ function actionStatus(result) {
   return response?.result?.status || response?.status || ''
 }
 
+function isTerminalActionStatus(status) {
+  return ['success', 'succeeded', 'failed', 'conflict'].includes(String(status || ''))
+}
+
+function actionData(result) {
+  const response = result?.data && typeof result.data === 'object' && result.data.result
+    ? result.data
+    : result
+  return response?.data && typeof response.data === 'object' ? response.data : {}
+}
+
 function salesDetailBelongsToOrder(detail, orderId) {
   if (!detail || !orderId) return false
   return String(detail.id || detail.orderId || detail.salesOrderId || '') === String(orderId)
@@ -538,9 +553,35 @@ async function handleSalesOrderDetailAction(payload = {}) {
     relationId: payload.relationId,
     cardBatchId: payload.cardBatchId,
     benefitEntryId: payload.benefitEntryId,
+    reason: payload.reason,
+    refundAmount: payload.refundAmount,
+    actualRefundAmount: payload.actualRefundAmount,
+    balancePrincipalRefundAmount: payload.balancePrincipalRefundAmount,
+    balanceGiftRefundAmount: payload.balanceGiftRefundAmount,
+    replaceWorkspace: payload.replaceWorkspace === true,
+    personnel: payload.personnel,
     ...(idempotencyKey ? { idempotencyKey } : {})
   })
-  if (idempotencyKey && ['failed', 'conflict'].includes(actionStatus(result))) {
+  const businessData = actionData(result)
+  const adjustment = businessData.orderPersonnelAdjustment
+  if (action === 'open-sales-order-personnel-adjustment' && adjustment) {
+    salesDetailOrder.value = { ...salesDetailOrder.value, personnelAdjustment: adjustment }
+  }
+  if (['adjust-sales-order-personnel', 'reopen-sales-order'].includes(action)
+    && !['failed', 'conflict'].includes(actionStatus(result))) {
+    await openSalesOrderDetail({ orderId: currentOrderId })
+  }
+  if (['refund-sales-order', 'void-sales-order'].includes(action)
+    && ['success', 'succeeded'].includes(actionStatus(result))) {
+    await queryRecords({}, false)
+    await openSalesOrderDetail({ orderId: currentOrderId })
+  }
+  if (action === 'reopen-sales-order'
+    && !['failed', 'conflict'].includes(actionStatus(result))
+    && businessData.orderLifecycle?.cashierDraft) {
+    await router.push({ name: 'cashier-v3-cashier' })
+  }
+  if (idempotencyKey && isTerminalActionStatus(actionStatus(result))) {
     salesOrderActionIds.value = { ...salesOrderActionIds.value, [commandKey]: null }
   }
   return result
@@ -649,6 +690,7 @@ onBeforeUnmount(() => {
       v-if="isSalesDetailOpen"
       :order="salesDetailOrder"
       :is-loading="isSalesDetailLoading"
+      :cart-line-count="Array.isArray(state.cashier?.cart?.lines) ? state.cashier.cart.lines.length : 0"
       :on-action="handleSalesOrderDetailAction"
       @close="closeSalesDetail"
     />

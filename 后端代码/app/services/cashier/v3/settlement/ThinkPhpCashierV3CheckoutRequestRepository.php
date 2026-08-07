@@ -644,6 +644,126 @@ final class ThinkPhpCashierV3CheckoutRequestRepository implements CashierV3Check
         ];
     }
 
+    public function readEditingProjectionByRequestId(
+        string $requestId,
+        string $workspaceId,
+        string $stateContextId,
+        CashierV3OperatorScope $operatorScope,
+        CashierV3DataScopeContext $dataScope
+    ) {
+        $this->assertScopeContext($operatorScope, $dataScope);
+        $requestId = trim($requestId);
+        $workspaceId = trim($workspaceId);
+        $stateContextId = trim($stateContextId);
+        $expectedWorkspaceId = sprintf(
+            'ws:%d:%d:%s',
+            $operatorScope->storeId(),
+            $operatorScope->operatorId(),
+            $stateContextId
+        );
+        if (!$this->validRequestId($requestId)
+            || $stateContextId === ''
+            || strlen($workspaceId) > 64
+            || strlen($stateContextId) > 64
+            || !hash_equals($expectedWorkspaceId, $workspaceId)) {
+            throw self::failure('checkout_projection_request_invalid');
+        }
+
+        $workspaceVersion = (int)Db::name(CashierV3ResourceVersionServices::TABLE)
+            ->where('scope_type', CashierV3ResourceScope::TYPE_STORE)
+            ->where('scope_id', (string)$operatorScope->storeId())
+            ->where('resource_kind', 'cashier_workspace')
+            ->where('resource_id', $workspaceId)
+            ->value('current_version');
+        if ($workspaceVersion <= 1) {
+            return null;
+        }
+
+        $request = Db::name(self::REQUEST_TABLE)
+            ->where('request_id', $requestId)
+            ->where('tenant_id', $dataScope->tenantId())
+            ->where('store_id', $dataScope->forcedStoreId())
+            ->where('operator_id', $operatorScope->operatorId())
+            ->where('workspace_id', $workspaceId)
+            ->where('state_context_id', $stateContextId)
+            ->whereIn('request_status', ['editing', 'ready_for_submit'])
+            ->find();
+        if (!$request) {
+            return null;
+        }
+
+        $requestVersion = (int)($request['request_version'] ?? 0);
+        $requestStatus = (string)($request['request_status'] ?? '');
+        $authoritySnapshotVersion = (int)($request['authority_snapshot_version'] ?? 0);
+        if ($requestVersion <= 0
+            || $authoritySnapshotVersion <= 0
+            || $authoritySnapshotVersion >= $workspaceVersion) {
+            return null;
+        }
+        $lines = $this->rows(Db::name(self::LINE_TABLE)
+            ->where('request_id', $requestId)
+            ->where('draft_version', $requestVersion)
+            ->where('draft_status', 'draft')
+            ->order('sort_no asc,id asc')
+            ->select());
+        $payments = $this->rows(Db::name(self::PAYMENT_TABLE)
+            ->where('request_id', $requestId)
+            ->where('draft_version', $requestVersion)
+            ->where('draft_status', 'draft')
+            ->order('sort_no asc,id asc')
+            ->select());
+        $sources = $this->rows(Db::name(self::SOURCE_TABLE)
+            ->where('request_id', $requestId)
+            ->order('source_kind asc,source_id asc,source_role asc')
+            ->select());
+
+        $workspaceVersionAfter = (int)Db::name(CashierV3ResourceVersionServices::TABLE)
+            ->where('scope_type', CashierV3ResourceScope::TYPE_STORE)
+            ->where('scope_id', (string)$operatorScope->storeId())
+            ->where('resource_kind', 'cashier_workspace')
+            ->where('resource_id', $workspaceId)
+            ->value('current_version');
+        $requestAfter = Db::name(self::REQUEST_TABLE)
+            ->where('request_id', $requestId)
+            ->where('tenant_id', $dataScope->tenantId())
+            ->where('store_id', $dataScope->forcedStoreId())
+            ->where('operator_id', $operatorScope->operatorId())
+            ->where('workspace_id', $workspaceId)
+            ->where('state_context_id', $stateContextId)
+            ->field(
+                'request_version,request_status,authority_snapshot_version,'
+                . 'aggregate_fingerprint,last_operation_fingerprint'
+            )
+            ->find();
+        if ($workspaceVersionAfter !== $workspaceVersion
+            || !$requestAfter
+            || (int)($requestAfter['request_version'] ?? 0) !== $requestVersion
+            || (string)($requestAfter['request_status'] ?? '') !== $requestStatus
+            || (int)($requestAfter['authority_snapshot_version'] ?? 0) !== $authoritySnapshotVersion
+            || !hash_equals(
+                (string)($request['aggregate_fingerprint'] ?? ''),
+                (string)($requestAfter['aggregate_fingerprint'] ?? '')
+            )
+            || !hash_equals(
+                (string)($request['last_operation_fingerprint'] ?? ''),
+                (string)($requestAfter['last_operation_fingerprint'] ?? '')
+            )) {
+            return null;
+        }
+
+        return [
+            'request' => is_array($request) ? $request : (array)$request,
+            'lines' => $lines,
+            'payments' => $payments,
+            'sources' => $sources,
+            'workspaceCurrentVersion' => $workspaceVersion,
+            // Only a committed command receipt may select this exact request.
+            // Workspace-only draft settings can legitimately advance beyond
+            // the original checkout authority snapshot without rebuilding it.
+            'exactRequestProjection' => true,
+        ];
+    }
+
     public function lockCurrentForKernelInTx(
         string $requestId,
         string $creationIdempotencyKey,

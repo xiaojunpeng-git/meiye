@@ -619,7 +619,8 @@ class CashierV3ActionDispatcher
                 $operatorScope->operatorId(),
                 $stateContextId
             );
-            $projection = (new CashierV3CheckoutProjectionServices())->readCurrent(
+            $projection = (new CashierV3CheckoutProjectionServices())->readEditingRequest(
+                $requestId,
                 $workspaceId,
                 $stateContextId,
                 $operatorScope,

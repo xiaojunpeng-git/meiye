@@ -8,6 +8,12 @@ $module = file_get_contents(
 $dispatcher = file_get_contents(
     $root . '/后端代码/app/services/cashier/v3/CashierV3ActionDispatcher.php'
 );
+$repository = file_get_contents(
+    $root . '/后端代码/app/services/cashier/v3/settlement/ThinkPhpCashierV3CheckoutRequestRepository.php'
+);
+$rebuilder = file_get_contents(
+    $root . '/后端代码/app/services/cashier/v3/settlement/CashierV3CheckoutDraftAuthorityRebuilder.php'
+);
 
 $passed = 0;
 $failed = 0;
@@ -80,6 +86,20 @@ checkoutDraftProjectionOk(
     && strpos($dispatcher, 'readCheckoutDraftProjection') !== false
     && strpos($dispatcher, 'attachCheckoutDraftProjection') !== false
     && strpos($dispatcher, '&& $checkoutDraftProjection === null') !== false
+);
+checkoutDraftProjectionOk(
+    'narrow checkout projection resolves the committed exact request instead of guessing the latest draft',
+    is_string($dispatcher)
+    && strpos($dispatcher, '->readEditingRequest(') !== false
+    && is_string($repository)
+    && strpos($repository, 'readEditingProjectionByRequestId') !== false
+    && strpos($repository, "->where('request_id', \$requestId)") !== false
+    && strpos($repository, "'exactRequestProjection' => true") !== false
+);
+checkoutDraftProjectionOk(
+    'payment draft rebuild accepts workspace-only edits on its locked exact request',
+    is_string($rebuilder)
+    && strpos($rebuilder, "'exactRequestProjection' => true") !== false
 );
 checkoutDraftProjectionOk(
     'balance-conflict recovery reopens the persisted payment edit with a root projection',

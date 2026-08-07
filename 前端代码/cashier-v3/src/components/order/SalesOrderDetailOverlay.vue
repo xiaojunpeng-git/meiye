@@ -1,6 +1,7 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import { formatMoney } from '@/services/cashierV3Bridge'
+import SalesOrderReceiptPrintButton from '@/components/order/SalesOrderReceiptPrintButton.vue'
 
 /**
  * 销售订单详情只消费后端已结算的快照，不在页面重算金额、业绩或权益。
@@ -47,12 +48,29 @@ const props = defineProps({
   onAction: {
     type: Function,
     default: null
+  },
+  cartLineCount: {
+    type: Number,
+    default: 0
   }
 })
 
 const emit = defineEmits(['close'])
 const pendingAction = ref('')
 const actionError = ref('')
+const adjustmentReason = ref('')
+const salesSelections = ref({})
+const craftsmanSelections = ref({})
+const salesPreSaleSelections = ref({})
+const craftsmanPointSelections = ref({})
+const activeLifecycleForm = ref('')
+const refundAmount = ref('')
+const balancePrincipalRefundAmount = ref('0')
+const balanceGiftRefundAmount = ref('0')
+const refundReason = ref('')
+const voidReason = ref('')
+const actionPanelRef = ref(null)
+const reopenConfirmationVisible = ref(false)
 
 const sourceOrder = computed(() => (props.order && typeof props.order === 'object' ? props.order : {}))
 const orderId = computed(() => pickValue(sourceOrder.value, ['id', 'orderId', 'salesOrderId']))
@@ -143,6 +161,13 @@ function hasCardInfo(item) {
 function personName(person) {
   if (typeof person === 'string') return person
   return pickValue(person, ['name', 'staffName', 'employeeName', 'salespersonName', 'craftsmanName']) || '未命名人员'
+}
+
+function craftsmanDisplayName(person) {
+  const name = personName(person)
+  if (typeof person === 'string') return `${name}(轮)`
+  const marked = person?.isPointCustomer ?? person?.is_point_customer ?? person?.marked
+  return `${name}(${marked === true || marked === 1 || marked === '1' ? '点' : '轮'})`
 }
 
 function peopleFor(item, keys) {
@@ -287,23 +312,146 @@ const relatedGroups = computed(() => {
     { key: 'debt', label: '欠款／补交', action: 'open-order-debt-settlements', actionAliases: ['open-order-debt-settlements', 'open-debt-settlements'], records: relatedRecords(['debtSettlements', 'debts', 'supplementPayments']) },
     { key: 'refund', label: '退款', action: 'open-order-refunds', actionAliases: ['open-order-refunds', 'open-refunds'], records: relatedRecords(['refunds', 'refundRecords']) },
     { key: 'void', label: '作废', action: 'open-order-void', actionAliases: ['open-order-void', 'open-void-record'], records: relatedRecords(['voids', 'voidRecords']) },
-    { key: 'reopen', label: '重开', action: 'open-order-reopenings', actionAliases: ['open-order-reopenings', 'open-reopen-records', 'reopen-sales-order'], records: relatedRecords(['reopenings', 'reopenRecords']) },
     { key: 'upgrade', label: '升级', action: 'open-order-upgrades', actionAliases: ['open-order-upgrades', 'open-upgrade-records'], records: relatedRecords(['upgrades', 'upgradeRecords']) },
     { key: 'gift', label: '随单赠送', action: 'open-order-gifts', actionAliases: ['open-order-gifts', 'open-gift-records'], records: relatedRecords(['gifts', 'giftRecords', 'orderGifts']) },
     { key: 'service', label: '服务', action: 'open-order-services', actionAliases: ['open-order-services', 'open-service-records'], records: relatedRecords(['services', 'serviceRecords']) },
     { key: 'writeoff', label: '核销', action: 'open-order-writeoffs', actionAliases: ['open-order-writeoffs', 'open-writeoff-records'], records: relatedRecords(['writeoffs', 'writeoffRecords']) }
   ]
-  return groups.filter((group) => group.records.length || group.actionAliases.some(hasAction))
+  return groups.filter((group) => {
+    // 后端不应为游客下发补交能力；这里再兜底，避免异常旧投影误露入口。
+    if (group.key === 'debt' && (sourceOrder.value.isGuest === true || Number(sourceOrder.value.memberId || 0) <= 0)) return false
+    return group.records.length || group.actionAliases.some(hasAction)
+  })
 })
 
 const operationRecords = computed(() => relatedRecords(['operationLogs', 'operations', 'operationRecords']))
+const personnelAdjustment = computed(() => sourceOrder.value.personnelAdjustment && typeof sourceOrder.value.personnelAdjustment === 'object' ? sourceOrder.value.personnelAdjustment : null)
+const adjustmentLines = computed(() => Array.isArray(personnelAdjustment.value?.lines) ? personnelAdjustment.value.lines : [])
+const adjustmentSalespeople = computed(() => Array.isArray(personnelAdjustment.value?.salespeople) ? personnelAdjustment.value.salespeople : [])
+const adjustmentCraftsmen = computed(() => Array.isArray(personnelAdjustment.value?.craftsmen) ? personnelAdjustment.value.craftsmen : [])
 const canOpenOperationLogs = computed(() => hasAction('open-order-operation-logs') || hasAction('open-operation-logs'))
 const quickActions = computed(() => [
+  { action: 'open-sales-order-personnel-adjustment', label: '人员调整' },
   { action: 'refund-sales-order', label: '发起退款' },
   { action: 'void-sales-order', label: '作废订单' },
-  { action: 'reopen-sales-order', label: '重开订单' },
+  { action: 'reopen-sales-order', label: '重开' },
   { action: 'upgrade-sales-order', label: '卡项／项目升级' }
 ].filter((item) => hasAction(item.action)))
+
+function submitPersonnelAdjustment() {
+  const personnel = []
+  for (const line of adjustmentLines.value) {
+    const salesStaffId = Number(salesSelections.value[line.orderLineId] || 0)
+    const craftsmanStaffId = Number(craftsmanSelections.value[line.orderLineId] || 0)
+    if (salesStaffId > 0) personnel.push({ orderLineId: line.orderLineId, role: 'salesperson', staffId: salesStaffId, isPreSale: Boolean(salesPreSaleSelections.value[line.orderLineId]) })
+    if (craftsmanStaffId > 0) personnel.push({ orderLineId: line.orderLineId, role: 'craftsman', staffId: craftsmanStaffId, isPointCustomer: Boolean(craftsmanPointSelections.value[line.orderLineId]) })
+  }
+  return runAction('adjust-sales-order-personnel', { reason: adjustmentReason.value, personnel })
+}
+
+async function revealActionPanel() {
+  await nextTick()
+  actionPanelRef.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
+async function openLifecycleForm(action) {
+  actionError.value = ''
+  if (action === 'refund-sales-order') activeLifecycleForm.value = 'refund'
+  if (action === 'void-sales-order') activeLifecycleForm.value = 'void'
+  await revealActionPanel()
+}
+
+async function runQuickAction(action) {
+  if (['refund-sales-order', 'void-sales-order'].includes(action)) {
+    await openLifecycleForm(action)
+    return
+  }
+  if (action === 'reopen-sales-order' && props.cartLineCount > 0) {
+    reopenConfirmationVisible.value = true
+    return
+  }
+  await runAction(action)
+  await revealActionPanel()
+}
+
+async function confirmReopenWithCartReplacement() {
+  reopenConfirmationVisible.value = false
+  await runAction('reopen-sales-order', { replaceWorkspace: true })
+  await revealActionPanel()
+}
+
+function isValidMoney(value, allowZero = false) {
+  const normalized = String(value ?? '').trim()
+  if (!/^\d+(\.\d{1,2})?$/.test(normalized)) return false
+  const amount = Number(normalized)
+  return Number.isFinite(amount) && (allowZero ? amount >= 0 : amount > 0)
+}
+
+function moneyCents(value) {
+  const [yuan, fraction = ''] = String(value ?? '').trim().split('.')
+  return Number(yuan) * 100 + Number(fraction.padEnd(2, '0'))
+}
+
+function actionStatusFromResponse(response) {
+  const envelope = response?.data?.result ? response.data : response
+  return String(envelope?.result?.status || envelope?.status || '')
+}
+
+function resetRefundForm() {
+  refundAmount.value = ''
+  balancePrincipalRefundAmount.value = '0'
+  balanceGiftRefundAmount.value = '0'
+  refundReason.value = ''
+}
+
+async function submitRefund() {
+  if (!isValidMoney(refundAmount.value, true)) {
+    actionError.value = '实际退款金额必须大于等于 0，且最多保留两位小数。'
+    return
+  }
+  if (!isValidMoney(balancePrincipalRefundAmount.value, true)) {
+    actionError.value = '余额本金退回金额必须大于等于 0，且最多保留两位小数。'
+    return
+  }
+  if (!isValidMoney(balanceGiftRefundAmount.value, true)) {
+    actionError.value = '赠金退回金额必须大于等于 0，且最多保留两位小数。'
+    return
+  }
+  if (moneyCents(refundAmount.value)
+    + moneyCents(balancePrincipalRefundAmount.value)
+    + moneyCents(balanceGiftRefundAmount.value) <= 0) {
+    actionError.value = '实际退款、本金退回和赠金退回至少需要填写一项。'
+    return
+  }
+  if (!refundReason.value.trim()) {
+    actionError.value = '请填写退款原因。'
+    return
+  }
+  const response = await runAction('refund-sales-order', {
+    // refundAmount remains the authoritative refund-statistics amount.
+    refundAmount: refundAmount.value,
+    actualRefundAmount: refundAmount.value,
+    balancePrincipalRefundAmount: balancePrincipalRefundAmount.value,
+    balanceGiftRefundAmount: balanceGiftRefundAmount.value,
+    reason: refundReason.value
+  })
+  if (['success', 'succeeded'].includes(actionStatusFromResponse(response))) {
+    activeLifecycleForm.value = ''
+    resetRefundForm()
+  }
+}
+
+async function submitVoid() {
+  if (!voidReason.value.trim()) {
+    actionError.value = '请填写作废原因。'
+    return
+  }
+  const response = await runAction('void-sales-order', { reason: voidReason.value })
+  if (['success', 'succeeded'].includes(actionStatusFromResponse(response))) {
+    activeLifecycleForm.value = ''
+    voidReason.value = ''
+  }
+}
 
 function relationRecordLabel(record) {
   if (typeof record === 'string') return record
@@ -349,13 +497,21 @@ async function runAction(action, payload = {}) {
   pendingAction.value = action
   actionError.value = ''
   try {
-    await props.onAction({
+    const response = await props.onAction({
       action,
       orderId: orderId.value,
       orderNo: orderNo.value,
       revision: orderRevision.value,
       ...payload
     })
+    const envelope = response?.data?.result ? response.data : response
+    const status = envelope?.result?.status || envelope?.status || ''
+    if (['failed', 'conflict', 'result_unknown'].includes(status)) {
+      actionError.value = envelope?.result?.message || envelope?.message || '暂时无法完成该操作，请稍后再试。'
+    } else if (!['success', 'succeeded'].includes(status)) {
+      actionError.value = '系统没有返回可确认的处理结果，本次操作状态未改变。'
+    }
+    return response
   } catch (error) {
     actionError.value = error?.message || '暂时无法完成该操作，请稍后再试。'
   } finally {
@@ -374,17 +530,35 @@ async function runAction(action, payload = {}) {
       </div>
       <div class="sales-order-detail-overlay__header-actions">
         <button
+          v-for="item in quickActions"
+          :key="item.action"
           type="button"
           class="sales-order-detail-button sales-order-detail-button--secondary"
           :disabled="isLoading || Boolean(pendingAction)"
-          title="打印销售订单小票"
-          @click="runAction('print-sales-order-receipt')"
+          @click="runQuickAction(item.action)"
+        >{{ pendingAction === item.action ? '处理中…' : item.label }}</button>
+        <SalesOrderReceiptPrintButton
+          class="sales-order-detail-button sales-order-detail-button--secondary"
+          :order="sourceOrder"
+          :disabled="isLoading"
+          @error="actionError = $event"
         >
           小票打印
-        </button>
+        </SalesOrderReceiptPrintButton>
         <button type="button" class="sales-order-detail-button sales-order-detail-button--secondary" :disabled="isLoading || Boolean(pendingAction)" @click="$emit('close')">关闭</button>
       </div>
     </header>
+
+    <div v-if="reopenConfirmationVisible" class="sales-order-detail-confirm" role="dialog" aria-modal="true" aria-label="确认清空购物车并重开">
+      <section>
+        <h3>清空购物车并重开？</h3>
+        <p>当前购物车有 {{ cartLineCount }} 项未结账内容。确认后将清空这些内容，并按原订单商品重新创建收银草稿。</p>
+        <footer>
+          <button type="button" class="sales-order-detail-button sales-order-detail-button--text" @click="reopenConfirmationVisible = false">否，取消</button>
+          <button type="button" class="sales-order-detail-button sales-order-detail-button--secondary" @click="confirmReopenWithCartReplacement">是，清空并重开</button>
+        </footer>
+      </section>
+    </div>
 
     <main class="sales-order-detail-overlay__body">
       <div v-if="isLoading" class="sales-order-detail-loading" role="status">
@@ -452,7 +626,7 @@ async function runAction(action, payload = {}) {
                 </div>
                 <div v-if="peopleFor(item, ['craftsmen', 'craftspeople', 'artisans', 'craftsmanAllocations']).length" class="sales-order-detail-person-list">
                   <div v-for="(person, personIndex) in peopleFor(item, ['craftsmen', 'craftspeople', 'artisans', 'craftsmanAllocations'])" :key="pickValue(person, ['id', 'staffId', 'employeeId']) || `${personName(person)}-${personIndex}`">
-                    <span>{{ personName(person) }}</span>
+                    <span>{{ craftsmanDisplayName(person) }}</span>
                     <strong v-if="hasValue(performanceAmount(person, ['laborPerformanceAmount', 'performanceAmount', 'laborAmount']))">劳动业绩 {{ displayAmount(performanceAmount(person, ['laborPerformanceAmount', 'performanceAmount', 'laborAmount'])) }}</strong>
                   </div>
                 </div>
@@ -556,14 +730,57 @@ async function runAction(action, payload = {}) {
           </div>
         </section>
 
-        <section v-if="quickActions.length" class="sales-order-detail-section sales-order-detail-section--actions">
-          <header class="sales-order-detail-section__header">
-            <div><h3>订单操作</h3></div>
-          </header>
-          <div class="sales-order-detail-quick-actions">
-            <button v-for="item in quickActions" :key="item.action" type="button" class="sales-order-detail-button sales-order-detail-button--secondary" :disabled="Boolean(pendingAction)" @click="runAction(item.action)">{{ item.label }}</button>
+        <div ref="actionPanelRef">
+          <p v-if="actionError" class="sales-order-detail-error" role="alert">{{ actionError }}</p>
+
+          <section v-if="activeLifecycleForm === 'refund'" class="sales-order-detail-section sales-order-detail-section--actions">
+          <header class="sales-order-detail-section__header"><div><h3>发起退款</h3><span>实际退款金额计入退款统计；本金和赠金退回金额只用于账户冲销。未使用卡权益和完全未还欠款会随单撤销；已使用权益、已还欠款或商品订单不允许直接退款。</span></div></header>
+          <div class="sales-order-detail-lifecycle-form">
+            <div class="sales-order-detail-refund-amounts">
+              <label>实际退款金额<input v-model.trim="refundAmount" inputmode="decimal" placeholder="输入实际退给客户的金额" /></label>
+              <label>余额本金退回金额<input v-model.trim="balancePrincipalRefundAmount" inputmode="decimal" placeholder="输入退回账户本金" /></label>
+              <label>赠金退回金额<input v-model.trim="balanceGiftRefundAmount" inputmode="decimal" placeholder="输入退回账户赠金" /></label>
+            </div>
+            <label>退款原因<textarea v-model.trim="refundReason" maxlength="255" rows="3" placeholder="填写退款原因" /></label>
+            <div class="sales-order-detail-quick-actions"><button type="button" class="sales-order-detail-button sales-order-detail-button--text" :disabled="Boolean(pendingAction)" @click="activeLifecycleForm = ''">取消</button><button type="button" class="sales-order-detail-button sales-order-detail-button--secondary" :disabled="Boolean(pendingAction)" @click="submitRefund">确认退款</button></div>
           </div>
-        </section>
+          </section>
+
+          <section v-if="activeLifecycleForm === 'void'" class="sales-order-detail-section sales-order-detail-section--actions">
+          <header class="sales-order-detail-section__header"><div><h3>作废订单</h3><span>作废会保留原单和操作记录，自动退回原单本金、赠金和未使用卡权益，并取消完全未还欠款。已使用权益或已还欠款时不允许作废。</span></div></header>
+          <div class="sales-order-detail-lifecycle-form">
+            <label>作废原因<textarea v-model.trim="voidReason" maxlength="255" rows="3" placeholder="填写作废原因" /></label>
+            <div class="sales-order-detail-quick-actions"><button type="button" class="sales-order-detail-button sales-order-detail-button--text" :disabled="Boolean(pendingAction)" @click="activeLifecycleForm = ''">取消</button><button type="button" class="sales-order-detail-button sales-order-detail-button--secondary" :disabled="Boolean(pendingAction)" @click="submitVoid">确认作废</button></div>
+          </div>
+          </section>
+
+          <section v-if="personnelAdjustment" class="sales-order-detail-section sales-order-detail-section--actions">
+          <header class="sales-order-detail-section__header"><div><h3>人员调整</h3><span>调整会保留原订单与原业绩快照，并写入新的调整事实。</span></div></header>
+          <div class="sales-order-detail-personnel-adjustment">
+            <article v-for="line in adjustmentLines" :key="line.orderLineId">
+              <strong>{{ line.itemName }}</strong>
+              <label>销售人
+                <select v-model="salesSelections[line.orderLineId]">
+                  <option value="">不调整</option>
+                  <option v-for="person in adjustmentSalespeople" :key="person.staffId" :value="person.staffId">{{ person.name }}</option>
+                </select>
+              </label>
+              <label v-if="salesSelections[line.orderLineId]" class="sales-order-detail-personnel-adjustment__flag"><input v-model="salesPreSaleSelections[line.orderLineId]" type="checkbox"> 售前</label>
+              <label v-if="line.canAdjustCraftsman">手艺人
+                <select v-model="craftsmanSelections[line.orderLineId]">
+                  <option value="">不调整</option>
+                  <option v-for="person in adjustmentCraftsmen" :key="person.staffId" :value="person.staffId">{{ person.name }}</option>
+                </select>
+              </label>
+              <label v-if="line.canAdjustCraftsman && craftsmanSelections[line.orderLineId]" class="sales-order-detail-personnel-adjustment__flag"><input v-model="craftsmanPointSelections[line.orderLineId]" type="checkbox"> 点客（未勾选为轮）</label>
+            </article>
+            <label class="sales-order-detail-personnel-adjustment__reason">调整原因
+              <textarea v-model.trim="adjustmentReason" maxlength="255" rows="3" placeholder="填写调整原因" />
+            </label>
+            <div class="sales-order-detail-quick-actions"><button type="button" class="sales-order-detail-button sales-order-detail-button--secondary" :disabled="Boolean(pendingAction)" @click="submitPersonnelAdjustment">确认调整</button></div>
+          </div>
+          </section>
+        </div>
 
         <section v-if="operationRecords.length || canOpenOperationLogs" class="sales-order-detail-section">
           <header class="sales-order-detail-section__header">
@@ -579,7 +796,6 @@ async function runAction(action, payload = {}) {
           <div v-else class="sales-order-detail-empty">暂无操作记录。</div>
         </section>
 
-        <p v-if="actionError" class="sales-order-detail-error" role="alert">{{ actionError }}</p>
       </template>
     </main>
   </section>
@@ -605,6 +821,28 @@ async function runAction(action, payload = {}) {
   border-bottom: 1px solid #e5e7eb;
   background: #fff;
 }
+
+.sales-order-detail-confirm {
+  position: fixed;
+  inset: 0;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, .36);
+}
+
+.sales-order-detail-confirm > section {
+  width: min(460px, 100%);
+  padding: 24px;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 18px 48px rgba(15, 23, 42, .22);
+}
+
+.sales-order-detail-confirm h3 { margin: 0; font-size: 18px; }
+.sales-order-detail-confirm p { margin: 12px 0 20px; color: #475569; line-height: 1.6; }
+.sales-order-detail-confirm footer { display: flex; justify-content: flex-end; gap: 10px; }
 
 .sales-order-detail-overlay__header p,
 .sales-order-detail-overlay__header h2,
@@ -642,6 +880,79 @@ async function runAction(action, payload = {}) {
   flex-wrap: wrap;
   align-items: center;
   gap: 10px;
+}
+
+.sales-order-detail-personnel-adjustment {
+  display: grid;
+  gap: 12px;
+}
+
+.sales-order-detail-personnel-adjustment article {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) repeat(2, minmax(180px, 1fr));
+  gap: 12px;
+  align-items: end;
+  padding: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+
+.sales-order-detail-personnel-adjustment label {
+  display: grid;
+  gap: 6px;
+  color: #475467;
+  font-size: 13px;
+}
+
+.sales-order-detail-personnel-adjustment select,
+.sales-order-detail-personnel-adjustment textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #d0d5dd;
+  border-radius: 6px;
+  padding: 8px 10px;
+  color: #1f2937;
+  background: #fff;
+  font: inherit;
+}
+
+.sales-order-detail-personnel-adjustment__reason { max-width: 560px; }
+
+.sales-order-detail-lifecycle-form {
+  display: grid;
+  gap: 12px;
+  max-width: 560px;
+}
+
+.sales-order-detail-lifecycle-form label {
+  display: grid;
+  gap: 6px;
+  color: #475467;
+  font-size: 13px;
+}
+
+.sales-order-detail-refund-amounts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.sales-order-detail-lifecycle-form input,
+.sales-order-detail-lifecycle-form textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #d0d5dd;
+  border-radius: 6px;
+  padding: 8px 10px;
+  color: #1f2937;
+  background: #fff;
+  font: inherit;
+}
+
+@media (max-width: 720px) {
+  .sales-order-detail-refund-amounts {
+    grid-template-columns: 1fr;
+  }
 }
 
 .sales-order-detail-overlay__body {

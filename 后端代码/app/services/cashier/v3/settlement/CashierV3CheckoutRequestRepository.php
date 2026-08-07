@@ -69,6 +69,21 @@ interface CashierV3CheckoutRequestRepository
     );
 
     /**
+     * Read one exact editable request after a committed narrow mutation. The
+     * request identity comes from the committed command receipt; this method
+     * never guesses among older editing requests in the same workspace.
+     *
+     * @return array|null request, line and payment rows in persistence shape
+     */
+    public function readEditingProjectionByRequestId(
+        string $requestId,
+        string $workspaceId,
+        string $stateContextId,
+        CashierV3OperatorScope $operatorScope,
+        CashierV3DataScopeContext $dataScope
+    );
+
+    /**
      * Lock the existing request used as CashierV3CheckoutSettlementKernel's
      * currentRequest. A blank request ID resolves only by the immutable
      * creation idempotency key.

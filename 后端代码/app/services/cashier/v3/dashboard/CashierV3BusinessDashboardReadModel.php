@@ -118,7 +118,7 @@ final class CashierV3BusinessDashboardReadModel
     {
         $source = $this->source($metric, $range, $operator, $scope);
         $amount = $source['amount'];
-        $sql = "COALESCE(SUM(CASE WHEN fact_direction = 'reversal' THEN -({$amount}) ELSE ({$amount}) END),0) AS amount";
+        $sql = "COALESCE(SUM({$amount}),0) AS amount";
         if ($metric === 'service_count') $sql = 'COALESCE(SUM(quantity),0) AS amount';
         if ($metric === 'debt_amount') $sql = "COALESCE(SUM({$amount}),0) AS amount";
         // ThinkORM's value('amount') replaces the aggregate select with the physical
@@ -132,7 +132,7 @@ final class CashierV3BusinessDashboardReadModel
     {
         $source = $this->source($metric, $range, $operator, $scope);
         $amount = $source['amount'];
-        $value = $metric === 'service_count' ? 'SUM(quantity)' : ($metric === 'debt_amount' ? "SUM({$amount})" : "SUM(CASE WHEN fact_direction = 'reversal' THEN -({$amount}) ELSE ({$amount}) END)");
+        $value = $metric === 'service_count' ? 'SUM(quantity)' : "SUM({$amount})";
         $dateColumn = $source['date'];
         $rows = (clone $source['query'])->fieldRaw("{$dateColumn} AS day, COALESCE({$value},0) AS amount")
             ->group($dateColumn)->orderRaw($dateColumn . ' ASC')->select()->toArray();
@@ -151,7 +151,7 @@ final class CashierV3BusinessDashboardReadModel
     {
         $source = $this->source($metric, $range, $operator, $scope);
         $amount = $source['amount'];
-        $value = $metric === 'service_count' ? 'SUM(quantity)' : ($metric === 'debt_amount' ? "SUM({$amount})" : "SUM(CASE WHEN fact_direction = 'reversal' THEN -({$amount}) ELSE ({$amount}) END)");
+        $value = $metric === 'service_count' ? 'SUM(quantity)' : "SUM({$amount})";
         $operator = $metric === 'debt_amount'
             ? "0 AS operator_id, '' AS operator_name"
             : 'operator_id AS operator_id, MAX(operator_name_snapshot) AS operator_name';
@@ -216,7 +216,7 @@ final class CashierV3BusinessDashboardReadModel
     private function rowAmount(array $row, string $amount): int
     {
         if ($amount === '-(principal_delta_cents + bonus_delta_cents)') return -((int)($row['principal_delta_cents'] ?? 0) + (int)($row['bonus_delta_cents'] ?? 0));
-        return (int)($row[$amount] ?? 0) * ((string)($row['fact_direction'] ?? 'forward') === 'reversal' ? -1 : 1);
+        return (int)($row[$amount] ?? 0);
     }
 
     /** @return array{start:string,end:string} */

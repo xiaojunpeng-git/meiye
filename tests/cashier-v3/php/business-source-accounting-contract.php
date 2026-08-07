@@ -9,21 +9,30 @@ $read = static function (string $file) use ($root): string {
 };
 $source = $read('后端代码/app/services/cashier/v3/settlement/CashierV3CheckoutBusinessSourceSelectionServices.php');
 $salesPlan = $read('后端代码/app/services/cashier/v3/order/settlement/CashierV3SalesOrderPlanV1.php');
+$saleOnly = $read('后端代码/app/services/cashier/v3/settlement/CashierV3SaleOnlyCheckoutSubmissionServices.php');
 $paymentPlan = $read('后端代码/app/services/cashier/v3/settlement/payment/CashierV3PaymentCollectionPlanV1.php');
 $projection = $read('后端代码/app/services/cashier/v3/settlement/CashierV3CheckoutProjectionServices.php');
 $businessConfigProjection = $read('后端代码/app/services/cashier/v3/settlement/CashierV3CheckoutBusinessConfigProjectionServices.php');
 $rechargeCheckout = $read('后端代码/app/services/cashier/v3/member/CashierV3RechargeCheckoutModule.php');
 $recharge = $read('后端代码/app/services/cashier/v3/member/CashierV3RechargeModule.php');
+$cashierModule = $read('后端代码/app/services/cashier/v3/cashier/CashierV3CashierModule.php');
 
 $checks = [
     'source has isolated selection version' => str_contains($source, "'selection_version'"),
     'source final settlement locks configuration' => str_contains($source, 'lockResolvedForSettlementInTx'),
     'sales order has business source snapshots' => str_contains($salesPlan, 'business_source_label_snapshot'),
+    'sale-only settlement locks and passes business source' => str_contains($saleOnly, 'lockResolvedForSettlementInTx')
+        && str_contains($saleOnly, "CashierV3CheckoutBusinessSourceSelectionServices::KIND_SALE")
+        && str_contains($saleOnly, '$businessSource[\'primarySourceId\'] > 0 ? $businessSource : []'),
     'payment plan snapshots configured accounting name' => str_contains($paymentPlan, 'resolveAccountingMethodSnapshot'),
     'recharge checkout reads configured accounting names and rechecks submit' => str_contains($rechargeCheckout, 'accountingMethodMap') && str_contains($rechargeCheckout, 'resolveAccountingMethodSnapshot'),
     'recharge authority snapshots configured accounting name' => str_contains($recharge, 'paymentMethodNameSnapshot'),
     'editing checkout delegates business configuration projection' => str_contains($projection, 'businessConfigProjection->apply'),
     'business configuration projection exposes configured accounting names' => str_contains($businessConfigProjection, 'applyAccountingMethodNames'),
+    'business source locks checkout but touches workspace only' => str_contains($cashierModule, "\$action = 'update-checkout-business-source';")
+        && str_contains($cashierModule, "['cashier_workspace', 'checkout_request']")
+        && str_contains($cashierModule, "\$resolved['required_touched_roles'] = ['cashier_workspace'];")
+        && str_contains($cashierModule, "'touched' => ['cashier_workspace']"),
 ];
 foreach ($checks as $label => $ok) {
     if (!$ok) throw new RuntimeException('FAIL: ' . $label);

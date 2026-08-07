@@ -34,10 +34,10 @@ final class CashierV3CheckoutProjectionServices
     /** @var CashierV3MemberBalanceProvider */
     private $memberBalances;
 
-    public function __construct(
     /** @var CashierV3CheckoutBusinessConfigProjectionServices */
     private $businessConfigProjection;
 
+    public function __construct(
         CashierV3CheckoutRequestRepository $requests = null,
         CashierV3CheckoutResultReadRepository $completedResults = null,
         CashierV3MemberBalanceProvider $memberBalances = null,
@@ -46,8 +46,8 @@ final class CashierV3CheckoutProjectionServices
         $this->requests = $requests ?: new ThinkPhpCashierV3CheckoutRequestRepository();
         $this->completedResults = $completedResults;
         $this->memberBalances = $memberBalances ?: new CashierV3MemberBalanceProvider();
-    }
         $this->businessConfigProjection = $businessConfigProjection ?: new CashierV3CheckoutBusinessConfigProjectionServices();
+    }
 
     public function readCurrent(
         string $workspaceId,
@@ -84,6 +84,34 @@ final class CashierV3CheckoutProjectionServices
         return $committed === null || $committed === []
             ? null
             : self::projectSucceededResult($committed);
+    }
+
+    public function readEditingRequest(
+        string $requestId,
+        string $workspaceId,
+        string $stateContextId,
+        CashierV3OperatorScope $operatorScope,
+        CashierV3DataScopeContext $dataScope
+    ): ?array {
+        $aggregate = $this->requests->readEditingProjectionByRequestId(
+            $requestId,
+            $workspaceId,
+            $stateContextId,
+            $operatorScope,
+            $dataScope
+        );
+        if ($aggregate === null) {
+            return null;
+        }
+        return $this->withCurrentMemberBalance(
+            $this->businessConfigProjection->apply(
+                self::projectPersistedAggregate($aggregate),
+                CashierV3CheckoutBusinessSourceSelectionServices::KIND_SALE,
+                (array)$aggregate['request']
+            ),
+            $operatorScope,
+            $dataScope
+        );
     }
 
     /**
@@ -275,8 +303,11 @@ final class CashierV3CheckoutProjectionServices
             $aggregate['workspaceCurrentVersion'] ?? null,
             'workspaceCurrentVersion'
         );
+        $exactRequestProjection = ($aggregate['exactRequestProjection'] ?? false) === true;
         if ($workspaceVersion >= PHP_INT_MAX
-            || $workspaceCurrentVersion !== $workspaceVersion + 1) {
+            || $workspaceCurrentVersion <= $workspaceVersion
+            || (!$exactRequestProjection
+                && $workspaceCurrentVersion !== $workspaceVersion + 1)) {
             throw self::failure('checkout_projection_workspace_version_drift');
         }
         $authorityFingerprint = self::fingerprint(
