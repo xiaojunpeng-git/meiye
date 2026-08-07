@@ -14,6 +14,25 @@ import { menusApi } from '@/api/account';
 import Setting from '@/setting';
 import util from '@/libs/util';
 import { isAgentPath } from '@/utils/pathUtils';
+import { normalizeOrganizationWorkspaceMenu } from '@/libs/organizationWorkspaceMenu';
+
+// "出入库记录" has been consolidated into inventory query/statistics.  Filter
+// the legacy entry here as well as in the menu migration so a browser with an
+// older cached menu cannot keep exposing a closed workflow after refresh.
+function withoutLegacyInventoryMovement(menuData) {
+  if (!Array.isArray(menuData)) return [];
+  return menuData
+    .filter((item) => {
+      const path = String((item && (item.path || item.menu_path)) || '');
+      return item && item.unique_auth !== 'admin-inventory-statistics'
+        && !/\/?inventory\/statistics\/?$/.test(path)
+        && item.title !== '出入库记录';
+    })
+    .map(item => ({
+      ...item,
+      children: Array.isArray(item.children) ? withoutLegacyInventoryMovement(item.children) : item.children
+    }));
+}
 
 // 数据大屏作为总部下的普通菜单项，紧跟“概况”；同时补齐旧登录缓存。
 function withOperatingScreenMenu(menuData) {
@@ -81,7 +100,8 @@ function getMenusName() {
   try {
     menuData = menuList !== undefined ? JSON.parse(menuList) : [];
   } catch (e) {}
-  return withOperatingScreenMenu(menuData);
+  const prefix = isAgentPath() ? Setting.routePreAgent : Setting.roterPre;
+  return withOperatingScreenMenu(normalizeOrganizationWorkspaceMenu(withoutLegacyInventoryMovement(menuData), prefix));
 }
 
 export default {
@@ -94,7 +114,8 @@ export default {
   mutations: {
     getmenusNav(state, menuList) {
       const storage = window.localStorage;
-      menuList = withOperatingScreenMenu(menuList);
+      const prefix = isAgentPath() ? Setting.routePreAgent : Setting.roterPre;
+      menuList = withOperatingScreenMenu(normalizeOrganizationWorkspaceMenu(withoutLegacyInventoryMovement(menuList), prefix));
       state.menusName = menuList;
       if (isAgentPath()) {
         storage.setItem('agent_menuList', JSON.stringify(menuList));
@@ -106,7 +127,8 @@ export default {
     },
     getAgentMenusNav(state, menuList) {
       const storage = window.localStorage;
-      menuList = withOperatingScreenMenu(menuList);
+      const prefix = isAgentPath() ? Setting.routePreAgent : Setting.roterPre;
+      menuList = withOperatingScreenMenu(normalizeOrganizationWorkspaceMenu(withoutLegacyInventoryMovement(menuList), prefix));
       //   state.menusName = menuList;
       storage.setItem('agent_menuList', JSON.stringify(menuList));
       storage.setItem('agent_roterPre', 'agent');

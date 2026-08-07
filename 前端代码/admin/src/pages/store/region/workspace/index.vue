@@ -211,20 +211,16 @@
             </section>
           </div>
 
-          <div v-show="activeTab === 'stores'" class="tab-pane active">
+          <div v-show="activeTab === 'stores' || activeTab === 'employees'" class="tab-pane active">
             <section class="section-card full-card">
               <div class="list-toolbar">
-                <div class="segmented">
-                  <button type="button" :class="{ active: dataView === 'store' }" @click="switchDataView('store')">按门店</button>
-                  <button type="button" :class="{ active: dataView === 'people' }" @click="switchDataView('people')">按人员</button>
-                </div>
                 <div class="toolbar-right">
                   <div class="input-shell small">
                     <svg-icon name="search" />
-                    <input v-model.trim="dataSearch" type="search" placeholder="搜索门店、姓名或手机号" @keyup.enter="reloadCurrentList" />
+                    <input v-model.trim="dataSearch" type="search" :placeholder="activeTab === 'employees' ? '搜索姓名或手机号' : '搜索门店'" @keyup.enter="reloadCurrentList" />
                   </div>
                   <button class="button secondary compact-button" type="button" @click="reloadCurrentList">查询 <span class="enter-key">↵</span></button>
-                  <button v-if="dataView === 'people'" class="button secondary compact-button" type="button" @click="openOrgDirectModal">组织直属</button>
+                  <button v-if="activeTab === 'employees'" class="button secondary compact-button" type="button" @click="openOrgDirectModal">组织直属</button>
                   <button class="button secondary compact-button" type="button" @click="openTransferApplyModal">调店申请</button>
                   <div class="view-switch">
                     <button type="button" :class="{ active: dataLayout === 'list' }" @click="dataLayout = 'list'"><svg-icon name="list" /></button>
@@ -232,7 +228,7 @@
                   </div>
                 </div>
               </div>
-              <div v-if="dataView === 'store'" class="filter-chips">
+              <div v-if="activeTab === 'stores'" class="filter-chips">
                 <button v-for="filter in filters" :key="filter.key" class="chip" type="button" :class="{ active: dataFilter === filter.key }" @click="setStoreFilter(filter.key)">{{ filter.label }}</button>
               </div>
 
@@ -242,7 +238,7 @@
                 <button class="text-button" type="button" @click="reloadCurrentList">重试</button>
               </div>
               <template v-else>
-                <div v-if="dataView === 'store' && dataLayout === 'list'">
+                <div v-if="activeTab === 'stores' && dataLayout === 'list'">
                   <table class="data-table">
                     <thead><tr><th>门店</th><th>店长/副店长</th><th>所属组织</th><th>在职人数</th><th>状态</th><th>待完善</th><th>操作</th></tr></thead>
                     <tbody>
@@ -264,7 +260,7 @@
                   </table>
                   <div v-if="!storeList.length" class="empty-state">没有找到符合条件的门店</div>
                 </div>
-                <div v-else-if="dataView === 'store'">
+                <div v-else-if="activeTab === 'stores'">
                   <div class="card-list">
                     <article v-for="store in storeList" :key="store.id" class="store-card" @click="openStoreDrawer(store)">
                       <div class="store-card-head">
@@ -351,7 +347,7 @@
                   <div v-if="!employeeList.length" class="empty-state">没有找到符合条件的人员</div>
                 </div>
                 <div class="pagination">
-                  <span>共 {{ listTotal }} {{ dataView === 'store' ? '家门店' : '名人员' }}</span>
+                  <span>共 {{ listTotal }} {{ activeTab === 'stores' ? '家门店' : '名人员' }}</span>
                   <div>
                     <button type="button" :disabled="listPage <= 1" @click="changeListPage(listPage - 1)">上一页</button>
                     <button type="button" class="active">{{ listPage }}</button>
@@ -1564,7 +1560,7 @@ export default {
       grantSearch: '',
       grantCandidates: [],
       grantForm: { employee_id: 0, admin_id: 0, scope_mode: 'inherit', allowed_store_ids: [] },
-      tabLoaded: { stores: false, permissions: false, logs: false },
+      tabLoaded: { stores: false, employees: false, permissions: false, logs: false },
       filters: [
         { key: 'all', label: '全部' },
         { key: 'open', label: '营业中' },
@@ -1685,7 +1681,8 @@ export default {
     tabs() {
       return [
         { key: 'overview', label: '概况' },
-        { key: 'stores', label: '门店与人员', count: this.selectedOrg.stores },
+        { key: 'stores', label: '门店', count: this.selectedOrg.stores },
+        { key: 'employees', label: '员工', count: this.selectedOrg.employees },
         { key: 'permissions', label: '权限范围' },
         { key: 'logs', label: '变更记录' },
       ];
@@ -1838,6 +1835,15 @@ export default {
     },
   },
   created() {
+    const entryTab = String((this.$route && this.$route.query && this.$route.query.tab) || '');
+    if (entryTab === 'stores') {
+      this.$router.replace(`${Setting.roterPre}/store/store/index`);
+      return;
+    }
+    if (entryTab === 'people' || entryTab === 'employees') {
+      this.$router.replace(`${Setting.roterPre}/setting/staff/index`);
+      return;
+    }
     this.applyReturnQuery();
     this.loadWriteStatus().finally(() => {
       this.loadTree();
@@ -1859,10 +1865,30 @@ export default {
   },
   watch: {
     '$route.query'(val, oldVal) {
+      const entryTab = String((val && val.tab) || '');
+      if (entryTab === 'stores') {
+        this.$router.replace(`${Setting.roterPre}/store/store/index`);
+        return;
+      }
+      if (entryTab === 'people' || entryTab === 'employees') {
+        this.$router.replace(`${Setting.roterPre}/setting/staff/index`);
+        return;
+      }
       const r = Number((val && val._r) || 0);
       const oldR = Number((oldVal && oldVal._r) || 0);
       if (r && r !== oldR) {
         this.applyReturnQuery(true);
+        return;
+      }
+      const tab = String((val && val.tab) || '');
+      const oldTab = String((oldVal && oldVal.tab) || '');
+      const orgId = Number((val && (val.org_id || val.return_org_id)) || 0);
+      const oldOrgId = Number((oldVal && (oldVal.org_id || oldVal.return_org_id)) || 0);
+      if (tab !== oldTab || orgId !== oldOrgId) {
+        this.applyReturnQuery(false);
+        if ((this.activeTab === 'stores' || this.activeTab === 'employees') && this.selectedOrgId) {
+          this.reloadCurrentList();
+        }
       }
     },
   },
@@ -1904,13 +1930,13 @@ export default {
         this.activeTab = 'stores';
         this.dataView = 'store';
       } else if (tab === 'people' || tab === 'employees') {
-        this.activeTab = 'stores';
+        this.activeTab = 'employees';
         this.dataView = 'people';
       } else if (tab === 'permissions' || tab === 'permission') {
         this.activeTab = 'permissions';
       }
       if (forceRefresh || refreshKey > 0) {
-        this.tabLoaded = { stores: false, permissions: false, logs: false };
+        this.tabLoaded = { stores: false, employees: false, permissions: false, logs: false };
         if (this.orgs.length) {
           this.loadTree();
         }
@@ -1998,12 +2024,12 @@ export default {
       if (!next) return;
       this.expandOrgAncestors(next);
       this.selectedOrgId = next;
-      this.activeTab = 'stores';
+      this.activeTab = 'employees';
       this.dataView = 'people';
       this.dataFilter = 'all';
       this.dataSearch = String(keyword || '');
       this.listPage = 1;
-      this.tabLoaded.stores = false;
+      this.tabLoaded.employees = false;
       this.closeMenus();
       this.closeMobileTree();
       this.loadOverview();
@@ -2030,6 +2056,7 @@ export default {
       this.activeTab = 'stores';
       this.dataView = 'store';
       this.tabLoaded.stores = false;
+      this.tabLoaded.employees = false;
       this.loadTree();
       this.loadOverview();
       this.loadStores();
@@ -2148,9 +2175,10 @@ export default {
         allowedStoreIds: [],
         defaultOrgId: Number(this.selectedOrgId || 0),
       };
-      this.activeTab = 'stores';
+      this.activeTab = 'employees';
       this.dataView = 'people';
       this.tabLoaded.stores = false;
+      this.tabLoaded.employees = false;
       this.loadTree();
       this.loadOverview();
       this.loadEmployees();
@@ -2725,14 +2753,14 @@ export default {
       this.permissionHolders = [];
       this.orgStoreOptions = [];
       this.logList = [];
-      this.tabLoaded = { stores: false, permissions: false, logs: false };
+      this.tabLoaded = { stores: false, employees: false, permissions: false, logs: false };
       const seq = this.beginLoad('overviewState');
       getOrganizationWorkspaceOverview({ org_id: orgId })
         .then((res) => {
           if (!this.endLoad('overviewState', seq)) return;
           if (Number(this.selectedOrgId) !== orgId) return;
           this.overview = res.data || null;
-          if (this.activeTab === 'stores') this.reloadCurrentList();
+          if (this.activeTab === 'stores' || this.activeTab === 'employees') this.reloadCurrentList();
           if (this.activeTab === 'permissions') this.loadPermissions();
           if (this.activeTab === 'logs') this.loadLogs(1);
         })
@@ -2761,8 +2789,18 @@ export default {
       this.loadOverview();
     },
     switchTab(key) {
+      const isListTab = key === 'stores' || key === 'employees';
+      const changedListTab = isListTab && key !== this.activeTab;
       this.activeTab = key;
+      if (key === 'stores') {
+        this.dataView = 'store';
+      } else if (key === 'employees') {
+        this.dataView = 'people';
+      }
+      if (changedListTab) this.listPage = 1;
       if (key === 'stores' && !this.tabLoaded.stores) {
+        this.reloadCurrentList();
+      } else if (key === 'employees' && !this.tabLoaded.employees) {
         this.reloadCurrentList();
       } else if (key === 'permissions' && !this.tabLoaded.permissions) {
         this.loadPermissions();
@@ -2772,6 +2810,7 @@ export default {
     },
     switchDataView(view) {
       this.dataView = view;
+      this.activeTab = view === 'people' ? 'employees' : 'stores';
       this.listPage = 1;
       this.reloadCurrentList();
     },
@@ -3134,7 +3173,7 @@ export default {
           const data = res.data || {};
           this.employeeList = data.list || [];
           this.listTotal = data.count || 0;
-          this.tabLoaded.stores = true;
+          this.tabLoaded.employees = true;
         })
         .catch((err) => {
           if (!this.endLoad('listState', seq, (err && err.msg) || '人员加载失败')) return;
@@ -3342,7 +3381,7 @@ export default {
         });
     },
     openPeopleFromOverview() {
-      this.activeTab = 'stores';
+      this.activeTab = 'employees';
       this.dataView = 'people';
       this.listPage = 1;
       this.loadEmployees();

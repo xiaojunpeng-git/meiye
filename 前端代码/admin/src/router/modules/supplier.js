@@ -1,3 +1,4 @@
+/* eslint-disable no-mixed-spaces-and-tabs */
 // +----------------------------------------------------------------------
 // | MOHE [ MOHE赋能开发者，助力企业发展 ]
 // +----------------------------------------------------------------------
@@ -44,6 +45,7 @@ export default {
     {
       path: 'menu/list',
       name: `${pre}menulist`,
+      redirect: `${Setting.roterPre}/setting/staff/index`,
       meta: {
         auth: ['admin-supplier-menu-list'],
         title: '供应商管理'

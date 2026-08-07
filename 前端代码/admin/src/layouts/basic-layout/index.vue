@@ -226,9 +226,20 @@ export default {
     ]),
     isRouteMatch(to, menuPath) {
       const normalize = (path) => (path || '').replace(/\/$/, '');
+      const [targetPath, targetQuery = ''] = String(menuPath || '').split('?');
+      const targetTab = targetQuery.split('&').reduce((tab, item) => {
+        const [key, value = ''] = item.split('=');
+        return key === 'tab' ? decodeURIComponent(value) : tab;
+      }, '');
       const current = normalize(to.path);
-      const target = normalize(menuPath);
-      return target === current || current === normalize(getPath(to, menuPath));
+      const target = normalize(targetPath);
+      if (target === current && targetTab) {
+        return String(to.query.tab || '') === targetTab;
+      }
+      if (target === current && ['stores', 'people'].includes(String(to.query.tab || ''))) {
+        return false;
+      }
+      return target === current || current === normalize(getPath(to, targetPath));
     },
     isRechargeRoute(to) {
       return /\/marketing\/(setup_recharge|balance_recharge)$/.test((to.path || '').replace(/\/$/, ''));

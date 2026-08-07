@@ -13,6 +13,8 @@
 import { cloneDeep } from 'lodash';
 import { includeArray } from '@/libs/system';
 import util from '@/libs/util';
+import Setting from '@/setting';
+import { normalizeOrganizationWorkspaceMenu } from '@/libs/organizationWorkspaceMenu';
 
 // 根据 menu 配置的权限，过滤菜单
 function filterMenu(menuList, access, lastList) {
@@ -60,11 +62,10 @@ export default {
       const userInfo = rootState.admin.user.info;
       // @权限
       const access = userInfo.access;
-      if (access && access.length) {
-        return filterMenu(state.sider, access, []);
-      } else {
-        return filterMenu(state.sider, [], []);
-      }
+      const filtered = access && access.length
+        ? filterMenu(state.sider, access, [])
+        : filterMenu(state.sider, [], []);
+      return normalizeOrganizationWorkspaceMenu(filtered, Setting.roterPre);
     },
     // 处理顶部路由递归
 
