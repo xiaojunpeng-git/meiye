@@ -1,5 +1,6 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
+import Info from '@lucide/vue/dist/esm/icons/info.mjs'
 import { formatMoney } from '@/services/cashierV3Bridge'
 
 /**
@@ -9,7 +10,7 @@ import { formatMoney } from '@/services/cashierV3Bridge'
  * 资料、资产、记录和可执行动作：不在浏览器计算余额、到店次数、卡项次数、金额、
  * 业绩或业务状态，也不会自行改写会员、卡项、赠送、订单或预约。
  *
- * 固定七页签：会员概况、资产权益、销售订单、服务记录、客情管理、欠款记录、赠送记录。
+ * 固定九页签：会员概况、权益明细、余额变动明细、销售订单、服务记录、客情管理、欠款记录、赠送记录、积分变动记录。
  * 各页签由调用方按需独立加载；该组件只消费后端已按数据权限裁剪的快照，不在浏览器
  * 汇总金额、权益、到店次数、状态或权限。
  *
@@ -86,17 +87,36 @@ const emit = defineEmits(['close', 'tab-change'])
 
 const DEFAULT_TABS = [
   { key: 'profile', label: '会员概况' },
-  { key: 'assets', label: '资产权益' },
+  { key: 'assets', label: '权益明细' },
+  { key: 'card-operations', label: '卡操作记录' },
+  { key: 'balance-changes', label: '余额变动明细' },
   { key: 'sales', label: '销售订单' },
   { key: 'writeoff', label: '服务记录' },
   { key: 'care', label: '客情管理' },
   { key: 'debt', label: '欠款记录' },
   { key: 'gift', label: '赠送记录' },
+  { key: 'points', label: '积分变动记录' },
 ]
+
+const ACTION_LABELS = Object.freeze({
+  'open-sales-order-personnel-adjustment': '人员调整',
+  'adjust-sales-order-personnel': '确认人员调整',
+  'reopen-sales-order': '重开订单',
+  'open-order-debt-settlements': '查看欠款',
+  'refund-sales-order': '发起退款',
+  'void-sales-order': '作废订单',
+  'open-sales-order-detail': '查看详情',
+  'open-debt-settlements': '补交',
+  'open-writeoff-records': '查看服务记录',
+  'open-operation-logs': '查看操作记录',
+  'open-gift-records': '查看赠送记录'
+})
 
 const activeTab = ref(DEFAULT_TABS.some((tab) => tab.key === props.initialTab) ? props.initialTab : 'profile')
 const activeActionKey = ref('')
 const actionError = ref('')
+const tabKeyword = ref('')
+const metricTooltip = ref({ visible: false, text: '', left: 0, top: 0 })
 
 const detail = computed(() => (props.detail && typeof props.detail === 'object' ? props.detail : {}))
 const member = computed(() => firstObject(detail.value, ['member', 'memberInfo', 'memberProfile', 'profileInfo']))
@@ -120,19 +140,13 @@ const latestVisit = computed(() => {
 const careReminder = computed(() => firstObjectFrom([profile.value, detail.value], ['careReminder', 'customerCare', 'reminder']))
 
 const cards = computed(() => readList(detail.value, ['cards', 'cardBenefits', 'memberCards', 'cardItems']))
+const cardOperations = computed(() => readList(detail.value, ['cardOperations', 'cardOperationRecords', 'cardOperationHistory']))
 const balanceChanges = computed(() => readList(detail.value, ['balanceChanges', 'balanceChangeRecords', 'balanceHistory']))
 const coupons = computed(() => readList(detail.value, ['coupons', 'couponRecords', 'memberCoupons']))
 const pointChanges = computed(() => readList(detail.value, ['pointChanges', 'pointChangeRecords', 'pointHistory']))
 const writeoffRecords = computed(() => readList(detail.value, ['writeoffRecords', 'serviceRecords', 'writeoffs']))
 const salesOrders = computed(() => readList(detail.value, ['salesOrders', 'saleOrders', 'orders']))
 const giftRecords = computed(() => readList(detail.value, ['giftRecords', 'gifts', 'giftHistory']))
-const appointmentHighlights = computed(() => {
-  const profileRecords = readList(profile.value, ['appointmentHighlights', 'reservationHighlights'])
-  if (profileRecords.length) return profileRecords
-  const detailRecords = readList(detail.value, ['appointmentHighlights', 'reservationHighlights'])
-  if (detailRecords.length) return detailRecords
-  return readList(detail.value, ['reservations', 'reservationRecords', 'appointments'])
-})
 const careTasks = computed(() => readList(detail.value, ['careTasks', 'customerCareTasks', 'followUpTasks']))
 const careRecords = computed(() => readList(detail.value, ['careRecords', 'customerCareRecords', 'careTimeline', 'followUpRecords']))
 const exclusiveServiceStaffChanges = computed(() => readList(detail.value, ['exclusiveServiceStaffChanges', 'serviceStaffChanges', 'exclusiveStaffHistory']))
@@ -141,6 +155,7 @@ const debtRecords = computed(() => readList(detail.value, ['debtRecords', 'debts
 const availableActions = computed(() => normalizeActionList(readList(detail.value, ['actions', 'availableActions', 'actionList']), 'member'))
 
 const tabs = DEFAULT_TABS
+const isSearchableTab = computed(() => ['assets', 'card-operations', 'sales', 'writeoff', 'care', 'debt', 'gift', 'points'].includes(activeTab.value))
 
 watch(
   () => props.initialTab,
@@ -158,17 +173,13 @@ const headerFacts = computed(() => [
 
 const headerStats = computed(() => [
   metric('账户余额', summaryValue(['accountBalance', 'totalBalance', 'balance']), 'money'),
-  metric('本金', summaryValue(['principalBalance', 'balancePrincipal', 'principalAmount']), 'money'),
-  metric('赠金', summaryValue(['giftBalance', 'balanceGift', 'giftAmount']), 'money'),
-  metric('当前积分', summaryValue(['currentPoints', 'points', 'pointBalance']), 'number'),
   metric('次卡权益金额', summaryValue(['cardBenefitAmount', 'cardBenefitValue']), 'money'),
-  metric('剩余项目次数', summaryValue(['remainingProjectTimes', 'remainingTimes']), 'times'),
+  { ...metric('剩余项目次数', summaryValue(['remainingProjectTimes', 'remainingTimes']), 'times'), tooltip: '剩余项目次数不计算时间卡的次数' },
   metric('剩余项目金额', summaryValue(['remainingProjectAmount', 'remainingAmount']), 'money'),
   { label: '有效卡数量', value: numberText(summaryValue(['activeCardCount', 'validCardCount']), ' 张') },
   metric('总消费金额', summaryValue(['totalConsumptionAmount', 'totalPurchaseAmount']), 'money'),
-  metric('最近购买日期', summaryValue(['latestPurchaseDate', 'lastPurchaseDate']), 'text'),
   { label: '到店次数', value: numberText(summaryValue(['visitCount']), ' 次') },
-  metric('最近到店日期', summaryValue(['latestVisitDate', 'lastVisitDate']), 'text')
+  metric('当前积分', summaryValue(['currentPoints', 'points', 'pointBalance']), 'number')
 ])
 
 const basicRows = computed(() => compactRows([
@@ -324,11 +335,37 @@ function switchTab(tab) {
   if (!tab || tab.key === activeTab.value) return
   activeTab.value = tab.key
   actionError.value = ''
-  emit('tab-change', { tab: tab.key, memberId: memberId.value, member: member.value })
+  tabKeyword.value = ''
+  emit('tab-change', { tab: tab.key, memberId: memberId.value, member: member.value, keyword: '' })
+}
+
+function queryActiveTab() {
+  if (!isSearchableTab.value) return
+  emit('tab-change', {
+    tab: activeTab.value,
+    memberId: memberId.value,
+    member: member.value,
+    keyword: tabKeyword.value.trim()
+  })
 }
 
 function switchTabByKey(tabKey) {
   switchTab(tabs.find((tab) => tab.key === tabKey))
+}
+
+function showMetricTooltip(event, item) {
+  if (!item?.tooltip) return
+  const rect = event.currentTarget.getBoundingClientRect()
+  metricTooltip.value = {
+    visible: true,
+    text: item.tooltip,
+    left: Math.min(Math.max(rect.left + (rect.width / 2), 150), window.innerWidth - 150),
+    top: rect.bottom + 8
+  }
+}
+
+function hideMetricTooltip() {
+  metricTooltip.value = { ...metricTooltip.value, visible: false }
 }
 
 function requestClose() {
@@ -346,7 +383,8 @@ function normalizeAction(raw, scope, index = 0) {
   if (!source || typeof source !== 'object') return null
 
   const code = String(firstValue(source, ['code', 'actionCode', 'action', 'key']) || firstValue(source, ['label', 'name', 'title']) || '').trim()
-  const label = String(firstValue(source, ['label', 'name', 'title']) || code).trim()
+  const suppliedLabel = String(firstValue(source, ['label', 'name', 'title']) || '').trim()
+  const label = suppliedLabel && suppliedLabel !== code ? suppliedLabel : (ACTION_LABELS[code] || code)
   if (!code || !label || source.visible === false) return null
 
   return {
@@ -400,12 +438,15 @@ function balanceChangeNo(record) {
   return text(firstValue(record, ['changeNo', 'recordNo', 'balanceNo', 'no', 'code']))
 }
 
+function cardOperationNo(record) {
+  return text(firstValue(record, ['operationNo', 'recordNo', 'no', 'code']))
+}
+
 function balanceChangeType(record) {
   return text(firstValue(record, ['typeLabel', 'changeTypeLabel', 'businessTypeLabel', 'type', 'changeType']))
 }
 
 function balanceChangeAmount(record) {
-  // 余额支付仅展示后端返回的总变动金额，不读取或展示本金／赠金拆分。
   return money(firstValue(record, ['changeAmount', 'amount', 'totalAmount', 'paidAmount']))
 }
 
@@ -496,7 +537,17 @@ function giftContents(record) {
 }
 
 function giftContentType(content) {
-  return text(firstValue(content, ['typeLabel', 'giftTypeLabel', 'contentTypeLabel', 'type', 'giftType']))
+  const type = firstValue(content, ['typeLabel', 'giftTypeLabel', 'contentTypeLabel', 'type', 'giftType'])
+  if (isCoupon(content)) return '优惠券'
+  const normalized = String(type || '').toLowerCase()
+  return ({ project: '项目', product: '产品', coupon: '优惠券' })[normalized] || text(type)
+}
+
+function laborPerformanceDisplay(record) {
+  const status = String(firstValue(record, ['laborPerformanceStatus', 'laborStatus']) || '').toLowerCase()
+  if (status === 'pending') return '未核算'
+  if (status === 'legacy_unmigrated') return '旧数据未迁移'
+  return money(firstValue(record, ['laborPerformanceAmount', 'laborAmount']))
 }
 
 function giftContentName(content) {
@@ -677,8 +728,16 @@ async function triggerAction(action, context = {}) {
       </header>
 
       <section v-if="hasDetail && !isLoading" class="member-detail-overlay__stats" aria-label="会员关键数据">
-        <div v-for="item in headerStats" :key="item.label" class="member-detail-overlay__stat">
-          <span>{{ item.label }}</span>
+        <div
+          v-for="item in headerStats"
+          :key="item.label"
+          class="member-detail-overlay__stat"
+          @mouseenter="showMetricTooltip($event, item)"
+          @mouseleave="hideMetricTooltip"
+          @focusin="showMetricTooltip($event, item)"
+          @focusout="hideMetricTooltip"
+        >
+          <span :tabindex="item.tooltip ? 0 : undefined" :aria-describedby="item.tooltip ? 'member-detail-metric-tooltip' : undefined">{{ item.label }}<Info v-if="item.tooltip" class="member-detail-overlay__metric-help" :size="14" aria-hidden="true" /></span>
           <strong>{{ item.value }}</strong>
         </div>
       </section>
@@ -697,6 +756,14 @@ async function triggerAction(action, context = {}) {
           {{ tab.label }}
         </button>
       </nav>
+
+      <form v-if="hasDetail && !isLoading && isSearchableTab" class="member-detail-overlay__query" @submit.prevent="queryActiveTab">
+        <label>
+          <span>查询</span>
+          <input v-model="tabKeyword" type="search" maxlength="80" placeholder="输入关键词后查询" />
+        </label>
+        <button type="submit" class="member-detail-overlay__button member-detail-overlay__button--secondary" :disabled="tabIsLoading(activeTab) || activeActionKey !== ''">查询</button>
+      </form>
 
       <main class="member-detail-overlay__body" :aria-busy="isLoading || tabIsLoading(activeTab)">
         <div v-if="isLoading" class="member-detail-overlay__loading">
@@ -758,32 +825,10 @@ async function triggerAction(action, context = {}) {
                 <div v-else class="member-detail-overlay__empty-inline">暂无客情提醒</div>
               </section>
 
-              <section class="member-detail-overlay__panel member-detail-overlay__panel--full">
-                <header><h3>预约辅助记录</h3><span>预约不单独作为会员详情页签；完整预约请到预约菜单查看。</span></header>
-                <div v-if="appointmentHighlights.length" class="member-detail-overlay__table-wrap">
-                  <table class="member-detail-overlay__table member-detail-overlay__table--wide">
-                    <thead>
-                      <tr><th>预约单号</th><th>预约状态</th><th>预约时间</th><th>预约项目</th><th>计划手艺人</th><th>预约房间</th><th>操作</th></tr>
-                    </thead>
-                    <tbody>
-                      <tr v-for="(record, index) in appointmentHighlights" :key="recordKey(record, 'appointment-highlight', index)">
-                        <td>{{ reservationNo(record) }}</td>
-                        <td><span class="member-detail-overlay__record-status">{{ displayStatus(firstValue(record, ['statusLabel', 'statusName', 'status'])) }}</span></td>
-                        <td>{{ reservationTime(record) }}</td>
-                        <td>{{ text(firstValue(record, ['projectSummary', 'projectsSummary', 'projectName'])) }}</td>
-                        <td>{{ listText(firstValue(record, ['plannedCraftsmenSummary', 'craftsmenSummary', 'plannedCraftsmen'])) }}</td>
-                        <td>{{ text(firstValue(record, ['roomName', 'plannedRoomName'])) }}</td>
-                        <td><div class="member-detail-overlay__record-actions"><button v-for="action in recordActions(record, `appointment-highlight-${index}`)" :key="action.key" type="button" class="member-detail-overlay__inline-action" :disabled="!onAction || action.disabled || activeActionKey !== ''" :title="action.disabledReason || ''" @click="triggerAction(action, { scope: 'appointment-highlight', record })">{{ activeActionKey === action.key ? '处理中…' : action.label }}</button></div></td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-                <div v-else class="member-detail-overlay__empty-inline">暂无预约辅助记录</div>
-              </section>
             </div>
           </section>
 
-          <section v-else-if="activeTab === 'assets'" class="member-detail-overlay__tab-content" aria-label="资产权益">
+          <section v-else-if="activeTab === 'assets'" class="member-detail-overlay__tab-content" aria-label="权益明细">
             <section v-for="(card, cardIndex) in cards" :key="recordKey(card, 'card', cardIndex)" class="member-detail-overlay__card-panel">
               <header class="member-detail-overlay__card-header">
                 <div>
@@ -836,31 +881,6 @@ async function triggerAction(action, context = {}) {
             <div v-if="!cards.length" class="member-detail-overlay__empty-inline member-detail-overlay__empty-inline--page">暂无卡项权益</div>
 
             <section class="member-detail-overlay__panel">
-              <header><h3>余额变更记录</h3><span>余额支付仅展示总额，不展示本金／赠金拆分。</span></header>
-              <div class="member-detail-overlay__table-wrap">
-                <table class="member-detail-overlay__table member-detail-overlay__table--wide">
-                  <thead>
-                    <tr><th>变更记录号</th><th>业务日期</th><th>变更类型</th><th>变更金额</th><th>变更后可用余额</th><th>来源单据</th><th>操作人</th><th>备注</th><th>操作</th></tr>
-                  </thead>
-                  <tbody>
-                    <tr v-for="(record, index) in balanceChanges" :key="recordKey(record, 'balance', index)">
-                      <td>{{ balanceChangeNo(record) }}</td>
-                      <td>{{ text(firstValue(record, ['businessDate', 'date', 'occurredAt'])) }}</td>
-                      <td>{{ balanceChangeType(record) }}</td>
-                      <td class="member-detail-overlay__money">{{ balanceChangeAmount(record) }}</td>
-                      <td class="member-detail-overlay__money">{{ balanceAfter(record) }}</td>
-                      <td>{{ sourceReference(record) }}</td>
-                      <td>{{ text(firstValue(record, ['operatorName', 'operator', 'staffName'])) }}</td>
-                      <td>{{ text(firstValue(record, ['remark', 'note', 'memo'])) }}</td>
-                      <td><div class="member-detail-overlay__record-actions"><button v-for="action in recordActions(record, `balance-${index}`)" :key="action.key" type="button" class="member-detail-overlay__inline-action" :disabled="!onAction || action.disabled || activeActionKey !== ''" :title="action.disabledReason || ''" @click="triggerAction(action, { scope: 'balance-change', record })">{{ activeActionKey === action.key ? '处理中…' : action.label }}</button></div></td>
-                    </tr>
-                    <tr v-if="!balanceChanges.length"><td colspan="9" class="member-detail-overlay__table-empty">暂无余额变更记录</td></tr>
-                  </tbody>
-                </table>
-              </div>
-            </section>
-
-            <section class="member-detail-overlay__panel">
               <header><h3>优惠券</h3><span>展示后端返回的可查看优惠券记录。</span></header>
               <div class="member-detail-overlay__table-wrap">
                 <table class="member-detail-overlay__table member-detail-overlay__table--wide">
@@ -884,35 +904,11 @@ async function triggerAction(action, context = {}) {
               </div>
             </section>
 
-            <section class="member-detail-overlay__panel">
-              <header><h3>积分变动记录</h3><span>当前积分以顶部后端快照为准。</span></header>
-              <div class="member-detail-overlay__table-wrap">
-                <table class="member-detail-overlay__table member-detail-overlay__table--wide">
-                  <thead>
-                    <tr><th>变动记录号</th><th>业务日期</th><th>变动类型</th><th>变动积分</th><th>变动后积分</th><th>来源单据</th><th>操作人</th><th>备注</th><th>操作</th></tr>
-                  </thead>
-                  <tbody>
-                    <tr v-for="(record, index) in pointChanges" :key="recordKey(record, 'point', index)">
-                      <td>{{ pointChangeNo(record) }}</td>
-                      <td>{{ text(firstValue(record, ['businessDate', 'date', 'occurredAt'])) }}</td>
-                      <td>{{ pointChangeType(record) }}</td>
-                      <td>{{ pointChangeAmount(record) }}</td>
-                      <td>{{ pointsAfter(record) }}</td>
-                      <td>{{ sourceReference(record) }}</td>
-                      <td>{{ text(firstValue(record, ['operatorName', 'operator', 'staffName'])) }}</td>
-                      <td>{{ text(firstValue(record, ['remark', 'note', 'memo'])) }}</td>
-                      <td><div class="member-detail-overlay__record-actions"><button v-for="action in recordActions(record, `point-${index}`)" :key="action.key" type="button" class="member-detail-overlay__inline-action" :disabled="!onAction || action.disabled || activeActionKey !== ''" :title="action.disabledReason || ''" @click="triggerAction(action, { scope: 'point-change', record })">{{ activeActionKey === action.key ? '处理中…' : action.label }}</button></div></td>
-                    </tr>
-                    <tr v-if="!pointChanges.length"><td colspan="9" class="member-detail-overlay__table-empty">暂无积分变动记录</td></tr>
-                  </tbody>
-                </table>
-              </div>
-            </section>
           </section>
 
           <section v-else-if="activeTab === 'writeoff'" class="member-detail-overlay__tab-content" aria-label="服务记录">
             <section class="member-detail-overlay__panel">
-              <header><h3>服务记录</h3><span>只展示本次实际完成的服务项目，不展示“原项目”。</span></header>
+              <header><h3>服务记录</h3></header>
               <div class="member-detail-overlay__table-wrap">
                 <table class="member-detail-overlay__table member-detail-overlay__table--wide">
                   <thead>
@@ -929,7 +925,7 @@ async function triggerAction(action, context = {}) {
                       <td>{{ numberText(firstValue(record, ['usedTimes', 'writeoffTimes', 'times']), ' 次') }}</td>
                       <td>{{ text(firstValue(record, ['storeName', 'serviceStoreName'])) }}</td>
                       <td>{{ listText(firstValue(record, ['craftsmenSummary', 'craftsmen', 'staffSummary'])) }}</td>
-                      <td class="member-detail-overlay__money">{{ money(firstValue(record, ['laborPerformanceAmount', 'laborAmount'])) }}</td>
+                      <td class="member-detail-overlay__money">{{ laborPerformanceDisplay(record) }}</td>
                       <td>{{ text(firstValue(record, ['operatorName', 'writeoffOperatorName', 'operator'])) }}</td>
                       <td><span class="member-detail-overlay__record-status">{{ serviceStatus(record) }}</span></td>
                       <td>{{ firstValue(record, ['isSupplement', 'supplementFlag', 'isMakeup']) === true ? '补单' : '—' }}</td>
@@ -999,10 +995,11 @@ async function triggerAction(action, context = {}) {
               <div class="member-detail-overlay__table-wrap">
                 <table class="member-detail-overlay__table member-detail-overlay__table--wide">
                   <thead>
-                    <tr><th>任务类型</th><th>计划跟进时间</th><th>任务负责人</th><th>任务来源</th><th>关联业务</th><th>任务状态</th><th>任务创建人</th><th>创建时间</th><th>实际跟进人</th><th>实际完成时间</th><th>完成结果</th><th>操作</th></tr>
+                    <tr><th>任务单号</th><th>任务类型</th><th>计划跟进时间</th><th>任务负责人</th><th>任务来源</th><th>关联业务</th><th>任务状态</th><th>任务创建人</th><th>创建时间</th><th>实际跟进人</th><th>实际完成时间</th><th>完成结果</th><th>操作</th></tr>
                   </thead>
                   <tbody>
                     <tr v-for="(record, index) in careTasks" :key="recordKey(record, 'care-task', index)">
+                      <td>{{ text(firstValue(record, ['taskNo', 'documentNo'])) }}</td>
                       <td>{{ careTaskType(record) }}</td>
                       <td>{{ text(firstValue(record, ['scheduledAt', 'plannedAt', 'nextFollowUpAt', 'dueAt'])) }}</td>
                       <td>{{ text(firstValue(record, ['ownerName', 'taskOwnerName', 'assigneeName'])) }}</td>
@@ -1016,7 +1013,7 @@ async function triggerAction(action, context = {}) {
                       <td>{{ text(firstValue(record, ['resultSummary', 'result', 'completionResult'])) }}</td>
                       <td><div class="member-detail-overlay__record-actions"><button v-for="action in recordActions(record, `care-task-${index}`)" :key="action.key" type="button" class="member-detail-overlay__inline-action" :disabled="!onAction || action.disabled || activeActionKey !== ''" :title="action.disabledReason || ''" @click="triggerAction(action, { scope: 'care-task', record })">{{ activeActionKey === action.key ? '处理中…' : action.label }}</button></div></td>
                     </tr>
-                    <tr v-if="!careTasks.length"><td colspan="12" class="member-detail-overlay__table-empty">暂无可查看的跟进任务</td></tr>
+                    <tr v-if="!careTasks.length"><td colspan="13" class="member-detail-overlay__table-empty">暂无可查看的跟进任务</td></tr>
                   </tbody>
                 </table>
               </div>
@@ -1087,6 +1084,67 @@ async function triggerAction(action, context = {}) {
             </section>
           </section>
 
+          <section v-else-if="activeTab === 'card-operations'" class="member-detail-overlay__tab-content" aria-label="卡操作记录">
+            <section class="member-detail-overlay__panel">
+              <header><h3>卡操作记录</h3><span>仅展示当前数据范围内已留痕的卡操作。</span></header>
+              <div class="member-detail-overlay__table-wrap">
+                <table class="member-detail-overlay__table member-detail-overlay__table--wide">
+                  <thead>
+                    <tr><th>操作单号</th><th>业务日期</th><th>操作类型</th><th>原卡名称</th><th>原卡号</th><th>目标内容</th><th>关联会员</th><th>金额</th><th>办理门店</th><th>操作人</th><th>原因</th><th>状态</th><th>完成时间</th></tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="(record, index) in cardOperations" :key="recordKey(record, 'card-operation', index)">
+                      <td>{{ cardOperationNo(record) }}</td>
+                      <td>{{ text(firstValue(record, ['businessDate', 'date'])) }}</td>
+                      <td>{{ text(firstValue(record, ['typeLabel', 'operationTypeLabel', 'operationType'])) }}</td>
+                      <td>{{ text(firstValue(record, ['cardName', 'sourceCardName'])) }}</td>
+                      <td>{{ text(firstValue(record, ['cardNo', 'sourceCardNo'])) }}</td>
+                      <td>{{ text(firstValue(record, ['targetContent', 'targetName'])) }}</td>
+                      <td>{{ text(firstValue(record, ['relatedMemberName', 'memberName'])) }}</td>
+                      <td class="member-detail-overlay__money">{{ money(firstValue(record, ['amount', 'settlementAmount'])) }}</td>
+                      <td>{{ text(firstValue(record, ['storeName', 'handlingStoreName'])) }}</td>
+                      <td>{{ text(firstValue(record, ['operatorName', 'operator'])) }}</td>
+                      <td>{{ text(firstValue(record, ['reason', 'remark'])) }}</td>
+                      <td><span class="member-detail-overlay__record-status">{{ displayStatus(firstValue(record, ['statusLabel', 'status'])) }}</span></td>
+                      <td>{{ text(firstValue(record, ['completedAt', 'occurredAt'])) }}</td>
+                    </tr>
+                    <tr v-if="!cardOperations.length"><td colspan="13" class="member-detail-overlay__table-empty">暂无卡操作记录</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </section>
+
+          <section v-else-if="activeTab === 'balance-changes'" class="member-detail-overlay__tab-content" aria-label="余额变动明细">
+            <section class="member-detail-overlay__panel">
+              <header><h3>余额变动明细</h3><span>本金、赠金拆分只读取后端余额变更事实。</span></header>
+              <div class="member-detail-overlay__table-wrap">
+                <table class="member-detail-overlay__table member-detail-overlay__table--wide">
+                  <thead>
+                    <tr><th>变更记录号</th><th>业务日期</th><th>变更类型</th><th>变更金额</th><th>本金变动</th><th>赠金变动</th><th>变动后本金</th><th>变动后赠金</th><th>变动后可用余额</th><th>来源单据</th><th>操作人</th><th>操作</th></tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="(record, index) in balanceChanges" :key="recordKey(record, 'balance', index)">
+                      <td>{{ balanceChangeNo(record) }}</td>
+                      <td>{{ text(firstValue(record, ['businessDate', 'date', 'occurredAt'])) }}</td>
+                      <td>{{ balanceChangeType(record) }}</td>
+                      <td class="member-detail-overlay__money">{{ balanceChangeAmount(record) }}</td>
+                      <td class="member-detail-overlay__money">{{ money(firstValue(record, ['principalDelta'])) }}</td>
+                      <td class="member-detail-overlay__money">{{ money(firstValue(record, ['bonusDelta'])) }}</td>
+                      <td class="member-detail-overlay__money">{{ money(firstValue(record, ['principalAfter'])) }}</td>
+                      <td class="member-detail-overlay__money">{{ money(firstValue(record, ['bonusAfter'])) }}</td>
+                      <td class="member-detail-overlay__money">{{ balanceAfter(record) }}</td>
+                      <td>{{ sourceReference(record) }}</td>
+                      <td>{{ text(firstValue(record, ['operatorName', 'operator', 'staffName'])) }}</td>
+                      <td><div class="member-detail-overlay__record-actions"><button v-for="action in recordActions(record, `balance-${index}`)" :key="action.key" type="button" class="member-detail-overlay__inline-action" :disabled="!onAction || action.disabled || activeActionKey !== ''" :title="action.disabledReason || ''" @click="triggerAction(action, { scope: 'balance-change', record })">{{ activeActionKey === action.key ? '处理中…' : action.label }}</button></div></td>
+                    </tr>
+                    <tr v-if="!balanceChanges.length"><td colspan="12" class="member-detail-overlay__table-empty">暂无余额变动明细</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </section>
+
           <section v-else-if="activeTab === 'gift'" class="member-detail-overlay__tab-content" aria-label="赠送记录">
             <section v-for="(record, recordIndex) in giftRecords" :key="recordKey(record, 'gift', recordIndex)" class="member-detail-overlay__gift-panel">
               <header class="member-detail-overlay__gift-header">
@@ -1126,6 +1184,33 @@ async function triggerAction(action, context = {}) {
             <div v-if="!giftRecords.length" class="member-detail-overlay__empty-inline member-detail-overlay__empty-inline--page">暂无赠送记录</div>
           </section>
 
+          <section v-else-if="activeTab === 'points'" class="member-detail-overlay__tab-content" aria-label="积分变动记录">
+            <section class="member-detail-overlay__panel">
+              <header><h3>积分变动记录</h3><span>当前积分以顶部后端快照为准。</span></header>
+              <div class="member-detail-overlay__table-wrap">
+                <table class="member-detail-overlay__table member-detail-overlay__table--wide">
+                  <thead>
+                    <tr><th>变动记录号</th><th>业务日期</th><th>变动类型</th><th>变动积分</th><th>变动后积分</th><th>来源单据</th><th>操作人</th><th>备注</th><th>操作</th></tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="(record, index) in pointChanges" :key="recordKey(record, 'point', index)">
+                      <td>{{ pointChangeNo(record) }}</td>
+                      <td>{{ text(firstValue(record, ['businessDate', 'date', 'occurredAt'])) }}</td>
+                      <td>{{ pointChangeType(record) }}</td>
+                      <td>{{ pointChangeAmount(record) }}</td>
+                      <td>{{ pointsAfter(record) }}</td>
+                      <td>{{ sourceReference(record) }}</td>
+                      <td>{{ text(firstValue(record, ['operatorName', 'operator', 'staffName'])) }}</td>
+                      <td>{{ text(firstValue(record, ['remark', 'note', 'memo'])) }}</td>
+                      <td><div class="member-detail-overlay__record-actions"><button v-for="action in recordActions(record, `point-${index}`)" :key="action.key" type="button" class="member-detail-overlay__inline-action" :disabled="!onAction || action.disabled || activeActionKey !== ''" :title="action.disabledReason || ''" @click="triggerAction(action, { scope: 'point-change', record })">{{ activeActionKey === action.key ? '处理中…' : action.label }}</button></div></td>
+                    </tr>
+                    <tr v-if="!pointChanges.length"><td colspan="9" class="member-detail-overlay__table-empty">暂无积分变动记录</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </section>
+
         </template>
       </main>
 
@@ -1134,6 +1219,13 @@ async function triggerAction(action, context = {}) {
         <button type="button" class="member-detail-overlay__button member-detail-overlay__button--secondary" :disabled="activeActionKey !== ''" @click="requestClose">关闭</button>
       </footer>
     </section>
+    <div
+      v-if="metricTooltip.visible"
+      id="member-detail-metric-tooltip"
+      class="member-detail-overlay__metric-tooltip"
+      role="tooltip"
+      :style="{ left: `${metricTooltip.left}px`, top: `${metricTooltip.top}px` }"
+    >{{ metricTooltip.text }}</div>
   </div>
 </template>
 
@@ -1153,7 +1245,7 @@ async function triggerAction(action, context = {}) {
   width: min(1480px, 100%);
   height: min(900px, calc(100vh - 40px));
   max-height: calc(100vh - 40px);
-  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto auto auto minmax(0, 1fr) auto;
   overflow: hidden;
   border: 1px solid #dfe5ef;
   border-radius: 16px;
@@ -1294,7 +1386,7 @@ async function triggerAction(action, context = {}) {
 
 .member-detail-overlay__stats {
   display: grid;
-  grid-template-columns: repeat(10, minmax(104px, 1fr));
+  grid-template-columns: repeat(8, minmax(104px, 1fr));
   overflow-x: auto;
   border-bottom: 1px solid #eaecf0;
   background: #fbfcfe;
@@ -1323,6 +1415,30 @@ async function triggerAction(action, context = {}) {
   white-space: nowrap;
 }
 
+.member-detail-overlay__metric-help {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  margin-left: 4px;
+  vertical-align: -1px;
+}
+
+.member-detail-overlay__metric-tooltip {
+  position: fixed;
+  z-index: 1400;
+  width: max-content;
+  max-width: 280px;
+  transform: translateX(-50%);
+  padding: 7px 10px;
+  border-radius: 6px;
+  background: #1f2937;
+  color: #fff;
+  font-size: 12px;
+  line-height: 18px;
+  pointer-events: none;
+  white-space: normal;
+}
+
 .member-detail-overlay__stat strong {
   overflow: hidden;
   color: #1d2939;
@@ -1340,6 +1456,40 @@ async function triggerAction(action, context = {}) {
   padding: 0 24px;
   border-bottom: 1px solid #eaecf0;
   background: #fff;
+}
+
+.member-detail-overlay__query {
+  display: flex;
+  align-items: end;
+  gap: 10px;
+  padding: 10px 24px;
+  border-bottom: 1px solid #eaecf0;
+  background: #fbfcfe;
+}
+
+.member-detail-overlay__query label {
+  display: grid;
+  gap: 4px;
+  min-width: min(360px, 100%);
+  color: #667085;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.member-detail-overlay__query input {
+  width: 100%;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid #d0d5dd;
+  border-radius: 6px;
+  outline: none;
+  color: #344054;
+  font-size: 13px;
+}
+
+.member-detail-overlay__query input:focus {
+  border-color: #84adf8;
+  box-shadow: 0 0 0 3px rgb(45 120 231 / 12%);
 }
 
 .member-detail-overlay__tab {
@@ -1401,6 +1551,11 @@ async function triggerAction(action, context = {}) {
   border: 1px solid #e4e7ec;
   border-radius: 12px;
   background: #fff;
+}
+
+.member-detail-overlay__card-panel {
+  border-left: 4px solid #2d78e7;
+  box-shadow: 0 2px 10px rgb(16 24 40 / 6%);
 }
 
 .member-detail-overlay__panel-grid {
@@ -1676,7 +1831,7 @@ async function triggerAction(action, context = {}) {
 
 @media (max-width: 1240px) {
   .member-detail-overlay__stats {
-    grid-template-columns: repeat(10, minmax(128px, 1fr));
+    grid-template-columns: repeat(8, minmax(128px, 1fr));
   }
 
   .member-detail-overlay__card-meta {

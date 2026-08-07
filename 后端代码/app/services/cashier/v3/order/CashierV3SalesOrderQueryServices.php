@@ -206,16 +206,24 @@ final class CashierV3SalesOrderQueryServices
             $status = '';
         }
         $recordType = $this->scalarString($payload['recordType'] ?? $payload['record_type'] ?? 'sales');
+        $memberFilterPresent = array_key_exists('memberId', $payload) || array_key_exists('member_id', $payload);
+        $memberId = $memberFilterPresent
+            ? $this->positiveInteger($payload['memberId'] ?? $payload['member_id'])
+            : null;
         $requestedStores = $this->requestedStoreIds($payload);
         $allowedStores = $recordType === 'sales'
             ? $dataScope->narrowVisibleStores($requestedStores)
             : [];
+        if ($memberFilterPresent && $memberId === null) {
+            $allowedStores = [];
+        }
 
         return [
             'page' => $page,
             'pageSize' => $pageSize,
             'keyword' => $keyword,
             'status' => $status,
+            'memberId' => $memberId,
             'allowedStoreIds' => $this->canonicalStoreIds($allowedStores),
             'operatorStoreId' => $operatorScope->storeId(),
             'operatorId' => $operatorScope->operatorId(),
@@ -426,6 +434,7 @@ final class CashierV3SalesOrderQueryServices
             'allowedStoreIds' => $criteria['allowedStoreIds'],
             'keyword' => $criteria['keyword'],
             'status' => $criteria['status'],
+            'memberId' => $criteria['memberId'],
             'pageSize' => (int)$criteria['pageSize'],
             'orderType' => 0,
             'primarySaleCartTypes' => self::PRIMARY_SALE_CART_TYPES,
@@ -658,6 +667,9 @@ final class CashierV3SalesOrderQueryServices
         if ($criteria['allowedStoreIds'] !== null) {
             $query->whereIn('o.store_id', $criteria['allowedStoreIds']);
         }
+        if ($criteria['memberId'] !== null) {
+            $query->where('o.member_id', (int)$criteria['memberId']);
+        }
         return $query;
     }
 
@@ -752,6 +764,9 @@ final class CashierV3SalesOrderQueryServices
             });
         if ($criteria['allowedStoreIds'] !== null) {
             $query->whereIn('o.store_id', $criteria['allowedStoreIds']);
+        }
+        if ($criteria['memberId'] !== null) {
+            $query->where('o.uid', (int)$criteria['memberId']);
         }
         if ($operation === 'snapshot') {
             $query->where('o.pay_time', '<=', (int)$criteria['queryCutoffTimestamp']);

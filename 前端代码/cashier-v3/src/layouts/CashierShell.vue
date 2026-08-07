@@ -40,6 +40,10 @@ import { changeStoreV3Password, clearStoreV3Token, logoutStoreV3 } from '@/servi
 import { readStoreV3SessionToken } from '@/services/storeV3SessionToken'
 import { requestCustomerCareAction } from '@/services/customerCareApi'
 import { roomOpenIntentFromRouteQuery } from '@/services/cashierV3RoomOpenIntent'
+import {
+  mergeSalesOrderCenterProjection,
+  salesOrderProjectionFromResult
+} from '@/services/cashierV3OrderProjectionContract'
 
 const route = useRoute()
 const router = useRouter()
@@ -54,6 +58,7 @@ const memberDetailInitialTab = ref('profile')
 const memberDetailFallback = ref({})
 const isMemberDetailLoading = ref(false)
 const activeMemberDetailId = ref(null)
+let memberDetailLoadSequence = 0
 const isDebtReminderOpen = ref(false)
 const debtReminderMember = ref(null)
 const deferredMemberSelection = ref(null)
@@ -341,11 +346,12 @@ const hasWorkflowCustomer = computed(() => Boolean(workflowMember.value) || isGu
 const memberSelector = computed(() => state.memberSelector || {})
 const memberDetail = computed(() => {
   const backendDetail = state.memberCenter?.detail
-  if (!backendDetail) return memberDetailFallback.value || {}
+  const loadedDetail = memberDetailFallback.value || {}
+  if (!backendDetail) return loadedDetail
   if (!activeMemberDetailId.value || String(memberDetailId(backendDetail)) === String(activeMemberDetailId.value)) {
-    return backendDetail
+    return mergeMemberDetail(backendDetail, loadedDetail)
   }
-  return memberDetailFallback.value || {}
+  return loadedDetail
 })
 const memberDebtSnapshot = computed(() => {
   const snapshot = state.memberCenter?.debtSnapshot
@@ -860,10 +866,15 @@ function showMemberDetail(payload = {}) {
   memberDetailFallback.value = matchingBackendDetail || detail.member || detail.record || detail.fallback || {}
   memberDetailInitialTab.value = detail.initialTab || 'profile'
   isMemberDetailOpen.value = true
-  return requestedMemberId || memberDetailId(memberDetailFallback.value)
+  const openedMemberId = requestedMemberId || memberDetailId(memberDetailFallback.value)
+  if (openedMemberId) {
+    void loadMemberDetailTab({ memberId: openedMemberId, tab: memberDetailInitialTab.value, keyword: '' })
+  }
+  return openedMemberId
 }
 
 function closeMemberDetail() {
+  memberDetailLoadSequence++
   isMemberDetailOpen.value = false
   memberDetailFallback.value = {}
   isMemberDetailLoading.value = false
@@ -987,22 +998,26 @@ async function prepareDebtRepayment(payload = {}) {
 
 async function loadMemberDetailTab(payload = {}) {
   if (!payload.memberId) return { success: false, message: '未找到会员。' }
+  const loadSequence = ++memberDetailLoadSequence
   isMemberDetailLoading.value = true
   try {
     const result = await requestCashierV3Action('load-member-detail-tab', {
       memberId: payload.memberId,
       tab: payload.tab,
+      keyword: String(payload.keyword || '').trim(),
       silent: true
     })
     const detail = memberDetailFromResponse(result)
-    if (isSucceededResult(result)
+    if (loadSequence === memberDetailLoadSequence
+      && isMemberDetailOpen.value
+      && isSucceededResult(result)
       && detail
-      && String(memberDetailId(detail)) === String(activeMemberDetailId.value || payload.memberId)) {
+      && String(memberDetailId(detail)) === String(activeMemberDetailId.value)) {
       memberDetailFallback.value = mergeMemberDetail(memberDetailFallback.value, detail)
     }
     return result
   } finally {
-    isMemberDetailLoading.value = false
+    if (loadSequence === memberDetailLoadSequence) isMemberDetailLoading.value = false
   }
 }
 
@@ -1041,6 +1056,28 @@ async function handleMemberDetailAction(payload = {}) {
   if (scope === 'debt-record' && action === 'open-debt-settlements') {
     isMemberDetailOpen.value = false
     return openMemberDebt(currentMemberId)
+  }
+  if (scope === 'sales-order' && action === 'open-sales-order-detail') {
+    const orderId = payload.record?.orderId || payload.record?.salesOrderId || payload.record?.id
+    if (!orderId) {
+      return { result: { status: 'failed', code: 'SALES_ORDER_ID_MISSING', message: '销售订单标识尚未加载，请刷新会员详情后重试。' } }
+    }
+    const result = await requestCashierV3Action(action, { orderId })
+    if (!isSucceededResult(result)) return result
+    const projection = salesOrderProjectionFromResult(result)
+    const detail = projection?.salesOrderDetail
+    const detailOrderId = detail?.id || detail?.orderId || detail?.salesOrderId
+    if (!detail || String(detailOrderId) !== String(orderId)) {
+      return { result: { status: 'failed', code: 'SALES_ORDER_DETAIL_INVALID', message: '销售订单详情尚未完整返回，请稍后重试。' } }
+    }
+    state.orderCenter = mergeSalesOrderCenterProjection(state.orderCenter, projection)
+    isMemberDetailOpen.value = false
+    await router.push({ name: 'cashier-v3-order-center' })
+    await nextTick()
+    window.dispatchEvent(new CustomEvent('cashier-v3:open-sales-order-detail', {
+      detail: { orderId, salesOrderId: orderId }
+    }))
+    return result
   }
   return requestCashierV3Action(action, {
     memberId: currentMemberId,

@@ -11,6 +11,7 @@ use app\services\cashier\v3\cashier\CashierV3MemberDebtProjectionServices;
 use app\services\cashier\v3\CashierV3TransactionGuard;
 use app\services\cashier\v3\event\CashierV3BusinessEventExecution;
 use app\services\cashier\v3\event\CashierV3BusinessEventRecorder;
+use app\services\cashier\v3\order\CashierV3SalesOrderQueryServices;
 use app\services\cashier\v3\projection\CashierV3RootDomainAssembler;
 use app\services\cashier\v3\registry\CashierV3ContextPolicy;
 use app\services\cashier\v3\cashier\CashierV3CashierReadinessGuard;
@@ -62,15 +63,20 @@ final class CashierV3MemberModule
         $handlers = $dispatcher->handlers();
         $memberDetails = new CashierV3MemberDetailQueryServices();
         $memberDebtDetails = new CashierV3MemberDebtProjectionServices();
+        $memberSalesOrders = new CashierV3SalesOrderQueryServices();
         foreach (['open-member-detail', 'load-member-detail-tab'] as $action) {
             if (!$handlers->hasProjection($action)) {
-                $handlers->registerProjection($action, function (array $scope) use ($memberDetails, $memberDebtDetails): array {
+                $handlers->registerProjection($action, function (array $scope) use ($memberDetails, $memberDebtDetails, $memberSalesOrders): array {
                     $payload = is_array($scope['payload'] ?? null) ? $scope['payload'] : [];
                     $memberId = (int)($payload['memberId'] ?? $payload['member_id'] ?? 0);
                     $detail = $memberDetails->read(
                         $memberId,
                         $scope['operator_scope'],
-                        $scope['data_scope']
+                        $scope['data_scope'],
+                        [
+                            'tab' => (string)($payload['tab'] ?? ''),
+                            'keyword' => (string)($payload['keyword'] ?? ''),
+                        ]
                     );
                     if ((string)($payload['tab'] ?? '') === 'debt') {
                         $debtSnapshot = $memberDebtDetails->read(
@@ -84,12 +90,44 @@ final class CashierV3MemberModule
                                 'label' => '补交',
                             ]];
                             return $record;
-                        }, (array)($debtSnapshot['records'] ?? []));
+                        }, self::filterMemberDetailRecords((array)($debtSnapshot['records'] ?? []), (string)($payload['keyword'] ?? '')));
                         $detail['summary']['outstandingDebtAmount'] = (string)($debtSnapshot['outstandingDebtAmount'] ?? '0.00');
                         $detail['summary']['outstandingDebtCount'] = (int)($debtSnapshot['outstandingDebtCount'] ?? 0);
                     }
+                    if ((string)($payload['tab'] ?? '') === 'sales') {
+                        $salesPage = $memberSalesOrders->querySalesOrders([
+                            'memberId' => $memberId,
+                            'keyword' => (string)($payload['keyword'] ?? ''),
+                            'page' => 1,
+                            'pageSize' => 50,
+                        ], $scope['operator_scope'], $scope['data_scope']);
+                        $detail['salesOrders'] = array_map(static function (array $record): array {
+                            $record['orderNo'] = (string)($record['salesOrderNo'] ?? $record['sales_order_no'] ?? '');
+                            $record['orderTypeLabel'] = '销售订单';
+                            $record['orderAmount'] = $record['receivableAmount'] ?? null;
+                            $record['cashPerformanceAmount'] = $record['actualReceivedAmount'] ?? null;
+                            $record['statusLabel'] = (string)($record['orderStatus'] ?? $record['order_status'] ?? '');
+                            $record['completedAt'] = (string)($record['paymentCompletedAt'] ?? $record['settledAt'] ?? '');
+                            // 会员详情只提供查看订单入口。人员调整、退款、作废和重开
+                            // 都由订单详情按权限、状态和版本生成，不把内部动作编码泄露
+                            // 到会员记录列表。
+                            $record['availableActions'] = [[
+                                'code' => 'open-sales-order-detail',
+                                'label' => '查看详情',
+                            ]];
+                            return $record;
+                        }, array_values((array)($salesPage['records'] ?? [])));
+                        $detail['tabStates']['sales'] = [
+                            'total' => (int)($salesPage['total'] ?? 0),
+                            'hasMore' => (bool)($salesPage['hasMore'] ?? false),
+                            'dataStatus' => (string)($salesPage['dataStatus'] ?? ''),
+                        ];
+                    }
                     return [
-                        'data' => ['detail' => $detail],
+                        'data' => [
+                            'detail' => $detail,
+                            'memberCenter' => ['detail' => $detail],
+                        ],
                     ];
                 });
             }
@@ -684,6 +722,24 @@ final class CashierV3MemberModule
             return null;
         }
         return (float)$raw;
+    }
+
+    /**
+     * 欠款明细由专用权威投影读取；详情页的关键词只在服务端对该投影结果做只读
+     * 过滤，绝不回退到销售订单聚合或前端筛选。
+     *
+     * @param array<int,array<string,mixed>> $records
+     * @return array<int,array<string,mixed>>
+     */
+    private static function filterMemberDetailRecords(array $records, string $keyword): array
+    {
+        $keyword = trim($keyword);
+        if ($keyword === '') return $records;
+        $keyword = mb_substr($keyword, 0, 80);
+        return array_values(array_filter($records, static function (array $record) use ($keyword): bool {
+            $text = json_encode($record, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            return is_string($text) && mb_stripos($text, $keyword) !== false;
+        }));
     }
 
     /**
