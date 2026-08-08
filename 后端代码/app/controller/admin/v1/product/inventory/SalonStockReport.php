@@ -56,9 +56,18 @@ class SalonStockReport extends AuthController
             ['status', ''],
             ['consumable_product_id', ''],
             ['writeoff_id', ''],
+            ['keyword', ''],
             ['start_time', ''],
             ['end_time', ''],
+            ['business_date_from', ''],
+            ['business_date_to', ''],
         ]);
+        // 旧院装流水以 add_time 记录发生时间；将统一日期筛选映射为
+        // 门店本地日的完整时间边界，避免前端参数被静默忽略。
+        if ((string)$where['business_date_from'] !== '' && (string)$where['business_date_to'] !== '') {
+            $where['start_time'] = (string)$where['business_date_from'] . ' 00:00:00';
+            $where['end_time'] = (string)$where['business_date_to'] . ' 23:59:59';
+        }
         $scope = $this->salonScope();
         if (!empty($scope['empty'])) {
             return $this->success(['list' => [], 'count' => 0, 'scope_label' => $scope['scope_label']]);
@@ -77,7 +86,13 @@ class SalonStockReport extends AuthController
             ['consumable_product_id', ''],
             ['start_time', ''],
             ['end_time', ''],
+            ['business_date_from', ''],
+            ['business_date_to', ''],
         ]);
+        if ((string)$where['business_date_from'] !== '' && (string)$where['business_date_to'] !== '') {
+            $where['start_time'] = (string)$where['business_date_from'] . ' 00:00:00';
+            $where['end_time'] = (string)$where['business_date_to'] . ' 23:59:59';
+        }
         $scope = $this->salonScope();
         if (!empty($scope['empty'])) {
             return $this->success(['list' => [], 'count' => 0, 'scope_label' => $scope['scope_label']]);

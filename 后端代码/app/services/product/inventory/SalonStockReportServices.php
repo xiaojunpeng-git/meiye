@@ -25,7 +25,7 @@ class SalonStockReportServices extends BaseServices
     /**
      * 领用/退回明细列表
      *
-     * @param array $where 过滤：store_id/status/start_time/end_time/consumable_product_id/writeoff_id
+     * @param array $where 过滤：store_id/status/start_time/end_time/keyword/consumable_product_id/writeoff_id
      * @param int $storeScope 门店端传自身 store_id，仅看本店
      */
     public function usageDetailList(array $where, int $storeScope = 0): array
@@ -59,6 +59,7 @@ class SalonStockReportServices extends BaseServices
             $row['qty'] = $this->trimQty((string)($row['qty'] ?? '0'));
             $row['balance_stock'] = $this->trimQty((string)($row['balance_stock'] ?? '0'));
             $row['usage_time'] = !empty($row['usage_time']) ? date('Y-m-d H:i:s', (int)$row['usage_time']) : '';
+            $row['business_date'] = $row['usage_time'] !== '' ? substr($row['usage_time'], 0, 10) : '';
             unset($row['recipe_snapshot']);
         }
         unset($row);
@@ -160,6 +161,16 @@ class SalonStockReportServices extends BaseServices
         }
         if (isset($where['consumable_product_id']) && $where['consumable_product_id'] !== '' && (int)$where['consumable_product_id'] > 0) {
             $query->where('d.consumable_product_id', (int)$where['consumable_product_id']);
+        }
+        $keyword = trim((string)($where['keyword'] ?? ''));
+        if ($keyword !== '') {
+            $like = '%' . $keyword . '%';
+            $query->where(function ($keywordQuery) use ($like): void {
+                $keywordQuery->whereLike('u.id', $like)
+                    ->whereOr('u.writeoff_id', 'like', $like)
+                    ->whereOr('d.consumable_name', 'like', $like)
+                    ->whereOr('d.sku_name', 'like', $like);
+            });
         }
         // 时间范围：未传起止则默认最近 N 天，避免全表扫描
         [$startTs, $endTs] = $this->resolveTimeRange($where);
