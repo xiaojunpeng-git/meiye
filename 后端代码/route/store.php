@@ -623,6 +623,7 @@ Route::get('home/header', 'Common/homeStatics')->option(['real_name' => '首页�
 		Route::get('v3/transfer', 'product.inventory.InventoryBatchTransfer/index')->option(['real_name' => '批次库存调拨单查询']);
 		Route::post('v3/transfer', 'product.inventory.InventoryBatchTransfer/create')->option(['real_name' => '批次库存调拨确认']);
 		Route::get('v3/salon-usage', 'product.inventory.InventorySalonUsage/index')->option(['real_name' => '院装耗材记录查询']);
+		Route::get('v3/salon-usage/:id/detail', 'product.inventory.InventorySalonUsage/detail')->pattern(['id' => '\\d+'])->option(['real_name' => '院装耗材单据详情']);
 		Route::post('v3/salon-usage/issue', 'product.inventory.InventorySalonUsage/issue')->option(['real_name' => '院装耗材领用']);
 		Route::post('v3/salon-usage/return', 'product.inventory.InventorySalonUsage/returnToDefault')->option(['real_name' => '院装耗材退回']);
 		Route::get('v3/dashboard', 'product.inventory.InventoryStoreReadModel/dashboard')->option(['real_name' => '库存首页权威概览']);

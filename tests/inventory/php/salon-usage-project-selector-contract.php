@@ -27,6 +27,9 @@ selectorAssert('project picker resolves the scope from the authenticated current
     && selectorContains($service, "->where('p.is_show', 1)")
     && selectorContains($service, "->whereOr('p.relation_id', \$scope['storeId'])"));
 
+selectorAssert('project keyword search uses the authoritative project name, keywords and code fields',
+    selectorContains($service, "whereLike('p.store_name|p.keyword|p.code|p.bar_code', \$like)"));
+
 selectorAssert('project picker route remains behind the store authenticated controller',
     selectorContains($controller, 'public function projects()')
     && selectorContains($controller, '$this->services->projects((int)$this->storeId,(int)$this->storeStaffId')

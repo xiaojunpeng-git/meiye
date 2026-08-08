@@ -51,6 +51,7 @@ final class InventoryOperationalUnifiedQueryContract
                 ['operation_at', '操作时间', 'datetime', ''],
             ],
             'inventory_request' => [
+                ['request_no', '请货单号', 'text', ''],
                 ['request_party_name', '请货方', 'text', ''], ['supply_party_name', '供货方', 'text', ''],
                 ['detail_count', '商品项数', 'integer', ''], ['estimated_amount_cents', '预计金额（分）', 'integer', InventoryBatchStockQueryContract::PERMISSION_COST],
                 ['operation_at', '操作时间', 'datetime', ''],
@@ -106,6 +107,7 @@ final class InventoryOperationalUnifiedQueryContract
     private static function keywordFields(string $pageCode): array
     {
         $fields = ['order_sn'];
+        if ($pageCode === 'inventory_request') return ['request_no', 'order_sn'];
         if ($pageCode === 'inventory_movement') return array_merge($fields, ['product_name', 'sku_name', 'batch_no']);
         if (in_array($pageCode, ['inventory_inbound', 'inventory_outbound'], true)) return array_merge($fields, ['product_summary']);
         if ($pageCode === 'inventory_salon_usage') return ['order_sn', 'project_name_snapshot', 'remark'];

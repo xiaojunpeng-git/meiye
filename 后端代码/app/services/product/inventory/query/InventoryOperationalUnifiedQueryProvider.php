@@ -160,7 +160,7 @@ abstract class InventoryOperationalUnifiedQueryProvider implements UnifiedQueryP
     {
         $rows = Db::name('inventory_stock_request_document')->alias('d')->leftJoin('inventory_stock_request_line l', 'l.document_id=d.id')->leftJoin('system_store s', 's.id=d.store_id')
             ->where('d.tenant_id', $tenantId)->where('d.store_id', $storeId)->whereIn('d.location_id', $locationIds)
-            ->field('d.id,d.request_no order_sn,d.document_status status_name,d.business_date,d.recorded_at add_time,d.recorded_at operation_at,d.location_id,s.name request_store_name,d.supply_party_name_snapshot supply_party_name,COUNT(l.id) detail_count,SUM((l.requested_quantity_units*l.reference_unit_cost_cents)/POW(10,l.quantity_scale)) estimated_amount_cents')
+            ->field('d.id,d.request_no,d.request_no order_sn,d.document_status status_name,d.business_date,d.recorded_at add_time,d.recorded_at operation_at,d.location_id,s.name request_store_name,d.supply_party_name_snapshot supply_party_name,COUNT(l.id) detail_count,SUM((l.requested_quantity_units*l.reference_unit_cost_cents)/POW(10,l.quantity_scale)) estimated_amount_cents')
             ->group('d.id')->order('d.id desc')->limit(UnifiedQueryExecutionServices::MAX_SOURCE_ROWS + 1)->select()->toArray();
         foreach ($rows as &$row) {
             $status = (string)$row['status_name'];

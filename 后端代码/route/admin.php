@@ -2101,6 +2101,11 @@ Route::group('adminapi', function () {
 			Route::get('v3/import/template', 'v1.product.inventory.InventoryPlatformExcelImport/template')->option(['real_name' => '平台库存导入模板']);
 			Route::post('v3/import/upload', 'v1.product.inventory.InventoryPlatformExcelImport/upload')->option(['real_name' => '平台库存导入文件上传']);
 			Route::post('v3/import', 'v1.product.inventory.InventoryPlatformExcelImport/import')->option(['real_name' => '平台多门店库存导入']);
+			Route::get('v3/salon-usage', 'v1.product.inventory.InventoryPlatformSalonUsage/index')->option(['real_name' => '平台院装单据查询']);
+			Route::get('v3/salon-usage/projects', 'v1.product.inventory.InventoryPlatformSalonUsage/projects')->option(['real_name' => '平台院装项目选择']);
+			Route::get('v3/salon-usage/:id/detail', 'v1.product.inventory.InventoryPlatformSalonUsage/detail')->pattern(['id' => '\\d+'])->option(['real_name' => '平台院装单据详情']);
+			Route::post('v3/salon-usage/issue', 'v1.product.inventory.InventoryPlatformSalonUsage/issue')->option(['real_name' => '平台院装领用']);
+			Route::post('v3/salon-usage/return', 'v1.product.inventory.InventoryPlatformSalonUsage/returnToDefault')->option(['real_name' => '平台院装退回']);
 			Route::get('v3/hq/inbound', 'v1.product.inventory.InventoryPlatformHqInbound/index')->option(['real_name' => '平台总部仓入库查询']);
 			Route::get('v3/hq/inbound/:id/detail', 'v1.product.inventory.InventoryPlatformHqInbound/detail')->pattern(['id' => '[A-Za-z0-9-]+'])->option(['real_name' => '平台总部仓入库详情']);
 			Route::get('v3/hq/inbound/:id/outbound-details', 'v1.product.inventory.InventoryPlatformHqInbound/outboundDetails')->pattern(['id' => '[A-Za-z0-9-]+'])->option(['real_name' => '平台总部仓入库批次后续出库明细']);

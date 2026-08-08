@@ -12,11 +12,12 @@ const props = defineProps({
   defaultLocationName: { type: String, default: '' },
   warehouseOptions: { type: Array, default: () => [] },
   hqLocationId: { type: Number, default: 0 },
+  usageStoreId: { type: Number, default: 0 },
   detail: { type: Object, default: null },
   mode: { type: String, default: 'store' }
 })
 
-const emit = defineEmits(['close', 'saved'])
+const emit = defineEmits(['close', 'saved', 'start-usage-return'])
 
 const inboundType = ref('采购入库')
 const outboundType = ref('过期退货')
@@ -79,6 +80,7 @@ const requestEditIdempotencyKey = ref('')
 const isDetail = computed(() => props.modalKind.endsWith('-detail'))
 const isInboundOutboundDetail = computed(() => props.modalKind === 'inbound-outbound-detail')
 const isRequestEdit = computed(() => props.modalKind === 'request-edit')
+const isUsageReturn = computed(() => props.modalKind === 'usage-return')
 const isImport = computed(() => props.modalKind === 'import')
 const isPlatformHeadquarters = computed(() => props.mode === 'platform')
 const platformImportStores = computed(() => {
@@ -93,7 +95,7 @@ const catalogQuery = computed(() => {
   // “当前库存”则必须来自供货方库存主体，不能误展示请货方库存。
   const selection = props.pageKey === 'request'
     ? requestPartySelection.value
-    : (transferSourceSelection.value || 'HQ:0')
+    : props.pageKey === 'usage' ? `STORE:${Number(props.usageStoreId) || 0}` : (transferSourceSelection.value || 'HQ:0')
   const [sourcePartyType, rawSourceId] = String(selection).split(':', 2)
   const availabilitySelection = props.pageKey === 'request'
     ? (supplyPartySelection.value || selection)
@@ -120,6 +122,7 @@ const title = computed(() => {
   if (isImport.value) return '库存导入'
   if (isInboundOutboundDetail.value) return '入库批次出库明细'
   if (isDetail.value) return `${pageLabel.value}详情`
+  if (isUsageReturn.value) return '院装耗材退回'
   if (isRequestEdit.value) return '编辑请货单'
   return {
     inbound: '添加入库单', outbound: '添加出库单', count: '添加盘点单',
@@ -318,13 +321,31 @@ async function hydrateRequestEditor(detail) {
 
 watch(() => props.detail, (detail) => { hydrateRequestEditor(detail) }, { immediate: true })
 
+function hydrateUsageReturn(detail) {
+  if (!isUsageReturn.value || !detail?.document) return
+  usageDate.value = new Date().toISOString().slice(0, 10)
+  usageProjectId.value = String(detail.document.project_id || '')
+  usageProjectName.value = String(detail.document.project_name_snapshot || '')
+  usageRemark.value = ''
+  selectedRows.value = (Array.isArray(detail.lines) ? detail.lines : [])
+    .filter((line) => Number(line.returnable_quantity || 0) > 0)
+    .map((line) => ({
+      source_usage_line_id: Number(line.line_id), product_id: Number(line.product_id), sku_id: Number(line.sku_id), sku_unique: String(line.sku_unique || ''),
+      product_name: String(line.product_name || ''), sku_name: String(line.sku_name || ''), barcode: String(line.barcode || ''),
+      quantity: String(line.returnable_quantity), returnable_quantity: String(line.returnable_quantity)
+    }))
+}
+
+watch([() => props.detail, isUsageReturn], ([detail]) => { hydrateUsageReturn(detail) }, { immediate: true })
+
 async function loadUsageProjects() {
   if (props.pageKey !== 'usage') return
   const requestSerial = ++usageProjectRequestSerial
   usageProjectsLoading.value = true
   usageProjectsError.value = ''
   try {
-    const response = await inventoryApi.salonUsageProjects({ keyword: usageProjectKeyword.value.trim(), page: 1, limit: 50 })
+    const api = isPlatformHeadquarters.value ? platformInventoryApi : inventoryApi
+    const response = await api.salonUsageProjects({ keyword: usageProjectKeyword.value.trim(), page: 1, limit: 50, ...(isPlatformHeadquarters.value ? { store_id: Number(props.usageStoreId) } : {}) })
     if (requestSerial !== usageProjectRequestSerial) return
     usageProjects.value = Array.isArray(response?.list) ? response.list : []
   } catch (error) {
@@ -711,7 +732,15 @@ async function submitUsage() {
   if (props.pageKey !== 'usage' || !selectedRows.value.length || Number(usageProjectId.value) <= 0 || !usageProjectName.value.trim()) return
   submitting.value = true; submitError.value = ''
   try {
-    await inventoryApi.issueSalonUsage({ idempotency_key: usageIdempotencyKey(), business_date: usageDate.value, project_id: Number(usageProjectId.value), project_name: usageProjectName.value.trim(), remark: usageRemark.value, lines: selectedRows.value.map((row) => ({ product_id: Number(row.product_id), sku_id: Number(row.sku_id), sku_unique: row.sku_unique, quantity: row.quantity })) })
+    const api = isPlatformHeadquarters.value ? platformInventoryApi : inventoryApi
+    const scope = isPlatformHeadquarters.value ? { store_id: Number(props.usageStoreId) } : {}
+    if (isUsageReturn.value) {
+      const exceedsReturnableQuantity = selectedRows.value.some((row) => Number(row.quantity) <= 0 || Number(row.quantity) > Number(row.returnable_quantity))
+      if (exceedsReturnableQuantity) throw new Error('退回数量不能超过原领用数量。')
+      await api.returnSalonUsage({ idempotency_key: usageIdempotencyKey(), business_date: usageDate.value, project_id: Number(usageProjectId.value), project_name: usageProjectName.value.trim(), remark: usageRemark.value, return_location_id: Number(props.detail?.document?.location_id || 0), ...scope, lines: selectedRows.value.map((row) => ({ source_usage_line_id: Number(row.source_usage_line_id), quantity: row.quantity })) })
+    } else {
+      await api.issueSalonUsage({ idempotency_key: usageIdempotencyKey(), business_date: usageDate.value, project_id: Number(usageProjectId.value), project_name: usageProjectName.value.trim(), remark: usageRemark.value, ...scope, lines: selectedRows.value.map((row) => ({ product_id: Number(row.product_id), sku_id: Number(row.sku_id), sku_unique: row.sku_unique, quantity: row.quantity })) })
+    }
     emit('saved'); close()
   } catch (error) { submitError.value = error instanceof Error ? error.message : '院装领用提交失败。' } finally { submitting.value = false }
 }
@@ -779,6 +808,10 @@ async function submitWarehouse() {
               <div class="detail-meta"><span>盘点单号：<b>{{ detail.document.order_sn || '-' }}</b></span><span>库存仓：{{ detail.document.location_name || scopeName }}</span><span>盘点日期：{{ detail.document.business_date || '-' }}</span><span>盘点状态：{{ detail.document.status_name || '-' }}</span></div>
               <section class="line-section"><header><div><h3>盘点明细</h3><p>{{ detail.document.remark || '盘点数据已确认，明细仅供查看。' }}</p></div></header><div class="modal-table-scroll"><table><thead><tr><th>商品</th><th>规格</th><th>条码</th><th>账面库存</th><th>实盘库存</th><th>库存盈亏</th><th>库存单位</th><th>盘盈批次号</th><th>盘盈单价</th><th>生产日期</th><th>到期日</th></tr></thead><tbody><tr v-if="!detail.lines?.length"><td colspan="11" class="modal-empty">该盘点单没有商品明细</td></tr><tr v-for="line in detail.lines || []" :key="line.id"><td>{{ line.product_name }}</td><td>{{ line.sku_name || '默认规格' }}</td><td>{{ line.barcode || '-' }}</td><td>{{ line.book_quantity }}</td><td>{{ line.counted_quantity }}</td><td>{{ line.difference_quantity }}</td><td>{{ line.stock_unit || '-' }}</td><td>{{ line.surplus_batch_no || '-' }}</td><td>{{ line.surplus_unit_cost_cents === null || line.surplus_unit_cost_cents === undefined ? '-' : `¥${(Number(line.surplus_unit_cost_cents) / 100).toFixed(2)}` }}</td><td>{{ line.surplus_manufactured_date || '-' }}</td><td>{{ line.surplus_expire_date || '-' }}</td></tr></tbody></table></div></section>
             </template>
+            <template v-else-if="pageKey === 'usage' && detail?.document">
+              <div class="detail-meta"><span>院装单号：<b>{{ detail.document.usage_no }}</b></span><span>关联项目：{{ detail.document.project_name_snapshot }}</span><span>业务日期：{{ detail.document.business_date }}</span><span>类型：{{ detail.document.operation_type === 'RETURN' ? '退回' : '领用' }}</span></div>
+              <section class="line-section"><header><div><h3>耗材明细</h3><p>{{ detail.document.remark || '无备注' }}</p></div><button v-if="detail.document.can_return" class="modal-secondary" @click="emit('start-usage-return')">退回耗材</button></header><div class="modal-table-scroll"><table><thead><tr><th>商品</th><th>规格</th><th>批次条码</th><th>领用/退回数量</th><th>已退回</th><th>可退回</th><th>库存单位</th></tr></thead><tbody><tr v-if="!detail.lines?.length"><td colspan="7" class="modal-empty">该院装单没有耗材明细</td></tr><tr v-for="line in detail.lines" :key="line.line_id"><td>{{ line.product_name }}</td><td>{{ line.sku_name || '默认规格' }}</td><td>{{ line.barcode || '-' }}</td><td>{{ line.quantity }}</td><td>{{ line.returned_quantity }}</td><td>{{ line.returnable_quantity }}</td><td>{{ line.stock_unit || '-' }}</td></tr></tbody></table></div></section>
+            </template>
             <template v-else-if="pageKey === 'import' && detail?.record">
               <div class="detail-meta"><span>文件：<b>{{ detail.record.source_file_name }}</b></span><span>方向：{{ detail.record.direction === 'inbound' ? '入库导入' : '出库导入' }}</span><span>业务单号：{{ detail.record.document_no || '-' }}</span><span>状态：{{ detail.record.status === 'SUCCEEDED' ? '成功' : detail.record.status === 'FAILED' ? '失败' : '处理中' }}</span></div>
               <section class="line-section"><header><div><h3>导入结果</h3><p>成功 {{ detail.record.success_count || 0 }} 行，失败 {{ detail.record.failure_count || 0 }} 行。</p></div></header><div class="modal-table-scroll"><table><thead><tr><th>Excel 行号</th><th>错误原因</th></tr></thead><tbody><tr v-if="!detail.errors?.length"><td colspan="2" class="modal-empty">本次导入没有错误行</td></tr><tr v-for="error in detail.errors" :key="error.id"><td>{{ error.excel_row || '-' }}</td><td>{{ error.error_message }}</td></tr></tbody></table></div></section>
@@ -830,8 +863,9 @@ async function submitWarehouse() {
             </section>
 
             <section v-else-if="pageKey === 'usage'" class="form-grid">
-              <label class="form-grid__inline form-grid__full"><span class="field-label">核销项目<i>*</i></span><span class="usage-project-picker"><input v-model="usageProjectKeyword" placeholder="搜索项目名称或编码" @input="loadUsageProjects" /><select v-model="usageProjectId" :disabled="usageProjectsLoading" @change="selectUsageProject"><option value="">{{ usageProjectsLoading ? '正在读取项目…' : '请选择本次核销项目' }}</option><option v-for="project in usageProjects" :key="project.id" :value="String(project.id)">{{ project.name }}{{ project.code ? `（${project.code}）` : '' }}</option></select><small v-if="usageProjectName">已选择：{{ usageProjectName }}</small><small v-else-if="usageProjectsError" class="catalog-error">{{ usageProjectsError }}</small><small v-else-if="!usageProjectsLoading && !usageProjects.length">当前门店没有可用核销项目</small></span></label>
-              <label class="form-grid__inline"><span class="field-label">领用日期<i>*</i></span><input v-model="usageDate" type="date" /></label><label class="form-grid__inline"><span class="field-label">领用人</span><input value="当前登录员工" disabled /></label>
+              <label v-if="!isUsageReturn" class="form-grid__inline form-grid__full"><span class="field-label">核销项目<i>*</i></span><span class="usage-project-picker"><input v-model="usageProjectKeyword" placeholder="搜索项目名称或编码" @input="loadUsageProjects" /><select v-model="usageProjectId" :disabled="usageProjectsLoading" @change="selectUsageProject"><option value="">{{ usageProjectsLoading ? '正在读取项目…' : '请选择本次核销项目' }}</option><option v-for="project in usageProjects" :key="project.id" :value="String(project.id)">{{ project.name }}{{ project.code ? `（${project.code}）` : '' }}</option></select><small v-if="usageProjectName">已选择：{{ usageProjectName }}</small><small v-else-if="usageProjectsError" class="catalog-error">{{ usageProjectsError }}</small><small v-else-if="!usageProjectsLoading && !usageProjects.length">当前门店没有可用核销项目</small></span></label>
+              <label v-else class="form-grid__inline form-grid__full"><span class="field-label">原领用项目</span><input :value="usageProjectName" disabled /></label>
+              <label class="form-grid__inline"><span class="field-label">{{ isUsageReturn ? '退回日期' : '领用日期' }}<i>*</i></span><input v-model="usageDate" type="date" /></label><label class="form-grid__inline"><span class="field-label">操作人</span><input value="当前登录人员" disabled /></label>
               <label class="form-grid__inline form-grid__full"><span class="field-label">备注</span><input v-model="usageRemark" placeholder="请输入备注" /></label>
             </section>
 
@@ -840,7 +874,7 @@ async function submitWarehouse() {
           <section v-if="!isImport && !isDetail && pageKey !== 'warehouse'" class="line-section">
             <header>
               <div><h3>{{ pageKey === 'count' ? '盘点商品' : pageKey === 'request' ? '请货商品' : pageKey === 'transfer' ? '调拨商品' : pageKey === 'inbound' ? '入库商品' : pageKey === 'outbound' ? '出库商品' : '业务明细' }}<i v-if="!isDetail">*</i></h3><p v-if="pageKey === 'inbound'">扫描商品条码可自动添加；批次、生产日期、到期日和入库单价在商品明细中填写。</p><p v-else-if="pageKey === 'outbound'">系统会优先扣减最早到期的可用批次，并自动计算成本。</p></div>
-              <div v-if="!isDetail" class="line-actions"><button class="modal-secondary" @click="openCatalogPicker"><Search :size="16" />选择商品</button><button v-if="['inbound', 'outbound'].includes(pageKey)" class="modal-secondary" @click="openScanner"><QrCode :size="16" />扫码添加</button><button class="modal-secondary" :disabled="!selectedLineIndexes.length" @click="bulkEditorVisible = !bulkEditorVisible">批量填写</button><button class="modal-danger" :disabled="!selectedLineIndexes.length" @click="removeSelectedRows"><Trash2 :size="15" />批量删除</button></div>
+              <div v-if="!isDetail" class="line-actions"><button v-if="!isUsageReturn" class="modal-secondary" @click="openCatalogPicker"><Search :size="16" />选择商品</button><button v-if="!isUsageReturn && ['inbound', 'outbound'].includes(pageKey)" class="modal-secondary" @click="openScanner"><QrCode :size="16" />扫码添加</button><button class="modal-secondary" :disabled="!selectedLineIndexes.length" @click="bulkEditorVisible = !bulkEditorVisible">批量填写</button><button class="modal-danger" :disabled="!selectedLineIndexes.length" @click="removeSelectedRows"><Trash2 :size="15" />批量删除</button></div>
             </header>
             <p v-if="catalogError" class="catalog-error">{{ catalogError }}</p>
             <section v-if="scannerVisible" class="scanner-entry"><Barcode :size="17" /><label>扫描条码<input v-model="scannerCode" autofocus placeholder="请扫描或输入商品条码" @keyup.enter="addScannedProduct" /></label><button class="modal-secondary" @click="scannerVisible = false">取消</button><button class="modal-primary" :disabled="!scannerCode.trim() || scannerLoading" @click="addScannedProduct">{{ scannerLoading ? '添加中' : '添加' }}</button></section>
@@ -855,7 +889,7 @@ async function submitWarehouse() {
 
         <footer class="inventory-modal__footer">
           <button class="modal-secondary" @click="close">取消</button>
-          <template v-if="!isDetail && !isImport"><button v-if="['count'].includes(pageKey)" class="modal-secondary">保存草稿</button><button class="modal-primary" :disabled="submitting || (['inbound', 'outbound', 'count', 'request', 'transfer', 'usage'].includes(pageKey) && !selectedRows.length) || (pageKey === 'usage' && (!Number(usageProjectId) || !usageProjectName.trim())) || (pageKey === 'request' && (!supplyPartySelection || !requesterName.trim())) || (pageKey === 'transfer' && (!transferTargetSelection || !transferStaffOptions.length)) || (pageKey === 'warehouse' && (Number(warehouseStoreId) <= 0 || !warehouseName.trim()))" @click="pageKey === 'inbound' ? submitInbound() : pageKey === 'outbound' ? submitOutbound() : pageKey === 'count' ? submitCount() : pageKey === 'request' ? submitRequest() : pageKey === 'transfer' ? submitTransfer() : pageKey === 'usage' ? submitUsage() : pageKey === 'warehouse' ? submitWarehouse() : null">{{ (['inbound', 'outbound', 'count', 'request', 'transfer', 'usage', 'warehouse'].includes(pageKey) && submitting) ? '提交中' : pageKey === 'count' ? '完成盘点' : pageKey === 'request' ? (isRequestEdit ? '保存修改' : '确认申请') : pageKey === 'transfer' ? '保存调拨草稿' : pageKey === 'usage' ? '确认领用' : pageKey === 'warehouse' ? '创建仓库' : '保存' }}</button></template>
+          <template v-if="!isDetail && !isImport"><button v-if="['count'].includes(pageKey)" class="modal-secondary">保存草稿</button><button class="modal-primary" :disabled="submitting || (['inbound', 'outbound', 'count', 'request', 'transfer', 'usage'].includes(pageKey) && !selectedRows.length) || (pageKey === 'usage' && (!Number(usageProjectId) || !usageProjectName.trim())) || (pageKey === 'request' && (!supplyPartySelection || !requesterName.trim())) || (pageKey === 'transfer' && (!transferTargetSelection || !transferStaffOptions.length)) || (pageKey === 'warehouse' && (Number(warehouseStoreId) <= 0 || !warehouseName.trim()))" @click="pageKey === 'inbound' ? submitInbound() : pageKey === 'outbound' ? submitOutbound() : pageKey === 'count' ? submitCount() : pageKey === 'request' ? submitRequest() : pageKey === 'transfer' ? submitTransfer() : pageKey === 'usage' ? submitUsage() : pageKey === 'warehouse' ? submitWarehouse() : null">{{ (['inbound', 'outbound', 'count', 'request', 'transfer', 'usage', 'warehouse'].includes(pageKey) && submitting) ? '提交中' : pageKey === 'count' ? '完成盘点' : pageKey === 'request' ? (isRequestEdit ? '保存修改' : '确认申请') : pageKey === 'transfer' ? '保存调拨草稿' : pageKey === 'usage' ? (isUsageReturn ? '确认退回' : '确认领用') : pageKey === 'warehouse' ? '创建仓库' : '保存' }}</button></template>
           <button v-else-if="isImport" class="modal-secondary" :disabled="importBusy" @click="close">返回列表</button>
           <button v-else class="modal-primary" @click="close">关闭</button>
         </footer>

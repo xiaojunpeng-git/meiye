@@ -115,4 +115,10 @@ docker run --rm --cpus 1 --memory 256m \
   --volume "$repo_dir:/workspace:ro" \
   --entrypoint php \
   "$php_image" \
+  /workspace/tests/inventory/php/operational-unified-query-registration-contract.php
+
+docker run --rm --cpus 1 --memory 256m \
+  --volume "$repo_dir:/workspace:ro" \
+  --entrypoint php \
+  "$php_image" \
   /workspace/tests/inventory/php/excel-import-contract.php

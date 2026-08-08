@@ -264,5 +264,24 @@ await api.salonUsageProjects({ keyword: '护理', page: 1, limit: 50 })
 check('salon usage project selection is read through the current-store scoped V3 endpoint', calls[31].url === '/storeapi/product/inventory/v3/salon-usage/projects?keyword=%E6%8A%A4%E7%90%86&page=1&limit=50'
   && calls[31].options.method === 'GET')
 
+await api.salonUsageDetail(73)
+check('store salon usage detail is read from the protected V3 document authority', calls[32].url === '/storeapi/product/inventory/v3/salon-usage/73/detail'
+  && calls[32].options.method === 'GET')
+
+const platformSalonCallOffset = platformCalls.length
+await platformApi.list('usage', { store_id: 118, keyword: '脱毛', from: '2026-08-09', to: '2026-08-09' })
+await platformApi.salonUsageProjects({ store_id: 118, keyword: '脱毛', page: 1, limit: 50 })
+await platformApi.salonUsageDetail(73, { store_id: 118 })
+await platformApi.issueSalonUsage({ store_id: 118, idempotency_key: 'platform-salon-issue-001' })
+await platformApi.returnSalonUsage({ store_id: 118, idempotency_key: 'platform-salon-return-001' })
+check('platform salon usage reads, issue and return stay on the selected store authority',
+  platformCalls[platformSalonCallOffset].url === '/adminapi/product/inventory/v3/salon-usage?store_id=118&keyword=%E8%84%B1%E6%AF%9B&from=2026-08-09&to=2026-08-09'
+  && platformCalls[platformSalonCallOffset + 1].url === '/adminapi/product/inventory/v3/salon-usage/projects?store_id=118&keyword=%E8%84%B1%E6%AF%9B&page=1&limit=50'
+  && platformCalls[platformSalonCallOffset + 2].url === '/adminapi/product/inventory/v3/salon-usage/73/detail?store_id=118'
+  && platformCalls[platformSalonCallOffset + 3].options.method === 'POST'
+  && JSON.parse(platformCalls[platformSalonCallOffset + 3].options.body).store_id === 118
+  && platformCalls[platformSalonCallOffset + 4].options.method === 'POST'
+  && JSON.parse(platformCalls[platformSalonCallOffset + 4].options.body).store_id === 118)
+
 console.log(`INVENTORY_API_RESULT passed=${passed} failed=${failed}`)
 process.exit(failed === 0 ? 0 : 1)

@@ -31,6 +31,7 @@ foreach ($expected as $pageCode) {
 }
 
 $source = file_get_contents(dirname(__DIR__, 3) . '/后端代码/app/services/product/inventory/query/InventoryOperationalUnifiedQueryProvider.php');
+$requestDefinition = InventoryOperationalUnifiedQueryContract::definition('inventory_request');
 operationalUqAssert('operational provider keeps a bounded full source window instead of reusing a 100-row list page',
     strpos($source, 'UnifiedQueryExecutionServices::MAX_SOURCE_ROWS + 1') !== false
     && strpos($source, 'list($storeId, $operatorId') === false
@@ -43,6 +44,10 @@ operationalUqAssert('Excel import records are an isolated operational projection
     && isset($registry->page('inventory_import')['fields']['source_file_name'])
     && strpos($source, "case 'inventory_import':") !== false
     && strpos($source, 'inventory_v3_import_record') !== false
+);
+operationalUqAssert('request unified-query keyword uses the authoritative request number and keeps the display alias',
+    in_array('request_no', $requestDefinition['keywordFields'], true)
+    && strpos($source, 'd.id,d.request_no,d.request_no order_sn') !== false
 );
 
 $statisticsRegistry = UnifiedQueryPageRegistry::fromRegistrars([], [new InventoryStatisticsUnifiedQueryRegistrar()]);

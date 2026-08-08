@@ -14,6 +14,8 @@ $storeRoutes = file_get_contents($root . '/后端代码/route/store.php');
 $operationalProvider = file_get_contents($root . '/后端代码/app/services/product/inventory/query/InventoryOperationalUnifiedQueryProvider.php');
 $requestQuery = file_get_contents($root . '/后端代码/app/services/product/inventory/InventoryStockRequestQueryServices.php');
 $crossTransfer = file_get_contents($root . '/后端代码/app/services/product/inventory/InventoryCrossSubjectTransferServices.php');
+$platformUsage = file_get_contents($root . '/后端代码/app/controller/admin/v1/product/inventory/InventoryPlatformSalonUsage.php');
+$adminRoutes = file_get_contents($root . '/后端代码/route/admin.php');
 
 $failed = 0;
 function readModelAssert(string $name, bool $condition): void
@@ -47,6 +49,18 @@ readModelAssert('salon usage list returns item count and the effective server da
     && strpos($usage, "leftJoin('inventory_salon_usage_line l', 'l.document_id=d.id')") !== false
     && strpos($usage, 'COUNT(l.id) detail_count') !== false
     && strpos($usage, "'from' => \$from, 'to' => \$to") !== false);
+
+readModelAssert('salon usage projects, list and details stay within the server-authorized store scope',
+    $usage !== false
+    && strpos($usage, "whereLike('p.store_name|p.keyword|p.code|p.bar_code', \$like)") !== false
+    && strpos($usage, "whereLike('d.usage_no|d.project_name_snapshot|d.remark', \$like)") !== false
+    && strpos($usage, "'returnable_quantity'") !== false
+    && strpos($usage, 'inventory_salon_usage_return_exceeds_issue') !== false
+    && $platformUsage !== false
+    && strpos($platformUsage, 'listForPlatform') !== false
+    && strpos($platformUsage, 'issueForPlatform') !== false
+    && strpos($platformUsage, 'returnForPlatform') !== false
+    && strpos($adminRoutes, 'v3/salon-usage/:id/detail') !== false);
 
 readModelAssert('inventory page displays the authority fields with correct units and labels',
     $app !== false
