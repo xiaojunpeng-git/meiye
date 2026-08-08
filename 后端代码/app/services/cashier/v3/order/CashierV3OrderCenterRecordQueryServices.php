@@ -830,6 +830,9 @@ final class CashierV3OrderCenterRecordQueryServices
     {
         $query = Db::name('cashier_v3_gift_fact')->alias('gf')
             ->join('cashier_v3_direct_gift_authority ga', 'ga.gift_id = gf.source_id')
+            // Each direct-gift item has its own expiry. Read that immutable item
+            // snapshot instead of inferring a line expiry from the parent gift.
+            ->leftJoin('cashier_v3_direct_gift_item gi', 'gi.gift_id = gf.source_id AND gi.item_id = gf.source_detail_id')
             ->leftJoin('user u', 'u.uid = gf.member_id')
             ->leftJoin('system_store s', 's.id = gf.store_id')
             ->leftJoin('system_store_staff st', 'st.id = gf.operator_id')
@@ -848,14 +851,17 @@ final class CashierV3OrderCenterRecordQueryServices
         $rows = $query->field(implode(',', [
             'gf.id', 'gf.gift_fact_id', 'gf.source_id', 'gf.source_detail_id', 'gf.gift_kind',
             'gf.quantity', 'gf.content_name_snapshot', 'gf.content_snapshot_json', 'gf.settled_at',
-            'gf.store_id', 'gf.operator_id', 'ga.gift_no', 'ga.reason_snapshot', 'u.real_name',
+            'gf.store_id', 'gf.operator_id', 'ga.gift_no', 'ga.reason_snapshot', 'ga.validity_end AS authority_validity_end',
+            'gi.content_snapshot_json AS item_content_snapshot_json', 'u.real_name',
             'u.nickname', 'u.phone', 's.name AS store_name', 'st.staff_name',
         ]))->order('gf.settled_at', 'desc')->order('gf.id', 'desc')->limit($limit)->select()->toArray();
         return [array_map(function (array $row): array {
-            $snapshot = json_decode((string)$row['content_snapshot_json'], true);
+            $snapshot = json_decode((string)($row['item_content_snapshot_json'] ?: $row['content_snapshot_json']), true);
             $snapshot = is_array($snapshot) ? $snapshot : [];
             $kind = (string)$row['gift_kind'];
             $time = (int)$row['settled_at'];
+            $validityEnd = (int)($snapshot['validityEnd'] ?? $snapshot['validity_end'] ?? 0);
+            if ($validityEnd <= 0) $validityEnd = (int)($row['authority_validity_end'] ?? 0);
             return [
                 'id' => 'v3-direct-gift:' . (string)$row['gift_fact_id'],
                 'giftRecordNo' => trim((string)($row['gift_no'] ?? '')) ?: (string)$row['gift_fact_id'],
@@ -866,7 +872,7 @@ final class CashierV3OrderCenterRecordQueryServices
                 'giftContent' => (string)$row['content_name_snapshot'],
                 'giftQuantity' => (int)$row['quantity'],
                 'effectiveAt' => $this->dateTime($time),
-                'expiresAt' => (int)($snapshot['validityEnd'] ?? 0) > 0 ? $this->dateTime((int)$snapshot['validityEnd']) : null,
+                'expiresAt' => $validityEnd > 0 ? $this->dateTime($validityEnd) : null,
                 'giftStatus' => '有效',
                 'storeName' => (string)$row['store_name'],
                 'operatorName' => (string)$row['staff_name'],

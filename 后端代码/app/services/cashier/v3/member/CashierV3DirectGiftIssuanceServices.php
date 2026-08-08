@@ -63,16 +63,25 @@ final class CashierV3DirectGiftIssuanceServices
         if ($reason === '' || mb_strlen($reason) > 120) {
             throw self::failure('direct_gift_reason_invalid', '请填写不超过 120 个字符的赠送原因。');
         }
-        $validityEnd = $this->validityEnd($payload['validityEnd'] ?? $payload['validity_end'] ?? '', $now);
-        $items = $this->normalizeItems((array)($payload['items'] ?? []), $operatorScope, $now, $validityEnd);
+        // New clients carry validity per gift item. Keep a top-level fallback
+        // for older clients, but never let it override an item's own date.
+        $legacyValidityEnd = $this->validityEnd($payload['validityEnd'] ?? $payload['validity_end'] ?? '', $now);
+        $items = $this->normalizeItems((array)($payload['items'] ?? []), $operatorScope, $now, $legacyValidityEnd);
         if ($items === []) {
             throw self::failure('direct_gift_items_empty', '请至少选择一项可赠送内容。');
         }
+        $validityEnds = array_values(array_unique(array_map(static function (array $item): int {
+            return (int)($item['validityEnd'] ?? 0);
+        }, $items)));
+        // The authority column is retained for compatibility with existing
+        // readers. Mixed per-item dates are represented by 0; the item
+        // snapshot remains the source of truth for each benefit's expiry.
+        $authorityValidityEnd = count($validityEnds) === 1 ? (int)$validityEnds[0] : 0;
         $giftId = 'DGI-' . strtoupper(substr(hash('sha256', implode('|', [$operatorScope->tenantId(), $commandIdempotencyKey])), 0, 40));
         $fingerprint = hash('sha256', $this->json([
             'contractVersion' => self::CONTRACT_VERSION, 'giftId' => $giftId,
             'tenantId' => $operatorScope->tenantId(), 'storeId' => $operatorScope->storeId(),
-            'memberId' => $memberId, 'reason' => $reason, 'validityEnd' => $validityEnd, 'items' => $items,
+            'memberId' => $memberId, 'reason' => $reason, 'validityEnd' => $authorityValidityEnd, 'items' => $items,
         ]));
         $existing = Db::name(self::AUTHORITY_TABLE)->where('tenant_id', $operatorScope->tenantId())
             ->where('command_idempotency_key', $commandIdempotencyKey)->lock(true)->find();
@@ -86,7 +95,7 @@ final class CashierV3DirectGiftIssuanceServices
             $authorityId = (int)Db::name(self::AUTHORITY_TABLE)->insertGetId([
                 'gift_id' => $giftId, 'gift_no' => $giftNo, 'tenant_id' => $operatorScope->tenantId(),
                 'store_id' => $operatorScope->storeId(), 'member_id' => $memberId,
-                'reason_snapshot' => $reason, 'validity_end' => $validityEnd,
+                'reason_snapshot' => $reason, 'validity_end' => $authorityValidityEnd,
                 'command_idempotency_key' => $commandIdempotencyKey, 'immutable_fingerprint' => $fingerprint,
                 'status' => 'issued', 'occurred_at' => $now, 'settled_at' => $now, 'recorded_at' => $now,
                 'created_at' => $now, 'updated_at' => $now,
@@ -107,7 +116,7 @@ final class CashierV3DirectGiftIssuanceServices
         return ['giftId' => $giftId, 'giftNo' => $giftNo, 'issuedCount' => count($issued), 'items' => $issued, 'replayed' => false];
     }
 
-    private function normalizeItems(array $input, CashierV3OperatorScope $scope, int $now, int $validityEnd): array
+    private function normalizeItems(array $input, CashierV3OperatorScope $scope, int $now, int $legacyValidityEnd = 0): array
     {
         if (count($input) > 100) throw self::failure('direct_gift_item_count_exceeded', '一次最多赠送 100 项内容。');
         $items = []; $seen = [];
@@ -120,6 +129,8 @@ final class CashierV3DirectGiftIssuanceServices
                 throw self::failure('direct_gift_item_invalid', '赠送类型或数量无效。');
             }
             $quantity = (int)$quantityRaw;
+            $itemValidityEnd = $this->validityEnd($raw['validityEnd'] ?? $raw['validity_end'] ?? '', $now);
+            if ($itemValidityEnd === 0) $itemValidityEnd = $legacyValidityEnd;
             if ($kind === 'coupon') {
                 $couponId = (int)($raw['couponIssueId'] ?? $raw['coupon_issue_id'] ?? 0);
                 $coupon = (array)Db::name('store_coupon_issue')->where('id', $couponId)->where('status', 1)->where('is_del', 0)
@@ -127,7 +138,7 @@ final class CashierV3DirectGiftIssuanceServices
                 if (!$coupon || isset($seen['coupon:' . $couponId])) throw self::failure('direct_gift_coupon_unavailable', '所选优惠券已停用、删除或重复。');
                 $items[] = ['itemNo' => count($items) + 1, 'kind' => 'coupon', 'productId' => 0, 'productType' => 0,
                     'couponIssueId' => $couponId, 'quantity' => $quantity, 'name' => trim((string)($coupon['title'] ?? '')) ?: '赠送优惠券',
-                    'skuUnique' => '', 'skuWriteTimes' => 0, 'validityStart' => $now, 'validityEnd' => $validityEnd,
+                    'skuUnique' => '', 'skuWriteTimes' => 0, 'validityStart' => $now, 'validityEnd' => $itemValidityEnd,
                     'couponIssueStoreId' => (int)($coupon['relation_id'] ?? 0),
                     'couponApplicableStoreIds' => $this->storeIds($coupon['applicable_store_id'] ?? '')];
                 $seen['coupon:' . $couponId] = true;
@@ -142,16 +153,10 @@ final class CashierV3DirectGiftIssuanceServices
             if (!$sku || !$product || ($kind === 'project' ? $productType !== 6 : $productType !== 0) || isset($seen[$kind . ':' . $skuId])) {
                 throw self::failure('direct_gift_catalog_unavailable', '所选赠送品项已下架、类型变化、不属于当前门店或重复。');
             }
-            // A physical product must never be issued without an authoritative
-            // inventory movement. That movement is not part of the direct-gift
-            // contract yet, so fail closed instead of creating a false success.
-            if ($kind === 'product' && (int)($product['is_inventory'] ?? 0) === 1) {
-                throw self::failure('direct_gift_inventory_product_not_supported', '库存管理商品暂不支持独立赠送，请先通过具备库存扣减能力的业务流程办理。');
-            }
             $items[] = ['itemNo' => count($items) + 1, 'kind' => $kind, 'productId' => $productId, 'productType' => $productType,
                 'couponIssueId' => 0, 'quantity' => $quantity, 'name' => trim((string)($product['store_name'] ?? '')) ?: '赠送内容',
                 'skuUnique' => (string)($sku['unique'] ?? ''), 'skuWriteTimes' => $kind === 'project' ? max(1, (int)($sku['write_times'] ?? 1)) : 0,
-                'validityStart' => $now, 'validityEnd' => $validityEnd];
+                'validityStart' => $now, 'validityEnd' => $itemValidityEnd];
             $seen[$kind . ':' . $skuId] = true;
         }
         return $items;
@@ -228,6 +233,12 @@ final class CashierV3DirectGiftIssuanceServices
             if ((string)($row[$column] ?? '') !== (string)($expected[$key] ?? '')) {
                 throw self::failure('direct_gift_item_replay_conflict', '赠送内容已变化，不能重复发放。');
             }
+        }
+        $snapshot = json_decode((string)($row['content_snapshot_json'] ?? ''), true);
+        $rowValidityEnd = is_array($snapshot) ? (int)($snapshot['validityEnd'] ?? $snapshot['validity_end'] ?? 0) : 0;
+        $expectedValidityEnd = (int)($expected['validityEnd'] ?? $expected['validity_end'] ?? 0);
+        if ($rowValidityEnd !== $expectedValidityEnd) {
+            throw self::failure('direct_gift_item_replay_conflict', '赠送有效期已变化，不能重复发放。');
         }
         if ((string)($row['status'] ?? '') !== 'issued') {
             throw self::failure('direct_gift_item_not_active', '赠送记录已经失效，不能重复发放。');

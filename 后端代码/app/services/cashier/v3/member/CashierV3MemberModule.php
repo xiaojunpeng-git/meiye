@@ -251,13 +251,22 @@ final class CashierV3MemberModule
                     $member = self::findSelectableMember((string)$memberId, $scope['operator_scope']);
                     $memberVersion = $memberVersions->synchronizeProjectionVersion('member', (string)$memberId, $scope['operator_scope'], $scope['data_scope']);
                     $catalog = (new CashierV3SaleCatalogServices())->catalog($scope['operator_scope'], $scope['data_scope']);
-                    // Direct gifts have no inventory movement authority yet. Do
-                    // not offer inventory-managed products in this workflow;
-                    // the issuer repeats this check after locking the product.
-                    $catalogItems = array_values(array_filter((array)($catalog['items'] ?? []), static function (array $item): bool {
-                        return (int)($item['productType'] ?? -1) !== 0
-                            || trim((string)($item['stockText'] ?? '')) === '';
-                    }));
+                    // Gifts do not create inventory movements. Inventory-managed
+                    // products remain selectable and are issued as benefits;
+                    // stock is intentionally unchanged by this workflow.
+                    $catalogItems = array_map(static function (array $item): array {
+                        // Sale catalog disables an inventory SKU when stock is
+                        // empty. Gift issuance has no stock movement, so only
+                        // clear that stock-only disable; ordinary off-shelf or
+                        // invalid items stay unavailable.
+                        if (trim((string)($item['stockText'] ?? '')) !== ''
+                            && (string)($item['disabledReason'] ?? '') === '库存不足') {
+                            $item['disabled'] = false;
+                            $item['disabledReason'] = '';
+                            $item['stockWarning'] = false;
+                        }
+                        return $item;
+                    }, array_values((array)($catalog['items'] ?? [])));
                     $store = (array)Db::name('system_store')->where('id', $scope['operator_scope']->storeId())
                         ->field('id,name')->find();
                     if ((int)($store['id'] ?? 0) !== $scope['operator_scope']->storeId()) {

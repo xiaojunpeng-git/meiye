@@ -360,17 +360,43 @@ final class CashierV3MemberDetailQueryServices
             ['authority' => 'cashier_v3_direct_gift_authority', 'source' => 'direct_gift', 'reason' => 'reason_snapshot'],
             ['authority' => 'cashier_v3_recharge_gift_authority', 'source' => 'recharge_gift', 'reason' => 'recharge_order_no_snapshot'],
         ] as $source) {
+            $isDirectGift = $source['source'] === 'direct_gift';
             $query = Db::name('cashier_v3_gift_fact')->alias('gf')
                 ->join($source['authority'] . ' ga', 'ga.gift_id=gf.source_id')
                 ->leftJoin('system_store ss', 'ss.id=gf.store_id')
                 ->where('gf.tenant_id', $tenantId)->where('gf.member_id', $memberId)
                 ->where('gf.source_type', $source['source'])->where('gf.status', 'effective');
+            if ($isDirectGift) {
+                // Direct gifts can have different expiries in one batch. The item
+                // snapshot is the display authority for an individual gift fact.
+                $query->leftJoin(
+                    'cashier_v3_direct_gift_item gi',
+                    'gi.gift_id=gf.source_id AND gi.item_id=gf.source_detail_id'
+                );
+            }
             $this->applyStoreScope($query, 'gf.store_id', $dataScope);
             $this->applyDetailKeyword($query, $keyword, ['gf.content_name_snapshot', 'ga.gift_no', 'ga.' . $source['reason']]);
+            $fields = [
+                'gf.id,gf.gift_fact_id,gf.source_id,gf.source_detail_id,gf.gift_kind,gf.content_name_snapshot,gf.quantity',
+                'gf.content_snapshot_json,gf.business_date,gf.settled_at,gf.recorded_at,ss.name AS store_name',
+                'ga.gift_no,ga.' . $source['reason'] . ' AS reason_snapshot',
+            ];
+            if ($isDirectGift) {
+                $fields[] = 'gi.content_snapshot_json AS item_content_snapshot_json,ga.validity_end AS authority_validity_end';
+            }
             $rows = $query
-                ->field('gf.id,gf.gift_fact_id,gf.gift_kind,gf.content_name_snapshot,gf.quantity,gf.business_date,gf.settled_at,gf.recorded_at,ss.name AS store_name,ga.gift_no,ga.' . $source['reason'] . ' AS reason_snapshot')
+                ->field(implode(',', $fields))
                 ->order('gf.settled_at desc,gf.id desc')->limit(100)->select()->toArray();
             foreach ($rows as $row) {
+                $snapshotJson = $isDirectGift
+                    ? ($row['item_content_snapshot_json'] ?: $row['content_snapshot_json'])
+                    : $row['content_snapshot_json'];
+                $snapshot = json_decode((string)$snapshotJson, true);
+                $snapshot = is_array($snapshot) ? $snapshot : [];
+                $validityEnd = (int)($snapshot['validityEnd'] ?? $snapshot['validity_end'] ?? 0);
+                if ($validityEnd <= 0 && $isDirectGift) {
+                    $validityEnd = (int)($row['authority_validity_end'] ?? 0);
+                }
                 $result[] = [
                     'id' => 'gift:' . (string)$row['id'],
                     'giftNo' => (string)$row['gift_no'],
@@ -385,6 +411,7 @@ final class CashierV3MemberDetailQueryServices
                         'name' => (string)$row['content_name_snapshot'],
                         'quantity' => (int)$row['quantity'],
                         'effectiveAt' => $this->dateTime((int)$row['settled_at']),
+                        'expiresAt' => $validityEnd > 0 ? $this->dateTime($validityEnd) : null,
                         'statusLabel' => '已生效',
                     ]],
                     '_issuedAt' => (int)$row['settled_at'],
