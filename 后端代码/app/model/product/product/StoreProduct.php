@@ -469,6 +469,18 @@ class StoreProduct extends BaseModel
         }
     }
 
+    /**
+     * 卡项规则搜索器
+     * @param $query
+     * @param $value
+     */
+    public function searchCardRuleTypeAttr($query, $value)
+    {
+        if (in_array($value, ['normal', 'choice_kind', 'choice_count', 'time'], true)) {
+            $query->where('card_rule_type', $value);
+        }
+    }
+
 	/**
 	 * 商品类型搜索器
 	 * @param $query

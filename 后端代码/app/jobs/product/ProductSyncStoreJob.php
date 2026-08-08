@@ -18,6 +18,7 @@ use app\services\product\product\StoreProductServices;
 use app\services\product\category\StoreProductCategoryServices;
 use mohe\basic\BaseJobs;
 use mohe\traits\QueueTrait;
+use think\facade\Db;
 use think\facade\Log;
 
 /**
@@ -58,6 +59,84 @@ class ProductSyncStoreJob extends BaseJobs
             $storeBranchProductServices->syncProduct($product_id, $store_id, $card_product_id, $is_sync_stock, $is_sync_show);
         } catch (\Throwable $e) {
             Log::error('同步商品[syncProduct]到门店发生错误,错误原因:' . $e->getMessage() . '-----' . $e->getFile() . '----' . $e->getLine());
+            throw $e;
+        }
+        return true;
+    }
+
+    /**
+     * The initial fan-out creates one queue item per store. Reconcile once the
+     * fan-out should have settled so a dropped child job cannot leave a store
+     * with an invisible platform product forever.
+     */
+    public function reconcileProductScope(int $productId = 0, int $retry = 0)
+    {
+        if ($productId <= 0) {
+            return true;
+        }
+        try {
+            $product = Db::name('store_product')
+                ->where('id', $productId)
+                ->whereIn('type', [0, 2])
+                ->where('is_del', 0)
+                ->field(['id', 'applicable_type', 'applicable_store_id'])
+                ->find();
+            if (!$product || (int)$product['applicable_type'] === 0) {
+                return true;
+            }
+
+            $storeQuery = Db::name('system_store')->where('is_del', 0);
+            if ((int)$product['applicable_type'] === 2) {
+                $selectedIds = is_array($product['applicable_store_id'])
+                    ? $product['applicable_store_id']
+                    : explode(',', (string)$product['applicable_store_id']);
+                $selectedIds = array_values(array_filter(array_map('intval', $selectedIds)));
+                if (!$selectedIds) {
+                    return true;
+                }
+                $storeQuery->whereIn('id', $selectedIds);
+            } elseif ((int)$product['applicable_type'] !== 1) {
+                return true;
+            }
+            $targetStoreIds = array_values(array_filter(array_map('intval', $storeQuery->column('id'))));
+            if (!$targetStoreIds) {
+                return true;
+            }
+            $syncedStoreIds = Db::name('store_product')
+                ->where('pid', $productId)
+                ->where('type', 1)
+                ->where('is_del', 0)
+                ->whereIn('relation_id', $targetStoreIds)
+                ->column('relation_id');
+            $missingStoreIds = array_values(array_diff($targetStoreIds, array_map('intval', $syncedStoreIds)));
+            if (!$missingStoreIds) {
+                return true;
+            }
+
+            /** @var StoreBranchProductServices $storeBranchProductServices */
+            $storeBranchProductServices = app()->make(StoreBranchProductServices::class);
+            foreach ($missingStoreIds as $storeId) {
+                $storeBranchProductServices->syncProduct($productId, $storeId, 0, 0, 1);
+            }
+
+            $remainingStoreIds = array_values(array_diff(
+                $missingStoreIds,
+                array_map('intval', Db::name('store_product')
+                    ->where('pid', $productId)
+                    ->where('type', 1)
+                    ->where('is_del', 0)
+                    ->whereIn('relation_id', $missingStoreIds)
+                    ->column('relation_id'))
+            ));
+            if ($remainingStoreIds) {
+                if ($retry >= 2) {
+                    throw new \RuntimeException('平台商品同步未覆盖门店：' . implode(',', $remainingStoreIds));
+                }
+                self::dispatchDo('reconcileProductScope', [$productId, $retry + 1], 60);
+            }
+        } catch (\Throwable $e) {
+            Log::error('核对平台商品门店同步范围失败：' . $e->getMessage());
+            throw $e;
         }
         return true;
     }
@@ -97,6 +176,7 @@ class ProductSyncStoreJob extends BaseJobs
             }
         } catch (\Throwable $e) {
             Log::error('同步卡项权益商品[syncCardRelatedProducts]到门店发生错误,错误原因:' . $e->getMessage() . '-----' . $e->getFile() . '----' . $e->getLine());
+            throw $e;
         }
         return true;
     }

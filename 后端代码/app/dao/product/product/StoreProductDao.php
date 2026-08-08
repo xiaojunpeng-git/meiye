@@ -216,6 +216,9 @@ class StoreProductDao extends BaseDao
                     case 96://院装配方项目选择：仅项目（预约）商品
                         $query->where('product_type', 6);
                         break;
+                    case 97://平台卡项项目选择：只取平台项目主数据，不混入产品或其他卡项
+                        $query->where('product_type', 6);
+                        break;
                     default:
                         $query->where('product_type', 0);
                         break;
@@ -282,7 +285,13 @@ class StoreProductDao extends BaseDao
 					$query->where(['a.is_vip' => $where['is_vip']]);
 				})->when(isset($where['spec_type']) && $where['spec_type'], function ($query) use ($where) {
                     $query->where(['a.spec_type' => $where['spec_type']]);
-                })->when(isset($where['is_vip']) && $where['is_vip'], function ($query) use ($where) {
+                })->when(
+                    isset($where['card_rule_type'])
+                    && in_array($where['card_rule_type'], ['normal', 'choice_kind', 'choice_count', 'time'], true),
+                    function ($query) use ($where) {
+                        $query->where('a.card_rule_type', $where['card_rule_type']);
+                    }
+                )->when(isset($where['is_vip']) && $where['is_vip'], function ($query) use ($where) {
                     $query->where(['a.is_vip' => $where['is_vip']]);
                 })->when(isset($where['delivery_type']) && $where['delivery_type'], function ($query) use ($where) {
                     if (in_array($where['delivery_type'], [1, 2, 3])) {
@@ -452,7 +461,13 @@ class StoreProductDao extends BaseDao
 					$query->where(['a.is_vip' => $where['is_vip']]);
 				})->when(isset($where['spec_type']) && $where['spec_type'], function ($query) use ($where) {
 					$query->where(['a.spec_type' => $where['spec_type']]);
-				})->when(isset($where['is_vip']) && $where['is_vip'], function ($query) use ($where) {
+				})->when(
+					isset($where['card_rule_type'])
+					&& in_array($where['card_rule_type'], ['normal', 'choice_kind', 'choice_count', 'time'], true),
+					function ($query) use ($where) {
+							$query->where('a.card_rule_type', $where['card_rule_type']);
+						}
+					)->when(isset($where['is_vip']) && $where['is_vip'], function ($query) use ($where) {
 					$query->where(['a.is_vip' => $where['is_vip']]);
 				})->when(isset($where['delivery_type']) && $where['delivery_type'], function ($query) use ($where) {
 					if (in_array($where['delivery_type'], [1, 2, 3])) {

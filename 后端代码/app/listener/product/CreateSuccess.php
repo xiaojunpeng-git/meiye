@@ -43,6 +43,8 @@ class CreateSuccess implements ListenerInterface
 		if (in_array($type, [0, 2])) {
 			//商品同步至门店
 			ProductSyncStoreJob::dispatchDo('syncProductToStores', [$id, $data['applicable_type'] ?? 0, $data['applicable_store_id'] ?? [], 0, $relationData['is_sync_show'] ?? 1]);
+			// 扇出队列完成后再核对目标门店，补偿个别子任务丢失或失败的情况。
+			ProductSyncStoreJob::dispatchDo('reconcileProductScope', [$id, 0], 70);
 			// 第4参固定 0：【库存铁律】不同步实物库存；原 $relationData['is_sync_stock'] ?? 1 已停用
 		}
         $cate_id = [];
