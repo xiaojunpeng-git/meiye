@@ -18,6 +18,8 @@ final class CashierV3BusinessDocumentNumberServices
     public const DEBT_REPAYMENT = 'debt_repayment';
     public const GIFT = 'gift';
     public const CARD_OPERATION = 'card_operation';
+    public const RESERVATION = 'reservation';
+    public const DEBT = 'debt';
 
     private const PREFIXES = [
         self::SALES_ORDER => 'XS',
@@ -27,6 +29,8 @@ final class CashierV3BusinessDocumentNumberServices
         self::DEBT_REPAYMENT => 'BJ',
         self::GIFT => 'ZS',
         self::CARD_OPERATION => 'CK',
+        self::RESERVATION => 'YY',
+        self::DEBT => 'QK',
     ];
 
     /** Customer-visible sales receipts are XS + YYMMDD + five-digit sequence. */
@@ -79,10 +83,15 @@ final class CashierV3BusinessDocumentNumberServices
             ->where('business_date', $businessDate)
             ->lock(true)
             ->value('current_value');
-        if ($sequence < 1 || $sequence > 99999) {
+        $sequenceWidth = in_array($documentType, [self::RESERVATION, self::DEBT], true) ? 4 : 5;
+        $sequenceLimit = (10 ** $sequenceWidth) - 1;
+        if ($sequence < 1 || $sequence > $sequenceLimit) {
             throw new \RuntimeException('cashier_business_document_number_daily_limit_reached');
         }
-        $number = $prefix . $date->format('ymd') . str_pad((string)$sequence, 5, '0', STR_PAD_LEFT);
+        // 服务记录是门店工作人员与会员共同使用的短单号：FW + MMDD + 五位流水。
+        // 其他业务单据保持既有 YYMMDD 编号口径，避免改变已确认的销售、充值等规则。
+        $datePart = $documentType === self::SERVICE ? $date->format('md') : $date->format('ymd');
+        $number = $prefix . $datePart . str_pad((string)$sequence, $sequenceWidth, '0', STR_PAD_LEFT);
         Db::name('cashier_v3_business_document_no')->insert([
             'tenant_id' => $tenantId,
             'source_type' => $sourceType,

@@ -254,6 +254,7 @@ const C5_ACTIONS = {
     'deactivate-member': FEATURE_MEMBER,
     'submit-recharge': FEATURE_MEMBER,
     'prepare-recharge-checkout': FEATURE_MEMBER,
+    'prepare-recharge-debt-repayment': FEATURE_MEMBER,
     'add-recharge-checkout-payment-method': FEATURE_MEMBER,
     'update-recharge-checkout-payment-line': FEATURE_MEMBER,
     'remove-recharge-checkout-payment-line': FEATURE_MEMBER,

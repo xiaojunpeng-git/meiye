@@ -218,6 +218,10 @@ $reader = function (string $operation, array $criteria) use (&$readerCalls, &$or
             && !in_array((int)$row['store_id'], $criteria['allowedStoreIds'], true)) {
             return false;
         }
+        if (($criteria['memberId'] ?? null) !== null
+            && (int)$row['uid'] !== (int)$criteria['memberId']) {
+            return false;
+        }
         if (($criteria['queryCutoffTimestamp'] ?? null) !== null
             && (int)$row['pay_time'] > (int)$criteria['queryCutoffTimestamp']) {
             return false;
@@ -329,6 +333,13 @@ orderOk('响应只暴露不透明游标，不返回 cutoff 或最大订单 ID', 
 orderOk('充值、核销子单、补交、未支付、系统删除、拆分父单、纯赠送单和 settled_at=0 均排除', $first['total'] === 12, $first);
 orderOk('pid=-2 且 order_type=0 的历史正式销售纳入，其他负 pid 仍排除', $service->querySalesOrders(['keyword' => '负二正式销售'], $operator, $storesScope)['total'] === 1);
 orderOk('固定排序合同传给真实读取器', ($readerCalls[0]['criteria']['sort'] ?? null) === [['pay_time', 'desc'], ['id', 'desc']]);
+$memberFiltered = $service->querySalesOrders(['memberId' => 1102], $operator, $storesScope);
+orderOk('会员详情按 memberId 精确读取本人的销售订单',
+    $memberFiltered['total'] === 1
+    && ($memberFiltered['records'][0]['memberId'] ?? 0) === 1102
+    && ($memberFiltered['records'][0]['orderId'] ?? 0) === 102,
+    $memberFiltered
+);
 
 echo "== opaque cursor security ==\n";
 $nextCursor = (string)($first['paginationCursor']['next'] ?? '');

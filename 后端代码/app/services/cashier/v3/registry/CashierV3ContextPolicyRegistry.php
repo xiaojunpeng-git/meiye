@@ -135,12 +135,16 @@ class CashierV3ContextPolicyRegistry
             'submit-debt-repayment',
         ] as $action) {
             // 后续步骤：客户端只提交 checkout_request；真实来源在事务内从持久化记录反推
+            $touched = ['cashier_workspace', 'checkout_request'];
+            if ($action === 'submit-debt-repayment') {
+                $touched[] = 'debt_record';
+            }
             $this->register(new CashierV3ContextPolicy(
                 $action,
                 ['cashier_workspace', 'checkout_request'],
                 ['service_order', 'hang_order', 'reservation', 'room', 'debt_record'],
                 [$this, 'resolveCheckoutFollowUpBranch'],
-                ['cashier_workspace', 'checkout_request'],
+                $touched,
                 ['service_order', 'hang_order', 'reservation', 'room', 'debt_record'],
                 ['service_order', 'hang_order', 'reservation', 'room', 'debt_record']
             ));
@@ -330,7 +334,7 @@ class CashierV3ContextPolicyRegistry
     public function resolveCheckoutFollowUpBranch(array $payload, array $base): array
     {
         $base['required'] = ['cashier_workspace', 'checkout_request'];
-        $base['allowed'] = ['service_order', 'hang_order', 'reservation', 'room', 'checkout_request'];
+        $base['allowed'] = ['service_order', 'hang_order', 'reservation', 'room', 'debt_record', 'checkout_request'];
         return $this->resolveCheckoutSourceBranch($payload, $base);
     }
 

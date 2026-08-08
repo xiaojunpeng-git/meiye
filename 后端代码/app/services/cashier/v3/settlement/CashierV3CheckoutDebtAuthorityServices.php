@@ -5,6 +5,7 @@ namespace app\services\cashier\v3\settlement;
 
 use app\services\cashier\v3\CashierV3CommandException;
 use app\services\cashier\v3\CashierV3DataScopeContext;
+use app\services\cashier\v3\CashierV3BusinessDocumentNumberServices;
 use app\services\cashier\v3\CashierV3OperatorScope;
 use app\services\cashier\v3\CashierV3ResultCode;
 use app\services\cashier\v3\CashierV3TransactionGuard;
@@ -21,11 +22,11 @@ final class CashierV3CheckoutDebtAuthorityServices
         array $lockedRequest,
         CashierV3SalesOrderPlanV1 $salesPlan,
         array $salesResult,
+        array $salespeopleByCheckoutLine,
         string $commandIdempotencyKey,
         int $occurredAt,
         CashierV3OperatorScope $operator,
-        CashierV3DataScopeContext $dataScope,
-        array $cardPurchaseResult = []
+        CashierV3DataScopeContext $dataScope
     ): array {
         CashierV3TransactionGuard::assertInTransaction('checkoutDebtAuthority.persistInTx');
         $amount = (int)($lockedRequest['debt_amount_cents'] ?? 0);
@@ -52,38 +53,26 @@ final class CashierV3CheckoutDebtAuthorityServices
             throw self::failure('checkout_debt_sales_order_missing');
         }
 
-        $allocations = self::allocate($amount, $salesPlan->lines());
-        $legacyOrderId = 0;
-        $legacyOrderNo = '';
-        $legacyCartInfoId = 0;
-        $receipts = array_values((array)($cardPurchaseResult['receipts'] ?? []));
-        if ($receipts) {
-            if (count($receipts) !== 1 || count($salesPlan->lines()) !== 1) {
-                throw self::failure('checkout_debt_multi_card_legacy_projection_not_supported');
-            }
-            $legacyOrderId = (int)($receipts[0]['legacyOrderId'] ?? 0);
-            $legacyCartInfoId = (int)($receipts[0]['baseCartId'] ?? 0);
-            $legacy = Db::name('store_order')
-                ->where('id', $legacyOrderId)
-                ->where('uid', (int)$header['member_id'])
-                ->where('store_id', (int)$header['store_id'])
-                ->lock(true)
-                ->field('id,order_id,debt_amount')
-                ->find();
-            if (!$legacy
-                || $legacyCartInfoId <= 0
-                || self::cents((string)($legacy['debt_amount'] ?? '')) !== $amount) {
-                throw self::failure('checkout_debt_legacy_card_projection_mismatch');
-            }
-            $legacyOrderNo = (string)$legacy['order_id'];
+        $allocations = self::exactAllocations($amount, $salesPlan->lines());
+        $debtOrderRecordId = $v3OrderRecordId;
+        $debtOrderNo = (string)$header['order_no'];
+        // Completed historical V3 debts retain their D3 number. New debts use
+        // the customer-visible QK daily sequence and are stable on retries.
+        $debtNo = (string)Db::name('cashier_v3_debt_authority')
+            ->where('tenant_id', (string)$header['tenant_id'])
+            ->where('checkout_request_id', (string)$header['checkout_request_id'])
+            ->lock(true)
+            ->value('debt_no');
+        if ($debtNo === '') {
+            $debtNo = (new CashierV3BusinessDocumentNumberServices())->allocateForSourceInTx(
+                (string)$header['tenant_id'],
+                CashierV3BusinessDocumentNumberServices::DEBT,
+                'checkout_debt',
+                (string)$header['checkout_request_id'],
+                (string)$header['business_date'],
+                $occurredAt
+            );
         }
-        $debtOrderRecordId = $legacyOrderId > 0 ? $legacyOrderId : $v3OrderRecordId;
-        $debtOrderNo = $legacyOrderNo !== '' ? $legacyOrderNo : (string)$header['order_no'];
-        $debtNo = 'D3' . strtoupper(substr(hash('sha256', implode('|', [
-            (string)$header['tenant_id'],
-            (string)$header['checkout_request_id'],
-            (string)$header['order_id'],
-        ])), 0, 30));
         $expected = [
             'debt_no' => $debtNo,
             'order_id' => $debtOrderRecordId,
@@ -113,22 +102,34 @@ final class CashierV3CheckoutDebtAuthorityServices
         }
 
         $expectedItems = [];
+        $expectedPersonnel = [];
         foreach ($salesPlan->lines() as $line) {
             $lineId = (string)($line['order_line_id'] ?? '');
+            $checkoutLineId = (string)($line['checkout_line_id'] ?? '');
             $lineDebt = (int)($allocations[$lineId] ?? 0);
             if ($lineDebt <= 0) {
                 continue;
             }
+            if ($checkoutLineId === '' || !array_key_exists($checkoutLineId, $salespeopleByCheckoutLine)) {
+                throw self::failure('checkout_debt_personnel_snapshot_missing');
+            }
+            $salespeople = self::salespeopleSnapshot((array)$salespeopleByCheckoutLine[$checkoutLineId]);
             $expectedItems[] = [
                 'debt_id' => $debtId,
                 'order_id' => $debtOrderRecordId,
-                'cart_info_id' => $legacyCartInfoId,
+                'cart_info_id' => 0,
                 'product_id' => (int)$line['item_id'],
                 'product_type' => self::legacyProductType((string)$line['item_type']),
                 'product_name' => (string)$line['item_name_snapshot'],
                 'cart_num' => (int)$line['quantity'],
                 'debt_amount' => self::money($lineDebt),
                 'repaid_debt' => '0.00',
+            ];
+            $expectedPersonnel[] = [
+                'order_line_id' => $lineId,
+                'checkout_line_id' => $checkoutLineId,
+                'line_debt_amount_cents' => $lineDebt,
+                'salespeople_snapshot_json' => self::encodeJson($salespeople),
             ];
         }
         $storedItems = self::rows(Db::name('store_debt_item')
@@ -158,6 +159,35 @@ final class CashierV3CheckoutDebtAuthorityServices
             }
             if ((int)Db::name('store_debt_item')->insertAll($rows) !== count($rows)) {
                 throw self::failure('checkout_debt_item_insert_failed');
+            }
+        }
+        $storedItems = self::rows(Db::name('store_debt_item')
+            ->where('debt_id', $debtId)->order('id asc')->lock(true)->select());
+        if (count($storedItems) !== count($expectedPersonnel)) {
+            throw self::failure('checkout_debt_personnel_item_count_mismatch');
+        }
+        foreach ($expectedPersonnel as $index => $personnel) {
+            $debtItemId = (int)($storedItems[$index]['id'] ?? 0);
+            $row = array_merge($personnel, [
+                'debt_item_id' => $debtItemId,
+                'debt_id' => $debtId,
+                'tenant_id' => (string)$header['tenant_id'],
+                'store_id' => (int)$header['store_id'],
+                'member_id' => (int)$header['member_id'],
+            ]);
+            $row['snapshot_fingerprint'] = hash('sha256', json_encode($row, JSON_UNESCAPED_SLASHES));
+            $storedPersonnel = Db::name('cashier_v3_debt_item_personnel_authority')
+                ->where('debt_item_id', $debtItemId)->lock(true)->find();
+            if ($storedPersonnel) {
+                self::assertRow($row, (array)$storedPersonnel, 'checkout_debt_personnel_replay_conflict');
+                $replayed = true;
+                continue;
+            }
+            if ((int)Db::name('cashier_v3_debt_item_personnel_authority')->insert(array_merge($row, [
+                'created_at' => $occurredAt,
+                'updated_at' => $occurredAt,
+            ])) !== 1) {
+                throw self::failure('checkout_debt_personnel_insert_failed');
             }
         }
 
@@ -209,6 +239,7 @@ final class CashierV3CheckoutDebtAuthorityServices
             'debtNo' => $debtNo,
             'amountCents' => $amount,
             'orderLineAllocations' => $allocations,
+            'personnelSnapshotCount' => count($expectedPersonnel),
             'replayed' => $replayed,
             'commandIdempotencyKey' => $commandIdempotencyKey,
             'salesOrderId' => (string)$header['order_id'],
@@ -224,39 +255,68 @@ final class CashierV3CheckoutDebtAuthorityServices
     }
 
     /** @return array<string,int> */
-    public static function allocate(int $amount, array $lines): array
+    public static function exactAllocations(int $amount, array $lines): array
     {
-        $total = 0;
-        foreach ($lines as $line) {
-            $total += (int)($line['sale_amount_cents'] ?? 0);
-        }
-        if ($amount <= 0 || $total <= 0 || $amount > $total) {
+        if ($amount <= 0) {
             throw self::failure('checkout_debt_allocation_total_invalid');
         }
-        $result = [];
-        $remainders = [];
         $allocated = 0;
-        foreach (array_values($lines) as $index => $line) {
+        $result = [];
+        foreach ($lines as $line) {
             $lineId = trim((string)($line['order_line_id'] ?? ''));
             $lineAmount = (int)($line['sale_amount_cents'] ?? 0);
-            if ($lineId === '' || $lineAmount <= 0 || isset($result[$lineId])) {
+            $lineDebt = (int)($line['debt_amount_cents'] ?? 0);
+            if ($lineId === '' || $lineAmount <= 0 || $lineDebt < 0
+                || $lineDebt > $lineAmount || isset($result[$lineId])) {
                 throw self::failure('checkout_debt_allocation_line_invalid');
             }
-            $product = bcmul((string)$amount, (string)$lineAmount, 0);
-            $share = (int)bcdiv($product, (string)$total, 0);
-            $remainder = (int)bcmod($product, (string)$total);
-            $result[$lineId] = $share;
-            $remainders[] = ['lineId' => $lineId, 'remainder' => $remainder, 'index' => $index];
-            $allocated += $share;
+            if ($allocated > PHP_INT_MAX - $lineDebt) {
+                throw self::failure('checkout_debt_allocation_total_invalid');
+            }
+            $result[$lineId] = $lineDebt;
+            $allocated += $lineDebt;
         }
-        usort($remainders, static function (array $left, array $right): int {
-            return $right['remainder'] <=> $left['remainder']
-                ?: $left['index'] <=> $right['index'];
-        });
-        for ($remaining = $amount - $allocated, $index = 0; $remaining > 0; $remaining--, $index++) {
-            $result[$remainders[$index]['lineId']]++;
+        if ($allocated !== $amount) {
+            throw self::failure('checkout_debt_allocation_total_invalid');
         }
         return $result;
+    }
+
+    private static function salespeopleSnapshot(array $rows): array
+    {
+        $out = [];
+        $sum = 0;
+        foreach (array_values($rows) as $index => $row) {
+            $normalized = [
+                'employeeId' => (int)($row['employeeId'] ?? 0),
+                'name' => trim((string)($row['name'] ?? '')),
+                'employeeTypeCodeSnapshot' => trim((string)($row['employeeTypeCodeSnapshot'] ?? '')),
+                'employeeTypeAuthorityVersion' => (int)($row['employeeTypeAuthorityVersion'] ?? 0),
+                'allocationWeight' => (int)($row['allocationWeight'] ?? 0),
+                'sequence' => (int)($row['sequence'] ?? ($index + 1)),
+            ];
+            if ($normalized['employeeId'] <= 0 || $normalized['name'] === ''
+                || !in_array($normalized['employeeTypeCodeSnapshot'], ['internal', 'partner', 'outsourced'], true)
+                || $normalized['employeeTypeAuthorityVersion'] <= 0 || $normalized['allocationWeight'] <= 0
+                || $normalized['sequence'] <= 0) {
+                throw self::failure('checkout_debt_personnel_snapshot_invalid');
+            }
+            $sum += $normalized['allocationWeight'];
+            $out[] = $normalized;
+        }
+        if ($out && $sum !== 100) {
+            throw self::failure('checkout_debt_personnel_weight_invalid');
+        }
+        return $out;
+    }
+
+    private static function encodeJson(array $value): string
+    {
+        $json = json_encode($value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        if (!is_string($json)) {
+            throw self::failure('checkout_debt_personnel_json_invalid');
+        }
+        return $json;
     }
 
     private static function legacyProductType(string $itemType): int
@@ -312,15 +372,6 @@ final class CashierV3CheckoutDebtAuthorityServices
     private static function money(int $cents): string
     {
         return intdiv($cents, 100) . '.' . str_pad((string)($cents % 100), 2, '0', STR_PAD_LEFT);
-    }
-
-    private static function cents(string $money): int
-    {
-        if (preg_match('/^(?:0|[1-9][0-9]*)\.[0-9]{2}$/D', $money) !== 1) {
-            throw self::failure('checkout_debt_legacy_money_invalid');
-        }
-        [$yuan, $fraction] = explode('.', $money, 2);
-        return (int)$yuan * 100 + (int)$fraction;
     }
 
     private static function failure(string $reason, array $detail = []): CashierV3CommandException

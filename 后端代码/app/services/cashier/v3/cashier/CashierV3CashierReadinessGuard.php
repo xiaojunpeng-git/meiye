@@ -33,7 +33,9 @@ final class CashierV3CashierReadinessGuard
             'source_detail_id', 'project_id', 'quantity', 'source_version', 'detail_version',
             'service_object', 'is_experience', 'craftsmen_json', 'salespeople_json', 'display_snapshot_json',
             'catalog_product_id', 'catalog_sku_id', 'catalog_product_type',
-            'unit_price_cents', 'original_unit_price_cents', 'authority_fingerprint',
+            'unit_price_cents', 'original_unit_price_cents', 'configured_cost_cents',
+            'debt_amount_cents', 'price_change_reason', 'price_changed_by',
+            'price_changed_by_name_snapshot', 'price_changed_at', 'authority_fingerprint',
             'authority_snapshot_json', 'sort_no', 'add_time', 'update_time',
         ],
         'eb_cashier_v3_entitlement_resource_version' => [
@@ -51,7 +53,7 @@ final class CashierV3CashierReadinessGuard
             'allow_negative_stock', 'card_num', 'card_num_type',
         ],
         'eb_store_product_attr_value' => [
-            'id', 'product_id', 'product_type', 'unique', 'suk', 'price', 'ot_price',
+            'id', 'product_id', 'product_type', 'unique', 'suk', 'price', 'ot_price', 'cost',
             'stock', 'code', 'bar_code', 'is_show', 'type', 'write_times', 'write_valid',
             'write_days', 'write_start', 'write_end',
         ],

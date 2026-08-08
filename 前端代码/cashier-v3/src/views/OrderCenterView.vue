@@ -80,6 +80,22 @@ const ORDER_TABS = [
     ]
   },
   {
+    key: 'debt',
+    label: '欠款管理',
+    stateKey: 'debtRecords',
+    primaryField: 'debt_no',
+    searchPlaceholder: '搜索欠款编号、来源订单、会员姓名或手机号',
+    emptyText: '暂无欠款记录。欠款以权威欠款事实为准。',
+    fields: [
+      field('debt_no', '欠款编号', 'text', { defaultQuick: true }),
+      field('member_name', '客户'), field('phone', '手机号'),
+      field('source_type', '欠款来源'), field('source_order_no', '来源订单'),
+      field('original_debt_amount', '原欠款', 'money'), field('repaid_amount', '已还', 'money'),
+      field('remaining_amount', '剩余', 'money'), field('debt_status', '状态', 'status'),
+      field('store', '欠款门店', 'store'), field('created_at', '创建时间', 'date')
+    ]
+  },
+  {
     key: 'service',
     label: '服务记录',
     stateKey: 'serviceRecords',
@@ -174,6 +190,8 @@ const FIELD_ALIASES = {
   card_operation_no: ['cardOperationNo', 'operationNo'], operation_type: ['operationTypeLabel', 'operationType'],
   source_card: ['sourceCard', 'sourceCardName'], target_content: ['targetContent', 'targetCardName', 'targetProjectName'],
   operation_amount: ['operationAmount', 'amount'], operation_reason: ['operationReason', 'reason'],
+  debt_no: ['debtNo'], source_type: ['sourceType'], original_debt_amount: ['originalDebtAmount', 'totalDebtAmount'],
+  repaid_amount: ['repaidAmount'], remaining_amount: ['remainingAmount'], debt_status: ['debtStatus', 'statusLabel'],
   service_record_no: ['serviceRecordNo', 'serviceFactId'], service_project: ['serviceProject', 'projectName'],
   entitlement_source: ['entitlementSource'], source_card_no: ['sourceCardNo', 'sourceCode'],
   used_times: ['usedTimes', 'quantity'], craftsman: ['craftsmenSummary', 'craftsmen'],
@@ -207,6 +225,7 @@ const salesDetailOrder = ref({})
 const isSalesDetailLoading = ref(false)
 const genericDetailRecord = ref(null)
 const salesOrderActionIds = ref({})
+const rechargeOrderActionIds = ref({})
 let salesQuerySequence = 0
 let salesDetailSequence = 0
 let recordQuerySequence = 0
@@ -531,6 +550,57 @@ function openRecordDetail(record) {
   return null
 }
 
+async function openDebtRepayment(record) {
+  if (!record?.canRepay || !record.memberId || !record.debtId) return
+  // The shell owns repayment preparation and the cross-route Checkout handoff.
+  // It re-reads the member's authoritative debt snapshot before accepting a
+  // payment amount, so this table never fabricates a payable draft locally.
+  window.dispatchEvent(new CustomEvent('cashier-v3:open-member-debt-repayment', {
+    // Sales debt has a verified V3 Checkout path. Recharge debt remains on
+    // its own authority until its Checkout migration is complete; opening the
+    // member debt sheet preserves the existing safe repayment path meanwhile.
+    detail: record.sourceType === '销售订单'
+      ? { memberId: record.memberId, debtId: record.debtId, debtNo: record.debtNo }
+      : { memberId: record.memberId }
+  }))
+}
+
+const rechargeLifecycleActions = computed(() => {
+  if (activeTabKey.value !== 'recharge' || !genericDetailRecord.value
+    || genericDetailRecord.value.economicsDataStatus !== 'ready'
+    || genericDetailRecord.value.orderStatus !== '正常') return []
+  return ['refund', 'void']
+})
+
+async function handleRechargeLifecycleAction(payload = {}) {
+  const record = genericDetailRecord.value || {}
+  const action = String(payload.action || '')
+  if (!['refund-recharge-order', 'void-recharge-order'].includes(action)
+    || !record.rechargeId || !record.memberId) {
+    return { result: { status: 'failed', message: '充值订单资料已变化，请重新打开后操作。' } }
+  }
+  const key = `${action}:${record.rechargeId}`
+  const idempotencyKey = rechargeOrderActionIds.value[key] || createCashierV3CommandId()
+  rechargeOrderActionIds.value = { ...rechargeOrderActionIds.value, [key]: idempotencyKey }
+  const result = await requestAction(action, {
+    rechargeId: record.rechargeId,
+    memberId: record.memberId,
+    reason: payload.reason,
+    cashRefundAmount: payload.cashRefundAmount,
+    principalRefundAmount: payload.principalRefundAmount,
+    bonusRefundAmount: payload.bonusRefundAmount,
+    idempotencyKey
+  })
+  if (isTerminalActionStatus(actionStatus(result))) {
+    rechargeOrderActionIds.value = { ...rechargeOrderActionIds.value, [key]: null }
+  }
+  if (['success', 'succeeded'].includes(actionStatus(result))) {
+    genericDetailRecord.value = null
+    await queryRecords({}, false)
+  }
+  return result
+}
+
 async function handleSalesOrderDetailAction(payload = {}) {
   const action = String(payload.action || '')
   if (!allowedSalesOrderDetailActions.has(action)) {
@@ -567,6 +637,17 @@ async function handleSalesOrderDetailAction(payload = {}) {
   if (action === 'open-sales-order-personnel-adjustment' && adjustment) {
     salesDetailOrder.value = { ...salesDetailOrder.value, personnelAdjustment: adjustment }
   }
+  const debtRepayment = businessData.orderDebtRepayment
+  if (['open-order-debt-settlements', 'open-debt-settlements'].includes(action) && debtRepayment?.memberId) {
+    window.dispatchEvent(new CustomEvent('cashier-v3:open-member-debt-repayment', {
+      detail: {
+        memberId: debtRepayment.memberId,
+        debtId: debtRepayment.debtId,
+        debtNo: debtRepayment.debtNo,
+        sourceOrderId: debtRepayment.salesOrderId
+      }
+    }))
+  }
   if (['adjust-sales-order-personnel', 'reopen-sales-order'].includes(action)
     && !['failed', 'conflict'].includes(actionStatus(result))) {
     await openSalesOrderDetail({ orderId: currentOrderId })
@@ -598,6 +679,7 @@ function resetLocalContext() {
   isSalesDetailLoading.value = false
   genericDetailRecord.value = null
   salesOrderActionIds.value = {}
+  rechargeOrderActionIds.value = {}
 }
 
 onMounted(() => {
@@ -670,7 +752,15 @@ onBeforeUnmount(() => {
               </span>
               <span v-else>{{ displayRecordField(record, fieldItem.key) }}</span>
             </td>
-            <td><button type="button" class="button button--text" @click="openRecordDetail(record)">查看详情</button></td>
+            <td>
+              <button type="button" class="button button--text" @click="openRecordDetail(record)">查看详情</button>
+              <button
+                v-if="activeTabKey === 'debt' && record.canRepay"
+                type="button"
+                class="button button--text"
+                @click="openDebtRepayment(record)"
+              >去还款</button>
+            </td>
           </tr>
         </tbody>
       </table>
@@ -701,6 +791,8 @@ onBeforeUnmount(() => {
       :record="genericDetailRecord"
       :fields="visibleFields"
       :resolve-value="recordFieldValue"
+      :lifecycle-actions="rechargeLifecycleActions"
+      :on-lifecycle-action="handleRechargeLifecycleAction"
       @close="genericDetailRecord = null"
     />
   </section>

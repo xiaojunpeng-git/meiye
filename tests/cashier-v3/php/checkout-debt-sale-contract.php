@@ -18,15 +18,22 @@ $check = static function (string $name, bool $condition) use (&$passed, &$failed
 };
 
 $lines = [
-    ['order_line_id' => 'line-a', 'sale_amount_cents' => 333],
-    ['order_line_id' => 'line-b', 'sale_amount_cents' => 667],
+    ['order_line_id' => 'line-a', 'sale_amount_cents' => 333, 'debt_amount_cents' => 100],
+    ['order_line_id' => 'line-b', 'sale_amount_cents' => 667, 'debt_amount_cents' => 401],
 ];
-$allocation = CashierV3CheckoutDebtAuthorityServices::allocate(501, $lines);
+$allocation = CashierV3CheckoutDebtAuthorityServices::exactAllocations(501, $lines);
 $check(
-    'debt uses deterministic largest-remainder line allocation',
-    $allocation === ['line-a' => 167, 'line-b' => 334]
+    'debt remains on the exact sales line where it was entered',
+    $allocation === ['line-a' => 100, 'line-b' => 401]
         && array_sum($allocation) === 501
 );
+$mismatchRejected = false;
+try {
+    CashierV3CheckoutDebtAuthorityServices::exactAllocations(500, $lines);
+} catch (Throwable $exception) {
+    $mismatchRejected = true;
+}
+$check('header debt must equal the exact line debt sum', $mismatchRejected);
 $check(
     'debt policy authority is store-scoped',
     CashierV3CheckoutDebtAuthorityServices::authorityKey(163)
@@ -36,6 +43,10 @@ $check(
 $submission = file_get_contents(
     dirname(__DIR__, 3)
     . '/后端代码/app/services/cashier/v3/settlement/CashierV3SaleOnlyCheckoutSubmissionServices.php'
+);
+$executionPort = file_get_contents(
+    dirname(__DIR__, 3)
+    . '/后端代码/app/services/cashier/v3/settlement/ThinkPhpCashierV3CheckoutSubmissionExecutionPort.php'
 );
 $card = file_get_contents(
     dirname(__DIR__, 3)
@@ -71,11 +82,13 @@ $check(
         && strpos($resultReader, "'debt' => \$debt") !== false
 );
 $check(
-    'debt authority, legacy card projection and event share final transaction',
+    'debt authority and event share the final transaction without legacy card projection',
     strpos($submission, '$this->cardPurchases->issueInTx(') !== false
         && strpos($submission, '$this->debts->persistInTx(') !== false
         && strpos($submission, "'event_type' => 'debt.recorded'") !== false
-        && strpos($card, "'debt_amount' => self::money(\$debtCents)") !== false
+        && strpos($submission, 'debtAllocations') === false
+        && strpos($card, 'debtAllocations') === false
+        && strpos($card, "'debt_amount' => '0.00'") !== false
 );
 $debtAuthority = file_get_contents(
     dirname(__DIR__, 3)
@@ -88,10 +101,42 @@ $check(
         && strpos($debtAuthority, 'checkout_debt_v3_authority_replay_conflict') !== false
 );
 $check(
-    'cashier debt editor supplies intent without client authority keys',
-    strpos($frontend, 'debtAmountCents: checkoutDebtAmountCents.value') !== false
+    'new debt numbers use the QK business sequence while historical debt numbers remain stable',
+    strpos($debtAuthority, "CashierV3BusinessDocumentNumberServices::DEBT") !== false
+        && strpos($debtAuthority, "'checkout_debt'") !== false
+        && strpos($debtAuthority, "->where('checkout_request_id', (string)\$header['checkout_request_id'])") !== false
+);
+$personnelMigration = file_get_contents(
+    dirname(__DIR__, 3)
+    . '/后端代码/database/upgrades/2026-08-05-收银V3销售欠款行人员快照/02-正式升级.sql'
+);
+$check(
+    'new V3 debt freezes exact line salesperson authority without historical backfill',
+    strpos($debtAuthority, "Db::name('cashier_v3_debt_item_personnel_authority')") !== false
+        && strpos($debtAuthority, "'order_line_id' => \$lineId") !== false
+        && strpos($debtAuthority, "'salespeople_snapshot_json' => self::encodeJson(\$salespeople)") !== false
+        && strpos($submission, '$salespeopleByCheckoutLine,') !== false
+        && strpos($executionPort, '$salespeopleByCheckoutLine = $this->workspace->lockedSalespeopleByCheckoutLineInTx(') !== false
+        && strpos($executionPort, '$salespeopleByCheckoutLine,') !== false
+        && strpos($personnelMigration, 'eb_cashier_v3_debt_item_personnel_authority') !== false
+        && stripos($personnelMigration, 'UPDATE eb_') === false
+);
+$check(
+    'cashier debt editor persists the selected cart line and header debt is derived',
+    strpos($frontend, "mutateCashierDraft('update-cashier-line-debt', line") !== false
+        && strpos($frontend, 'debtAmountCents: checkoutDebtAmountCents.value') === false
+        && strpos($frontend, "checkoutDebtSummary(line)") !== false
         && strpos($frontend, 'checkout-debt-policy:') === false
         && strpos($frontend, 'cashier-v3:open-member-debt-repayment') === false
+);
+$migration = file_get_contents(
+    dirname(__DIR__, 3)
+    . '/后端代码/database/upgrades/2026-08-05-收银V3更多操作权威/02-正式升级.sql'
+);
+$check(
+    'migration adds default-only line debt columns without rewriting historical rows',
+    substr_count($migration, "'debt_amount_cents'") >= 4
+        && stripos($migration, 'UPDATE eb_') === false
 );
 
 echo "CHECKOUT_DEBT_SALE_CONTRACT passed={$passed} failed={$failed}\n";

@@ -20,6 +20,7 @@ final class ThinkPhpCashierV3PaymentCollectionAuthorityWriter
     public const BATCH_TABLE = 'cashier_v3_payment_collection_batch';
     public const COLLECTION_TABLE = 'cashier_v3_payment_collection';
     public const SALES_ORDER_TABLE = 'cashier_v3_sales_order';
+    public const CHECKOUT_REQUEST_TABLE = 'cashier_v3_checkout_request';
 
     public function persistInTx(
         CashierV3PaymentCollectionPlanV1 $plan,
@@ -143,7 +144,13 @@ final class ThinkPhpCashierV3PaymentCollectionAuthorityWriter
             ->where('order_id', $batch['sales_order_id'])
             ->lock(true)
             ->find();
+        $request = Db::name(self::CHECKOUT_REQUEST_TABLE)
+            ->where('tenant_id', $batch['tenant_id'])
+            ->where('request_id', $batch['checkout_request_id'])
+            ->lock(true)
+            ->find();
         if (!$order
+            || !$request
             || (string)($order['order_no'] ?? '') !== (string)$batch['sales_order_no_snapshot']
             || (string)($order['immutable_fingerprint'] ?? '')
                 !== (string)$batch['sales_order_fingerprint']
@@ -160,10 +167,16 @@ final class ThinkPhpCashierV3PaymentCollectionAuthorityWriter
             || (string)($order['composition'] ?? '') !== $expectedComposition
             || (string)($order['business_date'] ?? '') !== (string)$batch['business_date']
             || (int)($order['sale_amount_cents'] ?? -1)
-                !== (int)$batch['receivable_amount_cents']
+                !== (int)($request['sales_amount_cents'] ?? -1)
             || (string)($order['order_status'] ?? '') !== 'settled'
             || (string)($order['order_direction'] ?? '') !== 'forward') {
-            throw self::failure('payment_collection_persisted_sales_order_mismatch');
+            throw self::failure('payment_collection_persisted_sales_order_mismatch', [
+                'order_sale_amount_cents' => (int)($order['sale_amount_cents'] ?? -1),
+                'request_sales_amount_cents' => (int)($request['sales_amount_cents'] ?? -1),
+                'batch_receivable_amount_cents' => (int)($batch['receivable_amount_cents'] ?? -1),
+                'order_status' => (string)($order['order_status'] ?? ''),
+                'order_direction' => (string)($order['order_direction'] ?? ''),
+            ]);
         }
     }
 

@@ -398,7 +398,7 @@ const resultTitle = computed(() => {
   if (isPaymentSucceededServicePending.value) return '收款成功，服务待处理'
   if (isFailed.value && isPartialPaymentRecovery.value) return '部分收款已成功'
   if (isFailed.value) return '支付失败'
-  if (isResultUnknown.value) return '支付结果暂时未知'
+  if (isResultUnknown.value) return '正在确认支付结果'
   if (isPendingConfirmation.value) return '正在确认原支付结果'
   return '正在处理'
 })
@@ -411,8 +411,8 @@ const resultDescription = computed(() => {
   if (isPaymentSucceededServicePending.value) {
     return props.checkout.completionDescription || '本次收款已经成功，只能继续处理原结账请求，禁止再次收款。'
   }
-  if (isResultUnknown.value) return `顾客可能已扣款。只能查询这一次原支付请求，禁止重新${isDebtRepayment.value ? '还款' : '结账'}。`
-  if (isPendingConfirmation.value) return `顾客可能已扣款，正在确认原支付结果，请勿关闭或重复${isDebtRepayment.value ? '还款' : '结账'}。`
+  if (isResultUnknown.value) return '正在确认支付结果，请稍候。'
+  if (isPendingConfirmation.value) return '正在确认支付结果，请稍候。'
   return props.checkout.processingLong ? '仍在处理中，请稍候。' : '正在处理，请勿关闭或重复操作。'
 })
 const nextLabel = computed(() => {
@@ -549,7 +549,7 @@ function paymentLineStatus(line = {}) {
   if (['succeeded', 'success', 'completed'].includes(normalizedStatus)) return '成功'
   if (['editing', '待确认'].includes(normalizedStatus)) return normalizedStatus === 'editing' ? '待确认' : rawStatus
   if (['processing', 'pending', 'result_pending', 'pending_confirmation'].includes(normalizedStatus)) return '处理中'
-  if (normalizedStatus === 'result_unknown') return '结果待确认'
+  if (normalizedStatus === 'result_unknown') return '处理中'
   if (['failed', 'error'].includes(normalizedStatus)) return '失败'
   return rawStatus || '待收款'
 }
@@ -1392,7 +1392,7 @@ onBeforeUnmount(() => {
         </div>
         <h3 ref="resultHeading" tabindex="-1">{{ resultTitle }}</h3>
         <p>{{ resultDescription }}</p>
-        <span v-if="checkout.requestNo" class="checkout-result__request">{{ isDebtRepayment ? '还款请求号' : '结账请求号' }}：{{ checkout.requestNo }}</span>
+        <!-- Internal request ids are intentionally hidden from cashier users. -->
         <span v-if="isSucceeded && !isDebtRepayment && checkout.salesOrderNo" class="checkout-result__order">销售订单号：{{ checkout.salesOrderNo }}</span>
         <div v-if="Object.keys(childResults).length" class="checkout-child-results" aria-label="本次业务处理结果">
           <div v-for="(result, key) in childResults" :key="key" :class="childResultStatusClass(result)">

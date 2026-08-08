@@ -990,6 +990,7 @@ async function handleOpenMemberDebt(event = {}) {
     debtItemId: record.debtItemId || record.id || record.debtId,
     recordVersion: record.recordVersion || record.revision,
     amount,
+    rechargeDebt: String(record.sourceType || record.source_type || record.sourceLabel || record.source || '').includes('充值'),
   })
 }
 
@@ -1022,33 +1023,50 @@ async function openDebtRepaymentCheckout(preparationRequestId, debtRecordId) {
 async function prepareDebtRepayment(payload = {}) {
   if (isDebtRepaymentPreparing.value) return { success: false, message: '正在准备收款，请勿重复操作。' }
   const preparationRequestId = createCashierV3CommandId('CHECKOUT_PREPARE')
+  const requestedAmount = Number(payload.amount)
+  const checkoutAmount = (checkout) => Number(
+    checkout?.summary?.receivableAmount
+      ?? checkout?.payment?.summary?.receivableAmount
+      ?? checkout?.receivableAmount
+      ?? NaN
+  )
+  const checkoutMatchesRequestedAmount = (checkout) => (
+    Number.isFinite(requestedAmount)
+      && requestedAmount > 0
+      && Math.abs(checkoutAmount(checkout) - requestedAmount) < 0.000001
+  )
   isDebtRepaymentPreparing.value = true
   try {
-    if (payload.rechargeDebt === true) {
-      const result = await requestCashierV3Action('submit-recharge-debt-repayment', {
-        ...payload,
-        idempotencyKey: preparationRequestId
-      })
-      if (isSucceededResult(result)) {
-        await openMemberDebt(memberDetailId(activeDebtMember.value))
-      }
-      return result
-    }
     await requestCashierV3Action('open-cashier-workbench', { silent: true })
     const currentCheckout = state.cashier?.checkout
     if (currentCheckout
       && currentCheckout.businessType === 'debt_repayment'
       && String(currentCheckout.sourceDocumentId || '') === String(payload.debtRecordId || '')
       && String(currentCheckout.requestStatus || '') === 'editing'
+      && checkoutMatchesRequestedAmount(currentCheckout)
       && currentCheckout.preparationRequestId) {
       await openDebtRepaymentCheckout(currentCheckout.preparationRequestId, payload.debtRecordId)
       return { result: { status: 'success', code: 'DEBT_REPAYMENT_DRAFT_RESUMED' } }
     }
-    const result = await requestCashierV3Action('prepare-debt-repayment', {
+    const prepareAction = payload.rechargeDebt === true
+      ? 'prepare-recharge-debt-repayment'
+      : 'prepare-debt-repayment'
+    const result = await requestCashierV3Action(prepareAction, {
       ...payload,
       preparationRequestId,
       idempotencyKey: preparationRequestId
     })
+    // 准备命令已经在服务端原子落下统一结账草稿；响应中的准备标识就是
+    // 本次交接凭证。不要再用一次根状态刷新决定是否能跳转，否则会员欠款
+    // 读模型的刷新可能清空弹层，却把已存在的收款草稿留在后台。
+    const responseEnvelope = resultEnvelope(result)
+    const prepared = responseEnvelope?.data?.debtRepaymentPreparation
+      || result?.data?.debtRepaymentPreparation
+      || result?.result?.data?.debtRepaymentPreparation
+    if (isSucceededResult(result) && prepared?.preparationRequestId) {
+      await openDebtRepaymentCheckout(String(prepared.preparationRequestId), payload.debtRecordId)
+      return result
+    }
     // 准备命令的响应可能因订单中心仍持有旧根投影而不能被当前页面接纳。
     // 重新读取工作台中的已持久化草稿，只有确认是本次请求才跨页接力，不能
     // 仅凭前端响应状态猜测是否可收款。
@@ -1058,6 +1076,7 @@ async function prepareDebtRepayment(payload = {}) {
       && preparedCheckout.businessType === 'debt_repayment'
       && String(preparedCheckout.sourceDocumentId || '') === String(payload.debtRecordId || '')
       && String(preparedCheckout.requestStatus || '') === 'editing'
+      && checkoutMatchesRequestedAmount(preparedCheckout)
       && String(preparedCheckout.preparationRequestId || '') === preparationRequestId) {
       await openDebtRepaymentCheckout(preparationRequestId, payload.debtRecordId)
       return result

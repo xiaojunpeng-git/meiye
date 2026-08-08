@@ -334,20 +334,29 @@ final class ThinkPhpCashierV3CheckoutResultReadRepository implements CashierV3Ch
         if ($amount === 0) {
             return null;
         }
-        $debtNo = 'D3' . strtoupper(substr(hash('sha256', implode('|', [
-            (string)$request['tenant_id'],
-            (string)$request['request_id'],
-            (string)$order['order_id'],
-        ])), 0, 30));
+        // New V3 sale debts use the customer-facing QK sequence and are
+        // linked through the V3 authority map. The old D3 derivation is only
+        // valid for historical rows and cannot prove a newly committed debt.
+        $authority = $this->row(Db::name('cashier_v3_debt_authority')
+            ->where('tenant_id', (string)$request['tenant_id'])
+            ->where('store_id', (int)$request['store_id'])
+            ->where('member_id', (int)$request['member_id'])
+            ->where('checkout_request_id', (string)$request['request_id'])
+            ->where('sales_order_id', (string)$order['order_id'])
+            ->field('debt_id,debt_no,sales_order_id')
+            ->find());
+        if ($authority === null) {
+            return false;
+        }
         $row = $this->row(Db::name('store_debt')
-            ->where('debt_no', $debtNo)
+            ->where('id', (int)$authority['debt_id'])
             ->where('uid', (int)$request['member_id'])
             ->where('store_id', (int)$request['store_id'])
             ->field('id,debt_no,total_debt,repaid_debt,status')
             ->find());
         if ($row === null
             || $this->moneyCents((string)$row['total_debt']) !== $amount
-            || !hash_equals($debtNo, (string)$row['debt_no'])) {
+            || !hash_equals((string)$authority['debt_no'], (string)$row['debt_no'])) {
             return false;
         }
         return [

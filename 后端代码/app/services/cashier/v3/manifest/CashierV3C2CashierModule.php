@@ -36,16 +36,24 @@ class CashierV3C2CashierModule implements CashierV3ActionModule
             'choose-catalog-item',
             'create-custom-card-configuration',
             'remove-cart-line',
+            'clear-cart-lines',
             'change-cart-line-quantity',
             'select-cashier-member',
             'set-guest-order',
             'change-supplement-date',
             'exit-supplement',
+            'update-cashier-order-note',
+            'update-cashier-line-price',
+            'update-cashier-supplement',
         ] as $action) {
             $command[$action] = self::FEATURE_CASHIER;
         }
         $command['add-checkout-entitlement-lines'] = 'policy:checkout_entitlement';
         $command['update-cart-line-service-settings'] = self::FEATURE_CASHIER;
+        $command['apply-cashier-salespeople-to-all-sale-lines'] = self::FEATURE_CASHIER;
+        $command['apply-cashier-craftsmen-to-all-service-lines'] = self::FEATURE_CASHIER;
+        $command['apply-cashier-personnel-to-all-lines'] = self::FEATURE_CASHIER;
+        $command['update-cashier-line-debt'] = self::FEATURE_CASHIER;
         $command['submit-card-operation'] = self::FEATURE_CASHIER;
 
         // ---- 结账流程 ----
@@ -61,6 +69,8 @@ class CashierV3C2CashierModule implements CashierV3ActionModule
             'apply-balance-payment',
             'remove-balance-payment',
             'update-balance-payment',
+            'update-checkout-business-source',
+            'update-checkout-sales-date',
             'prepare-checkout-submission',
             'confirm-debt-warning',
             'confirm-checkout-final-changes',

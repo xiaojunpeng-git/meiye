@@ -28,13 +28,20 @@ const selectedDebtId = ref('')
 const repayAmount = ref('')
 const validationMessage = ref('')
 const paymentLines = ref([])
-const newPaymentMethod = ref('unionpay')
 const salespersonAllocations = ref([])
 const salespersonCandidates = ref([])
 const isSalespersonSelectorOpen = ref(false)
 const isSalespersonLoading = ref(false)
 const salespersonLoadError = ref('')
-const paymentMethods = [['unionpay', '银联'], ['wechat', '微信'], ['alipay', '支付宝'], ['dianping_voucher', '大众验券'], ['douyin_voucher', '抖音验券'], ['partner_collection', '合作方收款'], ['other_collection', '其他收款']]
+const paymentMethods = [
+  { code: 'unionpay', label: '银联' },
+  { code: 'wechat', label: '微信' },
+  { code: 'alipay', label: '支付宝' },
+  { code: 'dianping_voucher', label: '大众验券' },
+  { code: 'douyin_voucher', label: '抖音验券' },
+  { code: 'partner_collection', label: '合作方收款' },
+  { code: 'other_collection', label: '其他收款' }
+]
 let paymentLineSequence = 0
 
 const records = computed(() => {
@@ -61,6 +68,8 @@ const dataAsOf = computed(() => props.snapshot.debtDataAsOf || props.snapshot.da
 const selectedDebt = computed(() => records.value.find((record) => String(recordId(record)) === String(selectedDebtId.value)) || null)
 const selectedDebtIsRecharge = computed(() => String(value(selectedDebt.value, ['sourceType', 'source_type', 'sourceLabel', 'source'], '')).includes('充值'))
 const paymentTotal = computed(() => paymentLines.value.reduce((sum, item) => sum + moneyToCents(item.amount), 0))
+const selectedPaymentMethods = computed(() => new Set(paymentLines.value.map((item) => String(item.paymentMethod || ''))))
+const paymentMethodLabel = (code) => paymentMethods.find((method) => method.code === String(code))?.label || '未命名收款方式'
 
 watch(records, (nextRecords) => {
   if (selectedDebtId.value && nextRecords.some((record) => String(recordId(record)) === String(selectedDebtId.value))) return
@@ -112,16 +121,6 @@ function submitRepayment() {
     validationMessage.value = '还款金额不能超过当前剩余欠款。'
     return
   }
-  if (selectedDebtIsRecharge.value) {
-    if (!paymentLines.value.length || paymentLines.value.some((item) => !isPositiveMoney(item.amount))) {
-      validationMessage.value = '请为每种收款方式填写大于 0 的金额。'
-      return
-    }
-    if (paymentTotal.value !== moneyToCents(repayAmount.value)) {
-      validationMessage.value = '各收款金额合计必须等于本次补交金额。'
-      return
-    }
-  }
   if (salespersonAllocations.value.length && salespersonAllocations.value.reduce((sum, item) => sum + Number(item.allocationWeight || 0), 0) !== 100) {
     validationMessage.value = '销售人分配比例合计必须为 100%。'
     return
@@ -156,7 +155,11 @@ function wholeYuanString(value) {
 function nextPaymentLineId() { paymentLineSequence += 1; return `recharge-repayment-${Date.now()}-${paymentLineSequence}` }
 function normalizeRepayAmount(event) { repayAmount.value = String(event.target.value ?? '').trim() }
 function normalizePaymentAmount(line, event) { line.amount = String(event.target.value ?? '').trim() }
-function addPaymentLine() { const method = newPaymentMethod.value; if (!method) return; paymentLines.value.push({ id: nextPaymentLineId(), paymentMethod: method, amount: '', collectionReference: '', remark: '' }) }
+function addPaymentLine(method) {
+  const code = String(method || '')
+  if (!code || selectedPaymentMethods.value.has(code)) return
+  paymentLines.value.push({ id: nextPaymentLineId(), paymentMethod: code, amount: '', collectionReference: '', remark: '' })
+}
 function removePaymentLine(id) { if (paymentLines.value.length <= 1) return; paymentLines.value = paymentLines.value.filter((item) => item.id !== id) }
 async function openSalespersonSelector() {
   isSalespersonSelectorOpen.value = true
@@ -266,15 +269,42 @@ function confirmSalespeople(result = {}) {
           </button>
           <p v-if="validationMessage" role="alert">{{ validationMessage }}</p>
         </section>
-        <section v-if="selectedDebt && selectedDebtIsRecharge" class="member-debt-overlay__recharge-payment" aria-label="充值欠款收款信息">
-          <header><strong>收款信息</strong><span>已收 {{ formatMoney(paymentTotal / 100) }} / 本次补交 {{ formatMoney(repayAmount) }}</span></header>
+        <!-- 充值欠款进入统一结账收款页；这里不再维护第二套收款控件。 -->
+        <section v-if="false && selectedDebt && selectedDebtIsRecharge" class="member-debt-overlay__recharge-payment" aria-label="充值欠款收款信息">
+          <header>
+            <strong>收款信息</strong>
+            <span>可先选择全部收款方式，再调整金额；合计必须等于本次补交。</span>
+          </header>
+          <div class="member-debt-overlay__payment-methods-header">
+            <strong>记账收款</strong>
+            <span v-if="paymentLines.length > 1">组合收款</span>
+          </div>
+          <div class="member-debt-overlay__payment-methods-grid">
+            <button
+              v-for="method in paymentMethods"
+              :key="method.code"
+              type="button"
+              class="member-debt-overlay__payment-method-card"
+              :disabled="selectedPaymentMethods.has(method.code) || isPreparing"
+              @click="addPaymentLine(method.code)"
+            >
+              {{ method.label }}
+            </button>
+          </div>
           <div v-for="line in paymentLines" :key="line.id" class="member-debt-overlay__recharge-payment-line">
-            <select v-model="line.paymentMethod"><option v-for="[code, label] in paymentMethods" :key="code" :value="code">{{ label }}</option></select>
+            <div>
+              <strong>{{ paymentMethodLabel(line.paymentMethod) }}</strong>
+              <span>待收</span>
+            </div>
             <input v-model="line.amount" inputmode="numeric" autocomplete="off" placeholder="整数收款金额" @input="normalizePaymentAmount(line, $event)">
             <input v-model="line.collectionReference" autocomplete="off" placeholder="流水号（选填）">
-            <button type="button" class="member-debt-overlay__repay-link" :disabled="paymentLines.length <= 1" @click="removePaymentLine(line.id)">移除</button>
+            <button type="button" class="member-debt-overlay__repay-link" :disabled="paymentLines.length <= 1 || isPreparing" @click="removePaymentLine(line.id)">删除</button>
           </div>
-          <footer><select v-model="newPaymentMethod"><option v-for="[code, label] in paymentMethods" :key="code" :value="code">{{ label }}</option></select><button type="button" class="button button--secondary" @click="addPaymentLine">添加收款方式</button></footer>
+          <dl class="member-debt-overlay__payment-summary">
+            <div><dt>本次补交</dt><dd>{{ formatMoney(repayAmount) }}</dd></div>
+            <div><dt>已选收款</dt><dd>{{ formatMoney(paymentTotal / 100) }}</dd></div>
+            <div><dt>待收</dt><dd>{{ formatMoney(Math.max(0, Number(repayAmount || 0) - paymentTotal / 100)) }}</dd></div>
+          </dl>
         </section>
         <section v-if="selectedDebt" class="member-debt-overlay__recharge-salespeople" aria-label="销售人分配">
           <header><strong>销售人分配</strong><span>{{ salespersonAllocations.length ? salespersonAllocations.map((item) => `${item.name} ${item.allocationWeight}%`).join('、') : '暂未选择' }}</span><button type="button" class="button button--secondary" @click="openSalespersonSelector">选择销售人</button></header>
@@ -515,11 +545,23 @@ function confirmSalespeople(result = {}) {
 .member-debt-overlay__recharge-salespeople header strong { color: #303640; font-size: 14px; }
 .member-debt-overlay__recharge-payment header span,
 .member-debt-overlay__recharge-salespeople header span { flex: 1; text-align: right; }
-.member-debt-overlay__recharge-payment-line { display: grid; grid-template-columns: 130px 120px minmax(160px, 1fr) auto; gap: 8px; }
-.member-debt-overlay__recharge-payment select,
+.member-debt-overlay__payment-methods-header { display: flex; align-items: center; justify-content: space-between; color: #6b7787; font-size: 12px; }
+.member-debt-overlay__payment-methods-header strong { color: #303640; font-size: 14px; }
+.member-debt-overlay__payment-methods-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.member-debt-overlay__payment-method-card { min-height: 38px; padding: 0 10px; border: 1px solid #dbe3ec; border-radius: 6px; background: #fff; color: #303640; font-weight: 700; }
+.member-debt-overlay__payment-method-card:not(:disabled):hover { border-color: #1769aa; color: #1769aa; }
+.member-debt-overlay__payment-method-card:disabled { cursor: not-allowed; opacity: .45; }
+.member-debt-overlay__recharge-payment-line { display: grid; grid-template-columns: minmax(130px, .7fr) 120px minmax(160px, 1fr) auto; align-items: center; gap: 8px; padding: 10px 0; border-top: 1px solid #edf0f4; }
+.member-debt-overlay__recharge-payment-line > div { display: grid; gap: 3px; }
+.member-debt-overlay__recharge-payment-line > div span { color: #7d8897; font-size: 12px; }
+.member-debt-overlay__recharge-payment-line input,
 .member-debt-overlay__recharge-payment input,
 .member-debt-overlay__recharge-salespeople input { min-width: 0; height: 34px; padding: 0 9px; border: 1px solid #cfd8e3; border-radius: 5px; background: #fff; }
-.member-debt-overlay__recharge-payment footer { display: flex; justify-content: flex-end; gap: 8px; }
+.member-debt-overlay__payment-summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 0; padding-top: 10px; border-top: 1px solid #edf0f4; }
+.member-debt-overlay__payment-summary div { display: flex; justify-content: space-between; gap: 8px; color: #6b7787; font-size: 12px; }
+.member-debt-overlay__payment-summary dt,
+.member-debt-overlay__payment-summary dd { margin: 0; }
+.member-debt-overlay__payment-summary dd { color: #9f1239; font-weight: 800; }
 .member-debt-overlay__recharge-salespeople > label { display: grid; grid-template-columns: minmax(0, 1fr) 150px auto; align-items: center; gap: 10px; }
 
 .member-debt-overlay__state {
@@ -580,6 +622,19 @@ function confirmSalespeople(result = {}) {
 
   .member-debt-overlay__repayment > p {
     grid-column: 1;
+  }
+
+  .member-debt-overlay__payment-methods-grid,
+  .member-debt-overlay__payment-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .member-debt-overlay__recharge-payment-line {
+    grid-template-columns: minmax(110px, 1fr) 100px auto;
+  }
+
+  .member-debt-overlay__recharge-payment-line input:nth-of-type(2) {
+    grid-column: 1 / -1;
   }
 }
 </style>

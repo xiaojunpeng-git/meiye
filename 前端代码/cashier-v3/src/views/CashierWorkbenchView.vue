@@ -277,6 +277,14 @@ const supplement = computed(() => {
 })
 const checkout = computed(() => cashier.value.checkout || {})
 const isDebtRepaymentCheckout = computed(() => checkout.value.businessType === 'debt_repayment')
+// 充值欠款与销售欠款共用统一结账界面，但最终领域命令不同：充值欠款
+// 必须写入充值欠款补交事实并记录 recharge_debt_repayment 事件，不能落到
+// 销售欠款的 debt_repayment 事件契约。准备快照的权威行名用于区分两者。
+const isRechargeDebtRepaymentCheckout = computed(() => (
+  isDebtRepaymentCheckout.value
+  && Array.isArray(checkout.value.orderLines)
+  && checkout.value.orderLines.some((line) => String(line?.name || '') === '充值欠款补交')
+))
 const checkoutLocalOutcome = ref({})
 // A recovered draft can safely reopen on the final confirmation step only
 // when the authoritative payment snapshot is already fully balanced.  This
@@ -776,6 +784,7 @@ const checkoutRequestActions = new Set([
   'confirm-debt-warning',
   'confirm-checkout-final-changes',
   'submit-checkout',
+  'submit-recharge-debt-repayment',
   'return-to-payment-edit',
   'retry-checkout',
   'query-checkout-result',
@@ -2170,9 +2179,19 @@ async function confirmCheckoutDebt() {
     }))
     return
   }
-  const result = await mutateCashierDraft('update-cashier-line-debt', line, {
+  let result = await mutateCashierDraft('update-cashier-line-debt', line, {
     debtAmountCents: amountCents
   })
+  // The draft command may commit while its response is delayed. Resolve the
+  // original idempotent command before keeping the editor open; otherwise the
+  // operator sees “操作已受理” indefinitely even though the debt was saved.
+  if (resultStatus(result) === 'result_unknown') {
+    const recovered = await recoverPendingDraftCommand()
+    if (!recovered) return
+    // recoverPendingDraftCommand re-reads the authoritative workbench with
+    // the original idempotency key; do not issue a second write.
+    result = { result: { status: 'succeeded' } }
+  }
   if (!['success', 'succeeded'].includes(resultStatus(result))) return
   checkoutPreparationId.value = null
   checkoutSession.value = null
@@ -2369,6 +2388,20 @@ function closeClearCartConfirmation() {
 
 async function confirmClearCart() {
   if (!hasCartLines.value || isClearingCart.value) return
+  // A previous draft command may have committed while its response was lost.
+  // Resolve that original idempotent command before starting the clear, or the
+  // recovery guard will incorrectly report that this action is still pending.
+  if (cashierDraftHasUnresolvedCommand.value) {
+    resolveReflectedDraftCommand()
+    if (cashierDraftHasUnresolvedCommand.value) {
+      const recovered = await recoverPendingDraftCommand()
+      if (!recovered) {
+        return unresolvedDraftCommandResult(
+          draftCommandRecovery.pendingForScope(draftRecoveryScopeKey.value)
+        )
+      }
+    }
+  }
   const workspaceId = String(state.workspace?.id || '')
   if (!workspaceId) return
 
@@ -3362,6 +3395,14 @@ async function requestCheckoutAction({ action, payload }) {
     preparationToken: String(checkoutPreparationToken(checkout.value) || ''),
     commandContexts: current.commandContexts
   }
+  if (isRechargeDebtRepaymentCheckout.value && ['submit-checkout', 'retry-checkout'].includes(action)) {
+    // Dedicated recharge-debt submission derives member/balance/request locks
+    // from these stable identities. Do not send the generic two-context draft
+    // subset, which would omit the member balance required by its policy.
+    approvedPayload.memberId = checkout.value.member?.id || checkout.value.member?.memberId || ''
+    approvedPayload.debtRecordId = checkout.value.sourceDocumentId || ''
+    delete approvedPayload.commandContexts
+  }
   if (checkoutDraftMutationActions.has(action)) {
     const draftContexts = checkoutSubmissionCommandContexts(current.commandContexts)
     if (!draftContexts) {
@@ -3390,8 +3431,8 @@ async function requestCheckoutAction({ action, payload }) {
 
   const effectiveAction = isDebtRepaymentCheckout.value
     ? ({
-        'submit-checkout': 'submit-debt-repayment',
-        'retry-checkout': 'submit-debt-repayment',
+        'submit-checkout': isRechargeDebtRepaymentCheckout.value ? 'submit-recharge-debt-repayment' : 'submit-debt-repayment',
+        'retry-checkout': isRechargeDebtRepaymentCheckout.value ? 'submit-recharge-debt-repayment' : 'submit-debt-repayment',
         'query-checkout-result': 'query-debt-repayment-result'
       }[action] || action)
     : action
@@ -3559,6 +3600,24 @@ async function requestCheckoutAction({ action, payload }) {
     })
     response = cashierV3ResponseEnvelope(result)
   }
+  // A lost submit response is resolved once against the original request.
+  // If the read-only query proves that no receipt exists, return the cashier
+  // to the cart automatically; never expose the technical result-unknown
+  // state or force a low-literacy operator to understand idempotency.
+  let resultQueryAttempted = action === 'query-checkout-result' || shouldQueryCommittedResult
+  if (!isDebtRepaymentCheckout.value
+    && ['submit-checkout', 'retry-checkout'].includes(action)
+    && resultStatus(result) === 'result_unknown'
+    && originalIdempotencyKey.startsWith('CHECKOUT-')) {
+    result = await requestAction('query-checkout-result', {
+      checkoutRequestId: session.checkoutRequestId,
+      requestNo: checkout.value.requestNo,
+      originalIdempotencyKey,
+      queryOnly: true
+    })
+    response = cashierV3ResponseEnvelope(result)
+    resultQueryAttempted = true
+  }
   const resultEnvelope = response?.result && typeof response.result === 'object' ? response.result : {}
   const hasAuthoritativeCheckoutState = isRecord(response?.state?.cashier?.checkout)
   if (hasAuthoritativeCheckoutState) {
@@ -3584,6 +3643,19 @@ async function requestCheckoutAction({ action, payload }) {
     }
     return result
   }
+  // Debt repayment is a dedicated business record, not a generic sales
+  // checkout.  A transport/command failure must return the operator to the
+  // cashier immediately with a plain retry message.  Do not show the generic
+  // “正在确认支付结果” / query-original-request flow for a single repayment.
+  if (isDebtRepaymentCheckout.value && ['submit-checkout', 'retry-checkout'].includes(action)) {
+    checkoutRequiresRootReload.value = false
+    checkoutLocalOutcome.value = {}
+    closeCheckoutOverlay()
+    window.dispatchEvent(new CustomEvent('cashier-v3:ui-result', {
+      detail: { status: 'failed', message: '补交失败，请重新操作。' }
+    }))
+    return result
+  }
   const projectedResult = !isDebtRepaymentCheckout.value
     ? authoritativeCheckoutResult(result, {
         originalIdempotencyKey,
@@ -3607,10 +3679,17 @@ async function requestCheckoutAction({ action, payload }) {
     }
     return result
   }
-  const resultQueryAttempted = action === 'query-checkout-result' || shouldQueryCommittedResult
   let status = resultEnvelope.status || response.status || ''
   const code = resultEnvelope.code || response.code || ''
   if (projectedResult) status = projectedResult.status
+  if (resultQueryAttempted && resultEnvelope.phase === 'not_found') {
+    checkoutLocalOutcome.value = {}
+    closeCheckoutOverlay()
+    window.dispatchEvent(new CustomEvent('cashier-v3:ui-result', {
+      detail: { status: 'failed', message: '结账失败，未产生收款，请重新操作。' }
+    }))
+    return result
+  }
   if (status === 'failed' && code === 'CLIENT_REQUEST_FAILED') status = 'result_unknown'
   if (['succeeded', 'success', 'processing', 'pending', 'pending_confirmation'].includes(status)) {
     // 没有可信根状态时，不能仅凭传输层结果推断支付终态。

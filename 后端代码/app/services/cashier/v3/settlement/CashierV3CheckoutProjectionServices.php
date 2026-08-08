@@ -148,7 +148,45 @@ final class CashierV3CheckoutProjectionServices
             ->where('store_id', $operator->storeId())
             ->where('natural_key', 'debt_repayment:' . $requestId)
             ->where('status', 'succeeded')->find();
-        if (!$repayment) throw self::failure('debt_repayment_succeeded_projection_missing');
+        if (!$repayment) {
+            $rechargeRepayment = (array)Db::name('cashier_v3_recharge_debt_repayment')
+                ->where('tenant_id', $scope->tenantId())->where('store_id', $operator->storeId())
+                ->where('command_idempotency_key', (string)($request['last_idempotency_key'] ?? ''))
+                ->where('status', 'succeeded')->find();
+            if (!$rechargeRepayment) throw self::failure('debt_repayment_succeeded_projection_missing');
+            $collections = Db::name('cashier_v3_recharge_debt_repayment_payment')
+                ->where('repayment_id', (string)$rechargeRepayment['repayment_id'])
+                ->order('payment_line_no asc,id asc')->select()->toArray();
+            $resultLines = [];
+            foreach ($collections as $row) {
+                $method = (string)$row['payment_method'];
+                if (!isset(self::PAYMENT_NAMES[$method])) throw self::failure('debt_repayment_collection_method_invalid');
+                $resultLines[] = [
+                    'id' => (string)$rechargeRepayment['repayment_id'] . ':' . (int)$row['payment_line_no'],
+                    'kind' => 'bookkeeping_collection', 'method' => $method,
+                    'name' => self::PAYMENT_NAMES[$method], 'amount' => self::money((int)$row['amount_cents']),
+                    'status' => 'succeeded', 'externalTransactionNo' => (string)($row['collection_reference_snapshot'] ?? ''),
+                    'remark' => (string)($row['remark_snapshot'] ?? ''), 'canEdit' => false, 'canRemove' => false,
+                ];
+            }
+            $amount = (int)$rechargeRepayment['amount_cents'];
+            return [
+                'contractVersion' => self::CONTRACT_VERSION, 'businessType' => 'debt_repayment',
+                'status' => 'succeeded', 'requestStatus' => 'succeeded', 'checkoutRequestId' => $requestId,
+                'requestId' => $requestId, 'requestNo' => (string)$rechargeRepayment['repayment_no'],
+                'checkoutRequestVersion' => (int)$request['request_version'], 'revision' => (int)$request['request_version'],
+                'originalIdempotencyKey' => (string)$rechargeRepayment['command_idempotency_key'],
+                'settledAt' => (int)$rechargeRepayment['settled_at'], 'completionKind' => 'debt_repayment_completed',
+                'completionLabel' => '欠款补交成功', 'completionDescription' => '本次充值欠款补交与收款明细已保存。',
+                'canClose' => true, 'canRetry' => false, 'resumeOnLoad' => false, 'recoveryReady' => false,
+                'preparationReady' => false, 'snapshotReady' => false, 'orderLines' => [],
+                'summary' => ['selectedCount'=>0,'originalAmount'=>self::money($amount),'discountAmount'=>0,'receivableAmount'=>self::money($amount),'entitlementActualAmount'=>0],
+                'compositionCode' => 'sale_only', 'composition' => ['code'=>'sale_only','lineRoles'=>[],'hasSale'=>false,'hasEntitlement'=>false,'primaryAction'=>'collect_payment','primaryActionLabel'=>'确认补交'],
+                'debtAmount' => 0, 'cashPerformanceAmount' => self::money($amount), 'balancePaymentAmount' => 0,
+                'payment' => ['methods'=>[],'selectedLines'=>[],'resultLines'=>$resultLines,'summary'=>['receivableAmount'=>self::money($amount),'selectedAmount'=>self::money($amount),'remainingAmount'=>0,'overpaidAmount'=>0]],
+                'finalChanges' => [], 'commandContexts' => [],
+            ];
+        }
         $collections = Db::name('cashier_v3_debt_repayment_collection')
             ->where('repayment_id', (string)$repayment['repayment_id'])
             ->where('collection_status', 'succeeded')->order('payment_line_no asc,id asc')->select()->toArray();
@@ -758,7 +796,7 @@ final class CashierV3CheckoutProjectionServices
             'request.entitlement_actual_amount_cents'
         );
         if ($saleAmount !== $salesAmount
-            || $salesAmount !== $receivable
+            || $receivable !== $salesAmount - $saleDebt
             || $entitlementActual !== $requestEntitlementActual) {
             throw self::failure('checkout_projection_line_total_drift');
         }
@@ -884,11 +922,7 @@ final class CashierV3CheckoutProjectionServices
                 'removalAction' => 'remove-balance-payment',
             ];
         }
-        $settlement = self::safeAdd(
-            self::safeAdd($selectedPayment, $balance, 'settlement_total'),
-            $debt,
-            'settlement_total'
-        );
+        $settlement = self::safeAdd($selectedPayment, $balance, 'settlement_total');
         $remaining = $receivable > $settlement ? $receivable - $settlement : 0;
         $overpaid = $settlement > $receivable ? $settlement - $receivable : 0;
 

@@ -151,9 +151,7 @@ final class CashierV3PaymentCollectionPlanV1
         $balanceTotal = $request['balance_deduction_amount_cents'];
         $debtTotal = $request['debt_amount_cents'];
         if ($paymentTotal > 100000000000 - $balanceTotal
-            || $paymentTotal + $balanceTotal > 100000000000 - $debtTotal
-            || $paymentTotal + $balanceTotal + $debtTotal
-                !== $request['receivable_amount_cents']) {
+            || $paymentTotal + $balanceTotal !== $request['receivable_amount_cents']) {
             throw self::failure('payment_collection_sale_only_settlement_mismatch');
         }
 

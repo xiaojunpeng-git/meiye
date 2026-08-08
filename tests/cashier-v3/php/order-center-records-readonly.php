@@ -56,7 +56,7 @@ $calls = [];
 $reader = function (string $operation, array $context) use (&$calls): array {
     $calls[] = ['operation' => $operation, 'context' => $context];
     if ($operation === 'counts') {
-        return ['recharge' => 17, 'refund' => 7, 'service' => 3, 'supplement' => 0, 'gift' => 1, 'card_operation' => 4];
+        return ['recharge' => 17, 'refund' => 7, 'debt' => 2, 'service' => 3, 'supplement' => 0, 'gift' => 1, 'card_operation' => 4];
     }
     return [
         'records' => [[
@@ -81,7 +81,7 @@ $queryCall = $calls[0]['context']['criteria'] ?? [];
 recordOk('卡操作中文类型转换为严格操作码', ($queryCall['operationType'] ?? '') === 'card_upgrade'
     && ($queryCall['keyword'] ?? 'x') === '', $queryCall);
 recordOk('客户端门店只能与服务端门店范围取交集', ($queryCall['allowedStoreIds'] ?? null) === [133], $queryCall);
-recordOk('合法七类记录返回 offset 分页契约', $page['recordType'] === 'card_operation'
+recordOk('合法订单中心记录返回 offset 分页契约', $page['recordType'] === 'card_operation'
     && $page['total'] === 1
     && $page['page'] === 1
     && $page['pageSize'] === 20);
@@ -118,7 +118,7 @@ recordOk('服务统一查询只接受白名单筛选与排序字段', ($serviceC
 ]], $serviceCall);
 
 $invalid = $service->queryRecords(['recordType' => 'unknown'], $operator, $storesScope);
-recordOk('不在七类清单中的记录类型被拒绝', $invalid['recordType'] === ''
+recordOk('不在订单中心清单中的记录类型被拒绝', $invalid['recordType'] === ''
     && $invalid['total'] === 0
     && count($calls) === $beforeBlocked + 1);
 
@@ -126,6 +126,7 @@ $counts = $service->counts($operator, $storesScope);
 recordOk('页签数量使用同一服务端 DataScope', $counts === [
     'recharge' => 17,
     'refund' => 7,
+    'debt' => 2,
     'service' => 3,
     'supplement' => 0,
     'gift' => 1,
@@ -138,8 +139,9 @@ $partition = $service->augmentInitialPartition([
     'pagesByType' => ['sales' => ['total' => 2472]],
     'statusOptionsByType' => ['sales' => []],
 ], $operator, $storesScope);
-recordOk('根分区固定七类且销售数量并入同一数字映射', count($partition['businessTypes']) === 7
+recordOk('根分区包含权威欠款管理且销售数量并入同一数字映射', count($partition['businessTypes']) === 8
     && $partition['countsByType']['sales'] === 2472
+    && $partition['countsByType']['debt'] === 2
     && $partition['countsByType']['service'] === 3
     && $partition['countsByType']['card_operation'] === 4);
 
@@ -152,10 +154,19 @@ recordOk('服务记录只读取完成态服务事实，不从销售订单回推'
 recordOk('劳动业绩只汇总有效正向的劳动事实', strpos($source, "->where('performance_type', 'labor_performance_allocated')") !== false
     && strpos($source, "->where('fact_direction', 'forward')") !== false
     && strpos($source, "->where('status', 'effective')") !== false);
-recordOk('补交记录同时读取 V3 权威补交和旧兼容记录，展示不回写旧表', strpos($source, "readV3RechargeDebtRepayments") !== false
+recordOk('补交记录同时读取销售与充值 V3 权威补交和旧兼容记录，展示不回写旧表', strpos($source, "readV3SalesDebtRepayments") !== false
+    && strpos($source, "cashier_v3_debt_repayment_collection") !== false
+    && strpos($source, "readV3RechargeDebtRepayments") !== false
     && strpos($source, "cashier_v3_recharge_debt_repayment") !== false
     && strpos($source, "readLegacySupplements") !== false
+    && strpos($source, "不写入旧 store_debt_repay") !== false
     && strpos($source, "不得为订单中心展示而回写旧 store_debt_repay") !== false);
+recordOk('欠款管理直接读取欠款主表和 V3 权威映射，不从销售订单拼算余额', strpos($source, 'private function readDebts') !== false
+    && strpos($source, "Db::name('store_debt')") !== false
+    && strpos($source, "cashier_v3_debt_authority") !== false
+    && strpos($source, "cashier_v3_recharge_debt_authority") !== false
+    && strpos($source, "bcsub(\$totalDebt, \$repaidDebt, 2)") !== false
+    && strpos($source, "case 'debt':") !== false);
 recordOk('充值套餐赠送从 V3 事实读取且排除其旧权益投影，避免项目和赠券漏记或重复', strpos($source, "readV3RechargeGifts") !== false
     && strpos($source, "cashier_v3_gift_fact") !== false
     && strpos($source, "cashier_v3_recharge_gift_authority") !== false

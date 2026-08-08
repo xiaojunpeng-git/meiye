@@ -388,11 +388,15 @@ class CashierV3ActionDispatcher
                 // 根未就绪：禁止夹带 overlay／navigation 副作用
                 return $this->attachContextSwitchBinding($envelope, $payload, $result, $stateContext);
             }
+            // Projection handlers may provide server-derived display hints for
+            // the next root snapshot (for example the selected calendar date).
+            // They are not command contexts and never participate in writes.
+            $rootHints = is_array($result['root_hints'] ?? null) ? $result['root_hints'] : [];
             $rebuilt = $this->rootProjector->rebuild(
                 $stateContext['state_context_id'],
                 $operatorScope,
                 $dataScope,
-                []
+                $rootHints
             );
             if ($rebuilt === null) {
                 unset($envelope['state'], $envelope['stateRevision'], $envelope['versions']);

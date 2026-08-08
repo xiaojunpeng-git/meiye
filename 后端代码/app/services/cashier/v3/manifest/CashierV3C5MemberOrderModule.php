@@ -41,6 +41,7 @@ class CashierV3C5MemberOrderModule implements CashierV3ActionModule
         $command['deactivate-member'] = self::FEATURE_MEMBER;
         $command['submit-recharge'] = self::FEATURE_MEMBER;
         $command['prepare-recharge-checkout'] = self::FEATURE_MEMBER;
+        $command['prepare-recharge-debt-repayment'] = self::FEATURE_MEMBER;
         $command['add-recharge-checkout-payment-method'] = self::FEATURE_MEMBER;
         $command['update-recharge-checkout-payment-line'] = self::FEATURE_MEMBER;
         $command['remove-recharge-checkout-payment-line'] = self::FEATURE_MEMBER;

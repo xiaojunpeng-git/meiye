@@ -34,6 +34,7 @@ use app\services\cashier\v3\settlement\CashierV3CheckoutProjectionServices;
 use app\services\cashier\v3\settlement\CashierV3CheckoutBusinessSourceSelectionServices;
 use app\services\cashier\v3\settlement\CashierV3CheckoutResultQueryServices;
 use app\services\cashier\v3\settlement\CashierV3DebtRepaymentServices;
+use app\services\cashier\v3\settlement\CashierV3RechargeDebtRepaymentServices;
 use app\services\cashier\v3\settlement\CashierV3CheckoutSubmissionOrchestrator;
 use app\services\cashier\v3\settlement\CashierV3CheckoutSubmissionPreparationServices;
 use app\services\cashier\v3\settlement\CashierV3CheckoutSubmissionResourceDiscoveryComposite;
@@ -272,8 +273,28 @@ final class CashierV3CashierModule
                 'message' => '欠款补交收款已准备完成。',
             ];
         });
+        if ($handlers->hasCommand('prepare-recharge-debt-repayment')) {
+            throw new \LogicException('C5 cashier module: recharge debt repayment prepare handler duplicate');
+        }
+        $rechargeDebtRepayments = new CashierV3RechargeDebtRepaymentServices();
+        $handlers->registerCommand('prepare-recharge-debt-repayment', function (array $scope) use ($rechargeDebtRepayments): array {
+            $prepared = $rechargeDebtRepayments->prepareCheckoutInTx($scope);
+            return [
+                'data' => ['debtRepaymentPreparation' => $prepared],
+                'business_no' => (string)$prepared['checkoutRequestId'],
+                'touched' => ['cashier_workspace'],
+                'return_root_state' => true,
+                'message' => '充值欠款补交收款已准备完成。',
+            ];
+        });
         $handlers->registerCommand('submit-debt-repayment', function (array $scope) use ($debtRepayments): array {
             return $debtRepayments->submitInTx($scope);
+        });
+        if ($handlers->hasCommand('submit-recharge-debt-repayment')) {
+            throw new \LogicException('C5 cashier module: recharge debt repayment submit handler duplicate');
+        }
+        $handlers->registerCommand('submit-recharge-debt-repayment', function (array $scope) use ($debtRepayments): array {
+            return $debtRepayments->submitRechargeDebtCheckoutInTx($scope);
         });
         if ($handlers->hasProjection('query-debt-repayment-result')) {
             throw new \LogicException('C2 cashier module: debt repayment query handler duplicate');
@@ -982,7 +1003,7 @@ final class CashierV3CashierModule
 
     private static function registerDebtRepaymentPolicies(CashierV3ActionDispatcher $dispatcher): void
     {
-        foreach (['prepare-debt-repayment', 'submit-debt-repayment'] as $action) {
+        foreach (['prepare-debt-repayment', 'prepare-recharge-debt-repayment', 'submit-debt-repayment', 'submit-recharge-debt-repayment'] as $action) {
             if ($dispatcher->policies()->has($action)) {
                 throw new \LogicException('C2 cashier module: debt repayment context policy duplicate');
             }
@@ -999,13 +1020,67 @@ final class CashierV3CashierModule
         ));
 
         $dispatcher->policies()->register(new CashierV3ContextPolicy(
+            'prepare-recharge-debt-repayment',
+            ['cashier_workspace', 'member', 'member_balance'],
+            [],
+            static function (array $payload, array $base): array {
+                $workspaceId = trim((string)($base['session']['workspace_id'] ?? ''));
+                $memberId = trim((string)($payload['memberId'] ?? ''));
+                if ($workspaceId === '' || preg_match('/^[1-9][0-9]*$/D', $memberId) !== 1) {
+                    throw CashierV3CommandException::invalidContext('充值欠款补交资料已变化，请刷新后重试。');
+                }
+                return [
+                    'required' => ['cashier_workspace', 'member', 'member_balance'],
+                    'identities' => [
+                        ['role' => 'cashier_workspace', 'kind' => 'cashier_workspace', 'id' => $workspaceId, 'required' => true],
+                        ['role' => 'member', 'kind' => 'member', 'id' => $memberId, 'required' => true],
+                        ['role' => 'member_balance', 'kind' => 'member_balance', 'id' => $memberId, 'required' => true],
+                    ],
+                    'required_read_roles' => ['cashier_workspace', 'member', 'member_balance'],
+                    'required_touched_roles' => ['cashier_workspace'],
+                ];
+            },
+            ['cashier_workspace'],
+            ['cashier_workspace', 'member', 'member_balance'],
+            ['cashier_workspace', 'member', 'member_balance']
+        ));
+
+        $dispatcher->policies()->register(new CashierV3ContextPolicy(
             'submit-debt-repayment',
             ['cashier_workspace', 'checkout_request'],
-            ['debt_record'],
+            [],
             [$dispatcher->policies(), 'resolveCheckoutFollowUpBranch'],
-            ['cashier_workspace', 'checkout_request', 'debt_record'],
-            ['debt_record'],
-            ['debt_record']
+            ['cashier_workspace', 'checkout_request'],
+            [],
+            []
+        ));
+
+        $dispatcher->policies()->register(new CashierV3ContextPolicy(
+            'submit-recharge-debt-repayment',
+            ['cashier_workspace', 'member', 'member_balance'],
+            ['checkout_request'],
+            static function (array $payload, array $base): array {
+                $workspaceId = trim((string)($base['session']['workspace_id'] ?? ''));
+                $memberId = trim((string)($payload['memberId'] ?? ''));
+                $requestId = trim((string)($payload['checkoutRequestId'] ?? ''));
+                if ($workspaceId === '' || preg_match('/^[1-9][0-9]*$/D', $memberId) !== 1 || $requestId === '') {
+                    throw CashierV3CommandException::invalidContext('充值欠款补交资料已变化，请刷新后重试。');
+                }
+                return [
+                    'required' => ['cashier_workspace', 'member', 'member_balance', 'checkout_request'],
+                    'identities' => [
+                        ['role' => 'cashier_workspace', 'kind' => 'cashier_workspace', 'id' => $workspaceId, 'required' => true],
+                        ['role' => 'member', 'kind' => 'member', 'id' => $memberId, 'required' => true],
+                        ['role' => 'member_balance', 'kind' => 'member_balance', 'id' => $memberId, 'required' => true],
+                        ['role' => 'checkout_request', 'kind' => 'checkout_request', 'id' => $requestId, 'required' => true],
+                    ],
+                    'required_read_roles' => ['cashier_workspace', 'member', 'member_balance', 'checkout_request'],
+                    'required_touched_roles' => ['cashier_workspace', 'checkout_request', 'member_balance'],
+                ];
+            },
+            ['cashier_workspace', 'checkout_request', 'member_balance'],
+            ['cashier_workspace', 'member', 'member_balance', 'checkout_request'],
+            ['cashier_workspace', 'member', 'member_balance', 'checkout_request']
         ));
     }
 

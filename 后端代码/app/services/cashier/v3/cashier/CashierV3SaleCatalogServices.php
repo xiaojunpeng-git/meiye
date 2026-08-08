@@ -432,22 +432,25 @@ final class CashierV3SaleCatalogServices
 
     private function saleLineFromItem(array $normalized, string $idempotencyKey): array
     {
+        $isServiceProject = $normalized['productType'] === 6
+            && (string)($normalized['kindCode'] ?? '') !== 'custom_card';
         return [
             'line_key' => 'sale:' . substr(hash('sha256', $idempotencyKey), 0, 48),
             'line_role' => 'sale',
             'catalog_product_id' => $normalized['productId'],
             'catalog_sku_id' => $normalized['skuId'],
             'catalog_product_type' => $normalized['productType'],
-            'project_id' => $normalized['productType'] === 6 ? $normalized['productId'] : 0,
+            'project_id' => $isServiceProject ? $normalized['productId'] : 0,
             'quantity' => 1,
             'source_version' => $normalized['productVersion'],
             'detail_version' => $normalized['skuVersion'],
             'unit_price_cents' => $normalized['unitPriceCents'],
             'original_unit_price_cents' => $normalized['originalUnitPriceCents'],
+            'configured_cost_cents' => $normalized['configuredCostCents'],
             'authority_fingerprint' => $normalized['authorityFingerprint'],
             'authority_snapshot' => $normalized['authoritySnapshot'],
             'display_snapshot' => $this->displaySnapshot($normalized),
-            'service_object' => $normalized['productType'] === 6 ? 'self' : '',
+            'service_object' => $isServiceProject ? 'self' : '',
             'is_experience' => 0,
         ];
     }
@@ -481,8 +484,18 @@ final class CashierV3SaleCatalogServices
 
     private function checkoutSourceFromCurrent(array $storedLine, array $current, int $quantity): array
     {
-        $lineAmountCents = self::multiplyCents($current['unitPriceCents'], $quantity);
-        $originalLineAmountCents = self::multiplyCents($current['originalUnitPriceCents'], $quantity);
+        $unitPriceCents = (int)($storedLine['unit_price_cents'] ?? -1);
+        $lineAmountCents = self::multiplyCents($unitPriceCents, $quantity);
+        $isCustomCard = (string)($current['authoritySnapshot']['cardPurchase']['sourceKind'] ?? '') === 'custom_card';
+        // The settlement kernel models discounts as non-negative. A custom
+        // card may be priced above its configured display total, so its gross
+        // settlement amount is the confirmed line amount; the configured
+        // display price remains separately available in configuredPriceCents
+        // and the immutable authority snapshot for audit.
+        $settlementOriginalUnitPriceCents = $isCustomCard
+            ? max($current['originalUnitPriceCents'], $unitPriceCents)
+            : $current['originalUnitPriceCents'];
+        $originalLineAmountCents = self::multiplyCents($settlementOriginalUnitPriceCents, $quantity);
         return [
             'contractVersion' => self::CHECKOUT_SOURCE_CONTRACT_VERSION,
             'lineId' => (string)($storedLine['line_key'] ?? ''),
@@ -504,12 +517,19 @@ final class CashierV3SaleCatalogServices
             'skuVersion' => $current['skuVersion'],
             'definitionFingerprint' => $current['authorityFingerprint'],
             'quantity' => $quantity,
-            'unitPriceCents' => $current['unitPriceCents'],
-            'originalUnitPriceCents' => $current['originalUnitPriceCents'],
+            'unitPriceCents' => $unitPriceCents,
+            'originalUnitPriceCents' => $settlementOriginalUnitPriceCents,
+            'configuredPriceCents' => $current['unitPriceCents'],
+            'configuredCostCents' => $current['configuredCostCents'],
+            'priceChangeReason' => (string)($storedLine['price_change_reason'] ?? ''),
+            'priceChangedBy' => (int)($storedLine['price_changed_by'] ?? 0),
+            'priceChangedByNameSnapshot' => (string)($storedLine['price_changed_by_name_snapshot'] ?? ''),
+            'priceChangedAt' => (int)($storedLine['price_changed_at'] ?? 0),
+            'debtAmountCents' => (int)($storedLine['debt_amount_cents'] ?? 0),
             'lineAmountCents' => $lineAmountCents,
             'originalLineAmountCents' => $originalLineAmountCents,
-            'unitPrice' => self::centsToMoney($current['unitPriceCents']),
-            'originalUnitPrice' => self::centsToMoney($current['originalUnitPriceCents']),
+            'unitPrice' => self::centsToMoney($unitPriceCents),
+            'originalUnitPrice' => self::centsToMoney($settlementOriginalUnitPriceCents),
             'lineAmount' => self::centsToMoney($lineAmountCents),
             'originalLineAmount' => self::centsToMoney($originalLineAmountCents),
             'serviceObject' => (string)($storedLine['service_object'] ?? ''),
@@ -707,7 +727,27 @@ final class CashierV3SaleCatalogServices
             throw self::failure(CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE, '定制卡配置已失效，请重新配置。', 'custom_card_configuration_expired_or_invalid');
         }
         $resourceSources = (array)($shell['authoritySnapshot']['resourceSources'] ?? []);
+        $configuredCostCents = 0;
         foreach ($components as $component) {
+            $componentCostCents = (int)($component['configuredCostCents'] ?? -1);
+            $componentQuantity = (int)($component['writeTimes'] ?? 0);
+            if ($componentCostCents < 0 || $componentQuantity <= 0
+                || $componentCostCents > intdiv(PHP_INT_MAX, $componentQuantity)) {
+                throw self::failure(
+                    CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
+                    '定制卡卡内项目成本资料不完整，请重新配置。',
+                    'custom_card_component_cost_invalid'
+                );
+            }
+            $componentTotalCostCents = $componentCostCents * $componentQuantity;
+            if ($componentTotalCostCents > PHP_INT_MAX - $configuredCostCents) {
+                throw self::failure(
+                    CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
+                    '定制卡卡内项目成本资料不完整，请重新配置。',
+                    'custom_card_component_cost_overflow'
+                );
+            }
+            $configuredCostCents += $componentTotalCostCents;
             foreach ((array)($component['resourceSources'] ?? []) as $resource) {
                 $resourceSources[] = $resource;
             }
@@ -734,6 +774,7 @@ final class CashierV3SaleCatalogServices
         $authoritySnapshot = $shell['authoritySnapshot'];
         $authoritySnapshot['sku']['priceCents'] = $total;
         $authoritySnapshot['sku']['originalPriceCents'] = $total;
+        $authoritySnapshot['sku']['costCents'] = $configuredCostCents;
         $authoritySnapshot['cardPurchase'] = $purchase;
         $authoritySnapshot['resourceSources'] = $resourceSources;
         $authoritySnapshot['customCardConfiguration'] = [
@@ -744,6 +785,7 @@ final class CashierV3SaleCatalogServices
         $result = $shell;
         $result['unitPriceCents'] = $total;
         $result['originalUnitPriceCents'] = $total;
+        $result['configuredCostCents'] = $configuredCostCents;
         $result['name'] = (string)($snapshot['cardName'] ?? $shell['name']);
         $result['authoritySnapshot'] = $authoritySnapshot;
         $result['authorityFingerprint'] = hash('sha256', self::canonicalJson($authoritySnapshot));
@@ -837,12 +879,27 @@ final class CashierV3SaleCatalogServices
 
     private function assertStoredAuthorityMatches(array $stored, array $current): void
     {
+        $storedUnitPrice = (int)($stored['unit_price_cents'] ?? -1);
+        $storedCost = (int)($stored['configured_cost_cents'] ?? 0);
+        $changedAt = (int)($stored['price_changed_at'] ?? 0);
+        $changedReason = trim((string)($stored['price_change_reason'] ?? ''));
+        $changedBy = (int)($stored['price_changed_by'] ?? 0);
+        $changedByName = trim((string)($stored['price_changed_by_name_snapshot'] ?? ''));
+        $isCustomCard = (string)($current['authoritySnapshot']['cardPurchase']['sourceKind'] ?? '') === 'custom_card';
+        $priceAuditValid = $changedAt === 0
+            ? ($storedUnitPrice === $current['unitPriceCents']
+                && in_array($storedCost, [0, $current['configuredCostCents']], true)
+                && $changedReason === '' && $changedBy === 0 && $changedByName === '')
+            : ($storedCost === $current['configuredCostCents']
+                && $storedUnitPrice >= $storedCost
+                && ($isCustomCard || $storedUnitPrice <= $current['unitPriceCents'])
+                && $changedReason !== '' && $changedBy > 0 && $changedByName !== '');
         $matches = (int)($stored['catalog_product_id'] ?? 0) === $current['productId']
             && (int)($stored['catalog_sku_id'] ?? 0) === $current['skuId']
             && (int)($stored['catalog_product_type'] ?? -1) === $current['productType']
             && (int)($stored['source_version'] ?? 0) === $current['productVersion']
             && (int)($stored['detail_version'] ?? 0) === $current['skuVersion']
-            && (int)($stored['unit_price_cents'] ?? -1) === $current['unitPriceCents']
+            && $priceAuditValid
             && (int)($stored['original_unit_price_cents'] ?? -1) === $current['originalUnitPriceCents'];
         $fingerprint = (string)($stored['authority_fingerprint'] ?? '');
         $snapshot = self::decodeStoredObject(
@@ -1006,6 +1063,7 @@ final class CashierV3SaleCatalogServices
         }
         $unitPriceCents = self::moneyToCents($row['sku_price'] ?? null, 'price');
         $originalUnitPriceCents = self::moneyToCents($row['sku_ot_price'] ?? null, 'ot_price');
+        $configuredCostCents = self::moneyToCents($row['sku_cost'] ?? 0, 'cost');
         if ($originalUnitPriceCents < $unitPriceCents) {
             $originalUnitPriceCents = $unitPriceCents;
         }
@@ -1055,6 +1113,7 @@ final class CashierV3SaleCatalogServices
             'barCode' => trim((string)($row['sku_bar_code'] ?? '')),
             'priceCents' => $unitPriceCents,
             'originalPriceCents' => $originalUnitPriceCents,
+            'costCents' => $configuredCostCents,
             'isShow' => (int)($row['sku_is_show'] ?? 0),
             'writeTimes' => (int)($row['sku_write_times'] ?? 0),
             'writeValid' => (int)($row['sku_write_valid'] ?? 0),
@@ -1112,6 +1171,7 @@ final class CashierV3SaleCatalogServices
             'categoryNames' => $categoryNames,
             'unitPriceCents' => $unitPriceCents,
             'originalUnitPriceCents' => $originalUnitPriceCents,
+            'configuredCostCents' => $configuredCostCents,
             'stock' => $stock,
             'isInventory' => (int)($row['product_is_inventory'] ?? 0) === 1,
             'allowNegativeStock' => (int)($row['product_allow_negative_stock'] ?? 0) === 1,

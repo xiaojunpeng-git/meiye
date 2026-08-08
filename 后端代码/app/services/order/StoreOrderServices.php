@@ -20,6 +20,7 @@ use app\jobs\order\SpliteOrderAfterJob;
 use app\model\order\CombinationOrder;
 use app\model\order\StoreOrder;
 use app\model\order\StoreOrderCartInfo;
+use app\model\order\StoreOrderTerminalOperation;
 use app\model\order\StoreOrderWriteoff;
 use app\model\product\product\StoreProduct;
 use app\model\store\SystemStore;
@@ -246,10 +247,49 @@ class StoreOrderServices extends BaseServices
     public function getOrderList(array $where, array $field = ['*'], array $with = [], bool $abridge = false, string $order = 'add_time DESC,id DESC', bool $storeBackendListProductFormat = false)
     {
         [$page, $limit] = $this->getPageValue();
+        // 完整 7 位卡号精确搜持卡订单；不支持后 6 位，不把订单号尾号当卡号
+        $realName = trim((string)($where['real_name'] ?? ''));
+        $fieldKey = trim((string)($where['field_key'] ?? ''));
+        if ($realName !== '' && ($fieldKey === '' || $fieldKey === 'card_no') && preg_match('/^[1-9]\d{6}$/', $realName)) {
+            /** @var \app\services\user\CardNumberServices $cardNumberServices */
+            $cardNumberServices = app()->make(\app\services\user\CardNumberServices::class);
+            if ($cardNumberServices->hasCardNoColumn()) {
+                $cardOids = \think\facade\Db::name('user_card_holder')->where('card_no', $realName)->column('oid');
+                if ($cardOids) {
+                    $where['id'] = count($cardOids) === 1
+                        ? (int)$cardOids[0]
+                        : array_values(array_map('intval', $cardOids));
+                } else {
+                    $where['id'] = -1;
+                }
+                $where['real_name'] = '';
+                $where['field_key'] = '';
+            }
+        }
+        // 核销业务主单聚合：admin/store 订单列表按业务行键（batch:{id} / order:{id}）分页，
+        // count/排序/分页同一口径；cashier 不传该标志，行为保持不变
+        if (!empty($where['aggregate_writeoff_batch'])) {
+            /** @var \app\services\order\WriteoffBatchListServices $listServices */
+            $listServices = app()->make(\app\services\order\WriteoffBatchListServices::class);
+            return $listServices->getAggregatedList($where, $field, $with, $abridge, $order, $storeBackendListProductFormat, $page, $limit);
+        }
         $data = $this->dao->getOrderList($where, $field, $page, $limit, $with, $order);
         $count = $this->dao->count($where);
         $stat = [];
         $batch_url = "file/upload/1";
+        $data = $this->hydrateOrderListRows($data, $abridge, $storeBackendListProductFormat);
+        return compact('data', 'count', 'stat', 'batch_url');
+    }
+
+    /**
+     * 订单列表行数据 hydration（原 getOrderList 内联逻辑抽出，供核销业务主单聚合复用）
+     * @param array $data 原始订单行（dao->getOrderList 结果）
+     * @param bool $abridge
+     * @param bool $storeBackendListProductFormat
+     * @return array
+     */
+    public function hydrateOrderListRows(array $data, bool $abridge = false, bool $storeBackendListProductFormat = false): array
+    {
         if ($data) {
             $data = $this->tidyOrderList($data, true, $abridge);
             // 旧卡升级：把 card_upgrade_use_oid 映射成“新订单编号”，便于前端展示
@@ -399,8 +439,9 @@ class StoreOrderServices extends BaseServices
                     $this->formatStoreBackendOrderListCartRows($item);
                 }
             }
+            unset($item);
         }
-        return compact('data', 'count', 'stat', 'batch_url');
+        return $data;
     }
 
     /**
@@ -726,6 +767,17 @@ class StoreOrderServices extends BaseServices
             }
             $order['cartInfo'] = $info;
         }
+        // 卡项/次卡订单详情附带平台唯一 7 位卡号（不等于 verify_code）
+        if (isset($order['id']) && in_array((int)($order['product_type'] ?? 0), [4, 5], true)) {
+            /** @var \app\services\user\CardNumberServices $cardNumberServices */
+            $cardNumberServices = app()->make(\app\services\user\CardNumberServices::class);
+            $order['card_no'] = '';
+            if ($cardNumberServices->hasCardNoColumn()) {
+                $order['card_no'] = trim((string)\think\facade\Db::name('user_card_holder')
+                    ->where('oid', (int)$order['id'])
+                    ->value('card_no'));
+            }
+        }
         /** @var StoreOrderStatusServices $statusServices */
         $statusServices = app()->make(StoreOrderStatusServices::class);
         $status = [];
@@ -757,6 +809,11 @@ class StoreOrderServices extends BaseServices
             $status['_title'] = '交易删除';
             $status['_msg'] = '交易已删除，感谢您的支持!';
             $status['_class'] = 'nobuy';
+        } else if ((int)($order['terminal_action'] ?? 0) === StoreOrderTerminalOperation::ACTION_VOID) {
+            $status['_type'] = -3;
+            $status['_title'] = '已作废';
+            $status['_msg'] = '订单已作废';
+            $status['_class'] = 'state-yzf';
         } else if ($order['refund_status'] == 2) {
             $status['_type'] = -2;
             $status['_title'] = '已退款';
@@ -1615,6 +1672,8 @@ class StoreOrderServices extends BaseServices
         /** @var StoreDebtServices $debtServices */
         $debtServices = app()->make(StoreDebtServices::class);
         $pendingDebtMap = $debtServices->resolveOrderActivePendingAmountMap($data);
+        /** @var StoreOrderTerminalOperationServices $terminalServices */
+        $terminalServices = app()->make(StoreOrderTerminalOperationServices::class);
         $debtRepayOriginIds = [];
         foreach ($data as $row) {
             if (!empty($row['is_debt_repay']) && !empty($row['debt_repay_origin_order_id'])) {
@@ -1625,6 +1684,23 @@ class StoreOrderServices extends BaseServices
         if ($debtRepayOriginIds) {
             $debtRepayOriginOrderSnMap = StoreOrder::whereIn('id', array_unique($debtRepayOriginIds))
                 ->column('order_id', 'id');
+        }
+        $cardNoByOid = [];
+        /** @var \app\services\user\CardNumberServices $cardNumberServices */
+        $cardNumberServices = app()->make(\app\services\user\CardNumberServices::class);
+        if ($cardNumberServices->hasCardNoColumn()) {
+            $listOids = [];
+            foreach ($data as $row) {
+                $pt = (int)($row['product_type'] ?? 0);
+                if (in_array($pt, [4, 5], true) && !empty($row['id'])) {
+                    $listOids[] = (int)$row['id'];
+                }
+            }
+            if ($listOids) {
+                $cardNoByOid = \think\facade\Db::name('user_card_holder')
+                    ->whereIn('oid', array_unique($listOids))
+                    ->column('card_no', 'oid');
+            }
         }
         foreach ($data as &$item) {
             if ($is_cart_info) $item['_info'] = $services->getOrderCartInfoCache((int)$item['id']);
@@ -1652,6 +1728,22 @@ class StoreOrderServices extends BaseServices
             $item['combination_pay_lines'] = ($item['pay_type'] ?? '') === PayServices::COMBINATION_PAY
                 ? ($combinationPayLineMap[(int)($item['id'] ?? 0)] ?? [])
                 : [];
+            $item['terminal_action'] = (int)($item['terminal_action'] ?? 0);
+            $item['can_reopen'] = $terminalServices->canReopen($item);
+            $item['reopen_deny_reason'] = '';
+            if ((int)$item['terminal_action'] === 2 && !$item['can_reopen']) {
+                if ((int)($item['order_type'] ?? 0) === 1) {
+                    $item['reopen_deny_reason'] = '充值订单不能重新开单';
+                } elseif (!empty($item['is_debt_repay'])) {
+                    $item['reopen_deny_reason'] = '补交订单不能重新开单';
+                } else {
+                    $item['reopen_deny_reason'] = '该订单不能重新开单';
+                }
+            }
+            $oid = (int)($item['id'] ?? 0);
+            $item['card_no'] = in_array((int)($item['product_type'] ?? 0), [4, 5], true)
+                ? trim((string)($cardNoByOid[$oid] ?? ''))
+                : '';
             $this->resolveOrderListGendanInfo($item);
             $status_name = ['status_name' => '', 'pics' => []];
             if ($item['is_del'] || $item['is_system_del']) {
@@ -1660,6 +1752,10 @@ class StoreOrderServices extends BaseServices
             } else if ($item['is_user_del'] && !$item['is_del'] && !$item['is_system_del']) {
                 $status_name['status_name'] = '已取消';
                 $item['_status'] = -1;
+            } else if ((int)$item['terminal_action'] === StoreOrderTerminalOperation::ACTION_VOID) {
+                // 作废只写 terminal_action，不改 refund_status；须显式覆盖「待评价」等原状态
+                $status_name['status_name'] = '已作废';
+                $item['_status'] = -3;
             } else if ($item['paid'] == 0 && $item['status'] == 0) {
                 $status_name['status_name'] = '待付款';
                 $item['_status'] = 1;//未支付

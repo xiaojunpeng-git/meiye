@@ -269,12 +269,21 @@ final class CashierV3CheckoutSettlementKernel
         $selectedPaymentAmountCents = self::sumField($snapshot['paymentDetails'], 'amountCents');
         $balanceAmountCents = $snapshot['balanceDeduction']['amountCents'];
         $debtAmountCents = $snapshot['debt']['amountCents'];
+        if ($debtAmountCents > $salesAmountCents) {
+            throw self::failure('checkout_debt_amount_exceeds_sales_amount', [
+                'salesAmountCents' => $salesAmountCents,
+                'debtAmountCents' => $debtAmountCents,
+            ]);
+        }
+        // Debt is recorded separately and is not a collected payment. The
+        // amount due now is the sale total less the debt; only payment methods
+        // and balance deductions are compared against that receivable.
         $settlementAmountCents = self::safeAdd(
-            self::safeAdd($selectedPaymentAmountCents, $balanceAmountCents, 'settlement_total'),
-            $debtAmountCents,
+            $selectedPaymentAmountCents,
+            $balanceAmountCents,
             'settlement_total'
         );
-        $receivableAmountCents = $salesAmountCents;
+        $receivableAmountCents = $salesAmountCents - $debtAmountCents;
         $balanced = $settlementAmountCents === $receivableAmountCents;
 
         if ($composition === self::COMPOSITION_ENTITLEMENT_ONLY && $settlementAmountCents !== 0) {

@@ -5,6 +5,7 @@ namespace app\services\order;
 use app\dao\order\StoreDebtDao;
 use app\dao\order\StoreDebtItemDao;
 use app\dao\order\StoreDebtRepayDao;
+use app\services\cashier\v3\CashierV3BusinessDocumentNumberServices;
 use app\jobs\order\OrderStatusJob;
 use app\model\order\StoreDebt;
 use app\model\order\StoreOrder;
@@ -21,6 +22,8 @@ use app\dao\user\UserRechargeDao;
 use app\services\user\UserServices;
 use app\services\wechat\WechatUserServices;
 use app\services\order\ValidCashOrderServices;
+use app\services\cashier\v3\checkout\provider\CashierV3LegacyDebtGuardWriterAdapter;
+use app\services\cashier\v3\checkout\provider\CashierV3LegacyDebtMutationToken;
 use think\exception\ValidateException;
 use think\facade\Cache;
 use think\facade\Db;
@@ -33,11 +36,55 @@ class StoreDebtServices extends BaseServices
     /** @var StoreDebtRepayDao */
     protected $repayDao;
 
-    public function __construct(StoreDebtDao $dao, StoreDebtItemDao $itemDao, StoreDebtRepayDao $repayDao)
+    /** @var CashierV3LegacyDebtGuardWriterAdapter|null */
+    protected $debtGuardWriter;
+
+    public function __construct(
+        StoreDebtDao $dao,
+        StoreDebtItemDao $itemDao,
+        StoreDebtRepayDao $repayDao,
+        CashierV3LegacyDebtGuardWriterAdapter $debtGuardWriter = null
+    )
     {
         $this->dao = $dao;
         $this->itemDao = $itemDao;
         $this->repayDao = $repayDao;
+        $this->debtGuardWriter = $debtGuardWriter;
+    }
+
+    protected function debtGuardWriter(): CashierV3LegacyDebtGuardWriterAdapter
+    {
+        if ($this->debtGuardWriter === null) {
+            $this->debtGuardWriter = new CashierV3LegacyDebtGuardWriterAdapter();
+        }
+        return $this->debtGuardWriter;
+    }
+
+    protected function runDebtMutationTransaction(callable $runner)
+    {
+        return $this->isInDbTransaction() ? $runner() : $this->transaction($runner);
+    }
+
+    protected function canonicalDebtMoney($amount): string
+    {
+        return bcadd((string)$amount, '0', 2);
+    }
+
+    protected function canonicalDebtCombination($combinationInfo): string
+    {
+        if (is_string($combinationInfo)) {
+            $decoded = json_decode($combinationInfo, true);
+            $combinationInfo = is_array($decoded) ? $decoded : [];
+        }
+        if (!is_array($combinationInfo)) {
+            $combinationInfo = [];
+        }
+        return $this->debtGuardWriter()->fingerprint(['combinationInfo' => $combinationInfo]);
+    }
+
+    protected function authoritativeDebtStaffId(CashierV3LegacyDebtMutationToken $token): int
+    {
+        return (int)($token->originOrder()['staff_id'] ?? 0);
     }
 
     public function generateDebtNo(): string
@@ -183,47 +230,76 @@ class StoreDebtServices extends BaseServices
     public function createFromPaidOrder(array $orderInfo): void
     {
         $orderId = (int)($orderInfo['id'] ?? 0);
-        $debtAmount = (float)($orderInfo['debt_amount'] ?? 0);
-        if (!$orderId || $debtAmount <= 0) {
+        if ($orderId <= 0) {
             return;
         }
-        if ($this->dao->be(['order_id' => $orderId])) {
-            return;
-        }
-        $staffId = $this->resolveOrderStaffId($orderId, (int)($orderInfo['staff_id'] ?? 0));
-        if (!$staffId) {
-            $req = app()->request;
-            if ($req->hasMacro('cashierId') && $req->cashierId()) {
-                $staffId = (int)$req->cashierId();
+        $this->runDebtMutationTransaction(function () use ($orderId): void {
+            $writer = $this->debtGuardWriter();
+            $token = $writer->lockOriginOrderInTx($orderId);
+            $lockedOrder = $token->originOrder();
+            $debtAmount = $this->canonicalDebtMoney($lockedOrder['debt_amount'] ?? '0');
+            if (bccomp($debtAmount, '0', 2) <= 0) {
+                return;
             }
-        }
-        $now = time();
-        $debtModel = $this->dao->save([
-            'debt_no' => $this->generateDebtNo(),
-            'order_id' => $orderId,
-            'order_sn' => (string)($orderInfo['order_id'] ?? ''),
-            'uid' => (int)($orderInfo['uid'] ?? 0),
-            'store_id' => (int)($orderInfo['store_id'] ?? 0),
-            'staff_id' => $staffId,
-            'total_debt' => $debtAmount,
-            'repaid_debt' => 0,
-            'status' => StoreDebt::STATUS_PENDING,
-            'remark' => '',
-            'add_time' => $now,
-            'update_time' => $now,
-        ]);
-        $debtId = (int)$debtModel->id;
-        /** @var StoreOrderCartInfoServices $cartServices */
-        $cartServices = app()->make(StoreOrderCartInfoServices::class);
-        $cartList = $cartServices->getSplitCartList($orderId, '*', 'id');
-        $items = [];
-        if ($cartList) {
-            foreach ($cartList as $row) {
-                $lineDebt = (float)($row['debt_amount'] ?? 0);
-                if ($lineDebt <= 0) {
+            $mutationKey = 'legacy-debt:create:order:' . $orderId;
+            $fingerprint = $writer->fingerprint([
+                'path' => 'create',
+                'originOrderId' => $orderId,
+                'originOrderNo' => (string)($lockedOrder['order_id'] ?? ''),
+                'uid' => (int)($lockedOrder['uid'] ?? 0),
+                'storeId' => (int)($lockedOrder['store_id'] ?? 0),
+                'debtAmount' => $debtAmount,
+            ]);
+            $prepared = $writer->beginMutationInTx(
+                $token,
+                'create',
+                $mutationKey,
+                $fingerprint,
+                'debt_created'
+            );
+            if (!empty($prepared['idempotentReplay'])) {
+                return;
+            }
+            $existing = Db::name('store_debt')
+                ->where('order_id', $orderId)
+                ->order('id asc')
+                ->lock(true)
+                ->find();
+            if ($existing) {
+                // Historical rows may predate guard receipts. Existing business
+                // idempotency returns without manufacturing a version advance.
+                return;
+            }
+
+            $staffId = $this->resolveOrderStaffId($orderId, (int)($lockedOrder['staff_id'] ?? 0));
+            $now = time();
+            $debtModel = $this->dao->save([
+                'debt_no' => $this->generateDebtNo(),
+                'order_id' => $orderId,
+                'order_sn' => (string)($lockedOrder['order_id'] ?? ''),
+                'uid' => (int)($lockedOrder['uid'] ?? 0),
+                'store_id' => (int)($lockedOrder['store_id'] ?? 0),
+                'staff_id' => $staffId,
+                'total_debt' => (float)$debtAmount,
+                'repaid_debt' => 0,
+                'status' => StoreDebt::STATUS_PENDING,
+                'remark' => '',
+                'add_time' => $now,
+                'update_time' => $now,
+            ]);
+            $debtId = (int)$debtModel->id;
+            /** @var StoreOrderCartInfoServices $cartServices */
+            $cartServices = app()->make(StoreOrderCartInfoServices::class);
+            $cartList = $cartServices->getSplitCartList($orderId, '*', 'id');
+            $items = [];
+            foreach ((array)$cartList as $row) {
+                $lineDebt = $this->canonicalDebtMoney($row['debt_amount'] ?? '0');
+                if (bccomp($lineDebt, '0', 2) <= 0) {
                     continue;
                 }
-                $cartInfo = is_string($row['cart_info'] ?? '') ? json_decode($row['cart_info'], true) : ($row['cart_info'] ?? []);
+                $cartInfo = is_string($row['cart_info'] ?? '')
+                    ? json_decode($row['cart_info'], true)
+                    : ($row['cart_info'] ?? []);
                 $items[] = [
                     'debt_id' => $debtId,
                     'order_id' => $orderId,
@@ -232,32 +308,31 @@ class StoreDebtServices extends BaseServices
                     'product_type' => (int)($row['product_type'] ?? 0),
                     'product_name' => (string)($cartInfo['productInfo']['store_name'] ?? ''),
                     'cart_num' => (int)($row['cart_num'] ?? 1),
-                    'debt_amount' => $lineDebt,
+                    'debt_amount' => (float)$lineDebt,
                     'repaid_debt' => 0,
                     'add_time' => $now,
                     'update_time' => $now,
                 ];
             }
-        }
-        if (!$items) {
-            $productName = (int)($orderInfo['order_type'] ?? 0) === 1 ? '储值充值' : '订单欠款';
-            $items[] = [
-                'debt_id' => $debtId,
-                'order_id' => $orderId,
-                'cart_info_id' => 0,
-                'product_id' => 0,
-                'product_type' => 0,
-                'product_name' => $productName,
-                'cart_num' => 1,
-                'debt_amount' => $debtAmount,
-                'repaid_debt' => 0,
-                'add_time' => $now,
-                'update_time' => $now,
-            ];
-        }
-        if ($items) {
+            if (!$items) {
+                $productName = (int)($lockedOrder['order_type'] ?? 0) === 1 ? '储值充值' : '订单欠款';
+                $items[] = [
+                    'debt_id' => $debtId,
+                    'order_id' => $orderId,
+                    'cart_info_id' => 0,
+                    'product_id' => 0,
+                    'product_type' => 0,
+                    'product_name' => $productName,
+                    'cart_num' => 1,
+                    'debt_amount' => (float)$debtAmount,
+                    'repaid_debt' => 0,
+                    'add_time' => $now,
+                    'update_time' => $now,
+                ];
+            }
             $this->itemDao->saveAll($items);
-        }
+            $writer->completeMutationInTx($token, $prepared);
+        });
     }
 
     public function getUserPendingSummary(int $uid): array
@@ -480,26 +555,47 @@ class StoreDebtServices extends BaseServices
      */
     public function voidDebtByOrderId(int $orderId, string $remark = ''): void
     {
-        if (!$orderId) {
+        if ($orderId <= 0) {
             return;
         }
-        $debt = $this->dao->get(['order_id' => $orderId]);
-        if (!$debt) {
-            return;
-        }
-        $debtArr = is_array($debt) ? $debt : $debt->toArray();
-        $status = (int)($debtArr['status'] ?? 0);
-        if ($status === StoreDebt::STATUS_VOID) {
-            return;
-        }
-        $update = [
-            'status' => StoreDebt::STATUS_VOID,
-            'update_time' => time(),
-        ];
-        if ($remark !== '') {
-            $update['remark'] = $remark;
-        }
-        $this->dao->update((int)$debtArr['id'], $update);
+        $this->runDebtMutationTransaction(function () use ($orderId, $remark): void {
+            $writer = $this->debtGuardWriter();
+            $guarded = $writer->lockDebtByOriginOrderInTx($orderId);
+            $debt = $guarded['debt'];
+            if ($debt === null) {
+                return;
+            }
+            $fingerprint = $writer->fingerprint([
+                'path' => 'adjustment',
+                'operation' => 'void',
+                'originOrderId' => $orderId,
+                'debtId' => (int)$debt['id'],
+                'remark' => trim($remark),
+            ]);
+            $prepared = $writer->beginMutationInTx(
+                $guarded['token'],
+                'adjustment',
+                'legacy-debt:void:order:' . $orderId,
+                $fingerprint,
+                'debt_voided'
+            );
+            if (!empty($prepared['idempotentReplay'])) {
+                return;
+            }
+            if ((int)($debt['status'] ?? 0) === StoreDebt::STATUS_VOID) {
+                // Historical business idempotency: do not manufacture a guard
+                // advance when the old mutation predates guard receipts.
+                return;
+            }
+            $update = ['status' => StoreDebt::STATUS_VOID, 'update_time' => time()];
+            if ($remark !== '') {
+                $update['remark'] = $remark;
+            }
+            if (!(bool)$this->dao->update((int)$debt['id'], $update)) {
+                throw new ValidateException('欠款作废失败');
+            }
+            $writer->completeMutationInTx($guarded['token'], $prepared);
+        });
     }
 
     /**
@@ -608,9 +704,6 @@ class StoreDebtServices extends BaseServices
             if (!$staffId && !empty($row['order_id'])) {
                 $staffId = $this->resolveOrderStaffId((int)$row['order_id'], 0);
             }
-            if (!(int)($row['staff_id'] ?? 0) && $staffId > 0) {
-                $this->dao->update((int)$row['id'], ['staff_id' => $staffId, 'update_time' => time()]);
-            }
             $staffName = $staffMap[$staffId] ?? '';
             if ($staffName === '') {
                 $staffName = $this->resolveStaffDisplayName($staffId, (int)($row['order_id'] ?? 0));
@@ -679,17 +772,43 @@ class StoreDebtServices extends BaseServices
 
     public function closeDebt(int $id): bool
     {
-        $debt = $this->dao->get($id);
-        if (!$debt) {
-            throw new ValidateException('欠款记录不存在');
-        }
-        if ((int)$debt['status'] !== StoreDebt::STATUS_PENDING) {
-            throw new ValidateException('当前状态不可关闭');
-        }
-        return (bool)$this->dao->update($id, [
-            'status' => StoreDebt::STATUS_CLOSED,
-            'update_time' => time(),
-        ]);
+        return (bool)$this->runDebtMutationTransaction(function () use ($id): bool {
+            $writer = $this->debtGuardWriter();
+            $guarded = $writer->lockDebtInTx($id);
+            $debt = $guarded['debt'];
+            $fingerprint = $writer->fingerprint([
+                'path' => 'adjustment',
+                'operation' => 'close',
+                'originOrderId' => (int)$debt['order_id'],
+                'debtId' => (int)$debt['id'],
+            ]);
+            $prepared = $writer->beginMutationInTx(
+                $guarded['token'],
+                'adjustment',
+                'legacy-debt:close:debt:' . (int)$debt['id'],
+                $fingerprint,
+                'debt_closed'
+            );
+            if (!empty($prepared['idempotentReplay'])) {
+                return true;
+            }
+            if ((int)$debt['status'] === StoreDebt::STATUS_CLOSED) {
+                // Historical business idempotency without a guard receipt.
+                return true;
+            }
+            if ((int)$debt['status'] !== StoreDebt::STATUS_PENDING) {
+                throw new ValidateException('当前状态不可关闭');
+            }
+            $updated = (bool)$this->dao->update($id, [
+                'status' => StoreDebt::STATUS_CLOSED,
+                'update_time' => time(),
+            ]);
+            if (!$updated) {
+                throw new ValidateException('欠款关闭失败');
+            }
+            $writer->completeMutationInTx($guarded['token'], $prepared);
+            return true;
+        });
     }
 
     public function closeDebtForStore(int $id, int $storeId): bool
@@ -773,22 +892,23 @@ class StoreDebtServices extends BaseServices
     /**
      * 补交生成普通收银订单（未支付）
      */
-    public function createRepayOrder(int $debtId, float $amount, array $params = []): array
+    protected function createRepayOrder(
+        CashierV3LegacyDebtMutationToken $token,
+        int $debtId,
+        float $amount,
+        array $params = []
+    ): array
     {
-        $debt = $this->dao->get($debtId);
-        if (!$debt) {
-            throw new ValidateException('欠款记录不存在');
-        }
-        $debt = is_array($debt) ? $debt : $debt->toArray();
+        $debt = $this->debtGuardWriter()->lockDebtForTokenInTx($token, $debtId);
         $debtItemId = (int)($params['debt_item_id'] ?? 0);
         $payType = (string)($params['pay_type'] ?? PayServices::CASH_PAY);
         $combinationInfo = $params['combination_info'] ?? [];
         $cashChoose = (int)($params['cash_choose'] ?? 0);
-        $source = (int)($params['source'] ?? 0);
+        $source = (int)($token->originOrder()['source'] ?? 0);
         $isBudan = (int)($params['is_budan'] ?? 0);
         $budanTime = (string)($params['budan_time'] ?? '');
-        $staffId = (int)($params['staff_id'] ?? 0);
-        $payStoreId = (int)($params['pay_store_id'] ?? 0);
+        $staffId = $this->authoritativeDebtStaffId($token);
+        $payStoreId = $token->originStoreId();
         $remarkInfo = $params['remark_info'] ?? [];
         $setYejiAll = $params['set_yeji_all'] ?? $params['setYejiAll'] ?? [];
         if (is_string($setYejiAll)) {
@@ -798,16 +918,7 @@ class StoreDebtServices extends BaseServices
             $setYejiAll = [];
         }
 
-        /** @var StoreOrderServices $orderServices */
-        $orderServices = app()->make(StoreOrderServices::class);
-        $originalOrder = $orderServices->get((int)$debt['order_id']);
-        if (!$originalOrder) {
-            throw new ValidateException('原订单不存在');
-        }
-        $originalOrder = is_array($originalOrder) ? $originalOrder : $originalOrder->toArray();
-        if (!$source) {
-            $source = (int)($originalOrder['source'] ?? 0);
-        }
+        $originalOrder = $token->originOrder();
 
         $repayItems = $this->resolveRepayDebtItems($debtId, $debtItemId, $amount);
         if (!$repayItems) {
@@ -885,7 +996,7 @@ class StoreDebtServices extends BaseServices
 
         /** @var StoreOrderCreateServices $orderCreateServices */
         $orderCreateServices = app()->make(StoreOrderCreateServices::class);
-        $storeId = $payStoreId ?: (int)$originalOrder['store_id'];
+        $storeId = $payStoreId;
         $addTime = time();
         if ($isBudan === 1 && $budanTime !== '') {
             $budanTs = strtotime($budanTime);
@@ -911,7 +1022,7 @@ class StoreDebtServices extends BaseServices
             'order_type' => 0,
             'shipping_type' => 4,
             'store_id' => $storeId,
-            'staff_id' => $staffId ?: (int)($originalOrder['staff_id'] ?? 0),
+            'staff_id' => $staffId,
             'source' => $source,
             'cash_choose' => $cashChoose,
             'remark_info' => json_encode($remarkInfo, JSON_UNESCAPED_UNICODE),
@@ -1148,13 +1259,18 @@ class StoreDebtServices extends BaseServices
         $successService->paySuccess($repayOrder, $payType, $params['other'] ?? []);
     }
 
-    protected function buildRepayApplyExtra(int $debtId, float $amount, string $payType, array $params, array $repayOrder): array
+    protected function buildRepayApplyExtra(
+        CashierV3LegacyDebtMutationToken $token,
+        string $payType,
+        array $params,
+        array $repayOrder
+    ): array
     {
         return [
             'debt_item_id' => (int)($params['debt_item_id'] ?? 0),
             'pay_type' => $payType,
-            'pay_store_id' => (int)($params['pay_store_id'] ?? 0),
-            'staff_id' => (int)($params['staff_id'] ?? 0),
+            'pay_store_id' => $token->originStoreId(),
+            'staff_id' => $this->authoritativeDebtStaffId($token),
             'combination_info' => $params['combination_info'] ?? [],
             'is_budan' => (int)($params['is_budan'] ?? 0),
             'repay_no' => (string)($params['repay_no'] ?? $this->generateRepayNo()),
@@ -1163,15 +1279,21 @@ class StoreDebtServices extends BaseServices
     }
 
     /**
-     * 欠款主表行锁（须在事务内调用）
+     * Guard must precede the debt row. A supplied token is accepted only from
+     * an already-running server transaction; request arrays cannot construct it.
+     *
+     * @return array{token:CashierV3LegacyDebtMutationToken,debt:array}
      */
-    protected function lockDebtForUpdate(int $debtId): array
+    protected function lockDebtMutationInTx(int $debtId, $token = null): array
     {
-        $debt = Db::name('store_debt')->where('id', $debtId)->lock(true)->find();
-        if (!$debt) {
-            throw new ValidateException('欠款记录不存在');
+        $writer = $this->debtGuardWriter();
+        if ($token instanceof CashierV3LegacyDebtMutationToken) {
+            return [
+                'token' => $token,
+                'debt' => $writer->lockDebtForTokenInTx($token, $debtId),
+            ];
         }
-        return $debt;
+        return $writer->lockDebtInTx($debtId);
     }
 
     /**
@@ -1198,6 +1320,57 @@ class StoreDebtServices extends BaseServices
         }
     }
 
+    protected function assertExistingRepayMatches(
+        array $existing,
+        array $debt,
+        float $amount,
+        array $extra
+    ): void {
+        $requestedOrderId = (int)($extra['repay_order_id'] ?? 0);
+        $requestedPayType = trim((string)($extra['pay_type'] ?? ''));
+        if ((int)($existing['debt_id'] ?? 0) !== (int)$debt['id']
+            || (int)($existing['order_id'] ?? 0) !== (int)$debt['order_id']
+            || (int)($existing['debt_item_id'] ?? 0) !== (int)($extra['debt_item_id'] ?? 0)
+            || bccomp(
+                $this->canonicalDebtMoney($existing['repay_amount'] ?? '0'),
+                $this->canonicalDebtMoney($amount),
+                2
+            ) !== 0
+            || ($requestedOrderId > 0
+                && (int)($existing['repay_order_id'] ?? 0) !== $requestedOrderId)
+            || ($requestedPayType !== ''
+                && (string)($existing['pay_type'] ?? '') !== $requestedPayType)
+            || (array_key_exists('combination_info', $extra)
+                && $this->canonicalDebtCombination($existing['combination_info'] ?? [])
+                    !== $this->canonicalDebtCombination($extra['combination_info']))) {
+            throw new ValidateException('同一还款请求标识不能用于不同欠款或金额');
+        }
+    }
+
+    protected function lockAndAssertRepayOrderRelation(
+        CashierV3LegacyDebtMutationToken $token,
+        int $repayOrderId
+    ): array {
+        if ($repayOrderId <= 0) {
+            return [];
+        }
+        $repayOrder = Db::name('store_order')
+            ->where('id', $repayOrderId)
+            ->field('id,is_debt_repay,debt_repay_origin_order_id,store_id,staff_id,pay_price,paid')
+            ->lock(true)
+            ->find();
+        if (!$repayOrder
+            || (int)($repayOrder['is_debt_repay'] ?? 0) !== 1
+            || (int)($repayOrder['debt_repay_origin_order_id'] ?? 0) !== $token->originOrderId()) {
+            throw new ValidateException('补交订单与原欠款关系不一致');
+        }
+        if ((int)($repayOrder['store_id'] ?? 0) !== $token->originStoreId()
+            || (int)($repayOrder['staff_id'] ?? 0) !== $this->authoritativeDebtStaffId($token)) {
+            throw new ValidateException('补交订单门店或操作人快照不一致');
+        }
+        return $repayOrder;
+    }
+
     /**
      * 同债务下是否已有未支付补交单（渠道进行中）
      */
@@ -1221,7 +1394,10 @@ class StoreDebtServices extends BaseServices
      * 渠道补交待入账信息持久化（DB 为主，Redis 为辅）
      * 必须含：repay_no、debt_id、金额、repay_order_id、支付方式
      */
-    protected function rememberDebtRepayPending(array $pending): array
+    protected function rememberDebtRepayPending(
+        CashierV3LegacyDebtMutationToken $token,
+        array $pending
+    ): array
     {
         $repayNo = trim((string)($pending['repay_no'] ?? ''));
         $repayOrderId = (int)($pending['repay_order_id'] ?? 0);
@@ -1230,20 +1406,28 @@ class StoreDebtServices extends BaseServices
         if ($repayNo === '' || $repayOrderId <= 0 || $debtId <= 0 || $amount <= 0) {
             throw new ValidateException('补交待入账信息缺失');
         }
+        $debt = $this->debtGuardWriter()->lockDebtForTokenInTx($token, $debtId);
+        $order = $this->lockAndAssertRepayOrderRelation($token, $repayOrderId);
+        if ((int)$debt['id'] !== $debtId) {
+            throw new ValidateException('补交欠款关系不一致');
+        }
+        if (bccomp(
+            $this->canonicalDebtMoney($order['pay_price'] ?? '0'),
+            $this->canonicalDebtMoney($amount),
+            2
+        ) !== 0) {
+            throw new ValidateException('补交订单金额与待入账金额不一致');
+        }
         $payload = [
             'debt_id' => $debtId,
             'debt_item_id' => (int)($pending['debt_item_id'] ?? 0),
             'amount' => $amount,
             'pay_type' => (string)($pending['pay_type'] ?? PayServices::WEIXIN_PAY),
-            'pay_store_id' => (int)($pending['pay_store_id'] ?? 0),
-            'staff_id' => (int)($pending['staff_id'] ?? 0),
+            'pay_store_id' => $token->originStoreId(),
+            'staff_id' => $this->authoritativeDebtStaffId($token),
             'repay_order_id' => $repayOrderId,
             'repay_no' => $repayNo,
         ];
-        $order = Db::name('store_order')->where('id', $repayOrderId)->where('is_debt_repay', 1)->find();
-        if (!$order) {
-            throw new ValidateException('补交订单不存在');
-        }
         $notify = [];
         $raw = (string)($order['notify_data'] ?? '');
         if ($raw !== '') {
@@ -1341,15 +1525,14 @@ class StoreDebtServices extends BaseServices
      */
     protected function repayPayImmediateLocked(int $debtId, float $amount, string $payType, array $params = []): array
     {
-        return $this->transaction(function () use ($debtId, $amount, $payType, $params) {
-            $debt = $this->lockDebtForUpdate($debtId);
+        return $this->runDebtMutationTransaction(function () use ($debtId, $amount, $payType, $params) {
+            $guarded = $this->lockDebtMutationInTx($debtId);
+            $debt = $guarded['debt'];
             $debtItemId = (int)($params['debt_item_id'] ?? 0);
             $this->assertDebtRepayableLocked($debt, $amount, $debtItemId);
 
             $combinationInfo = $params['combination_info'] ?? [];
             $userCode = (string)($params['user_code'] ?? '');
-            $payStoreId = (int)($params['pay_store_id'] ?? 0);
-            $staffId = (int)($params['staff_id'] ?? 0);
             $repayNo = !empty($params['repay_no']) ? (string)$params['repay_no'] : $this->generateRepayNo();
             $params['repay_no'] = $repayNo;
 
@@ -1358,15 +1541,14 @@ class StoreDebtServices extends BaseServices
                 ValidCashOrderServices::validateCombinationTotal($combinationInfo, $amount);
             }
 
-            $repayOrder = $this->createRepayOrder($debtId, $amount, array_merge($params, [
+            $repayOrder = $this->createRepayOrder($guarded['token'], $debtId, $amount, array_merge($params, [
                 'pay_type' => $payType,
                 'debt_item_id' => $debtItemId,
-                'pay_store_id' => $payStoreId,
-                'staff_id' => $staffId,
             ]));
-            $applyExtra = $this->buildRepayApplyExtra($debtId, $amount, $payType, array_merge($params, [
+            $applyExtra = $this->buildRepayApplyExtra($guarded['token'], $payType, array_merge($params, [
                 'combination_info' => $combinationInfo,
             ]), $repayOrder);
+            $applyExtra['_debt_guard_token'] = $guarded['token'];
 
             $finalizeParams = [];
             if ($payType === PayServices::COMBINATION_PAY) {
@@ -1416,30 +1598,25 @@ class StoreDebtServices extends BaseServices
                 throw new ValidateException('缺少支付付款二维码');
             }
             $debtItemId = (int)($params['debt_item_id'] ?? 0);
-            $payStoreId = (int)($params['pay_store_id'] ?? 0);
-            $staffId = (int)($params['staff_id'] ?? 0);
             $repayNo = !empty($params['repay_no']) ? (string)$params['repay_no'] : $this->generateRepayNo();
             $params['repay_no'] = $repayNo;
 
             // 创建未付补交单：欠款行锁 + DB 持久化待入账（不依赖 Redis）
-            $prepared = $this->transaction(function () use ($debtId, $amount, $payType, $params, $debtItemId, $payStoreId, $staffId, $repayNo) {
-                $debt = $this->lockDebtForUpdate($debtId);
+            $prepared = $this->runDebtMutationTransaction(function () use ($debtId, $amount, $payType, $params, $debtItemId, $repayNo) {
+                $guarded = $this->lockDebtMutationInTx($debtId);
+                $debt = $guarded['debt'];
                 $this->assertDebtRepayableLocked($debt, $amount, $debtItemId);
                 $this->assertNoInFlightDebtRepayOrder((int)$debt['order_id']);
-                $repayOrder = $this->createRepayOrder($debtId, $amount, array_merge($params, [
+                $repayOrder = $this->createRepayOrder($guarded['token'], $debtId, $amount, array_merge($params, [
                     'pay_type' => $payType,
                     'debt_item_id' => $debtItemId,
-                    'pay_store_id' => $payStoreId,
-                    'staff_id' => $staffId,
                     'repay_no' => $repayNo,
                 ]));
-                $this->rememberDebtRepayPending([
+                $this->rememberDebtRepayPending($guarded['token'], [
                     'debt_id' => $debtId,
                     'debt_item_id' => $debtItemId,
                     'amount' => $amount,
                     'pay_type' => $payType,
-                    'pay_store_id' => $payStoreId,
-                    'staff_id' => $staffId,
                     'repay_order_id' => (int)$repayOrder['id'],
                     'repay_no' => $repayNo,
                 ]);
@@ -1569,25 +1746,22 @@ class StoreDebtServices extends BaseServices
             }
             $repayNo = $this->generateRepayNo();
             $body = '欠款补交-' . ($debt['order_sn'] ?: $repayNo);
-            $payStoreId = (int)($order['store_id'] ?? 0);
             // 先锁欠款创建未付补交单并 DB 持久化待入账，再调起渠道
-            $repayOrder = $this->transaction(function () use ($debtId, $amount, $payStoreId, $repayNo) {
-                $locked = $this->lockDebtForUpdate($debtId);
+            $repayOrder = $this->runDebtMutationTransaction(function () use ($debtId, $amount, $repayNo) {
+                $guarded = $this->lockDebtMutationInTx($debtId);
+                $locked = $guarded['debt'];
                 $this->assertDebtRepayableLocked($locked, $amount, 0);
                 $this->assertNoInFlightDebtRepayOrder((int)$locked['order_id']);
-                $created = $this->createRepayOrder($debtId, $amount, [
+                $created = $this->createRepayOrder($guarded['token'], $debtId, $amount, [
                     'pay_type' => PayServices::WEIXIN_PAY,
                     'debt_item_id' => 0,
-                    'pay_store_id' => $payStoreId,
                     'repay_no' => $repayNo,
                 ]);
-                $this->rememberDebtRepayPending([
+                $this->rememberDebtRepayPending($guarded['token'], [
                     'debt_id' => $debtId,
                     'debt_item_id' => 0,
                     'amount' => $amount,
                     'pay_type' => PayServices::WEIXIN_PAY,
-                    'pay_store_id' => $payStoreId,
-                    'staff_id' => 0,
                     'repay_order_id' => (int)$created['id'],
                     'repay_no' => $repayNo,
                 ]);
@@ -1611,24 +1785,21 @@ class StoreDebtServices extends BaseServices
             }
             $repayNo = $this->generateRepayNo();
             $body = '欠款补交-' . ($debt['order_sn'] ?: $repayNo);
-            $payStoreId = (int)($order['store_id'] ?? 0);
-            $repayOrder = $this->transaction(function () use ($debtId, $amount, $payStoreId, $repayNo) {
-                $locked = $this->lockDebtForUpdate($debtId);
+            $repayOrder = $this->runDebtMutationTransaction(function () use ($debtId, $amount, $repayNo) {
+                $guarded = $this->lockDebtMutationInTx($debtId);
+                $locked = $guarded['debt'];
                 $this->assertDebtRepayableLocked($locked, $amount, 0);
                 $this->assertNoInFlightDebtRepayOrder((int)$locked['order_id']);
-                $created = $this->createRepayOrder($debtId, $amount, [
+                $created = $this->createRepayOrder($guarded['token'], $debtId, $amount, [
                     'pay_type' => PayServices::ALIAPY_PAY,
                     'debt_item_id' => 0,
-                    'pay_store_id' => $payStoreId,
                     'repay_no' => $repayNo,
                 ]);
-                $this->rememberDebtRepayPending([
+                $this->rememberDebtRepayPending($guarded['token'], [
                     'debt_id' => $debtId,
                     'debt_item_id' => 0,
                     'amount' => $amount,
                     'pay_type' => PayServices::ALIAPY_PAY,
-                    'pay_store_id' => $payStoreId,
-                    'staff_id' => 0,
                     'repay_order_id' => (int)$created['id'],
                     'repay_no' => $repayNo,
                 ]);
@@ -1670,6 +1841,9 @@ class StoreDebtServices extends BaseServices
         // 已入账：重复回调成功（幂等）
         $existed = Db::name('store_debt_repay')->where('repay_no', $repayNo)->find();
         if ($existed) {
+            if ($payType !== '' && (string)($existed['pay_type'] ?? '') !== $payType) {
+                return false;
+            }
             $this->clearDebtRepayPendingMark((int)($existed['repay_order_id'] ?? 0), $repayNo);
             return true;
         }
@@ -1702,9 +1876,20 @@ class StoreDebtServices extends BaseServices
         $repayOrderId = (int)($pending['repay_order_id'] ?? 0);
 
         try {
-            $this->transaction(function () use ($debtId, $amount, $pending, $repayNo, $tradeNo, $payType, $repayOrderId) {
+            $this->runDebtMutationTransaction(function () use ($debtId, $amount, $pending, $repayNo, $tradeNo, $payType, $repayOrderId) {
+                $guarded = $this->lockDebtMutationInTx($debtId);
+                $debt = $guarded['debt'];
                 $exist = Db::name('store_debt_repay')->where('repay_no', $repayNo)->lock(true)->find();
                 if ($exist) {
+                    $this->applyRepay($debtId, $amount, [
+                        'debt_item_id' => (int)($pending['debt_item_id'] ?? 0),
+                        'pay_type' => (string)($pending['pay_type'] ?? $payType),
+                        'repay_no' => $repayNo,
+                        'repay_order_id' => $repayOrderId,
+                        'trade_no' => $tradeNo,
+                        '_debt_guard_token' => $guarded['token'],
+                    ]);
+                    $this->clearDebtRepayPendingMark($repayOrderId, $repayNo);
                     return;
                 }
                 if ($tradeNo !== '') {
@@ -1719,15 +1904,21 @@ class StoreDebtServices extends BaseServices
                     }
                 }
 
-                $debt = $this->lockDebtForUpdate($debtId);
                 $resolvedPayType = (string)($pending['pay_type'] ?? $payType ?: PayServices::WEIXIN_PAY);
 
                 if ($repayOrderId > 0) {
-                    /** @var StoreOrderServices $orderServices */
-                    $orderServices = app()->make(StoreOrderServices::class);
-                    $repayOrder = $orderServices->get($repayOrderId);
-                    if ($repayOrder && !(int)($repayOrder['paid'] ?? 0)) {
-                        $repayOrder = is_array($repayOrder) ? $repayOrder : $repayOrder->toArray();
+                    $repayOrder = $this->lockAndAssertRepayOrderRelation(
+                        $guarded['token'],
+                        $repayOrderId
+                    );
+                    if (bccomp(
+                        $this->canonicalDebtMoney($repayOrder['pay_price'] ?? '0'),
+                        $this->canonicalDebtMoney($amount),
+                        2
+                    ) !== 0) {
+                        throw new ValidateException('补交订单金额与回调金额不一致');
+                    }
+                    if (!(int)($repayOrder['paid'] ?? 0)) {
                         $this->finalizeRepayPayment($repayOrder, $resolvedPayType, [
                             'other' => ['trade_no' => $tradeNo],
                         ]);
@@ -1735,7 +1926,7 @@ class StoreDebtServices extends BaseServices
                 }
 
                 // 锁后重新读取：已结清则不再 apply（防超额）；是否已有本 repay_no 由事务外二次确认（避免 RR 快照看不到他事务已提交行）
-                $debt = $this->lockDebtForUpdate($debtId);
+                $debt = $this->debtGuardWriter()->lockDebtForTokenInTx($guarded['token'], $debtId);
                 if ((int)$debt['status'] !== StoreDebt::STATUS_PENDING) {
                     return;
                 }
@@ -1743,19 +1934,14 @@ class StoreDebtServices extends BaseServices
                 $this->applyRepay($debtId, $amount, [
                     'debt_item_id' => (int)($pending['debt_item_id'] ?? 0),
                     'pay_type' => $resolvedPayType,
-                    'pay_store_id' => (int)($pending['pay_store_id'] ?? 0),
-                    'staff_id' => (int)($pending['staff_id'] ?? 0),
                     'repay_no' => $repayNo,
                     'repay_order_id' => $repayOrderId,
                     'trade_no' => $tradeNo,
+                    '_debt_guard_token' => $guarded['token'],
                 ]);
                 $this->clearDebtRepayPendingMark($repayOrderId, $repayNo);
             });
         } catch (ValidateException $e) {
-            if (Db::name('store_debt_repay')->where('repay_no', $repayNo)->value('id')) {
-                $this->clearDebtRepayPendingMark($repayOrderId, $repayNo);
-                return true;
-            }
             return false;
         } catch (\Throwable $e) {
             return false;
@@ -1851,10 +2037,37 @@ class StoreDebtServices extends BaseServices
     public function applyRepay(int $debtId, float $amount, array $extra = []): array
     {
         $runner = function () use ($debtId, $amount, $extra) {
-            $debt = $this->lockDebtForUpdate($debtId);
+            $writer = $this->debtGuardWriter();
+            $guarded = $this->lockDebtMutationInTx($debtId, $extra['_debt_guard_token'] ?? null);
+            $debt = $guarded['debt'];
+            $token = $guarded['token'];
             $repayNo = !empty($extra['repay_no']) ? (string)$extra['repay_no'] : $this->generateRepayNo();
+            $debtItemId = (int)($extra['debt_item_id'] ?? 0);
+            $repayOrderId = (int)($extra['repay_order_id'] ?? 0);
+            $amountKey = $this->canonicalDebtMoney($amount);
+            $payType = trim((string)($extra['pay_type'] ?? ''));
+            $combinationInfo = $extra['combination_info'] ?? [];
+            $fingerprint = $writer->fingerprint([
+                'path' => 'repay',
+                'originOrderId' => (int)$debt['order_id'],
+                'debtId' => $debtId,
+                'debtItemId' => $debtItemId,
+                'repayNo' => $repayNo,
+                'repayOrderId' => $repayOrderId,
+                'amount' => $amountKey,
+                'payType' => $payType,
+                'combinationInfoFingerprint' => $this->canonicalDebtCombination($combinationInfo),
+            ]);
+            $prepared = $writer->beginMutationInTx(
+                $token,
+                'repay',
+                'legacy-debt:repay:' . substr(hash('sha256', $repayNo), 0, 32),
+                $fingerprint,
+                'debt_repaid'
+            );
             $exist = Db::name('store_debt_repay')->where('repay_no', $repayNo)->lock(true)->find();
             if ($exist) {
+                $this->assertExistingRepayMatches($exist, $debt, $amount, $extra);
                 return [
                     'repay_id' => (int)$exist['id'],
                     'status' => (int)$debt['status'],
@@ -1872,6 +2085,7 @@ class StoreDebtServices extends BaseServices
                 if ($byTrade > 0) {
                     $existByOrder = Db::name('store_debt_repay')->where('repay_order_id', $byTrade)->find();
                     if ($existByOrder) {
+                        $this->assertExistingRepayMatches($existByOrder, $debt, $amount, $extra);
                         return [
                             'repay_id' => (int)$existByOrder['id'],
                             'status' => (int)$debt['status'],
@@ -1881,8 +2095,20 @@ class StoreDebtServices extends BaseServices
                 }
             }
 
-            $this->assertDebtRepayableLocked($debt, $amount, (int)($extra['debt_item_id'] ?? 0));
-            $debtItemId = (int)($extra['debt_item_id'] ?? 0);
+            if (!empty($prepared['idempotentReplay'])) {
+                throw new ValidateException('还款防重记录存在但还款事实缺失，请联系平台处理');
+            }
+            $this->assertDebtRepayableLocked($debt, $amount, $debtItemId);
+            if ($repayOrderId > 0) {
+                $repayOrder = $this->lockAndAssertRepayOrderRelation($token, $repayOrderId);
+                if (bccomp(
+                    $this->canonicalDebtMoney($repayOrder['pay_price'] ?? '0'),
+                    $amountKey,
+                    2
+                ) !== 0) {
+                    throw new ValidateException('补交订单金额与还款金额不一致');
+                }
+            }
             $now = time();
             try {
                 $repayModel = $this->repayDao->save([
@@ -1891,20 +2117,21 @@ class StoreDebtServices extends BaseServices
                     'debt_item_id' => $debtItemId,
                     'order_id' => (int)$debt['order_id'],
                     'order_sn' => (string)$debt['order_sn'],
-                    'repay_order_id' => (int)($extra['repay_order_id'] ?? 0),
+                    'repay_order_id' => $repayOrderId,
                     'uid' => (int)$debt['uid'],
-                    'repay_amount' => $amount,
-                    'pay_type' => (string)($extra['pay_type'] ?? ''),
-                    'pay_store_id' => (int)($extra['pay_store_id'] ?? 0),
+                    'repay_amount' => (float)$amountKey,
+                    'pay_type' => $payType,
+                    'pay_store_id' => $token->originStoreId(),
                     'debt_store_id' => (int)$debt['store_id'],
-                    'staff_id' => (int)($extra['staff_id'] ?? 0),
-                    'combination_info' => json_encode($extra['combination_info'] ?? [], JSON_UNESCAPED_UNICODE),
+                    'staff_id' => $this->authoritativeDebtStaffId($token),
+                    'combination_info' => json_encode($combinationInfo, JSON_UNESCAPED_UNICODE),
                     'add_time' => $now,
                 ]);
             } catch (\Throwable $e) {
                 // uniq_repay_no：并发下后到者视为幂等成功
                 $exist = Db::name('store_debt_repay')->where('repay_no', $repayNo)->find();
                 if ($exist) {
+                    $this->assertExistingRepayMatches($exist, $debt, $amount, $extra);
                     return [
                         'repay_id' => (int)$exist['id'],
                         'status' => (int)Db::name('store_debt')->where('id', $debtId)->value('status'),
@@ -1914,6 +2141,14 @@ class StoreDebtServices extends BaseServices
                 throw $e;
             }
             $repayId = (int)$repayModel->id;
+            (new CashierV3BusinessDocumentNumberServices())->allocateForSourceInTx(
+                '0',
+                CashierV3BusinessDocumentNumberServices::DEBT_REPAYMENT,
+                'legacy_store_debt_repayment',
+                (string)$repayId,
+                date('Y-m-d', $now),
+                $now
+            );
             $newRepaid = (float)bcadd((string)$debt['repaid_debt'], (string)$amount, 2);
             if (bccomp((string)$newRepaid, (string)$debt['total_debt'], 2) > 0) {
                 throw new ValidateException('还款金额不正确');
@@ -1926,31 +2161,37 @@ class StoreDebtServices extends BaseServices
                 'status' => $status,
                 'update_time' => $now,
             ]);
-            /** @var StoreOrderServices $orderServices */
-            $orderServices = app()->make(StoreOrderServices::class);
-            $order = $orderServices->get((int)$debt['order_id']);
-            if ($order) {
-                $orderRepaid = (float)bcadd((string)($order['repaid_debt_amount'] ?? 0), (string)$amount, 2);
-                $orderServices->update((int)$debt['order_id'], ['repaid_debt_amount' => $orderRepaid]);
-                if ((int)($order['order_type'] ?? 0) === 1 && (int)($order['link_id'] ?? 0) > 0) {
-                    /** @var UserRechargeDao $rechargeDao */
-                    $rechargeDao = app()->make(UserRechargeDao::class);
-                    $recharge = $rechargeDao->get((int)$order['link_id']);
-                    if ($recharge) {
-                        $rechargeRepaid = (float)bcadd((string)($recharge['repaid_debt_amount'] ?? 0), (string)$amount, 2);
-                        $rechargeDao->update((int)$order['link_id'], ['repaid_debt_amount' => $rechargeRepaid]);
-                    }
+            $order = $token->originOrder();
+            $orderRepaid = (float)bcadd(
+                (string)($order['repaid_debt_amount'] ?? 0),
+                (string)$amount,
+                2
+            );
+            Db::name('store_order')->where('id', $token->originOrderId())->update([
+                'repaid_debt_amount' => $orderRepaid,
+            ]);
+            if ((int)($order['order_type'] ?? 0) === 1 && (int)($order['link_id'] ?? 0) > 0) {
+                /** @var UserRechargeDao $rechargeDao */
+                $rechargeDao = app()->make(UserRechargeDao::class);
+                $recharge = $rechargeDao->get((int)$order['link_id']);
+                if ($recharge) {
+                    $rechargeRepaid = (float)bcadd(
+                        (string)($recharge['repaid_debt_amount'] ?? 0),
+                        (string)$amount,
+                        2
+                    );
+                    $rechargeDao->update((int)$order['link_id'], [
+                        'repaid_debt_amount' => $rechargeRepaid,
+                    ]);
                 }
             }
             $this->allocateRepayToItems($debtId, $debtItemId, $amount);
             $this->allocateRepayToOrderCart($debt, $debtItemId, $amount);
+            $writer->completeMutationInTx($token, $prepared);
             return ['repay_id' => $repayId, 'status' => $status];
         };
 
-        if ($this->isInDbTransaction()) {
-            return $runner();
-        }
-        return $this->transaction($runner);
+        return $this->runDebtMutationTransaction($runner);
     }
 
     protected function allocateRepayToItems(int $debtId, int $debtItemId, float $amount): void
@@ -2146,65 +2387,131 @@ class StoreDebtServices extends BaseServices
         if ($repayOrderId <= 0 || $refundAmount <= 0) {
             return;
         }
-        $repay = $this->repayDao->get(['repay_order_id' => $repayOrderId]);
-        if (!$repay) {
-            return;
-        }
-        $repay = is_array($repay) ? $repay : $repay->toArray();
-        $debtId = (int)($repay['debt_id'] ?? 0);
-        if (!$debtId) {
-            return;
-        }
-        $debt = $this->dao->get($debtId);
-        if (!$debt) {
-            return;
-        }
-        $debt = is_array($debt) ? $debt : $debt->toArray();
-        if ((int)($debt['status'] ?? 0) === StoreDebt::STATUS_VOID) {
-            return;
-        }
-        $debtItemId = (int)($repay['debt_item_id'] ?? 0);
-        $now = time();
-        $newRepaid = (float)bcsub((string)($debt['repaid_debt'] ?? 0), (string)$refundAmount, 2);
-        if ($newRepaid < 0) {
-            $newRepaid = 0.0;
-        }
-        $status = bccomp((string)$newRepaid, (string)($debt['total_debt'] ?? 0), 2) >= 0
-            ? StoreDebt::STATUS_SETTLED
-            : StoreDebt::STATUS_PENDING;
-        $this->dao->update($debtId, [
-            'repaid_debt' => $newRepaid,
-            'status' => $status,
-            'update_time' => $now,
-        ]);
-        /** @var StoreOrderServices $orderServices */
-        $orderServices = app()->make(StoreOrderServices::class);
-        $originOrderId = (int)($debt['order_id'] ?? 0);
-        if ($originOrderId > 0) {
-            $order = $orderServices->get($originOrderId);
-            if ($order) {
-                $order = is_array($order) ? $order : $order->toArray();
-                $orderRepaid = (float)bcsub((string)($order['repaid_debt_amount'] ?? 0), (string)$refundAmount, 2);
-                if ($orderRepaid < 0) {
-                    $orderRepaid = 0.0;
-                }
-                $orderServices->update($originOrderId, ['repaid_debt_amount' => $orderRepaid]);
-                if ((int)($order['order_type'] ?? 0) === 1 && (int)($order['link_id'] ?? 0) > 0) {
-                    /** @var UserRechargeDao $rechargeDao */
-                    $rechargeDao = app()->make(UserRechargeDao::class);
-                    $recharge = $rechargeDao->get((int)$order['link_id']);
-                    if ($recharge) {
-                        $rechargeRepaid = (float)bcsub((string)($recharge['repaid_debt_amount'] ?? 0), (string)$refundAmount, 2);
-                        if ($rechargeRepaid < 0) {
-                            $rechargeRepaid = 0.0;
-                        }
-                        $rechargeDao->update((int)$order['link_id'], ['repaid_debt_amount' => $rechargeRepaid]);
+        $this->runDebtMutationTransaction(function () use ($repayOrderId, $refundAmount): void {
+            $repayHint = Db::name('store_debt_repay')
+                ->where('repay_order_id', $repayOrderId)
+                ->field('id,debt_id')
+                ->find();
+            if (!$repayHint || (int)($repayHint['debt_id'] ?? 0) <= 0) {
+                return;
+            }
+            $writer = $this->debtGuardWriter();
+            $guarded = $writer->lockDebtInTx((int)$repayHint['debt_id']);
+            $token = $guarded['token'];
+            $debt = $guarded['debt'];
+            $repay = Db::name('store_debt_repay')
+                ->where('repay_order_id', $repayOrderId)
+                ->lock(true)
+                ->find();
+            if (!$repay || (int)$repay['debt_id'] !== (int)$debt['id']) {
+                throw new ValidateException('补交记录与原欠款关系不一致');
+            }
+            if ((int)($debt['status'] ?? 0) === StoreDebt::STATUS_VOID) {
+                return;
+            }
+            $repayOrder = Db::name('store_order')
+                ->where('id', $repayOrderId)
+                ->field('id,is_debt_repay,debt_repay_origin_order_id,refund_price,pay_price')
+                ->lock(true)
+                ->find();
+            if (!$repayOrder
+                || (int)($repayOrder['is_debt_repay'] ?? 0) !== 1
+                || (int)($repayOrder['debt_repay_origin_order_id'] ?? 0) !== $token->originOrderId()) {
+                throw new ValidateException('补交订单与原欠款关系不一致');
+            }
+            $cumulativeRefund = $this->canonicalDebtMoney($repayOrder['refund_price'] ?? '0');
+            if (bccomp($cumulativeRefund, '0', 2) <= 0) {
+                $cumulativeRefund = $this->canonicalDebtMoney($refundAmount);
+            }
+            if (bccomp(
+                $cumulativeRefund,
+                $this->canonicalDebtMoney($repay['repay_amount'] ?? '0'),
+                2
+            ) > 0 || bccomp(
+                $cumulativeRefund,
+                $this->canonicalDebtMoney($refundAmount),
+                2
+            ) < 0) {
+                throw new ValidateException('补交退款累计金额不正确');
+            }
+            $fingerprint = $writer->fingerprint([
+                'path' => 'adjustment',
+                'operation' => 'repay_refund',
+                'originOrderId' => $token->originOrderId(),
+                'debtId' => (int)$debt['id'],
+                'repayId' => (int)$repay['id'],
+                'repayOrderId' => $repayOrderId,
+                'refundAmount' => $this->canonicalDebtMoney($refundAmount),
+                'cumulativeRefundAmount' => $cumulativeRefund,
+            ]);
+            $prepared = $writer->beginMutationInTx(
+                $token,
+                'adjustment',
+                'legacy-debt:reverse:' . $repayOrderId . ':' . str_replace('.', '', $cumulativeRefund),
+                $fingerprint,
+                'debt_repay_reversed'
+            );
+            if (!empty($prepared['idempotentReplay'])) {
+                return;
+            }
+
+            $debtId = (int)$debt['id'];
+            $debtItemId = (int)($repay['debt_item_id'] ?? 0);
+            $now = time();
+            if (bccomp(
+                $this->canonicalDebtMoney($debt['repaid_debt'] ?? '0'),
+                $this->canonicalDebtMoney($refundAmount),
+                2
+            ) < 0) {
+                throw new ValidateException('补交退款超过当前已还欠款');
+            }
+            $newRepaid = bcsub((string)($debt['repaid_debt'] ?? 0), (string)$refundAmount, 2);
+            $status = bccomp($newRepaid, (string)($debt['total_debt'] ?? 0), 2) >= 0
+                ? StoreDebt::STATUS_SETTLED
+                : StoreDebt::STATUS_PENDING;
+            if (!(bool)$this->dao->update($debtId, [
+                'repaid_debt' => (float)$newRepaid,
+                'status' => $status,
+                'update_time' => $now,
+            ])) {
+                throw new ValidateException('欠款反向调整失败');
+            }
+
+            $originOrder = $token->originOrder();
+            $orderRepaid = bcsub(
+                (string)($originOrder['repaid_debt_amount'] ?? 0),
+                (string)$refundAmount,
+                2
+            );
+            if (bccomp($orderRepaid, '0', 2) < 0) {
+                $orderRepaid = '0.00';
+            }
+            Db::name('store_order')->where('id', $token->originOrderId())->update([
+                'repaid_debt_amount' => (float)$orderRepaid,
+            ]);
+            if ((int)($originOrder['order_type'] ?? 0) === 1
+                && (int)($originOrder['link_id'] ?? 0) > 0) {
+                /** @var UserRechargeDao $rechargeDao */
+                $rechargeDao = app()->make(UserRechargeDao::class);
+                $recharge = $rechargeDao->get((int)$originOrder['link_id']);
+                if ($recharge) {
+                    $rechargeRepaid = bcsub(
+                        (string)($recharge['repaid_debt_amount'] ?? 0),
+                        (string)$refundAmount,
+                        2
+                    );
+                    if (bccomp($rechargeRepaid, '0', 2) < 0) {
+                        $rechargeRepaid = '0.00';
                     }
+                    $rechargeDao->update((int)$originOrder['link_id'], [
+                        'repaid_debt_amount' => (float)$rechargeRepaid,
+                    ]);
                 }
             }
-        }
-        $this->reverseAllocateRepayToItems($debtId, $debtItemId, $refundAmount);
-        $this->reverseAllocateRepayToOrderCart($debt, $debtItemId, $refundAmount);
+            $this->reverseAllocateRepayToItems($debtId, $debtItemId, $refundAmount);
+            $this->reverseAllocateRepayToOrderCart($debt, $debtItemId, $refundAmount);
+            $writer->completeMutationInTx($token, $prepared);
+        });
     }
 
     protected function reverseAllocateRepayToItems(int $debtId, int $debtItemId, float $amount): void

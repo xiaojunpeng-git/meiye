@@ -85,6 +85,8 @@ const RESULT_QUERY_ACTIONS = new Set([
 const QUERY_RESULT_ACTION_BY_COMMAND = Object.freeze({
   'submit-checkout': 'query-checkout-result',
   'retry-checkout': 'query-checkout-result',
+  // 充值欠款补交是独立的补交记录。提交失败直接回收银台重试，
+  // 不把一条简单补交转成通用结账的“查询原支付请求”流程。
   'confirm-service-completion': 'query-service-completion-result',
   'retry-service-completion': 'query-service-completion-result',
   'submit-hang-order': 'query-hang-order-result',
@@ -2659,6 +2661,7 @@ function isCashierWorkspaceAction(action) {
   return cashierWorkspaceActions.includes(action)
     || action === 'submit-recharge'
     || action === 'prepare-recharge-checkout'
+    || action === 'prepare-recharge-debt-repayment'
     || action === 'add-recharge-checkout-payment-method'
     || action === 'update-recharge-checkout-payment-line'
     || action === 'remove-recharge-checkout-payment-line'
@@ -2741,7 +2744,8 @@ function resolveCommandContexts(action, payload) {
   // inside its transaction. Its declared context policy contains the workspace,
   // member and member balance only, so sending a synthetic debt_record context
   // would be rejected before the command can reach that server-side guard.
-  if ((payload.debtRecordId || payload.debtItemId) && action !== 'submit-recharge-debt-repayment') {
+  if ((payload.debtRecordId || payload.debtItemId)
+    && !['submit-recharge-debt-repayment', 'prepare-recharge-debt-repayment'].includes(action)) {
     contexts.push(buildCommandContext('debt_record', payload.debtRecordId || payload.debtItemId))
   }
 
@@ -2767,7 +2771,7 @@ function resolveCommandContexts(action, payload) {
     contexts.push(buildCommandContext('member_balance', payload.memberId))
   }
 
-  if ((action === 'submit-recharge' || action === 'prepare-recharge-checkout'
+  if ((action === 'submit-recharge' || action === 'prepare-recharge-checkout' || action === 'prepare-recharge-debt-repayment'
     || action === 'add-recharge-checkout-payment-method' || action === 'update-recharge-checkout-payment-line'
     || action === 'remove-recharge-checkout-payment-line' || action === 'update-recharge-checkout-business-source'
     || action === 'update-recharge-checkout-business-date'

@@ -24,7 +24,7 @@ use think\facade\Db;
 final class CashierV3EntitlementResourceVersionProvider implements CashierV3DataScopedVersionProvider
 {
     public const VERSION_TABLE = 'cashier_v3_entitlement_resource_version';
-    public const KINDS = ['member', 'member_benefit_pool', 'card_holder'];
+    public const KINDS = ['member', 'member_benefit_pool', 'card_holder', 'debt_record'];
 
     /** @var CashierV3CashierReadinessGuard */
     private $readiness;
@@ -120,7 +120,8 @@ final class CashierV3EntitlementResourceVersionProvider implements CashierV3Data
             && in_array($action, ['update-member', 'deactivate-member'], true);
         $cardMutation = $action === 'submit-card-operation'
             && in_array($kind, ['card_holder', 'member_benefit_pool'], true);
-        if (!$memberMutation && !$cardMutation) {
+        $debtMutation = $action === 'submit-debt-repayment' && $kind === 'debt_record';
+        if (!$memberMutation && !$cardMutation && !$debtMutation) {
             throw new CashierV3CommandException(
                 CashierV3ResultCode::ACTION_DEPENDENCY_NOT_READY,
                 '会员权益写入尚未接入统一版本推进，本次操作已停止。',
@@ -330,6 +331,67 @@ final class CashierV3EntitlementResourceVersionProvider implements CashierV3Data
                     'order' => $this->orderFingerprintFields($order),
                     'card_state' => $state,
                     'card_rule_state' => $ruleState,
+                ]),
+            ];
+        }
+
+        if ($kind === 'debt_record') {
+            $query = Db::name('cashier_v3_debt_authority')->alias('a')
+                ->join('store_debt d', 'd.id=a.debt_id')
+                ->where('a.debt_id', $id)
+                ->where('a.tenant_id', $operatorScope->tenantId())
+                ->where('a.store_id', $operatorScope->storeId())
+                ->field('a.debt_id,a.member_id,a.sales_order_id,a.authority_fingerprint,d.uid,d.store_id,d.total_debt,d.repaid_debt,d.status,d.update_time');
+            if ($lock) {
+                $query->lock(true);
+            }
+            $debt = $query->find();
+            if (!$debt
+                || (int)$debt['member_id'] !== (int)$debt['uid']
+                || !$this->allowsSourceStore((int)$debt['store_id'], $operatorScope)) {
+                // 充值欠款使用 order_id=0，并由独立的充值欠款权威表维护。
+                // 版本发现必须和会员欠款投影使用同一权威分支，否则有效充值欠款
+                // 在打开“补交”时会被误判为不存在，无法进入收款流程。
+                $rechargeQuery = Db::name('cashier_v3_recharge_debt_authority')->alias('a')
+                    ->join('store_debt d', 'd.id=a.debt_id')
+                    ->where('a.debt_id', $id)
+                    ->where('a.tenant_id', $operatorScope->tenantId())
+                    ->where('a.store_id', $operatorScope->storeId())
+                    ->field('a.debt_id,a.member_id,a.recharge_id,a.recharge_order_no_snapshot,a.authority_fingerprint,d.uid,d.store_id,d.order_id,d.total_debt,d.repaid_debt,d.status,d.update_time');
+                if ($lock) {
+                    $rechargeQuery->lock(true);
+                }
+                $rechargeDebt = $rechargeQuery->find();
+                if (!$rechargeDebt
+                    || (int)$rechargeDebt['member_id'] !== (int)$rechargeDebt['uid']
+                    || (int)($rechargeDebt['order_id'] ?? 0) !== 0
+                    || !$this->allowsSourceStore((int)$rechargeDebt['store_id'], $operatorScope)) {
+                    return null;
+                }
+                return [
+                    'member_id' => (int)$rechargeDebt['member_id'],
+                    'fingerprint' => $this->fingerprint([
+                        'debt_id' => (int)$rechargeDebt['debt_id'],
+                        'recharge_id' => (int)$rechargeDebt['recharge_id'],
+                        'recharge_order_no_snapshot' => (string)$rechargeDebt['recharge_order_no_snapshot'],
+                        'authority_fingerprint' => (string)$rechargeDebt['authority_fingerprint'],
+                        'total_debt' => (string)$rechargeDebt['total_debt'],
+                        'repaid_debt' => (string)$rechargeDebt['repaid_debt'],
+                        'status' => (int)$rechargeDebt['status'],
+                        'update_time' => (int)$rechargeDebt['update_time'],
+                    ]),
+                ];
+            }
+            return [
+                'member_id' => (int)$debt['member_id'],
+                'fingerprint' => $this->fingerprint([
+                    'debt_id' => (int)$debt['debt_id'],
+                    'sales_order_id' => (string)$debt['sales_order_id'],
+                    'authority_fingerprint' => (string)$debt['authority_fingerprint'],
+                    'total_debt' => (string)$debt['total_debt'],
+                    'repaid_debt' => (string)$debt['repaid_debt'],
+                    'status' => (int)$debt['status'],
+                    'update_time' => (int)$debt['update_time'],
                 ]),
             ];
         }
