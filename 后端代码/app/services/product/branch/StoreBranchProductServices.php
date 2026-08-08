@@ -19,6 +19,8 @@ use app\services\BaseServices;
 use app\services\order\StoreCartServices;
 use app\services\product\brand\StoreBrandServices;
 use app\services\product\product\StoreCardRelatedServices;
+use app\services\product\product\StoreCatalogWriteLease;
+use app\services\product\product\StoreCatalogWriteLockGuard;
 use app\services\product\product\StoreDescriptionServices;
 use app\services\product\product\StoreProductCouponServices;
 use app\services\product\product\StoreProductRelationServices;
@@ -37,6 +39,10 @@ use app\services\user\UserServices;
 use mohe\exceptions\AdminException;
 use mohe\traits\ServicesTrait;
 use think\exception\ValidateException;
+
+final class StoreBranchProductSyncPlanChangedException extends \RuntimeException
+{
+}
 
 /**
  * Class StoreBranchProductServices
@@ -530,31 +536,42 @@ class StoreBranchProductServices extends BaseServices
         if (!$info) {
             throw new AdminException('操作失败！');
         }
-        //平台统一商品
-        if ($info['pid']) {
-            $productInfo = $this->dao->get($info['pid']);
-            if ($is_show && !$productInfo['is_show']) {
-                throw new AdminException('平台该商品暂未上架！');
-            }
+        $productIds = [$id];
+        if ((int)$info['pid'] > 0) {
+            $productIds[] = (int)$info['pid'];
         }
-        /** @var StoreCartServices $cartService */
-        $cartService = app()->make(StoreCartServices::class);
-        $cartService->batchUpdate([$id], ['status' => $is_show], 'product_id');
-        $update = ['is_show' => $is_show];
-        if ($is_show) {//手动上架 清空定时下架状态
-            if ($info['is_verify'] != 1) {//验证商品是否审核通过
-                throw new AdminException('该商品暂未审核通过');
+        /** @var StoreCatalogWriteLockGuard $catalogGuard */
+        $catalogGuard = app()->make(StoreCatalogWriteLockGuard::class);
+        $catalogGuard->withComponentCatalogMutation($productIds, function (StoreCatalogWriteLease $catalogLease) use ($id, $is_show, $info) {
+            $lockedInfo = $this->dao->get($id);
+            if (!$lockedInfo || (int)$lockedInfo['pid'] !== (int)$info['pid']) {
+                throw new AdminException('商品状态已变化，请刷新后重试');
             }
-            $update['auto_off_time'] = 0;
-        }
-        $res = $this->update($info['id'], $update);
-        /** @var StoreProductRelationServices $storeProductRelationServices */
-        $storeProductRelationServices = app()->make(StoreProductRelationServices::class);
-        $storeProductRelationServices->setShow([$id], (int)$is_show);
-        /** @var StoreCardRelatedServices $relatedService */
-        $relatedService = app()->make(StoreCardRelatedServices::class);
-        $relatedService->setStatus([$id], (int)$is_show);
-        if (!$res) throw new AdminException('操作失败！');
+            if ($lockedInfo['pid']) {
+                $productInfo = $this->dao->get($lockedInfo['pid']);
+                if ($is_show && !$productInfo['is_show']) {
+                    throw new AdminException('平台该商品暂未上架！');
+                }
+            }
+            /** @var StoreCartServices $cartService */
+            $cartService = app()->make(StoreCartServices::class);
+            $cartService->batchUpdate([$id], ['status' => $is_show], 'product_id');
+            $update = ['is_show' => $is_show];
+            if ($is_show) {
+                if ($lockedInfo['is_verify'] != 1) {
+                    throw new AdminException('该商品暂未审核通过');
+                }
+                $update['auto_off_time'] = 0;
+            }
+            $res = $this->update($lockedInfo['id'], $update);
+            /** @var StoreProductRelationServices $storeProductRelationServices */
+            $storeProductRelationServices = app()->make(StoreProductRelationServices::class);
+            $storeProductRelationServices->setShow([$id], (int)$is_show);
+            /** @var StoreCardRelatedServices $relatedService */
+            $relatedService = app()->make(StoreCardRelatedServices::class);
+            $relatedService->setStatusInGuard($catalogLease, [$id], (int)$is_show);
+            if (!$res) throw new AdminException('操作失败！');
+        });
     }
 
     /**
@@ -602,17 +619,37 @@ class StoreBranchProductServices extends BaseServices
 
         //查询目前商品已经同步的门店
         $alreadyIds = $this->dao->getColumn(['type' => 1, 'pid' => $product_id], 'relation_id');
+        $deactivateProductIds = [];
         switch ($applicable_type) {
             case 0://仅平台
                 $ids = [];
-                $this->dao->update(['type' => 1, 'pid' => $product_id], ['is_del' => 1]);
+                $deactivateProductIds = $this->dao->getColumn(['type' => 1, 'pid' => $product_id], 'id');
                 break;
             case 1://全部门店
                 break;
             case 2://部分门店
                 $delIds = array_merge(array_diff($alreadyIds, $ids));
-                if ($delIds) $this->dao->update(['type' => 1, 'pid' => $product_id, 'relation_id' => $delIds], ['is_del' => 1]);
+                if ($delIds) {
+                    $deactivateProductIds = $this->dao->getColumn([
+                        'type' => 1,
+                        'pid' => $product_id,
+                        'relation_id' => $delIds,
+                    ], 'id');
+                }
                 break;
+        }
+        if ($deactivateProductIds) {
+            /** @var StoreCatalogWriteLockGuard $catalogGuard */
+            $catalogGuard = app()->make(StoreCatalogWriteLockGuard::class);
+            $catalogGuard->withComponentCatalogMutation(
+                array_merge([$product_id], $deactivateProductIds),
+                function (StoreCatalogWriteLease $catalogLease) use ($deactivateProductIds) {
+                    $this->dao->update(['id' => $deactivateProductIds], ['is_del' => 1, 'is_show' => 0]);
+                    /** @var StoreCardRelatedServices $relatedService */
+                    $relatedService = app()->make(StoreCardRelatedServices::class);
+                    $relatedService->setStatusInGuard($catalogLease, $deactivateProductIds, 0);
+                }
+            );
         }
         if (!$ids) {
             return true;
@@ -642,6 +679,26 @@ class StoreBranchProductServices extends BaseServices
      */
     public function syncProduct(int $product_id, int $store_id, int $card_product_id = 0, int $is_sync_stock = 0, int $is_sync_show = 1)
     {
+        for ($attempt = 1; $attempt <= 3; $attempt++) {
+            try {
+                return $this->syncProductAttempt(
+                    $product_id,
+                    $store_id,
+                    $card_product_id,
+                    $is_sync_stock,
+                    $is_sync_show
+                );
+            } catch (StoreBranchProductSyncPlanChangedException $exception) {
+                if ($attempt === 3) {
+                    throw new AdminException('门店商品同步期间目录已变化，请稍后重试');
+                }
+            }
+        }
+        throw new AdminException('门店商品同步规划失败');
+    }
+
+    private function syncProductAttempt(int $product_id, int $store_id, int $card_product_id, int $is_sync_stock, int $is_sync_show)
+    {
         // 【库存铁律】永久不同步实物库存
         $is_sync_stock = 0;
         if (!$product_id || !$store_id) {
@@ -656,10 +713,12 @@ class StoreBranchProductServices extends BaseServices
             return true;
         }
         $productInfo = $productInfo->toArray();
+        $sourceProductSnapshot = $productInfo;
         $productInfo['pid'] = $productInfo['id'];
         $productInfo['slider_image'] = json_encode($productInfo['slider_image']);
         $productInfo['custom_form'] = json_encode($productInfo['custom_form']);
         $productInfo['specs'] = is_array($productInfo['specs']) ? json_encode($productInfo['specs']) : $productInfo['specs'];
+        $applicableStoreIdUpdate = null;
         if ($productInfo['applicable_type'] == 2) {
             $applicable_store_id = $productInfo['applicable_store_id'];
             if (!is_array($applicable_store_id)) {
@@ -667,7 +726,7 @@ class StoreBranchProductServices extends BaseServices
             }
             $applicable_store_id[] = $store_id;
             $applicableStoreId = array_unique($applicable_store_id);
-            $this->dao->update($product_id, ['applicable_store_id' => $applicableStoreId]);
+            $applicableStoreIdUpdate = $applicableStoreId;
             $productInfo['applicable_store_id'] = $applicableStoreId;
         }
         $deliveryType = is_string($productInfo['delivery_type']) ? explode(',', $productInfo['delivery_type']) : $productInfo['delivery_type'];
@@ -717,16 +776,91 @@ class StoreBranchProductServices extends BaseServices
             $productInfo['store_cate_id'] = $branchProductInfo['store_cate_id'];
             $relationData['store_cate_id'] = $branchProductInfo['store_cate_id'];
         }
-        [$id, $is_new] = $productServices->transaction(function () use (
-            $product_id, $branchProductInfo, $productInfo, $store_id, $storeInfo, $attrInfo, $attrResult, $attrValue, $description,
-            $productServices, $productAttrServices, $productAttrResultServices, $productAttrValueServices, $productDescriptionServices, $productReservationTimeServices, $card_product_id, $is_sync_stock, $is_sync_show
+        $sourceCardRelated = [];
+        $targetRefs = [];
+        $explicitCardIds = $card_product_id > 0 ? [$card_product_id] : [];
+        $catalogProductIds = [$product_id];
+        if ($branchProductInfo) {
+            $catalogProductIds[] = (int)$branchProductInfo['id'];
+        }
+        if ((int)$productInfo['product_type'] === 5) {
+            /** @var StoreCardRelatedServices $sourceRelatedService */
+            $sourceRelatedService = app()->make(StoreCardRelatedServices::class);
+            $sourceCardRelated = $sourceRelatedService->getCardRelatedProduct($product_id);
+            foreach ($sourceCardRelated as $row) {
+                $row['cardProductId'] = $branchProductInfo ? (int)$branchProductInfo['id'] : 0;
+                $targetRefs[] = $row;
+            }
+            if ($branchProductInfo) {
+                $explicitCardIds[] = (int)$branchProductInfo['id'];
+            }
+        }
+        /** @var StoreCatalogWriteLockGuard $catalogGuard */
+        $catalogGuard = app()->make(StoreCatalogWriteLockGuard::class);
+        [$id, $is_new] = $catalogGuard->withCatalogMutation(
+            $explicitCardIds,
+            $catalogProductIds,
+            $targetRefs,
+            function (StoreCatalogWriteLease $catalogLease) use (
+            $product_id, $branchProductInfo, &$productInfo, $store_id, $storeInfo, $attrInfo, $attrResult, $attrValue, &$description,
+            $productServices, $productAttrServices, $productAttrResultServices, $productAttrValueServices, $productDescriptionServices, $productReservationTimeServices, $card_product_id, $is_sync_stock, $is_sync_show,
+            $catalogGuard, &$sourceCardRelated, $applicableStoreIdUpdate, $sourceProductSnapshot, &$relationData
         ) {
+            $currentProduct = $productServices->get([
+                'type' => [0, 2],
+                'product_type' => [0, 4, 5, 6],
+                'id' => $product_id,
+            ]);
+            $currentProduct = $currentProduct ? $currentProduct->toArray() : [];
+            $this->assertSyncSnapshotUnchanged('平台商品', $sourceProductSnapshot, $currentProduct);
+
+            $currentBranchProductInfo = $this->dao->get([
+                'pid' => $product_id,
+                'type' => 1,
+                'relation_id' => $store_id,
+            ]);
+            $plannedBranchId = $branchProductInfo ? (int)$branchProductInfo['id'] : 0;
+            $currentBranchId = $currentBranchProductInfo ? (int)$currentBranchProductInfo['id'] : 0;
+            if ($plannedBranchId !== $currentBranchId) {
+                throw new StoreBranchProductSyncPlanChangedException('branch product changed');
+            }
+            $branchProductInfo = $currentBranchProductInfo;
+            if ($branchProductInfo) {
+                $productInfo['store_cate_id'] = $branchProductInfo['store_cate_id'];
+                $relationData['store_cate_id'] = $branchProductInfo['store_cate_id'];
+            }
+
+            $where = ['product_id' => $product_id, 'type' => 0];
+            $currentAttrInfo = $productAttrServices->getProductAttr($where);
+            $currentAttrResult = $productAttrResultServices->getResult($where);
+            $currentAttrValue = $productAttrValueServices->getList($where);
+            $currentDescription = $productDescriptionServices->getDescription($where) ?: '';
+            $this->assertSyncSnapshotUnchanged('平台商品规格', $attrInfo, $currentAttrInfo);
+            $this->assertSyncSnapshotUnchanged('平台商品规格结果', $attrResult, $currentAttrResult);
+            $this->assertSyncSnapshotUnchanged('平台商品 SKU', $attrValue, $currentAttrValue);
+            $this->assertSyncSnapshotUnchanged('平台商品描述', $description, $currentDescription);
+            $attrInfo = $currentAttrInfo;
+            $attrResult = $currentAttrResult;
+            $attrValue = $currentAttrValue;
+            $description = $currentDescription;
+
+            if ((int)$productInfo['product_type'] === 5) {
+                /** @var StoreCardRelatedServices $sourceRelatedService */
+                $sourceRelatedService = app()->make(StoreCardRelatedServices::class);
+                $currentSourceCardRelated = $sourceRelatedService->getCardRelatedProduct($product_id);
+                $this->assertSyncSnapshotUnchanged('平台卡项权益', $sourceCardRelated, $currentSourceCardRelated);
+                $sourceCardRelated = $currentSourceCardRelated;
+            }
+            if ($applicableStoreIdUpdate !== null) {
+                $this->dao->update($product_id, ['applicable_store_id' => $applicableStoreIdUpdate]);
+            }
             $productInfo['is_del'] = 0;
             $productInfo['type'] = 1;
             $productInfo['relation_id'] = $store_id;
             $reservationTime = [];
             if ($branchProductInfo) {//二次同步，编辑
                 $id = $branchProductInfo['id'];
+                $catalogLease->assertCoversProducts([(int)$id]);
                 unset($productInfo['stock'], $productInfo['is_show']);
                 $res = $this->dao->update($id, $productInfo);
                 if (!$res) throw new ValidateException('商品添加失败');
@@ -775,7 +909,7 @@ class StoreBranchProductServices extends BaseServices
                         $attrId = $oldAttrValue[$item['suk']]['id'];
                         $unique = $oldAttrValue[$item['suk']]['unique'];
                         unset($item['suk'], $item['unique']);
-                        $res1 = $res1 && $productAttrValueServices->update($attrId, $item);
+                        $res1 = $res1 && $productAttrValueServices->updateInGuard($catalogLease, $attrId, $item);
                     } else {
                         $unique = $productAttrServices->createAttrUnique($id, $item['suk']);
                         $item['unique'] = $unique;
@@ -792,11 +926,11 @@ class StoreBranchProductServices extends BaseServices
                 }
                 if ($delSuks) {
                     // 门店二次同步删规格前校验：禁止静默丢门店库存
-                    $productAttrValueServices->assertSkusCanBeDeleted((int)$id, $delSuks, $oldAttrValue ?: []);
-                    $res2 = $productAttrValueServices->del($id, 0, $delSuks);
+                    $productAttrValueServices->assertSkusCanBeDeleted((int)$id, $delSuks, $oldAttrValue ?: [], $catalogLease);
+                    $res2 = $productAttrValueServices->delInGuard($catalogLease, $id, 0, $delSuks);
                 }
                 if ($dataAll) {
-                    $res3 = $productAttrValueServices->saveAll($dataAll);
+                    $res3 = $productAttrValueServices->saveAllInGuard($catalogLease, $dataAll);
                 }
                 if (!$res1 || !$res2 || !$res3) {
                     throw new AdminException('商品规格信息保存失败');
@@ -813,6 +947,19 @@ class StoreBranchProductServices extends BaseServices
                 $res = $this->dao->save($productInfo);
                 if (!$res) throw new ValidateException('商品添加失败');
                 $id = (int)$res->id;
+                $newCardRefs = [];
+                if ((int)$productInfo['product_type'] === 5) {
+                    foreach ($sourceCardRelated as $row) {
+                        $row['cardProductId'] = $id;
+                        $newCardRefs[] = $row;
+                    }
+                }
+                $catalogGuard->adoptCreatedProduct(
+                    $catalogLease,
+                    $id,
+                    (int)$productInfo['product_type'],
+                    $newCardRefs
+                );
                 if ($attrValue) {
                     foreach ($attrValue as &$value) {
                         unset($value['id'], $value['sales']);
@@ -833,7 +980,7 @@ class StoreBranchProductServices extends BaseServices
                         }
                         $value['unique'] = $unique;
                     }
-                    $productAttrValueServices->saveAll($attrValue);
+                    $productAttrValueServices->saveAllInGuard($catalogLease, $attrValue);
                 }
                 $is_new = 1;
             }
@@ -857,20 +1004,24 @@ class StoreBranchProductServices extends BaseServices
             if ($productInfo['product_type'] == 5) {//卡项商品
                 /** @var StoreCardRelatedServices $relatedService */
                 $relatedService = app()->make(StoreCardRelatedServices::class);
-                $related = $relatedService->getCardRelatedProduct($product_id);
-                $res = $cardRelatedServices->handleCardRelated($id, $related);
-                if ($res) {
-                    ProductSyncStoreJob::dispatchDo('syncCardRelatedProducts', [$store_id, $product_id, $related, $id]);
-                }
+                $related = $sourceCardRelated;
+                $cardRelatedServices->handleCardRelatedInGuard($catalogLease, $id, $related);
             }
             //处理卡项关联商品
             if (in_array($productInfo['product_type'], [0, 6]) && $card_product_id) {
-                $cardRelatedServices->updateCardProduct($productInfo['pid'], $card_product_id, $id);
+                $cardRelatedServices->updateCardProductInGuard($catalogLease, $productInfo['pid'], $card_product_id, $id);
             }
             if ($attrResult) $productAttrResultServices->setResult($attrResult, $id, 0);
             $productDescriptionServices->saveDescription($id, $description, 0);
             return [$id, $is_new];
         });
+
+        if ((int)$productInfo['product_type'] === 5 && $sourceCardRelated) {
+            ProductSyncStoreJob::dispatchDo(
+                'syncCardRelatedProducts',
+                [$store_id, $product_id, $sourceCardRelated, $id]
+            );
+        }
 
         //商品创建事件
         event('product.create', [$id, $productInfo, [], $is_new, [], $description, 1, $relationData]);
@@ -878,6 +1029,31 @@ class StoreBranchProductServices extends BaseServices
         $this->dao->cacheTag()->clear();
         $productAttrServices->cacheTag()->clear();
         return true;
+    }
+
+    private function assertSyncSnapshotUnchanged(string $label, $planned, $current): void
+    {
+        if ($this->normalizeSyncSnapshot($planned) !== $this->normalizeSyncSnapshot($current)) {
+            throw new StoreBranchProductSyncPlanChangedException($label . ' changed');
+        }
+    }
+
+    private function normalizeSyncSnapshot($value)
+    {
+        if (is_object($value) && method_exists($value, 'toArray')) {
+            $value = $value->toArray();
+        }
+        if (!is_array($value)) {
+            return $value;
+        }
+        $normalized = [];
+        foreach ($value as $key => $item) {
+            $normalized[$key] = $this->normalizeSyncSnapshot($item);
+        }
+        if (array_keys($normalized) !== range(0, count($normalized) - 1)) {
+            ksort($normalized);
+        }
+        return $normalized;
     }
 
     /**
@@ -916,17 +1092,19 @@ class StoreBranchProductServices extends BaseServices
 			/** @var StoreCardRelatedServices $relatedService */
 			$relatedService = app()->make(StoreCardRelatedServices::class);
             // 校验与物理删除同一事务，保证行锁覆盖到删除；任一不满足则整批拒绝
-            $this->transaction(function () use (
+            /** @var StoreCatalogWriteLockGuard $catalogGuard */
+            $catalogGuard = app()->make(StoreCatalogWriteLockGuard::class);
+            $catalogGuard->withComponentCatalogMutation($productIds, function (StoreCatalogWriteLease $catalogLease) use (
                 $productIds, $productAttrServices, $productAttrResultServices, $productAttrValueServices,
                 $productDescriptionServices, $productRelationServices, $productCoupon, $productRelation,
                 $productReservationTimeServices, $relatedService, $productReplyServices, $productReplyCommentServices
             ) {
-                $productAttrValueServices->assertProductsSkusCanBeDeleted($productIds);
+                $productAttrValueServices->assertProductsSkusCanBeDeleted($productIds, $catalogLease);
                 $idsArr = array_chunk($productIds, 100);
                 foreach ($idsArr as $ids) {
                     $productAttrServices->delete(['product_id' => $ids, 'type' => 0]);
                     $productAttrResultServices->delete(['product_id' => $ids, 'type' => 0]);
-                    $productAttrValueServices->delete(['product_id' => $ids, 'type' => 0]);
+                    $productAttrValueServices->deleteInGuard($catalogLease, ['product_id' => $ids, 'type' => 0]);
                     $productDescriptionServices->delete(['product_id' => $ids, 'type' => 0]);
                     $productRelationServices->delete(['product_id' => $ids]);
                     //删除商品关联优惠券数据
@@ -935,7 +1113,7 @@ class StoreBranchProductServices extends BaseServices
                     $productRelation->delete(['relation_id' => $ids, 'category' => UserRelationServices::CATEGORY_PRODUCT]);
                     $productReservationTimeServices->delete(['product_id' => $ids]);
                     //删除卡项权益数据
-                    $relatedService->delete(['product_id' => $ids]);
+                    $relatedService->deleteForProductsInGuard($catalogLease, $ids);
                     $this->dao->delete(['id' => $ids]);
 
                     $replyIds = $productReplyServices->getColumn([['product_id', 'IN', $ids]], 'id');
@@ -972,23 +1150,36 @@ class StoreBranchProductServices extends BaseServices
 		if (!$pIds) {
 			return true;
 		}
-		foreach ($pIds as $id => $p) {
-			//门店商品sku
-			$attrValue = $productAttrValueServices->getList(['product_id' => $id, 'type' => 0]);
-			//平台商品sku
-			$platAttrValue = $productAttrValueServices->getSkuArray(['product_id' => $p['pid'], 'type' => 0], '*', 'suk');
-			//平台商品
-			$pProduct = $this->dao->get($p['pid'], ['id', 'price']);
-			foreach ($attrValue as $item) {
-				//恢复门店商品sku售价，到平台该sku售价
-				if (isset($platAttrValue[$item['suk']]['price'])) {
-					$price = $platAttrValue[$item['suk']]['price'];
-					$productAttrValueServices->update($item['id'], ['price' => $price]);
+		$catalogProductIds = array_map('intval', array_keys($pIds));
+		foreach ($pIds as $p) {
+			$catalogProductIds[] = (int)($p['pid'] ?? 0);
+		}
+		/** @var StoreCatalogWriteLockGuard $catalogGuard */
+		$catalogGuard = app()->make(StoreCatalogWriteLockGuard::class);
+		$catalogGuard->withComponentCatalogMutation(
+			$catalogProductIds,
+			function (StoreCatalogWriteLease $catalogLease) use ($pIds, $productAttrValueServices) {
+				foreach ($pIds as $id => $p) {
+					// 商品与全部 SKU 已按 42 -> 43 锁定，再恢复门店售价。
+					$attrValue = $productAttrValueServices->getList(['product_id' => $id, 'type' => 0]);
+					$platAttrValue = $productAttrValueServices->getSkuArray([
+						'product_id' => $p['pid'],
+						'type' => 0,
+					], '*', 'suk');
+					$pProduct = $this->dao->get($p['pid'], ['id', 'price']);
+					foreach ($attrValue as $item) {
+						if (isset($platAttrValue[$item['suk']]['price'])) {
+							$productAttrValueServices->updateInGuard(
+								$catalogLease,
+								$item['id'],
+								['price' => $platAttrValue[$item['suk']]['price']]
+							);
+						}
+					}
+					$this->dao->update($id, ['price' => $pProduct['price']]);
 				}
 			}
-			//修改门店商品售价
-			$this->dao->update($id, ['price' => $pProduct['price']]);
-		}
+		);
 		// 清除缓存
 		$this->dao->cacheTag()->clear();
 		/** @var StoreProductAttrServices $attrService */

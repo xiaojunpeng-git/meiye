@@ -62,7 +62,7 @@
         </div>
         <div v-show="currentTab === '2'">
           <!-- 商品规格的设置 -->
-          <FormItem label="商品规格：" v-if="formData.product_type != 4 && formData.product_type != 5 && formData.product_type != 6">
+          <FormItem label="商品规格：" v-if="formData.product_type != 0 && formData.product_type != 4 && formData.product_type != 5 && formData.product_type != 6">
             <div class="flex-y-center">
               <RadioGroup v-model="formData.spec_type">
                 <Radio :disabled="disabledSpecType" :label="0" class="radio"
@@ -403,6 +403,7 @@
                           v-model="oneFormBatch[0].price"
                           :min="0"
                           :max="9999999999"
+                          :step="1"
                           class="priceBox"
                           clearable
                         ></InputNumber>
@@ -417,6 +418,7 @@
                           v-model="oneFormBatch[0].settle_price"
                           :min="0"
                           :max="9999999999"
+                          :step="1"
                           class="priceBox"
                         ></InputNumber>
                       </template>
@@ -426,6 +428,7 @@
                           v-model="oneFormBatch[0].cost"
                           :min="0"
                           :max="9999999999"
+                          :step="1"
                           class="priceBox"
                           clearable
                         ></InputNumber>
@@ -435,6 +438,7 @@
                           :controls="false"
                           v-model="oneFormBatch[0].ot_price"
                           :min="0"
+                          :step="1"
                           class="priceBox"
                           clearable
                         ></InputNumber>
@@ -565,6 +569,7 @@
                           v-model="manyFormValidate[scope.$index].price"
                           :min="0"
                           :max="9999999999"
+                          :step="1"
                           class="priceBox"
 						  @on-change='changeManyPrice(scope.$index,$event)'
                         ></InputNumber>
@@ -632,6 +637,7 @@
                           v-model="manyFormValidate[scope.$index].settle_price"
                           :min="0"
                           :max="9999999999"
+                          :step="1"
                           class="priceBox"
                         ></InputNumber>
                       </template>
@@ -641,6 +647,7 @@
                           v-model="manyFormValidate[scope.$index].cost"
                           :min="0"
                           :max="9999999999"
+                          :step="1"
                           class="priceBox"
                         ></InputNumber>
                       </template>
@@ -650,6 +657,7 @@
                           v-model="manyFormValidate[scope.$index].ot_price"
                           :min="0"
                           :max="9999999999"
+                          :step="1"
                           class="priceBox"
                         ></InputNumber>
                       </template>
@@ -817,6 +825,14 @@
               [0, 1, 3].includes(formData.product_type)
             "
           >
+            <FormItem v-if="formData.product_type === 0" label="规格名称：">
+              <Input
+                v-model.trim="formData.single_spec_name"
+                :maxlength="30"
+                placeholder="请输入规格名称"
+                v-width="'50%'"
+              ></Input>
+            </FormItem>
             <FormItem label="图片：" required>
               <div class="pictrueBox inline-block" @click="attrPicTap()">
                 <div class="pictrue" v-if="formData.attr.pic">
@@ -832,6 +848,7 @@
                 v-model="formData.attr.price"
                 :min="0"
                 :max="99999999"
+                :step="1"
                 v-width="'50%'"
 				@on-change='changePrice'
               ></InputNumber>
@@ -857,9 +874,10 @@
             <FormItem label="结算价：" v-if="merchantType == 2 || goodsSource == 2" prop="settle_price" :rules="ruleValidate.settle_price">
               <InputNumber
                 v-model="formData.attr.settle_price"
-				:disabled="$route.params.id"
+					:disabled="$route.params.id"
                 :min="0"
                 :max="99999999"
+                :step="1"
                 v-width="'50%'"
               ></InputNumber>
             </FormItem>
@@ -868,6 +886,7 @@
                 v-model="formData.attr.cost"
                 :min="0"
                 :max="99999999"
+                :step="1"
                 v-width="'50%'"
               ></InputNumber>
             </FormItem>
@@ -876,6 +895,7 @@
                 v-model="formData.attr.ot_price"
                 :min="0"
                 :max="99999999"
+                :step="1"
                 v-width="'50%'"
               ></InputNumber>
             </FormItem>
@@ -899,7 +919,7 @@
             </FormItem>
             <FormItem
               label="库存："
-              v-else-if="formData.product_type != 0 && formData.product_type != 1"
+              v-else-if="formData.product_type != 0 && formData.product_type != 1 && formData.product_type != 5 && formData.product_type != 6"
               prop="stock"
               :rules="ruleValidate.stock"
               key="stock1b"
@@ -976,6 +996,15 @@
             </template>
           </div>
           <div v-if="formData.product_type == 5 || (formData.product_type == 4 && formData.spec_type == 0)">
+            <FormItem v-if="formData.product_type == 5" label="卡项规则：" required key="card_rule_type">
+              <RadioGroup :value="formData.card_rule_type" @on-change="requestCardRuleChange">
+                <Radio label="normal">普通卡</Radio>
+                <Radio label="choice_kind">任选种数卡</Radio>
+                <Radio label="choice_count">任选次数卡</Radio>
+                <Radio label="time">时间卡</Radio>
+              </RadioGroup>
+              <div class="card-rule-summary" v-if="cardRuleSummary">{{ cardRuleSummary }}</div>
+            </FormItem>
             <FormItem v-if="formData.product_type == 5" label="图片：" required>
               <div class="pictrueBox inline-block" @click="attrPicTap()">
                 <div class="pictrue" v-if="formData.attr.pic">
@@ -998,10 +1027,11 @@
             </FormItem>
             <FormItem label="核销时效：" key="write_valid">
               <RadioGroup v-model="formData.attr.write_valid">
-                <Radio :label="1">永久有效</Radio>
-                <Radio :label="2">购买后几天有效</Radio>
+                <Radio :label="1" v-if="formData.product_type != 5 || formData.card_rule_type != 'time'">永久有效</Radio>
+                <Radio :label="2">{{ formData.product_type == 5 ? '开卡后若干天有效' : '购买后几天有效' }}</Radio>
                 <Radio :label="3">固定有效期</Radio>
               </RadioGroup>
+              <div class="tips" v-if="formData.product_type == 5 && formData.card_rule_type == 'time'">时间卡不允许永久有效</div>
               <div class="tips" v-if="formData.attr.write_valid == 3">超过有效期后，商品会自动下架放入仓库</div>
             </FormItem>
             <FormItem
@@ -1042,6 +1072,7 @@
                 v-model="formData.attr.price"
                 :min="0"
                 :max="99999999"
+                :step="1"
                 v-width="'50%'"
 				@on-change='changePrice'
               ></InputNumber>
@@ -1069,6 +1100,7 @@
                 v-model="formData.attr.cost"
                 :min="0"
                 :max="99999999"
+                :step="1"
                 v-width="'50%'"
               ></InputNumber>
             </FormItem>
@@ -1077,6 +1109,7 @@
                 v-model="formData.attr.ot_price"
                 :min="0"
                 :max="99999999"
+                :step="1"
                 v-width="'50%'"
               ></InputNumber>
             </FormItem>
@@ -1100,7 +1133,7 @@
             </FormItem>
             <FormItem
               label="库存："
-              v-else-if="formData.product_type != 0 && formData.product_type != 1"
+              v-else-if="formData.product_type != 0 && formData.product_type != 1 && formData.product_type != 5 && formData.product_type != 6"
               prop="stock"
               :rules="ruleValidate.stock"
               key="stock2b"
@@ -1114,27 +1147,30 @@
                 v-width="'50%'"
               ></InputNumber>
             </FormItem>
-            <FormItem v-if="formData.product_type == 5" label="几选几套餐：">
+            <FormItem v-if="formData.product_type == 5 && formData.card_rule_type == 'choice_kind'" label="最多可选项目种数：" required>
               <InputNumber
-                  v-model="formData.card_num"
-                  :min="0"
+                  v-model="formData.card_choice_limit"
+                  :min="1"
                   :max="99999999"
                   :precision="0"
                   v-width="'50%'"
               ></InputNumber>
-              <div class="tips">若输入0，则不做控制，如果输入3，则购买的时候一定要选择3个项目</div>
+              <div class="tips">会员首次核销某个项目后，该项目会占用一个可选种类名额</div>
             </FormItem>
-            <FormItem label="几选几类型：" key="card_num_type" v-if="formData.product_type == 5" >
-              <RadioGroup v-model="formData.card_num_type">
-                <Radio :label="0">种数</Radio>
-                <Radio :label="1">次数</Radio>
-              </RadioGroup>
-              <div class="tips" v-if="formData.attr.write_valid == 3">超过有效期后，商品会自动下架放入仓库</div>
+            <FormItem v-if="formData.product_type == 5 && formData.card_rule_type == 'choice_count'" label="共享总次数：" required>
+              <InputNumber
+                  v-model="formData.card_shared_times"
+                  :min="1"
+                  :max="99999999"
+                  :precision="0"
+                  v-width="'50%'"
+              ></InputNumber>
+              <div class="tips">核销任意卡内项目都会扣减同一个共享次数池</div>
             </FormItem>
-            <FormItem v-if="formData.product_type == 5" label="卡项：" required key="cardData">
-              <Button type="primary" @click="goodsModal = true">添加商品</Button>
+            <FormItem v-if="formData.product_type == 5" label="卡内项目：" required key="cardData">
+              <Button type="primary" @click="goodsModal = true">添加项目</Button>
               <Button type="primary" class="ml-10" :disabled="!cardDataSelection.length" @click="cardDataDelete">批量删除</Button>
-              <Table class="mt-20" :columns="cardColumns" :data="cardData" @on-selection-change="cardDataChange">
+              <Table class="mt-20" :columns="cardRuleColumns" :data="cardData" @on-selection-change="cardDataChange">
                 <template slot-scope="{ row }" slot="product">
                   <div class="flex-y-center">
                     <div v-viewer>
@@ -1144,13 +1180,20 @@
                     <div class="line1 ml-10" v-else>{{ row.store_name }}</div>
                   </div>
                 </template>
+                <template slot-scope="{ row }" slot="price">
+                  {{ formatWholeYuan(row.price) }}
+                </template>
                 <template slot-scope="{ row, index }" slot="write_times">
-                  <InputNumber v-model="cardData[index].write_times" :max="row.stock" :min="1" :readonly="row.stock <= 1" :precision="0"></InputNumber>
+                  <InputNumber v-model="cardData[index].write_times" :max="99999999" :min="1" :precision="0"></InputNumber>
+                </template>
+                <template slot-scope="{ index }" slot="writeoff_amount">
+                  <InputNumber v-model="cardData[index].writeoff_amount" :min="0" :max="9999999999" :precision="0"></InputNumber>
                 </template>
                 <template slot-scope="{ row, index }" slot="action">
                   <a @click="cardDataRowDelete(index)">删除</a>
                 </template>
               </Table>
+              <div class="card-rule-preview" v-if="cardData.length">{{ cardRulePreview }}</div>
             </FormItem>
           </div>
 		  <div v-if="formData.spec_type === 0 && formData.product_type == 6">
@@ -1169,6 +1212,7 @@
 			    v-model="formData.attr.price"
 			    :min="0"
 			    :max="99999999"
+			    :step="1"
 			    v-width="'50%'"
 				@on-change='changePrice'
 			  ></InputNumber>
@@ -1196,6 +1240,7 @@
 			    v-model="formData.attr.cost"
 			    :min="0"
 			    :max="99999999"
+			    :step="1"
 			    v-width="'50%'"
 			  ></InputNumber>
 			</FormItem>
@@ -1204,6 +1249,7 @@
 			    v-model="formData.attr.ot_price"
 			    :min="0"
 			    :max="99999999"
+			    :step="1"
 			    v-width="'50%'"
 			  ></InputNumber>
 			</FormItem>
@@ -1394,7 +1440,7 @@
                   }}
                 </div>
               </FormItem>
-              <FormItem label="库存同步：" :label-width="100" v-show="formData.applicable_type && (!formData.id || $route.query.copy)">
+              <FormItem label="库存同步：" :label-width="100" v-show="Number(formData.product_type) === 0 && formData.applicable_type && (!formData.id || $route.query.copy)">
                 <Switch
                   v-model="formData.is_sync_stock"
                   :true-value="1"
@@ -1470,7 +1516,7 @@
             :storeBrokerageRatio="storeBrokerageRatio"
             :storeBrokerageTwo="storeBrokerageTwo"
             :successData="success"
-            :baseInfo="formData"
+            :productType="formData.product_type"
           ></vipPriceBrokerageSet>
         </div>
       </Form>
@@ -1573,8 +1619,8 @@
     </Modal>
 	<stockSet ref="stockSet" :timeData='specTimeData' @modalStockSet='modalStockSet'></stockSet>
   <!-- 商品列表弹窗 -->
-  <Modal v-model="goodsModal" title="商品列表" footerHide  class="paymentFooter" scrollable width="900">
-    <goods-attr :chooseType="90" ref="goodSattr" v-if="goodsModal" @getProductId="getAtterId"></goods-attr>
+  <Modal v-model="goodsModal" title="项目列表" footerHide  class="paymentFooter" scrollable width="900">
+    <goods-attr :chooseType="97" ref="goodSattr" v-if="goodsModal" @getProductId="getAtterId"></goods-attr>
   </Modal>
   </div>
 </template>
@@ -2094,7 +2140,6 @@ export default {
           { title: '商品详情', name: '3' },
           { title: '会员价/佣金', name: '10' },
           { title: '适用门店', name: '7' },
-          { title: '物流设置', name: '4' },
           { title: '营销设置', name: '5' },
           { title: '其他设置', name: '6' },
         ];
@@ -2128,6 +2173,56 @@ export default {
       const header = this.formData.header || [];
       if (this.showSalonUnitFields) return header;
       return header.filter((col) => col.slot !== 'stock_unit' && col.slot !== 'unit_convert');
+    },
+    cardRuleSummary() {
+      const summaries = {
+        normal: '每个项目分别配置次数，各项目次数互不共享。',
+        choice_kind: '使用期间最多选择指定种数，首次核销即锁定该项目。',
+        choice_count: '卡内所有项目共享总次数，每次可以任选其中一个项目。',
+        time: '卡内项目在有效期内不限次，每个项目单独配置单次核销金额。',
+      };
+      return summaries[this.formData.card_rule_type] || '';
+    },
+    cardRulePreview() {
+      const projectCount = this.cardData.length;
+      if (this.formData.card_rule_type === 'normal') {
+        const total = this.cardData.reduce((sum, item) => sum + Number(item.write_times || 0), 0);
+        return `本卡包含${projectCount}个项目，各项目独立使用，共${total}次。`;
+      }
+      if (this.formData.card_rule_type === 'choice_kind') {
+        return `本卡包含${projectCount}个候选项目，使用期间最多选择其中${Number(this.formData.card_choice_limit || 0)}种。`;
+      }
+      if (this.formData.card_rule_type === 'choice_count') {
+        return `本卡包含${projectCount}个可任选项目，所有项目累计最多核销${Number(this.formData.card_shared_times || 0)}次。`;
+      }
+      if (this.formData.card_rule_type === 'time') {
+        return `本卡包含${projectCount}个项目，有效期内不限次数使用。`;
+      }
+      return '';
+    },
+    cardRuleColumns() {
+      const columns = [
+        { type: 'selection', width: 60, align: 'center' },
+        { title: '项目信息', slot: 'product', minWidth: 210 },
+        { title: '项目规格', key: 'suk', minWidth: 100 },
+        {
+          title: '项目类型',
+          minWidth: 100,
+          render: (h, params) => h('div', Number(params.row.product_type) === 6 ? '项目' : '产品'),
+        },
+        { title: '项目原价', slot: 'price', minWidth: 100 },
+      ];
+      if (['normal', 'choice_kind'].includes(this.formData.card_rule_type)) {
+        columns.push({
+          title: this.formData.card_rule_type === 'choice_kind' ? '选中后可使用次数' : '可使用次数',
+          slot: 'write_times',
+          minWidth: 160,
+        });
+      } else if (this.formData.card_rule_type === 'time') {
+        columns.push({ title: '单次核销金额', slot: 'writeoff_amount', minWidth: 160 });
+      }
+      columns.push({ title: '操作', slot: 'action', minWidth: 80 });
+      return columns;
     },
   },
   destroyed() {
@@ -3122,6 +3217,9 @@ export default {
       // this.formData.slider_image = this.formData.slider_image.splice(0, 10);
       //多规格 SKU 赋值
       this.attrs = data.items || [];
+      if (Number(data.product_type) === 0 && Number(data.spec_type) === 0 && this.attrs[0] && this.attrs[0].value) {
+        this.formData.single_spec_name = this.attrs[0].value;
+      }
       this.attrs.map((item) => {
         if (item.add_pic) this.canSel = false;
       });
@@ -3183,6 +3281,7 @@ export default {
             ...item.productInfo.attrInfo,
             store_name: item.productInfo.store_name,
             write_times: item.write_times,
+            writeoff_amount: Number(item.writeoff_amount || 0),
           };
         });
         this.cardData = related;
@@ -3468,8 +3567,68 @@ export default {
         });
       });
     },
+    isWholeYuanMoney(value) {
+      if (typeof value === 'number') {
+        return Number.isInteger(value) && value >= 0;
+      }
+      return /^(?:0|[1-9]\d*)(?:\.0+)?$/.test(String(value == null ? '' : value).trim());
+    },
+    normalizeWholeYuanMoney(value) {
+      return Number(String(value).trim());
+    },
+    validateWholeYuanMoney(formData) {
+      if (![0, 4, 5, 6].includes(Number(formData.product_type))) return true;
+      const labels = {
+        price: '售价',
+        ot_price: '划线价',
+        settle_price: '结算价',
+        cost: '成本价',
+      };
+      if (Number(formData.is_vip) === 1) labels.vip_price = '会员价';
+      if (Number(formData.is_brokerage) === 1 && Number(formData.is_sub) === 1) {
+        labels.brokerage = '一级返佣';
+        labels.brokerage_two = '二级返佣';
+      }
+      const attrs = Number(formData.spec_type) === 1 ? formData.attrs : [formData.attr];
+      for (const attr of attrs) {
+        if (Number(formData.is_vip) !== 1) attr.vip_price = 0;
+        if (Number(formData.is_brokerage) !== 1 || Number(formData.is_sub) !== 1) {
+          attr.brokerage = 0;
+          attr.brokerage_two = 0;
+        }
+        for (const [field, label] of Object.entries(labels)) {
+          if (!Object.prototype.hasOwnProperty.call(attr, field)) continue;
+          if (this.isWholeYuanMoney(attr[field])) {
+            attr[field] = this.normalizeWholeYuanMoney(attr[field]);
+            continue;
+          }
+          const sku = String(attr.suk || (attr.attr_arr || []).join() || '默认');
+          this.currentTab = ['vip_price', 'brokerage', 'brokerage_two'].includes(field) ? '10' : '2';
+          this.$Message.error(`规格【${sku}】的${label}必须填写整数金额`);
+          return false;
+        }
+        if (Number(formData.level_type) === 2 && Array.isArray(attr.level_price)) {
+          for (const levelPrice of attr.level_price) {
+            const price = levelPrice.price != null ? levelPrice.price : levelPrice.inputPrice;
+            if (!this.isWholeYuanMoney(price)) {
+              const sku = String(attr.suk || (attr.attr_arr || []).join() || '默认');
+              this.currentTab = '10';
+              this.$Message.error(`规格【${sku}】的等级会员价必须填写整数金额`);
+              return false;
+            }
+            levelPrice.price = this.normalizeWholeYuanMoney(price);
+            if (Object.prototype.hasOwnProperty.call(levelPrice, 'inputPrice')) {
+              levelPrice.inputPrice = levelPrice.price;
+            }
+          }
+        }
+      }
+      return true;
+    },
     async handleSubmit() {
       let formData = this.summarizeData();
+      if (Number(formData.product_type) === 5) formData.unit_name = '张';
+      if (Number(formData.product_type) === 6) formData.unit_name = '次';
       if (formData.store_name == '') {
         this.currentTab = '1';
         this.$Message.error('请添加商品名称');
@@ -3480,9 +3639,13 @@ export default {
         this.$Message.error('请选择商品分类');
         return;
       }
-      if (formData.unit_name == '') {
+      if (![5, 6].includes(Number(formData.product_type)) && formData.unit_name == '') {
         this.currentTab = '1';
         this.$Message.error('请添加商品单位');
+        return;
+      }
+      if (!this.validateCardRuleSettings(formData)) {
+        this.currentTab = '2';
         return;
       }
 	  if (this.merchantType != 1 && [0, 4, 5, 6].includes(this.formData.product_type) && this.formData.spec_type == 0) {
@@ -3556,6 +3719,7 @@ export default {
       formData.attr.vip_price=vipPriceBrokerageData.attrData[0].vip_price;
       formData.attr.level_price=vipPriceBrokerageData.attrData[0].level_price;
     }
+    if (!this.validateWholeYuanMoney(formData)) return;
     if (!formData.product_type && formData.delivery_type.includes('3') && !formData.store_delivery_type.length) {
       return this.$Message.warning('请选择配送类型');
     }
@@ -3595,6 +3759,7 @@ export default {
       this.$set(formData, 'create_request_key', this.create_request_key || this.genCreateRequestKey());
       this.$set(formData, "product_type", this.formData.product_type);
       this.$set(formData, 'spec_type', this.formData.spec_type);
+      this.$set(formData, 'single_spec_name', this.formData.single_spec_name);
       this.$set(formData, 'items', this.attrs);
       this.$set(formData, 'attr', this.formData.attr);
       this.$set(formData, 'attrs', this.manyFormValidate.slice(1));
@@ -3646,7 +3811,69 @@ export default {
       this.$set(formData, 'is_sync_stock', this.formData.is_sync_stock);
       this.$set(formData, 'card_num', this.formData.card_num);
       this.$set(formData, 'card_num_type', this.formData.card_num_type);
+      this.$set(formData, 'card_rule_type', this.formData.card_rule_type);
+      this.$set(formData, 'card_rule_version', this.formData.card_rule_version || 0);
+      this.$set(formData, 'card_choice_limit', this.formData.card_choice_limit || 0);
+      this.$set(formData, 'card_shared_times', this.formData.card_shared_times || 0);
       return formData;
+    },
+    validateCardRuleSettings(formData) {
+      if (Number(formData.product_type) !== 5) return true;
+      const ruleType = formData.card_rule_type;
+      if (!['normal', 'choice_kind', 'choice_count', 'time'].includes(ruleType)) {
+        this.$Message.warning('请选择卡项规则');
+        return false;
+      }
+      if (!Array.isArray(formData.related) || !formData.related.length) {
+        this.$Message.warning('请添加卡内项目');
+        return false;
+      }
+      const validity = Number((formData.attr || {}).write_valid || 0);
+      if (![1, 2, 3].includes(validity)) {
+        this.$Message.warning('请选择核销时效类型');
+        return false;
+      }
+      if (ruleType === 'time' && validity === 1) {
+        this.$Message.warning('时间卡不允许永久有效');
+        return false;
+      }
+      if (validity === 2 && Number((formData.attr || {}).days || 0) <= 0) {
+        this.$Message.warning('请填写有效天数');
+        return false;
+      }
+      if (validity === 3 && (!Array.isArray((formData.attr || {}).section_time) || formData.attr.section_time.length !== 2)) {
+        this.$Message.warning('请选择固定有效期');
+        return false;
+      }
+      if (ruleType === 'choice_kind') {
+        const choiceLimit = Number(formData.card_choice_limit || 0);
+        if (!Number.isInteger(choiceLimit) || choiceLimit <= 0 || choiceLimit > formData.related.length) {
+          this.$Message.warning('最多可选项目种数必须大于0且不能超过卡内项目总数');
+          return false;
+        }
+      }
+      if (ruleType === 'choice_count') {
+        const sharedTimes = Number(formData.card_shared_times || 0);
+        if (!Number.isInteger(sharedTimes) || sharedTimes <= 0) {
+          this.$Message.warning('共享总次数必须是大于0的整数');
+          return false;
+        }
+      }
+      if (['normal', 'choice_kind'].includes(ruleType)) {
+        const invalidTimes = formData.related.some((item) => !Number.isInteger(Number(item.write_times)) || Number(item.write_times) <= 0);
+        if (invalidTimes) {
+          this.$Message.warning('每个卡内项目的可使用次数必须是大于0的整数');
+          return false;
+        }
+      }
+      if (ruleType === 'time') {
+        const invalidAmount = formData.related.some((item) => item.writeoff_amount === '' || item.writeoff_amount === null || !Number.isInteger(Number(item.writeoff_amount)) || Number(item.writeoff_amount) < 0);
+        if (invalidAmount) {
+          this.$Message.warning('每个时间卡项目都必须填写不小于0的整数核销金额');
+          return false;
+        }
+      }
+      return true;
     },
     handleSaveAsTemplate() {
       let that = this;
@@ -3798,8 +4025,40 @@ export default {
       const newCardData = selectCardData.filter((item) => !uniqueSet.has(item.unique));
       newCardData.forEach((item) => {
         item.write_times = 1;
+        item.writeoff_amount = 0;
       });
       this.cardData = [...this.cardData, ...newCardData];
+    },
+    formatWholeYuan(value) {
+      const amount = Number(value);
+      return Number.isFinite(amount) ? String(Math.trunc(amount)) : '0';
+    },
+    requestCardRuleChange(nextType) {
+      if (nextType === this.formData.card_rule_type) return;
+      const applyChange = () => {
+        this.cardData = [];
+        this.cardDataSelection = [];
+        this.$set(this.formData, 'card_choice_limit', 0);
+        this.$set(this.formData, 'card_shared_times', 0);
+        this.$set(this.formData, 'card_num', 0);
+        this.$set(this.formData, 'card_num_type', 0);
+        this.$set(this.formData.attr, 'write_valid', 0);
+        this.$set(this.formData.attr, 'days', 0);
+        this.$set(this.formData.attr, 'section_time', []);
+        this.section_time = [];
+        this.$set(this.formData, 'card_rule_type', nextType);
+      };
+      if (!this.cardData.length) {
+        applyChange();
+        return;
+      }
+      this.$Modal.confirm({
+        title: '确认切换卡项规则？',
+        content: '切换后将清空卡内项目、次数规则、单次核销金额和有效期。商品基础信息及价格保留。',
+        okText: '清空并切换',
+        cancelText: '取消',
+        onOk: applyChange,
+      });
     },
     // 批量设置卡项可核销次数
     handleBatch() {
@@ -4223,6 +4482,19 @@ export default {
   display: inline-bolck;
   font-size: 12px;
   color: #999999;
+}
+.card-rule-summary,
+.card-rule-preview {
+  max-width: 760px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  line-height: 1.6;
+  color: #515a6e;
+  background: #f3f8fe;
+  border-left: 3px solid #2d8cf0;
+}
+.card-rule-preview {
+  margin-top: 16px;
 }
 .seeCatMy {
   color: #2d8cf0;

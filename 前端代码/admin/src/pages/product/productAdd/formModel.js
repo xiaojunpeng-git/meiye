@@ -7,6 +7,10 @@ export const defaultObj = {
   is_support_refund: 0,
   card_num: 0,
   card_num_type: 0,
+  card_rule_type: 'normal',
+  card_rule_version: 0,
+  card_choice_limit: 0,
+  card_shared_times: 0,
   system_form_type: 1,
   disk_info: "", //卡密简介
   presale_day: 1, //预售发货时间-结束
@@ -44,6 +48,7 @@ export const defaultObj = {
   is_sub: [],
   id: 0,
   spec_type: 0,
+  single_spec_name: '规格',
   video_link: "",
   temp_id: "",
   attr: {
@@ -91,8 +96,8 @@ export const defaultObj = {
   selectRule: "",
   coupon_ids: [],
   command_word: "",
-  // delivery_type: ["1"],
-  delivery_type: [],
+  // 平台产品当前只提供到店自提；物流配置不在新增商品流程中展示。
+  delivery_type: ['2'],
   store_delivery_type: [],  // 门店配送类型
   specs: [],
   recommend_list: [],
@@ -109,8 +114,8 @@ export const defaultObj = {
   reservation_time_interval:30, //预约时段自动类型：时间间隔（分钟）
   customize_time_period: [[]], //自定义时间段
   // 预约设置模块参数
-  reservation_type:1, //预约类型1：到店服务+上门服务，2：到店服务，3：上门服务
-  reservation_timing_type:1, //预约时机1：购买时预约+先买后约，2：购买时预约，3：先买后约
+  reservation_type:2, //预约类型1：到店服务+上门服务，2：到店服务，3：上门服务
+  reservation_timing_type:3, //预约时机1：购买时预约+先买后约，2：购买时预约，3：先买后约
   is_show_stock:1 ,//是否展示库存
   sale_time_type:1, //销售日期1：每天，2:每周，3：自定义时间
   sale_time_week:[], //销售日期每周设置
@@ -129,7 +134,7 @@ export const defaultObj = {
   related: [], //卡项
   type: 0,
   supplier_id: 0,
-  is_sync_stock: 1, //库存同步
+  is_sync_stock: 0, //库存同步
   is_sync_show: 1, //状态同步
   is_inventory: 1, //是否参与库存管理（仅产品类型）
   allow_negative_stock: 1, //是否允许负库存

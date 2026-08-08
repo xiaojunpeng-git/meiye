@@ -72,6 +72,21 @@
                   >
                 </Select>
               </FormItem>
+              <FormItem label="卡项规则：" prop="card_rule_type">
+                <Select
+                  v-model="artFrom.card_rule_type"
+                  clearable
+                  class="input-add"
+                  @on-change="userSearchs"
+                >
+                  <Option
+                    v-for="item in cardRuleOptions"
+                    :value="item.value"
+                    :key="item.value"
+                    >{{ item.label }}</Option
+                  >
+                </Select>
+              </FormItem>
               <div v-show="collapse">
                 <FormItem label="商品分类：" prop="cate_id">
                   <el-cascader
@@ -598,6 +613,9 @@
                 >{{ item.name }}</span
               >
             </template>
+            <span v-else-if="col.key === 'card_rule_type'">{{
+              cardRuleName(row)
+            }}</span>
             <span v-else-if="col.key === 'spec_type'">{{
               row.spec_type ? "多规格" : "单规格"
             }}</span>
@@ -1289,6 +1307,7 @@ const PRODUCT_COLUMNS_META = [
   { key: "image", title: "商品图", width: 70 },
   { key: "store_name", title: "商品名称", minWidth: 200 },
   { key: "product_type", title: "商品类型", minWidth: 100 },
+  { key: "card_rule_type", title: "卡项规则", minWidth: 110 },
   { key: "price", title: "商品售价", minWidth: 90 },
   { key: "cost", title: "成本价", minWidth: 90 },
   { key: "is_inventory", title: "参与库存管理", minWidth: 110 },
@@ -1314,6 +1333,7 @@ const PRODUCT_DEFAULT_COLUMN_CONFIG = [
   { key: "image", show: true },
   { key: "store_name", show: true },
   { key: "product_type", show: true },
+  { key: "card_rule_type", show: true },
   { key: "price", show: true },
   { key: "cost", show: true },
   { key: "is_inventory", show: true },
@@ -1514,6 +1534,12 @@ export default {
           title: "到店+上门",
         },
       ],
+      cardRuleOptions: [
+        { label: "普通卡", value: "normal" },
+        { label: "任选种数卡", value: "choice_kind" },
+        { label: "任选次数卡", value: "choice_count" },
+        { label: "时间卡", value: "time" },
+      ],
       formTypeList: [],
       formColumns: [
         {
@@ -1570,6 +1596,7 @@ export default {
         store_label_id: [],
         field_key: "all",
         product_type: "",
+        card_rule_type: "",
         delivery_type: "",
         spec_type: "",
         is_vip: "",
@@ -1801,6 +1828,7 @@ export default {
           vm.timeVal != "" ||
           vm.artFrom.field_key != "all" ||
           vm.artFrom.product_type != "" ||
+          vm.artFrom.card_rule_type != "" ||
           vm.artFrom.delivery_type != "" ||
           vm.artFrom.spec_type != "" ||
           vm.artFrom.is_vip != "" ||
@@ -1832,6 +1860,7 @@ export default {
             create_range: "",
             field_key: "all",
             product_type: "",
+            card_rule_type: "",
             delivery_type: "",
             spec_type: "",
             is_vip: "",
@@ -2392,6 +2421,7 @@ export default {
         store_label_id: [],
         field_key: "all",
         product_type: "",
+        card_rule_type: "",
         delivery_type: "",
         spec_type: "",
         is_vip: "",
@@ -2912,6 +2942,13 @@ export default {
         brandList.push(store_label_id[i].label_name);
       }
       return brandList.join();
+    },
+    cardRuleName(row) {
+      if (Number(row.product_type) !== 5 || !row.card_rule_type) return "—";
+      const option = this.cardRuleOptions.find(
+        (item) => item.value === row.card_rule_type
+      );
+      return option ? option.label : "—";
     },
     updateTableHeight() {
       this.$nextTick(() => {

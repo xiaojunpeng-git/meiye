@@ -300,6 +300,19 @@ class StoreProductServices extends BaseServices
      */
     public function setShow(array $ids, int $is_show)
     {
+        $storeProductIds = $this->dao->getColumn(['pid' => $ids], 'id');
+        /** @var StoreCatalogWriteLockGuard $catalogGuard */
+        $catalogGuard = app()->make(StoreCatalogWriteLockGuard::class);
+        return $catalogGuard->withComponentCatalogMutation(
+            array_merge($ids, $storeProductIds ?: []),
+            function (StoreCatalogWriteLease $catalogLease) use ($ids, $is_show) {
+                return $this->setShowInGuard($catalogLease, $ids, $is_show);
+            }
+        );
+    }
+
+    public function setShowInGuard(StoreCatalogWriteLease $catalogLease, array $ids, int $is_show)
+    {
         if ($is_show == 0) {
             //下架检测是否有参与活动商品
 //            $this->checkActivity($ids);
@@ -308,6 +321,7 @@ class StoreProductServices extends BaseServices
             if ($count) throw new AdminException('回收站商品无法直接上架，请先恢复商品');
         }
         $storeProductIds = $this->dao->getColumn(['pid' => $ids], 'id');
+        $catalogLease->assertCoversProducts(array_merge($ids, $storeProductIds ?: []));
         /** @var StoreCartServices $cartService */
         $cartService = app()->make(StoreCartServices::class);
         $cartService->batchUpdate(array_merge($ids, $storeProductIds), ['status' => $is_show], 'product_id');
@@ -324,9 +338,18 @@ class StoreProductServices extends BaseServices
         $storeBranchProductServices = app()->make(StoreBranchProductServices::class);
         $storeBranchProductServices->update(['pid' => $ids, 'type' => 1], ['is_show' => $is_show ? 1 : 0]);
 
+        /** @var StoreCardRelatedServices $relatedService */
+        $relatedService = app()->make(StoreCardRelatedServices::class);
+        $relatedService->setStatusInGuard(
+            $catalogLease,
+            array_merge($ids, $storeProductIds ?: []),
+            $is_show ? 1 : 0
+        );
+
         event('product.status', [$ids, $is_show]);
 
         $this->dao->cacheTag()->clear();
+        return true;
 
         return true;
     }
@@ -917,6 +940,80 @@ class StoreProductServices extends BaseServices
     }
 
     /**
+     * New cashier catalog writes use whole RMB. This validation deliberately
+     * rejects rather than rounds, and never rewrites historic decimal rows.
+     */
+    private function wholeYuanMoney($value, string $label): int
+    {
+        $raw = is_int($value) || is_float($value) || is_string($value) ? trim((string)$value) : '';
+        if (preg_match('/^(?:0|[1-9][0-9]*)(?:\.0+)?$/D', $raw) !== 1) {
+            throw new AdminException($label . '必须填写整数金额');
+        }
+        $integerPart = explode('.', $raw, 2)[0];
+        if (strlen($integerPart) > 10 || (strlen($integerPart) === 10 && strcmp($integerPart, '9999999999') === 1)) {
+            throw new AdminException($label . '超出允许范围');
+        }
+        return (int)$integerPart;
+    }
+
+    private function normalizeSkuWholeYuanMoney(array $item, array $data): array
+    {
+        if (!in_array((int)($data['product_type'] ?? -1), [0, 4, 5, 6], true)) {
+            return $item;
+        }
+
+        $isVipEnabled = !empty($data['is_vip']);
+        $isCustomBrokerageEnabled = !empty($data['is_brokerage']) && !empty($data['is_sub']);
+        if (!$isVipEnabled) {
+            $item['vip_price'] = 0;
+        }
+        if (!$isCustomBrokerageEnabled) {
+            $item['brokerage'] = 0;
+            $item['brokerage_two'] = 0;
+        }
+
+        $moneyLabels = [
+            'price' => '售价',
+            'ot_price' => '划线价',
+            'settle_price' => '结算价',
+            'cost' => '成本价',
+        ];
+        if ($isVipEnabled) {
+            $moneyLabels['vip_price'] = '会员价';
+        }
+        if ($isCustomBrokerageEnabled) {
+            $moneyLabels['brokerage'] = '一级返佣';
+            $moneyLabels['brokerage_two'] = '二级返佣';
+        }
+
+        $skuLabel = trim((string)($item['suk'] ?? '默认')) ?: '默认';
+        foreach ($moneyLabels as $field => $moneyLabel) {
+            if (array_key_exists($field, $item)) {
+                $item[$field] = $this->wholeYuanMoney(
+                    $item[$field],
+                    '规格【' . $skuLabel . '】的' . $moneyLabel
+                );
+            }
+        }
+
+        if ((int)($data['level_type'] ?? 1) === 2 && isset($item['level_price']) && is_array($item['level_price'])) {
+            foreach ($item['level_price'] as $index => $levelPrice) {
+                $levelLabel = trim((string)($levelPrice['name'] ?? $levelPrice['level_name'] ?? '等级会员价')) ?: '等级会员价';
+                $price = $levelPrice['price'] ?? $levelPrice['inputPrice'] ?? null;
+                $item['level_price'][$index]['price'] = $this->wholeYuanMoney(
+                    $price,
+                    '规格【' . $skuLabel . '】的' . $levelLabel
+                );
+                if (array_key_exists('inputPrice', $levelPrice)) {
+                    $item['level_price'][$index]['inputPrice'] = $item['level_price'][$index]['price'];
+                }
+            }
+        }
+
+        return $item;
+    }
+
+    /**
      * 新增编辑商品
      * @param int $id
      * @param array $data
@@ -929,6 +1026,18 @@ class StoreProductServices extends BaseServices
      */
     public function saveData(int $id, array $data, int $type = 0, int $relation_id = 0, int $adminId = 0)
     {
+        $productType = (int)($data['product_type'] ?? 0);
+        if ($productType === 5) {
+            $data['unit_name'] = '张';
+            $data['is_inventory'] = 0;
+            $data['allow_negative_stock'] = 1;
+            $data['salon_stock_enabled'] = 0;
+        } elseif ($productType === 6) {
+            $data['unit_name'] = '次';
+            $data['is_inventory'] = 0;
+            $data['allow_negative_stock'] = 1;
+            $data['salon_stock_enabled'] = 0;
+        }
         if (count($data['cate_id']) < 1) throw new AdminException('请选择商品分类');
         if (!$data['store_name']) throw new AdminException('请输入商品名称');
         if (count($data['slider_image']) < 1) throw new AdminException('请上传商品轮播图');
@@ -972,6 +1081,16 @@ class StoreProductServices extends BaseServices
             $reservationServices = app()->make(StoreProductReservationServices::class);
             $data = $reservationServices->validateData($data);
         }
+        /** @var StoreCardRuleServices $cardRuleServices */
+        $cardRuleServices = app()->make(StoreCardRuleServices::class);
+        if ($id > 0 && $type === 1 && (int)($data['product_type'] ?? 0) === 5) {
+            $existingProduct = $this->dao->get($id, ['id', 'pid', 'product_type']);
+            if ($existingProduct && (int)$existingProduct['pid'] > 0) {
+                $existingDefinition = $this->getInfo($id)['productInfo'] ?? [];
+                $data = $cardRuleServices->preserveLockedDefinition($data, $existingDefinition);
+            }
+        }
+        $data = $cardRuleServices->normalizeForSave($data);
         if ($data['product_type'] == 5) {
             if (!$data['related']) throw new AdminException('请选择关联商品');
             if ($data['card_cover'] == 1 && !$data['card_cover_image']) {
@@ -1086,16 +1205,26 @@ class StoreProductServices extends BaseServices
             $data['specs'] = '';
         }
         if ($data['spec_type'] == 0) {
+            $singleSpecName = '规格';
+            if ((int)$data['product_type'] === 0) {
+                $singleSpecName = trim((string)($data['single_spec_name'] ?? '规格'));
+                if ($singleSpecName === '') {
+                    throw new AdminException('请输入规格名称');
+                }
+                if (mb_strlen($singleSpecName) > 30) {
+                    throw new AdminException('规格名称不能超过30个字符');
+                }
+            }
             $attr = [
                 [
-                    'value' => '规格',
+                    'value' => $singleSpecName,
                     'detailValue' => '',
                     'attrHidden' => '',
                     'detail' => ['默认']
                 ]
             ];
             $detail[0]['suk'] = '默认';
-            $detail[0]['detail'] = ['规格' => '默认'];
+            $detail[0]['detail'] = [$singleSpecName => '默认'];
             $data['default_sku'] = '';
         }
         foreach ($detail as &$item) {
@@ -1108,6 +1237,10 @@ class StoreProductServices extends BaseServices
             if (!isset($item['price'])) $item['price'] = 0;
             if (!isset($item['ot_price'])) $item['ot_price'] = 0;
             if (!isset($item['settle_price'])) $item['settle_price'] = 0;
+            $item = $this->normalizeSkuWholeYuanMoney($item, $data);
+            if ((int)$data['product_type'] === 5) {
+                $item['stock'] = 0;
+            }
             //默认sku图片
             if (!$item['pic']) {
                 $item['pic'] = $data['slider_image'][0] ?? '';
@@ -1267,7 +1400,7 @@ class StoreProductServices extends BaseServices
         $stock = $detail ? min(array_map('floatval', array_column($detail, 'stock'))) : 0;
         //是否售罄
         $data['is_sold'] = $stock ? 0 : 1;
-        unset($data['supplier_id'], $data['is_copy'], $data['description'], $data['coupon_ids'], $data['items'], $data['attrs'], $data['recommend'], $data['is_sync_stock'], $data['is_sync_show']);
+        unset($data['supplier_id'], $data['is_copy'], $data['description'], $data['coupon_ids'], $data['items'], $data['attrs'], $data['recommend'], $data['is_sync_stock'], $data['is_sync_show'], $data['single_spec_name']);
         /** @var StoreDescriptionServices $storeDescriptionServices */
         $storeDescriptionServices = app()->make(StoreDescriptionServices::class);
         /** @var StoreProductAttrServices $storeProductAttrServices */
@@ -1293,11 +1426,29 @@ class StoreProductServices extends BaseServices
                 return ['product_id' => (int)$exist['product_id'], 'duplicated' => true];
             }
         }
-        [$skuList, $id, $is_new, $data] = $this->transaction(function () use ($id, $data, $description, $storeDescriptionServices, $storeProductAttrServices, $storeProductCouponServices, $detail, $attr, $coupon_ids, $storeDiscountProduct, $slider_image, $relatedService, $adminId, $is_copy, $initialSkuQty, $createRequestKey, $createIdempotentServices, $resolvedIsInventoryEarly) {
+        /** @var StoreCatalogWriteLockGuard $catalogGuard */
+        $catalogGuard = app()->make(StoreCatalogWriteLockGuard::class);
+        $targetRefs = [];
+        $catalogProductIds = $id ? [$id] : [];
+        if ((int)$data['product_type'] === 5) {
+            foreach ((array)($data['related'] ?? []) as $relatedRow) {
+                if ($id) {
+                    $relatedRow['cardProductId'] = $id;
+                }
+                $targetRefs[] = $relatedRow;
+            }
+        }
+        if ($id && (int)$data['type'] === 0) {
+            $catalogProductIds = array_merge(
+                $catalogProductIds,
+                $this->dao->getColumn(['pid' => $id], 'id') ?: []
+            );
+        }
+        $catalogWrite = function (StoreCatalogWriteLease $catalogLease) use ($id, $data, $description, $storeDescriptionServices, $storeProductAttrServices, $storeProductCouponServices, $detail, $attr, $coupon_ids, $storeDiscountProduct, $slider_image, $relatedService, $adminId, $is_copy, $initialSkuQty, $createRequestKey, $createIdempotentServices, $resolvedIsInventoryEarly, $catalogGuard) {
 
             if ($id) {
                 //上下架处理
-                $this->setShow([$id], $data['is_show']);
+                $this->setShowInGuard($catalogLease, [$id], $data['is_show']);
                 $oldInfo = $this->get($id)->toArray();
                 if ($oldInfo['product_type'] != $data['product_type']) {
                     throw new AdminException('商品类型不能切换！');
@@ -1334,7 +1485,7 @@ class StoreProductServices extends BaseServices
                 } else {
                     $status = 0;
                 }
-                $relatedService->setStatus([$id], $status);
+                $relatedService->setStatusInGuard($catalogLease, [$id], $status);
                 $is_new = 1;
             } else {
                 //默认评分
@@ -1345,6 +1496,19 @@ class StoreProductServices extends BaseServices
                 $res = $this->dao->save($data);
                 if (!$res) throw new AdminException('添加失败');
                 $id = (int)$res->id;
+                $newTargetRefs = [];
+                if ((int)$data['product_type'] === 5) {
+                    foreach ((array)($data['related'] ?? []) as $relatedRow) {
+                        $relatedRow['cardProductId'] = $id;
+                        $newTargetRefs[] = $relatedRow;
+                    }
+                }
+                $catalogGuard->adoptCreatedProduct(
+                    $catalogLease,
+                    $id,
+                    (int)$data['product_type'],
+                    $newTargetRefs
+                );
                 if (!empty($coupon_ids)) $storeProductCouponServices->setCoupon($id, $coupon_ids);
                 $is_new = 0;
             }
@@ -1363,7 +1527,7 @@ class StoreProductServices extends BaseServices
                 $this->dao->update($id, ['vip_price' => $proudctVipPrice]);
             }
 
-            $valueGroup = $storeProductAttrServices->saveProductAttr($skuList, $id);
+            $valueGroup = $storeProductAttrServices->saveProductAttrInGuard($catalogLease, $skuList, $id);
             if (!$valueGroup) throw new AdminException('添加失败！');
             if ($data['product_type'] == 1) {//卡密商品
                 /** @var StoreProductVirtualServices $productVirtual */
@@ -1376,7 +1540,7 @@ class StoreProductServices extends BaseServices
             } elseif ($data['product_type'] == 5) {//卡项商品
                 /** @var StoreCardRelatedServices $cardRelatedServices */
                 $cardRelatedServices = app()->make(StoreCardRelatedServices::class);
-                $cardRelatedServices->handleCardRelated($id, $data['related']);
+                $cardRelatedServices->handleCardRelatedInGuard($catalogLease, $id, $data['related']);
             }
             if (in_array($data['product_type'], [0, 3, 5]) && isset($skuList['stockData'])) {
                 // 库存改造：商品资料保存不再因库存差额生成出入库单；库存仅由库存业务变更。
@@ -1430,7 +1594,17 @@ class StoreProductServices extends BaseServices
                 $createIdempotentServices->save((int)$data['type'], (int)$data['relation_id'], $createRequestKey, (int)$id);
             }
             return [$skuList, $id, $is_new, $data];
-        });
+        };
+        if ($id) {
+            [$skuList, $id, $is_new, $data] = $catalogGuard->withCatalogMutation(
+                [],
+                $catalogProductIds,
+                $targetRefs,
+                $catalogWrite
+            );
+        } else {
+            [$skuList, $id, $is_new, $data] = $catalogGuard->withNewProductCreation($catalogWrite, $targetRefs);
+        }
         //事件（商品+初始入库全部提交成功后）
         event('product.create', [$id, $data, $skuList, $is_new, $slider_image, $description, $is_copy, $relationData]);
         //清空缓存
@@ -1477,7 +1651,16 @@ class StoreProductServices extends BaseServices
             }
         }
         $data['is_verify'] = 1;
-        $this->transaction(function () use ($id, $data, $productInfo, $update) {
+        $catalogProductIds = [$id];
+        if ((int)$productInfo['type'] === 0) {
+            $catalogProductIds = array_merge(
+                $catalogProductIds,
+                $this->dao->getColumn(['pid' => $id], 'id') ?: []
+            );
+        }
+        /** @var StoreCatalogWriteLockGuard $catalogGuard */
+        $catalogGuard = app()->make(StoreCatalogWriteLockGuard::class);
+        $catalogGuard->withComponentCatalogMutation($catalogProductIds, function (StoreCatalogWriteLease $catalogLease) use ($id, $data, $productInfo, $update) {
             $where['id'] = $id;
             $ids = [];
             //门店商品处理
@@ -1507,7 +1690,7 @@ class StoreProductServices extends BaseServices
             if (!$res) throw new AdminException($productInfo['is_del'] == 1 ? '恢复失败,请稍候再试!' : '删除失败,请稍候再试!');
             /** @var StoreCardRelatedServices $relatedService */
             $relatedService = app()->make(StoreCardRelatedServices::class);
-            $relatedService->setStatus($ids, 0);
+            $relatedService->setStatusInGuard($catalogLease, $ids, 0);
         });
         return $msg;
     }
@@ -1555,12 +1738,14 @@ class StoreProductServices extends BaseServices
         $relatedService = app()->make(StoreCardRelatedServices::class);
         // 永久删除前统一校验（含门店子商品）；禁止静默丢库存；失败必须抛出
         // 校验与物理删除同一事务，保证行锁覆盖到删除
-        $this->transaction(function () use (
+        /** @var StoreCatalogWriteLockGuard $catalogGuard */
+        $catalogGuard = app()->make(StoreCatalogWriteLockGuard::class);
+        $catalogGuard->withComponentCatalogMutation($ids, function (StoreCatalogWriteLease $catalogLease) use (
             $ids, $productAttrServices, $productAttrResultServices, $productAttrValueServices,
             $productDescriptionServices, $productRelationServices, $productCoupon, $productRelation,
             $productReply, $productReplyCommentServices, $productReservationTime, $relatedService
         ) {
-            $productAttrValueServices->assertProductsSkusCanBeDeleted($ids);
+            $productAttrValueServices->assertProductsSkusCanBeDeleted($ids, $catalogLease);
             foreach ($ids as $id) {
                 $where = ['product_id' => $id, 'type' => 0];
                 //清除规格表数据
@@ -1568,7 +1753,7 @@ class StoreProductServices extends BaseServices
                 //清除规格表数据
                 $productAttrResultServices->delete($where);
                 //删除商品sku
-                $productAttrValueServices->delete($where);
+                $productAttrValueServices->deleteInGuard($catalogLease, $where);
                 //删除商品详情
                 $productDescriptionServices->delete($where);
                 //删除商品关联数据
@@ -1587,7 +1772,7 @@ class StoreProductServices extends BaseServices
                 //删除预约商品时段库存数据
                 $productReservationTime->delete(['product_id' => $id]);
                 //删除卡项权益数据
-                $relatedService->delete(['product_id' => $id]);
+                $relatedService->deleteForProductsInGuard($catalogLease, [$id]);
                 //删除商品
                 $this->dao->delete($id);
 
@@ -1887,6 +2072,32 @@ class StoreProductServices extends BaseServices
     public function create(array $data)
     {
         return $this->dao->save($data);
+    }
+
+    public function createErpProductInGuard(
+        StoreCatalogWriteLockGuard $catalogGuard,
+        StoreCatalogWriteLease $catalogLease,
+        array $data
+    ): int {
+        $catalogLease->assertActive();
+        $productId = (int)$this->dao->ErpProductSave($data);
+        if ($productId <= 0) {
+            throw new AdminException('ERP 商品创建失败');
+        }
+        $catalogGuard->adoptCreatedProduct(
+            $catalogLease,
+            $productId,
+            (int)($data['product_type'] ?? 0)
+        );
+        return $productId;
+    }
+
+    public function __call($name, $arguments)
+    {
+        if ($name === 'ErpProductSave') {
+            throw new AdminException('ERP 商品与初始 SKU 必须使用同一目录写锁事务');
+        }
+        return parent::__call($name, $arguments);
     }
 
     /**
@@ -3073,41 +3284,24 @@ class StoreProductServices extends BaseServices
      * @param int $store_id
      * @return bool
      */
-    public function incProductSales(int $num, int $productId, string $unique = '', int $store_id = 0)
+    public function incProductSales(
+        int $num,
+        int $productId,
+        string $unique = '',
+        int $store_id = 0,
+        bool $assumeLocked = false,
+        ?array $resolvedTarget = null
+    )
     {
-		if (!$productId) return true;
-        $res = true;
-        /** @var StoreProductAttrValueServices $skuValueServices */
-        $skuValueServices = app()->make(StoreProductAttrValueServices::class);
-        if ($store_id) {
-            /** @var StoreBranchProductServices $branchProductServices */
-            $branchProductServices = app()->make(StoreBranchProductServices::class);
-            //查询门店商品
-            $info = $branchProductServices->isValidStoreProduct($productId, $store_id);
-            $storeProductId = $info['id'] ?? 0;
-            if ($productId && $storeProductId != $productId) {
-                //原商品sku
-                $suk = $skuValueServices->value(['unique' => $unique, 'product_id' => $productId, 'type' => 0], 'suk');
-                //门店商品ID
-                $productId = $storeProductId;
-                //门店商品sku unique
-                $unique = $skuValueServices->value(['suk' => $suk, 'product_id' => $productId, 'type' => 0], 'unique');
-            }
-            //平台该商品也增加销量
-            if ($info && isset($info['pid']) && $info['pid']) {
-                $res = $this->dao->bcInc($info['pid'], 'sales', (string)$num);
-            }
-        }
-        if ($unique) {
-            $res = $res && $skuValueServices->bcInc([
-                    'product_id' => $productId,
-                    'unique' => $unique,
-                    'type' => 0
-                ], 'sales', (string)$num);
-        }
-        $res = $res && $this->dao->bcInc($productId, 'sales', (string)$num);
-        $this->clearProductCache();
-        return $res;
+		return $this->mutateProductSales(
+			true,
+			$num,
+			$productId,
+			$unique,
+			$store_id,
+			$assumeLocked,
+			$resolvedTarget
+		);
     }
 
 
@@ -3150,37 +3344,197 @@ class StoreProductServices extends BaseServices
      * @throws \think\db\exception\DbException
      * @throws \think\db\exception\ModelNotFoundException
      */
-    public function decProductSales(int $num, int $productId, string $unique = '', int $store_id = 0)
+    public function decProductSales(
+        int $num,
+        int $productId,
+        string $unique = '',
+        int $store_id = 0,
+        bool $assumeLocked = false,
+        ?array $resolvedTarget = null
+    )
     {
-		if (!$productId) return true;
-        $res = true;
-        /** @var StoreProductAttrValueServices $skuValueServices */
-        $skuValueServices = app()->make(StoreProductAttrValueServices::class);
-        if ($store_id) {
+		return $this->mutateProductSales(
+			false,
+			$num,
+			$productId,
+			$unique,
+			$store_id,
+			$assumeLocked,
+			$resolvedTarget
+		);
+    }
+
+    /**
+     * @param array<int,array{product_id:int,unique:string,num:int}> $lines
+     */
+    public function decProductSalesBatch(array $lines, int $storeId = 0)
+    {
+        return $this->transaction(function () use ($lines, $storeId) {
+            /** @var StoreProductAttrValueServices $skuValueServices */
+            $skuValueServices = app()->make(StoreProductAttrValueServices::class);
+            $prepared = [];
+            $lockTargets = [];
+            foreach ($lines as $line) {
+                $sourceProductId = (int)($line['product_id'] ?? 0);
+                $sourceUnique = (string)($line['unique'] ?? '');
+                $num = (int)($line['num'] ?? 0);
+                if ($sourceProductId <= 0 || $num <= 0) {
+                    continue;
+                }
+                $resolvedTarget = $this->resolveProductSalesTarget(
+                    $sourceProductId,
+                    $sourceUnique,
+                    $storeId,
+                    $skuValueServices
+                );
+                $lockTargets[] = [
+                    'product_id' => (int)$resolvedTarget['product_id'],
+                    'unique' => (string)$resolvedTarget['unique'],
+                    'platform_pid' => (int)$resolvedTarget['platform_pid'],
+                ];
+                $prepared[] = compact(
+                    'sourceProductId',
+                    'sourceUnique',
+                    'num',
+                    'resolvedTarget'
+                );
+            }
+
+            /** @var StoreProductSkuWriteLock $catalogWriteLock */
+            $catalogWriteLock = app()->make(StoreProductSkuWriteLock::class);
+            $catalogWriteLock->lock($lockTargets);
+
+            $result = true;
+            foreach ($prepared as $line) {
+                $lineResult = $this->mutateProductSales(
+                    false,
+                    (int)$line['num'],
+                    (int)$line['sourceProductId'],
+                    (string)$line['sourceUnique'],
+                    $storeId,
+                    true,
+                    $line['resolvedTarget']
+                );
+                $result = (bool)$lineResult && $result;
+            }
+            return $result;
+        });
+    }
+
+    private function mutateProductSales(
+        bool $increase,
+        int $num,
+        int $sourceProductId,
+        string $sourceUnique,
+        int $storeId,
+        bool $assumeLocked,
+        ?array $resolvedTarget
+    ) {
+        if ($sourceProductId <= 0 || $num <= 0) {
+            return true;
+        }
+
+        $write = function () use (
+            $increase,
+            $num,
+            $sourceProductId,
+            $sourceUnique,
+            $storeId,
+            $assumeLocked,
+            $resolvedTarget
+        ) {
+            /** @var StoreProductAttrValueServices $skuValueServices */
+            $skuValueServices = app()->make(StoreProductAttrValueServices::class);
+            if (is_array($resolvedTarget)) {
+                $target = [
+                    'product_id' => (int)($resolvedTarget['product_id'] ?? 0),
+                    'unique' => (string)($resolvedTarget['unique'] ?? ''),
+                    'platform_pid' => (int)($resolvedTarget['platform_pid'] ?? 0),
+                ];
+            } else {
+                $target = $this->resolveProductSalesTarget(
+                    $sourceProductId,
+                    $sourceUnique,
+                    $storeId,
+                    $skuValueServices
+                );
+            }
+            $productId = (int)$target['product_id'];
+            $unique = (string)$target['unique'];
+            $platformProductId = (int)$target['platform_pid'];
+            if ($productId <= 0) {
+                throw new ValidateException('商品不存在');
+            }
+
+            if (!$assumeLocked) {
+                /** @var StoreProductSkuWriteLock $catalogWriteLock */
+                $catalogWriteLock = app()->make(StoreProductSkuWriteLock::class);
+                $catalogWriteLock->lock([[
+                    'product_id' => $productId,
+                    'unique' => $unique,
+                    'platform_pid' => $platformProductId,
+                ]]);
+            }
+
+            $method = $increase ? 'bcInc' : 'bcDec';
+            $res = true;
+            if ($platformProductId > 0 && $platformProductId !== $productId) {
+                $res = (bool)$this->dao->{$method}($platformProductId, 'sales', (string)$num);
+            }
+            if ($unique !== '') {
+                $res = $res && (bool)$skuValueServices->{$method}([
+                    'product_id' => $productId,
+                    'unique' => $unique,
+                    'type' => 0,
+                ], 'sales', (string)$num);
+            }
+            $res = $res && (bool)$this->dao->{$method}($productId, 'sales', (string)$num);
+            $this->clearProductCache();
+            return $res;
+        };
+
+        return $assumeLocked ? $write() : $this->transaction($write);
+    }
+
+    private function resolveProductSalesTarget(
+        int $sourceProductId,
+        string $sourceUnique,
+        int $storeId,
+        StoreProductAttrValueServices $skuValueServices
+    ): array {
+        $productId = $sourceProductId;
+        $unique = $sourceUnique;
+        $platformProductId = 0;
+        if ($storeId > 0) {
             /** @var StoreBranchProductServices $branchProductServices */
             $branchProductServices = app()->make(StoreBranchProductServices::class);
-            //查询门店商品
-            $info = $branchProductServices->isValidStoreProduct($productId, $store_id);
-            $storeProductId = $info['id'] ?? 0;
-            if ($productId && $storeProductId != $productId) {
-                //原商品sku
-                $suk = $skuValueServices->value(['unique' => $unique, 'product_id' => $productId, 'type' => 0], 'suk');
-                //门店商品ID
-                $productId = $storeProductId;
-                //门店商品sku unique
-                $unique = $skuValueServices->value(['suk' => $suk, 'product_id' => $productId, 'type' => 0], 'unique');
+            $info = $branchProductServices->isValidStoreProduct($sourceProductId, $storeId);
+            if (!$info) {
+                throw new ValidateException('门店商品不存在或未上架');
             }
-            //平台该商品也减少销量
-            if ($info && isset($info['pid']) && $info['pid']) {
-                $this->dao->bcDec($info['pid'], 'sales', (string)$num);
+            $productId = (int)($info['id'] ?? 0);
+            $platformProductId = (int)($info['pid'] ?? 0);
+            if ($productId !== $sourceProductId) {
+                $suk = $skuValueServices->value([
+                    'unique' => $sourceUnique,
+                    'product_id' => $sourceProductId,
+                    'type' => 0,
+                ], 'suk');
+                $unique = (string)$skuValueServices->value([
+                    'suk' => $suk,
+                    'product_id' => $productId,
+                    'type' => 0,
+                ], 'unique');
             }
         }
-        if ($unique) {
-            $res = $res && $skuValueServices->bcDec(['unique' => $unique, 'product_id' => $productId, 'type' => 0], 'sales', (string)$num);
+        if ($productId <= 0) {
+            throw new ValidateException('商品不存在');
         }
-        $res = $res && $this->dao->bcDec($productId, 'sales', (string)$num);
-        $this->clearProductCache();
-        return $res;
+        return [
+            'product_id' => $productId,
+            'unique' => $unique,
+            'platform_pid' => $platformProductId,
+        ];
     }
 
     /**

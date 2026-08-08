@@ -15,6 +15,8 @@ namespace app\services\product\sku;
 use app\dao\product\sku\StoreProductAttrDao;
 use app\services\BaseServices;
 use app\services\order\StoreCartServices;
+use app\services\product\product\StoreCatalogWriteLease;
+use app\services\product\product\StoreCatalogWriteLockGuard;
 use app\services\product\product\StoreProductServices;
 use mohe\exceptions\AdminException;
 use mohe\traits\OptionTrait;
@@ -295,11 +297,39 @@ class StoreProductAttrServices extends BaseServices
      */
     public function saveProductAttr(array $data, int $id, int $type = 0)
     {
+        if ($type !== 0) {
+            return $this->transaction(function () use ($data, $id, $type) {
+                return $this->saveProductAttrRows(null, $data, $id, $type);
+            });
+        }
+        /** @var StoreCatalogWriteLockGuard $guard */
+        $guard = app()->make(StoreCatalogWriteLockGuard::class);
+        return $guard->withComponentCatalogMutation([$id], function (StoreCatalogWriteLease $lease) use ($data, $id, $type) {
+            return $this->saveProductAttrInGuard($lease, $data, $id, $type);
+        });
+    }
+
+    public function saveProductAttrInGuard(
+        StoreCatalogWriteLease $lease,
+        array $data,
+        int $id,
+        int $type = 0
+    ) {
+        if ($type !== 0) {
+            throw new AdminException('目录写锁只允许保存 type=0 SKU');
+        }
+        $lease->assertCoversProducts([$id]);
+        return $this->saveProductAttrRows($lease, $data, $id, $type);
+    }
+
+    private function saveProductAttrRows(
+        ?StoreCatalogWriteLease $lease,
+        array $data,
+        int $id,
+        int $type
+    ) {
         /** @var StoreProductAttrValueServices $storeProductAttrValueServices */
         $storeProductAttrValueServices = app()->make(StoreProductAttrValueServices::class);
-
-        // 校验→写 attr/result→删/增 SKU 同一事务，保证行锁覆盖到删除（含 ERP 等直调路径）
-        return $this->transaction(function () use ($data, $id, $type, $storeProductAttrValueServices) {
             $valueGroup = $data['valueGroup'] ?? [];
             $updateSuks = array_column($valueGroup, 'suk');
             $oldSuks = [];
@@ -308,7 +338,12 @@ class StoreProductAttrServices extends BaseServices
             $delSuks = array_merge(array_diff($oldSuks, $updateSuks));
             // 普通商品：删除/改名规格前禁止静默丢库存（须在写 attr/result 之前拦截）
             if ((int)$type === 0 && $delSuks) {
-                $storeProductAttrValueServices->assertSkusCanBeDeleted($id, $delSuks, $oldAttrValue ?: []);
+                $storeProductAttrValueServices->assertSkusCanBeDeleted(
+                    $id,
+                    $delSuks,
+                    $oldAttrValue ?: [],
+                    $lease
+                );
             }
 
             $this->setAttr($data['attrGroup'], $id, $type);
@@ -327,7 +362,9 @@ class StoreProductAttrServices extends BaseServices
                         unset($item['stock'], $item['defective_stock'], $item['sum_stock'], $item['old_stock']);
                     }
                     $item['virtual_list'] = json_encode($item['virtual_list']);
-                    $res1 = $res1 && $storeProductAttrValueServices->update($attrId, $item);
+                    $res1 = $res1 && ($type === 0
+                        ? $storeProductAttrValueServices->updateInGuard($lease, $attrId, $item)
+                        : $storeProductAttrValueServices->update($attrId, $item));
                 } else {
                     if ((int)$type === 0) {
                         $item['stock'] = 0;
@@ -338,16 +375,19 @@ class StoreProductAttrServices extends BaseServices
                 }
             }
             if ($delSuks) {
-                $res2 = $storeProductAttrValueServices->del($id, $type, $delSuks);
+                $res2 = $type === 0
+                    ? $storeProductAttrValueServices->delInGuard($lease, $id, $type, $delSuks)
+                    : $storeProductAttrValueServices->del($id, $type, $delSuks);
             }
             if ($dataAll) {
-                $res3 = $storeProductAttrValueServices->saveAll($dataAll);
+                $res3 = $type === 0
+                    ? $storeProductAttrValueServices->saveAllInGuard($lease, $dataAll)
+                    : $storeProductAttrValueServices->saveAll($dataAll);
             }
             if ($res1 && $res2 && $res3) {
                 return $valueGroup;
             }
             throw new AdminException('商品规格信息保存失败');
-        });
     }
 
 

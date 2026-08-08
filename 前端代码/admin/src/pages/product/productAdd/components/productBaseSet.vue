@@ -35,7 +35,7 @@
         <span class="addClass" @click="addBrand">新增品牌</span>
       </div>
     </FormItem>
-    <FormItem label="销售/包装单位：" prop="unit_name" :rules="ruleValidate.unit_name">
+    <FormItem v-if="![5, 6].includes(Number(baseInfo.product_type))" label="销售/包装单位：" prop="unit_name" :rules="ruleValidate.unit_name">
       <Select
         v-model="formValidate.unit_name"
         clearable
@@ -201,31 +201,6 @@
         开启定时下架后，系统会在设置时间下架该商品。下架时间需晚于开售时间，商品才能定时开售。
       </div>
     </FormItem>
-    <FormItem label="商品来源：" v-if="baseInfo.type != 1 && baseInfo.product_type == 0">
-      <RadioGroup v-model="goodsSource" @on-change="sourceChange">
-        <Radio :label="1">
-          <span>平台自采</span>
-        </Radio>
-        <Radio :label="2">
-          <span>供应商</span>
-        </Radio>
-      </RadioGroup>
-    </FormItem>
-    <FormItem label="供应商：" v-if="baseInfo.type != 1 && baseInfo.product_type == 0 && goodsSource == 2">
-      <Select
-          v-model="formValidate.supplier_id"
-          clearable
-          v-width="'50%'"
-      >
-        <Option
-            v-for="item in supplierList"
-            :value="item.id"
-            :key="item.id"
-        >{{ item.supplier_name }}</Option
-        >
-      </Select>
-    </FormItem>
-
     <!-- 商品标签 -->
     <Modal
       v-model="storeLabelShow"

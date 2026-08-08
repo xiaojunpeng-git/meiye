@@ -220,6 +220,7 @@ class StoreProduct extends AuthController
 			['field_key', ''],//搜索字段类型
             ['store_name', ''],//关键词
 			['product_type', ''],//商品类型0:普通商品，1：卡密，2：优惠券，3：虚拟商品,4：次卡商品,5:卡项商品6：预约商品
+            ['card_rule_type', ''],//卡项规则：普通卡、任选种数卡、任选次数卡、时间卡
             ['cate_id', ''],//分类
 			['supplier_id', 0],//供应商
             ['type', 1, '', 'status'],//商品状态
@@ -257,6 +258,8 @@ class StoreProduct extends AuthController
 					return $this->success(['list' => [], 'count' => 0]);
 				}
 			} else {
+				// 平台商品主数据使用 type=0；默认值 type=1 会错误限定为门店来源。
+				$where['type'] = 0;
 				$where['pid'] = 0;
 			}
 		}
@@ -594,6 +597,10 @@ class StoreProduct extends AuthController
             ['sort', 0],
             ['card_num', 0],
             ['card_num_type', 0],
+            ['card_rule_type', ''],
+            ['card_rule_version', 0],
+            ['card_choice_limit', 0],
+            ['card_shared_times', 0],
 //            ['sales', 0],
             ['ficti', 0],
             ['give_integral', 0],
@@ -607,6 +614,7 @@ class StoreProduct extends AuthController
             ['is_good', 0],
             ['description', ''],
             ['spec_type', 0],
+            ['single_spec_name', '规格'],//单规格名称（仅产品类型）
             ['video_open', 0],
             ['video_link', ''],
             ['items', []],
@@ -797,8 +805,8 @@ class StoreProduct extends AuthController
         if (in_array($chooseType, [94, 95], true)) {
             // 94=库存选品 / 95=院装耗材：仅产品
             $where['product_type'] = 0;
-        } elseif ($chooseType === 96) {
-            // 96=院装配方项目：仅预约/项目
+        } elseif ($chooseType === 96 || $chooseType === 97) {
+            // 96=院装配方项目，97=平台卡项选项目：仅预约/项目
             $where['product_type'] = 6;
         }
         // 94=库存选品：仅平台商品，排除供应商；取消 type=[0,2]；忽略客户端 status 以免只查上架
@@ -806,6 +814,12 @@ class StoreProduct extends AuthController
             unset($where['status'], $where['is_show']);
             $where['type'] = 0;
             $where['relation_id'] = 0;
+        } elseif ($chooseType === 97) {
+            // 平台卡项只配置已上架的平台项目主数据；门店项目 ID 在同步后由原映射链路解析。
+            $where['type'] = 0;
+            $where['relation_id'] = 0;
+            $where['is_show'] = 1;
+            $where['is_card'] = 0;
         } else {
             $where['type'] = [0, 2];
             if ($where['is_supplier'] == 1) {

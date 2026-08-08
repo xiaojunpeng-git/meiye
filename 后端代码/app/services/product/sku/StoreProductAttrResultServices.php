@@ -14,6 +14,8 @@ namespace app\services\product\sku;
 
 use app\dao\product\sku\StoreProductAttrResultDao;
 use app\services\BaseServices;
+use app\services\product\product\StoreCatalogWriteLease;
+use app\services\product\product\StoreCatalogWriteLockGuard;
 use app\services\product\product\StoreProductServices;
 use mohe\exceptions\AdminException;
 
@@ -97,12 +99,38 @@ class StoreProductAttrResultServices extends BaseServices
 		if (!$productInfo) {
 			return true;
 		}
-		$productInfo = is_object($productInfo) ? $productInfo->toArray() : $productInfo;
-		//无属性添加默认属性
-		if ($this->dao->getCount(['product_id' => $id, 'type' => $type])) {
-			return  true;
-		}
-		$attr = [
+			$productInfo = is_object($productInfo) ? $productInfo->toArray() : $productInfo;
+			if ($type === 0) {
+				/** @var StoreCatalogWriteLockGuard $guard */
+				$guard = app()->make(StoreCatalogWriteLockGuard::class);
+				return $guard->withComponentCatalogMutation([$id], function (StoreCatalogWriteLease $lease) use ($id, $type, $storeProductServices) {
+					if ($this->dao->getCount(['product_id' => $id, 'type' => $type])) {
+						return true;
+					}
+					$lockedProductInfo = $storeProductServices->get($id);
+					if (!$lockedProductInfo) {
+						throw new AdminException('默认 SKU 对应商品不存在');
+					}
+					$lockedProductInfo = is_object($lockedProductInfo)
+						? $lockedProductInfo->toArray()
+						: $lockedProductInfo;
+					return $this->saveDefaultProductAttr($lease, $id, $type, $lockedProductInfo, $storeProductServices);
+				});
+			}
+			if ($this->dao->getCount(['product_id' => $id, 'type' => $type])) {
+				return true;
+			}
+			return $this->saveDefaultProductAttr(null, $id, $type, $productInfo, $storeProductServices);
+	}
+
+	private function saveDefaultProductAttr(
+		?StoreCatalogWriteLease $lease,
+		int $id,
+		int $type,
+		array $productInfo,
+		StoreProductServices $storeProductServices
+	): bool {
+			$attr = [
 			[
 				'value' => '规格',
 				'detailValue' => '',
@@ -130,12 +158,19 @@ class StoreProductAttrResultServices extends BaseServices
 			'days' => 0,
 			'section_time' => []
 		];
-		/** @var StoreProductAttrServices $storeProductAttrServices */
-		$storeProductAttrServices = app()->make(StoreProductAttrServices::class);
-		$skuList = $storeProductAttrServices->validateProductAttr($attr, $detail, $id);
-		$storeProductAttrServices->saveProductAttr($skuList, $id, $type);
-		$storeProductServices->update($id, ['spec_type' => 0]);
-		return true;
+			/** @var StoreProductAttrServices $storeProductAttrServices */
+			$storeProductAttrServices = app()->make(StoreProductAttrServices::class);
+			$skuList = $storeProductAttrServices->validateProductAttr($attr, $detail, $id);
+			if ($type === 0) {
+				if (!$lease) {
+					throw new AdminException('默认 SKU 创建缺少商品目录写锁');
+				}
+				$storeProductAttrServices->saveProductAttrInGuard($lease, $skuList, $id, $type);
+			} else {
+				$storeProductAttrServices->saveProductAttr($skuList, $id, $type);
+			}
+			$storeProductServices->update($id, ['spec_type' => 0]);
+			return true;
 	}
 
 

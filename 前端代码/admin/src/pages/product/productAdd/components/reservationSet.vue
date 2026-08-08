@@ -1,22 +1,5 @@
 <template>
 	<div>
-	   <FormItem label="预约模式：">
-	     <RadioGroup v-model="baseInfo.reservation_type">
-	       <Radio :label="1">到店服务+上门服务</Radio>
-	       <Radio :label="2">到店服务</Radio>
-	       <Radio :label="3">上门服务</Radio>
-	     </RadioGroup>
-	   </FormItem>
-	   <FormItem label="预约时机：">
-	     <RadioGroup v-model="baseInfo.reservation_timing_type">
-	       <Radio :label="1">购买时预约+先买后约</Radio>
-	       <Radio :label="2">购买时预约</Radio>
-	       <Radio :label="3">先买后约</Radio>
-	     </RadioGroup>
-		 <div class="fs-12 text--w111-999">
-			购买时预约：用户需选择预约时间后再提交预约订单；先买后约：支持用户先购买预约服务，再选择合适的预约时间。
-		 </div>
-	   </FormItem>
 	   <FormItem label="可售日期：">
 		   <RadioGroup v-model="baseInfo.sale_time_type">
 		     <Radio :label="1">每天</Radio>

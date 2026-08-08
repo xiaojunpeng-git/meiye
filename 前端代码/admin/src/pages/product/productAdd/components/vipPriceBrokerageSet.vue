@@ -104,6 +104,7 @@
               <div class="mt-14 flex-between-center">
                 <Input
                   type="number"
+                  :step="vipSetType == 1 ? 0.01 : 1"
                   class="w-85"
                   @on-change="vipPriceReplace"
                   v-model="vipSetNum"
@@ -137,6 +138,7 @@
           <template slot-scope="scope">
             <Input
               type="number"
+              :step="1"
               v-model="scope.row.vip_price"
               @on-change="vipRowReplace(scope.row)"
             >
@@ -178,6 +180,7 @@
               <div class="mt-14 flex-between-center">
                 <Input
                   type="number"
+                  :step="brokerageSetType == 1 ? 0.01 : 1"
                   @on-change="brokerageReplace"
                   class="w-85"
                   v-model="brokerage"
@@ -204,6 +207,8 @@
           <template slot-scope="scope">
             <div v-show="formData.is_sub == 1">
               <Input
+                type="number"
+                :step="1"
                 v-model="scope.row.brokerage"
                 @on-change="brokerageRowReplace(scope.row)"
               >
@@ -246,6 +251,7 @@
               <div class="mt-14 flex-between-center">
                 <Input
                   type="number"
+                  :step="brokerageSetType == 1 ? 0.01 : 1"
                   @on-change="brokerageTwoReplace"
                   class="w-85"
                   v-model="brokerage_two"
@@ -272,6 +278,8 @@
           <template slot-scope="scope">
             <div v-show="formData.is_sub == 1">
               <Input
+                type="number"
+                :step="1"
                 v-model="scope.row.brokerage_two"
                 @on-change="brokerageTwoRowReplace(scope.row)"
               >
@@ -319,6 +327,7 @@
               <div class="mt-14 flex-between-center">
                 <Input
                   type="number"
+                  :step="levelSetType == 1 ? 0.01 : 1"
                   @on-change="levelPriceReplace"
                   class="w-85"
                   v-model="levelSetNum"
@@ -362,6 +371,7 @@
             <div v-if="formData.level_type == 2">
               <Input
                 type="number"
+                :step="1"
                 v-model="scope.row.level_price[i].inputPrice"
                 @on-change="levelRowReplace(scope.row, i)"
               >
@@ -449,6 +459,10 @@ export default {
       type: Boolean,
       default: false,
     },
+    productType: {
+      type: [Number, String],
+      default: 0,
+    },
   },
   data() {
     return {
@@ -468,6 +482,11 @@ export default {
       levelSetType: 0,
       levelSetNum: '',
     };
+  },
+  computed: {
+    requiresWholeYuan() {
+      return [0, 4, 5, 6].includes(Number(this.productType));
+    },
   },
   watch: {
     attrs: {
@@ -566,14 +585,20 @@ export default {
       if (this.vipSetNum == 0) return this.$Message.error('会员价不可为0');
       if (this.vipSetType == 1 && this.vipSetNum > 100)
         return this.$Message.error('折扣不可超过100');
-      this.attrData.map((item) => {
+      const values = this.attrData.map((item) => {
         if (this.vipSetType == 0) {
-          item.vip_price = this.vipSetNum;
+          return this.vipSetNum;
         } else if (this.vipSetType == 1) {
-          item.vip_price = ((this.vipSetNum / 100) * item.price).toFixed(2);
+          return (this.vipSetNum / 100) * item.price;
         } else {
-          item.vip_price = item.price - this.vipSetNum;
+          return item.price - this.vipSetNum;
         }
+      });
+      if (this.requiresWholeYuan && values.some((value) => !this.isWholeYuanMoney(value))) {
+        return this.$Message.error('批量计算后的会员价不是整数金额，请调整设置');
+      }
+      this.attrData.forEach((item, index) => {
+        item.vip_price = values[index];
       });
       this.closeVipSet();
     },
@@ -585,27 +610,36 @@ export default {
     brokerageOneSetUp() {
       if (this.brokerageSetType == 1 && this.brokerage > 100)
         return this.$Message.error('折扣不可超过100');
-      this.attrData.map((item) => {
+      const values = this.attrData.map((item) => {
         if (this.brokerageSetType == 0) {
-          item.brokerage = this.brokerage;
+          return this.brokerage;
         } else {
-          item.brokerage = ((this.brokerage / 100) * item.price).toFixed(2);
+          return (this.brokerage / 100) * item.price;
         }
+      });
+      if (this.requiresWholeYuan && values.some((value) => !this.isWholeYuanMoney(value))) {
+        return this.$Message.error('批量计算后的一级返佣不是整数金额，请调整设置');
+      }
+      this.attrData.forEach((item, index) => {
+        item.brokerage = values[index];
       });
       this.closePop();
     },
     brokerageTwoSetUp() {
       if (this.brokerageSetType == 1 && this.brokerage_two > 100)
         return this.$Message.error('折扣不可超过100');
-      this.attrData.map((item) => {
+      const values = this.attrData.map((item) => {
         if (this.brokerageSetType == 0) {
-          item.brokerage_two = this.brokerage_two;
+          return this.brokerage_two;
         } else {
-          item.brokerage_two = (
-            (this.brokerage_two / 100) *
-            item.price
-          ).toFixed(2);
+          return (this.brokerage_two / 100) * item.price;
         }
+      });
+      if (this.requiresWholeYuan && values.some((value) => !this.isWholeYuanMoney(value))) {
+        return this.$Message.error('批量计算后的二级返佣不是整数金额，请调整设置');
+      }
+      this.attrData.forEach((item, index) => {
+        item.brokerage_two = values[index];
       });
       this.closePop();
     },
@@ -620,24 +654,23 @@ export default {
         return this.$Message.error('等级会员价不可为0');
       if (this.levelSetType == 1 && this.levelSetNum > 100)
         return this.$Message.error('折扣不可超过100');
-      this.attrData.forEach((item) => {
+      const values = this.attrData.map((item) => {
         switch (this.levelSetType) {
           case 0:
-            item.level_price[index].inputPrice = this.levelSetNum;
-            break;
+            return this.levelSetNum;
           case 1:
-            item.level_price[index].inputPrice = Math.floor(this.$computes.Mul(
-              this.$computes.Div(this.levelSetNum, 100),
-              item.price
-            ) * 100) / 100;
-            break;
+            return this.$computes.Mul(this.$computes.Div(this.levelSetNum, 100), item.price);
           case 2:
-            item.level_price[index].inputPrice = this.$computes.Sub(
-              item.price,
-              this.levelSetNum
-            );
-            break;
+            return this.$computes.Sub(item.price, this.levelSetNum);
+          default:
+            return '';
         }
+      });
+      if (this.requiresWholeYuan && values.some((value) => !this.isWholeYuanMoney(value))) {
+        return this.$Message.error('批量计算后的等级会员价不是整数金额，请调整设置');
+      }
+      this.attrData.forEach((item, itemIndex) => {
+        item.level_price[index].inputPrice = values[itemIndex];
       });
       this.closeLevelSet(index);
     },
@@ -658,6 +691,21 @@ export default {
         cleanedValue = integerPart + '.' + decimalPart.slice(0, 2);
       }
       return cleanedValue;
+    },
+    isWholeYuanMoney(value) {
+      if (typeof value === 'number') {
+        return Number.isInteger(value) && value >= 0;
+      }
+      return /^(?:0|[1-9]\d*)(?:\.0+)?$/.test(String(value == null ? '' : value).trim());
+    },
+    vipRowReplace(row) {
+      row.vip_price = this.cleanPrice(String(row.vip_price == null ? '' : row.vip_price));
+    },
+    brokerageRowReplace(row) {
+      row.brokerage = this.cleanPrice(String(row.brokerage == null ? '' : row.brokerage));
+    },
+    brokerageTwoRowReplace(row) {
+      row.brokerage_two = this.cleanPrice(String(row.brokerage_two == null ? '' : row.brokerage_two));
     },
     levelPriceReplace(event) {
       this.levelSetNum = this.cleanPrice(event.target.value);
@@ -687,8 +735,12 @@ export default {
     },
     validateForm() {
       // 付费会员价
-      if (this.formData.is_vip) {
+      if (Number(this.formData.is_vip) === 1) {
         for (let i = 0; i < this.attrData.length; i++) {
+          if (this.requiresWholeYuan && !this.isWholeYuanMoney(this.attrData[i].vip_price)) {
+            this.$Message.error(`规格【${this.attrData[i].suk || '默认'}】的会员价必须填写整数金额`);
+            return false;
+          }
           if (Number(this.attrData[i].vip_price) <= 0) {
             this.$Message.error('付费会员价需大于0');
             return false;
@@ -702,8 +754,15 @@ export default {
         }
       }
       // 自定义等级会员价
-      if (this.formData.level_type == 2) {
+      if (Number(this.formData.level_type) === 2) {
         for (const item of this.attrData) {
+          if (
+            this.requiresWholeYuan &&
+            item.level_price.some((value) => !this.isWholeYuanMoney(value.inputPrice))
+          ) {
+            this.$Message.error(`规格【${item.suk || '默认'}】的等级会员价必须填写整数金额`);
+            return false;
+          }
           const result = item.level_price.some(
             (value) => Number(value.inputPrice) > Number(item.price)
           );
@@ -714,8 +773,16 @@ export default {
         }
       }
       let step = true;
-      if (this.formData.is_brokerage && this.formData.is_sub) {
+      let wholeYuanBrokerageValid = true;
+      if (Number(this.formData.is_brokerage) === 1 && Number(this.formData.is_sub) === 1) {
         this.attrData.forEach((item) => {
+          if (
+            this.requiresWholeYuan &&
+            (!this.isWholeYuanMoney(item.brokerage) || !this.isWholeYuanMoney(item.brokerage_two))
+          ) {
+            wholeYuanBrokerageValid = false;
+            return;
+          }
           if (
             Number(item.brokerage) > Number(item.price) ||
             Number(item.brokerage_two) > Number(item.price)
@@ -723,6 +790,10 @@ export default {
             step = false;
           }
         });
+      }
+      if (!wholeYuanBrokerageValid) {
+        this.$Message.error('一级返佣和二级返佣必须填写整数金额');
+        return false;
       }
       if (!step) {
         this.$Message.error('佣金需不大于售价');
@@ -733,13 +804,22 @@ export default {
     getFormData() {
       const formData = JSON.parse(JSON.stringify(this.formData));
       const attrData = JSON.parse(JSON.stringify(this.attrData));
-      if (formData.level_type == 2) {
-        attrData.forEach((item) => {
+      attrData.forEach((item) => {
+        item.vip_price = Number(formData.is_vip) === 1 ? Number(item.vip_price) : 0;
+        if (Number(formData.is_brokerage) === 1 && Number(formData.is_sub) === 1) {
+          item.brokerage = Number(item.brokerage);
+          item.brokerage_two = Number(item.brokerage_two);
+        } else {
+          item.brokerage = 0;
+          item.brokerage_two = 0;
+        }
+        if (formData.level_type == 2) {
           item.level_price.forEach((value) => {
-            value.price = value.inputPrice;
+            value.price = Number(value.inputPrice);
+            value.inputPrice = value.price;
           });
-        });
-      }
+        }
+      });
       return {
         ...formData,
         attrData,

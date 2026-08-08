@@ -98,4 +98,12 @@ class StoreBranchProductAttrValueServices extends BaseServices
         return $this->dao->getProductAttrValue(['product_id' => $id, 'type' => $type], $with);
     }
 
+    public function __call($name, $arguments)
+    {
+        if (in_array($name, ['save', 'saveAll', 'update', 'delete', 'del', 'insert', 'insertAll', 'batchUpdate', 'destroy'], true)) {
+            throw new AdminException('旧门店 SKU 写入口已停用，请使用统一商品同步服务');
+        }
+        return parent::__call($name, $arguments);
+    }
+
 }

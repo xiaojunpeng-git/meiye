@@ -23,7 +23,10 @@ use app\services\BaseServices;
 use app\services\product\branch\StoreBranchProductAttrValueServices;
 use app\services\product\inventory\StoreProductStockDetailServices;
 use app\services\product\product\StoreCardRelatedServices;
+use app\services\product\product\StoreCatalogWriteLease;
+use app\services\product\product\StoreCatalogWriteLockGuard;
 use app\services\product\product\StoreProductServices;
+use app\services\product\product\StoreProductSkuWriteLock;
 use app\services\store\SystemStoreServices;
 use mohe\exceptions\AdminException;
 use mohe\services\CacheService;
@@ -273,6 +276,24 @@ class StoreProductAttrValueServices extends BaseServices
      */
     public function del(int $id, int $type, array $suk = [])
     {
+        if ($type === 0) {
+            /** @var StoreCatalogWriteLockGuard $guard */
+            $guard = app()->make(StoreCatalogWriteLockGuard::class);
+            return $guard->withComponentCatalogMutation([$id], function (StoreCatalogWriteLease $lease) use ($id, $type, $suk) {
+                return $this->delInGuard($lease, $id, $type, $suk);
+            });
+        }
+        return $this->dao->del($id, $type, $suk);
+    }
+
+    public function delInGuard(StoreCatalogWriteLease $lease, int $id, int $type, array $suk = [])
+    {
+        if ($type !== 0) {
+            throw new AdminException('目录写锁仅处理 type=0 SKU');
+        }
+        $lease->assertCoversProducts([$id]);
+        $rows = $this->dao->getList(['product_id' => $id, 'type' => 0, 'suk' => $suk], 'id');
+        $lease->assertCoversSkuIds(array_column($rows, 'id'));
         return $this->dao->del($id, $type, $suk);
     }
 
@@ -282,7 +303,12 @@ class StoreProductAttrValueServices extends BaseServices
      * @param array $delSuks 待删除的 suk 列表
      * @param array $oldAttrValue 以 suk 为键的旧规格行
      */
-    public function assertSkusCanBeDeleted(int $productId, array $delSuks, array $oldAttrValue): void
+    public function assertSkusCanBeDeleted(
+        int $productId,
+        array $delSuks,
+        array $oldAttrValue,
+        StoreCatalogWriteLease $lease = null
+    ): void
     {
         if ($productId <= 0 || !$delSuks) {
             return;
@@ -294,15 +320,12 @@ class StoreProductAttrValueServices extends BaseServices
             }
             $skuId = (int)($row['id'] ?? 0);
             $unique = (string)($row['unique'] ?? '');
+            if (!$lease) {
+                throw new AdminException('删除或改名 SKU 必须先取得商品目录写锁');
+            }
+            $lease->assertCoversProducts([$productId]);
             if ($skuId > 0) {
-                $locked = \think\facade\Db::name('store_product_attr_value')
-                    ->where('id', $skuId)
-                    ->lock(true)
-                    ->find();
-                if ($locked) {
-                    $row = $locked;
-                    $unique = (string)($locked['unique'] ?? $unique);
-                }
+                $lease->assertCoversSkuIds([$skuId]);
             }
             $stock = (string)($row['stock'] ?? '0');
             $defective = (string)($row['defective_stock'] ?? '0');
@@ -391,7 +414,10 @@ class StoreProductAttrValueServices extends BaseServices
      * 永久删除/批量删除前：校验商品下全部 type=0 SKU 可否删除
      * @param int $productId
      */
-    public function assertAllType0SkusCanBeDeleted(int $productId): void
+    public function assertAllType0SkusCanBeDeleted(
+        int $productId,
+        StoreCatalogWriteLease $lease = null
+    ): void
     {
         if ($productId <= 0) {
             return;
@@ -400,16 +426,19 @@ class StoreProductAttrValueServices extends BaseServices
         if (!$oldAttrValue) {
             return;
         }
-        $this->assertSkusCanBeDeleted($productId, array_keys($oldAttrValue), $oldAttrValue);
+        $this->assertSkusCanBeDeleted($productId, array_keys($oldAttrValue), $oldAttrValue, $lease);
     }
 
     /**
      * @param array $productIds
      */
-    public function assertProductsSkusCanBeDeleted(array $productIds): void
+    public function assertProductsSkusCanBeDeleted(
+        array $productIds,
+        StoreCatalogWriteLease $lease = null
+    ): void
     {
         foreach ($productIds as $productId) {
-            $this->assertAllType0SkusCanBeDeleted((int)$productId);
+            $this->assertAllType0SkusCanBeDeleted((int)$productId, $lease);
         }
     }
 
@@ -419,9 +448,166 @@ class StoreProductAttrValueServices extends BaseServices
      */
     public function saveAll(array $data)
     {
+        $typeZeroProducts = [];
+        foreach ($data as $row) {
+            if ((int)($row['type'] ?? 0) === 0) {
+                $typeZeroProducts[] = (int)($row['product_id'] ?? 0);
+            }
+        }
+        if ($typeZeroProducts) {
+            /** @var StoreCatalogWriteLockGuard $guard */
+            $guard = app()->make(StoreCatalogWriteLockGuard::class);
+            return $guard->withComponentCatalogMutation($typeZeroProducts, function (StoreCatalogWriteLease $lease) use ($data) {
+                return $this->saveAllInGuard($lease, $data);
+            });
+        }
         $res = $this->dao->saveAll($data);
         if (!$res) throw new AdminException('规格保存失败');
         return $res;
+    }
+
+    public function saveAllInGuard(StoreCatalogWriteLease $lease, array $data)
+    {
+        $productIds = [];
+        foreach ($data as $row) {
+            if ((int)($row['type'] ?? 0) !== 0) {
+                throw new AdminException('目录写锁批量保存只允许 type=0 SKU');
+            }
+            $productIds[] = (int)($row['product_id'] ?? 0);
+        }
+        $lease->assertCoversProducts($productIds);
+        $res = $this->dao->saveAll($data);
+        if (!$res) throw new AdminException('规格保存失败');
+        $rows = Db::name('store_product_attr_value')
+            ->whereIn('product_id', array_values(array_unique(array_map('intval', $productIds))))
+            ->where('type', 0)
+            ->field('id,product_id,unique,type')
+            ->select();
+        $rows = is_object($rows) && method_exists($rows, 'toArray') ? $rows->toArray() : (array)$rows;
+        $lease->registerWrittenSkuRows($rows);
+        return $res;
+    }
+
+    public function save(array $data)
+    {
+        if ((int)($data['type'] ?? 0) !== 0) {
+            return $this->dao->save($data);
+        }
+        $productId = (int)($data['product_id'] ?? 0);
+        /** @var StoreCatalogWriteLockGuard $guard */
+        $guard = app()->make(StoreCatalogWriteLockGuard::class);
+        return $guard->withComponentCatalogMutation([$productId], function (StoreCatalogWriteLease $lease) use ($data) {
+            return $this->saveInGuard($lease, $data);
+        });
+    }
+
+    public function saveInGuard(StoreCatalogWriteLease $lease, array $data)
+    {
+        if ((int)($data['type'] ?? 0) !== 0) {
+            throw new AdminException('目录写锁单行保存只允许 type=0 SKU');
+        }
+        $lease->assertCoversProducts([(int)($data['product_id'] ?? 0)]);
+        $result = $this->dao->save($data);
+        if (!$result) {
+            throw new AdminException('规格保存失败');
+        }
+        $lease->registerWrittenSkuRows([$result]);
+        return $result;
+    }
+
+    public function update($id, array $data, ?string $key = null)
+    {
+        $identityFields = ['product_id', 'unique', 'suk', 'type', 'product_type', 'is_show'];
+        if (array_intersect(array_keys($data), $identityFields)) {
+            $where = is_array($id) ? $id : [is_null($key) ? 'id' : $key => $id];
+            $rows = Db::name('store_product_attr_value')->where($where)->field('id,product_id,type')->select();
+            $rows = is_object($rows) && method_exists($rows, 'toArray') ? $rows->toArray() : (array)$rows;
+            $touchesCatalogIdentity = array_key_exists('type', $data) && (int)$data['type'] === 0;
+            foreach ($rows as $row) {
+                if ((int)($row['type'] ?? -1) === 0) {
+                    $touchesCatalogIdentity = true;
+                    break;
+                }
+            }
+            if ($rows && $touchesCatalogIdentity) {
+                $productIds = [];
+                foreach ($rows as $row) {
+                    $productIds[] = (int)($row['product_id'] ?? 0);
+                    $productIds[] = (int)($data['product_id'] ?? $row['product_id'] ?? 0);
+                }
+                /** @var StoreCatalogWriteLockGuard $guard */
+                $guard = app()->make(StoreCatalogWriteLockGuard::class);
+                return $guard->withComponentCatalogMutation($productIds, function (StoreCatalogWriteLease $lease) use ($id, $data, $key) {
+                    return $this->updateInGuard($lease, $id, $data, $key);
+                });
+            }
+        }
+        return $this->dao->update($id, $data, $key);
+    }
+
+    public function updateInGuard(
+        StoreCatalogWriteLease $lease,
+        $id,
+        array $data,
+        ?string $key = null
+    ) {
+        $where = is_array($id) ? $id : [is_null($key) ? 'id' : $key => $id];
+        $rows = Db::name('store_product_attr_value')->where($where)->field('id,product_id,type')->select();
+        $rows = is_object($rows) && method_exists($rows, 'toArray') ? $rows->toArray() : (array)$rows;
+        $catalogRows = array_values(array_filter($rows, static function (array $row): bool {
+            return (int)($row['type'] ?? -1) === 0;
+        }));
+        $lease->assertCoversProducts(array_column($catalogRows, 'product_id'));
+        $lease->assertCoversSkuIds(array_column($catalogRows, 'id'));
+        $targetProductIds = [];
+        foreach ($rows as $row) {
+            if ((int)($data['type'] ?? $row['type'] ?? -1) === 0) {
+                $targetProductIds[] = (int)($data['product_id'] ?? $row['product_id'] ?? 0);
+            }
+        }
+        $lease->assertCoversProducts($targetProductIds);
+        $result = $this->dao->update($id, $data, $key);
+        $updatedRows = Db::name('store_product_attr_value')->whereIn('id', array_column($rows, 'id'))->where('type', 0)
+            ->field('id,product_id,unique,type')->select();
+        $updatedRows = is_object($updatedRows) && method_exists($updatedRows, 'toArray')
+            ? $updatedRows->toArray()
+            : (array)$updatedRows;
+        $lease->registerWrittenSkuRows($updatedRows);
+        return $result;
+    }
+
+    public function delete($id, ?string $key = null)
+    {
+        $where = is_array($id) ? $id : [is_null($key) ? 'id' : $key => $id];
+        $rows = Db::name('store_product_attr_value')->where($where)->where('type', 0)->field('id,product_id')->select();
+        $rows = is_object($rows) && method_exists($rows, 'toArray') ? $rows->toArray() : (array)$rows;
+        if ($rows) {
+            $productIds = array_column($rows, 'product_id');
+            /** @var StoreCatalogWriteLockGuard $guard */
+            $guard = app()->make(StoreCatalogWriteLockGuard::class);
+            return $guard->withComponentCatalogMutation($productIds, function (StoreCatalogWriteLease $lease) use ($id, $key) {
+                return $this->deleteInGuard($lease, $id, $key);
+            });
+        }
+        return $this->dao->delete($id, $key);
+    }
+
+    public function deleteInGuard(StoreCatalogWriteLease $lease, $id, ?string $key = null)
+    {
+        $where = is_array($id) ? $id : [is_null($key) ? 'id' : $key => $id];
+        $rows = Db::name('store_product_attr_value')->where($where)->where('type', 0)->field('id,product_id')->select();
+        $rows = is_object($rows) && method_exists($rows, 'toArray') ? $rows->toArray() : (array)$rows;
+        $lease->assertCoversProducts(array_column($rows, 'product_id'));
+        $lease->assertCoversSkuIds(array_column($rows, 'id'));
+        return $this->dao->delete($id, $key);
+    }
+
+    public function __call($name, $arguments)
+    {
+        if (in_array($name, ['insert', 'insertAll', 'batchUpdate', 'destroy'], true)) {
+            throw new AdminException('SKU identity 写入必须使用商品目录写锁守卫');
+        }
+        return parent::__call($name, $arguments);
     }
 
     /**
@@ -628,24 +814,27 @@ class StoreProductAttrValueServices extends BaseServices
     {
         /** @var StoreProductServices $productServices */
         $productServices = app()->make(StoreProductServices::class);
-        // 全局实物库存锁顺序（与 changeSkuStock 一致）：先按 id 升序锁 SKU，再更新商品表（不先锁商品）
-        $uniques = [];
+        // 全局实物库存锁顺序：先锁商品(42)，再按 id 升序锁 SKU(43)。
+        $lockTargets = [];
         foreach ($data as $attr) {
             $uq = (string)($attr['unique'] ?? '');
-            if ($uq !== '') {
-                $uniques[$uq] = $uq;
-            }
+            $lockTargets[] = [
+                'product_id' => $id,
+                'unique' => $uq,
+                'require_sku' => true,
+            ];
         }
-        $lockedRows = $this->dao->lockAttrValuesByUniques(array_values($uniques), $id);
+        /** @var StoreProductSkuWriteLock $catalogWriteLock */
+        $catalogWriteLock = app()->make(StoreProductSkuWriteLock::class);
+        $lockedCatalog = $catalogWriteLock->lock($lockTargets);
         $attrs = [];
-        foreach ($lockedRows as $row) {
+        foreach ($lockedCatalog['skus'] as $row) {
             $attrs[(string)$row['unique']] = $row;
         }
-        $product = $productServices->get($id);
+        $product = $lockedCatalog['products'][$id] ?? null;
         if (!$product) {
             throw new ValidateException('商品不存在');
         }
-        $product = is_object($product) ? $product->toArray() : $product;
 		/** @var StoreProductReservationTimeServices $productReservationTimeServices */
 		$productReservationTimeServices = app()->make(StoreProductReservationTimeServices::class);
 		$reservationTimes = $productReservationTimeServices->getColumn(['product_id' => $id], '*', 'id');
@@ -800,8 +989,48 @@ class StoreProductAttrValueServices extends BaseServices
 	 * @throws \think\db\exception\DbException
 	 * @throws \think\db\exception\ModelNotFoundException
 	 */
-	public function updateAttrs(int $id, array $data, string $type = '', int $is_verify = 1, int $relation_type = 0, int $relation_id = 0, int $adminId = 0)
+	public function updateAttrs(
+		int $id,
+		array $data,
+		string $type = '',
+		int $is_verify = 1,
+		int $relation_type = 0,
+		int $relation_id = 0,
+		int $adminId = 0,
+		StoreCatalogWriteLease $catalogLease = null
+	)
 	{
+		if ($type !== 'price') {
+			throw new ValidateException('已停用：不可在此修改库存，请到「库存管理」入库/出库/盘点操作');
+		}
+		if (!$catalogLease) {
+			/** @var StoreCatalogWriteLockGuard $catalogGuard */
+			$catalogGuard = app()->make(StoreCatalogWriteLockGuard::class);
+			return $catalogGuard->withComponentCatalogMutation(
+				[$id],
+				function (StoreCatalogWriteLease $lease) use (
+					$id,
+					$data,
+					$type,
+					$is_verify,
+					$relation_type,
+					$relation_id,
+					$adminId
+				) {
+					return $this->updateAttrs(
+						$id,
+						$data,
+						$type,
+						$is_verify,
+						$relation_type,
+						$relation_id,
+						$adminId,
+						$lease
+					);
+				}
+			);
+		}
+		$catalogLease->assertCoversProducts([$id]);
 		/** @var StoreProductServices $productServices */
 		$productServices = app()->make(StoreProductServices::class);
 		$product = $productServices->get($id);
@@ -810,9 +1039,6 @@ class StoreProductAttrValueServices extends BaseServices
 		}
 		// 【库存铁律】库存只能由库存管理（入/出/盘）与销售出库/退货改动；规格页禁止改库存
 		// 原 type=stock / 同时改价库存 逻辑已停用
-		if ($type !== 'price') {
-			throw new ValidateException('已停用：不可在此修改库存，请到「库存管理」入库/出库/盘点操作');
-		}
 		//平台同步到门店商品 验证门店是否有自主定价权限
 		$isSyncStoreProduct = $product['type'] == 1 && $product['relation_id'] && $product['pid'] > 0;
 		if ($isSyncStoreProduct) {
@@ -852,7 +1078,7 @@ class StoreProductAttrValueServices extends BaseServices
 					}
 				}
 				$updateData = ['price' => $attr['price'], 'cost' => $attr['cost'] ?? $item['cost'], 'ot_price' => $attr['ot_price'] ?? $item['ot_price']];
-				$this->dao->update($item['id'], $updateData);
+				$this->updateInGuard($catalogLease, $item['id'], $updateData);
 			}
 			// 更新商品价格（不改库存汇总）
 			$product_price_arr[] = $attr['price'] ?? $item['price'] ?? 0;

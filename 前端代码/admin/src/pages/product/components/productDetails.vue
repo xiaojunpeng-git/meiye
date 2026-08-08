@@ -225,7 +225,29 @@
                 <span>{{ formValidate.attr.volume }}</span>
               </div>
               <div v-if="formValidate.product_type == 5" class="mt20">
-                <div>卡项：</div>
+                <div class="item-cell flex-y-center">
+                  <div>卡项规则：</div>
+                  <div class="value">{{ cardRuleName }}</div>
+                </div>
+                <div class="item-cell flex-y-center">
+                  <div>有效期：</div>
+                  <div class="value">{{ cardValidityText }}</div>
+                </div>
+                <div
+                  v-if="formValidate.card_rule_type === 'choice_kind'"
+                  class="item-cell flex-y-center"
+                >
+                  <div>最多可选项目种数：</div>
+                  <div class="value">{{ formValidate.card_choice_limit }}</div>
+                </div>
+                <div
+                  v-if="formValidate.card_rule_type === 'choice_count'"
+                  class="item-cell flex-y-center"
+                >
+                  <div>共享总次数：</div>
+                  <div class="value">{{ formValidate.card_shared_times }}</div>
+                </div>
+                <div class="mt20">卡内项目：</div>
                 <Table
                   class="mt-20"
                   :columns="cardColumns"
@@ -878,33 +900,6 @@ export default {
           minWidth: 80,
         },
       ],
-      cardColumns: [
-        {
-          title: '商品信息',
-          slot: 'product',
-          width: 210,
-        },
-        {
-          title: '商品规格',
-          render: (h, params) => {
-            return h('div', params.row.productInfo.attrInfo.suk);
-          },
-        },
-        {
-          title: '商品类型',
-          render: (h, params) => {
-            return h('div', params.row.product_type ? '预约商品' : '产品');
-          },
-        },
-        {
-          title: '售价',
-          key: 'price',
-        },
-        {
-          title: '可核销次数',
-          key: 'write_times',
-        },
-      ],
       timeColumns: [
         {
           title: '时段',
@@ -943,6 +938,52 @@ export default {
     },
   },
   computed: {
+    cardRuleName() {
+      return {
+        normal: '普通卡',
+        choice_kind: '任选种数卡',
+        choice_count: '任选次数卡',
+        time: '时间卡',
+      }[this.formValidate.card_rule_type] || '—';
+    },
+    cardValidityText() {
+      const attr = this.formValidate.attr || {};
+      if (!this.formValidate.card_rule_type) return '—';
+      if (Number(attr.write_valid) === 1) return '永久有效';
+      if (Number(attr.write_valid) === 2) {
+        return attr.days ? `开卡后${attr.days}天有效` : '—';
+      }
+      if (Number(attr.write_valid) === 3) {
+        const range = Array.isArray(attr.section_time) ? attr.section_time : [];
+        return range[0] && range[1] ? `${range[0]} 至 ${range[1]}` : '—';
+      }
+      return '—';
+    },
+    cardColumns() {
+      const columns = [
+        { title: '商品信息', slot: 'product', width: 210 },
+        {
+          title: '商品规格',
+          render: (h, params) => h('div', params.row.productInfo.attrInfo.suk),
+        },
+        {
+          title: '商品类型',
+          render: (h, params) => h('div', params.row.product_type ? '项目' : '产品'),
+        },
+        { title: '售价', key: 'price' },
+      ];
+      if (['normal', 'choice_kind'].includes(this.formValidate.card_rule_type)) {
+        columns.push({
+          title: this.formValidate.card_rule_type === 'choice_kind'
+            ? '选中后可使用次数'
+            : '可使用次数',
+          key: 'write_times',
+        });
+      } else if (this.formValidate.card_rule_type === 'time') {
+        columns.push({ title: '单次核销金额', key: 'writeoff_amount' });
+      }
+      return columns;
+    },
     headTab() {
       return headTabConfig.filter((item) => {
         if (item.name == 7 && this.formValidate.type == 1) {
