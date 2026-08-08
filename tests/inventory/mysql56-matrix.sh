@@ -5,6 +5,7 @@ repo_dir="$(cd "$(dirname "$0")/../.." && pwd)"
 upgrade_dir="$repo_dir/后端代码/database/upgrades/2026-07-29-库存耗材批次完成合同"
 query_upgrade_dir="$repo_dir/后端代码/database/upgrades/2026-07-29-库存统一查询批次事实"
 warehouse_upgrade_dir="$repo_dir/后端代码/database/upgrades/2026-07-31-库存V3仓库创建命令"
+document_number_upgrade_dir="$repo_dir/后端代码/database/upgrades/2026-08-03-库存V3业务单号统一"
 init_sql="$repo_dir/后端代码/database/upgrades/0000-升级登记表初始化.sql"
 container="inventory-completion-mysql56-$$"
 image="docker.m.daocloud.io/library/mysql:5.6.51"
@@ -394,6 +395,7 @@ mysql_file "$db" "$warehouse_upgrade_dir/01-升级前检查.sql" >/dev/null
 mysql_file "$db" "$warehouse_upgrade_dir/02-正式升级.sql" >/dev/null
 mysql_file "$db" "$warehouse_upgrade_dir/02-正式升级.sql" >/dev/null
 mysql_file "$db" "$warehouse_upgrade_dir/03-升级后验证.sql" >/dev/null
+mysql_file "$db" "$document_number_upgrade_dir/02-正式升级.sql" >/dev/null
 echo "WAREHOUSE_CREATE_MIGRATION=PASS"
 manual_inbound_output="$(docker run --rm --cpus 1 --memory 256m \
   --network "container:$container" \
@@ -414,6 +416,27 @@ manual_inbound_output="$(docker run --rm --cpus 1 --memory 256m \
 echo "$manual_inbound_output"
 echo "$manual_inbound_output" | grep 'INVENTORY_MANUAL_INBOUND_RESULT failed=0' >/dev/null
 echo "THINKPHP_MANUAL_INBOUND_INTEGRATION=PASS"
+
+manual_reversal_output="$(docker run --rm --cpus 1 --memory 256m \
+  --network "container:$container" \
+  --volume "$repo_dir:/workspace:ro" \
+  --env CACHE_DRIVER=file \
+  --env PHP_CACHE_DRIVER=file \
+  --env DB_HOST=127.0.0.1 \
+  --env DB_PORT=3306 \
+  --env DB_DATABASE="$db" \
+  --env DB_USERNAME=root \
+  --env DB_PASSWORD= \
+  --env INVENTORY_SKIP_SCHEMA_BOOTSTRAP=1 \
+  --entrypoint php \
+  "$php_image" \
+  /workspace/tests/inventory/php/manual-document-reversal-integration.php 2>&1)" || {
+    echo "$manual_reversal_output" >&2
+    exit 1
+  }
+echo "$manual_reversal_output"
+echo "$manual_reversal_output" | grep 'INVENTORY_MANUAL_REVERSAL_INTEGRATION failed=0' >/dev/null
+echo "THINKPHP_MANUAL_REVERSAL_INTEGRATION=PASS"
 
 warehouse_command_output="$(docker run --rm --cpus 1 --memory 256m \
   --network "container:$container" \

@@ -22,25 +22,26 @@ final class InventoryBatchStockQueryContract
     public static function fields(): array
     {
         return [
-            self::field('organization_name', '组织', 'text', true, true),
-            self::field('location_name', '仓库', 'text', true, true),
-            self::field('store_name', '门店', 'text', true, true),
+            self::field('organization_name', '组织', 'text', true),
+            self::field('location_name', '仓库', 'text', true),
+            self::field('store_name', '门店', 'text', true),
             self::field('product_name', '商品名称', 'text', true, true),
-            self::field('sku_name', '商品规格', 'text', true, true),
+            self::field('sku_name', '商品规格', 'text', true),
             self::field('product_code', '商品编码', 'text'),
-            self::field('barcode', '商品条码', 'text', false, true),
+            self::field('barcode', '商品条码', 'text'),
             self::field('brand_name', '品牌', 'text'),
             self::field('category_name', '商品类别', 'text'),
             self::field('stock_unit', '库存单位', 'text'),
-            self::field('batch_no', '批次号', 'text', true, true),
-            self::field('quality_status', '库存状态', 'text', true, true),
+            self::field('batch_no', '批次号', 'text', true),
+            self::field('quality_status', '库存状态', 'text', true),
             self::field('received_date', '正式入库日期', 'date', true),
             self::field('manufactured_date', '生产日期', 'date', true),
             self::field('expire_date', '到期日', 'date', true),
+            self::field('available_quantity', '数量范围', 'decimal', false, true, ['quick', 'filter', 'sort']),
             self::field('batch_balance_quantity', '批次结存数量', 'decimal', true, false, ['display', 'filter', 'sort', 'summary', 'export']),
             self::field('batch_unit_cost', '批次单位成本', 'amount', true, false, [], self::PERMISSION_COST),
             self::field('source_order_no', '来源入库单', 'text'),
-            self::field('data_quality', '数据质量', 'text', true, true),
+            self::field('data_quality', '数据质量', 'text', true),
         ];
     }
 

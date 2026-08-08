@@ -13,17 +13,11 @@
 					<FormItem label="状态：">
 						<Select
 							v-model="formValidate.status"
-							placeholder="请选择"
-							clearable
+							placeholder="全部"
 							@on-change="searchs"
 							class="input-add"
 						>
-							<Option value="0">草稿</Option>
-							<Option value="1">已申请</Option>
-							<Option value="2">部分调拨</Option>
-							<Option value="3">已完成</Option>
-							<Option value="4">已驳回</Option>
-							<Option value="5">已取消</Option>
+							<Option value="">全部</Option>
 						</Select>
 					</FormItem>
 					<FormItem label="请货门店：">
@@ -47,7 +41,6 @@
 							@on-change="onSupplyFilterChange"
 							class="input-add"
 						>
-							<Option value="hq">总部仓</Option>
 							<Option v-for="item in storeList" :value="'s' + item.id" :key="'s' + item.id">{{ item.name }}</Option>
 						</Select>
 					</FormItem>
@@ -64,7 +57,6 @@
 			</div>
 		</Card>
 		<Card :bordered="false" dis-hover class="ivu-mt">
-			<div class="op-tips">确认申请不会变动库存；确认调拨后才会改双方库存。双方门店须已有同源商品。</div>
 			<Button type="primary" class="mt10" @click="openForm()">新建请货</Button>
 			<Table class="mt25" :columns="columns" :data="orderList" :loading="loading" :border="false">
 				<template slot-scope="{ row }" slot="status">

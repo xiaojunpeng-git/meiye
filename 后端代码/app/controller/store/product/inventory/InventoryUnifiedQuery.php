@@ -5,6 +5,8 @@ namespace app\controller\store\product\inventory;
 
 use app\controller\store\AuthController;
 use app\services\product\inventory\query\InventoryBatchStockQueryContract;
+use app\services\product\inventory\query\InventoryOperationalUnifiedQueryContract;
+use app\services\product\inventory\query\InventoryStatisticsUnifiedQueryContract;
 use app\services\product\inventory\query\InventoryStoreUnifiedQueryContextFactory;
 use app\services\product\inventory\query\InventoryUnifiedQueryCommandServices;
 use app\services\query\UnifiedQueryException;
@@ -39,21 +41,43 @@ final class InventoryUnifiedQuery extends AuthController
         }
     }
 
+    /** Executes an operational V3 document/ledger query through its registered provider. */
+    public function operational()
+    {
+        try {
+            $runtime = UnifiedQueryRuntime::runtime();
+            $pageCode = $this->requestedPageCode($runtime);
+            if (!in_array($pageCode, array_merge(InventoryOperationalUnifiedQueryContract::PAGE_CODES, InventoryStatisticsUnifiedQueryContract::PAGE_CODES), true)) {
+                throw new \InvalidArgumentException('inventory_operational_page_code_invalid');
+            }
+            $payload = $this->payload($pageCode);
+            $cutoff = (string)($payload['queryCutoffDate'] ?? $payload['query_cutoff_date'] ?? date('Y-m-d'));
+            unset($payload['query_cutoff_date']);
+            $context = $this->context($runtime, $cutoff, $pageCode);
+            return $this->success($runtime['providers']->resolve($pageCode)->query($context, $payload));
+        } catch (UnifiedQueryException $exception) {
+            return $this->fail($exception->getMessage(), ['code' => $exception->getErrorCode()]);
+        } catch (\InvalidArgumentException $exception) {
+            return $this->fail('库存业务查询条件不合法。');
+        }
+    }
+
     public function capabilities()
     {
         try {
             $runtime = UnifiedQueryRuntime::runtime();
-            $context = $this->context($runtime, date('Y-m-d'));
-            $settings = $runtime['preferences']->load($context, InventoryBatchStockQueryContract::PAGE_CODE);
+            $pageCode = $this->requestedPageCode($runtime);
+            $context = $this->context($runtime, date('Y-m-d'), $pageCode);
+            $settings = $runtime['preferences']->load($context, $pageCode);
             $capability = $runtime['capabilities']->build(
                 $context,
-                InventoryBatchStockQueryContract::PAGE_CODE,
+                $pageCode,
                 (int)$settings['settingsVersion'],
                 (int)($context['data_as_of'] ?? time())
             );
             $capability['commandContext'] = [
                 'kind' => 'query_preference',
-                'id' => InventoryBatchStockQueryContract::PAGE_CODE,
+                'id' => $pageCode,
             ];
             return $this->success(['unifiedQueryCapability' => $capability]);
         } catch (UnifiedQueryException $exception) {
@@ -87,26 +111,37 @@ final class InventoryUnifiedQuery extends AuthController
     {
         try {
             $runtime = UnifiedQueryRuntime::runtime();
-            $context = $this->context($runtime, date('Y-m-d'));
-            $context['page_code'] = InventoryBatchStockQueryContract::PAGE_CODE;
+            $pageCode = $this->requestedPageCode($runtime);
+            $context = $this->context($runtime, date('Y-m-d'), $pageCode);
             return $this->success(['exportTask' => $runtime['exports']->findForAccount($context, $taskNo)]);
         } catch (UnifiedQueryException $exception) {
             return $this->fail($exception->getMessage(), ['code' => $exception->getErrorCode()]);
         }
     }
 
-    private function context(array $runtime, string $cutoff): array
+    private function context(array $runtime, string $cutoff, string $pageCode = InventoryBatchStockQueryContract::PAGE_CODE): array
     {
         $contextFactory = new InventoryStoreUnifiedQueryContextFactory($runtime['contextFactory']);
         return $contextFactory->make(
             (int)$this->storeId,
             (int)$this->storeStaffId,
             is_array($this->auth) ? $this->auth : [],
-            $cutoff
+            $cutoff,
+            $pageCode
         );
     }
 
-    private function payload(): array
+    private function requestedPageCode(array $runtime): string
+    {
+        $pageCode = trim((string)$this->request->get('pageCode', InventoryBatchStockQueryContract::PAGE_CODE));
+        $runtime['registry']->page($pageCode);
+        if (!in_array($pageCode, array_merge([InventoryBatchStockQueryContract::PAGE_CODE], InventoryOperationalUnifiedQueryContract::PAGE_CODES, InventoryStatisticsUnifiedQueryContract::PAGE_CODES), true)) {
+            throw new \InvalidArgumentException('inventory_unified_query_page_code_invalid');
+        }
+        return $pageCode;
+    }
+
+    private function payload(string $pageCode = InventoryBatchStockQueryContract::PAGE_CODE): array
     {
         $raw = $this->request->get();
         $raw = is_array($raw) ? $raw : [];
@@ -129,7 +164,7 @@ final class InventoryUnifiedQuery extends AuthController
             }
             $payload[$key] = $decoded;
         }
-        $payload['pageCode'] = InventoryBatchStockQueryContract::PAGE_CODE;
+        $payload['pageCode'] = $pageCode;
         return $payload;
     }
 }

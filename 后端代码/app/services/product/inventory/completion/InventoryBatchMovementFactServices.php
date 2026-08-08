@@ -14,12 +14,18 @@ final class InventoryBatchMovementFactServices
         $movement = $this->normalize($movement);
         $stock = Db::name('inventory_stock')->where('id', $movement['stockId'])->find();
         $batch = Db::name('inventory_batch')->where('id', $movement['batchId'])->find();
-        if (!$stock || !$batch || (int)$batch['stock_id'] !== $movement['stockId']
+        $location = $stock ? Db::name('inventory_location')->where('id', (int)($stock['location_id'] ?? 0))->find() : null;
+        if (!$stock || !$batch || !$location || (int)$batch['stock_id'] !== $movement['stockId']
             || (string)$stock['tenant_id'] !== $movement['tenantId']
             || (string)$stock['organization_id'] !== $movement['organizationId']
             || (string)$stock['organization_path'] !== $movement['organizationPath']
             || (int)$stock['store_id'] !== $movement['storeId']
-            || (int)($stock['location_id'] ?? 0) <= 0) {
+            || (int)($stock['location_id'] ?? 0) <= 0
+            || (string)$location['tenant_id'] !== $movement['tenantId']
+            || (string)$location['organization_id'] !== $movement['organizationId']
+            || (string)$location['organization_path'] !== $movement['organizationPath']
+            || (string)$location['location_status'] !== 'ACTIVE'
+            || !$this->locationOwnsStore((array)$location, $movement['storeId'])) {
             throw new InventoryCompletionContractException('inventory_batch_movement_scope_mismatch');
         }
         $movement['locationId'] = (int)$stock['location_id'];
@@ -94,7 +100,7 @@ final class InventoryBatchMovementFactServices
             }
         }
         if (!is_int($movement['direction']) || !in_array($movement['direction'], [-1, 1], true)
-            || $movement['storeId'] <= 0 || $movement['stockId'] <= 0 || $movement['batchId'] <= 0
+            || $movement['storeId'] < 0 || $movement['stockId'] <= 0 || $movement['batchId'] <= 0
             || $movement['quantityUnits'] <= 0 || $movement['unitCostCents'] < 0
             || $movement['costAmountCents'] < 0 || $movement['reversalOf'] < 0
             || $movement['occurredAt'] <= 0 || $movement['settledAt'] < $movement['occurredAt']
@@ -143,6 +149,26 @@ final class InventoryBatchMovementFactServices
             'settled_at' => $movement['settledAt'],
             'recorded_at' => $movement['recordedAt'],
         ];
+    }
+
+    /**
+     * A store ID of zero is valid only for the physical HQ location owned by
+     * an organization root. The check happens after loading the persisted
+     * location, so callers cannot manufacture a headquarters movement merely
+     * by passing zero in a command payload.
+     */
+    private function locationOwnsStore(array $location, int $storeId): bool
+    {
+        if ((string)($location['location_type'] ?? '') === 'STORE') {
+            return $storeId > 0 && (int)($location['store_id'] ?? 0) === $storeId && (int)($location['owner_id'] ?? 0) === $storeId;
+        }
+        return (string)($location['location_type'] ?? '') === 'HQ'
+            && $storeId === 0
+            && (int)($location['store_id'] ?? -1) === 0
+            && (int)($location['owner_id'] ?? 0) > 0
+            && (int)($location['owner_id'] ?? 0) === (int)($location['organization_id'] ?? 0)
+            && (string)($location['organization_path'] ?? '') === '/' . (int)($location['owner_id'] ?? 0) . '/'
+            && (int)($location['is_default'] ?? 0) === 1;
     }
 
     private function assertTransaction(): void

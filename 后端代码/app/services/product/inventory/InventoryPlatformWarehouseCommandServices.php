@@ -16,6 +16,7 @@ final class InventoryPlatformWarehouseCommandServices
 {
     public function create(array $adminInfo, array $input): array
     {
+        InventoryV3RolloutPolicy::assertMultiWarehouseEnabled();
         $command = $this->normalize($input);
         $policy = new InventoryPlatformAccessPolicy();
         $access = $policy->resolve($adminInfo);

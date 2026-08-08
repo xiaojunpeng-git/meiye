@@ -26,30 +26,48 @@
 						<Col :xs="24" :sm="12">
 							<FormItem label="调出方：" prop="from_select">
 								<Select
-									v-model="formValidate.from_select"
-									placeholder="请选择调出门店或总部仓"
-									filterable
+									v-model="fromMode"
+									placeholder="请选择调出方"
 									transfer
 									:disabled="requestId > 0 || editId > 0"
-									@on-change="onFromSelectChange"
+									@on-change="onFromModeChange"
 								>
-									<Option value="hq" key="hq">总部仓</Option>
-									<Option v-for="item in storeList" :value="'s' + item.id" :key="'f' + item.id">{{ item.name }}</Option>
+									<Option value="hq">总部仓</Option>
+									<Option value="store">门店</Option>
 								</Select>
+								<OrganizationResourceSelector
+									v-if="fromMode === 'store'"
+									v-model="formValidate.from_store_id"
+									resource="store"
+									picker-mode="modal"
+									:tree-mode="true"
+									selection-mode="store_only"
+									modal-title="选择调出门店"
+									trigger-placeholder="请选择调出门店"
+									placeholder="搜索门店名称"
+									:multiple="false"
+									:clearable="true"
+									:disabled="requestId > 0 || editId > 0"
+									@change="onFromStorePick"
+								/>
 							</FormItem>
 						</Col>
 						<Col :xs="24" :sm="12">
 							<FormItem label="调入门店：" prop="to_store_id">
-								<Select
+								<OrganizationResourceSelector
 									v-model="formValidate.to_store_id"
-									placeholder="请选择调入门店"
-									filterable
-									transfer
+									resource="store"
+									picker-mode="modal"
+									:tree-mode="true"
+									selection-mode="store_only"
+									modal-title="选择调入门店"
+									trigger-placeholder="请选择调入门店"
+									placeholder="搜索门店名称"
+									:multiple="false"
+									:clearable="true"
 									:disabled="requestId > 0 || editId > 0"
-									@on-change="onStoreChange"
-								>
-									<Option v-for="item in storeList" :value="item.id" :key="'t' + item.id">{{ item.name }}</Option>
-								</Select>
+									@change="onStoreChange"
+								/>
 							</FormItem>
 						</Col>
 					</Row>
@@ -145,7 +163,9 @@
 </template>
 
 <script>
+	import { mapState } from 'vuex';
 	import { merchantStoreListApi, merchantStaffSelect } from '@/api/setting';
+	import OrganizationResourceSelector from '@/components/organization/OrganizationResourceSelector.vue';
 	import {
 		stockTransferSaveApi,
 		stockTransferInfoApi,
@@ -161,9 +181,11 @@
 			editId: { type: Number, default: 0 },
 			requestId: { type: Number, default: 0 }
 		},
+		components: { OrganizationResourceSelector },
 		data() {
 			return {
 				innerRequestId: 0,
+				fromMode: 'hq',
 				storeList: [],
 				staffList: [],
 				staffLoading: false,
@@ -176,8 +198,8 @@
 				selectedMap: {},
 				createAdminName: '',
 				formValidate: {
-					from_select: null,
-					from_party_type: 'store',
+					from_select: 'hq',
+					from_party_type: 'hq',
 					from_store_id: 0,
 					to_store_id: null,
 					to_party_type: 'store',
@@ -196,6 +218,7 @@
 			};
 		},
 		computed: {
+			...mapState('admin/user', { userInfo: 'info' }),
 			pageTitle() {
 				if (this.innerRequestId > 0) return '请货转调拨';
 				return this.editId > 0 ? '编辑调拨单' : '新建自由调拨';
@@ -242,9 +265,10 @@
 				this.staffList = [];
 				this.createAdminName = '';
 				this.innerRequestId = Number(this.requestId) || 0;
+				this.fromMode = 'hq';
 				this.formValidate = {
-					from_select: null,
-					from_party_type: 'store',
+					from_select: 'hq',
+					from_party_type: 'hq',
 					from_store_id: 0,
 					to_store_id: null,
 					to_party_type: 'store',
@@ -276,19 +300,29 @@
 			},
 			applyFromParty(partyType, storeId) {
 				const party = partyType === 'hq' ? 'hq' : 'store';
+				this.fromMode = party;
 				this.formValidate.from_party_type = party;
 				this.formValidate.from_store_id = party === 'hq' ? 0 : (Number(storeId) || 0);
 				this.formValidate.from_select = party === 'hq' ? 'hq' : ('s' + this.formValidate.from_store_id);
 			},
-			onFromSelectChange(val) {
-				if (val === 'hq') {
+			onFromModeChange(mode) {
+				if (mode === 'hq') {
 					this.applyFromParty('hq', 0);
-				} else if (val && String(val).indexOf('s') === 0) {
-					this.applyFromParty('store', String(val).slice(1));
-				} else {
-					this.applyFromParty('store', 0);
-					this.formValidate.from_select = null;
+					return this.onStoreChange();
 				}
+				this.formValidate.from_party_type = 'store';
+				this.formValidate.from_store_id = 0;
+				this.formValidate.from_select = null;
+				this.skuList = [];
+				this.selectedMap = {};
+				this.skuTotal = 0;
+				this.loadStaff();
+			},
+			onFromStorePick(storeId) {
+				const id = Number(storeId) || 0;
+				this.formValidate.from_party_type = 'store';
+				this.formValidate.from_store_id = id;
+				this.formValidate.from_select = id > 0 ? `s${id}` : null;
 				this.onStoreChange();
 			},
 			loadStaff(keepStaffId) {
@@ -310,7 +344,11 @@
 						if (item && item.id) map[item.id] = item;
 					});
 					this.staffList = Object.values(map);
-					const keep = Number(keepStaffId || 0);
+					const current = this.userInfo || {};
+					const employeeId = Number(current.employee_id || 0);
+					const staffId = Number(current.staff_id || 0);
+					const matchedEmployee = this.staffList.find(item => employeeId > 0 && Number(item.employee_id) === employeeId);
+					const keep = Number(keepStaffId || staffId || (matchedEmployee && matchedEmployee.id) || 0);
 					const exists = this.staffList.some(item => Number(item.id) === keep);
 					this.formValidate.transfer_staff_id = exists ? keep : null;
 					this.staffLoading = false;
@@ -324,7 +362,8 @@
 				const list = Array.isArray(raw) ? raw : ((raw && raw.list) || []);
 				return list.map(item => ({
 					id: Number(item.value != null ? item.value : item.id),
-					staff_name: item.label || item.staff_name || ''
+					staff_name: item.label || item.staff_name || '',
+					employee_id: Number(item.employee_id || 0)
 				})).filter(item => item.id > 0);
 			},
 			onStoreChange() {

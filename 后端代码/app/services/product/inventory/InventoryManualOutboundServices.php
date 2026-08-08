@@ -14,9 +14,23 @@ use think\facade\Db;
  */
 final class InventoryManualOutboundServices
 {
+    /** Excel imports share one visible business document and may contain more lines than interactive entry. */
+    private const IMPORT_LINE_LIMIT = 5000;
+
     public function create(int $storeId, int $operatorId, array $input): array
     {
-        $command = $this->normalize($input);
+        return $this->createWithLineLimit($storeId, $operatorId, $input, 100);
+    }
+
+    /** Uses the same V3 batch authority as manual entry, with the import file limit. */
+    public function createForImport(int $storeId, int $operatorId, array $input): array
+    {
+        return $this->createWithLineLimit($storeId, $operatorId, $input, self::IMPORT_LINE_LIMIT);
+    }
+
+    private function createWithLineLimit(int $storeId, int $operatorId, array $input, int $lineLimit): array
+    {
+        $command = $this->normalize($input, $lineLimit);
         if ($storeId <= 0 || $operatorId <= 0) {
             throw new \InvalidArgumentException('inventory_manual_outbound_scope_invalid');
         }
@@ -24,6 +38,33 @@ final class InventoryManualOutboundServices
         return Db::transaction(function () use ($storeId, $operatorId, $command): array {
             $scope = $this->lockScope($storeId, $operatorId);
             $location = $this->lockDefaultLocation($scope);
+            return $this->createAtLocation($scope, $location, $command);
+        });
+    }
+
+    /**
+     * Platform headquarters outbound. The platform controller resolves both the
+     * administrator grant and the HQ location before this method is entered.
+     * Stock mutation still uses the exact same locked batch, FEFO and fact path
+     * as a store outbound.
+     */
+    public function createForHeadquarters(array $scope, array $location, array $input, int $lineLimit = 5000): array
+    {
+        $command = $this->normalize($input, $lineLimit);
+        return Db::transaction(function () use ($scope, $location, $command): array {
+            $locked = Db::name('inventory_location')->where('id', (int)($location['id'] ?? 0))->lock(true)->find();
+            if (!$locked || (string)($locked['location_type'] ?? '') !== 'HQ'
+                || (int)($locked['store_id'] ?? -1) !== 0
+                || (string)($locked['location_status'] ?? '') !== 'ACTIVE'
+                || (string)($locked['tenant_id'] ?? '') !== (string)($scope['tenantId'] ?? '')) {
+                throw new \RuntimeException('inventory_hq_location_invalid');
+            }
+            return $this->createAtLocation($scope, (array)$locked, $command);
+        });
+    }
+
+    private function createAtLocation(array $scope, array $location, array $command): array
+    {
             $existing = Db::name('inventory_batch_movement_fact')
                 ->where('tenant_id', $scope['tenantId'])
                 ->where('source_type', 'manual_outbound')
@@ -35,6 +76,14 @@ final class InventoryManualOutboundServices
             if ($existing) {
                 return $this->replay($existing, $scope, $location, $command);
             }
+
+            $command['documentNo'] = (new InventoryBusinessDocumentNumberServices())->manual(
+                (string)$scope['tenantId'],
+                'manual_outbound',
+                (string)$command['idempotencyKey'],
+                (string)$command['businessDate'],
+                (int)$command['recordedAt']
+            );
 
             // A stable SKU order prevents opposite multi-line requests from
             // acquiring aggregate stock locks in different orders.
@@ -57,14 +106,13 @@ final class InventoryManualOutboundServices
                 $resultByIndex[$line['index']] = ['movement_fact_ids' => $facts, 'idempotent' => false];
             }
             ksort($resultByIndex, SORT_NUMERIC);
-            return ['idempotency_key' => $command['idempotencyKey'], 'lines' => array_values($resultByIndex)];
-        });
+            return ['document_no' => $command['documentNo'], 'idempotency_key' => $command['idempotencyKey'], 'lines' => array_values($resultByIndex)];
     }
 
-    private function normalize(array $input): array
+    private function normalize(array $input, int $lineLimit = 100): array
     {
         if (array_keys($input) !== ['idempotency_key', 'business_date', 'remark', 'lines']
-            || !is_array($input['lines']) || !$input['lines'] || count($input['lines']) > 100) {
+            || !is_array($input['lines']) || !$input['lines'] || count($input['lines']) > $lineLimit) {
             throw new \InvalidArgumentException('inventory_manual_outbound_input_invalid');
         }
         $key = trim((string)$input['idempotency_key']);
@@ -238,7 +286,11 @@ final class InventoryManualOutboundServices
             }
             $result[] = ['movement_fact_ids' => $replay['ids'], 'idempotent' => true];
         }
-        return ['idempotency_key' => $command['idempotencyKey'], 'lines' => $result];
+        return [
+            'document_no' => (new InventoryBusinessDocumentNumberServices())->manualExisting((string)$scope['tenantId'], 'manual_outbound', (string)$command['idempotencyKey']),
+            'idempotency_key' => $command['idempotencyKey'],
+            'lines' => $result,
+        ];
     }
 
     private function date(string $value): string

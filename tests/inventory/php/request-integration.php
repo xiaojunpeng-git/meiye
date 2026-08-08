@@ -18,7 +18,7 @@ $app->initialize(); Config::set(['default' => 'file'], 'cache');
 function requestAssert(string $name, bool $condition): void { global $failed; echo ($condition ? 'PASS ' : 'FAIL ') . $name . "\n"; if (!$condition) $failed++; }
 function requestReason(callable $operation): string { try { $operation(); } catch (\Throwable $exception) { return $exception->getMessage(); } return ''; }
 function requestEnsure(string $table, array $row): void { $query = Db::name($table); $table === 'organization_store' ? $query->where('store_id', $row['store_id']) : $query->where('id', $row['id']); if (!$query->find()) Db::name($table)->insert($row); }
-function requestCommand(string $key, string $quantity): array { return ['idempotency_key' => $key, 'business_date' => '2026-07-30', 'remark' => 'TEST-请货保留数据', 'lines' => [['product_id' => 990091, 'sku_id' => 9900911, 'sku_unique' => 'testsku9900911', 'quantity' => $quantity]]]; }
+function requestCommand(string $key, string $quantity): array { return ['idempotency_key' => $key, 'business_date' => '2026-07-30', 'remark' => 'TEST-请货保留数据', 'supply_party_type' => 'HQ', 'supply_party_id' => 0, 'lines' => [['product_id' => 990091, 'sku_id' => 9900911, 'sku_unique' => 'testsku9900911', 'quantity' => $quantity]]]; }
 
 $failed = 0;
 foreach ([

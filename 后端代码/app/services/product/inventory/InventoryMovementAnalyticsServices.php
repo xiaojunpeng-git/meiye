@@ -12,6 +12,14 @@ final class InventoryMovementAnalyticsServices
     public function list(int $storeId, int $operatorId, string $kind, string $from, string $to, bool $canViewCost = false): array
     {
         $locationIds = $this->locationIds($storeId, $operatorId);
+        return $this->listForLocations($locationIds, $kind, $from, $to, $canViewCost);
+    }
+
+    /** Uses an already authenticated server-side location scope (store or HQ). */
+    public function listForLocations(array $locationIds, string $kind, string $from, string $to, bool $canViewCost = false): array
+    {
+        $locationIds = array_values(array_unique(array_filter(array_map('intval', $locationIds))));
+        if (!$locationIds) throw new \RuntimeException('inventory_movement_statistics_scope_denied');
         $direction = ['inbound' => 1, 'outbound' => -1][$kind] ?? null;
         if ($direction === null) throw new \InvalidArgumentException('inventory_movement_statistics_kind_invalid');
         $from = $this->date($from); $to = $this->date($to);

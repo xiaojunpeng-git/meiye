@@ -23,6 +23,11 @@ final class InventoryEntitlementCompletionDiscovery
         $request = $this->normalizeRequest($request);
         $scope->assertTenantAndStore($request['tenantId'], $request['storeId']);
 
+        $request['lines'] = $this->inventoryManagedLines($request['lines']);
+        if ($request['lines'] === []) {
+            return ['contractVersion' => InventoryEntitlementCompletionContract::CONTRACT_VERSION, 'resourceContractVersion' => self::RESOURCE_CONTRACT_VERSION, 'tenantId' => $request['tenantId'], 'storeId' => $request['storeId'], 'resources' => []];
+        }
+
         $resources = [];
         $policyByProject = $this->readPolicies(
             $request['tenantId'],
@@ -251,6 +256,21 @@ final class InventoryEntitlementCompletionDiscovery
             ];
         }
         return $result;
+    }
+
+    private function inventoryManagedLines(array $lines): array
+    {
+        $managed = [];
+        foreach ($lines as $line) {
+            $project = Db::name('store_product')->where('id', $line['projectId'])->where('is_del', 0)->field('is_inventory')->find();
+            if (!$project) {
+                throw $this->failure('inventory_project_not_found', ['projectId' => $line['projectId']]);
+            }
+            if ((int)$project['is_inventory'] === 1) {
+                $managed[] = $line;
+            }
+        }
+        return $managed;
     }
 
     private function readRecipes(array $lines, int $storeId): array

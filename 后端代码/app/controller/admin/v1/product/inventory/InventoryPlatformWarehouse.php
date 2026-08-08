@@ -7,7 +7,10 @@ use app\controller\admin\AuthController;
 use app\services\product\inventory\InventoryPlatformAccessPolicy;
 use app\services\product\inventory\InventoryPlatformWarehouseCommandServices;
 use app\services\product\inventory\InventoryPlatformWarehouseServices;
+use app\services\product\inventory\InventoryV3RolloutPolicy;
 use app\services\product\inventory\query\InventoryBatchStockQueryContract;
+use app\services\product\inventory\query\InventoryOperationalUnifiedQueryContract;
+use app\services\product\inventory\query\InventoryStatisticsUnifiedQueryContract;
 use app\services\product\inventory\query\InventoryPlatformUnifiedQueryContextFactory;
 use app\services\product\inventory\query\InventoryUnifiedQueryCommandServices;
 use app\services\query\UnifiedQueryException;
@@ -40,6 +43,9 @@ final class InventoryPlatformWarehouse extends AuthController
 
     public function createLocation(InventoryPlatformWarehouseCommandServices $services)
     {
+        if (!InventoryV3RolloutPolicy::MULTI_WAREHOUSE_ENABLED) {
+            return $this->fail('多仓库建仓本期暂不开放。', ['code' => InventoryV3RolloutPolicy::MULTI_WAREHOUSE_DEFERRED_CODE]);
+        }
         try {
             $input = $this->request->postMore([
                 ['idempotency_key', ''], ['store_id', 0], ['location_name', ''],
@@ -66,6 +72,17 @@ final class InventoryPlatformWarehouse extends AuthController
         }
     }
 
+    public function dashboard()
+    {
+        try {
+            return $this->success($this->services->dashboard((array)$this->adminInfo));
+        } catch (UnifiedQueryException $exception) {
+            return $this->fail($exception->getMessage(), ['code' => $exception->getErrorCode()]);
+        } catch (\InvalidArgumentException $exception) {
+            return $this->fail('当前平台没有可用库存仓库。');
+        }
+    }
+
     public function unifiedBatchStock()
     {
         try {
@@ -73,20 +90,59 @@ final class InventoryPlatformWarehouse extends AuthController
             foreach (['tenant_id','store_id','organization_id','location_id','scope_dimensions','permissions'] as $key) if (array_key_exists($key, $payload)) throw new \InvalidArgumentException('inventory_platform_uq_scope_forbidden');
             foreach (['filters','topFilters','topFilterConditions','keywordFilters','sorts','groupBy','summaries','quickFilters','visibleFields','fieldVersions'] as $key) if (isset($payload[$key]) && is_string($payload[$key])) { $decoded = json_decode($payload[$key], true); if (!is_array($decoded) || json_last_error() !== JSON_ERROR_NONE) throw new \InvalidArgumentException('inventory_platform_uq_query_invalid'); $payload[$key] = $decoded; }
             $runtime = UnifiedQueryRuntime::runtime();
-            $selectedLocationId = $this->selectedLocationId($payload);
-            unset($payload['warehouseId']);
-            $context = (new InventoryPlatformUnifiedQueryContextFactory($runtime['contextFactory']))->make((int)$this->adminId, (array)$this->adminInfo, (string)($payload['queryCutoffDate'] ?? date('Y-m-d')), $selectedLocationId);
+            $selectedStoreId = $this->selectedStoreId($payload);
+            $subject = $this->selectedSubject($payload);
+            unset($payload['storeId'], $payload['subject']);
+            $context = (new InventoryPlatformUnifiedQueryContextFactory($runtime['contextFactory']))->make((int)$this->adminId, (array)$this->adminInfo, (string)($payload['queryCutoffDate'] ?? date('Y-m-d')), $selectedStoreId, $subject);
             $payload['pageCode'] = InventoryBatchStockQueryContract::PAGE_CODE;
             return $this->success($runtime['providers']->resolve(InventoryBatchStockQueryContract::PAGE_CODE)->query($context, $payload));
         } catch (UnifiedQueryException $exception) { return $this->fail($exception->getMessage(), ['code' => $exception->getErrorCode()]); }
         catch (\InvalidArgumentException $exception) { return $this->fail('平台库存查询条件不合法。'); }
     }
 
+    /** Executes platform inventory document/statistics queries in a server-resolved scope. */
+    public function unifiedOperational()
+    {
+        try {
+            $payload = $this->request->get();
+            $payload = is_array($payload) ? $payload : [];
+            foreach (['tenant_id','store_id','organization_id','location_id','scope_dimensions','permissions','granted_features'] as $key) {
+                if (array_key_exists($key, $payload)) throw new \InvalidArgumentException('inventory_platform_uq_scope_forbidden');
+            }
+            $pageCode = trim((string)($payload['pageCode'] ?? ''));
+            if (!in_array($pageCode, array_merge(InventoryOperationalUnifiedQueryContract::PAGE_CODES, InventoryStatisticsUnifiedQueryContract::PAGE_CODES), true)) {
+                throw new \InvalidArgumentException('inventory_platform_operational_page_invalid');
+            }
+            foreach (['filters','topFilters','topFilterConditions','keywordFilters','sorts','groupBy','summaries','quickFilters','visibleFields','fieldVersions'] as $key) {
+                if (!isset($payload[$key]) || !is_string($payload[$key])) continue;
+                $decoded = json_decode($payload[$key], true);
+                if (!is_array($decoded) || json_last_error() !== JSON_ERROR_NONE) throw new \InvalidArgumentException('inventory_platform_uq_query_invalid');
+                $payload[$key] = $decoded;
+            }
+            $runtime = UnifiedQueryRuntime::runtime();
+            $context = (new InventoryPlatformUnifiedQueryContextFactory($runtime['contextFactory']))->make(
+                (int)$this->adminId,
+                (array)$this->adminInfo,
+                (string)($payload['queryCutoffDate'] ?? date('Y-m-d')),
+                $this->selectedStoreId($payload),
+                $this->selectedSubject($payload),
+                $pageCode,
+                $this->selectedHqLocationId($payload)
+            );
+            unset($payload['storeId'], $payload['subject'], $payload['hq_location_id']);
+            return $this->success($runtime['providers']->resolve($pageCode)->query($context, $payload));
+        } catch (UnifiedQueryException $exception) {
+            return $this->fail($exception->getMessage(), ['code' => $exception->getErrorCode()]);
+        } catch (\InvalidArgumentException $exception) {
+            return $this->fail('平台库存业务查询条件不合法。');
+        }
+    }
+
     public function unifiedCapabilities()
     {
         try {
             $raw = $this->request->get(); $raw = is_array($raw) ? $raw : [];
-            $runtime = UnifiedQueryRuntime::runtime(); $context = (new InventoryPlatformUnifiedQueryContextFactory($runtime['contextFactory']))->make((int)$this->adminId, (array)$this->adminInfo, date('Y-m-d'), $this->selectedLocationId($raw));
+            $runtime = UnifiedQueryRuntime::runtime(); $context = (new InventoryPlatformUnifiedQueryContextFactory($runtime['contextFactory']))->make((int)$this->adminId, (array)$this->adminInfo, date('Y-m-d'), $this->selectedStoreId($raw), $this->selectedSubject($raw));
             $settings = $runtime['preferences']->load($context, InventoryBatchStockQueryContract::PAGE_CODE);
             $capability = $runtime['capabilities']->build($context, InventoryBatchStockQueryContract::PAGE_CODE, (int)$settings['settingsVersion'], (int)$context['data_as_of']);
             $capability['commandContext'] = ['kind' => 'query_preference', 'id' => InventoryBatchStockQueryContract::PAGE_CODE];
@@ -108,8 +164,8 @@ final class InventoryPlatformWarehouse extends AuthController
                     ? '当前岗位未配置“平台库存导出”权限。'
                     : '当前岗位未配置“平台库存查询管理”权限。');
             $runtime = UnifiedQueryRuntime::runtime();
-            $context = (new InventoryPlatformUnifiedQueryContextFactory($runtime['contextFactory']))->make((int)$this->adminId, (array)$this->adminInfo, date('Y-m-d'), $this->selectedLocationId($input));
-            unset($input['warehouseId']);
+            $context = (new InventoryPlatformUnifiedQueryContextFactory($runtime['contextFactory']))->make((int)$this->adminId, (array)$this->adminInfo, date('Y-m-d'), $this->selectedStoreId($input), $this->selectedSubject($input));
+            unset($input['storeId'], $input['subject']);
             return $this->success($services->dispatchWithContext($context, $input));
         } catch (UnifiedQueryException $exception) { return $this->fail($exception->getMessage(), ['code' => $exception->getErrorCode()]); }
         catch (\InvalidArgumentException $exception) { return $this->fail('平台库存统一查询操作参数不合法。'); }
@@ -127,15 +183,33 @@ final class InventoryPlatformWarehouse extends AuthController
         } catch (UnifiedQueryException $exception) { return $this->fail($exception->getMessage(), ['code' => $exception->getErrorCode()]); }
     }
 
-    private function selectedLocationId(array $input): int
+    private function selectedStoreId(array $input): int
     {
         foreach (['tenant_id','store_id','organization_id','location_id','scope_dimensions','permissions'] as $key) {
             if (array_key_exists($key, $input)) throw new \InvalidArgumentException('inventory_platform_uq_scope_forbidden');
         }
-        if (!array_key_exists('warehouseId', $input)) return 0;
-        $value = $input['warehouseId'];
+        if (!array_key_exists('storeId', $input)) return 0;
+        $value = $input['storeId'];
         if (!is_int($value) && !(is_string($value) && preg_match('/^\d+$/D', $value))) {
-            throw new \InvalidArgumentException('inventory_platform_uq_warehouse_invalid');
+            throw new \InvalidArgumentException('inventory_platform_uq_store_invalid');
+        }
+        return (int)$value;
+    }
+
+    private function selectedSubject(array $input): string
+    {
+        if (!array_key_exists('subject', $input)) return 'HQ';
+        $subject = strtoupper(trim((string)$input['subject']));
+        if (!in_array($subject, ['HQ', 'STORE'], true)) throw new \InvalidArgumentException('inventory_platform_uq_subject_invalid');
+        return $subject;
+    }
+
+    private function selectedHqLocationId(array $input): int
+    {
+        if (!array_key_exists('hq_location_id', $input)) return 0;
+        $value = $input['hq_location_id'];
+        if (!is_int($value) && !(is_string($value) && preg_match('/^\d+$/D', $value))) {
+            throw new \InvalidArgumentException('inventory_platform_uq_hq_location_invalid');
         }
         return (int)$value;
     }

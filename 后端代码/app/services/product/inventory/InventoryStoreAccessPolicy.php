@@ -34,7 +34,12 @@ final class InventoryStoreAccessPolicy
             $uniqueAuth = [];
         }
         $features = [InventoryBatchStockQueryContract::PERMISSION_VIEW, InventoryBatchStockQueryContract::PERMISSION_EXPORT];
-        if (in_array(InventoryBatchStockQueryContract::PERMISSION_COST, (array)$uniqueAuth, true)) {
+        // The store session is issued server-side. A level-0 store principal
+        // is the platform super-administrator's delegated store session and
+        // retains the original full-management visibility without accepting
+        // any client-side privilege hint.
+        if ((int)($staff['level'] ?? 1) === 0
+            || in_array(InventoryBatchStockQueryContract::PERMISSION_COST, (array)$uniqueAuth, true)) {
             $features[] = InventoryBatchStockQueryContract::PERMISSION_COST;
         }
         sort($features, SORT_STRING);

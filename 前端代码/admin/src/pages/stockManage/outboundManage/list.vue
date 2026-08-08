@@ -77,7 +77,7 @@
 		  </div>
 		</Card>
 		<Card :bordered="false" dis-hover class="ivu-mt">
-			<template v-if="formValidate.scope === 'hq'">
+			<template>
 				<Button type="primary" @click="add">新建出库</Button>
 				<Button class="ml-10" @click="openImport">出库导入</Button>
 			</template>
@@ -92,10 +92,7 @@
 				  @click="exports"
 			  >导出出库明细</Button>
 			</Tooltip>
-			<div class="op-tips mt10" v-if="formValidate.scope === 'hq'">
-				导入：须用系统模板，商品ID/SKU勿改；整表校验通过才入账，库存不足且不允许负库存时整单失败。导出：导出当前勾选单据明细，非导入模板。
-			</div>
-			<div class="op-tips mt10" v-else>当前为监管查看：仅查看门店出库流水，新建/导入仍在总部仓范围操作。</div>
+			<div class="op-tips mt10">导入：平台可先选择多家门店并生成对应模板，模板中的库存仓决定实际出账门店；库存不足且不允许负库存时整单失败。导出：导出当前勾选单据明细，非导入模板。</div>
 			<!-- 用户列表表格 -->
 			<vxe-table
 			    ref="xTable"

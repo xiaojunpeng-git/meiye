@@ -84,11 +84,7 @@ export default {
     {
 		    path: `${Setting.roterPre}/inventory/statistics`,
 		    name: `inventoryStatistics`,
-		    meta: {
-		        auth: ['admin-inventory-statistics'],
-		        title: '库存统计'
-		    },
-		    component: () => import('@/pages/stockManage/InventoryV3Bridge')
+		    redirect: `${Setting.roterPre}/inventory/details`
     },
     {
 		    path: `${Setting.roterPre}/stock/request`,

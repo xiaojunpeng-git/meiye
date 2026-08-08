@@ -17,13 +17,36 @@ final class InventoryStockCountServices
         return Db::transaction(function () use ($storeId, $operatorId, $command): array {
             $scope = $this->scope($storeId, $operatorId);
             $location = $this->location($scope);
+            return $this->confirmAtScope($scope, $location, $command);
+        });
+    }
+
+    /** Confirms a count against a platform-authenticated headquarters location. */
+    public function confirmForHeadquarters(array $adminInfo, int $locationId, array $input): array
+    {
+        $command = $this->normalize($input);
+        $hq = new InventoryHqLocationServices();
+        $resolved = $hq->writableLocation($adminInfo, $locationId);
+        $scope = $hq->scope((array)$resolved['location'], (int)($resolved['access']['admin_id'] ?? 0));
+        return Db::transaction(function () use ($scope, $resolved, $command): array {
+            $location = Db::name('inventory_location')->where('id', (int)$resolved['location']['id'])->lock(true)->find();
+            if (!$location || (string)$location['location_type'] !== 'HQ' || (int)$location['store_id'] !== 0 || (string)$location['location_status'] !== 'ACTIVE') {
+                throw new \RuntimeException('inventory_hq_location_invalid');
+            }
+            return $this->confirmAtScope($scope, (array)$location, $command);
+        });
+    }
+
+    private function confirmAtScope(array $scope, array $location, array $command): array
+    {
+            $operatorId = (int)$scope['operatorId'];
             $existing = Db::name('inventory_stock_count_document')->where('tenant_id', $scope['tenantId'])->where('idempotency_key', $command['key'])->lock(true)->find();
             if ($existing) {
                 if ((string)$existing['request_fingerprint'] !== $command['fingerprint'] || (int)$existing['location_id'] !== (int)$location['id']) throw new \RuntimeException('inventory_stock_count_idempotency_conflict');
                 return ['count_document_id' => (int)$existing['id'], 'count_no' => (string)$existing['count_no'], 'idempotent' => true];
             }
             $documentId = (int)Db::name('inventory_stock_count_document')->insertGetId([
-                'count_no' => 'IC-' . substr(hash('sha256', $scope['tenantId'] . ':' . $command['key']), 0, 24), 'idempotency_key' => $command['key'], 'request_fingerprint' => $command['fingerprint'],
+                'count_no' => (new InventoryBusinessDocumentNumberServices())->next($scope['tenantId'], InventoryBusinessDocumentNumberServices::COUNT, $command['businessDate'], $command['now']), 'idempotency_key' => $command['key'], 'request_fingerprint' => $command['fingerprint'],
                 'tenant_id' => $scope['tenantId'], 'organization_id' => $scope['organizationId'], 'organization_path' => $scope['organizationPath'], 'location_id' => (int)$location['id'],
                 'store_id' => $scope['storeId'], 'operator_id' => $operatorId, 'document_status' => 'CONFIRMED', 'remark' => $command['remark'], 'business_date' => $command['businessDate'], 'confirmed_at' => $command['now'], 'recorded_at' => $command['now'],
             ]);
@@ -31,7 +54,6 @@ final class InventoryStockCountServices
             $ordered = $command['lines']; usort($ordered, static fn(array $a, array $b): int => [$a['productId'], $a['skuId'], $a['unique'], $a['index']] <=> [$b['productId'], $b['skuId'], $b['unique'], $b['index']]);
             foreach ($ordered as $line) $this->confirmLine($scope, $location, $document, $line, $command);
             return ['count_document_id' => $documentId, 'count_no' => (string)$document['count_no'], 'idempotent' => false];
-        });
     }
 
     private function confirmLine(array $scope, array $location, array $document, array $line, array $command): void

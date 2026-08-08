@@ -15,7 +15,7 @@ class StoreProjectConsumableRecipeDetailDao extends BaseDao
 
     public function getByRecipeId(int $recipeId): array
     {
-        return $this->search(['recipe_id' => $recipeId])->order('id asc')->select()->toArray();
+        return $this->getModel()->where('recipe_id', $recipeId)->order('id asc')->select()->toArray();
     }
 
     public function deleteByRecipeId(int $recipeId): void

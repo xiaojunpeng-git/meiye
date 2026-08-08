@@ -38,9 +38,50 @@ final class InventorySalonUsageServices
     {
         $scope = $this->scope($storeId, $operatorId);
         $from = $this->date($from); $to = $this->date($to); if ($from > $to) throw new \InvalidArgumentException('inventory_salon_usage_date_range_invalid');
-        $query = Db::name('inventory_salon_usage_document')->where('tenant_id', $scope['tenantId'])->where('store_id', $scope['storeId'])->whereBetween('business_date', [$from, $to]);
+        $query = Db::name('inventory_salon_usage_document')->alias('d')
+            ->leftJoin('inventory_salon_usage_line l', 'l.document_id=d.id')
+            ->where('d.tenant_id', $scope['tenantId'])->where('d.store_id', $scope['storeId'])->whereBetween('d.business_date', [$from, $to]);
         if ($projectId > 0) $query->where('project_id', $projectId);
-        return ['items' => $query->order('business_date desc')->order('id desc')->field('id,usage_no,operation_type,project_id,project_name_snapshot,location_id,business_date,remark,settled_at')->select()->toArray()];
+        $items = $query->order('d.business_date desc')->order('d.id desc')
+            ->field('d.id,d.usage_no,d.operation_type,d.project_id,d.project_name_snapshot,d.location_id,d.document_status,d.business_date,d.remark,d.settled_at,d.recorded_at operation_at,COUNT(l.id) detail_count')
+            ->group('d.id')->select()->toArray();
+        return ['items' => $items, 'from' => $from, 'to' => $to];
+    }
+
+    /**
+     * Read-only project picker. The authenticated store scope is derived here;
+     * callers cannot query another store's project catalogue.
+     */
+    public function projects(int $storeId, int $operatorId, string $keyword, int $page = 1, int $limit = 50): array
+    {
+        $scope = $this->scope($storeId, $operatorId);
+        $keyword = trim($keyword);
+        if (mb_strlen($keyword) > 64) throw new \InvalidArgumentException('inventory_salon_usage_project_search_invalid');
+        $page = max(1, $page);
+        $limit = max(1, min($limit, 50));
+
+        $query = Db::name('store_product')->alias('p')
+            ->where('p.is_del', 0)
+            ->where('p.is_show', 1)
+            ->where('p.product_type', 6)
+            ->whereIn('p.type', [0, 1])
+            ->where(function ($scopeQuery) use ($scope) {
+                $scopeQuery->where('p.type', 0)->whereOr('p.relation_id', $scope['storeId']);
+            })
+            ->when($keyword !== '', function ($keywordQuery) use ($keyword) {
+                $like = '%' . $keyword . '%';
+                $keywordQuery->whereLike('p.store_name|p.keyword|p.code|p.bar_code', $like);
+            });
+
+        $total = (int)(clone $query)->count();
+        $list = $query
+            ->field(['p.id' => 'id', 'p.store_name' => 'name', 'p.code' => 'code'])
+            ->order('p.sort desc,p.id desc')
+            ->page($page, $limit)
+            ->select()
+            ->toArray();
+
+        return compact('list', 'total', 'page', 'limit');
     }
 
     private function writeIssue(array $scope, array $location, int $operatorId, array $command): array
@@ -82,7 +123,7 @@ final class InventorySalonUsageServices
     }
 
     private function existing(array $scope,array $command,array $location): ?array { $doc=Db::name('inventory_salon_usage_document')->where('tenant_id',$scope['tenantId'])->where('idempotency_key',$command['key'])->lock(true)->find(); if(!$doc)return null; if((string)$doc['request_fingerprint']!==$command['fingerprint']||(int)$doc['location_id']!==(int)$location['id']||(string)$doc['operation_type']!==$command['operation'])throw new \RuntimeException('inventory_salon_usage_idempotency_conflict'); return ['usage_document_id'=>(int)$doc['id'],'usage_no'=>(string)$doc['usage_no'],'line_ids'=>Db::name('inventory_salon_usage_line')->where('document_id',(int)$doc['id'])->column('id'),'idempotent'=>true]; }
-    private function document(array $scope,array $location,int $operatorId,array $c): array { $id=(int)Db::name('inventory_salon_usage_document')->insertGetId(['usage_no'=>'SU-'.substr(hash('sha256',$scope['tenantId'].':'.$c['key']),0,24),'idempotency_key'=>$c['key'],'request_fingerprint'=>$c['fingerprint'],'operation_type'=>$c['operation'],'tenant_id'=>$scope['tenantId'],'organization_id'=>$scope['organizationId'],'organization_path'=>$scope['organizationPath'],'store_id'=>$scope['storeId'],'project_id'=>$c['projectId'],'project_name_snapshot'=>$c['projectName'],'location_id'=>(int)$location['id'],'operator_id'=>$operatorId,'document_status'=>'SETTLED','remark'=>$c['remark'],'business_date'=>$c['businessDate'],'settled_at'=>$c['now'],'recorded_at'=>$c['now']]); return Db::name('inventory_salon_usage_document')->where('id',$id)->lock(true)->find(); }
+    private function document(array $scope,array $location,int $operatorId,array $c): array { $documentType=$c['operation']==='RETURN'?InventoryBusinessDocumentNumberServices::SALON_RETURN:InventoryBusinessDocumentNumberServices::SALON_ISSUE; $id=(int)Db::name('inventory_salon_usage_document')->insertGetId(['usage_no'=>(new InventoryBusinessDocumentNumberServices())->next($scope['tenantId'],$documentType,$c['businessDate'],$c['now']),'idempotency_key'=>$c['key'],'request_fingerprint'=>$c['fingerprint'],'operation_type'=>$c['operation'],'tenant_id'=>$scope['tenantId'],'organization_id'=>$scope['organizationId'],'organization_path'=>$scope['organizationPath'],'store_id'=>$scope['storeId'],'project_id'=>$c['projectId'],'project_name_snapshot'=>$c['projectName'],'location_id'=>(int)$location['id'],'operator_id'=>$operatorId,'document_status'=>'SETTLED','remark'=>$c['remark'],'business_date'=>$c['businessDate'],'settled_at'=>$c['now'],'recorded_at'=>$c['now']]); return Db::name('inventory_salon_usage_document')->where('id',$id)->lock(true)->find(); }
     private function lockStock(array $location,array $line): array { $s=Db::name('inventory_stock')->where('tenant_id',$location['tenant_id'])->where('location_id',(int)$location['id'])->where('consumable_product_id',$line['productId'])->where('sku_id',$line['skuId'])->where('product_unique',$line['unique'])->where('stock_status',InventoryEntitlementCompletionContract::STOCK_STATUS_GOOD)->lock(true)->find(); if(!$s||(int)$s['available_quantity_units']<=0)throw new \RuntimeException('inventory_salon_usage_stock_insufficient'); return $s; }
     private function fefo(int $stockId,int $needed): array { $b=Db::name('inventory_batch')->where('stock_id',$stockId)->where('batch_status','ACTIVE')->where('available_quantity_units','>',0)->orderRaw('expire_date IS NULL ASC, expire_date ASC, received_business_date IS NULL ASC, received_business_date ASC, id ASC')->lock(true)->select()->toArray();$a=[];$left=$needed;foreach($b as $x){$n=min((int)$x['available_quantity_units'],$left);if($n)$a[]=['batch'=>$x,'units'=>$n];$left-=$n;if(!$left)break;}if($left)throw new \RuntimeException('inventory_salon_usage_stock_insufficient');return $a; }
     private function decrease(array $stock,array $allocations,int $units,int $now):void { if(Db::name('inventory_stock')->where('id',(int)$stock['id'])->where('version',(int)$stock['version'])->update(['available_quantity_units'=>(int)$stock['available_quantity_units']-$units,'version'=>(int)$stock['version']+1,'updated_at'=>$now])!==1)throw new \RuntimeException('inventory_salon_usage_stock_changed');foreach($allocations as $a){$b=$a['batch'];if(Db::name('inventory_batch')->where('id',(int)$b['id'])->where('version',(int)$b['version'])->where('available_quantity_units','>=',$a['units'])->update(['available_quantity_units'=>(int)$b['available_quantity_units']-$a['units'],'version'=>(int)$b['version']+1,'updated_at'=>$now])!==1)throw new \RuntimeException('inventory_salon_usage_batch_changed');} }

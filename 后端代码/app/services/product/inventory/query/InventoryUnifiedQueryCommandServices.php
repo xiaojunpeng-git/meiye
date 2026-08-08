@@ -25,7 +25,8 @@ final class InventoryUnifiedQueryCommandServices
     {
         $runtime = UnifiedQueryRuntime::runtime();
         $contextFactory = new InventoryStoreUnifiedQueryContextFactory($runtime['contextFactory']);
-        $context = $contextFactory->make($storeId, $operatorId, $rules, date('Y-m-d'));
+        $pageCode = $this->pageCode($input);
+        $context = $contextFactory->make($storeId, $operatorId, $rules, date('Y-m-d'), $pageCode);
         return $this->dispatchWithContext($context, $input);
     }
 
@@ -40,15 +41,16 @@ final class InventoryUnifiedQueryCommandServices
             'scope_dimensions' => (array)($context['scope_dimensions'] ?? []),
         ]));
         $runtime = UnifiedQueryRuntime::runtime();
-        $settings = $runtime['preferences']->load($context, InventoryBatchStockQueryContract::PAGE_CODE);
-        $context['page_code'] = InventoryBatchStockQueryContract::PAGE_CODE;
+        $pageCode = (string)$context['page_code'];
+        $settings = $runtime['preferences']->load($context, $pageCode);
         $context['query_preference_version'] = (int)$settings['settingsVersion'];
 
-        return Db::transaction(function () use ($runtime, $context, $command): array {
+        return Db::transaction(function () use ($runtime, $context, $command, $pageCode): array {
             $existing = Db::name(self::RECEIPT_TABLE)
                 ->where('tenant_id', (string)$context['tenant_id'])
                 ->where('store_id', (int)$context['store_id'])
                 ->where('operator_id', (int)$context['operator_id'])
+                ->where('page_code', $pageCode)
                 ->where('action', $command['action'])
                 ->where('idempotency_key', $command['idempotencyKey'])
                 ->lock(true)
@@ -69,7 +71,7 @@ final class InventoryUnifiedQueryCommandServices
                 'tenant_id' => (string)$context['tenant_id'],
                 'store_id' => (int)$context['store_id'],
                 'operator_id' => (int)$context['operator_id'],
-                'page_code' => InventoryBatchStockQueryContract::PAGE_CODE,
+                'page_code' => $pageCode,
                 'action' => $command['action'],
                 'idempotency_key' => $command['idempotencyKey'],
                 'request_hash' => $command['requestHash'],
@@ -131,23 +133,35 @@ final class InventoryUnifiedQueryCommandServices
             throw new UnifiedQueryException('INVENTORY_UNIFIED_QUERY_IDEMPOTENCY_INVALID', '查询操作缺少有效的防重复标识，请刷新后重试。', []);
         }
         $payload = $input;
-        unset($payload['action'], $payload['idempotencyKey'], $payload['idempotency_key'], $payload['commandContexts'], $payload['command_contexts']);
+        unset($payload['action'], $payload['idempotencyKey'], $payload['idempotency_key'], $payload['commandContexts'], $payload['command_contexts'], $payload['pageCode'], $payload['page_code']);
         foreach (['tenant_id', 'tenantId', 'store_id', 'storeId', 'organization_id', 'organizationId', 'location_id', 'locationId', 'scope_dimensions', 'scopeDimensions', 'permissions', 'granted_features', 'query_preference_version', 'queryPreferenceVersion'] as $forbidden) {
             if (array_key_exists($forbidden, $payload)) {
                 throw new UnifiedQueryException('INVENTORY_UNIFIED_QUERY_CLIENT_SCOPE_FORBIDDEN', '查询操作不能指定租户、门店或仓库范围。', []);
             }
         }
-        $payload['pageCode'] = InventoryBatchStockQueryContract::PAGE_CODE;
+        $pageCode = $this->pageCode($input);
+        $payload['pageCode'] = $pageCode;
         return [
             'action' => $action,
             'idempotencyKey' => $key,
             'payload' => $payload,
             'requestHash' => hash('sha256', UnifiedQueryJson::encode([
-                'pageCode' => InventoryBatchStockQueryContract::PAGE_CODE,
+                'pageCode' => $pageCode,
                 'action' => $action,
                 'payload' => $payload,
             ])),
         ];
+    }
+
+    private function pageCode(array $input): string
+    {
+        $pageCode = trim((string)($input['pageCode'] ?? ($input['page_code'] ?? InventoryBatchStockQueryContract::PAGE_CODE)));
+        $runtime = UnifiedQueryRuntime::runtime();
+        $runtime['registry']->page($pageCode);
+        if (!in_array($pageCode, array_merge([InventoryBatchStockQueryContract::PAGE_CODE], InventoryOperationalUnifiedQueryContract::PAGE_CODES, InventoryStatisticsUnifiedQueryContract::PAGE_CODES), true)) {
+            throw new UnifiedQueryException('UNIFIED_QUERY_PAGE_FORBIDDEN', '当前页面不支持库存统一查询操作。', []);
+        }
+        return $pageCode;
     }
 
     private function receiptResult(array $receipt): array

@@ -92,9 +92,31 @@ final class InventoryBatchStockQueryProvider
         if (count($rows) > self::MAX_SOURCE_ROWS) {
             throw new \RuntimeException('inventory_query_source_window_too_large');
         }
-        return array_map(function (array $row) use ($scope, $request): array {
+        $projected = array_map(function (array $row) use ($scope, $request): array {
             return $this->projectRow($row, $scope, $request['queryCutoffDate']);
         }, $rows);
+        $totals = [];
+        foreach ($projected as $row) {
+            $key = (int)$row['product_id'] . ':' . (int)$row['sku_id'];
+            $scale = (int)$row['quantity_scale'];
+            if (isset($totals[$key]) && (int)$totals[$key]['scale'] !== $scale) {
+                throw new \RuntimeException('inventory_product_quantity_scale_mismatch');
+            }
+            $totals[$key] = [
+                'scale' => $scale,
+                'units' => (int)($totals[$key]['units'] ?? 0)
+                    + $this->decimalUnits((string)$row['batch_balance_quantity'], $scale),
+            ];
+        }
+        foreach ($projected as &$row) {
+            $key = (int)$row['product_id'] . ':' . (int)$row['sku_id'];
+            $row['available_quantity'] = InventoryBatchStockQueryContract::unitsToDecimal(
+                (int)$totals[$key]['units'],
+                (int)$totals[$key]['scale']
+            );
+        }
+        unset($row);
+        return $projected;
     }
 
     private function normalizeRequest(array $request, InventoryBatchStockDataScope $scope): array
@@ -147,6 +169,9 @@ final class InventoryBatchStockQueryProvider
             'brand_name' => (string)$row['brand_name'],
             'category_name' => (string)$row['category_name'],
             'stock_unit' => (string)$row['stock_unit'],
+            // Read-model consumers need the authoritative scale to aggregate decimal quantities.
+            // It is not a user-configurable UQ field and is therefore intentionally not registered.
+            'quantity_scale' => $scale,
             'batch_no' => (string)$row['batch_no'],
             'quality_status' => InventoryBatchStockQueryContract::statusLabel($status),
             'received_date' => $this->nullableDate($row['received_date'] ?? null),
@@ -178,5 +203,12 @@ final class InventoryBatchStockQueryProvider
             return null;
         }
         return InventoryBatchStockQueryContract::assertCutoffDate((string)$value);
+    }
+
+    private function decimalUnits(string $quantity, int $scale): int
+    {
+        [$whole, $fraction] = array_pad(explode('.', $quantity, 2), 2, '');
+        $fraction = substr(str_pad($fraction, $scale, '0'), 0, $scale);
+        return (int)$whole * (10 ** $scale) + (int)($fraction === '' ? '0' : $fraction);
     }
 }

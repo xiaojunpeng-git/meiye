@@ -104,6 +104,12 @@ final class InventoryBatchStockUnifiedQueryProvider implements UnifiedQueryProvi
             'locationIds' => $scope->locationIds(),
             'includeZero' => false,
         ], $scope);
+        if ($this->hasQuantityRangeTopFilter($payload)) {
+            // The stock page displays one row per product/SKU. A quantity range
+            // must therefore be applied to that total, never to individual
+            // batches before the browser adds them again.
+            $rows = (new InventoryProductStockSummaryServices())->summarize($rows);
+        }
         $allowedLocations = array_fill_keys($scope->locationIds(), true);
         return $this->execution->execute(
             $this->pageCode(),
@@ -116,6 +122,18 @@ final class InventoryBatchStockUnifiedQueryProvider implements UnifiedQueryProvi
                     && isset($allowedLocations[(int)($row['location_id'] ?? 0)]);
             }
         );
+    }
+
+    private function hasQuantityRangeTopFilter(array $payload): bool
+    {
+        $filters = (array)($payload['topFilterConditions'] ?? []);
+        foreach ($filters as $filter) {
+            if (is_array($filter)
+                && (string)($filter['field_key'] ?? $filter['fieldKey'] ?? $filter['field'] ?? '') === 'available_quantity') {
+                return true;
+            }
+        }
+        return false;
     }
 
     private function dataScope(array $context): InventoryBatchStockDataScope

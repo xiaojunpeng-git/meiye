@@ -1,33 +1,35 @@
 <template>
 	<div class="scope-bar">
-		<FormItem label="监管范围：">
+		<FormItem label="库存仓：">
 			<RadioGroup v-model="innerScope" type="button" @on-change="onScopeChange">
-				<Radio v-if="mode !== 'salon'" label="hq">总部仓</Radio>
-				<Radio label="store">指定门店</Radio>
-				<Radio label="all">全部门店汇总</Radio>
+				<Radio label="hq">总部仓</Radio>
+				<Radio label="store">选择门店</Radio>
+				<Radio label="all">全部库存仓</Radio>
 			</RadioGroup>
 		</FormItem>
-		<FormItem v-if="innerScope === 'store'" label="门店：">
-			<Select
+		<FormItem v-if="innerScope === 'store'" label="">
+			<OrganizationResourceSelector
 				v-model="innerStoreId"
-				filterable
-				clearable
-				placeholder="请选择门店"
-				class="input-add"
-				@on-change="onStoreChange"
-			>
-				<Option v-for="item in storeList" :value="item.id" :key="item.id">{{ item.name }}</Option>
-			</Select>
+				resource="store"
+				picker-mode="modal"
+				:tree-mode="true"
+				selection-mode="store_only"
+				modal-title="选择库存仓门店"
+				trigger-placeholder="请选择门店"
+				placeholder="搜索门店名称"
+				:clearable="true"
+				@input="onStoreChange"
+			/>
 		</FormItem>
-		<span v-if="hint" class="scope-hint">{{ hint }}</span>
 	</div>
 </template>
 
 <script>
-	import { merchantStoreListApi } from '@/api/setting';
+	import OrganizationResourceSelector from '@/components/organization/OrganizationResourceSelector.vue';
 
 	export default {
 		name: 'InventoryScopeBar',
+		components: { OrganizationResourceSelector },
 		props: {
 			scope: { type: String, default: 'hq' },
 			storeId: { type: [Number, String], default: '' },
@@ -38,19 +40,7 @@
 			return {
 				innerScope: this.scope || (this.mode === 'salon' ? 'all' : 'hq'),
 				innerStoreId: this.storeId || '',
-				storeList: [],
 			};
-		},
-		computed: {
-			hint() {
-				if (this.innerScope === 'hq') {
-					return this.mode === 'salon' ? '总部仓无院装领用/退回数据' : '';
-				}
-				if (this.innerScope === 'store') {
-					return this.mode === 'salon' ? '指定门店院装数据' : '';
-				}
-				return this.mode === 'salon' ? '仅汇总门店仓，不含总部仓' : '仅汇总门店仓，不含总部仓';
-			},
 		},
 		watch: {
 			scope(v) {
@@ -60,18 +50,8 @@
 				if (v !== this.innerStoreId) this.innerStoreId = v;
 			},
 		},
-		created() {
-			this.loadStores();
-			this.emitChange(false);
-		},
+		created() { this.emitChange(false); },
 		methods: {
-			loadStores() {
-				merchantStoreListApi().then((res) => {
-					this.storeList = res.data || [];
-				}).catch(() => {
-					this.storeList = [];
-				});
-			},
 			onScopeChange() {
 				if (this.innerScope !== 'store') {
 					this.innerStoreId = '';

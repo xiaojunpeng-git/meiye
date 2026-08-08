@@ -16,6 +16,7 @@ final class InventoryBatchTransferServices
 {
     public function list(int $storeId, int $operatorId, string $keyword, int $page = 1, int $limit = 20, bool $canViewCost = false): array
     {
+        InventoryV3RolloutPolicy::assertMultiWarehouseEnabled();
         $scope = $this->scope($storeId, $operatorId);
         $from = $this->defaultLocation($scope);
         $query = Db::name('inventory_batch_transfer_document')->alias('d')->leftJoin('inventory_batch_transfer_line l', 'l.document_id=d.id')
@@ -32,6 +33,7 @@ final class InventoryBatchTransferServices
 
     public function create(int $storeId, int $operatorId, array $input): array
     {
+        InventoryV3RolloutPolicy::assertMultiWarehouseEnabled();
         $command = $this->normalize($input);
         if ($storeId <= 0 || $operatorId <= 0) throw new \InvalidArgumentException('inventory_batch_transfer_scope_invalid');
 

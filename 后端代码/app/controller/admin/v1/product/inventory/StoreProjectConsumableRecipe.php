@@ -23,6 +23,7 @@ class StoreProjectConsumableRecipe extends AuthController
         $where = $this->request->getMore([
             ['status', ''],
             ['project_product_id', ''],
+            ['keyword', ''],
         ]);
         return $this->success($this->services->getList($where, 0));
     }

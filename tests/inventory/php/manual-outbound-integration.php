@@ -44,12 +44,13 @@ Config::set(['default' => 'file'], 'cache');
 function ensureOutboundFixture(): void
 {
     $records = [
+        ['organization', ['id' => 99000, 'pid' => 0, 'name' => 'TEST-库存根组织', 'is_del' => 0]],
         ['system_store', ['id' => 99006, 'name' => 'TEST-FEFO出库门店', 'is_del' => 0, 'is_show' => 1]],
         ['system_store_staff', ['id' => 990006, 'store_id' => 99006, 'status' => 1, 'is_del' => 0]],
         ['organization', ['id' => 99006, 'pid' => 99000, 'name' => 'TEST-FEFO出库组织', 'is_del' => 0]],
         ['organization_store', ['store_id' => 99006, 'org_id' => 99006]],
         ['store_product', ['id' => 990061, 'type' => 1, 'relation_id' => 99006, 'is_del' => 0, 'is_inventory' => 1, 'store_name' => 'TEST-FEFO出库精华', 'code' => 'TEST-P-990061', 'bar_code' => '6909900100067', 'salon_stock_enabled' => 0, 'sort' => 1, 'keyword' => 'TEST-FEFO出库精华']],
-        ['store_product_attr_value', ['id' => 9900611, 'product_id' => 990061, 'type' => 0, 'unique' => 'testsku9900611', 'suk' => '30ml', 'bar_code' => '6909900100067', 'code' => 'TEST-S-990061', 'stock_unit' => '瓶']],
+        ['store_product_attr_value', ['id' => 9900611, 'product_id' => 990061, 'type' => 0, 'unique' => 'testsku9', 'suk' => '30ml', 'bar_code' => '6909900100067', 'code' => 'TEST-S-990061', 'stock_unit' => '瓶']],
     ];
     foreach ($records as [$table, $record]) {
         $keys = $table === 'organization_store' ? ['store_id'] : ['id'];
@@ -64,13 +65,13 @@ function outboundAssert(string $name, bool $condition): void { global $failed; e
 function outboundReason(callable $operation): string { try { $operation(); } catch (\Throwable $exception) { return $exception->getMessage(); } return ''; }
 function outboundInbound(string $key, string $batch, string $quantity, string $cost, string $expire): array {
     return ['idempotency_key' => $key, 'business_date' => '2026-07-30', 'remark' => 'TEST-FEFO入库保留数据', 'lines' => [[
-        'product_id' => 990061, 'sku_id' => 9900611, 'sku_unique' => 'testsku9900611', 'batch_no' => $batch,
+        'product_id' => 990061, 'sku_id' => 9900611, 'sku_unique' => 'testsku9', 'batch_no' => $batch,
         'quantity' => $quantity, 'unit_cost' => $cost, 'manufactured_date' => '2026-07-01', 'expire_date' => $expire,
     ]]];
 }
 function outboundCommand(string $key, string $quantity): array {
     return ['idempotency_key' => $key, 'business_date' => '2026-07-30', 'remark' => 'TEST-FEFO出库保留数据', 'lines' => [[
-        'product_id' => 990061, 'sku_id' => 9900611, 'sku_unique' => 'testsku9900611', 'quantity' => $quantity,
+        'product_id' => 990061, 'sku_id' => 9900611, 'sku_unique' => 'testsku9', 'quantity' => $quantity,
     ]]];
 }
 
@@ -111,11 +112,12 @@ outboundAssert('insufficient stock creates no negative batch or partial movement
     && (int)Db::name('inventory_stock')->where('id', (int)$stock['id'])->value('available_quantity_units') === 5
     && (int)Db::name('inventory_batch_movement_fact')->where('tenant_id', '0')->where('store_id', 99006)->where('source_id', 'TEST-fefo-outbound-insufficient-20260730')->count() === 0);
 
-$outboundList = $movementQuery->list(99006, 990006, 'outbound', 'TEST-fefo-outbound-20260730');
+$outboundList = $movementQuery->list(99006, 990006, 'outbound', 'TEST-fefo-outbound-20260730', 1, 20, true);
 $movementList = $movementQuery->list(99006, 990006, 'movement', 'TEST-fefo-outbound-20260730');
 outboundAssert('V3 outbound list reads the same immutable source event rather than a legacy stock order',
     (int)$outboundList['count'] === 1 && count($outboundList['list']) === 1
-    && (string)$outboundList['list'][0]['order_sn'] === 'TEST-fefo-outbound-20260730'
+    && (string)$outboundList['list'][0]['source_id'] === 'TEST-fefo-outbound-20260730'
+    && preg_match('/^CK\d{10}$/', (string)$outboundList['list'][0]['order_sn']) === 1
     && (int)$outboundList['list'][0]['detail_count'] === 2
     && (int)$outboundList['list'][0]['cost_amount_cents'] === 39850);
 outboundAssert('V3 movement list preserves both FEFO batch facts and signed quantities',
@@ -124,7 +126,7 @@ outboundAssert('V3 movement list preserves both FEFO batch facts and signed quan
     && in_array($movementList['list'][0]['quantity_display'], ['-4', '-1'], true)
     && in_array($movementList['list'][1]['quantity_display'], ['-4', '-1'], true));
 
-$outboundStatistics = $movementAnalytics->list(99006, 990006, 'outbound', '2026-07-30', '2026-07-30');
+$outboundStatistics = $movementAnalytics->list(99006, 990006, 'outbound', '2026-07-30', '2026-07-30', true);
 outboundAssert('outbound statistics are grouped directly from immutable batch facts by business day and SKU',
     (int)$outboundStatistics['count'] >= 1
     && array_reduce($outboundStatistics['list'], static function (bool $found, array $row): bool {
@@ -133,13 +135,14 @@ outboundAssert('outbound statistics are grouped directly from immutable batch fa
             && (int)$row['quantity_units'] === 5 && (int)$row['cost_amount_cents'] === 39850);
     }, false));
 
-$locations = $platformWarehouses->locations(['*']);
-$platformStock = $platformWarehouses->batchStock(['*'], (int)$stock['location_id'], '2026-07-30');
+$platformAdmin = ['id' => 1];
+$locations = $platformWarehouses->locations($platformAdmin);
+$platformStock = $platformWarehouses->batchStock($platformAdmin, (int)$stock['location_id'], '2026-07-30');
 outboundAssert('platform warehouse selector reads active locations and returns only the selected warehouse batch scope',
     count($locations) >= 1 && (int)$platformStock['count'] >= 1
     && array_reduce($platformStock['list'], static function (bool $valid, array $row) use ($stock): bool { return $valid && (int)$row['location_id'] === (int)$stock['location_id']; }, true));
 outboundAssert('platform warehouse selection rejects a browser-supplied location outside the server scope',
-    outboundReason(static function () use ($platformWarehouses): void { $platformWarehouses->batchStock(['*'], 999999999, '2026-07-30'); }) === 'inventory_query_location_scope_denied');
+    outboundReason(static function () use ($platformWarehouses, $platformAdmin): void { $platformWarehouses->batchStock($platformAdmin, 999999999, '2026-07-30'); }) === 'inventory_query_location_scope_denied');
 
 echo "INVENTORY_MANUAL_OUTBOUND_RESULT failed={$failed}\n";
 exit($failed === 0 ? 0 : 1);

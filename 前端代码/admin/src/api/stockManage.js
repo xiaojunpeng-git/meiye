@@ -8,6 +8,7 @@
 // | Author: MOHE Team <admin@mohe.com>
 // +----------------------------------------------------------------------
 import request from '@/plugins/request';
+import axios from 'axios';
 import Setting from '@/setting';
 import util from '@/libs/util';
 
@@ -404,3 +405,76 @@ export function stockOutImportApi(data) {
   });
 }
 
+function decodeArrayBufferText(buf) {
+  try {
+    if (typeof TextDecoder !== 'undefined') {
+      return new TextDecoder('utf-8').decode(buf);
+    }
+  } catch (e) {
+    /* fallthrough */
+  }
+  const view = new Uint8Array(buf);
+  let s = '';
+  const len = Math.min(view.length, 4000);
+  for (let i = 0; i < len; i++) s += String.fromCharCode(view[i]);
+  return s;
+}
+
+function downloadBlobRequest(urlPath, params, fileName) {
+  const token = util.cookies.get('token') || '';
+  const excelType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+  return axios({
+    url: `${Setting.apiBaseURL}${urlPath}`,
+    method: 'get',
+    params,
+    responseType: 'blob',
+    withCredentials: true,
+    headers: {
+      'Authori-zation': token ? `Bearer ${token}` : '',
+      'X-Source': 'f76d38d0ee4f854f',
+    },
+  }).then((res) => {
+    const headers = res.headers || {};
+    const disposition = headers['content-disposition'] || headers['Content-Disposition'] || '';
+    const matched = /filename\*?=(?:UTF-8'')?["']?([^"';]+)/i.exec(disposition);
+    let name = fileName || 'inventory-platform-import-template.xlsx';
+    if (matched && matched[1]) {
+      try {
+        name = decodeURIComponent(matched[1].replace(/['"]/g, '').trim());
+      } catch (e) {
+        name = matched[1].replace(/['"]/g, '').trim();
+      }
+    }
+    const contentType = headers['content-type'] || '';
+    if (contentType.indexOf('application/json') !== -1) {
+      return res.data.text().then((text) => {
+        let msg = '下载失败';
+        try {
+          const json = JSON.parse(text);
+          msg = json.msg || json.message || msg;
+        } catch (e) {
+          /* ignore */
+        }
+        return Promise.reject({ msg });
+      });
+    }
+    return { blob: res.data, fileName: name, contentType: contentType || excelType };
+  }).catch((err) => {
+    if (err && err.msg) return Promise.reject(err);
+    return Promise.reject({ msg: (err && err.message) || '下载失败' });
+  });
+}
+
+/** 平台多门店入/出库导入模板 */
+export function platformStockImportTemplateApi(data) {
+  return downloadBlobRequest('/v3/import/template', data, 'inventory_v3_platform_import_template.xlsx');
+}
+
+/** 平台多门店入/出库导入提交 */
+export function platformStockImportApi(data) {
+  return request({
+    url: `/v3/import`,
+    method: 'post',
+    data
+  });
+}

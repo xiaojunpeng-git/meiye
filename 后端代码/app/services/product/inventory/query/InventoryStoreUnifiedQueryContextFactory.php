@@ -19,7 +19,7 @@ final class InventoryStoreUnifiedQueryContextFactory
         $this->core = $core;
     }
 
-    public function make(int $storeId, int $operatorId, array $rules, string $cutoffDate): array
+    public function make(int $storeId, int $operatorId, array $rules, string $cutoffDate, string $pageCode = InventoryBatchStockQueryContract::PAGE_CODE): array
     {
         if ($storeId <= 0 || $operatorId <= 0) {
             throw new UnifiedQueryException('UNIFIED_QUERY_CONTEXT_INVALID', '库存查询登录身份无效。', []);
@@ -66,6 +66,6 @@ final class InventoryStoreUnifiedQueryContextFactory
             'scope_dimensions' => ['location_id' => array_keys($locationIds)],
             'query_cutoff_date' => InventoryBatchStockQueryContract::assertCutoffDate($cutoffDate),
             'data_as_of' => time(),
-        ], ['pageCode' => InventoryBatchStockQueryContract::PAGE_CODE]);
+        ], ['pageCode' => $pageCode]);
     }
 }

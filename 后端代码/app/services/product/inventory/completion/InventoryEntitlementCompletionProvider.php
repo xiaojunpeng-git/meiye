@@ -22,11 +22,21 @@ final class InventoryEntitlementCompletionProvider
         $request = $this->normalizeRequest($request);
         $scope->assertTenantAndStore($request['tenantId'], $request['storeId']);
 
+        $managedLines = $this->inventoryManagedLines($request['lines']);
+        if ($managedLines === []) {
+            return $this->unmanagedSnapshot($request, $scope);
+        }
+
+        $lineInventory = [];
+        foreach ($request['lines'] as $line) {
+            $lineInventory[$line['lineId']] = ['inventoryManaged' => false];
+        }
+
         $policyByProject = $this->lockPolicies(
             $request['tenantId'],
-            array_values(array_unique(array_column($request['lines'], 'projectId')))
+            array_values(array_unique(array_column($managedLines, 'projectId')))
         );
-        $recipeSets = $this->lockRecipes($request['lines'], $request['storeId']);
+        $recipeSets = $this->lockRecipes($managedLines, $request['storeId']);
         $materialLines = $this->resolveMaterialLines($recipeSets, $request['storeId']);
         $defaultLocationId = $this->resolveDefaultLocationId(
             $request['tenantId'],
@@ -45,9 +55,8 @@ final class InventoryEntitlementCompletionProvider
             $stockSets['stocks']
         );
 
-        $lineInventory = [];
         $resourceRows = [];
-        foreach ($request['lines'] as $line) {
+        foreach ($managedLines as $line) {
             $lineId = $line['lineId'];
             $projectId = $line['projectId'];
             $recipeKey = $this->projectKey($projectId, $line['projectUnique']);
@@ -106,6 +115,7 @@ final class InventoryEntitlementCompletionProvider
                 $formulaLines
             );
             $lineInventory[$lineId] = [
+                'inventoryManaged' => true,
                 'merchantDefaultPolicy' => $policy['merchantPolicy'],
                 'merchantDefaultPolicyVersion' => $policy['merchantVersion'],
                 'productPolicyOverride' => $policy['projectPolicy'],
@@ -184,12 +194,46 @@ final class InventoryEntitlementCompletionProvider
             'lockedInventoryResources' => $lockedResources,
             'persistenceSnapshot' => $this->persistenceSnapshot($stockSets, $materialLines),
             'projectNameSnapshotByLineId' => $this->projectNameSnapshotByLineId($request['lines']),
+            'inventoryPersistenceRequired' => true,
             'dataScopeSnapshot' => [
                 'organizationId' => $scope->organizationId(),
                 'organizationPath' => $scope->organizationPath(),
                 'operatorId' => $scope->operatorId(),
             ],
         ];
+    }
+
+    private function unmanagedSnapshot(array $request, InventoryCompletionDataScope $scope): array
+    {
+        $lineInventory = [];
+        foreach ($request['lines'] as $line) {
+            $lineInventory[$line['lineId']] = ['inventoryManaged' => false];
+        }
+        return [
+            'contractVersion' => InventoryEntitlementCompletionContract::CONTRACT_VERSION,
+            'shortageCursorLockGate' => InventoryEntitlementCompletionContract::SHORTAGE_CURSOR_GATE,
+            'tenantId' => $request['tenantId'], 'storeId' => $request['storeId'],
+            'lineInventoryByLineId' => $lineInventory, 'inventoryStocks' => [],
+            'lockedInventoryResources' => [], 'persistenceSnapshot' => [],
+            'projectNameSnapshotByLineId' => $this->projectNameSnapshotByLineId($request['lines']),
+            'inventoryPersistenceRequired' => false,
+            'dataScopeSnapshot' => ['organizationId' => $scope->organizationId(), 'organizationPath' => $scope->organizationPath(), 'operatorId' => $scope->operatorId()],
+        ];
+    }
+
+    private function inventoryManagedLines(array $lines): array
+    {
+        $managed = [];
+        foreach ($lines as $line) {
+            $project = Db::name('store_product')->where('id', $line['projectId'])->where('is_del', 0)->field('is_inventory')->find();
+            if (!$project) {
+                throw $this->failure('inventory_project_not_found', ['projectId' => $line['projectId']]);
+            }
+            if ((int)$project['is_inventory'] === 1) {
+                $managed[] = $line;
+            }
+        }
+        return $managed;
     }
 
     private function normalizeRequest(array $request): array

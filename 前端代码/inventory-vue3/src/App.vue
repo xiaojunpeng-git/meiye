@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   AlertTriangle, ArrowDownToLine, ArrowUpFromLine,
   Boxes, ChartNoAxesCombined, ChevronRight, ClipboardCheck,
@@ -28,8 +28,14 @@ const platformTransferFromParty = ref('ALL:0')
 const platformTransferToParty = ref('ALL:0')
 const platformStockSubject = ref('HQ')
 const platformHqLocationId = ref(0)
+// The operational document lists use a warehouse descriptor so the filter
+// can distinguish the headquarters warehouse from a store warehouse. Keep the
+// stock page's numeric selector separate because it drives the stock query
+// subject directly.
+const platformListWarehouseSelection = ref('HQ:0')
 const platformLocations = ref([])
 const storeLocations = ref([])
+const platformListWarehouseSelectionReady = ref(false)
 const active = ref('overview')
 const activeStatisticsTab = ref('inbound')
 const sidebarCollapsed = ref(false)
@@ -46,6 +52,7 @@ const businessDateFrom = ref(todayDate())
 const businessDateTo = ref(todayDate())
 const businessDatePages = new Set(['request', 'transfer', 'inbound', 'outbound', 'usage'])
 const recipeStatus = ref('')
+const recipeKeyword = ref('')
 const editor = ref('')
 const statusFocus = ref('')
 const remoteRows = ref([])
@@ -343,6 +350,18 @@ const platformStoreSelectorOptions = computed(() => [
     type: 'STORE'
   }))
 ])
+const platformListWarehouseOptions = computed(() => [
+  ...platformHqLocations.value.map((location) => ({
+    key: `HQ:${Number(location.id)}`,
+    name: location.location_name || location.organization_name_snapshot || '总部仓',
+    type: 'HQ'
+  })),
+  ...platformStoreOptions.value.map((location) => ({
+    key: `STORE:${Number(location.store_id)}`,
+    name: location.store_name_snapshot || location.store_name || `门店${location.store_id}`,
+    type: 'STORE'
+  }))
+])
 const platformStoreSelection = computed({
   get: () => String(Number(platformStoreId.value) || 0),
   set: (value) => {
@@ -495,7 +514,14 @@ function expiryRiskTone(code) {
 
 function openEditor(kind = active.value, row = null) {
   if (deferredPageKeys.has(active.value)) return
-  if (platformActionRequiresHqLocation.value && Number(platformHqLocationId.value) <= 0) {
+  if (kind === 'count-detail' && mode.value === 'platform') {
+    openCountDetail(row)
+    return
+  }
+  // Import chooses one or more inventory warehouses inside its own dialog;
+  // it must not be blocked merely because the current list has no HQ default.
+  const isReadOnlyDetail = String(kind).endsWith('-detail')
+  if (kind !== 'import' && !isReadOnlyDetail && platformActionRequiresHqLocation.value && Number(platformHqLocationId.value) <= 0) {
     listError.value = '当前平台范围内没有可操作的总部仓。'
     return
   }
@@ -563,6 +589,19 @@ async function openRequestDetail(row) {
     editor.value = 'request-detail'
   } catch (error) {
     listError.value = error instanceof Error ? error.message : '请货详情读取失败。'
+  }
+}
+
+async function openCountDetail(row) {
+  try {
+    if (mode.value !== 'platform') {
+      openEditor('count-detail', row)
+      return
+    }
+    selectedDetail.value = await platformInventoryApi.hqCountDetail(row.id, { hq_location_id: Number(platformHqLocationId.value) })
+    editor.value = 'count-detail'
+  } catch (error) {
+    listError.value = error instanceof Error ? error.message : '盘点详情读取失败。'
   }
 }
 
@@ -693,7 +732,7 @@ function mapApiRow(page, row) {
     case 'stock': return row.available_quantity !== undefined
       ? [text(row.product_name), text(row.sku_name), text(row.available_quantity), row.inventory_amount_cents !== undefined ? centsMoney(row.inventory_amount_cents) : money(row.inventory_amount)]
       : [text(row.product_name), text(row.sku_name), text(row.batch_balance_quantity), row.inventory_amount === null ? '-' : money(row.inventory_amount)]
-    case 'count': return [text(row.order_sn), text(row.store_name_label || row.store_name || row.store_name_snapshot || row.location_name || scopeName.value), text(row.count_type || '全盘'), text(row.detail_count), centsMoney(row.change_amount_cents), operationTime(row.operation_at), text(row.status_name)]
+    case 'count': return [text(row.order_sn), text(row.store_name_label || row.store_name || row.store_name_snapshot || row.location_name || scopeName.value), text(row.count_type || '全盘'), text(row.detail_count), centsMoney(row.change_amount_cents), operationTime(row.operation_at), countStatusName(row.status_name)]
     case 'request': return [text(row.order_sn), text(row.request_party_name || row.request_store_name), text(row.supply_party_name || row.supply_store_name), text(row.detail_count), operationTime(row.operation_at), text(row.status_name)]
     case 'transfer': return [text(row.order_sn), text(row.from_party_name || row.from_store_name), text(row.to_party_name || row.to_store_name), text(row.detail_count), operationTime(row.operation_at), text(row.status_name)]
     case 'usage': return [text(row.usage_no), '耗材明细见单据', text(row.project_name_snapshot), `${text(row.detail_count, '0')} 项`, '-', text(row.operation_type === 'RETURN' ? '退回' : '领用'), operationTime(row.operation_at), text(row.document_status || '已完成')]
@@ -702,6 +741,10 @@ function mapApiRow(page, row) {
     case 'warehouse': return [text(row.location_code), text(row.location_name), text(row.location_type), text(row.store_name_snapshot || row.organization_name_snapshot), Number(row.is_default) === 1 ? '是' : '否', text(row.location_status || '启用')]
     default: return []
   }
+}
+
+function countStatusName(status) {
+  return { CONFIRMED: '已确认', CANCELLED: '已取消' }[String(status || '')] || text(status)
 }
 
 // The query service returns batch facts so filters can remain batch-accurate.
@@ -734,19 +777,30 @@ function summarizeStockRows(rows) {
   return Array.from(summary.values())
 }
 
+function isExplicitListQuery(value) {
+  return value !== null
+    && typeof value === 'object'
+    && !('isTrusted' in value)
+    && !('preventDefault' in value)
+}
+
 async function loadCurrentList(unifiedQuery = null) {
   if (active.value === 'overview' || active.value === 'statistics') return
   listLoading.value = true
   listError.value = ''
   try {
     const client = mode.value === 'platform' ? platformInventoryApi : inventoryApi
-    const query = unifiedQuery && typeof unifiedQuery === 'object'
+    const hasExplicitQuery = isExplicitListQuery(unifiedQuery)
+    const query = hasExplicitQuery
       ? { ...unifiedQuery }
       : {
           keyword: keyword.value.trim()
         }
+    // Keep the visible search box authoritative when the query button is used.
+    // Unified-query callbacks may carry a stale payload from the previous run.
+    if (!hasExplicitQuery || !Object.prototype.hasOwnProperty.call(query, 'keyword')) query.keyword = keyword.value.trim()
     if (active.value === 'recipe') {
-      delete query.keyword
+      query.keyword = recipeKeyword.value.trim()
       query.status = recipeStatus.value
       query.page = 1
       query.limit = 100
@@ -780,17 +834,40 @@ async function loadCurrentList(unifiedQuery = null) {
         query.end_time = `${businessDateTo.value} 23:59:59`
       }
     }
-    const response = mode.value === 'platform' && active.value === 'inbound'
-      ? await platformInventoryApi.listHqInbound({ hq_location_id: Number(platformHqLocationId.value), ...query })
+    const [listWarehouseType, listWarehouseId] = String(platformListWarehouseSelection.value || 'HQ:0').split(':')
+    // The platform unified-query endpoint accepts only its structured filter
+    // contract. Legacy list endpoints consume business_date_from/to directly,
+    // so remove those keys when a selected store uses unified query.
+    const { business_date_from, business_date_to, ...unifiedOperationalQuery } = query
+    const platformCountQuery = listWarehouseType === 'STORE'
+      ? { ...unifiedOperationalQuery, pageCode: 'inventory_count', subject: 'STORE', storeId: Number(listWarehouseId) || 0 }
+      : { ...unifiedOperationalQuery, pageCode: 'inventory_count', subject: 'HQ', hq_location_id: Number(listWarehouseId) || Number(platformHqLocationId.value) }
+    const listWarehouseQuery = listWarehouseType === 'STORE'
+      ? { ...unifiedOperationalQuery, pageCode: `inventory_${active.value}`, subject: 'STORE', storeId: Number(listWarehouseId) || 0,
+          topFilterConditions: [
+            ...(Array.isArray(unifiedOperationalQuery.topFilterConditions) ? unifiedOperationalQuery.topFilterConditions : []),
+            ...(businessDatePages.has(active.value) && businessDateFrom.value && businessDateTo.value
+              ? [{ field: 'business_date', operator: 'between', value: [businessDateFrom.value, businessDateTo.value] }]
+              : [])
+          ] }
+      : { hq_location_id: Number(listWarehouseId) || Number(platformHqLocationId.value), ...query }
+    const response = mode.value === 'platform' && active.value === 'inbound' && listWarehouseType === 'STORE'
+      ? await platformInventoryApi.unifiedOperationalQuery(listWarehouseQuery)
+      : mode.value === 'platform' && active.value === 'outbound' && listWarehouseType === 'STORE'
+      ? await platformInventoryApi.unifiedOperationalQuery(listWarehouseQuery)
+      : mode.value === 'platform' && active.value === 'inbound'
+      ? await platformInventoryApi.listHqInbound(listWarehouseQuery)
       : mode.value === 'platform' && active.value === 'outbound'
-      ? await platformInventoryApi.listHqOutbound({ hq_location_id: Number(platformHqLocationId.value), ...query })
+      ? await platformInventoryApi.listHqOutbound(listWarehouseQuery)
+      : mode.value === 'platform' && active.value === 'count'
+      ? await platformInventoryApi.unifiedOperationalQuery(platformCountQuery)
       : mode.value === 'platform' && active.value === 'transfer'
       ? await platformInventoryApi.listHqCrossTransfers({ hq_location_id: Number(platformHqLocationId.value), ...query })
       : mode.value === 'platform' && active.value === 'request'
       ? await platformInventoryApi.list('request', { hq_location_id: Number(platformHqLocationId.value), ...query })
-      : unifiedQuery && operationalQueryPage.value && mode.value === 'store'
+      : hasExplicitQuery && operationalQueryPage.value && mode.value === 'store'
       ? await inventoryApi.unifiedOperationalQuery({ ...query, pageCode: operationalQueryPage.value.pageCode })
-      : active.value === 'stock' && unifiedQuery
+      : active.value === 'stock' && hasExplicitQuery
       ? await client.unifiedBatchStock(query)
       : active.value === 'stock'
       ? mode.value === 'store'
@@ -887,6 +964,14 @@ async function loadPlatformLocations() {
     if (platformStoreId.value > 0 && !platformLocations.value.some((item) => Number(item.store_id) === Number(platformStoreId.value))) platformStoreId.value = 0
     if (platformHqLocationId.value > 0 && !platformHqLocations.value.some((item) => Number(item.id) === Number(platformHqLocationId.value))) platformHqLocationId.value = 0
     if (platformHqLocationId.value <= 0 && (platformHqLocations.value.length === 1 || active.value === 'request')) platformHqLocationId.value = Number(platformHqLocations.value[0]?.id || 0)
+    const selected = String(platformListWarehouseSelection.value || '')
+    if (!platformListWarehouseOptions.value.some((item) => item.key === selected)) {
+      platformListWarehouseSelection.value = platformHqLocations.value.length
+        ? `HQ:${Number(platformHqLocations.value[0].id)}`
+        : (platformStoreOptions.value.length ? `STORE:${Number(platformStoreOptions.value[0].store_id)}` : 'HQ:0')
+    }
+    const [selectionType, selectionId] = String(platformListWarehouseSelection.value || 'HQ:0').split(':')
+    if (selectionType === 'HQ' && Number(selectionId) > 0) platformHqLocationId.value = Number(selectionId)
   } catch (error) {
     platformLocations.value = []
     listError.value = error instanceof Error ? error.message : '平台仓库范围读取失败。'
@@ -924,7 +1009,15 @@ function onPlatformHqLocationChanged() {
   loadCurrentList()
 }
 
-function openRecipeEditor(row = sourceRows.value[0] || null) {
+watch(platformListWarehouseSelection, (selection) => {
+  const [selectionType, selectionId] = String(selection || 'HQ:0').split(':')
+  if (selectionType === 'HQ' && Number(selectionId) > 0) platformHqLocationId.value = Number(selectionId)
+  if (!platformListWarehouseSelectionReady.value) return
+  if (mode.value !== 'platform' || ['stock', 'request', 'transfer'].includes(active.value)) return
+  loadCurrentList()
+})
+
+function openRecipeEditor(row = null) {
   selectedDetail.value = row
   editor.value = row ? 'recipe-edit' : 'recipe'
 }
@@ -974,6 +1067,7 @@ onMounted(async () => {
   applyRequestedPage()
   if (mode.value === 'platform') await loadPlatformLocations()
   else await loadStoreSessionContext()
+  platformListWarehouseSelectionReady.value = true
   await loadDashboard()
   if (active.value === 'statistics' && mode.value === 'platform') {
     await queryStatisticsPage({})
@@ -1192,11 +1286,12 @@ onBeforeUnmount(() => {
           />
           <section v-else-if="active === 'recipe'" class="filter-card">
             <label>配方状态<select v-model="recipeStatus" @change="loadCurrentList"><option value="">全部</option><option value="1">启用中</option><option value="0">已停用</option></select></label>
+            <div class="filter-search"><Search :size="17" /><input v-model="recipeKeyword" placeholder="搜索项目名称" @keyup.enter="loadCurrentList" /></div>
             <button class="primary-button" :disabled="listLoading" @click="loadCurrentList">{{ listLoading ? '查询中' : '查询' }}</button>
-            <button class="secondary-button" :disabled="listLoading" @click="recipeStatus = ''; loadCurrentList()">重置</button>
+            <button class="secondary-button" :disabled="listLoading" @click="recipeStatus = ''; recipeKeyword = ''; loadCurrentList()">重置</button>
           </section>
-<section v-else-if="!(active === 'stock')" class="filter-card"><div class="filter-search"><Search :size="17" /><input v-model="keyword" :placeholder="`搜索${currentPage.title}记录`" @keyup.enter="loadCurrentList" /></div><template v-if="mode === 'platform' && active === 'request'"><label>请货方<InventoryStoreSelector v-model="platformRequestPartySelection" :options="platformRequestPartySelectorOptions" placeholder="全部请货方" /></label><label>请货状态<select v-model="platformRequestStatus"><option value="">全部</option><option value="APPLIED">申请中</option><option value="PARTIAL">部分调拨</option><option value="DONE">已完成</option><option value="CANCELLED">已取消</option><option value="TERMINATED">已终止</option></select></label></template><template v-else-if="mode === 'platform' && active === 'transfer'"><label>调出方<InventoryStoreSelector v-model="platformTransferFromParty" :options="platformWarehouseSelectorOptions" placeholder="全部调出方" /></label><label>调入方<InventoryStoreSelector v-model="platformTransferToParty" :options="platformWarehouseSelectorOptions" placeholder="全部调入方" /></label><label>调拨状态<select v-model="platformTransferStatus"><option value="">全部</option><option value="DRAFT">草稿</option><option value="DISPATCHED">在途</option><option value="RECEIVED">已收货</option><option value="CANCELLED">已取消</option><option value="REVERSED">已作废</option></select></label></template><label v-else-if="mode === 'platform'">库存仓<InventoryStoreSelector v-model="platformStoreSelection" :options="platformStoreSelectorOptions" placeholder="选择门店" /></label><label v-if="!(mode === 'platform' && ['request', 'transfer'].includes(active))" v-for="filter in currentPage.filters.slice(0, 2)" :key="filter">{{ filter }}<select><option>全部</option></select></label><div v-if="businessDatePages.has(active)" class="business-date-filter business-date-filter--inline"><label>业务日期</label><input v-model="businessDateFrom" type="date" :max="businessDateTo" @change="loadCurrentList" /><span>至</span><input v-model="businessDateTo" type="date" :min="businessDateFrom" @change="loadCurrentList" /></div><button class="primary-button" :disabled="listLoading || (platformFilterRequiresHqLocation && !platformHqLocationId)" @click="loadCurrentList">{{ listLoading ? '查询中' : '查询' }}</button></section>
-          <section class="content-card table-card"><header class="table-meta"><span>共 {{ remoteTotal }} 条记录</span><span v-if="listDateRange" class="table-meta__note">业务日期：{{ listDateRange.from }} 至 {{ listDateRange.to }}</span><div><button v-if="mode === 'store' && ['inbound', 'outbound'].includes(active)" class="text-button" @click="openEditor('import')">导入</button><span v-if="active !== 'stock' && active !== 'request'" class="table-meta__note">导出将在对应权威导出任务接入后开放</span></div></header><p v-if="listError" class="inventory-load-error">{{ listError }}</p><div v-else class="table-scroll"><table><thead><tr><th v-for="column in currentPage.columns" :key="column">{{ column }}</th><th>操作</th></tr></thead><tbody><tr v-if="listLoading"><td :colspan="currentPage.columns.length + 1" class="table-empty">正在读取库存数据...</td></tr><tr v-else-if="!currentRows.length"><td :colspan="currentPage.columns.length + 1" class="table-empty">暂无符合条件的记录</td></tr><tr v-else v-for="(row, index) in currentRows" :key="index"><td v-for="(cell, cellIndex) in row" :key="cellIndex"><span v-if="cellIndex === row.length - 2 && active === 'inbound'" class="state-tag">{{ cell }}</span><span v-else-if="cellIndex === row.length - 1 && ['outbound', 'count', 'request', 'transfer', 'usage', 'import'].includes(active)" class="state-tag">{{ cell }}</span><template v-else>{{ cell }}</template></td><td><template v-if="active === 'transfer'"><button class="text-button" @click="openTransferDetail(sourceRows[index])">查看</button><button v-if="sourceRows[index].can_dispatch" class="text-button" @click="runTransferAction('dispatch', sourceRows[index])">发货</button><button v-if="sourceRows[index].can_receive" class="text-button" @click="runTransferAction('receive', sourceRows[index])">收货</button><button v-if="sourceRows[index].can_cancel" class="text-button" @click="runTransferAction('cancel', sourceRows[index])">取消</button><button v-if="sourceRows[index].can_reverse" class="text-button" @click="runTransferAction('reverse', sourceRows[index])">作废</button></template><template v-else-if="active === 'request'"><button class="text-button" @click="openRequestDetail(sourceRows[index])">查看</button><button v-if="sourceRows[index].can_edit" class="text-button" @click="openRequestEditor(sourceRows[index])">编辑</button><button v-if="sourceRows[index].can_cancel" class="text-button" @click="runDocumentAction('cancelRequest', sourceRows[index], 'request')">取消</button><button v-if="sourceRows[index].can_terminate" class="text-button" @click="runDocumentAction('terminateRequest', sourceRows[index], 'request')">终止剩余</button></template><template v-else-if="['inbound', 'outbound'].includes(active)"><button class="text-button" @click="active === 'inbound' ? openInboundDetail(sourceRows[index]) : openOutboundDetail(sourceRows[index])">查看</button><button v-if="active === 'inbound'" class="text-button" @click="openInboundOutboundDetails(sourceRows[index])">出库明细</button><button v-if="sourceRows[index].can_void" class="text-button" @click="runDocumentAction('void', sourceRows[index], active)">作废</button></template><template v-else-if="active === 'recipe'"><button class="text-button" @click="openRecipeEditor()">编辑</button><button class="text-button" @click="toggleRecipeStatus(sourceRows[index])">{{ Number(sourceRows[index].status) === 1 ? '停用' : '启用' }}</button><button class="text-button text-button--danger" @click="deleteRecipe(sourceRows[index])">删除</button></template><button v-else class="text-button" @click="active === 'stock' ? openStockDetail(sourceRows[index]) : active === 'import' ? openImportDetail(sourceRows[index]) : openEditor(`${active}-detail`, sourceRows[index])">查看</button></td></tr></tbody></table></div></section>
+<section v-else-if="!(active === 'stock')" class="filter-card"><div class="filter-search"><Search :size="17" /><input v-model="keyword" :placeholder="`搜索${currentPage.title}记录`" @keyup.enter="loadCurrentList" /></div><template v-if="mode === 'platform' && active === 'request'"><label>请货方<InventoryStoreSelector v-model="platformRequestPartySelection" :options="platformRequestPartySelectorOptions" placeholder="全部请货方" /></label><label>请货状态<select v-model="platformRequestStatus"><option value="">全部</option><option value="APPLIED">申请中</option><option value="PARTIAL">部分调拨</option><option value="DONE">已完成</option><option value="CANCELLED">已取消</option><option value="TERMINATED">已终止</option></select></label></template><template v-else-if="mode === 'platform' && active === 'transfer'"><label>调出方<InventoryStoreSelector v-model="platformTransferFromParty" :options="platformWarehouseSelectorOptions" placeholder="全部调出方" /></label><label>调入方<InventoryStoreSelector v-model="platformTransferToParty" :options="platformWarehouseSelectorOptions" placeholder="全部调入方" /></label><label>调拨状态<select v-model="platformTransferStatus"><option value="">全部</option><option value="DRAFT">草稿</option><option value="DISPATCHED">在途</option><option value="RECEIVED">已收货</option><option value="CANCELLED">已取消</option><option value="REVERSED">已作废</option></select></label></template><label v-else-if="mode === 'platform'">库存仓<InventoryStoreSelector v-model="platformListWarehouseSelection" :options="platformListWarehouseOptions" placeholder="选择库存仓" presentation="modal" /></label><label v-if="!(['inbound', 'outbound'].includes(active) || (mode === 'platform' && ['request', 'transfer'].includes(active)))" v-for="filter in currentPage.filters.slice(0, 2)" :key="filter">{{ filter }}<select><option>全部</option></select></label><div v-if="businessDatePages.has(active)" class="business-date-filter business-date-filter--inline"><label>业务日期</label><input v-model="businessDateFrom" type="date" :max="businessDateTo" @change="loadCurrentList" /><span>至</span><input v-model="businessDateTo" type="date" :min="businessDateFrom" @change="loadCurrentList" /></div><button class="primary-button" :disabled="listLoading || (platformFilterRequiresHqLocation && !platformHqLocationId)" @click="loadCurrentList">{{ listLoading ? '查询中' : '查询' }}</button></section>
+          <section class="content-card table-card"><header class="table-meta"><span>共 {{ remoteTotal }} 条记录</span><span v-if="listDateRange" class="table-meta__note">业务日期：{{ listDateRange.from }} 至 {{ listDateRange.to }}</span><div><button v-if="['store', 'platform'].includes(mode) && ['inbound', 'outbound'].includes(active)" class="text-button" @click="openEditor('import')">导入</button><span v-if="active !== 'stock' && active !== 'request'" class="table-meta__note">导出将在对应权威导出任务接入后开放</span></div></header><p v-if="listError" class="inventory-load-error">{{ listError }}</p><div v-else class="table-scroll"><table><thead><tr><th v-for="column in currentPage.columns" :key="column">{{ column }}</th><th>操作</th></tr></thead><tbody><tr v-if="listLoading"><td :colspan="currentPage.columns.length + 1" class="table-empty">正在读取库存数据...</td></tr><tr v-else-if="!currentRows.length"><td :colspan="currentPage.columns.length + 1" class="table-empty">暂无符合条件的记录</td></tr><tr v-else v-for="(row, index) in currentRows" :key="index"><td v-for="(cell, cellIndex) in row" :key="cellIndex"><span v-if="cellIndex === row.length - 2 && active === 'inbound'" class="state-tag">{{ cell }}</span><span v-else-if="cellIndex === row.length - 1 && ['outbound', 'count', 'request', 'transfer', 'usage', 'import'].includes(active)" class="state-tag">{{ cell }}</span><template v-else>{{ cell }}</template></td><td><template v-if="active === 'transfer'"><button class="text-button" @click="openTransferDetail(sourceRows[index])">查看</button><button v-if="sourceRows[index].can_dispatch" class="text-button" @click="runTransferAction('dispatch', sourceRows[index])">发货</button><button v-if="sourceRows[index].can_receive" class="text-button" @click="runTransferAction('receive', sourceRows[index])">收货</button><button v-if="sourceRows[index].can_cancel" class="text-button" @click="runTransferAction('cancel', sourceRows[index])">取消</button><button v-if="sourceRows[index].can_reverse" class="text-button" @click="runTransferAction('reverse', sourceRows[index])">作废</button></template><template v-else-if="active === 'request'"><button class="text-button" @click="openRequestDetail(sourceRows[index])">查看</button><button v-if="sourceRows[index].can_edit" class="text-button" @click="openRequestEditor(sourceRows[index])">编辑</button><button v-if="sourceRows[index].can_cancel" class="text-button" @click="runDocumentAction('cancelRequest', sourceRows[index], 'request')">取消</button><button v-if="sourceRows[index].can_terminate" class="text-button" @click="runDocumentAction('terminateRequest', sourceRows[index], 'request')">终止剩余</button></template><template v-else-if="['inbound', 'outbound'].includes(active)"><button class="text-button" @click="active === 'inbound' ? openInboundDetail(sourceRows[index]) : openOutboundDetail(sourceRows[index])">查看</button><button v-if="active === 'inbound'" class="text-button" @click="openInboundOutboundDetails(sourceRows[index])">出库明细</button><button v-if="sourceRows[index].can_void" class="text-button" @click="runDocumentAction('void', sourceRows[index], active)">作废</button></template><template v-else-if="active === 'recipe'"><button class="text-button" @click="openRecipeEditor(sourceRows[index])">编辑</button><button class="text-button" @click="toggleRecipeStatus(sourceRows[index])">{{ Number(sourceRows[index].status) === 1 ? '停用' : '启用' }}</button><button class="text-button text-button--danger" @click="deleteRecipe(sourceRows[index])">删除</button></template><button v-else class="text-button" @click="active === 'stock' ? openStockDetail(sourceRows[index]) : active === 'import' ? openImportDetail(sourceRows[index]) : openEditor(`${active}-detail`, sourceRows[index])">查看</button></td></tr></tbody></table></div></section>
         </template>
       </section>
     </main>

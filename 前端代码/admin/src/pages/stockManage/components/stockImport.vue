@@ -1,5 +1,5 @@
 <template>
-  <Modal v-model="visible" :title="modalTitle" width="720" @on-cancel="close">
+  <Modal v-model="visible" :title="modalTitle" width="760" @on-cancel="close">
     <Alert type="warning" show-icon class="mb12">
       <div class="notice-title">操作注意事项</div>
       <ul class="notice-list">
@@ -11,17 +11,38 @@
         <li>导入入账请勿中途关闭页面或重复点击；整表校验通过后才会写入库存。</li>
         <li>入账失败时库存不会变化，可在导入记录查看失败原因并下载错误明细；失败后可改表重试。</li>
         <li>同一文件内容成功导入后永久不可再提交；失败可改表后重新上传。</li>
-        <li v-if="stockSide === 'in'">初始入库类型固定为「初始入库」；普通入库仅支持采购/其他入库类型。</li>
-        <li v-else>出库导入仅支持过期退货、试用、报废、其他出库；库存不足且不允许负库存时整单失败。</li>
-        <li>导入失败明细可在「导入记录」中查看（含第 N 行原因）。</li>
+        <li v-if="stockSide === 'in'">入库导入仅支持当前业务所允许的入库类型。</li>
+        <li v-else>出库导入仅支持当前业务所允许的出库类型。</li>
       </ul>
     </Alert>
 
     <div class="mb12">
       <Button type="primary" ghost @click="downloadTpl" :loading="downLoading">导出 Excel 模板</Button>
-      <span class="tip ml10">可先选择商品再导出；不选则导出全部符合条件的规格</span>
+      <span class="tip ml10">
+        {{ platformImport ? '先选门店，再导出对应门店模板；模板会按所选库存仓自动生成。' : '可先选择商品再导出；不选则导出全部符合条件的规格' }}
+      </span>
     </div>
-    <Form inline v-if="needScene">
+
+    <Form inline v-if="platformImport" class="mb12">
+      <FormItem label="导入门店：">
+        <OrganizationResourceSelector
+          v-model="selectedStoreIds"
+          resource="store"
+          picker-mode="modal"
+          :tree-mode="true"
+          selection-mode="store_only"
+          modal-title="选择导入门店"
+          trigger-placeholder="请选择导入门店"
+          placeholder="搜索门店名称"
+          :multiple="true"
+          :clearable="true"
+          style="min-width: 360px"
+        />
+      </FormItem>
+      <span class="tip ml10">已选 {{ selectedStoreIds.length }} 家门店</span>
+    </Form>
+
+    <Form inline v-else-if="needScene" class="mb12">
       <FormItem label="导入类型：">
         <Select v-model="scene" style="width:180px">
           <Option value="initial_in">初始入库</Option>
@@ -29,19 +50,22 @@
         </Select>
       </FormItem>
     </Form>
-    <Form inline>
+
+    <Form v-if="!platformImport" inline class="mb12">
       <FormItem label="预填筛选：">
         <Button type="primary" class="mr10" @click="goodsVisible = true">选择商品</Button>
         <Button v-if="selectedProducts.length" @click="clearSelected">清空</Button>
         <span class="tip ml10">已选 {{ selectedProducts.length }} 个商品</span>
       </FormItem>
     </Form>
-    <Form inline>
+
+    <Form v-if="!platformImport" inline class="mb12">
       <FormItem label="关键字：">
         <Input v-model="keyword" placeholder="商品名/编码/条码（可选，与已选商品取交集）" style="width:320px" clearable />
       </FormItem>
     </Form>
-    <div v-if="selectedProducts.length" class="selected-box mb12">
+
+    <div v-if="!platformImport && selectedProducts.length" class="selected-box mb12">
       <Tag
         v-for="item in selectedProducts"
         :key="item.id"
@@ -50,6 +74,7 @@
         @on-close="removeSelected(item.id)"
       >{{ item.name }}</Tag>
     </div>
+
     <Upload
       type="drag"
       :action="uploadUrl"
@@ -67,13 +92,16 @@
         <p class="tip">上传后点「立即导入」；校验不通过不会改库存</p>
       </div>
     </Upload>
+
     <div v-if="fileUrl" class="mt12">
       已选文件：{{ fileName }}
       <Button type="primary" class="ml10" :loading="importLoading" @click="doImport">立即导入</Button>
     </div>
+
     <div slot="footer">
       <Button @click="close">关闭</Button>
     </div>
+
     <selectGoodsBox
       v-model="goodsVisible"
       :chooseType="94"
@@ -87,25 +115,33 @@
 import Setting from '@/setting'
 import util from '@/libs/util'
 import selectGoodsBox from '@/components/selectGoodsBox'
+import OrganizationResourceSelector from '@/components/organization/OrganizationResourceSelector.vue'
 import {
   stockInTemplateApi,
   stockInTemplateFileApi,
   stockInImportApi,
   stockOutTemplateApi,
   stockOutTemplateFileApi,
-  stockOutImportApi
+  stockOutImportApi,
+  platformStockImportTemplateApi,
+  platformStockImportApi
 } from '@/api/stockManage'
 
 const PRODUCT_IDS_MAX = 500
 
 export default {
   name: 'stockImport',
-  components: { selectGoodsBox },
+  components: { selectGoodsBox, OrganizationResourceSelector },
   props: {
     // in | out
     stockSide: {
       type: String,
       default: 'in'
+    },
+    // true：平台多门店导入；false：保留旧导入
+    platformImport: {
+      type: Boolean,
+      default: true
     }
   },
   data() {
@@ -114,6 +150,7 @@ export default {
       scene: 'initial_in',
       keyword: '',
       selectedProducts: [],
+      selectedStoreIds: [],
       goodsVisible: false,
       fileUrl: '',
       fileName: '',
@@ -125,21 +162,26 @@ export default {
   },
   computed: {
     needScene() {
-      return this.stockSide === 'in'
+      return !this.platformImport && this.stockSide === 'in'
     },
     modalTitle() {
+      if (this.platformImport) {
+        return this.stockSide === 'out' ? '平台出库导入' : '平台入库导入'
+      }
       return this.stockSide === 'out' ? '出库 Excel 导入' : '入库 Excel 导入'
     },
     productIds() {
       return this.selectedProducts.map((item) => item.id)
+    },
+    direction() {
+      return this.stockSide === 'out' ? 'outbound' : 'inbound'
     }
   },
   methods: {
     open(defaultScene) {
-      if (defaultScene) this.scene = defaultScene
+      if (!this.platformImport && defaultScene) this.scene = defaultScene
       this.fileUrl = ''
       this.fileName = ''
-      // 关闭弹窗后保留已选商品，便于连续下载初始/普通入库模板；刷新页面不持久化
       this.visible = true
       const token = util.cookies.get('token')
       this.header = token ? { 'Authori-zation': 'Bearer ' + token } : {}
@@ -149,7 +191,6 @@ export default {
       this.goodsVisible = false
     },
     onSelectGoods(list) {
-      // goodsAttr 回传 SKU 行：按 product_id 去重为商品集合（同一商品多规格只保留一个标签）
       const map = {}
       ;(list || []).forEach((row) => {
         const id = Number(row.product_id || 0)
@@ -181,7 +222,6 @@ export default {
       return true
     },
     onUploadSuccess(res) {
-      // 上传接口返回 data.src（与商品/用户导入一致），不是 data.url
       const data = (res && res.data) || {}
       const src = data.src || data.url || ''
       if (res && res.status === 200 && src) {
@@ -210,10 +250,27 @@ export default {
       window.URL.revokeObjectURL(url)
     },
     downloadTpl() {
+      if (this.platformImport && !this.selectedStoreIds.length) {
+        this.$Message.warning('请先选择导入门店')
+        return
+      }
       this.downLoading = true
       const payload = {
         keyword: this.keyword,
         product_ids: this.productIds
+      }
+      if (this.platformImport) {
+        payload.direction = this.direction
+        payload.store_ids = this.selectedStoreIds
+        platformStockImportTemplateApi(payload).then((res) => {
+          this.saveBlob(res.blob, res.fileName)
+          this.$Message.success('模板已下载')
+        }).catch((err) => {
+          this.$Message.error((err && err.msg) || '下载失败')
+        }).finally(() => {
+          this.downLoading = false
+        })
+        return
       }
       const metaReq = this.stockSide === 'out'
         ? stockOutTemplateApi(payload)
@@ -225,7 +282,6 @@ export default {
           return Promise.reject({ msg: '未返回下载凭证，请刷新后重试' })
         }
         const fileApi = this.stockSide === 'out' ? stockOutTemplateFileApi : stockInTemplateFileApi
-        // 展示名用接口 file_name（中文）；接口层已校验 xlsx 魔数
         return fileApi(key, data.file_name).then((file) => {
           this.saveBlob(file.blob, data.file_name || file.fileName)
           this.$Message.success('模板已下载' + (data.count != null ? '（' + data.count + ' 行）' : ''))
@@ -241,10 +297,21 @@ export default {
         this.$Message.error('请先上传文件')
         return
       }
+      if (this.platformImport && !this.selectedStoreIds.length) {
+        this.$Message.warning('请先选择导入门店')
+        return
+      }
       this.importLoading = true
-      const req = this.stockSide === 'out'
-        ? stockOutImportApi({ file: this.fileUrl, real_name: this.fileName })
-        : stockInImportApi({ scene: this.scene, file: this.fileUrl, real_name: this.fileName })
+      const req = this.platformImport
+        ? platformStockImportApi({
+            direction: this.direction,
+            file: this.fileUrl,
+            real_name: this.fileName,
+            store_ids: this.selectedStoreIds
+          })
+        : (this.stockSide === 'out'
+          ? stockOutImportApi({ file: this.fileUrl, real_name: this.fileName })
+          : stockInImportApi({ scene: this.scene, file: this.fileUrl, real_name: this.fileName }))
       req.then((res) => {
         this.$Message.success(res.msg || '导入成功')
         this.$emit('success')

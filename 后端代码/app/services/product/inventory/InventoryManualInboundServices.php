@@ -14,43 +14,93 @@ use think\facade\Db;
  */
 final class InventoryManualInboundServices
 {
+    /** Excel imports share one visible business document and may contain more lines than interactive entry. */
+    private const IMPORT_LINE_LIMIT = 5000;
+
     public function create(int $storeId, int $operatorId, array $input): array
     {
-        $command = $this->normalize($input);
+        return $this->createWithLineLimit($storeId, $operatorId, $input, 100);
+    }
+
+    /**
+     * Dedicated entry for the V3 Excel importer. It keeps the same authority,
+     * transaction, facts, FEFO contract and idempotency semantics as manual entry.
+     */
+    public function createForImport(int $storeId, int $operatorId, array $input): array
+    {
+        return $this->createWithLineLimit($storeId, $operatorId, $input, self::IMPORT_LINE_LIMIT);
+    }
+
+    private function createWithLineLimit(int $storeId, int $operatorId, array $input, int $lineLimit): array
+    {
+        $command = $this->normalize($input, $lineLimit);
         if ($storeId <= 0 || $operatorId <= 0) {
             throw new \InvalidArgumentException('inventory_manual_inbound_scope_invalid');
         }
         return Db::transaction(function () use ($storeId, $operatorId, $command): array {
             $scope = $this->lockScope($storeId, $operatorId);
             $location = $this->lockOrCreateDefaultLocation($scope, $command['recordedAt']);
-            $results = [];
-            foreach ($command['lines'] as $index => $line) {
-                $factKey = 'manual-in:' . hash('sha256', $command['idempotencyKey'] . ':' . $index);
-                $existing = Db::name('inventory_batch_movement_fact')
-                    ->where('tenant_id', $location['tenant_id'])
-                    ->where('fact_key', $factKey)
-                    ->lock(true)
-                    ->find();
-                if ($existing) {
-                    $this->assertIdempotentFact($existing, $location, $command, $index, $line);
-                    $results[] = ['movement_fact_id' => (int)$existing['id'], 'idempotent' => true];
-                    continue;
-                }
-                $catalog = $this->lockCatalogSku((int)$scope['storeId'], $line);
-                $stock = $this->lockOrCreateStock($location, $catalog, $line, $command['recordedAt']);
-                $batch = $this->lockOrCreateBatch($stock, $catalog, $line, $command, $index);
-                $this->increaseBalances($stock, $batch, $line, $command['recordedAt']);
-                $movementId = $this->appendMovement($factKey, $location, $stock, $batch, $line, $command, $index);
-                $results[] = ['movement_fact_id' => $movementId, 'idempotent' => false];
-            }
-            return ['idempotency_key' => $command['idempotencyKey'], 'lines' => $results];
+            return $this->createAtLocation($scope, $location, $command);
         });
     }
 
-    private function normalize(array $input): array
+    /**
+     * Platform headquarters inbound. The caller has already resolved the
+     * platform permission and an HQ location from trusted server-side scope.
+     * The command deliberately shares the same batch and fact write path as a
+     * store inbound so HQ stock remains in the V3 authority, not legacy stock.
+     */
+    public function createForHeadquarters(array $scope, array $location, array $input, int $lineLimit = self::IMPORT_LINE_LIMIT): array
+    {
+        $command = $this->normalize($input, $lineLimit);
+        return Db::transaction(function () use ($scope, $location, $command): array {
+            $locked = Db::name('inventory_location')->where('id', (int)($location['id'] ?? 0))->lock(true)->find();
+            if (!$locked || (string)($locked['location_type'] ?? '') !== 'HQ'
+                || (int)($locked['store_id'] ?? -1) !== 0
+                || (string)($locked['location_status'] ?? '') !== 'ACTIVE'
+                || (string)($locked['tenant_id'] ?? '') !== (string)($scope['tenantId'] ?? '')) {
+                throw new \RuntimeException('inventory_hq_location_invalid');
+            }
+            return $this->createAtLocation($scope, (array)$locked, $command);
+        });
+    }
+
+    private function createAtLocation(array $scope, array $location, array $command): array
+    {
+        $command['documentNo'] = (new InventoryBusinessDocumentNumberServices())->manual(
+            (string)$scope['tenantId'],
+            'manual_inbound',
+            (string)$command['idempotencyKey'],
+            (string)$command['businessDate'],
+            (int)$command['recordedAt']
+        );
+        $results = [];
+        foreach ($command['lines'] as $index => $line) {
+            $factKey = 'manual-in:' . hash('sha256', $command['idempotencyKey'] . ':' . $index);
+            $existing = Db::name('inventory_batch_movement_fact')
+                ->where('tenant_id', $location['tenant_id'])
+                ->where('fact_key', $factKey)
+                ->lock(true)
+                ->find();
+            if ($existing) {
+                $this->assertIdempotentFact($existing, $location, $command, $index, $line);
+                $results[] = ['movement_fact_id' => (int)$existing['id'], 'idempotent' => true];
+                continue;
+            }
+            $catalog = $this->lockCatalogSku($scope, $line);
+            $stock = $this->lockOrCreateStock($location, $catalog, $line, $command['recordedAt']);
+            $batch = $this->lockOrCreateBatch($stock, $catalog, $line, $command, $index);
+            $this->increaseBalances($stock, $batch, $line, $command['recordedAt']);
+            $movementId = $this->appendMovement($factKey, $location, $stock, $batch, $line, $command, $index);
+            $results[] = ['movement_fact_id' => $movementId, 'idempotent' => false];
+        }
+        return ['document_no' => $command['documentNo'], 'idempotency_key' => $command['idempotencyKey'], 'lines' => $results];
+    }
+
+    private function normalize(array $input, int $lineLimit = 100): array
     {
         $keys = ['idempotency_key', 'business_date', 'remark', 'lines'];
-        if (array_keys($input) !== $keys || !is_array($input['lines']) || !$input['lines'] || count($input['lines']) > 100) {
+        if (array_keys($input) !== $keys || !is_array($input['lines']) || !$input['lines'] || count($input['lines']) > $lineLimit) {
             throw new \InvalidArgumentException('inventory_manual_inbound_input_invalid');
         }
         $idempotencyKey = trim((string)$input['idempotency_key']);
@@ -265,14 +315,18 @@ final class InventoryManualInboundServices
         }
     }
 
-    private function lockCatalogSku(int $storeId, array $line): array
+    private function lockCatalogSku(array $scope, array $line): array
     {
-        $row = Db::name('store_product_attr_value')->alias('a')->join('store_product p', 'p.id=a.product_id')
-            ->where('p.id', $line['productId'])->where('p.type', 1)->where('p.relation_id', $storeId)
-            ->where('p.is_del', 0)->where('p.is_inventory', 1)->where('a.id', $line['skuId'])
+        $query = Db::name('store_product_attr_value')->alias('a')->join('store_product p', 'p.id=a.product_id')
+            ->where('p.id', $line['productId'])->where('p.is_del', 0)->where('p.is_inventory', 1)->where('a.id', $line['skuId'])
             ->where('a.unique', $line['skuUnique'])->where('a.type', 0)->lock(true)
-            ->field('p.id product_id,p.store_name product_name,p.code product_code,p.salon_stock_enabled,a.id sku_id,a.unique sku_unique,a.suk sku_name,a.bar_code barcode,a.stock_unit')
-            ->find();
+            ->field('p.id product_id,p.store_name product_name,p.code product_code,p.salon_stock_enabled,a.id sku_id,a.unique sku_unique,a.suk sku_name,a.bar_code barcode,a.stock_unit');
+        if (($scope['partyType'] ?? 'STORE') === 'HQ') {
+            $query->where('p.type', 0)->where('p.relation_id', 0);
+        } else {
+            $query->where('p.type', 1)->where('p.relation_id', (int)($scope['storeId'] ?? 0));
+        }
+        $row = $query->find();
         if (!$row) throw new \RuntimeException('inventory_manual_inbound_sku_not_found');
         $row['quantity_scale'] = (int)($row['salon_stock_enabled'] ?? 0) === 1 ? 2 : 0;
         $row['stock_unit'] = trim((string)($row['stock_unit'] ?? ''));
@@ -318,7 +372,7 @@ final class InventoryManualInboundServices
             'received_business_date' => $command['businessDate'], 'available_quantity_units' => 0, 'unit_cost_cents' => $line['unitCostCents'],
             'cost_allocated_quantity_units' => 0, 'batch_status' => 'ACTIVE', 'version' => 1, 'product_name_snapshot' => $catalog['product_name'],
             'sku_name_snapshot' => $catalog['sku_name'], 'product_code_snapshot' => $catalog['product_code'], 'barcode_snapshot' => $catalog['barcode'],
-            'brand_name_snapshot' => '', 'category_name_snapshot' => '', 'source_order_no_snapshot' => 'MI-' . $command['idempotencyKey'] . '-' . $index,
+            'brand_name_snapshot' => '', 'category_name_snapshot' => '', 'source_order_no_snapshot' => (string)($command['documentNo'] ?: ('MI-' . $command['idempotencyKey'] . '-' . $index)),
             'data_quality' => 'COMPLETE',
             'created_at' => $command['recordedAt'], 'updated_at' => $command['recordedAt'],
         ]);

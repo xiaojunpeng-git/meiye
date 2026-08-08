@@ -78,11 +78,7 @@ export default {
 		{
 		    path: `${Setting.routePre}/inventory/statistics`,
 		    name: `inventoryStatistics`,
-		    meta: {
-		        auth: ['store-inventory-statistics'],
-		        title: '库存统计'
-		    },
-		    component: () => import('@/pages/stockManage/inventoryStatistics/index')
+		    redirect: `${Setting.routePre}/inventory/details`
 		},
 		{
 		    path: `${Setting.routePre}/stock/import/record`,

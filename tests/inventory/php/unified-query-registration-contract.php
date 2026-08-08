@@ -93,12 +93,18 @@ uqInventoryAssert('inventory UQ commands persist idempotent receipts and rederiv
 $platformContextSource = file_get_contents($root . '/后端代码/app/services/product/inventory/query/InventoryPlatformUnifiedQueryContextFactory.php');
 $platformControllerSource = file_get_contents($root . '/后端代码/app/controller/admin/v1/product/inventory/InventoryPlatformWarehouse.php');
 $adminRouteSource = file_get_contents($root . '/后端代码/route/admin.php');
-uqInventoryAssert('platform UQ derives active warehouses server-side and accepts only a verified narrowing selection',
+uqInventoryAssert('platform UQ derives HQ or store locations server-side and accepts only a verified store narrowing selection',
     $platformContextSource !== false
-    && strpos($platformContextSource, 'selectedLocationId') !== false
+    && strpos($platformContextSource, 'selectedStoreId') !== false
+    && strpos($platformContextSource, "if (!isset(\$storeIds[\$selectedStoreId]))") !== false
+    && strpos($platformContextSource, "(int)(\$location['store_id'] ?? 0) === \$selectedStoreId") !== false
+    && strpos($platformContextSource, "'store_id' => \$subject === 'STORE' ? \$selectedStoreId : 0") !== false
     && strpos($platformContextSource, "'scope_dimensions' => ['location_id' => array_keys(\$locationIds)]") !== false
     && $platformControllerSource !== false
-    && strpos($platformControllerSource, 'selectedLocationId') !== false
+    && strpos($platformControllerSource, 'selectedStoreId') !== false
+    && strpos($platformControllerSource, "unset(\$payload['storeId'], \$payload['subject'])") !== false
+    && strpos($platformControllerSource, "['HQ', 'STORE']") !== false
+    && strpos($platformControllerSource, 'warehouseId') === false
     && strpos($platformControllerSource, 'unifiedExportTask') !== false
     && $adminRouteSource !== false
     && strpos($adminRouteSource, 'v3/unified-query/export-task/:taskNo') !== false);

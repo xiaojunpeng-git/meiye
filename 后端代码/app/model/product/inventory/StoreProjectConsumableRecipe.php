@@ -53,4 +53,10 @@ class StoreProjectConsumableRecipe extends BaseModel
             $query->where('project_product_id', (int)$value);
         }
     }
+
+    public function searchProjectProductIdsAttr($query, $value)
+    {
+        $ids = array_values(array_unique(array_filter(array_map('intval', (array)$value))));
+        $query->whereIn('project_product_id', $ids ?: [0]);
+    }
 }

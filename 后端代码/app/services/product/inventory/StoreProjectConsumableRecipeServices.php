@@ -57,8 +57,16 @@ class StoreProjectConsumableRecipeServices extends BaseServices
     public function getList(array $where, int $storeScope = 0): array
     {
         [$type, $relationId] = $this->owner($storeScope);
+        $keyword = trim((string)($where['keyword'] ?? ''));
+        unset($where['keyword']);
         $where['type'] = $type;
         $where['relation_id'] = $relationId;
+        if ($keyword !== '') {
+            $projectIds = Db::name('store_product')
+                ->where('store_name', 'like', '%' . addcslashes($keyword, '%_\\') . '%')
+                ->column('id');
+            $where['project_product_ids'] = $projectIds ?: [0];
+        }
         [$page, $limit] = $this->getPageValue();
         $list = $this->dao->getList($where, '*', $page, $limit);
         $count = $this->dao->count($where);
@@ -125,10 +133,9 @@ class StoreProjectConsumableRecipeServices extends BaseServices
                 if ((int)$info['type'] !== $type || (int)$info['relation_id'] !== $relationId) {
                     throw new ValidateException('无权操作该配方');
                 }
-                // 编辑允许改绑项目SKU；改绑后需保证唯一
-                $dup = $this->dao->findByOwnerProject($type, $relationId, $projectProductId, $projectUnique);
-                if ($dup && (int)$dup['id'] !== $id) {
-                    throw new ValidateException('该项目规格已存在配方，请勿重复创建');
+                if ((int)$info['project_product_id'] !== $projectProductId
+                    || (string)$info['project_unique'] !== $projectUnique) {
+                    throw new ValidateException('编辑配方时不能更换项目规格');
                 }
                 $this->dao->update($id, [
                     'project_product_id' => $projectProductId,
@@ -252,8 +259,8 @@ class StoreProjectConsumableRecipeServices extends BaseServices
             if ($qty === '' || !is_numeric($qty) || bccomp($qty, '0', 4) <= 0) {
                 throw new ValidateException('耗材单次用量必须大于0');
             }
-            if (!preg_match('/^\d+(\.\d{1,4})?$/', $qty)) {
-                throw new ValidateException('耗材单次用量最多4位小数');
+            if (!preg_match('/^\d+(\.\d{1,2})?$/', $qty)) {
+                throw new ValidateException('耗材单次用量最多保留两位小数');
             }
 
             $product = Db::name('store_product')->where('id', $pid)->find();

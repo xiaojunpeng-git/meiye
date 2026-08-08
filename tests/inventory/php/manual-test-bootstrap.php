@@ -87,9 +87,14 @@ $files = [
     $backend . '/database/upgrades/2026-07-30-库存V3院装事实/02-正式升级.sql',
     $backend . '/database/upgrades/2026-07-28-统一查询自定义字段/02-正式升级.sql',
     $backend . '/database/upgrades/2026-07-30-库存V3统一查询命令/02-正式升级.sql',
+    $backend . '/database/upgrades/2026-08-02-库存V3跨主体调拨在途收货/02-正式升级.sql',
+    $backend . '/database/upgrades/2026-08-03-库存V3业务单号统一/02-正式升级.sql',
 ];
-foreach ($files as $file) executeInventorySqlFile($file);
-if (!Db::query("SHOW TABLES LIKE 'eb_system_store'") || !Db::query("SHOW TABLES LIKE 'eb_inventory_batch_movement_fact'") || !Db::query("SHOW TABLES LIKE 'eb_inventory_stock_count_document'")) {
+if (getenv('INVENTORY_SKIP_SCHEMA_BOOTSTRAP') !== '1') {
+    foreach ($files as $file) executeInventorySqlFile($file);
+}
+if (getenv('INVENTORY_SKIP_SCHEMA_BOOTSTRAP') !== '1'
+    && (!Db::query("SHOW TABLES LIKE 'eb_system_store'") || !Db::query("SHOW TABLES LIKE 'eb_inventory_batch_movement_fact'") || !Db::query("SHOW TABLES LIKE 'eb_inventory_stock_count_document'"))) {
     throw new RuntimeException('inventory_test_bootstrap_schema_missing');
 }
 echo "INVENTORY_MANUAL_TEST_BOOTSTRAP_OK database=" . (string)Config::get('database.connections.mysql.database') . "\n";
