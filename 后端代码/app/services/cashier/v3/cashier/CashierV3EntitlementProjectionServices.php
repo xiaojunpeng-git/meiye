@@ -285,7 +285,18 @@ final class CashierV3EntitlementProjectionServices
         // Gateway already owns the exact entitlement locks. Keep this as a
         // post-lock authority re-read so no lower-order row is locked after the
         // cashier workspace.
-        $snapshot = $this->loadRows($memberId, $operatorScope, $operatorScope->tenantId(), false, $holderIds, $detailIds);
+        // 添加到购物车只确认权益来源与项目本身；预约占用和欠款影响
+        // 在最终核销/结账阶段再判断，不应拖慢普通加购。
+        $snapshot = $this->loadRows(
+            $memberId,
+            $operatorScope,
+            $operatorScope->tenantId(),
+            false,
+            $holderIds,
+            $detailIds,
+            false,
+            false
+        );
 
         $holderVersions = [];
         foreach ($holderIds as $holderId) {
@@ -491,7 +502,8 @@ final class CashierV3EntitlementProjectionServices
         bool $lock,
         array $holderFilter = null,
         array $detailFilter = null,
-        bool $includeDisabledCards = false
+        bool $includeDisabledCards = false,
+        bool $includeOperationalState = true
     ): array {
         if ($lock) {
             CashierV3TransactionGuard::assertInTransaction('loadEntitlementRowsLocked');
@@ -593,7 +605,7 @@ final class CashierV3EntitlementProjectionServices
         $cartIds = array_values(array_unique(array_map('intval', array_column($carts, 'id'))));
 
         $reservations = [];
-        if ($cartIds) {
+        if ($includeOperationalState && $cartIds) {
             $reservationQuery = Db::name('store_reservation_order')
                 ->field('id,cart_info_id,status,is_del,is_system_del')
                 ->whereIn('cart_info_id', $cartIds)
@@ -606,7 +618,7 @@ final class CashierV3EntitlementProjectionServices
         }
 
         $debts = [];
-        if ($validOrderIds) {
+        if ($includeOperationalState && $validOrderIds) {
             $debtQuery = Db::name('store_debt')
                 ->field('id,order_id,status,total_debt,repaid_debt')
                 ->whereIn('order_id', $validOrderIds);

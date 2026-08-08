@@ -1194,14 +1194,22 @@ async function selectCatalogItem(item) {
     pendingCardPurchase.value = clonePlain(item)
     return
   }
-  await appendCatalogItemToDraft(item.id)
+  await appendCatalogItemToDraft(item)
 }
 
 let catalogItemAppendQueue = Promise.resolve()
-async function appendCatalogItemToDraft(itemId) {
+async function appendCatalogItemToDraft(item) {
+  const itemId = Number(item?.id || 0)
+  const catalogKind = String(item?.kind || '').trim()
   const queued = catalogItemAppendQueue.then(async () => {
     const requestScopeKey = currentCashierDraftScopeKey.value
-    const result = await requestAction('choose-catalog-item', { itemId })
+    // 每次用户点击都由 action bridge 生成新的命令标识，因此同一商品
+    // 连续点击会追加多条独立购物车行；只有同一次请求的网络重试才复用
+    // 原标识，交由后端幂等保护避免重复写入。
+    // 普通项目／产品没有卡内组成资源，提示仅用于省去一次无意义的
+    // 服务端目录展开；最终商品、上架和价格仍由事务内权威行锁定校验。
+    // 缺失提示时后端按旧客户端兼容路径处理，不能把它当授权依据。
+    const result = await requestAction('choose-catalog-item', { itemId, catalogKind })
 
     // Choosing a catalog item is a write command but intentionally returns a
     // scoped draft instead of replacing the entire workbench root projection.
@@ -1264,6 +1272,33 @@ async function applyCommittedCashierDraft(draft, requestScopeKey) {
   return ensureCashierDraftRendered(draft)
 }
 
+function preserveEntitlementSelectorAfterDraftCommit(result = {}) {
+  const versions = Array.isArray(result?.versions)
+    ? result.versions
+    : (Array.isArray(result?.result?.versions) ? result.result.versions : [])
+  const workspaceId = String(state.workspace?.id || '')
+  const workspaceVersion = versions.find((row) => (
+    row?.kind === 'cashier_workspace'
+    && String(row?.id || '') === workspaceId
+    && Number.isInteger(Number(row?.version))
+    && Number(row.version) > 0
+  ))
+  if (!workspaceVersion || !entitlementSelectorSnapshot.value) return false
+  const snapshot = clonePlain(entitlementSelectorSnapshot.value.snapshot)
+  const contexts = Array.isArray(snapshot.commandContexts) ? snapshot.commandContexts : []
+  const context = contexts.find((row) => (
+    row?.kind === 'cashier_workspace' && String(row?.id || '') === workspaceId
+  ))
+  if (!context) return false
+  context.expectedVersion = Number(workspaceVersion.version)
+  entitlementSelectorSnapshot.value = Object.freeze({
+    scopeKey: entitlementSelectorSnapshot.value.scopeKey,
+    snapshot: Object.freeze(snapshot)
+  })
+  state.workspace = { ...state.workspace, revision: Number(workspaceVersion.version) }
+  return true
+}
+
 function isResponseBoundCommittedCashierDraft(draft) {
   // The V3 gateway binds the command receipt to its request. The caller keeps
   // this snapshot under that request's stable scope, so a later switch of
@@ -1324,7 +1359,10 @@ async function confirmPendingCardPurchase() {
   if (!item?.id || isConfirmingCardPurchase.value) return
   isConfirmingCardPurchase.value = true
   try {
-    const result = await appendCatalogItemToDraft(item.id)
+    // 卡项预览确认也要传完整目录项，不能只传 id；新增的项目／产品
+    // 加购优化会读取 kind 作为后端轻量路径提示，传 id 会把它丢失并
+    // 被服务端当成“无效商品”拒绝。
+    const result = await appendCatalogItemToDraft(item)
     if (['success', 'succeeded'].includes(resultStatus(result))) pendingCardPurchase.value = null
     return result
   } finally {
@@ -1830,9 +1868,14 @@ async function addEntitlementLines(payload = {}) {
           entitlementAddedTimer = null
         }, 700)
       }
-      // 每次写命令都会推进 workspace 版本。保持左侧权益区打开，并立即
-      // 重取新的规范 contexts，避免后续点击沿用旧版本。
-      await openEntitlementSelector({ preserveSnapshot: true })
+      // 添加权益不会消耗权益次数或余额，只推进收银工作台版本。
+      // 直接用命令回执更新该版本，避免每次添加后再全量读取会员权益。
+      if (!preserveEntitlementSelectorAfterDraftCommit(result)) {
+        reportEntitlementContractError({
+          code: 'ENTITLEMENT_SELECTOR_CONTEXT_INCOMPLETE',
+          message: '权益选择状态已变化，请关闭后重新打开。'
+        })
+      }
     }
     return result
   } finally {

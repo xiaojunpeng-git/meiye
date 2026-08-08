@@ -44,6 +44,7 @@ import {
   mergeSalesOrderCenterProjection,
   salesOrderProjectionFromResult
 } from '@/services/cashierV3OrderProjectionContract'
+import { responseDataBlock } from '@/services/cashierV3EntitlementDraftContract'
 
 const route = useRoute()
 const router = useRouter()
@@ -747,12 +748,10 @@ async function selectMemberFromSelector(record) {
     selectorEntry: memberSelectorContext.value
   })
   if (isSucceededResult(result)) {
-    // 会员选择会改变工作台草稿。若写命令回执未能被当前页面接收完整根投影，
-    // 只读重取同一工作台，避免界面仍把已选会员显示为游客。
-    if (memberSelectorContext.value === 'cashier'
-      && String(memberDetailId(cashierMember.value)) !== String(memberDetailId(record))) {
-      await requestCashierV3Action('open-cashier-workbench', { silent: true })
-    }
+    // 选择会员命令已经在同一事务内返回最新 cashierDraft。当前收银场景默认
+    // 一位顾客只在一台收银电脑上开单，直接回填这份草稿即可，不再为同一次
+    // 选择紧接着重新读取完整工作台。
+    applyCashierMemberDraft(result, record)
     await nextTick()
     const selectedDetail = {
       context: memberSelectorContext.value,
@@ -773,6 +772,37 @@ async function selectMemberFromSelector(record) {
     await completeMemberSelection(selectedDetail)
   }
   return result
+}
+
+function applyCashierMemberDraft(result, fallbackMember = null) {
+  const data = responseDataBlock(result)
+  const draft = data?.cashierDraft
+  if (!draft || typeof draft !== 'object' || !Array.isArray(draft.lines)
+    || !draft.workspaceId || String(draft.workspaceId) !== String(state.workspace?.id || '')) {
+    return false
+  }
+  const customerMode = String(data.customerMode || draft.customerMode || 'member')
+  const selectedMember = data.member && typeof data.member === 'object'
+    ? data.member
+    : fallbackMember
+  state.cashier = {
+    ...(state.cashier || {}),
+    customerMode,
+    member: customerMode === 'member' ? selectedMember : null,
+    cart: {
+      ...(state.cashier?.cart || {}),
+      lines: draft.lines,
+      summary: draft.summary || state.cashier?.cart?.summary || {},
+    },
+    checkoutComposition: draft.checkoutComposition || null,
+  }
+  const workspaceVersion = (resultEnvelope(result)?.versions || [])
+    .find((row) => String(row?.kind || '') === 'cashier_workspace'
+      && String(row?.id || '') === String(draft.workspaceId))?.version
+  if (Number.isInteger(Number(workspaceVersion)) && Number(workspaceVersion) > Number(state.workspace?.revision || 0)) {
+    state.workspace = { ...(state.workspace || {}), revision: Number(workspaceVersion) }
+  }
+  return true
 }
 
 async function completeMemberSelection(detail) {
@@ -806,6 +836,7 @@ async function selectGuestOrderFromSelector() {
     selectorContext: 'cashier'
   })
   if (!isSucceededResult(result)) return result
+  applyCashierMemberDraft(result, null)
 
   // 游客不能进入核销或项目替换；成功切换后统一回到结账收款。
   pendingCashierWorkflowTarget.value = null
