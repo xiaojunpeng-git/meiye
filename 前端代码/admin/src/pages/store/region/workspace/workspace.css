@@ -146,6 +146,23 @@
   max-width: 40%;
 }
 
+.org-prototype .jp-toolbar .jp-status-filter {
+  flex: none;
+  height: 34px;
+  min-width: 88px;
+  padding: 0 28px 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  color: var(--text);
+  background: #fff;
+  font: inherit;
+}
+
+.org-prototype .jp-toolbar .jp-status-filter:focus {
+  outline: 2px solid rgba(91, 91, 214, .18);
+  border-color: var(--primary);
+}
+
 .org-prototype .jp-toolbar .compact-button {
   flex: none;
 }
@@ -1038,4 +1055,3 @@
     .org-prototype .permission-row > .permission-tags { display: none; }
 
 }
-

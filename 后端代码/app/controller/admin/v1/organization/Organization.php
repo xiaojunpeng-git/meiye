@@ -1104,12 +1104,15 @@ class Organization extends AuthController
             [['status', 'd'], 1],
             [['remark', 's'], ''],
             [['allow_store_select', 'd'], 0],
+            [['is_store_manager', 'd'], 0],
+            [['status_only', 'd'], 0],
             [['use_platform', 'd'], 0],
             [['use_store', 'd'], 0],
             [['use_cashier', 'd'], 0],
             [['use_mobile', 'd'], 0],
             [['channel_rules', 'a'], []],
             [['platform_rules', 'a'], []],
+            [['store_v3_rules', 'a'], []],
             [['store_rules', 'a'], []],
             [['cashier_rules', 'a'], []],
             [['mobile_rules', 'a'], []],
@@ -1117,6 +1120,15 @@ class Organization extends AuthController
         ]);
         try {
             $svc = app()->make(\app\services\organization\JobPositionPolicyServices::class);
+            if ((int)($data['status_only'] ?? 0) === 1) {
+                $ret = $svc->setPositionStatus(
+                    (int)($data['id'] ?? 0),
+                    (int)($data['status'] ?? 1),
+                    $this->writeAdminInfo(),
+                    $this->buildWriteRequestCtx((string)($data['request_token'] ?? ''))
+                );
+                return $this->success($ret['msg'], $ret['data']);
+            }
             $ret = $svc->savePosition(
                 $data,
                 $this->writeAdminInfo(),

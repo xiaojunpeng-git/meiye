@@ -15,6 +15,7 @@ import Setting from '@/setting';
 import util from '@/libs/util';
 import { isAgentPath } from '@/utils/pathUtils';
 import { normalizeOrganizationWorkspaceMenu } from '@/libs/organizationWorkspaceMenu';
+import { normalizeProductBusinessConfigMenu } from '@/libs/productBusinessConfigMenu';
 
 // "出入库记录" has been consolidated into inventory query/statistics.  Filter
 // the legacy entry here as well as in the menu migration so a browser with an
@@ -101,7 +102,10 @@ function getMenusName() {
     menuData = menuList !== undefined ? JSON.parse(menuList) : [];
   } catch (e) {}
   const prefix = isAgentPath() ? Setting.routePreAgent : Setting.roterPre;
-  return withOperatingScreenMenu(normalizeOrganizationWorkspaceMenu(withoutLegacyInventoryMovement(menuData), prefix));
+  return withOperatingScreenMenu(normalizeProductBusinessConfigMenu(
+    normalizeOrganizationWorkspaceMenu(withoutLegacyInventoryMovement(menuData), prefix),
+    prefix
+  ));
 }
 
 export default {
@@ -115,7 +119,10 @@ export default {
     getmenusNav(state, menuList) {
       const storage = window.localStorage;
       const prefix = isAgentPath() ? Setting.routePreAgent : Setting.roterPre;
-      menuList = withOperatingScreenMenu(normalizeOrganizationWorkspaceMenu(withoutLegacyInventoryMovement(menuList), prefix));
+      menuList = withOperatingScreenMenu(normalizeProductBusinessConfigMenu(
+        normalizeOrganizationWorkspaceMenu(withoutLegacyInventoryMovement(menuList), prefix),
+        prefix
+      ));
       state.menusName = menuList;
       if (isAgentPath()) {
         storage.setItem('agent_menuList', JSON.stringify(menuList));
@@ -128,7 +135,10 @@ export default {
     getAgentMenusNav(state, menuList) {
       const storage = window.localStorage;
       const prefix = isAgentPath() ? Setting.routePreAgent : Setting.roterPre;
-      menuList = withOperatingScreenMenu(normalizeOrganizationWorkspaceMenu(withoutLegacyInventoryMovement(menuList), prefix));
+      menuList = withOperatingScreenMenu(normalizeProductBusinessConfigMenu(
+        normalizeOrganizationWorkspaceMenu(withoutLegacyInventoryMovement(menuList), prefix),
+        prefix
+      ));
       //   state.menusName = menuList;
       storage.setItem('agent_menuList', JSON.stringify(menuList));
       storage.setItem('agent_roterPre', 'agent');

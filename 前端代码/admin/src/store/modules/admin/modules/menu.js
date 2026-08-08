@@ -15,6 +15,7 @@ import { includeArray } from '@/libs/system';
 import util from '@/libs/util';
 import Setting from '@/setting';
 import { normalizeOrganizationWorkspaceMenu } from '@/libs/organizationWorkspaceMenu';
+import { normalizeProductBusinessConfigMenu } from '@/libs/productBusinessConfigMenu';
 
 // 根据 menu 配置的权限，过滤菜单
 function filterMenu(menuList, access, lastList) {
@@ -65,7 +66,10 @@ export default {
       const filtered = access && access.length
         ? filterMenu(state.sider, access, [])
         : filterMenu(state.sider, [], []);
-      return normalizeOrganizationWorkspaceMenu(filtered, Setting.roterPre);
+      return normalizeProductBusinessConfigMenu(
+        normalizeOrganizationWorkspaceMenu(filtered, Setting.roterPre),
+        Setting.roterPre
+      );
     },
     // 处理顶部路由递归
 

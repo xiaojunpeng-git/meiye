@@ -677,6 +677,9 @@
                   <div class="permission-note"><strong>{{ row.store_name }}</strong><span>{{ row.status_text }}</span></div>
                   <div class="permission-note"><strong>起止时间</strong><span>{{ row.period_text }}</span></div>
                   <div class="permission-note"><strong>调离/离职原因</strong><span>{{ row.reason || '—' }}</span></div>
+                  <div v-if="row.can_resume" class="auth-actions" style="margin-top:10px">
+                    <button class="button secondary compact-button" type="button" :disabled="writeSubmitting" @click="openTenureConfirm(row.staff, 'resume')">复职</button>
+                  </div>
                 </div>
                 <div v-if="!personTenureHistoryRows.length" class="empty-inline">暂无任职历史</div>
               </div>
@@ -1002,6 +1005,10 @@
               <svg-icon name="search" />
               <input v-model.trim="jobPositionModal.keyword" type="search" placeholder="搜索岗位名称" @keyup.enter="loadJobPositionList" />
             </div>
+            <select v-model="jobPositionModal.status" class="jp-status-filter" aria-label="岗位启用状态" @change="loadJobPositionList">
+              <option :value="1">启用</option>
+              <option value="">全部</option>
+            </select>
             <button class="button primary compact-button" type="button" @click="loadJobPositionList">查询 <span class="enter-key">↵</span></button>
             <button class="button primary compact-button" type="button" :disabled="!canWrite || writeSubmitting" @click="openCreateJobPosition">新建岗位</button>
           </div>
@@ -1503,6 +1510,7 @@ export default {
         open: false,
         formOpen: false,
         keyword: '',
+        status: 1,
         list: [],
         selectedId: 0,
         help: {},
@@ -1789,8 +1797,10 @@ export default {
     personTenureHistoryRows() {
       const assignments = (this.personAuth && this.personAuth.store_assignments) || [];
       const storeNameMap = {};
+      const assignmentByStaffId = {};
       assignments.forEach((a) => {
         storeNameMap[Number(a.store_id)] = a.store_name || (`门店#${a.store_id}`);
+        assignmentByStaffId[Number(a.id || a.staff_id || 0)] = a;
       });
       const rows = [];
       const tenure = (this.personAuth && this.personAuth.tenure) || [];
@@ -1799,12 +1809,17 @@ export default {
         const start = Number(p.start_time || 0);
         const end = Number(p.end_time || 0);
         const statusOn = Number(p.status) === 1 && !end;
+        const staffId = Number(p.staff_id || 0);
+        const assignment = assignmentByStaffId[staffId] || null;
         rows.push({
           key: `t-${p.id || idx}`,
+          staff_id: staffId,
+          staff: assignment,
           store_name: storeNameMap[storeId] || (`门店#${storeId}`),
           period_text: `${this.formatUnixTime(start)} ~ ${end ? this.formatUnixTime(end) : '至今'}`,
           reason: p.reason || this.tenureActionLabel(p.action),
           status_text: statusOn ? '当前有效' : (this.tenureActionLabel(p.action) || '已结束'),
+          can_resume: !statusOn && !!assignment && Number(assignment.status) !== 1,
         });
       });
       if (!rows.length) {
@@ -3809,7 +3824,7 @@ export default {
         .finally(() => { this.writeSubmitting = false; });
     },
     loadJobPositionList() {
-      getJobPositions({ keyword: this.jobPositionModal.keyword || '', page: 1, limit: 50 })
+      getJobPositions({ keyword: this.jobPositionModal.keyword || '', status: this.jobPositionModal.status, page: 1, limit: 50 })
         .then((res) => {
           this.jobPositionModal.list = (res.data && res.data.list) || [];
         })
@@ -3936,19 +3951,42 @@ export default {
       this.setJobPositionToggleBusy(positionId, true);
       this.writeSubmitting = true;
       try {
+        if (Object.prototype.hasOwnProperty.call(patch, 'status')
+          && !Object.prototype.hasOwnProperty.call(patch, 'allow_store_select')) {
+          this.resetWriteToken();
+          const statusPayload = {
+            id: positionId,
+            status: Number(patch.status) === 1 ? 1 : 0,
+            status_only: 1,
+          };
+          const statusHeaders = this.writeHeadersFor('job_position_status', {
+            id: positionId,
+            ...statusPayload,
+          });
+          statusPayload.request_token = statusHeaders['X-Request-Token'];
+          const statusRes = await saveJobPosition(statusPayload, statusHeaders);
+          this.finishWriteSuccess();
+          this.showToast((statusRes && statusRes.msg) || '保存成功');
+          this.loadJobPositionList();
+          this.loadJobPositionOptions();
+          return;
+        }
         const detailRes = await getJobPositionDetail(positionId);
         const data = (detailRes && detailRes.data) || {};
-        const p = data.position || row;
+        // 详情接口在兼容旧实例时可能缺少主键；列表行主键是当前操作目标，必须优先保留。
+        const p = Object.assign({}, row, data.position || {}, { id: positionId });
         const payload = this.buildJobPositionSavePayload({
-          id: Number(p.id),
+          id: positionId || Number(p.id) || Number(row.id) || 0,
           name: p.name || row.name || '',
-          status: Number(p.status) === 1 ? 1 : 0,
-          remark: p.remark || '',
-          allow_store_select: Number(p.allow_store_select) === 1 ? 1 : 0,
-          is_store_manager: Number(p.is_store_manager) === 1 ? 1 : 0,
-          use_platform: Number(p.use_platform) === 1 ? 1 : 0,
-          use_store: Number(p.use_store) === 1 ? 1 : 0,
-          use_mobile: Number(p.use_mobile) === 1 ? 1 : 0,
+          status: p.status == null ? Number(row.status) : Number(p.status),
+          remark: p.remark == null ? (row.remark || '') : p.remark,
+          allow_store_select: p.allow_store_select == null
+            ? Number(row.allow_store_select) : Number(p.allow_store_select),
+          is_store_manager: p.is_store_manager == null
+            ? Number(row.is_store_manager) : Number(p.is_store_manager),
+          use_platform: p.use_platform == null ? Number(row.use_platform) : Number(p.use_platform),
+          use_store: p.use_store == null ? Number(row.use_store) : Number(p.use_store),
+          use_mobile: p.use_mobile == null ? Number(row.use_mobile) : Number(p.use_mobile),
           channel_rules: data.channel_rules || row.channel_rules || {},
         }, patch);
         if (!payload.name) {

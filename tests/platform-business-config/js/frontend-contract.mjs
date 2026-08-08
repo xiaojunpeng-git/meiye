@@ -14,12 +14,20 @@ const productRouter = read('router/modules/product.js');
 const api = read('api/productBusinessConfig.js');
 const sourcePage = read('pages/product/businessConfig/source.vue');
 const accountingPage = read('pages/product/businessConfig/accounting.vue');
+const menuCache = read('store/modules/admin/modules/menus.js');
+const menuState = read('store/modules/admin/modules/menu.js');
+const menuNormalization = read('libs/productBusinessConfigMenu.js');
 
 assert.match(settingRouter, /path: 'shop\/business-source'/, '商品设置路由应注册来源设置');
 assert.match(settingRouter, /auth: \['setting-shop-business-source'\]/, '来源设置路由必须匹配页面菜单权限');
 assert.match(settingRouter, /path: 'shop\/accounting'/, '商品设置路由应注册记账设置');
 assert.match(settingRouter, /auth: \['setting-shop-accounting'\]/, '记账设置路由必须匹配页面菜单权限');
 assert.doesNotMatch(productRouter, /business_source_setting|accounting_setting/, '来源和记账设置不得错误挂在商品资料路由下');
+assert.match(menuNormalization, /来源设置: 'setting\/shop\/business-source'/, '来源设置旧菜单必须归一到正式页面路由');
+assert.match(menuNormalization, /记账设置: 'setting\/shop\/accounting'/, '记账设置旧菜单必须归一到正式页面路由');
+assert.match(menuNormalization, /normalized\.path = `\$\{prefix\}\/\$\{route\}`/, '菜单路径必须使用当前终端路由前缀');
+assert.match(menuCache, /normalizeProductBusinessConfigMenu/, '菜单缓存和刷新数据都必须执行来源、记账入口归一化');
+assert.match(menuState, /normalizeProductBusinessConfigMenu/, '动态侧栏也必须执行来源、记账入口归一化');
 
 assert.match(api, /url: 'product\/business-config\/sources'[\s\S]*method: 'get'/, '来源设置应读取正式列表接口');
 assert.match(api, /url: 'product\/business-config\/sources'[\s\S]*method: 'post'/, '新增来源应使用正式写接口');

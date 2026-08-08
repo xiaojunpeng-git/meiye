@@ -194,9 +194,13 @@ export default {
     },
     openCreate(parentId) {
       this.editingId = 0;
-      this.form = this.emptyForm(parentId);
+      const selectedParentId = Number(parentId) || 0;
+      this.form = this.emptyForm();
       this.modalVisible = true;
-      this.$nextTick(() => this.$refs.sourceForm && this.$refs.sourceForm.resetFields());
+      this.$nextTick(() => {
+        if (this.$refs.sourceForm) this.$refs.sourceForm.resetFields();
+        this.form.parentId = selectedParentId;
+      });
     },
     openEdit(row) {
       this.editingId = row.id;

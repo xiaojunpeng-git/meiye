@@ -120,6 +120,53 @@ class JobPositionPolicyServices extends BaseServices
         return compact('count', 'list');
     }
 
+    /**
+     * 仅切换岗位启用状态，不重写岗位名称与权限规则。
+     * 岗位名称历史上可能存在重复，状态开关不能走完整保存的重名校验。
+     *
+     * @return array{msg:string,data:array,replay:bool}
+     */
+    public function setPositionStatus(
+        int $positionId,
+        int $status,
+        array $adminInfo,
+        array $requestCtx
+    ): array {
+        $status = $status === 1 ? 1 : 0;
+        $payload = ['position_id' => $positionId, 'status' => $status];
+        /** @var OrganizationStrictIdempotencyServices $idem */
+        $idem = app()->make(OrganizationStrictIdempotencyServices::class);
+        return $idem->run(
+            'job_position_status',
+            'job_position:' . $positionId . ':status',
+            $payload,
+            $adminInfo,
+            $requestCtx,
+            function (array $auditMeta) use ($positionId, $status) {
+                if ($positionId <= 0) {
+                    throw new AdminException('请选择岗位');
+                }
+                $row = Db::name('position')->where('id', $positionId)->lock(true)->find();
+                if (!$row) {
+                    throw new AdminException('岗位不存在');
+                }
+                $version = (int)($row['version'] ?? 1) + 1;
+                Db::name('position')->where('id', $positionId)->update([
+                    'status' => $status,
+                    'version' => $version,
+                    'update_time' => time(),
+                ]);
+                /** @var StaffJobPositionServices $jobSvc */
+                $jobSvc = app()->make(StaffJobPositionServices::class);
+                $jobSvc->reprojectEmployeesByPosition($positionId);
+                return [
+                    'msg' => $status === 1 ? '岗位已启用' : '岗位已停用',
+                    'data' => ['id' => $positionId, 'status' => $status, 'version' => $version],
+                ];
+            }
+        );
+    }
+
     public function getPositionDetail(int $positionId): array
     {
         if ($positionId <= 0) {
