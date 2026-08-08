@@ -121,7 +121,8 @@ export default {
     /**
        * 选择商品列表使用场景1：秒杀、2:砍价、3:拼团、4:积分、5:套餐、7:新人礼、8:抽奖、
 	   * 90:卡项关联商品、91：添加门店同步商品、92优惠活动参与商品、93优惠活动赠送商品、
-	   * 94：库存管理选品（仅产品）、95：院装耗材（仅产品）、96：院装项目（仅预约）
+	   * 94：库存管理选品（仅产品）、95：院装耗材（仅产品）、96：院装项目（仅预约）、
+	   * 97：平台卡项选项目（仅平台项目主数据）
        */
     chooseType: {
       type: Number,
@@ -211,9 +212,9 @@ export default {
     labelPosition() {
       return this.isMobile ? 'top' : 'right';
     },
-    // 库存选品/院装耗材只锁产品；院装项目只锁预约
+    // 库存选品/院装耗材只锁产品；院装项目和卡项选项目只锁项目。
     lockProductType() {
-      return [94, 95, 96].includes(Number(this.chooseType));
+      return [94, 95, 96, 97].includes(Number(this.chooseType));
     },
   },
   created() {
@@ -229,7 +230,7 @@ export default {
       const ct = Number(this.chooseType);
       if (ct === 94 || ct === 95) {
         this.formValidate.product_type = 0;
-      } else if (ct === 96) {
+      } else if (ct === 96 || ct === 97) {
         this.formValidate.product_type = 6;
       }
       this.formValidate.choose_type = ct || this.formValidate.choose_type;
@@ -270,8 +271,10 @@ export default {
       if (this.isIntegral) {
         this.formValidate.is_integral = 1;
       }
-      if (this.isCard) {
+      if (this.isCard && Number(this.chooseType) !== 97) {
         this.formValidate.is_card = 1;
+      } else if (Number(this.chooseType) === 97) {
+        this.formValidate.is_card = 0;
       }
       changeListApi(this.formValidate)
         .then(async(res) => {
@@ -338,7 +341,7 @@ export default {
         if (!item.hasOwnProperty('product_id')) return;
         // 库存选品/院装耗材：提交前再挡非产品
         if ((ct === 94 || ct === 95) && item.product_type != null && Number(item.product_type) !== 0) return;
-        if (ct === 96 && item.product_type != null && Number(item.product_type) !== 6) return;
+        if ((ct === 96 || ct === 97) && item.product_type != null && Number(item.product_type) !== 6) return;
         goodsattr.push(item);
       });
       if (goodsattr.length > 0) {
