@@ -1,0 +1,20 @@
+{
+  "name": "@mohe/unified-query-vue3",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "sideEffects": [
+    "./src/styles/*.css"
+  ],
+  "exports": {
+    ".": "./src/index.js",
+    "./contract": "./src/contracts/unifiedQueryContract.js",
+    "./composable": "./src/composables/useUnifiedQueryPage.js",
+    "./styles.css": "./src/styles/unified-query.css",
+    "./components/*": "./src/components/*.vue"
+  },
+  "peerDependencies": {
+    "@lucide/vue": "^1.27.0",
+    "vue": "^3.4.38"
+  }
+}
