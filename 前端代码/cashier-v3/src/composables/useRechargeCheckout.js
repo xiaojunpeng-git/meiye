@@ -37,7 +37,35 @@ export function useRechargeCheckout({ member, currentMemberId, stateContextId, o
 
   function setRechargeCheckout(response) {
     const projection = rechargeCheckoutProjection(response)
-    if (projection) rechargeCheckout.value = projection
+    if (projection) {
+      rechargeCheckout.value = projection
+      // Recharge draft mutations advance recharge_checkout_request independently
+      // of the root workbench. Keep the bridge's public version in sync so the
+      // next serialized edit is sent with the version returned by the server.
+      mergeCashierV3PublicVersions([{
+        kind: 'recharge_checkout_request',
+        id: projection.rechargeCheckoutRequestId,
+        version: Number(projection.checkoutRequestVersion)
+      }], unref(stateContextId), { requestStateContextId: unref(stateContextId) })
+    } else {
+      // A command can reach the server but lose its HTTP response (timeout,
+      // worker restart, or a proxy disconnect). Keep the same request visible
+      // as an outcome instead of leaving the overlay's local submit lock on an
+      // editing snapshot forever. The result-query action can then resolve the
+      // original request without creating a second recharge.
+      const status = String(resultStatus(response) || '').toLowerCase()
+      if (['result_unknown', 'pending_confirmation', 'processing', 'failed'].includes(status)
+        && rechargeCheckout.value) {
+        const envelope = cashierV3ResponseEnvelope(response)
+        const result = envelope?.result && typeof envelope.result === 'object' ? envelope.result : {}
+        rechargeCheckout.value = {
+          ...rechargeCheckout.value,
+          status,
+          failureReason: String(result.message || envelope?.message || ''),
+          processingLong: status === 'processing' || status === 'pending_confirmation'
+        }
+      }
+    }
     return projection
   }
 
@@ -69,7 +97,9 @@ export function useRechargeCheckout({ member, currentMemberId, stateContextId, o
       'update-payment-line': 'update-recharge-checkout-payment-line',
       'remove-payment-line': 'remove-recharge-checkout-payment-line',
       'submit-checkout': 'submit-recharge-checkout',
-      'update-checkout-business-source': 'update-recharge-checkout-business-source'
+      'update-checkout-business-source': 'update-recharge-checkout-business-source',
+      'update-recharge-business-date': 'update-recharge-checkout-business-date',
+      'query-checkout-result': 'reload-recharge-checkout'
     }
     const targetAction = actionMap[action]
     if (!targetAction) return { result: { status: 'failed', code: 'RECHARGE_CHECKOUT_ACTION_NOT_ALLOWED', message: '该充值结账操作尚未开放。' } }
@@ -80,6 +110,18 @@ export function useRechargeCheckout({ member, currentMemberId, stateContextId, o
       rechargeCheckoutRequestVersion: checkout.checkoutRequestVersion
     })
     setRechargeCheckout(response)
+    if (typeof window !== 'undefined'
+      && ['add-payment-method', 'update-payment-line', 'remove-payment-line', 'update-checkout-business-source'].includes(action)) {
+      const envelope = cashierV3ResponseEnvelope(response)
+      window.dispatchEvent(new CustomEvent('cashier-v3:checkout-draft-mutation-result', {
+        detail: {
+          action,
+          payload: clonePlain(payload),
+          status: resultStatus(response),
+          message: envelope?.result?.message || response?.result?.message || ''
+        }
+      }))
+    }
     return response
   }
 
@@ -109,11 +151,19 @@ export function useRechargeCheckout({ member, currentMemberId, stateContextId, o
     return requestRechargeCheckoutAction(event)
   }
 
-  function enqueueRechargeCheckoutAction(event) {
+  async function enqueueRechargeCheckoutAction(event = {}) {
+    let result
+    if (String(event?.action || '') === 'query-checkout-result') {
+      result = await requestRechargeCheckoutAction(event)
+      event?.resolve?.(result)
+      return result
+    }
     rechargeCheckoutMutationTail = rechargeCheckoutMutationTail
       .catch(() => undefined)
       .then(() => requestRechargeCheckoutMutationWithSingleConflictReplay(event))
-    return rechargeCheckoutMutationTail
+    result = await rechargeCheckoutMutationTail
+    event?.resolve?.(result)
+    return result
   }
 
   return {

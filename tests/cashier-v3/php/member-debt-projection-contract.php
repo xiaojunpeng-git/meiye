@@ -18,13 +18,19 @@ $summarySource = file_get_contents($summary);
 $moduleSource = file_get_contents($module);
 $memberModuleSource = file_get_contents($memberModule);
 $frontendSource = file_get_contents($frontend);
-foreach (['cashier_v3_recharge_debt_authority', 'store_debt', 'store_order', "'充值欠款'", 'outstandingDebtAmount'] as $needle) {
+foreach (['cashier_v3_recharge_debt_authority', 'cashier_v3_debt_authority', 'cashier_v3_sales_order', 'store_debt', 'store_order', "'充值欠款'", 'outstandingDebtAmount', 'sales_order_no_snapshot'] as $needle) {
     if (strpos($readerSource, $needle) === false) {
         fwrite(STDERR, "missing reader contract: {$needle}\n");
         exit(1);
     }
 }
 if (strpos($summarySource, 'CashierV3MemberDebtProjectionServices') === false
+    || strpos($summarySource, 'amountForMember($memberId, $storeId)') === false
+    || strpos($readerSource, 'amountForMember(int $memberId, int $storeId)') === false
+    || strpos($readerSource, "->where('d.store_id', \$storeId)") === false
+    || strpos($readerSource, "return 'v3_sale';") === false
+    || strpos($readerSource, "return 'legacy_sale';") === false
+    || strpos($readerSource, "return 'recharge';") === false
     || strpos($moduleSource, "registerProjection('open-member-debt-repayment'") === false
     || strpos($moduleSource, "'kind' => 'member'") === false
     || strpos($moduleSource, 'synchronizeProjectionVersion') === false

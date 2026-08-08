@@ -45,6 +45,7 @@ class CashierV3C5MemberOrderModule implements CashierV3ActionModule
         $command['update-recharge-checkout-payment-line'] = self::FEATURE_MEMBER;
         $command['remove-recharge-checkout-payment-line'] = self::FEATURE_MEMBER;
         $command['update-recharge-checkout-business-source'] = self::FEATURE_MEMBER;
+        $command['update-recharge-checkout-business-date'] = self::FEATURE_MEMBER;
         $command['reload-recharge-checkout'] = self::FEATURE_MEMBER;
         $command['submit-recharge-checkout'] = self::FEATURE_MEMBER;
         $command['submit-recharge-debt-repayment'] = self::FEATURE_MEMBER;
@@ -93,6 +94,8 @@ class CashierV3C5MemberOrderModule implements CashierV3ActionModule
             'adjust-sales-order-personnel',
             'refund-sales-order',
             'void-sales-order',
+            'refund-recharge-order',
+            'void-recharge-order',
             'reopen-sales-order',
             'upgrade-sales-order',
             'print-sales-order-receipt',

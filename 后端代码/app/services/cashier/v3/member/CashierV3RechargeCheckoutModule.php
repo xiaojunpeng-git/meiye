@@ -26,6 +26,7 @@ final class CashierV3RechargeCheckoutModule
     private const UPDATE = 'update-recharge-checkout-payment-line';
     private const REMOVE = 'remove-recharge-checkout-payment-line';
     private const SOURCE = 'update-recharge-checkout-business-source';
+    private const DATE = 'update-recharge-checkout-business-date';
     private const RELOAD = 'reload-recharge-checkout';
     private const SUBMIT = 'submit-recharge-checkout';
     private const REQUEST_TABLE = 'cashier_v3_recharge_checkout_request';
@@ -59,7 +60,10 @@ final class CashierV3RechargeCheckoutModule
         };
         $install(self::PREPARE, ['cashier_workspace','member','member_balance'], ['cashier_workspace'], static function (array $scope) use ($module): array { return $module->prepareInTx($scope); });
         foreach ([self::ADD,self::UPDATE,self::REMOVE] as $action) $install($action, ['cashier_workspace','member','member_balance','recharge_checkout_request'], ['recharge_checkout_request'], static function (array $scope) use ($module, $action): array { return $module->editInTx($action, $scope); });
-        $install(self::SOURCE, ['cashier_workspace','member','member_balance','recharge_checkout_request'], ['recharge_checkout_request'], static function (array $scope) use ($module): array { return $module->updateBusinessSourceInTx($scope); });
+        // 来源选择写独立 selection_version；充值请求只用于同版本锁读，
+        // 不应在来源变更时推进 recharge_checkout_request 版本。
+        $install(self::SOURCE, ['cashier_workspace','member','member_balance','recharge_checkout_request'], ['cashier_workspace'], static function (array $scope) use ($module): array { return $module->updateBusinessSourceInTx($scope); });
+        $install(self::DATE, ['cashier_workspace','member','member_balance','recharge_checkout_request'], ['recharge_checkout_request'], static function (array $scope) use ($module): array { return $module->updateBusinessDateInTx($scope); });
         $install(self::RELOAD, ['cashier_workspace','member','member_balance'], [], static function (array $scope) use ($module): array { return $module->reloadInTx($scope); });
         $install(self::SUBMIT, ['cashier_workspace','member','member_balance','recharge_checkout_request'], ['recharge_checkout_request','member_balance'], static function (array $scope) use ($module): array { return $module->submitInTx($scope); });
     }
@@ -83,7 +87,7 @@ final class CashierV3RechargeCheckoutModule
             'workspace_id'=>$workspace,'state_context_id'=>(string)$scope['state_context_id'],'request_version'=>1,'request_status'=>'editing','recharge_mode'=>$input['mode'],'recharge_package_id'=>$input['packageId'],
             'principal_cents'=>$input['principalCents'],'bonus_cents'=>$input['bonusCents'],'debt_cents'=>$input['debtCents'],'credited_principal_cents'=>$input['creditedPrincipalCents'],'balance_version'=>$input['balanceVersion'],
             'salespeople_json'=>json_encode($input['salespersonAllocations'], JSON_UNESCAPED_UNICODE),'terms_fingerprint'=>$termsFingerprint,'creation_idempotency_key'=>$creationKey,'last_idempotency_key'=>$creationKey,
-            'business_date'=>date('Y-m-d',$now),'occurred_at'=>$now,'settled_at'=>0,'recorded_at'=>$now,'add_time'=>$now,'update_time'=>$now
+            'business_date'=>date('Y-m-d',$now),'business_date_reason'=>'','occurred_at'=>$now,'settled_at'=>0,'recorded_at'=>$now,'add_time'=>$now,'update_time'=>$now
         ]);
         if ($input['creditedPrincipalCents'] > 0) {
             (new CashierV3BusinessConfigServices())->resolveAccountingMethodSnapshot('unionpay', true);
@@ -100,7 +104,14 @@ final class CashierV3RechargeCheckoutModule
         $version = (int)$request['request_version']; $payments = $this->payments((string)$request['request_id'],$version,true); $now = time();
         if ($action === self::ADD) {
             $method = (string)($payload['paymentMethodId'] ?? ''); if (!in_array($method,self::METHODS,true)) throw self::invalid('recharge_checkout_payment_method_invalid','请选择有效的记账收款方式。');
-            (new CashierV3BusinessConfigServices())->resolveAccountingMethodSnapshot($method, true);
+            if (array_reduce($payments, static function (bool $found, array $payment) use ($method): bool {
+                return $found || (string)$payment['payment_method'] === $method;
+            }, false)) {
+                throw self::invalid('recharge_checkout_payment_method_duplicate', '该收款方式已添加，请直接修改已有金额。');
+            }
+            // Adding a draft payment only reads configuration; the final
+            // submit command takes the write lock after all methods are chosen.
+            (new CashierV3BusinessConfigServices())->resolveAccountingMethodSnapshot($method, false);
             $this->copyPayments($payments,$version+1,$now,'',[]);
             $this->insertPayment((string)$request['request_id'],$version + 1,$method,max(0,$this->due($request)-$this->paymentTotal($payments)),'payment:'.$method.':'.(string)$scope['idempotency_key'],count($payments)+1,$now);
         } elseif ($action === self::UPDATE) {
@@ -132,8 +143,49 @@ final class CashierV3RechargeCheckoutModule
                 $this->payments((string)$request['request_id'], (int)$request['request_version']),
                 $scope
             )],
-            'touched' => ['recharge_checkout_request'],
+            'touched' => ['cashier_workspace'],
             'message' => '业务来源已更新。',
+        ];
+    }
+
+    private function updateBusinessDateInTx(array $scope): array
+    {
+        CashierV3TransactionGuard::assertInTransaction('rechargeCheckoutBusinessDate');
+        [$payload, $operator, $data] = $this->scope($scope);
+        $businessDate = trim((string)($payload['businessDate'] ?? ''));
+        $reason = trim((string)($payload['reason'] ?? ''));
+        $timezone = new \DateTimeZone('Asia/Shanghai');
+        $today = (new \DateTimeImmutable('now', $timezone))->format('Y-m-d');
+        $date = \DateTimeImmutable::createFromFormat('!Y-m-d', $businessDate, $timezone);
+        if (!$date || $date->format('Y-m-d') !== $businessDate) {
+            throw self::invalid('recharge_business_date_invalid', '充值日期格式无效，请重新选择。');
+        }
+        if ($businessDate > $today) {
+            throw self::invalid('recharge_business_date_future', '充值日期不能晚于今天。');
+        }
+        if ($businessDate < $today && $reason === '') {
+            throw self::invalid('recharge_business_date_reason_required', '历史充值日期必须填写补单原因。');
+        }
+        if (mb_strlen($reason) > 200) {
+            throw self::invalid('recharge_business_date_reason_invalid', '补单原因不能超过 200 个字。');
+        }
+        $request = $this->lockEditing($payload, $operator, $data, (string)$scope['state_context_id']);
+        $version = (int)$request['request_version'];
+        $now = time();
+        Db::name(self::REQUEST_TABLE)->where('id', $request['id'])->where('request_version', $version)->update([
+            'business_date' => $businessDate,
+            'business_date_reason' => $businessDate < $today ? $reason : '',
+            'request_version' => $version + 1,
+            'last_idempotency_key' => (string)$scope['idempotency_key'],
+            'update_time' => $now,
+        ]);
+        $request['business_date'] = $businessDate;
+        $request['business_date_reason'] = $businessDate < $today ? $reason : '';
+        $request['request_version'] = $version + 1;
+        return [
+            'data' => ['rechargeCheckout' => $this->projection($request, $this->payments((string)$request['request_id'], $version + 1), $scope)],
+            'touched' => ['recharge_checkout_request'],
+            'message' => '充值日期已保存。',
         ];
     }
 
@@ -142,13 +194,16 @@ final class CashierV3RechargeCheckoutModule
         CashierV3TransactionGuard::assertInTransaction('rechargeCheckoutSubmit');
         [$payload,$operator,$data] = $this->scope($scope); $request = $this->lockEditing($payload,$operator,$data,(string)$scope['state_context_id']);
         $payments = $this->payments((string)$request['request_id'],(int)$request['request_version'],true);
+        if ($this->hasDuplicatePaymentMethods($payments)) {
+            throw self::invalid('recharge_checkout_payment_method_duplicate', '同一种收款方式只能保留一行，请删除重复方式后重试。');
+        }
         if ($this->paymentTotal($payments) !== $this->due($request)) throw self::invalid('recharge_checkout_payment_total_mismatch','各收款金额合计必须等于本次实际收款。');
         $accountingConfig = new CashierV3BusinessConfigServices();
         foreach ($payments as $payment) {
             $accountingConfig->resolveAccountingMethodSnapshot((string)$payment['payment_method'], true);
         }
         $businessSource = (new CashierV3CheckoutBusinessSourceSelectionServices())->lockResolvedForSettlementInTx(CashierV3CheckoutBusinessSourceSelectionServices::KIND_RECHARGE, (string)$request['request_id'], $data->tenantId(), $operator->storeId());
-        $finalPayload = ['memberId'=>(int)$request['member_id'],'rechargeMode'=>(string)$request['recharge_mode'],'rechargePackageId'=>(int)$request['recharge_package_id'],'principalAmount'=>$this->money((int)$request['principal_cents']),'bonusAmount'=>$this->money((int)$request['bonus_cents']),'debtAmount'=>$this->money((int)$request['debt_cents']),'balanceVersion'=>(int)$request['balance_version'],'salespersonAllocations'=>json_decode((string)$request['salespeople_json'],true) ?: [],'paymentLines'=>array_map(static function(array $p): array { return ['paymentMethod'=>(string)$p['payment_method'],'amount'=>(string)($p['amount_cents']/100),'collectionReference'=>(string)$p['collection_reference']]; },$payments)];
+        $finalPayload = ['memberId'=>(int)$request['member_id'],'rechargeMode'=>(string)$request['recharge_mode'],'rechargePackageId'=>(int)$request['recharge_package_id'],'principalAmount'=>$this->wholeMoney((int)$request['principal_cents']),'bonusAmount'=>$this->wholeMoney((int)$request['bonus_cents']),'debtAmount'=>$this->wholeMoney((int)$request['debt_cents']),'balanceVersion'=>(int)$request['balance_version'],'businessDate'=>(string)($request['business_date'] ?? ''),'businessDateReason'=>(string)($request['business_date_reason'] ?? ''),'salespersonAllocations'=>json_decode((string)$request['salespeople_json'],true) ?: [],'paymentLines'=>array_map(static function(array $p): array { return ['paymentMethod'=>(string)$p['payment_method'],'amount'=>(string)intdiv((int)$p['amount_cents'], 100),'collectionReference'=>(string)$p['collection_reference']]; },$payments)];
         $result = (new CashierV3RechargeModule())->submitInTx(array_merge($scope,['payload'=>$finalPayload,'business_source'=>$businessSource]));
         $recharge = (array)($result['data']['recharge'] ?? []); $now=time(); $version=(int)$request['request_version'];
         Db::name(self::REQUEST_TABLE)->where('id',$request['id'])->where('request_version',$version)->update(['request_version'=>$version+1,'request_status'=>'succeeded','recharge_id'=>(int)($recharge['rechargeId']??0),'recharge_order_no'=>(string)($recharge['rechargeOrderNo']??''),'settled_at'=>$now,'last_idempotency_key'=>(string)$scope['idempotency_key'],'update_time'=>$now]);
@@ -172,23 +227,27 @@ final class CashierV3RechargeCheckoutModule
             ->where('operator_id', $operator->operatorId())
             ->where('workspace_id', $this->workspaceId($operator, (string)$scope['state_context_id']))
             ->where('state_context_id', (string)$scope['state_context_id'])
-            ->where('request_status', 'editing')
             ->find();
-        if (!$request) {
+        if (!$request || (!($payload['queryOnly'] ?? false) && (string)$request['request_status'] !== 'editing')) {
             throw self::invalid('recharge_checkout_reload_not_available', '充值结账现场已失效，请重新进入。');
         }
+        $statusOverride = (($payload['queryOnly'] ?? false) && (string)$request['request_status'] === 'editing')
+            ? 'result_unknown'
+            : null;
         return [
             'data' => ['rechargeCheckout' => $this->projection(
                 $request,
                 $this->payments($requestId, (int)$request['request_version']),
-                $scope
+                $scope,
+                [],
+                $statusOverride
             )],
             'touched' => [],
             'message' => '充值结账资料已刷新。',
         ];
     }
 
-    private function projection(array $request,array $payments,array $scope=[],array $result=[]): array
+    private function projection(array $request,array $payments,array $scope=[],array $result=[],?string $statusOverride=null): array
     {
         $businessSource = (new CashierV3CheckoutBusinessSourceSelectionServices())->read(
             CashierV3CheckoutBusinessSourceSelectionServices::KIND_RECHARGE,
@@ -200,13 +259,16 @@ final class CashierV3RechargeCheckoutModule
         if ($scope) foreach ((array)($scope['contexts']??[]) as $c) $contexts[]=['kind'=>(string)$c['kind'],'id'=>(string)$c['id'],'expectedVersion'=>(int)$c['expected_version']];
         $found=false; foreach ($contexts as &$c) if ($c['kind']==='recharge_checkout_request') {$c['expectedVersion']=$version;$found=true;} unset($c);
         if (!$found && (string)$request['request_status']==='editing') $contexts[]=['kind'=>'recharge_checkout_request','id'=>(string)$request['request_id'],'expectedVersion'=>$version];
-        return ['contractVersion'=>'cashier-v3-recharge-checkout-v1','businessType'=>'recharge','status'=>(string)$request['request_status'],'requestStatus'=>(string)$request['request_status'],'checkoutRequestId'=>(string)$request['request_id'],'rechargeCheckoutRequestId'=>(string)$request['request_id'],'requestId'=>(string)$request['request_id'],'checkoutRequestVersion'=>$version,'revision'=>$version,'activeStep'=>(string)$request['request_status']==='succeeded'?4:1,'resumeOnLoad'=>false,'canClose'=>(string)$request['request_status']==='succeeded','canRetry'=>false,
+        $status = $statusOverride ?: (string)$request['request_status'];
+        $selectedMethods = [];
+        foreach ($payments as $payment) $selectedMethods[(string)$payment['payment_method']] = true;
+        return ['contractVersion'=>'cashier-v3-recharge-checkout-v1','businessType'=>'recharge','status'=>$status,'requestStatus'=>(string)$request['request_status'],'checkoutRequestId'=>(string)$request['request_id'],'rechargeCheckoutRequestId'=>(string)$request['request_id'],'requestId'=>(string)$request['request_id'],'checkoutRequestVersion'=>$version,'revision'=>$version,'activeStep'=>$status !== 'editing' ? 4 : 1,'resumeOnLoad'=>false,'canClose'=>$status==='succeeded','canRetry'=>false,'businessDate'=>(string)($request['business_date'] ?? ''),'businessDateReason'=>(string)($request['business_date_reason'] ?? ''),
             'orderLines'=>[['id'=>'recharge:'.(string)$request['request_id'],'lineRole'=>'recharge','name'=>(string)$request['recharge_mode']==='package'?'充值套餐':'自定义充值','quantity'=>1,'amount'=>$this->money((int)$request['principal_cents'])]],
             'summary'=>['selectedCount'=>1,'originalAmount'=>$this->money((int)$request['principal_cents']),'discountAmount'=>0,'receivableAmount'=>$this->money($due),'entitlementActualAmount'=>0],
             'composition'=>['code'=>'recharge','lineRoles'=>['recharge'],'hasSale'=>false,'hasEntitlement'=>false,'primaryAction'=>'collect_payment','primaryActionLabel'=>'确认充值','steps'=>[['key'=>'order','number'=>1,'label'=>'确认充值'],['key'=>'payment','number'=>2,'label'=>'收款信息'],['key'=>'final','number'=>3,'label'=>'确认充值'],['key'=>'result','number'=>4,'label'=>'处理结果']]],
-            'member'=>['id'=>(int)$request['member_id']],'debtAmount'=>$this->money((int)$request['debt_cents']),'cashPerformanceAmount'=>$this->money($due),'balancePaymentAmount'=>0,'finalChanges'=>[],
+            'member'=>['id'=>(int)$request['member_id']],'bonusAmount'=>$this->money((int)$request['bonus_cents']),'debtAmount'=>$this->money((int)$request['debt_cents']),'cashPerformanceAmount'=>$this->money($due),'balancePaymentAmount'=>0,'finalChanges'=>[],
             'sourceEnabled'=>true,'sourceSelectable'=>true,'sourceLabel'=>(string)$businessSource['displayNameSnapshot'],'sourceSelectionVersion'=>(int)$businessSource['selectionVersion'],'primarySourceId'=>(int)$businessSource['primarySourceId'],'secondarySourceId'=>(int)$businessSource['secondarySourceId'],
-            'payment'=>['methods'=>array_values(array_map(static function(array $method):array{return ['id'=>$method['code'],'name'=>$method['displayName'],'canAdd'=>true];},array_filter($accounting,static function(array $method):bool{return (int)$method['status']===1;}))),'selectedLines'=>array_map(function(array $p) use ($accounting):array{$method=(string)$p['payment_method'];return ['id'=>(string)$p['payment_draft_id'],'kind'=>'bookkeeping_collection','method'=>$method,'name'=>(string)($accounting[$method]['displayName']??self::METHOD_NAMES[$method]??'未命名收款方式'),'amount'=>$this->money((int)$p['amount_cents']),'externalTransactionNo'=>(string)$p['collection_reference'],'remark'=>'','status'=>(string)$request['request_status']==='succeeded'?'succeeded':'editing','canEdit'=>(string)$request['request_status']==='editing','canRemove'=>(string)$request['request_status']==='editing'];},$payments),'summary'=>['receivableAmount'=>$this->money($due),'selectedAmount'=>$this->money($selected),'remainingAmount'=>$this->money(max(0,$due-$selected)),'overpaidAmount'=>$this->money(max(0,$selected-$due))]],
+            'payment'=>['methods'=>array_values(array_map(static function(array $method) use ($selectedMethods):array{$code=(string)$method['code'];return ['id'=>$code,'name'=>$method['displayName'],'canAdd'=>!isset($selectedMethods[$code])];},array_filter($accounting,static function(array $method):bool{return (int)$method['status']===1;}))),'selectedLines'=>array_map(function(array $p) use ($accounting, $request):array{$method=(string)$p['payment_method'];return ['id'=>(string)$p['payment_draft_id'],'kind'=>'bookkeeping_collection','method'=>$method,'name'=>(string)($accounting[$method]['displayName']??self::METHOD_NAMES[$method]??'未命名收款方式'),'amount'=>$this->money((int)$p['amount_cents']),'externalTransactionNo'=>(string)$p['collection_reference'],'remark'=>'','status'=>(string)$request['request_status']==='succeeded'?'succeeded':'editing','canEdit'=>(string)$request['request_status']==='editing','canRemove'=>(string)$request['request_status']==='editing'];},$payments),'summary'=>['receivableAmount'=>$this->money($due),'selectedAmount'=>$this->money($selected),'remainingAmount'=>$this->money(max(0,$due-$selected)),'overpaidAmount'=>$this->money(max(0,$selected-$due))]],
             'commandContexts'=>$contexts,'result'=>$result];
     }
 
@@ -222,8 +284,19 @@ final class CashierV3RechargeCheckoutModule
     private function paymentById(array $payments,string $id):array {foreach($payments as $p)if((string)$p['payment_draft_id']===$id)return $p;throw self::invalid('recharge_checkout_payment_not_found','该收款明细已变化，请刷新后重试。');}
     private function due(array $request):int{return (int)$request['credited_principal_cents'];}
     private function paymentTotal(array $payments):int{return array_sum(array_map(static function(array $p):int{return (int)$p['amount_cents'];},$payments));}
+    private function hasDuplicatePaymentMethods(array $payments): bool
+    {
+        $seen = [];
+        foreach ($payments as $payment) {
+            $method = (string)($payment['payment_method'] ?? '');
+            if ($method !== '' && isset($seen[$method])) return true;
+            if ($method !== '') $seen[$method] = true;
+        }
+        return false;
+    }
     private function moneyToCents($value):int{$raw=trim((string)$value);if(preg_match('/^(?:0|[1-9][0-9]*)$/D',$raw)!==1)return -1;return (int)$raw*100;}
     private function money(int $cents):string{return number_format($cents/100,2,'.','');}
+    private function wholeMoney(int $cents):string{return (string)intdiv($cents,100);}
     private function workspaceId(CashierV3OperatorScope $o,string $state):string{return sprintf('ws:%d:%d:%s',$o->storeId(),$o->operatorId(),$state);}
     private function secret():string{$s=trim((string)config('cashier_v3.checkout_namespace_secret'));if(strlen($s)<32)throw self::invalid('recharge_checkout_secret_missing','充值结账签名服务尚未配置。');return $s;}
     private static function invalid(string $reason,string $message):CashierV3CommandException{return CashierV3CommandException::invalidContext($message,['reason'=>$reason]);}

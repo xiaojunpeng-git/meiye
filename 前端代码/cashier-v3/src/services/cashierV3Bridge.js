@@ -2663,6 +2663,7 @@ function isCashierWorkspaceAction(action) {
     || action === 'update-recharge-checkout-payment-line'
     || action === 'remove-recharge-checkout-payment-line'
     || action === 'update-recharge-checkout-business-source'
+    || action === 'update-recharge-checkout-business-date'
     || action === 'reload-recharge-checkout'
     || action === 'submit-recharge-checkout'
     || action === 'submit-recharge-debt-repayment'
@@ -2769,6 +2770,7 @@ function resolveCommandContexts(action, payload) {
   if ((action === 'submit-recharge' || action === 'prepare-recharge-checkout'
     || action === 'add-recharge-checkout-payment-method' || action === 'update-recharge-checkout-payment-line'
     || action === 'remove-recharge-checkout-payment-line' || action === 'update-recharge-checkout-business-source'
+    || action === 'update-recharge-checkout-business-date'
     || action === 'submit-recharge-checkout'
     || action === 'reload-recharge-checkout'
     || action === 'submit-recharge-debt-repayment' || action === 'submit-direct-gift') && payload.memberId) {
@@ -3696,9 +3698,11 @@ function emitCommandResultUnknown(idempotencyKey, canonicalAction, silent, detai
   const queryResultAction = QUERY_RESULT_ACTION_BY_COMMAND[canonicalAction] || null
   const recoveryMode = CASHIER_V3_ACTION_MANIFEST[canonicalAction]?.recovery?.mode || ''
   const canRetryWithSameKey = !queryResultAction && recoveryMode === 'same_idempotency_retry'
-  const message = canRetryWithSameKey
-    ? '操作结果未知，请回到原操作重试；系统必须沿用原内容和原请求标识，不能新建请求。'
-    : '操作结果未知，请查询原结果后再决定是否重试，请勿更换请求标识重复提交。'
+  const message = canonicalAction === 'prepare-recharge-checkout'
+    ? '收款准备未完成，本次尚未进入收款或扣款，请核对充值金额后重试。'
+    : canRetryWithSameKey
+      ? '操作结果未知，请回到原操作重试；系统必须沿用原内容和原请求标识，不能新建请求。'
+      : '操作结果未知，请查询原结果后再决定是否重试，请勿更换请求标识重复提交。'
   const unknown = {
     result: {
       status: 'result_unknown',
@@ -3706,6 +3710,8 @@ function emitCommandResultUnknown(idempotencyKey, canonicalAction, silent, detai
       message,
       detail: detailMessage || ''
     },
+    action: canonicalAction,
+    canonicalAction,
     idempotencyKey: idempotencyKey || '',
     queryResultAction,
     canClose: false,
@@ -3717,6 +3723,8 @@ function emitCommandResultUnknown(idempotencyKey, canonicalAction, silent, detai
       detail: {
         status: 'result_unknown',
         code: 'COMMAND_RESULT_UNKNOWN',
+        action: canonicalAction,
+        canonicalAction,
         message,
         feedback: null,
         navigation: null,

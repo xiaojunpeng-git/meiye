@@ -34,7 +34,7 @@ final class CashierV3CashierMemberSummaryServices
         }
         $accountBalance = $this->money($member['now_money'] ?? 0);
         $cards = $this->cardSummary($memberId);
-        $debtAmount = $this->debtAmount($memberId);
+        $debtAmount = $this->debtAmount($memberId, $currentStoreId);
         $exclusive = $this->exclusiveServiceName($memberId);
         return [
             'id' => (string)$memberId,
@@ -70,6 +70,12 @@ final class CashierV3CashierMemberSummaryServices
             ->field('id,oid,write_start,write_end')
             ->order('id asc')
             ->select());
+        $holderIds = array_values(array_unique(array_filter(array_map('intval', array_column($holders, 'id')))));
+        $disabledHolderIds = $this->disabledHolderIds($holderIds, $memberId);
+        $timeCardHolderIds = $this->timeCardHolderIds($holderIds, $memberId);
+        $holders = array_values(array_filter($holders, static function (array $holder) use ($disabledHolderIds): bool {
+            return !isset($disabledHolderIds[(int)($holder['id'] ?? 0)]);
+        }));
         $orderIds = array_values(array_unique(array_filter(array_map('intval', array_column($holders, 'oid')))));
         if (!$orderIds) {
             return ['activeCardCount' => 0, 'remainingTimes' => 0, 'remainingAmount' => '0.00'];
@@ -92,6 +98,7 @@ final class CashierV3CashierMemberSummaryServices
         }
         $now = time();
         $holderOrderIds = [];
+        $holderIdByOrder = [];
         foreach ($holders as $holder) {
             $oid = (int)($holder['oid'] ?? 0);
             $start = max(0, (int)($holder['write_start'] ?? 0));
@@ -100,6 +107,7 @@ final class CashierV3CashierMemberSummaryServices
                 && ($start === 0 || $start <= $now)
                 && ($end === 0 || $end >= $now)) {
                 $holderOrderIds[$oid] = true;
+                $holderIdByOrder[$oid] = (int)($holder['id'] ?? 0);
             }
         }
         if (!$holderOrderIds) {
@@ -126,7 +134,9 @@ final class CashierV3CashierMemberSummaryServices
                 || ($start > 0 && $start > $now) || ($end > 0 && $end < $now)) {
                 continue;
             }
-            $remainingTimes += $remaining;
+            if (!isset($timeCardHolderIds[(int)($holderIdByOrder[(int)$cart['oid']] ?? 0)])) {
+                $remainingTimes += $remaining;
+            }
             $consumed = $total - $remaining;
             try {
                 $remainingAmount = bcadd(
@@ -155,9 +165,33 @@ final class CashierV3CashierMemberSummaryServices
         ];
     }
 
-    private function debtAmount(int $memberId): string
+    /** @param array<int,int> $holderIds @return array<int,bool> */
+    private function disabledHolderIds(array $holderIds, int $memberId): array
     {
-        return (new CashierV3MemberDebtProjectionServices())->amountForMember($memberId);
+        if (!$holderIds) return [];
+        $ids = Db::name('cashier_v3_card_state')
+            ->whereIn('card_holder_id', $holderIds)
+            ->where('current_member_id', $memberId)
+            ->where('card_status', 'disabled')
+            ->column('card_holder_id');
+        return array_fill_keys(array_map('intval', $ids), true);
+    }
+
+    /** @param array<int,int> $holderIds @return array<int,bool> */
+    private function timeCardHolderIds(array $holderIds, int $memberId): array
+    {
+        if (!$holderIds) return [];
+        $ids = Db::name('cashier_v3_card_rule_state')
+            ->whereIn('card_holder_id', $holderIds)
+            ->where('member_id', $memberId)
+            ->where('rule_type', 'time')
+            ->column('card_holder_id');
+        return array_fill_keys(array_map('intval', $ids), true);
+    }
+
+    private function debtAmount(int $memberId, int $storeId): string
+    {
+        return (new CashierV3MemberDebtProjectionServices())->amountForMember($memberId, $storeId);
     }
 
     private function exclusiveServiceName(int $memberId): string

@@ -77,7 +77,7 @@ final class CashierV3RechargeModule
         }
     }
 
-    private function submitInTx(array $scope): array
+    public function submitInTx(array $scope): array
     {
         $payload = is_array($scope['payload'] ?? null) ? $scope['payload'] : [];
         $operator = $scope['operator_scope'] ?? null;
@@ -90,6 +90,7 @@ final class CashierV3RechargeModule
             throw self::failure('recharge_command_scope_incomplete', '充值服务尚未就绪，请刷新后重试。');
         }
         $input = $this->normalizeInput($payload);
+        $input = $this->normalizeBusinessDate($input);
         $input['businessSource'] = $this->normalizeBusinessSource((array)($scope['business_source'] ?? []));
         $member = $this->lockedMember($input['memberId'], $operator, $dataScope);
         // 套餐金额和赠金必须在服务端按当前有效配置重算，不能信任页面
@@ -122,7 +123,7 @@ final class CashierV3RechargeModule
             CashierV3BusinessDocumentNumberServices::RECHARGE,
             'recharge_command',
             (string)$scope['idempotency_key'],
-            date('Y-m-d', $now),
+            $input['businessDate'],
             $now
         );
         $rechargeId = (int)Db::name('user_recharge')->insertGetId([
@@ -208,7 +209,7 @@ final class CashierV3RechargeModule
             'source_type' => self::ACTION,
             'source_id' => 'RCH:' . $rechargeId,
             'member_id' => $input['memberId'],
-            'business_date' => date('Y-m-d', $now),
+            'business_date' => $input['businessDate'],
             'occurred_at' => $now,
             'settled_at' => $now,
             'recorded_at' => $now,
@@ -240,7 +241,7 @@ final class CashierV3RechargeModule
                 'source_type' => self::ACTION,
                 'source_id' => 'RCH:' . $rechargeId,
                 'member_id' => $input['memberId'],
-                'business_date' => date('Y-m-d', $now),
+                'business_date' => $input['businessDate'],
                 'occurred_at' => $now,
                 'settled_at' => $now,
                 'recorded_at' => $now,
@@ -399,7 +400,7 @@ final class CashierV3RechargeModule
                 'memberNameSnapshot' => $memberName,
                 'operatorId' => $operator->operatorId(),
                 'operatorNameSnapshot' => $operatorName,
-                'businessDate' => date('Y-m-d', $now),
+                'businessDate' => $input['businessDate'],
                 'businessTimezone' => 'Asia/Shanghai',
                 'occurredAt' => $now,
                 'settledAt' => $now,
@@ -463,12 +464,11 @@ final class CashierV3RechargeModule
             || ($mode === 'custom' && ($principal <= 0 || $bonus < 0))
             || $debt < 0
             || $balanceVersion <= 0
-            || (!$paymentLines && !in_array($paymentMethod, self::PAYMENT_METHODS, true))
             || (!$paymentLines && (strlen($reference) > 128
                 || ($reference !== '' && preg_match('/^[A-Za-z0-9_.:\/-]+$/D', $reference) !== 1)))) {
             throw self::failure('recharge_payload_invalid', '充值信息不完整或金额无效，请重新填写。');
         }
-        if (!$paymentLines) {
+        if (!$paymentLines && in_array($paymentMethod, self::PAYMENT_METHODS, true)) {
             $paymentLines = [[
                 'paymentMethod' => $paymentMethod,
                 'amount' => $mode === 'package' ? '' : (string)($payload['principalAmount'] ?? ''),
@@ -480,7 +480,36 @@ final class CashierV3RechargeModule
             'bonusCents' => $bonus,
             'debtCents' => $debt,
             'collectionReference' => $reference,
+            'businessDate' => trim((string)($payload['businessDate'] ?? '')),
+            'businessDateReason' => trim((string)($payload['businessDateReason'] ?? '')),
         ];
+    }
+
+    private function normalizeBusinessDate(array $input): array
+    {
+        $timezone = new \DateTimeZone('Asia/Shanghai');
+        $today = (new \DateTimeImmutable('now', $timezone))->format('Y-m-d');
+        $businessDate = (string)($input['businessDate'] ?? '');
+        $reason = trim((string)($input['businessDateReason'] ?? ''));
+        if ($businessDate === '') {
+            $businessDate = $today;
+        }
+        $date = \DateTimeImmutable::createFromFormat('!Y-m-d', $businessDate, $timezone);
+        if (!$date || $date->format('Y-m-d') !== $businessDate) {
+            throw self::failure('recharge_business_date_invalid', '充值日期格式无效，请重新选择。');
+        }
+        if ($businessDate > $today) {
+            throw self::failure('recharge_business_date_future', '充值日期不能晚于今天。');
+        }
+        if ($businessDate < $today && $reason === '') {
+            throw self::failure('recharge_business_date_reason_required', '历史充值日期必须填写补单原因。');
+        }
+        if (mb_strlen($reason) > 200) {
+            throw self::failure('recharge_business_date_reason_invalid', '补单原因不能超过 200 个字。');
+        }
+        $input['businessDate'] = $businessDate;
+        $input['businessDateReason'] = $businessDate < $today ? $reason : '';
+        return $input;
     }
 
     private function resolveRechargeTerms(array $input, array $member): array
@@ -515,8 +544,10 @@ final class CashierV3RechargeModule
     }
 
     /**
-     * The browser may propose only staff IDs and amounts. Names, employment
-     * types and eligibility are always reloaded under the current store lock.
+     * The browser proposes the same integer percentage allocation used by the
+     * cart personnel editor. Names, eligibility and the resulting whole-yuan
+     * performance amounts are always rebuilt under the current store lock.
+     * Legacy amount payloads remain readable only for already-prepared drafts.
      */
     private function resolveSalespeople(array $allocations, int $principalCents, CashierV3OperatorScope $operator): array
     {
@@ -528,16 +559,25 @@ final class CashierV3RechargeModule
         }
         $requested = [];
         $total = 0;
+        $usesWeights = array_reduce($allocations, static function (bool $carry, $allocation): bool {
+            return $carry && is_array($allocation) && array_key_exists('allocationWeight', $allocation);
+        }, true);
         foreach ($allocations as $index => $allocation) {
             $staffId = is_array($allocation) ? (int)($allocation['staffId'] ?? $allocation['id'] ?? 0) : 0;
-            $amount = is_array($allocation) ? $this->moneyToCents($allocation['amount'] ?? null) : -1;
-            if ($staffId <= 0 || $amount <= 0 || isset($requested[$staffId])) {
+            $allocationValue = $usesWeights
+                ? (int)($allocation['allocationWeight'] ?? 0)
+                : (is_array($allocation) ? $this->moneyToCents($allocation['amount'] ?? null) : -1);
+            if ($staffId <= 0 || $allocationValue <= 0 || isset($requested[$staffId])) {
                 throw self::failure('recharge_salesperson_allocations_invalid', '销售人或分配金额无效，请重新填写。');
             }
-            $requested[$staffId] = ['amountCents' => $amount, 'sequence' => $index + 1];
-            $total += $amount;
+            $requested[$staffId] = [
+                'allocationValue' => $allocationValue,
+                'sequence' => $index + 1,
+                'isPreSale' => !empty($allocation['isPreSale']) || !empty($allocation['marked']),
+            ];
+            $total += $allocationValue;
         }
-        if ($total > $principalCents) {
+        if (($usesWeights && $total !== 100) || (!$usesWeights && $total > $principalCents)) {
             throw self::failure('recharge_salesperson_amount_exceeds_principal', '销售人分配金额不能超过本次充值本金。');
         }
         $staffIds = array_keys($requested);
@@ -564,6 +604,8 @@ final class CashierV3RechargeModule
             throw self::failure('recharge_salesperson_not_active', '所选销售人已停用、离职或不属于当前门店，请重新选择。');
         }
         $result = [];
+        $allocatedCents = 0;
+        $selectionCount = count($requested);
         foreach ($requested as $staffId => $selection) {
             $row = $byStaffId[$staffId];
             $name = trim((string)($row['employee_name'] ?? '')) ?: trim((string)($row['staff_name'] ?? ''));
@@ -572,12 +614,24 @@ final class CashierV3RechargeModule
             if ($name === '' || !in_array($type, ['internal', 'partner', 'outsourced'], true) || $typeVersion <= 0) {
                 throw self::failure('recharge_salesperson_profile_incomplete', '所选销售人员工档案不完整，请先维护员工信息。');
             }
+            $sequence = (int)$selection['sequence'];
+            $amountCents = $usesWeights
+                ? ($sequence === $selectionCount
+                    ? $principalCents - $allocatedCents
+                    : intdiv(intdiv($principalCents, 100) * (int)$selection['allocationValue'], 100) * 100)
+                : (int)$selection['allocationValue'];
+            if ($amountCents <= 0 || $amountCents % 100 !== 0) {
+                throw self::failure('recharge_salesperson_allocations_invalid', '销售人分配结果必须为正整数金额，请调整分配比例。');
+            }
+            $allocatedCents += $amountCents;
             $result[] = [
                 'staffId' => (int)$staffId,
                 'employeeId' => (int)$row['employee_id'],
                 'name' => $name,
-                'amountCents' => (int)$selection['amountCents'],
-                'sequence' => (int)$selection['sequence'],
+                'amountCents' => $amountCents,
+                'allocationWeight' => $usesWeights ? (int)$selection['allocationValue'] : 0,
+                'isPreSale' => (bool)$selection['isPreSale'],
+                'sequence' => $sequence,
                 'employeeTypeCodeSnapshot' => $type,
                 'employeeTypeAuthorityVersion' => $typeVersion,
             ];

@@ -258,6 +258,7 @@ const C5_ACTIONS = {
     'update-recharge-checkout-payment-line': FEATURE_MEMBER,
     'remove-recharge-checkout-payment-line': FEATURE_MEMBER,
     'update-recharge-checkout-business-source': FEATURE_MEMBER,
+    'update-recharge-checkout-business-date': FEATURE_MEMBER,
     'reload-recharge-checkout': FEATURE_MEMBER,
     'submit-recharge-checkout': FEATURE_MEMBER,
     'submit-recharge-debt-repayment': FEATURE_MEMBER,

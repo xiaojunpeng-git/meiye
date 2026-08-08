@@ -28,6 +28,12 @@ $checks = [
     'payment edits lock the request version and reject totals above receivable' => strpos($module, 'private function lockEditing') !== false
         && strpos($module, 'recharge_checkout_payment_exceeds_due') !== false
         && strpos($module, 'recharge_checkout_payment_total_mismatch') !== false,
+    'payment projection captures request status explicitly' => strpos($module, 'function(array $p) use ($accounting, $request):array') !== false,
+    'recharge payment methods cannot be duplicated' => strpos($module, 'recharge_checkout_payment_method_duplicate') !== false
+        && strpos($module, "'canAdd'=>!isset(\$selectedMethods[\$code])") !== false
+        && strpos($module, 'private function hasDuplicatePaymentMethods') !== false,
+    'recharge source selection advances workspace only' => strpos($module, "self::SOURCE, ['cashier_workspace','member','member_balance','recharge_checkout_request'], ['cashier_workspace']") !== false
+        && strpos($module, "'touched' => ['cashier_workspace']") !== false,
     'new context version provider and action module are installed' => strpos($bootstrap, 'CashierV3RechargeCheckoutRequestVersionProvider') !== false
         && strpos($bootstrap, 'CashierV3RechargeCheckoutModule::install') !== false,
     'reload command is registered with an explicit eventless contract' => strpos($manifestModule, "\$command['reload-recharge-checkout'] = self::FEATURE_MEMBER") !== false

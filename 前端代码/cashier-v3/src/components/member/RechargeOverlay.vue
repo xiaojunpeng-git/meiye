@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
-import { formatMoney, openCashierV3QueryEntitySelector } from '@/services/cashierV3Bridge'
+import { formatMoney, requestCashierV3Action } from '@/services/cashierV3Bridge'
+import PersonnelPerformanceOverlay from '@/components/cashier/PersonnelPerformanceOverlay.vue'
 
 const props = defineProps({
   session: { type: Object, default: () => ({}) },
@@ -16,6 +17,10 @@ const rechargePackageId = ref('')
 const paymentLines = ref([])
 const newPaymentMethod = ref('unionpay')
 const salespersonAllocations = ref([])
+const salespersonCandidates = ref([])
+const isSalespersonSelectorOpen = ref(false)
+const isSalespersonLoading = ref(false)
+const salespersonLoadError = ref('')
 const validationMessage = ref('')
 let paymentLineSequence = 1
 
@@ -39,7 +44,6 @@ const displayedBonus = computed(() => rechargeMode.value === 'package'
   : bonusAmount.value)
 const cashDueCents = computed(() => Math.max(0, moneyToCents(displayedPrincipal.value) - moneyToCents(debtAmount.value)))
 const cashDue = computed(() => cashDueCents.value / 100)
-const salesAllocationTotal = computed(() => salespersonAllocations.value.reduce((total, item) => total + Number(item.amount || 0), 0))
 const paymentLineTotalCents = computed(() => paymentLines.value.reduce((total, item) => total + moneyToCents(item.amount), 0))
 const paymentLineTotal = computed(() => paymentLineTotalCents.value / 100)
 const paymentMethods = [
@@ -78,39 +82,20 @@ function moneyToCents(value) {
   return Number(match[1]) * 100
 }
 
-function wholeYuanString(value) {
-  const amount = Number(value)
-  return Number.isFinite(amount) && amount >= 0 ? String(Math.trunc(amount)) : ''
-}
-
 function normalizePrincipalAmount(event) {
-  const amount = wholeYuanString(event.target.value)
-  principalAmount.value = amount
-  event.target.value = amount
+  principalAmount.value = String(event.target.value ?? '').trim()
 }
 
 function normalizeBonusAmount(event) {
-  const amount = wholeYuanString(event.target.value)
-  bonusAmount.value = amount
-  event.target.value = amount
+  bonusAmount.value = String(event.target.value ?? '').trim()
 }
 
 function normalizeDebtAmount(event) {
-  const amount = wholeYuanString(event.target.value)
-  debtAmount.value = amount
-  event.target.value = amount
+  debtAmount.value = String(event.target.value ?? '').trim()
 }
 
 function normalizePaymentAmount(line, event) {
-  const amount = wholeYuanString(event.target.value)
-  line.amount = amount
-  event.target.value = amount
-}
-
-function normalizeSalespersonAmount(person, event) {
-  const amount = wholeYuanString(event.target.value)
-  person.amount = amount
-  event.target.value = amount
+  line.amount = String(event.target.value ?? '').trim()
 }
 
 function formatPackageBonus(value) {
@@ -125,11 +110,7 @@ function submit() {
   else if (!isMoney(principal)) validationMessage.value = '请输入大于 0 的充值金额。'
   else if (!isMoney(bonus, true)) validationMessage.value = '赠送金额只能填写不小于 0 的金额。'
   else if (!isMoney(debt, true) || moneyToCents(debt) > moneyToCents(principal)) validationMessage.value = '欠款金额必须在 0 到充值本金之间。'
-  else if (cashDueCents.value > 0 && (!paymentLines.value.length || paymentLines.value.some((item) => !isMoney(item.amount)))) validationMessage.value = '请为每种收款方式填写大于 0 的金额。'
-  else if (paymentLineTotalCents.value !== cashDueCents.value) validationMessage.value = '各收款金额合计必须等于本次实际收款。'
-  else if (paymentLines.value.some((item) => item.collectionReference && !/^[A-Za-z0-9_.:/-]{1,128}$/.test(item.collectionReference.trim()))) validationMessage.value = '流水号或备注只能使用字母、数字和 . _ : / - 。'
-  else if (salespersonAllocations.value.some((item) => !isMoney(item.amount))) validationMessage.value = '请为每位销售人填写大于 0 的业绩金额。'
-  else if (salesAllocationTotal.value > cashDue.value) validationMessage.value = '销售人分配金额不能超过本次实际收款。'
+  else if (salespersonAllocations.value.length && salespersonAllocations.value.reduce((total, item) => total + Number(item.allocationWeight || 0), 0) !== 100) validationMessage.value = '销售人分配比例合计必须为 100%。'
   else validationMessage.value = ''
   if (validationMessage.value) return
   emit('submit', {
@@ -139,36 +120,54 @@ function submit() {
     principalAmount: principal,
     bonusAmount: bonus,
     debtAmount: debt,
-    paymentLines: paymentLines.value.map((item) => ({
-      paymentMethod: item.paymentMethod,
-      amount: String(item.amount),
-      collectionReference: String(item.collectionReference || '').trim()
+    salespersonAllocations: salespersonAllocations.value.map((item) => ({
+      staffId: item.staffId || item.id,
+      allocationWeight: Number(item.allocationWeight),
+      isPreSale: Boolean(item.isPreSale ?? item.marked)
     })),
-    salespersonAllocations: salespersonAllocations.value.map((item) => ({ staffId: item.staffId, amount: String(item.amount) })),
     balanceVersion: Number(balance.value.accountVersion || 0)
   })
 }
 
-async function addSalesperson() {
-  const selected = await openCashierV3QueryEntitySelector({
-    entityType: 'person',
-    title: '选择销售人',
-    description: '仅显示当前门店已启用收银销售人资格的员工。',
-    selectorEntry: 'cashier',
-    selectionContext: { scope: 'sales_performance_assignees' }
-  })
-  const record = Array.isArray(selected?.selected) ? selected.selected[0] : selected?.selected
-  const staffId = Number(record?.staffId || record?.id || 0)
-  if (!staffId || salespersonAllocations.value.some((item) => Number(item.staffId) === staffId)) return
-  salespersonAllocations.value.push({
-    staffId,
-    name: record?.name || record?.staffName || '',
-    amount: ''
-  })
+async function openSalespersonSelector() {
+  isSalespersonSelectorOpen.value = true
+  isSalespersonLoading.value = true
+  salespersonLoadError.value = ''
+  const records = []
+  let page = 1
+  let total = 0
+  try {
+    do {
+      const response = await requestCashierV3Action('query-query-entities', {
+        entityType: 'person',
+        selectorEntry: 'cashier',
+        selectorContext: { scope: 'sales_performance_assignees' },
+        keyword: '',
+        page,
+        pageSize: 100,
+        silent: true
+      })
+      const envelope = response?.data?.result ? response.data : response
+      const data = envelope?.data || {}
+      const status = String(envelope?.result?.status || '')
+      if (!['success', 'succeeded'].includes(status) || !Array.isArray(data.records)) {
+        throw new Error(envelope?.result?.message || '当前门店销售人加载失败，请重试。')
+      }
+      records.push(...data.records)
+      total = Math.max(0, Number(data.total) || records.length)
+      page += 1
+    } while (records.length < total && page <= 20)
+    salespersonCandidates.value = records
+  } catch (error) {
+    salespersonLoadError.value = error instanceof Error ? error.message : '当前门店销售人加载失败，请重试。'
+  } finally {
+    isSalespersonLoading.value = false
+  }
 }
 
-function removeSalesperson(staffId) {
-  salespersonAllocations.value = salespersonAllocations.value.filter((item) => Number(item.staffId) !== Number(staffId))
+function confirmSalespeople(result = {}) {
+  salespersonAllocations.value = Array.isArray(result.salespeople) ? result.salespeople.map((item) => ({ ...item })) : []
+  isSalespersonSelectorOpen.value = false
 }
 
 function addPaymentLine() {
@@ -238,36 +237,35 @@ function createPaymentLine(paymentMethod) {
           </template>
           <label>本次欠款<input v-model="debtAmount" inputmode="numeric" autocomplete="off" @input="normalizeDebtAmount"></label>
         </div>
-        <section class="recharge-overlay__payments" aria-label="收款信息">
-          <header><strong>收款信息</strong><span>已收 {{ formatMoney(paymentLineTotal) }} / 实收 {{ formatMoney(cashDue) }}</span></header>
-          <div class="recharge-overlay__payment-list">
-            <section v-for="line in paymentLines" :key="line.id" class="recharge-overlay__payment-line">
-              <select v-model="line.paymentMethod"><option v-for="[code, label] in paymentMethods" :key="code" :value="code">{{ label }}</option></select>
-              <input v-model="line.amount" inputmode="numeric" autocomplete="off" placeholder="整数收款金额" @input="normalizePaymentAmount(line, $event)">
-              <input v-model="line.collectionReference" autocomplete="off" placeholder="流水号或备注（选填）">
-              <button type="button" class="button button--text" :disabled="paymentLines.length <= 1" @click="removePaymentLine(line.id)">移除</button>
-            </section>
-          </div>
-          <footer><select v-model="newPaymentMethod"><option v-for="[code, label] in paymentMethods" :key="code" :value="code">{{ label }}</option></select><button type="button" class="button button--secondary" @click="addPaymentLine">添加收款方式</button></footer>
-        </section>
         <section class="recharge-overlay__salespeople" aria-label="销售人分配">
-          <header><strong>销售人分配</strong><span>已分配 {{ formatMoney(salesAllocationTotal) }} / 可分配 {{ formatMoney(cashDue) }}</span><button type="button" class="button button--secondary" @click="addSalesperson">添加销售人</button></header>
+          <header><strong>销售人分配</strong><span>{{ salespersonAllocations.length ? salespersonAllocations.map((item) => `${item.name} ${item.allocationWeight}%`).join('、') : '暂未选择' }}</span><button type="button" class="button button--secondary" @click="openSalespersonSelector">选择销售人</button></header>
           <div v-if="salespersonAllocations.length" class="recharge-overlay__salesperson-list">
-            <label v-for="item in salespersonAllocations" :key="item.staffId">
-              <span>{{ item.name || `员工 #${item.staffId}` }}</span>
-              <input v-model="item.amount" inputmode="numeric" autocomplete="off" placeholder="整数业绩金额" @input="normalizeSalespersonAmount(item, $event)">
-              <button type="button" class="button button--text" @click="removeSalesperson(item.staffId)">移除</button>
-            </label>
+            <span v-for="item in salespersonAllocations" :key="item.staffId || item.id">{{ item.name }}（{{ item.isPreSale || item.marked ? '售前' : '售后' }}，{{ item.allocationWeight }}%）</span>
           </div>
           <p v-else class="recharge-overlay__hint">未分配时，本笔现金业绩不归属具体销售人。</p>
         </section>
         <p v-if="validationMessage" class="recharge-overlay__error" role="alert">{{ validationMessage }}</p>
         <footer class="recharge-overlay__footer">
           <button type="button" class="button button--secondary" :disabled="submitting" @click="emit('close')">取消</button>
-          <button type="submit" class="button button--primary" :disabled="submitting">{{ submitting ? '正在提交' : '确认充值' }}</button>
+          <button type="submit" class="button button--primary" :disabled="submitting">{{ submitting ? '正在准备' : '下一步：收款信息' }}</button>
         </footer>
       </form>
     </section>
+    <PersonnelPerformanceOverlay
+      v-if="isSalespersonSelectorOpen"
+      initial-tab="salespeople"
+      :show-craftsmen="false"
+      :show-salespeople="true"
+      :craftsmen-candidates="[]"
+      :salesperson-candidates="salespersonCandidates"
+      :selected-craftsmen="[]"
+      :selected-salespeople="salespersonAllocations"
+      :loading="isSalespersonLoading"
+      :load-error="salespersonLoadError"
+      @close="isSalespersonSelectorOpen = false"
+      @confirm="confirmSalespeople"
+      @retry="openSalespersonSelector"
+    />
   </Teleport>
 </template>
 

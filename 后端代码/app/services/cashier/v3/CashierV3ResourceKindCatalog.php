@@ -37,6 +37,7 @@ class CashierV3ResourceKindCatalog
         'inventory_shortage_cursor' => ['scope' => CashierV3ResourceScope::TYPE_STORE, 'lock' => 56, 'ownership' => self::OWNERSHIP_DOMAIN],
         'checkout_debt_policy' => ['scope' => CashierV3ResourceScope::TYPE_STORE, 'lock' => 57, 'ownership' => self::OWNERSHIP_DOMAIN],
         'member_debt_guard' => ['scope' => CashierV3ResourceScope::TYPE_TENANT, 'lock' => 58, 'ownership' => self::OWNERSHIP_DOMAIN],
+        'recharge_order' => ['scope' => CashierV3ResourceScope::TYPE_STORE, 'lock' => 59, 'ownership' => self::OWNERSHIP_DOMAIN],
         'sales_order' => ['scope' => CashierV3ResourceScope::TYPE_STORE, 'lock' => 60, 'ownership' => self::OWNERSHIP_DOMAIN],
         // 按原始权益订单稳定存在的欠款并发门闩；建欠与还款路径必须共锁。
         'entitlement_debt_guard' => ['scope' => CashierV3ResourceScope::TYPE_TENANT, 'lock' => 64, 'ownership' => self::OWNERSHIP_DOMAIN],
@@ -51,6 +52,8 @@ class CashierV3ResourceKindCatalog
         'staff_profile' => ['scope' => CashierV3ResourceScope::TYPE_STORE, 'lock' => 125, 'ownership' => self::OWNERSHIP_DOMAIN],
         'staff_time_slot' => ['scope' => CashierV3ResourceScope::TYPE_STORE, 'lock' => 130, 'ownership' => self::OWNERSHIP_DOMAIN],
         'checkout_request' => ['scope' => CashierV3ResourceScope::TYPE_STORE, 'lock' => 140, 'ownership' => self::OWNERSHIP_DOMAIN],
+        // 充值结账有自己的草稿和金额语义，不能复用销售 checkout_request。
+        'recharge_checkout_request' => ['scope' => CashierV3ResourceScope::TYPE_STORE, 'lock' => 141, 'ownership' => self::OWNERSHIP_DOMAIN],
         // C1 底座：工作台与账号级查询方案可由 C1 内置 provider 负责
         'cashier_workspace' => ['scope' => CashierV3ResourceScope::TYPE_STORE, 'lock' => 150, 'ownership' => self::OWNERSHIP_C1],
         'query_preference' => ['scope' => CashierV3ResourceScope::TYPE_ACCOUNT, 'lock' => 160, 'ownership' => self::OWNERSHIP_C1],

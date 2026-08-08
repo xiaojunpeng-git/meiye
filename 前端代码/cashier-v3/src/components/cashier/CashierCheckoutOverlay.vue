@@ -44,7 +44,8 @@ const emit = defineEmits([
   'request',
   'business-source-change',
   'retry-business-sources',
-  'sales-date-change'
+  'sales-date-change',
+  'recharge-date-change'
 ])
 
 const localStep = ref(1)
@@ -69,6 +70,10 @@ const receiptPrintError = ref('')
 const pendingPrimarySourceId = ref(0)
 const salesDateDraft = ref('')
 const salesDateReason = ref('')
+const pendingPaymentMethodIds = ref(new Set())
+const submissionLongRunning = ref(false)
+let submissionLongTimer = null
+let submissionQueryTimer = null
 let previouslyFocusedElement = null
 let backgroundShell = null
 let backgroundShellWasInert = false
@@ -76,6 +81,7 @@ let backgroundShellHadInertAttribute = false
 let backgroundShellAriaHidden = null
 
 const isDebtRepayment = computed(() => props.checkout.businessType === 'debt_repayment')
+const isRechargeCheckout = computed(() => props.checkout.businessType === 'recharge')
 const allowedPrimaryActions = new Set(['collect_payment', 'complete_service', 'collect_and_complete'])
 const composition = computed(() => isRecord(props.checkout.composition) ? props.checkout.composition : {})
 const hasSaleLines = computed(() => composition.value.hasSale === true || composition.value.lineRoles?.includes('sale'))
@@ -196,13 +202,16 @@ const salesDateIsHistorical = computed(() => (
   && props.salesDateMax !== ''
   && salesDateDraft.value < props.salesDateMax
 ))
+const dateLabel = computed(() => isRechargeCheckout.value ? '充值日期' : '销售日期')
+const dateReasonLabel = computed(() => isRechargeCheckout.value ? '历史充值原因' : '补单原因')
+const dateSaving = computed(() => props.salesDateSaving)
 const salesDateIsDirty = computed(() => salesDateDraft.value !== String(props.checkout.businessDate || ''))
 const canSaveSalesDate = computed(() => (
   salesDateIsDirty.value
   && /^\d{4}-\d{2}-\d{2}$/.test(salesDateDraft.value)
   && (!props.salesDateMax || salesDateDraft.value <= props.salesDateMax)
   && (!salesDateIsHistorical.value || salesDateReason.value.trim() !== '')
-  && !props.salesDateSaving
+  && !dateSaving.value
 ))
 const selectedPaymentLines = computed(() => Array.isArray(payment.value.selectedLines) ? payment.value.selectedLines : [])
 const hasBalancePayment = computed(() => selectedPaymentLines.value.some((line) => line?.kind === 'balance_deduction'))
@@ -371,8 +380,9 @@ const originalCheckoutIdempotencyKey = computed(() => (
   || recoveredCheckoutIdempotencyKey.value
   || ''
 ))
+const showSubmissionLongRunning = computed(() => isSubmitRequested.value && submissionLongRunning.value && !isResultStep.value)
 const canQueryCheckoutResult = computed(() => (
-  (isUncertain.value || isPaymentSucceededServicePending.value)
+  (isUncertain.value || isPaymentSucceededServicePending.value || (isRechargeCheckout.value && showSubmissionLongRunning.value))
   && Boolean(checkoutRequestIdentity.value)
   && Boolean(originalCheckoutIdempotencyKey.value)
 ))
@@ -460,13 +470,49 @@ watch(
   () => props.checkout.businessDate,
   (businessDate) => {
     salesDateDraft.value = String(businessDate || '')
-    salesDateReason.value = String(props.checkout.supplement?.reason || '')
+    salesDateReason.value = String(props.checkout.businessDateReason || props.checkout.supplement?.reason || '')
   },
   { immediate: true }
 )
 
+watch(checkoutStatus, (status) => {
+  if (['processing', 'pending_confirmation', 'result_unknown', 'failed', 'succeeded'].includes(status)) {
+    submissionLongRunning.value = false
+    if (submissionLongTimer) {
+      window.clearTimeout(submissionLongTimer)
+      submissionLongTimer = null
+    }
+    if (submissionQueryTimer) {
+      window.clearTimeout(submissionQueryTimer)
+      submissionQueryTimer = null
+    }
+  }
+})
+
 function request(action, payload = {}) {
-  emit('request', { action, payload })
+  return new Promise((resolve) => {
+    emit('request', { action, payload, resolve })
+  })
+}
+
+function handleSubmissionResponse(response) {
+  const status = String(response?.result?.status || response?.status || '').toLowerCase()
+  if (['failed', 'conflict'].includes(status)) {
+    isSubmitRequested.value = false
+    submissionLongRunning.value = false
+    if (submissionLongTimer) {
+      window.clearTimeout(submissionLongTimer)
+      submissionLongTimer = null
+    }
+    if (submissionQueryTimer) {
+      window.clearTimeout(submissionQueryTimer)
+      submissionQueryTimer = null
+    }
+    const message = String(response?.result?.message || response?.message || '充值提交失败，请核对收款信息后重试。')
+    window.dispatchEvent(new CustomEvent('cashier-v3:ui-result', {
+      detail: { status: 'failed', message }
+    }))
+  }
 }
 
 function chooseBusinessSourcePrimary(source) {
@@ -491,14 +537,21 @@ function chooseBusinessSourceSecondary(secondarySourceId) {
 
 function saveSalesDate() {
   if (!canSaveSalesDate.value) return
-  emit('sales-date-change', {
+  emit(isRechargeCheckout.value ? 'recharge-date-change' : 'sales-date-change', {
     businessDate: salesDateDraft.value,
     reason: salesDateIsHistorical.value ? salesDateReason.value.trim() : ''
   })
 }
 
 function paymentLineStatus(line = {}) {
-  return line.status || line.paymentStatus || line.resultStatus || '待收款'
+  const rawStatus = String(line.status || line.paymentStatus || line.resultStatus || '待收款').trim()
+  const normalizedStatus = rawStatus.toLowerCase()
+  if (['succeeded', 'success', 'completed'].includes(normalizedStatus)) return '成功'
+  if (['editing', '待确认'].includes(normalizedStatus)) return normalizedStatus === 'editing' ? '待确认' : rawStatus
+  if (['processing', 'pending', 'result_pending', 'pending_confirmation'].includes(normalizedStatus)) return '处理中'
+  if (normalizedStatus === 'result_unknown') return '结果待确认'
+  if (['failed', 'error'].includes(normalizedStatus)) return '失败'
+  return rawStatus || '待收款'
 }
 
 function checkoutLineRole(line = {}) {
@@ -579,11 +632,32 @@ function closePaymentLineEditor() {
 }
 
 function addPaymentMethod(method = {}) {
-  if (method.canAdd === false || !method.id) return
+  if (method.canAdd === false || !method.id || pendingPaymentMethodIds.value.has(String(method.id))) return
   // Selecting a method always adds an editable draft line. The cashier chooses
   // all methods first and then adjusts their amounts; the only gate is the
   // aggregate amount check before advancing to final confirmation.
+  pendingPaymentMethodIds.value = new Set(pendingPaymentMethodIds.value).add(String(method.id))
   request('add-payment-method', { paymentMethodId: method.id })
+}
+
+function scheduleSubmissionLongRunning() {
+  submissionLongRunning.value = false
+  if (submissionLongTimer) window.clearTimeout(submissionLongTimer)
+  submissionLongTimer = window.setTimeout(() => {
+    submissionLongRunning.value = true
+    submissionLongTimer = null
+    // A lost submit response must not leave the operator staring at a locked
+    // button. Read the same original request once automatically; the query is
+    // read-only and can safely run while the original command is unresolved.
+    if (isRechargeCheckout.value) {
+      submissionQueryTimer = window.setTimeout(() => {
+        submissionQueryTimer = null
+        if (isRechargeCheckout.value && isSubmitRequested.value && !isResultStep.value) {
+          queryOriginalCheckoutResult()
+        }
+      }, 5000)
+    }
+  }, 3000)
 }
 
 function savePaymentLine(line) {
@@ -699,6 +773,15 @@ function clearPaymentLineAmountError(key) {
 function handleCheckoutDraftMutationResult(event) {
   const detail = event?.detail || {}
   const action = String(detail.action || '')
+  if (action === 'add-payment-method') {
+    const methodId = String(detail.payload?.paymentMethodId || '')
+    if (methodId) {
+      const next = new Set(pendingPaymentMethodIds.value)
+      next.delete(methodId)
+      pendingPaymentMethodIds.value = next
+    }
+    return
+  }
   if (!['update-payment-line', 'update-balance-payment'].includes(action)) return
   const key = action === 'update-balance-payment'
     ? 'balance-deduction'
@@ -760,7 +843,7 @@ function goNext() {
     }
     if (salesDateIsDirty.value) {
       window.dispatchEvent(new CustomEvent('cashier-v3:ui-result', {
-        detail: { status: 'failed', message: '销售日期已修改，请先保存销售日期。' }
+        detail: { status: 'failed', message: `${dateLabel.value}已修改，请先保存${dateLabel.value}。` }
       }))
       return
     }
@@ -781,13 +864,15 @@ function goNext() {
       || createCashierV3CommandId('CHECKOUT')
   }
   isSubmitRequested.value = true
-  request('submit-checkout', { idempotencyKey: submitCommandId.value })
+  scheduleSubmissionLongRunning()
+  request('submit-checkout', { idempotencyKey: submitCommandId.value }).then(handleSubmissionResponse)
 }
 
 function returnToPaymentEdit() {
   if (!canReturnToPaymentEdit.value) return
   submitCommandId.value = null
   isSubmitRequested.value = false
+  submissionLongRunning.value = false
   localStep.value = 2
   request('return-to-payment-edit')
 }
@@ -796,12 +881,14 @@ function returnToCashierEdit() {
   if (!canReturnToCashierEdit.value) return
   submitCommandId.value = null
   isSubmitRequested.value = false
+  submissionLongRunning.value = false
   request('return-to-payment-edit', { closeAfterEditReturn: true })
 }
 
 function handleCheckoutReturnedToPaymentEdit() {
   submitCommandId.value = null
   isSubmitRequested.value = false
+  submissionLongRunning.value = false
   localStep.value = 2
 }
 
@@ -809,15 +896,18 @@ function retryCheckout() {
   if (!canRetryCheckout.value) return
   submitCommandId.value = createCashierV3CommandId('CHECKOUT')
   isSubmitRequested.value = true
-  request('retry-checkout', { idempotencyKey: submitCommandId.value })
+  scheduleSubmissionLongRunning()
+  request('retry-checkout', { idempotencyKey: submitCommandId.value }).then(handleSubmissionResponse)
 }
 
 function queryOriginalCheckoutResult() {
   if (!canQueryCheckoutResult.value) return
   request('query-checkout-result', {
     checkoutRequestId: props.checkout.checkoutRequestId || props.checkout.requestId,
+    requestId: props.checkout.checkoutRequestId || props.checkout.requestId,
     requestNo: props.checkout.requestNo,
-    originalIdempotencyKey: originalCheckoutIdempotencyKey.value
+    originalIdempotencyKey: originalCheckoutIdempotencyKey.value,
+    queryOnly: true
   })
 }
 
@@ -939,6 +1029,10 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  if (submissionLongTimer) window.clearTimeout(submissionLongTimer)
+  submissionLongTimer = null
+  if (submissionQueryTimer) window.clearTimeout(submissionQueryTimer)
+  submissionQueryTimer = null
   window.removeEventListener('cashier-v3:checkout-draft-mutation-result', handleCheckoutDraftMutationResult)
   window.removeEventListener('cashier-v3:checkout-returned-to-payment-edit', handleCheckoutReturnedToPaymentEdit)
   if (backgroundShell instanceof HTMLElement) {
@@ -1066,21 +1160,21 @@ onBeforeUnmount(() => {
 
         <dl class="checkout-order-details checkout-order-details--source-date">
           <div v-if="checkout.businessDate" class="checkout-sales-date">
-            <dt>销售日期</dt>
+            <dt>{{ dateLabel }}</dt>
             <dd>
-              <input v-model="salesDateDraft" type="date" :max="salesDateMax || undefined" :disabled="salesDateSaving" aria-label="销售日期">
+              <input v-model="salesDateDraft" type="date" :max="salesDateMax || undefined" :disabled="dateSaving" :aria-label="dateLabel">
               <input
                 v-if="salesDateIsHistorical"
                 v-model.trim="salesDateReason"
                 type="text"
                 maxlength="255"
-                :disabled="salesDateSaving"
-                aria-label="补单原因"
-                placeholder="历史日期请填写补单原因"
+                :disabled="dateSaving"
+                :aria-label="dateReasonLabel"
+                :placeholder="`历史日期请填写${dateReasonLabel}`"
                 @keydown.enter.prevent="saveSalesDate"
               >
               <button v-if="salesDateIsDirty" type="button" class="button button--secondary" :disabled="!canSaveSalesDate" @click="saveSalesDate">
-                {{ salesDateSaving ? '保存中…' : '保存日期' }}
+                {{ dateSaving ? '保存中…' : '保存日期' }}
               </button>
             </dd>
           </div>
@@ -1168,11 +1262,11 @@ onBeforeUnmount(() => {
               :key="method.id"
               type="button"
               class="payment-method-card"
-              :disabled="method.canAdd === false"
+              :disabled="method.canAdd === false || pendingPaymentMethodIds.has(String(method.id))"
               :title="method.disabledReason || ''"
               @click="addPaymentMethod(method)"
             >
-              {{ method.name }}
+              {{ pendingPaymentMethodIds.has(String(method.id)) ? '添加中…' : method.name }}
             </button>
           </div>
         </section>
@@ -1186,7 +1280,7 @@ onBeforeUnmount(() => {
             <article v-for="line in selectedPaymentLines" :key="line.id" class="checkout-payment-line">
               <div>
                 <strong>{{ line.name }}</strong>
-                <span class="checkout-payment-line__status" :class="paymentLineStatusClass(line)">{{ paymentLineStatus(line) }}</span>
+                <span v-if="String(line.status || '').toLowerCase() !== 'editing'" class="checkout-payment-line__status" :class="paymentLineStatusClass(line)">{{ paymentLineStatus(line) }}</span>
                 <span v-if="line.lockReason" class="checkout-payment-line__lock-reason">{{ line.lockReason }}</span>
               </div>
               <div class="checkout-payment-line__amount">
@@ -1201,6 +1295,7 @@ onBeforeUnmount(() => {
                   autocomplete="off"
                   aria-label="收款金额"
                   @input="updatePaymentLineAmountDraft(line, $event)"
+                  @change="savePaymentLineAmount(line, paymentLineInputAmount(line))"
                   @blur="savePaymentLineAmount(line, paymentLineInputAmount(line))"
                   @keydown.enter.prevent="savePaymentLineAmount(line, paymentLineInputAmount(line))"
                 >
@@ -1241,9 +1336,13 @@ onBeforeUnmount(() => {
       <section v-else-if="currentStep === 3" class="checkout-card checkout-final-confirmation">
         <div class="checkout-card__title">
           <h3>{{ isDebtRepayment ? '确认还款' : primaryActionLabel }}</h3>
-          <span>{{ hasSaleLines || isDebtRepayment ? '请核对最终金额与收款内容。' : '请核对本次使用权益与服务内容。' }}</span>
+          <span>{{ isRechargeCheckout || hasSaleLines || isDebtRepayment ? '请核对最终金额与收款内容。' : '请核对本次使用权益与服务内容。' }}</span>
         </div>
         <dl class="checkout-final-summary">
+          <div v-if="isRechargeCheckout"><dt>充值本金</dt><dd>{{ formatMoney(checkoutSummary.originalAmount) }}</dd></div>
+          <div v-if="isRechargeCheckout"><dt>赠送金额</dt><dd>{{ formatMoney(checkout.bonusAmount) }}</dd></div>
+          <div v-if="isRechargeCheckout"><dt>本次实收</dt><dd>{{ formatMoney(checkout.cashPerformanceAmount) }}</dd></div>
+          <div v-if="isRechargeCheckout"><dt>本次欠款</dt><dd>{{ formatMoney(checkout.debtAmount) }}</dd></div>
           <div v-if="hasSaleLines || isDebtRepayment"><dt>应收</dt><dd>{{ formatMoney(checkoutSummary.receivableAmount) }}</dd></div>
           <div v-if="hasSaleLines"><dt>优惠</dt><dd>{{ formatMoney(checkoutSummary.discountAmount) }}</dd></div>
           <div v-if="hasSaleLines || isDebtRepayment"><dt>欠款</dt><dd>{{ formatMoney(checkout.debtAmount) }}</dd></div>
@@ -1252,8 +1351,14 @@ onBeforeUnmount(() => {
           <div v-if="hasEntitlementLines"><dt>权益服务</dt><dd>{{ checkoutOrderLines.filter(isEntitlementCheckoutLine).length }} 项</dd></div>
           <div v-if="checkout.cardUpgradeDeductionAmount !== undefined"><dt>卡升级抵扣</dt><dd>{{ formatMoney(checkout.cardUpgradeDeductionAmount) }}</dd></div>
           <div v-if="checkout.projectUpgradeDeductionAmount !== undefined"><dt>项目升级抵扣</dt><dd>{{ formatMoney(checkout.projectUpgradeDeductionAmount) }}</dd></div>
-          <div v-if="checkout.businessDate"><dt>销售日期</dt><dd>{{ checkout.businessDate }}</dd></div>
+          <div v-if="checkout.businessDate"><dt>{{ dateLabel }}</dt><dd>{{ checkout.businessDate }}</dd></div>
+          <div v-if="isRechargeCheckout && checkout.businessDateReason"><dt>补单原因</dt><dd>{{ checkout.businessDateReason }}</dd></div>
         </dl>
+        <section v-if="showSubmissionLongRunning" class="checkout-processing-hint" role="status" aria-live="polite">
+          <strong>正在提交，处理时间较长</strong>
+          <span>系统仍在处理本次充值，请勿重复提交；如长时间无响应，可查询原充值结果。</span>
+          <button type="button" class="button button--secondary" @click="queryOriginalCheckoutResult">查询原充值结果</button>
+        </section>
         <section v-if="finalChanges.length || checkout.finalValidationMessage" class="checkout-final-changes">
           <div>
             <strong>结账前变更核对</strong>
@@ -1509,6 +1614,22 @@ onBeforeUnmount(() => {
   flex: 1 1 240px;
   min-width: 180px;
   padding: 0 10px;
+}
+
+.checkout-processing-hint {
+  display: grid;
+  gap: 6px;
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px solid #f0c36d;
+  border-radius: 7px;
+  background: #fff8e6;
+  color: #7a4b00;
+  line-height: 1.5;
+}
+
+.checkout-processing-hint .button {
+  justify-self: start;
 }
 
 @media (max-width: 640px) {

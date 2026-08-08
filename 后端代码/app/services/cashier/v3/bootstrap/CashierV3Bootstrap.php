@@ -195,11 +195,11 @@ class CashierV3Bootstrap
             CashierV3CheckoutRequestVersionProvider::KIND,
             new CashierV3CheckoutRequestVersionProvider()
         );
-        $consumerRegistry = new CashierV3EventConsumerRegistry();
         $versionServices->registerProvider(
             CashierV3RechargeCheckoutRequestVersionProvider::KIND,
             new CashierV3RechargeCheckoutRequestVersionProvider()
         );
+        $consumerRegistry = new CashierV3EventConsumerRegistry();
         $consumerRegistry->register(
             'cashier_v3.direct_gift.reconcile',
             new CashierV3DirectGiftReconciliationConsumer()
@@ -316,8 +316,8 @@ class CashierV3Bootstrap
         CashierV3CardOperationModule::install($dispatcher);
         CashierV3MemberModule::install($dispatcher, $assembler, $cashierWorkspace);
         CashierV3RechargeModule::install($dispatcher);
-        CashierV3RechargeDebtRepaymentServices::install($dispatcher);
         CashierV3RechargeCheckoutModule::install($dispatcher);
+        CashierV3RechargeDebtRepaymentServices::install($dispatcher);
         CashierV3HangModule::install($dispatcher, $cashierWorkspace, $assembler);
         CashierV3ReservationModule::install($dispatcher, $assembler);
 

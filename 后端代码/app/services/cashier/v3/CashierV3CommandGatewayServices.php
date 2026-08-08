@@ -1502,7 +1502,10 @@ class CashierV3CommandGatewayServices extends BaseServices
         }
         $serverSources = $this->loadCheckoutSources($checkoutRequestId, $canonicalAction);
 
-        // 客户端 contexts 除 workspace／checkout_request 外必须与服务器反推精确一致
+        // New clients submit only workspace / checkout_request and let the
+        // server rebuild sources from the persisted request. During the
+        // compatibility window, an older client may still send source
+        // contexts; when it does, they must match the server set exactly.
         $clientExtra = [];
         foreach ($rawContexts as $row) {
             if (!is_array($row)) {
@@ -1519,9 +1522,11 @@ class CashierV3CommandGatewayServices extends BaseServices
         foreach ($serverSources as $src) {
             $serverMap[$src['kind'] . ':' . $src['id']] = $src;
         }
-        if (count($clientExtra) !== count($serverMap)
+        if ($clientExtra && (
+            count($clientExtra) !== count($serverMap)
             || array_diff_key($clientExtra, $serverMap)
-            || array_diff_key($serverMap, $clientExtra)) {
+            || array_diff_key($serverMap, $clientExtra)
+        )) {
             throw CashierV3CommandException::invalidContext(
                 '结账后续步骤的对象版本与服务器来源不一致，请刷新后重试。',
                 [
@@ -1541,7 +1546,14 @@ class CashierV3CommandGatewayServices extends BaseServices
         $contract['allowed'] = [];
         $contract['identities'] = [];
         $contract['required_read_roles'] = ['cashier_workspace', 'checkout_request'];
-        $contract['required_touched_roles'] = ['cashier_workspace', 'checkout_request'];
+        // The ordinary payment-draft policy advances both resources. A
+        // source-selection policy may lock the same pair for a consistent
+        // read while only its workspace version participates in the command
+        // receipt; preserve that policy-specific mutation contract here.
+        $contract['required_touched_roles'] = array_values(array_unique(array_map(
+            'strval',
+            (array)($baseContract['required_touched_roles'] ?? ['cashier_workspace', 'checkout_request'])
+        )));
         $contract['server_checkout_sources'] = $serverSources;
         $contract['checkout_request_id'] = $checkoutRequestId;
         $contract['checkout_source_recheck_required'] = true;

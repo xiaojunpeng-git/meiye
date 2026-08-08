@@ -5,6 +5,7 @@ namespace app\services\cashier\v3\settlement;
 
 use app\services\cashier\v3\CashierV3CommandException;
 use app\services\cashier\v3\CashierV3DataScopeContext;
+use app\services\cashier\v3\CashierV3BusinessDocumentNumberServices;
 use app\services\cashier\v3\CashierV3OperatorScope;
 use app\services\cashier\v3\CashierV3ResultCode;
 use app\services\cashier\v3\CashierV3TransactionGuard;
@@ -48,9 +49,23 @@ final class CashierV3RechargeDebtAuthorityServices
             throw self::failure('recharge_debt_recharge_projection_mismatch');
         }
 
-        $debtNo = 'RCD3' . strtoupper(substr(hash('sha256', implode('|', [
-            $dataScope->tenantId(), (string)$rechargeId, $commandIdempotencyKey,
-        ])), 0, 28));
+        // Keep existing historical RCD3 records unchanged; a newly persisted
+        // recharge debt shares the QK business number stream with sales debt.
+        $debtNo = (string)Db::name(self::AUTHORITY_TABLE)
+            ->where('tenant_id', $dataScope->tenantId())
+            ->where('recharge_id', $rechargeId)
+            ->lock(true)
+            ->value('debt_no');
+        if ($debtNo === '') {
+            $debtNo = (new CashierV3BusinessDocumentNumberServices())->allocateForSourceInTx(
+                $dataScope->tenantId(),
+                CashierV3BusinessDocumentNumberServices::DEBT,
+                'recharge_debt',
+                (string)$rechargeId,
+                date('Y-m-d', $occurredAt),
+                $occurredAt
+            );
+        }
         $expectedDebt = [
             'debt_no' => $debtNo,
             // Zero is an intentional compatibility sentinel. New V3 repayment

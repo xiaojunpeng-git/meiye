@@ -80,7 +80,9 @@ const isLoadingCheckoutBusinessSources = ref(false)
 const checkoutBusinessSourcesLoadError = ref('')
 let checkoutBusinessSourcesLoadToken = 0
 const isSavingCheckoutSalesDate = ref(false)
+const isSavingRechargeDate = ref(false)
 const rechargeSession = ref(null)
+const rechargePreparationIdempotencyKey = ref('')
 const isRechargeSubmitting = ref(false)
 const isHangOrderOpen = ref(false)
 const hangOrderPreparationId = ref(null)
@@ -839,6 +841,26 @@ async function loadInlineCheckoutBusinessSources() {
   }
 }
 
+async function loadInlineRechargeBusinessSources() {
+  const current = rechargeCheckout.value
+  const loadToken = ++checkoutBusinessSourcesLoadToken
+  if (!current || current.sourceEnabled !== true || current.sourceSelectable === false) return
+  checkoutBusinessSourcesLoadError.value = ''
+  isLoadingCheckoutBusinessSources.value = true
+  try {
+    const catalog = await loadCheckoutBusinessCatalog()
+    if (loadToken !== checkoutBusinessSourcesLoadToken || rechargeCheckout.value !== current) return
+    checkoutInlineBusinessSources.value = Array.isArray(catalog.sources) ? catalog.sources : []
+  } catch (error) {
+    if (loadToken === checkoutBusinessSourcesLoadToken) {
+      checkoutInlineBusinessSources.value = []
+      checkoutBusinessSourcesLoadError.value = checkoutSourceSelectorError(error)
+    }
+  } finally {
+    if (loadToken === checkoutBusinessSourcesLoadToken) isLoadingCheckoutBusinessSources.value = false
+  }
+}
+
 watch(
   () => [
     isCheckoutOpen.value,
@@ -855,6 +877,28 @@ watch(
     checkoutInlineBusinessSources.value = []
     checkoutBusinessSourcesLoadError.value = ''
     isLoadingCheckoutBusinessSources.value = false
+  },
+  { immediate: true }
+)
+
+watch(
+  () => [
+    Boolean(rechargeCheckout.value),
+    rechargeCheckout.value?.rechargeCheckoutRequestId || '',
+    rechargeCheckout.value?.sourceEnabled,
+    rechargeCheckout.value?.sourceSelectable
+  ],
+  ([isOpen]) => {
+    if (isOpen) {
+      loadInlineRechargeBusinessSources()
+      return
+    }
+    if (!isCheckoutOpen.value) {
+      checkoutBusinessSourcesLoadToken += 1
+      checkoutInlineBusinessSources.value = []
+      checkoutBusinessSourcesLoadError.value = ''
+      isLoadingCheckoutBusinessSources.value = false
+    }
   },
   { immediate: true }
 )
@@ -946,6 +990,26 @@ async function saveCheckoutBusinessSource(selection = {}) {
 
 function saveInlineCheckoutBusinessSource(selection = {}) {
   return persistCheckoutBusinessSource('sale', selection)
+}
+
+function saveInlineRechargeBusinessSource(selection = {}) {
+  return persistCheckoutBusinessSource('recharge', selection)
+}
+
+async function saveRechargeBusinessDate(selection = {}) {
+  if (isSavingRechargeDate.value) return null
+  const businessDate = String(selection.businessDate || '').trim()
+  const reason = String(selection.reason || '').trim()
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(businessDate)) return null
+  isSavingRechargeDate.value = true
+  try {
+    return await requestRechargeCheckoutAction({
+      action: 'update-recharge-business-date',
+      payload: { businessDate, reason }
+    })
+  } finally {
+    isSavingRechargeDate.value = false
+  }
 }
 
 async function saveCheckoutSalesDate(selection = {}) {
@@ -2440,7 +2504,13 @@ function openRecharge(event = {}) {
     }))
     return
   }
+  rechargePreparationIdempotencyKey.value = ''
   rechargeSession.value = session
+}
+
+function closeRecharge() {
+  rechargeSession.value = null
+  rechargePreparationIdempotencyKey.value = ''
 }
 
 async function submitRecharge(payload = {}) {
@@ -2449,11 +2519,20 @@ async function submitRecharge(payload = {}) {
   try {
     const response = await requestCashierV3Action('prepare-recharge-checkout', {
       ...payload,
-      memberId: payload.memberId || currentMemberId.value
+      memberId: payload.memberId || currentMemberId.value,
+      ...(rechargePreparationIdempotencyKey.value
+        ? { idempotencyKey: rechargePreparationIdempotencyKey.value }
+        : {})
     })
+    const responseStatus = resultStatus(response)
+    if (responseStatus === 'result_unknown') {
+      rechargePreparationIdempotencyKey.value = String(response.idempotencyKey || '')
+    } else if (responseStatus === 'success' || responseStatus === 'succeeded' || responseStatus === 'failed' || responseStatus === 'conflict') {
+      rechargePreparationIdempotencyKey.value = ''
+    }
     const prepared = acceptPreparedCheckout(response)
-    if (resultStatus(response) === 'success' && prepared) {
-      rechargeSession.value = null
+    if ((responseStatus === 'success' || responseStatus === 'succeeded') && prepared) {
+      closeRecharge()
     }
     return response
   } finally {
@@ -3059,7 +3138,13 @@ async function queryHangOrderResult(command = {}) {
 function enqueueCheckoutAction(event = {}) {
   const action = String(event?.action || '')
   if (!checkoutDraftMutationActions.has(action)) {
-    return requestCheckoutAction(event)
+    const direct = requestCheckoutAction(event)
+    if (direct && typeof direct.then === 'function') {
+      direct.then((result) => event?.resolve?.(result), (error) => event?.resolve?.({
+        result: { status: 'failed', message: error?.message || '结账操作未完成，请重试。' }
+      }))
+    }
+    return direct
   }
 
   // Draft edits advance the same checkout_request version. Serialize only
@@ -3085,6 +3170,7 @@ function enqueueCheckoutAction(event = {}) {
   checkoutDraftMutationTail = queued.catch(() => undefined)
   queued.then(
     (result) => {
+      event?.resolve?.(result)
       window.dispatchEvent(new CustomEvent('cashier-v3:checkout-draft-mutation-result', {
         detail: {
           action,
@@ -3094,7 +3180,8 @@ function enqueueCheckoutAction(event = {}) {
         }
       }))
     },
-    () => {
+    (error) => {
+      event?.resolve?.({ result: { status: 'failed', message: error?.message || '收款金额没有保存，已恢复原金额。' } })
       window.dispatchEvent(new CustomEvent('cashier-v3:checkout-draft-mutation-result', {
         detail: {
           action,
@@ -3772,7 +3859,7 @@ onBeforeUnmount(() => {
       v-if="rechargeSession"
       :session="rechargeSession"
       :submitting="isRechargeSubmitting"
-      @close="rechargeSession = null"
+      @close="closeRecharge"
       @submit="submitRecharge"
     />
     <div v-if="supplement" class="supplement-banner">
@@ -4227,9 +4314,18 @@ onBeforeUnmount(() => {
       <CashierCheckoutOverlay
         v-if="rechargeCheckout"
         :checkout="rechargeCheckout"
+        :business-sources="checkoutInlineBusinessSources"
+        :business-sources-loading="isLoadingCheckoutBusinessSources"
+        :business-sources-load-error="checkoutBusinessSourcesLoadError"
+        :business-source-saving="isSavingCheckoutBusinessSource"
+        :sales-date-max="cashierToday"
+        :sales-date-saving="isSavingRechargeDate"
         @close="closeRechargeCheckout"
         @completed="closeRechargeCheckout"
         @request="enqueueRechargeCheckoutAction"
+        @business-source-change="saveInlineRechargeBusinessSource"
+        @retry-business-sources="loadInlineRechargeBusinessSources"
+        @recharge-date-change="saveRechargeBusinessDate"
       />
     </Teleport>
 

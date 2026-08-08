@@ -90,6 +90,7 @@ const latestRoomAssignmentPreparationIntent = ref(null)
 const pendingCashierWorkflowTarget = ref(null)
 const pendingMemberTopAction = ref(null)
 const memberSelectorInitialView = ref('selector')
+const memberCreatorSchema = ref({})
 const isCardOperationMenuOpen = ref(false)
 const rechargeSession = ref(null)
 const isRechargeSubmitting = ref(false)
@@ -136,7 +137,6 @@ const inventoryFeatureItems = [
   { key: 'outbound', label: '出库', featureCode: 'cashier.v3.inventory.outbound', href: resolveInventoryEntryHref('outbound') },
   { key: 'stock', label: '库存', featureCode: 'cashier.v3.inventory.stock', href: resolveInventoryEntryHref('stock') },
   { key: 'count', label: '盘点', featureCode: 'cashier.v3.inventory.count', href: resolveInventoryEntryHref('count') },
-  { key: 'movement', label: '明细', featureCode: 'cashier.v3.inventory.movement', href: resolveInventoryEntryHref('movement') },
   { key: 'statistics', label: '统计', featureCode: 'cashier.v3.inventory.statistics', href: resolveInventoryEntryHref('statistics') },
   { key: 'request', label: '请货', featureCode: 'cashier.v3.inventory.request', href: resolveInventoryEntryHref('request') },
   { key: 'transfer', label: '调拨', featureCode: 'cashier.v3.inventory.transfer', href: resolveInventoryEntryHref('transfer') },
@@ -312,6 +312,7 @@ const isCashierPage = computed(() => route.name === 'cashier-v3-cashier')
 const isCashierWorkflowPage = computed(() => ['cashier-v3-cashier', 'cashier-v3-writeoff', 'cashier-v3-replacement'].includes(route.name))
 const isReservationPage = computed(() => route.name === 'cashier-v3-reservation')
 const isMemberPage = computed(() => route.name === 'cashier-v3-member')
+const isStaffPage = computed(() => route.name === 'cashier-v3-staff-list')
 const isManagementCenterPage = computed(() => route.name === 'cashier-v3-management-center')
 const isBusinessDashboardPage = computed(() => route.name === 'cashier-v3-business-dashboard')
 const activeCashierWorkflowMode = computed(() => {
@@ -426,8 +427,11 @@ const operatorLabel = computed(() => state.operator.roleName
 const hasPageHelp = computed(() => ['cashier-v3-cashier', 'cashier-v3-writeoff', 'cashier-v3-replacement', 'cashier-v3-room', 'cashier-v3-reservation', 'cashier-v3-member', 'cashier-v3-care', 'cashier-v3-hang', 'cashier-v3-order-center', 'cashier-v3-management-center', 'cashier-v3-staff-list', 'cashier-v3-business-dashboard'].includes(route.name))
 watch(
   () => route.name,
-  () => {
+  (routeName) => {
     isCardOperationMenuOpen.value = false
+    // 收银台 V3 的充值由 CashierWorkbenchView 统一接管，离开旧页面时
+    // 清掉 Shell 兼容充值状态，避免旧弹层在路由切换后重新覆盖新 Checkout。
+    if (routeName === 'cashier-v3-cashier') rechargeSession.value = null
   }
 )
 const helpContent = computed(() => {
@@ -521,7 +525,7 @@ const helpContent = computed(() => {
   if (route.name === 'cashier-v3-reservation') {
     return {
       title: '预约页面说明',
-      description: '预约以列表为主，日历用于查看当天人员和房间安排。',
+      description: '预约默认显示日历，列表用于集中查询预约记录。',
       steps: [
         '点击“新增预约”，依次选择会员、项目、时间、手艺人、房间和备注；房间可以暂不分配。',
         '每笔预约必须有一个主项目，其他项目作为明细项目；页面会展示实际采用的预约时长。',
@@ -586,12 +590,24 @@ async function requestTopAction(action, payload = {}) {
 async function openMemberCreator() {
   const result = await requestTopAction('open-member-creator')
   if (!isSucceededResult(result)) return result
+  const schema = result?.result?.data?.creatorSchema
+    || result?.data?.result?.data?.creatorSchema
+    || result?.data?.data?.creatorSchema
+    || result?.data?.creatorSchema
+    || {}
+  memberCreatorSchema.value = schema && typeof schema === 'object' ? schema : {}
   if (isMemberPage.value) {
     // 会员列表直接进入完整建档，不经过收银用的“查询/选择会员”流程。
-    window.dispatchEvent(new CustomEvent('cashier-v3:open-member-list-creator'))
+    window.dispatchEvent(new CustomEvent('cashier-v3:open-member-list-creator', {
+      detail: { creatorSchema: memberCreatorSchema.value }
+    }))
     return result
   }
   return openMemberSelector({ context: 'cashier', initialView: 'creator' })
+}
+
+function openStaffCreator() {
+  window.dispatchEvent(new CustomEvent('cashier-v3:open-staff-creator'))
 }
 
 async function openCashierMemberTopAction(action) {
@@ -903,6 +919,7 @@ async function openMemberDebt(memberId = null) {
     cashierMember.value,
     writeoffMember.value
   ].find((member) => member && (!memberId || String(memberDetailId(member)) === String(memberId)))
+    || (memberId ? { id: memberId, memberId } : null)
   if (!selectedMember) {
     return { result: { status: 'failed', code: 'MEMBER_DEBT_CONTEXT_MISSING', message: '未找到需要查看欠款的会员。' } }
   }
@@ -942,7 +959,9 @@ async function openMemberDebt(memberId = null) {
     }
     // 读取欠款时服务端会回传最新根状态。根状态替换可能清理所有浏览器内弹层，
     // 因此必须在读取完成后再打开，避免刚打开就被同一次响应关闭。
-    activeDebtMember.value = selectedMember
+    activeDebtMember.value = snapshot?.member && typeof snapshot.member === 'object'
+      ? snapshot.member
+      : selectedMember
     isMemberDebtOpen.value = true
     return result
   } finally {
@@ -950,9 +969,28 @@ async function openMemberDebt(memberId = null) {
   }
 }
 
-function handleOpenMemberDebt(event = {}) {
+async function handleOpenMemberDebt(event = {}) {
   const detail = event.detail || {}
-  void openMemberDebt(detail.memberId || null)
+  const result = await openMemberDebt(detail.memberId || null)
+  const debtId = String(detail.debtId || detail.debtRecordId || '')
+  if (!debtId || !isSucceededResult(result)) return result
+  const snapshot = memberDebtSnapshot.value
+  const record = (Array.isArray(snapshot?.records) ? snapshot.records : [])
+    .find((item) => String(item?.debtId ?? item?.id ?? '') === debtId)
+  if (!record) {
+    return { result: { status: 'failed', code: 'DEBT_RECORD_NOT_FOUND', message: '该欠款已变化，请重新查询后操作。' } }
+  }
+  const amount = String(record.remainingDebtAmount ?? record.remainingAmount ?? '')
+  if (!/^[1-9][0-9]*(?:\.00)?$/.test(amount)) {
+    return { result: { status: 'failed', code: 'DEBT_REPAYMENT_AMOUNT_INVALID', message: '该欠款剩余金额异常，无法进入收款。' } }
+  }
+  return prepareDebtRepayment({
+    memberId: detail.memberId,
+    debtRecordId: record.id || record.debtId,
+    debtItemId: record.debtItemId || record.id || record.debtId,
+    recordVersion: record.recordVersion || record.revision,
+    amount,
+  })
 }
 
 function closeMemberDebt() {
@@ -961,9 +999,29 @@ function closeMemberDebt() {
   activeDebtMember.value = null
 }
 
+async function openDebtRepaymentCheckout(preparationRequestId, debtRecordId) {
+  const handoff = {
+    businessType: 'debt_repayment',
+    preparationRequestId,
+    debtRecordId
+  }
+  isMemberDebtOpen.value = false
+  activeDebtMember.value = null
+  if (route.name !== 'cashier-v3-cashier') {
+    // 跨页面事件会在工作台挂载前丢失。仅保存本次已准备草稿的交接标识，
+    // 收银工作台挂载后自行消费并重新读取权威结账快照。
+    window.sessionStorage.setItem('cashier-v3:prepared-checkout-handoff', JSON.stringify(handoff))
+    window.location.hash = '#/cashier'
+    return
+  }
+  window.dispatchEvent(new CustomEvent('cashier-v3:open-prepared-checkout', {
+    detail: handoff
+  }))
+}
+
 async function prepareDebtRepayment(payload = {}) {
   if (isDebtRepaymentPreparing.value) return { success: false, message: '正在准备收款，请勿重复操作。' }
-  const preparationRequestId = createCashierV3CommandId('DEBT_REPAY_PREPARE')
+  const preparationRequestId = createCashierV3CommandId('CHECKOUT_PREPARE')
   isDebtRepaymentPreparing.value = true
   try {
     if (payload.rechargeDebt === true) {
@@ -976,20 +1034,36 @@ async function prepareDebtRepayment(payload = {}) {
       }
       return result
     }
+    await requestCashierV3Action('open-cashier-workbench', { silent: true })
+    const currentCheckout = state.cashier?.checkout
+    if (currentCheckout
+      && currentCheckout.businessType === 'debt_repayment'
+      && String(currentCheckout.sourceDocumentId || '') === String(payload.debtRecordId || '')
+      && String(currentCheckout.requestStatus || '') === 'editing'
+      && currentCheckout.preparationRequestId) {
+      await openDebtRepaymentCheckout(currentCheckout.preparationRequestId, payload.debtRecordId)
+      return { result: { status: 'success', code: 'DEBT_REPAYMENT_DRAFT_RESUMED' } }
+    }
     const result = await requestCashierV3Action('prepare-debt-repayment', {
       ...payload,
       preparationRequestId,
       idempotencyKey: preparationRequestId
     })
-    if (isSucceededResult(result)) {
-      window.dispatchEvent(new CustomEvent('cashier-v3:open-prepared-checkout', {
-        detail: {
-          businessType: 'debt_repayment',
-          preparationRequestId,
-          debtRecordId: payload.debtRecordId
-        }
-      }))
+    // 准备命令的响应可能因订单中心仍持有旧根投影而不能被当前页面接纳。
+    // 重新读取工作台中的已持久化草稿，只有确认是本次请求才跨页接力，不能
+    // 仅凭前端响应状态猜测是否可收款。
+    await requestCashierV3Action('open-cashier-workbench', { silent: true })
+    const preparedCheckout = state.cashier?.checkout
+    if (preparedCheckout
+      && preparedCheckout.businessType === 'debt_repayment'
+      && String(preparedCheckout.sourceDocumentId || '') === String(payload.debtRecordId || '')
+      && String(preparedCheckout.requestStatus || '') === 'editing'
+      && String(preparedCheckout.preparationRequestId || '') === preparationRequestId) {
+      await openDebtRepaymentCheckout(preparationRequestId, payload.debtRecordId)
+      return result
     }
+    // 读取失败时保留原始业务结果，由调用方展示服务端返回的真实原因；不得
+    // 在没有权威草稿时伪造跳转到收银台。
     return result
   } finally {
     isDebtRepaymentPreparing.value = false
@@ -1928,9 +2002,18 @@ async function logoutCurrentAccount() {
 function operatorFeedback(detail, conflictText) {
   const status = String(detail.status || '')
   const code = String(detail.code || '')
+  const action = String(detail.action || detail.canonicalAction || '')
   const fallbackMessage = detail.feedback?.message || detail.message || conflictText
 
   if (status === 'result_unknown' || code === 'COMMAND_RESULT_UNKNOWN') {
+    if (action === 'prepare-recharge-checkout') {
+      return {
+        kind: 'error',
+        title: '收款准备未完成',
+        message: '本次尚未进入收款，也未扣款。请核对充值金额后，再点“下一步：收款信息”重试。',
+        persistent: true
+      }
+    }
     return {
       kind: 'error',
       title: '正在确认操作结果',
@@ -1997,8 +2080,17 @@ async function handleUiResult(event) {
     'member-detail': 'cashier-v3:open-member-detail',
     'room-detail': 'cashier-v3:open-room-detail'
   }
+  // V3 收银台已经使用 prepare-recharge-checkout + CashierCheckoutOverlay。
+  // Shell 只负责把准备好的充值快照交给 Workbench；非收银台页面仍保留
+  // 旧充值兼容入口，避免第一步表单误走 submit-recharge。
   if (canApplyUiDirective && overlayName === 'recharge') {
-    rechargeSession.value = typeof overlay === 'object' ? overlay : null
+    if (isCashierPage.value) {
+      window.dispatchEvent(new CustomEvent('cashier-v3:open-recharge', {
+        detail: overlay
+      }))
+    } else {
+      rechargeSession.value = typeof overlay === 'object' ? overlay : null
+    }
   }
   if (canApplyUiDirective && overlayName === 'direct-gift') {
     directGiftSession.value = typeof overlay === 'object' ? overlay : null
@@ -2020,7 +2112,10 @@ async function handleUiResult(event) {
     }))
   }
 
-  if (['success', 'succeeded'].includes(String(detail.status || ''))) return
+  if (['success', 'succeeded'].includes(String(detail.status || ''))) {
+    dismissFeedback()
+    return
+  }
   if (!detail.message && !detail.feedback && detail.status !== 'conflict') return
   const conflictText = detail.conflict?.message || '该内容已被其他人员修改。已保留你当前未保存的输入，请先查看最新内容后再处理。'
   const feedback = operatorFeedback(detail, conflictText)
@@ -2112,7 +2207,7 @@ onBeforeUnmount(() => {
       </form>
     </div>
     <RechargeOverlay
-      v-if="rechargeSession"
+      v-if="rechargeSession && !isCashierPage"
       :session="rechargeSession"
       :submitting="isRechargeSubmitting"
       @close="rechargeSession = null"
@@ -2254,6 +2349,14 @@ onBeforeUnmount(() => {
           </button>
           <button v-if="canUseFeature('cashier.v3.member.batch')" type="button" class="button button--secondary" @click="requestTopAction('open-member-batch-actions')">
             批量操作
+          </button>
+          <button type="button" class="button button--help" @click="isOperationHelpOpen = true">
+            页面说明
+          </button>
+        </div>
+        <div v-else-if="isStaffPage" class="cashier-header-actions">
+          <button type="button" class="button button--primary" @click="openStaffCreator">
+            新增员工
           </button>
           <button type="button" class="button button--help" @click="isOperationHelpOpen = true">
             页面说明
@@ -2455,7 +2558,7 @@ onBeforeUnmount(() => {
     :allow-guest="isCashierWorkflowPage && memberSelectorContext !== 'reservation' && !memberSelectorRequiresMember"
     :allow-create="canUseFeature('cashier.v3.member') && (isCashierWorkflowPage || memberSelectorInitialView === 'creator')"
     :current-store-name="state.storeName || ''"
-    :creator-schema="state.memberCenter?.creatorSchema || {}"
+    :creator-schema="memberCreatorSchema"
     :initial-view="memberSelectorInitialView"
     :on-query="queryMemberSelector"
     :on-select="selectMemberFromSelector"
