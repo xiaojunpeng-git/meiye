@@ -2,6 +2,7 @@
 namespace app\services\cashier\v3\permission;
 
 use app\services\organization\JobPositionPolicyServices;
+use app\services\mobile\merchant\MobileMerchantCapabilityCatalog;
 use think\facade\Db;
 
 /**
@@ -65,6 +66,17 @@ class CashierV3FeatureResolver
 
     public const SUPER_ADMIN_LEVEL_RULE = 'level_0_super_admin_all_features';
 
+    /**
+     * 手机商家端能力与收银 V3 复用能力的唯一服务端桥接。
+     *
+     * 手机端岗位规则不是 system_menus id，不能再把 401xxx 直接交给
+     * getMenusList / system_menus 解析。仅已由 mobile merchant session
+     * 解析并标记为可信的服务端操作上下文会走到此映射。
+     */
+    private const MOBILE_MERCHANT_RULE_TO_FEATURES = [
+        MobileMerchantCapabilityCatalog::RULE_RESERVATIONS => ['cashier.v3.reservation'],
+    ];
+
     /** @var callable|null function(array $profile): string[] 仅测试可替换；生产 freeze 后不可换 */
     protected $menuResolver;
 
@@ -100,8 +112,8 @@ class CashierV3FeatureResolver
         // the position entry, while an explicit disabled row denies access.
         $granted = $this->storeV3GrantedFeatures($operatorProfile);
         // This marker is produced only by the mobile merchant-session adapter.
-        // It re-reads the active mobile menu grants server-side; client input
-        // can neither set it nor widen the returned feature set.
+        // It re-reads the active mobile capability grants server-side; client
+        // input can neither set it nor widen the returned feature set.
         if (!empty($operatorProfile['_trusted_mobile_merchant_session'])) {
             $granted = array_merge($granted, $this->mobileMerchantFeatures((int)($operatorProfile['employee_id'] ?? 0)));
         }
@@ -179,11 +191,13 @@ class CashierV3FeatureResolver
                 if ($id > 0) $ids[$id] = $id;
             }
             if (!$ids) return [];
-            $rows = \think\facade\Db::name('system_menus')->whereIn('id', array_values($ids))
-                ->field('unique_auth')->select()->toArray();
-            return $this->featuresFromUniqueAuths(array_map(static function (array $row): string {
-                return (string)($row['unique_auth'] ?? '');
-            }, $rows));
+            $features = [];
+            foreach ($ids as $id) {
+                foreach (self::MOBILE_MERCHANT_RULE_TO_FEATURES[$id] ?? [] as $feature) {
+                    $features[$feature] = $feature;
+                }
+            }
+            return array_values($features);
         } catch (\Throwable $exception) {
             return [];
         }

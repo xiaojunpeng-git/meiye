@@ -4,6 +4,7 @@ import { AlertTriangle, Barcode, FileSpreadsheet, Plus, QrCode, Search, Trash2, 
 import { inventoryApi, platformInventoryApi } from '../services/inventoryApi'
 import InventoryProductSelector from './InventoryProductSelector.vue'
 import InventoryStoreSelector from './InventoryStoreSelector.vue'
+import { inventoryStatusLabel } from '../statusLabels'
 
 const props = defineProps({
   pageKey: { type: String, default: '' },
@@ -174,6 +175,10 @@ function allocationStatus(allocation) {
   if (Number(allocation?.received_at || 0) > 0) return '已收货'
   if (Number(allocation?.dispatched_at || 0) > 0) return '在途'
   return '待发货'
+}
+
+function detailStatus(detail, fallback = '-') {
+  return inventoryStatusLabel(detail?.status_name || detail?.document_status, fallback)
 }
 
 const productRows = computed(() => {
@@ -805,7 +810,7 @@ async function submitWarehouse() {
               <section class="line-section"><header><div><h3>出库商品</h3><p>明细由已结算出库事实生成，不可在详情中修改。</p></div></header><div class="modal-table-scroll"><table><thead><tr><th>商品</th><th>规格</th><th>条码</th><th>扣减批次</th><th>生产日期</th><th>到期日</th><th>出库数量</th><th>库存单位</th><th>实际单位成本</th><th>成本金额</th></tr></thead><tbody><tr v-if="!detail.lines?.length"><td colspan="10" class="modal-empty">该出库单没有已结算明细</td></tr><tr v-for="(line, index) in detail.lines" :key="index"><td>{{ line.product_name }}</td><td>{{ line.sku_name || '默认规格' }}</td><td>{{ line.barcode || '-' }}</td><td>{{ line.batch_no }}</td><td>{{ line.manufactured_date }}</td><td>{{ line.expire_date }}</td><td>{{ line.quantity }}</td><td>{{ line.stock_unit }}</td><td>{{ line.unit_cost_cents === null ? '-' : `¥${(Number(line.unit_cost_cents) / 100).toFixed(2)}` }}</td><td>{{ line.cost_amount_cents === null ? '-' : `¥${(Number(line.cost_amount_cents) / 100).toFixed(2)}` }}</td></tr></tbody></table></div></section>
             </template>
             <template v-else-if="pageKey === 'count' && detail?.document">
-              <div class="detail-meta"><span>盘点单号：<b>{{ detail.document.order_sn || '-' }}</b></span><span>库存仓：{{ detail.document.location_name || scopeName }}</span><span>盘点日期：{{ detail.document.business_date || '-' }}</span><span>盘点状态：{{ detail.document.status_name || '-' }}</span></div>
+              <div class="detail-meta"><span>盘点单号：<b>{{ detail.document.order_sn || '-' }}</b></span><span>库存仓：{{ detail.document.location_name || scopeName }}</span><span>盘点日期：{{ detail.document.business_date || '-' }}</span><span>盘点状态：{{ detailStatus(detail.document) }}</span></div>
               <section class="line-section"><header><div><h3>盘点明细</h3><p>{{ detail.document.remark || '盘点数据已确认，明细仅供查看。' }}</p></div></header><div class="modal-table-scroll"><table><thead><tr><th>商品</th><th>规格</th><th>条码</th><th>账面库存</th><th>实盘库存</th><th>库存盈亏</th><th>库存单位</th><th>盘盈批次号</th><th>盘盈单价</th><th>生产日期</th><th>到期日</th></tr></thead><tbody><tr v-if="!detail.lines?.length"><td colspan="11" class="modal-empty">该盘点单没有商品明细</td></tr><tr v-for="line in detail.lines || []" :key="line.id"><td>{{ line.product_name }}</td><td>{{ line.sku_name || '默认规格' }}</td><td>{{ line.barcode || '-' }}</td><td>{{ line.book_quantity }}</td><td>{{ line.counted_quantity }}</td><td>{{ line.difference_quantity }}</td><td>{{ line.stock_unit || '-' }}</td><td>{{ line.surplus_batch_no || '-' }}</td><td>{{ line.surplus_unit_cost_cents === null || line.surplus_unit_cost_cents === undefined ? '-' : `¥${(Number(line.surplus_unit_cost_cents) / 100).toFixed(2)}` }}</td><td>{{ line.surplus_manufactured_date || '-' }}</td><td>{{ line.surplus_expire_date || '-' }}</td></tr></tbody></table></div></section>
             </template>
             <template v-else-if="pageKey === 'usage' && detail?.document">
@@ -822,11 +827,11 @@ async function submitWarehouse() {
               <section class="line-section"><header><div><h3>出入库流水</h3><p>仅展示当前商品最近 200 条已结算批次事实。</p></div></header><div class="modal-table-scroll"><table><thead><tr><th>业务日期</th><th>单据号</th><th>业务类型</th><th>方向</th><th>数量</th><th>单位</th><th>单位成本</th><th>发生仓库</th><th>成本金额</th></tr></thead><tbody><tr v-if="!detail.movements?.length"><td colspan="9" class="modal-empty">暂无出入库流水</td></tr><tr v-for="movement in detail.movements" :key="movement.id"><td>{{ movement.business_date }}</td><td>{{ movement.order_sn }}</td><td>{{ movementTypeName(movement.source_type) }}</td><td>{{ Number(movement.direction) > 0 ? '入库' : '出库' }}</td><td>{{ formatQuantity(movement.quantity_units, movement.quantity_scale) }}</td><td>{{ movement.stock_unit || detail.product.stock_unit }}</td><td>{{ movement.unit_cost_cents === null ? '-' : `¥${(Number(movement.unit_cost_cents) / 100).toFixed(2)}` }}</td><td>{{ movement.location_name }}</td><td>{{ movement.cost_amount_cents === null ? '-' : `¥${(Number(movement.cost_amount_cents) / 100).toFixed(2)}` }}</td></tr></tbody></table></div></section>
             </template>
             <template v-else-if="pageKey === 'request' && detail?.document">
-              <div class="detail-meta"><span>请货单号：<b>{{ detail.document.request_no }}</b></span><span>请货方：{{ detail.document.request_store_name || scopeName }}</span><span>供货方：{{ detail.document.supply_party_name_snapshot || '-' }}</span><span>状态：{{ detail.document.status_name || detail.document.document_status }}</span><span>申请日期：{{ detail.document.business_date }}</span></div>
+              <div class="detail-meta"><span>请货单号：<b>{{ detail.document.request_no }}</b></span><span>请货方：{{ detail.document.request_store_name || scopeName }}</span><span>供货方：{{ detail.document.supply_party_name_snapshot || '-' }}</span><span>状态：{{ detailStatus(detail.document) }}</span><span>申请日期：{{ detail.document.business_date }}</span></div>
               <section class="line-section"><header><div><h3>请货商品</h3><p>{{ detail.document.remark || '无备注' }}</p></div></header><div class="modal-table-scroll"><table><thead><tr><th>商品</th><th>规格</th><th>条码</th><th>申请数量</th><th>库存单位</th></tr></thead><tbody><tr v-if="!requestDetailLines.length"><td colspan="5" class="modal-empty">该请货单没有商品明细</td></tr><tr v-for="line in requestDetailLines" :key="line.id"><td>{{ line.product_name_snapshot }}</td><td>{{ line.sku_name_snapshot || '默认规格' }}</td><td>{{ line.barcode_snapshot || '-' }}</td><td>{{ line.quantity }}</td><td>{{ line.stock_unit_snapshot }}</td></tr></tbody></table></div></section>
             </template>
             <template v-else-if="pageKey === 'transfer' && detail?.transfer_no">
-              <div class="detail-meta"><span>调拨单号：<b>{{ detail.transfer_no }}</b></span><span>调出方：{{ detail.from_party_name_snapshot }}</span><span>调入方：{{ detail.to_party_name_snapshot }}</span><span>状态：{{ detail.status_name || detail.document_status }}</span><span>调拨日期：{{ detail.business_date }}</span></div>
+              <div class="detail-meta"><span>调拨单号：<b>{{ detail.transfer_no }}</b></span><span>调出方：{{ detail.from_party_name_snapshot }}</span><span>调入方：{{ detail.to_party_name_snapshot }}</span><span>状态：{{ detailStatus(detail) }}</span><span>调拨日期：{{ detail.business_date }}</span></div>
               <section class="line-section"><header><div><h3>调拨商品</h3><p>{{ detail.remark || '无备注' }}</p></div></header><div class="modal-table-scroll"><table><thead><tr><th>商品</th><th>规格</th><th>调拨数量</th><th>库存单位</th><th>批次分配</th><th>状态</th></tr></thead><tbody><tr v-if="!transferDetailLines.length"><td colspan="6" class="modal-empty">该调拨单没有商品明细</td></tr><template v-for="line in transferDetailLines" :key="line.id"><tr><td>{{ line.product_name_snapshot }}</td><td>{{ line.sku_name_snapshot || '默认规格' }}</td><td>{{ formatQuantity(line.requested_quantity_units, line.quantity_scale) }}</td><td>{{ line.stock_unit_snapshot }}</td><td>{{ line.allocations?.length || 0 }} 个批次</td><td>{{ detail.status_name || detail.document_status }}</td></tr><tr v-for="allocation in line.allocations || []" :key="allocation.id" class="allocation-row"><td colspan="2">批次 ID：{{ allocation.from_batch_id }}</td><td>{{ formatQuantity(allocation.quantity_units, allocation.quantity_scale) }}</td><td>单位成本：{{ allocation.unit_cost_cents === null ? '-' : `¥${(Number(allocation.unit_cost_cents) / 100).toFixed(2)}` }}</td><td>目标批次 ID：{{ allocation.to_batch_id || '-' }}</td><td>{{ allocationStatus(allocation) }}</td></tr></template></tbody></table></div></section>
             </template>
             <div v-else class="detail-meta"><span>此单据详情读取接口尚未接入。</span></div>

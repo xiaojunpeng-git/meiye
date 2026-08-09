@@ -21,10 +21,13 @@ final class MobileAuthRevocationServices
         }
         $now = time();
         $employee = Db::name('employee')->where('id', $employeeId)->lock(true)->find();
-        $state = Db::name('employee_mobile_auth_state')->where('employee_id', $employeeId)->lock(true)->find();
         if (!$employee) {
             throw MobileApiException::business('EMPLOYEE_NOT_FOUND', '员工认证状态不存在。');
         }
+        if (!$this->tableExists('employee_mobile_auth_state')) {
+            return;
+        }
+        $state = Db::name('employee_mobile_auth_state')->where('employee_id', $employeeId)->lock(true)->find();
         // 新建员工不会经过历史迁移。首次变更手机授权时，在同一事务补齐
         // 认证版本状态，随后仍按统一撤销链路推进版本和租约。
         if (!$state) {
@@ -78,5 +81,14 @@ final class MobileAuthRevocationServices
             'auth_version_before' => (int)$state['auth_version'], 'auth_version_after' => $authVersion, 'installation_digest' => null,
             'request_id' => $requestId, 'reason_code' => $reason, 'payload' => '{}', 'occurred_at' => $now, 'recorded_at' => $now,
         ]);
+    }
+
+    private function tableExists(string $table): bool
+    {
+        $row = Db::query(
+            'SELECT COUNT(*) AS c FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?',
+            [$table]
+        );
+        return (int)($row[0]['c'] ?? 0) > 0;
     }
 }

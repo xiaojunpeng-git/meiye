@@ -29,6 +29,8 @@ import RoomAssignmentOverlay from '@/components/room/RoomAssignmentOverlay.vue'
 import ServiceCompletionOverlay from '@/components/service/ServiceCompletionOverlay.vue'
 import ServiceLineCompletionEditorOverlay from '@/components/service/ServiceLineCompletionEditorOverlay.vue'
 import ServiceLineCraftsmenOverlay from '@/components/service/ServiceLineCraftsmenOverlay.vue'
+import InventoryWorkbench from '@mohe/inventory-vue3'
+import '@mohe/inventory-vue3/styles.css'
 import {
   canUseCashierV3Feature,
   createCashierV3CommandId,
@@ -109,49 +111,23 @@ let feedbackTimeoutId = null
 const sidebarPreferenceKey = 'cashier-v3-sidebar-collapsed'
 const isSidebarCollapsed = ref(readSidebarPreference())
 const isInventoryMenuExpanded = ref(false)
-const inventoryWorkspaceFrame = ref(null)
-
-function resolveInventoryEntryHref(page = '') {
-  const configuredHref = String(import.meta.env.VITE_INVENTORY_ENTRY_URL || '').trim()
-  const queryParameters = new URLSearchParams({ source: 'store' })
-  if (page) queryParameters.set('page', page)
-  // Inventory always asks its cashier parent for the current session. This
-  // keeps an embedded page from reusing a stale browser token after a store
-  // switch, including in the controlled static acceptance build.
-  if (typeof window !== 'undefined') {
-    queryParameters.set('parent_origin', window.location.origin)
-  }
-  const query = `?${queryParameters.toString()}`
-  if (configuredHref) {
-    return `${configuredHref}${configuredHref.includes('?') ? '&' : '?'}${queryParameters.toString()}`
-  }
-
-  if (import.meta.env.DEV && typeof window !== 'undefined' && ['127.0.0.1', 'localhost'].includes(window.location.hostname)) {
-    return `${window.location.protocol}//${window.location.hostname}:18088/view_inventory_v3/${query}`
-  }
-
-  return `/view_inventory_v3/${query}`
-}
+const inventorySessionToken = ref('')
 
 const inventoryFeatureItems = [
-  { key: 'overview', label: '首页', featureCode: 'cashier.v3.inventory.overview', href: resolveInventoryEntryHref() },
-  { key: 'inbound', label: '入库', featureCode: 'cashier.v3.inventory.inbound', href: resolveInventoryEntryHref('inbound') },
-  { key: 'outbound', label: '出库', featureCode: 'cashier.v3.inventory.outbound', href: resolveInventoryEntryHref('outbound') },
-  { key: 'stock', label: '库存', featureCode: 'cashier.v3.inventory.stock', href: resolveInventoryEntryHref('stock') },
-  { key: 'count', label: '盘点', featureCode: 'cashier.v3.inventory.count', href: resolveInventoryEntryHref('count') },
-  { key: 'statistics', label: '统计', featureCode: 'cashier.v3.inventory.statistics', href: resolveInventoryEntryHref('statistics') },
-  { key: 'request', label: '请货', featureCode: 'cashier.v3.inventory.request', href: resolveInventoryEntryHref('request') },
-  { key: 'transfer', label: '调拨', featureCode: 'cashier.v3.inventory.transfer', href: resolveInventoryEntryHref('transfer') },
-  { key: 'usage', label: '院装', featureCode: 'cashier.v3.inventory.usage', href: resolveInventoryEntryHref('usage') },
-  { key: 'import', label: '导入', featureCode: 'cashier.v3.inventory.import', href: resolveInventoryEntryHref('import') }
+  { key: 'overview', label: '首页', featureCode: 'cashier.v3.inventory.overview' },
+  { key: 'inbound', label: '入库', featureCode: 'cashier.v3.inventory.inbound' },
+  { key: 'outbound', label: '出库', featureCode: 'cashier.v3.inventory.outbound' },
+  { key: 'stock', label: '库存', featureCode: 'cashier.v3.inventory.stock' },
+  { key: 'count', label: '盘点', featureCode: 'cashier.v3.inventory.count' },
+  { key: 'statistics', label: '统计', featureCode: 'cashier.v3.inventory.statistics' },
+  { key: 'request', label: '请货', featureCode: 'cashier.v3.inventory.request' },
+  { key: 'transfer', label: '调拨', featureCode: 'cashier.v3.inventory.transfer' },
+  { key: 'usage', label: '院装', featureCode: 'cashier.v3.inventory.usage' },
+  { key: 'import', label: '导入', featureCode: 'cashier.v3.inventory.import' }
 ]
 const visibleInventoryFeatureItems = computed(() => inventoryFeatureItems.filter((entry) => canUseFeature(entry.featureCode)))
-const inventoryHomeHref = resolveInventoryEntryHref()
-const inventoryEntryHref = computed(() => visibleInventoryFeatureItems.value[0]?.href || inventoryHomeHref)
 const isInventoryWorkspaceOpen = ref(false)
 const activeInventoryFeatureKey = ref('overview')
-const inventoryWorkspaceHref = ref(inventoryHomeHref)
-
 const menuItems = [
   {
     key: 'cashier',
@@ -274,32 +250,13 @@ function toggleInventoryMenu() {
 function openInventoryWorkspace(entry = visibleInventoryFeatureItems.value[0]) {
   if (!entry || !canUseFeature(entry.featureCode)) return
   activeInventoryFeatureKey.value = entry.key
-  // Re-selecting the same inventory feature must recreate its iframe so the
-  // latest local Vue3 module is visible during cashier-side acceptance.
-  const separator = entry.href.includes('?') ? '&' : '?'
-  inventoryWorkspaceHref.value = `${entry.href}${separator}reload=${Date.now()}`
+  inventorySessionToken.value = readStoreV3SessionToken()
   isInventoryMenuExpanded.value = true
   isInventoryWorkspaceOpen.value = true
 }
 
 function closeInventoryWorkspace() {
   isInventoryWorkspaceOpen.value = false
-}
-
-function handleInventorySessionRequest(event) {
-  if (event?.data?.type !== 'cashier-v3:inventory-session-request') return
-  const frameWindow = inventoryWorkspaceFrame.value?.contentWindow
-  if (!frameWindow || event.source !== frameWindow) return
-  let inventoryOrigin = ''
-  try {
-    inventoryOrigin = new URL(inventoryWorkspaceHref.value).origin
-  } catch (_) {
-    return
-  }
-  if (event.origin !== inventoryOrigin) return
-  const token = readStoreV3SessionToken()
-  if (!token) return
-  frameWindow.postMessage({ type: 'cashier-v3:inventory-session', token }, inventoryOrigin)
 }
 
 function isMenuItemActive(item) {
@@ -2213,7 +2170,6 @@ onMounted(() => {
   window.addEventListener('cashier-v3:open-service-completion', openServiceCompletion)
   window.addEventListener('cashier-v3:register-service-completion-request', registerServiceCompletionPreparation)
   window.addEventListener('cashier-v3:register-room-assignment-request', registerRoomAssignmentPreparation)
-  window.addEventListener('message', handleInventorySessionRequest)
 })
 onBeforeUnmount(() => {
   window.removeEventListener('cashier-v3:ui-result', handleUiResult)
@@ -2226,7 +2182,6 @@ onBeforeUnmount(() => {
   window.removeEventListener('cashier-v3:open-service-completion', openServiceCompletion)
   window.removeEventListener('cashier-v3:register-service-completion-request', registerServiceCompletionPreparation)
   window.removeEventListener('cashier-v3:register-room-assignment-request', registerRoomAssignmentPreparation)
-  window.removeEventListener('message', handleInventorySessionRequest)
   closeQueryEntitySelector({ reason: 'shell-unmounted' })
   closeServiceCompletion()
   closeRoomAssignment()
@@ -2274,7 +2229,7 @@ onBeforeUnmount(() => {
           <div v-if="canUseFeature(item.featureCode) && item.submenu && visibleInventoryFeatureItems.length" class="cashier-inventory-group">
             <div class="cashier-inventory-entry" :class="{ 'cashier-inventory-entry--open': isInventoryMenuExpanded }">
               <a
-                :href="inventoryEntryHref"
+                href="#/cashier"
                 class="cashier-nav__item cashier-nav__item--inventory"
                 :aria-label="item.label"
                 :title="isSidebarCollapsed ? item.label : undefined"
@@ -2300,7 +2255,7 @@ onBeforeUnmount(() => {
                 :key="entry.key"
                 class="cashier-inventory-grid__item"
                 :class="{ 'cashier-inventory-grid__item--active': activeInventoryFeatureKey === entry.key && isInventoryWorkspaceOpen }"
-                :href="entry.href"
+                href="#/cashier"
                 @click.prevent="openInventoryWorkspace(entry)"
               >{{ entry.label }}</a>
             </div>
@@ -2411,7 +2366,12 @@ onBeforeUnmount(() => {
 
       <main class="cashier-main__content" :class="{ 'cashier-main__content--with-member': isCashierWorkflowPage && !isInventoryWorkspaceOpen }">
         <section v-if="isInventoryWorkspaceOpen" class="cashier-inventory-workspace" aria-label="库存管理工作区">
-          <iframe ref="inventoryWorkspaceFrame" class="cashier-inventory-workspace__frame" :src="inventoryWorkspaceHref" :title="`库存管理：${inventoryFeatureItems.find((entry) => entry.key === activeInventoryFeatureKey)?.label || '首页'}`" />
+          <InventoryWorkbench
+            entry-mode="store"
+            :entry-page="activeInventoryFeatureKey"
+            :embedded="true"
+            :session-token="inventorySessionToken"
+          />
         </section>
         <template v-else>
         <div v-if="isCashierPage" class="cashier-workflow-toolbar cashier-workflow-toolbar--cashier" aria-label="当前办理会员与收银功能">
@@ -2793,14 +2753,6 @@ onBeforeUnmount(() => {
   width: 100%;
   height: 100%;
   min-height: 0;
-  background: #f2f1ef;
-}
-
-.cashier-inventory-workspace__frame {
-  display: block;
-  width: 100%;
-  height: 100%;
-  border: 0;
   background: #f2f1ef;
 }
 </style>

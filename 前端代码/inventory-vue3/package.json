@@ -1,8 +1,12 @@
 {
-  "name": "mohe-inventory-vue3",
+  "name": "@mohe/inventory-vue3",
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "exports": {
+    ".": "./src/index.js",
+    "./styles.css": "./src/styles.css"
+  },
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 18088 --strictPort",
     "build": "vite build"

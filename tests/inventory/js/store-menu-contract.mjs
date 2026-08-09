@@ -5,6 +5,9 @@ import { fileURLToPath } from 'node:url'
 const here = path.dirname(fileURLToPath(import.meta.url))
 const root = path.resolve(here, '../../..')
 const shellPath = path.join(root, '前端代码/cashier-v3/src/layouts/CashierShell.vue')
+const cashierPackagePath = path.join(root, '前端代码/cashier-v3/package.json')
+const inventoryPackagePath = path.join(root, '前端代码/inventory-vue3/package.json')
+const inventoryModuleEntryPath = path.join(root, '前端代码/inventory-vue3/src/index.js')
 const cashierBridgePath = path.join(root, '前端代码/cashier-v3/src/services/cashierV3Bridge.js')
 const inventoryAppPath = path.join(root, '前端代码/inventory-vue3/src/App.vue')
 const inventoryModalPath = path.join(root, '前端代码/inventory-vue3/src/components/InventoryBusinessModal.vue')
@@ -12,6 +15,9 @@ const inventoryOperationalToolbarPath = path.join(root, '前端代码/inventory-
 const unifiedQueryToolbarPath = path.join(root, '前端代码/shared/unified-query-vue3/src/components/UnifiedQueryToolbar.vue')
 const inventoryBatchContractPath = path.join(root, '后端代码/app/services/product/inventory/query/InventoryBatchStockQueryContract.php')
 const source = fs.readFileSync(shellPath, 'utf8')
+const cashierPackage = JSON.parse(fs.readFileSync(cashierPackagePath, 'utf8'))
+const inventoryPackage = JSON.parse(fs.readFileSync(inventoryPackagePath, 'utf8'))
+const inventoryModuleEntry = fs.readFileSync(inventoryModuleEntryPath, 'utf8')
 const cashierBridge = fs.readFileSync(cashierBridgePath, 'utf8')
 const inventoryApp = fs.readFileSync(inventoryAppPath, 'utf8')
 const inventoryModal = fs.readFileSync(inventoryModalPath, 'utf8')
@@ -42,18 +48,26 @@ check('inventory parent follows the cashier workbench gate while subentries have
 check('inventory group is rendered inside the shared store shell navigation',
   source.includes('v-if="canUseFeature(item.featureCode) && item.submenu && visibleInventoryFeatureItems.length"')
     && source.includes('class="cashier-inventory-grid"')
-    && source.includes(':href="entry.href"'))
-check('inventory entry keeps production same-origin and local Vue3 development routes',
-  source.includes('return `/view_inventory_v3/${query}`')
-    && source.includes("VITE_INVENTORY_ENTRY_URL")
-    && source.includes(":18088/view_inventory_v3/")
-    && source.includes("source: 'store'"))
-check('embedded inventory always receives the current cashier session after a store switch',
-  source.includes("queryParameters.set('parent_origin', window.location.origin)")
-    && source.includes("import { readStoreV3SessionToken } from '@/services/storeV3SessionToken'")
-    && source.includes('const token = readStoreV3SessionToken()')
-    && source.includes("type: 'cashier-v3:inventory-session'")
-    && inventoryApp.includes("type: 'cashier-v3:inventory-session-request'"))
+    && source.includes('@click.prevent="openInventoryWorkspace(entry)"'))
+check('cashier directly mounts the shared Vue3 inventory workbench instead of an iframe or preview port',
+  source.includes("import InventoryWorkbench from '@mohe/inventory-vue3'")
+    && source.includes('<InventoryWorkbench')
+    && source.includes('entry-mode="store"')
+    && source.includes(':entry-page="activeInventoryFeatureKey"')
+    && source.includes(':embedded="true"')
+    && !source.includes('<InventoryIframeBridge')
+    && !source.includes('inventoryEmbedOrigin')
+    && !source.includes('18092')
+    && cashierPackage.dependencies?.['@mohe/inventory-vue3'] === 'file:../inventory-vue3'
+    && inventoryPackage.exports?.['.'] === './src/index.js'
+    && inventoryPackage.exports?.['./styles.css'] === './src/styles.css'
+    && inventoryModuleEntry.includes("export { default as InventoryWorkbench } from './App.vue'"))
+check('cashier supplies its current Store V3 session directly to the mounted inventory workbench',
+  source.includes("import { readStoreV3SessionToken } from '@/services/storeV3SessionToken'")
+    && source.includes('inventorySessionToken.value = readStoreV3SessionToken()')
+    && source.includes(':session-token="inventorySessionToken"')
+    && inventoryApp.includes('watch(() => props.sessionToken')
+    && inventoryApp.includes('setInventoryEmbeddedSessionToken(value)'))
 check('a late embedded session refreshes store scope dashboard and the active inventory list',
   inventoryApp.includes("const wasWaiting = typeof embeddedSessionReady === 'function'")
     && inventoryApp.includes('if (!wasWaiting)')
@@ -70,16 +84,14 @@ check('inventory opens inside the store work area with the first permitted funct
     && source.includes('activeInventoryFeatureKey.value = entry.key')
     && source.includes('class="cashier-inventory-workspace"')
     && source.includes('@click.prevent="openInventoryWorkspace()"')
-    && source.includes('const inventoryEntryHref = computed(() => visibleInventoryFeatureItems.value[0]?.href || inventoryHomeHref)')
-    && source.includes(':href="inventoryEntryHref"'))
+    && source.includes(':entry-page="activeInventoryFeatureKey"'))
 check('current cashier entries remain individually gated and omit the closed movement entry',
   ['首页', '入库', '出库', '库存', '盘点', '统计', '请货', '调拨', '院装', '导入']
     .every((label) => source.includes(`label: '${label}'`))
     && ['overview', 'inbound', 'outbound', 'stock', 'count', 'statistics', 'request', 'transfer', 'usage', 'import']
       .every((key) => source.includes(`featureCode: 'cashier.v3.inventory.${key}'`))
     && !source.includes("key: 'movement', label: '明细'")
-    && !source.includes("label: '项目配方', href: resolveInventoryEntryHref('recipe')")
-    && source.includes('const inventoryHomeHref = resolveInventoryEntryHref()')
+    && !source.includes("key: 'recipe', label: '项目配方'")
     && inventoryApp.includes('function applyRequestedPage()')
     && inventoryApp.includes("['store', 'platform'].includes(new URLSearchParams(window.location.search).get('source'))")
     && !inventoryApp.includes("key: 'movement', label:")
@@ -102,7 +114,7 @@ check('inventory rows no longer forge a store operator and transfer is explicitl
   !inventoryApp.includes('王晓雯')
     && !inventoryApp.includes("text(row.operator_name || row.admin_name || row.staff_name, '—')")
     && inventoryApp.includes('row.store_name_label || row.store_name || row.store_name_snapshot || row.location_name || scopeName.value')
-    && inventoryModal.includes('调入门店')
+    && inventoryModal.includes('调入方')
     && inventoryModal.includes('收货时入账')
     && inventoryModal.includes('crossTransferIncomingRequests'))
 check('unimplemented exports are not exposed as clickable actions',
@@ -144,15 +156,20 @@ check('permission-filtered inventory cost does not disable safe unified-query ca
 check('embedded platform pages hide the duplicate inventory navigation and narrow stock only by store',
   inventoryApp.includes('const isEmbeddedEntry')
     && inventoryApp.includes("['store', 'platform'].includes")
+    && inventoryApp.includes('entryMode: { type: String')
+    && inventoryApp.includes('entryPage: { type: String')
+    && inventoryApp.includes('embedded: { type: Boolean')
+    && inventoryApp.includes('sessionToken: { type: String')
+    && inventoryApp.includes('watch(() => props.entryPage')
     && inventoryApp.includes('const platformStoreId = ref(0)')
     && inventoryApp.includes("? { storeId: Number(platformStoreId.value) }")
     && !inventoryApp.includes('platformLocationId'))
 check('platform HQ operations bind catalog, inbound, and transfer to one selected headquarters location',
   inventoryApp.includes('const platformHqLocationId = ref(0)')
     && inventoryApp.includes('const platformHqLocations = computed')
-    && inventoryApp.includes('listHqInbound({ hq_location_id: Number(platformHqLocationId.value)')
-    && inventoryApp.includes('listHqCrossTransfers({ hq_location_id: Number(platformHqLocationId.value)')
-    && inventoryModal.includes('catalogQuery = computed(() => isPlatformHeadquarters.value')
+    && inventoryApp.includes('listHqInbound(listWarehouseQuery)')
+    && inventoryApp.includes('listHqCrossTransfers({ hq_location_id: Number(platformHqLocationId.value), ...query })')
+    && inventoryModal.includes('const catalogQuery = computed(() =>')
     && inventoryModal.includes('createHqInbound({ ...payload, hq_location_id: Number(props.hqLocationId) })')
     && inventoryModal.includes('createHqCrossTransfer({ ...payload, hq_location_id: Number(props.hqLocationId) })'))
 check('request detail and edit are wired to the V3 authority and import accepts a dropped xlsx file',

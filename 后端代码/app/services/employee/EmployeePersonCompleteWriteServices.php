@@ -307,8 +307,9 @@ class EmployeePersonCompleteWriteServices extends BaseServices
         ];
         // 员工授权是手机端唯一入口开关。任职渠道记录仅供兼容和审计，
         // 无店直属员工没有任职记录也可以由组织数据权限限定可操作门店。
-        $mobileAuthOn = (int)Db::name('employee_mobile_auth')
-            ->where('employee_id', $employeeId)->where('is_del', 0)->where('status', 1)->count() > 0;
+        $mobileAuthOn = $this->hasEmployeeMobileAuthTable()
+            && (int)Db::name('employee_mobile_auth')
+                ->where('employee_id', $employeeId)->where('is_del', 0)->where('status', 1)->count() > 0;
         $result['mobile_enabled'] = $mobileAuthOn ? 1 : 0;
         if ($staff) {
             foreach ([
@@ -663,7 +664,8 @@ class EmployeePersonCompleteWriteServices extends BaseServices
                 : 1,
             'mobile_enabled' => $mobileAccessOut !== null
                 ? (int)$mobileAccessOut['enabled']
-                : ((int)Db::name('employee_mobile_auth')->where('employee_id', $employeeId)->where('is_del', 0)->where('status', 1)->count() > 0 ? 1 : 0),
+                : ($this->hasEmployeeMobileAuthTable()
+                    && (int)Db::name('employee_mobile_auth')->where('employee_id', $employeeId)->where('is_del', 0)->where('status', 1)->count() > 0 ? 1 : 0),
             'auth_version' => (int)($authProjection['auth_version'] ?? 0),
         ];
         if ($employmentTypeOut !== null) {
@@ -698,6 +700,15 @@ class EmployeePersonCompleteWriteServices extends BaseServices
         ]);
 
         return $out;
+    }
+
+    private function hasEmployeeMobileAuthTable(): bool
+    {
+        $row = Db::query(
+            'SELECT COUNT(*) AS c FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?',
+            ['employee_mobile_auth']
+        );
+        return (int)($row[0]['c'] ?? 0) > 0;
     }
 
     protected function upsertEmployee(

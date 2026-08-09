@@ -706,6 +706,15 @@ class StaffJobPositionServices extends BaseServices
         $this->assertEmployee($employeeId);
         $ruleIds = $this->computeEmployeeChannelRulesUnion($employeeId, JobPositionPolicyServices::CHANNEL_MOBILE);
         $rules = implode(',', $ruleIds);
+        if (!$this->hasEmployeeMobileAuthTable()) {
+            return [
+                'employee_id' => $employeeId,
+                'rules' => '',
+                'rule_ids' => [],
+                'id' => 0,
+                'status' => 0,
+            ];
+        }
         $now = time();
         $row = Db::name('employee_mobile_auth')->where('employee_id', $employeeId)->lock(true)->find();
         $newStatus = $status;
@@ -1142,6 +1151,15 @@ class StaffJobPositionServices extends BaseServices
             ->where('is_del', 0)
             ->order('id', 'asc')
             ->select()->toArray();
+    }
+
+    private function hasEmployeeMobileAuthTable(): bool
+    {
+        $row = Db::query(
+            'SELECT COUNT(*) AS c FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?',
+            ['employee_mobile_auth']
+        );
+        return (int)($row[0]['c'] ?? 0) > 0;
     }
 
     /**

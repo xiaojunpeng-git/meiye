@@ -5,7 +5,9 @@ $backend = is_dir('/workspace/后端代码') ? '/workspace/后端代码' : '/var
 require $backend . '/vendor/autoload.php';
 
 use app\services\cashier\v3\CashierV3DataScopeContext;
+use app\services\cashier\v3\CashierV3CommandException;
 use app\services\cashier\v3\CashierV3OperatorScope;
+use app\services\cashier\v3\order\CashierV3SalesOrderInventoryReversalServices;
 use app\services\cashier\v3\settlement\CashierV3CheckoutSettlementCanonicalizer;
 use app\services\cashier\v3\settlement\CashierV3CheckoutSettlementContractException;
 use app\services\cashier\v3\settlement\CashierV3SaleInventorySettlementServices;
@@ -184,6 +186,45 @@ saleInventoryDbOk('same plan replay returns its receipt without a second deducti
     !empty($replayed['replayed'])
     && (int)Db::name('inventory_stock')->where('id', 701)->value('available_quantity_units') === 2
     && (int)Db::name('inventory_batch_movement_fact')->where('source_type', 'cashier_sale')->count() === 2);
+
+$voidResult = [];
+Db::startTrans();
+try {
+    $voidResult = (new CashierV3SalesOrderInventoryReversalServices())->reverseForVoidInTx([
+        'sourceId' => $orderId,
+        'checkoutRequestId' => $requestId,
+    ], 'OLO-' . str_repeat('a', 40), $operator, $dataScope, 1785369700);
+    Db::commit();
+} catch (Throwable $exception) {
+    Db::rollback();
+    throw $exception;
+}
+saleInventoryDbOk('void restores the exact original batches and appends linked reversal movements',
+    $voidResult === ['restoredAllocationCount' => 2, 'restoredQuantityUnits' => 3]
+    && (int)Db::name('inventory_stock')->where('id', 701)->value('available_quantity_units') === 5
+    && (int)Db::name('inventory_batch')->where('id', 801)->value('available_quantity_units') === 1
+    && (int)Db::name('inventory_batch')->where('id', 802)->value('available_quantity_units') === 4
+    && (int)Db::name('inventory_batch')->where('id', 801)->value('cost_allocated_quantity_units') === 0
+    && (int)Db::name('inventory_batch')->where('id', 802)->value('cost_allocated_quantity_units') === 0
+    && (int)Db::name('inventory_batch_movement_fact')->where('source_type', 'cashier_sale_void')
+        ->where('direction', 1)->where('reversal_of', '>', 0)->count() === 2);
+
+$duplicateVoidReason = '';
+Db::startTrans();
+try {
+    (new CashierV3SalesOrderInventoryReversalServices())->reverseForVoidInTx([
+        'sourceId' => $orderId,
+        'checkoutRequestId' => $requestId,
+    ], 'OLO-' . str_repeat('b', 40), $operator, $dataScope, 1785369800);
+    Db::commit();
+} catch (CashierV3CommandException $exception) {
+    $duplicateVoidReason = (string)($exception->getDetail()['reason'] ?? '');
+    Db::rollback();
+}
+saleInventoryDbOk('a second void cannot restore inventory twice',
+    $duplicateVoidReason === 'sales_void_inventory_already_reversed'
+    && (int)Db::name('inventory_stock')->where('id', 701)->value('available_quantity_units') === 5
+    && (int)Db::name('inventory_batch_movement_fact')->where('source_type', 'cashier_sale_void')->count() === 2);
 
 $conflictReason = '';
 Db::startTrans();

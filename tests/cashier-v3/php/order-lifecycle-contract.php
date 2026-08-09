@@ -3,6 +3,7 @@
 $root = dirname(__DIR__, 3);
 $service = file_get_contents($root . '/后端代码/app/services/cashier/v3/order/CashierV3OrderLifecycleServices.php');
 $reversalService = file_get_contents($root . '/后端代码/app/services/cashier/v3/order/CashierV3SalesOrderReversalServices.php');
+$inventoryReversalService = file_get_contents($root . '/后端代码/app/services/cashier/v3/order/CashierV3SalesOrderInventoryReversalServices.php');
 $module = file_get_contents($root . '/后端代码/app/services/cashier/v3/order/CashierV3OrderLifecycleModule.php');
 $manifest = file_get_contents($root . '/后端代码/app/services/cashier/v3/manifest/CashierV3ActionManifest.php');
 $migration = file_get_contents($root . '/后端代码/database/upgrades/2026-08-05-收银V3订单生命周期权威/02-正式升级.sql');
@@ -20,7 +21,10 @@ $checks = [
     'personnel_reverses_then_reallocates' => strpos($service, 'insertReversal') !== false && strpos($service, 'insertAdjustedPerformance') !== false && strpos($service, 'personnel_adjustment_staff_ineligible') !== false
         && strpos($service, 'effectivePersonnelFactsForLine') !== false && strpos($service, 'cashPerformanceForLine') !== false
         && strpos($service, "'ORDER-PERSONNEL-ADJUST-V1'") !== false,
-    'strict_void_restores_supported_authorities_and_keeps_inventory_closed' => strpos($service, 'order_reversal_inventory_unsupported') !== false
+    'strict_void_restores_supported_authorities_and_inventory' => strpos($service, 'CashierV3SalesOrderInventoryReversalServices') !== false
+        && strpos($inventoryReversalService, "'sourceType' => 'cashier_sale_void'") !== false
+        && strpos($inventoryReversalService, "'reversalOf' => (int)\$fact['id']") !== false
+        && strpos($inventoryReversalService, 'sales_void_inventory_already_reversed') !== false
         && strpos($service, 'CashierV3SalesOrderReversalServices') !== false
         && strpos($service, "cashier_v3_order_lifecycle_financial_reversal") !== false
         && strpos($reversalService, 'creditBenGive') !== false

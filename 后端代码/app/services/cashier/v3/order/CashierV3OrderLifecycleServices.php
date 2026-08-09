@@ -139,12 +139,18 @@ final class CashierV3OrderLifecycleServices
             $reopenDraftId = $this->createReopenDraft($source, $input, $operationId, $commandKey, $now, $dataScope);
         } else {
             // A void/refund is an append-only reversal, never an order-status
-            // overwrite.  Unsupported current-right or inventory domains are
-            // deliberately rejected before a single accounting row is written.
+            // overwrite.  Unsupported current-right domains are deliberately
+            // rejected before a single accounting row is written. Product
+            // inventory is restored only for a full void, never a refund.
             $financial = $this->assertFinancialReversalEligible($source, $action, $input, $dataScope);
             $input['cashRefundCents'] = (int)$financial['cashRefundCents'];
             $input['restorePrincipalCents'] = (int)$financial['restorePrincipalCents'];
             $input['restoreBonusCents'] = (int)$financial['restoreBonusCents'];
+            if ($action === 'void-sales-order') {
+                (new CashierV3SalesOrderInventoryReversalServices())->reverseForVoidInTx(
+                    $source, $operationId, $operator, $dataScope, $now
+                );
+            }
             (new CashierV3SalesOrderReversalServices())->apply(
                 $source, $action, $financial, $operationId, $commandKey, $operator, $dataScope, $now
             );
@@ -273,10 +279,8 @@ final class CashierV3OrderLifecycleServices
         $hasEntitlement = Db::name('cashier_v3_entitlement_completion_receipt')
             ->where('tenant_id', $scope->tenantId())
             ->where('checkout_request_id', $source['checkoutRequestId'])->count() > 0;
-        $lineTypes = Db::name('cashier_v3_sales_order_line')->where('tenant_id', $scope->tenantId())->where('order_id', $source['sourceId'])->where('line_direction', 'forward')->column('item_type');
-        // 商品依赖库存冲销，本闭环不跨越库存边界。卡项则由专用权益
-        // 撤销服务逐张验证，仅完全未使用时放行。
-        if (in_array('product', $lineTypes, true)) throw self::failure('order_reversal_inventory_unsupported');
+        // 卡项由专用权益撤销服务逐张验证，仅完全未使用时放行。商品
+        // 的原批次库存回补在同一事务内由专用库存冲销服务完成。
         if ($hasEntitlement) throw self::failure('order_reversal_entitlement_already_consumed');
         return (new CashierV3SalesOrderReversalServices())->prepare($source, $action, $input, $scope);
     }

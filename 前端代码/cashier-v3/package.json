@@ -9,6 +9,7 @@
     "preview": "vite preview --host 127.0.0.1 --port 18087 --strictPort"
   },
   "dependencies": {
+    "@mohe/inventory-vue3": "file:../inventory-vue3",
     "@mohe/unified-query-vue3": "file:../shared/unified-query-vue3",
     "@lucide/vue": "^1.27.0",
     "vue": "^3.4.38",
