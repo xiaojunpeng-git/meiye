@@ -800,7 +800,7 @@ final class CashierV3OrderCenterRecordQueryServices
             'sf.business_date', 'sf.member_id', 'sf.member_name_snapshot', 'sf.project_id',
             'sf.project_name_snapshot', 'sf.quantity', 'sf.store_id', 'sf.store_name_snapshot',
             'sf.operator_id', 'sf.operator_name_snapshot', 'sf.settled_at', 'sf.occurred_at',
-            'sf.craftsmen_snapshot_json', 'sf.service_status', 'wf.is_gift', 'wf.source_kind',
+            'sf.craftsmen_snapshot_json', 'sf.service_status', 'sf.source_document_type', 'wf.is_gift', 'wf.source_kind',
             'wf.source_name_snapshot AS source_name_snapshot',
             'wf.source_code_snapshot AS source_code_snapshot',
         ]));
@@ -892,14 +892,34 @@ final class CashierV3OrderCenterRecordQueryServices
         $names = [];
         foreach ($items as $item) {
             if (!is_array($item)) continue;
-            $name = trim((string)($item['staff_name_snapshot'] ?? $item['staffName'] ?? $item['staff_name'] ?? ''));
-            if ($name !== '' && !in_array($name, $names, true)) $names[] = $name;
+            $name = trim((string)(
+                $item['staff_name_snapshot']
+                ?? $item['staffName']
+                ?? $item['staff_name']
+                ?? $item['name']
+                ?? ''
+            ));
+            if ($name === '') continue;
+            // “点/轮” is frozen at checkout in the craftsmen snapshot. Never
+            // infer it from a current member or staff record when reading a
+            // historical completed service.
+            if (array_key_exists('isPointCustomer', $item)) {
+                $label = $name . ((bool)$item['isPointCustomer'] ? '（点）' : '（轮）');
+            } elseif (array_key_exists('is_point_customer', $item)) {
+                $label = $name . ((bool)$item['is_point_customer'] ? '（点）' : '（轮）');
+            } else {
+                $label = $name;
+            }
+            if (!in_array($label, $names, true)) $names[] = $label;
         }
         return implode('、', $names);
     }
 
     private function serviceEntitlementSource(array $row): string
     {
+        if ((string)($row['source_document_type'] ?? '') === 'sales_order') {
+            return '现金购买项目';
+        }
         if ((int)($row['is_gift'] ?? 0) === 1) return '赠送权益';
         $kind = trim((string)($row['source_kind'] ?? ''));
         $labels = [

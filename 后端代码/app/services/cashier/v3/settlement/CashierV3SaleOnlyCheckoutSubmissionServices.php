@@ -49,6 +49,7 @@ final class CashierV3SaleOnlyCheckoutSubmissionServices
         'eb_cashier_v3_payment_fact',
         'eb_cashier_v3_balance_fact',
         'eb_cashier_v3_performance_fact',
+        'eb_cashier_v3_entitlement_service_fact',
         'eb_store_debt',
         'eb_store_debt_item',
         'eb_cashier_v3_debt_authority',
@@ -106,6 +107,9 @@ final class CashierV3SaleOnlyCheckoutSubmissionServices
     /** @var CashierV3CheckoutBusinessSourceSelectionServices */
     private $businessSources;
 
+    /** @var CashierV3SaleProjectServiceCompletionServices */
+    private $saleProjectServices;
+
     /** @var string */
     private $serverNamespaceSecret;
 
@@ -122,7 +126,8 @@ final class CashierV3SaleOnlyCheckoutSubmissionServices
         CashierV3MemberBalanceWriterAdapter $balances = null,
         CashierV3CheckoutDebtAuthorityServices $debts = null,
         ?CashierV3CardOperationCheckoutSettlementServices $cardOperationSettlements = null,
-        ?CashierV3CheckoutBusinessSourceSelectionServices $businessSources = null
+        ?CashierV3CheckoutBusinessSourceSelectionServices $businessSources = null,
+        ?CashierV3SaleProjectServiceCompletionServices $saleProjectServices = null
     ) {
         $this->workspace = $workspace;
         $this->requests = $requests ?: new ThinkPhpCashierV3CheckoutRequestRepository();
@@ -139,6 +144,8 @@ final class CashierV3SaleOnlyCheckoutSubmissionServices
             ?: new CashierV3CardOperationCheckoutSettlementServices();
         $this->businessSources = $businessSources
             ?: new CashierV3CheckoutBusinessSourceSelectionServices();
+        $this->saleProjectServices = $saleProjectServices
+            ?: new CashierV3SaleProjectServiceCompletionServices($this->salesOrders);
     }
 
     public function submitInTx(array $scope): array
@@ -405,6 +412,48 @@ final class CashierV3SaleOnlyCheckoutSubmissionServices
                 'source_id' => $requestId,
                 'command_idempotency_key' => $commandKey,
             ]);
+            // Product decision: a cash-purchased project (member or guest)
+            // completes service at successful settlement.  The service fact
+            // references the transaction's committed checkout event; a later
+            // failure rolls both facts back together.
+            $saleProjectServiceResult = $this->saleProjectServices->completeInTx(
+                $salesPlan,
+                $salesResult,
+                $now,
+                (string)$eventAuthority['event_no']
+            );
+            foreach ((array)$saleProjectServiceResult['services'] as $service) {
+                $eventRecorder->recordInTx($eventExecution, $eventContract, [
+                    'event_type' => 'service.completed',
+                    'aggregate_type' => 'service_line',
+                    'aggregate_id' => (string)$service['sourceLineId'],
+                    'aggregate_version' => 1,
+                    'event_version' => 1,
+                    'source_type' => self::ACTION,
+                    'source_id' => $requestId,
+                    'member_id' => (int)$order['member_id'],
+                    'business_date' => (string)$order['business_date'],
+                    'occurred_at' => $now,
+                    'settled_at' => $now,
+                    'recorded_at' => $now,
+                    'aggregate_name_snapshot' => (string)$service['projectNameSnapshot'],
+                    'store_name_snapshot' => (string)$order['store_name_snapshot'],
+                    'payload' => [
+                        'contractVersion' => 'cashier-v3-sale-project-service-v1',
+                        'checkoutRequestId' => $requestId,
+                        'salesOrderId' => (string)$order['order_id'],
+                        'salesOrderNo' => (string)$order['order_no'],
+                        'serviceFactId' => (string)$service['serviceFactId'],
+                        'serviceRecordNo' => (string)$service['serviceRecordNo'],
+                        'sourceLineId' => (string)$service['sourceLineId'],
+                        'projectId' => (int)$service['projectId'],
+                        'quantity' => (int)$service['quantity'],
+                        'serviceObject' => (string)$service['serviceObject'],
+                        'isExperience' => (bool)$service['isExperience'],
+                        'source' => 'cash_project_sale',
+                    ],
+                ]);
+            }
 
             $factPlan = CashierV3SaleOnlyFactAssembler::assemble(
                 $aggregate,
@@ -428,13 +477,10 @@ final class CashierV3SaleOnlyCheckoutSubmissionServices
                 $operatorScope,
                 $dataScope
             );
-            $hangCompletion = $this->hangBindings->completeFromCheckoutInTx(
+            $hangResult = $this->hangBindings->completeFromCheckoutInTx(
                 $aggregate,
                 $requestId,
-                [
-                    'orderId' => (string)$salesResult['orderId'],
-                    'orderNo' => (string)$salesResult['orderNo'],
-                ],
+                $salesResult,
                 $operatorScope,
                 $dataScope,
                 $eventRecorder,
@@ -475,16 +521,18 @@ final class CashierV3SaleOnlyCheckoutSubmissionServices
                 'businessEventNo' => (string)$eventAuthority['event_no'],
                 'factFingerprint' => (string)$factResult['planFingerprint'],
                 'settledAt' => $now,
-                'hangOrder' => $hangCompletion,
                 'cardPurchase' => [
                     'issuedCardCount' => (int)$cardPurchaseResult['issuedCardCount'],
                     'receipts' => (array)$cardPurchaseResult['receipts'],
                 ],
                 'cardOperation' => $cardOperationSettlement,
+                'saleProjectService' => $saleProjectServiceResult,
+                'hangOrder' => $hangResult,
                 'cashierDraft' => $cashierDraft,
                 'replayed' => !empty($salesResult['replayed'])
                     || !empty($paymentResult['replayed'])
                     || !empty($inventoryResult['replayed'])
+                    || !empty($saleProjectServiceResult['replayed'])
                     || !empty($cardPurchaseResult['replayed'])
                     || !empty($debtResult['replayed'])
                     || array_sum((array)$factResult['replayed']) > 0,
