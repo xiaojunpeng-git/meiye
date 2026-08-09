@@ -468,7 +468,18 @@ function relationRecordLabel(record) {
 
 function relationRecordStatus(record) {
   if (!record || typeof record !== 'object') return ''
-  return pickValue(record, ['statusLabel', 'status', 'state']) || ''
+  const statusLabel = pickValue(record, ['statusLabel', 'status_label'])
+  if (statusLabel) return String(statusLabel)
+  const status = String(pickValue(record, ['status', 'state']) || '')
+  return {
+    succeeded: '已完成',
+    success: '已完成',
+    failed: '失败',
+    conflict: '版本冲突',
+    result_unknown: '结果未知',
+    pending: '处理中',
+    processing: '处理中'
+  }[status] || (/^[\u4e00-\u9fff]/.test(status) ? status : '')
 }
 
 function relationRecordId(record) {

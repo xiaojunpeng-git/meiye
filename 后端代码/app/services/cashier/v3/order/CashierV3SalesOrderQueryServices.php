@@ -1299,8 +1299,10 @@ final class CashierV3SalesOrderQueryServices
         $operationRecords = array_map(function (array $operation): array {
             $labels = ['personnel_adjustment' => '人员调整', 'refund' => '退款', 'void' => '作废', 'reopen' => '重开'];
             $type = (string)$operation['operation_type'];
+            $status = (string)$operation['status'];
             return ['id' => (string)$operation['operation_id'], 'operationNo' => (string)$operation['operation_no'],
-                'operationType' => (string)$operation['operation_type'], 'status' => (string)$operation['status'],
+                'operationType' => (string)$operation['operation_type'], 'status' => $status,
+                'statusLabel' => $this->operationStatusLabel($status),
                 'actionLabel' => $labels[$type] ?? '订单操作',
                 'reason' => (string)$operation['reason_snapshot'], 'content' => (string)$operation['reason_snapshot'],
                 'cashRefundAmount' => $this->moneyFromCents((int)$operation['cash_refund_cents']),
@@ -1320,6 +1322,19 @@ final class CashierV3SalesOrderQueryServices
         ];
         $mapped['relatedDataStatus'] = 'ready';
         return $mapped;
+    }
+
+    private function operationStatusLabel(string $status): string
+    {
+        return [
+            'succeeded' => '已完成',
+            'success' => '已完成',
+            'failed' => '失败',
+            'conflict' => '版本冲突',
+            'result_unknown' => '结果未知',
+            'pending' => '处理中',
+            'processing' => '处理中',
+        ][$status] ?? (preg_match('/[\\x{4e00}-\\x{9fff}]/u', $status) === 1 ? $status : '处理中');
     }
 
     private function mapAuthorityLine(array $line, array $salespeople, array $craftsmen = []): array

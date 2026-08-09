@@ -47,6 +47,12 @@ ok('明确失败、冲突与结果未知均在订单详情可见',
   detail.includes("['failed', 'conflict', 'result_unknown'].includes(status)")
     && detail.includes('role="alert"'))
 
+ok('关联业务状态只显示中文，不泄漏 succeeded 等内部状态码',
+  detail.includes("const statusLabel = pickValue(record, ['statusLabel', 'status_label'])")
+    && detail.includes("succeeded: '已完成'")
+    && detail.includes("result_unknown: '结果未知'")
+    && detail.includes('test(status)'))
+
 ok('命令键只在权威终态释放，结果未知保留原键',
   center.includes("return ['success', 'succeeded', 'failed', 'conflict'].includes(String(status || ''))")
     && center.includes('isTerminalActionStatus(actionStatus(result))')

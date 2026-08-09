@@ -70,6 +70,9 @@ $checks = [
         && strpos($salesQuery, "'orderStatus' => \$orderStatus") !== false
         && strpos($salesQuery, "\$terminal ? ['reopen-sales-order']") !== false
         && strpos($salesQuery, "'operationLogs' => \$operationRecords") !== false,
+    'sales_order_related_status_has_chinese_label' => strpos($salesQuery, "'statusLabel' => \$this->operationStatusLabel(\$status)") !== false
+        && strpos($salesQuery, "'succeeded' => '已完成'") !== false
+        && strpos($detailFrontend, "const statusLabel = pickValue(record, ['statusLabel', 'status_label'])") !== false,
     'terminal_reversal_keeps_personnel_snapshot' => strpos($salesQuery, "->where('operation_type', 'personnel_adjustment')") !== false
         && strpos($salesQuery, "\$adjustmentCommandKeys") !== false
         && strpos($salesQuery, "isset(\$adjustmentCommandKeys[(string)(\$row['command_idempotency_key'] ?? '')])") !== false
