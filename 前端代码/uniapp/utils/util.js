@@ -73,8 +73,9 @@ export default {
 						//返回上页面
 						setTimeout(function() {
 							// #ifndef H5
+							const parsedDelta = parseInt(url, 10);
 							uni.navigateBack({
-								delta: parseInt(url),
+								delta: Number.isFinite(parsedDelta) && parsedDelta > 0 ? parsedDelta : 1,
 							})
 							// #endif
 							// #ifdef H5

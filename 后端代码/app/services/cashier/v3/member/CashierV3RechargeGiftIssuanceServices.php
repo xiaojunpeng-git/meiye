@@ -31,6 +31,7 @@ final class CashierV3RechargeGiftIssuanceServices
     private const AUTHORITY_TABLE = 'cashier_v3_recharge_gift_authority';
     private const ITEM_TABLE = 'cashier_v3_recharge_gift_item';
     private const FACT_TABLE = 'cashier_v3_gift_fact';
+    private const COUPON_MAPPING_TABLE = 'cashier_v3_recharge_gift_coupon_issue_mapping';
 
     /** @var CardNumberServices */
     private $cardNumbers;
@@ -165,6 +166,9 @@ final class CashierV3RechargeGiftIssuanceServices
         $result = [];
         foreach ($rows as $row) {
             $this->assertItemReplay($row, $items[(int)$row['item_no'] - 1] ?? []);
+            if ((string)($row['gift_kind'] ?? '') === 'coupon') {
+                $this->assertCouponIssueMappingReplay($row);
+            }
             $this->assertFactReplay($row, $authority);
             $result[] = $this->itemResult($row, true);
             $this->recordGiftEvent($eventRecorder, $eventExecution, $eventContract, $authority, $row);
@@ -211,6 +215,9 @@ final class CashierV3RechargeGiftIssuanceServices
             throw self::failure('recharge_gift_item_duplicate', '充值赠送明细重复，本次操作已取消。');
         }
         $row['id'] = $id;
+        if ($item['kind'] === 'coupon') {
+            $this->insertCouponIssueMappings($giftId, $itemId, $rechargeId, $memberId, $operatorScope, (array)($projection['couponIssueMappings'] ?? []), $now);
+        }
         $authority = (array)Db::name(self::AUTHORITY_TABLE)->where('gift_id', $giftId)->lock(true)->find();
         if (!$authority) throw self::failure('recharge_gift_authority_missing', '充值赠送记录缺失，本次操作已取消。');
         $event = $this->recordGiftEvent($eventRecorder, $eventExecution, $eventContract, $authority, $row);
@@ -341,6 +348,7 @@ final class CashierV3RechargeGiftIssuanceServices
         $coupon = (array)Db::name('store_coupon_issue')->where('id', (int)$item['couponIssueId'])->where('status', 1)->where('is_del', 0)->lock(true)->find();
         if (!$coupon) throw self::failure('recharge_gift_coupon_unavailable', '充值套餐中的优惠券已停用或删除。');
         $ids = [];
+        $issueMappings = [];
         for ($i = 0; $i < (int)$item['quantity']; $i++) {
             // total_count=0 is the existing unlimited-issue convention;
             // is_permanent controls validity, not inventory capacity.
@@ -355,13 +363,52 @@ final class CashierV3RechargeGiftIssuanceServices
                 'use_time' => 0, 'type' => $projectionSource, 'status' => 0, 'is_fail' => 0, 'oid' => 0,
             ]);
             if ($couponUserId <= 0) throw self::failure('recharge_gift_coupon_insert_failed', '赠送优惠券写入失败，本次操作已取消。');
-            $issued = Db::name('store_coupon_issue_user')->insert([
+            $couponIssueUserId = (int)Db::name('store_coupon_issue_user')->insertGetId([
                 'uid' => $memberId, 'issue_coupon_id' => (int)$coupon['id'], 'add_time' => $now,
             ]);
-            if ((int)$issued !== 1) throw self::failure('recharge_gift_coupon_issue_log_insert_failed', '赠送优惠券记录写入失败，本次操作已取消。');
+            if ($couponIssueUserId <= 0) throw self::failure('recharge_gift_coupon_issue_log_insert_failed', '赠送优惠券记录写入失败，本次操作已取消。');
             $ids[] = $couponUserId;
+            $issueMappings[] = ['couponUserId' => $couponUserId, 'couponIssueUserId' => $couponIssueUserId, 'couponIssueId' => (int)$coupon['id']];
         }
-        return ['legacyOrderId' => 0, 'holderId' => 0, 'benefitDetailId' => 0, 'couponUserIds' => $ids];
+        return ['legacyOrderId' => 0, 'holderId' => 0, 'benefitDetailId' => 0, 'couponUserIds' => $ids, 'couponIssueMappings' => $issueMappings];
+    }
+
+    private function insertCouponIssueMappings(string $giftId, string $itemId, int $rechargeId, int $memberId, CashierV3OperatorScope $operator, array $mappings, int $now): void
+    {
+        if ($mappings === []) throw self::failure('recharge_gift_coupon_issue_mapping_missing', '赠送优惠券领取映射缺失，本次操作已取消。');
+        $rows = [];
+        foreach ($mappings as $sequence => $mapping) {
+            $couponUserId = (int)($mapping['couponUserId'] ?? 0);
+            $couponIssueUserId = (int)($mapping['couponIssueUserId'] ?? 0);
+            $couponIssueId = (int)($mapping['couponIssueId'] ?? 0);
+            if ($couponUserId <= 0 || $couponIssueUserId <= 0 || $couponIssueId <= 0) {
+                throw self::failure('recharge_gift_coupon_issue_mapping_invalid', '赠送优惠券领取映射无效，本次操作已取消。');
+            }
+            $rows[] = [
+                'mapping_id' => 'RGCM-' . strtoupper(substr(hash('sha256', $itemId . '|' . $couponUserId . '|' . $couponIssueUserId), 0, 40)),
+                'tenant_id' => $operator->tenantId(), 'store_id' => $operator->storeId(), 'member_id' => $memberId,
+                'recharge_id' => $rechargeId, 'gift_id' => $giftId, 'gift_item_id' => $itemId, 'item_sequence' => $sequence + 1,
+                'coupon_issue_id' => $couponIssueId, 'coupon_user_id' => $couponUserId, 'coupon_issue_user_id' => $couponIssueUserId,
+                'status' => 'issued', 'void_operation_id' => '', 'voided_at' => 0, 'created_at' => $now, 'updated_at' => $now,
+            ];
+        }
+        if ((int)Db::name(self::COUPON_MAPPING_TABLE)->insertAll($rows) !== count($rows)) {
+            throw self::failure('recharge_gift_coupon_issue_mapping_insert_failed', '赠送优惠券领取映射写入失败，本次操作已取消。');
+        }
+    }
+
+    private function assertCouponIssueMappingReplay(array $item): void
+    {
+        $couponIds = json_decode((string)($item['coupon_user_ids_json'] ?? ''), true);
+        $couponIds = is_array($couponIds) ? array_values(array_unique(array_map('intval', $couponIds))) : [];
+        $mappings = Db::name(self::COUPON_MAPPING_TABLE)->where('gift_item_id', (string)$item['item_id'])
+            ->where('status', 'issued')->lock(true)->order('item_sequence', 'asc')->select()->toArray();
+        $mappedIds = array_values(array_map('intval', array_column($mappings, 'coupon_user_id')));
+        sort($couponIds, SORT_NUMERIC);
+        sort($mappedIds, SORT_NUMERIC);
+        if ($couponIds === [] || $couponIds !== $mappedIds || count($mappings) !== (int)$item['quantity']) {
+            throw self::failure('recharge_gift_coupon_issue_mapping_replay_incomplete', '充值赠券领取映射不完整，不能重复发放。');
+        }
     }
 
     private function insertGiftProjectionOrder(string $itemId, int $memberId, array $member, array $item, int $rechargeId, string $rechargeOrderNo, int $now, CashierV3OperatorScope $scope, string $projectionSource = 'cashier_v3_recharge_gift', string $projectionTitle = 'V3充值套餐赠送'): int

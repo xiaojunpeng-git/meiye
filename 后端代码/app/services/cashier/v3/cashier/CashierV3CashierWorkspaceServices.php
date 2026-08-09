@@ -125,10 +125,11 @@ final class CashierV3CashierWorkspaceServices
         string $workspaceId,
         string $stateContextId,
         CashierV3OperatorScope $operatorScope,
-        array $line
+        array $line,
+        ?array $lockedDraft = null
     ): array {
         CashierV3TransactionGuard::assertInTransaction('cashierWorkspaceAppendSale');
-        $draft = $this->lockOrCreateDraft($workspaceId, $stateContextId, $operatorScope);
+        $draft = $lockedDraft ?? $this->lockOrCreateDraft($workspaceId, $stateContextId, $operatorScope);
         $this->assertNotResumedHangMutation($draft);
         $memberId = (string)($draft['customer_mode'] ?? '') === self::MODE_MEMBER
             ? (int)($draft['member_id'] ?? 0)
@@ -175,11 +176,12 @@ final class CashierV3CashierWorkspaceServices
         $record['add_time'] = $now;
         $record['update_time'] = $now;
         Db::name(self::LINE_TABLE)->insert($record);
-        $this->updateDraft($workspaceId, [
+        $rowsAfter = array_merge($existing, [$record]);
+        $draft = $this->persistDraftWithRowsInTx($workspaceId, $draft, [
             'member_id' => $memberId,
             'draft_status' => self::STATUS_EDITING,
-        ]);
-        return $this->readDraft($workspaceId, $stateContextId, $operatorScope, true);
+        ], $rowsAfter);
+        return $this->toPublicDraft($draft, $rowsAfter);
     }
 
     /**
@@ -216,7 +218,7 @@ final class CashierV3CashierWorkspaceServices
                 ['reason' => 'card_operation_upgrade_workspace_not_empty']
             );
         }
-        return $this->appendSaleLineInTx($workspaceId, $stateContextId, $operatorScope, $line);
+        return $this->appendSaleLineInTx($workspaceId, $stateContextId, $operatorScope, $line, $draft);
     }
 
     /**
@@ -754,8 +756,8 @@ final class CashierV3CashierWorkspaceServices
             }
         }
         Db::name(self::LINE_TABLE)->where('workspace_id', $workspaceId)->delete();
-        $this->updateDraft($workspaceId, []);
-        return $this->readDraft($workspaceId, $stateContextId, $operatorScope, true);
+        $draft = $this->persistDraftWithRowsInTx($workspaceId, $draft, [], []);
+        return $this->toPublicDraft($draft, []);
     }
 
     /**
@@ -1563,6 +1565,20 @@ final class CashierV3CashierWorkspaceServices
     private function updateDraft(string $workspaceId, array $changes): void
     {
         $rows = $this->lineRows($workspaceId, true);
+        $this->persistDraftWithRowsInTx($workspaceId, [], $changes, $rows);
+    }
+
+    /**
+     * Persist a draft using rows already locked by the current transaction.
+     * Mutation commands must not re-query the same workspace lines merely to
+     * rebuild the fingerprint and response snapshot.
+     */
+    private function persistDraftWithRowsInTx(
+        string $workspaceId,
+        array $draft,
+        array $changes,
+        array $rows
+    ): array {
         $changes['line_fingerprint'] = $this->lineFingerprint($rows);
         $changes['update_time'] = time();
         $affected = Db::name(self::DRAFT_TABLE)
@@ -1575,6 +1591,7 @@ final class CashierV3CashierWorkspaceServices
                 CashierV3ResultCode::STATUS_FAILED
             );
         }
+        return array_merge($draft, $changes);
     }
 
     private function checkedLineAmount(int $unitAmountCents, int $quantity): int

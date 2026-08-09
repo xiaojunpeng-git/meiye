@@ -101,18 +101,41 @@ class SystemRoleServices extends BaseServices
         }
 		$method = trim(strtolower($request->method()));
 		$auth = $this->getAllRoles(2);
-        //验证访问接口是否存在
-        if (!in_array($method . '@@' . $rule, array_map(function ($item) {
-            return trim(strtolower($item['methods'])). '@@'. trim(strtolower(str_replace(' ', '', $item['api_url'])));
-        }, $auth))) {
+        $isPlatformInventoryV3 = strpos($rule, 'product/inventory/v3/') === 0;
+        $registered = array_values(array_filter($auth, function ($item) use ($rule, $method) {
+            return trim(strtolower($item['methods'])) === $method
+                && trim(strtolower(str_replace(' ', '', $item['api_url']))) === $rule;
+        }));
+        if (!$registered) {
+            // V3 平台库存不得沿用历史接口“未登记即放行”的兜底；其他
+            // 路由维持旧行为，避免本次权限补洞扩大成全平台兼容性改造。
+            if ($isPlatformInventoryV3) {
+                throw new AuthException(ApiErrorCode::ERR_AUTH);
+            }
             return true;
         }
 		$auth = $this->getRolesByAuth($request->adminInfo()['roles'], 2);
+        $directGranted = !empty(array_filter($auth, function ($item) use ($rule, $method) {
+            return trim(strtolower($item['api_url'])) === $rule
+                && $method === trim(strtolower($item['methods']));
+        }));
+        if ($directGranted) {
+            return true;
+        }
+        if ($isPlatformInventoryV3) {
+            // A stable capability may intentionally cover sibling endpoint
+            // registrations. The requested route was already verified above.
+            $requiredAuth = trim((string)($registered[0]['unique_auth'] ?? ''));
+            $sharedGranted = $requiredAuth !== '' && !empty(array_filter($auth, function ($item) use ($requiredAuth) {
+                return trim((string)($item['unique_auth'] ?? '')) === $requiredAuth;
+            }));
+            if (!$sharedGranted) {
+                throw new AuthException(ApiErrorCode::ERR_AUTH);
+            }
+            return true;
+        }
         //验证访问接口是否有权限
-        if ($auth && empty(array_filter($auth, function ($item) use ($rule, $method) {
-            if (trim(strtolower($item['api_url'])) === $rule && $method === trim(strtolower($item['methods'])))
-                return true;
-        }))) {
+        if ($auth) {
             throw new AuthException(ApiErrorCode::ERR_AUTH);
         }
     }
@@ -130,7 +153,7 @@ class SystemRoleServices extends BaseServices
         return CacheService::redisHandler('system_menus')->remember($cacheName, function () use ($auth_type, $type) {
             /** @var SystemMenusServices $menusService */
             $menusService = app()->make(SystemMenusServices::class);
-            return $menusService->getColumn([['auth_type', '=', $auth_type], ['type', '=', $type]], 'api_url,methods');
+            return $menusService->getColumn([['auth_type', '=', $auth_type], ['type', '=', $type]], 'api_url,methods,unique_auth');
         });
     }
 
@@ -149,7 +172,7 @@ class SystemRoleServices extends BaseServices
         return CacheService::redisHandler('system_menus')->remember($cacheName, function () use ($roles, $auth_type, $type) {
             /** @var SystemMenusServices $menusService */
             $menusService = app()->make(SystemMenusServices::class);
-            return $menusService->getColumn([['id', 'IN', $this->getRoleIds($roles, $type == 3 ? 'cashier_rules' : 'rules')], ['auth_type', '=', $auth_type], ['type', '=', $type]], 'api_url,methods');
+            return $menusService->getColumn([['id', 'IN', $this->getRoleIds($roles, $type == 3 ? 'cashier_rules' : 'rules')], ['auth_type', '=', $auth_type], ['type', '=', $type]], 'api_url,methods,unique_auth');
         });
     }
 

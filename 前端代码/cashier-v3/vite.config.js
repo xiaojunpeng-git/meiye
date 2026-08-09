@@ -2,9 +2,14 @@ import { fileURLToPath, URL } from 'node:url'
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 
+const cashierApiTarget = process.env.CASHIER_V3_API_PROXY_TARGET || 'http://127.0.0.1:8080'
 const cashierApiProxy = {
   '/cashierapi': {
-    target: 'http://127.0.0.1:8080',
+    target: cashierApiTarget,
+    changeOrigin: false
+  },
+  '/storeapi': {
+    target: cashierApiTarget,
     changeOrigin: false
   }
 }

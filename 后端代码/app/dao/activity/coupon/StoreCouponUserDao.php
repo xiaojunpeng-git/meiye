@@ -109,12 +109,16 @@ class StoreCouponUserDao extends BaseDao
 
     /**
      * 使用优惠券修改优惠券状态
-     * @param $id
-     * @return \think\Model|null
+     * @return int affected rows
      */
-    public function useCoupon(int $id)
+    public function useCoupon(int $id, int $uid = 0): int
     {
-        return $this->getModel()->where('id', $id)->update(['status' => 1, 'use_time' => time()]);
+        $query = $this->getModel()->where('id', $id)
+            ->where('status', 0)->where('is_fail', 0)->where('use_time', 0);
+        if ($uid > 0) {
+            $query->where('uid', $uid);
+        }
+        return (int)$query->update(['status' => 1, 'use_time' => time()]);
     }
 
     /**

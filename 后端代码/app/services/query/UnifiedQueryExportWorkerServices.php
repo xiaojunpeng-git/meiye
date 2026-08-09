@@ -2,9 +2,6 @@
 
 namespace app\services\query;
 
-use app\model\store\SystemStoreStaff;
-use app\services\cashier\v3\CashierV3ActionDispatcher;
-use app\services\query\provider\MemberUnifiedQueryProvider;
 use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
 use PhpOffice\PhpSpreadsheet\Cell\DataType;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
@@ -23,28 +20,27 @@ class UnifiedQueryExportWorkerServices
     public const MAX_TASK_RUNTIME_SECONDS = 240;
     public const HEARTBEAT_ROW_INTERVAL = 50;
 
-    /** @var CashierV3ActionDispatcher */
-    protected $dispatcher;
-
     /** @var UnifiedQueryExportTaskServices */
     protected $tasks;
 
-    /** @var MemberUnifiedQueryProvider */
-    protected $memberProvider;
+    /** @var UnifiedQueryProviderRegistry */
+    protected $providers;
 
-    /** @var UnifiedQueryContextFactory */
-    protected $contextFactory;
+    /** @var UnifiedQueryWorkerContextResolverRegistry */
+    protected $contextResolvers;
+
+    /** @var UnifiedQueryExportStorage */
+    protected $storage;
 
     public function __construct(
-        CashierV3ActionDispatcher $dispatcher,
         UnifiedQueryExportTaskServices $tasks,
-        MemberUnifiedQueryProvider $memberProvider,
-        UnifiedQueryContextFactory $contextFactory
+        UnifiedQueryProviderRegistry $providers,
+        UnifiedQueryWorkerContextResolverRegistry $contextResolvers
     ) {
-        $this->dispatcher = $dispatcher;
         $this->tasks = $tasks;
-        $this->memberProvider = $memberProvider;
-        $this->contextFactory = $contextFactory;
+        $this->providers = $providers;
+        $this->contextResolvers = $contextResolvers;
+        $this->storage = new UnifiedQueryExportStorage();
     }
 
     public function processPending(int $limit = 20, string $onlyTaskNo = ''): array
@@ -201,18 +197,65 @@ class UnifiedQueryExportWorkerServices
             // claim 后立即 CAS 续期；后续任何昂贵阶段开始前都已确认本 worker
             // 仍是当前租约持有者，旧 worker 不会继续生成可提交结果。
             $heartbeat(true);
-            $context['visible_store_ids'] = $claim['effectiveDataScope']['visible_store_ids'];
+            $effectiveDataScope = $this->normalizeEffectiveDataScope(
+                $claim['effectiveDataScope'] ?? null,
+                (string)($claim['page_code'] ?? '')
+            );
+            $context['visible_store_ids'] = $effectiveDataScope['visible_store_ids'];
             $context['all_stores'] = $context['visible_store_ids'] === null;
-            $context['ancestor_organization_ids'] = (array)$claim['effectiveDataScope']['ancestor_organization_ids'];
-            $context['query_cutoff_date'] = (string)$claim['query_cutoff_date'];
-            $context['data_as_of'] = (int)$claim['data_as_of'];
+            $context['ancestor_organization_ids'] = $effectiveDataScope['ancestor_organization_ids'];
+            $context['scope_dimensions'] = $effectiveDataScope['scope_dimensions'];
+            $context['effective_data_scope'] = [
+                'all_stores' => $context['all_stores'],
+                'visible_store_ids' => $context['visible_store_ids'],
+                'ancestor_organization_ids' => $context['ancestor_organization_ids'],
+                'scope_dimensions' => $context['scope_dimensions'],
+            ];
+            $claimCutoffDate = trim((string)($claim['query_cutoff_date'] ?? ''));
+            $claimDataAsOf = (int)($claim['data_as_of'] ?? 0);
+            if (!$this->validDate($claimCutoffDate) || $claimDataAsOf <= 0) {
+                throw new UnifiedQueryException(
+                    'UNIFIED_QUERY_EXPORT_PLAN_INVALID',
+                    '导出任务的冻结统计时点不合法。',
+                    []
+                );
+            }
+            $context['query_cutoff_date'] = $claimCutoffDate;
+            $context['data_as_of'] = $claimDataAsOf;
 
             $plan = UnifiedQueryJson::decode((string)$claim['query_payload']);
+            $taskPageCode = trim((string)($claim['page_code'] ?? ''));
+            $planPageCode = trim((string)($plan['page_code'] ?? ''));
+            if ($taskPageCode === '' || $planPageCode !== $taskPageCode) {
+                throw new UnifiedQueryException(
+                    'UNIFIED_QUERY_EXPORT_PLAN_INVALID',
+                    '导出查询计划与页面不匹配。',
+                    [
+                        'task_page_code' => $taskPageCode,
+                        'plan_page_code' => $planPageCode,
+                    ]
+                );
+            }
+            $provider = $this->providers->resolve($taskPageCode);
+            if (!hash_equals($taskPageCode, $provider->pageCode())) {
+                throw new UnifiedQueryException(
+                    'UNIFIED_QUERY_EXPORT_PLAN_INVALID',
+                    '导出查询服务与页面不匹配。',
+                    ['page_code' => $taskPageCode]
+                );
+            }
             $fieldSnapshot = UnifiedQueryJson::decode((string)$claim['field_snapshot']);
+            $this->tasks->preflightFrozenExecution(
+                $context,
+                $claim,
+                $plan,
+                $fieldSnapshot
+            );
+            $heartbeat(true);
             $fieldKeys = array_values(array_filter(array_map(function (array $field): string {
                 return (string)($field['key'] ?? '');
             }, $fieldSnapshot)));
-            $execution = $this->memberProvider->executeFrozenPlan(
+            $execution = $provider->executeFrozenPlan(
                 $context,
                 $plan,
                 (string)$claim['export_scope'],
@@ -392,82 +435,267 @@ class UnifiedQueryExportWorkerServices
 
     public function absolutePath(string $storageKey): string
     {
-        if (!preg_match('#^unified-query-exports/[A-Za-z0-9/_-]{1,400}\.xlsx$#D', $storageKey)
-            || strpos($storageKey, '..') !== false
-            || strpos($storageKey, '//') !== false) {
-            throw new \RuntimeException('导出对象键不合法');
-        }
-        $runtimeRoot = rtrim((string)app()->getRuntimePath(), DIRECTORY_SEPARATOR)
-            . DIRECTORY_SEPARATOR;
-        $base = $runtimeRoot . 'unified-query-exports' . DIRECTORY_SEPARATOR;
-        $relative = substr($storageKey, strlen('unified-query-exports/'));
-        $path = $base . str_replace('/', DIRECTORY_SEPARATOR, $relative);
-        if (!is_dir($base) || !is_dir(dirname($path))) {
-            // 对象目录已由运维清走时文件必然不存在；严格键白名单保证返回路径
-            // 仍位于固定 runtime 根内，清理器可据此完成幂等收口。
-            return $path;
-        }
-        $baseReal = realpath($base);
-        $directoryReal = realpath(dirname($path));
-        if ($baseReal === false || $directoryReal === false
-            || strpos($directoryReal . DIRECTORY_SEPARATOR, $baseReal . DIRECTORY_SEPARATOR) !== 0) {
-            throw new \RuntimeException('导出文件路径越界');
-        }
-        return $path;
+        return $this->storage->absolutePath($storageKey);
     }
 
     protected function currentContext(array $task): array
     {
-        $operatorId = (int)($task['operator_id'] ?? 0);
-        $originStoreId = (int)($task['origin_store_id'] ?? 0);
-        $staff = SystemStoreStaff::where('id', $operatorId)
-            ->where('status', 1)
-            ->where('is_del', 0)
-            ->find();
-        if (!$staff || $originStoreId <= 0) {
+        $pageCode = trim((string)($task['page_code'] ?? ''));
+        if ($pageCode === '') {
+            throw $this->invalidWorkerContext('', '任务缺少 page_code');
+        }
+        $resolver = $this->contextResolvers->resolve($pageCode);
+        if (!hash_equals($pageCode, $resolver->pageCode())) {
+            throw $this->invalidWorkerContext($pageCode, 'resolver 页面不匹配');
+        }
+        return $this->normalizeWorkerContext(
+            $task,
+            $resolver->resolve($task),
+            $pageCode
+        );
+    }
+
+    protected function normalizeWorkerContext(
+        array $task,
+        array $rawContext,
+        string $pageCode
+    ): array {
+        $taskTenantId = trim((string)($task['tenant_id'] ?? ''));
+        $taskAccountId = (int)($task['account_id'] ?? 0);
+        $taskOperatorId = (int)($task['operator_id'] ?? 0);
+        if (!is_string($rawContext['tenant_id'] ?? null)
+            || !is_int($rawContext['account_id'] ?? null)
+            || !is_int($rawContext['operator_id'] ?? null)
+            || !is_string($rawContext['page_code'] ?? null)) {
+            throw $this->invalidWorkerContext($pageCode, '身份上下文字段类型不合法');
+        }
+        $contextTenantId = trim($rawContext['tenant_id']);
+        $contextAccountId = $rawContext['account_id'];
+        $operatorId = $rawContext['operator_id'];
+        $contextPageCode = trim($rawContext['page_code']);
+        if ($taskTenantId === '' || $taskAccountId <= 0 || $taskOperatorId <= 0
+            || $contextTenantId === '' || $contextAccountId <= 0 || $operatorId <= 0
+            || !hash_equals($taskTenantId, $contextTenantId)
+            || $taskAccountId !== $contextAccountId
+            || $taskOperatorId !== $operatorId
+            || !hash_equals($pageCode, $contextPageCode)) {
+            throw $this->invalidWorkerContext($pageCode, '任务与当前账号上下文不匹配');
+        }
+
+        $permissions = $this->normalizeStringList(
+            $rawContext['permissions'] ?? null,
+            $pageCode,
+            'permissions',
+            '/^(?:\*|[a-z][a-z0-9._:-]{1,127})$/D',
+            512
+        );
+        if (in_array('*', $permissions, true)) {
+            throw $this->invalidWorkerContext($pageCode, 'permissions 禁止通配符');
+        }
+        if (!in_array(UnifiedQueryAccessPolicy::PAGE_POLICY, $permissions, true)
+            || !in_array(UnifiedQueryAccessPolicy::EXPORT, $permissions, true)) {
             throw new UnifiedQueryException(
                 'UNIFIED_QUERY_EXPORT_PERMISSION_REVOKED',
-                '创建任务的账号已停用，导出任务已停止。',
-                []
+                '当前账号已无页面查询或导出权限，任务已停止。',
+                ['page_code' => $pageCode]
             );
         }
-        $profile = $staff->toArray();
-        $employeeId = (int)($profile['employee_id'] ?? 0);
-        if ($employeeId > 0) {
-            $employee = Db::name('employee')
-                ->where('id', $employeeId)
-                ->where('status', 1)
-                ->where('is_del', 0)
-                ->find();
-            if (!$employee) {
-                throw new UnifiedQueryException(
-                    'UNIFIED_QUERY_EXPORT_PERMISSION_REVOKED',
-                    '创建任务的员工档案已停用，导出任务已停止。',
-                    []
-                );
+
+        if (!array_key_exists('visible_store_ids', $rawContext)) {
+            throw $this->invalidWorkerContext($pageCode, '缺少 visible_store_ids');
+        }
+        $visibleStoreIds = null;
+        if ($rawContext['visible_store_ids'] !== null) {
+            if (!is_array($rawContext['visible_store_ids'])
+                || !$this->isList($rawContext['visible_store_ids'])
+                || count($rawContext['visible_store_ids'])
+                    > UnifiedQueryContextFactory::MAX_SCOPE_IDS) {
+                throw $this->invalidWorkerContext($pageCode, 'visible_store_ids 不合法');
             }
+            $visibleStoreIds = [];
+            foreach ($rawContext['visible_store_ids'] as $storeId) {
+                if (!is_int($storeId) || $storeId <= 0
+                    || isset($visibleStoreIds[$storeId])) {
+                    throw $this->invalidWorkerContext($pageCode, 'visible_store_ids 不合法');
+                }
+                $visibleStoreIds[$storeId] = $storeId;
+            }
+            $visibleStoreIds = array_values($visibleStoreIds);
+            sort($visibleStoreIds, SORT_NUMERIC);
         }
-        $operatorScope = $this->dispatcher->scopeResolver()->operatorScope(
-            $originStoreId,
-            $operatorId
+
+        $ancestorOrganizationIds = $this->normalizeStringList(
+            $rawContext['ancestor_organization_ids'] ?? null,
+            $pageCode,
+            'ancestor_organization_ids',
+            '/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/D'
         );
-        $taskTenantId = (string)($task['tenant_id'] ?? '');
-        if ($taskTenantId === ''
-            || !hash_equals($operatorScope->tenantId(), $taskTenantId)) {
-            throw new UnifiedQueryException(
-                'UNIFIED_QUERY_EXPORT_PERMISSION_REVOKED',
-                '导出任务所属商户与当前账号不一致，任务已停止。',
-                []
+        if (!is_string($rawContext['permission_version'] ?? null)) {
+            throw $this->invalidWorkerContext($pageCode, 'permission_version 不合法');
+        }
+        $permissionVersion = trim($rawContext['permission_version']);
+        if ($permissionVersion === '' || strlen($permissionVersion) > 128) {
+            throw $this->invalidWorkerContext($pageCode, 'permission_version 不合法');
+        }
+        if (!is_array($rawContext['scope_dimensions'] ?? null)) {
+            throw $this->invalidWorkerContext($pageCode, 'scope_dimensions 不合法');
+        }
+        try {
+            $scopeDimensions = $this->contextResolvers->pageRegistry()
+                ->normalizeScopeDimensions($pageCode, $rawContext['scope_dimensions']);
+            $this->contextResolvers->pageRegistry()
+                ->assertScopeDimensionsNotEmpty($pageCode, $scopeDimensions);
+        } catch (UnifiedQueryException $exception) {
+            throw $this->invalidWorkerContext(
+                $pageCode,
+                'scope_dimensions 不合法：' . $exception->getErrorCode()
             );
         }
-        $dataScope = $this->dispatcher->dataScopeFactory()->build(
-            $originStoreId,
-            $operatorId,
-            $profile,
-            $taskTenantId,
-            (string)($task['origin_organization_id'] ?? $operatorScope->organizationId())
+
+        if (!is_string($rawContext['query_cutoff_date'] ?? null)
+            || !is_int($rawContext['data_as_of'] ?? null)) {
+            throw $this->invalidWorkerContext($pageCode, '统计时点类型不合法');
+        }
+        $cutoffDate = trim($rawContext['query_cutoff_date']);
+        $dataAsOf = $rawContext['data_as_of'];
+        if (!$this->validDate($cutoffDate) || $dataAsOf <= 0) {
+            throw $this->invalidWorkerContext($pageCode, '统计时点不合法');
+        }
+
+        if (!is_int($rawContext['store_id'] ?? null)
+            || (int)$rawContext['store_id'] < 0) {
+            throw $this->invalidWorkerContext($pageCode, 'store_id 不合法');
+        }
+        $storeId = (int)$rawContext['store_id'];
+        if (!is_string($rawContext['organization_id'] ?? null)) {
+            throw $this->invalidWorkerContext($pageCode, 'organization_id 不合法');
+        }
+        $organizationId = trim($rawContext['organization_id']);
+        if ($organizationId !== ''
+            && !preg_match('/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/D', $organizationId)) {
+            throw $this->invalidWorkerContext($pageCode, 'organization_id 不合法');
+        }
+
+        return [
+            'tenant_id' => $contextTenantId,
+            'account_id' => $contextAccountId,
+            'operator_id' => $operatorId,
+            'store_id' => $storeId,
+            'organization_id' => $organizationId,
+            'page_code' => $pageCode,
+            'permissions' => $permissions,
+            'visible_store_ids' => $visibleStoreIds,
+            'all_stores' => $visibleStoreIds === null,
+            'ancestor_organization_ids' => $ancestorOrganizationIds,
+            'permission_version' => $permissionVersion,
+            'scope_dimensions' => $scopeDimensions,
+            'query_cutoff_date' => $cutoffDate,
+            'data_as_of' => $dataAsOf,
+        ];
+    }
+
+    protected function normalizeStringList(
+        $value,
+        string $pageCode,
+        string $key,
+        string $pattern,
+        int $maxItems = UnifiedQueryContextFactory::MAX_SCOPE_IDS
+    ): array {
+        if (!is_array($value) || !$this->isList($value) || count($value) > $maxItems) {
+            throw $this->invalidWorkerContext($pageCode, $key . ' 不合法');
+        }
+        $normalized = [];
+        foreach ($value as $item) {
+            if (!is_string($item)) {
+                throw $this->invalidWorkerContext($pageCode, $key . ' 不合法');
+            }
+            $item = trim($item);
+            $identity = 'value:' . $item;
+            if ($item === '' || !preg_match($pattern, $item)
+                || isset($normalized[$identity])) {
+                throw $this->invalidWorkerContext($pageCode, $key . ' 不合法');
+            }
+            $normalized[$identity] = $item;
+        }
+        return array_values($normalized);
+    }
+
+    protected function normalizeEffectiveDataScope($rawScope, string $pageCode): array
+    {
+        if (!is_array($rawScope)
+            || !array_key_exists('visible_store_ids', $rawScope)
+            || !array_key_exists('ancestor_organization_ids', $rawScope)
+            || !array_key_exists('scope_dimensions', $rawScope)) {
+            throw $this->invalidWorkerContext($pageCode, '有效数据范围结构不完整');
+        }
+        $visibleStoreIds = null;
+        if ($rawScope['visible_store_ids'] !== null) {
+            if (!is_array($rawScope['visible_store_ids'])
+                || !$this->isList($rawScope['visible_store_ids'])
+                || count($rawScope['visible_store_ids'])
+                    > UnifiedQueryContextFactory::MAX_SCOPE_IDS) {
+                throw $this->invalidWorkerContext($pageCode, '有效门店范围不合法');
+            }
+            $visibleStoreIds = [];
+            foreach ($rawScope['visible_store_ids'] as $storeId) {
+                if (!is_int($storeId) || $storeId <= 0
+                    || isset($visibleStoreIds[$storeId])) {
+                    throw $this->invalidWorkerContext($pageCode, '有效门店范围不合法');
+                }
+                $visibleStoreIds[$storeId] = $storeId;
+            }
+            $visibleStoreIds = array_values($visibleStoreIds);
+            sort($visibleStoreIds, SORT_NUMERIC);
+        }
+        $ancestorOrganizationIds = $this->normalizeStringList(
+            $rawScope['ancestor_organization_ids'],
+            $pageCode,
+            '有效组织范围',
+            '/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/D'
         );
-        return $this->contextFactory->make($operatorScope, $dataScope);
+        try {
+            $scopeDimensions = $this->contextResolvers->pageRegistry()
+                ->normalizeScopeDimensions($pageCode, $rawScope['scope_dimensions']);
+            $this->contextResolvers->pageRegistry()
+                ->assertScopeDimensionsNotEmpty($pageCode, $scopeDimensions);
+        } catch (UnifiedQueryException $exception) {
+            throw $this->invalidWorkerContext(
+                $pageCode,
+                '有效维度范围不合法：' . $exception->getErrorCode()
+            );
+        }
+        return [
+            'visible_store_ids' => $visibleStoreIds,
+            'ancestor_organization_ids' => $ancestorOrganizationIds,
+            'scope_dimensions' => $scopeDimensions,
+        ];
+    }
+
+    protected function invalidWorkerContext(
+        string $pageCode,
+        string $reason
+    ): UnifiedQueryException {
+        return new UnifiedQueryException(
+            'UNIFIED_QUERY_WORKER_CONTEXT_INVALID',
+            '导出任务的当前权限上下文无效，任务已停止。',
+            ['page_code' => $pageCode, 'reason' => $reason]
+        );
+    }
+
+    protected function validDate(string $value): bool
+    {
+        $date = \DateTimeImmutable::createFromFormat('!Y-m-d', $value);
+        $errors = \DateTimeImmutable::getLastErrors();
+        return $date !== false
+            && ($errors === false
+                || ((int)$errors['warning_count'] === 0
+                    && (int)$errors['error_count'] === 0))
+            && $date->format('Y-m-d') === $value;
+    }
+
+    protected function isList(array $value): bool
+    {
+        return $value === [] || array_keys($value) === range(0, count($value) - 1);
     }
 
     /**

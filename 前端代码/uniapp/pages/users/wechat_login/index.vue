@@ -28,15 +28,12 @@
 				<!-- #endif -->
 				<!-- #ifdef MP -->
 				<template v-if="configData.wechat_auth_switch">
-					<button hover-class="none" v-if="bindPhone" open-type="getPhoneNumber" @getphonenumber="getphonenumber"
+					<button hover-class="none" v-if="authPreparing" disabled class="bg-color btn1">正在准备登录...</button>
+					<button hover-class="none" v-else-if="!authReady" @tap="userLogin"
+						class="bg-color btn1">重新准备登录</button>
+					<button hover-class="none" v-else-if="bindPhone" open-type="getPhoneNumber" @getphonenumber="getphonenumber"
 						class="bg-color btn1">授权登录</button>
-					<button hover-class="none" v-else-if="!bindPhone" @tap="getAuthLogin"
-						class="bg-color btn1">授权登录</button>
-					<button hover-class="none" v-else-if="mp_is_new" @tap="userLogin"
-						class="bg-color btn1">授权登录</button>
-					<button v-else-if="canUseGetUserProfile && code" hover-class="none" @tap="getUserProfile"
-							class="bg-color btn1">授权登录</button>
-					<button v-else hover-class="none" open-type="getUserInfo" @getuserinfo="setUserInfo"
+					<button hover-class="none" v-else @tap="getAuthLogin"
 						class="bg-color btn1">授权登录</button>
 				</template>
 				<button v-if="configData.phone_auth_switch" hover-class="none" @click="phoneLogin" class="btn2">手机号登录</button>
@@ -120,6 +117,8 @@
 				protocol: false,
 				bindPhone: false,
 				isShow: false,
+				authPreparing: false,
+				authReady: false,
 			};
 		},
 		components: {
@@ -167,6 +166,21 @@
 			uni.removeStorageSync('form_type_cart');
 		},
 		methods: {
+			getErrorMessage(error, fallback = '登录失败，请稍后重试') {
+				if (typeof error === 'string') return error;
+				return (error && (error.msg || error.message || error.errMsg)) || fallback;
+			},
+			finishLogin() {
+				const pages = getCurrentPages();
+				if (pages.length > 1) {
+					uni.navigateBack({
+						delta: 1,
+						fail: () => uni.reLaunch({ url: '/pages/user/index' })
+					});
+					return;
+				}
+				uni.reLaunch({ url: '/pages/user/index' });
+			},
 			goHome(){
 				uni.switchTab({
 					url: '/pages/index/index'
@@ -211,28 +225,38 @@
 			},
 			// 小程序 22.11.8日删除getUserProfile 接口获取用户昵称头像
 			userLogin() {
-				Routine.getCode()
+				if (this.authPreparing) return;
+				this.authPreparing = true;
+				this.authReady = false;
+				return Routine.getCode()
 					.then(code => {
 						this.code = code
-						authType({
+						return authType({
 							code,
 							spread_spid: app.globalData.spid,
 							spread_code: app.globalData.code
 						}).then(res => {
 							this.authKey = res.data.key;
 							this.bindPhone = res.data.bindPhone
-			
+							this.authReady = Boolean(this.authKey);
+							if (!this.authReady) throw new Error('未获取到登录凭证');
 						}).catch(err => {
-							uni.hideLoading();
 							uni.showToast({
-								title: err,
+								title: this.getErrorMessage(err, '登录准备失败，请重试'),
 								icon: 'none',
 								duration: 2000
 							});
 						})
 					})
 					.catch(err => {
-						console.log(err)
+						uni.showToast({
+							title: this.getErrorMessage(err, '无法获取微信登录凭证'),
+							icon: 'none',
+							duration: 2000
+						});
+					})
+					.finally(() => {
+						this.authPreparing = false;
 					});
 			},
 			// 授权登录
@@ -257,7 +281,7 @@
 				}).catch(err => {
 					uni.hideLoading();
 					uni.showToast({
-						title: err,
+						title: this.getErrorMessage(err),
 						icon: 'none',
 						duration: 2000
 					});
@@ -274,9 +298,7 @@
 				this.$util.Tips({
 					title: '登录成功',
 					icon: 'success'
-				}, {
-					tab: 3
-				});
+				}, () => this.finishLogin());
 			},
 			phoneLogin(){
 				uni.navigateTo({
@@ -307,9 +329,7 @@
 					this.$util.Tips({
 						title: '登录成功',
 						icon: 'success'
-					}, {
-						tab: 3
-					});
+					}, () => this.finishLogin());
 				} else {
 					this.isPhoneBox = false;
 				}
@@ -385,9 +405,7 @@
 						that.$util.Tips({
 							title: '登录成功',
 							icon: 'success'
-						}, {
-							tab: 3
-						});
+						}, () => that.finishLogin());
 						// #endif
 						// #ifndef MP
 						that.$util.Tips({
@@ -483,12 +501,10 @@
 										token: res.data.token,
 										time: time
 									});
-									self.$util.Tips({
-										title: res.msg,
-										icon: 'success'
-									}, {
-										tab: 3
-									});
+								self.$util.Tips({
+									title: res.msg,
+									icon: 'success'
+								}, () => self.finishLogin());
 								}
 							})
 							.catch(res => {

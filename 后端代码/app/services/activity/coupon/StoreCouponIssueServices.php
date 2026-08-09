@@ -794,7 +794,7 @@ class StoreCouponIssueServices extends BaseServices
 //        }
         if ($issueCouponInfo->remain_count <= 0 && !$issueCouponInfo->is_permanent) throw new ValidateException('抱歉优惠券已经领取完了！');
         if (!$issueCouponInfo['is_claimed'] && $type == 'get' && $issueCouponInfo['receive_type'] == 1) {
-            $user_quantity_count = $issueUserService->count(['uid' => $uid, 'issue_coupon_id' => $id]);
+            $user_quantity_count = $issueUserService->effectiveClaimCount((int)$uid, (int)$id);
             if ($user_quantity_count >= $issueCouponInfo['quantity_count']) {
                 throw new ValidateException('抱歉该优惠券您不能再领取了!');
             }

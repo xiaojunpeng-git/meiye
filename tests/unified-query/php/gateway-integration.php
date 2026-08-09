@@ -16,6 +16,8 @@ use app\services\query\UnifiedQueryException;
 use app\services\query\UnifiedQueryExportTaskServices;
 use app\services\query\UnifiedQueryExportWorkerServices;
 use app\services\query\UnifiedQueryJson;
+use app\services\query\UnifiedQueryProviderRegistry;
+use app\services\query\UnifiedQueryWorkerContextResolverRegistry;
 use app\controller\cashier\v3\Command as UnifiedQueryCommandController;
 use app\services\system\SystemMenusServices;
 use C1A\CashierV3\Test\MemberIntegrationFixture;
@@ -71,6 +73,20 @@ final class UqGwAmbiguousCompleteTasks extends UnifiedQueryExportTaskServices
     public function claim(array $rawContext, string $taskNo): array
     {
         return $this->delegate->claim($rawContext, $taskNo);
+    }
+
+    public function preflightFrozenExecution(
+        array $rawContext,
+        array $task,
+        array $plan,
+        array $fieldSnapshot
+    ): void {
+        $this->delegate->preflightFrozenExecution(
+            $rawContext,
+            $task,
+            $plan,
+            $fieldSnapshot
+        );
     }
 
     public function renewLease(
@@ -136,6 +152,20 @@ final class UqGwExpiredLeaseCompleteTasks extends UnifiedQueryExportTaskServices
     public function claim(array $rawContext, string $taskNo): array
     {
         return $this->delegate->claim($rawContext, $taskNo);
+    }
+
+    public function preflightFrozenExecution(
+        array $rawContext,
+        array $task,
+        array $plan,
+        array $fieldSnapshot
+    ): void {
+        $this->delegate->preflightFrozenExecution(
+            $rawContext,
+            $task,
+            $plan,
+            $fieldSnapshot
+        );
     }
 
     public function renewLease(
@@ -205,6 +235,9 @@ final class UqGwLeaseTrackingTasks extends UnifiedQueryExportTaskServices
     /** @var array<int,array<string,mixed>> */
     public $renewals = [];
 
+    /** @var array<int,array<string,mixed>> */
+    public $claimContexts = [];
+
     public function __construct(UnifiedQueryExportTaskServices $delegate)
     {
         $this->delegate = $delegate;
@@ -212,7 +245,22 @@ final class UqGwLeaseTrackingTasks extends UnifiedQueryExportTaskServices
 
     public function claim(array $rawContext, string $taskNo): array
     {
+        $this->claimContexts[] = $rawContext;
         return $this->delegate->claim($rawContext, $taskNo);
+    }
+
+    public function preflightFrozenExecution(
+        array $rawContext,
+        array $task,
+        array $plan,
+        array $fieldSnapshot
+    ): void {
+        $this->delegate->preflightFrozenExecution(
+            $rawContext,
+            $task,
+            $plan,
+            $fieldSnapshot
+        );
     }
 
     public function renewLease(
@@ -973,11 +1021,35 @@ try {
     $createdTask = (array)(uqGwResultData($createExport['envelope'])['exportTask'] ?? []);
     $taskNo = (string)($createdTask['taskId'] ?? '');
     $runtime = UnifiedQueryModule::runtime();
+    $runtimeProviders = $runtime['providers'] ?? null;
+    $runtimeWorkerContextResolvers = $runtime['workerContextResolvers'] ?? null;
+    ok(
+        '生产 Runtime 统一冻结 provider 与 Worker context resolver 映射',
+        $runtimeProviders instanceof UnifiedQueryProviderRegistry
+            && $runtimeProviders->isFrozen()
+            && $runtimeWorkerContextResolvers
+                instanceof UnifiedQueryWorkerContextResolverRegistry
+            && $runtimeWorkerContextResolvers->isFrozen()
+            && UnifiedQueryModule::service('providers') === $runtimeProviders
+            && UnifiedQueryModule::service('workerContextResolvers')
+                === $runtimeWorkerContextResolvers
+            && $runtimeWorkerContextResolvers->resolve('member_list')->pageCode()
+                === 'member_list',
+        json_encode([
+            'providerPages' => $runtimeProviders instanceof UnifiedQueryProviderRegistry
+                ? $runtimeProviders->pageCodes()
+                : [],
+            'workerResolverPages' => $runtimeWorkerContextResolvers
+                instanceof UnifiedQueryWorkerContextResolverRegistry
+                ? $runtimeWorkerContextResolvers->pageCodes()
+                : [],
+        ], JSON_UNESCAPED_UNICODE),
+        'UQ-WORKER-00'
+    );
     $worker = new UnifiedQueryExportWorkerServices(
-        $dispatcher,
         $runtime['exports'],
-        $runtime['memberProvider'],
-        $runtime['contextFactory']
+        $runtimeProviders,
+        $runtimeWorkerContextResolvers
     );
     $precisionTaskNo = 'uqe_' . str_repeat('9', 32);
     $writeXlsx = new ReflectionMethod(UnifiedQueryExportWorkerServices::class, 'writeXlsx');
@@ -1258,10 +1330,9 @@ try {
     $pageTaskNo = (string)(uqGwResultData($pageExport['envelope'])['exportTask']['taskId'] ?? '');
     $leaseTrackingTasks = new UqGwLeaseTrackingTasks($runtime['exports']);
     $leaseTrackingWorker = new UnifiedQueryExportWorkerServices(
-        $dispatcher,
         $leaseTrackingTasks,
-        $runtime['memberProvider'],
-        $runtime['contextFactory']
+        $runtimeProviders,
+        $runtimeWorkerContextResolvers
     );
     $pageWorkerResult = $leaseTrackingWorker->processOne($pageTaskNo);
     $pagePath = $leaseTrackingWorker->absolutePath((string)($pageWorkerResult['storageKey'] ?? ''));
@@ -1280,14 +1351,18 @@ try {
     $leaseRenewalSeconds = array_values(array_unique(array_map(function (array $renewal): int {
         return (int)($renewal['seconds'] ?? 0);
     }, $leaseTrackingTasks->renewals)));
+    $leaseClaimContext = (array)($leaseTrackingTasks->claimContexts[0] ?? []);
     ok(
         'worker 在冻结查询、写表和落盘阶段以同一租约持续续期，完成仍受 token CAS 保护',
         ($pageWorkerResult['status'] ?? '') === 'succeeded'
             && count($leaseTrackingTasks->renewals) >= 6
-            && $leaseRenewalSeconds === [UnifiedQueryExportTaskServices::LEASE_SECONDS],
+            && $leaseRenewalSeconds === [UnifiedQueryExportTaskServices::LEASE_SECONDS]
+            && ($leaseClaimContext['page_code'] ?? '') === 'member_list'
+            && ($leaseClaimContext['scope_dimensions'] ?? null) === [],
         json_encode([
             'renewals' => $leaseTrackingTasks->renewals,
             'leaseRenewalSeconds' => $leaseRenewalSeconds,
+            'claimContext' => $leaseClaimContext,
             'maxTaskRuntimeSeconds' => UnifiedQueryExportWorkerServices::MAX_TASK_RUNTIME_SECONDS,
             'renewIntervalSeconds' => UnifiedQueryExportWorkerServices::LEASE_RENEW_INTERVAL_SECONDS,
         ], JSON_UNESCAPED_UNICODE),
@@ -1317,10 +1392,9 @@ try {
     );
     $expiredLeaseTasks = new UqGwExpiredLeaseCompleteTasks($runtime['exports']);
     $expiredLeaseWorker = new UnifiedQueryExportWorkerServices(
-        $dispatcher,
         $expiredLeaseTasks,
-        $runtime['memberProvider'],
-        $runtime['contextFactory']
+        $runtimeProviders,
+        $runtimeWorkerContextResolvers
     );
     $staleLeaseResult = $expiredLeaseWorker->processOne($staleLeaseTaskNo);
     $staleLeaseTask = Db::name('unified_query_export_task')
@@ -1382,10 +1456,9 @@ try {
         uqGwResultData($ambiguousExport['envelope'])['exportTask']['taskId'] ?? ''
     );
     $ambiguousWorker = new UnifiedQueryExportWorkerServices(
-        $dispatcher,
         new UqGwAmbiguousCompleteTasks($runtime['exports']),
-        $runtime['memberProvider'],
-        $runtime['contextFactory']
+        $runtimeProviders,
+        $runtimeWorkerContextResolvers
     );
     $ambiguousResult = $ambiguousWorker->processOne($ambiguousTaskNo);
     $ambiguousRow = Db::name('unified_query_export_task')
@@ -1439,10 +1512,12 @@ try {
         ($brokenWorkerResult['status'] ?? '') === 'failed'
             && ($brokenTask['status'] ?? '') === 'failed'
             && (string)($brokenTask['storage_key'] ?? '') === ''
+            && ($brokenWorkerResult['errorCode'] ?? '')
+                === 'UNIFIED_QUERY_EXPORT_PLAN_INVALID'
             && strpos((string)($brokenWorkerResult['diagnostic'] ?? ''),
                 'UnifiedQueryException') !== false
             && strpos((string)($brokenWorkerResult['diagnostic'] ?? ''),
-                '查询截止日期无效') !== false,
+                '导出任务的冻结统计时点不合法') !== false,
         json_encode(compact('brokenWorkerResult', 'brokenTask'), JSON_UNESCAPED_UNICODE),
         'UQ-CUTOFF-04'
     );
@@ -1451,6 +1526,7 @@ try {
     $operatorScope = MemberIntegrationFixture::operatorScope(1);
     $dataScope = MemberIntegrationFixture::dataScope($dispatcher, 1);
     $downloadContext = $runtime['contextFactory']->make($operatorScope, $dataScope, [
+        'pageCode' => 'member_list',
         'queryCutoffDate' => $cutoffDate,
     ]);
     $downloadDescriptor = $runtime['exports']->resolveDownloadDescriptor(
@@ -1461,7 +1537,7 @@ try {
     $revokedContext = $downloadContext;
     $revokedContext['permissions'] = array_values(array_diff(
         (array)$revokedContext['permissions'],
-        [UnifiedQueryAccessPolicy::EXPORT]
+        [UnifiedQueryAccessPolicy::PAGE_POLICY]
     ));
     $revokedCode = uqGwCode(function () use ($runtime, $revokedContext, $taskNo): void {
         $runtime['exports']->resolveDownload($revokedContext, $taskNo);
@@ -1475,7 +1551,7 @@ try {
         $resolvedKey === $storageKey
             && (string)($downloadDescriptor['fileName'] ?? '')
                 === (string)($createdTask['fileName'] ?? '')
-            && $revokedCode === 'UNIFIED_QUERY_EXPORT_FORBIDDEN'
+            && $revokedCode === 'UNIFIED_QUERY_FORBIDDEN'
             && strpos($routeSource,
                 "Route::get('unified-query/exports/:taskNo/download'") !== false
             && strpos($routeSource, 'AuthTokenMiddleware::class') !== false

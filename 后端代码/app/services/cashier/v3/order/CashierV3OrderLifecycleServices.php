@@ -262,6 +262,14 @@ final class CashierV3OrderLifecycleServices
     /** @return array<string,mixed> */
     private function assertFinancialReversalEligible(array $source, string $action, array $input, CashierV3DataScopeContext $scope): array
     {
+        if (Db::name(self::OPERATION_TABLE)->where('tenant_id', $scope->tenantId())
+            ->where('source_type', 'sales')->where('source_order_id', $source['sourceId'])
+            ->whereIn('operation_type', ['refund', 'void'])->where('status', 'succeeded')->count() > 0) {
+            throw self::failure('order_already_reversed');
+        }
+        if ($action === 'refund-sales-order') {
+            return (new CashierV3SalesOrderReversalServices())->prepareFinancialRefund($source, $input, $scope);
+        }
         $hasEntitlement = Db::name('cashier_v3_entitlement_completion_receipt')
             ->where('tenant_id', $scope->tenantId())
             ->where('checkout_request_id', $source['checkoutRequestId'])->count() > 0;
@@ -270,11 +278,6 @@ final class CashierV3OrderLifecycleServices
         // 撤销服务逐张验证，仅完全未使用时放行。
         if (in_array('product', $lineTypes, true)) throw self::failure('order_reversal_inventory_unsupported');
         if ($hasEntitlement) throw self::failure('order_reversal_entitlement_already_consumed');
-        if (Db::name(self::OPERATION_TABLE)->where('tenant_id', $scope->tenantId())
-            ->where('source_type', 'sales')->where('source_order_id', $source['sourceId'])
-            ->whereIn('operation_type', ['refund', 'void'])->where('status', 'succeeded')->count() > 0) {
-            throw self::failure('order_already_reversed');
-        }
         return (new CashierV3SalesOrderReversalServices())->prepare($source, $action, $input, $scope);
     }
 

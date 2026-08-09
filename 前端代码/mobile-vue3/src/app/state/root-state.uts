@@ -1,6 +1,7 @@
 export {
 	hasCompleteMerchantRoot,
 	evaluateMerchantRootUpdate,
+	merchantContextSwitchInstallDecision,
 	merchantContextIsComplete,
 	merchantRootInstallDecision,
 	merchantStateIdentifiersAreCleared

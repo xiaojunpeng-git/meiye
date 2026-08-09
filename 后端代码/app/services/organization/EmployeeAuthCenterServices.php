@@ -144,6 +144,7 @@ class EmployeeAuthCenterServices extends BaseServices
                 $allEntries[] = $e;
             }
             foreach ($s['tenure_periods'] ?? [] as $t) {
+                $t['staff_id'] = (int)($s['id'] ?? 0);
                 $allTenure[] = $t;
             }
             $storeId = (int)($s['store_id'] ?? 0);

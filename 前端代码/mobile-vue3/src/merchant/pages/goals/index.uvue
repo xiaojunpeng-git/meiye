@@ -1,0 +1,109 @@
+<template>
+	<view class="goal-page">
+		<view class="goal-page__header"><text class="goal-page__eyebrow">商家端</text><text class="goal-page__title">目标</text><text class="goal-page__subtitle">员工按月创建，完成情况由统一 V3 指标后续汇总</text></view>
+		<scroll-view scroll-y class="goal-page__content">
+			<view class="goal-page__month"><text class="goal-page__month-label">目标周期</text><text class="goal-page__month-value">{{ monthLabel }}</text></view>
+			<view v-if="loading" class="goal-page__notice"><text class="goal-page__notice-title">正在读取本月目标</text></view>
+			<view v-else-if="message.length > 0" class="goal-page__notice"><text class="goal-page__notice-title">{{ message }}</text><view class="goal-page__retry" @tap="loadTarget"><text>重新加载</text></view></view>
+			<view v-else>
+				<view class="goal-page__card"><text class="goal-page__card-kicker">本月个人目标</text><text class="goal-page__card-title">{{ targetName }}</text><text class="goal-page__card-copy">一期由员工在手机端创建；团队汇总只读取后端数据权限范围内已创建的目标。</text></view>
+				<view class="goal-page__section"><text class="goal-page__section-title">填写三项目标</text><view v-for="item in metricCatalog" :key="item.code" class="goal-page__line"><view class="goal-page__line-copy-wrap"><text class="goal-page__line-label">{{ item.label }}</text><text class="goal-page__line-copy">{{ item.code === 'SERVICE_VISITS' ? '填写预计服务客次数' : '填写整数元金额' }}</text></view><input class="goal-page__input" type="number" :value="inputValue(item.code)" :placeholder="item.code === 'SERVICE_VISITS' ? '0 次' : '0 元'" @input="setMetric(item.code, $event.detail.value)" /></view></view>
+				<view class="goal-page__save" :class="{ 'goal-page__save--disabled': saving }" @tap="saveTarget"><text>{{ saving ? '正在保存…' : (targetVersion > 0 ? '保存修改' : '创建本月目标') }}</text></view>
+				<view v-if="teamAvailable" class="goal-page__section"><text class="goal-page__section-title">授权范围团队目标</text><text class="goal-page__team-copy">已创建目标 {{ teamTargetCount }} 份 · 员工 {{ teamEmployeeCount }} 人</text><view v-for="item in teamMetrics" :key="item.code" class="goal-page__line"><text class="goal-page__line-label">{{ item.label }}</text><text class="goal-page__value">{{ displayValue(item) }}</text></view></view>
+				<view v-else class="goal-page__notice"><text class="goal-page__notice-title">团队汇总暂不可见</text><text class="goal-page__notice-copy">{{ teamMessage }}</text></view>
+				<view class="goal-page__notice"><text class="goal-page__notice-title">完成值尚未接入</text><text class="goal-page__notice-copy">{{ progressMessage }}</text></view>
+			</view>
+		</scroll-view>
+		<view class="goal-page__tabs"><navigator class="goal-page__tab" url="/src/merchant/pages/warehouse/index" open-type="navigate"><text>数仓</text></navigator><navigator class="goal-page__tab" url="/src/merchant/pages/customers/index" open-type="navigate"><text>客户</text></navigator><navigator class="goal-page__tab" url="/src/merchant/pages/workbench/index" open-type="navigate"><text>工作台</text></navigator><view class="goal-page__tab goal-page__tab--active"><text>目标</text></view><navigator class="goal-page__tab" url="/src/merchant/pages/profile/index" open-type="navigate"><text>我的</text></navigator></view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	import { queryMobilePersonalMonthlyTarget, saveMobilePersonalMonthlyTarget } from '../../../shared/api/mobile-personal-target-client.uts'
+	import { showMobileNotice } from '../../../shared/platform/mobile-platform.uts'
+	const fixedMetricCatalog = [
+		{ code: 'SALES_PERFORMANCE', label: '销售业绩', unitCode: 'CNY_FEN', displayUnit: '元' },
+		{ code: 'CONSUMPTION_PERFORMANCE', label: '消耗业绩', unitCode: 'CNY_FEN', displayUnit: '元' },
+		{ code: 'SERVICE_VISITS', label: '服务客次', unitCode: 'COUNT', displayUnit: '次' }
+	]
+	const loading = ref(false)
+	const saving = ref(false)
+	const message = ref('')
+	const monthKey = ref('')
+	const targetName = ref('')
+	const targetVersion = ref(0)
+	const metricCatalog = ref<Array<any>>(fixedMetricCatalog)
+	const metricInputs = ref<any>({ SALES_PERFORMANCE: '', CONSUMPTION_PERFORMANCE: '', SERVICE_VISITS: '' })
+	const teamAvailable = ref(false)
+	const teamMessage = ref('')
+	const teamMetrics = ref<Array<any>>([])
+	const teamTargetCount = ref(0)
+	const teamEmployeeCount = ref(0)
+	const progressMessage = ref('完成值将只从统一 V3 指标接口读取。')
+	const now = new Date()
+	const monthLabel = now.getFullYear().toString() + '年' + (now.getMonth() + 1).toString() + '月'
+
+	onShow(() => loadTarget())
+
+	function inputValue(code : string) : string { return String(metricInputs.value[code] || '') }
+	function setMetric(code : string, value : string) { metricInputs.value[code] = value.replace(/[^0-9]/g, '') }
+	function displayValue(item : any) : string {
+		let value = Number(item.targetValue || 0)
+		return item.unitCode === 'CNY_FEN' ? (value / 100).toString() + ' 元' : value.toString() + ' 次'
+	}
+	function applyProjection(projection : any) {
+		monthKey.value = String(projection.monthKey || '')
+		metricCatalog.value = Array.isArray(projection.metricCatalog) && projection.metricCatalog.length === 3 ? projection.metricCatalog : fixedMetricCatalog
+		let target = projection.personalTarget
+		targetName.value = target != null ? String(target.name || '') : monthLabel + '个人目标'
+		targetVersion.value = target != null ? Number(target.version || 0) : 0
+		let values : any = { SALES_PERFORMANCE: '', CONSUMPTION_PERFORMANCE: '', SERVICE_VISITS: '' }
+		if (target != null && Array.isArray(target.metrics)) for (let index = 0; index < target.metrics.length; index++) {
+			let metric = target.metrics[index]
+			values[metric.code] = metric.unitCode === 'CNY_FEN' ? (Number(metric.targetValue || 0) / 100).toString() : Number(metric.targetValue || 0).toString()
+		}
+		metricInputs.value = values
+		let team = projection.teamSummary || {}
+		teamAvailable.value = team.available === true
+		teamMessage.value = String(team.message || '当前权限范围不展示团队汇总。')
+		teamMetrics.value = Array.isArray(team.metrics) ? team.metrics : []
+		teamTargetCount.value = Number(team.targetCount || 0)
+		teamEmployeeCount.value = Number(team.employeeCount || 0)
+		progressMessage.value = String((projection.actualProgress || {}).message || '完成值将只从统一 V3 指标接口读取。')
+	}
+	function loadTarget() {
+		loading.value = true; message.value = ''
+		queryMobilePersonalMonthlyTarget((response : any) => {
+			loading.value = false
+			if (!response.ok || response.body == null || response.body.monthKey == null) { message.value = String(response.message || '本月目标暂时不可用。'); return }
+			applyProjection(response.body)
+		})
+	}
+	function saveTarget() {
+		if (saving.value || monthKey.value.length === 0) return
+		let sales = Number(metricInputs.value.SALES_PERFORMANCE || 0)
+		let consumption = Number(metricInputs.value.CONSUMPTION_PERFORMANCE || 0)
+		let visits = Number(metricInputs.value.SERVICE_VISITS || 0)
+		if (!Number.isInteger(sales) || !Number.isInteger(consumption) || !Number.isInteger(visits) || sales < 0 || consumption < 0 || visits < 0) { message.value = '请填写非负整数目标。'; return }
+		saving.value = true; message.value = ''
+		let payload : any = { monthKey: monthKey.value, name: targetName.value, metrics: { SALES_PERFORMANCE: sales * 100, CONSUMPTION_PERFORMANCE: consumption * 100, SERVICE_VISITS: visits }, idempotencyKey: 'mobile-target-' + Date.now().toString() + '-' + Math.floor(Math.random() * 100000).toString() }
+		if (targetVersion.value > 0) payload.expectedVersion = targetVersion.value
+		saveMobilePersonalMonthlyTarget(payload, (response : any) => {
+			saving.value = false
+			if (!response.ok || response.body == null || response.body.monthKey == null) { message.value = String(response.message || '目标保存失败。'); return }
+			applyProjection(response.body)
+			showMobileNotice('本月目标已保存')
+		})
+	}
+</script>
+
+<style>
+	.goal-page { display: flex; flex: 1; min-height: 100%; flex-direction: column; background-color: #f5f7fa; }
+	.goal-page__header { display: flex; flex-direction: column; padding: 52px 20px 18px 20px; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #dde4ed; background-color: #ffffff; }
+	.goal-page__eyebrow { font-size: 12px; font-weight: 600; color: #697586; }.goal-page__title { margin-top: 6px; font-size: 24px; font-weight: 700; color: #1f2329; }.goal-page__subtitle { margin-top: 7px; font-size: 13px; line-height: 20px; color: #697586; }
+	.goal-page__content { min-height: 0; flex: 1; padding: 18px 20px 94px 20px; }.goal-page__month { display: flex; min-height: 42px; flex-direction: row; align-items: center; justify-content: space-between; padding: 0px 2px; }.goal-page__month-label { font-size: 13px; color: #697586; }.goal-page__month-value { font-size: 14px; font-weight: 700; color: #303133; }
+	.goal-page__card { display: flex; flex-direction: column; padding: 18px; border-left-width: 3px; border-left-style: solid; border-left-color: #1677cc; background-color: #ffffff; }.goal-page__card-kicker { font-size: 12px; font-weight: 600; color: #1677cc; }.goal-page__card-title { margin-top: 6px; font-size: 18px; font-weight: 700; color: #303133; }.goal-page__card-copy { margin-top: 7px; font-size: 13px; line-height: 20px; color: #697586; }
+	.goal-page__section { display: flex; flex-direction: column; margin-top: 20px; border-top-width: 1px; border-bottom-width: 1px; border-style: solid; border-color: #dde4ed; background-color: #ffffff; }.goal-page__section-title { padding: 13px 14px; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #edf1f5; font-size: 14px; font-weight: 700; color: #303133; }.goal-page__line { display: flex; min-height: 66px; flex-direction: row; align-items: center; justify-content: space-between; padding: 0px 14px; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #edf1f5; }.goal-page__line-copy-wrap { flex: 1; }.goal-page__line-label { font-size: 14px; font-weight: 600; color: #303133; }.goal-page__line-copy { display: block; margin-top: 4px; font-size: 12px; color: #7c8795; }.goal-page__input { width: 94px; margin-left: 12px; padding: 8px 0px; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #b8c5d4; text-align: right; font-size: 16px; font-weight: 700; color: #1677cc; }.goal-page__value { font-size: 15px; font-weight: 700; color: #1677cc; }
+	.goal-page__save { display: flex; min-height: 46px; flex-direction: row; align-items: center; justify-content: center; margin-top: 20px; background-color: #1677cc; font-size: 15px; font-weight: 700; color: #ffffff; }.goal-page__save--disabled { background-color: #9dbbd4; }.goal-page__notice { display: flex; flex-direction: column; margin-top: 18px; padding: 14px; background-color: #f7fbff; }.goal-page__notice-title { font-size: 14px; font-weight: 700; color: #1f5f96; }.goal-page__notice-copy,.goal-page__team-copy { margin-top: 5px; font-size: 13px; line-height: 20px; color: #526071; }.goal-page__retry { display: flex; align-self: flex-start; margin-top: 10px; padding: 7px 10px; background-color: #1677cc; font-size: 13px; font-weight: 600; color: #ffffff; }
+	.goal-page__tabs { display: flex; min-height: 62px; flex-direction: row; border-top-width: 1px; border-top-style: solid; border-top-color: #dde4ed; background-color: #ffffff; }.goal-page__tab { display: flex; min-width: 0; flex: 1; flex-direction: row; align-items: center; justify-content: center; border-top-width: 2px; border-top-style: solid; border-top-color: #ffffff; font-size: 12px; font-weight: 600; color: #697586; }.goal-page__tab--active { border-top-color: #1677cc; background-color: #f7fbff; color: #1677cc; }
+</style>

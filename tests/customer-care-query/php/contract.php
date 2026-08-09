@@ -276,11 +276,24 @@ $taskRange = CustomerCareProjectionContract::normalizeTaskQuery([
 ], $scope);
 careQueryAssert('task time range is normalized in the business timezone',
     $taskRange['plannedFrom'] > 0 && $taskRange['plannedTo'] > $taskRange['plannedFrom']);
+$memberOpenTaskQuery = CustomerCareProjectionContract::normalizeTaskQuery([
+    'memberId' => '501', 'statusGroup' => 'open',
+], $scope);
+careQueryAssert('task exact member and open status group are normalized together',
+    $memberOpenTaskQuery['memberId'] === 501 && $memberOpenTaskQuery['statusGroup'] === 'open');
+careQueryAssert('task exact member filter rejects invalid member id', careQueryThrows(static function () use ($scope) {
+    CustomerCareProjectionContract::normalizeTaskQuery(['memberId' => '0'], $scope);
+}, 'CARE_QUERY_INVALID'));
 $recordRange = CustomerCareProjectionContract::normalizeRecordQuery([
     'followedFrom' => '2026-08-03T09:00', 'followedTo' => '2026-08-03T18:00',
 ], $scope);
 careQueryAssert('record time range is normalized in the business timezone',
     $recordRange['followedFrom'] > 0 && $recordRange['followedTo'] > $recordRange['followedFrom']);
+$memberRecordQuery = CustomerCareProjectionContract::normalizeRecordQuery(['memberId' => '501'], $scope);
+careQueryAssert('record exact member filter is normalized', $memberRecordQuery['memberId'] === 501);
+careQueryAssert('record exact member filter rejects invalid member id', careQueryThrows(static function () use ($scope) {
+    CustomerCareProjectionContract::normalizeRecordQuery(['memberId' => '0'], $scope);
+}, 'CARE_QUERY_INVALID'));
 $customerQuery = CustomerCareProjectionContract::normalizeCustomerQuery(['memberId' => '501']);
 careQueryAssert('customer exact member filter accepts a positive member id', $customerQuery['memberId'] === 501);
 careQueryAssert('customer exact member filter rejects invalid member id', careQueryThrows(static function () {
@@ -325,6 +338,17 @@ careQueryAssert('task and record queries default to current business month',
         && ($projection['taskView']['appliedQuery']['plannedTo'] ?? '') !== ''
         && ($projection['recordView']['appliedQuery']['followedFrom'] ?? '') !== ''
         && ($projection['recordView']['appliedQuery']['followedTo'] ?? '') !== '');
+$memberTaskProjection = $service->query(careTrustedContext(), [
+    'view' => 'tasks', 'query' => ['memberId' => '501', 'statusGroup' => 'open'],
+]);
+careQueryAssert('task view echoes exact member and open status filters',
+    ($memberTaskProjection['taskView']['appliedQuery']['memberId'] ?? '') === '501'
+        && ($memberTaskProjection['taskView']['appliedQuery']['statusGroup'] ?? '') === 'open');
+$memberRecordProjection = $service->query(careTrustedContext(), [
+    'view' => 'records', 'query' => ['memberId' => '501'],
+]);
+careQueryAssert('record view echoes exact member filter',
+    ($memberRecordProjection['recordView']['appliedQuery']['memberId'] ?? '') === '501');
 careQueryAssert('server bucket counts returned', $projection['taskView']['bucketCounts']['overdue'] === 2);
 careQueryAssert('task DTO carries stable navigation target', $projection['taskView']['records'][0]['relatedBusiness']['navigationTarget']['targetCode'] === 'member-detail');
 careQueryAssert('task and record DTOs expose formal document numbers only',

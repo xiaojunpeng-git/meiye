@@ -770,14 +770,13 @@ final class CashierV3SaleOnlyFactAssembler
             || $discount !== (int)$order['discount_amount_cents']
             || $sale !== (int)$order['sale_amount_cents']
             || $sale !== (int)$request['sales_amount_cents']
-            || $sale !== (int)$request['receivable_amount_cents']
             || $collected !== (int)$request['selected_payment_amount_cents']
             || $collected !== (int)$request['cash_performance_amount_cents']
             || $collected + $balance + $debt !== $sale
             || $lineDebt !== $debt
             || $collected !== (int)$batch['collected_amount_cents']
             || $collected !== (int)$batch['cash_performance_amount_cents']
-            || $sale !== (int)$batch['receivable_amount_cents']) {
+            || (int)$batch['receivable_amount_cents'] !== (int)$request['receivable_amount_cents']) {
             throw self::failure('sale_only_fact_total_equation_mismatch');
         }
         foreach ($orderLines as $index => $line) {

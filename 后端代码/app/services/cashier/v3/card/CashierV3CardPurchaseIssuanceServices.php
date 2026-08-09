@@ -68,8 +68,7 @@ final class CashierV3CardPurchaseIssuanceServices
         string $commandIdempotencyKey,
         int $occurredAt,
         CashierV3OperatorScope $operatorScope,
-        CashierV3DataScopeContext $dataScope,
-        array $debtAllocations = []
+        CashierV3DataScopeContext $dataScope
     ): array {
         CashierV3TransactionGuard::assertInTransaction('cardPurchaseIssuance');
         $hasCard = false;
@@ -124,8 +123,6 @@ final class CashierV3CardPurchaseIssuanceServices
                 throw self::failure('card_purchase_quantity_invalid');
             }
             for ($issueNo = 1; $issueNo <= $quantity; $issueNo++) {
-                $lineDebtCents = (int)($debtAllocations[(string)$salesLine['order_line_id']] ?? 0);
-                $issueDebtCents = self::unitAllocation($lineDebtCents, $quantity, $issueNo);
                 $issued[] = $this->issueOneInTx(
                     $header,
                     $salesLine,
@@ -136,8 +133,7 @@ final class CashierV3CardPurchaseIssuanceServices
                     $commandIdempotencyKey,
                     $occurredAt,
                     $operatorScope,
-                    $dataScope,
-                    $issueDebtCents
+                    $dataScope
                 );
             }
         }
@@ -161,8 +157,7 @@ final class CashierV3CardPurchaseIssuanceServices
         string $commandIdempotencyKey,
         int $occurredAt,
         CashierV3OperatorScope $operatorScope,
-        CashierV3DataScopeContext $dataScope,
-        int $debtCents
+        CashierV3DataScopeContext $dataScope
     ): array {
         $salesOrderLineId = trim((string)($salesLine['order_line_id'] ?? ''));
         $skuId = (int)($salesLine['catalog_sku_id'] ?? 0);
@@ -208,8 +203,7 @@ final class CashierV3CardPurchaseIssuanceServices
             $salesLine,
             $issueNo,
             $member,
-            $occurredAt,
-            $debtCents
+            $occurredAt
         );
         $validity = $this->validity($purchase, $occurredAt);
         $baseCartId = $this->insertBaseCart(
@@ -219,8 +213,7 @@ final class CashierV3CardPurchaseIssuanceServices
             $line,
             $validity,
             $issueNo,
-            $occurredAt,
-            $debtCents
+            $occurredAt
         );
         $components = $this->insertComponents(
             $legacyOrderId,
@@ -269,7 +262,7 @@ final class CashierV3CardPurchaseIssuanceServices
             'cardNo' => (string)$holder['cardNo'],
             'baseCartId' => $baseCartId,
             'benefitDetailIds' => array_values((array)$components['benefitDetailIds']),
-            'debtAmountCents' => $debtCents,
+            'debtAmountCents' => 0,
             'cardRuleStateId' => (string)($ruleState['stateId'] ?? ''),
             'cardRuleType' => (string)($ruleState['ruleType'] ?? ''),
             'replayed' => false,
@@ -338,8 +331,7 @@ final class CashierV3CardPurchaseIssuanceServices
         array $salesLine,
         int $issueNo,
         array $member,
-        int $now,
-        int $debtCents
+        int $now
     ): int
     {
         $lineId = (string)$salesLine['order_line_id'];
@@ -347,10 +339,7 @@ final class CashierV3CardPurchaseIssuanceServices
         $saleCents = $this->divideExactly((int)$salesLine['sale_amount_cents'], (int)$salesLine['quantity']);
         $originalCents = $this->divideExactly((int)$salesLine['original_amount_cents'], (int)$salesLine['quantity']);
         $discountCents = $this->divideExactly((int)$salesLine['discount_amount_cents'], (int)$salesLine['quantity']);
-        if ($debtCents < 0 || $debtCents > $saleCents) {
-            throw self::failure('card_purchase_debt_amount_invalid');
-        }
-        $collectedCents = $saleCents - $debtCents;
+        $collectedCents = $saleCents;
         $orderId = 'v3c' . substr(hash('sha256', $seed), 0, 28);
         $unique = md5('cashier-v3-card:' . $seed);
         $verifyCode = strtoupper(substr(hash('sha256', 'verify:' . $seed), 0, 12));
@@ -380,7 +369,7 @@ final class CashierV3CardPurchaseIssuanceServices
             'total_postage' => '0.00',
             'pay_price' => self::money($collectedCents),
             'cash_pay_price' => self::money($collectedCents),
-            'debt_amount' => self::money($debtCents),
+            'debt_amount' => '0.00',
             'repaid_debt_amount' => '0.00',
             'is_debt_repay' => 0,
             'debt_repay_origin_order_id' => 0,
@@ -501,16 +490,12 @@ final class CashierV3CardPurchaseIssuanceServices
         array $line,
         array $validity,
         int $issueNo,
-        int $now,
-        int $debtCents
+        int $now
     ): int {
         $saleCents = $this->divideExactly((int)$salesLine['sale_amount_cents'], (int)$salesLine['quantity']);
         $originalCents = $this->divideExactly((int)$salesLine['original_amount_cents'], (int)$salesLine['quantity']);
         $discountCents = $this->divideExactly((int)$salesLine['discount_amount_cents'], (int)$salesLine['quantity']);
-        if ($debtCents < 0 || $debtCents > $saleCents) {
-            throw self::failure('card_purchase_cart_debt_amount_invalid');
-        }
-        $collectedCents = $saleCents - $debtCents;
+        $collectedCents = $saleCents;
         $cartId = 'v3b' . substr(hash('sha256', (string)$salesLine['order_line_id'] . ':' . $issueNo), 0, 28);
         $cartInfo = [
             'sourceType' => 'cashier_v3_card_purchase',
@@ -557,7 +542,7 @@ final class CashierV3CardPurchaseIssuanceServices
             'yue_pay_amount' => '0.00',
             'card_upgrade_amount' => self::money($discountCents),
             'cash_pay_amount' => self::money($collectedCents),
-            'debt_amount' => self::money($debtCents),
+            'debt_amount' => '0.00',
             'repaid_debt_amount' => '0.00',
             'pay_postage' => '0.00',
             'member_price' => self::money($saleCents),
@@ -820,11 +805,13 @@ final class CashierV3CardPurchaseIssuanceServices
             (int)($salesLine['quantity'] ?? 0)
         );
         $ordinaryPriceMatches = (int)($salesLine['sale_amount_cents'] ?? -1) === $fullPriceCents;
+        $auditedPriceChangeMatches = !$isCustom
+            && $this->isAuthorizedManualPriceSettlement($salesLine, $line);
         if ($identityMismatch
             || (!$isCustom && $sourceKind !== 'card_package')
             || !is_array($purchase['components'] ?? null)
             || !$purchase['components']
-            || (!$ordinaryPriceMatches && !$this->isBoundCardUpgradeSettlement(
+            || (!$ordinaryPriceMatches && !$auditedPriceChangeMatches && !$this->isBoundCardUpgradeSettlement(
                 $salesLine,
                 $line,
                 $header,
@@ -832,6 +819,25 @@ final class CashierV3CardPurchaseIssuanceServices
             ))) {
             throw self::failure('card_purchase_catalog_authority_changed');
         }
+    }
+
+    private function isAuthorizedManualPriceSettlement(array $salesLine, array $line): bool
+    {
+        $quantity = (int)($salesLine['quantity'] ?? 0);
+        $saleAmount = (int)($salesLine['sale_amount_cents'] ?? -1);
+        $configuredCost = (int)($salesLine['configured_cost_cents'] ?? -1);
+        $currentCost = (int)($line['configured_cost_cents'] ?? -2);
+        if ($quantity <= 0 || $saleAmount < 0 || $configuredCost < 0
+            || $configuredCost !== $currentCost
+            || ($configuredCost > 0 && $quantity > intdiv(PHP_INT_MAX, $configuredCost))) {
+            return false;
+        }
+
+        return (int)($salesLine['price_changed_at'] ?? 0) > 0
+            && (int)($salesLine['price_changed_by'] ?? 0) > 0
+            && trim((string)($salesLine['price_changed_by_name_snapshot'] ?? '')) !== ''
+            && trim((string)($salesLine['price_change_reason'] ?? '')) !== ''
+            && $saleAmount >= $configuredCost * $quantity;
     }
 
     /**
@@ -983,6 +989,8 @@ final class CashierV3CardPurchaseIssuanceServices
 
     private function validity(array $purchase, int $now): array
     {
+        // 加购阶段只冻结卡项的有效期规则；到成功结账并签发权益时，才以
+        // 可信成交时间计算“购买后 N 天有效”的真实起止时间。
         $validity = is_array($purchase['validity'] ?? null) ? $purchase['validity'] : [];
         $mode = (int)($validity['writeValid'] ?? 0);
         $days = (int)($validity['writeDays'] ?? 0);
@@ -1091,14 +1099,6 @@ final class CashierV3CardPurchaseIssuanceServices
             throw self::failure('card_purchase_unit_amount_invalid');
         }
         return intdiv($amount, $quantity);
-    }
-
-    private static function unitAllocation(int $amount, int $quantity, int $sequence): int
-    {
-        if ($amount < 0 || $quantity <= 0 || $sequence <= 0 || $sequence > $quantity) {
-            throw self::failure('card_purchase_unit_allocation_invalid');
-        }
-        return intdiv($amount, $quantity) + ($sequence <= $amount % $quantity ? 1 : 0);
     }
 
     private function json(array $value): string

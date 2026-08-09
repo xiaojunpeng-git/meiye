@@ -16,6 +16,19 @@ export function postStaff(data, id, headers = {}) {
 }
 
 /**
+ * 人员完整保存（组织工作台专用）：路径参数始终为 employee_id，
+ * 不复用 staff/save/:id，避免 employee_id 与 staff_id 数值碰撞。
+ */
+export function postPersonComplete(data, employeeId, headers = {}) {
+  return request({
+    url: `merchant/staff/person_complete/save/${employeeId}`,
+    method: 'post',
+    data,
+    headers,
+  });
+}
+
+/**
  * 人员完整详情（含岗位与数据权限）
  * @param {number|string} id employee_id（总部 personComplete 路径参数）
  * @param {object} [params] 可选 { staff_id }

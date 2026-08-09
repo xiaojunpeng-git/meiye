@@ -15,10 +15,12 @@ use app\services\cashier\v3\order\CashierV3SalesOrderQueryServices;
 use app\services\cashier\v3\projection\CashierV3RootDomainAssembler;
 use app\services\cashier\v3\registry\CashierV3ContextPolicy;
 use app\services\cashier\v3\cashier\CashierV3CashierReadinessGuard;
+use app\services\cashier\v3\cashier\CashierV3CashierMemberSummaryServices;
 use app\services\cashier\v3\cashier\CashierV3EntitlementResourceVersionProvider;
 use app\services\cashier\v3\cashier\CashierV3CashierWorkspaceServices;
 use app\services\cashier\v3\cashier\CashierV3SaleCatalogServices;
 use app\services\cashier\v3\checkout\provider\CashierV3MemberBalanceProvider;
+use mohe\services\SystemConfigService;
 use think\facade\Db;
 
 /**
@@ -64,6 +66,7 @@ final class CashierV3MemberModule
         $memberDetails = new CashierV3MemberDetailQueryServices();
         $memberDebtDetails = new CashierV3MemberDebtProjectionServices();
         $memberSalesOrders = new CashierV3SalesOrderQueryServices();
+        $cashierMemberSummaries = new CashierV3CashierMemberSummaryServices();
         foreach (['open-member-detail', 'load-member-detail-tab'] as $action) {
             if (!$handlers->hasProjection($action)) {
                 $handlers->registerProjection($action, function (array $scope) use ($memberDetails, $memberDebtDetails, $memberSalesOrders): array {
@@ -76,6 +79,9 @@ final class CashierV3MemberModule
                         [
                             'tab' => (string)($payload['tab'] ?? ''),
                             'keyword' => (string)($payload['keyword'] ?? ''),
+                            'status' => (string)($payload['status'] ?? ''),
+                            'dateFrom' => (string)($payload['dateFrom'] ?? ''),
+                            'dateTo' => (string)($payload['dateTo'] ?? ''),
                         ]
                     );
                     if ((string)($payload['tab'] ?? '') === 'debt') {
@@ -98,6 +104,8 @@ final class CashierV3MemberModule
                         $salesPage = $memberSalesOrders->querySalesOrders([
                             'memberId' => $memberId,
                             'keyword' => (string)($payload['keyword'] ?? ''),
+                            'dateFrom' => (string)($payload['dateFrom'] ?? ''),
+                            'dateTo' => (string)($payload['dateTo'] ?? ''),
                             'page' => 1,
                             'pageSize' => 50,
                         ], $scope['operator_scope'], $scope['data_scope']);
@@ -182,7 +190,11 @@ final class CashierV3MemberModule
         }
         if (!$handlers->hasProjection('open-member-creator')) {
             $handlers->registerProjection('open-member-creator', function (): array {
-                return ['data' => ['ready' => true, 'creator' => 'member']];
+                return ['data' => [
+                    'ready' => true,
+                    'creator' => 'member',
+                    'creatorSchema' => self::memberCreatorSchema(),
+                ]];
             });
         }
         if (!$handlers->hasProjection('open-recharge')) {
@@ -441,7 +453,7 @@ final class CashierV3MemberModule
             });
         }
         if (!$handlers->hasCommand('select-cashier-member')) {
-            $handlers->registerCommand('select-cashier-member', function (array $scope) use ($cashierWorkspace, $memberVersions): array {
+            $handlers->registerCommand('select-cashier-member', function (array $scope) use ($cashierWorkspace, $memberVersions, $cashierMemberSummaries): array {
                 $payload = is_array($scope['payload'] ?? null) ? $scope['payload'] : [];
                 self::assertSelectorEntry($payload, 'cashier');
                 $member = self::findSelectableMember(
@@ -462,6 +474,10 @@ final class CashierV3MemberModule
                     $scope['operator_scope'],
                     (int)($member['id'] ?? $member['memberId'] ?? 0)
                 );
+                $member = array_merge($member, $cashierMemberSummaries->read(
+                    (int)($member['id'] ?? $member['memberId'] ?? 0),
+                    $scope['operator_scope']->storeId()
+                ));
                 return [
                     'data' => ['customerMode' => 'member', 'member' => $member, 'cashierDraft' => $draft],
                     'touched' => ['cashier_workspace'],
@@ -2038,6 +2054,41 @@ final class CashierV3MemberModule
             CashierV3ResultCode::STATUS_FAILED,
             ['fieldErrors' => [$field => $message]]
         );
+    }
+
+    /** @return array{profileFields:array<int,array<string,mixed>>,memberLevels:array<int,array<string,mixed>>,memberTags:array<int,array<string,mixed>>} */
+    private static function memberCreatorSchema(): array
+    {
+        $profileFields = array_values(array_filter(
+            (array)SystemConfigService::get('user_extend_info', []),
+            static function ($field): bool {
+                return is_array($field) && !empty($field['use']);
+            }
+        ));
+        usort($profileFields, static function (array $left, array $right): int {
+            return (int)($left['sort'] ?? 0) <=> (int)($right['sort'] ?? 0);
+        });
+
+        $memberLevels = array_map(static function (array $row): array {
+            return ['value' => (int)$row['id'], 'label' => (string)$row['name']];
+        }, Db::name('system_user_level')
+            ->where('is_del', 0)
+            ->where('is_show', 1)
+            ->field('id,name')
+            ->order('grade asc,id asc')
+            ->select()
+            ->toArray());
+        $memberTags = array_map(static function (array $row): array {
+            return ['value' => (int)$row['id'], 'label' => (string)$row['label_name']];
+        }, Db::name('user_label')
+            ->where('type', 0)
+            ->where('relation_id', 0)
+            ->field('id,label_name')
+            ->order('id asc')
+            ->select()
+            ->toArray());
+
+        return compact('profileFields', 'memberLevels', 'memberTags');
     }
 
     private static function normalizeBirthday($raw): int

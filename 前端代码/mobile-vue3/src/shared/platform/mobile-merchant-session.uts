@@ -1,0 +1,30 @@
+import { currentMobilePlatform } from './mobile-platform.uts'
+
+const ROOT_STORAGE_KEY = 'mobile.merchant.root'
+
+export function currentMerchantRoot() : any {
+	let stored = uni.getStorageSync(ROOT_STORAGE_KEY)
+	return stored != null && typeof stored == 'object' ? stored : null
+}
+
+export function saveMerchantRoot(root : any) : void {
+	if (root != null && typeof root == 'object') uni.setStorageSync(ROOT_STORAGE_KEY, root)
+}
+
+export function clearMerchantRoot() : void {
+	uni.removeStorageSync(ROOT_STORAGE_KEY)
+}
+
+export function merchantRequestSession(root : any) : any {
+	if (root == null || typeof root != 'object') return null
+	let clientSessionId = String(uni.getStorageSync('mobile.client.session.id') || '')
+	if (clientSessionId.length == 0) return null
+	return {
+		merchantToken: String(root.merchantToken || ''),
+		activeContextId: String(root.activeContextId || ''),
+		stateContextId: String(root.stateContextId || ''),
+		clientSessionId: clientSessionId,
+		platform: currentMobilePlatform(),
+		requestId: 'mobile-' + Date.now().toString() + '-' + Math.floor(Math.random() * 100000).toString()
+	}
+}

@@ -671,7 +671,8 @@ class CashierV3CommandGatewayServices extends BaseServices
             $validatedContexts,
             $operatorScope,
             $dataScope,
-            $stateContextId
+            $stateContextId,
+            (bool)($baseContract['allow_empty_server_resource_discovery'] ?? false)
         );
         $resources = $discovery['resources'];
 
@@ -755,7 +756,10 @@ class CashierV3CommandGatewayServices extends BaseServices
         $contract['required_read_roles'] = array_values(array_unique($readRoles));
         $contract['required_touched_roles'] = array_values(array_unique($touchedRoles));
         $contract['server_resource_discovery'] = $discovery;
-        $contract['server_resource_discovery_recheck_required'] = true;
+        // 无目录资源（普通产品/项目）的命令已经在业务事务内锁定了
+        // 权威商品/SKU joined 行，不再为一个空资源计划重复做 discovery
+        // recheck；卡项仍保持完整资源重检。
+        $contract['server_resource_discovery_recheck_required'] = count($resources) > 0;
         $contract['expand_from_server_resource_discovery'] = false;
         return ['contexts' => $contexts, 'contract' => $contract];
     }
@@ -785,7 +789,8 @@ class CashierV3CommandGatewayServices extends BaseServices
             $lockedContexts,
             $operatorScope,
             $dataScope,
-            $stateContextId
+            $stateContextId,
+            (bool)($contract['allow_empty_server_resource_discovery'] ?? false)
         );
         if (!hash_equals((string)$before['fingerprint'], (string)$after['fingerprint'])) {
             Log::warning('[cashier_v3_resource_discovery_drift] ' . json_encode([
@@ -817,7 +822,8 @@ class CashierV3CommandGatewayServices extends BaseServices
         array $contexts,
         CashierV3OperatorScope $operatorScope,
         CashierV3DataScopeContext $dataScope,
-        string $stateContextId
+        string $stateContextId,
+        bool $allowEmpty = false
     ): array {
         try {
             $raw = call_user_func($discoverer, [
@@ -882,7 +888,7 @@ class CashierV3CommandGatewayServices extends BaseServices
             $canonicalAction,
             $phase
         );
-        if (!$resources) {
+        if (!$resources && !$allowEmpty) {
             throw CashierV3CommandException::invalidContext(
                 '本次操作没有找到可校验的服务端资源，请刷新后重试。',
                 ['action' => $canonicalAction, 'phase' => $phase, 'reason' => 'server_resource_set_empty']

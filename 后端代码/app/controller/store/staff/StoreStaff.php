@@ -58,10 +58,20 @@ class StoreStaff extends AuthController
 	 * @param WorkMemberServices $services
 	 * @return mixed
 	 */
-	public function getWorkMemberList(WorkMemberServices $services)
-	{
-		return $this->success($services->getMemberList(['status' => 1, 'enable' => 1], ['id', 'name', 'qr_code']));
-	}
+    public function getWorkMemberList(WorkMemberServices $services)
+    {
+        return $this->success($services->getMemberList(['status' => 1, 'enable' => 1], ['id', 'name', 'qr_code']));
+    }
+
+    /**
+     * 当前门店可选岗位。与人员完整保存使用同一岗位发布策略，避免前端展示不可保存的岗位。
+     */
+    public function selectablePositions()
+    {
+        /** @var \app\services\organization\JobPositionPolicyServices $positions */
+        $positions = app()->make(\app\services\organization\JobPositionPolicyServices::class);
+        return $this->success($positions->listStoreSelectablePositions((int)$this->storeId));
+    }
 
     /**
      * 获取店员列表
@@ -115,6 +125,11 @@ class StoreStaff extends AuthController
     {
         if (!$id) {
             return app('json')->fail('缺少店员id');
+        }
+        try {
+            $this->assertStaffInCurrentStore((int)$id);
+        } catch (AdminException $e) {
+            return app('json')->fail($e->getMessage());
         }
         return app('json')->success($this->services->read((int)$id, true));
     }
@@ -243,8 +258,26 @@ class StoreStaff extends AuthController
             'org_ids' => [],
             'store_ids' => [],
             'status' => (int)($raw['status'] ?? 1),
+            'cashier_salesperson_enabled' => (int)($raw['cashier_salesperson_enabled'] ?? 1),
+            'cashier_craftsman_enabled' => (int)($raw['cashier_craftsman_enabled'] ?? 1),
             'request_token' => $bodyToken,
         ];
+        // 档案字段全部由人员完整保存编排在同一事务内落库；不接受角色、规则或门店范围等扩权字段。
+        foreach ([
+            'work_member_id', 'notify', 'is_customer', 'customer_url', 'is_reservable',
+            'employee_number', 'id_card', 'age', 'join_area', 'join_date', 'birthday_date',
+            'birthday_type', 'birthday_area', 'now_area', 'contract_begin', 'contract_end',
+            'salary_status', 'department',
+        ] as $key) {
+            if (array_key_exists($key, $raw)) {
+                $input[$key] = $raw[$key];
+            }
+        }
+        foreach (['employment_type_code', 'employment_type_version'] as $key) {
+            if (array_key_exists($key, $raw)) {
+                $input[$key] = $raw[$key];
+            }
+        }
         foreach (['roles', 'role_ids', 'save_roles', 'is_manager', 'is_butler', 'position', 'position_level'] as $k) {
             if (array_key_exists($k, $raw)) {
                 $input[$k] = $raw[$k];

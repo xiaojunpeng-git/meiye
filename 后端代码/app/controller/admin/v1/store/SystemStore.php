@@ -175,13 +175,9 @@ class SystemStore extends AuthController
         ($is_show == '' || $id == '') && $this->fail('缺少参数');
         $res = $this->services->update((int)$id, ['is_show' => (int)$is_show]);
         if ($res) {
-            /** @var SystemStoreStaffServices $storeStaffServices */
-            $storeStaffServices = app()->make(SystemStoreStaffServices::class);
             if ($is_show) {
-                $storeStaffServices->update(['store_id' => $id, 'is_del' => 0, 'status' => 0], ['status' => 1]);
 				$this->services->cacheSaveValue($id, 'is_show', $is_show);
             } else {
-                $storeStaffServices->update(['store_id' => $id, 'is_del' => 0, 'status' => 1], ['status' => 0]);
 				$this->services->cacheDelById($id);
             }
             event('store.status', [$id, $is_show]);

@@ -36,6 +36,7 @@ use app\services\system\admin\SystemAdminServices;
 use app\services\user\UserServices;
 use app\services\yeji\SatffYejiServices;
 use think\exception\ValidateException;
+use think\facade\Db;
 
 /**
  * 核销订单
@@ -118,6 +119,33 @@ class StoreOrderWriteOffServices extends BaseServices
             /** @var \app\services\product\inventory\SalonStockWriteoffServices $salonWriteoffServices */
             $salonWriteoffServices = app()->make(\app\services\product\inventory\SalonStockWriteoffServices::class);
             $salonWriteoffServices->returnForWriteoff($linkId);
+
+            // 预约恢复：关联预约因本次核销已完成(status=2)时，回退到服务中(status=1)，可再次完成/消耗
+            $reservationOid = (int)($writeoff['reservation_oid'] ?? 0);
+            if ($reservationOid > 0) {
+                $resv = StoreReservationOrder::where('id', $reservationOid)->lock(true)->find();
+                if ($resv) {
+                    $resvArr = is_array($resv) ? $resv : $resv->toArray();
+                    if ((int)($resvArr['status'] ?? -99) === 2) {
+                        StoreReservationOrder::where('id', $reservationOid)->update([
+                            'status' => 1,
+                            'service_end_time' => 0,
+                        ]);
+                    }
+                }
+            }
+
+            // 批量核销：明细全部撤销后同步主单状态
+            $batchId = (int)($writeoff['batch_id'] ?? 0);
+            if ($batchId > 0) {
+                $active = (int)StoreOrderWriteoff::where('batch_id', $batchId)->where('status', 0)->count();
+                if ($active === 0) {
+                    Db::name('store_writeoff_batch')->where('id', $batchId)->update([
+                        'status' => 1,
+                        'update_time' => time(),
+                    ]);
+                }
+            }
 
             return true;
         });
@@ -232,8 +260,12 @@ class StoreOrderWriteOffServices extends BaseServices
             'oid' => (int)($orderInfo['id'] ?? 0),
             'is_writeoff' => 0,
         ];
-        // 卡项：项目权益行固定 cart_type=2；整卡不再用 is_card='' 落到默认 cart_type IN(0,1,3)
-        if ((int)($orderInfo['type'] ?? 0) == 11) {
+        // 卡项权益行固定 cart_type=2；与有效卡列表/批量核销对齐，不限于 order.type==11
+        $oid = (int)($orderInfo['id'] ?? 0);
+        $useCardProject = ((int)($orderInfo['type'] ?? 0) === 11)
+            || ((int)($orderInfo['product_type'] ?? 0) === 5)
+            || ($oid > 0 && (int)StoreOrderCartInfo::where('oid', $oid)->where('cart_type', 2)->count() > 0);
+        if ($useCardProject) {
             $where['cart_type'] = 2;
         }
         if ($cartIds) {
@@ -280,13 +312,13 @@ class StoreOrderWriteOffServices extends BaseServices
         if (!$orderInfo) {
             throw new ValidateException('核销订单不存在');
         }
-        $onePrice=0;
+        $packageWriteTimes=0;
         $productId=StoreOrderCartInfo::where("oid",$oid)->where("cart_type",0)->value("product_id");
         if(!empty($productId)){
             $productInfo=StoreProduct::where("id",$productId)->find();
-            if($productInfo['card_num'] > 0 && $productInfo['card_num_type'] == 1){
-                //几选几套餐 按订单付款金额判断单次金额
-                $onePrice=bcdiv($orderInfo['pay_price'],$productInfo['card_num'],2);
+            // 卡头商品被删/缺失时不得按数组解引用，否则阻断正常逐次核销
+            if($productInfo && (int)$productInfo['card_num'] > 0 && (int)$productInfo['card_num_type'] == 1){
+                $packageWriteTimes=(int)$productInfo['card_num'];
             }
         }
         $orderInfo = is_object($orderInfo) ? $orderInfo->toArray() : $orderInfo;
@@ -312,8 +344,9 @@ class StoreOrderWriteOffServices extends BaseServices
             if ($reservationStoreId > 0) {
                 $data['store_id'] = $reservationStoreId;
             }
-            $writeOffInfo = $this->dao->get(['oid' => $oid, 'reservation_oid' => $reservation_oid], ['id']);
-            if ($writeOffInfo) {//预约单已生成核销记录
+            // 仅认有效核销；已撤销(status=1)不得阻断预约再次完成
+            $writeOffInfo = $this->dao->get(['oid' => $oid, 'reservation_oid' => $reservation_oid, 'status' => 0], ['id']);
+            if ($writeOffInfo) {//预约单已生成有效核销记录
                 $this->ensureWriteoffSubOrder(
                     (int)$writeOffInfo['id'],
                     $oid,
@@ -343,14 +376,18 @@ class StoreOrderWriteOffServices extends BaseServices
             $where = [];
             /** @var StoreOrderCartInfoServices $cartInfoServices */
             $cartInfoServices = app()->make(StoreOrderCartInfoServices::class);
+            $oid = (int)($orderInfo['id'] ?? 0);
+            $useCardProject = ((int)($orderInfo['type'] ?? 0) === 11)
+                || ((int)($orderInfo['product_type'] ?? 0) === 5)
+                || ($oid > 0 && (int)StoreOrderCartInfo::where('oid', $oid)->where('cart_type', 2)->count() > 0);
             if ($cartIds) {//商城存在部分核销
-                if ((int)$orderInfo['type'] == 11) {
+                if ($useCardProject) {
                     $where['cart_type'] = 2;
                 }
                 $cartInfo = $cartInfoServices->getCartColunm(['oid' => $orderInfo['id'], 'cart_id' => array_keys($cartIds)] + $where, '*', 'cart_id');
             } else {//整单核销
-                if ((int)$orderInfo['type'] == 11) {
-                    $where['is_card'] = '';
+                if ($useCardProject) {
+                    $where['cart_type'] = 2;
                 }
                 $cartInfo = $cartInfoServices->getCartColunm(['oid' => $orderInfo['id']] + $where, '*', 'cart_id');
             }
@@ -359,8 +396,12 @@ class StoreOrderWriteOffServices extends BaseServices
         $setYejiAll=$data['sync_all'] ?? [];
         // 核销记录 + 院装扣料同事务：任一步失败整体回滚；通知必须在事务提交后再发
         $writeoffNoticePayloads = [];
-        $this->transaction(function () use ($cartInfo, $cartIds, $orderInfo, $oid, $reservation_oid, $reservationOrderInfo, $data, $onePrice, $addTime, $isBudan, $isAuto, $setYejiAll, &$writeoffNoticePayloads) {
+        $currentWriteoffTotal = 0;
+        $this->transaction(function () use ($cartInfo, $cartIds, $orderInfo, $oid, $reservation_oid, $reservationOrderInfo, $data, $packageWriteTimes, $addTime, $isBudan, $isAuto, $setYejiAll, &$writeoffNoticePayloads, &$currentWriteoffTotal) {
         $writeOffData = ['uid' => $orderInfo['uid'], 'oid' => $oid, 'reservation_oid' => $reservation_oid, 'writeoff_code' => $reservationOrderInfo['verify_code'] ?? $orderInfo['verify_code'], 'add_time' => time()];
+        $packageAlreadyTimes = $packageWriteTimes > 0
+            ? (int)StoreOrderWriteoff::where('oid', $oid)->where('status', 0)->sum('writeoff_num')
+            : 0;
         foreach ($cartInfo as $cart) {
             $write = $cartIds[(string)$cart['cart_id']] ?? [];
             if (!$cartIds || $write) {
@@ -377,15 +418,45 @@ class StoreOrderWriteOffServices extends BaseServices
                 }
                 $writeOffData['product_id'] = $cart['product_id'];
                 $writeOffData['product_type'] = $cart['product_type'];
-                if($onePrice > 0){
-                    $unit_price=$onePrice;
+                $currentTimes = max((int)$writeOffData['writeoff_num'], 0);
+                // 金额口径与批量 preview / WriteOffOrderServices::allocatePersistedWriteoffAmount 一致：
+                // 几选几用订单实付；普通行用 cart 行字段 pay_price（不用 cart_info JSON 价）。
+                if($packageWriteTimes > 0){
+                    $writeOffData['writeoff_price'] = WriteoffIntegerAmount::allocate(
+                        $orderInfo['pay_price'] ?? 0,
+                        $packageWriteTimes,
+                        $packageAlreadyTimes,
+                        $currentTimes
+                    );
+                    $packageAlreadyTimes += $currentTimes;
                 }else{
-                    $unit_price = bcdiv((string)$cart['pay_price'], (string)$cart['write_times'], 2);
+                    $alreadyTimes = (int)StoreOrderWriteoff::where('oid', $oid)
+                        ->where('order_cart_id', (int)$cart['id'])
+                        ->where('status', 0)
+                        ->sum('writeoff_num');
+                    $writeOffData['writeoff_price'] = WriteoffIntegerAmount::allocate(
+                        $cart['pay_price'] ?? 0,
+                        (int)($cart['write_times'] ?? 0),
+                        $alreadyTimes,
+                        $currentTimes
+                    );
                 }
-				$writeOffData['writeoff_price'] = (float)bcmul((string)$unit_price, (string)$writeOffData['writeoff_num'], 2);
+                $currentWriteoffTotal += (int)$writeOffData['writeoff_price'];
                 $writeOffData['staff_id'] = $data['staff_id'] ?? 0;
                 $writeOffData['service_type'] = $data['service_type'] ?? 0;
                 $writeOffData['add_time']=$addTime;
+                $writeOffData['batch_id'] = (int)($data['batch_id'] ?? 0);
+                $perfMode = trim((string)($data['performance_mode'] ?? ''));
+                if ($perfMode === '') {
+                    try {
+                        $perfMode = app()->make(WriteoffPerformanceModeServices::class)->getMode();
+                    } catch (\Throwable $e) {
+                        $perfMode = WriteoffPerformanceModeServices::MODE_COMMISSION;
+                    }
+                }
+                $writeOffData['performance_mode'] = $perfMode === WriteoffPerformanceModeServices::MODE_WRITEOFF_AMOUNT
+                    ? WriteoffPerformanceModeServices::MODE_WRITEOFF_AMOUNT
+                    : WriteoffPerformanceModeServices::MODE_COMMISSION;
                 $res = $this->dao->save($writeOffData);
                 $id = $res->id;
                 $noticeRow = $writeOffData;
@@ -414,16 +485,16 @@ class StoreOrderWriteOffServices extends BaseServices
                             $syncCartId = '';
                         }
                         $lineCartId = (string)($cart['cart_id'] ?? '');
-                        if ($syncCartId === '' || $syncCartId === $lineCartId) {
+                        // 必须精确匹配 cart_id：空 cart_id 不得匹配任意行，避免跨行串业绩。
+                        if ($syncCartId !== '' && $syncCartId === $lineCartId) {
                             $v['link_id'] = $id;
                             $v['order_id'] = $oid;
                             $v['is_budan']=$isBudan;
                             $v['add_time']=$addTime;
                             $v['is_auto']=$isAuto;
                             $v['service_object'] = $writeOffData['service_object'] ?? '本人';
-                            if (empty($v['cart_id']) || (string)$v['cart_id'] === '0') {
-                                $v['cart_id'] = $cart['cart_id'];
-                            }
+                            $v['performance_mode'] = $writeOffData['performance_mode'] ?? WriteoffPerformanceModeServices::MODE_COMMISSION;
+                            $v['writeoff_price'] = (int)($writeOffData['writeoff_price'] ?? 0);
                             if (empty($v['goods_id'])) {
                                 $v['goods_id'] = (int)($cart['product_id'] ?? 0);
                             }
@@ -463,6 +534,12 @@ class StoreOrderWriteOffServices extends BaseServices
             }
         }
         });
+        // 财务流水、店员财务与核销表必须使用同一个整数金额，禁止沿用调用方的小数预估值。
+        $data['price'] = $currentWriteoffTotal;
+        // 批量核销外层事务未提交前：跳过通知与财务侧效应，由 BatchWriteoffServices 成功后再补发
+        if (!empty($data['defer_side_effects'])) {
+            return true;
+        }
         // 通知：外层若仍在支付事务中则延后（收银 is_auto）；否则即时发，避免回滚后仍推送
         $deferNotice = !empty($data['is_auto']);
         foreach ($writeoffNoticePayloads as $noticePayload) {
@@ -505,7 +582,7 @@ class StoreOrderWriteOffServices extends BaseServices
         if (!$writeoffId || !$oid) {
             return;
         }
-        if (!$writeOffRow || empty($writeOffRow['writeoff_price'])) {
+        if (!$writeOffRow || !array_key_exists('writeoff_price', $writeOffRow)) {
             $writeOffModel = StoreOrderWriteoff::where('id', $writeoffId)->find();
             $writeOffRow = $writeOffModel ? (is_array($writeOffModel) ? $writeOffModel : $writeOffModel->toArray()) : [];
         }
@@ -526,14 +603,27 @@ class StoreOrderWriteOffServices extends BaseServices
             }
             return;
         }
-        $price = (float)($writeOffRow['writeoff_price'] ?? ($data['price'] ?? 0));
-        if ($price <= 0 && !empty($writeOffRow['order_cart_id'])) {
+        $hasWriteoffPrice = array_key_exists('writeoff_price', $writeOffRow);
+        $price = $hasWriteoffPrice
+            ? WriteoffIntegerAmount::truncate($writeOffRow['writeoff_price'])
+            : WriteoffIntegerAmount::truncate($data['price'] ?? 0);
+        if (!$hasWriteoffPrice && !empty($writeOffRow['order_cart_id'])) {
             $cart = StoreOrderCartInfo::where('id', (int)$writeOffRow['order_cart_id'])->find();
             if ($cart) {
                 $cart = is_array($cart) ? $cart : $cart->toArray();
                 $times = max((int)($cart['write_times'] ?? 1), 1);
                 $num = max((int)($writeOffRow['writeoff_num'] ?? 1), 1);
-                $price = (float)bcmul(bcdiv((string)($cart['pay_price'] ?? 0), (string)$times, 2), (string)$num, 2);
+                $alreadyTimes = (int)StoreOrderWriteoff::where('oid', $oid)
+                    ->where('order_cart_id', (int)$writeOffRow['order_cart_id'])
+                    ->where('status', 0)
+                    ->where('id', '<', $writeoffId)
+                    ->sum('writeoff_num');
+                $price = WriteoffIntegerAmount::allocate(
+                    $cart['pay_price'] ?? 0,
+                    $times,
+                    $alreadyTimes,
+                    $num
+                );
             }
         }
         /** @var SatffYejiServices $staffYeji */
@@ -605,9 +695,32 @@ class StoreOrderWriteOffServices extends BaseServices
             $count = $this->dao->count($where);
         }
         if ($list) {
+            $writeoffIds = array_values(array_filter(array_map('intval', array_column($list, 'id'))));
+            $subByLink = [];
+            if ($writeoffIds) {
+                $subs = \app\model\order\StoreOrder::whereIn('link_id', $writeoffIds)
+                    ->where('order_type', 2)
+                    ->field('id,link_id,add_time,pay_time,is_budan')
+                    ->order('id', 'asc')
+                    ->select()
+                    ->toArray();
+                foreach ($subs as $sub) {
+                    $lid = (int)($sub['link_id'] ?? 0);
+                    if ($lid > 0 && !isset($subByLink[$lid])) {
+                        $subByLink[$lid] = $sub;
+                    }
+                }
+            }
             foreach ($list as &$item) {
-                $item['time_key'] = $item['time'] = $item['add_time'] ? date('Y-m-d H:i', (int)$item['add_time']) : '';
-                $item['add_time'] = $item['add_time'] ? date('Y-m-d H:i', (int)$item['add_time']) : '';
+                $bizUnix = (int)($item['add_time'] ?? 0);
+                $item['time_key'] = $item['time'] = $bizUnix ? date('Y-m-d H:i', $bizUnix) : '';
+                $item['add_time'] = $bizUnix ? date('Y-m-d H:i', $bizUnix) : '';
+                // 补单：add_time/业务时间为补单归属；实际操作时间取核销子单 pay_time（创建时固定为当前时间）
+                $sub = $subByLink[(int)($item['id'] ?? 0)] ?? null;
+                $item['business_time'] = $bizUnix ? date('Y-m-d H:i:s', $bizUnix) : '';
+                $opUnix = (int)($sub['pay_time'] ?? 0);
+                $item['operate_time'] = $opUnix ? date('Y-m-d H:i:s', $opUnix) : '';
+                $item['is_budan'] = (int)($sub['is_budan'] ?? 0);
                 if($product_type != 4) {
                     $value = is_string($item['cartInfo']['cart_info']) ? json_decode($item['cartInfo']['cart_info'], true) : $item['cartInfo']['cart_info'];
                     $value['productInfo']['store_name'] = $value['productInfo']['store_name'] ?? '';

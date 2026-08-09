@@ -50,7 +50,7 @@ export default {
 						{ name: '查找客户', icon: 'icon-ic_search', url: '/pages/merchant/customer/index' },
 						{ name: '添加客户', icon: 'icon-ic_user2', url: '/pages/merchant/customer/index?action=add', perm: 'merchant.customer.create' },
 						{ name: '补交欠款', icon: 'icon-ic_money', url: '/pages/merchant/debt/index', perm: 'merchant.debt.view' },
-						{ name: '客户回访', icon: 'icon-ic_message', action: 'developing', need: 'customer_follow' },
+						{ name: '客情管理', icon: 'icon-ic_message', action: 'care', need: 'customer_follow' },
 					],
 				},
 				{
@@ -59,7 +59,7 @@ export default {
 						{ name: '首页', icon: 'icon-ic_order', url: '/pages/merchant/data/index', redirect: true, need: 'data_hub' },
 						{ name: '门店业绩', icon: 'icon-ic_star', url: '/pages/admin/yeji/store', perm: 'merchant.data.store' },
 						{ name: '个人业绩', icon: 'icon-ic_star1', url: '/pages/merchant/yeji/self', perm: 'merchant.data.self' },
-						{ name: '区域统计', icon: 'icon-ic_home', url: '/pages/admin/agent/index', perm: 'merchant.data.region' },
+						{ name: '当前门店数据', icon: 'icon-ic_home', url: '/pages/merchant/data/index', perm: 'merchant.data.region' },
 						{ name: '目标看板', icon: 'icon-ic_star', url: '/pages/merchant/target/index', redirect: true, perm: 'merchant.target.view' },
 					],
 				},
@@ -146,6 +146,10 @@ export default {
 		},
 		onItem(item) {
 			if (!item) return;
+			if (item.action === 'care') {
+				uni.navigateTo({ url: '/pages/merchant/care/index' });
+				return;
+			}
 			if (item.action === 'developing') {
 				uni.showToast({ title: '该功能正在开发中，敬请期待', icon: 'none' });
 				return;

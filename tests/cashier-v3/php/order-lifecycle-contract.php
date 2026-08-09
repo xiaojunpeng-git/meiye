@@ -20,7 +20,7 @@ $checks = [
     'personnel_reverses_then_reallocates' => strpos($service, 'insertReversal') !== false && strpos($service, 'insertAdjustedPerformance') !== false && strpos($service, 'personnel_adjustment_staff_ineligible') !== false
         && strpos($service, 'effectivePersonnelFactsForLine') !== false && strpos($service, 'cashPerformanceForLine') !== false
         && strpos($service, "'ORDER-PERSONNEL-ADJUST-V1'") !== false,
-    'void_refund_restores_supported_authorities_and_keeps_inventory_closed' => strpos($service, 'order_reversal_inventory_unsupported') !== false
+    'strict_void_restores_supported_authorities_and_keeps_inventory_closed' => strpos($service, 'order_reversal_inventory_unsupported') !== false
         && strpos($service, 'CashierV3SalesOrderReversalServices') !== false
         && strpos($service, "cashier_v3_order_lifecycle_financial_reversal") !== false
         && strpos($reversalService, 'creditBenGive') !== false
@@ -41,16 +41,19 @@ $checks = [
         && strpos($module, "(array)(\$result['touchedRoles'] ?? ['sales_order'])") !== false
         && strpos($module, "['sales_order', 'member_balance'], ['sales_order', 'member_balance']") !== false
         && strpos($manifest, 'sales_order.personnel_adjusted') !== false && strpos($manifest, 'sales_order.reopened') !== false,
+    'order_debt_entry_reuses_member_repayment' => strpos($service, "'nextAction' => 'open-member-debt-repayment'") !== false
+        && strpos($service, "whereRaw('d.total_debt > d.repaid_debt')") !== false,
     'frontend_unwraps_action_business_data' => strpos($frontend, 'function actionData(result)') !== false
         && strpos($frontend, 'businessData.orderPersonnelAdjustment') !== false
         && strpos($frontend, 'businessData.orderLifecycle?.cashierDraft') !== false,
+    'order_debt_entry_opens_member_repayment' => strpos($frontend, 'cashier-v3:open-member-debt-repayment') !== false,
     'frontend_surfaces_failed_lifecycle_action' => strpos($detailFrontend, "['failed', 'conflict', 'result_unknown'].includes(status)") !== false
         && strpos($detailFrontend, 'envelope?.result?.message') !== false,
     'frontend_releases_terminal_lifecycle_idempotency' => strpos($frontend, 'isTerminalActionStatus(actionStatus(result))') !== false,
     'lifecycle_commands_send_sales_order_version' => strpos($bridgeFrontend, "'adjust-sales-order-personnel', 'refund-sales-order', 'void-sales-order', 'reopen-sales-order'") !== false
         && strpos($bridgeFrontend, "buildCommandContext('sales_order', payload.orderId)") !== false
         && strpos($bridgeFrontend, "'reopen-sales-order',") !== false,
-    'order_center_publishes_lifecycle_sales_order_versions' => strpos($orderPartition, "'public_versions' => \$this->salesOrderPublicVersions(\$payload, \$dataScope)") !== false
+    'order_center_publishes_lifecycle_sales_order_versions' => strpos($orderPartition, "'public_versions' => \$this->recordPublicVersions(\$payload, \$dataScope)") !== false
         && strpos($orderPartition, 'CashierV3OrderLifecycleServices::OPERATION_TABLE') !== false
         && strpos($orderPartition, "'source_type', 'sales'") !== false
         && strpos($orderPartition, "'version' => 1 + (int)(\$operationCounts[\$id] ?? 0)") !== false,
@@ -78,8 +81,10 @@ $checks = [
         && strpos($salesQuery, "'reversedCashAmount'") !== false
         && strpos($salesQuery, "'actionLabel'") !== false
         && strpos($salesQuery, "'operatorName' => '操作人#'") !== false,
-    'inventory_sales_hide_unsupported_terminal_actions' => strpos($salesQuery, "\$hasProduct ? null : 'refund-sales-order'") !== false
-        && strpos($salesQuery, "\$hasProduct ? null : 'void-sales-order'") !== false,
+    'refund_is_financial_only_and_allows_inventory_sales' => strpos($service, "if (\$action === 'refund-sales-order')") !== false
+        && strpos($reversalService, 'prepareFinancialRefund') !== false
+        && strpos($salesQuery, "'refund-sales-order',") !== false
+        && strpos($salesQuery, '已退款作废') !== false,
     'lifecycle_eligibility_and_reopen_queries_are_tenant_scoped' => strpos($service, "Db::name('cashier_v3_entitlement_completion_receipt')\n            ->where('tenant_id', \$scope->tenantId())") !== false
         && strpos($service, "Db::name(self::OPERATION_TABLE)->where('tenant_id', \$scope->tenantId())") !== false
         && strpos($service, "Db::name('cashier_v3_sales_order_line')->where('tenant_id', \$scope->tenantId())") !== false,

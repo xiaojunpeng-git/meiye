@@ -82,8 +82,8 @@ assert.match(workbench, /async function applyPersonnelAssignmentToAll[\s\S]*if \
 assert.match(workbench, /:saving="isSavingPersonnelAssignment"/, '人员弹窗必须展示权威保存中状态')
 assert.match(
   bridge,
-  /function isCashierWorkspaceAction\(action\)[\s\S]*'apply-cashier-personnel-to-all-lines'/,
-  '统一人员命令必须自动携带当前收银工作台版本'
+  /'apply-cashier-personnel-to-all-lines'[\s\S]*'update-cashier-order-note'[\s\S]*'update-cashier-line-price'[\s\S]*'update-cashier-supplement'/,
+  '统一人员与更多操作写命令必须自动携带当前收银工作台版本'
 )
 assert.match(workspace, /function applySalespeopleToAllSaleLinesInTx\(/, '后端必须在同一事务中更新全部本次购买明细')
 assert.match(workspace, /function applyCraftsmenToAllServiceLinesInTx\([\s\S]*?\$isSaleProject[\s\S]*?\$isEntitlementService[\s\S]*?'craftsmen_json'/, '后端必须在同一事务中更新项目和权益服务行的手艺人')

@@ -210,7 +210,7 @@ class MerchantDataServices extends BaseServices
                 'store_id' => $storeId,
                 'scope_store_ids' => $scopeStoreIds,
                 'resolved_store_ids' => $access['resolved_store_ids'] ?? [],
-                'scope_mode' => $role === 'region_agent' ? 'resolved_all' : 'active_store',
+                'scope_mode' => 'active_store',
             ],
             'note' => $note,
             'updated_at' => date('Y-m-d H:i:s'),

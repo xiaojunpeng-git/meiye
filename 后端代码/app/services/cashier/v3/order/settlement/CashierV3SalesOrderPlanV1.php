@@ -47,6 +47,9 @@ final class CashierV3SalesOrderPlanV1
         'store_name_snapshot', 'member_id', 'member_name_snapshot', 'operator_id',
         'operator_name_snapshot', 'request_version', 'request_status', 'composition',
         'business_date', 'business_timezone', 'operation_occurred_at', 'recorded_at',
+        'order_note', 'supplement_enabled', 'supplement_reason',
+        'supplement_operator_id', 'supplement_operator_name_snapshot',
+        'supplement_operated_at',
         'source_document_type', 'source_document_id', 'source_document_no',
         'sales_amount_cents', 'receivable_amount_cents', 'selected_payment_amount_cents',
         'balance_deduction_amount_cents', 'balance_authority_key', 'balance_account_id',
@@ -64,9 +67,11 @@ final class CashierV3SalesOrderPlanV1
         'source_type', 'source_id', 'entitlement_source_detail_id', 'source_version',
         'catalog_sku_id',
         'project_id', 'project_version', 'service_object', 'is_experience', 'quantity', 'original_amount_cents',
-        'discount_amount_cents', 'sale_amount_cents', 'entitlement_actual_amount_cents',
+        'discount_amount_cents', 'sale_amount_cents', 'debt_amount_cents', 'entitlement_actual_amount_cents',
         'source_name_snapshot', 'source_code_snapshot', 'project_name_snapshot',
         'category_id_snapshot', 'category_name_snapshot', 'line_fingerprint',
+        'configured_cost_cents', 'price_change_reason', 'price_changed_by',
+        'price_changed_by_name_snapshot', 'price_changed_at',
         'craftsmen_snapshot_json',
         'sort_no', 'add_time', 'update_time',
     ];
@@ -131,12 +136,12 @@ final class CashierV3SalesOrderPlanV1
         }
 
         $request = self::normalizeRequest($lockedAggregate['request']);
+        $businessSource = self::normalizeBusinessSource($businessSource);
         self::assertCurrentRequest($lockedAggregate['currentRequest'], $request);
         self::assertIdempotencyKey($commandIdempotencyKey, 'sales_order_command_idempotency_key_invalid');
         if ($occurredAt <= 0
             || $settledAt < $occurredAt
             || $recordedAt < $settledAt
-        $businessSource = self::normalizeBusinessSource($businessSource);
             || $occurredAt < $request['operation_occurred_at']
             || $occurredAt < $request['recorded_at']) {
             throw self::failure('sales_order_final_times_invalid');
@@ -167,20 +172,18 @@ final class CashierV3SalesOrderPlanV1
             throw self::failure('sales_order_entitlement_trace_total_mismatch');
         }
         $saleAmount = self::sum($saleLines, 'sale_amount_cents');
+        $lineDebtAmount = self::sum($saleLines, 'debt_amount_cents');
         $originalAmount = self::sum($saleLines, 'original_amount_cents');
         $discountAmount = self::sum($saleLines, 'discount_amount_cents');
         if ($saleAmount !== $request['sales_amount_cents']
-            || $saleAmount !== $request['receivable_amount_cents']
-            || $originalAmount - $discountAmount !== $saleAmount) {
+            || $request['receivable_amount_cents'] !== $saleAmount - $lineDebtAmount
+            || $originalAmount - $discountAmount !== $saleAmount
+            || $lineDebtAmount !== $request['debt_amount_cents']) {
             throw self::failure('sales_order_checkout_total_mismatch');
         }
         $settlementTotal = self::safeAdd(
-            self::safeAdd(
-                $paymentTotal,
-                $request['balance_deduction_amount_cents'],
-                'sales_order_settlement_total_overflow'
-            ),
-            $request['debt_amount_cents'],
+            $paymentTotal,
+            $request['balance_deduction_amount_cents'],
             'sales_order_settlement_total_overflow'
         );
         if ($settlementTotal !== $request['receivable_amount_cents']) {
@@ -236,6 +239,12 @@ final class CashierV3SalesOrderPlanV1
                 'original_amount_cents' => $line['original_amount_cents'],
                 'discount_amount_cents' => $line['discount_amount_cents'],
                 'sale_amount_cents' => $line['sale_amount_cents'],
+                'debt_amount_cents' => $line['debt_amount_cents'],
+                'configured_cost_cents' => $line['configured_cost_cents'],
+                'price_change_reason' => $line['price_change_reason'],
+                'price_changed_by' => $line['price_changed_by'],
+                'price_changed_by_name_snapshot' => $line['price_changed_by_name_snapshot'],
+                'price_changed_at' => $line['price_changed_at'],
                 'line_status' => self::ORDER_STATUS_SETTLED,
                 'line_version' => 1,
                 'line_direction' => self::ORDER_DIRECTION_FORWARD,
@@ -273,9 +282,20 @@ final class CashierV3SalesOrderPlanV1
             'occurred_at' => $occurredAt,
             'settled_at' => $settledAt,
             'recorded_at' => $recordedAt,
+            'order_note' => $request['order_note'],
+            'supplement_enabled' => $request['supplement_enabled'],
+            'supplement_reason' => $request['supplement_reason'],
+            'supplement_operator_id' => $request['supplement_operator_id'],
+            'supplement_operator_name_snapshot' => $request['supplement_operator_name_snapshot'],
+            'supplement_operated_at' => $request['supplement_operated_at'],
             'source_document_type' => $request['source_document_type'],
             'source_document_id' => $request['source_document_id'],
             'source_document_no_snapshot' => $request['source_document_no'],
+            'business_source_primary_id' => $businessSource['primarySourceId'],
+            'business_source_primary_name_snapshot' => $businessSource['primarySourceNameSnapshot'],
+            'business_source_secondary_id' => $businessSource['secondarySourceId'],
+            'business_source_secondary_name_snapshot' => $businessSource['secondarySourceNameSnapshot'],
+            'business_source_label_snapshot' => $businessSource['displayNameSnapshot'],
             'line_count' => count($orderLines),
             'total_quantity' => $totalQuantity,
             'original_amount_cents' => $originalAmount,
@@ -295,11 +315,6 @@ final class CashierV3SalesOrderPlanV1
         $header['immutable_fingerprint'] = self::canonicalFingerprint($headerFingerprintInput);
         return new self($header, $orderLines, $header['immutable_fingerprint']);
     }
-            'business_source_primary_id' => $businessSource['primarySourceId'],
-            'business_source_primary_name_snapshot' => $businessSource['primarySourceNameSnapshot'],
-            'business_source_secondary_id' => $businessSource['secondarySourceId'],
-            'business_source_secondary_name_snapshot' => $businessSource['secondarySourceNameSnapshot'],
-            'business_source_label_snapshot' => $businessSource['displayNameSnapshot'],
 
     public function header(): array
     {
@@ -327,25 +342,6 @@ final class CashierV3SalesOrderPlanV1
         return (string)$this->header['command_idempotency_key'];
     }
 
-    private static function normalizeRequest(array $request): array
-    {
-        self::assertExactKeys($request, self::REQUEST_KEYS, 'locked_checkout_request_shape_invalid');
-        $normalized = [
-            'request_id' => self::opaqueId($request['request_id'], 'CKR', 'checkout_request_id_invalid'),
-            'tenant_id' => self::token($request['tenant_id'], 32, 'checkout_tenant_id_invalid'),
-            'organization_id' => self::token(
-                $request['organization_id'],
-                32,
-                'checkout_organization_id_invalid'
-            ),
-            'organization_path' => self::organizationPath($request['organization_path']),
-            'organization_name_snapshot' => self::text(
-                $request['organization_name_snapshot'],
-                128,
-                'checkout_organization_name_invalid',
-                true
-            ),
-            'workspace_id' => self::token($request['workspace_id'], 64, 'checkout_workspace_id_invalid'),
     private static function normalizeBusinessSource(array $source): array
     {
         if ($source === []) {
@@ -378,6 +374,25 @@ final class CashierV3SalesOrderPlanV1
         ];
     }
 
+    private static function normalizeRequest(array $request): array
+    {
+        self::assertExactKeys($request, self::REQUEST_KEYS, 'locked_checkout_request_shape_invalid');
+        $normalized = [
+            'request_id' => self::opaqueId($request['request_id'], 'CKR', 'checkout_request_id_invalid'),
+            'tenant_id' => self::token($request['tenant_id'], 32, 'checkout_tenant_id_invalid'),
+            'organization_id' => self::token(
+                $request['organization_id'],
+                32,
+                'checkout_organization_id_invalid'
+            ),
+            'organization_path' => self::organizationPath($request['organization_path']),
+            'organization_name_snapshot' => self::text(
+                $request['organization_name_snapshot'],
+                128,
+                'checkout_organization_name_invalid',
+                true
+            ),
+            'workspace_id' => self::token($request['workspace_id'], 64, 'checkout_workspace_id_invalid'),
             'store_id' => self::positiveInt($request['store_id'], 'checkout_store_id_invalid'),
             'store_name_snapshot' => self::text(
                 $request['store_name_snapshot'],
@@ -421,6 +436,36 @@ final class CashierV3SalesOrderPlanV1
             'recorded_at' => self::positiveInt(
                 $request['recorded_at'],
                 'checkout_recorded_at_invalid'
+            ),
+            'order_note' => self::text(
+                $request['order_note'],
+                500,
+                'checkout_order_note_invalid',
+                true
+            ),
+            'supplement_enabled' => self::nonNegativeInt(
+                $request['supplement_enabled'],
+                'checkout_supplement_enabled_invalid'
+            ),
+            'supplement_reason' => self::text(
+                $request['supplement_reason'],
+                255,
+                'checkout_supplement_reason_invalid',
+                true
+            ),
+            'supplement_operator_id' => self::nonNegativeInt(
+                $request['supplement_operator_id'],
+                'checkout_supplement_operator_invalid'
+            ),
+            'supplement_operator_name_snapshot' => self::text(
+                $request['supplement_operator_name_snapshot'],
+                128,
+                'checkout_supplement_operator_name_invalid',
+                true
+            ),
+            'supplement_operated_at' => self::nonNegativeInt(
+                $request['supplement_operated_at'],
+                'checkout_supplement_operated_at_invalid'
             ),
             'source_document_type' => self::token(
                 $request['source_document_type'],
@@ -529,6 +574,18 @@ final class CashierV3SalesOrderPlanV1
         }
         if ($normalized['recorded_at'] < $normalized['operation_occurred_at']) {
             throw self::failure('checkout_request_times_invalid');
+        }
+        if ($normalized['supplement_enabled'] > 1
+            || ($normalized['supplement_enabled'] === 1
+                ? ($normalized['supplement_reason'] === ''
+                    || $normalized['supplement_operator_id'] <= 0
+                    || $normalized['supplement_operator_name_snapshot'] === ''
+                    || $normalized['supplement_operated_at'] <= 0)
+                : ($normalized['supplement_reason'] !== ''
+                    || $normalized['supplement_operator_id'] !== 0
+                    || $normalized['supplement_operator_name_snapshot'] !== ''
+                    || $normalized['supplement_operated_at'] !== 0))) {
+            throw self::failure('checkout_supplement_audit_invalid');
         }
         if ($normalized['business_timezone'] !== 'Asia/Shanghai') {
             throw self::failure('checkout_business_timezone_not_supported');
@@ -674,8 +731,41 @@ final class CashierV3SalesOrderPlanV1
         $original = self::money($row['original_amount_cents'], 'sales_order_original_amount_invalid');
         $discount = self::money($row['discount_amount_cents'], 'sales_order_discount_amount_invalid');
         $sale = self::money($row['sale_amount_cents'], 'sales_order_sale_amount_invalid');
-        if ($discount > $original || $sale !== $original - $discount) {
+        $debt = self::money($row['debt_amount_cents'], 'sales_order_debt_amount_invalid');
+        $configuredCost = self::money(
+            $row['configured_cost_cents'],
+            'sales_order_configured_cost_invalid'
+        );
+        $priceChangeReason = self::text(
+            $row['price_change_reason'],
+            255,
+            'sales_order_price_change_reason_invalid',
+            true
+        );
+        $priceChangedBy = self::nonNegativeInt(
+            $row['price_changed_by'],
+            'sales_order_price_changed_by_invalid'
+        );
+        $priceChangedByName = self::text(
+            $row['price_changed_by_name_snapshot'],
+            128,
+            'sales_order_price_changed_by_name_invalid',
+            true
+        );
+        $priceChangedAt = self::nonNegativeInt(
+            $row['price_changed_at'],
+            'sales_order_price_changed_at_invalid'
+        );
+        if ($discount > $original || $sale !== $original - $discount || $debt > $sale) {
             throw self::failure('sales_order_line_amount_equation_invalid');
+        }
+        $costOverflow = $configuredCost > 0
+            && $quantity > intdiv(PHP_INT_MAX, $configuredCost);
+        if ($priceChangedAt === 0
+            ? ($priceChangeReason !== '' || $priceChangedBy !== 0 || $priceChangedByName !== '')
+            : ($priceChangeReason === '' || $priceChangedBy <= 0 || $priceChangedByName === ''
+                || $costOverflow || $sale < $configuredCost * $quantity)) {
+            throw self::failure('sales_order_line_price_audit_invalid');
         }
         $categoryId = self::nonNegativeInt(
             $row['category_id_snapshot'],
@@ -734,6 +824,7 @@ final class CashierV3SalesOrderPlanV1
             'originalAmountCents' => $original,
             'discountAmountCents' => $discount,
             'saleAmountCents' => $sale,
+            'debtAmountCents' => $debt,
             'sourceNameSnapshot' => self::text(
                 $row['source_name_snapshot'],
                 128,
@@ -748,6 +839,11 @@ final class CashierV3SalesOrderPlanV1
             ),
             'categoryIdSnapshot' => $categoryId,
             'categoryNameSnapshot' => $categoryName,
+            'configuredCostCents' => $configuredCost,
+            'priceChangeReason' => $priceChangeReason,
+            'priceChangedBy' => $priceChangedBy,
+            'priceChangedByNameSnapshot' => $priceChangedByName,
+            'priceChangedAt' => $priceChangedAt,
             'serviceObject' => $serviceObject,
             'isExperience' => $isExperience,
         ];
@@ -761,7 +857,18 @@ final class CashierV3SalesOrderPlanV1
             $row['line_fingerprint'],
             'sales_order_checkout_line_fingerprint_invalid'
         );
-        if (!hash_equals($lineFingerprint, self::canonicalFingerprint($authority))) {
+        $expectedFingerprint = self::canonicalFingerprint($authority);
+        if (!hash_equals($lineFingerprint, $expectedFingerprint)
+            && !self::matchesLegacyUnchangedPriceFingerprint(
+                $lineFingerprint,
+                $authority,
+                $configuredCost,
+                $priceChangeReason,
+                $priceChangedBy,
+                $priceChangedByName,
+                $priceChangedAt,
+                $debt
+            )) {
             throw self::failure('sales_order_checkout_line_fingerprint_mismatch');
         }
         return [
@@ -783,7 +890,47 @@ final class CashierV3SalesOrderPlanV1
             'original_amount_cents' => $original,
             'discount_amount_cents' => $discount,
             'sale_amount_cents' => $sale,
+            'debt_amount_cents' => $debt,
+            'configured_cost_cents' => $configuredCost,
+            'price_change_reason' => $priceChangeReason,
+            'price_changed_by' => $priceChangedBy,
+            'price_changed_by_name_snapshot' => $priceChangedByName,
+            'price_changed_at' => $priceChangedAt,
         ];
+    }
+
+    private static function matchesLegacyUnchangedPriceFingerprint(
+        string $lineFingerprint,
+        array $authority,
+        int $configuredCost,
+        string $priceChangeReason,
+        int $priceChangedBy,
+        string $priceChangedByName,
+        int $priceChangedAt,
+        int $debt
+    ): bool {
+        if ($debt !== 0) {
+            return false;
+        }
+        unset($authority['debtAmountCents']);
+        if (hash_equals($lineFingerprint, self::canonicalFingerprint($authority))) {
+            return true;
+        }
+        if ($configuredCost !== 0
+            || $priceChangeReason !== ''
+            || $priceChangedBy !== 0
+            || $priceChangedByName !== ''
+            || $priceChangedAt !== 0) {
+            return false;
+        }
+        unset(
+            $authority['configuredCostCents'],
+            $authority['priceChangeReason'],
+            $authority['priceChangedBy'],
+            $authority['priceChangedByNameSnapshot'],
+            $authority['priceChangedAt']
+        );
+        return hash_equals($lineFingerprint, self::canonicalFingerprint($authority));
     }
 
     private static function assertEntitlementLine(array $row): int

@@ -1,7 +1,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { createCashierV3CommandId, formatMoney } from '@/services/cashierV3Bridge'
-import { openSalesOrderReceiptPrint, salesOrderReceiptFromCheckout } from '@/services/salesOrderReceiptPrint'
+import { openSalesOrderReceiptPrint } from '@/services/salesOrderReceiptPrint'
 
 const props = defineProps({
   checkout: {
@@ -66,7 +66,9 @@ const paymentLineDraft = ref({
 const paymentLineAmountDrafts = ref({})
 const paymentLineAmountErrors = ref({})
 const balancePaymentPromptOpen = ref(false)
+const paymentValidationPromptMessage = ref('')
 const receiptPrintError = ref('')
+const receiptPrintLoading = ref(false)
 const pendingPrimarySourceId = ref(0)
 const salesDateDraft = ref('')
 const salesDateReason = ref('')
@@ -247,11 +249,29 @@ const displayedPaymentSummary = computed(() => {
   }
 })
 const hasPendingPaymentLineAmountDraft = computed(() => Object.keys(paymentLineAmountDrafts.value).length > 0)
-const hasNonPositivePaymentLine = computed(() => selectedPaymentLines.value.some((line) => {
-  const amount = authoritativeWholeYuanAmount(line?.amount)
-  return amount === null || amount <= 0
-}))
+const firstInvalidPaymentLine = computed(() => {
+  for (const line of selectedPaymentLines.value) {
+    const draft = paymentLineAmountDrafts.value[paymentLineAmountKey(line)]
+    const amount = draft
+      ? wholeYuanAmount(draft.value)
+      : authoritativeWholeYuanAmount(line?.amount)
+    if (amount === null || amount <= 0) return { line, amount }
+  }
+  return null
+})
+const hasNonPositivePaymentLine = computed(() => firstInvalidPaymentLine.value !== null)
+const invalidPaymentLineMessage = computed(() => {
+  const invalid = firstInvalidPaymentLine.value
+  if (!invalid) return ''
+  const name = String(invalid.line?.name || '当前收款方式').trim() || '当前收款方式'
+  return invalid.amount === 0
+    ? `${name}的收款金额不能为0。`
+    : `${name}的收款金额必须为大于0的整数。`
+})
 const paymentAmountValidation = computed(() => {
+  if (invalidPaymentLineMessage.value) {
+    return { state: 'invalid', message: invalidPaymentLineMessage.value }
+  }
   const summary = displayedPaymentSummary.value
   const receivable = Number(summary.receivableAmount)
   const selected = Number(summary.selectedAmount)
@@ -261,7 +281,6 @@ const paymentAmountValidation = computed(() => {
   const delta = receivable - selected
   if (delta > 0) return { state: 'underpaid', message: `还差 ${formatMoney(delta)}` }
   if (delta < 0) return { state: 'overpaid', message: `超出 ${formatMoney(Math.abs(delta))}` }
-  if (hasNonPositivePaymentLine.value) return { state: 'invalid', message: '每种收款方式的金额必须大于 0。' }
   return { state: 'balanced', message: '收款金额已与应收金额相等。' }
 })
 const toggleBalancePayment = () => {
@@ -279,6 +298,14 @@ const toggleBalancePayment = () => {
 
 function closeBalancePaymentPrompt() {
   balancePaymentPromptOpen.value = false
+}
+
+function showPaymentValidationPrompt(message) {
+  paymentValidationPromptMessage.value = String(message || '请检查本次收款信息。')
+}
+
+function closePaymentValidationPrompt() {
+  paymentValidationPromptMessage.value = ''
 }
 const isPaymentDraftReady = computed(() => (
   hasAuthoritativePaymentSnapshot.value
@@ -330,8 +357,7 @@ const safeServiceStartOptions = computed(() => serviceStartOptions.value.filter(
 const canPrintReceipt = computed(() => (
   isSucceeded.value
   && !isDebtRepayment.value
-  && Boolean(String(props.checkout.salesOrderNo || '').trim())
-  && hasAuthoritativeOrderSnapshot.value
+  && Boolean(String(props.checkout.salesOrderId || '').trim())
 ))
 const hasResultLockedPaymentLine = computed(() => selectedPaymentLines.value.some((line) => paymentLineIsLocked(line)))
 const canReturnToPaymentEdit = computed(() => (
@@ -455,6 +481,14 @@ watch(
     if ([1, 2, 3].includes(activeStep)) {
       localStep.value = activeStep
     }
+  },
+  { immediate: true }
+)
+
+watch(
+  [() => props.checkout.activeStep, firstInvalidPaymentLine],
+  ([activeStep, invalidLine]) => {
+    if (activeStep === 3 && invalidLine) localStep.value = 2
   },
   { immediate: true }
 )
@@ -685,8 +719,10 @@ function savePaymentLineAmount(line, amount) {
   // receivable. An explicit zero remains useful while typing, but a saved
   // payment must be a positive whole yuan.
   if (!/^[1-9]\d*$/.test(normalizedAmount)) {
-    clearPaymentLineAmountDraft(key)
-    setPaymentLineAmountError(key, '收款金额必须为正整数，已恢复原金额。')
+    paymentLineAmountDrafts.value = {
+      ...paymentLineAmountDrafts.value,
+      [key]: { ...draft, value: normalizedAmount, pending: false }
+    }
     return
   }
   paymentLineAmountDrafts.value = {
@@ -773,6 +809,8 @@ function clearPaymentLineAmountError(key) {
 function handleCheckoutDraftMutationResult(event) {
   const detail = event?.detail || {}
   const action = String(detail.action || '')
+  const succeeded = ['success', 'succeeded'].includes(String(detail.status || ''))
+  if (!succeeded && detail.message) showPaymentValidationPrompt(detail.message)
   if (action === 'add-payment-method') {
     const methodId = String(detail.payload?.paymentMethodId || '')
     if (methodId) {
@@ -788,7 +826,7 @@ function handleCheckoutDraftMutationResult(event) {
     : String(detail.payload?.paymentLineId || '')
   const draft = paymentLineAmountDrafts.value[key]
   if (!draft || draft.pending !== true) return
-  if (['success', 'succeeded'].includes(String(detail.status || ''))) {
+  if (succeeded) {
     clearPaymentLineAmountDraft(key)
     clearPaymentLineAmountError(key)
     return
@@ -806,10 +844,27 @@ function removePaymentLine(line) {
   request('remove-payment-line', { paymentLineId: line.id })
 }
 
-function printReceipt() {
+async function printReceipt() {
+  if (receiptPrintLoading.value) return
   receiptPrintError.value = ''
-  const result = openSalesOrderReceiptPrint(salesOrderReceiptFromCheckout(props.checkout))
-  if (!result.ok) receiptPrintError.value = result.message
+  receiptPrintLoading.value = true
+  try {
+    // The success projection is intentionally lightweight and may only carry
+    // the order id.  Load the already-settled order snapshot before printing;
+    // never turn a partial checkout projection into an empty receipt.
+    const response = await request('print-sales-order-receipt')
+    const detail = response?.receiptOrder
+    if (!detail || typeof detail !== 'object') {
+      receiptPrintError.value = String(response?.result?.message || response?.message || '订单明细尚未完整返回，暂时不能打印小票。')
+      return
+    }
+    const result = openSalesOrderReceiptPrint(detail)
+    if (!result.ok) receiptPrintError.value = result.message
+  } catch (error) {
+    receiptPrintError.value = String(error?.message || '读取订单明细失败，暂时不能打印小票。')
+  } finally {
+    receiptPrintLoading.value = false
+  }
 }
 
 function handleServiceStartOption(option) {
@@ -851,7 +906,13 @@ function goNext() {
   // Do not let the final-preparation command race a just-finished amount
   // edit. The parent serializes each draft write and this component resumes
   // navigation as soon as its authoritative projection arrives.
-  if (currentStep.value === 2 && !isPaymentDraftReady.value) return
+  if (currentStep.value === 2) {
+    if (invalidPaymentLineMessage.value) {
+      showPaymentValidationPrompt(invalidPaymentLineMessage.value)
+      return
+    }
+    if (!isPaymentDraftReady.value) return
+  }
   const currentIndex = editableSteps.value.findIndex((step) => step.number === currentStep.value)
   const nextStep = currentIndex >= 0 ? editableSteps.value[currentIndex + 1] : null
   if (nextStep) {
@@ -1328,7 +1389,7 @@ onBeforeUnmount(() => {
             <div v-if="displayedPaymentSummary.receivableAmount !== undefined"><dt>应收</dt><dd>{{ formatMoney(displayedPaymentSummary.receivableAmount) }}</dd></div>
             <div v-if="displayedPaymentSummary.selectedAmount !== undefined"><dt>已选收款</dt><dd>{{ formatMoney(displayedPaymentSummary.selectedAmount) }}</dd></div>
             <div v-if="displayedPaymentSummary.remainingAmount !== undefined"><dt>待收</dt><dd>{{ formatMoney(displayedPaymentSummary.remainingAmount) }}</dd></div>
-            <div v-if="paymentAmountValidation.message" :class="`checkout-payment-summary__validation checkout-payment-summary__validation--${paymentAmountValidation.state}`"><dt>校验提示</dt><dd>{{ paymentAmountValidation.message }}</dd></div>
+            <div v-if="paymentAmountValidation.message && paymentAmountValidation.state !== 'invalid'" :class="`checkout-payment-summary__validation checkout-payment-summary__validation--${paymentAmountValidation.state}`"><dt>校验提示</dt><dd>{{ paymentAmountValidation.message }}</dd></div>
           </dl>
         </section>
       </section>
@@ -1435,10 +1496,34 @@ onBeforeUnmount(() => {
       </section>
     </div>
 
+    <div
+      v-if="paymentValidationPromptMessage"
+      class="checkout-inline-modal-backdrop"
+      role="presentation"
+    >
+      <section
+        class="checkout-inline-modal"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="payment-validation-prompt-title"
+      >
+        <header>
+          <h3 id="payment-validation-prompt-title">收款信息有误</h3>
+          <button type="button" class="button button--text" aria-label="关闭" @click="closePaymentValidationPrompt">×</button>
+        </header>
+        <p>{{ paymentValidationPromptMessage }}</p>
+        <footer>
+          <button type="button" class="button button--primary" @click="closePaymentValidationPrompt">知道了</button>
+        </footer>
+      </section>
+    </div>
+
     <footer class="checkout-overlay__footer">
       <template v-if="isSucceeded">
         <button v-if="!isDebtRepayment && checkout.salesOrderId" type="button" class="button button--secondary" @click="request('view-sales-order')">查看销售订单</button>
-        <button v-if="canPrintReceipt" type="button" class="button button--secondary" @click="printReceipt">打印小票</button>
+        <button v-if="canPrintReceipt" type="button" class="button button--secondary" :disabled="receiptPrintLoading" @click="printReceipt">
+          {{ receiptPrintLoading ? '正在加载小票…' : '打印小票' }}
+        </button>
         <button type="button" class="button button--primary" @click="finishCheckoutAndReturn">
           {{ isServiceOrder || hasEntitlementLines ? '完成并返回收银台' : '返回收银台' }}
         </button>
@@ -1465,7 +1550,7 @@ onBeforeUnmount(() => {
       </template>
       <template v-else>
         <button type="button" class="button button--secondary" :disabled="currentStepPosition === 0" @click="goPrevious">上一步</button>
-        <button type="button" class="button button--primary" :disabled="isSubmissionLocked || !hasCurrentStepSnapshot || (currentStep === 2 && !isPaymentDraftReady)" @click="goNext">{{ nextLabel }}</button>
+        <button type="button" class="button button--primary" :disabled="isSubmissionLocked || !hasCurrentStepSnapshot || (currentStep === 2 && !isPaymentDraftReady && !invalidPaymentLineMessage)" @click="goNext">{{ nextLabel }}</button>
       </template>
     </footer>
   </section>

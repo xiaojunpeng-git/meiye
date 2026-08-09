@@ -98,7 +98,7 @@
 				<view>服务凭证</view>
 				<view class="fs-24 text--w111-999">{{fontNum}}/100</view>
 			</view>
-			<textarea class="mt-20 text--w111-333 fs-28" maxlength="100" :value="service_describe" @input="sumfontnum" placeholder-class="placeholder" placeholder="请填写服务凭证" name="service_describe" v-model="service_describe"></textarea>
+			<textarea class="mt-20 text--w111-333 fs-28" maxlength="100" @input="sumfontnum" placeholder-class="placeholder" placeholder="请填写服务凭证" name="service_describe" v-model="service_describe"></textarea>
 			<view class="acea-row row-middle mt-20">
 				<view class='pictrue mr-8' v-for="(item,index) in service_img" :key="index">
 					<image class="w-136 h-136 rd-16rpx" :src='item' mode="aspectFill"></image>

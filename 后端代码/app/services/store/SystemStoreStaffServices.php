@@ -964,10 +964,14 @@ class SystemStoreStaffServices extends BaseServices
      */
     public function getSelectList($where = [])
     {
-        $list = $this->dao->getSelectList($where);
+        $list = $this->dao->getSelectList($where, 'id,employee_id,staff_name');
         $menus = [];
         foreach ($list as $menu) {
-            $menus[] = ['value' => $menu['id'], 'label' => $menu['staff_name'] ?? ''];
+            $menus[] = [
+                'value' => $menu['id'],
+                'label' => $menu['staff_name'] ?? '',
+                'employee_id' => (int)($menu['employee_id'] ?? 0),
+            ];
         }
         return $menus;
     }
@@ -1663,6 +1667,8 @@ class SystemStoreStaffServices extends BaseServices
         }
         $item['store_name'] = $item['name'] ?? '-';
         $item['is_fencheng'] = (int)($item['is_fencheng'] ?? 0);
+        $item['cashier_salesperson_enabled'] = (int)($item['cashier_salesperson_enabled'] ?? 1);
+        $item['cashier_craftsman_enabled'] = (int)($item['cashier_craftsman_enabled'] ?? 1);
         if ($hideFencheng) {
             unset($item['is_fencheng']);
         }
@@ -1682,6 +1688,8 @@ class SystemStoreStaffServices extends BaseServices
         $staffInfo['has_pwd'] = !empty($staffInfo['pwd']) ? 1 : 0;
         unset($staffInfo['pwd']);
         $staffInfo['is_fencheng'] = (int)($staffInfo['is_fencheng'] ?? 0);
+        $staffInfo['cashier_salesperson_enabled'] = (int)($staffInfo['cashier_salesperson_enabled'] ?? 1);
+        $staffInfo['cashier_craftsman_enabled'] = (int)($staffInfo['cashier_craftsman_enabled'] ?? 1);
         if ($hideFencheng) {
             unset($staffInfo['is_fencheng']);
         }

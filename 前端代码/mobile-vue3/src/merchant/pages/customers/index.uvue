@@ -1,0 +1,1157 @@
+<template>
+	<view class="customer-page">
+		<view class="customer-page__header">
+			<text class="customer-page__eyebrow">商家端</text>
+			<view class="customer-page__title-row">
+				<text class="customer-page__title">客户</text>
+				<view class="customer-page__header-actions">
+					<view class="customer-page__new-group" @tap="openGroupEntry">
+					<text class="customer-page__new-group-symbol">+</text>
+					<text class="customer-page__new-group-label">新建客群</text>
+					</view>
+					<view class="customer-page__new-customer" @tap="openCustomerEntry"><text class="customer-page__new-customer-symbol">+</text><text>新建客户</text></view>
+				</view>
+			</view>
+		</view>
+
+		<view class="customer-page__tabs" role="tablist">
+			<view
+				v-for="tab in tabs"
+				:key="tab.key"
+				class="customer-page__tab"
+				:class="{ 'customer-page__tab--active': activeTab === tab.key }"
+				role="tab"
+				:aria-selected="activeTab === tab.key"
+				@tap="selectTab(tab.key)"
+			>
+				<text>{{ tab.label }}</text>
+			</view>
+		</view>
+
+		<view class="customer-page__query-bar">
+			<view class="customer-page__search">
+				<text class="customer-page__search-symbol">⌕</text>
+				<input
+					class="customer-page__search-input"
+					v-model="keyword"
+					confirm-type="search"
+					placeholder="姓名、手机号或会员编号"
+					@confirm="applySearch"
+				/>
+			</view>
+			<view v-if="activeTab === 'list'" class="customer-page__field-settings">
+				<navigator url="/src/merchant/pages/customer-settings/index" open-type="navigate"><text>列表字段</text></navigator>
+			</view>
+			<view v-if="activeAudience == null" class="customer-page__filter-button" @tap="openFilter">
+				<text>筛选</text>
+				<text v-if="selectedFilterKeys.length > 0" class="customer-page__filter-count">{{ selectedFilterKeys.length }}</text>
+			</view>
+		</view>
+
+		<view class="customer-page__scope-row">
+			<text class="customer-page__scope-label">{{ activeTabLabel }}</text>
+			<text v-if="activeAudience != null" class="customer-page__scope-query" @tap="closeAudience">返回客群</text>
+			<text v-else-if="searchApplied" class="customer-page__scope-query">已应用搜索</text>
+		</view>
+
+		<scroll-view class="customer-page__content" scroll-y>
+			<view v-if="loading" class="customer-page__empty">
+				<text class="customer-page__empty-title">正在加载客户数据</text>
+			</view>
+			<view v-else-if="loadMessage.length > 0" class="customer-page__empty">
+				<text class="customer-page__empty-title">{{ loadMessage }}</text>
+				<view class="customer-page__empty-command" @tap="loadActiveTab"><text>重新加载</text></view>
+			</view>
+			<view v-else-if="activeTab === 'groups' && activeAudience == null && audiences.length === 0" class="customer-page__empty">
+				<text class="customer-page__empty-title">暂无客群</text>
+				<text class="customer-page__empty-copy">客群只保存筛选规则，会员名单始终按当前权限实时查询。</text>
+				<view class="customer-page__empty-command" @tap="openGroupEntry"><text>创建客群</text></view>
+			</view>
+			<view v-else-if="activeTab === 'groups' && activeAudience == null" class="customer-page__list">
+				<view v-for="audience in audiences" :key="audience.audienceId" class="customer-page__audience-card" @tap="openAudience(audience)">
+					<text class="customer-page__audience-name">{{ audience.name }}</text>
+					<text class="customer-page__audience-copy">动态客群 · 规则版本 {{ audience.version }} · 查看成员 ›</text>
+				</view>
+			</view>
+			<view v-else-if="records.length === 0" class="customer-page__empty">
+				<text class="customer-page__empty-title">暂无客户</text>
+				<text class="customer-page__empty-copy">客户列表将严格按照当前人员的数据权限显示</text>
+			</view>
+			<view v-else class="customer-page__list">
+				<view v-for="record in records" :key="record.id" class="customer-page__customer-card" @tap="openCustomerDetail(record)">
+					<view class="customer-page__customer-heading">
+						<view class="customer-page__customer-avatar"><text>{{ customerInitial(record) }}</text></view>
+						<view class="customer-page__customer-identity">
+							<view class="customer-page__customer-title-line">
+								<text class="customer-page__customer-name">{{ customerName(record) }}</text>
+								<text v-if="customerLevel(record).length > 0" class="customer-page__customer-tag customer-page__customer-tag--level">{{ customerLevel(record) }}</text>
+								<text v-if="customerStatus(record).length > 0" class="customer-page__customer-tag">{{ customerStatus(record) }}</text>
+							</view>
+							<text v-if="customerPrimaryMeta(record).length > 0" class="customer-page__customer-primary-meta">{{ customerPrimaryMeta(record) }}</text>
+						</view>
+						<text class="customer-page__customer-chevron">›</text>
+					</view>
+					<text v-if="customerRelationMeta(record).length > 0" class="customer-page__customer-relation-meta">{{ customerRelationMeta(record) }}</text>
+					<view class="customer-page__customer-metrics">
+						<view v-for="metric in customerMetrics(record)" :key="metric.key" class="customer-page__customer-metric">
+							<text class="customer-page__customer-metric-value">{{ metric.value }}</text>
+							<text class="customer-page__customer-metric-label">{{ metric.label }}</text>
+						</view>
+					</view>
+					<view v-if="additionalCardFields(record).length > 0" class="customer-page__customer-extra-fields">
+						<view v-for="field in additionalCardFields(record)" :key="field.key" class="customer-page__customer-extra-field">
+							<text class="customer-page__customer-extra-label">{{ field.label }}</text>
+							<text class="customer-page__customer-extra-value">{{ field.value }}</text>
+						</view>
+					</view>
+				</view>
+			</view>
+		</scroll-view>
+
+		<view class="customer-page__tabs-bottom" role="tablist">
+			<navigator class="customer-page__tab-bottom" url="/src/merchant/pages/warehouse/index" open-type="navigate" role="tab" aria-selected="false"><text>数仓</text></navigator>
+			<view class="customer-page__tab-bottom customer-page__tab-bottom--active" role="tab" aria-selected="true"><text>客户</text></view>
+			<navigator class="customer-page__tab-bottom" url="/src/merchant/pages/workbench/index" open-type="navigate" role="tab" aria-selected="false"><text>工作台</text></navigator>
+			<navigator class="customer-page__tab-bottom" url="/src/merchant/pages/goals/index" open-type="navigate" role="tab" aria-selected="false"><text>目标</text></navigator>
+			<navigator class="customer-page__tab-bottom" url="/src/merchant/pages/profile/index" open-type="navigate" role="tab" aria-selected="false"><text>我的</text></navigator>
+		</view>
+
+		<view v-if="filterVisible" class="customer-filter">
+			<view class="customer-filter__header">
+				<text class="customer-filter__dismiss" @tap="closeFilter">取消</text>
+				<text class="customer-filter__title">筛选客户</text>
+				<text class="customer-filter__apply" @tap="applyFilter">应用</text>
+			</view>
+			<scroll-view scroll-y class="customer-filter__body">
+				<text class="customer-filter__hint">选择要设置条件的字段</text>
+				<view class="customer-filter__field-grid">
+					<view
+						v-for="field in filterFields"
+						:key="field.key"
+						class="customer-filter__field"
+						:class="{ 'customer-filter__field--selected': isFieldSelected(field.key) }"
+						@tap="toggleField(field.key)"
+					>
+						<text>{{ field.label }}</text>
+					</view>
+					</view>
+					<view v-for="field in selectedFilterDefinitions()" :key="field.key" class="customer-filter__condition">
+						<view class="customer-filter__condition-heading"><text class="customer-filter__condition-label">{{ field.label }}</text></view>
+						<view v-if="showFilterOperator(field.key)" class="customer-filter__operator-row">
+							<view v-for="option in filterOperatorOptions(field.key)" :key="option.value" class="customer-filter__operator-option" :class="{ 'customer-filter__operator-option--active': filterOperatorFor(field.key) === option.value }" @tap="setFilterOperatorValue(field.key, option.value)"><text>{{ option.label }}</text></view>
+						</view>
+						<view v-if="isBirthdayField(field.key)" class="customer-filter__shortcut-row"><view v-for="option in birthdayShortcutOptions" :key="option.value" class="customer-filter__shortcut" :class="{ 'customer-filter__shortcut--active': birthdayShortcutFor(field.key) === option.value }" @tap="setBirthdayShortcut(field.key, option.value)"><text>{{ option.label }}</text></view></view>
+						<view v-if="isDateField(field.key) && !isBirthdayField(field.key)" class="customer-filter__shortcut-row"><picker class="customer-filter__date-shortcut" mode="selector" :range="dateShortcutLabelsFor(field.key)" @change="setDateShortcut(field.key, $event.detail.value)"><text>{{ dateShortcutLabel(field.key) }}⌄</text></picker></view>
+						<view v-if="showFilterValue(field.key)" class="customer-filter__value-row">
+							<input v-if="isRollingDayShortcut(field.key)" class="customer-filter__value-input" type="number" :value="filterValueFor(field.key)" :placeholder="rollingDayPlaceholder(field.key)" @input="setFilterValue(field.key, $event.detail.value)" />
+							<text v-if="isRollingDayShortcut(field.key)" class="customer-filter__value-unit">天</text>
+							<picker v-else-if="isDateField(field.key)" class="customer-filter__value-picker" mode="date" :value="filterValueFor(field.key)" @change="setFilterValue(field.key, $event.detail.value)"><text>{{ filterValueFor(field.key, '选择日期') }}</text></picker>
+							<input v-else class="customer-filter__value-input" :value="filterValueFor(field.key)" :type="isNumberField(field.key) ? 'number' : 'text'" :placeholder="filterValuePlaceholder(field.key, false)" @input="setFilterValue(field.key, $event.detail.value)" />
+							<picker v-if="filterOperatorFor(field.key) === 'between' && isDateField(field.key) && !isRollingDayShortcut(field.key)" class="customer-filter__value-picker" mode="date" :value="filterValueToFor(field.key)" @change="setFilterValueTo(field.key, $event.detail.value)"><text>{{ filterValueToFor(field.key, '结束日期') }}</text></picker>
+							<input v-else-if="filterOperatorFor(field.key) === 'between' && !isRollingDayShortcut(field.key)" class="customer-filter__value-input" type="number" :value="filterValueToFor(field.key)" :placeholder="filterValuePlaceholder(field.key, true)" @input="setFilterValueTo(field.key, $event.detail.value)" />
+						</view>
+					</view>
+			</scroll-view>
+		</view>
+
+		<view v-if="groupEntryVisible" class="customer-group-entry">
+			<view class="customer-group-entry__header">
+				<text class="customer-group-entry__dismiss" @tap="closeGroupEntry">关闭</text>
+				<text class="customer-group-entry__title">新建客群</text>
+				<text class="customer-group-entry__placeholder"></text>
+			</view>
+			<view class="customer-group-entry__body">
+				<text class="customer-group-entry__headline">创建动态客群</text>
+				<input class="customer-group-entry__input" v-model="groupName" placeholder="填写客群名称" @input="clearGroupEntryMessage" />
+				<text class="customer-group-entry__copy">客群会保存为动态条件，名单始终以当前权限和最新客户数据为准。</text>
+				<text v-if="groupEntryMessage.length > 0" class="customer-group-entry__error">{{ groupEntryMessage }}</text>
+				<view class="customer-group-entry__command" @tap="openFilterFromGroup">
+					<text>设置筛选条件</text>
+				</view>
+				<view class="customer-group-entry__command" :class="{ 'customer-group-entry__command--disabled': creatingGroup }" @tap="createGroup"><text>{{ creatingGroup ? '正在创建...' : '保存客群' }}</text></view>
+			</view>
+		</view>
+
+	</view>
+</template>
+
+<script setup lang="uts">
+	import { createMobileCustomerAudience, listMobileCustomerAudiences, queryMobileCustomerAudienceMembers, queryMobileCustomers } from '../../../shared/api/mobile-customer-client.uts'
+	import { mobileHttpResultRequiresMerchantLogin } from '../../../shared/api/mobile-http.uts'
+	import { clearMerchantRoot } from '../../../shared/platform/mobile-merchant-session.uts'
+	import { openMerchantBootstrapForCustomers, openMerchantCustomerDetail, openMerchantCustomerProfile } from '../../../shared/platform/mobile-navigation.uts'
+	const tabs = [
+		{ key: 'exclusive', label: '专属客户' },
+		{ key: 'groups', label: '我的客群' },
+		{ key: 'list', label: '客户列表' }
+	]
+	const filterFields = [
+		{ key: 'member_name', label: '会员姓名', type: 'text' },
+		{ key: 'phone', label: '手机号', type: 'text' },
+		{ key: 'member_no', label: '会员编号', type: 'text' },
+		{ key: 'birthday', label: '生日', type: 'birthday' },
+		{ key: 'member_status', label: '会员状态', type: 'text' },
+		{ key: 'member_level', label: '会员等级', type: 'text' },
+		{ key: 'member_tag', label: '会员标签', type: 'text' },
+		{ key: 'store', label: '归属门店', type: 'text' },
+		{ key: 'exclusive_service_staff', label: '专属服务人', type: 'text' },
+		{ key: 'account_balance', label: '账户余额', type: 'number' },
+		{ key: 'active_card_count', label: '有效卡项', type: 'number' },
+		{ key: 'remaining_project_times', label: '剩余项目次数', type: 'number' },
+		{ key: 'remaining_project_amount', label: '剩余项目金额', type: 'number' },
+		{ key: 'debt_amount', label: '欠款金额', type: 'number' },
+		{ key: 'total_consumption_amount', label: '总消费金额', type: 'number' },
+		{ key: 'visit_count', label: '到店次数', type: 'number' },
+		{ key: 'latest_purchase_date', label: '最近购买日期', type: 'date' },
+		{ key: 'last_service_staff', label: '上次服务人员', type: 'text' },
+		{ key: 'latest_visit_date', label: '最近到店日期', type: 'date' },
+		{ key: 'created_at', label: '建档时间', type: 'date' }
+	]
+	const numberOperatorOptions = [{ value: 'greater_than', label: '大于' }, { value: 'greater_or_equal', label: '大于等于' }, { value: 'equal', label: '等于' }, { value: 'less_or_equal', label: '小于等于' }, { value: 'less_than', label: '小于' }, { value: 'between', label: '介于' }]
+	const dateOperatorOptions = [{ value: 'equal', label: '等于' }, { value: 'greater_than', label: '晚于' }, { value: 'greater_or_equal', label: '不早于' }, { value: 'less_than', label: '早于' }, { value: 'less_or_equal', label: '不晚于' }, { value: 'between', label: '介于' }]
+	const textOperatorOptions = [{ value: 'contains', label: '包含' }, { value: 'equal', label: '等于' }]
+	const dateShortcutOptions = [{ value: 'custom', label: '自定义日期' }, { value: 'today', label: '今天' }, { value: 'yesterday', label: '昨天' }, { value: 'this_week', label: '本周' }, { value: 'last_week', label: '上周' }, { value: 'this_month', label: '本月' }, { value: 'last_month', label: '上月' }, { value: 'this_year', label: '本年' }]
+	const birthdayShortcutOptions = [{ value: 'today', label: '今天生日' }, { value: 'this_week', label: '本周生日' }, { value: 'this_month', label: '本月生日' }, { value: 'custom', label: '指定生日' }]
+	const defaultVisibleFieldKeys = ['member_name', 'phone', 'birthday', 'member_level', 'store']
+
+	const activeTab = ref('exclusive')
+	const activeTabLabel = ref('专属客户')
+	const keyword = ref('')
+	const searchApplied = ref(false)
+	const filterVisible = ref(false)
+	const groupEntryVisible = ref(false)
+	const filterForGroupEntry = ref(false)
+	const selectedFilterKeys = ref<Array<string>>([])
+	const listFilterSnapshotKeys = ref<Array<string>>([])
+	const records = ref<Array<any>>([])
+	const visibleFieldKeys = ref<Array<string>>(defaultVisibleFieldKeys)
+	const fieldAliases = ref<any>({})
+	const audiences = ref<Array<any>>([])
+	const activeAudience = ref<any>(null)
+	const loading = ref(false)
+	const creatingGroup = ref(false)
+	const loadMessage = ref('')
+	const groupName = ref('')
+	const groupEntryMessage = ref('')
+	const filterValues = ref<any>({})
+	const filterValueTos = ref<any>({})
+	const filterOperators = ref<any>({})
+	const dateShortcuts = ref<any>({})
+	const birthdayShortcuts = ref<any>({})
+	const listFilterSnapshotValues = ref<any>({})
+	const listFilterSnapshotValueTos = ref<any>({})
+	const listFilterSnapshotOperators = ref<any>({})
+	const listFilterSnapshotDateShortcuts = ref<any>({})
+	const listFilterSnapshotBirthdayShortcuts = ref<any>({})
+
+	onShow(() => loadActiveTab())
+
+	function selectTab(tab : string) {
+		activeAudience.value = null
+		activeTab.value = tab
+		if (tab == 'groups') {
+			activeTabLabel.value = '我的客群'
+			loadActiveTab()
+			return
+		}
+		if (tab == 'list') {
+			activeTabLabel.value = '客户列表'
+			loadActiveTab()
+			return
+		}
+		activeTabLabel.value = '专属客户'
+		loadActiveTab()
+	}
+
+	function applySearch() {
+		searchApplied.value = keyword.value.trim().length > 0
+		loadActiveTab()
+	}
+
+	function openFilter() {
+		filterForGroupEntry.value = false
+		filterVisible.value = true
+	}
+
+	function closeFilter() {
+		filterVisible.value = false
+		if (filterForGroupEntry.value) {
+			filterForGroupEntry.value = false
+			groupEntryVisible.value = true
+		}
+	}
+
+	function applyFilter() {
+		filterVisible.value = false
+		if (filterForGroupEntry.value) {
+			filterForGroupEntry.value = false
+			groupEntryVisible.value = true
+			return
+		}
+		loadActiveTab()
+	}
+
+	function isFieldSelected(fieldKey : string) : boolean {
+		return selectedFilterKeys.value.indexOf(fieldKey) >= 0
+	}
+
+	function toggleField(fieldKey : string) {
+		const index = selectedFilterKeys.value.indexOf(fieldKey)
+		if (index >= 0) {
+			selectedFilterKeys.value.splice(index, 1)
+			delete filterValues.value[fieldKey]
+			delete filterValueTos.value[fieldKey]
+			delete filterOperators.value[fieldKey]
+			delete dateShortcuts.value[fieldKey]
+			delete birthdayShortcuts.value[fieldKey]
+			return
+		}
+		selectedFilterKeys.value.push(fieldKey)
+		if (isBirthdayField(fieldKey)) birthdayShortcuts.value[fieldKey] = 'today'
+		else if (isDateField(fieldKey)) dateShortcuts.value[fieldKey] = 'custom'
+	}
+
+	function openGroupEntry() {
+		listFilterSnapshotKeys.value = copyFilterKeys(selectedFilterKeys.value)
+		listFilterSnapshotValues.value = copyFilterValues(filterValues.value)
+		listFilterSnapshotValueTos.value = copyFilterValues(filterValueTos.value)
+		listFilterSnapshotOperators.value = copyFilterValues(filterOperators.value)
+		listFilterSnapshotDateShortcuts.value = copyFilterValues(dateShortcuts.value)
+		listFilterSnapshotBirthdayShortcuts.value = copyFilterValues(birthdayShortcuts.value)
+		selectedFilterKeys.value = new Array<string>()
+		filterValues.value = {}
+		filterValueTos.value = {}
+		filterOperators.value = {}
+		dateShortcuts.value = {}
+		birthdayShortcuts.value = {}
+		groupEntryMessage.value = ''
+		groupEntryVisible.value = true
+	}
+
+	function openCustomerEntry() {
+		openMerchantCustomerProfile('create')
+	}
+
+	function openCustomerDetail(record : any) {
+		let memberId = String(record != null ? record.id || record.memberId || '' : '')
+		let lookup = String(record != null ? record.phone || record.memberNo || '' : '')
+		if (memberId.length == 0 || lookup.length == 0) { loadMessage.value = '该客户缺少可用于安全定位的联系方式，暂时无法打开详情。'; return }
+		openMerchantCustomerDetail(memberId, lookup)
+	}
+
+	function openAudience(audience : any) {
+		activeAudience.value = audience
+		activeTabLabel.value = String(audience != null ? audience.name || '客群成员' : '客群成员')
+		records.value = new Array<any>()
+		loadActiveTab()
+	}
+
+	function closeAudience() {
+		activeAudience.value = null
+		activeTabLabel.value = '我的客群'
+		records.value = new Array<any>()
+		loadActiveTab()
+	}
+
+	function handleExpiredMerchantSession(result : any) : boolean {
+		if (!mobileHttpResultRequiresMerchantLogin(result)) return false
+		clearMerchantRoot()
+		openMerchantBootstrapForCustomers()
+		return true
+	}
+
+
+	function closeGroupEntry() {
+		groupEntryVisible.value = false
+		filterForGroupEntry.value = false
+		restoreListFilters()
+		groupName.value = ''
+		groupEntryMessage.value = ''
+	}
+
+	function openFilterFromGroup() {
+		groupEntryMessage.value = ''
+		groupEntryVisible.value = false
+		filterForGroupEntry.value = true
+		filterVisible.value = true
+	}
+
+	function loadActiveTab() {
+		loading.value = true
+		loadMessage.value = ''
+		if (activeTab.value == 'groups') {
+			if (activeAudience.value != null) {
+				queryMobileCustomerAudienceMembers(String(activeAudience.value.audienceId || ''), {
+					page: 1,
+					limit: 30,
+					keyword: keyword.value.trim()
+				}, (result : any) => {
+					loading.value = false
+					if (!result.ok) { if (handleExpiredMerchantSession(result)) return; loadMessage.value = String(result.message || '客群成员加载失败。'); return }
+					records.value = Array.isArray(result.body.records) ? result.body.records : []
+					let display = result.body.displayConfiguration || {}
+					let savedVisible = Array.isArray(display.visibleFields) ? display.visibleFields : []
+					visibleFieldKeys.value = savedVisible.length > 0 ? savedVisible : defaultVisibleFieldKeys
+					fieldAliases.value = display.fieldAliases || {}
+				})
+				return
+			}
+			listMobileCustomerAudiences((result : any) => {
+				loading.value = false
+				if (!result.ok) { if (handleExpiredMerchantSession(result)) return; loadMessage.value = String(result.message || '客群加载失败。'); return }
+				audiences.value = Array.isArray(result.body.audiences) ? result.body.audiences : []
+			})
+			return
+		}
+		queryMobileCustomers(activeTab.value == 'exclusive', {
+			page: 1,
+			limit: 30,
+			keyword: keyword.value.trim(),
+			filters: selectedFilters(),
+			filterRelation: 'all'
+		}, (result : any) => {
+			loading.value = false
+			if (!result.ok) { if (handleExpiredMerchantSession(result)) return; loadMessage.value = String(result.message || '客户加载失败。'); return }
+			records.value = Array.isArray(result.body.records) ? result.body.records : []
+			let display = result.body.displayConfiguration || {}
+			let savedVisible = Array.isArray(display.visibleFields) ? display.visibleFields : []
+			visibleFieldKeys.value = savedVisible.length > 0 ? savedVisible : defaultVisibleFieldKeys
+			fieldAliases.value = display.fieldAliases || {}
+		})
+	}
+
+	function customerName(record : any) : string { let value = String(record != null ? record.name || '' : ''); return value.length > 0 ? value : '未命名客户' }
+	function customerInitial(record : any) : string { return customerName(record).substring(0, 1) }
+	function customerLevel(record : any) : string { return String(record != null ? record.level || '' : '') }
+	function customerStatus(record : any) : string { return String(record != null ? record.status || '' : '') }
+	function fieldLabel(key : string, fallback : string) : string { return String(fieldAliases.value[key] || fallback) }
+	function customerPrimaryMeta(record : any) : string {
+		let values = new Array<string>()
+		let phone = String(record != null ? record.phone || '' : '')
+		let birthday = String(record != null ? record.birthday || '' : '')
+		if (phone.length > 0) values.push(phone)
+		if (birthday.length > 0) values.push(fieldLabel('birthday', '生日') + ' ' + birthday)
+		return values.join(' · ')
+	}
+	function customerRelationMeta(record : any) : string {
+		let values = new Array<string>()
+		let store = String(record != null ? record.storeName || '' : '')
+		let staff = String(record != null ? record.exclusiveServiceStaff || '' : '')
+		if (store.length > 0) values.push(store)
+		if (staff.length > 0) values.push(fieldLabel('exclusive_service_staff', '专属服务人') + ' ' + staff)
+		return values.join(' · ')
+	}
+	function wholeNumber(value : any) : string {
+		let numberValue = Number(value == null || String(value).length == 0 ? 0 : value)
+		if (isNaN(numberValue)) return '0'
+		return String(Math.round(numberValue))
+	}
+	function totalBalance(record : any) : string { return wholeNumber(Number(record != null ? record.accountBalance || 0 : 0) + Number(record != null ? record.remainingProjectAmount || 0 : 0)) }
+	function customerMetrics(record : any) : Array<any> { return [
+		{ key: 'total_balance', label: '总余额', value: '¥' + totalBalance(record) },
+		{ key: 'active_card_count', label: fieldLabel('active_card_count', '有效卡项'), value: wholeNumber(record != null ? record.activeCardCount : 0) },
+		{ key: 'remaining_project_times', label: fieldLabel('remaining_project_times', '剩余次数'), value: wholeNumber(record != null ? record.remainingProjectTimes : 0) },
+		{ key: 'debt_amount', label: fieldLabel('debt_amount', '当前欠款'), value: '¥' + wholeNumber(record != null ? record.debtAmount : 0) }
+	] }
+	function isPrimaryCardField(key : string) : boolean {
+		return key == 'member_name' || key == 'phone' || key == 'birthday' || key == 'member_status' || key == 'member_level' || key == 'store' || key == 'exclusive_service_staff' || key == 'account_balance' || key == 'active_card_count' || key == 'remaining_project_times' || key == 'remaining_project_amount' || key == 'debt_amount'
+	}
+	function additionalCardFields(record : any) : Array<any> {
+		let fields = new Array<any>()
+		for (let index = 0; index < filterFields.length; index++) {
+			let definition = filterFields[index]
+			if (isPrimaryCardField(definition.key) || visibleFieldKeys.value.indexOf(definition.key) < 0) continue
+			let value = customerFieldValue(record, definition.key)
+			if (value.length == 0) continue
+			fields.push({ key: definition.key, label: fieldLabel(definition.key, String(definition.label)), value: monetaryFieldValue(definition.key, value) })
+		}
+		return fields
+	}
+
+	function monetaryFieldValue(key : string, value : any) : string {
+		if (key == 'account_balance' || key == 'remaining_project_amount' || key == 'debt_amount' || key == 'total_consumption_amount') return '¥' + wholeNumber(value)
+		return String(value == null ? '' : value)
+	}
+
+	function customerFieldValue(record : any, key : string) : string {
+		if (key == 'phone') return String(record.phone || '')
+		if (key == 'member_no') return String(record.memberNo || '')
+		if (key == 'birthday') return String(record.birthday || '')
+		if (key == 'member_status') return String(record.status || '')
+		if (key == 'member_level') return String(record.level || '')
+		if (key == 'member_tag') return Array.isArray(record.tags) ? record.tags.join('、') : ''
+		if (key == 'store') return String(record.storeName || '')
+		if (key == 'exclusive_service_staff') return String(record.exclusiveServiceStaff || '')
+		if (key == 'account_balance') return String(record.accountBalance || '')
+		if (key == 'active_card_count') return String(record.activeCardCount || '')
+		if (key == 'remaining_project_times') return String(record.remainingProjectTimes || '')
+		if (key == 'remaining_project_amount') return String(record.remainingProjectAmount || '')
+		if (key == 'debt_amount') return String(record.debtAmount || '')
+		if (key == 'total_consumption_amount') return String(record.totalConsumptionAmount || '')
+		if (key == 'visit_count') return String(record.visitCount || '')
+		if (key == 'latest_purchase_date') return String(record.latestPurchaseDate || '')
+		if (key == 'last_service_staff') return String(record.lastServiceStaff || '')
+		if (key == 'latest_visit_date') return String(record.latestVisitDate || '')
+		if (key == 'created_at') return String(record.createdAt || '')
+		return ''
+	}
+
+	function createGroup() {
+		let name = groupName.value.trim()
+		if (creatingGroup.value) return
+		if (name.length == 0) { groupEntryMessage.value = '请先填写客群名称。'; return }
+		groupEntryMessage.value = ''
+		creatingGroup.value = true
+		createMobileCustomerAudience({
+			name: name,
+			filters: selectedFilters(),
+			filterRelation: 'all',
+			idempotencyKey: 'audience-' + Date.now().toString() + '-' + Math.floor(Math.random() * 100000).toString()
+		}, (result : any) => {
+			creatingGroup.value = false
+			if (!result.ok) { if (handleExpiredMerchantSession(result)) return; groupEntryMessage.value = String(result.message || '客群保存失败。'); return }
+			groupEntryVisible.value = false
+			restoreListFilters()
+			groupName.value = ''
+			activeTab.value = 'groups'
+			activeTabLabel.value = '我的客群'
+			loadActiveTab()
+		})
+	}
+
+	function clearGroupEntryMessage() { groupEntryMessage.value = '' }
+
+	function selectedFilters() : Array<any> {
+		let result = new Array<any>()
+		for (let index = 0; index < selectedFilterKeys.value.length; index++) {
+			let fieldKey = selectedFilterKeys.value[index]
+			if (isBirthdayField(fieldKey)) {
+				let shortcut = birthdayShortcutFor(fieldKey)
+				if (shortcut !== 'custom') { result.push({ field_key: fieldKey, operator: 'mobile_birthday_' + shortcut, value: '' }); continue }
+			}
+			if (isDateField(fieldKey) && !isBirthdayField(fieldKey)) {
+				let shortcut = dateShortcutFor(fieldKey)
+				if (shortcut !== 'custom') { result.push({ field_key: fieldKey, operator: 'mobile_date_' + shortcut, value: isRollingDayShortcut(fieldKey) ? filterValueFor(fieldKey).trim() : '' }); continue }
+			}
+			let value = filterValueFor(fieldKey).trim()
+			let operator = filterOperatorFor(fieldKey)
+			if (operator === 'between') {
+				let valueTo = filterValueToFor(fieldKey).trim()
+				if (value.length > 0 && valueTo.length > 0) {
+					if (isDateField(fieldKey)) result.push({ field_key: fieldKey, operator: 'mobile_date_between', value: value, valueTo: valueTo })
+					else result.push({ field_key: fieldKey, operator: operator, value: [value, valueTo] })
+				}
+			} else if (value.length > 0) result.push({ field_key: fieldKey, operator: isDateField(fieldKey) ? 'mobile_date_' + operator : operator, value: value })
+		}
+		return result
+	}
+
+	function selectedFilterDefinitions() : Array<any> {
+		let result = new Array<any>()
+		for (let index = 0; index < filterFields.length; index++) if (isFieldSelected(filterFields[index].key)) result.push(filterFields[index])
+		return result
+	}
+
+	function copyFilterKeys(source : Array<string>) : Array<string> {
+		let copied = new Array<string>()
+		for (let index = 0; index < source.length; index++) copied.push(source[index])
+		return copied
+	}
+
+	function copyFilterValues(source : any) : any {
+		let copied : any = {}
+		for (let index = 0; index < filterFields.length; index++) {
+			let key = filterFields[index].key
+			if (source[key] != null) copied[key] = String(source[key])
+		}
+		return copied
+	}
+
+	function restoreListFilters() {
+		selectedFilterKeys.value = copyFilterKeys(listFilterSnapshotKeys.value)
+		filterValues.value = copyFilterValues(listFilterSnapshotValues.value)
+		filterValueTos.value = copyFilterValues(listFilterSnapshotValueTos.value)
+		filterOperators.value = copyFilterValues(listFilterSnapshotOperators.value)
+		dateShortcuts.value = copyFilterValues(listFilterSnapshotDateShortcuts.value)
+		birthdayShortcuts.value = copyFilterValues(listFilterSnapshotBirthdayShortcuts.value)
+		listFilterSnapshotKeys.value = new Array<string>()
+		listFilterSnapshotValues.value = {}
+		listFilterSnapshotValueTos.value = {}
+		listFilterSnapshotOperators.value = {}
+		listFilterSnapshotDateShortcuts.value = {}
+		listFilterSnapshotBirthdayShortcuts.value = {}
+	}
+
+	function filterDefinition(fieldKey : string) : any { for (let index = 0; index < filterFields.length; index++) if (filterFields[index].key === fieldKey) return filterFields[index]; return { key: fieldKey, label: fieldKey, type: 'text' } }
+	function filterType(fieldKey : string) : string { return String(filterDefinition(fieldKey).type || 'text') }
+	function isNumberField(fieldKey : string) : boolean { return filterType(fieldKey) === 'number' }
+	function isDateField(fieldKey : string) : boolean { let type = filterType(fieldKey); return type === 'date' || type === 'birthday' }
+	function isBirthdayField(fieldKey : string) : boolean { return filterType(fieldKey) === 'birthday' }
+	function filterOperatorOptions(fieldKey : string) : Array<any> { if (isNumberField(fieldKey)) return numberOperatorOptions; if (isDateField(fieldKey)) return dateOperatorOptions; return textOperatorOptions }
+	function filterOperatorFor(fieldKey : string) : string { let configured = String(filterOperators.value[fieldKey] || ''); if (configured.length > 0) return configured; return isNumberField(fieldKey) ? 'greater_than' : (isDateField(fieldKey) ? 'equal' : 'contains') }
+	function setFilterOperatorValue(fieldKey : string, value : string) { filterOperators.value[fieldKey] = String(value) }
+	function showFilterOperator(fieldKey : string) : boolean { if (isBirthdayField(fieldKey) || isRollingDayShortcut(fieldKey)) return false; if (isDateField(fieldKey)) return dateShortcutFor(fieldKey) === 'custom'; return true }
+	function dateShortcutFor(fieldKey : string) : string { return String(dateShortcuts.value[fieldKey] || 'custom') }
+	function dateShortcutOptionsFor(fieldKey : string) : Array<any> { let options = new Array<any>(); for (let index = 0; index < dateShortcutOptions.length; index++) options.push(dateShortcutOptions[index]); if (fieldKey === 'latest_visit_date') options.push({ value: 'inactive_days', label: '超过指定天数未到店' }); if (fieldKey === 'latest_purchase_date') options.push({ value: 'inactive_purchase_days', label: '超过指定天数未购买' }); return options }
+	function dateShortcutLabelsFor(fieldKey : string) : Array<string> { let labels = new Array<string>(); let options = dateShortcutOptionsFor(fieldKey); for (let index = 0; index < options.length; index++) labels.push(String(options[index].label)); return labels }
+	function dateShortcutLabel(fieldKey : string) : string { let value = dateShortcutFor(fieldKey); let options = dateShortcutOptionsFor(fieldKey); for (let index = 0; index < options.length; index++) if (options[index].value === value) return String(options[index].label); return '自定义日期' }
+	function setDateShortcut(fieldKey : string, index : any) {
+		let option = dateShortcutOptionsFor(fieldKey)[Number(index)]
+		if (option == null) return
+		let next = String(option.value)
+		if (dateShortcutFor(fieldKey) !== next) {
+			filterValues.value[fieldKey] = ''
+			filterValueTos.value[fieldKey] = ''
+			filterOperators.value[fieldKey] = 'equal'
+		}
+		dateShortcuts.value[fieldKey] = next
+	}
+	function birthdayShortcutFor(fieldKey : string) : string { return String(birthdayShortcuts.value[fieldKey] || 'today') }
+	function setBirthdayShortcut(fieldKey : string, value : string) { birthdayShortcuts.value[fieldKey] = value }
+	function isRollingDayShortcut(fieldKey : string) : boolean { let shortcut = dateShortcutFor(fieldKey); return shortcut === 'inactive_days' || shortcut === 'inactive_purchase_days' }
+	function rollingDayPlaceholder(fieldKey : string) : string { return fieldKey === 'latest_purchase_date' ? '输入未购买天数' : '输入未到店天数' }
+	function showFilterValue(fieldKey : string) : boolean { if (isBirthdayField(fieldKey)) return birthdayShortcutFor(fieldKey) === 'custom'; if (isDateField(fieldKey)) return dateShortcutFor(fieldKey) === 'custom' || isRollingDayShortcut(fieldKey); return true }
+	function filterValuePlaceholder(fieldKey : string, ending : boolean) : string { if (isNumberField(fieldKey)) return ending ? '最大值' : '最小值'; return '填写' + String(filterDefinition(fieldKey).label) + '条件' }
+	function filterValueFor(fieldKey : string, fallback : string = '') : string { let value = String(filterValues.value[fieldKey] || ''); return value.length > 0 ? value : fallback }
+	function setFilterValue(fieldKey : string, value : string) { filterValues.value[fieldKey] = String(value || '') }
+	function filterValueToFor(fieldKey : string, fallback : string = '') : string { let value = String(filterValueTos.value[fieldKey] || ''); return value.length > 0 ? value : fallback }
+	function setFilterValueTo(fieldKey : string, value : string) { filterValueTos.value[fieldKey] = String(value || '') }
+</script>
+
+<style>
+	.customer-page {
+		display: flex;
+		min-height: 100%;
+		flex: 1;
+		flex-direction: column;
+		background-color: #f5f7fa;
+	}
+
+	.customer-page__header {
+		display: flex;
+		flex-direction: column;
+		padding: 52px 20px 16px 20px;
+		border-bottom-width: 1px;
+		border-bottom-style: solid;
+		border-bottom-color: #dde4ed;
+		background-color: #ffffff;
+	}
+
+	.customer-page__eyebrow {
+		font-size: 12px;
+		font-weight: 600;
+		line-height: 18px;
+		color: #697586;
+	}
+
+	.customer-page__title-row {
+		display: flex;
+		min-width: 0;
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+		margin-top: 6px;
+	}
+
+	.customer-page__title {
+		font-size: 24px;
+		font-weight: 700;
+		line-height: 34px;
+		color: #1f2329;
+	}
+
+	.customer-page__header-actions { display: flex; flex-direction: row; align-items: center; }
+	.customer-page__new-customer { display: flex; min-height: 34px; flex-direction: row; align-items: center; margin-left: 8px; padding: 0px 11px; border-width: 1px; border-style: solid; border-color: #1677cc; background-color: #1677cc; font-size: 13px; font-weight: 600; line-height: 20px; color: #ffffff; }
+	.customer-page__new-customer-symbol { margin-right: 3px; font-size: 17px; line-height: 20px; }
+
+	.customer-page__new-group {
+		display: flex;
+		min-height: 34px;
+		flex-direction: row;
+		align-items: center;
+		padding: 0px 10px 0px 9px;
+		border-width: 1px;
+		border-style: solid;
+		border-color: #b8d6ef;
+		background-color: #f7fbff;
+	}
+
+	.customer-page__new-group-symbol {
+		font-size: 18px;
+		font-weight: 600;
+		line-height: 20px;
+		color: #1677cc;
+	}
+
+	.customer-page__new-group-label {
+		margin-left: 4px;
+		font-size: 13px;
+		font-weight: 600;
+		line-height: 20px;
+		color: #1677cc;
+	}
+
+	.customer-page__tabs {
+		display: flex;
+		min-height: 48px;
+		flex-direction: row;
+		align-items: stretch;
+		padding: 0px 20px 0px 20px;
+		border-bottom-width: 1px;
+		border-bottom-style: solid;
+		border-bottom-color: #dde4ed;
+		background-color: #ffffff;
+	}
+
+	.customer-page__tab {
+		display: flex;
+		min-width: 0;
+		flex: 1;
+		flex-direction: row;
+		align-items: center;
+		justify-content: center;
+		border-bottom-width: 2px;
+		border-bottom-style: solid;
+		border-bottom-color: #ffffff;
+		font-size: 14px;
+		font-weight: 600;
+		line-height: 20px;
+		color: #697586;
+	}
+
+	.customer-page__tab--active {
+		border-bottom-color: #1677cc;
+		color: #1677cc;
+	}
+
+	.customer-page__query-bar {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		padding: 14px 20px 10px 20px;
+		background-color: #ffffff;
+	}
+
+	.customer-page__search {
+		display: flex;
+		min-width: 0;
+		flex: 1;
+		flex-direction: row;
+		align-items: center;
+		height: 38px;
+		padding: 0px 12px 0px 12px;
+		border-width: 1px;
+		border-style: solid;
+		border-color: #d8e0ea;
+		background-color: #f8fafc;
+	}
+
+	.customer-page__search-symbol {
+		font-size: 18px;
+		line-height: 20px;
+		color: #98a2b3;
+	}
+
+	.customer-page__search-input {
+		min-width: 0;
+		flex: 1;
+		margin-left: 8px;
+		font-size: 14px;
+		line-height: 20px;
+		color: #303133;
+	}
+
+	.customer-page__filter-button {
+		display: flex;
+		min-width: 56px;
+		height: 38px;
+		flex-direction: row;
+		align-items: center;
+		justify-content: center;
+		margin-left: 8px;
+		border-width: 1px;
+		border-style: solid;
+		border-color: #d8e0ea;
+		background-color: #ffffff;
+		font-size: 13px;
+		font-weight: 600;
+		line-height: 20px;
+		color: #526071;
+	}
+
+	.customer-page__field-settings {
+		display: flex;
+		height: 38px;
+		flex-direction: row;
+		align-items: center;
+		justify-content: center;
+		margin-left: 8px;
+		padding: 0px 9px;
+		border-width: 1px;
+		border-style: solid;
+		border-color: #d8e0ea;
+		background-color: #ffffff;
+		font-size: 13px;
+		font-weight: 600;
+		line-height: 20px;
+		color: #526071;
+	}
+
+	.customer-page__filter-count {
+		display: flex;
+		min-width: 16px;
+		height: 16px;
+		align-items: center;
+		justify-content: center;
+		margin-left: 4px;
+		background-color: #1677cc;
+		font-size: 10px;
+		font-weight: 700;
+		line-height: 16px;
+		color: #ffffff;
+	}
+
+	.customer-page__scope-row {
+		display: flex;
+		min-height: 36px;
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+		padding: 0px 20px 0px 20px;
+		background-color: #ffffff;
+	}
+
+	.customer-page__scope-label {
+		font-size: 13px;
+		font-weight: 600;
+		line-height: 20px;
+		color: #526071;
+	}
+
+	.customer-page__scope-query {
+		font-size: 12px;
+		line-height: 18px;
+		color: #1677cc;
+	}
+
+	.customer-page__content {
+		display: flex;
+		min-height: 0;
+		flex: 1;
+		flex-direction: column;
+		padding: 24px 20px 32px 20px;
+		box-sizing: border-box;
+	}
+
+	.customer-page__empty {
+		display: flex;
+		flex-direction: column;
+		padding: 0px 0px 0px 12px;
+		border-left-width: 3px;
+		border-left-style: solid;
+		border-left-color: #1677cc;
+	}
+
+	.customer-page__empty-title {
+		font-size: 18px;
+		font-weight: 700;
+		line-height: 26px;
+		color: #303133;
+	}
+
+	.customer-page__empty-copy {
+		margin-top: 8px;
+		font-size: 14px;
+		line-height: 22px;
+		color: #697586;
+	}
+
+	.customer-page__empty-command {
+		display: flex;
+		width: 92px;
+		height: 34px;
+		flex-direction: row;
+		align-items: center;
+		justify-content: center;
+		margin-top: 16px;
+		background-color: #1677cc;
+		font-size: 13px;
+		font-weight: 600;
+		line-height: 20px;
+		color: #ffffff;
+	}
+
+	.customer-filter,
+	.customer-group-entry {
+		display: flex;
+		position: absolute;
+		top: 0px;
+		right: 0px;
+		bottom: 0px;
+		left: 0px;
+		z-index: 10;
+		flex-direction: column;
+		background-color: #ffffff;
+	}
+
+	.customer-filter__header,
+	.customer-group-entry__header {
+		display: flex;
+		min-height: 58px;
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+		padding: 30px 20px 0px 20px;
+		border-bottom-width: 1px;
+		border-bottom-style: solid;
+		border-bottom-color: #dde4ed;
+	}
+
+	.customer-filter__dismiss,
+	.customer-group-entry__dismiss {
+		font-size: 14px;
+		line-height: 20px;
+		color: #697586;
+	}
+
+	.customer-filter__title,
+	.customer-group-entry__title {
+		font-size: 16px;
+		font-weight: 700;
+		line-height: 22px;
+		color: #1f2329;
+	}
+
+	.customer-filter__apply {
+		font-size: 14px;
+		font-weight: 600;
+		line-height: 20px;
+		color: #1677cc;
+	}
+
+	.customer-group-entry__placeholder {
+		width: 28px;
+	}
+
+	.customer-filter__body {
+		min-height: 0;
+		flex: 1;
+		padding: 24px 20px 36px 20px;
+	}
+
+	.customer-filter__hint {
+		font-size: 13px;
+		line-height: 20px;
+		color: #697586;
+	}
+
+	.customer-filter__field-grid {
+		display: flex;
+		flex-direction: row;
+		flex-wrap: wrap;
+		margin-top: 14px;
+	}
+
+	.customer-filter__field {
+		display: flex;
+		min-width: 96px;
+		height: 34px;
+		flex-direction: row;
+		align-items: center;
+		justify-content: center;
+		margin-right: 8px;
+		margin-bottom: 8px;
+		padding: 0px 10px 0px 10px;
+		border-width: 1px;
+		border-style: solid;
+		border-color: #d8e0ea;
+		background-color: #ffffff;
+		font-size: 13px;
+		line-height: 20px;
+		color: #526071;
+	}
+
+	.customer-filter__field--selected {
+		border-color: #1677cc;
+		background-color: #f1f8ff;
+		color: #1677cc;
+	}
+
+	.customer-filter__condition-heading { display: flex; min-height: 28px; flex-direction: row; align-items: center; justify-content: space-between; }
+	.customer-filter__date-shortcut { display: flex; min-height: 28px; flex-direction: row; align-items: center; padding: 0 8px; border-width: 1px; border-style: solid; border-color: #d8e0ea; background-color: #ffffff; font-size: 12px; color: #3e5f7a; }
+	.customer-filter__operator-row { display: flex; flex-direction: row; flex-wrap: wrap; margin-top: 8px; margin-bottom: -6px; }
+	.customer-filter__operator-option { display: flex; min-width: 54px; min-height: 30px; flex-direction: row; align-items: center; justify-content: center; margin-right: 6px; margin-bottom: 6px; padding: 0 9px; border-width: 1px; border-style: solid; border-color: #d8e0ea; background-color: #ffffff; font-size: 12px; color: #526071; }
+	.customer-filter__operator-option--active { border-color: #1677cc; background-color: #f1f8ff; color: #1677cc; }
+	.customer-filter__shortcut-row { display: flex; flex-wrap: wrap; flex-direction: row; margin-top: 8px; margin-bottom: -6px; }
+	.customer-filter__shortcut { display: flex; min-height: 30px; flex-direction: row; align-items: center; justify-content: center; margin-right: 6px; margin-bottom: 6px; padding: 0 9px; border-width: 1px; border-style: solid; border-color: #d8e0ea; background-color: #ffffff; font-size: 12px; color: #526071; }
+	.customer-filter__shortcut--active { border-color: #1677cc; background-color: #f1f8ff; color: #1677cc; }
+	.customer-filter__value-row { display: flex; min-height: 42px; flex-direction: row; margin-top: 8px; }
+	.customer-filter__value-input, .customer-filter__value-picker {
+		box-sizing: border-box;
+		min-width: 0;
+		flex: 1;
+		height: 42px;
+		padding: 0 12px;
+		border-width: 1px;
+		border-style: solid;
+		border-color: #d8e0ea;
+		background-color: #ffffff;
+		font-size: 14px;
+		color: #1f2329;
+	}
+	.customer-filter__value-picker { display: flex; flex-direction: row; align-items: center; }
+	.customer-filter__value-unit { display: flex; width: 36px; align-items: center; justify-content: center; font-size: 14px; color: #526071; }
+	.customer-filter__value-input + .customer-filter__value-input, .customer-filter__value-picker + .customer-filter__value-picker { margin-left: 8px; }
+
+	.customer-filter__condition { display: flex; flex-direction: column; margin-top: 14px; }
+	.customer-filter__condition-label { font-size: 13px; font-weight: 600; line-height: 20px; color: #526071; }
+
+	.customer-group-entry__body {
+		display: flex;
+		flex: 1;
+		flex-direction: column;
+		justify-content: center;
+		padding: 24px 32px 64px 32px;
+	}
+
+	.customer-group-entry__headline {
+		font-size: 20px;
+		font-weight: 700;
+		line-height: 28px;
+		color: #303133;
+	}
+
+	.customer-group-entry__copy {
+		margin-top: 10px;
+		font-size: 14px;
+		line-height: 22px;
+		color: #697586;
+	}
+
+	.customer-page__list {
+		display: flex;
+		flex-direction: column;
+		padding: 12px 16px 28px 16px;
+	}
+
+	.customer-page__tabs-bottom { display: flex; min-height: 64px; flex-direction: row; align-items: stretch; border-top-width: 1px; border-top-style: solid; border-top-color: #dde4ed; background-color: #ffffff; }
+	.customer-page__tab-bottom { display: flex; min-width: 0; flex: 1; flex-direction: row; align-items: center; justify-content: center; border-top-width: 2px; border-top-style: solid; border-top-color: #ffffff; font-size: 12px; font-weight: 600; color: #526071; }
+	.customer-page__tab-bottom--active { border-top-color: #1677cc; background-color: #f7fbff; color: #1677cc; }
+
+	.customer-page__customer-card,
+	.customer-page__audience-card {
+		display: flex;
+		flex-direction: column;
+		padding: 16px;
+		margin-bottom: 10px;
+		border-width: 1px;
+		border-style: solid;
+		border-color: #e5eaf0;
+		background-color: #ffffff;
+	}
+
+	.customer-page__customer-card { border-color: #e6e9ed; border-radius: 8px; }
+
+	.customer-page__customer-heading {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+	}
+
+	.customer-page__customer-avatar { display: flex; width: 40px; height: 40px; flex-direction: row; align-items: center; justify-content: center; border-radius: 20px; background-color: #e9f3fb; font-size: 16px; font-weight: 700; line-height: 22px; color: #17689e; }
+	.customer-page__customer-identity { display: flex; min-width: 0; flex: 1; flex-direction: column; margin-left: 11px; }
+	.customer-page__customer-title-line { display: flex; min-width: 0; flex-direction: row; align-items: center; }
+
+	.customer-page__customer-name,
+	.customer-page__audience-name {
+		font-size: 16px;
+		font-weight: 700;
+		line-height: 22px;
+		color: #1f2329;
+	}
+
+	.customer-page__customer-tag { margin-left: 6px; padding: 2px 6px; border-radius: 3px; background-color: #f1f3f5; font-size: 10px; line-height: 16px; color: #66717f; }
+	.customer-page__customer-tag--level { background-color: #fff4df; color: #9a6116; }
+	.customer-page__customer-primary-meta { margin-top: 3px; font-size: 12px; line-height: 18px; color: #7b8694; }
+	.customer-page__customer-relation-meta { margin-top: 10px; font-size: 12px; line-height: 18px; color: #596777; }
+	.customer-page__customer-chevron { margin-left: 8px; font-size: 24px; line-height: 28px; color: #a7afb9; }
+
+	.customer-page__customer-metrics {
+		display: flex;
+		flex-direction: row;
+		margin-top: 13px;
+		padding: 11px 0px 2px 0px;
+		border-top-width: 1px;
+		border-top-style: solid;
+		border-top-color: #eef0f2;
+	}
+
+	.customer-page__customer-metric { display: flex; min-width: 0; flex: 1; flex-direction: column; }
+	.customer-page__customer-metric-value { font-size: 14px; font-weight: 700; line-height: 20px; color: #26313c; }
+	.customer-page__customer-metric-label { margin-top: 2px; font-size: 10px; line-height: 16px; color: #929ba6; }
+
+	.customer-page__customer-extra-fields {
+		display: flex;
+		flex-direction: row;
+		flex-wrap: wrap;
+		margin-top: 8px;
+		padding-top: 8px;
+		border-top-width: 1px;
+		border-top-style: solid;
+		border-top-color: #f0f2f4;
+	}
+
+	.customer-page__customer-extra-field { display: flex; min-width: 50%; flex: 1; flex-direction: row; padding: 3px 10px 3px 0px; box-sizing: border-box; }
+	.customer-page__customer-extra-label {
+		font-size: 11px;
+		font-weight: 600;
+		line-height: 18px;
+		color: #929ba6;
+	}
+	.customer-page__customer-extra-value { min-width: 0; flex: 1; margin-left: 5px; font-size: 11px; line-height: 18px; color: #596777; }
+
+	.customer-page__audience-copy {
+		margin-top: 6px;
+		font-size: 13px;
+		line-height: 19px;
+		color: #697586;
+	}
+
+	.customer-group-entry__input {
+		height: 42px;
+		margin-top: 18px;
+		padding: 0px 12px 0px 12px;
+		border-width: 1px;
+		border-style: solid;
+		border-color: #d8e0ea;
+		background-color: #ffffff;
+		font-size: 15px;
+		color: #1f2329;
+	}
+	.customer-group-entry__input--next { margin-top: 10px; }
+	.customer-group-entry__error { margin-top: 12px; font-size: 13px; line-height: 20px; color: #c03c36; }
+
+	.customer-group-entry__command {
+		display: flex;
+		width: 116px;
+		height: 36px;
+		flex-direction: row;
+		align-items: center;
+		justify-content: center;
+		margin-top: 20px;
+		border-width: 1px;
+		border-style: solid;
+		border-color: #b8d6ef;
+		background-color: #f7fbff;
+		font-size: 13px;
+		font-weight: 600;
+		line-height: 20px;
+		color: #1677cc;
+	}
+
+	.customer-group-entry__command--disabled {
+		border-color: #d8e0ea;
+		background-color: #f2f4f7;
+		color: #98a2b3;
+	}
+</style>

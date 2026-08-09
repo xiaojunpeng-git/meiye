@@ -50,9 +50,10 @@ customCardCheck('CCC-03 configuration is immutable, idempotent, and member/works
     && strpos($configuration, "'workspace_line_key'") !== false
     && strpos($migration, 'UNIQUE KEY `uk_tenant_command`') !== false
     && strpos($migration, 'UNIQUE KEY `uk_tenant_workspace_line`') !== false);
-customCardCheck('CCC-04 only project components and integer-cent total authority are accepted',
+customCardCheck('CCC-04 only project components and whole-yuan total authority are accepted',
     strpos($configuration, "'custom_card_component_not_project'") !== false
     && strpos($configuration, "'configuredAmountCents'") !== false
+    && strpos($configuration, "'项目金额必须填写整数元。'") !== false
     && strpos($catalog, "'totalAmountCents'") !== false
     && strpos($configuration, 'moneyToCents(') !== false);
 customCardCheck('CCC-05 custom card cannot be mixed with normal sale lines',
@@ -78,6 +79,11 @@ customCardCheck('CCC-10 legacy hidden custom-card shell is recognized before ord
     strpos($catalog, 'if ($productId === self::CUSTOM_CARD_SHELL_PRODUCT_ID || $pid === self::CUSTOM_CARD_SHELL_PRODUCT_ID)') !== false
     && strpos($catalog, "if (\$normalized['kindCode'] === 'custom_card') {") !== false
     && strpos($provider, 'customCardConfigurationVersion') !== false);
+customCardCheck('CCC-11 component cost is frozen and initial configured total respects the cost floor',
+    strpos($configuration, "'configuredCostCents' => \$configuredCostCents") !== false
+    && strpos($configuration, "'custom_card_total_below_cost'") !== false
+    && strpos($configuration, 'roundUpToWholeYuan($configuredCostTotalCents)') !== false
+    && strpos($catalog, "'custom_card_component_cost_overflow'") !== false);
 
 echo "CUSTOM_CARD_CONFIGURATION_CONTRACT passed={$passed} failed={$failed}\n";
 exit($failed === 0 ? 0 : 1);

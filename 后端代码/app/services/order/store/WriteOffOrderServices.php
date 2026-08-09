@@ -27,6 +27,7 @@ use app\services\order\StoreOrderCreateServices;
 use app\services\order\StoreOrderRefundServices;
 use app\services\order\StoreOrderTakeServices;
 use app\services\order\StoreOrderWriteOffServices;
+use app\services\order\WriteoffIntegerAmount;
 use app\services\activity\combination\StorePinkServices;
 use app\services\BaseServices;
 use app\services\order\StoreReservationOrderServices;
@@ -37,6 +38,7 @@ use app\services\user\UserServices;
 use mohe\services\CacheService;
 use mohe\services\FormBuilder as Form;
 use think\exception\ValidateException;
+use think\facade\Db;
 
 /**
  * 核销订单
@@ -352,7 +354,7 @@ class WriteOffOrderServices extends BaseServices
         $storeCartServices = app()->make(StoreCartServices::class);
         $isGiftProjectOrder = $storeCartServices->isGiftProjectShellOrder((int)$orderInfo['id']);
         $where = [];
-        if ($orderInfo['type'] == 11 || $isGiftProjectOrder) {
+        if ($this->shouldUseCardProjectCartType($orderInfo) || $isGiftProjectOrder) {
             $where['cart_type'] = 2;
         }
         $mainCartValidity = $this->isCardPackageOrder($orderInfo)
@@ -367,16 +369,60 @@ class WriteOffOrderServices extends BaseServices
         $time=time();
         $pendingDebt = $this->resolveOrderPendingDebt($orderInfo);
         $orderInfo['is_full_debt_order'] = $this->isOrderFullyDebtPending($orderInfo, $pendingDebt);
+        // 旧系统导入的项目行保存了独立的实付快照。混合卡（部分项目有快照、
+        // 部分没有）不能再把整单实付金额分摊给普通项目，否则会与快照金额重复计算。
+        $hasLegacyMoneySnapshotInOrder = false;
+        $legacyFixedPayPrice = '0.00';
+        $normalCartInfo = [];
+        foreach ($cartInfo as $snapshotItem) {
+            $snapshotInfo = is_string($snapshotItem['cart_info']) ? json_decode($snapshotItem['cart_info'], true) : $snapshotItem['cart_info'];
+            $snapshotSource = is_array($snapshotInfo['rh_source'] ?? null) ? $snapshotInfo['rh_source'] : [];
+            if (isset($snapshotSource['source_line_paid_amount'], $snapshotSource['source_unit_price_raw'])) {
+                $hasLegacyMoneySnapshotInOrder = true;
+                $legacyFixedPayPrice = bcadd($legacyFixedPayPrice, (string)$snapshotSource['source_line_paid_amount'], 2);
+            } else {
+                $normalCartInfo[] = $snapshotItem;
+            }
+        }
+        $normalOrderPayPrice = $hasLegacyMoneySnapshotInOrder
+            ? bcsub((string)$orderInfo['pay_price'], $legacyFixedPayPrice, 2)
+            : '0.00';
+        if (bccomp($normalOrderPayPrice, '0.00', 2) < 0) {
+            $normalOrderPayPrice = '0.00';
+        }
+        $normalCartCount = count($normalCartInfo);
+        $normalCartIndex = 0;
+        $normalAllocatedPayPrice = '0.00';
         foreach ($cartInfo as $k => &$item) {
             $_info = is_string($item['cart_info']) ? json_decode($item['cart_info'], true) : $item['cart_info'];
             if (!is_array($_info)) {
                 $_info = [];
             }
-            $linePayPrice = $this->resolveCartInfoPayPrice($_info, $item);
+            $legacySource = is_array($_info['rh_source'] ?? null) ? $_info['rh_source'] : [];
+            $hasLegacyMoneySnapshot = isset($legacySource['source_line_paid_amount'], $legacySource['source_unit_price_raw']);
+            // Imported times cards retain two separate old-system figures:
+            // actual paid per project row and original unit write-off price.
+            // Never infer the latter by dividing actual paid by total times.
+            if ($hasLegacyMoneySnapshot) {
+                $linePayPrice = bcadd((string)$legacySource['source_line_paid_amount'], '0', 2);
+            } elseif ($hasLegacyMoneySnapshotInOrder) {
+                // 只在无快照的项目之间分摊扣除旧快照后的整单余款；最后一行承接分的尾差。
+                if ($normalCartIndex >= $normalCartCount - 1) {
+                    $linePayPrice = bcsub($normalOrderPayPrice, $normalAllocatedPayPrice, 2);
+                } else {
+                    $linePayPrice = $cartInfoServices->setActualPaymentPrice($normalCartInfo, $item['product_id'], $item['sku_unique'], $normalOrderPayPrice);
+                    $normalAllocatedPayPrice = bcadd($normalAllocatedPayPrice, (string)$linePayPrice, 2);
+                }
+                $normalCartIndex++;
+            } else {
+                $linePayPrice = $this->resolveCartInfoPayPrice($_info, $item);
+            }
             if (!isset($_info['pay_price']) || $_info['pay_price'] === '' || $_info['pay_price'] === null) {
                 $_info['pay_price'] = $linePayPrice;
             }
-            if ($item['write_times'] == 0) {
+            if ($hasLegacyMoneySnapshot) {
+                $onePrice = (float)$legacySource['source_unit_price_raw'];
+            } elseif ($item['write_times'] == 0) {
                 $onePrice = 0;
             } else {
                 $onePrice = (float)$linePayPrice / $item['write_times'];
@@ -388,7 +434,9 @@ class WriteOffOrderServices extends BaseServices
             if (isset($_info['productInfo']['attrInfo'])) {
                 $_info['productInfo']['attrInfo'] = get_thumb_water($_info['productInfo']['attrInfo']);
             }
-            if ($orderInfo['type'] == 11) {
+            if ($orderInfo['type'] == 11 && $hasLegacyMoneySnapshotInOrder) {
+                $_info['truePrice'] = $linePayPrice;
+            } elseif ($orderInfo['type'] == 11) {
                 if ($k > $count - 2) {
                     $_info['truePrice'] = bcsub((string)$orderInfo['pay_price'], (string)$pay_price, 2);
                 } else {
@@ -449,6 +497,175 @@ class WriteOffOrderServices extends BaseServices
     }
 
     /**
+     * 校验并清洗核销手艺人业绩 syncAll。
+     * 仅允许：本订单且本次勾选的项目行、当前核销门店启用员工、人员业绩合计不超过服务端项目业绩配置；
+     * 赠送/非项目静默丢弃。前端过滤不能替代本校验。
+     *
+     * @param array $cartIds 本次核销勾选行 [['cart_id'=>..., 'cart_num'=>...], ...]
+     * @param array $syncAll 前端提交的手艺人分配
+     */
+    /**
+     * @param string $performanceMode 本次核销业绩模式快照；非空时作为清洗权威值，避免提交中途重读全局配置
+     */
+    public function sanitizeWriteoffSyncAll(int $orderId, array $cartIds, array $syncAll, int $storeId, string $performanceMode = ''): array
+    {
+        if ($syncAll === []) {
+            return [];
+        }
+        $selectedNums = [];
+        foreach ($cartIds as $cart) {
+            $cid = (string)($cart['cart_id'] ?? '');
+            if ($cid === '' || $cid === '0') {
+                continue;
+            }
+            $selectedNums[$cid] = (int)($cart['cart_num'] ?? 0);
+        }
+        // 未勾选具体行时不接受 syncAll，避免整单路径被伪造跨行业绩。
+        if ($selectedNums === []) {
+            return [];
+        }
+
+        $cartRows = StoreOrderCartInfo::where('oid', $orderId)
+            ->whereIn('cart_id', array_keys($selectedNums))
+            ->field('cart_id,product_id,product_type,pay_price,write_times,cart_info')
+            ->select()
+            ->toArray();
+        $byCartId = [];
+        foreach ($cartRows as $row) {
+            $byCartId[(string)$row['cart_id']] = $row;
+        }
+
+        $staffIdsNeeded = [];
+        foreach ($syncAll as $item) {
+            foreach (($item['staffChoose'] ?? []) as $staff) {
+                $sid = (int)($staff['staff_id'] ?? 0);
+                if ($sid > 0) {
+                    $staffIdsNeeded[$sid] = true;
+                }
+            }
+        }
+        $validStaffIds = [];
+        if ($staffIdsNeeded !== [] && $storeId > 0) {
+            $ids = Db::name('system_store_staff')
+                ->whereIn('id', array_keys($staffIdsNeeded))
+                ->where('store_id', $storeId)
+                ->where('status', 1)
+                ->where('is_del', 0)
+                ->column('id');
+            $validStaffIds = array_fill_keys(array_map('intval', $ids), true);
+        }
+
+        $out = [];
+        foreach ($syncAll as $item) {
+            $cid = (string)($item['cart_id'] ?? '');
+            if ($cid === '' || $cid === '0' || !isset($selectedNums[$cid])) {
+                throw new ValidateException('手艺人业绩行不属于本次核销商品');
+            }
+            $cart = $byCartId[$cid] ?? null;
+            if (!$cart) {
+                throw new ValidateException('手艺人业绩行不属于本订单');
+            }
+            $decoded = is_string($cart['cart_info'] ?? null)
+                ? json_decode((string)$cart['cart_info'], true)
+                : ($cart['cart_info'] ?? []);
+            if (!is_array($decoded)) {
+                $decoded = [];
+            }
+            $isGift = (int)($decoded['is_gift'] ?? 0) === 1;
+            $productType = (int)($cart['product_type'] ?? $decoded['product_type'] ?? 0);
+            if ($isGift || $productType !== 6) {
+                continue;
+            }
+
+            $staffChoose = $item['staffChoose'] ?? [];
+            if (!is_array($staffChoose) || $staffChoose === []) {
+                continue;
+            }
+            $cleanedStaff = [];
+            $yejiSum = '0';
+            foreach ($staffChoose as $staff) {
+                $sid = (int)($staff['staff_id'] ?? 0);
+                if ($sid <= 0 || !isset($validStaffIds[$sid])) {
+                    throw new ValidateException('手艺人必须属于当前核销门店且启用');
+                }
+                $yeji = bcadd((string)($staff['yeji'] ?? '0'), '0', 2);
+                if (bccomp($yeji, '0', 2) < 0) {
+                    throw new ValidateException('手艺人业绩不能为负');
+                }
+                $yejiSum = bcadd($yejiSum, $yeji, 2);
+                $staff['staff_id'] = $sid;
+                $staff['yeji'] = (float)$yeji;
+                $cleanedStaff[] = $staff;
+            }
+
+            $cartNum = max(1, $selectedNums[$cid]);
+            $productInfo = is_array($decoded['productInfo'] ?? null) ? $decoded['productInfo'] : [];
+            $performanceProductId = (int)($productInfo['pid'] ?? 0);
+            if ($performanceProductId <= 0) {
+                $performanceProductId = (int)($productInfo['id'] ?? $cart['product_id'] ?? 0);
+            }
+            $configuredPerformance = $performanceProductId > 0
+                ? YejiCommission::where('product_id', $performanceProductId)->value('yeji')
+                : null;
+            if ($configuredPerformance !== null && $configuredPerformance !== '') {
+                $unitPerformance = bcadd((string)$configuredPerformance, '0', 2);
+            } else {
+                $snapshotUnit = $decoded['truePrice'] ?? $decoded['price'] ?? $productInfo['price'] ?? null;
+                if ($snapshotUnit !== null && $snapshotUnit !== '') {
+                    $unitPerformance = bcadd((string)$snapshotUnit, '0', 2);
+                } else {
+                    $writeTimes = max(1, (int)($cart['write_times'] ?? 1));
+                    $unitPerformance = bcdiv((string)($cart['pay_price'] ?? '0'), (string)$writeTimes, 2);
+                }
+            }
+            $linePrice = bcmul($unitPerformance, (string)$cartNum, 2);
+            if (bccomp($yejiSum, $linePrice, 2) > 0) {
+                throw new ValidateException('手艺人业绩合计不能超过项目耗卡业绩');
+            }
+            // commission：前端若误传全 0，按耗卡业绩等权回填；writeoff_amount 仍由入账侧覆盖核销金额
+            if (bccomp($yejiSum, '0', 2) === 0 && $cleanedStaff !== []) {
+                $perfMode = trim($performanceMode);
+                if ($perfMode === '') {
+                    try {
+                        $perfMode = app()->make(\app\services\order\WriteoffPerformanceModeServices::class)->getMode();
+                    } catch (\Throwable $e) {
+                        $perfMode = 'commission';
+                    }
+                }
+                if ($perfMode !== 'writeoff_amount') {
+                    $n = count($cleanedStaff);
+                    $totalCents = (int)bcmul($linePrice, '100', 0);
+                    $avgCents = intdiv($totalCents, $n);
+                    $remCents = $totalCents - $avgCents * $n;
+                    foreach ($cleanedStaff as $idx => $staff) {
+                        $cents = $avgCents + ($remCents > 0 ? 1 : 0);
+                        if ($remCents > 0) {
+                            $remCents--;
+                        }
+                        $cleanedStaff[$idx]['yeji'] = $cents / 100;
+                    }
+                }
+            }
+
+            $out[] = [
+                'cart_id' => $cid,
+                'goods_id' => (int)($item['goods_id'] ?? $cart['product_id'] ?? 0),
+                'type' => (int)($item['type'] ?? 3) ?: 3,
+                'value' => $cartNum,
+                'price' => (float)$linePrice,
+                'once_price' => (float)$unitPerformance,
+                'true_price' => (float)($decoded['truePrice'] ?? $decoded['price'] ?? $productInfo['price'] ?? 0),
+                'write_times' => (int)($cart['write_times'] ?? 0),
+                'staffChoose' => $cleanedStaff,
+                'staffIds' => array_values(array_map(static function ($s) {
+                    return (int)$s['staff_id'];
+                }, $cleanedStaff)),
+            ];
+        }
+        return $out;
+    }
+
+    /**
      * 核销订单
      * @param int $uid
      * @param array $orderInfo
@@ -459,7 +676,7 @@ class WriteOffOrderServices extends BaseServices
      * @throws \think\db\exception\DbException
      * @throws \think\db\exception\ModelNotFoundException
      */
-    public function writeoffOrder(int $uid, array $orderInfo, array $cartIds = [], string $orderType = 'admin', int $staff_id = 0,array $syncAll=[],$is_budan=0,$budan_time='',$isAuto=0,$reservationOid=0)
+    public function writeoffOrder(int $uid, array $orderInfo, array $cartIds = [], string $orderType = 'admin', int $staff_id = 0,array $syncAll=[],$is_budan=0,$budan_time='',$isAuto=0,$reservationOid=0, array $extra = [])
     {
         if (!$orderInfo) {
             throw new ValidateException('订单不存在');
@@ -488,7 +705,9 @@ class WriteOffOrderServices extends BaseServices
 		if (!$isAutoWriteoff && $this->dao->count(['pid' => $orderInfo['id']])) {//订单已拆分
 			throw new ValidateException('该订单已拆分，请使用子订单核销');
 		}
-        if (!$orderInfo['verify_code'] || ($orderInfo['shipping_type'] != 2 && $orderInfo['delivery_type'] != 'send')) {
+        // 收银台购买的卡项使用 shipping_type=4；含 cart_type=2 权益行的卡（不限于 type=11）仍应允许逐次核销。
+        $isCardOrder = $this->shouldUseCardProjectCartType($orderInfo);
+        if (!$orderInfo['verify_code'] || (!$isCardOrder && $orderInfo['shipping_type'] != 2 && $orderInfo['delivery_type'] != 'send')) {
             throw new ValidateException('此订单不能被核销');
         }
         if (!$isAutoWriteoff) {
@@ -516,7 +735,11 @@ class WriteOffOrderServices extends BaseServices
 
         $cartInfo = [];
         $where = [];
-        if ($orderInfo['type'] == 11) {
+        $packageWriteTimes = $this->resolveSelectPackageWriteTimes((int)$orderInfo['id']);
+        // 与收银台有效卡列表(type=105 查询口径)及批量 options 对齐：
+        // 卡项权益行固定 cart_type=2。不得只认 order.type==11，否则列表可见的
+        // cart_type=2 行会在提交阶段落入 DAO 默认 [0,1,3] 被误判「已核销」。
+        if ($this->shouldUseCardProjectCartType($orderInfo)) {
             $where['cart_type'] = 2;
         }
         if ($cartIds) {//商城存在部分核销
@@ -527,6 +750,22 @@ class WriteOffOrderServices extends BaseServices
                 throw new ValidateException('订单中有商品已核销');
             }
             $price = 0;
+            $packageCurrentTimes = 0;
+            if ($packageWriteTimes > 0) {
+                foreach ($cartIds as $cart) {
+                    $packageCurrentTimes += max((int)($cart['cart_num'] ?? 0), 0);
+                }
+                $packageAlreadyTimes = (int)StoreOrderWriteoff::where('oid', $orderInfo['id'])
+                    ->where('status', 0)
+                    ->sum('writeoff_num');
+                $price = WriteoffIntegerAmount::allocate(
+                    $orderInfo['pay_price'] ?? 0,
+                    $packageWriteTimes,
+                    $packageAlreadyTimes,
+                    $packageCurrentTimes
+                );
+            }
+            $lineAlreadyTimes = [];
             foreach ($cartIds as $cart) {
                 $info = $cartInfo[$cart['cart_id']] ?? [];
                 if (!$info) {
@@ -536,15 +775,29 @@ class WriteOffOrderServices extends BaseServices
                 if (!$isAuto) {
                     $this->assertWriteoffWithinDebtLimit($info, (int)$cart['cart_num'], $orderInfo);
                 }
-                $decodedInfo = is_string($info['cart_info'] ?? null) ? json_decode($info['cart_info'], true) : ($info['cart_info'] ?? []);
-                if (!is_array($decodedInfo)) {
-                    $decodedInfo = [];
+                if ($packageWriteTimes <= 0) {
+                    $lineId = (int)($info['id'] ?? 0);
+                    if (!array_key_exists($lineId, $lineAlreadyTimes)) {
+                        $lineAlreadyTimes[$lineId] = (int)StoreOrderWriteoff::where('oid', $orderInfo['id'])
+                            ->where('order_cart_id', $lineId)
+                            ->where('status', 0)
+                            ->sum('writeoff_num');
+                    }
+                    $currentTimes = max((int)($cart['cart_num'] ?? 0), 0);
+                    // 与 saveWriteOff 落账一致：用行字段 pay_price，不用 JSON 解析价
+                    $price += $this->allocatePersistedWriteoffAmount(
+                        $info,
+                        $orderInfo,
+                        $currentTimes,
+                        $lineAlreadyTimes[$lineId],
+                        0,
+                        0
+                    );
+                    $lineAlreadyTimes[$lineId] += $currentTimes;
                 }
-                $linePay = $this->resolveCartInfoPayPrice($decodedInfo, $info);
-                $price = bcadd((string)$price, bcmul(bcdiv($linePay, (string)$info['write_times'], 4), (string)$cart['cart_num'], 2), 2);
             }
         } else {//整单核销
-            $price = $orderInfo['pay_price'];
+            $price = WriteoffIntegerAmount::truncate($orderInfo['pay_price'] ?? 0);
             $cartInfo = $cartInfoServices->getCartColunm(['oid' => $orderInfo['id'], 'is_writeoff' => 0] + $where, 'id,cart_id,cart_num,surplus_num,product_id,write_times,write_surplus_times,write_start,write_end,pay_price,debt_amount,repaid_debt_amount', 'cart_id');
             foreach ($cartIds ?: array_map(function ($row) {
                 return ['cart_id' => $row['cart_id'], 'cart_num' => $row['write_surplus_times'] ?? 0];
@@ -636,23 +889,17 @@ class WriteOffOrderServices extends BaseServices
         unset($data['staff_id']);
         //判断商品类型（自动核销项目单不走几选几卡次累计）
         $isEnd=false;
-        if (!$isAutoWriteoff) {
-            $productId=StoreOrderCartInfo::where("oid",$orderInfo['id'])->where("cart_type",0)->value("product_id");
-            if(!empty($productId)){
-                $productInfo=StoreProduct::where("id",$productId)->find();
-                if($productInfo['card_num'] > 0 && $productInfo['card_num_type'] == 1){
-                      //几选几套餐按次数  判断核销次数是否大于
-                     $need=StoreOrderWriteoff::where("oid",$orderInfo['id'])->where("status",0)->sum("writeoff_num");
-                     foreach ($cartIds as $cartOne) {
-                         $need=$need+$cartOne['cart_num'];
-                     }
-                     if($need > $productInfo['card_num']){
-                         throw new ValidateException('该项目累计核销次数不能超过：'.$productInfo['card_num']."次");
-                     }
-                     if($need == $productInfo['card_num']){
-                         $isEnd=true;
-                     }
-                }
+        if (!$isAutoWriteoff && $packageWriteTimes > 0) {
+            //几选几套餐按次数校验累计核销上限
+            $need=(int)StoreOrderWriteoff::where("oid",$orderInfo['id'])->where("status",0)->sum("writeoff_num");
+            foreach ($cartIds as $cartOne) {
+                $need += (int)($cartOne['cart_num'] ?? 0);
+            }
+            if($need > $packageWriteTimes){
+                throw new ValidateException('该项目累计核销次数不能超过：'.$packageWriteTimes."次");
+            }
+            if($need == $packageWriteTimes){
+                $isEnd=true;
             }
         }
         if (!CacheService::lock($key)) {
@@ -666,6 +913,25 @@ class WriteOffOrderServices extends BaseServices
         $writeoffCartSnapshot = $writeOffRecordServices->getWriteoffCartRows($orderInfo, $cartIds, '*', 'cart_id');
         // 按「本次实际核销行是否含项目(product_type=6)」判断，覆盖卡项(头5/行6)、几选几、赠送项目、补单
         $salonHasProject = $writeOffRecordServices->snapshotContainsProject($writeoffCartSnapshot);
+        // 本次业绩模式：优先使用调用方快照（批量提交已冻结），避免清洗阶段重读全局配置产生竞态
+        $performanceMode = trim((string)($extra['performance_mode'] ?? ''));
+        if ($performanceMode === '') {
+            try {
+                $performanceMode = app()->make(\app\services\order\WriteoffPerformanceModeServices::class)->getMode();
+            } catch (\Throwable $e) {
+                $performanceMode = 'commission';
+            }
+        }
+        // 手艺人业绩：本单/本次 cart、本店启用员工、金额上限（收银自动核销同样校验，禁止跨单串行）
+        if ($syncAll !== []) {
+            $syncAll = $this->sanitizeWriteoffSyncAll(
+                (int)$orderInfo['id'],
+                $cartIds ?: [],
+                $syncAll,
+                (int)$store_id,
+                $performanceMode
+            );
+        }
         // 含项目行时：核销记录 + 院装扣料在核销主事务内同步完成的入参
         $writeoffPayload = [
             'staff_id' => $staff_id,
@@ -677,6 +943,9 @@ class WriteOffOrderServices extends BaseServices
             'budan_time' => $budan_time,
             'is_auto' => $isAuto,
             'reservation_oid' => (int)$reservationOid,
+            'batch_id' => (int)($extra['batch_id'] ?? 0),
+            'performance_mode' => $performanceMode,
+            'defer_side_effects' => !empty($extra['defer_side_effects']),
         ];
         $data = $this->transaction(function () use ($isEnd,$orderInfo, $staff_id, $data, $cartIds, $cartInfoServices, $cartData, $auth, $cartInfo, $price, $writeoffPayload, $reservationOid, $salonHasProject, $writeOffRecordServices, $writeoffCartSnapshot, $isAuto) {
             if ($cartIds) {//选择商品、件数核销
@@ -784,7 +1053,13 @@ class WriteOffOrderServices extends BaseServices
         $data['reservation_oid'] = (int)$reservationOid;
         // 含项目行已在主事务内同步写核销记录+扣料，通知监听器跳过异步 OrderWriteoffJob，避免重复写核销记录
         $data['salon_sync'] = $salonHasProject ? 1 : 0;
-        event('order.writeoff', [$orderInfo, $auth, $data, $cartIds, $cartInfo]);
+        if (!empty($extra['defer_side_effects'])) {
+            // 批量核销外层事务未提交前不发事件；仅释放本单锁
+            $key = md5('lock_order_writeoff_' . $orderInfo['id']);
+            \mohe\services\CacheService::unLock($key);
+        } else {
+            event('order.writeoff', [$orderInfo, $auth, $data, $cartIds, $cartInfo]);
+        }
         return $orderInfo;
     }
 
@@ -823,6 +1098,59 @@ class WriteOffOrderServices extends BaseServices
     protected function isCardPackageOrder(array $orderInfo): bool
     {
         return (int)($orderInfo['product_type'] ?? 0) === 5;
+    }
+
+    /**
+     * 几选几套餐的总可核销次数；非此类型返回 0。
+     * 批量预览/提交共用，避免 preview 与落账口径分叉。
+     */
+    public function resolveSelectPackageWriteTimes(int $orderId): int
+    {
+        $productId = (int)StoreOrderCartInfo::where('oid', $orderId)
+            ->where('cart_type', 0)
+            ->value('product_id');
+        if ($productId <= 0) {
+            return 0;
+        }
+        $product = StoreProduct::where('id', $productId)->field('card_num,card_num_type')->find();
+        if (!$product || (int)$product['card_num_type'] !== 1) {
+            return 0;
+        }
+        return max((int)$product['card_num'], 0);
+    }
+
+    /**
+     * 核销行金额口径（与 StoreOrderWriteOffServices::saveWriteOff 落账一致）：
+     * - 几选几：按订单实付 + 套餐总次数整数分摊；
+     * - 普通权益行：按 cart 行字段 pay_price + 行总次数整数分摊。
+     * 禁止改用 cart_info JSON 内 pay_price 顶替行字段，否则预览与提交金额会不一致。
+     */
+    public function allocatePersistedWriteoffAmount(
+        array $cart,
+        array $orderInfo,
+        int $currentTimes,
+        int $alreadyTimes,
+        int $packageWriteTimes = 0,
+        int $packageAlreadyTimes = 0
+    ): int {
+        $currentTimes = max($currentTimes, 0);
+        if ($currentTimes <= 0) {
+            return 0;
+        }
+        if ($packageWriteTimes > 0) {
+            return WriteoffIntegerAmount::allocate(
+                $orderInfo['pay_price'] ?? 0,
+                $packageWriteTimes,
+                $packageAlreadyTimes,
+                $currentTimes
+            );
+        }
+        return WriteoffIntegerAmount::allocate(
+            $cart['pay_price'] ?? 0,
+            (int)($cart['write_times'] ?? 0),
+            $alreadyTimes,
+            $currentTimes
+        );
     }
 
     /**
@@ -921,10 +1249,29 @@ class WriteOffOrderServices extends BaseServices
     protected function hasPendingWriteoffItems(int $oid, int $orderType): bool
     {
         $query = StoreOrderCartInfo::where('oid', $oid)->where('write_surplus_times', '>', 0);
-        if ($orderType == 11) {
+        if ($orderType == 11 || StoreOrderCartInfo::where('oid', $oid)->where('cart_type', 2)->count() > 0) {
             $query->where('cart_type', 2);
         }
         return $query->count() > 0;
+    }
+
+    /**
+     * 是否应按卡项权益行(cart_type=2)取核销商品。
+     * 覆盖：order.type=11、卡包 product_type=5、以及仍含 cart_type=2 权益行的可见核销卡。
+     */
+    protected function shouldUseCardProjectCartType(array $orderInfo): bool
+    {
+        if ((int)($orderInfo['type'] ?? 0) === 11) {
+            return true;
+        }
+        if ($this->isCardPackageOrder($orderInfo)) {
+            return true;
+        }
+        $oid = (int)($orderInfo['id'] ?? 0);
+        if ($oid <= 0) {
+            return false;
+        }
+        return StoreOrderCartInfo::where('oid', $oid)->where('cart_type', 2)->count() > 0;
     }
 
     /**
@@ -1090,6 +1437,46 @@ class WriteOffOrderServices extends BaseServices
             }
             throw new ValidateException($this->getDebtWriteoffLimitMessage());
         }
+    }
+
+    /**
+     * 对外暴露的行金额解析（批量核销/项目替换复用）
+     */
+    public function resolveCartInfoPayPricePublic(array $cartInfo, array $cartRow): string
+    {
+        return $this->resolveCartInfoPayPrice($cartInfo, $cartRow);
+    }
+
+    /**
+     * 耗卡业绩单价：优先项目提成配置，其次购物车快照价，再次总价/总次数。
+     */
+    public function resolveUnitPerformancePublic(array $cart, array $decoded = []): string
+    {
+        if ($decoded === [] && isset($cart['cart_info'])) {
+            $decoded = is_string($cart['cart_info'])
+                ? json_decode((string)$cart['cart_info'], true)
+                : ($cart['cart_info'] ?? []);
+        }
+        if (!is_array($decoded)) {
+            $decoded = [];
+        }
+        $productInfo = is_array($decoded['productInfo'] ?? null) ? $decoded['productInfo'] : [];
+        $performanceProductId = (int)($productInfo['pid'] ?? 0);
+        if ($performanceProductId <= 0) {
+            $performanceProductId = (int)($productInfo['id'] ?? $cart['product_id'] ?? 0);
+        }
+        $configuredPerformance = $performanceProductId > 0
+            ? YejiCommission::where('product_id', $performanceProductId)->value('yeji')
+            : null;
+        if ($configuredPerformance !== null && $configuredPerformance !== '') {
+            return bcadd((string)$configuredPerformance, '0', 2);
+        }
+        $snapshotUnit = $decoded['truePrice'] ?? $decoded['price'] ?? $productInfo['price'] ?? null;
+        if ($snapshotUnit !== null && $snapshotUnit !== '') {
+            return bcadd((string)$snapshotUnit, '0', 2);
+        }
+        $writeTimes = max(1, (int)($cart['write_times'] ?? 1));
+        return bcdiv((string)($cart['pay_price'] ?? '0'), (string)$writeTimes, 2);
     }
 
     /**

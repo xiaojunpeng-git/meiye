@@ -1171,6 +1171,7 @@ Route::group('adminapi', function () {
 		Route::delete('manage/:id', 'v1.store.SystemRegionManage/delete')->option(['real_name' => '区域架构删除']);
 		Route::get('manage/agent_ids/:id', 'v1.store.SystemRegionManage/agent_ids')->option(['real_name' => '区域架构关联代理商']);
 
+		
 		// 组织架构（新）— 静态路径必须写在 organization/:id 之前，避免 migrate/bind_store 被当成 id
 		Route::get('organization/tree', 'v1.organization.Organization/tree')->option(['real_name' => '组织架构树']);
 		Route::get('organization/counts', 'v1.organization.Organization/counts')->option(['real_name' => '组织架构数量']);
@@ -1182,7 +1183,44 @@ Route::group('adminapi', function () {
 		Route::get('organization/source_status', 'v1.organization.Organization/source_status')->option(['real_name' => '组织数据源状态']);
 		Route::get('organization/migrate_readiness', 'v1.organization.Organization/migrate_readiness')->option(['real_name' => '组织迁移就绪检查']);
 		Route::get('organization/write_status', 'v1.organization.Organization/write_status')->option(['real_name' => '组织工作台写状态']);
+		Route::get('organization/org_employees', 'v1.organization.Organization/org_employees')->option(['real_name' => '组织直属人员列表']);
+		Route::post('organization/org_employees', 'v1.organization.Organization/org_employees_save')->option(['real_name' => '组织直属人员保存']);
+		Route::delete('organization/org_employees/:id', 'v1.organization.Organization/org_employees_delete')->option(['real_name' => '组织直属人员删除']);
+		Route::post('organization/employees/:id/leave', 'v1.organization.Organization/employee_leave')->option(['real_name' => '员工全局离职']);
+		Route::post('organization/employees/:id/archive_delete', 'v1.organization.Organization/employee_archive_delete')->option(['real_name' => '软删除人员档案']);
+		Route::get('organization/transfer_applies', 'v1.organization.Organization/transfer_applies')->option(['real_name' => '调店申请列表']);
+		Route::post('organization/transfer_applies', 'v1.organization.Organization/transfer_apply_create')->option(['real_name' => '总部发起调店申请']);
+		Route::post('organization/transfer_applies/:id/approve', 'v1.organization.Organization/transfer_apply_approve')->option(['real_name' => '批准调店申请']);
+		Route::post('organization/transfer_applies/:id/reject', 'v1.organization.Organization/transfer_apply_reject')->option(['real_name' => '驳回调店申请']);
+		// I2 授权中心 / 角色发布 / 资源选择（静态路径须在 organization/:id 前）
+		Route::get('organization/employee_auth/:id', 'v1.organization.Organization/employee_auth')->option(['real_name' => '员工授权聚合读']);
+		Route::get('organization/employee_auth/:id/audits', 'v1.organization.Organization/employee_auth_audits')->option(['real_name' => '员工授权审计']);
+		Route::post('organization/employee_auth/:id/platform', 'v1.organization.Organization/employee_auth_platform')->option(['real_name' => '员工平台授权写']);
+		Route::post('organization/employee_auth/:id/store', 'v1.organization.Organization/employee_auth_store')->option(['real_name' => '员工门店授权写']);
+		Route::post('organization/employee_auth/:id/cashier', 'v1.organization.Organization/employee_auth_cashier')->option(['real_name' => '员工收银授权写']);
+		Route::post('organization/employee_auth/:id/mobile', 'v1.organization.Organization/employee_auth_mobile')->option(['real_name' => '员工手机授权写']);
+		Route::post('organization/employee_auth/:id/jobs', 'v1.organization.Organization/employee_auth_jobs')->option(['real_name' => '员工岗位保存']);
+		Route::post('organization/employee_auth/:id/data_scope', 'v1.organization.Organization/employee_auth_data_scope')->option(['real_name' => '员工数据权限保存']);
+		Route::post('organization/employee_auth/:id/entries', 'v1.organization.Organization/employee_auth_entries')->option(['real_name' => '员工渠道入口保存']);
+		Route::post('organization/employee_auth/:id/tenure', 'v1.organization.Organization/employee_auth_tenure')->option(['real_name' => '单店停职复职删除']);
+		Route::get('organization/job_positions', 'v1.organization.Organization/job_positions')->option(['real_name' => '岗位策略列表']);
+		Route::get('organization/job_positions/menus', 'v1.organization.Organization/job_position_menus')->option(['real_name' => '岗位策略四端菜单树']);
+		Route::get('organization/job_positions/:id', 'v1.organization.Organization/job_position_detail')->option(['real_name' => '岗位策略详情']);
+		Route::post('organization/job_positions', 'v1.organization.Organization/job_position_save')->option(['real_name' => '岗位策略保存']);
+		Route::post('organization/job_positions/publish', 'v1.organization.Organization/job_position_publish')->option(['real_name' => '岗位发布']);
+		Route::post('organization/job_positions/publishes/:id/disable', 'v1.organization.Organization/job_position_publish_disable')->option(['real_name' => '岗位发布停用']);
+		Route::post('organization/stores/:id/ops_status', 'v1.organization.Organization/store_ops_status')->option(['real_name' => '门店停用恢复']);
+		Route::get('organization/role_templates', 'v1.organization.Organization/role_templates')->option(['real_name' => '角色模板列表']);
+		Route::get('organization/role_templates/menus', 'v1.organization.Organization/role_template_menus')->option(['real_name' => '角色模板菜单树']);
+		Route::get('organization/role_templates/:id', 'v1.organization.Organization/role_template_detail')->option(['real_name' => '角色模板详情']);
+		Route::post('organization/role_templates/save', 'v1.organization.Organization/role_template_save')->option(['real_name' => '角色模板保存']);
+		Route::post('organization/role_templates/:id/disable', 'v1.organization.Organization/role_template_disable')->option(['real_name' => '角色模板停用']);
+		Route::get('organization/role_publishes', 'v1.organization.Organization/role_publishes')->option(['real_name' => '角色发布列表']);
+		Route::post('organization/role_templates/publish', 'v1.organization.Organization/role_template_publish')->option(['real_name' => '角色模板发布']);
+		Route::post('organization/role_publishes/:id/disable', 'v1.organization.Organization/role_publish_disable')->option(['real_name' => '角色发布停用']);
+		Route::get('organization/resource_selector', 'v1.organization.Organization/resource_selector')->option(['real_name' => '组织资源选择']);
 		Route::get('organization/:id/permissions', 'v1.organization.Organization/permissions')->option(['real_name' => '组织工作台权限只读']);
+		Route::get('organization/:id/admin_candidates', 'v1.organization.Organization/admin_candidates')->option(['real_name' => '组织权限授权候选']);
 		Route::post('organization/migrate', 'v1.organization.Organization/migrate')->option(['real_name' => '组织架构数据迁移']);
 		Route::post('organization/bind_store', 'v1.organization.Organization/bind_store')->option(['real_name' => '门店绑定组织']);
 		Route::get('organization/admin_excludes/:orgAdminId', 'v1.organization.Organization/admin_excludes')->option(['real_name' => '管理员排除门店']);
@@ -1190,7 +1228,10 @@ Route::group('adminapi', function () {
 		Route::post('organization/admin_excludes/:orgAdminId', 'v1.organization.Organization/save_admin_excludes')->option(['real_name' => '保存管理员排除门店']);
 		Route::post('organization/admin_excludes_by_agent/:legacyAgentId', 'v1.organization.Organization/save_admin_excludes_by_agent')->option(['real_name' => '按管理人员保存排除门店']);
 		Route::post('organization/admin_permission/:orgAdminId', 'v1.organization.Organization/save_admin_permission')->option(['real_name' => '保存组织权限范围']);
+		Route::post('organization/:id/admin_grants', 'v1.organization.Organization/admin_grants')->option(['real_name' => '授权组织权限人员']);
+		Route::delete('organization/:id/admin_grants/:orgAdminId', 'v1.organization.Organization/revoke_admin_grant')->option(['real_name' => '撤销组织权限人员']);
 		Route::post('organization/:id/leaders', 'v1.organization.Organization/save_leaders')->option(['real_name' => '保存组织负责人']);
+		Route::post('organization/:id/ops_status', 'v1.organization.Organization/org_ops_status')->option(['real_name' => '组织停用恢复']);
 		Route::post('organization/:id', 'v1.organization.Organization/save')->option(['real_name' => '组织架构保存']);
 		Route::delete('organization/:id', 'v1.organization.Organization/delete')->option(['real_name' => '组织架构删除']);
 
@@ -1206,16 +1247,6 @@ Route::group('adminapi', function () {
 
         //门店首页头部统计数据
         Route::get('home/header', 'v1.store.Common/homeStatics')->option(['real_name' => '门店首页头部统计数据']);
-
-        // 经营看板
-        Route::get('statistics/overview', 'v1.store.BusinessDashboard/overview')->option(['real_name' => '经营看板概览']);
-        Route::get('statistics/trend', 'v1.store.BusinessDashboard/trend')->option(['real_name' => '经营看板趋势']);
-        Route::get('statistics/store-ranking', 'v1.store.BusinessDashboard/storeRanking')->option(['real_name' => '经营看板门店排行']);
-        Route::get('statistics/reservation-detail', 'v1.store.BusinessDashboard/reservationDetail')->option(['real_name' => '经营看板预约明细']);
-        Route::get('statistics/new-profile-detail', 'v1.store.BusinessDashboard/newProfileDetail')->option(['real_name' => '经营看板新建档明细']);
-        Route::get('statistics/source-customer-detail', 'v1.store.BusinessDashboard/sourceCustomerDetail')->option(['real_name' => '经营看板散客新客明细']);
-        Route::get('statistics/money-detail', 'v1.store.BusinessDashboard/moneyDetail')->option(['real_name' => '经营看板金额明细']);
-
         //门店首页营业趋势图表
         Route::get('home/operate', 'v1.store.Common/operateChart')->option(['real_name' => '门店首页营业趋势图表']);
         //门店首页交易图表
@@ -1224,6 +1255,13 @@ Route::group('adminapi', function () {
         Route::get('home/store', 'v1.store.Common/storeChart')->option(['real_name' => '门店首页门店统计']);
 
 		//门店区域列表
+        Route::get('statistics/overview', 'v1.store.BusinessDashboard/overview')->option(['real_name' => '经营看板概览']);
+        Route::get('statistics/trend', 'v1.store.BusinessDashboard/trend')->option(['real_name' => '经营看板趋势']);
+        Route::get('statistics/store-ranking', 'v1.store.BusinessDashboard/storeRanking')->option(['real_name' => '经营看板门店排行']);
+        Route::get('statistics/reservation-detail', 'v1.store.BusinessDashboard/reservationDetail')->option(['real_name' => '经营看板预约明细']);
+        Route::get('statistics/new-profile-detail', 'v1.store.BusinessDashboard/newProfileDetail')->option(['real_name' => '经营看板新建档明细']);
+        Route::get('statistics/source-customer-detail', 'v1.store.BusinessDashboard/sourceCustomerDetail')->option(['real_name' => '经营看板散客新客明细']);
+        Route::get('statistics/money-detail', 'v1.store.BusinessDashboard/moneyDetail')->option(['real_name' => '经营看板金额明细']);
 		Route::get('all_region', 'v1.store.SystemStoreRegion/allRegion')->option(['real_name' => '门店区域列表']);
 		//门店区域列表
 		Route::get('region', 'v1.store.SystemStoreRegion/index')->option(['real_name' => '门店区域列表']);
@@ -1405,6 +1443,8 @@ Route::group('adminapi', function () {
         Route::get('staff/performance/:id', 'v1.merchant.SystemStoreStaff/getStaffPerformance')->option(['real_name' => '获取店员业绩列表']);
         //获取店员详情
         Route::get('staff/read/:id', 'v1.merchant.SystemStoreStaff/read')->option(['real_name' => '获取店员详情']);
+        Route::get('staff/person_complete/:id', 'v1.merchant.SystemStoreStaff/personComplete')->option(['real_name' => '人员完整详情']);
+        Route::post('staff/person_complete/save/:id', 'v1.merchant.SystemStoreStaff/savePersonComplete')->option(['real_name' => '人员完整保存']);
         //保存店员信息
         Route::post('staff/save/:id', 'v1.merchant.SystemStoreStaff/saveStaff')->option(['real_name' => '保存店员信息']);
         //店员调店
@@ -1727,9 +1767,17 @@ Route::group('adminapi', function () {
         Route::put('refund/:id', 'v1.order.StoreOrder/update_refund')->name('StoreOrderUpdateRefund')->option(['real_name' => '订单退款']);
         //后台拆单退款
         Route::post('open/refund/:id', 'v1.order.StoreOrder/open_order_refund')->name('StoreOrderUpdateRefund')->option(['real_name' => '后台拆单退款']);
-        Route::post('order/:id/refund', 'v1.order.StoreOrder/terminal_order_refund')->option(['real_name' => '整单退款']);
-        Route::post('order/:id/void', 'v1.order.StoreOrder/terminal_order_void')->option(['real_name' => '整单作废']);
-        Route::put('order/writeoff/:subOrderId/cancel', 'v1.order.StoreOrder/cancel_writeoff')->option(['real_name' => '撤销本次核销']);
+        // 整单退款/作废/重开/撤销核销（与门店端路径对齐：本分组前缀已是 order）
+        Route::post(':id/refund', 'v1.order.StoreOrder/terminal_order_refund')->option(['real_name' => '整单退款']);
+        Route::post(':id/void', 'v1.order.StoreOrder/terminal_order_void')->option(['real_name' => '整单作废']);
+        Route::post(':id/reopen', 'v1.order.StoreOrder/terminal_order_reopen')->option(['real_name' => '创建或获取重开草稿']);
+        Route::get('reopen/:token', 'v1.order.StoreOrder/terminal_order_reopen_load')->option(['real_name' => '加载重开草稿']);
+        
+        
+		// RH-GAP-WRITEOFF-BATCH-LIST（本分组前缀已是 order）
+        Route::get('writeoff/batch/:id', 'v1.store.Order/writeoffBatchDetail')->option(['real_name' => '核销业务主单详情']);
+        Route::put('writeoff/batch/:id/cancel', 'v1.store.Order/writeoffBatchCancel')->option(['real_name' => '核销业务主单整笔撤销']);
+        Route::put('writeoff/:subOrderId/cancel', 'v1.order.StoreOrder/cancel_writeoff')->option(['real_name' => '撤销本次核销']);
         //快递公司电子面单模版
         Route::get('express/temp', 'v1.order.StoreOrder/express_temp')->option(['real_name' => '快递公司电子面单模版']);
         //获取物流信息
@@ -1837,6 +1885,13 @@ Route::group('adminapi', function () {
      * 商品路由
      */
     Route::group('product', function () {
+        // 收银 V3 来源与记账设置（总部统一配置）
+        Route::get('business-config/sources', 'v1.product.CashierV3BusinessConfig/sources')->option(['real_name' => '读取收银来源设置']);
+        Route::post('business-config/sources', 'v1.product.CashierV3BusinessConfig/createSource')->option(['real_name' => '新增收银来源']);
+        Route::put('business-config/sources/:id', 'v1.product.CashierV3BusinessConfig/updateSource')->option(['real_name' => '修改收银来源']);
+        Route::get('business-config/accounting-methods', 'v1.product.CashierV3BusinessConfig/accountingMethods')->option(['real_name' => '读取记账设置']);
+        Route::put('business-config/accounting-methods/:code', 'v1.product.CashierV3BusinessConfig/updateAccountingMethod')->option(['real_name' => '修改记账设置']);
+        Route::post('business-config/accounting-methods/restore-defaults', 'v1.product.CashierV3BusinessConfig/restoreAccountingDefaults')->option(['real_name' => '恢复记账默认名称']);
         //商品批量操作
         Route::post('batch_process', 'v1.product.StoreProduct/batchProcess')->option(['real_name' => '商品批量操作']);
         //商品导入
@@ -1885,13 +1940,6 @@ Route::group('adminapi', function () {
         //获取商品规格
         Route::get('product/attrs/:id/:type', 'v1.product.StoreProduct/get_attrs')->option(['real_name' => '获取商品规格']);
         //商品列表头部数据
-        // 收银 V3 来源与记账设置（总部统一配置）
-        Route::get('business-config/sources', 'v1.product.CashierV3BusinessConfig/sources')->option(['real_name' => '读取收银来源设置']);
-        Route::post('business-config/sources', 'v1.product.CashierV3BusinessConfig/createSource')->option(['real_name' => '新增收银来源']);
-        Route::put('business-config/sources/:id', 'v1.product.CashierV3BusinessConfig/updateSource')->option(['real_name' => '修改收银来源']);
-        Route::get('business-config/accounting-methods', 'v1.product.CashierV3BusinessConfig/accountingMethods')->option(['real_name' => '读取记账设置']);
-        Route::put('business-config/accounting-methods/:code', 'v1.product.CashierV3BusinessConfig/updateAccountingMethod')->option(['real_name' => '修改记账设置']);
-        Route::post('business-config/accounting-methods/restore-defaults', 'v1.product.CashierV3BusinessConfig/restoreAccountingDefaults')->option(['real_name' => '恢复记账默认名称']);
         Route::get('product/type_header', 'v1.product.StoreProduct/type_header')->option(['real_name' => '商品列表头部数据']);
         //商品放入回收站
         Route::delete('product/:id', 'v1.product.StoreProduct/delete')->option(['real_name' => '商品放入回收站']);
@@ -2092,15 +2140,10 @@ Route::group('adminapi', function () {
 			Route::get('detail/list', 'v1.product.inventory.StoreProductStockDetail/index')->option(['real_name' => '库存明细列表']);
 			// Vue3 平台库存：仓库范围与批次库存均由服务端限定
 			Route::get('v3/locations', 'v1.product.inventory.InventoryPlatformWarehouse/locations')->option(['real_name' => '平台库存仓库列表']);
-			Route::post('v3/locations', 'v1.product.inventory.InventoryPlatformWarehouse/createLocation')->option(['real_name' => '平台库存创建仓库']);
-			Route::get('v3/batch-stock', 'v1.product.inventory.InventoryPlatformWarehouse/batchStock')->option(['real_name' => '平台批次库存查询']);
-			Route::get('v3/unified-query/batch-stock', 'v1.product.inventory.InventoryPlatformWarehouse/unifiedBatchStock')->option(['real_name' => '平台统一查询批次库存']);
-			Route::get('v3/unified-query/capabilities', 'v1.product.inventory.InventoryPlatformWarehouse/unifiedCapabilities')->option(['real_name' => '平台库存统一查询能力']);
-			Route::post('v3/unified-query/commands', 'v1.product.inventory.InventoryPlatformWarehouse/unifiedCommand')->option(['real_name' => '平台库存统一查询操作']);
-			Route::get('v3/unified-query/export-task/:taskNo', 'v1.product.inventory.InventoryPlatformWarehouse/unifiedExportTask')->option(['real_name' => '平台库存统一查询导出任务']);
 			Route::get('v3/import/template', 'v1.product.inventory.InventoryPlatformExcelImport/template')->option(['real_name' => '平台库存导入模板']);
 			Route::post('v3/import/upload', 'v1.product.inventory.InventoryPlatformExcelImport/upload')->option(['real_name' => '平台库存导入文件上传']);
 			Route::post('v3/import', 'v1.product.inventory.InventoryPlatformExcelImport/import')->option(['real_name' => '平台多门店库存导入']);
+			Route::post('v3/locations', 'v1.product.inventory.InventoryPlatformWarehouse/createLocation')->option(['real_name' => '平台库存创建仓库']);
 			Route::get('v3/salon-usage', 'v1.product.inventory.InventoryPlatformSalonUsage/index')->option(['real_name' => '平台院装单据查询']);
 			Route::get('v3/salon-usage/projects', 'v1.product.inventory.InventoryPlatformSalonUsage/projects')->option(['real_name' => '平台院装项目选择']);
 			Route::get('v3/salon-usage/:id/detail', 'v1.product.inventory.InventoryPlatformSalonUsage/detail')->pattern(['id' => '\\d+'])->option(['real_name' => '平台院装单据详情']);
@@ -2140,8 +2183,13 @@ Route::group('adminapi', function () {
 			Route::post('v3/hq/cross-transfer/:id/receive', 'v1.product.inventory.InventoryPlatformHqCrossTransfer/receive')->option(['real_name' => '平台总部仓跨主体调拨收货']);
 			Route::post('v3/hq/cross-transfer/:id/cancel', 'v1.product.inventory.InventoryPlatformHqCrossTransfer/cancel')->option(['real_name' => '平台总部仓跨主体调拨取消']);
 			Route::post('v3/hq/cross-transfer/:id/reverse', 'v1.product.inventory.InventoryPlatformHqCrossTransfer/reverse')->option(['real_name' => '平台总部仓跨主体调拨作废']);
+			Route::get('v3/batch-stock', 'v1.product.inventory.InventoryPlatformWarehouse/batchStock')->option(['real_name' => '平台批次库存查询']);
 			Route::get('v3/dashboard', 'v1.product.inventory.InventoryPlatformWarehouse/dashboard')->option(['real_name' => '平台库存首页权威概览']);
+			Route::get('v3/unified-query/batch-stock', 'v1.product.inventory.InventoryPlatformWarehouse/unifiedBatchStock')->option(['real_name' => '平台统一查询批次库存']);
 			Route::get('v3/unified-query/operational', 'v1.product.inventory.InventoryPlatformWarehouse/unifiedOperational')->option(['real_name' => '平台统一查询库存业务单据']);
+			Route::get('v3/unified-query/capabilities', 'v1.product.inventory.InventoryPlatformWarehouse/unifiedCapabilities')->option(['real_name' => '平台库存统一查询能力']);
+			Route::post('v3/unified-query/commands', 'v1.product.inventory.InventoryPlatformWarehouse/unifiedCommand')->option(['real_name' => '平台库存统一查询操作']);
+			Route::get('v3/unified-query/export-task/:taskNo', 'v1.product.inventory.InventoryPlatformWarehouse/unifiedExportTask')->option(['real_name' => '平台库存统一查询导出任务']);
 			//出入库统计
 			Route::get('order/overall_statistics', 'v1.product.inventory.StoreProductStockDetail/stockOrderOverallStatistics')->option(['real_name' => '出入库顶部统计']);
 			Route::get('order/statistics', 'v1.product.inventory.StoreProductStockDetail/stockOrderStatistics')->option(['real_name' => '出入库统计']);
@@ -2282,6 +2330,10 @@ Route::group('adminapi', function () {
         //基本配置编辑表单
         Route::get('config/edit_basics', 'v1.system.config.SystemConfig/edit_basics')->option(['real_name' => '基本配置编辑表单']);
         //新配置编辑表单
+        
+        // RH-GAP-WRITEOFF-WORKBENCH
+        Route::get('writeoff-performance-mode', 'v1.system.WriteoffPerformanceMode/read')->option(['real_name' => '读取核销业绩计算方式']);
+        Route::put('writeoff-performance-mode', 'v1.system.WriteoffPerformanceMode/update')->option(['real_name' => '保存核销业绩计算方式']);
         Route::get('config/edit_new_build/:type', 'v1.system.config.SystemConfig/getNewFormBuild')->option(['real_name' => '新配置编辑表单']);
         //获取置缩略图配置信息
         Route::get('config/image', 'v1.system.config.SystemConfig/getImageConfig')->option(['real_name' => '获取置缩略图配置信息']);

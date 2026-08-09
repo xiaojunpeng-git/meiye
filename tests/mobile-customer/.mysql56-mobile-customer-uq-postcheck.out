@@ -1,0 +1,4 @@
+table_count	column_count	index_count	bad_row_count	verification_failure_count
+1	13	3	0	0
+verify_result
+VERIFY_OK

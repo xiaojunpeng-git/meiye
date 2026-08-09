@@ -13,8 +13,9 @@
 const env = process.env.NODE_ENV;
 
 const Setting = {
-  // 是否使用 Mock 的数据，默认 开发环境为 true，生产环境为 false
-  isMock: env === 'development',
+  // Mock must be explicitly enabled so the source hot-reload entry exercises
+  // the local backend data by default.
+  isMock: process.env.VUE_APP_USE_MOCK === 'true',
   // 部署应用包时的基本 URL
   // publicPath: env === 'development' ? '' : '',
   publicPath: '/',

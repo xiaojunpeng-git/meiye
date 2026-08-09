@@ -142,11 +142,34 @@ final class CashierV3SaleCatalogServices
         CashierV3DataScopeContext $dataScope
     ): array {
         $this->assertStoreScope($operatorScope, $dataScope);
-        $normalized = $this->readActiveItem(
+        $skuId = self::positiveId($itemId, 'itemId');
+        $availability = $this->authority->readStoreItemAvailabilityBySkuId(
             $operatorScope->storeId(),
-            self::positiveId($itemId, 'itemId')
+            $skuId
         );
-        $this->assertPurchasable($normalized, 1);
+        if (!is_array($availability)
+            || (int)($availability['product_type'] ?? 0) !== 1
+            || (int)($availability['product_is_del'] ?? 1) !== 0
+            || (int)($availability['product_is_show'] ?? 0) !== 1
+            || (int)($availability['product_is_verify'] ?? 0) !== 1
+            || (int)($availability['sku_type'] ?? -1) !== 0
+            || (int)($availability['sku_is_show'] ?? 0) !== 1) {
+            throw self::notAvailable($skuId);
+        }
+        $productType = (int)($availability['product_product_type'] ?? -1);
+        $isCardDiscovery = in_array($productType, [4, 5], true)
+            || (int)($availability['product_pid'] ?? 0) === 8154;
+        if ($isCardDiscovery) {
+            $normalized = $this->readActiveItem($operatorScope->storeId(), $skuId);
+            $this->assertPurchasable($normalized, 1);
+        }
+        // 普通产品/项目只有门店可售状态这一项目录前置判断；它们没有
+        // 卡内关系，也不需要把商品/SKU版本资源扩成 Gateway 锁集合。
+        // 事务内会再次用同一权威 joined 行加锁，避免把同一条目录资料
+        // 在版本锁和资源重检阶段重复读取。
+        if (!$isCardDiscovery) {
+            return [];
+        }
         return $this->serverResources($normalized);
     }
 
@@ -266,7 +289,7 @@ final class CashierV3SaleCatalogServices
                 'cashier_sale_idempotency_key_invalid'
             );
         }
-        $normalized = $this->readActiveItem(
+        $normalized = $this->lockedActiveItem(
             $operatorScope->storeId(),
             self::positiveId($itemId, 'itemId')
         );
@@ -828,6 +851,9 @@ final class CashierV3SaleCatalogServices
     private function serverResources(array $item): array
     {
         $resources = [];
+        $mainProductId = (string)(int)($item['productId'] ?? 0);
+        $mainSkuId = (string)(int)($item['skuId'] ?? 0);
+        $isCard = in_array((string)($item['kindCode'] ?? ''), ['count_card', 'card_package', 'custom_card'], true);
         foreach ((array)($item['authoritySnapshot']['resourceSources'] ?? []) as $source) {
             $kind = trim((string)($source['kind'] ?? ''));
             $id = trim((string)($source['id'] ?? ''));
@@ -838,6 +864,18 @@ final class CashierV3SaleCatalogServices
                     '商品资源快照不完整，请重新选择。',
                     'cashier_sale_resource_snapshot_invalid'
                 );
+            }
+            // A card definition version is an aggregate fingerprint of the
+            // card rule, active relations, and every component product/SKU
+            // snapshot. Locking those child rows again here only repeats the
+            // same reads and can make a simple card add take several seconds.
+            // Keep the parent product/SKU plus the aggregate definition lock;
+            // any child change still changes the definition version and is
+            // rejected by the normal optimistic-version check.
+            if ($isCard
+                && (($kind === 'catalog_product' && $id !== $mainProductId)
+                    || ($kind === 'catalog_sku' && $id !== $mainSkuId))) {
+                continue;
             }
             $resources[] = [
                 'kind' => $kind,
@@ -854,6 +892,12 @@ final class CashierV3SaleCatalogServices
 
     private function assertLockedContextsCover(array $item, array $contexts, array $ignoreKinds = []): void
     {
+        // 普通产品/项目不依赖目录资源版本上下文；它们已经在当前事务内
+        // 通过 lockedActiveItem() 锁住商品与 SKU，并在该权威行上完成可售
+        // 与价格快照校验。卡项仍走完整父卡/组成资源覆盖检查。
+        if (!in_array((string)($item['kindCode'] ?? ''), ['count_card', 'card_package', 'custom_card'], true)) {
+            return;
+        }
         $contextMap = [];
         foreach ($contexts as $context) {
             $kind = trim((string)($context['kind'] ?? ''));
@@ -1039,6 +1083,9 @@ final class CashierV3SaleCatalogServices
     private function normalizeAuthorityRow(array $row, bool $withComponents): array
     {
         $productId = (int)($row['product_id'] ?? 0);
+        // 卡项和服务项目通常只有一个默认 SKU，前端不需要让收银员选择
+        // 规格；后端仍保留 SKU 作为价格、门店范围、版本和订单快照的
+        // 技术身份，不能因为业务上“看不到 SKU”就省略这层校验。
         $skuId = (int)($row['sku_id'] ?? 0);
         $skuProductId = (int)($row['sku_product_id'] ?? 0);
         $productType = (int)($row['product_product_type'] ?? -1);
@@ -1346,6 +1393,13 @@ final class CashierV3SaleCatalogServices
         }
     }
 
+    /**
+     * 保存“购买后有效期规则”，不在加购阶段判断卡是否已经过期。
+     *
+     * writeValid=2 只保存有效天数，实际起止时间由成功结账后的签发服务
+     * 按可信成交时间计算；writeValid=3 保存配置的固定区间，是否允许销售
+     * 属于商品可售策略，不应被误写成“已购买权益有效期”的判断。
+     */
     private static function validitySnapshot(array $row, string $kindCode, string $ruleType = ''): array
     {
         $mode = (int)($row['sku_write_valid'] ?? 0);

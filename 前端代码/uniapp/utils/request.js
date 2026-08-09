@@ -18,6 +18,8 @@ import {
 	checkLogin
 } from '../libs/login';
 import store from '../store';
+import Cache from '@/utils/cache';
+import { MERCHANT_STAFF_TOKEN } from '@/config/cache';
 import pako from '../plugin/pako/pako.es5.min.js'
 
 function toLoginMp(){
@@ -52,12 +54,17 @@ function base64ToUint8Array(base64String) {
  */
 function baseRequest(url, method, data, {
 	noAuth = false,
-	noVerify = false
+	noVerify = false,
+	merchantAuth = false,
 }) {
 	let Url = HTTP_REQUEST_URL,
-		header = HEADER;
+		header = Object.assign({}, HEADER);
 
-	if (!noAuth) {
+	const merchantToken = merchantAuth ? Cache.get(MERCHANT_STAFF_TOKEN) : '';
+	if (merchantAuth && !merchantToken) {
+		return Promise.reject({ msg: '员工商家会话已失效，请重新使用员工账号登录' });
+	}
+	if (!merchantAuth && !noAuth) {
 		//登录过期自动登录
 		if (!store.state.app.token && !checkLogin()) {
 			toLogin();
@@ -66,7 +73,8 @@ function baseRequest(url, method, data, {
 			});
 		}
 	}
-	if (store.state.app.token) header[TOKENNAME] = 'Bearer ' + store.state.app.token;
+	if (merchantAuth) header[TOKENNAME] = 'Bearer ' + merchantToken;
+	else if (store.state.app.token) header[TOKENNAME] = 'Bearer ' + store.state.app.token;
     // 410000 请登录
 	// 410001 登录已过期,请重新登录
 	// 410002 登录状态有误,请重新登录
@@ -93,7 +101,8 @@ function baseRequest(url, method, data, {
 				else if (res.data.status == 200)
 					reslove(res.data, res);
 				else if ([410000, 410001, 410002].indexOf(res.data.status) !== -1) {
-					toLogin();
+					if (merchantAuth) Cache.clear(MERCHANT_STAFF_TOKEN);
+					else toLogin();
 					reject(res.data);
 				} else if (res.data.status == 410010) {
 					uni.showModal({
@@ -140,6 +149,12 @@ const request = {};
 	request[method] = (api, data, opt) => baseRequest(api, method, data, opt || {})
 });
 
+const merchantRequest = {};
+['options', 'get', 'post', 'put', 'head', 'delete', 'trace', 'connect'].forEach((method) => {
+	merchantRequest[method] = (api, data, opt) => baseRequest(api, method, data, Object.assign({}, opt || {}, {
+		merchantAuth: true,
+	}));
+});
 
-
+export { merchantRequest };
 export default request;

@@ -1,5 +1,6 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
+import Info from '@lucide/vue/dist/esm/icons/info.mjs'
 import {
   formatMoney,
   openCashierV3QueryEntitySelector,
@@ -39,6 +40,7 @@ const METRIC_LABELS = {
 
 const dashboardSnapshot = ref(null)
 const detail = ref(null)
+const descriptionMetricCode = ref('')
 const dashboard = computed(() => dashboardSnapshot.value || state.businessDashboard || {})
 const scope = computed(() => dashboard.value.scope || {})
 const trend = computed(() => dashboard.value.trend || {})
@@ -189,6 +191,20 @@ function formatMetricValue(card = {}) {
 
 function cardDescription(card = {}) {
   return card.description || card.tooltip?.summary || '查看趋势与明细'
+}
+
+function descriptionId(card = {}) {
+  const code = metricCode(card) || 'metric'
+  return `business-metric-description-${code}`
+}
+
+function isDescriptionOpen(card = {}) {
+  return descriptionMetricCode.value === metricCode(card)
+}
+
+function toggleDescription(card = {}) {
+  const code = metricCode(card)
+  descriptionMetricCode.value = descriptionMetricCode.value === code ? '' : code
 }
 
 async function selectMetric(card) {
@@ -345,20 +361,31 @@ function aggregationLabel() {
     </section>
 
     <section class="business-dashboard-metrics" aria-label="经营指标">
-      <button
+      <article
         v-for="card in cards"
         :key="metricCode(card) || card.name"
-        type="button"
         class="business-metric-card"
         :class="{ 'business-metric-card--active': metricCode(card) === activeMetricCode }"
-        :title="cardDescription(card)"
-        @click="selectMetric(card)"
       >
-        <span class="business-metric-card__name">{{ card.name || card.label }}</span>
-        <strong>{{ formatMetricValue(card) }}</strong>
-        <span class="business-metric-card__description">{{ cardDescription(card) }}</span>
-        <span class="business-metric-card__detail" @click.stop="openMetricDetail(card)">查看明细 →</span>
-      </button>
+        <div class="business-metric-card__heading">
+          <button type="button" class="business-metric-card__select" @click="selectMetric(card)">
+            <span class="business-metric-card__name">{{ card.name || card.label }}</span>
+            <strong>{{ formatMetricValue(card) }}</strong>
+          </button>
+          <button
+            type="button"
+            class="business-metric-card__info"
+            :aria-controls="descriptionId(card)"
+            :aria-expanded="isDescriptionOpen(card)"
+            :aria-label="`${card.name || card.label}指标说明`"
+            @click="toggleDescription(card)"
+          >
+            <Info :size="16" aria-hidden="true" />
+          </button>
+          <span v-if="isDescriptionOpen(card)" :id="descriptionId(card)" class="business-metric-card__description-popover" role="tooltip">{{ cardDescription(card) }}</span>
+        </div>
+        <button type="button" class="business-metric-card__detail" @click="openMetricDetail(card)">查看明细 →</button>
+      </article>
       <div v-if="!cards.length" class="business-dashboard-empty">暂无经营数据。</div>
     </section>
 
@@ -434,7 +461,7 @@ function aggregationLabel() {
 </template>
 
 <style scoped>
-.business-dashboard-page { display: grid; gap: 14px; min-width: 0; padding: 20px; overflow: auto; background: #f5f7fa; }
+.business-dashboard-page { display: grid; align-content: start; gap: 14px; width: 100%; height: 100%; min-width: 0; min-height: 0; box-sizing: border-box; padding: 20px; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; background: #f5f7fa; }
 .business-dashboard-page__header, .business-dashboard-filter, .business-dashboard-data-status, .business-dashboard-panel { border: 1px solid #dde4ed; border-radius: 12px; background: #fff; }
 .business-dashboard-page__header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding: 20px; }
 .business-dashboard-page__eyebrow { margin-bottom: 4px; color: #2878c9; font-size: 12px; font-weight: 700; letter-spacing: .05em; }
@@ -455,13 +482,18 @@ function aggregationLabel() {
 .business-dashboard-data-status__pill { padding: 4px 8px; border-radius: 999px; background: #eaf8ed; color: #287d3c; font-weight: 600; }
 .business-dashboard-data-status__pill--pending { background: #fff7e8; color: #b66a00; }
 .business-dashboard-metrics { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
-.business-metric-card { display: grid; min-height: 150px; align-content: start; gap: 9px; padding: 15px; border: 1px solid #dde4ed; border-radius: 11px; background: #fff; color: inherit; text-align: left; cursor: pointer; transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease; }
+.business-metric-card { position: relative; display: grid; min-height: 150px; align-content: start; gap: 9px; padding: 15px; border: 1px solid #dde4ed; border-radius: 11px; background: #fff; color: inherit; text-align: left; transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease; }
 .business-metric-card:hover { border-color: #91caff; box-shadow: 0 7px 17px rgba(22, 119, 204, .08); transform: translateY(-1px); }
 .business-metric-card--active { border-color: #1677cc; box-shadow: 0 0 0 2px rgba(22, 119, 204, .11); }
+.business-metric-card__heading { position: relative; display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.business-metric-card__select { display: grid; flex: 1; gap: 9px; min-width: 0; padding: 0; border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
+.business-metric-card__select:focus-visible, .business-metric-card__info:focus-visible, .business-metric-card__detail:focus-visible { outline: 2px solid #1677cc; outline-offset: 2px; }
 .business-metric-card__name { color: #526071; font-size: 13px; font-weight: 600; }
 .business-metric-card strong { color: #1f2329; font-size: 24px; line-height: 1.15; }
-.business-metric-card__description { min-height: 34px; color: #7a8696; font-size: 11px; line-height: 1.55; }
-.business-metric-card__detail { justify-self: start; color: #1677cc; font-size: 12px; font-weight: 600; }
+.business-metric-card__info { display: grid; flex: none; width: 24px; height: 24px; place-items: center; padding: 0; border: 0; border-radius: 4px; background: transparent; color: #6d7c8d; cursor: pointer; }
+.business-metric-card__info:hover, .business-metric-card__info[aria-expanded="true"] { color: #1677cc; background: #eaf4ff; }
+.business-metric-card__description-popover { position: absolute; z-index: 3; top: 30px; right: 0; width: min(270px, calc(100vw - 72px)); padding: 9px 10px; border: 1px solid #c6d8eb; border-radius: 6px; background: #fff; box-shadow: 0 8px 20px rgba(31, 35, 41, .16); color: #526071; font-size: 12px; line-height: 1.55; }
+.business-metric-card__detail { justify-self: start; margin-top: auto; padding: 0; border: 0; background: transparent; color: #1677cc; font-size: 12px; font-weight: 600; cursor: pointer; }
 .business-dashboard-panels { display: grid; grid-template-columns: minmax(0, .92fr) minmax(0, 1.08fr); gap: 14px; }
 .business-dashboard-panel { display: grid; min-width: 0; min-height: 330px; padding: 18px; }
 .business-dashboard-panel > header { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }

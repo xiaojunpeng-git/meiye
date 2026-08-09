@@ -1,0 +1,113 @@
+<template>
+	<view class="customer-settings">
+		<view class="customer-settings__header"><navigator class="customer-settings__back" url="/src/merchant/pages/customers/index" open-type="navigate"><text>‹</text></navigator><view class="customer-settings__header-copy"><text class="customer-settings__eyebrow">客户</text><text class="customer-settings__title">列表字段</text></view><view class="customer-settings__header-save" @tap="saveVisibleFields"><text>{{ savingSettings ? '正在保存' : '保存设置' }}</text></view></view>
+		<scroll-view scroll-y class="customer-settings__content">
+			<view v-if="loading" class="customer-settings__empty"><text>正在读取数据设置</text></view>
+			<view v-else-if="message.length > 0" class="customer-settings__empty"><text>{{ message }}</text><view class="customer-settings__retry" @tap="loadCapability"><text>重新加载</text></view></view>
+			<view v-else>
+				<view class="customer-settings__intro"><text class="customer-settings__intro-title">显示字段</text><text class="customer-settings__intro-copy">设置仅作用于你的客户列表；客户范围始终由服务端权限决定。</text><text v-if="saveMessage.length > 0" class="customer-settings__success">{{ saveMessage }}</text></view>
+				<view class="customer-settings__section"><view v-for="field in fields" :key="field.key" class="customer-settings__row" @tap="toggleVisible(field.key)"><view class="customer-settings__row-copy"><text class="customer-settings__label">{{ field.label }}</text><text class="customer-settings__key">{{ field.key }}</text></view><text class="customer-settings__check">{{ isVisible(field.key) ? '已显示' : '隐藏' }}</text></view></view>
+				<view class="customer-settings__save" @tap="saveVisibleFields"><text>{{ savingSettings ? '正在保存…' : '保存显示字段' }}</text></view>
+				<view class="customer-settings__intro customer-settings__intro--aliases"><text class="customer-settings__intro-title">字段改名</text><text class="customer-settings__intro-copy">只改你的显示名称，不改变字段含义、数据范围或报表口径。</text></view>
+				<view class="customer-settings__section"><view v-for="field in fields" :key="'alias-' + field.key" class="customer-settings__alias-row"><text class="customer-settings__label">{{ field.label }}</text><input class="customer-settings__alias-input" :value="aliasFor(field.key)" placeholder="保持原名称" @input="setAlias(field.key, $event.detail.value)" /></view></view>
+				<view class="customer-settings__save" @tap="saveAliases"><text>{{ savingAliases ? '正在保存…' : '保存字段名称' }}</text></view>
+				<text class="customer-settings__hint">自定义字段和导出任务将继续沿用同一受控接口；本页不会把门店、组织或员工范围发送给服务端。</text>
+			</view>
+		</scroll-view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	import { dispatchMobileCustomerUnifiedQueryCommand, queryMobileCustomerUnifiedQueryCapabilities } from '../../../shared/api/mobile-customer-client.uts'
+	const loading = ref(false)
+	const savingSettings = ref(false)
+	const savingAliases = ref(false)
+	const message = ref('')
+	const saveMessage = ref('')
+	const fields = ref<Array<any>>([])
+	const visibleFields = ref<Array<string>>([])
+	const aliases = ref<any>({})
+	const settings = ref<any>({})
+	const aliasVersion = ref(1)
+
+	onShow(() => loadCapability())
+
+	function loadCapability() {
+		loading.value = true
+		message.value = ''
+		queryMobileCustomerUnifiedQueryCapabilities((result : any) => {
+			loading.value = false
+			if (!result.ok || result.body == null || result.body.unifiedQueryCapability == null) { message.value = String(result.message || '数据设置暂时不可用。'); return }
+			let capability = result.body.unifiedQueryCapability
+			fields.value = Array.isArray(capability.fields) ? capability.fields : []
+			let querySettings = capability.querySettings || {}
+			settings.value = querySettings.settings || {}
+			visibleFields.value = Array.isArray(settings.value.visibleFields) ? settings.value.visibleFields : []
+			aliases.value = capability.fieldAliases || {}
+			aliasVersion.value = Number(capability.fieldAliasVersion || 1)
+		})
+	}
+
+	function isVisible(key : string) : boolean { return visibleFields.value.indexOf(key) >= 0 }
+	function toggleVisible(key : string) {
+		saveMessage.value = ''
+		let index = visibleFields.value.indexOf(key)
+		if (index >= 0) { visibleFields.value.splice(index, 1); return }
+		visibleFields.value.push(key)
+	}
+	function aliasFor(key : string) : string { return String(aliases.value[key] || '') }
+	function setAlias(key : string, value : string) { aliases.value[key] = String(value || '') }
+	function idempotencyKey(prefix : string) : string { return prefix + '-' + Date.now().toString() + '-' + Math.floor(Math.random() * 100000).toString() }
+
+	function saveVisibleFields() {
+		if (savingSettings.value) return
+		savingSettings.value = true
+		saveMessage.value = ''
+		let payload : any = { visibleFields: visibleFields.value, quickFields: settings.value.quickFields || [], filters: settings.value.filters || [], filterRelation: settings.value.filterRelation || 'all', sorts: settings.value.sorts || [], groupBy: settings.value.groupBy || [], summaries: settings.value.summaries || [], schemaVersion: settings.value.schemaVersion || '' }
+		dispatchMobileCustomerUnifiedQueryCommand({ action: 'save-unified-query-settings', idempotencyKey: idempotencyKey('customer-settings'), settings: payload }, (result : any) => {
+			savingSettings.value = false
+			if (!result.ok) { message.value = String(result.message || '显示字段保存失败。'); return }
+			saveMessage.value = '列表字段已保存。'
+			loadCapability()
+		})
+	}
+
+	function saveAliases() {
+		if (savingAliases.value) return
+		savingAliases.value = true
+		saveMessage.value = ''
+		dispatchMobileCustomerUnifiedQueryCommand({ action: 'save-unified-query-field-aliases', idempotencyKey: idempotencyKey('customer-alias'), expectedAliasVersion: aliasVersion.value, aliases: aliases.value }, (result : any) => {
+			savingAliases.value = false
+			if (!result.ok) { message.value = String(result.message || '字段名称保存失败。'); return }
+			saveMessage.value = '字段名称已保存。'
+			loadCapability()
+		})
+	}
+</script>
+
+<style>
+	.customer-settings { display: flex; min-height: 100%; flex: 1; flex-direction: column; background-color: #f5f7fa; }
+	.customer-settings__header { display: flex; flex-direction: row; align-items: center; padding: 48px 20px 16px; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #dde4ed; background-color: #ffffff; }
+	.customer-settings__back { display: flex; width: 30px; height: 38px; align-items: center; font-size: 32px; line-height: 34px; color: #303133; }
+	.customer-settings__header-copy { display: flex; min-width: 0; flex: 1; flex-direction: column; margin-left: 4px; }
+	.customer-settings__header-save { display: flex; min-height: 34px; flex-direction: row; align-items: center; justify-content: center; margin-left: 12px; padding: 0 11px; border-width: 1px; border-style: solid; border-color: #1677cc; background-color: #1677cc; font-size: 13px; font-weight: 700; line-height: 20px; color: #ffffff; }
+	.customer-settings__eyebrow { font-size: 12px; line-height: 18px; color: #697586; }
+	.customer-settings__title { margin-top: 3px; font-size: 22px; font-weight: 700; line-height: 30px; color: #1f2329; }
+	.customer-settings__content { min-height: 0; flex: 1; }
+	.customer-settings__intro { display: flex; flex-direction: column; padding: 20px 20px 12px; }
+	.customer-settings__intro--aliases { padding-top: 30px; }
+	.customer-settings__intro-title { font-size: 16px; font-weight: 700; line-height: 24px; color: #303133; }
+	.customer-settings__intro-copy, .customer-settings__hint { margin-top: 5px; font-size: 12px; line-height: 18px; color: #697586; }
+	.customer-settings__success { margin-top: 8px; font-size: 13px; font-weight: 600; line-height: 20px; color: #177245; }
+	.customer-settings__section { border-top-width: 1px; border-top-style: solid; border-top-color: #dde4ed; background-color: #ffffff; }
+	.customer-settings__row, .customer-settings__alias-row { display: flex; min-height: 58px; flex-direction: row; align-items: center; justify-content: space-between; padding: 0 20px; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #edf0f3; }
+	.customer-settings__row-copy { display: flex; min-width: 0; flex: 1; flex-direction: column; }
+	.customer-settings__label { font-size: 14px; font-weight: 600; line-height: 21px; color: #303133; }
+	.customer-settings__key { margin-top: 2px; font-size: 11px; line-height: 15px; color: #98a2b3; }
+	.customer-settings__check { margin-left: 12px; font-size: 13px; font-weight: 600; line-height: 20px; color: #1677cc; }
+	.customer-settings__alias-input { min-width: 0; width: 160px; margin-left: 12px; padding: 7px 8px; border-width: 1px; border-style: solid; border-color: #d8e0ea; font-size: 13px; line-height: 20px; color: #303133; }
+	.customer-settings__save, .customer-settings__retry { display: flex; min-height: 42px; flex-direction: row; align-items: center; justify-content: center; margin: 16px 20px 0; background-color: #1677cc; font-size: 14px; font-weight: 700; color: #ffffff; }
+	.customer-settings__hint { display: block; margin: 20px; padding-bottom: 30px; }
+	.customer-settings__empty { display: flex; min-height: 240px; flex-direction: column; align-items: center; justify-content: center; padding: 20px; font-size: 14px; color: #697586; }
+	.customer-settings__retry { min-width: 100px; margin-top: 14px; }
+</style>

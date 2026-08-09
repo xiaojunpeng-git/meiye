@@ -6,6 +6,7 @@ use app\services\cashier\v3\CashierV3ActionDispatcher;
 use app\services\cashier\v3\CashierV3CommandException;
 use app\services\cashier\v3\cashier\CashierV3CashierWorkspaceServices;
 use app\services\cashier\v3\cashier\CashierV3SaleCatalogServices;
+use app\services\cashier\v3\checkout\provider\CashierV3MemberBalanceProvider;
 use app\services\cashier\v3\registry\CashierV3ContextPolicy;
 
 final class CashierV3OrderLifecycleModule
@@ -68,5 +69,46 @@ final class CashierV3OrderLifecycleModule
             return ['data' => ['orderPersonnelAdjustment' => $service->personnelAdjustmentEntry((array)($scope['payload'] ?? []), $scope['operator_scope'], $scope['data_scope'])], 'message' => '订单人员调整资料已读取。'];
         });
 
+        $recharge = new CashierV3RechargeOrderLifecycleServices();
+        $dispatcher->versionServices()->registerProvider(
+            CashierV3RechargeOrderLifecycleVersionProvider::KIND,
+            new CashierV3RechargeOrderLifecycleVersionProvider()
+        );
+        foreach (['refund-recharge-order', 'void-recharge-order'] as $action) {
+            if ($dispatcher->handlers()->hasCommand($action) || $dispatcher->policies()->has($action)) {
+                throw new \LogicException('recharge order lifecycle duplicate action: ' . $action);
+            }
+            $dispatcher->handlers()->registerCommand($action, static function (array $scope) use ($recharge, $action): array {
+                $result = $recharge->executeInTx($action, $scope);
+                return ['data' => ['rechargeOrderLifecycle' => $result], 'business_no' => (string)$result['operationNo'],
+                    'touched' => (array)($result['touchedRoles'] ?? ['recharge_order']), 'message' => (string)$result['message']];
+            });
+            $policy = new CashierV3ContextPolicy($action, ['recharge_order', 'member_balance'], [], static function (array $payload) use ($action): array {
+                $rechargeId = trim((string)($payload['rechargeId'] ?? ''));
+                $memberId = trim((string)($payload['memberId'] ?? ''));
+                if (preg_match('/^[1-9][0-9]*$/D', $rechargeId) !== 1 || preg_match('/^[1-9][0-9]*$/D', $memberId) !== 1) {
+                    throw CashierV3CommandException::invalidContext('充值订单或会员资料无效，请重新打开订单详情。');
+                }
+                $touchesBalance = $action === 'void-recharge-order';
+                if (!$touchesBalance) {
+                    foreach (['principalRefundAmount', 'bonusRefundAmount'] as $field) {
+                        $amount = trim((string)($payload[$field] ?? '0'));
+                        if (preg_match('/^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,2})?$/D', $amount) === 1 && bccomp($amount, '0', 2) === 1) {
+                            $touchesBalance = true;
+                            break;
+                        }
+                    }
+                }
+                $touchedRoles = ['recharge_order'];
+                if ($touchesBalance) $touchedRoles[] = 'member_balance';
+                return ['required' => ['recharge_order', 'member_balance'], 'allowed' => [], 'identities' => [
+                    ['role' => 'recharge_order', 'kind' => 'recharge_order', 'id' => $rechargeId, 'required' => true],
+                    ['role' => 'member_balance', 'kind' => CashierV3MemberBalanceProvider::KIND, 'id' => $memberId, 'required' => true],
+                ], 'required_read_roles' => ['recharge_order', 'member_balance'],
+                    'required_touched_roles' => $touchedRoles];
+            }, [], ['recharge_order', 'member_balance'], ['recharge_order', 'member_balance']);
+            $policy->configureServerResourceDiscovery([$recharge, 'discover'], ['recharge_order', 'member_balance'], ['recharge_order', 'member_balance']);
+            $dispatcher->policies()->register($policy);
+        }
     }
 }

@@ -52,8 +52,53 @@ final class CashierV3ReservationModule
         }
         if (!$handlers->hasProjection('query-reservations')) {
             $handlers->registerProjection('query-reservations', function (array $scope) use ($assembler): array {
-                $part = (new CashierV3ReservationPartitionProvider())->readPartition((string)($scope['state_context_id'] ?? ''), '', $scope['operator_scope'], $scope['data_scope']);
-                return ['data' => ['reservation' => $part['payload']], 'versions' => $part['public_versions'], 'return_root_state' => true, 'message' => '预约列表已刷新。'];
+                $payload = (array)($scope['payload'] ?? []);
+                $part = (new CashierV3ReservationPartitionProvider())->readPartition((string)($scope['state_context_id'] ?? ''), '', $scope['operator_scope'], $scope['data_scope'], ['calendarDate' => (string)($payload['calendarDate'] ?? '')]);
+                return ['data' => ['reservation' => $part['payload']], 'versions' => $part['public_versions'], 'return_root_state' => true, 'root_hints' => ['calendarDate' => (string)($part['payload']['calendar']['date'] ?? '')], 'message' => '预约列表已刷新。'];
+            });
+        }
+        if (!$handlers->hasProjection('open-reservation-detail')) {
+            $handlers->registerProjection('open-reservation-detail', function (array $scope): array {
+                $detail = (new CashierV3ReservationDetailQueryServices())->read(
+                    is_array($scope['payload'] ?? null) ? $scope['payload'] : [],
+                    $scope['operator_scope'],
+                    $scope['data_scope']
+                );
+                if ($detail === null) {
+                    throw new CashierV3CommandException(
+                        CashierV3ResultCode::RESOURCE_NOT_FOUND,
+                        '该预约不存在、资料不完整或当前账号无权查看。'
+                    );
+                }
+                return [
+                    'data' => ['reservation' => ['detail' => $detail]],
+                    'versions' => [[
+                        'kind' => 'reservation',
+                        'id' => (string)$detail['reservationId'],
+                        'version' => (int)$detail['reservationVersion'],
+                    ]],
+                    'message' => '预约详情已读取。',
+                ];
+            });
+        }
+        if (!$handlers->hasProjection('change-reservation-calendar-date')) {
+            $handlers->registerProjection('change-reservation-calendar-date', function (array $scope): array {
+                $payload = (array)($scope['payload'] ?? []);
+                $baseDate = trim((string)($payload['calendarDate'] ?? ''));
+                $timezone = new \DateTimeZone('Asia/Shanghai');
+                $parsed = \DateTimeImmutable::createFromFormat('!Y-m-d', $baseDate, $timezone);
+                if (!$parsed || $parsed->format('Y-m-d') !== $baseDate) $parsed = new \DateTimeImmutable('today', $timezone);
+                $direction = (int)($payload['direction'] ?? 0);
+                if ($direction < -1 || $direction > 1) $direction = 0;
+                $date = $direction === 0 ? new \DateTimeImmutable('today', $timezone) : $parsed->modify(($direction > 0 ? '+' : '-') . '1 day');
+                $part = (new CashierV3ReservationPartitionProvider())->readPartition(
+                    (string)($scope['state_context_id'] ?? ''),
+                    '',
+                    $scope['operator_scope'],
+                    $scope['data_scope'],
+                    ['calendarDate' => $date->format('Y-m-d')]
+                );
+                return ['data' => ['reservation' => $part['payload']], 'versions' => $part['public_versions'], 'return_root_state' => true, 'root_hints' => ['calendarDate' => (string)($part['payload']['calendar']['date'] ?? '')], 'message' => '预约日历已更新。'];
             });
         }
         if (!$handlers->hasProjection('recalculate-reservation-plan')) {
@@ -115,7 +160,15 @@ final class CashierV3ReservationModule
         }
         $now = time(); $tenant = $dataScope->tenantId(); $store = Db::name('system_store')->where('id', $operator->storeId())->field('id,name')->find();
         if (!$store) throw new CashierV3CommandException(CashierV3ResultCode::RESOURCE_NOT_FOUND, '当前门店不存在。');
-        $reservationNo = 'YY' . date('YmdHis', $now) . substr((string)mt_rand(1000, 9999), 0, 4); $reservationId = 'RSV-' . bin2hex(random_bytes(12));
+        $reservationId = 'RSV-' . bin2hex(random_bytes(12));
+        $reservationNo = (new CashierV3BusinessDocumentNumberServices())->allocateForSourceInTx(
+            $tenant,
+            CashierV3BusinessDocumentNumberServices::RESERVATION,
+            'reservation',
+            $reservationId,
+            date('Y-m-d', $when),
+            $now
+        );
         $roomId = max(0, (int)($reservation['roomId'] ?? 0)); $roomName = '';
         if ($roomId > 0) {
             $room = Db::name('table_qrcode')->where('id', $roomId)->where('store_id', $operator->storeId())->where('is_del', 0)->where('is_using', 1)->lock(true)->find();

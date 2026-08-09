@@ -365,7 +365,7 @@ checkoutAssert('draft remains eventless editing state',
     $draft['requestStatus'] === 'editing' && $draft['eventless'] === true);
 checkoutAssert('sales amount excludes entitlement actual amount',
     $draft['totals']['salesAmountCents'] === 9000
-        && $draft['totals']['receivableAmountCents'] === 9000
+        && $draft['totals']['receivableAmountCents'] === 6000
         && $draft['totals']['entitlementActualAmountCents'] === 2000);
 checkoutAssert('seven-method sum is cash performance',
     $draft['totals']['selectedPaymentAmountCents'] === 4000
@@ -373,7 +373,7 @@ checkoutAssert('seven-method sum is cash performance',
 checkoutAssert('balance and debt remain independent non-cash components',
     $draft['totals']['balanceDeductionAmountCents'] === 2000
         && $draft['totals']['debtAmountCents'] === 3000
-        && $draft['totals']['settlementAmountCents'] === 9000);
+        && $draft['totals']['settlementAmountCents'] === 6000);
 checkoutAssert('balanced draft records equality', $draft['totals']['balanced'] === true);
 checkoutAssert('request and child ids are server stable ids',
     preg_match('/^CKR-[0-9a-f]{40}$/D', $draft['requestId']) === 1
@@ -497,7 +497,7 @@ checkoutAssert('checkout projection lines summary and composition use frozen req
             'selectedCount' => 2,
             'originalAmount' => '100.00',
             'discountAmount' => '10.00',
-            'receivableAmount' => '90.00',
+            'receivableAmount' => '60.00',
             'entitlementActualAmount' => '20.00',
         ]
         && $checkoutProjection['compositionCode'] === 'mixed'
@@ -520,7 +520,7 @@ checkoutAssert('projection payment lines and summary remain exact cents-derived 
         && $checkoutProjection['payment']['selectedLines'][0]['remark'] === '前台记账说明'
         && $checkoutProjection['payment']['selectedLines'][2]['kind'] === 'balance_deduction'
         && $checkoutProjection['payment']['selectedLines'][2]['amount'] === '20.00'
-        && $checkoutProjection['payment']['summary']['receivableAmount'] === '90.00'
+        && $checkoutProjection['payment']['summary']['receivableAmount'] === '60.00'
         && $checkoutProjection['payment']['summary']['selectedAmount'] === '60.00'
         && $checkoutProjection['payment']['summary']['remainingAmount'] === '0.00'
         && $checkoutProjection['debtAmount'] === '30.00'

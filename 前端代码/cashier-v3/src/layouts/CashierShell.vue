@@ -65,6 +65,7 @@ const debtReminderMember = ref(null)
 const deferredMemberSelection = ref(null)
 const isMemberDebtOpen = ref(false)
 const activeDebtMember = ref(null)
+const initialDebtRecordId = ref('')
 const isMemberDebtLoading = ref(false)
 const isDebtRepaymentPreparing = ref(false)
 const isQueryEntitySelectorOpen = ref(false)
@@ -1004,31 +1005,15 @@ async function handleOpenMemberDebt(event = {}) {
   const detail = event.detail || {}
   const result = await openMemberDebt(detail.memberId || null)
   const debtId = String(detail.debtId || detail.debtRecordId || '')
-  if (!debtId || !isSucceededResult(result)) return result
-  const snapshot = memberDebtSnapshot.value
-  const record = (Array.isArray(snapshot?.records) ? snapshot.records : [])
-    .find((item) => String(item?.debtId ?? item?.id ?? '') === debtId)
-  if (!record) {
-    return { result: { status: 'failed', code: 'DEBT_RECORD_NOT_FOUND', message: '该欠款已变化，请重新查询后操作。' } }
-  }
-  const amount = String(record.remainingDebtAmount ?? record.remainingAmount ?? '')
-  if (!/^[1-9][0-9]*(?:\.00)?$/.test(amount)) {
-    return { result: { status: 'failed', code: 'DEBT_REPAYMENT_AMOUNT_INVALID', message: '该欠款剩余金额异常，无法进入收款。' } }
-  }
-  return prepareDebtRepayment({
-    memberId: detail.memberId,
-    debtRecordId: record.id || record.debtId,
-    debtItemId: record.debtItemId || record.id || record.debtId,
-    recordVersion: record.recordVersion || record.revision,
-    amount,
-    rechargeDebt: String(record.sourceType || record.source_type || record.sourceLabel || record.source || '').includes('充值'),
-  })
+  initialDebtRecordId.value = isSucceededResult(result) ? debtId : ''
+  return result
 }
 
 function closeMemberDebt() {
   if (isDebtRepaymentPreparing.value) return
   isMemberDebtOpen.value = false
   activeDebtMember.value = null
+  initialDebtRecordId.value = ''
 }
 
 async function openDebtRepaymentCheckout(preparationRequestId, debtRecordId) {
@@ -1039,6 +1024,7 @@ async function openDebtRepaymentCheckout(preparationRequestId, debtRecordId) {
   }
   isMemberDebtOpen.value = false
   activeDebtMember.value = null
+  initialDebtRecordId.value = ''
   if (route.name !== 'cashier-v3-cashier') {
     // 跨页面事件会在工作台挂载前丢失。仅保存本次已准备草稿的交接标识，
     // 收银工作台挂载后自行消费并重新读取权威结账快照。
@@ -1129,6 +1115,9 @@ async function loadMemberDetailTab(payload = {}) {
       memberId: payload.memberId,
       tab: payload.tab,
       keyword: String(payload.keyword || '').trim(),
+      status: String(payload.status || '').trim(),
+      dateFrom: String(payload.dateFrom || '').trim(),
+      dateTo: String(payload.dateTo || '').trim(),
       silent: true
     })
     const detail = memberDetailFromResponse(result)
@@ -1631,6 +1620,7 @@ function handleStateContextChanged() {
   closeDebtReminder()
   isMemberDebtOpen.value = false
   activeDebtMember.value = null
+  initialDebtRecordId.value = ''
   isDebtRepaymentPreparing.value = false
   closeQueryEntitySelector({ reason: 'state-context-changed' })
   closeServiceCompletion()
@@ -2640,6 +2630,7 @@ onBeforeUnmount(() => {
     v-if="isMemberDebtOpen && activeDebtMember"
     :member="activeDebtMember"
     :snapshot="memberDebtSnapshot"
+    :initial-debt-id="initialDebtRecordId"
     :is-loading="isMemberDebtLoading"
     :is-preparing="isDebtRepaymentPreparing"
     @close="closeMemberDebt"

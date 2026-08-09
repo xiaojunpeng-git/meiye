@@ -32,7 +32,7 @@ class StoreOrderDao extends BaseDao
      * 限制精确查询字段
      * @var string[]
      */
-    protected $withField = ['uid', 'order_id', 'real_name', 'user_phone', 'title', 'total_num'];
+    protected $withField = ['uid', 'order_id', 'real_name', 'user_phone', 'title', 'total_num', 'verify_code'];
 
     /**
      * @return string
@@ -84,8 +84,105 @@ class StoreOrderDao extends BaseDao
         $fieldKey = $fieldKey == 'all' ? '' : $fieldKey;
         $deliveryType = $where['deliveryType'] ?? '';
         unset($where['deliveryType']);
+        // 终端作废订单会保留原支付/退款字段以便审计，核销场景必须显式排除。
+        // 先从通用搜索参数移除，再由本 DAO 精确落入订单表字段。
+        $terminalAction = $where['terminal_action'] ?? null;
+        unset($where['terminal_action']);
+        // 数据权限：先取出再手动 where，避免通用 searcher 误解析
+        $employeeDataScope = $where['employee_data_scope'] ?? null;
+        unset(
+            $where['employee_data_scope'],
+            $where['data_scope_participate_staff_ids'],
+            $where['data_scope_participate_fields']
+        );
         return parent::search($where)->when(is_array($pidFilter), function ($query) use ($pidFilter) {
             $query->whereIn('pid', $pidFilter);
+        })->when($terminalAction !== null && $terminalAction !== '', function ($query) use ($terminalAction) {
+            $query->where('terminal_action', (int)$terminalAction);
+        })->when(is_array($employeeDataScope), function ($query) use ($employeeDataScope) {
+            $mode = (string)($employeeDataScope['mode'] ?? '');
+            if ($mode === 'none') {
+                $query->where('id', -1);
+                return;
+            }
+            if ($mode === 'personal') {
+                $staffIds = array_values(array_filter(array_map('intval', $employeeDataScope['staff_ids'] ?? [])));
+                if (!$staffIds) {
+                    $query->where('id', -1);
+                    return;
+                }
+                $windows = $employeeDataScope['tenure_windows'] ?? [];
+                if (is_array($windows) && $windows) {
+                    $query->where(function ($outer) use ($staffIds, $windows) {
+                        foreach ($windows as $w) {
+                            $sid = (int)($w['store_id'] ?? 0);
+                            $start = (int)($w['start_time'] ?? 0);
+                            $end = (int)($w['end_time'] ?? 0);
+                            if ($sid <= 0) {
+                                continue;
+                            }
+                            $outer->whereOr(function ($q) use ($staffIds, $sid, $start, $end) {
+                                $q->where('store_id', $sid);
+                                if ($start > 0) {
+                                    $q->where('add_time', '>=', $start);
+                                }
+                                if ($end > 0) {
+                                    $q->where('add_time', '<=', $end);
+                                }
+                                $q->where(function ($p) use ($staffIds) {
+                                    $p->whereIn('staff_id', $staffIds)
+                                        ->whereOr('clerk_id', 'in', $staffIds)
+                                        ->whereOr('service_staff_id', 'in', $staffIds)
+                                        ->whereOr('gendan_staff_id', 'in', $staffIds);
+                                });
+                            });
+                        }
+                    });
+                } else {
+                    $query->where(function ($q) use ($staffIds) {
+                        $q->whereIn('staff_id', $staffIds)
+                            ->whereOr('clerk_id', 'in', $staffIds)
+                            ->whereOr('service_staff_id', 'in', $staffIds)
+                            ->whereOr('gendan_staff_id', 'in', $staffIds);
+                    });
+                }
+            }
+            if ($mode === 'store_with_history') {
+                $curStore = (int)($employeeDataScope['store_id'] ?? 0);
+                $staffIds = array_values(array_filter(array_map('intval', $employeeDataScope['staff_ids'] ?? [])));
+                $history = $employeeDataScope['history_windows'] ?? [];
+                $query->where(function ($outer) use ($curStore, $staffIds, $history) {
+                    if ($curStore > 0) {
+                        $outer->where('store_id', $curStore);
+                    }
+                    if (is_array($history) && $history && $staffIds) {
+                        foreach ($history as $w) {
+                            $sid = (int)($w['store_id'] ?? 0);
+                            $start = (int)($w['start_time'] ?? 0);
+                            $end = (int)($w['end_time'] ?? 0);
+                            if ($sid <= 0) {
+                                continue;
+                            }
+                            $outer->whereOr(function ($q) use ($staffIds, $sid, $start, $end) {
+                                $q->where('store_id', $sid);
+                                if ($start > 0) {
+                                    $q->where('add_time', '>=', $start);
+                                }
+                                if ($end > 0) {
+                                    $q->where('add_time', '<=', $end);
+                                }
+                                $q->where(function ($p) use ($staffIds) {
+                                    $p->whereIn('staff_id', $staffIds)
+                                        ->whereOr('clerk_id', 'in', $staffIds)
+                                        ->whereOr('service_staff_id', 'in', $staffIds)
+                                        ->whereOr('gendan_staff_id', 'in', $staffIds);
+                                });
+                            });
+                        }
+                    }
+                });
+            }
+            // all / store_all / stores：门店范围由 store_id 条件承担
         })->when($serviceObject !== '', function ($query) use ($serviceObject) {
             if ($serviceObject === '朋友') {
                 // 朋友：含旧数据——主单 service_object 未同步，但自动核销的核销记录/核销子单已是朋友
@@ -206,6 +303,14 @@ class StoreOrderDao extends BaseDao
                         $quetwo->where("write_end",0)->whereOr("write_end",">",time());
                     })->field(['oid'])->select();
             });
+        })->when(!empty($where['verify_pending']), function ($query) {
+            // 收银台消耗待核销：门店自提(2) + 收银台(4)
+            $query->where('paid', 1)
+                ->whereIn('status', [0, 1, 5])
+                ->whereIn('refund_status', [0, 3])
+                ->whereIn('shipping_type', [2, 4])
+                ->where('is_del', 0)
+                ->where('is_user_del', 0);
         })->when(isset($where['staff_id']) && $where['staff_id'], function ($query) use ($where) {
             $query->where('staff_id', $where['staff_id']);
         })->when($cardUpgradeOld, function ($query) {

@@ -1,5 +1,5 @@
 <script setup>
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import TablePagination from '@/components/common/TablePagination.vue'
 import UnifiedQueryToolbar from '@/components/query/UnifiedQueryToolbar.vue'
 import { useUnifiedQueryPage } from '@/composables/useUnifiedQueryPage'
@@ -245,6 +245,14 @@ async function openEditor(record = null) {
   }
 }
 
+onMounted(() => {
+  window.addEventListener('cashier-v3:open-staff-creator', openEditor)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('cashier-v3:open-staff-creator', openEditor)
+})
+
 function validateEditor() {
   if (!editorValues.staffName.trim()) return '请填写员工姓名。'
   if (!/^1[3-9]\d{9}$/.test(editorValues.phone.trim())) return '手机号码格式不正确。'
@@ -318,7 +326,6 @@ async function onAvatarFileChange(event) {
       :on-upgrade-saved-query-field-reference="unifiedQuery.upgradeSavedQueryFieldReference" :on-create-export="unifiedQuery.createExport"
       :on-query-export-task="unifiedQuery.queryExportTask"
     />
-    <div class="staff-list-page__actions"><button type="button" class="button button--primary" @click="openEditor()">新增员工</button></div>
     <p v-if="isQueryLoading" class="staff-list-message">正在查询员工数据…</p>
     <p v-else-if="queryError" class="staff-list-message staff-list-message--error">{{ queryError }}</p>
     <main class="staff-list-wrap">
@@ -377,7 +384,7 @@ async function onAvatarFileChange(event) {
 
 <style scoped>
 .staff-list-page { display:grid; min-width:0; min-height:0; gap:12px; padding:18px; overflow:auto; background:#f5f7fa; }
-.staff-list-page__actions { display:flex; justify-content:flex-end; }.staff-list-message { margin:0; padding:9px 12px; border:1px solid #b9d4ff; border-radius:7px; background:#f7fbff; color:#35658f; font-size:13px; }.staff-list-message--error { border-color:#ffccc7; background:#fff2f0; color:#cf1322; }
+.staff-list-message { margin:0; padding:9px 12px; border:1px solid #b9d4ff; border-radius:7px; background:#f7fbff; color:#35658f; font-size:13px; }.staff-list-message--error { border-color:#ffccc7; background:#fff2f0; color:#cf1322; }
 .staff-list-wrap { min-width:0; overflow:auto; border:1px solid #dde4ed; border-radius:8px; background:#fff; }.staff-list-table { width:100%; min-width:1080px; border-collapse:collapse; color:#303133; font-size:13px; white-space:nowrap; }.staff-list-table th,.staff-list-table td { padding:11px 12px; border-bottom:1px solid #edf1f5; text-align:left; }.staff-list-table th { position:sticky; top:0; z-index:1; background:#f8fafc; color:#697586; font-size:12px; font-weight:600; }.staff-list-table__action { position:sticky; right:0; width:72px; background:#fff; }.staff-list-empty { display:grid; min-height:220px; place-items:center; color:#8a94a3; font-size:13px; }
 .staff-editor-backdrop { position:fixed; inset:0; z-index:1200; display:grid; place-items:center; padding:20px; background:rgba(20,29,40,.42); }.staff-editor { width:min(960px,100%); max-height:calc(100vh - 40px); overflow:hidden; border-radius:8px; background:#fff; box-shadow:0 22px 60px rgba(20,29,40,.24); }.staff-editor header,.staff-editor footer { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:16px 18px; border-bottom:1px solid #edf1f5; }.staff-editor footer { justify-content:flex-end; border-top:1px solid #edf1f5; border-bottom:0; }.staff-editor h2 { margin:0; font-size:17px; }.staff-editor__close { width:32px; height:32px; border:0; background:transparent; color:#697586; font-size:24px; cursor:pointer; }.staff-editor__loading { display:grid; min-height:280px; place-items:center; color:#7a8696; }.staff-editor__tabs { display:flex; gap:4px; padding:0 18px; border-bottom:1px solid #edf1f5; }.staff-editor__tabs button { padding:12px 16px; border:0; border-bottom:2px solid transparent; background:transparent; color:#697586; cursor:pointer; }.staff-editor__tabs button.active { border-color:#2f80ed; color:#2f80ed; }.staff-editor__body { min-height:300px; max-height:calc(100vh - 250px); overflow:auto; padding:18px; }.staff-editor__grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }.staff-editor__grid>label,.staff-editor__avatar-field { display:grid; gap:6px; color:#697586; font-size:13px; }.staff-editor input:not([type=checkbox]):not([type=file]),.staff-editor select { box-sizing:border-box; width:100%; min-height:36px; padding:7px 9px; border:1px solid #d9e1eb; border-radius:6px; background:#fff; color:#303133; font:inherit; }.staff-editor select[multiple] { min-height:112px; }.staff-editor__wide { grid-column:1 / -1; }.staff-editor__toggle { display:flex !important; align-items:center; gap:9px; padding:10px; border:1px solid #dbe4ef; border-radius:7px; color:#303133 !important; cursor:pointer; }.staff-editor__toggle input { width:18px; height:18px; }.staff-editor__avatar-field>div { display:flex; align-items:center; gap:12px; }.staff-editor__avatar-field img { width:56px; height:56px; border-radius:50%; object-fit:cover; border:1px solid #dbe4ef; }.staff-editor__avatar-field .button { position:relative; display:inline-grid; place-items:center; min-height:34px; overflow:hidden; cursor:pointer; }.staff-editor__avatar-field input[type=file] { position:absolute; inset:0; opacity:0; cursor:pointer; }.staff-editor__section fieldset { display:flex; gap:20px; margin:0; padding:16px; border:1px solid #dbe4ef; border-radius:7px; }.staff-editor__section label { display:flex; align-items:center; gap:6px; cursor:pointer; }.staff-editor__error { margin:16px 0 0; color:#cf1322; font-size:13px; }
 @media (max-width:760px) { .staff-list-page { padding:12px; }.staff-editor-backdrop { padding:12px; }.staff-editor__grid { grid-template-columns:1fr; }.staff-editor__wide { grid-column:auto; }.staff-editor__tabs { overflow:auto; padding:0 8px; }.staff-editor__tabs button { flex:0 0 auto; padding:12px 10px; } }

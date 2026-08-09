@@ -42,7 +42,7 @@ class UnifiedQueryCapabilityServices
     }
 
     /**
-     * $queryPreferenceVersion 必须来自服务端 query_preference/member_list 当前版本，
+     * $queryPreferenceVersion 必须来自服务端 query_preference/<page_code> 当前版本，
      * 不能从请求 payload 透传。
      */
     public function build(

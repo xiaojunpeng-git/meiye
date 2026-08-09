@@ -13,7 +13,7 @@ import {
 } from '@/services/cashierV3Bridge'
 
 const state = useCashierV3State()
-const viewMode = ref('list')
+const viewMode = ref('calendar')
 const calendarResourceMode = ref('staff')
 const activeQuickKey = ref('today')
 const isEditorOpen = ref(false)
@@ -222,6 +222,7 @@ function queryReservations(query = reservationQuerySnapshot.value, resetPage = t
 function changeReservationCalendarDate(direction) {
   return requestAction('change-reservation-calendar-date', {
     ...normalizeReservationQuery(reservationQuerySnapshot.value, activeQuickKey.value),
+    calendarDate: String(calendar.value.date || ''),
     direction
   })
 }
@@ -328,7 +329,21 @@ function statusClass(status) {
 }
 
 function blocksForResource(resourceId, time) {
-  return calendarBlocks.value.filter((block) => block.resourceId === resourceId && block.start === time)
+  const slotStart = clockMinutes(time)
+  if (slotStart === null) return []
+  const slotEnd = slotStart + 30
+  return calendarBlocks.value.filter((block) => {
+    const blockStart = clockMinutes(block.start)
+    return block.resourceId === resourceId
+      && blockStart !== null
+      && blockStart >= slotStart
+      && blockStart < slotEnd
+  })
+}
+
+function clockMinutes(value) {
+  const matched = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(String(value || ''))
+  return matched ? (Number(matched[1]) * 60) + Number(matched[2]) : null
 }
 
 function reservationPayload(recordOrId) {
@@ -446,15 +461,15 @@ async function requestReservationPrimaryAction(record) {
 }
 
 function blockStyle(block, index = 0, count = 1) {
-  const [startHour, startMinute] = String(block.start || '00:00').split(':').map(Number)
-  const [endHour, endMinute] = String(block.end || block.start || '00:00').split(':').map(Number)
-  const startMinutes = (startHour * 60) + startMinute
-  const endMinutes = (endHour * 60) + endMinute
-  const slotCount = Math.max(1, Math.ceil((endMinutes - startMinutes) / 15))
+  const startMinutes = clockMinutes(block.start) ?? 0
+  const endMinutes = clockMinutes(block.end) ?? startMinutes
+  const slotCount = Math.max(1, Math.ceil((endMinutes - startMinutes) / 30))
+  const offsetRatio = (startMinutes % 30) / 30
   const safeCount = Math.max(1, Number(count) || 1)
   const safeIndex = Math.min(Math.max(0, Number(index) || 0), safeCount - 1)
   return {
     height: `calc((var(--reservation-slot-height) * ${slotCount}) - 8px)`,
+    top: `calc(4px + (var(--reservation-slot-height) * ${offsetRatio}))`,
     right: 'auto',
     left: `calc(5px + ((100% - 10px) * ${safeIndex} / ${safeCount}))`,
     width: `calc(((100% - 10px) / ${safeCount}) - ${safeCount > 1 ? 3 : 0}px)`
@@ -1260,7 +1275,6 @@ onBeforeUnmount(() => {
         @settings-applied="applyQuerySettings"
       >
         <template #primary-actions>
-          <button type="button" class="button reservation-page__create" @click="openReservationEditor()">新增预约</button>
           <div class="reservation-page__view-switch" aria-label="预约视图">
             <button type="button" :aria-pressed="viewMode === 'list'" :class="{ 'reservation-page__view-switch--active': viewMode === 'list' }" @click="viewMode = 'list'">列表</button>
             <button type="button" :aria-pressed="viewMode === 'calendar'" :class="{ 'reservation-page__view-switch--active': viewMode === 'calendar' }" @click="viewMode = 'calendar'">日历</button>

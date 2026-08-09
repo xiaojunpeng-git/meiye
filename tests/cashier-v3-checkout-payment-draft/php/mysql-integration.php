@@ -105,6 +105,22 @@ final class PaymentDraftCapturingRepository implements CashierV3CheckoutRequestR
         );
     }
 
+    public function readEditingProjectionByRequestId(
+        string $requestId,
+        string $workspaceId,
+        string $stateContextId,
+        CashierV3OperatorScope $operatorScope,
+        CashierV3DataScopeContext $dataScope
+    ) {
+        return $this->delegate->readEditingProjectionByRequestId(
+            $requestId,
+            $workspaceId,
+            $stateContextId,
+            $operatorScope,
+            $dataScope
+        );
+    }
+
     public function lockCurrentForKernelInTx(
         string $requestId,
         string $creationIdempotencyKey,

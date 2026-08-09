@@ -1,0 +1,132 @@
+<template>
+	<view class="reservation-page">
+		<view class="reservation-page__header"><text class="reservation-page__eyebrow">商家端 · 收银 V3</text><view class="reservation-page__title-row"><text class="reservation-page__title">预约管理</text><view class="reservation-page__new" @tap="openEditor"><text>新增预约</text></view></view></view>
+		<view class="reservation-page__summary"><view><text class="reservation-page__summary-number">{{ todayCount }}</text><text>今日预约</text></view><view><text class="reservation-page__summary-number">{{ pendingCount }}</text><text>待确认</text></view></view>
+		<view v-if="loading" class="reservation-page__notice"><text>正在读取收银 V3 预约…</text></view>
+		<view v-else-if="message.length > 0" class="reservation-page__notice"><text>{{ message }}</text><view class="reservation-page__link" @tap="loginRequired ? openMerchantLogin() : loadReservations()"><text>{{ loginRequired ? '前往商家端登录' : '重新加载' }}</text></view></view>
+		<view v-else-if="records.length === 0" class="reservation-page__notice"><text>当前门店暂无收银 V3 预约</text><text class="reservation-page__notice-copy">本页只显示新的 cashier_v3_reservation，不读取旧预约数据。</text></view>
+		<scroll-view v-else scroll-y class="reservation-page__list"><view v-for="item in records" :key="item.reservationId" class="reservation-page__card"><view class="reservation-page__card-row"><text class="reservation-page__card-title">{{ item.memberName }}</text><text class="reservation-page__status">{{ item.status }}</text></view><text class="reservation-page__copy">{{ item.appointmentTime }} · {{ item.projectSummary }}</text><text class="reservation-page__copy">{{ item.craftsmanSummary }}{{ item.roomName.length > 0 ? ' · ' + item.roomName : '' }}</text><text v-if="item.remark.length > 0" class="reservation-page__copy">备注：{{ item.remark }}</text><text class="reservation-page__receipt">预约单 {{ item.reservationNo }} · 服务单 {{ item.serviceOrderId }}</text></view></scroll-view>
+		<view v-if="editorOpen" class="reservation-page__sheet"><view class="reservation-page__sheet-header"><text class="reservation-page__cancel" @tap="closeEditor">取消</text><text class="reservation-page__sheet-title">新建预约</text><text class="reservation-page__header-space"></text></view><scroll-view scroll-y class="reservation-page__sheet-body"><text class="reservation-page__field-label">会员</text><view v-if="selectedMember == null" class="reservation-page__select" @tap="loadMembers"><text>{{ memberLoading ? '正在加载会员…' : '选择会员' }}</text></view><view v-else class="reservation-page__selected" @tap="loadMembers"><text>{{ selectedMember.name }} · {{ selectedMember.phone }}</text></view><view v-if="memberPickerOpen" class="reservation-page__picker"><input class="reservation-page__input" :value="memberKeyword" placeholder="输入会员姓名或手机号" @input="memberKeyword = $event.detail.value" /><view class="reservation-page__minor" @tap="loadMembers"><text>查询</text></view><view v-for="member in memberCandidates" :key="member.memberId" class="reservation-page__option" @tap="selectMember(member)"><text>{{ member.name }} · {{ member.phone }}</text></view></view>
+				<text class="reservation-page__field-label">预约项目（可多选）</text><view class="reservation-page__choices"><view v-for="project in projectOptions" :key="project.projectId + '-' + project.skuId" class="reservation-page__choice" :class="{ 'reservation-page__choice--active': selectedProject(project) }" @tap="toggleProject(project)"><text>{{ project.name }}</text></view></view>
+				<text class="reservation-page__field-label">预约时间</text><input class="reservation-page__input" :value="appointmentTime" placeholder="例如 2026-08-01 14:30" @input="appointmentTime = $event.detail.value" /><view class="reservation-page__minor" @tap="recalculate"><text>{{ calculating ? '正在计算…' : '确认预约时间' }}</text></view>
+				<text class="reservation-page__field-label">可选手艺人</text><view class="reservation-page__choices"><view v-for="staff in craftsmanOptions" :key="staff.staffId" class="reservation-page__choice" :class="{ 'reservation-page__choice--active': selectedCraftsman(staff) }" @tap="toggleCraftsman(staff)"><text>{{ staff.name }}</text></view></view>
+				<text class="reservation-page__field-label">可选房间</text><view class="reservation-page__choices"><view v-for="room in roomOptions" :key="room.id" class="reservation-page__choice" :class="{ 'reservation-page__choice--active': selectedRoomId === Number(room.id), 'reservation-page__choice--disabled': !roomSelectable(room) }" @tap="chooseRoom(room)"><text>{{ room.name || room.label || room.remarks || ('房间 ' + room.id) }}</text></view></view>
+				<text class="reservation-page__field-label">备注</text><textarea class="reservation-page__textarea" :value="remark" placeholder="可填写到店提醒或服务说明" @input="remark = $event.detail.value" /><view class="reservation-page__submit" @tap="submit"><text>{{ submitting ? '正在创建…' : '创建预约' }}</text></view><text class="reservation-page__scope-copy">仅创建预约。开始服务、服务完成、结账、改期和取消暂未在手机端开放。</text></scroll-view></view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	import { createMobileReservation, openMobileReservationEditor, queryMobileReservationMembers, queryMobileReservations, recalculateMobileReservation } from '../../../shared/api/mobile-reservation-client.uts'
+	import { openMerchantBootstrap } from '../../../shared/platform/mobile-navigation.uts'
+	import { currentMerchantRoot, merchantRequestSession } from '../../../shared/platform/mobile-merchant-session.uts'
+	const records = ref<Array<any>>([])
+	const loading = ref(false)
+	const message = ref('')
+	const loginRequired = ref(false)
+	const todayCount = ref(0)
+	const pendingCount = ref(0)
+	const editorOpen = ref(false)
+	const projectOptions = ref<Array<any>>([])
+	const craftsmanOptions = ref<Array<any>>([])
+	const roomOptions = ref<Array<any>>([])
+	const editorContexts = ref<Array<any>>([])
+	const selectedProjects = ref<Array<any>>([])
+	const selectedCraftsmen = ref<Array<any>>([])
+	const selectedRoomId = ref(0)
+	const selectedMember = ref<any>(null)
+	const appointmentTime = ref('')
+	const remark = ref('')
+	const memberPickerOpen = ref(false)
+	const memberKeyword = ref('')
+	const memberCandidates = ref<Array<any>>([])
+	const memberLoading = ref(false)
+	const calculating = ref(false)
+	const submitting = ref(false)
+
+	onShow(() => loadReservations())
+
+	function merchantLoginIsRequired() : boolean { return merchantRequestSession(currentMerchantRoot()) == null }
+	function openMerchantLogin() : void { openMerchantBootstrap() }
+	function loadReservations() {
+		loading.value = true; message.value = ''; loginRequired.value = false
+		queryMobileReservations((response : any) => {
+			loading.value = false
+			let payload = response != null && response.body != null ? response.body.reservation : null
+			if (!response.ok || payload == null || payload.result == null || payload.result.status != 'success') { loginRequired.value = merchantLoginIsRequired(); message.value = loginRequired.value ? '请先完成商家端登录。' : String(response.message || (payload != null && payload.result != null ? payload.result.message : '预约列表暂时不可用。')); return }
+			let view = payload.data != null ? payload.data.reservation : null
+			records.value = view != null && Array.isArray(view.records) ? view.records : []
+			todayCount.value = Number(view != null && view.quickCounts != null ? view.quickCounts.today : 0)
+			pendingCount.value = Number(view != null && view.quickCounts != null ? view.quickCounts.pending : 0)
+		})
+	}
+	function openEditor() {
+		if (merchantLoginIsRequired()) { openMerchantLogin(); return }
+		message.value = ''; loginRequired.value = false
+		openMobileReservationEditor((response : any) => {
+			let payload = response != null && response.body != null ? response.body.reservation : null
+			if (!response.ok || payload == null || payload.result == null || payload.result.status != 'success') { message.value = String(response.message || (payload != null && payload.result != null ? payload.result.message : '预约编辑器暂时不可用。')); return }
+			let editor = payload.data != null ? payload.data.editor : null
+			if (editor == null || editor.preparationReady !== true) { message.value = '预约编辑器准备不完整，请刷新后重试。'; return }
+			projectOptions.value = Array.isArray(editor.catalogOptions) ? editor.catalogOptions : []
+			craftsmanOptions.value = Array.isArray(editor.craftsmenOptions) ? editor.craftsmenOptions : []
+			roomOptions.value = Array.isArray(editor.rooms) ? editor.rooms : []
+			editorContexts.value = Array.isArray(editor.commandContexts) ? editor.commandContexts : []
+			selectedProjects.value = []; selectedCraftsmen.value = []; selectedRoomId.value = 0; selectedMember.value = null; appointmentTime.value = ''; remark.value = ''; memberPickerOpen.value = false; memberCandidates.value = []; editorOpen.value = true
+		})
+	}
+	function closeEditor() { if (!submitting.value) editorOpen.value = false }
+	function loadMembers() {
+		memberPickerOpen.value = true; memberLoading.value = true
+		queryMobileReservationMembers({ keyword: memberKeyword.value.trim(), page: 1, limit: 20 }, (response : any) => { memberLoading.value = false; let result = response != null && response.body != null && response.body.reservation != null ? response.body.reservation.memberCandidates : null; if (!response.ok || result == null) { message.value = String(response.message || '会员列表暂时不可用。'); return }; memberCandidates.value = Array.isArray(result.records) ? result.records : [] })
+	}
+	function selectMember(member : any) { selectedMember.value = member; memberPickerOpen.value = false }
+	function selectedProject(project : any) : boolean { for (let i = 0; i < selectedProjects.value.length; i++) if (Number(selectedProjects.value[i].projectId) == Number(project.projectId) && Number(selectedProjects.value[i].skuId) == Number(project.skuId)) return true; return false }
+	function toggleProject(project : any) { let next = new Array<any>(); let found = false; for (let i = 0; i < selectedProjects.value.length; i++) { let current = selectedProjects.value[i]; if (Number(current.projectId) == Number(project.projectId) && Number(current.skuId) == Number(project.skuId)) found = true; else next.push(current) }; if (!found) next.push({ projectId: Number(project.projectId), skuId: Number(project.skuId), quantity: 1 }); selectedProjects.value = next }
+	function selectedCraftsman(staff : any) : boolean { for (let i = 0; i < selectedCraftsmen.value.length; i++) if (Number(selectedCraftsmen.value[i]) == Number(staff.staffId)) return true; return false }
+	function toggleCraftsman(staff : any) { let id = Number(staff.staffId); let next = new Array<any>(); let found = false; for (let i = 0; i < selectedCraftsmen.value.length; i++) { if (Number(selectedCraftsmen.value[i]) == id) found = true; else next.push(selectedCraftsmen.value[i]) }; if (!found) next.push(id); selectedCraftsmen.value = next }
+	function roomSelectable(room : any) : boolean { return room != null && room.selectable !== false && room.canSelect !== false }
+	function chooseRoom(room : any) { if (!roomSelectable(room)) { message.value = '该房间当前不可用，请选择空闲房间。'; return }; selectedRoomId.value = Number(room.id) }
+	function reservationDraft() : any { return { memberId: selectedMember.value != null ? Number(selectedMember.value.memberId) : 0, projects: selectedProjects.value, craftsmen: selectedCraftsmen.value, roomId: selectedRoomId.value, appointmentTime: appointmentTime.value.trim(), remark: remark.value.trim() } }
+	function recalculate() { if (appointmentTime.value.trim().length == 0) { message.value = '请先填写预约时间。'; return }; calculating.value = true; recalculateMobileReservation({ reservation: reservationDraft(), recalculationRequestId: 'mobile-plan-' + Date.now().toString() }, (response : any) => { calculating.value = false; let payload = response != null && response.body != null ? response.body.reservation : null; if (!response.ok || payload == null || payload.result == null || payload.result.status != 'success') { message.value = String(response.message || (payload != null && payload.result != null ? payload.result.message : '预约时间不可用。')); return }; let draft = payload.data != null && payload.data.reservationPlan != null ? payload.data.reservationPlan.draft : null; if (draft != null) appointmentTime.value = String(draft.appointmentTime || appointmentTime.value) }) }
+	function uuid() : string { let text = ''; let chars = '0123456789abcdef'; for (let i = 0; i < 32; i++) { if (i == 8 || i == 12 || i == 16 || i == 20) text += '-'; let n = Math.floor(Math.random() * 16); if (i == 12) n = 4; if (i == 16) n = (n & 3) | 8; text += chars.charAt(n) }; return text }
+	function submit() { if (submitting.value) return; if (selectedMember.value == null || selectedProjects.value.length == 0 || appointmentTime.value.trim().length == 0) { message.value = '请选择会员、至少一个项目并填写预约时间。'; return }; if (editorContexts.value.length == 0) { message.value = '预约工作台已失效，请重新打开。'; return }; submitting.value = true; createMobileReservation({ reservation: reservationDraft(), command: { idempotencyKey: 'RESERVATION-' + uuid(), contexts: editorContexts.value } }, (response : any) => { submitting.value = false; let payload = response != null && response.body != null ? response.body.reservation : null; if (!response.ok || payload == null || payload.result == null || payload.result.status != 'success') { message.value = String(response.message || (payload != null && payload.result != null ? payload.result.message : '预约创建失败。')); return }; editorOpen.value = false; loadReservations() }) }
+</script>
+
+<style>
+	.reservation-page { display: flex; min-height: 100%; flex: 1; flex-direction: column; background-color: #f4f7f5; }
+	.reservation-page__header { display: flex; flex-direction: column; padding: 52px 20px 18px; background-color: #ffffff; }
+	.reservation-page__eyebrow { font-size: 12px; font-weight: 600; line-height: 18px; color: #6c7b71; }
+	.reservation-page__title-row { display: flex; flex-direction: row; align-items: center; justify-content: space-between; margin-top: 6px; }
+	.reservation-page__title { font-size: 24px; font-weight: 700; line-height: 34px; color: #203128; }
+	.reservation-page__new, .reservation-page__submit { display: flex; min-height: 40px; flex-direction: row; align-items: center; justify-content: center; padding: 0 14px; background-color: #177a54; font-size: 14px; font-weight: 700; color: #ffffff; }
+	.reservation-page__summary { display: flex; flex-direction: row; margin: 12px 20px; padding: 14px 0; background-color: #e8f4ed; }
+	.reservation-page__summary > view { display: flex; flex: 1; flex-direction: column; align-items: center; font-size: 12px; color: #5a7162; }
+	.reservation-page__summary-number { margin-bottom: 4px; font-size: 22px; font-weight: 700; line-height: 28px; color: #177a54; }
+	.reservation-page__notice { display: flex; flex-direction: column; margin: 16px 20px; padding: 15px; border-left-width: 3px; border-left-style: solid; border-left-color: #177a54; background-color: #ffffff; font-size: 14px; line-height: 22px; color: #405147; }
+	.reservation-page__notice-copy, .reservation-page__scope-copy { margin-top: 7px; font-size: 12px; line-height: 19px; color: #718078; }
+	.reservation-page__link, .reservation-page__minor { display: flex; align-self: flex-start; min-height: 34px; flex-direction: row; align-items: center; margin-top: 10px; padding: 0 11px; border-width: 1px; border-style: solid; border-color: #96c9ae; font-size: 13px; color: #177a54; }
+	.reservation-page__list { min-height: 0; flex: 1; padding: 0 20px 32px; }
+	.reservation-page__card { display: flex; flex-direction: column; margin-bottom: 10px; padding: 15px; background-color: #ffffff; }
+	.reservation-page__card-row { display: flex; flex-direction: row; justify-content: space-between; }
+	.reservation-page__card-title { font-size: 16px; font-weight: 700; line-height: 24px; color: #203128; }
+	.reservation-page__status { font-size: 12px; font-weight: 600; line-height: 20px; color: #177a54; }
+	.reservation-page__copy { margin-top: 6px; font-size: 13px; line-height: 20px; color: #607068; }
+	.reservation-page__receipt { margin-top: 10px; font-size: 11px; line-height: 17px; color: #91a098; }
+	.reservation-page__sheet { position: fixed; z-index: 30; top: 0; right: 0; bottom: 0; left: 0; display: flex; flex-direction: column; background-color: #f4f7f5; }
+	.reservation-page__sheet-header { display: flex; flex-direction: row; align-items: center; justify-content: space-between; padding: 48px 20px 16px; background-color: #ffffff; }
+	.reservation-page__cancel, .reservation-page__header-space { width: 44px; font-size: 14px; line-height: 22px; color: #5a7162; }
+	.reservation-page__sheet-title { font-size: 18px; font-weight: 700; line-height: 26px; color: #203128; }
+	.reservation-page__sheet-body { min-height: 0; flex: 1; padding: 20px; }
+	.reservation-page__field-label { display: block; margin-top: 15px; font-size: 13px; font-weight: 700; line-height: 20px; color: #405147; }
+	.reservation-page__field-label:first-child { margin-top: 0; }
+	.reservation-page__select, .reservation-page__selected, .reservation-page__input { box-sizing: border-box; display: flex; width: 100%; min-height: 42px; flex-direction: row; align-items: center; margin-top: 8px; padding: 0 11px; border-width: 1px; border-style: solid; border-color: #d7e2da; background-color: #ffffff; font-size: 14px; color: #405147; }
+	.reservation-page__selected { border-color: #96c9ae; color: #177a54; }
+	.reservation-page__picker { margin-top: 8px; padding: 10px; background-color: #ffffff; }
+	.reservation-page__option { padding: 10px 0; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #edf2ee; font-size: 13px; color: #405147; }
+	.reservation-page__choices { display: flex; flex-wrap: wrap; flex-direction: row; margin-top: 8px; }
+	.reservation-page__choice { display: flex; min-height: 34px; flex-direction: row; align-items: center; margin-right: 8px; margin-bottom: 8px; padding: 0 10px; border-width: 1px; border-style: solid; border-color: #d7e2da; background-color: #ffffff; font-size: 13px; color: #51645a; }
+	.reservation-page__choice--active { border-color: #177a54; background-color: #e8f4ed; color: #177a54; }
+	.reservation-page__choice--disabled { border-color: #e1e7e3; background-color: #f4f6f4; color: #a0aaa3; }
+	.reservation-page__textarea { box-sizing: border-box; width: 100%; height: 96px; margin-top: 8px; padding: 10px; border-width: 1px; border-style: solid; border-color: #d7e2da; background-color: #ffffff; font-size: 14px; color: #405147; }
+	.reservation-page__submit { margin-top: 22px; }
+</style>

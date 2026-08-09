@@ -24,6 +24,12 @@ use think\facade\Db;
  */
 class SystemClearServices extends BaseServices
 {
+    private const CATALOG_EXCLUSIVE_TABLES = [
+        'store_product',
+        'store_product_attr_value',
+        'store_card_related',
+    ];
+
     /**
      * 清除表数据
      * @param string|array $table_name
@@ -36,6 +42,9 @@ class SystemClearServices extends BaseServices
             $clearData = [$table_name];
         } else {
             $clearData = $table_name;
+        }
+        if (array_intersect(self::CATALOG_EXCLUSIVE_TABLES, array_map('strval', $clearData))) {
+            throw new AdminException('商品目录权威表只能在停用 HTTP、队列和定时任务后的独占迁移中清理');
         }
         foreach ($clearData as $name) {
             if ($status) {

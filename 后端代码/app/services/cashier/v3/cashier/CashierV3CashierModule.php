@@ -329,7 +329,8 @@ final class CashierV3CashierModule
                 $workspaceId,
                 (string)($scope['state_context_id'] ?? ''),
                 $scope['operator_scope'],
-                $line
+                $line,
+                $lockedDraft
             );
             return [
                 'data' => ['cashierDraft' => $draft],
@@ -344,7 +345,7 @@ final class CashierV3CashierModule
         $handlers->registerCommand('create-custom-card-configuration', function (array $scope) use ($workspace, $customCards): array {
             $payload = is_array($scope['payload'] ?? null) ? $scope['payload'] : [];
             $workspaceId = self::workspaceContextId((array)($scope['contexts'] ?? []));
-            $workspace->lockForSaleMutationInTx(
+            $lockedDraft = $workspace->lockForSaleMutationInTx(
                 $workspaceId,
                 (string)($scope['state_context_id'] ?? ''),
                 $scope['operator_scope']
@@ -362,7 +363,8 @@ final class CashierV3CashierModule
                 $workspaceId,
                 (string)($scope['state_context_id'] ?? ''),
                 $scope['operator_scope'],
-                $line
+                $line,
+                $lockedDraft
             );
             return [
                 'data' => ['cashierDraft' => $draft],
@@ -1413,7 +1415,20 @@ final class CashierV3CashierModule
                 $readiness->assertReady();
                 $itemId = CashierV3SaleCatalogServices::itemId($payload['itemId'] ?? null);
                 $resolved = self::workspaceOnlyPolicyResult($base);
+                // 新版目录已在本地持有展示品类。普通项目／产品没有卡内
+                // 组成资源，直接交由事务内 joined 行锁定校验即可，避免
+                // 点击一次就先做一次只读目录查询。提示仅作性能分流：
+                // 缺失时维持旧客户端完整发现；伪造为非卡项时，领域层仍会
+                // 因卡资源锁上下文缺失而拒绝，不能绕过卡项校验。
+                $catalogKindHint = trim((string)($payload['catalogKind'] ?? ''));
+                if ($catalogKindHint !== ''
+                    && !in_array($catalogKindHint, ['卡项', '定制卡'], true)) {
+                    return $resolved;
+                }
                 $resolved['expand_from_server_resource_discovery'] = true;
+                // 普通项目/产品没有需要额外锁定的服务端资源；业务事务
+                // 会锁定权威商品/SKU joined 行。卡项仍必须返回完整资源计划。
+                $resolved['allow_empty_server_resource_discovery'] = true;
                 $resolved['server_resource_discoverer'] = static function (array $scope) use (
                     $saleCatalog,
                     $itemId

@@ -1,4 +1,6 @@
 import { merchantAccess, merchantContextSwitch } from '@/api/merchant.js';
+import Cache from '@/utils/cache';
+import { MERCHANT_STAFF_SESSION, MERCHANT_STAFF_TOKEN } from '@/config/cache';
 
 const MERCHANT_CONTEXT_KEY = 'MERCHANT_CONTEXT';
 
@@ -24,6 +26,7 @@ function clearCachedContext() {
 }
 
 const cached = readCachedContext() || {};
+const employeeSession = Cache.get(MERCHANT_STAFF_SESSION, true) || {};
 
 const state = {
 	accessLoaded: false,
@@ -33,11 +36,17 @@ const state = {
 	roles: cached.roles || [],
 	activeRole: cached.active_role || '',
 	activeStoreId: cached.active_store_id || 0,
+	activeStore: cached.active_store || null,
 	stores: cached.stores || [],
+	dataScopeType: cached.data_scope_type || 'NONE',
+	storeSwitchAllowed: !!cached.store_switch_allowed,
+	taskVisibility: cached.task_visibility || 'NONE',
 	permissions: cached.permissions || [],
 	identity: cached.identity || {},
 	mallUniqueAuth: cached.mall_unique_auth || [],
 	loading: false,
+	employeeAuthenticated: !!Cache.get(MERCHANT_STAFF_TOKEN),
+	employeeSession,
 };
 
 const mutations = {
@@ -48,7 +57,11 @@ const mutations = {
 		state.roles = data.roles || [];
 		state.activeRole = data.active_role || '';
 		state.activeStoreId = Number(data.active_store_id || 0);
+		state.activeStore = data.active_store || null;
 		state.stores = data.stores || [];
+		state.dataScopeType = data.data_scope_type || 'NONE';
+		state.storeSwitchAllowed = !!data.store_switch_allowed;
+		state.taskVisibility = data.task_visibility || 'NONE';
 		state.permissions = data.permissions || [];
 		state.identity = data.identity || {};
 		state.mallUniqueAuth = data.mall_unique_auth || [];
@@ -56,7 +69,11 @@ const mutations = {
 			roles: state.roles,
 			active_role: state.activeRole,
 			active_store_id: state.activeStoreId,
+			active_store: state.activeStore,
 			stores: state.stores,
+			data_scope_type: state.dataScopeType,
+			store_switch_allowed: state.storeSwitchAllowed,
+			task_visibility: state.taskVisibility,
 			permissions: state.permissions,
 			identity: state.identity,
 			mall_unique_auth: state.mallUniqueAuth,
@@ -69,6 +86,29 @@ const mutations = {
 	SET_LOADING(state, val) {
 		state.loading = !!val;
 	},
+	SET_EMPLOYEE_SESSION(state, payload) {
+		const data = payload || {};
+		const token = String(data.token || '');
+		if (!token) return;
+		const expiresAt = Number(data.expires_time || 0);
+		const ttl = expiresAt > 0 ? Math.max(1, expiresAt - Cache.time()) : 0;
+		Cache.set(MERCHANT_STAFF_TOKEN, token, ttl);
+		const session = {
+			staff: data.user_info || {},
+			store_id: Number(data.store_id || 0),
+			store_name: data.store_name || '',
+			expires_time: expiresAt,
+		};
+		Cache.set(MERCHANT_STAFF_SESSION, session, ttl);
+		state.employeeAuthenticated = true;
+		state.employeeSession = session;
+	},
+	CLEAR_EMPLOYEE_SESSION(state) {
+		Cache.clear(MERCHANT_STAFF_TOKEN);
+		Cache.clear(MERCHANT_STAFF_SESSION);
+		state.employeeAuthenticated = false;
+		state.employeeSession = {};
+	},
 	RESET_MERCHANT(state) {
 		state.accessLoaded = false;
 		state.canEnter = false;
@@ -76,7 +116,11 @@ const mutations = {
 		state.roles = [];
 		state.activeRole = '';
 		state.activeStoreId = 0;
+		state.activeStore = null;
 		state.stores = [];
+		state.dataScopeType = 'NONE';
+		state.storeSwitchAllowed = false;
+		state.taskVisibility = 'NONE';
 		state.permissions = [];
 		state.identity = {};
 		state.mallUniqueAuth = [];
@@ -87,7 +131,7 @@ const mutations = {
 
 const actions = {
 	async fetchAccess({ commit, state, rootGetters }, force = false) {
-		if (!rootGetters.isLogin) {
+		if (!rootGetters.isLogin && !state.employeeAuthenticated) {
 			commit('RESET_MERCHANT');
 			return { can_enter_merchant: false };
 		}
@@ -100,7 +144,11 @@ const actions = {
 				roles: state.roles,
 				active_role: state.activeRole,
 				active_store_id: state.activeStoreId,
+				active_store: state.activeStore,
 				stores: state.stores,
+				data_scope_type: state.dataScopeType,
+				store_switch_allowed: state.storeSwitchAllowed,
+				task_visibility: state.taskVisibility,
 				permissions: state.permissions,
 				identity: state.identity,
 				mall_unique_auth: state.mallUniqueAuth,
@@ -130,6 +178,14 @@ const actions = {
 		const data = (res && res.data) || res || {};
 		commit('SET_ACCESS', data);
 		return data;
+	},
+	signInWithEmployeeSession({ commit }, payload) {
+		commit('RESET_MERCHANT');
+		commit('SET_EMPLOYEE_SESSION', payload);
+	},
+	clearEmployeeSession({ commit }) {
+		commit('CLEAR_EMPLOYEE_SESSION');
+		commit('RESET_MERCHANT');
 	},
 	enterMerchant({ commit }) {
 		commit('SET_MODE', 'merchant');

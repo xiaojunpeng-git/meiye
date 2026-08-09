@@ -66,8 +66,8 @@ const Setting = {
     headerTheme: 'primary',
     // 顶栏是否置顶，开启后会覆盖侧边栏，需开启 headerFix
     headerStick: true,
-    // 是否开启多 Tabs 页签
-    tabs: true,
+    // 平台端采用单页工作流：左侧菜单负责导航，不展示已打开功能的多页签栏。
+    tabs: false,
     // 多 Tabs 页签是否显示图标，开启 tabs 时有效
     showTabsIcon: false,
     // 是否固定多 Tabs 多页签

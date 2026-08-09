@@ -7,12 +7,13 @@ use app\services\query\UnifiedQueryCustomFieldKeyCollector;
 use app\services\query\UnifiedQueryException;
 use app\services\query\UnifiedQueryExecutionServices;
 use app\services\query\UnifiedQueryPreferenceServices;
+use app\services\query\UnifiedQueryProvider;
 use think\facade\Db;
 
 /**
  * 会员列表权威投影。先在 SQL 中注入 DataScope，再补齐业务字段并计算派生字段。
  */
-class MemberUnifiedQueryProvider
+class MemberUnifiedQueryProvider implements UnifiedQueryProvider
 {
     public const PAGE_CODE = 'member_list';
     public const BUSINESS_TIME_ZONE = 'Asia/Shanghai';
@@ -37,6 +38,11 @@ class MemberUnifiedQueryProvider
         $this->execution = $execution;
         $this->customFields = $customFields;
         $this->preferences = $preferences;
+    }
+
+    public function pageCode(): string
+    {
+        return self::PAGE_CODE;
     }
 
     public function query(array $context, array $payload): array
@@ -337,7 +343,7 @@ class MemberUnifiedQueryProvider
         }
 
         $userColumns = $this->tableColumns('user');
-        foreach (['uid', 'nickname', 'real_name', 'phone', 'bar_code', 'belong_store_id', 'status', 'is_del', 'delete_time', 'add_time', 'level'] as $required) {
+        foreach (['uid', 'nickname', 'real_name', 'phone', 'bar_code', 'birthday', 'belong_store_id', 'status', 'is_del', 'delete_time', 'add_time', 'level'] as $required) {
             if (!isset($userColumns[$required])) {
                 throw new \RuntimeException('会员权威表缺少统一查询字段：' . $required);
             }
@@ -345,7 +351,7 @@ class MemberUnifiedQueryProvider
         $selectedFields = [
             'u.uid', 'u.nickname', 'u.real_name', 'u.phone', 'u.bar_code',
             'u.belong_store_id', 'u.status', 'u.is_del', 'u.delete_time',
-            'u.add_time', 'u.level',
+            'u.add_time', 'u.level', 'u.birthday',
         ];
         if (isset($userColumns['now_money'])) {
             $selectedFields[] = 'u.now_money';
@@ -397,7 +403,12 @@ class MemberUnifiedQueryProvider
         $cards = $this->cardSummaries($uids, $visibleStoreIds, $allStores);
         $debts = $this->debtSummaries($uids, $visibleStoreIds, $allStores);
         $purchases = $this->purchaseSummaries($uids, $visibleStoreIds, $allStores);
-        $visits = $this->visitSummaries($uids, $visibleStoreIds, $allStores);
+        $visits = $this->visitSummaries(
+            $uids,
+            $visibleStoreIds,
+            $allStores,
+            (string)($context['tenant_id'] ?? '')
+        );
 
         $result = [];
         foreach ($rows as $row) {
@@ -418,6 +429,8 @@ class MemberUnifiedQueryProvider
                 'member_name' => $name !== '' ? $name : '未命名会员',
                 'phone' => (string)($row['phone'] ?? ''),
                 'member_no' => (string)($row['bar_code'] ?? ''),
+                'birthday' => $this->dateValue($row['birthday'] ?? 0),
+                'birthday_month_day' => $this->birthdayMonthDay($row['birthday'] ?? 0),
                 'member_status' => $state['label'],
                 'member_level' => (string)($levels[(int)($row['level'] ?? 0)] ?? '普通会员'),
                 'member_tag' => implode('、', $tagList),
@@ -441,6 +454,12 @@ class MemberUnifiedQueryProvider
             ];
         }
         return $result;
+    }
+
+    protected function birthdayMonthDay($timestamp): string
+    {
+        $timestamp = (int)$timestamp;
+        return $timestamp > 0 ? date('m-d', $timestamp) : '';
     }
 
     protected function rowAllowed(array $row, array $scope): bool
@@ -485,6 +504,7 @@ class MemberUnifiedQueryProvider
             'name' => (string)$row['member_name'],
             'phone' => (string)$row['phone'],
             'memberNo' => (string)$row['member_no'],
+            'birthday' => (string)$row['birthday'],
             'status' => (string)$row['member_status'],
             'level' => (string)$row['member_level'],
             'tags' => (array)($row['_member_tags'] ?? []),
@@ -786,52 +806,68 @@ class MemberUnifiedQueryProvider
         return $result;
     }
 
-    protected function visitSummaries(array $uids, array $visible, bool $allStores): array
+    protected function visitSummaries(array $uids, array $visible, bool $allStores, string $tenantId): array
     {
-        $columns = $this->tableColumns('store_order_writeoff');
-        foreach (['id', 'uid', 'relation_id', 'add_time', 'status', 'staff_id'] as $required) {
+        if ($tenantId === '') {
+            throw new \RuntimeException('会员到店事实缺少租户范围');
+        }
+        $columns = $this->tableColumns('cashier_v3_entitlement_service_fact');
+        foreach (['id', 'tenant_id', 'store_id', 'member_id', 'business_date', 'settled_at', 'service_status', 'craftsmen_snapshot_json'] as $required) {
             if (!isset($columns[$required])) {
-                return [];
+                throw new \RuntimeException('会员到店事实表缺少权威字段：' . $required);
             }
         }
-        $query = Db::name('store_order_writeoff')
-            ->whereIn('uid', $uids)
-            ->where('status', 0);
+        $query = Db::name('cashier_v3_entitlement_service_fact')
+            ->where('tenant_id', $tenantId)
+            ->whereIn('member_id', $uids)
+            ->where('service_status', 'completed');
         if (!$allStores) {
-            $query->whereIn('relation_id', $visible);
+            $query->whereIn('store_id', $visible);
         }
-        // add_time 是 Unix 秒；不用 FROM_UNIXTIME，避免 MySQL session time_zone 与应用业务时区
-        // 不一致时把同一核销同时计入前一天、却显示为当天。字面基准兼容 MySQL 5.6。
-        $businessDay = "DATE(DATE_ADD('1970-01-01 08:00:00', INTERVAL add_time SECOND))";
         $rows = $query
-            ->field("uid,COUNT(DISTINCT {$businessDay}) AS visit_count,MAX(add_time) AS latest_time,SUBSTRING_INDEX(GROUP_CONCAT(id ORDER BY add_time DESC,id DESC), ',', 1) AS latest_writeoff_id,SUBSTRING_INDEX(GROUP_CONCAT(staff_id ORDER BY add_time DESC,id DESC), ',', 1) AS last_staff_id")
-            ->group('uid')
+            ->field("member_id AS uid,COUNT(DISTINCT business_date) AS visit_count,MAX(business_date) AS latest_date,SUBSTRING_INDEX(GROUP_CONCAT(id ORDER BY settled_at DESC,id DESC), ',', 1) AS latest_service_fact_id")
+            ->group('member_id')
             ->select()
             ->toArray();
-        $latestWriteoffIds = array_values(array_unique(array_filter(array_map(
+        $latestFactIds = array_values(array_unique(array_filter(array_map(
             'intval',
-            array_column($rows, 'latest_writeoff_id')
+            array_column($rows, 'latest_service_fact_id')
         ))));
-        $snapshotNames = $this->writeoffStaffSnapshots($latestWriteoffIds);
-        $staffIds = array_values(array_unique(array_filter(array_map('intval', array_column($rows, 'last_staff_id')))));
-        $staffNames = [];
-        $staffColumns = $this->tableColumns('system_store_staff');
-        if ($staffIds && isset($staffColumns['id'], $staffColumns['staff_name'])) {
-            $staffNames = Db::name('system_store_staff')->whereIn('id', $staffIds)->column('staff_name', 'id');
+        $craftsmenByFact = [];
+        if ($latestFactIds) {
+            foreach (Db::name('cashier_v3_entitlement_service_fact')->where('tenant_id', $tenantId)
+                ->whereIn('id', $latestFactIds)->field('id,craftsmen_snapshot_json')->select()->toArray() as $fact) {
+                $craftsmenByFact[(int)$fact['id']] = $this->serviceCraftsmenSummary(
+                    (string)($fact['craftsmen_snapshot_json'] ?? '')
+                );
+            }
         }
         $result = [];
         foreach ($rows as $row) {
-            $timestamp = (int)($row['latest_time'] ?? 0);
-            $writeoffId = (int)($row['latest_writeoff_id'] ?? 0);
-            $snapshot = (string)($snapshotNames[$writeoffId] ?? '');
-            $staffId = (int)($row['last_staff_id'] ?? 0);
+            $factId = (int)($row['latest_service_fact_id'] ?? 0);
             $result[(int)$row['uid']] = [
                 'visit_count' => (int)($row['visit_count'] ?? 0),
-                'latest_date' => $this->businessDate($timestamp),
-                'last_staff_name' => $snapshot !== '' ? $snapshot : (string)($staffNames[$staffId] ?? ''),
+                'latest_date' => (string)($row['latest_date'] ?? ''),
+                'last_staff_name' => (string)($craftsmenByFact[$factId] ?? ''),
             ];
         }
         return $result;
+    }
+
+    protected function serviceCraftsmenSummary(string $json): string
+    {
+        $rows = json_decode($json, true);
+        if (!is_array($rows)) {
+            return '';
+        }
+        $names = [];
+        foreach ($rows as $row) {
+            $name = trim((string)($row['staff_name_snapshot'] ?? $row['staffName'] ?? ''));
+            if ($name !== '' && !in_array($name, $names, true)) {
+                $names[] = $name;
+            }
+        }
+        return implode('、', $names);
     }
 
     protected function businessDate(int $timestamp): string
@@ -931,7 +967,7 @@ class MemberUnifiedQueryProvider
             // 所有最终“正常”会员必定 status=1；删除标记由最终判定继续过滤。
             $query->where('u.status', 1);
             if ($exact) {
-                $query->where('u.is_del', '<>', 1)->whereNull('u.delete_time');
+                $this->applyExactNotCancelledPushdown($query);
             }
         } elseif ($status === 'inactive') {
             $query->where(function ($where) {
@@ -940,17 +976,38 @@ class MemberUnifiedQueryProvider
                 });
             });
             if ($exact) {
-                $query->where('u.is_del', '<>', 1)->whereNull('u.delete_time');
+                $this->applyExactNotCancelledPushdown($query);
             }
         } elseif ($status === 'cancelled') {
-            // delete_time 在不同历史库可能是 timestamp/int/varchar；IS NOT NULL 只会
-            // 多取空值形态，不会漏掉最终 cancelled，再由 rowAllowed 精确收口。
-            $query->where(function ($where) {
-                $where->where('u.is_del', 1)->whereOr(function ($deleted) {
-                    $deleted->whereNotNull('u.delete_time');
+            if ($exact) {
+                // 快路径在 SQL COUNT 和分页前必须与 memberState() 使用同一套
+                // empty() 语义；历史库可能用 0 或空字符串表示未注销。
+                $query->whereRaw(
+                    "(COALESCE(u.is_del, 0) = 1 OR "
+                    . "BINARY COALESCE(CAST(u.delete_time AS CHAR), '') "
+                    . "NOT IN (_binary'', _binary'0'))"
+                );
+            } else {
+                // 非快路径只做安全超集下推，最终仍由 rowAllowed() 精确收口。
+                $query->where(function ($where) {
+                    $where->where('u.is_del', 1)->whereOr(function ($deleted) {
+                        $deleted->whereNotNull('u.delete_time');
+                    });
                 });
-            });
+            }
         }
+    }
+
+    /**
+     * fast path 的总数和分页必须与 memberState() 的未注销定义完全一致。
+     */
+    protected function applyExactNotCancelledPushdown($query): void
+    {
+        $query->whereRaw(
+            "(COALESCE(u.is_del, 0) <> 1 AND "
+            . "BINARY COALESCE(CAST(u.delete_time AS CHAR), '') "
+            . "IN (_binary'', _binary'0'))"
+        );
     }
 
     /**
@@ -1053,5 +1110,14 @@ class MemberUnifiedQueryProvider
         }
         $timestamp = strtotime((string)$value);
         return $timestamp ? date('Y-m-d H:i:s', $timestamp) : '';
+    }
+
+    protected function dateValue($value): string
+    {
+        if (is_numeric($value) && (int)$value > 0) {
+            return date('Y-m-d', (int)$value);
+        }
+        $timestamp = strtotime((string)$value);
+        return $timestamp ? date('Y-m-d', $timestamp) : '';
     }
 }

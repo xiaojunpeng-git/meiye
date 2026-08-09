@@ -46,7 +46,7 @@ final class CashierV3OrderCenterPartitionProvider implements CashierV3RootPartit
             return [
                 'ready' => true,
                 'payload' => $payload,
-                'public_versions' => $this->salesOrderPublicVersions($payload, $dataScope),
+                'public_versions' => $this->recordPublicVersions($payload, $dataScope),
             ];
         } catch (\Throwable $exception) {
             // 订单中心是按需只读分区。不能以空记录冒充权威数据，但其读取
@@ -103,6 +103,45 @@ final class CashierV3OrderCenterPartitionProvider implements CashierV3RootPartit
         return array_values($versions);
     }
 
+    /** @return array<int,array{kind:string,id:string,version:int}> */
+    public function recordPublicVersions(array $payload, CashierV3DataScopeContext $dataScope): array
+    {
+        $versions = $this->salesOrderPublicVersions($payload, $dataScope);
+        $records = [];
+        foreach (['rechargeOrders', 'records'] as $key) {
+            foreach ((array)($payload[$key] ?? []) as $record) {
+                if (!is_array($record) || (string)($record['economicsDataStatus'] ?? '') !== 'ready') continue;
+                $rechargeId = (int)($record['rechargeId'] ?? 0);
+                $memberId = (int)($record['memberId'] ?? 0);
+                if ($rechargeId > 0 && $memberId > 0) $records[$rechargeId] = $memberId;
+            }
+        }
+        if ($records === []) return $versions;
+
+        $operationCounts = [];
+        foreach (Db::name(CashierV3OrderLifecycleServices::OPERATION_TABLE)
+            ->where('tenant_id', $dataScope->tenantId())->where('source_type', 'recharge')
+            ->whereIn('source_order_id', array_map('strval', array_keys($records)))
+            ->field('source_order_id, COUNT(*) AS operation_count')->group('source_order_id')->select()->toArray() as $row) {
+            $operationCounts[(int)$row['source_order_id']] = (int)$row['operation_count'];
+        }
+        $balanceVersions = [];
+        foreach (Db::name('user')->whereIn('uid', array_values($records))->field('uid,balance_version')->select()->toArray() as $row) {
+            if ((int)$row['balance_version'] > 0) $balanceVersions[(int)$row['uid']] = (int)$row['balance_version'];
+        }
+        foreach ($records as $rechargeId => $memberId) {
+            $versions[] = ['kind' => 'recharge_order', 'id' => (string)$rechargeId,
+                'version' => 1 + (int)($operationCounts[$rechargeId] ?? 0)];
+            if (isset($balanceVersions[$memberId])) {
+                $versions[] = ['kind' => 'member_balance', 'id' => (string)$memberId,
+                    'version' => $balanceVersions[$memberId]];
+            }
+        }
+        $unique = [];
+        foreach ($versions as $version) $unique[$version['kind'] . ':' . $version['id']] = $version;
+        return array_values($unique);
+    }
+
     private function unavailablePayload(): array
     {
         return [
@@ -120,6 +159,7 @@ final class CashierV3OrderCenterPartitionProvider implements CashierV3RootPartit
             'rechargeOrders' => [],
             'supplementOrders' => [],
             'refundOrders' => [],
+            'debtRecords' => [],
             'serviceRecords' => [],
             'giftRecords' => [],
             'projectReplacementRecords' => [],

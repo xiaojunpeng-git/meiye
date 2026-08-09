@@ -223,6 +223,7 @@ class CashierV3ContextPolicy
                 'deferred_identity_kinds',
                 'normalized_payload',
                 'server_checkout_sources',
+                'allow_empty_server_resource_discovery',
             ] as $passKey) {
                 if (array_key_exists($passKey, $extra)) {
                     $out[$passKey] = $extra[$passKey];

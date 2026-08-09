@@ -29,6 +29,7 @@ class ProductRelatedJob extends BaseJobs
             $cardRelatedServices->handleCardRelated($id, $related);
         } catch (\Throwable $e) {
             Log::error('写入卡项关联商品发生错误,错误原因:' . $e->getMessage());
+            throw $e;
         }
         return true;
     }

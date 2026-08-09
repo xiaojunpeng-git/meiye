@@ -43,6 +43,12 @@ if (strpos($summarySource, 'CashierV3MemberDebtProjectionServices') === false
     fwrite(STDERR, "member debt projection wiring missing\n");
     exit(1);
 }
+if (strpos($memberModuleSource, 'CashierV3CashierMemberSummaryServices') === false
+    || strpos($memberModuleSource, '$cashierMemberSummaries->read(') === false
+    || strpos($memberModuleSource, '$member = array_merge($member,') === false) {
+    fwrite(STDERR, "cashier member selection does not return the authoritative financial summary\n");
+    exit(1);
+}
 foreach (['CashierV3MemberDebtProjectionServices', "(string)(\$payload['tab'] ?? '') === 'debt'", "'debtRecords'", "'open-debt-settlements'"] as $needle) {
     if (strpos($memberModuleSource, $needle) === false) {
         fwrite(STDERR, "member detail debt tab wiring missing: {$needle}\n");

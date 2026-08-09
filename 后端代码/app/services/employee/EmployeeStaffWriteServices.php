@@ -2,6 +2,7 @@
 namespace app\services\employee;
 
 use app\services\BaseServices;
+use app\services\mobile\merchant\MobileAuthRevocationServices;
 use app\services\store\SystemStoreStaffServices;
 use app\services\system\SystemRoleServices;
 use mohe\exceptions\AdminException;
@@ -20,8 +21,7 @@ class EmployeeStaffWriteServices extends BaseServices
     /** 门店端禁止改写的总部字段（仅允许选择总部已配置的门店角色 roles） */
     public const STORE_FORBIDDEN_HQ_FIELDS = [
         'position', 'position_level', 'is_manager', 'is_butler', 'is_cashier',
-        'order_status', 'verify_status', 'is_customer', 'can_choose', 'is_reservable',
-        'is_fencheng', 'rules', 'cashier_rules', 'mall_rules',
+        'order_status', 'verify_status', 'rules', 'cashier_rules', 'mall_rules',
     ];
 
     /**
@@ -78,6 +78,8 @@ class EmployeeStaffWriteServices extends BaseServices
 
             /** @var SystemStoreStaffServices $staffServices */
             $staffServices = app()->make(SystemStoreStaffServices::class);
+            $staffServices->normalizeStaffAvatar($staffPayload);
+            $staffServices->normalizeStaffDates($staffPayload);
 
             $existingStaff = null;
             $linkedEmployeeId = 0;
@@ -155,7 +157,7 @@ class EmployeeStaffWriteServices extends BaseServices
                 $phone = $staffPayload['phone'];
             }
 
-            $this->assertNoActiveDuplicateAssignment($employeeId, $storeId, $staffId);
+            $this->assertSingleActiveStoreAssignment($employeeId, $staffId, $staffStatus);
 
             $staffPayload['employee_id'] = $employeeId;
 
@@ -327,6 +329,14 @@ class EmployeeStaffWriteServices extends BaseServices
             'status' => 0,
             'update_time' => $now,
         ]);
+        /** @var MobileAuthRevocationServices $mobileSessions */
+        $mobileSessions = app()->make(MobileAuthRevocationServices::class);
+        $mobileSessions->revokeAllInCurrentTransaction(
+            $employeeId,
+            'EMPLOYEE_DISABLED',
+            (int)($operatorContext['operator_id'] ?? 0),
+            (string)($operatorContext['request_id'] ?? '')
+        );
         Db::name('system_store_staff')
             ->where('employee_id', $employeeId)
             ->where('is_del', 0)
@@ -574,8 +584,6 @@ class EmployeeStaffWriteServices extends BaseServices
         foreach (self::STORE_FORBIDDEN_HQ_FIELDS as $field) {
             unset($staffPayload[$field]);
         }
-        // 客服二维码随 is_customer 总部字段一并禁写
-        unset($staffPayload['customer_url']);
         if ($existingStaff) {
             // J1：编辑已有任职时全部总部字段必须用数据库原值覆盖（含 is_butler，不得强制清零）
             $staffPayload['position'] = (int)($existingStaff['position'] ?? 0);
@@ -585,11 +593,6 @@ class EmployeeStaffWriteServices extends BaseServices
             $staffPayload['is_cashier'] = (int)($existingStaff['is_cashier'] ?? 0) === 1 ? 1 : 0;
             $staffPayload['order_status'] = (int)($existingStaff['order_status'] ?? 0) === 1 ? 1 : 0;
             $staffPayload['verify_status'] = (int)($existingStaff['verify_status'] ?? 0) === 1 ? 1 : 0;
-            $staffPayload['is_customer'] = (int)($existingStaff['is_customer'] ?? 0) === 1 ? 1 : 0;
-            $staffPayload['can_choose'] = (int)($existingStaff['can_choose'] ?? 0) === 1 ? 1 : 0;
-            $staffPayload['is_reservable'] = (int)($existingStaff['is_reservable'] ?? 0) === 1 ? 1 : 0;
-            $staffPayload['is_fencheng'] = (int)($existingStaff['is_fencheng'] ?? 0) === 1 ? 1 : 0;
-            $staffPayload['customer_url'] = (string)($existingStaff['customer_url'] ?? '');
         } else {
             $staffPayload['position'] = 0;
             $staffPayload['position_level'] = 0;
@@ -598,19 +601,20 @@ class EmployeeStaffWriteServices extends BaseServices
             $staffPayload['is_cashier'] = 0;
             $staffPayload['order_status'] = 0;
             $staffPayload['verify_status'] = 0;
-            $staffPayload['is_customer'] = 0;
-            $staffPayload['can_choose'] = 0;
-            $staffPayload['is_reservable'] = 0;
-            $staffPayload['is_fencheng'] = 0;
-            $staffPayload['customer_url'] = '';
         }
     }
 
-    protected function assertNoActiveDuplicateAssignment(int $employeeId, int $storeId, int $excludeStaffId): void
+    /**
+     * 一个员工同时只能有一条有效门店任职。跨店变更必须走调店事务，
+     * 不能通过新增或重新启用任职绕过原任职停用与任职历史记录。
+     */
+    protected function assertSingleActiveStoreAssignment(int $employeeId, int $excludeStaffId, int $targetStatus): void
     {
+        if ($targetStatus !== 1) {
+            return;
+        }
         $q = Db::name('system_store_staff')
             ->where('employee_id', $employeeId)
-            ->where('store_id', $storeId)
             ->where('is_del', 0)
             ->where('status', 1)
             ->lock(true);
@@ -619,7 +623,7 @@ class EmployeeStaffWriteServices extends BaseServices
         }
         $dup = $q->find();
         if ($dup) {
-            throw new AdminException('该员工在本门店已有有效任职，不能重复添加');
+            throw new AdminException('该员工已有有效门店任职，如需变更门店请使用调店功能');
         }
     }
 

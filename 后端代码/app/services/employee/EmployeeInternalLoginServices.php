@@ -65,6 +65,36 @@ class EmployeeInternalLoginServices extends BaseServices
     }
 
     /**
+     * 门店端登录只能使用员工唯一的有效门店任职；多任职属于数据异常，
+     * 不能退化为让员工自行选择门店。
+     */
+    public function resolveUniqueStoreV3Staff(int $employeeId): ?array
+    {
+        if ($employeeId <= 0) {
+            return null;
+        }
+        $activeStaffIds = Db::name('system_store_staff')
+            ->where('employee_id', $employeeId)
+            ->where('status', 1)
+            ->where('is_del', 0)
+            ->where('store_id', '>', 0)
+            ->order('id', 'asc')
+            ->column('id');
+        $activeStaffIds = array_values(array_unique(array_map('intval', $activeStaffIds ?: [])));
+        if (!$activeStaffIds) {
+            return null;
+        }
+        if (count($activeStaffIds) !== 1) {
+            throw new AdminException('当前员工存在多条有效门店任职，请先完成调店处理');
+        }
+        $eligible = $this->listEligibleStoreV3Staff($employeeId);
+        if (count($eligible) !== 1 || (int)($eligible[0]['id'] ?? 0) !== $activeStaffIds[0]) {
+            return null;
+        }
+        return $eligible[0];
+    }
+
+    /**
      * 员工在指定门店任职上是否具备某端入口（岗位入口开 + 有规则）
      */
     public function staffHasChannelEntry(int $staffId, string $channel): bool

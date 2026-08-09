@@ -1,0 +1,84 @@
+import { buildMobileRequestPlan, mobileRequestPlanMatchesContract } from './request-context.uts'
+import { sendMobileRequest } from './mobile-http.uts'
+import { merchantContextSwitchInstallDecision } from '../../app/state/root-state.uts'
+import { clearMerchantRoot, currentMerchantRoot, merchantRequestSession, saveMerchantRoot } from '../platform/mobile-merchant-session.uts'
+
+const merchantSessionTransportContract : any = {
+	contractVersion: 'mobile-merchant-v1',
+	endpoints: {
+		switchContext: { method: 'POST', path: '/mobile/merchant/context/switch', requestMetadataProfile: 'MERCHANT_SESSION' },
+		logout: { method: 'POST', path: '/mobile/merchant/logout', requestMetadataProfile: 'MERCHANT_SESSION' }
+	},
+	requestMetadataProfiles: {
+		MERCHANT_SESSION: {
+			required: {
+				'X-Mobile-Contract-Version': 'contractVersion',
+				'X-Mobile-Client-Session-Id': 'clientSessionId',
+				'X-Mobile-Platform': 'platform',
+				'X-Mobile-Request-Id': 'requestId',
+				Authorization: 'Bearer <merchantToken>',
+				'X-Mobile-Active-Context-Id': 'activeContextId',
+				'X-Mobile-State-Context-Id': 'stateContextId'
+			},
+			forbidden: ['X-Mobile-App-Session', 'Cookie', 'queryToken', 'bodyToken', 'headerAlias']
+		}
+	}
+}
+
+function opaque(prefix : string) : string {
+	return prefix + '-' + Date.now().toString() + '-' + Math.floor(Math.random() * 100000000).toString()
+}
+
+function merchantSessionPlan(endpoint : string, root : any) : any {
+	let session = merchantRequestSession(root)
+	if (session == null) return null
+	let plan = buildMobileRequestPlan(merchantSessionTransportContract, endpoint, session)
+	return mobileRequestPlanMatchesContract(merchantSessionTransportContract, endpoint, session, plan) ? plan : null
+}
+
+function logoutPlan() : any {
+	let root = currentMerchantRoot()
+	return merchantSessionPlan('logout', root)
+}
+
+export function switchMobileMerchantContext(targetContextId : string, done : (value : any) => void) : void {
+	let current = currentMerchantRoot()
+	let normalizedTarget = targetContextId.trim()
+	if (current == null || !Array.isArray(current.contexts)) { done({ ok: false, message: '当前商家会话尚未准备好。' }); return }
+	let allowed = false
+	for (let index = 0; index < current.contexts.length; index++) {
+		if (String(current.contexts[index].contextId || '') == normalizedTarget) { allowed = true; break }
+	}
+	if (!allowed) { done({ ok: false, message: '目标门店不在当前可用范围内。' }); return }
+	if (current.activeContext != null && String(current.activeContext.contextId || '') == normalizedTarget) {
+		done({ ok: false, message: '当前已经是该门店。' }); return
+	}
+	let plan = merchantSessionPlan('switchContext', current)
+	if (plan == null) { done({ ok: false, message: '当前商家会话无法发起门店切换。' }); return }
+	sendMobileRequest(plan, {
+		targetContextId: normalizedTarget,
+		expectedAuthVersion: Number(current.authVersion || 0),
+		idempotencyKey: opaque('merchant-context-switch')
+	}, (result : any) => {
+		if (!result.ok) { done(result); return }
+		let incoming = result.body
+		let decision = merchantContextSwitchInstallDecision(current, incoming, normalizedTarget)
+		if (decision != 'ACCEPT_SWITCH') {
+			done({ ok: false, message: '门店切换结果校验失败：' + decision, body: incoming })
+			return
+		}
+		saveMerchantRoot(incoming)
+		done({ ok: true, message: '', body: incoming, root: incoming })
+	})
+}
+
+export function logoutMobileMerchant(done : (value : any) => void) : void {
+	let plan = logoutPlan()
+	if (plan == null) { done({ ok: false, message: '当前没有可退出的商家会话。' }); return }
+	sendMobileRequest(plan, {
+		idempotencyKey: 'merchant-logout-' + Date.now().toString() + '-' + Math.floor(Math.random() * 100000000).toString()
+	}, (result : any) => {
+		if (result.ok) clearMerchantRoot()
+		done(result)
+	})
+}

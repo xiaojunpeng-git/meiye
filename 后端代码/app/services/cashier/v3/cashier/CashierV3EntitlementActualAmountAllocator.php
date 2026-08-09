@@ -6,11 +6,12 @@ namespace app\services\cashier\v3\cashier;
  * 权益项目“实际购买金额”的分摊器。
  *
  * 这里处理的是购买金额按权益次数的展示／草稿分摊，不是核销后台计价。
- * 使用累计四舍五入差额，保证全部次数的分摊金额严格回到原购买金额。
+ * 购买金额必须是整数元。前 N-1 次按整除向下取整，最后一次承担尾差，
+ * 保证全部次数严格回到原购买金额且收银链路不产生小数金额。
  */
 final class CashierV3EntitlementActualAmountAllocator
 {
-    public const CALCULATION_VERSION = 'cumulative-half-up-cent-v2';
+    public const CALCULATION_VERSION = 'whole-yuan-floor-final-remainder-v1';
 
     public static function allocate(
         string $purchaseAmount,
@@ -19,13 +20,13 @@ final class CashierV3EntitlementActualAmountAllocator
         int $quantity
     ): string {
         self::assertInputs($purchaseAmount, $totalPurchaseTimes, $consumedTimes, $quantity);
-        $start = self::cumulativeCents($purchaseAmount, $totalPurchaseTimes, $consumedTimes);
-        $end = self::cumulativeCents(
+        $start = self::cumulativeYuan($purchaseAmount, $totalPurchaseTimes, $consumedTimes);
+        $end = self::cumulativeYuan(
             $purchaseAmount,
             $totalPurchaseTimes,
             $consumedTimes + $quantity
         );
-        return self::centsToMoney(bcsub($end, $start, 0));
+        return self::yuanToMoney(bcsub($end, $start, 0));
     }
 
     public static function remaining(
@@ -41,7 +42,7 @@ final class CashierV3EntitlementActualAmountAllocator
         );
     }
 
-    private static function cumulativeCents(
+    private static function cumulativeYuan(
         string $purchaseAmount,
         int $totalPurchaseTimes,
         int $completedTimes
@@ -49,40 +50,31 @@ final class CashierV3EntitlementActualAmountAllocator
         if ($completedTimes <= 0) {
             return '0';
         }
-        $totalCents = self::moneyToCents($purchaseAmount);
+        $totalYuan = self::moneyToWholeYuan($purchaseAmount);
         if ($completedTimes >= $totalPurchaseTimes) {
-            return $totalCents;
+            return $totalYuan;
         }
-        $divisor = (string)$totalPurchaseTimes;
-        $numerator = bcmul($totalCents, (string)$completedTimes, 0);
-        $whole = bcdiv($numerator, $divisor, 0);
-        $remainder = bcmod($numerator, $divisor);
-        if (bccomp(bcmul($remainder, '2', 0), $divisor, 0) >= 0) {
-            $whole = bcadd($whole, '1', 0);
-        }
-        return $whole;
+        $regularAmount = bcdiv($totalYuan, (string)$totalPurchaseTimes, 0);
+        return bcmul($regularAmount, (string)$completedTimes, 0);
     }
 
-    private static function moneyToCents(string $amount): string
+    private static function moneyToWholeYuan(string $amount): string
     {
-        if (preg_match('/^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,2})?$/', $amount) !== 1) {
-            throw new \InvalidArgumentException('purchase amount must be nonnegative money');
+        if (preg_match('/^(?:0|[1-9][0-9]*)(?:\.0{1,2})?$/D', $amount) !== 1) {
+            throw new \InvalidArgumentException('purchase amount must be nonnegative whole yuan');
         }
-        $parts = explode('.', $amount, 2);
-        $fraction = str_pad($parts[1] ?? '', 2, '0');
-        $cents = ltrim($parts[0] . $fraction, '0');
-        return $cents === '' ? '0' : $cents;
+        $whole = ltrim(explode('.', $amount, 2)[0], '0');
+        return $whole === '' ? '0' : $whole;
     }
 
-    private static function centsToMoney(string $cents): string
+    private static function yuanToMoney(string $yuan): string
     {
-        if (preg_match('/^[0-9]+$/', $cents) !== 1) {
-            throw new \InvalidArgumentException('allocated cents must be nonnegative');
+        if (preg_match('/^[0-9]+$/D', $yuan) !== 1) {
+            throw new \InvalidArgumentException('allocated yuan must be nonnegative');
         }
-        $normalized = ltrim($cents, '0');
+        $normalized = ltrim($yuan, '0');
         $normalized = $normalized === '' ? '0' : $normalized;
-        $padded = str_pad($normalized, 3, '0', STR_PAD_LEFT);
-        return substr($padded, 0, -2) . '.' . substr($padded, -2);
+        return $normalized . '.00';
     }
 
     private static function assertInputs(
@@ -91,7 +83,7 @@ final class CashierV3EntitlementActualAmountAllocator
         int $consumedTimes,
         int $quantity
     ): void {
-        self::moneyToCents($purchaseAmount);
+        self::moneyToWholeYuan($purchaseAmount);
         if ($totalPurchaseTimes <= 0
             || $consumedTimes < 0
             || $quantity < 0

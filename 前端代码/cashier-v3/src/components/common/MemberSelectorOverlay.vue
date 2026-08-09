@@ -1,4 +1,5 @@
 <script setup>
+import CornerDownLeft from '@lucide/vue/dist/esm/icons/corner-down-left.mjs'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import MemberCreatorPanel from '@/components/member/MemberCreatorPanel.vue'
 
@@ -82,7 +83,6 @@ const queryError = ref('')
 const selectError = ref('')
 const activeView = ref(props.initialView === 'creator' ? 'creator' : 'selector')
 const isSelectingGuest = ref(false)
-let keywordQueryTimer = null
 let querySequence = 0
 
 const isBusy = computed(() => props.isLoading || isQuerying.value || isSelectingGuest.value)
@@ -146,23 +146,13 @@ async function runQuery(targetPage = 1) {
 }
 
 function submitQuery() {
-  if (keywordQueryTimer) clearTimeout(keywordQueryTimer)
   runQuery(1)
 }
 
 function clearQuery() {
   keyword.value = ''
-  if (keywordQueryTimer) clearTimeout(keywordQueryTimer)
-  runQuery(1)
+  queryError.value = ''
 }
-
-function scheduleKeywordQuery() {
-  if (keywordQueryTimer) clearTimeout(keywordQueryTimer)
-  if (activeView.value !== 'selector') return
-  keywordQueryTimer = setTimeout(() => runQuery(1), 300)
-}
-
-watch(keyword, scheduleKeywordQuery)
 
 // 打开选择器即加载当前数据权限范围内的第一页。此前只有手动点击“查询”
 // 才会发起请求，首次打开会把尚未加载误显示成“暂无可显示的会员”。
@@ -171,7 +161,6 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
-  if (keywordQueryTimer) clearTimeout(keywordQueryTimer)
   querySequence += 1
 })
 
@@ -264,10 +253,11 @@ async function handleCreated(payload = {}) {
       <form class="member-selector__search" @submit.prevent="submitQuery">
         <label class="member-selector__search-field">
           <span>查询会员</span>
-          <input v-model="keyword" type="search" autocomplete="off" placeholder="姓名、完整手机号或会员编号" :disabled="isBusy || selectingRecordId !== null">
+          <input v-model="keyword" type="search" autocomplete="off" placeholder="姓名、完整手机号或会员编号" :disabled="isBusy || selectingRecordId !== null" @keydown.enter.prevent="submitQuery">
         </label>
         <button type="submit" class="member-selector__button member-selector__button--primary" :disabled="isBusy || selectingRecordId !== null">
-          {{ isBusy ? '查询中…' : '查询' }}
+          <template v-if="isBusy">查询中…</template>
+          <template v-else><span>查询</span><CornerDownLeft :size="15" :stroke-width="2" aria-hidden="true" /></template>
         </button>
         <button type="button" class="member-selector__button" :disabled="isBusy || selectingRecordId !== null" @click="clearQuery">清空</button>
         <span class="member-selector__search-divider" aria-hidden="true" />

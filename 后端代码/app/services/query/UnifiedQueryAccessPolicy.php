@@ -83,7 +83,11 @@ class UnifiedQueryAccessPolicy
     {
         $base = $this->has($context, self::PAGE_POLICY);
         $shared = $base && $this->has($context, self::MANAGE_SHARED);
-        $export = $base && ($this->has($context, self::EXPORT) || $this->has($context, '*'));
+        // 产品统一口径（2026-07-29）：页面一旦获得统一查询资格，
+        // 查询设置、个人自定义字段、字段改名和导出均不再受细粒度角色权限控制。
+        // 数据范围仍由服务端上下文和 provider 强制注入；这里不能扩大租户、
+        // 门店或组织范围。共享字段发布继续单独校验其可共享范围。
+        $export = $base;
         return [
             'createCustomField' => $base,
             'editCustomField' => $base,

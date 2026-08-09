@@ -1,0 +1,384 @@
+<template>
+	<view class="customer-detail">
+		<view class="customer-detail__header">
+			<view class="customer-detail__back" role="button" aria-label="返回客户列表" @tap="goBack"><text>‹</text></view>
+			<text class="customer-detail__title">客户详情</text>
+			<view class="customer-detail__edit" v-if="customer != null" role="button" @tap="openProfileEditor"><text>编辑</text></view><view v-else class="customer-detail__header-space"></view>
+		</view>
+		<scroll-view class="customer-detail__content" scroll-y>
+			<view v-if="loading" class="customer-detail__empty"><text>正在读取客户详情</text></view>
+			<view v-else-if="message.length > 0" class="customer-detail__empty"><text>{{ message }}</text><view class="customer-detail__retry" @tap="loadDetail"><text>重新加载</text></view></view>
+			<view v-else-if="customer == null" class="customer-detail__empty"><text>未找到该客户</text></view>
+			<view v-else class="customer-detail__body">
+				<view class="customer-detail__identity">
+					<view class="customer-detail__identity-main">
+						<view class="customer-detail__name-row"><text class="customer-detail__name">{{ customer.name }}</text><text v-if="customer.level.length > 0" class="customer-detail__level">{{ customer.level }}</text><text v-if="customer.status.length > 0" class="customer-detail__status">{{ customer.status }}</text></view>
+						<text class="customer-detail__identity-copy">{{ identitySummary() }}</text>
+					</view>
+					<view v-if="customer.phone.length > 0" class="customer-detail__call" role="button" aria-label="拨打客户电话" @tap="callCustomer"><text>拨号</text></view>
+				</view>
+
+				<view class="customer-detail__metrics" aria-label="客户关键资产">
+					<view v-for="metric in metrics()" :key="metric.key" class="customer-detail__metric" :class="{ 'customer-detail__metric--total': metric.key === 'total_balance', 'customer-detail__metric--link': metric.action.length > 0 }" role="button" @tap="openAssetDetail(metric.action)"><view class="customer-detail__metric-value-row"><text class="customer-detail__metric-value">{{ metric.value }}</text><text v-if="metric.action.length > 0" class="customer-detail__metric-arrow">›</text></view><text class="customer-detail__metric-label">{{ metric.label }}</text><text v-if="metric.composition.length > 0" class="customer-detail__metric-composition">{{ metric.composition }}</text></view>
+				</view>
+
+				<scroll-view class="customer-detail__tabs" scroll-x :show-scrollbar="false" role="tablist" aria-label="客户详情页签">
+					<view class="customer-detail__tab-track"><view v-for="tab in tabs" :key="tab.key" class="customer-detail__tab" :class="{ 'customer-detail__tab--active': activeTab === tab.key }" role="tab" :aria-selected="activeTab === tab.key" @tap="selectTab(tab.key)"><text>{{ tab.label }}</text></view></view>
+				</scroll-view>
+
+				<view v-if="activeTab === 'overview'" class="customer-detail__tab-content">
+					<view class="customer-detail__section">
+						<view v-for="field in overviewFields()" :key="field.key" class="customer-detail__row" :class="{ 'customer-detail__row--link': field.action.length > 0 }" role="button" @tap="openOverviewField(field)"><text class="customer-detail__label">{{ field.label }}</text><view class="customer-detail__overview-value"><text class="customer-detail__value">{{ field.value }}</text><text v-if="field.action.length > 0" class="customer-detail__overview-arrow">›</text></view></view>
+					</view>
+				</view>
+
+				<view v-else-if="activeTab === 'profile'" class="customer-detail__tab-content">
+					<view class="customer-detail__section"><view class="customer-detail__section-heading"><text class="customer-detail__section-title">基本资料</text></view><view v-for="field in profileFields()" :key="field.key" class="customer-detail__row"><text class="customer-detail__label">{{ field.label }}</text><text class="customer-detail__value">{{ field.value }}</text></view></view>
+					<view class="customer-detail__section"><view class="customer-detail__section-heading"><text class="customer-detail__section-title">会员关系</text></view><view v-for="field in relationFields()" :key="field.key" class="customer-detail__row"><text class="customer-detail__label">{{ field.label }}</text><text class="customer-detail__value">{{ field.value }}</text></view></view>
+				</view>
+
+				<view v-else-if="activeTab === 'assets'" class="customer-detail__tab-content">
+					<view class="customer-detail__asset-detail">
+						<view class="customer-detail__asset-detail-heading"><view class="customer-detail__asset-detail-back" role="button" @tap="closeAssetDetail"><text>‹</text><text>返回近况</text></view><text class="customer-detail__asset-detail-title">{{ assetDetailTitle() }}</text></view>
+						<view v-if="assetDetailType === 'balance_changes'" class="customer-detail__notice customer-detail__asset-note"><text class="customer-detail__notice-title">余额异动仅显示可审计的 V3 记录</text><text class="customer-detail__notice-copy">早期未带门店归属的历史流水不会混入当前权限范围。</text></view>
+						<view class="customer-detail__section">
+							<view v-if="assetLoading" class="customer-detail__service-empty"><text>正在读取{{ assetDetailTitle() }}</text></view>
+							<view v-else-if="assetMessage.length > 0" class="customer-detail__service-empty"><text>{{ assetMessage }}</text><view class="customer-detail__inline-action" @tap="loadAssetRecords(false)"><text>重新加载</text></view></view>
+							<view v-else-if="assetRecords.length === 0" class="customer-detail__service-empty"><text>暂无{{ assetDetailTitle() }}</text><text>仅显示当前账号有权查看的真实记录。</text></view>
+							<view v-else-if="assetDetailType === 'entitlements'"><view v-for="record in assetRecords" :key="record.id" class="customer-detail__asset-card"><view class="customer-detail__asset-card-row"><text class="customer-detail__asset-card-title">{{ record.cardName }}</text><text class="customer-detail__asset-card-status">{{ record.statusLabel }}</text></view><text class="customer-detail__asset-meta">{{ entitlementMeta(record) }}</text><view v-for="project in record.projects" :key="project.id" class="customer-detail__asset-project"><text>{{ project.projectName }}</text><text>剩余 {{ project.remainingTimes }} 次 · ¥{{ wholeMoney(project.remainingAmount) }}</text></view><text class="customer-detail__asset-footer">合计剩余 {{ record.remainingTimes }} 次 · ¥{{ wholeMoney(record.remainingAmount) }}</text></view></view>
+							<view v-else-if="assetDetailType === 'balance_changes'"><view v-for="record in assetRecords" :key="record.id" class="customer-detail__asset-card"><view class="customer-detail__asset-card-row"><view><text class="customer-detail__asset-card-title">{{ record.typeLabel }}</text><text class="customer-detail__asset-meta">{{ balanceMeta(record) }}</text></view><text class="customer-detail__balance-change" :class="{ 'customer-detail__balance-change--negative': isNegative(record.changeAmount) }">{{ signedMoney(record.changeAmount) }}</text></view><view class="customer-detail__asset-balance-grid"><text>本金 {{ signedMoney(record.principalDelta) }}</text><text>赠送 {{ signedMoney(record.bonusDelta) }}</text><text>余额 ¥{{ wholeMoney(record.balanceAfter) }}</text><text>本金 ¥{{ wholeMoney(record.principalAfter) }} · 赠送 ¥{{ wholeMoney(record.bonusAfter) }}</text></view><text v-if="record.sourceReference.length > 0" class="customer-detail__asset-footer">{{ record.sourceTypeLabel }} · {{ record.sourceReference }}</text></view></view>
+							<view v-else><view v-for="record in assetRecords" :key="record.id" class="customer-detail__asset-card"><view class="customer-detail__asset-card-row"><view><text class="customer-detail__asset-card-title">{{ record.sourceLabel }}</text><text class="customer-detail__asset-meta">{{ debtMeta(record) }}</text></view><text class="customer-detail__asset-card-status" :class="{ 'customer-detail__asset-card-status--settled': record.statusLabel === '已结清' }">{{ record.statusLabel }}</text></view><text class="customer-detail__asset-summary">{{ record.summary }}</text><view class="customer-detail__asset-balance-grid"><text>欠款 ¥{{ wholeMoney(record.originalDebtAmount) }}</text><text>已还 ¥{{ wholeMoney(record.repaidAmount) }}</text><text>待还 ¥{{ wholeMoney(record.remainingDebtAmount) }}</text></view><text v-if="record.sourceOrderNo.length > 0" class="customer-detail__asset-footer">{{ record.sourceOrderNo }}</text></view></view>
+							<view v-if="assetHasMore" class="customer-detail__load-more" @tap="loadAssetRecords(true)"><text>{{ assetLoading ? '正在加载…' : '加载更多明细' }}</text></view>
+						</view>
+					</view>
+				</view>
+
+				<view v-else-if="activeTab === 'care'" class="customer-detail__tab-content">
+					<view class="customer-detail__section"><view class="customer-detail__section-heading"><text class="customer-detail__section-title">未完成的跟进任务</text><view class="customer-detail__care-link" role="button" @tap="openCustomerCare"><text>进入客情管理</text><text>›</text></view></view>
+						<view v-if="careLoading" class="customer-detail__service-empty"><text>正在读取跟进任务</text></view>
+						<view v-else-if="careMessage.length > 0" class="customer-detail__service-empty"><text>{{ careMessage }}</text><view class="customer-detail__inline-action" @tap="loadCareTasks"><text>重新加载</text></view></view>
+						<view v-else-if="careTasks.length === 0" class="customer-detail__service-empty"><text>暂无未完成跟进任务</text></view>
+						<view v-else><view v-for="task in careTasks" :key="task.taskId" class="customer-detail__care-task"><view class="customer-detail__care-task-row"><text class="customer-detail__care-task-title">{{ task.typeLabel }}</text><text class="customer-detail__care-task-status">{{ task.statusLabel }}</text></view><text class="customer-detail__care-task-meta">{{ task.plannedAt }} · {{ task.owner.name }}</text><text v-if="String(task.note || '').length > 0" class="customer-detail__care-task-note">{{ task.note }}</text></view></view>
+					</view>
+				</view>
+
+				<view v-else-if="activeTab === 'service'" class="customer-detail__tab-content">
+					<view class="customer-detail__section"><view class="customer-detail__section-heading"><text class="customer-detail__section-title">实际服务记录</text><text class="customer-detail__section-copy">仅显示已完成服务</text></view>
+						<view v-if="serviceLoading" class="customer-detail__service-empty"><text>正在读取服务记录</text></view>
+						<view v-else-if="serviceMessage.length > 0" class="customer-detail__service-empty"><text>{{ serviceMessage }}</text><view class="customer-detail__inline-action" @tap="loadServiceRecords(false)"><text>重新加载</text></view></view>
+						<view v-else-if="serviceRecords.length === 0" class="customer-detail__service-empty"><text>暂无真实完成的服务记录</text><text>销售订单和未完成服务不会显示在这里。</text></view>
+						<view v-else><view v-for="record in serviceRecords" :key="record.id" class="customer-detail__service-card"><view class="customer-detail__service-card-row"><text class="customer-detail__service-project">{{ record.projectName }}</text><text class="customer-detail__service-status">{{ record.serviceStatus }}</text></view><text class="customer-detail__service-time">{{ record.serviceCompletedAt }}</text><view class="customer-detail__service-meta"><text>{{ serviceMeta(record) }}</text><text>{{ serviceSource(record) }}</text></view><text v-if="record.craftsmenSummary.length > 0" class="customer-detail__service-craftsman">手艺人：{{ record.craftsmenSummary }}</text></view><view v-if="serviceHasMore" class="customer-detail__load-more" @tap="loadServiceRecords(true)"><text>{{ serviceLoading ? '正在加载…' : '加载更多服务记录' }}</text></view></view>
+					</view>
+				</view>
+
+				<view v-else-if="activeTab === 'records'" class="customer-detail__tab-content">
+					<view class="customer-detail__section"><view class="customer-detail__section-heading"><text class="customer-detail__section-title">全部订单记录</text><text class="customer-detail__section-copy">包含历史状态</text></view>
+						<view v-if="orderLoading" class="customer-detail__service-empty"><text>正在读取订单记录</text></view>
+						<view v-else-if="orderMessage.length > 0" class="customer-detail__service-empty"><text>{{ orderMessage }}</text><view class="customer-detail__inline-action" @tap="loadOrderRecords(false)"><text>重新加载</text></view></view>
+						<view v-else-if="orderRecords.length === 0" class="customer-detail__service-empty"><text>暂无订单记录</text></view>
+						<view v-else><view v-for="record in orderRecords" :key="record.id" class="customer-detail__order-card"><view class="customer-detail__order-card-row"><text class="customer-detail__order-kind">{{ record.kindLabel }}</text><text class="customer-detail__order-status">{{ record.statusLabel }}</text></view><text class="customer-detail__order-items">{{ record.itemSummary }}</text><view class="customer-detail__order-meta"><text>{{ orderMeta(record) }}</text><text>¥{{ wholeMoney(record.amount) }}</text></view></view><view v-if="orderHasMore" class="customer-detail__load-more" @tap="loadOrderRecords(true)"><text>{{ orderLoading ? '正在加载…' : '加载更多订单' }}</text></view></view>
+					</view>
+				</view>
+
+				<view v-else class="customer-detail__tab-content">
+					<view class="customer-detail__notice customer-detail__notice--future"><text class="customer-detail__notice-title">{{ activeTabLabel() }}即将接入</text><text class="customer-detail__notice-copy">将由后端按当前数据权限分页返回正式服务或业务记录；不会用销售订单替代实际服务记录。</text></view>
+				</view>
+			</view>
+		</scroll-view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	import { queryMobileCustomerAssetRecords, queryMobileCustomerOrderRecords, queryMobileCustomerRecentSummary, queryMobileCustomerServiceRecords, queryMobileCustomers } from '../../../shared/api/mobile-customer-client.uts'
+	import { queryMobileCustomerCare } from '../../../shared/api/mobile-customer-care-client.uts'
+	import { callMobilePhone } from '../../../shared/platform/mobile-platform.uts'
+	import { currentMerchantRoot, merchantRequestSession } from '../../../shared/platform/mobile-merchant-session.uts'
+	import { openMerchantBootstrapForCustomerDetail, openMerchantCustomerCare, openMerchantCustomerOrderDetail, openMerchantCustomerProfile, returnFromMerchantCustomerDetail } from '../../../shared/platform/mobile-navigation.uts'
+
+	const tabs = [
+		{ key: 'overview', label: '近况' }, { key: 'profile', label: '资料' },
+		{ key: 'care', label: '客情' }, { key: 'service', label: '服务' }, { key: 'records', label: '记录' }
+	]
+	const customer = ref<any>(null)
+	const loading = ref(false)
+	const message = ref('')
+	const memberId = ref('')
+	const lookup = ref('')
+	const activeTab = ref('overview')
+	const serviceRecords = ref<Array<any>>([])
+	const recentSummary = ref<any>(null)
+	const serviceLoading = ref(false)
+	const serviceMessage = ref('')
+	const servicePage = ref(0)
+	const serviceHasMore = ref(false)
+	const orderRecords = ref<Array<any>>([])
+	const orderLoading = ref(false)
+	const orderMessage = ref('')
+	const orderPage = ref(0)
+	const orderHasMore = ref(false)
+	const careTasks = ref<Array<any>>([])
+	const careLoading = ref(false)
+	const careMessage = ref('')
+	const assetDetailType = ref('')
+	const assetRecords = ref<Array<any>>([])
+	const assetLoading = ref(false)
+	const assetMessage = ref('')
+	const assetPage = ref(0)
+	const assetHasMore = ref(false)
+
+	onLoad((options : any) => {
+		memberId.value = String(options != null ? options.id || '' : '')
+		lookup.value = String(options != null ? options.lookup || '' : '')
+		if (merchantLoginIsRequired()) { openMerchantBootstrapForCustomerDetail(memberId.value, lookup.value); return }
+		loadDetail()
+	})
+
+	function goBack() { returnFromMerchantCustomerDetail() }
+	function merchantLoginIsRequired() : boolean { return merchantRequestSession(currentMerchantRoot()) == null }
+	function selectTab(value : string) { activeTab.value = value; if (value != 'assets') assetDetailType.value = ''; if (value == 'service' && servicePage.value == 0) loadServiceRecords(false); if (value == 'records' && orderPage.value == 0) loadOrderRecords(false); if (value == 'care' && careTasks.value.length == 0) loadCareTasks() }
+	function callCustomer() { if (customer.value != null) callMobilePhone(String(customer.value.phone || '')) }
+	function openProfileEditor() { if (customer.value != null) openMerchantCustomerProfile('edit', memberId.value, String(customer.value.phone || lookup.value)) }
+	function openCustomerCare() { openMerchantCustomerCare(memberId.value) }
+	function activeTabLabel() : string { for (let index = 0; index < tabs.length; index++) if (tabs[index].key == activeTab.value) return tabs[index].label; return '当前内容' }
+
+	function loadDetail() {
+		if (memberId.value.length == 0 || lookup.value.length == 0) { message.value = '客户详情参数不完整，请返回列表重新打开。'; return }
+		loading.value = true; message.value = ''
+		queryMobileCustomers(false, { page: 1, limit: 20, keyword: lookup.value, filters: [], filterRelation: 'all' }, (result : any) => {
+			loading.value = false
+			if (!result.ok || result.body == null) { message.value = String(result.message || '客户详情加载失败。'); return }
+			let records = Array.isArray(result.body.records) ? result.body.records : []
+			let selected : any = null
+			for (let index = 0; index < records.length; index++) if (String(records[index].id || records[index].memberId || '') == memberId.value) { selected = records[index]; break }
+			if (selected == null) { message.value = '该客户不在当前数据权限范围内，或数据已发生变化。'; return }
+			customer.value = selected
+			loadRecentSummary()
+		})
+	}
+
+	function loadRecentSummary() {
+		if (customer.value == null) return
+		queryMobileCustomerRecentSummary({ memberId: Number(memberId.value) }, (result : any) => {
+			if (result.ok && result.body != null) recentSummary.value = result.body
+		})
+	}
+
+	function loadServiceRecords(append : boolean) {
+		if (customer.value == null || serviceLoading.value) return
+		serviceLoading.value = true; serviceMessage.value = ''
+		let page = append ? servicePage.value + 1 : 1
+		queryMobileCustomerServiceRecords({ memberId: Number(memberId.value), page: page, pageSize: 10 }, (result : any) => {
+			serviceLoading.value = false
+			if (!result.ok || result.body == null) { serviceMessage.value = String(result.message || '服务记录加载失败。'); return }
+			let records = Array.isArray(result.body.records) ? result.body.records : []
+			serviceRecords.value = append ? serviceRecords.value.concat(records) : records
+			servicePage.value = Number(result.body.page || page)
+			serviceHasMore.value = result.body.hasMore === true
+		})
+	}
+
+	function loadOrderRecords(append : boolean) {
+		if (customer.value == null || orderLoading.value) return
+		orderLoading.value = true; orderMessage.value = ''
+		let page = append ? orderPage.value + 1 : 1
+		queryMobileCustomerOrderRecords({ memberId: Number(memberId.value), page: page, pageSize: 10 }, (result : any) => {
+			orderLoading.value = false
+			if (!result.ok || result.body == null) { orderMessage.value = String(result.message || '订单记录加载失败。'); return }
+			let records = Array.isArray(result.body.records) ? result.body.records : []
+			orderRecords.value = append ? orderRecords.value.concat(records) : records
+			orderPage.value = Number(result.body.page || page)
+			orderHasMore.value = result.body.hasMore === true
+		})
+	}
+
+	function loadCareTasks() {
+		if (customer.value == null || careLoading.value) return
+		careLoading.value = true; careMessage.value = ''
+		queryMobileCustomerCare({ view: 'tasks', query: { memberId: Number(memberId.value), bucket: 'all', statusGroup: 'open', pageSize: 20 } }, (result : any) => {
+			careLoading.value = false
+			if (!result.ok || result.body == null || result.body.projection == null || result.body.projection.customerCare == null) { careMessage.value = String(result.message || '跟进任务加载失败。'); return }
+			let taskView = result.body.projection.customerCare.taskView
+			careTasks.value = taskView != null && Array.isArray(taskView.records) ? taskView.records : []
+		})
+	}
+
+	function openAssetDetail(detailType : string) {
+		if (detailType.length == 0) return
+		activeTab.value = 'assets'
+		assetDetailType.value = detailType
+		assetRecords.value = []; assetPage.value = 0; assetHasMore.value = false; assetMessage.value = ''
+		loadAssetRecords(false)
+	}
+	function closeAssetDetail() { assetDetailType.value = ''; assetMessage.value = ''; activeTab.value = 'overview' }
+	function assetDetailTitle() : string {
+		if (assetDetailType.value == 'entitlements') return '权益明细'
+		if (assetDetailType.value == 'balance_changes') return '余额异动'
+		if (assetDetailType.value == 'debts') return '欠款明细'
+		return '资产明细'
+	}
+	function loadAssetRecords(append : boolean) {
+		if (customer.value == null || assetDetailType.value.length == 0 || assetLoading.value) return
+		assetLoading.value = true; assetMessage.value = ''
+		let page = append ? assetPage.value + 1 : 1
+		queryMobileCustomerAssetRecords({ memberId: Number(memberId.value), detailType: assetDetailType.value, page: page, pageSize: 10 }, (result : any) => {
+			assetLoading.value = false
+			if (!result.ok || result.body == null) { assetMessage.value = String(result.message || '资产明细加载失败。'); return }
+			let records = Array.isArray(result.body.records) ? result.body.records : []
+			assetRecords.value = append ? assetRecords.value.concat(records) : records
+			assetPage.value = Number(result.body.page || page)
+			assetHasMore.value = result.body.hasMore === true
+		})
+	}
+
+	function textValue(value : any, fallback : string = '—') : string { let text = String(value == null ? '' : value); return text.length > 0 ? text : fallback }
+	function tagsValue() : string { return customer.value != null && Array.isArray(customer.value.tags) && customer.value.tags.length > 0 ? customer.value.tags.join('、') : '—' }
+	function identitySummary() : string { if (customer.value == null) return ''; let items = new Array<string>(); if (String(customer.value.phone || '').length > 0) items.push(String(customer.value.phone)); if (String(customer.value.storeName || '').length > 0) items.push(String(customer.value.storeName)); return items.length > 0 ? items.join(' · ') : '当前账号授权可查看的客户' }
+	function wholeMoney(value : any) : string { let text = String(value == null ? '0' : value); let point = text.indexOf('.'); return point >= 0 ? text.substring(0, point) : text }
+	function totalBalance() : string { if (customer.value == null) return '0'; return String(Math.round(Number(customer.value.accountBalance || 0) + Number(customer.value.remainingProjectAmount || 0))) }
+	function metrics() : Array<any> { if (customer.value == null) return []; return [
+		{ key: 'total_balance', label: '总余额', value: '¥' + totalBalance(), composition: '余额 ¥' + wholeMoney(customer.value.accountBalance) + ' · 次卡 ¥' + wholeMoney(customer.value.remainingProjectAmount), action: 'balance_changes' },
+		{ key: 'cards', label: '有效卡项', value: textValue(customer.value.activeCardCount, '0') + ' 张', composition: '', action: 'entitlements' },
+		{ key: 'times', label: '剩余项目次数', value: textValue(customer.value.remainingProjectTimes, '0') + ' 次', composition: '', action: 'entitlements' },
+		{ key: 'debt', label: '当前欠款', value: '¥' + wholeMoney(customer.value.debtAmount), composition: '', action: 'debts' }
+	] }
+	function recentPurchaseValue() : string {
+		if (recentSummary.value == null || recentSummary.value.latestPurchase == null) return textValue(customer.value != null ? customer.value.latestPurchaseDate : '')
+		let purchase = recentSummary.value.latestPurchase
+		return '¥' + wholeMoney(purchase.amount)
+	}
+	function recentPurchaseOrderId() : string { return recentSummary.value != null && recentSummary.value.latestPurchase != null ? String(recentSummary.value.latestPurchase.orderId || '') : '' }
+	function overviewFields() : Array<any> { if (customer.value == null) return []; let latestService = recentSummary.value != null ? recentSummary.value.latestService : null; return [
+		{ key: 'latest_visit', label: '最近到店', value: textValue(customer.value.latestVisitDate), action: '' },
+		{ key: 'latest_service', label: '最近服务', value: latestService == null ? '—' : textValue(latestService.projectName), action: '' },
+		{ key: 'latest_purchase', label: '最近购买', value: recentPurchaseValue(), action: recentPurchaseOrderId() },
+		{ key: 'last_service_staff', label: '上次服务人员', value: textValue(customer.value.lastServiceStaff), action: '' }, { key: 'visit_count', label: '累计到店', value: textValue(customer.value.visitCount, '0') + ' 次', action: '' }
+	] }
+	function openOverviewField(field : any) { if (String(field.action || '').length > 0) openMerchantCustomerOrderDetail(memberId.value, String(field.action)) }
+	function profileFields() : Array<any> { if (customer.value == null) return []; return [
+		{ key: 'phone', label: '手机号', value: textValue(customer.value.phone) }, { key: 'member_no', label: '会员编号', value: textValue(customer.value.memberNo) },
+		{ key: 'birthday', label: '生日', value: textValue(customer.value.birthday) }, { key: 'level', label: '会员等级', value: textValue(customer.value.level) }, { key: 'tag', label: '会员标签', value: tagsValue() },
+		{ key: 'created_at', label: '建档时间', value: textValue(customer.value.createdAt) }
+	] }
+	function relationFields() : Array<any> { if (customer.value == null) return []; return [
+		{ key: 'store', label: '归属门店', value: textValue(customer.value.storeName) }, { key: 'exclusive_staff', label: '专属服务人', value: textValue(customer.value.exclusiveServiceStaff) },
+		{ key: 'status', label: '会员状态', value: textValue(customer.value.status) }
+	] }
+	function entitlementMeta(record : any) : string { let values = new Array<string>(); if (String(record.cardNo || '').length > 0) values.push(String(record.cardNo)); if (String(record.storeName || '').length > 0) values.push(String(record.storeName)); if (String(record.expiresAt || '').length > 0) values.push('有效期至 ' + String(record.expiresAt)); return values.join(' · ') }
+	function balanceMeta(record : any) : string { let values = new Array<string>(); if (String(record.occurredAt || '').length > 0) values.push(String(record.occurredAt)); if (String(record.storeName || '').length > 0) values.push(String(record.storeName)); if (String(record.operatorName || '').length > 0) values.push(String(record.operatorName)); return values.join(' · ') }
+	function debtMeta(record : any) : string { let values = new Array<string>(); if (String(record.businessDate || '').length > 0) values.push(String(record.businessDate)); if (String(record.storeName || '').length > 0) values.push(String(record.storeName)); if (String(record.operatorName || '').length > 0) values.push(String(record.operatorName)); return values.join(' · ') }
+	function isNegative(value : any) : boolean { return String(value || '').indexOf('-') === 0 }
+	function signedMoney(value : any) : string { let text = String(value == null ? '0' : value); return isNegative(text) ? '-¥' + wholeMoney(text.substring(1)) : '+¥' + wholeMoney(text) }
+	function serviceMeta(record : any) : string { let values = new Array<string>(); let date = String(record.businessDate || ''); if (date.length > 0) values.push(date); values.push(String(record.usedTimes || 0) + ' 次'); let store = String(record.storeName || ''); if (store.length > 0) values.push(store); return values.join(' · ') }
+	function serviceSource(record : any) : string { let source = String(record.entitlementSource || ''); let card = String(record.sourceCardName || ''); return card.length > 0 ? source + ' · ' + card : source }
+	function orderMeta(record : any) : string { let values = new Array<string>(); if (String(record.occurredAt || '').length > 0) values.push(String(record.occurredAt)); if (String(record.storeName || '').length > 0) values.push(String(record.storeName)); return values.join(' · ') }
+</script>
+
+<style>
+	.customer-detail { display: flex; min-height: 100%; flex: 1; flex-direction: column; background-color: #f4f6f8; }
+	.customer-detail__header { display: flex; height: 56px; flex-direction: row; align-items: center; justify-content: space-between; padding: 0 20px; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #e5e9ee; background-color: #ffffff; }
+	.customer-detail__back { display: flex; width: 40px; height: 40px; flex-direction: row; align-items: center; font-size: 34px; line-height: 34px; color: #29323d; }
+	.customer-detail__title { font-size: 17px; font-weight: 700; line-height: 24px; color: #202a35; }
+	.customer-detail__header-space, .customer-detail__edit { width: 40px; }
+	.customer-detail__edit { display: flex; height: 40px; flex-direction: row; align-items: center; justify-content: flex-end; font-size: 14px; font-weight: 700; color: #126bb5; }
+	.customer-detail__content { min-height: 0; flex: 1; }
+	.customer-detail__body { padding-bottom: 28px; }
+	.customer-detail__identity { display: flex; flex-direction: row; align-items: center; justify-content: space-between; padding: 22px 20px 20px; background-color: #ffffff; }
+	.customer-detail__identity-main { min-width: 0; flex: 1; }
+	.customer-detail__name-row { display: flex; flex-wrap: wrap; flex-direction: row; align-items: center; }
+	.customer-detail__name { margin-right: 8px; font-size: 24px; font-weight: 700; line-height: 32px; color: #202a35; }
+	.customer-detail__level, .customer-detail__status { margin-top: 2px; margin-right: 6px; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: 600; line-height: 17px; }
+	.customer-detail__level { background-color: #f7f0dd; color: #8a5a12; }
+	.customer-detail__status { background-color: #eaf6ef; color: #187344; }
+	.customer-detail__identity-copy { display: block; margin-top: 8px; font-size: 13px; line-height: 20px; color: #667383; }
+	.customer-detail__call { display: flex; min-width: 50px; height: 32px; flex-direction: row; align-items: center; justify-content: center; margin-left: 16px; border-width: 1px; border-style: solid; border-color: #a9cbe8; border-radius: 4px; background-color: #f4f9fd; font-size: 13px; font-weight: 600; color: #126bb5; }
+	.customer-detail__metrics { display: flex; flex-wrap: wrap; flex-direction: row; padding: 4px 12px 14px; background-color: #ffffff; }
+	.customer-detail__metric { box-sizing: border-box; display: flex; width: 50%; min-height: 72px; flex-direction: column; justify-content: center; padding: 12px 8px; border-top-width: 1px; border-top-style: solid; border-top-color: #edf0f3; }
+	.customer-detail__metric:nth-child(2n + 1) { padding-left: 8px; border-right-width: 1px; border-right-style: solid; border-right-color: #edf0f3; }
+	.customer-detail__metric--link { cursor: pointer; }
+	.customer-detail__metric--total { background-color: #fbfdff; }
+	.customer-detail__metric-value-row { display: flex; min-width: 0; flex-direction: row; align-items: center; }
+	.customer-detail__metric-value { min-width: 0; font-size: 18px; font-weight: 700; line-height: 25px; color: #202a35; }
+	.customer-detail__metric-arrow { margin-left: 5px; font-size: 22px; line-height: 25px; color: #8190a0; }
+	.customer-detail__metric-label { margin-top: 3px; font-size: 12px; line-height: 18px; color: #6c7888; }
+	.customer-detail__metric-composition { display: block; margin-top: 4px; font-size: 11px; line-height: 17px; color: #637386; }
+	.customer-detail__tabs { height: 46px; white-space: nowrap; border-top-width: 1px; border-top-style: solid; border-top-color: #e5e9ee; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #dfe5eb; background-color: #ffffff; }
+	.customer-detail__tab-track { display: flex; min-width: 360px; height: 46px; flex-direction: row; align-items: stretch; }
+	.customer-detail__tab { box-sizing: border-box; display: flex; width: 72px; height: 46px; flex-shrink: 0; flex-direction: row; align-items: center; justify-content: center; border-bottom-width: 2px; border-bottom-style: solid; border-bottom-color: #ffffff; font-size: 13px; font-weight: 600; line-height: 20px; color: #687585; }
+	.customer-detail__tab--active { border-bottom-color: #1677cc; color: #126bb5; }
+	.customer-detail__tab-content { padding: 12px 12px 0; }
+	.customer-detail__section { margin-bottom: 12px; border-width: 1px; border-style: solid; border-color: #e1e6ec; border-radius: 6px; background-color: #ffffff; overflow: hidden; }
+	.customer-detail__section-heading { display: flex; min-height: 48px; flex-direction: row; align-items: center; justify-content: space-between; padding: 0 14px; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #edf0f3; }
+	.customer-detail__section-title { font-size: 15px; font-weight: 700; line-height: 22px; color: #29323d; }
+	.customer-detail__section-copy { font-size: 12px; line-height: 18px; color: #7b8794; }
+	.customer-detail__inline-action { display: flex; min-height: 30px; flex-direction: row; align-items: center; font-size: 13px; font-weight: 600; color: #126bb5; }
+	.customer-detail__row { display: flex; min-height: 50px; flex-direction: row; align-items: center; justify-content: space-between; padding: 0 14px; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #edf0f3; }
+	.customer-detail__row:last-child { border-bottom-width: 0; }
+	.customer-detail__row--link { cursor: pointer; }
+	.customer-detail__label { font-size: 13px; line-height: 20px; color: #6c7888; }
+	.customer-detail__overview-value { display: flex; min-width: 0; flex: 1; flex-direction: row; align-items: center; justify-content: flex-end; }
+	.customer-detail__value { max-width: 60%; margin-left: 16px; font-size: 14px; font-weight: 600; line-height: 20px; color: #303a45; text-align: right; }
+	.customer-detail__overview-arrow { flex-shrink: 0; margin-left: 6px; font-size: 21px; line-height: 20px; color: #8190a0; }
+	.customer-detail__value--amount { color: #182f47; }
+	.customer-detail__asset-entry { display: flex; min-height: 68px; flex-direction: row; align-items: center; justify-content: space-between; padding: 0 14px; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #edf0f3; }
+	.customer-detail__asset-entry:last-child { border-bottom-width: 0; }
+	.customer-detail__asset-entry-title { display: block; font-size: 14px; font-weight: 700; line-height: 21px; color: #2d3b49; }
+	.customer-detail__asset-entry-copy { display: block; margin-top: 3px; font-size: 12px; line-height: 18px; color: #778493; }
+	.customer-detail__asset-entry-arrow { margin-left: 16px; font-size: 25px; line-height: 28px; color: #8e9baa; }
+	.customer-detail__asset-detail-heading { display: flex; min-height: 42px; flex-direction: row; align-items: center; justify-content: space-between; padding: 0 2px 8px; }
+	.customer-detail__asset-detail-back { display: flex; min-height: 34px; flex-direction: row; align-items: center; font-size: 13px; font-weight: 600; color: #126bb5; }
+	.customer-detail__asset-detail-back text:first-child { margin-right: 3px; font-size: 25px; line-height: 28px; }
+	.customer-detail__asset-detail-title { font-size: 15px; font-weight: 700; line-height: 22px; color: #29323d; }
+	.customer-detail__asset-note { margin-top: 0; }
+	.customer-detail__asset-card { display: flex; flex-direction: column; padding: 14px; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #edf0f3; }
+	.customer-detail__asset-card:last-child { border-bottom-width: 0; }
+	.customer-detail__asset-card-row { display: flex; flex-direction: row; align-items: flex-start; justify-content: space-between; }
+	.customer-detail__asset-card-title { display: block; font-size: 15px; font-weight: 700; line-height: 22px; color: #283440; }
+	.customer-detail__asset-card-status { flex-shrink: 0; margin-left: 12px; padding: 2px 6px; border-radius: 4px; background-color: #eaf6ef; font-size: 11px; font-weight: 600; line-height: 17px; color: #187344; }
+	.customer-detail__asset-card-status--settled { background-color: #eff2f5; color: #6c7888; }
+	.customer-detail__asset-meta { display: block; margin-top: 5px; font-size: 12px; line-height: 18px; color: #728092; }
+	.customer-detail__asset-project { display: flex; flex-direction: row; align-items: center; justify-content: space-between; margin-top: 10px; padding: 9px 10px; background-color: #f7f9fb; font-size: 12px; line-height: 18px; color: #485769; }
+	.customer-detail__asset-project text:last-child { margin-left: 12px; color: #637386; text-align: right; }
+	.customer-detail__asset-footer { display: block; margin-top: 10px; font-size: 12px; line-height: 18px; color: #637386; }
+	.customer-detail__asset-summary { display: block; margin-top: 10px; font-size: 13px; line-height: 20px; color: #4b5a6c; }
+	.customer-detail__asset-balance-grid { display: flex; flex-wrap: wrap; flex-direction: row; margin-top: 10px; font-size: 12px; line-height: 19px; color: #627184; }
+	.customer-detail__asset-balance-grid text { width: 50%; }
+	.customer-detail__balance-change { flex-shrink: 0; margin-left: 12px; font-size: 16px; font-weight: 700; line-height: 24px; color: #19724a; }
+	.customer-detail__balance-change--negative { color: #c14343; }
+	.customer-detail__notice { display: flex; flex-direction: column; margin-bottom: 12px; padding: 16px; border-left-width: 3px; border-left-style: solid; border-left-color: #7faed6; background-color: #eef6fc; }
+	.customer-detail__notice--future { margin-top: 4px; border-left-color: #b6c0ca; background-color: #f1f3f5; }
+		.customer-detail__notice-title, .customer-detail__care-title { font-size: 14px; font-weight: 700; line-height: 21px; color: #314253; }
+		.customer-detail__notice-copy, .customer-detail__care-copy { margin-top: 6px; font-size: 13px; line-height: 20px; color: #657484; }
+		.customer-detail__care-link { display: flex; min-height: 34px; flex-direction: row; align-items: center; font-size: 13px; font-weight: 600; color: #126bb5; }
+		.customer-detail__care-link text:last-child { margin-left: 3px; font-size: 22px; line-height: 22px; }
+		.customer-detail__care-task { display: flex; flex-direction: column; padding: 14px; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #edf0f3; }
+		.customer-detail__care-task:last-child { border-bottom-width: 0; }
+		.customer-detail__care-task-row { display: flex; flex-direction: row; align-items: flex-start; justify-content: space-between; }
+		.customer-detail__care-task-title { min-width: 0; flex: 1; padding-right: 10px; font-size: 15px; font-weight: 700; line-height: 22px; color: #283440; }
+		.customer-detail__care-task-status { flex-shrink: 0; padding: 2px 6px; border-radius: 4px; background-color: #eef6fc; font-size: 11px; font-weight: 600; line-height: 17px; color: #126bb5; }
+		.customer-detail__care-task-meta, .customer-detail__care-task-note { display: block; margin-top: 6px; font-size: 12px; line-height: 18px; color: #667689; }
+		.customer-detail__care-task-note { color: #4d5c6c; }
+		.customer-detail__care-card { display: flex; flex-direction: column; padding: 16px 14px 18px; }
+	.customer-detail__primary-action { display: flex; align-self: flex-start; min-height: 38px; flex-direction: row; align-items: center; justify-content: center; margin-top: 16px; padding: 0 14px; border-radius: 4px; background-color: #1677cc; font-size: 13px; font-weight: 700; color: #ffffff; }
+	.customer-detail__service-empty { display: flex; min-height: 130px; flex-direction: column; align-items: center; justify-content: center; padding: 16px; font-size: 13px; line-height: 21px; color: #6d7a89; text-align: center; }
+	.customer-detail__service-empty .customer-detail__inline-action { margin-top: 10px; }
+	.customer-detail__service-card { display: flex; flex-direction: column; padding: 14px; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #edf0f3; }
+	.customer-detail__service-card-row { display: flex; flex-direction: row; align-items: flex-start; justify-content: space-between; }
+	.customer-detail__service-project { min-width: 0; flex: 1; padding-right: 10px; font-size: 15px; font-weight: 700; line-height: 22px; color: #283440; }
+	.customer-detail__service-status { padding: 2px 6px; border-radius: 4px; background-color: #eaf6ef; font-size: 11px; font-weight: 600; line-height: 17px; color: #187344; }
+	.customer-detail__service-time { margin-top: 6px; font-size: 12px; line-height: 18px; color: #738092; }
+	.customer-detail__service-meta { display: flex; flex-wrap: wrap; flex-direction: row; margin-top: 9px; font-size: 12px; line-height: 18px; color: #536274; }
+	.customer-detail__service-meta text { margin-right: 12px; }
+	.customer-detail__service-craftsman { margin-top: 6px; font-size: 12px; line-height: 18px; color: #536274; }
+	.customer-detail__order-card { display: flex; flex-direction: column; padding: 14px; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #edf0f3; }
+	.customer-detail__order-card:last-child { border-bottom-width: 0; }
+	.customer-detail__order-card-row, .customer-detail__order-meta { display: flex; flex-direction: row; align-items: center; justify-content: space-between; }
+	.customer-detail__order-kind { font-size: 15px; font-weight: 700; line-height: 22px; color: #283440; }
+	.customer-detail__order-status { flex-shrink: 0; margin-left: 12px; padding: 2px 6px; border-radius: 4px; background-color: #eff2f5; font-size: 11px; font-weight: 600; line-height: 17px; color: #637386; }
+	.customer-detail__order-items { display: block; margin-top: 7px; font-size: 13px; line-height: 20px; color: #4d5c6c; }
+	.customer-detail__order-meta { margin-top: 7px; font-size: 12px; line-height: 19px; color: #667689; }
+	.customer-detail__order-meta text:last-child { flex-shrink: 0; margin-left: 12px; font-size: 14px; font-weight: 700; color: #283440; }
+	.customer-detail__order-time, .customer-detail__order-remark { display: block; margin-top: 5px; font-size: 12px; line-height: 18px; color: #738092; }
+	.customer-detail__load-more { display: flex; min-height: 46px; flex-direction: row; align-items: center; justify-content: center; font-size: 13px; font-weight: 600; color: #126bb5; }
+	.customer-detail__empty { display: flex; min-height: 280px; flex-direction: column; align-items: center; justify-content: center; padding: 20px; font-size: 14px; line-height: 22px; color: #697586; }
+	.customer-detail__retry { display: flex; min-height: 38px; flex-direction: row; align-items: center; justify-content: center; margin-top: 14px; padding: 0 12px; border-radius: 4px; background-color: #1677cc; font-size: 13px; font-weight: 600; color: #ffffff; }
+</style>

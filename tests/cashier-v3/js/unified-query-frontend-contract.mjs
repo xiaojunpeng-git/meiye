@@ -288,10 +288,10 @@ assert.match(toolbarSource, /limit: Math\.max/, '查询和分页统一使用后�
 assert.doesNotMatch(toolbarSource, /querySettings:\s*\{/, '查询条件不再维护嵌套的第二套执行合同')
 assert.match(toolbarSource, /preservedDormantAliases/, '停用字段的账号页面别名不会因修改其他字段而静默丢失')
 assert.match(toolbarSource, /settingsButtonLabel:\s*\{[\s\S]*?default:\s*'设置'/, '共享查询工具栏默认文案保持为设置，不能扩散修改其他页面')
-assert.equal((toolbarSource.match(/@click="isSettingsOpen = true"/g) || []).length, 1, '共享查询工具栏只保留一个设置抽屉入口')
+assert.equal((toolbarSource.match(/@click="openSettings"/g) || []).length, 1, '共享查询工具栏只保留一个设置抽屉入口')
 assert.match(
   toolbarSource,
-  /unified-query-export-button[\s\S]*?@click="isSettingsOpen = true">\{\{ settingsButtonLabel \}\}<\/button>/,
+  /unified-query-export-button[\s\S]*?v-if="showSettingsButton"[\s\S]*?@click="openSettings">\{\{ settingsButtonLabel \}\}<\/button>/,
   '参数化设置入口保留在原工具栏位置并继续打开同一抽屉'
 )
 

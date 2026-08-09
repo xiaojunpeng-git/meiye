@@ -52,6 +52,40 @@ ok('命令键只在权威终态释放，结果未知保留原键',
     && center.includes('isTerminalActionStatus(actionStatus(result))')
     && !/isTerminalActionStatus[\s\S]{0,160}result_unknown/.test(center))
 
+const shell = readFileSync(new URL('../../../前端代码/cashier-v3/src/layouts/CashierShell.vue', import.meta.url), 'utf8')
+const workbench = readFileSync(new URL('../../../前端代码/cashier-v3/src/views/CashierWorkbenchView.vue', import.meta.url), 'utf8')
+const bridge = readFileSync(new URL('../../../前端代码/cashier-v3/src/services/cashierV3Bridge.js', import.meta.url), 'utf8')
+const debtPreparationStart = shell.indexOf('const prepareAction = payload.rechargeDebt === true')
+const debtHandoffStart = shell.indexOf("await requestCashierV3Action('open-cashier-workbench', { silent: true })", debtPreparationStart)
+ok('用户确认还款后才从权威工作台草稿接力到收银结账页',
+  debtPreparationStart >= 0
+    && debtHandoffStart > debtPreparationStart
+    && shell.includes('const preparedCheckout = state.cashier?.checkout')
+    && shell.includes("preparedCheckout.businessType === 'debt_repayment'")
+    && shell.includes("String(preparedCheckout.preparationRequestId || '') === preparationRequestId")
+    && shell.indexOf('openDebtRepaymentCheckout(preparationRequestId, payload.debtRecordId)', debtPreparationStart) > debtPreparationStart
+    && shell.includes("window.sessionStorage.setItem('cashier-v3:prepared-checkout-handoff'")
+    && shell.includes("window.location.hash = '#/cashier'")
+    && workbench.includes("function consumePreparedCheckoutHandoff()")
+    && workbench.includes("void openPreparedCheckout({ detail: handoff })"))
+
+ok('同一工作台根状态刷新保留已读取的欠款资源版本',
+  bridge.includes('function replaceCashierV3PublicVersionStore(stateContextId, versions = null)')
+    && bridge.includes('if (currentPublicVersionContextId() !== contextId)')
+    && bridge.includes('下一条写命令'))
+
+ok('订单中心欠款管理使用独立顶层页签并可进入已有统一还款流程',
+  center.includes("key: 'debt'")
+    && center.includes("label: '欠款管理'")
+    && center.includes("activeTabKey === 'debt' && record.canRepay")
+    && center.includes("cashier-v3:open-member-debt-repayment"))
+
+ok('欠款管理直达入口仅预选欠款，用户下一步后才创建 Checkout 草稿',
+  shell.includes('async function handleOpenMemberDebt(event = {})')
+    && shell.includes('initialDebtRecordId.value = isSucceededResult(result) ? debtId : \'\'')
+    && !/async function handleOpenMemberDebt[\s\S]{0,700}prepareDebtRepayment\(/.test(shell)
+    && center.includes("record.sourceType === '销售订单'"))
+
 process.stdout.write(`ASSERT_PASSED=${passed}\n`)
 process.stdout.write('ASSERT_FAILED=0\n')
 process.stdout.write('ORDER_LIFECYCLE_FRONTEND=PASS\n')

@@ -164,7 +164,7 @@ function b1SnapshotLine(
         ]] : [],
         'purchaseAmount' => $purchaseAmount,
         'totalPurchaseTimes' => $totalTimes,
-        'amountCalculationVersion' => 'cumulative-half-up-cent-v2',
+        'amountCalculationVersion' => 'whole-yuan-floor-final-remainder-v1',
         'allowedStoreIds' => [8, 7],
         'craftsmen' => b1AuthorityCraftsmen($craftsmen),
         'performance' => b1Performance($sourceNo),
@@ -561,15 +561,23 @@ b1Assert(
 );
 b1Assert(
     'actual amount uses each locked physical source baseline',
-    $lineOne['actualEntitlementAmountCents'] === 3333
+    $lineOne['actualEntitlementAmountCents'] === 3300
         && $lineTwo['actualEntitlementAmountCents'] === 6000
-        && $plan['totals']['actualEntitlementAmountCents'] === 9333
+        && $plan['totals']['actualEntitlementAmountCents'] === 9300
+);
+$staleAmountVersionSnapshot = b1Snapshot();
+$staleAmountVersionSnapshot['lines'][0]['amountCalculationVersion'] = 'cumulative-half-up-cent-v2';
+b1Assert(
+    'stale fractional allocation drafts are rejected before completion',
+    b1Reason(static function () use ($staleAmountVersionSnapshot): void {
+        b1Plan(null, $staleAmountVersionSnapshot);
+    }) === 'entitlement_amount_calculation_version_stale'
 );
 b1Assert(
     'consumption and labor performance remain separate facts',
-    $plan['totals']['consumptionPerformanceCents'] === 9333
+    $plan['totals']['consumptionPerformanceCents'] === 9300
         && $plan['totals']['laborPerformanceCents'] === 3000
-        && $lineOne['consumptionPerformance']['amountCents'] === 3333
+        && $lineOne['consumptionPerformance']['amountCents'] === 3300
         && $lineOne['laborPerformance']['amountCents'] === 1000
 );
 b1Assert(
@@ -612,7 +620,7 @@ b1Assert(
         && $lineOne['source']['purchaseAmountCents'] === 10000
         && $lineOne['source']['totalPurchaseTimes'] === 3
         && $lineOne['source']['consumedTimesAtLock'] === 0
-        && $lineOne['source']['amountCalculationVersion'] === 'cumulative-half-up-cent-v2'
+        && $lineOne['source']['amountCalculationVersion'] === 'whole-yuan-floor-final-remainder-v1'
 );
 b1Assert(
     'strict and flexible projects use different entitlement sources',
@@ -1014,11 +1022,11 @@ foreach ($sourceFields as $field) {
 $sameSourceSnapshot['inventoryStocks'][0]['batches'][0]['availableQuantityUnits'] = 6;
 $sameSourcePlan = b1Plan(null, $sameSourceSnapshot);
 b1Assert(
-    'consistent duplicate source lines aggregate and return cent tail deterministically',
+    'consistent duplicate source lines aggregate and return the whole-yuan tail deterministically',
     count($sameSourcePlan['entitlementDeductions']) === 1
         && $sameSourcePlan['entitlementDeductions'][0]['deductPhysicalTimes'] === 3
-        && $sameSourcePlan['linePlans'][0]['actualEntitlementAmountCents'] === 3333
-        && $sameSourcePlan['linePlans'][1]['actualEntitlementAmountCents'] === 6667
+        && $sameSourcePlan['linePlans'][0]['actualEntitlementAmountCents'] === 3300
+        && $sameSourcePlan['linePlans'][1]['actualEntitlementAmountCents'] === 6700
         && $sameSourcePlan['totals']['actualEntitlementAmountCents'] === 10000
 );
 b1Assert(
@@ -1091,7 +1099,7 @@ b1Assert(
 );
 
 $allocationInvariant = true;
-for ($totalCents = 0; $totalCents <= 100; $totalCents++) {
+for ($totalCents = 0; $totalCents <= 10000; $totalCents += 100) {
     for ($times = 1; $times <= 10; $times++) {
         $sum = 0;
         for ($used = 0; $used < $times; $used++) {
@@ -1103,7 +1111,13 @@ for ($totalCents = 0; $totalCents <= 100; $totalCents++) {
         }
     }
 }
-b1Assert('all tested cent tails return to source total', $allocationInvariant);
+b1Assert('all tested whole-yuan tails return to source total', $allocationInvariant);
+b1Assert(
+    'fractional-yuan source amounts are rejected instead of rounded or truncated',
+    b1Reason(static function (): void {
+        CashierV3EntitlementCompletionKernel::allocateActualAmountCents(10001, 3, 0, 1);
+    }) === 'entitlement_purchase_amount_not_whole_yuan'
+);
 
 $labor = CashierV3EntitlementCompletionKernel::allocateLaborAmount(1, [30, 20, 10], [30 => 1, 20 => 1, 10 => 1]);
 b1Assert(

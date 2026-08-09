@@ -25,9 +25,10 @@ export default {
 				permission = 'merchant.enter',
 				fallbackMerchantHome = false,
 			} = options;
-			if (!this.isLogin) {
+			const employeeAuthenticated = !!this.$store.state.merchant.employeeAuthenticated;
+			if (!this.isLogin && !employeeAuthenticated) {
 				if (redirect) {
-					uni.reLaunch({ url: '/pages/index/index' });
+					uni.reLaunch({ url: '/pages/users/login/index' });
 				}
 				return false;
 			}

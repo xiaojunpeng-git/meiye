@@ -27,9 +27,13 @@ class MerchantAccessServices extends BaseServices
             'roles' => [],
             'active_role' => '',
             'active_store_id' => 0,
+            'active_store' => null,
             'stores' => [],
             'resolved_store_ids' => [],
             'scope_store_ids' => [],
+            'data_scope_type' => 'NONE',
+            'store_switch_allowed' => false,
+            'task_visibility' => 'NONE',
             'permissions' => [],
             'mall_unique_auth' => [],
             'identity' => [
@@ -196,21 +200,42 @@ class MerchantAccessServices extends BaseServices
             }
         }
         $allowedStoreMap = array_flip($roleStoreIds);
+        // 只有组织权限可在其授权门店之间切换。个人/门店权限始终固定在稳定的首个有效门店，
+        // 请求传入的门店只能在组织权限内缩小范围，不能扩大或改变固定门店。
+        $storeSwitchAllowed = $activeRole === 'region_agent' && count($stores) > 1;
 
         $activeStoreId = (int)($context['active_store_id'] ?? 0);
-        if ($activeStoreId > 0 && !isset($allowedStoreMap[$activeStoreId])) {
+        if (!$storeSwitchAllowed || ($activeStoreId > 0 && !isset($allowedStoreMap[$activeStoreId]))) {
             $activeStoreId = 0;
         }
         if ($activeStoreId <= 0 && $stores) {
             $activeStoreId = (int)$stores[0]['id'];
         }
+        $activeStore = null;
+        foreach ($stores as $store) {
+            if ((int)$store['id'] === $activeStoreId) {
+                $activeStore = $store;
+                break;
+            }
+        }
 
-        // 查询范围：区域代理默认看授权全部门店；门店角色仅当前店
+        // 所有商家查询按当前活动门店执行。组织权限可以切换门店，但不能默认聚合其所有授权门店。
         $scopeStoreIds = [];
-        if ($activeRole === 'region_agent') {
-            $scopeStoreIds = $roleStoreIds;
-        } elseif (in_array($activeRole, ['store_manager', 'store_staff'], true) && $activeStoreId > 0) {
+        if (in_array($activeRole, ['region_agent', 'store_manager', 'store_staff'], true) && $activeStoreId > 0) {
             $scopeStoreIds = [$activeStoreId];
+        }
+
+        $dataScopeType = 'NONE';
+        $taskVisibility = 'NONE';
+        if ($activeRole === 'store_staff') {
+            $dataScopeType = 'PERSONAL';
+            $taskVisibility = 'SELF';
+        } elseif ($activeRole === 'store_manager') {
+            $dataScopeType = 'STORE';
+            $taskVisibility = 'STORE';
+        } elseif ($activeRole === 'region_agent') {
+            $dataScopeType = 'ORGANIZATION';
+            $taskVisibility = 'STORE';
         }
 
         $activeStaff = ($activeStoreId > 0 && isset($staffByStore[$activeStoreId]))
@@ -227,9 +252,13 @@ class MerchantAccessServices extends BaseServices
             'roles' => $roles,
             'active_role' => $activeRole,
             'active_store_id' => $activeStoreId,
+            'active_store' => $activeStore,
             'stores' => $stores,
             'resolved_store_ids' => $roleStoreIds,
             'scope_store_ids' => $scopeStoreIds,
+            'data_scope_type' => $dataScopeType,
+            'store_switch_allowed' => $storeSwitchAllowed,
+            'task_visibility' => $taskVisibility,
             'permissions' => $permissions,
             'mall_unique_auth' => $mallUniqueAuth,
             'identity' => $identity,

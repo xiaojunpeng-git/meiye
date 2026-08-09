@@ -1,0 +1,175 @@
+import { buildMobileRequestPlan, mobileRequestPlanMatchesContract } from './request-context.uts'
+import { sendMobileRequest } from './mobile-http.uts'
+import { mobileApiOrigin } from '../platform/mobile-runtime-config.uts'
+import { currentMerchantRoot, merchantRequestSession } from '../platform/mobile-merchant-session.uts'
+
+// UTS cannot import JSON contract files in the HBuilderX compiler. This runtime
+// mirror contains only the transport fields and is asserted against the frozen
+// JSON contracts by the mobile test suite.
+const customerTransportContract : any = {
+	contractVersion: 'mobile-merchant-v1',
+	endpoints: {
+		queryExclusiveCustomers: { method: 'POST', path: '/mobile/merchant/customers/exclusive/query', requestMetadataProfile: 'MERCHANT_SESSION' },
+		queryCustomers: { method: 'POST', path: '/mobile/merchant/customers/query', requestMetadataProfile: 'MERCHANT_SESSION' },
+		queryCustomerServiceRecords: { method: 'POST', path: '/mobile/merchant/customers/service-records', requestMetadataProfile: 'MERCHANT_SESSION' },
+		queryCustomerRecentSummary: { method: 'POST', path: '/mobile/merchant/customers/recent-summary', requestMetadataProfile: 'MERCHANT_SESSION' },
+		queryCustomerOrderRecords: { method: 'POST', path: '/mobile/merchant/customers/order-records', requestMetadataProfile: 'MERCHANT_SESSION' },
+		queryCustomerOrderRecordDetail: { method: 'POST', path: '/mobile/merchant/customers/order-record-detail', requestMetadataProfile: 'MERCHANT_SESSION' },
+		queryCustomerAssetRecords: { method: 'POST', path: '/mobile/merchant/customers/asset-records', requestMetadataProfile: 'MERCHANT_SESSION' },
+		customerProfileDraft: { method: 'GET', path: '/mobile/merchant/customers/profile-draft', requestMetadataProfile: 'MERCHANT_SESSION' },
+		customerProfileAvatarUpload: { method: 'POST', path: '/mobile/merchant/customers/profile-avatar', requestMetadataProfile: 'MERCHANT_SESSION' },
+		customerProfileDetail: { method: 'GET', path: '/mobile/merchant/customers/:memberId/profile', requestMetadataProfile: 'MERCHANT_SESSION' },
+		createCustomerProfile: { method: 'POST', path: '/mobile/merchant/customers/profile', requestMetadataProfile: 'MERCHANT_SESSION' },
+		updateCustomerProfile: { method: 'PUT', path: '/mobile/merchant/customers/:memberId/profile', requestMetadataProfile: 'MERCHANT_SESSION' },
+		createCustomer: { method: 'POST', path: '/mobile/merchant/customers', requestMetadataProfile: 'MERCHANT_SESSION' },
+		unifiedQueryCapabilities: { method: 'GET', path: '/mobile/merchant/customers/unified-query-capabilities', requestMetadataProfile: 'MERCHANT_SESSION' },
+		unifiedQueryCommand: { method: 'POST', path: '/mobile/merchant/customers/unified-query/commands', requestMetadataProfile: 'MERCHANT_SESSION' },
+		listAudiences: { method: 'GET', path: '/mobile/merchant/customer-audiences', requestMetadataProfile: 'MERCHANT_SESSION' },
+		createAudience: { method: 'POST', path: '/mobile/merchant/customer-audiences', requestMetadataProfile: 'MERCHANT_SESSION' },
+		queryAudienceMembers: { method: 'POST', path: '/mobile/merchant/customer-audiences/:audienceId/members/query', requestMetadataProfile: 'MERCHANT_SESSION' }
+	},
+	requestMetadataProfiles: {
+		MERCHANT_SESSION: {
+			required: {
+				'X-Mobile-Contract-Version': 'contractVersion',
+				'X-Mobile-Client-Session-Id': 'clientSessionId',
+				'X-Mobile-Platform': 'platform',
+				'X-Mobile-Request-Id': 'requestId',
+				Authorization: 'Bearer <merchantToken>',
+				'X-Mobile-Active-Context-Id': 'activeContextId',
+				'X-Mobile-State-Context-Id': 'stateContextId'
+			},
+			forbidden: ['X-Mobile-App-Session', 'Cookie', 'queryToken', 'bodyToken', 'headerAlias']
+		}
+	}
+}
+
+function merchantPlan(endpointName : string) : any {
+	let root = currentMerchantRoot()
+	let session = merchantRequestSession(root)
+	if (session == null) return null
+	let plan = buildMobileRequestPlan(customerTransportContract, endpointName, session)
+	return mobileRequestPlanMatchesContract(customerTransportContract, endpointName, session, plan) ? plan : null
+}
+
+export function queryMobileCustomers(exclusiveOnly : boolean, payload : any, done : (value : any) => void) : void {
+	let endpoint = exclusiveOnly ? 'queryExclusiveCustomers' : 'queryCustomers'
+	let plan = merchantPlan(endpoint)
+	if (plan == null) { done({ ok: false, message: '请先完成商家端登录。', body: null }); return }
+	sendMobileRequest(plan, payload, done)
+}
+
+export function queryMobileCustomerServiceRecords(payload : any, done : (value : any) => void) : void {
+	let plan = merchantPlan('queryCustomerServiceRecords')
+	if (plan == null) { done({ ok: false, message: '请先完成商家端登录。', body: null }); return }
+	sendMobileRequest(plan, payload, done)
+}
+
+export function queryMobileCustomerRecentSummary(payload : any, done : (value : any) => void) : void {
+	let plan = merchantPlan('queryCustomerRecentSummary')
+	if (plan == null) { done({ ok: false, message: '请先完成商家端登录。', body: null }); return }
+	sendMobileRequest(plan, payload, done)
+}
+
+export function queryMobileCustomerOrderRecords(payload : any, done : (value : any) => void) : void {
+	let plan = merchantPlan('queryCustomerOrderRecords')
+	if (plan == null) { done({ ok: false, message: '请先完成商家端登录。', body: null }); return }
+	sendMobileRequest(plan, payload, done)
+}
+
+export function queryMobileCustomerOrderRecordDetail(payload : any, done : (value : any) => void) : void {
+	let plan = merchantPlan('queryCustomerOrderRecordDetail')
+	if (plan == null) { done({ ok: false, message: '请先完成商家端登录。', body: null }); return }
+	sendMobileRequest(plan, payload, done)
+}
+
+export function queryMobileCustomerAssetRecords(payload : any, done : (value : any) => void) : void {
+	let plan = merchantPlan('queryCustomerAssetRecords')
+	if (plan == null) { done({ ok: false, message: '请先完成商家端登录。', body: null }); return }
+	sendMobileRequest(plan, payload, done)
+}
+
+export function createMobileCustomer(payload : any, done : (value : any) => void) : void {
+	let plan = merchantPlan('createCustomer')
+	if (plan == null) { done({ ok: false, message: '请先完成商家端登录。', body: null }); return }
+	sendMobileRequest(plan, payload, done)
+}
+
+export function queryMobileCustomerProfileDraft(done : (value : any) => void) : void {
+	let plan = merchantPlan('customerProfileDraft')
+	if (plan == null) { done({ ok: false, message: '请先完成商家端登录。', body: null }); return }
+	sendMobileRequest(plan, {}, done)
+}
+
+export function uploadMobileCustomerProfileAvatar(filePath : string, idempotencyKey : string, done : (value : any) => void) : void {
+	let plan = merchantPlan('customerProfileAvatarUpload')
+	let origin = mobileApiOrigin()
+	if (plan == null) { done({ ok: false, message: '请先完成商家端登录。', body: null }); return }
+	if (origin.length == 0 || filePath.length == 0) { done({ ok: false, message: '未选择头像图片。', body: null }); return }
+	uni.uploadFile({
+		url: origin + '/api' + plan.path, filePath: filePath, name: 'file', header: plan.headers, formData: { idempotencyKey: idempotencyKey },
+		success: (response : any) => {
+			let payload : any = null
+			try { payload = typeof response.data === 'string' ? JSON.parse(response.data) : response.data } catch (error) { payload = null }
+			let ok = response.statusCode >= 200 && response.statusCode < 300 && payload != null && payload.protocolCode == null && payload.errorCode == null
+			let message = payload != null ? String(payload.message || '') : ''
+			done({ ok: ok, statusCode: response.statusCode, body: payload, message: ok ? '' : (message || '头像上传未完成。') })
+		},
+		fail: () => done({ ok: false, statusCode: 0, body: null, message: '头像上传失败，请检查网络后重试。' })
+	})
+}
+
+export function queryMobileCustomerProfile(memberId : string, done : (value : any) => void) : void {
+	let plan = merchantPlan('customerProfileDetail')
+	if (plan == null) { done({ ok: false, message: '请先完成商家端登录。', body: null }); return }
+	plan.path = plan.path.replace(':memberId', memberId)
+	sendMobileRequest(plan, {}, done)
+}
+
+export function createMobileCustomerProfile(payload : any, done : (value : any) => void) : void {
+	let plan = merchantPlan('createCustomerProfile')
+	if (plan == null) { done({ ok: false, message: '请先完成商家端登录。', body: null }); return }
+	sendMobileRequest(plan, payload, done)
+}
+
+export function updateMobileCustomerProfile(memberId : string, payload : any, done : (value : any) => void) : void {
+	let plan = merchantPlan('updateCustomerProfile')
+	if (plan == null) { done({ ok: false, message: '请先完成商家端登录。', body: null }); return }
+	plan.path = plan.path.replace(':memberId', memberId)
+	sendMobileRequest(plan, payload, done)
+}
+
+export function listMobileCustomerAudiences(done : (value : any) => void) : void {
+	let plan = merchantPlan('listAudiences')
+	if (plan == null) { done({ ok: false, message: '请先完成商家端登录。', body: null }); return }
+	sendMobileRequest(plan, {}, done)
+}
+
+export function createMobileCustomerAudience(payload : any, done : (value : any) => void) : void {
+	let plan = merchantPlan('createAudience')
+	if (plan == null) { done({ ok: false, message: '请先完成商家端登录。', body: null }); return }
+	sendMobileRequest(plan, payload, done)
+}
+
+export function queryMobileCustomerAudienceMembers(audienceId : string, payload : any, done : (value : any) => void) : void {
+	let plan = merchantPlan('queryAudienceMembers')
+	if (plan == null) { done({ ok: false, message: '请先完成商家端登录。', body: null }); return }
+	plan.path = plan.path.replace(':audienceId', audienceId)
+	sendMobileRequest(plan, payload, done)
+}
+
+export function queryMobileCustomerUnifiedQueryCapabilities(done : (value : any) => void) : void {
+	let plan = merchantPlan('unifiedQueryCapabilities')
+	if (plan == null) { done({ ok: false, message: '请先完成商家端登录。', body: null }); return }
+	sendMobileRequest(plan, {}, done)
+}
+
+export function dispatchMobileCustomerUnifiedQueryCommand(payload : any, done : (value : any) => void) : void {
+	let plan = merchantPlan('unifiedQueryCommand')
+	if (plan == null) { done({ ok: false, message: '请先完成商家端登录。', body: null }); return }
+	sendMobileRequest(plan, payload, done)
+}
+
+export function customerContractVersion() : string {
+	return 'mobile-customer-v1'
+}

@@ -47,7 +47,7 @@ function maskedPhone(phone) {
 }
 
 function cardBenefitAmount(member) {
-  return Number(member?.cardBenefitAmount ?? member?.remainingProjectAmount ?? 0)
+  return member?.cardBenefitAmount ?? member?.remainingProjectAmount ?? 0
 }
 
 function totalBalanceAmount(member) {
@@ -63,7 +63,9 @@ function hasOutstandingDebt(member) {
 }
 
 function formatPlainAmount(value) {
-  return String(Number(value || 0))
+  const raw = String(value ?? 0).trim()
+  if (!/^-?(?:0|[1-9]\d*)(?:\.0{1,2})?$/.test(raw)) return '金额异常'
+  return raw.split('.')[0]
 }
 
 function openMemberDebt(member) {
@@ -96,7 +98,7 @@ function openMemberDebt(member) {
         </button>
         <div class="member-card__metrics">
           <div><span>余额：</span><strong>{{ formatPlainAmount(member.accountBalance) }}</strong></div>
-          <div><span>次卡：</span><strong>{{ formatPlainAmount(cardBenefitAmount(member)) }}</strong></div>
+          <div><span>权益金额：</span><strong>{{ formatPlainAmount(cardBenefitAmount(member)) }}</strong></div>
           <div class="member-card__metric-total"><span>总余额：</span><strong>{{ formatPlainAmount(totalBalanceAmount(member)) }}</strong></div>
           <div class="member-card__metric-debt">
             <span>总欠款：</span>

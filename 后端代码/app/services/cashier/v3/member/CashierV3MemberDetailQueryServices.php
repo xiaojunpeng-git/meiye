@@ -43,10 +43,10 @@ final class CashierV3MemberDetailQueryServices
             $storeId = $operatorScope->storeId();
         }
         $detailQuery = $this->detailQuery($detailQuery);
-        $cards = $this->cards($memberId, $operatorScope->tenantId(), $dataScope, $detailQuery['tab'] === 'assets' ? $detailQuery['keyword'] : '');
-        $services = $this->services($memberId, $operatorScope->tenantId(), $dataScope, $detailQuery['tab'] === 'writeoff' ? $detailQuery['keyword'] : '');
-        $gifts = $this->gifts($memberId, $operatorScope->tenantId(), $dataScope, $detailQuery['tab'] === 'gift' ? $detailQuery['keyword'] : '');
-        $care = $this->care($memberId, $operatorScope->tenantId(), $dataScope, $detailQuery['tab'] === 'care' ? $detailQuery['keyword'] : '');
+        $cards = $this->cards($memberId, $operatorScope->tenantId(), $dataScope, $detailQuery['tab'] === 'assets' ? $detailQuery['keyword'] : '', $detailQuery['tab'] === 'assets' ? $detailQuery['status'] : 'active', $detailQuery['tab'] === 'assets' && $detailQuery['status'] === '' ? $detailQuery['dateFrom'] : '', $detailQuery['tab'] === 'assets' && $detailQuery['status'] === '' ? $detailQuery['dateTo'] : '');
+        $services = $this->services($memberId, $operatorScope->tenantId(), $dataScope, $detailQuery['tab'] === 'writeoff' ? $detailQuery['keyword'] : '', $detailQuery['tab'] === 'writeoff' ? $detailQuery['dateFrom'] : '', $detailQuery['tab'] === 'writeoff' ? $detailQuery['dateTo'] : '');
+        $gifts = $this->gifts($memberId, $operatorScope->tenantId(), $dataScope, $detailQuery['tab'] === 'gift' ? $detailQuery['keyword'] : '', $detailQuery['tab'] === 'gift' ? $detailQuery['status'] : 'active', $detailQuery['tab'] === 'gift' ? $detailQuery['dateFrom'] : '', $detailQuery['tab'] === 'gift' ? $detailQuery['dateTo'] : '');
+        $care = $this->care($memberId, $operatorScope->tenantId(), $dataScope, $detailQuery['tab'] === 'care' ? $detailQuery['keyword'] : '', $detailQuery['tab'] === 'care' ? $detailQuery['status'] : '', $detailQuery['tab'] === 'care' && $detailQuery['status'] === '' ? $detailQuery['dateFrom'] : '', $detailQuery['tab'] === 'care' && $detailQuery['status'] === '' ? $detailQuery['dateTo'] : '');
         $balanceChanges = $this->balanceChanges($memberId, $operatorScope->tenantId(), $dataScope);
         $cardOperations = $this->cardOperations(
             $memberId,
@@ -158,7 +158,7 @@ final class CashierV3MemberDetailQueryServices
     }
 
     /** @return array<int,array<string,mixed>> */
-    private function services(int $memberId, string $tenantId, CashierV3DataScopeContext $dataScope, string $keyword = ''): array
+    private function services(int $memberId, string $tenantId, CashierV3DataScopeContext $dataScope, string $keyword = '', string $dateFrom = '', string $dateTo = ''): array
     {
         $query = Db::name('cashier_v3_entitlement_service_fact')->alias('sf')
             ->leftJoin(
@@ -173,6 +173,8 @@ final class CashierV3MemberDetailQueryServices
             'sf.operator_name_snapshot', 'sf.craftsmen_snapshot_json', 'sf.document_no_snapshot',
             'wf.source_name_snapshot', 'wf.source_code_snapshot',
         ]);
+        if ($dateFrom !== '') $query->where('sf.business_date', '>=', $dateFrom);
+        if ($dateTo !== '') $query->where('sf.business_date', '<=', $dateTo);
         $rows = $query
             ->field(implode(',', [
                 'sf.id', 'sf.checkout_request_id', 'sf.source_line_id', 'sf.service_record_no',
@@ -198,7 +200,7 @@ final class CashierV3MemberDetailQueryServices
                 'cardNo' => (string)($row['source_code_snapshot'] ?? ''),
                 'usedTimes' => (int)$row['quantity'],
                 'storeName' => (string)$row['store_name_snapshot'],
-                'craftsmenSummary' => $this->craftsmenSummary((string)($row['craftsmen_snapshot_json'] ?? '')),
+                'craftsmenSummary' => $this->craftsmenSummary((string)($row['craftsmen_snapshot_json'] ?? ''), (array)($labor['names'] ?? [])),
                 'laborPerformanceAmount' => $labor === null ? null : $this->moneyFromCents((int)$labor['amountCents']),
                 'laborPerformanceStatus' => $labor === null ? 'pending' : 'recorded',
                 'operatorName' => (string)$row['operator_name_snapshot'],
@@ -236,7 +238,7 @@ final class CashierV3MemberDetailQueryServices
             ->where('status', 'effective')
             ->whereIn('checkout_request_id', array_values($checkoutIds))
             ->whereIn('source_line_id', array_values($lineIds))
-            ->field('checkout_request_id,source_line_id,amount_cents,employee_name_snapshot')
+            ->field('checkout_request_id,source_line_id,amount_cents,employee_name_snapshot,role_snapshot')
             ->select()->toArray();
         $result = [];
         foreach ($facts as $fact) {
@@ -246,7 +248,10 @@ final class CashierV3MemberDetailQueryServices
             $result[$key]['amountCents'] += (int)($fact['amount_cents'] ?? 0);
             $name = trim((string)($fact['employee_name_snapshot'] ?? ''));
             if ($name !== '' && !in_array($name, $result[$key]['names'], true)) {
-                $result[$key]['names'][] = $name;
+                $role = strtolower(trim((string)($fact['role_snapshot'] ?? '')));
+                $result[$key]['names'][] = str_contains($role, ':point') || str_contains($role, 'point')
+                    ? $name . '（点）'
+                    : ($role !== '' ? $name . '（轮）' : $name);
             }
         }
         return $result;
@@ -353,7 +358,7 @@ final class CashierV3MemberDetailQueryServices
     }
 
     /** @return array<int,array<string,mixed>> */
-    private function gifts(int $memberId, string $tenantId, CashierV3DataScopeContext $dataScope, string $keyword = ''): array
+    private function gifts(int $memberId, string $tenantId, CashierV3DataScopeContext $dataScope, string $keyword = '', string $status = 'active', string $dateFrom = '', string $dateTo = ''): array
     {
         $result = [];
         foreach ([
@@ -365,7 +370,10 @@ final class CashierV3MemberDetailQueryServices
                 ->join($source['authority'] . ' ga', 'ga.gift_id=gf.source_id')
                 ->leftJoin('system_store ss', 'ss.id=gf.store_id')
                 ->where('gf.tenant_id', $tenantId)->where('gf.member_id', $memberId)
-                ->where('gf.source_type', $source['source'])->where('gf.status', 'effective');
+                ->where('gf.source_type', $source['source']);
+            if ($status === 'active') $query->where('gf.status', 'effective');
+            if ($dateFrom !== '') $query->where('gf.business_date', '>=', $dateFrom);
+            if ($dateTo !== '') $query->where('gf.business_date', '<=', $dateTo);
             if ($isDirectGift) {
                 // Direct gifts can have different expiries in one batch. The item
                 // snapshot is the display authority for an individual gift fact.
@@ -378,7 +386,7 @@ final class CashierV3MemberDetailQueryServices
             $this->applyDetailKeyword($query, $keyword, ['gf.content_name_snapshot', 'ga.gift_no', 'ga.' . $source['reason']]);
             $fields = [
                 'gf.id,gf.gift_fact_id,gf.source_id,gf.source_detail_id,gf.gift_kind,gf.content_name_snapshot,gf.quantity',
-                'gf.content_snapshot_json,gf.business_date,gf.settled_at,gf.recorded_at,ss.name AS store_name',
+                'gf.content_snapshot_json,gf.business_date,gf.settled_at,gf.recorded_at,gf.status,ss.name AS store_name',
                 'ga.gift_no,ga.' . $source['reason'] . ' AS reason_snapshot',
             ];
             if ($isDirectGift) {
@@ -404,7 +412,7 @@ final class CashierV3MemberDetailQueryServices
                     'sourceLabel' => $source['source'] === 'direct_gift' ? '直接赠送' : '充值赠送',
                     'storeName' => (string)($row['store_name'] ?? ''),
                     'reason' => (string)($row['reason_snapshot'] ?? ''),
-                    'statusLabel' => '已生效',
+                    'statusLabel' => $this->giftStatusLabel((string)($row['status'] ?? 'effective')),
                     'createdAt' => $this->dateTime((int)$row['recorded_at']),
                     'contents' => [[
                         'typeLabel' => $this->giftKindLabel((string)$row['gift_kind']),
@@ -412,7 +420,7 @@ final class CashierV3MemberDetailQueryServices
                         'quantity' => (int)$row['quantity'],
                         'effectiveAt' => $this->dateTime((int)$row['settled_at']),
                         'expiresAt' => $validityEnd > 0 ? $this->dateTime($validityEnd) : null,
-                        'statusLabel' => '已生效',
+                        'statusLabel' => $this->giftStatusLabel((string)($row['status'] ?? 'effective')),
                     ]],
                     '_issuedAt' => (int)$row['settled_at'],
                 ];
@@ -427,19 +435,29 @@ final class CashierV3MemberDetailQueryServices
     }
 
     /** @return array{records:array<int,array<string,mixed>>,tasks:array<int,array<string,mixed>>,reminder:array<string,mixed>} */
-    private function care(int $memberId, string $tenantId, CashierV3DataScopeContext $dataScope, string $keyword = ''): array
+    private function care(int $memberId, string $tenantId, CashierV3DataScopeContext $dataScope, string $keyword = '', string $status = '', string $dateFrom = '', string $dateTo = ''): array
     {
-        $recordQuery = Db::name('customer_care_record')->where('tenant_id', $tenantId)
-            ->where('member_id', $memberId)->where('status', 'NORMAL');
-        $this->applyStoreScope($recordQuery, 'business_store_id', $dataScope);
-        $this->applyDetailKeyword($recordQuery, $keyword, ['record_no', 'record_type', 'summary', 'detail', 'follower_name_snapshot']);
-        $records = $recordQuery
-            ->field('id,record_no,record_type,summary,detail,followed_at,follower_name_snapshot,business_store_name_snapshot,status')
-            ->order('followed_at desc,id desc')->limit(100)->select()->toArray();
+        $records = [];
+        // 客情记录本身代表已经发生的跟进；“未完成”只显示尚未完成的任务，
+        // 不把已完成的历史记录伪装成待办。
+        if ($status !== 'unfinished') {
+            $recordQuery = Db::name('customer_care_record')->where('tenant_id', $tenantId)
+                ->where('member_id', $memberId)->where('status', 'NORMAL');
+            $this->applyStoreScope($recordQuery, 'business_store_id', $dataScope);
+            $this->applyDetailKeyword($recordQuery, $keyword, ['record_no', 'record_type', 'summary', 'detail', 'follower_name_snapshot']);
+            if ($dateFrom !== '') $recordQuery->where('followed_at', '>=', strtotime($dateFrom . ' 00:00:00'));
+            if ($dateTo !== '') $recordQuery->where('followed_at', '<=', strtotime($dateTo . ' 23:59:59'));
+            $records = $recordQuery
+                ->field('id,record_no,record_type,summary,detail,followed_at,follower_name_snapshot,business_store_name_snapshot,status')
+                ->order('followed_at desc,id desc')->limit(100)->select()->toArray();
+        }
         $taskQuery = Db::name('customer_care_task')->where('tenant_id', $tenantId)
             ->where('member_id', $memberId)->where('is_visible', 1);
         $this->applyStoreScope($taskQuery, 'business_store_id', $dataScope);
         $this->applyDetailKeyword($taskQuery, $keyword, ['task_no', 'title', 'task_type', 'owner_name_snapshot']);
+        if ($status === 'unfinished') $taskQuery->whereIn('status', ['UNSTARTED', 'PENDING', 'IN_PROGRESS']);
+        if ($dateFrom !== '') $taskQuery->where('planned_at', '>=', strtotime($dateFrom . ' 00:00:00'));
+        if ($dateTo !== '') $taskQuery->where('planned_at', '<=', strtotime($dateTo . ' 23:59:59'));
         $tasks = $taskQuery
             ->field('task_key,task_no,title,task_type,status,planned_at,owner_name_snapshot,business_store_name_snapshot')
             ->order('planned_at desc,task_key desc')->limit(100)->select()->toArray();
@@ -531,23 +549,26 @@ final class CashierV3MemberDetailQueryServices
     }
 
     /** @return array<int,array<string,mixed>> */
-    private function cards(int $memberId, string $tenantId, CashierV3DataScopeContext $dataScope, string $keyword = ''): array
+    private function cards(int $memberId, string $tenantId, CashierV3DataScopeContext $dataScope, string $keyword = '', string $status = 'active', string $dateFrom = '', string $dateTo = ''): array
     {
         $now = time();
+        $activeOnly = $status === 'active';
         $holderQuery = Db::name('user_card_holder')->alias('h')
             ->join('store_order o', 'o.id = h.oid')
             ->where('h.uid', $memberId)
             ->where('h.is_del', 0)
             ->where('h.store_id', '>', 0)
-            ->where('h.write_surplus_times', '>', 0)
             ->where('o.uid', $memberId)
             ->where('o.paid', 1)
             ->where('o.is_del', 0)
             ->where('o.is_system_del', 0)
             ->where('o.is_user_del', 0)
-            ->where('o.refund_status', 0)
-            ->where('o.terminal_action', 0)
             ->where('o.card_upgrade_use_oid', 0);
+        if ($activeOnly) {
+            $holderQuery->where('h.write_surplus_times', '>', 0)->where('o.refund_status', 0)->where('o.terminal_action', 0);
+        }
+        if ($dateFrom !== '') $holderQuery->where('h.add_time', '>=', strtotime($dateFrom . ' 00:00:00'));
+        if ($dateTo !== '') $holderQuery->where('h.add_time', '<=', strtotime($dateTo . ' 23:59:59'));
         $this->applyStoreScope($holderQuery, 'h.store_id', $dataScope);
         $this->applyDetailKeyword($holderQuery, $keyword, ['h.card_name', 'h.card_no']);
         $holders = $holderQuery
@@ -560,7 +581,7 @@ final class CashierV3MemberDetailQueryServices
         foreach ($holders as $holder) {
             $start = max(0, (int)($holder['write_start'] ?? 0));
             $end = max(0, (int)($holder['write_end'] ?? 0));
-            if (($start > 0 && $start > $now) || ($end > 0 && $end < $now)) {
+            if ($activeOnly && (($start > 0 && $start > $now) || ($end > 0 && $end < $now))) {
                 continue;
             }
             $holderByOrder[(int)$holder['oid']] = $holder;
@@ -588,7 +609,6 @@ final class CashierV3MemberDetailQueryServices
             ->where('cart_type', 2)
             ->where('product_type', 6)
             ->where('is_writeoff', 0)
-            ->where('write_surplus_times', '>', 0)
             ->field('id,oid,cart_info,write_times,write_surplus_times,write_start,write_end,pay_price')
             ->order('oid asc,id asc')
             ->select()
@@ -598,8 +618,8 @@ final class CashierV3MemberDetailQueryServices
             $end = max(0, (int)($row['write_end'] ?? 0));
             $total = max(0, (int)($row['write_times'] ?? 0));
             $remaining = max(0, (int)($row['write_surplus_times'] ?? 0));
-            if ($total <= 0 || $remaining <= 0 || $remaining > $total
-                || ($start > 0 && $start > $now) || ($end > 0 && $end < $now)) {
+            if ($total <= 0 || $remaining < 0 || $remaining > $total
+                || ($activeOnly && (($start > 0 && $start > $now) || ($end > 0 && $end < $now)))) {
                 continue;
             }
             try {
@@ -634,7 +654,7 @@ final class CashierV3MemberDetailQueryServices
         $cards = [];
         foreach ($holderByOrder as $orderId => $holder) {
             $projects = $projectsByOrder[$orderId] ?? [];
-            if (!$projects) {
+            if (!$projects && $activeOnly) {
                 continue;
             }
             $remainingTimes = 0;
@@ -655,7 +675,7 @@ final class CashierV3MemberDetailQueryServices
                 'cardNo' => (string)($holder['card_no'] ?? ''),
                 'cardName' => trim((string)($holder['card_name'] ?? '')) ?: '会员卡项',
                 'statusCode' => $statusCode,
-                'statusLabel' => $statusCode === 'disabled' ? '已停用' : '有效',
+                'statusLabel' => $statusCode === 'disabled' ? '已停用' : (($holder['write_end'] ?? 0) > 0 && (int)$holder['write_end'] < $now ? '已过期' : ($remainingTimes > 0 ? '有效' : '已用完')),
                 'cardRuleType' => $cardRuleType,
                 'isTimeCard' => $isTimeCard,
                 'storeName' => (string)($stores[(int)$holder['store_id']] ?? ''),
@@ -685,16 +705,30 @@ final class CashierV3MemberDetailQueryServices
         $query->whereIn($column, $storeIds);
     }
 
-    /** @return array{tab:string,keyword:string} */
+    /** @return array{tab:string,keyword:string,status:string,dateFrom:string,dateTo:string} */
     private function detailQuery(array $raw): array
     {
         $tab = trim((string)($raw['tab'] ?? ''));
         $allowedTabs = ['assets', 'card-operations', 'sales', 'writeoff', 'care', 'debt', 'gift', 'points'];
         $keyword = trim((string)($raw['keyword'] ?? ''));
+        $status = trim((string)($raw['status'] ?? ''));
+        if (!in_array($status, ['', 'active', 'unfinished'], true)) $status = '';
+        $dateFrom = $this->validDate((string)($raw['dateFrom'] ?? ''));
+        $dateTo = $this->validDate((string)($raw['dateTo'] ?? ''));
+        if ($dateFrom !== '' && $dateTo !== '' && $dateFrom > $dateTo) [$dateFrom, $dateTo] = [$dateTo, $dateFrom];
         return [
             'tab' => in_array($tab, $allowedTabs, true) ? $tab : '',
             'keyword' => mb_substr($keyword, 0, 80),
+            'status' => $status,
+            'dateFrom' => $dateFrom,
+            'dateTo' => $dateTo,
         ];
+    }
+
+    private function validDate(string $value): string
+    {
+        $value = trim($value);
+        return preg_match('/^\d{4}-\d{2}-\d{2}$/', $value) === 1 ? $value : '';
     }
 
     private function applyDetailKeyword($query, string $keyword, array $columns): void
@@ -710,14 +744,14 @@ final class CashierV3MemberDetailQueryServices
         });
     }
 
-    private function craftsmenSummary(string $json): string
+    private function craftsmenSummary(string $json, array $fallbackNames = []): string
     {
         $values = json_decode($json, true);
-        if (!is_array($values)) return '';
+        if (!is_array($values)) return implode('、', array_values(array_unique(array_filter($fallbackNames))));
         $names = [];
         foreach ($values as $value) {
             if (!is_array($value)) continue;
-            $name = trim((string)($value['staff_name_snapshot'] ?? $value['staffName'] ?? $value['staff_name'] ?? ''));
+            $name = trim((string)($value['name'] ?? $value['staff_name_snapshot'] ?? $value['staffName'] ?? $value['staff_name'] ?? ''));
             if ($name === '') continue;
             // 只展示持久化的分配类型。旧快照没有该字段时不能从金额或
             // 人员反推，明确标记为未标注，避免把历史数据误写成轮次。
@@ -730,7 +764,9 @@ final class CashierV3MemberDetailQueryServices
             }
             if (!in_array($label, $names, true)) $names[] = $label;
         }
-        return implode('、', $names);
+        $summary = implode('、', $names);
+        if ($summary !== '' && !str_contains($summary, '未标注')) return $summary;
+        return $fallbackNames !== [] ? implode('、', array_values(array_unique(array_filter($fallbackNames)))) : $summary;
     }
 
     private function giftKindLabel(string $value): string
@@ -738,6 +774,18 @@ final class CashierV3MemberDetailQueryServices
         $normalized = strtolower(trim($value));
         $labels = ['project' => '项目', 'product' => '产品', 'coupon' => '优惠券'];
         return $labels[$normalized] ?? (trim($value) !== '' ? $value : '赠送内容');
+    }
+
+    private function giftStatusLabel(string $value): string
+    {
+        $normalized = strtolower(trim($value));
+        return [
+            'effective' => '已生效',
+            'issued' => '已生效',
+            'revoked' => '已作废',
+            'cancelled' => '已取消',
+            'expired' => '已过期',
+        ][$normalized] ?? (trim($value) !== '' ? $value : '—');
     }
 
     private function careTypeLabel(string $value): string

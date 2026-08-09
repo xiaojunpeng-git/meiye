@@ -173,3 +173,45 @@ export function merchantRootInstallDecision(
 	if (!merchantContextIsComplete(activeContextId, stateContextId)) return 'MISSING_STATE_CONTEXT'
 	return validRevision(stateRevision) ? 'ACCEPT' : 'INVALID_STATE_REVISION'
 }
+
+export function merchantContextSwitchInstallDecision(current : any, incoming : any, targetContextId : string) : string {
+	if (current == null || incoming == null || targetContextId.length == 0) return 'INVALID_CONTEXT_SWITCH_ROOT'
+	let baseDecision = merchantRootInstallDecision(
+		String(incoming.contractVersion || ''), 'mobile-merchant-v1',
+		incoming.employee != null && incoming.employee.status == 'ACTIVE', Number(incoming.authVersion || 0),
+		String(incoming.activeContextId || ''), String(incoming.stateContextId || ''), String(incoming.stateRevision || ''),
+		incoming.dataScope != null && incoming.dataScope.authorized == true,
+		Number(incoming.dataScope != null ? incoming.dataScope.scopeEntryCount || 0 : 0),
+		String(incoming.dataScope != null ? incoming.dataScope.scopeDigest || '' : '')
+	)
+	if (baseDecision != 'ACCEPT') return baseDecision
+	if (String(current.merchantToken || '').length == 0 || String(incoming.expiresAt || '').length == 0 ||
+		current.employee == null || incoming.employee == null || String(current.employee.id || '').length == 0 ||
+		!Object.hasOwn(incoming.employee, 'name') || !Object.hasOwn(incoming.employee, 'avatar') || !Object.hasOwn(incoming.employee, 'status')) {
+		return 'INCOMPLETE_ROOT_STATE'
+	}
+	if (current.employee == null || incoming.employee == null ||
+		String(current.employee.id || '') != String(incoming.employee.id || '') ||
+		Number(current.authVersion || 0) != Number(incoming.authVersion || 0) ||
+		String(current.merchantToken || '') != String(incoming.merchantToken || '') ||
+		String(incoming.reasonCode || '') != 'CONTEXT_SWITCHED') return 'UNAUTHORIZED_ROOT_STATE'
+	if (current.activeContext == null || incoming.activeContext == null ||
+		String(current.activeContext.contextId || '') == targetContextId ||
+		String(incoming.activeContext.contextId || '') != targetContextId ||
+		String(current.activeContextId || '') == String(incoming.activeContextId || '') ||
+		String(current.stateContextId || '') == String(incoming.stateContextId || '') ||
+		String(incoming.stateRevision || '') != '1') return 'INVALID_CONTEXT_SWITCH_ROOT'
+	if (!Array.isArray(incoming.contexts) || !Array.isArray(incoming.capabilities) || !Array.isArray(incoming.availableActions)) return 'INCOMPLETE_ROOT_STATE'
+	let targetMatches = 0
+	let contextIds : Array<string> = []
+	for (let index = 0; index < incoming.contexts.length; index++) {
+		let context = incoming.contexts[index]
+		let contextId = context != null ? String(context.contextId || '') : ''
+		if (contextId.length == 0 || context == null || typeof context.label != 'string' ||
+			Object.hasOwn(context, 'capabilities') || Object.hasOwn(context, 'dataScope') || Object.hasOwn(context, 'availableActions') ||
+			contextIds.indexOf(contextId) >= 0) return 'INCOMPLETE_ROOT_STATE'
+		contextIds.push(contextId)
+		if (contextId == targetContextId) targetMatches++
+	}
+	return targetMatches == 1 ? 'ACCEPT_SWITCH' : 'INVALID_CONTEXT_SWITCH_ROOT'
+}

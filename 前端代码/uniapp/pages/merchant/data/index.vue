@@ -201,9 +201,6 @@ export default {
 		},
 		detailMenus() {
 			const list = [];
-			if (this.perms.includes('merchant.data.region') || this.activeRole === 'region_agent') {
-				list.push({ name: '区域经营', desc: '区域统计工作台', url: '/pages/admin/agent/index' });
-			}
 			if (this.perms.includes('merchant.data.store') || this.activeRole === 'store_manager') {
 				list.push({ name: '员工业绩', desc: '员工业绩排行（非三指标明细）', url: '/pages/admin/yeji/store' });
 			}

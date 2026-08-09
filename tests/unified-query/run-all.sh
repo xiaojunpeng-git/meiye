@@ -11,6 +11,7 @@ C1_UPG="$UPGRADES/2026-07-27-收银V3命令与幂等底座"
 EVENT_UPG="$UPGRADES/2026-07-28-收银V3统一事件与Outbox"
 C5_UPG="$UPGRADES/2026-07-28-C5会员建档一致性"
 UQ_UPG="$UPGRADES/2026-07-28-统一查询自定义字段"
+STAFF_ROLE_UPG="$UPGRADES/2026-08-01-门店员工收银角色资格"
 RUN_ID="${UQ_RUN_ID:-$(date '+%Y%m%d-%H%M%S')-$$-${RANDOM}}"
 EVIDENCE_ROOT="${UQ_EVIDENCE_ROOT:-$TESTS/_evidence}"
 EV="${UQ_EVIDENCE_DIR:-$EVIDENCE_ROOT/runs/$RUN_ID}"
@@ -74,6 +75,7 @@ input_manifest() {
     "$EVENT_UPG"
     "$C5_UPG"
     "$UQ_UPG"
+    "$STAFF_ROLE_UPG"
     "$CASHIER_TESTS/lib"
     "$CASHIER_TESTS/php/member-prepare-schema.php"
     "$CASHIER_TESTS/js/unified-query-frontend-contract.mjs"
@@ -91,6 +93,12 @@ input_manifest() {
     "$REPO/前端代码/cashier-v3/src/composables/useUnifiedQueryPage.js"
     "$REPO/前端代码/cashier-v3/src/dev/UnifiedQueryCustomFieldPreview.vue"
     "$REPO/前端代码/cashier-v3/src/views/MemberListView.vue"
+    "$REPO/前端代码/cashier-v3/src/views/StaffListView.vue"
+    "$REPO/前端代码/cashier-v3/src/services/staffManagementApi.js"
+    "$REPO/前端代码/cashier-v3/package.json"
+    "$REPO/前端代码/cashier-v3/package-lock.json"
+    "$REPO/前端代码/cashier-v3/vite.config.js"
+    "$REPO/前端代码/shared/unified-query-vue3"
   )
 
   for input in "${inputs[@]}"; do
@@ -461,8 +469,28 @@ if mysql_file "$UQ_UPG/01-升级前检查.sql" > "$EV/unified-query-reapply-prec
 fi
 echo "GATE_PASS=UQ-MIGRATION-REGISTRATION-01"
 
+mysql_file "$STAFF_ROLE_UPG/01-升级前检查.sql"
+mysql_file "$STAFF_ROLE_UPG/02-正式升级.sql"
+mysql_file "$STAFF_ROLE_UPG/02-正式升级.sql"
+mysql_file "$STAFF_ROLE_UPG/03-升级后验证.sql" \
+  | tee "$EV/staff-role-eligibility-postcheck.out"
+register_upgrade \
+  '20260801-001-store-staff-cashier-role-eligibility' \
+  'store staff cashier role eligibility' \
+  "$STAFF_ROLE_UPG/02-正式升级.sql"
+echo "GATE_PASS=UQ-STAFF-MIGRATION-01"
+
+docker_php 'php /all-tests/unified-query/php/staff-provider-integration.php' \
+  | tee "$EV/unified-query-staff-provider.out"
+docker_php 'php /all-tests/cashier-v3/php/staff-role-eligibility-contract.php' \
+  | tee "$EV/staff-role-eligibility-contract.out"
+
 docker_php 'php /all-tests/unified-query/php/contract.php' \
   | tee "$EV/unified-query-contract.out"
+docker_php 'php /all-tests/unified-query/php/range-bucket-contract.php' \
+  | tee "$EV/unified-query-range-bucket.out"
+docker_php 'php /all-tests/unified-query/php/generalization-contract.php' \
+  | tee "$EV/unified-query-generalization.out"
 docker_php 'php /all-tests/unified-query/php/metadata-integration.php' \
   | tee "$EV/unified-query-metadata.out"
 docker_php 'php /all-tests/unified-query/php/gateway-integration.php' \
@@ -476,6 +504,10 @@ C1A_EVIDENCE_DIR="$EV" C1A_TMP_DIR="$TEMP_TMP" \
   | tee "$EV/unified-query-gateway-envelope.out"
 node "$CASHIER_TESTS/js/unified-query-frontend-contract.mjs" \
   | tee "$EV/unified-query-frontend-contract.out"
+node "$TESTS/js/shared-package-contract.mjs" \
+  | tee "$EV/unified-query-shared-package.out"
+node "$TESTS/js/staff-frontend-contract.mjs" \
+  | tee "$EV/unified-query-staff-frontend.out"
 bash "$TESTS/sql-matrix.sh" | tee "$EV/unified-query-sql-matrix.out"
 
 verify_node_dependencies

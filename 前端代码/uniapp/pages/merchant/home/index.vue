@@ -4,51 +4,14 @@
 			
 			<view class="identity" @click="openContextSheet">
 				<view class="identity__main">
-					<view class="identity__name">{{ storeTitle }}</view>
-					<view class="identity__role">
-						{{ roleLabel }}
+					<view class="identity__name">
+						{{ storeTitle }}
 						<text v-if="canSwitchContext" class="iconfont icon-ic_downarrow identity__arrow"></text>
 					</view>
 				</view>
 				<view class="identity__msg" @click.stop="goUrl('/pages/users/message_center/index')">
 					<text class="iconfont icon-ic_message"></text>
 				</view>
-			</view>
-
-			
-			<view
-				v-if="showMetrics"
-				class="card metrics"
-				@click="goMetricsDetail"
-			>
-				<view class="card__head">
-					<text class="card__title">{{ metricsTitle }}</text>
-					<view class="metrics__actions">
-						<text class="metrics__eye" @click.stop="hideAmount = !hideAmount">{{ hideAmount ? '显示' : '隐藏' }}</text>
-						<text class="card__link">{{ metricsLinkText }}</text>
-					</view>
-				</view>
-				<view class="metrics__row" :class="{ 'metrics__row--wrap': metricList.length > 3 }">
-					<view
-						class="metrics__item"
-						:class="{ 'metrics__item--third': metricList.length > 3 }"
-						v-for="(m, i) in metricList"
-						:key="m.metric_code || i"
-					>
-						<view class="metrics__label">
-							{{ m.title }}
-							<text
-								v-if="m.tooltip_api"
-								class="tip"
-								@click.stop="onTooltip(m)"
-							>ⓘ</text>
-						</view>
-						<view class="metrics__value">{{ formatMetricValue(m) }}</view>
-						<view v-if="m.developing" class="metrics__sub">口径开发中</view>
-						<view v-else-if="m.detail_developing" class="metrics__sub">明细开发中</view>
-					</view>
-				</view>
-				<view v-if="metricsExtra" class="metrics__extra">{{ metricsExtra }}</view>
 			</view>
 
 			
@@ -136,14 +99,6 @@ import merchantTabBar from '@/components/merchantTabBar/index.vue';
 import { merchantHome } from '@/api/merchant.js';
 import request from '@/utils/request.js';
 
-const ROLE_MAP = {
-	region_agent: '区域代理',
-	store_manager: '店长',
-	store_staff: '店员',
-	platform_service: '平台客服',
-	delivery: '配送员',
-};
-
 export default {
 	mixins: [merchantGuard],
 	components: { merchantSwitch, merchantTabBar },
@@ -173,9 +128,6 @@ export default {
 		activeRole() {
 			return this.$store.state.merchant.activeRole || '';
 		},
-		roleLabel() {
-			return ROLE_MAP[this.activeRole] || this.activeRole || '商家';
-		},
 		stores() {
 			return this.$store.state.merchant.stores || [];
 		},
@@ -184,13 +136,10 @@ export default {
 		},
 		storeTitle() {
 			const hit = this.stores.find((s) => Number(s.id) === Number(this.activeStoreId));
-			return (hit && hit.name) || this.storeNameFromApi || '未选择门店';
-		},
-		roles() {
-			return this.$store.state.merchant.roles || [];
+			return (hit && hit.name) || this.storeNameFromApi || '暂无可用门店';
 		},
 		canSwitchContext() {
-			return this.roles.length > 1 || this.stores.length > 1;
+			return !!this.$store.state.merchant.storeSwitchAllowed;
 		},
 		perms() {
 			return this.$store.state.merchant.permissions || [];
@@ -211,7 +160,6 @@ export default {
 		},
 		metricsTitle() {
 			if (this.metricsMode === 'staff_self') return '我的今日业绩';
-			if (this.activeRole === 'region_agent') return '今日区域经营';
 			if (this.canStoreData) return '今日经营';
 			return '我的今日业绩';
 		},
@@ -294,10 +242,10 @@ export default {
 				workbench: Number(this.todoCounts.refunding || 0) + Number(this.todoCounts.policeforce || 0),
 			};
 			const all = [
-				{ name: '扫码核销', icon: 'icon-ic_Scan', action: 'scan', need: 'cancel' },
+				{ name: '扫码核销', icon: 'icon-ic_Scan', action: 'developing', need: 'cancel' },
 				{ name: '开单收银', icon: 'icon-ic_order', action: 'developing', need: '' },
 				{ name: '开卡充值', icon: 'icon-ic_user1', action: 'developing', need: '' },
-				{ name: '预约', icon: 'icon-ic_clock', action: 'url', url: '/pages/admin/reservation_list/index?merchant=1', need: 'rsv' },
+				{ name: '预约', icon: 'icon-ic_clock', action: 'developing', need: 'rsv' },
 				{ name: '添加客户', icon: 'icon-ic_user', action: 'developing', need: 'customer_create' },
 				{ name: '订单管理', icon: 'icon-ic_order1', action: 'url', url: '/pages/admin/orderList/index', need: 'order' },
 				{ name: '补交欠款', icon: 'icon-ic_money', action: 'url', url: '/pages/merchant/debt/index', need: 'debt' },
@@ -510,14 +458,10 @@ export default {
 	font-weight: 600;
 	color: #1a1a1a;
 }
-.identity__role {
-	margin-top: 8rpx;
+.identity__arrow {
+	margin-left: 8rpx;
 	font-size: 24rpx;
 	color: #888;
-	display: flex;
-	align-items: center;
-}
-.identity__arrow {
 	font-size: 22rpx;
 	margin-left: 4rpx;
 }

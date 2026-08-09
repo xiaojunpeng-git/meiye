@@ -56,6 +56,65 @@ function uqMemberQuery(
     ];
 }
 
+function uqMemberDeleteTimeColumnDefinition(array $column): string
+{
+    $type = trim((string)($column['column_type'] ?? ''));
+    if ($type === '' || !preg_match('/^[A-Za-z0-9(), ]+$/D', $type)) {
+        throw new \RuntimeException('无法安全恢复 delete_time 的列类型');
+    }
+    $definition = $type;
+    foreach ([
+        'charset_name' => 'CHARACTER SET',
+        'collation_name' => 'COLLATE',
+    ] as $key => $keyword) {
+        $value = trim((string)($column[$key] ?? ''));
+        if ($value === '') {
+            continue;
+        }
+        if (!preg_match('/^[A-Za-z0-9_]+$/D', $value)) {
+            throw new \RuntimeException('无法安全恢复 delete_time 的字符集定义');
+        }
+        $definition .= ' ' . $keyword . ' ' . $value;
+    }
+    $definition .= (string)($column['is_nullable'] ?? '') === 'NO'
+        ? ' NOT NULL'
+        : ' NULL';
+
+    $default = $column['column_default'] ?? null;
+    if ($default === null) {
+        $definition .= ' DEFAULT NULL';
+    } elseif (preg_match('/^CURRENT_TIMESTAMP(?:\\(\\))?$/i', (string)$default)) {
+        $definition .= ' DEFAULT ' . strtoupper((string)$default);
+    } else {
+        $definition .= " DEFAULT '" . str_replace(
+            ['\\', "'"],
+            ['\\\\', "\\'"],
+            (string)$default
+        ) . "'";
+    }
+
+    $extra = trim((string)($column['extra_value'] ?? ''));
+    if ($extra !== '') {
+        if (!preg_match('/^on update current_timestamp(?:\\(\\))?$/i', $extra)) {
+            throw new \RuntimeException('无法安全恢复 delete_time 的额外定义');
+        }
+        $definition .= ' ' . $extra;
+    }
+    $comment = (string)($column['comment_text'] ?? '');
+    if ($comment !== '') {
+        $definition .= " COMMENT '" . str_replace(
+            ['\\', "'"],
+            ['\\\\', "\\'"],
+            $comment
+        ) . "'";
+    }
+    return $definition;
+}
+
+$legacyDeleteTimeRestore = '';
+$legacyDeleteTimeAltered = false;
+$legacyDeleteTimeRestoreError = '';
+
 try {
     MemberIntegrationFixture::ensureLegacySchema();
     MemberIntegrationFixture::resetAndSeed();
@@ -613,6 +672,212 @@ try {
         ), JSON_UNESCAPED_UNICODE),
         'UQ-PERF-04'
     );
+
+    // 此文件是 focused suite 最后一个业务数据库用例；在独立临时库中把
+    // delete_time 切为旧 int/varchar 形态，确保 SQL 快路径的总数和分页不会与
+    // rowAllowed()/导出使用的 PHP 状态判定分叉。
+    $legacyDeleteTimeColumn = (array)(Db::query(
+        "SELECT COLUMN_TYPE AS column_type, IS_NULLABLE AS is_nullable, "
+        . "COLUMN_DEFAULT AS column_default, EXTRA AS extra_value, "
+        . "CHARACTER_SET_NAME AS charset_name, COLLATION_NAME AS collation_name, "
+        . "COLUMN_COMMENT AS comment_text "
+        . "FROM information_schema.COLUMNS "
+        . "WHERE TABLE_SCHEMA = DATABASE() "
+        . "AND TABLE_NAME = 'eb_user' AND COLUMN_NAME = 'delete_time'"
+    )[0] ?? []);
+    $legacyDeleteTimeRestore = uqMemberDeleteTimeColumnDefinition(
+        $legacyDeleteTimeColumn
+    );
+    $legacyStatusUsers = [
+        21001, 21002, 21003, 21004,
+        21005, 21006, 21007, 21008,
+    ];
+    MemberIntegrationFixture::seedMember(
+        21001,
+        'UQLEGACY正常会员',
+        '13900021001',
+        MemberIntegrationFixture::STORE_ID,
+        1
+    );
+    MemberIntegrationFixture::seedMember(
+        21002,
+        'UQLEGACY停用会员',
+        '13900021002',
+        MemberIntegrationFixture::STORE_ID,
+        0
+    );
+    MemberIntegrationFixture::seedMember(
+        21003,
+        'UQLEGACY标记注销会员',
+        '13900021003',
+        MemberIntegrationFixture::STORE_ID,
+        1
+    );
+    MemberIntegrationFixture::seedMember(
+        21004,
+        'UQLEGACY时间注销会员',
+        '13900021004',
+        MemberIntegrationFixture::STORE_ID,
+        1
+    );
+    MemberIntegrationFixture::seedMember(
+        21005,
+        'UQLEGACY空格注销会员',
+        '13900021005',
+        MemberIntegrationFixture::STORE_ID,
+        1
+    );
+    MemberIntegrationFixture::seedMember(
+        21006,
+        'UQLEGACY零空格注销会员',
+        '13900021006',
+        MemberIntegrationFixture::STORE_ID,
+        1
+    );
+    MemberIntegrationFixture::seedMember(
+        21007,
+        'UQLEGACY双零注销会员',
+        '13900021007',
+        MemberIntegrationFixture::STORE_ID,
+        1
+    );
+    MemberIntegrationFixture::seedMember(
+        21008,
+        'UQLEGACY空值正常会员',
+        '13900021008',
+        MemberIntegrationFixture::STORE_ID,
+        1
+    );
+
+    $legacyDeleteTimeAltered = true;
+    Db::execute(
+        'ALTER TABLE `eb_user` MODIFY `delete_time` int unsigned NULL DEFAULT NULL'
+    );
+    Db::name('user')->whereIn('uid', $legacyStatusUsers)->update([
+        'delete_time' => 0,
+    ]);
+    Db::name('user')->where('uid', 21003)->update(['is_del' => 1]);
+    Db::name('user')->where('uid', 21004)->update(['delete_time' => 1710000000]);
+
+    $legacyIntCancelled = uqMemberQuery($dispatcher, 'UQLEGACY', $session, [
+        'dataScope' => 'all',
+        'businessStatus' => '已注销',
+    ]);
+    $legacyIntNormal = uqMemberQuery($dispatcher, 'UQLEGACY', $session, [
+        'dataScope' => 'normal',
+        'businessStatus' => '',
+    ]);
+    $legacyIntInactive = uqMemberQuery($dispatcher, 'UQLEGACY', $session, [
+        'dataScope' => 'all',
+        'businessStatus' => '已停用',
+    ]);
+    $legacyStatusExportPlan = [
+        'page_code' => 'member_list',
+        'query_cutoff_date' => (string)$scopedExportContext['query_cutoff_date'],
+        'stable_row_key' => 'member_id',
+        'filters' => [],
+        'top_filters' => [],
+        'keyword_filters' => [
+            ['field_key' => 'member_name', 'operator' => 'contains', 'value' => 'UQLEGACY'],
+            ['field_key' => 'phone', 'operator' => 'contains', 'value' => 'UQLEGACY'],
+            ['field_key' => 'member_no', 'operator' => 'contains', 'value' => 'UQLEGACY'],
+        ],
+        'filter_relation' => 'all',
+        'sorts' => [['field_key' => 'member_id', 'direction' => 'asc']],
+        'groups' => [],
+        'summaries' => [],
+        'pagination' => ['page' => 1, 'limit' => 20],
+        'custom_definitions' => [],
+        'domain_scope' => ['data_scope' => 'all', 'business_status' => '已注销'],
+        'quick_filters' => [],
+        'visible_fields' => ['member_name', 'member_status'],
+        'permission_must_be_injected_before_calculation' => true,
+    ];
+    $legacyIntExport = $runtime['memberProvider']->executeFrozenPlan(
+        $scopedExportContext,
+        $legacyStatusExportPlan,
+        'query',
+        ['member_name', 'member_status']
+    );
+
+    Db::execute(
+        'ALTER TABLE `eb_user` MODIFY `delete_time` varchar(32) NULL DEFAULT NULL'
+    );
+    Db::name('user')->where('uid', 21001)->update(['delete_time' => '']);
+    Db::name('user')->where('uid', 21002)->update(['delete_time' => '0']);
+    Db::name('user')->where('uid', 21003)->update(['delete_time' => '0']);
+    Db::name('user')->where('uid', 21004)->update(['delete_time' => '1710000000']);
+    Db::name('user')->where('uid', 21005)->update(['delete_time' => ' ']);
+    Db::name('user')->where('uid', 21006)->update(['delete_time' => '0 ']);
+    Db::name('user')->where('uid', 21007)->update(['delete_time' => '00']);
+    Db::name('user')->where('uid', 21008)->update(['delete_time' => null]);
+
+    $legacyVarcharCancelled = uqMemberQuery($dispatcher, 'UQLEGACY', $session, [
+        'dataScope' => 'all',
+        'businessStatus' => '已注销',
+    ]);
+    $legacyVarcharNormal = uqMemberQuery($dispatcher, 'UQLEGACY', $session, [
+        'dataScope' => 'normal',
+        'businessStatus' => '',
+    ]);
+    $legacyVarcharInactive = uqMemberQuery($dispatcher, 'UQLEGACY', $session, [
+        'dataScope' => 'all',
+        'businessStatus' => '已停用',
+    ]);
+    $legacyVarcharExport = $runtime['memberProvider']->executeFrozenPlan(
+        $scopedExportContext,
+        $legacyStatusExportPlan,
+        'query',
+        ['member_name', 'member_status']
+    );
+
+    $legacyStatusResults = [
+        'int' => [
+            'expected' => ['cancelled' => 2, 'normal' => 5, 'inactive' => 1],
+            'cancelled' => $legacyIntCancelled['data'],
+            'normal' => $legacyIntNormal['data'],
+            'inactive' => $legacyIntInactive['data'],
+            'export' => $legacyIntExport,
+        ],
+        'varchar' => [
+            'expected' => ['cancelled' => 5, 'normal' => 2, 'inactive' => 1],
+            'cancelled' => $legacyVarcharCancelled['data'],
+            'normal' => $legacyVarcharNormal['data'],
+            'inactive' => $legacyVarcharInactive['data'],
+            'export' => $legacyVarcharExport,
+        ],
+    ];
+    $legacyStatusCountsMatch = true;
+    foreach ($legacyStatusResults as $legacyStatusResult) {
+        $expected = (array)$legacyStatusResult['expected'];
+        $cancelled = (array)$legacyStatusResult['cancelled'];
+        $normal = (array)$legacyStatusResult['normal'];
+        $inactive = (array)$legacyStatusResult['inactive'];
+        $exportRows = (array)($legacyStatusResult['export']['exportRows'] ?? []);
+        $legacyStatusCountsMatch = $legacyStatusCountsMatch
+            && (int)($cancelled['total'] ?? -1) === (int)$expected['cancelled']
+            && count((array)($cancelled['records'] ?? [])) === (int)$expected['cancelled']
+            && count(array_unique(array_column((array)($cancelled['records'] ?? []), 'status'))) === 1
+            && (string)($cancelled['records'][0]['status'] ?? '') === '已注销'
+            && (int)($normal['total'] ?? -1) === (int)$expected['normal']
+            && count((array)($normal['records'] ?? [])) === (int)$expected['normal']
+            && (string)($normal['records'][0]['status'] ?? '') === '正常'
+            && (int)($inactive['total'] ?? -1) === (int)$expected['inactive']
+            && count((array)($inactive['records'] ?? [])) === (int)$expected['inactive']
+            && (string)($inactive['records'][0]['status'] ?? '') === '已停用'
+            && count($exportRows) === (int)$expected['cancelled']
+            && count(array_unique(array_column($exportRows, 'member_status'))) === 1
+            && (string)($exportRows[0]['member_status'] ?? '') === '已注销'
+            && !empty($cancelled['security']['sqlPaginatedAfterDataScope'])
+            && !empty($normal['security']['sqlPaginatedAfterDataScope'])
+            && !empty($inactive['security']['sqlPaginatedAfterDataScope']);
+    }
+    ok(
+        'SQL 快路径在旧 int/varchar 删除时间形态下与列表和导出状态口径一致',
+        $legacyStatusCountsMatch,
+        json_encode($legacyStatusResults, JSON_UNESCAPED_UNICODE),
+        'UQ-PERF-06'
+    );
 } catch (\Throwable $throwable) {
     ok(
         '会员首发字段真实 Gateway 集成未发生未捕获异常',
@@ -620,6 +885,26 @@ try {
         get_class($throwable) . ': ' . $throwable->getMessage()
             . "\n" . $throwable->getTraceAsString()
     );
+} finally {
+    if ($legacyDeleteTimeAltered && $legacyDeleteTimeRestore !== '') {
+        try {
+            // 回归只在临时库运行，但仍恢复原列形态，保证单文件重跑不会污染后续用例。
+            Db::name('user')->where('uid', '>', 0)->update(['delete_time' => null]);
+            Db::execute(
+                'ALTER TABLE `eb_user` MODIFY `delete_time` ' . $legacyDeleteTimeRestore
+            );
+        } catch (\Throwable $throwable) {
+            $legacyDeleteTimeRestoreError = get_class($throwable) . ': '
+                . $throwable->getMessage();
+        }
+    }
 }
+
+ok(
+    '旧 delete_time 回归结束后恢复测试库原列形态',
+    !$legacyDeleteTimeAltered || $legacyDeleteTimeRestoreError === '',
+    $legacyDeleteTimeRestoreError,
+    'UQ-PERF-07'
+);
 
 finish('unified-query-member-provider-integration');

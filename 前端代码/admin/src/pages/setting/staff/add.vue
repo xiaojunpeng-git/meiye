@@ -185,7 +185,7 @@
 
           <TabPane label="数据权限" name="scope">
             <Alert show-icon>
-              设置该人员可查看的数据范围。个人：本人任职相关数据；门店：系统按当前任职自动计算；组织：可多选组织及其下级。
+              设置该人员可查看的数据范围。个人：本人任职相关数据；门店：系统按当前任职自动计算；组织：可多选组织及其下级。手机端是否可进入由本页的“手机端”开关控制；数据权限只决定进入后可查看、可切换的门店范围。
             </Alert>
             <FormItem label="数据范围：">
               <RadioGroup v-model="formInline.scope_mode" @on-change="onScopeModeChange">
@@ -220,7 +220,7 @@
                 :multiple="true"
                 :disabled-ids="[]"
               />
-              <div class="form-tip">可多选组织；将查看所选组织及其下级组织、门店的数据（取并集）。不能直接选门店。</div>
+              <div class="form-tip">可多选组织；将查看所选组织及其下级组织、门店的数据（取并集）。不能直接选门店。手机端看板按此范围汇总，工作台需在此范围内选择一个门店操作。</div>
             </FormItem>
             <FormItem label="手机端：">
               <i-switch
@@ -241,14 +241,14 @@
                 所选岗位未配置手机端功能，不能启用手机端。
               </div>
               <div v-else class="form-tip">
-                岗位决定可使用的商家端功能；此开关只控制该员工是否实际开通手机端。
+                岗位决定可使用的商家端功能；此开关是该员工进入手机端的唯一入口控制。数据权限仅限制进入后可见的组织和门店范围。
               </div>
             </FormItem>
           </TabPane>
 
           <TabPane label="登录设置" name="login">
             <Alert show-icon>
-              统一内部账号：用于平台后台和门店端登录。手机端使用手机验证与手机端权限，不使用内部账号密码。账号禁止使用纯 11 位手机号格式。
+              统一内部账号用于平台后台、门店端和手机端登录，也可以使用员工手机号登录。手机号仅作为登录输入，不作为内部账号保存；内部账号禁止使用纯 11 位手机号格式。
             </Alert>
             <Row :gutter="24">
               <Col :span="12">
@@ -469,6 +469,7 @@ import { mapState } from 'vuex';
 import {
   workMemberList,
   postStaff,
+  postPersonComplete,
   getStaffInfo,
   getPersonComplete,
 } from '@/api/staff.js';
@@ -1270,13 +1271,16 @@ export default {
       const headers = {
         'X-Request-Token': token,
       };
-      // 保存 URL：有 staff_id 用 staff_id；否则用 editId（可能为 employee_id / 0）
+      // 组织工作台以 employee_id 为唯一保存主键，不能复用 staff_id 路径。
       const saveId = Number(this.formInline.staff_id) > 0
         ? Number(this.formInline.staff_id)
         : (Number(this.editId) || 0);
+      const saveRequest = this.scene === 'organization'
+        ? postPersonComplete(payload, Number(this.editId) || 0, headers)
+        : postStaff(payload, saveId, headers);
 
       this.submitting = true;
-      postStaff(payload, saveId, headers)
+      saveRequest
         .then((res) => {
           const data = (res && res.data) || {};
           this.$Message.success((res && res.msg) || '保存成功');

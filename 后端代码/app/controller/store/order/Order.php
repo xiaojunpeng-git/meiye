@@ -107,6 +107,28 @@ class Order extends AuthController
         }
         $where['status'] = trim($where['status']);
         $where['type'] = trim($where['type']);
+        // I2：门店订单列表按本店数据权限（个人/本店）收口
+        try {
+            /** @var \app\services\organization\EmployeeDataScopeServices $scopeSvc */
+            $scopeSvc = app()->make(\app\services\organization\EmployeeDataScopeServices::class);
+            $staffInfo = is_array($this->storeStaffInfo ?? null) ? $this->storeStaffInfo : [];
+            $employeeId = (int)($staffInfo['employee_id'] ?? 0);
+            if ($employeeId <= 0 && !empty($staffInfo['id'])) {
+                $employeeId = (int)\think\facade\Db::name('system_store_staff')
+                    ->where('id', (int)$staffInfo['id'])->where('is_del', 0)->value('employee_id');
+            }
+            $adminInfo = [
+                'id' => (int)($staffInfo['id'] ?? 0),
+                'level' => 1,
+                'admin_type' => 3,
+                'employee_id' => $employeeId,
+            ];
+            $scopeSvc->applyOrderListScope($where, $employeeId, 'store', (int)$this->storeId, $adminInfo);
+        } catch (\Throwable $e) {
+            $where['id'] = -1;
+        }
+        // 核销业务主单聚合：同一 batch_no 只展示 1 行「项目核销业务单」，旧 batch_id=0 子单保持原行
+        $where['aggregate_writeoff_batch'] = 1;
         return $this->success($this->services->getOrderList($where, ['*'], ['split' => function ($query) {
             $query->field('id,pid');
         }, 'pink', 'invoice', 'storeStaff'], false, 'add_time DESC,id DESC', true));
@@ -124,6 +146,87 @@ class Order extends AuthController
         ];
         return $this->success('ok',$result);
     }
+    /**
+     * 核销业务主单详情：全量明细（含已撤销）+ original/active 汇总 + visibility
+     * @param \app\services\order\WriteoffBatchListServices $listServices
+     * @param $id 批量核销主单ID
+     * @return mixed
+     */
+    public function writeoffBatchDetail(\app\services\order\WriteoffBatchListServices $listServices, $id)
+    {
+        if (!$id) {
+            return $this->fail('缺少批量核销单ID');
+        }
+        $scope = $this->resolveWriteoffBatchScope();
+        try {
+            return $this->success($listServices->getBatchDetail((int)$id, $scope, (int)$this->storeId, 'store'));
+        } catch (\think\exception\ValidateException $e) {
+            return $this->fail($e->getMessage());
+        }
+    }
+
+    /**
+     * 核销业务主单整笔撤销：仅操作人或具备本店撤销核销权限的员工可操作（与可见性分离）
+     * @param Request $request
+     * @param \app\services\order\WriteoffBatchListServices $listServices
+     * @param $id 批量核销主单ID
+     * @return mixed
+     */
+    public function writeoffBatchCancel(Request $request, \app\services\order\WriteoffBatchListServices $listServices, $id)
+    {
+        if (!$id) {
+            return $this->fail('缺少批量核销单ID');
+        }
+        [$remark] = $request->putMore([
+            ['remark', ''],
+        ], true);
+        $scope = $this->resolveWriteoffBatchScope();
+        try {
+            $batch = $listServices->getBatchForCancelCheck((int)$id, (int)$this->storeId, 'store');
+            if (!$listServices->canCancelBatch($batch, $scope)) {
+                return $this->fail('无权撤销该批量核销单');
+            }
+            /** @var \app\services\order\BatchWriteoffServices $batchServices */
+            $batchServices = app()->make(\app\services\order\BatchWriteoffServices::class);
+            $batchServices->cancelBatch((int)$id, (string)$remark, (int)$this->storeId);
+            return $this->success('撤销成功');
+        } catch (\think\exception\ValidateException $e) {
+            return $this->fail($e->getMessage());
+        }
+    }
+
+    /**
+     * 单条核销明细修改手艺人
+     */
+
+    /**
+     * 批量核销明细修改为同一组手艺人
+     */
+
+    /**
+     * 与门店订单列表同一数据权限（employee_data_scope），供批量核销详情/撤销复用
+     */
+    protected function resolveWriteoffBatchScope(): array
+    {
+        try {
+            /** @var \app\services\organization\EmployeeDataScopeServices $scopeSvc */
+            $scopeSvc = app()->make(\app\services\organization\EmployeeDataScopeServices::class);
+            $staffInfo = is_array($this->storeStaffInfo ?? null) ? $this->storeStaffInfo : [];
+            $employeeId = $scopeSvc->resolveEmployeeIdFromOperator($staffInfo, 'store');
+            $adminInfo = [
+                'id' => (int)($staffInfo['id'] ?? 0),
+                'level' => 1,
+                'admin_type' => 3,
+                'employee_id' => $employeeId,
+            ];
+            $tmp = [];
+            $scopeSvc->applyOrderListScope($tmp, $employeeId, 'store', (int)$this->storeId, $adminInfo);
+            return (array)($tmp['employee_data_scope'] ?? ['mode' => 'none']);
+        } catch (\Throwable $e) {
+            return ['mode' => 'none'];
+        }
+    }
+
     /**
      * 撤销订单
      */
@@ -158,6 +261,22 @@ class Order extends AuthController
         ]);
         $where['pid'] = -2;
         $where['store_id'] = $this->storeId;
+        // I2：门店订单头部统计与列表同一数据权限
+        try {
+            /** @var \app\services\organization\EmployeeDataScopeServices $scopeSvc */
+            $scopeSvc = app()->make(\app\services\organization\EmployeeDataScopeServices::class);
+            $staffInfo = is_array($this->storeStaffInfo ?? null) ? $this->storeStaffInfo : [];
+            $employeeId = $scopeSvc->resolveEmployeeIdFromOperator($staffInfo, 'store');
+            $adminInfo = [
+                'id' => (int)($staffInfo['id'] ?? 0),
+                'level' => 1,
+                'admin_type' => 3,
+                'employee_id' => $employeeId,
+            ];
+            $scopeSvc->applyOrderListScope($where, $employeeId, 'store', (int)$this->storeId, $adminInfo);
+        } catch (\Throwable $e) {
+            $where['id'] = -1;
+        }
         $data = $this->services->orderStoreCount($where);
         return $this->success($data);
     }
@@ -243,8 +362,11 @@ class Order extends AuthController
                     ['product_type', ''],//商品类型0:普通商品，1：卡密，2：优惠券，3：虚拟商品,4：次卡商品,5:卡项商品6：项目
                     ['ids', ''],
                 ]);
+                /** @var \app\services\store\channel\StoreSessionContext $sessionCtx */
+                $sessionCtx = app()->make(\app\services\store\channel\StoreSessionContext::class);
+                $exportCtx = $sessionCtx->exportStoreContext($this->request);
                 $where['is_system_del'] = 0;
-                $where['store_id'] = $this->storeId;
+                $where['store_id'] = (int)$exportCtx['store_id'];
                 $exportByIds = !empty($where['ids']);
                 $exportIds = [];
                 if ($exportByIds) {
@@ -252,10 +374,11 @@ class Order extends AuthController
                     $exportByIds = !empty($exportIds);
                 }
                 if ($exportByIds) {
+                    $sessionCtx->assertTableIdsInSessionStore($this->request, 'store_order', $exportIds, 'store_id');
                     $where = [
                         'id' => $exportIds,
                         'is_system_del' => 0,
-                        'store_id' => $this->storeId,
+                        'store_id' => (int)$exportCtx['store_id'],
                     ];
                 } else {
                     unset($where['ids']);
@@ -271,6 +394,22 @@ class Order extends AuthController
                     }
                 }
                 $where['status'] = trim((string)($where['status'] ?? ''));
+                // I2：门店订单导出与列表同一数据权限
+                try {
+                    /** @var \app\services\organization\EmployeeDataScopeServices $scopeSvc */
+                    $scopeSvc = app()->make(\app\services\organization\EmployeeDataScopeServices::class);
+                    $staffInfo = is_array($this->storeStaffInfo ?? null) ? $this->storeStaffInfo : [];
+                    $employeeId = $scopeSvc->resolveEmployeeIdFromOperator($staffInfo, 'store');
+                    $adminInfo = [
+                        'id' => (int)($staffInfo['id'] ?? 0),
+                        'level' => 1,
+                        'admin_type' => 3,
+                        'employee_id' => $employeeId,
+                    ];
+                    $scopeSvc->applyOrderListScope($where, $employeeId, 'store', (int)$this->storeId, $adminInfo);
+                } catch (\Throwable $e) {
+                    $where['id'] = -1;
+                }
                 $data = $this->services->getExportList($where, [], $exportServices->limit);
                 return $this->success($exportServices->storeOrder($data, ''));
             case 2:
@@ -330,7 +469,26 @@ class Order extends AuthController
         [$oid] = $request->postMore([
             ['oid', '']
         ], true);
-        return app('json')->success($writeOffOrderServices->getOrderCartInfo(0, (int)$oid));
+        $oid = (int)$oid;
+        if ($oid <= 0) {
+            return $this->fail('核销订单未查到!');
+        }
+        $orderRow = $this->services->getOne(['id' => $oid, 'is_del' => 0], 'id,store_id,staff_id,clerk_id,service_staff_id,gendan_staff_id');
+        if (!$orderRow) {
+            return $this->fail('核销订单未查到!');
+        }
+        try {
+            /** @var \app\services\organization\EmployeeDataScopeServices $scopeSvc */
+            $scopeSvc = app()->make(\app\services\organization\EmployeeDataScopeServices::class);
+            $scopeSvc->guardOrderAccessFromStoreStaff(
+                is_array($this->storeStaffInfo ?? null) ? $this->storeStaffInfo : [],
+                (int)$this->storeId,
+                is_object($orderRow) ? $orderRow->toArray() : (array)$orderRow
+            );
+        } catch (\mohe\exceptions\AdminException $e) {
+            return $this->fail($e->getMessage());
+        }
+        return app('json')->success($writeOffOrderServices->getOrderCartInfo(0, $oid));
     }
 
     /**
@@ -348,6 +506,17 @@ class Order extends AuthController
         $orderInfo = $this->services->getOne(['order_id' => $order_id, 'is_del' => 0], '*', ['pink']);
         if (!$orderInfo) {
             return $this->fail('核销订单未查到!');
+        }
+        try {
+            /** @var \app\services\organization\EmployeeDataScopeServices $scopeSvc */
+            $scopeSvc = app()->make(\app\services\organization\EmployeeDataScopeServices::class);
+            $scopeSvc->guardOrderAccessFromStoreStaff(
+                is_array($this->storeStaffInfo ?? null) ? $this->storeStaffInfo : [],
+                (int)$this->storeId,
+                $orderInfo->toArray()
+            );
+        } catch (\mohe\exceptions\AdminException $e) {
+            return $this->fail($e->getMessage());
         }
         [$cart_ids] = $request->postMore([
             ['cart_ids', []]
@@ -381,7 +550,18 @@ class Order extends AuthController
             ['yeji_staff', ''], //手艺人
             ['data', '', '', 'time'], //核销时间
         ]);
-        $where['relation_id'] = (int)$this->storeId;
+        try {
+            /** @var \app\services\organization\EmployeeDataScopeServices $scopeSvc */
+            $scopeSvc = app()->make(\app\services\organization\EmployeeDataScopeServices::class);
+            $scopeSvc->applyWriteOffRecordsScope(
+                $where,
+                is_array($this->storeStaffInfo ?? null) ? $this->storeStaffInfo : [],
+                (int)$this->storeId
+            );
+        } catch (\Throwable $e) {
+            $where['relation_id'] = (int)$this->storeId;
+            $where['scope_staff_ids'] = [-1];
+        }
         return app('json')->successful($services->getAllWriteOffRecords($where));
     }
     /**
@@ -482,6 +662,25 @@ class Order extends AuthController
         if (!$id) {
             return $this->fail('缺少核销订单ID');
         }
+        $orderRow = $this->services->getOne(['id' => (int)$id, 'is_del' => 0], 'id,store_id,staff_id,clerk_id,service_staff_id,gendan_staff_id');
+        if (!$orderRow) {
+            return $this->fail('核销订单未查到!');
+        }
+        /** @var \app\services\store\channel\StoreSessionContext $sessionCtx */
+        $sessionCtx = app()->make(\app\services\store\channel\StoreSessionContext::class);
+        $orderStoreId = is_object($orderRow) ? (int)$orderRow->getData('store_id') : (int)($orderRow['store_id'] ?? 0);
+        $sessionCtx->assertRowStore($this->request, $orderStoreId);
+        try {
+            /** @var \app\services\organization\EmployeeDataScopeServices $scopeSvc */
+            $scopeSvc = app()->make(\app\services\organization\EmployeeDataScopeServices::class);
+            $scopeSvc->guardOrderAccessFromStoreStaff(
+                is_array($this->storeStaffInfo ?? null) ? $this->storeStaffInfo : [],
+                (int)$this->storeId,
+                is_object($orderRow) ? $orderRow->toArray() : (array)$orderRow
+            );
+        } catch (\mohe\exceptions\AdminException $e) {
+            return $this->fail($e->getMessage());
+        }
         [$cart_num] = $this->request->getMore([
             ['cart_num', 1]
         ], true);
@@ -505,6 +704,17 @@ class Order extends AuthController
         $orderInfo = $this->services->getOne(['id' => $id, 'is_del' => 0], '*', ['pink']);
         if (!$orderInfo) {
             return $this->fail('核销订单未查到!');
+        }
+        try {
+            /** @var \app\services\organization\EmployeeDataScopeServices $scopeSvc */
+            $scopeSvc = app()->make(\app\services\organization\EmployeeDataScopeServices::class);
+            $scopeSvc->guardOrderAccessFromStoreStaff(
+                is_array($this->storeStaffInfo ?? null) ? $this->storeStaffInfo : [],
+                (int)$this->storeId,
+                $orderInfo->toArray()
+            );
+        } catch (\mohe\exceptions\AdminException $e) {
+            return $this->fail($e->getMessage());
         }
         $data = $this->request->postMore([
             ['cart_id', ''],//核销订单商品cart_id
@@ -569,6 +779,14 @@ class Order extends AuthController
         if (!$id) {
             return $this->fail('缺少订单ID');
         }
+        $orderRow = $this->services->getOne(['id' => (int)$id, 'is_del' => 0], 'id,store_id');
+        if (!$orderRow) {
+            return $this->fail('订单不存在');
+        }
+        /** @var \app\services\store\channel\StoreSessionContext $sessionCtx */
+        $sessionCtx = app()->make(\app\services\store\channel\StoreSessionContext::class);
+        $orderStoreId = is_object($orderRow) ? (int)$orderRow->getData('store_id') : (int)($orderRow['store_id'] ?? 0);
+        $sessionCtx->assertRowStore($request, $orderStoreId);
         $where = ['pid' => $id, 'is_system_del' => 0];
         if (!$this->services->count($where)) {
             $where = ['id' => $id, 'is_system_del' => 0];

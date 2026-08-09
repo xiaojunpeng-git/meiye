@@ -156,6 +156,13 @@ hangSaleResumeAssert(
 );
 
 $workspaceClass = new ReflectionClass(CashierV3CashierWorkspaceServices::class);
+$workspaceSource = (string)file_get_contents($backendRoot . '/app/services/cashier/v3/cashier/CashierV3CashierWorkspaceServices.php');
+hangSaleResumeAssert(
+    'restore replaces the current cart only inside the transaction',
+    strpos($workspaceSource, '$existingRows = $this->lineRows($workspaceId, true);') !== false
+        && strpos($workspaceSource, "'cashier_hang_restore_workspace_replace_incomplete'") !== false
+        && strpos($workspaceSource, '当前购物车不为空，请先完成或清空现有内容后再提单。') === false
+);
 $workspace = $workspaceClass->newInstanceWithoutConstructor();
 $restore = $workspaceClass->getMethod('normalizeRestoredSaleLine');
 $restored = $restore->invoke($workspace, $snapshot, 'ws:8:1:CTX-HANG-SALE-RESUME-02', 0, 1);

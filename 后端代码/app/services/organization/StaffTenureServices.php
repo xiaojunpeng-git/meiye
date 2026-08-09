@@ -111,7 +111,20 @@ class StaffTenureServices extends BaseServices
                 if ((int)($staff['is_del'] ?? 0) === 1) {
                     throw new AdminException('本店关系已删除，请重新入职，不能直接复职');
                 }
+                if ((int)($staff['status'] ?? 0) === 1) {
+                    throw new AdminException('当前任职已生效，无需重复复职');
+                }
                 $storeId = (int)$staff['store_id'];
+                $otherActiveStaff = Db::name('system_store_staff')
+                    ->where('employee_id', $employeeId)
+                    ->where('status', 1)
+                    ->where('is_del', 0)
+                    ->where('id', '<>', $staffId)
+                    ->lock(true)
+                    ->find();
+                if ($otherActiveStaff) {
+                    throw new AdminException('该员工已有有效门店任职，如需变更门店请使用调店功能');
+                }
                 $now = time();
                 $opId = (int)($auditMeta['operator_id'] ?? $adminInfo['id'] ?? 0);
                 $opName = (string)($auditMeta['operator_name'] ?? $adminInfo['real_name'] ?? $adminInfo['account'] ?? '');
@@ -319,7 +332,7 @@ class StaffTenureServices extends BaseServices
 
     protected function lockStaffForEmployee(int $employeeId, int $staffId, bool $requireNotDeleted = true): array
     {
-        $emp = Db::name('employee')->where('id', $employeeId)->where('is_del', 0)->find();
+        $emp = Db::name('employee')->where('id', $employeeId)->where('is_del', 0)->lock(true)->find();
         if (!$emp) {
             throw new AdminException('员工不存在');
         }
@@ -444,20 +457,16 @@ class StaffTenureServices extends BaseServices
         if ($employeeId <= 0) {
             return;
         }
-        try {
-            /** @var StaffJobPositionServices $jobSvc */
-            $jobSvc = app()->make(StaffJobPositionServices::class);
-            $staffIds = Db::name('system_store_staff')
-                ->where('employee_id', $employeeId)
-                ->where('is_del', 0)
-                ->column('id');
-            foreach ($staffIds as $sid) {
-                $jobSvc->projectStaffRoles((int)$sid);
-            }
-            $jobSvc->afterEmployeeAuthChanged($employeeId);
-        } catch (\Throwable $e) {
-            // 结构未就绪时不阻断任职写路径
+        /** @var StaffJobPositionServices $jobSvc */
+        $jobSvc = app()->make(StaffJobPositionServices::class);
+        $staffIds = Db::name('system_store_staff')
+            ->where('employee_id', $employeeId)
+            ->where('is_del', 0)
+            ->column('id');
+        foreach ($staffIds as $sid) {
+            $jobSvc->projectStaffRoles((int)$sid);
         }
+        $jobSvc->afterEmployeeAuthChanged($employeeId);
     }
 
     protected function writeAudit(

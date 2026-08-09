@@ -209,6 +209,22 @@ checkoutMysqlOk('checkout projection returns null after the workspace advances b
         $operator,
         $scope
     ) === null);
+$exactProjection = $projectionService->readEditingRequest(
+    $created['requestId'],
+    'ws:7:21:checkout-authority-state',
+    'checkout-authority-state',
+    $operator,
+    $scope
+);
+checkoutMysqlOk('committed narrow mutation projects its exact request after workspace-only version advance',
+    is_array($exactProjection)
+        && $exactProjection['checkoutRequestId'] === $created['requestId']
+        && $exactProjection['checkoutRequestVersion'] === 1
+        && $exactProjection['commandContexts'][0] === [
+            'kind' => 'cashier_workspace',
+            'id' => 'ws:7:21:checkout-authority-state',
+            'expectedVersion' => 3,
+        ]);
 Db::name('cashier_v3_resource_version')
     ->where('scope_type', 'store')
     ->where('scope_id', '7')

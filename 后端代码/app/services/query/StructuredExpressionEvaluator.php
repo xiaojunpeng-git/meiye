@@ -55,6 +55,9 @@ class StructuredExpressionEvaluator
         }
 
         $operator = (string)$node['operator'];
+        if ($operator === 'range_bucket') {
+            return $this->rangeBucket($node, $row, $context, $groupRows);
+        }
         $args = (array)$node['args'];
         if (in_array($operator, ['sum', 'average', 'minimum', 'maximum', 'count'], true)) {
             return $this->aggregate(
@@ -138,6 +141,21 @@ class StructuredExpressionEvaluator
             }
         }
         return $this->evaluateNode($args[$lastIndex], $row, $context, $groupRows);
+    }
+
+    protected function rangeBucket(array $node, array $row, array $context, array $groupRows): string
+    {
+        $value = $this->evaluateNode($node['input'], $row, $context, $groupRows);
+        if ($value === null) {
+            return (string)$node['null_label'];
+        }
+        $value = $this->numeric($value);
+        foreach ((array)$node['thresholds'] as $index => $threshold) {
+            if ($this->bcCompare($value, $this->numeric($threshold), self::INTERNAL_SCALE) <= 0) {
+                return (string)$node['labels'][$index];
+            }
+        }
+        return (string)$node['default_label'];
     }
 
     protected function aggregate(string $operator, array $child, array $context, array $rows, string $resultType)

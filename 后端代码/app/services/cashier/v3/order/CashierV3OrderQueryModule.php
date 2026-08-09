@@ -39,14 +39,17 @@ final class CashierV3OrderQueryModule
             ];
         });
 
-        $handlers->registerProjection('query-order-center-records', function (array $scope) use ($recordQueries): array {
+        $handlers->registerProjection('query-order-center-records', function (array $scope) use ($queries, $recordQueries): array {
             $page = $recordQueries->queryRecords(
                 is_array($scope['payload'] ?? null) ? $scope['payload'] : [],
                 $scope['operator_scope'],
                 $scope['data_scope']
             );
+            $partition = $recordQueries->pagePartition($page);
             return [
-                'data' => ['orderCenter' => $recordQueries->pagePartition($page)],
+                'data' => ['orderCenter' => $partition],
+                'versions' => (new CashierV3OrderCenterPartitionProvider($queries, $recordQueries))
+                    ->recordPublicVersions(['records' => $page['records']], $scope['data_scope']),
                 'message' => '订单记录已重新读取。',
             ];
         });

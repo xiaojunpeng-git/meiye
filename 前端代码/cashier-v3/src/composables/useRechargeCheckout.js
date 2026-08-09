@@ -35,7 +35,7 @@ export function useRechargeCheckout({ member, currentMemberId, stateContextId, o
     return projection && typeof projection === 'object' ? clonePlain(projection) : null
   }
 
-  function setRechargeCheckout(response) {
+  function setRechargeCheckout(response, { allowTerminalOutcome = true } = {}) {
     const projection = rechargeCheckoutProjection(response)
     if (projection) {
       rechargeCheckout.value = projection
@@ -54,7 +54,8 @@ export function useRechargeCheckout({ member, currentMemberId, stateContextId, o
       // editing snapshot forever. The result-query action can then resolve the
       // original request without creating a second recharge.
       const status = String(resultStatus(response) || '').toLowerCase()
-      if (['result_unknown', 'pending_confirmation', 'processing', 'failed'].includes(status)
+      if (allowTerminalOutcome
+        && ['result_unknown', 'pending_confirmation', 'processing', 'failed'].includes(status)
         && rechargeCheckout.value) {
         const envelope = cashierV3ResponseEnvelope(response)
         const result = envelope?.result && typeof envelope.result === 'object' ? envelope.result : {}
@@ -103,15 +104,17 @@ export function useRechargeCheckout({ member, currentMemberId, stateContextId, o
     }
     const targetAction = actionMap[action]
     if (!targetAction) return { result: { status: 'failed', code: 'RECHARGE_CHECKOUT_ACTION_NOT_ALLOWED', message: '该充值结账操作尚未开放。' } }
+    const draftAction = ['add-payment-method', 'update-payment-line', 'remove-payment-line', 'update-checkout-business-source'].includes(action)
     const response = await requestCashierV3Action(targetAction, {
       ...payload,
       memberId,
       rechargeCheckoutRequestId: checkout.rechargeCheckoutRequestId,
-      rechargeCheckoutRequestVersion: checkout.checkoutRequestVersion
+      rechargeCheckoutRequestVersion: checkout.checkoutRequestVersion,
+      silent: draftAction
     })
-    setRechargeCheckout(response)
+    setRechargeCheckout(response, { allowTerminalOutcome: !draftAction })
     if (typeof window !== 'undefined'
-      && ['add-payment-method', 'update-payment-line', 'remove-payment-line', 'update-checkout-business-source'].includes(action)) {
+      && draftAction) {
       const envelope = cashierV3ResponseEnvelope(response)
       window.dispatchEvent(new CustomEvent('cashier-v3:checkout-draft-mutation-result', {
         detail: {

@@ -1,6 +1,10 @@
 export function currentMobilePlatform() : string {
 	let platform = 'UNKNOWN'
 
+	// #ifdef WEB
+	platform = 'WEB'
+	// #endif
+
 	// #ifdef MP-WEIXIN
 	platform = 'MP_WEIXIN'
 	// #endif
@@ -32,4 +36,27 @@ export function declaredPlatformCapabilities() : string[] {
 		'PHONE_CALL',
 		'SCAN_CODE'
 	]
+}
+
+export function showMobileNotice(title : string) : void {
+	uni.showToast({ title: title, icon: 'none' })
+}
+
+export function chooseMobileImage(done : (filePath : string, message : string) => void) : void {
+	uni.chooseImage({
+		count: 1, sizeType: ['compressed'], sourceType: ['album', 'camera'],
+		success: (result : any) => {
+			let paths = result != null && Array.isArray(result.tempFilePaths) ? result.tempFilePaths : []
+			done(paths.length > 0 ? String(paths[0]) : '', paths.length > 0 ? '' : '未选择头像图片。')
+		},
+		fail: () => done('', '未选择头像图片。')
+	})
+}
+
+// A phone action is only an OS handoff.  It never changes a business task,
+// creates a customer-care record, or reports a successful contact.
+export function callMobilePhone(phone : string) : void {
+	let value = String(phone || '').trim()
+	if (value.length === 0) { showMobileNotice('会员没有可用手机号。'); return }
+	uni.makePhoneCall({ phoneNumber: value })
 }

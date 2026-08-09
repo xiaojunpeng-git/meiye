@@ -350,11 +350,17 @@ export default {
     },
     // 进入门店
     gostore(item) {
+      const targetWindow = window.open('', '_blank');
+      if (!targetWindow) {
+        this.$Message.error('请允许浏览器打开门店端');
+        return;
+      }
       storeLogin(item.id)
         .then((res) => {
-          util.openStoreBackend(res.data, { pageTitle: item.name });
+          util.openStoreBackend(res.data, { pageTitle: item.name, targetWindow });
         })
         .catch((err) => {
+          targetWindow.close();
           this.$Message.error(err.msg || "进入门店失败");
         });
     },

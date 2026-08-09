@@ -3,6 +3,7 @@
 
 use app\http\middleware\AllowOriginMiddleware;
 use app\http\middleware\api\AuthTokenMiddleware;
+use app\http\middleware\api\MerchantAuthMiddleware;
 use app\http\middleware\BlockerMiddleware;
 use app\http\middleware\api\ClientMiddleware;
 use app\http\middleware\InstallMiddleware;
@@ -969,6 +970,7 @@ Route::group('api', function () {
 	/**
 	 * 商家端身份与入口
 	 */
+	Route::post('merchant/login', 'v1.merchant.MerchantLogin/login')->option(['real_name' => '手机商家端员工账号登录']);
 	Route::group('merchant', function () {
 		Route::get('access', 'v1.merchant.MerchantAccess/access')->option(['real_name' => '商家入口权限']);
 		Route::post('context/switch', 'v1.merchant.MerchantAccess/switchContext')->option(['real_name' => '切换商家身份上下文']);
@@ -982,6 +984,7 @@ Route::group('api', function () {
 		Route::get('customer/detail/:uid', 'v1.merchant.MerchantBiz/customerDetail')->option(['real_name' => '商家客户详情']);
 		Route::get('customer/orders', 'v1.merchant.MerchantBiz/customerOrders')->option(['real_name' => '商家客户订单记录']);
 		Route::post('customer/update', 'v1.merchant.MerchantBiz/customerUpdate')->option(['real_name' => '商家客户档案保存']);
+		Route::get('customer-care/workbench', 'v1.merchant.MerchantBiz/customerCareWorkbench')->option(['real_name' => '商家客情任务工作台']);
 		Route::get('data/business', 'v1.merchant.MerchantBiz/dataBusiness')->option(['real_name' => '数仓经营概览']);
 		Route::get('data/customer', 'v1.merchant.MerchantBiz/dataCustomer')->option(['real_name' => '数仓客户分析']);
 		Route::get('data/staff/statistics', 'v1.merchant.MerchantBiz/dataStaffStats')->option(['real_name' => '数仓员工统计']);
@@ -999,7 +1002,7 @@ Route::group('api', function () {
 		Route::post('reservation/update/:id', 'v1.merchant.MerchantBiz/reservationUpdate')->option(['real_name' => '商家预约修改']);
 		Route::post('reservation/service/set/:id', 'v1.merchant.MerchantBiz/reservationServiceSet')->option(['real_name' => '商家预约服务状态']);
 		Route::get('debt/list', 'v1.merchant.MerchantBiz/debtList')->option(['real_name' => '商家欠款列表']);
-	})->middleware(AuthTokenMiddleware::class, true);
+	})->middleware(MerchantAuthMiddleware::class, true);
 
 	/**
 	 * 指标字典
@@ -1213,4 +1216,3 @@ Route::group('api', function () {
 	AllowOriginMiddleware::class,
 	StationOpenMiddleware::class
 ]);
-

@@ -29,6 +29,7 @@ use app\services\other\ExpressServices;
 use app\services\pay\PayServices;
 use app\services\product\product\StoreProductServices;
 use app\services\product\inventory\ProductInventoryChangeServices;
+use app\services\cashier\v3\CashierV3BusinessDocumentNumberServices;
 use app\services\store\SystemStoreServices;
 use app\services\supplier\SystemSupplierServices;
 use app\services\user\UserBillServices;
@@ -456,6 +457,11 @@ class StoreOrderRefundServices extends BaseServices
         if (!$res3) {
             throw new ValidateException('添加退款申请失败');
         }
+        $this->allocateCashierRefundDocumentNoInTx(
+            (int)$res3->id,
+            (int)$order['store_id'],
+            (int)$refundData['add_time']
+        );
         $res4 = true;
         if ($cart_ids) {
             foreach ($cart_ids as $cart) {
@@ -476,6 +482,26 @@ class StoreOrderRefundServices extends BaseServices
             throw new ValidateException('添加退款申请失败');
         }
         return (int)$res3->id;
+    }
+
+    /**
+     * Legacy refunds do not carry a tenant column and their order_id remains
+     * the historical payment/refund reference. Store the new display number
+     * separately, in the same transaction, without rewriting either field.
+     */
+    private function allocateCashierRefundDocumentNoInTx(int $refundId, int $storeId, int $occurredAt): void
+    {
+        if ($refundId <= 0 || $storeId <= 0 || $occurredAt <= 0) {
+            throw new ValidateException('退款单号资料无效');
+        }
+        (new CashierV3BusinessDocumentNumberServices())->allocateForSourceInTx(
+            '0',
+            CashierV3BusinessDocumentNumberServices::REFUND,
+            'legacy_store_order_refund',
+            (string)$refundId,
+            date('Y-m-d', $occurredAt),
+            $occurredAt
+        );
     }
 
     /**
@@ -654,6 +680,11 @@ class StoreOrderRefundServices extends BaseServices
             if (!$res3) {
                 throw new ValidateException('添加退款申请失败');
             }
+            $storeOrderRefundServices->allocateCashierRefundDocumentNoInTx(
+                (int)$res3->id,
+                (int)$order['store_id'],
+                (int)$refundData['add_time']
+            );
             $res4 = true;
             if ($cart_ids) {
                 //修改订单商品退款信息
@@ -1504,6 +1535,7 @@ class StoreOrderRefundServices extends BaseServices
                     if ($paid === 1 && $orderSalesHandled === 1) {
                         /** @var StoreProductServices $productServices */
                         $productServices = app()->make(StoreProductServices::class);
+						$salesLines = [];
                         foreach ($refundCartLines as $cart) {
                             $cart = $inventoryChange->enrichCartWithInventorySnapshot(is_array($cart) ? $cart : []);
                             try {
@@ -1511,10 +1543,15 @@ class StoreOrderRefundServices extends BaseServices
                             } catch (\Throwable $e) {
                                 continue;
                             }
-                            $num = (string)($cart['cart_num'] ?? 0);
-                            if ($productId <= 0 || bccomp($num, '0', 4) <= 0) continue;
-                            $productServices->decProductSales((int)ceil((float)$num), $productId, $unique, $store_id);
-                        }
+	                            $num = (string)($cart['cart_num'] ?? 0);
+	                            if ($productId <= 0 || bccomp($num, '0', 4) <= 0) continue;
+	                            $salesLines[] = [
+	                                'product_id' => $productId,
+	                                'unique' => $unique,
+	                                'num' => (int)ceil((float)$num),
+	                            ];
+	                        }
+	                        $productServices->decProductSalesBatch($salesLines, $store_id);
                         Db::name('store_order_refund')->where('id', $refundId)->update(['sales_refunded' => 1]);
                     }
                 }

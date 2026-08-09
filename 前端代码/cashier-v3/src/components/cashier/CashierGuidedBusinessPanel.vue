@@ -19,6 +19,7 @@ const selectedGiftIds = ref(['gift-project-1'])
 const selectedCustomIds = ref([])
 const customError = ref('')
 const customKeyword = ref('')
+const showSelectedCustomItems = ref(false)
 
 const giftOptions = [
   { id: 'gift-project-1', type: '项目', name: '水光护理', quantity: 1 },
@@ -39,10 +40,13 @@ const selectedCustomItems = computed(() => customOptions.value.filter((item) => 
 const customTotal = computed(() => selectedCustomItems.value.reduce((sum, item) => sum + Number(item.amount || 0), 0))
 const visibleCustomOptions = computed(() => {
   const normalizedKeyword = customKeyword.value.trim().toLocaleLowerCase()
-  if (!normalizedKeyword) return customOptions.value
-  return customOptions.value.filter((item) => [item.name, item.specification]
-    .filter(Boolean)
-    .some((value) => String(value).toLocaleLowerCase().includes(normalizedKeyword)))
+  return customOptions.value.filter((item) => {
+    if (showSelectedCustomItems.value && !selectedCustomIds.value.includes(item.id)) return false
+    if (!normalizedKeyword) return true
+    return [item.name, item.specification]
+      .filter(Boolean)
+      .some((value) => String(value).toLocaleLowerCase().includes(normalizedKeyword))
+  })
 })
 
 watch(() => props.catalogItems, (items) => {
@@ -72,6 +76,11 @@ function toggleCustom(id) {
   selectedCustomIds.value = selectedCustomIds.value.includes(id)
     ? selectedCustomIds.value.filter((item) => item !== id)
     : [...selectedCustomIds.value, id]
+}
+
+function clearSelectedCustomItems() {
+  selectedCustomIds.value = []
+  showSelectedCustomItems.value = false
 }
 
 function nextStep() {
@@ -173,10 +182,25 @@ function confirm() {
           <label class="cashier-guided-switch"><input v-model="openImmediately" type="checkbox"><span>购卡后立即开卡</span></label>
         </section>
         <section v-else-if="step === 2" class="cashier-guided-panel__section">
-          <label class="cashier-guided-panel__search">
-            <span class="sr-only">搜索卡内项目</span>
-            <input v-model="customKeyword" type="search" placeholder="搜索项目名称或规格">
-          </label>
+          <div class="cashier-guided-panel__search-row">
+            <label class="cashier-guided-panel__search">
+              <span class="sr-only">搜索卡内项目</span>
+              <input v-model="customKeyword" type="search" placeholder="搜索项目名称或规格">
+            </label>
+            <button
+              type="button"
+              class="button button--secondary"
+              :class="{ 'is-active': showSelectedCustomItems }"
+              :aria-pressed="showSelectedCustomItems"
+              @click="showSelectedCustomItems = !showSelectedCustomItems"
+            >显示已选</button>
+            <button
+              type="button"
+              class="button button--secondary"
+              :disabled="!selectedCustomIds.length"
+              @click="clearSelectedCustomItems"
+            >取消已选</button>
+          </div>
           <p v-if="!customOptions.length" class="cashier-guided-panel__empty">当前门店没有可配置的在售项目。</p>
           <p v-else-if="!visibleCustomOptions.length" class="cashier-guided-panel__empty">未找到匹配的在售项目。</p>
           <article v-for="item in visibleCustomOptions" :key="item.id" class="cashier-custom-option" :class="{ 'is-selected': selectedCustomIds.includes(item.id) }">

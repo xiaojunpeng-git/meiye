@@ -1,0 +1,37 @@
+const API_ORIGIN_KEY = 'mobile.runtime.apiOrigin'
+
+function normalizedOrigin(value : any) : string {
+	if (typeof value != 'string') return ''
+	let origin = value.trim().replace(/\/$/, '')
+	// HBuilderX's embedded Web preview currently strips ':' while entering a URL.
+	// These two aliases are intentionally local-development conveniences only;
+	// customer installations still store a complete provisioned origin.
+	if (origin == 'localhost' || origin == '127.0.0.1') origin = 'http://' + origin + ':8080'
+	return /^https?:\/\/[A-Za-z0-9.-]+(?::[0-9]{1,5})?$/.test(origin) ? origin : ''
+}
+
+function localWebDevelopmentOrigin() : string {
+	let origin = ''
+	// #ifdef WEB
+	let host = String(location.hostname || '')
+	if (host == 'localhost' || host == '127.0.0.1' || /^192\.168\./.test(host) || /^10\./.test(host) || /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(host)) {
+		origin = 'http://' + host + ':8080'
+	}
+	// #endif
+	return normalizedOrigin(origin)
+}
+
+// The instance address is provisioned per customer installation, never compiled
+// as a customer-specific source branch. H5 local development inherits the
+// current private-network host so a network change cannot strand the preview.
+export function mobileApiOrigin() : string {
+	let configured = normalizedOrigin(uni.getStorageSync(API_ORIGIN_KEY))
+	return configured.length > 0 ? configured : localWebDevelopmentOrigin()
+}
+
+export function setMobileApiOrigin(value : string) : boolean {
+	let origin = normalizedOrigin(value)
+	if (origin.length == 0) return false
+	uni.setStorageSync(API_ORIGIN_KEY, origin)
+	return true
+}

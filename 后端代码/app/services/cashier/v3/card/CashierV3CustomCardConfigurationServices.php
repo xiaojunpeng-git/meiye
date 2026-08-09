@@ -79,6 +79,7 @@ final class CashierV3CustomCardConfigurationServices
         }
 
         $components = [];
+        $configuredCostTotalCents = 0;
         foreach ($input['components'] as $index => $component) {
             $line = $this->catalog->selectSaleLineAfterGatewayLocksInTx(
                 $component['skuId'],
@@ -92,6 +93,18 @@ final class CashierV3CustomCardConfigurationServices
             }
             $authority = is_array($line['authority_snapshot'] ?? null) ? $line['authority_snapshot'] : [];
             $display = is_array($line['display_snapshot'] ?? null) ? $line['display_snapshot'] : [];
+            $configuredCostCents = (int)($line['configured_cost_cents'] ?? -1);
+            if ($configuredCostCents < 0) {
+                throw self::failure('custom_card_component_cost_invalid', '定制卡卡内项目成本资料不完整，请重新配置。');
+            }
+            if ($configuredCostCents > 0 && $component['times'] > intdiv(PHP_INT_MAX, $configuredCostCents)) {
+                throw self::failure('custom_card_component_cost_overflow', '定制卡卡内项目成本金额过大。');
+            }
+            $componentCostTotalCents = $configuredCostCents * $component['times'];
+            if ($componentCostTotalCents > PHP_INT_MAX - $configuredCostTotalCents) {
+                throw self::failure('custom_card_component_cost_overflow', '定制卡卡内项目成本金额过大。');
+            }
+            $configuredCostTotalCents += $componentCostTotalCents;
             $components[] = [
                 'productId' => (int)$line['catalog_product_id'],
                 'productType' => 6,
@@ -102,12 +115,27 @@ final class CashierV3CustomCardConfigurationServices
                 // A configured amount belongs to the entire project entitlement,
                 // not to each individual use. It therefore may not be multiplied.
                 'configuredAmountCents' => $component['amountCents'],
+                'configuredCostCents' => $configuredCostCents,
                 'resourceSources' => (array)($authority['resourceSources'] ?? []),
             ];
         }
-        $total = array_sum(array_column($components, 'configuredAmountCents'));
+        $total = 0;
+        foreach ($components as $component) {
+            $amount = (int)$component['configuredAmountCents'];
+            if ($amount > PHP_INT_MAX - $total) {
+                throw self::failure('custom_card_total_overflow', '定制卡合计金额过大。');
+            }
+            $total += $amount;
+        }
         if ($total <= 0) {
             throw self::failure('custom_card_total_invalid', '定制卡合计金额必须大于 0。');
+        }
+        $minimumTotalCents = self::roundUpToWholeYuan($configuredCostTotalCents);
+        if ($total < $minimumTotalCents) {
+            throw self::failure(
+                'custom_card_total_below_cost',
+                '定制卡合计金额不能低于卡内项目成本合计 ' . self::formatMoney($minimumTotalCents) . '。'
+            );
         }
         $snapshot = [
             'contractVersion' => 'cashier-v3-custom-card-configuration-v1',
@@ -235,18 +263,30 @@ final class CashierV3CustomCardConfigurationServices
             throw self::failure('custom_card_component_amount_invalid', '项目金额必须是有效金额。');
         }
         $value = trim((string)$value);
-        if (preg_match('/^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,2})?$/D', $value) !== 1) {
-            throw self::failure('custom_card_component_amount_invalid', '项目金额必须是有效金额。');
+        if (preg_match('/^(?:0|[1-9][0-9]*)$/D', $value) !== 1) {
+            throw self::failure('custom_card_component_amount_invalid', '项目金额必须填写整数元。');
         }
-        [$whole, $fraction] = array_pad(explode('.', $value, 2), 2, '');
-        $cents = ltrim($whole . str_pad($fraction, 2, '0'), '0');
-        if ($cents === '') {
+        $whole = ltrim($value, '0');
+        if ($whole === '') {
             return 0;
         }
-        if (strlen($cents) > 15) {
+        if (strlen($whole) > 13) {
             throw self::failure('custom_card_component_amount_overflow', '项目金额过大。');
         }
-        return (int)$cents;
+        return (int)$whole * 100;
+    }
+
+    private static function roundUpToWholeYuan(int $amountCents): int
+    {
+        if ($amountCents < 0 || $amountCents > PHP_INT_MAX - 99) {
+            throw self::failure('custom_card_component_cost_overflow', '定制卡卡内项目成本金额过大。');
+        }
+        return intdiv($amountCents + 99, 100) * 100;
+    }
+
+    private static function formatMoney(int $amountCents): string
+    {
+        return '¥' . number_format($amountCents / 100, 2, '.', ',');
     }
 
     private function uniqueResources(array $resources): array

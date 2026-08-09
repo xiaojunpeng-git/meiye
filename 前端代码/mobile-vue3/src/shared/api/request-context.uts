@@ -1,2 +1,107 @@
-// Request metadata is assembled from the versioned contract by the API adapter.
-// Context validity belongs to the single root-state production implementation.
+// This module creates request plans only. Transport, persistence, and root-state
+// installation remain owned by their dedicated boundaries.
+
+function nonEmptyString(value : any) : string {
+	return typeof value == 'string' && value.length > 0 ? value : ''
+}
+
+function profileForEndpoint(contract : any, endpointName : string) : any {
+	if (contract == null || contract.endpoints == null || contract.requestMetadataProfiles == null) {
+		return null
+	}
+	let endpoint = contract.endpoints[endpointName]
+	if (endpoint == null || typeof endpoint.requestMetadataProfile != 'string') {
+		return null
+	}
+	let profile = contract.requestMetadataProfiles[endpoint.requestMetadataProfile]
+	return profile == null || profile.required == null || !Array.isArray(profile.forbidden) ? null : profile
+}
+
+function valueForContractSource(contract : any, source : string, session : any) : string {
+	if (source == 'contractVersion') {
+		return nonEmptyString(contract.contractVersion)
+	}
+	if (source == 'Bearer <merchantToken>') {
+		let merchantToken = nonEmptyString(session.merchantToken)
+		if (merchantToken.length == 0 || merchantToken.indexOf('Bearer ') == 0) {
+			return ''
+		}
+		return 'Bearer ' + merchantToken
+	}
+	return nonEmptyString(session[source])
+}
+
+function valuesAreExactForProfile(contract : any, profile : any, session : any, headers : any) : boolean {
+	let requiredNames = Object.keys(profile.required)
+	let headerNames = Object.keys(headers)
+	if (headerNames.length != requiredNames.length) {
+		return false
+	}
+	for (let index = 0; index < headerNames.length; index++) {
+		if (!Object.hasOwn(profile.required, headerNames[index])) {
+			return false
+		}
+	}
+	for (let index = 0; index < requiredNames.length; index++) {
+		let headerName = requiredNames[index]
+		let expected = valueForContractSource(contract, profile.required[headerName], session)
+		if (expected.length == 0 || headers[headerName] != expected) {
+			return false
+		}
+	}
+	for (let index = 0; index < profile.forbidden.length; index++) {
+		if (Object.hasOwn(headers, profile.forbidden[index])) {
+			return false
+		}
+	}
+	return true
+}
+
+// The caller supplies only live session state. No token, context identifier, or
+// contract version is synthesized here.
+export function buildMobileRequestPlan(contract : any, endpointName : string, session : any) : any {
+	if (contract == null || contract.endpoints == null || session == null) {
+		return null
+	}
+	let endpoint = contract.endpoints[endpointName]
+	let profile = profileForEndpoint(contract, endpointName)
+	if (endpoint == null || profile == null || typeof endpoint.method != 'string' || typeof endpoint.path != 'string') {
+		return null
+	}
+
+	let headers : any = {}
+	let requiredNames = Object.keys(profile.required)
+	for (let index = 0; index < requiredNames.length; index++) {
+		let headerName = requiredNames[index]
+		let headerValue = valueForContractSource(contract, profile.required[headerName], session)
+		if (headerValue.length == 0) {
+			return null
+		}
+		headers[headerName] = headerValue
+	}
+	if (!valuesAreExactForProfile(contract, profile, session, headers)) {
+		return null
+	}
+	return {
+		method: endpoint.method,
+		path: endpoint.path,
+		headers: headers
+	}
+}
+
+// This is intentionally an exact validator so later transport code cannot add a
+// second credential channel or carry a stale context header into another profile.
+export function mobileRequestPlanMatchesContract(contract : any, endpointName : string, session : any, plan : any) : boolean {
+	if (plan == null || typeof plan.method != 'string' || typeof plan.path != 'string' || plan.headers == null) {
+		return false
+	}
+	if (contract == null || contract.endpoints == null) {
+		return false
+	}
+	let endpoint = contract.endpoints[endpointName]
+	let profile = profileForEndpoint(contract, endpointName)
+	if (endpoint == null || profile == null || plan.method != endpoint.method || plan.path != endpoint.path) {
+		return false
+	}
+	return valuesAreExactForProfile(contract, profile, session, plan.headers)
+}

@@ -1,0 +1,217 @@
+<template>
+	<view class="customer-profile">
+		<view class="customer-profile__header">
+			<view class="customer-profile__back" role="button" @tap="goBack"><text>‹</text></view>
+			<text class="customer-profile__title">{{ pageTitle() }}</text>
+			<view class="customer-profile__save" role="button" @tap="save"><text>{{ saving ? '正在保存' : '保存' }}</text></view>
+		</view>
+		<scroll-view class="customer-profile__content" scroll-y>
+			<view v-if="loading" class="customer-profile__empty"><text>正在读取客户资料</text></view>
+			<view v-else-if="message.length > 0" class="customer-profile__empty"><text>{{ message }}</text><view class="customer-profile__retry" @tap="loadProfile"><text>重新加载</text></view></view>
+			<view v-else class="customer-profile__body">
+				<view class="customer-profile__notice"><text>客户将归属当前登录门店</text><text>{{ storeName }}</text></view>
+				<view class="customer-profile__section customer-profile__avatar-section">
+					<view class="customer-profile__avatar-row">
+						<view class="customer-profile__avatar-preview">
+							<image v-if="avatarUrl.length > 0" class="customer-profile__avatar-image" :src="avatarUrl" mode="aspectFill" />
+							<text v-else class="customer-profile__avatar-initial">{{ avatarInitial() }}</text>
+						</view>
+						<view class="customer-profile__avatar-copy"><text class="customer-profile__avatar-label">客户头像</text><text class="customer-profile__avatar-tip">用于客户识别</text></view>
+						<view class="customer-profile__avatar-action" role="button" @tap="chooseAvatar"><text>{{ uploadingAvatar ? '上传中' : '选择头像' }}</text></view>
+					</view>
+				</view>
+				<view class="customer-profile__section">
+					<view class="customer-profile__section-heading"><text>基本资料</text></view>
+					<view v-for="field in fixedFields" :key="field.key" class="customer-profile__field">
+						<text class="customer-profile__label">{{ field.label }}<text v-if="field.required" class="customer-profile__required"> *</text></text>
+						<input v-if="isTextField(field)" class="customer-profile__input" :value="textValue(form[field.key])" type="text" :maxlength="inputMaxLength(field)" :placeholder="field.label" @input="setFixedText(field.key, $event.detail.value)" />
+						<textarea v-else-if="field.format === 'textarea'" class="customer-profile__textarea" :value="textValue(form[field.key])" :maxlength="500" placeholder="填写备注" @input="setFixedText(field.key, $event.detail.value)" />
+						<picker v-else-if="field.key === 'sex'" class="customer-profile__picker" mode="selector" :range="sexLabels" @change="setSex($event.detail.value)"><text>{{ sexLabel() }}</text></picker>
+						<picker v-else-if="field.key === 'birthday'" class="customer-profile__picker" mode="date" :value="textValue(form.birthday)" @change="setFixedText('birthday', $event.detail.value)"><text>{{ textValue(form.birthday, '选择生日') }}</text></picker>
+						<picker v-else-if="field.key === 'memberLevelId'" class="customer-profile__picker" mode="selector" :range="levelLabels()" @change="setLevel($event.detail.value)"><text>{{ levelLabel() }}</text></picker>
+						<picker v-else-if="field.key === 'exclusiveServicePersonId'" class="customer-profile__picker" mode="selector" :range="servicePersonLabels()" @change="setServicePerson($event.detail.value)"><text>{{ servicePersonLabel() }}</text></picker>
+						<view v-else-if="field.key === 'memberTagIds'" class="customer-profile__tag-list"><view v-for="tag in memberTags" :key="tag.value" class="customer-profile__tag" :class="{ 'customer-profile__tag--active': tagSelected(tag.value) }" @tap="toggleTag(tag.value)"><text>{{ tag.label }}</text></view></view>
+					</view>
+				</view>
+				<view v-if="customFields.length > 0" class="customer-profile__section">
+					<view class="customer-profile__section-heading"><text>自定义资料</text></view>
+					<view v-for="field in customFields" :key="field.key" class="customer-profile__field">
+						<text class="customer-profile__label">{{ field.label }}<text v-if="field.required" class="customer-profile__required"> *</text></text>
+						<textarea v-if="field.format === 'textarea'" class="customer-profile__textarea" :value="customText(field.key)" :placeholder="customPlaceholder(field)" @input="setCustomText(field.key, $event.detail.value)" />
+						<picker v-else-if="field.format === 'date'" class="customer-profile__picker" mode="date" :value="customText(field.key)" @change="setCustomText(field.key, $event.detail.value)"><text>{{ customText(field.key, customPlaceholder(field)) }}</text></picker>
+						<picker v-else-if="hasOptions(field)" class="customer-profile__picker" mode="selector" :range="optionLabels(field)" @change="setCustomOption(field, $event.detail.value)"><text>{{ customOptionLabel(field) }}</text></picker>
+						<input v-else class="customer-profile__input" :value="customText(field.key)" type="text" :placeholder="customPlaceholder(field)" @input="setCustomText(field.key, $event.detail.value)" />
+					</view>
+				</view>
+				<text v-if="saveMessage.length > 0" class="customer-profile__error">{{ saveMessage }}</text>
+				<view class="customer-profile__submit" role="button" @tap="save"><text>{{ saving ? '正在保存资料' : '保存客户资料' }}</text></view>
+			</view>
+		</scroll-view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	import { createMobileCustomerProfile, queryMobileCustomerProfile, queryMobileCustomerProfileDraft, updateMobileCustomerProfile, uploadMobileCustomerProfileAvatar } from '../../../shared/api/mobile-customer-client.uts'
+	import { replaceMerchantCustomerDetail, returnFromMerchantCustomerProfile } from '../../../shared/platform/mobile-navigation.uts'
+	import { chooseMobileImage } from '../../../shared/platform/mobile-platform.uts'
+
+	const loading = ref(false)
+	const saving = ref(false)
+	const message = ref('')
+	const saveMessage = ref('')
+	const mode = ref('create')
+	const memberId = ref('')
+	const lookup = ref('')
+	const fixedFields = ref<Array<any>>([])
+	const customFields = ref<Array<any>>([])
+	const memberLevels = ref<Array<any>>([])
+	const memberTags = ref<Array<any>>([])
+	const servicePeople = ref<Array<any>>([])
+	const storeName = ref('')
+	const profileVersion = ref('')
+	const avatarUrl = ref('')
+	const avatarUploadKey = ref('')
+	const uploadingAvatar = ref(false)
+	const form = ref<any>({ name: '', phone: '', sex: 0, birthday: '', idCard: '', address: '', memberLevelId: 0, memberTagIds: new Array<number>(), exclusiveServicePersonId: 0, note: '' })
+	const customValues = ref<any>({})
+	const sexLabels = ['保密', '男', '女']
+
+	onLoad((options : any) => {
+		mode.value = String(options != null ? options.mode || 'create' : 'create') === 'edit' ? 'edit' : 'create'
+		memberId.value = String(options != null ? options.id || '' : '')
+		lookup.value = String(options != null ? options.lookup || '' : '')
+		if (mode.value === 'edit' && memberId.value.length === 0) { message.value = '客户资料参数不完整，请返回后重试。'; return }
+		loadProfile()
+	})
+
+	function pageTitle() : string { return mode.value === 'edit' ? '编辑客户' : '新建客户' }
+	function goBack() { returnFromMerchantCustomerProfile() }
+	function textValue(value : any, fallback : string = '') : string { let result = String(value == null ? '' : value); return result.length > 0 ? result : fallback }
+	function avatarInitial() : string { let value = String(form.value.name || '').trim(); return value.length > 0 ? value.substring(0, 1) : '客' }
+	function isTextField(field : any) : boolean { return field.format === 'text' || field.format === 'phone' }
+	function inputMaxLength(field : any) : number { if (field.key === 'phone') return 11; if (field.key === 'idCard') return 30; if (field.key === 'address') return 200; return 50 }
+
+	function loadProfile() {
+		loading.value = true; message.value = ''; saveMessage.value = ''
+		let done = (result : any) => {
+			loading.value = false
+			if (!result.ok || result.body == null) { message.value = String(result.message || '客户资料加载失败。'); return }
+			applyProjection(result.body)
+		}
+		if (mode.value === 'edit') queryMobileCustomerProfile(memberId.value, done)
+		else queryMobileCustomerProfileDraft(done)
+	}
+
+	function applyProjection(body : any) {
+		fixedFields.value = Array.isArray(body.fixedFields) ? body.fixedFields : []
+		customFields.value = Array.isArray(body.customFields) ? body.customFields : []
+		memberLevels.value = Array.isArray(body.memberLevels) ? body.memberLevels : []
+		memberTags.value = Array.isArray(body.memberTags) ? body.memberTags : []
+		servicePeople.value = Array.isArray(body.servicePeople) ? body.servicePeople : []
+		let profile = body.profile || {}
+		storeName.value = String(profile.storeName || '')
+		profileVersion.value = String(body.profileVersion || '')
+		avatarUrl.value = String(profile.avatar || '')
+		avatarUploadKey.value = ''
+		form.value = {
+			name: String(profile.name || ''), phone: String(profile.phone || ''), sex: Number(profile.sex || 0), birthday: String(profile.birthday || ''),
+			idCard: String(profile.idCard || ''), address: String(profile.address || ''), memberLevelId: Number(profile.memberLevelId || 0),
+			memberTagIds: Array.isArray(profile.memberTagIds) ? profile.memberTagIds.map((item : any) : number => Number(item)) : new Array<number>(),
+			exclusiveServicePersonId: Number(profile.exclusiveServicePersonId || 0), note: String(profile.note || '')
+		}
+		customValues.value = profile.profileFields || {}
+	}
+
+	function setFixedText(key : string, value : any) { form.value[key] = String(value == null ? '' : value) }
+	function setSex(index : any) { form.value.sex = Number(index) }
+	function sexLabel() : string { let value = Number(form.value.sex || 0); return sexLabels[value] || sexLabels[0] }
+	function levelLabels() : Array<string> { let values = new Array<string>(); values.push('不设置'); for (let index = 0; index < memberLevels.value.length; index++) values.push(String(memberLevels.value[index].label || '')); return values }
+	function levelLabel() : string { let id = Number(form.value.memberLevelId || 0); if (id === 0) return '不设置'; for (let index = 0; index < memberLevels.value.length; index++) if (Number(memberLevels.value[index].value) === id) return String(memberLevels.value[index].label || ''); return '不设置' }
+	function setLevel(index : any) { let value = Number(index); form.value.memberLevelId = value <= 0 ? 0 : Number(memberLevels.value[value - 1].value || 0) }
+	function servicePersonLabels() : Array<string> { let values = new Array<string>(); values.push('不指定'); for (let index = 0; index < servicePeople.value.length; index++) values.push(String(servicePeople.value[index].label || '')); return values }
+	function servicePersonLabel() : string { let id = Number(form.value.exclusiveServicePersonId || 0); if (id === 0) return '不指定'; for (let index = 0; index < servicePeople.value.length; index++) if (Number(servicePeople.value[index].value) === id) return String(servicePeople.value[index].label || ''); return '不指定' }
+	function setServicePerson(index : any) { let value = Number(index); form.value.exclusiveServicePersonId = value <= 0 ? 0 : Number(servicePeople.value[value - 1].value || 0) }
+	function tagSelected(value : any) : boolean { return form.value.memberTagIds.indexOf(Number(value)) >= 0 }
+	function toggleTag(value : any) { let id = Number(value); let index = form.value.memberTagIds.indexOf(id); if (index >= 0) form.value.memberTagIds.splice(index, 1); else form.value.memberTagIds.push(id) }
+	function customText(key : string, fallback : string = '') : string { let value = customValues.value[key]; return value == null || String(value).length === 0 ? fallback : String(value) }
+	function setCustomText(key : string, value : any) { customValues.value[key] = String(value == null ? '' : value) }
+	function customPlaceholder(field : any) : string { return String(field.placeholder || ('填写' + String(field.label || '资料'))) }
+	function hasOptions(field : any) : boolean { return Array.isArray(field.options) && field.options.length > 0 }
+	function optionLabels(field : any) : Array<string> { let items = new Array<string>(); for (let index = 0; index < field.options.length; index++) items.push(String(field.options[index].label || '')); return items }
+	function customOptionLabel(field : any) : string { let value = customText(field.key); for (let index = 0; index < field.options.length; index++) if (String(field.options[index].value) === value) return String(field.options[index].label || ''); return customPlaceholder(field) }
+	function setCustomOption(field : any, index : any) { let item = field.options[Number(index)]; if (item != null) customValues.value[field.key] = String(item.value || '') }
+	function chooseAvatar() {
+		if (uploadingAvatar.value) return
+		chooseMobileImage((filePath : string, errorMessage : string) => {
+			if (filePath.length === 0) { if (errorMessage.length > 0) saveMessage.value = errorMessage; return }
+			uploadingAvatar.value = true; saveMessage.value = ''
+			let key = 'customer-avatar-' + Date.now().toString() + '-' + Math.floor(Math.random() * 100000).toString()
+			uploadMobileCustomerProfileAvatar(filePath, key, (result : any) => {
+				uploadingAvatar.value = false
+				if (!result.ok || result.body == null || String(result.body.avatar || '').length === 0) { saveMessage.value = String(result.message || '头像上传失败，请重新选择。'); return }
+				avatarUrl.value = String(result.body.avatar); avatarUploadKey.value = String(result.body.avatarUploadKey || key)
+			})
+		})
+	}
+
+	function payload() : any {
+		return {
+			name: String(form.value.name || '').trim(), phone: String(form.value.phone || '').trim(), sex: Number(form.value.sex || 0), birthday: String(form.value.birthday || ''),
+			idCard: String(form.value.idCard || '').trim(), address: String(form.value.address || '').trim(), memberLevelId: Number(form.value.memberLevelId || 0),
+			memberTagIds: form.value.memberTagIds, exclusiveServicePersonId: Number(form.value.exclusiveServicePersonId || 0), note: String(form.value.note || '').trim(),
+			profileFields: customValues.value, expectedVersion: profileVersion.value, avatarUploadKey: avatarUploadKey.value,
+			idempotencyKey: 'customer-profile-' + mode.value + '-' + Date.now().toString() + '-' + Math.floor(Math.random() * 100000).toString()
+		}
+	}
+	function save() {
+		if (saving.value || uploadingAvatar.value) return
+		if (String(form.value.name || '').trim().length === 0) { saveMessage.value = '请填写会员姓名。'; return }
+		if (!/^1[3-9][0-9]{9}$/.test(String(form.value.phone || '').trim())) { saveMessage.value = '请填写正确的手机号。'; return }
+		saving.value = true; saveMessage.value = ''
+		let done = (result : any) => {
+			saving.value = false
+			if (!result.ok || result.body == null || result.body.profile == null) { saveMessage.value = String(result.message || '客户资料保存失败。'); return }
+			let profile = result.body.profile
+			replaceMerchantCustomerDetail(String(profile.memberId || memberId.value), String(profile.phone || form.value.phone || lookup.value))
+		}
+		if (mode.value === 'edit') updateMobileCustomerProfile(memberId.value, payload(), done)
+		else createMobileCustomerProfile(payload(), done)
+	}
+</script>
+
+<style>
+	.customer-profile { display: flex; min-height: 100%; flex: 1; flex-direction: column; background-color: #f4f6f8; }
+	.customer-profile__header { display: flex; height: 56px; flex-direction: row; align-items: center; justify-content: space-between; padding: 0 20px; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #e2e7ec; background-color: #ffffff; }
+	.customer-profile__back { display: flex; width: 40px; height: 40px; flex-direction: row; align-items: center; font-size: 34px; line-height: 34px; color: #29323d; }
+	.customer-profile__title { font-size: 17px; font-weight: 700; line-height: 24px; color: #202a35; }
+	.customer-profile__save { display: flex; width: 40px; height: 40px; flex-direction: row; align-items: center; justify-content: flex-end; font-size: 14px; font-weight: 700; color: #126bb5; }
+	.customer-profile__content { min-height: 0; flex: 1; }
+	.customer-profile__body { padding: 12px 12px 30px; }
+	.customer-profile__notice { display: flex; min-height: 42px; flex-direction: row; align-items: center; justify-content: space-between; margin-bottom: 12px; padding: 0 12px; border-width: 1px; border-style: solid; border-color: #d7e6f4; border-radius: 5px; background-color: #f3f9fe; font-size: 12px; color: #587085; }
+	.customer-profile__notice text:last-child { max-width: 55%; font-weight: 600; color: #315b7d; text-align: right; }
+	.customer-profile__section { margin-bottom: 12px; border-width: 1px; border-style: solid; border-color: #e0e6ec; border-radius: 6px; background-color: #ffffff; overflow: hidden; }
+	.customer-profile__avatar-row { display: flex; min-height: 78px; flex-direction: row; align-items: center; padding: 12px 14px; }
+	.customer-profile__avatar-preview { display: flex; width: 52px; height: 52px; flex-direction: row; align-items: center; justify-content: center; border-radius: 26px; background-color: #e8f1f9; overflow: hidden; }
+	.customer-profile__avatar-image { width: 52px; height: 52px; }
+	.customer-profile__avatar-initial { font-size: 18px; font-weight: 700; color: #36729c; }
+	.customer-profile__avatar-copy { display: flex; min-width: 0; flex: 1; flex-direction: column; margin-left: 12px; }
+	.customer-profile__avatar-label { font-size: 14px; font-weight: 700; line-height: 20px; color: #29323d; }
+	.customer-profile__avatar-tip { margin-top: 3px; font-size: 12px; line-height: 18px; color: #718092; }
+	.customer-profile__avatar-action { display: flex; min-width: 72px; height: 34px; flex-direction: row; align-items: center; justify-content: center; border-width: 1px; border-style: solid; border-color: #a8cbe4; border-radius: 4px; background-color: #f5fbff; font-size: 13px; font-weight: 600; color: #126bb5; }
+	.customer-profile__section-heading { display: flex; min-height: 46px; flex-direction: row; align-items: center; padding: 0 14px; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #edf0f3; font-size: 15px; font-weight: 700; color: #29323d; }
+	.customer-profile__field { padding: 12px 14px; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #edf0f3; }
+	.customer-profile__field:last-child { border-bottom-width: 0; }
+	.customer-profile__label { display: block; margin-bottom: 8px; font-size: 13px; line-height: 20px; color: #4c5c6d; }
+	.customer-profile__required { color: #c9362a; }
+	.customer-profile__input, .customer-profile__textarea { box-sizing: border-box; width: 100%; border-width: 1px; border-style: solid; border-color: #d9e1e8; border-radius: 4px; background-color: #ffffff; font-size: 14px; color: #263442; }
+	.customer-profile__input { height: 40px; padding: 0 10px; }
+	.customer-profile__textarea { min-height: 76px; padding: 9px 10px; line-height: 20px; }
+	.customer-profile__picker { display: flex; min-height: 40px; flex-direction: row; align-items: center; padding: 0 10px; border-width: 1px; border-style: solid; border-color: #d9e1e8; border-radius: 4px; font-size: 14px; color: #2f3e4c; }
+	.customer-profile__tag-list { display: flex; flex-wrap: wrap; flex-direction: row; margin-bottom: -8px; }
+	.customer-profile__tag { display: flex; min-height: 32px; flex-direction: row; align-items: center; margin-right: 8px; margin-bottom: 8px; padding: 0 10px; border-width: 1px; border-style: solid; border-color: #d7dee6; border-radius: 4px; background-color: #ffffff; font-size: 12px; color: #526273; }
+	.customer-profile__tag--active { border-color: #8abce1; background-color: #edf7ff; color: #126bb5; }
+	.customer-profile__error { display: block; margin: 2px 4px 12px; font-size: 13px; line-height: 20px; color: #bf3025; }
+	.customer-profile__submit { display: flex; min-height: 46px; flex-direction: row; align-items: center; justify-content: center; border-radius: 4px; background-color: #1677cc; font-size: 15px; font-weight: 700; color: #ffffff; }
+	.customer-profile__empty { display: flex; min-height: 280px; flex-direction: column; align-items: center; justify-content: center; padding: 20px; font-size: 14px; line-height: 22px; color: #6b798a; text-align: center; }
+	.customer-profile__retry { margin-top: 12px; font-size: 13px; font-weight: 700; color: #126bb5; }
+</style>

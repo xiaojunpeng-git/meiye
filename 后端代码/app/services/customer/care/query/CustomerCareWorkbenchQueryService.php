@@ -38,7 +38,9 @@ final class CustomerCareWorkbenchQueryService
     {
         $now = $this->clock->now();
         $normalized = CustomerCareProjectionContract::normalizeWorkbenchRequest($request, $scope);
-        $normalized['taskQuery'] = $this->withCurrentMonthRange($normalized['taskQuery'], 'plannedFrom', 'plannedTo', $now, $scope->businessTimezone());
+        if (($normalized['taskQuery']['statusGroup'] ?? '') !== 'open') {
+            $normalized['taskQuery'] = $this->withCurrentMonthRange($normalized['taskQuery'], 'plannedFrom', 'plannedTo', $now, $scope->businessTimezone());
+        }
         $normalized['recordQuery'] = $this->withCurrentMonthRange($normalized['recordQuery'], 'followedFrom', 'followedTo', $now, $scope->businessTimezone());
         $dayEnd = CustomerCareProjectionContract::dayEnd($now, $scope->businessTimezone());
 
@@ -178,6 +180,8 @@ final class CustomerCareWorkbenchQueryService
                 'bucket' => $query['bucket'],
                 'keyword' => $query['keyword'],
                 'status' => $query['status'],
+				'statusGroup' => $query['statusGroup'],
+				'memberId' => (int)($query['memberId'] ?? 0) > 0 ? (string)(int)$query['memberId'] : '',
                 'plannedFrom' => $this->dateOnly(
                     (int)($query['plannedFrom'] ?? 0),
                     $scope->businessTimezone()
@@ -320,6 +324,7 @@ final class CustomerCareWorkbenchQueryService
             'appliedQuery' => [
                 'keyword' => $query['keyword'],
                 'dataScope' => $query['dataScope'],
+				'memberId' => (int)($query['memberId'] ?? 0) > 0 ? (string)(int)$query['memberId'] : '',
                 'followedFrom' => $this->dateOnly(
                     (int)($query['followedFrom'] ?? 0),
                     $scope->businessTimezone()

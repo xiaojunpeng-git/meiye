@@ -5,6 +5,72 @@
 			"style": {
 				"navigationStyle": "custom"
 			}
+		},
+		{
+			"path": "src/merchant/pages/workbench/index",
+			"style": {
+				"navigationStyle": "custom"
+			}
+		},
+		{
+			"path": "src/merchant/pages/warehouse/index",
+			"style": {
+				"navigationStyle": "custom"
+			}
+		},
+		{
+			"path": "src/merchant/pages/customers/index",
+			"style": {
+				"navigationStyle": "custom"
+			}
+		},
+		{
+			"path": "src/merchant/pages/customer-settings/index",
+			"style": {
+				"navigationStyle": "custom"
+			}
+		},
+		{
+			"path": "src/merchant/pages/customer-detail/index",
+			"style": {
+				"navigationStyle": "custom"
+			}
+		},
+		{
+			"path": "src/merchant/pages/customer-profile/index",
+			"style": {
+				"navigationStyle": "custom"
+			}
+		},
+		{
+			"path": "src/merchant/pages/customer-order-detail/index",
+			"style": {
+				"navigationStyle": "custom"
+			}
+		},
+		{
+			"path": "src/merchant/pages/profile/index",
+			"style": {
+				"navigationStyle": "custom"
+			}
+		},
+		{
+			"path": "src/merchant/pages/customer-care/index",
+			"style": {
+				"navigationStyle": "custom"
+			}
+		},
+		{
+			"path": "src/merchant/pages/goals/index",
+			"style": {
+				"navigationStyle": "custom"
+			}
+		},
+		{
+			"path": "src/merchant/pages/reservations/index",
+			"style": {
+				"navigationStyle": "custom"
+			}
 		}
 	],
 	"globalStyle": {

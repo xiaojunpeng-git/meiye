@@ -168,6 +168,15 @@ ok('销售页启用默认关闭的顺序分页，不改变其他列表默认行�
   assert.match(view, /:has-more="hasMore"/)
 })
 
+ok('订单列表中的真实会员可打开既有会员详情，游客保持普通文本', () => {
+  const view = readFileSync(new URL('../../../前端代码/cashier-v3/src/views/OrderCenterView.vue', import.meta.url), 'utf8')
+  assert.match(view, /function memberDetailPayload\(record = \{\}\)/)
+  assert.match(view, /Number\(memberId\) <= 0/)
+  assert.match(view, /fieldItem\.key === 'member_name' && canOpenMemberDetail\(record\)/)
+  assert.match(view, /cashier-v3:open-member-detail/)
+  assert.match(view, /查看\$\{displayRecordField\(record, fieldItem\.key\)\}的会员详情/)
+})
+
 process.stdout.write(`ASSERT_PASSED=${passed}\n`)
 process.stdout.write('ASSERT_FAILED=0\n')
 process.stdout.write('C5_O1_FRONTEND_PROJECTION=PASS\n')

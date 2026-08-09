@@ -2,8 +2,9 @@
 
 namespace app\jobs\product;
 
-use app\services\product\branch\StoreBranchProductAttrValueServices;
 use app\services\product\branch\StoreBranchProductServices;
+use app\services\product\product\StoreCatalogWriteLease;
+use app\services\product\product\StoreCatalogWriteLockGuard;
 use app\services\product\product\StoreProductServices;
 use app\services\product\sku\StoreProductAttrServices;
 use app\services\product\sku\StoreProductAttrValueServices;
@@ -112,77 +113,14 @@ class ProductSyncErp extends BaseJobs
      */
     public function productToBranch($id, $shop)
     {
-        /** @var StoreProductServices $productServices */
-        $productServices = app()->make(StoreProductServices::class);
-        // 获取商品信息
-        $productInfo = $productServices->getInfo($id)['productInfo'];
-        /** @var StoreProductAttrValueServices $storeProductAttrValueServices */
-        $storeProductAttrValueServices = app()->make(StoreProductAttrValueServices::class);
-        $skuArray = $storeProductAttrValueServices->getSkuArray(['product_id' => $id, 'type' => 0], 'unique', 'code');
-        $data = [
-            'product_id' => $id,
-            'image' => $productInfo['image'],
-            'store_name' => $productInfo['store_name'],
-            'store_info' => $productInfo['store_info'],
-            'keyword' => $productInfo['keyword'],
-            'bar_code' => $productInfo['bar_code'],
-            'cate_id' => $productInfo['cate_id'],
-            'store_id' => $shop['id'],
-            'sales' => 0,
-            'stock' => 0,
-            'sort' => 0,
-            'label_id' => $productInfo['label_id'],
-            'is_show' => 0,
-            'add_time' => time(),
-            'is_del' => 0,
-            'code' => $productInfo['code'],
-        ];
-        $attrs = [];
-        foreach ($productInfo['attrs'] as $item) {
-            if (empty($item['code']) || !array_key_exists($item['code'], $skuArray)) {
-                continue;
-            }
-            $attrs[] = [
-                'product_id' => $id,
-                'store_id' => $shop['id'],
-                'unique' => $skuArray[$item['code']],
-                'sales' => 0,
-                'stock' => 0,
-                'type' => 0,
-                'bar_code' => $item['bar_code'],
-                'code' => $item['code'],
-            ];
+        $productId = (int)$id;
+        $storeId = (int)($shop['id'] ?? 0);
+        if ($productId <= 0 || $storeId <= 0) {
+            throw new AdminException('ERP 门店商品同步参数错误');
         }
-
-        /** @var StoreBranchProductAttrValueServices $branchProductAttrServices */
-        $branchProductAttrServices = app()->make(StoreBranchProductAttrValueServices::class);
-
-        $branchProductAttrServices->transaction(function () use ($id, $data, $attrs, $shop, $branchProductAttrServices) {
-
-            /** @var StoreBranchProductServices $branchProductServices */
-            $branchProductServices = app()->make(StoreBranchProductServices::class);
-
-            // 判断门店是否有商品
-            $branchProduct = $branchProductServices->getOne(['product_id' => $id, 'store_id' => $shop['id']]);
-            if (empty($branchProduct)) {
-                $branchProductServices->save($data);
-                $branchProductAttrServices->saveAll($attrs);
-            } else {
-                $branchProductAttr = $branchProductAttrServices->getColumn(['product_id' => $id, 'store_id' => $shop['id']], '*', 'code');
-                if (!empty($branchProductAttr)) {
-                    foreach ($attrs as $key => $attr) {
-                        if (isset($branchProductAttr[$attr['code']])) {
-                            unset($attrs[$key]);
-                        }
-                    }
-                    if (!empty($attrs)) {
-                        $branchProductAttrServices->saveAll($attrs);
-                    }
-                }
-            }
-        });
-
-        return true;
+        /** @var StoreBranchProductServices $branchProductServices */
+        $branchProductServices = app()->make(StoreBranchProductServices::class);
+        return $branchProductServices->syncProduct($productId, $storeId, 0, 0, 0);
     }
 
     /**
@@ -251,21 +189,52 @@ class ProductSyncErp extends BaseJobs
                         'stock' => 0,
                     ];
                 }
-                $pid = $productServices->value(['code' => $item['i_id']], 'id');
-                if (!$pid) {
-                    $pid = $productServices->ErpProductSave($productInfo);
-                }
-                //检测库存警戒和检测是否售罄
-                ProductStockTips::dispatch([$pid, 0]);
-
                 $attr = [[
                     'value' => '规格',
                     'detail' => $detail,
                     'details' => $details,
                 ]];
-
-                $skuList = $productAttrServices->validateProductAttr($attr, $value, $pid, 0, 0, 0);
-                $productAttrServices->saveProductAttr($skuList, $pid);
+                $pid = (int)$productServices->value(['code' => $item['i_id']], 'id');
+                if (!$pid) {
+                    /** @var StoreCatalogWriteLockGuard $catalogGuard */
+                    $catalogGuard = app()->make(StoreCatalogWriteLockGuard::class);
+                    $pid = (int)$catalogGuard->withNewProductCreation(
+                        function (StoreCatalogWriteLease $catalogLease) use (
+                            $catalogGuard,
+                            $productServices,
+                            $productAttrServices,
+                            $productInfo,
+                            $attr,
+                            $value
+                        ) {
+                            $newProductId = $productServices->createErpProductInGuard(
+                                $catalogGuard,
+                                $catalogLease,
+                                $productInfo
+                            );
+                            $skuList = $productAttrServices->validateProductAttr(
+                                $attr,
+                                $value,
+                                $newProductId,
+                                0,
+                                0,
+                                0
+                            );
+                            $productAttrServices->saveProductAttrInGuard(
+                                $catalogLease,
+                                $skuList,
+                                $newProductId,
+                                0
+                            );
+                            return $newProductId;
+                        }
+                    );
+                } else {
+                    $skuList = $productAttrServices->validateProductAttr($attr, $value, $pid, 0, 0, 0);
+                    $productAttrServices->saveProductAttr($skuList, $pid);
+                }
+                // 商品及 SKU 提交后再派发库存状态检查，避免队列读取半成品目录。
+                ProductStockTips::dispatch([$pid, 0]);
                 // 同步商品至erp门店
                 if (!empty($systemStoreList)) {
                     foreach ($systemStoreList as $store) {
@@ -278,9 +247,10 @@ class ProductSyncErp extends BaseJobs
 			$productServices->cacheTag()->clear();
 			$productAttrServices->cacheTag()->clear();
 
-        } catch (\Exception $e) {
-            Log::error('商品同步失败, 原因: ' . $e->getMessage());
-        }
+		} catch (\Throwable $e) {
+			Log::error('商品同步失败, 原因: ' . $e->getMessage());
+			throw $e;
+		}
         return true;
     }
 

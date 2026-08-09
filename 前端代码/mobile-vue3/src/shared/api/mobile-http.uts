@@ -1,0 +1,38 @@
+import { mobileApiOrigin } from '../platform/mobile-runtime-config.uts'
+
+export type MobileHttpResult = { ok : boolean, statusCode : number, body : any, message : string }
+
+export function mobileHttpResultRequiresMerchantLogin(value : any) : boolean {
+	if (value == null || value.body == null) return false
+	let code = String(value.body.errorCode || value.body.protocolCode || '')
+	return code == 'MERCHANT_SESSION_EXPIRED'
+}
+
+function result(ok : boolean, statusCode : number, body : any, message : string) : MobileHttpResult {
+	return { ok: ok, statusCode: statusCode, body: body, message: message }
+}
+
+export function sendMobileRequest(plan : any, body : any, done : (value : MobileHttpResult) => void) : void {
+	let origin = mobileApiOrigin()
+	if (origin.length == 0 || plan == null || typeof plan.path != 'string' || typeof plan.method != 'string' || plan.headers == null) {
+		done(result(false, 0, null, '当前设备未配置服务地址。'))
+		return
+	}
+	let headers : any = { 'Content-Type': 'application/json' }
+	let names = Object.keys(plan.headers)
+	for (let index = 0; index < names.length; index++) headers[names[index]] = plan.headers[names[index]]
+	uni.request({
+		url: origin + '/api' + plan.path,
+		method: plan.method,
+		header: headers,
+		data: body == null ? {} : body,
+		success: (response : any) => {
+			let payload = response.data
+			let ok = response.statusCode >= 200 && response.statusCode < 300 && payload != null && payload.protocolCode == null && payload.errorCode == null
+			let errorCode = payload != null ? String(payload.errorCode || payload.protocolCode || '') : ''
+			let message = payload != null ? String(payload.message || '') : ''
+			done(result(ok, response.statusCode, payload, ok ? '' : (errorCode.length > 0 ? errorCode + '：' + message : message || '请求未完成。')))
+		},
+		fail: () => done(result(false, 0, null, '网络请求失败，请检查服务地址和网络。'))
+	})
+}

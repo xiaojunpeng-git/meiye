@@ -80,6 +80,7 @@ function uqMetaContext(
         'operator_id' => $accountId,
         'store_id' => $storeId,
         'organization_id' => $storeId === 8 ? '3' : '4',
+        'page_code' => 'member_list',
         'visible_store_ids' => $visibleStores,
         'ancestor_organization_ids' => $storeId === 8 ? ['1', '2', '3'] : ['1', '4'],
         'shareable_store_ids' => $visibleStores,
@@ -103,6 +104,30 @@ function uqMetaExpression(string $divisor = '3'): array
         'right' => ['type' => 'literal', 'valueType' => 'decimal', 'value' => $divisor],
         'nullMode' => 'empty',
         'returnType' => 'amount',
+    ];
+}
+
+function uqMetaRangeBucketExpression(): array
+{
+    return [
+        'type' => 'operator',
+        'operator' => 'range_bucket',
+        'input' => [
+            'type' => 'operator',
+            'operator' => 'date_diff_days',
+            'args' => [
+                ['type' => 'field', 'key' => 'latest_visit_date'],
+                ['type' => 'context', 'key' => 'query_cutoff_date'],
+            ],
+        ],
+        'thresholds' => [' -1 ', 30, '45.0', 60, 90, 180, 365, 730, 1095],
+        'labels' => [
+            '已过期', '0-30天', '31-45天', '46-60天', '61-90天',
+            '91-180天', '1年内', '1-2年', '2-3年',
+        ],
+        'nullLabel' => '到期日未知',
+        'defaultLabel' => '3年以上',
+        '_return_type' => 'text',
     ];
 }
 
@@ -889,12 +914,13 @@ try {
     );
     $wideTaskCountBefore = (int)Db::name('unified_query_export_task')->count();
     $wideFieldKeys = array_column($wideFields, 'key');
+    $wideContext = array_merge($manager, ['page_code' => 'wide_export_test']);
     $wideExportCode = uqMetaCode(function () use (
         $wideExports,
-        $manager,
+        $wideContext,
         $wideFieldKeys
     ): void {
-        $wideExports->create($manager, [
+        $wideExports->create($wideContext, [
             'pageCode' => 'wide_export_test',
             'scope' => 'query',
             'queryCutoffDate' => '2026-07-28',
@@ -974,7 +1000,7 @@ try {
     );
 
     $revoked = $manager;
-    $revoked['permissions'] = [UnifiedQueryAccessPolicy::PAGE_POLICY];
+    $revoked['permissions'] = [];
     $revokedDownloadCode = uqMetaCode(function () use ($exports, $revoked, $taskNo): void {
         $exports->resolveDownload($revoked, $taskNo);
     });
@@ -986,7 +1012,7 @@ try {
     });
     ok(
         '轮询/下载按账号与当前权限重验且对象键限制在运行时目录',
-        $revokedDownloadCode === 'UNIFIED_QUERY_EXPORT_FORBIDDEN'
+        $revokedDownloadCode === 'UNIFIED_QUERY_FORBIDDEN'
             && in_array($crossAccountPollCode, [
                 'UNIFIED_QUERY_EXPORT_FORBIDDEN',
                 'UNIFIED_QUERY_EXPORT_NOT_FOUND',
@@ -1263,6 +1289,127 @@ try {
         ), JSON_UNESCAPED_UNICODE),
         'UQ-RACE-01'
     );
+
+    uqMetaSection('range_bucket canonical persistence and frozen versions');
+    $rangePersistKey = '';
+    try {
+        $rangeSavedV1 = $customFields->save($manager, [
+            'pageCode' => 'member_list',
+            'name' => '日期分档持久化合同',
+            'returnType' => 'text',
+            'visibility' => 'personal',
+            'expression' => uqMetaRangeBucketExpression(),
+        ]);
+        $rangePersistKey = (string)($rangeSavedV1['key'] ?? '');
+        $rangeDefinitionV1 = $customFields->versionDefinition(
+            $manager,
+            'member_list',
+            $rangePersistKey,
+            1
+        );
+        $rangeSavedV2 = $customFields->save($manager, [
+            'pageCode' => 'member_list',
+            'fieldKey' => $rangePersistKey,
+            'expectedVersion' => 1,
+            'name' => '日期分档持久化合同新版',
+            'returnType' => 'text',
+            'visibility' => 'personal',
+            'expression' => uqMetaRangeBucketExpression(),
+        ]);
+        $rangeDefinitionV1AfterUpdate = $customFields->versionDefinition(
+            $manager,
+            'member_list',
+            $rangePersistKey,
+            1
+        );
+        $rangeDefinitionV2 = $customFields->versionDefinition(
+            $manager,
+            'member_list',
+            $rangePersistKey,
+            2
+        );
+        $rangeVisible = null;
+        foreach ($customFields->listVisible($manager, 'member_list', true) as $field) {
+            if ((string)($field['key'] ?? '') === $rangePersistKey) {
+                $rangeVisible = $field;
+                break;
+            }
+        }
+        $rangeRawVersions = Db::name('unified_query_custom_field_version')
+            ->where('field_key', $rangePersistKey)
+            ->order('version asc')
+            ->column('expression', 'version');
+        $rangeRawV1 = UnifiedQueryJson::decode((string)($rangeRawVersions[1] ?? ''));
+        $rangeRawV2 = UnifiedQueryJson::decode((string)($rangeRawVersions[2] ?? ''));
+        $rangeExpressionV1 = (array)($rangeDefinitionV1['expression'] ?? []);
+        $rangeExpressionV1AfterUpdate = (array)($rangeDefinitionV1AfterUpdate['expression'] ?? []);
+        $rangeExpressionV2 = (array)($rangeDefinitionV2['expression'] ?? []);
+        $rangeRawV1Canonical = UnifiedQueryJson::encode($rangeRawV1);
+        $rangeRawV2Canonical = UnifiedQueryJson::encode($rangeRawV2);
+        $rangeExpressionV1Canonical = UnifiedQueryJson::encode($rangeExpressionV1);
+        $rangeExpressionV2Canonical = UnifiedQueryJson::encode($rangeExpressionV2);
+        $rangeFrozenReferencedFieldsV1 = (array)(
+            $rangeDefinitionV1['referenced_fields'] ?? []
+        );
+        $rangeFrozenReferencedFieldsV2 = (array)(
+            $rangeDefinitionV2['referenced_fields'] ?? []
+        );
+        ok(
+            'range_bucket 经 save 持久化 canonical AST 且版本升级不改写 v1',
+            $rangePersistKey !== ''
+                && (int)($rangeSavedV1['version'] ?? 0) === 1
+                && (int)($rangeSavedV2['version'] ?? 0) === 2
+                && (int)($rangeVisible['version'] ?? 0) === 2
+                && ($rangeExpressionV1['operator'] ?? '') === 'range_bucket'
+                && ($rangeExpressionV1['thresholds'] ?? null) === [
+                    '-1', '30', '45.0', '60', '90', '180', '365', '730', '1095',
+                ]
+                && ($rangeExpressionV1['labels'] ?? null) === [
+                    '已过期', '0-30天', '31-45天', '46-60天', '61-90天',
+                    '91-180天', '1年内', '1-2年', '2-3年',
+                ]
+                && ($rangeExpressionV1['null_label'] ?? '') === '到期日未知'
+                && ($rangeExpressionV1['default_label'] ?? '') === '3年以上'
+                && ($rangeExpressionV1['input']['args'][0]['key'] ?? '')
+                    === 'latest_visit_date'
+                && ($rangeExpressionV1['input']['args'][1]['key'] ?? '')
+                    === 'query_cutoff_date'
+                && !isset($rangeExpressionV1['nullLabel'], $rangeExpressionV1['defaultLabel'])
+                && $rangeExpressionV1AfterUpdate === $rangeExpressionV1
+                && $rangeExpressionV2 === $rangeExpressionV1
+                && $rangeRawV1Canonical === $rangeExpressionV1Canonical
+                && $rangeRawV2Canonical === $rangeExpressionV2Canonical
+                && ($rangeSavedV1['referencedFields'] ?? []) === ['latest_visit_date']
+                && ($rangeSavedV2['referencedFields'] ?? []) === ['latest_visit_date']
+                && $rangeFrozenReferencedFieldsV1 === ['latest_visit_date']
+                && $rangeFrozenReferencedFieldsV2 === ['latest_visit_date'],
+            json_encode(compact(
+                'rangeSavedV1',
+                'rangeSavedV2',
+                'rangeExpressionV1',
+                'rangeExpressionV1AfterUpdate',
+                'rangeExpressionV2',
+                'rangeVisible',
+                'rangeRawV1',
+                'rangeRawV2',
+                'rangeFrozenReferencedFieldsV1',
+                'rangeFrozenReferencedFieldsV2'
+            ), JSON_UNESCAPED_UNICODE),
+            'UQ-RANGE-06'
+        );
+    } finally {
+        if ($rangePersistKey !== '') {
+            Db::name('unified_query_field_reference')
+                ->where('field_key', $rangePersistKey)
+                ->delete();
+            Db::name('unified_query_custom_field_version')
+                ->where('field_key', $rangePersistKey)
+                ->delete();
+            Db::name('unified_query_custom_field')
+                ->where('field_key', $rangePersistKey)
+                ->delete();
+        }
+    }
 } catch (\Throwable $throwable) {
     ok(
         '统一查询元数据集成未发生未捕获异常',

@@ -2,7 +2,9 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import BusinessRecordDetailOverlay from '@/components/order/BusinessRecordDetailOverlay.vue'
+import ReceiptPrinterSetupOverlay from '@/components/order/ReceiptPrinterSetupOverlay.vue'
 import SalesOrderDetailOverlay from '@/components/order/SalesOrderDetailOverlay.vue'
+import Printer from '@lucide/vue/dist/esm/icons/printer.mjs'
 import TablePagination from '@/components/common/TablePagination.vue'
 import UnifiedQueryToolbar from '@/components/query/UnifiedQueryToolbar.vue'
 import {
@@ -21,6 +23,7 @@ import {
 } from '@/services/cashierV3OrderProjectionContract'
 
 const field = (key, label, type = 'text', extra = {}) => ({ key, label, type, defaultVisible: true, ...extra })
+const isPrinterSetupOpen = ref(false)
 
 const ORDER_TABS = [
   {
@@ -342,6 +345,32 @@ function displayMoneyField(record, key) {
   if ((activeTabKey.value === 'sales' || key === 'actual_received_amount')
     && isUnavailableSalesOrderEconomics(record, value)) return '—'
   return formatMoney(value)
+}
+
+function memberDetailPayload(record = {}) {
+  const memberId = firstValue(record, ['memberId', 'member_id', 'uid', 'userId'])
+  if (memberId === undefined || memberId === null || String(memberId).trim() === '' || Number(memberId) <= 0) return null
+  return {
+    memberId,
+    member: {
+      id: memberId,
+      memberId,
+      name: displayRecordField(record, 'member_name'),
+      phone: displayRecordField(record, 'phone') === '—' ? '' : displayRecordField(record, 'phone')
+    }
+  }
+}
+
+function canOpenMemberDetail(record) {
+  return memberDetailPayload(record) !== null
+}
+
+function openMemberDetail(record) {
+  const payload = memberDetailPayload(record)
+  if (!payload) return
+  // Member detail remains owned by the shell so every entry loads the same
+  // authorization-scoped detail projection and tab contract.
+  window.dispatchEvent(new CustomEvent('cashier-v3:open-member-detail', { detail: payload }))
 }
 
 function statusClass(value) {
@@ -697,21 +726,27 @@ onBeforeUnmount(() => {
 
 <template>
   <section class="order-center-page" aria-label="订单中心">
-    <nav class="order-center-tabs" role="tablist" aria-label="订单与业务记录类型">
-      <button
-        v-for="tab in availableTabs"
-        :key="tab.key"
-        type="button"
-        role="tab"
-        class="order-center-tabs__button"
-        :class="{ 'order-center-tabs__button--active': activeTabKey === tab.key }"
-        :aria-selected="activeTabKey === tab.key"
-        @click="switchTab(tab)"
-      >
-        <span>{{ tab.label }}</span>
-        <strong class="order-center-tabs__count">{{ tabCount(tab.key) }}</strong>
+    <header class="order-center-page__head">
+      <nav class="order-center-tabs" role="tablist" aria-label="订单与业务记录类型">
+        <button
+          v-for="tab in availableTabs"
+          :key="tab.key"
+          type="button"
+          role="tab"
+          class="order-center-tabs__button"
+          :class="{ 'order-center-tabs__button--active': activeTabKey === tab.key }"
+          :aria-selected="activeTabKey === tab.key"
+          @click="switchTab(tab)"
+        >
+          <span>{{ tab.label }}</span>
+          <strong class="order-center-tabs__count">{{ tabCount(tab.key) }}</strong>
+        </button>
+      </nav>
+      <button type="button" class="order-center-printer-button" @click="isPrinterSetupOpen = true">
+        <Printer :size="17" />
+        打印设置
       </button>
-    </nav>
+    </header>
 
     <UnifiedQueryToolbar
       :key="activeTabKey"
@@ -743,6 +778,15 @@ onBeforeUnmount(() => {
                 type="button"
                 class="order-link"
                 @click="openRecordDetail(record)"
+              >
+                {{ displayRecordField(record, fieldItem.key) }}
+              </button>
+              <button
+                v-else-if="fieldItem.key === 'member_name' && canOpenMemberDetail(record)"
+                type="button"
+                class="order-link"
+                :title="`查看${displayRecordField(record, fieldItem.key)}的会员详情`"
+                @click="openMemberDetail(record)"
               >
                 {{ displayRecordField(record, fieldItem.key) }}
               </button>
@@ -795,5 +839,47 @@ onBeforeUnmount(() => {
       :on-lifecycle-action="handleRechargeLifecycleAction"
       @close="genericDetailRecord = null"
     />
+
+    <ReceiptPrinterSetupOverlay
+      v-if="isPrinterSetupOpen"
+      :store-name="state.currentStore?.name || state.currentStore?.storeName || ''"
+      @close="isPrinterSetupOpen = false"
+    />
   </section>
 </template>
+
+<style scoped>
+.order-center-page { position: relative; }
+
+.order-center-page__head {
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+  border-bottom: 1px solid #dfe5ec;
+  background: #fff;
+}
+
+.order-center-page__head .order-center-tabs {
+  flex: 1;
+  border-bottom: 0;
+}
+
+.order-center-printer-button {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-width: 116px;
+  margin: 6px 8px;
+  padding: 0 14px;
+  border: 1px solid #cfd8e3;
+  border-radius: 7px;
+  background: #fff;
+  color: #344054;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.order-center-printer-button:hover { border-color: #84adcf; color: #175cd3; }
+</style>

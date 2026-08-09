@@ -128,6 +128,18 @@ class Order extends AuthController
         }
         $where['status'] = trim($where['status']);
         $where['type'] = trim($where['type']);
+        // I2：总部门店订单列表与导出/详情同一数据权限
+        try {
+            /** @var \app\services\organization\EmployeeDataScopeServices $scopeSvc */
+            $scopeSvc = app()->make(\app\services\organization\EmployeeDataScopeServices::class);
+            $adminInfo = is_array($this->adminInfo ?? null) ? $this->adminInfo : [];
+            $employeeId = $scopeSvc->resolveEmployeeIdFromOperator($adminInfo, 'admin');
+            $scopeSvc->applyOrderListScope($where, $employeeId, 'admin', 0, $adminInfo);
+        } catch (\Throwable $e) {
+            $where['id'] = -1;
+        }
+        // 核销业务主单聚合：同一 batch_no 只展示 1 行「项目核销业务单」，旧 batch_id=0 子单保持原行
+        $where['aggregate_writeoff_batch'] = 1;
         return $this->success($this->services->getOrderList($where, ['*'], ['split' => function ($query) {
             $query->field('id,pid');
         }, 'pink', 'invoice', 'storeStaff'], false, 'add_time DESC,id DESC', true));
@@ -211,6 +223,16 @@ class Order extends AuthController
 				}
 			}
 		}
+        // I2：总部门店订单头部统计与列表同一数据权限
+        try {
+            /** @var \app\services\organization\EmployeeDataScopeServices $scopeSvc */
+            $scopeSvc = app()->make(\app\services\organization\EmployeeDataScopeServices::class);
+            $adminInfo = is_array($this->adminInfo ?? null) ? $this->adminInfo : [];
+            $employeeId = $scopeSvc->resolveEmployeeIdFromOperator($adminInfo, 'admin');
+            $scopeSvc->applyOrderListScope($where, $employeeId, 'admin', 0, $adminInfo);
+        } catch (\Throwable $e) {
+            $where['id'] = -1;
+        }
         $data = $this->services->orderStoreCount($where);
         return $this->success($data);
     }
@@ -264,6 +286,81 @@ class Order extends AuthController
     }
 
     /**
+     * 核销业务主单详情：全量明细（含已撤销）+ original/active 汇总 + visibility
+     * @param \app\services\order\WriteoffBatchListServices $listServices
+     * @param $id 批量核销主单ID
+     * @return mixed
+     */
+    public function writeoffBatchDetail(\app\services\order\WriteoffBatchListServices $listServices, $id)
+    {
+        if (!$id) {
+            return $this->fail('缺少批量核销单ID');
+        }
+        $scope = $this->resolveWriteoffBatchScope();
+        try {
+            return $this->success($listServices->getBatchDetail((int)$id, $scope, 0, 'admin'));
+        } catch (\think\exception\ValidateException $e) {
+            return $this->fail($e->getMessage());
+        }
+    }
+
+    /**
+     * 核销业务主单整笔撤销：仅操作人或具备门店级/平台级撤销核销权限的管理员可操作（与可见性分离）
+     * @param Request $request
+     * @param \app\services\order\WriteoffBatchListServices $listServices
+     * @param $id 批量核销主单ID
+     * @return mixed
+     */
+    public function writeoffBatchCancel(Request $request, \app\services\order\WriteoffBatchListServices $listServices, $id)
+    {
+        if (!$id) {
+            return $this->fail('缺少批量核销单ID');
+        }
+        [$remark] = $request->putMore([
+            ['remark', ''],
+        ], true);
+        $scope = $this->resolveWriteoffBatchScope();
+        try {
+            $batch = $listServices->getBatchForCancelCheck((int)$id, 0, 'admin');
+            if (!$listServices->canCancelBatch($batch, $scope)) {
+                return $this->fail('无权撤销该批量核销单');
+            }
+            /** @var \app\services\order\BatchWriteoffServices $batchServices */
+            $batchServices = app()->make(\app\services\order\BatchWriteoffServices::class);
+            $batchServices->cancelBatch((int)$id, (string)$remark, 0);
+            return $this->success('撤销成功');
+        } catch (\think\exception\ValidateException $e) {
+            return $this->fail($e->getMessage());
+        }
+    }
+
+    /**
+     * 单条核销明细修改手艺人
+     */
+
+    /**
+     * 批量核销明细修改为同一组手艺人
+     */
+
+    /**
+     * 与总后台门店订单列表同一数据权限（employee_data_scope），供批量核销详情/撤销复用
+     */
+    protected function resolveWriteoffBatchScope(): array
+    {
+        try {
+            /** @var \app\services\organization\EmployeeDataScopeServices $scopeSvc */
+            $scopeSvc = app()->make(\app\services\organization\EmployeeDataScopeServices::class);
+            $adminInfo = is_array($this->adminInfo ?? null) ? $this->adminInfo : [];
+            $employeeId = $scopeSvc->resolveEmployeeIdFromOperator($adminInfo, 'admin');
+            $tmp = [];
+            $scopeSvc->applyOrderListScope($tmp, $employeeId, 'admin', 0, $adminInfo);
+            return (array)($tmp['employee_data_scope'] ?? ['mode' => 'none']);
+        } catch (\Throwable $e) {
+            return ['mode' => 'none'];
+        }
+    }
+
+    /**
      * 撤销核销订单
      * @param $id
      * @return mixed
@@ -275,6 +372,6 @@ class Order extends AuthController
         $writeOffServices = app()->make(StoreOrderWriteOffServices::class);
         // 平台/门店统一走共享撤销服务：同事务撤核销、失效业绩、恢复次数、院装退料并恢复库存
         $writeOffServices->cancelWriteoff((int)$id, (string)$data, 0);
-        return $this->success('提交成功');
+        return $this->success('撤销本次核销成功');
     }
 }

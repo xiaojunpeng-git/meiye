@@ -116,6 +116,14 @@ class StoreOrderWriteoffDao extends BaseDao
                 }
             })->when(isset($where['relation_id']) && $where['relation_id'], function ($query) use ($where) {
                 $query->where('relation_id', $where['relation_id']);
+            })->when(array_key_exists('scope_staff_ids', $where), function ($query) use ($where) {
+                // 门店核销记录个人数据范围：按核销店员 staff_id 收口
+                $ids = array_values(array_unique(array_filter(array_map('intval', (array)$where['scope_staff_ids']))));
+                if (!$ids) {
+                    $query->where('id', -1);
+                } else {
+                    $query->whereIn('staff_id', $ids);
+                }
             })->when(isset($where['product_type']) && $where['product_type'], function ($query) use ($where) {
                 if(is_array($where['product_type'])){
                     $query->whereIn('product_type', $where['product_type']);

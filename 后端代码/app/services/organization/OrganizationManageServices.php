@@ -44,7 +44,9 @@ class OrganizationManageServices extends BaseServices
     public function getTree(): array
     {
         $list = $this->dao->getList(['is_del' => 0], 'id,pid,name,sort') ?: [];
-        return $this->buildTreeFromRows($list);
+        // Navigation tree deliberately excludes store/admin aggregates. Those
+        // values belong to the selected organization's overview request.
+        return $this->buildTreeFromRows($list, [], []);
     }
 
     /**
@@ -65,7 +67,9 @@ class OrganizationManageServices extends BaseServices
         if ($adminCountMap === null) {
             $adminCountMap = $this->getAdminCountMap();
         }
-        $allStoreMap = $this->computeAllStoreCounts($list, $directStoreMap);
+        $allStoreMap = ($directStoreMap === [] && $adminCountMap === [])
+            ? []
+            : $this->computeAllStoreCounts($list, $directStoreMap);
         return $this->buildTreeNodesBatched($list, 0, $directStoreMap, $adminCountMap, $allStoreMap, []);
     }
 

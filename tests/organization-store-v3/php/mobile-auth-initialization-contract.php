@@ -39,8 +39,9 @@ $assert(
 $assert(
     'MOBILE-AUTH-INIT-03',
     str_contains($jobs, 'setEmployeeMobileAccessInTx')
-    && str_contains($jobs, "revokeAllInCurrentTransaction(\$employeeId, 'AUTH_CHANGED')")
-    && str_contains($jobs, '在同一事务内')
+    && str_contains($jobs, '员工手机端开关是唯一的人员准入控制')
+    && str_contains($jobs, "'staff_id' => 0")
+    && str_contains($jobs, 'projectMobileAuthRules($employeeId, $enabled)')
 );
 
 exit($failed === 0 ? 0 : 1);

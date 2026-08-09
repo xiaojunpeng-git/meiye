@@ -42,6 +42,10 @@ if (strpos($reader, "'amount' => 'sd.total_debt * 100'") === false || strpos($re
 if (strpos($reader, "'value' => \$definition['unit'] === '元' ? \$this->centsToMoney(\$rawValue) : \$rawValue") === false) $failures[] = 'dashboard non-money metrics must not be converted from cents';
 if (strpos($reader, "->group(\$dateColumn)->orderRaw(\$dateColumn . ' ASC')") === false) $failures[] = 'dashboard trend must allow its static debt date expression in ORDER BY';
 if (strpos($reader, "? \"0 AS operator_id, '' AS operator_name\"") === false) $failures[] = 'dashboard debt ranking must not query an absent operator column';
+if (strpos($reader, "CASE WHEN fact_direction = 'reversal'") !== false
+    || strpos($reader, "fact_direction'] ?? 'forward') === 'reversal'") !== false) $failures[] = 'signed fact amounts must not be inverted again by fact_direction';
+if (strpos($reader, 'COALESCE(SUM({$amount}),0) AS amount') === false
+    || substr_count($reader, '"SUM({$amount})"') < 2) $failures[] = 'dashboard totals, trends and rankings must sum signed fact amounts directly';
 if (strpos($reader, 'return (string)intdiv($cents, 100);') === false || strpos($reader, 'number_format($cents / 100, 2') !== false) $failures[] = 'dashboard money display must preserve the cashier whole-yuan rule';
 if (strpos($bootstrap, 'CashierV3BusinessDashboardModule::install($dispatcher, $assembler);') === false) $failures[] = 'C4 module is not installed by production bootstrap';
 if (strpos($management, "id: 'business-dashboard-v3'") === false || strpos($management, "cashier-v3-business-dashboard") === false) $failures[] = 'management entry is not routed to dashboard';

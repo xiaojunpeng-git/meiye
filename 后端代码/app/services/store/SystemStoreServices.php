@@ -14,6 +14,7 @@ use app\dao\store\SystemStoreDao;
 use app\jobs\user\UserBelongStoreJob;
 use app\services\agent\SystemRegionAgentServices;
 use app\services\BaseServices;
+use app\services\employee\EmployeeStaffWriteServices;
 use app\services\order\DeliveryConfigServices;
 use app\services\order\store\BranchOrderServices;
 use app\services\order\StoreDeliveryOrderServices;
@@ -39,6 +40,7 @@ use mohe\services\FormBuilder as Form;
 use mohe\services\SystemConfigService;
 use think\exception\ValidateException;
 use think\facade\Cache;
+use think\facade\Db;
 use think\facade\Log;
 
 
@@ -873,44 +875,78 @@ class SystemStoreServices extends BaseServices
      */
     public function resetAdmin(int $id, array $data)
     {
-        $storeInfo = $this->getStoreInfo((int)$id);
-        if (!$storeInfo) {
-            throw new ValidateException('门店数据不存在');
-        }
-        /** @var SystemStoreStaffServices $staffServices */
-        $staffServices = app()->make(SystemStoreStaffServices::class);
-        $staff_data = [];
-        if ($data['phone'] != $storeInfo['phone']) {//重置手机号 清空之前绑定
-            $staff_data['uid'] = 0;
-        }
-        $staff_data['account'] = $data['account'];
-        $staff_data['phone'] = $data['phone'];
-        $staff_data['store_id'] = $storeInfo['id'];
-        $staff_data['level'] = 0;
-        $staff_data['is_admin'] = 1;
-        $staff_data['verify_status'] = 1;
-        $staff_data['is_manager'] = 1;
-        $staff_data['is_cashier'] = 1;
-        $staff_data['is_del'] = 0;
-        $staff_data['add_time'] = time();
-        $staff_data['pwd'] = $this->passwordHash($data['password']);
-        $staffInfo = $staffServices->getOne(['account' => $data['account'], 'is_del' => 0]);
-        if ($data['staff_id'] && $staffServices->getCount(['id' => $data['staff_id'], 'is_del' => 0])) {
-            if ($staffInfo && $staffInfo['id'] != $data['staff_id']) {
+        return Db::transaction(function () use ($id, $data) {
+            $storeInfo = Db::name('system_store')->where('id', $id)->lock(true)->find();
+            if (!$storeInfo || (int)($storeInfo['is_del'] ?? 0) === 1) {
+                throw new ValidateException('门店数据不存在');
+            }
+            $targetStaff = Db::name('system_store_staff')
+                ->where('store_id', $id)
+                ->where('level', 0)
+                ->where('is_admin', 1)
+                ->where('is_manager', 1)
+                ->where('is_del', 0)
+                ->lock(true)
+                ->find();
+            if (!$targetStaff) {
+                throw new ValidateException('请先在人员管理中设置该门店管理员');
+            }
+
+            $submittedStaffId = (int)($data['staff_id'] ?? 0);
+            if ($submittedStaffId > 0 && $submittedStaffId !== (int)$targetStaff['id']) {
+                throw new ValidateException('管理员任职信息已变化，请刷新后重试');
+            }
+
+            $accountOwner = Db::name('system_store_staff')
+                ->where('account', (string)$data['account'])
+                ->where('is_del', 0)
+                ->where('id', '<>', (int)$targetStaff['id'])
+                ->lock(true)
+                ->find();
+            if ($accountOwner) {
                 throw new ValidateException('该账号已存在');
             }
-            if (!$staffServices->update($data['staff_id'], $staff_data)) {
-                throw new ValidateException('创建门店管理员失败！');
+
+            $employeeId = (int)($targetStaff['employee_id'] ?? 0);
+            if ($employeeId > 0) {
+                $otherAssignment = Db::name('system_store_staff')
+                    ->where('employee_id', $employeeId)
+                    ->where('id', '<>', (int)$targetStaff['id'])
+                    ->where('status', 1)
+                    ->where('is_del', 0)
+                    ->lock(true)
+                    ->find();
+                if ($otherAssignment) {
+                    throw new ValidateException('当前员工存在其他有效门店任职，请先完成调店处理');
+                }
             }
-        } else {
-            if ($staffInfo) {
-                throw new ValidateException('该账号已存在');
+
+            $phone = trim((string)$data['phone']);
+            $phoneOwner = Db::name('system_store_staff')
+                ->where('id', '<>', (int)$targetStaff['id'])
+                ->where('status', 1)
+                ->where('is_del', 0)
+                ->where(function ($query) use ($phone) {
+                    $query->where('phone', $phone)->whereOr('customer_phone', $phone);
+                })
+                ->lock(true)
+                ->find();
+            if ($phoneOwner) {
+                throw new ValidateException('该手机号已在其他门店任职，如需变更门店请使用调店功能');
             }
-            if (!$staffServices->save($staff_data)) {
-                throw new ValidateException('创建门店管理员失败！');
+
+            $update = [
+                'account' => (string)$data['account'],
+                'phone' => $phone,
+                'customer_phone' => $phone,
+                'pwd' => $this->passwordHash((string)$data['password']),
+            ];
+            if ($phone !== (string)($targetStaff['phone'] ?? '')) {
+                $update['uid'] = 0;
             }
-        }
-        return true;
+            Db::name('system_store_staff')->where('id', (int)$targetStaff['id'])->update($update);
+            return true;
+        });
     }
 
     /**
@@ -1034,22 +1070,29 @@ class SystemStoreServices extends BaseServices
                 $res = $this->dao->save($data);
                 if ($staff_data) {
                     $staffServices = app()->make(SystemStoreStaffServices::class);
-//                        if ($staffServices->count(['phone' => $staff_data['phone'], 'is_del' => 0])) {
-//                            throw new AdminException('该手机号已经存在');
-//                        }
                     if ($staffServices->count(['account' => $staff_data['account'], 'is_del' => 0])) {
                         throw new AdminException('管理员账号已存在');
                     }
                     $staff_data['level'] = 0;
                     $staff_data['store_id'] = $res->id;
-                    $staff_data['is_admin'] = 1;
-                    $staff_data['is_store'] = 1;
-                    $staff_data['verify_status'] = 1;
-                    $staff_data['is_manager'] = 1;
                     $staff_data['is_cashier'] = 1;
-                    $staff_data['add_time'] = time();
+                    $staff_data['status'] = 1;
                     $staff_data['pwd'] = $this->passwordHash($staff_data['pwd']);
-                    if (!$staffServices->save($staff_data)) {
+                    /** @var EmployeeStaffWriteServices $staffWriter */
+                    $staffWriter = app()->make(EmployeeStaffWriteServices::class);
+                    $assignment = $staffWriter->saveStaffAssignment(0, $staff_data, [
+                        'source' => 'admin',
+                        'reason' => '新建门店初始化管理员任职',
+                    ], ['use_outer_transaction' => true]);
+                    $staffId = (int)($assignment['staff_id'] ?? 0);
+                    if ($staffId <= 0 || !$staffServices->update($staffId, [
+                        'level' => 0,
+                        'is_admin' => 1,
+                        'is_store' => 1,
+                        'verify_status' => 1,
+                        'is_manager' => 1,
+                        'is_cashier' => 1,
+                    ])) {
                         throw new AdminException('创建门店管理员失败！');
                     }
                     $data = [

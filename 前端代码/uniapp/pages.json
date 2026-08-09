@@ -2558,6 +2558,13 @@
 					}
 				},
 				{
+					"path": "care/index",
+					"style": {
+						"navigationBarTitleText": "客情管理",
+						"navigationBarBackgroundColor": "#ffffff"
+					}
+				},
+				{
 					"path": "data/index",
 					"style": {
 						"navigationBarTitleText": "数仓",

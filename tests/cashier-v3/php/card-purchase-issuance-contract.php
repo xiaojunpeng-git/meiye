@@ -111,5 +111,27 @@ cardPurchaseCheck('CPU-12 issued state supports independent, choice, shared and 
     && strpos($ruleSource, "'writeoff_amount_cents'") !== false
     && strpos($ruleMigration, 'No historic holder/card row is read or changed') !== false);
 
+$auditedPrice = $reflection->getMethod('isAuthorizedManualPriceSettlement');
+$auditedPrice->setAccessible(true);
+$auditedLine = [
+    'quantity' => 1,
+    'sale_amount_cents' => 100000,
+    'configured_cost_cents' => 100000,
+    'price_change_reason' => '真人验收改价',
+    'price_changed_by' => 871,
+    'price_changed_by_name_snapshot' => '店长',
+    'price_changed_at' => 1700000000,
+];
+cardPurchaseCheck('CPU-13 audited card price at current configured cost remains issuable',
+    $auditedPrice->invoke($service, $auditedLine, ['configured_cost_cents' => 100000]) === true);
+$belowCost = $auditedLine;
+$belowCost['sale_amount_cents'] = 99999;
+cardPurchaseCheck('CPU-14 audited card price below current configured cost fails closed',
+    $auditedPrice->invoke($service, $belowCost, ['configured_cost_cents' => 100000]) === false);
+$staleCost = $auditedLine;
+$staleCost['configured_cost_cents'] = 90000;
+cardPurchaseCheck('CPU-15 stale configured cost cannot authorize discounted card issuance',
+    $auditedPrice->invoke($service, $staleCost, ['configured_cost_cents' => 100000]) === false);
+
 echo "CARD_PURCHASE_ISSUANCE_CONTRACT passed={$passed} failed={$failed}\n";
 exit($failed === 0 ? 0 : 1);

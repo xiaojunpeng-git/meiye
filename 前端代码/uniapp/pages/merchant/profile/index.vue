@@ -6,23 +6,8 @@
 				<image class="avatar" :src="avatarUrl" mode="aspectFill" />
 				<view class="profile-card__body">
 					<view class="profile-card__name">{{ displayName }}</view>
-					<view class="profile-card__role">{{ roleLabel }} · {{ storeTitle }}</view>
+					<view class="profile-card__role">{{ storeTitle }}</view>
 					<view class="profile-card__hint" v-if="scopeHint">{{ scopeHint }}</view>
-				</view>
-			</view>
-
-			<!-- 切换身份 -->
-			<view class="card" v-if="roles.length > 1">
-				<view class="card__sub">切换身份</view>
-				<view
-					v-for="role in roles"
-					:key="role"
-					class="role-item"
-					:class="{ active: role === activeRole, disabled: switching }"
-					@click="switchRole(role)"
-				>
-					{{ roleLabelOf(role) }}
-					<text v-if="role === activeRole" class="role-item__tag">当前</text>
 				</view>
 			</view>
 
@@ -58,10 +43,6 @@
 			<!-- 设置：复用买家端账号级消息/安全页（同一登录态） -->
 			<view class="card mt">
 				<view class="card__sub">设置</view>
-				<view class="menu-item" @click="goUrl('/pages/merchant/training/index')">
-					<text>培训资料</text>
-					<text class="arrow">›</text>
-				</view>
 				<view class="menu-item" @click="goUrl('/pages/users/message_center/index')">
 					<text>消息通知</text>
 					<text class="arrow">›</text>
@@ -90,14 +71,6 @@ import { mapGetters } from 'vuex';
 import merchantGuard from '@/mixins/merchantGuard.js';
 import merchantTabBar from '@/components/merchantTabBar/index.vue';
 
-const ROLE_MAP = {
-	region_agent: '区域代理',
-	store_manager: '店长',
-	store_staff: '店员',
-	platform_service: '平台客服',
-	delivery: '配送员',
-};
-
 export default {
 	mixins: [merchantGuard],
 	components: { merchantTabBar },
@@ -108,9 +81,6 @@ export default {
 	},
 	computed: {
 		...mapGetters(['userInfo']),
-		roles() {
-			return this.$store.state.merchant.roles || [];
-		},
 		stores() {
 			return this.$store.state.merchant.stores || [];
 		},
@@ -123,12 +93,9 @@ export default {
 		identity() {
 			return this.$store.state.merchant.identity || {};
 		},
-		roleLabel() {
-			return this.roleLabelOf(this.activeRole);
-		},
 		storeTitle() {
 			const hit = this.stores.find((s) => Number(s.id) === Number(this.activeStoreId));
-			return (hit && hit.name) || (this.stores.length ? '未选择门店' : '无门店范围');
+			return (hit && hit.name) || '暂无可用门店';
 		},
 		displayName() {
 			const u = this.userInfo || {};
@@ -139,11 +106,15 @@ export default {
 			return u.avatar || '/static/images/f.png';
 		},
 		showStoreSwitch() {
-			if (this.stores.length <= 1) return false;
-			// 配送/纯客服通常无多店切换意义，但仍允许有 stores 时切换
-			return true;
+			return !!this.$store.state.merchant.storeSwitchAllowed;
 		},
 		scopeHint() {
+			if (this.$store.state.merchant.taskVisibility === 'SELF') {
+				return '仅可查看本人任务';
+			}
+			if (this.$store.state.merchant.taskVisibility === 'STORE') {
+				return '当前门店全部任务';
+			}
 			if (!this.hasMerchantPermission('merchant.home.view')) {
 				return '当前身份为裁剪工作台，经营数据不可见';
 			}
@@ -172,10 +143,8 @@ export default {
 			}
 			if (this.hasMerchantPermission('merchant.data.store') || this.hasMerchantPermission('merchant.data.region')) {
 				menus.push({
-					name: this.hasMerchantPermission('merchant.data.region') ? '区域/门店业绩' : '门店业绩',
-					url: this.hasMerchantPermission('merchant.data.region')
-						? '/pages/admin/agent/index'
-						: '/pages/admin/yeji/store',
+					name: '当前门店数据',
+					url: '/pages/merchant/data/index',
 				});
 			}
 			if (role === 'store_manager' || role === 'store_staff') {
@@ -198,9 +167,6 @@ export default {
 		if (!ok) return;
 	},
 	methods: {
-		roleLabelOf(role) {
-			return ROLE_MAP[role] || role || '商家';
-		},
 		developing() {
 			uni.showToast({ title: '该功能正在开发中，敬请期待', icon: 'none' });
 		},
@@ -217,19 +183,6 @@ export default {
 				return;
 			}
 			uni.navigateTo({ url: item.url });
-		},
-		async switchRole(role) {
-			if (this.switching || role === this.activeRole) return;
-			this.switching = true;
-			try {
-				await this.$store.dispatch('merchant/switchContext', { active_role: role });
-				uni.showToast({ title: '已切换身份，数据范围已更新', icon: 'none' });
-			} catch (e) {
-				const msg = (e && (e.msg || e.message)) || '切换失败';
-				uni.showToast({ title: String(msg).slice(0, 40), icon: 'none' });
-			} finally {
-				this.switching = false;
-			}
 		},
 		async switchStore(storeId) {
 			if (this.switching || Number(storeId) === Number(this.activeStoreId)) return;

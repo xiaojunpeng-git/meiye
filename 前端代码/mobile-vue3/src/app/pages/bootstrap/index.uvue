@@ -2,12 +2,22 @@
 	<view class="page">
 		<view class="hero">
 			<text class="platform">{{ platformCode }}</text>
-			<text class="title">手机端</text>
-			<text class="subtitle">基础环境已就绪</text>
+			<text class="title">商家端登录</text>
+			<text class="subtitle">使用员工档案中的登录账号进入工作台</text>
+		</view>
+		<view class="login-card">
+			<text class="field-label">服务地址</text>
+			<input class="field-input" v-model="apiOrigin" placeholder="例如 http://127.0.0.1:8080" />
+			<text class="field-label">员工账号</text>
+			<input class="field-input" v-model="account" placeholder="请输入员工账号" />
+			<text class="field-label">登录密码</text>
+			<input class="field-input" v-model="password" password placeholder="请输入登录密码" />
+			<view class="login-command" @tap="login"><text>{{ loading ? '正在登录…' : '登录并进入商家端' }}</text></view>
+			<text v-if="message.length > 0" class="message">{{ message }}</text>
 		</view>
 		<view class="status-row">
-			<view class="status-dot"></view>
-			<text class="status-text">{{ foundationReady ? '等待身份服务接入' : '基础校验未通过' }}</text>
+			<view class="status-dot" :class="{ 'status-dot--error': !foundationReady }"></view>
+			<text class="status-text">{{ foundationReady ? '本机调试使用真实手机端接口' : '基础校验未通过' }}</text>
 		</view>
 	</view>
 </template>
@@ -15,6 +25,8 @@
 <script setup lang="uts">
 	import { currentMobilePlatform, declaredPlatformCapabilityCount } from '../../../shared/platform/mobile-platform.uts'
 	import { merchantContextIsComplete, merchantStateIdentifiersAreCleared } from '../../state/root-state.uts'
+	import { currentMobileApiOrigin, enterMerchantWithPassword, updateMobileApiOrigin } from '../../../shared/api/mobile-login-client.uts'
+	import { openMerchantCustomerDetailAfterBootstrap, openMerchantCustomers, openMerchantWorkbench } from '../../../shared/platform/mobile-navigation.uts'
 
 	const platformCode = ref(currentMobilePlatform())
 	const foundationReady = ref(
@@ -22,6 +34,52 @@
 		!merchantContextIsComplete('', '') &&
 		merchantStateIdentifiersAreCleared('', '', '', '')
 	)
+	const apiOrigin = ref(currentMobileApiOrigin())
+	const account = ref('')
+	const password = ref('')
+	const message = ref('')
+	const loading = ref(false)
+	const returnTarget = ref('')
+	const returnMemberId = ref('')
+	const returnLookup = ref('')
+
+	onLoad((options : any) => {
+		let target = String(options != null ? options.returnTarget || '' : '')
+		let memberId = String(options != null ? options.memberId || '' : '')
+		let lookup = String(options != null ? options.lookup || '' : '')
+		if (target == 'customers') {
+			returnTarget.value = target
+			return
+		}
+		if (target == 'customer-detail' && memberId.length > 0 && lookup.length > 0) {
+			returnTarget.value = target
+			returnMemberId.value = memberId
+			returnLookup.value = lookup
+		}
+	})
+
+	function login() {
+		message.value = ''
+		if (!updateMobileApiOrigin(apiOrigin.value)) { message.value = '服务地址格式无效。'; return }
+		loading.value = true
+		enterMerchantWithPassword(account.value, password.value, (result : any) => {
+			loading.value = false
+			if (!result.ok) { message.value = String(result.message || '登录未完成。'); return }
+			completeLoginNavigation()
+		})
+	}
+
+	function completeLoginNavigation() : void {
+		if (returnTarget.value == 'customers') {
+			openMerchantCustomers()
+			return
+		}
+		if (returnTarget.value == 'customer-detail') {
+			openMerchantCustomerDetailAfterBootstrap(returnMemberId.value, returnLookup.value)
+			return
+		}
+		openMerchantWorkbench()
+	}
 </script>
 
 <style>
@@ -39,6 +97,20 @@
 		flex-direction: column;
 		margin-top: 64px;
 	}
+
+	.login-card {
+		display: flex;
+		flex-direction: column;
+		padding: 20px;
+		border-radius: 18px;
+		background-color: #ffffff;
+	}
+
+	.field-label { margin-top: 12px; font-size: 12px; color: #668073; }
+	.field-label:first-child { margin-top: 0; }
+	.field-input { margin-top: 7px; height: 42px; padding: 0 12px; border-radius: 10px; background-color: #f1f5f2; color: #173326; font-size: 15px; }
+	.login-command { margin-top: 20px; display: flex; justify-content: center; align-items: center; height: 46px; border-radius: 12px; background-color: #173326; color: #ffffff; font-size: 15px; font-weight: 600; }
+	.message { margin-top: 13px; color: #a44848; font-size: 13px; line-height: 19px; }
 
 	.platform {
 		font-size: 12px;
@@ -76,6 +148,7 @@
 		border-radius: 4px;
 		background-color: #2f7d58;
 	}
+	.status-dot--error { background-color: #a44848; }
 
 	.status-text {
 		margin-left: 10px;

@@ -335,12 +335,15 @@ class UserServices extends BaseServices
     {
         mt_srand();
         $ip = app()->request->ip();
+        $phone = trim((string)($user['phone'] ?? ''));
         $data = [
             'account' => $user['account'] ?? 'wx' . rand(1, 9999) . time(),
             'pwd' => $user['pwd'] ?? md5('123456'),
             'nickname' => $user['nickname'] ?? '',
             'avatar' => !empty($user['headimgurl']) ? $user['headimgurl'] : sys_config('h5_avatar'),
-            'phone' => $user['phone'] ?? '',
+            // CanonicalUserIdentityServices writes the member phone after the
+            // identity row is reserved; this create payload must not bypass it.
+            'phone' => '',
             'birthday' => $user['birthday'] ?? '',
             'add_time' => time(),
             'add_ip' => $ip,
@@ -352,9 +355,30 @@ class UserServices extends BaseServices
             $data['spread_uid'] = $spreadUid;
             $data['spread_time'] = time();
         }
-        $res = $this->dao->save($data);
-        if (!$res)
+        /** @var CanonicalUserIdentityServices $identityServices */
+        $identityServices = app()->make(CanonicalUserIdentityServices::class);
+        $created = false;
+        $createUser = function () use ($data, &$created) {
+            $res = $this->dao->save($data);
+            if (!$res) {
+                throw new AdminException('保存用户信息失败');
+            }
+            $created = true;
+            return (int)$res->uid;
+        };
+        $uid = $phone === ''
+            ? $identityServices->createUserWithoutPhoneIdentity($createUser)
+            : $identityServices->ensureUserIdentity($phone, $createUser, [
+                'operator_type' => 'SYSTEM',
+                'source' => 'USER_SET_INFO',
+            ]);
+        $res = $this->dao->get($uid);
+        if (!$res) {
             throw new AdminException('保存用户信息失败');
+        }
+        if (!$created) {
+            return $res;
+        }
         //用户注册成功事件
         $userInfo = $res->toArray();
         $userInfo['unionid'] = $user['unionid'] ?? '';

@@ -1,0 +1,34 @@
+import { buildMobileRequestPlan, mobileRequestPlanMatchesContract } from './request-context.uts'
+import { sendMobileRequest } from './mobile-http.uts'
+import { currentMerchantRoot, merchantRequestSession } from '../platform/mobile-merchant-session.uts'
+
+const targetTransportContract : any = {
+	contractVersion: 'mobile-merchant-v1',
+	endpoints: {
+		currentPersonalMonthlyTarget: { method: 'GET', path: '/mobile/merchant/personal-monthly-target/current', requestMetadataProfile: 'MERCHANT_SESSION' },
+		savePersonalMonthlyTarget: { method: 'POST', path: '/mobile/merchant/personal-monthly-target', requestMetadataProfile: 'MERCHANT_SESSION' }
+	},
+	requestMetadataProfiles: {
+		MERCHANT_SESSION: { required: { 'X-Mobile-Contract-Version': 'contractVersion', 'X-Mobile-Client-Session-Id': 'clientSessionId', 'X-Mobile-Platform': 'platform', 'X-Mobile-Request-Id': 'requestId', Authorization: 'Bearer <merchantToken>', 'X-Mobile-Active-Context-Id': 'activeContextId', 'X-Mobile-State-Context-Id': 'stateContextId' }, forbidden: ['X-Mobile-App-Session', 'Cookie', 'queryToken', 'bodyToken', 'headerAlias'] }
+	}
+}
+
+function targetPlan(endpointName : string) : any {
+	let root = currentMerchantRoot()
+	let session = merchantRequestSession(root)
+	if (session == null) return null
+	let plan = buildMobileRequestPlan(targetTransportContract, endpointName, session)
+	return mobileRequestPlanMatchesContract(targetTransportContract, endpointName, session, plan) ? plan : null
+}
+
+export function queryMobilePersonalMonthlyTarget(done : (value : any) => void) : void {
+	let plan = targetPlan('currentPersonalMonthlyTarget')
+	if (plan == null) { done({ ok: false, message: '请先完成商家端登录。', body: null }); return }
+	sendMobileRequest(plan, {}, done)
+}
+
+export function saveMobilePersonalMonthlyTarget(payload : any, done : (value : any) => void) : void {
+	let plan = targetPlan('savePersonalMonthlyTarget')
+	if (plan == null) { done({ ok: false, message: '请先完成商家端登录。', body: null }); return }
+	sendMobileRequest(plan, payload, done)
+}

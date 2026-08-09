@@ -17,6 +17,15 @@ use think\facade\Db;
 const QA_DATABASE = 'ruihao_test_recovered_20260801';
 const QA_PASSWORD = 'QaOrgV3!20260803';
 const QA_MARKER = 'ORG-STOREV3-00001';
+const QA_ADMIN_STORE_V3_RULES = '301001,301004,301005,301006,301100,301101,301102,301103,301104,301105,301106,301107,301108,301109,301110';
+const QA_ADMIN_STORE_V3_RULE_IDS = [301001, 301004, 301005, 301006, 301100, 301101, 301102, 301103, 301104, 301105, 301106, 301107, 301108, 301109, 301110];
+const QA_ADMIN_REQUIRED_FEATURES = [
+    'cashier.v3.cashier', 'cashier.v3.reservation', 'cashier.v3.member', 'cashier.v3.order_center',
+    'cashier.v3.inventory.overview', 'cashier.v3.inventory.inbound', 'cashier.v3.inventory.outbound',
+    'cashier.v3.inventory.stock', 'cashier.v3.inventory.count', 'cashier.v3.inventory.movement',
+    'cashier.v3.inventory.statistics', 'cashier.v3.inventory.request', 'cashier.v3.inventory.transfer',
+    'cashier.v3.inventory.usage', 'cashier.v3.inventory.import',
+];
 
 function qaFail(string $message): void
 {
@@ -305,7 +314,7 @@ $now = time();
 
 $fixture = Db::transaction(function () use ($storeA, $storeB, $now): array {
     $memberPosition = qaUpsertPosition('QA ORG V3 会员岗位', 1, '301005', $now);
-    $editorPosition = qaUpsertPosition('QA ORG V3 回显岗位', 1, '301001,301005,301006', $now);
+    $editorPosition = qaUpsertPosition('QA ORG V3 回显岗位', 1, QA_ADMIN_STORE_V3_RULES, $now);
     $noRulePosition = qaUpsertPosition('QA ORG V3 无规则岗位', 1, '', $now);
 
     $a = qaUpsertEmployee('QA ORG V3 A 两店会员', '17000080301', 'qa_orgv3_a', $now);
@@ -359,17 +368,17 @@ $savedEditor = $positions->savePosition([
     'use_store' => 1,
     'use_mobile' => 0,
     'platform_rules' => '',
-    'store_v3_rules' => '301001,301005,301006',
+    'store_v3_rules' => QA_ADMIN_STORE_V3_RULES,
     'mobile_rules' => '',
     'remark' => QA_MARKER,
 ], is_array($qaAdmin) ? $qaAdmin : $qaAdmin->toArray(), [
-    'header_token' => '54e6f8c9-71e2-4a80-9be7-40f4325b8d91',
-    'body_token' => '54e6f8c9-71e2-4a80-9be7-40f4325b8d91',
+    'header_token' => '2b4c265f-5d0d-46a4-9475-067ddd1f1be3',
+    'body_token' => '2b4c265f-5d0d-46a4-9475-067ddd1f1be3',
     'operator_ip' => '127.0.0.1',
 ]);
 $editorDetail = $positions->getPositionDetail($fixture['position_ids']['editor']);
 if ((int)($savedEditor['data']['id'] ?? 0) !== $fixture['position_ids']['editor']
-    || (array)($editorDetail['store_v3_rules_ids'] ?? []) !== [301001, 301005, 301006]
+    || (array)($editorDetail['store_v3_rules_ids'] ?? []) !== QA_ADMIN_STORE_V3_RULE_IDS
     || (int)($editorDetail['position']['use_store'] ?? 0) !== 1) {
     qaFail('position_save_and_readback_assertion');
 }
@@ -471,17 +480,17 @@ if (count($dStores) !== 1 || (int)($dStores[0]['id'] ?? 0) !== $fixture['staff_i
 
 /** @var CashierV3StoreLoginServices $login */
 $login = app()->make(CashierV3StoreLoginServices::class);
-$selection = $login->login('qa_orgv3_a', QA_PASSWORD);
-if (empty($selection['need_select_store']) || count((array)($selection['stores'] ?? [])) !== 2 || empty($selection['login_ticket'])) {
-    qaFail('multi_store_login_assertion');
-}
-$selected = $login->login('', '', $storeA, (string)$selection['login_ticket']);
-if (empty($selected['token']) || (array)($selected['features'] ?? []) !== ['cashier.v3.member']) {
-    qaFail('selected_store_feature_assertion');
+try {
+    $login->login('qa_orgv3_a', QA_PASSWORD);
+    qaFail('multi_store_login_was_allowed');
+} catch (\mohe\exceptions\AdminException $exception) {
+    if (strpos($exception->getMessage(), '多条有效门店任职') === false) {
+        qaFail('multi_store_login_wrong_error');
+    }
 }
 $administrator = $login->login('qa_orgv3_admin', QA_PASSWORD);
 if (!empty($administrator['need_select_store']) || empty($administrator['token'])
-    || !in_array('cashier.v3.member', (array)($administrator['features'] ?? []), true)) {
+    || array_diff(QA_ADMIN_REQUIRED_FEATURES, (array)($administrator['features'] ?? []))) {
     qaFail('administrator_positive_login_assertion');
 }
 foreach (['qa_orgv3_b', 'qa_orgv3_c'] as $account) {
@@ -511,11 +520,11 @@ echo json_encode([
         'password' => QA_PASSWORD,
     ],
     'expected' => [
-        'A' => 'two stores; selected store exposes only cashier.v3.member',
+        'A' => 'two active store assignments; login is denied and must use the transfer process',
         'B' => 'no store_v3 rule and entry disabled; login denied',
         'C' => 'staff assignment inactive; login denied',
-        'editor' => 'store_v3 entry enabled; rule IDs 301001,301005,301006 persist and read back',
-        'Administrator' => 'one active store with store_v3 rule; internal login can enter the Vue 3 store app',
+        'editor' => 'store_v3 entry enabled; cashier, reservation and all inventory rule IDs persist and read back',
+        'Administrator' => 'one active store with cashier, reservation and full inventory features; internal login can enter the Vue 3 store app',
         'mobile_enabled' => 'mobile role has all current Vue 3 merchant features; archive and both runtime projections are enabled',
         'mobile_disabled' => 'same mobile role but archive and both runtime projections are manually closed',
         'mobile_no_role' => 'no mobile-capable role; archive switch remains closed',

@@ -231,10 +231,12 @@ export default {
 			return Number((this.$store.state.merchant && this.$store.state.merchant.activeStoreId) || 0);
 		},
 		canRegion() {
-			return this.perms.indexOf('merchant.data.region') !== -1 || this.activeRole === 'region_agent';
+			return false;
 		},
 		canStore() {
-			return this.perms.indexOf('merchant.data.store') !== -1 || this.activeRole === 'store_manager';
+			return this.perms.indexOf('merchant.data.store') !== -1
+				|| this.perms.indexOf('merchant.data.region') !== -1
+				|| this.activeRole === 'store_manager';
 		},
 		canSelf() {
 			return this.perms.indexOf('merchant.data.self') !== -1;

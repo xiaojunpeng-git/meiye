@@ -2,9 +2,8 @@
 
 namespace app\command;
 
-use app\services\cashier\v3\bootstrap\CashierV3Bootstrap;
-use app\services\cashier\v3\query\UnifiedQueryModule;
 use app\services\query\UnifiedQueryExportWorkerServices;
+use app\services\query\UnifiedQueryRuntime;
 use think\console\Command;
 use think\console\Input;
 use think\console\input\Option;
@@ -24,13 +23,11 @@ class UnifiedQueryExportWorker extends Command
 
     protected function execute(Input $input, Output $output)
     {
-        $dispatcher = CashierV3Bootstrap::dispatcher();
-        $runtime = UnifiedQueryModule::runtime();
+        $runtime = UnifiedQueryRuntime::runtime();
         $worker = new UnifiedQueryExportWorkerServices(
-            $dispatcher,
             $runtime['exports'],
-            $runtime['memberProvider'],
-            $runtime['contextFactory']
+            $runtime['providers'],
+            $runtime['workerContextResolvers']
         );
         $limit = max(1, min(100, (int)$input->getOption('limit')));
         $loop = (bool)$input->getOption('loop');

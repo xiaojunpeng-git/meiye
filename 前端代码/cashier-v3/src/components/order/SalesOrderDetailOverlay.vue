@@ -163,6 +163,14 @@ function personName(person) {
   return pickValue(person, ['name', 'staffName', 'employeeName', 'salespersonName', 'craftsmanName']) || '未命名人员'
 }
 
+function salespersonDisplayName(person) {
+  const name = personName(person)
+  const rawRole = String(person?.roleSnapshot ?? person?.role_snapshot ?? person?.employeeType ?? person?.employee_type ?? '').toLowerCase()
+  if (rawRole.includes('presale') || rawRole.includes('pre_sale') || rawRole.includes('售前')) return `${name}（售前）`
+  if (rawRole.includes('postsale') || rawRole.includes('post_sale') || rawRole.includes('售后')) return `${name}（售后）`
+  return name
+}
+
 function craftsmanDisplayName(person) {
   const name = personName(person)
   if (typeof person === 'string') return `${name}(轮)`
@@ -332,7 +340,7 @@ const adjustmentCraftsmen = computed(() => Array.isArray(personnelAdjustment.val
 const canOpenOperationLogs = computed(() => hasAction('open-order-operation-logs') || hasAction('open-operation-logs'))
 const quickActions = computed(() => [
   { action: 'open-sales-order-personnel-adjustment', label: '人员调整' },
-  { action: 'refund-sales-order', label: '发起退款' },
+  { action: 'refund-sales-order', label: '退款并作废' },
   { action: 'void-sales-order', label: '作废订单' },
   { action: 'reopen-sales-order', label: '重开' },
   { action: 'upgrade-sales-order', label: '卡项／项目升级' }
@@ -612,7 +620,7 @@ async function runAction(action, payload = {}) {
                 <h5>销售人及销售业绩</h5>
                 <div class="sales-order-detail-person-list">
                   <div v-for="(person, personIndex) in peopleFor(item, ['salespeople', 'salesPersons', 'salespersonAllocations', 'salesperson'])" :key="pickValue(person, ['id', 'staffId', 'employeeId']) || `${personName(person)}-${personIndex}`">
-                    <span>{{ personName(person) }}</span>
+                    <span>{{ salespersonDisplayName(person) }}</span>
                     <strong v-if="hasValue(performanceAmount(person, ['salesPerformanceAmount', 'performanceAmount', 'salesAmount']))">销售业绩 {{ displayAmount(performanceAmount(person, ['salesPerformanceAmount', 'performanceAmount', 'salesAmount'])) }}</strong>
                   </div>
                 </div>
@@ -734,7 +742,7 @@ async function runAction(action, payload = {}) {
           <p v-if="actionError" class="sales-order-detail-error" role="alert">{{ actionError }}</p>
 
           <section v-if="activeLifecycleForm === 'refund'" class="sales-order-detail-section sales-order-detail-section--actions">
-          <header class="sales-order-detail-section__header"><div><h3>发起退款</h3><span>实际退款金额计入退款统计；本金和赠金退回金额只用于账户冲销。未使用卡权益和完全未还欠款会随单撤销；已使用权益、已还欠款或商品订单不允许直接退款。</span></div></header>
+          <header class="sales-order-detail-section__header"><div><h3>退款并作废</h3><span>退款金额由本次人工填写；成功后该订单只能保留查看，不能再次退款或作废。卡项、权益、库存、已完成服务和欠款不会随本次退款回退。</span></div></header>
           <div class="sales-order-detail-lifecycle-form">
             <div class="sales-order-detail-refund-amounts">
               <label>实际退款金额<input v-model.trim="refundAmount" inputmode="decimal" placeholder="输入实际退给客户的金额" /></label>
@@ -742,7 +750,7 @@ async function runAction(action, payload = {}) {
               <label>赠金退回金额<input v-model.trim="balanceGiftRefundAmount" inputmode="decimal" placeholder="输入退回账户赠金" /></label>
             </div>
             <label>退款原因<textarea v-model.trim="refundReason" maxlength="255" rows="3" placeholder="填写退款原因" /></label>
-            <div class="sales-order-detail-quick-actions"><button type="button" class="sales-order-detail-button sales-order-detail-button--text" :disabled="Boolean(pendingAction)" @click="activeLifecycleForm = ''">取消</button><button type="button" class="sales-order-detail-button sales-order-detail-button--secondary" :disabled="Boolean(pendingAction)" @click="submitRefund">确认退款</button></div>
+            <div class="sales-order-detail-quick-actions"><button type="button" class="sales-order-detail-button sales-order-detail-button--text" :disabled="Boolean(pendingAction)" @click="activeLifecycleForm = ''">取消</button><button type="button" class="sales-order-detail-button sales-order-detail-button--secondary" :disabled="Boolean(pendingAction)" @click="submitRefund">确认退款并作废</button></div>
           </div>
           </section>
 

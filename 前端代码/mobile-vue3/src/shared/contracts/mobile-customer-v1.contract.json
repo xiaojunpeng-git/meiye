@@ -1,0 +1,64 @@
+{
+  "contractVersion": "mobile-customer-v1",
+  "merchantContract": "mobile-merchant-v1",
+  "requestMetadataProfile": "MERCHANT_SESSION",
+  "dataAuthority": {
+    "memberQueryPageCode": "member_list",
+    "clientMayProvide": ["keyword", "filters", "filterRelation", "page", "limit", "sorts"],
+    "clientMustNotProvide": ["employeeId", "accountId", "storeScope", "organizationScope", "permissionScope", "tenantId", "storeId", "organizationId", "permissions", "grantedFeatures", "queryPreferenceVersion"],
+    "dataScope": "SERVER_ENFORCED_INTERSECTION",
+    "unifiedQueryCapabilities": ["QUERY_SETTINGS", "CUSTOM_FIELDS", "FIELD_ALIASES", "EXPORT"],
+    "capabilitiesMustNotDependOnFineGrainedRole": true
+  },
+  "tabs": ["EXCLUSIVE_CUSTOMERS", "MY_AUDIENCES", "CUSTOMER_LIST"],
+  "customerFields": [
+    "member_name", "phone", "member_no", "birthday", "member_status", "member_level",
+    "member_tag", "store", "exclusive_service_staff", "account_balance",
+    "active_card_count", "remaining_project_times", "remaining_project_amount",
+    "debt_amount", "total_consumption_amount", "visit_count",
+    "latest_purchase_date", "last_service_staff", "latest_visit_date", "created_at"
+  ],
+  "endpoints": {
+    "queryExclusiveCustomers": {"method": "POST", "path": "/mobile/merchant/customers/exclusive/query", "authorization": "MERCHANT_SESSION_AND_SERVER_DATA_SCOPE", "response": "customerPage"},
+    "queryCustomers": {"method": "POST", "path": "/mobile/merchant/customers/query", "authorization": "MERCHANT_SESSION_AND_SERVER_DATA_SCOPE", "response": "customerPage"},
+    "queryCustomerServiceRecords": {"method": "POST", "path": "/mobile/merchant/customers/service-records", "authorization": "MERCHANT_SESSION_AND_SERVER_DATA_SCOPE", "requestBodyRequired": ["memberId"], "response": "customerServiceRecordPage", "authority": "CASHIER_V3_COMPLETED_SERVICE_FACT"},
+    "queryCustomerRecentSummary": {"method": "POST", "path": "/mobile/merchant/customers/recent-summary", "authorization": "MERCHANT_SESSION_CURRENT_INSTANCE", "requestBodyRequired": ["memberId"], "response": "customerRecentSummary", "authority": ["CASHIER_V3_COMPLETED_SERVICE_FACT", "CASHIER_V3_SALE_FACT"], "storeScope": "NOT_APPLIED_BY_PRODUCT_DECISION"},
+    "queryCustomerOrderRecords": {"method": "POST", "path": "/mobile/merchant/customers/order-records", "authorization": "MERCHANT_SESSION_CURRENT_INSTANCE", "requestBodyRequired": ["memberId"], "response": "customerOrderRecordPage", "authority": "STORE_ORDER_MEMBER_HISTORY", "storeScope": "NOT_APPLIED_BY_PRODUCT_DECISION", "includesHistoricalStatuses": true},
+    "queryCustomerOrderRecordDetail": {"method": "POST", "path": "/mobile/merchant/customers/order-record-detail", "authorization": "MERCHANT_SESSION_CURRENT_INSTANCE", "requestBodyRequired": ["memberId", "orderId"], "response": "customerOrderRecordDetail", "authority": "STORE_ORDER_MEMBER_HISTORY", "storeScope": "NOT_APPLIED_BY_PRODUCT_DECISION", "includesHistoricalStatuses": true},
+    "queryCustomerAssetRecords": {"method": "POST", "path": "/mobile/merchant/customers/asset-records", "authorization": "MERCHANT_SESSION_AND_SERVER_DATA_SCOPE", "requestBodyRequired": ["memberId", "detailType"], "response": "customerAssetRecordPage", "authorityByDetailType": {"entitlements": "CURRENT_CARD_ENTITLEMENT", "balance_changes": "CASHIER_V3_BALANCE_FACT", "debts": "STORE_DEBT"}},
+    "customerProfileDraft": {"method": "GET", "path": "/mobile/merchant/customers/profile-draft", "authorization": "MERCHANT_SESSION_AND_SERVER_DATA_SCOPE", "response": "customerProfileDraft"},
+    "customerProfileAvatarUpload": {"method": "POST", "path": "/mobile/merchant/customers/profile-avatar", "authorization": "MERCHANT_SESSION_AND_SERVER_DATA_SCOPE", "requestBodyRequired": ["idempotencyKey", "file"], "response": "customerProfileAvatarUpload"},
+    "customerProfileDetail": {"method": "GET", "path": "/mobile/merchant/customers/:memberId/profile", "authorization": "MERCHANT_SESSION_AND_SERVER_DATA_SCOPE", "response": "customerProfile"},
+    "createCustomerProfile": {"method": "POST", "path": "/mobile/merchant/customers/profile", "authorization": "MERCHANT_SESSION_AND_SERVER_DATA_SCOPE", "requestBodyRequired": ["name", "phone", "idempotencyKey"], "response": "customerProfile"},
+    "updateCustomerProfile": {"method": "PUT", "path": "/mobile/merchant/customers/:memberId/profile", "authorization": "MERCHANT_SESSION_AND_SERVER_DATA_SCOPE", "requestBodyRequired": ["expectedVersion", "idempotencyKey"], "response": "customerProfile"},
+    "createCustomer": {"method": "POST", "path": "/mobile/merchant/customers", "authorization": "MERCHANT_SESSION_AND_SERVER_DATA_SCOPE", "requestBodyRequired": ["name", "phone", "idempotencyKey"], "response": "customer"},
+    "unifiedQueryCapabilities": {"method": "GET", "path": "/mobile/merchant/customers/unified-query-capabilities", "authorization": "MERCHANT_SESSION_AND_SERVER_DATA_SCOPE", "response": "unifiedQueryCapability"},
+    "unifiedQueryCommand": {"method": "POST", "path": "/mobile/merchant/customers/unified-query/commands", "authorization": "MERCHANT_SESSION_AND_SERVER_DATA_SCOPE", "requestBodyRequired": ["action", "idempotencyKey"], "response": "unifiedQueryCommandReceipt"},
+    "listAudiences": {"method": "GET", "path": "/mobile/merchant/customer-audiences", "authorization": "MERCHANT_SESSION_AND_SERVER_DATA_SCOPE", "response": "audienceList"},
+    "createAudience": {"method": "POST", "path": "/mobile/merchant/customer-audiences", "authorization": "MERCHANT_SESSION_AND_SERVER_DATA_SCOPE", "requestBodyRequired": ["name", "filters", "filterRelation", "idempotencyKey"], "response": "audience"},
+    "queryAudienceMembers": {"method": "POST", "path": "/mobile/merchant/customer-audiences/:audienceId/members/query", "authorization": "MERCHANT_SESSION_AND_SERVER_DATA_SCOPE", "requestBodyRequired": ["page", "limit"], "response": "customerPage"},
+    "updateAudience": {"method": "PATCH", "path": "/mobile/merchant/customer-audiences/:audienceId", "authorization": "MERCHANT_SESSION_AND_SERVER_DATA_SCOPE", "requestBodyRequired": ["expectedVersion", "idempotencyKey"], "response": "audience"},
+    "archiveAudience": {"method": "DELETE", "path": "/mobile/merchant/customer-audiences/:audienceId", "authorization": "MERCHANT_SESSION_AND_SERVER_DATA_SCOPE", "requestBodyRequired": ["expectedVersion", "idempotencyKey"], "response": "successEnvelope"}
+  },
+  "unifiedQueryCommand": {
+    "pageCode": "member_list",
+    "supportedActions": ["save-unified-query-settings", "save-unified-query-field-aliases", "save-unified-query-custom-field", "change-unified-query-custom-field-status", "archive-unified-query-custom-field", "upgrade-unified-query-field-reference", "create-unified-query-export"],
+    "idempotency": "EMPLOYEE_ACCOUNT_ACTION_KEY",
+    "clientScopeMustBeRejected": true,
+    "personalScopeMustNotExpand": true
+  },
+  "audienceList": {"required": ["audiences"], "audiencesMustBeArray": true},
+  "audience": {
+    "owner": "EMPLOYEE_ID",
+    "membership": "DYNAMIC_QUERY",
+    "membershipMustNotBePersisted": true,
+    "nameMaxLength": 64,
+    "expectedVersionMustBePositive": true,
+    "filterFieldsMustBeCustomerFields": true,
+    "currentDataScopeAppliedOnEveryQuery": true,
+    "relativeDateRulesReevaluatedOnEveryQuery": true,
+    "relativeDatePresets": ["INACTIVE_VISIT_CONFIGURABLE_DAYS", "INACTIVE_PURCHASE_CONFIGURABLE_DAYS"],
+    "relativeDateDaysRange": {"minimum": 1, "maximum": 3650, "integerOnly": true},
+    "permissionChangeMayReduceVisibleMembers": true
+  }
+}

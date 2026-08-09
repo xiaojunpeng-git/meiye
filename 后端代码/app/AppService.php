@@ -28,6 +28,13 @@ use mohe\utils\Json;
 use think\Service;
 use Yurun\Util\Swoole\Guzzle\SwooleHandler;
 use GuzzleHttp\DefaultHandler;
+use app\services\customer\care\CustomerCareClock;
+use app\services\customer\care\CustomerCareRepository;
+use app\services\customer\care\SystemCustomerCareClock;
+use app\services\customer\care\ThinkPhpCustomerCareRepository;
+use app\services\customer\care\query\CustomerCareCursorCodec;
+use app\services\customer\care\query\CustomerCareQueryRepository;
+use app\services\customer\care\query\ThinkPhpCustomerCareQueryRepository;
 
 /**
  * Class AppService
@@ -53,6 +60,14 @@ class AppService extends Service
      */
     public function register()
     {
+		// The mobile/PC customer-care adapter shares these implementations; only
+		// trusted request contexts may reach the command/query services.
+		$this->app->bind(CustomerCareRepository::class, ThinkPhpCustomerCareRepository::class);
+		$this->app->bind(CustomerCareQueryRepository::class, ThinkPhpCustomerCareQueryRepository::class);
+		$this->app->bind(CustomerCareClock::class, SystemCustomerCareClock::class);
+		$this->app->bind(CustomerCareCursorCodec::class, function () {
+			return new CustomerCareCursorCodec(hash('sha256', (string)config('mobile_auth.hmac_key')));
+		});
         //http配置服务
         $this->app->bind(HttpCommonConfig::class, function () {
             return (new HttpCommonConfig())->setServe(\app\services\system\config\SystemConfigServices::class);

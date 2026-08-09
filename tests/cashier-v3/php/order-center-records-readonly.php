@@ -52,6 +52,7 @@ function recordScope(string $mode, $stores, array $features = ['cashier.v3.order
 }
 
 $operator = new CashierV3OperatorScope(133, 71, 'organization:8', 'tenant:default');
+$orderCenterSource = (string)file_get_contents($backendRoot . '/app/services/cashier/v3/order/CashierV3OrderCenterRecordQueryServices.php');
 $calls = [];
 $reader = function (string $operation, array $context) use (&$calls): array {
     $calls[] = ['operation' => $operation, 'context' => $context];
@@ -85,6 +86,9 @@ recordOk('合法订单中心记录返回 offset 分页契约', $page['recordType
     && $page['total'] === 1
     && $page['page'] === 1
     && $page['pageSize'] === 20);
+recordOk('服务权益来源不向页面泄漏内部英文类型码', strpos($orderCenterSource, "'time_card' => '时间卡权益'") !== false
+    && strpos($orderCenterSource, "'count_card' => '次数卡权益'") !== false
+    && strpos($orderCenterSource, "'卡项权益（' . \$kind") === false);
 
 $beforeBlocked = count($calls);
 $blocked = $service->queryRecords([
@@ -151,6 +155,9 @@ recordOk('初始化统计为服务记录提供空筛选与排序，不能因缺�
 recordOk('服务记录只读取完成态服务事实，不从销售订单回推', strpos($source, "Db::name('cashier_v3_entitlement_service_fact')") !== false
     && strpos($source, "->where('sf.service_status', 'completed')") !== false
     && strpos($source, "case 'service':") !== false);
+recordOk('服务记录使用会员详情同源的可见服务单号并携带会员编号', strpos($source, "'sf.service_record_no'") !== false
+    && strpos($source, "'serviceRecordNo' => (string)(\$row['service_record_no'] ?: \$row['service_fact_id'])") !== false
+    && strpos($source, "'memberId' => (int)\$row['member_id']") !== false);
 recordOk('劳动业绩只汇总有效正向的劳动事实', strpos($source, "->where('performance_type', 'labor_performance_allocated')") !== false
     && strpos($source, "->where('fact_direction', 'forward')") !== false
     && strpos($source, "->where('status', 'effective')") !== false);
@@ -186,6 +193,14 @@ recordOk('V3 充值事实存在即使冲销后净额为零也为 ready，旧充�
     && strpos($source, "'actualReceivedAmount' => \$hasV3PaymentFacts") !== false
     && strpos($source, "'economicsDataStatus' => \$hasV3PaymentFacts ? 'ready' : 'not_ready'") !== false
     && strpos($source, 'must not filter to forward facts only') !== false);
+recordOk('充值订单状态和筛选读取成功的追加式退款作废操作，不回写旧充值主表',
+    strpos($source, 'rechargeLifecycleOperationQuery') !== false
+    && strpos($source, 'readRechargeLifecycleOperations') !== false
+    && strpos($source, "->where('rlo.status', 'succeeded')") !== false
+    && strpos($source, "\$lifecycleOperation === 'void'") !== false
+    && strpos($source, "\$lifecycleOperation === 'refund'") !== false
+    && strpos($source, "Db::name('user_recharge')->alias('r')") !== false
+    && strpos($source, "Db::name('user_recharge')->where") === false);
 
 $paymentLabel = new ReflectionMethod(CashierV3OrderCenterRecordQueryServices::class, 'rechargePaymentLabel');
 recordOk('充值订单组合收款展示真实方式并去重', $paymentLabel->invoke($service, [

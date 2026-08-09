@@ -342,8 +342,8 @@ ok(
         && (int)($pair['project']['consumedTimesAtSelection'] ?? -1) === 2
         && substr(
             (string)($pair['project']['amountCalculationVersion'] ?? ''),
-            -strlen('cumulative-half-up-cent-v2')
-        ) === 'cumulative-half-up-cent-v2'
+            -strlen('whole-yuan-floor-final-remainder-v1')
+        ) === 'whole-yuan-floor-final-remainder-v1'
         && (string)($pair['project']['expiryDate'] ?? '') === date('Y-m-d', $now + 86400)
         && (($pair['project']['orderRemark'] ?? '') === 'C2 购买备注 A')
         && (($unknownSource['sourceKind'] ?? '') === 'unknown')
@@ -1063,15 +1063,15 @@ ok(
     'C2-A1-BE-13'
 );
 
-c2Section('cumulative cent allocation preserves the full purchase amount');
+c2Section('whole-yuan allocation assigns the remainder to the final use');
 ok(
-    '累计分摊黄金向量覆盖尾差、已用次数、极小金额和零金额',
-    CashierV3EntitlementActualAmountAllocator::allocate('100.00', 3, 0, 1) === '33.33'
-        && CashierV3EntitlementActualAmountAllocator::allocate('100.00', 3, 0, 2) === '66.67'
+    '整元分摊覆盖尾差、已用次数和零金额',
+    CashierV3EntitlementActualAmountAllocator::allocate('100.00', 3, 0, 1) === '33.00'
+        && CashierV3EntitlementActualAmountAllocator::allocate('100.00', 3, 0, 2) === '66.00'
         && CashierV3EntitlementActualAmountAllocator::allocate('100.00', 3, 0, 3) === '100.00'
-        && CashierV3EntitlementActualAmountAllocator::allocate('100.00', 3, 1, 1) === '33.34'
-        && CashierV3EntitlementActualAmountAllocator::allocate('100.00', 3, 1, 2) === '66.67'
-        && CashierV3EntitlementActualAmountAllocator::allocate('0.01', 3, 0, 3) === '0.01'
+        && CashierV3EntitlementActualAmountAllocator::allocate('100.00', 3, 1, 1) === '33.00'
+        && CashierV3EntitlementActualAmountAllocator::allocate('100.00', 3, 1, 2) === '67.00'
+        && CashierV3EntitlementActualAmountAllocator::allocate('2180.00', 9, 3, 6) === '1454.00'
         && CashierV3EntitlementActualAmountAllocator::allocate('0.00', 3, 0, 3) === '0.00',
     '',
     'C2-A1-BE-21'
@@ -1085,14 +1085,14 @@ $roundSelector = (array)($roundProjection['data']['entitlementSelector'] ?? []);
 $roundPair = c2FindProject($roundSelector, 1003, 2003);
 $roundContexts = c2ContextsForSelection($roundSelector, 1003, 2003);
 ok(
-    '三次权益投影保留完整 100.00 且声明累计到分口径',
+    '三次权益投影保留完整 100.00 且声明整元末次补差口径',
     (string)($roundPair['project']['remainingAmount'] ?? '') === '100.00'
         && (int)($roundPair['project']['totalPurchaseTimes'] ?? 0) === 3
         && (int)($roundPair['project']['consumedTimesAtSelection'] ?? -1) === 0
         && substr(
             (string)($roundPair['project']['amountCalculationVersion'] ?? ''),
-            -strlen('cumulative-half-up-cent-v2')
-        ) === 'cumulative-half-up-cent-v2',
+            -strlen('whole-yuan-floor-final-remainder-v1')
+        ) === 'whole-yuan-floor-final-remainder-v1',
     json_encode($roundPair, JSON_UNESCAPED_UNICODE),
     'C2-A1-BE-21'
 );

@@ -18,6 +18,7 @@ class UnifiedQueryExecutionServices
     public const MAX_GROUPS = 3;
     public const MAX_SUMMARIES = 20;
     public const MAX_PAGE_SIZE = 200;
+    public const MAX_VISIBLE_FIELDS = 100;
 
     /** @var UnifiedQueryPageRegistry */
     protected $registry;
@@ -100,6 +101,11 @@ class UnifiedQueryExecutionServices
             $customDefinitions,
             $permissions
         );
+        $fieldIndex = $this->fieldIndex($pageCode, $permissions, $definitions);
+        $visibleFields = $this->normalizeVisibleFields(
+            $query['visibleFields'] ?? [],
+            $fieldIndex
+        );
 
         $aggregateValues = [];
         foreach ($definitions as $fieldKey => $definition) {
@@ -127,7 +133,6 @@ class UnifiedQueryExecutionServices
             }
             $calculatedRows[] = $calculated;
         }
-        $fieldIndex = $this->fieldIndex($pageCode, $permissions, $definitions);
         // 快捷筛选也是实际查询条件，不接受 UI 标签、数量或 active 等展示元数据。
         // 与顶部条件一样，它只能在数据权限已经注入、派生字段已经计算之后参与筛选。
         $quickFilters = $this->normalizeFilters(
@@ -214,6 +219,7 @@ class UnifiedQueryExecutionServices
             'groups' => $query['groups'] ?? [],
             'groupBy' => $query['groupBy'] ?? [],
             'summaries' => $query['summaries'] ?? [],
+            'visible_fields' => $visibleFields,
             'filterRelation' => $query['filterRelation'] ?? 'all',
             'data_as_of' => $dataAsOf,
         ]));
@@ -295,6 +301,10 @@ class UnifiedQueryExecutionServices
             $fieldIndex
         );
         $summaries = $this->normalizeSummaries($query['summaries'] ?? [], $fieldIndex);
+        $visibleFields = $this->normalizeVisibleFields(
+            $query['visibleFields'] ?? [],
+            $fieldIndex
+        );
         $filterRelation = $this->normalizeFilterRelation(
             (string)($query['filterRelation'] ?? 'all')
         );
@@ -326,7 +336,7 @@ class UnifiedQueryExecutionServices
             ],
             // 冻结的任务只保存已白名单化的条件，worker 不能重新解释 UI 展示对象。
             'quick_filters' => $quickFilters,
-            'visible_fields' => $query['visibleFields'] ?? [],
+            'visible_fields' => $visibleFields,
             'permission_must_be_injected_before_calculation' => true,
         ];
     }
@@ -339,7 +349,7 @@ class UnifiedQueryExecutionServices
         array $raw,
         array $permissions = []
     ): array {
-        $this->registry->page($pageCode);
+        $page = $this->registry->page($pageCode);
         $requestedPageCode = (string)($raw['pageCode'] ?? ($raw['page_code'] ?? ''));
         if ($requestedPageCode !== '' && $requestedPageCode !== $pageCode) {
             throw new UnifiedQueryException(
@@ -367,6 +377,13 @@ class UnifiedQueryExecutionServices
         if (array_key_exists('quickFilters', $raw) && !is_array($raw['quickFilters'])) {
             throw $this->invalidQuery('quickFilters 必须是筛选条件数组');
         }
+        if (array_key_exists('visibleFields', $raw) && !is_array($raw['visibleFields'])) {
+            throw new UnifiedQueryException(
+                'UNIFIED_QUERY_VISIBLE_FIELDS_INVALID',
+                '显示字段必须是有序字段列表。',
+                []
+            );
+        }
         $settings = is_array($raw['querySettings'] ?? null) ? $raw['querySettings'] : [];
         $allowedSettingKeys = [
             'visibleFields', 'quickFields', 'filters', 'filterRelation', 'sorts',
@@ -376,6 +393,14 @@ class UnifiedQueryExecutionServices
             if (!in_array($key, $allowedSettingKeys, true)) {
                 throw $this->invalidQuery('querySettings 包含不支持的配置：' . $key);
             }
+        }
+        if (array_key_exists('visibleFields', $settings)
+            && !is_array($settings['visibleFields'])) {
+            throw new UnifiedQueryException(
+                'UNIFIED_QUERY_VISIBLE_FIELDS_INVALID',
+                '显示字段必须是有序字段列表。',
+                []
+            );
         }
         if (isset($settings['schemaVersion'])
             && (string)$settings['schemaVersion'] !== $this->registry->schemaVersion()) {
@@ -459,7 +484,7 @@ class UnifiedQueryExecutionServices
             if ($length > 100) {
                 throw $this->invalidQuery('关键字不能超过 100 个字符');
             }
-            foreach (['member_name', 'phone', 'member_no'] as $fieldKey) {
+            foreach ((array)$page['keywordFields'] as $fieldKey) {
                 $this->registry->assertReadable($pageCode, $fieldKey, $permissions);
                 $normalized['keywordFilters'][] = [
                     'field' => $fieldKey,
@@ -575,6 +600,38 @@ class UnifiedQueryExecutionServices
             ];
         }
         return $index;
+    }
+
+    protected function normalizeVisibleFields(array $fields, array $fieldIndex): array
+    {
+        if (!$this->isList($fields) || count($fields) > self::MAX_VISIBLE_FIELDS) {
+            throw new UnifiedQueryException(
+                'UNIFIED_QUERY_VISIBLE_FIELDS_INVALID',
+                '显示字段必须是有序且有界的字段列表。',
+                ['max_fields' => self::MAX_VISIBLE_FIELDS]
+            );
+        }
+        $normalized = [];
+        foreach ($fields as $fieldKey) {
+            if (!is_string($fieldKey)) {
+                throw new UnifiedQueryException(
+                    'UNIFIED_QUERY_VISIBLE_FIELDS_INVALID',
+                    '显示字段标识不合法。',
+                    []
+                );
+            }
+            $fieldKey = trim($fieldKey);
+            if ($fieldKey === '' || isset($normalized[$fieldKey])) {
+                throw new UnifiedQueryException(
+                    'UNIFIED_QUERY_VISIBLE_FIELDS_INVALID',
+                    '显示字段不能为空或重复。',
+                    ['field_key' => $fieldKey]
+                );
+            }
+            $this->assertFieldOperation($fieldIndex, $fieldKey, 'display');
+            $normalized[$fieldKey] = true;
+        }
+        return array_keys($normalized);
     }
 
     protected function applyFilters(

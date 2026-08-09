@@ -29,14 +29,12 @@ class OrganizationWorkspaceReadServices extends BaseServices
     }
 
     /**
-     * 复用 Manage 安全构树，再批量补充员工/负责人/待完善统计；门店数按有效门店覆盖。
+     * 左侧导航只返回组织结构。组织统计由详情概况接口按需读取，避免每次展开
+     * 树都扫描全部门店、员工和负责人。
      */
     public function getTree(): array
     {
-        $base = $this->manageServices->getTree();
-        $orgRows = $this->loadOrgRows();
-        $stats = $this->buildOrgStatBundle($orgRows);
-        return $this->enrichTreeNodes($base, $stats, 0);
+        return $this->manageServices->getTree();
     }
 
     public function getOverview(int $orgId): array

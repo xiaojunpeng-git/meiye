@@ -89,6 +89,66 @@ final class CashierV3SalesOrderReversalServices
         ];
     }
 
+    /**
+     * 退款不是全量作废：它只冲销本次人工确认的资金事实，不能撤回已经
+     * 发放或已经使用的卡项、服务、库存、欠款等后续业务。全量回滚仍由
+     * prepare() 仅供 void-sales-order 使用。
+     *
+     * @return array<string,mixed>
+     */
+    public function prepareFinancialRefund(array $source, array $input, CashierV3DataScopeContext $scope): array
+    {
+        CashierV3TransactionGuard::assertInTransaction('salesOrderReversal.prepareFinancialRefund');
+        $balanceFacts = Db::name('cashier_v3_balance_fact')->where('tenant_id', $scope->tenantId())
+            ->where('order_id', (string)$source['sourceId'])->where('fact_direction', 'forward')
+            ->where('status', 'effective')->lock(true)->order('id', 'asc')->select()->toArray();
+        $principalPaid = 0;
+        $bonusPaid = 0;
+        foreach ($balanceFacts as $fact) {
+            $principal = (int)($fact['principal_delta_cents'] ?? 0);
+            $bonus = (int)($fact['bonus_delta_cents'] ?? 0);
+            if ($principal > 0 || $bonus > 0) throw self::failure('sales_refund_balance_direction_invalid');
+            $principalPaid += abs($principal);
+            $bonusPaid += abs($bonus);
+        }
+        $restorePrincipal = (int)$input['restorePrincipalCents'];
+        $restoreBonus = (int)$input['restoreBonusCents'];
+        if ($restorePrincipal > $principalPaid || $restoreBonus > $bonusPaid) {
+            throw self::failure('sales_refund_balance_restore_exceeds_source');
+        }
+
+        $paymentFacts = Db::name('cashier_v3_payment_fact')->where('tenant_id', $scope->tenantId())
+            ->where('order_id', (string)$source['sourceId'])->where('fact_direction', 'forward')
+            ->where('status', 'effective')->lock(true)->order('id', 'asc')->select()->toArray();
+        $cashCollected = array_sum(array_map(static function (array $row): int {
+            return (int)($row['amount_cents'] ?? 0);
+        }, $paymentFacts));
+        $cashRefund = (int)$input['cashRefundCents'];
+        if ($cashRefund < 0 || $cashRefund > $cashCollected) {
+            throw self::failure('sales_refund_cash_refund_exceeds_collected');
+        }
+        $economicReversal = $cashRefund + $restorePrincipal + $restoreBonus;
+        if ($economicReversal <= 0 || $economicReversal > (int)$source['amountCents']) {
+            throw self::failure('sales_refund_economic_amount_invalid');
+        }
+
+        return [
+            'balanceFacts' => $balanceFacts,
+            'principalPaidCents' => $principalPaid,
+            'bonusPaidCents' => $bonusPaid,
+            'restorePrincipalCents' => $restorePrincipal,
+            'restoreBonusCents' => $restoreBonus,
+            'debts' => [],
+            'cancelledDebtCents' => 0,
+            'cards' => [],
+            'paymentFacts' => $paymentFacts,
+            'cashCollectedCents' => $cashCollected,
+            'cashRefundCents' => $cashRefund,
+            'cashReversalCents' => $cashRefund,
+            'economicReversalCents' => $economicReversal,
+        ];
+    }
+
     /** @return array<string,mixed> */
     public function apply(
         array $source,

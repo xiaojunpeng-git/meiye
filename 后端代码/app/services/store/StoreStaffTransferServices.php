@@ -129,6 +129,17 @@ class StoreStaffTransferServices extends BaseServices
             throw new AdminException('员工主档无效或已离职');
         }
 
+        $activeAssignments = Db::name('system_store_staff')
+            ->where('employee_id', $employeeId)
+            ->where('status', 1)
+            ->where('is_del', 0)
+            ->lock(true)
+            ->column('id');
+        $activeAssignmentIds = array_values(array_unique(array_map('intval', $activeAssignments ?: [])));
+        if (count($activeAssignmentIds) !== 1 || $activeAssignmentIds[0] !== $sourceStaffId) {
+            throw new AdminException('员工有效门店任职异常，请先处理为单店任职后再调店');
+        }
+
         $targetRows = Db::name('system_store_staff')
             ->where('employee_id', $employeeId)
             ->where('store_id', $toStoreId)
@@ -232,6 +243,16 @@ class StoreStaffTransferServices extends BaseServices
         $recheck = Db::name('system_store_staff')->where('id', $sourceStaffId)->find();
         if (!$recheck || (int)$recheck['store_id'] !== $fromStoreId) {
             throw new AdminException('调店异常：原任职门店被改写');
+        }
+        $activeAfterTransfer = Db::name('system_store_staff')
+            ->where('employee_id', $employeeId)
+            ->where('status', 1)
+            ->where('is_del', 0)
+            ->lock(true)
+            ->column('id');
+        $activeAfterTransfer = array_values(array_unique(array_map('intval', $activeAfterTransfer ?: [])));
+        if (count($activeAfterTransfer) !== 1 || $activeAfterTransfer[0] !== $executeStaffId) {
+            throw new AdminException('调店异常：员工未形成唯一目标门店任职');
         }
 
         $fromStore = Db::name('system_store')->where('id', $fromStoreId)->find();

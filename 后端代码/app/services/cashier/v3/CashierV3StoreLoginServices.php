@@ -7,60 +7,47 @@ use app\services\employee\EmployeeInternalAccountServices;
 use app\services\employee\EmployeeInternalLoginServices;
 use mohe\exceptions\AdminException;
 use mohe\services\CacheService;
-use think\facade\Cache;
 use think\facade\Db;
 
 /**
- * 门店端 Vue 3 登录：统一员工账号认证后，仅展示当前具备 store_v3 授权的门店。
+ * 门店端 Vue 3 登录：统一员工账号认证后，直接进入唯一有效任职门店。
  */
 class CashierV3StoreLoginServices extends BaseServices
 {
-    private const SELECT_TICKET_PREFIX = 'cashier_v3_store_select:';
-    private const SELECT_TICKET_TTL = 300;
-
     /** @return array */
     public function login(string $account, string $password, int $storeId = 0, string $ticket = ''): array
     {
-        $ticket = trim($ticket);
-        if ($ticket !== '') {
-            $pending = Cache::get(self::SELECT_TICKET_PREFIX . $ticket);
-            if (!is_array($pending) || (int)($pending['employee_id'] ?? 0) <= 0) {
-                throw new AdminException('选店凭证已失效，请重新登录');
-            }
-            return $this->issueSelectedStore((int)$pending['employee_id'], $storeId, (int)($pending['account_id'] ?? 0));
-        }
         /** @var EmployeeInternalAccountServices $accounts */
         $accounts = app()->make(EmployeeInternalAccountServices::class);
         $auth = $accounts->authenticateByPassword($account, $password);
         $employeeId = (int)$auth['employee_id'];
         /** @var EmployeeInternalLoginServices $employees */
         $employees = app()->make(EmployeeInternalLoginServices::class);
-        $stores = $employees->listEligibleStoreV3Staff($employeeId);
-        if (!$stores) {
+        $staff = $employees->resolveUniqueStoreV3Staff($employeeId);
+        if (!$staff) {
             throw new AdminException('当前账号没有可进入的门店端门店');
         }
-        if ($storeId <= 0 && count($stores) > 1) {
-            $ticket = bin2hex(random_bytes(24));
-            Cache::set(self::SELECT_TICKET_PREFIX . $ticket, [
-                'employee_id' => $employeeId,
-                'account_id' => (int)($auth['account_row']['id'] ?? 0),
-            ], self::SELECT_TICKET_TTL);
-            return [
-                'need_select_store' => true,
-                'login_ticket' => $ticket,
-                'stores' => $this->presentStores($stores),
-            ];
-        }
-        if ($storeId <= 0) {
-            $storeId = (int)$stores[0]['store_id'];
-        }
-        return $this->issueSelectedStore($employeeId, $storeId, (int)($auth['account_row']['id'] ?? 0), $stores);
+        return $this->issueSelectedStore(
+            $employeeId,
+            (int)$staff['store_id'],
+            (int)($auth['account_row']['id'] ?? 0),
+            [$staff]
+        );
     }
 
     /** @return array */
     public function switchStore(int $employeeId, int $storeId): array
     {
-        return $this->issueSelectedStore($employeeId, $storeId, 0);
+        /** @var EmployeeInternalLoginServices $employees */
+        $employees = app()->make(EmployeeInternalLoginServices::class);
+        $staff = $employees->resolveUniqueStoreV3Staff($employeeId);
+        if (!$staff) {
+            throw new AdminException('当前账号没有可进入的门店端门店');
+        }
+        if ((int)$staff['store_id'] !== $storeId) {
+            throw new AdminException('员工只能进入当前任职门店');
+        }
+        return $this->issueSelectedStore($employeeId, $storeId, 0, [$staff]);
     }
 
     /**
@@ -84,7 +71,8 @@ class CashierV3StoreLoginServices extends BaseServices
         if ($eligible === null) {
             /** @var EmployeeInternalLoginServices $employees */
             $employees = app()->make(EmployeeInternalLoginServices::class);
-            $eligible = $employees->listEligibleStoreV3Staff($employeeId);
+            $uniqueStaff = $employees->resolveUniqueStoreV3Staff($employeeId);
+            $eligible = $uniqueStaff ? [$uniqueStaff] : [];
         }
         $staff = null;
         foreach ($eligible as $item) {
@@ -111,7 +99,7 @@ class CashierV3StoreLoginServices extends BaseServices
             $accounts->touchLogin($accountId, (string)app('request')->ip());
         }
         $result['need_select_store'] = false;
-        $result['stores'] = $this->presentStores($eligible);
+        $result['stores'] = $this->presentStores([$staff]);
         return $result;
     }
 

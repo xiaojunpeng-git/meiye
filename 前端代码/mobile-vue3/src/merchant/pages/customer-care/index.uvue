@@ -1,0 +1,238 @@
+<template>
+	<view class="care-page">
+		<view class="care-page__header">
+			<text class="care-page__eyebrow">商家端</text>
+			<text class="care-page__title">客情管理</text>
+		</view>
+		<view class="care-page__tabs" role="tablist">
+			<view v-for="tab in tabs" :key="tab.key" class="care-page__tab" :class="{ 'care-page__tab--active': activeTab === tab.key }" role="tab" :aria-selected="activeTab === tab.key" @tap="selectTab(tab.key)"><text>{{ tab.label }}</text></view>
+		</view>
+		<view class="care-page__filters">
+			<view class="care-page__segment"><view v-for="bucket in buckets" :key="bucket.key" class="care-page__segment-item" :class="{ 'care-page__segment-item--active': activeBucket === bucket.key }" @tap="selectBucket(bucket.key)"><text>{{ bucket.label }}</text></view></view>
+		</view>
+		<view class="care-page__content">
+			<view v-if="loading" class="care-page__empty"><text class="care-page__empty-title">正在读取客情数据</text></view>
+			<view v-else-if="message.length > 0" class="care-page__empty"><text class="care-page__empty-title">{{ message }}</text><view class="care-page__reload" @tap="loadWorkbench"><text>重新加载</text></view></view>
+			<view v-else-if="activeTab === 'tasks' && tasks.length === 0" class="care-page__empty"><text class="care-page__empty-title">{{ activeTabLabel }}</text><text class="care-page__empty-copy">当前筛选范围没有待跟进任务</text></view>
+			<view v-else-if="activeTab === 'tasks'" class="care-page__list">
+				<view v-for="task in tasks" :key="task.taskId" class="care-page__card">
+					<view class="care-page__card-row"><text class="care-page__card-title">{{ task.member.name }} · {{ task.typeLabel }}</text><text class="care-page__status">{{ task.statusLabel }}</text></view>
+					<text class="care-page__card-copy">{{ task.plannedAt }} · {{ task.owner.name }}</text>
+					<text v-if="task.note" class="care-page__card-copy">{{ task.note }}</text>
+					<view v-if="canCall(task)" class="care-page__call-entry" @tap="callCustomer(task)"><text>拨打电话</text></view>
+					<view v-if="canComplete(task)" class="care-page__complete-entry" @tap="openComplete(task)"><text>记录本次客情</text></view>
+				</view>
+			</view>
+			<view v-else-if="activeTab === 'customers' && customers.length === 0" class="care-page__empty"><text class="care-page__empty-title">暂无客户</text><text class="care-page__empty-copy">客户范围由服务端数据权限决定。</text></view>
+			<view v-else-if="activeTab === 'customers'" class="care-page__list">
+				<view v-for="customer in customers" :key="customer.memberId" class="care-page__card"><text class="care-page__card-title">{{ customer.name }} · {{ customer.phone }}</text><text class="care-page__card-copy">{{ customer.storeName }} · {{ customer.nextTaskLabel }}</text><text class="care-page__card-copy">最近客情：{{ customer.latestCareLabel }}</text><view class="care-page__complete-entry" @tap="openCreateTask(customer)"><text>新增客情任务</text></view></view>
+			</view>
+			<view v-else-if="activeTab === 'records' && records.length === 0" class="care-page__empty"><text class="care-page__empty-title">暂无客情记录</text><text class="care-page__empty-copy">正式记录由服务端生成，不能在手机端直接编辑。</text></view>
+			<view v-else-if="activeTab === 'records'" class="care-page__list">
+				<view v-for="record in records" :key="record.recordId" class="care-page__card"><view class="care-page__card-row"><text class="care-page__card-title">{{ record.memberName }} · {{ record.typeLabel }}</text><text class="care-page__status">{{ record.resultLabel }}</text></view><text class="care-page__card-copy">{{ record.followedAt }} · {{ record.methodLabel }}</text><text class="care-page__card-copy">{{ record.summary }}</text></view>
+			</view>
+			<view v-else-if="activeTab === 'statistics'" class="care-page__list"><view v-for="metric in metrics" :key="metric.code" class="care-page__card"><text class="care-page__card-title">{{ metric.label }}</text><text class="care-page__metric">{{ metric.value }}{{ metric.unit }}</text><text class="care-page__card-copy">{{ metric.userReady ? metric.description : '统计口径待确认' }}</text></view></view>
+		</view>
+		<view v-if="completingTask != null" class="care-page__complete-panel">
+			<view class="care-page__complete-header"><text class="care-page__complete-cancel" @tap="closeComplete">取消</text><text class="care-page__complete-title">完成客情</text><text class="care-page__complete-placeholder"></text></view>
+			<scroll-view scroll-y class="care-page__complete-body"><text class="care-page__complete-member">{{ completingTask.member.name }} · {{ completingTask.typeLabel }}</text><text class="care-page__complete-label">联系方式</text><view class="care-page__choice-row"><view v-for="method in methods" :key="method.value" class="care-page__choice" :class="{ 'care-page__choice--active': methodCode === method.value }" @tap="methodCode = method.value"><text>{{ method.label }}</text></view></view><text class="care-page__complete-label">跟进结果</text><view class="care-page__choice-row"><view v-for="result in results" :key="result.value" class="care-page__choice" :class="{ 'care-page__choice--active': resultCode === result.value }" @tap="resultCode = result.value"><text>{{ result.label }}</text></view></view><text class="care-page__complete-label">本次内容</text><textarea class="care-page__complete-textarea" :value="completeContent" placeholder="如实记录沟通内容和后续约定" @input="completeContent = $event.detail.value" /><view class="care-page__next-toggle" @tap="createNextTask = !createNextTask"><text>{{ createNextTask ? '已创建下一次跟进' : '创建下一次跟进' }}</text></view><view v-if="createNextTask"><text class="care-page__complete-label">下次跟进时间</text><input class="care-page__datetime-input" :value="nextPlannedAt" placeholder="例如 2026-07-31 10:00" @input="nextPlannedAt = $event.detail.value" /><text class="care-page__complete-label">下次负责人</text><view class="care-page__choice-row"><view v-for="assignee in assignees" :key="'next-' + assignee.value" class="care-page__choice" :class="{ 'care-page__choice--active': nextOwnerId === assignee.value }" @tap="nextOwnerId = assignee.value"><text>{{ assignee.label }}</text></view></view></view><view class="care-page__complete-submit" @tap="submitComplete"><text>{{ submitting ? '正在提交…' : '完成并保存记录' }}</text></view></scroll-view>
+		</view>
+		<view v-if="creatingForCustomer != null" class="care-page__complete-panel">
+			<view class="care-page__complete-header"><text class="care-page__complete-cancel" @tap="closeCreateTask">取消</text><text class="care-page__complete-title">新增客情任务</text><text class="care-page__complete-placeholder"></text></view>
+			<scroll-view scroll-y class="care-page__complete-body"><text class="care-page__complete-member">{{ creatingForCustomer.name }}</text><text class="care-page__complete-label">任务类型</text><view class="care-page__choice-row"><view v-for="type in taskTypes" :key="type.value" class="care-page__choice" :class="{ 'care-page__choice--active': taskTypeCode === type.value }" @tap="taskTypeCode = type.value"><text>{{ type.label }}</text></view></view><text class="care-page__complete-label">负责人</text><view class="care-page__choice-row"><view v-for="assignee in assignees" :key="assignee.value" class="care-page__choice" :class="{ 'care-page__choice--active': ownerId === assignee.value }" @tap="ownerId = assignee.value"><text>{{ assignee.label }}</text></view></view><text class="care-page__complete-label">计划跟进时间</text><input class="care-page__datetime-input" :value="plannedAt" placeholder="例如 2026-07-30 18:30" @input="plannedAt = $event.detail.value" /><text class="care-page__complete-label">任务备注</text><textarea class="care-page__complete-textarea" :value="taskContent" placeholder="填写本次需要跟进的事项" @input="taskContent = $event.detail.value" /><view class="care-page__complete-submit" @tap="submitCreateTask"><text>{{ creatingTask ? '正在提交…' : '创建客情任务' }}</text></view></scroll-view>
+		</view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	import { completeMobileCustomerCareTask, createMobileCustomerCareTask, queryMobileCustomerCare } from '../../../shared/api/mobile-customer-care-client.uts'
+	import { callMobilePhone } from '../../../shared/platform/mobile-platform.uts'
+	const tabs = [
+		{ key: 'tasks', label: '跟进任务' },
+		{ key: 'customers', label: '客户视图' },
+		{ key: 'records', label: '客情记录' },
+		{ key: 'statistics', label: '跟进统计' }
+	]
+	const buckets = [
+		{ key: 'all', label: '未完成' },
+		{ key: 'today', label: '今日' },
+		{ key: 'overdue', label: '逾期' },
+		{ key: 'future', label: '未来' },
+		{ key: 'completed', label: '已完成' }
+	]
+	const activeTab = ref('tasks')
+	const activeBucket = ref('today')
+	const taskStatusGroup = ref('')
+	const activeTabLabel = ref('跟进任务')
+	const loading = ref(false)
+	const message = ref('')
+	const tasks = ref<Array<any>>([])
+	const customers = ref<Array<any>>([])
+	const records = ref<Array<any>>([])
+	const metrics = ref<Array<any>>([])
+	const completingTask = ref<any>(null)
+	const completeContent = ref('')
+	const methodCode = ref('PHONE')
+	const resultCode = ref('FOLLOW_UP')
+	const submitting = ref(false)
+	const methods = ref<Array<any>>([])
+	const results = ref<Array<any>>([])
+	const creatingForCustomer = ref<any>(null)
+	const taskContent = ref('')
+	const plannedAt = ref('')
+	const taskTypeCode = ref('FOLLOWUP')
+	const ownerId = ref('')
+	const creatingTask = ref(false)
+	const assignees = ref<Array<any>>([])
+	const createNextTask = ref(false)
+	const nextPlannedAt = ref('')
+	const nextOwnerId = ref('')
+	const taskTypes = [{ value: 'FOLLOWUP', label: '回访' }, { value: 'DAILY_FOLLOWUP', label: '日常跟进' }, { value: 'INVITATION', label: '邀约' }, { value: 'SERVICE_FEEDBACK', label: '服务反馈' }]
+	const memberFilterId = ref('')
+
+	onLoad((options : any) => {
+		memberFilterId.value = String(options != null ? options.memberId || '' : '')
+		let bucket = String(options != null ? options.bucket || '' : '')
+		let statusGroup = String(options != null ? options.statusGroup || '' : '')
+		if (bucket == 'all' && statusGroup == 'open') { activeBucket.value = 'all'; taskStatusGroup.value = 'open' }
+	})
+	onShow(() => loadWorkbench())
+
+	function selectTab(value : string) {
+		activeTab.value = value
+		for (let index = 0; index < tabs.length; index++) if (tabs[index].key == value) activeTabLabel.value = tabs[index].label
+		loadWorkbench()
+	}
+	function selectBucket(value : string) { activeBucket.value = value; taskStatusGroup.value = value == 'all' ? 'open' : ''; if (activeTab.value == 'tasks') loadWorkbench() }
+	function canComplete(task : any) : boolean {
+		let actions = Array.isArray(task.availableActions) ? task.availableActions : []
+		for (let index = 0; index < actions.length; index++) if (actions[index].code == 'complete-care-task' && actions[index].enabled === true) return Number(task.taskVersion || 0) > 0
+		return false
+	}
+	function canCall(task : any) : boolean {
+		let actions = Array.isArray(task.navigationActions) ? task.navigationActions : []
+		for (let index = 0; index < actions.length; index++) if (actions[index].code == 'call-member' && actions[index].enabled === true) return true
+		return false
+	}
+	function callCustomer(task : any) { callMobilePhone(String(task.member != null ? task.member.phone : '')) }
+	function openComplete(task : any) { completingTask.value = task; completeContent.value = ''; methodCode.value = 'PHONE'; resultCode.value = 'FOLLOW_UP'; createNextTask.value = false; nextPlannedAt.value = ''; nextOwnerId.value = assignees.value.length > 0 ? String(assignees.value[0].value) : ''; message.value = '' }
+	function closeComplete() { if (!submitting.value) completingTask.value = null }
+	function openCreateTask(customer : any) { creatingForCustomer.value = customer; taskContent.value = ''; plannedAt.value = ''; taskTypeCode.value = 'FOLLOWUP'; ownerId.value = assignees.value.length > 0 ? String(assignees.value[0].value) : ''; message.value = '' }
+	function closeCreateTask() { if (!creatingTask.value) creatingForCustomer.value = null }
+	function submitComplete() {
+		if (completingTask.value == null || submitting.value) return
+		let content = completeContent.value.trim()
+		if (content.length == 0) { message.value = '请如实填写本次客情内容。'; return }
+		if (createNextTask.value && (nextOwnerId.value.length == 0 || nextPlannedAt.value.trim().length == 0)) { message.value = '请填写下一次跟进时间并选择负责人。'; return }
+		submitting.value = true
+		completeMobileCustomerCareTask({ taskId: completingTask.value.taskId, expectedVersion: Number(completingTask.value.taskVersion), methodCode: methodCode.value, resultCode: resultCode.value, content: content, createNextTask: createNextTask.value, nextPlannedAt: nextPlannedAt.value.trim(), nextOwnerId: Number(nextOwnerId.value), idempotencyKey: 'care-complete-' + Date.now().toString() + '-' + Math.floor(Math.random() * 100000).toString() }, (response : any) => {
+			submitting.value = false
+			if (!response.ok) { message.value = String(response.message || '客情记录保存失败。'); return }
+			completingTask.value = null
+			loadWorkbench()
+		})
+	}
+	function submitCreateTask() {
+		if (creatingForCustomer.value == null || creatingTask.value) return
+		if (ownerId.value.length == 0 || plannedAt.value.trim().length == 0) { message.value = '请选择负责人并填写计划跟进时间。'; return }
+		creatingTask.value = true
+		createMobileCustomerCareTask({ memberId: creatingForCustomer.value.memberId, ownerId: Number(ownerId.value), taskTypeCode: taskTypeCode.value, plannedAt: plannedAt.value.trim(), content: taskContent.value.trim(), idempotencyKey: 'care-create-' + Date.now().toString() + '-' + Math.floor(Math.random() * 100000).toString() }, (response : any) => {
+			creatingTask.value = false
+			if (!response.ok) { message.value = String(response.message || '客情任务创建失败。'); return }
+			creatingForCustomer.value = null
+			activeTab.value = 'tasks'
+			activeTabLabel.value = '跟进任务'
+			loadWorkbench()
+		})
+	}
+
+	function loadWorkbench() {
+		loading.value = true
+		message.value = ''
+		let request : any = { view: activeTab.value, query: {} }
+		if (activeTab.value == 'tasks') request.query = memberFilterId.value.length > 0
+			? { memberId: Number(memberFilterId.value), bucket: 'all', statusGroup: 'open' }
+			: (taskStatusGroup.value == 'open'
+				? { bucket: 'all', statusGroup: 'open' }
+				: { scope: 'my', bucket: activeBucket.value })
+		if (activeTab.value == 'customers') request.query = memberFilterId.value.length > 0
+			? { memberId: Number(memberFilterId.value) }
+			: {}
+		if (activeTab.value == 'records') request.query = memberFilterId.value.length > 0
+			? { memberId: Number(memberFilterId.value), stream: 'human', dataScope: 'normal' }
+			: { stream: 'human', dataScope: 'normal' }
+		queryMobileCustomerCare(request, (response : any) => {
+			loading.value = false
+			if (!response.ok || response.body == null || response.body.projection == null || response.body.projection.customerCare == null) { message.value = String(response.message || '客情数据暂时不可用。'); return }
+			let projection = response.body.projection.customerCare
+			tasks.value = Array.isArray(projection.taskView.records) ? projection.taskView.records : []
+			customers.value = normalizeCustomers(Array.isArray(projection.customerView.records) ? projection.customerView.records : [])
+			records.value = Array.isArray(projection.recordView.records) ? projection.recordView.records : []
+			metrics.value = Array.isArray(projection.statistics.metrics) ? projection.statistics.metrics : []
+			let completion = projection.preparations != null && projection.preparations.completion != null ? projection.preparations.completion : {}
+			methods.value = Array.isArray(completion.methodOptions) ? completion.methodOptions : []
+			let serverResults = Array.isArray(completion.resultOptions) ? completion.resultOptions : []
+			let enabledResults = new Array<any>()
+			for (let index = 0; index < serverResults.length; index++) if (serverResults[index].enabled !== false) enabledResults.push(serverResults[index])
+			results.value = enabledResults
+			assignees.value = Array.isArray(completion.assigneeOptions) ? completion.assigneeOptions : []
+		})
+	}
+
+	function normalizeCustomers(source : Array<any>) : Array<any> {
+		let result = new Array<any>()
+		for (let index = 0; index < source.length; index++) {
+			let customer = source[index]
+			let nextTask = customer.nextTask
+			let taskLabel = nextTask != null && typeof nextTask === 'object' ? String(nextTask.label || nextTask.statusLabel || '暂无待跟进任务') : String(nextTask || '暂无待跟进任务')
+			let latestCare = customer.latestCare
+			let careLabel = latestCare != null && typeof latestCare === 'object' ? String(latestCare.summary || latestCare.label || '暂无跟进记录') : String(latestCare || '暂无跟进记录')
+			customer.nextTaskLabel = taskLabel
+			customer.latestCareLabel = careLabel
+			result.push(customer)
+		}
+		return result
+	}
+</script>
+
+<style>
+	.care-page { display: flex; flex: 1; min-height: 100%; flex-direction: column; background-color: #f5f7fa; }
+	.care-page__header { display: flex; flex-direction: column; padding: 52px 20px 16px 20px; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #dde4ed; background-color: #ffffff; }
+	.care-page__eyebrow { font-size: 12px; font-weight: 600; line-height: 18px; color: #697586; }
+	.care-page__title { margin-top: 6px; font-size: 24px; font-weight: 700; line-height: 34px; color: #1f2329; }
+	.care-page__tabs { display: flex; min-height: 48px; flex-direction: row; align-items: stretch; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #dde4ed; background-color: #ffffff; }
+	.care-page__tab { display: flex; min-width: 0; flex: 1; height: 48px; flex-direction: row; align-items: center; justify-content: center; border-bottom-width: 2px; border-bottom-style: solid; border-bottom-color: #ffffff; font-size: 12px; font-weight: 600; line-height: 18px; color: #697586; }
+	.care-page__tab--active { border-bottom-color: #1677cc; color: #1677cc; }
+	.care-page__filters { padding: 12px 20px 12px 20px; background-color: #ffffff; }
+	.care-page__segment { display: flex; height: 34px; flex-direction: row; border-width: 1px; border-style: solid; border-color: #d8e0ea; }
+	.care-page__segment-item { display: flex; min-width: 0; flex: 1; flex-direction: row; align-items: center; justify-content: center; border-right-width: 1px; border-right-style: solid; border-right-color: #d8e0ea; font-size: 12px; font-weight: 600; line-height: 18px; color: #697586; }
+	.care-page__segment-item--active { background-color: #f1f8ff; color: #1677cc; }
+	.care-page__content { display: flex; min-height: 0; flex: 1; flex-direction: column; justify-content: center; padding: 24px 20px 48px 20px; }
+	.care-page__empty { display: flex; flex-direction: column; padding-left: 12px; border-left-width: 3px; border-left-style: solid; border-left-color: #1677cc; }
+	.care-page__empty-title { font-size: 18px; font-weight: 700; line-height: 26px; color: #303133; }
+	.care-page__empty-copy { margin-top: 8px; font-size: 14px; line-height: 22px; color: #697586; }
+	.care-page__reload { display: flex; align-self: flex-start; margin-top: 12px; padding: 7px 12px; background-color: #1677cc; font-size: 13px; font-weight: 600; color: #ffffff; }
+	.care-page__list { display: flex; flex-direction: column; }
+	.care-page__card { display: flex; flex-direction: column; margin-bottom: 10px; padding: 15px; border-width: 1px; border-style: solid; border-color: #dde4ed; background-color: #ffffff; }
+	.care-page__card-row { display: flex; flex-direction: row; align-items: flex-start; justify-content: space-between; }
+	.care-page__card-title { flex: 1; font-size: 15px; font-weight: 700; line-height: 22px; color: #303133; }
+	.care-page__status { margin-left: 8px; font-size: 12px; font-weight: 600; line-height: 18px; color: #1677cc; }
+	.care-page__card-copy { margin-top: 7px; font-size: 13px; line-height: 20px; color: #697586; }
+	.care-page__metric { margin-top: 10px; font-size: 24px; font-weight: 700; line-height: 32px; color: #1677cc; }
+	.care-page__complete-entry { display: flex; align-self: flex-start; margin-top: 12px; padding: 7px 12px; background-color: #1677cc; font-size: 13px; font-weight: 600; color: #ffffff; }
+	.care-page__call-entry { display: flex; align-self: flex-start; margin-top: 12px; padding: 7px 12px; border-width: 1px; border-style: solid; border-color: #b8d6ef; background-color: #f7fbff; font-size: 13px; font-weight: 600; color: #1677cc; }
+	.care-page__complete-panel { position: fixed; z-index: 20; top: 0; right: 0; bottom: 0; left: 0; display: flex; flex-direction: column; background-color: #f5f7fa; }
+	.care-page__complete-header { display: flex; flex-direction: row; align-items: center; justify-content: space-between; padding: 48px 20px 16px; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #dde4ed; background-color: #ffffff; }
+	.care-page__complete-cancel, .care-page__complete-placeholder { width: 46px; font-size: 14px; line-height: 22px; color: #526071; }
+	.care-page__complete-title { font-size: 18px; font-weight: 700; line-height: 26px; color: #303133; }
+	.care-page__complete-body { min-height: 0; flex: 1; padding: 20px; }
+	.care-page__complete-member { display: block; font-size: 16px; font-weight: 700; line-height: 24px; color: #303133; }
+	.care-page__complete-label { display: block; margin-top: 20px; font-size: 13px; font-weight: 600; line-height: 20px; color: #526071; }
+	.care-page__choice-row { display: flex; flex-wrap: wrap; flex-direction: row; margin-top: 8px; }
+	.care-page__choice { display: flex; min-height: 32px; flex-direction: row; align-items: center; margin-right: 8px; margin-bottom: 8px; padding: 0 10px; border-width: 1px; border-style: solid; border-color: #d8e0ea; font-size: 13px; color: #526071; }
+	.care-page__choice--active { border-color: #1677cc; background-color: #f1f8ff; color: #1677cc; }
+	.care-page__complete-textarea { box-sizing: border-box; width: 100%; height: 130px; margin-top: 8px; padding: 10px; border-width: 1px; border-style: solid; border-color: #d8e0ea; background-color: #ffffff; font-size: 14px; line-height: 21px; color: #303133; }
+	.care-page__next-toggle { display: flex; min-height: 38px; flex-direction: row; align-items: center; margin-top: 18px; padding: 0 12px; border-width: 1px; border-style: solid; border-color: #b8d6ef; background-color: #f7fbff; font-size: 13px; font-weight: 600; color: #1677cc; }
+	.care-page__datetime-input { box-sizing: border-box; width: 100%; height: 42px; margin-top: 8px; padding: 0 10px; border-width: 1px; border-style: solid; border-color: #d8e0ea; background-color: #ffffff; font-size: 14px; color: #303133; }
+	.care-page__complete-submit { display: flex; min-height: 44px; flex-direction: row; align-items: center; justify-content: center; margin-top: 20px; background-color: #1677cc; font-size: 14px; font-weight: 700; color: #ffffff; }
+</style>

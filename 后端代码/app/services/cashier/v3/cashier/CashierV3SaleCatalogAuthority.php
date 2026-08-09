@@ -26,6 +26,14 @@ interface CashierV3SaleCatalogAuthority
      */
     public function readStoreItemBySkuId(int $storeId, int $skuId);
 
+    /**
+     * Read only the lightweight on-sale gate used before a normal add-to-cart
+     * transaction. This must not build price/category/version snapshots.
+     *
+     * @return array|null
+     */
+    public function readStoreItemAvailabilityBySkuId(int $storeId, int $skuId);
+
     /** Lock exactly one catalog resource row in the caller-owned transaction. */
     public function lockStoreResourceRow(int $storeId, string $kind, int $resourceId): bool;
 }

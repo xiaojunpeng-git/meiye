@@ -1073,8 +1073,8 @@ class StaffJobPositionServices extends BaseServices
     /**
      * 员工档案中的唯一“手机端”开关。
      *
-     * 任职入口和员工手机授权是同一业务结果的两份权威投影，必须在同一事务内
-     * 一起更新，避免页面显示已开通而登录会话被另一层拒绝。
+     * 员工手机端开关是唯一的人员准入控制。已有任职的渠道入口仍同步为
+     * 兼容投影和审计信息；无店直属员工不创建伪任职，直接写员工授权投影。
      *
      * @return array{staff_id:int,enabled:int,entries:array,mobile:array,auth_version:int}
      */
@@ -1091,8 +1091,19 @@ class StaffJobPositionServices extends BaseServices
         $staff = Db::name('system_store_staff')
             ->where('id', $staffId)->where('employee_id', $employeeId)->where('is_del', 0)
             ->lock(true)->find();
+        if ($staffId <= 0) {
+            $mobile = $this->projectMobileAuthRules($employeeId, $enabled);
+            $after = $this->afterEmployeeAuthChanged($employeeId);
+            return [
+                'staff_id' => 0,
+                'enabled' => $enabled,
+                'entries' => [],
+                'mobile' => $mobile,
+                'auth_version' => (int)($after['auth_version'] ?? 0),
+            ];
+        }
         if (!$staff || (int)($staff['status'] ?? 0) !== 1 || (int)($staff['store_id'] ?? 0) <= 0) {
-            throw new AdminException('手机端授权需要有效的门店任职');
+            throw new AdminException('当前门店任职无效，不能保存手机端授权');
         }
 
         $entry = $this->bindChannelEntriesInTx(

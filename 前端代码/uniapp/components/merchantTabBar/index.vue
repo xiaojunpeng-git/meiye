@@ -47,6 +47,12 @@ export default {
 	methods: {
 		onSwitch(item) {
 			if (!item || item.key === this.current) return;
+			if (item.key === 'target') {
+				uni.showToast({ title: '目标功能待开发', icon: 'none' });
+				return;
+			}
+			// 商家页位于分包中。H5 iframe 预览下 reLaunch 可能停在旧页面，
+			// 使用页面替换保证点击底栏后立即进入目标页。
 			uni.redirectTo({ url: item.path });
 		},
 	},

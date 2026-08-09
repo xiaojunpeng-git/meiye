@@ -24,6 +24,7 @@ use app\model\product\product\StoreProduct;
 use app\model\yeji\StaffYeji;
 use app\model\yeji\YejiCommission;
 use app\services\BaseServices;
+use app\services\cashier\v3\service\ThinkPhpCashierV3ServiceOrderRepository;
 use app\services\order\store\WriteOffOrderServices;
 use app\services\other\CityAreaServices;
 use app\services\product\product\StoreProductReservationServices;
@@ -1958,6 +1959,9 @@ class StoreReservationOrderServices extends BaseServices
             $primaryStaffId, $staffChoose, $reservation_time, $createOrderServices, $orderServices, $addonDeductionList
         ) {
             $ids = [];
+            $giftDetailIds = [(int)$reservationOrderInfo['cart_info_id']];
+            foreach ($addonDeductionList as $addon) $giftDetailIds[] = (int)($addon['cart_info_id'] ?? 0);
+            $this->lockRechargeGiftReservationEntitlements($giftDetailIds, $uid);
             $data = [
                 'uid' => $uid,
                 'oid' => $oid,
@@ -2014,6 +2018,42 @@ class StoreReservationOrderServices extends BaseServices
             }
         }
         return $ids;
+    }
+
+    /**
+     * Serializes reservation creation with V3 recharge-gift void. Ordinary
+     * purchased entitlements retain the existing path.
+     *
+     * @param int[] $detailIds
+     */
+    private function lockRechargeGiftReservationEntitlements(array $detailIds, int $memberId): void
+    {
+        $detailIds = array_values(array_unique(array_filter(array_map('intval', $detailIds))));
+        sort($detailIds, SORT_NUMERIC);
+        foreach ($detailIds as $detailId) {
+            $hint = (array)Db::name('cashier_v3_recharge_gift_item')->where('benefit_detail_id', $detailId)
+                ->where('gift_kind', 'project')->find();
+            if (!$hint) continue;
+            $authority = (array)Db::name('cashier_v3_recharge_gift_authority')
+                ->where('gift_id', (string)$hint['gift_id'])->lock(true)->find();
+            $item = (array)Db::name('cashier_v3_recharge_gift_item')->where('id', (int)$hint['id'])->lock(true)->find();
+            if (!$authority || !$item || (string)($authority['status'] ?? '') !== 'issued'
+                || (string)($item['status'] ?? '') !== 'issued'
+                || (int)($authority['member_id'] ?? 0) !== $memberId) {
+                throw new ValidateException('该充值赠送权益已失效，不能预约。');
+            }
+            $repository = new ThinkPhpCashierV3ServiceOrderRepository();
+            $repository->lockOrCreateEntitlementGuard((string)$authority['tenant_id'], $detailId);
+            $detail = (array)Db::name('store_order_cart_info')->where('id', $detailId)->lock(true)->find();
+            $order = (array)Db::name('store_order')->where('id', (int)($item['legacy_order_id'] ?? 0))->lock(true)->find();
+            $holder = (array)Db::name('user_card_holder')->where('id', (int)($item['card_holder_id'] ?? 0))->lock(true)->find();
+            if (!$detail || !$order || !$holder || (int)($detail['oid'] ?? 0) !== (int)$order['id']
+                || (int)($detail['write_surplus_times'] ?? 0) <= 0 || (int)($detail['is_writeoff'] ?? 0) !== 0
+                || (int)($order['terminal_action'] ?? -1) !== 0 || (int)($order['paid'] ?? 0) !== 1
+                || (int)($holder['is_del'] ?? -1) !== 0 || (int)($holder['uid'] ?? 0) !== $memberId) {
+                throw new ValidateException('该充值赠送权益已失效，不能预约。');
+            }
+        }
     }
 
     /**

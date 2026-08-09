@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { formatMoney } from '@/services/cashierV3Bridge'
 
 const props = defineProps({
@@ -18,10 +18,20 @@ const props = defineProps({
   resolveValue: {
     type: Function,
     required: true
-  }
+  },
+  lifecycleActions: { type: Array, default: () => [] },
+  onLifecycleAction: { type: Function, default: null }
 })
 
 defineEmits(['close'])
+
+const activeForm = ref('')
+const cashRefundAmount = ref('')
+const principalAmount = ref('0')
+const bonusAmount = ref('0')
+const reason = ref('')
+const pending = ref(false)
+const actionError = ref('')
 
 const rows = computed(() => props.fields.map((field) => {
   const value = props.resolveValue(props.record, field.key)
@@ -33,6 +43,47 @@ const rows = computed(() => props.fields.map((field) => {
       : value === undefined || value === null || value === '' ? '—' : String(value)
   }
 }))
+
+function validMoney(value, allowZero = false) {
+  const raw = String(value ?? '').trim()
+  if (!/^\d+(\.\d{1,2})?$/.test(raw)) return false
+  const amount = Number(raw)
+  return Number.isFinite(amount) && (allowZero ? amount >= 0 : amount > 0)
+}
+
+async function submitLifecycleAction() {
+  if (!props.onLifecycleAction || pending.value) return
+  actionError.value = ''
+  if (!reason.value.trim()) {
+    actionError.value = activeForm.value === 'refund' ? '请填写退款原因。' : '请填写作废原因。'
+    return
+  }
+  const payload = { action: activeForm.value === 'refund' ? 'refund-recharge-order' : 'void-recharge-order', reason: reason.value.trim() }
+  if (activeForm.value === 'refund') {
+    if (!validMoney(cashRefundAmount.value, true) || !validMoney(principalAmount.value, true) || !validMoney(bonusAmount.value, true)
+      || Number(cashRefundAmount.value) + Number(principalAmount.value) + Number(bonusAmount.value) <= 0) {
+      actionError.value = '实际退款、扣回本金和扣回赠金至少需要填写一项。'
+      return
+    }
+    Object.assign(payload, { cashRefundAmount: cashRefundAmount.value, principalRefundAmount: principalAmount.value, bonusRefundAmount: bonusAmount.value })
+  }
+  pending.value = true
+  try {
+    const response = await props.onLifecycleAction(payload)
+    const envelope = response?.data?.result ? response.data : response
+    const status = String(envelope?.result?.status || envelope?.status || '')
+    if (!['success', 'succeeded'].includes(status)) {
+      actionError.value = envelope?.result?.message || envelope?.message || '本次操作没有成功，订单状态未改变。'
+      return
+    }
+    activeForm.value = ''
+    reason.value = ''
+  } catch (error) {
+    actionError.value = error?.message || '本次操作没有成功，订单状态未改变。'
+  } finally {
+    pending.value = false
+  }
+}
 </script>
 
 <template>
@@ -53,9 +104,25 @@ const rows = computed(() => props.fields.map((field) => {
             <dd>{{ row.displayValue }}</dd>
           </div>
         </dl>
+        <section v-if="activeForm" class="business-record-detail__lifecycle">
+          <h3>{{ activeForm === 'refund' ? '充值退款并作废' : '作废充值订单' }}</h3>
+          <template v-if="activeForm === 'refund'">
+            <label>实际退款金额<input v-model.trim="cashRefundAmount" inputmode="decimal" placeholder="实际退给客户的金额" /></label>
+            <div class="business-record-detail__amount-row">
+              <label>扣回本金<input v-model.trim="principalAmount" inputmode="decimal" /></label>
+              <label>扣回赠金<input v-model.trim="bonusAmount" inputmode="decimal" /></label>
+            </div>
+          </template>
+          <small v-if="activeForm === 'refund'">退款成功后订单只保留查看；已发生的欠款、赠品和权益不会回退。</small>
+          <label>{{ activeForm === 'refund' ? '退款原因' : '作废原因' }}<textarea v-model.trim="reason" maxlength="255" rows="3" /></label>
+          <p v-if="actionError" role="alert">{{ actionError }}</p>
+          <div><button type="button" class="button button--text" :disabled="pending" @click="activeForm = ''">取消</button><button type="button" class="button button--primary" :disabled="pending" @click="submitLifecycleAction">确认</button></div>
+        </section>
       </main>
 
       <footer class="business-record-detail__footer">
+        <button v-if="lifecycleActions.includes('refund')" type="button" class="button button--secondary" :disabled="pending" @click="activeForm = 'refund'">退款并作废</button>
+        <button v-if="lifecycleActions.includes('void')" type="button" class="button button--secondary" :disabled="pending" @click="activeForm = 'void'">作废</button>
         <button type="button" class="button button--primary" @click="$emit('close')">关闭</button>
       </footer>
     </section>
@@ -93,6 +160,14 @@ const rows = computed(() => props.fields.map((field) => {
   gap: 16px;
   padding: 18px 22px;
 }
+
+.business-record-detail__lifecycle { display:grid; gap:12px; margin-top:18px; padding:16px; border:1px solid #dfe5ec; border-radius:6px; background:#fff; }
+.business-record-detail__lifecycle h3, .business-record-detail__lifecycle p { margin:0; }
+.business-record-detail__lifecycle label { display:grid; gap:6px; color:#475467; font-size:13px; }
+.business-record-detail__lifecycle input, .business-record-detail__lifecycle textarea { width:100%; box-sizing:border-box; padding:9px 10px; border:1px solid #cfd7e3; border-radius:5px; font:inherit; }
+.business-record-detail__lifecycle > div:last-child { display:flex; justify-content:flex-end; gap:10px; }
+.business-record-detail__lifecycle p { color:#b42318; }
+.business-record-detail__amount-row { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
 
 .business-record-detail__header {
   border-bottom: 1px solid #e8edf2;

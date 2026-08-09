@@ -18,6 +18,7 @@ use app\services\product\brand\StoreBrandServices;
 use app\services\user\UserServices;
 use app\dao\activity\coupon\StoreCouponUserDao;
 use app\services\product\category\StoreProductCategoryServices;
+use think\exception\ValidateException;
 
 /**
  * Class StoreCouponUserServices
@@ -616,7 +617,9 @@ class StoreCouponUserServices extends BaseServices
         $promotionsServices = app()->make(StorePromotionsServices::class);
         [$couponInfo, $couponPrice] = $promotionsServices->useCoupon($couponId, $uid, $cartInfo, $promotions, $store_id);
         if ($couponInfo) {
-            $this->dao->useCoupon($couponId);
+            if ($this->dao->useCoupon($couponId, $uid) !== 1) {
+                throw new ValidateException('优惠券状态已变化，请重新选择优惠券。');
+            }
         }
         return true;
     }

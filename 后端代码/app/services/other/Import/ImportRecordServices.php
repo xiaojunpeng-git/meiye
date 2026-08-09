@@ -15,7 +15,6 @@ namespace app\services\other\Import;
 use app\controller\api\v1\store\Store;
 use app\dao\order\StoreOrderDao;
 use app\dao\other\Import\ImportRecordDao;
-use app\dao\product\product\StoreCardRelatedDao;
 use app\dao\product\product\StoreProductDao;
 use app\dao\store\SystemStoreDao;
 use app\jobs\order\OrderPayHandelJob;
@@ -40,6 +39,7 @@ use app\services\order\StoreOrderCartInfoServices;
 use app\services\order\StoreOrderCreateServices;
 use app\services\other\CityAreaServices;
 use app\services\pay\PayServices;
+use app\services\product\product\StoreCardRelatedServices;
 use app\services\product\product\StoreProductServices;
 use app\services\user\group\UserGroupServices;
 use app\services\user\label\UserLabelRelationServices;
@@ -491,6 +491,7 @@ class ImportRecordServices extends BaseServices
             $mainId=7895;
             $relate=StoreCardRelated::where("card_product_id",$mainId)->where("product_id",$productId)->find();
             if(empty($relate)){
+                $pendingRelatedRows = [];
                 $ids=StoreProduct::where("pid",$mainId)->column("id");
                 $ids[]=$mainId;
                 foreach ($ids as $k=>$v) {
@@ -515,8 +516,12 @@ class ImportRecordServices extends BaseServices
                     $save['price'] = $info['price'];
                     $save['write_times'] = $number;
                     $save['status'] = 1;
-                    $dao=app()->make(StoreCardRelatedDao::class);
-                    $dao->save($save);
+                    $pendingRelatedRows[] = $save;
+                }
+                if ($pendingRelatedRows) {
+                    /** @var StoreCardRelatedServices $cardRelatedServices */
+                    $cardRelatedServices = app()->make(StoreCardRelatedServices::class);
+                    $cardRelatedServices->appendCardRelatedRows($pendingRelatedRows);
                 }
             }
             $storeMainId=StoreProduct::where("pid",$mainId)->where("relation_id",$storeId)->value("id");
@@ -596,7 +601,14 @@ class ImportRecordServices extends BaseServices
              if($userCard['write_end'] > 0 && $userCard['write_start'] == 0){
                  $userCard['write_start']=time();
              }
-             Db::name("user_card_holder")->insert($userCard);
+             /** @var \app\services\user\CardNumberServices $cardNumberServices */
+             $cardNumberServices = app()->make(\app\services\user\CardNumberServices::class);
+             $preferredCardNo = isset($handle['card_no']) ? (string)$handle['card_no'] : (isset($handle['cardNo']) ? (string)$handle['cardNo'] : null);
+             $cardNumberServices->withAllocateRetry(function (string $cardNo) use (&$userCard) {
+                 $userCard['card_no'] = $cardNo;
+                 Db::name('user_card_holder')->insert($userCard);
+                 return true;
+             }, $preferredCardNo, 'import');
         }
         $saveErrorData = $this->prepareErrorData($errorData, $id);
         return $saveErrorData;

@@ -11,6 +11,7 @@ namespace app\services\query;
 class UnifiedQueryPageRegistry
 {
     public const SCHEMA_VERSION = 'unified-query-2026-07-28-v1';
+    public const MAX_SCOPE_DIMENSION_VALUES = 1000;
 
     /** @var array<string,array> */
     protected $pages = [];
@@ -58,30 +59,28 @@ class UnifiedQueryPageRegistry
         }
     }
 
-    public static function withDefaults(array $metricDefinitions = []): self
+    public static function withDefaults(
+        array $metricDefinitions = [],
+        array $registrars = []
+    ): self
     {
+        array_unshift($registrars, new provider\MemberUnifiedQueryPageRegistrar());
+        return self::fromRegistrars($metricDefinitions, $registrars);
+    }
+
+    public static function fromRegistrars(
+        array $metricDefinitions,
+        array $registrars
+    ): self {
         $registry = new self($metricDefinitions);
-        $registry->registerPage('member_list', '会员列表', [
-            self::field('member_name', '会员姓名', 'text', true, true),
-            self::field('phone', '完整手机号', 'text', true, true),
-            self::field('member_no', '会员编号', 'text', true, true),
-            self::field('member_status', '会员状态', 'text', true, false),
-            self::field('member_level', '会员等级', 'text', true, false),
-            self::field('member_tag', '会员标签', 'text', true, false),
-            self::field('store', '归属门店', 'text', true, false),
-            self::field('exclusive_service_staff', '专属服务人', 'text', true, false),
-            self::field('account_balance', '账户余额', 'amount', true, false, [], '', true),
-            self::field('active_card_count', '有效卡项数量', 'integer', true, false),
-            self::field('remaining_project_times', '剩余项目次数', 'integer', true, false),
-            self::field('remaining_project_amount', '剩余项目金额', 'amount', true, false),
-            self::field('debt_amount', '欠款金额', 'amount', true, false, [], '', true),
-            self::field('total_consumption_amount', '总消费金额', 'amount', true, false, [], '', true),
-            self::field('visit_count', '到店次数', 'integer', true, false, [], '', true),
-            self::field('latest_purchase_date', '最近购买日期', 'date', true, false),
-            self::field('last_service_staff', '上次服务人员', 'text', true, false),
-            self::field('latest_visit_date', '最近到店日期', 'date', true, false),
-            self::field('created_at', '建档时间', 'datetime', true, false),
-        ], 'member_id');
+        foreach ($registrars as $registrar) {
+            if (!$registrar instanceof UnifiedQueryPageRegistrar) {
+                throw new \InvalidArgumentException(
+                    '统一查询页面 registrar 必须实现 UnifiedQueryPageRegistrar'
+                );
+            }
+            $registrar->register($registry);
+        }
         $registry->freeze();
         return $registry;
     }
@@ -108,8 +107,13 @@ class UnifiedQueryPageRegistry
         ];
     }
 
-    public function registerPage(string $pageCode, string $label, array $fields, string $stableRowKey): void
-    {
+    public function registerPage(
+        string $pageCode,
+        string $label,
+        array $fields,
+        string $stableRowKey,
+        array $options = []
+    ): void {
         if ($this->frozen) {
             throw new \LogicException('统一查询页面白名单已冻结');
         }
@@ -120,6 +124,13 @@ class UnifiedQueryPageRegistry
         }
         if ($label === '' || $this->textLength($label) > 64) {
             throw new \InvalidArgumentException('统一查询页面名称不合法');
+        }
+        foreach (array_keys($options) as $option) {
+            if (!in_array($option, [
+                'keywordFields', 'requiredFeature', 'exportFeature', 'scopeDimensions',
+            ], true)) {
+                throw new \InvalidArgumentException('统一查询页面配置不合法：' . $option);
+            }
         }
 
         $normalized = [];
@@ -146,17 +157,134 @@ class UnifiedQueryPageRegistry
                 'hidden' => true,
             ]);
         }
+        $keywordFields = $this->normalizeKeywordFields(
+            $pageCode,
+            $options['keywordFields'] ?? [],
+            $normalized
+        );
+        $requiredFeature = $this->normalizeFeature(
+            (string)($options['requiredFeature'] ?? ''),
+            'requiredFeature'
+        );
+        $exportFeature = $this->normalizeFeature(
+            (string)($options['exportFeature'] ?? $requiredFeature),
+            'exportFeature'
+        );
+        $scopeDimensions = $this->normalizeScopeDimensionNames(
+            $options['scopeDimensions'] ?? []
+        );
         $this->pages[$pageCode] = [
             'pageCode' => $pageCode,
             'label' => $label,
             'stableRowKey' => $stableRowKey,
             'fields' => $normalized,
+            'keywordFields' => $keywordFields,
+            'requiredFeature' => $requiredFeature,
+            'exportFeature' => $exportFeature,
+            'scopeDimensions' => $scopeDimensions,
         ];
     }
 
     public function freeze(): void
     {
         $this->frozen = true;
+    }
+
+    public function isFrozen(): bool
+    {
+        return $this->frozen;
+    }
+
+    public function pageCodes(): array
+    {
+        return array_keys($this->pages);
+    }
+
+    /**
+     * @return array<string,array|null> null 表示该维度全量，空数组表示无可见范围。
+     */
+    public function normalizeScopeDimensions(string $pageCode, $raw): array
+    {
+        $page = $this->page($pageCode);
+        if (!is_array($raw)) {
+            throw $this->invalidScopeDimensions($pageCode, '维度范围必须是结构化对象');
+        }
+        $declared = array_fill_keys((array)$page['scopeDimensions'], true);
+        foreach (array_keys($raw) as $dimension) {
+            if (!is_string($dimension) || !isset($declared[$dimension])) {
+                throw $this->invalidScopeDimensions(
+                    $pageCode,
+                    '包含未声明维度：' . (string)$dimension
+                );
+            }
+        }
+        $normalized = [];
+        foreach (array_keys($declared) as $dimension) {
+            if (!array_key_exists($dimension, $raw)) {
+                throw $this->invalidScopeDimensions(
+                    $pageCode,
+                    '缺少维度：' . $dimension
+                );
+            }
+            $values = $raw[$dimension];
+            if ($values === null) {
+                $normalized[$dimension] = null;
+                continue;
+            }
+            if (!is_array($values)
+                || ($values !== []
+                    && array_keys($values) !== range(0, count($values) - 1))
+                || count($values) > self::MAX_SCOPE_DIMENSION_VALUES) {
+                throw $this->invalidScopeDimensions(
+                    $pageCode,
+                    '维度值必须是有界有序列表：' . $dimension
+                );
+            }
+            $unique = [];
+            foreach ($values as $value) {
+                if (!is_int($value) && !is_string($value)) {
+                    throw $this->invalidScopeDimensions(
+                        $pageCode,
+                        '维度值必须是稳定标识：' . $dimension
+                    );
+                }
+                $value = trim((string)$value);
+                if (!preg_match('/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/D', $value)) {
+                    throw $this->invalidScopeDimensions(
+                        $pageCode,
+                        '维度值必须是稳定标识：' . $dimension
+                    );
+                }
+                $identity = 'value:' . $value;
+                if (isset($unique[$identity])) {
+                    throw $this->invalidScopeDimensions(
+                        $pageCode,
+                        '维度值不能重复：' . $dimension
+                    );
+                }
+                $unique[$identity] = $value;
+            }
+            $items = array_values($unique);
+            sort($items, SORT_STRING);
+            $normalized[$dimension] = $items;
+        }
+        return $normalized;
+    }
+
+    public function assertScopeDimensionsNotEmpty(
+        string $pageCode,
+        array $dimensions
+    ): void {
+        foreach ((array)$this->page($pageCode)['scopeDimensions'] as $dimension) {
+            if (!array_key_exists($dimension, $dimensions)
+                || $dimensions[$dimension] === []) {
+                throw new UnifiedQueryException(
+                    'UNIFIED_QUERY_SCOPE_EMPTY',
+                    '当前账号在该页面没有可查询的数据范围。',
+                    ['page_code' => $pageCode, 'dimension' => $dimension]
+                );
+            }
+        }
     }
 
     public function page(string $pageCode): array
@@ -325,6 +453,82 @@ class UnifiedQueryPageRegistry
             'systemMetric' => !empty($field['systemMetric']),
             'hidden' => !empty($field['hidden']),
         ];
+    }
+
+    protected function normalizeKeywordFields(
+        string $pageCode,
+        $keywordFields,
+        array $fields
+    ): array {
+        if (!is_array($keywordFields)
+            || ($keywordFields !== []
+                && array_keys($keywordFields) !== range(0, count($keywordFields) - 1))) {
+            throw new \InvalidArgumentException(
+                '统一查询页面关键字字段必须是有序数组：' . $pageCode
+            );
+        }
+        $normalized = [];
+        foreach ($keywordFields as $fieldKey) {
+            $fieldKey = trim((string)$fieldKey);
+            if ($fieldKey === '' || isset($normalized[$fieldKey]) || !isset($fields[$fieldKey])) {
+                throw new \InvalidArgumentException(
+                    '统一查询页面关键字字段无效：' . $pageCode . '/' . $fieldKey
+                );
+            }
+            $field = $fields[$fieldKey];
+            if (!empty($field['hidden'])
+                || (string)$field['type'] !== 'text'
+                || !in_array('filter', (array)$field['allowedOperations'], true)) {
+                throw new \InvalidArgumentException(
+                    '统一查询关键字字段必须是可筛选文本：' . $pageCode . '/' . $fieldKey
+                );
+            }
+            $normalized[$fieldKey] = true;
+        }
+        return array_keys($normalized);
+    }
+
+    protected function normalizeFeature(string $feature, string $kind): string
+    {
+        $feature = trim($feature);
+        if ($feature !== ''
+            && !preg_match('/^[a-z][a-z0-9._:-]{1,127}$/D', $feature)) {
+            throw new \InvalidArgumentException('统一查询页面 ' . $kind . ' 不合法');
+        }
+        return $feature;
+    }
+
+    protected function normalizeScopeDimensionNames($dimensions): array
+    {
+        if (!is_array($dimensions)
+            || ($dimensions !== []
+                && array_keys($dimensions) !== range(0, count($dimensions) - 1))
+            || count($dimensions) > 16) {
+            throw new \InvalidArgumentException('统一查询 scopeDimensions 不合法');
+        }
+        $normalized = [];
+        foreach ($dimensions as $dimension) {
+            $dimension = trim((string)$dimension);
+            if (!preg_match('/^[a-z][a-z0-9_]{1,63}$/D', $dimension)
+                || isset($normalized[$dimension])) {
+                throw new \InvalidArgumentException(
+                    '统一查询 scopeDimension 标识不合法或重复：' . $dimension
+                );
+            }
+            $normalized[$dimension] = true;
+        }
+        return array_keys($normalized);
+    }
+
+    protected function invalidScopeDimensions(
+        string $pageCode,
+        string $reason
+    ): UnifiedQueryException {
+        return new UnifiedQueryException(
+            'UNIFIED_QUERY_SCOPE_DIMENSION_INVALID',
+            '当前页面的数据范围无效，请刷新权限后重试。',
+            ['page_code' => $pageCode, 'reason' => $reason]
+        );
     }
 
     protected function capabilityField(array $field): array

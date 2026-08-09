@@ -23,6 +23,7 @@ const isMemberCreatorOpen = ref(false)
 const editingMember = ref(null)
 const deletingMember = ref(null)
 const isMemberMutationSaving = ref(false)
+const memberEditConflictMessage = ref('')
 
 const EMPTY_MEMBER_QUERY_PROJECTION = Object.freeze({
   records: [],
@@ -46,7 +47,7 @@ const memberCenter = computed(() => ({
 }))
 const records = computed(() => Array.isArray(memberCenter.value.records) ? memberCenter.value.records : [])
 const statusOptions = computed(() => Array.isArray(memberCenter.value.statusOptions) ? memberCenter.value.statusOptions : [])
-const creatorSchema = computed(() => state.memberCenter?.creatorSchema || {})
+const creatorSchema = ref({})
 const hasSuccessfulQuery = computed(() => Boolean(lastSuccessfulQuery.value) && Boolean(memberQueryProjection.value) && !queryError.value)
 const canBatchOperate = computed(() => hasSuccessfulQuery.value && !isQueryLoading.value && Boolean(memberCenter.value.canBatchOperate))
 const isAllSelected = computed(() => records.value.length > 0 && selectedMemberIds.value.length === records.value.length)
@@ -194,7 +195,9 @@ async function requestAction(action, payload = {}) {
   return requestCashierV3Action(action, payload)
 }
 
-function openMemberCreator() {
+function openMemberCreator(event = null) {
+  const schema = event?.detail?.creatorSchema
+  if (schema && typeof schema === 'object') creatorSchema.value = schema
   isMemberCreatorOpen.value = true
 }
 
@@ -380,10 +383,20 @@ async function openMemberDetail(record) {
   window.dispatchEvent(new CustomEvent('cashier-v3:open-member-detail', {
     detail: { memberId, record }
   }))
-  return requestAction('open-member-detail', {
+  const response = await requestAction('open-member-detail', {
     memberId,
     recordVersion: record.revision
   })
+  const detailEnvelope = response?.result && typeof response.result === 'object'
+    ? response
+    : (response?.data && typeof response.data === 'object' ? response.data : {})
+  const detail = detailEnvelope?.data?.detail
+  if (unifiedQueryActionSucceeded(response) && detail && typeof detail === 'object') {
+    window.dispatchEvent(new CustomEvent('cashier-v3:open-member-detail', {
+      detail: { memberId, fallback: detail }
+    }))
+  }
+  return response
 }
 
 function resultData(response) {
@@ -399,18 +412,46 @@ function memberCommandContexts(memberId) {
   ]
 }
 
+function actionResultCode(response) {
+  const envelope = response?.result && typeof response.result === 'object'
+    ? response
+    : response?.data?.result && typeof response.data.result === 'object'
+      ? response.data
+      : response
+  return String(envelope?.result?.code || envelope?.code || '').toUpperCase()
+}
+
+function isMemberEditConflict(response) {
+  const code = actionResultCode(response)
+  return code.includes('CONFLICT') || code.includes('VERSION') || code.includes('CONTEXT')
+}
+
+function editableMemberDraft(member) {
+  return {
+    name: String(member?.name || '').trim(),
+    sex: Number(member?.sex) || 0,
+    birthday: member?.birthday || '',
+    address: String(member?.address || '').trim(),
+    note: String(member?.note || '').trim()
+  }
+}
+
 async function openMemberEditor(record) {
   const memberId = memberRecordId(record)
   const response = await requestAction('open-member-editor', { memberId })
   if (!unifiedQueryActionSucceeded(response)) return response
   const member = resultData(response).member
-  if (member && member.memberId) editingMember.value = { ...member }
+  if (member && member.memberId) {
+    memberEditConflictMessage.value = ''
+    editingMember.value = { ...member }
+  }
   return response
 }
 
 async function saveMemberEdit() {
   const member = editingMember.value
   if (!member || isMemberMutationSaving.value) return
+  const draft = editableMemberDraft(member)
   isMemberMutationSaving.value = true
   try {
     const response = await requestAction('update-member', {
@@ -423,8 +464,21 @@ async function saveMemberEdit() {
       commandContexts: memberCommandContexts(member.memberId)
     })
     if (unifiedQueryActionSucceeded(response)) {
+      // Save completion only returns a compact list row. Re-read the editor
+      // projection so the next open always starts from the authoritative row.
+      await requestAction('open-member-editor', { memberId: member.memberId })
       editingMember.value = null
+      memberEditConflictMessage.value = ''
       await queryMembers({}, false)
+    } else if (isMemberEditConflict(response)) {
+      // A stale member version must never discard what the operator typed.
+      // Refresh the authoritative base and layer this unsaved draft over it.
+      const refreshed = await requestAction('open-member-editor', { memberId: member.memberId })
+      const latest = resultData(refreshed).member
+      if (unifiedQueryActionSucceeded(refreshed) && latest?.memberId) {
+        editingMember.value = { ...latest, ...draft }
+        memberEditConflictMessage.value = '会员资料已被更新，已加载最新资料并保留本次输入，请核对后再次保存。'
+      }
     }
   } finally {
     isMemberMutationSaving.value = false
@@ -570,6 +624,7 @@ async function openBatchAction() {
         <div class="member-mutation-modal__backdrop" @click="!isMemberMutationSaving && (editingMember = null)" />
         <form class="member-mutation-modal__card" @submit.prevent="saveMemberEdit">
           <header><h2>编辑会员</h2><button type="button" class="button button--text" :disabled="isMemberMutationSaving" @click="editingMember = null">关闭</button></header>
+          <p v-if="memberEditConflictMessage" class="member-mutation-modal__conflict" role="status">{{ memberEditConflictMessage }}</p>
           <label>会员姓名<input v-model.trim="editingMember.name" required maxlength="64"></label>
           <label>手机号<input :value="editingMember.phone" disabled></label>
           <label>性别<select v-model.number="editingMember.sex"><option :value="0">未填写</option><option :value="1">男</option><option :value="2">女</option></select></label>
@@ -614,6 +669,7 @@ async function openBatchAction() {
 .member-mutation-modal__card header, .member-mutation-modal__card footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .member-mutation-modal__card h2 { margin: 0; font-size: 18px; }
 .member-mutation-modal__card p { margin: 0; color: #4b5563; line-height: 1.65; }
+.member-mutation-modal__conflict { padding: 8px 10px; border: 1px solid #ffe1a8; border-radius: 6px; color: #8a5900 !important; background: #fff9ec; font-size: 13px; }
 .member-mutation-modal__card label { display: grid; gap: 6px; color: #374151; font-size: 13px; }
 .member-mutation-modal__card input, .member-mutation-modal__card select, .member-mutation-modal__card textarea { width: 100%; min-height: 34px; box-sizing: border-box; padding: 7px 9px; border: 1px solid #d1d5db; border-radius: 4px; font: inherit; }
 .member-mutation-modal__card textarea { resize: vertical; }

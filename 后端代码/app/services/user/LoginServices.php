@@ -92,6 +92,7 @@ class LoginServices extends BaseServices
 			}
 		}
         $data = [];
+        $phoneToBind = '';
         if (isset($user['nickname']) && $user['nickname']) {
             $data['nickname'] = $user['nickname'];
         }
@@ -99,7 +100,7 @@ class LoginServices extends BaseServices
             $data['avatar'] = $user['headimgurl'];
         }
         if (isset($user['phone']) && $user['phone'] && isset($userInfo['phone']) && !$userInfo['phone']) {
-            $data['phone'] = $user['phone'];
+            $phoneToBind = trim((string)$user['phone']);
         }
         $data['last_time'] = time();
         $data['last_ip'] = app()->request->ip();
@@ -127,6 +128,14 @@ class LoginServices extends BaseServices
         }
         if (!$this->dao->update($uid, $data, 'uid')) {
             throw new ValidateException('修改信息失败');
+        }
+        if ($phoneToBind !== '') {
+            /** @var CanonicalUserIdentityServices $identityServices */
+            $identityServices = app()->make(CanonicalUserIdentityServices::class);
+            $identityServices->bindPhoneIdentity($uid, $phoneToBind, [
+                'operator_type' => 'SYSTEM',
+                'source' => 'LOGIN_UPDATE_USER_INFO',
+            ]);
         }
         if (isset($data['spread_uid']) && $data['spread_uid']) {
             event('user.register', [$this->dao->get((int)$userInfo['uid']), false, $spread_uid]);

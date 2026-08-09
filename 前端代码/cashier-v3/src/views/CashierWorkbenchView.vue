@@ -3371,21 +3371,21 @@ async function requestCheckoutAction({ action, payload }) {
     if (!salesOrderId) {
       return { result: { status: 'failed', code: 'SALES_ORDER_ID_MISSING', message: '销售订单标识尚未加载，不能执行该操作。' } }
     }
-    if (action === 'view-sales-order') {
-      const result = await requestAction('open-sales-order-detail', { orderId: salesOrderId })
-      if (['failed', 'conflict'].includes(resultStatus(result))) return result
-      const projection = salesOrderProjectionFromResult(result)
-      const detail = projection?.salesOrderDetail
-      const detailOrderId = detail?.id || detail?.orderId || detail?.salesOrderId
-      if (!detail || String(detailOrderId) !== String(salesOrderId)) {
-        return {
-          result: {
-            status: 'failed',
-            code: 'SALES_ORDER_DETAIL_INVALID',
-            message: '销售订单详情尚未完整返回，请稍后重试。'
-          }
+    const result = await requestAction('open-sales-order-detail', { orderId: salesOrderId })
+    if (['failed', 'conflict', 'result_unknown'].includes(resultStatus(result))) return result
+    const projection = salesOrderProjectionFromResult(result)
+    const detail = projection?.salesOrderDetail
+    const detailOrderId = detail?.id || detail?.orderId || detail?.salesOrderId
+    if (!detail || String(detailOrderId) !== String(salesOrderId)) {
+      return {
+        result: {
+          status: 'failed',
+          code: 'SALES_ORDER_DETAIL_INVALID',
+          message: '销售订单详情尚未完整返回，请稍后重试。'
         }
       }
+    }
+    if (action === 'view-sales-order') {
       // This is a read-only partial projection, so the bridge does not replace
       // the cashier root state. Preserve it before navigating to the order page.
       state.orderCenter = mergeSalesOrderCenterProjection(state.orderCenter, projection)
@@ -3397,10 +3397,10 @@ async function requestCheckoutAction({ action, payload }) {
       }))
       return result
     }
-    return requestAction(action, {
-      salesOrderId,
-      idempotencyKey: payload?.idempotencyKey || createCashierV3CommandId()
-    })
+    // The success overlay itself only has a concise result projection.  Return
+    // the verified authority detail to its local print adapter so its receipt
+    // always includes items, payment rows and the frozen money summary.
+    return { ...result, receiptOrder: detail }
   }
 
   const session = checkoutSession.value
@@ -3461,6 +3461,9 @@ async function requestCheckoutAction({ action, payload }) {
     // Debt/service/reservation authorities are rebuilt from the persisted
     // request inside the server transaction and must not be client-supplied.
     approvedPayload.commandContexts = draftContexts
+    // Draft editing failures are handled inside the checkout overlay. They
+    // must not also create a global payment-result notification.
+    approvedPayload.silent = true
   }
   if (action === 'query-checkout-result' && !approvedPayload.originalIdempotencyKey) {
     return {

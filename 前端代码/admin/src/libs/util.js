@@ -10,6 +10,7 @@
 import cookies from './util.cookies';
 import log from './util.log';
 import db from './util.db';
+import Cookies from 'js-cookie';
 
 import Setting from '@/setting';
 
@@ -127,8 +128,10 @@ util.resolveDefaultMenuPath = function resolveDefaultMenuPath(menus) {
 };
 
 /**
- * 平台端免密进入门店后台（写入门店端 cookie / localStorage 后打开门店首页）
- * 开发预览 18081 与门店集成页 8080 不同端口时，通过 store_auto_login.html 桥接会话。
+ * 平台端免密进入门店端。
+ *
+ * 平台只负责签发受控的门店会话；新门店端从同源 cashier_token / localStorage
+ * 读取该会话后，仍由服务端按令牌解析门店与权限，前端不携带或猜测门店范围。
  */
 util.openStoreBackend = function openStoreBackend(data, options = {}) {
   if (!data || !data.token) {
@@ -138,6 +141,7 @@ util.openStoreBackend = function openStoreBackend(data, options = {}) {
   util.makeMenu(`/${data.prefix}`, menus);
   const expires = data.expires_time;
   const pageTitle = options.pageTitle || '';
+  const targetWindow = options.targetWindow || null;
   util.cookies.setStore('token', data.token, { expires });
   util.cookies.setStore('uuid', data.user_info.id, { expires });
   util.cookies.setStore('expires_time', expires, { expires });
@@ -157,25 +161,65 @@ util.openStoreBackend = function openStoreBackend(data, options = {}) {
     userInfoStore: JSON.stringify(userInfoStore),
   };
   try {
+    // 收银 V3 优先读取这个独立会话名。平台页面可能保留旧收银标签页，
+    // 因而不能只写 store-token/localStorage，否则旧 cashier_token 会覆盖
+    // 本次“进入门店”签发的目标门店超级管理员会话。
+    Cookies.set('cashier_token', data.token, { expires, path: '/' });
     window.localStorage.setItem('menuListStore', storagePayload.menuListStore);
     window.localStorage.setItem('uniqueAuthStore', storagePayload.uniqueAuthStore);
     window.localStorage.setItem('userInfoStore', storagePayload.userInfoStore);
+    // Cashier V3 only accepts a same-origin token. Do not pass it through the
+    // URL, which would expose it to history, referrers, and copied links.
+    // 平台端与门店端同源时，通用 token 属于平台登录态。收银 V3 已优先
+    // 从 cashier_token 读取门店会话，不能覆盖平台 token，否则切换门店会
+    // 破坏当前管理员会话并让已有收银页回退到错误门店。
+    window.localStorage.setItem('cashier_store_title', pageTitle);
   } catch (e) {
     // ignore
   }
 
   const storeOrigin = Setting.apiBaseURL.replace(/\/adminapi\/?$/, '');
+  const isLocalDevelopment = process.env.NODE_ENV === 'development'
+    && typeof window !== 'undefined'
+    && ['127.0.0.1', 'localhost'].includes(window.location.hostname);
+  if (isLocalDevelopment) {
+    // 平台开发页必须连接收银 V3 源码热更新服务，不能回退到 8080 的上一次
+    // 受控静态构建。库存由该收银页继续嵌入独立的 18088 源码服务。
+    const cashierDevOrigin = String(process.env.VUE_APP_CASHIER_V3_DEV_ORIGIN || '')
+      .trim()
+      .replace(/\/+$/, '');
+    if (!cashierDevOrigin) {
+      throw new Error('门店端开发地址未配置');
+    }
+    const cashierURL = `${cashierDevOrigin}/view_cashier_v3/#/cashier`;
+    if (targetWindow) {
+      targetWindow.location.replace(cashierURL);
+    } else {
+      window.open(cashierURL);
+    }
+    return;
+  }
   const sameOrigin = !storeOrigin || storeOrigin === window.location.origin;
   if (sameOrigin) {
-    const baseURL = `${storeOrigin}/${data.prefix}/home/`;
-    window.open(baseURL);
+    // 8080 serves the published V3 bundle. Vite's development entry only
+    // exists on its dedicated dev server, so it must not be selected here.
+    const cashierPath = '/cashier-v3/#/cashier';
+    const cashierURL = `${storeOrigin}${cashierPath}`;
+    if (targetWindow) {
+      targetWindow.location.replace(cashierURL);
+    } else {
+      window.open(cashierURL);
+    }
     return;
   }
 
   const bridgeUrl = `${storeOrigin}/store_auto_login.html`;
-  const win = window.open(bridgeUrl);
+  const win = targetWindow || window.open(bridgeUrl);
   if (!win) {
     throw new Error('请允许浏览器弹出窗口');
+  }
+  if (targetWindow) {
+    targetWindow.location.replace(bridgeUrl);
   }
   const payload = {
     token: data.token,

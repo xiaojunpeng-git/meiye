@@ -55,6 +55,7 @@ class Migrate extends Command
             ->addOption('repair-card-related', null, Option::VALUE_NONE, '将平台卡项关联同步到门店副本（收银台卡项弹窗选项目）')
             ->addOption('repair-product-attrs', null, Option::VALUE_NONE, '补全项目/卡项缺失的默认规格，并同步订单/卡包 SKU（收银台加购、手机预约）')
             ->addOption('repair-order-cart-sku', null, Option::VALUE_NONE, '同步 store_order_cart_info.sku_unique 与当前商品规格（手机卡包预约）')
+            ->addOption('exclusive-catalog-maintenance', null, Option::VALUE_NONE, '确认目标库 HTTP/队列/定时任务均已停止，独占修改商品目录')
             ->addOption('module', 'm', Option::VALUE_REQUIRED, '仅迁移指定模块: base|product|user|card|order|finance|reservation');
     }
 
@@ -156,6 +157,10 @@ class Migrate extends Command
         $this->newDb = Db::connect('migrate');
 
         if (!$this->assertMigrationSafety($output)) {
+            return 1;
+        }
+        if (!$input->getOption('exclusive-catalog-maintenance')) {
+            $output->writeln('<error>迁移会直接改写商品目录；请先停止目标库 HTTP、队列和定时任务，再显式传入 --exclusive-catalog-maintenance</error>');
             return 1;
         }
 

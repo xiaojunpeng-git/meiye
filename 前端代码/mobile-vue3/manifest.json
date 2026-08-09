@@ -11,8 +11,13 @@
 	"uniStatistics": {
 		"enable": false
 	},
+	"h5": {
+		"devServer": {
+			"port": 18100
+		}
+	},
 	"mp-weixin": {
-		"appid": "",
+		"appid": "wxce4f61fc9c4eaaa6",
 		"setting": {
 			"urlCheck": false
 		},

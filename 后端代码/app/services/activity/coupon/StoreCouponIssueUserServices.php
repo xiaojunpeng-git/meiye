@@ -14,6 +14,7 @@ namespace app\services\activity\coupon;
 
 use app\services\BaseServices;
 use app\dao\activity\coupon\StoreCouponIssueUserDao;
+use think\facade\Db;
 
 /**
  * Class StoreCouponIssueUserServices
@@ -43,5 +44,20 @@ class StoreCouponIssueUserServices extends BaseServices
         $list = $this->dao->getList($where, $page, $limit);
         $count = $this->dao->count($where);
         return compact('list', 'count');
+    }
+
+    /**
+     * Counts effective claims while retaining append-only V3 void history.
+     */
+    public function effectiveClaimCount(int $uid, int $issueCouponId): int
+    {
+        return (int)Db::name('store_coupon_issue_user')->alias('iu')
+            ->where('iu.uid', $uid)->where('iu.issue_coupon_id', $issueCouponId)
+            ->whereNotExists(function ($query): void {
+                $query->name('cashier_v3_recharge_gift_coupon_issue_mapping')->alias('gm')
+                    ->whereRaw('gm.coupon_issue_user_id=iu.id')
+                    ->where('gm.status', 'voided')
+                    ->field('gm.id');
+            })->count('iu.id');
     }
 }

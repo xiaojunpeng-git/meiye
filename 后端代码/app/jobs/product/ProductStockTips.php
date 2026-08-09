@@ -14,6 +14,8 @@ namespace app\jobs\product;
 
 use app\jobs\system\SocketPushJob;
 use app\services\product\product\StoreCardRelatedServices;
+use app\services\product\product\StoreCatalogWriteLease;
+use app\services\product\product\StoreCatalogWriteLockGuard;
 use app\services\product\product\StoreProductServices;
 use app\services\product\sku\StoreProductAttrValueServices;
 use mohe\basic\BaseJobs;
@@ -31,39 +33,47 @@ class ProductStockTips extends BaseJobs
 
     public function doJob($productId, $send = 1)
     {
-        /** @var StoreProductServices $make */
-        $make = app()->make(StoreProductServices::class);
-        $product = $make->get(['id' => $productId], ['stock', 'id', 'is_police', 'is_sold']);
+        $productId = (int)$productId;
+        if ($productId <= 0) {
+            return true;
+        }
         $store_stock = sys_config('store_stock') ?? 0;//库存预警界限
-        /** @var StoreProductAttrValueServices $storeValueService */
-        $storeValueService = app()->make(StoreProductAttrValueServices::class);
-        /** @var StoreCardRelatedServices $relatedService */
-        $relatedService = app()->make(StoreCardRelatedServices::class);
-        $count = $storeValueService->getPolice([
-            ['type', '=', 0],
-            ['stock', '<=', $store_stock],
-            ['product_id', '=', $productId]
-        ]);
-        $sold_count = $storeValueService->getPolice([
-            ['type', '=', 0],
-            ['product_type', '<>', 6],
-            ['stock', '<=', 0],
-            ['product_id', '=', $productId]
-        ]);
-        $product->is_sold = $sold_count ? 1 : 0;
-        if($sold_count) {
-            $relatedService->setStatus([$productId], 0);
-        }
-        if ($store_stock >= $product['stock'] || $count) {
-            $product->is_police = 1;
-            if ($send) {
-
-				SocketPushJob::dispatch(['', 'STORE_STOCK', ['id' => $productId], 'admin']);
+        /** @var StoreCatalogWriteLockGuard $catalogGuard */
+        $catalogGuard = app()->make(StoreCatalogWriteLockGuard::class);
+        $shouldSend = $catalogGuard->withComponentCatalogMutation([$productId], function (StoreCatalogWriteLease $catalogLease) use ($productId, $store_stock) {
+            /** @var StoreProductServices $make */
+            $make = app()->make(StoreProductServices::class);
+            $product = $make->get(['id' => $productId], ['stock', 'id', 'is_police', 'is_sold']);
+            if (!$product) {
+                return false;
             }
-        } else {
-            $product->is_police = 0;
+            /** @var StoreProductAttrValueServices $storeValueService */
+            $storeValueService = app()->make(StoreProductAttrValueServices::class);
+            /** @var StoreCardRelatedServices $relatedService */
+            $relatedService = app()->make(StoreCardRelatedServices::class);
+            $count = $storeValueService->getPolice([
+                ['type', '=', 0],
+                ['stock', '<=', $store_stock],
+                ['product_id', '=', $productId]
+            ]);
+            $soldCount = $storeValueService->getPolice([
+                ['type', '=', 0],
+                ['product_type', '<>', 6],
+                ['stock', '<=', 0],
+                ['product_id', '=', $productId]
+            ]);
+            $product->is_sold = $soldCount ? 1 : 0;
+            if ($soldCount) {
+                $relatedService->setStatusInGuard($catalogLease, [$productId], 0);
+            }
+            $shouldSend = $store_stock >= $product['stock'] || $count;
+            $product->is_police = $shouldSend ? 1 : 0;
+            $product->save();
+            return $shouldSend;
+        });
+        if ($send && $shouldSend) {
+            SocketPushJob::dispatch(['', 'STORE_STOCK', ['id' => $productId], 'admin']);
         }
-        $product->save();
         return true;
     }
 

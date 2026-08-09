@@ -12,6 +12,9 @@
 namespace app;
 
 use app\services\product\inventory\InventoryErrorMessage;
+use app\services\mobile\protocol\MobileApiException;
+use app\services\mobile\protocol\MobileApiResponse;
+use app\services\query\UnifiedQueryException;
 use mohe\exceptions\AdminException;
 use mohe\exceptions\ApiException;
 use mohe\exceptions\AuthException;
@@ -82,6 +85,19 @@ class ExceptionHandle extends Handle
                 'status' => 400,
             ]);
         }
+        if ($this->isMobileApiRequest($request)) {
+            if ($e instanceof MobileApiException) {
+                return MobileApiResponse::failure($e, $request);
+            }
+            if ($e instanceof ValidateException) {
+                return MobileApiResponse::validationFailure($e, $request);
+            }
+            // 统一查询已接入手机端时，不能退回旧 status/msg/data 封装；
+            // 保持移动协议并避免调试信息进入客户端。
+            if ($e instanceof UnifiedQueryException) {
+                return MobileApiResponse::validationFailure($e, $request);
+            }
+        }
         // 添加自定义异常处理机制
         $massageData = Env::get('app_debug', false) ? [
             'file'     => $e->getFile(),
@@ -107,5 +123,10 @@ class ExceptionHandle extends Handle
             return app('json')->code(500)->make(400, $e->getMessage(), $massageData);
         }
 
+    }
+
+    private function isMobileApiRequest($request): bool
+    {
+        return strpos(ltrim((string)$request->pathinfo(), '/'), 'api/mobile/') === 0;
     }
 }

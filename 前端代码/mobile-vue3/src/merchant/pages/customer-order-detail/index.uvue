@@ -1,0 +1,94 @@
+<template>
+	<view class="customer-order-detail">
+		<view class="customer-order-detail__header">
+			<view class="customer-order-detail__back" role="button" aria-label="返回客户详情" @tap="goBack"><text>‹</text></view>
+			<text class="customer-order-detail__title">销售订单详情</text>
+			<view class="customer-order-detail__header-space"></view>
+		</view>
+		<scroll-view class="customer-order-detail__content" scroll-y>
+			<view v-if="loading" class="customer-order-detail__empty"><text>正在读取订单详情</text></view>
+			<view v-else-if="message.length > 0" class="customer-order-detail__empty"><text>{{ message }}</text><view class="customer-order-detail__retry" role="button" @tap="loadDetail"><text>重新加载</text></view></view>
+			<view v-else-if="order == null" class="customer-order-detail__empty"><text>未找到销售订单</text></view>
+			<view v-else class="customer-order-detail__body">
+				<view class="customer-order-detail__summary">
+					<view><text class="customer-order-detail__kind">{{ order.kindLabel }}</text></view>
+					<text class="customer-order-detail__status">{{ order.statusLabel }}</text>
+				</view>
+				<view class="customer-order-detail__amount"><text class="customer-order-detail__amount-label">实收金额</text><text class="customer-order-detail__amount-value">¥{{ wholeMoney(order.amount) }}</text></view>
+				<view class="customer-order-detail__section">
+					<view class="customer-order-detail__section-heading"><text>商品明细</text></view>
+					<view v-if="order.items.length === 0" class="customer-order-detail__empty-items"><text>该订单没有可显示的商品明细</text></view>
+					<view v-else v-for="item in order.items" :key="item.id" class="customer-order-detail__item"><view><text class="customer-order-detail__item-name">{{ item.name }}</text><text class="customer-order-detail__item-meta">¥{{ wholeMoney(item.unitPrice) }} × {{ item.quantity }}</text></view><text class="customer-order-detail__item-total">¥{{ wholeMoney(item.subtotal) }}</text></view>
+				</view>
+				<view class="customer-order-detail__section">
+					<view class="customer-order-detail__section-heading"><text>订单信息</text></view>
+					<view v-for="field in detailFields()" :key="field.label" class="customer-order-detail__row"><text>{{ field.label }}</text><text>{{ field.value }}</text></view>
+				</view>
+			</view>
+		</scroll-view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	import { queryMobileCustomerOrderRecordDetail } from '../../../shared/api/mobile-customer-client.uts'
+	import { returnFromMerchantCustomerOrderDetail } from '../../../shared/platform/mobile-navigation.uts'
+
+	const memberId = ref('')
+	const orderId = ref('')
+	const order = ref<any>(null)
+	const loading = ref(false)
+	const message = ref('')
+
+	onLoad((options : any) => {
+		memberId.value = String(options != null ? options.memberId || '' : '')
+		orderId.value = String(options != null ? options.orderId || '' : '')
+		loadDetail()
+	})
+
+	function goBack() { returnFromMerchantCustomerOrderDetail() }
+	function loadDetail() {
+		if (memberId.value.length === 0 || orderId.value.length === 0) { message.value = '订单详情参数不完整，请返回客户详情重新打开。'; return }
+		loading.value = true; message.value = ''
+		queryMobileCustomerOrderRecordDetail({ memberId: Number(memberId.value), orderId: Number(orderId.value) }, (result : any) => {
+			loading.value = false
+			if (!result.ok || result.body == null || result.body.order == null) { message.value = String(result.message || '订单详情加载失败。'); return }
+			order.value = result.body.order
+		})
+	}
+	function textValue(value : any) : string { let text = String(value == null ? '' : value); return text.length > 0 ? text : '—' }
+	function wholeMoney(value : any) : string { let text = String(value == null ? '0' : value); let point = text.indexOf('.'); return point >= 0 ? text.substring(0, point) : text }
+	function detailFields() : Array<any> { if (order.value == null) return []; return [
+		{ label: '订单总额', value: '¥' + wholeMoney(order.value.totalAmount) },
+		{ label: '下单时间', value: textValue(order.value.occurredAt) },
+		{ label: '成交门店', value: textValue(order.value.storeName) }
+	] }
+</script>
+
+<style>
+	.customer-order-detail { display: flex; min-height: 100%; flex: 1; flex-direction: column; background-color: #f4f6f8; }
+	.customer-order-detail__header { display: flex; height: 56px; flex-direction: row; align-items: center; justify-content: space-between; padding: 0 20px; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #e5e9ee; background-color: #ffffff; }
+	.customer-order-detail__back { display: flex; width: 40px; height: 40px; flex-direction: row; align-items: center; font-size: 34px; line-height: 34px; color: #29323d; }
+	.customer-order-detail__title { font-size: 17px; font-weight: 700; line-height: 24px; color: #202a35; }
+	.customer-order-detail__header-space { width: 40px; }
+	.customer-order-detail__content { min-height: 0; flex: 1; }
+	.customer-order-detail__body { padding: 12px; }
+	.customer-order-detail__summary { display: flex; flex-direction: row; align-items: flex-start; justify-content: space-between; padding: 16px 14px; border-width: 1px; border-style: solid; border-color: #e1e6ec; border-radius: 6px 6px 0 0; background-color: #ffffff; }
+	.customer-order-detail__kind { display: block; font-size: 16px; font-weight: 700; line-height: 23px; color: #29323d; }
+	.customer-order-detail__order-no { display: block; margin-top: 5px; font-size: 12px; line-height: 18px; color: #718093; }
+	.customer-order-detail__status { flex-shrink: 0; margin-left: 12px; padding: 2px 6px; border-radius: 4px; background-color: #eff2f5; font-size: 11px; font-weight: 600; line-height: 17px; color: #637386; }
+	.customer-order-detail__amount { display: flex; min-height: 72px; flex-direction: row; align-items: center; justify-content: space-between; padding: 0 14px; border-right-width: 1px; border-bottom-width: 1px; border-left-width: 1px; border-style: solid; border-color: #e1e6ec; background-color: #ffffff; }
+	.customer-order-detail__amount-label { font-size: 13px; line-height: 20px; color: #6c7888; }
+	.customer-order-detail__amount-value { font-size: 22px; font-weight: 700; line-height: 29px; color: #202a35; }
+	.customer-order-detail__section { margin-top: 12px; border-width: 1px; border-style: solid; border-color: #e1e6ec; border-radius: 6px; background-color: #ffffff; overflow: hidden; }
+	.customer-order-detail__section-heading { display: flex; min-height: 48px; flex-direction: row; align-items: center; padding: 0 14px; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #edf0f3; font-size: 15px; font-weight: 700; color: #29323d; }
+	.customer-order-detail__item { display: flex; min-height: 64px; flex-direction: row; align-items: center; justify-content: space-between; padding: 10px 14px; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #edf0f3; }
+	.customer-order-detail__item:last-child, .customer-order-detail__row:last-child { border-bottom-width: 0; }
+	.customer-order-detail__item-name { display: block; font-size: 14px; font-weight: 600; line-height: 21px; color: #303a45; }
+	.customer-order-detail__item-meta { display: block; margin-top: 3px; font-size: 12px; line-height: 18px; color: #748193; }
+	.customer-order-detail__item-total { flex-shrink: 0; margin-left: 14px; font-size: 14px; font-weight: 700; color: #29323d; }
+	.customer-order-detail__row { display: flex; min-height: 50px; flex-direction: row; align-items: center; justify-content: space-between; padding: 0 14px; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #edf0f3; font-size: 13px; line-height: 20px; color: #6c7888; }
+	.customer-order-detail__row text:last-child { max-width: 62%; margin-left: 16px; font-weight: 600; color: #303a45; text-align: right; }
+	.customer-order-detail__empty { display: flex; min-height: 180px; flex-direction: column; align-items: center; justify-content: center; padding: 20px; font-size: 13px; line-height: 21px; color: #6d7a89; text-align: center; }
+	.customer-order-detail__retry { margin-top: 10px; font-size: 13px; font-weight: 600; color: #126bb5; }
+	.customer-order-detail__empty-items { display: flex; min-height: 76px; flex-direction: row; align-items: center; justify-content: center; padding: 0 14px; font-size: 13px; color: #728092; }
+</style>

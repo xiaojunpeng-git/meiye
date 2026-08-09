@@ -44,9 +44,9 @@ class UnifiedQueryPreferenceServices
     {
         $context = $this->access->normalizeContext($rawContext);
         $this->access->assertPageAccess($context);
-        $pageCode = (string)($payload['pageCode'] ?? ($payload['page_code'] ?? 'member_list'));
+        $pageCode = trim((string)($payload['pageCode'] ?? ($payload['page_code'] ?? '')));
         $this->registry->page($pageCode);
-        // 并发由外层 query_preference/member_list 网关资源锁唯一承担。
+        // 并发由外层 query_preference/<page_code> 网关资源锁唯一承担。
         // 此值来自已锁定的服务端 context，只证明调用未绕过网关，不与内部审计版本比较。
         $gatewayVersion = (int)($context['query_preference_version'] ?? 0);
         if ($gatewayVersion <= 0) {
@@ -188,7 +188,7 @@ class UnifiedQueryPreferenceServices
     {
         $context = $this->access->normalizeContext($rawContext);
         $this->access->assertPageAccess($context);
-        $pageCode = (string)($payload['pageCode'] ?? ($payload['page_code'] ?? 'member_list'));
+        $pageCode = trim((string)($payload['pageCode'] ?? ($payload['page_code'] ?? '')));
         $this->registry->page($pageCode);
         $fieldKey = trim((string)($payload['fieldKey'] ?? ($payload['field_key'] ?? '')));
         if (!preg_match('/^cf_[a-f0-9]{20,40}$/D', $fieldKey)) {
@@ -198,7 +198,7 @@ class UnifiedQueryPreferenceServices
                 []
             );
         }
-        // 与保存设置相同，外层 Gateway 的 query_preference 资源锁是唯一并发口径；
+        // 与保存设置相同，宿主 Gateway 的 query_preference 资源锁是唯一并发口径；
         // 不能用客户端 expectedVersion 或 fieldVersion 替代它。
         if ((int)($context['query_preference_version'] ?? 0) <= 0) {
             throw new UnifiedQueryException(
@@ -564,7 +564,9 @@ class UnifiedQueryPreferenceServices
             'quickFields' => $quick,
             'filters' => [],
             'filterRelation' => 'all',
-            'sorts' => [['field' => 'created_at', 'direction' => 'desc']],
+            // 页面未显式保存业务排序时，由执行器追加该页面的 stableRowKey，
+            // 不能假设所有统一查询页面都存在 created_at。
+            'sorts' => [],
             'groupBy' => [],
             'summaries' => [],
             'queryCutoffDate' => $this->trustedCutoffDate($context),

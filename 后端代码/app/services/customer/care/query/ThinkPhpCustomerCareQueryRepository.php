@@ -92,6 +92,9 @@ final class ThinkPhpCustomerCareQueryRepository implements CustomerCareQueryRepo
         if ($query['dataScope'] === 'normal') {
             $base->where('r.status', CustomerCareRecordState::NORMAL);
         }
+        if ((int)($query['memberId'] ?? 0) > 0) {
+            $base->where('r.member_id', (int)$query['memberId']);
+        }
         if ((int)($query['followedFrom'] ?? 0) > 0) {
             $base->where('r.followed_at', '>=', (int)$query['followedFrom']);
         }
@@ -549,6 +552,9 @@ final class ThinkPhpCustomerCareQueryRepository implements CustomerCareQueryRepo
         if ($query['scope'] === 'my') {
             $base->where('owner_staff_id', $scope->staffId());
         }
+		if ((int)($query['memberId'] ?? 0) > 0) {
+			$base->where('member_id', (int)$query['memberId']);
+		}
         $ownerStaffId = (int)($query['ownerStaffId'] ?? 0);
         if ($ownerStaffId > 0) {
             $base->where('owner_staff_id', $ownerStaffId);

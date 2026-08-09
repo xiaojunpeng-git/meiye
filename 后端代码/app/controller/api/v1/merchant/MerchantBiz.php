@@ -4,6 +4,7 @@ namespace app\controller\api\v1\merchant;
 use app\Request;
 use app\services\merchant\MerchantAccessServices;
 use app\services\merchant\MerchantCustomerServices;
+use app\services\merchant\MerchantCustomerCareServices;
 use app\services\merchant\MerchantDataServices;
 use app\services\merchant\MerchantHomeServices;
 use app\services\system\TrainingDocumentServices;
@@ -208,6 +209,20 @@ class MerchantBiz
         $services = app()->make(MerchantCustomerServices::class);
         $services->updateCustomer($targetUid, $access, $data);
         return app('json')->success('保存成功');
+    }
+
+    /** 手机端客情任务只读工作台，任务权威仍由共享客情服务提供。 */
+    public function customerCareWorkbench(Request $request)
+    {
+        [$uid, $access, $accessServices] = $this->access($request);
+        $accessServices->requirePermissions($access, ['merchant.customer.view'], '暂无客情查看权限');
+        $input = $request->getMore([
+            ['bucket', 'today'],
+            ['scope', 'my'],
+        ]);
+        /** @var MerchantCustomerCareServices $services */
+        $services = app()->make(MerchantCustomerCareServices::class);
+        return app('json')->success($services->workbench($uid, $access, $input));
     }
 
     public function dataBusiness(Request $request)

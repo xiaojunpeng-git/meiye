@@ -32,6 +32,9 @@ $checks = [
     'recharge payment methods cannot be duplicated' => strpos($module, 'recharge_checkout_payment_method_duplicate') !== false
         && strpos($module, "'canAdd'=>!isset(\$selectedMethods[\$code])") !== false
         && strpos($module, 'private function hasDuplicatePaymentMethods') !== false,
+    'recharge payment line identity stays stable across draft versions' => strpos($module, 'private function publicPaymentLineId') !== false
+        && strpos($module, "'id'=>\$this->publicPaymentLineId") !== false
+        && strpos($module, "hash_equals(\$this->publicPaymentLineId") !== false,
     'recharge source selection advances workspace only' => strpos($module, "self::SOURCE, ['cashier_workspace','member','member_balance','recharge_checkout_request'], ['cashier_workspace']") !== false
         && strpos($module, "'touched' => ['cashier_workspace']") !== false,
     'new context version provider and action module are installed' => strpos($bootstrap, 'CashierV3RechargeCheckoutRequestVersionProvider') !== false

@@ -205,6 +205,9 @@ final class CashierV3SalesOrderQueryServices
         ], true)) {
             $status = '';
         }
+        $dateFrom = $this->validBusinessDate($payload['dateFrom'] ?? $payload['businessDateFrom'] ?? '');
+        $dateTo = $this->validBusinessDate($payload['dateTo'] ?? $payload['businessDateTo'] ?? '');
+        if ($dateFrom !== '' && $dateTo !== '' && $dateFrom > $dateTo) [$dateFrom, $dateTo] = [$dateTo, $dateFrom];
         $recordType = $this->scalarString($payload['recordType'] ?? $payload['record_type'] ?? 'sales');
         $memberFilterPresent = array_key_exists('memberId', $payload) || array_key_exists('member_id', $payload);
         $memberId = $memberFilterPresent
@@ -223,6 +226,8 @@ final class CashierV3SalesOrderQueryServices
             'pageSize' => $pageSize,
             'keyword' => $keyword,
             'status' => $status,
+            'dateFrom' => $dateFrom,
+            'dateTo' => $dateTo,
             'memberId' => $memberId,
             'allowedStoreIds' => $this->canonicalStoreIds($allowedStores),
             'operatorStoreId' => $operatorScope->storeId(),
@@ -670,6 +675,8 @@ final class CashierV3SalesOrderQueryServices
         if ($criteria['memberId'] !== null) {
             $query->where('o.member_id', (int)$criteria['memberId']);
         }
+        if (($criteria['dateFrom'] ?? '') !== '') $query->where('o.business_date', '>=', $criteria['dateFrom']);
+        if (($criteria['dateTo'] ?? '') !== '') $query->where('o.business_date', '<=', $criteria['dateTo']);
         return $query;
     }
 
@@ -701,6 +708,15 @@ final class CashierV3SalesOrderQueryServices
                                     ->where('l.line_status', 'settled')
                                     ->where('l.line_direction', 'forward')
                                     ->where('l.item_name_snapshot', 'like', $like);
+                            });
+                        })
+                        ->whereOr(function ($personMatch) use ($like) {
+                            $personMatch->whereExists(function ($person) use ($like) {
+                                $person->name('cashier_v3_performance_fact')->alias('pf')
+                                    ->whereRaw('pf.order_id = o.order_id')
+                                    ->where('pf.fact_direction', 'forward')
+                                    ->where('pf.status', 'effective')
+                                    ->where('pf.employee_name_snapshot', 'like', $like);
                             });
                         });
                 });
@@ -1167,11 +1183,19 @@ final class CashierV3SalesOrderQueryServices
         $cashPerformanceCents = (int)$batch['cash_performance_amount_cents'];
         $debtCents = (int)($request['debt_amount_cents'] ?? 0);
         $balanceCents = (int)($request['balance_deduction_amount_cents'] ?? 0);
-        if ((int)$header['sale_amount_cents'] !== $receivableCents
-            || (int)$batch['collected_amount_cents'] !== $cashPerformanceCents
-            || $debtCents < 0 || $balanceCents < 0
-            || $cashPerformanceCents + $debtCents + $balanceCents !== $receivableCents) {
-            throw new \RuntimeException('sales_order_authority_settlement_equation_invalid');
+        $settlementEquationValid = (int)$header['sale_amount_cents'] === $receivableCents
+            && (int)$batch['collected_amount_cents'] === $cashPerformanceCents
+            && $debtCents >= 0
+            && $balanceCents >= 0
+            && $cashPerformanceCents + $debtCents + $balanceCents === $receivableCents;
+        if (!$settlementEquationValid) {
+            // A bad historical snapshot must stay visible for reconciliation,
+            // but cannot make unrelated business records disappear or expose
+            // untrustworthy amounts as normal settlement data.
+            $receivableCents = 0;
+            $cashPerformanceCents = 0;
+            $debtCents = 0;
+            $balanceCents = 0;
         }
         $items = [];
         $salespersonNames = [];
@@ -1182,7 +1206,7 @@ final class CashierV3SalesOrderQueryServices
                 $snapshot['craftsmenByLine'][(string)$line['order_line_id']] ?? []
             );
             foreach ($snapshot['salespeopleByLine'][(string)$line['order_line_id']] ?? [] as $person) {
-                $name = trim((string)($person['employee_name_snapshot'] ?? ''));
+                $name = $this->salespersonDisplayName($person);
                 if ($name !== '') $salespersonNames[$name] = true;
             }
         }
@@ -1195,18 +1219,17 @@ final class CashierV3SalesOrderQueryServices
         foreach ($snapshot['collections'] as $collection) $paymentNames[$this->paymentMethodName($collection)] = true;
         $memberName = trim((string)$header['member_name_snapshot']);
         $operations = (array)($snapshot['lifecycleOperations'] ?? []);
-        $hasProduct = false;
-        foreach ((array)$snapshot['lines'] as $sourceLine) {
-            if (strtolower((string)($sourceLine['item_type'] ?? '')) === 'product') {
-                $hasProduct = true;
-                break;
-            }
-        }
         $terminal = null;
         foreach ($operations as $operation) {
             if (in_array((string)$operation['operation_type'], ['refund', 'void'], true)) $terminal = $operation;
         }
-        $orderStatus = $terminal ? ((string)$terminal['operation_type'] === 'void' ? '已作废' : '已退款') : '正常';
+        $orderStatus = !$settlementEquationValid
+            ? '数据异常'
+            : ($terminal ? ((string)$terminal['operation_type'] === 'void' ? '已作废' : '已退款作废') : '正常');
+        $paymentStatus = !$settlementEquationValid
+            ? '数据异常'
+            : ($debtCents > 0 ? '部分支付（含欠款）' : '已支付');
+        $economicsStatus = $settlementEquationValid ? 'ready' : 'integrity_failed';
         $mapped = [
             'id' => (string)$header['order_id'], 'orderId' => (string)$header['order_id'],
             'revision' => 1 + count($operations),
@@ -1225,44 +1248,53 @@ final class CashierV3SalesOrderQueryServices
             'itemCount' => array_sum(array_map(function (array $item): int { return (int)$item['quantity']; }, $items)),
             'item_count' => array_sum(array_map(function (array $item): int { return (int)$item['quantity']; }, $items)),
             'orderStatus' => $orderStatus, 'order_status' => $orderStatus,
-            'paymentStatus' => $debtCents > 0 ? '部分支付（含欠款）' : '已支付',
-            'payment_status' => $debtCents > 0 ? '部分支付（含欠款）' : '已支付',
-            'receivableAmount' => $this->moneyFromCents($receivableCents), 'receivable_amount' => $this->moneyFromCents($receivableCents),
-            'discountAmount' => $this->moneyFromCents((int)$header['discount_amount_cents']), 'discount_amount' => $this->moneyFromCents((int)$header['discount_amount_cents']),
-            'debtAmount' => $this->moneyFromCents($debtCents), 'debt_amount' => $this->moneyFromCents($debtCents),
-            'actualReceivedAmount' => $this->moneyFromCents($cashPerformanceCents), 'actual_received_amount' => $this->moneyFromCents($cashPerformanceCents),
+            'paymentStatus' => $paymentStatus, 'payment_status' => $paymentStatus,
+            'receivableAmount' => $settlementEquationValid ? $this->moneyFromCents($receivableCents) : null,
+            'receivable_amount' => $settlementEquationValid ? $this->moneyFromCents($receivableCents) : null,
+            'discountAmount' => $settlementEquationValid ? $this->moneyFromCents((int)$header['discount_amount_cents']) : null,
+            'discount_amount' => $settlementEquationValid ? $this->moneyFromCents((int)$header['discount_amount_cents']) : null,
+            'debtAmount' => $settlementEquationValid ? $this->moneyFromCents($debtCents) : null,
+            'debt_amount' => $settlementEquationValid ? $this->moneyFromCents($debtCents) : null,
+            'actualReceivedAmount' => $settlementEquationValid ? $this->moneyFromCents($cashPerformanceCents) : null,
+            'actual_received_amount' => $settlementEquationValid ? $this->moneyFromCents($cashPerformanceCents) : null,
             'paymentMethod' => implode('、', array_keys($paymentNames)), 'payment_method' => implode('、', array_keys($paymentNames)),
             'salespersonSummary' => implode('、', array_keys($salespersonNames)), 'cashierName' => (string)$header['operator_name_snapshot'],
             'sourcePrimary' => '收银台', 'sourceSecondary' => 'V3 结账',
-            'economicsDataStatus' => 'ready', 'cashPerformanceDataStatus' => 'ready',
+            'economicsDataStatus' => $economicsStatus, 'cashPerformanceDataStatus' => $economicsStatus,
+            'dataIntegrityStatus' => $settlementEquationValid ? 'valid' : 'settlement_equation_invalid',
             'contractVersion' => self::CONTRACT_VERSION,
-            'availableActions' => $terminal ? ['reopen-sales-order'] : array_values(array_filter([
+            'availableActions' => !$settlementEquationValid ? [] : ($terminal ? ['reopen-sales-order'] : array_values(array_filter([
                 'open-sales-order-personnel-adjustment', 'adjust-sales-order-personnel',
                 'reopen-sales-order',
                 // 游客没有会员欠款账户，不能进入补交链路。
                 (int)$header['member_id'] > 0 ? 'open-order-debt-settlements' : null,
-                $hasProduct ? null : 'refund-sales-order',
-                $hasProduct ? null : 'void-sales-order',
-            ])),
+                // 退款只写人工确认的财务冲销，不撤回库存、卡项或后续服务，
+                // 因此所有完整结算订单都可进入一次退款。
+                'refund-sales-order',
+                // 作废仍是严格的全量回滚路径，具体资格由服务端二次校验。
+                'void-sales-order',
+            ]))),
         ];
         if (!$detail) return $mapped;
         $mapped['orderNote'] = '';
         $mapped['items'] = $items;
         $mapped['amountSummary'] = [
-            'originalAmount' => $this->moneyFromCents((int)$header['original_amount_cents']),
+            'originalAmount' => $settlementEquationValid ? $this->moneyFromCents((int)$header['original_amount_cents']) : null,
             'priceChangeDiscountAmount' => null, 'couponDiscountAmount' => null,
-            'otherDiscountAmount' => $this->moneyFromCents((int)$header['discount_amount_cents']),
-            'payableAmount' => $this->moneyFromCents($receivableCents), 'debtAmount' => $this->moneyFromCents($debtCents),
-            'actualReceivedAmount' => $this->moneyFromCents($cashPerformanceCents),
-            'balancePaymentAmount' => $this->moneyFromCents($balanceCents), 'dataStatus' => 'ready',
+            'otherDiscountAmount' => $settlementEquationValid ? $this->moneyFromCents((int)$header['discount_amount_cents']) : null,
+            'payableAmount' => $settlementEquationValid ? $this->moneyFromCents($receivableCents) : null,
+            'debtAmount' => $settlementEquationValid ? $this->moneyFromCents($debtCents) : null,
+            'actualReceivedAmount' => $settlementEquationValid ? $this->moneyFromCents($cashPerformanceCents) : null,
+            'balancePaymentAmount' => $settlementEquationValid ? $this->moneyFromCents($balanceCents) : null,
+            'dataStatus' => $economicsStatus,
         ];
-        $mapped['paymentDetails'] = array_map(function (array $collection): array {
+        $mapped['paymentDetails'] = !$settlementEquationValid ? [] : array_map(function (array $collection): array {
             return ['id' => (string)$collection['collection_id'], 'paymentMethodCode' => (string)$collection['payment_method'],
                 'methodName' => $this->paymentMethodName($collection), 'amount' => $this->moneyFromCents((int)$collection['amount_cents']),
                 'externalTransactionNo' => (string)$collection['external_transaction_no_snapshot'], 'remark' => (string)$collection['remark_snapshot'],
                 'occurredAt' => $this->formatTimestamp((int)$collection['occurred_at'], 'Y-m-d H:i:s')];
         }, $snapshot['collections']);
-        $mapped['paymentDetailsDataStatus'] = 'ready';
+        $mapped['paymentDetailsDataStatus'] = $economicsStatus;
         $mapped['cardBatches'] = [];
         $operationRecords = array_map(function (array $operation): array {
             $labels = ['personnel_adjustment' => '人员调整', 'refund' => '退款', 'void' => '作废', 'reopen' => '重开'];
@@ -1306,7 +1338,7 @@ final class CashierV3SalesOrderQueryServices
             'isExperience' => (int)($line['is_experience'] ?? 0) === 1,
             'salespeople' => array_map(function (array $person): array {
                 return ['id' => (string)$person['fact_id'], 'employeeId' => (int)$person['employee_id'], 'name' => (string)$person['employee_name_snapshot'],
-                    'employeeType' => (string)$person['employee_type_snapshot'], 'allocationWeight' => (int)$person['allocation_weight_numerator'],
+                    'employeeType' => (string)$person['employee_type_snapshot'], 'roleSnapshot' => (string)($person['role_snapshot'] ?? ''), 'allocationWeight' => (int)$person['allocation_weight_numerator'],
                     'allocationWeightDenominator' => (int)$person['allocation_weight_denominator'], 'salesPerformanceAmount' => $this->moneyFromCents((int)$person['amount_cents'])];
             }, $salespeople), 'craftsmen' => $craftsmen !== []
                 ? array_map(function (array $person): array {
@@ -1489,7 +1521,7 @@ final class CashierV3SalesOrderQueryServices
         $salespersonNames = [];
         foreach ($items as $item) {
             foreach (($item['salespeople'] ?? []) as $salesperson) {
-                $name = trim((string)($salesperson['name'] ?? ''));
+                $name = $this->salespersonDisplayName($salesperson);
                 if ($name !== '') {
                     $salespersonNames[$name] = true;
                 }
@@ -1791,7 +1823,7 @@ final class CashierV3SalesOrderQueryServices
         $labels = [
             'normal' => '正常',
             'refund_pending' => (int)($row['refund_status'] ?? 0) === 1 ? '申请退款' : '退款中',
-            'refunded' => '已退款',
+            'refunded' => '已退款作废',
             'partially_refunded' => '部分退款',
             'cancelled' => '已取消',
             'voided' => '已作废',
@@ -1845,11 +1877,28 @@ final class CashierV3SalesOrderQueryServices
             ['value' => '', 'label' => '全部'],
             ['value' => 'normal', 'label' => '正常'],
             ['value' => 'refund_pending', 'label' => '退款中'],
-            ['value' => 'refunded', 'label' => '已退款'],
+            ['value' => 'refunded', 'label' => '已退款作废'],
             ['value' => 'partially_refunded', 'label' => '部分退款'],
             ['value' => 'cancelled', 'label' => '已取消'],
             ['value' => 'voided', 'label' => '已作废'],
         ];
+    }
+
+    private function validBusinessDate($value): string
+    {
+        $value = trim((string)$value);
+        return preg_match('/^\d{4}-\d{2}-\d{2}$/', $value) === 1 ? $value : '';
+    }
+
+    private function salespersonDisplayName(array $person): string
+    {
+        $name = trim((string)($person['employee_name_snapshot'] ?? $person['name'] ?? ''));
+        if ($name === '') return '';
+        $role = strtolower(trim((string)($person['role_snapshot'] ?? $person['roleSnapshot'] ?? '')));
+        if ($role === '') $role = strtolower(trim((string)($person['employee_type_snapshot'] ?? $person['employeeType'] ?? '')));
+        if (str_contains($role, 'presale') || str_contains($role, 'pre_sale') || str_contains($role, '售前')) return $name . '（售前）';
+        if (str_contains($role, 'postsale') || str_contains($role, 'post_sale') || str_contains($role, '售后')) return $name . '（售后）';
+        return $name;
     }
 
     private function formatTimestamp(int $timestamp, string $format)

@@ -19,6 +19,10 @@ const props = defineProps({
   isPreparing: {
     type: Boolean,
     default: false
+  },
+  initialDebtId: {
+    type: [String, Number],
+    default: ''
   }
 })
 
@@ -78,6 +82,15 @@ watch(records, (nextRecords) => {
   paymentLines.value = []
   salespersonAllocations.value = []
   validationMessage.value = ''
+}, { immediate: true })
+
+// 从订单中心“去还款”进入时，只预选对应欠款；实际准备收款必须由用户
+// 点击“下一步”触发，不能在打开明细时隐式跳转或覆盖当前购物车。
+watch([records, () => props.initialDebtId], ([nextRecords, initialDebtId]) => {
+  const requested = String(initialDebtId || '')
+  if (!requested || selectedDebtId.value || props.isPreparing) return
+  const record = nextRecords.find((item) => String(recordId(item)) === requested)
+  if (record) selectRepayment(record)
 }, { immediate: true })
 
 function value(record, keys, fallback = '—') {

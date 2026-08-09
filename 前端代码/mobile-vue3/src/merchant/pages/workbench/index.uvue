@@ -1,0 +1,179 @@
+<template>
+	<view class="merchant-workbench">
+		<view class="merchant-workbench__header">
+			<view class="merchant-workbench__heading-copy"><text class="merchant-workbench__eyebrow">商家端</text><text class="merchant-workbench__title">工作台</text></view>
+			<picker v-if="storeContexts.length > 1" mode="selector" :range="storeLabels" :value="activeStoreIndex" @change="selectStore">
+				<view class="merchant-workbench__store merchant-workbench__store--switchable"><view class="merchant-workbench__store-copy"><text class="merchant-workbench__store-label">当前门店</text><text class="merchant-workbench__store-name">{{ activeStoreLabel }}</text></view><text class="merchant-workbench__store-action">{{ switchingStore ? '切换中' : '切换' }}</text></view>
+			</picker>
+			<view v-else class="merchant-workbench__store"><view class="merchant-workbench__store-copy"><text class="merchant-workbench__store-label">当前门店</text><text class="merchant-workbench__store-name">{{ activeStoreLabel }}</text></view></view>
+		</view>
+		<view v-if="storeSwitchMessage.length > 0" class="merchant-workbench__store-error" role="alert"><text>{{ storeSwitchMessage }}</text></view>
+
+		<scroll-view scroll-y class="merchant-workbench__content">
+			<view class="merchant-workbench__section">
+				<view class="merchant-workbench__section-heading">
+					<text class="merchant-workbench__section-title">待办</text>
+					<text class="merchant-workbench__refresh" @tap="loadTodos">刷新</text>
+				</view>
+				<view class="merchant-workbench__todo-list">
+					<navigator class="merchant-workbench__todo" url="/src/merchant/pages/customer-care/index?bucket=all&statusGroup=open" open-type="navigate">
+						<view class="merchant-workbench__todo-count"><text>{{ careLoading ? '—' : (careFailed ? '!' : openTaskCount) }}</text></view>
+						<view class="merchant-workbench__todo-copy"><text class="merchant-workbench__todo-title">跟进任务</text><text class="merchant-workbench__todo-note">{{ careFailed ? '数据暂不可用，点击进入后重试' : '未完成的跟进任务' }}</text></view>
+						<text class="merchant-workbench__chevron">›</text>
+					</navigator>
+					<navigator class="merchant-workbench__todo" url="/src/merchant/pages/reservations/index" open-type="navigate">
+						<view class="merchant-workbench__todo-count merchant-workbench__todo-count--warm"><text>{{ reservationLoading ? '—' : (reservationFailed ? '!' : dueNotArrivedCount) }}</text></view>
+						<view class="merchant-workbench__todo-copy"><text class="merchant-workbench__todo-title">预约未到店</text><text class="merchant-workbench__todo-note">{{ reservationFailed ? '数据暂不可用，点击进入后重试' : '已到预约时间，尚未开始服务' }}</text></view>
+						<text class="merchant-workbench__chevron">›</text>
+					</navigator>
+				</view>
+			</view>
+
+			<view class="merchant-workbench__section merchant-workbench__section--functions">
+				<text class="merchant-workbench__section-title">常用功能</text>
+				<view class="merchant-workbench__grid">
+					<navigator class="merchant-workbench__entry" url="/src/merchant/pages/reservations/index" open-type="navigate"><text class="merchant-workbench__entry-index">01</text><text class="merchant-workbench__entry-label">预约管理</text></navigator>
+					<navigator class="merchant-workbench__entry" url="/src/merchant/pages/customer-care/index" open-type="navigate"><text class="merchant-workbench__entry-index">02</text><text class="merchant-workbench__entry-label">客情管理</text></navigator>
+					<navigator class="merchant-workbench__entry" url="/src/merchant/pages/customers/index" open-type="navigate"><text class="merchant-workbench__entry-index">03</text><text class="merchant-workbench__entry-label">客户管理</text></navigator>
+					<view class="merchant-workbench__entry merchant-workbench__entry--pending" @tap="showPending('服务确认')"><text class="merchant-workbench__entry-index">04</text><text class="merchant-workbench__entry-label">服务确认</text><text class="merchant-workbench__entry-state">待开发</text></view>
+					<view class="merchant-workbench__entry merchant-workbench__entry--pending" @tap="showPending('订单管理')"><text class="merchant-workbench__entry-index">05</text><text class="merchant-workbench__entry-label">订单管理</text><text class="merchant-workbench__entry-state">待开发</text></view>
+					<view class="merchant-workbench__entry merchant-workbench__entry--pending" @tap="showPending('欠款管理')"><text class="merchant-workbench__entry-index">06</text><text class="merchant-workbench__entry-label">欠款管理</text><text class="merchant-workbench__entry-state">待开发</text></view>
+					<view class="merchant-workbench__entry merchant-workbench__entry--pending" @tap="showPending('售后管理')"><text class="merchant-workbench__entry-index">07</text><text class="merchant-workbench__entry-label">售后管理</text><text class="merchant-workbench__entry-state">待开发</text></view>
+					<view class="merchant-workbench__entry merchant-workbench__entry--pending" @tap="showPending('服务留影')"><text class="merchant-workbench__entry-index">08</text><text class="merchant-workbench__entry-label">服务留影</text><text class="merchant-workbench__entry-state">待开发</text></view>
+				</view>
+			</view>
+		</scroll-view>
+
+		<view class="merchant-workbench__tabs" role="tablist">
+			<navigator class="merchant-workbench__tab" url="/src/merchant/pages/warehouse/index" open-type="navigate" role="tab" aria-selected="false"><text class="merchant-workbench__tab-index">01</text><text class="merchant-workbench__tab-label">数仓</text></navigator>
+			<navigator class="merchant-workbench__tab" url="/src/merchant/pages/customers/index" open-type="navigate"><text class="merchant-workbench__tab-index">02</text><text class="merchant-workbench__tab-label">客户</text></navigator>
+			<view class="merchant-workbench__tab merchant-workbench__tab--active" role="tab" aria-selected="true"><text class="merchant-workbench__tab-index">03</text><text class="merchant-workbench__tab-label">工作台</text></view>
+			<navigator class="merchant-workbench__tab" url="/src/merchant/pages/goals/index" open-type="navigate" role="tab" aria-selected="false"><text class="merchant-workbench__tab-index">04</text><text class="merchant-workbench__tab-label">目标</text></navigator>
+			<navigator class="merchant-workbench__tab" url="/src/merchant/pages/profile/index" open-type="navigate"><text class="merchant-workbench__tab-index">05</text><text class="merchant-workbench__tab-label">我的</text></navigator>
+		</view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	import { queryMobileCustomerCare } from '../../../shared/api/mobile-customer-care-client.uts'
+	import { queryMobileReservations } from '../../../shared/api/mobile-reservation-client.uts'
+	import { switchMobileMerchantContext } from '../../../shared/api/mobile-merchant-session-client.uts'
+	import { currentMerchantRoot } from '../../../shared/platform/mobile-merchant-session.uts'
+	import { showMobileNotice } from '../../../shared/platform/mobile-platform.uts'
+
+	const openTaskCount = ref(0)
+	const dueNotArrivedCount = ref(0)
+	const careLoading = ref(false)
+	const reservationLoading = ref(false)
+	const careFailed = ref(false)
+	const reservationFailed = ref(false)
+	const storeContexts = ref<Array<any>>([])
+	const storeLabels = ref<Array<string>>([])
+	const activeStoreIndex = ref(0)
+	const activeStoreLabel = ref('门店信息加载中')
+	const switchingStore = ref(false)
+	const storeSwitchMessage = ref('')
+
+	onShow(() => { loadStoreContext(); loadTodos() })
+
+	function loadStoreContext() : void {
+		let root = currentMerchantRoot()
+		let contexts = root != null && Array.isArray(root.contexts) ? root.contexts : []
+		let activeId = root != null && root.activeContext != null ? String(root.activeContext.contextId || '') : ''
+		storeContexts.value = contexts
+		storeLabels.value = contexts.map((context : any) : string => String(context.label || '未命名门店'))
+		let index = 0
+		for (let position = 0; position < contexts.length; position++) if (String(contexts[position].contextId || '') == activeId) { index = position; break }
+		activeStoreIndex.value = index
+		activeStoreLabel.value = contexts.length > 0 ? storeLabels.value[index] : '暂无可用门店'
+	}
+
+	function selectStore(event : any) : void {
+		if (switchingStore.value) return
+		let index = Number(event.detail.value || 0)
+		if (index < 0 || index >= storeContexts.value.length || index == activeStoreIndex.value) return
+		let targetContextId = String(storeContexts.value[index].contextId || '')
+		switchingStore.value = true
+		storeSwitchMessage.value = ''
+		switchMobileMerchantContext(targetContextId, (result : any) => {
+			switchingStore.value = false
+			if (!result.ok) { storeSwitchMessage.value = String(result.message || '门店切换失败。'); return }
+			loadStoreContext()
+			loadTodos()
+		})
+	}
+
+	function loadTodos() : void {
+		loadOpenTasks()
+		loadDueReservations()
+	}
+
+	function loadOpenTasks() : void {
+		careLoading.value = true
+		careFailed.value = false
+		queryMobileCustomerCare({ view: 'tasks', query: { bucket: 'all', statusGroup: 'open', pageSize: 1 } }, (response : any) => {
+			careLoading.value = false
+			let projection = response != null && response.body != null && response.body.projection != null ? response.body.projection.customerCare : null
+			if (!response.ok || projection == null || projection.taskView == null) { careFailed.value = true; return }
+			openTaskCount.value = Number(projection.taskView.total || 0)
+		})
+	}
+
+	function loadDueReservations() : void {
+		reservationLoading.value = true
+		reservationFailed.value = false
+		queryMobileReservations((response : any) => {
+			reservationLoading.value = false
+			let payload = response != null && response.body != null ? response.body.reservation : null
+			let view = payload != null && payload.data != null ? payload.data.reservation : null
+			if (!response.ok || payload == null || payload.result == null || payload.result.status != 'success' || view == null || view.quickCounts == null) { reservationFailed.value = true; return }
+			dueNotArrivedCount.value = Number(view.quickCounts.dueNotArrived || 0)
+		})
+	}
+
+	function showPending(label : string) : void {
+		showMobileNotice(label + '待开发')
+	}
+</script>
+
+<style>
+	.merchant-workbench { display: flex; min-height: 100%; flex: 1; flex-direction: column; background-color: #f4f6f8; }
+	.merchant-workbench__header { display: flex; flex-direction: row; align-items: flex-end; justify-content: space-between; padding: 52px 20px 18px 20px; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #e3e7ec; background-color: #ffffff; }
+	.merchant-workbench__heading-copy { display: flex; flex-shrink: 0; flex-direction: column; }
+	.merchant-workbench__eyebrow { font-size: 12px; font-weight: 600; line-height: 18px; color: #687483; }
+	.merchant-workbench__title { margin-top: 5px; font-size: 24px; font-weight: 700; line-height: 32px; color: #20242a; }
+	.merchant-workbench__store { display: flex; min-width: 0; max-width: 210px; min-height: 42px; flex-direction: row; align-items: center; justify-content: flex-end; }
+	.merchant-workbench__store--switchable { padding-left: 12px; }
+	.merchant-workbench__store-copy { display: flex; min-width: 0; flex-direction: column; align-items: flex-end; }
+	.merchant-workbench__store-label { font-size: 10px; line-height: 15px; color: #8993a0; }
+	.merchant-workbench__store-name { max-width: 150px; overflow: hidden; font-size: 14px; font-weight: 700; line-height: 21px; color: #2e3945; text-overflow: ellipsis; white-space: nowrap; }
+	.merchant-workbench__store-action { flex-shrink: 0; margin-left: 8px; padding: 4px 7px; border-radius: 4px; background-color: #edf5fb; font-size: 11px; line-height: 17px; color: #1677cc; }
+	.merchant-workbench__store-error { padding: 9px 18px; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #f0cccc; background-color: #fff7f7; font-size: 12px; line-height: 18px; color: #a44848; }
+	.merchant-workbench__content { display: flex; min-height: 0; flex: 1; padding-bottom: 92px; }
+	.merchant-workbench__section { display: flex; flex-direction: column; padding: 20px; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #e3e7ec; background-color: #ffffff; }
+	.merchant-workbench__section--functions { margin-top: 10px; }
+	.merchant-workbench__section-heading { display: flex; flex-direction: row; align-items: center; justify-content: space-between; }
+	.merchant-workbench__section-title { font-size: 16px; font-weight: 700; line-height: 24px; color: #252a31; }
+	.merchant-workbench__refresh { padding: 4px 0px 4px 12px; font-size: 13px; line-height: 20px; color: #1677cc; }
+	.merchant-workbench__todo-list { display: flex; flex-direction: column; margin-top: 10px; }
+	.merchant-workbench__todo { display: flex; min-height: 72px; flex-direction: row; align-items: center; border-top-width: 1px; border-top-style: solid; border-top-color: #edf0f3; }
+	.merchant-workbench__todo:last-child { border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #edf0f3; }
+	.merchant-workbench__todo-count { display: flex; width: 42px; height: 42px; flex-shrink: 0; align-items: center; justify-content: center; border-radius: 8px; background-color: #e8f3fb; font-size: 18px; font-weight: 700; color: #1268a8; }
+	.merchant-workbench__todo-count--warm { background-color: #fff2df; color: #9a5a00; }
+	.merchant-workbench__todo-copy { display: flex; min-width: 0; flex: 1; flex-direction: column; padding: 0px 12px; }
+	.merchant-workbench__todo-title { font-size: 15px; font-weight: 700; line-height: 22px; color: #252a31; }
+	.merchant-workbench__todo-note { margin-top: 2px; font-size: 12px; line-height: 18px; color: #737e8c; }
+	.merchant-workbench__chevron { width: 16px; flex-shrink: 0; font-size: 22px; line-height: 28px; color: #a0a8b2; }
+	.merchant-workbench__grid { display: flex; flex-direction: row; flex-wrap: wrap; margin-top: 12px; border-top-width: 1px; border-left-width: 1px; border-style: solid; border-color: #e2e7ec; }
+	.merchant-workbench__entry { display: flex; box-sizing: border-box; width: 25%; min-height: 84px; flex-direction: column; align-items: center; justify-content: center; padding: 10px 4px; border-right-width: 1px; border-bottom-width: 1px; border-style: solid; border-color: #e2e7ec; background-color: #ffffff; }
+	.merchant-workbench__entry--pending { background-color: #fafbfc; }
+	.merchant-workbench__entry-index { font-size: 11px; font-weight: 600; line-height: 16px; color: #8993a0; }
+	.merchant-workbench__entry-label { margin-top: 4px; font-size: 13px; font-weight: 700; line-height: 20px; color: #30353c; }
+	.merchant-workbench__entry-state { margin-top: 2px; font-size: 10px; line-height: 14px; color: #9aa2ad; }
+	.merchant-workbench__tabs { display: flex; min-height: 72px; flex-direction: row; align-items: stretch; border-top-width: 1px; border-top-style: solid; border-top-color: #dde4ed; background-color: #ffffff; }
+	.merchant-workbench__tab { display: flex; min-width: 0; flex: 1; flex-direction: column; align-items: center; justify-content: center; border-top-width: 2px; border-top-style: solid; border-top-color: #ffffff; }
+	.merchant-workbench__tab--active { border-top-color: #1677cc; background-color: #f7fbff; }
+	.merchant-workbench__tab-index { font-size: 10px; font-weight: 600; line-height: 14px; color: #98a2b3; }
+	.merchant-workbench__tab-label { margin-top: 2px; font-size: 12px; font-weight: 600; line-height: 18px; color: #526071; }
+	.merchant-workbench__tab--active .merchant-workbench__tab-index, .merchant-workbench__tab--active .merchant-workbench__tab-label { color: #1677cc; }
+</style>

@@ -75,6 +75,22 @@ class UnifiedQueryExportTaskServices
         }
         $pageCode = (string)($payload['pageCode'] ?? ($payload['page_code'] ?? ''));
         $this->registry->page($pageCode);
+        $contextPageCode = $this->contextPageCode($context);
+        if (!hash_equals($contextPageCode, $pageCode)) {
+            throw new UnifiedQueryException(
+                'UNIFIED_QUERY_EXPORT_PAGE_MISMATCH',
+                '导出任务页面与当前页面不一致，请返回原页面重试。',
+                [
+                    'context_page_code' => $contextPageCode,
+                    'payload_page_code' => $pageCode,
+                ]
+            );
+        }
+        $scopeDimensions = $this->registry->normalizeScopeDimensions(
+            $pageCode,
+            $context['scope_dimensions'] ?? []
+        );
+        $this->registry->assertScopeDimensionsNotEmpty($pageCode, $scopeDimensions);
         if (isset($payload['schemaVersion'])
             && (string)$payload['schemaVersion'] !== $this->registry->schemaVersion()) {
             throw new UnifiedQueryException(
@@ -231,11 +247,13 @@ class UnifiedQueryExportTaskServices
             'permissions' => $context['permissions'],
             'visible_store_ids' => $context['visible_store_ids'],
             'ancestor_organization_ids' => $context['ancestor_organization_ids'],
+            'scope_dimensions' => $scopeDimensions,
         ]));
         $frozenScope = UnifiedQueryJson::encode([
             'all_stores' => !empty($context['all_stores']),
             'visible_store_ids' => $context['visible_store_ids'],
             'ancestor_organization_ids' => $context['ancestor_organization_ids'],
+            'scope_dimensions' => $scopeDimensions,
         ]);
 
         return Db::transaction(function () use (
@@ -326,7 +344,8 @@ class UnifiedQueryExportTaskServices
                 []
             );
         }
-        return Db::transaction(function () use ($context, $taskNo) {
+        $contextPageCode = $this->contextPageCode($context);
+        return Db::transaction(function () use ($context, $contextPageCode, $taskNo) {
             $task = Db::name(self::TABLE)
                 ->where('tenant_id', $context['tenant_id'])
                 ->where('task_no', $taskNo)
@@ -339,6 +358,7 @@ class UnifiedQueryExportTaskServices
                     []
                 );
             }
+            $this->assertTaskPage($contextPageCode, $task);
             $now = time();
             $canReclaim = (string)$task['status'] === 'running'
                 && (int)$task['lease_expires_at'] > 0
@@ -350,6 +370,10 @@ class UnifiedQueryExportTaskServices
                     ['status' => $task['status']]
                 );
             }
+            $effectiveScope = $this->effectiveScope($context, $task);
+            $effectiveFrozenScope = UnifiedQueryJson::encode(
+                $this->canonicalScope($effectiveScope)
+            );
             $leaseToken = hash('sha256', $taskNo . '|' . bin2hex(random_bytes(16)));
             $query = Db::name(self::TABLE)->where('id', (int)$task['id']);
             if ($canReclaim) {
@@ -362,6 +386,7 @@ class UnifiedQueryExportTaskServices
                 'lease_token' => $leaseToken,
                 'lease_expires_at' => $now + self::LEASE_SECONDS,
                 'attempt_count' => (int)$task['attempt_count'] + 1,
+                'frozen_scope' => $effectiveFrozenScope,
                 'started_at' => $now,
                 'updated_at' => $now,
             ]);
@@ -376,11 +401,309 @@ class UnifiedQueryExportTaskServices
             $task['lease_token'] = $leaseToken;
             $task['lease_expires_at'] = $now + self::LEASE_SECONDS;
             $task['attempt_count'] = (int)$task['attempt_count'] + 1;
+            $task['frozen_scope'] = $effectiveFrozenScope;
             $task['claimed'] = true;
             $task['workerToken'] = $leaseToken;
-            $task['effectiveDataScope'] = $this->effectiveScope($context, $task);
+            $task['effectiveDataScope'] = $effectiveScope;
             return $task;
         });
+    }
+
+    /**
+     * Worker 在调用领域 provider 前，用当前权限重新验证冻结计划和字段快照。
+     * 任务保存的是可追溯版本，不代表账号在执行时仍有权读取这些字段。
+     */
+    public function preflightFrozenExecution(
+        array $rawContext,
+        array $task,
+        array $plan,
+        array $fieldSnapshot
+    ): void {
+        try {
+            $context = $this->access->normalizeContext($rawContext);
+            $this->access->assertPageAccess($context);
+            if (!$this->access->capabilityPermissions($context)['export']) {
+                throw new UnifiedQueryException(
+                    'UNIFIED_QUERY_EXPORT_FORBIDDEN',
+                    '当前账号已无导出权限，任务已停止。',
+                    []
+                );
+            }
+
+            $pageCode = $this->contextPageCode($context);
+            $this->assertTaskPage($pageCode, $task);
+            if ((string)($plan['page_code'] ?? '') !== $pageCode) {
+                throw new UnifiedQueryException(
+                    'UNIFIED_QUERY_EXPORT_PLAN_INVALID',
+                    '导出查询计划与页面不匹配。',
+                    ['page_code' => $pageCode]
+                );
+            }
+            if (!$this->isList($fieldSnapshot)
+                || !$fieldSnapshot
+                || count($fieldSnapshot) > self::MAX_EXPORT_FIELDS) {
+                throw new UnifiedQueryException(
+                    'UNIFIED_QUERY_EXPORT_FIELDS_INVALID',
+                    '导出字段快照不合法。',
+                    []
+                );
+            }
+
+            $frozenDefinitions = $plan['custom_definitions'] ?? null;
+            if (!is_array($frozenDefinitions) || !$this->isList($frozenDefinitions)) {
+                throw new UnifiedQueryException(
+                    'UNIFIED_QUERY_EXPORT_PLAN_INVALID',
+                    '导出查询计划中的自定义字段定义不合法。',
+                    []
+                );
+            }
+            $currentDefinitions = $this->currentDefinitionsForFrozenPlan(
+                $context,
+                $pageCode,
+                $frozenDefinitions
+            );
+            $canonicalPlan = $this->validatedFrozenPlan(
+                $context,
+                $pageCode,
+                $plan,
+                $currentDefinitions
+            );
+            $this->assertFrozenFieldSnapshot(
+                $context,
+                $pageCode,
+                $fieldSnapshot,
+                (array)$canonicalPlan['custom_definitions']
+            );
+        } catch (UnifiedQueryException $exception) {
+            if ($exception->getErrorCode() === 'UNIFIED_QUERY_EXPORT_PREFLIGHT_FORBIDDEN') {
+                throw $exception;
+            }
+            throw new UnifiedQueryException(
+                'UNIFIED_QUERY_EXPORT_PREFLIGHT_FORBIDDEN',
+                '导出任务使用的字段、权限或查询规则已失效，请重新创建任务。',
+                ['reason_code' => $exception->getErrorCode()]
+            );
+        }
+    }
+
+    /**
+     * 只验证冻结导出列的身份与当前系统字段权限，不读取或计算业务数据。
+     * 自定义字段使用调用方已经验证的冻结定义，成功文件因此不依赖字段当前状态。
+     */
+    public function assertFrozenFieldSnapshot(
+        array $rawContext,
+        string $pageCode,
+        array $fieldSnapshot,
+        array $customDefinitions
+    ): void {
+        $context = $this->access->normalizeContext($rawContext);
+        $this->access->assertPageAccess($context);
+        if (!$this->access->capabilityPermissions($context)['export']) {
+            throw new UnifiedQueryException(
+                'UNIFIED_QUERY_EXPORT_FORBIDDEN',
+                '当前账号已无导出权限。',
+                []
+            );
+        }
+        $this->registry->page($pageCode);
+        if (!$this->isList($fieldSnapshot)
+            || !$fieldSnapshot
+            || count($fieldSnapshot) > self::MAX_EXPORT_FIELDS
+            || !$this->isList($customDefinitions)) {
+            throw new UnifiedQueryException(
+                'UNIFIED_QUERY_EXPORT_FIELDS_INVALID',
+                '导出字段快照不合法。',
+                []
+            );
+        }
+
+        $customIndex = [];
+        foreach ($customDefinitions as $definition) {
+            if (!is_array($definition)) {
+                throw new UnifiedQueryException(
+                    'UNIFIED_QUERY_EXPORT_PLAN_INVALID',
+                    '冻结自定义字段定义不合法。',
+                    []
+                );
+            }
+            $fieldKey = trim((string)($definition['field_key'] ?? ''));
+            $version = (int)($definition['version'] ?? 0);
+            $type = trim((string)($definition['return_type'] ?? ''));
+            $operations = $definition['allowed_operations'] ?? null;
+            if (!preg_match('/^cf_[a-f0-9]{20,40}$/D', $fieldKey)
+                || $version <= 0
+                || $type === ''
+                || !is_array($operations)
+                || !in_array('export', $operations, true)
+                || isset($customIndex[$fieldKey])) {
+                throw new UnifiedQueryException(
+                    'UNIFIED_QUERY_EXPORT_PLAN_INVALID',
+                    '冻结自定义字段身份或导出能力不合法。',
+                    ['field_key' => $fieldKey]
+                );
+            }
+            $customIndex[$fieldKey] = [
+                'version' => $version,
+                'type' => $type,
+            ];
+        }
+
+        $seenFields = [];
+        foreach ($fieldSnapshot as $field) {
+            if (!is_array($field)) {
+                throw new UnifiedQueryException(
+                    'UNIFIED_QUERY_EXPORT_FIELDS_INVALID',
+                    '导出字段快照不合法。',
+                    []
+                );
+            }
+            $fieldKey = trim((string)($field['key'] ?? ''));
+            $fieldType = trim((string)($field['type'] ?? ''));
+            $fieldVersion = (int)($field['version'] ?? 0);
+            if ($fieldKey === '' || $fieldType === '' || $fieldVersion <= 0
+                || isset($seenFields[$fieldKey])) {
+                throw new UnifiedQueryException(
+                    'UNIFIED_QUERY_EXPORT_FIELDS_INVALID',
+                    '导出字段快照包含无效或重复字段。',
+                    ['field_key' => $fieldKey]
+                );
+            }
+            $seenFields[$fieldKey] = true;
+            if (strpos($fieldKey, 'cf_') === 0) {
+                if (!isset($customIndex[$fieldKey])
+                    || $customIndex[$fieldKey]['version'] !== $fieldVersion
+                    || $customIndex[$fieldKey]['type'] !== $fieldType) {
+                    throw new UnifiedQueryException(
+                        'UNIFIED_QUERY_EXPORT_FIELDS_INVALID',
+                        '导出自定义字段快照与冻结版本不一致。',
+                        ['field_key' => $fieldKey]
+                    );
+                }
+                continue;
+            }
+            $definition = $this->registry->assertReadable(
+                $pageCode,
+                $fieldKey,
+                $context['permissions']
+            );
+            if (!in_array('export', (array)$definition['allowedOperations'], true)
+                || (string)$definition['type'] !== $fieldType
+                || (int)$definition['version'] !== $fieldVersion) {
+                throw new UnifiedQueryException(
+                    'UNIFIED_QUERY_EXPORT_FIELD_FORBIDDEN',
+                    '导出字段已不可用或超出权限。',
+                    ['field_key' => $fieldKey]
+                );
+            }
+        }
+    }
+
+    protected function currentDefinitionsForFrozenPlan(
+        array $context,
+        string $pageCode,
+        array $frozenDefinitions
+    ): array {
+        $currentDefinitions = [];
+        $seen = [];
+        foreach ($frozenDefinitions as $definition) {
+            if (!is_array($definition)) {
+                throw new UnifiedQueryException(
+                    'UNIFIED_QUERY_EXPORT_PLAN_INVALID',
+                    '导出查询计划中的自定义字段定义不合法。',
+                    []
+                );
+            }
+            $fieldKey = trim((string)($definition['field_key'] ?? ''));
+            $version = (int)($definition['version'] ?? 0);
+            if (!preg_match('/^cf_[a-f0-9]{20,40}$/D', $fieldKey)
+                || $version <= 0
+                || isset($seen[$fieldKey])) {
+                throw new UnifiedQueryException(
+                    'UNIFIED_QUERY_EXPORT_PLAN_INVALID',
+                    '导出查询计划中的自定义字段身份不合法。',
+                    ['field_key' => $fieldKey]
+                );
+            }
+            $seen[$fieldKey] = true;
+            $current = $this->customFields->versionDefinition(
+                $context,
+                $pageCode,
+                $fieldKey,
+                $version
+            );
+            $current['page_code'] = $pageCode;
+            $currentDefinitions[] = $current;
+        }
+        return $currentDefinitions;
+    }
+
+    protected function validatedFrozenPlan(
+        array $context,
+        string $pageCode,
+        array $plan,
+        array $customDefinitions
+    ): array {
+        if ((string)($plan['page_code'] ?? '') !== $pageCode) {
+            throw new UnifiedQueryException(
+                'UNIFIED_QUERY_EXPORT_PLAN_INVALID',
+                '导出查询计划与页面不匹配。',
+                ['page_code' => $pageCode]
+            );
+        }
+        $pagination = is_array($plan['pagination'] ?? null)
+            ? $plan['pagination']
+            : [];
+        $domainScope = is_array($plan['domain_scope'] ?? null)
+            ? $plan['domain_scope']
+            : [];
+        $query = [
+            'pageCode' => $pageCode,
+            'page' => (int)($pagination['page'] ?? 0),
+            'limit' => (int)($pagination['limit'] ?? 0),
+            'filters' => $plan['filters'] ?? null,
+            'topFilterConditions' => $plan['top_filters'] ?? null,
+            'keywordFilters' => $plan['keyword_filters'] ?? null,
+            'quickFilters' => $plan['quick_filters'] ?? null,
+            'filterRelation' => $plan['filter_relation'] ?? null,
+            'sorts' => $plan['sorts'] ?? null,
+            'groupBy' => $plan['groups'] ?? null,
+            'summaries' => $plan['summaries'] ?? null,
+            'dataScope' => $domainScope['data_scope'] ?? null,
+            'businessStatus' => $domainScope['business_status'] ?? null,
+            'visibleFields' => $plan['visible_fields'] ?? null,
+            'queryCutoffDate' => $plan['query_cutoff_date'] ?? null,
+        ];
+        foreach ([
+            'filters', 'topFilterConditions', 'keywordFilters', 'quickFilters',
+            'sorts', 'groupBy', 'summaries', 'visibleFields',
+        ] as $arrayKey) {
+            if (!is_array($query[$arrayKey])) {
+                throw new UnifiedQueryException(
+                    'UNIFIED_QUERY_EXPORT_PLAN_INVALID',
+                    '导出查询计划结构不完整。',
+                    ['key' => $arrayKey]
+                );
+            }
+        }
+        $validationContext = $context;
+        $validationContext['query_cutoff_date'] = (string)($plan['query_cutoff_date'] ?? '');
+        $rebuilt = $this->execution->validatedPlan(
+            $pageCode,
+            $customDefinitions,
+            $query,
+            $validationContext
+        );
+        if (!hash_equals(
+            hash('sha256', UnifiedQueryJson::encode($plan)),
+            hash('sha256', UnifiedQueryJson::encode($rebuilt))
+        )) {
+            throw new UnifiedQueryException(
+                'UNIFIED_QUERY_EXPORT_PLAN_INVALID',
+                '导出查询计划已失效，请重新创建任务。',
+                ['page_code' => $pageCode]
+            );
+        }
+        return $rebuilt;
     }
 
     public function complete(
@@ -595,6 +918,7 @@ class UnifiedQueryExportTaskServices
                 []
             );
         }
+        $contextPageCode = $this->contextPageCode($context);
         $task = Db::name(self::TABLE)
             ->where('tenant_id', $context['tenant_id'])
             ->where('account_id', $context['account_id'])
@@ -607,7 +931,7 @@ class UnifiedQueryExportTaskServices
                 []
             );
         }
-        $this->registry->page((string)$task['page_code']);
+        $this->assertTaskPage($contextPageCode, $task);
         return $this->present($task);
     }
 
@@ -633,12 +957,21 @@ class UnifiedQueryExportTaskServices
                 []
             );
         }
+        $contextPageCode = $this->contextPageCode($context);
         $task = Db::name(self::TABLE)
             ->where('tenant_id', $context['tenant_id'])
             ->where('account_id', $context['account_id'])
             ->where('task_no', $taskNo)
             ->find();
-        if (!$task || (string)$task['status'] !== 'succeeded'
+        if (!$task) {
+            throw new UnifiedQueryException(
+                'UNIFIED_QUERY_EXPORT_DOWNLOAD_UNAVAILABLE',
+                '导出文件尚未生成或已过期。',
+                []
+            );
+        }
+        $this->assertTaskPage($contextPageCode, $task);
+        if ((string)$task['status'] !== 'succeeded'
             || (int)$task['expires_at'] <= time()) {
             throw new UnifiedQueryException(
                 'UNIFIED_QUERY_EXPORT_DOWNLOAD_UNAVAILABLE',
@@ -646,7 +979,45 @@ class UnifiedQueryExportTaskServices
                 []
             );
         }
-        $this->registry->page((string)$task['page_code']);
+        $this->assertDownloadScopeCurrent($context, $task);
+        try {
+            $plan = UnifiedQueryJson::decode((string)($task['query_payload'] ?? ''));
+            $fieldSnapshot = UnifiedQueryJson::decode(
+                (string)($task['field_snapshot'] ?? '')
+            );
+            $frozenDefinitions = $plan['custom_definitions'] ?? null;
+            if (!is_array($frozenDefinitions) || !$this->isList($frozenDefinitions)) {
+                throw new UnifiedQueryException(
+                    'UNIFIED_QUERY_EXPORT_PLAN_INVALID',
+                    '导出查询计划中的自定义字段定义不合法。',
+                    []
+                );
+            }
+            $canonicalPlan = $this->validatedFrozenPlan(
+                $context,
+                $contextPageCode,
+                $plan,
+                $frozenDefinitions
+            );
+            $this->assertFrozenFieldSnapshot(
+                $context,
+                $contextPageCode,
+                $fieldSnapshot,
+                (array)$canonicalPlan['custom_definitions']
+            );
+        } catch (UnifiedQueryException $exception) {
+            throw new UnifiedQueryException(
+                'UNIFIED_QUERY_EXPORT_DOWNLOAD_FIELD_FORBIDDEN',
+                '导出文件包含你当前无权读取的查询字段，无法下载。',
+                ['reason_code' => $exception->getErrorCode()]
+            );
+        } catch (\Throwable $exception) {
+            throw new UnifiedQueryException(
+                'UNIFIED_QUERY_EXPORT_DOWNLOAD_FIELD_FORBIDDEN',
+                '导出文件的冻结字段合同已损坏，无法下载。',
+                ['reason_code' => 'UNIFIED_QUERY_EXPORT_PLAN_INVALID']
+            );
+        }
         $storageKey = (string)$task['storage_key'];
         $this->assertStorageKey($storageKey);
         return [
@@ -796,6 +1167,11 @@ class UnifiedQueryExportTaskServices
             && $date->format('Y-m-d') === $value;
     }
 
+    protected function isList(array $value): bool
+    {
+        return $value === [] || array_keys($value) === range(0, count($value) - 1);
+    }
+
     protected function assertStorageKey(string $storageKey): void
     {
         if (!preg_match('#^unified-query-exports/[A-Za-z0-9/_-]{1,400}\.xlsx$#D', $storageKey)
@@ -805,15 +1181,69 @@ class UnifiedQueryExportTaskServices
         }
     }
 
+    protected function contextPageCode(array $context): string
+    {
+        $pageCode = trim((string)($context['page_code'] ?? ''));
+        if ($pageCode === '') {
+            throw new UnifiedQueryException(
+                'UNIFIED_QUERY_EXPORT_PAGE_MISMATCH',
+                '导出任务页面与当前页面不一致，请返回原页面重试。',
+                ['context_page_code' => '']
+            );
+        }
+        $this->registry->page($pageCode);
+        return $pageCode;
+    }
+
+    protected function assertTaskPage(string $contextPageCode, array $task): void
+    {
+        $taskPageCode = trim((string)($task['page_code'] ?? ''));
+        if ($taskPageCode === '' || !hash_equals($contextPageCode, $taskPageCode)) {
+            throw new UnifiedQueryException(
+                'UNIFIED_QUERY_EXPORT_PAGE_MISMATCH',
+                '导出任务页面与当前页面不一致，请返回原页面重试。',
+                [
+                    'context_page_code' => $contextPageCode,
+                    'task_page_code' => $taskPageCode,
+                ]
+            );
+        }
+        $this->registry->page($taskPageCode);
+    }
+
     protected function effectiveScope(array $current, array $task): array
     {
-        $frozen = UnifiedQueryJson::decode((string)$task['frozen_scope']);
-        $frozenAll = !empty($frozen['all_stores']);
+        $pageCode = trim((string)($task['page_code'] ?? ''));
+        $frozen = $this->normalizeFrozenScope($pageCode, $task['frozen_scope'] ?? null);
+        $currentDimensions = $this->registry->normalizeScopeDimensions(
+            $pageCode,
+            $current['scope_dimensions'] ?? []
+        );
+        $frozenDimensions = $this->registry->normalizeScopeDimensions(
+            $pageCode,
+            $frozen['scope_dimensions'] ?? []
+        );
+        $effectiveDimensions = [];
+        foreach ((array)$this->registry->page($pageCode)['scopeDimensions'] as $dimension) {
+            $currentValues = $currentDimensions[$dimension];
+            $frozenValues = $frozenDimensions[$dimension];
+            if ($currentValues === null && $frozenValues === null) {
+                $effectiveDimensions[$dimension] = null;
+            } elseif ($currentValues === null) {
+                $effectiveDimensions[$dimension] = $frozenValues;
+            } elseif ($frozenValues === null) {
+                $effectiveDimensions[$dimension] = $currentValues;
+            } else {
+                $effectiveDimensions[$dimension] = array_values(array_intersect(
+                    $frozenValues,
+                    $currentValues
+                ));
+            }
+        }
+        $this->registry->assertScopeDimensionsNotEmpty($pageCode, $effectiveDimensions);
+        $frozenAll = $frozen['all_stores'];
         $currentAll = !empty($current['all_stores']);
-        $frozenStores = array_values(array_unique(array_map(
-            'intval',
-            (array)($frozen['visible_store_ids'] ?? [])
-        )));
+        $frozenStores = $frozen['visible_store_ids'];
         $currentStores = array_values(array_unique(array_map(
             'intval',
             (array)($current['visible_store_ids'] ?? [])
@@ -838,6 +1268,138 @@ class UnifiedQueryExportTaskServices
             'origin_organization_id' => (string)$task['origin_organization_id'],
             'current_permission_version' => (string)($current['permission_version'] ?? ''),
             'frozen_permission_version' => (string)$task['permission_version'],
+            'scope_dimensions' => $effectiveDimensions,
         ];
+    }
+
+    protected function canonicalScope(array $effectiveScope): array
+    {
+        $visibleStoreIds = $effectiveScope['visible_store_ids'] ?? null;
+        return [
+            'all_stores' => $visibleStoreIds === null,
+            // 现有数据库合同用 [] 表示 all_stores=true 时无需枚举门店。
+            'visible_store_ids' => $visibleStoreIds === null
+                ? []
+                : array_values($visibleStoreIds),
+            'ancestor_organization_ids' => array_values(
+                (array)($effectiveScope['ancestor_organization_ids'] ?? [])
+            ),
+            'scope_dimensions' => (array)($effectiveScope['scope_dimensions'] ?? []),
+        ];
+    }
+
+    protected function assertDownloadScopeCurrent(array $context, array $task): void
+    {
+        $pageCode = trim((string)($task['page_code'] ?? ''));
+        $frozen = $this->normalizeFrozenScope(
+            $pageCode,
+            $task['frozen_scope'] ?? null
+        );
+        $effective = $this->canonicalScope($this->effectiveScope($context, $task));
+        if (!hash_equals(
+            hash('sha256', UnifiedQueryJson::encode($frozen)),
+            hash('sha256', UnifiedQueryJson::encode($effective))
+        )) {
+            throw new UnifiedQueryException(
+                'UNIFIED_QUERY_EXPORT_DOWNLOAD_SCOPE_REVOKED',
+                '当前数据权限已缩小，无法下载此前生成的导出文件。',
+                ['page_code' => $pageCode]
+            );
+        }
+    }
+
+    protected function normalizeFrozenScope(string $pageCode, $rawScope): array
+    {
+        try {
+            if (!is_string($rawScope) || $rawScope === '') {
+                throw new \InvalidArgumentException('冻结范围不是 JSON 字符串');
+            }
+            $scope = UnifiedQueryJson::decode($rawScope);
+            $currentKeys = [
+                'all_stores',
+                'ancestor_organization_ids',
+                'scope_dimensions',
+                'visible_store_ids',
+            ];
+            $legacyKeys = [
+                'all_stores',
+                'ancestor_organization_ids',
+                'visible_store_ids',
+            ];
+            $actualKeys = array_keys($scope);
+            sort($actualKeys, SORT_STRING);
+            if ($actualKeys === $legacyKeys) {
+                if ((array)$this->registry->page($pageCode)['scopeDimensions'] !== []) {
+                    throw new \InvalidArgumentException(
+                        '声明维度的页面不能使用旧三键冻结范围'
+                    );
+                }
+                $scope['scope_dimensions'] = [];
+            } elseif ($actualKeys !== $currentKeys) {
+                throw new \InvalidArgumentException('冻结范围键不合法');
+            }
+            if (!is_bool($scope['all_stores'])) {
+                throw new \InvalidArgumentException('冻结范围键或 all_stores 类型不合法');
+            }
+            if (!is_array($scope['visible_store_ids'])
+                || !$this->isList($scope['visible_store_ids'])
+                || count($scope['visible_store_ids']) > UnifiedQueryContextFactory::MAX_SCOPE_IDS) {
+                throw new \InvalidArgumentException('冻结门店范围不是有界列表');
+            }
+            if ($scope['all_stores'] && $scope['visible_store_ids'] !== []) {
+                throw new \InvalidArgumentException('全部门店范围必须使用空门店列表');
+            }
+            $stores = [];
+            foreach ($scope['visible_store_ids'] as $storeId) {
+                if (!is_int($storeId) || $storeId <= 0 || isset($stores[$storeId])) {
+                    throw new \InvalidArgumentException('冻结门店范围包含非法或重复标识');
+                }
+                $stores[$storeId] = $storeId;
+            }
+            $stores = array_values($stores);
+            sort($stores, SORT_NUMERIC);
+
+            if (!is_array($scope['ancestor_organization_ids'])
+                || !$this->isList($scope['ancestor_organization_ids'])
+                || count($scope['ancestor_organization_ids'])
+                    > UnifiedQueryContextFactory::MAX_SCOPE_IDS) {
+                throw new \InvalidArgumentException('冻结组织范围不是有界列表');
+            }
+            $organizations = [];
+            foreach ($scope['ancestor_organization_ids'] as $organizationId) {
+                $identity = is_string($organizationId)
+                    ? 'value:' . $organizationId
+                    : '';
+                if (!is_string($organizationId)
+                    || !preg_match(
+                        '/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/D',
+                        $organizationId
+                    )
+                    || isset($organizations[$identity])) {
+                    throw new \InvalidArgumentException('冻结组织范围包含非法或重复标识');
+                }
+                $organizations[$identity] = $organizationId;
+            }
+            $organizations = array_values($organizations);
+            sort($organizations, SORT_STRING);
+
+            $scopeDimensions = $this->registry->normalizeScopeDimensions(
+                $pageCode,
+                $scope['scope_dimensions']
+            );
+            $this->registry->assertScopeDimensionsNotEmpty($pageCode, $scopeDimensions);
+            return [
+                'all_stores' => $scope['all_stores'],
+                'visible_store_ids' => $stores,
+                'ancestor_organization_ids' => $organizations,
+                'scope_dimensions' => $scopeDimensions,
+            ];
+        } catch (\Throwable $exception) {
+            throw new UnifiedQueryException(
+                'UNIFIED_QUERY_FROZEN_SCOPE_INVALID',
+                '导出任务的数据权限快照已损坏，任务已停止。',
+                ['page_code' => $pageCode]
+            );
+        }
     }
 }

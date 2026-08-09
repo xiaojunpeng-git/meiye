@@ -14,6 +14,8 @@ class StructuredExpressionValidator
     public const MAX_REFERENCES = 12;
     public const MAX_COMPLEXITY = 100;
     public const MAX_NODE_KEYS = 16;
+    public const MAX_RANGE_BUCKET_THRESHOLDS = 16;
+    public const MAX_RANGE_BUCKET_LABEL_LENGTH = 64;
 
     /** @var UnifiedQueryPageRegistry */
     protected $registry;
@@ -228,6 +230,10 @@ class StructuredExpressionValidator
             ];
         }
         if ($type === 'operator') {
+            $operator = $this->normalizeOperatorName((string)($node['operator'] ?? ''));
+            if ($operator === 'range_bucket') {
+                return $this->normalizeRangeBucketNode($node);
+            }
             $this->assertOnlyKeys($node, ['type', 'operator', 'args', '_return_type']);
             $args = $node['args'] ?? null;
             if (!is_array($args) || !$this->isList($args)) {
@@ -242,13 +248,107 @@ class StructuredExpressionValidator
             }
             $normalized = [
                 'type' => 'operator',
-                'operator' => $this->normalizeOperatorName((string)($node['operator'] ?? '')),
+                'operator' => $operator,
                 'args' => $normalizedArgs,
             ];
             // 任何非根节点的类型标记都不可信，不能参与金额中间精度计算。
             return $normalized;
         }
         throw $this->invalidNode('节点类型不在白名单中');
+    }
+
+    protected function normalizeRangeBucketNode(array $node): array
+    {
+        $this->assertOnlyKeys($node, [
+            'type', 'operator', 'input', 'thresholds', 'labels',
+            'nullLabel', 'null_label', 'defaultLabel', 'default_label', '_return_type',
+        ]);
+        if (!is_array($node['input'] ?? null)) {
+            throw $this->rangeBucketInvalid('range_bucket.input 必须是结构化节点');
+        }
+        $thresholds = $node['thresholds'] ?? null;
+        $labels = $node['labels'] ?? null;
+        if (!is_array($thresholds) || !$this->isNonEmptyList($thresholds)
+            || !is_array($labels) || !$this->isNonEmptyList($labels)
+            || count($thresholds) !== count($labels)
+            || count($thresholds) > self::MAX_RANGE_BUCKET_THRESHOLDS) {
+            throw $this->rangeBucketInvalid(
+                'range_bucket 的 thresholds/labels 必须等长且包含 1 到 '
+                . self::MAX_RANGE_BUCKET_THRESHOLDS . ' 项'
+            );
+        }
+        if (array_key_exists('nullLabel', $node) && array_key_exists('null_label', $node)) {
+            throw $this->rangeBucketInvalid('nullLabel 不能重复声明');
+        }
+        if (array_key_exists('defaultLabel', $node) && array_key_exists('default_label', $node)) {
+            throw $this->rangeBucketInvalid('defaultLabel 不能重复声明');
+        }
+        $hasNullLabel = array_key_exists('nullLabel', $node)
+            || array_key_exists('null_label', $node);
+        $hasDefaultLabel = array_key_exists('defaultLabel', $node)
+            || array_key_exists('default_label', $node);
+        if (!$hasNullLabel || !$hasDefaultLabel) {
+            throw $this->rangeBucketInvalid('nullLabel 和 defaultLabel 都必须明确提供');
+        }
+
+        $normalizedThresholds = [];
+        foreach ($thresholds as $threshold) {
+            $normalizedThresholds[] = $this->normalizeRangeBucketThreshold($threshold);
+        }
+        $normalizedLabels = [];
+        foreach ($labels as $label) {
+            $normalizedLabels[] = $this->normalizeRangeBucketLabel($label);
+        }
+
+        return [
+            'type' => 'operator',
+            'operator' => 'range_bucket',
+            'input' => $this->normalizeFrontendNode($node['input']),
+            'thresholds' => $normalizedThresholds,
+            'labels' => $normalizedLabels,
+            'null_label' => $this->normalizeRangeBucketLabel(
+                $node['nullLabel'] ?? $node['null_label']
+            ),
+            'default_label' => $this->normalizeRangeBucketLabel(
+                $node['defaultLabel'] ?? $node['default_label']
+            ),
+        ];
+    }
+
+    protected function normalizeRangeBucketThreshold($value): string
+    {
+        if ((!is_int($value) && !is_float($value) && !is_string($value))
+            || !preg_match(
+                '/^-?(?:0|[1-9][0-9]{0,17})(?:\.[0-9]{1,8})?$/D',
+                trim((string)$value)
+            )) {
+            throw $this->rangeBucketInvalid(
+                'range_bucket 阈值必须是最多 18 位整数和 8 位小数的静态数值'
+            );
+        }
+        return trim((string)$value);
+    }
+
+    protected function normalizeRangeBucketLabel($value): string
+    {
+        if (!is_string($value)) {
+            throw $this->rangeBucketInvalid('range_bucket 标签必须是文本');
+        }
+        $label = trim($value);
+        if ($label === '' || $this->textLength($label) > self::MAX_RANGE_BUCKET_LABEL_LENGTH) {
+            throw $this->rangeBucketInvalid(
+                'range_bucket 标签不能为空且不能超过 '
+                . self::MAX_RANGE_BUCKET_LABEL_LENGTH . ' 个字符'
+            );
+        }
+        if (preg_match('/^[=+@]/', ltrim($label))) {
+            throw new UnifiedQueryException(
+                'UNIFIED_QUERY_EXCEL_FORMULA_FORBIDDEN',
+                '分档标签不能使用 Excel 公式。',
+                []
+            );
+        }
+        return $label;
     }
 
     protected function normalizeOperatorName(string $operator): string
@@ -340,8 +440,13 @@ class StructuredExpressionValidator
                     $children[] = $node[$key];
                 }
             }
-        } elseif (($node['type'] ?? '') === 'operator' && is_array($node['args'] ?? null)) {
-            $children = $node['args'];
+        } elseif (($node['type'] ?? '') === 'operator') {
+            if (strtolower(trim((string)($node['operator'] ?? ''))) === 'range_bucket'
+                && array_key_exists('input', $node)) {
+                $children = [$node['input']];
+            } elseif (is_array($node['args'] ?? null)) {
+                $children = $node['args'];
+            }
         }
 
         foreach ($children as $child) {
@@ -467,8 +572,11 @@ class StructuredExpressionValidator
 
     protected function inspectOperator(array $node, int $depth, bool $isRoot): string
     {
-        $this->assertOnlyKeys($node, ['type', 'operator', 'args', '_return_type']);
         $operator = strtolower(trim((string)($node['operator'] ?? '')));
+        if ($operator === 'range_bucket') {
+            return $this->inspectRangeBucket($node, $depth);
+        }
+        $this->assertOnlyKeys($node, ['type', 'operator', 'args', '_return_type']);
         $args = $node['args'] ?? null;
         if (!is_array($args) || !$this->isList($args)) {
             throw $this->invalidNode('操作符参数必须是有序数组');
@@ -652,6 +760,71 @@ class StructuredExpressionValidator
         throw $this->invalidOperator($operator);
     }
 
+    protected function inspectRangeBucket(array $node, int $depth): string
+    {
+        $this->assertOnlyKeys($node, [
+            'type', 'operator', 'input', 'thresholds', 'labels',
+            'null_label', 'default_label', '_return_type',
+        ]);
+        if (!is_array($node['input'] ?? null)) {
+            throw $this->rangeBucketInvalid('range_bucket.input 必须是结构化节点');
+        }
+        $thresholds = $node['thresholds'] ?? null;
+        $labels = $node['labels'] ?? null;
+        if (!is_array($thresholds) || !$this->isNonEmptyList($thresholds)
+            || !is_array($labels) || !$this->isNonEmptyList($labels)
+            || count($thresholds) !== count($labels)
+            || count($thresholds) > self::MAX_RANGE_BUCKET_THRESHOLDS) {
+            throw $this->rangeBucketInvalid('range_bucket 档位数量不正确');
+        }
+
+        $inputType = $this->inspect($node['input'], $depth + 1, false);
+        if (!in_array($inputType, ['integer', 'decimal'], true)) {
+            throw $this->typeError(
+                'range_bucket',
+                [$inputType],
+                'range_bucket 输入只支持整数或普通数字'
+            );
+        }
+        $this->complexity += 8 + count($thresholds);
+
+        $previous = null;
+        foreach ($thresholds as $threshold) {
+            $threshold = $this->normalizeRangeBucketThreshold($threshold);
+            if ($previous !== null) {
+                if (!function_exists('bccomp')) {
+                    throw new \RuntimeException('统一查询金额计算需要 ext-bcmath');
+                }
+                if (bccomp($previous, $threshold, 8) >= 0) {
+                    throw new UnifiedQueryException(
+                        'UNIFIED_QUERY_RANGE_BUCKET_THRESHOLDS_INVALID',
+                        '分档阈值必须严格递增且不能重复。',
+                        []
+                    );
+                }
+            }
+            $previous = $threshold;
+        }
+
+        $seenLabels = [];
+        foreach (array_merge(
+            $labels,
+            [$node['null_label'] ?? null, $node['default_label'] ?? null]
+        ) as $label) {
+            $label = $this->normalizeRangeBucketLabel($label);
+            $identity = hash('sha256', $label);
+            if (isset($seenLabels[$identity])) {
+                throw new UnifiedQueryException(
+                    'UNIFIED_QUERY_RANGE_BUCKET_LABELS_INVALID',
+                    '分档标签不能重复。',
+                    ['label' => $label]
+                );
+            }
+            $seenLabels[$identity] = true;
+        }
+        return 'text';
+    }
+
     protected function assertNumericTypes(array $types, string $operator): void
     {
         foreach ($types as $type) {
@@ -744,7 +917,12 @@ class StructuredExpressionValidator
 
     protected function isList(array $value): bool
     {
-        return array_keys($value) === range(0, count($value) - 1);
+        return $value === [] || array_keys($value) === range(0, count($value) - 1);
+    }
+
+    protected function isNonEmptyList(array $value): bool
+    {
+        return $value !== [] && $this->isList($value);
     }
 
     protected function validDate(string $value, string $format): bool
@@ -771,6 +949,15 @@ class StructuredExpressionValidator
             'UNIFIED_QUERY_OPERATOR_NOT_ALLOWED',
             '该计算方式不受支持，请重新选择。',
             ['operator' => $operator]
+        );
+    }
+
+    protected function rangeBucketInvalid(string $reason): UnifiedQueryException
+    {
+        return new UnifiedQueryException(
+            'UNIFIED_QUERY_RANGE_BUCKET_INVALID',
+            '分档规则不合法，请重新设置档位。',
+            ['reason' => $reason]
         );
     }
 

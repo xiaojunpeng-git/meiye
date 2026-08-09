@@ -21,6 +21,7 @@ final class CashierV3OrderCenterRecordQueryServices
     private const TYPES = [
         'recharge',
         'refund',
+        'debt',
         'service',
         'supplement',
         'gift',
@@ -111,6 +112,7 @@ final class CashierV3OrderCenterRecordQueryServices
                 'topFilters' => [],
                 'sorts' => [],
                 'allowedStoreIds' => $allowed,
+                'tenantId' => $dataScope->tenantId(),
             ];
             [, $counts[$type]] = $this->readType($criteria, $operatorScope, true);
         }
@@ -129,6 +131,7 @@ final class CashierV3OrderCenterRecordQueryServices
             ['key' => 'sales', 'label' => '销售订单', 'ready' => true],
             ['key' => 'recharge', 'label' => '充值订单', 'ready' => true],
             ['key' => 'refund', 'label' => '退货订单', 'ready' => true],
+            ['key' => 'debt', 'label' => '欠款管理', 'ready' => true],
             ['key' => 'service', 'label' => '服务记录', 'ready' => true],
             ['key' => 'supplement', 'label' => '补交记录', 'ready' => true],
             ['key' => 'gift', 'label' => '赠送记录', 'ready' => true],
@@ -139,6 +142,7 @@ final class CashierV3OrderCenterRecordQueryServices
             'sales' => [],
             'recharge' => [],
             'refund' => [],
+            'debt' => [],
             'service' => [],
             'supplement' => [],
             'gift' => [],
@@ -147,6 +151,7 @@ final class CashierV3OrderCenterRecordQueryServices
         $partition['pagesByType'] = array_merge([
             'recharge' => $this->emptyPageMeta(),
             'refund' => $this->emptyPageMeta(),
+            'debt' => $this->emptyPageMeta(),
             'service' => $this->emptyPageMeta(),
             'supplement' => $this->emptyPageMeta(),
             'gift' => $this->emptyPageMeta(),
@@ -155,6 +160,7 @@ final class CashierV3OrderCenterRecordQueryServices
         $partition['statusOptionsByType'] = array_merge([
             'recharge' => $this->statusOptions('recharge'),
             'refund' => $this->statusOptions('refund'),
+            'debt' => $this->statusOptions('debt'),
             'service' => $this->statusOptions('service'),
             'supplement' => $this->statusOptions('supplement'),
             'gift' => $this->statusOptions('gift'),
@@ -218,6 +224,7 @@ final class CashierV3OrderCenterRecordQueryServices
             'topFilters' => $type === 'service' ? $this->serviceTopFilters($payload) : [],
             'sorts' => $type === 'service' ? $this->serviceSorts($payload) : [],
             'allowedStoreIds' => $this->canonicalStoreIds($dataScope->narrowVisibleStores($requestedStores)),
+            'tenantId' => $dataScope->tenantId(),
         ];
     }
 
@@ -230,6 +237,8 @@ final class CashierV3OrderCenterRecordQueryServices
                 return $this->readSupplement($criteria, $countOnly);
             case 'refund':
                 return $this->readRefund($criteria, $countOnly);
+            case 'debt':
+                return $this->readDebts($criteria, $countOnly);
             case 'service':
                 return $this->readServices($criteria, $scope, $countOnly);
             case 'gift':
@@ -243,6 +252,7 @@ final class CashierV3OrderCenterRecordQueryServices
 
     private function readRecharge(array $criteria, bool $countOnly): array
     {
+        $tenantId = (string)($criteria['tenantId'] ?? '');
         $query = Db::name('user_recharge')->alias('r')
             ->leftJoin('user u', 'u.uid = r.uid')
             ->leftJoin('system_store s', 's.id = r.store_id')
@@ -252,11 +262,20 @@ final class CashierV3OrderCenterRecordQueryServices
             'r.order_id', 'u.real_name', 'u.nickname', 'u.phone', 's.name', 'st.staff_name',
         ]);
         if ($criteria['status'] === 'paid') {
-            $query->where('r.paid', 1)->where('r.terminal_action', 0);
+            $query->where('r.paid', 1)->where('r.terminal_action', 0)->where('r.refund_price', '<=', 0)
+                ->whereNotExists($this->rechargeLifecycleOperationQuery($tenantId, ['refund', 'void']));
         } elseif ($criteria['status'] === 'voided') {
-            $query->where('r.terminal_action', '>', 0);
+            $query->where(function ($statusQuery) use ($tenantId): void {
+                $statusQuery->where('r.terminal_action', '>', 0)
+                    ->whereExists($this->rechargeLifecycleOperationQuery($tenantId, ['void']), 'OR');
+            });
         } elseif ($criteria['status'] === 'refunded') {
-            $query->where('r.refund_price', '>', 0);
+            $query->where('r.terminal_action', 0)
+                ->where(function ($statusQuery) use ($tenantId): void {
+                    $statusQuery->where('r.refund_price', '>', 0)
+                        ->whereExists($this->rechargeLifecycleOperationQuery($tenantId, ['refund']), 'OR');
+                })
+                ->whereNotExists($this->rechargeLifecycleOperationQuery($tenantId, ['void']));
         }
         $total = (int)(clone $query)->count('r.id');
         if ($countOnly) return [[], $total];
@@ -267,14 +286,19 @@ final class CashierV3OrderCenterRecordQueryServices
             's.name AS store_name', 'st.staff_name',
         ]));
         $rechargeEconomics = $this->readRechargeEconomics($rows);
-        return [array_map(function (array $row) use ($rechargeEconomics): array {
+        $rechargeBusinessDates = $this->readRechargeBusinessDates($rows);
+        $rechargeLifecycleOperations = $this->readRechargeLifecycleOperations($rows, $tenantId);
+        return [array_map(function (array $row) use ($rechargeEconomics, $rechargeBusinessDates, $rechargeLifecycleOperations): array {
             $time = (int)($row['pay_time'] ?: $row['add_time']);
             $economicsKey = $this->rechargeFactKey((int)$row['store_id'], (string)$row['order_id']);
             $hasV3PaymentFacts = array_key_exists($economicsKey, $rechargeEconomics);
+            $lifecycleOperation = (string)($rechargeLifecycleOperations[(int)$row['id']] ?? '');
             return [
                 'id' => 'recharge:' . $row['id'],
+                'rechargeId' => (int)$row['id'],
+                'memberId' => (int)$row['uid'],
                 'rechargeOrderNo' => (string)$row['order_id'],
-                'businessDate' => $this->date($time),
+                'businessDate' => $rechargeBusinessDates[$economicsKey] ?? $this->date($time),
                 'memberName' => $this->memberName($row),
                 'phone' => (string)$row['phone'],
                 'storeName' => (string)$row['store_name'],
@@ -291,12 +315,56 @@ final class CashierV3OrderCenterRecordQueryServices
                 'salespersonName' => (string)$row['staff_name'],
                 'operatorName' => (string)$row['staff_name'],
                 'paymentStatus' => (int)$row['paid'] === 1 ? '已支付' : '未支付',
-                'orderStatus' => (int)$row['terminal_action'] > 0
+                'orderStatus' => $lifecycleOperation === 'void'
                     ? '已作废'
-                    : ((float)$row['refund_price'] > 0 ? '已退款' : '正常'),
+                    : ($lifecycleOperation === 'refund'
+                        ? '已退款作废'
+                        : ((int)$row['terminal_action'] > 0
+                            ? '已作废'
+                            : ((float)$row['refund_price'] > 0 ? '已退款' : '正常'))),
                 'paymentCompletedAt' => $this->dateTime($time),
             ];
         }, $rows), $total];
+    }
+
+    private function rechargeLifecycleOperationQuery(string $tenantId, array $operationTypes): callable
+    {
+        return static function ($operation) use ($tenantId, $operationTypes): void {
+            $operation->name(CashierV3OrderLifecycleServices::OPERATION_TABLE)->alias('rlo')
+                ->whereRaw('rlo.source_order_id = CAST(r.id AS CHAR)')
+                ->where('rlo.tenant_id', $tenantId)
+                ->where('rlo.source_type', 'recharge')
+                ->where('rlo.status', 'succeeded')
+                ->whereIn('rlo.operation_type', $operationTypes);
+        };
+    }
+
+    /** @return array<int,string> keyed by recharge ID */
+    private function readRechargeLifecycleOperations(array $recharges, string $tenantId): array
+    {
+        $rechargeIds = array_values(array_unique(array_filter(array_map(static function (array $row): int {
+            return (int)($row['id'] ?? 0);
+        }, $recharges))));
+        if ($rechargeIds === []) return [];
+        $rows = Db::name(CashierV3OrderLifecycleServices::OPERATION_TABLE)
+            ->where('tenant_id', $tenantId)
+            ->where('source_type', 'recharge')
+            ->where('status', 'succeeded')
+            ->whereIn('operation_type', ['refund', 'void'])
+            ->whereIn('source_order_id', array_map('strval', $rechargeIds))
+            ->field('source_order_id,operation_type')
+            ->select()
+            ->toArray();
+        $operations = [];
+        foreach ($rows as $row) {
+            $rechargeId = (int)($row['source_order_id'] ?? 0);
+            $operationType = (string)($row['operation_type'] ?? '');
+            if ($rechargeId <= 0 || !in_array($operationType, ['refund', 'void'], true)) continue;
+            if ($operationType === 'void' || !isset($operations[$rechargeId])) {
+                $operations[$rechargeId] = $operationType;
+            }
+        }
+        return $operations;
     }
 
     /**
@@ -339,6 +407,46 @@ final class CashierV3OrderCenterRecordQueryServices
         return $economics;
     }
 
+    /**
+     * The selected recharge date is recorded in the immutable V3 fact context.
+     * The legacy recharge row keeps payment time for compatibility, so order
+     * center must prefer the fact date when one exists.
+     *
+     * @return array<string,string> keyed by store ID and recharge order number
+     */
+    private function readRechargeBusinessDates(array $recharges): array
+    {
+        $storeIds = [];
+        $orderNos = [];
+        foreach ($recharges as $recharge) {
+            $storeId = (int)($recharge['store_id'] ?? 0);
+            $orderNo = trim((string)($recharge['order_id'] ?? ''));
+            if ($storeId <= 0 || $orderNo === '') continue;
+            $storeIds[$storeId] = $storeId;
+            $orderNos[$orderNo] = $orderNo;
+        }
+        if ($storeIds === [] || $orderNos === []) return [];
+        $facts = Db::name('cashier_v3_payment_fact')->alias('pf')
+            ->where('pf.source_document_type', 'recharge')
+            ->where('pf.status', 'effective')
+            ->whereIn('pf.store_id', array_values($storeIds))
+            ->whereIn('pf.order_no_snapshot', array_values($orderNos))
+            ->field('pf.store_id,pf.order_no_snapshot,MAX(pf.business_date) AS business_date')
+            ->group('pf.store_id,pf.order_no_snapshot')
+            ->select()
+            ->toArray();
+        $dates = [];
+        foreach ($facts as $fact) {
+            $storeId = (int)($fact['store_id'] ?? 0);
+            $orderNo = trim((string)($fact['order_no_snapshot'] ?? ''));
+            $businessDate = trim((string)($fact['business_date'] ?? ''));
+            if ($storeId > 0 && $orderNo !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/D', $businessDate) === 1) {
+                $dates[$this->rechargeFactKey($storeId, $orderNo)] = $businessDate;
+            }
+        }
+        return $dates;
+    }
+
     private function rechargeFactKey(int $storeId, string $orderNo): string
     {
         return $storeId . "\0" . trim($orderNo);
@@ -347,6 +455,7 @@ final class CashierV3OrderCenterRecordQueryServices
     private function readSupplement(array $criteria, bool $countOnly): array
     {
         $sources = [
+            $this->readV3SalesDebtRepayments($criteria, $countOnly),
             $this->readV3RechargeDebtRepayments($criteria, $countOnly),
             $this->readLegacySupplements($criteria, $countOnly),
         ];
@@ -365,6 +474,70 @@ final class CashierV3OrderCenterRecordQueryServices
         foreach ($records as &$record) unset($record['_sortTime']);
         unset($record);
         return [$records, $total];
+    }
+
+    /**
+     * V3 销售欠款补交的权威来源。销售补交独立落账，不写入旧 store_debt_repay。
+     */
+    private function readV3SalesDebtRepayments(array $criteria, bool $countOnly): array
+    {
+        $query = Db::name('cashier_v3_debt_repayment')->alias('r')
+            ->leftJoin('user u', 'u.uid = r.member_id')
+            ->leftJoin('system_store s', 's.id = r.store_id')
+            ->leftJoin('system_store_staff st', 'st.id = r.operator_id')
+            ->where('r.status', 'succeeded');
+        $this->applyStoreScope($query, 'r.store_id', $criteria['allowedStoreIds']);
+        $this->applyKeyword($query, $criteria['keyword'], [
+            'r.repayment_no', 'r.debt_no', 'r.sales_order_no_snapshot',
+            'u.real_name', 'u.nickname', 'u.phone',
+        ]);
+        $total = (int)(clone $query)->count('r.id');
+        if ($countOnly) return [[], $total];
+
+        $limit = $criteria['page'] * $criteria['pageSize'];
+        $rows = $query->field(implode(',', [
+            'r.id', 'r.repayment_id', 'r.repayment_no', 'r.debt_no',
+            'r.sales_order_no_snapshot', 'r.repayment_amount_cents',
+            'r.store_id', 'r.member_id', 'r.operator_id', 'r.business_date', 'r.settled_at',
+            'u.real_name', 'u.nickname', 'u.phone', 's.name AS store_name',
+            'st.staff_name',
+        ]))->order('r.settled_at', 'desc')->order('r.id', 'desc')->limit($limit)->select()->toArray();
+        if ($rows === []) return [[], $total];
+
+        $repaymentIds = array_values(array_unique(array_filter(array_column($rows, 'repayment_id'))));
+        $paymentMethods = [];
+        if ($repaymentIds !== []) {
+            $payments = Db::name('cashier_v3_debt_repayment_collection')
+                ->whereIn('repayment_id', $repaymentIds)
+                ->field('repayment_id,payment_line_no,payment_method')
+                ->order('repayment_id', 'asc')->order('payment_line_no', 'asc')->select()->toArray();
+            foreach ($payments as $payment) {
+                $repaymentId = (string)($payment['repayment_id'] ?? '');
+                if ($repaymentId !== '') $paymentMethods[$repaymentId][] = $this->paymentLabel((string)($payment['payment_method'] ?? ''));
+            }
+        }
+
+        return [array_map(function (array $row) use ($paymentMethods): array {
+            $repaymentId = (string)$row['repayment_id'];
+            return [
+                'id' => 'v3-sales-supplement:' . $repaymentId,
+                'supplementOrderNo' => (string)$row['repayment_no'],
+                'businessDate' => (string)$row['business_date'],
+                'debtNo' => (string)$row['debt_no'],
+                'sourceOrderNo' => (string)$row['sales_order_no_snapshot'],
+                'memberId' => (int)$row['member_id'],
+                'memberName' => $this->memberName($row),
+                'phone' => (string)$row['phone'],
+                'debtSummary' => '销售欠款补交',
+                'supplementAmount' => $this->centsToMoney((int)$row['repayment_amount_cents']),
+                'paymentMethod' => implode('、', array_values(array_unique($paymentMethods[$repaymentId] ?? []))) ?: '未标注',
+                'storeName' => (string)$row['store_name'],
+                'operatorName' => (string)$row['staff_name'],
+                'paymentStatus' => '补交成功',
+                'paymentCompletedAt' => $this->dateTime((int)$row['settled_at']),
+                '_sortTime' => (int)$row['settled_at'],
+            ];
+        }, $rows), $total];
     }
 
     /**
@@ -388,7 +561,7 @@ final class CashierV3OrderCenterRecordQueryServices
         $limit = $criteria['page'] * $criteria['pageSize'];
         $rows = $query->field(implode(',', [
             'r.id', 'r.repayment_id', 'r.repayment_no', 'r.debt_id', 'r.amount_cents',
-            'r.store_id', 'r.operator_id', 'r.business_date', 'r.settled_at', 'd.debt_no',
+            'r.store_id', 'r.member_id', 'r.operator_id', 'r.business_date', 'r.settled_at', 'd.debt_no',
             'd.order_sn', 'u.real_name', 'u.nickname', 'u.phone', 's.name AS store_name',
             'st.staff_name',
         ]))->order('r.settled_at', 'desc')->order('r.id', 'desc')->limit($limit)->select()->toArray();
@@ -414,6 +587,7 @@ final class CashierV3OrderCenterRecordQueryServices
                 'businessDate' => (string)$row['business_date'],
                 'debtNo' => (string)$row['debt_no'],
                 'sourceOrderNo' => (string)$row['order_sn'],
+                'memberId' => (int)$row['member_id'],
                 'memberName' => $this->memberName($row),
                 'phone' => (string)$row['phone'],
                 'debtSummary' => '充值欠款补交',
@@ -445,7 +619,7 @@ final class CashierV3OrderCenterRecordQueryServices
         $limit = $criteria['page'] * $criteria['pageSize'];
         $rows = $query->field(implode(',', [
             'r.id', 'COALESCE(bd.document_no, r.repay_no) AS repay_no', 'r.order_sn', 'r.repay_amount', 'r.pay_type',
-            'r.pay_store_id', 'r.staff_id', 'r.add_time', 'd.debt_no',
+            'r.pay_store_id', 'r.uid', 'r.staff_id', 'r.add_time', 'd.debt_no',
             'u.real_name', 'u.nickname', 'u.phone', 's.name AS store_name', 'st.staff_name',
         ]))->order('r.add_time', 'desc')->order('r.id', 'desc')->limit($limit)->select()->toArray();
         return [array_map(function (array $row): array {
@@ -455,6 +629,7 @@ final class CashierV3OrderCenterRecordQueryServices
                 'businessDate' => $this->date((int)$row['add_time']),
                 'debtNo' => (string)$row['debt_no'],
                 'sourceOrderNo' => (string)$row['order_sn'],
+                'memberId' => (int)$row['uid'],
                 'memberName' => $this->memberName($row),
                 'phone' => (string)$row['phone'],
                 'debtSummary' => '欠款补交',
@@ -465,6 +640,70 @@ final class CashierV3OrderCenterRecordQueryServices
                 'paymentStatus' => '补交成功',
                 'paymentCompletedAt' => $this->dateTime((int)$row['add_time']),
                 '_sortTime' => (int)$row['add_time'],
+            ];
+        }, $rows), $total];
+    }
+
+    /**
+     * 欠款管理只读取欠款主表及 V3 authority/repaid facts。销售订单只作为
+     * authority 记录的来源快照，绝不用于临时汇总欠款余额。
+     */
+    private function readDebts(array $criteria, bool $countOnly): array
+    {
+        $query = Db::name('store_debt')->alias('d')
+            ->leftJoin('user u', 'u.uid = d.uid')
+            ->leftJoin('system_store s', 's.id = d.store_id')
+            ->leftJoin('cashier_v3_debt_authority a', 'a.debt_id = d.id')
+            ->leftJoin('cashier_v3_recharge_debt_authority ra', 'ra.debt_id = d.id');
+        $this->applyStoreScope($query, 'd.store_id', $criteria['allowedStoreIds']);
+        $this->applyKeyword($query, $criteria['keyword'], [
+            'd.debt_no', 'd.order_sn', 'a.sales_order_no_snapshot',
+            'ra.recharge_order_no_snapshot', 'u.real_name', 'u.nickname', 'u.phone',
+        ]);
+        if ($criteria['status'] === 'outstanding') {
+            $query->where('d.status', 0);
+        } elseif ($criteria['status'] === 'settled') {
+            $query->where('d.status', 1);
+        }
+        // New V3 debts have either sales or recharge authority. Keep legacy
+        // store_debt readable as well, but label it rather than pretending it
+        // carries V3 source precision.
+        $total = (int)(clone $query)->count('d.id');
+        if ($countOnly) return [[], $total];
+        $rows = $this->pageRows($query, $criteria, 'd.add_time', 'd.id', implode(',', [
+            'd.id,d.debt_no,d.order_id,d.order_sn,d.uid,d.store_id,d.total_debt,d.repaid_debt,d.status,d.remark,d.add_time,d.update_time',
+            'u.real_name,u.nickname,u.phone,s.name AS store_name',
+            'a.sales_order_id,a.sales_order_no_snapshot,a.checkout_request_id',
+            'ra.recharge_id,ra.recharge_order_no_snapshot',
+        ]));
+        return [array_map(function (array $row): array {
+            $totalDebt = (string)($row['total_debt'] ?? '0.00');
+            $repaidDebt = (string)($row['repaid_debt'] ?? '0.00');
+            $remaining = bcsub($totalDebt, $repaidDebt, 2);
+            $salesOrderNo = trim((string)($row['sales_order_no_snapshot'] ?? ''));
+            $rechargeOrderNo = trim((string)($row['recharge_order_no_snapshot'] ?? ''));
+            $sourceOrderNo = $salesOrderNo !== '' ? $salesOrderNo
+                : ($rechargeOrderNo !== '' ? $rechargeOrderNo : (string)($row['order_sn'] ?? ''));
+            $sourceType = $salesOrderNo !== '' ? '销售订单'
+                : ($rechargeOrderNo !== '' ? '充值订单' : '历史欠款');
+            return [
+                'id' => 'debt:' . (int)$row['id'],
+                'debtId' => (int)$row['id'],
+                'debtNo' => (string)$row['debt_no'],
+                'memberId' => (int)$row['uid'],
+                'memberName' => $this->memberName($row),
+                'phone' => (string)($row['phone'] ?? ''),
+                'sourceOrderNo' => $sourceOrderNo,
+                'sourceType' => $sourceType,
+                'originalDebtAmount' => $totalDebt,
+                'repaidAmount' => $repaidDebt,
+                'remainingAmount' => $remaining,
+                'debtStatus' => (int)$row['status'] === 1 ? '已结清' : '待补交',
+                'storeName' => (string)($row['store_name'] ?? ''),
+                'createdAt' => $this->dateTime((int)($row['add_time'] ?? 0)),
+                'updatedAt' => $this->dateTime((int)($row['update_time'] ?? 0)),
+                'remark' => (string)($row['remark'] ?? ''),
+                'canRepay' => (int)$row['status'] === 0 && bccomp($remaining, '0.00', 2) > 0,
             ];
         }, $rows), $total];
     }
@@ -511,6 +750,7 @@ final class CashierV3OrderCenterRecordQueryServices
                 'refundOrderNo' => (string)($row['refund_no'] ?: ('RF-' . $row['id'])),
                 'businessDate' => $this->date($time),
                 'sourceOrderNo' => (string)$row['source_order_no'],
+                'memberId' => (int)$row['uid'],
                 'memberName' => $this->memberName($row),
                 'phone' => (string)$row['phone'],
                 'refundSummary' => (string)($row['refund_explain'] ?: $row['refund_reason']),
@@ -544,7 +784,7 @@ final class CashierV3OrderCenterRecordQueryServices
             ->where('sf.service_status', 'completed');
         $this->applyStoreScope($query, 'sf.store_id', $criteria['allowedStoreIds']);
         $this->applyKeyword($query, $criteria['keyword'], [
-            'sf.service_fact_id', 'sf.member_name_snapshot', 'sf.project_name_snapshot',
+            'sf.service_record_no', 'sf.member_name_snapshot', 'sf.project_name_snapshot',
             'sf.store_name_snapshot', 'sf.operator_name_snapshot', 'sf.craftsmen_snapshot_json',
             'wf.source_name_snapshot', 'wf.source_code_snapshot',
         ]);
@@ -556,7 +796,7 @@ final class CashierV3OrderCenterRecordQueryServices
         if ($countOnly) return [[], $total];
 
         $rows = $this->pageServiceRows($query, $criteria, implode(',', [
-            'sf.id', 'sf.service_fact_id', 'sf.tenant_id', 'sf.checkout_request_id', 'sf.source_line_id',
+            'sf.id', 'sf.service_fact_id', 'sf.service_record_no', 'sf.tenant_id', 'sf.checkout_request_id', 'sf.source_line_id',
             'sf.business_date', 'sf.member_id', 'sf.member_name_snapshot', 'sf.project_id',
             'sf.project_name_snapshot', 'sf.quantity', 'sf.store_id', 'sf.store_name_snapshot',
             'sf.operator_id', 'sf.operator_name_snapshot', 'sf.settled_at', 'sf.occurred_at',
@@ -575,8 +815,12 @@ final class CashierV3OrderCenterRecordQueryServices
             }
             return [
                 'id' => 'service:' . $row['id'],
-                'serviceRecordNo' => (string)$row['service_fact_id'],
+                // The member-detail writeoff tab displays the immutable visible
+                // service document number. ESF remains only an internal fallback
+                // for historical rows created before that number was allocated.
+                'serviceRecordNo' => (string)($row['service_record_no'] ?: $row['service_fact_id']),
                 'businessDate' => (string)$row['business_date'],
+                'memberId' => (int)$row['member_id'],
                 'memberName' => (string)$row['member_name_snapshot'],
                 'serviceProject' => (string)$row['project_name_snapshot'],
                 'entitlementSource' => $this->serviceEntitlementSource($row),
@@ -658,7 +902,13 @@ final class CashierV3OrderCenterRecordQueryServices
     {
         if ((int)($row['is_gift'] ?? 0) === 1) return '赠送权益';
         $kind = trim((string)($row['source_kind'] ?? ''));
-        return $kind === '' ? '卡项权益' : '卡项权益（' . $kind . '）';
+        $labels = [
+            'time_card' => '时间卡权益',
+            'count_card' => '次数卡权益',
+            'custom_card' => '定制卡权益',
+            'gift' => '赠送权益',
+        ];
+        return $labels[$kind] ?? '卡项权益';
     }
 
     /** @return array<string,string> */
@@ -705,7 +955,7 @@ final class CashierV3OrderCenterRecordQueryServices
     private function applyServiceTopFilters($query, array $filters): void
     {
         $likeFields = [
-            'service_record_no' => 'sf.service_fact_id',
+            'service_record_no' => 'sf.service_record_no',
             'member_name' => 'sf.member_name_snapshot',
             'service_project' => 'sf.project_name_snapshot',
             'entitlement_source' => 'wf.source_name_snapshot',
@@ -727,7 +977,7 @@ final class CashierV3OrderCenterRecordQueryServices
     private function pageServiceRows($query, array $criteria, string $fields): array
     {
         $columns = [
-            'service_record_no' => 'sf.service_fact_id',
+            'service_record_no' => 'sf.service_record_no',
             'business_date' => 'sf.business_date',
             'member_name' => 'sf.member_name_snapshot',
             'service_project' => 'sf.project_name_snapshot',
@@ -794,7 +1044,7 @@ final class CashierV3OrderCenterRecordQueryServices
         $rows = $query->field(implode(',', [
             'gf.id', 'gf.gift_fact_id', 'gf.source_id', 'gf.source_detail_id', 'gf.gift_kind',
             'gf.quantity', 'gf.content_name_snapshot', 'gf.content_snapshot_json', 'gf.settled_at',
-            'gf.store_id', 'gf.operator_id', 'ga.gift_no', 'ga.recharge_order_no_snapshot', 'u.real_name',
+            'gf.store_id', 'gf.member_id', 'gf.operator_id', 'ga.gift_no', 'ga.recharge_order_no_snapshot', 'u.real_name',
             'u.nickname', 'u.phone', 's.name AS store_name', 'st.staff_name',
         ]))->order('gf.settled_at', 'desc')->order('gf.id', 'desc')->limit($limit)->select()->toArray();
         return [array_map(function (array $row): array {
@@ -806,6 +1056,7 @@ final class CashierV3OrderCenterRecordQueryServices
                 'id' => 'v3-gift:' . (string)$row['gift_fact_id'],
                 'giftRecordNo' => trim((string)($row['gift_no'] ?? '')) ?: (string)$row['gift_fact_id'],
                 'businessDate' => $this->date($time),
+                'memberId' => (int)$row['member_id'],
                 'memberName' => $this->memberName($row),
                 'giftSource' => '充值订单 ' . (string)$row['recharge_order_no_snapshot'],
                 'giftType' => $kind === 'coupon' ? '赠送优惠券' : ($kind === 'project' ? '赠送项目' : '赠送商品'),
@@ -851,7 +1102,7 @@ final class CashierV3OrderCenterRecordQueryServices
         $rows = $query->field(implode(',', [
             'gf.id', 'gf.gift_fact_id', 'gf.source_id', 'gf.source_detail_id', 'gf.gift_kind',
             'gf.quantity', 'gf.content_name_snapshot', 'gf.content_snapshot_json', 'gf.settled_at',
-            'gf.store_id', 'gf.operator_id', 'ga.gift_no', 'ga.reason_snapshot', 'ga.validity_end AS authority_validity_end',
+            'gf.store_id', 'gf.member_id', 'gf.operator_id', 'ga.gift_no', 'ga.reason_snapshot', 'ga.validity_end AS authority_validity_end',
             'gi.content_snapshot_json AS item_content_snapshot_json', 'u.real_name',
             'u.nickname', 'u.phone', 's.name AS store_name', 'st.staff_name',
         ]))->order('gf.settled_at', 'desc')->order('gf.id', 'desc')->limit($limit)->select()->toArray();
@@ -866,6 +1117,7 @@ final class CashierV3OrderCenterRecordQueryServices
                 'id' => 'v3-direct-gift:' . (string)$row['gift_fact_id'],
                 'giftRecordNo' => trim((string)($row['gift_no'] ?? '')) ?: (string)$row['gift_fact_id'],
                 'businessDate' => $this->date($time),
+                'memberId' => (int)$row['member_id'],
                 'memberName' => $this->memberName($row),
                 'giftSource' => '独立赠送',
                 'giftType' => $kind === 'coupon' ? '赠送优惠券' : ($kind === 'project' ? '赠送项目' : '赠送商品'),
@@ -925,6 +1177,7 @@ final class CashierV3OrderCenterRecordQueryServices
                 'id' => 'gift:' . $row['id'],
                 'giftRecordNo' => 'GIFT-' . $row['id'],
                 'businessDate' => $this->date($time),
+                'memberId' => (int)$row['uid'],
                 'memberName' => $this->memberName($row),
                 'giftSource' => '销售订单 ' . (string)$row['order_id'],
                 'giftType' => (int)$row['product_type'] === 6 ? '赠送项目' : '赠送商品',
@@ -990,6 +1243,7 @@ final class CashierV3OrderCenterRecordQueryServices
         $limit = $criteria['page'] * $criteria['pageSize'];
         $rows = $query->field(implode(',', [
             'c.id', 'c.operation_no', 'c.operation_type', 'c.operation_status', 'c.store_id',
+            'c.origin_member_id', 'c.member_id_before', 'c.member_id_after',
             'c.store_name_snapshot', 'c.member_name_after_snapshot', 'c.card_name_snapshot',
             'c.card_no_snapshot', 'c.target_catalog_name_snapshot', 'c.source_remaining_value_cents',
             'c.settlement_delta_cents', 'c.checkout_request_id', 'c.reason_snapshot',
@@ -1003,6 +1257,7 @@ final class CashierV3OrderCenterRecordQueryServices
                 'operationType' => $row['operation_type'],
                 'operationStatus' => $row['operation_status'],
                 'businessDate' => (string)$row['business_date'],
+                'memberId' => (int)($row['member_id_after'] ?: $row['member_id_before'] ?: $row['origin_member_id']),
                 'memberName' => $row['member_name_after_snapshot'],
                 'sourceCard' => $row['card_name_snapshot'],
                 'targetContent' => $row['target_catalog_name_snapshot'],
@@ -1040,7 +1295,7 @@ final class CashierV3OrderCenterRecordQueryServices
         $rows = $query->field(implode(',', [
             'r.id', 'r.replacement_no', 'r.oid', 'r.target_amount', 'r.snapshot_json',
             'r.status', 'r.business_time', 'r.operate_time', 'u.real_name', 'u.nickname',
-            'u.phone', 's.name AS store_name', 'st.staff_name',
+            'u.uid', 'u.phone', 's.name AS store_name', 'st.staff_name',
         ]))->order('r.business_time', 'desc')->order('r.id', 'desc')->limit($limit)->select()->toArray();
         return [array_map(function (array $row): array {
             $snapshot = json_decode((string)$row['snapshot_json'], true);
@@ -1057,6 +1312,7 @@ final class CashierV3OrderCenterRecordQueryServices
                 'operationType' => 'project_replacement',
                 'operationStatus' => 'completed',
                 'businessDate' => $this->date((int)$row['business_time']),
+                'memberId' => (int)($row['uid'] ?? 0),
                 'memberName' => $this->memberName($row),
                 'sourceCard' => implode('、', array_unique($sourceNames)),
                 'targetContent' => (string)($target['name'] ?? $target['product_name'] ?? ''),
@@ -1101,7 +1357,7 @@ final class CashierV3OrderCenterRecordQueryServices
         $rows = $query->field(implode(',', [
             'o.id', 'o.order_id', 'o.card_upgrade_use_oid', 'o.pay_price', 'o.debt_amount',
             'o.terminal_action', 'o.pay_time', 'o.add_time', 'target.order_id AS target_order_no',
-            'u.real_name', 'u.nickname', 'u.phone', 's.name AS store_name', 'st.staff_name',
+            'o.uid', 'u.real_name', 'u.nickname', 'u.phone', 's.name AS store_name', 'st.staff_name',
         ]))->order('o.pay_time', 'desc')->order('o.id', 'desc')->limit($limit)->select()->toArray();
         return [array_map(function (array $row): array {
             $time = (int)($row['pay_time'] ?: $row['add_time']);
@@ -1111,6 +1367,7 @@ final class CashierV3OrderCenterRecordQueryServices
                 'operationType' => 'card_upgrade',
                 'operationStatus' => (int)$row['terminal_action'] > 0 ? 'cancelled' : 'completed',
                 'businessDate' => $this->date($time),
+                'memberId' => (int)($row['uid'] ?? 0),
                 'memberName' => $this->memberName($row),
                 'sourceCard' => '原卡订单 ' . $row['order_id'],
                 'targetContent' => '升级订单 ' . ($row['target_order_no'] ?: $row['card_upgrade_use_oid']),
@@ -1133,6 +1390,7 @@ final class CashierV3OrderCenterRecordQueryServices
             'cardOperationNo' => (string)$row['operationNo'],
             'businessDate' => (string)$row['businessDate'],
             'memberName' => (string)$row['memberName'],
+            'memberId' => (int)($row['memberId'] ?? 0),
             'operationType' => $type,
             'operationTypeLabel' => $this->cardOperationLabel($type),
             'sourceCard' => (string)$row['sourceCard'],
@@ -1219,6 +1477,12 @@ final class CashierV3OrderCenterRecordQueryServices
                 ['value' => 'pending', 'label' => '处理中'],
                 ['value' => 'completed', 'label' => '已退货退款'],
                 ['value' => 'cancelled', 'label' => '已取消'],
+            ]);
+        }
+        if ($type === 'debt') {
+            return array_merge($options, [
+                ['value' => 'outstanding', 'label' => '待补交'],
+                ['value' => 'settled', 'label' => '已结清'],
             ]);
         }
         if ($type === 'gift') {

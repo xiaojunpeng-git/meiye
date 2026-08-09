@@ -90,8 +90,11 @@
               <template slot-scope="{ row }" slot="is_manager">
                 {{ row.is_manager == 1 ? '是' : '否' }}
               </template>
-              <template slot-scope="{ row }" slot="can_choose">
-                {{ row.can_choose == 1 ? '是' : '否' }}
+              <template slot-scope="{ row }" slot="cashier_salesperson_enabled">
+                {{ row.cashier_salesperson_enabled == 1 ? '是' : '否' }}
+              </template>
+              <template slot-scope="{ row }" slot="cashier_craftsman_enabled">
+                {{ row.cashier_craftsman_enabled == 1 ? '是' : '否' }}
               </template>
               <template slot-scope="{ row }" slot="status">
                 {{ row.status == 1 ? '在职' : '离职' }}
@@ -346,7 +349,8 @@ const COLUMNS_META = [
   { key: 'position_label', title: '职位', minWidth: 100 },
   { key: 'position_level_label', title: '职级', minWidth: 100 },
   { key: 'is_manager', title: '店长', minWidth: 80, slot: 'is_manager' },
-  { key: 'can_choose', title: '销售/手艺人', minWidth: 100, slot: 'can_choose' },
+  { key: 'cashier_salesperson_enabled', title: '可作为销售人', minWidth: 110, slot: 'cashier_salesperson_enabled' },
+  { key: 'cashier_craftsman_enabled', title: '可作为手艺人', minWidth: 110, slot: 'cashier_craftsman_enabled' },
   { key: 'status', title: '在职状态', minWidth: 80, slot: 'status' },
   { key: 'is_fencheng', title: '参与分成', minWidth: 90, slot: 'is_fencheng' },
   { key: 'employee_number', title: '工号', minWidth: 100 },
@@ -380,7 +384,8 @@ const DEFAULT_COLUMN_CONFIG = [
   { key: 'position_label', show: true },
   { key: 'position_level_label', show: true },
   { key: 'is_manager', show: true },
-  { key: 'can_choose', show: true },
+  { key: 'cashier_salesperson_enabled', show: true },
+  { key: 'cashier_craftsman_enabled', show: true },
   { key: 'status', show: true },
   { key: 'is_fencheng', show: true },
   { key: 'action', show: true },

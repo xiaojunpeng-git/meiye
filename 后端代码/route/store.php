@@ -65,14 +65,21 @@ Route::group('storeapi', function () {
 		//解析（导入地图城市地址）
 		Route::get('resolve/city', 'Common/resolveCityList')->option(['real_name' => '解析导入地图城市地址']);
 
-    })->middleware(AuthTokenMiddleware::class)->middleware(\app\http\middleware\SystemLogMiddleware::class, 'store');
+    })->middleware([AuthTokenMiddleware::class, ForceStoreSessionMiddleware::class])->middleware(\app\http\middleware\SystemLogMiddleware::class, 'store');
 
     /**
      * 需登录验证权限
      */
     Route::group(function () {
         //首页头部统计数据
-                // 经营看板（阶段1）
+        Route::get('home/header', 'Common/homeStatics')->option(['real_name' => '首页头部统计数据']);
+        //首页营业趋势图表
+        Route::get('home/operate', 'Common/operateChart')->option(['real_name' => '首页营业趋势图表']);
+        //首页交易图表
+        Route::get('home/orderChart', 'Common/orderChart')->option(['real_name' => '首页交易图表']);
+        //首页店员统计
+        Route::get('home/staff', 'Common/staffChart')->option(['real_name' => '首页店员统计']);
+        // 经营看板（阶段1）
         Route::get('home/statistics/overview', 'BusinessDashboard/overview')->option(['real_name' => '经营看板概览']);
         Route::get('home/statistics/trend', 'BusinessDashboard/trend')->option(['real_name' => '经营看板趋势']);
         Route::get('home/statistics/staff-ranking', 'BusinessDashboard/staffRanking')->option(['real_name' => '经营看板员工排行']);
@@ -80,18 +87,17 @@ Route::group('storeapi', function () {
         Route::get('home/statistics/new-profile-detail', 'BusinessDashboard/newProfileDetail')->option(['real_name' => '经营看板新建档明细']);
         Route::get('home/statistics/source-customer-detail', 'BusinessDashboard/sourceCustomerDetail')->option(['real_name' => '经营看板散客新客明细']);
         Route::get('home/statistics/money-detail', 'BusinessDashboard/moneyDetail')->option(['real_name' => '经营看板金额明细']);
-
-Route::get('home/header', 'Common/homeStatics')->option(['real_name' => '首页头部统计数据']);
-        //首页营业趋势图表
-        Route::get('home/operate', 'Common/operateChart')->option(['real_name' => '首页营业趋势图表']);
-        //首页交易图表
-        Route::get('home/orderChart', 'Common/orderChart')->option(['real_name' => '首页交易图表']);
-        //首页店员统计
-        Route::get('home/staff', 'Common/staffChart')->option(['real_name' => '首页店员统计']);
+        // Vue 3 门店端房间设置。独立的同名 storeapi 分组会被后加载的
+        // 本文件覆盖，因此路由必须在当前鉴权分组内注册。
+        Route::get('room-settings', 'system.RoomSettings/index')->option(['real_name' => '房间设置列表']);
+        Route::post('room-settings', 'system.RoomSettings/create')->option(['real_name' => '新增房间']);
+        Route::post('room-settings/sort', 'system.RoomSettings/sort')->option(['real_name' => '房间排序']);
+        Route::put('room-settings/:id', 'system.RoomSettings/update')->option(['real_name' => '编辑房间']);
+        Route::post('room-settings/:id/status', 'system.RoomSettings/setStatus')->option(['real_name' => '启用停用房间']);
         //轮询查询扫码订单支付状态
         Route::post('check_order_status/:type', 'Common/checkOrderStatus')->option(['real_name' => '轮询订单状态接口'])->name('checkOrderStatus');//轮询订单状态接口
 
-    })->middleware([AuthTokenMiddleware::class, StoreCkeckRoleMiddleware::class])->middleware(\app\http\middleware\SystemLogMiddleware::class, 'store');
+    })->middleware([AuthTokenMiddleware::class, ForceStoreSessionMiddleware::class, StoreCkeckRoleMiddleware::class])->middleware(\app\http\middleware\SystemLogMiddleware::class, 'store');
 
 
     /**
@@ -165,7 +171,7 @@ Route::get('home/header', 'Common/homeStatics')->option(['real_name' => '首页�
         //系统更新日志（只读）
         Route::get('changelog', 'system.SystemChangelog/index')->option(['real_name' => '更新日志列表']);
         Route::get('changelog/:id', 'system.SystemChangelog/read')->option(['real_name' => '更新日志详情']);
-    })->middleware([AuthTokenMiddleware::class, StoreCkeckRoleMiddleware::class]);
+    })->middleware([AuthTokenMiddleware::class, ForceStoreSessionMiddleware::class, StoreCkeckRoleMiddleware::class]);
 
     /**
      * 同城配送
@@ -179,7 +185,7 @@ Route::get('home/header', 'Common/homeStatics')->option(['real_name' => '首页�
         Route::post('confirm', 'order.Order/confirm_delivery')->option(['real_name' => '配送员确认送达']);
         Route::get('export/statistics', 'export.ExportExcel/statistics')->option(['real_name' => '配送数据统计导出']);
         Route::get('data', 'order.StoreDeliveryOrder/getData')->option(['real_name' => '统计数据']);
-    })->middleware([AuthTokenMiddleware::class, StoreCkeckRoleMiddleware::class]);
+    })->middleware([AuthTokenMiddleware::class, ForceStoreSessionMiddleware::class, StoreCkeckRoleMiddleware::class]);
 
     /**
      * 桌码管理
@@ -214,7 +220,7 @@ Route::get('home/header', 'Common/homeStatics')->option(['real_name' => '首页�
         //桌码操作启用
         Route::get('update/using/:id', 'table.TableCode/updateUsing')->option(['real_name' => '桌码操作启用']);
 
-    })->middleware([AuthTokenMiddleware::class, StoreCkeckRoleMiddleware::class])->middleware(\app\http\middleware\SystemLogMiddleware::class, 'store');
+    })->middleware([AuthTokenMiddleware::class, ForceStoreSessionMiddleware::class, StoreCkeckRoleMiddleware::class])->middleware(\app\http\middleware\SystemLogMiddleware::class, 'store');
 
     /**
      * 社区相关路由
@@ -255,13 +261,14 @@ Route::get('home/header', 'Common/homeStatics')->option(['real_name' => '首页�
         //社区保存虚拟评论
         Route::post('comment/save_fictitious', 'community.CommunityComment/saveFictitiousComment')->option(['real_name' => '社区保存虚拟评论']);
 
-    })->middleware([AuthTokenMiddleware::class, StoreCkeckRoleMiddleware::class])->middleware(\app\http\middleware\SystemLogMiddleware::class, 'store');
+    })->middleware([AuthTokenMiddleware::class, ForceStoreSessionMiddleware::class, StoreCkeckRoleMiddleware::class])->middleware(\app\http\middleware\SystemLogMiddleware::class, 'store');
     /**
      * 用户
      */
     Route::group('user', function () {
         //门店搜索用户
         Route::get('search', 'user.User/search')->option(['real_name' => '门店搜索用户']);
+        Route::get('profile_fields', 'user.User/profileFields')->option(['real_name' => '门店客户档案字段']);
         //获取指定用户的信息
         Route::get('one_info/:id', 'user.User/oneUserInfo')->option(['real_name' => '获取指定用户的信息']);
         //获取单个卡项信息
@@ -322,7 +329,7 @@ Route::get('home/header', 'Common/homeStatics')->option(['real_name' => '首页�
         //用户标签树
         Route::get('user_label/tree', 'user.User/userLabelTree')->option(['real_name' => '用户标签树形列表']);
 
-    })->middleware([AuthTokenMiddleware::class, StoreCkeckRoleMiddleware::class])->middleware(\app\http\middleware\SystemLogMiddleware::class, 'store');
+    })->middleware([AuthTokenMiddleware::class, ForceStoreSessionMiddleware::class, StoreCkeckRoleMiddleware::class])->middleware(\app\http\middleware\SystemLogMiddleware::class, 'store');
 
     /**
      * 员工
@@ -340,8 +347,9 @@ Route::get('home/header', 'Common/homeStatics')->option(['real_name' => '首页�
         Route::get('statistics/export', 'export.ExportExcel/statisticsExport')->option(['real_name' => '店员交易统计导出']);
         //获取店员交易头部数据
         Route::get('statisticsHeader', 'staff.StoreStaff/getStaffStatisticsHeader')->option(['real_name' => '获取店员交易头部数据']);
-        //获取门店所有店员
-        Route::get('staff/all', 'staff.StoreStaff/getStaffSelect')->option(['real_name' => '获取门店所有店员']);
+		//获取门店所有店员
+		Route::get('staff/all', 'staff.StoreStaff/getStaffSelect')->option(['real_name' => '获取门店所有店员']);
+		Route::get('staff/positions', 'staff.StoreStaff/selectablePositions')->option(['real_name' => '获取门店可选岗位']);
 		//获取门店店员列表
 		Route::get('workMember/list', 'staff.StoreStaff/getWorkMemberList')->option(['real_name' => '获取门店店员列表']);
 		//获取门店店员列表
@@ -352,6 +360,7 @@ Route::get('home/header', 'Common/homeStatics')->option(['real_name' => '首页�
         Route::get('staff/customer/:id', 'staff.StoreStaff/getStaffCustomer')->option(['real_name' => '获取店员专属客户']);
         //店员业绩订单
         Route::get('staff/performance/:id', 'staff.StoreStaff/getStaffPerformance')->option(['real_name' => '获取店员业绩列表']);
+        Route::get('staff/person_complete/:id', 'staff.StoreStaff/personComplete')->option(['real_name' => '人员完整详情']);
         //获取门店店员详情
         Route::get('staff/:id', 'staff.StoreStaff/read')->option(['real_name' => '获取门店店员详情']);
 		//获取店员详情
@@ -404,7 +413,7 @@ Route::get('home/header', 'Common/homeStatics')->option(['real_name' => '首页�
         Route::get('shift/template/list', 'staff.StaffShift/index')->option(['real_name' => '班次模板列表']);
         Route::post('shift/template/save', 'staff.StaffShift/save')->option(['real_name' => '保存班次模板']);
         Route::delete('shift/template/del/:id', 'staff.StaffShift/delete')->option(['real_name' => '删除班次模板']);
-    })->middleware([AuthTokenMiddleware::class, StoreCkeckRoleMiddleware::class])->middleware(\app\http\middleware\SystemLogMiddleware::class, 'store');
+    })->middleware([AuthTokenMiddleware::class, ForceStoreSessionMiddleware::class, StoreCkeckRoleMiddleware::class])->middleware(\app\http\middleware\SystemLogMiddleware::class, 'store');
 
     /**
      * 财务
@@ -433,7 +442,7 @@ Route::get('home/header', 'Common/homeStatics')->option(['real_name' => '首页�
 
 		//储值退款
 		Route::put('recharge/:id', 'order.Recharge/refund_update')->option(['real_name' => '储值退款']);
-    })->middleware([AuthTokenMiddleware::class, StoreCkeckRoleMiddleware::class])->middleware(\app\http\middleware\SystemLogMiddleware::class, 'store');
+    })->middleware([AuthTokenMiddleware::class, ForceStoreSessionMiddleware::class, StoreCkeckRoleMiddleware::class])->middleware(\app\http\middleware\SystemLogMiddleware::class, 'store');
 
 
 	/**
@@ -451,7 +460,7 @@ Route::get('home/header', 'Common/homeStatics')->option(['real_name' => '首页�
         //城市数据接口
         Route::get('shipping_templates/city_list', 'product.shipping.ShippingTemplates/city_list')->option(['real_name' => '城市数据接口']);
 
-	})->middleware([AuthTokenMiddleware::class, StoreCkeckRoleMiddleware::class])->middleware(\app\http\middleware\SystemLogMiddleware::class, 'store');
+	})->middleware([AuthTokenMiddleware::class, ForceStoreSessionMiddleware::class, StoreCkeckRoleMiddleware::class])->middleware(\app\http\middleware\SystemLogMiddleware::class, 'store');
 
     /**
      * 商品
@@ -605,46 +614,40 @@ Route::get('home/header', 'Common/homeStatics')->option(['real_name' => '首页�
 		//批次库存权威查询（Vue3 库存页，门店范围由服务端强制）
 		Route::get('v3/batch-stock', 'product.inventory.InventoryBatchStockQuery/index')->option(['real_name' => '批次库存查询']);
 		Route::get('v3/batch-analysis', 'product.inventory.InventoryBatchStockQuery/analysis')->option(['real_name' => '批次临期与库龄分析']);
+		Route::get('v3/dashboard', 'product.inventory.InventoryStoreReadModel/dashboard')->option(['real_name' => '库存首页权威概览']);
+		Route::get('v3/product-summary', 'product.inventory.InventoryStoreReadModel/productSummary')->option(['real_name' => '库存商品汇总查询']);
+		Route::get('v3/product-summary/:productId/detail', 'product.inventory.InventoryStoreReadModel/productDetail')->option(['real_name' => '库存商品批次与流水详情']);
 		Route::get('v3/unified-query/batch-stock', 'product.inventory.InventoryUnifiedQuery/batchStock')->option(['real_name' => '统一查询批次库存']);
+		Route::get('v3/unified-query/operational', 'product.inventory.InventoryUnifiedQuery/operational')->option(['real_name' => '统一查询库存业务单据']);
 		Route::get('v3/unified-query/capabilities', 'product.inventory.InventoryUnifiedQuery/capabilities')->option(['real_name' => '库存统一查询能力']);
 		Route::post('v3/unified-query/commands', 'product.inventory.InventoryUnifiedQuery/command')->option(['real_name' => '库存统一查询操作']);
 		Route::get('v3/unified-query/export-task/:taskNo', 'product.inventory.InventoryUnifiedQuery/exportTask')->option(['real_name' => '库存统一查询导出任务']);
 		Route::get('v3/catalog', 'product.inventory.InventoryStoreCatalog/search')->option(['real_name' => '库存商品条码搜索']);
-		Route::get('v3/locations', 'product.inventory.InventoryStoreWarehouse/index')->option(['real_name' => '门店可用库存仓库列表']);
-		Route::post('v3/inbound', 'product.inventory.InventoryManualInbound/create')->option(['real_name' => '批次手工入库']);
-		Route::post('v3/outbound', 'product.inventory.InventoryManualOutbound/create')->option(['real_name' => '批次手工出库']);
-		Route::get('v3/movement', 'product.inventory.InventoryMovementQuery/index')->option(['real_name' => '批次事实出入库记录查询']);
-		Route::get('v3/movement-statistics', 'product.inventory.InventoryMovementAnalytics/index')->option(['real_name' => '批次事实出入库统计']);
-		Route::post('v3/count/confirm', 'product.inventory.InventoryStockCount/confirm')->option(['real_name' => '批次库存盘点确认']);
-		Route::get('v3/count', 'product.inventory.InventoryStockCountQuery/index')->option(['real_name' => '批次库存盘点单查询']);
-		Route::get('v3/request', 'product.inventory.InventoryStockRequestQuery/index')->option(['real_name' => '批次库存请货单查询']);
-		Route::post('v3/request/apply', 'product.inventory.InventoryStockRequest/apply')->option(['real_name' => '批次库存请货申请']);
-		Route::post('v3/request/cancel/:id', 'product.inventory.InventoryStockRequest/cancel')->option(['real_name' => '批次库存请货取消']);
-		Route::get('v3/transfer', 'product.inventory.InventoryBatchTransfer/index')->option(['real_name' => '批次库存调拨单查询']);
-		Route::post('v3/transfer', 'product.inventory.InventoryBatchTransfer/create')->option(['real_name' => '批次库存调拨确认']);
-		Route::get('v3/salon-usage', 'product.inventory.InventorySalonUsage/index')->option(['real_name' => '院装耗材记录查询']);
-		Route::get('v3/salon-usage/:id/detail', 'product.inventory.InventorySalonUsage/detail')->pattern(['id' => '\\d+'])->option(['real_name' => '院装耗材单据详情']);
-		Route::post('v3/salon-usage/issue', 'product.inventory.InventorySalonUsage/issue')->option(['real_name' => '院装耗材领用']);
-		Route::post('v3/salon-usage/return', 'product.inventory.InventorySalonUsage/returnToDefault')->option(['real_name' => '院装耗材退回']);
-		Route::get('v3/dashboard', 'product.inventory.InventoryStoreReadModel/dashboard')->option(['real_name' => '库存首页权威概览']);
-		Route::get('v3/product-summary', 'product.inventory.InventoryStoreReadModel/productSummary')->option(['real_name' => '库存商品汇总查询']);
-		Route::get('v3/product-summary/:productId/detail', 'product.inventory.InventoryStoreReadModel/productDetail')->option(['real_name' => '库存商品批次与流水详情']);
-		Route::get('v3/unified-query/operational', 'product.inventory.InventoryUnifiedQuery/operational')->option(['real_name' => '统一查询库存业务单据']);
 		Route::get('v3/catalog/barcode', 'product.inventory.InventoryStoreCatalog/barcode')->option(['real_name' => '库存商品精确条码查询']);
 		Route::get('v3/request/requester', 'product.inventory.InventoryStoreCatalog/requester')->option(['real_name' => '库存请货人默认信息']);
+		Route::get('v3/locations', 'product.inventory.InventoryStoreWarehouse/index')->option(['real_name' => '门店可用库存仓库列表']);
 		Route::get('v3/import/template', 'product.inventory.InventoryV3ExcelImport/template')->option(['real_name' => 'V3库存导入模板']);
 		Route::post('v3/import/upload', 'product.inventory.InventoryV3ExcelImport/upload')->option(['real_name' => 'V3库存导入文件上传']);
 		Route::post('v3/import', 'product.inventory.InventoryV3ExcelImport/import')->option(['real_name' => 'V3库存Excel导入']);
 		Route::get('v3/import', 'product.inventory.InventoryV3ExcelImport/index')->option(['real_name' => 'V3库存导入记录']);
 		Route::get('v3/import/:id/detail', 'product.inventory.InventoryV3ExcelImport/detail')->option(['real_name' => 'V3库存导入错误详情']);
+		Route::post('v3/inbound', 'product.inventory.InventoryManualInbound/create')->option(['real_name' => '批次手工入库']);
 		Route::get('v3/inbound/:id/detail', 'product.inventory.InventoryManualInbound/detail')->pattern(['id' => '[A-Za-z0-9-]+'])->option(['real_name' => '批次手工入库详情']);
 		Route::get('v3/inbound/:id/outbound-details', 'product.inventory.InventoryManualInbound/outboundDetails')->pattern(['id' => '[A-Za-z0-9-]+'])->option(['real_name' => '入库批次后续出库明细']);
 		Route::post('v3/inbound/:id/void', 'product.inventory.InventoryManualInbound/void')->pattern(['id' => '[A-Za-z0-9-]+'])->option(['real_name' => '批次手工入库作废']);
+		Route::post('v3/outbound', 'product.inventory.InventoryManualOutbound/create')->option(['real_name' => '批次手工出库']);
 		Route::post('v3/outbound/:id/void', 'product.inventory.InventoryManualOutbound/void')->pattern(['id' => '[A-Za-z0-9-]+'])->option(['real_name' => '批次手工出库作废']);
+		Route::get('v3/movement', 'product.inventory.InventoryMovementQuery/index')->option(['real_name' => '批次事实出入库记录查询']);
+		Route::get('v3/movement-statistics', 'product.inventory.InventoryMovementAnalytics/index')->option(['real_name' => '批次事实出入库统计']);
+		Route::post('v3/count/confirm', 'product.inventory.InventoryStockCount/confirm')->option(['real_name' => '批次库存盘点确认']);
+		Route::get('v3/count', 'product.inventory.InventoryStockCountQuery/index')->option(['real_name' => '批次库存盘点单查询']);
+		Route::get('v3/request', 'product.inventory.InventoryStockRequestQuery/index')->option(['real_name' => '批次库存请货单查询']);
 		Route::get('v3/request/:id/detail', 'product.inventory.InventoryStockRequestQuery/detail')->option(['real_name' => '批次库存请货单详情']);
+		Route::post('v3/request/apply', 'product.inventory.InventoryStockRequest/apply')->option(['real_name' => '批次库存请货申请']);
 		Route::get('v3/request/suppliers', 'product.inventory.InventoryStockRequest/suppliers')->option(['real_name' => '批次库存请货供货方目录']);
 		Route::get('v3/request/counterparties', 'product.inventory.InventoryStockRequest/suppliers')->option(['real_name' => '批次库存请货供货方选择']);
 		Route::post('v3/request/:id/update', 'product.inventory.InventoryStockRequest/updateApplied')->option(['real_name' => '批次库存请货编辑']);
+		Route::post('v3/request/cancel/:id', 'product.inventory.InventoryStockRequest/cancel')->option(['real_name' => '批次库存请货取消']);
 		Route::post('v3/request/terminate/:id', 'product.inventory.InventoryStockRequest/terminate')->option(['real_name' => '批次库存请货终止剩余']);
 		Route::get('v3/cross-transfer', 'product.inventory.InventoryCrossSubjectTransfer/index')->option(['real_name' => '跨门店库存调拨单查询']);
 		Route::get('v3/cross-transfer/:id/detail', 'product.inventory.InventoryCrossSubjectTransfer/detail')->option(['real_name' => '跨门店库存调拨单详情']);
@@ -655,7 +658,13 @@ Route::get('home/header', 'Common/homeStatics')->option(['real_name' => '首页�
 		Route::post('v3/cross-transfer/:id/receive', 'product.inventory.InventoryCrossSubjectTransfer/receive')->option(['real_name' => '跨门店库存调拨收货']);
 		Route::post('v3/cross-transfer/:id/cancel', 'product.inventory.InventoryCrossSubjectTransfer/cancel')->option(['real_name' => '跨门店库存调拨取消']);
 		Route::post('v3/cross-transfer/:id/reverse', 'product.inventory.InventoryCrossSubjectTransfer/reverse')->option(['real_name' => '跨主体库存调拨作废']);
+		Route::get('v3/transfer', 'product.inventory.InventoryBatchTransfer/index')->option(['real_name' => '批次库存调拨单查询']);
+		Route::post('v3/transfer', 'product.inventory.InventoryBatchTransfer/create')->option(['real_name' => '批次库存调拨确认']);
+		Route::get('v3/salon-usage', 'product.inventory.InventorySalonUsage/index')->option(['real_name' => '院装耗材记录查询']);
+		Route::get('v3/salon-usage/:id/detail', 'product.inventory.InventorySalonUsage/detail')->pattern(['id' => '\\d+'])->option(['real_name' => '院装耗材单据详情']);
 		Route::get('v3/salon-usage/projects', 'product.inventory.InventorySalonUsage/projects')->option(['real_name' => '院装核销项目选择']);
+		Route::post('v3/salon-usage/issue', 'product.inventory.InventorySalonUsage/issue')->option(['real_name' => '院装耗材领用']);
+		Route::post('v3/salon-usage/return', 'product.inventory.InventorySalonUsage/returnToDefault')->option(['real_name' => '院装耗材退回']);
 			//出入库统计
 			Route::get('order/overall_statistics', 'product.inventory.StoreProductStockDetail/stockOrderOverallStatistics')->option(['real_name' => '出入库顶部统计']);
 			Route::get('order/statistics', 'product.inventory.StoreProductStockDetail/stockOrderStatistics')->option(['real_name' => '出入库统计']);
@@ -749,7 +758,7 @@ Route::get('home/header', 'Common/homeStatics')->option(['real_name' => '首页�
         //短视频保存自评
         Route::post('video/comment/save_fictitious', 'marketing.video.VideoComment/saveFictitiousComment')->option(['real_name' => '短视频保存自评']);
 
-    })->middleware([AuthTokenMiddleware::class, StoreCkeckRoleMiddleware::class])->middleware(\app\http\middleware\SystemLogMiddleware::class, 'store');
+    })->middleware([AuthTokenMiddleware::class, ForceStoreSessionMiddleware::class, StoreCkeckRoleMiddleware::class])->middleware(\app\http\middleware\SystemLogMiddleware::class, 'store');
 
     /**
      * 附件相关路由
@@ -800,7 +809,7 @@ Route::get('home/header', 'Common/homeStatics')->option(['real_name' => '首页�
             'delete' => '删除附件分类'
         ]]);
 
-    })->middleware([AuthTokenMiddleware::class, StoreCkeckRoleMiddleware::class])->middleware(\app\http\middleware\SystemLogMiddleware::class, 'store');
+    })->middleware([AuthTokenMiddleware::class, ForceStoreSessionMiddleware::class, StoreCkeckRoleMiddleware::class])->middleware(\app\http\middleware\SystemLogMiddleware::class, 'store');
     Route::group('report', function () {
         Route::get('order_data', 'report.Report/orderData')->name('reportOrder')->option(['real_name' => '订单报表']);
         Route::get('reportSale', 'report.ReportData/reportSale')->name('reportColumn')->option(['real_name' => '报表列信息']);
@@ -826,7 +835,7 @@ Route::get('home/header', 'Common/homeStatics')->option(['real_name' => '首页�
         Route::delete('reportTable/del/:id', 'report.ReportTable/delTable')->name('delTable')->option(['real_name' => '删除行']);
         Route::post('setTableSalary', 'report.ReportTable/setSalary')->name('setSalary')->option(['real_name' => '编辑表单']);
         Route::post('addTableSalary', 'report.ReportTable/addSalary')->name('addSalary')->option(['real_name' => '新增表单']);
-    })->middleware([AuthTokenMiddleware::class, StoreCkeckRoleMiddleware::class])->middleware(\app\http\middleware\SystemLogMiddleware::class, 'store');
+    })->middleware([AuthTokenMiddleware::class, ForceStoreSessionMiddleware::class, StoreCkeckRoleMiddleware::class])->middleware(\app\http\middleware\SystemLogMiddleware::class, 'store');
 
     Route::group('order', function () {
         Route::post('get_remark_info', 'yeji.Yeji/getRemark')->option(['real_name' => '获得订单备注']);
@@ -950,6 +959,10 @@ Route::get('home/header', 'Common/homeStatics')->option(['real_name' => '首页�
         Route::post(':id/reopen', 'order.Order/terminal_order_reopen')->option(['real_name' => '创建或获取重开草稿']);
         Route::get('reopen/:token', 'order.Order/terminal_order_reopen_load')->option(['real_name' => '加载重开草稿']);
         //撤销本次核销（阶段3明确入口；旧 postChexiao 保留）
+        
+        // RH-GAP-WRITEOFF-BATCH-LIST
+        Route::get('writeoff/batch/:id', 'order.Order/writeoffBatchDetail')->option(['real_name' => '核销业务主单详情']);
+        Route::put('writeoff/batch/:id/cancel', 'order.Order/writeoffBatchCancel')->option(['real_name' => '核销业务主单整笔撤销']);
         Route::put('writeoff/:subOrderId/cancel', 'order.Order/cancel_writeoff')->option(['real_name' => '撤销本次核销']);
         //快递公司电子面单模版
         Route::get('express/temp', 'order.Order/express_temp')->option(['real_name' => '快递公司电子面单模版']);
@@ -1019,7 +1032,7 @@ Route::get('home/header', 'Common/homeStatics')->option(['real_name' => '首页�
         //后台退款信息
         Route::get('benefits/:id', 'order.Order/cardBenefits')->name('cardBenefits')->option(['real_name' => '后台退款信息']);
 
-    })->middleware([AuthTokenMiddleware::class, StoreCkeckRoleMiddleware::class])->middleware(\app\http\middleware\SystemLogMiddleware::class, 'store');
+    })->middleware([AuthTokenMiddleware::class, ForceStoreSessionMiddleware::class, StoreCkeckRoleMiddleware::class])->middleware(\app\http\middleware\SystemLogMiddleware::class, 'store');
 
 
     /**
@@ -1044,7 +1057,7 @@ Route::get('home/header', 'Common/homeStatics')->option(['real_name' => '首页�
 		Route::delete('del/:id', 'order.Refund/del')->name('orderRefundDel')->option(['real_name' => '售后订单删除']);
 		//售后退货物流
 		Route::get('express/:id', 'order.Refund/getRefundExpress')->option(['real_name' => '售后退货物流']);
-    })->middleware([AuthTokenMiddleware::class, StoreCkeckRoleMiddleware::class])->middleware(\app\http\middleware\SystemLogMiddleware::class, 'store');
+    })->middleware([AuthTokenMiddleware::class, ForceStoreSessionMiddleware::class, StoreCkeckRoleMiddleware::class])->middleware(\app\http\middleware\SystemLogMiddleware::class, 'store');
 
     /**
      * 小票打印
@@ -1056,7 +1069,7 @@ Route::get('home/header', 'Common/homeStatics')->option(['real_name' => '首页�
         Route::delete('del/:id', 'system.SystemPrinter/delete')->option(['real_name' => '删除小票打印']);
         Route::get('content/:id', 'system.SystemPrinter/getPrintContent')->option(['real_name' => '获取小票打印详情']);
         Route::post('save_content/:id', 'system.SystemPrinter/savePrintContent')->option(['real_name' => '保存小票打印详情']);
-    })->middleware([AuthTokenMiddleware::class, StoreCkeckRoleMiddleware::class])->middleware(\app\http\middleware\SystemLogMiddleware::class, 'store');
+    })->middleware([AuthTokenMiddleware::class, ForceStoreSessionMiddleware::class, StoreCkeckRoleMiddleware::class])->middleware(\app\http\middleware\SystemLogMiddleware::class, 'store');
     /**
      * 导出excel相关路由
      */
@@ -1083,13 +1096,13 @@ Route::get('home/header', 'Common/homeStatics')->option(['real_name' => '首页�
         //门店导入记录列表（仅本店）
         Route::get('import/list', 'export.ExportExcel/importUserList')->option(['real_name' => '门店导入记录']);
 
-    })->middleware([AuthTokenMiddleware::class, StoreCkeckRoleMiddleware::class])->middleware(\app\http\middleware\SystemLogMiddleware::class, 'store');
+    })->middleware([AuthTokenMiddleware::class, ForceStoreSessionMiddleware::class, StoreCkeckRoleMiddleware::class])->middleware(\app\http\middleware\SystemLogMiddleware::class, 'store');
 
     /** 培训资料中心 */
     Route::group('training/document', function () {
         Route::get('list', 'system.TrainingDocument/index')->option(['real_name' => '培训资料列表']);
         Route::get('download/:id', 'system.TrainingDocument/download')->option(['real_name' => '下载培训资料']);
-    })->middleware([AuthTokenMiddleware::class, StoreCkeckRoleMiddleware::class])->middleware(\app\http\middleware\SystemLogMiddleware::class, 'store');
+    })->middleware([AuthTokenMiddleware::class, ForceStoreSessionMiddleware::class, StoreCkeckRoleMiddleware::class])->middleware(\app\http\middleware\SystemLogMiddleware::class, 'store');
 
     /**
      * miss 路由
@@ -1108,4 +1121,3 @@ Route::get('home/header', 'Common/homeStatics')->option(['real_name' => '首页�
 	AllowOriginMiddleware::class,
 	StationOpenMiddleware::class
 ]);
-

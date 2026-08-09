@@ -123,6 +123,11 @@ final class SaleFakeAuthority implements CashierV3SaleCatalogAuthority
         return $this->lockStoreItemBySkuId($storeId, $skuId);
     }
 
+    public function readStoreItemAvailabilityBySkuId(int $storeId, int $skuId)
+    {
+        return $this->lockStoreItemBySkuId($storeId, $skuId);
+    }
+
     public function lockStoreResourceRow(int $storeId, string $kind, int $resourceId): bool
     {
         return $storeId === 7

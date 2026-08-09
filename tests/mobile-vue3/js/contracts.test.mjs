@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import path from 'node:path'
 import test from 'node:test'
 
-import { exactSorted, sourceJson } from './helpers.mjs'
+import { exactSorted, repoRoot, sourceJson, sourceRoot } from './helpers.mjs'
 
 function assertRequired(assertion, value, required, label) {
 	for (const field of required) assertion.equal(Object.hasOwn(value, field), true, `${label} missing ${field}`)
@@ -61,20 +63,79 @@ test('public auth endpoints derive their required metadata from the contract', (
 
 test('merchant credential profiles prohibit token aliasing and bind every endpoint', () => {
 	const merchant = sourceJson('shared/contracts/mobile-merchant-v1.contract.json')
+	const password = merchant.requestMetadataProfiles.EMPLOYEE_PASSWORD
 	const exchange = merchant.requestMetadataProfiles.APP_SESSION_EXCHANGE
 	const session = merchant.requestMetadataProfiles.MERCHANT_SESSION
 
+	assert.deepEqual(password.required, {'X-Mobile-Contract-Version': 'contractVersion', 'X-Mobile-Client-Session-Id': 'clientSessionId', 'X-Mobile-Platform': 'platform', 'X-Mobile-Request-Id': 'requestId'})
+	assert.deepEqual(password.forbidden, ['Authorization', 'X-Mobile-App-Session', 'X-Mobile-Active-Context-Id', 'X-Mobile-State-Context-Id', 'Cookie', 'queryToken', 'bodyToken', 'headerAlias'])
+	assert.equal(password.emptyContextValuesAllowed, false)
 	assert.deepEqual(exchange.required, {'X-Mobile-Contract-Version': 'contractVersion', 'X-Mobile-Client-Session-Id': 'clientSessionId', 'X-Mobile-Platform': 'platform', 'X-Mobile-Request-Id': 'requestId', 'X-Mobile-App-Session': 'appSession'})
 	assert.deepEqual(exchange.forbidden, ['Authorization', 'X-Mobile-Active-Context-Id', 'X-Mobile-State-Context-Id', 'Cookie', 'queryToken', 'bodyToken', 'headerAlias'])
 	assert.deepEqual(session.required, {'X-Mobile-Contract-Version': 'contractVersion', 'X-Mobile-Client-Session-Id': 'clientSessionId', 'X-Mobile-Platform': 'platform', 'X-Mobile-Request-Id': 'requestId', 'Authorization': 'Bearer <merchantToken>', 'X-Mobile-Active-Context-Id': 'activeContextId', 'X-Mobile-State-Context-Id': 'stateContextId'})
 	assert.deepEqual(session.forbidden, ['X-Mobile-App-Session', 'Cookie', 'queryToken', 'bodyToken', 'headerAlias'])
 	assert.equal(exchange.emptyContextValuesAllowed, false)
 	assert.equal(session.emptyContextValuesAllowed, false)
+	assert.equal(merchant.endpoints.passwordLogin.requestMetadataProfile, 'EMPLOYEE_PASSWORD')
+	assert.deepEqual(merchant.endpoints.passwordLogin.requestBodyRequired, ['account', 'pwd', 'installationId', 'idempotencyKey'])
 	assert.equal(merchant.endpoints.createMerchantSession.requestMetadataProfile, 'APP_SESSION_EXCHANGE')
 	for (const endpoint of ['bootstrap', 'switchContext', 'logout']) {
 		assert.equal(merchant.endpoints[endpoint].requestMetadataProfile, 'MERCHANT_SESSION')
 	}
 	assert.deepEqual(merchant.endpoints.logout.requestBodyRequired, ['idempotencyKey'])
+})
+
+test('employee password sign-in creates only a new merchant session', () => {
+	const source = fs.readFileSync(path.join(sourceRoot, 'shared/api/mobile-login-client.uts'), 'utf8')
+	assert.equal(source.includes("'/mobile/merchant/password-login'"), true)
+	assert.equal(source.includes("commonHeaders('mobile-merchant-v1')"), true)
+	assert.equal(source.includes('installationId: deviceId'), true)
+	assert.equal(source.includes('saveMerchantRoot(root)'), true)
+	assert.equal(source.includes('merchant_legacy'), false)
+})
+
+test('merchant session chooses an effective mobile appointment instead of the newest appointment', () => {
+	const source = fs.readFileSync(path.join(repoRoot, '后端代码', 'app', 'services', 'mobile', 'merchant', 'MobileMerchantSessionServices.php'), 'utf8')
+	assert.match(source, /defaultEligibleMobileStaff\(\$employeeId, \$auth\)/)
+	assert.match(source, /isStoreWithinMobileScope\(\$auth, \$storeId\)/)
+	assert.match(source, /isStoreWithinEmployeeDataScope\(\$employeeId, \$storeId\)/)
+	assert.equal(source.includes('resolveCurrentStaff($employeeId)'), false)
+})
+
+test('customer UTS transport mirror stays exact with the frozen customer and merchant headers', () => {
+	const merchant = sourceJson('shared/contracts/mobile-merchant-v1.contract.json')
+	const customer = sourceJson('shared/contracts/mobile-customer-v1.contract.json')
+	const source = fs.readFileSync(path.join(sourceRoot, 'shared/api/mobile-customer-client.uts'), 'utf8')
+	assert.match(source, /contractVersion: 'mobile-merchant-v1'/)
+	for (const endpoint of ['queryExclusiveCustomers', 'queryCustomers', 'queryCustomerServiceRecords', 'queryCustomerRecentSummary', 'queryCustomerOrderRecords', 'queryCustomerOrderRecordDetail', 'queryCustomerAssetRecords', 'customerProfileDraft', 'customerProfileAvatarUpload', 'customerProfileDetail', 'createCustomerProfile', 'updateCustomerProfile', 'createCustomer', 'unifiedQueryCapabilities', 'unifiedQueryCommand', 'listAudiences', 'createAudience', 'queryAudienceMembers']) {
+		const contractEndpoint = customer.endpoints[endpoint]
+		assert.match(source, new RegExp(`${endpoint}: \\{ method: '${contractEndpoint.method}', path: '${contractEndpoint.path}', requestMetadataProfile: 'MERCHANT_SESSION' \\}`))
+	}
+	assert.deepEqual(customer.endpoints.createCustomer.requestBodyRequired, ['name', 'phone', 'idempotencyKey'])
+	assert.deepEqual(customer.endpoints.createCustomerProfile.requestBodyRequired, ['name', 'phone', 'idempotencyKey'])
+	assert.deepEqual(customer.endpoints.updateCustomerProfile.requestBodyRequired, ['expectedVersion', 'idempotencyKey'])
+	for (const [header, value] of Object.entries(merchant.requestMetadataProfiles.MERCHANT_SESSION.required)) {
+		const escapedHeader = header.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')
+		const escapedValue = value.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')
+		assert.match(source, new RegExp(`(?:'${escapedHeader}'|${escapedHeader}): '${escapedValue}'`))
+	}
+	for (const header of merchant.requestMetadataProfiles.MERCHANT_SESSION.forbidden) assert.match(source, new RegExp(`'${header}'`))
+})
+
+test('customer-care UTS transport keeps the only supported merchant actions and headers', () => {
+	const merchant = sourceJson('shared/contracts/mobile-merchant-v1.contract.json')
+	const source = fs.readFileSync(path.join(sourceRoot, 'shared/api/mobile-customer-care-client.uts'), 'utf8')
+	for (const endpoint of [
+		"queryWorkbench: { method: 'POST', path: '/mobile/merchant/customer-care/workbench', requestMetadataProfile: 'MERCHANT_SESSION' }",
+		"createTask: { method: 'POST', path: '/mobile/merchant/customer-care/actions/create-care-task', requestMetadataProfile: 'MERCHANT_SESSION' }",
+		"completeTask: { method: 'POST', path: '/mobile/merchant/customer-care/actions/complete-care-task', requestMetadataProfile: 'MERCHANT_SESSION' }"
+	]) assert.equal(source.includes(endpoint), true)
+	assert.equal(source.includes('start-care-task'), false)
+	for (const [header, value] of Object.entries(merchant.requestMetadataProfiles.MERCHANT_SESSION.required)) {
+		const escapedHeader = header.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+		const escapedValue = value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+		assert.match(source, new RegExp(`(?:'${escapedHeader}'|${escapedHeader}): '${escapedValue}'`))
+	}
 })
 
 test('merchant root and data scope remain fail-closed', () => {

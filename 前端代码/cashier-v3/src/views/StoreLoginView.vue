@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { loginStoreV3, persistStoreV3Token } from '@/services/storeV3LoginApi'
 import { applyCashierV3LoginFeatures } from '@/services/cashierV3Bridge'
@@ -8,43 +8,26 @@ import { onCashierStoreOrAccountChanged } from '@/services/cashierV3SessionLifec
 const router = useRouter()
 const account = ref('')
 const password = ref('')
-const ticket = ref('')
-const stores = ref([])
-const selectedStoreId = ref(0)
 const submitting = ref(false)
 const error = ref('')
-const needsStoreSelection = computed(() => stores.value.length > 0 && !!ticket.value)
 
 async function submit() {
   if (submitting.value) return
   error.value = ''
-  if (!needsStoreSelection.value && (!account.value.trim() || !password.value)) {
+  if (!account.value.trim() || !password.value) {
     error.value = '请输入登录账号和密码。'
-    return
-  }
-  if (needsStoreSelection.value && !selectedStoreId.value) {
-    error.value = '请选择要进入的门店。'
     return
   }
   submitting.value = true
   try {
-    const result = await loginStoreV3(needsStoreSelection.value
-      ? { store_id: selectedStoreId.value, login_ticket: ticket.value }
-      : { account: account.value.trim(), pwd: password.value })
-    if (result.need_select_store) {
-      ticket.value = String(result.login_ticket || '')
-      stores.value = Array.isArray(result.stores) ? result.stores : []
-      selectedStoreId.value = stores.value.length === 1 ? Number(stores.value[0].store_id) : 0
-      if (!ticket.value || !stores.value.length) throw new Error('当前账号没有可进入的门店端门店。')
-      return
-    }
+    const result = await loginStoreV3({ account: account.value.trim(), pwd: password.value })
     persistStoreV3Token(result.token)
     applyCashierV3LoginFeatures(result.features)
     // 登录成功后必须先接收该账号和门店的首份根投影。功能权限快照仅用于
     // 路由放行，不能替代工作台及其既有资源的并发版本。
     const bootstrap = await onCashierStoreOrAccountChanged({
       reason: 'account',
-      storeId: Number(result.store_id || selectedStoreId.value || 0),
+      storeId: Number(result.store_id || 0),
       silent: true
     })
     const bootstrapResult = bootstrap?.data?.result && typeof bootstrap.data.result === 'object'
@@ -59,13 +42,6 @@ async function submit() {
   } finally {
     submitting.value = false
   }
-}
-
-function resetSelection() {
-  ticket.value = ''
-  stores.value = []
-  selectedStoreId.value = 0
-  error.value = ''
 }
 </script>
 

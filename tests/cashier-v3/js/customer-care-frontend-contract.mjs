@@ -120,9 +120,12 @@ ok('客户视图只提交正整数会员定位，后端零值不会回写为筛�
     && view.includes('/^[1-9][0-9]*$/.test(memberId)')
     && view.includes('customerMemberId.value = validCustomerMemberId(customerQuery.memberId)')
     && view.includes('...(memberId ? { memberId } : {})'))
-ok('会员选择器输入自动查询且旧响应不能覆盖新关键字',
-  memberSelector.includes('watch(keyword, scheduleKeywordQuery)')
-    && memberSelector.includes('setTimeout(() => runQuery(1), 300)')
+ok('会员选择器只在回车或点击查询时请求且旧响应不能覆盖新关键字',
+  memberSelector.includes('@submit.prevent="submitQuery"')
+    && memberSelector.includes('function submitQuery()')
+    && memberSelector.includes('CornerDownLeft')
+    && !memberSelector.includes('watch(keyword, scheduleKeywordQuery)')
+    && !memberSelector.includes('setTimeout(() => runQuery(1), 300)')
     && memberSelector.includes('let querySequence = 0')
     && memberSelector.includes('sequence === querySequence')
     && shell.includes('let memberSelectorQuerySequence = 0')

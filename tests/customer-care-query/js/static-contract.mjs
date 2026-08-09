@@ -74,6 +74,14 @@ ok('customer view echoes only a positive exact member filter',
   sources.includes("'memberId' => (int)($query['memberId'] ?? 0) > 0")
     && sources.includes("? (string)(int)$query['memberId']")
     && sources.includes(": ''"))
+ok('customer-scoped task and record views normalize and apply exact member filters',
+  sources.includes("$statusGroup = self::enum")
+    && sources.includes("'memberId' => self::optionalPositiveInt($query['memberId'] ?? null, 'memberId')")
+    && repository.includes("$base->where('member_id', (int)$query['memberId'])")
+    && repository.includes("$base->where('r.member_id', (int)$query['memberId'])"))
+ok('open customer task view can only contain unfinished states',
+  repository.includes("($query['statusGroup'] ?? '') === 'open'")
+    && repository.includes('CustomerCareTaskState::UNSTARTED, CustomerCareTaskState::IN_PROGRESS'))
 ok('mutually exclusive bucket SQL', sources.includes('planned_at < %d')
   && sources.includes('planned_at >= %d')
   && sources.includes('planned_at > %d'))

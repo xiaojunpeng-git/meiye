@@ -35,7 +35,7 @@ export function readStoreStaffComplete(staffId) {
 }
 
 export function readStoreStaffPositions() {
-  return request('/storeapi/staff/positions')
+  return request('/storeapi/staff/staff/positions')
 }
 
 export function readStoreStaffWorkMembers() {

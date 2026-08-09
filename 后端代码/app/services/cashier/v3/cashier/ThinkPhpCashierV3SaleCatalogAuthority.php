@@ -18,7 +18,7 @@ final class ThinkPhpCashierV3SaleCatalogAuthority implements CashierV3SaleCatalo
     ];
 
     private const SKU_FIELDS = [
-        'id', 'product_id', 'product_type', 'unique', 'suk', 'price', 'ot_price',
+        'id', 'product_id', 'product_type', 'unique', 'suk', 'price', 'ot_price', 'cost',
         'stock', 'code', 'bar_code', 'is_show', 'type', 'write_times', 'write_valid',
         'write_days', 'write_start', 'write_end',
     ];
@@ -136,6 +136,22 @@ final class ThinkPhpCashierV3SaleCatalogAuthority implements CashierV3SaleCatalo
         return $row;
     }
 
+    public function readStoreItemAvailabilityBySkuId(int $storeId, int $skuId)
+    {
+        if ($storeId <= 0 || $skuId <= 0) {
+            return null;
+        }
+        return Db::name('store_product_attr_value')->alias('sku')
+            ->join('store_product p', 'p.id=sku.product_id')
+            ->where('sku.id', $skuId)
+            ->where('p.type', 1)
+            ->where('p.relation_id', $storeId)
+            ->whereIn('p.product_type', [0, 4, 5, 6])
+            ->where('sku.type', 0)
+            ->field('p.id product_id,p.pid product_pid,p.product_type product_product_type,p.type product_type,p.relation_id product_relation_id,p.is_del product_is_del,p.is_show product_is_show,p.is_verify product_is_verify,sku.id sku_id,sku.product_id sku_product_id,sku.product_type sku_product_type,sku.type sku_type,sku.is_show sku_is_show')
+            ->find();
+    }
+
     public function lockStoreResourceRow(int $storeId, string $kind, int $resourceId): bool
     {
         CashierV3TransactionGuard::assertInTransaction('cashierSaleCatalogResourceLock:' . $kind);
@@ -219,6 +235,34 @@ final class ThinkPhpCashierV3SaleCatalogAuthority implements CashierV3SaleCatalo
         }
 
         $plannedProductType = (int)($productIdentity['product_type'] ?? -1);
+
+        // 项目/产品没有卡内关系，也不需要逐项锁定组件。一次 joined
+        // SELECT ... FOR UPDATE 同时锁住商品与 SKU，避免身份查询、商品锁、
+        // SKU 锁和再次拼接造成的重复往返；最终可售与价格/版本校验仍由
+        // CashierV3SaleCatalogServices 使用这份权威行完成。
+        if ($plannedProductType !== 5) {
+            $row = Db::name('store_product_attr_value')->alias('sku')
+                ->join('store_product p', 'p.id=sku.product_id')
+                ->where('sku.id', $skuId)
+                ->where('p.type', 1)
+                ->where('p.relation_id', $storeId)
+                ->whereIn('p.product_type', [0, 4, 6])
+                ->where('sku.type', 0)
+                ->field($this->joinedFields())
+                ->lock(true)
+                ->find();
+            if (!$row) {
+                return null;
+            }
+            $row = (array)$row;
+            $row['category_names'] = $this->categoryNames(
+                (string)($row['product_cate_id'] ?? ''),
+                $this->categoryMap($storeId, [$row])
+            );
+            $row['card_components'] = [];
+            return $row;
+        }
+
         $plannedRelations = $plannedProductType === 5
             ? $this->readActiveCardRelations($productId)
             : [];

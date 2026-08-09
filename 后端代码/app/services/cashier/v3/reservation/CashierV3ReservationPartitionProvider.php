@@ -11,6 +11,8 @@ use think\facade\Db;
 /** Read model for new C3 reservations only. Old reservation rows are intentionally excluded. */
 final class CashierV3ReservationPartitionProvider implements CashierV3RootPartitionProvider
 {
+    private const BUSINESS_TIMEZONE = 'Asia/Shanghai';
+
     public function partitionKey(): string { return 'reservation'; }
 
     public function readPartition(
@@ -22,12 +24,39 @@ final class CashierV3ReservationPartitionProvider implements CashierV3RootPartit
     ): array {
         $tenantId = $dataScope->tenantId();
         $storeId = $operatorScope->storeId();
+        $now = time();
+        $dueNotArrivedCount = (int)Db::name('cashier_v3_reservation')->alias('r')
+            ->join('cashier_v3_service_order s', 's.id=r.service_order_id')
+            ->where('r.tenant_id', $tenantId)->where('r.store_id', $storeId)
+            ->where('s.tenant_id', $tenantId)->where('s.business_store_id', $storeId)
+            ->whereIn('r.status', ['PENDING_CONFIRMATION', 'CONFIRMED'])
+            ->where('r.appointment_start_at', '>', 0)->where('r.appointment_start_at', '<=', $now)
+            ->where('s.status', 'OPEN')->where('s.service_started_at', 0)
+            ->count();
         $rows = Db::name('cashier_v3_reservation')
             ->where('tenant_id', $tenantId)->where('store_id', $storeId)
             ->order('appointment_start_at desc,id desc')->limit(100)->select();
         $rows = is_object($rows) && method_exists($rows, 'toArray') ? $rows->toArray() : (array)$rows;
         $ids = [];
         foreach ($rows as $row) $ids[] = (int)($row['id'] ?? 0);
+        $serviceOrderIds = [];
+        foreach ($rows as $row) {
+            $serviceOrderId = (int)($row['service_order_id'] ?? 0);
+            if ($serviceOrderId > 0) $serviceOrderIds[$serviceOrderId] = $serviceOrderId;
+        }
+        $serviceOrders = $serviceOrderIds
+            ? Db::name('cashier_v3_service_order')
+                ->where('tenant_id', $tenantId)->where('business_store_id', $storeId)
+                ->whereIn('id', array_values($serviceOrderIds))
+                ->field('id,status,service_started_at')->select()
+            : [];
+        $serviceOrders = is_object($serviceOrders) && method_exists($serviceOrders, 'toArray')
+            ? $serviceOrders->toArray()
+            : (array)$serviceOrders;
+        $serviceOrdersById = [];
+        foreach ($serviceOrders as $serviceOrder) {
+            $serviceOrdersById[(int)($serviceOrder['id'] ?? 0)] = $serviceOrder;
+        }
         $lineRows = $ids ? Db::name('cashier_v3_reservation_line')->where('tenant_id', $tenantId)->whereIn('reservation_id', $ids)->order('id asc')->select() : [];
         $lineRows = is_object($lineRows) && method_exists($lineRows, 'toArray') ? $lineRows->toArray() : (array)$lineRows;
         $lines = [];
@@ -40,8 +69,8 @@ final class CashierV3ReservationPartitionProvider implements CashierV3RootPartit
         $artisanNames = $artisanIds ? Db::name('system_store_staff')->whereIn('id', array_values($artisanIds))->column('staff_name', 'id') : [];
         $versions = [];
         $records = [];
-        $counts = ['today' => 0, 'pending' => 0, 'serving' => 0];
-        $today = date('Y-m-d');
+        $counts = ['today' => 0, 'pending' => 0, 'serving' => 0, 'dueNotArrived' => $dueNotArrivedCount];
+        $today = self::businessNow()->format('Y-m-d');
         foreach ($rows as $row) {
             $id = (int)($row['id'] ?? 0);
             if ($id <= 0) continue;
@@ -52,9 +81,17 @@ final class CashierV3ReservationPartitionProvider implements CashierV3RootPartit
                 $ids = json_decode((string)($line['artisan_staff_ids_json'] ?? '[]'), true);
                 foreach (is_array($ids) ? $ids : [] as $staffId) { $name = trim((string)($artisanNames[(int)$staffId] ?? '')); if ($name !== '') $reservationArtisans[$name] = $name; }
             }
-            $status = self::statusLabel((string)($row['status'] ?? ''));
+            $statusCode = (string)($row['status'] ?? '');
+            $status = self::statusLabel($statusCode);
             $dateTime = (int)($row['appointment_start_at'] ?? 0);
-            if ($dateTime > 0 && date('Y-m-d', $dateTime) === $today) $counts['today']++;
+            $serviceOrderId = (int)($row['service_order_id'] ?? 0);
+            $serviceOrder = (array)($serviceOrdersById[$serviceOrderId] ?? []);
+            $dueNotArrived = $dateTime > 0
+                && $dateTime <= $now
+                && in_array($statusCode, ['PENDING_CONFIRMATION', 'CONFIRMED'], true)
+                && (string)($serviceOrder['status'] ?? '') === 'OPEN'
+                && (int)($serviceOrder['service_started_at'] ?? 0) <= 0;
+            if ($dateTime > 0 && self::businessDateFromTimestamp($dateTime) === $today) $counts['today']++;
             if ($status === '待确认') $counts['pending']++;
             if ($status === '服务中') $counts['serving']++;
             // reservation is a domain-owned source version. It is not a
@@ -66,7 +103,7 @@ final class CashierV3ReservationPartitionProvider implements CashierV3RootPartit
                 'id' => $id,
                 'reservationId' => $id,
                 'reservationNo' => (string)($row['reservation_no'] ?? ''),
-                'appointmentTime' => $dateTime > 0 ? date('Y-m-d H:i', $dateTime) : '',
+                'appointmentTime' => $dateTime > 0 ? self::businessTimeFromTimestamp($dateTime) : '',
                 'memberName' => (string)($row['member_name_snapshot'] ?? ''),
                 'phone' => (string)($row['member_phone_snapshot'] ?? ''),
                 'projectSummary' => implode('、', array_filter($projectNames)),
@@ -77,16 +114,159 @@ final class CashierV3ReservationPartitionProvider implements CashierV3RootPartit
                 'source' => '收银 V3',
                 'creator' => (string)($row['creator_name_snapshot'] ?? ''),
                 'status' => $status,
-                'serviceOrderId' => (int)($row['service_order_id'] ?? 0),
+                'serviceOrderId' => $serviceOrderId,
+                'dueNotArrived' => $dueNotArrived,
                 'primaryAction' => ['action' => 'open-reservation-detail', 'label' => '查看详情', 'enabled' => true],
             ];
         }
+        $calendarDate = self::calendarDate($hints['calendarDate'] ?? $hints['calendar_date'] ?? '');
+        $calendar = self::calendar($tenantId, $storeId, $calendarDate, $rows, $lines, $artisanNames);
         return ['ready' => true, 'payload' => [
             'availability' => ['contractVersion' => 'cashier-v3-reservation-v1', 'status' => 'active', 'reasonCode' => '', 'dataLoaded' => true, 'businessFactsIncluded' => true],
             'quickCounts' => $counts, 'records' => $records, 'total' => count($records), 'page' => 1, 'pageSize' => 20,
             'detail' => null, 'editor' => ['draft' => new \stdClass(), 'catalogOptions' => [], 'craftsmenOptions' => [], 'rooms' => []],
-            'calendar' => ['date' => date('Y-m-d'), 'resources' => [], 'blocks' => [], 'timeSlots' => []],
+            'calendar' => $calendar,
         ], 'public_versions' => $versions];
+    }
+
+    /**
+     * Calendar is a read model over V3 reservations only.  It deliberately
+     * does not try to infer availability from legacy reservation tables.
+     */
+    private static function calendar(string $tenantId, int $storeId, string $date, array $rows, array $lines, array $artisanNames): array
+    {
+        $store = Db::name('system_store')->where('id', $storeId)->field('day_start,day_end')->find();
+        $start = self::timeOfDay((string)($store['day_start'] ?? ''));
+        $end = self::timeOfDay((string)($store['day_end'] ?? ''));
+        $timeSlots = [];
+        $businessHoursReady = $start !== '' && $end !== '' && $start < $end;
+        if ($businessHoursReady) {
+            $zone = self::businessZone();
+            $cursor = new \DateTimeImmutable($date . ' ' . $start, $zone);
+            $closeAt = new \DateTimeImmutable($date . ' ' . $end, $zone);
+            for (; $cursor < $closeAt; $cursor = $cursor->modify('+30 minutes')) {
+                $timeSlots[$cursor->format('H:i')] = $cursor->format('H:i');
+            }
+        }
+
+        // 营业时间只限制新预约的可选时段。历史或已创建预约必须始终
+        // 出现在对应日期的时间轴上，不能因门店后来修改营业时间而消失。
+        foreach ($rows as $row) {
+            $at = (int)($row['appointment_start_at'] ?? 0);
+            if ($at <= 0 || self::businessDateFromTimestamp($at) !== $date) {
+                continue;
+            }
+            $endAt = max($at + 60, (int)($row['appointment_end_at'] ?? 0));
+            $cursor = self::businessTime($at)->setTime(
+                (int)self::businessTime($at)->format('H'),
+                ((int)self::businessTime($at)->format('i') >= 30) ? 30 : 0
+            );
+            $closeAt = self::businessTime($endAt)->modify('+30 minutes')->setTime(
+                (int)self::businessTime($endAt)->modify('+30 minutes')->format('H'),
+                ((int)self::businessTime($endAt)->modify('+30 minutes')->format('i') >= 30) ? 30 : 0
+            );
+            for (; $cursor < $closeAt; $cursor = $cursor->modify('+30 minutes')) {
+                $timeSlots[$cursor->format('H:i')] = $cursor->format('H:i');
+            }
+        }
+        ksort($timeSlots, SORT_STRING);
+
+        $resources = [['id' => 'staff:unassigned', 'type' => 'unassigned_staff', 'name' => '未分配']];
+        $staffRows = Db::name('system_store_staff')
+            ->where('store_id', $storeId)->where('status', 1)->where('is_del', 0)
+            ->where('cashier_craftsman_enabled', 1)->field('id,staff_name')->order('id asc')->select();
+        $staffRows = is_object($staffRows) && method_exists($staffRows, 'toArray') ? $staffRows->toArray() : (array)$staffRows;
+        foreach ($staffRows as $staff) {
+            $staffId = (int)($staff['id'] ?? 0);
+            if ($staffId > 0) $resources[] = ['id' => 'staff:' . $staffId, 'type' => 'staff', 'name' => (string)($staff['staff_name'] ?? ('手艺人 ' . $staffId))];
+        }
+
+        $roomResources = [['id' => 'room:unassigned', 'type' => 'unassigned_room', 'name' => '未分配']];
+        $roomRows = Db::name('table_qrcode')->where('store_id', $storeId)->where('is_del', 0)->where('is_using', 1)
+            ->field('id,remarks,table_number')->order('id asc')->select();
+        $roomRows = is_object($roomRows) && method_exists($roomRows, 'toArray') ? $roomRows->toArray() : (array)$roomRows;
+        foreach ($roomRows as $room) {
+            $roomId = (int)($room['id'] ?? 0);
+            if ($roomId > 0) {
+                $name = trim((string)($room['remarks'] ?? $room['table_number'] ?? '')) ?: ('房间 ' . $roomId);
+                $roomResources[] = ['id' => 'room:' . $roomId, 'type' => 'room', 'name' => $name];
+            }
+        }
+        $resources = array_merge($resources, $roomResources);
+
+        $blocks = [];
+        foreach ($rows as $row) {
+            $reservationId = (int)($row['id'] ?? 0);
+            $at = (int)($row['appointment_start_at'] ?? 0);
+            if ($reservationId <= 0 || $at <= 0 || self::businessDateFromTimestamp($at) !== $date) continue;
+            $lineRows = (array)($lines[$reservationId] ?? []);
+            $staffIds = [];
+            foreach ($lineRows as $line) {
+                $ids = json_decode((string)($line['artisan_staff_ids_json'] ?? '[]'), true);
+                foreach (is_array($ids) ? $ids : [] as $staffId) {
+                    $staffId = (int)$staffId;
+                    if ($staffId > 0) $staffIds[$staffId] = $staffId;
+                }
+            }
+            $resourceIds = $staffIds ? array_map(static function (int $id): string { return 'staff:' . $id; }, array_values($staffIds)) : ['staff:unassigned'];
+            $roomId = (int)($row['room_id'] ?? 0);
+            $roomResourceId = $roomId > 0 ? 'room:' . $roomId : 'room:unassigned';
+            $projectCount = count($lineRows);
+            $base = [
+                'id' => 'reservation:' . $reservationId,
+                'reservationId' => $reservationId,
+                'memberName' => (string)($row['member_name_snapshot'] ?? ''),
+                'start' => self::businessTimeFromTimestamp($at, 'H:i'),
+                'end' => self::businessTimeFromTimestamp(max($at + 60, (int)($row['appointment_end_at'] ?? 0)), 'H:i'),
+                'projectCount' => $projectCount,
+                'status' => self::statusLabel((string)($row['status'] ?? '')),
+                'roomName' => trim((string)($row['room_name_snapshot'] ?? '')) ?: ($roomId > 0 ? ('房间 ' . $roomId) : '待分配房间'),
+            ];
+            foreach (array_unique(array_merge($resourceIds, [$roomResourceId])) as $resourceId) {
+                $blocks[] = array_merge($base, ['id' => $base['id'] . ':' . $resourceId, 'resourceId' => $resourceId]);
+            }
+        }
+        return ['date' => $date, 'resources' => $resources, 'blocks' => $blocks, 'timeSlots' => array_values($timeSlots), 'businessHoursReady' => $businessHoursReady];
+    }
+
+    private static function calendarDate($value): string
+    {
+        $value = trim((string)$value);
+        $date = \DateTimeImmutable::createFromFormat('!Y-m-d', $value, self::businessZone());
+        return $date && $date->format('Y-m-d') === $value ? $value : self::businessNow()->format('Y-m-d');
+    }
+
+    private static function timeOfDay(string $value): string
+    {
+        $value = trim($value);
+        if (!preg_match('/^([01]?\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/D', $value)) return '';
+        $parts = explode(':', $value);
+        return str_pad((string)(int)$parts[0], 2, '0', STR_PAD_LEFT) . ':' . $parts[1];
+    }
+
+    private static function businessZone(): \DateTimeZone
+    {
+        return new \DateTimeZone(self::BUSINESS_TIMEZONE);
+    }
+
+    private static function businessNow(): \DateTimeImmutable
+    {
+        return new \DateTimeImmutable('now', self::businessZone());
+    }
+
+    private static function businessDateFromTimestamp(int $timestamp): string
+    {
+        return self::businessTime($timestamp)->format('Y-m-d');
+    }
+
+    private static function businessTimeFromTimestamp(int $timestamp, string $format = 'Y-m-d H:i'): string
+    {
+        return self::businessTime($timestamp)->format($format);
+    }
+
+    private static function businessTime(int $timestamp): \DateTimeImmutable
+    {
+        return (new \DateTimeImmutable('@' . $timestamp))->setTimezone(self::businessZone());
     }
 
     private static function statusLabel(string $status): string

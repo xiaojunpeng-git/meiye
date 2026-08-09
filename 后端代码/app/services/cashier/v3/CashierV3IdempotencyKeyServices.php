@@ -27,6 +27,7 @@ class CashierV3IdempotencyKeyServices
         // 结账
         'CHECKOUT',
         'CHECKOUT_PREPARE',
+        'CHECKOUT_BALANCE_RECOVERY',
         'DEBT_REPAY_PREPARE',
         'SERVICE_CHECKOUT',
         'SERVICE_CHECKOUT_PREPARE',
@@ -46,17 +47,24 @@ class CashierV3IdempotencyKeyServices
         // 房间
         'ROOM_ACTION',
         'ROOM_ASSIGNMENT',
+        'ROOM_CASHIER_INTENT',
         'ROOM_PREPARE',
         // 核销
         'WRITEOFF',
         'WRITEOFF_PREPARE',
         'ADD_ENTITLEMENT',
+        'ENTITLEMENT_ADD',
+        'ENTITLEMENT_SELECTOR',
         'REMOVE_CART_LINE',
+        'CLEAR_CART',
         'CHANGE_CART_QUANTITY',
         'CART_SERVICE_SETTINGS',
+        // 收银草稿编辑
+        'CASHIER_LINE_DEBT',
         'CASHIER_APPLY_SALESPEOPLE_ALL',
         'CASHIER_APPLY_CRAFTSMEN_ALL',
         'CASHIER_APPLY_PERSONNEL_ALL',
+        'CASHIER_MORE',
         // 卡操作（转让、延期、停用、启用及后续升级/替换）
         'CARD_OPERATION',
         // 统一查询

@@ -1,8 +1,5 @@
 <template>
 	<view class="wrapper" :style="colorStyle">
-		<view class="bag">
-			<img :src="imgHost+'/statics/images/users/login-bg.jpg'" alt="" srcset="">
-		</view>
 		<!-- #ifdef MP -->
 		<view class="title-bar" style="height: 43px;">
 			<view class="icon" @click="back" v-if="!isHome">
@@ -14,27 +11,28 @@
 			{{pageTitle}}
 		</view>
 		<!-- #endif -->
-		<view class="page-msg">
-			<view class="title">
-				{{current ? '快速登录' :'账号登录'}}
+		<view class="login-shell">
+			<view class="page-msg">
+				<view class="eyebrow">商家工作台</view>
+				<view class="title">
+					{{current ? '快速登录' :'员工登录'}}
+				</view>
+				<view class="tip">
+					{{current ? '首次登录会自动注册' : '使用员工档案中的登录账号和密码'}}
+				</view>
 			</view>
-			<view class="tip">
-				首次登录会自动注册
-			</view>
-		</view>
-		<view class="page-form">
-			<view class="item">
-				<input type='number' placeholder='请输入手机号码' placeholder-class='placeholder' v-model="account"
-					:maxlength="11" :adjust-position="false"></input>
-			</view>
-			<view class="item acea-row row-between-wrapper" v-if="!current">
-				<input type='password' placeholder='请输入密码' placeholder-class='placeholder'
-					class="codeIput" v-model="password" :adjust-position="false"></input>
-				<view class="line"></view>
-				<navigator class="code font-num" hover-class="none" url="/pages/users/retrievePassword/index">
-					忘记密码
-				</navigator>
-			</view>
+			<view class="page-form">
+				<view class="item" :class="{ 'item--staff': !current }">
+					<text v-if="!current" class="field-label">登录账号</text>
+					<input type='text' placeholder='请输入员工登录账号' placeholder-class='placeholder' v-model="account"
+						:maxlength="64" :adjust-position="false"></input>
+				</view>
+				<view class="item item--password acea-row row-between-wrapper" v-if="!current">
+					<text class="field-label">密码</text>
+					<input type='password' placeholder='请输入密码' placeholder-class='placeholder'
+						class="codeIput" v-model="password" :adjust-position="false"></input>
+				</view>
+				<view v-if="!current" class="reset-note">忘记密码请联系管理员重置</view>
 			<view class="item acea-row row-between-wrapper" v-else>
 				<input type='number' placeholder='请输入验证码' placeholder-class='placeholder' :maxlength="6"
 					class="codeIput" v-model="captcha"></input>
@@ -48,9 +46,8 @@
 			<view class="btn" @click="submitData">
 				立即登录
 			</view>
-			<view class="text-center fs-32 text--w111-999 mt-32" @click="current = !current">{{current ? '账号登录' :'手机号登录'}}</view>
 			<!-- #ifdef APP-PLUS -->
-			<view class="appLogin" v-if="!appLoginStatus && !appleLoginStatus">
+			<view class="appLogin" v-if="current && !appLoginStatus && !appleLoginStatus">
 				<view class="hds">
 					<span class="line"></span>
 					<p>其他方式登录</p>
@@ -67,7 +64,8 @@
 			</view>
 			<!-- #endif -->
 		</view>
-		<view class="protocol">
+		</view>
+		<view class="protocol" v-if="current">
 			<checkbox-group @click.stop='ChangeIsDefault' v-if="configData.store_user_agreement">
 				<checkbox :class="inAnimation?'trembling':''" @animationend='inAnimation=false'
 					:checked="protocol ? true : false" /> <text @click.stop='ChangeIsDefault'>已阅读并同意</text>
@@ -88,7 +86,6 @@
 	import dayjs from "@/plugin/dayjs/dayjs.min.js";
 	import sendVerifyCode from "@/mixins/SendVerifyCode";
 	import {
-		loginH5,
 		loginMobile,
 		registerVerify,
 		register,
@@ -96,6 +93,7 @@
 		getUserInfo,
 		appleLogin
 	} from "@/api/user";
+	import { merchantEmployeeLogin } from '@/api/merchant';
 	import attrs, {
 		required,
 		alpha_num,
@@ -128,7 +126,8 @@
 				protocol: false,
 				imgHost: HTTP_REQUEST_URL,
 				navList: ["快速登录", "账号登录"],
-				current: true,
+				// 商家端只允许员工档案账号密码登录，不在首屏暴露会员短信登录。
+				current: false,
 				account: "",
 				password: "",
 				captcha: "",
@@ -567,17 +566,11 @@
 			},
 			async submit() {
 				let that = this;
-				if (!that.protocol && that.configData.store_user_agreement) {
-					this.inAnimation = true
-					return that.$util.Tips({
-						title: '请先阅读并同意协议'
-					});
-				}
 				if (!that.account) return that.$util.Tips({
-					title: '请填写账号'
+					title: '请填写员工登录账号'
 				});
-				if (!/^[\w\d]{5,16}$/i.test(that.account)) return that.$util.Tips({
-					title: '请输入正确的账号'
+				if (that.account.trim().length < 4 || that.account.trim().length > 64) return that.$util.Tips({
+					title: '员工登录账号长度为4到64位'
 				});
 				if (!that.password) return that.$util.Tips({
 					title: '请填写密码'
@@ -589,37 +582,49 @@
 						title: '请勿重复点击'
 					});
 				}
-				loginH5({
-						account: that.account,
-						password: that.password,
-						spread_spid: that.$Cache.get("spid")
-					})
-					.then(({
-						data
-					}) => {
-						that.$store.commit("LOGIN", {
-							'token': data.token,
-							'time': data.expires_time - this.$Cache.time()
-						});
-						let backUrl = that.$Cache.get(BACK_URL) || "/pages/index/index";
-						that.$Cache.clear(BACK_URL);
-						getUserInfo().then(res => {
-							this.keyLock = true
-							that.$store.commit("SETUID", res.data.uid);
-							that.$store.commit("UPDATE_USERINFO", res.data);
-							uni.reLaunch({
-								url: backUrl
-							});
-						}).catch(error => {
-							this.keyLock = true
-						})
-					})
-					.catch(e => {
-						this.keyLock = true
-						that.$util.Tips({
-							title: e
+				try {
+					const response = await merchantEmployeeLogin({
+						account: that.account.trim(),
+						pwd: that.password,
+					});
+					await that.completeEmployeeLogin(response.data || {}, that.account.trim(), that.password);
+				} catch (e) {
+					that.$util.Tips({ title: (e && e.msg) || '员工账号或密码错误' });
+				} finally {
+					that.keyLock = true;
+				}
+			},
+			async completeEmployeeLogin(data, account, password) {
+				if (data.need_select_store) {
+					const stores = Array.isArray(data.stores) ? data.stores : [];
+					if (!stores.length) throw { msg: '当前账号没有可进入的门店' };
+					const choice = await new Promise((resolve, reject) => {
+						uni.showActionSheet({
+							itemList: stores.map(item => item.store_name || item.name || `门店${item.store_id || item.id}`),
+							success: result => resolve(result.tapIndex),
+							fail: () => reject({ msg: '已取消选择门店' }),
 						});
 					});
+					const selected = stores[choice];
+					const response = await merchantEmployeeLogin({
+						account,
+						pwd: password,
+						store_id: Number(selected.store_id || selected.id || 0),
+						login_ticket: data.login_ticket || '',
+					});
+					return this.completeEmployeeLogin(response.data || {}, account, password);
+				}
+				if (!data.token) throw { msg: '员工会话创建失败' };
+				this.$store.dispatch('merchant/signInWithEmployeeSession', data);
+				try {
+					const access = await this.$store.dispatch('merchant/fetchAccess', true);
+					if (!access || !access.can_enter_merchant) throw { msg: '当前员工暂无商家端权限' };
+					this.$store.dispatch('merchant/enterMerchant');
+					uni.reLaunch({ url: '/pages/merchant/home/index' });
+				} catch (e) {
+					this.$store.dispatch('merchant/clearEmployeeSession');
+					throw e;
+				}
 			},
 			privacy(type) {
 				uni.navigateTo({
@@ -632,72 +637,105 @@
 
 <style lang="scss" scoped>
 	.wrapper {
-		background-color: #fff;
+		background-color: #f5f7f8;
 		min-height: 100vh;
 		position: relative;
+		box-sizing: border-box;
+		padding: 72rpx 40rpx 96rpx;
 
-		.bag {
-			position: absolute;
-			top: 0;
-			left: 0;
+		.login-shell {
 			width: 100%;
-			z-index: 0;
-			/* #ifdef H5 */
-			z-index: 0;
-	
-			/* #endif */
-			img {
-				width: 100%;
-				height: 544rpx;
-			}
+			max-width: 660rpx;
+			margin: 0 auto;
 		}
 
 		.page-msg {
-			padding-top: 160rpx;
-			margin-left: 72rpx;
-			z-index: 2;
-			position: relative;
+			padding: 38rpx 8rpx 44rpx;
+
+			.eyebrow {
+				margin-bottom: 16rpx;
+				font-size: 24rpx;
+				font-weight: 600;
+				color: #e3317a;
+				letter-spacing: 2rpx;
+			}
+
 			.title {
-				font-size: 48rpx;
-				font-weight: 500;
-				color: #333333;
-				line-height: 68rpx;
+				font-size: 52rpx;
+				font-weight: 700;
+				color: #162128;
+				line-height: 1.2;
 			}
 
 			.tip {
+				margin-top: 14rpx;
 				font-size: 28rpx;
 				font-weight: 400;
-				color: #333333;
-				line-height: 40rpx;
+				color: #66747d;
+				line-height: 42rpx;
 			}
 		}
 
 		.page-form {
-			width: 606rpx;
-			margin: 100rpx auto 0 auto;
-			z-index: 2;
-			position: relative;
+			width: 100%;
+			box-sizing: border-box;
+			padding: 40rpx;
+			background: #ffffff;
+			border: 1rpx solid #e1e6e9;
+			border-radius: 8rpx;
+			box-shadow: 0 10rpx 26rpx rgba(31, 46, 56, 0.06);
 			.item {
 				width: 100%;
-				height: 88rpx;
-				background: #F5F5F5;
-				border-radius: 45rpx;
-				padding: 24rpx 48rpx;
-				margin-bottom: 32rpx;
+				height: 104rpx;
+				box-sizing: border-box;
+				background: #ffffff;
+				border: 1rpx solid #cbd4d9;
+				border-radius: 6rpx;
+				padding: 0 28rpx;
+				margin-bottom: 24rpx;
+				display: flex;
+				align-items: center;
+
+				&:focus-within {
+					border-color: #e3317a;
+					box-shadow: 0 0 0 4rpx rgba(227, 49, 122, 0.12);
+				}
+
+				&.item--staff,
+				&.item--password {
+					flex-direction: column;
+					align-items: flex-start;
+					justify-content: center;
+					gap: 5rpx;
+				}
+
+				.field-label {
+					font-size: 22rpx;
+					font-weight: 600;
+					line-height: 28rpx;
+					color: #66747d;
+				}
 
 				input {
 					width: 100%;
-					height: 100%;
-					font-size: 32rpx;
+					height: 44rpx;
+					box-sizing: border-box;
+					border: 0;
+					outline: 0;
+					background: transparent;
+					-webkit-appearance: none;
+					font-size: 28rpx;
+					line-height: 44rpx;
+					color: #162128;
 				}
 
 				.placeholder {
-					color: #BBBBBB;
+					color: #9aa6ad;
 					font-size: 28rpx;
 				}
 
 				input.codeIput {
-					width: 300rpx;
+					width: 100%;
 				}
 
 				.line {
@@ -717,21 +755,28 @@
 				}
 			}
 
+			.reset-note {
+				margin: -4rpx 0 34rpx;
+				font-size: 24rpx;
+				line-height: 36rpx;
+				color: #7e8c94;
+			}
+
 			.btn {
-				width: 606rpx;
-				height: 88rpx;
+				width: 100%;
+				height: 96rpx;
 				background: var(--view-theme);
-				border-radius: 200rpx 200rpx 200rpx 200rpx;
+				border-radius: 6rpx;
 				display: flex;
 				justify-content: center;
 				align-items: center;
-				font-size: 32rpx;
+				font-size: 30rpx;
 				font-family: PingFang SC-Regular, PingFang SC;
 				font-weight: 400;
 				color: #FFFFFF;
 				line-height: 44rpx;
-				margin-top: 48rpx;
-				letter-spacing: 1px;
+				margin-top: 12rpx;
+				letter-spacing: 0;
 			}
 		}
 	}

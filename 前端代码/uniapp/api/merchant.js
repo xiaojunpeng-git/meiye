@@ -1,4 +1,22 @@
-import request from '@/utils/request.js';
+import { merchantRequest as request } from '@/utils/request.js';
+import { HTTP_REQUEST_URL, HEADER } from '@/config/app';
+
+/** 员工档案账号登录。该令牌只用于商家端，不写入会员登录态。 */
+export function merchantEmployeeLogin(data) {
+	return new Promise((resolve, reject) => {
+		uni.request({
+			url: HTTP_REQUEST_URL + '/api/merchant/login',
+			method: 'POST',
+			header: Object.assign({}, HEADER),
+			data: data || {},
+			success: (res) => {
+				if (res.data && res.data.status === 200) resolve(res.data);
+				else reject((res && res.data) || { msg: '员工账号登录失败' });
+			},
+			fail: () => reject({ msg: '员工账号登录请求失败' }),
+		});
+	});
+}
 
 /** 商家入口权限与身份上下文 */
 export function merchantAccess(data) {
@@ -56,6 +74,11 @@ export function merchantCustomerOrders(data) {
 
 export function merchantCustomerUpdate(data) {
 	return request.post('merchant/customer/update', data || {});
+}
+
+/** 共享客情服务的手机端只读任务工作台。 */
+export function merchantCustomerCareWorkbench(data) {
+	return request.get('merchant/customer-care/workbench', data || {});
 }
 
 export function merchantDataBusiness(data) {

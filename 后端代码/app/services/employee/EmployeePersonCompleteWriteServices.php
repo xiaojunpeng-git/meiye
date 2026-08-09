@@ -305,13 +305,11 @@ class EmployeePersonCompleteWriteServices extends BaseServices
             'is_fencheng' => $staff ? (int)($staff['is_fencheng'] ?? 0) : 0,
             'status' => (int)($emp['status'] ?? 1),
         ];
-        // 档案只暴露一个手机端状态：必须同时满足员工授权与当前任职入口。
-        // 读取失败或任一投影关闭时均回显关闭，避免编辑保存时误把授权状态猜成开启。
+        // 员工授权是手机端唯一入口开关。任职渠道记录仅供兼容和审计，
+        // 无店直属员工没有任职记录也可以由组织数据权限限定可操作门店。
         $mobileAuthOn = (int)Db::name('employee_mobile_auth')
             ->where('employee_id', $employeeId)->where('is_del', 0)->where('status', 1)->count() > 0;
-        $mobileEntryOn = $staffId > 0 && (int)Db::name('staff_channel_entry')
-            ->where('staff_id', $staffId)->where('channel', 'mobile')->where('is_del', 0)->where('status', 1)->count() > 0;
-        $result['mobile_enabled'] = $mobileAuthOn && $mobileEntryOn ? 1 : 0;
+        $result['mobile_enabled'] = $mobileAuthOn ? 1 : 0;
         if ($staff) {
             foreach ([
                 'work_member_id', 'notify', 'is_customer', 'customer_url', 'is_reservable',
@@ -625,26 +623,20 @@ class EmployeePersonCompleteWriteServices extends BaseServices
             }
         }
 
-        // 6c) 员工档案的唯一手机端开关：任职入口和员工授权在本事务内同时落地。
+        // 6c) 员工档案的唯一手机端开关。已有任职同步兼容入口；无店直属
+        // 员工只写员工授权，后续由组织数据权限限定可见、可操作门店。
         // 未提交该字段的旧调用只重投影岗位，绝不根据岗位擅自把历史关闭授权重新打开。
         $mobileAccessOut = null;
         if ($mobileEnabledPresent) {
-            if ($staffId <= 0) {
-                if ($mobileEnabled === 1) {
-                    throw new AdminException('开通手机端前请先配置有效的门店任职和岗位');
-                }
-                $authProjection = $jobSvc->afterEmployeeAuthChanged($employeeId);
-            } else {
-                $mobileAccessOut = $jobSvc->setEmployeeMobileAccessInTx(
-                    $employeeId,
-                    $staffId,
-                    $mobileEnabled,
-                    $adminInfo,
-                    $auditMeta,
-                    $source
-                );
-                $authProjection = ['auth_version' => $mobileAccessOut['auth_version']];
-            }
+            $mobileAccessOut = $jobSvc->setEmployeeMobileAccessInTx(
+                $employeeId,
+                $staffId,
+                $mobileEnabled,
+                $adminInfo,
+                $auditMeta,
+                $source
+            );
+            $authProjection = ['auth_version' => $mobileAccessOut['auth_version']];
         } else {
             $authProjection = $jobSvc->afterEmployeeAuthChanged($employeeId);
         }

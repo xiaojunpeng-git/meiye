@@ -116,6 +116,16 @@ const activeTab = ref(DEFAULT_TABS.some((tab) => tab.key === props.initialTab) ?
 const activeActionKey = ref('')
 const actionError = ref('')
 const tabKeyword = ref('')
+const todayDate = () => {
+  const now = new Date()
+  const year = now.getFullYear()
+  const month = String(now.getMonth() + 1).padStart(2, '0')
+  const day = String(now.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+const tabDateFrom = ref(todayDate())
+const tabDateTo = ref(todayDate())
+const tabStatus = ref('')
 const metricTooltip = ref({ visible: false, text: '', left: 0, top: 0 })
 
 const detail = computed(() => (props.detail && typeof props.detail === 'object' ? props.detail : {}))
@@ -176,6 +186,14 @@ const availableActions = computed(() => normalizeActionList(readList(detail.valu
 
 const tabs = DEFAULT_TABS
 const isSearchableTab = computed(() => ['assets', 'card-operations', 'sales', 'writeoff', 'care', 'debt', 'gift', 'points'].includes(activeTab.value))
+const tabKeywordPlaceholder = computed(() => {
+  if (activeTab.value === 'writeoff') return '输入手艺人或项目后查询'
+  if (activeTab.value === 'sales') return '输入商品名称或销售人后查询'
+  if (activeTab.value === 'gift') return '输入赠送内容或来源后查询'
+  return '输入关键词后查询'
+})
+const hasStatusFilter = computed(() => ['assets', 'gift', 'care'].includes(activeTab.value))
+const showDateRange = computed(() => !['assets', 'care'].includes(activeTab.value) || tabStatus.value === '')
 
 watch(
   () => props.initialTab,
@@ -356,7 +374,20 @@ function switchTab(tab) {
   activeTab.value = tab.key
   actionError.value = ''
   tabKeyword.value = ''
-  emit('tab-change', { tab: tab.key, memberId: memberId.value, member: member.value, keyword: '' })
+  tabDateFrom.value = todayDate()
+  tabDateTo.value = todayDate()
+  tabStatus.value = tab.key === 'assets' || tab.key === 'gift'
+    ? 'active'
+    : (tab.key === 'care' ? 'unfinished' : '')
+  emit('tab-change', {
+    tab: tab.key,
+    memberId: memberId.value,
+    member: member.value,
+    keyword: '',
+    status: tabStatus.value,
+    dateFrom: tabDateFrom.value,
+    dateTo: tabDateTo.value
+  })
 }
 
 function queryActiveTab() {
@@ -365,7 +396,10 @@ function queryActiveTab() {
     tab: activeTab.value,
     memberId: memberId.value,
     member: member.value,
-    keyword: tabKeyword.value.trim()
+    keyword: tabKeyword.value.trim(),
+    status: hasStatusFilter.value ? tabStatus.value : '',
+    dateFrom: tabDateFrom.value,
+    dateTo: tabDateTo.value
   })
 }
 
@@ -778,11 +812,29 @@ async function triggerAction(action, context = {}) {
       </nav>
 
       <form v-if="hasDetail && !isLoading && isSearchableTab" class="member-detail-overlay__query" @submit.prevent="queryActiveTab">
+        <label v-if="showDateRange" class="member-detail-overlay__date-range">
+          <div>
+            <input v-model="tabDateFrom" type="date" aria-label="开始日期" />
+            <em>至</em>
+            <input v-model="tabDateTo" type="date" aria-label="结束日期" />
+          </div>
+        </label>
         <label>
-          <span>查询</span>
-          <input v-model="tabKeyword" type="search" maxlength="80" placeholder="输入关键词后查询" />
+          <input v-model="tabKeyword" type="search" maxlength="80" :placeholder="tabKeywordPlaceholder" />
         </label>
         <button type="submit" class="member-detail-overlay__button member-detail-overlay__button--secondary" :disabled="tabIsLoading(activeTab) || activeActionKey !== ''">查询</button>
+        <label v-if="hasStatusFilter" class="member-detail-overlay__status-filter">
+          <select v-model="tabStatus" aria-label="状态筛选" @change="queryActiveTab">
+            <template v-if="activeTab === 'care'">
+              <option value="unfinished">未完成</option>
+              <option value="">全部</option>
+            </template>
+            <template v-else>
+              <option value="active">有效</option>
+              <option value="">全部</option>
+            </template>
+          </select>
+        </label>
       </form>
 
       <main class="member-detail-overlay__body" :aria-busy="isLoading || tabIsLoading(activeTab)">
@@ -964,12 +1016,13 @@ async function triggerAction(action, context = {}) {
               <div class="member-detail-overlay__table-wrap">
                 <table class="member-detail-overlay__table member-detail-overlay__table--wide">
                   <thead>
-                    <tr><th>销售订单号</th><th>业务日期</th><th>订单类型</th><th>销售金额</th><th>现金业绩</th><th>订单状态</th><th>支付完成时间</th><th>操作</th></tr>
+                    <tr><th>销售订单号</th><th>业务日期</th><th>销售门店</th><th>订单类型</th><th>销售金额</th><th>现金业绩</th><th>订单状态</th><th>支付完成时间</th><th>操作</th></tr>
                   </thead>
                   <tbody>
                     <tr v-for="(record, index) in salesOrders" :key="recordKey(record, 'sale', index)">
                       <td>{{ salesOrderNo(record) }}</td>
                       <td>{{ text(firstValue(record, ['businessDate', 'date'])) }}</td>
+                      <td>{{ text(firstValue(record, ['storeName', 'salesStoreName', 'businessStoreName'])) }}</td>
                       <td>{{ text(firstValue(record, ['orderTypeLabel', 'businessTypeLabel', 'typeLabel', 'isSupplement']) === true ? '补单' : firstValue(record, ['orderTypeLabel', 'businessTypeLabel', 'typeLabel'])) }}</td>
                       <td class="member-detail-overlay__money">{{ salesOrderAmount(record) }}</td>
                       <td class="member-detail-overlay__money">{{ salesOrderReceived(record) }}</td>
@@ -977,7 +1030,7 @@ async function triggerAction(action, context = {}) {
                       <td>{{ text(firstValue(record, ['completedAt', 'paidAt', 'paymentCompletedAt'])) }}</td>
                       <td><div class="member-detail-overlay__record-actions"><button v-for="action in recordActions(record, `sale-${index}`)" :key="action.key" type="button" class="member-detail-overlay__inline-action" :disabled="!onAction || action.disabled || activeActionKey !== ''" :title="action.disabledReason || ''" @click="triggerAction(action, { scope: 'sales-order', record })">{{ activeActionKey === action.key ? '处理中…' : action.label }}</button></div></td>
                     </tr>
-                    <tr v-if="!salesOrders.length"><td colspan="8" class="member-detail-overlay__table-empty">暂无销售订单</td></tr>
+                    <tr v-if="!salesOrders.length"><td colspan="9" class="member-detail-overlay__table-empty">暂无销售订单</td></tr>
                   </tbody>
                 </table>
               </div>
@@ -1481,6 +1534,7 @@ async function triggerAction(action, context = {}) {
 .member-detail-overlay__query {
   display: flex;
   align-items: end;
+  flex-wrap: wrap;
   gap: 10px;
   padding: 10px 24px;
   border-bottom: 1px solid #eaecf0;
@@ -1496,6 +1550,25 @@ async function triggerAction(action, context = {}) {
   line-height: 18px;
 }
 
+.member-detail-overlay__query .member-detail-overlay__date-range {
+  min-width: 250px;
+}
+
+.member-detail-overlay__date-range > div {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.member-detail-overlay__date-range em {
+  font-style: normal;
+  color: #98a2b3;
+}
+
+.member-detail-overlay__query .member-detail-overlay__status-filter {
+  min-width: 92px;
+}
+
 .member-detail-overlay__query input {
   width: 100%;
   height: 34px;
@@ -1503,6 +1576,16 @@ async function triggerAction(action, context = {}) {
   border: 1px solid #d0d5dd;
   border-radius: 6px;
   outline: none;
+  color: #344054;
+  font-size: 13px;
+}
+
+.member-detail-overlay__query select {
+  height: 34px;
+  padding: 0 28px 0 10px;
+  border: 1px solid #d0d5dd;
+  border-radius: 6px;
+  background: #fff;
   color: #344054;
   font-size: 13px;
 }

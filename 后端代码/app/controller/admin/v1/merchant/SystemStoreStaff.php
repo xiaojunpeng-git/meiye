@@ -427,6 +427,28 @@ class SystemStoreStaff extends AuthController
      */
     public function saveStaff($id = 0)
     {
+        return $this->saveStaffByIdentity((int)$id, false);
+    }
+
+    /**
+     * 组织工作台人员完整保存：路径 ID 明确为 employee_id。
+     * 不允许 employee_id 数值碰撞到不相关的 system_store_staff.id。
+     *
+     * @param int $employeeId employee_id；新建传 0
+     * @return mixed
+     */
+    public function savePersonComplete($employeeId = 0)
+    {
+        return $this->saveStaffByIdentity((int)$employeeId, true);
+    }
+
+    /**
+     * @param int $id staff_id（兼容入口）或 employee_id（明确人员入口）
+     * @param bool $explicitEmployee true 时路径 ID 只能作为 employee_id 解析
+     * @return mixed
+     */
+    protected function saveStaffByIdentity(int $id, bool $explicitEmployee)
+    {
         $raw = $this->request->post();
         if (!is_array($raw)) {
             $raw = [];
@@ -437,10 +459,37 @@ class SystemStoreStaff extends AuthController
             return $this->fail($e->getMessage());
         }
 
-        $id = (int)$id;
         $employeeId = (int)($raw['employee_id'] ?? 0);
         $storeId = (int)($raw['store_id'] ?? 0);
         $orgId = (int)($raw['org_id'] ?? 0);
+        if ($explicitEmployee) {
+            if ($id > 0) {
+                if ($employeeId > 0 && $employeeId !== $id) {
+                    return $this->fail('路径员工与提交员工不一致');
+                }
+                $employee = Db::name('employee')->where('id', $id)->where('is_del', 0)->find();
+                if (!$employee) {
+                    return $this->fail('员工不存在');
+                }
+                $employeeId = $id;
+            } elseif ($employeeId > 0) {
+                return $this->fail('新建人员不能提交员工ID');
+            }
+
+            // staff_id 只可作为同一员工既有任职的辅助信息，不能改变保存对象。
+            $requestedStaffId = (int)($raw['staff_id'] ?? 0);
+            if ($requestedStaffId > 0) {
+                $requestedStaff = $this->services->get($requestedStaffId);
+                $requestedStaffArr = is_object($requestedStaff) ? $requestedStaff->toArray() : (array)$requestedStaff;
+                if (!$requestedStaffArr || $employeeId <= 0
+                    || (int)($requestedStaffArr['employee_id'] ?? 0) !== $employeeId) {
+                    return $this->fail('任职与员工不匹配');
+                }
+                $id = $requestedStaffId;
+            } else {
+                $id = 0;
+            }
+        }
         if ($orgId <= 0 && $employeeId > 0) {
             $orgId = (int)Db::name('organization_employee')
                 ->where('employee_id', $employeeId)->where('is_del', 0)->order('id', 'desc')->value('org_id');
