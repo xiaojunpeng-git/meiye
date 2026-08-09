@@ -66,7 +66,7 @@ final class InventoryPlatformHqReadModelServices
             ->where('f.tenant_id', (string)$location['tenant_id'])->where('f.location_id', (int)$location['id'])
             ->where('f.store_id', 0)->whereIn('f.batch_id', $batchIds)->where('f.fact_status', 'SETTLED')
             ->leftJoin('inventory_stock s', 's.id=f.stock_id')
-            ->field('f.id,COALESCE(n.document_no,f.source_id) order_sn,f.source_type,f.business_date,f.direction,f.quantity_units,s.quantity_scale,s.stock_unit,f.unit_cost_cents,f.cost_amount_cents,f.recorded_at,l.location_name')
+            ->field('f.id,COALESCE(n.document_no,f.source_id) order_sn,f.source_type,f.source_id,f.source_detail_id,f.reversal_of,f.business_date,f.direction,f.quantity_units,s.quantity_scale,s.stock_unit,f.unit_cost_cents,f.cost_amount_cents,f.recorded_at,l.location_name')
             ->order('f.id desc')->limit(200)->select()->toArray();
         foreach ($facts as &$fact) {
             if (!$canViewCost) {

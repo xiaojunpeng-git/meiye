@@ -15,6 +15,8 @@ const salonReportController = fs.readFileSync(new URL('../../../后端代码/app
 const salonReportService = fs.readFileSync(new URL('../../../后端代码/app/services/product/inventory/SalonStockReportServices.php', import.meta.url), 'utf8')
 const salonUsageService = fs.readFileSync(new URL('../../../后端代码/app/services/product/inventory/InventorySalonUsageServices.php', import.meta.url), 'utf8')
 const platformSalonUsageController = fs.readFileSync(new URL('../../../后端代码/app/controller/admin/v1/product/inventory/InventoryPlatformSalonUsage.php', import.meta.url), 'utf8')
+const stockReadModel = fs.readFileSync(new URL('../../../后端代码/app/services/product/inventory/InventoryStoreReadModelServices.php', import.meta.url), 'utf8')
+const platformStockReadModel = fs.readFileSync(new URL('../../../后端代码/app/services/product/inventory/InventoryPlatformHqReadModelServices.php', import.meta.url), 'utf8')
 
 assert.match(app, /request:\s*\{[\s\S]*?filters:\s*\['请货状态'\]/, '请货筛选只保留状态入口')
 assert.match(app, /platformUsesHqSubject\s*=\s*computed\(\(\)\s*=>[^\n]*transfer/, '调拨仍按总部仓主体加载平台库存范围')
@@ -124,5 +126,9 @@ assert.match(inventoryApi, /localStorage\?\.getItem\('token'\)/, '独立门店�
 assert.match(app, /kind !== 'import' && !isReadOnlyDetail && platformActionRequiresHqLocation\.value/, '导入和只读查看不依赖当前总部仓，写操作仍受总部仓门禁保护')
 assert.match(app, /function isExplicitListQuery\(value\)[\s\S]*?!\('isTrusted' in value\)[\s\S]*?!\('preventDefault' in value\)/, '列表查询不会将浏览器事件作为查询条件发送')
 assert.match(app, /const hasExplicitQuery = isExplicitListQuery\(unifiedQuery\)/, '列表查询仅展开明确的查询配置对象')
+assert.doesNotMatch(modal, /class="modal-secondary">保存草稿<\/button>/, '盘点弹窗不展示未接入服务端的无效草稿按钮')
+assert.match(stockReadModel, /f\.source_detail_id,f\.reversal_of/, '门店库存流水返回来源明细和冲销关系')
+assert.match(platformStockReadModel, /f\.source_detail_id,f\.reversal_of/, '平台库存流水返回来源明细和冲销关系')
+assert.match(modal, /冲销流水 #\$\{movement\.reversal_of\}/, '库存流水展示原流水编号')
 
 console.log('inventory-v3-c3-contract: PASS')
