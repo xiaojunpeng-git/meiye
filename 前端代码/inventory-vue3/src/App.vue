@@ -1301,7 +1301,8 @@ onBeforeUnmount(() => {
         <template v-else-if="active === 'statistics'">
           <div class="page-heading"><div><p>库存管理 / 库存统计</p><h1>库存统计</h1><span>入库、出库、临期与库龄均按批次事实统一查询</span></div><div class="heading-actions"><span class="page-heading__note">当前统计导出将在对应权威导出任务接入后开放</span><button v-if="mode === 'store' && statisticsQueryPage" class="secondary-button" @click="openCurrentQuerySettings"><SlidersHorizontal :size="16" />查询设置</button></div></div>
           <div class="statistics-tabs"><button v-for="tab in statisticsTabs" :key="tab.key" :class="{ active: activeStatisticsTab === tab.key }" @click="selectStatisticsTab(tab.key)">{{ tab.label }}</button></div>
-          <InventoryOperationalUnifiedQueryToolbar
+          <component
+            :is="InventoryOperationalUnifiedQueryToolbar"
             v-if="statisticsQueryPage && mode === 'store'"
             ref="statisticsQueryToolbar"
             :key="statisticsQueryPage.pageCode"

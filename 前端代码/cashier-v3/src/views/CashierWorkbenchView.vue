@@ -50,6 +50,9 @@ const selectedCategory = ref('')
 const areCategoriesExpanded = ref(false)
 const selectedCardRuleType = ref('')
 const activeCartLineId = ref(null)
+// 保留最近一次数量校验失败，避免后端拒绝超量后输入框被恢复为权威数量，
+// 但结账按钮仍沿用旧购物车继续进入结账向导。
+const cartQuantityValidationError = ref('')
 const localExperienceState = ref({})
 const previewCardOperation = ref(null)
 const guidedBusinessMode = ref('')
@@ -1162,6 +1165,18 @@ function reportPersonnelAssignmentFailure(result, fallback) {
     detail: {
       status: status === 'conflict' ? 'conflict' : 'failed',
       message: resultMessage(result, fallback)
+    }
+  }))
+}
+
+function reportCartQuantityFailure(result, fallback) {
+  const status = resultStatus(result)
+  const message = resultMessage(result, fallback)
+  cartQuantityValidationError.value = message
+  window.dispatchEvent(new CustomEvent('cashier-v3:ui-result', {
+    detail: {
+      status: status === 'conflict' ? 'conflict' : 'failed',
+      message
     }
   }))
 }
@@ -2821,10 +2836,21 @@ async function changeLineQuantity(line, delta) {
     if (maximum < 1 || nextQuantity < 1 || nextQuantity > maximum) return
   }
   if (!localCashierDraft.value) {
-    await mutateRootCashierDraft('change-cart-line-quantity', line, { delta })
-    return
+    const result = await mutateRootCashierDraft('change-cart-line-quantity', line, { delta })
+    if (['failed', 'conflict'].includes(resultStatus(result))) {
+      reportCartQuantityFailure(result, '库存不足，请修改数量后再试。')
+    } else {
+      cartQuantityValidationError.value = ''
+    }
+    return result
   }
-  await mutateCashierDraft('change-cart-line-quantity', line, { delta })
+  const result = await mutateCashierDraft('change-cart-line-quantity', line, { delta })
+  if (['failed', 'conflict'].includes(resultStatus(result))) {
+    reportCartQuantityFailure(result, '库存不足，请修改数量后再试。')
+  } else {
+    cartQuantityValidationError.value = ''
+  }
+  return result
 }
 
 function entitlementLineMaximum(line = {}) {
@@ -2856,16 +2882,31 @@ async function setLineQuantity(line, event) {
     return
   }
   event.target.value = String(nextQuantity)
-  if (nextQuantity === currentQuantity) return
-  if (!localCashierDraft.value) {
-    await mutateRootCashierDraft('change-cart-line-quantity', line, { delta: nextQuantity - currentQuantity })
+  if (nextQuantity === currentQuantity) {
+    cartQuantityValidationError.value = ''
     return
   }
-  await mutateCashierDraft('change-cart-line-quantity', line, { delta: nextQuantity - currentQuantity })
+  const result = !localCashierDraft.value
+    ? await mutateRootCashierDraft('change-cart-line-quantity', line, { delta: nextQuantity - currentQuantity })
+    : await mutateCashierDraft('change-cart-line-quantity', line, { delta: nextQuantity - currentQuantity })
+  if (['failed', 'conflict'].includes(resultStatus(result))) {
+    const authoritativeLine = cartLines.value.find((candidate) => String(candidate?.id || '') === String(line?.id || ''))
+    event.target.value = String(Math.max(1, Number(authoritativeLine?.quantity || currentQuantity)))
+    reportCartQuantityFailure(result, '库存不足，请修改数量后再试。')
+  } else {
+    cartQuantityValidationError.value = ''
+  }
+  return result
 }
 
 async function openCheckout() {
   try {
+    if (cartQuantityValidationError.value) {
+      window.dispatchEvent(new CustomEvent('cashier-v3:ui-result', {
+        detail: { status: 'failed', message: cartQuantityValidationError.value }
+      }))
+      return { result: { status: 'failed', code: 'CASHIER_CART_QUANTITY_INVALID', message: cartQuantityValidationError.value } }
+    }
     if (previewCardOperation.value) {
     const operation = previewCardOperation.value
     if (!operation.sources?.length || !operation.target) {

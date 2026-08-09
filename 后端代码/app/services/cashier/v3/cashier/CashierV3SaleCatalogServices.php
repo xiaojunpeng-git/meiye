@@ -1034,7 +1034,10 @@ final class CashierV3SaleCatalogServices
             ->select()
             ->toArray();
         if (count($locations) !== 1 || (int)($locations[0]['id'] ?? 0) <= 0) {
-            throw self::inventoryUnavailable('cashier_sale_inventory_location_not_ready');
+            throw self::inventoryUnavailable(
+                'cashier_sale_inventory_location_not_ready',
+                '当前门店尚未建立可用库存位置，不能销售该产品。'
+            );
         }
 
         $stocks = \think\facade\Db::name('inventory_stock')
@@ -1050,7 +1053,10 @@ final class CashierV3SaleCatalogServices
             ->select()
             ->toArray();
         if (count($stocks) !== 1) {
-            throw self::inventoryUnavailable('cashier_sale_inventory_stock_not_ready');
+            throw self::inventoryUnavailable(
+                'cashier_sale_inventory_stock_not_ready',
+                '当前门店尚未入库，不能销售该产品。'
+            );
         }
         $scale = (int)($stocks[0]['quantity_scale'] ?? -1);
         $factor = 1;
@@ -1059,7 +1065,12 @@ final class CashierV3SaleCatalogServices
         }
         if ($scale < 0 || $scale > 4 || $quantity > intdiv(PHP_INT_MAX, $factor)
             || (int)($stocks[0]['available_quantity_units'] ?? -1) < $quantity * $factor) {
-            throw self::inventoryUnavailable('cashier_sale_inventory_shortage');
+            $availableUnits = max(0, (int)($stocks[0]['available_quantity_units'] ?? 0));
+            $availableText = self::inventoryUnitsToDecimal($availableUnits, max(0, min(4, $scale)));
+            throw self::inventoryUnavailable(
+                'cashier_sale_inventory_shortage',
+                sprintf('库存不足，当前可用库存为 %s，不能销售 %s 件，请修改数量后再试。', $availableText, $quantity)
+            );
         }
         $batchAvailable = (int)\think\facade\Db::name('inventory_batch')
             ->where('stock_id', (int)$stocks[0]['id'])
@@ -1067,15 +1078,18 @@ final class CashierV3SaleCatalogServices
             ->sum('available_quantity_units');
         if ($batchAvailable < $quantity * $factor
             || $batchAvailable !== (int)$stocks[0]['available_quantity_units']) {
-            throw self::inventoryUnavailable('cashier_sale_inventory_batch_not_ready');
+            throw self::inventoryUnavailable(
+                'cashier_sale_inventory_batch_not_ready',
+                '当前批次库存与库存余额不一致，请刷新后重试。'
+            );
         }
     }
 
-    private static function inventoryUnavailable(string $reason): CashierV3CommandException
+    private static function inventoryUnavailable(string $reason, ?string $message = null): CashierV3CommandException
     {
         return self::failure(
             CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
-            '当前门店尚未入库或库存不足，不能销售该产品。',
+            $message ?: '当前门店库存不可用，不能销售该产品。',
             $reason
         );
     }
