@@ -8,6 +8,7 @@ use app\services\cashier\v3\CashierV3OperatorScope;
 use app\services\cashier\v3\CashierV3ResultCode;
 use app\services\cashier\v3\cashier\CashierV3EntitlementActualAmountAllocator;
 use app\services\cashier\v3\checkout\provider\CashierV3MemberBalanceProvider;
+use mohe\services\SystemConfigService;
 use think\facade\Db;
 
 /**
@@ -32,7 +33,7 @@ final class CashierV3MemberDetailQueryServices
 
         $member = Db::name('user')
             ->where('uid', $memberId)
-            ->field('uid,nickname,real_name,phone,bar_code,belong_store_id,integral,level,sex,birthday,wechat_account,addres,mark,add_time,extend_info,status,is_del,delete_time')
+            ->field('uid,nickname,real_name,phone,bar_code,belong_store_id,integral,level,sex,birthday,card_id,wechat_account,addres,mark,add_time,extend_info,status,is_del,delete_time')
             ->find();
         if (!$this->isActiveMember($member)) {
             throw $this->notFound();
@@ -76,7 +77,8 @@ final class CashierV3MemberDetailQueryServices
             : '';
         $levelName = (int)($member['level'] ?? 0) > 0
             ? (string)Db::name('system_user_level')->where('id', (int)$member['level'])->value('name')
-            : '';
+            : '普通会员';
+        $tagNames = $this->memberTagNames($memberId);
         $balanceSnapshot = (new CashierV3MemberBalanceProvider())->readSnapshot(
             $memberId,
             $operatorScope,
@@ -119,8 +121,9 @@ final class CashierV3MemberDetailQueryServices
                 'memberLevel' => $levelName,
                 'genderLabel' => $this->genderLabel((int)($member['sex'] ?? 0)),
                 'birthday' => $this->dateOnly((int)($member['birthday'] ?? 0)),
+                'idCard' => (string)($member['card_id'] ?? ''),
                 'wechat' => (string)($member['wechat_account'] ?? ''),
-                'tags' => [],
+                'tags' => $tagNames,
                 'createdAt' => $this->dateTime((int)($member['add_time'] ?? 0)),
                 'address' => (string)($member['addres'] ?? ''),
                 'remark' => (string)($member['mark'] ?? ''),
@@ -510,14 +513,84 @@ final class CashierV3MemberDetailQueryServices
     /** @return array<int,array{key:string,label:string,value:string}> */
     private function customFields($raw): array
     {
-        $decoded = is_array($raw) ? $raw : json_decode((string)$raw, true);
-        if (!is_array($decoded)) return [];
+        $storedRows = is_array($raw) ? $raw : json_decode((string)$raw, true);
+        $stored = [];
+        foreach ((array)$storedRows as $key => $row) {
+            if (is_array($row)) {
+                $param = trim((string)($row['param'] ?? $row['key'] ?? $row['info'] ?? ''));
+                $info = trim((string)($row['info'] ?? ''));
+                if ($param !== '') $stored[$param] = $row['value'] ?? '';
+                if ($info !== '') $stored[$info] = $row['value'] ?? '';
+                continue;
+            }
+            if (is_scalar($row)) $stored[(string)$key] = $row;
+        }
+
         $fields = [];
-        foreach ($decoded as $key => $value) {
-            if (!is_scalar($value) || trim((string)$value) === '') continue;
-            $fields[] = ['key' => (string)$key, 'label' => (string)$key, 'value' => (string)$value];
+        foreach ((array)SystemConfigService::get('user_extend_info', []) as $index => $definition) {
+            if (!is_array($definition) || empty($definition['use'])) continue;
+            $param = trim((string)($definition['param'] ?? $definition['key'] ?? $definition['info'] ?? ''));
+            $label = trim((string)($definition['info'] ?? $definition['label'] ?? $definition['name'] ?? ''));
+            if ($param === '' || $label === '' || $this->isBuiltInProfileField($param)) continue;
+            $value = $stored[$param] ?? $stored[$label] ?? '';
+            $fields[] = [
+                'key' => $param !== '' ? $param : ('profile-field-' . $index),
+                'label' => $label,
+                'value' => $this->customFieldValue($value, $definition),
+            ];
         }
         return $fields;
+    }
+
+    /** @return string[] */
+    private function memberTagNames(int $memberId): array
+    {
+        if ($memberId <= 0) return [];
+        $rows = Db::name('user_label_relation')->alias('relation')
+            ->join('user_label label', 'label.id = relation.label_id')
+            ->where('relation.uid', $memberId)
+            ->where('relation.type', 0)
+            ->where('relation.relation_id', 0)
+            ->field('label.label_name')
+            ->order('label.id asc')
+            ->select();
+        $rows = is_object($rows) && method_exists($rows, 'toArray') ? $rows->toArray() : (array)$rows;
+        $names = [];
+        foreach ($rows as $row) {
+            $name = trim((string)($row['label_name'] ?? ''));
+            if ($name !== '') $names[$name] = $name;
+        }
+        return array_values($names);
+    }
+
+    private function isBuiltInProfileField(string $field): bool
+    {
+        return in_array($field, ['real_name', 'sex', 'birthday', 'card_id', 'address', 'mark'], true);
+    }
+
+    private function customFieldValue($value, array $definition): string
+    {
+        if (is_array($value)) $values = $value;
+        elseif ($value === null || $value === '') return '';
+        else $values = preg_split('/[,，]/u', (string)$value) ?: [];
+
+        $labels = [];
+        foreach ((array)($definition['singlearr'] ?? $definition['options'] ?? []) as $key => $option) {
+            if (is_array($option)) {
+                $optionValue = (string)($option['value'] ?? $option['id'] ?? $key);
+                $optionLabel = (string)($option['label'] ?? $option['name'] ?? $optionValue);
+            } else {
+                $optionValue = (string)$key;
+                $optionLabel = (string)$option;
+            }
+            $labels[$optionValue] = $optionLabel;
+        }
+        $display = [];
+        foreach ($values as $item) {
+            $item = trim((string)$item);
+            if ($item !== '') $display[] = $labels[$item] ?? $item;
+        }
+        return implode('、', array_values(array_unique($display)));
     }
 
     private function genderLabel(int $sex): string

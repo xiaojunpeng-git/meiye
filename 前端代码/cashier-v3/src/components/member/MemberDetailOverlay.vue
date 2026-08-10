@@ -10,7 +10,7 @@ import { formatMoney } from '@/services/cashierV3Bridge'
  * 资料、资产、记录和可执行动作：不在浏览器计算余额、到店次数、卡项次数、金额、
  * 业绩或业务状态，也不会自行改写会员、卡项、赠送、订单或预约。
  *
- * 固定九页签：会员概况、权益明细、余额变动明细、销售订单、服务记录、客情管理、欠款记录、赠送记录、积分变动记录。
+ * 会员详情页签包含业务记录与会员档案；档案页只展示后端返回的创建资料快照。
  * 各页签由调用方按需独立加载；该组件只消费后端已按数据权限裁剪的快照，不在浏览器
  * 汇总金额、权益、到店次数、状态或权限。
  *
@@ -96,6 +96,7 @@ const DEFAULT_TABS = [
   { key: 'debt', label: '欠款记录' },
   { key: 'gift', label: '赠送记录' },
   { key: 'points', label: '积分变动记录' },
+  { key: 'archive', label: '会员档案' },
 ]
 
 const ACTION_LABELS = Object.freeze({
@@ -236,8 +237,24 @@ const customFields = computed(() => readList(profile.value, ['customFields', 'fi
     key: firstValue(field, ['key', 'id', 'fieldKey', 'name']) || `custom-field-${index}`,
     label: firstValue(field, ['label', 'fieldLabel', 'name', 'title']) || '自定义字段',
     value: listText(firstValue(field, ['displayValue', 'value', 'content']))
-  }))
-  .filter((field) => hasValue(field.value)))
+  })))
+
+const archiveRows = computed(() => [
+  { label: '会员姓名', value: memberName.value },
+  { label: '完整手机号', value: firstValueFrom([member.value, detail.value], ['phone', 'mobile', 'memberPhone']) },
+  { label: '会员编号', value: firstValueFrom([member.value, detail.value], ['memberNo', 'memberCode', 'code']) },
+  { label: '会员状态', value: memberStatus.value },
+  { label: '性别', value: profileValue(['genderLabel', 'gender']) },
+  { label: '生日', value: profileValue(['birthday', 'birthDate']) },
+  { label: '身份证', value: profileValue(['idCard', 'cardId', 'id_card']) },
+  { label: '地址', value: profileValue(['address', 'fullAddress']) },
+  { label: '会员等级', value: profileValue(['memberLevel', 'levelName', 'level']) || '普通会员' },
+  { label: '会员标签', value: listText(profileValue(['tags', 'memberTags', 'tagNames'])) },
+  { label: '备注', value: profileValue(['remark', 'note', 'memo']) },
+  { label: '建档时间', value: profileValue(['createdAt', 'createdTime', 'registeredAt']) },
+  { label: '归属门店', value: firstValueFrom([relation.value, member.value, detail.value], ['storeName', 'homeStoreName', 'belongStoreName']) },
+  { label: '专属服务人', value: firstValueFrom([relation.value, member.value, detail.value], ['exclusiveServiceStaff', 'exclusiveStaffName', 'serviceConsultantName']) }
+])
 
 const relationRows = computed(() => compactRows([
   { label: '归属门店', value: firstValueFrom([relation.value, member.value, detail.value], ['storeName', 'homeStoreName', 'belongStoreName']) },
@@ -1257,6 +1274,27 @@ async function triggerAction(action, context = {}) {
             <div v-if="!giftRecords.length" class="member-detail-overlay__empty-inline member-detail-overlay__empty-inline--page">暂无赠送记录</div>
           </section>
 
+          <section v-else-if="activeTab === 'archive'" class="member-detail-overlay__tab-content member-detail-overlay__tab-content--archive" aria-label="会员档案">
+            <section class="member-detail-overlay__panel member-detail-overlay__archive-panel">
+              <header>
+                <div>
+                  <h3>会员档案</h3>
+                  <span>展示会员新增/编辑时保存的基本资料与自定义字段。</span>
+                </div>
+              </header>
+              <dl v-if="archiveRows.length" class="member-detail-overlay__info-grid member-detail-overlay__archive-grid">
+                <div v-for="row in archiveRows" :key="row.label"><dt>{{ row.label }}</dt><dd>{{ text(row.value) }}</dd></div>
+              </dl>
+              <div v-if="customFields.length" class="member-detail-overlay__archive-custom">
+                <h4>自定义字段</h4>
+                <dl class="member-detail-overlay__info-grid member-detail-overlay__info-grid--custom">
+                  <div v-for="field in customFields" :key="field.key"><dt>{{ field.label }}</dt><dd>{{ text(field.value) }}</dd></div>
+                </dl>
+              </div>
+              <div v-if="!archiveRows.length && !customFields.length" class="member-detail-overlay__empty-inline">暂无会员档案资料</div>
+            </section>
+          </section>
+
           <section v-else-if="activeTab === 'points'" class="member-detail-overlay__tab-content" aria-label="积分变动记录">
             <section class="member-detail-overlay__panel">
               <header><h3>积分变动记录</h3><span>当前积分以顶部后端快照为准。</span></header>
@@ -1717,6 +1755,14 @@ async function triggerAction(action, context = {}) {
 
 .member-detail-overlay__info-grid--custom {
   padding-top: 0;
+}
+
+.member-detail-overlay__archive-custom h4 {
+  margin: 0 17px 12px;
+  padding: 0;
+  color: #1d2939;
+  font-size: 15px;
+  line-height: 22px;
 }
 
 .member-detail-overlay__info-grid > div,
