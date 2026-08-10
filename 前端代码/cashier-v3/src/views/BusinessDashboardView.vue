@@ -46,7 +46,7 @@ const scope = computed(() => dashboard.value.scope || {})
 const trend = computed(() => dashboard.value.trend || {})
 const ranking = computed(() => dashboard.value.ranking || {})
 const isPlatform = computed(() => dashboard.value.mode === 'platform')
-const dashboardTitle = computed(() => isPlatform.value ? '经营看板' : '经营看板')
+const dashboardTitle = computed(() => isPlatform.value ? '运营概况' : '运营概况')
 const rankingTitle = computed(() => ranking.value.dimension === 'store' ? '门店排行' : '员工排行')
 const rankEntityLabel = computed(() => ranking.value.dimension === 'store' ? '门店' : '员工')
 
@@ -314,7 +314,7 @@ function aggregationLabel() {
 </script>
 
 <template>
-  <section class="business-dashboard-page" aria-label="经营看板">
+  <section class="business-dashboard-page" aria-label="运营概况">
     <header class="business-dashboard-page__header">
       <div>
         <div class="business-dashboard-page__eyebrow">门店经营</div>
@@ -326,7 +326,7 @@ function aggregationLabel() {
       </div>
     </header>
 
-    <section class="business-dashboard-filter" aria-label="经营看板筛选条件">
+    <section class="business-dashboard-filter" aria-label="运营概况筛选条件">
       <label>
         <span>开始日期</span>
         <input v-model="localScope.start" type="date">

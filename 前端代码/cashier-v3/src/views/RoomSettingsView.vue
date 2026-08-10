@@ -10,6 +10,7 @@ import {
 } from '@/services/roomManagementApi'
 
 const router = useRouter()
+const props = defineProps({ embedded: { type: Boolean, default: false } })
 const keyword = ref('')
 const status = ref('')
 const records = ref([])
@@ -116,7 +117,7 @@ onMounted(load)
         <span>维护当前门店的房间基础资料</span>
       </div>
       <div class="room-settings-page__actions">
-        <button type="button" class="button button--secondary" @click="router.push({ name: 'cashier-v3-management-center' })">返回管理</button>
+        <button v-if="!props.embedded" type="button" class="button button--secondary" @click="router.push({ name: 'cashier-v3-management-center' })">返回管理</button>
         <button type="button" class="button button--primary" @click="openCreate">新增房间</button>
       </div>
     </header>

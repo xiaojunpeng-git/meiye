@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import BadgeDollarSign from '@lucide/vue/dist/esm/icons/badge-dollar-sign.mjs'
 import Boxes from '@lucide/vue/dist/esm/icons/boxes.mjs'
 import CalendarDays from '@lucide/vue/dist/esm/icons/calendar-days.mjs'
+import ChartNoAxesCombined from '@lucide/vue/dist/esm/icons/chart-no-axes-combined.mjs'
 import ChevronDown from '@lucide/vue/dist/esm/icons/chevron-down.mjs'
 import CircleUserRound from '@lucide/vue/dist/esm/icons/circle-user-round.mjs'
 import ClipboardList from '@lucide/vue/dist/esm/icons/clipboard-list.mjs'
@@ -149,7 +150,15 @@ const menuItems = [
     icon: Settings,
     featureCode: 'cashier.v3.management_center',
     to: { name: 'cashier-v3-management-center' },
-    activeRouteNames: ['cashier-v3-management-center', 'cashier-v3-staff-list', 'cashier-v3-business-dashboard']
+    activeRouteNames: ['cashier-v3-management-center', 'cashier-v3-staff-list', 'cashier-v3-room-settings']
+  },
+  {
+    key: 'data',
+    label: '数据',
+    icon: ChartNoAxesCombined,
+    featureCode: 'cashier.v3.management_center',
+    to: { name: 'cashier-v3-business-dashboard' },
+    activeRouteNames: ['cashier-v3-business-dashboard']
   },
   {
     key: 'inventory',
@@ -396,7 +405,7 @@ watch(
 const helpContent = computed(() => {
   if (isBusinessDashboardPage.value) {
     return {
-      title: '经营看板说明',
+      title: '运营概况说明',
       description: '经营看板只展示 V3 事实覆盖范围内的数据，平台和门店使用同一套指标与后端权限。',
       steps: [
         '顶部十张卡固定从“销售人业绩”开始，不再展示“新建档数”。',
@@ -1363,8 +1372,6 @@ function showServiceCompletionContractError() {
     title: '服务确认数据未就绪',
     message: '本次服务的确认快照或版本信息不完整，暂不能提交。请刷新后重新打开本次服务单。'
   }
-  if (feedbackTimeoutId) window.clearTimeout(feedbackTimeoutId)
-  feedbackTimeoutId = window.setTimeout(dismissFeedback, 7000)
 }
 
 function showRoomAssignmentContractError() {
@@ -1373,8 +1380,6 @@ function showRoomAssignmentContractError() {
     title: '房间安排数据未就绪',
     message: '本次预约／服务、当前房间或版本信息不完整，暂不能保存。请刷新房态后重新打开。'
   }
-  if (feedbackTimeoutId) window.clearTimeout(feedbackTimeoutId)
-  feedbackTimeoutId = window.setTimeout(dismissFeedback, 7000)
 }
 
 function serviceCompletionPreparationId(detail = {}) {
@@ -1442,8 +1447,6 @@ function openServiceCompletion(payload = {}, options = {}) {
       title: '服务确认响应已过期',
       message: '本次服务的确认结果不是当前操作返回的最新快照，已忽略。请重新打开本次服务单。'
     }
-    if (feedbackTimeoutId) window.clearTimeout(feedbackTimeoutId)
-    feedbackTimeoutId = window.setTimeout(dismissFeedback, 7000)
     return { success: false, message: '服务确认响应已过期。' }
   }
   isServiceLineCompletionEditorOpen.value = false
@@ -1539,8 +1542,6 @@ function openRoomAssignment(payload = {}) {
       title: '房间分配响应已过期',
       message: '本次房间分配结果不是当前操作返回的最新快照，已忽略。请从最新房态重新打开。'
     }
-    if (feedbackTimeoutId) window.clearTimeout(feedbackTimeoutId)
-    feedbackTimeoutId = window.setTimeout(dismissFeedback, 7000)
     return { success: false, message: '房间安排响应已过期。' }
   }
   activeRoomAssignmentSubjectKey.value = requestedSubjectKey
@@ -2118,9 +2119,6 @@ async function handleUiResult(event) {
   const feedback = operatorFeedback(detail, conflictText)
   uiFeedback.value = feedback
   if (feedbackTimeoutId) window.clearTimeout(feedbackTimeoutId)
-  if (!feedback.persistent) {
-    feedbackTimeoutId = window.setTimeout(dismissFeedback, 5000)
-  }
 }
 
 watch(
@@ -2657,12 +2655,22 @@ onBeforeUnmount(() => {
   />
 
   <Teleport to="body">
-    <section v-if="uiFeedback" class="cashier-ui-feedback" :class="`cashier-ui-feedback--${uiFeedback.kind}`" role="alert">
-      <div>
-        <strong>{{ uiFeedback.title }}</strong>
-        <span>{{ uiFeedback.message }}</span>
-      </div>
-      <button type="button" aria-label="关闭提示" @click="dismissFeedback">×</button>
+    <section v-if="uiFeedback" class="cashier-ui-feedback-backdrop" role="presentation">
+      <section
+        class="cashier-ui-feedback"
+        :class="`cashier-ui-feedback--${uiFeedback.kind}`"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="cashier-ui-feedback-title"
+      >
+        <div>
+          <strong id="cashier-ui-feedback-title">{{ uiFeedback.title }}</strong>
+          <span>{{ uiFeedback.message }}</span>
+        </div>
+        <footer>
+          <button type="button" class="button button--primary" @click="dismissFeedback">确认</button>
+        </footer>
+      </section>
     </section>
   </Teleport>
 </template>

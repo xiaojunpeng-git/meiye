@@ -13,6 +13,7 @@ import {
 import {
   cloneUnifiedQuerySnapshot,
   extractUnifiedQueryMemberProjection,
+  unwrapUnifiedQueryEnvelope,
   unifiedQueryActionMessage,
   unifiedQueryActionSucceeded
 } from '@/services/unifiedQueryContract'
@@ -205,12 +206,31 @@ function closeMemberCreator() {
   isMemberCreatorOpen.value = false
 }
 
+function closeMemberMutation() {
+  if (isMemberMutationSaving.value) return
+  isMemberCreatorOpen.value = false
+  editingMember.value = null
+  memberEditConflictMessage.value = ''
+}
+
 async function createMemberFromList(payload = {}) {
   // 头像文件不进入 JSON 命令；会员归属门店和组织继续由后端当前会话强制决定。
   const { avatarFile: _avatarFile, ...serializablePayload } = payload && typeof payload === 'object'
     ? payload
     : {}
   return requestAction('create-member', serializablePayload)
+}
+
+async function submitMemberMutation(payload = {}) {
+  if (!editingMember.value) return createMemberFromList(payload)
+  const { avatarFile: _avatarFile, profileMode: _profileMode, ...serializablePayload } = payload && typeof payload === 'object'
+    ? payload
+    : {}
+  return requestAction('update-member', {
+    memberId: editingMember.value.memberId,
+    ...serializablePayload,
+    commandContexts: memberCommandContexts(editingMember.value.memberId)
+  })
 }
 
 async function selectMemberCreatorServicePerson({ selectedRecord = null } = {}) {
@@ -238,6 +258,17 @@ async function handleMemberCreated({ member = null, payload = {} } = {}) {
     ...initialQueryPayload(queryCapability.value),
     ...(keyword ? { keyword } : {})
   }, true)
+}
+
+async function handleMemberMutationSaved({ member = null, payload = {} } = {}) {
+  if (editingMember.value) {
+    const memberId = editingMember.value.memberId
+    closeMemberMutation()
+    await requestAction('open-member-editor', { memberId })
+    await queryMembers({}, false)
+    return
+  }
+  await handleMemberCreated({ member, payload })
 }
 
 async function saveMemberQuerySettings(settings, options = {}) {
@@ -400,8 +431,9 @@ async function openMemberDetail(record) {
 }
 
 function resultData(response) {
-  if (response?.data && typeof response.data === 'object') return response.data
-  if (response?.result?.data && typeof response.result.data === 'object') return response.result.data
+  const envelope = unwrapUnifiedQueryEnvelope(response)
+  if (envelope?.data && typeof envelope.data === 'object') return envelope.data
+  if (envelope?.result?.data && typeof envelope.result.data === 'object') return envelope.result.data
   return {}
 }
 
@@ -440,7 +472,11 @@ async function openMemberEditor(record) {
   const memberId = memberRecordId(record)
   const response = await requestAction('open-member-editor', { memberId })
   if (!unifiedQueryActionSucceeded(response)) return response
-  const member = resultData(response).member
+  const data = resultData(response)
+  if (data.creatorSchema && typeof data.creatorSchema === 'object') {
+    creatorSchema.value = data.creatorSchema
+  }
+  const member = data.member
   if (member && member.memberId) {
     memberEditConflictMessage.value = ''
     editingMember.value = { ...member }
@@ -599,40 +635,28 @@ async function openBatchAction() {
     <TablePagination :total="total" :page="page" :page-size="pageSize" @change="changeMemberPage" />
 
     <Teleport to="body">
-      <div v-if="isMemberCreatorOpen" class="member-mutation-modal" role="dialog" aria-modal="true" aria-label="新增会员">
-        <div class="member-mutation-modal__backdrop" />
+      <div v-if="isMemberCreatorOpen || editingMember" class="member-mutation-modal" role="dialog" aria-modal="true" :aria-label="editingMember ? '编辑会员' : '新增会员'">
+        <div class="member-mutation-modal__backdrop" @click="closeMemberMutation" />
         <section class="member-mutation-modal__card member-mutation-modal__card--creator">
-          <header><h2>新增会员</h2></header>
+          <header><h2>{{ editingMember ? '编辑会员' : '新增会员' }}</h2><button type="button" class="button button--text" :disabled="isMemberMutationSaving" @click="closeMemberMutation">关闭</button></header>
           <MemberCreatorPanel
             initial-profile-mode="full"
             lock-profile-mode
             cancel-label="取消"
             submit-label="保存"
+            :mode="editingMember ? 'edit' : 'create'"
+            :initial-member="editingMember"
             :allow-select-existing="false"
             :current-store-name="state.storeName || ''"
             :profile-fields="creatorSchema.profileFields || creatorSchema.fields || []"
             :member-levels="creatorSchema.memberLevels || creatorSchema.levels || []"
             :member-tags="creatorSchema.memberTags || creatorSchema.tags || []"
-            :on-submit="createMemberFromList"
+            :on-submit="submitMemberMutation"
             :on-select-service-person="selectMemberCreatorServicePerson"
-            @cancel="closeMemberCreator"
-            @created="handleMemberCreated"
+            @cancel="closeMemberMutation"
+            @created="handleMemberMutationSaved"
           />
         </section>
-      </div>
-      <div v-if="editingMember" class="member-mutation-modal" role="dialog" aria-modal="true" aria-label="编辑会员">
-        <div class="member-mutation-modal__backdrop" @click="!isMemberMutationSaving && (editingMember = null)" />
-        <form class="member-mutation-modal__card" @submit.prevent="saveMemberEdit">
-          <header><h2>编辑会员</h2><button type="button" class="button button--text" :disabled="isMemberMutationSaving" @click="editingMember = null">关闭</button></header>
-          <p v-if="memberEditConflictMessage" class="member-mutation-modal__conflict" role="status">{{ memberEditConflictMessage }}</p>
-          <label>会员姓名<input v-model.trim="editingMember.name" required maxlength="64"></label>
-          <label>手机号<input :value="editingMember.phone" disabled></label>
-          <label>性别<select v-model.number="editingMember.sex"><option :value="0">未填写</option><option :value="1">男</option><option :value="2">女</option></select></label>
-          <label>生日<input v-model="editingMember.birthday" type="date"></label>
-          <label>详细地址<input v-model.trim="editingMember.address" maxlength="255"></label>
-          <label>备注<textarea v-model.trim="editingMember.note" rows="3" maxlength="500" /></label>
-          <footer><button type="button" class="button button--secondary" :disabled="isMemberMutationSaving" @click="editingMember = null">取消</button><button type="submit" class="button button--primary" :disabled="isMemberMutationSaving">{{ isMemberMutationSaving ? '保存中…' : '保存' }}</button></footer>
-        </form>
       </div>
       <div v-if="deletingMember" class="member-mutation-modal" role="dialog" aria-modal="true" aria-label="注销会员">
         <div class="member-mutation-modal__backdrop" @click="!isMemberMutationSaving && (deletingMember = null)" />

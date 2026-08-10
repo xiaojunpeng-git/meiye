@@ -334,7 +334,10 @@ final class CashierV3MemberModule
                         $scope['data_scope']
                     );
                     return [
-                        'data' => ['member' => self::editableMember($member)],
+                        'data' => [
+                            'member' => self::editableMember($member),
+                            'creatorSchema' => self::memberCreatorSchema(),
+                        ],
                         'versions' => [['kind' => 'member', 'id' => (string)$memberId, 'version' => $version]],
                     ];
                 });
@@ -1160,12 +1163,17 @@ final class CashierV3MemberModule
 
         $now = time();
         $memberNo = self::nextMemberNumber();
-        $profileFields = is_array($payload['profileFields'] ?? null) ? $payload['profileFields'] : [];
+        $profileFields = self::normalizeProfileFields(
+            is_array($payload['profileFields'] ?? null) ? $payload['profileFields'] : []
+        );
         $userServices = app()->make(\app\services\user\UserServices::class);
-        $extendInfo = [];
+        $extendInfo = '';
         if ($profileFields) {
             try {
-                $extendInfo = $userServices->handelExtendInfo($profileFields);
+                $extendInfo = self::encodeMemberExtendInfo(
+                    $userServices->handelExtendInfo($profileFields),
+                    $profileFields
+                );
             } catch (\Throwable $e) {
                 throw self::validation('profileFields', '会员档案信息校验失败，请检查后重试。');
             }
@@ -1299,12 +1307,47 @@ final class CashierV3MemberModule
             'addres' => trim((string)($payload['address'] ?? $payload['addres'] ?? ($member['addres'] ?? ''))),
             'mark' => trim((string)($payload['note'] ?? $payload['mark'] ?? ($member['mark'] ?? ''))),
         ];
-        if ((int)Db::name('user')->where('uid', (int)$member['uid'])->update($updates) !== 1) {
+        // 编辑与新增共用完整档案契约：档案字段、身份证、等级和标签都从同一
+        // 个命令一次保存，避免编辑窗体显示了字段却只落基础资料。
+        $profile = self::validateProfileSelections($payload, $operatorScope);
+        $profileFields = self::normalizeProfileFields(
+            is_array($payload['profileFields'] ?? null) ? $payload['profileFields'] : [],
+            $member
+        );
+        $userServices = app()->make(\app\services\user\UserServices::class);
+        try {
+            $updates['card_id'] = trim((string)($payload['idCard'] ?? $payload['card_id'] ?? ($member['card_id'] ?? '')));
+            $updates['extend_info'] = self::encodeMemberExtendInfo(
+                $userServices->handelExtendInfo($profileFields),
+                $profileFields,
+                $member
+            );
+        } catch (\Throwable $e) {
+            throw self::validation('profileFields', '会员档案信息校验失败，请检查后重试。');
+        }
+        // ThinkPHP returns 0 when the submitted values equal the current row;
+        // that is still a successful edit and must not surface as a false error.
+        $updated = Db::name('user')->where('uid', (int)$member['uid'])->update($updates);
+        if ($updated === false) {
             throw new CashierV3CommandException(
                 CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
                 '会员资料保存失败，本次操作已取消。',
                 CashierV3ResultCode::STATUS_FAILED
             );
+        }
+        try {
+            /** @var \app\services\user\level\UserLevelServices $levelServices */
+            $levelServices = app()->make(\app\services\user\level\UserLevelServices::class);
+            if (!$levelServices->setUserLevel((int)$member['uid'], (int)$profile['level_id'])) {
+                throw new \RuntimeException('setUserLevel returned false');
+            }
+            /** @var \app\services\user\label\UserLabelRelationServices $labelServices */
+            $labelServices = app()->make(\app\services\user\label\UserLabelRelationServices::class);
+            if (!$labelServices->setUserLable([(int)$member['uid']], $profile['tag_ids'], 0, 0, true)) {
+                throw new \RuntimeException('setUserLable returned false');
+            }
+        } catch (\Throwable $e) {
+            throw self::validation('memberProfile', '会员等级或标签保存失败，请重试。');
         }
         $current = Db::name('user')->where('uid', (int)$member['uid'])->lock(true)->find();
         self::recordMemberMutationEvent(
@@ -1315,7 +1358,7 @@ final class CashierV3MemberModule
             $dataScope,
             $idempotencyKey,
             [
-                'changed_fields' => ['name', 'sex', 'birthday', 'address', 'note'],
+                'changed_fields' => ['name', 'sex', 'birthday', 'address', 'note', 'idCard', 'profileFields', 'memberLevelId', 'memberTagIds'],
                 'source' => 'cashier_v3',
             ],
             $eventRecorder,
@@ -1396,16 +1439,132 @@ final class CashierV3MemberModule
 
     private static function editableMember(array $member): array
     {
+        $uid = (int)($member['uid'] ?? 0);
+        $rawExtendInfo = $member['extend_info'] ?? [];
+        $extendRows = is_array($rawExtendInfo) ? $rawExtendInfo : (json_decode((string)$rawExtendInfo, true) ?: []);
+        $stored = [];
+        foreach ((array)$extendRows as $row) {
+            if (!is_array($row)) continue;
+            $key = trim((string)($row['param'] ?? $row['key'] ?? $row['info'] ?? ''));
+            if ($key !== '') $stored[$key] = $row['value'] ?? '';
+        }
+        $profileFields = [];
+        foreach (self::memberCreatorSchema()['profileFields'] as $field) {
+            $key = trim((string)($field['param'] ?? $field['key'] ?? $field['info'] ?? ''));
+            if ($key !== '') $profileFields[$key] = $stored[$key] ?? $stored[(string)($field['info'] ?? '')] ?? '';
+        }
+        $tagIds = $uid > 0
+            ? array_map('intval', (array)Db::name('user_label_relation')->where('uid', $uid)->where('type', 0)->where('relation_id', 0)->column('label_id'))
+            : [];
+        $exclusive = $uid > 0
+            ? Db::name(self::EXCLUSIVE_SERVICE_TABLE)->where('member_id', $uid)->where('status', 1)->find()
+            : null;
         return [
             'id' => (string)($member['uid'] ?? ''),
             'memberId' => (int)($member['uid'] ?? 0),
             'name' => trim((string)($member['real_name'] ?? '')) ?: trim((string)($member['nickname'] ?? '')),
             'phone' => (string)($member['phone'] ?? ''),
+            'idCard' => (string)($member['card_id'] ?? ''),
             'sex' => (int)($member['sex'] ?? 0),
             'birthday' => (int)($member['birthday'] ?? 0) > 0 ? date('Y-m-d', (int)$member['birthday']) : '',
             'address' => (string)($member['addres'] ?? ''),
             'note' => (string)($member['mark'] ?? ''),
+            'memberLevelId' => (int)($member['level'] ?? 0),
+            'memberTagIds' => array_values(array_unique($tagIds)),
+            'profileFields' => $profileFields,
+            'exclusiveServicePersonId' => (int)($exclusive['staff_id'] ?? 0),
+            'exclusiveServiceStaffRecord' => $exclusive ?: null,
         ];
+    }
+
+    /**
+     * The legacy extend-info writer accepts only field `param` keys.  Older
+     * callers and saved drafts may still use a field id, key or label, so
+     * normalize those aliases before persisting.  Missing fields retain their
+     * current value for a basic-profile-only edit; explicit empty values clear
+     * the corresponding field.
+     *
+     * @param array<string,mixed> $submitted
+     * @param array<string,mixed> $member
+     * @return array<string,mixed>
+     */
+    private static function normalizeProfileFields(array $submitted, array $member = []): array
+    {
+        $storedRows = $member['extend_info'] ?? [];
+        $storedRows = is_array($storedRows) ? $storedRows : (json_decode((string)$storedRows, true) ?: []);
+        $stored = [];
+        foreach ((array)$storedRows as $row) {
+            if (!is_array($row)) continue;
+            $key = trim((string)($row['param'] ?? $row['key'] ?? $row['info'] ?? ''));
+            if ($key !== '') $stored[$key] = $row['value'] ?? '';
+        }
+
+        $normalized = [];
+        foreach (self::memberCreatorSchema()['profileFields'] as $fieldIndex => $field) {
+            $param = trim((string)($field['param'] ?? $field['key'] ?? $field['info'] ?? ''));
+            if ($param === '') continue;
+            $aliases = array_values(array_unique(array_filter([
+                $param,
+                $field['fieldParam'] ?? null,
+                $field['fieldKey'] ?? null,
+                $field['field_key'] ?? null,
+                $field['key'] ?? null,
+                $field['id'] ?? null,
+                $field['info'] ?? null,
+                // The original cashier profile panel used this positional key
+                // for legacy custom fields that have neither param nor id.
+                // Accept it during the rollout, then persist by param/info.
+                sprintf('profile-field-%d', $fieldIndex),
+            ], static function ($value): bool {
+                return $value !== null && trim((string)$value) !== '';
+            })));
+            $hasSubmittedValue = false;
+            foreach ($aliases as $alias) {
+                if (!array_key_exists((string)$alias, $submitted)) continue;
+                $normalized[$param] = $submitted[(string)$alias];
+                $hasSubmittedValue = true;
+                break;
+            }
+            if (!$hasSubmittedValue) {
+                $normalized[$param] = $stored[$param] ?? $stored[(string)($field['info'] ?? '')] ?? '';
+            }
+        }
+        return $normalized;
+    }
+
+    /**
+     * The legacy schema stores extension data in a LONGTEXT JSON column. Query
+     * builder updates do not reliably coerce nested PHP arrays for that column,
+     * so the V3 command serializes the complete canonical payload explicitly.
+     * Values outside the editable schema are retained during an edit.
+     *
+     * @param array<int,array<string,mixed>> $configured
+     * @param array<string,mixed> $submitted
+     * @param array<string,mixed> $member
+     */
+    private static function encodeMemberExtendInfo(array $configured, array $submitted, array $member = []): string
+    {
+        $storedRows = $member['extend_info'] ?? [];
+        $storedRows = is_array($storedRows) ? $storedRows : (json_decode((string)$storedRows, true) ?: []);
+        $storedValues = [];
+        foreach ((array)$storedRows as $storedRow) {
+            if (!is_array($storedRow)) continue;
+            $key = trim((string)($storedRow['param'] ?? $storedRow['key'] ?? $storedRow['info'] ?? ''));
+            if ($key !== '') $storedValues[$key] = $storedRow['value'] ?? '';
+        }
+        foreach ($configured as &$field) {
+            if (!is_array($field)) continue;
+            $key = trim((string)($field['param'] ?? $field['key'] ?? $field['info'] ?? ''));
+            if ($key !== '' && !array_key_exists($key, $submitted) && array_key_exists($key, $storedValues)) {
+                $field['value'] = $storedValues[$key];
+            }
+        }
+        unset($field);
+        $encoded = json_encode($configured, JSON_UNESCAPED_UNICODE);
+        if (!is_string($encoded)) {
+            throw new \RuntimeException('member_extend_info_encode_failed');
+        }
+        return $encoded;
     }
 
     private static function recordMemberMutationEvent(

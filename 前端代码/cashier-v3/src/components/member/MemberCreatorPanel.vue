@@ -63,6 +63,14 @@ const props = defineProps({
   allowSelectExisting: {
     type: Boolean,
     default: true
+  },
+  mode: {
+    type: String,
+    default: 'create'
+  },
+  initialMember: {
+    type: Object,
+    default: null
   }
 })
 
@@ -140,9 +148,17 @@ const servicePersonName = computed(() => firstText(servicePerson.value, [
   'nickname'
 ]) || '')
 const canSubmit = computed(() => !isSubmitting.value && !isOutcomeUncertain.value)
+const isEditing = computed(() => props.mode === 'edit')
+const phoneReadonly = computed(() => isEditing.value)
 watch(
   () => props.initialKeyword,
   (value) => applyInitialKeyword(value),
+  { immediate: true }
+)
+
+watch(
+  () => props.initialMember,
+  (member) => initializeMember(member),
   { immediate: true }
 )
 
@@ -168,6 +184,32 @@ function applyInitialKeyword(value) {
     return
   }
   if (!form.name) form.name = keyword
+}
+
+function initializeMember(member) {
+  if (!member || typeof member !== 'object') return
+  form.name = firstText(member, ['name', 'realName', 'memberName'])
+  form.phone = firstText(member, ['phone', 'mobile'])
+  form.sex = firstValue(member, ['sex', 'gender']) ?? ''
+  form.birthday = firstText(member, ['birthday', 'birthDate'])
+  form.idCard = firstText(member, ['idCard', 'id_card', 'cardId'])
+  form.address = firstText(member, ['address', 'fullAddress'])
+  form.memberLevelId = firstValue(member, ['memberLevelId', 'levelId', 'member_level_id']) ?? ''
+  const tags = firstValue(member, ['memberTagIds', 'tagIds', 'labelIds', 'member_tag_ids'])
+  form.memberTagIds = Array.isArray(tags) ? [...tags] : []
+  form.note = firstText(member, ['note', 'remark', 'memo'])
+  const service = firstValue(member, ['exclusiveServiceStaffRecord', 'exclusiveServiceStaff', 'exclusiveStaff'])
+  if (service && typeof service === 'object') servicePerson.value = service
+  const values = firstValue(member, ['profileFields', 'customFields', 'customFieldValues', 'custom_field_values'])
+  if (Array.isArray(values)) {
+    customValues.value = Object.fromEntries(values.map((field, index) => [
+      String(firstValue(field, ['key', 'fieldKey', 'field_key', 'id']) || `profile-field-${index}`),
+      cloneFieldValue(firstValue(field, ['value', 'displayValue', 'content']))
+    ]))
+  } else if (values && typeof values === 'object') {
+    customValues.value = { ...values }
+  }
+  clearSubmitState()
 }
 
 function firstValue(source, keys) {
@@ -217,7 +259,10 @@ function truthy(value) {
 }
 
 function normalizeProfileField(field, index) {
-  const key = String(firstValue(field, ['fieldKey', 'field_key', 'key', 'id', 'param']) || `profile-field-${index}`)
+  // UserServices::handelExtendInfo persists extension values by `param`, or
+  // by `info` for older custom fields without a param. Prefer those durable
+  // storage keys over admin configuration ids so an edit can read back.
+  const key = String(firstValue(field, ['param', 'fieldParam', 'builtinKey', 'fieldKey', 'field_key', 'key', 'info', 'id']) || `profile-field-${index}`)
   const format = String(firstValue(field, ['format', 'fieldType', 'field_type', 'type', 'controlType']) || 'text').toLowerCase()
   const label = firstText(field, ['info', 'label', 'name', 'title', 'fieldName']) || '档案字段'
   return {
@@ -610,7 +655,7 @@ function cancelCreation() {
 </script>
 
 <template>
-  <section ref="panelRef" class="member-creator" aria-label="新增会员资料">
+  <section ref="panelRef" class="member-creator" :aria-label="isEditing ? '编辑会员资料' : '新增会员资料'">
     <div class="member-creator__body">
       <template v-if="!fullProfile">
         <div class="member-creator__tabs-bar member-creator__tabs-bar--quick">
@@ -645,7 +690,7 @@ function cancelCreation() {
               maxlength="11"
               placeholder="请输入手机号"
               :aria-invalid="Boolean(fieldErrors.phone)"
-              :disabled="isSubmitting || isOutcomeUncertain"
+              :disabled="phoneReadonly || isSubmitting || isOutcomeUncertain"
               @input="clearFieldError('phone')"
             >
             <small v-if="fieldErrors.phone" class="member-creator__field-error">{{ fieldErrors.phone }}</small>
@@ -697,7 +742,7 @@ function cancelCreation() {
 
               <label class="member-creator__field" data-error-key="phone">
                 <span class="member-creator__label">手机号 <b>*</b></span>
-                <input v-model="form.phone" type="tel" autocomplete="tel" inputmode="numeric" maxlength="11" placeholder="请输入手机号" :aria-invalid="Boolean(fieldErrors.phone)" :disabled="isSubmitting || isOutcomeUncertain" @input="clearFieldError('phone')">
+                <input v-model="form.phone" type="tel" autocomplete="tel" inputmode="numeric" maxlength="11" placeholder="请输入手机号" :aria-invalid="Boolean(fieldErrors.phone)" :disabled="phoneReadonly || isSubmitting || isOutcomeUncertain" @input="clearFieldError('phone')">
                 <small v-if="fieldErrors.phone" class="member-creator__field-error">{{ fieldErrors.phone }}</small>
               </label>
 
@@ -868,7 +913,7 @@ function cancelCreation() {
     <footer class="member-creator__footer">
       <button type="button" class="member-creator__button" :disabled="isSubmitting || isOutcomeUncertain" @click="cancelCreation">{{ cancelLabel }}</button>
       <button type="button" class="member-creator__button member-creator__button--primary" :disabled="!canSubmit" @click="submitMember">
-        {{ isSubmitting ? '正在保存…' : submitLabel }}
+        {{ isSubmitting ? '正在保存…' : (isEditing ? '保存修改' : submitLabel) }}
       </button>
     </footer>
   </section>
