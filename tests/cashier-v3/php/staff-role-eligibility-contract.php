@@ -63,6 +63,7 @@ $check(
 );
 $check(
     strpos($completeWrite, "'position_ids_present'") !== false
+        && strpos($completeWrite, '$boundPositionIds') !== false
         && strpos($completeWrite, '$legacyProjection') !== false
         && strpos($completeWrite, '$legacyOrderStatus') !== false
         && strpos($completeWrite, '$staffPayload[\'account\'] = $account') !== false,

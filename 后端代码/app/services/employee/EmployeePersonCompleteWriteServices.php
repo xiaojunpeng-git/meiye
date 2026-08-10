@@ -57,20 +57,28 @@ class EmployeePersonCompleteWriteServices extends BaseServices
         $positionIds = $positionIdsPresent
             ? $this->normalizeIntIds($input['position_ids'])
             : [];
-        // 旧任职尚未迁入岗位策略时，历史管理端会回传空数组。若直接把它
-        // 当作“清空岗位”，投影会撤销既有收银/岗位权限；显式选择岗位后仍按
-        // 正常写命令处理，只有这类遗留空回显才保留现状。
-        if ($positionIdsPresent && $positionIds === [] && $staffIdHint > 0) {
-            $legacyProjection = Db::name('system_store_staff')
-                ->where('id', $staffIdHint)->where('is_del', 0)
-                ->field('roles,position,is_cashier')
-                ->find();
-            if ($legacyProjection && (
-                trim((string)($legacyProjection['roles'] ?? '')) !== ''
-                || (int)($legacyProjection['position'] ?? 0) > 0
-                || (int)($legacyProjection['is_cashier'] ?? 0) === 1
-            )) {
+        // 编辑页会提交完整表单。岗位集合未变化时不能重投影旧任职权限；
+        // 对尚未迁入岗位策略的历史任职，空回显同样表示“未修改”。
+        if ($positionIdsPresent && $staffIdHint > 0) {
+            $boundPositionIds = Db::name('staff_job_position')
+                ->where('staff_id', $staffIdHint)->where('is_del', 0)
+                ->where('status', 1)->where('end_time', 0)
+                ->column('position_id');
+            $boundPositionIds = $this->normalizeIntIds($boundPositionIds ?: []);
+            if ($positionIds === $boundPositionIds) {
                 $positionIdsPresent = false;
+            } elseif ($positionIds === []) {
+                $legacyProjection = Db::name('system_store_staff')
+                    ->where('id', $staffIdHint)->where('is_del', 0)
+                    ->field('roles,position,is_cashier')
+                    ->find();
+                if ($legacyProjection && (
+                    trim((string)($legacyProjection['roles'] ?? '')) !== ''
+                    || (int)($legacyProjection['position'] ?? 0) > 0
+                    || (int)($legacyProjection['is_cashier'] ?? 0) === 1
+                )) {
+                    $positionIdsPresent = false;
+                }
             }
         }
         $orgIds = $this->normalizeIntIds($input['org_ids'] ?? []);
