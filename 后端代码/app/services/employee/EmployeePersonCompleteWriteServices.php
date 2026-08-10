@@ -53,7 +53,26 @@ class EmployeePersonCompleteWriteServices extends BaseServices
         }
         $scopeKey = 'employee:' . ($employeeIdHint > 0 ? $employeeIdHint : 'new') . ':' . $source;
 
-        $positionIds = $this->normalizeIntIds($input['position_ids'] ?? []);
+        $positionIdsPresent = array_key_exists('position_ids', $input);
+        $positionIds = $positionIdsPresent
+            ? $this->normalizeIntIds($input['position_ids'])
+            : [];
+        // 旧任职尚未迁入岗位策略时，历史管理端会回传空数组。若直接把它
+        // 当作“清空岗位”，投影会撤销既有收银/岗位权限；显式选择岗位后仍按
+        // 正常写命令处理，只有这类遗留空回显才保留现状。
+        if ($positionIdsPresent && $positionIds === [] && $staffIdHint > 0) {
+            $legacyProjection = Db::name('system_store_staff')
+                ->where('id', $staffIdHint)->where('is_del', 0)
+                ->field('roles,position,is_cashier')
+                ->find();
+            if ($legacyProjection && (
+                trim((string)($legacyProjection['roles'] ?? '')) !== ''
+                || (int)($legacyProjection['position'] ?? 0) > 0
+                || (int)($legacyProjection['is_cashier'] ?? 0) === 1
+            )) {
+                $positionIdsPresent = false;
+            }
+        }
         $orgIds = $this->normalizeIntIds($input['org_ids'] ?? []);
         $storeIds = $this->normalizeIntIds($input['store_ids'] ?? []);
         $scopeMode = trim((string)($input['scope_mode'] ?? EmployeeDataScopeServices::MODE_PERSONAL));
@@ -77,6 +96,7 @@ class EmployeePersonCompleteWriteServices extends BaseServices
             'avatar' => $avatar,
             'account' => $account,
             'pwd_set' => $pwd !== '' ? 1 : 0,
+            'position_ids_present' => $positionIdsPresent ? 1 : 0,
             'position_ids' => $positionIds,
             'scope_mode' => $scopeMode,
             'org_ids' => $orgIds,
@@ -133,6 +153,7 @@ class EmployeePersonCompleteWriteServices extends BaseServices
                 $account,
                 $pwd,
                 $positionIds,
+                $positionIdsPresent,
                 $scopeMode,
                 $orgIds,
                 $storeIds,
@@ -159,6 +180,7 @@ class EmployeePersonCompleteWriteServices extends BaseServices
                         $account,
                         $pwd,
                         $positionIds,
+                        $positionIdsPresent,
                         $scopeMode,
                         $orgIds,
                         $storeIds,
@@ -293,7 +315,11 @@ class EmployeePersonCompleteWriteServices extends BaseServices
             'staff_name' => (string)($emp['name'] ?? ''),
             'phone' => (string)($emp['phone'] ?? ''),
             'avatar' => (string)($emp['avatar'] ?? ''),
-            'account' => $acct ? (string)$acct['account'] : '',
+            // 尚未迁入统一账号表的历史任职继续回显原账号，避免编辑页把它
+            // 误判为空并在后续保存时覆盖。
+            'account' => $acct
+                ? (string)$acct['account']
+                : (string)($staff['account'] ?? ''),
             'position_ids' => $positionIds,
             'jobs' => $jobs,
             'scope' => $scope,
@@ -353,6 +379,7 @@ class EmployeePersonCompleteWriteServices extends BaseServices
         string $account,
         string $pwd,
         array $positionIds,
+        bool $positionIdsPresent,
         string $scopeMode,
         array $orgIds,
         array $storeIds,
@@ -500,8 +527,10 @@ class EmployeePersonCompleteWriteServices extends BaseServices
                 'is_customer' => (int)($input['is_customer'] ?? 0) === 1 ? 1 : 0,
                 'salary_status' => array_key_exists('salary_status', $input)
                     ? ((int)$input['salary_status'] === 1 ? 1 : 0) : 1,
-                'account' => $account,
             ];
+            if ($account !== '') {
+                $staffPayload['account'] = $account;
+            }
             foreach ([
                 'work_member_id', 'notify', 'is_customer', 'customer_url', 'is_reservable',
                 'employee_number', 'id_card', 'age', 'join_area', 'join_date', 'birthday_date',
@@ -568,22 +597,33 @@ class EmployeePersonCompleteWriteServices extends BaseServices
         }
 
         // 5) 岗位
-        $this->maybeFail('jobs', $input);
         /** @var StaffJobPositionServices $jobSvc */
         $jobSvc = app()->make(StaffJobPositionServices::class);
-        $jobsRet = $jobSvc->bindJobsInTx(
-            $employeeId,
-            $staffId,
-            $storeId > 0 ? $storeId : 0,
-            $positionIds,
-            $adminInfo,
-            $auditMeta,
-            $source,
-            false
-        );
-        if ($staffId > 0) {
-            $jobSvc->projectStaffRoles($staffId);
-            $jobSvc->syncManagerFlagFromJobs($staffId);
+        if ($positionIdsPresent) {
+            $this->maybeFail('jobs', $input);
+            $jobsRet = $jobSvc->bindJobsInTx(
+                $employeeId,
+                $staffId,
+                $storeId > 0 ? $storeId : 0,
+                $positionIds,
+                $adminInfo,
+                $auditMeta,
+                $source,
+                false
+            );
+            if ($staffId > 0) {
+                $jobSvc->projectStaffRoles($staffId);
+                $jobSvc->syncManagerFlagFromJobs($staffId);
+            }
+        } else {
+            $jobsRet = [
+                'staff_id' => $staffId,
+                'store_id' => $storeId > 0 ? $storeId : 0,
+                'position_ids' => [],
+                'jobs' => $staffId > 0
+                    ? $jobSvc->listActiveJobs($staffId)
+                    : $jobSvc->listActiveJobs(0, $employeeId),
+            ];
         }
 
         // 6) 数据权限

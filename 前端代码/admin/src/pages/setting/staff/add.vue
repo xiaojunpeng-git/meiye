@@ -120,6 +120,7 @@
                     filterable
                     transfer
                     placeholder="请选择岗位"
+                    @on-change="onPositionIdsChange"
                   >
                     <Option
                       v-for="item in jobOptions"
@@ -658,6 +659,7 @@ export default {
       mobileAuthLoaded: true,
       /** 新建人员自动默认值只应用一次，员工手工关闭后不再被岗位选择覆盖。 */
       mobileEnabledTouched: false,
+      positionIdsTouched: false,
       originalInternalAccount: '',
       /** 详情加载序号：连续切换人员时丢弃过期响应，防止串人 */
       loadSeq: 0,
@@ -980,6 +982,7 @@ export default {
       this.employmentTypeLoaded = employmentTypeLoaded;
       this.mobileAuthLoaded = mobileAuthLoaded;
       this.mobileEnabledTouched = false;
+      this.positionIdsTouched = false;
       this.originalInternalAccount = String((data && data.account) || base.account || '');
       DATE_FIELDS.forEach((field) => {
         this.formInline[field] = this.normalizeDate(this.formInline[field]);
@@ -1154,6 +1157,9 @@ export default {
       this.mobileEnabledTouched = true;
       this.formInline.mobile_enabled = enabled ? 1 : 0;
     },
+    onPositionIdsChange() {
+      this.positionIdsTouched = true;
+    },
     syncNewStaffMobileDefault() {
       if (Number(this.editId) > 0 || this.mobileEnabledTouched) return;
       this.formInline.mobile_enabled = this.hasMobileCapablePosition ? 1 : 0;
@@ -1194,9 +1200,14 @@ export default {
         // 账号未改：后端保留现有统一账号，完整资料保存不触发账号/密码写入。
         delete payload.account;
       }
-      payload.position_ids = Array.isArray(this.formInline.position_ids)
-        ? this.formInline.position_ids.map((x) => Number(x)).filter((n) => n > 0)
-        : [];
+      if (Number(this.editId) > 0 && !this.positionIdsTouched) {
+        // 岗位未在本次编辑中触碰时，不让不完整的历史回显撤销既有岗位投影。
+        delete payload.position_ids;
+      } else {
+        payload.position_ids = Array.isArray(this.formInline.position_ids)
+          ? this.formInline.position_ids.map((x) => Number(x)).filter((n) => n > 0)
+          : [];
+      }
       payload.scope_mode = ['personal', 'store', 'org'].includes(this.formInline.scope_mode)
         ? this.formInline.scope_mode
         : 'personal';
