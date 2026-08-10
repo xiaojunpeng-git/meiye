@@ -49,5 +49,53 @@ $ok = ($record['orderStatus'] ?? '') === '数据异常'
     && ($detail['amountSummary']['dataStatus'] ?? '') === 'integrity_failed'
     && ($detail['paymentDetails'] ?? ['unexpected']) === [];
 
-echo $ok ? "ORDER_CENTER_SETTLEMENT_INTEGRITY=PASS\n" : "ORDER_CENTER_SETTLEMENT_INTEGRITY=FAIL\n";
-exit($ok ? 0 : 1);
+$upgradeSnapshot = $snapshot;
+$upgradeSnapshot['header']['sale_amount_cents'] = 10000;
+$upgradeSnapshot['batch']['receivable_amount_cents'] = 2000;
+$upgradeSnapshot['batch']['collected_amount_cents'] = 2000;
+$upgradeSnapshot['batch']['cash_performance_amount_cents'] = 2000;
+$upgradeSnapshot['request'] = ['debt_amount_cents' => 0, 'balance_deduction_amount_cents' => 0];
+$upgradeSnapshot['lines'][0]['sale_amount_cents'] = 10000;
+$upgradeSnapshot['upgradeSettlement'] = [
+    'operation_id' => 'COP-integrity-upgrade-1',
+    'operation_type' => 'card_upgrade',
+    'settlement_status' => 'settled',
+    'entitlement_credit_cents' => 8000,
+    'cash_delta_cents' => 2000,
+];
+$upgradeRecord = $method->invoke($service, $upgradeSnapshot, false);
+$upgradeDetail = $method->invoke($service, $upgradeSnapshot, true);
+$upgradeOk = ($upgradeRecord['orderStatus'] ?? '') === '正常'
+    && ($upgradeRecord['receivableAmount'] ?? null) === 100.0
+    && ($upgradeRecord['actualReceivedAmount'] ?? null) === 20.0
+    && ($upgradeRecord['dataIntegrityStatus'] ?? '') === 'valid'
+    && ($upgradeDetail['amountSummary']['entitlementCreditAmount'] ?? null) === 80.0
+    && ($upgradeDetail['amountSummary']['payableAmount'] ?? null) === 100.0;
+
+$zeroCreditDebtUpgrade = $snapshot;
+$zeroCreditDebtUpgrade['header']['sale_amount_cents'] = 18000;
+$zeroCreditDebtUpgrade['header']['original_amount_cents'] = 18000;
+$zeroCreditDebtUpgrade['batch']['receivable_amount_cents'] = 10000;
+$zeroCreditDebtUpgrade['batch']['collected_amount_cents'] = 10000;
+$zeroCreditDebtUpgrade['batch']['cash_performance_amount_cents'] = 10000;
+$zeroCreditDebtUpgrade['request'] = ['debt_amount_cents' => 8000, 'balance_deduction_amount_cents' => 0];
+$zeroCreditDebtUpgrade['lines'][0]['original_amount_cents'] = 18000;
+$zeroCreditDebtUpgrade['lines'][0]['sale_amount_cents'] = 18000;
+$zeroCreditDebtUpgrade['upgradeSettlement'] = [
+    'operation_id' => 'COP-integrity-upgrade-zero-credit',
+    'operation_type' => 'card_upgrade',
+    'settlement_status' => 'settled',
+    'entitlement_credit_cents' => 0,
+    'cash_delta_cents' => 18000,
+];
+$zeroCreditDebtRecord = $method->invoke($service, $zeroCreditDebtUpgrade, false);
+$zeroCreditDebtDetail = $method->invoke($service, $zeroCreditDebtUpgrade, true);
+$zeroCreditDebtOk = ($zeroCreditDebtRecord['orderStatus'] ?? '') === '正常'
+    && ($zeroCreditDebtRecord['paymentStatus'] ?? '') === '部分支付（含欠款）'
+    && ($zeroCreditDebtRecord['receivableAmount'] ?? null) === 180.0
+    && ($zeroCreditDebtRecord['debtAmount'] ?? null) === 80.0
+    && ($zeroCreditDebtRecord['actualReceivedAmount'] ?? null) === 100.0
+    && ($zeroCreditDebtDetail['amountSummary']['payableAmount'] ?? null) === 180.0;
+
+echo ($ok && $upgradeOk && $zeroCreditDebtOk) ? "ORDER_CENTER_SETTLEMENT_INTEGRITY=PASS\n" : "ORDER_CENTER_SETTLEMENT_INTEGRITY=FAIL\n";
+exit($ok && $upgradeOk && $zeroCreditDebtOk ? 0 : 1);

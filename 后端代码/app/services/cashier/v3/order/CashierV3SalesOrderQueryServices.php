@@ -1137,6 +1137,22 @@ final class CashierV3SalesOrderQueryServices
         if (count($tenantIds) !== 1 || $tenantIds[0] === '') {
             throw new \RuntimeException('sales_order_authority_tenant_scope_invalid');
         }
+        // A card/project upgrade is a formal sale of the target item.  Its
+        // old entitlement value is neither a discount nor cash collection;
+        // the immutable settlement record is the only authority for that
+        // third settlement component.
+        $upgradeSettlementsByOrder = [];
+        foreach (Db::name('cashier_v3_card_operation_settlement')
+            ->where('tenant_id', $tenantIds[0])
+            ->whereIn('sales_order_id', $orderIds)
+            ->field('sales_order_id,operation_id,operation_type,entitlement_credit_cents,cash_delta_cents,settlement_status')
+            ->order('id', 'asc')->select()->toArray() as $settlement) {
+            $orderId = (string)$settlement['sales_order_id'];
+            if (isset($upgradeSettlementsByOrder[$orderId])) {
+                throw new \RuntimeException('sales_order_authority_upgrade_settlement_conflict');
+            }
+            $upgradeSettlementsByOrder[$orderId] = $settlement;
+        }
         $salespeopleByOrderAndLine = [];
         $craftsmenByOrderAndLine = [];
         foreach ($this->effectivePersonnelFacts($orderIds, $tenantIds[0]) as $fact) {
@@ -1173,6 +1189,7 @@ final class CashierV3SalesOrderQueryServices
                 'salespeopleByLine' => $salespeopleByOrderAndLine[$orderId] ?? [],
                 'craftsmenByLine' => $craftsmenByOrderAndLine[$orderId] ?? [],
                 'lifecycleOperations' => $operationsByOrder[$orderId] ?? [],
+                'upgradeSettlement' => $upgradeSettlementsByOrder[$orderId] ?? [],
             ];
         }
         return $snapshots;
@@ -1183,15 +1200,33 @@ final class CashierV3SalesOrderQueryServices
         $header = $snapshot['header'];
         $batch = $snapshot['batch'];
         $request = $snapshot['request'];
-        $receivableCents = (int)$batch['receivable_amount_cents'];
+        // The payment batch is the amount still due after a card/project
+        // upgrade's entitlement credit and after any debt allocation.  The
+        // sales order itself remains a formal purchase of the target item, so
+        // its receivable amount is the settled sales amount.
+        $cashReceivableCents = (int)$batch['receivable_amount_cents'];
+        $receivableCents = (int)$header['sale_amount_cents'];
         $cashPerformanceCents = (int)$batch['cash_performance_amount_cents'];
         $debtCents = (int)($request['debt_amount_cents'] ?? 0);
         $balanceCents = (int)($request['balance_deduction_amount_cents'] ?? 0);
-        $settlementEquationValid = (int)$header['sale_amount_cents'] === $receivableCents
+        $upgradeSettlement = is_array($snapshot['upgradeSettlement'] ?? null)
+            ? $snapshot['upgradeSettlement'] : [];
+        $entitlementCreditCents = (int)($upgradeSettlement['entitlement_credit_cents'] ?? 0);
+        $hasUpgradeSettlement = $upgradeSettlement !== [];
+        $upgradeSettlementValid = !$hasUpgradeSettlement || (
+            (string)($upgradeSettlement['settlement_status'] ?? '') === 'settled'
+            && in_array((string)($upgradeSettlement['operation_type'] ?? ''), ['card_upgrade', 'project_upgrade'], true)
+            && $entitlementCreditCents >= 0
+            && (int)($upgradeSettlement['cash_delta_cents'] ?? -1) === $receivableCents - $entitlementCreditCents
+        );
+        $settlementEquationValid = $upgradeSettlementValid
+            && $entitlementCreditCents >= 0
             && (int)$batch['collected_amount_cents'] === $cashPerformanceCents
             && $debtCents >= 0
             && $balanceCents >= 0
-            && $cashPerformanceCents + $debtCents + $balanceCents === $receivableCents;
+            && $cashReceivableCents >= 0
+            && $cashPerformanceCents + $debtCents + $balanceCents + $entitlementCreditCents === $receivableCents
+            && $cashReceivableCents + $debtCents + $balanceCents + $entitlementCreditCents === $receivableCents;
         if (!$settlementEquationValid) {
             // A bad historical snapshot must stay visible for reconciliation,
             // but cannot make unrelated business records disappear or expose
@@ -1286,6 +1321,7 @@ final class CashierV3SalesOrderQueryServices
             'originalAmount' => $settlementEquationValid ? $this->moneyFromCents((int)$header['original_amount_cents']) : null,
             'priceChangeDiscountAmount' => null, 'couponDiscountAmount' => null,
             'otherDiscountAmount' => $settlementEquationValid ? $this->moneyFromCents((int)$header['discount_amount_cents']) : null,
+            'entitlementCreditAmount' => $settlementEquationValid ? $this->moneyFromCents($entitlementCreditCents) : null,
             'payableAmount' => $settlementEquationValid ? $this->moneyFromCents($receivableCents) : null,
             'debtAmount' => $settlementEquationValid ? $this->moneyFromCents($debtCents) : null,
             'actualReceivedAmount' => $settlementEquationValid ? $this->moneyFromCents($cashPerformanceCents) : null,

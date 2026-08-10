@@ -1233,6 +1233,11 @@ final class CashierV3OrderCenterRecordQueryServices
     private function readV3CardOperations(array $criteria, CashierV3OperatorScope $scope, bool $countOnly): array
     {
         $query = Db::name('cashier_v3_card_operation')->alias('c')
+            // A checkout request id is an idempotency/processing reference, not
+            // the customer-facing sales order number. Upgrade settlement is the
+            // authoritative bridge from a card operation to its sales order.
+            ->leftJoin('cashier_v3_card_operation_settlement s', 's.tenant_id = c.tenant_id AND s.operation_id = c.operation_id AND s.settlement_status = \'settled\'')
+            ->leftJoin('cashier_v3_sales_order o', 'o.tenant_id = s.tenant_id AND o.order_id = s.sales_order_id')
             ->where('c.tenant_id', $scope->tenantId())
             ->whereIn('c.operation_type', self::CARD_OPERATION_TYPES);
         if ($criteria['operationType'] !== '') {
@@ -1254,7 +1259,7 @@ final class CashierV3OrderCenterRecordQueryServices
             'c.origin_member_id', 'c.member_id_before', 'c.member_id_after',
             'c.store_name_snapshot', 'c.member_name_after_snapshot', 'c.card_name_snapshot',
             'c.card_no_snapshot', 'c.target_catalog_name_snapshot', 'c.source_remaining_value_cents',
-            'c.settlement_delta_cents', 'c.checkout_request_id', 'c.reason_snapshot',
+            'c.settlement_delta_cents', 'o.order_no AS sales_order_no', 'c.reason_snapshot',
             'c.operator_name_snapshot', 'c.business_date', 'c.occurred_at', 'c.settled_at',
         ]))->order('c.occurred_at', 'desc')->order('c.id', 'desc')->limit($limit)->select()->toArray();
         return [array_map(function (array $row): array {
@@ -1270,7 +1275,7 @@ final class CashierV3OrderCenterRecordQueryServices
                 'sourceCard' => $row['card_name_snapshot'],
                 'targetContent' => $row['target_catalog_name_snapshot'],
                 'amount' => $this->centsToMoney((int)$row['settlement_delta_cents']),
-                'salesOrderNo' => $row['checkout_request_id'],
+                'salesOrderNo' => $row['sales_order_no'],
                 'storeName' => $row['store_name_snapshot'],
                 'operatorName' => $row['operator_name_snapshot'],
                 'reason' => $row['reason_snapshot'],

@@ -102,6 +102,12 @@ recordOk('订单中心投影合同统一升级至退款事实 v3',
     strpos($orderCenterSource, "CONTRACT_VERSION = 'cashier-v3.order-center.v3'") !== false
     && strpos($salesOrderQuerySource, "CONTRACT_VERSION = 'cashier-v3.order-center.v3'") !== false
     && strpos($orderProjectionSource, "ORDER_CONTRACT_VERSION = 'cashier-v3.order-center.v3'") !== false);
+recordOk('卡升级和项目升级的关联销售订单号只从结算权威记录关联，不把结账请求号当业务单号',
+    strpos($orderCenterSource, "->leftJoin('cashier_v3_card_operation_settlement s'") !== false
+    && strpos($orderCenterSource, "o.tenant_id = s.tenant_id AND o.order_id = s.sales_order_id") !== false
+    && strpos($orderCenterSource, "'o.order_no AS sales_order_no'") !== false
+    && strpos($orderCenterSource, "'salesOrderNo' => \$row['sales_order_no']") !== false
+    && strpos($orderCenterSource, "'salesOrderNo' => \$row['checkout_request_id']") === false);
 
 $beforeBlocked = count($calls);
 $blocked = $service->queryRecords([
