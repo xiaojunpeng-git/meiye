@@ -205,6 +205,18 @@
   gap: 8px;
 }
 
+.unified-query-toolbar--quick-controls-inline {
+  grid-template-rows: auto;
+}
+
+.unified-query-toolbar--quick-controls-inline .unified-query-toolbar__primary {
+  align-items: center;
+}
+
+.unified-query-toolbar--quick-controls-inline .unified-query-toolbar__top-fields {
+  padding-top: 0;
+}
+
 .unified-query-toolbar__primary {
   flex: 1 1 auto;
   min-width: 0;

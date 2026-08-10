@@ -46,10 +46,6 @@ const props = defineProps({
     type: String,
     default: ''
   },
-  canStartService: {
-    type: Boolean,
-    default: false
-  },
   onReload: {
     type: Function,
     default: null
@@ -66,9 +62,6 @@ const activeActionKey = ref('')
 const actionError = ref('')
 const actionErrorCode = ref('')
 const detailDialogRef = ref(null)
-const pendingReasonAction = ref(null)
-const actionReason = ref('')
-const reasonValidationMessage = ref('')
 
 const reservation = computed(() => (props.detail && typeof props.detail === 'object' ? props.detail : {}))
 const summary = computed(() => (props.summary && typeof props.summary === 'object' ? props.summary : {}))
@@ -141,35 +134,29 @@ const relatedGroups = computed(() => {
 })
 
 const availableActions = computed(() => {
-  const source = readList(reservation.value, ['actions', 'availableActions', 'actionList'])
-  const seen = new Set()
-
-  return source
-    .map(normalizeAction)
-    .filter(Boolean)
-    .filter((action) => {
-      if (seen.has(action.key)) return false
-      seen.add(action.key)
-      return true
-    })
-    .map((action) => {
-      if (action.key !== 'start-service' || props.canStartService) return action
-      return {
-        ...action,
-        disabled: true,
-        disabledReason: '预约数据尚未同步，请先重新加载完整详情。'
+  const phase = reservationPhase.value.phase
+  if (phase === 'unstarted') {
+    return [
+      { key: 'edit-reservation', label: '编辑', raw: { code: 'edit-reservation' }, disabled: false, disabledReason: '' },
+      { key: 'cancel-reservation', label: '删除', raw: { code: 'cancel-reservation' }, disabled: false, disabledReason: '', danger: true },
+      {
+        key: 'start-service',
+        label: '开始服务',
+        raw: { code: 'start-service' },
+        disabled: false,
+        disabledReason: '',
+        primary: true
       }
-    })
+    ]
+  }
+  if (phase === 'serving') {
+    return [{ key: 'end-service', label: '结束服务', raw: { code: 'end-service' }, disabled: false, disabledReason: '', primary: true }]
+  }
+  return []
 })
 
-const startServiceVersionBlocked = computed(() => (
-  isDetailReady.value
-  && !props.canStartService
-  && availableActions.value.some((action) => action.key === 'start-service')
-))
-const reservationStatus = computed(() => (
-  isDetailReady.value ? firstValue(reservation.value, ['statusLabel', 'statusName', 'status']) || '—' : ''
-))
+const reservationPhase = computed(() => normalizeReservationStatus(firstValue(reservation.value, ['status', 'statusLabel', 'statusName'])))
+const reservationStatus = computed(() => (isDetailReady.value ? reservationPhase.value.label : ''))
 const reservationNo = computed(() => (
   firstValue(reservation.value, ['reservationNo', 'appointmentNo', 'no', 'code'])
   || firstValue(summary.value, ['reservationNo', 'appointmentNo', 'no', 'code'])
@@ -334,64 +321,18 @@ function timelineMeta(item) {
   ].filter(Boolean).join(' · ')
 }
 
-const actionMap = {
-  '确认预约': { key: 'confirm-reservation', label: '确认预约' },
-  'confirm-reservation': { key: 'confirm-reservation', label: '确认预约' },
-  confirm_reservation: { key: 'confirm-reservation', label: '确认预约' },
-  confirmreservation: { key: 'confirm-reservation', label: '确认预约' },
-  confirm: { key: 'confirm-reservation', label: '确认预约' },
-  编辑: { key: 'edit-reservation', label: '编辑' },
-  'edit-reservation': { key: 'edit-reservation', label: '编辑' },
-  edit_reservation: { key: 'edit-reservation', label: '编辑' },
-  editreservation: { key: 'edit-reservation', label: '编辑' },
-  edit: { key: 'edit-reservation', label: '编辑' },
-  开始服务: { key: 'start-service', label: '开始服务' },
-  'start-service': { key: 'start-service', label: '开始服务' },
-  start_service: { key: 'start-service', label: '开始服务' },
-  startservice: { key: 'start-service', label: '开始服务' },
-  结束服务: { key: 'end-service', label: '结束服务' },
-  'end-service': { key: 'end-service', label: '结束服务' },
-  end_service: { key: 'end-service', label: '结束服务' },
-  endservice: { key: 'end-service', label: '结束服务' },
-  去结账: { key: 'go-checkout', label: '去结账' },
-  'go-checkout': { key: 'go-checkout', label: '去结账' },
-  go_checkout: { key: 'go-checkout', label: '去结账' },
-  gocheckout: { key: 'go-checkout', label: '去结账' },
-  checkout: { key: 'go-checkout', label: '去结账' },
-  取消: { key: 'cancel-reservation', label: '取消' },
-  'cancel-reservation': { key: 'cancel-reservation', label: '取消' },
-  cancel_reservation: { key: 'cancel-reservation', label: '取消' },
-  cancelreservation: { key: 'cancel-reservation', label: '取消' },
-  cancel: { key: 'cancel-reservation', label: '取消' },
-  拒绝: { key: 'reject-reservation', label: '拒绝' },
-  'reject-reservation': { key: 'reject-reservation', label: '拒绝' },
-  reject_reservation: { key: 'reject-reservation', label: '拒绝' },
-  rejectreservation: { key: 'reject-reservation', label: '拒绝' },
-  reject: { key: 'reject-reservation', label: '拒绝' },
-  爽约: { key: 'mark-no-show', label: '爽约' },
-  'mark-no-show': { key: 'mark-no-show', label: '爽约' },
-  mark_no_show: { key: 'mark-no-show', label: '爽约' },
-  marknoshow: { key: 'mark-no-show', label: '爽约' },
-  'no-show': { key: 'mark-no-show', label: '爽约' },
-  no_show: { key: 'mark-no-show', label: '爽约' },
-  noshow: { key: 'mark-no-show', label: '爽约' }
-}
-
-function normalizeAction(raw) {
-  if (!raw) return null
-  const source = typeof raw === 'string' ? { code: raw } : raw
-  const rawCode = String(firstValue(source, ['code', 'actionCode', 'action', 'key', 'label', 'name'])).trim()
-  const normalizedCode = rawCode.toLowerCase().replace(/\s+/g, '').replace(/_/g, '-')
-  const mapped = actionMap[rawCode] || actionMap[normalizedCode] || actionMap[normalizedCode.replace(/-/g, '')]
-  if (!mapped) return null
-
-  return {
-    ...source,
-    ...mapped,
-    raw: source,
-    disabled: source.disabled === true || source.enabled === false,
-    disabledReason: firstValue(source, ['disabledReason', 'reason', 'hint'])
-  }
+function normalizeReservationStatus(rawStatus) {
+  const raw = String(rawStatus || '').trim()
+  const normalized = raw.toUpperCase().replace(/[\s-]/g, '_')
+  if (
+    ['未开始'].includes(raw)
+    || ['UNSTARTED', 'SCHEDULED'].includes(normalized)
+  ) return { label: '未开始', phase: 'unstarted' }
+  if (
+    ['服务中', '进行中'].includes(raw)
+    || ['SERVING', 'IN_SERVICE', 'SERVICE_IN_PROGRESS'].includes(normalized)
+  ) return { label: '服务中', phase: 'serving' }
+  return { label: '已结束', phase: 'ended' }
 }
 
 function actionResultBlock(result) {
@@ -440,31 +381,7 @@ function operatorActionError(result) {
   return actionResultMessage(result) || '操作未完成，请重新加载预约详情后再试。'
 }
 
-function actionNeedsConfirmation(action) {
-  return ['cancel-reservation', 'reject-reservation', 'mark-no-show'].includes(action?.key)
-}
-
-function actionRequiresReason(action) {
-  return ['reject-reservation', 'mark-no-show'].includes(action?.key)
-}
-
-function beginReasonAction(action) {
-  if (!actionNeedsConfirmation(action) || action.disabled || activeActionKey.value) return
-  pendingReasonAction.value = action
-  actionReason.value = ''
-  reasonValidationMessage.value = ''
-  actionError.value = ''
-  actionErrorCode.value = ''
-}
-
-function cancelReasonAction() {
-  if (activeActionKey.value) return
-  pendingReasonAction.value = null
-  actionReason.value = ''
-  reasonValidationMessage.value = ''
-}
-
-async function executeAction(action, reason = '') {
+async function executeAction(action) {
   if (!props.onAction || action.disabled || activeActionKey.value) return
 
   activeActionKey.value = action.key
@@ -475,8 +392,7 @@ async function executeAction(action, reason = '') {
       action: action.raw,
       actionCode: action.key,
       reservation: reservation.value,
-      reservationId: firstValue(reservation.value, ['id', 'reservationId', 'appointmentId']),
-      reason: reason.trim() || null
+      reservationId: firstValue(reservation.value, ['id', 'reservationId', 'appointmentId'])
     })
 
     if (isActionResultError(result)) {
@@ -506,31 +422,11 @@ async function requestReload() {
 }
 
 async function triggerAction(action) {
-  if (actionNeedsConfirmation(action)) {
-    beginReasonAction(action)
-    return
-  }
   await executeAction(action)
-}
-
-async function confirmReasonAction() {
-  const action = pendingReasonAction.value
-  if (!action || activeActionKey.value) return
-  if (actionRequiresReason(action) && !actionReason.value.trim()) {
-    reasonValidationMessage.value = `${action.label}必须填写原因。`
-    return
-  }
-  reasonValidationMessage.value = ''
-  await executeAction(action, actionReason.value)
-  if (!actionError.value) cancelReasonAction()
 }
 
 function requestClose() {
   if (activeActionKey.value) return
-  if (pendingReasonAction.value) {
-    cancelReasonAction()
-    return
-  }
   emit('close')
 }
 
@@ -737,38 +633,16 @@ useModalFocusTrap({
           <span>{{ actionError }}</span>
           <small v-if="actionErrorCode">错误编号：{{ actionErrorCode }}</small>
         </div>
-        <div v-else-if="startServiceVersionBlocked" class="reservation-detail__action-error reservation-detail__action-error--recoverable" role="status">
-          <span>预约数据尚未同步，开始服务暂不可用。</span>
-          <button type="button" :disabled="activeActionKey !== ''" @click="requestReload">重新加载详情</button>
-        </div>
-        <section v-if="pendingReasonAction" class="reservation-detail__reason-panel" aria-label="预约状态变更确认">
-          <div>
-            <strong>确认{{ pendingReasonAction.label }}</strong>
-            <span>
-              {{ actionRequiresReason(pendingReasonAction)
-                ? `请填写${pendingReasonAction.label}原因；保存后将释放预约占用。`
-                : '取消后将释放预约占用，请确认本次操作。' }}
-            </span>
-          </div>
-          <label>
-            <span>原因{{ actionRequiresReason(pendingReasonAction) ? '（必填）' : '（选填）' }}</span>
-            <textarea v-model="actionReason" rows="2" maxlength="200" :disabled="activeActionKey !== ''" :placeholder="`请输入${pendingReasonAction.label}原因`" />
-          </label>
-          <p v-if="reasonValidationMessage" role="alert">{{ reasonValidationMessage }}</p>
-          <div class="reservation-detail__reason-actions">
-            <button type="button" class="reservation-detail__button reservation-detail__button--secondary" :disabled="activeActionKey !== ''" @click="cancelReasonAction">返回</button>
-            <button type="button" class="reservation-detail__button reservation-detail__button--danger" :disabled="activeActionKey !== ''" @click="confirmReasonAction">
-              {{ activeActionKey ? '处理中…' : `确认${pendingReasonAction.label}` }}
-            </button>
-          </div>
-        </section>
-        <div v-else class="reservation-detail__actions">
+        <div class="reservation-detail__actions">
           <button type="button" class="reservation-detail__button reservation-detail__button--secondary" :disabled="activeActionKey !== ''" @click="requestClose">关闭</button>
           <template v-for="action in availableActions" :key="action.key">
             <button
               type="button"
               class="reservation-detail__button"
-              :class="{ 'reservation-detail__button--primary': ['confirm-reservation', 'start-service', 'go-checkout'].includes(action.key) }"
+              :class="{
+                'reservation-detail__button--primary': action.primary,
+                'reservation-detail__button--danger': action.danger
+              }"
               :disabled="!onAction || action.disabled || activeActionKey !== ''"
               :title="action.disabledReason || ''"
               @click="triggerAction(action)"

@@ -31,6 +31,9 @@ class CashierV3CommandContextServices
             }
         }
 
+        if (!$rawContexts && !empty($contract['allows_empty_contexts'])) {
+            return [];
+        }
         if (!$rawContexts) {
             throw CashierV3CommandException::invalidContext(
                 '本次操作缺少有效的既有资源版本，请刷新当前工作台后重试。',

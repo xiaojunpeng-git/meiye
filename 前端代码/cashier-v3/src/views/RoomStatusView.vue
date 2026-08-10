@@ -1,10 +1,12 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { createCashierV3CommandId, formatMoney, requestCashierV3Action, useCashierV3State } from '@/services/cashierV3Bridge'
 import RoomDetailOverlay from '@/components/room/RoomDetailOverlay.vue'
 import UnassignedRoomListOverlay from '@/components/room/UnassignedRoomListOverlay.vue'
 
 const state = useCashierV3State()
+const router = useRouter()
 const roomState = computed(() => state.room || {})
 const categories = computed(() => Array.isArray(roomState.value.categories) ? roomState.value.categories : [])
 const pendingAssignments = computed(() => Array.isArray(roomState.value.pendingAssignments) ? roomState.value.pendingAssignments : [])
@@ -102,6 +104,16 @@ function nextReservationText(room = {}) {
 
 function roomWarningText(room = {}) {
   return room.conflictMessage || room.warningMessage || room.nextReservation?.warningMessage || ''
+}
+
+function isReservationRoomService(room = {}) {
+  return room.serviceSource === 'reservation'
+}
+
+function reservationServiceTitle(room = {}) {
+  const count = Math.max(1, Number(room.activeReservationServices?.length) || 1)
+  const member = room.memberName || '会员'
+  return count > 1 ? `${member}等 ${count} 笔预约服务中` : `${member}服务中`
 }
 
 async function requestAction(action, payload = {}) {
@@ -446,6 +458,17 @@ function closeRoomDetail() {
   activeRoomDetailId.value = null
 }
 
+async function openReservationFromRoom(service = {}) {
+  const reservationId = service.reservationId || service.id
+  if (!reservationId) return
+  closeRoomDetail()
+  await router.push({ name: 'cashier-v3-reservation' })
+  await nextTick()
+  window.dispatchEvent(new CustomEvent('cashier-v3:open-reservation-detail', {
+    detail: { reservationId }
+  }))
+}
+
 function resetRoomLocalContext() {
   closeRoomDetail()
   isUnassignedRoomListOpen.value = false
@@ -592,13 +615,22 @@ onBeforeUnmount(() => {
             </div>
 
             <div v-else-if="normalizedRoomStatus(room) === '服务中'" class="room-card__body">
-              <strong>{{ room.memberName || '会员服务中' }}</strong>
-              <span>{{ room.serviceDuration }}</span>
-              <span>主要手艺人：{{ room.primaryCraftsman || '待分配' }}</span>
-              <span>待核销项目 {{ room.pendingWriteoffCount || 0 }} 项 · 本次新增 {{ formatMoney(room.newConsumptionAmount) }}</span>
+              <template v-if="isReservationRoomService(room)">
+                <strong>{{ reservationServiceTitle(room) }}</strong>
+                <span>{{ room.reservationNo || '预约服务' }} · {{ room.projectSummary || '未填写项目' }}</span>
+                <span>开始服务：{{ room.serviceStartedAt || '—' }}</span>
+                <span v-if="Number(room.activeReservationServices?.length) > 1">当前房间有 {{ room.activeReservationServices.length }} 笔预约服务中</span>
+              </template>
+              <template v-else>
+                <strong>{{ room.memberName || '会员服务中' }}</strong>
+                <span>{{ room.serviceDuration }}</span>
+                <span>主要手艺人：{{ room.primaryCraftsman || '待分配' }}</span>
+                <span>待核销项目 {{ room.pendingWriteoffCount || 0 }} 项 · 本次新增 {{ formatMoney(room.newConsumptionAmount) }}</span>
+              </template>
               <div class="room-card__footer-actions">
                 <button type="button" class="button button--text" @click="openRoom(room)">查看详情</button>
                 <button
+                  v-if="!isReservationRoomService(room)"
                   type="button"
                   class="button button--secondary"
                   :disabled="isRoomActionPending('prepare-room-service-completion', room)"
@@ -645,6 +677,7 @@ onBeforeUnmount(() => {
       :is-loading="isDetailLoading"
       :on-action="handleRoomDetailAction"
       @close="closeRoomDetail"
+      @open-reservation="openReservationFromRoom"
     />
 
     <UnassignedRoomListOverlay

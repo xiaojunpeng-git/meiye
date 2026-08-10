@@ -29,12 +29,14 @@ final class CashierV3ReservationPartitionProvider implements CashierV3RootPartit
             ->join('cashier_v3_service_order s', 's.id=r.service_order_id')
             ->where('r.tenant_id', $tenantId)->where('r.store_id', $storeId)
             ->where('s.tenant_id', $tenantId)->where('s.business_store_id', $storeId)
-            ->whereIn('r.status', ['PENDING_CONFIRMATION', 'CONFIRMED'])
+            ->where('r.status', 'UNSTARTED')
             ->where('r.appointment_start_at', '>', 0)->where('r.appointment_start_at', '<=', $now)
             ->where('s.status', 'OPEN')->where('s.service_started_at', 0)
             ->count();
         $rows = Db::name('cashier_v3_reservation')
             ->where('tenant_id', $tenantId)->where('store_id', $storeId)
+            // 旧待确认／已确认预约不参与本轮生命周期，也不出现在新工作台。
+            ->whereIn('status', ['UNSTARTED', 'IN_SERVICE', 'COMPLETED'])
             ->order('appointment_start_at desc,id desc')->limit(100)->select();
         $rows = is_object($rows) && method_exists($rows, 'toArray') ? $rows->toArray() : (array)$rows;
         $ids = [];
@@ -69,7 +71,7 @@ final class CashierV3ReservationPartitionProvider implements CashierV3RootPartit
         $artisanNames = $artisanIds ? Db::name('system_store_staff')->whereIn('id', array_values($artisanIds))->column('staff_name', 'id') : [];
         $versions = [];
         $records = [];
-        $counts = ['today' => 0, 'pending' => 0, 'serving' => 0, 'dueNotArrived' => $dueNotArrivedCount];
+        $counts = ['today' => 0, 'unstarted' => 0, 'serving' => 0, 'ended' => 0, 'dueNotArrived' => $dueNotArrivedCount];
         $today = self::businessNow()->format('Y-m-d');
         foreach ($rows as $row) {
             $id = (int)($row['id'] ?? 0);
@@ -88,12 +90,13 @@ final class CashierV3ReservationPartitionProvider implements CashierV3RootPartit
             $serviceOrder = (array)($serviceOrdersById[$serviceOrderId] ?? []);
             $dueNotArrived = $dateTime > 0
                 && $dateTime <= $now
-                && in_array($statusCode, ['PENDING_CONFIRMATION', 'CONFIRMED'], true)
+                && $statusCode === 'UNSTARTED'
                 && (string)($serviceOrder['status'] ?? '') === 'OPEN'
                 && (int)($serviceOrder['service_started_at'] ?? 0) <= 0;
             if ($dateTime > 0 && self::businessDateFromTimestamp($dateTime) === $today) $counts['today']++;
-            if ($status === '待确认') $counts['pending']++;
+            if ($status === '未开始') $counts['unstarted']++;
             if ($status === '服务中') $counts['serving']++;
+            if ($status === '已结束') $counts['ended']++;
             // reservation is a domain-owned source version. It is not a
             // central synthetic row: the V3 reservation header is the only
             // authority, so list/detail actions receive the header revision.
@@ -119,6 +122,13 @@ final class CashierV3ReservationPartitionProvider implements CashierV3RootPartit
                 'primaryAction' => ['action' => 'open-reservation-detail', 'label' => '查看详情', 'enabled' => true],
             ];
         }
+        $quickFilter = self::quickFilter($hints['quickFilter'] ?? $hints['quick_filter'] ?? '');
+        $records = array_values(array_filter($records, static function (array $record) use ($quickFilter, $today): bool {
+            if ($quickFilter === 'all') return true;
+            if ($quickFilter === 'today') return strpos((string)($record['appointmentTime'] ?? ''), $today . ' ') === 0;
+            if ($quickFilter === 'unstarted') return (string)($record['status'] ?? '') === '未开始';
+            return (string)($record['status'] ?? '') === '服务中';
+        }));
         $calendarDate = self::calendarDate($hints['calendarDate'] ?? $hints['calendar_date'] ?? '');
         $calendar = self::calendar($tenantId, $storeId, $calendarDate, $rows, $lines, $artisanNames);
         return ['ready' => true, 'payload' => [
@@ -236,6 +246,12 @@ final class CashierV3ReservationPartitionProvider implements CashierV3RootPartit
         return $date && $date->format('Y-m-d') === $value ? $value : self::businessNow()->format('Y-m-d');
     }
 
+    private static function quickFilter($value): string
+    {
+        $value = trim((string)$value);
+        return in_array($value, ['today', 'unstarted', 'serving', 'all'], true) ? $value : 'today';
+    }
+
     private static function timeOfDay(string $value): string
     {
         $value = trim($value);
@@ -271,6 +287,6 @@ final class CashierV3ReservationPartitionProvider implements CashierV3RootPartit
 
     private static function statusLabel(string $status): string
     {
-        return ['PENDING_CONFIRMATION' => '待确认', 'CONFIRMED' => '已确认', 'IN_SERVICE' => '服务中', 'PENDING_CHECKOUT' => '待结账', 'CANCELLED' => '已取消', 'NO_SHOW' => '爽约'][$status] ?? '待确认';
+        return ['UNSTARTED' => '未开始', 'IN_SERVICE' => '服务中', 'COMPLETED' => '已结束', 'CANCELLED' => '已取消'][$status] ?? '状态未知';
     }
 }

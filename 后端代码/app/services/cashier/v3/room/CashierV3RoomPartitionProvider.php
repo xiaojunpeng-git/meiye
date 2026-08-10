@@ -19,9 +19,16 @@ final class CashierV3RoomPartitionProvider implements CashierV3RootPartitionProv
     /** @var CashierV3HangPreparationProvider */
     private $rooms;
 
-    public function __construct(?CashierV3HangPreparationProvider $rooms = null)
+    /** @var CashierV3RoomReservationReadServices */
+    private $reservations;
+
+    public function __construct(
+        ?CashierV3HangPreparationProvider $rooms = null,
+        ?CashierV3RoomReservationReadServices $reservations = null
+    )
     {
         $this->rooms = $rooms ?: new CashierV3LegacyRoomReadProvider();
+        $this->reservations = $reservations ?: new CashierV3RoomReservationReadServices();
     }
 
     public function partitionKey(): string
@@ -36,7 +43,7 @@ final class CashierV3RoomPartitionProvider implements CashierV3RootPartitionProv
         CashierV3DataScopeContext $dataScope,
         array $hints = []
     ): array {
-        $candidates = $this->rooms->roomCandidates($operatorScope, $dataScope);
+        $candidates = $this->candidates($operatorScope, $dataScope);
         $categories = $this->categories($candidates, $operatorScope->storeId());
         return [
             'ready' => true,
@@ -79,7 +86,7 @@ final class CashierV3RoomPartitionProvider implements CashierV3RootPartitionProv
         $expectedVersion = $this->optionalPositiveInt(
             $payload['roomVersion'] ?? $payload['revision'] ?? null
         );
-        foreach ($this->rooms->roomCandidates($operatorScope, $dataScope) as $room) {
+        foreach ($this->candidates($operatorScope, $dataScope) as $room) {
             if ((int)($room['roomId'] ?? 0) !== $roomId) {
                 continue;
             }
@@ -107,6 +114,46 @@ final class CashierV3RoomPartitionProvider implements CashierV3RootPartitionProv
             CashierV3ResultCode::STATUS_FAILED,
             ['kind' => 'room', 'id' => $roomId]
         );
+    }
+
+    private function candidates(CashierV3OperatorScope $operatorScope, CashierV3DataScopeContext $dataScope): array
+    {
+        $activeReservations = $this->reservations->activeByRoom($operatorScope, $dataScope);
+        $result = [];
+        foreach ($this->rooms->roomCandidates($operatorScope, $dataScope) as $room) {
+            $roomId = (int)($room['roomId'] ?? $room['id'] ?? 0);
+            $reservationServices = $roomId > 0 ? (array)($activeReservations[$roomId] ?? []) : [];
+            if (!$reservationServices) {
+                $result[] = $room;
+                continue;
+            }
+            $primary = $reservationServices[0];
+            $guardService = trim((string)($room['ownerKind'] ?? '')) !== '' ? [[
+                'sourceType' => 'room_guard',
+                'memberName' => (string)($room['memberName'] ?? ''),
+                'serviceStartedAt' => (string)($room['serviceStartedAt'] ?? ''),
+            ]] : [];
+            $room['activeReservationServices'] = $reservationServices;
+            $room['activeServiceSources'] = array_merge($reservationServices, $guardService);
+            $room['activeServiceCount'] = count($room['activeServiceSources']);
+            $room['serviceSource'] = 'reservation';
+            $room['memberName'] = (string)($primary['memberName'] ?? '');
+            $room['memberPhone'] = (string)($primary['memberPhone'] ?? '');
+            $room['reservationId'] = (int)($primary['reservationId'] ?? 0);
+            $room['reservationNo'] = (string)($primary['reservationNo'] ?? '');
+            $room['reservationVersion'] = (int)($primary['reservationVersion'] ?? 0);
+            $room['projectSummary'] = (string)($primary['projectSummary'] ?? '');
+            $room['serviceStartedAt'] = (string)($primary['serviceStartedAt'] ?? '');
+            $room['serviceDuration'] = (string)($primary['serviceStartedAt'] ?? '');
+            $room['primaryCraftsman'] = '预约服务';
+            $room['pendingWriteoffCount'] = 0;
+            $room['newConsumptionAmount'] = 0;
+            $room['status'] = '服务中';
+            $room['statusLabel'] = '服务中';
+            $room['roomStatus'] = '服务中';
+            $result[] = $room;
+        }
+        return $result;
     }
 
     private function categories(array $rooms, int $storeId): array

@@ -695,10 +695,9 @@ async function queryMemberSelector(query) {
 }
 
 async function selectMemberFromSelector(record) {
-  if (['card-transfer', 'customer-care', 'customer-care-record'].includes(memberSelectorContext.value)) {
-    // 转让只选择目标会员，不能调用 select-cashier-member 把当前正在
-    // 收银的会员悄悄切换成受让人。正式写入由 submit-card-operation
-    // 在同一事务内重新锁定、校验该目标会员。
+  if (['card-transfer', 'customer-care', 'customer-care-record', 'reservation'].includes(memberSelectorContext.value)) {
+    // 转让和预约都只回填选择结果。预约没有收银工作台上下文，也不需要
+    // 为选择会员发送一笔服务端写命令；正式保存时仅写预约单据本身。
     isMemberSelectorOpen.value = false
     window.dispatchEvent(new CustomEvent('cashier-v3:member-selector-selected', {
       detail: { context: memberSelectorContext.value, record }

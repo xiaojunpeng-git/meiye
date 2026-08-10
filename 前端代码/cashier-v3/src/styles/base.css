@@ -6017,6 +6017,11 @@ button:disabled {
   background: #fff;
 }
 
+/* 预约页将快捷状态、常用字段和查询动作收敛到同一行；空间不足时由主行横向滚动。 */
+.unified-query-toolbar.unified-query-toolbar--quick-controls-inline {
+  grid-template-rows: auto;
+}
+
 .unified-query-toolbar__primary,
 .unified-query-toolbar__secondary,
 .unified-query-toolbar__quick,
@@ -6801,12 +6806,17 @@ button:disabled {
   white-space: nowrap;
 }
 
-.reservation-status--pending {
-  background: #fff7e6;
-  color: #d48806 !important;
+.reservation-status--unstarted {
+  background: #edf9f2;
+  color: #208a52 !important;
 }
 
 .reservation-status--serving {
+  background: #fff7e6;
+  color: #d46b08 !important;
+}
+
+.reservation-status--ended {
   background: #eaf4ff;
   color: #1677cc !important;
 }
@@ -6961,6 +6971,39 @@ button:disabled {
 }
 
 .reservation-calendar-block:hover {
+  border-color: #1890ff;
+  background: #dceeff;
+}
+
+.reservation-calendar-block--unstarted {
+  border-color: #b7dfc4;
+  background: #edf9f2;
+  color: #208a52;
+}
+
+.reservation-calendar-block--unstarted:hover {
+  border-color: #6eb983;
+  background: #def2e5;
+}
+
+.reservation-calendar-block--serving {
+  border-color: #ffd591;
+  background: #fff7e6;
+  color: #d46b08;
+}
+
+.reservation-calendar-block--serving:hover {
+  border-color: #f5aa49;
+  background: #ffefd2;
+}
+
+.reservation-calendar-block--ended {
+  border-color: #b9d4ff;
+  background: #eaf4ff;
+  color: #1677cc;
+}
+
+.reservation-calendar-block--ended:hover {
   border-color: #1890ff;
   background: #dceeff;
 }

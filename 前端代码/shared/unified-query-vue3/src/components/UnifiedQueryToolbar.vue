@@ -28,6 +28,13 @@ const props = defineProps({
     type: Boolean,
     default: true
   },
+  // Some dense operational pages need their status shortcuts and their
+  // configured quick fields beside the primary query controls. Keep the
+  // default two-row presentation for all existing pages.
+  inlineQuickControls: {
+    type: Boolean,
+    default: false
+  },
   quickFilters: {
     type: Array,
     default: () => []
@@ -578,9 +585,75 @@ function createExport(configuration) {
 </script>
 
 <template>
-  <section class="unified-query-toolbar" aria-label="查询条件">
+  <section
+    class="unified-query-toolbar"
+    :class="{ 'unified-query-toolbar--quick-controls-inline': inlineQuickControls }"
+    aria-label="查询条件"
+  >
     <div class="unified-query-toolbar__topline">
       <div class="unified-query-toolbar__primary">
+        <div v-if="inlineQuickControls && quickFilters.length" class="unified-query-toolbar__quick">
+          <button
+            v-for="filter in quickFilters"
+            :key="filter.key"
+            type="button"
+            class="unified-query-quick-filter"
+            :aria-pressed="filter.active === true"
+            :class="{ 'unified-query-quick-filter--active': filter.active }"
+            @click="selectQuickFilter(filter)"
+          >
+            {{ filter.label }}<span v-if="filter.count !== undefined">（{{ filter.count }}）</span>
+          </button>
+        </div>
+        <div v-if="inlineQuickControls && activeQuickFields.length" class="unified-query-toolbar__top-fields" aria-label="常用查询字段">
+          <label v-for="field in activeQuickFields" :key="field.key" class="unified-query-top-field">
+            <span>{{ field.label }}</span>
+            <div class="unified-query-top-field__control">
+              <div v-if="field.quickRange === true" class="unified-query-top-field__range">
+                <input
+                  :value="quickRangeValue(field, 'min')"
+                  type="number"
+                  placeholder="最小值"
+                  aria-label="最小值"
+                  @input="setQuickRangeValue(field, 'min', $event.target.value)"
+                  @keyup.enter="submitQuery"
+                >
+                <span>至</span>
+                <input
+                  :value="quickRangeValue(field, 'max')"
+                  type="number"
+                  placeholder="最大值"
+                  aria-label="最大值"
+                  @input="setQuickRangeValue(field, 'max', $event.target.value)"
+                  @keyup.enter="submitQuery"
+                >
+              </div>
+              <button
+                v-else-if="isEntityField(field)"
+                type="button"
+                class="unified-query-top-field__entity"
+                :class="{ 'unified-query-top-field__entity--fixed': isFixedStoreField(field) }"
+                :disabled="isFixedStoreField(field)"
+                :title="isFixedStoreField(field) ? '门店端默认使用当前门店，无需选择' : ''"
+                @click="selectTopEntity(field)"
+              >
+                {{ displayTopFieldValue(field) }}
+              </button>
+              <select v-else-if="field.type === 'enum' && field.options?.length" v-model="quickFieldValues[field.key]" @change="submitQuery">
+                <option value="">全部</option>
+                <option v-for="option in field.options" :key="option.value || option" :value="option.value || option">{{ option.label || option }}</option>
+              </select>
+              <input
+                v-else
+                v-model="quickFieldValues[field.key]"
+                :type="topFieldType(field)"
+                :placeholder="topFieldPlaceholder(field)"
+                @keyup.enter="submitQuery"
+              >
+              <button v-if="(field.quickRange === true ? (quickFieldRanges[field.key]?.min || quickFieldRanges[field.key]?.max) : quickFieldValues[field.key]) && !isFixedStoreField(field)" type="button" class="unified-query-top-field__clear" :aria-label="`清空${field.label}`" @click="clearTopField(field)">×</button>
+            </div>
+          </label>
+        </div>
         <label v-if="showKeywordSearch" class="search-field">
           <span class="sr-only">综合查询</span>
           <input v-model="keyword" type="search" :placeholder="searchPlaceholder" autocomplete="off" @keyup.enter="submitQuery">
@@ -604,7 +677,7 @@ function createExport(configuration) {
       </div>
     </div>
 
-    <div v-if="quickFilters.length || activeQuickFields.length" class="unified-query-toolbar__secondary">
+    <div v-if="!inlineQuickControls && (quickFilters.length || activeQuickFields.length)" class="unified-query-toolbar__secondary">
       <div v-if="quickFilters.length" class="unified-query-toolbar__quick">
         <button
           v-for="filter in quickFilters"

@@ -27,10 +27,14 @@ reservationDetailOk('项目、服务单和操作时间线读取各自权威子�
     strpos($query, "Db::name('cashier_v3_reservation_line')") !== false
     && strpos($query, "Db::name('cashier_v3_service_order')") !== false
     && strpos($query, "Db::name('cashier_v3_reservation_operation')") !== false);
-reservationDetailOk('详情返回完整只读契约和预约业务版本',
+reservationDetailOk('详情返回完整只读契约、预约业务版本与生命周期动作',
     strpos($query, "'detailReady' => true") !== false
     && strpos($query, "'relatedRecords' => [") !== false
-    && strpos($query, "'actions' => []") !== false
+    && strpos($query, "'actions' => self::actions(\$status)") !== false
+    && strpos($query, "'edit-reservation'") !== false
+    && strpos($query, "'cancel-reservation'") !== false
+    && strpos($query, "'start-reservation-service'") !== false
+    && strpos($query, "'end-reservation-service'") !== false
     && strpos($module, "'kind' => 'reservation'") !== false);
 
 echo "RESERVATION_DETAIL_PROJECTION_CONTRACT=PASS\n";

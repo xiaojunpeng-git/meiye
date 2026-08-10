@@ -55,6 +55,16 @@ Route::group('cashierapi/v3', function () {
         // 统一命令网关：白名单 action + 幂等键 + 多对象 contexts 严格校验
         Route::post('workbenches/actions', 'Command/dispatchAction')
             ->option(['real_name' => '收银V3命令网关']);
+        Route::post('hang-drafts/delete', 'HangDraft/delete')
+            ->option(['real_name' => '挂单草稿直接删除']);
+        Route::post('hang-drafts/save', 'HangDraft/save')
+            ->option(['real_name' => '挂单草稿直接保存']);
+        Route::post('hang-drafts/resume', 'HangDraft/resume')
+            ->option(['real_name' => '挂单草稿直接提取']);
+        Route::post('cashier-drafts/clear', 'HangDraft/clearCart')
+            ->option(['real_name' => '收银草稿直接清空']);
+        Route::post('cashier-drafts/discard-checkout', 'HangDraft/discardCheckout')
+            ->option(['real_name' => '收银失败结账草稿废弃']);
         Route::post('customer-care/actions', 'CustomerCare/action')
             ->option(['real_name' => '门店PC客情工作台']);
         Route::get('unified-query/exports/:taskNo/download', 'Command/downloadUnifiedQueryExport')

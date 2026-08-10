@@ -28,6 +28,8 @@ final class CashierV3ReservationDetailQueryServices
             ->where('store_id', $storeId)
             ->find();
         if (!$reservation) return null;
+        // 旧预约数据保持原状。本期只开放新生命周期状态的预约详情和操作。
+        if (!in_array((string)($reservation['status'] ?? ''), ['UNSTARTED', 'IN_SERVICE', 'COMPLETED'], true)) return null;
 
         $lines = $this->rows(Db::name('cashier_v3_reservation_line')
             ->where('tenant_id', $tenantId)
@@ -79,6 +81,7 @@ final class CashierV3ReservationDetailQueryServices
         $actualEndAt = (int)($serviceOrder['completed_at'] ?? 0);
         $version = (int)($reservation['version'] ?? 0);
 
+        $status = (string)($reservation['status'] ?? '');
         return [
             'detailReady' => true,
             'id' => $reservationId,
@@ -86,8 +89,8 @@ final class CashierV3ReservationDetailQueryServices
             'reservationNo' => (string)($reservation['reservation_no'] ?? ''),
             'revision' => $version,
             'reservationVersion' => $version,
-            'status' => (string)($reservation['status'] ?? ''),
-            'statusLabel' => self::statusLabel((string)($reservation['status'] ?? '')),
+            'status' => $status,
+            'statusLabel' => self::statusLabel($status),
             'member' => [
                 'id' => (int)($reservation['member_id'] ?? 0),
                 'name' => (string)($reservation['member_name_snapshot'] ?? ''),
@@ -147,9 +150,7 @@ final class CashierV3ReservationDetailQueryServices
                     'occurredAt' => self::formatTime((int)($operation['occurred_at'] ?? 0)),
                 ];
             }, $operations),
-            // Detail is read-only until each state-changing reservation command
-            // has its own context policy and transactional handler.
-            'actions' => [],
+            'actions' => self::actions($status),
         ];
     }
 
@@ -192,15 +193,28 @@ final class CashierV3ReservationDetailQueryServices
     private static function statusLabel(string $status): string
     {
         return [
-            'PENDING_CONFIRMATION' => '待确认',
-            'CONFIRMED' => '已确认',
+            'UNSTARTED' => '未开始',
             'IN_SERVICE' => '服务中',
-            'PENDING_CHECKOUT' => '待结账',
-            'COMPLETED' => '已完成',
+            'COMPLETED' => '已结束',
             'CANCELLED' => '已取消',
-            'REJECTED' => '已拒绝',
-            'NO_SHOW' => '爽约',
+            'REJECTED' => '已取消',
+            'NO_SHOW' => '已取消',
         ][$status] ?? '状态未知';
+    }
+
+    private static function actions(string $status): array
+    {
+        if ($status === 'UNSTARTED') {
+            return [
+                ['action' => 'edit-reservation', 'label' => '编辑', 'enabled' => true],
+                ['action' => 'cancel-reservation', 'label' => '删除', 'enabled' => true],
+                ['action' => 'start-reservation-service', 'label' => '开始服务', 'enabled' => true],
+            ];
+        }
+        if ($status === 'IN_SERVICE') {
+            return [['action' => 'end-reservation-service', 'label' => '结束服务', 'enabled' => true]];
+        }
+        return [];
     }
 
     private static function operationLabel(string $operation): string
@@ -213,6 +227,7 @@ final class CashierV3ReservationDetailQueryServices
             'REJECT' => '拒绝预约',
             'MARK_NO_SHOW' => '标记爽约',
             'UPDATE' => '更新预约',
+            'END_SERVICE' => '结束服务',
         ][$operation] ?? '预约状态更新';
     }
 }

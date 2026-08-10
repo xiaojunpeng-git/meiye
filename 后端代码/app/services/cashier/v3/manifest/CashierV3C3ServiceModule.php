@@ -29,6 +29,9 @@ class CashierV3C3ServiceModule implements CashierV3ActionModule
     private const FEATURE_HANG = 'cashier.v3.hang';
     private const FEATURE_WRITEOFF = 'cashier.v3.writeoff';
     private const FEATURE_CASHIER = 'cashier.v3.cashier';
+    // 预约在本期不再按操作人角色/功能入口二次拦截。登录态和强制数据
+    // 范围仍由统一网关注入；这里仅取消操作级授权门禁。
+    private const POLICY_RESERVATION_OPERATION = 'policy:reservation_operation';
 
     /**
      * 页面 action => 规范写命令。桥接层按此表映射后再发送。
@@ -96,15 +99,20 @@ class CashierV3C3ServiceModule implements CashierV3ActionModule
         // ---- 预约 ----
         foreach ([
             'confirm-reservation',
-            'start-reservation-service',
-            'cancel-reservation',
             'reject-reservation',
             'mark-reservation-no-show',
-            'create-reservation',
-            'update-reservation',
-            'select-reservation-member',
         ] as $action) {
             $command[$action] = self::FEATURE_RESERVATION;
+        }
+        foreach ([
+            'create-reservation',
+            'update-reservation',
+            'cancel-reservation',
+            'start-reservation-service',
+            'end-reservation-service',
+            'select-reservation-member',
+        ] as $action) {
+            $command[$action] = self::POLICY_RESERVATION_OPERATION;
         }
         foreach ([
             'query-reservations',
@@ -112,6 +120,7 @@ class CashierV3C3ServiceModule implements CashierV3ActionModule
             'open-reservation-editor',
             'open-reservation-more-actions',
             'open-reservation-member-selector',
+            'query-reservation-project-catalog',
             'change-reservation-calendar-date',
             'recalculate-reservation-plan',
             'query-reservation-result',

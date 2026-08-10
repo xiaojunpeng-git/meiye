@@ -6,6 +6,10 @@ import { openCashierV3QueryEntitySelector } from '@/services/cashierV3Bridge'
 defineOptions({ inheritAttrs: false })
 
 const props = defineProps({
+  inlineQuickControls: {
+    type: Boolean,
+    default: false
+  },
   onSelectEntity: {
     type: Function,
     default: null
@@ -23,7 +27,11 @@ function selectEntity(payload) {
 </script>
 
 <template>
-  <SharedUnifiedQueryToolbar v-bind="$attrs" :on-select-entity="selectEntity">
+  <SharedUnifiedQueryToolbar
+    v-bind="$attrs"
+    :inline-quick-controls="inlineQuickControls"
+    :on-select-entity="selectEntity"
+  >
     <template #primary-actions>
       <slot name="primary-actions" />
     </template>

@@ -3454,6 +3454,9 @@ export async function requestCashierV3Action(action, payload = {}) {
 
   const canonicalAction = canonicalCashierV3Action(action)
   const readOnly = isReadOnlyAction(canonicalAction)
+  // 预约只是单据资料保存。它不依赖收银工作台或预约资源版本，直接按
+  // 服务端单据写入结果处理，也不应因工作台投影未同步而拒绝提交。
+  const reservationDataWrite = ['create-reservation', 'update-reservation'].includes(canonicalAction)
 
   // 结果追查：必须带 originalIdempotencyKey；禁止猜测或创建新键
   if (RESULT_QUERY_ACTIONS.has(canonicalAction)) {
@@ -3471,7 +3474,7 @@ export async function requestCashierV3Action(action, payload = {}) {
     }
   }
 
-  const resolvedContexts = readOnly
+  const resolvedContexts = readOnly || reservationDataWrite
     ? { invalid: false, contexts: [] }
     : resolveCommandContexts(canonicalAction, { ...requestBody, commandContexts })
   const contexts = resolvedContexts.contexts
@@ -3525,7 +3528,7 @@ export async function requestCashierV3Action(action, payload = {}) {
     if (!silent) emitCashierV3UiResult(invalidPreparationRequest)
     return invalidPreparationRequest
   }
-  if (!readOnly && (resolvedContexts.invalid || hasInvalidWriteContexts(contexts))) {
+  if (!readOnly && !reservationDataWrite && (resolvedContexts.invalid || hasInvalidWriteContexts(contexts))) {
     // No command has been sent yet, so a single automatic root recovery is
     // safe. This covers the narrow interval after entering the cashier where
     // the UI is visible but the root's authoritative versions are still
@@ -3563,6 +3566,9 @@ export async function requestCashierV3Action(action, payload = {}) {
   if (adapter && typeof adapter.request === 'function') {
     try {
       const result = await adapter.request(canonicalAction, requestPayload)
+      // 预约创建／编辑是独立单据保存，不接入收银工作台回执绑定、根状态
+      // 投影或结果追查。页面仅按服务端保存结果处理成功和普通失败。
+      if (reservationDataWrite) return result || {}
       // 无可信标准 V3 结果信封时，写命令视为结果未知
       if (!readOnly && !isTrustedV3Envelope(result)) {
         return emitCommandResultUnknown(resolvedIdempotencyKey, canonicalAction, silent, '损坏或不可信的响应')
@@ -3625,6 +3631,15 @@ export async function requestCashierV3Action(action, payload = {}) {
       }
       return result || {}
     } catch (error) {
+      if (reservationDataWrite) {
+        return {
+          result: {
+            status: 'failed',
+            code: 'RESERVATION_SAVE_FAILED',
+            message: error?.message || '预约保存失败，请重试。'
+          }
+        }
+      }
       if (readOnly) {
         const failed = {
           result: {

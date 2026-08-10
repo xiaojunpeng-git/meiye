@@ -468,8 +468,61 @@ class CashierV3ActionManifest
 
             // C3 | reservation
             'confirm-reservation' => $deferred($inactiveReservation),
-            'start-reservation-service' => $deferred($inactiveReservation),
-            'cancel-reservation' => $deferred($inactiveReservation),
+            'start-reservation-service' => [
+                'required_event_types' => ['reservation.service_started'],
+                'allowed_event_types' => ['reservation.service_started', 'room.occupied'],
+                'event_rules' => [
+                    'reservation.service_started' => [
+                        'min_count' => 1,
+                        'max_count' => 1,
+                        'aggregate_type' => 'reservation',
+                        'source_type' => 'start-reservation-service',
+                        'aggregate_version' => null,
+                    ],
+                    'room.occupied' => [
+                        'min_count' => 0,
+                        'max_count' => 1,
+                        'aggregate_type' => 'room',
+                        'source_type' => 'start-reservation-service',
+                        'aggregate_version' => null,
+                    ],
+                ],
+                'eventless_reason' => '',
+                'activation_blocked_until_event_contract' => false,
+                'consumers' => ['reservation.service_started' => [], 'room.occupied' => []],
+            ],
+            'end-reservation-service' => [
+                'required_event_types' => ['reservation.completed'],
+                'allowed_event_types' => ['reservation.completed'],
+                'event_rules' => [
+                    'reservation.completed' => [
+                        'min_count' => 1,
+                        'max_count' => 1,
+                        'aggregate_type' => 'reservation',
+                        'source_type' => 'end-reservation-service',
+                        'aggregate_version' => null,
+                    ],
+                ],
+                'eventless_reason' => '',
+                'activation_blocked_until_event_contract' => false,
+                'consumers' => ['reservation.completed' => []],
+            ],
+            'cancel-reservation' => [
+                'required_event_types' => ['reservation.cancelled'],
+                'allowed_event_types' => ['reservation.cancelled'],
+                'event_rules' => [
+                    'reservation.cancelled' => [
+                        'min_count' => 1,
+                        'max_count' => 1,
+                        'aggregate_type' => 'reservation',
+                        'source_type' => 'cancel-reservation',
+                        'aggregate_version' => null,
+                    ],
+                ],
+                'eventless_reason' => '',
+                'activation_blocked_until_event_contract' => false,
+                'consumers' => ['reservation.cancelled' => []],
+            ],
             'reject-reservation' => $deferred($inactiveReservation),
             'mark-reservation-no-show' => $deferred($inactiveReservation),
             'create-reservation' => [
@@ -488,7 +541,22 @@ class CashierV3ActionManifest
                 'activation_blocked_until_event_contract' => false,
                 'consumers' => ['reservation.created' => []],
             ],
-            'update-reservation' => $deferred($inactiveReservation),
+            'update-reservation' => [
+                'required_event_types' => ['reservation.updated'],
+                'allowed_event_types' => ['reservation.updated'],
+                'event_rules' => [
+                    'reservation.updated' => [
+                        'min_count' => 1,
+                        'max_count' => 1,
+                        'aggregate_type' => 'reservation',
+                        'source_type' => 'update-reservation',
+                        'aggregate_version' => null,
+                    ],
+                ],
+                'eventless_reason' => '',
+                'activation_blocked_until_event_contract' => false,
+                'consumers' => ['reservation.updated' => []],
+            ],
             'select-reservation-member' => $eventless($selection),
 
             // C3 | hang order
@@ -688,8 +756,6 @@ class CashierV3ActionManifest
             'retry-service-completion' => 'query-service-completion-result',
             'submit-hang-order' => 'query-hang-order-result',
             'submit-writeoff' => 'query-writeoff-result',
-            'create-reservation' => 'query-reservation-result',
-            'update-reservation' => 'query-reservation-result',
             'create-unified-query-export' => 'query-unified-query-export-task',
         ];
         if (isset($queryMap[$action])) {

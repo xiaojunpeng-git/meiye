@@ -36,7 +36,7 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['close'])
+const emit = defineEmits(['close', 'open-reservation'])
 
 const activeActionKey = ref('')
 const actionError = ref('')
@@ -85,6 +85,7 @@ const isPendingAssignment = computed(() => room.value.isUnassigned === true
   || (!roomId.value && Boolean(serviceOrderId.value)))
 const historyReservations = computed(() => readList(room.value, ['historyReservations', 'pastReservations', 'reservationHistory']))
 const upcomingReservations = computed(() => readList(room.value, ['upcomingReservations', 'futureReservations', 'nextReservations']))
+const activeReservationServices = computed(() => readList(room.value, ['activeReservationServices']))
 const roomNote = computed(() => firstValue(room.value, ['note', 'remark', 'description']))
 
 const availableActions = computed(() => {
@@ -173,6 +174,11 @@ function pendingMeta(item) {
     firstValue(item, ['summary', 'projectSummary', 'projectName']),
     firstValue(item, ['startedAt', 'serviceStartedAt', 'appointmentStartAt', 'time'])
   ].filter(Boolean).join(' · ')
+}
+
+function openReservation(service) {
+  if (!service?.reservationId || activeActionKey.value) return
+  emit('open-reservation', service)
 }
 
 const actionMap = {
@@ -283,7 +289,7 @@ useModalFocusTrap({
           <h2 id="room-detail-title">{{ roomName }}</h2>
           <div v-if="hasVisibleRoom" class="room-detail__status-row">
             <span class="room-detail__status" :class="`room-detail__status--${status.key}`">{{ statusText }}</span>
-            <span>房间实际占用以服务开始后的后端房态为准。</span>
+            <span>{{ activeReservationServices.length ? '房间页按服务中的预约实时展示。' : '房间实际占用以服务开始后的后端房态为准。' }}</span>
           </div>
         </div>
         <button type="button" class="room-detail__close" :disabled="activeActionKey !== ''" aria-label="关闭房间详情" @click="requestClose">×</button>
@@ -323,10 +329,21 @@ useModalFocusTrap({
             <header class="room-detail__section-header">
               <h3>当前服务</h3>
               <span v-if="status.key === 'idle'">当前没有实际占用</span>
+              <span v-else-if="activeReservationServices.length">当前有 {{ activeReservationServices.length }} 笔预约服务中</span>
               <span v-else>当前房间仅展示一张本次服务单</span>
             </header>
 
-            <div v-if="status.key !== 'idle' || serviceOrderId || memberName !== '—'" class="room-detail__service-card">
+            <ul v-if="activeReservationServices.length" class="room-detail__active-reservation-list">
+              <li v-for="(item, index) in activeReservationServices" :key="reservationKey(item, index)">
+                <div>
+                  <strong>{{ reservationTitle(item) }}</strong>
+                  <span>{{ reservationMeta(item) || '—' }}</span>
+                </div>
+                <span>开始服务：{{ item.serviceStartedAt || '—' }}</span>
+                <button type="button" class="room-detail__button room-detail__button--secondary" @click="openReservation(item)">查看预约</button>
+              </li>
+            </ul>
+            <div v-else-if="status.key !== 'idle' || serviceOrderId || memberName !== '—'" class="room-detail__service-card">
               <div class="room-detail__member">
                 <span>当前会员</span>
                 <strong>{{ memberName }}</strong>
@@ -350,8 +367,8 @@ useModalFocusTrap({
             </div>
             <div>
               <header class="room-detail__section-header"><h3>房间占用规则</h3></header>
-              <p class="room-detail__rule">同一房间、同一服务时段只能有一张本次服务单。预约仅作安排，不会提前占用房间；开始服务后才实际占用。</p>
-              <p class="room-detail__rule room-detail__rule--muted">结账或作废后服务场次结束并释放房间；未点击结束服务直接结账时，由后端自动补做结束服务。</p>
+              <p class="room-detail__rule">预约创建和选择房间不会限制后续选择。预约进入服务中后，房间页按预约状态展示当前服务。</p>
+              <p class="room-detail__rule room-detail__rule--muted">同一房间可同时展示多笔服务中的预约；结束预约服务后，该预约不再显示在当前服务中。</p>
             </div>
           </section>
 
@@ -391,6 +408,7 @@ useModalFocusTrap({
 
       <footer class="room-detail__footer">
         <p v-if="actionError" class="room-detail__action-error" role="alert">{{ actionError }}</p>
+        <p v-else-if="activeReservationServices.length" class="room-detail__backend-tip">预约服务请在预约详情中结束，结束后房态自动更新。</p>
         <p v-else class="room-detail__backend-tip">操作前会由后端按当前权限、最新房态和版本再次校验。</p>
         <div class="room-detail__actions">
           <button type="button" class="room-detail__button room-detail__button--secondary" :disabled="activeActionKey !== ''" @click="$emit('close')">关闭</button>
@@ -715,6 +733,39 @@ useModalFocusTrap({
   gap: 8px;
 }
 
+.room-detail__active-reservation-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.room-detail__active-reservation-list li {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(160px, .85fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 14px;
+  border: 1px solid #ffd9a8;
+  border-radius: 9px;
+  background: #fffaf1;
+}
+
+.room-detail__active-reservation-list li > div {
+  display: grid;
+  gap: 4px;
+}
+
+.room-detail__active-reservation-list li strong {
+  color: #6e4c18;
+}
+
+.room-detail__active-reservation-list li span {
+  color: #7f6a46;
+  font-size: 12px;
+}
+
 .room-detail__reservation-list li {
   display: grid;
   grid-template-columns: minmax(130px, .7fr) minmax(0, 1.6fr) auto;
@@ -842,6 +893,7 @@ useModalFocusTrap({
   }
 
   .room-detail__service-meta,
+  .room-detail__active-reservation-list li,
   .room-detail__reservation-list li {
     grid-template-columns: 1fr;
   }

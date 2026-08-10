@@ -55,20 +55,29 @@ const editorCraftsmenOptions = computed(() => Array.isArray(editorConfig.value.c
 const editorRooms = computed(() => Array.isArray(editorConfig.value.rooms) ? editorConfig.value.rooms : [])
 const reservationStatusOptions = computed(() => {
   if (!Array.isArray(reservation.value.statusOptions)) return []
+  const seen = new Set()
   return reservation.value.statusOptions
     .map((option) => {
-      if (typeof option === 'string' && option.trim()) return { value: option.trim(), normal: false }
+      if (typeof option === 'string' && option.trim()) {
+        const normalized = normalizeReservationStatus(option.trim())
+        return { value: normalized.value, label: normalized.label, normal: false }
+      }
       if (!option || typeof option !== 'object') return null
       const value = option.value ?? option.code ?? option.status
       if (value === undefined || value === null || String(value).trim() === '') return null
+      const normalized = normalizeReservationStatus(value || option.label || option.name)
       return {
         ...option,
-        value,
-        label: option.label || option.name || String(value),
+        value: normalized.value,
+        label: normalized.label,
         normal: option.normal === true || option.isNormal === true
       }
     })
-    .filter(Boolean)
+    .filter((option) => {
+      if (!option || seen.has(option.value)) return false
+      seen.add(option.value)
+      return true
+    })
 })
 const editorSubmission = computed(() => {
   const suppliedSubmission = editorConfig.value.submission && typeof editorConfig.value.submission === 'object'
@@ -170,7 +179,16 @@ watch(
     if (!isEditorOpen.value || !submission || typeof submission !== 'object' || !submissionBelongsToCurrentEditor(submission)) return
     const status = normalizeSubmissionStatus(submission.status)
     if (status === 'editing') return
-    editorSubmissionResult.value = { ...editorSubmissionResult.value, ...submission }
+    editorSubmissionResult.value = status === 'failed'
+      ? {
+          ...editorSubmissionResult.value,
+          ...submission,
+          status: 'failed',
+          canClose: true,
+          canRetry: true,
+          message: submission.message || submission.failureReason || '保存未完成，请重试。'
+        }
+      : { ...editorSubmissionResult.value, ...submission }
     editorSubmissionStatus.value = status
     if (status === 'succeeded') closeReservationEditor()
   },
@@ -206,7 +224,7 @@ function normalizeReservationQuery(query = {}, quickFilter = activeQuickKey.valu
       filters: Array.isArray(querySettings.filters) ? querySettings.filters.map((filter) => ({ ...filter })) : [],
       filterRelation: querySettings.filterRelation === 'any' ? 'any' : 'all'
     },
-    quickFilter: typeof quickFilter === 'string' && quickFilter ? quickFilter : 'today',
+    quickFilter: typeof quickFilter === 'string' && quickFilter && quickFilter !== 'pending' ? quickFilter : 'today',
     page: Math.max(1, Number(source.page) || 1),
     pageSize: Math.max(1, Number(source.pageSize) || pageSize.value)
   }
@@ -240,13 +258,14 @@ function reservationFieldValue(record, fieldKey) {
     source: record.source,
     creator: record.creator
   }
+  if (fieldKey === 'status') return reservationStatusLabel(record)
   return values[fieldKey] || record[fieldKey] || '—'
 }
 
 const quickFilters = computed(() => [
   { key: 'today', label: '今日预约', count: quickCounts.value.today, active: activeQuickKey.value === 'today' },
-  { key: 'pending', label: '待确认', count: quickCounts.value.pending, active: activeQuickKey.value === 'pending' },
-  { key: 'serving', label: '进行中', count: quickCounts.value.serving, active: activeQuickKey.value === 'serving' },
+  { key: 'unstarted', label: '未开始', count: quickCounts.value.unstarted, active: activeQuickKey.value === 'unstarted' },
+  { key: 'serving', label: '服务中', count: quickCounts.value.serving, active: activeQuickKey.value === 'serving' },
   { key: 'all', label: '全部', active: activeQuickKey.value === 'all' }
 ])
 
@@ -259,20 +278,16 @@ const timeSlots = computed(() => {
 
 const RESERVATION_ACTION_ALIASES = {
   'start-service': 'start-reservation-service',
-  'end-service': 'prepare-reservation-service-completion',
-  'go-checkout': 'open-reservation-checkout',
-  'mark-no-show': 'mark-reservation-no-show'
+  'end-service': 'end-reservation-service',
+  'delete-reservation': 'cancel-reservation'
 }
 
 const ALLOWED_RESERVATION_RECORD_ACTIONS = new Set([
   'open-reservation-detail',
-  'confirm-reservation',
+  'edit-reservation',
   'start-reservation-service',
-  'prepare-reservation-service-completion',
-  'open-reservation-checkout',
-  'cancel-reservation',
-  'reject-reservation',
-  'mark-reservation-no-show'
+  'end-reservation-service',
+  'cancel-reservation'
 ])
 
 function normalizedReservationAction(action) {
@@ -294,38 +309,41 @@ function hasPublicReservationVersion(recordOrId) {
   return positivePublicReservationVersion(reservationId) !== null
 }
 
-const canStartServiceFromDetail = computed(() => (
-  reservationDetailLoadStatus.value === 'ready'
-  && hasPublicReservationVersion(activeDetailReservationId.value)
-))
-
-function primaryAction(record) {
-  const configured = record?.primaryAction
-    || (Array.isArray(record?.actions) ? record.actions.find((action) => action?.primary === true) : null)
-  const action = normalizedReservationAction(configured?.action || configured?.code)
-  if (action === 'start-reservation-service' && !hasPublicReservationVersion(record)) {
-    return {
-      label: '加载后开始',
-      action: 'open-reservation-detail',
-      recoveryFor: action,
-      disabledReason: '预约数据尚未同步，请先加载完整预约详情。'
-    }
+function normalizeReservationStatus(rawStatus) {
+  const raw = String(rawStatus || '').trim()
+  const normalized = raw.toUpperCase().replace(/[\s-]/g, '_')
+  if (['UNSTARTED', 'SCHEDULED', '未开始'].includes(raw) || ['UNSTARTED', 'SCHEDULED'].includes(normalized)) {
+    return { value: 'UNSTARTED', label: '未开始', phase: 'unstarted' }
   }
-  if (action && configured.enabled !== false) {
-    return {
-      ...configured,
-      action,
-      label: configured.label || '继续处理'
-    }
+  if (['SERVING', 'IN_SERVICE', 'SERVICE_IN_PROGRESS', '服务中', '进行中'].includes(raw) || ['SERVING', 'IN_SERVICE', 'SERVICE_IN_PROGRESS'].includes(normalized)) {
+    return { value: 'SERVING', label: '服务中', phase: 'serving' }
   }
-  return { label: '查看详情', action: 'open-reservation-detail' }
+  return { value: 'ENDED', label: '已结束', phase: 'ended' }
 }
 
-function statusClass(status) {
-  if (status === '待确认') return 'reservation-status--pending'
-  if (status === '服务中') return 'reservation-status--serving'
-  if (status === '待结账') return 'reservation-status--checkout'
-  return 'reservation-status--scheduled'
+function reservationStatus(record) {
+  return normalizeReservationStatus(record?.status || record?.statusLabel || record?.statusName)
+}
+
+function reservationStatusLabel(record) {
+  return reservationStatus(record).label
+}
+
+function statusClass(record) {
+  return `reservation-status--${reservationStatus(record).phase}`
+}
+
+function recordActions(record) {
+  const phase = reservationStatus(record).phase
+  if (phase === 'unstarted') {
+    return [
+      { action: 'edit-reservation', label: '编辑' },
+      { action: 'cancel-reservation', label: '删除' },
+      { action: 'start-reservation-service', label: '开始服务', primary: true }
+    ]
+  }
+  if (phase === 'serving') return [{ action: 'end-reservation-service', label: '结束服务', primary: true }]
+  return []
 }
 
 function blocksForResource(resourceId, time) {
@@ -424,19 +442,9 @@ async function requestReservationRecordAction(action, payload = {}) {
     return { result: { status: 'failed', code: 'RESERVATION_ACTION_PENDING', message: '该预约正在处理中，请勿重复操作。' } }
   }
 
-  if (action === 'prepare-reservation-service-completion' && !payload.serviceOrderId) {
-    return { result: { status: 'failed', code: 'RESERVATION_SERVICE_CONTEXT_MISSING', message: '未找到本次服务单，请刷新预约后重试。' } }
-  }
-
   const idempotencyKey = reservationActionIds.value[actionKey] || createCashierV3CommandId('RESERVATION_ACTION')
   reservationActionIds.value = { ...reservationActionIds.value, [actionKey]: idempotencyKey }
   const requestPayload = { ...payload, idempotencyKey }
-  if (action === 'prepare-reservation-service-completion') {
-    requestPayload.preparationRequestId = idempotencyKey
-    window.dispatchEvent(new CustomEvent('cashier-v3:register-service-completion-request', {
-      detail: { preparationRequestId: idempotencyKey, serviceOrderId: payload.serviceOrderId }
-    }))
-  }
 
   reservationActionLocks.value = { ...reservationActionLocks.value, [actionKey]: true }
   try {
@@ -450,14 +458,15 @@ async function requestReservationRecordAction(action, payload = {}) {
   }
 }
 
-async function requestReservationPrimaryAction(record) {
-  const primary = primaryAction(record)
-  if (primary.action === 'open-reservation-detail') return openReservationDetail(reservationPayload(record))
-  const approved = approvedReservationActionPayload(primary, record)
+async function requestReservationRecordButton(record, action) {
+  if (action === 'edit-reservation') {
+    return openReservationEditor({ reservationId: reservationPayload(record).reservationId, reservation: record })
+  }
+  const approved = approvedReservationActionPayload({ action }, record)
   if (!approved.valid) {
     return { result: { status: 'failed', code: 'RESERVATION_ACTION_CONTRACT_INVALID', message: approved.message } }
   }
-  return requestReservationRecordAction(primary.action, approved.payload)
+  return requestReservationRecordAction(action, approved.payload)
 }
 
 function blockStyle(block, index = 0, count = 1) {
@@ -477,7 +486,10 @@ function blockStyle(block, index = 0, count = 1) {
 }
 
 async function requestAction(action, payload = {}) {
-  return requestCashierV3Action(action, payload)
+  // 预约保存是普通资料落单。页面自行处理保存成功或失败，不让通用结账
+  // 回执恢复弹窗打断操作人员。
+  const isReservationSave = ['create-reservation', 'update-reservation'].includes(action)
+  return requestCashierV3Action(action, isReservationSave ? { ...payload, silent: true } : payload)
 }
 
 function resultStatus(result) {
@@ -500,6 +512,16 @@ function resultMessage(result) {
     || resultBlock(result)?.message
     || response?.message
     || ''
+}
+
+function resultData(result) {
+  const response = result?.data && typeof result.data === 'object' ? result.data : result
+  return response?.data && typeof response.data === 'object' ? response.data : {}
+}
+
+function reservationDetailFromResult(result) {
+  const detail = resultData(result)?.reservation?.detail
+  return detail && typeof detail === 'object' && !Array.isArray(detail) ? detail : null
 }
 
 function detailBelongsToReservation(detail, reservationId) {
@@ -562,8 +584,9 @@ function operatorDetailLoadError(result) {
   return resultMessage(result) || '预约详情暂时无法加载，本次未提交任何预约或服务操作。请重新加载详情。'
 }
 
-function activateReservationDetail(reservationId) {
-  const backendDetail = reservation.value.detail
+function activateReservationDetail(reservationId, responseDetail = null) {
+  // 预约详情是独立详情投影；列表根投影会刻意把 detail 置空，不能只从根状态读取。
+  const backendDetail = responseDetail || reservation.value.detail
   if (!hasCompleteReservationDetail(backendDetail, reservationId)) return false
   reservationDetail.value = backendDetail
   reservationDetailLoadStatus.value = 'ready'
@@ -629,7 +652,7 @@ async function openReservationDetail(payload = {}) {
       setReservationDetailLoadError(operatorDetailLoadError(result), resultCode(result))
       return result
     }
-    if (!activateReservationDetail(reservationId)) {
+    if (!activateReservationDetail(reservationId, reservationDetailFromResult(result))) {
       setReservationDetailLoadError(
         '系统没有返回与本次预约匹配的完整详情。为避免把未加载的数据显示成“暂无”，请重新加载详情。',
         'RESERVATION_DETAIL_INCOMPLETE'
@@ -675,7 +698,10 @@ function closeReservationDetail() {
 }
 
 function handleOpenReservationDetail(event) {
-  showReservationDetail(event)
+  const payload = event?.detail || event || {}
+  const reservationId = payload.reservationId || payload.appointmentId || payload.id
+  if (!reservationId) return
+  openReservationDetail({ reservationId })
 }
 
 async function handleReservationDetailAction(payload = {}) {
@@ -689,15 +715,6 @@ async function handleReservationDetailAction(payload = {}) {
   }
   const action = normalizedReservationAction(payload.actionCode || payload.action?.code || payload.action?.action)
   if (!action) return { success: false, message: '该预约操作暂未接入。' }
-  if (action === 'start-reservation-service' && !hasPublicReservationVersion(payload.reservationId)) {
-    return {
-      result: {
-        status: 'failed',
-        code: 'RESERVATION_PUBLIC_VERSION_NOT_READY',
-        message: '预约数据尚未同步，本次开始服务没有提交。请重新加载预约详情后再试。'
-      }
-    }
-  }
   const record = payload.reservation || records.value.find((item) => String(item.id) === String(payload.reservationId))
   const approved = approvedReservationActionPayload(payload.action, record || payload.reservationId)
   if (!approved.valid) {
@@ -709,17 +726,13 @@ async function handleReservationDetailAction(payload = {}) {
   const result = await requestReservationRecordAction(action, approved.payload)
   if (
     resultStatus(result) === 'success'
-    && action === 'start-reservation-service'
+    && ['start-reservation-service', 'end-reservation-service'].includes(action)
     && String(activeDetailReservationId.value) === String(payload.reservationId)
   ) {
-    // 开始服务会推进预约版本并把详情动作切换为“结束服务”；只采用同一新根中的完整详情。
-    if (!activateReservationDetail(payload.reservationId)) {
-      setReservationDetailLoadError(
-        '服务已开始，但最新预约详情尚未完整加载。请返回列表查看服务状态。',
-        'RESERVATION_DETAIL_REFRESH_REQUIRED'
-      )
-    }
+    // 服务状态已变更后重新读取该预约的完整详情，保留详情窗并切换可用操作。
+    await openReservationDetail({ reservationId: payload.reservationId })
   }
+  if (resultStatus(result) === 'success' && action === 'cancel-reservation') closeReservationDetail()
   return result
 }
 
@@ -727,7 +740,8 @@ async function selectQuickFilter(payload = {}) {
   // UnifiedQueryToolbar 会把点击当刻的完整查询状态一起交回；兼容旧事件形状，
   // 也不能让快捷筛选覆盖此前已经提交的关键词、范围或组合筛选。
   const filter = payload.filter && typeof payload.filter === 'object' ? payload.filter : payload
-  const nextQuickKey = typeof filter?.key === 'string' && filter.key ? filter.key : activeQuickKey.value
+  const selectedKey = typeof filter?.key === 'string' && filter.key ? filter.key : activeQuickKey.value
+  const nextQuickKey = selectedKey === 'pending' ? 'today' : selectedKey
   const suppliedQuery = payload.query && typeof payload.query === 'object'
     ? payload.query
     : reservationQuerySnapshot.value
@@ -990,31 +1004,15 @@ function preparedReservationEditorFrom(result) {
 function normalizeSubmissionStatus(value) {
   const status = String(value || '').trim().toLowerCase()
   if (['processing', 'submitting', '处理中', '提交中'].includes(status)) return 'processing'
-  if (['pending', 'result_pending', 'pending_confirmation', 'confirming', '结果确认中', '待确认'].includes(status)) {
-    return 'pending_confirmation'
-  }
-  if (['result_unknown', 'unknown', '结果未知', '未知'].includes(status)) return 'result_unknown'
+  if (['pending', 'result_pending', 'pending_confirmation', 'confirming', '结果确认中', '待确认', 'result_unknown', 'unknown', '结果未知', '未知'].includes(status)) return 'failed'
   if (['failed', 'failure', 'error', 'conflict', '失败', '冲突'].includes(status)) return 'failed'
   if (['succeeded', 'success', 'completed', '已完成', '成功'].includes(status)) return 'succeeded'
   if (!status || status === 'editing') return 'editing'
-  return 'result_unknown'
+  return 'failed'
 }
 
 async function selectEditorMember() {
   if (resolvePendingMemberSelection) return null
-  // 先完成只读的编辑器准备请求，再打开全局会员选择器。此前二者并行，
-  // 操作人员极快选择会员时，较晚返回的准备响应会与选择命令交错，造成
-  // “响应绑定不一致”的误提示；准备失败时也不应打开一个不可用的选择器。
-  try {
-    const result = await requestAction('open-reservation-member-selector', {
-      reservationId: reservationIdentity(editorDraft.value),
-      recordVersion: reservationRecordVersion(editorDraft.value),
-      preparationRequestId: editorSession.value?.preparationRequestId
-    })
-    if (['failed', 'conflict', 'result_unknown'].includes(actionStatus(result))) return null
-  } catch (error) {
-    return null
-  }
   return new Promise((resolve) => {
     resolvePendingMemberSelection = resolve
     window.dispatchEvent(new CustomEvent('cashier-v3:open-member-selector', {
@@ -1096,24 +1094,31 @@ async function recalculateReservationPlan({ draft, changeReason, recalculationRe
   return { success: true, draft: normalizeEditorDraft(calculatedDraft) }
 }
 
+async function refreshReservationProjectCatalog({ memberId } = {}) {
+  const normalizedMemberId = Number(memberId)
+  if (!Number.isSafeInteger(normalizedMemberId) || normalizedMemberId <= 0) {
+    return { catalogOptions: [] }
+  }
+  const result = await requestAction('query-reservation-project-catalog', { memberId: normalizedMemberId })
+  if (!['success', 'succeeded'].includes(actionStatus(result))) {
+    return { catalogOptions: [] }
+  }
+  const envelope = result?.data && typeof result.data === 'object' ? result.data : result || {}
+  const catalogOptions = envelope?.data?.reservationProjectCatalog?.catalogOptions
+    || envelope?.reservationProjectCatalog?.catalogOptions
+    || envelope?.data?.editor?.catalogOptions
+    || []
+  return { catalogOptions: Array.isArray(catalogOptions) ? catalogOptions : [] }
+}
+
 async function submitReservationEditor(draft) {
   const session = editorSession.value
-  if (!session || session.stateContextId !== currentStateContextId()) {
-    return { success: false, status: 'blocked', message: '账号或门店已经切换，请重新打开预约后再保存。' }
-  }
+  if (!session) return { success: false, status: 'failed', message: '保存未完成，请重试。' }
   const normalizedDraft = normalizeEditorDraft(draft)
-  const draftReservationId = reservationIdentity(normalizedDraft) ?? null
-  const draftRecordVersion = reservationRecordVersion(normalizedDraft) ?? null
-  if (
-    (session.reservationId !== null && String(draftReservationId) !== String(session.reservationId))
-    || (session.reservationId !== null && String(draftRecordVersion) !== String(session.recordVersion))
-  ) {
-    return { success: false, status: 'blocked', message: '预约对象或版本与当前编辑会话不一致，请重新打开后再保存。' }
-  }
   const currentStatus = normalizeSubmissionStatus(editorSubmission.value.status)
   const canRetry = currentStatus === 'failed' && editorSubmission.value.canRetry === true
   if (isEditorSubmitting.value || (currentStatus !== 'editing' && !canRetry)) {
-    return { success: false, status: 'blocked', message: '当前预约请求尚未结束，请勿重复提交。' }
+    return { success: false, status: 'failed', message: '保存未完成，请重试。' }
   }
   isEditorSubmitting.value = true
   if (!editorSubmitCommandId.value) {
@@ -1127,11 +1132,7 @@ async function submitReservationEditor(draft) {
     const isExistingReservation = session.reservationId !== null
     const result = await requestAction(isExistingReservation ? 'update-reservation' : 'create-reservation', {
       reservationId: session.reservationId,
-      recordVersion: session.recordVersion,
       reservation: normalizedDraft,
-      preparationRequestId: session.preparationRequestId,
-      preparationToken: session.preparationToken,
-      commandContexts: session.commandContexts,
       idempotencyKey: commandId
     })
     if (!editorSession.value || editorSession.value.commandId !== commandId) {
@@ -1139,50 +1140,49 @@ async function submitReservationEditor(draft) {
     }
     const response = actionResponse(result)
     const status = normalizeSubmissionStatus(response.status)
-    editorSubmissionResult.value = { ...response }
-    editorSubmissionStatus.value = status === 'editing' ? 'result_unknown' : status
+    if (status === 'succeeded') {
+      editorSubmissionResult.value = { ...response }
+      editorSubmissionStatus.value = status
+      return result
+    }
+    editorSubmissionResult.value = {
+      ...response,
+      status: 'failed',
+      canClose: true,
+      canRetry: true,
+      // 预约是普通单据保存。保留服务端已说明的原因，不能用统一文案把
+      // 可修复的字段或接口错误吞掉。
+      message: actionMessage(result) || response.message || '保存未完成，请重试。'
+    }
+    editorSubmissionStatus.value = 'failed'
     return result
   } catch (error) {
-    editorSubmissionStatus.value = 'result_unknown'
+    editorSubmissionStatus.value = 'failed'
     editorSubmissionResult.value = {
-      message: error?.message || '网络中断，未能确认预约结果。请查询原请求，禁止重新提交。'
+      status: 'failed',
+      canClose: true,
+      canRetry: true,
+      message: error?.message || '保存未完成，请重试。'
     }
-    throw error
+    return { result: { status: 'failed', message: error?.message || '保存未完成，请重试。' } }
   } finally {
     isEditorSubmitting.value = false
   }
 }
 
+function resumeReservationEditing() {
+  if (editorSubmissionStatus.value !== 'failed') return
+  const session = editorSession.value
+  if (session) editorSession.value = Object.freeze({ ...session, commandId: null })
+  editorSubmitCommandId.value = null
+  editorSubmissionStatus.value = ''
+  editorSubmissionResult.value = {}
+}
+
 function handleEditorSubmitted(result) {
   if (normalizeSubmissionStatus(actionResponse(result).status) !== 'succeeded') return
   closeReservationEditor()
-}
-
-async function queryReservationEditorResult(command = {}) {
-  const session = editorSession.value
-  const originalIdempotencyKey = command.originalIdempotencyKey
-  if (!session || session.stateContextId !== currentStateContextId() || !originalIdempotencyKey) {
-    return { success: false, status: 'blocked', message: '未找到原预约请求标识，请勿重新提交。' }
-  }
-  const { queryAction: ignoredQueryAction, idempotencyKey: ignoredIdempotencyKey, ...payload } = command
-  const result = await requestAction('query-reservation-result', {
-    ...payload,
-    originalIdempotencyKey,
-    preparationRequestId: session.preparationRequestId,
-    reservationId: session.reservationId,
-    recordVersion: session.recordVersion
-  })
-  if (!editorSession.value || editorSession.value.commandId !== session.commandId) {
-    return { success: false, status: 'superseded', message: '该预约查询结果已被较新的编辑会话取代。' }
-  }
-  const response = actionResponse(result)
-  const status = normalizeSubmissionStatus(response.status)
-  editorSubmissionResult.value = { ...editorSubmissionResult.value, ...response }
-  editorSubmissionStatus.value = status === 'editing' ? 'result_unknown' : status
-  if (editorSubmissionStatus.value === 'succeeded') {
-    closeReservationEditor()
-  }
-  return result
+  queryReservations(reservationQuerySnapshot.value, false)
 }
 
 function closeReservationEditor() {
@@ -1261,7 +1261,8 @@ onBeforeUnmount(() => {
   <section class="reservation-page" :class="{ 'reservation-page--list': viewMode === 'list' }" aria-label="预约列表">
     <header class="reservation-page__toolbar">
       <UnifiedQueryToolbar
-        search-placeholder="搜索会员姓名、手机号、预约单号或项目"
+        :show-keyword-search="false"
+        :inline-quick-controls="true"
         :quick-filters="quickFilters"
         :status-options="reservationStatusOptions"
         :fields="queryFields"
@@ -1321,26 +1322,23 @@ onBeforeUnmount(() => {
               </button>
               <strong v-else-if="field.key === 'member_name'">{{ reservationFieldValue(record, field.key) }}</strong>
               <strong v-else-if="field.key === 'project'">{{ reservationFieldValue(record, field.key) }}</strong>
-              <span v-else-if="field.key === 'status'" class="reservation-status" :class="statusClass(record.status)">{{ record.status || '—' }}</span>
+              <span v-else-if="field.key === 'status'" class="reservation-status" :class="statusClass(record)">{{ reservationStatusLabel(record) }}</span>
               <template v-else>{{ reservationFieldValue(record, field.key) }}</template>
             </td>
             <td>
               <div class="reservation-row-actions">
                 <button
+                  v-for="action in recordActions(record)"
+                  :key="action.action"
                   type="button"
                   class="button reservation-row-action"
-                  :class="{ 'reservation-row-action--primary': primaryAction(record).action !== 'open-reservation-detail' }"
-                  :disabled="isReservationActionPending(primaryAction(record).action, record)"
-                  :title="primaryAction(record).disabledReason || ''"
-                  :aria-label="`${primaryAction(record).label}，预约 ${record.reservationNo || record.id}，${record.memberName || '未命名会员'}`"
-                  @click="requestReservationPrimaryAction(record)"
-                >{{ isReservationActionPending(primaryAction(record).action, record) ? '正在处理…' : primaryAction(record).label }}</button>
-                <button
-                  type="button"
-                  class="button button--text"
-                  :aria-label="`更多操作，预约 ${record.reservationNo || record.id}，${record.memberName || '未命名会员'}`"
-                  @click="requestAction('open-reservation-more-actions', reservationPayload(record))"
-                >更多</button>
+                  :class="{
+                    'reservation-row-action--primary': action.primary
+                  }"
+                  :disabled="isReservationActionPending(action.action, record)"
+                  :aria-label="`${action.label}，预约 ${record.reservationNo || record.id}，${record.memberName || '未命名会员'}`"
+                  @click="requestReservationRecordButton(record, action.action)"
+                >{{ isReservationActionPending(action.action, record) ? '正在处理…' : action.label }}</button>
               </div>
             </td>
           </tr>
@@ -1384,6 +1382,7 @@ onBeforeUnmount(() => {
               :key="block.id"
               type="button"
               class="reservation-calendar-block"
+              :class="`reservation-calendar-block--${reservationStatus(block).phase}`"
               :style="blockStyle(block, blockIndex, blocksForResource(resource.id, time).length)"
               @click="openReservationDetail(reservationPayload(block.reservationId || block.id))"
             >
@@ -1406,10 +1405,11 @@ onBeforeUnmount(() => {
       :is-submitting="isEditorSubmitting"
       :submission="editorSubmission"
       :on-select-member="selectEditorMember"
+      :on-refresh-catalog="refreshReservationProjectCatalog"
       :on-recalculate="recalculateReservationPlan"
       :on-submit="submitReservationEditor"
-      :on-query="queryReservationEditorResult"
       @close="closeReservationEditor"
+      @resume-editing="resumeReservationEditing"
       @submitted="handleEditorSubmitted"
     />
 
@@ -1421,7 +1421,6 @@ onBeforeUnmount(() => {
       :load-status="reservationDetailLoadStatus"
       :load-error="reservationDetailLoadError"
       :load-error-code="reservationDetailLoadErrorCode"
-      :can-start-service="canStartServiceFromDetail"
       :on-reload="reloadReservationDetail"
       :on-action="handleReservationDetailAction"
       @close="closeReservationDetail"
