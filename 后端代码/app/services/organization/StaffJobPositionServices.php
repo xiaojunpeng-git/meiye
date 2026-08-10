@@ -1155,9 +1155,15 @@ class StaffJobPositionServices extends BaseServices
 
     private function hasEmployeeMobileAuthTable(): bool
     {
+        $connection = Db::connect();
+        $database = (string)$connection->getConfig('database');
+        $table = (string)$connection->getConfig('prefix') . 'employee_mobile_auth';
+        if ($database === '') {
+            return false;
+        }
         $row = Db::query(
-            'SELECT COUNT(*) AS c FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?',
-            ['employee_mobile_auth']
+            'SELECT COUNT(*) AS c FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?',
+            [$database, $table]
         );
         return (int)($row[0]['c'] ?? 0) > 0;
     }
