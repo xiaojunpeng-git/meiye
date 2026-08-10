@@ -16,7 +16,7 @@ use think\facade\Db;
  */
 final class CashierV3SalesOrderQueryServices
 {
-    public const CONTRACT_VERSION = 'cashier-v3.order-center.v2';
+    public const CONTRACT_VERSION = 'cashier-v3.order-center.v3';
     public const ECONOMICS_STATUS = 'not_ready';
     public const BUSINESS_TIMEZONE = 'Asia/Shanghai';
     public const KEYWORD_SEARCH_WINDOW_DAYS = 366;
@@ -757,6 +757,8 @@ final class CashierV3SalesOrderQueryServices
             'o.id,o.order_id,o.order_no,o.tenant_id,o.store_id,o.store_name_snapshot',
             'o.member_id,o.member_name_snapshot,o.operator_id,o.operator_name_snapshot',
             'o.checkout_request_id,o.business_date,o.business_timezone,o.occurred_at,o.settled_at,o.recorded_at',
+            'o.business_source_primary_id,o.business_source_primary_name_snapshot',
+            'o.business_source_secondary_id,o.business_source_secondary_name_snapshot,o.business_source_label_snapshot',
             'o.original_amount_cents,o.discount_amount_cents,o.sale_amount_cents,o.order_version',
         ]);
     }
@@ -959,6 +961,8 @@ final class CashierV3SalesOrderQueryServices
                 'order_id,order_no,store_id,store_name_snapshot,member_id,member_name_snapshot,'
                 . 'operator_id,operator_name_snapshot,business_date,business_timezone,occurred_at,settled_at,'
                 . 'recorded_at,source_document_type,source_document_id,source_document_no_snapshot,'
+                . 'business_source_primary_id,business_source_primary_name_snapshot,'
+                . 'business_source_secondary_id,business_source_secondary_name_snapshot,business_source_label_snapshot,'
                 . 'original_amount_cents,discount_amount_cents,sale_amount_cents,order_version'
             )
             ->select()
@@ -1259,7 +1263,7 @@ final class CashierV3SalesOrderQueryServices
             'actual_received_amount' => $settlementEquationValid ? $this->moneyFromCents($cashPerformanceCents) : null,
             'paymentMethod' => implode('、', array_keys($paymentNames)), 'payment_method' => implode('、', array_keys($paymentNames)),
             'salespersonSummary' => implode('、', array_keys($salespersonNames)), 'cashierName' => (string)$header['operator_name_snapshot'],
-            'sourcePrimary' => '收银台', 'sourceSecondary' => 'V3 结账',
+            'source' => $this->businessSourceLabel($header),
             'economicsDataStatus' => $economicsStatus, 'cashPerformanceDataStatus' => $economicsStatus,
             'dataIntegrityStatus' => $settlementEquationValid ? 'valid' : 'settlement_equation_invalid',
             'contractVersion' => self::CONTRACT_VERSION,
@@ -1613,8 +1617,7 @@ final class CashierV3SalesOrderQueryServices
             'payment_method' => $v3Ready ? implode('、', array_keys($paymentNames)) : null,
             'salespersonSummary' => $v3Ready ? implode('、', array_keys($salespersonNames)) : null,
             'cashierName' => $v3Ready ? (string)$v3Header['operator_name_snapshot'] : null,
-            'sourcePrimary' => $v3Ready ? '收银台' : null,
-            'sourceSecondary' => $v3Ready ? 'V3 结账' : null,
+            'source' => $v3Ready ? $this->businessSourceLabel($v3Header) : null,
             'economicsDataStatus' => $v3Ready ? 'ready' : self::ECONOMICS_STATUS,
             'cashPerformanceDataStatus' => $v3Ready ? 'ready' : self::ECONOMICS_STATUS,
             'contractVersion' => self::CONTRACT_VERSION,
@@ -1789,6 +1792,25 @@ final class CashierV3SalesOrderQueryServices
         ];
         $code = strtolower(trim((string)($collection['payment_method'] ?? '')));
         return $labels[$code] ?? ($code !== '' ? $code : '未知收款方式');
+    }
+
+    /**
+     * 销售来源由结账时选定的快照决定。二级来源被选择时优先显示它，
+     * 否则显示一级来源；旧订单缺少快照时保留最小可读兜底。
+     */
+    private function businessSourceLabel(array $header): string
+    {
+        foreach ([
+            $header['business_source_secondary_name_snapshot'] ?? '',
+            $header['business_source_primary_name_snapshot'] ?? '',
+            $header['business_source_label_snapshot'] ?? '',
+        ] as $value) {
+            $label = trim((string)$value);
+            if ($label !== '') {
+                return $label;
+            }
+        }
+        return '—';
     }
 
     private function moneyFromCents(int $cents): float

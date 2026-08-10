@@ -123,6 +123,16 @@ class CashierV3PermissionPolicyRegistry
             $pageFeatures = [
                 'member_list' => 'cashier.v3.member',
                 'staff_list' => 'cashier.v3.management_center',
+                // 订单中心八类记录共用既有“订单”入口权限；页面字段、门店范围
+                // 与导出执行范围仍由统一查询注册表和当前数据范围强制控制。
+                'order_center_sales' => 'cashier.v3.order_center',
+                'order_center_recharge' => 'cashier.v3.order_center',
+                'order_center_refund' => 'cashier.v3.order_center',
+                'order_center_debt' => 'cashier.v3.order_center',
+                'order_center_service' => 'cashier.v3.order_center',
+                'order_center_supplement' => 'cashier.v3.order_center',
+                'order_center_gift' => 'cashier.v3.order_center',
+                'order_center_card_operation' => 'cashier.v3.order_center',
             ];
             $feature = $pageFeatures[$pageCode] ?? '';
             if ($feature === '') {

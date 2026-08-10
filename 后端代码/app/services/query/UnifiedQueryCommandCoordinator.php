@@ -2,6 +2,8 @@
 
 namespace app\services\query;
 
+use app\jobs\query\UnifiedQueryExportJob;
+
 /**
  * 统一查询元数据写命令的中立白名单分派。
  *
@@ -108,6 +110,13 @@ class UnifiedQueryCommandCoordinator
             $data = $this->preferences->upgradeReference($context, $payload);
         } else {
             $data = ['exportTask' => $this->exports->create($context, $payload)];
+            $taskNo = (string)($data['exportTask']['taskId'] ?? '');
+            if ($taskNo === '') {
+                throw new \LogicException('统一查询导出任务创建结果缺少任务编号');
+            }
+            // 任务创建事务已经完成后再投递；任务 worker 仍使用数据库 lease 领取，
+            // 因而网络重试或幂等回执重放不会生成重复文件。
+            UnifiedQueryExportJob::dispatch([$taskNo]);
         }
         $taskNo = (string)($data['exportTask']['taskId'] ?? '');
         return [

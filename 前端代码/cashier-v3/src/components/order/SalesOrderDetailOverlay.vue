@@ -10,7 +10,7 @@ import SalesOrderReceiptPrintButton from '@/components/order/SalesOrderReceiptPr
  * {
  *   id, revision, salesOrderNo, orderStatus, paymentStatus,
  *   memberName, phone, storeName, businessDate, occurredAt, paymentCompletedAt,
- *   cashierName, sourcePrimary, sourceSecondary, orderNote,
+ *   cashierName, source, orderNote,
  *   amountSummary: {
  *     originalAmount, priceChangeDiscountAmount, couponDiscountAmount,
  *     otherDiscountAmount, payableAmount, debtAmount, actualReceivedAmount,
@@ -76,6 +76,8 @@ const sourceOrder = computed(() => (props.order && typeof props.order === 'objec
 const orderId = computed(() => pickValue(sourceOrder.value, ['id', 'orderId', 'salesOrderId']))
 const orderNo = computed(() => pickValue(sourceOrder.value, ['salesOrderNo', 'orderNo', 'no']))
 const orderRevision = computed(() => pickValue(sourceOrder.value, ['revision', 'version', 'recordVersion']))
+const isGuestOrder = computed(() => sourceOrder.value.isGuest === true
+  || Number(sourceOrder.value.memberId || sourceOrder.value.member_id || 0) <= 0)
 const itemLines = computed(() => firstList(sourceOrder.value, ['items', 'orderItems', 'lines', 'details']))
 const paymentLines = computed(() => firstList(sourceOrder.value, ['paymentDetails', 'paymentLines', 'receipts', 'payments']))
 const relatedSource = computed(() => {
@@ -234,8 +236,7 @@ const basicInfoRows = computed(() => [
   { label: '真实操作时间', value: pickValue(sourceOrder.value, ['occurredAt', 'operatedAt', 'actualOperationAt']) },
   { label: '支付完成时间', value: pickValue(sourceOrder.value, ['paymentCompletedAt', 'settledAt']) },
   { label: '收银员／操作人', value: pickValue(sourceOrder.value, ['cashierName', 'operatorName', 'operatedBy']) },
-  { label: '一级来源', value: pickValue(sourceOrder.value, ['sourcePrimary']) },
-  { label: '二级来源', value: pickValue(sourceOrder.value, ['sourceSecondary']) },
+  { label: '客户来源', value: pickValue(sourceOrder.value, ['source', 'sourceLabel', 'sourceSecondary', 'sourcePrimary']) },
   { label: '订单备注', value: pickValue(sourceOrder.value, ['orderNote', 'remark', 'note']), wide: true }
 ].filter((row) => hasValue(row.value)))
 
@@ -413,21 +414,23 @@ function resetRefundForm() {
 }
 
 async function submitRefund() {
+  const balancePrincipalAmount = isGuestOrder.value ? '0' : balancePrincipalRefundAmount.value
+  const balanceGiftAmount = isGuestOrder.value ? '0' : balanceGiftRefundAmount.value
   if (!isValidMoney(refundAmount.value, true)) {
     actionError.value = '实际退款金额必须大于等于 0，且最多保留两位小数。'
     return
   }
-  if (!isValidMoney(balancePrincipalRefundAmount.value, true)) {
+  if (!isValidMoney(balancePrincipalAmount, true)) {
     actionError.value = '余额本金退回金额必须大于等于 0，且最多保留两位小数。'
     return
   }
-  if (!isValidMoney(balanceGiftRefundAmount.value, true)) {
+  if (!isValidMoney(balanceGiftAmount, true)) {
     actionError.value = '赠金退回金额必须大于等于 0，且最多保留两位小数。'
     return
   }
   if (moneyCents(refundAmount.value)
-    + moneyCents(balancePrincipalRefundAmount.value)
-    + moneyCents(balanceGiftRefundAmount.value) <= 0) {
+    + moneyCents(balancePrincipalAmount)
+    + moneyCents(balanceGiftAmount) <= 0) {
     actionError.value = '实际退款、本金退回和赠金退回至少需要填写一项。'
     return
   }
@@ -439,8 +442,8 @@ async function submitRefund() {
     // refundAmount remains the authoritative refund-statistics amount.
     refundAmount: refundAmount.value,
     actualRefundAmount: refundAmount.value,
-    balancePrincipalRefundAmount: balancePrincipalRefundAmount.value,
-    balanceGiftRefundAmount: balanceGiftRefundAmount.value,
+    balancePrincipalRefundAmount: balancePrincipalAmount,
+    balanceGiftRefundAmount: balanceGiftAmount,
     reason: refundReason.value
   })
   if (['success', 'succeeded'].includes(actionStatusFromResponse(response))) {
@@ -757,8 +760,8 @@ async function runAction(action, payload = {}) {
           <div class="sales-order-detail-lifecycle-form">
             <div class="sales-order-detail-refund-amounts">
               <label>实际退款金额<input v-model.trim="refundAmount" inputmode="decimal" placeholder="输入实际退给客户的金额" /></label>
-              <label>余额本金退回金额<input v-model.trim="balancePrincipalRefundAmount" inputmode="decimal" placeholder="输入退回账户本金" /></label>
-              <label>赠金退回金额<input v-model.trim="balanceGiftRefundAmount" inputmode="decimal" placeholder="输入退回账户赠金" /></label>
+              <label v-if="!isGuestOrder">余额本金退回金额<input v-model.trim="balancePrincipalRefundAmount" inputmode="decimal" placeholder="输入退回账户本金" /></label>
+              <label v-if="!isGuestOrder">赠金退回金额<input v-model.trim="balanceGiftRefundAmount" inputmode="decimal" placeholder="输入退回账户赠金" /></label>
             </div>
             <label>退款原因<textarea v-model.trim="refundReason" maxlength="255" rows="3" placeholder="填写退款原因" /></label>
             <div class="sales-order-detail-quick-actions"><button type="button" class="sales-order-detail-button sales-order-detail-button--text" :disabled="Boolean(pendingAction)" @click="activeLifecycleForm = ''">取消</button><button type="button" class="sales-order-detail-button sales-order-detail-button--secondary" :disabled="Boolean(pendingAction)" @click="submitRefund">确认退款并作废</button></div>

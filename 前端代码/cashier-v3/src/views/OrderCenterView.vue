@@ -7,6 +7,7 @@ import SalesOrderDetailOverlay from '@/components/order/SalesOrderDetailOverlay.
 import Printer from '@lucide/vue/dist/esm/icons/printer.mjs'
 import TablePagination from '@/components/common/TablePagination.vue'
 import UnifiedQueryToolbar from '@/components/query/UnifiedQueryToolbar.vue'
+import { useUnifiedQueryPage } from '@mohe/unified-query-vue3/composable'
 import {
   createCashierV3CommandId,
   formatMoney,
@@ -28,6 +29,7 @@ const isPrinterSetupOpen = ref(false)
 const ORDER_TABS = [
   {
     key: 'sales',
+    pageCode: 'order_center_sales',
     label: '销售订单',
     stateKey: 'salesOrders',
     primaryField: 'sales_order_no',
@@ -42,13 +44,14 @@ const ORDER_TABS = [
       field('discount_amount', '优惠金额', 'money'), field('debt_amount', '欠款金额', 'money'),
       field('actual_received_amount', '现金业绩', 'money'), field('payment_method', '收款方式'),
       field('salesperson', '销售人', 'person'), field('cashier', '收银员／操作人', 'person'),
-      field('source_primary', '一级来源'), field('source_secondary', '二级来源'),
+      field('source', '客户来源'),
       field('payment_status', '支付状态', 'status'), field('order_status', '订单状态', 'status'),
       field('supplement', '补单标记'), field('payment_completed_at', '支付完成时间', 'date')
     ]
   },
   {
     key: 'recharge',
+    pageCode: 'order_center_recharge',
     label: '充值订单',
     stateKey: 'rechargeOrders',
     primaryField: 'recharge_order_no',
@@ -67,23 +70,25 @@ const ORDER_TABS = [
   },
   {
     key: 'refund',
-    label: '退货订单',
+    pageCode: 'order_center_refund',
+    label: '退款记录',
     stateKey: 'refundOrders',
     primaryField: 'refund_order_no',
-    searchPlaceholder: '搜索退货单号、来源订单、会员姓名或手机号',
-    emptyText: '暂无退货订单。',
+    searchPlaceholder: '搜索退款单号、来源订单、会员姓名或手机号',
+    emptyText: '暂无退款记录。',
     fields: [
-      field('refund_order_no', '退货单号', 'text', { defaultQuick: true }),
+      field('refund_order_no', '退款单号', 'text', { defaultQuick: true }),
       field('business_date', '业务日期', 'date', { defaultQuick: true }),
       field('source_order_no', '来源订单号'), field('member_name', '会员姓名／游客'),
-      field('phone', '手机号'), field('refund_summary', '退货内容'), field('refund_amount', '退款金额', 'money'),
+      field('phone', '手机号'), field('refund_summary', '退款内容'), field('refund_amount', '退款金额', 'money'),
       field('refund_method', '退款方式'), field('store', '办理门店', 'store'),
-      field('operator', '操作人', 'person'), field('refund_status', '退货状态', 'status'),
+      field('operator', '操作人', 'person'), field('refund_status', '退款状态', 'status'),
       field('refund_completed_at', '退款完成时间', 'date')
     ]
   },
   {
     key: 'debt',
+    pageCode: 'order_center_debt',
     label: '欠款管理',
     stateKey: 'debtRecords',
     primaryField: 'debt_no',
@@ -100,6 +105,7 @@ const ORDER_TABS = [
   },
   {
     key: 'service',
+    pageCode: 'order_center_service',
     label: '服务记录',
     stateKey: 'serviceRecords',
     primaryField: 'service_record_no',
@@ -118,6 +124,7 @@ const ORDER_TABS = [
   },
   {
     key: 'supplement',
+    pageCode: 'order_center_supplement',
     label: '补交记录',
     stateKey: 'supplementOrders',
     primaryField: 'supplement_order_no',
@@ -135,6 +142,7 @@ const ORDER_TABS = [
   },
   {
     key: 'gift',
+    pageCode: 'order_center_gift',
     label: '赠送记录',
     stateKey: 'giftRecords',
     primaryField: 'gift_record_no',
@@ -152,6 +160,7 @@ const ORDER_TABS = [
   },
   {
     key: 'card_operation',
+    pageCode: 'order_center_card_operation',
     label: '卡操作记录',
     stateKey: 'cardOperationRecords',
     primaryField: 'card_operation_no',
@@ -176,7 +185,7 @@ const FIELD_ALIASES = {
   receivable_amount: ['receivableAmount', 'payableAmount'], discount_amount: ['discountAmount'],
   debt_amount: ['debtAmount', 'outstandingDebtAmount'], actual_received_amount: ['actualReceivedAmount'],
   payment_method: ['paymentSummary', 'paymentMethod'], salesperson: ['salespersonSummary', 'salespersonName'],
-  cashier: ['cashierName', 'operatorName'], source_primary: ['sourcePrimary'], source_secondary: ['sourceSecondary'],
+  cashier: ['cashierName', 'operatorName'], source: ['source', 'sourceLabel', 'sourceSecondary', 'sourcePrimary'],
   payment_status: ['paymentStatus'], order_status: ['orderStatus', 'statusLabel'], supplement: ['supplementLabel', 'isSupplement'],
   payment_completed_at: ['paymentCompletedAt', 'completedAt'], recharge_order_no: ['rechargeOrderNo', 'orderNo'],
   recharge_plan: ['rechargePlan', 'planName'], recharge_amount: ['rechargeAmount'], gift_amount: ['giftAmount'],
@@ -222,6 +231,8 @@ const availableTabs = computed(() => {
 const activeTab = computed(() => availableTabs.value.find((tab) => tab.key === activeTabKey.value) || availableTabs.value[0])
 const querySettings = ref({})
 const queryModelByType = ref({})
+const executedQueryByType = ref({})
+const isOrderQueryLoading = ref(false)
 const salesPageCursors = ref({})
 const isSalesDetailOpen = ref(false)
 const salesDetailOrder = ref({})
@@ -315,6 +326,46 @@ watch(
 
 function requestAction(action, payload = {}) {
   return requestCashierV3Action(action, payload)
+}
+
+// The normal list projection remains the order-center authority. This companion
+// capability is only used to freeze that successfully executed query for the
+// shared async export worker; it never exports browser rows.
+const unifiedQueryPages = Object.fromEntries(ORDER_TABS.map((tab) => [tab.key, useUnifiedQueryPage({
+  pageCode: tab.pageCode,
+  pageName: tab.label,
+  baseFields: tab.fields,
+  requestAction
+})]))
+const activeUnifiedQuery = computed(() => unifiedQueryPages[activeTabKey.value] || unifiedQueryPages.sales)
+const activeQueryCapability = computed(() => activeUnifiedQuery.value?.capability?.value || {})
+const activeQueryFields = computed(() => activeUnifiedQuery.value?.fields?.value || queryFields.value)
+const executedQuery = computed(() => executedQueryByType.value[activeTabKey.value] || null)
+
+function exportQuerySnapshot(recordType, query = {}) {
+  const { recordType: ignoredRecordType, queryCursor, pageSize, ...rest } = query || {}
+  const tab = ORDER_TABS.find((item) => item.key === recordType)
+  return {
+    ...rest,
+    pageCode: tab?.pageCode || '',
+    page: Math.max(1, Number(rest.page) || 1),
+    limit: Math.max(1, Number(rest.limit ?? pageSize) || 20)
+  }
+}
+
+function saveExecutedQuery(recordType, query) {
+  executedQueryByType.value = {
+    ...executedQueryByType.value,
+    [recordType]: exportQuerySnapshot(recordType, query)
+  }
+}
+
+function createActiveExport(payload) {
+  return activeUnifiedQuery.value?.createExport(payload)
+}
+
+function queryActiveExportTask(payload) {
+  return activeUnifiedQuery.value?.queryExportTask(payload)
 }
 
 function firstValue(record, keys) {
@@ -423,12 +474,18 @@ async function queryRecords(query = {}, resetPage = true) {
     }
     queryModelByType.value = { ...queryModelByType.value, [recordType]: nextQuery }
     const sequence = ++recordQuerySequence
-    const result = await requestAction('query-order-center-records', nextQuery)
-    const projection = salesOrderProjectionFromResult(result)
-    if (projection && sequence === recordQuerySequence && activeTabKey.value === recordType) {
-      state.orderCenter = mergeSalesOrderCenterProjection(state.orderCenter, projection)
+    isOrderQueryLoading.value = true
+    try {
+      const result = await requestAction('query-order-center-records', nextQuery)
+      const projection = salesOrderProjectionFromResult(result)
+      if (projection && sequence === recordQuerySequence && activeTabKey.value === recordType) {
+        state.orderCenter = mergeSalesOrderCenterProjection(state.orderCenter, projection)
+        saveExecutedQuery(recordType, nextQuery)
+      }
+      return result
+    } finally {
+      isOrderQueryLoading.value = false
     }
-    return result
   }
   const currentQuery = queryModelByType.value[recordType] || {}
   const requestedPageSize = Math.max(1, Number(query.pageSize ?? query.limit) || pageSize.value)
@@ -456,21 +513,43 @@ async function queryRecords(query = {}, resetPage = true) {
   queryModelByType.value = { ...queryModelByType.value, sales: cursorQuery }
 
   const sequence = ++salesQuerySequence
-  const result = await requestAction('query-sales-orders', cursorQuery)
-  const projection = salesOrderProjectionFromResult(result)
-  if (projection && sequence === salesQuerySequence && activeTabKey.value === recordType) {
-    state.orderCenter = mergeSalesOrderCenterProjection(state.orderCenter, projection)
-    const pagination = salesOrderPaginationFromPartition(projection)
-    const cursors = { ...salesPageCursors.value }
-    if (pagination.current) cursors[pagination.page] = pagination.current
-    if (pagination.next) cursors[pagination.page + 1] = pagination.next
-    else delete cursors[pagination.page + 1]
-    salesPageCursors.value = cursors
-    queryModelByType.value = {
-      ...queryModelByType.value,
-      sales: cursorQuery
+  isOrderQueryLoading.value = true
+  try {
+    const result = await requestAction('query-sales-orders', cursorQuery)
+    const projection = salesOrderProjectionFromResult(result)
+    if (projection && sequence === salesQuerySequence && activeTabKey.value === recordType) {
+      state.orderCenter = mergeSalesOrderCenterProjection(state.orderCenter, projection)
+      const pagination = salesOrderPaginationFromPartition(projection)
+      const cursors = { ...salesPageCursors.value }
+      if (pagination.current) cursors[pagination.page] = pagination.current
+      if (pagination.next) cursors[pagination.page + 1] = pagination.next
+      else delete cursors[pagination.page + 1]
+      salesPageCursors.value = cursors
+      queryModelByType.value = {
+        ...queryModelByType.value,
+        sales: cursorQuery
+      }
+      saveExecutedQuery(recordType, cursorQuery)
     }
+    return result
+  } finally {
+    isOrderQueryLoading.value = false
   }
+}
+
+async function refreshRefundRecords() {
+  const recordType = 'refund'
+  const currentQuery = queryModelByType.value[recordType] || {}
+  const nextQuery = {
+    ...currentQuery,
+    recordType,
+    page: 1,
+    pageSize: Math.max(1, Number(currentQuery.pageSize) || pageSize.value)
+  }
+  queryModelByType.value = { ...queryModelByType.value, [recordType]: nextQuery }
+  const result = await requestAction('query-order-center-records', nextQuery)
+  const projection = salesOrderProjectionFromResult(result)
+  if (projection) state.orderCenter = mergeSalesOrderCenterProjection(state.orderCenter, projection)
   return result
 }
 
@@ -684,6 +763,7 @@ async function handleSalesOrderDetailAction(payload = {}) {
   if (['refund-sales-order', 'void-sales-order'].includes(action)
     && ['success', 'succeeded'].includes(actionStatus(result))) {
     await queryRecords({}, false)
+    await refreshRefundRecords()
     await openSalesOrderDetail({ orderId: currentOrderId })
   }
   if (action === 'reopen-sales-order'
@@ -703,6 +783,8 @@ function resetLocalContext() {
   recordQuerySequence++
   salesPageCursors.value = {}
   queryModelByType.value = {}
+  executedQueryByType.value = {}
+  isOrderQueryLoading.value = false
   isSalesDetailOpen.value = false
   salesDetailOrder.value = {}
   isSalesDetailLoading.value = false
@@ -716,6 +798,10 @@ onMounted(() => {
   window.addEventListener('cashier-v3:state-context-changing', resetLocalContext)
   window.addEventListener('cashier-v3:state-context-changed', resetLocalContext)
 })
+
+watch(activeTabKey, () => {
+  activeUnifiedQuery.value?.load({ silent: true })
+}, { immediate: true })
 
 onBeforeUnmount(() => {
   window.removeEventListener('cashier-v3:open-sales-order-detail', showSalesOrderDetail)
@@ -752,13 +838,26 @@ onBeforeUnmount(() => {
       :key="activeTabKey"
       :search-placeholder="activeTab.searchPlaceholder"
       :status-options="statusOptions"
-      :fields="queryFields"
+      :fields="activeQueryFields"
       :settings="querySettings"
       default-sort-field="业务日期"
       lock-store-selector
       :current-store="state.currentStore"
+      :page-code="activeTab.pageCode"
+      :page-name="activeTab.label"
+      :result-count="total"
+      :page-size="pageSize"
+      :current-page-count="records.length"
+      :current-page="page"
+      :data-as-of="orderCenter.dataAsOf"
+      :executed-query="executedQuery"
+      :is-query-loading="isOrderQueryLoading"
+      :state-context-key="state.stateContextId"
+      :query-capability="activeQueryCapability"
       @query="queryRecords"
       :on-save-settings="saveQuerySettings"
+      :on-create-export="createActiveExport"
+      :on-query-export-task="queryActiveExportTask"
       @settings-applied="applyQuerySettings"
     />
 

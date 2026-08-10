@@ -53,6 +53,8 @@ function recordScope(string $mode, $stores, array $features = ['cashier.v3.order
 
 $operator = new CashierV3OperatorScope(133, 71, 'organization:8', 'tenant:default');
 $orderCenterSource = (string)file_get_contents($backendRoot . '/app/services/cashier/v3/order/CashierV3OrderCenterRecordQueryServices.php');
+$salesOrderQuerySource = (string)file_get_contents($backendRoot . '/app/services/cashier/v3/order/CashierV3SalesOrderQueryServices.php');
+$orderProjectionSource = (string)file_get_contents($root . '/前端代码/cashier-v3/src/services/cashierV3OrderProjectionContract.js');
 $calls = [];
 $reader = function (string $operation, array $context) use (&$calls): array {
     $calls[] = ['operation' => $operation, 'context' => $context];
@@ -89,6 +91,17 @@ recordOk('合法订单中心记录返回 offset 分页契约', $page['recordType
 recordOk('服务权益来源不向页面泄漏内部英文类型码', strpos($orderCenterSource, "'time_card' => '时间卡权益'") !== false
     && strpos($orderCenterSource, "'count_card' => '次数卡权益'") !== false
     && strpos($orderCenterSource, "'卡项权益（' . \$kind") === false);
+recordOk('退款记录只读取收银 V3 退款生命周期事实，不兼容旧退货表',
+    strpos($orderCenterSource, "CashierV3OrderLifecycleServices::OPERATION_TABLE") !== false
+    && strpos($orderCenterSource, "->where('rlo.operation_type', 'refund')") !== false
+    && strpos($orderCenterSource, "->where('rlo.status', 'succeeded')") !== false
+    && strpos($orderCenterSource, "Db::name('store_order_refund')") === false
+    && strpos($orderCenterSource, "'refundStatus' => '已退款作废'") !== false);
+recordOk('退款页签使用退款记录名称', strpos($orderCenterSource, "['key' => 'refund', 'label' => '退款记录'") !== false);
+recordOk('订单中心投影合同统一升级至退款事实 v3',
+    strpos($orderCenterSource, "CONTRACT_VERSION = 'cashier-v3.order-center.v3'") !== false
+    && strpos($salesOrderQuerySource, "CONTRACT_VERSION = 'cashier-v3.order-center.v3'") !== false
+    && strpos($orderProjectionSource, "ORDER_CONTRACT_VERSION = 'cashier-v3.order-center.v3'") !== false);
 
 $beforeBlocked = count($calls);
 $blocked = $service->queryRecords([

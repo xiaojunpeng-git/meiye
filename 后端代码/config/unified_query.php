@@ -6,6 +6,16 @@ use app\services\query\provider\MemberUnifiedQueryWorkerContextResolver;
 use app\services\query\provider\StaffUnifiedQueryPageRegistrar;
 use app\services\query\provider\StaffUnifiedQueryProvider;
 use app\services\query\provider\StaffUnifiedQueryWorkerContextResolver;
+use app\services\cashier\v3\order\CashierV3OrderCenterUnifiedQueryRegistrar;
+use app\services\cashier\v3\order\CashierV3OrderCenterUnifiedQueryWorkerContextResolver;
+use app\services\cashier\v3\order\CashierV3SalesOrderUnifiedQueryProvider;
+use app\services\cashier\v3\order\CashierV3RechargeOrderUnifiedQueryProvider;
+use app\services\cashier\v3\order\CashierV3RefundRecordUnifiedQueryProvider;
+use app\services\cashier\v3\order\CashierV3DebtRecordUnifiedQueryProvider;
+use app\services\cashier\v3\order\CashierV3ServiceRecordUnifiedQueryProvider;
+use app\services\cashier\v3\order\CashierV3SupplementRecordUnifiedQueryProvider;
+use app\services\cashier\v3\order\CashierV3GiftRecordUnifiedQueryProvider;
+use app\services\cashier\v3\order\CashierV3CardOperationUnifiedQueryProvider;
 use app\services\product\inventory\query\InventoryBatchStockUnifiedQueryProvider;
 use app\services\product\inventory\query\InventoryBatchStockUnifiedQueryRegistrar;
 use app\services\product\inventory\query\InventoryBatchStockUnifiedQueryWorkerContextResolver;
@@ -33,6 +43,7 @@ return [
         InventoryBatchStockUnifiedQueryRegistrar::class,
         InventoryOperationalUnifiedQueryRegistrar::class,
         InventoryStatisticsUnifiedQueryRegistrar::class,
+        CashierV3OrderCenterUnifiedQueryRegistrar::class,
     ],
     // 页面未登记专属 resolver 时，严格使用 requiredFeature/exportFeature。
     'permission_resolvers' => [],
@@ -52,6 +63,14 @@ return [
         InventoryStatisticsOutboundUnifiedQueryProvider::class,
         InventoryStatisticsExpiryUnifiedQueryProvider::class,
         InventoryStatisticsAgeUnifiedQueryProvider::class,
+        CashierV3SalesOrderUnifiedQueryProvider::class,
+        CashierV3RechargeOrderUnifiedQueryProvider::class,
+        CashierV3RefundRecordUnifiedQueryProvider::class,
+        CashierV3DebtRecordUnifiedQueryProvider::class,
+        CashierV3ServiceRecordUnifiedQueryProvider::class,
+        CashierV3SupplementRecordUnifiedQueryProvider::class,
+        CashierV3GiftRecordUnifiedQueryProvider::class,
+        CashierV3CardOperationUnifiedQueryProvider::class,
     ],
     // 后台导出执行时按权威 task.page_code 重建当前账号权限与数据范围。
     'worker_context_resolvers' => [
@@ -59,5 +78,6 @@ return [
         StaffUnifiedQueryWorkerContextResolver::class,
         InventoryBatchStockUnifiedQueryWorkerContextResolver::class,
         InventoryOperationalUnifiedQueryWorkerContextResolver::class,
+        CashierV3OrderCenterUnifiedQueryWorkerContextResolver::class,
     ],
 ];

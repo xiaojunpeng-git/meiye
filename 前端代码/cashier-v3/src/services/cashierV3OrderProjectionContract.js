@@ -1,4 +1,4 @@
-const ORDER_CONTRACT_VERSION = 'cashier-v3.order-center.v2'
+const ORDER_CONTRACT_VERSION = 'cashier-v3.order-center.v3'
 
 function isRecord(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)

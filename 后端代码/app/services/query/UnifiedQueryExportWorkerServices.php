@@ -445,7 +445,11 @@ class UnifiedQueryExportWorkerServices
             throw $this->invalidWorkerContext('', '任务缺少 page_code');
         }
         $resolver = $this->contextResolvers->resolve($pageCode);
-        if (!hash_equals($pageCode, $resolver->pageCode())) {
+        $resolvedPageCodes = method_exists($resolver, 'pageCodes')
+            ? $resolver->pageCodes()
+            : [$resolver->pageCode()];
+        $resolvedPageCodes = array_values(array_unique(array_map('strval', is_array($resolvedPageCodes) ? $resolvedPageCodes : [])));
+        if (!in_array($pageCode, $resolvedPageCodes, true)) {
             throw $this->invalidWorkerContext($pageCode, 'resolver 页面不匹配');
         }
         return $this->normalizeWorkerContext(

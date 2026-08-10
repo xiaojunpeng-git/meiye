@@ -14,7 +14,7 @@ use think\facade\Db;
  */
 final class CashierV3OrderCenterRecordQueryServices
 {
-    public const CONTRACT_VERSION = 'cashier-v3.order-center.v2';
+    public const CONTRACT_VERSION = 'cashier-v3.order-center.v3';
     public const BUSINESS_TIMEZONE = 'Asia/Shanghai';
     public const MAX_PAGE_SIZE = 100;
 
@@ -130,7 +130,7 @@ final class CashierV3OrderCenterRecordQueryServices
         $partition['businessTypes'] = [
             ['key' => 'sales', 'label' => '销售订单', 'ready' => true],
             ['key' => 'recharge', 'label' => '充值订单', 'ready' => true],
-            ['key' => 'refund', 'label' => '退货订单', 'ready' => true],
+            ['key' => 'refund', 'label' => '退款记录', 'ready' => true],
             ['key' => 'debt', 'label' => '欠款管理', 'ready' => true],
             ['key' => 'service', 'label' => '服务记录', 'ready' => true],
             ['key' => 'supplement', 'label' => '补交记录', 'ready' => true],
@@ -710,58 +710,46 @@ final class CashierV3OrderCenterRecordQueryServices
 
     private function readRefund(array $criteria, bool $countOnly): array
     {
-        $query = Db::name('store_order_refund')->alias('r')
-            ->leftJoin('cashier_v3_business_document_no bd', "bd.source_type = 'legacy_store_order_refund' AND bd.source_id = CAST(r.id AS CHAR) AND bd.document_type = 'refund' AND bd.tenant_id = '0'")
-            ->leftJoin('store_order o', 'o.id = r.store_order_id')
-            ->leftJoin('user u', 'u.uid = r.uid')
-            ->leftJoin('system_store s', 's.id = r.store_id')
-            ->leftJoin('system_store_staff st', 'st.id = o.staff_id')
-            ->where('r.is_del', 0);
-        $this->applyStoreScope($query, 'r.store_id', $criteria['allowedStoreIds']);
+        // Refund records are append-only V3 lifecycle facts.  The retired
+        // store_order_refund table is intentionally not a source or a
+        // compatibility projection for this workbench.
+        $query = Db::name(CashierV3OrderLifecycleServices::OPERATION_TABLE)->alias('rlo')
+            ->leftJoin('user u', 'u.uid = rlo.member_id')
+            ->leftJoin('system_store s', 's.id = rlo.store_id')
+            ->leftJoin('system_store_staff st', 'st.id = rlo.operator_id')
+            ->where('rlo.tenant_id', (string)$criteria['tenantId'])
+            ->where('rlo.operation_type', 'refund')
+            ->where('rlo.status', 'succeeded');
+        $this->applyStoreScope($query, 'rlo.store_id', $criteria['allowedStoreIds']);
         $this->applyKeyword($query, $criteria['keyword'], [
-            'r.order_id', 'bd.document_no', 'o.order_id', 'u.real_name', 'u.nickname', 'u.phone',
-            'r.refund_reason', 'r.refund_explain',
+            'rlo.operation_no', 'rlo.source_order_no_snapshot', 'u.real_name', 'u.nickname', 'u.phone',
+            'rlo.reason_snapshot',
         ]);
-        if ($criteria['status'] === 'pending') {
-            $query->whereIn('r.refund_type', [0, 1, 2, 4, 5])->where('r.is_cancel', 0);
-        } elseif ($criteria['status'] === 'completed') {
-            $query->where('r.refund_type', 6)->where('r.is_cancel', 0);
-        } elseif ($criteria['status'] === 'cancelled') {
-            $query->where('r.is_cancel', 1);
-        }
-        $total = (int)(clone $query)->count('r.id');
+        $total = (int)(clone $query)->count('rlo.id');
         if ($countOnly) return [[], $total];
-        $rows = $this->pageRows($query, $criteria, 'r.add_time', 'r.id', implode(',', [
-            'r.id', 'COALESCE(bd.document_no, r.order_id) AS refund_no', 'r.store_order_id', 'o.order_id AS source_order_no',
-            'r.uid', 'r.store_id', 'r.apply_price', 'r.refund_price', 'r.refunded_price',
-            'r.refund_reason', 'r.refund_explain', 'r.refund_type', 'r.is_cancel',
-            'r.refunded_time', 'r.add_time', 'u.real_name', 'u.nickname', 'u.phone',
+        $rows = $this->pageRows($query, $criteria, 'rlo.settled_at', 'rlo.id', implode(',', [
+            'rlo.id', 'rlo.operation_id', 'rlo.operation_no', 'rlo.source_type', 'rlo.source_order_no_snapshot',
+            'rlo.member_id', 'rlo.store_id', 'rlo.reason_snapshot', 'rlo.cash_refund_cents',
+            'rlo.status', 'rlo.business_date', 'rlo.settled_at', 'u.real_name', 'u.nickname', 'u.phone',
             's.name AS store_name', 'st.staff_name',
         ]));
         return [array_map(function (array $row): array {
-            $completed = (int)$row['refund_type'] === 6 && (int)$row['is_cancel'] === 0;
-            $time = $completed && (int)$row['refunded_time'] > 0
-                ? (int)$row['refunded_time']
-                : (int)$row['add_time'];
-            $amount = (float)$row['refunded_price'] > 0 ? $row['refunded_price']
-                : ((float)$row['refund_price'] > 0 ? $row['refund_price'] : $row['apply_price']);
             return [
-                'id' => 'refund:' . $row['id'],
-                'refundOrderNo' => (string)($row['refund_no'] ?: ('RF-' . $row['id'])),
-                'businessDate' => $this->date($time),
-                'sourceOrderNo' => (string)$row['source_order_no'],
-                'memberId' => (int)$row['uid'],
+                'id' => 'refund:' . (string)$row['operation_id'],
+                'refundOrderNo' => (string)$row['operation_no'],
+                'businessDate' => (string)$row['business_date'],
+                'sourceOrderNo' => (string)$row['source_order_no_snapshot'],
+                'memberId' => (int)$row['member_id'],
                 'memberName' => $this->memberName($row),
                 'phone' => (string)$row['phone'],
-                'refundSummary' => (string)($row['refund_explain'] ?: $row['refund_reason']),
-                'refundAmount' => (string)$amount,
+                'refundSummary' => (string)$row['reason_snapshot'],
+                'refundAmount' => $this->centsToMoney((int)$row['cash_refund_cents']),
                 'refundMethod' => '原记账方式退回',
                 'storeName' => (string)$row['store_name'],
                 'operatorName' => (string)$row['staff_name'],
-                'refundStatus' => (int)$row['is_cancel'] === 1
-                    ? '已取消'
-                    : ($completed ? '已退货退款' : '处理中'),
-                'refundCompletedAt' => $completed ? $this->dateTime($time) : null,
+                'refundStatus' => '已退款作废',
+                'refundCompletedAt' => $this->dateTime((int)$row['settled_at']),
+                'refundSourceType' => (string)$row['source_type'],
             ];
         }, $rows), $total];
     }
@@ -1494,9 +1482,7 @@ final class CashierV3OrderCenterRecordQueryServices
         }
         if ($type === 'refund') {
             return array_merge($options, [
-                ['value' => 'pending', 'label' => '处理中'],
-                ['value' => 'completed', 'label' => '已退货退款'],
-                ['value' => 'cancelled', 'label' => '已取消'],
+                ['value' => 'completed', 'label' => '已退款作废'],
             ]);
         }
         if ($type === 'debt') {
