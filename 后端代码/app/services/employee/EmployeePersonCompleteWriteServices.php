@@ -486,6 +486,7 @@ class EmployeePersonCompleteWriteServices extends BaseServices
 
         // 3) staff（仅 store_id>0；禁止 store_id=0 伪造任职）
         $staffId = 0;
+        $legacyOrderStatus = null;
         if ($storeId > 0) {
             $this->maybeFail('staff', $input);
             if ($staffIdHint > 0) {
@@ -498,6 +499,9 @@ class EmployeePersonCompleteWriteServices extends BaseServices
                     throw new AdminException('任职与员工不匹配');
                 }
                 $staffId = $staffIdHint;
+                if (!$positionIdsPresent) {
+                    $legacyOrderStatus = (int)($existStaff['order_status'] ?? 0) === 1 ? 1 : 0;
+                }
             } else {
                 $existStaff = Db::name('system_store_staff')
                     ->where('employee_id', $employeeId)
@@ -553,6 +557,12 @@ class EmployeePersonCompleteWriteServices extends BaseServices
             ]);
             $staffId = (int)$ret['staff_id'];
             $employeeId = (int)$ret['employee_id'];
+            if ($legacyOrderStatus !== null) {
+                // Preserve legacy order access when this request did not change jobs.
+                Db::name('system_store_staff')->where('id', $staffId)->update([
+                    'order_status' => $legacyOrderStatus,
+                ]);
+            }
         } elseif ($staffIdHint > 0) {
             throw new AdminException('无店直属不可绑定伪造门店任职');
         }

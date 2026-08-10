@@ -64,6 +64,7 @@ $check(
 $check(
     strpos($completeWrite, "'position_ids_present'") !== false
         && strpos($completeWrite, '$legacyProjection') !== false
+        && strpos($completeWrite, '$legacyOrderStatus') !== false
         && strpos($completeWrite, '$staffPayload[\'account\'] = $account') !== false,
     '历史任职的空岗位回显不得清空账号或撤销既有岗位投影',
     'STAFF-ROLE-LEGACY-EDIT-PRESERVE-01'
