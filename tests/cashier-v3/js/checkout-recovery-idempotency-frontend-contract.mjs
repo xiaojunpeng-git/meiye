@@ -46,7 +46,7 @@ ok(
 )
 ok(
   'successful checkout opens the authoritative sales-order detail before navigating',
-  /if \(action === 'view-sales-order'\) \{[\s\S]*?requestAction\('open-sales-order-detail', \{ orderId: salesOrderId \}\)[\s\S]*?router\.push\(\{ name: 'cashier-v3-order-center' \}\)[\s\S]*?cashier-v3:open-sales-order-detail/.test(workbench)
+  /if \(action === 'view-sales-order'(?: \|\| action === 'print-sales-order-receipt')?\) \{[\s\S]*?requestAction\('open-sales-order-detail', \{ orderId: salesOrderId \}\)[\s\S]*?if \(action === 'view-sales-order'\) \{[\s\S]*?router\.push\(\{ name: 'cashier-v3-order-center' \}\)[\s\S]*?cashier-v3:open-sales-order-detail/.test(workbench)
     && !/requestAction\('view-sales-order'/.test(workbench)
 )
 ok(
@@ -65,6 +65,11 @@ ok(
 ok(
   'recovery does not invoke another final checkout command',
   !/action: 'return-to-payment-edit'[\s\S]{0,600}action: 'submit-checkout'/.test(workbench)
+)
+ok(
+  'final preparation sends only workspace and checkout request contexts',
+  workbench.includes('const preparationContexts = checkoutSubmissionCommandContexts(current.commandContexts)')
+    && /requestAction\('prepare-checkout-submission',[\s\S]{0,220}commandContexts: preparationContexts/.test(workbench)
 )
 ok(
   'returning to payment edit always resets the overlay to payment step two',

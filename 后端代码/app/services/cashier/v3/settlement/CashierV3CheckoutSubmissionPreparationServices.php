@@ -470,13 +470,6 @@ final class CashierV3CheckoutSubmissionPreparationServices
                 $resource['accessMode'],
                 self::contextAccessMode($context)
             );
-            // A restored hang is a read dependency while a checkout request is
-            // prepared, but final submission must terminally settle it in the
-            // same transaction as sales and payment.  Persist that stricter
-            // final-plan access mode without advancing the hang at prepare time.
-            if ($kind === 'hang_order') {
-                $accessMode = 'mutate';
-            }
             [$scopeType, $scopeId] = self::planScope($kind, $context, $dataScope);
             $rowIndexByPhysical[$physical] = count($rows);
             $rows[] = [

@@ -14,6 +14,7 @@ use app\services\cashier\v3\event\CashierV3BusinessEventExecution;
 use app\services\cashier\v3\event\CashierV3BusinessEventRecorder;
 use app\services\cashier\v3\fact\CashierV3CheckoutFactPlanV1;
 use app\services\cashier\v3\fact\ThinkPhpCashierV3CheckoutFactRepository;
+use app\services\report\CustomerLifecycleFactServices;
 use think\facade\Db;
 
 /** Sales-debt repayment authority. Legacy debts are deliberately unsupported. */
@@ -109,6 +110,9 @@ final class CashierV3DebtRepaymentServices
                 'quantity' => 1,
                 'originalAmountCents' => $amountCents,
                 'discountAmountCents' => 0,
+                'couponUserId' => 0,
+                'couponNameSnapshot' => '',
+                'couponDiscountCents' => 0,
                 'saleAmountCents' => $amountCents,
                 'debtAmountCents' => 0,
                 'configuredCostCents' => 0,
@@ -313,6 +317,11 @@ final class CashierV3DebtRepaymentServices
             'payload' => ['contractVersion' => self::SUBMIT_CONTRACT_VERSION, 'debtId' => $debtId, 'amountCents' => $amount, 'salesOrderId' => (string)$authority['sales_order_id'], 'salespeopleSnapshotFingerprint' => hash('sha256', json_encode($selectedSalespeople, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES))],
         ]);
         $this->persistFactsInTx($payments, $authority, $selectedSalespeople, $repaymentId, $repaymentNo, $requestId, $amount, $commandKey, $event, $dimensions, $operator, $dataScope, $now);
+        if ($repaidAfter === $total) {
+            (new CustomerLifecycleFactServices())->recordDebtCompletionInTx(
+                $dataScope->tenantId(), (string)$authority['sales_order_id'], $now
+            );
+        }
         $lineDraftCount = (int)Db::name('cashier_v3_checkout_line_draft')
             ->where('request_id', $requestId)->where('draft_version', $requestVersion)
             ->where('draft_status', 'draft')->lock(true)->count();
@@ -715,7 +724,7 @@ final class CashierV3DebtRepaymentServices
         $performanceFacts = $this->performanceFacts($selectedSalespeople, $repaymentId, $amount, $ids);
         $plan = CashierV3CheckoutFactPlanV1::fromInternalAuthority([
             'contractVersion'=>CashierV3CheckoutFactPlanV1::CONTRACT_VERSION,'commandIdempotencyKey'=>$commandKey,
-            'context'=>['tenantId'=>$scope->tenantId(),'tenantNameSnapshot'=>'','organizationId'=>$operator->organizationId(),'organizationNameSnapshot'=>$dimensions['organizationName'],'organizationPathSnapshot'=>$dimensions['organizationPath'],'storeId'=>$operator->storeId(),'storeNameSnapshot'=>$dimensions['storeName'],'memberId'=>(int)$authority['member_id'],'memberNameSnapshot'=>$dimensions['memberName'],'operatorId'=>$operator->operatorId(),'operatorNameSnapshot'=>$dimensions['operatorName'],'businessDate'=>date('Y-m-d',$now),'businessTimezone'=>'Asia/Shanghai','occurredAt'=>$now,'settledAt'=>$now,'recordedAt'=>$now,'checkoutRequestId'=>$requestId,'orderId'=>$repaymentId,'orderNoSnapshot'=>$repaymentNo,'sourceDocumentType'=>'debt_repayment','businessEventNo'=>(string)$event['event_no']],
+            'context'=>['tenantId'=>$scope->tenantId(),'tenantNameSnapshot'=>'','organizationId'=>$operator->organizationId(),'organizationNameSnapshot'=>$dimensions['organizationName'],'organizationPathSnapshot'=>$dimensions['organizationPath'],'storeId'=>$operator->storeId(),'storeNameSnapshot'=>$dimensions['storeName'],'memberId'=>(int)$authority['member_id'],'memberNameSnapshot'=>$dimensions['memberName'],'operatorId'=>$operator->operatorId(),'operatorNameSnapshot'=>$dimensions['operatorName'],'businessDate'=>date('Y-m-d',$now),'businessTimezone'=>'Asia/Shanghai','occurredAt'=>$now,'settledAt'=>$now,'recordedAt'=>$now,'checkoutRequestId'=>$requestId,'orderId'=>$repaymentId,'orderNoSnapshot'=>$repaymentNo,'sourceDocumentType'=>'debt_repayment','businessEventNo'=>(string)$event['event_no'],'businessSourcePrimaryId'=>0,'businessSourcePrimaryNameSnapshot'=>'','businessSourceSecondaryId'=>0,'businessSourceSecondaryNameSnapshot'=>'','businessSourceLabelSnapshot'=>''],
             'saleFacts'=>[],'paymentFacts'=>$paymentFacts,'balanceFacts'=>[],'performanceFacts'=>$performanceFacts,
         ]);
         try { (new ThinkPhpCashierV3CheckoutFactRepository())->persistInTx($plan,$operator,$scope); }

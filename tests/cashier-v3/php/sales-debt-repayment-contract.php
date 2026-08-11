@@ -8,6 +8,7 @@ $facts = $root . '/后端代码/app/services/cashier/v3/fact/ThinkPhpCashierV3Ch
 $cashierModule = $root . '/后端代码/app/services/cashier/v3/cashier/CashierV3CashierModule.php';
 $commandGateway = $root . '/后端代码/app/services/cashier/v3/CashierV3CommandGatewayServices.php';
 $contextPolicies = $root . '/后端代码/app/services/cashier/v3/registry/CashierV3ContextPolicyRegistry.php';
+$debtResourceDiscovery = $root . '/后端代码/app/services/cashier/v3/settlement/CashierV3DebtRepaymentResourceDiscovery.php';
 $cashierShell = $root . '/前端代码/cashier-v3/src/layouts/CashierShell.vue';
 $cashierWorkbench = $root . '/前端代码/cashier-v3/src/views/CashierWorkbenchView.vue';
 require $root . '/后端代码/vendor/autoload.php';
@@ -17,6 +18,9 @@ use app\services\cashier\v3\settlement\CashierV3DebtRepaymentServices;
 $source = (string)file_get_contents($service);
 foreach (['cashier_v3_debt_authority','cashier_v3_debt_item_personnel_authority','cashier_v3_debt_repayment_draft','cashier_v3_debt_repayment_collection','debt.repaid','paymentFacts','performanceFacts','proportionalCumulativeAllocation','debt_repayment_v3_authority_missing','debt_repayment_header_item_amount_drift','debt_repayment_personnel_authority_missing','debt_repayment_selected_salesperson_allocation'] as $needle) {
     if (strpos($source, $needle) === false) throw new RuntimeException('missing contract: ' . $needle);
+}
+foreach (["'couponUserId' => 0", "'couponNameSnapshot' => ''", "'couponDiscountCents' => 0"] as $needle) {
+    if (strpos($source, $needle) === false) throw new RuntimeException('debt repayment kernel sale-line coupon snapshot missing: ' . $needle);
 }
 foreach (['resolveRepaymentSalespeople(', 'verifyRepaymentSalespeopleSnapshot(', "'salespeople_snapshot_json'", "'allocationWeightDenominator'=>100"] as $needle) {
     if (strpos($source, $needle) === false) throw new RuntimeException('selected repayment salesperson authority missing: ' . $needle);
@@ -48,8 +52,23 @@ foreach ([
     'registerDebtRepaymentPolicies($dispatcher)',
     "'prepare-debt-repayment',\n            ['cashier_workspace', 'debt_record']",
     "'submit-debt-repayment',\n            ['cashier_workspace', 'checkout_request']",
+    "['cashier_workspace', 'checkout_request', 'debt_record']",
+    "[new CashierV3DebtRepaymentResourceDiscovery(), 'discover']",
 ] as $needle) {
     if (strpos($cashierModuleSource, $needle) === false) throw new RuntimeException('production debt repayment context policy missing: ' . $needle);
+}
+$debtDiscoverySource = (string)file_get_contents($debtResourceDiscovery);
+foreach ([
+    "where('source_kind', 'debt_record')",
+    "where('source_id', (string)\$debtId)",
+    "'roles' => ['debt_record']",
+    "'accessMode' => 'mutate'",
+    "'debt_repayment_source_version_changed'",
+] as $needle) {
+    if (strpos($debtDiscoverySource, $needle) === false) throw new RuntimeException('server-derived debt lock contract missing: ' . $needle);
+}
+if (strpos($debtDiscoverySource, 'debtRecordId') !== false || strpos($debtDiscoverySource, 'debt_record_id') !== false) {
+    throw new RuntimeException('repayment submission must not discover debt from browser payload');
 }
 $cashierShellSource = (string)file_get_contents($cashierShell);
 if (strpos($cashierShellSource, "createCashierV3CommandId('CHECKOUT_PREPARE')") === false) throw new RuntimeException('canonical debt repayment preparation key missing');

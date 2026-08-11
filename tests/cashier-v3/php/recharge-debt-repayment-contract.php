@@ -47,6 +47,12 @@ foreach (["'allocationWeight'", "'allocationWeightDenominator' => 100", "'salesp
         exit(1);
     }
 }
+foreach (["'couponUserId' => 0", "'couponNameSnapshot' => ''", "'couponDiscountCents' => 0"] as $needle) {
+    if (strpos($source, $needle) === false) {
+        fwrite(STDERR, "recharge repayment kernel sale-line coupon snapshot missing: {$needle}\n");
+        exit(1);
+    }
+}
 if (!is_file($snapshotMigration) || strpos((string)file_get_contents($snapshotMigration), 'eb_cashier_v3_recharge_debt_repayment') === false) {
     fwrite(STDERR, "missing recharge repayment salesperson snapshot migration\n");
     exit(1);

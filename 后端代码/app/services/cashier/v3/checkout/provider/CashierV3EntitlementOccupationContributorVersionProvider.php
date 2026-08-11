@@ -85,11 +85,34 @@ final class CashierV3EntitlementOccupationContributorVersionProvider implements 
         CashierV3DataScopeContext $dataScope
     ): int {
         CashierV3TransactionGuard::assertInTransaction('entitlementOccupationContributorBump:' . $kind);
-        throw self::failure('occupation_contributor_advance_owned_by_source_writer', [
-            'kind' => $kind,
-            'resourceId' => $resourceId,
-            'action' => $action,
-        ]);
+        $id = $this->positiveId($resourceId);
+        if ($kind !== 'reservation') {
+            throw self::failure('occupation_contributor_advance_owned_by_source_writer', [
+                'kind' => $kind,
+                'resourceId' => $resourceId,
+                'action' => $action,
+            ]);
+        }
+        // The reservation command owns its header update and advances the
+        // authoritative version with an SQL compare-and-set in that same
+        // transaction.  The gateway calls us afterwards to validate the
+        // resulting version, not to apply a second increment.
+        $row = $this->row(Db::name('cashier_v3_reservation')
+            ->where('tenant_id', $dataScope->tenantId())
+            ->where('id', $id)
+            ->lock(true)
+            ->find());
+        $storeId = (int)($row['store_id'] ?? 0);
+        if (!$row || $storeId <= 0 || $storeId !== $dataScope->forcedStoreId()
+            || $scope->type() !== CashierV3ResourceScope::TYPE_STORE
+            || $scope->id() !== (string)$storeId) {
+            return 0;
+        }
+        $current = (int)($row['version'] ?? 0);
+        if ($current <= 0) {
+            throw self::failure('reservation_authority_version_invalid');
+        }
+        return $current;
     }
 
     private function authority(

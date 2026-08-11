@@ -561,6 +561,19 @@ final class CashierV3CheckoutProjectionServices
                     $row['discount_amount_cents'] ?? null,
                     'line.discount_amount_cents'
                 );
+                $couponUserId = self::nonNegativeInt(
+                    $row['coupon_user_id'] ?? 0,
+                    'line.coupon_user_id'
+                );
+                $couponName = self::text(
+                    $row['coupon_name_snapshot'] ?? '',
+                    128,
+                    'line.coupon_name_snapshot'
+                );
+                $couponDiscount = self::nonNegativeInt(
+                    $row['coupon_discount_cents'] ?? 0,
+                    'line.coupon_discount_cents'
+                );
                 $amount = self::nonNegativeInt(
                     $row['sale_amount_cents'] ?? null,
                     'line.sale_amount_cents'
@@ -628,6 +641,9 @@ final class CashierV3CheckoutProjectionServices
                     'quantity' => $quantity,
                     'originalAmountCents' => $original,
                     'discountAmountCents' => $discount,
+                    'couponUserId' => $couponUserId,
+                    'couponNameSnapshot' => $couponName,
+                    'couponDiscountCents' => $couponDiscount,
                     'saleAmountCents' => $amount,
                     'debtAmountCents' => $lineDebt,
                     'sourceNameSnapshot' => $sourceName,
@@ -683,6 +699,9 @@ final class CashierV3CheckoutProjectionServices
                     'originalAmount' => self::money($original),
                     'finalAmount' => self::money($amount),
                     'amount' => self::money($amount),
+                    'couponUserId' => $couponUserId,
+                    'couponNameSnapshot' => $couponName,
+                    'couponDiscountAmount' => self::money($couponDiscount),
                     'amountRole' => 'sale_receivable',
                     'debtAmountCents' => $lineDebt,
                     'serviceSource' => '本次购买',

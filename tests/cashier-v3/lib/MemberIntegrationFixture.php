@@ -181,6 +181,43 @@ final class MemberIntegrationFixture
     public static function ensureLegacySchema(): void
     {
         $statements = [
+            "CREATE TABLE IF NOT EXISTS `eb_cash_source` (
+              `id` int unsigned NOT NULL AUTO_INCREMENT,
+              `name` varchar(64) NOT NULL DEFAULT '',
+              `status` tinyint NOT NULL DEFAULT 1,
+              PRIMARY KEY (`id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci",
+            "CREATE TABLE IF NOT EXISTS `eb_system_menus` (
+              `id` int unsigned NOT NULL AUTO_INCREMENT,
+              `pid` int unsigned NOT NULL DEFAULT 0,
+              `type` tinyint NOT NULL DEFAULT 0,
+              `icon` varchar(128) NOT NULL DEFAULT '',
+              `menu_name` varchar(128) NOT NULL DEFAULT '',
+              `module` varchar(64) NOT NULL DEFAULT '',
+              `controller` varchar(64) NOT NULL DEFAULT '',
+              `action` varchar(64) NOT NULL DEFAULT '',
+              `api_url` varchar(255) NOT NULL DEFAULT '',
+              `methods` varchar(32) NOT NULL DEFAULT '',
+              `params` text,
+              `sort` int NOT NULL DEFAULT 0,
+              `is_show` tinyint NOT NULL DEFAULT 1,
+              `is_show_path` tinyint NOT NULL DEFAULT 1,
+              `access` tinyint NOT NULL DEFAULT 1,
+              `menu_path` varchar(255) NOT NULL DEFAULT '',
+              `path` varchar(255) NOT NULL DEFAULT '',
+              `auth_type` tinyint NOT NULL DEFAULT 0,
+              `header` varchar(255) NOT NULL DEFAULT '',
+              `is_header` tinyint NOT NULL DEFAULT 0,
+              `unique_auth` varchar(128) NOT NULL DEFAULT '',
+              `is_del` tinyint NOT NULL DEFAULT 0,
+              PRIMARY KEY (`id`), KEY `idx_unique_auth` (`unique_auth`,`is_del`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci",
+            "CREATE TABLE IF NOT EXISTS `eb_system_role` (
+              `id` int unsigned NOT NULL AUTO_INCREMENT,
+              `rules` text,
+              `status` tinyint NOT NULL DEFAULT 1,
+              PRIMARY KEY (`id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci",
             "CREATE TABLE IF NOT EXISTS `eb_system_store` (
               `id` int unsigned NOT NULL,
               `name` varchar(64) NOT NULL DEFAULT '',
@@ -359,6 +396,7 @@ final class MemberIntegrationFixture
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci",
             "CREATE TABLE IF NOT EXISTS `eb_store_order_cart_info` (
               `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+              `uid` int unsigned NOT NULL DEFAULT 0,
               `oid` bigint unsigned NOT NULL DEFAULT 0,
               `cart_id` varchar(64) NOT NULL DEFAULT '',
               `product_id` int unsigned NOT NULL DEFAULT 0,
@@ -388,15 +426,39 @@ final class MemberIntegrationFixture
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci",
             "CREATE TABLE IF NOT EXISTS `eb_store_debt` (
               `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+              `debt_no` varchar(32) NOT NULL DEFAULT '',
               `order_id` bigint unsigned NOT NULL DEFAULT 0,
+              `order_sn` varchar(32) NOT NULL DEFAULT '',
               `uid` int unsigned NOT NULL DEFAULT 0,
               `store_id` int unsigned NOT NULL DEFAULT 0,
+              `staff_id` int unsigned NOT NULL DEFAULT 0,
               `status` tinyint NOT NULL DEFAULT 0,
               `total_debt` decimal(12,2) NOT NULL DEFAULT 0,
               `repaid_debt` decimal(12,2) NOT NULL DEFAULT 0,
+              `remark` varchar(500) NOT NULL DEFAULT '',
+              `add_time` int unsigned NOT NULL DEFAULT 0,
+              `update_time` int unsigned NOT NULL DEFAULT 0,
               PRIMARY KEY (`id`),
+              UNIQUE KEY `uniq_debt_no` (`debt_no`),
               KEY `idx_order_id` (`order_id`),
               KEY `idx_uid_status_store` (`uid`,`status`,`store_id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci",
+            "CREATE TABLE IF NOT EXISTS `eb_store_debt_item` (
+              `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+              `debt_id` bigint unsigned NOT NULL DEFAULT 0,
+              `order_id` bigint unsigned NOT NULL DEFAULT 0,
+              `cart_info_id` bigint unsigned NOT NULL DEFAULT 0,
+              `product_id` bigint unsigned NOT NULL DEFAULT 0,
+              `product_type` tinyint NOT NULL DEFAULT 0,
+              `product_name` varchar(255) NOT NULL DEFAULT '',
+              `cart_num` int NOT NULL DEFAULT 1,
+              `debt_amount` decimal(12,2) NOT NULL DEFAULT 0,
+              `repaid_debt` decimal(12,2) NOT NULL DEFAULT 0,
+              `add_time` int unsigned NOT NULL DEFAULT 0,
+              `update_time` int unsigned NOT NULL DEFAULT 0,
+              PRIMARY KEY (`id`),
+              KEY `idx_debt_id` (`debt_id`),
+              KEY `idx_order_cart` (`order_id`,`cart_info_id`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci",
             "CREATE TABLE IF NOT EXISTS `eb_store_product` (
               `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
@@ -430,6 +492,7 @@ final class MemberIntegrationFixture
               `suk` varchar(128) NOT NULL DEFAULT '',
               `price` decimal(12,2) unsigned NOT NULL DEFAULT 0,
               `ot_price` decimal(12,2) unsigned NOT NULL DEFAULT 0,
+              `cost` decimal(12,2) unsigned NOT NULL DEFAULT 0,
               `stock` decimal(18,4) NOT NULL DEFAULT 0,
               `code` varchar(50) NOT NULL DEFAULT '',
               `bar_code` varchar(50) NOT NULL DEFAULT '',
@@ -543,8 +606,15 @@ final class MemberIntegrationFixture
         self::ensureColumn('eb_store_order', 'mark', "varchar(512) NOT NULL DEFAULT ''");
         self::ensureColumn('eb_store_order', 'add_time', "int unsigned NOT NULL DEFAULT 0");
         self::ensureColumn('eb_store_order', 'pay_time', "int unsigned NOT NULL DEFAULT 0");
+        self::ensureColumn('eb_store_order_cart_info', 'uid', "int unsigned NOT NULL DEFAULT 0");
         self::ensureColumn('eb_store_debt', 'uid', "int unsigned NOT NULL DEFAULT 0");
         self::ensureColumn('eb_store_debt', 'store_id', "int unsigned NOT NULL DEFAULT 0");
+        self::ensureColumn('eb_store_debt', 'debt_no', "varchar(32) NOT NULL DEFAULT ''");
+        self::ensureColumn('eb_store_debt', 'order_sn', "varchar(32) NOT NULL DEFAULT ''");
+        self::ensureColumn('eb_store_debt', 'staff_id', "int unsigned NOT NULL DEFAULT 0");
+        self::ensureColumn('eb_store_debt', 'remark', "varchar(500) NOT NULL DEFAULT ''");
+        self::ensureColumn('eb_store_debt', 'add_time', "int unsigned NOT NULL DEFAULT 0");
+        self::ensureColumn('eb_store_debt', 'update_time', "int unsigned NOT NULL DEFAULT 0");
         self::ensureColumn('eb_employee', 'employment_type_code', "varchar(16) DEFAULT NULL");
         self::ensureColumn('eb_employee', 'employment_type_version', "bigint unsigned NOT NULL DEFAULT 0");
     }

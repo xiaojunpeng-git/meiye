@@ -150,6 +150,22 @@ final class PaymentDraftCapturingRepository implements CashierV3CheckoutRequestR
             $dataScope
         );
     }
+
+    public function bindResumedHangOrderInTx(
+        string $requestId,
+        int $requestVersion,
+        string $hangOrderId,
+        CashierV3OperatorScope $operatorScope,
+        CashierV3DataScopeContext $dataScope
+    ): void {
+        $this->delegate->bindResumedHangOrderInTx(
+            $requestId,
+            $requestVersion,
+            $hangOrderId,
+            $operatorScope,
+            $dataScope
+        );
+    }
 }
 
 $passed = 0;

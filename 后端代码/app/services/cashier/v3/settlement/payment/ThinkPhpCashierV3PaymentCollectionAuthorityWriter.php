@@ -30,7 +30,11 @@ final class ThinkPhpCashierV3PaymentCollectionAuthorityWriter
         CashierV3TransactionGuard::assertInTransaction('paymentCollectionAuthority.persistInTx');
         $batch = $plan->batch();
         $this->assertDataScope($batch, $operatorScope, $dataScope);
-        $this->assertPersistedSalesOrderIdentity($batch, $plan->composition());
+        $this->assertPersistedSalesOrderIdentity(
+            $batch,
+            $plan->composition(),
+            $plan->entitlementCreditCents()
+        );
 
         // A request-level batch is the concurrency guard for its 0..7 detail
         // rows. Missing-key FOR UPDATE is avoided; the unique request key lets
@@ -133,7 +137,8 @@ final class ThinkPhpCashierV3PaymentCollectionAuthorityWriter
 
     private function assertPersistedSalesOrderIdentity(
         array $batch,
-        string $expectedComposition
+        string $expectedComposition,
+        int $entitlementCreditCents
     ): void
     {
         if (!in_array($expectedComposition, ['sale_only', 'mixed'], true)) {
@@ -167,12 +172,13 @@ final class ThinkPhpCashierV3PaymentCollectionAuthorityWriter
             || (string)($order['composition'] ?? '') !== $expectedComposition
             || (string)($order['business_date'] ?? '') !== (string)$batch['business_date']
             || (int)($order['sale_amount_cents'] ?? -1)
-                !== (int)($request['sales_amount_cents'] ?? -1)
+                !== (int)($request['sales_amount_cents'] ?? -1) + $entitlementCreditCents
             || (string)($order['order_status'] ?? '') !== 'settled'
             || (string)($order['order_direction'] ?? '') !== 'forward') {
             throw self::failure('payment_collection_persisted_sales_order_mismatch', [
                 'order_sale_amount_cents' => (int)($order['sale_amount_cents'] ?? -1),
                 'request_sales_amount_cents' => (int)($request['sales_amount_cents'] ?? -1),
+                'entitlement_credit_cents' => $entitlementCreditCents,
                 'batch_receivable_amount_cents' => (int)($batch['receivable_amount_cents'] ?? -1),
                 'order_status' => (string)($order['order_status'] ?? ''),
                 'order_direction' => (string)($order['order_direction'] ?? ''),

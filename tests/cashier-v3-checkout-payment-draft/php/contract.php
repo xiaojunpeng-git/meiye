@@ -128,6 +128,15 @@ namespace {
             $this->lastKernel = $kernelResult;
             return ['replayed' => false];
         }
+
+        public function bindResumedHangOrderInTx(
+            string $requestId,
+            int $requestVersion,
+            string $hangOrderId,
+            CashierV3OperatorScope $operatorScope,
+            CashierV3DataScopeContext $dataScope
+        ): void {
+        }
     }
 
     $passed = 0;

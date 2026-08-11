@@ -83,8 +83,8 @@ check_card_operation($replacement['lines'][0]['quantityAfter'] === 2, 'replaceme
 check_card_operation(
     count($replacement['lines']) === 2
     && ($replacement['lines'][1]['lineRole'] ?? '') === 'target_project'
-    && (int)($replacement['lines'][1]['quantityAfter'] ?? 0) === 2,
-    'replacement freezes one target right line at the selected quantity'
+    && (int)($replacement['lines'][1]['quantityAfter'] ?? 0) === 1,
+    'replacement freezes one target right line regardless of selected source quantity'
 );
 $replacementRepeated = CashierV3CardOperationKernel::plan([
     'operationType' => 'project_replacement', 'sourceCardHolderId' => 10, 'sourceCardHolderVersion' => 7,
@@ -95,6 +95,25 @@ check_card_operation(
     count($replacementRepeated['stateMutation']['projectMutations'] ?? []) === 1
     && (int)($replacementRepeated['stateMutation']['projectMutations'][0]['quantityAfter'] ?? -1) === 0,
     'repeated source selection is aggregated before available rights validation'
+);
+$multipleSourceReplacement = $source;
+$multipleSourceReplacement['projects'][] = [
+    'detailId' => 302,
+    'detailVersion' => 4,
+    'projectId' => 402,
+    'remainingTimes' => 3,
+    'remainingValueCents' => 6000,
+];
+$replacementMultipleSources = CashierV3CardOperationKernel::plan([
+    'operationType' => 'project_replacement', 'sourceCardHolderId' => 10, 'sourceCardHolderVersion' => 7,
+    'idempotencyKey' => 'PROJECT-REPLACEMENT-0004', 'reason' => '项目调整',
+    'projectLines' => [['sourceDetailId' => 301, 'quantity' => 2], ['sourceDetailId' => 302, 'quantity' => 3]],
+], $multipleSourceReplacement, ['catalogId' => 501, 'catalogName' => '目标项目'], $context);
+check_card_operation(
+    count($replacementMultipleSources['stateMutation']['projectMutations'] ?? []) === 2
+    && count($replacementMultipleSources['lines'] ?? []) === 3
+    && (int)($replacementMultipleSources['lines'][2]['quantityAfter'] ?? 0) === 1,
+    'multiple source projects still create exactly one target right'
 );
 $roundingSource = $source;
 $roundingSource['projects'] = [[

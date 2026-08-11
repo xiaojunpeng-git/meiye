@@ -56,22 +56,9 @@ final class CashierV3SaleCatalogServices
             if ($normalized['kindCode'] === 'custom_card') {
                 continue;
             }
-            $cardUnavailableReason = '';
             $catalogItem = $normalized;
-            if ($normalized['productType'] === 5) {
-                try {
-                    // 目录与“加入购物车”必须使用同一张卡项及卡内项目快照；
-                    // 否则下架或跨店的卡内项目会在点击后才失败。
-                    $cardForSale = $this->normalizeAuthorityRow($row, true);
-                    $this->assertPurchasable($cardForSale, 1);
-                    $catalogItem = $cardForSale;
-                } catch (CashierV3CommandException $exception) {
-                    $cardUnavailableReason = $exception->getMessage();
-                }
-            }
             $catalogItems[] = [
                 'item' => $catalogItem,
-                'cardUnavailableReason' => $cardUnavailableReason,
             ];
             foreach ($normalized['categoryNames'] as $name) {
                 $categories[$name] = true;
@@ -88,10 +75,8 @@ final class CashierV3SaleCatalogServices
             $catalogItem = $entry['item'];
             $inventory = $inventoryAvailability[self::inventoryItemKey($catalogItem)] ?? null;
             $publicItem = $this->publicCatalogItem($catalogItem, $inventory);
-            if ($entry['cardUnavailableReason'] !== '') {
-                $publicItem['disabled'] = true;
-                $publicItem['disabledReason'] = $entry['cardUnavailableReason'];
-            }
+            // 目录点击只写入收银草稿，不在这里拦截库存、上下架或卡内余次。
+            // 最终可售性、库存和权益状态统一在确认收款事务内复核。
             $items[] = $publicItem;
         }
         return [
@@ -300,6 +285,38 @@ final class CashierV3SaleCatalogServices
     }
 
     /**
+     * Draft-only catalog selection.  This deliberately records the current
+     * catalog snapshot without applying sale, price or inventory rules.  The
+     * checkout preparation/submit transaction is the only place that turns a
+     * draft line into a business fact.
+     */
+    public function selectDraftSaleLineAfterGatewayLocksInTx(
+        $itemId,
+        string $idempotencyKey,
+        CashierV3OperatorScope $operatorScope,
+        CashierV3DataScopeContext $dataScope
+    ): array {
+        CashierV3TransactionGuard::assertInTransaction('cashierSaleCatalogDraftSelect');
+        $this->assertStoreScope($operatorScope, $dataScope);
+        $idempotencyKey = trim($idempotencyKey);
+        if ($idempotencyKey === '' || strlen($idempotencyKey) > 128 || strpos($idempotencyKey, "\0") !== false) {
+            throw self::failure(
+                CashierV3ResultCode::INVALID_IDEMPOTENCY_KEY,
+                '本次添加请求标识无效，请重新操作。',
+                'cashier_sale_idempotency_key_invalid'
+            );
+        }
+        $skuId = self::positiveId($itemId, 'itemId');
+        $row = $this->authority->lockStoreItemBySkuId($operatorScope->storeId(), $skuId);
+        if (!is_array($row)) {
+            throw self::notAvailable($skuId);
+        }
+        // No active/stock/card-availability assertion here.  This is a draft
+        // snapshot only; checkout re-reads and locks the authoritative rows.
+        return $this->saleLineFromItem($this->normalizeAuthorityRow($row, false), $idempotencyKey);
+    }
+
+    /**
      * Build the one server-managed sale line for a pending card/project
      * upgrade. The target's normal catalogue price remains the original
      * amount; the consumed old-right value is represented as a frozen discount
@@ -395,6 +412,8 @@ final class CashierV3SaleCatalogServices
             'sourceCardHolderVersion' => (int)$source['holderVersion'],
             'originOrderId' => (int)($source['originOrderId'] ?? 0),
             'memberId' => (int)($source['currentMemberId'] ?? 0),
+            'sourceCardName' => trim((string)($source['cardName'] ?? '')) ?: '原卡',
+            'sourceCardNo' => trim((string)($source['cardNo'] ?? '')),
             'targetProductId' => $targetProductId,
             'targetSkuId' => $targetSkuId,
             'targetPriceCents' => $targetPriceCents,
@@ -515,9 +534,12 @@ final class CashierV3SaleCatalogServices
         // settlement amount is the confirmed line amount; the configured
         // display price remains separately available in configuredPriceCents
         // and the immutable authority snapshot for audit.
-        $settlementOriginalUnitPriceCents = $isCustomCard
-            ? max($current['originalUnitPriceCents'], $unitPriceCents)
-            : $current['originalUnitPriceCents'];
+        // 草稿中的成交价就是本次结算价。为保持统一结算方程，原价快照
+        // 至少覆盖成交价，目录后来改价不改变本单金额。
+        $settlementOriginalUnitPriceCents = max(
+            (int)($storedLine['original_unit_price_cents'] ?? 0),
+            $unitPriceCents
+        );
         $originalLineAmountCents = self::multiplyCents($settlementOriginalUnitPriceCents, $quantity);
         return [
             'contractVersion' => self::CHECKOUT_SOURCE_CONTRACT_VERSION,
@@ -643,6 +665,7 @@ final class CashierV3SaleCatalogServices
         $sourceValue = $binding['sourceRemainingValueCents'] ?? null;
         $delta = $binding['settlementDeltaCents'] ?? null;
         $sourceResources = is_array($binding['sourceResources'] ?? null) ? $binding['sourceResources'] : [];
+        $couponDiscount = (int)($storedLine['coupon_discount_cents'] ?? 0);
         if (preg_match('/^COP-[A-F0-9]{40}$/D', $operationId) !== 1
             || !in_array($operationType, ['card_upgrade', 'project_upgrade'], true)
             || !preg_match('/^[a-f0-9]{64}$/D', (string)($binding['operationFingerprint'] ?? ''))
@@ -652,7 +675,9 @@ final class CashierV3SaleCatalogServices
             || (int)($binding['targetProductId'] ?? 0) !== (int)$current['productId']
             || (int)($binding['targetSkuId'] ?? 0) !== (int)$current['skuId']
             || (int)$current['unitPriceCents'] !== $targetPrice
-            || (int)$storedLine['unit_price_cents'] !== $delta
+            // 行券只降低本次应收，绝不能改写升级操作冻结的原始补价。
+            || $couponDiscount < 0 || $couponDiscount > $delta
+            || (int)$storedLine['unit_price_cents'] !== $delta - $couponDiscount
             || (int)$storedLine['original_unit_price_cents'] !== $targetPrice
             || (int)$current['productType'] !== ($operationType === 'card_upgrade' ? 5 : 6)
             || $sourceResources === []) {
@@ -929,22 +954,15 @@ final class CashierV3SaleCatalogServices
         $changedReason = trim((string)($stored['price_change_reason'] ?? ''));
         $changedBy = (int)($stored['price_changed_by'] ?? 0);
         $changedByName = trim((string)($stored['price_changed_by_name_snapshot'] ?? ''));
-        $isCustomCard = (string)($current['authoritySnapshot']['cardPurchase']['sourceKind'] ?? '') === 'custom_card';
         $priceAuditValid = $changedAt === 0
-            ? ($storedUnitPrice === $current['unitPriceCents']
-                && in_array($storedCost, [0, $current['configuredCostCents']], true)
+            ? ($storedUnitPrice >= 0 && $storedCost >= 0
                 && $changedReason === '' && $changedBy === 0 && $changedByName === '')
-            : ($storedCost === $current['configuredCostCents']
-                && $storedUnitPrice >= $storedCost
-                && ($isCustomCard || $storedUnitPrice <= $current['unitPriceCents'])
+            : ($storedCost >= 0 && $storedUnitPrice >= $storedCost
                 && $changedReason !== '' && $changedBy > 0 && $changedByName !== '');
         $matches = (int)($stored['catalog_product_id'] ?? 0) === $current['productId']
             && (int)($stored['catalog_sku_id'] ?? 0) === $current['skuId']
             && (int)($stored['catalog_product_type'] ?? -1) === $current['productType']
-            && (int)($stored['source_version'] ?? 0) === $current['productVersion']
-            && (int)($stored['detail_version'] ?? 0) === $current['skuVersion']
-            && $priceAuditValid
-            && (int)($stored['original_unit_price_cents'] ?? -1) === $current['originalUnitPriceCents'];
+            && $priceAuditValid;
         $fingerprint = (string)($stored['authority_fingerprint'] ?? '');
         $snapshot = self::decodeStoredObject(
             (string)($stored['authority_snapshot_json'] ?? ''),
@@ -954,10 +972,10 @@ final class CashierV3SaleCatalogServices
         if (!$matches
             || preg_match('/^[a-f0-9]{64}$/D', $fingerprint) !== 1
             || !hash_equals($fingerprint, $storedFingerprint)
-            || !hash_equals($fingerprint, $current['authorityFingerprint'])) {
+            ) {
             throw new CashierV3CommandException(
                 CashierV3ResultCode::RESOURCE_VERSION_CONFLICT,
-                '商品资料或价格已经变化，请删除该行后重新选择。',
+                '商品资料已经失效，请删除该行后重新选择。',
                 CashierV3ResultCode::STATUS_CONFLICT,
                 [
                     'line_id' => (string)($stored['line_key'] ?? ''),
@@ -1587,14 +1605,11 @@ final class CashierV3SaleCatalogServices
     {
         $isInventoryProduct = $item['productType'] === 0 && $item['isInventory'];
         $inventoryAvailable = !$isInventoryProduct || !empty($inventory['available']);
-        $disabled = !$item['active'] || $item['kindCode'] === 'custom_card' || !$inventoryAvailable;
+        // 目录阶段只创建草稿，库存与可售状态统一在结账事务中判断。
+        $disabled = $item['kindCode'] === 'custom_card';
         $reason = '';
-        if (!$item['active']) {
-            $reason = '该品项已下架或不可售';
-        } elseif ($item['kindCode'] === 'custom_card') {
+        if ($item['kindCode'] === 'custom_card') {
             $reason = '定制卡需先配置卡内项目';
-        } elseif (!$inventoryAvailable) {
-            $reason = '库存不足';
         }
         return [
             'id' => $item['skuId'],

@@ -158,6 +158,11 @@ final class CashierV3CardOperationResourceDiscovery
             throw self::notFound('target_project_not_available');
         }
 
+        // 项目替换在本命令内直接变更来源权益；项目升级仅创建受保护的
+        // 销售草稿，旧项目必须留到普通销售订单结账成功后才结算。
+        $sourceProjectAccessMode = $type === CashierV3CardOperationKernel::TYPE_PROJECT_REPLACEMENT
+            ? 'mutate'
+            : 'read';
         $resources = [];
         foreach ($ids as $id) {
             $version = $versionMap[$id];
@@ -166,7 +171,7 @@ final class CashierV3CardOperationResourceDiscovery
                 'id' => (string)$id,
                 'expectedVersion' => (int)$version['current_version'],
                 'roles' => ['source_project:' . $id],
-                'accessMode' => 'mutate',
+                'accessMode' => $sourceProjectAccessMode,
                 'providerContractVersion' => 'cashier-v3-entitlement-resource-v1',
                 'authorityFingerprint' => self::fingerprint($version),
             ];

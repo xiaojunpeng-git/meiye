@@ -1,0 +1,48 @@
+#!/usr/bin/env node
+import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const dirname = path.dirname(fileURLToPath(import.meta.url))
+const repo = path.resolve(dirname, '../../..')
+const workbench = fs.readFileSync(path.join(repo, '前端代码/cashier-v3/src/views/CashierWorkbenchView.vue'), 'utf8')
+const selector = fs.readFileSync(path.join(repo, '前端代码/cashier-v3/src/components/cashier/EntitlementSelectorOverlay.vue'), 'utf8')
+const checkout = fs.readFileSync(path.join(repo, '前端代码/cashier-v3/src/components/cashier/CashierCheckoutOverlay.vue'), 'utf8')
+
+assert.match(workbench, /async function handleOpenCardOperation[\s\S]*?if \(hasCartLines\.value\) \{[\s\S]*?await confirmClearCart\(\)/)
+assert.match(workbench, /if \(operation && operation\.awaitingTarget !== true\)[\s\S]*?当前只能办理/)
+assert.match(workbench, /const cardOperationReasonModes = new Set\(\[[\s\S]*?'card-extension'[\s\S]*?'card-transfer'[\s\S]*?'card-disable'[\s\S]*?'card-enable'[\s\S]*?\]\)/)
+assert.doesNotMatch(workbench, /if \(mode === 'project-replacement'\) return '替换原因'/)
+assert.doesNotMatch(workbench, /return '升级原因'/)
+assert.match(workbench, /const existingSources = operation\.mode === 'project-replacement'[\s\S]*?sources: \[\.\.\.existingSources, selectedSource\]/)
+assert.match(workbench, /completedMode === 'project-replacement'\) await openEntitlementSelector\(\)/)
+assert.match(selector, /operationMode === 'project-replacement' && selectedOperationProjectKeys\.length/)
+assert.match(selector, /选择目标项目/)
+assert.match(workbench, /if \(\['card-upgrade', 'project-upgrade'\]\.includes\(operation\.mode\)\) \{[\s\S]*?result = await confirmPreviewCardOperation\(\)[\s\S]*?catch \(error\)[\s\S]*?awaitingTarget: true/)
+assert.match(workbench, /if \(pendingCheckout\) \{[\s\S]*?const committedDraft = responseDataBlock\(result\)\.cashierDraft[\s\S]*?await applyCommittedCashierDraft\([\s\S]*?committedDraft,[\s\S]*?currentCashierDraftScopeKey\.value[\s\S]*?requestAction\('open-cashier-workbench', \{ silent: true \}\)\.catch/)
+assert.doesNotMatch(workbench, /确认后生成升级补价/)
+assert.doesNotMatch(workbench, /确认升级并去收款/)
+assert.match(workbench, /正在加入购物车…/)
+assert.match(selector, /return !isSourceAvailable\(source\) \|\| project\.disabled === true \|\| project\.selectable === false/)
+assert.match(workbench, /v-if="\['card-transfer', 'project-replacement'\]\.includes\(previewCardOperation\.mode\)/)
+assert.match(workbench, /activeCardOperationUpgrade[\s\S]*?line\?\.cardOperationUpgrade \|\| line\?\.authoritySnapshot\?\.cardOperationUpgrade/)
+assert.match(workbench, /class="cart-line__upgrade-flow"[\s\S]*?sourceCardName[\s\S]*?sourceCardNo[\s\S]*?旧权益抵扣[\s\S]*?本次应收/)
+assert.match(workbench, /balancePaymentAmount: \(Number\(activeCardOperationUpgrade\.value\.sourceRemainingValueCents/)
+assert.match(workbench, /activeCardOperationUpgrade\.value[\s\S]*?'立即结账'/)
+assert.match(workbench, /!cardOperationUpgradeBinding\(line\)[\s\S]*?!hasCartLineCraftsmen\(line\)/)
+assert.match(workbench, /const showCraftsmen = isProjectLine\(line\) && !cardOperationUpgradeBinding\(line\)/)
+assert.match(workbench, /if \(isProjectLine\(line\) && !cardOperationUpgradeBinding\(line\)\) payload\.craftsmen = craftsmen/)
+assert.doesNotMatch(workbench, /requestAction\('open-balance-payment'[\s\S]*?cardOperationUpgrade/)
+assert.match(checkout, /旧权益余额支付/)
+assert.match(checkout, /不扣减会员储值余额/)
+assert.match(checkout, /目标商品原价/)
+assert.match(checkout, /补差应收/)
+assert.doesNotMatch(checkout, /卡升级抵扣|项目升级抵扣/)
+assert.match(checkout, /function submissionResponseEnvelope\(response = \{\}\)/)
+assert.match(checkout, /envelope\?\.result\?\.message \|\| envelope\?\.message/)
+assert.match(checkout, /\? '充值结账失败，请核对收款信息后重试。'/)
+assert.match(checkout, /: '结账失败，请核对收款信息后重试。'/)
+assert.doesNotMatch(checkout, /充值提交失败，请核对收款信息后重试。/)
+
+console.log('R15_CARD_OPERATION_FRONTEND_CONTRACT_PASS')

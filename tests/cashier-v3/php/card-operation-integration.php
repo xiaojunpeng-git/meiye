@@ -588,15 +588,39 @@ try {
         cardOpProjectionBody($targetSession, 4102, 'card-enable'),
         $targetSession
     );
-    ok('停用成功且权益选择器不再暴露该卡',
+    $disabledSource = [];
+    $enableSource = [];
+    foreach ((array)($disabledProjection['data']['entitlementSelector']['sources'] ?? []) as $source) {
+        if ((int)($source['entitlementInstanceId'] ?? $source['id'] ?? 0) === 4601) {
+            $disabledSource = (array)$source;
+            break;
+        }
+    }
+    foreach ((array)($enableProjection['data']['entitlementSelector']['sources'] ?? []) as $source) {
+        if ((int)($source['entitlementInstanceId'] ?? $source['id'] ?? 0) === 4601) {
+            $enableSource = (array)$source;
+            break;
+        }
+    }
+    ok('停用成功且普通权益投影将该卡标记为不可选',
         ($disable['result']['status'] ?? '') === 'success'
         && (string)Db::name('cashier_v3_card_state')->where('card_holder_id', 4601)->value('card_status') === 'disabled'
-        && !cardOpSelectorHasHolder($disabledProjection, 4601),
-        '', 'C2-CARDOP-BE-11');
-    ok('启用入口只读投影可看见停用卡且不放宽普通权益选择',
-        cardOpSelectorHasHolder($enableProjection, 4601)
-        && !cardOpSelectorHasHolder($disabledProjection, 4601),
-        '', 'C2-CARDOP-BE-11A');
+        && (string)($disabledSource['statusCode'] ?? '') === 'disabled'
+        && ($disabledSource['selectable'] ?? true) === false,
+        json_encode([
+            'disable' => $disable,
+            'cardStatus' => Db::name('cashier_v3_card_state')->where('card_holder_id', 4601)->value('card_status'),
+            'disabledSelector' => $disabledProjection['data']['entitlementSelector'] ?? [],
+        ], JSON_UNESCAPED_UNICODE), 'C2-CARDOP-BE-11');
+    ok('启用入口可读取停用卡且不将其放宽为可用权益',
+        (string)($enableSource['statusCode'] ?? '') === 'disabled'
+        && ($enableSource['selectable'] ?? true) === false
+        && (string)($disabledSource['statusCode'] ?? '') === 'disabled'
+        && ($disabledSource['selectable'] ?? true) === false,
+        json_encode([
+            'enableSelector' => $enableProjection['data']['entitlementSelector'] ?? [],
+            'disabledSelector' => $disabledProjection['data']['entitlementSelector'] ?? [],
+        ], JSON_UNESCAPED_UNICODE), 'C2-CARDOP-BE-11A');
 
     $enableVersion = cardOpVersion('card_holder', 4601);
     $enableBody = cardOpBody($session, [
@@ -645,7 +669,7 @@ try {
         && (int)Db::name('store_order')->where('id', 4501)->value('uid') === 4101,
         json_encode($extensionAudit, JSON_UNESCAPED_UNICODE), 'C2-CARDOP-BE-12A');
 
-    cardOpSection('project replacement preserves current rights 1:1');
+    cardOpSection('project replacement grants one target right');
     $replacementVersion = cardOpVersion('card_holder', 4601);
     $replacementKey = 'CARD_OPERATION-' . MemberIntegrationFixture::uuid();
     $replacementBody = cardOpBody($session, [
@@ -662,11 +686,12 @@ try {
     $replacementTarget = (array)Db::name('store_order_cart_info')
         ->where('oid', 4501)->where('product_id', 4802)->where('cart_type', 2)->where('product_type', 6)
         ->find();
-    ok('项目替换只扣当前来源权益并等量创建目标权益',
+    ok('项目替换扣减来源权益并固定创建一个目标权益',
         ($replacement['result']['status'] ?? '') === 'success'
         && (int)Db::name('store_order_cart_info')->where('id', 4701)->value('write_surplus_times') === 6
-        && (int)($replacementTarget['write_times'] ?? 0) === 2
-        && (int)($replacementTarget['write_surplus_times'] ?? 0) === 2
+        && (int)($replacementTarget['write_times'] ?? 0) === 1
+        && (int)($replacementTarget['write_surplus_times'] ?? 0) === 1
+        && (int)($replacementTarget['uid'] ?? 0) === 4101
         && (string)($replacementTarget['pay_price'] ?? '') === '20.00'
         && (int)Db::name('user_card_holder')->where('id', 4601)->value('write_surplus_times') === 8,
         json_encode(['result' => $replacement, 'target' => $replacementTarget], JSON_UNESCAPED_UNICODE), 'C2-CARDOP-BE-12B');
@@ -696,7 +721,7 @@ try {
         ->find();
     ok('项目替换在同一事务同步规则组件，后续权益选择可读取目标项目',
         (int)($replacementSourceRule['remainingTimes'] ?? -1) === 6
-        && (int)($replacementTargetRule['remainingTimes'] ?? -1) === 2
+        && (int)($replacementTargetRule['remainingTimes'] ?? -1) === 1
         && (int)($replacementTargetComponent['project_product_id'] ?? 0) === 4802
         && (string)($replacementTargetComponent['status'] ?? '') === 'active',
         json_encode($replacementTargetComponent, JSON_UNESCAPED_UNICODE), 'C2-CARDOP-BE-12E');

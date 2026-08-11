@@ -21,7 +21,7 @@ final class CashierV3SalesOrderReversalServices
     public const BENEFIT_REVERSAL_TABLE = 'cashier_v3_order_lifecycle_benefit_reversal';
 
     /** @return array<string,mixed> */
-    public function prepare(array $source, string $action, array $input, CashierV3DataScopeContext $scope): array
+    public function prepare(array $source, string $action, array $input, CashierV3DataScopeContext $scope, int $entitlementCreditCents = 0): array
     {
         CashierV3TransactionGuard::assertInTransaction('salesOrderReversal.prepare');
         $balanceFacts = Db::name('cashier_v3_balance_fact')->where('tenant_id', $scope->tenantId())
@@ -72,20 +72,29 @@ final class CashierV3SalesOrderReversalServices
         $cashReversal = $action === 'void-sales-order' ? $cashCollected : (int)$input['cashRefundCents'];
         $cashRefund = $action === 'void-sales-order' ? 0 : $cashReversal;
         if ($cashReversal < 0 || $cashReversal > $cashCollected) throw self::failure('sales_reversal_cash_refund_exceeds_source');
-        $economicReversal = $cashReversal + $restorePrincipal + $restoreBonus + $cancelledDebtCents;
+        if ($entitlementCreditCents < 0) throw self::failure('sales_reversal_entitlement_credit_invalid');
+        $economicReversal = $cashReversal + $restorePrincipal + $restoreBonus + $cancelledDebtCents + $entitlementCreditCents;
         if ($economicReversal <= 0 || $economicReversal > (int)$source['amountCents']) {
             throw self::failure('sales_reversal_economic_amount_invalid');
         }
         if ($action === 'void-sales-order' && $economicReversal !== (int)$source['amountCents']) {
             throw self::failure('sales_void_source_equation_invalid');
         }
+        // A coupon is a one-shot sale discount. It becomes reusable only when
+        // the order's entire settled economic value is reversed; a partial
+        // financial refund must leave the coupon consumed.
+        $coupons = $economicReversal === (int)$source['amountCents']
+            ? $this->lockConsumedCoupons($source, $scope)
+            : [];
 
         return [
             'balanceFacts' => $balanceFacts, 'principalPaidCents' => $principalPaid, 'bonusPaidCents' => $bonusPaid,
             'restorePrincipalCents' => $restorePrincipal, 'restoreBonusCents' => $restoreBonus,
             'debts' => $debts, 'cancelledDebtCents' => $cancelledDebtCents,
             'cards' => $cards, 'paymentFacts' => $paymentFacts, 'cashCollectedCents' => $cashCollected,
-            'cashRefundCents' => $cashRefund, 'cashReversalCents' => $cashReversal, 'economicReversalCents' => $economicReversal,
+            'cashRefundCents' => $cashRefund, 'cashReversalCents' => $cashReversal,
+            'entitlementCreditCents' => $entitlementCreditCents, 'economicReversalCents' => $economicReversal,
+            'coupons' => $coupons,
         ];
     }
 
@@ -96,7 +105,7 @@ final class CashierV3SalesOrderReversalServices
      *
      * @return array<string,mixed>
      */
-    public function prepareFinancialRefund(array $source, array $input, CashierV3DataScopeContext $scope): array
+    public function prepareFinancialRefund(array $source, array $input, CashierV3DataScopeContext $scope, int $entitlementCreditCents = 0): array
     {
         CashierV3TransactionGuard::assertInTransaction('salesOrderReversal.prepareFinancialRefund');
         $balanceFacts = Db::name('cashier_v3_balance_fact')->where('tenant_id', $scope->tenantId())
@@ -127,10 +136,14 @@ final class CashierV3SalesOrderReversalServices
         if ($cashRefund < 0 || $cashRefund > $cashCollected) {
             throw self::failure('sales_refund_cash_refund_exceeds_collected');
         }
-        $economicReversal = $cashRefund + $restorePrincipal + $restoreBonus;
+        if ($entitlementCreditCents < 0) throw self::failure('sales_refund_entitlement_credit_invalid');
+        $economicReversal = $cashRefund + $restorePrincipal + $restoreBonus + $entitlementCreditCents;
         if ($economicReversal <= 0 || $economicReversal > (int)$source['amountCents']) {
             throw self::failure('sales_refund_economic_amount_invalid');
         }
+        $coupons = $economicReversal === (int)$source['amountCents']
+            ? $this->lockConsumedCoupons($source, $scope)
+            : [];
 
         return [
             'balanceFacts' => $balanceFacts,
@@ -145,7 +158,9 @@ final class CashierV3SalesOrderReversalServices
             'cashCollectedCents' => $cashCollected,
             'cashRefundCents' => $cashRefund,
             'cashReversalCents' => $cashRefund,
+            'entitlementCreditCents' => $entitlementCreditCents,
             'economicReversalCents' => $economicReversal,
+            'coupons' => $coupons,
         ];
     }
 
@@ -168,6 +183,7 @@ final class CashierV3SalesOrderReversalServices
         foreach ((array)$prepared['cards'] as $card) {
             $this->revokeCard((array)$card, $source, $action, $operationId, $commandKey, $operator, $scope, $now);
         }
+        $this->restoreCoupons((array)($prepared['coupons'] ?? []), $source, $operationId, $now);
         return ['balance' => $balance, 'restoredPrincipalCents' => (int)$prepared['restorePrincipalCents'],
             'restoredBonusCents' => (int)$prepared['restoreBonusCents'], 'cancelledDebtCents' => (int)$prepared['cancelledDebtCents'],
             'revokedCardCount' => count((array)$prepared['cards'])];
@@ -337,6 +353,45 @@ final class CashierV3SalesOrderReversalServices
             'operator_id' => $operator->operatorId(), 'status' => 'revoked', 'occurred_at' => $now, 'created_at' => $now,
         ];
         if ((int)Db::name(self::BENEFIT_REVERSAL_TABLE)->insert($row) !== 1) throw self::failure('sales_reversal_card_audit_insert_failed');
+    }
+
+    /** @return array<int,array<string,mixed>> */
+    private function lockConsumedCoupons(array $source, CashierV3DataScopeContext $scope): array
+    {
+        $lines = Db::name('cashier_v3_sales_order_line')->where('tenant_id', $scope->tenantId())
+            ->where('order_id', (string)$source['sourceId'])->where('line_direction', 'forward')
+            ->where('line_status', 'settled')->where('coupon_user_id', '>', 0)
+            ->field('order_line_id,coupon_user_id,coupon_name_snapshot,coupon_discount_cents')
+            ->order('line_no', 'asc')->lock(true)->select()->toArray();
+        $seen = [];
+        foreach ($lines as &$line) {
+            $couponId = (int)$line['coupon_user_id'];
+            if (isset($seen[$couponId]) || (int)$line['coupon_discount_cents'] <= 0) {
+                throw self::failure('sales_reversal_coupon_trace_invalid');
+            }
+            $coupon = (array)Db::name('store_coupon_user')->where('id', $couponId)->lock(true)->find();
+            if (!$coupon || (int)($coupon['uid'] ?? 0) !== (int)$source['memberId']
+                || (int)($coupon['status'] ?? -1) !== 1 || (int)($coupon['use_time'] ?? 0) <= 0
+                || (int)($coupon['is_fail'] ?? -1) !== 0) {
+                throw self::failure('sales_reversal_coupon_state_changed');
+            }
+            $line['coupon'] = $coupon;
+            $seen[$couponId] = true;
+        }
+        unset($line);
+        return $lines;
+    }
+
+    private function restoreCoupons(array $coupons, array $source, string $operationId, int $now): void
+    {
+        foreach ($coupons as $line) {
+            $coupon = (array)($line['coupon'] ?? []);
+            $updated = Db::name('store_coupon_user')->where('id', (int)$line['coupon_user_id'])
+                ->where('uid', (int)$source['memberId'])->where('status', 1)
+                ->where('is_fail', 0)->where('use_time', (int)($coupon['use_time'] ?? 0))
+                ->update(['status' => 0, 'use_time' => 0]);
+            if ((int)$updated !== 1) throw self::failure('sales_reversal_coupon_restore_race');
+        }
     }
 
     private function moneyToCents($value): int

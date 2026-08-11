@@ -51,6 +51,13 @@ const emit = defineEmits([
 const localStep = ref(1)
 const submitCommandId = ref(null)
 const isSubmitRequested = ref(false)
+// 本地验收夹具只模拟“未产生任何收款事实”的最终失败展示；生产构建会
+// 删除触发分支。它不覆盖服务端真实结账状态。
+const developmentFailureResult = ref(null)
+// Keep the command receipt until the operator closes the success screen.
+// The parent uses its committed empty workbench draft when returning to the
+// cashier, so an old local cart can never reappear after a successful sale.
+const succeededSubmissionResponse = ref(null)
 const editingPaymentLineId = ref(null)
 const dialogRoot = ref(null)
 const resultHeading = ref(null)
@@ -131,7 +138,9 @@ const steps = computed(() => {
 })
 const editableSteps = computed(() => steps.value.filter((step) => step.key !== 'result'))
 
-const checkoutStatus = computed(() => normalizeCheckoutStatus(props.checkout.status))
+const checkoutStatus = computed(() => normalizeCheckoutStatus(
+  developmentFailureResult.value?.status || props.checkout.status
+))
 const isProcessing = computed(() => checkoutStatus.value === 'processing')
 const isPendingConfirmation = computed(() => checkoutStatus.value === 'pending_confirmation')
 const isResultUnknown = computed(() => checkoutStatus.value === 'result_unknown')
@@ -153,6 +162,16 @@ const checkoutOrderLines = computed(() => {
   if (Array.isArray(props.checkout.snapshot?.orderLines)) return props.checkout.snapshot.orderLines
   return []
 })
+const cardOperationUpgrade = computed(() => isRecord(props.checkout.cardOperationUpgrade)
+  ? props.checkout.cardOperationUpgrade
+  : null)
+const isCardOperationUpgrade = computed(() => Boolean(cardOperationUpgrade.value))
+const cardOperationTargetAmount = computed(() => Number(cardOperationUpgrade.value?.targetPriceCents || 0) / 100)
+const cardOperationCreditAmount = computed(() => Number(cardOperationUpgrade.value?.sourceRemainingValueCents || 0) / 100)
+const cardOperationDeltaAmount = computed(() => Number(cardOperationUpgrade.value?.settlementDeltaCents || 0) / 100)
+const cardOperationSettlementResults = computed(() => Array.isArray(props.checkout.cardOperationSettlement?.operations)
+  ? props.checkout.cardOperationSettlement.operations
+  : [])
 const checkoutSummary = computed(() => {
   if (isRecord(props.checkout.summary)) return props.checkout.summary
   if (isRecord(props.checkout.orderSummary)) return props.checkout.orderSummary
@@ -386,6 +405,9 @@ const isPartialPaymentRecovery = computed(() => (
 ))
 const canCloseOverlay = computed(() => (
   isSucceeded.value
+  // 普通失败尚未产生任何成功收款时，必须可以返回原购物车修改后重试。
+  // 不能要求失败响应额外回传 canClose；这会把操作人困在失败结果页。
+  || (isFailed.value && !isPartialPaymentRecovery.value)
   || (isFailed.value && props.checkout.canClose === true)
   || (!isResultStep.value && !isSubmissionLocked.value)
 ))
@@ -433,7 +455,11 @@ const resultDescription = computed(() => {
   if (isFailed.value && isPartialPaymentRecovery.value) {
     return props.checkout.failureReason || '成功款项不会重复收取，请继续处理剩余收款。'
   }
-  if (isFailed.value) return props.checkout.failureReason || '本次支付未成功，已保留原来的收款信息。'
+  if (isFailed.value) {
+    return developmentFailureResult.value?.message
+      || props.checkout.failureReason
+      || '本次支付未成功，已保留原来的收款信息。'
+  }
   if (isPaymentSucceededServicePending.value) {
     return props.checkout.completionDescription || '本次收款已经成功，只能继续处理原结账请求，禁止再次收款。'
   }
@@ -529,8 +555,35 @@ function request(action, payload = {}) {
   })
 }
 
+function submissionResponseEnvelope(response = {}) {
+  // The HTTP controller places the standard V3 envelope below `data`, while
+  // component tests and direct adapters may return the envelope at the top
+  // level. Keep status and error messages on the same response shape.
+  return response?.result && typeof response.result === 'object'
+    ? response
+    : (response?.data && typeof response.data === 'object' ? response.data : response)
+}
+
+function submissionResponseStatus(response = {}) {
+  const envelope = submissionResponseEnvelope(response)
+  return String(envelope?.result?.status || envelope?.status || '').toLowerCase()
+}
+
+function submissionResponseMessage(response = {}) {
+  const envelope = submissionResponseEnvelope(response)
+  const message = envelope?.result?.message || envelope?.message
+  if (typeof message === 'string' && message.trim()) return message.trim()
+  return isRechargeCheckout.value
+    ? '充值结账失败，请核对收款信息后重试。'
+    : '结账失败，请核对收款信息后重试。'
+}
+
 function handleSubmissionResponse(response) {
-  const status = String(response?.result?.status || response?.status || '').toLowerCase()
+  const status = submissionResponseStatus(response)
+  if (['success', 'succeeded'].includes(status)) {
+    succeededSubmissionResponse.value = response || null
+    return
+  }
   if (['failed', 'conflict'].includes(status)) {
     isSubmitRequested.value = false
     submissionLongRunning.value = false
@@ -542,7 +595,7 @@ function handleSubmissionResponse(response) {
       window.clearTimeout(submissionQueryTimer)
       submissionQueryTimer = null
     }
-    const message = String(response?.result?.message || response?.message || '充值提交失败，请核对收款信息后重试。')
+    const message = submissionResponseMessage(response)
     window.dispatchEvent(new CustomEvent('cashier-v3:ui-result', {
       detail: { status: 'failed', message }
     }))
@@ -887,6 +940,15 @@ function goPrevious() {
   localStep.value = editableSteps.value[currentIndex - 1].number
 }
 
+function useDevelopmentNoPaymentFailureFixture() {
+  // A deterministic local-only UAT fixture. It is erased from production
+  // builds because Vite replaces import.meta.env.DEV with false there. The
+  // branch deliberately runs before the final command: no payment attempt,
+  // business fact, inventory movement or sales order can be written.
+  return import.meta.env.DEV
+    && new URLSearchParams(window.location.search).get('test') === 'checkout-no-payment-failure'
+}
+
 function goNext() {
   if (!hasCurrentStepSnapshot.value) return
   if (currentStep.value === 1) {
@@ -923,6 +985,19 @@ function goNext() {
   if (!submitCommandId.value) {
     submitCommandId.value = recoveredCheckoutIdempotencyKey.value
       || createCashierV3CommandId('CHECKOUT')
+  }
+  if (useDevelopmentNoPaymentFailureFixture()) {
+    // 这条仅在 Vite 开发环境的显式 URL 参数下生效。直接切到结果步，
+    // 让“返回收银”走与真实无收款失败相同的草稿废弃路径，而不是只弹提示。
+    developmentFailureResult.value = {
+      status: 'failed',
+      code: 'CHECKOUT_TEST_NO_PAYMENT_FAILURE',
+      message: '测试支付失败：未发起收款，也未产生业务单据。'
+    }
+    isSubmitRequested.value = false
+    submissionLongRunning.value = false
+    localStep.value = resultStepNumber.value
+    return
   }
   isSubmitRequested.value = true
   scheduleSubmissionLongRunning()
@@ -974,12 +1049,15 @@ function queryOriginalCheckoutResult() {
 
 function finishCheckoutAndReturn() {
   if (!isSucceeded.value) return
-  emit('completed')
+  emit('completed', succeededSubmissionResponse.value)
 }
 
 function requestClose() {
   if (!canCloseOverlay.value) return
-  emit('close')
+  emit('close', {
+    // 没有成功收款的失败结账返回后，下一次确认收款必须创建新请求。
+    discardFailedCheckout: isFailed.value && !isPartialPaymentRecovery.value
+  })
 }
 
 function focusableDialogElements() {
@@ -1289,7 +1367,15 @@ onBeforeUnmount(() => {
             <span>可先选择全部收款方式，再调整金额；合计必须等于应收。</span>
           </div>
 
-          <section v-if="checkoutMember && payment.balanceAvailable !== false && Number(payment.availableBalance) > 0" class="checkout-balance-section">
+          <section v-if="isCardOperationUpgrade" class="checkout-balance-section">
+            <div class="checkout-balance-section__title">
+              <strong>旧权益余额支付</strong>
+              <span>{{ formatMoney(cardOperationCreditAmount) }}</span>
+            </div>
+            <span class="checkout-balance-section__verification">由原卡或原项目权益折抵，不扣减会员储值余额。</span>
+          </section>
+
+          <section v-else-if="checkoutMember && payment.balanceAvailable !== false && Number(payment.availableBalance) > 0" class="checkout-balance-section">
             <div class="checkout-balance-section__title">
               <strong>余额支付</strong>
               <span>可用余额 {{ formatMoney(payment.availableBalance) }}</span>
@@ -1335,7 +1421,7 @@ onBeforeUnmount(() => {
         <section class="checkout-card checkout-payment-selected">
           <div class="checkout-card__title">
             <h3>本次收款</h3>
-            <span>应收 {{ formatMoney(checkoutSummary.receivableAmount) }}</span>
+            <span>{{ isCardOperationUpgrade ? '补差应收' : '应收' }} {{ formatMoney(checkoutSummary.receivableAmount) }}</span>
           </div>
           <div v-if="selectedPaymentLines.length" class="checkout-payment-lines">
             <article v-for="line in selectedPaymentLines" :key="line.id" class="checkout-payment-line">
@@ -1386,7 +1472,7 @@ onBeforeUnmount(() => {
           </div>
           <div v-else class="checkout-empty-state">请在左侧选择收款方式。</div>
           <dl v-if="Object.keys(displayedPaymentSummary).length" class="checkout-payment-summary">
-            <div v-if="displayedPaymentSummary.receivableAmount !== undefined"><dt>应收</dt><dd>{{ formatMoney(displayedPaymentSummary.receivableAmount) }}</dd></div>
+            <div v-if="displayedPaymentSummary.receivableAmount !== undefined"><dt>{{ isCardOperationUpgrade ? '补差应收' : '应收' }}</dt><dd>{{ formatMoney(displayedPaymentSummary.receivableAmount) }}</dd></div>
             <div v-if="displayedPaymentSummary.selectedAmount !== undefined"><dt>已选收款</dt><dd>{{ formatMoney(displayedPaymentSummary.selectedAmount) }}</dd></div>
             <div v-if="displayedPaymentSummary.remainingAmount !== undefined"><dt>待收</dt><dd>{{ formatMoney(displayedPaymentSummary.remainingAmount) }}</dd></div>
             <div v-if="paymentAmountValidation.message && paymentAmountValidation.state !== 'invalid'" :class="`checkout-payment-summary__validation checkout-payment-summary__validation--${paymentAmountValidation.state}`"><dt>校验提示</dt><dd>{{ paymentAmountValidation.message }}</dd></div>
@@ -1404,14 +1490,15 @@ onBeforeUnmount(() => {
           <div v-if="isRechargeCheckout"><dt>赠送金额</dt><dd>{{ formatMoney(checkout.bonusAmount) }}</dd></div>
           <div v-if="isRechargeCheckout"><dt>本次实收</dt><dd>{{ formatMoney(checkout.cashPerformanceAmount) }}</dd></div>
           <div v-if="isRechargeCheckout"><dt>本次欠款</dt><dd>{{ formatMoney(checkout.debtAmount) }}</dd></div>
-          <div v-if="hasSaleLines || isDebtRepayment"><dt>应收</dt><dd>{{ formatMoney(checkoutSummary.receivableAmount) }}</dd></div>
+          <div v-if="isCardOperationUpgrade"><dt>目标商品原价</dt><dd>{{ formatMoney(cardOperationTargetAmount) }}</dd></div>
+          <div v-if="isCardOperationUpgrade"><dt>旧权益余额支付</dt><dd>{{ formatMoney(cardOperationCreditAmount) }}</dd></div>
+          <div v-if="isCardOperationUpgrade"><dt>补差应收</dt><dd>{{ formatMoney(cardOperationDeltaAmount) }}</dd></div>
+          <div v-else-if="hasSaleLines || isDebtRepayment"><dt>应收</dt><dd>{{ formatMoney(checkoutSummary.receivableAmount) }}</dd></div>
           <div v-if="hasSaleLines"><dt>优惠</dt><dd>{{ formatMoney(checkoutSummary.discountAmount) }}</dd></div>
           <div v-if="hasSaleLines || isDebtRepayment"><dt>欠款</dt><dd>{{ formatMoney(checkout.debtAmount) }}</dd></div>
           <div v-if="hasSaleLines || isDebtRepayment"><dt>现金业绩</dt><dd>{{ formatMoney(checkout.cashPerformanceAmount) }}</dd></div>
-          <div v-if="hasSaleLines || isDebtRepayment"><dt>余额支付</dt><dd>{{ formatMoney(checkout.balancePaymentAmount) }}</dd></div>
+          <div v-if="!isCardOperationUpgrade && (hasSaleLines || isDebtRepayment)"><dt>余额支付</dt><dd>{{ formatMoney(checkout.balancePaymentAmount) }}</dd></div>
           <div v-if="hasEntitlementLines"><dt>权益服务</dt><dd>{{ checkoutOrderLines.filter(isEntitlementCheckoutLine).length }} 项</dd></div>
-          <div v-if="checkout.cardUpgradeDeductionAmount !== undefined"><dt>卡升级抵扣</dt><dd>{{ formatMoney(checkout.cardUpgradeDeductionAmount) }}</dd></div>
-          <div v-if="checkout.projectUpgradeDeductionAmount !== undefined"><dt>项目升级抵扣</dt><dd>{{ formatMoney(checkout.projectUpgradeDeductionAmount) }}</dd></div>
           <div v-if="checkout.businessDate"><dt>{{ dateLabel }}</dt><dd>{{ checkout.businessDate }}</dd></div>
           <div v-if="isRechargeCheckout && checkout.businessDateReason"><dt>补单原因</dt><dd>{{ checkout.businessDateReason }}</dd></div>
         </dl>
@@ -1455,6 +1542,12 @@ onBeforeUnmount(() => {
         <p>{{ resultDescription }}</p>
         <!-- Internal request ids are intentionally hidden from cashier users. -->
         <span v-if="isSucceeded && !isDebtRepayment && checkout.salesOrderNo" class="checkout-result__order">销售订单号：{{ checkout.salesOrderNo }}</span>
+        <div v-if="cardOperationSettlementResults.length" class="checkout-child-results" aria-label="升级权益处理结果">
+          <div v-for="operation in cardOperationSettlementResults" :key="operation.operationId" :class="operation.status === 'succeeded' ? 'is-succeeded' : 'is-failed'">
+            <span>{{ operation.operationType === 'card_upgrade' ? '卡升级' : '项目升级' }}</span>
+            <strong>{{ operation.status === 'succeeded' ? '已生效' : '未完成' }}</strong>
+          </div>
+        </div>
         <div v-if="Object.keys(childResults).length" class="checkout-child-results" aria-label="本次业务处理结果">
           <div v-for="(result, key) in childResults" :key="key" :class="childResultStatusClass(result)">
             <span>{{ result.label || key }}</span>

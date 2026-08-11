@@ -47,6 +47,10 @@ $check('sale checkout persists the service fact in the same transaction and reco
     strpos($submission, '$this->saleProjectServices->completeInTx(') !== false
     && strpos($submission, "'event_type' => 'service.completed'") !== false
     && strpos($submission, "'eb_cashier_v3_entitlement_service_fact'") !== false);
+$check('cash-purchased project completion also updates customer lifecycle in the same transaction',
+    strpos($service, 'CustomerLifecycleFactServices') !== false
+    && strpos($service, 'recordServiceCompletionInTx') !== false
+    && strpos($service, "'checkout_request_id' => (string)\$header['checkout_request_id']") !== false);
 $check('service records label cash purchase projects without misrepresenting a card writeoff',
     strpos($records, "'sf.source_document_type'") !== false
     && strpos($records, "return '现金购买项目';") !== false);

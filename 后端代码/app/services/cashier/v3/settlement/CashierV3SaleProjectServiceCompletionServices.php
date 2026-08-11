@@ -8,6 +8,7 @@ use app\services\cashier\v3\CashierV3ResultCode;
 use app\services\cashier\v3\CashierV3TransactionGuard;
 use app\services\cashier\v3\order\settlement\CashierV3SalesOrderPlanV1;
 use app\services\cashier\v3\order\settlement\ThinkPhpCashierV3SalesOrderAuthorityWriter;
+use app\services\report\CustomerLifecycleFactServices;
 use think\facade\Db;
 
 /**
@@ -156,6 +157,19 @@ final class CashierV3SaleProjectServiceCompletionServices
                 'isExperience' => (bool)$row['is_experience'],
             ];
         }
+        if ($services) {
+            (new CustomerLifecycleFactServices())->recordServiceCompletionInTx([
+                'tenant_id' => (string)$header['tenant_id'],
+                'organization_id' => (string)$header['organization_id'],
+                'store_id' => (int)$header['store_id'],
+                'member_id' => (int)$header['member_id'],
+                'checkout_request_id' => (string)$header['checkout_request_id'],
+                'business_date' => (string)$header['business_date'],
+                'occurred_at' => (int)$header['occurred_at'],
+                'recorded_at' => $recordedAt,
+            ], $services);
+        }
+
         return ['serviceCount' => count($services), 'replayed' => $replayed, 'services' => $services];
     }
 

@@ -807,16 +807,17 @@ final class CashierV3CardPurchaseIssuanceServices
         $ordinaryPriceMatches = (int)($salesLine['sale_amount_cents'] ?? -1) === $fullPriceCents;
         $auditedPriceChangeMatches = !$isCustom
             && $this->isAuthorizedManualPriceSettlement($salesLine, $line);
+        $boundUpgrade = $this->isBoundCardUpgradeSettlement(
+            $salesLine,
+            $line,
+            $header,
+            $dataScope
+        );
         if ($identityMismatch
             || (!$isCustom && $sourceKind !== 'card_package')
             || !is_array($purchase['components'] ?? null)
             || !$purchase['components']
-            || (!$ordinaryPriceMatches && !$auditedPriceChangeMatches && !$this->isBoundCardUpgradeSettlement(
-                $salesLine,
-                $line,
-                $header,
-                $dataScope
-            ))) {
+            || (!$ordinaryPriceMatches && !$auditedPriceChangeMatches && !$boundUpgrade)) {
             throw self::failure('card_purchase_catalog_authority_changed');
         }
     }
@@ -864,13 +865,16 @@ final class CashierV3CardPurchaseIssuanceServices
             ->where('operation_status', 'awaiting_checkout')
             ->lock(true)
             ->find();
+        $couponDiscount = (int)($salesLine['coupon_discount_cents'] ?? 0);
         if (!$operation
             || (int)($operation['store_id'] ?? 0) !== (int)($header['store_id'] ?? 0)
             || (int)($operation['member_id_before'] ?? 0) !== (int)($header['member_id'] ?? 0)
             || (int)($operation['target_catalog_id'] ?? 0) !== (int)($salesLine['item_id'] ?? 0)
             || (int)($operation['target_price_cents'] ?? -1) !== (int)($salesLine['original_amount_cents'] ?? -2)
-            || (int)($operation['source_remaining_value_cents'] ?? -1) !== (int)($salesLine['discount_amount_cents'] ?? -2)
-            || (int)($operation['settlement_delta_cents'] ?? -1) !== (int)($salesLine['sale_amount_cents'] ?? -2)) {
+            || $couponDiscount < 0
+            || $couponDiscount > (int)($operation['target_price_cents'] ?? -1)
+            || (int)($salesLine['sale_amount_cents'] ?? -1)
+                !== (int)($operation['target_price_cents'] ?? -2) - $couponDiscount) {
             return false;
         }
         return true;

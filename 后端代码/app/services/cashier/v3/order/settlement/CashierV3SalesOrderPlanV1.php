@@ -51,6 +51,7 @@ final class CashierV3SalesOrderPlanV1
         'supplement_operator_id', 'supplement_operator_name_snapshot',
         'supplement_operated_at',
         'source_document_type', 'source_document_id', 'source_document_no',
+        'resumed_hang_order_id',
         'sales_amount_cents', 'receivable_amount_cents', 'selected_payment_amount_cents',
         'balance_deduction_amount_cents', 'balance_authority_key', 'balance_account_id',
         'balance_account_version', 'debt_amount_cents', 'debt_authority_key',
@@ -70,6 +71,7 @@ final class CashierV3SalesOrderPlanV1
         'discount_amount_cents', 'sale_amount_cents', 'debt_amount_cents', 'entitlement_actual_amount_cents',
         'source_name_snapshot', 'source_code_snapshot', 'project_name_snapshot',
         'category_id_snapshot', 'category_name_snapshot', 'line_fingerprint',
+        'coupon_user_id', 'coupon_name_snapshot', 'coupon_discount_cents',
         'configured_cost_cents', 'price_change_reason', 'price_changed_by',
         'price_changed_by_name_snapshot', 'price_changed_at',
         'craftsmen_snapshot_json',
@@ -119,7 +121,8 @@ final class CashierV3SalesOrderPlanV1
         int $recordedAt,
         string $serverNamespaceSecret,
         string $businessDocumentNo = '',
-        array $businessSource = []
+        array $businessSource = [],
+        array $entitlementCredit = []
     ): self {
         self::assertExactKeys(
             $lockedAggregate,
@@ -161,6 +164,21 @@ final class CashierV3SalesOrderPlanV1
 
         $lineResult = self::normalizeLines($lockedAggregate['lines'], $request);
         $saleLines = $lineResult['saleLines'];
+        $credit = self::normalizeEntitlementCredit($entitlementCredit, $request, $saleLines);
+        if ($credit['amountCents'] > 0) {
+            $couponDiscount = (int)($saleLines[0]['coupon_discount_cents'] ?? 0);
+            if ($couponDiscount < 0
+                || $couponDiscount > $credit['targetPriceCents'] - $credit['amountCents']) {
+                throw self::failure('sales_order_upgrade_coupon_discount_invalid');
+            }
+            $saleLines[0]['original_amount_cents'] = $credit['targetPriceCents'];
+            $saleLines[0]['discount_amount_cents'] = $couponDiscount;
+            $saleLines[0]['sale_amount_cents'] = $credit['targetPriceCents'] - $couponDiscount;
+            $saleLines[0]['checkout_line_fingerprint'] = self::canonicalFingerprint([
+                'checkoutLineFingerprint' => $saleLines[0]['checkout_line_fingerprint'],
+                'entitlementCredit' => $credit,
+            ]);
+        }
         if (!$saleLines) {
             throw self::failure('sales_order_formal_sale_line_required');
         }
@@ -175,8 +193,8 @@ final class CashierV3SalesOrderPlanV1
         $lineDebtAmount = self::sum($saleLines, 'debt_amount_cents');
         $originalAmount = self::sum($saleLines, 'original_amount_cents');
         $discountAmount = self::sum($saleLines, 'discount_amount_cents');
-        if ($saleAmount !== $request['sales_amount_cents']
-            || $request['receivable_amount_cents'] !== $saleAmount - $lineDebtAmount
+        if ($saleAmount !== $request['sales_amount_cents'] + $credit['amountCents']
+            || $request['receivable_amount_cents'] + $credit['amountCents'] !== $saleAmount - $lineDebtAmount
             || $originalAmount - $discountAmount !== $saleAmount
             || $lineDebtAmount !== $request['debt_amount_cents']) {
             throw self::failure('sales_order_checkout_total_mismatch');
@@ -186,7 +204,12 @@ final class CashierV3SalesOrderPlanV1
             $request['balance_deduction_amount_cents'],
             'sales_order_settlement_total_overflow'
         );
-        if ($settlementTotal !== $request['receivable_amount_cents']) {
+        $settlementTotal = self::safeAdd(
+            $settlementTotal,
+            $credit['amountCents'],
+            'sales_order_entitlement_credit_total_overflow'
+        );
+        if ($settlementTotal !== $saleAmount - $lineDebtAmount) {
             throw self::failure('sales_order_checkout_not_balanced');
         }
         self::assertComposition(
@@ -238,6 +261,9 @@ final class CashierV3SalesOrderPlanV1
                 'quantity' => $line['quantity'],
                 'original_amount_cents' => $line['original_amount_cents'],
                 'discount_amount_cents' => $line['discount_amount_cents'],
+                'coupon_user_id' => $line['coupon_user_id'],
+                'coupon_name_snapshot' => $line['coupon_name_snapshot'],
+                'coupon_discount_cents' => $line['coupon_discount_cents'],
                 'sale_amount_cents' => $line['sale_amount_cents'],
                 'debt_amount_cents' => $line['debt_amount_cents'],
                 'configured_cost_cents' => $line['configured_cost_cents'],
@@ -314,6 +340,31 @@ final class CashierV3SalesOrderPlanV1
         );
         $header['immutable_fingerprint'] = self::canonicalFingerprint($headerFingerprintInput);
         return new self($header, $orderLines, $header['immutable_fingerprint']);
+    }
+
+    private static function normalizeEntitlementCredit(array $raw, array $request, array $saleLines): array
+    {
+        if ($raw === []) {
+            return ['operationId' => '', 'operationType' => '', 'amountCents' => 0, 'targetPriceCents' => 0];
+        }
+        self::assertExactKeys($raw, ['operationId', 'operationType', 'checkoutRequestId', 'amountCents', 'targetPriceCents'], 'entitlement_credit_shape_invalid');
+        $operationId = self::token($raw['operationId'], 64, 'entitlement_credit_operation_invalid');
+        $operationType = (string)$raw['operationType'];
+        $checkoutRequestId = self::token($raw['checkoutRequestId'], 64, 'entitlement_credit_checkout_invalid');
+        $amount = self::money($raw['amountCents'], 'entitlement_credit_amount_invalid');
+        $targetPrice = self::money($raw['targetPriceCents'], 'entitlement_credit_target_price_invalid');
+        $couponDiscount = count($saleLines) === 1
+            ? self::money($saleLines[0]['coupon_discount_cents'] ?? 0, 'entitlement_credit_coupon_discount_invalid')
+            : 0;
+        if (count($saleLines) !== 1 || $amount < 0
+            || !in_array($operationType, ['card_upgrade', 'project_upgrade'], true)
+            || !hash_equals($request['request_id'], $checkoutRequestId)
+            || $targetPrice !== (int)$saleLines[0]['sale_amount_cents'] + $amount + $couponDiscount
+            || (int)$saleLines[0]['original_amount_cents'] !== $targetPrice
+            || (int)$saleLines[0]['discount_amount_cents'] !== $amount + $couponDiscount) {
+            throw self::failure('entitlement_credit_checkout_mismatch');
+        }
+        return ['operationId' => $operationId, 'operationType' => $operationType, 'amountCents' => $amount, 'targetPriceCents' => $targetPrice];
     }
 
     public function header(): array
@@ -731,6 +782,9 @@ final class CashierV3SalesOrderPlanV1
         $original = self::money($row['original_amount_cents'], 'sales_order_original_amount_invalid');
         $discount = self::money($row['discount_amount_cents'], 'sales_order_discount_amount_invalid');
         $sale = self::money($row['sale_amount_cents'], 'sales_order_sale_amount_invalid');
+        $couponUserId = self::nonNegativeInt($row['coupon_user_id'], 'sales_order_coupon_user_invalid');
+        $couponName = self::text($row['coupon_name_snapshot'], 128, 'sales_order_coupon_name_invalid', true);
+        $couponDiscount = self::money($row['coupon_discount_cents'], 'sales_order_coupon_discount_invalid');
         $debt = self::money($row['debt_amount_cents'], 'sales_order_debt_amount_invalid');
         $configuredCost = self::money(
             $row['configured_cost_cents'],
@@ -758,6 +812,11 @@ final class CashierV3SalesOrderPlanV1
         );
         if ($discount > $original || $sale !== $original - $discount || $debt > $sale) {
             throw self::failure('sales_order_line_amount_equation_invalid');
+        }
+        if ($couponUserId === 0
+            ? ($couponName !== '' || $couponDiscount !== 0)
+            : ($couponName === '' || $couponDiscount <= 0 || $couponDiscount > $discount)) {
+            throw self::failure('sales_order_coupon_snapshot_invalid');
         }
         $costOverflow = $configuredCost > 0
             && $quantity > intdiv(PHP_INT_MAX, $configuredCost);
@@ -823,6 +882,9 @@ final class CashierV3SalesOrderPlanV1
             'quantity' => $quantity,
             'originalAmountCents' => $original,
             'discountAmountCents' => $discount,
+            'couponUserId' => $couponUserId,
+            'couponNameSnapshot' => $couponName,
+            'couponDiscountCents' => $couponDiscount,
             'saleAmountCents' => $sale,
             'debtAmountCents' => $debt,
             'sourceNameSnapshot' => self::text(
@@ -889,6 +951,9 @@ final class CashierV3SalesOrderPlanV1
             'quantity' => $quantity,
             'original_amount_cents' => $original,
             'discount_amount_cents' => $discount,
+            'coupon_user_id' => $couponUserId,
+            'coupon_name_snapshot' => $couponName,
+            'coupon_discount_cents' => $couponDiscount,
             'sale_amount_cents' => $sale,
             'debt_amount_cents' => $debt,
             'configured_cost_cents' => $configuredCost,
@@ -911,6 +976,9 @@ final class CashierV3SalesOrderPlanV1
     ): bool {
         if ($debt !== 0) {
             return false;
+        }
+        if ((int)($authority['couponUserId'] ?? 0) === 0) {
+            unset($authority['couponUserId'], $authority['couponNameSnapshot'], $authority['couponDiscountCents']);
         }
         unset($authority['debtAmountCents']);
         if (hash_equals($lineFingerprint, self::canonicalFingerprint($authority))) {

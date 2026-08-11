@@ -66,6 +66,15 @@ final class CashierV3CheckoutDraftAuthorityRebuilder
                         $row['discount_amount_cents'] ?? null,
                         'sale.discount_amount_cents'
                     ),
+                    'couponUserId' => self::nonNegativeInt(
+                        $row['coupon_user_id'] ?? 0,
+                        'sale.coupon_user_id'
+                    ),
+                    'couponNameSnapshot' => (string)($row['coupon_name_snapshot'] ?? ''),
+                    'couponDiscountCents' => self::nonNegativeInt(
+                        $row['coupon_discount_cents'] ?? 0,
+                        'sale.coupon_discount_cents'
+                    ),
                     'saleAmountCents' => self::nonNegativeInt(
                         $row['sale_amount_cents'] ?? null,
                         'sale.sale_amount_cents'

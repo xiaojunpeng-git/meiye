@@ -136,20 +136,6 @@ final class CashierV3CashierMoreActionServices
             || $lineAmountCents % $quantity !== 0) {
             throw self::invalid('price_change_line_amount_not_divisible');
         }
-        $lineDebtAmountCents = (int)($line['debt_amount_cents'] ?? 0);
-        if ($lineDebtAmountCents < 0 || $lineAmountCents < $lineDebtAmountCents) {
-            throw new CashierV3CommandException(
-                CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
-                '改价金额不能低于该商品已设置的欠款金额。',
-                CashierV3ResultCode::STATUS_FAILED,
-                [
-                    'reason' => 'price_change_below_line_debt',
-                    'line_id' => $lineKey,
-                    'line_debt_amount_cents' => $lineDebtAmountCents,
-                ]
-            );
-        }
-
         // Product then SKU matches the catalog gateway's stable lock order.
         $product = Db::name('store_product')
             ->where('id', $productId)
@@ -202,20 +188,6 @@ final class CashierV3CashierMoreActionServices
                 ]
             );
         }
-        $originalLineAmountCents = self::multiply(
-            (int)($line['original_unit_price_cents'] ?? -1),
-            $quantity,
-            'price_change_original_amount_invalid'
-        );
-        if (!$isCustomCard && $lineAmountCents > $originalLineAmountCents) {
-            throw new CashierV3CommandException(
-                CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
-                '改价金额不能高于商品原价。',
-                CashierV3ResultCode::STATUS_FAILED,
-                ['reason' => 'price_change_above_original_amount', 'line_id' => $lineKey]
-            );
-        }
-
         $now = time();
         $operatorName = self::operatorName($dataScope->operatorProfile());
         $affected = Db::name(self::LINE_TABLE)

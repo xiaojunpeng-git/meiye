@@ -5,6 +5,7 @@ namespace app\services\cashier\v3\checkout\persistence;
 use app\services\cashier\v3\card\CashierV3CardRuleEntitlementAuthorityServices;
 use app\services\cashier\v3\CashierV3BusinessDocumentNumberServices;
 use app\services\cashier\v3\CashierV3TransactionGuard;
+use app\services\report\CustomerLifecycleFactServices;
 use think\facade\Db;
 
 /**
@@ -66,6 +67,7 @@ final class ThinkPhpCashierV3EntitlementCompletionWriter
             'service' => $this->persistRows(self::SERVICE_TABLE, 'service', $serviceRows),
             'performance' => $this->persistRows(self::PERFORMANCE_TABLE, 'performance', $plan->performanceRows()),
         ];
+        (new CustomerLifecycleFactServices())->recordServiceCompletionInTx($context, $serviceRows);
 
         $result = [
             'contractVersion' => CashierV3EntitlementCompletionPlanV1::CONTRACT_VERSION,

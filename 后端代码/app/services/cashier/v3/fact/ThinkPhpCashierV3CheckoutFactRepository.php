@@ -5,6 +5,7 @@ namespace app\services\cashier\v3\fact;
 use app\services\cashier\v3\CashierV3DataScopeContext;
 use app\services\cashier\v3\CashierV3OperatorScope;
 use app\services\cashier\v3\CashierV3TransactionGuard;
+use app\services\report\CustomerLifecycleFactServices;
 use think\facade\Db;
 
 /**
@@ -40,10 +41,15 @@ final class ThinkPhpCashierV3CheckoutFactRepository
         foreach ($plan->rows() as $domain => $rows) {
             $table = self::TABLES[$domain];
             foreach ($rows as $row) {
+                $row['source_attribution_type_snapshot'] = $this->sourceAttributionType($table, $row, $plan->context());
                 $result = $this->persistRow($table, $domain, $row);
                 $result === 'inserted' ? $inserted[$domain]++ : $replayed[$domain]++;
             }
         }
+
+        // Lifecycle is a reporting fact derived from the same final, locked
+        // checkout authority. Its own natural keys make partial replays safe.
+        (new CustomerLifecycleFactServices())->recordCheckoutInTx($plan);
 
         return [
             'contractVersion' => CashierV3CheckoutFactPlanV1::CONTRACT_VERSION,
@@ -101,6 +107,24 @@ final class ThinkPhpCashierV3CheckoutFactRepository
         return 'inserted';
     }
 
+    /** The configured source type is resolved while the checkout authority is locked. */
+    private function sourceAttributionType(string $table, array $row, array $context): string
+    {
+        if ((string)$row['fact_direction'] === CashierV3CheckoutFactPlanV1::DIRECTION_REVERSAL && (string)$row['reversal_of'] !== '') {
+            $original = Db::name($table)->where('tenant_id', (string)$context['tenant_id'])->where('fact_id', (string)$row['reversal_of'])
+                ->lock(true)->field('source_attribution_type_snapshot')->find();
+            return (string)($original['source_attribution_type_snapshot'] ?? 'other');
+        }
+        $ids = array_filter([(int)$context['business_source_primary_id'], (int)$context['business_source_secondary_id']]);
+        if (!$ids) return 'other';
+        $rows = Db::name('cashier_v3_business_source')->whereIn('id', $ids)->lock(true)
+            ->field('id,attribution_type')->select()->toArray();
+        foreach ($rows as $row) if ((string)$row['attribution_type'] === 'guide') return 'guide';
+        $secondaryId = (int)$context['business_source_secondary_id'];
+        foreach ($rows as $row) if ((int)$row['id'] === $secondaryId) return (string)$row['attribution_type'];
+        return (string)($rows[0]['attribution_type'] ?? 'other');
+    }
+
     private function assertDataScope(
         CashierV3CheckoutFactPlanV1 $plan,
         CashierV3OperatorScope $operatorScope,
@@ -138,10 +162,10 @@ final class ThinkPhpCashierV3CheckoutFactRepository
         $isRechargeDebtRepayment = $sourceDocumentType === 'recharge_debt_repayment';
         $isSalesDebtRepayment = $sourceDocumentType === 'debt_repayment';
         $expected = [
-            'event_type' => $isRecharge ? 'recharge.completed' : (($isRechargeDebtRepayment || $isSalesDebtRepayment) ? 'debt.repaid' : 'checkout.completed'),
-            'aggregate_type' => $isRecharge ? 'recharge_order' : ($isRechargeDebtRepayment ? 'recharge_debt_repayment' : ($isSalesDebtRepayment ? 'debt_repayment' : 'sales_order')),
+            'event_type' => 'checkout.completed',
+            'aggregate_type' => 'sales_order',
             'aggregate_id' => $context['order_id'],
-            'source_type' => $isRecharge ? 'submit-recharge' : ($isRechargeDebtRepayment ? 'submit-recharge-debt-repayment' : ($isSalesDebtRepayment ? 'submit-debt-repayment' : 'submit-checkout')),
+            'source_type' => 'submit-checkout',
             'source_id' => $context['checkout_request_id'],
             'command_idempotency_key' => $plan->commandIdempotencyKey(),
             'organization_id' => $context['organization_id'],
@@ -152,6 +176,19 @@ final class ThinkPhpCashierV3CheckoutFactRepository
             'settled_at' => $context['settled_at'],
             'recorded_at' => $context['recorded_at'],
         ];
+        if ($isRecharge) {
+            $expected['event_type'] = 'recharge.completed';
+            $expected['aggregate_type'] = 'recharge_order';
+            $expected['source_type'] = 'submit-recharge';
+        } elseif ($isRechargeDebtRepayment) {
+            $expected['event_type'] = 'debt.repaid';
+            $expected['aggregate_type'] = 'recharge_debt_repayment';
+            $expected['source_type'] = 'submit-recharge-debt-repayment';
+        } elseif ($isSalesDebtRepayment) {
+            $expected['event_type'] = 'debt.repaid';
+            $expected['aggregate_type'] = 'debt_repayment';
+            $expected['source_type'] = 'submit-debt-repayment';
+        }
         foreach ($expected as $column => $value) {
             if ((string)($event[$column] ?? '') !== (string)$value) {
                 throw self::failure('checkout_fact_business_event_mismatch', [
@@ -229,7 +266,7 @@ final class ThinkPhpCashierV3CheckoutFactRepository
     private function amountColumns(string $domain): array
     {
         if ($domain === 'sale') {
-            return ['original_amount_cents', 'discount_amount_cents', 'sale_amount_cents'];
+            return ['original_amount_cents', 'discount_amount_cents', 'coupon_discount_cents', 'sale_amount_cents'];
         }
         if ($domain === 'balance') {
             return ['principal_delta_cents', 'bonus_delta_cents'];

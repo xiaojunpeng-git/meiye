@@ -698,6 +698,9 @@ final class CashierV3CheckoutSettlementKernel
                 'quantity',
                 'originalAmountCents',
                 'discountAmountCents',
+                'couponUserId',
+                'couponNameSnapshot',
+                'couponDiscountCents',
                 'saleAmountCents',
                 'debtAmountCents',
                 'sourceNameSnapshot',
@@ -807,6 +810,20 @@ final class CashierV3CheckoutSettlementKernel
                 'quantity' => $quantity,
                 'originalAmountCents' => $original,
                 'discountAmountCents' => $discount,
+                'couponUserId' => self::nonNegativeInt(
+                    $line['couponUserId'] ?? 0,
+                    'saleLine.couponUserId'
+                ),
+                'couponNameSnapshot' => self::text(
+                    $line['couponNameSnapshot'] ?? '',
+                    128,
+                    'saleLine.couponNameSnapshot',
+                    true
+                ),
+                'couponDiscountCents' => self::money(
+                    $line['couponDiscountCents'] ?? 0,
+                    'saleLine.couponDiscountCents'
+                ),
                 'saleAmountCents' => $sale,
                 'debtAmountCents' => $lineDebt,
                 'sourceNameSnapshot' => self::text(
@@ -1206,6 +1223,9 @@ final class CashierV3CheckoutSettlementKernel
                 'quantity' => $line['quantity'],
                 'originalAmountCents' => $line['originalAmountCents'],
                 'discountAmountCents' => $line['discountAmountCents'],
+                'couponUserId' => $line['couponUserId'],
+                'couponNameSnapshot' => $line['couponNameSnapshot'],
+                'couponDiscountCents' => $line['couponDiscountCents'],
                 'saleAmountCents' => $line['saleAmountCents'],
                 'debtAmountCents' => $line['debtAmountCents'],
                 'entitlementActualAmountCents' => 0,
@@ -1261,6 +1281,9 @@ final class CashierV3CheckoutSettlementKernel
                 'quantity' => $line['quantity'],
                 'originalAmountCents' => 0,
                 'discountAmountCents' => 0,
+                'couponUserId' => 0,
+                'couponNameSnapshot' => '',
+                'couponDiscountCents' => 0,
                 'saleAmountCents' => 0,
                 'debtAmountCents' => 0,
                 'entitlementActualAmountCents' => $line['actualEntitlementAmountCents'],

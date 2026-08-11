@@ -48,19 +48,26 @@ final class CashierV3CashierWorkspaceServices
             );
         }
         $draft = $this->lockOrCreateDraft($workspaceId, $stateContextId, $operatorScope);
-        $this->assertNotResumedHangMutation($draft);
-        $changedCustomer = (string)($draft['customer_mode'] ?? '') !== self::MODE_MEMBER
-            || (int)($draft['member_id'] ?? 0) !== $memberId;
-        $this->assertNoPendingCardOperationUpgradeLine($this->lineRows($workspaceId, true));
-        if ($changedCustomer) {
-            $this->deleteEntitlementLines($workspaceId);
+        // Selecting a member always starts a fresh cart by product rule.
+        $existingRows = $this->lineRows($workspaceId, true);
+        if ($existingRows !== []) {
+            $deleted = (int)Db::name(self::LINE_TABLE)
+                ->where('workspace_id', $workspaceId)
+                ->delete();
+            if ($deleted !== count($existingRows)) {
+                throw new CashierV3CommandException(
+                    CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
+                    '清空购物车失败，请重试。',
+                    CashierV3ResultCode::STATUS_FAILED,
+                    ['reason' => 'cashier_member_change_clear_cart_incomplete']
+                );
+            }
         }
-        // 即使 draft 已经指向同一会员，也修复可能由旧版本留下的销售行归属漂移。
-        $this->rebindSaleLines($workspaceId, $memberId, $changedCustomer);
         $this->updateDraft($workspaceId, [
             'member_id' => $memberId,
             'customer_mode' => self::MODE_MEMBER,
             'draft_status' => self::STATUS_EDITING,
+            'resumed_hang_order_id' => '',
         ]);
         return $this->readDraft($workspaceId, $stateContextId, $operatorScope, true);
     }
@@ -100,20 +107,7 @@ final class CashierV3CashierWorkspaceServices
     public function assertCardSaleMemberInTx(array $draft, array $line): void
     {
         CashierV3TransactionGuard::assertInTransaction('cashierWorkspaceCardSaleMember');
-        $productType = (int)($line['catalog_product_type'] ?? -1);
-        if (!in_array($productType, [4, 5], true)) {
-            return;
-        }
-        if ((string)($draft['customer_mode'] ?? '') === self::MODE_MEMBER
-            && (int)($draft['member_id'] ?? 0) > 0) {
-            return;
-        }
-        throw new CashierV3CommandException(
-            CashierV3ResultCode::ENTITLEMENT_MEMBER_REQUIRED,
-            '请先创建会员档案，再购买卡项。',
-            CashierV3ResultCode::STATUS_FAILED,
-            ['reason' => 'card_purchase_member_required']
-        );
+        // 目录加入阶段不判断会员、卡项或可售状态；结账事务统一校验。
     }
 
     /**
@@ -140,9 +134,6 @@ final class CashierV3CashierWorkspaceServices
         $existing = $this->lineRows($workspaceId, true);
         $maxSort = 0;
         foreach ($existing as $row) {
-            if ($this->isCardOperationUpgradeSaleRow($row)) {
-                throw $this->cardOperationUpgradeCartLocked();
-            }
             if ((string)($row['line_key'] ?? '') === (string)($line['line_key'] ?? '')) {
                 throw new CashierV3CommandException(
                     CashierV3ResultCode::IDEMPOTENCY_KEY_CONFLICT,
@@ -151,24 +142,7 @@ final class CashierV3CashierWorkspaceServices
                     ['line_id' => (string)($line['line_key'] ?? ''), 'reason' => 'sale_add_intent_reused']
                 );
             }
-            if ((string)($row['line_role'] ?? '') === self::ROLE_SALE
-                && $this->isCustomCardSaleRow($row)) {
-                throw new CashierV3CommandException(
-                    CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
-                    '定制卡不能与其他商品同时结账，请先处理当前订单。',
-                    CashierV3ResultCode::STATUS_FAILED,
-                    ['reason' => 'custom_card_cart_conflict']
-                );
-            }
             $maxSort = max($maxSort, (int)($row['sort_no'] ?? 0));
-        }
-        if ($existing && $this->isCustomCardSaleLine($line)) {
-            throw new CashierV3CommandException(
-                CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
-                '定制卡不能与其他商品同时结账，请先处理当前订单。',
-                CashierV3ResultCode::STATUS_FAILED,
-                ['reason' => 'custom_card_cart_conflict']
-            );
         }
         $record = $this->normalizePersistedSaleLine($line, $workspaceId, $memberId);
         $now = time();
@@ -221,9 +195,7 @@ final class CashierV3CashierWorkspaceServices
         return $this->appendSaleLineInTx($workspaceId, $stateContextId, $operatorScope, $line, $draft);
     }
 
-    /**
-     * @param array<int,array> $lines 已由权益领域在同一事务中重新校验的权威草稿行
-     */
+    /** @param array<int,array> $lines 由权益选择器提供的本次展示快照草稿行 */
     public function appendEntitlementLinesInTx(
         string $workspaceId,
         string $stateContextId,
@@ -278,42 +250,14 @@ final class CashierV3CashierWorkspaceServices
                 ['line_id' => $lineKey, 'reason' => 'add_intent_reused_with_new_key']
             );
         }
-        $selectedQuantity = 0;
         foreach ($existing as $row) {
             if ((string)($row['line_role'] ?? '') === self::ROLE_ENTITLEMENT
                 && (int)($row['member_id'] ?? 0) === $memberId
                 && (int)($row['holder_id'] ?? 0) === (int)$record['holder_id']
                 && (int)($row['source_detail_id'] ?? 0) === (int)$record['source_detail_id']) {
-                if ((int)($row['project_id'] ?? 0) !== (int)$record['project_id']) {
-                    throw $this->incompleteDraftLine(
-                        (string)($row['line_key'] ?? ''),
-                        'entitlement_source_project_mismatch'
-                    );
-                }
-                $existingQuantity = (int)($row['quantity'] ?? 0);
-                if ($existingQuantity <= 0) {
-                    throw $this->incompleteDraftLine(
-                        (string)($row['line_key'] ?? ''),
-                        'entitlement_line_quantity_invalid'
-                    );
-                }
-                $selectedQuantity += $existingQuantity;
+                // 购物车只是草稿。同一权益池的重复项目由前端合并展示，
+                // 最终可用次数由结账事务重新读取权威数据后判断。
             }
-        }
-        $available = (int)($line['display_snapshot']['availableTimes'] ?? 0);
-        if ((int)$record['quantity'] !== 1
-            || $available <= 0
-            || $selectedQuantity + (int)$record['quantity'] > $available) {
-            throw new CashierV3CommandException(
-                CashierV3ResultCode::ENTITLEMENT_SELECTION_CHANGED,
-                '权益项目可用次数已经变化，请重新打开后选择。',
-                CashierV3ResultCode::STATUS_CONFLICT,
-                [
-                    'line_id' => $lineKey,
-                    'selected_quantity' => $selectedQuantity,
-                    'available_times' => $available,
-                ]
-            );
         }
         // 草稿不是权益事实。来源在两次点击之间发生合法版本变化时，以本次已锁定的
         // 权威快照刷新同一权益池的旧草稿行，避免各独立行从不同已用次数起点分摊。
@@ -338,17 +282,34 @@ final class CashierV3CashierWorkspaceServices
                 ['reason' => 'entitlement_draft_snapshot_refresh_failed']
             );
         }
+        // `$existing` 已经是本事务中锁定的完整草稿行。同步内存快照后可直接
+        // 继续生成回执，避免“刷新同一权益池 → 再读整车 → 再读整车”三次查询。
+        foreach ($existing as &$existingRow) {
+            if ((string)($existingRow['line_role'] ?? '') !== self::ROLE_ENTITLEMENT
+                || (int)($existingRow['member_id'] ?? 0) !== $memberId
+                || (int)($existingRow['holder_id'] ?? 0) !== (int)$record['holder_id']
+                || (int)($existingRow['source_detail_id'] ?? 0) !== (int)$record['source_detail_id']) {
+                continue;
+            }
+            $existingRow['project_id'] = (int)$record['project_id'];
+            $existingRow['source_version'] = (int)$record['source_version'];
+            $existingRow['detail_version'] = (int)$record['detail_version'];
+            $existingRow['display_snapshot_json'] = (string)$record['display_snapshot_json'];
+            $existingRow['update_time'] = $now;
+        }
+        unset($existingRow);
         $record['sort_no'] = ++$maxSort;
         $record['add_time'] = $now;
         $record['update_time'] = $now;
         Db::name(self::LINE_TABLE)->insert($record);
 
-        $this->updateDraft($workspaceId, [
+        $rowsAfterAppend = array_merge($existing, [$record]);
+        $draft = $this->persistDraftWithRowsInTx($workspaceId, $draft, [
             'member_id' => $memberId,
             'customer_mode' => self::MODE_MEMBER,
             'draft_status' => self::STATUS_EDITING,
-        ]);
-        return $this->readDraft($workspaceId, $stateContextId, $operatorScope, true);
+        ], $rowsAfterAppend);
+        return $this->toPublicDraft($draft, $rowsAfterAppend);
     }
 
     public function updateLineServiceSettingsInTx(
@@ -364,9 +325,6 @@ final class CashierV3CashierWorkspaceServices
         $line = $this->lockLine($workspaceId, $lineKey);
         if (!$line) {
             throw CashierV3ScopeResolver::notFound('cashier_workspace_line', $lineKey);
-        }
-        if ($this->isCardOperationUpgradeSaleRow((array)$line)) {
-            throw $this->cardOperationUpgradeCartLocked();
         }
         $lineRole = (string)($line['line_role'] ?? '');
         $isEntitlement = $lineRole === self::ROLE_ENTITLEMENT;
@@ -385,6 +343,10 @@ final class CashierV3CashierWorkspaceServices
         $hasCraftsmen = array_key_exists('craftsmen', $settings);
         $hasSalespeople = array_key_exists('salespeople', $settings);
         $hasExperience = array_key_exists('isExperience', $settings);
+        if ($this->isCardOperationUpgradeSaleRow((array)$line)
+            && (!$hasSalespeople || $hasServiceObject || $hasCraftsmen || $hasExperience)) {
+            throw $this->cardOperationUpgradeCartLocked();
+        }
         if (!$hasServiceObject && !$hasCraftsmen && !$hasSalespeople && !$hasExperience) {
             throw new CashierV3CommandException(
                 CashierV3ResultCode::ENTITLEMENT_LINE_INVALID,
@@ -543,9 +505,6 @@ final class CashierV3CashierWorkspaceServices
             if ((string)($row['line_role'] ?? '') !== self::ROLE_SALE) {
                 continue;
             }
-            if ($this->isCardOperationUpgradeSaleRow((array)$row)) {
-                throw $this->cardOperationUpgradeCartLocked();
-            }
             $saleIds[] = (int)($row['id'] ?? 0);
         }
         $saleIds = array_values(array_filter($saleIds));
@@ -683,6 +642,95 @@ final class CashierV3CashierWorkspaceServices
         return $this->readDraft($workspaceId, $stateContextId, $operatorScope, true);
     }
 
+    public function couponSelector(
+        string $workspaceId,
+        string $stateContextId,
+        CashierV3OperatorScope $operatorScope,
+        string $lineKey
+    ): array {
+        $draft = $this->readDraft($workspaceId, $stateContextId, $operatorScope, false);
+        $memberId = (int)($draft['memberId'] ?? 0);
+        if ($memberId <= 0) {
+            throw CashierV3CommandException::invalidContext('请先选择会员后再使用优惠券。');
+        }
+        $line = Db::name(self::LINE_TABLE)
+            ->where('workspace_id', $workspaceId)
+            ->where('line_key', $lineKey)
+            ->where('line_role', self::ROLE_SALE)
+            ->find();
+        if (!$line) {
+            throw CashierV3ScopeResolver::notFound('cashier_workspace_line', $lineKey);
+        }
+        $amounts = $this->couponLineAmounts((array)$line);
+        return [
+            'lineId' => $lineKey,
+            'lineAmountCents' => $amounts['threshold'],
+            'coupons' => $this->availableCoupons($memberId, $operatorScope->storeId(), $amounts, false, $workspaceId, $lineKey),
+            'selectedCouponId' => (int)($line['coupon_user_id'] ?? 0),
+        ];
+    }
+
+    public function applyLineCouponInTx(
+        string $workspaceId,
+        string $stateContextId,
+        CashierV3OperatorScope $operatorScope,
+        string $lineKey,
+        int $couponId
+    ): array {
+        CashierV3TransactionGuard::assertInTransaction('cashierWorkspaceApplyCoupon');
+        $draft = $this->lockOrCreateDraft($workspaceId, $stateContextId, $operatorScope);
+        $this->assertNotResumedHangMutation($draft);
+        $memberId = (string)($draft['customer_mode'] ?? '') === self::MODE_MEMBER
+            ? (int)($draft['member_id'] ?? 0) : 0;
+        if ($memberId <= 0 || $couponId <= 0) {
+            throw CashierV3CommandException::invalidContext('请选择当前会员可用的优惠券。');
+        }
+        $line = Db::name(self::LINE_TABLE)->where('workspace_id', $workspaceId)
+            ->where('line_key', $lineKey)->where('line_role', self::ROLE_SALE)->lock(true)->find();
+        if (!$line) {
+            throw CashierV3ScopeResolver::notFound('cashier_workspace_line', $lineKey);
+        }
+        $amounts = $this->couponLineAmounts((array)$line);
+        $coupons = $this->availableCoupons($memberId, $operatorScope->storeId(), $amounts, true, $workspaceId, $lineKey, $couponId);
+        if (count($coupons) !== 1 || (int)$coupons[0]['couponId'] !== $couponId) {
+            throw CashierV3CommandException::versionConflict('该优惠券当前不可使用，请重新选择。', ['coupon_id' => $couponId]);
+        }
+        $coupon = $coupons[0];
+        $discount = (int)$coupon['discountAmountCents'];
+        $changes = [
+            'coupon_user_id' => $couponId,
+            'coupon_name_snapshot' => (string)$coupon['name'],
+            'coupon_discount_cents' => $discount,
+            'unit_price_cents' => max(0, $amounts['base'] - $discount),
+            'update_time' => time(),
+        ];
+        Db::name(self::LINE_TABLE)->where('id', (int)$line['id'])->where('workspace_id', $workspaceId)->update($changes);
+        $this->updateDraft($workspaceId, []);
+        return $this->readDraft($workspaceId, $stateContextId, $operatorScope, true);
+    }
+
+    public function removeLineCouponInTx(
+        string $workspaceId,
+        string $stateContextId,
+        CashierV3OperatorScope $operatorScope,
+        string $lineKey
+    ): array {
+        CashierV3TransactionGuard::assertInTransaction('cashierWorkspaceRemoveCoupon');
+        $draft = $this->lockOrCreateDraft($workspaceId, $stateContextId, $operatorScope);
+        $this->assertNotResumedHangMutation($draft);
+        $line = Db::name(self::LINE_TABLE)->where('workspace_id', $workspaceId)
+            ->where('line_key', $lineKey)->where('line_role', self::ROLE_SALE)->lock(true)->find();
+        if (!$line) {
+            throw CashierV3ScopeResolver::notFound('cashier_workspace_line', $lineKey);
+        }
+        $base = $this->couponLineAmounts((array)$line)['base'];
+        $changes = ['coupon_user_id' => 0, 'coupon_name_snapshot' => '', 'coupon_discount_cents' => 0,
+            'unit_price_cents' => $base, 'update_time' => time()];
+        Db::name(self::LINE_TABLE)->where('id', (int)$line['id'])->where('workspace_id', $workspaceId)->update($changes);
+        $this->updateDraft($workspaceId, []);
+        return $this->readDraft($workspaceId, $stateContextId, $operatorScope, true);
+    }
+
     public function assertSelectedMemberInTx(
         string $workspaceId,
         string $stateContextId,
@@ -748,7 +796,6 @@ final class CashierV3CashierWorkspaceServices
     ): array {
         CashierV3TransactionGuard::assertInTransaction('cashierWorkspaceClearLines');
         $draft = $this->lockOrCreateDraft($workspaceId, $stateContextId, $operatorScope);
-        $this->assertNotResumedHangMutation($draft);
         $lines = $this->lineRows($workspaceId, true);
         if ($beforeDelete !== null) {
             foreach ($lines as $line) {
@@ -756,6 +803,9 @@ final class CashierV3CashierWorkspaceServices
             }
         }
         Db::name(self::LINE_TABLE)->where('workspace_id', $workspaceId)->delete();
+        // 清空购物车就是草稿重置。若当前内容来自提单，同时解除这次
+        // 工作台关联，原挂单仍留在列表中，供之后再次提取或删除。
+        $this->updateDraft($workspaceId, ['resumed_hang_order_id' => '']);
         $draft = $this->persistDraftWithRowsInTx($workspaceId, $draft, [], []);
         return $this->toPublicDraft($draft, []);
     }
@@ -792,7 +842,7 @@ final class CashierV3CashierWorkspaceServices
         callable $saleValidator
     ): array {
         CashierV3TransactionGuard::assertInTransaction('cashierWorkspaceChangeLineQuantity');
-        if ($delta === 0 || abs($delta) > 1000) {
+        if ($delta === 0 || abs($delta) > 1000000) {
             throw new CashierV3CommandException(
                 CashierV3ResultCode::ENTITLEMENT_LINE_INVALID,
                 '购物车数量变化无效，请重新操作。',
@@ -826,35 +876,9 @@ final class CashierV3CashierWorkspaceServices
                 ['line_id' => $lineKey, 'quantity' => $next]
             );
         }
-        if ((string)($line['line_role'] ?? '') === self::ROLE_ENTITLEMENT) {
-            $aggregateQuantity = $next;
-            foreach ($rows as $row) {
-                if ((int)($row['id'] ?? 0) === (int)($line['id'] ?? 0)) {
-                    continue;
-                }
-                if ((string)($row['line_role'] ?? '') === self::ROLE_ENTITLEMENT
-                    && (int)($row['member_id'] ?? 0) === (int)($line['member_id'] ?? 0)
-                    && (int)($row['holder_id'] ?? 0) === (int)($line['holder_id'] ?? 0)
-                    && (int)($row['source_detail_id'] ?? 0) === (int)($line['source_detail_id'] ?? 0)) {
-                    if ((int)($row['project_id'] ?? 0) !== (int)($line['project_id'] ?? 0)) {
-                        throw $this->incompleteDraftLine(
-                            (string)($row['line_key'] ?? ''),
-                            'entitlement_source_project_mismatch'
-                        );
-                    }
-                    $otherQuantity = (int)($row['quantity'] ?? 0);
-                    if ($otherQuantity <= 0) {
-                        throw $this->incompleteDraftLine(
-                            (string)($row['line_key'] ?? ''),
-                            'entitlement_line_quantity_invalid'
-                        );
-                    }
-                    $aggregateQuantity += $otherQuantity;
-                }
-            }
-            $entitlementValidator($line, $next, $aggregateQuantity);
-        } elseif ((string)($line['line_role'] ?? '') === self::ROLE_SALE) {
-            $saleValidator($line, $next);
+        if ((string)($line['line_role'] ?? '') === self::ROLE_ENTITLEMENT
+            || (string)($line['line_role'] ?? '') === self::ROLE_SALE) {
+            // 数量编辑只改草稿；权益余次与库存均在最终结账时校验。
         } else {
             throw new CashierV3CommandException(
                 CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
@@ -905,6 +929,13 @@ final class CashierV3CashierWorkspaceServices
                     'cashier_sale_checkout_source_invalid'
                 );
             }
+            // Coupon selection belongs to the locked workspace line, rather
+            // than the catalog source. Carry the immutable checkout snapshot
+            // forward so the request, order, and sale fact share one line
+            // fingerprint even when no coupon is selected.
+            $source['couponUserId'] = (int)($row['coupon_user_id'] ?? 0);
+            $source['couponNameSnapshot'] = (string)($row['coupon_name_snapshot'] ?? '');
+            $source['couponDiscountCents'] = (int)($row['coupon_discount_cents'] ?? 0);
             $sources[] = $source;
         }
         return [
@@ -1038,15 +1069,16 @@ final class CashierV3CashierWorkspaceServices
         string $workspaceId,
         string $stateContextId,
         CashierV3OperatorScope $operatorScope,
-        string $expectedLineFingerprint
+        string $expectedLineFingerprint,
+        bool $retainMember = false,
+        bool $requireFingerprint = true
     ): array {
         CashierV3TransactionGuard::assertInTransaction('cashierWorkspaceHangTransfer');
         $draft = $this->lockOrCreateDraft($workspaceId, $stateContextId, $operatorScope);
         $this->assertNotResumedHangMutation($draft);
         $workspaceRows = $this->lineRows($workspaceId, true);
-        $this->assertNoPendingCardOperationUpgradeLine($workspaceRows);
         $publicDraft = $this->toPublicDraft($draft, $workspaceRows);
-        if (!$workspaceRows || ($publicDraft['complete'] ?? false) !== true) {
+        if (!$workspaceRows) {
             throw new CashierV3CommandException(
                 CashierV3ResultCode::INVALID_COMMAND_CONTEXT,
                 '请先添加需要挂单的项目。',
@@ -1054,8 +1086,8 @@ final class CashierV3CashierWorkspaceServices
                 ['reason' => 'cashier_hang_workspace_empty']
             );
         }
-        if ($expectedLineFingerprint === ''
-            || !hash_equals((string)$publicDraft['lineFingerprint'], $expectedLineFingerprint)) {
+        if ($requireFingerprint && ($expectedLineFingerprint === ''
+            || !hash_equals((string)$publicDraft['lineFingerprint'], $expectedLineFingerprint))) {
             throw CashierV3CommandException::versionConflict(
                 '购物车已经变化，请重新打开挂单页面。',
                 ['reason' => 'cashier_hang_workspace_fingerprint_changed']
@@ -1072,11 +1104,12 @@ final class CashierV3CashierWorkspaceServices
                 ['reason' => 'cashier_hang_workspace_clear_incomplete']
             );
         }
-        $this->updateDraft($workspaceId, [
-            'member_id' => 0,
-            'customer_mode' => self::MODE_GUEST,
-            'draft_status' => self::STATUS_EDITING,
-        ]);
+        $changes = ['draft_status' => self::STATUS_EDITING];
+        if (!$retainMember) {
+            $changes['member_id'] = 0;
+            $changes['customer_mode'] = self::MODE_GUEST;
+        }
+        $this->updateDraft($workspaceId, $changes);
         return [
             'hangDraft' => $publicDraft,
             // Only the caller that already owns this transaction can pass these
@@ -1088,46 +1121,40 @@ final class CashierV3CashierWorkspaceServices
     }
 
     /**
-     * Restore a new-contract, sale-only hang by atomically replacing the
+     * Restore a new-contract hang draft by atomically replacing the
      * current workspace. The caller locks the hang first; this method locks
      * both draft and existing rows, removes the old draft rows, then writes
      * the immutable hang snapshots in the same transaction.
      *
-     * @param array<int,array> $frozenSaleRows selected fields decoded from
-     *   immutable hang-line workspace snapshots, ordered by original line_no.
+     * @param array<int,array> $frozenRows authoritative workspace snapshots,
+     *   ordered by original line_no.
      */
-    public function restoreSaleOnlyHangInTx(
+    public function restoreHangDraftInTx(
         string $workspaceId,
         string $stateContextId,
         CashierV3OperatorScope $operatorScope,
         string $hangOrderId,
         int $memberId,
-        array $frozenSaleRows
+        array $frozenRows
     ): array {
-        CashierV3TransactionGuard::assertInTransaction('cashierWorkspaceRestoreSaleOnlyHang');
+        CashierV3TransactionGuard::assertInTransaction('cashierWorkspaceRestoreHangDraft');
         if (preg_match('/^HGO[0-9a-f]{40}$/D', $hangOrderId) !== 1 || $memberId < 0) {
             throw $this->incompleteDraft('cashier_hang_restore_identity_invalid');
         }
         $draft = $this->lockOrCreateDraft($workspaceId, $stateContextId, $operatorScope);
-        if (trim((string)($draft['resumed_hang_order_id'] ?? '')) !== '') {
-            throw CashierV3CommandException::versionConflict(
-                '当前收银台已经提取了另一张挂单，请先完成该挂单结账。',
-                ['reason' => 'cashier_hang_restore_workspace_already_bound']
-            );
-        }
         $existingRows = $this->lineRows($workspaceId, true);
-        if ($frozenSaleRows === [] || count($frozenSaleRows) > 1000) {
+        if ($frozenRows === [] || count($frozenRows) > 1000) {
             throw $this->incompleteDraft('cashier_hang_restore_lines_invalid');
         }
 
         $records = [];
         $seenLineKeys = [];
         $now = time();
-        foreach (array_values($frozenSaleRows) as $index => $line) {
+        foreach (array_values($frozenRows) as $index => $line) {
             if (!is_array($line)) {
                 throw $this->incompleteDraft('cashier_hang_restore_line_invalid');
             }
-            $record = $this->normalizeRestoredSaleLine(
+            $record = $this->normalizeRestoredHangLine(
                 $line,
                 $workspaceId,
                 $memberId,
@@ -1167,7 +1194,26 @@ final class CashierV3CashierWorkspaceServices
             'member_id' => $memberId,
             'customer_mode' => $memberId > 0 ? self::MODE_MEMBER : self::MODE_GUEST,
             'draft_status' => self::STATUS_EDITING,
+            'resumed_hang_order_id' => '',
+        ]);
+        return $this->readDraft($workspaceId, $stateContextId, $operatorScope, true);
+    }
+
+    /** Mark the restored workspace as awaiting checkout of its source hang. */
+    public function bindResumedHangOrderInTx(
+        string $workspaceId,
+        string $stateContextId,
+        CashierV3OperatorScope $operatorScope,
+        string $hangOrderId
+    ): array {
+        CashierV3TransactionGuard::assertInTransaction('cashierWorkspaceBindResumedHang');
+        if (preg_match('/^HGO[0-9a-f]{40}$/D', $hangOrderId) !== 1) {
+            throw $this->incompleteDraft('cashier_hang_binding_identity_invalid');
+        }
+        $this->lockOrCreateDraft($workspaceId, $stateContextId, $operatorScope);
+        $this->updateDraft($workspaceId, [
             'resumed_hang_order_id' => $hangOrderId,
+            'draft_status' => self::STATUS_EDITING,
         ]);
         return $this->readDraft($workspaceId, $stateContextId, $operatorScope, true);
     }
@@ -1485,19 +1531,12 @@ final class CashierV3CashierWorkspaceServices
         }
     }
 
-    /** A restored hang is immutable until it either settles or rolls back. */
+    /** Hang orders are copied drafts; they never lock later cart edits. */
     private function assertNotResumedHangMutation(array $draft): void
     {
-        $hangOrderId = trim((string)($draft['resumed_hang_order_id'] ?? ''));
-        if ($hangOrderId === '') {
-            return;
-        }
-        throw new CashierV3CommandException(
-            CashierV3ResultCode::INVALID_COMMAND_CONTEXT,
-            '已提取的挂单必须按原内容完成结账，不能修改会员或购物车。',
-            CashierV3ResultCode::STATUS_FAILED,
-            ['reason' => 'cashier_resumed_hang_mutation_blocked', 'hang_order_id' => $hangOrderId]
-        );
+        // Kept as a compatibility hook for old callers. Cart mutations remain
+        // ordinary draft operations; only the successful checkout path uses
+        // the source id to remove the retained hang draft.
     }
 
     private function assertWorkspaceIdentity(
@@ -2003,7 +2042,7 @@ final class CashierV3CashierWorkspaceServices
             || ($isServiceProject ? $projectId !== $productId : $projectId !== 0)
             || $quantity !== 1 || $sourceVersion <= 0 || $detailVersion <= 0
             || !is_int($unitPriceCents) || $unitPriceCents < 0
-            || !is_int($originalUnitPriceCents) || (!$isCustomCard && $originalUnitPriceCents < $unitPriceCents)
+            || !is_int($originalUnitPriceCents)
             || preg_match('/^[a-f0-9]{64}$/D', $fingerprint) !== 1
             || $authoritySnapshot === null || $displaySnapshot === null) {
             throw new CashierV3CommandException(
@@ -2031,6 +2070,9 @@ final class CashierV3CashierWorkspaceServices
             'original_unit_price_cents' => $originalUnitPriceCents,
             'configured_cost_cents' => (int)($line['configured_cost_cents'] ?? 0),
             'debt_amount_cents' => 0,
+            'coupon_user_id' => 0,
+            'coupon_name_snapshot' => '',
+            'coupon_discount_cents' => 0,
             'price_change_reason' => '',
             'price_changed_by' => 0,
             'price_changed_by_name_snapshot' => '',
@@ -2061,6 +2103,7 @@ final class CashierV3CashierWorkspaceServices
         $productId = (int)($line['catalog_product_id'] ?? 0);
         $skuId = (int)($line['catalog_sku_id'] ?? 0);
         $productType = (int)($line['catalog_product_type'] ?? -1);
+        $projectId = (int)($line['project_id'] ?? 0);
         $quantity = (int)($line['quantity'] ?? 0);
         $sourceVersion = (int)($line['source_version'] ?? 0);
         $detailVersion = (int)($line['detail_version'] ?? 0);
@@ -2071,10 +2114,13 @@ final class CashierV3CashierWorkspaceServices
         $displayJson = (string)($line['display_snapshot_json'] ?? '');
         $craftsmenJson = (string)($line['craftsmen_json'] ?? '');
         $salespeopleJson = (string)($line['salespeople_json'] ?? '');
+        $isServiceProject = $productType === 6 && $projectId === $productId;
         if (preg_match('/^sale:[a-f0-9]{48}$/D', $lineKey) !== 1
             || (string)($line['line_role'] ?? '') !== self::ROLE_SALE
             || (int)($line['member_id'] ?? -1) !== $memberId
-            || $productId <= 0 || $skuId <= 0 || $productType !== 0 || $quantity <= 0
+            || $productId <= 0 || $skuId <= 0 || !in_array($productType, [0, 6], true)
+            || ($productType === 0 ? $projectId !== 0 : !$isServiceProject)
+            || $quantity <= 0
             || $quantity > 1000000 || $sourceVersion <= 0 || $detailVersion <= 0
             || !is_numeric($unitPriceCents) || (int)$unitPriceCents < 0
             || !is_numeric($originalUnitPriceCents)
@@ -2094,7 +2140,7 @@ final class CashierV3CashierWorkspaceServices
         $display = $this->decodeStoredDisplaySnapshot($probe, $lineKey);
         $craftsmen = $this->decodeStoredCraftsmen($probe, $lineKey);
         $salespeople = $this->decodeStoredSalespeople($probe, $lineKey);
-        if ($craftsmen !== [] || $salespeople !== []
+        if (($productType === 0 && ($craftsmen !== [] || $salespeople !== []))
             || !hash_equals($fingerprint, hash('sha256', $this->canonicalJson($authority)))
             || (int)($authority['product']['id'] ?? 0) !== $productId
             || (int)($authority['sku']['id'] ?? 0) !== $skuId
@@ -2116,7 +2162,7 @@ final class CashierV3CashierWorkspaceServices
             'member_id' => $memberId,
             'holder_id' => 0,
             'source_detail_id' => 0,
-            'project_id' => 0,
+            'project_id' => $projectId,
             'catalog_product_id' => $productId,
             'catalog_sku_id' => $skuId,
             'catalog_product_type' => $productType,
@@ -2133,13 +2179,96 @@ final class CashierV3CashierWorkspaceServices
             'price_changed_at' => 0,
             'authority_fingerprint' => $fingerprint,
             'authority_snapshot_json' => $authorityJson,
-            'service_object' => '',
+            'service_object' => (string)($line['service_object'] ?? ''),
             'craftsmen_json' => $craftsmenJson,
             'salespeople_json' => $salespeopleJson,
-            'is_experience' => 0,
+            'is_experience' => (int)($line['is_experience'] ?? 0),
             'display_snapshot_json' => $displayJson,
             'sort_no' => $sortNo,
         ];
+    }
+
+    /**
+     * A hang order restores its own immutable workspace rows.  This is a
+     * structural integrity check only: availability, price, inventory and
+     * entitlement eligibility belong to the subsequent checkout authority.
+     */
+    private function normalizeRestoredHangLine(
+        array $line,
+        string $workspaceId,
+        int $memberId,
+        int $sortNo
+    ): array {
+        $lineKey = trim((string)($line['line_key'] ?? ''));
+        $role = (string)($line['line_role'] ?? '');
+        $quantity = (int)($line['quantity'] ?? 0);
+        $sourceVersion = (int)($line['source_version'] ?? 0);
+        $detailVersion = (int)($line['detail_version'] ?? 0);
+        $displayJson = (string)($line['display_snapshot_json'] ?? '');
+        $craftsmenJson = (string)($line['craftsmen_json'] ?? '');
+        $salespeopleJson = (string)($line['salespeople_json'] ?? '');
+        if ($lineKey === ''
+            || !in_array($role, [self::ROLE_SALE, self::ROLE_ENTITLEMENT], true)
+            || (int)($line['member_id'] ?? -1) !== $memberId
+            || $quantity <= 0 || $sourceVersion <= 0 || $detailVersion <= 0
+            || $displayJson === '' || $craftsmenJson === '' || $salespeopleJson === ''
+            || !is_array(json_decode($displayJson, true))
+            || !is_array(json_decode($craftsmenJson, true))
+            || !is_array(json_decode($salespeopleJson, true))
+            || !in_array((int)($line['is_experience'] ?? -1), [0, 1], true)
+            || $sortNo <= 0) {
+            throw $this->incompleteDraftLine($lineKey, 'cashier_hang_restore_snapshot_invalid');
+        }
+
+        $record = [
+            'workspace_id' => $workspaceId,
+            'line_key' => $lineKey,
+            'line_role' => $role,
+            'member_id' => $memberId,
+            'holder_id' => (int)($line['holder_id'] ?? 0),
+            'source_detail_id' => (int)($line['source_detail_id'] ?? 0),
+            'project_id' => (int)($line['project_id'] ?? 0),
+            'catalog_product_id' => (int)($line['catalog_product_id'] ?? 0),
+            'catalog_sku_id' => (int)($line['catalog_sku_id'] ?? 0),
+            'catalog_product_type' => (int)($line['catalog_product_type'] ?? 0),
+            'quantity' => $quantity,
+            'source_version' => $sourceVersion,
+            'detail_version' => $detailVersion,
+            'unit_price_cents' => (int)($line['unit_price_cents'] ?? 0),
+            'original_unit_price_cents' => (int)($line['original_unit_price_cents'] ?? 0),
+            'configured_cost_cents' => 0,
+            'debt_amount_cents' => 0,
+            'price_change_reason' => '',
+            'price_changed_by' => 0,
+            'price_changed_by_name_snapshot' => '',
+            'price_changed_at' => 0,
+            'authority_fingerprint' => (string)($line['authority_fingerprint'] ?? ''),
+            'authority_snapshot_json' => (string)($line['authority_snapshot_json'] ?? ''),
+            'service_object' => (string)($line['service_object'] ?? ''),
+            'craftsmen_json' => $craftsmenJson,
+            'salespeople_json' => $salespeopleJson,
+            'is_experience' => (int)($line['is_experience'] ?? 0),
+            'display_snapshot_json' => $displayJson,
+            'sort_no' => $sortNo,
+        ];
+        if ($role === self::ROLE_SALE) {
+            $productType = (int)$record['catalog_product_type'];
+            $productId = (int)$record['catalog_product_id'];
+            $skuId = (int)$record['catalog_sku_id'];
+            if ($productId <= 0 || $skuId <= 0 || !in_array($productType, [0, 4, 5, 6], true)
+                || ($productType === 6
+                    ? (int)$record['project_id'] !== $productId
+                    : (int)$record['project_id'] !== 0)
+                || !preg_match('/^[a-f0-9]{64}$/D', (string)$record['authority_fingerprint'])
+                || (string)$record['authority_snapshot_json'] === '') {
+                throw $this->incompleteDraftLine($lineKey, 'cashier_hang_restore_sale_snapshot_invalid');
+            }
+        } elseif ((int)$record['holder_id'] <= 0
+            || (int)$record['source_detail_id'] <= 0
+            || (int)$record['project_id'] <= 0) {
+            throw $this->incompleteDraftLine($lineKey, 'cashier_hang_restore_entitlement_snapshot_invalid');
+        }
+        return $record;
     }
 
     private function normalizePersistedEntitlementLine(array $line, string $workspaceId, int $memberId): array
@@ -2192,6 +2321,10 @@ final class CashierV3CashierWorkspaceServices
             || $draftStatus !== self::STATUS_EDITING
             || preg_match('/^[a-f0-9]{64}$/', $storedFingerprint) !== 1
             || (!hash_equals($storedFingerprint, $this->lineFingerprint($rows))
+                // Existing editing drafts written before the R15 coupon snapshot
+                // fields must remain readable. A later normal draft write upgrades
+                // this fingerprint to the current canonical representation.
+                && !hash_equals($storedFingerprint, $this->lineFingerprint($rows, true, false))
                 && !hash_equals($storedFingerprint, $this->lineFingerprint($rows, false)))) {
             throw $this->incompleteDraft('cashier_workspace_draft_contract_invalid');
         }
@@ -2276,6 +2409,17 @@ final class CashierV3CashierWorkspaceServices
                     $lineKey,
                     'configured_cost_cents'
                 );
+                $couponUserId = $this->storedNonnegativeInteger(
+                    $row['coupon_user_id'] ?? 0,
+                    $lineKey,
+                    'coupon_user_id'
+                );
+                $couponDiscountCents = $this->storedNonnegativeInteger(
+                    $row['coupon_discount_cents'] ?? 0,
+                    $lineKey,
+                    'coupon_discount_cents'
+                );
+                $couponName = trim((string)($row['coupon_name_snapshot'] ?? ''));
                 $priceChangeReason = trim((string)($row['price_change_reason'] ?? ''));
                 $priceChangedBy = (int)($row['price_changed_by'] ?? 0);
                 $priceChangedByName = trim((string)($row['price_changed_by_name_snapshot'] ?? ''));
@@ -2283,34 +2427,33 @@ final class CashierV3CashierWorkspaceServices
                 $configuredPriceCents = (int)($authoritySnapshot['sku']['priceCents'] ?? -1);
                 $authorityCostCents = (int)($authoritySnapshot['sku']['costCents'] ?? -1);
                 $priceAuditMatches = $priceChangedAt === 0
-                    ? ($unitPriceCents === $configuredPriceCents
+                    ? ($unitPriceCents >= 0
                         && in_array($configuredCostCents, [0, $authorityCostCents], true)
                         && $priceChangeReason === '' && $priceChangedBy === 0 && $priceChangedByName === '')
                     : ($authorityCostCents >= 0
                         && $configuredCostCents === $authorityCostCents
                         && $unitPriceCents >= $configuredCostCents
-                        && ($isCustomCard || $unitPriceCents <= $configuredPriceCents)
                         && $priceChangeReason !== '' && $priceChangedBy > 0 && $priceChangedByName !== '');
                 $priceSnapshotMatches = $cardOperationUpgrade === null
-                    ? ($priceAuditMatches
-                        && (int)($authoritySnapshot['sku']['originalPriceCents'] ?? -1) === $originalUnitPriceCents)
+                    ? $priceAuditMatches
                     : (
                         (int)($cardOperationUpgrade['targetProductId'] ?? 0) === $productId
                         && (int)($cardOperationUpgrade['targetSkuId'] ?? 0) === $skuId
                         && (int)($cardOperationUpgrade['targetPriceCents'] ?? -1) === $originalUnitPriceCents
-                        && (int)($cardOperationUpgrade['settlementDeltaCents'] ?? -1) === $unitPriceCents
+                        && $couponDiscountCents >= 0
+                        && (int)($cardOperationUpgrade['settlementDeltaCents'] ?? -1)
+                            === $unitPriceCents + $couponDiscountCents
                     );
+                $displayOriginalUnitPriceCents = max($originalUnitPriceCents, $unitPriceCents);
                 if (preg_match('/^sale:[a-f0-9]{48}$/D', $lineKey) !== 1
                     || $productId <= 0 || $skuId <= 0
                     || !in_array($productType, [0, 4, 5, 6], true)
-                    || (!$isCustomCard && $originalUnitPriceCents < $unitPriceCents)
                     || preg_match('/^[a-f0-9]{64}$/D', $authorityFingerprint) !== 1
                     || !hash_equals($authorityFingerprint, $authorityHash)
                     || (int)($authoritySnapshot['product']['id'] ?? 0) !== $productId
                     || (int)($authoritySnapshot['sku']['id'] ?? 0) !== $skuId
                     || (int)($authoritySnapshot['product']['productType'] ?? -1) !== $productType
                     || (int)($authoritySnapshot['productVersion'] ?? 0) !== $sourceVersion
-                    || (int)($authoritySnapshot['skuVersion'] ?? 0) !== $detailVersion
                     || !$priceSnapshotMatches
                     || (int)($row['holder_id'] ?? 0) !== 0
                     || (int)($row['source_detail_id'] ?? 0) !== 0
@@ -2324,7 +2467,7 @@ final class CashierV3CashierWorkspaceServices
                     throw $this->incompleteDraftLine($lineKey, 'cashier_sale_line_identity_invalid');
                 }
                 $lineAmountCents = $this->multiplyCents($unitPriceCents, $quantity, $lineKey);
-                $originalAmountCents = $this->multiplyCents($originalUnitPriceCents, $quantity, $lineKey);
+                $originalAmountCents = $this->multiplyCents($displayOriginalUnitPriceCents, $quantity, $lineKey);
                 $debtAmountCents = $this->storedNonnegativeInteger(
                     $row['debt_amount_cents'] ?? 0,
                     $lineKey,
@@ -2341,7 +2484,7 @@ final class CashierV3CashierWorkspaceServices
                     'productVersion' => $sourceVersion,
                     'skuVersion' => $detailVersion,
                     'unitPriceCents' => $unitPriceCents,
-                    'originalUnitPriceCents' => $originalUnitPriceCents,
+                    'originalUnitPriceCents' => $displayOriginalUnitPriceCents,
                     'configuredPriceCents' => $configuredPriceCents,
                     'configuredCostCents' => $configuredCostCents,
                     'priceChangeReason' => $priceChangeReason,
@@ -2350,9 +2493,13 @@ final class CashierV3CashierWorkspaceServices
                     'priceChangedAt' => $priceChangedAt,
                     'lineAmountCents' => $lineAmountCents,
                     'debtAmountCents' => $debtAmountCents,
+                    'couponUserId' => $couponUserId,
+                    'couponName' => $couponName,
+                    'couponDiscountAmountCents' => $couponDiscountCents,
+                    'couponSummary' => $couponUserId > 0 ? $couponName . '：-' . $this->centsToMoney($couponDiscountCents) : '',
                     'originalLineAmountCents' => $originalAmountCents,
                     'unitPrice' => $this->centsToMoney($unitPriceCents),
-                    'originalUnitPrice' => $this->centsToMoney($originalUnitPriceCents),
+                    'originalUnitPrice' => $this->centsToMoney($displayOriginalUnitPriceCents),
                     'finalAmount' => $this->centsToMoney($lineAmountCents),
                     'amount' => $this->centsToMoney($lineAmountCents),
                     'originalAmount' => $this->centsToMoney($originalAmountCents),
@@ -2360,6 +2507,11 @@ final class CashierV3CashierWorkspaceServices
                     'definitionFingerprint' => $authorityFingerprint,
                     'serviceObject' => $serviceObject,
                 ]);
+                if ($cardOperationUpgrade !== null) {
+                    // Deliberately expose only the immutable upgrade binding,
+                    // never the full server authority snapshot.
+                    $line['cardOperationUpgrade'] = $cardOperationUpgrade;
+                }
             } elseif ($lineRole === self::ROLE_ENTITLEMENT) {
                 if ((int)($row['holder_id'] ?? 0) <= 0
                     || (int)($row['source_detail_id'] ?? 0) <= 0
@@ -2407,22 +2559,32 @@ final class CashierV3CashierWorkspaceServices
                 $allocationBasisBySource[$sourceKey] = $allocationBasis;
                 $selectedBefore = (int)($selectedQuantityBySource[$sourceKey] ?? 0);
                 $allocationStart = $consumedTimes + $selectedBefore;
-                if ($allocationStart < $consumedTimes
-                    || $allocationStart + $quantity > $totalPurchaseTimes) {
+                if ($allocationStart < $consumedTimes) {
                     throw $this->incompleteLineSettings(
                         (string)$row['line_key'],
-                        'actual_amount_aggregate_quantity_invalid'
+                        'actual_amount_allocation_start_invalid'
                     );
                 }
-                try {
-                    $line['actualAmount'] = CashierV3EntitlementActualAmountAllocator::allocate(
-                        $purchaseAmount,
-                        $totalPurchaseTimes,
-                        $allocationStart,
-                        $quantity
-                    );
-                } catch (\InvalidArgumentException $exception) {
-                    throw $this->incompleteLineSettings((string)$row['line_key'], 'actual_amount_allocation_failed');
+
+                // 购物车是草稿：同一权益可被继续加入，即使暂存数量已经超过
+                // 打开“使用权益”时的展示快照。此处只计算快照可覆盖部分的
+                // 展示金额；剩余部分显示为 0，绝不在加购阶段阻断。最终结账
+                // 事务会重新读取权威权益事实并统一校验可用次数。
+                $remainingAtSnapshot = max(0, $totalPurchaseTimes - $allocationStart);
+                $allocatableQuantity = min($quantity, $remainingAtSnapshot);
+                if ($allocatableQuantity === 0) {
+                    $line['actualAmount'] = '0.00';
+                } else {
+                    try {
+                        $line['actualAmount'] = CashierV3EntitlementActualAmountAllocator::allocate(
+                            $purchaseAmount,
+                            $totalPurchaseTimes,
+                            $allocationStart,
+                            $allocatableQuantity
+                        );
+                    } catch (\InvalidArgumentException $exception) {
+                        throw $this->incompleteLineSettings((string)$row['line_key'], 'actual_amount_allocation_failed');
+                    }
                 }
                 $line['purchaseAmount'] = bcadd($purchaseAmount, '0', 2);
                 $line['totalPurchaseTimes'] = $totalPurchaseTimes;
@@ -2557,7 +2719,11 @@ final class CashierV3CashierWorkspaceServices
         return $labels ? implode('、', $labels) : '待分配';
     }
 
-    private function lineFingerprint(array $rows, bool $includeLineFinancials = true): string
+    private function lineFingerprint(
+        array $rows,
+        bool $includeLineFinancials = true,
+        bool $includeCouponFields = true
+    ): string
     {
         $canonical = [];
         foreach ($rows as $row) {
@@ -2591,6 +2757,11 @@ final class CashierV3CashierWorkspaceServices
                     $item['price_changed_by'] = (int)($row['price_changed_by'] ?? 0);
                     $item['price_changed_by_name_snapshot'] = (string)($row['price_changed_by_name_snapshot'] ?? '');
                     $item['price_changed_at'] = (int)($row['price_changed_at'] ?? 0);
+                    if ($includeCouponFields) {
+                        $item['coupon_user_id'] = (int)($row['coupon_user_id'] ?? 0);
+                        $item['coupon_name_snapshot'] = (string)($row['coupon_name_snapshot'] ?? '');
+                        $item['coupon_discount_cents'] = (int)($row['coupon_discount_cents'] ?? 0);
+                    }
                 }
                 $item['authority_fingerprint'] = (string)($row['authority_fingerprint'] ?? '');
                 $item['authority_snapshot_json'] = (string)($row['authority_snapshot_json'] ?? '');
@@ -2598,6 +2769,106 @@ final class CashierV3CashierWorkspaceServices
             $canonical[] = $item;
         }
         return hash('sha256', $this->encodeJson($canonical));
+    }
+
+    /** @return array{threshold:int,base:int,cap:int} */
+    private function couponLineAmounts(array $line): array
+    {
+        $quantity = max(1, (int)($line['quantity'] ?? 1));
+        $current = $this->multiplyCents((int)($line['unit_price_cents'] ?? 0), $quantity, (string)($line['line_key'] ?? ''));
+        $oldDiscount = max(0, (int)($line['coupon_discount_cents'] ?? 0));
+        $base = $current + $oldDiscount;
+        $snapshot = json_decode((string)($line['authority_snapshot_json'] ?? ''), true);
+        $upgrade = is_array($snapshot) && is_array($snapshot['cardOperationUpgrade'] ?? null)
+            ? $snapshot['cardOperationUpgrade'] : null;
+        $threshold = $upgrade === null ? $base : (int)($upgrade['targetPriceCents'] ?? 0);
+        if ($threshold <= 0 || $base < 0 || $base > $threshold) {
+            throw $this->incompleteDraftLine((string)($line['line_key'] ?? ''), 'coupon_line_amount_invalid');
+        }
+        return ['threshold' => $threshold, 'base' => $base, 'cap' => $base];
+    }
+
+    private function availableCoupons(
+        int $memberId,
+        int $storeId,
+        array $amounts,
+        bool $lock,
+        string $workspaceId,
+        string $lineKey,
+        int $onlyCouponId = 0
+    ): array {
+        $now = time();
+        $query = Db::name('store_coupon_user')->alias('cu')
+            ->leftJoin('store_coupon_issue ci', 'ci.id=cu.cid')
+            ->where('cu.uid', $memberId)->where('cu.status', 0)->where('cu.is_fail', 0)->where('cu.use_time', 0)
+            ->where(function ($q) use ($now) { $q->where('cu.start_time', 0)->whereOr('cu.start_time', '<=', $now); })
+            ->where(function ($q) use ($now) { $q->where('cu.end_time', 0)->whereOr('cu.end_time', '>=', $now); })
+            ->field('cu.id,cu.coupon_title,cu.coupon_price,cu.use_min_price,cu.end_time,cu.cid,ci.coupon_type,ci.top_discount_price,ci.coupon_issue_type,ci.relation_id,ci.applicable_type,ci.applicable_store_id');
+        if ($onlyCouponId > 0) $query->where('cu.id', $onlyCouponId);
+        if ($lock) $query->lock(true);
+        $rows = $query->order('cu.end_time asc,cu.id asc')->select();
+        $rows = is_object($rows) && method_exists($rows, 'toArray') ? $rows->toArray() : (array)$rows;
+        $usedIds = Db::name(self::LINE_TABLE)->where('workspace_id', $workspaceId)
+            ->where('line_key', '<>', $lineKey)->where('coupon_user_id', '>', 0)->column('coupon_user_id');
+        $used = array_fill_keys(array_map('intval', $usedIds), true);
+        $out = [];
+        foreach ($rows as $row) {
+            $id = (int)($row['id'] ?? 0);
+            $minimum = $this->decimalMoneyToCents($row['use_min_price'] ?? null, 'coupon_use_min_price_invalid');
+            if ($id <= 0 || isset($used[$id]) || $minimum > $amounts['threshold']) continue;
+            if (!$this->couponAllowsStore($row, $storeId)) continue;
+            $face = $this->decimalMoneyToCents($row['coupon_price'] ?? null, 'coupon_price_invalid');
+            if ((int)($row['coupon_type'] ?? 1) === 2) {
+                $rate = $this->decimalPercentHundredths($row['coupon_price'] ?? null);
+                $face = intdiv($amounts['threshold'] * (10000 - $rate), 10000);
+                $top = $this->decimalMoneyToCents($row['top_discount_price'] ?? 0, 'coupon_top_discount_invalid');
+                if ($top > 0) $face = min($face, $top);
+            }
+            $out[] = ['couponId' => $id, 'name' => trim((string)$row['coupon_title']) ?: '优惠券',
+                'discountAmountCents' => min($face, $amounts['cap']),
+                'useMinAmountCents' => $minimum,
+                'expiresAt' => (int)($row['end_time'] ?? 0)];
+        }
+        return $out;
+    }
+
+    private function couponAllowsStore(array $row, int $storeId): bool
+    {
+        if ((int)($row['cid'] ?? 0) <= 0) return true;
+        if ((int)($row['coupon_issue_type'] ?? 0) === 1 && (int)($row['relation_id'] ?? 0) !== $storeId) return false;
+        $type = (int)($row['applicable_type'] ?? 1);
+        if ($type === 0) return false;
+        if ($type !== 2) return true;
+        $raw = trim((string)($row['applicable_store_id'] ?? ''));
+        $decoded = json_decode($raw, true);
+        $ids = is_array($decoded)
+            ? $decoded
+            : preg_split('/\s*,\s*/', trim($raw, "[] \t\n\r\0\x0B"));
+        return in_array($storeId, array_map('intval', $ids ?: []), true);
+    }
+
+    private function decimalMoneyToCents($value, string $reason): int
+    {
+        $raw = trim((string)$value);
+        if (preg_match('/^(0|[1-9][0-9]{0,12})(?:\.([0-9]{1,2})(?:0{0,4})?)?$/D', $raw, $matches) !== 1) {
+            throw $this->incompleteDraft($reason);
+        }
+        $fraction = str_pad((string)($matches[2] ?? ''), 2, '0');
+        return ((int)$matches[1] * 100) + (int)$fraction;
+    }
+
+    private function decimalPercentHundredths($value): int
+    {
+        $raw = trim((string)$value);
+        if (preg_match('/^(0|[1-9][0-9]?|100)(?:\.([0-9]{1,2})(?:0{0,4})?)?$/D', $raw, $matches) !== 1) {
+            throw $this->incompleteDraft('coupon_discount_rate_invalid');
+        }
+        $fraction = str_pad((string)($matches[2] ?? ''), 2, '0');
+        $rate = ((int)$matches[1] * 100) + (int)$fraction;
+        if ($rate > 10000) {
+            throw $this->incompleteDraft('coupon_discount_rate_invalid');
+        }
+        return $rate;
     }
 
     private function encodeJson(array $value): string

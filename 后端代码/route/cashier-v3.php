@@ -52,6 +52,13 @@ Route::group('cashierapi/v3', function () {
             ->option(['real_name' => '门店端退出登录']);
         Route::get('business-config/checkout-catalog', 'BusinessConfig/checkoutCatalog')
             ->option(['real_name' => '读取收银来源与记账方式']);
+        // 报表只读统一事实服务；门店范围由 V3 会话强制注入。
+        Route::get('report/unified/catalog', 'Report/catalog')
+            ->option(['real_name' => '收银V3经营报表目录']);
+        Route::get('report/unified/query', 'Report/query')
+            ->option(['real_name' => '收银V3经营报表查询']);
+        Route::get('report/unified/export', 'Report/export')
+            ->option(['real_name' => '收银V3经营报表导出']);
         // 统一命令网关：白名单 action + 幂等键 + 多对象 contexts 严格校验
         Route::post('workbenches/actions', 'Command/dispatchAction')
             ->option(['real_name' => '收银V3命令网关']);

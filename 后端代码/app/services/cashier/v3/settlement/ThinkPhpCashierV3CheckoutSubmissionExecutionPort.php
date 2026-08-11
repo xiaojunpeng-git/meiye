@@ -83,6 +83,9 @@ final class ThinkPhpCashierV3CheckoutSubmissionExecutionPort
     /** @var CashierV3CheckoutBusinessSourceSelectionServices */
     private $businessSources;
 
+    /** @var CashierV3CheckoutCouponSettlementServices */
+    private $coupons;
+
     /** @var string */
     private $serverNamespaceSecret;
 
@@ -99,7 +102,8 @@ final class ThinkPhpCashierV3CheckoutSubmissionExecutionPort
         string $serverNamespaceSecret = '',
         ?CashierV3CheckoutDebtAuthorityServices $debts = null,
         ?CashierV3MemberBalanceWriterAdapter $balances = null,
-        ?CashierV3CheckoutBusinessSourceSelectionServices $businessSources = null
+        ?CashierV3CheckoutBusinessSourceSelectionServices $businessSources = null,
+        ?CashierV3CheckoutCouponSettlementServices $coupons = null
     ) {
         $this->workspace = $workspace;
         $this->requests = $requests ?: new ThinkPhpCashierV3CheckoutRequestRepository();
@@ -111,6 +115,7 @@ final class ThinkPhpCashierV3CheckoutSubmissionExecutionPort
         $this->debts = $debts ?: new CashierV3CheckoutDebtAuthorityServices();
         $this->balances = $balances ?: new CashierV3MemberBalanceWriterAdapter();
         $this->businessSources = $businessSources ?: new CashierV3CheckoutBusinessSourceSelectionServices();
+        $this->coupons = $coupons ?: new CashierV3CheckoutCouponSettlementServices();
         $this->entitlementAuthority = $entitlementAuthority;
         $this->serverNamespaceSecret = $serverNamespaceSecret;
         $this->saleOnly = $saleOnly ?: new CashierV3SaleOnlyCheckoutSubmissionServices(
@@ -253,11 +258,15 @@ final class ThinkPhpCashierV3CheckoutSubmissionExecutionPort
         return $this->domainCall(function () use ($authority): array {
             $context = $this->context($authority);
             $plan = $this->salesPlan($context, $authority);
-            return $this->salesOrders->persistInTx(
+            $salesResult = $this->salesOrders->persistInTx(
                 $plan,
                 $context->operatorScope(),
                 $context->dataScope()
             );
+            $this->coupons->consumeInTx(
+                $plan, $salesResult, $context->dataScope(), (int)$authority['settledAt']
+            );
+            return $salesResult;
         });
     }
 

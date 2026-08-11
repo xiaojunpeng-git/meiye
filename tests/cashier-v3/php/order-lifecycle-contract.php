@@ -3,6 +3,7 @@
 $root = dirname(__DIR__, 3);
 $service = file_get_contents($root . '/后端代码/app/services/cashier/v3/order/CashierV3OrderLifecycleServices.php');
 $reversalService = file_get_contents($root . '/后端代码/app/services/cashier/v3/order/CashierV3SalesOrderReversalServices.php');
+$cardOperationReversal = file_get_contents($root . '/后端代码/app/services/cashier/v3/order/CashierV3CardOperationReversalServices.php');
 $inventoryReversalService = file_get_contents($root . '/后端代码/app/services/cashier/v3/order/CashierV3SalesOrderInventoryReversalServices.php');
 $module = file_get_contents($root . '/后端代码/app/services/cashier/v3/order/CashierV3OrderLifecycleModule.php');
 $manifest = file_get_contents($root . '/后端代码/app/services/cashier/v3/manifest/CashierV3ActionManifest.php');
@@ -92,6 +93,13 @@ $checks = [
         && strpos($reversalService, 'prepareFinancialRefund') !== false
         && strpos($salesQuery, "'refund-sales-order',") !== false
         && strpos($salesQuery, '已退款作废') !== false,
+    'upgrade_reversal_restores_source_rights_without_member_balance_credit' => strpos($service, 'CashierV3CardOperationReversalServices') !== false
+        && strpos($cardOperationReversal, "'settlement_status' => 'reversed'") !== false
+        && strpos($cardOperationReversal, "'card_upgrade_use_oid' => 0") !== false
+        && strpos($cardOperationReversal, "'write_surplus_times' => \$before") !== false
+        && strpos($cardOperationReversal, 'UserBalanceAtomicServices') === false
+        && strpos($reversalService, 'entitlementCreditCents') !== false
+        && strpos($service, 'card_operation_upgrade_refund_must_reverse_full_order') !== false,
     'lifecycle_eligibility_and_reopen_queries_are_tenant_scoped' => strpos($service, "Db::name('cashier_v3_entitlement_completion_receipt')\n            ->where('tenant_id', \$scope->tenantId())") !== false
         && strpos($service, "Db::name(self::OPERATION_TABLE)->where('tenant_id', \$scope->tenantId())") !== false
         && strpos($service, "Db::name('cashier_v3_sales_order_line')->where('tenant_id', \$scope->tenantId())") !== false,

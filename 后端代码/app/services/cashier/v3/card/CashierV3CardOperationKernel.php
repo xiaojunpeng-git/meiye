@@ -288,14 +288,11 @@ final class CashierV3CardOperationKernel
                 'amountCents' => $lineValue,
             ];
         }
-        // A replacement preserves the selected current-right quantity 1:1.
-        // The target row is a new current-right record on the same original
-        // card sale; no sales fact or historic order amount is rewritten.
+        // A replacement may consume several source rights, but it always
+        // creates one target right. The target row remains a new current-right
+        // record on the same original card sale; no sales fact or historic
+        // order amount is rewritten.
         if (!$isUpgrade) {
-            $totalQuantity = 0;
-            foreach ($mutations as $mutation) {
-                $totalQuantity += -(int)$mutation['quantityDelta'];
-            }
             $lines[] = [
                 'lineNo' => ++$lineNo,
                 'lineRole' => 'target_project',
@@ -304,8 +301,8 @@ final class CashierV3CardOperationKernel
                 'sourceProjectId' => 0,
                 'targetCatalogId' => $targetCatalogId,
                 'quantityBefore' => 0,
-                'quantityDelta' => $totalQuantity,
-                'quantityAfter' => $totalQuantity,
+                'quantityDelta' => 1,
+                'quantityAfter' => 1,
                 'amountCents' => $sourceValue,
             ];
         }
@@ -339,7 +336,18 @@ final class CashierV3CardOperationKernel
         if (!preg_match('/^[A-Za-z0-9._:-]{12,128}$/', $key)) {
             throw self::invalid('operation_idempotency_key_invalid');
         }
-        $reason = self::requiredText($intent['reason'] ?? null, 500, 'operation_reason_required');
+        $reason = trim((string)($intent['reason'] ?? ''));
+        $reasonRequired = in_array($type, [
+            self::TYPE_CARD_EXTENSION,
+            self::TYPE_CARD_TRANSFER,
+            self::TYPE_CARD_DISABLE,
+            self::TYPE_CARD_ENABLE,
+        ], true);
+        if ($reasonRequired) {
+            $reason = self::requiredText($reason, 500, 'operation_reason_required');
+        } elseif (mb_strlen($reason) > 500) {
+            throw self::invalid('operation_reason_invalid');
+        }
         return [
             'operationType' => $type,
             'sourceCardHolderId' => self::positiveInt($intent['sourceCardHolderId'] ?? null, 'source_card_missing'),

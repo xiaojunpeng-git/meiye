@@ -63,6 +63,7 @@ $balance = $loopBlock(
 );
 $returnToEdit = $commandBlock('return-to-payment-edit');
 $submission = $commandBlock('prepare-checkout-submission');
+$finalSubmission = $commandBlock('submit-checkout');
 
 checkoutDraftProjectionOk(
     'checkout preparation returns the authoritative root before payment editing',
@@ -109,6 +110,10 @@ checkoutDraftProjectionOk(
     'submission preparation returns the token and version required by final settlement',
     strpos($submission, "'return_root_state' => true") !== false
     && strpos($submission, "'checkout_request'") !== false
+);
+checkoutDraftProjectionOk(
+    'final settlement returns the rebuilt authoritative root so success is never rendered as result unknown',
+    strpos($finalSubmission, "'return_root_state' => true") !== false
 );
 
 echo "\n{$passed} passed, {$failed} failed\n";

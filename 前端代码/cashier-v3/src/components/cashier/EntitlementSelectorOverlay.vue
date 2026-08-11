@@ -43,6 +43,10 @@ const props = defineProps({
     type: String,
     default: ''
   },
+  selectedOperationProjectKeys: {
+    type: Array,
+    default: () => []
+  },
   loadState: {
     type: String,
     default: 'ready'
@@ -53,7 +57,7 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['close', 'retry', 'add', 'contract-error', 'operation-source', 'operation-project', 'operation-confirm'])
+const emit = defineEmits(['close', 'retry', 'add', 'contract-error', 'operation-source', 'operation-project', 'operation-target', 'operation-confirm'])
 const localSources = ref([])
 const keyword = ref('')
 const appliedKeyword = ref('')
@@ -240,22 +244,9 @@ function sourceOrderRemark(source = {}) {
   return String(source.orderRemark || '').trim()
 }
 
-function projectAvailableQuantity(project = {}) {
-  const quantity = Number(project.availableTimes)
-  return Number.isInteger(quantity) && quantity >= 0 ? quantity : 0
-}
-
-function remainingAddableQuantity(source = {}, project = {}) {
-  return Math.max(0, projectAvailableQuantity(project) - cartQuantity(source, project))
-}
-
 function projectDisabled(source = {}, project = {}) {
-  return props.submitting
-    || !selectorReady.value
-    || !isSourceAvailable(source)
-    || project.disabled === true
-    || project.selectable === false
-    || remainingAddableQuantity(source, project) < 1
+  if (props.submitting || !selectorReady.value) return true
+  return !isSourceAvailable(source) || project.disabled === true || project.selectable === false
 }
 
 function addProject(source = {}, project = {}) {
@@ -273,7 +264,32 @@ function addProject(source = {}, project = {}) {
     entitlementSourceVersion: Number(source.version || source.revision),
     projectId: project.projectId || project.id,
     projectVersion: Number(project.version || project.revision),
-    quantity: 1
+    quantity: 1,
+    displaySnapshot: {
+      name: String(project.name || project.projectName || '项目'),
+      kind: '项目',
+      entitlementInstanceType: String(source.entitlementInstanceType || source.sourceType || ''),
+      entitlementSourceKind: project.isGift ? 'gift' : String(source.sourceKind || ''),
+      isGift: Boolean(project.isGift),
+      giftSourceType: project.isGift ? 'holder_backed' : 'none',
+      sourceDetailId: Number(project.entitlementSourceDetailId || project.sourceDetailId || project.id || 0),
+      detailVersion: Number(project.version || project.revision || 0),
+      entitlementSourceName: String(source.name || ''),
+      fullCardNo: String(source.fullCardNo || ''),
+      remainingTimes: Number(project.remainingTimes || 0),
+      occupiedTimes: Number(project.occupiedTimes || 0),
+      availableTimes: Number(project.availableTimes || 0),
+      purchaseAmount: String(project.purchaseAmount || ''),
+      totalPurchaseTimes: Number(project.totalPurchaseTimes || 0),
+      consumedTimesAtSelection: Number(project.consumedTimesAtSelection || 0),
+      amountSourceVersion: Number(project.version || project.revision || 0),
+      amountCalculationVersion: String(project.amountCalculationVersion || ''),
+      amountRole: 'entitlement_actual',
+      validThroughLabel: String(project.validThroughLabel || source.validThroughLabel || ''),
+      expiryDate: String(project.expiryDate || source.expiryDate || ''),
+      debtRestrictionLabel: String(project.debtRestrictionLabel || ''),
+      serviceSource: '卡内项目'
+    }
   }
   const commandContexts = canonicalEntitlementCommandContexts({
     suppliedContexts: props.selector.commandContexts,
@@ -344,6 +360,10 @@ function addButtonLabel(source = {}, project = {}) {
   if (props.pendingProjectKey === key) return '添加中…'
   return '添加'
 }
+
+function operationProjectSelected(source = {}, project = {}) {
+  return props.selectedOperationProjectKeys.includes(projectKey(source, project))
+}
 </script>
 
 <template>
@@ -400,6 +420,11 @@ function addButtonLabel(source = {}, project = {}) {
           >全部</button>
         </template>
       </section>
+
+      <div v-if="operationMode === 'project-replacement' && selectedOperationProjectKeys.length" class="cashier-entitlement-selector__operation-next">
+        <span>已选择 {{ selectedOperationProjectKeys.length }} 个原项目</span>
+        <button type="button" class="button button--primary" @click="emit('operation-target')">选择目标项目</button>
+      </div>
 
       <section class="cashier-entitlement-selector__content" aria-label="可使用权益">
         <div v-if="visibleSources.length" class="cashier-entitlement-table" role="table" aria-label="会员权益项目">
@@ -460,9 +485,9 @@ function addButtonLabel(source = {}, project = {}) {
                 class="cashier-entitlement-table__add"
                 :class="{ 'is-added': addedProjectKey === projectKey(source, project) }"
                 :disabled="projectDisabled(source, project)"
-                :title="remainingAddableQuantity(source, project) < 1 ? '已达到可用次数' : `添加${project.name || '项目'}到购物车`"
+                :title="projectDisabled(source, project) ? (project.disabledReason || project.unavailableReason || '当前权益不可使用') : '添加到购物车'"
                 @click="addProject(source, project)"
-              >{{ ['project-replacement', 'project-upgrade'].includes(operationMode) ? '添加' : addButtonLabel(source, project) }}</button>
+              >{{ ['project-replacement', 'project-upgrade'].includes(operationMode) ? (operationProjectSelected(source, project) ? '已添加' : '添加') : addButtonLabel(source, project) }}</button>
             </article>
           </template>
         </div>

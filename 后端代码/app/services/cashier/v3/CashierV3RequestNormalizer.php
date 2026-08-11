@@ -112,7 +112,13 @@ class CashierV3RequestNormalizer
             ),
             'sourceCardHolderVersion'
         );
-        $reason = CashierV3AliasResolver::resolveString($payload, ['reason'], true);
+        $reasonRequired = in_array($type, [
+            'card_extension',
+            'card_transfer',
+            'card_disable',
+            'card_enable',
+        ], true);
+        $reason = CashierV3AliasResolver::resolveString($payload, ['reason'], $reasonRequired);
         if (mb_strlen($reason) > 500) {
             throw self::invalidCardOperation('reason_invalid');
         }
@@ -510,6 +516,11 @@ class CashierV3RequestNormalizer
                     'projectVersion'
                 ),
                 'quantity' => self::canonicalPositiveInteger($line['quantity'] ?? null, 'quantity', 1),
+                // “使用权益”打开时已取得当前权益展示快照。加入购物车只是保存草稿，
+                // 标准化层不能在此丢弃它；最终结账再以权威权益事实完成校验与核销。
+                'displaySnapshot' => is_array($line['displaySnapshot'] ?? null)
+                    ? $line['displaySnapshot']
+                    : (is_array($line['display_snapshot'] ?? null) ? $line['display_snapshot'] : []),
                 // 服务对象、手艺人与体验标记只能在购物车行命令中设置；加入动作只创建安全默认值。
                 'serviceObject' => '本人',
                 'craftsmen' => [],

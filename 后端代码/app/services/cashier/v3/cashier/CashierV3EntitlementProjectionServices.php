@@ -63,10 +63,12 @@ final class CashierV3EntitlementProjectionServices
                 CashierV3ResultCode::STATUS_FAILED
             );
         }
-        // 启用被停用卡时需要看见同一会员的停用权益；其它使用权益场景
-        // 保持既有“仅可用卡”投影，避免把停用卡暴露给核销或结账。
+        // 选择器同时承载“有效卡 / 全部”两个视图，因此打开时必须返回
+        // 当前会员全部未删除权益。是否可加入购物车由投影的 selectable
+        // 明确表达，不能在查询阶段删掉已用完、已到期或已停用的卡。
         $cardOperationMode = trim((string)($payload['cardOperationMode'] ?? ''));
-        $includeDisabledCards = $cardOperationMode === 'card-enable';
+        $includeDisabledCards = true;
+        $includeUnavailableCards = true;
         $workspaceId = $this->workspaceId($stateContextId, $operatorScope);
         $this->workspace->requireSelectedMember(
             $workspaceId,
@@ -76,7 +78,7 @@ final class CashierV3EntitlementProjectionServices
         );
 
         // 无锁发现只用于确定固定锁集合；最终展示会在同一事务、同一批锁后重读。
-        $discovered = $this->loadRows($memberId, $operatorScope, $operatorScope->tenantId(), false, null, null, $includeDisabledCards);
+        $discovered = $this->loadRows($memberId, $operatorScope, $operatorScope->tenantId(), false, null, null, $includeDisabledCards, true, $includeUnavailableCards);
         $holderIds = array_values(array_unique(array_map('intval', array_column($discovered['holders'], 'id'))));
         $detailIds = array_values(array_unique(array_map('intval', array_column($discovered['carts'], 'id'))));
         sort($holderIds, SORT_NUMERIC);
@@ -92,7 +94,8 @@ final class CashierV3EntitlementProjectionServices
             $workspaceId,
             $holderIds,
             $detailIds,
-            $includeDisabledCards
+            $includeDisabledCards,
+            $includeUnavailableCards
         ): array {
             $memberVersion = $this->provider->synchronizeProjectionVersion(
                 'member',
@@ -145,7 +148,9 @@ final class CashierV3EntitlementProjectionServices
                 false,
                 $holderIds,
                 $detailIds,
-                $includeDisabledCards
+                $includeDisabledCards,
+                true,
+                $includeUnavailableCards
             );
             $sources = $this->buildSources(
                 $snapshot,
@@ -247,79 +252,14 @@ final class CashierV3EntitlementProjectionServices
             );
         }
 
-        $contextMap = [];
-        foreach ($contexts as $context) {
-            $contextMap[(string)$context['kind'] . ':' . (string)$context['id']] = (int)$context['expected_version'];
-        }
-        if (($contextMap['member:' . $memberId] ?? 0) <= 0
-            || ($contextMap['cashier_workspace:' . $workspaceId] ?? 0) <= 0) {
-            throw new CashierV3CommandException(
-                CashierV3ResultCode::INVALID_COMMAND_CONTEXT,
-                '权益选择缺少会员或工作台版本，请重新打开后选择。',
-                CashierV3ResultCode::STATUS_FAILED
-            );
-        }
-
-        $holderIds = [];
-        $detailIds = [];
+        // 选择器打开时已经读取了最新权益展示快照。这里仅校验请求结构，
+        // 不再次锁定权益来源、不判断可用次数，最终结账事务才读取权威权益。
         $seen = [];
         foreach ($requested as $line) {
             $holderId = $this->positiveId($line['entitlementInstanceId'] ?? null, 'entitlementInstanceId');
             $detailId = $this->positiveId($line['entitlementSourceDetailId'] ?? null, 'entitlementSourceDetailId');
             $key = $holderId . ':' . $detailId;
-            if (isset($seen[$key])) {
-                throw new CashierV3CommandException(
-                    CashierV3ResultCode::ENTITLEMENT_LINE_INVALID,
-                    '同一权益项目不能重复加入，请重新选择。',
-                    CashierV3ResultCode::STATUS_FAILED
-                );
-            }
             $seen[$key] = true;
-            $holderIds[] = $holderId;
-            $detailIds[] = $detailId;
-        }
-        $holderIds = array_values(array_unique($holderIds));
-        $detailIds = array_values(array_unique($detailIds));
-        sort($holderIds, SORT_NUMERIC);
-        sort($detailIds, SORT_NUMERIC);
-        // Gateway already owns the exact entitlement locks. Keep this as a
-        // post-lock authority re-read so no lower-order row is locked after the
-        // cashier workspace.
-        // 添加到购物车只确认权益来源与项目本身；预约占用和欠款影响
-        // 在最终核销/结账阶段再判断，不应拖慢普通加购。
-        $snapshot = $this->loadRows(
-            $memberId,
-            $operatorScope,
-            $operatorScope->tenantId(),
-            false,
-            $holderIds,
-            $detailIds,
-            false,
-            false
-        );
-
-        $holderVersions = [];
-        foreach ($holderIds as $holderId) {
-            $holderVersions[$holderId] = (int)($contextMap['card_holder:' . $holderId] ?? 0);
-        }
-        $detailVersions = [];
-        foreach ($detailIds as $detailId) {
-            $detailVersions[$detailId] = (int)($contextMap['member_benefit_pool:' . $detailId] ?? 0);
-        }
-        $sources = $this->buildSources(
-            $snapshot,
-            $holderVersions,
-            $detailVersions,
-            $operatorScope->tenantId()
-        );
-        $projectMap = [];
-        foreach ($sources as $source) {
-            foreach ($source['projects'] as $project) {
-                $projectMap[(int)$source['entitlementInstanceId'] . ':' . (int)$project['entitlementSourceDetailId']] = [
-                    'source' => $source,
-                    'project' => $project,
-                ];
-            }
         }
 
         $validated = [];
@@ -329,62 +269,30 @@ final class CashierV3EntitlementProjectionServices
             $sourceVersion = (int)$line['entitlementSourceVersion'];
             $detailVersion = (int)$line['projectVersion'];
             $quantity = (int)$line['quantity'];
-            $pair = $projectMap[$holderId . ':' . $detailId] ?? null;
-            if (!$pair
-                || $sourceVersion <= 0
-                || $detailVersion <= 0
-                || $sourceVersion !== (int)($contextMap['card_holder:' . $holderId] ?? 0)
-                || $detailVersion !== (int)($contextMap['member_benefit_pool:' . $detailId] ?? 0)
-                || (int)$line['projectId'] !== (int)$pair['project']['projectId']
-                || $quantity <= 0
-                || $quantity > (int)$pair['project']['availableTimes']
-                || empty($pair['source']['selectable'])
-                || empty($pair['project']['selectable'])) {
+            $projectId = $this->positiveId($line['projectId'] ?? null, 'projectId');
+            $displaySnapshot = is_array($line['displaySnapshot'] ?? null)
+                ? $line['displaySnapshot']
+                : (is_array($line['display_snapshot'] ?? null) ? $line['display_snapshot'] : []);
+            if ($sourceVersion <= 0 || $detailVersion <= 0 || $quantity <= 0 || !$displaySnapshot) {
                 throw new CashierV3CommandException(
-                    CashierV3ResultCode::ENTITLEMENT_SELECTION_CHANGED,
-                    '权益项目已经变化，请重新打开后选择。',
-                    CashierV3ResultCode::STATUS_CONFLICT,
-                    ['holder_id' => $holderId, 'source_detail_id' => $detailId]
+                    CashierV3ResultCode::ENTITLEMENT_LINE_INVALID,
+                    '权益项目草稿快照不完整，请重新打开使用权益。',
+                    CashierV3ResultCode::STATUS_FAILED,
+                    ['holder_id' => $holderId, 'source_detail_id' => $detailId, 'project_id' => $projectId]
                 );
             }
             $validated[] = [
                 'add_intent_id' => $addIntentId,
                 'holder_id' => $holderId,
                 'source_detail_id' => $detailId,
-                'project_id' => (int)$pair['project']['projectId'],
+                'project_id' => $projectId,
                 'quantity' => $quantity,
                 'source_version' => $sourceVersion,
                 'detail_version' => $detailVersion,
                 // 权益选择只确认权益身份与次数；购物车服务设置必须走独立写命令。
                 'service_object' => 'self',
                 'craftsmen' => [],
-                'display_snapshot' => [
-                    'name' => (string)$pair['project']['name'],
-                    'kind' => '项目',
-                    'entitlementInstanceType' => (string)$pair['source']['entitlementInstanceType'],
-                    'entitlementSourceKind' => !empty($pair['project']['isGift'])
-                        ? 'gift'
-                        : (string)$pair['source']['sourceKind'],
-                    'isGift' => !empty($pair['project']['isGift']),
-                    'giftSourceType' => !empty($pair['project']['isGift']) ? 'holder_backed' : 'none',
-                    'sourceDetailId' => $detailId,
-                    'detailVersion' => $detailVersion,
-                    'entitlementSourceName' => (string)$pair['source']['name'],
-                    'fullCardNo' => (string)$pair['source']['fullCardNo'],
-                    'remainingTimes' => (int)$pair['project']['remainingTimes'],
-                    'occupiedTimes' => (int)$pair['project']['occupiedTimes'],
-                    'availableTimes' => (int)$pair['project']['availableTimes'],
-                    'purchaseAmount' => (string)$pair['project']['purchaseAmount'],
-                    'totalPurchaseTimes' => (int)$pair['project']['totalPurchaseTimes'],
-                    'consumedTimesAtSelection' => (int)$pair['project']['consumedTimesAtSelection'],
-                    'amountSourceVersion' => $detailVersion,
-                    'amountCalculationVersion' => (string)$pair['project']['amountCalculationVersion'],
-                    'amountRole' => 'entitlement_actual',
-                    'validThroughLabel' => (string)$pair['project']['validThroughLabel'],
-                    'expiryDate' => (string)$pair['project']['expiryDate'],
-                    'debtRestrictionLabel' => (string)$pair['project']['debtRestrictionLabel'],
-                    'serviceSource' => '卡内项目',
-                ],
+                'display_snapshot' => $displaySnapshot,
             ];
         }
         return $validated;
@@ -503,7 +411,8 @@ final class CashierV3EntitlementProjectionServices
         array $holderFilter = null,
         array $detailFilter = null,
         bool $includeDisabledCards = false,
-        bool $includeOperationalState = true
+        bool $includeOperationalState = true,
+        bool $includeUnavailableCards = false
     ): array {
         if ($lock) {
             CashierV3TransactionGuard::assertInTransaction('loadEntitlementRowsLocked');
@@ -527,8 +436,10 @@ final class CashierV3EntitlementProjectionServices
             ->field('id,uid,oid,card_name,card_no,store_id,product_type,write_times,write_surplus_times,write_start,write_end,is_del')
             ->where('uid', $memberId)
             ->where('is_del', 0)
-            ->where('store_id', '>', 0)
-            ->where('write_surplus_times', '>', 0);
+            ->where('store_id', '>', 0);
+        if (!$includeUnavailableCards) {
+            $holderQuery->where('write_surplus_times', '>', 0);
+        }
         // 跨店核销关闭时，必须在发现阶段就裁掉其它门店卡实例。
         // 否则后续会先给不可见卡实例同步版本，再以“资源不存在”中断整个
         // 选择器，导致本店仍可用权益也无法展示。
@@ -591,9 +502,11 @@ final class CashierV3EntitlementProjectionServices
                 ->field('id,oid,cart_id,product_id,cart_type,product_type,cart_info,write_times,write_surplus_times,is_writeoff,write_start,write_end,pay_price,debt_amount,repaid_debt_amount,is_gift')
                 ->whereIn('oid', $validOrderIds)
                 ->where('cart_type', 2)
-                ->where('product_type', 6)
-                ->where('is_writeoff', 0)
-                ->where('write_surplus_times', '>', 0);
+                ->where('product_type', 6);
+            if (!$includeUnavailableCards) {
+                $cartQuery->where('is_writeoff', 0)
+                    ->where('write_surplus_times', '>', 0);
+            }
             if ($detailFilter !== null) {
                 $cartQuery->whereIn('id', $detailFilter ?: [-1]);
             }
@@ -690,17 +603,23 @@ final class CashierV3EntitlementProjectionServices
             }
             if ((int)($state['origin_order_id'] ?? 0) !== (int)($holder['oid'] ?? 0)
                 || (int)($state['current_member_id'] ?? 0) !== (int)($holder['uid'] ?? 0)
-                || !in_array((string)($state['card_status'] ?? ''), ['enabled', 'disabled'], true)) {
+                || !in_array((string)($state['card_status'] ?? ''), ['enabled', 'disabled', 'upgraded'], true)) {
                 throw CashierV3CommandException::versionConflict(
                     '会员卡当前状态已经变化，请重新打开后选择。',
                     ['reason' => 'card_state_projection_mismatch', 'holder_id' => (int)($holder['id'] ?? 0)]
                 );
             }
+            // 已升级卡的原权益已经在升级结算中转入目标销售单。即使“全部”
+            // 视图需要展示不可用卡，也不能把它作为权益来源或同步资源版本：
+            // 原订单已被标记为升级来源，不再具备独立可用资源的当前版本。
+            if ((string)$state['card_status'] === 'upgraded') {
+                continue;
+            }
             if ((string)$state['card_status'] !== 'enabled') {
                 if (!$includeDisabledCards) {
                     continue;
                 }
-                $holder['card_operation_status'] = 'disabled';
+                $holder['card_operation_status'] = (string)$state['card_status'];
             } else {
                 $holder['card_operation_status'] = 'enabled';
             }
@@ -860,7 +779,8 @@ final class CashierV3EntitlementProjectionServices
             if (!$projects || empty($holderVersions[$holderId])) {
                 continue;
             }
-            $cardDisabled = (string)($holder['card_operation_status'] ?? '') === 'disabled';
+            $operationStatus = (string)($holder['card_operation_status'] ?? 'enabled');
+            $cardDisabled = $operationStatus !== 'enabled';
             $remaining = max(0, (int)($holder['write_surplus_times'] ?? 0));
             $purchaseTimes = max(0, (int)($holder['write_times'] ?? 0));
             $occupiedTimes = 0;

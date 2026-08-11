@@ -150,6 +150,15 @@ namespace {
                 'eventless' => true,
             ];
         }
+
+        public function bindResumedHangOrderInTx(
+            string $requestId,
+            int $requestVersion,
+            string $hangOrderId,
+            CashierV3OperatorScope $operatorScope,
+            CashierV3DataScopeContext $dataScope
+        ): void {
+        }
     }
 
     final class SubmissionPreparationPlanRepository implements CashierV3CheckoutResourcePlanRepository

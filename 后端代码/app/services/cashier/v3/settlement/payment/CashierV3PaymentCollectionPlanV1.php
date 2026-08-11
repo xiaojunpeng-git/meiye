@@ -49,6 +49,7 @@ final class CashierV3PaymentCollectionPlanV1
         'supplement_operator_id', 'supplement_operator_name_snapshot',
         'supplement_operated_at',
         'source_document_type', 'source_document_id', 'source_document_no',
+        'resumed_hang_order_id',
         'sales_amount_cents', 'receivable_amount_cents', 'selected_payment_amount_cents',
         'balance_deduction_amount_cents', 'balance_authority_key', 'balance_account_id',
         'balance_account_version', 'debt_amount_cents', 'debt_authority_key',
@@ -81,16 +82,21 @@ final class CashierV3PaymentCollectionPlanV1
     /** @var string */
     private $composition;
 
+    /** @var int */
+    private $entitlementCreditCents;
+
     private function __construct(
         array $batch,
         array $collections,
         string $fingerprint,
-        string $composition
+        string $composition,
+        int $entitlementCreditCents
     ) {
         $this->batch = $batch;
         $this->collections = $collections;
         $this->fingerprint = $fingerprint;
         $this->composition = $composition;
+        $this->entitlementCreditCents = $entitlementCreditCents;
     }
 
     /**
@@ -103,7 +109,8 @@ final class CashierV3PaymentCollectionPlanV1
         int $occurredAt,
         int $settledAt,
         int $recordedAt,
-        string $serverNamespaceSecret
+        string $serverNamespaceSecret,
+        int $entitlementCreditCents = 0
     ): self {
         self::assertExactKeys(
             $lockedAggregate,
@@ -133,6 +140,9 @@ final class CashierV3PaymentCollectionPlanV1
             throw self::failure('payment_collection_final_times_invalid');
         }
 
+        if ($entitlementCreditCents < 0 || $entitlementCreditCents > 100000000000) {
+            throw self::failure('payment_collection_entitlement_credit_invalid');
+        }
         $order = self::assertSalesOrderIdentity(
             $salesOrder,
             $request,
@@ -140,7 +150,8 @@ final class CashierV3PaymentCollectionPlanV1
             $commandIdempotencyKey,
             $occurredAt,
             $settledAt,
-            $recordedAt
+            $recordedAt,
+            $entitlementCreditCents
         );
         $payments = self::normalizePayments($lockedAggregate['payments'], $request);
         $paymentTotal = self::sum($payments, 'amount_cents');
@@ -151,7 +162,8 @@ final class CashierV3PaymentCollectionPlanV1
         $balanceTotal = $request['balance_deduction_amount_cents'];
         $debtTotal = $request['debt_amount_cents'];
         if ($paymentTotal > 100000000000 - $balanceTotal
-            || $paymentTotal + $balanceTotal !== $request['receivable_amount_cents']) {
+            || $paymentTotal + $balanceTotal !== $request['receivable_amount_cents']
+            || (int)$order['sale_amount_cents'] !== $request['sales_amount_cents'] + $entitlementCreditCents) {
             throw self::failure('payment_collection_sale_only_settlement_mismatch');
         }
 
@@ -280,7 +292,8 @@ final class CashierV3PaymentCollectionPlanV1
             $batch,
             $collectionRows,
             $batch['immutable_fingerprint'],
-            $request['composition']
+            $request['composition'],
+            $entitlementCreditCents
         );
     }
 
@@ -313,6 +326,11 @@ final class CashierV3PaymentCollectionPlanV1
     public function composition(): string
     {
         return $this->composition;
+    }
+
+    public function entitlementCreditCents(): int
+    {
+        return $this->entitlementCreditCents;
     }
 
     private static function normalizeRequest(array $request): array
@@ -566,7 +584,8 @@ final class CashierV3PaymentCollectionPlanV1
         string $commandIdempotencyKey,
         int $occurredAt,
         int $settledAt,
-        int $recordedAt
+        int $recordedAt,
+        int $entitlementCreditCents = 0
     ): array {
         $order = $salesOrder->header();
         $required = [
@@ -623,7 +642,7 @@ final class CashierV3PaymentCollectionPlanV1
             || (string)$order['source_document_type'] !== $request['source_document_type']
             || (string)$order['source_document_id'] !== $request['source_document_id']
             || (string)$order['source_document_no_snapshot'] !== $request['source_document_no']
-            || (int)$order['sale_amount_cents'] !== $request['sales_amount_cents']
+            || (int)$order['sale_amount_cents'] !== $request['sales_amount_cents'] + $entitlementCreditCents
             || (string)$order['order_status'] !== 'settled'
             || (int)$order['order_version'] !== 1
             || (string)$order['order_direction'] !== 'forward'

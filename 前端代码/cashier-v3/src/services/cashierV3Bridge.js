@@ -2608,6 +2608,8 @@ function isCashierWorkspaceAction(action) {
     'apply-cashier-craftsmen-to-all-service-lines',
     'apply-cashier-personnel-to-all-lines',
     'update-cashier-line-debt',
+    'apply-line-coupon',
+    'remove-line-coupon',
     'update-cashier-order-note',
     'update-cashier-line-price',
     'update-cashier-supplement',

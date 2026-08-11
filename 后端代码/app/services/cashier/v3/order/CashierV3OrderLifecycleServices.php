@@ -142,7 +142,12 @@ final class CashierV3OrderLifecycleServices
             // overwrite.  Unsupported current-right domains are deliberately
             // rejected before a single accounting row is written. Product
             // inventory is restored only for a full void, never a refund.
-            $financial = $this->assertFinancialReversalEligible($source, $action, $input, $dataScope);
+            $cardOperationReversal = (new CashierV3CardOperationReversalServices())->prepare(
+                $source, $action, $dataScope
+            );
+            $financial = $this->assertFinancialReversalEligible(
+                $source, $action, $input, $dataScope, (int)$cardOperationReversal['entitlementCreditCents']
+            );
             $input['cashRefundCents'] = (int)$financial['cashRefundCents'];
             $input['restorePrincipalCents'] = (int)$financial['restorePrincipalCents'];
             $input['restoreBonusCents'] = (int)$financial['restoreBonusCents'];
@@ -153,6 +158,9 @@ final class CashierV3OrderLifecycleServices
             }
             (new CashierV3SalesOrderReversalServices())->apply(
                 $source, $action, $financial, $operationId, $commandKey, $operator, $dataScope, $now
+            );
+            (new CashierV3CardOperationReversalServices())->apply(
+                $cardOperationReversal, $action, $operationId, $operator, $dataScope, $now
             );
             $this->writeFactReversals($source, $action, $financial, $operationId, $commandKey, $event, $operator, $dataScope, $now);
             $this->recordFinancialReversal($source, $action, $operationId, $commandKey, $input, $financial, $dataScope, $now);
@@ -243,7 +251,7 @@ final class CashierV3OrderLifecycleServices
         if ($lock) $q->lock(true);
         $row = (array)$q->find();
         if (!$row || (string)($row['order_status'] ?? '') !== 'settled' || (string)($row['order_direction'] ?? '') !== 'forward') throw self::failure('sales_order_not_mutable');
-        return ['sourceType' => 'sales', 'sourceId' => $id, 'sourceRecordId' => (int)$row['id'], 'resourceId' => $id, 'sourceNo' => (string)$row['order_no'], 'memberId' => (int)$row['member_id'], 'storeId' => (int)$row['store_id'], 'storeName' => (string)$row['store_name_snapshot'], 'checkoutRequestId' => (string)$row['checkout_request_id'], 'amountCents' => (int)$row['sale_amount_cents']];
+        return ['sourceType' => 'sales', 'sourceId' => $id, 'sourceRecordId' => (int)$row['id'], 'resourceId' => $id, 'sourceNo' => (string)$row['order_no'], 'memberId' => (int)$row['member_id'], 'storeId' => (int)$row['store_id'], 'storeName' => (string)$row['store_name_snapshot'], 'checkoutRequestId' => (string)$row['checkout_request_id'], 'amountCents' => (int)$row['sale_amount_cents'], 'tenantId' => $scope->tenantId()];
     }
 
     private function input(string $action, array $payload, array $source): array
@@ -259,14 +267,18 @@ final class CashierV3OrderLifecycleServices
             $cashRefund = $this->moneyCents($payload['cashRefundAmount'] ?? $payload['actualRefundAmount'] ?? $payload['refundAmount'] ?? $payload['amount'] ?? '');
             $restorePrincipal = $this->optionalMoneyCents($payload['restorePrincipalAmount'] ?? $payload['refundPrincipalAmount'] ?? $payload['balancePrincipalRefundAmount'] ?? 0);
             $restoreBonus = $this->optionalMoneyCents($payload['restoreBonusAmount'] ?? $payload['refundBonusAmount'] ?? $payload['balanceGiftRefundAmount'] ?? 0);
-            $amount = $cashRefund + $restorePrincipal + $restoreBonus;
+            $upgradeCredit = (int)Db::name(CashierV3CardOperationReversalServices::SETTLEMENT_TABLE)
+                ->where('tenant_id', (string)($source['tenantId'] ?? ''))
+                ->where('sales_order_id', (string)$source['sourceId'])
+                ->where('settlement_status', 'settled')->value('entitlement_credit_cents');
+            $amount = $cashRefund + $restorePrincipal + $restoreBonus + max(0, $upgradeCredit);
             if ($amount <= 0 || $amount > (int)$source['amountCents']) throw self::failure('order_lifecycle_refund_amount_invalid');
         }
         return ['reason' => $reason, 'cashRefundCents' => $cashRefund, 'restorePrincipalCents' => $restorePrincipal, 'restoreBonusCents' => $restoreBonus, 'replaceWorkspace' => !empty($payload['replaceWorkspace']), 'personnel' => is_array($payload['personnel'] ?? null) ? array_values($payload['personnel']) : []];
     }
 
     /** @return array<string,mixed> */
-    private function assertFinancialReversalEligible(array $source, string $action, array $input, CashierV3DataScopeContext $scope): array
+    private function assertFinancialReversalEligible(array $source, string $action, array $input, CashierV3DataScopeContext $scope, int $entitlementCreditCents = 0): array
     {
         if (Db::name(self::OPERATION_TABLE)->where('tenant_id', $scope->tenantId())
             ->where('source_type', 'sales')->where('source_order_id', $source['sourceId'])
@@ -274,7 +286,13 @@ final class CashierV3OrderLifecycleServices
             throw self::failure('order_already_reversed');
         }
         if ($action === 'refund-sales-order') {
-            return (new CashierV3SalesOrderReversalServices())->prepareFinancialRefund($source, $input, $scope);
+            $prepared = (new CashierV3SalesOrderReversalServices())->prepareFinancialRefund(
+                $source, $input, $scope, $entitlementCreditCents
+            );
+            if ($entitlementCreditCents > 0 && (int)$prepared['economicReversalCents'] !== (int)$source['amountCents']) {
+                throw self::failure('card_operation_upgrade_refund_must_reverse_full_order');
+            }
+            return $prepared;
         }
         $hasEntitlement = Db::name('cashier_v3_entitlement_completion_receipt')
             ->where('tenant_id', $scope->tenantId())
@@ -282,7 +300,9 @@ final class CashierV3OrderLifecycleServices
         // 卡项由专用权益撤销服务逐张验证，仅完全未使用时放行。商品
         // 的原批次库存回补在同一事务内由专用库存冲销服务完成。
         if ($hasEntitlement) throw self::failure('order_reversal_entitlement_already_consumed');
-        return (new CashierV3SalesOrderReversalServices())->prepare($source, $action, $input, $scope);
+        return (new CashierV3SalesOrderReversalServices())->prepare(
+            $source, $action, $input, $scope, $entitlementCreditCents
+        );
     }
 
     private function writeFactReversals(array $source, string $action, array $financial, string $operationId, string $commandKey, array $event, CashierV3OperatorScope $operator, CashierV3DataScopeContext $scope, int $now): void
@@ -471,7 +491,7 @@ final class CashierV3OrderLifecycleServices
         $row['fact_id'] = $factId; $row['business_event_no'] = (string)$event['event_no']; $row['fact_direction'] = 'reversal'; $row['natural_key'] = 'order_lifecycle:reversal:' . hash('sha256', $table . '|' . $source['fact_id'] . '|' . $operationId); $row['command_idempotency_key'] = $commandKey; $row['fact_version'] = 1; $row['reversal_of'] = (string)$source['fact_id']; $row['operator_id'] = $operator->operatorId(); $row['business_date'] = date('Y-m-d', $now); $row['occurred_at'] = $now; $row['settled_at'] = $now; $row['recorded_at'] = $now;
         if (!$amountOverrides) {
             $columns = $table === 'cashier_v3_sale_fact'
-                ? ['original_amount_cents', 'discount_amount_cents', 'sale_amount_cents', 'debt_amount_cents']
+                ? ['original_amount_cents', 'discount_amount_cents', 'coupon_discount_cents', 'sale_amount_cents', 'debt_amount_cents']
                 : ($table === 'cashier_v3_performance_fact' ? ['allocation_base_amount_cents', 'amount_cents'] : ['amount_cents']);
             foreach ($columns as $column) $row[$column] = -(int)($source[$column] ?? 0);
         }

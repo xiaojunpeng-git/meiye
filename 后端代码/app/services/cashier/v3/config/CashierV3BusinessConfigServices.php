@@ -14,6 +14,15 @@ use think\facade\Db;
  */
 final class CashierV3BusinessConfigServices extends BaseServices
 {
+    public const SOURCE_ATTRIBUTION_TYPES = [
+        'guide' => '导购',
+        'beautician' => '美容师',
+        'coach' => '拓客教练',
+        'external' => '外接地推',
+        'online' => '线上',
+        'referral' => '老客转介绍',
+        'other' => '其他',
+    ];
     public const PAYMENT_METHODS = [
         'unionpay' => '银联',
         'wechat' => '微信',
@@ -83,10 +92,13 @@ final class CashierV3BusinessConfigServices extends BaseServices
         $requireSecondary = $this->normalizeStatus(
             $input['requireSecondary'] ?? $input['require_secondary'] ?? 0
         );
+        $attributionType = $this->normalizeSourceAttributionType(
+            $input['attributionType'] ?? $input['attribution_type'] ?? 'other'
+        );
         $idempotencyKey = $this->requireIdempotencyKey($input);
 
         return Db::transaction(function () use (
-            $name, $parentId, $status, $sort, $requireSecondary, $idempotencyKey, $adminId
+            $name, $parentId, $status, $sort, $requireSecondary, $attributionType, $idempotencyKey, $adminId
         ): array {
             $replayed = $this->replayedResult('source_create', $idempotencyKey);
             if ($replayed !== null) {
@@ -109,6 +121,7 @@ final class CashierV3BusinessConfigServices extends BaseServices
                 'status' => $status,
                 'sort' => $sort,
                 'require_secondary' => $requireSecondary,
+                'attribution_type' => $attributionType,
                 'version' => 1,
                 'created_at' => $now,
                 'updated_at' => $now,
@@ -152,6 +165,9 @@ final class CashierV3BusinessConfigServices extends BaseServices
             $requireSecondary = $this->normalizeStatus(
                 $input['requireSecondary'] ?? $input['require_secondary'] ?? $row['require_secondary']
             );
+            $attributionType = $this->normalizeSourceAttributionType(
+                $input['attributionType'] ?? $input['attribution_type'] ?? $row['attribution_type'] ?? 'other'
+            );
             $parentId = (int)$row['parent_id'];
             if ($parentId > 0) {
                 $requireSecondary = 0;
@@ -171,6 +187,7 @@ final class CashierV3BusinessConfigServices extends BaseServices
                 'status' => $status,
                 'sort' => $sort,
                 'require_secondary' => $requireSecondary,
+                'attribution_type' => $attributionType,
                 'version' => $expectedVersion + 1,
                 'updated_at' => time(),
             ]);
@@ -294,6 +311,7 @@ final class CashierV3BusinessConfigServices extends BaseServices
                 : (string)$primary['name'],
             'primarySourceVersion' => (int)$primary['version'],
             'secondarySourceVersion' => $secondary ? (int)$secondary['version'] : 0,
+            'attributionTypeSnapshot' => (string)($secondary['attribution_type'] ?? $primary['attribution_type'] ?? 'other'),
         ];
     }
 
@@ -343,6 +361,7 @@ final class CashierV3BusinessConfigServices extends BaseServices
             'status' => (int)$row['status'],
             'sort' => (int)$row['sort'],
             'requireSecondary' => (int)$row['require_secondary'],
+            'attributionType' => (string)($row['attribution_type'] ?? 'other'),
             'version' => (int)$row['version'],
         ];
     }
@@ -387,6 +406,15 @@ final class CashierV3BusinessConfigServices extends BaseServices
             throw new ValidateException('排序必须在0到65535之间');
         }
         return $sort;
+    }
+
+    private function normalizeSourceAttributionType($value): string
+    {
+        $type = trim((string)$value);
+        if (!isset(self::SOURCE_ATTRIBUTION_TYPES[$type])) {
+            throw new ValidateException('来源类型无效');
+        }
+        return $type;
     }
 
     private function requireIdempotencyKey(array $input): string

@@ -25,6 +25,8 @@ final class CashierV3CardOperationCheckoutSettlementServices
     private const OPERATION_TABLE = 'cashier_v3_card_operation';
     private const OPERATION_LINE_TABLE = 'cashier_v3_card_operation_line';
     private const STATE_TABLE = 'cashier_v3_card_state';
+    private const SETTLEMENT_TABLE = 'cashier_v3_card_operation_settlement';
+    private const CHECKOUT_REQUEST_TABLE = 'cashier_v3_checkout_request';
 
     /** @var CashierV3EntitlementResourceVersionProvider */
     private $versions;
@@ -34,6 +36,41 @@ final class CashierV3CardOperationCheckoutSettlementServices
         $this->versions = $versions ?: new CashierV3EntitlementResourceVersionProvider(
             new CashierV3CashierReadinessGuard()
         );
+    }
+
+    /**
+     * The checkout draft remains payable only for the cash delta. This method
+     * exposes the frozen old-right credit to the formal sales plan so the sale
+     * is recorded at the target's catalogue price without touching stored value.
+     */
+    public function creditForCheckoutInTx(string $checkoutRequestId, CashierV3DataScopeContext $dataScope): array
+    {
+        CashierV3TransactionGuard::assertInTransaction('cardOperationCheckoutCredit');
+        $checkoutRequestId = self::checkoutRequestId($checkoutRequestId);
+        $rows = self::rows(Db::name(self::OPERATION_TABLE)
+            ->where('tenant_id', $dataScope->tenantId())
+            ->where('checkout_request_id', $checkoutRequestId)
+            ->lock(true)->select());
+        if ($rows === []) {
+            return [];
+        }
+        if (count($rows) !== 1 || (string)($rows[0]['operation_status'] ?? '') !== 'awaiting_checkout') {
+            throw self::failure('card_operation_checkout_credit_ambiguous');
+        }
+        $row = $rows[0];
+        $amount = (int)($row['source_remaining_value_cents'] ?? -1);
+        $target = (int)($row['target_price_cents'] ?? -1);
+        if ($amount < 0 || $target < $amount
+            || $target - $amount !== (int)($row['settlement_delta_cents'] ?? -1)) {
+            throw self::failure('card_operation_checkout_credit_invalid');
+        }
+        return [
+            'operationId' => (string)$row['operation_id'],
+            'operationType' => (string)$row['operation_type'],
+            'checkoutRequestId' => $checkoutRequestId,
+            'amountCents' => $amount,
+            'targetPriceCents' => $target,
+        ];
     }
 
     /**
@@ -68,16 +105,27 @@ final class CashierV3CardOperationCheckoutSettlementServices
             throw self::failure('card_operation_upgrade_not_pending');
         }
         if ($existingRequestId !== '' && $existingRequestId !== $checkoutRequestId) {
-            throw CashierV3CommandException::versionConflict(
-                '该升级操作已经关联其他结账单，请重新打开后处理。',
-                ['reason' => 'card_operation_upgrade_checkout_already_bound']
-            );
+            // A failed terminal submit rolls every business mutation back, but
+            // its earlier preparation request remains for audit. Rebind only
+            // that untouched request state so the operator can create a fresh
+            // normal checkout without being trapped by the stale draft.
+            $previous = Db::name(self::CHECKOUT_REQUEST_TABLE)
+                ->where('tenant_id', $dataScope->tenantId())
+                ->where('request_id', $existingRequestId)
+                ->lock(true)
+                ->find();
+            if ($previous && !in_array((string)($previous['request_status'] ?? ''), ['editing', 'ready_for_submit'], true)) {
+                throw CashierV3CommandException::versionConflict(
+                    '该升级操作已经进入其他结账流程，请处理原结账单。',
+                    ['reason' => 'card_operation_upgrade_checkout_already_bound']
+                );
+            }
         }
-        if ($existingRequestId === '') {
+        if ($existingRequestId !== $checkoutRequestId) {
             $updated = Db::name(self::OPERATION_TABLE)
                 ->where('id', (int)$operation['id'])
                 ->where('operation_status', 'awaiting_checkout')
-                ->where('checkout_request_id', '')
+                ->where('checkout_request_id', $existingRequestId)
                 ->update([
                     'checkout_request_id' => $checkoutRequestId,
                     'update_time' => time(),
@@ -178,20 +226,28 @@ final class CashierV3CardOperationCheckoutSettlementServices
         $target = self::decodeJson((string)($operation['target_snapshot_json'] ?? ''), 'card_operation_target_snapshot_invalid');
         $result = self::decodeJson((string)($operation['result_snapshot_json'] ?? ''), 'card_operation_result_snapshot_invalid');
         $this->assertCheckoutMatchesOperation($operation, $target, $salesPlan, $header, $operatorScope, $dataScope);
+        $targetAuthority = [];
         if ($type === 'card_upgrade') {
-            $this->settleCardUpgradeInTx($operation, $target, $result, $salesPlan, $cardPurchaseResult, $operatorScope, $dataScope, $settledAt);
+            $targetAuthority = $this->settleCardUpgradeInTx($operation, $target, $result, $salesPlan, $cardPurchaseResult, $operatorScope, $dataScope, $settledAt);
         } else {
-            $this->settleProjectUpgradeInTx($operation, $target, $result, $salesPlan, $operatorScope, $dataScope, $settledAt);
+            $targetAuthority = $this->settleProjectUpgradeInTx($operation, $target, $result, $salesPlan, $salesResult, $operatorScope, $dataScope, $settledAt);
+        }
+        $settlement = $this->persistSettlementInTx($operation, $salesPlan, $salesResult, $targetAuthority, $dataScope, $settledAt);
+        $operationUpdate = [
+            'operation_status' => 'succeeded',
+            'settled_at' => $settledAt,
+            'update_time' => $settledAt,
+        ];
+        if ($type === 'card_upgrade') {
+            // The authority state has just been transitioned in the same
+            // transaction. Persist the terminal state on the audit record too.
+            $operationUpdate['card_status_after'] = 'upgraded';
         }
         $updated = Db::name(self::OPERATION_TABLE)
             ->where('id', (int)$operation['id'])
             ->where('operation_status', 'awaiting_checkout')
             ->where('checkout_request_id', $checkoutRequestId)
-            ->update([
-                'operation_status' => 'succeeded',
-                'settled_at' => $settledAt,
-                'update_time' => $settledAt,
-            ]);
+            ->update($operationUpdate);
         if ((int)$updated !== 1) {
             throw CashierV3CommandException::versionConflict(
                 '升级操作已经变化，结账已回滚，请重新处理。',
@@ -227,7 +283,11 @@ final class CashierV3CardOperationCheckoutSettlementServices
         ]);
         $operation['operation_status'] = 'succeeded';
         $operation['settled_at'] = $settledAt;
-        return ['settledOperationCount' => 1, 'operations' => [$this->publicBinding($operation)], 'replayed' => false];
+        $binding = array_merge($this->publicBinding($operation), [
+            'salesOrderId' => (string)$salesResult['orderId'],
+            'entitlementCreditCents' => (int)$operation['source_remaining_value_cents'],
+        ], $targetAuthority);
+        return ['settledOperationCount' => 1, 'operations' => [$binding], 'settlement' => $settlement, 'replayed' => false];
     }
 
     private function settleCardUpgradeInTx(
@@ -239,7 +299,7 @@ final class CashierV3CardOperationCheckoutSettlementServices
         CashierV3OperatorScope $operatorScope,
         CashierV3DataScopeContext $dataScope,
         int $now
-    ): void {
+    ): array {
         $receipts = array_values((array)($cardPurchaseResult['receipts'] ?? []));
         $line = $this->onlySalesLine($salesPlan);
         if (count($receipts) !== 1
@@ -252,8 +312,11 @@ final class CashierV3CardOperationCheckoutSettlementServices
             ->where('id', (int)$operation['origin_order_id'])
             ->lock(true)
             ->find();
+        // The card may have been transferred before it is upgraded.  The
+        // legacy source order is immutable and remains owned by the original
+        // member, whereas member_id_before is the card's current holder.
         if (!$oldOrder
-            || (int)($oldOrder['uid'] ?? 0) !== (int)$operation['member_id_before']
+            || (int)($oldOrder['uid'] ?? 0) !== (int)$operation['origin_member_id']
             || (int)($oldOrder['store_id'] ?? 0) !== $operatorScope->storeId()
             || (int)($oldOrder['paid'] ?? 0) !== 1
             || (int)($oldOrder['card_upgrade_use_oid'] ?? -1) !== 0) {
@@ -275,6 +338,11 @@ final class CashierV3CardOperationCheckoutSettlementServices
             );
         }
         $this->disableSourceStateInTx($state, $operation, $now);
+        return [
+            'targetHolderId' => (int)$receipts[0]['holderId'],
+            'targetLegacyOrderId' => $newLegacyOrderId,
+            'targetEntitlementDetailId' => 0,
+        ];
     }
 
     private function settleProjectUpgradeInTx(
@@ -282,10 +350,11 @@ final class CashierV3CardOperationCheckoutSettlementServices
         array $target,
         array $result,
         CashierV3SalesOrderPlanV1 $salesPlan,
+        array $salesResult,
         CashierV3OperatorScope $operatorScope,
         CashierV3DataScopeContext $dataScope,
         int $now
-    ): void {
+    ): array {
         $state = $this->lockSourceState($operation, $result);
         if ((string)($state['card_status'] ?? '') !== 'enabled') {
             throw CashierV3CommandException::versionConflict(
@@ -365,7 +434,8 @@ final class CashierV3CardOperationCheckoutSettlementServices
                 ->where('write_surplus_times', $before)
                 ->update([
                     'write_surplus_times' => $after,
-                    'is_writeoff' => $after === 0 ? 1 : 0,
+                    // Upgrade transfer is not service consumption/write-off.
+                    'is_writeoff' => 0,
                 ]);
             if ((int)$updated !== 1) {
                 throw CashierV3CommandException::versionConflict(
@@ -390,8 +460,21 @@ final class CashierV3CardOperationCheckoutSettlementServices
         }
         $cartId = 'copu' . substr(hash('sha256', (string)$operation['operation_id']), 0, 27);
         $money = self::money($targetPrice);
+        $targetLegacyOrderId = $this->insertProjectUpgradeLegacyOrderInTx(
+            $operation,
+            $salesPlan,
+            $salesResult,
+            $operatorScope,
+            $now
+        );
         $targetDetailId = (int)Db::name('store_order_cart_info')->insertGetId([
             'uid' => (int)$operation['member_id_before'],
+            // The upgraded project is a new right on the same source card,
+            // rather than a second card instance.  Keep its legacy benefit
+            // pool under the original card order so entitlement discovery and
+            // resource versions resolve it through the one current holder.
+            // The new sales order remains linked through cart_info and its
+            // cart_id projection below for compatibility and audit.
             'oid' => (int)$operation['origin_order_id'],
             'cart_id' => $cartId,
             'cart_type' => 2,
@@ -400,6 +483,9 @@ final class CashierV3CardOperationCheckoutSettlementServices
             'pay_price' => $money,
             'write_times' => $totalQuantity,
             'write_surplus_times' => $totalQuantity,
+            'cart_num' => $totalQuantity,
+            'surplus_num' => $totalQuantity,
+            'split_surplus_num' => $totalQuantity,
             'write_start' => (int)($holder['write_start'] ?? 0),
             'write_end' => (int)($holder['write_end'] ?? 0),
             'is_writeoff' => 0,
@@ -421,6 +507,8 @@ final class CashierV3CardOperationCheckoutSettlementServices
         if ($targetDetailId <= 0) {
             throw self::failure('card_operation_project_upgrade_target_create_failed');
         }
+        Db::name('store_order')->where('id', $targetLegacyOrderId)
+            ->update(['cart_id' => self::json([(string)$targetDetailId])]);
         $this->advanceSourceStateInTx($state, $operation, $now);
         $this->versions->synchronizeProjectionVersion(
             'member_benefit_pool',
@@ -434,6 +522,11 @@ final class CashierV3CardOperationCheckoutSettlementServices
             $operatorScope,
             $dataScope
         );
+        return [
+            'targetHolderId' => 0,
+            'targetLegacyOrderId' => $targetLegacyOrderId,
+            'targetEntitlementDetailId' => $targetDetailId,
+        ];
     }
 
     private function assertCheckoutMatchesOperation(
@@ -448,7 +541,8 @@ final class CashierV3CardOperationCheckoutSettlementServices
         $type = (string)$operation['operation_type'];
         $expectedItemType = $type === 'card_upgrade' ? 'card' : 'project';
         $targetSkuId = (int)($target['skuId'] ?? 0);
-        $expectedDiscount = (int)$operation['source_remaining_value_cents'];
+        $expectedCredit = (int)$operation['source_remaining_value_cents'];
+        $couponDiscount = (int)($line['coupon_discount_cents'] ?? 0);
         if ((string)($header['tenant_id'] ?? '') !== $dataScope->tenantId()
             || (int)($header['store_id'] ?? 0) !== $operatorScope->storeId()
             || (int)($header['member_id'] ?? 0) !== (int)$operation['member_id_before']
@@ -456,13 +550,119 @@ final class CashierV3CardOperationCheckoutSettlementServices
             || (int)($line['item_id'] ?? 0) !== (int)$operation['target_catalog_id']
             || (int)($line['catalog_sku_id'] ?? 0) !== $targetSkuId
             || (int)($line['original_amount_cents'] ?? -1) !== (int)$operation['target_price_cents']
-            || (int)($line['discount_amount_cents'] ?? -1) !== $expectedDiscount
-            || (int)($line['sale_amount_cents'] ?? -1) !== (int)$operation['settlement_delta_cents']) {
+            || $couponDiscount < 0 || $couponDiscount > (int)$operation['settlement_delta_cents']
+            || (int)($line['discount_amount_cents'] ?? -1) !== $couponDiscount
+            || (int)($line['sale_amount_cents'] ?? -1) !== (int)$operation['target_price_cents'] - $couponDiscount
+            || (int)($line['sale_amount_cents'] ?? -1) - $expectedCredit
+                !== (int)$operation['settlement_delta_cents'] - $couponDiscount) {
             throw CashierV3CommandException::versionConflict(
                 '升级结账内容已经变化，请重新打开后办理。',
                 ['reason' => 'card_operation_checkout_sale_line_mismatch']
             );
         }
+    }
+
+    private function insertProjectUpgradeLegacyOrderInTx(
+        array $operation,
+        CashierV3SalesOrderPlanV1 $salesPlan,
+        array $salesResult,
+        CashierV3OperatorScope $operatorScope,
+        int $now
+    ): int {
+        $header = $salesPlan->header();
+        $legacyOrderNo = 'v3p' . substr(hash('sha256', (string)$salesResult['orderId']), 0, 28);
+        $money = self::money((int)$operation['target_price_cents']);
+        $cash = self::money((int)$operation['settlement_delta_cents']);
+        $credit = self::money((int)$operation['source_remaining_value_cents']);
+        $id = (int)Db::name('store_order')->insertGetId([
+            'type' => 11,
+            'pid' => 0,
+            'order_id' => $legacyOrderNo,
+            'store_id' => $operatorScope->storeId(),
+            'uid' => (int)$operation['member_id_before'],
+            'real_name' => (string)($header['member_name_snapshot'] ?? ''),
+            'cart_id' => '[]',
+            'total_num' => 1,
+            'total_price' => $money,
+            'settle_price' => $money,
+            'pay_price' => $money,
+            'cash_pay_price' => $cash,
+            'yue_pay_price' => $credit,
+            'paid' => 1,
+            'pay_type' => 'cashier_v3',
+            'status' => 0,
+            'refund_status' => 0,
+            'card_upgrade_use_oid' => 0,
+            'terminal_action' => 0,
+            'product_type' => 6,
+            'mark' => 'V3项目升级目标权益',
+            'remark' => 'V3 sales order ' . (string)($header['order_no'] ?? ''),
+            'unique' => md5('cashier-v3-project-upgrade:' . (string)$operation['operation_id']),
+            'is_del' => 0,
+            'is_user_del' => 0,
+            'is_system_del' => 0,
+            'channel_type' => 'cashier_v3',
+            'pay_time' => $now,
+            'add_time' => $now,
+            'selected_product' => (string)$operation['target_catalog_id'],
+        ]);
+        if ($id <= 0) {
+            throw self::failure('card_operation_project_upgrade_target_order_create_failed');
+        }
+        return $id;
+    }
+
+    private function persistSettlementInTx(
+        array $operation,
+        CashierV3SalesOrderPlanV1 $salesPlan,
+        array $salesResult,
+        array $targetAuthority,
+        CashierV3DataScopeContext $dataScope,
+        int $now
+    ): array {
+        $line = $this->onlySalesLine($salesPlan);
+        $sourceLines = self::rows(Db::name(self::OPERATION_LINE_TABLE)
+            ->where('tenant_id', $dataScope->tenantId())
+            ->where('operation_id', (string)$operation['operation_id'])
+            ->where('line_role', 'source_project')
+            ->order('line_no asc')->select());
+        $sourceDetailIds = array_values(array_map(static function (array $row): int {
+            return (int)$row['source_detail_id'];
+        }, $sourceLines));
+        $sourceOrderNo = (string)Db::name('store_order')
+            ->where('id', (int)$operation['origin_order_id'])->value('order_id');
+        $row = [
+            'settlement_id' => 'COS-' . strtoupper(substr(hash('sha256', (string)$operation['operation_id']), 0, 40)),
+            'tenant_id' => $dataScope->tenantId(),
+            'operation_id' => (string)$operation['operation_id'],
+            'operation_no_snapshot' => (string)$operation['operation_no'],
+            'operation_type' => (string)$operation['operation_type'],
+            'checkout_request_id' => (string)$operation['checkout_request_id'],
+            'sales_order_id' => (string)$salesResult['orderId'],
+            'sales_order_line_id' => (string)$line['order_line_id'],
+            'source_card_holder_id' => (int)$operation['source_card_holder_id'],
+            'source_legacy_order_id' => (int)$operation['origin_order_id'],
+            'source_card_no_snapshot' => (string)$operation['card_no_snapshot'],
+            'source_order_no_snapshot' => $sourceOrderNo,
+            'source_detail_ids_json' => self::json($sourceDetailIds),
+            'target_card_holder_id' => (int)($targetAuthority['targetHolderId'] ?? 0),
+            'target_legacy_order_id' => (int)($targetAuthority['targetLegacyOrderId'] ?? 0),
+            'target_entitlement_detail_id' => (int)($targetAuthority['targetEntitlementDetailId'] ?? 0),
+            'entitlement_credit_cents' => (int)$operation['source_remaining_value_cents'],
+            'cash_delta_cents' => (int)$operation['settlement_delta_cents'],
+            'settlement_status' => 'settled',
+            'reversed_by_operation_id' => '',
+            'settled_at' => $now,
+            'reversed_at' => 0,
+            'recorded_at' => $now,
+            'current_version' => 1,
+        ];
+        $row['immutable_fingerprint'] = hash('sha256', self::json($row));
+        $id = (int)Db::name(self::SETTLEMENT_TABLE)->insertGetId($row);
+        if ($id <= 0) {
+            throw self::failure('card_operation_settlement_insert_failed');
+        }
+        return $row;
     }
 
     private function onlySalesLine(CashierV3SalesOrderPlanV1 $salesPlan): array
@@ -503,7 +703,7 @@ final class CashierV3CardOperationCheckoutSettlementServices
             ->where('current_version', $version)
             ->where('card_status', 'enabled')
             ->update([
-                'card_status' => 'disabled',
+                'card_status' => 'upgraded',
                 'status_reason_snapshot' => '卡升级完成',
                 'current_version' => $version + 1,
                 'last_operation_id' => (string)$operation['operation_id'],

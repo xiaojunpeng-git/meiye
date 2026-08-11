@@ -349,7 +349,9 @@ final class CashierV3CardRuleEntitlementAuthorityServices
         }
 
         $usesIndependentTimes = in_array($ruleType, ['normal', 'choice_kind'], true);
-        $targetTimes = $usesIndependentTimes ? $totalQuantity : 0;
+        // Source rights can be deducted in aggregate, while a replacement
+        // always grants exactly one target-project right.
+        $targetTimes = $usesIndependentTimes ? 1 : 0;
         $componentSnapshot = [
             'relationId' => $relationId,
             'productId' => (int)$target['catalogId'],

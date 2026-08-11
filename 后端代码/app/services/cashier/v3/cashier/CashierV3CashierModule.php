@@ -4,6 +4,7 @@ namespace app\services\cashier\v3\cashier;
 
 use app\services\cashier\v3\CashierV3ActionDispatcher;
 use app\services\cashier\v3\CashierV3CommandException;
+use app\services\cashier\v3\CashierV3OperatorScope;
 use app\services\cashier\v3\CashierV3ResultCode;
 use app\services\cashier\v3\checkout\CashierV3EntitlementCompletionAuthorityAdapter;
 use app\services\cashier\v3\checkout\persistence\ThinkPhpCashierV3EntitlementCompletionWriter;
@@ -20,7 +21,6 @@ use app\services\cashier\v3\checkout\provider\CashierV3StaffProfileProvider;
 use app\services\cashier\v3\card\CashierV3CustomCardConfigurationServices;
 use app\services\cashier\v3\card\CashierV3CustomCardConfigurationVersionProvider;
 use app\services\cashier\v3\card\CashierV3CardRuleEntitlementAuthorityServices;
-use app\services\cashier\v3\card\CashierV3CardOperationCheckoutSettlementServices;
 use app\services\cashier\v3\projection\CashierV3RootDomainAssembler;
 use app\services\cashier\v3\registry\CashierV3ContextPolicy;
 use app\services\cashier\v3\service\CashierV3ServiceOrderOccupationAuthorityProvider;
@@ -34,6 +34,7 @@ use app\services\cashier\v3\settlement\CashierV3CheckoutProjectionServices;
 use app\services\cashier\v3\settlement\CashierV3CheckoutBusinessSourceSelectionServices;
 use app\services\cashier\v3\settlement\CashierV3CheckoutResultQueryServices;
 use app\services\cashier\v3\settlement\CashierV3DebtRepaymentServices;
+use app\services\cashier\v3\settlement\CashierV3DebtRepaymentResourceDiscovery;
 use app\services\cashier\v3\settlement\CashierV3RechargeDebtRepaymentServices;
 use app\services\cashier\v3\settlement\CashierV3CheckoutSubmissionOrchestrator;
 use app\services\cashier\v3\settlement\CashierV3CheckoutSubmissionPreparationServices;
@@ -62,7 +63,6 @@ final class CashierV3CashierModule
         $readiness = new CashierV3CashierReadinessGuard();
         $workspace = new CashierV3CashierWorkspaceServices($readiness);
         $moreActions = new CashierV3CashierMoreActionServices($workspace);
-        $cardOperationSettlements = new CashierV3CardOperationCheckoutSettlementServices();
         $saleCatalog = $saleCatalog ?: new CashierV3SaleCatalogServices(null, $readiness);
         $saleCatalogProvider = new CashierV3SaleCatalogResourceVersionProvider($readiness);
         foreach (CashierV3SaleCatalogResourceVersionProvider::KINDS as $kind) {
@@ -317,10 +317,9 @@ final class CashierV3CashierModule
                 (string)($scope['state_context_id'] ?? ''),
                 $scope['operator_scope']
             );
-            $line = $saleCatalog->selectSaleLineAfterGatewayLocksInTx(
+            $line = $saleCatalog->selectDraftSaleLineAfterGatewayLocksInTx(
                 $payload['itemId'] ?? null,
                 (string)($scope['idempotency_key'] ?? ''),
-                (array)($scope['contexts'] ?? []),
                 $scope['operator_scope'],
                 $scope['data_scope']
             );
@@ -430,20 +429,13 @@ final class CashierV3CashierModule
         if ($handlers->hasCommand('remove-cart-line')) {
             throw new \LogicException('C2 cashier module: remove cart line duplicate handler');
         }
-        $handlers->registerCommand('remove-cart-line', function (array $scope) use ($workspace, $cardOperationSettlements): array {
+        $handlers->registerCommand('remove-cart-line', function (array $scope) use ($workspace): array {
             $payload = is_array($scope['payload'] ?? null) ? $scope['payload'] : [];
             $draft = $workspace->removeLineInTx(
                 self::workspaceContextId((array)($scope['contexts'] ?? [])),
                 (string)($scope['state_context_id'] ?? ''),
                 $scope['operator_scope'],
-                self::lineKey($payload['lineId'] ?? $payload['line_id'] ?? null),
-                static function (array $line) use ($scope, $cardOperationSettlements): void {
-                    $cardOperationSettlements->cancelForRemovedWorkspaceLineInTx(
-                        $line,
-                        $scope['operator_scope'],
-                        $scope['data_scope']
-                    );
-                }
+                self::lineKey($payload['lineId'] ?? $payload['line_id'] ?? null)
             );
             return [
                 'data' => ['cashierDraft' => $draft],
@@ -455,18 +447,11 @@ final class CashierV3CashierModule
         if ($handlers->hasCommand('clear-cart-lines')) {
             throw new \LogicException('C2 cashier module: clear cart lines duplicate handler');
         }
-        $handlers->registerCommand('clear-cart-lines', function (array $scope) use ($workspace, $cardOperationSettlements): array {
+        $handlers->registerCommand('clear-cart-lines', function (array $scope) use ($workspace): array {
             $draft = $workspace->clearLinesInTx(
                 self::workspaceContextId((array)($scope['contexts'] ?? [])),
                 (string)($scope['state_context_id'] ?? ''),
-                $scope['operator_scope'],
-                static function (array $line) use ($scope, $cardOperationSettlements): void {
-                    $cardOperationSettlements->cancelForRemovedWorkspaceLineInTx(
-                        $line,
-                        $scope['operator_scope'],
-                        $scope['data_scope']
-                    );
-                }
+                $scope['operator_scope']
             );
             return [
                 'data' => ['cashierDraft' => $draft],
@@ -487,24 +472,10 @@ final class CashierV3CashierModule
                 $scope['operator_scope'],
                 self::lineKey($payload['lineId'] ?? $payload['line_id'] ?? null),
                 self::quantityDelta($payload['delta'] ?? null),
-                function (array $line, int $quantity, int $aggregateQuantity) use ($projection, $contexts, $scope): void {
-                    $projection->assertDraftLineQuantityInTx(
-                        $line,
-                        $quantity,
-                        $aggregateQuantity,
-                        $contexts,
-                        $scope['operator_scope']
-                    );
-                },
-                function (array $line, int $quantity) use ($saleCatalog, $scope, $contexts): void {
-                    $saleCatalog->assertStoredSaleQuantityAfterGatewayLocksInTx(
-                        $line,
-                        $quantity,
-                        $contexts,
-                        $scope['operator_scope'],
-                        $scope['data_scope']
-                    );
-                }
+                // Quantity is a draft edit.  Entitlement availability and
+                // inventory are checked once by checkout preparation only.
+                static function (): void {},
+                static function (): void {}
             );
             return [
                 'data' => ['cashierDraft' => $draft],
@@ -626,6 +597,64 @@ final class CashierV3CashierModule
                 'message' => '该条商品欠款已更新。',
             ];
         });
+
+        if ($handlers->hasProjection('open-line-coupon')) {
+            throw new \LogicException('C2 cashier module: open line coupon duplicate handler');
+        }
+        $handlers->registerProjection('open-line-coupon', function (array $scope) use ($workspace): array {
+            $payload = is_array($scope['payload'] ?? null) ? $scope['payload'] : [];
+            $selector = $workspace->couponSelector(
+                // 投影请求没有写命令 contexts；工作台身份必须由服务端已
+                // 解析的门店、操作人和 state context 派生，不能错误要求
+                // 浏览器伪造一个带版本的 command context。
+                self::workspaceIdForProjection($scope),
+                (string)($scope['state_context_id'] ?? ''),
+                $scope['operator_scope'],
+                self::lineKey($payload['lineId'] ?? $payload['line_id'] ?? null)
+            );
+            return [
+                'data' => ['couponSelector' => $selector],
+                'message' => '可用优惠券已重新读取。',
+            ];
+        });
+
+        foreach (['apply-line-coupon', 'remove-line-coupon'] as $action) {
+            if ($handlers->hasCommand($action)) {
+                throw new \LogicException('C2 cashier module: line coupon command duplicate handler');
+            }
+            $handlers->registerCommand($action, function (array $scope) use ($workspace, $action): array {
+                $payload = is_array($scope['payload'] ?? null) ? $scope['payload'] : [];
+                $lineKey = self::lineKey($payload['lineId'] ?? $payload['line_id'] ?? null);
+                $couponId = 0;
+                if ($action === 'apply-line-coupon') {
+                    $rawCouponId = trim((string)($payload['couponId'] ?? ''));
+                    if (preg_match('/^[1-9][0-9]*$/D', $rawCouponId) !== 1
+                        || (string)(int)$rawCouponId !== $rawCouponId) {
+                        throw CashierV3CommandException::invalidContext('优惠券标识无效，请重新选择。');
+                    }
+                    $couponId = (int)$rawCouponId;
+                }
+                $draft = $action === 'apply-line-coupon'
+                    ? $workspace->applyLineCouponInTx(
+                        self::workspaceContextId((array)($scope['contexts'] ?? [])),
+                        (string)($scope['state_context_id'] ?? ''),
+                        $scope['operator_scope'],
+                        $lineKey,
+                        $couponId
+                    )
+                    : $workspace->removeLineCouponInTx(
+                        self::workspaceContextId((array)($scope['contexts'] ?? [])),
+                        (string)($scope['state_context_id'] ?? ''),
+                        $scope['operator_scope'],
+                        $lineKey
+                    );
+                return [
+                    'data' => ['cashierDraft' => $draft],
+                    'touched' => ['cashier_workspace'],
+                    'message' => $action === 'apply-line-coupon' ? '优惠券已使用。' : '优惠券已移除。',
+                ];
+            });
+        }
 
         foreach ([
             'update-cashier-order-note',
@@ -812,9 +841,6 @@ final class CashierV3CashierModule
                     break;
                 }
             }
-            if (is_array($submitted['hangOrder'] ?? null)) {
-                $touched[] = 'hang_order';
-            }
             return [
                 'data' => [
                     'checkoutSubmission' => $submitted,
@@ -822,6 +848,9 @@ final class CashierV3CashierModule
                 ],
                 'business_no' => $businessNo,
                 'touched' => $touched,
+                // 结账成功后必须重建权威根投影，让客户端看到 succeeded
+                // 终态及清空后的工作台；否则只拿到命令成功会被误判为结果未知。
+                'return_root_state' => true,
                 'message' => $message,
             ];
         });
@@ -935,6 +964,7 @@ final class CashierV3CashierModule
         self::registerChangeQuantityPolicy($dispatcher, $readiness, $saleCatalog);
         self::registerUpdateServiceSettingsPolicy($dispatcher, $readiness);
         self::registerMoreActionPolicies($dispatcher, $readiness, $saleCatalog);
+        self::registerLineCouponPolicies($dispatcher, $readiness);
         self::registerPrepareCheckoutPolicy($dispatcher, $checkoutPreparation);
         self::registerDebtRepaymentPolicies($dispatcher);
         self::registerSubmissionPreparationPolicy(
@@ -1047,15 +1077,21 @@ final class CashierV3CashierModule
             ['cashier_workspace', 'member', 'member_balance']
         ));
 
-        $dispatcher->policies()->register(new CashierV3ContextPolicy(
+        $submitDebtRepaymentPolicy = new CashierV3ContextPolicy(
             'submit-debt-repayment',
             ['cashier_workspace', 'checkout_request'],
-            [],
+            ['debt_record'],
             [$dispatcher->policies(), 'resolveCheckoutFollowUpBranch'],
-            ['cashier_workspace', 'checkout_request'],
-            [],
-            []
-        ));
+            ['cashier_workspace', 'checkout_request', 'debt_record'],
+            ['debt_record'],
+            ['debt_record']
+        );
+        $submitDebtRepaymentPolicy->configureServerResourceDiscovery(
+            [new CashierV3DebtRepaymentResourceDiscovery(), 'discover'],
+            ['debt_record'],
+            ['debt_record']
+        );
+        $dispatcher->policies()->register($submitDebtRepaymentPolicy);
 
         $dispatcher->policies()->register(new CashierV3ContextPolicy(
             'submit-recharge-debt-repayment',
@@ -1096,11 +1132,11 @@ final class CashierV3CashierModule
         $policy = new CashierV3ContextPolicy(
             'prepare-checkout-submission',
             ['cashier_workspace', 'checkout_request'],
-            ['service_order', 'hang_order', 'reservation', 'room'],
+            ['service_order', 'reservation', 'room'],
             [$dispatcher->policies(), 'resolveCheckoutFollowUpBranch'],
             ['cashier_workspace', 'checkout_request'],
-            ['service_order', 'hang_order', 'reservation', 'room'],
-            ['service_order', 'hang_order', 'reservation', 'room']
+            ['service_order', 'reservation', 'room'],
+            ['service_order', 'reservation', 'room']
         );
         $policy->configureServerResourceDiscovery(
             [$discovery, 'discover'],
@@ -1290,6 +1326,29 @@ final class CashierV3CashierModule
         );
     }
 
+    /**
+     * Projection 不能携带写命令 contexts；以服务端已认证的会话派生当前
+     * 工作台 ID，随后仍由 workspace binding 校验门店、操作人和状态会话。
+     */
+    private static function workspaceIdForProjection(array $scope): string
+    {
+        $operatorScope = $scope['operator_scope'] ?? null;
+        $stateContextId = trim((string)($scope['state_context_id'] ?? ''));
+        if (!$operatorScope instanceof CashierV3OperatorScope || $stateContextId === '') {
+            throw new CashierV3CommandException(
+                CashierV3ResultCode::CLIENT_SESSION_REQUIRED,
+                '当前收银工作台会话无效，请刷新页面后重试。',
+                CashierV3ResultCode::STATUS_FAILED
+            );
+        }
+        return sprintf(
+            'ws:%d:%d:%s',
+            $operatorScope->storeId(),
+            $operatorScope->operatorId(),
+            $stateContextId
+        );
+    }
+
     private static function canonicalPositiveId($value, string $field): int
     {
         if (is_bool($value) || is_array($value) || $value === null) {
@@ -1411,39 +1470,14 @@ final class CashierV3CashierModule
             'choose-catalog-item',
             ['cashier_workspace'],
             [],
-            function (array $payload, array $base) use ($readiness, $saleCatalog): array {
+            function (array $payload, array $base) use ($readiness): array {
                 $readiness->assertReady();
-                $itemId = CashierV3SaleCatalogServices::itemId($payload['itemId'] ?? null);
-                $resolved = self::workspaceOnlyPolicyResult($base);
-                // 新版目录已在本地持有展示品类。普通项目／产品没有卡内
-                // 组成资源，直接交由事务内 joined 行锁定校验即可，避免
-                // 点击一次就先做一次只读目录查询。提示仅作性能分流：
-                // 缺失时维持旧客户端完整发现；伪造为非卡项时，领域层仍会
-                // 因卡资源锁上下文缺失而拒绝，不能绕过卡项校验。
-                $catalogKindHint = trim((string)($payload['catalogKind'] ?? ''));
-                if ($catalogKindHint !== ''
-                    && !in_array($catalogKindHint, ['卡项', '定制卡'], true)) {
-                    return $resolved;
-                }
-                $resolved['expand_from_server_resource_discovery'] = true;
-                // 普通项目/产品没有需要额外锁定的服务端资源；业务事务
-                // 会锁定权威商品/SKU joined 行。卡项仍必须返回完整资源计划。
-                $resolved['allow_empty_server_resource_discovery'] = true;
-                $resolved['server_resource_discoverer'] = static function (array $scope) use (
-                    $saleCatalog,
-                    $itemId
-                ): array {
-                    return ['resources' => $saleCatalog->discoverItemResources(
-                        $itemId,
-                        $scope['operator_scope'],
-                        $scope['data_scope']
-                    )];
-                };
-                return $resolved;
+                // 目录点击只创建草稿行；商品可售、库存和卡项有效性统一在结账事务中校验。
+                return self::workspaceOnlyPolicyResult($base);
             },
             ['cashier_workspace'],
-            ['cashier_workspace', 'catalog_card_definition', 'catalog_product', 'catalog_sku'],
-            ['catalog_card_definition', 'catalog_product', 'catalog_sku']
+            ['cashier_workspace'],
+            []
         ));
     }
 
@@ -1490,7 +1524,7 @@ final class CashierV3CashierModule
             'change-cart-line-quantity',
             ['cashier_workspace'],
             [],
-            function (array $payload, array $base) use ($readiness, $saleCatalog): array {
+            function (array $payload, array $base) use ($readiness): array {
                 $readiness->assertReady();
                 $lineKey = self::lineKey($payload['lineId'] ?? $payload['line_id'] ?? null);
                 $delta = self::quantityDelta($payload['delta'] ?? null);
@@ -1508,63 +1542,11 @@ final class CashierV3CashierModule
                     );
                 }
                 $resolved = self::workspaceOnlyPolicyResult($base);
-                if ((string)($row['line_role'] ?? '') === 'sale') {
-                    $resolved['expand_from_server_resource_discovery'] = true;
-                    $resolved['server_resource_discoverer'] = static function (array $scope) use (
-                        $saleCatalog,
-                        $workspaceId,
-                        $lineKey,
-                        $delta
-                    ): array {
-                        $current = Db::name('cashier_v3_workspace_line')
-                            ->where('workspace_id', $workspaceId)
-                            ->where('line_key', $lineKey)
-                            ->find();
-                        if (!$current || (string)($current['line_role'] ?? '') !== 'sale') {
-                            throw new CashierV3CommandException(
-                                CashierV3ResultCode::RESOURCE_NOT_FOUND,
-                                '该购物车项目不存在或已经删除。',
-                                CashierV3ResultCode::STATUS_FAILED,
-                                ['line_id' => $lineKey]
-                            );
-                        }
-                        $nextQuantity = (int)($current['quantity'] ?? 0) + $delta;
-                        return ['resources' => $saleCatalog->discoverStoredLineResources(
-                            (array)$current,
-                            $nextQuantity,
-                            $scope['operator_scope'],
-                            $scope['data_scope']
-                        )];
-                    };
-                    return $resolved;
-                }
-                if ((string)($row['line_role'] ?? '') !== 'entitlement_service') {
-                    throw self::invalidLine('lineRole');
-                }
-                $memberId = self::canonicalPositiveId($row['member_id'] ?? null, 'memberId');
-                $holderId = self::canonicalPositiveId($row['holder_id'] ?? null, 'entitlementInstanceId');
-                $detailId = self::canonicalPositiveId($row['source_detail_id'] ?? null, 'entitlementSourceDetailId');
-                $extraIdentities = [
-                    ['role' => 'member', 'kind' => 'member', 'id' => (string)$memberId, 'required' => true],
-                    ['role' => 'member_benefit_pool:' . $detailId, 'kind' => 'member_benefit_pool', 'id' => (string)$detailId, 'required' => true],
-                    ['role' => 'card_holder:' . $holderId, 'kind' => 'card_holder', 'id' => (string)$holderId, 'required' => true],
-                ];
-                $resolved['required'] = ['cashier_workspace', 'member', 'member_benefit_pool', 'card_holder'];
-                $resolved['identities'] = array_merge($extraIdentities, $resolved['identities']);
-                $resolved['required_read_roles'] = array_values(array_map(static function (array $identity): string {
-                    return (string)$identity['role'];
-                }, $resolved['identities']));
                 return $resolved;
             },
             ['cashier_workspace'],
-            [
-                'cashier_workspace', 'member', 'member_benefit_pool', 'card_holder',
-                'catalog_card_definition', 'catalog_product', 'catalog_sku',
-            ],
-            [
-                'member', 'member_benefit_pool', 'card_holder',
-                'catalog_card_definition', 'catalog_product', 'catalog_sku',
-            ]
+            ['cashier_workspace'],
+            []
         ));
     }
 
@@ -1778,6 +1760,29 @@ final class CashierV3CashierModule
                 ['cashier_workspace'],
                 ['cashier_workspace', 'catalog_card_definition', 'catalog_product', 'catalog_sku'],
                 ['catalog_card_definition', 'catalog_product', 'catalog_sku']
+            ));
+        }
+    }
+
+    private static function registerLineCouponPolicies(
+        CashierV3ActionDispatcher $dispatcher,
+        CashierV3CashierReadinessGuard $readiness
+    ): void {
+        foreach (['apply-line-coupon', 'remove-line-coupon'] as $action) {
+            if ($dispatcher->policies()->has($action)) {
+                throw new \LogicException('C2 cashier module: line coupon context policy duplicate');
+            }
+            $dispatcher->policies()->register(new CashierV3ContextPolicy(
+                $action,
+                ['cashier_workspace'],
+                [],
+                function (array $payload, array $base) use ($readiness): array {
+                    $readiness->assertReady();
+                    return self::workspaceOnlyPolicyResult($base);
+                },
+                ['cashier_workspace'],
+                ['cashier_workspace'],
+                []
             ));
         }
     }

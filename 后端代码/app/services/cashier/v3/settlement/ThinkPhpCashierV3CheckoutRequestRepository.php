@@ -118,6 +118,12 @@ final class ThinkPhpCashierV3CheckoutRequestRepository implements CashierV3Check
         'priceChangedBy' => 'price_changed_by',
         'priceChangedByNameSnapshot' => 'price_changed_by_name_snapshot',
         'priceChangedAt' => 'price_changed_at',
+        // Coupon identity and discount are part of the immutable checkout
+        // line snapshot. Omitting these mappings silently downgraded a valid
+        // workspace coupon to coupon_user_id=0 during prepare-checkout.
+        'couponUserId' => 'coupon_user_id',
+        'couponNameSnapshot' => 'coupon_name_snapshot',
+        'couponDiscountCents' => 'coupon_discount_cents',
         'craftsmenSnapshotJson' => 'craftsmen_snapshot_json',
         'lineFingerprint' => 'line_fingerprint',
         'sortNo' => 'sort_no',
@@ -869,6 +875,45 @@ final class ThinkPhpCashierV3CheckoutRequestRepository implements CashierV3Check
         }
 
         return $this->casReplaceAggregate($plan, $verifiedSources);
+    }
+
+    public function bindResumedHangOrderInTx(
+        string $requestId,
+        int $requestVersion,
+        string $hangOrderId,
+        CashierV3OperatorScope $operatorScope,
+        CashierV3DataScopeContext $dataScope
+    ): void {
+        CashierV3TransactionGuard::assertInTransaction('checkoutRequestResumedHangBinding');
+        $this->assertScopeContext($operatorScope, $dataScope);
+        $requestId = trim($requestId);
+        $hangOrderId = trim($hangOrderId);
+        if (!$this->validRequestId($requestId) || $requestVersion <= 0
+            || ($hangOrderId !== '' && preg_match('/^HGO[0-9a-f]{40}$/D', $hangOrderId) !== 1)) {
+            throw self::failure('checkout_resumed_hang_reference_invalid');
+        }
+
+        $query = Db::name(self::REQUEST_TABLE)
+            ->where('tenant_id', $dataScope->tenantId())
+            ->where('store_id', $dataScope->forcedStoreId())
+            ->where('operator_id', $dataScope->operatorId())
+            ->where('request_id', $requestId)
+            ->where('request_version', $requestVersion)
+            ->where('request_status', 'editing');
+        $current = $query->lock(true)->find();
+        if (!$current) {
+            throw self::failure('checkout_resumed_hang_reference_cas_conflict');
+        }
+        if (hash_equals((string)($current['resumed_hang_order_id'] ?? ''), $hangOrderId)) {
+            return;
+        }
+        $affected = (int)Db::name(self::REQUEST_TABLE)
+            ->where('id', (int)$current['id'])
+            ->update([
+                'resumed_hang_order_id' => $hangOrderId,
+                'update_time' => time(),
+            ]);
+        $this->assertAffected('checkout_resumed_hang_reference_bind', $affected, 1);
     }
 
     private function insertAggregate(

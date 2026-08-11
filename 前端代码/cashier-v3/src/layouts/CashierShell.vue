@@ -57,6 +57,13 @@ const isMemberSelectorOpen = ref(false)
 const memberSelectorContext = ref('cashier')
 let memberSelectorQuerySequence = 0
 const memberSelectorRequiresMember = ref(false)
+// 推荐人查询独立于主会员选择器。新建会员面板本身位于主选择器内部，
+// 不能通过切换主选择器来选择推荐人，否则会卸载并丢失正在填写的表单。
+const isReferrerSelectorOpen = ref(false)
+const referrerSelector = ref({ records: [], total: 0, page: 1, pageSize: 20, isLoading: false })
+let referrerSelectorQuerySequence = 0
+let referrerSelectorResolve = null
+let referrerSelectorExcludedMemberId = 0
 const isMemberDetailOpen = ref(false)
 const memberDetailInitialTab = ref('profile')
 const memberDetailFallback = ref({})
@@ -157,8 +164,8 @@ const menuItems = [
     label: '数据',
     icon: ChartNoAxesCombined,
     featureCode: 'cashier.v3.management_center',
-    to: { name: 'cashier-v3-business-dashboard' },
-    activeRouteNames: ['cashier-v3-business-dashboard']
+    to: { name: 'cashier-v3-store-business-reports' },
+    activeRouteNames: ['cashier-v3-store-business-reports', 'cashier-v3-business-dashboard']
   },
   {
     key: 'inventory',
@@ -193,7 +200,7 @@ const allowedTopActions = new Set([
   'open-member-creator',
   'open-member-batch-actions'
 ])
-const allowedMemberSelectorContexts = new Set(['cashier', 'writeoff', 'reservation', 'card-transfer', 'customer-care', 'customer-care-record'])
+const allowedMemberSelectorContexts = new Set(['cashier', 'writeoff', 'reservation', 'card-transfer', 'customer-care', 'customer-care-record', 'member-referrer'])
 const memberSelectorActions = {
   cashier: 'select-cashier-member',
   writeoff: 'select-writeoff-member',
@@ -283,6 +290,7 @@ const isMemberPage = computed(() => route.name === 'cashier-v3-member')
 const isStaffPage = computed(() => route.name === 'cashier-v3-staff-list')
 const isManagementCenterPage = computed(() => route.name === 'cashier-v3-management-center')
 const isBusinessDashboardPage = computed(() => route.name === 'cashier-v3-business-dashboard')
+const isStoreBusinessReportPage = computed(() => route.name === 'cashier-v3-store-business-reports')
 const activeCashierWorkflowMode = computed(() => {
   if (route.name === 'cashier-v3-writeoff') return 'writeoff'
   if (route.name === 'cashier-v3-replacement') return 'replacement'
@@ -337,6 +345,26 @@ const memberDebtSnapshot = computed(() => {
     records: Array.isArray(activeDebtMember.value?.debtRecords) ? activeDebtMember.value.debtRecords : []
   }
 })
+
+function applyAuthoritativeDebtSnapshot(snapshot) {
+  if (!snapshot || typeof snapshot !== 'object') return
+  const memberId = memberDetailId(snapshot.member || snapshot)
+  if (!memberId) return
+  const amount = Number(snapshot.outstandingDebtAmount ?? snapshot.totalDebtAmount ?? 0)
+  const count = Number(snapshot.outstandingDebtCount ?? snapshot.total ?? 0)
+  const dataAsOf = String(snapshot.debtDataAsOf ?? snapshot.dataAsOf ?? '')
+  const patch = {
+    outstandingDebtAmount: Number.isFinite(amount) ? amount : 0,
+    outstandingDebtCount: Number.isFinite(count) ? count : 0,
+    debtDataAsOf: dataAsOf
+  }
+  for (const key of ['cashier', 'writeoff']) {
+    const current = state[key]?.member
+    if (current && String(memberDetailId(current)) === String(memberId)) {
+      state[key] = { ...state[key], member: { ...current, ...patch } }
+    }
+  }
+}
 const queryEntitySelectorType = computed(() => queryEntitySelectorRequest.value?.entityType || 'person')
 const queryEntitySelector = computed(() => state.queryEntitySelector?.[queryEntitySelectorType.value] || {})
 const serviceCompletionSnapshot = computed(() => state.serviceCompletion || {})
@@ -392,7 +420,7 @@ const hasMatchingRoomAssignmentSnapshot = computed(() => {
 const operatorLabel = computed(() => state.operator.roleName
   ? `${state.operator.name} · ${state.operator.roleName}`
   : state.operator.name)
-const hasPageHelp = computed(() => ['cashier-v3-cashier', 'cashier-v3-writeoff', 'cashier-v3-replacement', 'cashier-v3-room', 'cashier-v3-reservation', 'cashier-v3-member', 'cashier-v3-care', 'cashier-v3-hang', 'cashier-v3-order-center', 'cashier-v3-management-center', 'cashier-v3-staff-list', 'cashier-v3-business-dashboard'].includes(route.name))
+const hasPageHelp = computed(() => ['cashier-v3-cashier', 'cashier-v3-writeoff', 'cashier-v3-replacement', 'cashier-v3-room', 'cashier-v3-reservation', 'cashier-v3-member', 'cashier-v3-care', 'cashier-v3-hang', 'cashier-v3-order-center', 'cashier-v3-management-center', 'cashier-v3-staff-list', 'cashier-v3-business-dashboard', 'cashier-v3-store-business-reports'].includes(route.name))
 watch(
   () => route.name,
   (routeName) => {
@@ -403,6 +431,18 @@ watch(
   }
 )
 const helpContent = computed(() => {
+  if (isStoreBusinessReportPage.value) {
+    return {
+      title: '经营报表说明',
+      description: '六类报表共用 V3 统一事实服务，当前门店范围由登录会话固定，页面筛选不能扩大可见范围。',
+      steps: [
+        '上排功能页签切换经营总览、销售收款、服务消耗、顾客、品项和拓客渠道报表。',
+        '所有报表只展示 V3 正式事实覆盖期；覆盖起始日、数据更新时间和口径版本显示在查询条件下方。',
+        '顾客报表中的待确认指标不计算也不导出；销售和服务事实分别统计。',
+        '导出复用当前筛选、固定字段和后端门店权限，不能由浏览器指定其他门店或字段。'
+      ]
+    }
+  }
   if (isBusinessDashboardPage.value) {
     return {
       title: '运营概况说明',
@@ -672,10 +712,15 @@ async function queryMemberSelector(query) {
   const selectorContext = memberSelectorContext.value === 'card-transfer'
     ? 'cashier'
     : memberSelectorContext.value
+  // member-referrer constrains the result set, but is not an authorization
+  // entry. This selector is opened from cashier and must use its grant.
+  const selectorEntry = selectorContext === 'member-referrer'
+    ? 'cashier'
+    : selectorContext
   const result = await requestCashierV3Action('query-member-selector', {
     ...query,
     selectorContext,
-    selectorEntry: selectorContext
+    selectorEntry
   })
   // 会员选择器是独立查询投影，不返回完整工作台根状态。将后端返回的
   // records/total/page/pageSize 明确写入选择器分区，避免页面仍展示旧空列表。
@@ -695,7 +740,7 @@ async function queryMemberSelector(query) {
 }
 
 async function selectMemberFromSelector(record) {
-  if (['card-transfer', 'customer-care', 'customer-care-record', 'reservation'].includes(memberSelectorContext.value)) {
+  if (['card-transfer', 'customer-care', 'customer-care-record', 'reservation', 'member-referrer'].includes(memberSelectorContext.value)) {
     // 转让和预约都只回填选择结果。预约没有收银工作台上下文，也不需要
     // 为选择会员发送一笔服务端写命令；正式保存时仅写预约单据本身。
     isMemberSelectorOpen.value = false
@@ -840,6 +885,66 @@ async function selectMemberCreatorServicePerson({ selectedRecord = null } = {}) 
   return selection?.selected || null
 }
 
+function resolveReferrerSelector(record = null) {
+  const resolve = referrerSelectorResolve
+  referrerSelectorResolve = null
+  if (resolve) resolve(record)
+}
+
+async function queryReferrerSelector(query = {}) {
+  const querySequence = ++referrerSelectorQuerySequence
+  referrerSelector.value = { ...referrerSelector.value, isLoading: true }
+  try {
+    const result = await requestCashierV3Action('query-member-selector', {
+      ...query,
+      selectorContext: 'member-referrer',
+      selectorEntry: 'cashier'
+    })
+    if (querySequence !== referrerSelectorQuerySequence) return result
+    const envelope = resultEnvelope(result)
+    const projection = envelope?.data && typeof envelope.data === 'object' ? envelope.data : {}
+    referrerSelector.value = {
+      records: Array.isArray(projection.records) ? projection.records : [],
+      total: Number.isFinite(Number(projection.total)) ? Number(projection.total) : 0,
+      page: Math.max(1, Number(projection.page) || 1),
+      pageSize: Math.max(1, Number(projection.pageSize) || 20),
+      isLoading: false
+    }
+    return result
+  } catch (error) {
+    if (querySequence === referrerSelectorQuerySequence) {
+      referrerSelector.value = { ...referrerSelector.value, isLoading: false }
+    }
+    throw error
+  }
+}
+
+function selectReferrerFromSelector(record) {
+  const memberId = Number(record?.memberId || record?.uid || record?.id || 0)
+  if (memberId <= 0 || memberId === referrerSelectorExcludedMemberId) {
+    return { result: { status: 'failed', code: 'MEMBER_REFERRER_INVALID', message: '请选择其他会员作为推荐人。' } }
+  }
+  isReferrerSelectorOpen.value = false
+  resolveReferrerSelector(record)
+  return { result: { status: 'success' } }
+}
+
+function closeReferrerSelector() {
+  isReferrerSelectorOpen.value = false
+  referrerSelectorQuerySequence += 1
+  resolveReferrerSelector(null)
+}
+
+function selectMemberReferrer({ excludeMemberId = 0 } = {}) {
+  referrerSelectorExcludedMemberId = Number(excludeMemberId) || 0
+  referrerSelector.value = { records: [], total: 0, page: 1, pageSize: 20, isLoading: false }
+  isReferrerSelectorOpen.value = true
+  return new Promise((resolve) => {
+    resolveReferrerSelector(null)
+    referrerSelectorResolve = resolve
+  })
+}
+
 function closeMemberSelector(detail = {}) {
   const context = memberSelectorContext.value
   isMemberSelectorOpen.value = false
@@ -953,6 +1058,8 @@ async function openMemberDebt(memberId = null) {
         ...(state.memberCenter || {}),
         debtSnapshot: snapshot
       }
+      // 欠款入口与弹窗必须显示同一份服务端快照，不能继续保留选客时的旧汇总值。
+      applyAuthoritativeDebtSnapshot(snapshot)
     }
     // 读取欠款时服务端会回传最新根状态。根状态替换可能清理所有浏览器内弹层，
     // 因此必须在读取完成后再打开，避免刚打开就被同一次响应关闭。
@@ -2562,7 +2669,24 @@ onBeforeUnmount(() => {
     :on-select-guest="selectGuestOrderFromSelector"
     :on-create-member="createMemberFromSelector"
     :on-select-service-person="selectMemberCreatorServicePerson"
+    :on-select-referrer="selectMemberReferrer"
     @close="closeMemberSelector"
+  />
+
+  <MemberSelectorOverlay
+    v-if="isReferrerSelectorOpen"
+    :records="referrerSelector.records"
+    :total="referrerSelector.total"
+    :page="referrerSelector.page"
+    :page-size="referrerSelector.pageSize"
+    :is-loading="Boolean(referrerSelector.isLoading)"
+    title="选择推荐人"
+    :allow-guest="false"
+    :allow-create="false"
+    :current-store-name="state.storeName || ''"
+    :on-query="queryReferrerSelector"
+    :on-select="selectReferrerFromSelector"
+    @close="closeReferrerSelector"
   />
 
   <MemberDetailOverlay

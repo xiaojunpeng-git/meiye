@@ -367,6 +367,8 @@ ok('常规使用权益不混入定制卡专属已选按钮，卡启用仅展示�
   && /props\.operationMode === 'card-enable'[\s\S]*?statusCode[\s\S]*?!== 'disabled'/.test(selector)
   && /placeholder="请选择客户需要服务的项目"/.test(selector))
 ok('权益有效卡筛选兼容后端 enabled 状态', /\['可用', 'available', 'valid', 'enabled'\]\.includes\(status\)/.test(selector))
+ok('权益全部视图由后端返回不可用与停用权益，前端仅在有效卡筛选时裁减', /sourceFilter\.value === 'all' \|\| isSourceAvailable\(source\)/.test(selector)
+  && /operationMode !== 'card-enable' && !isSourceAvailable\(source\)/.test(selector))
 ok('使用权益固定五列，卡号并入卡名下方且类型标签紧随名称', ['卡项名称', '余次', '余额', '有效期']
   .every((label) => entitlementTableHead.includes(`>${label}</span>`))
   && (entitlementTableHead.match(/<span(?:\s[^>]*)?(?:>|\s*\/\>)/g) || []).length === 5

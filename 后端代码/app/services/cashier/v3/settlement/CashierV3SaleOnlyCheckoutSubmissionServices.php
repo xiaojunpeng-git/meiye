@@ -220,6 +220,10 @@ final class CashierV3SaleOnlyCheckoutSubmissionServices
                 (string)$aggregate['request']['tenant_id'],
                 (int)$aggregate['request']['store_id']
             );
+            $entitlementCredit = $this->cardOperationSettlements->creditForCheckoutInTx(
+                (string)$aggregate['request']['request_id'],
+                $dataScope
+            );
             $salesPlan = CashierV3SalesOrderPlanV1::fromLockedCheckoutAggregate(
                 $aggregate,
                 $commandKey,
@@ -228,7 +232,8 @@ final class CashierV3SaleOnlyCheckoutSubmissionServices
                 $now,
                 $secret,
                 $salesOrderNo,
-                $businessSource['primarySourceId'] > 0 ? $businessSource : []
+                $businessSource['primarySourceId'] > 0 ? $businessSource : [],
+                $entitlementCredit
             );
             $inventoryPlan = $this->saleInventory->planInTx(
                 (array)$aggregate['request'],
@@ -242,6 +247,9 @@ final class CashierV3SaleOnlyCheckoutSubmissionServices
                 $operatorScope,
                 $dataScope
             );
+            $couponResult = (new CashierV3CheckoutCouponSettlementServices())->consumeInTx(
+                $salesPlan, $salesResult, $dataScope, $now
+            );
             $paymentPlan = CashierV3PaymentCollectionPlanV1::fromLockedCheckoutAggregate(
                 $aggregate,
                 $salesPlan,
@@ -249,7 +257,8 @@ final class CashierV3SaleOnlyCheckoutSubmissionServices
                 $now,
                 $now,
                 $now,
-                $secret
+                $secret,
+                (int)($entitlementCredit['amountCents'] ?? 0)
             );
             $paymentResult = $this->collections->persistInTx(
                 $paymentPlan,
@@ -416,12 +425,14 @@ final class CashierV3SaleOnlyCheckoutSubmissionServices
             // completes service at successful settlement.  The service fact
             // references the transaction's committed checkout event; a later
             // failure rolls both facts back together.
-            $saleProjectServiceResult = $this->saleProjectServices->completeInTx(
-                $salesPlan,
-                $salesResult,
-                $now,
-                (string)$eventAuthority['event_no']
-            );
+            $saleProjectServiceResult = (($entitlementCredit['operationType'] ?? '') === 'project_upgrade')
+                ? ['services' => [], 'completedServiceCount' => 0]
+                : $this->saleProjectServices->completeInTx(
+                    $salesPlan,
+                    $salesResult,
+                    $now,
+                    (string)$eventAuthority['event_no']
+                );
             foreach ((array)$saleProjectServiceResult['services'] as $service) {
                 $eventRecorder->recordInTx($eventExecution, $eventContract, [
                     'event_type' => 'service.completed',

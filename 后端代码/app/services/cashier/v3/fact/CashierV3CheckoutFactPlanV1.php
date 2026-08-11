@@ -51,6 +51,9 @@ final class CashierV3CheckoutFactPlanV1
         'operatorNameSnapshot', 'businessDate', 'businessTimezone', 'occurredAt',
         'settledAt', 'recordedAt', 'checkoutRequestId', 'orderId',
         'orderNoSnapshot', 'sourceDocumentType', 'businessEventNo',
+        'businessSourcePrimaryId', 'businessSourcePrimaryNameSnapshot',
+        'businessSourceSecondaryId', 'businessSourceSecondaryNameSnapshot',
+        'businessSourceLabelSnapshot',
     ];
 
     private const COMMON_FACT_KEYS = [
@@ -60,7 +63,8 @@ final class CashierV3CheckoutFactPlanV1
     private const SALE_KEYS = [
         'sourceType', 'itemId', 'itemCodeSnapshot', 'itemNameSnapshot',
         'categoryIdSnapshot', 'categoryNameSnapshot', 'quantity',
-        'originalAmountCents', 'discountAmountCents', 'saleAmountCents', 'debtAmountCents',
+        'originalAmountCents', 'discountAmountCents', 'couponUserId',
+        'couponNameSnapshot', 'couponDiscountCents', 'saleAmountCents', 'debtAmountCents',
     ];
 
     private const PAYMENT_KEYS = [
@@ -217,7 +221,22 @@ final class CashierV3CheckoutFactPlanV1
             'order_no_snapshot' => self::text($context['orderNoSnapshot'], 64, 'order_no_snapshot_invalid'),
             'source_document_type' => self::requiredToken($context['sourceDocumentType'], 32, 'source_document_type_invalid'),
             'business_event_no' => self::requiredToken($context['businessEventNo'], 64, 'business_event_no_invalid'),
+            'business_source_primary_id' => self::nonNegativeInt($context['businessSourcePrimaryId'], 'business_source_primary_id_invalid'),
+            'business_source_primary_name_snapshot' => self::text($context['businessSourcePrimaryNameSnapshot'], 64, 'business_source_primary_name_invalid'),
+            'business_source_secondary_id' => self::nonNegativeInt($context['businessSourceSecondaryId'], 'business_source_secondary_id_invalid'),
+            'business_source_secondary_name_snapshot' => self::text($context['businessSourceSecondaryNameSnapshot'], 64, 'business_source_secondary_name_invalid'),
+            'business_source_label_snapshot' => self::text($context['businessSourceLabelSnapshot'], 140, 'business_source_label_invalid'),
         ];
+        if (($normalized['business_source_primary_id'] === 0)
+            !== ($normalized['business_source_primary_name_snapshot'] === '')
+            || ($normalized['business_source_primary_id'] === 0)
+            !== ($normalized['business_source_label_snapshot'] === '')) {
+            throw self::failure('business_source_snapshot_invalid');
+        }
+        if (($normalized['business_source_secondary_id'] === 0)
+            !== ($normalized['business_source_secondary_name_snapshot'] === '')) {
+            throw self::failure('business_source_snapshot_invalid');
+        }
         if ($normalized['settled_at'] < $normalized['occurred_at']
             || $normalized['recorded_at'] < $normalized['occurred_at']) {
             throw self::failure('fact_time_order_invalid');
@@ -277,11 +296,18 @@ final class CashierV3CheckoutFactPlanV1
                 'quantity' => self::positiveInt($fact['quantity'], 'sale_quantity_invalid'),
                 'original_amount_cents' => self::signedMoney($fact['originalAmountCents'], $direction, 'sale_original_amount_invalid'),
                 'discount_amount_cents' => self::signedMoney($fact['discountAmountCents'], $direction, 'sale_discount_amount_invalid', true),
+                'coupon_user_id' => self::nonNegativeInt($fact['couponUserId'], 'sale_coupon_user_invalid'),
+                'coupon_name_snapshot' => self::text($fact['couponNameSnapshot'], 128, 'sale_coupon_name_invalid'),
+                'coupon_discount_cents' => self::signedMoney($fact['couponDiscountCents'], $direction, 'sale_coupon_discount_invalid', true),
                 'sale_amount_cents' => self::signedMoney($fact['saleAmountCents'], $direction, 'sale_amount_invalid'),
                 'debt_amount_cents' => self::signedMoney($fact['debtAmountCents'], $direction, 'sale_debt_amount_invalid', true),
             ];
             if ($row['original_amount_cents'] - $row['discount_amount_cents'] !== $row['sale_amount_cents']
-                || abs($row['debt_amount_cents']) > abs($row['sale_amount_cents'])) {
+                || abs($row['debt_amount_cents']) > abs($row['sale_amount_cents'])
+                || abs($row['coupon_discount_cents']) > abs($row['discount_amount_cents'])
+                || ($row['coupon_user_id'] === 0
+                    ? ($row['coupon_name_snapshot'] !== '' || $row['coupon_discount_cents'] !== 0)
+                    : ($row['coupon_name_snapshot'] === '' || $row['coupon_discount_cents'] === 0))) {
                 throw self::failure('sale_amount_equation_invalid');
             }
             return $row;

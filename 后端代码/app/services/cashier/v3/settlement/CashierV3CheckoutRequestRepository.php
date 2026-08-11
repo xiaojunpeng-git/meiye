@@ -107,4 +107,17 @@ interface CashierV3CheckoutRequestRepository
         CashierV3OperatorScope $operatorScope,
         CashierV3DataScopeContext $dataScope
     ): array;
+
+    /**
+     * Keep the resumed hang draft as an internal post-settlement cleanup
+     * reference. It is deliberately not a checkout source nor a Gateway
+     * resource: resuming a draft only restores editable cart data.
+     */
+    public function bindResumedHangOrderInTx(
+        string $requestId,
+        int $requestVersion,
+        string $hangOrderId,
+        CashierV3OperatorScope $operatorScope,
+        CashierV3DataScopeContext $dataScope
+    ): void;
 }

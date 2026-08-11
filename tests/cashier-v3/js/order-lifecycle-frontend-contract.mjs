@@ -20,17 +20,23 @@ ok('销售退款分别采集实际退款、本金退回、赠金退回和原因'
 ok('实际退款金额保持退款统计口径，本金和赠金仅作为账户冲销字段',
   detail.includes('refundAmount: refundAmount.value')
     && detail.includes('actualRefundAmount: refundAmount.value')
-    && detail.includes('balancePrincipalRefundAmount: balancePrincipalRefundAmount.value')
-    && detail.includes('balanceGiftRefundAmount: balanceGiftRefundAmount.value')
+    && detail.includes('balancePrincipalRefundAmount: balancePrincipalAmount')
+    && detail.includes('balanceGiftRefundAmount: balanceGiftAmount')
     && center.includes('actualRefundAmount: payload.actualRefundAmount')
     && center.includes('balancePrincipalRefundAmount: payload.balancePrincipalRefundAmount')
     && center.includes('balanceGiftRefundAmount: payload.balanceGiftRefundAmount'))
 
+ok('游客退款不展示余额退回字段且强制按零提交',
+  detail.includes('const isGuestOrder = computed(')
+    && detail.includes('v-if="!isGuestOrder"')
+    && detail.includes("const balancePrincipalAmount = isGuestOrder.value ? '0'")
+    && detail.includes("const balanceGiftAmount = isGuestOrder.value ? '0'"))
+
 ok('实际现金退款允许为零，但三类退款合计必须大于零且原因必填',
   detail.includes('isValidMoney(refundAmount.value, true)')
-    && detail.includes('isValidMoney(balancePrincipalRefundAmount.value, true)')
-    && detail.includes('isValidMoney(balanceGiftRefundAmount.value, true)')
-    && detail.includes('moneyCents(balanceGiftRefundAmount.value) <= 0')
+    && detail.includes('isValidMoney(balancePrincipalAmount, true)')
+    && detail.includes('isValidMoney(balanceGiftAmount, true)')
+    && detail.includes('moneyCents(balanceGiftAmount) <= 0')
     && detail.includes("if (!refundReason.value.trim())"))
 
 ok('作废只提交可追溯原因且原因必填',

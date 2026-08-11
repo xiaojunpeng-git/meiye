@@ -315,7 +315,7 @@ final class CashierV3EntitlementResourceVersionProvider implements CashierV3Data
             if ($state !== null) {
                 if ((int)($state['origin_order_id'] ?? 0) !== (int)$holder['oid']
                     || (int)($state['current_member_id'] ?? 0) !== (int)$holder['uid']
-                    || !in_array((string)($state['card_status'] ?? ''), ['enabled', 'disabled'], true)) {
+                    || !in_array((string)($state['card_status'] ?? ''), ['enabled', 'disabled', 'upgraded'], true)) {
                     return null;
                 }
             }
@@ -329,7 +329,7 @@ final class CashierV3EntitlementResourceVersionProvider implements CashierV3Data
                 'fingerprint' => $this->fingerprint([
                     'holder' => $holder,
                     'order' => $this->orderFingerprintFields($order),
-                    'card_state' => $state,
+                    'card_state' => $this->entitlementCardStateSnapshot($state, $holder, $order),
                     'card_rule_state' => $ruleState,
                 ]),
             ];
@@ -415,8 +415,7 @@ final class CashierV3EntitlementResourceVersionProvider implements CashierV3Data
         $holderQuery = Db::name('user_card_holder')
             ->field('id,uid,oid,store_id,product_type,write_times,write_surplus_times,write_start,write_end,is_del')
             ->where('oid', (int)$order['id'])
-            ->where('is_del', 0)
-            ->where('write_surplus_times', '>', 0);
+            ->where('is_del', 0);
         if ($lock) {
             $holderQuery->lock(true);
         }
@@ -482,7 +481,7 @@ final class CashierV3EntitlementResourceVersionProvider implements CashierV3Data
                 'cart' => $cart,
                 'order' => $this->orderFingerprintFields($order),
                 'holder' => $holder,
-                'card_state' => $state,
+                'card_state' => $this->entitlementCardStateSnapshot($state, $holder, $order),
                 'card_rule_state' => $ruleState,
                 'reservation_ids' => array_values(array_map(static function (array $row): int {
                     return (int)$row['id'];
@@ -490,6 +489,30 @@ final class CashierV3EntitlementResourceVersionProvider implements CashierV3Data
                 'pending_debt' => $pendingDebt,
             ]),
         ];
+    }
+
+    /**
+     * A newly materialized card-state row is only a V3 baseline for an
+     * existing legacy card.  It must not invalidate the entitlement version
+     * that was used to create the same pending upgrade.  Once any business
+     * field changes, retain the complete row in the fingerprint so genuine
+     * transfer, status and validity changes remain observable.
+     */
+    private function entitlementCardStateSnapshot(?array $state, array $holder, array $order): ?array
+    {
+        if ($state === null) {
+            return null;
+        }
+        $isBaseline = (int)($state['origin_order_id'] ?? 0) === (int)($order['id'] ?? 0)
+            && (int)($state['origin_member_id'] ?? 0) === (int)($order['uid'] ?? 0)
+            && (int)($state['current_member_id'] ?? 0) === (int)($holder['uid'] ?? 0)
+            && (string)($state['card_status'] ?? '') === 'enabled'
+            && (string)($state['status_reason_snapshot'] ?? '') === ''
+            && (int)($state['effective_write_start'] ?? -1) === (int)($holder['write_start'] ?? 0)
+            && (int)($state['effective_write_end'] ?? -1) === (int)($holder['write_end'] ?? 0)
+            && (int)($state['current_version'] ?? 0) === 1
+            && (string)($state['last_operation_id'] ?? '') === '';
+        return $isBaseline ? null : $state;
     }
 
     private function loadActiveOrder(int $orderId, int $expectedMemberId, bool $lock)

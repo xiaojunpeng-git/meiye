@@ -32,6 +32,7 @@ final class CashierV3SaleOnlyFactAssembler
         'supplement_operator_id', 'supplement_operator_name_snapshot',
         'supplement_operated_at',
         'source_document_type', 'source_document_id', 'source_document_no',
+        'resumed_hang_order_id',
         'sales_amount_cents', 'receivable_amount_cents', 'selected_payment_amount_cents',
         'balance_deduction_amount_cents', 'balance_authority_key', 'balance_account_id',
         'balance_account_version', 'debt_amount_cents', 'debt_authority_key',
@@ -51,6 +52,7 @@ final class CashierV3SaleOnlyFactAssembler
         'discount_amount_cents', 'sale_amount_cents', 'debt_amount_cents', 'entitlement_actual_amount_cents',
         'source_name_snapshot', 'source_code_snapshot', 'project_name_snapshot',
         'category_id_snapshot', 'category_name_snapshot', 'line_fingerprint',
+        'coupon_user_id', 'coupon_name_snapshot', 'coupon_discount_cents',
         'configured_cost_cents', 'price_change_reason', 'price_changed_by',
         'price_changed_by_name_snapshot', 'price_changed_at',
         'craftsmen_snapshot_json',
@@ -180,6 +182,9 @@ final class CashierV3SaleOnlyFactAssembler
                 'quantity' => (int)$line['quantity'],
                 'originalAmountCents' => (int)$line['original_amount_cents'],
                 'discountAmountCents' => (int)$line['discount_amount_cents'],
+                'couponUserId' => (int)$line['coupon_user_id'],
+                'couponNameSnapshot' => (string)$line['coupon_name_snapshot'],
+                'couponDiscountCents' => (int)$line['coupon_discount_cents'],
                 'saleAmountCents' => (int)$line['sale_amount_cents'],
                 'debtAmountCents' => (int)$line['debt_amount_cents'],
             ];
@@ -338,6 +343,11 @@ final class CashierV3SaleOnlyFactAssembler
                 'orderNoSnapshot' => (string)$order['order_no'],
                 'sourceDocumentType' => (string)$order['source_document_type'],
                 'businessEventNo' => (string)$event['event_no'],
+                'businessSourcePrimaryId' => (int)$order['business_source_primary_id'],
+                'businessSourcePrimaryNameSnapshot' => (string)$order['business_source_primary_name_snapshot'],
+                'businessSourceSecondaryId' => (int)$order['business_source_secondary_id'],
+                'businessSourceSecondaryNameSnapshot' => (string)$order['business_source_secondary_name_snapshot'],
+                'businessSourceLabelSnapshot' => (string)$order['business_source_label_snapshot'],
             ],
             'saleFacts' => $saleFacts,
             'paymentFacts' => $paymentFacts,
@@ -563,33 +573,37 @@ final class CashierV3SaleOnlyFactAssembler
         if (count($orderLines) === 0 || count($orderLines) !== count($saleRows)) {
             throw self::failure('sale_only_fact_sales_order_line_count_mismatch');
         }
-        $lockedById = [];
-        foreach ($saleRows as $line) {
-            $lockedById[(string)$line['line_id']] = $line;
+        // The sales plan is authoritative for the persisted order line. An
+        // upgrade converts the source-right value into a separate settlement
+        // component, so its formal sale row legitimately differs from the
+        // original checkout draft row in amount fields and fingerprint.
+        $plannedById = [];
+        foreach ($plan->lines() as $line) {
+            $plannedById[(string)$line['checkout_line_id']] = $line;
         }
         foreach ($orderLines as $index => $line) {
-            $locked = $lockedById[(string)($line['checkout_line_id'] ?? '')] ?? null;
-            if (!is_array($locked)
-                || (string)$line['checkout_line_fingerprint'] !== (string)$locked['line_fingerprint']
-                || (string)$line['item_type'] !== (string)$locked['source_type']
-                || (string)$line['item_id'] !== (string)$locked['source_id']
-                || (int)$line['catalog_sku_id'] !== (int)($locked['catalog_sku_id'] ?? 0)
-                || (int)$line['item_version'] !== (int)$locked['source_version']
-                || (int)$line['quantity'] !== (int)$locked['quantity']
-                || (int)$line['original_amount_cents'] !== (int)$locked['original_amount_cents']
-                || (int)$line['discount_amount_cents'] !== (int)$locked['discount_amount_cents']
-                || (int)$line['sale_amount_cents'] !== (int)$locked['sale_amount_cents']
-                || (int)$line['debt_amount_cents'] !== (int)$locked['debt_amount_cents']
-                || (int)$line['configured_cost_cents'] !== (int)$locked['configured_cost_cents']
-                || (string)$line['price_change_reason'] !== (string)$locked['price_change_reason']
-                || (int)$line['price_changed_by'] !== (int)$locked['price_changed_by']
+            $planned = $plannedById[(string)($line['checkout_line_id'] ?? '')] ?? null;
+            if (!is_array($planned)
+                || (string)$line['checkout_line_fingerprint'] !== (string)$planned['checkout_line_fingerprint']
+                || (string)$line['item_type'] !== (string)$planned['item_type']
+                || (string)$line['item_id'] !== (string)$planned['item_id']
+                || (int)$line['catalog_sku_id'] !== (int)$planned['catalog_sku_id']
+                || (int)$line['item_version'] !== (int)$planned['item_version']
+                || (int)$line['quantity'] !== (int)$planned['quantity']
+                || (int)$line['original_amount_cents'] !== (int)$planned['original_amount_cents']
+                || (int)$line['discount_amount_cents'] !== (int)$planned['discount_amount_cents']
+                || (int)$line['sale_amount_cents'] !== (int)$planned['sale_amount_cents']
+                || (int)$line['debt_amount_cents'] !== (int)$planned['debt_amount_cents']
+                || (int)$line['configured_cost_cents'] !== (int)$planned['configured_cost_cents']
+                || (string)$line['price_change_reason'] !== (string)$planned['price_change_reason']
+                || (int)$line['price_changed_by'] !== (int)$planned['price_changed_by']
                 || (string)$line['price_changed_by_name_snapshot']
-                    !== (string)$locked['price_changed_by_name_snapshot']
-                || (int)$line['price_changed_at'] !== (int)$locked['price_changed_at']
-                || (string)$line['item_name_snapshot'] !== (string)$locked['source_name_snapshot']
-                || (string)$line['item_code_snapshot'] !== (string)$locked['source_code_snapshot']
-                || (string)$line['category_id_snapshot'] !== (string)$locked['category_id_snapshot']
-                || (string)$line['category_name_snapshot'] !== (string)$locked['category_name_snapshot']
+                    !== (string)$planned['price_changed_by_name_snapshot']
+                || (int)$line['price_changed_at'] !== (int)$planned['price_changed_at']
+                || (string)$line['item_name_snapshot'] !== (string)$planned['item_name_snapshot']
+                || (string)$line['item_code_snapshot'] !== (string)$planned['item_code_snapshot']
+                || (string)$line['category_id_snapshot'] !== (string)$planned['category_id_snapshot']
+                || (string)$line['category_name_snapshot'] !== (string)$planned['category_name_snapshot']
                 || (string)$line['line_status'] !== 'settled'
                 || (string)$line['line_direction'] !== 'forward'
                 || (int)$line['line_version'] !== 1
@@ -764,15 +778,20 @@ final class CashierV3SaleOnlyFactAssembler
         $collected = self::sum($collections, 'amount_cents');
         $balance = (int)$request['balance_deduction_amount_cents'];
         $debt = (int)$request['debt_amount_cents'];
+        // A card/project upgrade records the target card's formal sale amount
+        // while retaining the old right value as a separate entitlement-credit
+        // settlement component. The locked sales plan has already bound that
+        // credit to the source operation; do not misclassify it as a discount.
+        $entitlementCredit = $sale - (int)$request['sales_amount_cents'];
         if ($sale <= 0
+            || $entitlementCredit < 0
             || $original - $discount !== $sale
             || $original !== (int)$order['original_amount_cents']
             || $discount !== (int)$order['discount_amount_cents']
             || $sale !== (int)$order['sale_amount_cents']
-            || $sale !== (int)$request['sales_amount_cents']
             || $collected !== (int)$request['selected_payment_amount_cents']
             || $collected !== (int)$request['cash_performance_amount_cents']
-            || $collected + $balance + $debt !== $sale
+            || $collected + $balance + $debt + $entitlementCredit !== $sale
             || $lineDebt !== $debt
             || $collected !== (int)$batch['collected_amount_cents']
             || $collected !== (int)$batch['cash_performance_amount_cents']

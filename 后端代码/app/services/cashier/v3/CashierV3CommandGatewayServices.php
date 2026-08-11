@@ -1749,7 +1749,7 @@ class CashierV3CommandGatewayServices extends BaseServices
         // 重放必须重新解析第一次落回执时保存的 contexts；不能信任本次请求
         // 夹带的版本或只依赖 store_id/operator_id，否则数据范围收窄后会泄露旧 data。
         $storedContexts = json_decode((string)($existing['contexts_json'] ?? ''), true);
-        if (!is_array($storedContexts) || $storedContexts === [] || $this->versionServices === null) {
+        if (!is_array($storedContexts) || $storedContexts === []) {
             return $this->replayDenied(
                 $stateContext,
                 $txnDataScope,
@@ -1758,48 +1758,18 @@ class CashierV3CommandGatewayServices extends BaseServices
                 'stored_contexts_missing'
             );
         }
-        $replayContexts = [];
-        foreach ($storedContexts as $storedContext) {
-            if (!is_array($storedContext)) {
-                return $this->replayDenied(
-                    $stateContext,
-                    $txnDataScope,
-                    $correlationId,
-                    $existing,
-                    'stored_context_invalid'
-                );
-            }
-            $kind = trim((string)($storedContext['kind'] ?? ''));
-            $resourceId = trim((string)($storedContext['id'] ?? ''));
-            $expectedVersion = $storedContext['expected_version'] ?? $storedContext['expectedVersion'] ?? null;
-            if ($kind === '' || $resourceId === '' || !is_numeric($expectedVersion) || (int)$expectedVersion <= 0) {
-                return $this->replayDenied(
-                    $stateContext,
-                    $txnDataScope,
-                    $correlationId,
-                    $existing,
-                    'stored_context_invalid'
-                );
-            }
-            $replayContexts[] = [
-                'kind' => $kind,
-                'id' => $resourceId,
-                'expected_version' => (int)$expectedVersion,
-            ];
-        }
-        try {
-            $this->versionServices->scopeResolver()->attachScopes(
-                $replayContexts,
-                $operatorScope,
-                $txnDataScope
-            );
-        } catch (CashierV3CommandException $scopeException) {
+        $scopeFailure = $this->historicalReplayScopeFailure(
+            $storedContexts,
+            $operatorScope,
+            $txnDataScope
+        );
+        if ($scopeFailure !== '') {
             return $this->replayDenied(
                 $stateContext,
                 $txnDataScope,
                 $correlationId,
                 $existing,
-                (string)($scopeException->getDetail()['reason'] ?? $scopeException->getResultCode())
+                $scopeFailure
             );
         }
 
@@ -1868,6 +1838,82 @@ class CashierV3CommandGatewayServices extends BaseServices
             'correlation_id' => $correlationId,
             'idempotency_key' => (string)($existing['idempotency_key'] ?? ''),
         ];
+    }
+
+    /**
+     * A successful receipt is immutable evidence of the resources that were
+     * authorized when the command ran.  Those resources may legitimately have
+     * transitioned afterwards (for example an upgraded card is no longer an
+     * enabled checkout resource), so replay must not re-resolve their mutable
+     * current state.  It instead validates the server-written scope snapshot
+     * against the current operator, tenant and data scope.
+     */
+    protected function historicalReplayScopeFailure(
+        array $storedContexts,
+        CashierV3OperatorScope $operatorScope,
+        CashierV3DataScopeContext $dataScope
+    ): string {
+        if ($dataScope->tenantId() !== $operatorScope->tenantId()
+            || $dataScope->organizationId() !== $operatorScope->organizationId()
+            || $dataScope->forcedStoreId() !== $operatorScope->storeId()
+            || $dataScope->operatorId() !== $operatorScope->operatorId()) {
+            return 'replay_scope_identity_changed';
+        }
+        foreach ($storedContexts as $storedContext) {
+            if (!is_array($storedContext)) {
+                return 'stored_context_invalid';
+            }
+            $kind = trim((string)($storedContext['kind'] ?? ''));
+            $resourceId = trim((string)($storedContext['id'] ?? ''));
+            $expectedVersion = $storedContext['expected_version'] ?? $storedContext['expectedVersion'] ?? null;
+            $signature = trim((string)($storedContext['scope'] ?? ''));
+            if ($kind === '' || $resourceId === '' || !is_numeric($expectedVersion) || (int)$expectedVersion <= 0) {
+                return 'stored_context_invalid';
+            }
+            try {
+                $scopeType = CashierV3ResourceKindCatalog::scopeTypeOf($kind);
+            } catch (\Throwable $exception) {
+                return 'stored_context_kind_invalid';
+            }
+            $slash = strpos($signature, '/');
+            if ($slash === false) {
+                return 'stored_context_scope_missing';
+            }
+            $snapshotType = substr($signature, 0, $slash);
+            $snapshotId = substr($signature, $slash + 1);
+            try {
+                $snapshotScope = CashierV3ResourceScope::of($snapshotType, $snapshotId);
+            } catch (CashierV3CommandException $exception) {
+                return 'stored_context_scope_invalid';
+            }
+            if ($snapshotScope->type() !== $scopeType) {
+                return 'stored_context_scope_type_invalid';
+            }
+            if ($scopeType === CashierV3ResourceScope::TYPE_TENANT
+                && $snapshotScope->id() !== $operatorScope->tenantId()) {
+                return 'stored_context_tenant_denied';
+            }
+            if ($scopeType === CashierV3ResourceScope::TYPE_ORGANIZATION
+                && $snapshotScope->id() !== $operatorScope->organizationId()) {
+                return 'stored_context_organization_denied';
+            }
+            if ($scopeType === CashierV3ResourceScope::TYPE_ACCOUNT
+                && $snapshotScope->id() !== (string)$operatorScope->operatorId()) {
+                return 'stored_context_account_denied';
+            }
+            if ($scopeType === CashierV3ResourceScope::TYPE_STORE) {
+                if ($snapshotScope->id() !== (string)$operatorScope->storeId()) {
+                    return 'stored_context_store_denied';
+                }
+                $mode = $dataScope->authorizationMode();
+                if ($mode !== CashierV3DataScopeContext::MODE_ALL
+                    && $mode !== CashierV3DataScopeContext::MODE_SELF_PARTICIPANT
+                    && !$dataScope->allowsStore($operatorScope->storeId())) {
+                    return 'stored_context_store_denied';
+                }
+            }
+        }
+        return '';
     }
 
     /**

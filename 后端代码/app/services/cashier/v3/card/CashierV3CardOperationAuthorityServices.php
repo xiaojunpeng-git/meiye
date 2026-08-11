@@ -434,7 +434,7 @@ final class CashierV3CardOperationAuthorityServices
         if ((int)($state['origin_order_id'] ?? 0) !== (int)$source['originOrderId']
             || (int)($state['origin_member_id'] ?? 0) !== (int)$source['originMemberId']
             || (int)($state['current_member_id'] ?? 0) !== (int)$source['currentMemberId']
-            || !in_array((string)($state['card_status'] ?? ''), ['enabled', 'disabled'], true)
+            || !in_array((string)($state['card_status'] ?? ''), ['enabled', 'disabled', 'upgraded'], true)
             || (int)($state['current_version'] ?? 0) <= 0) {
             throw CashierV3CommandException::versionConflict(
                 '会员卡当前状态已经变化，请重新打开后再办理。',
@@ -633,7 +633,7 @@ final class CashierV3CardOperationAuthorityServices
             'product_id' => (int)$target['catalogId'],
             'product_type' => 6,
             'product_attr_unique' => (string)$target['skuUnique'],
-            'cart_num' => $totalQuantity,
+            'cart_num' => 1,
             'productInfo' => [
                 'id' => (int)$target['catalogId'],
                 'store_name' => (string)$target['catalogName'],
@@ -647,14 +647,17 @@ final class CashierV3CardOperationAuthorityServices
             'sourceType' => 'cashier_v3_project_replacement',
         ];
         $targetDetailId = (int)Db::name('store_order_cart_info')->insertGetId([
+            // 目标权益仍属于原会员；不能只靠 oid 反推，旧表上不少读取和
+            // 数据修复以 uid 作为会员关联键。
+            'uid' => (int)$source['originMemberId'],
             'oid' => (int)$source['originOrderId'],
             'cart_id' => $cartId,
             'cart_type' => 2,
             'product_id' => (int)$target['catalogId'],
             'product_type' => 6,
             'pay_price' => $money,
-            'write_times' => $totalQuantity,
-            'write_surplus_times' => $totalQuantity,
+            'write_times' => 1,
+            'write_surplus_times' => 1,
             'write_start' => (int)$source['effectiveWriteStart'],
             'write_end' => (int)$source['effectiveWriteEnd'],
             'is_writeoff' => 0,

@@ -39,6 +39,11 @@ function checkoutFactInput(): array
             'orderNoSnapshot' => 'XS-20260729-9001',
             'sourceDocumentType' => 'cashier_checkout',
             'businessEventNo' => 'EVT-CHECKOUT-9001',
+            'businessSourcePrimaryId' => 18,
+            'businessSourcePrimaryNameSnapshot' => '导购卖卡',
+            'businessSourceSecondaryId' => 0,
+            'businessSourceSecondaryNameSnapshot' => '',
+            'businessSourceLabelSnapshot' => '导购卖卡',
         ],
         'saleFacts' => [array_merge($common('SALE-1', 'SALE-LINE-1'), [
             'sourceType' => 'project',
@@ -51,6 +56,7 @@ function checkoutFactInput(): array
             'originalAmountCents' => 12000,
             'discountAmountCents' => 2000,
             'saleAmountCents' => 10000,
+            'debtAmountCents' => 0,
         ])],
         'paymentFacts' => [array_merge($common('PAYMENT-WECHAT', 'PAYMENT-LINE-WECHAT'), [
             'paymentMethod' => 'wechat',

@@ -5,8 +5,7 @@ const existingReservation = false
 
 function saveReservation() {
   return requestCashierV3Action(
-    existingReservation ? 'update-reservation' : 'create-reservation',
-    { permission: 'cashier.v3.reservation' }
+    existingReservation ? 'update-reservation' : 'create-reservation'
   )
 }
 
@@ -19,8 +18,7 @@ function selectWriteoffMember() {
 
 function selectReservationMember() {
   return requestCashierV3Action(
-    'select-reservation-member',
-    { permission: 'cashier.v3.reservation' }
+    'select-reservation-member'
   )
 }
 </script>

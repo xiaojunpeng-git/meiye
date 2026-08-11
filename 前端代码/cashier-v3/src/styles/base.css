@@ -1277,6 +1277,10 @@ button:disabled {
   color: #fff;
 }
 
+.cashier-workflow-toolbar--cashier .cashier-workflow-clear-button {
+  order: -2;
+}
+
 .cashier-workflow-toolbar--cashier .cashier-workflow-entitlement-button:hover:not(:disabled) {
   border-color: #0050b3;
   background: #0050b3;
@@ -2090,6 +2094,82 @@ button:disabled {
   transition: border-color .16s ease, background .16s ease, box-shadow .16s ease;
 }
 
+.cart-line--upgrade {
+  grid-template-rows: auto 50px minmax(0, 1fr);
+  height: auto;
+  min-height: 196px;
+}
+
+.cart-line__upgrade-flow {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 7px;
+  margin: -1px -2px 7px;
+  padding: 7px 8px 8px;
+  border-bottom: 1px solid #d9e4ef;
+  background: #f5f9fd;
+}
+
+.cart-line__upgrade-heading,
+.cart-line__upgrade-route,
+.cart-line__upgrade-amounts {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.cart-line__upgrade-heading,
+.cart-line__upgrade-amounts {
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.cart-line__upgrade-heading > strong {
+  color: #1f4f78;
+  font-size: 13px;
+}
+
+.cart-line__upgrade-heading > span,
+.cart-line__upgrade-route small,
+.cart-line__upgrade-route span,
+.cart-line__upgrade-amounts > span {
+  color: #697586;
+  font-size: 11px;
+}
+
+.cart-line__upgrade-route {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 24px minmax(0, 1fr);
+  gap: 8px;
+}
+
+.cart-line__upgrade-route > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.cart-line__upgrade-route > div > strong {
+  overflow: hidden;
+  color: #303133;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cart-line__upgrade-arrow {
+  color: #1677d2 !important;
+  font-size: 18px !important;
+  font-weight: 700;
+  text-align: center;
+}
+
+.cart-line__upgrade-amounts strong {
+  color: #cf1322;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
 .cart-line--active {
   border-color: #409eff;
   border-left-color: #1677d2;
@@ -2610,18 +2690,11 @@ button:disabled {
   gap: 8px;
 }
 
-.cashier-more-actions {
+.cashier-checkout-actions__note {
   position: relative;
 }
 
-.cashier-more-actions__trigger {
-  position: relative;
-  width: 100px;
-  min-height: 40px;
-  height: 40px;
-}
-
-.cashier-more-actions__trigger--noted::after {
+.cashier-checkout-actions__note--noted::after {
   position: absolute;
   top: 6px;
   right: 5px;
@@ -2632,57 +2705,26 @@ button:disabled {
   content: "";
 }
 
-.cashier-more-actions__menu {
-  position: absolute;
-  right: 0;
-  bottom: calc(100% + 8px);
-  z-index: 3;
-  display: grid;
-  width: 144px;
-  padding: 6px;
-  border: 1px solid #dde4ed;
-  border-radius: 10px;
-  background: #fff;
-  box-shadow: 0 8px 24px rgba(31, 35, 41, 0.14);
-}
-
-.cashier-more-actions__menu button {
-  min-height: 40px;
-  padding: 0 8px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: #303133;
-  text-align: left;
-}
-
-.cashier-more-actions__menu button:hover {
-  background: #eaf4ff;
-  color: #1890ff;
-}
-
 .cashier-checkout-actions__clear,
+.cashier-checkout-actions__price,
+.cashier-checkout-actions__note,
 .cashier-checkout-actions__hang {
-  width: 100px;
-  min-width: 100px;
+  width: 80px;
+  min-width: 80px;
   min-height: 40px;
   height: 40px;
 }
 
-.cashier-checkout-actions__clear {
-  width: 120px;
-  min-width: 120px;
-  white-space: nowrap;
-}
-
-.cashier-more-actions__trigger,
 .cashier-checkout-actions__clear,
+.cashier-checkout-actions__price,
+.cashier-checkout-actions__note,
 .cashier-checkout-actions__hang {
   border-color: #91add0;
 }
 
-.cashier-more-actions__trigger:hover:not(:disabled),
 .cashier-checkout-actions__clear:hover:not(:disabled),
+.cashier-checkout-actions__price:hover:not(:disabled),
+.cashier-checkout-actions__note:hover:not(:disabled),
 .cashier-checkout-actions__hang:hover:not(:disabled) {
   border-color: #5f91c9;
 }
@@ -3772,6 +3814,18 @@ button:disabled {
   font-size: 12px;
 }
 
+.cashier-entitlement-selector__operation-next {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--color-border, #dfe5e8);
+  background: #f6fafc;
+  color: #42545d;
+  font-size: 13px;
+}
+
 .cashier-entitlement-selector__filter-button {
   flex: none;
   min-height: 32px;
@@ -4024,7 +4078,7 @@ button:disabled {
   position: relative;
   display: grid;
   grid-row: 1 / -1;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto auto minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
   overflow: hidden;
@@ -4822,6 +4876,23 @@ button:disabled {
   flex-wrap: wrap;
   gap: 7px;
   padding: 10px 12px;
+}
+
+.cashier-entitlement-selector-panel .cashier-entitlement-selector__operation-next {
+  min-width: 0;
+  padding: 6px 10px;
+  white-space: nowrap;
+}
+
+.cashier-entitlement-selector-panel .cashier-entitlement-selector__operation-next > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cashier-entitlement-selector-panel .cashier-entitlement-selector__operation-next .button {
+  flex: none;
+  min-height: 30px;
+  padding: 0 10px;
 }
 
 .cashier-entitlement-selector-panel .cashier-entitlement-selector__search {
@@ -7708,20 +7779,26 @@ button:disabled {
   box-shadow: 0 -5px 14px rgba(31, 35, 41, .04);
 }
 
-/* 全页面统一反馈：后端控制文案、导航与版本冲突，不在页面静默覆盖。 */
-.cashier-ui-feedback {
+/* 全页面统一反馈：后端控制文案、导航与版本冲突必须由操作人确认。 */
+.cashier-ui-feedback-backdrop {
   position: fixed;
   z-index: 130;
-  right: 24px;
-  bottom: 24px;
-  width: min(420px, calc(100vw - 48px));
-  justify-content: space-between;
-  gap: 14px;
-  padding: 13px 14px 13px 16px;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(20, 31, 48, .36);
+}
+
+.cashier-ui-feedback {
+  width: min(460px, calc(100vw - 48px));
+  display: grid;
+  gap: 18px;
+  padding: 22px 24px 20px;
   border: 1px solid #b9d4ff;
-  border-radius: 11px;
+  border-radius: 12px;
   background: #fff;
-  box-shadow: 0 10px 24px rgba(23, 37, 61, .18);
+  box-shadow: 0 18px 44px rgba(15, 23, 42, .28);
 }
 
 .cashier-ui-feedback > div {
@@ -7740,22 +7817,13 @@ button:disabled {
   line-height: 1.55;
 }
 
-.cashier-ui-feedback > button {
-  flex: none;
-  width: 26px;
-  height: 26px;
-  padding: 0;
-  border: 0;
-  border-radius: 7px;
-  background: transparent;
-  color: #909399;
-  font-size: 20px;
-  line-height: 1;
+.cashier-ui-feedback > footer {
+  display: flex;
+  justify-content: flex-end;
 }
 
-.cashier-ui-feedback > button:hover {
-  background: #f4f7fb;
-  color: #4b5563;
+.cashier-ui-feedback > footer .button {
+  min-width: 88px;
 }
 
 .cashier-ui-feedback--error {

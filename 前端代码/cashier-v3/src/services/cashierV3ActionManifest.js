@@ -111,6 +111,8 @@ const C2_ACTIONS = {
     'apply-cashier-craftsmen-to-all-service-lines': FEATURE_CASHIER,
     'apply-cashier-personnel-to-all-lines': FEATURE_CASHIER,
     'update-cashier-line-debt': FEATURE_CASHIER,
+    'apply-line-coupon': FEATURE_CASHIER,
+    'remove-line-coupon': FEATURE_CASHIER,
     'update-cashier-order-note': FEATURE_CASHIER,
     'update-cashier-line-price': FEATURE_CASHIER,
     'update-cashier-supplement': FEATURE_CASHIER,

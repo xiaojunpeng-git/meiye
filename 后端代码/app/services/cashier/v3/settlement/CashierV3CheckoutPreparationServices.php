@@ -13,7 +13,6 @@ use app\services\cashier\v3\cashier\CashierV3EntitlementProjectionServices;
 use app\services\cashier\v3\cashier\CashierV3EntitlementResourceVersionProvider;
 use app\services\cashier\v3\cashier\CashierV3SaleCatalogServices;
 use app\services\cashier\v3\card\CashierV3CardOperationCheckoutSettlementServices;
-use app\services\cashier\v3\hang\CashierV3HangCheckoutBindingServices;
 use think\facade\Db;
 
 /** Server-only resource discovery and checkout-request preparation. */
@@ -22,7 +21,7 @@ final class CashierV3CheckoutPreparationServices
     public const DISCOVERY_CONTRACT_VERSION = 'cashier-v3-checkout-preparation-discovery-v1';
     public const PREPARATION_CONTRACT_VERSION = 'cashier-v3-checkout-preparation-v1';
 
-    private const SOURCE_KINDS = ['service_order', 'hang_order', 'reservation', 'room'];
+    private const SOURCE_KINDS = ['service_order', 'reservation', 'room'];
 
     /** @var CashierV3CashierWorkspaceServices */
     private $workspace;
@@ -39,9 +38,6 @@ final class CashierV3CheckoutPreparationServices
     /** @var CashierV3CashierMemberSummaryServices */
     private $members;
 
-    /** @var CashierV3HangCheckoutBindingServices */
-    private $hangBindings;
-
     /** @var CashierV3CardOperationCheckoutSettlementServices */
     private $cardOperationSettlements;
 
@@ -55,7 +51,6 @@ final class CashierV3CheckoutPreparationServices
         CashierV3CheckoutRequestRepository $requests = null,
         CashierV3CashierMemberSummaryServices $members = null,
         string $serverIdSecret = '',
-        CashierV3HangCheckoutBindingServices $hangBindings = null,
         ?CashierV3CardOperationCheckoutSettlementServices $cardOperationSettlements = null
     ) {
         $this->workspace = $workspace;
@@ -64,7 +59,6 @@ final class CashierV3CheckoutPreparationServices
         $this->requests = $requests ?: new ThinkPhpCashierV3CheckoutRequestRepository();
         $this->members = $members ?: new CashierV3CashierMemberSummaryServices();
         $this->serverIdSecret = $serverIdSecret;
-        $this->hangBindings = $hangBindings ?: new CashierV3HangCheckoutBindingServices();
         $this->cardOperationSettlements = $cardOperationSettlements
             ?: new CashierV3CardOperationCheckoutSettlementServices();
     }
@@ -83,14 +77,6 @@ final class CashierV3CheckoutPreparationServices
         );
 
         $resources = [];
-        $hangResource = $this->hangBindings->discoverForWorkspaceDraft(
-            (array)$pack['draft'],
-            $operatorScope,
-            $dataScope
-        );
-        if ($hangResource !== null) {
-            $resources[] = $hangResource;
-        }
         $memberId = (int)($pack['draft']['member_id'] ?? 0);
         foreach ($pack['rows'] as $row) {
             $lineRole = (string)($row['line_role'] ?? '');
@@ -133,7 +119,6 @@ final class CashierV3CheckoutPreparationServices
             $memberVersion = $this->shadowVersion('member', $memberId);
             $resources[] = self::resource('member', $memberId, $memberVersion, 'checkout_member');
         }
-
         return [
             'contractVersion' => self::DISCOVERY_CONTRACT_VERSION,
             'resources' => $resources,
@@ -178,12 +163,6 @@ final class CashierV3CheckoutPreparationServices
         $storedDraft = (array)($authority['storedDraft'] ?? []);
         $storedRows = array_values((array)($authority['storedRows'] ?? []));
         $debtAmountCents = $this->saleDebtAmountCents((array)($authority['lines'] ?? []));
-        $this->hangBindings->assertWorkspaceBindingInTx(
-            $storedDraft,
-            $contexts,
-            $operatorScope,
-            $dataScope
-        );
         $this->assertEntitlementRowsAfterGatewayLocks(
             $storedRows,
             $contexts,
@@ -232,6 +211,16 @@ final class CashierV3CheckoutPreparationServices
         $persisted = $this->requests->persistKernelPlanInTx(
             $kernel,
             $verifiedSources,
+            $operatorScope,
+            $dataScope
+        );
+        // A resumed hang is only an editable cart draft. It never enters
+        // source-document resolution; the internal reference lets final
+        // submission lock and remove that draft only after success.
+        $this->requests->bindResumedHangOrderInTx(
+            (string)$kernel['requestId'],
+            (int)$kernel['requestVersion'],
+            trim((string)($storedDraft['resumed_hang_order_id'] ?? '')),
             $operatorScope,
             $dataScope
         );
@@ -391,8 +380,13 @@ final class CashierV3CheckoutPreparationServices
             : ($kindCode === 'project' ? 'project' : 'card');
         $original = (int)($line['originalLineAmountCents'] ?? -1);
         $sale = (int)($line['lineAmountCents'] ?? -1);
-        if ($original < 0 || $sale < 0 || $sale > $original) {
+        if ($original < 0 || $sale < 0) {
             throw self::incomplete('checkout_sale_amount_invalid');
+        }
+        // 手工改价可以高于目录原价；结算方程以成交价作为本单原价，
+        // 不产生负折扣，实际收款仍以草稿中的成交价为准。
+        if ($sale > $original) {
+            $original = $sale;
         }
         try {
             $craftsmen = $sourceType === 'project'
@@ -411,6 +405,9 @@ final class CashierV3CheckoutPreparationServices
             'quantity' => (int)($line['quantity'] ?? 0),
             'originalAmountCents' => $original,
             'discountAmountCents' => $original - $sale,
+            'couponUserId' => (int)($line['couponUserId'] ?? 0),
+            'couponNameSnapshot' => (string)($line['couponNameSnapshot'] ?? ''),
+            'couponDiscountCents' => (int)($line['couponDiscountCents'] ?? 0),
             'saleAmountCents' => $sale,
             'debtAmountCents' => $this->saleLineDebtAmountCents($line, $sale),
             'configuredCostCents' => (int)($line['configuredCostCents'] ?? 0),
