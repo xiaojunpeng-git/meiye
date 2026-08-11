@@ -23,6 +23,8 @@ $checks = [
         && strpos($module, "'update-recharge-checkout-payment-line'") !== false
         && strpos($module, "'reload-recharge-checkout'") !== false
         && strpos($module, "'submit-recharge-checkout'") !== false,
+    'selected active members may recharge across historical store relations' => strpos($module, "where('store_id',\$operator->storeId())") === false
+        && strpos($module, '充值就按当前登录门店归属创建') !== false,
     'draft writes are eventless while final submit reuses recharge authority' => strpos($module, 'eventless; only submit-recharge-checkout') !== false
         && strpos($module, '(new CashierV3RechargeModule())->submitInTx(') !== false,
     'payment edits lock the request version and reject totals above receivable' => strpos($module, 'private function lockEditing') !== false

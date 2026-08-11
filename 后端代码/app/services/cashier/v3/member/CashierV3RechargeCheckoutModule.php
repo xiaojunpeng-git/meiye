@@ -73,8 +73,10 @@ final class CashierV3RechargeCheckoutModule
         CashierV3TransactionGuard::assertInTransaction('rechargeCheckoutPrepare');
         [$payload,$operator,$data] = $this->scope($scope);
         $input = $this->normalizeTerms($payload);
+        // 收银选客已明确允许全集团正常会员。只要会员已在选择器中可选，
+        // 充值就按当前登录门店归属创建，不再额外以会员的历史门店关系拦截。
         $member = (array)Db::name('user')->where('uid',$input['memberId'])->where('status',1)->where('is_del',0)->lock(true)->find();
-        if (!$member || !Db::name('store_user')->where('uid',$input['memberId'])->where('store_id',$operator->storeId())->where('status',1)->lock(true)->find()) throw self::invalid('recharge_checkout_member_unavailable', '该会员不可在当前门店充值。');
+        if (!$member) throw self::invalid('recharge_checkout_member_unavailable', '该会员已失效，不能充值。');
         $input = $this->resolveTerms($input, $member);
         $workspace = $this->workspaceId($operator, (string)$scope['state_context_id']);
         $now = time(); $creationKey = (string)$scope['idempotency_key'];
