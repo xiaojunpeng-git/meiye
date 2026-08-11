@@ -48,30 +48,32 @@ async function submit() {
 <template>
   <main class="store-login">
     <section class="store-login__layout">
-      <div class="store-login__message">
-        <p class="store-login__eyebrow">门店经营工作台</p>
-        <h2 aria-label="你亲手雕琢细腻美好，我留存全部暖心操作">
-          <span aria-hidden="true">你亲手雕琢细腻美好，</span>
-          <span aria-hidden="true">我留存全部暖心操作</span>
-        </h2>
-      </div>
+      <div class="store-login__visual" aria-hidden="true" />
+      <div class="store-login__access">
+        <div class="store-login__message">
+          <h2 aria-label="你亲手雕琢细腻美好，我留存全部暖心操作">
+            <span aria-hidden="true">你亲手雕琢细腻美好，</span>
+            <span aria-hidden="true">我留存全部暖心操作</span>
+          </h2>
+        </div>
 
-      <form class="store-login__panel" @submit.prevent="submit">
-        <header>
-          <p>欢迎回来</p>
-          <h1>门店端登录</h1>
-        </header>
-        <label>
-          <span>登录账号</span>
-          <input v-model.trim="account" autocomplete="username" />
-        </label>
-        <label>
-          <span>登录密码</span>
-          <input v-model="password" type="password" autocomplete="current-password" />
-        </label>
-        <p v-if="error" class="store-login__error" role="alert">{{ error }}</p>
-        <button class="store-login__submit" type="submit" :disabled="submitting">{{ submitting ? '处理中…' : '登录' }}</button>
-      </form>
+        <form class="store-login__panel" @submit.prevent="submit">
+          <header>
+            <p>欢迎回来</p>
+            <h1>门店端登录</h1>
+          </header>
+          <label>
+            <span>登录账号</span>
+            <input v-model.trim="account" autocomplete="username" />
+          </label>
+          <label>
+            <span>登录密码</span>
+            <input v-model="password" type="password" autocomplete="current-password" />
+          </label>
+          <p v-if="error" class="store-login__error" role="alert">{{ error }}</p>
+          <button class="store-login__submit" type="submit" :disabled="submitting">{{ submitting ? '处理中…' : '登录' }}</button>
+        </form>
+      </div>
     </section>
 
     <footer class="store-login__footer">厦门魔核方舟科技有限公司提供支持</footer>
@@ -116,9 +118,14 @@ async function submit() {
   gap: clamp(48px, 8vw, 120px);
 }
 
+.store-login__access {
+  display: grid;
+  width: 100%;
+  gap: 22px;
+}
+
 .store-login__message {
-  align-self: center;
-  padding: 40px 0 0 clamp(8px, 2vw, 30px);
+  padding: 0;
 }
 
 .store-login__eyebrow {
@@ -130,10 +137,13 @@ async function submit() {
 
 .store-login__message h2 {
   margin: 0;
-  color: #25333a;
-  font-size: clamp(25px, 2.2vw, 34px);
-  line-height: 1.55;
-  font-weight: 600;
+  color: #a9709d;
+  font-family: "STKaiti", "KaiTi", "Kaiti SC", "Songti SC", "Noto Serif SC", serif;
+  font-size: 25px;
+  font-weight: 700;
+  line-height: 1.42;
+  letter-spacing: .075em;
+  text-shadow: 0 3px 14px rgba(169, 112, 157, .16);
 }
 
 .store-login__message h2 span {
@@ -143,7 +153,10 @@ async function submit() {
   animation: store-login-title .7s ease-out forwards;
 }
 
-.store-login__message h2 span:last-child { animation-delay: .12s; }
+.store-login__message h2 span:last-child {
+  padding-left: 1.2em;
+  animation-delay: .12s;
+}
 
 .store-login__panel {
   width: 100%;
@@ -251,17 +264,22 @@ async function submit() {
     gap: 28px;
   }
 
-  .store-login__message {
-    width: min(480px, 100%);
+  .store-login__visual { display: none; }
+
+  .store-login__access {
+    width: min(440px, 100%);
     margin: 0 auto;
-    padding: 0;
+  }
+
+  .store-login__message {
+    width: 100%;
   }
 
   .store-login__message h2 { font-size: 24px; }
 
   .store-login__panel {
-    width: min(440px, 100%);
-    margin: 0 auto;
+    width: 100%;
+    margin: 0;
     padding: 30px 26px 32px;
     background: rgba(255, 255, 255, .97);
   }

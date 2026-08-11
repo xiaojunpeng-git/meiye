@@ -10,11 +10,12 @@ import HangOrderListView from '@/views/HangOrderListView.vue'
 import OrderCenterView from '@/views/OrderCenterView.vue'
 import ManagementCenterView from '@/views/ManagementCenterView.vue'
 import BusinessDashboardView from '@/views/BusinessDashboardView.vue'
+import StoreBusinessReportView from '@/views/StoreBusinessReportView.vue'
 import StaffListView from '@/views/StaffListView.vue'
 import RoomSettingsView from '@/views/RoomSettingsView.vue'
 import RoutePlaceholderView from '@/views/RoutePlaceholderView.vue'
 import StoreLoginView from '@/views/StoreLoginView.vue'
-import { bootstrapCashierV3Workbench } from '@/services/cashierV3SessionLifecycle'
+import { bootstrapCashierV3Workbench, hasCashierV3Session } from '@/services/cashierV3SessionLifecycle'
 import { canUseCashierV3Feature } from '@/services/cashierV3Bridge'
 
 const routeFeatureCodes = Object.freeze({
@@ -30,7 +31,8 @@ const routeFeatureCodes = Object.freeze({
   'cashier-v3-management-center': 'cashier.v3.management_center',
   'cashier-v3-staff-list': 'cashier.v3.management_center',
   'cashier-v3-room-settings': 'cashier.v3.management_center',
-  'cashier-v3-business-dashboard': 'cashier.v3.management_center'
+  'cashier-v3-business-dashboard': 'cashier.v3.management_center',
+  'cashier-v3-store-business-reports': 'cashier.v3.management_center'
 })
 
 const defaultRouteNames = Object.freeze([
@@ -135,6 +137,12 @@ const routes = [
         name: 'cashier-v3-business-dashboard',
         component: BusinessDashboardView,
         meta: { title: '经营看板', description: 'V3 事实层经营指标、趋势、排行、明细与数据追平状态。' }
+      },
+      {
+        path: 'data/reports',
+        name: 'cashier-v3-store-business-reports',
+        component: StoreBusinessReportView,
+        meta: { title: '经营报表', description: '当前门店的 V3 统一事实报表。' }
       }
     ]
   }
@@ -178,6 +186,10 @@ const router = createRouter({
 router.beforeEach(async (to) => {
   if (to.path === '/login' || to.name === 'cashier-v3-login') return true
   if (to.path !== '/' && !String(to.name || '').startsWith('cashier-v3-')) return true
+
+  // 空会话不能渲染游客收银壳。否则目录和当前门店均为空，容易被误判为商品
+  // 未加载；门店端业务路由必须先回到登录页建立令牌和首份工作台投影。
+  if (!hasCashierV3Session()) return { name: 'cashier-v3-login' }
 
   const featureCode = routeFeatureCodes[String(to.name || '')]
   // 登录响应已经由服务端按任职、入口和岗位规则签发功能码。先使用这份
