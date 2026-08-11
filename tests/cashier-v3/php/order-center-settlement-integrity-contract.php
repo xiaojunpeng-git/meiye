@@ -97,5 +97,47 @@ $zeroCreditDebtOk = ($zeroCreditDebtRecord['orderStatus'] ?? '') === '正常'
     && ($zeroCreditDebtRecord['actualReceivedAmount'] ?? null) === 100.0
     && ($zeroCreditDebtDetail['amountSummary']['payableAmount'] ?? null) === 180.0;
 
-echo ($ok && $upgradeOk && $zeroCreditDebtOk) ? "ORDER_CENTER_SETTLEMENT_INTEGRITY=PASS\n" : "ORDER_CENTER_SETTLEMENT_INTEGRITY=FAIL\n";
-exit($ok && $upgradeOk && $zeroCreditDebtOk ? 0 : 1);
+$couponUpgradeSnapshot = $snapshot;
+$couponUpgradeSnapshot['header']['original_amount_cents'] = 1280000;
+$couponUpgradeSnapshot['header']['discount_amount_cents'] = 10000;
+$couponUpgradeSnapshot['header']['sale_amount_cents'] = 1270000;
+$couponUpgradeSnapshot['batch']['receivable_amount_cents'] = 1096800;
+$couponUpgradeSnapshot['batch']['collected_amount_cents'] = 1096800;
+$couponUpgradeSnapshot['batch']['cash_performance_amount_cents'] = 1096800;
+$couponUpgradeSnapshot['request'] = ['debt_amount_cents' => 10000, 'balance_deduction_amount_cents' => 0];
+$couponUpgradeSnapshot['lines'][0]['original_amount_cents'] = 1280000;
+$couponUpgradeSnapshot['lines'][0]['discount_amount_cents'] = 10000;
+$couponUpgradeSnapshot['lines'][0]['coupon_discount_cents'] = 10000;
+$couponUpgradeSnapshot['lines'][0]['coupon_name_snapshot'] = '100元现金券';
+$couponUpgradeSnapshot['lines'][0]['debt_amount_cents'] = 10000;
+$couponUpgradeSnapshot['lines'][0]['sale_amount_cents'] = 1270000;
+$couponUpgradeSnapshot['upgradeSettlement'] = [
+    'operation_id' => 'COP-integrity-coupon-upgrade',
+    'operation_type' => 'card_upgrade',
+    'settlement_status' => 'settled',
+    'entitlement_credit_cents' => 163200,
+    // Immutable upgrade delta is before the 100 yuan order coupon.
+    'cash_delta_cents' => 1116800,
+];
+$couponUpgradeSnapshot['debtAuthorities'] = [[
+    'debt_id' => 47, 'debt_no' => 'QK2608110008',
+    'sales_order_id' => 'CSO-integrity-coupon-upgrade',
+    'sales_order_no_snapshot' => 'XS-INT-COUPON-UPGRADE',
+]];
+$couponUpgradeRecord = $method->invoke($service, $couponUpgradeSnapshot, false);
+$couponUpgradeDetail = $method->invoke($service, $couponUpgradeSnapshot, true);
+$couponUpgradeOk = ($couponUpgradeRecord['orderStatus'] ?? '') === '正常'
+    && ($couponUpgradeRecord['paymentStatus'] ?? '') === '部分支付（含欠款）'
+    && ($couponUpgradeRecord['receivableAmount'] ?? null) === 12700.0
+    && ($couponUpgradeRecord['actualReceivedAmount'] ?? null) === 10968.0
+    && ($couponUpgradeRecord['dataIntegrityStatus'] ?? '') === 'valid'
+    && ($couponUpgradeDetail['amountSummary']['couponDiscountAmount'] ?? null) === 100.0
+    && ($couponUpgradeDetail['amountSummary']['entitlementCreditAmount'] ?? null) === 1632.0
+    && ($couponUpgradeDetail['amountSummary']['debtAmount'] ?? null) === 100.0
+    && count($couponUpgradeDetail['items'] ?? []) === 1
+    && ($couponUpgradeDetail['items'][0]['couponName'] ?? '') === '100元现金券'
+    && count($couponUpgradeDetail['related']['upgrades'] ?? []) === 1
+    && count($couponUpgradeDetail['related']['debtSettlements'] ?? []) === 1;
+
+echo ($ok && $upgradeOk && $zeroCreditDebtOk && $couponUpgradeOk) ? "ORDER_CENTER_SETTLEMENT_INTEGRITY=PASS\n" : "ORDER_CENTER_SETTLEMENT_INTEGRITY=FAIL\n";
+exit($ok && $upgradeOk && $zeroCreditDebtOk && $couponUpgradeOk ? 0 : 1);

@@ -1095,7 +1095,7 @@ final class CashierV3SalesOrderQueryServices
             ->whereIn('order_id', $orderIds)
             ->where('line_status', 'settled')
             ->where('line_direction', 'forward')
-            ->field('order_line_id,order_id,line_no,item_type,item_type_name_snapshot,item_id,item_code_snapshot,item_name_snapshot,category_name_snapshot,service_object,is_experience,craftsmen_snapshot_json,quantity,original_amount_cents,discount_amount_cents,sale_amount_cents,line_version')
+            ->field('order_line_id,order_id,line_no,item_type,item_type_name_snapshot,item_id,item_code_snapshot,item_name_snapshot,category_name_snapshot,service_object,is_experience,craftsmen_snapshot_json,quantity,original_amount_cents,discount_amount_cents,sale_amount_cents,debt_amount_cents,coupon_user_id,coupon_name_snapshot,coupon_discount_cents,line_version')
             ->order('order_id', 'asc')->order('line_no', 'asc')->select()->toArray() as $line) {
             $linesByOrder[(string)$line['order_id']][] = $line;
         }
@@ -1171,6 +1171,13 @@ final class CashierV3SalesOrderQueryServices
             ->order('id', 'asc')->select()->toArray() as $operation) {
             $operationsByOrder[(string)$operation['source_order_id']][] = $operation;
         }
+        $debtAuthoritiesByOrder = [];
+        foreach (Db::name('cashier_v3_debt_authority')
+            ->whereIn('sales_order_id', $orderIds)
+            ->field('debt_id,debt_no,sales_order_id,sales_order_no_snapshot,member_id,created_at,updated_at')
+            ->order('id', 'asc')->select()->toArray() as $debtAuthority) {
+            $debtAuthoritiesByOrder[(string)$debtAuthority['sales_order_id']][] = $debtAuthority;
+        }
         $snapshots = [];
         foreach ($headersByOrder as $orderId => $header) {
             if (empty($linesByOrder[$orderId]) || !isset($batchesByOrder[$orderId])) {
@@ -1190,6 +1197,7 @@ final class CashierV3SalesOrderQueryServices
                 'craftsmenByLine' => $craftsmenByOrderAndLine[$orderId] ?? [],
                 'lifecycleOperations' => $operationsByOrder[$orderId] ?? [],
                 'upgradeSettlement' => $upgradeSettlementsByOrder[$orderId] ?? [],
+                'debtAuthorities' => $debtAuthoritiesByOrder[$orderId] ?? [],
             ];
         }
         return $snapshots;
@@ -1209,6 +1217,20 @@ final class CashierV3SalesOrderQueryServices
         $cashPerformanceCents = (int)$batch['cash_performance_amount_cents'];
         $debtCents = (int)($request['debt_amount_cents'] ?? 0);
         $balanceCents = (int)($request['balance_deduction_amount_cents'] ?? 0);
+        $couponDiscountCents = 0;
+        $priceChangeDiscountCents = 0;
+        foreach ((array)($snapshot['lines'] ?? []) as $line) {
+            $coupon = max(0, (int)($line['coupon_discount_cents'] ?? 0));
+            $discount = max(0, (int)($line['discount_amount_cents'] ?? 0));
+            $couponDiscountCents += $coupon;
+            $priceChangeDiscountCents += max(0, $discount - $coupon);
+        }
+        $headerDiscountCents = max(0, (int)($header['discount_amount_cents'] ?? 0));
+        // card_operation_settlement.cash_delta_cents is the immutable cash
+        // delta before order-level discounts (coupon/price-change).  The
+        // formal sales order is recorded after those discounts, so include
+        // the snapshot discount when validating the upgrade component.
+        $discountCents = max($headerDiscountCents, $couponDiscountCents + $priceChangeDiscountCents);
         $upgradeSettlement = is_array($snapshot['upgradeSettlement'] ?? null)
             ? $snapshot['upgradeSettlement'] : [];
         $entitlementCreditCents = (int)($upgradeSettlement['entitlement_credit_cents'] ?? 0);
@@ -1217,7 +1239,7 @@ final class CashierV3SalesOrderQueryServices
             (string)($upgradeSettlement['settlement_status'] ?? '') === 'settled'
             && in_array((string)($upgradeSettlement['operation_type'] ?? ''), ['card_upgrade', 'project_upgrade'], true)
             && $entitlementCreditCents >= 0
-            && (int)($upgradeSettlement['cash_delta_cents'] ?? -1) === $receivableCents - $entitlementCreditCents
+            && (int)($upgradeSettlement['cash_delta_cents'] ?? -1) === $receivableCents + $discountCents - $entitlementCreditCents
         );
         $settlementEquationValid = $upgradeSettlementValid
             && $entitlementCreditCents >= 0
@@ -1319,8 +1341,10 @@ final class CashierV3SalesOrderQueryServices
         $mapped['items'] = $items;
         $mapped['amountSummary'] = [
             'originalAmount' => $settlementEquationValid ? $this->moneyFromCents((int)$header['original_amount_cents']) : null,
-            'priceChangeDiscountAmount' => null, 'couponDiscountAmount' => null,
-            'otherDiscountAmount' => $settlementEquationValid ? $this->moneyFromCents((int)$header['discount_amount_cents']) : null,
+            'priceChangeDiscountAmount' => $settlementEquationValid ? $this->moneyFromCents($priceChangeDiscountCents) : null,
+            'couponDiscountAmount' => $settlementEquationValid ? $this->moneyFromCents($couponDiscountCents) : null,
+            'otherDiscountAmount' => $settlementEquationValid
+                ? $this->moneyFromCents(max(0, $headerDiscountCents - $priceChangeDiscountCents - $couponDiscountCents)) : null,
             'entitlementCreditAmount' => $settlementEquationValid ? $this->moneyFromCents($entitlementCreditCents) : null,
             'payableAmount' => $settlementEquationValid ? $this->moneyFromCents($receivableCents) : null,
             'debtAmount' => $settlementEquationValid ? $this->moneyFromCents($debtCents) : null,
@@ -1353,12 +1377,43 @@ final class CashierV3SalesOrderQueryServices
                 'businessDate' => (string)$operation['business_date'],
                 'occurredAt' => $this->formatTimestamp((int)$operation['occurred_at'], 'Y-m-d H:i:s')];
         }, $operations);
+        $upgradeRecord = [];
+        if ($hasUpgradeSettlement) {
+            $operationId = (string)($upgradeSettlement['operation_id'] ?? '');
+            $operation = null;
+            foreach ($operations as $candidate) {
+                if ((string)($candidate['operation_id'] ?? '') === $operationId) {
+                    $operation = $candidate;
+                    break;
+                }
+            }
+            $upgradeRecord[] = [
+                'id' => $operationId,
+                'recordId' => $operationId,
+                'recordNo' => (string)($operation['operation_no'] ?? $operationId),
+                'operationType' => (string)($upgradeSettlement['operation_type'] ?? 'card_upgrade'),
+                'status' => (string)($upgradeSettlement['settlement_status'] ?? 'settled'),
+                'statusLabel' => '已完成',
+                'amount' => $this->moneyFromCents((int)($upgradeSettlement['cash_delta_cents'] ?? 0)),
+            ];
+        }
+        $debtRecords = array_map(function (array $debt) use ($debtCents): array {
+            return [
+                'id' => (string)($debt['debt_id'] ?? ''),
+                'recordId' => (string)($debt['debt_id'] ?? ''),
+                'recordNo' => (string)($debt['debt_no'] ?? ''),
+                'salesOrderNo' => (string)($debt['sales_order_no_snapshot'] ?? ''),
+                'status' => 'open',
+                'statusLabel' => '待还款',
+                'amount' => $this->moneyFromCents($debtCents),
+            ];
+        }, (array)($snapshot['debtAuthorities'] ?? []));
         $mapped['related'] = [
-            'debtSettlements' => [],
+            'debtSettlements' => $debtRecords,
             'refunds' => array_values(array_filter($operationRecords, static function (array $row): bool { return $row['operationType'] === 'refund'; })),
             'voids' => array_values(array_filter($operationRecords, static function (array $row): bool { return $row['operationType'] === 'void'; })),
             'reopenings' => array_values(array_filter($operationRecords, static function (array $row): bool { return $row['operationType'] === 'reopen'; })),
-            'upgrades' => [], 'gifts' => [], 'services' => [], 'writeoffs' => [], 'operationLogs' => $operationRecords,
+            'upgrades' => $upgradeRecord, 'gifts' => [], 'services' => [], 'writeoffs' => [], 'operationLogs' => $operationRecords,
         ];
         $mapped['relatedDataStatus'] = 'ready';
         return $mapped;
@@ -1386,8 +1441,11 @@ final class CashierV3SalesOrderQueryServices
             'name' => (string)$line['item_name_snapshot'], 'purchaseSpec' => '', 'quantity' => $quantity,
             'unitPrice' => $quantity > 0 ? $this->moneyFromCents((int)$line['original_amount_cents']) / $quantity : null,
             'originalAmount' => $this->moneyFromCents((int)$line['original_amount_cents']),
-            'priceChangeDiscountAmount' => null, 'couponDiscountAmount' => null,
-            'payableAmount' => $this->moneyFromCents((int)$line['sale_amount_cents']), 'debtAmount' => null,
+            'priceChangeDiscountAmount' => $this->moneyFromCents(max(0, (int)($line['discount_amount_cents'] ?? 0) - (int)($line['coupon_discount_cents'] ?? 0))),
+            'couponDiscountAmount' => $this->moneyFromCents((int)($line['coupon_discount_cents'] ?? 0)),
+            'couponName' => (string)($line['coupon_name_snapshot'] ?? ''),
+            'payableAmount' => $this->moneyFromCents((int)$line['sale_amount_cents']),
+            'debtAmount' => $this->moneyFromCents((int)($line['debt_amount_cents'] ?? 0)),
             'actualReceivedAmount' => null, 'economicsDataStatus' => 'ready', 'snapshotStatus' => 'ready',
             'serviceRecipientType' => (string)($line['service_object'] ?? ''),
             'isExperience' => (int)($line['is_experience'] ?? 0) === 1,
