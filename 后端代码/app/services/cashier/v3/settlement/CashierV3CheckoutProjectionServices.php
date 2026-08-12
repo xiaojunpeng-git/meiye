@@ -623,6 +623,8 @@ final class CashierV3CheckoutProjectionServices
                 );
                 $craftsmenJson = $row['craftsmen_snapshot_json'] ?? null;
                 $craftsmen = self::craftsmenSnapshot($craftsmenJson);
+                $guideSelections = self::attributionSnapshot($row['guide_selections_json'] ?? null);
+                $salesManagerSelections = self::attributionSnapshot($row['sales_manager_selections_json'] ?? null);
                 if (!in_array($serviceObject, ['', 'self', 'friend'], true)
                     || $isExperience > 1
                     || ($sourceType === 'project'
@@ -657,6 +659,8 @@ final class CashierV3CheckoutProjectionServices
                     'priceChangedAt' => $priceChangedAt,
                     'serviceObject' => $serviceObject,
                     'isExperience' => $isExperience,
+                    'guideSelections' => $guideSelections,
+                    'salesManagerSelections' => $salesManagerSelections,
                 ];
                 // Existing drafts predate this column and their fingerprint did
                 // not contain craftsmen. Preserve that immutable contract until
@@ -710,6 +714,8 @@ final class CashierV3CheckoutProjectionServices
                     'categoryName' => $categoryName,
                     'serviceObject' => $serviceObject,
                     'craftsmen' => $craftsmen,
+                    'guideSelections' => $guideSelections,
+                    'salesManagerSelections' => $salesManagerSelections,
                     'isExperience' => $isExperience === 1,
                 ];
                 continue;
@@ -1395,6 +1401,27 @@ final class CashierV3CheckoutProjectionServices
         } catch (\Throwable $exception) {
             throw self::failure('checkout_projection_craftsmen_snapshot_invalid');
         }
+    }
+
+    private static function attributionSnapshot($json): array
+    {
+        if ($json === null || trim((string)$json) === '') return [];
+        $decoded = is_array($json) ? $json : json_decode((string)$json, true);
+        if (!is_array($decoded)) throw self::failure('checkout_projection_attribution_snapshot_invalid');
+        $result = [];
+        foreach ($decoded as $row) {
+            if (!is_array($row)) throw self::failure('checkout_projection_attribution_snapshot_invalid');
+            $id = self::positiveInt($row['employeeId'] ?? $row['employee_id'] ?? $row['id'] ?? null, 'line.attribution.employee_id');
+            // Attribution names are immutable checkout snapshots and are part
+            // of the canonical line fingerprint. Keep the same normalized
+            // shape as CheckoutSettlementKernel so payment projection cannot
+            // reject a freshly prepared line as fingerprint drift.
+            $result[] = [
+                'employeeId' => $id,
+                'name' => (string)($row['name'] ?? $row['employeeNameSnapshot'] ?? ''),
+            ];
+        }
+        return $result;
     }
 
     private static function money(int $cents): string

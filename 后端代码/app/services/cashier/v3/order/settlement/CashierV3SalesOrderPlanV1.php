@@ -67,7 +67,7 @@ final class CashierV3SalesOrderPlanV1
         'store_id', 'member_id', 'line_role', 'authority_key', 'source_kind',
         'source_type', 'source_id', 'entitlement_source_detail_id', 'source_version',
         'catalog_sku_id',
-        'project_id', 'project_version', 'service_object', 'is_experience', 'quantity', 'original_amount_cents',
+        'project_id', 'project_version', 'service_object', 'friend_counts_as_customer', 'is_experience', 'is_presale', 'quantity', 'original_amount_cents',
         'discount_amount_cents', 'sale_amount_cents', 'debt_amount_cents', 'entitlement_actual_amount_cents',
         'source_name_snapshot', 'source_code_snapshot', 'project_name_snapshot',
         'category_id_snapshot', 'category_name_snapshot', 'line_fingerprint',
@@ -75,6 +75,7 @@ final class CashierV3SalesOrderPlanV1
         'configured_cost_cents', 'price_change_reason', 'price_changed_by',
         'price_changed_by_name_snapshot', 'price_changed_at',
         'craftsmen_snapshot_json',
+        'guide_selections_json', 'sales_manager_selections_json',
         'sort_no', 'add_time', 'update_time',
     ];
 
@@ -855,17 +856,21 @@ final class CashierV3SalesOrderPlanV1
             throw self::failure('sales_order_non_project_binding_invalid');
         }
         $serviceObject = trim((string)$row['service_object']);
+        $friendCountsAsCustomer = self::nonNegativeInt($row['friend_counts_as_customer'] ?? 1, 'sales_order_friend_counts_as_customer_invalid');
         $isExperience = self::nonNegativeInt($row['is_experience'], 'sales_order_is_experience_invalid');
+        $isPresale = self::nonNegativeInt($row['is_presale'] ?? 0, 'sales_order_is_presale_invalid');
         $craftsmenJson = $row['craftsmen_snapshot_json'];
         $craftsmen = self::craftsmenSnapshot($craftsmenJson);
-        if ($isExperience > 1) {
+        $guideSelections = self::attributionSnapshot($row['guide_selections_json'] ?? null);
+        $salesManagerSelections = self::attributionSnapshot($row['sales_manager_selections_json'] ?? null);
+        if ($isExperience > 1 || $friendCountsAsCustomer > 1 || $isPresale > 1) {
             throw self::failure('sales_order_is_experience_invalid');
         }
         if ($sourceType === 'project') {
             if (!in_array($serviceObject, ['self', 'friend'], true)) {
                 throw self::failure('sales_order_project_service_object_invalid');
             }
-        } elseif ($serviceObject !== '' || $isExperience !== 0 || $craftsmen !== []) {
+        } elseif ($serviceObject !== '' || $friendCountsAsCustomer !== 1 || $isExperience !== 0 || $craftsmen !== []) {
             throw self::failure('sales_order_non_project_service_tags_invalid');
         }
         $authority = [
@@ -912,6 +917,12 @@ final class CashierV3SalesOrderPlanV1
         if (!CashierV3CheckoutCraftsmenSnapshot::isLegacyEmpty($craftsmenJson)) {
             $authority['craftsmen'] = $craftsmen;
         }
+        if ($guideSelections !== []) {
+            $authority['guideSelections'] = $guideSelections;
+        }
+        if ($salesManagerSelections !== []) {
+            $authority['salesManagerSelections'] = $salesManagerSelections;
+        }
         if ($catalogSkuId <= 0) {
             unset($authority['catalogSkuId']);
         }
@@ -948,6 +959,7 @@ final class CashierV3SalesOrderPlanV1
             'service_object' => $serviceObject,
             'craftsmen_snapshot_json' => CashierV3CheckoutCraftsmenSnapshot::encode($craftsmen),
             'is_experience' => $isExperience,
+            'is_presale' => $isPresale,
             'quantity' => $quantity,
             'original_amount_cents' => $original,
             'discount_amount_cents' => $discount,
@@ -1445,6 +1457,26 @@ final class CashierV3SalesOrderPlanV1
         } catch (\Throwable $exception) {
             throw self::failure('sales_order_craftsmen_snapshot_invalid');
         }
+    }
+
+    private static function attributionSnapshot($json): array
+    {
+        if ($json === null || trim((string)$json) === '') return [];
+        $decoded = is_array($json) ? $json : json_decode((string)$json, true);
+        if (!is_array($decoded)) throw self::failure('sales_order_attribution_snapshot_invalid');
+        $result = [];
+        foreach ($decoded as $row) {
+            if (!is_array($row)) throw self::failure('sales_order_attribution_snapshot_invalid');
+            $employeeId = self::positiveInt(
+                $row['employeeId'] ?? $row['employee_id'] ?? $row['id'] ?? null,
+                'sales_order_attribution_employee_invalid'
+            );
+            $result[] = [
+                'employeeId' => $employeeId,
+                'name' => (string)($row['name'] ?? $row['employeeNameSnapshot'] ?? ''),
+            ];
+        }
+        return $result;
     }
 
     private static function assertExactKeys(array $value, array $required, string $reason): void

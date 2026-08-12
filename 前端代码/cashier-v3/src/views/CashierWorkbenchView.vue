@@ -2256,7 +2256,7 @@ function cartLineServiceObject(line = {}) {
   return ['friend', '朋友'].includes(line.serviceObject) ? 'friend' : 'self'
 }
 
-async function queryPersonnelCandidates(scope, line) {
+async function queryPersonnelCandidates(scope, line, keyword = '') {
   const records = []
   let page = 1
   let total = 0
@@ -2272,9 +2272,9 @@ async function queryPersonnelCandidates(scope, line) {
         entitlementInstanceId: line.entitlementInstanceId || line.cardHolderId || '',
         entitlementSourceDetailId: line.entitlementSourceDetailId || line.memberBenefitPoolId || ''
       },
-      keyword: '',
+      keyword,
       page,
-      pageSize: 100,
+      pageSize: scope === 'group_guides' || scope === 'group_sales_managers' ? 20 : 100,
       silent: true
     })
     const status = resultStatus(result)
@@ -2301,12 +2301,22 @@ async function loadPersonnelOverlay(line, initialTab) {
     initialTab: showSalespeople ? initialTab : 'craftsmen',
     showCraftsmen,
     showSalespeople,
+    showGuides: showSalespeople,
+    showSalesManagers: showSalespeople,
     requireCraftsmen: showCraftsmen,
     craftsmenCandidates: [],
     salespersonCandidates: [],
+    guideCandidates: [],
+    salesManagerCandidates: [],
     selectedCraftsmen: clonePlain(localPersonnelAssignments.value[line.id]?.craftsmen || cartLineCraftsmen(line)),
     selectedSalespeople: showSalespeople
       ? clonePlain(localPersonnelAssignments.value[line.id]?.salespeople || (Array.isArray(line.salespeople) ? line.salespeople : []))
+      : [],
+    selectedGuides: showSalespeople
+      ? clonePlain(localPersonnelAssignments.value[line.id]?.guideSelections || (Array.isArray(line.guideSelections) ? line.guideSelections : []))
+      : [],
+    selectedSalesManagers: showSalespeople
+      ? clonePlain(localPersonnelAssignments.value[line.id]?.salesManagerSelections || (Array.isArray(line.salesManagerSelections) ? line.salesManagerSelections : []))
       : [],
     loading: true,
     loadError: ''
@@ -2329,6 +2339,26 @@ async function loadPersonnelOverlay(line, initialTab) {
       ...personnelOverlay.value,
       loading: false,
       loadError: error instanceof Error ? error.message : '当前门店员工加载失败，请重试。'
+    }
+  }
+}
+
+async function searchPersonnelOverlay({ scope, keyword } = {}) {
+  const current = personnelOverlay.value
+  if (!current?.line || !['group_guides', 'group_sales_managers'].includes(scope)) return
+  const requestKey = current.requestKey
+  try {
+    const records = await queryPersonnelCandidates(scope, current.line, keyword)
+    if (personnelOverlay.value?.requestKey !== requestKey) return
+    personnelOverlay.value = {
+      ...personnelOverlay.value,
+      [scope === 'group_guides' ? 'guideCandidates' : 'salesManagerCandidates']: records
+    }
+  } catch (error) {
+    if (personnelOverlay.value?.requestKey !== requestKey) return
+    personnelOverlay.value = {
+      ...personnelOverlay.value,
+      loadError: error instanceof Error ? error.message : '集团人员搜索失败，请重试。'
     }
   }
 }
@@ -2513,9 +2543,23 @@ async function confirmPersonnelAssignment(result = {}) {
       staffId: record.staffId || record.id,
       allocationWeight: Number(record.allocationWeight)
     }))
+    const guideSelections = (result.guideSelections || []).map((record) => ({
+      staffId: record.staffId || record.id,
+      employeeId: record.employeeId || record.staffId || record.id,
+      name: record.name
+    }))
+    const salesManagerSelections = (result.salesManagerSelections || []).map((record) => ({
+      staffId: record.staffId || record.id,
+      employeeId: record.employeeId || record.staffId || record.id,
+      name: record.name
+    }))
     const payload = {}
     if (isProjectLine(line) && !cardOperationUpgradeBinding(line)) payload.craftsmen = craftsmen
     if (!isEntitlementLine(line)) payload.salespeople = salespeople
+    if (!isEntitlementLine(line)) {
+      payload.guideSelections = guideSelections
+      payload.salesManagerSelections = salesManagerSelections
+    }
     let savedResult = await mutateCashierDraft('update-cart-line-service-settings', line, payload)
     if (resultStatus(savedResult) === 'result_unknown') {
       const recovered = await recoverPendingDraftCommand()
@@ -2552,13 +2596,25 @@ async function applyPersonnelAssignmentToAll(result = {}) {
     staffId: record.staffId || record.id,
     allocationWeight: Number(record.allocationWeight)
   }))
-  if (!craftsmen.length && !salespeople.length) return
+  const guideSelections = (result.guideSelections || []).map((record) => ({
+    staffId: record.staffId || record.id,
+    employeeId: record.employeeId || record.staffId || record.id,
+    name: record.name
+  }))
+  const salesManagerSelections = (result.salesManagerSelections || []).map((record) => ({
+    staffId: record.staffId || record.id,
+    employeeId: record.employeeId || record.staffId || record.id,
+    name: record.name
+  }))
+  if (!craftsmen.length && !salespeople.length && !guideSelections.length && !salesManagerSelections.length) return
   isSavingPersonnelAssignment.value = true
   try {
     const requestScopeKey = currentCashierDraftScopeKey.value
     const response = await requestAction('apply-cashier-personnel-to-all-lines', {
       craftsmen,
       salespeople,
+      guideSelections,
+      salesManagerSelections,
       idempotencyKey: createCashierV3CommandId('CASHIER_APPLY_PERSONNEL_ALL')
     })
     if (!['success', 'succeeded'].includes(resultStatus(response))) {
@@ -2578,6 +2634,10 @@ async function applyPersonnelAssignmentToAll(result = {}) {
       }
       if (salespeople.length && !isEntitlementLine(line)) {
         current.salespeople = clonePlain(result.salespeople || [])
+      }
+      if (!isEntitlementLine(line)) {
+        current.guideSelections = clonePlain(result.guideSelections || [])
+        current.salesManagerSelections = clonePlain(result.salesManagerSelections || [])
       }
       assignments[line.id] = current
     }
@@ -4741,11 +4801,17 @@ onBeforeUnmount(() => {
         :initial-tab="personnelOverlay.initialTab"
         :show-craftsmen="personnelOverlay.showCraftsmen"
         :show-salespeople="personnelOverlay.showSalespeople"
+        :show-guides="personnelOverlay.showGuides"
+        :show-sales-managers="personnelOverlay.showSalesManagers"
         :require-craftsmen="personnelOverlay.requireCraftsmen"
         :craftsmen-candidates="personnelOverlay.craftsmenCandidates"
         :salesperson-candidates="personnelOverlay.salespersonCandidates"
+        :guide-candidates="personnelOverlay.guideCandidates"
+        :sales-manager-candidates="personnelOverlay.salesManagerCandidates"
         :selected-craftsmen="personnelOverlay.selectedCraftsmen"
         :selected-salespeople="personnelOverlay.selectedSalespeople"
+        :selected-guides="personnelOverlay.selectedGuides"
+        :selected-sales-managers="personnelOverlay.selectedSalesManagers"
         :loading="personnelOverlay.loading"
         :saving="isSavingPersonnelAssignment"
         :load-error="personnelOverlay.loadError"
@@ -4753,6 +4819,7 @@ onBeforeUnmount(() => {
         @confirm="confirmPersonnelAssignment"
         @apply-all="applyPersonnelAssignmentToAll"
         @retry="retryPersonnelOverlay"
+        @search-personnel="searchPersonnelOverlay"
       />
     </Teleport>
 

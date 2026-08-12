@@ -48,7 +48,7 @@ final class CashierV3SaleOnlyFactAssembler
         'store_id', 'member_id', 'line_role', 'authority_key', 'source_kind',
         'source_type', 'source_id', 'entitlement_source_detail_id', 'source_version',
         'catalog_sku_id',
-        'project_id', 'project_version', 'service_object', 'is_experience', 'quantity', 'original_amount_cents',
+        'project_id', 'project_version', 'service_object', 'friend_counts_as_customer', 'is_experience', 'is_presale', 'quantity', 'original_amount_cents',
         'discount_amount_cents', 'sale_amount_cents', 'debt_amount_cents', 'entitlement_actual_amount_cents',
         'source_name_snapshot', 'source_code_snapshot', 'project_name_snapshot',
         'category_id_snapshot', 'category_name_snapshot', 'line_fingerprint',
@@ -56,6 +56,7 @@ final class CashierV3SaleOnlyFactAssembler
         'configured_cost_cents', 'price_change_reason', 'price_changed_by',
         'price_changed_by_name_snapshot', 'price_changed_at',
         'craftsmen_snapshot_json',
+        'guide_selections_json', 'sales_manager_selections_json',
         'sort_no', 'add_time', 'update_time',
     ];
 

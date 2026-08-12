@@ -18,6 +18,8 @@ use app\services\cashier\v3\event\CashierV3BusinessEventRecorder;
 use app\services\cashier\v3\fact\CashierV3CheckoutFactContractException;
 use app\services\cashier\v3\fact\CashierV3SaleOnlyFactAssembler;
 use app\services\cashier\v3\fact\ThinkPhpCashierV3CheckoutFactRepository;
+use app\services\cashier\v3\report\CashierV3GuideRoundFactServices;
+use app\services\cashier\v3\report\CashierV3SalesManagerFactServices;
 use app\services\cashier\v3\hang\CashierV3HangCheckoutBindingServices;
 use app\services\cashier\v3\order\settlement\CashierV3SalesOrderAuthorityException;
 use app\services\cashier\v3\order\settlement\CashierV3SalesOrderPlanV1;
@@ -64,6 +66,8 @@ final class CashierV3SaleOnlyCheckoutSubmissionServices
         'eb_store_product',
         'eb_user',
         'eb_user_money',
+        'eb_cashier_v3_customer_guide_round_fact',
+        'eb_cashier_v3_sales_manager_fact',
     ];
 
     private const REQUIRED_COLUMNS = [
@@ -204,6 +208,13 @@ final class CashierV3SaleOnlyCheckoutSubmissionServices
                 (array)$aggregate['lines'],
                 $operatorScope
             );
+
+            // Guide attribution is a reporting-only snapshot. It is read from
+            // the server-locked aggregate (never from the browser payload),
+            // carries no amount/ratio, and is written in the same transaction
+            // as the sale facts. Older drafts simply have no guide selections.
+            $guideSelectionsByLine = self::lockedGuideSelectionsByCheckoutLine($aggregate['lines']);
+            $salesManagerSelectionsByLine = self::lockedSalesManagerSelectionsByCheckoutLine($aggregate['lines']);
 
             $commandKey = self::commandIdempotencyKey($scope['idempotency_key'] ?? null);
             $now = time();
@@ -478,6 +489,48 @@ final class CashierV3SaleOnlyCheckoutSubmissionServices
                 $balanceMutation,
                 $salespeopleByCheckoutLine
             );
+            // Guide selections are read only from the locked checkout aggregate
+            // (never from the exact public submit payload).  The independent
+            // immutable round fact is written before facts are exposed; any
+            // validation failure rolls back the entire checkout transaction.
+            $guideRoundResult = ['round_no' => 0, 'inserted' => 0, 'replayed' => 0, 'guide_count' => 0];
+            if ($guideSelectionsByLine !== []) {
+                try {
+                    $guideRoundResult = (new CashierV3GuideRoundFactServices())->persistInTx([
+                    'tenant_id' => (string)$order['tenant_id'],
+                    'organization_id' => $operatorScope->organizationId(),
+                    'store_id' => (int)$order['store_id'],
+                    'member_id' => (int)$order['member_id'],
+                    'member_name_snapshot' => (string)($order['member_name_snapshot'] ?? ''),
+                    'order_id' => (string)$order['order_id'],
+                    'order_no_snapshot' => (string)$order['order_no'],
+                    'checkout_request_id' => $requestId,
+                    'business_date' => (string)$order['business_date'],
+                    'operator_id' => $operatorScope->operatorId(),
+                    'operator_name_snapshot' => '',
+                    'business_event_no' => (string)$eventAuthority['event_no'],
+                    'command_idempotency_key' => $commandKey,
+                    'occurred_at' => $now,
+                    'recorded_at' => $now,
+                    ], $guideSelectionsByLine, $operatorScope, $dataScope);
+                } catch (\InvalidArgumentException $exception) {
+                    throw new CashierV3CommandException(
+                        CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
+                        '导购轮次保存失败，本次结账已回滚。',
+                        CashierV3ResultCode::STATUS_FAILED,
+                        ['reason' => $exception->getMessage()]
+                    );
+                }
+            }
+            $salesManagerResult = ['inserted' => 0, 'replayed' => 0, 'manager_count' => 0];
+            if ($salesManagerSelectionsByLine !== []) {
+                $salesManagerResult = (new CashierV3SalesManagerFactServices())->persistInTx([
+                    'tenant_id' => (string)$order['tenant_id'], 'organization_id' => $operatorScope->organizationId(), 'store_id' => (int)$order['store_id'],
+                    'member_id' => (int)$order['member_id'], 'order_id' => (string)$order['order_id'], 'order_no_snapshot' => (string)$order['order_no'],
+                    'checkout_request_id' => $requestId, 'business_date' => (string)$order['business_date'], 'operator_id' => $operatorScope->operatorId(),
+                    'business_event_no' => (string)$eventAuthority['event_no'], 'command_idempotency_key' => $commandKey, 'occurred_at' => $now, 'recorded_at' => $now,
+                ], $salesManagerSelectionsByLine, $operatorScope, $dataScope);
+            }
             $factResult = $this->facts->persistInTx($factPlan, $operatorScope, $dataScope);
             $requestResult = $this->requests->markSucceededInTx(
                 $requestId,
@@ -530,6 +583,8 @@ final class CashierV3SaleOnlyCheckoutSubmissionServices
                     'eventNo' => (string)($debtEvent['event_no'] ?? ''),
                 ],
                 'businessEventNo' => (string)$eventAuthority['event_no'],
+                'guideRound' => $guideRoundResult,
+                'salesManager' => $salesManagerResult,
                 'factFingerprint' => (string)$factResult['planFingerprint'],
                 'settledAt' => $now,
                 'cardPurchase' => [
@@ -686,6 +741,48 @@ final class CashierV3SaleOnlyCheckoutSubmissionServices
             || preg_match('/^CKPT-[0-9a-f]{64}$/D', $payload['preparationToken']) !== 1) {
             throw self::failure('checkout_submit_payload_invalid');
         }
+    }
+
+    /**
+     * Read server-locked workspace line snapshots only.  The upstream
+     * workspace-authority migration may expose the JSON field; absent fields
+     * mean no guide attribution and preserve existing checkouts unchanged.
+     *
+     * @return array<string,array<int,array{employeeId:int}>>
+     */
+    private static function lockedGuideSelectionsByCheckoutLine(array $lines): array
+    {
+        $result = [];
+        foreach ($lines as $line) {
+            if (!is_array($line)) continue;
+            $lineId = trim((string)($line['line_id'] ?? $line['line_key'] ?? $line['checkout_line_id'] ?? $line['id'] ?? ''));
+            if ($lineId === '') continue;
+            $raw = $line['guide_selections_json'] ?? $line['guideSelections'] ?? $line['guide_selections'] ?? [];
+            if (is_string($raw)) {
+                $raw = json_decode($raw, true);
+                if (!is_array($raw)) throw self::failure('guide_selection_invalid');
+            }
+            if ($raw === null || $raw === []) continue;
+            if (!is_array($raw)) throw self::failure('guide_selection_invalid');
+            $result[$lineId] = array_values($raw);
+        }
+        return $result;
+    }
+
+    private static function lockedSalesManagerSelectionsByCheckoutLine(array $lines): array
+    {
+        $result = [];
+        foreach ($lines as $line) {
+            if (!is_array($line)) continue;
+            $lineId = trim((string)($line['line_id'] ?? $line['line_key'] ?? $line['checkout_line_id'] ?? $line['id'] ?? ''));
+            if ($lineId === '') continue;
+            $raw = $line['sales_manager_selections_json'] ?? $line['salesManagerSelections'] ?? $line['sales_manager_selections'] ?? [];
+            if (is_string($raw)) { $raw = json_decode($raw, true); if (!is_array($raw)) throw self::failure('sales_manager_selection_invalid'); }
+            if ($raw === null || $raw === []) continue;
+            if (!is_array($raw)) throw self::failure('sales_manager_selection_invalid');
+            $result[$lineId] = array_values($raw);
+        }
+        return $result;
     }
 
     private static function assertPreparationIdentity(array $payload, array $request): void

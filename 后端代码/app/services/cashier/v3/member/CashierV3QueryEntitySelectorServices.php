@@ -6,6 +6,7 @@ use app\services\cashier\v3\CashierV3CommandException;
 use app\services\cashier\v3\CashierV3DataScopeContext;
 use app\services\cashier\v3\CashierV3OperatorScope;
 use app\services\cashier\v3\CashierV3ResultCode;
+use app\services\organization\OrganizationScopeService;
 use think\facade\Db;
 
 /**
@@ -19,6 +20,11 @@ final class CashierV3QueryEntitySelectorServices
         'service_actual_craftsmen' => false,
         'reservation_craftsmen' => false,
         'member_exclusive_service_staff' => false,
+        // Group attribution selectors deliberately use employee identity, not
+        // a store-local staff row. They are keyword-gated to avoid loading
+        // the whole group into a cashier page.
+        'group_sales_managers' => true,
+        'group_guides' => true,
     ];
 
     /**
@@ -46,8 +52,19 @@ final class CashierV3QueryEntitySelectorServices
         }
 
         $page = max(1, (int)($payload['page'] ?? 1));
-        $pageSize = min(100, max(1, (int)($payload['pageSize'] ?? $payload['page_size'] ?? 20)));
+        $pageSize = min(20, max(1, (int)($payload['pageSize'] ?? $payload['page_size'] ?? 20)));
         $keyword = trim((string)($payload['keyword'] ?? $payload['search'] ?? ''));
+        $isGroupAttribution = in_array($selectorScope, ['group_sales_managers', 'group_guides'], true);
+        if ($isGroupAttribution && mb_strlen($keyword) < 2) {
+            return [
+                'records' => [],
+                'total' => 0,
+                'page' => $page,
+                'pageSize' => $pageSize,
+                'isLoading' => false,
+                'requiresKeyword' => true,
+            ];
+        }
         $requiresEmploymentType = self::PERSON_SCOPES[$selectorScope];
         $eligibilityColumn = $requiresEmploymentType
             ? 'ss.cashier_salesperson_enabled'
@@ -55,13 +72,32 @@ final class CashierV3QueryEntitySelectorServices
 
         $query = Db::name('system_store_staff')->alias('ss')
             ->join('employee e', 'e.id = ss.employee_id')
-            ->where('ss.store_id', $operatorScope->storeId())
             ->where('ss.status', 1)
             ->where('ss.is_del', 0)
             ->where('ss.employee_id', '>', 0)
-            ->where($eligibilityColumn, 1)
             ->where('e.status', 1)
             ->where('e.is_del', 0);
+        if ($isGroupAttribution) {
+            // Group scope is bounded by the logged-in organization and its
+            // descendants. The selector never accepts a client org/store.
+            /** @var OrganizationScopeService $organizationScope */
+            $organizationScope = app()->make(OrganizationScopeService::class);
+            $groupStoreIds = $organizationScope->getOrgStoreIds((int)$operatorScope->organizationId(), true);
+            if ($groupStoreIds === []) {
+                return [
+                    'records' => [],
+                    'total' => 0,
+                    'page' => $page,
+                    'pageSize' => $pageSize,
+                    'isLoading' => false,
+                    'requiresKeyword' => false,
+                ];
+            }
+            $query->whereIn('ss.store_id', $groupStoreIds);
+        } else {
+            $query->where('ss.store_id', $operatorScope->storeId())
+                ->where($eligibilityColumn, 1);
+        }
         if ($requiresEmploymentType) {
             $query->whereIn('e.employment_type_code', ['internal', 'partner', 'outsourced'])
                 ->where('e.employment_type_version', '>', 0);
@@ -76,9 +112,15 @@ final class CashierV3QueryEntitySelectorServices
         }
 
         $total = (int)(clone $query)->count();
+        if ($isGroupAttribution) {
+            // Keep grouping explicit for ThinkPHP versions without Query::when.
+            $query->group('e.id,e.name,e.employment_type_code,e.employment_type_version');
+        }
         $rows = $query
-            ->field('ss.id,ss.employee_id,ss.store_id,ss.account,ss.staff_name,ss.cashier_salesperson_enabled,ss.cashier_craftsman_enabled,e.name as employee_name,e.employment_type_code,e.employment_type_version')
-            ->order('ss.id asc')
+            ->field($isGroupAttribution
+                ? 'e.id as employee_id,MIN(ss.id) as staff_id,MIN(ss.store_id) as store_id,e.name as employee_name,MAX(ss.account) as account,MAX(ss.staff_name) as staff_name,e.employment_type_code,e.employment_type_version'
+                : 'ss.id as staff_id,ss.employee_id,ss.store_id,ss.account,ss.staff_name,ss.cashier_salesperson_enabled,ss.cashier_craftsman_enabled,e.name as employee_name,e.employment_type_code,e.employment_type_version')
+            ->order($isGroupAttribution ? 'e.id asc' : 'ss.id asc')
             ->page($page, $pageSize)
             ->select()
             ->toArray();
@@ -96,8 +138,8 @@ final class CashierV3QueryEntitySelectorServices
                 continue;
             }
             $records[] = [
-                'id' => (int)$row['id'],
-                'staffId' => (int)$row['id'],
+                'id' => $isGroupAttribution ? (int)$row['employee_id'] : (int)$row['staff_id'],
+                'staffId' => $isGroupAttribution ? (int)$row['employee_id'] : (int)$row['staff_id'],
                 'employeeId' => (int)$row['employee_id'],
                 'storeId' => (int)$row['store_id'],
                 'name' => $name,
@@ -109,6 +151,8 @@ final class CashierV3QueryEntitySelectorServices
                 'salespersonEligible' => (int)($row['cashier_salesperson_enabled'] ?? 0) === 1,
                 'craftsmanEligible' => (int)($row['cashier_craftsman_enabled'] ?? 0) === 1,
                 'selectable' => true,
+                'groupScoped' => $isGroupAttribution,
+                'attributionRole' => $selectorScope === 'group_sales_managers' ? 'sales_manager' : ($selectorScope === 'group_guides' ? 'guide' : ''),
             ];
         }
 
@@ -118,6 +162,7 @@ final class CashierV3QueryEntitySelectorServices
             'page' => $page,
             'pageSize' => $pageSize,
             'isLoading' => false,
+            'requiresKeyword' => false,
         ];
     }
 

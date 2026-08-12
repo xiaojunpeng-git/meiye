@@ -342,12 +342,14 @@ final class CashierV3CashierWorkspaceServices
         $hasServiceObject = array_key_exists('serviceObject', $settings);
         $hasCraftsmen = array_key_exists('craftsmen', $settings);
         $hasSalespeople = array_key_exists('salespeople', $settings);
+        $hasGuides = array_key_exists('guideSelections', $settings);
+        $hasSalesManagers = array_key_exists('salesManagerSelections', $settings);
         $hasExperience = array_key_exists('isExperience', $settings);
         if ($this->isCardOperationUpgradeSaleRow((array)$line)
-            && (!$hasSalespeople || $hasServiceObject || $hasCraftsmen || $hasExperience)) {
+            && (!$hasSalespeople || $hasGuides || $hasSalesManagers || $hasServiceObject || $hasCraftsmen || $hasExperience)) {
             throw $this->cardOperationUpgradeCartLocked();
         }
-        if (!$hasServiceObject && !$hasCraftsmen && !$hasSalespeople && !$hasExperience) {
+        if (!$hasServiceObject && !$hasCraftsmen && !$hasSalespeople && !$hasGuides && !$hasSalesManagers && !$hasExperience) {
             throw new CashierV3CommandException(
                 CashierV3ResultCode::ENTITLEMENT_LINE_INVALID,
                 '购物车服务设置无效，请重新选择。',
@@ -357,7 +359,7 @@ final class CashierV3CashierWorkspaceServices
         }
 
         // 权益核销没有本次销售业绩。即使直接调用事务服务，也不能写入销售人快照。
-        if ($isEntitlement && $hasSalespeople) {
+        if ($isEntitlement && ($hasSalespeople || $hasGuides || $hasSalesManagers)) {
             throw new CashierV3CommandException(
                 CashierV3ResultCode::ENTITLEMENT_LINE_INVALID,
                 '权益项目只支持设置手艺人。',
@@ -368,7 +370,7 @@ final class CashierV3CashierWorkspaceServices
 
         // 销售人属于销售明细，不依赖项目服务设置；产品和卡项同样可以分配销售业绩。
         if ($isSale && !$isSaleProject) {
-            if ($hasServiceObject || $hasCraftsmen || $hasExperience || !$hasSalespeople) {
+            if ($hasServiceObject || $hasCraftsmen || $hasExperience) {
                 throw new CashierV3CommandException(
                     CashierV3ResultCode::ENTITLEMENT_LINE_INVALID,
                     '该商品只支持设置销售人。',
@@ -376,13 +378,23 @@ final class CashierV3CashierWorkspaceServices
                     ['line_id' => $lineKey, 'reason' => 'sale_non_project_setting_invalid']
                 );
             }
-            $salespeople = $this->authoritativeSalespeopleInTx($settings['salespeople'], $operatorScope);
+            $salespeople = $this->decodeStoredSalespeople($line, $lineKey);
+            if ($hasSalespeople) {
+                if (!is_array($settings['salespeople'])) throw $this->incompleteLineSettings($lineKey, 'salespeople_invalid');
+                $salespeople = $this->authoritativeSalespeopleInTx($settings['salespeople'], $operatorScope);
+            }
+            $salesManagers = $this->decodeStoredSalesManagerSelections($line, $lineKey);
+            if ($hasSalesManagers) {
+                if (!is_array($settings['salesManagerSelections'])) throw $this->incompleteLineSettings($lineKey, 'sales_manager_selections_invalid');
+                $salesManagers = $this->authoritativeSalesManagerSelectionsInTx($settings['salesManagerSelections'], $operatorScope);
+            }
             $affected = Db::name(self::LINE_TABLE)
                 ->where('id', (int)$line['id'])
                 ->where('workspace_id', $workspaceId)
                 ->where('line_key', $lineKey)
                 ->update([
                     'salespeople_json' => $this->encodeJson($salespeople),
+                    'sales_manager_selections_json' => $this->encodeJson($salesManagers),
                     'update_time' => time(),
                 ]);
             if ((int)$affected < 0) {
@@ -464,6 +476,20 @@ final class CashierV3CashierWorkspaceServices
             }
             $salespeople = $this->authoritativeSalespeopleInTx($settings['salespeople'], $operatorScope);
         }
+        $guides = $this->decodeStoredGuideSelections($line, $lineKey);
+        if (array_key_exists('guideSelections', $settings)) {
+            if (!is_array($settings['guideSelections'])) {
+                throw $this->incompleteLineSettings($lineKey, 'guide_selections_invalid');
+            }
+            $guides = $this->authoritativeGuideSelectionsInTx($settings['guideSelections'], $operatorScope);
+        }
+        $salesManagers = $this->decodeStoredSalesManagerSelections($line, $lineKey);
+        if ($hasSalesManagers) {
+            if (!is_array($settings['salesManagerSelections'])) {
+                throw $this->incompleteLineSettings($lineKey, 'sales_manager_selections_invalid');
+            }
+            $salesManagers = $this->authoritativeSalesManagerSelectionsInTx($settings['salesManagerSelections'], $operatorScope);
+        }
 
         // 权益仅持久化服务设置与手艺人；普通项目仍可同事务持久化销售人快照。
         $affected = Db::name(self::LINE_TABLE)
@@ -474,6 +500,8 @@ final class CashierV3CashierWorkspaceServices
                 'service_object' => $serviceObject,
                 'craftsmen_json' => $this->encodeJson($craftsmen),
                 'salespeople_json' => $this->encodeJson($salespeople),
+                'guide_selections_json' => $this->encodeJson($guides),
+                'sales_manager_selections_json' => $this->encodeJson($salesManagers),
                 'is_experience' => $isExperience,
                 'update_time' => time(),
             ]);
@@ -487,6 +515,60 @@ final class CashierV3CashierWorkspaceServices
         }
         $this->updateDraft($workspaceId, []);
         return $this->readDraft($workspaceId, $stateContextId, $operatorScope, true);
+    }
+
+    private function decodeStoredGuideSelections(array $line, string $lineKey): array
+    {
+        $raw = trim((string)($line['guide_selections_json'] ?? ''));
+        if ($raw === '') return [];
+        $decoded = json_decode($raw, true);
+        if (!is_array($decoded)) throw $this->incompleteLineSettings($lineKey, 'stored_guide_selections_invalid');
+        return array_values($decoded);
+    }
+
+    private function decodeStoredSalesManagerSelections(array $line, string $lineKey): array
+    {
+        $raw = trim((string)($line['sales_manager_selections_json'] ?? ''));
+        if ($raw === '') return [];
+        $decoded = json_decode($raw, true);
+        if (!is_array($decoded)) throw $this->incompleteLineSettings($lineKey, 'stored_sales_manager_selections_invalid');
+        return array_values($decoded);
+    }
+
+    private function authoritativeGuideSelectionsInTx(array $guides, CashierV3OperatorScope $operatorScope): array
+    {
+        $ids = [];
+        foreach ($guides as $guide) {
+            $id = (int)($guide['employeeId'] ?? $guide['employee_id'] ?? $guide['id'] ?? 0);
+            if ($id <= 0 || isset($ids[$id])) throw $this->incompleteLineSettings('', 'guide_selection_invalid');
+            $ids[$id] = true;
+        }
+        if (!$ids) return [];
+        $rows = Db::name('employee')->whereIn('id', array_keys($ids))->where('status', 1)->where('is_del', 0)->lock(true)->select()->toArray();
+        if (count($rows) !== count($ids)) throw $this->incompleteLineSettings('', 'guide_employee_not_active');
+        $result = [];
+        foreach ($rows as $row) $result[] = ['employeeId' => (int)$row['id'], 'name' => (string)$row['name']];
+        return $result;
+    }
+
+    private function authoritativeSalesManagerSelectionsInTx(array $managers, CashierV3OperatorScope $operatorScope): array
+    {
+        $ids = [];
+        foreach ($managers as $manager) {
+            $id = (int)($manager['employeeId'] ?? $manager['employee_id'] ?? $manager['id'] ?? 0);
+            if ($id <= 0 || isset($ids[$id])) throw $this->incompleteLineSettings('', 'sales_manager_selection_invalid');
+            $ids[$id] = true;
+        }
+        if (!$ids) return [];
+        $rows = Db::name('employee')->whereIn('id', array_keys($ids))->where('status', 1)->where('is_del', 0)->lock(true)->select()->toArray();
+        if (count($rows) !== count($ids)) throw $this->incompleteLineSettings('', 'sales_manager_employee_not_active');
+        $result = [];
+        foreach ($rows as $row) {
+            $name = trim((string)($row['name'] ?? ''));
+            if ($name === '') throw $this->incompleteLineSettings('', 'sales_manager_employee_name_missing');
+            $result[] = ['employeeId' => (int)$row['id'], 'name' => $name, 'employeeTypeCodeSnapshot' => (string)($row['employment_type_code'] ?? '')];
+        }
+        return $result;
     }
 
     /** Apply one confirmed salesperson allocation to every current-purchase line atomically. */
@@ -936,6 +1018,13 @@ final class CashierV3CashierWorkspaceServices
             $source['couponUserId'] = (int)($row['coupon_user_id'] ?? 0);
             $source['couponNameSnapshot'] = (string)($row['coupon_name_snapshot'] ?? '');
             $source['couponDiscountCents'] = (int)($row['coupon_discount_cents'] ?? 0);
+            // Personnel attribution is part of the locked workspace line
+            // authority. Carry the server-normalized snapshots into the
+            // checkout preparation snapshot; the catalog source loader must
+            // never be the source of these user-selected assignments.
+            $lineKey = (string)($row['line_key'] ?? '');
+            $source['guideSelections'] = $this->decodeStoredGuideSelections($row, $lineKey);
+            $source['salesManagerSelections'] = $this->decodeStoredSalesManagerSelections($row, $lineKey);
             $sources[] = $source;
         }
         return [
@@ -2082,6 +2171,8 @@ final class CashierV3CashierWorkspaceServices
             'service_object' => (string)($line['service_object'] ?? ''),
             'craftsmen_json' => $this->encodeJson([]),
             'salespeople_json' => $this->encodeJson([]),
+            'guide_selections_json' => $this->encodeJson([]),
+            'sales_manager_selections_json' => $this->encodeJson([]),
             'is_experience' => 0,
             'display_snapshot_json' => $this->encodeJson($displaySnapshot),
         ];
@@ -2355,6 +2446,8 @@ final class CashierV3CashierWorkspaceServices
             $salespeople = $lineRole === self::ROLE_SALE
                 ? $this->decodeStoredSalespeople($row, $lineKey)
                 : [];
+            $guides = $this->decodeStoredGuideSelections($row, $lineKey);
+            $salesManagers = $this->decodeStoredSalesManagerSelections($row, $lineKey);
             // 损坏的手艺人快照不能被静默显示为“待分配”。
             $this->craftsmanIdsFromSnapshot($craftsmen, $lineKey);
             $storedServiceObject = (string)($row['service_object'] ?? '');
@@ -2379,6 +2472,8 @@ final class CashierV3CashierWorkspaceServices
                 'craftsmen' => $craftsmen,
                 'craftsmenSummary' => $this->craftsmenSummary($craftsmen),
                 'isExperience' => $experienceFlag === 1,
+                'guideSelections' => $guides,
+                'salesManagerSelections' => $salesManagers,
             ]);
             if ($lineRole === self::ROLE_SALE) {
                 $line['salespeople'] = $salespeople;
@@ -2740,6 +2835,8 @@ final class CashierV3CashierWorkspaceServices
                 'service_object' => (string)($row['service_object'] ?? ''),
                 'craftsmen_json' => (string)($row['craftsmen_json'] ?? ''),
                 'salespeople_json' => (string)($row['salespeople_json'] ?? ''),
+                'guide_selections_json' => (string)($row['guide_selections_json'] ?? ''),
+                'sales_manager_selections_json' => (string)($row['sales_manager_selections_json'] ?? ''),
                 'is_experience' => (int)($row['is_experience'] ?? 0),
                 'display_snapshot_json' => (string)($row['display_snapshot_json'] ?? ''),
                 'sort_no' => (int)($row['sort_no'] ?? 0),

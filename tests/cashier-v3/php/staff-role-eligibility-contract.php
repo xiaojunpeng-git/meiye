@@ -20,6 +20,18 @@ $check = static function (bool $condition, string $name, string $id) use (&$fail
 };
 
 $selector = $read('app/services/cashier/v3/member/CashierV3QueryEntitySelectorServices.php');
+$groupSelectorChecks = [
+    'group_sales_managers',
+    'group_guides',
+    "mb_strlen(\$keyword) < 2",
+    "'requiresKeyword' => true",
+    "'groupScoped' => \$isGroupAttribution",
+];
+foreach ($groupSelectorChecks as $needle) {
+    if (strpos($selector, $needle) === false) {
+        throw new RuntimeException('missing group attribution selector contract: ' . $needle);
+    }
+}
 $workspace = $read('app/services/cashier/v3/cashier/CashierV3CashierWorkspaceServices.php');
 $reservation = $read('app/services/cashier/v3/reservation/CashierV3ReservationModule.php');
 $member = $read('app/services/cashier/v3/member/CashierV3MemberModule.php');
