@@ -9,6 +9,14 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PROJECT="$ROOT/后端代码"
 SQL="$ROOT/database/008.cc3798.com.sql"
 NGINX_CONF="$ROOT/docker/nginx/local.conf"
+PLATFORM_NGINX_CONF="$ROOT/docker/nginx/local-platform.conf"
+CASHIER_NGINX_CONF="$ROOT/docker/nginx/local-cashier.conf"
+PLATFORM_API_PORT="${PLATFORM_API_PORT:-18093}"
+CASHIER_API_PORT="${CASHIER_API_PORT:-18092}"
+
+# 本地数据库名以当前正本环境文件为准，禁止沿用旧的 lin8 固定值。
+DB_NAME="$(awk -F= '/^[[:space:]]*DATABASE[[:space:]]*=/{gsub(/[[:space:]]/, "", $2); print $2; exit}' "$PROJECT/.env.docker")"
+DB_NAME="${DB_NAME:-ruihao_rh_20260812}"
 
 if ! command -v docker >/dev/null; then
   echo "请先安装 Colima/Docker，并确保 ~/bin 在 PATH 中"
@@ -45,7 +53,7 @@ ensure_container() {
 
 if ! ensure_container mohe-mysql; then
   docker run -d --name mohe-mysql --platform linux/amd64 --network mohe-net --network-alias mysql \
-    -e MYSQL_ROOT_PASSWORD=localdev123 -e MYSQL_DATABASE=lin8 \
+    -e MYSQL_ROOT_PASSWORD=localdev123 -e MYSQL_DATABASE="$DB_NAME" \
     -p 3307:3306 \
     docker.m.daocloud.io/library/mysql:5.7 \
     --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci \
@@ -64,19 +72,22 @@ for i in $(seq 1 60); do
 done
 
 TABLE_COUNT=$(docker exec mohe-mysql mysql -uroot -plocaldev123 -Nse \
-  "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='lin8';" 2>/dev/null || echo 0)
+  "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='$DB_NAME';" 2>/dev/null || echo 0)
 
 if [ "${TABLE_COUNT:-0}" -lt 10 ]; then
   if [ -f "$SQL" ]; then
     echo "导入数据库（首次较慢）..."
-    docker exec -i mohe-mysql mysql -uroot -plocaldev123 lin8 < "$SQL"
+    docker exec -i mohe-mysql mysql -uroot -plocaldev123 "$DB_NAME" < "$SQL"
   else
     echo "警告：库表不足且未找到 SQL：$SQL"
     echo "本地库可能为空。如需导入，请把备份 SQL 放到上述路径后重跑本脚本。"
   fi
 fi
 
-docker rm -f mohe-app mohe-nginx >/dev/null 2>&1 || true
+# 每次启动都清理三套后端/网关，避免 Swoole 保留旧路由；随后按顺序重建。
+docker rm -f mohe-app mohe-nginx \
+  mohe-platform-app mohe-platform-nginx \
+  mohe-cashier-app mohe-cashier-nginx mohe-cashier-api >/dev/null 2>&1 || true
 
 # 使用预构建镜像 mohe-app:local（含 gd，登录验证码需要）；没有则先构建
 if ! docker image inspect mohe-app:local >/dev/null 2>&1; then
@@ -96,6 +107,13 @@ docker run -d --name mohe-app $APP_PLATFORM --network mohe-net \
   -w /var/www/html \
   mohe-app:local
 
+# 收银 V3 专用 PHP/Swoole 进程。它与 8080 使用同一源码和本地数据库，
+# 但不复用 mohe-app 进程，便于独立加载路由、重启和验收。
+docker run -d --name mohe-cashier-app $APP_PLATFORM --network mohe-net \
+  -v "$PROJECT:/var/www/html" \
+  -w /var/www/html \
+  mohe-app:local
+
 sleep 6
 
 docker run -d --name mohe-nginx --platform linux/amd64 --network mohe-net \
@@ -104,10 +122,36 @@ docker run -d --name mohe-nginx --platform linux/amd64 --network mohe-net \
   -v "$NGINX_CONF:/etc/nginx/conf.d/default.conf:ro" \
   docker.m.daocloud.io/library/nginx:1.25-alpine
 
+# 方案 2：平台端与收银/库存端各自使用独立的 PHP/Swoole + Nginx 实例。
+# 三套实例仍挂载同一份源码正本、使用同一份本地数据库，仅隔离进程、路由缓存和端口：
+#   8080  -> mohe-app / mohe-nginx（集成构建预览）
+#   18093 -> mohe-platform-app / mohe-platform-nginx（平台热更新 API）
+#   18092 -> mohe-cashier-app / mohe-cashier-api（收银/库存热更新 API）
+# 每次启动都重建两个热更新 API 实例，避免沿用旧 Swoole 路由缓存。
+
+docker run -d --name mohe-platform-app $APP_PLATFORM --network mohe-net \
+  -v "$PROJECT:/var/www/html" \
+  -w /var/www/html \
+  mohe-app:local
+
+docker run -d --name mohe-platform-nginx --platform linux/amd64 --network mohe-net \
+  -p "$PLATFORM_API_PORT:80" \
+  -v "$PROJECT:/var/www/html:ro" \
+  -v "$PLATFORM_NGINX_CONF:/etc/nginx/conf.d/default.conf:ro" \
+  docker.m.daocloud.io/library/nginx:1.25-alpine
+
+# 收银 V3 独立后端网关（18092）。18091 的 Vite 仅代理到此端口，不再
+# 依赖 8080 的集成路由；库存 /storeapi 与收银 /cashierapi 走同一收银实例。
+docker run -d --name mohe-cashier-nginx --platform linux/amd64 --network mohe-net \
+  -p "$CASHIER_API_PORT:80" \
+  -v "$PROJECT:/var/www/html:ro" \
+  -v "$CASHIER_NGINX_CONF:/etc/nginx/conf.d/default.conf:ro" \
+  docker.m.daocloud.io/library/nginx:1.25-alpine
+
 # 平台前端开发预览（18081，热更新；仅首次缺依赖时 install，避免每次启动重装）
 ADMIN_SRC="$ROOT/前端代码/admin"
 ADMIN_NM_VOLUME="mohe_admin_src_nm"
-ADMIN_DEV_CMD='if [ ! -x ./node_modules/.bin/vue-cli-service ]; then npm config set registry https://registry.npmmirror.com && npm install --no-audit --no-fund; fi && ./node_modules/.bin/vue-cli-service serve --mode=dev --host 0.0.0.0 --port 8081'
+ADMIN_DEV_CMD="if [ ! -x ./node_modules/.bin/vue-cli-service ]; then npm config set registry https://registry.npmmirror.com && npm install --no-audit --no-fund; fi && VUE_APP_API_URL='http://127.0.0.1:${PLATFORM_API_PORT}/adminapi' ./node_modules/.bin/vue-cli-service serve --mode=dev --host 0.0.0.0 --port 8081"
 
 ensure_admin_dev() {
   if docker ps -a --format '{{.Names}}' | grep -qx mohe-admin-src; then
@@ -139,80 +183,58 @@ ensure_admin_dev() {
     bash -lc "$ADMIN_DEV_CMD"
 }
 
+# API 目标属于容器启动环境变量；切换到 18093 后不能复用旧的 18081 容器。
+docker rm -f mohe-admin-src >/dev/null 2>&1 || true
 ensure_admin_dev
 
-# 门店前端开发预览（18082，热更新）
-STORE_SRC="$ROOT/前端代码/store"
-STORE_NM_VOLUME="mohe_store_src_nm"
-STORE_DEV_CMD='if [ ! -x ./node_modules/.bin/vue-cli-service ]; then npm config set registry https://registry.npmmirror.com && npm install --no-audit --no-fund; fi && ./node_modules/.bin/vue-cli-service serve --mode=dev --host 0.0.0.0 --port 8082'
+# 旧门店端 18082 已迁移到 美容源码/旧端口/18082/，仅作备份，不再启动热更新。
 
-ensure_store_dev() {
-  if docker ps -a --format '{{.Names}}' | grep -qx mohe-store-src; then
-    if docker ps --format '{{.Names}}' | grep -qx mohe-store-src; then
+# 当前门店端唯一开发入口（18091，热更新）。源码正本为 cashier-v3。
+CASHIER_V3_SRC="$ROOT/前端代码/cashier-v3"
+CASHIER_V3_NM_VOLUME="mohe_cashier_v3_src_nm"
+CASHIER_V3_DEV_CMD='if [ ! -x ./node_modules/.bin/vite ]; then npm config set registry https://registry.npmjs.org && npm install --no-audit --no-fund; fi && ./node_modules/.bin/vite --host 0.0.0.0 --port 18087 --strictPort'
+
+ensure_cashier_v3_dev() {
+  if docker ps -a --format '{{.Names}}' | grep -qx mohe-cashier-v3-src; then
+    if docker ps --format '{{.Names}}' | grep -qx mohe-cashier-v3-src; then
       return 0
     else
-      docker start mohe-store-src >/dev/null
+      docker start mohe-cashier-v3-src >/dev/null
       return 0
     fi
   fi
 
-  docker volume create "$STORE_NM_VOLUME" >/dev/null 2>&1 || true
+  docker volume create "$CASHIER_V3_NM_VOLUME" >/dev/null 2>&1 || true
   if ! docker image inspect node:14-bullseye >/dev/null 2>&1; then
     docker pull --platform linux/amd64 docker.m.daocloud.io/library/node:14-bullseye
     docker tag docker.m.daocloud.io/library/node:14-bullseye node:14-bullseye
   fi
-  docker run -d --name mohe-store-src --platform linux/amd64 \
-    -p 18082:8082 \
-    -e VUE_APP_API_URL='http://127.0.0.1:8080/storeapi' \
-    -v "$STORE_SRC:/app" \
-    -v "$STORE_NM_VOLUME:/app/node_modules" \
+  docker run -d --name mohe-cashier-v3-src --platform linux/amd64 \
+    -p 18091:18087 \
+    --add-host host.docker.internal:host-gateway \
+    -e CASHIER_V3_API_PROXY_TARGET="http://host.docker.internal:${CASHIER_API_PORT}" \
+    -v "$CASHIER_V3_SRC:/app" \
+    -v "$CASHIER_V3_NM_VOLUME:/app/node_modules" \
     -w /app \
     node:14-bullseye \
-    bash -lc "$STORE_DEV_CMD"
+    bash -lc "$CASHIER_V3_DEV_CMD"
 }
 
-ensure_store_dev
-
-# 收银台前端开发预览（18083，热更新）
-CASHIER_SRC="$ROOT/前端代码/cashier"
-CASHIER_NM_VOLUME="mohe_cashier_src_nm"
-CASHIER_DEV_CMD='if [ ! -x ./node_modules/.bin/vue-cli-service ]; then npm config set registry https://registry.npmjs.org && npm cache clean --force && npm install --no-audit --no-fund; fi && ./node_modules/.bin/vue-cli-service serve --mode=dev --host 0.0.0.0 --port 8083'
-
-ensure_cashier_dev() {
-  if docker ps -a --format '{{.Names}}' | grep -qx mohe-cashier-src; then
-    if docker ps --format '{{.Names}}' | grep -qx mohe-cashier-src; then
-      return 0
-    else
-      docker start mohe-cashier-src >/dev/null
-      return 0
-    fi
-  fi
-
-  docker volume create "$CASHIER_NM_VOLUME" >/dev/null 2>&1 || true
-  if ! docker image inspect node:14-bullseye >/dev/null 2>&1; then
-    docker pull --platform linux/amd64 docker.m.daocloud.io/library/node:14-bullseye
-    docker tag docker.m.daocloud.io/library/node:14-bullseye node:14-bullseye
-  fi
-  docker run -d --name mohe-cashier-src --platform linux/amd64 \
-    -p 18083:8083 \
-    -e VUE_APP_API_URL='http://127.0.0.1:8080/cashierapi' \
-    -v "$CASHIER_SRC:/app" \
-    -v "$CASHIER_NM_VOLUME:/app/node_modules" \
-    -w /app \
-    node:14-bullseye \
-    bash -lc "$CASHIER_DEV_CMD"
-}
-
-ensure_cashier_dev
+# API 目标属于容器启动环境变量；切换到 18092 后不能复用旧的 18091 容器。
+docker rm -f mohe-cashier-v3-src >/dev/null 2>&1 || true
+ensure_cashier_v3_dev
 
 echo
 echo "已启动（Nginx + Swoole，挂载：美容源码/后端代码）："
 echo "  平台开发预览: http://127.0.0.1:18081/admin/login  （改代码用，首次编译约 5-10 分钟）"
-echo "  门店开发预览: http://127.0.0.1:18082/            （热更新）"
-echo "  收银台开发预览: http://127.0.0.1:18083/          （热更新，接口走本地 8080/cashierapi）"
+echo "  当前门店端开发预览: http://127.0.0.1:18091/view_cashier_v3/#/cashier  （cashier-v3 热更新）"
+echo "  收银 V3 专用后端: http://127.0.0.1:${CASHIER_API_PORT}  （独立 PHP/Swoole + Nginx）"
+echo "  平台专用后端: http://127.0.0.1:${PLATFORM_API_PORT}  （独立 PHP/Swoole + Nginx）"
+echo "  旧门店端 18082: 已停用（源码备份于 美容源码/旧端口/18082/）"
+echo "  旧收银台 18083: 已停用（源码备份于 美容源码/旧端口/18083/）"
 echo "  平台集成预览: http://127.0.0.1:8080/admin/login    （build 产物，上线验证用）"
 echo "  前台 H5:     http://127.0.0.1:8080/"
 echo "  收银台(构建): http://127.0.0.1:8080/cashier.html"
 echo "  手机同网访问: http://$(ipconfig getifaddr en0 2>/dev/null || echo '你的Mac局域网IP'):8080"
-echo "  开发日志:    docker logs -f mohe-admin-src / mohe-cashier-src"
-echo "  后端日志:    docker logs -f mohe-app"
+echo "  开发日志:    docker logs -f mohe-admin-src / mohe-cashier-v3-src"
+echo "  后端日志:    docker logs -f mohe-app / mohe-platform-app / mohe-cashier-app"
