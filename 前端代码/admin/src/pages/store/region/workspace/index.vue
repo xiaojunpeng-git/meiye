@@ -94,7 +94,7 @@
                   />
                 </div>
                 <button v-auth="['admin-store-add_store']" class="button secondary" type="button" :disabled="!selectedOrgId" @click="goCreateStore"><svg-icon name="plus" />新建门店</button>
-                <button v-auth="['setting-staff-index']" class="button secondary" type="button" :disabled="!selectedOrgId" @click="openCreateStaff()"><svg-icon name="plus" />新建人员</button>
+                <button v-auth="['setting-staff-index']" class="button secondary" type="button" :disabled="!selectedOrgId && !rootOrgs.length" @click="openCreateStaff()"><svg-icon name="plus" />新建人员</button>
                 <button class="button secondary" type="button" :class="{ 'is-readonly-disabled': !canWrite || writeSubmitting }" :disabled="writeSubmitting" @click="openJobPositionModal"><svg-icon name="plus" />岗位策略</button>
                 <button class="button primary" :class="{ 'is-readonly-disabled': !canWrite || writeSubmitting }" type="button" :disabled="writeSubmitting" :aria-disabled="(!canWrite || writeSubmitting).toString()" @click="openCreateOrgModal()"><svg-icon name="plus" />新增组织</button>
                 <button class="button secondary" :class="{ 'is-readonly-disabled': !canWrite || writeSubmitting }" type="button" :disabled="writeSubmitting" :aria-disabled="(!canWrite || writeSubmitting).toString()" @click="openEditOrgModal"><svg-icon name="edit" />编辑组织</button>
@@ -2094,11 +2094,14 @@ export default {
       });
     },
     openCreateStaff(store) {
-      const orgId = Number(this.selectedOrgId || 0);
+      // 建档入口属于当前组织范围，不要求先点到最末级门店；
+      // 页面尚未完成首个组织选中时，使用已加载的第一个根组织作为默认范围。
+      const orgId = Number(this.selectedOrgId || (this.rootOrgs[0] && this.rootOrgs[0].id) || 0);
       if (!orgId) {
         this.showToast('请先选择组织');
         return;
       }
+      if (!this.selectedOrgId) this.selectedOrgId = orgId;
       if (!this.canEditStaff) {
         this.showToast(this.staffSaveDenyTip);
         return;
