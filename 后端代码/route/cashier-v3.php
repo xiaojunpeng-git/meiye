@@ -95,3 +95,26 @@ Route::group('cashierapi/v3', function () {
     AllowOriginMiddleware::class,
     StationOpenMiddleware::class,
 ]);
+
+// 房间资料控制器属于既有门店控制器命名空间 app\controller\store，不能放在
+// 上面的 cashier.v3.* 控制器前缀组内，否则会被解析为
+// app\controller\cashier\v3\store\system\RoomSettings。
+Route::group('cashierapi/v3/management/room-settings', function () {
+    Route::get('', 'store.system.RoomSettings/index')
+        ->option(['real_name' => 'V3房间设置列表']);
+    Route::post('', 'store.system.RoomSettings/create')
+        ->option(['real_name' => 'V3新增房间']);
+    Route::post('sort', 'store.system.RoomSettings/sort')
+        ->option(['real_name' => 'V3房间排序']);
+    Route::put(':id', 'store.system.RoomSettings/update')
+        ->option(['real_name' => 'V3编辑房间']);
+    Route::post(':id/status', 'store.system.RoomSettings/setStatus')
+        ->option(['real_name' => 'V3更新房间状态']);
+})->middleware([
+    AuthTokenMiddleware::class,
+    ForceStoreSessionMiddleware::class,
+    CashierCheckRoleMiddleware::class,
+    InstallMiddleware::class,
+    AllowOriginMiddleware::class,
+    StationOpenMiddleware::class,
+])->middleware(\app\http\middleware\SystemLogMiddleware::class, 'cashier');

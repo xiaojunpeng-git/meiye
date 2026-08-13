@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import TablePagination from '@/components/common/TablePagination.vue'
 import UnifiedQueryToolbar from '@/components/query/UnifiedQueryToolbar.vue'
 import { formatMoney, requestCashierV3Action, useCashierV3State } from '@/services/cashierV3Bridge'
+import { deleteHangDraft, resumeHangDraft } from '@/services/hangDraftApi.js'
 
 const state = useCashierV3State()
 const router = useRouter()
@@ -13,7 +14,6 @@ const records = computed(() => Array.isArray(hangOrders.value.records) ? hangOrd
 const statusOptions = computed(() => Array.isArray(hangOrders.value.statusOptions) ? hangOrders.value.statusOptions : [])
 const querySettings = ref({})
 const queryModel = ref({})
-const voidConfirmation = ref(null)
 const isVoiding = ref(false)
 const total = computed(() => Math.max(Number(hangOrders.value.total) || 0, records.value.length))
 const page = computed(() => Math.max(1, Number(hangOrders.value.page) || 1))
@@ -21,6 +21,7 @@ const pageSize = computed(() => Math.max(1, Number(hangOrders.value.pageSize) ||
 
 const queryFields = [
   { key: 'hang_at', label: '挂单时间', defaultVisible: true, defaultQuick: true, type: 'date' },
+  { key: 'room_name', label: '房间', defaultVisible: true, defaultQuick: true },
   { key: 'member_name', label: '会员', defaultVisible: true, defaultQuick: true },
   { key: 'phone', label: '手机号', defaultVisible: true },
   { key: 'item_count', label: '商品数量', defaultVisible: true, type: 'number' },
@@ -69,6 +70,7 @@ function applyQuerySettings(settings = {}) {
 function hangFieldValue(record, key) {
   const fieldValues = {
     hang_at: record.hangAt,
+    room_name: record.roomName,
     member_name: record.memberName,
     phone: record.phone,
     item_count: record.itemCount,
@@ -115,37 +117,41 @@ function resultStatus(result) {
 
 async function resumeHangOrder(record) {
   if (record?.canResume !== true) return null
-  const result = await requestAction('resume-hang-order', commandPayload(record))
-  if (['success', 'succeeded'].includes(resultStatus(result))) {
-    await router.push({ name: 'cashier-v3-cashier' })
-  }
-  return result
-}
-
-async function openVoidConfirmation(record) {
-  const result = await requestAction('open-hang-order-void-confirmation', commandPayload(record))
-  const confirmation = responseData(result).hangOrderVoidConfirmation
-  if (confirmation && typeof confirmation === 'object') {
-    voidConfirmation.value = confirmation
-  }
-  return result
-}
-
-function closeVoidConfirmation() {
-  if (!isVoiding.value) voidConfirmation.value = null
-}
-
-async function confirmVoidHangOrder() {
-  const confirmation = voidConfirmation.value
-  if (!confirmation?.hangOrderId || isVoiding.value) return null
-  isVoiding.value = true
   try {
-    const result = await requestAction('void-hang-order', { hangOrderId: confirmation.hangOrderId })
-    if (['success', 'succeeded'].includes(resultStatus(result))) {
-      voidConfirmation.value = null
-      await queryHangOrders({}, false)
+    const saved = await resumeHangDraft({
+      hangOrderId: record.id,
+      stateContextId: String(state.stateContextId || '')
+    })
+    if (saved?.cashierDraft) {
+      // 路由切换会卸载本页，先把一次性恢复结果交给收银页，再跳转。
+      window.__cashierV3PendingHangDraft = saved
     }
-    return result
+    await router.push({ name: 'cashier-v3-cashier' })
+    if (saved?.cashierDraft) {
+      window.dispatchEvent(new CustomEvent('cashier-v3:hang-draft-restored', { detail: saved }))
+    }
+    return { result: { status: 'succeeded' }, data: saved }
+  } catch (error) {
+    throw error
+  }
+}
+
+async function deleteHangOrder(record) {
+  if (!record?.id || isVoiding.value) return null
+  isVoiding.value = true
+  const current = hangOrders.value
+  if (current && Array.isArray(current.records)) {
+    queryResult.value = {
+      ...current,
+      records: current.records.filter((item) => item?.id !== record.id),
+      total: Math.max(0, (Number(current.total) || current.records.length) - 1)
+    }
+  }
+  try {
+    return await deleteHangDraft(record.id)
+  } catch (error) {
+    await queryHangOrders({}, false)
+    throw error
   } finally {
     isVoiding.value = false
   }
@@ -217,8 +223,14 @@ onMounted(() => {
             </td>
             <td>
               <div class="hang-order-row-actions">
-                <button type="button" class="button button--primary" :disabled="record.canResume !== true" @click="resumeHangOrder(record)">提单</button>
-                <button type="button" class="button button--text hang-order-row-actions__danger" @click="openVoidConfirmation(record)">删除</button>
+                <button
+                  v-if="record.canResume === true"
+                  type="button"
+                  class="button button--primary"
+                  title="恢复挂单并返回收银台"
+                  @click="resumeHangOrder(record)"
+                >提单</button>
+                <button type="button" class="button button--text hang-order-row-actions__danger" :disabled="isVoiding" @click="deleteHangOrder(record)">删除</button>
               </div>
             </td>
           </tr>
@@ -227,18 +239,5 @@ onMounted(() => {
       <div v-if="!records.length" class="hang-order-list-empty">暂无有效挂单。请在收银台先选择商品后点击“挂单”。</div>
     </main>
     <TablePagination :total="total" :page="page" :page-size="pageSize" @change="(pagination) => queryHangOrders(pagination, false)" />
-    <div v-if="voidConfirmation" class="hang-order-void-overlay" @click.self="closeVoidConfirmation">
-      <section class="hang-order-void-dialog" role="dialog" aria-modal="true" aria-labelledby="hang-order-void-title">
-        <header>
-          <h2 id="hang-order-void-title">作废挂单</h2>
-          <p>{{ voidConfirmation.hangOrderNo }} · {{ voidConfirmation.memberName }}</p>
-        </header>
-        <p class="hang-order-void-dialog__message">{{ voidConfirmation.message }}</p>
-        <footer>
-          <button type="button" class="button button--secondary" :disabled="isVoiding" @click="closeVoidConfirmation">取消</button>
-          <button type="button" class="button button--danger" :disabled="isVoiding" @click="confirmVoidHangOrder">{{ isVoiding ? '正在作废' : '确认作废' }}</button>
-        </footer>
-      </section>
-    </div>
   </section>
 </template>

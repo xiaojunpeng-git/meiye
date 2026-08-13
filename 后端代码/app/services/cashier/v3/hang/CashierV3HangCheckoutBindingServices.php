@@ -14,27 +14,29 @@ use app\services\cashier\v3\hang\authority\ThinkPhpCashierV3HangOrderRepository;
 use think\facade\Db;
 
 /**
- * Binds a restored normal-product hang to its later checkout.  The source
- * reference is read-only while preparing a checkout request; final settlement
- * changes the hang in the same transaction as sales, payment and facts.
+ * Performs post-settlement cleanup for a restored hang draft. A resume only
+ * restores editable cart data; the internal request reference is never a
+ * checkout source or a submission resource.
  */
 final class CashierV3HangCheckoutBindingServices
 {
     public const CONTRACT_VERSION = CashierV3HangResumeServices::CONTRACT_VERSION;
 
-    /** @return array<string,mixed>|null */
-    public function discoverForWorkspaceDraft(
-        array $draft,
+    /**
+     * Pins the restored draft as an internal cleanup dependency. It is not a
+     * checkout source document: submission preparation reads it here and the
+     * immutable final resource plan upgrades it to a mutate lock only when the
+     * successful settlement physically deletes the draft.
+     *
+     * @return array<string,mixed>
+     */
+    public function discoverSettlementCleanupResource(
+        string $hangOrderId,
+        string $workspaceId,
+        string $stateContextId,
         CashierV3OperatorScope $operator,
         CashierV3DataScopeContext $dataScope
-    ) {
-        $hangOrderId = trim((string)($draft['resumed_hang_order_id'] ?? ''));
-        if ($hangOrderId === '') {
-            return null;
-        }
-        $this->assertScope($operator, $dataScope);
-        $workspaceId = (string)($draft['workspace_id'] ?? '');
-        $stateContextId = (string)($draft['state_context_id'] ?? '');
+    ): array {
         $header = $this->readResumedHeader(
             $hangOrderId,
             $workspaceId,
@@ -43,36 +45,31 @@ final class CashierV3HangCheckoutBindingServices
             $dataScope,
             false
         );
-        return $this->resource($header, 'read');
-    }
-
-    /** Recheck source binding under the final prepare-checkout locks. */
-    public function assertWorkspaceBindingInTx(
-        array $draft,
-        array $contexts,
-        CashierV3OperatorScope $operator,
-        CashierV3DataScopeContext $dataScope
-    ): void {
-        CashierV3TransactionGuard::assertInTransaction('hangCheckoutSourceBinding');
-        $hangOrderId = trim((string)($draft['resumed_hang_order_id'] ?? ''));
-        if ($hangOrderId === '') {
-            return;
-        }
-        $header = $this->readResumedHeader(
-            $hangOrderId,
-            (string)$draft['workspace_id'],
-            (string)$draft['state_context_id'],
-            $operator,
-            $dataScope,
-            true
-        );
-        $expected = $this->contextVersion($contexts, 'hang_order', $hangOrderId);
-        if ($expected <= 0 || $expected !== (int)$header['hang_version']) {
+        if (trim((string)($header['checkout_request_id'] ?? '')) !== '') {
             throw CashierV3CommandException::versionConflict(
-                '该挂单已经变化，请返回重新提单。',
-                ['reason' => 'hang_checkout_source_version_changed']
+                '该挂单已经进入其他结账流程，请刷新后重试。',
+                ['reason' => 'hang_checkout_cleanup_already_bound']
             );
         }
+
+        $version = (int)$header['hang_version'];
+        return [
+            'kind' => CashierV3HangOrderVersionProvider::KIND,
+            'id' => $hangOrderId,
+            'expectedVersion' => $version,
+            'roles' => ['hang_order'],
+            // Preparing the final plan must not mutate the draft itself.
+            'accessMode' => 'read',
+            'providerContractVersion' => CashierV3HangOrderVersionProvider::CONTRACT_VERSION,
+            'authorityFingerprint' => hash('sha256', json_encode([
+                'contractVersion' => self::CONTRACT_VERSION,
+                'hangOrderId' => $hangOrderId,
+                'hangOrderNo' => (string)$header['hang_order_no'],
+                'status' => (string)$header['hang_status'],
+                'version' => $version,
+                'immutableFingerprint' => (string)$header['immutable_fingerprint'],
+            ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)),
+        ];
     }
 
     /**
@@ -92,114 +89,28 @@ final class CashierV3HangCheckoutBindingServices
         array $eventContract
     ) {
         CashierV3TransactionGuard::assertInTransaction('hangCheckoutCompletion');
-        $source = $this->hangSource($aggregate['sources'] ?? []);
-        if ($source === null) {
+        $request = is_array($aggregate['request'] ?? null) ? $aggregate['request'] : [];
+        $hangOrderId = trim((string)($request['resumed_hang_order_id'] ?? ''));
+        if ($hangOrderId === '') {
             return null;
         }
-        $hangOrderId = (string)$source['source_id'];
-        $sourceVersion = (int)$source['source_version'];
-        $request = is_array($aggregate['request'] ?? null) ? $aggregate['request'] : [];
-        $workspaceId = (string)($request['workspace_id'] ?? '');
-        $stateContextId = (string)($request['state_context_id'] ?? '');
-        $header = $this->readResumedHeader(
-            $hangOrderId,
-            $workspaceId,
-            $stateContextId,
-            $operator,
-            $dataScope,
-            true
-        );
-        if ($sourceVersion <= 0 || (int)$header['hang_version'] !== $sourceVersion
-            || trim((string)($header['checkout_request_id'] ?? '')) !== '') {
-            throw CashierV3CommandException::versionConflict(
-                '该挂单已经进入其他结账流程，请刷新后重试。',
-                ['reason' => 'hang_checkout_completion_version_or_binding_changed']
-            );
-        }
-        $salesOrderId = trim((string)($salesOrder['orderId'] ?? ''));
-        $salesOrderNo = trim((string)($salesOrder['orderNo'] ?? ''));
-        if ($salesOrderId === '' || $salesOrderNo === '') {
-            throw self::failure('hang_checkout_completion_sales_order_invalid');
-        }
-        $lines = $this->rows(Db::name(ThinkPhpCashierV3HangOrderRepository::LINE_TABLE)
-            ->where('tenant_id', $dataScope->tenantId())
-            ->where('hang_order_id', $hangOrderId)
-            ->order('line_no asc,id asc')
-            ->lock(true)
-            ->select());
-        if (count($lines) !== (int)$header['line_count']) {
-            throw self::failure('hang_checkout_completion_line_count_invalid');
-        }
-        foreach ($lines as $index => $line) {
-            if ((string)($line['line_status'] ?? '') !== 'resumed'
-                || (int)($line['line_version'] ?? 0) !== 2
-                || (string)($line['line_role'] ?? '') !== 'sale') {
-                throw self::failure('hang_checkout_completion_line_state_invalid', ['index' => $index]);
-            }
-        }
-        $now = time();
-        $headerUpdated = (int)Db::name(ThinkPhpCashierV3HangOrderRepository::HEADER_TABLE)
+        // A normal resumed hang is only a saved cart.  It never participates
+        // in checkout validation, resource locks or payment facts.  Once the
+        // sales/payment transaction succeeds, remove that draft directly.
+        $deletedLines = (int)Db::name(ThinkPhpCashierV3HangOrderRepository::LINE_TABLE)
             ->where('tenant_id', $dataScope->tenantId())
             ->where('store_id', $operator->storeId())
             ->where('hang_order_id', $hangOrderId)
-            ->where('hang_version', $sourceVersion)
-            ->where('hang_status', 'resumed_checkout')
-            ->where('resume_workspace_id', $workspaceId)
-            ->where('resume_state_context_id', $stateContextId)
-            ->where('checkout_request_id', '')
-            ->update([
-                'hang_status' => 'settled',
-                'checkout_request_id' => $checkoutRequestId,
-                'sales_order_id' => $salesOrderId,
-                'settled_at' => $now,
-                'update_time' => $now,
-            ]);
-        if ($headerUpdated !== 1) {
-            throw CashierV3CommandException::versionConflict(
-                '挂单结账状态已经变化，请刷新后重试。',
-                ['reason' => 'hang_checkout_completion_header_cas_conflict']
-            );
-        }
-        $lineUpdated = (int)Db::name(ThinkPhpCashierV3HangOrderRepository::LINE_TABLE)
+            ->delete();
+        $deletedHeader = (int)Db::name(ThinkPhpCashierV3HangOrderRepository::HEADER_TABLE)
             ->where('tenant_id', $dataScope->tenantId())
+            ->where('store_id', $operator->storeId())
             ->where('hang_order_id', $hangOrderId)
-            ->where('line_status', 'resumed')
-            ->update([
-                'line_status' => 'settled',
-                'line_version' => Db::raw('line_version + 1'),
-                'update_time' => $now,
-            ]);
-        if ($lineUpdated !== count($lines)) {
-            throw self::failure('hang_checkout_completion_line_update_incomplete');
-        }
-        $eventRecorder->recordInTx($eventExecution, $eventContract, [
-            'event_type' => 'hang_order.settled',
-            'aggregate_type' => 'hang_order',
-            'aggregate_id' => $hangOrderId,
-            'aggregate_version' => $sourceVersion + 1,
-            'event_version' => 1,
-            'source_type' => 'submit-checkout',
-            'source_id' => $checkoutRequestId,
-            'member_id' => (int)$header['member_id'],
-            'business_date' => (string)$header['business_date'],
-            'occurred_at' => $now,
-            'settled_at' => $now,
-            'recorded_at' => $now,
-            'aggregate_name_snapshot' => (string)$header['hang_order_no'],
-            'store_name_snapshot' => (string)$header['store_name_snapshot'],
-            'payload' => [
-                'contractVersion' => self::CONTRACT_VERSION,
-                'hangOrderId' => $hangOrderId,
-                'checkoutRequestId' => $checkoutRequestId,
-                'salesOrderId' => $salesOrderId,
-                'salesOrderNo' => $salesOrderNo,
-            ],
-        ]);
+            ->delete();
         return [
             'hangOrderId' => $hangOrderId,
-            'hangOrderNo' => (string)$header['hang_order_no'],
-            'hangVersion' => $sourceVersion + 1,
-            'status' => 'settled',
+            'deleted' => $deletedHeader === 1,
+            'deletedLineCount' => $deletedLines,
         ];
     }
 
@@ -226,13 +137,20 @@ final class CashierV3HangCheckoutBindingServices
         }
         $header = $query->find();
         $valid = is_array($header)
-            && (string)($header['hang_mode'] ?? '') === CashierV3HangOrderPlanV1::MODE_NORMAL
-            && (string)($header['hang_status'] ?? '') === 'resumed_checkout'
-            && (string)($header['resume_contract_version'] ?? '') === self::CONTRACT_VERSION
-            && hash_equals($workspaceId, (string)($header['resume_workspace_id'] ?? ''))
-            && hash_equals($stateContextId, (string)($header['resume_state_context_id'] ?? ''))
-            && trim((string)($header['resume_command_idempotency_key'] ?? '')) !== ''
-            && (int)($header['resumed_at'] ?? 0) > 0
+            && in_array((string)($header['hang_mode'] ?? ''), [
+                CashierV3HangOrderPlanV1::MODE_NORMAL,
+                CashierV3HangOrderPlanV1::MODE_START_SERVICE,
+            ], true)
+            && in_array((string)($header['hang_status'] ?? ''), [
+                CashierV3HangOrderPlanV1::STATUS_PENDING_CHECKOUT,
+                CashierV3HangOrderPlanV1::STATUS_SERVICE_IN_PROGRESS,
+                'resumed_checkout',
+            ], true)
+            && in_array((string)($header['resume_contract_version'] ?? ''), [
+                CashierV3HangOrderPlanV1::RESUME_SALE_ONLY_CONTRACT_VERSION,
+                CashierV3HangOrderPlanV1::RESUME_SALE_PROJECT_CONTRACT_VERSION,
+                CashierV3HangOrderPlanV1::RESUME_DRAFT_CONTRACT_VERSION,
+            ], true)
             && (int)($header['settled_at'] ?? 0) === 0
             && (int)($header['hang_version'] ?? 0) > 0;
         if (!$valid) {
@@ -242,54 +160,6 @@ final class CashierV3HangCheckoutBindingServices
             );
         }
         return $header;
-    }
-
-    /** @return array<string,mixed> */
-    private function resource(array $header, string $accessMode): array
-    {
-        return [
-            'kind' => CashierV3HangOrderVersionProvider::KIND,
-            'id' => (string)$header['hang_order_id'],
-            'expectedVersion' => (int)$header['hang_version'],
-            'roles' => ['hang_order'],
-            'accessMode' => $accessMode,
-            'providerContractVersion' => CashierV3HangOrderVersionProvider::CONTRACT_VERSION,
-            'authorityFingerprint' => hash('sha256', implode('|', [
-                self::CONTRACT_VERSION,
-                (string)$header['immutable_fingerprint'],
-                (string)$header['hang_status'],
-                (string)$header['hang_version'],
-                (string)$header['resume_workspace_id'],
-                (string)$header['resume_state_context_id'],
-            ])),
-        ];
-    }
-
-    /** @return array<string,mixed>|null */
-    private function hangSource($sources)
-    {
-        $found = null;
-        foreach ((array)$sources as $source) {
-            if (!is_array($source) || (string)($source['source_kind'] ?? '') !== 'hang_order') {
-                continue;
-            }
-            if ($found !== null) {
-                throw self::failure('hang_checkout_source_duplicate');
-            }
-            $found = $source;
-        }
-        return $found;
-    }
-
-    private function contextVersion(array $contexts, string $kind, string $id): int
-    {
-        foreach ($contexts as $context) {
-            if ((string)($context['kind'] ?? '') === $kind
-                && (string)($context['id'] ?? '') === $id) {
-                return (int)($context['expected_version'] ?? $context['expectedVersion'] ?? 0);
-            }
-        }
-        return 0;
     }
 
     private function assertScope(CashierV3OperatorScope $operator, CashierV3DataScopeContext $dataScope): void

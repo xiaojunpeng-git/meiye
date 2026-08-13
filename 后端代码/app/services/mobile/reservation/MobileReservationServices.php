@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace app\services\mobile\reservation;
 
 use app\services\cashier\v3\CashierV3CommandException;
+use app\services\cashier\v3\CashierV3CheckoutWorkspaceIdentity;
 use app\services\cashier\v3\CashierV3ResourceScope;
 use app\services\cashier\v3\bootstrap\CashierV3Bootstrap;
 use think\facade\Db;
@@ -85,7 +86,7 @@ final class MobileReservationServices
         if ($versions === null) {
             throw new \LogicException('mobile_reservation_workspace_versions_missing');
         }
-        $workspaceId = sprintf('ws:%d:%d:%s', $scope->storeId(), $scope->operatorId(), $stateContextId);
+        $workspaceId = CashierV3CheckoutWorkspaceIdentity::id($scope->storeId(), $stateContextId);
         Db::transaction(function () use ($versions, $scope, $workspaceId): void {
             $versions->ensureRegistered(
                 CashierV3ResourceScope::of(CashierV3ResourceScope::TYPE_STORE, (string)$scope->storeId()),

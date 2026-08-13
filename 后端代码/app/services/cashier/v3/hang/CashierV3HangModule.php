@@ -80,10 +80,8 @@ final class CashierV3HangModule
         $handlers->registerProjection('open-hang-order', function (array $scope) use ($services, $workspace): array {
             $stateContextId = (string)($scope['state_context_id'] ?? '');
             $operatorScope = $scope['operator_scope'];
-            $workspaceId = sprintf(
-                'ws:%d:%d:%s',
+            $workspaceId = \app\services\cashier\v3\CashierV3CheckoutWorkspaceIdentity::id(
                 $operatorScope->storeId(),
-                $operatorScope->operatorId(),
                 $stateContextId
             );
             $draft = $workspace->readDraftOrSyntheticGuest(
@@ -145,6 +143,7 @@ final class CashierV3HangModule
             return [
                 'data' => ['room' => $part['payload']],
                 'versions' => $part['public_versions'],
+                'return_root_state' => true,
                 'message' => '房态已刷新。',
             ];
         });
@@ -240,7 +239,8 @@ final class CashierV3HangModule
                     '_navigation' => ['routeName' => 'cashier-v3-cashier', 'query' => []],
                 ],
                 'business_no' => (string)$restored['hangOrderNo'],
-                'touched' => ['hang_order', 'cashier_workspace'],
+                // 提单已物理消费草稿；只推进被写入的当前工作台版本。
+                'touched' => ['cashier_workspace'],
                 'message' => '挂单已提取，请继续结账。',
             ];
         });
@@ -341,7 +341,7 @@ final class CashierV3HangModule
         }
         $voidPolicy = new CashierV3ContextPolicy(
             'void-hang-order',
-            ['cashier_workspace'],
+            [],
             [],
             static function (array $payload, array $base): array {
                 $hangOrderId = trim((string)($payload['hangOrderId'] ?? $payload['hang_order_id'] ?? ''));

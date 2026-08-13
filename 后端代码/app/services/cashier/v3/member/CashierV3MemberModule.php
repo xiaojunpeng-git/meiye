@@ -154,12 +154,14 @@ final class CashierV3MemberModule
         }
         if (!$handlers->hasProjection('query-member-selector')) {
             $handlers->registerProjection('query-member-selector', function (array $scope): array {
+                $payload = is_array($scope['payload'] ?? null) ? $scope['payload'] : [];
                 return [
                     'data' => self::querySelector(
-                        is_array($scope['payload'] ?? null) ? $scope['payload'] : [],
+                        $payload,
                         $scope['operator_scope'],
                         $scope['data_scope'],
-                        true
+                        // 推荐人必须是当前门店可见会员；不能复用办理业务时的全集团选客例外。
+                        (string)($payload['selectorContext'] ?? $payload['selector_context'] ?? '') !== 'member-referrer'
                     ),
                 ];
             });
@@ -679,10 +681,8 @@ final class CashierV3MemberModule
                 CashierV3ResultCode::STATUS_FAILED
             );
         }
-        return sprintf(
-            'ws:%d:%d:%s',
+        return \app\services\cashier\v3\CashierV3CheckoutWorkspaceIdentity::id(
             $operatorScope->storeId(),
-            $operatorScope->operatorId(),
             $stateContextId
         );
     }
@@ -1179,6 +1179,7 @@ final class CashierV3MemberModule
             }
         }
         $birthday = self::normalizeBirthday($payload['birthday'] ?? '');
+        $referrerMemberId = self::resolveReferrerMemberId($payload, 0, $operatorScope, $dataScope);
         $data = [
             'nickname' => $name,
             'real_name' => $name,
@@ -1196,6 +1197,7 @@ final class CashierV3MemberModule
             'addres' => trim((string)($payload['address'] ?? '')),
             'mark' => trim((string)($payload['note'] ?? '')),
             'adminId' => (int)($operator['id'] ?? $operator['operator_id'] ?? $dataScope->operatorId()),
+            'spread_uid' => $referrerMemberId,
         ];
         $saved = $userServices->save($data);
         if (!$saved || !(int)$saved->uid) {
@@ -1270,7 +1272,7 @@ final class CashierV3MemberModule
             $eventExecution,
             $eventContract
         );
-        $row = Db::name('user')->where('uid', $uid)->field('uid,nickname,real_name,phone,bar_code,belong_store_id')->find();
+        $row = Db::name('user')->where('uid', $uid)->field('uid,nickname,real_name,phone,bar_code,belong_store_id,spread_uid')->find();
         return self::formatMemberRow($row ?: ['uid' => $uid, 'real_name' => $name, 'phone' => $phone, 'belong_store_id' => $operatorScope->storeId()], $operatorScope->storeId());
     }
 
@@ -1307,6 +1309,17 @@ final class CashierV3MemberModule
             'addres' => trim((string)($payload['address'] ?? $payload['addres'] ?? ($member['addres'] ?? ''))),
             'mark' => trim((string)($payload['note'] ?? $payload['mark'] ?? ($member['mark'] ?? ''))),
         ];
+        $referrerSupplied = array_key_exists('referrerMemberId', $payload) || array_key_exists('referrer_member_id', $payload);
+        if ($referrerSupplied) {
+            $referrerId = self::resolveReferrerMemberId($payload, (int)$member['uid'], $operatorScope, $dataScope);
+            if ($referrerId !== (int)($member['spread_uid'] ?? 0)
+                && Db::name('cashier_v3_customer_lifecycle_projection')
+                    ->where('tenant_id', $dataScope->tenantId())->where('member_id', (int)$member['uid'])
+                    ->where('first_course_completed_at', '>', 0)->value('id')) {
+                throw self::validation('referrerMemberId', '首次疗程卡成交后不能修改推荐人。');
+            }
+            $updates['spread_uid'] = $referrerId;
+        }
         // 编辑与新增共用完整档案契约：档案字段、身份证、等级和标签都从同一
         // 个命令一次保存，避免编辑窗体显示了字段却只落基础资料。
         $profile = self::validateProfileSelections($payload, $operatorScope);
@@ -1349,7 +1362,30 @@ final class CashierV3MemberModule
         } catch (\Throwable $e) {
             throw self::validation('memberProfile', '会员等级或标签保存失败，请重试。');
         }
+        $exclusiveServicePersonChanged = false;
+        if ($profile['exclusive_service_person_supplied']) {
+            $exclusiveServicePersonChanged = self::updateExclusiveServicePerson(
+                (int)$member['uid'],
+                $profile['exclusive_service_person'],
+                $operatorScope,
+                $dataScope,
+                $idempotencyKey,
+                time()
+            );
+        }
         $current = Db::name('user')->where('uid', (int)$member['uid'])->lock(true)->find();
+        $changedFields = ['name', 'sex', 'birthday', 'address', 'note', 'idCard', 'profileFields', 'memberLevelId', 'memberTagIds'];
+        if ($referrerSupplied) $changedFields[] = 'referrerMemberId';
+        $mutationPayload = [
+            'changed_fields' => $changedFields,
+            'source' => 'cashier_v3',
+        ];
+        if ($profile['exclusive_service_person_supplied']) {
+            $changedFields[] = 'exclusiveServicePersonId';
+            $mutationPayload['changed_fields'] = $changedFields;
+            $mutationPayload['exclusive_service_person_id'] = (int)($profile['exclusive_service_person']['staff_id'] ?? 0);
+            $mutationPayload['exclusive_service_person_changed'] = $exclusiveServicePersonChanged;
+        }
         self::recordMemberMutationEvent(
             'member.updated',
             'update-member',
@@ -1357,10 +1393,7 @@ final class CashierV3MemberModule
             $operatorScope,
             $dataScope,
             $idempotencyKey,
-            [
-                'changed_fields' => ['name', 'sex', 'birthday', 'address', 'note', 'idCard', 'profileFields', 'memberLevelId', 'memberTagIds'],
-                'source' => 'cashier_v3',
-            ],
+            $mutationPayload,
             $eventRecorder,
             $eventExecution,
             $eventContract
@@ -1411,6 +1444,22 @@ final class CashierV3MemberModule
         return self::formatMemberRow($current ?: $member, $operatorScope->storeId());
     }
 
+    /** Resolves the referrer inside the V3 member-write transaction and scope. */
+    private static function resolveReferrerMemberId(array $payload, int $memberId, CashierV3OperatorScope $operatorScope, CashierV3DataScopeContext $dataScope): int
+    {
+        $raw = $payload['referrerMemberId'] ?? $payload['referrer_member_id'] ?? 0;
+        if (!is_int($raw) && !is_string($raw) || preg_match('/^(?:0|[1-9][0-9]*)$/D', (string)$raw) !== 1) {
+            throw self::validation('referrerMemberId', '推荐人资料无效，请重新选择。');
+        }
+        $referrerId = (int)$raw;
+        if ($referrerId === 0) return 0;
+        if ($memberId > 0 && $referrerId === $memberId) {
+            throw self::validation('referrerMemberId', '推荐人不能是顾客本人。');
+        }
+        self::findManageableMember((string)$referrerId, $operatorScope, $dataScope, true);
+        return $referrerId;
+    }
+
     private static function findManageableMember(
         string $memberId,
         CashierV3OperatorScope $operatorScope,
@@ -1459,6 +1508,7 @@ final class CashierV3MemberModule
         $exclusive = $uid > 0
             ? Db::name(self::EXCLUSIVE_SERVICE_TABLE)->where('member_id', $uid)->where('status', 1)->find()
             : null;
+        $referrer = self::referrerProjection($member);
         return [
             'id' => (string)($member['uid'] ?? ''),
             'memberId' => (int)($member['uid'] ?? 0),
@@ -1474,7 +1524,29 @@ final class CashierV3MemberModule
             'profileFields' => $profileFields,
             'exclusiveServicePersonId' => (int)($exclusive['staff_id'] ?? 0),
             'exclusiveServiceStaffRecord' => $exclusive ?: null,
+            'referrerMemberId' => (int)$referrer['member_id'],
+            'referrerMemberName' => (string)$referrer['name'],
+            'referrerLocked' => (bool)$referrer['locked'],
         ];
+    }
+
+    /**
+     * 推荐关系仍以 user.spread_uid 为权威主数据；生命周期投影只提供首次疗程后的只读锁定状态。
+     * @return array{member_id:int,name:string,locked:bool}
+     */
+    private static function referrerProjection(array $member): array
+    {
+        $memberId = (int)($member['uid'] ?? 0);
+        $referrerId = (int)($member['spread_uid'] ?? 0);
+        $name = '';
+        if ($referrerId > 0) {
+            $referrer = Db::name('user')->where('uid', $referrerId)->field('real_name,nickname')->find();
+            $name = trim((string)($referrer['real_name'] ?? '')) ?: trim((string)($referrer['nickname'] ?? ''));
+        }
+        $locked = $memberId > 0 && (int)Db::name('cashier_v3_customer_lifecycle_projection')
+            ->where('member_id', $memberId)
+            ->max('first_course_completed_at') > 0;
+        return ['member_id' => $referrerId, 'name' => $name, 'locked' => $locked];
     }
 
     /**
@@ -1599,6 +1671,10 @@ final class CashierV3MemberModule
             'name' => $name,
             'phone' => (string)($member['phone'] ?? ''),
         ]);
+        $referrer = self::referrerProjection($member);
+        $payload['referrer_member_id'] = (int)$referrer['member_id'];
+        $payload['referrer_member_name_snapshot'] = (string)$referrer['name'];
+        $payload['referrer_locked'] = (bool)$referrer['locked'];
         $eventRecorder->recordInTx($eventExecution, $eventContract, [
             'event_type' => $eventType,
             'aggregate_type' => 'member',
@@ -1618,7 +1694,7 @@ final class CashierV3MemberModule
 
     /**
      * 校验并规范化完整建档中的可落库选择项。
-     * @return array{level_id:int,tag_ids:int[],exclusive_service_person:?array}
+     * @return array{level_id:int,tag_ids:int[],exclusive_service_person:?array,exclusive_service_person_supplied:bool}
      */
     private static function validateProfileSelections(array $payload, CashierV3OperatorScope $operatorScope): array
     {
@@ -1673,6 +1749,8 @@ final class CashierV3MemberModule
             }
         }
 
+        $exclusiveServicePersonSupplied = array_key_exists('exclusiveServicePersonId', $payload)
+            || array_key_exists('exclusive_service_person_id', $payload);
         $servicePersonRaw = $payload['exclusiveServicePersonId']
             ?? $payload['exclusive_service_person_id']
             ?? null;
@@ -1713,7 +1791,180 @@ final class CashierV3MemberModule
             'level_id' => $levelId,
             'tag_ids' => $tagIds,
             'exclusive_service_person' => $exclusiveServicePerson,
+            'exclusive_service_person_supplied' => $exclusiveServicePersonSupplied,
         ];
+    }
+
+    /**
+     * 更新会员的当前专属服务人，并追加不可覆盖的变更历史。
+     * 未提交该字段的编辑由调用方跳过本方法；明确提交空值才表示解除绑定。
+     */
+    private static function updateExclusiveServicePerson(
+        int $uid,
+        ?array $person,
+        CashierV3OperatorScope $operatorScope,
+        CashierV3DataScopeContext $dataScope,
+        string $idempotencyKey,
+        int $occurredAt
+    ): bool {
+        CashierV3TransactionGuard::assertInTransaction('memberExclusiveServicePersonUpdate');
+        if ($uid <= 0 || trim($idempotencyKey) === '') {
+            throw new CashierV3CommandException(
+                CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
+                '会员操作幂等标识缺失，本次操作已取消。',
+                CashierV3ResultCode::STATUS_FAILED
+            );
+        }
+
+        $current = Db::name(self::EXCLUSIVE_SERVICE_TABLE)
+            ->where('member_id', $uid)
+            ->lock(true)
+            ->find();
+        $previous = self::exclusiveServiceSnapshot($current ?: []);
+        $next = $person === null ? self::exclusiveServiceSnapshot([]) : self::exclusiveServiceSnapshot($person);
+        $isCurrentActive = (int)($current['status'] ?? 0) === 1;
+        if ($isCurrentActive && $previous === $next) {
+            return false;
+        }
+        if (!$current && $person === null) {
+            return false;
+        }
+
+        $operatorName = self::exclusiveServiceOperatorName($operatorScope, $dataScope);
+        $sourceType = 'member_update';
+        $sourceBusinessType = 'member';
+        $sourceBusinessId = (string)$uid;
+        $reason = $person === null ? '编辑会员时清空' : '编辑会员时指定';
+        $changeKey = 'exclusive_service:' . $uid . ':' . trim($idempotencyKey);
+        $storeName = '';
+        if ($person !== null) {
+            $storeName = (string)Db::name('system_store')
+                ->where('id', (int)$next['store_id'])
+                ->where('is_del', 0)
+                ->where('is_show', 1)
+                ->value('name');
+            if ($storeName === '') {
+                throw self::validation('exclusiveServicePersonId', '专属服务人所属门店不存在或已失效。');
+            }
+        }
+
+        try {
+            if ($current) {
+                $affected = Db::name(self::EXCLUSIVE_SERVICE_TABLE)
+                    ->where('id', (int)$current['id'])
+                    ->where('version', (int)$current['version'])
+                    ->update([
+                        'staff_id' => (int)$next['staff_id'],
+                        'employee_id' => (int)$next['employee_id'],
+                        'store_id' => (int)$next['store_id'],
+                        'staff_name' => (string)$next['staff_name'],
+                        'store_name' => $storeName,
+                        'source_type' => $sourceType,
+                        'source_business_type' => $sourceBusinessType,
+                        'source_business_id' => $sourceBusinessId,
+                        'reason' => $reason,
+                        'status' => $person === null ? 0 : 1,
+                        'version' => (int)$current['version'] + 1,
+                        'bound_at' => $occurredAt,
+                        'operator_id' => $operatorScope->operatorId(),
+                        'operator_name' => $operatorName,
+                        'idempotency_key' => trim($idempotencyKey),
+                        'updated_at' => $occurredAt,
+                    ]);
+                if ((int)$affected !== 1) {
+                    throw new \RuntimeException('exclusive current relation update returned non-one');
+                }
+            } else {
+                $inserted = Db::name(self::EXCLUSIVE_SERVICE_TABLE)->insert([
+                    'member_id' => $uid,
+                    'staff_id' => (int)$next['staff_id'],
+                    'employee_id' => (int)$next['employee_id'],
+                    'store_id' => (int)$next['store_id'],
+                    'staff_name' => (string)$next['staff_name'],
+                    'store_name' => $storeName,
+                    'source_type' => $sourceType,
+                    'source_business_type' => $sourceBusinessType,
+                    'source_business_id' => $sourceBusinessId,
+                    'reason' => $reason,
+                    'status' => 1,
+                    'version' => 1,
+                    'bound_at' => $occurredAt,
+                    'operator_id' => $operatorScope->operatorId(),
+                    'operator_name' => $operatorName,
+                    'idempotency_key' => trim($idempotencyKey),
+                    'created_at' => $occurredAt,
+                    'updated_at' => $occurredAt,
+                ]);
+                if ((int)$inserted !== 1) {
+                    throw new \RuntimeException('exclusive current relation insert returned non-one');
+                }
+            }
+            $historyInserted = Db::name(self::EXCLUSIVE_SERVICE_CHANGE_TABLE)->insert([
+                'change_key' => $changeKey,
+                'member_id' => $uid,
+                'previous_staff_id' => (int)$previous['staff_id'],
+                'previous_employee_id' => (int)$previous['employee_id'],
+                'previous_store_id' => (int)$previous['store_id'],
+                'previous_staff_name' => (string)$previous['staff_name'],
+                'previous_store_name' => (string)($current['store_name'] ?? ''),
+                'current_staff_id' => (int)$next['staff_id'],
+                'current_employee_id' => (int)$next['employee_id'],
+                'current_store_id' => (int)$next['store_id'],
+                'current_staff_name' => (string)$next['staff_name'],
+                'current_store_name' => $storeName,
+                'source_type' => $sourceType,
+                'source_business_type' => $sourceBusinessType,
+                'source_business_id' => $sourceBusinessId,
+                'reason' => $reason,
+                'operator_id' => $operatorScope->operatorId(),
+                'operator_name' => $operatorName,
+                'idempotency_key' => trim($idempotencyKey),
+                'occurred_at' => $occurredAt,
+                'recorded_at' => $occurredAt,
+                'created_at' => $occurredAt,
+            ]);
+            if ((int)$historyInserted !== 1) {
+                throw new \RuntimeException('exclusive change insert returned non-one');
+            }
+        } catch (CashierV3CommandException $e) {
+            throw $e;
+        } catch (\Throwable $e) {
+            throw new CashierV3CommandException(
+                CashierV3ResultCode::ACTION_DEPENDENCY_NOT_READY,
+                '专属服务人记录保存失败，本次会员资料修改已取消。',
+                CashierV3ResultCode::STATUS_FAILED,
+                ['missing_tables' => ['eb_' . self::EXCLUSIVE_SERVICE_TABLE, 'eb_' . self::EXCLUSIVE_SERVICE_CHANGE_TABLE]]
+            );
+        }
+        return true;
+    }
+
+    /** @return array{staff_id:int,employee_id:int,store_id:int,staff_name:string} */
+    private static function exclusiveServiceSnapshot(array $record): array
+    {
+        return [
+            'staff_id' => (int)($record['staff_id'] ?? 0),
+            'employee_id' => (int)($record['employee_id'] ?? 0),
+            'store_id' => (int)($record['store_id'] ?? 0),
+            'staff_name' => trim((string)($record['staff_name'] ?? '')),
+        ];
+    }
+
+    private static function exclusiveServiceOperatorName(
+        CashierV3OperatorScope $operatorScope,
+        CashierV3DataScopeContext $dataScope
+    ): string {
+        $operatorProfile = $dataScope->operatorProfile();
+        $operatorName = trim((string)($operatorProfile['staff_name']
+            ?? $operatorProfile['real_name']
+            ?? $operatorProfile['account']
+            ?? ''));
+        if ($operatorName === '') {
+            $operatorName = (string)Db::name('system_store_staff')
+                ->where('id', $operatorScope->operatorId())
+                ->value('staff_name');
+        }
+        return $operatorName !== '' ? $operatorName : '操作人#' . $operatorScope->operatorId();
     }
 
     /**
@@ -2081,6 +2332,11 @@ final class CashierV3MemberModule
             'exclusive_service_person_employee_id' => (int)($exclusiveServicePerson['employee_id'] ?? 0),
             'source' => 'cashier_v3',
         ];
+        $member = Db::name('user')->where('uid', $uid)->field('uid,spread_uid')->find() ?: ['uid' => $uid];
+        $referrer = self::referrerProjection($member);
+        $payload['referrer_member_id'] = (int)$referrer['member_id'];
+        $payload['referrer_member_name_snapshot'] = (string)$referrer['name'];
+        $payload['referrer_locked'] = (bool)$referrer['locked'];
         $storeName = (string)Db::name('system_store')->where('id', $operatorScope->storeId())->value('name');
         $eventRecorder->recordInTx($eventExecution, $eventContract, [
             'event_type' => 'member.created',
@@ -2166,6 +2422,7 @@ final class CashierV3MemberModule
         $storeId = (int)($row['belong_store_id'] ?? $currentStoreId);
         $state = self::memberState($row);
         $name = trim((string)($row['real_name'] ?? '')) ?: trim((string)($row['nickname'] ?? ''));
+        $referrer = self::referrerProjection($row);
         return [
             'id' => (string)($row['uid'] ?? 0),
             // 下游写入（如独立赠送兼容权益）使用 user.uid 作为权威会员外键。
@@ -2181,6 +2438,9 @@ final class CashierV3MemberModule
             'organizationName' => (string)(self::organizationNamesForStores([$storeId])[$storeId] ?? ''),
             'selectable' => $state['selectable'],
             'disabledReason' => $state['reason'],
+            'referrerMemberId' => (int)$referrer['member_id'],
+            'referrerMemberName' => (string)$referrer['name'],
+            'referrerLocked' => (bool)$referrer['locked'],
         ];
     }
 

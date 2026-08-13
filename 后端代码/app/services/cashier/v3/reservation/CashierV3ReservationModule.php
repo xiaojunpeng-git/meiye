@@ -57,7 +57,7 @@ final class CashierV3ReservationModule
                 } else {
                     $options = self::catalogOptions($catalog, $operator, $dataScope, $selectedMemberId);
                     $stateContextId = (string)($scope['state_context_id'] ?? '');
-                    $workspaceId = sprintf('ws:%d:%d:%s', $operator->storeId(), $operator->operatorId(), $stateContextId);
+                    $workspaceId = \app\services\cashier\v3\CashierV3CheckoutWorkspaceIdentity::id($operator->storeId(), $stateContextId);
                     $workspaceVersion = (int)Db::name('cashier_v3_resource_version')
                         ->where('scope_type', 'store')->where('scope_id', (string)$operator->storeId())
                         ->where('resource_kind', 'cashier_workspace')->where('resource_id', $workspaceId)

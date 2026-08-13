@@ -47,6 +47,31 @@ final class CashierV3HangPreparationServices
         ];
     }
 
+    /**
+     * Direct draft hanging deliberately does not reuse the old preparation
+     * workflow.  Starting service still needs one authoritative, current
+     * room check at the exact moment the draft is saved, however.  Return the
+     * server-discovered snapshot so callers never depend on route-query
+     * versions that may have become stale while the cashier was adding items.
+     */
+    public function currentSelectableRoomForDirectHang(
+        $roomId,
+        CashierV3OperatorScope $operatorScope,
+        CashierV3DataScopeContext $dataScope
+    ): array {
+        $roomId = $this->positiveInt($roomId, 'roomId');
+        $candidate = $this->requireCandidate(
+            $this->provider->roomCandidates($operatorScope, $dataScope),
+            $roomId
+        );
+        $this->assertSelectableVersion(
+            $candidate,
+            $this->positiveInt($candidate['roomVersion'] ?? null, 'roomVersion'),
+            $this->positiveInt($candidate['roomTimeSlotVersion'] ?? null, 'roomTimeSlotVersion')
+        );
+        return $candidate;
+    }
+
     public function prepareHangOrder(
         array $payload,
         array $draft,
@@ -55,10 +80,8 @@ final class CashierV3HangPreparationServices
         CashierV3DataScopeContext $dataScope
     ): array {
         $preparationRequestId = $this->requestId($payload['preparationRequestId'] ?? null, 'preparationRequestId');
-        $workspaceId = sprintf(
-            'ws:%d:%d:%s',
+        $workspaceId = \app\services\cashier\v3\CashierV3CheckoutWorkspaceIdentity::id(
             $operatorScope->storeId(),
-            $operatorScope->operatorId(),
             $stateContextId
         );
         if (($draft['complete'] ?? false) !== true

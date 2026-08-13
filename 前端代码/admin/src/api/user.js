@@ -125,6 +125,22 @@ export function detailsApi(id) {
   });
 }
 
+/** 平台顾客资料的 V3 推荐人读写入口，不使用旧 putUserApi。 */
+export function customerV3ReferrerApi(memberId) {
+  return request({
+    url: `user/v3/member/${memberId}/referrer`,
+    method: 'get'
+  });
+}
+
+export function updateCustomerV3ReferrerApi(memberId, data) {
+  return request({
+    url: `user/v3/member/${memberId}/referrer`,
+    method: 'put',
+    data
+  });
+}
+
 /**
  * @description 会员管理详情中tab选项
  * @param {Number} param id {Number} 用户id

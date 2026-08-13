@@ -4,6 +4,7 @@ namespace app\services\cashier\v3\cashier;
 
 use app\services\cashier\v3\CashierV3CommandException;
 use app\services\cashier\v3\CashierV3OperatorScope;
+use app\services\cashier\v3\CashierV3CheckoutWorkspaceIdentity;
 use app\services\cashier\v3\CashierV3ResultCode;
 use app\services\cashier\v3\CashierV3ScopeResolver;
 use app\services\cashier\v3\CashierV3TransactionGuard;
@@ -1695,8 +1696,7 @@ final class CashierV3CashierWorkspaceServices
         if (!$row
             || (string)($row['workspace_id'] ?? '') !== $workspaceId
             || (string)($row['state_context_id'] ?? '') !== $stateContextId
-            || (int)($row['store_id'] ?? 0) !== $operatorScope->storeId()
-            || (int)($row['operator_id'] ?? 0) !== $operatorScope->operatorId()) {
+            || (int)($row['store_id'] ?? 0) !== $operatorScope->storeId()) {
             throw new CashierV3CommandException(
                 CashierV3ResultCode::CLIENT_SESSION_REQUIRED,
                 '当前收银工作台已经变化，请刷新页面后重试。',
@@ -1719,12 +1719,7 @@ final class CashierV3CashierWorkspaceServices
         string $stateContextId,
         CashierV3OperatorScope $operatorScope
     ): void {
-        $expected = sprintf(
-            'ws:%d:%d:%s',
-            $operatorScope->storeId(),
-            $operatorScope->operatorId(),
-            $stateContextId
-        );
+        $expected = CashierV3CheckoutWorkspaceIdentity::id($operatorScope->storeId(), $stateContextId);
         if ($stateContextId === '' || $workspaceId === '' || !hash_equals($expected, $workspaceId)) {
             throw new CashierV3CommandException(
                 CashierV3ResultCode::CLIENT_SESSION_REQUIRED,

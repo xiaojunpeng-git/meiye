@@ -13,6 +13,8 @@ final class CashierV3HangOrderPlanV1
 {
     public const CONTRACT_VERSION = 'cashier-v3-hang-order-authority-v1';
     public const RESUME_SALE_ONLY_CONTRACT_VERSION = 'cashier-v3-hang-resume-sale-only-v1';
+    public const RESUME_SALE_PROJECT_CONTRACT_VERSION = 'cashier-v3-hang-resume-sale-project-v2';
+    public const RESUME_DRAFT_CONTRACT_VERSION = 'cashier-v3-hang-resume-draft-v3';
     public const MODE_NORMAL = 'normal';
     public const MODE_START_SERVICE = 'start_service';
     public const STATUS_PENDING_CHECKOUT = 'pending_checkout';
@@ -47,14 +49,11 @@ final class CashierV3HangOrderPlanV1
 
         $workspaceId = self::token($lockedDraft['workspaceId'] ?? null, 64, 'hang_workspace_id_invalid');
         $stateContextId = self::token($lockedDraft['stateContextId'] ?? null, 64, 'hang_state_context_id_invalid');
-        $expectedWorkspaceId = sprintf(
-            'ws:%d:%d:%s',
+        $expectedWorkspaceId = \app\services\cashier\v3\CashierV3CheckoutWorkspaceIdentity::id(
             $operatorScope->storeId(),
-            $operatorScope->operatorId(),
             $stateContextId
         );
         if (!hash_equals($expectedWorkspaceId, $workspaceId)
-            || ($lockedDraft['complete'] ?? false) !== true
             || (string)($lockedDraft['status'] ?? '') !== 'editing') {
             throw self::failure('hang_locked_workspace_invalid');
         }
@@ -149,18 +148,23 @@ final class CashierV3HangOrderPlanV1
             $lines[] = $normalized;
         }
 
-        $resumeEligible = $mode === self::MODE_NORMAL && $lines !== [];
+        // A hang order is a frozen cashier draft.  Every authoritative cart
+        // row that was accepted into this draft can be restored; current
+        // catalog, inventory and entitlement conditions are deliberately
+        // revalidated only by the later checkout command.
+        $resumeEligible = in_array($mode, [self::MODE_NORMAL, self::MODE_START_SERVICE], true)
+            && $lines !== [];
         foreach ($lines as $line) {
-            if ((string)($line['line_role'] ?? '') !== 'sale'
+            if (!in_array((string)($line['line_role'] ?? ''), ['sale', 'entitlement_service'], true)
                 || (string)($line['workspace_snapshot_json'] ?? '') === '') {
                 $resumeEligible = false;
                 break;
             }
             $snapshot = json_decode((string)$line['workspace_snapshot_json'], true);
             if (!is_array($snapshot)
-                || (int)($snapshot['catalog_product_type'] ?? -1) !== 0
-                || (int)($snapshot['project_id'] ?? -1) !== 0
-                || (string)($snapshot['line_role'] ?? '') !== 'sale') {
+                || (string)($snapshot['line_key'] ?? '') !== (string)($line['workspace_line_id'] ?? '')
+                || (string)($snapshot['line_role'] ?? '') !== (string)($line['line_role'] ?? '')
+                || (int)($snapshot['member_id'] ?? -1) !== $memberId) {
                 $resumeEligible = false;
                 break;
             }
@@ -172,7 +176,7 @@ final class CashierV3HangOrderPlanV1
             'natural_key' => $naturalKey,
             'contract_version' => self::CONTRACT_VERSION,
             'resume_contract_version' => $resumeEligible
-                ? self::RESUME_SALE_ONLY_CONTRACT_VERSION
+                ? self::RESUME_DRAFT_CONTRACT_VERSION
                 : '',
             'command_idempotency_key' => $commandKey,
             'tenant_id' => $operatorScope->tenantId(),

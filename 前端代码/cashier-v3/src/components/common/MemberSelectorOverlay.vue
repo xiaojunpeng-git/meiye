@@ -71,6 +71,10 @@ const props = defineProps({
   onSelectServicePerson: {
     type: Function,
     default: null
+  },
+  onSelectReferrer: {
+    type: Function,
+    default: null
   }
 })
 
@@ -333,6 +337,7 @@ async function handleCreated(payload = {}) {
         :member-tags="creatorSchema.memberTags || creatorSchema.tags || []"
         :on-submit="onCreateMember"
         :on-select-service-person="onSelectServicePerson"
+        :on-select-referrer="onSelectReferrer"
         @cancel="returnToSelector"
         @created="handleCreated"
         @select-existing="selectMember"

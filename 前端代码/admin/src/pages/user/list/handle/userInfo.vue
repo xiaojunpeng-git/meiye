@@ -92,6 +92,20 @@
                 </div>
             </div>
         </div>
+        <div class="section">
+            <div class="section-hd">推荐人 / 老客转介绍</div>
+            <div class="section-bd">
+                <div class="item item--referrer">
+                    <div>当前推荐人：</div>
+                    <div class="value">{{ referrerProfile.referrerMemberName || '未绑定' }}<span v-if="referrerProfile.referrerMemberId">（ID {{ referrerProfile.referrerMemberId }}）</span></div>
+                </div>
+                <div class="item item--referrer-action">
+                    <Button v-if="!referrerProfile.referrerLocked" type="primary" size="small" :loading="referrerSaving" @click="openReferrerPicker">{{ referrerProfile.referrerMemberId ? '更换推荐人' : '绑定推荐人' }}</Button>
+                    <Button v-if="referrerProfile.referrerMemberId && !referrerProfile.referrerLocked" size="small" :loading="referrerSaving" @click="saveReferrer(0)">清空</Button>
+                    <span v-if="referrerProfile.referrerLocked" class="referrer-locked">首次疗程卡已成交，推荐人已锁定</span>
+                </div>
+            </div>
+        </div>
         <div v-if="hasExtendInfo" class="section">
             <div class="section-hd">补充信息</div>
             <div class="section-bd">
@@ -174,15 +188,20 @@
                 </div>
             </div>
         </div>
+        <Modal v-model="referrerPickerOpen" scrollable title="选择推荐人 / 老客转介绍" :closable="true" width="900" :footer-hide="true">
+            <customerInfo v-if="referrerPickerOpen" :isPromoter="1" @imageObject="selectReferrer" />
+        </Modal>
     </div>
 </template>
 
 <script>
 import dayjs from "dayjs";
 import template from '../../../setting/devise/template.vue';
+import customerInfo from '@/components/customerInfo';
+import { customerV3ReferrerApi, updateCustomerV3ReferrerApi } from '@/api/user';
 
 export default {
-    components: { template },
+    components: { template, customerInfo },
     name: 'userInfo',
     props: {
         psInfo: Object,
@@ -209,6 +228,70 @@ export default {
     computed: {
         hasExtendInfo() {
             return this.psInfo.extend_info.some(item => item.value);
+        }
+    },
+    data () {
+        return {
+            referrerPickerOpen: false,
+            referrerSaving: false,
+            referrerProfile: {
+                referrerMemberId: 0,
+                referrerMemberName: '',
+                referrerLocked: false
+            }
+        };
+    },
+    watch: {
+        'psInfo.uid': {
+            immediate: true,
+            handler (uid) {
+                if (Number(uid) > 0) this.loadReferrer();
+            }
+        }
+    },
+    methods: {
+        loadReferrer () {
+            const memberId = Number(this.psInfo.uid || 0);
+            if (!memberId) return;
+            customerV3ReferrerApi(memberId).then((res) => {
+                if (res && res.status === 200 && res.data) this.referrerProfile = { ...this.referrerProfile, ...res.data };
+            }).catch(() => {
+                this.referrerProfile = { referrerMemberId: 0, referrerMemberName: '', referrerLocked: false };
+            });
+        },
+        openReferrerPicker () {
+            if (!this.referrerSaving && !this.referrerProfile.referrerLocked) this.referrerPickerOpen = true;
+        },
+        selectReferrer (member) {
+            this.referrerPickerOpen = false;
+            const referrerMemberId = Number((member && (member.uid || member.memberId || member.id)) || 0);
+            if (!referrerMemberId) return;
+            this.saveReferrer(referrerMemberId);
+        },
+        saveReferrer (referrerMemberId) {
+            const memberId = Number(this.psInfo.uid || 0);
+            if (!memberId || this.referrerSaving) return;
+            this.referrerSaving = true;
+            updateCustomerV3ReferrerApi(memberId, {
+                referrerMemberId,
+                idempotencyKey: this.referrerCommandKey(memberId)
+            }).then((res) => {
+                if (res && res.status === 200) {
+                    this.referrerProfile = { ...this.referrerProfile, ...(res.data || {}) };
+                    this.$Message.success('推荐人已保存');
+                    this.$emit('referrer-saved', memberId);
+                }
+            }).catch((error) => {
+                this.$Message.error((error && error.msg) || '推荐人保存失败');
+            }).finally(() => {
+                this.referrerSaving = false;
+            });
+        },
+        referrerCommandKey (memberId) {
+            const random = (window.crypto && window.crypto.randomUUID)
+                ? window.crypto.randomUUID().replace(/-/g, '')
+                : `${Date.now()}${Math.random().toString(16).slice(2)}`;
+            return `CMD-${random}`;
         }
     }
 }
@@ -251,6 +334,15 @@ export default {
             &:nth-child(3n+3) {
                 margin: 16px 0 0;
             }
+        }
+
+        .item--referrer-action {
+            gap: 8px;
+            align-items: center;
+        }
+
+        .referrer-locked {
+            color: #8a5900;
         }
 
         .value {

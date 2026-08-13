@@ -9,16 +9,17 @@ use app\services\cashier\v3\CashierV3ResultCode;
 use app\services\cashier\v3\CashierV3TransactionGuard;
 use app\services\cashier\v3\cashier\CashierV3CashierWorkspaceServices;
 use app\services\cashier\v3\cashier\CashierV3SaleCatalogServices;
-use app\services\cashier\v3\event\CashierV3BusinessEventExecution;
-use app\services\cashier\v3\event\CashierV3BusinessEventRecorder;
 use app\services\cashier\v3\hang\authority\CashierV3HangOrderPlanV1;
 use app\services\cashier\v3\hang\authority\ThinkPhpCashierV3HangOrderRepository;
+use app\services\room\guard\RoomOpenServiceGuardAuthority;
+use app\services\room\guard\RoomOpenServiceGuardException;
+use app\services\room\guard\RoomOpenServiceGuardVersionProvider;
 use think\facade\Db;
 
 /**
- * Restores only new-contract ordinary-product hangs.  A public hang-line
- * snapshot is never used here: every restored cart row originates from the
- * immutable workspace snapshot captured while the source workspace was locked.
+ * Restores a direct cashier draft. A public hang-line snapshot is never used
+ * here: every restored cart row originates from the immutable workspace
+ * snapshot captured while the source workspace was locked.
  */
 final class CashierV3HangResumeServices
 {
@@ -30,12 +31,22 @@ final class CashierV3HangResumeServices
     /** @var CashierV3SaleCatalogServices */
     private $saleCatalog;
 
+    /** @var RoomOpenServiceGuardVersionProvider */
+    private $roomVersions;
+
+    /** @var RoomOpenServiceGuardAuthority */
+    private $roomGuard;
+
     public function __construct(
         CashierV3CashierWorkspaceServices $workspace,
-        CashierV3SaleCatalogServices $saleCatalog
+        CashierV3SaleCatalogServices $saleCatalog,
+        ?RoomOpenServiceGuardVersionProvider $roomVersions = null,
+        ?RoomOpenServiceGuardAuthority $roomGuard = null
     ) {
         $this->workspace = $workspace;
         $this->saleCatalog = $saleCatalog;
+        $this->roomVersions = $roomVersions ?: new RoomOpenServiceGuardVersionProvider();
+        $this->roomGuard = $roomGuard ?: new RoomOpenServiceGuardAuthority();
     }
 
     /** Callable server discovery for resume-hang-order. */
@@ -54,16 +65,6 @@ final class CashierV3HangResumeServices
         $lines = $this->loadEligibleLines($header, $operator, $dataScope, false);
 
         $resources = [$this->hangResource($header, $lines, 'mutate')];
-        foreach ($lines as $line) {
-            foreach ($this->saleCatalog->discoverStoredLineResources(
-                $line['workspaceSnapshot'],
-                (int)$line['workspaceSnapshot']['quantity'],
-                $operator,
-                $dataScope
-            ) as $resource) {
-                $resources[] = $resource;
-            }
-        }
         $resources[] = $this->workspaceResource($contexts);
 
         return [
@@ -78,16 +79,13 @@ final class CashierV3HangResumeServices
         CashierV3TransactionGuard::assertInTransaction('cashierHangResume');
         $operator = $scope['operator_scope'] ?? null;
         $dataScope = $scope['data_scope'] ?? null;
-        $eventRecorder = $scope['event_recorder'] ?? null;
-        $eventExecution = $scope['event_execution'] ?? null;
         $payload = is_array($scope['payload'] ?? null) ? $scope['payload'] : [];
         $contexts = is_array($scope['contexts'] ?? null) ? $scope['contexts'] : [];
         $stateContextId = trim((string)($scope['state_context_id'] ?? ''));
         $commandKey = trim((string)($scope['idempotency_key'] ?? ''));
         if (!$operator instanceof CashierV3OperatorScope
             || !$dataScope instanceof CashierV3DataScopeContext
-            || !$eventRecorder instanceof CashierV3BusinessEventRecorder
-            || !$eventExecution instanceof CashierV3BusinessEventExecution) {
+        ) {
             throw self::invalid('hang_resume_scope_incomplete');
         }
         $this->assertScope($operator, $dataScope);
@@ -107,17 +105,7 @@ final class CashierV3HangResumeServices
                 ['reason' => 'hang_resume_locked_version_changed']
             );
         }
-        foreach ($lines as $line) {
-            $this->saleCatalog->assertStoredSaleQuantityAfterGatewayLocksInTx(
-                $line['workspaceSnapshot'],
-                (int)$line['workspaceSnapshot']['quantity'],
-                $contexts,
-                $operator,
-                $dataScope
-            );
-        }
-
-        $cashierDraft = $this->workspace->restoreSaleOnlyHangInTx(
+        $cashierDraft = $this->workspace->restoreHangDraftInTx(
             $workspaceId,
             $stateContextId,
             $operator,
@@ -125,77 +113,84 @@ final class CashierV3HangResumeServices
             (int)$header['member_id'],
             array_column($lines, 'workspaceSnapshot')
         );
-        $now = time();
-        $updated = (int)Db::name(ThinkPhpCashierV3HangOrderRepository::HEADER_TABLE)
-            ->where('tenant_id', $dataScope->tenantId())
-            ->where('store_id', $operator->storeId())
-            ->where('hang_order_id', $hangOrderId)
-            ->where('hang_version', $contextVersion)
-            ->where('hang_status', CashierV3HangOrderPlanV1::STATUS_PENDING_CHECKOUT)
-            ->where('resume_contract_version', self::CONTRACT_VERSION)
-            ->where('resume_workspace_id', '')
-            ->where('checkout_request_id', '')
-            ->update([
-                'hang_status' => 'resumed_checkout',
-                'resume_workspace_id' => $workspaceId,
-                'resume_state_context_id' => $stateContextId,
-                'resume_command_idempotency_key' => $commandKey,
-                'resumed_at' => $now,
-                'update_time' => $now,
-            ]);
-        if ($updated !== 1) {
-            throw CashierV3CommandException::versionConflict(
-                '该挂单已被其他操作提取，请刷新后重试。',
-                ['reason' => 'hang_resume_header_cas_conflict']
-            );
-        }
-        $lineUpdated = (int)Db::name(ThinkPhpCashierV3HangOrderRepository::LINE_TABLE)
-            ->where('tenant_id', $dataScope->tenantId())
-            ->where('hang_order_id', $hangOrderId)
-            ->where('line_status', 'held')
-            ->update([
-                'line_status' => 'resumed',
-                'line_version' => Db::raw('line_version + 1'),
-                'update_time' => $now,
-            ]);
-        if ($lineUpdated !== count($lines)) {
-            throw new CashierV3CommandException(
-                CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
-                '挂单明细状态更新失败，本次提单已回滚，请重试。',
-                CashierV3ResultCode::STATUS_FAILED,
-                ['reason' => 'hang_resume_line_update_incomplete']
-            );
-        }
-
-        $eventRecorder->recordInTx($eventExecution, (array)($scope['event_contract'] ?? []), [
-            'event_type' => 'hang_order.resumed',
-            'aggregate_type' => 'hang_order',
-            'aggregate_id' => $hangOrderId,
-            'aggregate_version' => $contextVersion + 1,
-            'event_version' => 1,
-            'source_type' => 'resume-hang-order',
-            'source_id' => $hangOrderId,
-            'member_id' => (int)$header['member_id'],
-            'business_date' => (string)$header['business_date'],
-            'occurred_at' => $now,
-            'settled_at' => $now,
-            'recorded_at' => $now,
-            'aggregate_name_snapshot' => (string)$header['hang_order_no'],
-            'store_name_snapshot' => (string)$header['store_name_snapshot'],
-            'payload' => [
-                'contractVersion' => self::CONTRACT_VERSION,
-                'hangOrderId' => $hangOrderId,
-                'workspaceId' => $workspaceId,
-                'lineCount' => count($lines),
-            ],
-        ]);
+        // 提单只加载草稿，源挂单保留到正式结账成功；这里不做消费或重复
+        // 提取判断，当前工作台只记录它用于结账成功后的清理。
+        $cashierDraft = $this->workspace->bindResumedHangOrderInTx(
+            $workspaceId,
+            $stateContextId,
+            $operator,
+            $hangOrderId
+        );
 
         return [
             'contractVersion' => self::CONTRACT_VERSION,
             'hangOrderId' => $hangOrderId,
             'hangOrderNo' => (string)$header['hang_order_no'],
-            'hangVersion' => $contextVersion + 1,
+            'hangVersion' => (int)$header['hang_version'],
             'status' => 'restored',
+            'sourceRetained' => true,
+            'cashierDraft' => $cashierDraft,
+        ];
+    }
+
+    /** 直接复制草稿到当前购物车，并记录成功结账后删除源挂单的关联。 */
+    public function resumeDirectInTx(
+        string $hangOrderId,
+        string $stateContextId,
+        CashierV3OperatorScope $operator,
+        CashierV3DataScopeContext $dataScope
+    ): array {
+        CashierV3TransactionGuard::assertInTransaction('cashierHangDirectResume');
+        $this->assertScope($operator, $dataScope);
+        if (preg_match('/^HGO[0-9a-f]{40}$/D', $hangOrderId) !== 1) {
+            throw self::invalid('hang_resume_id_invalid');
+        }
+        $header = Db::name(ThinkPhpCashierV3HangOrderRepository::HEADER_TABLE)
+            ->where('tenant_id', $dataScope->tenantId())
+            ->where('store_id', $operator->storeId())
+            ->where('hang_order_id', $hangOrderId)
+            ->lock(true)
+            ->find();
+        if (!is_array($header)) {
+            throw CashierV3CommandException::versionConflict('该挂单不存在，请刷新列表后重试。');
+        }
+        $rows = Db::name(ThinkPhpCashierV3HangOrderRepository::LINE_TABLE)
+            ->where('tenant_id', $dataScope->tenantId())
+            ->where('store_id', $operator->storeId())
+            ->where('hang_order_id', $hangOrderId)
+            ->order('line_no asc,id asc')
+            ->lock(true)
+            ->select();
+        if (is_object($rows) && method_exists($rows, 'toArray')) $rows = $rows->toArray();
+        $snapshots = [];
+        foreach (is_array($rows) ? $rows : [] as $row) {
+            $snapshot = json_decode((string)($row['workspace_snapshot_json'] ?? ''), true);
+            if (is_array($snapshot)) $snapshots[] = $snapshot;
+        }
+        if ($snapshots === []) throw self::invalid('hang_direct_resume_lines_missing');
+        $workspaceId = self::workspaceId($operator, $stateContextId);
+        $cashierDraft = $this->workspace->restoreHangDraftInTx(
+            $workspaceId,
+            $stateContextId,
+            $operator,
+            $hangOrderId,
+            (int)($header['member_id'] ?? 0),
+            $snapshots
+        );
+        // 提单只是把草稿快照加载到收银台。源挂单保持原样，只有结账
+        // 成功后的绑定事务才会删除它；不在提单时增加“已提取”状态或锁。
+        $cashierDraft = $this->workspace->bindResumedHangOrderInTx(
+            $workspaceId,
+            $stateContextId,
+            $operator,
+            $hangOrderId
+        );
+        return [
+            'hangOrderId' => $hangOrderId,
+            'hangOrderNo' => (string)($header['hang_order_no'] ?? ''),
+            'status' => 'restored',
+            'sourceRetained' => true,
+            'hangVersion' => (int)($header['hang_version'] ?? 0),
             'cashierDraft' => $cashierDraft,
         ];
     }
@@ -221,9 +216,16 @@ final class CashierV3HangResumeServices
                 ['reason' => 'hang_resume_header_not_found']
             );
         }
-        $valid = (string)($header['hang_mode'] ?? '') === CashierV3HangOrderPlanV1::MODE_NORMAL
+        $valid = in_array((string)($header['hang_mode'] ?? ''), [
+                CashierV3HangOrderPlanV1::MODE_NORMAL,
+                CashierV3HangOrderPlanV1::MODE_START_SERVICE,
+            ], true)
             && (string)($header['hang_status'] ?? '') === CashierV3HangOrderPlanV1::STATUS_PENDING_CHECKOUT
-            && (string)($header['resume_contract_version'] ?? '') === self::CONTRACT_VERSION
+            && in_array((string)($header['resume_contract_version'] ?? ''), [
+                CashierV3HangOrderPlanV1::RESUME_SALE_ONLY_CONTRACT_VERSION,
+                CashierV3HangOrderPlanV1::RESUME_SALE_PROJECT_CONTRACT_VERSION,
+                CashierV3HangOrderPlanV1::RESUME_DRAFT_CONTRACT_VERSION,
+            ], true)
             && trim((string)($header['resume_workspace_id'] ?? '')) === ''
             && trim((string)($header['checkout_request_id'] ?? '')) === ''
             && trim((string)($header['sales_order_id'] ?? '')) === ''
@@ -231,11 +233,13 @@ final class CashierV3HangResumeServices
             && (int)($header['settled_at'] ?? 0) === 0
             && (int)($header['hang_version'] ?? 0) > 0
             && (int)($header['line_count'] ?? 0) > 0
-            && (int)($header['entitlement_actual_amount_cents'] ?? -1) === 0;
+            && ((string)($header['resume_contract_version'] ?? '')
+                === CashierV3HangOrderPlanV1::RESUME_DRAFT_CONTRACT_VERSION
+                || (int)($header['entitlement_actual_amount_cents'] ?? -1) === 0);
         if (!$valid) {
             throw new CashierV3CommandException(
                 CashierV3ResultCode::ACTION_NOT_IMPLEMENTED,
-                '该挂单不是可恢复的新版普通商品挂单，请按原流程处理。',
+                '该挂单草稿资料不完整或已被提取，请刷新后重试。',
                 CashierV3ResultCode::STATUS_FAILED,
                 ['reason' => 'hang_resume_contract_not_supported']
             );
@@ -268,24 +272,21 @@ final class CashierV3HangResumeServices
         $result = [];
         foreach ($rows as $index => $row) {
             $snapshot = json_decode((string)($row['workspace_snapshot_json'] ?? ''), true);
-            $valid = (string)($row['line_role'] ?? '') === 'sale'
+            $role = (string)($row['line_role'] ?? '');
+            $valid = in_array($role, ['sale', 'entitlement_service'], true)
                 && (string)($row['line_status'] ?? '') === 'held'
                 && (int)($row['line_version'] ?? 0) === 1
                 && (int)($row['member_id'] ?? -1) === (int)$header['member_id']
                 && (int)($row['quantity'] ?? 0) > 0
-                && (int)($row['source_id'] ?? 0) > 0
-                && (int)($row['detail_id'] ?? 0) > 0
+                && (int)($row['source_id'] ?? 0) >= 0
+                && (int)($row['detail_id'] ?? 0) >= 0
                 && (int)($row['source_version'] ?? 0) > 0
                 && (int)($row['detail_version'] ?? 0) > 0
                 && preg_match('/^[a-f0-9]{64}$/D', (string)($row['immutable_fingerprint'] ?? '')) === 1
                 && is_array($snapshot)
                 && (string)($snapshot['line_key'] ?? '') === (string)($row['workspace_line_id'] ?? '')
-                && (string)($snapshot['line_role'] ?? '') === 'sale'
+                && (string)($snapshot['line_role'] ?? '') === $role
                 && (int)($snapshot['member_id'] ?? -1) === (int)$header['member_id']
-                && (int)($snapshot['catalog_product_id'] ?? 0) === (int)$row['source_id']
-                && (int)($snapshot['catalog_sku_id'] ?? 0) === (int)$row['detail_id']
-                && (int)($snapshot['catalog_product_type'] ?? -1) === 0
-                && (int)($snapshot['project_id'] ?? -1) === 0
                 && (int)($snapshot['quantity'] ?? 0) === (int)$row['quantity']
                 && (int)($snapshot['source_version'] ?? 0) === (int)$row['source_version']
                 && (int)($snapshot['detail_version'] ?? 0) === (int)$row['detail_version'];
@@ -400,7 +401,7 @@ final class CashierV3HangResumeServices
         if ($stateContextId === '' || strlen($stateContextId) > 64) {
             throw self::invalid('hang_resume_state_context_invalid');
         }
-        return sprintf('ws:%d:%d:%s', $operator->storeId(), $operator->operatorId(), $stateContextId);
+        return \app\services\cashier\v3\CashierV3CheckoutWorkspaceIdentity::id($operator->storeId(), $stateContextId);
     }
 
     private static function canonicalJson(array $value): string

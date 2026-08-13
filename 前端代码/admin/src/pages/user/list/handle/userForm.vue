@@ -115,21 +115,9 @@
                             <Option v-for="item in levelOptions" :key="item.id" :value="item.id">{{ item.name }}</Option>
                         </Select>
                     </FormItem>
-                    <FormItem label="推广人：">
-                        <Input v-model="formData.spread_uid_nickname" @on-clear="clearSpread" clearable placeholder="请选择" icon="ios-arrow-down" @on-focus="editSpread"></Input>
-                    </FormItem>
                 </div>
             </div>
         </Form>
-				<Modal
-				  v-model="customerShow"
-				  scrollable
-				  title="请选择商城用户"
-				  :closable="false"
-				  width="900"
-				>
-				  <customerInfo v-if="customerShow" :isPromoter="1" @imageObject="imageObject"></customerInfo>
-				</Modal>
 				<!-- 用户标签 -->
 				<Modal
 				  v-model="labelShow"
@@ -149,13 +137,11 @@
 import { userLabelAddApi, groupAddApi, levelListApi, userGroupApi, userLabelApi, putUserApi } from '@/api/user';
 import { cityApi, staffListInfo } from '@/api/store';
 import { merchantStaffList } from '@/api/setting';
-import customerInfo from "@/components/customerInfo";
 import userLabel from "@/components/labelList";
 
 export default {
     name: 'userForm',
 		components: {
-		  customerInfo,
 			userLabel
 		},
     props: {
@@ -164,7 +150,6 @@ export default {
     data() {
         return {
 			labelShow:false,
-			customerShow: false,
             formData: {
                 uid: this.psInfo.uid,
                 real_name: this.psInfo.real_name,
@@ -256,10 +241,6 @@ export default {
 			   this.$Message.error(err.msg);
 			})
 		},
-		clearSpread(){
-			this.formData.spread_uid = 0;
-			this.formData.spread_uid_nickname = '';
-		},
 		closeLabel(label){
 			let index = this.dataLabel.indexOf(this.dataLabel.filter(d=>d.id == label.id)[0]);
 			this.dataLabel.splice(index,1);
@@ -276,14 +257,6 @@ export default {
 		labelClose() {
 		  this.labelShow = false;
 		},
-		editSpread(){
-			this.customerShow = true;
-		},
-		imageObject(e) {
-		  this.customerShow = false;
-		  this.formData.spread_uid = e.uid;
-			this.formData.spread_uid_nickname = e.name
-		},		
         changeMenu (value) {
             this.$emit('change-menu', value);
         },
@@ -379,7 +352,9 @@ export default {
 			}
 			this.formData.store_id = this.formData.store_id || 0
 			this.formData.salesman_id = this.formData.salesman_id || 0
-            putUserApi(this.formData).then(res => {
+            // 推荐关系只能由顾客详情中的 V3 受控命令修改，不能随旧资料表单直写。
+            const { spread_uid, spread_uid_nickname, ...legacyProfilePayload } = this.formData;
+            putUserApi(legacyProfilePayload).then(res => {
 				this.$Message.success('修改成功');
                 this.$emit('change-menu', '99');
             }).catch(res => {

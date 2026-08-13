@@ -8,8 +8,6 @@ use app\services\cashier\v3\CashierV3OperatorScope;
 use app\services\cashier\v3\CashierV3ResultCode;
 use app\services\cashier\v3\CashierV3ScopeResolver;
 use app\services\cashier\v3\CashierV3TransactionGuard;
-use app\services\cashier\v3\event\CashierV3BusinessEventExecution;
-use app\services\cashier\v3\event\CashierV3BusinessEventRecorder;
 use app\services\cashier\v3\hang\authority\CashierV3HangOrderPlanV1;
 use app\services\cashier\v3\hang\authority\ThinkPhpCashierV3HangOrderRepository;
 use app\services\room\guard\RoomOpenServiceGuardAuthority;
@@ -18,8 +16,8 @@ use app\services\room\guard\RoomOpenServiceGuardVersionProvider;
 use think\facade\Db;
 
 /**
- * Voids an active hang atomically. A service-start hang releases only the
- * room guard it owns; a changed room owner aborts the whole operation.
+ * Deletes a hang draft atomically. A service-start hang releases the room
+ * guard it owns when that guard information is still complete.
  */
 final class CashierV3HangVoidServices
 {
@@ -80,12 +78,9 @@ final class CashierV3HangVoidServices
         $header = $this->loadActiveHeader($this->hangOrderId($payload), $operatorScope, $dataScope, false);
         $resources = [$this->hangResource($header, $dataScope)];
 
-        if ($this->isServiceInProgress($header)) {
+        if ($this->hasReleasableRoomGuard($header)) {
             $roomId = (int)$header['room_id'];
             $slotId = (string)$header['room_time_slot_id'];
-            if ($roomId <= 0 || !hash_equals(RoomOpenServiceGuardAuthority::slotKey($roomId), $slotId)) {
-                throw $this->incomplete('hang_void_room_identity_invalid');
-            }
             $slotVersion = $this->roomVersions->discoverVersion(
                 RoomOpenServiceGuardVersionProvider::KIND_SLOT,
                 $slotId,
@@ -107,14 +102,11 @@ final class CashierV3HangVoidServices
         CashierV3TransactionGuard::assertInTransaction('hangOrderVoid');
         $operatorScope = $scope['operator_scope'] ?? null;
         $dataScope = $scope['data_scope'] ?? null;
-        $eventRecorder = $scope['event_recorder'] ?? null;
-        $eventExecution = $scope['event_execution'] ?? null;
         $payload = is_array($scope['payload'] ?? null) ? $scope['payload'] : [];
         $contexts = is_array($scope['contexts'] ?? null) ? $scope['contexts'] : [];
         if (!$operatorScope instanceof CashierV3OperatorScope
             || !$dataScope instanceof CashierV3DataScopeContext
-            || !$eventRecorder instanceof CashierV3BusinessEventRecorder
-            || !$eventExecution instanceof CashierV3BusinessEventExecution) {
+        ) {
             throw $this->incomplete('hang_void_scope_incomplete');
         }
         $this->assertScope($operatorScope, $dataScope);
@@ -129,7 +121,7 @@ final class CashierV3HangVoidServices
         }
 
         $roomRelease = null;
-        if ($this->isServiceInProgress($header)) {
+        if ($this->hasReleasableRoomGuard($header)) {
             $roomId = (int)$header['room_id'];
             $slotId = (string)$header['room_time_slot_id'];
             $slotVersion = $this->contextVersion($contexts, 'room_time_slot', $slotId);
@@ -147,92 +139,27 @@ final class CashierV3HangVoidServices
             }
         }
 
-        $now = time();
-        $headerUpdated = (int)Db::name(ThinkPhpCashierV3HangOrderRepository::HEADER_TABLE)
+        Db::name(ThinkPhpCashierV3HangOrderRepository::LINE_TABLE)
+            ->where('tenant_id', $dataScope->tenantId())
+            ->where('store_id', $operatorScope->storeId())
+            ->where('hang_order_id', $hangOrderId)
+            ->delete();
+        $headerDeleted = (int)Db::name(ThinkPhpCashierV3HangOrderRepository::HEADER_TABLE)
             ->where('tenant_id', $dataScope->tenantId())
             ->where('store_id', $operatorScope->storeId())
             ->where('hang_order_id', $hangOrderId)
             ->where('hang_version', $hangVersion)
-            ->whereIn('hang_status', [
-                CashierV3HangOrderPlanV1::STATUS_PENDING_CHECKOUT,
-                CashierV3HangOrderPlanV1::STATUS_SERVICE_IN_PROGRESS,
-            ])
-            ->update([
-                'hang_status' => self::STATUS_VOIDED,
-                'update_time' => $now,
-            ]);
-        if ($headerUpdated !== 1) {
+            ->delete();
+        if ($headerDeleted !== 1) {
             throw CashierV3CommandException::versionConflict(
-                '该挂单已被其他操作更新，请刷新后重试。',
-                ['reason' => 'hang_void_header_cas_conflict']
+                '该挂单已被其他操作删除，请刷新后重试。',
+                ['reason' => 'hang_delete_header_cas_conflict']
             );
         }
-        $lineUpdated = (int)Db::name(ThinkPhpCashierV3HangOrderRepository::LINE_TABLE)
-            ->where('tenant_id', $dataScope->tenantId())
-            ->where('store_id', $operatorScope->storeId())
-            ->where('hang_order_id', $hangOrderId)
-            ->where('line_status', 'held')
-            ->update([
-                'line_status' => self::STATUS_VOIDED,
-                'line_version' => Db::raw('line_version + 1'),
-                'update_time' => $now,
-            ]);
-        if ($lineUpdated !== (int)$header['line_count']) {
-            throw $this->incomplete('hang_void_line_cas_conflict');
-        }
 
-        $eventContract = is_array($scope['event_contract'] ?? null) ? $scope['event_contract'] : [];
-        $businessDate = (new \DateTimeImmutable('@' . $now))
-            ->setTimezone(new \DateTimeZone('Asia/Shanghai'))
-            ->format('Y-m-d');
-        $eventRecorder->recordInTx($eventExecution, $eventContract, [
-            'event_type' => 'hang_order.voided',
-            'aggregate_type' => 'hang_order',
-            'aggregate_id' => $hangOrderId,
-            'aggregate_version' => $hangVersion + 1,
-            'source_type' => 'void-hang-order',
-            'source_id' => $hangOrderId,
-            'member_id' => (int)$header['member_id'],
-            'business_date' => $businessDate,
-            'occurred_at' => $now,
-            'settled_at' => $now,
-            'recorded_at' => $now,
-            'aggregate_name_snapshot' => (string)$header['hang_order_no'],
-            'store_name_snapshot' => (string)$header['store_name_snapshot'],
-            'payload' => [
-                'hangOrderId' => $hangOrderId,
-                'hangOrderNo' => (string)$header['hang_order_no'],
-                'previousStatus' => (string)$header['hang_status'],
-                'lineCount' => (int)$header['line_count'],
-            ],
-        ]);
-        if ($roomRelease !== null) {
-            $eventRecorder->recordInTx($eventExecution, $eventContract, [
-                'event_type' => 'room.released',
-                'aggregate_type' => 'room',
-                'aggregate_id' => (string)$header['room_id'],
-                'aggregate_version' => 1,
-                'source_type' => 'void-hang-order',
-                'source_id' => $hangOrderId,
-                'member_id' => (int)$header['member_id'],
-                'business_date' => $businessDate,
-                'occurred_at' => $now,
-                'settled_at' => $now,
-                'recorded_at' => $now,
-                'aggregate_name_snapshot' => (string)$header['room_name_snapshot'],
-                'store_name_snapshot' => (string)$header['store_name_snapshot'],
-                'payload' => [
-                    'roomId' => (int)$header['room_id'],
-                    'roomTimeSlotId' => (string)$header['room_time_slot_id'],
-                    'roomTimeSlotVersionBefore' => $slotVersion,
-                    'roomTimeSlotVersionAfter' => (int)$roomRelease['slotVersion'],
-                    'ownerKind' => RoomOpenServiceGuardAuthority::OWNER_HANG_ORDER,
-                    'ownerId' => $hangOrderId,
-                ],
-            ]);
-        }
-
-        $touched = ['hang_order'];
+        // The draft header is physically gone, so it cannot be version-bumped
+        // by the command gateway. Advance the caller workspace revision only.
+        $touched = ['cashier_workspace'];
         if ($roomRelease !== null) {
             $touched[] = 'room_time_slot';
         }
@@ -242,7 +169,62 @@ final class CashierV3HangVoidServices
             'hangOrderNo' => (string)$header['hang_order_no'],
             'roomReleased' => $roomRelease !== null,
             'touched' => $touched,
-            'message' => $roomRelease === null ? '挂单已作废。' : '挂单已作废，房间已释放。',
+            'message' => $roomRelease === null ? '挂单已删除。' : '挂单已删除，房间已释放。',
+        ];
+    }
+
+    /**
+     * Draft-only deletion endpoint. This intentionally bypasses the command
+     * gateway because a draft has no business fact or version to advance.
+     * The controller still supplies the authenticated tenant/store scope.
+     */
+    public function deleteDirectInTx(
+        string $hangOrderId,
+        CashierV3OperatorScope $operatorScope,
+        CashierV3DataScopeContext $dataScope
+    ): array {
+        CashierV3TransactionGuard::assertInTransaction('hangDraftDirectDelete');
+        $this->assertScope($operatorScope, $dataScope);
+        if (preg_match('/^HGO[0-9a-f]{40}$/D', $hangOrderId) !== 1) {
+            throw CashierV3CommandException::invalidContext('挂单标识无效。');
+        }
+        $header = $this->loadActiveHeader($hangOrderId, $operatorScope, $dataScope, true);
+        $roomReleased = false;
+        if ($this->hasReleasableRoomGuard($header)) {
+            $roomId = (int)$header['room_id'];
+            $slotId = (string)$header['room_time_slot_id'];
+            $slotVersion = $this->roomVersions->discoverVersion(
+                RoomOpenServiceGuardVersionProvider::KIND_SLOT,
+                $slotId,
+                $operatorScope,
+                $dataScope
+            );
+            $this->roomGuard->releaseInTx(
+                $roomId,
+                RoomOpenServiceGuardAuthority::OWNER_HANG_ORDER,
+                $hangOrderId,
+                $slotVersion,
+                $operatorScope,
+                $dataScope
+            );
+            $roomReleased = true;
+        }
+        Db::name(ThinkPhpCashierV3HangOrderRepository::LINE_TABLE)
+            ->where('tenant_id', $dataScope->tenantId())
+            ->where('store_id', $operatorScope->storeId())
+            ->where('hang_order_id', $hangOrderId)
+            ->delete();
+        Db::name(ThinkPhpCashierV3HangOrderRepository::HEADER_TABLE)
+            ->where('tenant_id', $dataScope->tenantId())
+            ->where('organization_id', $dataScope->organizationId())
+            ->where('store_id', $operatorScope->storeId())
+            ->where('hang_order_id', $hangOrderId)
+            ->where('hang_version', (int)$header['hang_version'])
+            ->delete();
+        return [
+            'hangOrderId' => $hangOrderId,
+            'hangOrderNo' => (string)$header['hang_order_no'],
+            'roomReleased' => $roomReleased,
         ];
     }
 
@@ -257,10 +239,6 @@ final class CashierV3HangVoidServices
             ->where('organization_id', $dataScope->organizationId())
             ->where('store_id', $operatorScope->storeId())
             ->where('hang_order_id', $hangOrderId)
-            ->whereIn('hang_status', [
-                CashierV3HangOrderPlanV1::STATUS_PENDING_CHECKOUT,
-                CashierV3HangOrderPlanV1::STATUS_SERVICE_IN_PROGRESS,
-            ])
             ->field([
                 'hang_order_id', 'hang_order_no', 'hang_mode', 'hang_status', 'hang_version',
                 'member_id', 'member_name_snapshot', 'line_count', 'room_id', 'room_name_snapshot',
@@ -276,7 +254,7 @@ final class CashierV3HangVoidServices
         if (!is_array($row)) {
             throw CashierV3ScopeResolver::notFound('hang_order', $hangOrderId);
         }
-        if ((int)($row['hang_version'] ?? 0) <= 0 || (int)($row['line_count'] ?? 0) <= 0) {
+        if ((int)($row['hang_version'] ?? 0) <= 0) {
             throw $this->incomplete('hang_void_header_invalid');
         }
         return $row;
@@ -291,7 +269,10 @@ final class CashierV3HangVoidServices
             'id' => $hangOrderId,
             'expectedVersion' => $version,
             'roles' => ['hang_order'],
-            'accessMode' => 'mutate',
+            // The header is deleted, so it cannot be version-bumped after the
+            // command. It remains a locked read dependency; the delete itself
+            // is guarded by the scoped header/version CAS below.
+            'accessMode' => 'read',
             'providerContractVersion' => CashierV3HangOrderVersionProvider::CONTRACT_VERSION,
             'authorityFingerprint' => hash('sha256', implode('|', [
                 self::CONTRACT_VERSION,
@@ -361,6 +342,21 @@ final class CashierV3HangVoidServices
     {
         return (string)($header['hang_mode'] ?? '') === CashierV3HangOrderPlanV1::MODE_START_SERVICE
             && (string)($header['hang_status'] ?? '') === CashierV3HangOrderPlanV1::STATUS_SERVICE_IN_PROGRESS;
+    }
+
+    /**
+     * A draft may be old or partially populated, but deleting it must not be
+     * blocked by that. Only attempt room cleanup when the guard identity is
+     * complete enough to release safely.
+     */
+    private function hasReleasableRoomGuard(array $header): bool
+    {
+        if (!$this->isServiceInProgress($header)) {
+            return false;
+        }
+        $roomId = (int)($header['room_id'] ?? 0);
+        $slotId = (string)($header['room_time_slot_id'] ?? '');
+        return $roomId > 0 && hash_equals(RoomOpenServiceGuardAuthority::slotKey($roomId), $slotId);
     }
 
     private function assertScope(

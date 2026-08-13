@@ -249,6 +249,39 @@ async function selectMemberCreatorServicePerson({ selectedRecord = null } = {}) 
   return selection?.selected || null
 }
 
+function selectMemberReferrer({ selectedRecord = null, excludeMemberId = 0 } = {}) {
+  if (typeof window === 'undefined') return Promise.resolve(null)
+  return new Promise((resolve) => {
+    const cleanup = () => {
+      window.removeEventListener('cashier-v3:member-selector-selected', handler)
+      window.removeEventListener('cashier-v3:member-selector-closed', closedHandler)
+    }
+    const handler = (event) => {
+      const detail = event?.detail || {}
+      if (detail.context !== 'member-referrer') return
+      cleanup()
+      const memberId = Number(detail.record?.memberId || detail.record?.uid || detail.record?.id || 0)
+      resolve(memberId > 0 && memberId !== Number(excludeMemberId) ? detail.record : null)
+    }
+    const closedHandler = (event) => {
+      if ((event?.detail || {}).context !== 'member-referrer') return
+      cleanup()
+      resolve(null)
+    }
+    window.addEventListener('cashier-v3:member-selector-selected', handler)
+    window.addEventListener('cashier-v3:member-selector-closed', closedHandler)
+    window.dispatchEvent(new CustomEvent('cashier-v3:open-member-selector', {
+      detail: {
+        context: 'member-referrer',
+        initialView: 'selector',
+        requireMember: false,
+        selectedRecord,
+        excludeMemberId
+      }
+    }))
+  })
+}
+
 async function handleMemberCreated({ member = null, payload = {} } = {}) {
   closeMemberCreator()
   // 新建会员一定归属当前门店；用唯一手机号刷新默认列表，避免此前的筛选条件
@@ -653,6 +686,7 @@ async function openBatchAction() {
             :member-tags="creatorSchema.memberTags || creatorSchema.tags || []"
             :on-submit="submitMemberMutation"
             :on-select-service-person="selectMemberCreatorServicePerson"
+            :on-select-referrer="selectMemberReferrer"
             @cancel="closeMemberMutation"
             @created="handleMemberMutationSaved"
           />

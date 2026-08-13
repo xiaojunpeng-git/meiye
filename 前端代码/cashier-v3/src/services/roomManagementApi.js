@@ -39,25 +39,25 @@ async function request(path, options = {}) {
 }
 
 export function queryRoomSettings(query = {}) {
-  return request('/storeapi/room-settings', { query })
+  return request('/cashierapi/v3/management/room-settings', { query })
 }
 
 export function createRoomSetting(name) {
   const token = requestToken()
-  return request('/storeapi/room-settings', { method: 'POST', requestToken: token, body: { name, request_token: token } })
+  return request('/cashierapi/v3/management/room-settings', { method: 'POST', requestToken: token, body: { name, request_token: token } })
 }
 
 export function updateRoomSetting(id, name) {
   const token = requestToken()
-  return request(`/storeapi/room-settings/${encodeURIComponent(id)}`, { method: 'PUT', requestToken: token, body: { name, request_token: token } })
+  return request(`/cashierapi/v3/management/room-settings/${encodeURIComponent(id)}`, { method: 'PUT', requestToken: token, body: { name, request_token: token } })
 }
 
 export function setRoomSettingEnabled(id, enabled) {
   const token = requestToken()
-  return request(`/storeapi/room-settings/${encodeURIComponent(id)}/status`, { method: 'POST', requestToken: token, body: { enabled: enabled ? 1 : 0, request_token: token } })
+  return request(`/cashierapi/v3/management/room-settings/${encodeURIComponent(id)}/status`, { method: 'POST', requestToken: token, body: { enabled: enabled ? 1 : 0, request_token: token } })
 }
 
 export function sortRoomSettings(roomIds) {
   const token = requestToken()
-  return request('/storeapi/room-settings/sort', { method: 'POST', requestToken: token, body: { room_ids: roomIds, request_token: token } })
+  return request('/cashierapi/v3/management/room-settings/sort', { method: 'POST', requestToken: token, body: { room_ids: roomIds, request_token: token } })
 }

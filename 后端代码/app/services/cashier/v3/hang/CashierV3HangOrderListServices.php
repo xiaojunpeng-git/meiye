@@ -27,6 +27,7 @@ final class CashierV3HangOrderListServices
         $page = $this->page($payload['page'] ?? null);
         $pageSize = $this->pageSize($payload['pageSize'] ?? $payload['page_size'] ?? null);
         $keyword = trim((string)($payload['keyword'] ?? $payload['search'] ?? ''));
+        $roomName = $this->queryText($payload, 'room_name');
         $status = trim((string)($payload['businessStatus'] ?? $payload['business_status'] ?? ''));
         $scope = trim((string)($payload['dataScope'] ?? $payload['data_scope'] ?? 'normal'));
         $allowed = [
@@ -52,8 +53,12 @@ final class CashierV3HangOrderListServices
             $query->where(function ($subQuery) use ($keyword) {
                 $subQuery->whereLike('hang_order_no', '%' . $keyword . '%')
                     ->whereOr('member_name_snapshot', 'like', '%' . $keyword . '%')
-                    ->whereOr('operator_name_snapshot', 'like', '%' . $keyword . '%');
+                    ->whereOr('operator_name_snapshot', 'like', '%' . $keyword . '%')
+                    ->whereOr('room_name_snapshot', 'like', '%' . $keyword . '%');
             });
+        }
+        if ($roomName !== '') {
+            $query->whereLike('room_name_snapshot', '%' . $roomName . '%');
         }
 
         $total = (int)(clone $query)->count();
@@ -61,7 +66,10 @@ final class CashierV3HangOrderListServices
             ->field([
                 'hang_order_id', 'hang_order_no', 'hang_mode', 'hang_status', 'hang_version',
                 'member_name_snapshot', 'operator_name_snapshot', 'line_count',
+                'room_id', 'room_name_snapshot',
                 'sale_amount_cents', 'entitlement_actual_amount_cents', 'occurred_at', 'recorded_at',
+                'resume_contract_version', 'resume_workspace_id', 'checkout_request_id',
+                'sales_order_id', 'resumed_at', 'settled_at',
             ])
             ->order('occurred_at desc,id desc')
             ->page($page, $pageSize)
@@ -90,11 +98,23 @@ final class CashierV3HangOrderListServices
                     + (int)($row['entitlement_actual_amount_cents'] ?? 0)
                 ),
                 'operator' => (string)($row['operator_name_snapshot'] ?? ''),
+                'roomName' => (int)($row['room_id'] ?? 0) > 0
+                    ? (string)($row['room_name_snapshot'] ?? '')
+                    : '',
                 'orderNote' => '',
                 'status' => $this->statusLabel($hangStatus),
                 'statusCode' => $hangStatus,
-                'canResume' => (string)($row['hang_mode'] ?? '') === CashierV3HangOrderPlanV1::MODE_NORMAL
-                    && $hangStatus === CashierV3HangOrderPlanV1::STATUS_PENDING_CHECKOUT,
+                // 草稿在结账成功前都可提取；提单后标记为“已提单”，
+                // 原记录保留给结账绑定，成功结账后才物理清理。
+                'canResume' => in_array((string)($row['hang_mode'] ?? ''), [
+                    CashierV3HangOrderPlanV1::MODE_NORMAL,
+                    CashierV3HangOrderPlanV1::MODE_START_SERVICE,
+                ], true)
+                    && in_array((string)($row['hang_status'] ?? ''), [
+                        CashierV3HangOrderPlanV1::STATUS_PENDING_CHECKOUT,
+                        CashierV3HangOrderPlanV1::STATUS_SERVICE_IN_PROGRESS,
+                    ], true)
+                    && (int)($row['hang_version'] ?? 0) > 0,
             ];
             $publicVersions[] = [
                 'kind' => CashierV3HangOrderVersionProvider::KIND,
@@ -123,6 +143,24 @@ final class CashierV3HangOrderListServices
     private function page($value): int
     {
         return max(1, min(100000, (int)$value ?: 1));
+    }
+
+    private function queryText(array $payload, string $field): string
+    {
+        $direct = trim((string)($payload[$field] ?? ''));
+        if ($direct !== '') {
+            return mb_substr($direct, 0, 128);
+        }
+        foreach ((array)($payload['topFilters'] ?? []) as $filter) {
+            if (!is_array($filter) || (string)($filter['field'] ?? '') !== $field) {
+                continue;
+            }
+            $value = trim((string)($filter['value'] ?? ''));
+            if ($value !== '') {
+                return mb_substr($value, 0, 128);
+            }
+        }
+        return '';
     }
 
     private function pageSize($value): int

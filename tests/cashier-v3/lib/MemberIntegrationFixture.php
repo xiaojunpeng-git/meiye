@@ -795,7 +795,7 @@ final class MemberIntegrationFixture
             ''
         );
         $session['state_context_id'] = $state['state_context_id'];
-        $workspaceId = sprintf('ws:%d:%d:%s', self::STORE_ID, $operatorId, $state['state_context_id']);
+        $workspaceId = \app\services\cashier\v3\CashierV3CheckoutWorkspaceIdentity::id(self::STORE_ID, $state['state_context_id']);
         Db::transaction(function () use ($dispatcher, $workspaceId) {
             $scope = \app\services\cashier\v3\CashierV3ResourceScope::of('store', (string)self::STORE_ID);
             $dispatcher->versionServices()->ensureRegistered($scope, 'cashier_workspace', $workspaceId);

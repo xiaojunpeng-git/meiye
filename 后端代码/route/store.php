@@ -87,13 +87,6 @@ Route::group('storeapi', function () {
         Route::get('home/statistics/new-profile-detail', 'BusinessDashboard/newProfileDetail')->option(['real_name' => '经营看板新建档明细']);
         Route::get('home/statistics/source-customer-detail', 'BusinessDashboard/sourceCustomerDetail')->option(['real_name' => '经营看板散客新客明细']);
         Route::get('home/statistics/money-detail', 'BusinessDashboard/moneyDetail')->option(['real_name' => '经营看板金额明细']);
-        // Vue 3 门店端房间设置。独立的同名 storeapi 分组会被后加载的
-        // 本文件覆盖，因此路由必须在当前鉴权分组内注册。
-        Route::get('room-settings', 'system.RoomSettings/index')->option(['real_name' => '房间设置列表']);
-        Route::post('room-settings', 'system.RoomSettings/create')->option(['real_name' => '新增房间']);
-        Route::post('room-settings/sort', 'system.RoomSettings/sort')->option(['real_name' => '房间排序']);
-        Route::put('room-settings/:id', 'system.RoomSettings/update')->option(['real_name' => '编辑房间']);
-        Route::post('room-settings/:id/status', 'system.RoomSettings/setStatus')->option(['real_name' => '启用停用房间']);
         //轮询查询扫码订单支付状态
         Route::post('check_order_status/:type', 'Common/checkOrderStatus')->option(['real_name' => '轮询订单状态接口'])->name('checkOrderStatus');//轮询订单状态接口
 

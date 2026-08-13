@@ -40,6 +40,10 @@ const props = defineProps({
     type: Function,
     default: null
   },
+  onSelectReferrer: {
+    type: Function,
+    default: null
+  },
   initialKeyword: {
     type: String,
     default: ''
@@ -112,6 +116,7 @@ const fullProfile = ref(props.initialProfileMode === 'full')
 const activeTab = ref('basic')
 const isSubmitting = ref(false)
 const isSelectingServicePerson = ref(false)
+const isSelectingReferrer = ref(false)
 const isOutcomeUncertain = ref(false)
 const submitMessage = ref('')
 const submitMessageKind = ref('')
@@ -121,6 +126,7 @@ const avatarFile = ref(null)
 const avatarPreview = ref('')
 const customValues = ref({})
 const servicePerson = ref(null)
+const referrerMember = ref(null)
 
 const form = reactive({
   name: '',
@@ -141,12 +147,21 @@ const visibleProfileFields = computed(() => props.profileFields
   .filter((field) => !BUILTIN_PROFILE_PARAMS.has(profileParam(field).toLowerCase()))
   .map((field, index) => normalizeProfileField(field, index)))
 const servicePersonName = computed(() => firstText(servicePerson.value, [
-  'name',
   'staffName',
+  'staff_name',
+  'name',
   'employeeName',
   'realName',
   'nickname'
 ]) || '')
+const referrerMemberName = computed(() => firstText(referrerMember.value, [
+  'referrerMemberName',
+  'name',
+  'realName',
+  'real_name',
+  'nickname'
+]) || '')
+const referrerLocked = computed(() => Boolean(props.initialMember?.referrerLocked))
 const canSubmit = computed(() => !isSubmitting.value && !isOutcomeUncertain.value)
 const isEditing = computed(() => props.mode === 'edit')
 const phoneReadonly = computed(() => isEditing.value)
@@ -199,7 +214,13 @@ function initializeMember(member) {
   form.memberTagIds = Array.isArray(tags) ? [...tags] : []
   form.note = firstText(member, ['note', 'remark', 'memo'])
   const service = firstValue(member, ['exclusiveServiceStaffRecord', 'exclusiveServiceStaff', 'exclusiveStaff'])
-  if (service && typeof service === 'object') servicePerson.value = service
+  servicePerson.value = service && typeof service === 'object' ? service : null
+  const referrerId = firstValue(member, ['referrerMemberId', 'referrer_member_id', 'spread_uid'])
+  const referrerName = firstText(member, ['referrerMemberName', 'referrer_member_name', 'spread_uid_nickname'])
+  referrerMember.value = Number(referrerId) > 0 ? {
+    memberId: Number(referrerId),
+    name: referrerName || `会员 #${referrerId}`
+  } : null
   const values = firstValue(member, ['profileFields', 'customFields', 'customFieldValues', 'custom_field_values'])
   if (Array.isArray(values)) {
     customValues.value = Object.fromEntries(values.map((field, index) => [
@@ -416,6 +437,30 @@ async function selectServicePerson() {
   }
 }
 
+async function selectReferrer() {
+  if (referrerLocked.value || isSelectingReferrer.value || isSubmitting.value || isOutcomeUncertain.value) return
+  if (typeof props.onSelectReferrer !== 'function') {
+    submitMessageKind.value = 'error'
+    submitMessage.value = '暂未接入推荐人选择。'
+    return
+  }
+  isSelectingReferrer.value = true
+  submitMessage.value = ''
+  try {
+    const selection = await props.onSelectReferrer({
+      selectedRecord: referrerMember.value,
+      excludeMemberId: Number(props.initialMember?.memberId || 0)
+    })
+    const record = normalizeSelectedMember(selection)
+    if (record) referrerMember.value = record
+  } catch (error) {
+    submitMessageKind.value = 'error'
+    submitMessage.value = readableError(error, '选择推荐人失败，请稍后重试。')
+  } finally {
+    isSelectingReferrer.value = false
+  }
+}
+
 function normalizeSelectedPerson(selection) {
   if (!selection) return null
   if (Array.isArray(selection)) return selection[0] || null
@@ -426,13 +471,31 @@ function normalizeSelectedPerson(selection) {
   return selection && typeof selection === 'object' ? selection : null
 }
 
+function normalizeSelectedMember(selection) {
+  const record = normalizeSelectedPerson(selection)
+  if (!record) return null
+  const memberId = firstValue(record, ['memberId', 'member_id', 'uid', 'id'])
+  return Number(memberId) > 0 ? { ...record, memberId: Number(memberId) } : null
+}
+
 function clearServicePerson() {
   if (isSubmitting.value || isOutcomeUncertain.value) return
   servicePerson.value = null
 }
 
+function clearReferrer() {
+  if (referrerLocked.value || isSubmitting.value || isOutcomeUncertain.value) return
+  referrerMember.value = null
+}
+
 function servicePersonId() {
-  return firstValue(servicePerson.value, ['id', 'staffId', 'employeeId', 'userId']) ?? null
+  // 编辑回填的是会员-服务人关系记录，其 id 是关系主键，不是门店人员 id。
+  // 优先使用 staff_id，避免无关资料保存时把关系 id 当作新的服务人提交。
+  return firstValue(servicePerson.value, ['staffId', 'staff_id', 'id', 'employeeId', 'userId']) ?? null
+}
+
+function referrerMemberId() {
+  return firstValue(referrerMember.value, ['memberId', 'member_id', 'uid', 'id']) ?? 0
 }
 
 function isEmpty(value) {
@@ -498,6 +561,7 @@ function buildPayload() {
     memberLevelId: form.memberLevelId || null,
     memberTagIds: [...form.memberTagIds],
     exclusiveServicePersonId: servicePersonId(),
+    referrerMemberId: referrerMemberId(),
     note: form.note.trim(),
     profileFields: profileValues
   }
@@ -700,6 +764,16 @@ function cancelCreation() {
           <span>归属门店</span>
           <strong>{{ currentStoreName }}</strong>
         </div>
+        <div class="member-creator__quick-referrer">
+          <span class="member-creator__label">推荐人 / 老客转介绍</span>
+          <div class="member-creator__selector-field">
+            <button type="button" :disabled="referrerLocked || isSelectingReferrer || isSubmitting || isOutcomeUncertain" @click="selectReferrer">
+              {{ referrerLocked ? (referrerMemberName || '首次疗程卡成交后已锁定') : (isSelectingReferrer ? '选择中…' : referrerMemberName || '选择会员') }}
+            </button>
+            <button v-if="referrerMemberName && !referrerLocked" type="button" class="member-creator__selector-clear" aria-label="清空推荐人" :disabled="isSubmitting || isOutcomeUncertain" @click="clearReferrer">×</button>
+          </div>
+          <small v-if="referrerLocked" class="member-creator__field-hint">首次疗程卡已成交，推荐人不可再修改。</small>
+        </div>
         </div>
       </template>
 
@@ -792,6 +866,18 @@ function cancelCreation() {
                   </button>
                   <button v-if="servicePersonName" type="button" class="member-creator__selector-clear" aria-label="清空专属服务人" :disabled="isSubmitting || isOutcomeUncertain" @click="clearServicePerson">×</button>
                 </div>
+              </div>
+
+              <div class="member-creator__field" data-error-key="referrerMemberId">
+                <span class="member-creator__label">推荐人 / 老客转介绍</span>
+                <div class="member-creator__selector-field">
+                  <button type="button" :disabled="referrerLocked || isSelectingReferrer || isSubmitting || isOutcomeUncertain" @click="selectReferrer">
+                    {{ referrerLocked ? (referrerMemberName || '首次疗程卡成交后已锁定') : (isSelectingReferrer ? '选择中…' : referrerMemberName || '选择会员') }}
+                  </button>
+                  <button v-if="referrerMemberName && !referrerLocked" type="button" class="member-creator__selector-clear" aria-label="清空推荐人" :disabled="isSubmitting || isOutcomeUncertain" @click="clearReferrer">×</button>
+                </div>
+                <small v-if="referrerLocked" class="member-creator__field-hint">首次疗程卡已成交，推荐人不可再修改。</small>
+                <small v-else-if="fieldErrors.referrerMemberId" class="member-creator__field-error">{{ fieldErrors.referrerMemberId }}</small>
               </div>
 
               <fieldset class="member-creator__field member-creator__tag-field">
@@ -1014,6 +1100,17 @@ function cancelCreation() {
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.member-creator__quick-referrer {
+  display: grid;
+  gap: 7px;
+}
+
+.member-creator__field-hint {
+  color: #667085;
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .member-creator__tabs-bar {

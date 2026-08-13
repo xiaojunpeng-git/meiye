@@ -25,7 +25,7 @@ final class CashierV3HangSubmissionServices
     /** @var CashierV3CashierWorkspaceServices */
     private $workspace;
 
-    /** @var CashierV3HangPreparationServices */
+    /** @var null|CashierV3HangPreparationServices */
     private $preparations;
 
     /** @var CashierV3HangOrderRepository */
@@ -39,7 +39,7 @@ final class CashierV3HangSubmissionServices
 
     public function __construct(
         CashierV3CashierWorkspaceServices $workspace,
-        CashierV3HangPreparationServices $preparations,
+        ?CashierV3HangPreparationServices $preparations = null,
         ?CashierV3HangOrderRepository $hangOrders = null,
         ?RoomOpenServiceGuardAuthority $roomGuard = null,
         ?CashierV3CashierMemberSummaryServices $members = null
@@ -69,13 +69,19 @@ final class CashierV3HangSubmissionServices
                 ['reason' => 'hang_submission_scope_incomplete']
             );
         }
+        if (!$this->preparations instanceof CashierV3HangPreparationServices) {
+            throw new CashierV3CommandException(
+                CashierV3ResultCode::ACTION_DEPENDENCY_NOT_READY,
+                '挂单服务尚未准备完成，请稍后重试。',
+                CashierV3ResultCode::STATUS_FAILED,
+                ['reason' => 'hang_submission_preparation_missing']
+            );
+        }
 
         $payload = is_array($scope['payload'] ?? null) ? $scope['payload'] : [];
         $stateContextId = trim((string)($scope['state_context_id'] ?? ''));
-        $workspaceId = sprintf(
-            'ws:%d:%d:%s',
+        $workspaceId = \app\services\cashier\v3\CashierV3CheckoutWorkspaceIdentity::id(
             $operatorScope->storeId(),
-            $operatorScope->operatorId(),
             $stateContextId
         );
         $this->assertWorkspaceContext((array)($scope['contexts'] ?? []), $workspaceId);
@@ -241,6 +247,109 @@ final class CashierV3HangSubmissionServices
         return [
             'hangOrder' => $persisted,
             'roomOccupation' => $guardResult,
+            'cashierDraft' => (array)($transferred['cashierDraft'] ?? []),
+        ];
+    }
+
+    /**
+     * 普通挂单是收银草稿的直接快照：只保存当前已在购物车内的行，并清空
+     * 当前购物车。目录、库存、权益、价格和结账资格都只在随后结账时校验。
+     */
+    public function saveDraftDirectInTx(array $scope): array
+    {
+        CashierV3TransactionGuard::assertInTransaction('hangOrderDirectDraftSave');
+        $operatorScope = $scope['operator_scope'] ?? null;
+        $dataScope = $scope['data_scope'] ?? null;
+        $stateContextId = trim((string)($scope['state_context_id'] ?? ''));
+        $commandKey = trim((string)($scope['idempotency_key'] ?? ''));
+        $payload = is_array($scope['payload'] ?? null) ? $scope['payload'] : [];
+        if (!$operatorScope instanceof CashierV3OperatorScope
+            || !$dataScope instanceof CashierV3DataScopeContext
+            || $stateContextId === ''
+            || preg_match('/^[A-Za-z0-9:_-]{16,128}$/D', $commandKey) !== 1) {
+            throw new CashierV3CommandException(
+                CashierV3ResultCode::ACTION_DEPENDENCY_NOT_READY,
+                '挂单草稿保存请求无效，请重新点击挂单。',
+                CashierV3ResultCode::STATUS_FAILED,
+                ['reason' => 'hang_direct_draft_scope_invalid']
+            );
+        }
+
+        $workspaceId = \app\services\cashier\v3\CashierV3CheckoutWorkspaceIdentity::id(
+            $operatorScope->storeId(),
+            $stateContextId
+        );
+        // 挂单始终只是购物车草稿。即使从房间入口进入，也只保存房间关联，
+        // 不创建服务、不占房、不读取或校验当前房态。
+        $mode = CashierV3HangOrderPlanV1::MODE_NORMAL;
+        // 直接从当前工作台锁定的草稿写快照；不走挂单准备或业务重校验。
+        $transferred = $this->workspace->transferToHangInTx(
+            $workspaceId,
+            $stateContextId,
+            $operatorScope,
+            '',
+            true,
+            false
+        );
+        $lockedDraft = (array)($transferred['hangDraft'] ?? []);
+        $now = time();
+        $businessDate = (new \DateTimeImmutable('@' . $now))
+            ->setTimezone(new \DateTimeZone('Asia/Shanghai'))
+            ->format('Y-m-d');
+        $dimensions = $this->dimensions($operatorScope, $dataScope);
+        $memberId = (int)($lockedDraft['memberId'] ?? 0);
+        $memberName = '';
+        if ($memberId > 0) {
+            $memberName = trim((string)($this->members->read($memberId, $operatorScope->storeId())['name'] ?? ''));
+        }
+        $preparationRequestId = 'HANG_DRAFT_' . substr(hash('sha256', $commandKey), 0, 48);
+        $command = [
+            'commandIdempotencyKey' => $commandKey,
+            'preparationRequestId' => $preparationRequestId,
+            'preparationToken' => hash('sha256', 'hang-direct-draft:' . $commandKey),
+            'mode' => $mode,
+            'businessDate' => $businessDate,
+            'businessTimezone' => 'Asia/Shanghai',
+            'occurredAt' => $now,
+            'recordedAt' => $now,
+            'organizationPathSnapshot' => $dimensions['organizationPath'],
+            'organizationNameSnapshot' => $dimensions['organizationName'],
+            'storeNameSnapshot' => $dimensions['storeName'],
+            'memberNameSnapshot' => $memberName,
+            'operatorNameSnapshot' => $dimensions['operatorName'],
+        ];
+        if ((int)($payload['roomId'] ?? 0) > 0) {
+            $command = array_merge($command, [
+                'roomId' => (int)$payload['roomId'],
+                'roomNameSnapshot' => trim((string)($payload['roomNameSnapshot'] ?? '')),
+                // 这些字段只作草稿历史快照；不会参与房态版本或占用校验。
+                'roomVersion' => (int)($payload['roomVersion'] ?? 0),
+                'roomTimeSlotId' => trim((string)($payload['roomTimeSlotId'] ?? '')),
+                'roomTimeSlotVersion' => (int)($payload['roomTimeSlotVersion'] ?? 0),
+                'roomGuardFingerprint' => hash('sha256', 'hang-direct-room:' . $commandKey),
+            ]);
+        }
+        try {
+            $plan = CashierV3HangOrderPlanV1::fromLockedDraft(
+                $command,
+                $lockedDraft,
+                $operatorScope,
+                $dataScope,
+                (array)($transferred['frozenWorkspaceRows'] ?? [])
+            );
+            $persisted = $this->hangOrders->persistInTx($plan, $operatorScope, $dataScope);
+        } catch (CashierV3HangOrderAuthorityException $exception) {
+            throw new CashierV3CommandException(
+                CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
+                '挂单草稿保存失败，本次操作已回滚，请重试。',
+                CashierV3ResultCode::STATUS_FAILED,
+                array_merge(['reason' => $exception->reason()], $exception->detail())
+            );
+        }
+
+        return [
+            'hangOrder' => $persisted,
+            'roomOccupation' => null,
             'cashierDraft' => (array)($transferred['cashierDraft'] ?? []),
         ];
     }

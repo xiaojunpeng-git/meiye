@@ -2760,6 +2760,9 @@ Route::group('adminapi', function () {
      * 用户模块 相关路由
      */
     Route::group('user', function () {
+        // 顾客资料中的推荐人必须走 V3 受控命令；不得落回旧 user/user 直写链路。
+        Route::get('v3/member/:memberId/referrer', 'v1.user.CustomerReferrerProfile/read')->option(['real_name' => '读取顾客推荐人资料']);
+        Route::put('v3/member/:memberId/referrer', 'v1.user.CustomerReferrerProfile/update')->option(['real_name' => '修改顾客推荐人资料']);
         //用户导入
         Route::post('import_user', 'v1.user.UserImport/import')->option(['real_name' => '用户导入']);
         Route::post('import_user_card', 'v1.user.UserImport/importCard')->option(['real_name' => '用户卡项导入']);
