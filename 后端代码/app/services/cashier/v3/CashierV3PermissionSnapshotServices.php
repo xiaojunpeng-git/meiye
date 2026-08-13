@@ -42,29 +42,35 @@ class CashierV3PermissionSnapshotServices
             );
         }
 
-        // 权威表：收银账号 = system_store_staff（禁止再锁 system_admin）
+        $isDelegated = !empty($operatorProfile['_cashier_v3_delegated']);
+        // 常规会话锁 system_store_staff；数据权限选店会话锁定自己的会话投影，
+        // 不把它伪造成员工任职，也不恢复历史任职行。
         $staff = null;
-        try {
-            $staff = Db::name('system_store_staff')
-                ->where('id', $operatorId)
-                ->lock(true)
-                ->find();
-        } catch (\Throwable $e) {
-            throw new CashierV3CommandException(
-                CashierV3ResultCode::ACTION_DEPENDENCY_NOT_READY,
-                '收银账号权威源不可用，已拒绝。',
-                CashierV3ResultCode::STATUS_FAILED,
-                ['reason' => 'system_store_staff_lock_failed', 'error' => $e->getMessage()]
-            );
-        }
+        if ($isDelegated) {
+            $staff = $operatorProfile;
+        } else {
+            try {
+                $staff = Db::name('system_store_staff')
+                    ->where('id', $operatorId)
+                    ->lock(true)
+                    ->find();
+            } catch (\Throwable $e) {
+                throw new CashierV3CommandException(
+                    CashierV3ResultCode::ACTION_DEPENDENCY_NOT_READY,
+                    '收银账号权威源不可用，已拒绝。',
+                    CashierV3ResultCode::STATUS_FAILED,
+                    ['reason' => 'system_store_staff_lock_failed', 'error' => $e->getMessage()]
+                );
+            }
 
-        if (!$staff || !is_array($staff)) {
-            throw new CashierV3CommandException(
-                CashierV3ResultCode::PERMISSION_DENIED,
-                '当前账号不存在或已解绑，已拒绝。',
-                CashierV3ResultCode::STATUS_FAILED,
-                ['reason' => 'staff_not_found']
-            );
+            if (!$staff || !is_array($staff)) {
+                throw new CashierV3CommandException(
+                    CashierV3ResultCode::PERMISSION_DENIED,
+                    '当前账号不存在或已解绑，已拒绝。',
+                    CashierV3ResultCode::STATUS_FAILED,
+                    ['reason' => 'staff_not_found']
+                );
+            }
         }
 
         $isDel = (int)($staff['is_del'] ?? 1);
@@ -73,7 +79,7 @@ class CashierV3PermissionSnapshotServices
         $employeeId = (int)($staff['employee_id'] ?? 0);
         $internalAccount = '';
 
-        if ($isDel !== 0 || $status !== 1) {
+        if (!$isDelegated && ($isDel !== 0 || $status !== 1)) {
             throw new CashierV3CommandException(
                 CashierV3ResultCode::PERMISSION_DENIED,
                 '当前账号已停用或删除，已拒绝。',
@@ -82,7 +88,7 @@ class CashierV3PermissionSnapshotServices
             );
         }
 
-        if ($staffStoreId > 0 && $staffStoreId !== $operatorScope->storeId()) {
+        if (!$isDelegated && $staffStoreId > 0 && $staffStoreId !== $operatorScope->storeId()) {
             throw new CashierV3CommandException(
                 CashierV3ResultCode::PERMISSION_DENIED,
                 '当前账号门店已变更，请刷新工作台后重试。',
@@ -256,6 +262,10 @@ class CashierV3PermissionSnapshotServices
             'roles' => array_values($roles),
             'level' => (int)($staff['level'] ?? 1),
         ];
+
+        if (!empty($sessionHint['_cashier_v3_delegated'])) {
+            $profile['_cashier_v3_delegated'] = 1;
+        }
 
         // 仅透传测试菜单探针；生产不得从旧会话信任 unique_auth／deny_all
         if (isset($sessionHint['__menus_unique_auth'])) {

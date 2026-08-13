@@ -65,6 +65,41 @@ class EmployeeInternalLoginServices extends BaseServices
     }
 
     /**
+     * 组织直属岗位（staff_id=0）也可以授予收银 V3 入口。该能力只用于
+     * “数据权限选店”会话，不能把组织岗位伪造成门店任职。
+     */
+    public function employeeHasStoreV3Entry(int $employeeId): bool
+    {
+        if ($employeeId <= 0) {
+            return false;
+        }
+        $positionIds = Db::name('staff_job_position')
+            ->where('employee_id', $employeeId)
+            ->where('staff_id', 0)
+            ->where('status', 1)->where('is_del', 0)->where('end_time', 0)
+            ->column('position_id');
+        $positionIds = array_values(array_unique(array_filter(array_map('intval', $positionIds ?: []))));
+        if (!$positionIds) {
+            return false;
+        }
+        $opened = (int)Db::name('position')->whereIn('id', $positionIds)
+            ->where('status', 1)->where('use_store', 1)->count();
+        if ($opened <= 0) {
+            return false;
+        }
+        $rules = Db::name('job_position_channel_rule')
+            ->whereIn('position_id', $positionIds)
+            ->where('channel', JobPositionPolicyServices::CHANNEL_STORE_V3)
+            ->where('status', 1)->column('rules');
+        foreach ($rules as $value) {
+            if (trim((string)$value) !== '') {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
      * 门店端登录只能使用员工唯一的有效门店任职；多任职属于数据异常，
      * 不能退化为让员工自行选择门店。
      */

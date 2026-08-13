@@ -17,6 +17,9 @@ const assertions = [
   ['responsive layout prevents horizontal overflow', source.includes('overflow-x: hidden') && source.includes(':global(html:has(.store-login))') && source.includes(':global(body:has(.store-login))') && source.includes('@media (max-width: 460px)')],
   ['reduced motion keeps the title readable', source.includes('@media (prefers-reduced-motion: reduce)')],
   ['login behavior remains wired', source.includes('@submit.prevent="submit"') && source.includes('autocomplete="username"') && source.includes('autocomplete="current-password"')]
+  ,['multi-store selection state is rendered', source.includes('storeChoices') && source.includes('loginTicket') && source.includes('选择门店后登录')]
+  ,['selected store is submitted through the server ticket', source.includes('login_ticket: loginTicket.value') && source.includes('store_id: Number(store?.store_id || 0)')]
+  ,['login page explains the selected store is fixed', source.includes('工作台内不再切换门店')]
 ]
 
 let failed = 0

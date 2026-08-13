@@ -305,6 +305,9 @@ class LoginServices extends BaseServices
             }
             throw new AuthException(ApiErrorCode::ERR_LOGIN_INVALID);
         }
+        if ((string)$type === 'cashier_v3_delegated') {
+            return $this->parseCashierV3DelegatedToken($cacheService, (int)$id, (string)$auth, $md5Token);
+        }
         //获取管理员信息
         $storeStaffInfo = $this->dao->get($id);
         if (!$storeStaffInfo || !$storeStaffInfo->id || $storeStaffInfo->is_del) {
@@ -344,6 +347,72 @@ class LoginServices extends BaseServices
             }
         }
         return $profile;
+    }
+
+    /**
+     * 解析无直接门店任职的收银 V3 数据权限会话。
+     * 会话主键不是 system_store_staff，避免为了登录而伪造或恢复门店任职。
+     */
+    protected function parseCashierV3DelegatedToken(CacheService $cacheService, int $sessionId, string $auth, string $md5Token): array
+    {
+        $session = \think\facade\Db::name('cashier_v3_store_session')->where('id', $sessionId)
+            ->where('is_del', 0)->where('status', 1)->find();
+        if (!$session || (int)($session['expire_time'] ?? 0) < time()) {
+            $cacheService->clearToken($md5Token);
+            throw new AuthException(ApiErrorCode::ERR_LOGIN_STATUS);
+        }
+        if (!hash_equals((string)($session['token_secret_hash'] ?? ''), $auth === '' ? '' : $auth)) {
+            $cacheService->clearToken($md5Token);
+            throw new AuthException(ApiErrorCode::ERR_LOGIN_INVALID);
+        }
+        $employeeId = (int)($session['employee_id'] ?? 0);
+        $storeId = (int)($session['store_id'] ?? 0);
+        $employee = \think\facade\Db::name('employee')->where('id', $employeeId)
+            ->where('status', 1)->where('is_del', 0)->field('id,auth_version')->find();
+        if (!$employee || (int)($employee['auth_version'] ?? 1) !== (int)($session['auth_version'] ?? 1)) {
+            $cacheService->clearToken($md5Token);
+            throw new AuthException(ApiErrorCode::ERR_LOGIN_STATUS);
+        }
+        $store = \think\facade\Db::name('system_store')->alias('store')
+            ->leftJoin('organization_store org_store', 'org_store.store_id = store.id')
+            ->leftJoin('organization org', 'org.id = org_store.org_id')
+            ->where('store.id', $storeId)->where('store.is_del', 0)->where('store.is_show', 1)
+            ->where(function ($query) {
+                $query->whereNull('org.id')->whereOr(function ($or) { $or->where('org.is_del', 0); });
+            })->field('store.id,store.name,store.image,store.product_category_status')->find();
+        if (!$store) {
+            $cacheService->clearToken($md5Token);
+            throw new AuthException(ApiErrorCode::ERR_LOGIN_STATUS);
+        }
+        $scope = app()->make(\app\services\organization\EmployeeDataScopeServices::class);
+        $allowed = $scope->resolveEffectiveStoreIds($employeeId, 0, ['admin_type' => 3]);
+        if ($allowed === [] || ($allowed !== null && !in_array($storeId, array_map('intval', (array)$allowed), true))) {
+            $cacheService->clearToken($md5Token);
+            throw new AuthException(ApiErrorCode::ERR_LOGIN_STATUS);
+        }
+        $profile = [
+            'id' => $sessionId,
+            'employee_id' => $employeeId,
+            'store_id' => $storeId,
+            'staff_name' => (string)($session['staff_name_snapshot'] ?? ''),
+            'account' => (string)($session['account_snapshot'] ?? ''),
+            'roles' => [],
+            'level' => 1,
+            '_cashier_v3_delegated' => 1,
+            'type' => 'cashier_v3_delegated',
+        ];
+        $features = app()->make(\app\services\cashier\v3\permission\CashierV3FeatureResolver::class)
+            ->resolveGrantedFeatures($profile);
+        if (!$features) {
+            $cacheService->clearToken($md5Token);
+            throw new AuthException(ApiErrorCode::ERR_LOGIN_STATUS);
+        }
+        return $profile + [
+            'features' => $features,
+            'store_name' => (string)($store['name'] ?? ''),
+            'logo' => (string)($store['image'] ?? ''),
+            'product_category_status' => (int)($store['product_category_status'] ?? 0),
+        ];
     }
 
     /**

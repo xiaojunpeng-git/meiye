@@ -10,6 +10,26 @@ const account = ref('')
 const password = ref('')
 const submitting = ref(false)
 const error = ref('')
+const storeChoices = ref([])
+const loginTicket = ref('')
+const selectingStore = ref(false)
+
+async function finishLogin(result) {
+  persistStoreV3Token(result.token)
+  applyCashierV3LoginFeatures(result.features)
+  const bootstrap = await onCashierStoreOrAccountChanged({
+    reason: 'account',
+    storeId: Number(result.store_id || 0),
+    silent: true
+  })
+  const bootstrapResult = bootstrap?.data?.result && typeof bootstrap.data.result === 'object'
+    ? bootstrap.data.result
+    : bootstrap?.result
+  if (!['success', 'succeeded'].includes(String(bootstrapResult?.status || '').toLowerCase())) {
+    throw new Error(String(bootstrapResult?.message || '门店工作台初始化失败，请稍后重试。'))
+  }
+  await router.replace('/cashier')
+}
 
 async function submit() {
   if (submitting.value) return
@@ -21,27 +41,46 @@ async function submit() {
   submitting.value = true
   try {
     const result = await loginStoreV3({ account: account.value.trim(), pwd: password.value })
-    persistStoreV3Token(result.token)
-    applyCashierV3LoginFeatures(result.features)
-    // 登录成功后必须先接收该账号和门店的首份根投影。功能权限快照仅用于
-    // 路由放行，不能替代工作台及其既有资源的并发版本。
-    const bootstrap = await onCashierStoreOrAccountChanged({
-      reason: 'account',
-      storeId: Number(result.store_id || 0),
-      silent: true
-    })
-    const bootstrapResult = bootstrap?.data?.result && typeof bootstrap.data.result === 'object'
-      ? bootstrap.data.result
-      : bootstrap?.result
-    if (!['success', 'succeeded'].includes(String(bootstrapResult?.status || '').toLowerCase())) {
-      throw new Error(String(bootstrapResult?.message || '门店工作台初始化失败，请稍后重试。'))
+    if (result.need_select_store) {
+      storeChoices.value = Array.isArray(result.stores) ? result.stores : []
+      loginTicket.value = String(result.login_ticket || '')
+      if (!loginTicket.value || !storeChoices.value.length) {
+        throw new Error('当前账号没有可选择的有效门店。')
+      }
+      return
     }
-    await router.replace('/cashier')
+    await finishLogin(result)
   } catch (reason) {
     error.value = reason instanceof Error ? reason.message : '登录未完成，请稍后重试。'
   } finally {
     submitting.value = false
   }
+}
+
+async function selectStore(store) {
+  if (submitting.value || !loginTicket.value) return
+  error.value = ''
+  submitting.value = true
+  selectingStore.value = true
+  try {
+    const result = await loginStoreV3({
+      login_ticket: loginTicket.value,
+      store_id: Number(store?.store_id || 0)
+    })
+    await finishLogin(result)
+  } catch (reason) {
+    error.value = reason instanceof Error ? reason.message : '门店选择未完成，请重新登录。'
+  } finally {
+    submitting.value = false
+    selectingStore.value = false
+  }
+}
+
+function backToAccountLogin() {
+  if (submitting.value) return
+  storeChoices.value = []
+  loginTicket.value = ''
+  error.value = ''
 }
 </script>
 
@@ -57,7 +96,7 @@ async function submit() {
           </h2>
         </div>
 
-        <form class="store-login__panel" @submit.prevent="submit">
+        <form v-if="!loginTicket" class="store-login__panel" @submit.prevent="submit">
           <header>
             <p>欢迎回来</p>
             <h1>门店端登录</h1>
@@ -73,6 +112,28 @@ async function submit() {
           <p v-if="error" class="store-login__error" role="alert">{{ error }}</p>
           <button class="store-login__submit" type="submit" :disabled="submitting">{{ submitting ? '处理中…' : '登录' }}</button>
         </form>
+        <section v-else class="store-login__panel store-login__store-picker" aria-labelledby="store-picker-title">
+          <header>
+            <p>请选择进入门店</p>
+            <h1 id="store-picker-title">选择门店后登录</h1>
+          </header>
+          <p class="store-login__hint">进入后当前门店会固定，工作台内不再切换门店。</p>
+          <div class="store-login__stores">
+            <button
+              v-for="store in storeChoices"
+              :key="`${store.store_id}-${store.staff_id}`"
+              class="store-login__store"
+              type="button"
+              :disabled="submitting"
+              @click="selectStore(store)"
+            >
+              <span class="store-login__store-name">{{ store.store_name || `门店 ${store.store_id}` }}</span>
+              <span class="store-login__store-meta">{{ store.org_name || '当前数据权限范围' }} · {{ store.source === 'direct_tenure' ? '直接任职' : '数据权限' }}</span>
+            </button>
+          </div>
+          <button class="store-login__back" type="button" :disabled="submitting" @click="backToAccountLogin">返回重新登录</button>
+          <p v-if="error" class="store-login__error" role="alert">{{ error }}</p>
+        </section>
       </div>
     </section>
 
@@ -235,6 +296,55 @@ async function submit() {
   font-size: 14px;
   line-height: 1.5;
 }
+
+.store-login__hint {
+  margin: -8px 0 0;
+  color: #6e7f88;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.store-login__stores {
+  display: grid;
+  gap: 10px;
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.store-login__store {
+  display: grid;
+  gap: 5px;
+  width: 100%;
+  padding: 14px 15px;
+  border: 1px solid #c6d1d5;
+  border-radius: 5px;
+  color: #202b33;
+  background: #fff;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color .18s ease, background-color .18s ease;
+}
+
+.store-login__store:hover:not(:disabled) {
+  border-color: #6f9286;
+  background: #f4f9f7;
+}
+
+.store-login__store:disabled { opacity: .6; cursor: wait; }
+
+.store-login__store-name { font-size: 15px; font-weight: 650; }
+.store-login__store-meta { color: #718088; font-size: 12px; }
+
+.store-login__back {
+  min-height: 40px;
+  border: 1px solid #b8c5ca;
+  border-radius: 4px;
+  color: #4d5d65;
+  background: #fff;
+  cursor: pointer;
+}
+
+.store-login__back:disabled { opacity: .6; cursor: wait; }
 
 .store-login__footer {
   position: absolute;
