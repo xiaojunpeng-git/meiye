@@ -139,10 +139,10 @@ const routes = [
         meta: { title: '经营看板', description: 'V3 事实层经营指标、趋势、排行、明细与数据追平状态。' }
       },
       {
-        path: 'data/reports',
+        path: 'data/reports/:report?',
         name: 'cashier-v3-store-business-reports',
         component: StoreBusinessReportView,
-        meta: { title: '经营报表', description: '当前门店的 V3 统一事实报表。' }
+        meta: { title: '门店运营', description: '门店运营七张报表，统一读取 V3 事实与指标服务。' }
       }
     ]
   }

@@ -21,3 +21,17 @@ async function request(path, query = {}) {
 export const queryStoreBusinessReportCatalog = () => request('/cashierapi/v3/report/unified/catalog')
 export const queryStoreBusinessReport = (query = {}) => request('/cashierapi/v3/report/unified/query', query)
 export const exportStoreBusinessReport = (query = {}) => request('/cashierapi/v3/report/unified/export', query)
+export const listStoreBusinessReportAnnotations = (query = {}) => request('/cashierapi/v3/report/operations/annotations', query)
+
+async function write(path, body = {}) {
+  const token = readStoreV3SessionToken()
+  const response = await fetch(path, {
+    method: 'POST', credentials: 'omit', cache: 'no-store',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json', ...(token ? { 'Authori-zation': `Bearer ${token}` } : {}) },
+    body: JSON.stringify(body)
+  })
+  const payload = await response.json().catch(() => null)
+  if (!response.ok || !payload || Number(payload.status || 200) !== 200) throw new Error(String(payload?.msg || '保存报表补充内容失败。'))
+  return payload.data || payload
+}
+export const saveStoreBusinessReportAnnotation = (body = {}) => write('/cashierapi/v3/report/operations/annotation', body)

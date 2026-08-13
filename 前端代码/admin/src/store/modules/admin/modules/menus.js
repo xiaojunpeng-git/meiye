@@ -87,6 +87,68 @@ function withOperatingScreenMenu(menuData) {
   return menuData;
 }
 
+// 门店运营七表是平台“数据”菜单下的统一入口。部分本地账号的菜单权限缓存
+// 仍来自旧菜单树，后端不会把新节点返回到该账号的 role rules 中；这里补齐
+// 受控的前端入口，路由和接口权限仍由后端/路由守卫校验，不改变数据范围。
+function withStoreOperationsMenu(menuData) {
+  if (!Array.isArray(menuData)) return [];
+  const routePrefix = isAgentPath() ? Setting.routePreAgent : Setting.roterPre;
+  const reportPath = `${routePrefix}/report/business-center`;
+  const dataMenu = menuData.find(item => {
+    if (!item) return false;
+    const path = String(item.path || item.menu_path || '').replace(/\/$/, '');
+    return item.header === 'data'
+      || path === `${routePrefix}/data`
+      || item.title === '数据'
+      || item.menu_name === '数据'
+      || item.title === '订单';
+  });
+  if (!dataMenu) return menuData;
+  if (!Array.isArray(dataMenu.children)) dataMenu.children = [];
+  // The legacy permission tree sometimes leaves the report node under
+  // 订单.  Keep one canonical entry under 数据→门店运营 so the platform
+  // does not expose two competing report entrances.
+  menuData.forEach(item => {
+    if (!item || item === dataMenu || !Array.isArray(item.children)) return;
+    item.children = item.children.filter(child => {
+      if (!child) return true;
+      const childPath = String(child.path || '').replace(/\/$/, '');
+      return !(child.unique_auth === 'admin-report-store-operations'
+        || child.title === '门店运营'
+        || child.menu_name === '门店运营'
+        || childPath === reportPath);
+    });
+  });
+  const exists = dataMenu.children.some(item => item && (
+    item.unique_auth === 'admin-report-store-operations'
+    || item.title === '门店运营'
+    || String(item.path || '').replace(/\/$/, '') === reportPath
+  ));
+  if (exists) return menuData;
+  dataMenu.children.push({
+    id: 'admin-report-store-operations-local',
+    pid: dataMenu.id,
+    title: '门店运营',
+    menu_name: '门店运营',
+    icon: 'ios-pie-outline',
+    path: reportPath,
+    target: '_self',
+    header: '',
+    is_header: 0,
+    is_show_path: 0,
+    unique_auth: 'admin-report-store-operations',
+    children: []
+  });
+  return menuData;
+}
+
+function normalizeMenus(menuData, prefix) {
+  return withStoreOperationsMenu(withOperatingScreenMenu(normalizeProductBusinessConfigMenu(
+    normalizeOrganizationWorkspaceMenu(withoutLegacyInventoryMovement(menuData), prefix),
+    prefix
+  )));
+}
+
 function getMenusName() {
   let menuList, roterPre;
   let storage = window.localStorage,
@@ -102,10 +164,7 @@ function getMenusName() {
     menuData = menuList !== undefined ? JSON.parse(menuList) : [];
   } catch (e) {}
   const prefix = isAgentPath() ? Setting.routePreAgent : Setting.roterPre;
-  return withOperatingScreenMenu(normalizeProductBusinessConfigMenu(
-    normalizeOrganizationWorkspaceMenu(withoutLegacyInventoryMovement(menuData), prefix),
-    prefix
-  ));
+  return normalizeMenus(menuData, prefix);
 }
 
 export default {
@@ -119,10 +178,7 @@ export default {
     getmenusNav(state, menuList) {
       const storage = window.localStorage;
       const prefix = isAgentPath() ? Setting.routePreAgent : Setting.roterPre;
-      menuList = withOperatingScreenMenu(normalizeProductBusinessConfigMenu(
-        normalizeOrganizationWorkspaceMenu(withoutLegacyInventoryMovement(menuList), prefix),
-        prefix
-      ));
+      menuList = normalizeMenus(menuList, prefix);
       state.menusName = menuList;
       if (isAgentPath()) {
         storage.setItem('agent_menuList', JSON.stringify(menuList));
@@ -135,10 +191,7 @@ export default {
     getAgentMenusNav(state, menuList) {
       const storage = window.localStorage;
       const prefix = isAgentPath() ? Setting.routePreAgent : Setting.roterPre;
-      menuList = withOperatingScreenMenu(normalizeProductBusinessConfigMenu(
-        normalizeOrganizationWorkspaceMenu(withoutLegacyInventoryMovement(menuList), prefix),
-        prefix
-      ));
+      menuList = normalizeMenus(menuList, prefix);
       //   state.menusName = menuList;
       storage.setItem('agent_menuList', JSON.stringify(menuList));
       storage.setItem('agent_roterPre', 'agent');

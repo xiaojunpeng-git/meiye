@@ -257,6 +257,7 @@ final class CashierV3SalesOrderPlanV1
                 'category_id_snapshot' => (string)$line['category_id_snapshot'],
                 'category_name_snapshot' => $line['category_name_snapshot'],
                 'service_object' => $line['service_object'],
+                'friend_counts_as_customer' => $line['friend_counts_as_customer'],
                 'craftsmen_snapshot_json' => $line['craftsmen_snapshot_json'],
                 'is_experience' => $line['is_experience'],
                 'quantity' => $line['quantity'],
@@ -913,16 +914,12 @@ final class CashierV3SalesOrderPlanV1
             'priceChangedAt' => $priceChangedAt,
             'serviceObject' => $serviceObject,
             'isExperience' => $isExperience,
+            // Keep the sales-order authority shape identical to the V3
+            // settlement kernel, including empty attribution snapshots.
+            'craftsmen' => $craftsmen,
+            'guideSelections' => $guideSelections,
+            'salesManagerSelections' => $salesManagerSelections,
         ];
-        if (!CashierV3CheckoutCraftsmenSnapshot::isLegacyEmpty($craftsmenJson)) {
-            $authority['craftsmen'] = $craftsmen;
-        }
-        if ($guideSelections !== []) {
-            $authority['guideSelections'] = $guideSelections;
-        }
-        if ($salesManagerSelections !== []) {
-            $authority['salesManagerSelections'] = $salesManagerSelections;
-        }
         if ($catalogSkuId <= 0) {
             unset($authority['catalogSkuId']);
         }
@@ -958,6 +955,7 @@ final class CashierV3SalesOrderPlanV1
             'category_name_snapshot' => $categoryName,
             'service_object' => $serviceObject,
             'craftsmen_snapshot_json' => CashierV3CheckoutCraftsmenSnapshot::encode($craftsmen),
+            'friend_counts_as_customer' => $friendCountsAsCustomer,
             'is_experience' => $isExperience,
             'is_presale' => $isPresale,
             'quantity' => $quantity,

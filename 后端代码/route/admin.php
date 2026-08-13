@@ -1634,6 +1634,14 @@ Route::group('adminapi', function () {
      * 报表
      */
     Route::group('report', function () {
+        Route::get('business-catalog', 'v1.report.BusinessReportCatalog/index')->option(['real_name' => '业务报表中心目录']);
+        Route::get('unified/catalog', 'v1.report.UnifiedReport/catalog')->option(['real_name' => '门店业务报表目录']);
+        Route::get('unified/query', 'v1.report.UnifiedReport/query')->option(['real_name' => '门店业务报表查询']);
+        Route::get('unified/export', 'v1.report.UnifiedReport/export')->option(['real_name' => '门店业务报表导出']);
+        Route::get('operations/categories', 'v1.report.UnifiedReport/operationsCategories')->option(['real_name' => '门店运营商品分类']);
+        Route::post('operations/category', 'v1.report.UnifiedReport/saveCategory')->option(['real_name' => '保存合作方分类配置']);
+        Route::get('operations/annotations', 'v1.report.UnifiedReport/annotations')->option(['real_name' => '门店运营补充记录']);
+        Route::post('operations/annotation', 'v1.report.UnifiedReport/saveAnnotation')->option(['real_name' => '保存门店运营补充记录']);
         Route::get('reportSale', 'v1.report.ReportData/reportSale')->name('reportColumn')->option(['real_name' => '报表列信息']);
         Route::get('operating_screen', 'v1.report.ReportData/operatingScreen')->name('operatingScreen')->option(['real_name' => '总部经营数据大屏']);
         Route::get('reportList', 'v1.report.ReportData/reportList')->name('reportList')->option(['real_name' => '报表列表']);

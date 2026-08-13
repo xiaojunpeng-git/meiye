@@ -17,6 +17,15 @@ export default {
     component: BasicLayout,
     children: [
         {
+            path: 'business',
+            name: `${pre}business`,
+            meta: {
+                title: '门店业务报表',
+                auth: ['store-report-index']
+            },
+            component: () => import('@/pages/report/business')
+        },
+        {
             path: 'index',
             name: `${pre}reportList`,
             meta: {

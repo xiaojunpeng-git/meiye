@@ -2173,7 +2173,12 @@ final class CashierV3CashierWorkspaceServices
             'salespeople_json' => $this->encodeJson([]),
             'guide_selections_json' => $this->encodeJson([]),
             'sales_manager_selections_json' => $this->encodeJson([]),
+            // These customer/report dimensions are part of the locked line
+            // authority.  Persist the defaults explicitly so the workspace
+            // fingerprint and the final sales-order plan use the same shape.
+            'friend_counts_as_customer' => (int)($line['friend_counts_as_customer'] ?? 1),
             'is_experience' => 0,
+            'is_presale' => (int)($line['is_presale'] ?? 0),
             'display_snapshot_json' => $this->encodeJson($displaySnapshot),
         ];
     }
@@ -2837,7 +2842,9 @@ final class CashierV3CashierWorkspaceServices
                 'salespeople_json' => (string)($row['salespeople_json'] ?? ''),
                 'guide_selections_json' => (string)($row['guide_selections_json'] ?? ''),
                 'sales_manager_selections_json' => (string)($row['sales_manager_selections_json'] ?? ''),
+                'friend_counts_as_customer' => (int)($row['friend_counts_as_customer'] ?? 1),
                 'is_experience' => (int)($row['is_experience'] ?? 0),
+                'is_presale' => (int)($row['is_presale'] ?? 0),
                 'display_snapshot_json' => (string)($row['display_snapshot_json'] ?? ''),
                 'sort_no' => (int)($row['sort_no'] ?? 0),
             ];

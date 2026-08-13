@@ -59,6 +59,14 @@ Route::group('cashierapi/v3', function () {
             ->option(['real_name' => '收银V3经营报表查询']);
         Route::get('report/unified/export', 'Report/export')
             ->option(['real_name' => '收银V3经营报表导出']);
+        Route::get('report/operations/categories', 'Report/operationsCategories')
+            ->option(['real_name' => '收银V3门店运营商品分类']);
+        Route::post('report/operations/category', 'Report/saveCategory')
+            ->option(['real_name' => '收银V3保存合作方分类配置']);
+        Route::get('report/operations/annotations', 'Report/annotations')
+            ->option(['real_name' => '收银V3门店运营补充记录']);
+        Route::post('report/operations/annotation', 'Report/saveAnnotation')
+            ->option(['real_name' => '收银V3保存门店运营补充记录']);
         // 统一命令网关：白名单 action + 幂等键 + 多对象 contexts 严格校验
         Route::post('workbenches/actions', 'Command/dispatchAction')
             ->option(['real_name' => '收银V3命令网关']);

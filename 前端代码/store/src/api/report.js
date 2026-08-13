@@ -17,3 +17,15 @@ export function receiveColumn(data) {
 		params: data
 	});
 }
+
+export function businessReportCatalog () {
+  return request({ url: 'report/unified/catalog', method: 'get' });
+}
+
+export function businessReportQuery (data) {
+  return request({ url: 'report/unified/query', method: 'get', params: data });
+}
+
+export function businessReportExport (data) {
+  return request({ url: 'report/unified/export', method: 'get', params: data });
+}

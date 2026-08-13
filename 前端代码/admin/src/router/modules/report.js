@@ -23,6 +23,39 @@ export default {
   component: BasicLayout,
   children: [
     {
+      path: 'business-center',
+      name: `${pre}business_center`,
+      meta: {
+        auth: ['report-sale-info'],
+        title: '门店运营'
+      },
+      component: () => import('@/pages/report/data/business_hub')
+    },
+    {
+      path: 'store-operations',
+      name: `${pre}store_operations`,
+      meta: {
+        auth: ['report-sale-info'],
+        title: '门店运营报表'
+      },
+      component: () => import('@/pages/report/data/store_business')
+    },
+    {
+      // Legacy six-tab URL: keep bookmarked links safe while closing the old entry.
+      // The new seven-report page is intentionally reached through 门店运营.
+      path: 'store-business',
+      name: `${pre}store_business_legacy`,
+      meta: {
+        auth: ['report-sale-info'],
+        title: '门店业务报表（已迁移）'
+      },
+      redirect: (to) => ({
+        // Use the incoming path so generated agent routes keep their own prefix.
+        path: to.path.replace(/\/store-business$/, '/business-center'),
+        query: to.query
+      })
+    },
+    {
       path: 'report_sale',
       name: `${pre}report_sale`,
       meta: {

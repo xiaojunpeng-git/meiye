@@ -812,6 +812,14 @@ Route::group('storeapi', function () {
     })->middleware([AuthTokenMiddleware::class, ForceStoreSessionMiddleware::class, StoreCkeckRoleMiddleware::class])->middleware(\app\http\middleware\SystemLogMiddleware::class, 'store');
     Route::group('report', function () {
         Route::get('order_data', 'report.Report/orderData')->name('reportOrder')->option(['real_name' => '订单报表']);
+        Route::get('unified/catalog', 'report.UnifiedReport/catalog')->option(['real_name' => '门店业务报表目录']);
+        Route::get('unified/definitions', 'report.UnifiedReport/definitions')->option(['real_name' => '门店业务报表指标定义']);
+        Route::get('unified/query', 'report.UnifiedReport/query')->option(['real_name' => '门店业务报表查询']);
+        Route::get('unified/export', 'report.UnifiedReport/export')->option(['real_name' => '门店业务报表导出']);
+        Route::get('operations/categories', 'report.UnifiedReport/operationsCategories')->option(['real_name' => '门店运营商品分类']);
+        Route::post('operations/category', 'report.UnifiedReport/saveCategory')->option(['real_name' => '保存合作方分类配置']);
+        Route::get('operations/annotations', 'report.UnifiedReport/annotations')->option(['real_name' => '门店运营补充记录']);
+        Route::post('operations/annotation', 'report.UnifiedReport/saveAnnotation')->option(['real_name' => '保存门店运营补充记录']);
         Route::get('reportSale', 'report.ReportData/reportSale')->name('reportColumn')->option(['real_name' => '报表列信息']);
         Route::get('reportList', 'report.ReportData/reportList')->name('reportList')->option(['real_name' => '报表列表']);
         Route::get('receiveColumn', 'report.Report/receiveColumn')->name('receiveColumn')->option(['real_name' => 'receiveColumn']);

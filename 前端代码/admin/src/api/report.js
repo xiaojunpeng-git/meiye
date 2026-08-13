@@ -1,5 +1,36 @@
 import request from '@/plugins/request';
 
+export function businessReportCatalog() {
+  return request({
+    url: 'report/business-catalog',
+    method: 'get'
+  });
+}
+
+export function unifiedBusinessReportQuery(data) {
+  return request({ url: 'report/unified/query', method: 'get', params: data });
+}
+
+export function unifiedBusinessReportCatalog() {
+  return request({ url: 'report/unified/catalog', method: 'get' });
+}
+
+export function unifiedBusinessReportExport(data) {
+  return request({ url: 'report/unified/export', method: 'get', params: data });
+}
+
+/**
+ * 门店运营报表范围选择器：组织树与门店列表均由平台后端按当前账号权限返回。
+ * 报表查询仍由后端对 org_id / store_id 再次裁剪，前端只用于缩小范围。
+ */
+export function reportOrganizationTree() {
+  return request({ url: 'region/organization/tree', method: 'get' });
+}
+
+export function reportOrganizationStores(data) {
+  return request({ url: 'region/organization/stores', method: 'get', params: data });
+}
+
 export function reportSale(data) {
   return request({
     url: 'report/reportSale',
@@ -60,4 +91,3 @@ export function receiveColumn(data) {
     params: data
   });
 }
-
