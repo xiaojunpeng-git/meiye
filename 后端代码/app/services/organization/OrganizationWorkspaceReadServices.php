@@ -387,6 +387,67 @@ class OrganizationWorkspaceReadServices extends BaseServices
             $totalAssignCount[(int)$gr['employee_id']] = (int)$gr['cnt'];
         }
 
+        // 岗位权威来源是 staff_job_position；system_store_staff.position 仅作旧数据兼容。
+        // 这里按当前页一次性读取，避免列表逐员工 N+1 查询。
+        $jobRowsByStaff = [];
+        $scopeStaffIds = array_values(array_filter(array_map(static function ($row) {
+            return (int)($row['staff_id'] ?? 0);
+        }, $scopeAssignRows)));
+        if ($scopeStaffIds) {
+            $jobRows = Db::name('staff_job_position')->alias('j')
+                ->leftJoin('position p', 'p.id = j.position_id')
+                ->whereIn('j.staff_id', $scopeStaffIds)
+                ->where('j.is_del', 0)
+                ->where('j.status', 1)
+                ->where('j.end_time', 0)
+                ->field('j.id,j.staff_id,j.employee_id,j.store_id,j.position_id,j.start_time,j.end_time,j.status,p.name AS position_name,p.status AS position_status')
+                ->order('j.staff_id', 'asc')
+                ->order('j.id', 'asc')
+                ->select()
+                ->toArray();
+            foreach ($jobRows as $job) {
+                $sid = (int)($job['staff_id'] ?? 0);
+                if ($sid <= 0) {
+                    continue;
+                }
+                $job['id'] = (int)($job['id'] ?? 0);
+                $job['employee_id'] = (int)($job['employee_id'] ?? 0);
+                $job['store_id'] = (int)($job['store_id'] ?? 0);
+                $job['position_id'] = (int)($job['position_id'] ?? 0);
+                $job['position_name'] = $this->normalizePositionLabel((string)($job['position_name'] ?? ''));
+                $job['position_status'] = (int)($job['position_status'] ?? 0);
+                $jobRowsByStaff[$sid][] = $job;
+            }
+        }
+        $jobRowsByDirectEmployee = [];
+        if ($pageEmployeeIds && $includeDirectMembers) {
+            $directJobRows = Db::name('staff_job_position')->alias('j')
+                ->leftJoin('position p', 'p.id = j.position_id')
+                ->whereIn('j.employee_id', $pageEmployeeIds)
+                ->where('j.staff_id', 0)
+                ->where('j.is_del', 0)
+                ->where('j.status', 1)
+                ->where('j.end_time', 0)
+                ->field('j.id,j.staff_id,j.employee_id,j.store_id,j.position_id,j.start_time,j.end_time,j.status,p.name AS position_name,p.status AS position_status')
+                ->order('j.employee_id', 'asc')
+                ->order('j.id', 'asc')
+                ->select()
+                ->toArray();
+            foreach ($directJobRows as $job) {
+                $eid = (int)($job['employee_id'] ?? 0);
+                if ($eid <= 0) {
+                    continue;
+                }
+                $job['id'] = (int)($job['id'] ?? 0);
+                $job['employee_id'] = $eid;
+                $job['store_id'] = (int)($job['store_id'] ?? 0);
+                $job['position_id'] = (int)($job['position_id'] ?? 0);
+                $job['position_name'] = $this->normalizePositionLabel((string)($job['position_name'] ?? ''));
+                $job['position_status'] = (int)($job['position_status'] ?? 0);
+                $jobRowsByDirectEmployee[$eid][] = $job;
+            }
+        }
+
         $positionNameMap = $this->loadPositionNameMap();
         $byEmployee = [];
         foreach ($scopeAssignRows as $row) {
@@ -408,7 +469,16 @@ class OrganizationWorkspaceReadServices extends BaseServices
             $posName = $this->normalizePositionLabel(
                 (string)($positionNameMap[(int)($row['position'] ?? 0)] ?? '')
             );
+            $jobPositions = $jobRowsByStaff[(int)$row['staff_id']] ?? [];
+            $jobNames = array_values(array_unique(array_filter(array_map(static function ($job) {
+                return trim((string)($job['position_name'] ?? ''));
+            }, $jobPositions))));
             $roles = $this->buildStaffRoles($row, $posName);
+            foreach ($jobNames as $jobName) {
+                if (!in_array($jobName, $roles, true)) {
+                    $roles[] = $jobName;
+                }
+            }
             foreach ($roles as $roleName) {
                 if (!in_array($roleName, $byEmployee[$eid]['roles'], true)) {
                     $byEmployee[$eid]['roles'][] = $roleName;
@@ -421,6 +491,8 @@ class OrganizationWorkspaceReadServices extends BaseServices
                 'org_id' => (int)($row['org_id'] ?? 0),
                 'position' => $posName,
                 'roles' => $roles,
+                'job_positions' => $jobPositions,
+                'job_names' => $jobNames,
                 'is_manager' => SystemStoreStaffServices::staffIsManager($row),
             ];
         }
@@ -457,11 +529,22 @@ class OrganizationWorkspaceReadServices extends BaseServices
                         'direct_memberships' => [],
                     ];
                 }
+                $directJobPositions = $jobRowsByDirectEmployee[$eid] ?? [];
+                $directJobNames = array_values(array_unique(array_filter(array_map(static function ($job) {
+                    return trim((string)($job['position_name'] ?? ''));
+                }, $directJobPositions))));
+                foreach ($directJobNames as $jobName) {
+                    if (!in_array($jobName, $byEmployee[$eid]['roles'], true)) {
+                        $byEmployee[$eid]['roles'][] = $jobName;
+                    }
+                }
                 $byEmployee[$eid]['direct_memberships'][] = [
                     'org_id' => (int)$row['org_id'],
                     'org_name' => (string)($row['org_name'] ?? ''),
                     'job_title' => (string)($row['job_title'] ?? ''),
                     'source' => (string)($row['source'] ?? ''),
+                    'job_positions' => $directJobPositions,
+                    'job_names' => $directJobNames,
                 ];
             }
         }
