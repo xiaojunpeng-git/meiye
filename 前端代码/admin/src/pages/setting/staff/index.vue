@@ -120,7 +120,7 @@
               <template slot-scope="{ row }" slot="action">
                 <div class="action-ops">
                   <div class="action-row">
-                    <a @click="openForm(row.id)">编辑</a>
+                    <a @click="openForm(resolveEditId(row))">编辑</a>
                     <Divider type="vertical" />
                     <a @click="openTransfer(row)">调店</a>
                     <Divider type="vertical" />
@@ -620,6 +620,18 @@ export default {
     openForm(id = 0) {
       this.formEditId = Number(id) || 0;
       this.formModal = true;
+    },
+    /**
+     * 组织直属人员在列表中使用负 employee_id 作为只读占位 ID，
+     * 但完整人员编辑接口的路径主键必须是 employee_id。门店任职
+     * 仍沿用真实 staff_id，避免负占位值把“编辑”误开成新建表单。
+     */
+    resolveEditId(row = {}) {
+      const staffId = Number(row.id || 0);
+      if (Number(row.is_organization_direct || 0) === 1 || staffId <= 0) {
+        return Number(row.employee_id || 0);
+      }
+      return staffId;
     },
     openTransfer(row) {
       this.transferStaffRow = {

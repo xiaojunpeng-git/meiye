@@ -242,6 +242,12 @@ class EmployeeInternalLoginServices extends BaseServices
             ->order('id', 'asc')
             ->find();
         if ($admin) {
+            $admin = is_array($admin) ? $admin : $admin->toArray();
+            // 统一账号可能先于岗位绑定/岗位策略变更创建兼容的
+            // system_admin 投影。登录时必须校正 roles，否则认证成功后
+            // 会在平台菜单/API 权限校验阶段被误判为“无访问权限”。
+            $this->ensurePlatformAdminProjection($employeeId);
+            $admin = Db::name('system_admin')->where('id', (int)$admin['id'])->find();
             return is_array($admin) ? $admin : $admin->toArray();
         }
         $now = time();
@@ -259,7 +265,23 @@ class EmployeeInternalLoginServices extends BaseServices
             'add_time' => $now,
         ]);
         $admin = Db::name('system_admin')->where('id', $id)->find();
+        $this->ensurePlatformAdminProjection($employeeId);
+        $admin = Db::name('system_admin')->where('id', $id)->find();
         return is_array($admin) ? $admin : $admin->toArray();
+    }
+
+    /**
+     * 平台登录是兼容投影的最后一道自愈点：只在岗位投影不一致时写入，
+     * 避免每次登录都重复更新 system_admin.roles。
+     */
+    protected function ensurePlatformAdminProjection(int $employeeId): void
+    {
+        /** @var StaffJobPositionServices $jobSvc */
+        $jobSvc = app()->make(StaffJobPositionServices::class);
+        $check = $jobSvc->dryRunPlatformProjection($employeeId);
+        if (empty($check['consistent'])) {
+            $jobSvc->projectPlatformAdminRoles($employeeId);
+        }
     }
 
     protected function entryColumn(string $channel): string
