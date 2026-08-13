@@ -63,6 +63,8 @@ final class CashierV3CheckoutFactPlanV1
     private const SALE_KEYS = [
         'sourceType', 'itemId', 'itemCodeSnapshot', 'itemNameSnapshot',
         'categoryIdSnapshot', 'categoryNameSnapshot', 'quantity',
+        'friendCountsAsCustomer',
+        'isPresale', 'inventoryOutboundRequired',
         'originalAmountCents', 'discountAmountCents', 'couponUserId',
         'couponNameSnapshot', 'couponDiscountCents', 'saleAmountCents', 'debtAmountCents',
     ];
@@ -294,6 +296,12 @@ final class CashierV3CheckoutFactPlanV1
                 'category_id_snapshot' => self::optionalToken($fact['categoryIdSnapshot'], 64, 'sale_category_id_invalid'),
                 'category_name_snapshot' => self::text($fact['categoryNameSnapshot'], 128, 'sale_category_name_invalid'),
                 'quantity' => self::positiveInt($fact['quantity'], 'sale_quantity_invalid'),
+                'friend_counts_as_customer' => self::nonNegativeInt(
+                    $fact['friendCountsAsCustomer'],
+                    'sale_friend_counts_as_customer_invalid'
+                ),
+                'is_presale' => self::nonNegativeInt($fact['isPresale'] ?? 0, 'sale_is_presale_invalid'),
+                'inventory_outbound_required' => self::nonNegativeInt($fact['inventoryOutboundRequired'] ?? 1, 'sale_inventory_outbound_required_invalid'),
                 'original_amount_cents' => self::signedMoney($fact['originalAmountCents'], $direction, 'sale_original_amount_invalid'),
                 'discount_amount_cents' => self::signedMoney($fact['discountAmountCents'], $direction, 'sale_discount_amount_invalid', true),
                 'coupon_user_id' => self::nonNegativeInt($fact['couponUserId'], 'sale_coupon_user_invalid'),
@@ -302,7 +310,8 @@ final class CashierV3CheckoutFactPlanV1
                 'sale_amount_cents' => self::signedMoney($fact['saleAmountCents'], $direction, 'sale_amount_invalid'),
                 'debt_amount_cents' => self::signedMoney($fact['debtAmountCents'], $direction, 'sale_debt_amount_invalid', true),
             ];
-            if ($row['original_amount_cents'] - $row['discount_amount_cents'] !== $row['sale_amount_cents']
+            if ($row['friend_counts_as_customer'] > 1 || $row['is_presale'] > 1 || $row['inventory_outbound_required'] > 1 || ($row['is_presale'] === 1 && $row['inventory_outbound_required'] === 1)
+                || $row['original_amount_cents'] - $row['discount_amount_cents'] !== $row['sale_amount_cents']
                 || abs($row['debt_amount_cents']) > abs($row['sale_amount_cents'])
                 || abs($row['coupon_discount_cents']) > abs($row['discount_amount_cents'])
                 || ($row['coupon_user_id'] === 0

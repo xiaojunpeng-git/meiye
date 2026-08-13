@@ -54,7 +54,10 @@ const activeCartLineId = ref(null)
 // 保留最近一次数量校验失败，避免后端拒绝超量后输入框被恢复为权威数量，
 // 但结账按钮仍沿用旧购物车继续进入结账向导。
 const cartQuantityValidationError = ref('')
-const localExperienceState = ref({})
+// 服务对象、朋友是否计客与体验标记是本次结账的行设置。点击时只更新当前
+// 工作台投影，准备结账前再和其它草稿写入一起持久化，避免每次点选都阻塞收银员。
+const localLineServiceSettings = ref({})
+const isPersistingDeferredLineSettings = ref(false)
 const previewCardOperation = ref(null)
 const selectedCardOperationProjectKeys = computed(() => (previewCardOperation.value?.sources || []).map((source) => (
   `${entitlementCardHolderId(source)}:${entitlementBenefitPoolId(source)}`
@@ -2263,10 +2266,14 @@ function firstCartLineMissingCraftsmen() {
 }
 
 function cartLineServiceObject(line = {}) {
+  const local = localLineServiceSettings.value[line.id]
+  if (local?.serviceObject) return local.serviceObject
   return ['friend', '朋友'].includes(line.serviceObject) ? 'friend' : 'self'
 }
 
 function cartLineFriendCountsAsCustomer(line = {}) {
+  const local = localLineServiceSettings.value[line.id]
+  if (typeof local?.friendCountsAsCustomer === 'boolean') return local.friendCountsAsCustomer
   // 旧草稿没有该快照时保持原“朋友单独计客”的既有口径。
   return !(line.friendCountsAsCustomer === false || Number(line.friendCountsAsCustomer) === 0)
 }
@@ -2276,7 +2283,16 @@ function isProductLine(line = {}) {
 }
 
 function cartLinePresaleSelected(line = {}) {
-  return line.isPresale === true || Number(line.isPresale) === 1
+  const local = localLineServiceSettings.value[line.id]
+  return typeof local?.isPresale === 'boolean'
+    ? local.isPresale
+    : line.isPresale === true || Number(line.isPresale) === 1
+}
+
+function cartLineInventoryOutboundRequired(line = {}) {
+  const local = localLineServiceSettings.value[line.id]
+  if (typeof local?.inventoryOutboundRequired === 'boolean') return local.inventoryOutboundRequired
+  return line.inventoryOutboundRequired !== false && Number(line.inventoryOutboundRequired) !== 0
 }
 
 async function queryPersonnelCandidates(scope, line, keyword = '') {
@@ -2777,50 +2793,97 @@ function cardOperationConfirmLabel(mode = '') {
   return '确认操作'
 }
 
-async function setCartLineServiceObject(line, serviceObject, friendCountsAsCustomer = true) {
+function setCartLineServiceObject(line, serviceObject, friendCountsAsCustomer = true) {
   if (!isProjectLine(line) || !['self', 'friend'].includes(serviceObject)) return
   if (cartLineServiceObject(line) === serviceObject
     && (serviceObject !== 'friend' || cartLineFriendCountsAsCustomer(line) === friendCountsAsCustomer)) return
   activeCartLineId.value = line.id
-  await mutateCashierDraft('update-cart-line-service-settings', line, {
-    serviceObject,
-    friendCountsAsCustomer: serviceObject === 'friend' ? friendCountsAsCustomer : true
-  })
-}
-
-async function toggleCartLineExperience(line) {
-  if (!isProjectLine(line)) return
-  activeCartLineId.value = line.id
-  const previous = cartLineExperienceSelected(line)
-  const payload = { isExperience: !previous }
-  localExperienceState.value = { ...localExperienceState.value, [line.id]: payload.isExperience }
-  if (new URLSearchParams(window.location.search).get('preview') === '1') return
-  const result = await mutateCashierDraft('update-cart-line-service-settings', line, payload)
-  if (!['success', 'succeeded'].includes(resultStatus(result))) {
-    localExperienceState.value = { ...localExperienceState.value, [line.id]: previous }
+  localLineServiceSettings.value = {
+    ...localLineServiceSettings.value,
+    [line.id]: {
+      ...(localLineServiceSettings.value[line.id] || {}),
+      serviceObject,
+      friendCountsAsCustomer: serviceObject === 'friend' ? friendCountsAsCustomer : true
+    }
   }
 }
 
-async function toggleCartLinePresale(line) {
+function toggleCartLineExperience(line) {
+  if (!isProjectLine(line)) return
+  activeCartLineId.value = line.id
+  localLineServiceSettings.value = {
+    ...localLineServiceSettings.value,
+    [line.id]: {
+      ...(localLineServiceSettings.value[line.id] || {}),
+      isExperience: !cartLineExperienceSelected(line)
+    }
+  }
+}
+
+function setCartLineInventoryMode(line, mode) {
   if (!isProductLine(line)) return
   activeCartLineId.value = line.id
-  const result = await mutateCashierDraft('update-cart-line-service-settings', line, {
-    isPresale: !cartLinePresaleSelected(line)
-  })
-  if (resultStatus(result) === 'result_unknown') {
-    const recovered = await recoverPendingDraftCommand()
-    if (!recovered) {
-      window.dispatchEvent(new CustomEvent('cashier-v3:ui-result', {
-        detail: { status: 'failed', message: '预售设置结果仍在确认中，请稍后重试；确认收款暂不可用。' }
-      }))
+  const isPresale = mode === 'presale'
+  localLineServiceSettings.value = {
+    ...localLineServiceSettings.value,
+    [line.id]: {
+      ...(localLineServiceSettings.value[line.id] || {}),
+      isPresale,
+      inventoryOutboundRequired: mode === 'outbound'
     }
   }
 }
 
 function cartLineExperienceSelected(line = {}) {
-  return Object.prototype.hasOwnProperty.call(localExperienceState.value, line.id)
-    ? localExperienceState.value[line.id]
+  const local = localLineServiceSettings.value[line.id]
+  return typeof local?.isExperience === 'boolean'
+    ? local.isExperience
     : line.isExperience === true
+}
+
+async function persistDeferredLineServiceSettings() {
+  const pending = Object.entries(localLineServiceSettings.value)
+  if (!pending.length) return true
+  isPersistingDeferredLineSettings.value = true
+  try {
+    for (const [lineId, settings] of pending) {
+      const line = cartLines.value.find((candidate) => String(candidate?.id || '') === String(lineId))
+      if (!line || (!isProjectLine(line) && !isProductLine(line)) || cardOperationUpgradeBinding(line)) {
+        const next = { ...localLineServiceSettings.value }
+        delete next[lineId]
+        localLineServiceSettings.value = next
+        continue
+      }
+      const payload = {}
+      if (settings.serviceObject) {
+        payload.serviceObject = settings.serviceObject
+        payload.friendCountsAsCustomer = settings.serviceObject === 'friend'
+          ? settings.friendCountsAsCustomer !== false
+          : true
+      }
+      if (typeof settings.isExperience === 'boolean') payload.isExperience = settings.isExperience
+      if (isProductLine(line)) {
+        if (typeof settings.isPresale === 'boolean') payload.isPresale = settings.isPresale
+        if (typeof settings.inventoryOutboundRequired === 'boolean') {
+          payload.inventoryOutboundRequired = settings.inventoryOutboundRequired
+        }
+      }
+      if (!Object.keys(payload).length) continue
+      const result = await mutateCashierDraft('update-cart-line-service-settings', line, payload)
+      if (!['success', 'succeeded'].includes(resultStatus(result))) {
+        window.dispatchEvent(new CustomEvent('cashier-v3:ui-result', {
+          detail: { status: 'failed', message: resultMessage(result, '本次服务设置保存失败，请重试。') }
+        }))
+        return false
+      }
+      const next = { ...localLineServiceSettings.value }
+      delete next[lineId]
+      localLineServiceSettings.value = next
+    }
+    return true
+  } finally {
+    isPersistingDeferredLineSettings.value = false
+  }
 }
 
 function cardOperationUpgradeBinding(line = {}) {
@@ -2844,7 +2907,10 @@ async function removeCartLine(line) {
 }
 
 async function confirmClearCart() {
-  if (!hasCartLines.value || isClearingCart.value) return
+  const hasRecoveryState = cashierDraftHasUnresolvedCommand.value
+    || Boolean(checkoutSession.value)
+    || Boolean(checkoutPreparationId.value)
+  if ((!hasCartLines.value && !hasRecoveryState) || isClearingCart.value) return
   isClearingCart.value = true
   try {
     const saved = await clearCashierDraft(String(state.stateContextId || ''))
@@ -2852,6 +2918,9 @@ async function confirmClearCart() {
     if (!await applyCommittedCashierDraft(draft, currentCashierDraftScopeKey.value)) {
       throw new Error('购物车已清空，但空草稿状态尚未完整返回，请刷新收银台。')
     }
+    // 服务端已确认当前工作台及未完成结账草稿清理成功，释放本标签的原请求
+    // 恢复票据，避免清空后继续弹出“结果未知”或阻止下一单操作。
+    draftCommandRecovery.clear()
     cashierDraftHasUnresolvedCommand.value = false
     resetCashierLocalContext()
     // resetCashierLocalContext 清理结账/权益现场时会同时丢弃临时草稿投影；
@@ -2860,7 +2929,10 @@ async function confirmClearCart() {
       scopeKey: currentCashierDraftScopeKey.value,
       snapshot: Object.freeze(clonePlain(draft))
     })
-    requestAction('open-cashier-workbench', { silent: true }).catch(() => undefined)
+    // 先完成空工作台刷新，再关闭全局反馈；否则刷新请求的旧/未知回执可能
+    // 在清空事件之后重新打开“正在确认操作结果”弹窗。
+    await requestAction('open-cashier-workbench', { silent: true }).catch(() => undefined)
+    window.dispatchEvent(new CustomEvent('cashier-v3:clear-negative-state'))
     return { result: { status: 'succeeded' }, data: saved }
   } catch (error) {
     window.dispatchEvent(new CustomEvent('cashier-v3:ui-result', {
@@ -3230,6 +3302,9 @@ async function openCheckout() {
     if (!hasCartLines.value) {
     return { result: { status: 'failed', code: 'CASHIER_CART_EMPTY', message: '请先添加需要结算或服务的项目。' } }
   }
+    if (!await persistDeferredLineServiceSettings()) {
+      return { result: { status: 'failed', code: 'CASHIER_LINE_SERVICE_SETTINGS_SAVE_FAILED', message: '本次服务设置保存失败，请重试。' } }
+    }
     const craftsmenRequiredLine = firstCartLineMissingCraftsmen()
     if (craftsmenRequiredLine) {
       activeCartLineId.value = craftsmenRequiredLine.id
@@ -4278,6 +4353,7 @@ function resetCashierLocalContext() {
   isSavingLineCoupon.value = false
   checkoutLocalOutcome.value = {}
   checkoutRequiresRootReload.value = false
+  localLineServiceSettings.value = {}
   clearEntitlementBoundSnapshots()
 }
 
@@ -4790,10 +4866,29 @@ onBeforeUnmount(() => {
                         v-if="isProductLine(line)"
                         type="button"
                         class="cart-line__experience cart-line__presale"
+                        :class="{ 'is-active': cartLineInventoryOutboundRequired(line) }"
+                        :aria-pressed="cartLineInventoryOutboundRequired(line)"
+                        :disabled="cartLinePresaleSelected(line)"
+                        :title="cartLinePresaleSelected(line) ? '预售状态不可出库，请先选择不出库' : '本单正常出库并扣减库存'"
+                        @click.stop="setCartLineInventoryMode(line, 'outbound')"
+                      >出库</button>
+                      <button
+                        v-if="isProductLine(line)"
+                        type="button"
+                        class="cart-line__experience cart-line__presale"
+                        :class="{ 'is-active': !cartLineInventoryOutboundRequired(line) && !cartLinePresaleSelected(line) }"
+                        :aria-pressed="!cartLineInventoryOutboundRequired(line) && !cartLinePresaleSelected(line)"
+                        title="本单销售但不扣减库存"
+                        @click.stop="setCartLineInventoryMode(line, 'no-outbound')"
+                      >不出库</button>
+                      <button
+                        v-if="isProductLine(line)"
+                        type="button"
+                        class="cart-line__experience cart-line__presale"
                         :class="{ 'is-active': cartLinePresaleSelected(line) }"
                         :aria-pressed="cartLinePresaleSelected(line)"
-                        :title="cartLinePresaleSelected(line) ? '取消预售：恢复按正常商品处理库存' : '标记为预售：本单不扣减库存'"
-                        @click.stop="toggleCartLinePresale(line)"
+                        title="预售自动不出库"
+                        @click.stop="setCartLineInventoryMode(line, 'presale')"
                       >预售</button>
                       <button
                         v-if="isProjectLine(line) && !cardOperationUpgradeBinding(line)"
@@ -4854,7 +4949,7 @@ onBeforeUnmount(() => {
         <button
           type="button"
           class="button button--secondary cashier-checkout-actions__clear"
-          :disabled="!hasCartLines || isClearingCart"
+          :disabled="(!hasCartLines && !cashierDraftHasUnresolvedCommand && !checkoutSession && !checkoutPreparationId) || isClearingCart"
           @click="confirmClearCart"
         >{{ isClearingCart ? '清空中…' : '清空' }}</button>
         <button
@@ -4871,7 +4966,7 @@ onBeforeUnmount(() => {
           @click="openMoreAction('open-order-note')"
         >备注</button>
         <button type="button" class="button button--secondary cashier-checkout-actions__hang" :disabled="!hasCartLines || isSavingHangDraft || Boolean(activeCardOperationUpgrade)" @click="openHangOrder">{{ isSavingHangDraft ? '挂单中…' : '挂单' }}</button>
-        <button type="button" class="button button--primary cashier-checkout-actions__submit" :disabled="!canSubmitCart || isPreparingServiceCompletion || isPreparingCheckout" @click="openCheckout">
+        <button type="button" class="button button--primary cashier-checkout-actions__submit" :disabled="!canSubmitCart || isPreparingServiceCompletion || isPreparingCheckout || isPersistingDeferredLineSettings" @click="openCheckout">
           {{ isPreparingServiceCompletion ? '正在准备服务确认…' : isPreparingCheckout ? '正在准备结账…' : checkoutEntryLabel }}
         </button>
         </div>

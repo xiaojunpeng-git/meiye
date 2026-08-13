@@ -6,6 +6,7 @@ use app\services\cashier\v3\CashierV3DataScopeContext;
 use app\services\cashier\v3\CashierV3OperatorScope;
 use app\services\cashier\v3\CashierV3TransactionGuard;
 use app\services\report\CustomerLifecycleFactServices;
+use app\services\report\StoreOperationsReportDimensionServices;
 use think\facade\Db;
 
 /**
@@ -46,6 +47,11 @@ final class ThinkPhpCashierV3CheckoutFactRepository
                 $result === 'inserted' ? $inserted[$domain]++ : $replayed[$domain]++;
             }
         }
+
+        // Category/experience/partner dimensions are written in the same
+        // transaction as the immutable sale facts, so reports never need to
+        // infer them from mutable product configuration later.
+        (new StoreOperationsReportDimensionServices())->persistInTx($plan);
 
         // Lifecycle is a reporting fact derived from the same final, locked
         // checkout authority. Its own natural keys make partial replays safe.

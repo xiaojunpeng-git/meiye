@@ -140,6 +140,9 @@ function checkoutSnapshot(): array
             'quantity' => 1,
             'originalAmountCents' => 10000,
             'discountAmountCents' => 1000,
+            'couponUserId' => 0,
+            'couponNameSnapshot' => '',
+            'couponDiscountCents' => 0,
             'saleAmountCents' => 9000,
             'debtAmountCents' => 3000,
             'sourceNameSnapshot' => '深层护理',
@@ -154,6 +157,8 @@ function checkoutSnapshot(): array
             'serviceObject' => 'self',
             'craftsmen' => [],
             'isExperience' => 0,
+            'guideSelections' => [],
+            'salesManagerSelections' => [],
         ]],
         'entitlementLines' => [[
             'authorityKey' => 'entitlement:opaque-cart-row-alpha',
@@ -283,11 +288,19 @@ function checkoutProjectionAggregate(array $result): array
             'project_id' => $line['projectId'],
             'project_version' => $line['projectVersion'],
             'service_object' => $line['serviceObject'],
+            'friend_counts_as_customer' => $line['friendCountsAsCustomer'] ?? 1,
             'is_experience' => $line['isExperience'],
+            'catalog_sku_id' => $line['catalogSkuId'],
             'craftsmen_snapshot_json' => $line['craftsmenSnapshotJson'],
+            'guide_selections_json' => $line['guideSelectionsJson'],
+            'sales_manager_selections_json' => $line['salesManagerSelectionsJson'],
+            'manual_labor_fee_cents' => $line['manualLaborFeeCents'],
             'quantity' => $line['quantity'],
             'original_amount_cents' => $line['originalAmountCents'],
             'discount_amount_cents' => $line['discountAmountCents'],
+            'coupon_user_id' => $line['couponUserId'],
+            'coupon_name_snapshot' => $line['couponNameSnapshot'],
+            'coupon_discount_cents' => $line['couponDiscountCents'],
             'sale_amount_cents' => $line['saleAmountCents'],
             'debt_amount_cents' => $line['debtAmountCents'],
             'entitlement_actual_amount_cents' => $line['entitlementActualAmountCents'],
@@ -391,6 +404,13 @@ checkoutAssert('sale and entitlement are separate draft grains',
         && $draft['lineDrafts'][1]['serviceObject'] === ''
         && $draft['lineDrafts'][1]['isExperience'] === 0
         && $draft['lineDrafts'][1]['saleAmountCents'] === 0);
+checkoutAssert('line drafts carry immutable service and inventory tags',
+    $draft['lineDrafts'][0]['friendCountsAsCustomer'] === 1
+        && $draft['lineDrafts'][0]['isPresale'] === 0
+        && $draft['lineDrafts'][0]['inventoryOutboundRequired'] === 1
+        && $draft['lineDrafts'][1]['friendCountsAsCustomer'] === 1
+        && $draft['lineDrafts'][1]['isPresale'] === 0
+        && $draft['lineDrafts'][1]['inventoryOutboundRequired'] === 1);
 checkoutAssert('entitlement source and project history are frozen separately',
     $draft['lineDrafts'][1]['sourceNameSnapshot'] === '护理次卡'
         && $draft['lineDrafts'][1]['entitlementSourceDetailId'] === 1701

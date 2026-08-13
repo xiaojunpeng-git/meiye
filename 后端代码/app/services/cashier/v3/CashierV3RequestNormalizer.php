@@ -541,17 +541,23 @@ class CashierV3RequestNormalizer
         $craftsmanKeys = ['craftsmen', 'craftsmanIds', 'craftsman_ids'];
         $salespeopleKeys = ['salespeople', 'salesPeople', 'sales_people'];
         $experienceKeys = ['isExperience', 'is_experience'];
+        $friendCountKeys = ['friendCountsAsCustomer', 'friend_counts_as_customer'];
         $guideKeys = ['guideSelections', 'guide_selections'];
         $managerKeys = ['salesManagerSelections', 'sales_manager_selections'];
         $laborKeys = ['laborManualFee', 'labor_manual_fee'];
+        $presaleKeys = ['isPresale', 'is_presale'];
+        $outboundKeys = ['inventoryOutboundRequired', 'inventory_outbound_required'];
         $hasServiceObject = CashierV3AliasResolver::hasAnyKey($payload, $serviceKeys);
         $hasCraftsmen = CashierV3AliasResolver::hasAnyKey($payload, $craftsmanKeys);
         $hasSalespeople = CashierV3AliasResolver::hasAnyKey($payload, $salespeopleKeys);
         $hasExperience = CashierV3AliasResolver::hasAnyKey($payload, $experienceKeys);
+        $hasFriendCounts = CashierV3AliasResolver::hasAnyKey($payload, $friendCountKeys);
         $hasGuides = CashierV3AliasResolver::hasAnyKey($payload, $guideKeys);
         $hasManagers = CashierV3AliasResolver::hasAnyKey($payload, $managerKeys);
         $hasLabor = CashierV3AliasResolver::hasAnyKey($payload, $laborKeys);
-        if (!$hasServiceObject && !$hasCraftsmen && !$hasSalespeople && !$hasExperience && !$hasGuides && !$hasManagers && !$hasLabor) {
+        $hasPresale = CashierV3AliasResolver::hasAnyKey($payload, $presaleKeys);
+        $hasOutbound = CashierV3AliasResolver::hasAnyKey($payload, $outboundKeys);
+        if (!$hasServiceObject && !$hasCraftsmen && !$hasSalespeople && !$hasExperience && !$hasFriendCounts && !$hasGuides && !$hasManagers && !$hasLabor && !$hasPresale && !$hasOutbound) {
             throw self::invalidCartLineSetting('settings', 'service_settings_missing');
         }
 
@@ -579,6 +585,9 @@ class CashierV3RequestNormalizer
         if ($hasExperience) {
             $normalizedExperience = self::resolveBooleanAliases($payload, $experienceKeys);
         }
+        if ($hasFriendCounts) {
+            $normalizedFriendCounts = self::resolveBooleanAliases($payload, $friendCountKeys);
+        }
         if ($hasGuides) {
             $rawGuides = $payload['guideSelections'] ?? $payload['guide_selections'] ?? null;
             if (!is_array($rawGuides)) throw self::invalidCartLineSetting('guideSelections', 'guide_selection_invalid');
@@ -602,6 +611,10 @@ class CashierV3RequestNormalizer
             }
         }
         $normalizedLabor = null;
+        $normalizedPresale = null;
+        $normalizedOutbound = null;
+        if ($hasPresale) $normalizedPresale = self::resolveBooleanAliases($payload, $presaleKeys);
+        if ($hasOutbound) $normalizedOutbound = self::resolveBooleanAliases($payload, $outboundKeys);
         if ($hasLabor) {
             $rawLabor = CashierV3AliasResolver::resolveString($payload, $laborKeys, false);
             $rawLabor = trim($rawLabor);
@@ -621,9 +634,12 @@ class CashierV3RequestNormalizer
             $payload['salesPeople'],
             $payload['sales_people'],
             $payload['is_experience']
+            ,$payload['friend_counts_as_customer']
             ,$payload['guide_selections']
             ,$payload['sales_manager_selections']
             ,$payload['labor_manual_fee']
+            ,$payload['is_presale']
+            ,$payload['inventory_outbound_required']
         );
         $payload['lineId'] = $lineId;
 
@@ -639,6 +655,9 @@ class CashierV3RequestNormalizer
         if ($hasExperience) {
             $payload['isExperience'] = $normalizedExperience;
         }
+        if ($hasFriendCounts) {
+            $payload['friendCountsAsCustomer'] = $normalizedFriendCounts;
+        }
         if ($hasGuides) {
             $payload['guideSelections'] = $normalizedGuides;
         }
@@ -648,6 +667,8 @@ class CashierV3RequestNormalizer
         if ($hasLabor) {
             $payload['laborManualFee'] = $normalizedLabor;
         }
+        if ($hasPresale) $payload['isPresale'] = $normalizedPresale;
+        if ($hasOutbound) $payload['inventoryOutboundRequired'] = $normalizedOutbound;
         return $payload;
     }
 

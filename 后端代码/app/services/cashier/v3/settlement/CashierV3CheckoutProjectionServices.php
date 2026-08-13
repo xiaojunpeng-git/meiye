@@ -621,6 +621,15 @@ final class CashierV3CheckoutProjectionServices
                     $row['is_experience'] ?? null,
                     'line.is_experience'
                 );
+                $friendCountsAsCustomer = self::nonNegativeInt(
+                    $row['friend_counts_as_customer'] ?? 1,
+                    'line.friend_counts_as_customer'
+                );
+                $isPresale = self::nonNegativeInt($row['is_presale'] ?? 0, 'line.is_presale');
+                $inventoryOutboundRequired = self::nonNegativeInt($row['inventory_outbound_required'] ?? 1, 'line.inventory_outbound_required');
+                if ($isPresale > 1 || $inventoryOutboundRequired > 1 || ($isPresale === 1 && $inventoryOutboundRequired === 1)) {
+                    throw self::failure('checkout_projection_inventory_rule_invalid');
+                }
                 $manualLaborFeeCents = ($row['manual_labor_fee_cents'] ?? null) === null
                     ? null
                     : self::nonNegativeInt($row['manual_labor_fee_cents'], 'line.manual_labor_fee_cents');
@@ -629,11 +638,11 @@ final class CashierV3CheckoutProjectionServices
                 $guideSelections = self::attributionSnapshot($row['guide_selections_json'] ?? null);
                 $salesManagerSelections = self::attributionSnapshot($row['sales_manager_selections_json'] ?? null);
                 if (!in_array($serviceObject, ['', 'self', 'friend'], true)
-                    || $isExperience > 1
+                    || $isExperience > 1 || $friendCountsAsCustomer > 1
                     || ($sourceType === 'project'
                         && !in_array($serviceObject, ['self', 'friend'], true))
                     || ($sourceType !== 'project'
-                        && ($serviceObject !== '' || $isExperience !== 0 || $craftsmen !== []))) {
+                        && ($serviceObject !== '' || $friendCountsAsCustomer !== 1 || $isExperience !== 0 || $craftsmen !== []))) {
                     throw self::failure('checkout_projection_sale_service_tags_invalid');
                 }
                 $fingerprintInput = [
@@ -661,10 +670,25 @@ final class CashierV3CheckoutProjectionServices
                     'priceChangedByNameSnapshot' => $priceChangedByName,
                     'priceChangedAt' => $priceChangedAt,
                     'serviceObject' => $serviceObject,
+                    'friendCountsAsCustomer' => $friendCountsAsCustomer,
                     'isExperience' => $isExperience,
+                    'isPresale' => $isPresale,
+                    'inventoryOutboundRequired' => $inventoryOutboundRequired,
                     'guideSelections' => $guideSelections,
                     'salesManagerSelections' => $salesManagerSelections,
                 ];
+                if ($isPresale === 0) {
+                    unset($fingerprintInput['isPresale']);
+                }
+                if ($inventoryOutboundRequired === 1) {
+                    unset($fingerprintInput['inventoryOutboundRequired']);
+                }
+                if ($isPresale !== 0) {
+                    $fingerprintInput['isPresale'] = 1;
+                }
+                if ($inventoryOutboundRequired !== 1) {
+                    $fingerprintInput['inventoryOutboundRequired'] = 0;
+                }
                 if ($manualLaborFeeCents !== null) {
                     $fingerprintInput['manualLaborFeeCents'] = $manualLaborFeeCents;
                 }
@@ -719,12 +743,17 @@ final class CashierV3CheckoutProjectionServices
                     'categoryId' => $categoryId,
                     'categoryName' => $categoryName,
                     'serviceObject' => $serviceObject,
+                    'friendCountsAsCustomer' => $friendCountsAsCustomer === 1,
                     'craftsmen' => $craftsmen,
                     'guideSelections' => $guideSelections,
                     'salesManagerSelections' => $salesManagerSelections,
                     'laborManualFeeCents' => $manualLaborFeeCents,
                     'isExperience' => $isExperience === 1,
+                    'isPresale' => $isPresale === 1,
                 ];
+                if ($inventoryOutboundRequired !== 1) {
+                    $fingerprintInput['inventoryOutboundRequired'] = 0;
+                }
                 continue;
             }
 

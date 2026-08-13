@@ -886,6 +886,14 @@ final class CashierV3CheckoutSettlementKernel
                 $normalized[$attributionKey] = $normalizedSelections;
             }
             $fingerprintInput = $normalized;
+            // Keep the immutable line fingerprint compatible with the sales-order
+            // authority: default inventory flags are represented sparsely.
+            if ($isPresale === 0) {
+                unset($fingerprintInput['isPresale']);
+            }
+            if ($inventoryOutboundRequired === 1) {
+                unset($fingerprintInput['inventoryOutboundRequired']);
+            }
             if ($catalogSkuId <= 0) {
                 unset($fingerprintInput['catalogSkuId']);
             }

@@ -105,6 +105,10 @@ final class CashierV3CheckoutDraftAuthorityRebuilder
                         'sale.price_changed_at'
                     ),
                     'serviceObject' => (string)($row['service_object'] ?? ''),
+                    'friendCountsAsCustomer' => self::nonNegativeInt(
+                        $row['friend_counts_as_customer'] ?? 1,
+                        'sale.friend_counts_as_customer'
+                    ),
                     'isExperience' => self::nonNegativeInt(
                         $row['is_experience'] ?? null,
                         'sale.is_experience'
@@ -115,6 +119,12 @@ final class CashierV3CheckoutDraftAuthorityRebuilder
                     'guideSelections' => self::attributionSnapshot($row['guide_selections_json'] ?? null),
                     'salesManagerSelections' => self::attributionSnapshot($row['sales_manager_selections_json'] ?? null),
                 ];
+                if (self::nonNegativeInt($row['is_presale'] ?? 0, 'sale.is_presale') !== 0) {
+                    $saleLine['isPresale'] = 1;
+                }
+                if (self::nonNegativeInt($row['inventory_outbound_required'] ?? 1, 'sale.inventory_outbound_required') !== 1) {
+                    $saleLine['inventoryOutboundRequired'] = 0;
+                }
                 if (($row['manual_labor_fee_cents'] ?? null) !== null) {
                     $saleLine['manualLaborFeeCents'] = self::nonNegativeInt(
                         $row['manual_labor_fee_cents'],

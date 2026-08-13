@@ -578,8 +578,11 @@ final class CashierV3SaleCatalogServices
             'lineAmount' => self::centsToMoney($lineAmountCents),
             'originalLineAmount' => self::centsToMoney($originalLineAmountCents),
             'serviceObject' => (string)($storedLine['service_object'] ?? ''),
+            'friendCountsAsCustomer' => (int)($storedLine['friend_counts_as_customer'] ?? 1) === 1,
             'craftsmen' => self::decodeStoredList((string)($storedLine['craftsmen_json'] ?? ''), 'craftsmen_json'),
             'isExperience' => (int)($storedLine['is_experience'] ?? 0) === 1,
+            'isPresale' => (int)($storedLine['is_presale'] ?? 0) === 1,
+            'inventoryOutboundRequired' => (int)($storedLine['inventory_outbound_required'] ?? 1) === 1,
             'cardPurchaseSnapshot' => $current['authoritySnapshot']['cardPurchase'],
             'resourceSources' => $current['authoritySnapshot']['resourceSources'],
         ];
@@ -650,7 +653,17 @@ final class CashierV3SaleCatalogServices
         }
         $this->assertStoredAuthorityMatches($storedLine, $current);
         $this->assertPurchasable($current, $quantity);
-        $this->assertInventoryAvailableForSale($current, $quantity, $dataScope);
+        // Products explicitly marked as presale or non-outbound are still
+        // saleable without an inbound stock record. Inventory is only checked
+        // and deducted for the immutable outbound path at final settlement.
+        // Workspace rows do not expose source_type; the locked catalog
+        // authority's productType is the canonical item classification.
+        $isProduct = (int)($current['productType'] ?? -1) === 0;
+        $isPresale = (int)($storedLine['is_presale'] ?? 0) === 1;
+        $requiresOutbound = (int)($storedLine['inventory_outbound_required'] ?? 1) === 1;
+        if (!$isProduct || (!$isPresale && $requiresOutbound)) {
+            $this->assertInventoryAvailableForSale($current, $quantity, $dataScope);
+        }
         return $current;
     }
 

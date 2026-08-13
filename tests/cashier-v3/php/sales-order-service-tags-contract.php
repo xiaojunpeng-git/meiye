@@ -34,13 +34,15 @@ $check = static function (bool $condition, string $message) use (&$failed): void
 };
 
 $check(
-    strpos($plan, "'service_object', 'is_experience'") !== false
+    strpos($plan, "'service_object', 'friend_counts_as_customer', 'is_experience'") !== false
         && strpos($plan, "'service_object' => \$line['service_object']") !== false
+        && strpos($plan, "'friend_counts_as_customer' => \$line['friend_counts_as_customer']") !== false
         && strpos($plan, "'is_experience' => \$line['is_experience']") !== false,
     'locked checkout fields are copied into immutable sales-order lines'
 );
 $check(
-    strpos($facts, "'service_object', 'is_experience'") !== false,
+    strpos($facts, "'service_object', 'friend_counts_as_customer', 'is_experience'") !== false
+        && strpos($facts, "'friendCountsAsCustomer' => (int)(\$line['friend_counts_as_customer'] ?? 1)") !== false,
     'sale fact assembler accepts the same locked service-tag fields as the sales-order plan'
 );
 $check(
@@ -56,10 +58,13 @@ $check(
 );
 $check(
     strpos($preparation, "'serviceObject' => (string)(\$line['serviceObject'] ?? '')") !== false
+        && strpos($preparation, "'friendCountsAsCustomer' => !array_key_exists('friendCountsAsCustomer', \$line)") !== false
         && strpos($preparation, "'isExperience' => !empty(\$line['isExperience']) ? 1 : 0") !== false
         && strpos($kernel, "'serviceObject' => \$serviceObject") !== false
+        && strpos($kernel, "'friendCountsAsCustomer' => \$friendCountsAsCustomer") !== false
         && strpos($kernel, "'isExperience' => \$isExperience") !== false
         && strpos($repository, "'serviceObject' => 'service_object'") !== false
+        && strpos($repository, "'friendCountsAsCustomer' => 'friend_counts_as_customer'") !== false
         && strpos($repository, "'isExperience' => 'is_experience'") !== false
         && strpos($rebuilder, "'serviceObject' => (string)(\$row['service_object'] ?? '')") !== false,
     'project service tags survive preparation, draft persistence and draft rebuild'

@@ -1593,7 +1593,9 @@ final class CashierV3CashierModule
                         $hasProjectSettings = array_key_exists('serviceObject', $payload)
                             || array_key_exists('craftsmen', $payload)
                             || array_key_exists('isExperience', $payload);
-                        if (!$hasSalespeople || $hasProjectSettings) {
+                        $hasInventoryRule = array_key_exists('isPresale', $payload)
+                            || array_key_exists('inventoryOutboundRequired', $payload);
+                        if ($hasProjectSettings || (!$hasSalespeople && !$hasInventoryRule)) {
                             throw new CashierV3CommandException(
                                 CashierV3ResultCode::ENTITLEMENT_LINE_INVALID,
                                 '该商品只支持设置销售人。',

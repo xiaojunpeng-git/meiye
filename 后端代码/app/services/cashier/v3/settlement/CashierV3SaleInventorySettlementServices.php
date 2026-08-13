@@ -368,6 +368,9 @@ final class CashierV3SaleInventorySettlementServices
             if ((string)($line['item_type'] ?? '') !== 'product') {
                 throw $this->failure('sale_inventory_order_line_invalid');
             }
+            if ((int)($line['inventory_outbound_required'] ?? 1) !== 1) {
+                continue;
+            }
             $productId = $this->positiveInt($line['item_id'] ?? null, 'sale_inventory_product_invalid');
             $skuId = $this->positiveInt($line['catalog_sku_id'] ?? null, 'sale_inventory_sku_id_invalid');
             $unique = $this->token((string)($line['item_code_snapshot'] ?? ''), 64, 'sale_inventory_sku_unique_invalid');

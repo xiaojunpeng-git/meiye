@@ -345,12 +345,18 @@ final class CashierV3CashierWorkspaceServices
         $hasGuides = array_key_exists('guideSelections', $settings);
         $hasSalesManagers = array_key_exists('salesManagerSelections', $settings);
         $hasExperience = array_key_exists('isExperience', $settings);
+        $hasFriendCounts = array_key_exists('friendCountsAsCustomer', $settings);
         $hasLaborManualFee = array_key_exists('laborManualFee', $settings);
+        $hasPresale = array_key_exists('isPresale', $settings);
+        $hasInventoryOutbound = array_key_exists('inventoryOutboundRequired', $settings);
+        if (($hasPresale || $hasInventoryOutbound) && (!$isSale || $isSaleProject)) {
+            throw $this->incompleteLineSettings($lineKey, 'inventory_rule_product_only');
+        }
         if ($this->isCardOperationUpgradeSaleRow((array)$line)
-            && (!$hasSalespeople || $hasGuides || $hasSalesManagers || $hasServiceObject || $hasCraftsmen || $hasExperience || $hasLaborManualFee)) {
+            && (!$hasSalespeople || $hasGuides || $hasSalesManagers || $hasServiceObject || $hasCraftsmen || $hasExperience || $hasFriendCounts || $hasLaborManualFee || $hasPresale || $hasInventoryOutbound)) {
             throw $this->cardOperationUpgradeCartLocked();
         }
-        if (!$hasServiceObject && !$hasCraftsmen && !$hasSalespeople && !$hasGuides && !$hasSalesManagers && !$hasExperience && !$hasLaborManualFee) {
+        if (!$hasServiceObject && !$hasCraftsmen && !$hasSalespeople && !$hasGuides && !$hasSalesManagers && !$hasExperience && !$hasFriendCounts && !$hasLaborManualFee && !$hasPresale && !$hasInventoryOutbound) {
             throw new CashierV3CommandException(
                 CashierV3ResultCode::ENTITLEMENT_LINE_INVALID,
                 '购物车服务设置无效，请重新选择。',
@@ -371,13 +377,28 @@ final class CashierV3CashierWorkspaceServices
 
         // 销售人属于销售明细，不依赖项目服务设置；产品和卡项同样可以分配销售业绩。
         if ($isSale && !$isSaleProject) {
-            if ($hasServiceObject || $hasCraftsmen || $hasExperience || $hasLaborManualFee) {
+            if ($hasServiceObject || $hasCraftsmen || $hasExperience || $hasFriendCounts || $hasLaborManualFee) {
                 throw new CashierV3CommandException(
                     CashierV3ResultCode::ENTITLEMENT_LINE_INVALID,
                     '该商品只支持设置销售人。',
                     CashierV3ResultCode::STATUS_FAILED,
                     ['line_id' => $lineKey, 'reason' => 'sale_non_project_setting_invalid']
                 );
+            }
+            $isPresale = (int)($line['is_presale'] ?? 0);
+            $inventoryOutboundRequired = (int)($line['inventory_outbound_required'] ?? 1);
+            if (!in_array($isPresale, [0, 1], true) || !in_array($inventoryOutboundRequired, [0, 1], true)) {
+                throw $this->incompleteLineSettings($lineKey, 'stored_inventory_rule_invalid');
+            }
+            if ($hasPresale) {
+                if (!is_bool($settings['isPresale']) && !(is_int($settings['isPresale']) && in_array($settings['isPresale'], [0, 1], true))) throw $this->incompleteLineSettings($lineKey, 'presale_flag_invalid');
+                $isPresale = $settings['isPresale'] ? 1 : 0;
+                if ($isPresale === 1) $inventoryOutboundRequired = 0;
+            }
+            if ($hasInventoryOutbound) {
+                if (!is_bool($settings['inventoryOutboundRequired']) && !(is_int($settings['inventoryOutboundRequired']) && in_array($settings['inventoryOutboundRequired'], [0, 1], true))) throw $this->incompleteLineSettings($lineKey, 'inventory_outbound_flag_invalid');
+                $inventoryOutboundRequired = $settings['inventoryOutboundRequired'] ? 1 : 0;
+                if ($isPresale === 1 && $inventoryOutboundRequired === 1) throw $this->incompleteLineSettings($lineKey, 'presale_must_not_outbound');
             }
             $salespeople = $this->decodeStoredSalespeople($line, $lineKey);
             if ($hasSalespeople) {
@@ -396,6 +417,8 @@ final class CashierV3CashierWorkspaceServices
                 ->update([
                     'salespeople_json' => $this->encodeJson($salespeople),
                     'sales_manager_selections_json' => $this->encodeJson($salesManagers),
+                    'is_presale' => $isPresale,
+                    'inventory_outbound_required' => $inventoryOutboundRequired,
                     'update_time' => time(),
                 ]);
             if ((int)$affected < 0) {
@@ -422,6 +445,26 @@ final class CashierV3CashierWorkspaceServices
                     ['line_id' => $lineKey, 'reason' => 'service_object_invalid']
                 );
             }
+        }
+        $friendCountsAsCustomer = (int)($line['friend_counts_as_customer'] ?? 1);
+        if (!in_array($friendCountsAsCustomer, [0, 1], true)) {
+            throw $this->incompleteLineSettings($lineKey, 'stored_friend_counts_as_customer_invalid');
+        }
+        if ($hasFriendCounts) {
+            if (!$isSaleProject
+                || (!is_bool($settings['friendCountsAsCustomer'])
+                    && !(is_int($settings['friendCountsAsCustomer'])
+                        && in_array($settings['friendCountsAsCustomer'], [0, 1], true)))) {
+                throw $this->incompleteLineSettings($lineKey, 'friend_counts_as_customer_invalid');
+            }
+            $friendCountsAsCustomer = $settings['friendCountsAsCustomer'] ? 1 : 0;
+        }
+        // “本人”始终是当前会员本人，不允许标记为不计客；朋友默认计客，除非
+        // 当前行明确选择“朋友不算”。
+        if ($serviceObject === 'self') {
+            $friendCountsAsCustomer = 1;
+        } elseif ($hasServiceObject && !$hasFriendCounts) {
+            $friendCountsAsCustomer = 1;
         }
 
         $craftsmen = $this->decodeStoredCraftsmen($line, $lineKey);
@@ -510,6 +553,7 @@ final class CashierV3CashierWorkspaceServices
                 'guide_selections_json' => $this->encodeJson($guides),
                 'sales_manager_selections_json' => $this->encodeJson($salesManagers),
                 'manual_labor_fee_cents' => $manualLaborFeeCents,
+                'friend_counts_as_customer' => $friendCountsAsCustomer,
                 'is_experience' => $isExperience,
                 'update_time' => time(),
             ]);
@@ -1056,6 +1100,7 @@ final class CashierV3CashierWorkspaceServices
             $lineKey = (string)($row['line_key'] ?? '');
             $source['guideSelections'] = $this->decodeStoredGuideSelections($row, $lineKey);
             $source['salesManagerSelections'] = $this->decodeStoredSalesManagerSelections($row, $lineKey);
+            $source['friendCountsAsCustomer'] = (int)($row['friend_counts_as_customer'] ?? 1) === 1;
             if (($row['manual_labor_fee_cents'] ?? null) !== null) {
                 $source['laborManualFeeCents'] = $this->storedNonnegativeInteger(
                     $row['manual_labor_fee_cents'],
@@ -2220,7 +2265,8 @@ final class CashierV3CashierWorkspaceServices
             // fingerprint and the final sales-order plan use the same shape.
             'friend_counts_as_customer' => (int)($line['friend_counts_as_customer'] ?? 1),
             'is_experience' => 0,
-            'is_presale' => (int)($line['is_presale'] ?? 0),
+                'is_presale' => (int)($line['is_presale'] ?? 0),
+                'inventory_outbound_required' => (int)($line['inventory_outbound_required'] ?? 1),
             'display_snapshot_json' => $this->encodeJson($displaySnapshot),
         ];
     }
@@ -2523,9 +2569,12 @@ final class CashierV3CashierWorkspaceServices
                 'entitlementSourceVersion' => $sourceVersion,
                 'projectVersion' => $detailVersion,
                 'serviceObject' => $serviceObject,
+                'friendCountsAsCustomer' => (int)($row['friend_counts_as_customer'] ?? 1) === 1,
                 'craftsmen' => $craftsmen,
                 'craftsmenSummary' => $this->craftsmenSummary($craftsmen),
                 'isExperience' => $experienceFlag === 1,
+                'isPresale' => (int)($row['is_presale'] ?? 0) === 1,
+                'inventoryOutboundRequired' => (int)($row['inventory_outbound_required'] ?? 1) === 1,
                 'guideSelections' => $guides,
                 'salesManagerSelections' => $salesManagers,
                 'laborDefaultFee' => $this->centsToMoney($laborDefaultFeeCents),
@@ -2901,6 +2950,9 @@ final class CashierV3CashierWorkspaceServices
             ];
             if ($row['manual_labor_fee_cents'] !== null) {
                 $item['manual_labor_fee_cents'] = (int)$row['manual_labor_fee_cents'];
+            }
+            if ((int)($row['inventory_outbound_required'] ?? 1) !== 1) {
+                $item['inventory_outbound_required'] = 0;
             }
             if ((string)($row['line_role'] ?? '') === self::ROLE_SALE) {
                 $item['catalog_product_id'] = (int)($row['catalog_product_id'] ?? 0);

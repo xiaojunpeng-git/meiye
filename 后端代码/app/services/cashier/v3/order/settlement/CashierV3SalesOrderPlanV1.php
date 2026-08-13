@@ -67,7 +67,7 @@ final class CashierV3SalesOrderPlanV1
         'store_id', 'member_id', 'line_role', 'authority_key', 'source_kind',
         'source_type', 'source_id', 'entitlement_source_detail_id', 'source_version',
         'catalog_sku_id',
-        'project_id', 'project_version', 'service_object', 'friend_counts_as_customer', 'is_experience', 'is_presale', 'quantity', 'original_amount_cents',
+        'project_id', 'project_version', 'service_object', 'friend_counts_as_customer', 'is_experience', 'is_presale', 'inventory_outbound_required', 'quantity', 'original_amount_cents',
         'discount_amount_cents', 'sale_amount_cents', 'debt_amount_cents', 'entitlement_actual_amount_cents',
         'source_name_snapshot', 'source_code_snapshot', 'project_name_snapshot',
         'category_id_snapshot', 'category_name_snapshot', 'line_fingerprint',
@@ -261,6 +261,8 @@ final class CashierV3SalesOrderPlanV1
                 'friend_counts_as_customer' => $line['friend_counts_as_customer'],
                 'craftsmen_snapshot_json' => $line['craftsmen_snapshot_json'],
                 'is_experience' => $line['is_experience'],
+                'is_presale' => $line['is_presale'],
+                'inventory_outbound_required' => $line['inventory_outbound_required'],
                 'quantity' => $line['quantity'],
                 'original_amount_cents' => $line['original_amount_cents'],
                 'discount_amount_cents' => $line['discount_amount_cents'],
@@ -862,6 +864,7 @@ final class CashierV3SalesOrderPlanV1
         $friendCountsAsCustomer = self::nonNegativeInt($row['friend_counts_as_customer'] ?? 1, 'sales_order_friend_counts_as_customer_invalid');
         $isExperience = self::nonNegativeInt($row['is_experience'], 'sales_order_is_experience_invalid');
         $isPresale = self::nonNegativeInt($row['is_presale'] ?? 0, 'sales_order_is_presale_invalid');
+        $inventoryOutboundRequired = self::nonNegativeInt($row['inventory_outbound_required'] ?? 1, 'sales_order_inventory_outbound_required_invalid');
         $manualLaborFeeCents = ($row['manual_labor_fee_cents'] ?? null) === null
             ? null
             : self::nonNegativeInt($row['manual_labor_fee_cents'], 'sales_order_manual_labor_fee_invalid');
@@ -869,7 +872,7 @@ final class CashierV3SalesOrderPlanV1
         $craftsmen = self::craftsmenSnapshot($craftsmenJson);
         $guideSelections = self::attributionSnapshot($row['guide_selections_json'] ?? null);
         $salesManagerSelections = self::attributionSnapshot($row['sales_manager_selections_json'] ?? null);
-        if ($isExperience > 1 || $friendCountsAsCustomer > 1 || $isPresale > 1) {
+        if ($isExperience > 1 || $friendCountsAsCustomer > 1 || $isPresale > 1 || $inventoryOutboundRequired > 1 || ($isPresale === 1 && $inventoryOutboundRequired === 1)) {
             throw self::failure('sales_order_is_experience_invalid');
         }
         if ($sourceType === 'project') {
@@ -918,6 +921,7 @@ final class CashierV3SalesOrderPlanV1
             'priceChangedByNameSnapshot' => $priceChangedByName,
             'priceChangedAt' => $priceChangedAt,
             'serviceObject' => $serviceObject,
+            'friendCountsAsCustomer' => $friendCountsAsCustomer,
             'isExperience' => $isExperience,
             // Keep the sales-order authority shape identical to the V3
             // settlement kernel, including empty attribution snapshots.
@@ -925,6 +929,12 @@ final class CashierV3SalesOrderPlanV1
             'guideSelections' => $guideSelections,
             'salesManagerSelections' => $salesManagerSelections,
         ];
+        if ($inventoryOutboundRequired !== 1) {
+            $authority['inventoryOutboundRequired'] = 0;
+        }
+        if ($isPresale !== 0) {
+            $authority['isPresale'] = 1;
+        }
         if ($manualLaborFeeCents !== null) {
             $authority['manualLaborFeeCents'] = $manualLaborFeeCents;
         }
@@ -966,6 +976,7 @@ final class CashierV3SalesOrderPlanV1
             'friend_counts_as_customer' => $friendCountsAsCustomer,
             'is_experience' => $isExperience,
             'is_presale' => $isPresale,
+            'inventory_outbound_required' => $inventoryOutboundRequired,
             'quantity' => $quantity,
             'original_amount_cents' => $original,
             'discount_amount_cents' => $discount,
