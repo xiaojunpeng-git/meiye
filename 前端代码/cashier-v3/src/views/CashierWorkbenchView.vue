@@ -2297,7 +2297,7 @@ async function queryPersonnelCandidates(scope, line, keyword = '') {
       },
       keyword,
       page,
-      pageSize: scope === 'group_guides' || scope === 'group_sales_managers' ? 20 : 100,
+      pageSize: scope.startsWith('group_') ? 20 : 100,
       silent: true
     })
     const status = resultStatus(result)
@@ -2312,20 +2312,23 @@ async function queryPersonnelCandidates(scope, line, keyword = '') {
   return records
 }
 
-async function loadPersonnelOverlay(line, initialTab) {
+async function loadPersonnelOverlay(line, initialTab, roleScope = 'personnel') {
   // 卡/项目升级在收款成功前只形成销售草稿，不创建服务或劳动业绩。
-  const showCraftsmen = isProjectLine(line) && !cardOperationUpgradeBinding(line)
+  const showCraftsmen = roleScope === 'personnel' && isProjectLine(line) && !cardOperationUpgradeBinding(line)
   // 卡内权益只形成服务和劳动业绩，不形成销售业绩；不能加载或提交销售人。
-  const showSalespeople = !isEntitlementLine(line)
+  const showSalespeople = roleScope === 'personnel' && !isEntitlementLine(line)
+  const showGuides = !isEntitlementLine(line) && ['guide', 'attribution'].includes(roleScope)
+  const showSalesManagers = !isEntitlementLine(line) && ['salesManager', 'attribution'].includes(roleScope)
   const requestKey = `${line.id}:${Date.now()}`
   personnelOverlay.value = {
     requestKey,
     line: clonePlain(line),
-    initialTab: showSalespeople ? initialTab : 'craftsmen',
+    initialTab,
+    roleScope,
     showCraftsmen,
     showSalespeople,
-    showGuides: showSalespeople,
-    showSalesManagers: showSalespeople,
+    showGuides,
+    showSalesManagers,
     allowLaborOverride: showCraftsmen,
     laborDefaultFee: Number(line.laborDefaultFee ?? line.laborConfiguredUnitAmount ?? 0),
     laborManualFee: line.laborManualFee === null || line.laborManualFee === undefined
@@ -2340,10 +2343,10 @@ async function loadPersonnelOverlay(line, initialTab) {
     selectedSalespeople: showSalespeople
       ? clonePlain(localPersonnelAssignments.value[line.id]?.salespeople || (Array.isArray(line.salespeople) ? line.salespeople : []))
       : [],
-    selectedGuides: showSalespeople
+    selectedGuides: showGuides
       ? clonePlain(localPersonnelAssignments.value[line.id]?.guideSelections || (Array.isArray(line.guideSelections) ? line.guideSelections : []))
       : [],
-    selectedSalesManagers: showSalespeople
+    selectedSalesManagers: showSalesManagers
       ? clonePlain(localPersonnelAssignments.value[line.id]?.salesManagerSelections || (Array.isArray(line.salesManagerSelections) ? line.salesManagerSelections : []))
       : [],
     loading: true,
@@ -2373,14 +2376,15 @@ async function loadPersonnelOverlay(line, initialTab) {
 
 async function searchPersonnelOverlay({ scope, keyword } = {}) {
   const current = personnelOverlay.value
-  if (!current?.line || !['group_guides', 'group_sales_managers'].includes(scope)) return
+  if (!current?.line || scope !== 'group_attributions') return
   const requestKey = current.requestKey
   try {
     const records = await queryPersonnelCandidates(scope, current.line, keyword)
     if (personnelOverlay.value?.requestKey !== requestKey) return
     personnelOverlay.value = {
       ...personnelOverlay.value,
-      [scope === 'group_guides' ? 'guideCandidates' : 'salesManagerCandidates']: records
+      guideCandidates: records,
+      salesManagerCandidates: records
     }
   } catch (error) {
     if (personnelOverlay.value?.requestKey !== requestKey) return
@@ -2402,10 +2406,16 @@ async function openCartLineSalespeople(line) {
   await loadPersonnelOverlay(line, 'salespeople')
 }
 
+async function openCartLineAttributions(line) {
+  if (isEntitlementLine(line)) return
+  activeCartLineId.value = line.id
+  await loadPersonnelOverlay(line, 'guides', 'attribution')
+}
+
 async function retryPersonnelOverlay() {
   const current = personnelOverlay.value
   if (!current?.line) return
-  await loadPersonnelOverlay(current.line, current.initialTab)
+  await loadPersonnelOverlay(current.line, current.initialTab, current.roleScope)
 }
 
 async function saveCartLineSalespeople(line, salespeople) {
@@ -2560,6 +2570,7 @@ async function confirmPersonnelAssignment(result = {}) {
   if (isSavingPersonnelAssignment.value) return
   const line = personnelOverlay.value?.line
   if (!line?.id) return
+  const roleScope = personnelOverlay.value?.roleScope || 'personnel'
   isSavingPersonnelAssignment.value = true
   try {
     const craftsmen = (result.craftsmen || []).map((record) => ({
@@ -2582,9 +2593,14 @@ async function confirmPersonnelAssignment(result = {}) {
       name: record.name
     }))
     const payload = {}
-    if (isProjectLine(line) && !cardOperationUpgradeBinding(line)) payload.craftsmen = craftsmen
-    if (!isEntitlementLine(line)) payload.salespeople = salespeople
-    if (!isEntitlementLine(line)) {
+    if (roleScope === 'personnel') {
+      if (isProjectLine(line) && !cardOperationUpgradeBinding(line)) payload.craftsmen = craftsmen
+      if (!isEntitlementLine(line)) payload.salespeople = salespeople
+    } else if (roleScope === 'guide') {
+      payload.guideSelections = guideSelections
+    } else if (roleScope === 'salesManager') {
+      payload.salesManagerSelections = salesManagerSelections
+    } else if (roleScope === 'attribution') {
       payload.guideSelections = guideSelections
       payload.salesManagerSelections = salesManagerSelections
     }
@@ -2606,9 +2622,19 @@ async function confirmPersonnelAssignment(result = {}) {
     }
     localPersonnelAssignments.value = {
       ...localPersonnelAssignments.value,
-      [line.id]: isEntitlementLine(line)
-        ? { craftsmen: clonePlain(result.craftsmen || []) }
-        : clonePlain(result)
+      [line.id]: {
+        ...(localPersonnelAssignments.value[line.id] || {}),
+        ...(roleScope === 'personnel'
+          ? (isEntitlementLine(line) ? { craftsmen: clonePlain(result.craftsmen || []) } : clonePlain(result))
+          : roleScope === 'guide'
+            ? { guideSelections: clonePlain(result.guideSelections || []) }
+            : roleScope === 'salesManager'
+              ? { salesManagerSelections: clonePlain(result.salesManagerSelections || []) }
+              : {
+                  guideSelections: clonePlain(result.guideSelections || []),
+                  salesManagerSelections: clonePlain(result.salesManagerSelections || [])
+                })
+      }
     }
     personnelOverlay.value = null
   } finally {
@@ -2689,10 +2715,35 @@ function craftsmenDisplaySummary(line = {}) {
 
 function salespersonDisplaySummary(line = {}) {
   const records = localPersonnelAssignments.value[line.id]?.salespeople
-  if (!Array.isArray(records)) return line.salespersonSummary || '待分配'
-  if (!records.length) return '待分配'
+  if (!Array.isArray(records)) return ''
+  if (!records.length) return ''
   const first = `${records[0].name}${records[0].marked ? '(售前)' : ''}`
   return records.length > 1 ? `${first}${records.length}人` : first
+}
+
+function attributionDisplaySummary(line = {}, key = '', fallback = '') {
+  const localRecords = localPersonnelAssignments.value[line.id]?.[key]
+  const records = Array.isArray(localRecords)
+    ? localRecords
+    : (Array.isArray(line[key]) ? line[key] : [])
+  if (!records.length) return fallback
+  const names = records
+    .map((record) => record?.name || record?.staffName || record?.employeeName || '')
+    .filter(Boolean)
+  if (!names.length) return fallback
+  return names.length > 2 ? `${names.slice(0, 2).join('、')}等${names.length}人` : names.join('、')
+}
+
+function guideDisplaySummary(line = {}) {
+  return attributionDisplaySummary(line, 'guideSelections', '')
+}
+
+function salesManagerDisplaySummary(line = {}) {
+  return attributionDisplaySummary(line, 'salesManagerSelections', '')
+}
+
+function groupAttributionDisplaySummary(line = {}) {
+  return [guideDisplaySummary(line), salesManagerDisplaySummary(line)].filter(Boolean).join('、')
 }
 
 async function confirmPreviewCardOperation() {
@@ -4701,10 +4752,21 @@ onBeforeUnmount(() => {
                       type="button"
                       class="cart-line__meta-action cart-line__meta-action--enabled"
                       :disabled="isEntitlementLine(line)"
-                      :title="`销售人:${salespersonDisplaySummary(line)}`"
+                      :title="salespersonDisplaySummary(line) ? `销售人:${salespersonDisplaySummary(line)}` : '销售人'"
                       @click="openCartLineSalespeople(line)"
                     >
-                      销售人:{{ salespersonDisplaySummary(line) }}
+                      <template v-if="salespersonDisplaySummary(line)">销售人:{{ salespersonDisplaySummary(line) }}</template>
+                      <template v-else>销售人</template>
+                    </button>
+                  </div>
+                  <div v-if="!isEntitlementLine(line)" class="cart-line__meta-slot cart-line__meta-slot--attribution">
+                    <button
+                      type="button"
+                      class="cart-line__meta-action cart-line__meta-action--enabled"
+                      :title="groupAttributionDisplaySummary(line) ? `导购/销售经理:${groupAttributionDisplaySummary(line)}` : '导购/销售经理'"
+                      @click="openCartLineAttributions(line)"
+                    >
+                      导购/销售经理<span v-if="groupAttributionDisplaySummary(line)">:{{ groupAttributionDisplaySummary(line) }}</span>
                     </button>
                   </div>
                   <div class="cart-line__meta-slot cart-line__meta-slot--craftsmen">

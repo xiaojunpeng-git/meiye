@@ -2460,10 +2460,12 @@ button:disabled {
     minmax(48px, .55fr)
     minmax(62px, .75fr)
     minmax(80px, 1.1fr)
+    minmax(78px, .95fr)
+    minmax(90px, 1.1fr)
     minmax(90px, 1.2fr)
     minmax(140px, 1.15fr)
     auto;
-  column-gap: 6px;
+  column-gap: 12px;
   min-height: 27px;
 }
 
@@ -2471,6 +2473,11 @@ button:disabled {
   display: flex;
   min-width: 0;
   align-items: center;
+}
+
+/* 购物车人员/优惠券等操作统一留出间距，避免按钮相互贴合或依赖定位偏移。 */
+.cart-line__secondary-meta {
+  column-gap: 12px;
 }
 
 .cart-line__meta-slot .cart-line__meta-action {
@@ -2488,15 +2495,15 @@ button:disabled {
 }
 
 .cart-line__meta-slot--coupon {
-  /* Keep the grid track width intact so the label never gets clipped. */
-  position: relative;
-  left: 20px;
   z-index: 1;
 }
 
 .cart-line__meta-slot--salesperson {
+  z-index: 1;
+}
+
+.cart-line__meta-slot--attribution {
   position: relative;
-  left: 30px;
   z-index: 1;
 }
 
@@ -2505,6 +2512,8 @@ button:disabled {
   grid-template-columns:
     minmax(62px, .75fr)
     minmax(80px, 1.1fr)
+    minmax(78px, .95fr)
+    minmax(90px, 1.1fr)
     minmax(90px, 1.2fr)
     minmax(140px, 1.15fr)
     auto;
@@ -4458,6 +4467,149 @@ button:disabled {
   align-items: center;
   gap: 5px;
   color: #697586;
+}
+
+.personnel-attribution-manager {
+  display: flex !important;
+  flex-direction: column;
+  grid-column: 1 / -1;
+  gap: 14px;
+  max-width: 760px;
+  width: 100%;
+  justify-self: center;
+}
+
+.personnel-attribution-role {
+  display: grid;
+  grid-template-columns: 88px 80px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  min-height: 52px;
+  padding: 10px 12px;
+  border: 1px solid #e1e6ed;
+  border-radius: 6px;
+}
+
+.personnel-attribution-role > strong {
+  color: #303844;
+}
+
+.personnel-attribution-role > small,
+.personnel-attribution-members em {
+  color: #8b97a6;
+  font-size: 12px;
+  font-style: normal;
+}
+
+.personnel-attribution-members {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.personnel-attribution-members span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 7px;
+  border-radius: 4px;
+  background: #eef6ff;
+  color: #1769aa;
+  font-size: 13px;
+}
+
+.personnel-attribution-members button,
+.personnel-attribution-search-panel > header button {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 17px;
+  line-height: 1;
+}
+
+.personnel-attribution-add {
+  align-self: flex-start;
+}
+
+.personnel-attribution-search-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(20, 28, 40, .28);
+}
+
+.personnel-attribution-search-panel {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  width: min(680px, 100%);
+  max-height: min(560px, calc(100vh - 96px));
+  overflow: hidden;
+  border-radius: 6px;
+  background: #fff;
+  box-shadow: 0 18px 50px rgba(16, 30, 52, .25);
+}
+
+.personnel-attribution-search-panel > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 56px;
+  padding: 0 16px;
+  border-bottom: 1px solid #e3e8ef;
+  color: #1f2a3d;
+}
+
+.personnel-attribution-search-toolbar {
+  display: flex;
+  gap: 10px;
+  padding: 14px 16px;
+  border-bottom: 1px solid #edf0f4;
+}
+
+.personnel-attribution-search-toolbar input {
+  flex: 1;
+  min-width: 0;
+  height: 40px;
+  padding: 0 12px;
+  border: 1px solid #cfd8e3;
+  border-radius: 6px;
+}
+
+.personnel-attribution-search-results {
+  overflow: auto;
+  padding: 0 16px;
+}
+
+.personnel-attribution-search-results article {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 66px;
+  border-bottom: 1px solid #edf0f4;
+}
+
+.personnel-attribution-search-results article > div:first-child {
+  display: grid;
+  gap: 4px;
+  color: #303844;
+}
+
+.personnel-attribution-search-results article small {
+  color: #8b97a6;
+  font-size: 12px;
+}
+
+.personnel-attribution-search-results article > div:last-child {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .personnel-full-view {
@@ -8519,7 +8671,8 @@ button:disabled {
   }
 
   .cart-line__meta-slot--coupon,
-  .cart-line__meta-slot--salesperson {
+  .cart-line__meta-slot--salesperson,
+  .cart-line__meta-slot--attribution {
     left: 0;
   }
 }

@@ -25,6 +25,7 @@ final class CashierV3QueryEntitySelectorServices
         // the whole group into a cashier page.
         'group_sales_managers' => true,
         'group_guides' => true,
+        'group_attributions' => true,
     ];
 
     /**
@@ -54,7 +55,7 @@ final class CashierV3QueryEntitySelectorServices
         $page = max(1, (int)($payload['page'] ?? 1));
         $pageSize = min(20, max(1, (int)($payload['pageSize'] ?? $payload['page_size'] ?? 20)));
         $keyword = trim((string)($payload['keyword'] ?? $payload['search'] ?? ''));
-        $isGroupAttribution = in_array($selectorScope, ['group_sales_managers', 'group_guides'], true);
+        $isGroupAttribution = in_array($selectorScope, ['group_sales_managers', 'group_guides', 'group_attributions'], true);
         if ($isGroupAttribution && mb_strlen($keyword) < 2) {
             return [
                 'records' => [],
@@ -64,6 +65,9 @@ final class CashierV3QueryEntitySelectorServices
                 'isLoading' => false,
                 'requiresKeyword' => true,
             ];
+        }
+        if ($selectorScope === 'group_attributions') {
+            return $this->queryGroupAttributions($keyword, $page, $pageSize, $operatorScope);
         }
         $requiresEmploymentType = self::PERSON_SCOPES[$selectorScope];
         $eligibilityColumn = $requiresEmploymentType
@@ -152,7 +156,9 @@ final class CashierV3QueryEntitySelectorServices
                 'craftsmanEligible' => (int)($row['cashier_craftsman_enabled'] ?? 0) === 1,
                 'selectable' => true,
                 'groupScoped' => $isGroupAttribution,
-                'attributionRole' => $selectorScope === 'group_sales_managers' ? 'sales_manager' : ($selectorScope === 'group_guides' ? 'guide' : ''),
+                'attributionRole' => $selectorScope === 'group_sales_managers'
+                    ? 'sales_manager'
+                    : ($selectorScope === 'group_guides' ? 'guide' : 'guide_and_sales_manager'),
             ];
         }
 
@@ -174,5 +180,49 @@ final class CashierV3QueryEntitySelectorServices
             CashierV3ResultCode::STATUS_FAILED,
             ['reason' => $reason]
         );
+    }
+
+    private function queryGroupAttributions(string $keyword, int $page, int $pageSize, CashierV3OperatorScope $operatorScope): array
+    {
+        // 导购/销售经理是集团归属，不要求当前门店或当前组织存在任职关系。
+        // 本地数据库是一库一租户，租户边界由 CashierV3OperatorScope 绑定；
+        // 关键词门槛仍然保留，避免把全集团人员一次性加载到收银端。
+        $like = '%' . addcslashes($keyword, '%_') . '%';
+        $query = Db::name('employee')->alias('e')
+            ->leftJoin('system_store_staff ss', 'ss.employee_id=e.id AND ss.status=1 AND ss.is_del=0')
+            ->where('e.status', 1)
+            ->where('e.is_del', 0)
+            ->where(function ($subQuery) use ($like) {
+                $subQuery->whereLike('e.name', $like)
+                    ->whereLike('ss.staff_name', $like, 'OR')
+                    ->whereLike('ss.account', $like, 'OR');
+            })
+            ->group('e.id,e.name')
+            ->field('e.id as employee_id,e.name as employee_name,MIN(ss.id) as staff_id,MAX(ss.store_id) as store_id,MAX(ss.staff_name) as staff_name,MAX(ss.account) as account');
+        $total = (int)(clone $query)->count();
+        $rows = $query->order('e.id asc')->page($page, $pageSize)->select()->toArray();
+        $records = [];
+        foreach ($rows as $row) {
+            $name = trim((string)($row['employee_name'] ?? $row['staff_name'] ?? ''));
+            if ($name === '') continue;
+            $records[] = [
+                'id' => (int)$row['employee_id'],
+                'staffId' => (int)($row['employee_id'] ?? 0),
+                'employeeId' => (int)$row['employee_id'],
+                'storeId' => (int)($row['store_id'] ?? 0),
+                'name' => $name,
+                'staffName' => (string)($row['staff_name'] ?? ''),
+                'staffNo' => (string)($row['account'] ?? ''),
+                'storeName' => '',
+                'employeeTypeCode' => '',
+                'employeeTypeAuthorityVersion' => 0,
+                'salespersonEligible' => true,
+                'craftsmanEligible' => false,
+                'selectable' => true,
+                'groupScoped' => true,
+                'attributionRole' => 'guide_and_sales_manager',
+            ];
+        }
+        return ['records' => $records, 'total' => $total, 'page' => $page, 'pageSize' => $pageSize, 'isLoading' => false, 'requiresKeyword' => false];
     }
 }

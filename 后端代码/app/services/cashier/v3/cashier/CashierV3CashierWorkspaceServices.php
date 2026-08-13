@@ -552,6 +552,7 @@ final class CashierV3CashierWorkspaceServices
             $ids[$id] = true;
         }
         if (!$ids) return [];
+        $this->assertAttributionEmployeesInScope(array_keys($ids), $operatorScope, 'guide_employee_out_of_scope');
         $rows = Db::name('employee')->whereIn('id', array_keys($ids))->where('status', 1)->where('is_del', 0)->lock(true)->select()->toArray();
         if (count($rows) !== count($ids)) throw $this->incompleteLineSettings('', 'guide_employee_not_active');
         $result = [];
@@ -567,7 +568,11 @@ final class CashierV3CashierWorkspaceServices
             if ($id <= 0 || isset($ids[$id])) throw $this->incompleteLineSettings('', 'sales_manager_selection_invalid');
             $ids[$id] = true;
         }
+        if (count($ids) > 1) {
+            throw $this->incompleteLineSettings('', 'sales_manager_selection_limit_exceeded');
+        }
         if (!$ids) return [];
+        $this->assertAttributionEmployeesInScope(array_keys($ids), $operatorScope, 'sales_manager_employee_out_of_scope');
         $rows = Db::name('employee')->whereIn('id', array_keys($ids))->where('status', 1)->where('is_del', 0)->lock(true)->select()->toArray();
         if (count($rows) !== count($ids)) throw $this->incompleteLineSettings('', 'sales_manager_employee_not_active');
         $result = [];
@@ -577,6 +582,24 @@ final class CashierV3CashierWorkspaceServices
             $result[] = ['employeeId' => (int)$row['id'], 'name' => $name, 'employeeTypeCodeSnapshot' => (string)($row['employment_type_code'] ?? '')];
         }
         return $result;
+    }
+
+    /**
+     * 导购/销售经理属于集团归属。候选与最终锁读都只接受本地实例内的在职员工，
+     * 不采信客户端传入的组织、门店或人员名称。
+     */
+    private function assertAttributionEmployeesInScope(array $employeeIds, CashierV3OperatorScope $operatorScope, string $reason): void
+    {
+        $employeeIds = array_values(array_unique(array_filter(array_map('intval', $employeeIds))));
+        if (!$employeeIds) return;
+        $activeIds = Db::name('employee')
+            ->whereIn('id', $employeeIds)
+            ->where('status', 1)
+            ->where('is_del', 0)
+            ->column('id');
+        if (count(array_diff($employeeIds, array_map('intval', $activeIds))) !== 0) {
+            throw $this->incompleteLineSettings('', $reason);
+        }
     }
 
     /** Apply one confirmed salesperson allocation to every current-purchase line atomically. */

@@ -23,6 +23,7 @@ $selector = $read('app/services/cashier/v3/member/CashierV3QueryEntitySelectorSe
 $groupSelectorChecks = [
     'group_sales_managers',
     'group_guides',
+    'group_attributions',
     "mb_strlen(\$keyword) < 2",
     "'requiresKeyword' => true",
     "'groupScoped' => \$isGroupAttribution",
@@ -32,7 +33,22 @@ foreach ($groupSelectorChecks as $needle) {
         throw new RuntimeException('missing group attribution selector contract: ' . $needle);
     }
 }
+$groupAttributionMethod = substr($selector, (int)strpos($selector, 'private function queryGroupAttributions'));
+$check(
+    strpos($groupAttributionMethod, "Db::name('employee')->alias('e')") !== false
+        && strpos($groupAttributionMethod, "->where('e.status', 1)") !== false
+        && strpos($groupAttributionMethod, "->where('e.is_del', 0)") !== false
+        && strpos($groupAttributionMethod, "join('organization_employee") === false,
+    '导购与销售经理统一入口按全集团在职员工关键词搜索，不依赖当前组织或门店任职',
+    'STAFF-ROLE-GROUP-ATTRIBUTION-01'
+);
 $workspace = $read('app/services/cashier/v3/cashier/CashierV3CashierWorkspaceServices.php');
+$check(
+    strpos($workspace, "count(\$ids) > 1") !== false
+        && strpos($workspace, 'sales_manager_selection_limit_exceeded') !== false,
+    '销售经理归属服务端最多保存一人，导购仍可多人',
+    'STAFF-ROLE-SALES-MANAGER-LIMIT-01'
+);
 $reservation = $read('app/services/cashier/v3/reservation/CashierV3ReservationModule.php');
 $member = $read('app/services/cashier/v3/member/CashierV3MemberModule.php');
 $profile = $read('app/services/cashier/v3/checkout/provider/CashierV3StaffProfileProvider.php');

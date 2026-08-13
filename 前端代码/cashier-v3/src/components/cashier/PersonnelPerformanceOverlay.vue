@@ -26,13 +26,34 @@ const props = defineProps({
 const emit = defineEmits(['close', 'confirm', 'apply-all', 'retry', 'search-personnel'])
 
 const mode = ref('simple')
-const activeTab = ref(props.showCraftsmen ? props.initialTab : 'salespeople')
+const resolveInitialTab = (tab = '') => {
+  return tab
+}
+const initialTab = resolveInitialTab(props.initialTab)
+const firstVisibleTab = props.showCraftsmen
+  ? 'craftsmen'
+  : props.showSalespeople
+    ? 'salespeople'
+    : (props.showGuides || props.showSalesManagers)
+      ? 'guides'
+      : 'salesManagers'
+const activeTab = ref(
+  [
+    props.showCraftsmen && 'craftsmen',
+    props.showSalespeople && 'salespeople',
+    props.showGuides && 'guides',
+    props.showSalesManagers && 'salesManagers'
+  ].includes(initialTab)
+    ? initialTab
+    : firstVisibleTab
+)
 const keyword = ref('')
 const groupKeyword = ref('')
 const craftsmen = ref([])
 const salespeople = ref([])
 const guides = ref([])
 const salesManagers = ref([])
+const attributionSearchOpen = ref(false)
 const laborManualFee = ref(props.laborManualFee === null || props.laborManualFee === undefined
   ? Number(props.laborDefaultFee || 0)
   : Number(props.laborManualFee))
@@ -118,6 +139,17 @@ function mergeCandidates(candidates, selected, role) {
   return merged
 }
 
+function mergeWithLocalSelections(candidates, selected, currentRecords, role) {
+  const preserved = Array.isArray(currentRecords)
+    ? currentRecords.filter((record) => record.selected)
+    : []
+  const saved = [
+    ...(Array.isArray(selected) ? selected : []),
+    ...preserved
+  ]
+  return mergeCandidates(candidates, saved, role)
+}
+
 watch(
   () => [props.craftsmenCandidates, props.selectedCraftsmen],
   ([candidates, selected]) => { craftsmen.value = mergeCandidates(candidates, selected, 'craftsmen') },
@@ -125,12 +157,14 @@ watch(
 )
 watch(
   () => [props.guideCandidates, props.selectedGuides],
-  ([candidates, selected]) => { guides.value = mergeCandidates(candidates, selected, 'guides') },
+  ([candidates, selected]) => { guides.value = mergeWithLocalSelections(candidates, selected, guides.value, 'guides') },
   { immediate: true, deep: true }
 )
 watch(
   () => [props.salesManagerCandidates, props.selectedSalesManagers],
-  ([candidates, selected]) => { salesManagers.value = mergeCandidates(candidates, selected, 'salesManagers') },
+  ([candidates, selected]) => {
+    salesManagers.value = mergeWithLocalSelections(candidates, selected, salesManagers.value, 'salesManagers')
+  },
   { immediate: true, deep: true }
 )
 watch(
@@ -140,28 +174,67 @@ watch(
 )
 
 const normalizedKeyword = computed(() => keyword.value.trim().toLowerCase())
+const normalizedGroupKeyword = computed(() => groupKeyword.value.trim().toLowerCase())
+const isAttributionTab = computed(() => ['guides', 'salesManagers'].includes(activeTab.value))
+
 function matchesKeyword(item) {
   if (!normalizedKeyword.value) return true
   return [item.name, item.position, item.level, item.staffNo]
     .some((value) => String(value || '').toLowerCase().includes(normalizedKeyword.value))
 }
+function matchesGroupKeyword(item) {
+  if (!normalizedGroupKeyword.value) return true
+  return [item.name, item.position, item.level, item.staffNo, item.storeName]
+    .some((value) => String(value || '').toLowerCase().includes(normalizedGroupKeyword.value))
+}
 
 const filteredCraftsmen = computed(() => craftsmen.value.filter(matchesKeyword))
 const filteredSalespeople = computed(() => salespeople.value.filter(matchesKeyword))
-const filteredGuides = computed(() => guides.value.filter(matchesKeyword))
-const filteredSalesManagers = computed(() => salesManagers.value.filter(matchesKeyword))
+const filteredGuides = computed(() => guides.value.filter(isAttributionTab.value ? matchesGroupKeyword : matchesKeyword))
+const filteredSalesManagers = computed(() => salesManagers.value.filter(isAttributionTab.value ? matchesGroupKeyword : matchesKeyword))
+const selectedGuides = computed(() => guides.value.filter((item) => item.selected))
+const selectedSalesManagers = computed(() => salesManagers.value.filter((item) => item.selected))
+const attributionSearchResults = computed(() => guides.value.filter(matchesGroupKeyword))
 const activeRecords = computed(() => activeTab.value === 'craftsmen'
   ? craftsmen.value
   : activeTab.value === 'salespeople' ? salespeople.value
-    : activeTab.value === 'guides' ? guides.value : salesManagers.value)
+    : activeTab.value === 'guides' ? guides.value
+      : salesManagers.value)
 const selectedRecords = computed(() => activeRecords.value.filter((item) => item.selected))
 const activeTotal = computed(() => selectedRecords.value.reduce((total, item) => total + Number(item.performance || 0), 0))
-const activeIsNonPerformance = computed(() => ['guides', 'salesManagers'].includes(activeTab.value))
+const activeIsNonPerformance = computed(() => isAttributionTab.value)
 function selectRecord(item) {
+  if (item.role === 'salesManagers' && !item.selected) {
+    salesManagers.value.forEach((record) => { record.selected = false })
+  }
   item.selected = !item.selected
   if (!item.selected) item.marked = false
-  if (!['guides', 'salesManagers'].includes(item.role)) equalWeights(item.role === 'craftsmen' ? craftsmen.value : salespeople.value)
+  if (item.role === 'craftsmen') equalWeights(craftsmen.value)
+  if (item.role === 'salespeople') equalWeights(salespeople.value)
   validationMessage.value = ''
+}
+
+function openAttributionSearch() {
+  groupKeyword.value = ''
+  validationMessage.value = ''
+  attributionSearchOpen.value = true
+}
+
+function addGuide(item) {
+  const guide = guides.value.find((record) => record.id === item.id)
+  if (guide) guide.selected = true
+  attributionSearchOpen.value = false
+}
+
+function setSalesManager(item) {
+  salesManagers.value.forEach((record) => { record.selected = record.id === item.id })
+  attributionSearchOpen.value = false
+}
+
+function removeAttribution(item, role) {
+  const records = role === 'guide' ? guides.value : salesManagers.value
+  const target = records.find((record) => record.id === item.id)
+  if (target) target.selected = false
 }
 
 function setMarked(item, checked) {
@@ -220,13 +293,45 @@ function selectedAttributionPayload(records) {
   }))
 }
 
+function attributionRoleAllows(item = {}, role = '') {
+  const attributionRole = item?.attributionRole || item?.role || ''
+  if (!role) return true
+  if (role === 'guide') {
+    return attributionRole === ''
+      || attributionRole === 'guide'
+      || attributionRole === 'guide_and_sales_manager'
+      || attributionRole === 'guide_and_sales_manager'
+      || attributionRole === 'guideAndSalesManager'
+      || attributionRole === 'guide/salesManager'
+  }
+  if (role === 'salesManager') {
+    return attributionRole === ''
+      || attributionRole === 'sales_manager'
+      || attributionRole === 'guide_and_sales_manager'
+      || attributionRole === 'guideAndSalesManager'
+      || attributionRole === 'guide/salesManager'
+  }
+  return true
+}
+
+function selectedGuidePayload(records = []) {
+  return selectedAttributionPayload(records.filter((record) => attributionRoleAllows(record, 'guide')))
+}
+
+function selectedSalesManagerPayload(records = []) {
+  return selectedAttributionPayload(records.filter((record) => attributionRoleAllows(record, 'salesManager')))
+}
+
 function applySelectionToAll() {
   const selectedCraftsmen = props.showCraftsmen ? craftsmen.value.filter((item) => item.selected) : []
   const selectedSalespeople = props.showSalespeople ? salespeople.value.filter((item) => item.selected) : []
   const selectedGuides = props.showGuides ? guides.value.filter((item) => item.selected) : []
   const selectedSalesManagers = props.showSalesManagers ? salesManagers.value.filter((item) => item.selected) : []
-  if (selectedGuides.length || selectedSalesManagers.length) {
-    activateInvalidTab(selectedGuides.length ? 'guides' : 'salesManagers', '导购和销售经理需在当前商品上逐条保存，不能应用到全部商品。')
+  if (selectedGuides.length || selectedSalesManagers.length || (props.showGuides || props.showSalesManagers)) {
+    const tabName = isAttributionTab.value
+      ? activeTab.value
+      : (props.showCraftsmen && !selectedCraftsmen.length ? 'guides' : 'salespeople')
+    activateInvalidTab(tabName, '导购和销售经理需在当前商品上逐条保存，不能应用到全部商品。')
     return
   }
   if (!selectedCraftsmen.length && !selectedSalespeople.length && !selectedGuides.length && !selectedSalesManagers.length) {
@@ -248,8 +353,8 @@ function applySelectionToAll() {
       : selectedCraftsmen.length ? 'craftsmen' : 'salespeople',
     craftsmen: selectedCraftsmenPayload(),
     salespeople: selectedSalespersonPayload(),
-    guideSelections: selectedAttributionPayload(guides.value),
-    salesManagerSelections: selectedAttributionPayload(salesManagers.value)
+    guideSelections: selectedGuidePayload(guides.value),
+    salesManagerSelections: selectedSalesManagerPayload(salesManagers.value)
   })
 }
 
@@ -286,8 +391,8 @@ function confirm() {
   if (props.showSalespeople) {
     assignment.salespeople = selectedSalespersonPayload()
   }
-  assignment.guideSelections = selectedAttributionPayload(selectedGuides)
-  assignment.salesManagerSelections = selectedAttributionPayload(selectedSalesManagers)
+  if (props.showGuides) assignment.guideSelections = selectedGuidePayload(guides.value)
+  if (props.showSalesManagers) assignment.salesManagerSelections = selectedSalesManagerPayload(salesManagers.value)
   if (props.allowLaborOverride && mode.value === 'full' && laborFeeDirty.value) {
     assignment.laborManualFee = Number(laborManualFee.value)
   }
@@ -314,9 +419,7 @@ function searchGroupPersonnel(scope) {
       </header>
 
       <div class="personnel-performance-toolbar">
-        <label><span class="sr-only">搜索员工</span><input v-model="keyword" type="search" placeholder="输入关键词搜索员工"></label>
-        <label v-if="activeTab === 'guides' || activeTab === 'salesManagers'" class="personnel-group-search"><span class="sr-only">搜索集团人员</span><input v-model="groupKeyword" type="search" placeholder="输入姓名或工号后搜索" @keyup.enter="searchGroupPersonnel(activeTab === 'guides' ? 'group_guides' : 'group_sales_managers')"></label>
-        <button v-if="activeTab === 'guides' || activeTab === 'salesManagers'" type="button" class="button button--secondary" @click="searchGroupPersonnel(activeTab === 'guides' ? 'group_guides' : 'group_sales_managers')">搜索集团人员</button>
+        <label v-if="!isAttributionTab"><span class="sr-only">搜索员工</span><input v-model="keyword" type="search" placeholder="输入关键词搜索员工"></label>
         <div class="personnel-performance-mode" aria-label="分配模式">
           <button type="button" :class="{ 'is-active': mode === 'simple' }" @click="mode = 'simple'">简易选择</button>
           <button type="button" :class="{ 'is-active': mode === 'full' }" @click="mode = 'full'">完整分配</button>
@@ -346,19 +449,23 @@ function searchGroupPersonnel(scope) {
           </button>
           <p v-if="!filteredSalespeople.length" class="personnel-empty">暂无可选择的销售人</p>
         </section>
-        <section v-if="showGuides">
-          <div class="personnel-role-heading"><h3>导购（集团）</h3><small>不参与业绩比例分配</small></div>
-          <button v-for="item in filteredGuides" :key="`guide-${item.id}`" type="button" class="personnel-simple-item" :class="{ 'is-selected': item.selected }" @click="selectRecord(item)">
-            <span>{{ item.name }}</span><small>{{ item.storeName || '集团人员' }}</small>
-          </button>
-          <p v-if="!filteredGuides.length" class="personnel-empty">请输入关键词搜索导购</p>
-        </section>
-        <section v-if="showSalesManagers">
-          <div class="personnel-role-heading"><h3>销售经理（集团）</h3><small>不参与业绩比例分配</small></div>
-          <button v-for="item in filteredSalesManagers" :key="`sales-manager-${item.id}`" type="button" class="personnel-simple-item" :class="{ 'is-selected': item.selected }" @click="selectRecord(item)">
-            <span>{{ item.name }}</span><small>{{ item.storeName || '集团人员' }}</small>
-          </button>
-          <p v-if="!filteredSalesManagers.length" class="personnel-empty">请输入关键词搜索销售经理</p>
+        <section v-if="showGuides || showSalesManagers" class="personnel-attribution-manager">
+          <div class="personnel-role-heading"><h3>导购 / 销售经理</h3><small>仅记录归属，不参与业绩比例分配</small></div>
+          <div v-if="showGuides" class="personnel-attribution-role">
+            <strong>导购</strong><small>可添加多人</small>
+            <div class="personnel-attribution-members">
+              <span v-for="item in selectedGuides" :key="`selected-guide-${item.id}`">{{ item.name }}<button type="button" :aria-label="`移除导购 ${item.name}`" @click="removeAttribution(item, 'guide')">×</button></span>
+              <em v-if="!selectedGuides.length">暂未添加</em>
+            </div>
+          </div>
+          <div v-if="showSalesManagers" class="personnel-attribution-role">
+            <strong>销售经理</strong><small>仅 1 人</small>
+            <div class="personnel-attribution-members">
+              <span v-for="item in selectedSalesManagers" :key="`selected-manager-${item.id}`">{{ item.name }}<button type="button" :aria-label="`移除销售经理 ${item.name}`" @click="removeAttribution(item, 'salesManager')">×</button></span>
+              <em v-if="!selectedSalesManagers.length">暂未添加</em>
+            </div>
+          </div>
+          <button type="button" class="button button--secondary personnel-attribution-add" @click="openAttributionSearch">查找人员</button>
         </section>
       </div>
 
@@ -401,10 +508,31 @@ function searchGroupPersonnel(scope) {
         </div>
       </div>
 
+      <div v-if="attributionSearchOpen" class="personnel-attribution-search-overlay" role="dialog" aria-modal="true" aria-label="查找导购或销售经理">
+        <section class="personnel-attribution-search-panel">
+          <header><strong>查找人员</strong><button type="button" aria-label="关闭查找人员" @click="attributionSearchOpen = false">×</button></header>
+          <div class="personnel-attribution-search-toolbar">
+            <input v-model="groupKeyword" type="search" placeholder="输入姓名或工号后搜索" @keyup.enter="searchGroupPersonnel('group_attributions')">
+            <button type="button" class="button button--primary" @click="searchGroupPersonnel('group_attributions')">搜索</button>
+          </div>
+          <p v-if="groupKeyword.length < 2" class="personnel-empty">请输入至少 2 个字符后搜索集团人员</p>
+          <div v-else class="personnel-attribution-search-results">
+            <article v-for="item in attributionSearchResults" :key="`attribution-search-${item.id}`">
+              <div><strong>{{ item.name }}</strong><small>{{ item.storeName || '集团人员' }}</small></div>
+              <div>
+                <button v-if="showGuides" type="button" class="button button--secondary" @click="addGuide(item)">加入导购</button>
+                <button v-if="showSalesManagers" type="button" class="button button--primary" @click="setSalesManager(item)">设为销售经理</button>
+              </div>
+            </article>
+            <p v-if="!attributionSearchResults.length" class="personnel-empty">未找到匹配的在职人员</p>
+          </div>
+        </section>
+      </div>
+
       <footer>
         <p v-if="validationMessage" role="alert">{{ validationMessage }}</p>
         <button type="button" class="button button--secondary" :disabled="saving" @click="emit('close')">取消</button>
-        <button type="button" class="button button--secondary" :disabled="loading || saving || Boolean(loadError)" @click="applySelectionToAll">应用全部人</button>
+        <button v-if="showCraftsmen || showSalespeople" type="button" class="button button--secondary" :disabled="loading || saving || Boolean(loadError)" @click="applySelectionToAll">应用全部人</button>
         <button type="button" class="button button--primary" :disabled="loading || saving || Boolean(loadError)" @click="confirm">确认</button>
       </footer>
     </section>
