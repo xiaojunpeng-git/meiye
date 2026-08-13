@@ -2600,8 +2600,9 @@ button:disabled {
 .cart-line__service-object {
   display: inline-flex;
   justify-self: start;
-  overflow: hidden;
-  min-width: 0;
+  flex: 0 0 auto;
+  overflow: visible;
+  min-width: max-content;
   border: 1px solid #b9d4ff;
   border-radius: 999px;
   background: #fff;
@@ -2609,20 +2610,45 @@ button:disabled {
 
 .cart-line__service-controls {
   display: inline-flex;
-  min-width: 0;
+  justify-self: start;
+  min-width: max-content;
   align-items: center;
-  gap: 10px;
+  gap: 6px;
+}
+
+.cart-line__meta-slot--service-object {
+  min-width: 0;
 }
 
 .cart-line__service-object button {
-  min-width: 42px;
+  min-width: 56px;
+  height: 22px;
   min-height: 22px;
-  padding: 0 7px;
+  padding: 0 9px;
   border: 0;
   background: transparent;
   color: #409eff;
-  font-size: 10px;
+  font-size: 11px;
+  font-weight: 600;
   line-height: 20px;
+  white-space: nowrap;
+}
+
+.cart-line__service-object button:last-child {
+  min-width: 70px;
+}
+
+.cart-line__service-object button:first-child {
+  border-radius: 999px 0 0 999px;
+}
+
+.cart-line__service-object button:last-child {
+  border-radius: 0 999px 999px 0;
+}
+
+.cart-line__service-object--header {
+  flex: 0 0 auto;
+  align-self: center;
 }
 
 .cart-line__service-object button:hover:not(:disabled) {

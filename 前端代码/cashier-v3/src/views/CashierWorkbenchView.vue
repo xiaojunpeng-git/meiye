@@ -45,9 +45,9 @@ const router = useRouter()
 const cashierToday = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(new Date())
 
 const keyword = ref('')
-// 收银开单以项目为默认入口；“全部”会把卡项、产品等混在首屏，
-// 既不符合门店服务开单习惯，也让项目目录不易发现。
-const selectedType = ref('项目')
+// 产品确认：收银开单从卡项开始；实际目录仍由后端按当前门店权限返回。
+const preferredCatalogTypeOrder = ['卡项', '定制卡', '产品', '项目']
+const selectedType = ref('卡项')
 const selectedCategory = ref('')
 const areCategoriesExpanded = ref(false)
 const activeCartLineId = ref(null)
@@ -118,7 +118,7 @@ const draftCommandRecovery = useCashierV3DraftCommandRecovery(createCashierV3Com
 const cashierDraftHasUnresolvedCommand = ref(false)
 let entitlementAddedTimer = null
 
-const defaultTypes = ['项目', '产品', '卡项', '定制卡']
+const defaultTypes = [...preferredCatalogTypeOrder]
 
 const cashier = computed(() => state.cashier || {})
 const member = computed(() => cashier.value.member || null)
@@ -213,11 +213,17 @@ const checkoutEntryLabel = computed(() => activeCardOperationUpgrade.value
   : previewCardOperation.value?.mode === 'project-replacement'
     ? '确认替换'
     : (cart.value.primaryActionLabel || activeCheckoutComposition.value?.primaryActionLabel || '立即结账'))
-const productTypes = computed(() => (
-  previewCardOperation.value?.awaitingTarget
-    ? [previewCardOperation.value.mode === 'card-upgrade' ? '卡项' : '项目']
-    : (catalog.value.types && catalog.value.types.length ? catalog.value.types : defaultTypes)
-))
+const productTypes = computed(() => {
+  if (previewCardOperation.value?.awaitingTarget) {
+    return [previewCardOperation.value.mode === 'card-upgrade' ? '卡项' : '项目']
+  }
+  const available = catalog.value.types && catalog.value.types.length
+    ? catalog.value.types
+    : defaultTypes
+  const known = preferredCatalogTypeOrder.filter((type) => available.includes(type))
+  const other = available.filter((type) => !preferredCatalogTypeOrder.includes(type))
+  return [...known, ...other]
+})
 const categories = computed(() => [
   '全部',
   ...(Array.isArray(catalog.value.categories) ? catalog.value.categories : [])
@@ -2195,8 +2201,12 @@ function resolveReflectedDraftCommand() {
   const requestedSalespeople = ticket.payload?.salespeople
   if (Array.isArray(requestedSalespeople) && !sameStaffIds(line.salespeople, requestedSalespeople)) return false
   if (ticket.payload?.serviceObject && cartLineServiceObject(line) !== ticket.payload.serviceObject) return false
+  if (Object.prototype.hasOwnProperty.call(ticket.payload || {}, 'friendCountsAsCustomer')
+    && cartLineFriendCountsAsCustomer(line) !== Boolean(ticket.payload.friendCountsAsCustomer)) return false
   if (Object.prototype.hasOwnProperty.call(ticket.payload || {}, 'isExperience')
     && Boolean(line.isExperience) !== Boolean(ticket.payload.isExperience)) return false
+  if (Object.prototype.hasOwnProperty.call(ticket.payload || {}, 'isPresale')
+    && cartLinePresaleSelected(line) !== Boolean(ticket.payload.isPresale)) return false
 
   draftCommandRecovery.settle(ticket, 'success')
   cashierDraftHasUnresolvedCommand.value = Boolean(
@@ -2254,6 +2264,19 @@ function firstCartLineMissingCraftsmen() {
 
 function cartLineServiceObject(line = {}) {
   return ['friend', '朋友'].includes(line.serviceObject) ? 'friend' : 'self'
+}
+
+function cartLineFriendCountsAsCustomer(line = {}) {
+  // 旧草稿没有该快照时保持原“朋友单独计客”的既有口径。
+  return !(line.friendCountsAsCustomer === false || Number(line.friendCountsAsCustomer) === 0)
+}
+
+function isProductLine(line = {}) {
+  return cartLineRole(line) === 'sale' && (Number(line.productType) === 0 || line.kind === '产品')
+}
+
+function cartLinePresaleSelected(line = {}) {
+  return line.isPresale === true || Number(line.isPresale) === 1
 }
 
 async function queryPersonnelCandidates(scope, line, keyword = '') {
@@ -2703,10 +2726,15 @@ function cardOperationConfirmLabel(mode = '') {
   return '确认操作'
 }
 
-async function setCartLineServiceObject(line, serviceObject) {
-  if (!isProjectLine(line) || !['self', 'friend'].includes(serviceObject) || cartLineServiceObject(line) === serviceObject) return
+async function setCartLineServiceObject(line, serviceObject, friendCountsAsCustomer = true) {
+  if (!isProjectLine(line) || !['self', 'friend'].includes(serviceObject)) return
+  if (cartLineServiceObject(line) === serviceObject
+    && (serviceObject !== 'friend' || cartLineFriendCountsAsCustomer(line) === friendCountsAsCustomer)) return
   activeCartLineId.value = line.id
-  await mutateCashierDraft('update-cart-line-service-settings', line, { serviceObject })
+  await mutateCashierDraft('update-cart-line-service-settings', line, {
+    serviceObject,
+    friendCountsAsCustomer: serviceObject === 'friend' ? friendCountsAsCustomer : true
+  })
 }
 
 async function toggleCartLineExperience(line) {
@@ -2719,6 +2747,22 @@ async function toggleCartLineExperience(line) {
   const result = await mutateCashierDraft('update-cart-line-service-settings', line, payload)
   if (!['success', 'succeeded'].includes(resultStatus(result))) {
     localExperienceState.value = { ...localExperienceState.value, [line.id]: previous }
+  }
+}
+
+async function toggleCartLinePresale(line) {
+  if (!isProductLine(line)) return
+  activeCartLineId.value = line.id
+  const result = await mutateCashierDraft('update-cart-line-service-settings', line, {
+    isPresale: !cartLinePresaleSelected(line)
+  })
+  if (resultStatus(result) === 'result_unknown') {
+    const recovered = await recoverPendingDraftCommand()
+    if (!recovered) {
+      window.dispatchEvent(new CustomEvent('cashier-v3:ui-result', {
+        detail: { status: 'failed', message: '预售设置结果仍在确认中，请稍后重试；确认收款暂不可用。' }
+      }))
+    }
   }
 }
 
@@ -4580,6 +4624,27 @@ onBeforeUnmount(() => {
                   </span>
                 </div>
                 <div class="cart-line__header-actions">
+                  <div
+                    v-if="isProjectLine(line) && !cardOperationUpgradeBinding(line)"
+                    class="cart-line__service-object cart-line__service-object--header"
+                    aria-label="服务对象与客数"
+                  >
+                    <button
+                      type="button"
+                      :class="{ 'is-active': cartLineServiceObject(line) === 'self' }"
+                      @click="setCartLineServiceObject(line, 'self', true)"
+                    >本人</button>
+                    <button
+                      type="button"
+                      :class="{ 'is-active': cartLineServiceObject(line) === 'friend' && cartLineFriendCountsAsCustomer(line) }"
+                      @click="setCartLineServiceObject(line, 'friend', true)"
+                    >朋友算</button>
+                    <button
+                      type="button"
+                      :class="{ 'is-active': cartLineServiceObject(line) === 'friend' && !cartLineFriendCountsAsCustomer(line) }"
+                      @click="setCartLineServiceObject(line, 'friend', false)"
+                    >朋友不算</button>
+                  </div>
                   <div class="cart-line__amount">
                     <span v-if="linePriceChanged(line)" class="cart-line__original-price">
                       {{ formatMoney(line.originalAmount) }}
@@ -4655,8 +4720,21 @@ onBeforeUnmount(() => {
                     </button>
                   </div>
                   <div class="cart-line__meta-slot cart-line__meta-slot--service-object">
-                    <div v-if="isProjectLine(line) && !cardOperationUpgradeBinding(line)" class="cart-line__service-controls">
+                    <div
+                      v-if="(isProjectLine(line) && !cardOperationUpgradeBinding(line)) || isProductLine(line)"
+                      class="cart-line__service-controls"
+                    >
                       <button
+                        v-if="isProductLine(line)"
+                        type="button"
+                        class="cart-line__experience cart-line__presale"
+                        :class="{ 'is-active': cartLinePresaleSelected(line) }"
+                        :aria-pressed="cartLinePresaleSelected(line)"
+                        :title="cartLinePresaleSelected(line) ? '取消预售：恢复按正常商品处理库存' : '标记为预售：本单不扣减库存'"
+                        @click.stop="toggleCartLinePresale(line)"
+                      >预售</button>
+                      <button
+                        v-if="isProjectLine(line) && !cardOperationUpgradeBinding(line)"
                         type="button"
                         class="cart-line__experience"
                         :class="{ 'is-active': cartLineExperienceSelected(line) }"
@@ -4664,18 +4742,6 @@ onBeforeUnmount(() => {
                         :title="cartLineExperienceSelected(line) ? '取消体验项目标记' : '标记为体验项目'"
                         @click.stop="toggleCartLineExperience(line)"
                       >体验</button>
-                      <div class="cart-line__service-object" aria-label="服务对象">
-                        <button
-                          type="button"
-                          :class="{ 'is-active': cartLineServiceObject(line) === 'self' }"
-                          @click="setCartLineServiceObject(line, 'self')"
-                        >本人</button>
-                        <button
-                          type="button"
-                          :class="{ 'is-active': cartLineServiceObject(line) === 'friend' }"
-                          @click="setCartLineServiceObject(line, 'friend')"
-                        >朋友</button>
-                      </div>
                     </div>
                   </div>
                   <div class="quantity-stepper quantity-stepper--editable" aria-label="数量操作">
