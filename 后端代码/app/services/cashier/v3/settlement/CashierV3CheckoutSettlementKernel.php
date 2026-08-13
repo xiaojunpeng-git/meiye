@@ -713,7 +713,7 @@ final class CashierV3CheckoutSettlementKernel
                 'priceChangedByNameSnapshot',
                 'priceChangedAt',
                 'craftsmen',
-            ], ['catalogSkuId', 'serviceObject', 'isExperience', 'guideSelections', 'salesManagerSelections', 'manualLaborFeeCents'], 'saleLines[' . $index . ']');
+            ], ['catalogSkuId', 'serviceObject', 'friendCountsAsCustomer', 'isExperience', 'isPresale', 'inventoryOutboundRequired', 'guideSelections', 'salesManagerSelections', 'manualLaborFeeCents'], 'saleLines[' . $index . ']');
             if ($line['saleClassification'] !== 'formal_sale') {
                 throw self::failure('sale_line_not_formal', ['index' => $index]);
             }
@@ -783,10 +783,16 @@ final class CashierV3CheckoutSettlementKernel
                 $line['isExperience'] ?? 0,
                 'saleLine.isExperience'
             );
+            $friendCountsAsCustomer = self::nonNegativeInt(
+                $line['friendCountsAsCustomer'] ?? 1,
+                'saleLine.friendCountsAsCustomer'
+            );
+            $isPresale = self::nonNegativeInt($line['isPresale'] ?? 0, 'saleLine.isPresale');
+            $inventoryOutboundRequired = self::nonNegativeInt($line['inventoryOutboundRequired'] ?? 1, 'saleLine.inventoryOutboundRequired');
             $manualLaborFeeCents = array_key_exists('manualLaborFeeCents', $line)
                 ? self::nonNegativeInt($line['manualLaborFeeCents'], 'saleLine.manualLaborFeeCents')
                 : null;
-            if ($isExperience > 1) {
+            if ($isExperience > 1 || $friendCountsAsCustomer > 1 || $isPresale > 1 || $inventoryOutboundRequired > 1 || ($isPresale === 1 && $inventoryOutboundRequired === 1)) {
                 throw self::failure('sale_line_is_experience_invalid', ['authorityKey' => $authorityKey]);
             }
             try {
@@ -800,7 +806,7 @@ final class CashierV3CheckoutSettlementKernel
                 if (!in_array($serviceObject, ['self', 'friend'], true)) {
                     throw self::failure('sale_line_project_service_object_invalid', ['authorityKey' => $authorityKey]);
                 }
-            } elseif ($serviceObject !== '' || $isExperience !== 0 || $craftsmen !== []) {
+            } elseif ($serviceObject !== '' || $friendCountsAsCustomer !== 1 || $isExperience !== 0 || $craftsmen !== []) {
                 throw self::failure('sale_line_non_project_service_tags_invalid', ['authorityKey' => $authorityKey]);
             }
             $normalized = [
@@ -849,8 +855,11 @@ final class CashierV3CheckoutSettlementKernel
                 'priceChangedByNameSnapshot' => $priceChangedByName,
                 'priceChangedAt' => $priceChangedAt,
                 'serviceObject' => $serviceObject,
+                'friendCountsAsCustomer' => $friendCountsAsCustomer,
                 'craftsmen' => $craftsmen,
                 'isExperience' => $isExperience,
+                'isPresale' => $isPresale,
+                'inventoryOutboundRequired' => $inventoryOutboundRequired,
             ];
             if ($manualLaborFeeCents !== null) {
                 $normalized['manualLaborFeeCents'] = $manualLaborFeeCents;
@@ -1246,7 +1255,10 @@ final class CashierV3CheckoutSettlementKernel
                 'projectId' => $line['sourceType'] === 'project' ? $line['sourceId'] : 0,
                 'projectVersion' => $line['sourceType'] === 'project' ? $line['sourceVersion'] : 0,
                 'serviceObject' => $line['serviceObject'],
+                'friendCountsAsCustomer' => $line['friendCountsAsCustomer'],
                 'isExperience' => $line['isExperience'],
+                'isPresale' => $line['isPresale'],
+                'inventoryOutboundRequired' => $line['inventoryOutboundRequired'],
                 'quantity' => $line['quantity'],
                 'originalAmountCents' => $line['originalAmountCents'],
                 'discountAmountCents' => $line['discountAmountCents'],
@@ -1307,7 +1319,10 @@ final class CashierV3CheckoutSettlementKernel
                 // service tags are frozen by the entitlement completion authority,
                 // not by the sales-order checkout line.
                 'serviceObject' => '',
+                'friendCountsAsCustomer' => 1,
                 'isExperience' => 0,
+                'isPresale' => 0,
+                'inventoryOutboundRequired' => 1,
                 'quantity' => $line['quantity'],
                 'originalAmountCents' => 0,
                 'discountAmountCents' => 0,

@@ -422,6 +422,8 @@ final class CashierV3CheckoutPreparationServices
             'categoryIdSnapshot' => (int)($line['categoryIdSnapshot'] ?? 0),
             'categoryNameSnapshot' => (string)($line['categoryNameSnapshot'] ?? ''),
             'serviceObject' => (string)($line['serviceObject'] ?? ''),
+            'friendCountsAsCustomer' => !array_key_exists('friendCountsAsCustomer', $line)
+                || !empty($line['friendCountsAsCustomer']) ? 1 : 0,
             'craftsmen' => $craftsmen,
             'guideSelections' => is_array($line['guideSelections'] ?? null)
                 ? array_values($line['guideSelections'])
@@ -430,6 +432,13 @@ final class CashierV3CheckoutPreparationServices
                 ? array_values($line['salesManagerSelections'])
                 : [],
             'isExperience' => !empty($line['isExperience']) ? 1 : 0,
+            // These flags are part of every persisted line snapshot. Keep the
+            // ordinary sale defaults explicit so strict repository validation
+            // cannot reject a line that did not use the presale/outbound UI.
+            'isPresale' => !empty($line['isPresale']) ? 1 : 0,
+            'inventoryOutboundRequired' => array_key_exists('inventoryOutboundRequired', $line)
+                ? (empty($line['inventoryOutboundRequired']) ? 0 : 1)
+                : 1,
         ];
         $manualLaborFeeCents = array_key_exists('laborManualFeeCents', $line)
             ? ($line['laborManualFeeCents'] === null ? null : (int)$line['laborManualFeeCents'])
