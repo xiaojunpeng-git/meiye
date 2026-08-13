@@ -87,6 +87,9 @@
                   <span>{{ row.staff_name || '-' }}</span>
                 </div>
               </template>
+              <template slot-scope="{ row }" slot="store_name">
+                {{ row.is_organization_direct == 1 ? '无店直属' : (row.store_name || '-') }}
+              </template>
               <template slot-scope="{ row }" slot="is_manager">
                 {{ row.is_manager == 1 ? '是' : '否' }}
               </template>
@@ -341,7 +344,8 @@ function resolveStaffAvatar(url) {
 
 const COLUMNS_META = [
   { key: 'id', title: 'ID', minWidth: 60 },
-  { key: 'store_name', title: '所属门店', minWidth: 120 },
+  { key: 'organization_name', title: '所属组织', minWidth: 180 },
+  { key: 'store_name', title: '任职门店', minWidth: 120, slot: 'store_name' },
   { key: 'staff_name', title: '店员名称', minWidth: 150, slot: 'staff_name' },
   { key: 'nickname', title: '昵称', minWidth: 100 },
   { key: 'phone', title: '手机号', minWidth: 110 },
@@ -376,6 +380,7 @@ const COLUMNS_META = [
 ];
 
 const DEFAULT_COLUMN_CONFIG = [
+  { key: 'organization_name', show: true },
   { key: 'store_name', show: true },
   { key: 'staff_name', show: true },
   { key: 'nickname', show: true },
@@ -599,7 +604,17 @@ export default {
         .then((res) => {
           const columns = res.data && res.data.columns;
           if (Array.isArray(columns) && columns.length) {
-            this.columnConfig = columns;
+            // 旧用户保存的列配置没有“所属组织”，补到 ID 后面，
+            // 避免新字段因历史配置而永远不可见。
+            const nextColumns = columns.map((column) => ({ ...column }));
+            if (!nextColumns.some((column) => column.key === 'organization_name')) {
+              const idIndex = nextColumns.findIndex((column) => column.key === 'id');
+              nextColumns.splice(idIndex >= 0 ? idIndex + 1 : 0, 0, {
+                key: 'organization_name',
+                show: true,
+              });
+            }
+            this.columnConfig = nextColumns;
           }
         })
         .catch(() => {});

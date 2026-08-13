@@ -358,13 +358,14 @@ class OrganizationWorkspaceReadServices extends BaseServices
         $scopeAssignRows = Db::name('system_store_staff')->alias('s')
             ->join('system_store st', 'st.id = s.store_id')
             ->join('organization_store os', 'os.store_id = st.id')
+            ->leftJoin('organization o', 'o.id = os.org_id')
             ->whereIn('os.org_id', $orgIds)
             ->whereIn('s.employee_id', $pageEmployeeIds)
             ->where('st.is_del', 0)
             ->where('s.status', 1)
             ->where('s.is_del', 0)
             ->where('s.employee_id', '>', 0)
-            ->field('s.id as staff_id,s.store_id,s.employee_id,s.position,s.is_manager,s.is_butler,s.is_cashier,s.is_customer,st.name as store_name,os.org_id')
+            ->field('s.id as staff_id,s.store_id,s.employee_id,s.position,s.is_manager,s.is_butler,s.is_cashier,s.is_customer,st.name as store_name,os.org_id,o.name as organization_name')
             ->order('s.employee_id', 'asc')
             ->order('s.id', 'asc')
             ->select()
@@ -489,6 +490,7 @@ class OrganizationWorkspaceReadServices extends BaseServices
                 'store_id' => (int)$row['store_id'],
                 'store_name' => (string)($row['store_name'] ?? ''),
                 'org_id' => (int)($row['org_id'] ?? 0),
+                'organization_name' => (string)($row['organization_name'] ?? ''),
                 'position' => $posName,
                 'roles' => $roles,
                 'job_positions' => $jobPositions,

@@ -531,6 +531,16 @@ class EmployeeDataScopeServices extends BaseServices
         if ($adminId <= 0) {
             return [];
         }
+
+        // 平台账号的“集团/组织”数据权限是授权边界的一部分。
+        // 旧实现只读取 organization_admin，导致账号页面显示集团权限，
+        // 但没有对应 organization_admin 行时，保存员工组织范围仍被拒绝。
+        // 显式员工数据权限优先；没有统一数据权限记录时再兼容旧组织管理员关系。
+        $scopeAllowed = $this->resolveOperatorEmployeeScopeOrgIds($adminInfo, $adminId);
+        if ($scopeAllowed !== null) {
+            return $scopeAllowed;
+        }
+
         $orgAdminIds = Db::name('organization_admin')
             ->where('admin_id', $adminId)
             ->where('is_del', 0)
@@ -566,6 +576,97 @@ class EmployeeDataScopeServices extends BaseServices
             }
         }
         return array_map('intval', array_keys($allowed));
+    }
+
+    /**
+     * 返回平台操作者可管理的组织范围；null 表示总部超管不限。
+     * 组织直属人员写入、组织名册维护等入口必须复用这条边界，
+     * 不能只依赖页面上的“集团”文案或前端传入的 org_id。
+     *
+     * @return int[]|null
+     */
+    public function resolveOperatorManageableOrgIds(array $adminInfo): ?array
+    {
+        return $this->resolveOperatorAllowedOrgIds($adminInfo);
+    }
+
+    /**
+     * 将平台操作者自身的总部数据权限转换为“可授权组织范围”。
+     *
+     * null 表示没有可用于组织授权的统一组织范围，调用方可回退
+     * organization_admin；[] 表示明确配置了组织模式但没有有效组织，必须拒绝。
+     * 组织模式允许所选组织及其下级，集团根组织因此自然覆盖全集团。
+     *
+     * @return int[]|null
+     */
+    protected function resolveOperatorEmployeeScopeOrgIds(array $adminInfo, int $adminId): ?array
+    {
+        $employeeId = (int)($adminInfo['employee_id'] ?? 0);
+        if ($employeeId <= 0) {
+            $employeeId = (int)Db::name('system_admin')
+                ->where('id', $adminId)
+                ->where('is_del', 0)
+                ->value('employee_id');
+        }
+        if ($employeeId <= 0) {
+            return null;
+        }
+
+        $scope = Db::name('employee_data_scope')
+            ->where('employee_id', $employeeId)
+            ->where('source_type', self::SOURCE_HQ)
+            ->where('source_store_id', 0)
+            ->where('status', 1)
+            ->where('is_del', 0)
+            ->order('id', 'desc')
+            ->find();
+        if (!$scope) {
+            return null;
+        }
+
+        $mode = strtolower(trim((string)($scope['scope_mode'] ?? self::MODE_PERSONAL)));
+        if ($mode !== self::MODE_ORG) {
+            // 个人/门店模式本身不是集团组织授权；继续走旧
+            // organization_admin 兼容路径，避免覆盖已有的组织管理员授权。
+            return null;
+        }
+
+        $roots = json_decode((string)($scope['org_ids'] ?? '[]'), true) ?: [];
+        $roots = $this->normalizeIntIds($roots);
+        if (!$roots) {
+            return [];
+        }
+
+        $pidMap = Db::name('organization')
+            ->where('is_del', 0)
+            ->column('pid', 'id');
+        $children = [];
+        foreach ($pidMap as $id => $pid) {
+            $id = (int)$id;
+            $pid = (int)$pid;
+            if ($id > 0 && $pid > 0) {
+                $children[$pid][] = $id;
+            }
+        }
+
+        $allowed = [];
+        $stack = $roots;
+        $seen = [];
+        while ($stack) {
+            $id = (int)array_pop($stack);
+            if ($id <= 0 || isset($seen[$id])) {
+                continue;
+            }
+            $seen[$id] = true;
+            $allowed[$id] = true;
+            foreach (($children[$id] ?? []) as $childId) {
+                $stack[] = (int)$childId;
+            }
+        }
+
+        $ids = array_map('intval', array_keys($allowed));
+        sort($ids);
+        return $ids;
     }
 
     /**

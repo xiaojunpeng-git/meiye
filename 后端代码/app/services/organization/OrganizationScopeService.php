@@ -1116,6 +1116,16 @@ class OrganizationScopeService extends BaseServices
     }
 
     /**
+     * 组织范围内的组织 ID（含下级），供集团人员等无门店任职资源查询使用。
+     * 返回范围仍由当前组织权限决定，调用方不得用客户端组织参数替换。
+     */
+    public function getOrgIds(int $orgId, bool $includeDescendants = false): array
+    {
+        if ($orgId <= 0) return [];
+        return $includeDescendants ? $this->collectDescendantOrgIds($orgId) : [$orgId];
+    }
+
+    /**
      * 管理员有效门店 = 组织全量 − 排除列表
      */
     public function getAdminResolvedStoreIds(int $orgAdminId): array

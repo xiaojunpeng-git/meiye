@@ -279,7 +279,7 @@
                 </div>
                 <div v-else>
                   <table class="data-table">
-                    <thead><tr><th>人员</th><th>任职门店</th><th>角色</th><th>手机号</th><th>状态</th><th>操作</th></tr></thead>
+                    <thead><tr><th>人员</th><th>所属组织</th><th>任职门店</th><th>角色</th><th>手机号</th><th>状态</th><th>操作</th></tr></thead>
                     <tbody>
                       <tr v-for="person in employeeList" :key="person.employee_id" @click="openPersonDrawer(person)">
                         <td>
@@ -289,6 +289,7 @@
                             <div><strong>{{ person.name }}</strong><small>{{ person.scope_assignment_count ? `${person.scope_assignment_count} 家门店任职` : '组织直属人员' }}</small></div>
                           </div>
                         </td>
+                        <td>{{ assignmentOrganizationText(person) }}</td>
                         <td>{{ assignmentStoreText(person) }}</td>
                         <td><div class="role-tags"><span v-for="role in displayRoles(person)" :key="role" class="role-tag">{{ role }}</span></div></td>
                         <td>{{ person.phone_masked }}</td>
@@ -326,7 +327,7 @@
                                   @click="openCreateTransferApply(person); closePersonOps()"
                                 >发起调店申请</button>
                                 <button
-                                  v-if="canWrite"
+                                  v-if="canEditStaff"
                                   class="ops-dropdown-item danger"
                                   type="button"
                                   @click="confirmLeavePerson(person); closePersonOps()"
@@ -507,7 +508,7 @@
                 >更多 ▾</button>
                 <div v-if="personOpsKey === 'drawer-person'" class="ops-dropdown ops-dropdown-right" @click.stop>
                   <button
-                    v-if="canWrite"
+                    v-if="canEditStaff"
                     class="ops-dropdown-item danger"
                     type="button"
                     @click="confirmLeavePerson(drawer.person); closePersonOps()"
@@ -1227,10 +1228,10 @@
         <div class="modal-body">
           <p class="muted">不创建门店任职与权限，仅组织名册关系。</p>
           <div class="list-toolbar" style="margin-bottom:12px;">
-            <input v-model.trim="orgDirectModal.phone" class="input" placeholder="手机号" style="width:140px;" :disabled="!canWrite" />
-            <input v-model.trim="orgDirectModal.name" class="input" placeholder="姓名" style="width:120px;" :disabled="!canWrite" />
-            <input v-model.trim="orgDirectModal.jobTitle" class="input" placeholder="组织岗位" style="width:120px;" :disabled="!canWrite" />
-            <button class="button primary compact-button" type="button" :disabled="!canWrite || writeSubmitting" @click="saveOrgDirect">添加/更新</button>
+            <input v-model.trim="orgDirectModal.phone" class="input" placeholder="手机号" style="width:140px;" :disabled="!canEditStaff" />
+            <input v-model.trim="orgDirectModal.name" class="input" placeholder="姓名" style="width:120px;" :disabled="!canEditStaff" />
+            <input v-model.trim="orgDirectModal.jobTitle" class="input" placeholder="组织岗位" style="width:120px;" :disabled="!canEditStaff" />
+            <button class="button primary compact-button" type="button" :disabled="!canEditStaff || writeSubmitting" @click="saveOrgDirect">添加/更新</button>
           </div>
           <table class="data-table">
             <thead><tr><th>姓名</th><th>手机号</th><th>岗位</th><th>操作</th></tr></thead>
@@ -1240,8 +1241,8 @@
                 <td>{{ row.phone }}</td>
                 <td>{{ row.job_title || '—' }}</td>
                 <td>
-                  <button class="table-action" type="button" :disabled="!canWrite" @click="removeOrgDirect(row)">移除</button>
-                  <button class="table-action" type="button" :disabled="!canWrite" @click="leaveEmployeeGlobal(row)">全局离职</button>
+                  <button class="table-action" type="button" :disabled="!canEditStaff" @click="removeOrgDirect(row)">移除</button>
+                  <button class="table-action" type="button" :disabled="!canEditStaff" @click="leaveEmployeeGlobal(row)">全局离职</button>
                 </td>
               </tr>
             </tbody>
@@ -2356,13 +2357,24 @@ export default {
     assignmentStoreText(person) {
       const list = person.assignments || [];
       if (!list.length) {
-        const direct = person.direct_memberships || [];
-        if (!direct.length) return '—';
-        if (direct.length === 1) return direct[0].org_name || '组织直属';
-        return `${direct[0].org_name || '组织直属'} 等${direct.length}个组织`;
+        return (person.direct_memberships || []).length ? '无任职门店' : '—';
       }
       if (list.length === 1) return list[0].store_name;
       return `${list[0].store_name} 等${list.length}家`;
+    },
+    assignmentOrganizationText(person) {
+      const names = [];
+      (person.assignments || []).forEach((item) => {
+        const name = String(item.organization_name || '').trim();
+        if (name && !names.includes(name)) names.push(name);
+      });
+      (person.direct_memberships || []).forEach((item) => {
+        const name = String(item.org_name || '').trim();
+        if (name && !names.includes(name)) names.push(name);
+      });
+      if (!names.length) return '—';
+      if (names.length === 1) return names[0];
+      return `${names[0]} 等${names.length}个组织`;
     },
     displayRoles(person) {
       const roles = Array.isArray(person.roles) ? person.roles.slice() : [];
@@ -2891,8 +2903,8 @@ export default {
         .catch((err) => this.showToast((err && err.msg) || '加载直属人员失败'));
     },
     saveOrgDirect() {
-      if (!this.canWrite) {
-        this.showToast(READONLY_TIP);
+      if (!this.canEditStaff) {
+        this.showToast(this.staffSaveDenyTip);
         return;
       }
       const token = newRequestToken();
@@ -2918,7 +2930,10 @@ export default {
         .finally(() => { this.writeSubmitting = false; });
     },
     removeOrgDirect(row) {
-      if (!this.canWrite || !row || !row.id) return;
+      if (!this.canEditStaff || !row || !row.id) {
+        if (!this.canEditStaff) this.showToast(this.staffSaveDenyTip);
+        return;
+      }
       const token = newRequestToken();
       deleteOrganizationOrgEmployee(row.id, { 'X-Request-Token': token })
         .then(() => {
@@ -3014,7 +3029,10 @@ export default {
       return '';
     },
     confirmLeavePerson(person) {
-      if (!this.canWrite || !person || !person.employee_id) return;
+      if (!this.canEditStaff || !person || !person.employee_id) {
+        if (!this.canEditStaff) this.showToast(this.staffSaveDenyTip);
+        return;
+      }
       const name = person.name || person.employee_id;
       if (!window.confirm(`确认办理「${name}」离职？\n将结束当前任职并停止当前门店权限；工资、订单与任职历史会保留。`)) return;
       const token = newRequestToken();

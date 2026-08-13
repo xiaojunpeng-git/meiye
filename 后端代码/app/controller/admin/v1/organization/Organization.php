@@ -8,6 +8,7 @@ use app\services\organization\OrganizationScopeService;
 use app\services\organization\OrganizationWorkspaceReadServices;
 use app\services\organization\OrganizationWorkspaceWriteServices;
 use think\facade\App;
+use think\facade\Db;
 
 /**
  * 组织架构（兼容原 region 路由，新能力入口）
@@ -531,9 +532,16 @@ class Organization extends AuthController
         try {
             /** @var OrganizationWorkspaceWriteServices $writeGate */
             $gate = app()->make(\app\services\organization\OrganizationWorkspaceWriteGate::class);
-            $super = $gate->assertSuperAdmin(is_array($this->adminInfo) ? $this->adminInfo : []);
-            if (!$super['ok']) {
-                return $this->fail($super['reason_text'] ?: '无权限');
+            $permission = $gate->assertPlatformStaffMaintainPermission(is_array($this->adminInfo) ? $this->adminInfo : []);
+            if (!$permission['ok']) {
+                return $this->fail($permission['reason_text'] ?: '无权限');
+            }
+            $orgPermission = $gate->assertOrganizationManagePermission(
+                (int)$data['org_id'],
+                is_array($this->adminInfo) ? $this->adminInfo : []
+            );
+            if (!$orgPermission['ok']) {
+                return $this->fail($orgPermission['reason_text'] ?: '无权限');
             }
             /** @var \app\services\organization\OrganizationEmployeeServices $svc */
             $svc = app()->make(\app\services\organization\OrganizationEmployeeServices::class);
@@ -555,9 +563,17 @@ class Organization extends AuthController
     {
         try {
             $gate = app()->make(\app\services\organization\OrganizationWorkspaceWriteGate::class);
-            $super = $gate->assertSuperAdmin(is_array($this->adminInfo) ? $this->adminInfo : []);
-            if (!$super['ok']) {
-                return $this->fail($super['reason_text'] ?: '无权限');
+            $permission = $gate->assertPlatformStaffMaintainPermission(is_array($this->adminInfo) ? $this->adminInfo : []);
+            if (!$permission['ok']) {
+                return $this->fail($permission['reason_text'] ?: '无权限');
+            }
+            $relation = Db::name('organization_employee')->where('id', (int)$id)->where('is_del', 0)->find();
+            $orgPermission = $gate->assertOrganizationManagePermission(
+                (int)($relation['org_id'] ?? 0),
+                is_array($this->adminInfo) ? $this->adminInfo : []
+            );
+            if (!$orgPermission['ok']) {
+                return $this->fail($orgPermission['reason_text'] ?: '无权限');
             }
             /** @var \app\services\organization\OrganizationEmployeeServices $svc */
             $svc = app()->make(\app\services\organization\OrganizationEmployeeServices::class);
@@ -579,9 +595,9 @@ class Organization extends AuthController
         try {
             $gate = app()->make(\app\services\organization\OrganizationWorkspaceWriteGate::class);
             $gate->assertCanWrite();
-            $super = $gate->assertSuperAdmin(is_array($this->adminInfo) ? $this->adminInfo : []);
-            if (!$super['ok']) {
-                return $this->fail($super['reason_text'] ?: '无权限');
+            $permission = $gate->assertPlatformStaffMaintainPermission(is_array($this->adminInfo) ? $this->adminInfo : []);
+            if (!$permission['ok']) {
+                return $this->fail($permission['reason_text'] ?: '无权限');
             }
             /** @var \app\services\employee\EmployeeStaffWriteServices $write */
             $write = app()->make(\app\services\employee\EmployeeStaffWriteServices::class);

@@ -245,12 +245,34 @@ class EmployeePersonCompleteWriteServices extends BaseServices
         }
 
         $storeId = $staff ? (int)$staff['store_id'] : 0;
+        $storeName = $storeId > 0
+            ? (string)Db::name('system_store')->where('id', $storeId)->value('name')
+            : '';
         $oe = Db::name('organization_employee')
             ->where('employee_id', $employeeId)
             ->where('is_del', 0)
             ->order('id', 'desc')
             ->find();
         $orgId = $oe ? (int)$oe['org_id'] : 0;
+        // 员工可以同时归属多个组织；org_id 继续作为兼容的主组织回显，
+        // 另返回完整关系供列表/编辑页说明，避免把最新一条误认为唯一归属。
+        $organizationMembershipRows = Db::name('organization_employee')->alias('oe')
+            ->leftJoin('organization o', 'o.id = oe.org_id')
+            ->where('oe.employee_id', $employeeId)
+            ->where('oe.is_del', 0)
+            ->where('o.is_del', 0)
+            ->field('oe.id,oe.org_id,oe.job_title,o.name as org_name')
+            ->order('oe.id', 'asc')
+            ->select()->toArray();
+        $organizationMemberships = array_map(static function (array $row): array {
+            return [
+                'id' => (int)($row['id'] ?? 0),
+                'org_id' => (int)($row['org_id'] ?? 0),
+                'org_name' => (string)($row['org_name'] ?? ''),
+                'job_title' => (string)($row['job_title'] ?? ''),
+                'status' => array_key_exists('status', $row) ? (int)$row['status'] : 1,
+            ];
+        }, $organizationMembershipRows);
         if ($orgId <= 0 && $storeId > 0) {
             $orgId = (int)Db::name('organization_store')->where('store_id', $storeId)->value('org_id');
         }
@@ -319,7 +341,9 @@ class EmployeePersonCompleteWriteServices extends BaseServices
             'staff_id' => $staffId,
             'org_id' => $orgId,
             'store_id' => $storeId,
+            'store_name' => $storeName,
             'org_employee_id' => $oe ? (int)$oe['id'] : 0,
+            'organization_memberships' => $organizationMemberships,
             'staff_name' => (string)($emp['name'] ?? ''),
             'phone' => (string)($emp['phone'] ?? ''),
             'avatar' => (string)($emp['avatar'] ?? ''),

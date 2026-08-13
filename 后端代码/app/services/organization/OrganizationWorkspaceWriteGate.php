@@ -18,6 +18,7 @@ class OrganizationWorkspaceWriteGate
     public const REASON_NOT_SUPER_ADMIN = 'NOT_SUPER_ADMIN';
     public const REASON_IDENTITY_UNKNOWN = 'IDENTITY_UNKNOWN';
     public const REASON_NO_STAFF_MAINTAIN = 'NO_STAFF_MAINTAIN';
+    public const REASON_ORG_SCOPE = 'ORG_SCOPE_DENIED';
     public const REASON_OK = 'OK';
 
     /** 人员维护功能权限标识（与前端 v-auth 一致） */
@@ -277,6 +278,42 @@ class OrganizationWorkspaceWriteGate
             ];
         }
         return ['ok' => true, 'reason_code' => self::REASON_OK, 'reason_text' => ''];
+    }
+
+    /**
+     * 人员维护权限之外，还必须校验目标组织在操作者的数据权限范围内。
+     * 总部超管返回通过；普通“集团/组织”权限按组织及下级范围判断。
+     *
+     * @return array{ok:bool,reason_code:string,reason_text:string}
+     */
+    public function assertOrganizationManagePermission(int $orgId, array $adminInfo): array
+    {
+        if ($orgId <= 0) {
+            return [
+                'ok' => false,
+                'reason_code' => self::REASON_ORG_SCOPE,
+                'reason_text' => '目标组织无效，禁止写入',
+            ];
+        }
+        $staff = $this->assertPlatformStaffMaintainPermission($adminInfo);
+        if (!$staff['ok']) {
+            return $staff;
+        }
+        if ($this->isSuperAdmin($adminInfo)) {
+            return ['ok' => true, 'reason_code' => self::REASON_OK, 'reason_text' => ''];
+        }
+
+        /** @var EmployeeDataScopeServices $scopeService */
+        $scopeService = app()->make(EmployeeDataScopeServices::class);
+        $allowed = $scopeService->resolveOperatorManageableOrgIds($adminInfo);
+        if ($allowed === null || in_array($orgId, $allowed, true)) {
+            return ['ok' => true, 'reason_code' => self::REASON_OK, 'reason_text' => ''];
+        }
+        return [
+            'ok' => false,
+            'reason_code' => self::REASON_ORG_SCOPE,
+            'reason_text' => '超出当前账号的数据权限范围，不能维护该组织人员',
+        ];
     }
 
     /**

@@ -39,6 +39,9 @@
                     :clearable="false"
                     @change="onOrgPick"
                   />
+                  <div v-if="organizationMemberships.length > 1" class="form-tip">
+                    已有组织关系：{{ organizationMembershipLabel }}
+                  </div>
                 </FormItem>
               </Col>
               <Col :span="12">
@@ -158,7 +161,6 @@
                   <RadioGroup v-model="formInline.employment_type_code" type="button">
                     <Radio label="internal" :disabled="!canEditEmploymentType">内部员工</Radio>
                     <Radio label="partner" :disabled="!canEditEmploymentType">合作方</Radio>
-                    <Radio label="outsourced" :disabled="!canEditEmploymentType">外包</Radio>
                   </RadioGroup>
                   <div v-if="!canManageEmploymentType" class="form-tip">
                     当前账号无人员类型管理权限。
@@ -661,6 +663,11 @@ export default {
       mobileEnabledTouched: false,
       positionIdsTouched: false,
       originalInternalAccount: '',
+      // 编辑时记录打开表单前的真实任职状态；不能用可变的 formInline.store_id
+      // 判断锁定，否则无店直属员工本次选店后会被立即误锁定。
+      originalStoreId: 0,
+      originalStoreName: '',
+      organizationMemberships: [],
       /** 详情加载序号：连续切换人员时丢弃过期响应，防止串人 */
       loadSeq: 0,
       jobOptions: [],
@@ -738,14 +745,20 @@ export default {
     /** 已有任职店员：后端编辑时会锁定原 store_id */
     storeLocked() {
       return this.editId > 0 && Number(this.formInline.staff_id || this.editId) > 0
-        && Number(this.formInline.store_id) > 0;
+        && Number(this.originalStoreId) > 0;
     },
     storeLockedLabel() {
-      const sid = Number(this.formInline.store_id || 0);
-      return sid > 0 ? `门店 #${sid}` : '-';
+      const sid = Number(this.originalStoreId || this.formInline.store_id || 0);
+      return sid > 0 ? (this.originalStoreName || `门店 #${sid}`) : '-';
     },
     hasAppointmentStore() {
       return Number(this.formInline.store_id) > 0;
+    },
+    organizationMembershipLabel() {
+      return this.organizationMemberships
+        .map((item) => String(item.org_name || '').trim())
+        .filter(Boolean)
+        .join('、');
     },
     hasMobileCapablePosition() {
       const selected = new Set((this.formInline.position_ids || []).map((id) => Number(id)));
@@ -848,6 +861,9 @@ export default {
       this.activeTab = 'basic';
       this.submitting = false;
       this.originalInternalAccount = '';
+      this.originalStoreId = 0;
+      this.originalStoreName = '';
+      this.organizationMemberships = [];
       this.formInline = this.getDefaultForm();
       this.employmentTypeLoaded = !(Number(this.editId) > 0);
       this.mobileAuthLoaded = !(Number(this.editId) > 0);
@@ -930,6 +946,14 @@ export default {
         }
       });
       const storeId = Number((data && data.store_id) || 0);
+      this.originalStoreId = storeId;
+      this.originalStoreName = String((data && data.store_name) || '').trim();
+      this.organizationMemberships = Array.isArray(data && data.organization_memberships)
+        ? data.organization_memberships.map((item) => ({
+          org_id: Number(item.org_id || 0),
+          org_name: String(item.org_name || '').trim(),
+        })).filter((item) => item.org_id > 0 && item.org_name)
+        : [];
       let scopeMode = String(scope.scope_mode || 'personal');
       // 后端存 store_self，表单仅认 personal/store/org
       if (scopeMode === 'store_self') scopeMode = 'store';

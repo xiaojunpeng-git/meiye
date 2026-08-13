@@ -382,10 +382,41 @@ class SystemStoreStaffServices extends BaseServices
         $allRole = $storeRows ? $this->loadRoleMapForStaffList($storeRows) : [];
         /** @var UserServices $userService */
         $userService = app()->make(UserServices::class);
+
+        // 组织与任职门店是两条独立关系：门店行的组织取门店绑定组织，
+        // 不能再把组织名称塞进 store_name。
+        $storeIds = array_values(array_unique(array_filter(array_map(static function ($row) {
+            return (int)($row['store_id'] ?? 0);
+        }, $storeRows ?: []))));
+        $organizationNameByStore = [];
+        if ($storeIds) {
+            $organizationNameRows = Db::name('organization_store')->alias('os')
+                ->leftJoin('organization o', 'o.id = os.org_id')
+                ->whereIn('os.store_id', $storeIds)
+                ->where('o.is_del', 0)
+                ->field('os.store_id,os.org_id,o.name as org_name')
+                ->select()->toArray();
+            foreach ($organizationNameRows as $organizationNameRow) {
+                $sid = (int)($organizationNameRow['store_id'] ?? 0);
+                if ($sid <= 0 || isset($organizationNameByStore[$sid])) {
+                    continue;
+                }
+                $organizationNameByStore[$sid] = [
+                    'id' => (int)($organizationNameRow['org_id'] ?? 0),
+                    'name' => (string)($organizationNameRow['org_name'] ?? ''),
+                ];
+            }
+        }
         $byEmployee = [];
         foreach ($storeRows as &$row) {
             $this->enrichStaffListItem($row, $allRole, $userService, $hideFencheng);
             $row['is_organization_direct'] = 0;
+            $storeOrganization = $organizationNameByStore[(int)($row['store_id'] ?? 0)] ?? null;
+            $row['organization_id'] = (int)($storeOrganization['id'] ?? 0);
+            $row['organization_name'] = (string)($storeOrganization['name'] ?? '');
+            $row['organization_names'] = $row['organization_name'] !== ''
+                ? [$row['organization_name']]
+                : [];
             $employeeId = (int)($row['employee_id'] ?? 0);
             $byEmployee[$employeeId > 0 ? $employeeId : ('staff:' . (int)$row['id'])] = $row;
         }
@@ -423,6 +454,31 @@ class SystemStoreStaffServices extends BaseServices
                 ->select()
                 ->toArray();
         }
+
+        // 直属人员可以同时归属多个组织。列表需要展示完整有效组织关系，
+        // 不能只展示当前筛选树节点，更不能伪装成任职门店。
+        $directEmployeeIds = array_values(array_unique(array_filter(array_map(static function ($row) {
+            return (int)($row['employee_id'] ?? 0);
+        }, $directRows))));
+        $organizationNamesByEmployee = [];
+        if ($directEmployeeIds) {
+            $organizationMembershipRows = Db::name('organization_employee')->alias('oe')
+                ->leftJoin('organization o', 'o.id = oe.org_id')
+                ->whereIn('oe.employee_id', $directEmployeeIds)
+                ->where('oe.is_del', 0)
+                ->where('o.is_del', 0)
+                ->field('oe.employee_id,oe.org_id,o.name as org_name')
+                ->order('oe.id', 'asc')
+                ->select()->toArray();
+            foreach ($organizationMembershipRows as $organizationMembershipRow) {
+                $eid = (int)($organizationMembershipRow['employee_id'] ?? 0);
+                $name = trim((string)($organizationMembershipRow['org_name'] ?? ''));
+                if ($eid <= 0 || $name === '') {
+                    continue;
+                }
+                $organizationNamesByEmployee[$eid][(int)($organizationMembershipRow['org_id'] ?? 0)] = $name;
+            }
+        }
         foreach ($directRows as $row) {
             $employeeId = (int)$row['employee_id'];
             // 同一人员已有当前组织内门店任职时保留真实门店行，避免重复；其直属关系仍保存在组织工作台。
@@ -434,7 +490,12 @@ class SystemStoreStaffServices extends BaseServices
                 'id' => -$employeeId,
                 'employee_id' => $employeeId,
                 'store_id' => 0,
-                'store_name' => (string)($row['org_name'] ?? '组织直属'),
+                'store_name' => '',
+                'organization_id' => (int)($row['org_id'] ?? 0),
+                'organization_name' => implode('、', array_values($organizationNamesByEmployee[$employeeId] ?? []))
+                    ?: (string)($row['org_name'] ?? ''),
+                'organization_names' => array_values($organizationNamesByEmployee[$employeeId] ?? [])
+                    ?: array_values(array_filter([(string)($row['org_name'] ?? '')])),
                 'department' => (string)($row['org_name'] ?? ''),
                 'staff_name' => (string)($row['name'] ?? ''),
                 'nickname' => (string)($row['nickname'] ?? ''),
