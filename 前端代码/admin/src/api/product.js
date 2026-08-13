@@ -128,6 +128,14 @@ export function productInfoApi(id) {
   });
 }
 
+export function performanceRuleApi(id) {
+  return request({ url: `product/performance-rule/${id}`, method: 'get' });
+}
+
+export function savePerformanceRuleApi(id, data) {
+  return request({ url: `product/performance-rule/${id}`, method: 'put', data });
+}
+
 /**
  * @description 商品管理-- 提交
  */

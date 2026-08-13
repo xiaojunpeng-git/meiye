@@ -59,6 +59,29 @@
             @modalPicTap="modalPicTap"
             @sourceChange="sourceChange"
           ></productBaseSet>
+          <div v-if="Number(formData.product_type) === 6" class="performance-rule-panel">
+            <FormItem label="项目业绩计算方式：">
+              <RadioGroup v-model="performanceRule.labor_mode" :disabled="Number($route.params.id || 0) <= 0">
+                <Radio label="actual_entitlement_amount">按业绩规则</Radio>
+                <Radio label="project_configured_amount">按手工费</Radio>
+              </RadioGroup>
+            </FormItem>
+            <FormItem label="固定手工费：">
+              <InputNumber
+                v-model="performanceRule.labor_configured_unit_amount"
+                :min="0"
+                :precision="2"
+                :disabled="Number($route.params.id || 0) <= 0 || performanceRule.labor_mode !== 'project_configured_amount'"
+                style="width: 220px"
+              />
+              <span class="tips ml10">默认用于手工模式；收银临时调整手工费暂未开放。</span>
+            </FormItem>
+            <FormItem v-if="Number($route.params.id || 0) > 0" label="">
+              <Button type="primary" :loading="performanceRuleSaving" @click="savePerformanceRule">保存业绩与手工费</Button>
+              <span class="tips ml10">版本 {{ performanceRule.version || 1 }}</span>
+            </FormItem>
+            <div v-else class="tips performance-rule-tip">请先保存商品，再进入编辑页配置项目业绩方式和固定手工费。</div>
+          </div>
         </div>
         <div v-show="currentTab === '2'">
           <!-- 商品规格的设置 -->
@@ -1628,6 +1651,8 @@
 import { mapState, mapMutations } from 'vuex';
 import {
   productInfoApi,
+  performanceRuleApi,
+  savePerformanceRuleApi,
   checkActivityApi,
   productGetRuleApi,
   productAddApi,
@@ -1817,6 +1842,14 @@ export default {
       modals: false,
       type: 0,
       create_request_key: '',
+      performanceRule: {
+        labor_mode: 'actual_entitlement_amount',
+        labor_configured_unit_amount: 0,
+        consumption_mode: 'actual_entitlement_amount',
+        consumption_configured_unit_amount: 0,
+        version: 1,
+      },
+      performanceRuleSaving: false,
 	  timeoutId: null, //定时器
 	  reservationTime: [],//时间区域
 	  timeCheckAll:true, //自动划分控制全选
@@ -3121,6 +3154,7 @@ export default {
         .then(async (res) => {
           let data = res.data.productInfo;
           this.infoData(data);
+          this.loadPerformanceRule(data.id || this.$route.params.id);
           // 生成规格
           this.spinShow = false;
           this.success = true;
@@ -3129,6 +3163,32 @@ export default {
           this.spinShow = false;
           this.$Message.error(res.msg);
         });
+    },
+    loadPerformanceRule(id) {
+      if (!id) return;
+      performanceRuleApi(Number(id)).then((res) => {
+        this.performanceRule = { ...this.performanceRule, ...(res.data || {}) };
+      }).catch((res) => {
+        this.$Message.error(res.msg || '读取项目业绩配置失败');
+      });
+    },
+    savePerformanceRule() {
+      const id = Number(this.$route.params.id || 0);
+      if (!id) return;
+      this.performanceRuleSaving = true;
+      savePerformanceRuleApi(id, {
+        labor_mode: this.performanceRule.labor_mode,
+        labor_configured_unit_amount: this.performanceRule.labor_configured_unit_amount,
+        consumption_mode: this.performanceRule.consumption_mode,
+        consumption_configured_unit_amount: this.performanceRule.consumption_configured_unit_amount,
+      }).then((res) => {
+        this.performanceRule = { ...this.performanceRule, ...(res.data || {}) };
+        this.$Message.success(res.msg || '保存成功');
+      }).catch((res) => {
+        this.$Message.error(res.msg || '保存项目业绩配置失败');
+      }).finally(() => {
+        this.performanceRuleSaving = false;
+      });
     },
     infoData(data) {
       // 初始化会员价/佣金数据

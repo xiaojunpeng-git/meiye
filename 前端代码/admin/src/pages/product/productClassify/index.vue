@@ -70,6 +70,26 @@
                         </i-switch>
                     </template>
                 </vxe-table-column>
+                <vxe-table-column field="partner_name" title="合作方配置" min-width="300">
+                    <template v-slot="{ row }">
+                        <div class="partner-config-cell">
+                            <Input
+                                v-model="row.partner_name"
+                                clearable
+                                placeholder="填写合作方名称，留空即停用"
+                                :disabled="Number(row.is_show) !== 1 || row.partnerSaving"
+                                style="width: 190px"
+                            />
+                            <Button
+                                size="small"
+                                type="primary"
+                                :loading="row.partnerSaving"
+                                :disabled="Number(row.is_show) !== 1"
+                                @click="savePartnerConfig(row)"
+                            >保存</Button>
+                        </div>
+                    </template>
+                </vxe-table-column>
                 <vxe-table-column field="date" title="操作" width="250" align="left">
                     <template v-slot="{ row, index }">
                         <a @click="edit(row)">编辑</a>
@@ -87,6 +107,7 @@
 <script>
     import { mapState } from 'vuex';
     import { productListApi, productCreateApi, productEditApi, setShowApi, setMobileCardShowApi, treeListApi } from '@/api/product';
+    import { reportOperationCategories, saveReportOperationCategory } from '@/api/report';
     import editFrom from '../../../components/from/from';
     export default {
         name: 'product_productClassify',
@@ -114,7 +135,8 @@
                     id:0
                 },
                 total: 0,
-                tableData: []
+                tableData: [],
+                partnerConfigs: {}
             }
         },
         computed: {
@@ -132,10 +154,23 @@
             }
         },
         mounted () {
+            this.loadPartnerConfigs();
             this.goodsCategory();
             this.getList();
         },
         methods: {
+            loadPartnerConfigs () {
+                reportOperationCategories().then((res) => {
+                    const configs = {};
+                    (res.data || []).forEach((item) => {
+                        configs[String(item.category_id)] = item;
+                    });
+                    this.partnerConfigs = configs;
+                    this.tableData = this.tableData.map((row) => this.normalizeCategoryRow(row));
+                }).catch((res) => {
+                    this.$Message.error(res.msg || '读取合作方配置失败');
+                });
+            },
             // 商品分类；
             goodsCategory () {
                 treeListApi(0).then(res => {
@@ -159,10 +194,41 @@
                 })
             },
             normalizeCategoryRow (row) {
+                const config = this.partnerConfigs[String(row.id)] || {};
                 return {
                     ...row,
-                    mobile_card_show: row.mobile_card_show === undefined || row.mobile_card_show === null ? 1 : row.mobile_card_show
+                    mobile_card_show: row.mobile_card_show === undefined || row.mobile_card_show === null ? 1 : row.mobile_card_show,
+                    partner_name: row.partner_name !== undefined ? row.partner_name : (config.partner_name || ''),
+                    partner_enabled: row.partner_enabled !== undefined ? row.partner_enabled : Number(config.enabled || 0),
+                    partner_version: row.partner_version !== undefined ? row.partner_version : Number(config.version || 0),
+                    partnerSaving: false
                 };
+            },
+            savePartnerConfig (row) {
+                if (Number(row.is_show) !== 1) {
+                    this.$Message.warning('停用分类不能配置合作方');
+                    return;
+                }
+                row.partnerSaving = true;
+                const idempotencyKey = (typeof crypto !== 'undefined' && crypto.randomUUID)
+                    ? crypto.randomUUID()
+                    : `category_partner_${row.id}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+                saveReportOperationCategory({
+                    category_id: String(row.id),
+                    partner_name: String(row.partner_name || '').trim(),
+                    idempotency_key: idempotencyKey,
+                }).then((res) => {
+                    const saved = res.data || {};
+                    row.partner_name = saved.partner_name || '';
+                    row.partner_enabled = Number(saved.enabled || 0);
+                    row.partner_version = Number(saved.version || 0);
+                    this.$set(this.partnerConfigs, String(row.id), saved);
+                    this.$Message.success('合作方配置已保存');
+                }).catch((res) => {
+                    this.$Message.error(res.msg || '合作方配置保存失败');
+                }).finally(() => {
+                    row.partnerSaving = false;
+                });
             },
             loadChildrenMethod ({row}){
                 return new Promise((resolve, reject) => {
@@ -316,4 +382,3 @@
     /deep/.ivu-input
         font-size 14px !important
 </style>
-

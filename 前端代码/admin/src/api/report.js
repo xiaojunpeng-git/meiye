@@ -31,6 +31,15 @@ export function reportOrganizationStores(data) {
   return request({ url: 'region/organization/stores', method: 'get', params: data });
 }
 
+/** 门店运营商品分类合作方配置（仅启用分类可保存）。 */
+export function reportOperationCategories() {
+  return request({ url: 'report/operations/categories', method: 'get' });
+}
+
+export function saveReportOperationCategory(data) {
+  return request({ url: 'report/operations/category', method: 'post', data });
+}
+
 export function reportSale(data) {
   return request({
     url: 'report/reportSale',

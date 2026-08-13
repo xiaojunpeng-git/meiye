@@ -1953,6 +1953,9 @@ Route::group('adminapi', function () {
         Route::delete('product/:id', 'v1.product.StoreProduct/delete')->option(['real_name' => '商品放入回收站']);
 		//回收站商品删除
 		Route::delete('product/del/:id', 'v1.product.StoreProduct/delProduct')->option(['real_name' => '回收站商品删除']);
+        //V3预约项目业绩模式与固定手工费
+        Route::get('performance-rule/:id', 'v1.product.CashierV3PerformanceRule/read')->option(['real_name' => '读取项目业绩与固定手工费']);
+        Route::put('performance-rule/:id', 'v1.product.CashierV3PerformanceRule/save')->option(['real_name' => '保存项目业绩与固定手工费']);
         //新建或修改商品
         Route::post('product/:id', 'v1.product.StoreProduct/save')->option(['real_name' => '新建或修改商品']);
         //修改商品状态
