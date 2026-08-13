@@ -76,6 +76,7 @@ final class CashierV3SalesOrderPlanV1
         'price_changed_by_name_snapshot', 'price_changed_at',
         'craftsmen_snapshot_json',
         'guide_selections_json', 'sales_manager_selections_json',
+        'manual_labor_fee_cents',
         'sort_no', 'add_time', 'update_time',
     ];
 
@@ -268,6 +269,7 @@ final class CashierV3SalesOrderPlanV1
                 'coupon_discount_cents' => $line['coupon_discount_cents'],
                 'sale_amount_cents' => $line['sale_amount_cents'],
                 'debt_amount_cents' => $line['debt_amount_cents'],
+                'manual_labor_fee_cents' => $line['manual_labor_fee_cents'],
                 'configured_cost_cents' => $line['configured_cost_cents'],
                 'price_change_reason' => $line['price_change_reason'],
                 'price_changed_by' => $line['price_changed_by'],
@@ -860,6 +862,9 @@ final class CashierV3SalesOrderPlanV1
         $friendCountsAsCustomer = self::nonNegativeInt($row['friend_counts_as_customer'] ?? 1, 'sales_order_friend_counts_as_customer_invalid');
         $isExperience = self::nonNegativeInt($row['is_experience'], 'sales_order_is_experience_invalid');
         $isPresale = self::nonNegativeInt($row['is_presale'] ?? 0, 'sales_order_is_presale_invalid');
+        $manualLaborFeeCents = ($row['manual_labor_fee_cents'] ?? null) === null
+            ? null
+            : self::nonNegativeInt($row['manual_labor_fee_cents'], 'sales_order_manual_labor_fee_invalid');
         $craftsmenJson = $row['craftsmen_snapshot_json'];
         $craftsmen = self::craftsmenSnapshot($craftsmenJson);
         $guideSelections = self::attributionSnapshot($row['guide_selections_json'] ?? null);
@@ -920,6 +925,9 @@ final class CashierV3SalesOrderPlanV1
             'guideSelections' => $guideSelections,
             'salesManagerSelections' => $salesManagerSelections,
         ];
+        if ($manualLaborFeeCents !== null) {
+            $authority['manualLaborFeeCents'] = $manualLaborFeeCents;
+        }
         if ($catalogSkuId <= 0) {
             unset($authority['catalogSkuId']);
         }
@@ -971,6 +979,7 @@ final class CashierV3SalesOrderPlanV1
             'price_changed_by' => $priceChangedBy,
             'price_changed_by_name_snapshot' => $priceChangedByName,
             'price_changed_at' => $priceChangedAt,
+            'manual_labor_fee_cents' => $manualLaborFeeCents,
         ];
     }
 

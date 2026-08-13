@@ -713,7 +713,7 @@ final class CashierV3CheckoutSettlementKernel
                 'priceChangedByNameSnapshot',
                 'priceChangedAt',
                 'craftsmen',
-            ], ['catalogSkuId', 'serviceObject', 'isExperience'], 'saleLines[' . $index . ']');
+            ], ['catalogSkuId', 'serviceObject', 'isExperience', 'guideSelections', 'salesManagerSelections', 'manualLaborFeeCents'], 'saleLines[' . $index . ']');
             if ($line['saleClassification'] !== 'formal_sale') {
                 throw self::failure('sale_line_not_formal', ['index' => $index]);
             }
@@ -783,6 +783,9 @@ final class CashierV3CheckoutSettlementKernel
                 $line['isExperience'] ?? 0,
                 'saleLine.isExperience'
             );
+            $manualLaborFeeCents = array_key_exists('manualLaborFeeCents', $line)
+                ? self::nonNegativeInt($line['manualLaborFeeCents'], 'saleLine.manualLaborFeeCents')
+                : null;
             if ($isExperience > 1) {
                 throw self::failure('sale_line_is_experience_invalid', ['authorityKey' => $authorityKey]);
             }
@@ -849,6 +852,30 @@ final class CashierV3CheckoutSettlementKernel
                 'craftsmen' => $craftsmen,
                 'isExperience' => $isExperience,
             ];
+            if ($manualLaborFeeCents !== null) {
+                $normalized['manualLaborFeeCents'] = $manualLaborFeeCents;
+            }
+            foreach (['guideSelections', 'salesManagerSelections'] as $attributionKey) {
+                if (!array_key_exists($attributionKey, $line)) {
+                    continue;
+                }
+                $rawSelections = $line[$attributionKey];
+                if (!is_array($rawSelections) || !self::isList($rawSelections)) {
+                    throw self::failure('sale_line_attribution_snapshot_invalid', ['authorityKey' => $authorityKey]);
+                }
+                $normalizedSelections = [];
+                foreach ($rawSelections as $selection) {
+                    if (!is_array($selection)) {
+                        throw self::failure('sale_line_attribution_snapshot_invalid', ['authorityKey' => $authorityKey]);
+                    }
+                    $employeeId = self::positiveInt($selection['employeeId'] ?? 0, 'saleLine.attribution.employeeId');
+                    $normalizedSelections[] = [
+                        'employeeId' => $employeeId,
+                        'name' => self::text($selection['name'] ?? '', 128, 'saleLine.attribution.name', true),
+                    ];
+                }
+                $normalized[$attributionKey] = $normalizedSelections;
+            }
             $fingerprintInput = $normalized;
             if ($catalogSkuId <= 0) {
                 unset($fingerprintInput['catalogSkuId']);
@@ -1244,6 +1271,9 @@ final class CashierV3CheckoutSettlementKernel
                 'craftsmenSnapshotJson' => CashierV3CheckoutCraftsmenSnapshot::encode(
                     $line['craftsmen']
                 ),
+                'guideSelectionsJson' => json_encode($line['guideSelections'] ?? [], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                'salesManagerSelectionsJson' => json_encode($line['salesManagerSelections'] ?? [], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                'manualLaborFeeCents' => $line['manualLaborFeeCents'] ?? null,
                 'lineFingerprint' => $line['lineFingerprint'],
                 'sortNo' => ++$sortNo,
             ];
@@ -1298,6 +1328,9 @@ final class CashierV3CheckoutSettlementKernel
                 'priceChangedByNameSnapshot' => '',
                 'priceChangedAt' => 0,
                 'craftsmenSnapshotJson' => '[]',
+                'guideSelectionsJson' => '[]',
+                'salesManagerSelectionsJson' => '[]',
+                'manualLaborFeeCents' => null,
                 'lineFingerprint' => $line['lineFingerprint'],
                 'sortNo' => ++$sortNo,
             ];

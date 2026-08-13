@@ -53,6 +53,28 @@ $workspaceVersion = qaVersion('cashier_workspace', $workspaceId);
 qaDispatch($dispatcher, qaBody('select-cashier-member', ['selectorEntry'=>'cashier','memberId'=>(string)$memberId], $workspaceId, $workspaceVersion, $session, 'CMD-'.qaUuid()), $session);
 $workspaceVersion = qaVersion('cashier_workspace', $workspaceId);
 qaDispatch($dispatcher, qaBody('choose-catalog-item', ['itemId'=>$skuId,'catalogKind'=>'项目'], $workspaceId, $workspaceVersion, $session, 'CMD-'.qaUuid()), $session);
+$manualLaborFee = getenv('QA_MANUAL_LABOR_FEE');
+if ($manualLaborFee !== false && $manualLaborFee !== '') {
+    $draftLine = (array)Db::name('cashier_v3_workspace_line')
+        ->where('workspace_id', $workspaceId)
+        ->order('id', 'desc')
+        ->find();
+    $lineId = (string)($draftLine['line_key'] ?? '');
+    if ($lineId === '') {
+        throw new RuntimeException('qa_manual_labor_line_missing');
+    }
+    $workspaceVersion = qaVersion('cashier_workspace', $workspaceId);
+    qaDispatch($dispatcher, qaBody('update-cart-line-service-settings', [
+        'lineId' => $lineId,
+        'craftsmen' => [['staffId' => $operatorId, 'laborWeight' => 100]],
+        'laborManualFee' => (string)$manualLaborFee,
+    ], $workspaceId, $workspaceVersion, $session, 'CMD-'.qaUuid()), $session);
+    $savedManualFee = Db::name('cashier_v3_workspace_line')
+        ->where('workspace_id', $workspaceId)
+        ->where('line_key', $lineId)
+        ->value('manual_labor_fee_cents');
+    fwrite(STDERR, "QA_MANUAL_LABOR_CENTS=" . (string)$savedManualFee . PHP_EOL);
+}
 $workspaceVersion = qaVersion('cashier_workspace', $workspaceId);
 $prepKey='CHECKOUT_PREPARE-'.qaUuid();
 qaDispatch($dispatcher, qaBody('prepare-checkout', ['preparationRequestId'=>$prepKey], $workspaceId, $workspaceVersion, $session, $prepKey), $session);

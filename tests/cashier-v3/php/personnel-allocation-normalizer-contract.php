@@ -56,4 +56,35 @@ try {
 }
 personnelAllocationAssert($rejected, '手艺人比例合计不是 100% 必须拒绝');
 
+$manual = CashierV3RequestNormalizer::normalize('update-cart-line-service-settings', [
+    'lineId' => 'sale:manual-fee',
+    'laborManualFee' => '12',
+])['normalized'];
+personnelAllocationAssert(
+    ($manual['laborManualFee'] ?? null) === '12',
+    '完整模式本次手工费必须按整数元规范化'
+);
+
+$manualRejected = false;
+try {
+    CashierV3RequestNormalizer::normalize('update-cart-line-service-settings', [
+        'lineId' => 'sale:manual-fee-invalid',
+        'laborManualFee' => '-1',
+    ]);
+} catch (CashierV3CommandException $exception) {
+    $manualRejected = ($exception->getDetail()['reason'] ?? '') === 'labor_manual_fee_invalid';
+}
+personnelAllocationAssert($manualRejected, '负数临时手工费必须拒绝');
+
+$decimalRejected = false;
+try {
+    CashierV3RequestNormalizer::normalize('update-cart-line-service-settings', [
+        'lineId' => 'sale:manual-fee-decimal',
+        'laborManualFee' => '12.34',
+    ]);
+} catch (CashierV3CommandException $exception) {
+    $decimalRejected = ($exception->getDetail()['reason'] ?? '') === 'labor_manual_fee_invalid';
+}
+personnelAllocationAssert($decimalRejected, '小数临时手工费必须拒绝');
+
 echo "PASS personnel-allocation-normalizer-contract\n";

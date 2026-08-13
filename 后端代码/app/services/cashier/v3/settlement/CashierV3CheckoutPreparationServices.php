@@ -119,10 +119,11 @@ final class CashierV3CheckoutPreparationServices
             $memberVersion = $this->shadowVersion('member', $memberId);
             $resources[] = self::resource('member', $memberId, $memberVersion, 'checkout_member');
         }
-        return [
+        $result = [
             'contractVersion' => self::DISCOVERY_CONTRACT_VERSION,
             'resources' => $resources,
         ];
+        return $result;
     }
 
     /**
@@ -231,7 +232,7 @@ final class CashierV3CheckoutPreparationServices
             $dataScope
         );
 
-        return [
+        $result = [
             'contractVersion' => self::PREPARATION_CONTRACT_VERSION,
             'preparationRequestId' => $idempotencyKey,
             'checkoutRequestId' => (string)$kernel['requestId'],
@@ -246,6 +247,7 @@ final class CashierV3CheckoutPreparationServices
             'businessEffects' => (array)$kernel['businessEffects'],
             'cardOperationCheckout' => $cardOperationBinding,
         ];
+        return $result;
     }
 
     private function authoritySnapshot(
@@ -395,7 +397,7 @@ final class CashierV3CheckoutPreparationServices
         } catch (\Throwable $exception) {
             throw self::incomplete('checkout_sale_craftsmen_snapshot_invalid');
         }
-        return [
+        $result = [
             'authorityKey' => 'sale:' . (string)($line['lineId'] ?? ''),
             'saleClassification' => 'formal_sale',
             'sourceType' => $sourceType,
@@ -421,8 +423,23 @@ final class CashierV3CheckoutPreparationServices
             'categoryNameSnapshot' => (string)($line['categoryNameSnapshot'] ?? ''),
             'serviceObject' => (string)($line['serviceObject'] ?? ''),
             'craftsmen' => $craftsmen,
+            'guideSelections' => is_array($line['guideSelections'] ?? null)
+                ? array_values($line['guideSelections'])
+                : [],
+            'salesManagerSelections' => is_array($line['salesManagerSelections'] ?? null)
+                ? array_values($line['salesManagerSelections'])
+                : [],
             'isExperience' => !empty($line['isExperience']) ? 1 : 0,
         ];
+        $manualLaborFeeCents = array_key_exists('laborManualFeeCents', $line)
+            ? ($line['laborManualFeeCents'] === null ? null : (int)$line['laborManualFeeCents'])
+            : (array_key_exists('manualLaborFeeCents', $line) && $line['manualLaborFeeCents'] !== null
+                ? (int)$line['manualLaborFeeCents']
+                : null);
+        if ($manualLaborFeeCents !== null) {
+            $result['manualLaborFeeCents'] = $manualLaborFeeCents;
+        }
+        return $result;
     }
 
     private function saleDebtAmountCents(array $saleLines): int

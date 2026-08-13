@@ -2303,6 +2303,11 @@ async function loadPersonnelOverlay(line, initialTab) {
     showSalespeople,
     showGuides: showSalespeople,
     showSalesManagers: showSalespeople,
+    allowLaborOverride: showCraftsmen,
+    laborDefaultFee: Number(line.laborDefaultFee ?? line.laborConfiguredUnitAmount ?? 0),
+    laborManualFee: line.laborManualFee === null || line.laborManualFee === undefined
+      ? null
+      : Number(line.laborManualFee),
     requireCraftsmen: showCraftsmen,
     craftsmenCandidates: [],
     salespersonCandidates: [],
@@ -2559,6 +2564,9 @@ async function confirmPersonnelAssignment(result = {}) {
     if (!isEntitlementLine(line)) {
       payload.guideSelections = guideSelections
       payload.salesManagerSelections = salesManagerSelections
+    }
+    if (Object.prototype.hasOwnProperty.call(result, 'laborManualFee')) {
+      payload.laborManualFee = Number(result.laborManualFee)
     }
     let savedResult = await mutateCashierDraft('update-cart-line-service-settings', line, payload)
     if (resultStatus(savedResult) === 'result_unknown') {
@@ -4812,6 +4820,9 @@ onBeforeUnmount(() => {
         :selected-salespeople="personnelOverlay.selectedSalespeople"
         :selected-guides="personnelOverlay.selectedGuides"
         :selected-sales-managers="personnelOverlay.selectedSalesManagers"
+        :labor-default-fee="personnelOverlay.laborDefaultFee"
+        :labor-manual-fee="personnelOverlay.laborManualFee"
+        :allow-labor-override="personnelOverlay.allowLaborOverride"
         :loading="personnelOverlay.loading"
         :saving="isSavingPersonnelAssignment"
         :load-error="personnelOverlay.loadError"

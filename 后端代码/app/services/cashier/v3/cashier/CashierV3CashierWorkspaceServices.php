@@ -345,11 +345,12 @@ final class CashierV3CashierWorkspaceServices
         $hasGuides = array_key_exists('guideSelections', $settings);
         $hasSalesManagers = array_key_exists('salesManagerSelections', $settings);
         $hasExperience = array_key_exists('isExperience', $settings);
+        $hasLaborManualFee = array_key_exists('laborManualFee', $settings);
         if ($this->isCardOperationUpgradeSaleRow((array)$line)
-            && (!$hasSalespeople || $hasGuides || $hasSalesManagers || $hasServiceObject || $hasCraftsmen || $hasExperience)) {
+            && (!$hasSalespeople || $hasGuides || $hasSalesManagers || $hasServiceObject || $hasCraftsmen || $hasExperience || $hasLaborManualFee)) {
             throw $this->cardOperationUpgradeCartLocked();
         }
-        if (!$hasServiceObject && !$hasCraftsmen && !$hasSalespeople && !$hasGuides && !$hasSalesManagers && !$hasExperience) {
+        if (!$hasServiceObject && !$hasCraftsmen && !$hasSalespeople && !$hasGuides && !$hasSalesManagers && !$hasExperience && !$hasLaborManualFee) {
             throw new CashierV3CommandException(
                 CashierV3ResultCode::ENTITLEMENT_LINE_INVALID,
                 '购物车服务设置无效，请重新选择。',
@@ -370,7 +371,7 @@ final class CashierV3CashierWorkspaceServices
 
         // 销售人属于销售明细，不依赖项目服务设置；产品和卡项同样可以分配销售业绩。
         if ($isSale && !$isSaleProject) {
-            if ($hasServiceObject || $hasCraftsmen || $hasExperience) {
+            if ($hasServiceObject || $hasCraftsmen || $hasExperience || $hasLaborManualFee) {
                 throw new CashierV3CommandException(
                     CashierV3ResultCode::ENTITLEMENT_LINE_INVALID,
                     '该商品只支持设置销售人。',
@@ -490,6 +491,12 @@ final class CashierV3CashierWorkspaceServices
             }
             $salesManagers = $this->authoritativeSalesManagerSelectionsInTx($settings['salesManagerSelections'], $operatorScope);
         }
+        $manualLaborFeeCents = $line['manual_labor_fee_cents'] === null
+            ? null
+            : $this->storedNonnegativeInteger($line['manual_labor_fee_cents'], $lineKey, 'manual_labor_fee_cents');
+        if ($hasLaborManualFee) {
+            $manualLaborFeeCents = $this->manualLaborFeeCents($settings['laborManualFee'], $lineKey);
+        }
 
         // 权益仅持久化服务设置与手艺人；普通项目仍可同事务持久化销售人快照。
         $affected = Db::name(self::LINE_TABLE)
@@ -502,6 +509,7 @@ final class CashierV3CashierWorkspaceServices
                 'salespeople_json' => $this->encodeJson($salespeople),
                 'guide_selections_json' => $this->encodeJson($guides),
                 'sales_manager_selections_json' => $this->encodeJson($salesManagers),
+                'manual_labor_fee_cents' => $manualLaborFeeCents,
                 'is_experience' => $isExperience,
                 'update_time' => time(),
             ]);
@@ -1025,6 +1033,13 @@ final class CashierV3CashierWorkspaceServices
             $lineKey = (string)($row['line_key'] ?? '');
             $source['guideSelections'] = $this->decodeStoredGuideSelections($row, $lineKey);
             $source['salesManagerSelections'] = $this->decodeStoredSalesManagerSelections($row, $lineKey);
+            if (($row['manual_labor_fee_cents'] ?? null) !== null) {
+                $source['laborManualFeeCents'] = $this->storedNonnegativeInteger(
+                    $row['manual_labor_fee_cents'],
+                    $lineKey,
+                    'manual_labor_fee_cents'
+                );
+            }
             $sources[] = $source;
         }
         return [
@@ -1375,6 +1390,9 @@ final class CashierV3CashierWorkspaceServices
                     []
                 ),
                 'craftsmen' => $craftsmen,
+                'laborManualFeeCents' => $workspaceLine['manual_labor_fee_cents'] === null
+                    ? null
+                    : $this->storedNonnegativeInteger($workspaceLine['manual_labor_fee_cents'], $lineKey, 'manual_labor_fee_cents'),
                 'displaySnapshot' => $this->decodeStoredDisplaySnapshot($workspaceLine, $lineKey),
             ];
         }
@@ -2173,6 +2191,7 @@ final class CashierV3CashierWorkspaceServices
             'salespeople_json' => $this->encodeJson([]),
             'guide_selections_json' => $this->encodeJson([]),
             'sales_manager_selections_json' => $this->encodeJson([]),
+            'manual_labor_fee_cents' => null,
             // These customer/report dimensions are part of the locked line
             // authority.  Persist the defaults explicitly so the workspace
             // fingerprint and the final sales-order plan use the same shape.
@@ -2231,6 +2250,7 @@ final class CashierV3CashierWorkspaceServices
             'display_snapshot_json' => $displayJson,
             'craftsmen_json' => $craftsmenJson,
             'salespeople_json' => $salespeopleJson,
+            'manual_labor_fee_cents' => isset($line['manual_labor_fee_cents']) ? (int)$line['manual_labor_fee_cents'] : null,
         ];
         $authority = $this->decodeStoredAuthoritySnapshot($probe, $lineKey);
         $display = $this->decodeStoredDisplaySnapshot($probe, $lineKey);
@@ -2278,6 +2298,7 @@ final class CashierV3CashierWorkspaceServices
             'service_object' => (string)($line['service_object'] ?? ''),
             'craftsmen_json' => $craftsmenJson,
             'salespeople_json' => $salespeopleJson,
+            'manual_labor_fee_cents' => isset($line['manual_labor_fee_cents']) ? (int)$line['manual_labor_fee_cents'] : null,
             'is_experience' => (int)($line['is_experience'] ?? 0),
             'display_snapshot_json' => $displayJson,
             'sort_no' => $sortNo,
@@ -2343,6 +2364,7 @@ final class CashierV3CashierWorkspaceServices
             'service_object' => (string)($line['service_object'] ?? ''),
             'craftsmen_json' => $craftsmenJson,
             'salespeople_json' => $salespeopleJson,
+            'manual_labor_fee_cents' => isset($line['manual_labor_fee_cents']) ? (int)$line['manual_labor_fee_cents'] : null,
             'is_experience' => (int)($line['is_experience'] ?? 0),
             'display_snapshot_json' => $displayJson,
             'sort_no' => $sortNo,
@@ -2453,6 +2475,10 @@ final class CashierV3CashierWorkspaceServices
                 : [];
             $guides = $this->decodeStoredGuideSelections($row, $lineKey);
             $salesManagers = $this->decodeStoredSalesManagerSelections($row, $lineKey);
+            $manualLaborFeeCents = $row['manual_labor_fee_cents'] === null
+                ? null
+                : $this->storedNonnegativeInteger($row['manual_labor_fee_cents'], $lineKey, 'manual_labor_fee_cents');
+            $laborDefaultFeeCents = $this->projectLaborDefaultCents((int)($row['project_id'] ?? 0));
             // 损坏的手艺人快照不能被静默显示为“待分配”。
             $this->craftsmanIdsFromSnapshot($craftsmen, $lineKey);
             $storedServiceObject = (string)($row['service_object'] ?? '');
@@ -2479,6 +2505,8 @@ final class CashierV3CashierWorkspaceServices
                 'isExperience' => $experienceFlag === 1,
                 'guideSelections' => $guides,
                 'salesManagerSelections' => $salesManagers,
+                'laborDefaultFee' => $this->centsToMoney($laborDefaultFeeCents),
+                'laborManualFee' => $manualLaborFeeCents === null ? null : $this->centsToMoney($manualLaborFeeCents),
             ]);
             if ($lineRole === self::ROLE_SALE) {
                 $line['salespeople'] = $salespeople;
@@ -2848,6 +2876,9 @@ final class CashierV3CashierWorkspaceServices
                 'display_snapshot_json' => (string)($row['display_snapshot_json'] ?? ''),
                 'sort_no' => (int)($row['sort_no'] ?? 0),
             ];
+            if ($row['manual_labor_fee_cents'] !== null) {
+                $item['manual_labor_fee_cents'] = (int)$row['manual_labor_fee_cents'];
+            }
             if ((string)($row['line_role'] ?? '') === self::ROLE_SALE) {
                 $item['catalog_product_id'] = (int)($row['catalog_product_id'] ?? 0);
                 $item['catalog_sku_id'] = (int)($row['catalog_sku_id'] ?? 0);
@@ -3045,6 +3076,31 @@ final class CashierV3CashierWorkspaceServices
     private function centsToMoney(int $cents): string
     {
         return bcdiv((string)$cents, '100', 2);
+    }
+
+    private function projectLaborDefaultCents(int $projectId): int
+    {
+        if ($projectId <= 0) return 0;
+        return (int)(Db::name('cashier_v3_project_performance_rule')
+            ->where('project_id', $projectId)
+            ->order('id', 'desc')
+            ->value('labor_configured_unit_amount_cents') ?: 0);
+    }
+
+    private function manualLaborFeeCents($value, string $lineKey): ?int
+    {
+        if ($value === null || (is_string($value) && trim($value) === '')) {
+            return null;
+        }
+        $raw = is_numeric($value) ? (string)$value : trim((string)$value);
+        if (preg_match('/^(?:0|[1-9][0-9]*)$/D', $raw) !== 1) {
+            throw $this->incompleteLineSettings($lineKey, 'manual_labor_fee_invalid');
+        }
+        $cents = (int)$raw * 100;
+        if ($cents < 0 || $cents > 100000000000) {
+            throw $this->incompleteLineSettings($lineKey, 'manual_labor_fee_out_of_range');
+        }
+        return $cents;
     }
 
     private function storedNonnegativeInteger($value, string $lineKey, string $field): int

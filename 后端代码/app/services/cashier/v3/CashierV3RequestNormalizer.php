@@ -541,11 +541,17 @@ class CashierV3RequestNormalizer
         $craftsmanKeys = ['craftsmen', 'craftsmanIds', 'craftsman_ids'];
         $salespeopleKeys = ['salespeople', 'salesPeople', 'sales_people'];
         $experienceKeys = ['isExperience', 'is_experience'];
+        $guideKeys = ['guideSelections', 'guide_selections'];
+        $managerKeys = ['salesManagerSelections', 'sales_manager_selections'];
+        $laborKeys = ['laborManualFee', 'labor_manual_fee'];
         $hasServiceObject = CashierV3AliasResolver::hasAnyKey($payload, $serviceKeys);
         $hasCraftsmen = CashierV3AliasResolver::hasAnyKey($payload, $craftsmanKeys);
         $hasSalespeople = CashierV3AliasResolver::hasAnyKey($payload, $salespeopleKeys);
         $hasExperience = CashierV3AliasResolver::hasAnyKey($payload, $experienceKeys);
-        if (!$hasServiceObject && !$hasCraftsmen && !$hasSalespeople && !$hasExperience) {
+        $hasGuides = CashierV3AliasResolver::hasAnyKey($payload, $guideKeys);
+        $hasManagers = CashierV3AliasResolver::hasAnyKey($payload, $managerKeys);
+        $hasLabor = CashierV3AliasResolver::hasAnyKey($payload, $laborKeys);
+        if (!$hasServiceObject && !$hasCraftsmen && !$hasSalespeople && !$hasExperience && !$hasGuides && !$hasManagers && !$hasLabor) {
             throw self::invalidCartLineSetting('settings', 'service_settings_missing');
         }
 
@@ -573,6 +579,37 @@ class CashierV3RequestNormalizer
         if ($hasExperience) {
             $normalizedExperience = self::resolveBooleanAliases($payload, $experienceKeys);
         }
+        if ($hasGuides) {
+            $rawGuides = $payload['guideSelections'] ?? $payload['guide_selections'] ?? null;
+            if (!is_array($rawGuides)) throw self::invalidCartLineSetting('guideSelections', 'guide_selection_invalid');
+            $normalizedGuides = [];
+            foreach ($rawGuides as $guide) {
+                if (!is_array($guide)) throw self::invalidCartLineSetting('guideSelections', 'guide_selection_invalid');
+                $id = (int)($guide['employeeId'] ?? $guide['employee_id'] ?? $guide['id'] ?? 0);
+                if ($id <= 0) throw self::invalidCartLineSetting('guideSelections', 'guide_selection_invalid');
+                $normalizedGuides[] = ['employeeId' => $id];
+            }
+        }
+        if ($hasManagers) {
+            $rawManagers = $payload['salesManagerSelections'] ?? $payload['sales_manager_selections'] ?? null;
+            if (!is_array($rawManagers)) throw self::invalidCartLineSetting('salesManagerSelections', 'sales_manager_selection_invalid');
+            $normalizedManagers = [];
+            foreach ($rawManagers as $manager) {
+                if (!is_array($manager)) throw self::invalidCartLineSetting('salesManagerSelections', 'sales_manager_selection_invalid');
+                $id = (int)($manager['employeeId'] ?? $manager['employee_id'] ?? $manager['id'] ?? 0);
+                if ($id <= 0) throw self::invalidCartLineSetting('salesManagerSelections', 'sales_manager_selection_invalid');
+                $normalizedManagers[] = ['employeeId' => $id];
+            }
+        }
+        $normalizedLabor = null;
+        if ($hasLabor) {
+            $rawLabor = CashierV3AliasResolver::resolveString($payload, $laborKeys, false);
+            $rawLabor = trim($rawLabor);
+            if ($rawLabor !== '' && preg_match('/^(?:0|[1-9][0-9]*)$/D', $rawLabor) !== 1) {
+                throw self::invalidCartLineSetting('laborManualFee', 'labor_manual_fee_invalid');
+            }
+            $normalizedLabor = $rawLabor === '' ? null : $rawLabor;
+        }
 
         unset(
             $payload['line_id'],
@@ -584,6 +621,9 @@ class CashierV3RequestNormalizer
             $payload['salesPeople'],
             $payload['sales_people'],
             $payload['is_experience']
+            ,$payload['guide_selections']
+            ,$payload['sales_manager_selections']
+            ,$payload['labor_manual_fee']
         );
         $payload['lineId'] = $lineId;
 
@@ -598,6 +638,15 @@ class CashierV3RequestNormalizer
         }
         if ($hasExperience) {
             $payload['isExperience'] = $normalizedExperience;
+        }
+        if ($hasGuides) {
+            $payload['guideSelections'] = $normalizedGuides;
+        }
+        if ($hasManagers) {
+            $payload['salesManagerSelections'] = $normalizedManagers;
+        }
+        if ($hasLabor) {
+            $payload['laborManualFee'] = $normalizedLabor;
         }
         return $payload;
     }

@@ -101,5 +101,11 @@ assert.match(cashierModule, /'apply-cashier-craftsmen-to-all-service-lines'/, '�
 assert.match(cashierModule, /registerCommand\('apply-cashier-personnel-to-all-lines'[\s\S]*applyCraftsmenToAllServiceLinesInTx[\s\S]*applySalespeopleToAllSaleLinesInTx/, '后端统一命令必须在同一事务中依次应用手艺人和销售人')
 assert.match(workspace, /\$salespeople = \$lineRole === self::ROLE_SALE[\s\S]*: \[\];/, '权益草稿投影不得加载或展示销售人快照')
 assert.match(workspace, /if \(\$isSale && !\$isSaleProject\) \{[\s\S]*\$hasSalespeople/, '产品和普通卡项仍只允许销售人')
+assert.match(component, /本次手工费/, '完整模式必须提供本次临时手工费输入')
+assert.match(component, /laborDefaultFee/, '临时手工费必须接收项目默认手工费')
+assert.match(component, /laborFeeDirty\.value/, '只有显式修改临时手工费才提交覆盖值')
+assert.match(workbench, /laborManualFee: line\.laborManualFee/, '工作台必须回读本次手工费快照')
+assert.match(workbench, /payload\.laborManualFee = Number\(result\.laborManualFee\)/, '工作台必须把临时手工费写入权威草稿')
+assert.match(workspace, /manual_labor_fee_cents/, '后端工作台必须持久化临时手工费快照')
 
 console.log('PASS personnel-performance-overlay-contract')

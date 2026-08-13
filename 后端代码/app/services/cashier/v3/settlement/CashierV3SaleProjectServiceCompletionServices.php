@@ -113,6 +113,11 @@ final class CashierV3SaleProjectServiceCompletionServices
                 'quantity' => (int)$line['quantity'],
                 'service_object' => (string)$line['service_object'],
                 'is_experience' => (int)$line['is_experience'],
+                'labor_amount_cents' => max(0, (int)($line['manual_labor_fee_cents'] ?? 0))
+                    * max(1, (int)$line['quantity']),
+                'labor_mode' => ((int)($line['manual_labor_fee_cents'] ?? 0)) > 0
+                    ? 'checkout_manual_override'
+                    : 'project_rule',
                 // A paid project is immediately completed service. Preserve the
                 // locked checkout line's personnel snapshot, not a later staff
                 // lookup, so the service record stays historically traceable.
@@ -155,6 +160,8 @@ final class CashierV3SaleProjectServiceCompletionServices
                 'quantity' => $row['quantity'],
                 'serviceObject' => $row['service_object'],
                 'isExperience' => (bool)$row['is_experience'],
+                'laborAmountCents' => (int)$row['labor_amount_cents'],
+                'laborMode' => (string)$row['labor_mode'],
             ];
         }
         if ($services) {

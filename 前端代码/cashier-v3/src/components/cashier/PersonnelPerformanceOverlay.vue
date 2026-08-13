@@ -16,6 +16,9 @@ const props = defineProps({
   selectedSalespeople: { type: Array, default: () => [] },
   selectedGuides: { type: Array, default: () => [] },
   selectedSalesManagers: { type: Array, default: () => [] },
+  laborDefaultFee: { type: [Number, String], default: 0 },
+  laborManualFee: { type: [Number, String], default: null },
+  allowLaborOverride: { type: Boolean, default: false },
   loading: { type: Boolean, default: false },
   saving: { type: Boolean, default: false },
   loadError: { type: String, default: '' }
@@ -30,7 +33,21 @@ const craftsmen = ref([])
 const salespeople = ref([])
 const guides = ref([])
 const salesManagers = ref([])
+const laborManualFee = ref(props.laborManualFee === null || props.laborManualFee === undefined
+  ? Number(props.laborDefaultFee || 0)
+  : Number(props.laborManualFee))
+const laborFeeDirty = ref(false)
 const validationMessage = ref('')
+
+watch(
+  () => [props.laborManualFee, props.laborDefaultFee], ([manual, fallback]) => {
+    if (laborFeeDirty.value) return
+    laborManualFee.value = manual === null || manual === undefined
+      ? Number(fallback || 0)
+      : Number(manual)
+  },
+  { immediate: true }
+)
 
 function recordId(record = {}) {
   return String(record.staffId || record.id || record.systemStoreStaffId || '')
@@ -271,6 +288,9 @@ function confirm() {
   }
   assignment.guideSelections = selectedAttributionPayload(selectedGuides)
   assignment.salesManagerSelections = selectedAttributionPayload(selectedSalesManagers)
+  if (props.allowLaborOverride && mode.value === 'full' && laborFeeDirty.value) {
+    assignment.laborManualFee = Number(laborManualFee.value)
+  }
   emit('confirm', assignment)
 }
 
@@ -352,6 +372,22 @@ function searchGroupPersonnel(scope) {
         <div class="personnel-full-summary">
           <button type="button" class="button button--primary" @click="mode = 'simple'">添加人员</button>
           <strong>已选择 {{ selectedRecords.length }} 人<span v-if="!activeIsNonPerformance">，分配合计 {{ activeTotal }}%</span><span v-else>（仅记录归属，不分配比例）</span></strong>
+        </div>
+        <div v-if="allowLaborOverride" class="personnel-labor-override">
+          <label>
+            <span>本次手工费</span>
+            <input
+              v-model.number="laborManualFee"
+              type="number"
+              min="0"
+              step="1"
+              inputmode="decimal"
+              aria-label="本次手工费"
+              @input="laborFeeDirty = true"
+            >
+            <b>元</b>
+          </label>
+          <small>默认带入项目固定手工费；仅本次结账生效，不修改项目默认配置。</small>
         </div>
         <div class="personnel-full-table" role="table" aria-label="完整人员分配">
           <div role="row" class="personnel-full-table__head"><span>员工</span><span>职位</span><span>职级</span><span v-if="!activeIsNonPerformance">{{ activeTab === 'craftsmen' ? '是否点客' : '是否售前' }}</span><span v-if="!activeIsNonPerformance">分配比例</span><span>操作</span></div>

@@ -483,6 +483,18 @@ final class CashierV3EntitlementCompletionAuthorityAdapter
                 $performanceVersion,
                 $dataScope
             );
+            // A complete-mode labor fee is a checkout-scoped override.  It is
+            // already locked by the workspace aggregate; project configuration
+            // remains the default and is never mutated by this branch.
+            $manualLaborFeeCents = $intent['laborManualFeeCents'] ?? null;
+            if ($manualLaborFeeCents !== null) {
+                $manualLaborFeeCents = (int)$manualLaborFeeCents;
+                if ($manualLaborFeeCents < 0) {
+                    throw self::failure('authority_manual_labor_fee_invalid', ['lineId' => $lineId]);
+                }
+                $performance['laborMode'] = CashierV3EntitlementCompletionKernel::PERFORMANCE_CONFIGURED;
+                $performance['laborConfiguredUnitAmountCents'] = $manualLaborFeeCents;
+            }
             $craftsmen = [];
             foreach ($intent['craftsmanIds'] as $sequence => $staffId) {
                 $profile = $staffById[$staffId];

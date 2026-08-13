@@ -3,6 +3,8 @@
 namespace app\services\cashier\v3\fact;
 
 use app\services\cashier\v3\order\settlement\CashierV3SalesOrderPlanV1;
+use app\services\cashier\v3\checkout\CashierV3EntitlementCompletionKernel;
+use app\services\cashier\v3\settlement\CashierV3CheckoutCraftsmenSnapshot;
 use app\services\cashier\v3\settlement\CashierV3CheckoutVerifiedSourceSet;
 use app\services\cashier\v3\settlement\payment\CashierV3PaymentCollectionPlanV1;
 use app\services\cashier\v3\settlement\CashierV3CheckoutDebtAuthorityServices;
@@ -57,6 +59,7 @@ final class CashierV3SaleOnlyFactAssembler
         'price_changed_by_name_snapshot', 'price_changed_at',
         'craftsmen_snapshot_json',
         'guide_selections_json', 'sales_manager_selections_json',
+        'manual_labor_fee_cents',
         'sort_no', 'add_time', 'update_time',
     ];
 
@@ -224,18 +227,16 @@ final class CashierV3SaleOnlyFactAssembler
         foreach ($orderLines as $orderLine) {
             $checkoutLineId = (string)$orderLine['checkout_line_id'];
             $salespeople = array_values((array)($salespeopleByCheckoutLine[$checkoutLineId] ?? []));
-            if (!$salespeople) {
-                continue;
-            }
-            $weightTotal = array_sum(array_map(static function (array $person): int {
+            if ($salespeople) {
+              $weightTotal = array_sum(array_map(static function (array $person): int {
                 return (int)($person['allocationWeight'] ?? 0);
-            }, $salespeople));
-            if ($weightTotal !== 100) {
+              }, $salespeople));
+              if ($weightTotal !== 100) {
                 throw self::failure('sale_only_fact_salesperson_weight_total_invalid');
-            }
-            $lineCash = (int)($cashByOrderLine[(string)$orderLine['order_line_id']] ?? 0);
-            $employeeAmounts = self::allocateByWeights($lineCash, $salespeople);
-            foreach ($salespeople as $index => $person) {
+              }
+              $lineCash = (int)($cashByOrderLine[(string)$orderLine['order_line_id']] ?? 0);
+              $employeeAmounts = self::allocateByWeights($lineCash, $salespeople);
+              foreach ($salespeople as $index => $person) {
                 $employeeId = (int)($person['employeeId'] ?? 0);
                 $employeeType = (string)($person['employeeTypeCodeSnapshot'] ?? '');
                 $employeeTypeVersion = (int)($person['employeeTypeAuthorityVersion'] ?? 0);
@@ -282,6 +283,78 @@ final class CashierV3SaleOnlyFactAssembler
                     'ruleNameSnapshot' => '按本次实收现金和销售分配比例计算',
                     'ruleVersionSnapshot' => 'v1',
                 ];
+              }
+            }
+
+            // A complete-mode temporary labor fee is a checkout-scoped
+            // snapshot.  For paid project lines it becomes labor performance
+            // facts in the same immutable checkout fact plan; it never changes
+            // the project's configured default rule.
+            $manualLaborFeeCents = (int)($orderLine['manual_labor_fee_cents'] ?? 0);
+            if ($manualLaborFeeCents > 0 && (string)$orderLine['item_type'] === 'project') {
+                try {
+                    $craftsmen = CashierV3CheckoutCraftsmenSnapshot::decode(
+                        (string)$orderLine['craftsmen_snapshot_json']
+                    );
+                } catch (\InvalidArgumentException $exception) {
+                    throw self::failure('sale_only_fact_manual_labor_craftsmen_snapshot_invalid');
+                }
+                if (!$craftsmen) {
+                    throw self::failure('sale_only_fact_manual_labor_craftsman_required');
+                }
+                $staffIds = [];
+                $weights = [];
+                foreach ($craftsmen as $craftsman) {
+                    $staffId = (int)($craftsman['staffId'] ?? 0);
+                    $weight = (int)($craftsman['laborWeight'] ?? 0);
+                    if ($staffId <= 0 || $weight <= 0) {
+                        throw self::failure('sale_only_fact_manual_labor_craftsman_snapshot_invalid');
+                    }
+                    $staffIds[] = $staffId;
+                    $weights[$staffId] = $weight;
+                }
+                $totalLabor = $manualLaborFeeCents * (int)$orderLine['quantity'];
+                $allocations = CashierV3EntitlementCompletionKernel::allocateLaborAmount(
+                    $totalLabor,
+                    $staffIds,
+                    $weights
+                );
+                foreach ($allocations as $allocation) {
+                    $staffId = (int)$allocation['staffId'];
+                    $craftsman = null;
+                    foreach ($craftsmen as $candidate) {
+                        if ((int)($candidate['staffId'] ?? 0) === $staffId) {
+                            $craftsman = $candidate;
+                            break;
+                        }
+                    }
+                    if (!is_array($craftsman)) {
+                        throw self::failure('sale_only_fact_manual_labor_craftsman_missing');
+                    }
+                    $naturalKey = 'sale-project-labor:' . (string)$order['order_id'] . ':'
+                        . (string)$orderLine['order_line_id'] . ':' . $staffId;
+                    $performanceFacts[] = [
+                        'factId' => 'ELP-' . substr(hash('sha256', $naturalKey), 0, 40),
+                        'naturalKey' => $naturalKey,
+                        'factVersion' => 1,
+                        'reversalOf' => '',
+                        'status' => CashierV3CheckoutFactPlanV1::STATUS_EFFECTIVE,
+                        'sourceLineId' => (string)$orderLine['order_line_id'],
+                        'performanceType' => CashierV3CheckoutFactPlanV1::LABOR_PERFORMANCE,
+                        'employeeId' => max(1, (int)($craftsman['employeeId'] ?? $staffId)),
+                        'employeeNameSnapshot' => (string)($craftsman['name'] ?? ''),
+                        'employeeTypeSnapshot' => 'internal',
+                        'employeeTypeAuthorityVersion' => 1,
+                        'roleSnapshot' => !empty($craftsman['isPrimary']) ? 'primary_craftsman' : 'craftsman',
+                        'allocationWeightNumerator' => (int)($craftsman['laborWeight'] ?? 0),
+                        'allocationWeightDenominator' => array_sum($weights),
+                        'allocationBaseAmountCents' => $totalLabor,
+                        'amountCents' => (int)$allocation['amountCents'],
+                        'ruleCodeSnapshot' => 'SALE-PROJECT-MANUAL-LABOR-V1',
+                        'ruleNameSnapshot' => '本次结账临时手工费',
+                        'ruleVersionSnapshot' => 'checkout-manual-labor-v1',
+                    ];
+                }
             }
         }
         $actualPerformanceAmount = $cashPerformanceAmount - $externalSalesAmount;
@@ -605,6 +678,7 @@ final class CashierV3SaleOnlyFactAssembler
                 || (string)$line['item_code_snapshot'] !== (string)$planned['item_code_snapshot']
                 || (string)$line['category_id_snapshot'] !== (string)$planned['category_id_snapshot']
                 || (string)$line['category_name_snapshot'] !== (string)$planned['category_name_snapshot']
+                || (int)($line['manual_labor_fee_cents'] ?? 0) !== (int)($planned['manual_labor_fee_cents'] ?? 0)
                 || (string)$line['line_status'] !== 'settled'
                 || (string)$line['line_direction'] !== 'forward'
                 || (int)$line['line_version'] !== 1

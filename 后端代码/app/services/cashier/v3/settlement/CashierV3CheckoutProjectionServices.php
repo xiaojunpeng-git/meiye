@@ -621,6 +621,9 @@ final class CashierV3CheckoutProjectionServices
                     $row['is_experience'] ?? null,
                     'line.is_experience'
                 );
+                $manualLaborFeeCents = ($row['manual_labor_fee_cents'] ?? null) === null
+                    ? null
+                    : self::nonNegativeInt($row['manual_labor_fee_cents'], 'line.manual_labor_fee_cents');
                 $craftsmenJson = $row['craftsmen_snapshot_json'] ?? null;
                 $craftsmen = self::craftsmenSnapshot($craftsmenJson);
                 $guideSelections = self::attributionSnapshot($row['guide_selections_json'] ?? null);
@@ -662,6 +665,9 @@ final class CashierV3CheckoutProjectionServices
                     'guideSelections' => $guideSelections,
                     'salesManagerSelections' => $salesManagerSelections,
                 ];
+                if ($manualLaborFeeCents !== null) {
+                    $fingerprintInput['manualLaborFeeCents'] = $manualLaborFeeCents;
+                }
                 // Existing drafts predate this column and their fingerprint did
                 // not contain craftsmen. Preserve that immutable contract until
                 // a user action rewrites the draft with an explicit [] value.
@@ -716,6 +722,7 @@ final class CashierV3CheckoutProjectionServices
                     'craftsmen' => $craftsmen,
                     'guideSelections' => $guideSelections,
                     'salesManagerSelections' => $salesManagerSelections,
+                    'laborManualFeeCents' => $manualLaborFeeCents,
                     'isExperience' => $isExperience === 1,
                 ];
                 continue;

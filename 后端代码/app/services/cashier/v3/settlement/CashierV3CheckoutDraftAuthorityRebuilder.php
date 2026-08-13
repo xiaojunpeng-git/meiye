@@ -112,7 +112,15 @@ final class CashierV3CheckoutDraftAuthorityRebuilder
                     'craftsmen' => self::craftsmenSnapshot(
                         $row['craftsmen_snapshot_json'] ?? null
                     ),
+                    'guideSelections' => self::attributionSnapshot($row['guide_selections_json'] ?? null),
+                    'salesManagerSelections' => self::attributionSnapshot($row['sales_manager_selections_json'] ?? null),
                 ];
+                if (($row['manual_labor_fee_cents'] ?? null) !== null) {
+                    $saleLine['manualLaborFeeCents'] = self::nonNegativeInt(
+                        $row['manual_labor_fee_cents'],
+                        'sale.manual_labor_fee_cents'
+                    );
+                }
                 $catalogSkuId = self::nonNegativeInt(
                     $row['catalog_sku_id'] ?? 0,
                     'sale.catalog_sku_id'
@@ -265,6 +273,21 @@ final class CashierV3CheckoutDraftAuthorityRebuilder
         $snapshot['authoritySnapshotFingerprint'] =
             CashierV3CheckoutSettlementKernel::authorityFingerprint($snapshot);
         return $snapshot;
+    }
+
+    private static function attributionSnapshot($raw): array
+    {
+        if ($raw === null || trim((string)$raw) === '') return [];
+        $decoded = is_array($raw) ? $raw : json_decode((string)$raw, true);
+        if (!is_array($decoded)) throw self::failure('checkout_draft_attribution_snapshot_invalid');
+        $result = [];
+        foreach ($decoded as $row) {
+            if (!is_array($row)) throw self::failure('checkout_draft_attribution_snapshot_invalid');
+            $id = (int)($row['employeeId'] ?? $row['employee_id'] ?? $row['id'] ?? 0);
+            if ($id <= 0) throw self::failure('checkout_draft_attribution_snapshot_invalid');
+            $result[] = ['employeeId' => $id];
+        }
+        return $result;
     }
 
     private static function assertAggregateShape(array $aggregate): void
