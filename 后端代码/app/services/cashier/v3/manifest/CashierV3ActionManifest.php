@@ -175,6 +175,8 @@ class CashierV3ActionManifest
             'apply-cashier-craftsmen-to-all-service-lines' => $eventless($workspaceDraft),
             'apply-cashier-personnel-to-all-lines' => $eventless($workspaceDraft),
             'update-cashier-line-debt' => $eventless($workspaceDraft),
+            'apply-line-coupon' => $eventless($workspaceDraft),
+            'remove-line-coupon' => $eventless($workspaceDraft),
             'remove-cart-line' => $eventless($workspaceDraft),
             'clear-cart-lines' => $eventless($workspaceDraft),
             'change-cart-line-quantity' => $eventless($workspaceDraft),
@@ -322,6 +324,7 @@ class CashierV3ActionManifest
                     'inventory.service_consumption.resolved',
                     'hang_order.settled',
                     'debt.recorded',
+                    'card.operation.settled',
                 ],
                 'event_rules' => [
                     'checkout.completed' => [
@@ -411,6 +414,13 @@ class CashierV3ActionManifest
                         'source_type' => 'submit-checkout',
                         'aggregate_version' => 1,
                     ],
+                    'card.operation.settled' => [
+                        'min_count' => 0,
+                        'max_count' => 1,
+                        'aggregate_type' => 'card_operation',
+                        'source_type' => 'submit-checkout',
+                        'aggregate_version' => null,
+                    ],
                 ],
                 'eventless_reason' => '',
                 'activation_blocked_until_event_contract' => false,
@@ -429,6 +439,7 @@ class CashierV3ActionManifest
                     'inventory.service_consumption.resolved' => [],
                     'hang_order.settled' => [],
                     'debt.recorded' => [],
+                    'card.operation.settled' => [],
                 ],
             ],
             'submit-debt-repayment' => [
@@ -587,46 +598,24 @@ class CashierV3ActionManifest
                 ],
             ],
             'resume-hang-order' => [
-                'required_event_types' => ['hang_order.resumed'],
-                'allowed_event_types' => ['hang_order.resumed'],
-                'event_rules' => [
-                    'hang_order.resumed' => [
-                        'min_count' => 1,
-                        'max_count' => 1,
-                        'aggregate_type' => 'hang_order',
-                        'source_type' => 'resume-hang-order',
-                        'aggregate_version' => null,
-                    ],
-                ],
-                'eventless_reason' => '',
+                // A hang order is a private cashier draft. Resuming it only
+                // copies its snapshot into the current workspace.
+                'required_event_types' => [],
+                'allowed_event_types' => [],
+                'event_rules' => [],
+                'eventless_reason' => 'hang_draft_snapshot_restore',
                 'activation_blocked_until_event_contract' => false,
-                'consumers' => ['hang_order.resumed' => []],
+                'consumers' => [],
             ],
             'void-hang-order' => [
-                'required_event_types' => ['hang_order.voided'],
-                'allowed_event_types' => ['hang_order.voided', 'room.released'],
-                'event_rules' => [
-                    'hang_order.voided' => [
-                        'min_count' => 1,
-                        'max_count' => 1,
-                        'aggregate_type' => 'hang_order',
-                        'source_type' => 'void-hang-order',
-                        'aggregate_version' => null,
-                    ],
-                    'room.released' => [
-                        'min_count' => 0,
-                        'max_count' => 1,
-                        'aggregate_type' => 'room',
-                        'source_type' => 'void-hang-order',
-                        'aggregate_version' => 1,
-                    ],
-                ],
-                'eventless_reason' => '',
+                // Deleting a draft creates no sale or membership fact. Room
+                // guard cleanup is an internal technical side effect only.
+                'required_event_types' => [],
+                'allowed_event_types' => [],
+                'event_rules' => [],
+                'eventless_reason' => 'hang_draft_physical_delete',
                 'activation_blocked_until_event_contract' => false,
-                'consumers' => [
-                    'hang_order.voided' => [],
-                    'room.released' => [],
-                ],
+                'consumers' => [],
             ],
 
             // C3 | writeoff

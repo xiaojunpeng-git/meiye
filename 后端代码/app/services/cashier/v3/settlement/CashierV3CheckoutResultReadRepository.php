@@ -39,8 +39,7 @@ interface CashierV3CheckoutResultReadRepository
     /** @return array|null cashier_v3_command_receipt persistence row */
     public function findReceiptForActor(
         string $idempotencyKey,
-        int $storeId,
-        int $operatorId
+        int $storeId
     );
 
     /**

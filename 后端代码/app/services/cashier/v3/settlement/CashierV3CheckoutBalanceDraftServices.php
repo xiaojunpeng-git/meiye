@@ -7,6 +7,7 @@ use app\services\cashier\v3\CashierV3DataScopeContext;
 use app\services\cashier\v3\CashierV3OperatorScope;
 use app\services\cashier\v3\CashierV3ResultCode;
 use app\services\cashier\v3\CashierV3TransactionGuard;
+use app\services\cashier\v3\CashierV3CheckoutWorkspaceIdentity;
 use app\services\cashier\v3\checkout\provider\CashierV3MemberBalanceContractException;
 use app\services\cashier\v3\checkout\provider\CashierV3MemberBalanceProvider;
 use think\facade\Db;
@@ -410,7 +411,6 @@ final class CashierV3CheckoutBalanceDraftServices
             ->where('workspace_id', $workspaceId)
             ->where('state_context_id', $stateContextId)
             ->where('store_id', $operator->storeId())
-            ->where('operator_id', $operator->operatorId())
             ->where('draft_status', 'editing')
             ->update([
                 'supplement_enabled' => $historical ? 1 : 0,
@@ -582,7 +582,7 @@ final class CashierV3CheckoutBalanceDraftServices
 
     private static function workspaceId(CashierV3OperatorScope $operator, string $stateContextId): string
     {
-        return sprintf('ws:%d:%d:%s', $operator->storeId(), $operator->operatorId(), $stateContextId);
+        return CashierV3CheckoutWorkspaceIdentity::id($operator->storeId(), $stateContextId);
     }
 
     private static function stateContextId($value): string

@@ -45,6 +45,8 @@ class CashierV3C2CashierModule implements CashierV3ActionModule
             'update-cashier-order-note',
             'update-cashier-line-price',
             'update-cashier-supplement',
+            'apply-line-coupon',
+            'remove-line-coupon',
         ] as $action) {
             $command[$action] = self::FEATURE_CASHIER;
         }

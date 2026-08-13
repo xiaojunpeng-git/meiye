@@ -263,6 +263,7 @@ class CashierV3StoreLoginServices extends BaseServices
             'roles' => [],
             'level' => 1,
             '_cashier_v3_delegated' => 1,
+            '_cashier_v3_read_only' => 1,
         ];
         /** @var CashierV3FeatureResolver $resolver */
         $resolver = app()->make(CashierV3FeatureResolver::class);
@@ -285,11 +286,15 @@ class CashierV3StoreLoginServices extends BaseServices
             'need_select_store' => false,
             'stores' => $this->presentStores($eligible),
             'store_id' => $storeId,
+            'read_only' => true,
+            'session_mode' => 'store_read_only',
             'store_name' => (string)($store['name'] ?? $selected['store_name'] ?? ''),
             'user_info' => [
                 'id' => $sessionId,
                 'employee_id' => $employeeId,
                 'account' => $accountSnapshot,
+                'read_only' => true,
+                'session_mode' => 'store_read_only',
                 'avatar' => '',
                 'shift_start_time' => $now,
             ],
@@ -309,6 +314,7 @@ class CashierV3StoreLoginServices extends BaseServices
                 'org_id' => (int)($store['org_id'] ?? 0),
                 'org_name' => (string)($store['org_name'] ?? ''),
                 'source' => (string)($store['source'] ?? 'direct_tenure'),
+                'read_only' => !empty($store['delegated']),
             ];
         }, $stores);
     }

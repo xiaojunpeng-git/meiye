@@ -61,6 +61,8 @@ class CashierV3IdempotencyKeyServices
         'CART_SERVICE_SETTINGS',
         // 收银草稿编辑
         'CASHIER_LINE_DEBT',
+        'APPLY_LINE_COUPON',
+        'REMOVE_LINE_COUPON',
         'CASHIER_APPLY_SALESPEOPLE_ALL',
         'CASHIER_APPLY_CRAFTSMEN_ALL',
         'CASHIER_APPLY_PERSONNEL_ALL',

@@ -522,17 +522,17 @@ class CashierV3ContextPolicyRegistry
 
     private static function resolveWorkspaceId(array $session, array $payload): string
     {
+        $storeId = (int)($session['store_id'] ?? 0);
+        $stateContextId = trim((string)($session['state_context_id'] ?? ''));
+        if ($storeId > 0 && $stateContextId !== '') {
+            return \app\services\cashier\v3\CashierV3CheckoutWorkspaceIdentity::id($storeId, $stateContextId);
+        }
+        // Older sessions may not carry state_context_id. Preserve their value
+        // for read-only compatibility, but never use it when a canonical
+        // store/state identity can be derived above.
         $fromSession = trim((string)($session['workspace_id'] ?? ''));
         if ($fromSession !== '') {
             return $fromSession;
-        }
-        $storeId = (int)($session['store_id'] ?? 0);
-        $operatorId = (int)($session['operator_id'] ?? 0);
-        $stateContextId = trim((string)($session['state_context_id'] ?? ''));
-        if ($storeId > 0 && $operatorId > 0) {
-            return $stateContextId !== ''
-                ? sprintf('ws:%d:%d:%s', $storeId, $operatorId, $stateContextId)
-                : sprintf('ws:%d:%d', $storeId, $operatorId);
         }
         throw CashierV3CommandException::invalidContext(
             '当前工作台会话无效，请刷新页面后重试。',

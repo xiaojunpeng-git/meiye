@@ -40,6 +40,9 @@ class Command extends AuthController
         } catch (CashierV3CommandException $exception) {
             return $this->respond((new CashierV3CommandFailureEnvelopeServices())
                 ->fromException($body, $exception));
+        } catch (\Throwable $exception) {
+            return $this->respond((new CashierV3CommandFailureEnvelopeServices())
+                ->fromThrowable($body, $exception));
         }
     }
 

@@ -103,6 +103,13 @@ class CashierV3PermissionPolicyRegistry
             );
         });
 
+        // 预约的编辑、删除、开始与结束服务是同一条已进入预约工作台后的
+        // 直接业务操作。本期产品明确不设角色、门店归属或功能入口二次拦截；
+        // 网关仍会在事务内重建登录态数据范围，并由领域层校验对象、版本和状态。
+        $this->register('policy:reservation_operation', function (CashierV3DataScopeContext $scope, array $payload, string $action) {
+            return;
+        });
+
         $this->register('policy:checkout_entitlement', function (CashierV3DataScopeContext $scope, array $payload, string $action) {
             if ($scope->hasFeature('cashier.v3.cashier') || $scope->hasFeature('cashier.v3.writeoff')) {
                 return;

@@ -42,6 +42,10 @@ class AuthTokenMiddleware implements MiddlewareInterface
 		$request->storeId = (int)$outInfo['store_id'];
 		$request->cashierId = (int)$outInfo['id'];
 		$request->cashierInfo = $outInfo;
+		// V3 管理接口复用已验证的门店领域控制器。提供兼容身份别名，
+		// 但认证仍由 cashier V3 token 与 CashierCheckRoleMiddleware 负责。
+		$request->storeStaffId = (int)$outInfo['id'];
+		$request->storeStaffInfo = $outInfo;
 
         return $next($request);
     }

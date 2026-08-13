@@ -28,6 +28,14 @@ final class CashierV3CheckoutBusinessConfigProjectionServices
             (string)($request['tenant_id'] ?? ''),
             (int)($request['store_id'] ?? 0)
         );
+        if ($kind === CashierV3CheckoutBusinessSourceSelectionServices::KIND_SALE
+            && (int)($selection['primarySourceId'] ?? 0) <= 0) {
+            $selection = $this->businessSources->latestNormalMemberSource(
+                (string)($request['tenant_id'] ?? ''),
+                (int)($request['store_id'] ?? 0),
+                (int)($request['member_id'] ?? 0)
+            );
+        }
         $projection['sourceEnabled'] = true;
         $projection['sourceSelectable'] = (string)($projection['businessType'] ?? '') !== 'debt_repayment';
         $projection['sourceLabel'] = (string)($selection['displayNameSnapshot'] ?? '');

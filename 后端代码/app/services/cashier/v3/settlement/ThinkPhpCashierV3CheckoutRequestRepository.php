@@ -7,6 +7,7 @@ use app\services\cashier\v3\CashierV3OperatorScope;
 use app\services\cashier\v3\CashierV3ResourceScope;
 use app\services\cashier\v3\CashierV3ResourceVersionServices;
 use app\services\cashier\v3\CashierV3TransactionGuard;
+use app\services\cashier\v3\CashierV3CheckoutWorkspaceIdentity;
 use think\facade\Db;
 
 /**
@@ -182,12 +183,7 @@ final class ThinkPhpCashierV3CheckoutRequestRepository implements CashierV3Check
         $requestId = trim($requestId);
         $workspaceId = trim($workspaceId);
         $stateContextId = trim($stateContextId);
-        $expectedWorkspaceId = sprintf(
-            'ws:%d:%d:%s',
-            $operatorScope->storeId(),
-            $operatorScope->operatorId(),
-            $stateContextId
-        );
+        $expectedWorkspaceId = CashierV3CheckoutWorkspaceIdentity::id($operatorScope->storeId(), $stateContextId);
         if (!$this->validRequestId($requestId)
             || $expectedVersion <= 0
             || $stateContextId === ''
@@ -201,7 +197,6 @@ final class ThinkPhpCashierV3CheckoutRequestRepository implements CashierV3Check
             ->where('request_id', $requestId)
             ->where('tenant_id', $dataScope->tenantId())
             ->where('store_id', $dataScope->forcedStoreId())
-            ->where('operator_id', $operatorScope->operatorId())
             ->where('workspace_id', $workspaceId)
             ->where('state_context_id', $stateContextId)
             ->where('request_status', 'editing')
@@ -304,12 +299,7 @@ final class ThinkPhpCashierV3CheckoutRequestRepository implements CashierV3Check
         $requestId = trim($requestId);
         $workspaceId = trim($workspaceId);
         $stateContextId = trim($stateContextId);
-        $expectedWorkspaceId = sprintf(
-            'ws:%d:%d:%s',
-            $operatorScope->storeId(),
-            $operatorScope->operatorId(),
-            $stateContextId
-        );
+        $expectedWorkspaceId = CashierV3CheckoutWorkspaceIdentity::id($operatorScope->storeId(), $stateContextId);
         if (!$this->validRequestId($requestId)
             || $expectedVersion <= 0
             || $stateContextId === ''
@@ -323,7 +313,6 @@ final class ThinkPhpCashierV3CheckoutRequestRepository implements CashierV3Check
             ->where('request_id', $requestId)
             ->where('tenant_id', $dataScope->tenantId())
             ->where('store_id', $dataScope->forcedStoreId())
-            ->where('operator_id', $operatorScope->operatorId())
             ->where('workspace_id', $workspaceId)
             ->where('state_context_id', $stateContextId)
             ->where('request_status', CashierV3CheckoutSettlementStateMachine::READY_FOR_SUBMIT)
@@ -446,7 +435,6 @@ final class ThinkPhpCashierV3CheckoutRequestRepository implements CashierV3Check
             ->where('tenant_id', $dataScope->tenantId())
             ->where('organization_id', $dataScope->organizationId())
             ->where('store_id', $dataScope->forcedStoreId())
-            ->where('operator_id', $operatorScope->operatorId())
             ->where('request_version', $expectedVersion)
             ->where('request_status', CashierV3CheckoutSettlementStateMachine::READY_FOR_SUBMIT)
             ->lock(true)
@@ -478,7 +466,6 @@ final class ThinkPhpCashierV3CheckoutRequestRepository implements CashierV3Check
             ->where('request_id', $requestId)
             ->where('tenant_id', $dataScope->tenantId())
             ->where('store_id', $dataScope->forcedStoreId())
-            ->where('operator_id', $operatorScope->operatorId())
             ->where('request_version', $expectedVersion)
             ->where('request_status', CashierV3CheckoutSettlementStateMachine::READY_FOR_SUBMIT)
             ->update([
@@ -525,7 +512,6 @@ final class ThinkPhpCashierV3CheckoutRequestRepository implements CashierV3Check
             ->where('request_id', $requestId)
             ->where('tenant_id', $dataScope->tenantId())
             ->where('store_id', $dataScope->forcedStoreId())
-            ->where('operator_id', $operatorScope->operatorId())
             ->where('request_version', $expectedVersion)
             ->where('request_status', CashierV3CheckoutSettlementStateMachine::SUBMITTING)
             ->update([
@@ -564,12 +550,7 @@ final class ThinkPhpCashierV3CheckoutRequestRepository implements CashierV3Check
         $this->assertScopeContext($operatorScope, $dataScope);
         $workspaceId = trim($workspaceId);
         $stateContextId = trim($stateContextId);
-        $expectedWorkspaceId = sprintf(
-            'ws:%d:%d:%s',
-            $operatorScope->storeId(),
-            $operatorScope->operatorId(),
-            $stateContextId
-        );
+        $expectedWorkspaceId = CashierV3CheckoutWorkspaceIdentity::id($operatorScope->storeId(), $stateContextId);
         if ($stateContextId === ''
             || strlen($workspaceId) > 64
             || strlen($stateContextId) > 64
@@ -591,7 +572,6 @@ final class ThinkPhpCashierV3CheckoutRequestRepository implements CashierV3Check
         $request = Db::name(self::REQUEST_TABLE)
             ->where('tenant_id', $dataScope->tenantId())
             ->where('store_id', $dataScope->forcedStoreId())
-            ->where('operator_id', $operatorScope->operatorId())
             ->where('workspace_id', $workspaceId)
             ->where('state_context_id', $stateContextId)
             ->whereIn('request_status', ['editing', 'ready_for_submit'])
@@ -679,12 +659,7 @@ final class ThinkPhpCashierV3CheckoutRequestRepository implements CashierV3Check
         $requestId = trim($requestId);
         $workspaceId = trim($workspaceId);
         $stateContextId = trim($stateContextId);
-        $expectedWorkspaceId = sprintf(
-            'ws:%d:%d:%s',
-            $operatorScope->storeId(),
-            $operatorScope->operatorId(),
-            $stateContextId
-        );
+        $expectedWorkspaceId = CashierV3CheckoutWorkspaceIdentity::id($operatorScope->storeId(), $stateContextId);
         if (!$this->validRequestId($requestId)
             || $stateContextId === ''
             || strlen($workspaceId) > 64
@@ -707,7 +682,6 @@ final class ThinkPhpCashierV3CheckoutRequestRepository implements CashierV3Check
             ->where('request_id', $requestId)
             ->where('tenant_id', $dataScope->tenantId())
             ->where('store_id', $dataScope->forcedStoreId())
-            ->where('operator_id', $operatorScope->operatorId())
             ->where('workspace_id', $workspaceId)
             ->where('state_context_id', $stateContextId)
             ->whereIn('request_status', ['editing', 'ready_for_submit'])
@@ -751,7 +725,6 @@ final class ThinkPhpCashierV3CheckoutRequestRepository implements CashierV3Check
             ->where('request_id', $requestId)
             ->where('tenant_id', $dataScope->tenantId())
             ->where('store_id', $dataScope->forcedStoreId())
-            ->where('operator_id', $operatorScope->operatorId())
             ->where('workspace_id', $workspaceId)
             ->where('state_context_id', $stateContextId)
             ->field(
@@ -902,7 +875,6 @@ final class ThinkPhpCashierV3CheckoutRequestRepository implements CashierV3Check
         $query = Db::name(self::REQUEST_TABLE)
             ->where('tenant_id', $dataScope->tenantId())
             ->where('store_id', $dataScope->forcedStoreId())
-            ->where('operator_id', $dataScope->operatorId())
             ->where('request_id', $requestId)
             ->where('request_version', $requestVersion)
             ->where('request_status', 'editing');
@@ -1186,7 +1158,6 @@ final class ThinkPhpCashierV3CheckoutRequestRepository implements CashierV3Check
         }
         if (!hash_equals((string)$request['tenantId'], $dataScope->tenantId())
             || (int)$request['storeId'] !== $dataScope->forcedStoreId()
-            || (int)$request['operatorId'] !== $operatorScope->operatorId()
             || !hash_equals((string)$request['organizationId'], $operatorScope->organizationId())
             || !hash_equals($verifiedSources->tenantId(), (string)$request['tenantId'])
             || $verifiedSources->storeId() !== (int)$request['storeId']) {
@@ -1514,7 +1485,6 @@ final class ThinkPhpCashierV3CheckoutRequestRepository implements CashierV3Check
                 ->where('tenant_id', $dataScope->tenantId())
                 ->where('organization_id', $dataScope->organizationId())
                 ->where('store_id', $dataScope->forcedStoreId())
-                ->where('operator_id', $operatorScope->operatorId())
                 ->where('checkout_request_id', $requestId)
                 ->where('checkout_request_version', $requestVersion)
                 ->where('command_idempotency_key', $commandIdempotencyKey)
@@ -1583,7 +1553,6 @@ final class ThinkPhpCashierV3CheckoutRequestRepository implements CashierV3Check
             ->where('tenant_id', $dataScope->tenantId())
             ->where('organization_id', $dataScope->organizationId())
             ->where('store_id', $dataScope->forcedStoreId())
-            ->where('operator_id', $operatorScope->operatorId())
             ->where('member_id', (int)($request['member_id'] ?? 0))
             ->where('workspace_id', (string)($request['workspace_id'] ?? ''))
             ->where('state_context_id', (string)($request['state_context_id'] ?? ''))
@@ -1665,7 +1634,6 @@ final class ThinkPhpCashierV3CheckoutRequestRepository implements CashierV3Check
         CashierV3DataScopeContext $dataScope
     ): void {
         if ($operatorScope->storeId() !== $dataScope->forcedStoreId()
-            || $operatorScope->operatorId() !== $dataScope->operatorId()
             || $operatorScope->tenantId() === ''
             || !hash_equals($operatorScope->tenantId(), $dataScope->tenantId())
             || !hash_equals($operatorScope->organizationId(), $dataScope->organizationId())

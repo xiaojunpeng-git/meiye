@@ -300,7 +300,7 @@ final class CashierV3RechargeCheckoutModule
     private function moneyToCents($value):int{$raw=trim((string)$value);if(preg_match('/^(?:0|[1-9][0-9]*)$/D',$raw)!==1)return -1;return (int)$raw*100;}
     private function money(int $cents):string{return number_format($cents/100,2,'.','');}
     private function wholeMoney(int $cents):string{return (string)intdiv($cents,100);}
-    private function workspaceId(CashierV3OperatorScope $o,string $state):string{return sprintf('ws:%d:%d:%s',$o->storeId(),$o->operatorId(),$state);}
+    private function workspaceId(CashierV3OperatorScope $o,string $state):string{return \app\services\cashier\v3\CashierV3CheckoutWorkspaceIdentity::id($o->storeId(),$state);}
     private function secret():string{$s=trim((string)config('cashier_v3.checkout_namespace_secret'));if(strlen($s)<32)throw self::invalid('recharge_checkout_secret_missing','充值结账签名服务尚未配置。');return $s;}
     private static function invalid(string $reason,string $message):CashierV3CommandException{return CashierV3CommandException::invalidContext($message,['reason'=>$reason]);}
 }

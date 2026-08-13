@@ -10,10 +10,6 @@ const cashierApiProxy = {
   '/cashierapi': {
     target: cashierApiTarget,
     changeOrigin: false
-  },
-  '/storeapi': {
-    target: cashierApiTarget,
-    changeOrigin: false
   }
 }
 

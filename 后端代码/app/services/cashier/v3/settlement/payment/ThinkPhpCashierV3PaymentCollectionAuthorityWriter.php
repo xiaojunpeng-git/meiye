@@ -128,8 +128,6 @@ final class ThinkPhpCashierV3PaymentCollectionAuthorityWriter
             )
             || $operatorScope->storeId() !== $dataScope->forcedStoreId()
             || $operatorScope->storeId() !== (int)$batch['store_id']
-            || $operatorScope->operatorId() !== $dataScope->operatorId()
-            || $operatorScope->operatorId() !== (int)$batch['operator_id']
             || !$dataScope->allowsStore($operatorScope->storeId())) {
             throw self::failure('payment_collection_data_scope_denied');
         }

@@ -5,6 +5,7 @@ namespace app\services\cashier\v3\settlement;
 use app\services\cashier\v3\CashierV3DataScopeContext;
 use app\services\cashier\v3\CashierV3OperatorScope;
 use app\services\cashier\v3\CashierV3TransactionGuard;
+use app\services\cashier\v3\CashierV3CheckoutWorkspaceIdentity;
 use think\facade\Db;
 
 /**
@@ -36,12 +37,7 @@ final class CashierV3CheckoutDraftDiscardServices
         CashierV3TransactionGuard::assertInTransaction('checkoutDraftDiscard');
         $workspaceId = trim($workspaceId);
         $stateContextId = trim($stateContextId);
-        $expectedWorkspaceId = sprintf(
-            'ws:%d:%d:%s',
-            $operatorScope->storeId(),
-            $operatorScope->operatorId(),
-            $stateContextId
-        );
+        $expectedWorkspaceId = CashierV3CheckoutWorkspaceIdentity::id($operatorScope->storeId(), $stateContextId);
         if ($stateContextId === '' || !hash_equals($expectedWorkspaceId, $workspaceId)) {
             throw new \RuntimeException('当前收银草稿上下文无效，请刷新后重试。');
         }
@@ -52,10 +48,9 @@ final class CashierV3CheckoutDraftDiscardServices
         $requests = Db::name(self::REQUEST_TABLE)
             ->where('tenant_id', $dataScope->tenantId())
             ->where('store_id', $dataScope->forcedStoreId())
-            ->where('operator_id', $operatorScope->operatorId())
             ->where('workspace_id', $workspaceId)
             ->where('state_context_id', $stateContextId)
-            ->whereIn('request_status', ['editing', 'ready_for_submit', 'failed'])
+            ->whereIn('request_status', ['editing', 'ready_for_submit', 'failed', 'processing', 'pending_confirmation', 'result_unknown'])
             ->lock(true)
             ->field('request_id')
             ->select()
@@ -67,10 +62,9 @@ final class CashierV3CheckoutDraftDiscardServices
             return ['requestCount' => 0, 'lineCount' => 0, 'paymentCount' => 0, 'sourceCount' => 0, 'resourcePlanCount' => 0];
         }
 
-        // A checkout with any formal business fact is no longer a draft,
-        // regardless of a stale request status. In particular, a successful
-        // collection or balance deduction must never be erased by a “return to
-        // cashier” action.
+        // A checkout with any formal business fact is no longer a draft. Keep
+        // its request and detail rows as the auditable query anchor, but do
+        // not block clearing the current cashier workspace.
         $salesCount = (int)Db::name(self::SALES_ORDER_TABLE)
             ->whereIn('checkout_request_id', $requestIds)
             ->lock(true)
@@ -87,12 +81,31 @@ final class CashierV3CheckoutDraftDiscardServices
             ->whereIn('checkout_request_id', $requestIds)
             ->lock(true)
             ->count();
-        if ($salesCount > 0 || $completionCount > 0 || $paymentFactCount > 0 || $balanceFactCount > 0) {
-            throw new \RuntimeException('该结账已产生业务事实，不能直接清空，请先核对收款结果。');
+        $protectedRequestIds = [];
+        foreach ($requestIds as $requestId) {
+            $hasFact = (int)Db::name(self::SALES_ORDER_TABLE)->where('checkout_request_id', $requestId)->count() > 0
+                || (int)Db::name(self::ENTITLEMENT_COMPLETION_RECEIPT_TABLE)->where('checkout_request_id', $requestId)->count() > 0
+                || (int)Db::name(self::PAYMENT_FACT_TABLE)->where('checkout_request_id', $requestId)->count() > 0
+                || (int)Db::name(self::BALANCE_FACT_TABLE)->where('checkout_request_id', $requestId)->count() > 0;
+            if ($hasFact) {
+                $protectedRequestIds[] = $requestId;
+            }
+        }
+        $discardRequestIds = array_values(array_diff($requestIds, $protectedRequestIds));
+
+        if (!$discardRequestIds) {
+            return [
+                'requestCount' => 0,
+                'lineCount' => 0,
+                'paymentCount' => 0,
+                'sourceCount' => 0,
+                'resourcePlanCount' => 0,
+                'protectedRequestCount' => count($protectedRequestIds),
+            ];
         }
 
         $planRows = Db::name(self::RESOURCE_PLAN_TABLE)
-            ->whereIn('request_id', $requestIds)
+            ->whereIn('request_id', $discardRequestIds)
             ->lock(true)
             ->field('id')
             ->select()
@@ -105,12 +118,12 @@ final class CashierV3CheckoutDraftDiscardServices
             Db::name(self::RESOURCE_PLAN_TABLE)->whereIn('id', $planIds)->delete();
         }
 
-        $lineCount = (int)Db::name(self::LINE_TABLE)->whereIn('request_id', $requestIds)->delete();
-        $paymentCount = (int)Db::name(self::PAYMENT_TABLE)->whereIn('request_id', $requestIds)->delete();
-        $sourceCount = (int)Db::name(self::SOURCE_TABLE)->whereIn('request_id', $requestIds)->delete();
-        $requestCount = (int)Db::name(self::REQUEST_TABLE)->whereIn('request_id', $requestIds)->delete();
+        $lineCount = (int)Db::name(self::LINE_TABLE)->whereIn('request_id', $discardRequestIds)->delete();
+        $paymentCount = (int)Db::name(self::PAYMENT_TABLE)->whereIn('request_id', $discardRequestIds)->delete();
+        $sourceCount = (int)Db::name(self::SOURCE_TABLE)->whereIn('request_id', $discardRequestIds)->delete();
+        $requestCount = (int)Db::name(self::REQUEST_TABLE)->whereIn('request_id', $discardRequestIds)->delete();
 
-        if ($requestCount !== count($requestIds)) {
+        if ($requestCount !== count($discardRequestIds)) {
             throw new \RuntimeException('旧结账草稿已变化，请刷新后重试。');
         }
 
@@ -120,6 +133,7 @@ final class CashierV3CheckoutDraftDiscardServices
             'paymentCount' => $paymentCount,
             'sourceCount' => $sourceCount,
             'resourcePlanCount' => count($planIds),
+            'protectedRequestCount' => count($protectedRequestIds),
         ];
     }
 }

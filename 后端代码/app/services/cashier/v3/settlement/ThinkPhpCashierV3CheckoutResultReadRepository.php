@@ -47,13 +47,11 @@ final class ThinkPhpCashierV3CheckoutResultReadRepository implements CashierV3Ch
 
     public function findReceiptForActor(
         string $idempotencyKey,
-        int $storeId,
-        int $operatorId
+        int $storeId
     ) {
         return $this->row(Db::name(self::RECEIPT_TABLE)
             ->where('idempotency_key', $idempotencyKey)
             ->where('store_id', $storeId)
-            ->where('operator_id', $operatorId)
             ->field(
                 'idempotency_key,action,store_id,operator_id,state_context_id,status,'
                 . 'result_code,result_message,result_json,business_no,add_time,finish_time'
@@ -80,7 +78,6 @@ final class ThinkPhpCashierV3CheckoutResultReadRepository implements CashierV3Ch
             ->where('tenant_id', $dataScope->tenantId())
             ->where('organization_id', $dataScope->organizationId())
             ->where('store_id', $operatorScope->storeId())
-            ->where('operator_id', $operatorScope->operatorId())
             ->where('state_context_id', $stateContextId)
             ->where('last_idempotency_key', $idempotencyKey)
             ->where('request_status', CashierV3CheckoutSettlementStateMachine::SUCCEEDED)
@@ -127,12 +124,7 @@ final class ThinkPhpCashierV3CheckoutResultReadRepository implements CashierV3Ch
             || $stateContextId === ''
             || strlen($stateContextId) > 64
             || strlen($workspaceId) > 64
-            || !hash_equals(sprintf(
-                'ws:%d:%d:%s',
-                $operatorScope->storeId(),
-                $operatorScope->operatorId(),
-                $stateContextId
-            ), $workspaceId)) {
+            || !preg_match('/^ws:' . preg_quote((string)$operatorScope->storeId(), '/') . ':(?:[0-9]+:)?' . preg_quote($stateContextId, '/') . '$/D', $workspaceId)) {
             return null;
         }
 
@@ -140,7 +132,6 @@ final class ThinkPhpCashierV3CheckoutResultReadRepository implements CashierV3Ch
             ->where('tenant_id', $dataScope->tenantId())
             ->where('organization_id', $dataScope->organizationId())
             ->where('store_id', $operatorScope->storeId())
-            ->where('operator_id', $operatorScope->operatorId())
             ->where('workspace_id', $workspaceId)
             ->where('state_context_id', $stateContextId)
             ->where('request_status', CashierV3CheckoutSettlementStateMachine::SUCCEEDED)
@@ -187,8 +178,7 @@ final class ThinkPhpCashierV3CheckoutResultReadRepository implements CashierV3Ch
             || preg_match('/^CHECKOUT-[0-9a-f-]{36}$/D', $idempotencyKey) !== 1
             || (string)($request['tenant_id'] ?? '') !== $dataScope->tenantId()
             || (string)($request['organization_id'] ?? '') !== $dataScope->organizationId()
-            || (int)($request['store_id'] ?? 0) !== $operatorScope->storeId()
-            || (int)($request['operator_id'] ?? 0) !== $operatorScope->operatorId()) {
+            || (int)($request['store_id'] ?? 0) !== $operatorScope->storeId()) {
             return null;
         }
 
@@ -197,7 +187,6 @@ final class ThinkPhpCashierV3CheckoutResultReadRepository implements CashierV3Ch
                 ->where('tenant_id', $dataScope->tenantId())
                 ->where('organization_id', $dataScope->organizationId())
                 ->where('store_id', $operatorScope->storeId())
-                ->where('operator_id', $operatorScope->operatorId())
                 ->where('checkout_request_id', $requestId)
                 ->where('checkout_request_version', $requestVersion - 1)
                 ->where('command_idempotency_key', $idempotencyKey)
@@ -264,7 +253,6 @@ final class ThinkPhpCashierV3CheckoutResultReadRepository implements CashierV3Ch
             ->where('tenant_id', $dataScope->tenantId())
             ->where('organization_id', $dataScope->organizationId())
             ->where('store_id', $operatorScope->storeId())
-            ->where('operator_id', $operatorScope->operatorId())
             ->where('member_id', (int)($request['member_id'] ?? 0))
             ->where('workspace_id', (string)($request['workspace_id'] ?? ''))
             ->where('state_context_id', (string)($request['state_context_id'] ?? ''))
@@ -290,7 +278,6 @@ final class ThinkPhpCashierV3CheckoutResultReadRepository implements CashierV3Ch
             || !hash_equals((string)$request['tenant_id'], (string)$order['tenant_id'])
             || !hash_equals((string)$request['organization_id'], (string)$order['organization_id'])
             || (int)$request['store_id'] !== (int)$order['store_id']
-            || (int)$request['operator_id'] !== (int)$order['operator_id']
             || !hash_equals(
                 (string)$request['last_idempotency_key'],
                 (string)$order['command_idempotency_key']
@@ -397,7 +384,6 @@ final class ThinkPhpCashierV3CheckoutResultReadRepository implements CashierV3Ch
             || !hash_equals((string)$request['tenant_id'], (string)$receipt['tenant_id'])
             || !hash_equals((string)$request['organization_id'], (string)$receipt['organization_id'])
             || (int)$request['store_id'] !== (int)$receipt['store_id']
-            || (int)$request['operator_id'] !== (int)$receipt['operator_id']
             || (int)($request['member_id'] ?? 0) !== (int)$receipt['member_id']
             || !hash_equals((string)$request['workspace_id'], (string)$receipt['workspace_id'])
             || !hash_equals((string)$request['state_context_id'], (string)$receipt['state_context_id'])
@@ -441,7 +427,6 @@ final class ThinkPhpCashierV3CheckoutResultReadRepository implements CashierV3Ch
         return $mode !== CashierV3DataScopeContext::MODE_NONE
             && $storeAllowed
             && $operatorScope->storeId() === $dataScope->forcedStoreId()
-            && $operatorScope->operatorId() === $dataScope->operatorId()
             && $operatorScope->tenantId() !== ''
             && hash_equals($operatorScope->tenantId(), $dataScope->tenantId())
             && hash_equals($operatorScope->organizationId(), $dataScope->organizationId());

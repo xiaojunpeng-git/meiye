@@ -134,8 +134,6 @@ final class ThinkPhpCashierV3SalesOrderAuthorityWriter implements CashierV3Sales
             || !hash_equals($operatorScope->organizationId(), (string)$header['organization_id'])
             || $operatorScope->storeId() !== $dataScope->forcedStoreId()
             || $operatorScope->storeId() !== (int)$header['store_id']
-            || $operatorScope->operatorId() !== $dataScope->operatorId()
-            || $operatorScope->operatorId() !== (int)$header['operator_id']
             || !$dataScope->allowsStore($operatorScope->storeId())) {
             throw self::failure('sales_order_data_scope_denied');
         }

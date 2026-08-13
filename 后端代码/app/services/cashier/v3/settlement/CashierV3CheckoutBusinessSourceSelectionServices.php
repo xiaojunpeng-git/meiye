@@ -46,7 +46,6 @@ final class CashierV3CheckoutBusinessSourceSelectionServices
             ->where('request_id', $requestId)
             ->where('tenant_id', $dataScope->tenantId())
             ->where('store_id', $operator->storeId())
-            ->where('operator_id', $operator->operatorId())
             ->where('request_version', $requestVersion)
             ->where('request_status', 'editing')
             ->lock(true)->find();
@@ -75,7 +74,6 @@ final class CashierV3CheckoutBusinessSourceSelectionServices
             ->where('request_id', $requestId)
             ->where('tenant_id', $dataScope->tenantId())
             ->where('store_id', $operator->storeId())
-            ->where('operator_id', $operator->operatorId())
             ->where('state_context_id', $stateContextId)
             ->where('request_version', $requestVersion)
             ->where('request_status', 'editing')
@@ -103,7 +101,20 @@ final class CashierV3CheckoutBusinessSourceSelectionServices
             ->where('store_id', $storeId)
             ->lock(true)->find();
         if (!$row || (int)($row['primary_source_id'] ?? 0) <= 0) {
-            return self::emptySelection();
+            if ($kind !== self::KIND_SALE) {
+                return self::emptySelection();
+            }
+            $request = (array)Db::name('cashier_v3_checkout_request')
+                ->where('request_id', $requestId)
+                ->where('tenant_id', $tenantId)
+                ->where('store_id', $storeId)
+                ->field('member_id')->find();
+            return $this->latestNormalMemberSource(
+                $tenantId,
+                $storeId,
+                (int)($request['member_id'] ?? 0),
+                true
+            );
         }
         $source = $this->config->resolveSourceSnapshot(
             (int)$row['primary_source_id'],
@@ -124,6 +135,50 @@ final class CashierV3CheckoutBusinessSourceSelectionServices
             return self::emptySelection();
         }
         return self::rowProjection($row);
+    }
+
+    /**
+     * Read the latest normal V3 sale source for the confirmation-page default.
+     * This is a read-only projection, not a persisted member preference.
+     */
+    public function latestNormalMemberSource(string $tenantId, int $storeId, int $memberId, bool $forUpdate = false): array
+    {
+        if ($tenantId === '' || $storeId <= 0 || $memberId <= 0) {
+            return self::emptySelection();
+        }
+        $order = Db::name('cashier_v3_sales_order')->alias('o')
+            ->where('o.tenant_id', $tenantId)
+            ->where('o.store_id', $storeId)
+            ->where('o.member_id', $memberId)
+            ->where('o.order_status', 'settled')
+            ->where('o.order_direction', 'forward')
+            ->where('o.settled_at', '>', 0)
+            ->whereNotExists(function ($operation) {
+                $operation->name('cashier_v3_order_lifecycle_operation')->alias('olo')
+                    ->whereRaw('olo.source_order_id = o.order_id')
+                    ->whereRaw('olo.tenant_id = o.tenant_id')
+                    ->where('olo.source_type', 'sales')
+                    ->where('olo.status', 'succeeded')
+                    ->whereIn('olo.operation_type', ['refund', 'void']);
+            })
+            ->field('o.business_source_primary_id,o.business_source_primary_name_snapshot,'
+                . 'o.business_source_secondary_id,o.business_source_secondary_name_snapshot,'
+                . 'o.business_source_label_snapshot')
+            ->order('o.settled_at desc,o.id desc')
+            ->find();
+        if (!$order || (int)($order['business_source_primary_id'] ?? 0) <= 0) {
+            return self::emptySelection();
+        }
+        try {
+            $source = $this->config->resolveSourceSnapshot(
+                (int)$order['business_source_primary_id'],
+                (int)($order['business_source_secondary_id'] ?? 0),
+                $forUpdate
+            );
+        } catch (\Throwable $exception) {
+            return self::emptySelection();
+        }
+        return array_merge($source, ['selectionVersion' => 0]);
     }
 
     private function saveSelectionInTx(string $kind, string $requestId, string $tenantId, int $storeId, int $operatorId, array $payload): array

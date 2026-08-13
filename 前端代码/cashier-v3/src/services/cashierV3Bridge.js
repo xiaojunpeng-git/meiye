@@ -483,7 +483,7 @@ const DEV_PREVIEW_BOOTSTRAP = {
     'cashier.v3.inventory.import': true
   },
   workspace: {
-    id: 'ws:store-1:operator-preview:preview-state-context-1',
+    id: 'ws:1:preview-state-context-1',
     revision: 12,
     status: 'editing',
     serverTime: '2026-07-27T01:20:00+08:00'

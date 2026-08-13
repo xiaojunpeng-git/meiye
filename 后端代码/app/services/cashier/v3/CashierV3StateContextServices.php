@@ -50,7 +50,11 @@ class CashierV3StateContextServices
         }
         $clientSessionId = $this->keyServices->normalizeClientSessionId($rawClientSessionId);
 
-        $row = $this->findByIdentity($storeId, $operatorId, $clientSessionId);
+        // A cashier tab belongs to the store session, not to the account that
+        // happened to authenticate first. Keep the operator on the row for
+        // audit compatibility, but do not split or invalidate the workbench
+        // when the store account changes.
+        $row = $this->findByStoreSession($storeId, $clientSessionId);
         if (!$row) {
             $row = $this->createIdentity($storeId, $operatorId, $clientSessionId);
         }
@@ -138,12 +142,12 @@ class CashierV3StateContextServices
     /**
      * @return array|null
      */
-    protected function findByIdentity(int $storeId, int $operatorId, string $clientSessionId)
+    protected function findByStoreSession(int $storeId, string $clientSessionId)
     {
         return Db::name(self::TABLE)
             ->where('store_id', $storeId)
-            ->where('operator_id', $operatorId)
             ->where('client_session_id', $clientSessionId)
+            ->order('id', 'desc')
             ->find();
     }
 
@@ -162,13 +166,13 @@ class CashierV3StateContextServices
             ]);
         } catch (\Throwable $exception) {
             // 同一标签页并发首个请求：唯一键拦下后按已存在读取
-            $row = $this->findByIdentity($storeId, $operatorId, $clientSessionId);
+            $row = $this->findByStoreSession($storeId, $clientSessionId);
             if (!$row) {
                 throw $exception;
             }
             return $row;
         }
-        $row = $this->findByIdentity($storeId, $operatorId, $clientSessionId);
+        $row = $this->findByStoreSession($storeId, $clientSessionId);
         if (!$row) {
             throw new CashierV3CommandException(
                 CashierV3ResultCode::CLIENT_SESSION_REQUIRED,

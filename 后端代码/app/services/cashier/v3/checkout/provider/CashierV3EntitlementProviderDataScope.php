@@ -14,7 +14,7 @@ final class CashierV3EntitlementProviderDataScope
         if ($operatorScope->tenantId() === ''
             || $operatorScope->tenantId() !== $dataScope->tenantId()
             || $operatorScope->storeId() !== $dataScope->forcedStoreId()
-            || $operatorScope->operatorId() !== $dataScope->operatorId()) {
+            ) {
             throw self::failure('provider_data_scope_session_mismatch');
         }
     }

@@ -3,6 +3,7 @@ namespace app\services\cashier\v3\projection;
 
 use app\services\cashier\v3\CashierV3DataScopeContext;
 use app\services\cashier\v3\CashierV3OperatorScope;
+use app\services\cashier\v3\CashierV3CheckoutWorkspaceIdentity;
 use app\services\cashier\v3\CashierV3ResourceScope;
 use app\services\cashier\v3\CashierV3ResourceVersionServices;
 use think\facade\Db;
@@ -124,7 +125,7 @@ class CashierV3RootDomainAssembler
             throw new \RuntimeException('root_assembler_operator_name_unavailable');
         }
 
-        $workspaceId = sprintf('ws:%d:%d:%s', $storeId, $operatorId, $stateContextId);
+        $workspaceId = CashierV3CheckoutWorkspaceIdentity::id($storeId, $stateContextId);
         $workspaceRevision = $this->ensureWorkspaceVersion($workspaceId, $operatorScope);
 
         $features = [];

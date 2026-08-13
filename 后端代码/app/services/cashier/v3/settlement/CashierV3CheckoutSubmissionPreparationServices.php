@@ -9,6 +9,7 @@ use app\services\cashier\v3\CashierV3ResourceKindCatalog;
 use app\services\cashier\v3\CashierV3ResourceScope;
 use app\services\cashier\v3\CashierV3ResultCode;
 use app\services\cashier\v3\CashierV3TransactionGuard;
+use app\services\cashier\v3\CashierV3CheckoutWorkspaceIdentity;
 
 /**
  * Eventless final preparation for a checkout submission.
@@ -223,7 +224,6 @@ final class CashierV3CheckoutSubmissionPreparationServices
         CashierV3DataScopeContext $dataScope
     ): void {
         if ($operatorScope->storeId() !== $dataScope->forcedStoreId()
-            || $operatorScope->operatorId() !== $dataScope->operatorId()
             || $operatorScope->tenantId() === ''
             || !hash_equals($operatorScope->tenantId(), $dataScope->tenantId())
             || !hash_equals($operatorScope->organizationId(), $dataScope->organizationId())
@@ -825,12 +825,7 @@ final class CashierV3CheckoutSubmissionPreparationServices
         CashierV3OperatorScope $operatorScope,
         string $stateContextId
     ): string {
-        $workspaceId = sprintf(
-            'ws:%d:%d:%s',
-            $operatorScope->storeId(),
-            $operatorScope->operatorId(),
-            $stateContextId
-        );
+        $workspaceId = CashierV3CheckoutWorkspaceIdentity::id($operatorScope->storeId(), $stateContextId);
         if (strlen($workspaceId) > 64) {
             throw self::invalid(
                 'checkout_submission_workspace_id_invalid',

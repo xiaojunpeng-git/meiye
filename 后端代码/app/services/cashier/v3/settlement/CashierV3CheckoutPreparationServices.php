@@ -681,10 +681,8 @@ final class CashierV3CheckoutPreparationServices
         if ($stateContextId === '') {
             throw self::incomplete('checkout_state_context_missing');
         }
-        return sprintf(
-            'ws:%d:%d:%s',
+        return \app\services\cashier\v3\CashierV3CheckoutWorkspaceIdentity::id(
             $operatorScope->storeId(),
-            $operatorScope->operatorId(),
             $stateContextId
         );
     }

@@ -153,7 +153,9 @@ final class CashierV3PaymentCollectionPlanV1
             $recordedAt,
             $entitlementCreditCents
         );
-        $payments = self::normalizePayments($lockedAggregate['payments'], $request);
+        $finalOperatorId = self::positiveInt($order['operator_id'], 'payment_collection_final_operator_invalid');
+        $finalOperatorName = self::text($order['operator_name_snapshot'], 128, 'payment_collection_final_operator_name_invalid', false);
+        $payments = self::normalizePayments($lockedAggregate['payments'], $request, $finalOperatorId, $finalOperatorName);
         $paymentTotal = self::sum($payments, 'amount_cents');
         if ($paymentTotal !== $request['selected_payment_amount_cents']
             || $paymentTotal !== $request['cash_performance_amount_cents']) {
@@ -203,8 +205,8 @@ final class CashierV3PaymentCollectionPlanV1
                 'store_name_snapshot' => $request['store_name_snapshot'],
                 'member_id' => $request['member_id'],
                 'member_name_snapshot' => $request['member_name_snapshot'],
-                'operator_id' => $payment['operator_id'],
-                'operator_name_snapshot' => $payment['operator_name_snapshot'],
+                'operator_id' => $finalOperatorId,
+                'operator_name_snapshot' => $finalOperatorName,
                 'sales_order_id' => $order['order_id'],
                 'sales_order_no_snapshot' => $order['order_no'],
                 'sales_order_fingerprint' => $order['immutable_fingerprint'],
@@ -254,8 +256,8 @@ final class CashierV3PaymentCollectionPlanV1
             'store_name_snapshot' => $request['store_name_snapshot'],
             'member_id' => $request['member_id'],
             'member_name_snapshot' => $request['member_name_snapshot'],
-            'operator_id' => $request['operator_id'],
-            'operator_name_snapshot' => $request['operator_name_snapshot'],
+            'operator_id' => $finalOperatorId,
+            'operator_name_snapshot' => $finalOperatorName,
             'sales_order_id' => $order['order_id'],
             'sales_order_no_snapshot' => $order['order_no'],
             'sales_order_fingerprint' => $order['immutable_fingerprint'],
@@ -613,7 +615,6 @@ final class CashierV3PaymentCollectionPlanV1
             || !hash_equals((string)$order['organization_id'], $request['organization_id'])
             || (int)$order['store_id'] !== $request['store_id']
             || (int)$order['member_id'] !== $request['member_id']
-            || (int)$order['operator_id'] !== $request['operator_id']
             || !hash_equals((string)$order['checkout_request_id'], $request['request_id'])
             || (int)$order['checkout_request_version'] !== $request['request_version']
             || !hash_equals(
@@ -665,7 +666,7 @@ final class CashierV3PaymentCollectionPlanV1
     }
 
     /** @return array<int,array> */
-    private static function normalizePayments(array $rows, array $request): array
+    private static function normalizePayments(array $rows, array $request, int $finalOperatorId, string $finalOperatorName): array
     {
         if (count($rows) > self::MAX_PAYMENT_ROWS) {
             throw self::failure('payment_collection_payment_count_invalid');
@@ -697,10 +698,7 @@ final class CashierV3PaymentCollectionPlanV1
                     $row['member_id'],
                     'payment_collection_payment_member_invalid'
                 ) !== $request['member_id']
-                || self::positiveInt(
-                    $row['operator_id'],
-                    'payment_collection_payment_operator_invalid'
-                ) !== $request['operator_id']
+                || self::positiveInt($row['operator_id'], 'payment_collection_payment_operator_invalid') <= 0
                 || (string)$row['draft_status'] !== 'draft') {
                 throw self::failure('payment_collection_payment_binding_mismatch', ['index' => $index]);
             }
@@ -803,7 +801,6 @@ final class CashierV3PaymentCollectionPlanV1
                 || $paymentRecordedAt !== $request['recorded_at']
                 || (string)$row['business_date'] !== $request['business_date']
                 || (string)$row['business_timezone'] !== $request['business_timezone']
-                || $operatorName !== $request['operator_name_snapshot']
                 || $sourceType !== $request['source_document_type']
                 || $sourceId !== $request['source_document_id']
                 || $sourceNo !== $request['source_document_no']
@@ -819,8 +816,8 @@ final class CashierV3PaymentCollectionPlanV1
                 'amount_cents' => $amount,
                 'operation_occurred_at' => $paymentTime,
                 'recorded_at' => $paymentRecordedAt,
-                'operator_id' => $request['operator_id'],
-                'operator_name_snapshot' => $operatorName,
+                'operator_id' => $finalOperatorId,
+                'operator_name_snapshot' => $finalOperatorName,
                 'source_document_type' => $sourceType,
                 'source_document_id' => $sourceId,
                 'source_document_no' => $sourceNo,

@@ -417,6 +417,11 @@ const checkoutRequestIdentity = computed(() => (
   || props.checkout.requestNo
   || ''
 ))
+// 结果未知时不再把收银员留在“查询原支付结果”按钮上。这个动作只清理
+// 当前未完成结账现场并回到空收银台；正式订单/收款事实仍由后端保留。
+const canRestartCheckout = computed(() => (
+  isUncertain.value && Boolean(checkoutRequestIdentity.value)
+))
 const recoveredCheckoutIdempotencyKey = computed(() => {
   const key = String(props.checkout.originalIdempotencyKey || '')
   return /^CHECKOUT-[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(key)
@@ -1047,6 +1052,14 @@ function queryOriginalCheckoutResult() {
   })
 }
 
+function restartCheckout() {
+  if (!canRestartCheckout.value) return
+  emit('close', {
+    discardCheckoutRecovery: true,
+    restartNewCheckout: true
+  })
+}
+
 function finishCheckoutAndReturn() {
   if (!isSucceeded.value) return
   emit('completed', succeededSubmissionResponse.value)
@@ -1635,8 +1648,8 @@ onBeforeUnmount(() => {
         <button v-if="canContinuePartialPaymentRecovery" type="button" class="button button--primary" @click="request('continue-partial-payment-recovery')">继续处理剩余收款</button>
       </template>
       <template v-else-if="isUncertain">
-        <span v-if="!canQueryCheckoutResult" class="checkout-overlay__locked-tip">原{{ isDebtRepayment ? '还款' : '结账' }}请求号尚未加载，禁止关闭或重复提交，请联系管理员核对原请求。</span>
-        <button v-else type="button" class="button button--primary" @click="queryOriginalCheckoutResult">查询原支付结果</button>
+        <span class="checkout-overlay__locked-tip">本次结账结果未确认，重新开单会清空当前收银现场。</span>
+        <button type="button" class="button button--primary" :disabled="!canRestartCheckout" @click="restartCheckout">重新开单</button>
       </template>
       <template v-else-if="isProcessing">
         <span class="checkout-overlay__locked-tip">正在处理，请勿关闭或重复操作。</span>

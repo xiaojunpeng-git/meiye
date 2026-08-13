@@ -32,6 +32,12 @@ final class CashierV3DataScopeContext
     /** @var string[] */
     private $grantedFeatures;
     private $operatorProfile;
+    /**
+     * 无门店任职的数据权限会话只能浏览，不能提交任何写命令。
+     * 该标记由服务端会话解析生成，客户端不可注入。
+     * @var bool
+     */
+    private $readOnlySession;
 
     public function __construct(
         int $operatorId,
@@ -46,7 +52,8 @@ final class CashierV3DataScopeContext
         string $superAdminBasis,
         string $permissionVersion,
         array $grantedFeatures,
-        array $operatorProfile
+        array $operatorProfile,
+        bool $readOnlySession = false
     ) {
         $this->operatorId = $operatorId;
         $this->employeeId = $employeeId;
@@ -61,6 +68,7 @@ final class CashierV3DataScopeContext
         $this->permissionVersion = $permissionVersion;
         $this->grantedFeatures = array_values(array_unique(array_map('strval', $grantedFeatures)));
         $this->operatorProfile = $operatorProfile;
+        $this->readOnlySession = $readOnlySession;
     }
 
     public function operatorId(): int { return $this->operatorId; }
@@ -82,6 +90,11 @@ final class CashierV3DataScopeContext
     /** @return string[] */
     public function grantedFeatures(): array { return $this->grantedFeatures; }
     public function operatorProfile(): array { return $this->operatorProfile; }
+    /**
+     * 组织直属、无 system_store_staff 的门店会话为只读会话。
+     * 只读门禁在 CashierV3PermissionGuard 中按 action 类型执行，不能只依赖前端隐藏按钮。
+     */
+    public function isReadOnlySession(): bool { return $this->readOnlySession; }
 
     public function hasFeature(string $featureCode): bool
     {

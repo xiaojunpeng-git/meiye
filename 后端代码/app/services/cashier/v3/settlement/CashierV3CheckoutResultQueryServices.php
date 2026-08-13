@@ -50,8 +50,7 @@ final class CashierV3CheckoutResultQueryServices
 
         $receipt = $this->repository->findReceiptForActor(
             $idempotencyKey,
-            $operatorScope->storeId(),
-            $operatorScope->operatorId()
+            $operatorScope->storeId()
         );
         if ($receipt === null) {
             return $this->unknown(
@@ -138,7 +137,6 @@ final class CashierV3CheckoutResultQueryServices
             || $mode === CashierV3DataScopeContext::MODE_NONE
             || !$storeAllowed
             || $operatorScope->storeId() !== $dataScope->forcedStoreId()
-            || $operatorScope->operatorId() !== $dataScope->operatorId()
             || $operatorScope->tenantId() === ''
             || !hash_equals($operatorScope->tenantId(), $dataScope->tenantId())
             || !hash_equals($operatorScope->organizationId(), $dataScope->organizationId())) {
@@ -156,8 +154,7 @@ final class CashierV3CheckoutResultQueryServices
         CashierV3OperatorScope $operatorScope
     ): void {
         if (!hash_equals($idempotencyKey, (string)($receipt['idempotency_key'] ?? ''))
-            || (int)($receipt['store_id'] ?? 0) !== $operatorScope->storeId()
-            || (int)($receipt['operator_id'] ?? 0) !== $operatorScope->operatorId()) {
+            || (int)($receipt['store_id'] ?? 0) !== $operatorScope->storeId()) {
             throw new CashierV3CommandException(
                 CashierV3ResultCode::PERMISSION_DENIED,
                 '当前账号无权查看该结账结果。',

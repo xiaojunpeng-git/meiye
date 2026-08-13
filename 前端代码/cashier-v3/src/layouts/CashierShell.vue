@@ -2051,6 +2051,10 @@ function dismissFeedback() {
   }
 }
 
+function clearCashierNegativeState() {
+  dismissFeedback()
+}
+
 function openPasswordDialog() {
   isAccountMenuOpen.value = false
   passwordChange.value = { currentPassword: '', newPassword: '', confirmation: '' }
@@ -2267,6 +2271,7 @@ watch(
 
 onMounted(() => {
   window.addEventListener('cashier-v3:ui-result', handleUiResult)
+  window.addEventListener('cashier-v3:clear-negative-state', clearCashierNegativeState)
   window.addEventListener('cashier-v3:state-context-changing', handleStateContextChanged)
   window.addEventListener('cashier-v3:state-context-changed', handleStateContextChanged)
   window.addEventListener('cashier-v3:open-member-selector', openMemberSelector)
@@ -2279,6 +2284,7 @@ onMounted(() => {
 })
 onBeforeUnmount(() => {
   window.removeEventListener('cashier-v3:ui-result', handleUiResult)
+  window.removeEventListener('cashier-v3:clear-negative-state', clearCashierNegativeState)
   window.removeEventListener('cashier-v3:state-context-changing', handleStateContextChanged)
   window.removeEventListener('cashier-v3:state-context-changed', handleStateContextChanged)
   window.removeEventListener('cashier-v3:open-member-selector', openMemberSelector)

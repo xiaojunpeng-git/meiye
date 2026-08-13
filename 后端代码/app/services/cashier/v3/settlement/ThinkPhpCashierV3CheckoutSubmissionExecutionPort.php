@@ -8,6 +8,7 @@ use app\services\cashier\v3\CashierV3DataScopeContext;
 use app\services\cashier\v3\CashierV3OperatorScope;
 use app\services\cashier\v3\CashierV3ResultCode;
 use app\services\cashier\v3\CashierV3TransactionGuard;
+use app\services\cashier\v3\CashierV3CheckoutWorkspaceIdentity;
 use app\services\cashier\v3\cashier\CashierV3CashierWorkspaceServices;
 use app\services\cashier\v3\checkout\CashierV3EntitlementCompletionAuthorityAdapter;
 use app\services\cashier\v3\checkout\CashierV3EntitlementCompletionAuthorityException;
@@ -152,12 +153,7 @@ final class ThinkPhpCashierV3CheckoutSubmissionExecutionPort
             }
             self::assertDataScope($operatorScope, $dataScope);
             $stateContextId = self::stateContextId($scope['state_context_id'] ?? null);
-            $workspaceId = sprintf(
-                'ws:%d:%d:%s',
-                $operatorScope->storeId(),
-                $operatorScope->operatorId(),
-                $stateContextId
-            );
+            $workspaceId = CashierV3CheckoutWorkspaceIdentity::id($operatorScope->storeId(), $stateContextId);
             $requestId = (string)$payload['checkoutRequestId'];
             $requestVersion = (int)$payload['checkoutRequestVersion'];
             $aggregate = $this->requests->lockAggregateForSubmitInTx(
@@ -680,7 +676,10 @@ final class ThinkPhpCashierV3CheckoutSubmissionExecutionPort
             $authority['settledAt'],
             $this->serverNamespaceSecret(),
             $documentNo,
-            $businessSource['primarySourceId'] > 0 ? $businessSource : []
+            $businessSource['primarySourceId'] > 0 ? $businessSource : [],
+            [],
+            $context->operatorScope()->operatorId(),
+            $this->currentOperatorName($context->dataScope())
         );
     }
 
@@ -698,6 +697,17 @@ final class ThinkPhpCashierV3CheckoutSubmissionExecutionPort
             $authority['settledAt'],
             $this->serverNamespaceSecret()
         );
+    }
+
+    private function currentOperatorName(CashierV3DataScopeContext $scope): string
+    {
+        foreach (['staff_name', 'real_name', 'name', 'account'] as $field) {
+            $value = trim((string)($scope->operatorProfile()[$field] ?? ''));
+            if ($value !== '') {
+                return $value;
+            }
+        }
+        return '操作人#' . $scope->operatorId();
     }
 
     private function completionEventInputs(
@@ -1102,7 +1112,6 @@ final class ThinkPhpCashierV3CheckoutSubmissionExecutionPort
             || !hash_equals($operatorScope->tenantId(), $dataScope->tenantId())
             || !hash_equals($operatorScope->organizationId(), $dataScope->organizationId())
             || $operatorScope->storeId() !== $dataScope->forcedStoreId()
-            || $operatorScope->operatorId() !== $dataScope->operatorId()
             || !$storeAllowed) {
             throw self::failure('checkout_submit_data_scope_denied');
         }

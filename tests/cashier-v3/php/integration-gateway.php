@@ -9,6 +9,7 @@ require __DIR__ . '/../lib/_lib.php';
 require __DIR__ . '/../lib/TestGraphFactory.php';
 
 use app\services\cashier\v3\CashierV3CommandException;
+use app\services\cashier\v3\CashierV3CheckoutWorkspaceIdentity;
 use app\services\cashier\v3\CashierV3CommandContextServices;
 use app\services\cashier\v3\CashierV3DataScopeFactory;
 use app\services\cashier\v3\CashierV3IdempotencyKeyServices;
@@ -628,7 +629,7 @@ $dispatcher = CashierV3Bootstrap::dispatcher();
 $gateway = $dispatcher->gateway();
 
 // seed workspace version
-$wsId = sprintf('ws:8:1:%s', $session['state_context_id']);
+$wsId = CashierV3CheckoutWorkspaceIdentity::id(8, (string)$session['state_context_id']);
 Db::transaction(function () use ($dispatcher, $wsId) {
     $scope = \app\services\cashier\v3\CashierV3ResourceScope::of('store', '8');
     $dispatcher->versionServices()->ensureRegistered($scope, 'cashier_workspace', $wsId);

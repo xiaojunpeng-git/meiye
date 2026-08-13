@@ -30,7 +30,7 @@ $stateServices = new CashierV3StateContextServices($keyServices);
 $session = ['store_id'=>$storeId,'operator_id'=>$operatorId,'operator_profile'=>$profile,'client_session_id'=>'SESSION-'.sprintf('%08x-%04x-4%03x-%04x-%012x', random_int(0,0xffffffff), random_int(0,0xffff), random_int(0,0xfff), random_int(0x8000,0xbfff), random_int(0,0xffffffffffff)),'operator_ip'=>'127.0.0.1'];
 $state = $stateServices->resolve($storeId, $operatorId, $session['client_session_id'], '');
 $session['state_context_id'] = $state['state_context_id'];
-$workspaceId = sprintf('ws:%d:%d:%s', $storeId, $operatorId, $state['state_context_id']);
+$workspaceId = \app\services\cashier\v3\CashierV3CheckoutWorkspaceIdentity::id($storeId, $state['state_context_id']);
 Db::transaction(function () use ($dispatcher, $workspaceId, $storeId) {
     $dispatcher->versionServices()->ensureRegistered(CashierV3ResourceScope::of('store', (string)$storeId), 'cashier_workspace', $workspaceId);
 });

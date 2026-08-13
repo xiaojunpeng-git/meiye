@@ -8,6 +8,7 @@ use app\services\cashier\v3\CashierV3DataScopeContext;
 use app\services\cashier\v3\CashierV3OperatorScope;
 use app\services\cashier\v3\CashierV3ResultCode;
 use app\services\cashier\v3\CashierV3TransactionGuard;
+use app\services\cashier\v3\CashierV3CheckoutWorkspaceIdentity;
 use app\services\cashier\v3\cashier\CashierV3CashierWorkspaceServices;
 use app\services\cashier\v3\card\CashierV3CardPurchaseIssuanceServices;
 use app\services\cashier\v3\card\CashierV3CardOperationCheckoutSettlementServices;
@@ -68,6 +69,10 @@ final class CashierV3SaleOnlyCheckoutSubmissionServices
         'eb_user_money',
         'eb_cashier_v3_customer_guide_round_fact',
         'eb_cashier_v3_sales_manager_fact',
+        // CustomerLifecycleFactServices reads the immutable card-operation
+        // settlement authority while recording checkout facts.  Fail before
+        // any sale/payment write when this migration is not installed.
+        'eb_cashier_v3_card_operation_settlement',
     ];
 
     private const REQUIRED_COLUMNS = [
@@ -173,12 +178,7 @@ final class CashierV3SaleOnlyCheckoutSubmissionServices
             $requestId = (string)$payload['checkoutRequestId'];
             $requestVersion = (int)$payload['checkoutRequestVersion'];
             $stateContextId = self::stateContextId($scope['state_context_id'] ?? null);
-            $workspaceId = sprintf(
-                'ws:%d:%d:%s',
-                $operatorScope->storeId(),
-                $operatorScope->operatorId(),
-                $stateContextId
-            );
+            $workspaceId = CashierV3CheckoutWorkspaceIdentity::id($operatorScope->storeId(), $stateContextId);
             self::assertLockedPublicContexts(
                 (array)($scope['contexts'] ?? []),
                 (array)($scope['locked_versions'] ?? []),
@@ -244,7 +244,9 @@ final class CashierV3SaleOnlyCheckoutSubmissionServices
                 $secret,
                 $salesOrderNo,
                 $businessSource['primarySourceId'] > 0 ? $businessSource : [],
-                $entitlementCredit
+                $entitlementCredit,
+                $operatorScope->operatorId(),
+                self::currentOperatorName($dataScope)
             );
             $inventoryPlan = $this->saleInventory->planInTx(
                 (array)$aggregate['request'],
@@ -816,10 +818,20 @@ final class CashierV3SaleOnlyCheckoutSubmissionServices
             || !hash_equals($operatorScope->tenantId(), $dataScope->tenantId())
             || !hash_equals($operatorScope->organizationId(), $dataScope->organizationId())
             || $operatorScope->storeId() !== $dataScope->forcedStoreId()
-            || $operatorScope->operatorId() !== $dataScope->operatorId()
             || !$dataScope->allowsStore($operatorScope->storeId())) {
             throw self::failure('checkout_submit_data_scope_denied');
         }
+    }
+
+    private static function currentOperatorName(CashierV3DataScopeContext $scope): string
+    {
+        foreach (['staff_name', 'real_name', 'name', 'account'] as $field) {
+            $value = trim((string)($scope->operatorProfile()[$field] ?? ''));
+            if ($value !== '') {
+                return $value;
+            }
+        }
+        return '操作人#' . $scope->operatorId();
     }
 
     private static function assertLockedPublicContexts(

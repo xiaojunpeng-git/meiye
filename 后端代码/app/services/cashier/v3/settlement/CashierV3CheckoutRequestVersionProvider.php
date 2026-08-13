@@ -125,7 +125,6 @@ final class CashierV3CheckoutRequestVersionProvider implements CashierV3DataScop
         CashierV3DataScopeContext $dataScope
     ): bool {
         return $operatorScope->storeId() === $dataScope->forcedStoreId()
-            && $operatorScope->operatorId() === $dataScope->operatorId()
             && $operatorScope->tenantId() !== ''
             && hash_equals($operatorScope->tenantId(), $dataScope->tenantId())
             && hash_equals($operatorScope->organizationId(), $dataScope->organizationId())

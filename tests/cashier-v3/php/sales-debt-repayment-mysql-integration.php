@@ -80,7 +80,7 @@ try {
                 'operator_scope'=>$operator,'data_scope'=>$dataScope,'state_context_id'=>$stateContextId,
                 'idempotency_key'=>'CHECKOUT_PREPARE-00000000-0000-4000-8000-000000000001',
                 'contexts'=>[
-                    ['kind'=>'cashier_workspace','id'=>sprintf('ws:%d:%d:%s',$storeId,$operatorId,$stateContextId),'expectedVersion'=>1],
+                    ['kind'=>'cashier_workspace','id'=>\app\services\cashier\v3\CashierV3CheckoutWorkspaceIdentity::id($storeId,$stateContextId),'expectedVersion'=>1],
                     ['kind'=>'debt_record','id'=>(string)$authority['debt_id'],'expectedVersion'=>max(1,(int)($authority['updated_at']??1))],
                 ],
                 'payload'=>['debtRecordId'=>(int)$authority['debt_id'],'amount'=>$pendingYuan,'salespersonAllocations'=>[['staffId'=>$operatorId,'allocationWeight'=>100,'isPreSale'=>true]]],
@@ -109,7 +109,7 @@ try {
             try{$payment=(new CashierV3CheckoutPaymentDraftServices(null,null,str_repeat('d',64)))->mutateInTx('add-payment-method',[
                 'operator_scope'=>$operator,'data_scope'=>$dataScope,'state_context_id'=>$stateContextId,
                 'idempotency_key'=>'ADD_PAYMENT-00000000-0000-4000-8000-000000000002',
-                'contexts'=>[['kind'=>'cashier_workspace','id'=>sprintf('ws:%d:%d:%s',$storeId,$operatorId,$stateContextId),'expectedVersion'=>2],['kind'=>'checkout_request','id'=>$requestId,'expectedVersion'=>$requestVersion]],
+                'contexts'=>[['kind'=>'cashier_workspace','id'=>\app\services\cashier\v3\CashierV3CheckoutWorkspaceIdentity::id($storeId,$stateContextId),'expectedVersion'=>2],['kind'=>'checkout_request','id'=>$requestId,'expectedVersion'=>$requestVersion]],
                 'payload'=>['checkoutRequestId'=>$requestId,'checkoutRequestVersion'=>$requestVersion,'preparationRequestId'=>(string)$prepare['preparationRequestId'],'preparationToken'=>$token,'paymentMethodId'=>'wechat'],
             ]);}catch(Throwable $e){throw new RuntimeException('payment mutation failed: '.json_encode(method_exists($e,'getDetail')?$e->getDetail():[]),0,$e);}
             $check('first bookkeeping method defaults to the authoritative outstanding amount',

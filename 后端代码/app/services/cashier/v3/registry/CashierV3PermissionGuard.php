@@ -49,6 +49,17 @@ class CashierV3PermissionGuard
     public function assertAllowed(array $definition, CashierV3DataScopeContext $dataScope, array $payload = []): void
     {
         $action = (string)($definition['action'] ?? $definition['canonical'] ?? '');
+        // 组织直属、无 system_store_staff 的数据权限会话只允许浏览投影。
+        // 必须在统一权限策略之前按 manifest 类型拦截，避免某个宽松的
+        // policy（例如预约操作）或新增 feature 绕过只读边界。
+        if ((string)($definition['type'] ?? '') === 'command' && $dataScope->isReadOnlySession()) {
+            throw new CashierV3CommandException(
+                CashierV3ResultCode::PERMISSION_DENIED,
+                '当前为门店查看模式，不能执行新增、编辑、收银或结账操作。',
+                CashierV3ResultCode::STATUS_FAILED,
+                ['action' => $action, 'reason' => 'store_read_only_session']
+            );
+        }
         $policyId = $this->resolvePolicyId($definition);
         if ($policyId === null || $policyId === '') {
             throw new CashierV3CommandException(

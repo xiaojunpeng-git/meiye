@@ -83,7 +83,7 @@ final class CashierV3RechargeDebtRepaymentServices
         if (!$recharge || (int)($recharge['uid'] ?? 0) !== $memberId || (int)($recharge['store_id'] ?? 0) !== $operator->storeId()) {
             throw self::failure('recharge_repayment_recharge_missing');
         }
-        $workspaceId = sprintf('ws:%d:%d:%s', $operator->storeId(), $operator->operatorId(), $stateContextId);
+        $workspaceId = \app\services\cashier\v3\CashierV3CheckoutWorkspaceIdentity::id($operator->storeId(), $stateContextId);
         $workspaceVersion = 0;
         foreach ((array)($scope['contexts'] ?? []) as $context) {
             if ((string)($context['kind'] ?? '') === 'cashier_workspace' && (int)($context['expected_version'] ?? 0) > 0) {

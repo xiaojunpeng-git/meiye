@@ -133,7 +133,6 @@ final class CashierV3CheckoutProjectionServices
         $request = (array)Db::name('cashier_v3_checkout_request')
             ->where('tenant_id', $scope->tenantId())
             ->where('store_id', $operator->storeId())
-            ->where('operator_id', $operator->operatorId())
             ->where('workspace_id', $workspaceId)
             ->where('state_context_id', $stateContextId)
             ->order('recorded_at desc,id desc')->find();
@@ -891,9 +890,7 @@ final class CashierV3CheckoutProjectionServices
                 $memberId,
                 'payment'
             );
-            if (self::positiveInt($row['operator_id'] ?? null, 'payment.operator_id') !== $operatorId) {
-                throw self::failure('checkout_projection_payment_operator_drift');
-            }
+            self::positiveInt($row['operator_id'] ?? null, 'payment.operator_id');
             $method = (string)($row['payment_method'] ?? '');
             if (!isset(self::PAYMENT_NAMES[$method])) {
                 throw self::failure('checkout_projection_payment_method_invalid');

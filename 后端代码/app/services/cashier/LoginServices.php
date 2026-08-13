@@ -396,9 +396,12 @@ class LoginServices extends BaseServices
             'store_id' => $storeId,
             'staff_name' => (string)($session['staff_name_snapshot'] ?? ''),
             'account' => (string)($session['account_snapshot'] ?? ''),
+            'read_only' => true,
+            'session_mode' => 'store_read_only',
             'roles' => [],
             'level' => 1,
             '_cashier_v3_delegated' => 1,
+            '_cashier_v3_read_only' => 1,
             'type' => 'cashier_v3_delegated',
         ];
         $features = app()->make(\app\services\cashier\v3\permission\CashierV3FeatureResolver::class)
@@ -409,6 +412,8 @@ class LoginServices extends BaseServices
         }
         return $profile + [
             'features' => $features,
+            'read_only' => true,
+            'session_mode' => 'store_read_only',
             'store_name' => (string)($store['name'] ?? ''),
             'logo' => (string)($store['image'] ?? ''),
             'product_category_status' => (int)($store['product_category_status'] ?? 0),

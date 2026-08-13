@@ -26,17 +26,16 @@ function check(name, condition) {
   }
 }
 
-check('receipt read is bound to original key current store and current operator',
+check('receipt read is bound to original key and current store',
   repository.includes("->where('idempotency_key', $idempotencyKey)")
     && repository.includes("->where('store_id', $storeId)")
-    && repository.includes("->where('operator_id', $operatorId)"))
+    && !repository.includes("->where('operator_id', $operatorId)"))
 check('the service accepts only an original submit-checkout receipt',
   service.includes("private const ORIGINAL_ACTION = 'submit-checkout'")
     && service.includes('IDEMPOTENCY_KEY_CONFLICT'))
 check('no-scope and cross-identity reads fail closed',
   service.includes('MODE_NONE')
     && service.includes('$operatorScope->storeId() !== $dataScope->forcedStoreId()')
-    && service.includes('$operatorScope->operatorId() !== $dataScope->operatorId()')
     && service.includes('PERMISSION_DENIED'))
 check('pending and missing results stay result_unknown',
   service.includes("'pending'")
@@ -49,8 +48,8 @@ check('success is re-read from checkout request plus the composition authority',
     && repository.includes("->where('command_idempotency_key', $idempotencyKey)")
     && repository.includes("->where('last_idempotency_key', $idempotencyKey)")
     && repository.includes("->where('request_status', CashierV3CheckoutSettlementStateMachine::SUCCEEDED)"))
-check('authority re-read is tenant organization store operator and state-context scoped',
-  ['tenant_id', 'organization_id', 'store_id', 'operator_id', 'state_context_id']
+check('authority re-read is tenant organization store and state-context scoped',
+  ['tenant_id', 'organization_id', 'store_id', 'state_context_id']
     .every((field) => repository.includes(`->where('${field}'`)))
 check('sale-only and mixed require their exact settled forward CSO authority',
   repository.includes("->where('composition', $composition)")

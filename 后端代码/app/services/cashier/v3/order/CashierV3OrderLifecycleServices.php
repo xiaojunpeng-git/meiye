@@ -534,7 +534,7 @@ final class CashierV3OrderLifecycleServices
         $draft = (array)Db::name(self::REOPEN_TABLE)->where('draft_id', $draftId)->where('tenant_id', $scope->tenantId())->where('store_id', $operator->storeId())->where('draft_status', 'ready')->lock(true)->find();
         $lines = json_decode((string)($draft['line_snapshot_json'] ?? ''), true);
         if (!$draft || !is_array($lines) || $lines === []) throw self::failure('reopen_draft_not_ready');
-        $workspaceId = sprintf('ws:%d:%d:%s', $operator->storeId(), $operator->operatorId(), $stateContextId);
+        $workspaceId = \app\services\cashier\v3\CashierV3CheckoutWorkspaceIdentity::id($operator->storeId(), $stateContextId);
         $memberDraft = $this->workspace->lockForSaleMutationInTx($workspaceId, $stateContextId, $operator);
         if ((array)($this->workspace->readDraft($workspaceId, $stateContextId, $operator, true)['lines'] ?? []) !== []) {
             if ($replaceWorkspace) {

@@ -623,10 +623,8 @@ class CashierV3ActionDispatcher
             if ($stateContextId === '') {
                 return null;
             }
-            $workspaceId = sprintf(
-                'ws:%d:%d:%s',
+            $workspaceId = CashierV3CheckoutWorkspaceIdentity::id(
                 $operatorScope->storeId(),
-                $operatorScope->operatorId(),
                 $stateContextId
             );
             $projection = (new CashierV3CheckoutProjectionServices())->readEditingRequest(

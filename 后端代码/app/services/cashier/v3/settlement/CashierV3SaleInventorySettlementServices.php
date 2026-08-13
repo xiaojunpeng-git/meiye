@@ -286,7 +286,7 @@ final class CashierV3SaleInventorySettlementServices
         $organizationId = $this->token((string)($request['organization_id'] ?? ''), 32, 'sale_inventory_organization_invalid');
         $organizationPath = $this->pathToken((string)($request['organization_path'] ?? ''));
         $storeId = $this->positiveInt($request['store_id'] ?? null, 'sale_inventory_store_invalid');
-        $operatorId = $this->positiveInt($request['operator_id'] ?? null, 'sale_inventory_operator_invalid');
+        $operatorId = $this->positiveInt($salesOrder['operator_id'] ?? null, 'sale_inventory_operator_invalid');
         $checkoutRequestId = $this->opaqueId($request['request_id'] ?? null, 'CKR', 'sale_inventory_checkout_request_invalid');
         $businessDate = $this->date((string)($request['business_date'] ?? ''), 'sale_inventory_business_date_invalid');
         $occurredAt = $this->positiveInt($salesOrder['occurred_at'] ?? null, 'sale_inventory_occurred_at_invalid');
@@ -297,9 +297,7 @@ final class CashierV3SaleInventorySettlementServices
             || !hash_equals($organizationId, $operatorScope->organizationId())
             || !hash_equals($organizationId, $dataScope->organizationId())
             || $storeId !== $operatorScope->storeId()
-            || $storeId !== $dataScope->forcedStoreId()
-            || $operatorId !== $operatorScope->operatorId()
-            || $operatorId !== $dataScope->operatorId()) {
+            || $storeId !== $dataScope->forcedStoreId()) {
             throw $this->failure('sale_inventory_data_scope_denied');
         }
         if ((string)($salesOrder['checkout_request_id'] ?? '') !== $checkoutRequestId
@@ -307,7 +305,6 @@ final class CashierV3SaleInventorySettlementServices
             || (string)($salesOrder['organization_id'] ?? '') !== $organizationId
             || (string)($salesOrder['organization_path_snapshot'] ?? '') !== $organizationPath
             || (int)($salesOrder['store_id'] ?? 0) !== $storeId
-            || (int)($salesOrder['operator_id'] ?? 0) !== $operatorId
             || (string)($salesOrder['business_date'] ?? '') !== $businessDate) {
             throw $this->failure('sale_inventory_sales_order_scope_mismatch');
         }

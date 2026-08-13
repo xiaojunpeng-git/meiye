@@ -13,8 +13,10 @@ use app\services\cashier\v3\bootstrap\CashierV3Bootstrap;
 use think\facade\Db;
 
 const LOCAL_QA_DATABASE = 'ruihao_test_recovered_20260801';
-const LOCAL_QA_STORE_ID = 179;
-const LOCAL_QA_OPERATOR_ID = 399;
+const DEFAULT_LOCAL_QA_STORE_ID = 179;
+// This is the active store-179 employee with published store_v3 rules in the
+// recovered QA database. The legacy level-0 account has no V3 job assignment.
+const DEFAULT_LOCAL_QA_OPERATOR_ID = 1116;
 
 function localQaFail(string $message, int $status = 1): void
 {
@@ -32,6 +34,24 @@ if (!is_array($body)) {
     localQaFail('request_json_invalid');
 }
 
+// The browser session used for a real QA record may be bound to a different
+// store than the default fixture. Keep that identity outside the V3 command
+// envelope and prove it against the recovered database before dispatching.
+$qaSession = $body['qaSession'] ?? [];
+unset($body['qaSession']);
+if (!is_array($qaSession)) {
+    localQaFail('qa_session_invalid');
+}
+$storeId = array_key_exists('storeId', $qaSession)
+    ? filter_var($qaSession['storeId'], FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]])
+    : DEFAULT_LOCAL_QA_STORE_ID;
+$operatorId = array_key_exists('operatorId', $qaSession)
+    ? filter_var($qaSession['operatorId'], FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]])
+    : DEFAULT_LOCAL_QA_OPERATOR_ID;
+if (!$storeId || !$operatorId) {
+    localQaFail('qa_session_identity_invalid');
+}
+
 $backendRoot = is_file('/var/www/html/vendor/autoload.php')
     ? '/var/www/html/'
     : dirname(__DIR__) . '/后端代码/';
@@ -46,12 +66,12 @@ if ($database !== LOCAL_QA_DATABASE) {
 }
 
 $operator = Db::name('system_store_staff')
-    ->where('id', LOCAL_QA_OPERATOR_ID)
-    ->where('store_id', LOCAL_QA_STORE_ID)
+    ->where('id', $operatorId)
+    ->where('store_id', $storeId)
     ->where('status', 1)
     ->where('is_del', 0)
     ->find();
-if (!$operator || (int)($operator['level'] ?? -1) !== 0) {
+if (!$operator) {
     localQaFail('operator_guard');
 }
 
@@ -62,13 +82,14 @@ if ($clientSessionId === '') {
 }
 
 $session = [
-    'store_id' => LOCAL_QA_STORE_ID,
-    'operator_id' => LOCAL_QA_OPERATOR_ID,
+    'store_id' => $storeId,
+    'operator_id' => $operatorId,
     'operator_ip' => '127.0.0.1',
     'client_session_id' => $clientSessionId,
     'state_context_id' => (string)($body['stateContextId'] ?? ''),
     'operator_profile' => [
-        'id' => LOCAL_QA_OPERATOR_ID,
+        'id' => $operatorId,
+        'store_id' => $storeId,
         'level' => (int)$operator['level'],
         'roles' => $roles,
         'employee_id' => (int)($operator['employee_id'] ?? 0),

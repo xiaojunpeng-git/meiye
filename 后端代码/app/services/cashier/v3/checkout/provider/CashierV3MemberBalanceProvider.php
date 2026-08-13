@@ -273,7 +273,7 @@ final class CashierV3MemberBalanceProvider implements CashierV3DataScopedVersion
         if ($operatorScope->tenantId() === ''
             || $operatorScope->tenantId() !== $dataScope->tenantId()
             || $operatorScope->storeId() !== $dataScope->forcedStoreId()
-            || $operatorScope->operatorId() !== $dataScope->operatorId()) {
+            ) {
             throw self::failure('member_balance_data_scope_session_mismatch');
         }
     }

@@ -3,6 +3,7 @@
 namespace app\services\cashier\v3;
 
 use app\services\cashier\v3\manifest\CashierV3ActionManifest;
+use think\facade\Log;
 
 /**
  * Builds a fail-closed response for a command rejected before a normal gateway
@@ -31,6 +32,86 @@ final class CashierV3CommandFailureEnvelopeServices
             return $envelope;
         }
 
+        $envelope['boundAction'] = $binding['canonical'];
+        $envelope['boundCanonical'] = $binding['canonical'];
+        if ($binding['idempotencyKey'] !== '') {
+            $envelope['boundIdempotencyKey'] = $binding['idempotencyKey'];
+        }
+        $envelope['correlationId'] = $binding['correlationId'];
+        $envelope['boundCorrelationId'] = $binding['correlationId'];
+        if ($binding['stateContextId'] !== '') {
+            $envelope['stateContextId'] = $binding['stateContextId'];
+        }
+        return $envelope;
+    }
+
+    /**
+     * Convert an unexpected server exception into a deterministic V3 failure.
+     *
+     * The business transaction has already been rolled back by the gateway
+     * boundary.  Returning a bound failure keeps the browser from treating a
+     * deterministic database/dependency error as an unknown payment result.
+     * The exception text is logged only; SQL/schema details never reach the
+     * operator.
+     */
+    public function fromThrowable(array $body, \Throwable $exception): array
+    {
+        $command = isset($body['command']) && is_array($body['command'])
+            ? $body['command']
+            : [];
+        $action = trim((string)($body['action'] ?? $command['action'] ?? ''));
+        $isCheckout = in_array($action, [
+            'submit-checkout',
+            'submit-debt-repayment',
+            'submit-recharge-checkout',
+            'submit-recharge-debt-repayment',
+        ], true);
+        $message = $isCheckout
+            ? '结账提交失败，业务数据已回滚，请稍后重试。'
+            : '操作失败，请稍后重试。';
+        $code = CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE;
+        $raw = $exception->getMessage();
+        if (preg_match('/42S02|42S22|Base table or view not found|Unknown column|doesn\'t exist/i', $raw)) {
+            $message = $isCheckout
+                ? '收银服务依赖尚未完成升级，当前结账未提交，业务数据已回滚，请联系管理员完成数据库升级。'
+                : '当前功能依赖尚未完成升级，请联系管理员完成数据库升级后重试。';
+            $code = CashierV3ResultCode::ACTION_DEPENDENCY_NOT_READY;
+        }
+        try {
+            Log::error('[cashier_v3_unexpected_command_failure] ' . json_encode([
+                'action' => $action,
+                'correlationId' => (string)($body['correlationId'] ?? $body['correlation_id'] ?? ''),
+                'exceptionClass' => get_class($exception),
+                'exceptionMessage' => $raw,
+                'exceptionFile' => basename($exception->getFile()),
+                'exceptionLine' => $exception->getLine(),
+            ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+        } catch (\Throwable $ignored) {
+            // Logging failure must never turn a deterministic checkout failure
+            // back into an empty/unknown HTTP response.
+        }
+
+        $envelope = [
+            'result' => [
+                'status' => CashierV3ResultCode::STATUS_FAILED,
+                'code' => $code,
+                'message' => $message,
+            ],
+            'conflict' => null,
+        ];
+        $bindingBody = $body;
+        if (trim((string)($bindingBody['action'] ?? '')) === '' && $action !== '') {
+            $bindingBody['action'] = $action;
+        }
+        $binding = $this->safeBinding($bindingBody, new CashierV3CommandException(
+            $code,
+            $message,
+            CashierV3ResultCode::STATUS_FAILED,
+            ['action' => $action, 'reason' => 'unexpected_server_exception']
+        ));
+        if ($binding === null) {
+            return $envelope;
+        }
         $envelope['boundAction'] = $binding['canonical'];
         $envelope['boundCanonical'] = $binding['canonical'];
         if ($binding['idempotencyKey'] !== '') {

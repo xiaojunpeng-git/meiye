@@ -52,10 +52,9 @@ final class CheckoutResultFakeRepository implements CashierV3CheckoutResultReadR
 
     public function findReceiptForActor(
         string $idempotencyKey,
-        int $storeId,
-        int $operatorId
+        int $storeId
     ) {
-        $this->receiptCalls[] = [$idempotencyKey, $storeId, $operatorId];
+        $this->receiptCalls[] = [$idempotencyKey, $storeId];
         return $this->receipt;
     }
 
@@ -290,8 +289,8 @@ checkoutResultOk('missing receipt remains result_unknown rather than authorizing
         && $notFound['phase'] === 'not_found'
         && $notFound['checkoutRequest'] === null
         && $notFound['salesOrder'] === null);
-checkoutResultOk('receipt lookup is bound to the normalized key current store and current operator',
-    $repository->receiptCalls === [[$key, 7, 21]]);
+checkoutResultOk('receipt lookup is bound to the normalized key and current store',
+    $repository->receiptCalls === [[$key, 7]]);
 
 $repository = new CheckoutResultFakeRepository();
 $repository->receipt = checkoutResultReceipt(0);
@@ -394,10 +393,9 @@ checkoutResultOk('only an original submit-checkout receipt is accepted',
 $repository = new CheckoutResultFakeRepository();
 $repository->receipt = checkoutResultReceipt();
 $repository->receipt['operator_id'] = 22;
-checkoutResultOk('a repository mismatch cannot leak another operators receipt',
-    checkoutResultExceptionCode(static function () use ($repository, $payload, $operator, $scope): void {
-        (new CashierV3CheckoutResultQueryServices($repository))->query($payload, $operator, $scope);
-    }) === CashierV3ResultCode::PERMISSION_DENIED);
+checkoutResultOk('same-store result recovery ignores the original operator identity',
+    (new CashierV3CheckoutResultQueryServices($repository))->query($payload, $operator, $scope)['status']
+        === CashierV3ResultCode::STATUS_RESULT_UNKNOWN);
 
 $repository = new CheckoutResultFakeRepository();
 checkoutResultOk('non-checkout original keys are rejected before any receipt read',
@@ -425,9 +423,9 @@ $selfParticipant = (new CashierV3CheckoutResultQueryServices($repository))->quer
     $operator,
     checkoutResultScope(CashierV3DataScopeContext::MODE_SELF_PARTICIPANT, 7, 21, [])
 );
-checkoutResultOk('self-participant scope can inspect only its exact actor-bound receipt',
+checkoutResultOk('self-participant scope still cannot broaden store permission',
     $selfParticipant['status'] === CashierV3ResultCode::STATUS_RESULT_UNKNOWN
-        && $repository->receiptCalls === [[$key, 7, 21]]);
+        && $repository->receiptCalls === [[$key, 7]]);
 
 echo "CHECKOUT_RESULT_QUERY_CONTRACT passed={$passed} failed={$failed}\n";
 exit($failed === 0 ? 0 : 1);

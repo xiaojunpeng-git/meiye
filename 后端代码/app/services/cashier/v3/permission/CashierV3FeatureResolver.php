@@ -126,6 +126,9 @@ class CashierV3FeatureResolver
         $staffId = (int)($operatorProfile['id'] ?? $operatorProfile['staff_id'] ?? 0);
         $employeeId = (int)($operatorProfile['employee_id'] ?? 0);
         $storeId = (int)($operatorProfile['store_id'] ?? 0);
+        if (!empty($operatorProfile['_cashier_v3_delegated'])) {
+            return $this->employeeStoreV3GrantedFeatures($employeeId);
+        }
         if ($staffId <= 0 || $employeeId <= 0 || $storeId <= 0) {
             return [];
         }
@@ -152,6 +155,44 @@ class CashierV3FeatureResolver
                 ->where('rule.channel', JobPositionPolicyServices::CHANNEL_STORE_V3)
                 ->where('rule.status', 1)
                 ->column('rule.rules');
+            $ruleIds = [];
+            foreach ($ruleRows as $rules) {
+                foreach (explode(',', (string)$rules) as $ruleId) {
+                    $ruleId = (int)$ruleId;
+                    if ($ruleId > 0) $ruleIds[$ruleId] = $ruleId;
+                }
+            }
+            return JobPositionPolicyServices::storeV3FeaturesFromRuleIds(array_values($ruleIds));
+        } catch (\Throwable $exception) {
+            return [];
+        }
+    }
+
+    /**
+     * 数据权限选店会话使用组织直属岗位（staff_id=0）的收银 V3 规则。
+     * 规则仍由服务端岗位事实计算，客户端不能注入 feature 列表。
+     *
+     * @return string[]
+     */
+    public function employeeStoreV3GrantedFeatures(int $employeeId): array
+    {
+        if ($employeeId <= 0) {
+            return [];
+        }
+        try {
+            $positionIds = Db::name('staff_job_position')
+                ->where('employee_id', $employeeId)
+                ->where('staff_id', 0)
+                ->where('status', 1)->where('is_del', 0)->where('end_time', 0)
+                ->column('position_id');
+            $positionIds = array_values(array_unique(array_filter(array_map('intval', $positionIds ?: []))));
+            if (!$positionIds) {
+                return [];
+            }
+            $ruleRows = Db::name('job_position_channel_rule')
+                ->whereIn('position_id', $positionIds)
+                ->where('channel', JobPositionPolicyServices::CHANNEL_STORE_V3)
+                ->where('status', 1)->column('rules');
             $ruleIds = [];
             foreach ($ruleRows as $rules) {
                 foreach (explode(',', (string)$rules) as $ruleId) {

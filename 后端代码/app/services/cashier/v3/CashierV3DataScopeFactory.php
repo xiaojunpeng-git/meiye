@@ -45,6 +45,9 @@ class CashierV3DataScopeFactory
             : '';
 
         $granted = $this->featureResolver->resolveGrantedFeatures($operatorProfile);
+        // 数据权限选店会话没有 system_store_staff 任职，只能进入门店查看。
+        // 该身份由服务端 delegated token 产生，不能由客户端 profile 注入。
+        $readOnlySession = !empty($operatorProfile['_cashier_v3_delegated']);
 
         $adminInfoForScope = $operatorProfile;
         if (!array_key_exists('admin_type', $adminInfoForScope)) {
@@ -133,7 +136,8 @@ class CashierV3DataScopeFactory
             $dataSuperBasis !== '' ? $dataSuperBasis : $superAdminBasis,
             $permissionVersion,
             $granted,
-            $operatorProfile
+            $operatorProfile,
+            $readOnlySession
         );
     }
 }

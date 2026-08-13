@@ -7,6 +7,7 @@ use app\services\cashier\v3\CashierV3DataScopeContext;
 use app\services\cashier\v3\CashierV3OperatorScope;
 use app\services\cashier\v3\CashierV3ResultCode;
 use app\services\cashier\v3\CashierV3TransactionGuard;
+use app\services\cashier\v3\CashierV3CheckoutWorkspaceIdentity;
 
 /** Eventless editor for the seven bookkeeping-payment draft methods. */
 final class CashierV3CheckoutPaymentDraftServices
@@ -374,12 +375,7 @@ final class CashierV3CheckoutPaymentDraftServices
         if ($stateContextId === '') {
             throw self::invalid('checkout_state_context_missing', '当前收银工作台已失效，请刷新后重试。');
         }
-        return sprintf(
-            'ws:%d:%d:%s',
-            $operatorScope->storeId(),
-            $operatorScope->operatorId(),
-            $stateContextId
-        );
+        return CashierV3CheckoutWorkspaceIdentity::id($operatorScope->storeId(), $stateContextId);
     }
 
     private static function kernelIdempotencyKey(string $key): string

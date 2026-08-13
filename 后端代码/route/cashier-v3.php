@@ -84,6 +84,24 @@ Route::group('cashierapi/v3', function () {
             ->option(['real_name' => '门店PC客情工作台']);
         Route::get('unified-query/exports/:taskNo/download', 'Command/downloadUnifiedQueryExport')
             ->option(['real_name' => '统一查询导出下载']);
+
+        // 18091 门店端管理接口。这里沿用已验证的门店领域服务，但入口统一收敛到
+        // cashierapi/v3，避免新门店端继续依赖旧 18082 的 storeapi 路由。
+        Route::group('management', function () {
+            Route::get('staff/read/:id', 'store.staff.StoreStaff/read')
+                ->option(['real_name' => 'V3读取门店员工']);
+            Route::get('staff/person-complete/:id', 'store.staff.StoreStaff/personComplete')
+                ->option(['real_name' => 'V3读取员工完整资料']);
+            Route::get('staff/positions', 'store.staff.StoreStaff/selectablePositions')
+                ->option(['real_name' => 'V3读取可选岗位']);
+            Route::get('staff/work-members', 'store.staff.StoreStaff/getWorkMemberList')
+                ->option(['real_name' => 'V3读取企业微信成员']);
+            Route::post('staff/:id', 'store.staff.StoreStaff/save')
+                ->option(['real_name' => 'V3保存门店员工']);
+            Route::post('file/upload', 'store.file.SystemAttachment/upload')
+                ->option(['real_name' => 'V3上传员工头像']);
+
+        });
     })->middleware([
         AuthTokenMiddleware::class,
         ForceStoreSessionMiddleware::class,

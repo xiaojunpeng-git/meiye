@@ -1341,10 +1341,8 @@ final class CashierV3CashierModule
                 CashierV3ResultCode::STATUS_FAILED
             );
         }
-        return sprintf(
-            'ws:%d:%d:%s',
+        return \app\services\cashier\v3\CashierV3CheckoutWorkspaceIdentity::id(
             $operatorScope->storeId(),
-            $operatorScope->operatorId(),
             $stateContextId
         );
     }

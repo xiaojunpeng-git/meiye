@@ -6,6 +6,7 @@ use app\services\cashier\v3\CashierV3CommandException;
 use app\services\cashier\v3\CashierV3ResultCode;
 use app\services\cashier\v3\CashierV3DataScopeContext;
 use app\services\cashier\v3\CashierV3OperatorScope;
+use app\services\cashier\v3\CashierV3CheckoutWorkspaceIdentity;
 use app\services\cashier\v3\projection\CashierV3RootPartitionProvider;
 use app\services\cashier\v3\settlement\CashierV3CheckoutProjectionServices;
 use think\facade\Log;
@@ -50,12 +51,7 @@ final class CashierV3CashierPartitionProvider implements CashierV3RootPartitionP
         array $hints = []
     ): array {
         try {
-            $workspaceId = sprintf(
-                'ws:%d:%d:%s',
-                $operatorScope->storeId(),
-                $operatorScope->operatorId(),
-                $stateContextId
-            );
+            $workspaceId = CashierV3CheckoutWorkspaceIdentity::id($operatorScope->storeId(), $stateContextId);
             $draft = $this->workspace->readDraftOrSyntheticGuest(
                 $workspaceId,
                 $stateContextId,

@@ -237,6 +237,14 @@ class CashierV3CommandGatewayServices extends BaseServices
         array $actionDefinition = []
     ): array {
         $this->assertTablesReady();
+        if ($canonicalAction === 'submit-checkout') {
+            // Final checkout writes lifecycle facts that read the immutable
+            // card-operation settlement authority.  Check this dependency
+            // before inserting the command receipt or touching any business
+            // row, so every sale-only and mixed submit fails deterministically
+            // when the matching migration is absent.
+            $this->assertFinalCheckoutDependenciesReady();
+        }
 
         $actionDefinition = $this->authoritativeActionDefinition(
             $canonicalAction,
@@ -293,10 +301,8 @@ class CashierV3CommandGatewayServices extends BaseServices
             'store_id' => $operatorScope->storeId(),
             'operator_id' => $operatorScope->operatorId(),
             'state_context_id' => $stateContext['state_context_id'],
-            'workspace_id' => sprintf(
-                'ws:%d:%d:%s',
+            'workspace_id' => CashierV3CheckoutWorkspaceIdentity::id(
                 $operatorScope->storeId(),
-                $operatorScope->operatorId(),
                 $stateContext['state_context_id']
             ),
         ];
@@ -1682,7 +1688,6 @@ class CashierV3CommandGatewayServices extends BaseServices
     ): array {
         if ((string)($existing['action'] ?? '') !== $canonicalAction
             || (int)($existing['store_id'] ?? 0) !== $operatorScope->storeId()
-            || (int)($existing['operator_id'] ?? 0) !== $operatorScope->operatorId()
             || (string)($existing['request_hash'] ?? '') !== $requestHash
             || (string)($existing['contexts_hash'] ?? '') !== $contextsHash
         ) {
@@ -2256,6 +2261,30 @@ class CashierV3CommandGatewayServices extends BaseServices
             $this->readinessGuard = new CashierV3TableReadinessGuard();
         }
         $this->readinessGuard->assertReady();
+    }
+
+    private function assertFinalCheckoutDependenciesReady(): void
+    {
+        $table = 'eb_cashier_v3_card_operation_settlement';
+        $rows = Db::query(
+            'SELECT TABLE_NAME AS t FROM information_schema.TABLES'
+            . ' WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?',
+            [$table]
+        );
+        $existing = (string)($rows[0]['t'] ?? $rows[0]['TABLE_NAME'] ?? '');
+        if ($existing === $table) {
+            return;
+        }
+        throw new CashierV3CommandException(
+            CashierV3ResultCode::ACTION_DEPENDENCY_NOT_READY,
+            '收银服务依赖尚未完成升级，当前结账未提交，请联系管理员完成数据库升级。',
+            CashierV3ResultCode::STATUS_FAILED,
+            [
+                'action' => 'submit-checkout',
+                'reason' => 'checkout_submission_tables_missing',
+                'missing_tables' => [$table],
+            ]
+        );
     }
 
     protected function encodeJson(array $value): string

@@ -68,6 +68,45 @@ await test('two tabs retain independent V3 authorization headers', async () => {
   assert.deepEqual(calls, ['Bearer store-a-token', 'Bearer store-b-token'])
 })
 
+await test('adapter preserves a structured submit failure even when HTTP status is non-2xx', async () => {
+  const failure = {
+    result: {
+      status: 'failed',
+      code: 'ACTION_DEPENDENCY_NOT_READY',
+      message: '收银服务依赖尚未完成升级，当前结账未提交。'
+    },
+    boundAction: 'submit-checkout',
+    boundCanonical: 'submit-checkout',
+    boundIdempotencyKey: 'CHECKOUT-12345678-1234-4abc-8abc-1234567890ab',
+    correlationId: 'CORR-12345678-1234-4abc-8abc-1234567890ab',
+    boundCorrelationId: 'CORR-12345678-1234-4abc-8abc-1234567890ab',
+    stateContextId: 'ctx-1'
+  }
+  const adapter = adapterModule.createCashierV3HttpAdapter({
+    origin: 'https://cashier.example.test',
+    timeoutMs: 0,
+    storage: { getItem: () => 'tab-a-token' },
+    fetchImpl: async () => ({
+      ok: false,
+      status: 400,
+      text: async () => JSON.stringify({ status: 400, data: failure })
+    })
+  })
+  const response = await adapter.request('submit-checkout', {
+    stateContextId: 'ctx-1',
+    correlationId: failure.correlationId,
+    command: {
+      action: 'submit-checkout',
+      idempotencyKey: failure.boundIdempotencyKey,
+      contexts: []
+    }
+  })
+  assert.equal(response.status, 400)
+  assert.equal(response.data.result.status, 'failed')
+  assert.equal(response.data.result.code, 'ACTION_DEPENDENCY_NOT_READY')
+  assert.equal(response.data.boundIdempotencyKey, failure.boundIdempotencyKey)
+})
+
 await test('adapter rejects cross-origin endpoints and action mismatches before sending credentials', async () => {
   assert.throws(() => adapterModule.createCashierV3HttpAdapter({
     origin: 'https://cashier.example.test',

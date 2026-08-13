@@ -25,6 +25,7 @@ final class CashierV3CardOperationReadinessGuard
         'eb_cashier_v3_card_state',
         'eb_cashier_v3_card_operation',
         'eb_cashier_v3_card_operation_line',
+        'eb_cashier_v3_card_operation_settlement',
     ];
 
     /** @var callable|null */

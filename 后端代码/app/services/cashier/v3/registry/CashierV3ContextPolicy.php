@@ -29,6 +29,9 @@ class CashierV3ContextPolicy
     /** @var callable|null */
     protected $serverResourceDiscoverer;
 
+    /** @var bool 少数纯资料保存命令可由领域事务自行锁定，不要求页面资源版本。 */
+    protected $allowsEmptyContexts;
+
     /**
      * @param string[] $staticRequired
      * @param string[] $staticAllowed
@@ -44,12 +47,13 @@ class CashierV3ContextPolicy
         callable $dynamicResolver = null,
         array $requiredTouchedRoles = [],
         array $declaredDynamicRoles = [],
-        array $declaredDynamicKinds = []
+        array $declaredDynamicKinds = [],
+        bool $allowsEmptyContexts = false
     ) {
         foreach (array_merge($staticRequired, $staticAllowed, $declaredDynamicKinds) as $kind) {
             CashierV3ResourceKindCatalog::assertKnown($kind);
         }
-        if (!$staticRequired && $dynamicResolver === null) {
+        if (!$staticRequired && $dynamicResolver === null && !$allowsEmptyContexts) {
             throw new \LogicException(sprintf('写命令 %s 的 context policy 必须至少有一个必需资源', $action));
         }
         $this->action = $action;
@@ -59,6 +63,7 @@ class CashierV3ContextPolicy
         $this->requiredTouchedRoles = array_values(array_unique($requiredTouchedRoles));
         $this->declaredDynamicRoles = array_values(array_unique($declaredDynamicRoles));
         $this->declaredDynamicKinds = array_values(array_unique($declaredDynamicKinds));
+        $this->allowsEmptyContexts = $allowsEmptyContexts;
     }
 
     public function action(): string
@@ -211,6 +216,7 @@ class CashierV3ContextPolicy
             'identities' => $identities,
             'required_read_roles' => array_values(array_unique($readRoles)),
             'required_touched_roles' => array_values(array_unique($touchedRoles)),
+            'allows_empty_contexts' => $this->allowsEmptyContexts,
         ];
         // 透传 Gateway／事务内依赖的动态合同字段（禁止在此丢弃）
         if ($this->dynamicResolver !== null && isset($extra) && is_array($extra)) {

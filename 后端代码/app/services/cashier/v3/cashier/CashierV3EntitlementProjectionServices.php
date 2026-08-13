@@ -1151,10 +1151,8 @@ final class CashierV3EntitlementProjectionServices
                 '当前收银工作台会话无效，请刷新页面后重试。'
             );
         }
-        return sprintf(
-            'ws:%d:%d:%s',
+        return \app\services\cashier\v3\CashierV3CheckoutWorkspaceIdentity::id(
             $operatorScope->storeId(),
-            $operatorScope->operatorId(),
             $stateContextId
         );
     }

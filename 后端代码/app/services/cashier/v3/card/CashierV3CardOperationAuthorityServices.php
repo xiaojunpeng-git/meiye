@@ -226,10 +226,8 @@ final class CashierV3CardOperationAuthorityServices
 
     private static function workspaceId(CashierV3OperatorScope $operatorScope, string $stateContextId): string
     {
-        return sprintf(
-            'ws:%d:%d:%s',
+        return \app\services\cashier\v3\CashierV3CheckoutWorkspaceIdentity::id(
             $operatorScope->storeId(),
-            $operatorScope->operatorId(),
             $stateContextId
         );
     }

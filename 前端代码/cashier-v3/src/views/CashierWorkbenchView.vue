@@ -4358,6 +4358,14 @@ function resetCashierLocalContext() {
 }
 
 async function closeCheckoutOverlay(options = {}) {
+  if (options?.discardCheckoutRecovery === true) {
+    // “重新开单”是结果未知现场的统一出口：先清理未完成结账草稿，
+    // 再重建空收银台并释放本地恢复票据，避免刷新后旧支付结果再次弹出。
+    // 后端对已经产生正式事实的请求只保留审计锚点，不物理删除订单事实。
+    const cleared = await confirmClearCart()
+    if (resultStatus(cleared) !== 'succeeded') return cleared
+    return cleared
+  }
   if (checkoutRequiresRootReload.value) {
     checkoutRequiresRootReload.value = false
     window.location.reload()

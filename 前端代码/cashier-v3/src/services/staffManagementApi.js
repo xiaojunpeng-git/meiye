@@ -27,19 +27,19 @@ async function request(path, options = {}) {
 }
 
 export function readStoreStaff(staffId) {
-  return request(`/storeapi/staff/read/${encodeURIComponent(staffId)}`)
+  return request(`/cashierapi/v3/management/staff/read/${encodeURIComponent(staffId)}`)
 }
 
 export function readStoreStaffComplete(staffId) {
-  return request(`/storeapi/staff/staff/person_complete/${encodeURIComponent(staffId)}`)
+  return request(`/cashierapi/v3/management/staff/person-complete/${encodeURIComponent(staffId)}`)
 }
 
 export function readStoreStaffPositions() {
-  return request('/storeapi/staff/staff/positions')
+  return request('/cashierapi/v3/management/staff/positions')
 }
 
 export function readStoreStaffWorkMembers() {
-  return request('/storeapi/staff/workMember/list')
+  return request('/cashierapi/v3/management/staff/work-members')
 }
 
 export async function uploadStoreStaffAvatar(file) {
@@ -47,7 +47,7 @@ export async function uploadStoreStaffAvatar(file) {
   const formData = new FormData()
   formData.append('pid', '0')
   formData.append('file', file)
-  const payload = await request('/storeapi/file/upload', { method: 'POST', formData })
+  const payload = await request('/cashierapi/v3/management/file/upload', { method: 'POST', formData })
   const source = payload?.data?.src || payload?.data?.url || ''
   if (!source) throw new Error('头像上传失败。')
   return String(source)
@@ -84,7 +84,7 @@ function normalizedDate(value) {
 
 export function saveStoreStaff(staffId, values) {
   const requestToken = createRequestToken()
-  return request(`/storeapi/staff/staff/${encodeURIComponent(staffId)}`, {
+  return request(`/cashierapi/v3/management/staff/${encodeURIComponent(staffId)}`, {
     method: 'POST',
     requestToken,
     body: {

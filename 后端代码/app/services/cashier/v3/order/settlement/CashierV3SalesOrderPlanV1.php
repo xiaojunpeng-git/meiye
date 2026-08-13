@@ -124,7 +124,9 @@ final class CashierV3SalesOrderPlanV1
         string $serverNamespaceSecret,
         string $businessDocumentNo = '',
         array $businessSource = [],
-        array $entitlementCredit = []
+        array $entitlementCredit = [],
+        int $finalOperatorId = 0,
+        string $finalOperatorName = ''
     ): self {
         self::assertExactKeys(
             $lockedAggregate,
@@ -141,6 +143,13 @@ final class CashierV3SalesOrderPlanV1
         }
 
         $request = self::normalizeRequest($lockedAggregate['request']);
+        $finalOperatorId = $finalOperatorId > 0 ? $finalOperatorId : $request['operator_id'];
+        $finalOperatorName = trim($finalOperatorName) !== ''
+            ? trim($finalOperatorName)
+            : $request['operator_name_snapshot'];
+        if ($finalOperatorId <= 0 || $finalOperatorName === '') {
+            throw self::failure('sales_order_final_operator_invalid');
+        }
         $businessSource = self::normalizeBusinessSource($businessSource);
         self::assertCurrentRequest($lockedAggregate['currentRequest'], $request);
         self::assertIdempotencyKey($commandIdempotencyKey, 'sales_order_command_idempotency_key_invalid');
@@ -300,8 +309,8 @@ final class CashierV3SalesOrderPlanV1
             'store_name_snapshot' => $request['store_name_snapshot'],
             'member_id' => $request['member_id'],
             'member_name_snapshot' => $request['member_name_snapshot'],
-            'operator_id' => $request['operator_id'],
-            'operator_name_snapshot' => $request['operator_name_snapshot'],
+            'operator_id' => $finalOperatorId,
+            'operator_name_snapshot' => $finalOperatorName,
             'checkout_request_id' => $request['request_id'],
             'checkout_request_version' => $request['request_version'],
             'checkout_prepare_idempotency_key' => $request['last_idempotency_key'],
@@ -1120,12 +1129,7 @@ final class CashierV3SalesOrderPlanV1
             }
             self::assertExactKeys($row, self::PAYMENT_KEYS, 'locked_checkout_payment_shape_invalid');
             self::assertChildBinding($row, $request, 'payment', $index);
-            if (self::positiveInt(
-                $row['operator_id'],
-                'locked_checkout_payment_operator_invalid'
-            ) !== $request['operator_id']) {
-                throw self::failure('locked_checkout_payment_operator_mismatch');
-            }
+            self::positiveInt($row['operator_id'], 'locked_checkout_payment_operator_invalid');
             $method = (string)$row['payment_method'];
             if (!in_array($method, self::PAYMENT_METHODS, true)) {
                 throw self::failure('locked_checkout_payment_method_invalid', ['method' => $method]);

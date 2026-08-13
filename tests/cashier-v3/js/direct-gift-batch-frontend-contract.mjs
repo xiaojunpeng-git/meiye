@@ -13,4 +13,6 @@ assert.match(source, /v-model="item\.quantity"/, '每项赠送数量必须可编
 assert.match(source, /v-model="item\.validityEnd" type="date"/, '每项赠送内容必须独立设置有效期')
 assert.match(source, /validityEnd: item\.validityEnd \|\| ''/, '提交时必须按明细携带有效期')
 assert.doesNotMatch(source, /const validityEnd = ref\('/, '赠送弹层不得再使用全局有效期')
+assert.doesNotMatch(source, /赠送内容不加入销售订单，不产生收款或业绩/, '赠送弹层不得展示多余的业务说明')
+assert.match(source, /class="direct-gift-overlay__member-context"[\s\S]*?<h2>\{\{ memberName \}\}<\/h2>[\s\S]*?办理门店：\{\{ handlingStoreName \}\}/, '办理门店必须显示在会员标题区域的右下方')
 console.log('cashier direct-gift batch frontend contract: PASS')

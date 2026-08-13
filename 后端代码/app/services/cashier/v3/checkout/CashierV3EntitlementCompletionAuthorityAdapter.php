@@ -134,10 +134,8 @@ final class CashierV3EntitlementCompletionAuthorityAdapter
             64,
             'authority_discovery_state_context_invalid'
         );
-        $workspaceId = sprintf(
-            'ws:%d:%d:%s',
+        $workspaceId = \app\services\cashier\v3\CashierV3CheckoutWorkspaceIdentity::id(
             $operatorScope->storeId(),
-            $operatorScope->operatorId(),
             $stateContextId
         );
 
@@ -752,7 +750,6 @@ final class CashierV3EntitlementCompletionAuthorityAdapter
             ->where('state_context_id', $stateContextId)
             ->where('tenant_id', $dataScope->tenantId())
             ->where('store_id', $dataScope->forcedStoreId())
-            ->where('operator_id', $operatorScope->operatorId())
             ->find());
         if (!$row) {
             // This lookup runs before the checkout resources are locked. Keep
@@ -1277,11 +1274,7 @@ final class CashierV3EntitlementCompletionAuthorityAdapter
             'memberActive' => true,
             'workspaceStatus' => 'editing',
             'operatorId' => $operatorScope->operatorId(),
-            'operatorName' => self::text(
-                $request['operator_name_snapshot'] ?? null,
-                128,
-                'authority_operator_name_invalid'
-            ),
+            'operatorName' => self::operatorName($dataScope->operatorProfile()),
             'operatorStoreId' => $operatorScope->storeId(),
             'permissionSnapshotFingerprint' => $dataScope->permissionVersion(),
             'operatorFeatures' => $dataScope->grantedFeatures(),
@@ -1640,7 +1633,6 @@ final class CashierV3EntitlementCompletionAuthorityAdapter
         if (!$request
             || (string)($request['tenant_id'] ?? '') !== $dataScope->tenantId()
             || (int)($request['store_id'] ?? 0) !== $dataScope->forcedStoreId()
-            || (int)($request['operator_id'] ?? 0) !== $operatorScope->operatorId()
             || (string)($request['request_status'] ?? '') !== 'ready_for_submit'
             || !is_array($aggregate['lines'])) {
             throw self::failure('authority_locked_aggregate_scope_invalid');
@@ -1987,6 +1979,17 @@ final class CashierV3EntitlementCompletionAuthorityAdapter
             throw self::failure($reason);
         }
         return $value;
+    }
+
+    private static function operatorName(array $profile): string
+    {
+        foreach (['staff_name', 'real_name', 'name', 'account'] as $field) {
+            $value = trim((string)($profile[$field] ?? ''));
+            if ($value !== '') {
+                return $value;
+            }
+        }
+        throw self::failure('authority_operator_name_invalid');
     }
 
     private static function assertExactKeys(array $value, array $expected, string $field): void

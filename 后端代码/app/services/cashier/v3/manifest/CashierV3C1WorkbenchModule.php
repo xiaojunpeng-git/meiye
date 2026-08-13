@@ -23,8 +23,9 @@ class CashierV3C1WorkbenchModule implements CashierV3ActionModule
             self::OWNER,
             [],
             [
-                // 仅建立已经过门店任职、入口与岗位规则校验的 V3 会话；
-                // 不授予收银动作，后续每个页面／action 仍按自身 feature 拦截。
+                // 建立已经过门店任职、入口与岗位规则校验的 V3 会话；
+                // 组织数据权限人员即使无 system_store_staff 也可建立只读
+                // 门店会话，但后续所有 command 由统一只读门禁拒绝。
                 'open-cashier-workbench' => self::POLICY_STORE_V3_SESSION,
             ]
         );

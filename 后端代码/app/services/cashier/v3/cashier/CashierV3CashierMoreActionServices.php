@@ -39,10 +39,8 @@ final class CashierV3CashierMoreActionServices
             throw self::invalid('cashier_more_action_scope_invalid');
         }
         $stateContextId = trim((string)($scope['state_context_id'] ?? ''));
-        $workspaceId = sprintf(
-            'ws:%d:%d:%s',
+        $workspaceId = \app\services\cashier\v3\CashierV3CheckoutWorkspaceIdentity::id(
             $operatorScope->storeId(),
-            $operatorScope->operatorId(),
             $stateContextId
         );
         $payload = is_array($scope['payload'] ?? null) ? $scope['payload'] : [];
@@ -263,7 +261,6 @@ final class CashierV3CashierMoreActionServices
     ): array {
         if ($stateContextId === '' || strlen($stateContextId) > 64
             || $operatorScope->storeId() !== $dataScope->forcedStoreId()
-            || $operatorScope->operatorId() !== $dataScope->operatorId()
             || !hash_equals($operatorScope->tenantId(), $dataScope->tenantId())
             || !hash_equals($operatorScope->organizationId(), $dataScope->organizationId())) {
             throw self::invalid('cashier_more_action_scope_binding_invalid');
@@ -272,7 +269,6 @@ final class CashierV3CashierMoreActionServices
             ->where('workspace_id', $workspaceId)
             ->where('state_context_id', $stateContextId)
             ->where('store_id', $operatorScope->storeId())
-            ->where('operator_id', $operatorScope->operatorId())
             ->lock(true)
             ->find();
         if (!$draft) {

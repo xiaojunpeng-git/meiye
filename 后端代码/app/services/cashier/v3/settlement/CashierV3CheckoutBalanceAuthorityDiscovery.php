@@ -7,6 +7,7 @@ use app\services\cashier\v3\CashierV3DataScopeContext;
 use app\services\cashier\v3\CashierV3OperatorScope;
 use app\services\cashier\v3\CashierV3ResultCode;
 use app\services\cashier\v3\CashierV3TransactionGuard;
+use app\services\cashier\v3\CashierV3CheckoutWorkspaceIdentity;
 use app\services\cashier\v3\checkout\provider\CashierV3MemberBalanceContractException;
 use app\services\cashier\v3\checkout\provider\CashierV3MemberBalanceProvider;
 use think\facade\Db;
@@ -60,17 +61,11 @@ final class CashierV3CheckoutBalanceAuthorityDiscovery
                 'checkout_balance_discovery_request_version_invalid'
             );
             $stateContextId = self::stateContextId($scope['state_context_id'] ?? null);
-            $workspaceId = sprintf(
-                'ws:%d:%d:%s',
-                $operator->storeId(),
-                $operator->operatorId(),
-                $stateContextId
-            );
+            $workspaceId = CashierV3CheckoutWorkspaceIdentity::id($operator->storeId(), $stateContextId);
             $request = Db::name('cashier_v3_checkout_request')
                 ->where('request_id', $requestId)
                 ->where('tenant_id', $dataScope->tenantId())
                 ->where('store_id', $dataScope->forcedStoreId())
-                ->where('operator_id', $operator->operatorId())
                 ->where('workspace_id', $workspaceId)
                 ->where('state_context_id', $stateContextId)
                 ->whereIn('request_status', ['editing', 'ready_for_submit'])
