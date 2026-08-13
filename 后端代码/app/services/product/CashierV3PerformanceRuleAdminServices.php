@@ -27,7 +27,7 @@ final class CashierV3PerformanceRuleAdminServices
                 'project_id' => $projectId,
                 'consumption_mode' => CashierV3EntitlementCompletionKernel::PERFORMANCE_ACTUAL,
                 'consumption_configured_unit_amount_cents' => 0,
-                'labor_mode' => CashierV3EntitlementCompletionKernel::PERFORMANCE_ACTUAL,
+                'labor_mode' => CashierV3EntitlementCompletionKernel::PERFORMANCE_CONFIGURED,
                 'labor_configured_unit_amount_cents' => 0,
                 'current_version' => 1,
             ]);
@@ -39,7 +39,8 @@ final class CashierV3PerformanceRuleAdminServices
     {
         $this->assertProject($projectId);
         $consumptionMode = $this->mode($payload['consumption_mode'] ?? CashierV3EntitlementCompletionKernel::PERFORMANCE_ACTUAL);
-        $laborMode = $this->mode($payload['labor_mode'] ?? CashierV3EntitlementCompletionKernel::PERFORMANCE_ACTUAL);
+        // 平台端统一使用手工费模式，前端不再暴露业绩计算方式选择。
+        $laborMode = CashierV3EntitlementCompletionKernel::PERFORMANCE_CONFIGURED;
         $consumptionAmount = $this->moneyToCents($payload['consumption_configured_unit_amount'] ?? 0);
         $laborAmount = $this->moneyToCents($payload['labor_configured_unit_amount'] ?? 0);
         $now = time();
@@ -92,8 +93,8 @@ final class CashierV3PerformanceRuleAdminServices
     {
         $text = trim((string)$value);
         if ($text === '') $text = '0';
-        if (!preg_match('/^(?:0|[1-9]\d*)(?:\.\d{1,2})?$/D', $text)) {
-            throw new \InvalidArgumentException('固定手工费必须是非负金额，最多两位小数');
+        if (!preg_match('/^(?:0|[1-9]\d*)$/D', $text)) {
+            throw new \InvalidArgumentException('手工费必须是非负整数');
         }
         [$whole, $fraction] = array_pad(explode('.', $text, 2), 2, '');
         $cents = ((int)$whole * 100) + (int)str_pad($fraction, 2, '0');
@@ -107,7 +108,7 @@ final class CashierV3PerformanceRuleAdminServices
             'project_id' => (int)($row['project_id'] ?? 0),
             'consumption_mode' => (string)($row['consumption_mode'] ?? CashierV3EntitlementCompletionKernel::PERFORMANCE_ACTUAL),
             'consumption_configured_unit_amount' => $this->centsToMoney((int)($row['consumption_configured_unit_amount_cents'] ?? 0)),
-            'labor_mode' => (string)($row['labor_mode'] ?? CashierV3EntitlementCompletionKernel::PERFORMANCE_ACTUAL),
+            'labor_mode' => (string)($row['labor_mode'] ?? CashierV3EntitlementCompletionKernel::PERFORMANCE_CONFIGURED),
             'labor_configured_unit_amount' => $this->centsToMoney((int)($row['labor_configured_unit_amount_cents'] ?? 0)),
             'version' => (int)($row['current_version'] ?? 1),
         ];

@@ -48,7 +48,7 @@
               <Option :value="3">虚拟商品</Option>
               <Option :value="4">次卡商品</Option>
               <Option :value="5">卡项</Option>
-              <Option :value="6">预约商品</Option>
+              <Option :value="6">项目</Option>
             </Select>
           </FormItem>
           <productBaseSet
@@ -60,27 +60,19 @@
             @sourceChange="sourceChange"
           ></productBaseSet>
           <div v-if="Number(formData.product_type) === 6" class="performance-rule-panel">
-            <FormItem label="项目业绩计算方式：">
-              <RadioGroup v-model="performanceRule.labor_mode" :disabled="Number($route.params.id || 0) <= 0">
-                <Radio label="actual_entitlement_amount">按业绩规则</Radio>
-                <Radio label="project_configured_amount">按手工费</Radio>
-              </RadioGroup>
-            </FormItem>
-            <FormItem label="固定手工费：">
+            <FormItem label="手工费：">
               <InputNumber
                 v-model="performanceRule.labor_configured_unit_amount"
                 :min="0"
-                :precision="2"
-                :disabled="Number($route.params.id || 0) <= 0 || performanceRule.labor_mode !== 'project_configured_amount'"
+                :precision="0"
                 style="width: 220px"
               />
-              <span class="tips ml10">默认用于手工模式；收银临时调整手工费暂未开放。</span>
             </FormItem>
             <FormItem v-if="Number($route.params.id || 0) > 0" label="">
-              <Button type="primary" :loading="performanceRuleSaving" @click="savePerformanceRule">保存业绩与手工费</Button>
+              <Button type="primary" :loading="performanceRuleSaving" @click="savePerformanceRule">保存手工费</Button>
               <span class="tips ml10">版本 {{ performanceRule.version || 1 }}</span>
             </FormItem>
-            <div v-else class="tips performance-rule-tip">请先保存商品，再进入编辑页配置项目业绩方式和固定手工费。</div>
+            <div v-else class="tips performance-rule-tip">请先保存商品，再进入编辑页配置手工费。</div>
           </div>
         </div>
         <div v-show="currentTab === '2'">
@@ -1843,7 +1835,7 @@ export default {
       type: 0,
       create_request_key: '',
       performanceRule: {
-        labor_mode: 'actual_entitlement_amount',
+        labor_mode: 'project_configured_amount',
         labor_configured_unit_amount: 0,
         consumption_mode: 'actual_entitlement_amount',
         consumption_configured_unit_amount: 0,
@@ -3177,7 +3169,7 @@ export default {
       if (!id) return;
       this.performanceRuleSaving = true;
       savePerformanceRuleApi(id, {
-        labor_mode: this.performanceRule.labor_mode,
+        labor_mode: 'project_configured_amount',
         labor_configured_unit_amount: this.performanceRule.labor_configured_unit_amount,
         consumption_mode: this.performanceRule.consumption_mode,
         consumption_configured_unit_amount: this.performanceRule.consumption_configured_unit_amount,
@@ -3787,6 +3779,21 @@ export default {
         .then(async (res) => {
           this.openSubimit = true;
           this.$Message.success(res.msg);
+          const createdProductId = Number(res && res.data && res.data.product_id);
+          if (Number(formData.product_type) === 6 && !Number(this.$route.params.id || 0) && createdProductId > 0) {
+            try {
+              await savePerformanceRuleApi(createdProductId, {
+                labor_mode: 'project_configured_amount',
+                labor_configured_unit_amount: this.performanceRule.labor_configured_unit_amount,
+                consumption_mode: this.performanceRule.consumption_mode,
+                consumption_configured_unit_amount: this.performanceRule.consumption_configured_unit_amount,
+              });
+            } catch (ruleError) {
+              this.openSubimit = false;
+              this.$Message.error((ruleError && ruleError.msg) || '商品已创建，但手工费保存失败，请重试');
+              return;
+            }
+          }
           if (this.$route.params.id === '0') {
             cacheDelete().catch((err) => {
               this.$Message.error(err.msg);

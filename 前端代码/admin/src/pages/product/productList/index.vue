@@ -616,6 +616,10 @@
             <span v-else-if="col.key === 'card_rule_type'">{{
               cardRuleName(row)
             }}</span>
+            <span v-else-if="col.key === 'labor_fee'">
+              <template v-if="Number(row.product_type) !== 6">—</template>
+              <template v-else>{{ Number(row.labor_fee || 0) }}</template>
+            </span>
             <span v-else-if="col.key === 'spec_type'">{{
               row.spec_type ? "多规格" : "单规格"
             }}</span>
@@ -1309,6 +1313,7 @@ const PRODUCT_COLUMNS_META = [
   { key: "product_type", title: "商品类型", minWidth: 100 },
   { key: "card_rule_type", title: "卡项规则", minWidth: 110 },
   { key: "price", title: "商品售价", minWidth: 90 },
+  { key: "labor_fee", title: "手工费", minWidth: 90 },
   { key: "cost", title: "成本价", minWidth: 90 },
   { key: "is_inventory", title: "参与库存管理", minWidth: 110 },
   { key: "allow_negative_stock", title: "允许负库存", minWidth: 100 },
@@ -1335,6 +1340,7 @@ const PRODUCT_DEFAULT_COLUMN_CONFIG = [
   { key: "product_type", show: true },
   { key: "card_rule_type", show: true },
   { key: "price", show: true },
+  { key: "labor_fee", show: true },
   { key: "cost", show: true },
   { key: "is_inventory", show: true },
   { key: "allow_negative_stock", show: true },

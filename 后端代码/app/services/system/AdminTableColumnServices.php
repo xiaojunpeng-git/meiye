@@ -74,7 +74,7 @@ class AdminTableColumnServices extends BaseServices
             ]);
         } catch (\Throwable $e) {
             if ($this->isMissingTableError($e)) {
-                throw new AdminException('列设置表未初始化，请先执行数据库升级包 20260715-008-staff-manage-opt');
+                throw new AdminException('列设置表未初始化，请先执行数据库升级包 20260814-001-admin-table-column');
             }
             throw $e;
         }

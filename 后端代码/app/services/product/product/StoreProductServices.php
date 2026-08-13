@@ -54,6 +54,7 @@ use app\services\user\UserRelationServices;
 use app\services\user\UserSearchServices;
 use app\services\user\UserServices;
 use app\jobs\product\ProductLogJob;
+use app\services\cashier\v3\CashierV3ScopeResolver;
 use mohe\exceptions\AdminException;
 use mohe\services\FormBuilder as Form;
 use mohe\services\SystemConfigService;
@@ -62,6 +63,7 @@ use mohe\traits\OptionTrait;
 use think\exception\ValidateException;
 use think\facade\Config;
 use think\facade\Route as Url;
+use think\facade\Db;
 
 /**
  * Class StoreProductService
@@ -200,6 +202,22 @@ class StoreProductServices extends BaseServices
         $count = $this->dao->getCount($where);
         $list = $this->dao->getList($where, $page, $limit, $order_string);
         if ($list) {
+            // 项目手工费来自收银 V3 项目业绩规则权威表，批量读取避免逐行查询。
+            $laborFeeByProject = [];
+            $projectIds = array_values(array_filter(array_map(function ($item) {
+                return (int)($item['product_type'] ?? 0) === 6 ? (int)($item['id'] ?? 0) : 0;
+            }, $list)));
+            if ($projectIds) {
+                try {
+                    $laborFeeByProject = Db::name('cashier_v3_project_performance_rule')
+                        ->where('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
+                        ->whereIn('project_id', array_unique($projectIds))
+                        ->column('labor_configured_unit_amount_cents', 'project_id');
+                } catch (\Throwable $e) {
+                    // 旧实例尚未执行规则升级时，列表仍可正常打开，手工费按 0 展示。
+                    $laborFeeByProject = [];
+                }
+            }
             $cateIds = implode(',', array_column($list, 'cate_id'));
             /** @var StoreProductCategoryServices $categoryService */
             $categoryService = app()->make(StoreProductCategoryServices::class);
@@ -241,6 +259,10 @@ class StoreProductServices extends BaseServices
             /** @var UserLabelServices $userLabelServices */
             $userLabelServices = app()->make(UserLabelServices::class);
             foreach ($list as &$item) {
+                $projectId = (int)($item['id'] ?? 0);
+                $item['labor_fee'] = (int)($item['product_type'] ?? 0) === 6
+                    ? intdiv((int)($laborFeeByProject[$projectId] ?? 0), 100)
+                    : 0;
                 if ($item['spec_type'] == 0 && $is_move) {
                     $item['attr_value'] = $attrValueList[$item['id']] ?? [];
                 }
