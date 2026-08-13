@@ -78,9 +78,14 @@ class OrganizationEmployeeServices extends BaseServices
                 $existing = Db::name('employee')->where('phone', $phone)->lock(true)->find();
                 if ($existing) {
                     if ((int)($existing['is_del'] ?? 0) === 1) {
-                        throw new AdminException('该手机号对应员工已删除');
+                        $restored = $write->restoreDeletedEmployeeByPhone($phone, $operatorContext);
+                        if (!$restored) {
+                            throw new AdminException('员工主档状态已变化，请重试');
+                        }
+                        $employeeId = (int)$restored['employee_id'];
+                    } else {
+                        $employeeId = (int)$existing['id'];
                     }
-                    $employeeId = (int)$existing['id'];
                 } else {
                     $now = time();
                     $employeeId = (int)Db::name('employee')->insertGetId([

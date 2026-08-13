@@ -807,7 +807,13 @@ class EmployeePersonCompleteWriteServices extends BaseServices
         $exist = Db::name('employee')->where('phone', $phone)->lock(true)->find();
         if ($exist) {
             if ((int)($exist['is_del'] ?? 0) === 1) {
-                throw new AdminException('该手机号对应员工已删除');
+                /** @var EmployeeStaffWriteServices $staffWrite */
+                $staffWrite = app()->make(EmployeeStaffWriteServices::class);
+                $restored = $staffWrite->restoreDeletedEmployeeByPhone($phone, $opCtx);
+                if (!$restored) {
+                    throw new AdminException('员工主档状态已变化，请重试');
+                }
+                return (int)$restored['employee_id'];
             }
             $employeeId = (int)$exist['id'];
             Db::name('employee')->where('id', $employeeId)->update([

@@ -251,6 +251,45 @@ class EmployeeStaffWriteServices extends BaseServices
     }
 
     /**
+     * 受控恢复已软删除的员工主档。
+     *
+     * 只恢复 employee 主档本身，不恢复历史门店任职；调用方随后必须按本次
+     * 请求创建或恢复目标组织/门店关系。手机号是唯一定位条件，且整段调用须
+     * 处于外层事务内，避免并发新建重复员工。
+     *
+     * @return array{employee_id:int,name:string,phone:string,avatar:string}|null
+     */
+    public function restoreDeletedEmployeeByPhone(string $phone, array $operatorContext = []): ?array
+    {
+        $phone = $this->assertStrictPhone($phone);
+        $employee = Db::name('employee')->where('phone', $phone)->lock(true)->find();
+        if (!$employee || (int)($employee['is_del'] ?? 0) !== 1) {
+            return null;
+        }
+        $now = time();
+        Db::name('employee')->where('id', (int)$employee['id'])->update([
+            'is_del' => 0,
+            'status' => 1,
+            'update_time' => $now,
+        ]);
+        $this->writeChangeLog((int)$employee['id'], 'employee_archive_restore', 'employee', (int)$employee['id'], [
+            'restored' => true,
+            'phone' => $phone,
+            'previous_is_del' => (int)($employee['is_del'] ?? 1),
+            'previous_status' => (int)($employee['status'] ?? 0),
+            'current_is_del' => 0,
+            'current_status' => 1,
+            'assignment_scope' => 'current_request_only',
+        ], $operatorContext);
+        return [
+            'employee_id' => (int)$employee['id'],
+            'name' => (string)($employee['name'] ?? ''),
+            'phone' => (string)($employee['phone'] ?? $phone),
+            'avatar' => (string)($employee['avatar'] ?? self::DEFAULT_AVATAR),
+        ];
+    }
+
+    /**
      * 单店离职/关闭/软删统一内核：
      * - 始终 status=0，清本店角色/收银/手机订单标识
      * - 不改 store_id，不物理删除
@@ -536,7 +575,19 @@ class EmployeeStaffWriteServices extends BaseServices
         $employee = Db::name('employee')->where('phone', $phone)->lock(true)->find();
         if ($employee) {
             if ((int)($employee['is_del'] ?? 0) === 1) {
-                throw new AdminException('该手机号对应员工主档已删除，请联系总部处理');
+                $restored = $this->restoreDeletedEmployeeByPhone($phone, $operatorContext);
+                if (!$restored) {
+                    throw new AdminException('员工主档状态已变化，请重试');
+                }
+                return [
+                    'employee_id' => (int)$restored['employee_id'],
+                    'profile_updated' => true,
+                    'profile' => [
+                        'name' => (string)$restored['name'],
+                        'phone' => (string)$restored['phone'],
+                        'avatar' => (string)$restored['avatar'],
+                    ],
+                ];
             }
             return [
                 'employee_id' => (int)$employee['id'],
