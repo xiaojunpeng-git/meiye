@@ -119,7 +119,9 @@ let feedbackTimeoutId = null
 const sidebarPreferenceKey = 'cashier-v3-sidebar-collapsed'
 const isSidebarCollapsed = ref(readSidebarPreference())
 const isInventoryMenuExpanded = ref(false)
-const inventorySessionToken = ref('')
+// 库存工作区与收银台共用当前 V3 会话；初始化时就读取，避免 HMR/路由重载
+// 期间库存组件先于点击事件挂载而拿到空 token。
+const inventorySessionToken = ref(readStoreV3SessionToken())
 
 const inventoryFeatureItems = [
   { key: 'overview', label: '首页', featureCode: 'cashier.v3.inventory.overview' },

@@ -12,7 +12,7 @@ import InventoryOperationalUnifiedQueryToolbar from './components/InventoryOpera
 import InventoryRecipeModal from './components/InventoryRecipeModal.vue'
 import InventoryStoreSelector from './components/InventoryStoreSelector.vue'
 import { inventoryStatusLabel } from './statusLabels'
-import { inventoryApi, inventoryCommandIdempotencyKey, platformInventoryApi, setInventoryEmbeddedSessionToken } from './services/inventoryApi'
+import { inventoryApi, inventoryCommandIdempotencyKey, platformInventoryApi, setInventoryEmbeddedSessionToken, clearInventoryEmbeddedSessionToken } from './services/inventoryApi'
 import { UnifiedQueryToolbar, useUnifiedQueryPage } from '@mohe/unified-query-vue3'
 import '@mohe/unified-query-vue3/styles.css'
 
@@ -100,6 +100,7 @@ let embeddedSessionReady = null
 watch(() => props.sessionToken, (token) => {
   const value = String(token || '').trim()
   if (value) setInventoryEmbeddedSessionToken(value)
+  else clearInventoryEmbeddedSessionToken()
 }, { immediate: true })
 
 function receiveEmbeddedSession(event) {
@@ -118,6 +119,10 @@ function receiveEmbeddedSession(event) {
   }
 }
 
+function clearHostSession() {
+  clearInventoryEmbeddedSessionToken()
+}
+
 function requestEmbeddedSession() {
   if (window.parent === window) return Promise.resolve()
   const parentOrigin = new URLSearchParams(window.location.search).get('parent_origin')
@@ -125,11 +130,11 @@ function requestEmbeddedSession() {
   return new Promise((resolve) => {
     const timeout = window.setTimeout(() => {
       if (embeddedSessionReady === complete) embeddedSessionReady = null
-      resolve()
-    }, 800)
+      resolve(false)
+    }, 5000)
     const complete = () => {
       window.clearTimeout(timeout)
-      resolve()
+      resolve(true)
     }
     embeddedSessionReady = complete
     window.parent.postMessage({ type: 'cashier-v3:inventory-session-request' }, parentOrigin)
@@ -1173,7 +1178,15 @@ function onModalSaved() {
 
 onMounted(async () => {
   window.addEventListener('message', receiveEmbeddedSession)
-  await requestEmbeddedSession()
+  window.addEventListener('cashier-v3:state-context-changing', clearHostSession)
+  const embeddedSessionReceived = await requestEmbeddedSession()
+  // iframe 入口必须先拿到宿主收银台签发的 V3 会话，再访问任何库存接口。
+  // 超时继续请求会把“尚未收到 token”误报成登录状态错误，并在每次 HMR
+  // 重新加载时污染所有库存页面的错误状态。
+  if (window.parent !== window && embeddedSessionReceived !== true) {
+    listError.value = '登录状态有误，请重新登录。'
+    return
+  }
   applyRequestedPage()
   if (mode.value === 'platform') await loadPlatformLocations()
   else await loadStoreSessionContext()
@@ -1189,6 +1202,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('message', receiveEmbeddedSession)
+  window.removeEventListener('cashier-v3:state-context-changing', clearHostSession)
   embeddedSessionReady = null
 })
 </script>

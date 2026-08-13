@@ -6,6 +6,12 @@ export function setInventoryEmbeddedSessionToken(token) {
   embeddedSessionToken = String(token || '').trim()
 }
 
+// Cashier V3 的登出会销毁当前会话；库存模块是共享单例，必须同步清空
+// 内存中的宿主令牌，避免下一次登录前继续优先使用旧 token。
+export function clearInventoryEmbeddedSessionToken() {
+  embeddedSessionToken = ''
+}
+
 function tokenFromBrowser(browserWindow) {
   // Embedded platform/store entries receive a scoped session from the host
   // window. Prefer it over any stale localStorage token left by a previous

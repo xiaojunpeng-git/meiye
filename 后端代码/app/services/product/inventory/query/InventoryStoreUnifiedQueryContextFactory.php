@@ -26,7 +26,10 @@ final class InventoryStoreUnifiedQueryContextFactory
         }
         $staff = Db::name('system_store_staff')->where('id', $operatorId)
             ->where('store_id', $storeId)->where('status', 1)->where('is_del', 0)->find();
-        if (!$staff) {
+        $sessionInfo = (array)(request()->storeStaffInfo ?? []);
+        $delegated = !empty($sessionInfo['_cashier_v3_delegated'])
+            && (int)($sessionInfo['store_id'] ?? 0) === $storeId;
+        if (!$staff && !$delegated) {
             throw new UnifiedQueryException('UNIFIED_QUERY_CONTEXT_INVALID', '当前员工不属于门店库存范围。', []);
         }
         $locations = Db::name('inventory_location')->where('store_id', $storeId)
