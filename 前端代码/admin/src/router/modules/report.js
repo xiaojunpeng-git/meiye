@@ -41,8 +41,20 @@ export default {
       component: () => import('@/pages/report/data/store_business')
     },
     {
-      // Legacy six-tab URL: keep bookmarked links safe while closing the old entry.
-      // The new seven-report page is intentionally reached through 门店运营.
+      // Each second-level menu item opens the same report workspace with a
+      // stable report code. The component is reused and reacts to param
+      // changes, so switching reports does not rebuild or refresh the menu.
+      path: 'store-operations/:report',
+      name: `${pre}store_operations_report`,
+      meta: {
+        auth: ['report-sale-info'],
+        title: '门店运营报表'
+      },
+      component: () => import('@/pages/report/data/store_business')
+    },
+    {
+      // Legacy URL: keep bookmarked links safe while the seven reports move
+      // into direct second-level menu entries.
       path: 'store-business',
       name: `${pre}store_business_legacy`,
       meta: {

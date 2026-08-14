@@ -55,8 +55,18 @@ export default {
   computed: {
     scopeLabel () { return this.scope.label || '当前权限范围' }
   },
+  watch: {
+    '$route.params.report' (value) {
+      const requested = String(value || '')
+      if (!requested || requested === this.activeReport) return
+      if (!this.catalog.some(item => item.code === requested)) return
+      this.activeReport = requested
+      this.page = 1
+      this.loadReport()
+    }
+  },
   methods: {
-    initialise () { Promise.all([this.loadScopeTree(), unifiedBusinessReportCatalog()]).then(([, res]) => { this.catalog = res.data || []; const requested = String((this.$route.query || {}).report || ''); this.activeReport = this.catalog.some(item => item.code === requested) ? requested : ((this.catalog[0] || {}).code || ''); if (this.activeReport) this.loadReport() }).catch(err => this.$Message.error(err.msg || '读取报表目录失败')) },
+    initialise () { Promise.all([this.loadScopeTree(), unifiedBusinessReportCatalog()]).then(([, res]) => { this.catalog = res.data || []; const route = this.$route || {}; const requested = String((route.params || {}).report || (route.query || {}).report || ''); this.activeReport = this.catalog.some(item => item.code === requested) ? requested : ((this.catalog[0] || {}).code || ''); if (this.activeReport) this.loadReport() }).catch(err => this.$Message.error(err.msg || '读取报表目录失败')) },
     params (extra) { const range = this.dateRange || []; const scope = this.scope.store_id > 0 ? { store_id: this.scope.store_id } : (this.scope.org_id > 0 ? { org_id: this.scope.org_id } : {}); return Object.assign({ report: this.activeReport, start_date: this.formatDate(range[0]), end_date: this.formatDate(range[1]), customer_segment: this.customerSegment, consumption_metric: this.consumptionMetric, sleep_months: this.sleepMonths, year: this.reportYear, page: this.page, limit: this.pageSize }, scope, extra || {}) },
     loadReport () { if (!this.activeReport) return; this.loading = true; unifiedBusinessReportQuery(this.params()).then(res => { const data = res.data || {}; const model = this.buildReportModel(data); this.reportMeta = data; this.cards = data.cards || []; this.columns = model.columns; this.exportColumns = model.exportColumns; this.columnGroups = model.groups; this.records = model.records; this.total = data.total || 0; this.pendingMetrics = data.pending_metrics || [] }).catch(err => this.$Message.error(err.msg || '读取报表失败')).finally(() => { this.loading = false }) },
     changePage (page) { this.page = page; this.loadReport() },

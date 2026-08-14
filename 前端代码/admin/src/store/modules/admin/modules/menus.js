@@ -17,6 +17,16 @@ import { isAgentPath } from '@/utils/pathUtils';
 import { normalizeOrganizationWorkspaceMenu } from '@/libs/organizationWorkspaceMenu';
 import { normalizeProductBusinessConfigMenu } from '@/libs/productBusinessConfigMenu';
 
+const STORE_OPERATION_REPORTS = [
+  { code: 'partner_item_summary', title: '合作方品项汇总' },
+  { code: 'partner_item_detail', title: '合作方品项明细' },
+  { code: 'member_consumption_detail', title: '会员消费明细' },
+  { code: 'store_item_analysis', title: '门店品项分析' },
+  { code: 'store_craftsman_consumption', title: '门店手艺人消耗' },
+  { code: 'store_salesperson_performance', title: '门店销售人业绩' },
+  { code: 'market_performance', title: '市场业绩' }
+];
+
 // "出入库记录" has been consolidated into inventory query/statistics.  Filter
 // the legacy entry here as well as in the menu migration so a browser with an
 // older cached menu cannot keep exposing a closed workflow after refresh.
@@ -93,51 +103,51 @@ function withOperatingScreenMenu(menuData) {
 function withStoreOperationsMenu(menuData) {
   if (!Array.isArray(menuData)) return [];
   const routePrefix = isAgentPath() ? Setting.routePreAgent : Setting.roterPre;
-  const reportPath = `${routePrefix}/report/business-center`;
   const dataMenu = menuData.find(item => {
     if (!item) return false;
     const path = String(item.path || item.menu_path || '').replace(/\/$/, '');
     return item.header === 'data'
       || path === `${routePrefix}/data`
       || item.title === '数据'
-      || item.menu_name === '数据'
-      || item.title === '订单';
+      || item.menu_name === '数据';
   });
   if (!dataMenu) return menuData;
   if (!Array.isArray(dataMenu.children)) dataMenu.children = [];
-  // The legacy permission tree sometimes leaves the report node under
-  // 订单.  Keep one canonical entry under 数据→门店运营 so the platform
-  // does not expose two competing report entrances.
+  const reportPathPrefix = `${routePrefix}/report/store-operations/`;
+  const isGeneratedReport = (item) => {
+    if (!item) return false;
+    const path = String(item.path || item.menu_path || '').replace(/\/$/, '');
+    return item.unique_auth === 'admin-report-store-operations'
+      || String(item.unique_auth || '').startsWith('admin-report-store-operations-')
+      || item.title === '门店运营'
+      || item.menu_name === '门店运营'
+      || path === `${routePrefix}/report/business-center`
+      || path === `${routePrefix}/report/store-operations`
+      || path.startsWith(reportPathPrefix);
+  };
+  // Replace the old single hub entry (including stale cached menu nodes) with
+  // seven ordinary second-level links. No menu API call or menu-state refresh
+  // is needed when switching between these links; they are normal router paths.
+  dataMenu.children = dataMenu.children.filter(child => !isGeneratedReport(child));
   menuData.forEach(item => {
     if (!item || item === dataMenu || !Array.isArray(item.children)) return;
-    item.children = item.children.filter(child => {
-      if (!child) return true;
-      const childPath = String(child.path || '').replace(/\/$/, '');
-      return !(child.unique_auth === 'admin-report-store-operations'
-        || child.title === '门店运营'
-        || child.menu_name === '门店运营'
-        || childPath === reportPath);
-    });
+    item.children = item.children.filter(child => !isGeneratedReport(child));
   });
-  const exists = dataMenu.children.some(item => item && (
-    item.unique_auth === 'admin-report-store-operations'
-    || item.title === '门店运营'
-    || String(item.path || '').replace(/\/$/, '') === reportPath
-  ));
-  if (exists) return menuData;
-  dataMenu.children.push({
-    id: 'admin-report-store-operations-local',
-    pid: dataMenu.id,
-    title: '门店运营',
-    menu_name: '门店运营',
-    icon: 'ios-pie-outline',
-    path: reportPath,
-    target: '_self',
-    header: '',
-    is_header: 0,
-    is_show_path: 0,
-    unique_auth: 'admin-report-store-operations',
-    children: []
+  STORE_OPERATION_REPORTS.forEach((report, index) => {
+    dataMenu.children.push({
+      id: `admin-report-store-operations-${report.code}`,
+      pid: dataMenu.id,
+      title: report.title,
+      menu_name: report.title,
+      icon: index === 0 ? 'ios-pie-outline' : 'ios-stats-outline',
+      path: `${reportPathPrefix}${report.code}`,
+      target: '_self',
+      header: '',
+      is_header: 0,
+      is_show_path: 0,
+      unique_auth: `admin-report-store-operations-${report.code}`,
+      children: []
+    });
   });
   return menuData;
 }
