@@ -29,6 +29,16 @@ module.exports = {
   productionSourceMap: false, //关闭生产环境下的SourceMap映射文件
   devServer: {
     publicPath: Setting.publicPath,
+    // 直接访问 18081/view_inventory_v3/ 时，也转发到库存 Vue 3 热更新服务。
+    // 平台页面内嵌库存时仍由 InventoryV3Bridge 直接指向 18086；这里覆盖
+    // 用户手动打开旧路径的场景，避免回退到 Admin 的空壳 index.html。
+    proxy: {
+      '^/view_inventory_v3(?:/|$)': {
+        target: process.env.VUE_APP_INVENTORY_V3_DEV_PROXY_TARGET || 'http://host.docker.internal:18086',
+        changeOrigin: false,
+        ws: true
+      }
+    }
 
   },
 

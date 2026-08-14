@@ -151,7 +151,7 @@ docker run -d --name mohe-cashier-nginx --platform linux/amd64 --network mohe-ne
 # 平台前端开发预览（18081，热更新；仅首次缺依赖时 install，避免每次启动重装）
 ADMIN_SRC="$ROOT/前端代码/admin"
 ADMIN_NM_VOLUME="mohe_admin_src_nm"
-ADMIN_DEV_CMD="if [ ! -x ./node_modules/.bin/vue-cli-service ]; then npm config set registry https://registry.npmmirror.com && npm install --no-audit --no-fund; fi && VUE_APP_API_URL='http://127.0.0.1:${PLATFORM_API_PORT}/adminapi' ./node_modules/.bin/vue-cli-service serve --mode=dev --host 0.0.0.0 --port 8081"
+ADMIN_DEV_CMD="if [ ! -x ./node_modules/.bin/vue-cli-service ]; then npm config set registry https://registry.npmmirror.com && npm install --no-audit --no-fund; fi && VUE_APP_API_URL='http://127.0.0.1:${PLATFORM_API_PORT}/adminapi' VUE_APP_INVENTORY_V3_DEV_ORIGIN='http://127.0.0.1:18086' VUE_APP_INVENTORY_V3_DEV_PROXY_TARGET='http://host.docker.internal:18086' ./node_modules/.bin/vue-cli-service serve --mode=dev --host 0.0.0.0 --port 8081"
 
 ensure_admin_dev() {
   if docker ps -a --format '{{.Names}}' | grep -qx mohe-admin-src; then
@@ -186,6 +186,29 @@ ensure_admin_dev() {
 # API 目标属于容器启动环境变量；切换到 18093 后不能复用旧的 18081 容器。
 docker rm -f mohe-admin-src >/dev/null 2>&1 || true
 ensure_admin_dev
+
+# 库存 Vue 3 独立热更新入口（18086）。平台 18081 只承载 Admin，
+# 库存前端通过 iframe 指向本端口；API 仍由 18092 收银/库存后端提供。
+INVENTORY_V3_SRC="$ROOT/前端代码/inventory-vue3"
+INVENTORY_V3_NM_VOLUME="mohe_inventory_v3_src_nm"
+INVENTORY_NODE_IMAGE="node:20-bullseye"
+INVENTORY_V3_DEV_CMD='if [ ! -x ./node_modules/.bin/vite ]; then npm config set registry https://registry.npmjs.org && npm install --no-audit --no-fund; fi && VITE_LOCAL_BACKEND_ORIGIN="http://host.docker.internal:'"${CASHIER_API_PORT}"'" ./node_modules/.bin/vite --host 0.0.0.0 --port 18086 --strictPort'
+
+docker rm -f mohe-inventory-v3-src >/dev/null 2>&1 || true
+docker volume create "$INVENTORY_V3_NM_VOLUME" >/dev/null 2>&1 || true
+if ! docker image inspect "$INVENTORY_NODE_IMAGE" >/dev/null 2>&1; then
+  docker pull --platform linux/amd64 docker.m.daocloud.io/library/node:20-bullseye
+  docker tag docker.m.daocloud.io/library/node:20-bullseye "$INVENTORY_NODE_IMAGE"
+fi
+docker run -d --name mohe-inventory-v3-src --platform linux/amd64 \
+  -p 18086:18086 \
+  --add-host host.docker.internal:host-gateway \
+  -v "$INVENTORY_V3_SRC:/app" \
+  -v "$ROOT/前端代码/shared:/shared:ro" \
+  -v "$INVENTORY_V3_NM_VOLUME:/app/node_modules" \
+  -w /app \
+  "$INVENTORY_NODE_IMAGE" \
+  bash -lc "$INVENTORY_V3_DEV_CMD"
 
 # 旧门店端 18082 已迁移到 美容源码/旧端口/18082/，仅作备份，不再启动热更新。
 
@@ -227,6 +250,7 @@ ensure_cashier_v3_dev
 echo
 echo "已启动（Nginx + Swoole，挂载：美容源码/后端代码）："
 echo "  平台开发预览: http://127.0.0.1:18081/admin/login  （改代码用，首次编译约 5-10 分钟）"
+echo "  库存前端开发预览: http://127.0.0.1:18086/view_inventory_v3/  （inventory-vue3 热更新）"
 echo "  当前门店端开发预览: http://127.0.0.1:18091/view_cashier_v3/#/cashier  （cashier-v3 热更新）"
 echo "  收银 V3 专用后端: http://127.0.0.1:${CASHIER_API_PORT}  （独立 PHP/Swoole + Nginx）"
 echo "  平台专用后端: http://127.0.0.1:${PLATFORM_API_PORT}  （独立 PHP/Swoole + Nginx）"
@@ -236,5 +260,5 @@ echo "  平台集成预览: http://127.0.0.1:8080/admin/login    （build 产物
 echo "  前台 H5:     http://127.0.0.1:8080/"
 echo "  收银台(构建): http://127.0.0.1:8080/cashier.html"
 echo "  手机同网访问: http://$(ipconfig getifaddr en0 2>/dev/null || echo '你的Mac局域网IP'):8080"
-echo "  开发日志:    docker logs -f mohe-admin-src / mohe-cashier-v3-src"
+echo "  开发日志:    docker logs -f mohe-admin-src / mohe-inventory-v3-src / mohe-cashier-v3-src"
 echo "  后端日志:    docker logs -f mohe-app / mohe-platform-app / mohe-cashier-app"

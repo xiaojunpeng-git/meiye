@@ -13,6 +13,9 @@
         <template slot-scope="{ row }" slot="level">
           {{ row.level === 2 ? '二级来源' : '一级来源' }}
         </template>
+        <template slot-scope="{ row }" slot="attributionType">
+          {{ attributionTypeLabel(row.attributionType) }}
+        </template>
         <template slot-scope="{ row }" slot="requireSecondary">
           <span v-if="row.level === 2">—</span>
           <Tag v-else :color="row.requireSecondary ? 'blue' : 'default'">
@@ -52,6 +55,11 @@
             <Option v-for="item in availableParents" :key="item.id" :value="item.id">
               {{ item.name }}
             </Option>
+          </Select>
+        </FormItem>
+        <FormItem label="来源类型" prop="attributionType">
+          <Select v-model="form.attributionType">
+            <Option v-for="item in attributionTypes" :key="item.value" :value="item.value">{{ item.label }}</Option>
           </Select>
         </FormItem>
         <FormItem v-if="form.parentId === 0" label="二级来源要求">
@@ -106,6 +114,7 @@ function normalizeSource(item, level, inheritedParentId) {
       item.requireSecondary !== undefined ? item.requireSecondary : item.require_secondary,
       0
     ),
+    attributionType: String(item.attributionType || item.attribution_type || 'other'),
     children: children.map(child => normalizeSource(child, 2, item.id))
   };
 }
@@ -134,6 +143,11 @@ export default {
       modalVisible: false,
       editingId: 0,
       sources: [],
+      attributionTypes: [
+        { value: 'guide', label: '导购' }, { value: 'beautician', label: '美容师' },
+        { value: 'coach', label: '拓客教练' }, { value: 'external', label: '外接地推' },
+        { value: 'online', label: '线上' }, { value: 'referral', label: '老客转介绍' }, { value: 'other', label: '其他' }
+      ],
       form: this.emptyForm(),
       rules: {
         name: [{ required: true, message: '请输入来源名称', trigger: 'blur' }],
@@ -143,6 +157,7 @@ export default {
       columns: [
         { title: '来源名称', slot: 'name', minWidth: 220 },
         { title: '层级', slot: 'level', width: 120 },
+        { title: '来源类型', slot: 'attributionType', minWidth: 120 },
         { title: '二级来源要求', slot: 'requireSecondary', minWidth: 150 },
         { title: '排序', key: 'sort', width: 100 },
         { title: '状态', slot: 'status', width: 120 },
@@ -174,7 +189,8 @@ export default {
         status: 1,
         sort: 0,
         version: 0,
-        requireSecondary: 0
+        requireSecondary: 0,
+        attributionType: 'other'
       };
     },
     extractList(res) {
@@ -210,7 +226,8 @@ export default {
         status: row.status,
         sort: row.sort,
         version: row.version,
-        requireSecondary: row.level === 1 ? row.requireSecondary : 0
+        requireSecondary: row.level === 1 ? row.requireSecondary : 0,
+        attributionType: row.attributionType
       };
       this.modalVisible = true;
     },
@@ -221,6 +238,7 @@ export default {
         status: this.form.status,
         sort: this.form.sort,
         requireSecondary: this.form.parentId === 0 ? this.form.requireSecondary : 0,
+        attributionType: this.form.attributionType,
         idempotencyKey: createBusinessConfigIdempotencyKey(this.editingId ? 'SOURCE-UPDATE' : 'SOURCE-CREATE')
       };
       if (isUpdate) payload.expectedVersion = this.form.version;
@@ -253,6 +271,7 @@ export default {
         status,
         sort: row.sort,
         requireSecondary: row.level === 1 ? row.requireSecondary : 0,
+        attributionType: row.attributionType,
         expectedVersion: row.version,
         idempotencyKey: createBusinessConfigIdempotencyKey('SOURCE-STATUS')
       })
@@ -267,6 +286,10 @@ export default {
         .finally(() => {
           this.statusSavingId = 0;
         });
+    },
+    attributionTypeLabel(value) {
+      const item = this.attributionTypes.find(type => type.value === value)
+      return item ? item.label : '其他'
     }
   }
 };

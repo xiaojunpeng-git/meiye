@@ -184,6 +184,22 @@ class Customer extends BaseController
         return $this->mobileSuccess($page);
     }
 
+    public function audienceOverview(int $audienceId)
+    {
+        $context = $this->merchantContext->resolve($this->request);
+        $this->merchantContext->assertAction($context, 'CUSTOMER_AUDIENCE_VIEW');
+        $audience = $this->audiences->find($this->identity($context), $audienceId);
+        $page = $this->customers->queryAudience($context, (array)$audience['validatedRule'], [
+            'page' => 1,
+            'limit' => 1,
+        ]);
+        return $this->mobileSuccess($this->audiences->overview(
+            $this->identity($context),
+            $audienceId,
+            (int)($page['total'] ?? 0)
+        ));
+    }
+
     public function updateAudience(int $audienceId)
     {
         return $this->writeAudience('update', $audienceId);

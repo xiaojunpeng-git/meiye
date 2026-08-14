@@ -70,7 +70,7 @@
 			<view v-else-if="activeTab === 'groups' && activeAudience == null" class="customer-page__list">
 				<view v-for="audience in audiences" :key="audience.audienceId" class="customer-page__audience-card" @tap="openAudience(audience)">
 					<text class="customer-page__audience-name">{{ audience.name }}</text>
-					<text class="customer-page__audience-copy">动态客群 · 规则版本 {{ audience.version }} · 查看成员 ›</text>
+					<text class="customer-page__audience-copy">动态客群 · 规则版本 {{ audience.version }}{{ audience.memberCount != null ? ' · ' + audience.memberCount + ' 名成员' : '' }} · 查看成员 ›</text>
 				</view>
 			</view>
 			<view v-else-if="records.length === 0" class="customer-page__empty">
@@ -176,7 +176,7 @@
 </template>
 
 <script setup lang="uts">
-	import { createMobileCustomerAudience, listMobileCustomerAudiences, queryMobileCustomerAudienceMembers, queryMobileCustomers } from '../../../shared/api/mobile-customer-client.uts'
+	import { createMobileCustomerAudience, listMobileCustomerAudiences, queryMobileCustomerAudienceMembers, queryMobileCustomerAudienceOverview, queryMobileCustomers } from '../../../shared/api/mobile-customer-client.uts'
 	import { mobileHttpResultRequiresMerchantLogin } from '../../../shared/api/mobile-http.uts'
 	import { clearMerchantRoot } from '../../../shared/platform/mobile-merchant-session.uts'
 	import { openMerchantBootstrapForCustomers, openMerchantCustomerDetail, openMerchantCustomerProfile } from '../../../shared/platform/mobile-navigation.uts'
@@ -343,6 +343,11 @@
 		activeAudience.value = audience
 		activeTabLabel.value = String(audience != null ? audience.name || '客群成员' : '客群成员')
 		records.value = new Array<any>()
+		queryMobileCustomerAudienceOverview(String(audience != null ? audience.audienceId || '' : ''), (result : any) => {
+			if (result.ok && result.body != null && result.body.overview != null) {
+				audience.memberCount = Number(result.body.overview.memberCount || 0)
+			}
+		})
 		loadActiveTab()
 	}
 

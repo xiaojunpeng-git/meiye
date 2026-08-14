@@ -26,6 +26,7 @@ const customerTransportContract : any = {
 		unifiedQueryCommand: { method: 'POST', path: '/mobile/merchant/customers/unified-query/commands', requestMetadataProfile: 'MERCHANT_SESSION' },
 		listAudiences: { method: 'GET', path: '/mobile/merchant/customer-audiences', requestMetadataProfile: 'MERCHANT_SESSION' },
 		createAudience: { method: 'POST', path: '/mobile/merchant/customer-audiences', requestMetadataProfile: 'MERCHANT_SESSION' },
+		overviewAudience: { method: 'GET', path: '/mobile/merchant/customer-audiences/:audienceId/overview', requestMetadataProfile: 'MERCHANT_SESSION' },
 		queryAudienceMembers: { method: 'POST', path: '/mobile/merchant/customer-audiences/:audienceId/members/query', requestMetadataProfile: 'MERCHANT_SESSION' }
 	},
 	requestMetadataProfiles: {
@@ -149,6 +150,13 @@ export function createMobileCustomerAudience(payload : any, done : (value : any)
 	let plan = merchantPlan('createAudience')
 	if (plan == null) { done({ ok: false, message: '请先完成商家端登录。', body: null }); return }
 	sendMobileRequest(plan, payload, done)
+}
+
+export function queryMobileCustomerAudienceOverview(audienceId : string, done : (value : any) => void) : void {
+	let plan = merchantPlan('overviewAudience')
+	if (plan == null) { done({ ok: false, message: '请先完成商家端登录。', body: null }); return }
+	plan.path = plan.path.replace(':audienceId', audienceId)
+	sendMobileRequest(plan, {}, done)
 }
 
 export function queryMobileCustomerAudienceMembers(audienceId : string, payload : any, done : (value : any) => void) : void {

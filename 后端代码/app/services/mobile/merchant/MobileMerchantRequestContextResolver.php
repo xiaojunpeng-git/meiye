@@ -48,6 +48,12 @@ final class MobileMerchantRequestContextResolver
             $staffName = $this->employeeName($employeeId);
         }
         $actions = $this->availableActions($mobileAuth, $dataScope['mode']);
+        if ($staffId <= 0) {
+            // Customer-care commands must carry a real staff/employee owner snapshot.
+            $actions = array_values(array_filter($actions, static function (string $action): bool {
+                return $action !== 'CUSTOMER_CARE_WRITE';
+            }));
+        }
         $accountId = $this->internalAccountId($employeeId);
         return [
             'employeeId' => $employeeId,
@@ -98,7 +104,8 @@ final class MobileMerchantRequestContextResolver
             throw MobileApiException::business('STORE_DISABLED', '当前门店或组织已失效，请重新进入商家端。');
         }
         $actions = (array)$context['availableActions'];
-        $canWrite = in_array('CUSTOMER_CARE_WRITE', $actions, true);
+        $canWrite = (int)$context['staffId'] > 0
+            && in_array('CUSTOMER_CARE_WRITE', $actions, true);
         return [
             'tenantId' => '0', 'staffId' => (int)$context['staffId'],
             'employeeId' => (int)$context['employeeId'], 'staffName' => (string)$context['staffName'],

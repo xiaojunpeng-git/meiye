@@ -33,7 +33,7 @@ try {
 $assert('MOBILE-CATALOG-05', $strictRejectsUnknown);
 $assert('MOBILE-CATALOG-06', $catalog->availableActions([401002, 401006], 'STORES') === [
     'merchant.context.bootstrap', 'merchant.context.switch', 'merchant.session.logout', 'merchant.self.participation.read', 'merchant.self.performance.read',
-    'RESERVATION_VIEW', 'RESERVATION_CREATE', 'TARGET_PERSONAL_VIEW', 'TARGET_PERSONAL_MANAGE', 'TARGET_TEAM_VIEW',
+    'RESERVATION_VIEW', 'RESERVATION_CREATE', 'RESERVATION_MANAGE', 'TARGET_PERSONAL_VIEW', 'TARGET_PERSONAL_MANAGE', 'TARGET_TEAM_VIEW',
 ]);
 $assert('MOBILE-CATALOG-07', $catalog->availableActions([401006], 'PERSONAL_SELF') === [
     'merchant.context.bootstrap', 'merchant.context.switch', 'merchant.session.logout', 'merchant.self.participation.read', 'merchant.self.performance.read',

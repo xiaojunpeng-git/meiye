@@ -11,7 +11,7 @@
 				<text class="reservation-page__field-label">预约时间</text><input class="reservation-page__input" :value="appointmentTime" placeholder="例如 2026-08-01 14:30" @input="appointmentTime = $event.detail.value" /><view class="reservation-page__minor" @tap="recalculate"><text>{{ calculating ? '正在计算…' : '确认预约时间' }}</text></view>
 				<text class="reservation-page__field-label">可选手艺人</text><view class="reservation-page__choices"><view v-for="staff in craftsmanOptions" :key="staff.staffId" class="reservation-page__choice" :class="{ 'reservation-page__choice--active': selectedCraftsman(staff) }" @tap="toggleCraftsman(staff)"><text>{{ staff.name }}</text></view></view>
 				<text class="reservation-page__field-label">可选房间</text><view class="reservation-page__choices"><view v-for="room in roomOptions" :key="room.id" class="reservation-page__choice" :class="{ 'reservation-page__choice--active': selectedRoomId === Number(room.id), 'reservation-page__choice--disabled': !roomSelectable(room) }" @tap="chooseRoom(room)"><text>{{ room.name || room.label || room.remarks || ('房间 ' + room.id) }}</text></view></view>
-				<text class="reservation-page__field-label">备注</text><textarea class="reservation-page__textarea" :value="remark" placeholder="可填写到店提醒或服务说明" @input="remark = $event.detail.value" /><view class="reservation-page__submit" @tap="submit"><text>{{ submitting ? '正在创建…' : '创建预约' }}</text></view><text class="reservation-page__scope-copy">仅创建预约。开始服务、服务完成、结账、改期和取消暂未在手机端开放。</text></scroll-view></view>
+				<text class="reservation-page__field-label">备注</text><textarea class="reservation-page__textarea" :value="remark" placeholder="可填写到店提醒或服务说明" @input="remark = $event.detail.value" /><view class="reservation-page__submit" @tap="submit"><text>{{ submitting ? '正在创建…' : '创建预约' }}</text></view><text class="reservation-page__scope-copy">预约详情与服务生命周期由商家端服务统一处理，并继续受当前门店数据权限约束。</text></scroll-view></view>
 	</view>
 </template>
 
@@ -62,7 +62,7 @@
 	function openEditor() {
 		if (merchantLoginIsRequired()) { openMerchantLogin(); return }
 		message.value = ''; loginRequired.value = false
-		openMobileReservationEditor((response : any) => {
+		openMobileReservationEditor({}, (response : any) => {
 			let payload = response != null && response.body != null ? response.body.reservation : null
 			if (!response.ok || payload == null || payload.result == null || payload.result.status != 'success') { message.value = String(response.message || (payload != null && payload.result != null ? payload.result.message : '预约编辑器暂时不可用。')); return }
 			let editor = payload.data != null ? payload.data.editor : null

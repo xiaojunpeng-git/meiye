@@ -38,7 +38,7 @@ final class MobileMerchantCapabilityCatalog
     {
         return [
             ['id' => self::RULE_WORKBENCH, 'title' => '工作台', 'feature_code' => 'mobile.merchant.workbench', 'actions' => []],
-            ['id' => self::RULE_RESERVATIONS, 'title' => '预约管理', 'feature_code' => 'mobile.merchant.reservations', 'actions' => ['RESERVATION_VIEW', 'RESERVATION_CREATE']],
+            ['id' => self::RULE_RESERVATIONS, 'title' => '预约管理', 'feature_code' => 'mobile.merchant.reservations', 'actions' => ['RESERVATION_VIEW', 'RESERVATION_CREATE', 'RESERVATION_MANAGE']],
             ['id' => self::RULE_CUSTOMER_CARE, 'title' => '客情管理', 'feature_code' => 'mobile.merchant.customer_care', 'actions' => ['CUSTOMER_CARE_VIEW', 'CUSTOMER_CARE_WRITE']],
             ['id' => self::RULE_CUSTOMERS, 'title' => '客户管理', 'feature_code' => 'mobile.merchant.customers', 'actions' => ['CUSTOMER_VIEW', 'CUSTOMER_CREATE', 'CUSTOMER_AUDIENCE_VIEW', 'CUSTOMER_AUDIENCE_MANAGE']],
             ['id' => self::RULE_CUSTOMER_SETTINGS, 'title' => '客户数据设置', 'feature_code' => 'mobile.merchant.customer_settings', 'actions' => []],

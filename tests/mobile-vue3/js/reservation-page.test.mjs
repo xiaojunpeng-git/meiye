@@ -9,23 +9,21 @@ const page = fs.readFileSync(path.join(mobileRoot, 'src', 'merchant', 'pages', '
 const client = fs.readFileSync(path.join(mobileRoot, 'src', 'shared', 'api', 'mobile-reservation-client.uts'), 'utf8')
 const merchant = JSON.parse(fs.readFileSync(path.join(mobileRoot, 'src', 'shared', 'contracts', 'mobile-merchant-v1.contract.json'), 'utf8'))
 
-test('mobile reservation page exposes only the released V3 create slice', () => {
+test('mobile reservation page exposes the V3 reservation lifecycle transport', () => {
 	for (const name of ['queryMobileReservations', 'openMobileReservationEditor', 'queryMobileReservationMembers', 'recalculateMobileReservation', 'createMobileReservation']) {
 		assert.equal(page.includes(name), true, name)
 	}
-	for (const forbidden of ['start-reservation-service', 'finish-service-completion', 'prepare-reservation-checkout', 'cancel-reservation', 'update-reservation']) {
-		assert.equal(client.includes(forbidden), false, forbidden)
-	}
+	for (const name of ['queryMobileReservationDetail', 'queryMobileReservationProjectCatalog', 'updateMobileReservation', 'deleteMobileReservation', 'startMobileReservationService', 'endMobileReservationService']) assert.equal(client.includes(name), true, name)
 	assert.equal(page.includes('cashier_v3_reservation'), true)
 	assert.equal(page.includes('legacy reservation'), false)
 })
 
 test('mobile reservation transport uses merchant session contract and no legacy endpoint', () => {
-	for (const endpoint of ['listReservations', 'openReservationEditor', 'queryReservationMemberCandidates', 'recalculateReservation', 'createReservation']) {
+	for (const endpoint of ['listReservations', 'reservationDetail', 'openReservationEditor', 'reservationProjectCatalog', 'queryReservationMemberCandidates', 'recalculateReservation', 'createReservation', 'updateReservation', 'deleteReservation', 'startReservationService', 'endReservationService']) {
 		assert.equal(merchant.endpoints[endpoint].requestMetadataProfile, 'MERCHANT_SESSION', endpoint)
 	}
 	assert.equal(merchant.endpoints.createReservation.legacyReservationForbidden, true)
-	for (const pathValue of ['/mobile/merchant/reservations', '/mobile/merchant/reservations/editor', '/mobile/merchant/reservations/member-candidates', '/mobile/merchant/reservations/recalculate']) {
+	for (const pathValue of ['/mobile/merchant/reservations', '/mobile/merchant/reservations/:reservationId', '/mobile/merchant/reservations/editor', '/mobile/merchant/reservations/project-catalog', '/mobile/merchant/reservations/member-candidates', '/mobile/merchant/reservations/recalculate', '/mobile/merchant/reservations/:reservationId/start-service', '/mobile/merchant/reservations/:reservationId/end-service']) {
 		assert.equal(client.includes(`path: '${pathValue}'`), true, pathValue)
 	}
 	assert.equal(client.includes('/reservation/'), false)

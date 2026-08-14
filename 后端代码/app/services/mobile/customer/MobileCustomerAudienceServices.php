@@ -47,6 +47,25 @@ class MobileCustomerAudienceServices
         return $this->present($row);
     }
 
+    /**
+     * Dynamic audience metadata plus a server-calculated member total. The
+     * total is supplied by the unified member query layer so no stale member
+     * snapshot is persisted.
+     */
+    public function overview(array $identity, int $audienceId, int $memberCount): array
+    {
+        $audience = $this->find($identity, $audienceId);
+        return [
+            'audience' => $audience,
+            'overview' => [
+                'memberCount' => max(0, $memberCount),
+                'membership' => 'DYNAMIC_QUERY',
+                'calculatedAt' => date('c'),
+                'dataScopeApplied' => true,
+            ],
+        ];
+    }
+
     public function create(array $identity, array $payload): array
     {
         $owner = $this->owner($identity);

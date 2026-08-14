@@ -46,6 +46,7 @@ test('merchant customer page keeps the confirmed tabs and unified query fields',
 	assert.equal(content.includes('fieldAliases.value[key]'), true)
 	assert.equal(content.includes('@tap="openAudience(audience)"'), true)
 	assert.equal(content.includes('queryMobileCustomerAudienceMembers'), true)
+	assert.equal(content.includes('queryMobileCustomerAudienceOverview'), true)
 	assert.equal(content.includes('返回客群'), true)
 	assert.equal(content.includes('groupEntryMessage'), true)
 	assert.equal(content.includes("'customer-group-entry__command--disabled': creatingGroup"), true)

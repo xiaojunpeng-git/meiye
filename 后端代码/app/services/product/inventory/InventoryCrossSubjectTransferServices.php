@@ -577,9 +577,12 @@ final class InventoryCrossSubjectTransferServices
     private function normalize(array $input): array
     {
         $legacyKeys = ['idempotency_key', 'business_date', 'remark', 'target_store_id', 'request_document_id', 'lines'];
+        // 门店控制器只接受调入方字段，调出方始终由登录会话强制确定。
+        // 它与旧兼容格式相比多了 target_party_type，不能误走平台来源主体契约。
+        $storeKeys = ['idempotency_key', 'business_date', 'remark', 'target_party_type', 'target_store_id', 'request_document_id', 'lines'];
         $keys = ['idempotency_key', 'business_date', 'remark', 'source_party_type', 'source_store_id', 'target_party_type', 'target_store_id', 'request_document_id', 'lines'];
         $keysWithTransferStaff = ['idempotency_key', 'business_date', 'remark', 'source_party_type', 'source_store_id', 'target_party_type', 'target_store_id', 'request_document_id', 'transfer_staff_id', 'lines'];
-        if (!in_array(array_keys($input), [$legacyKeys, $keys, $keysWithTransferStaff], true) || !is_int($input['target_store_id']) || !is_int($input['request_document_id']) || (array_key_exists('transfer_staff_id', $input) && (!is_int($input['transfer_staff_id']) || $input['transfer_staff_id'] < 0)) || !is_array($input['lines']) || !$input['lines'] || count($input['lines']) > 100) throw new \InvalidArgumentException('inventory_cross_transfer_input_invalid');
+        if (!in_array(array_keys($input), [$legacyKeys, $storeKeys, $keys, $keysWithTransferStaff], true) || !is_int($input['target_store_id']) || !is_int($input['request_document_id']) || (array_key_exists('transfer_staff_id', $input) && (!is_int($input['transfer_staff_id']) || $input['transfer_staff_id'] < 0)) || !is_array($input['lines']) || !$input['lines'] || count($input['lines']) > 100) throw new \InvalidArgumentException('inventory_cross_transfer_input_invalid');
         $sourcePartyType = strtoupper(trim((string)($input['source_party_type'] ?? 'HQ')));
         $sourceStoreId = (int)($input['source_store_id'] ?? 0);
         if (!in_array($sourcePartyType, ['STORE', 'HQ'], true) || ($sourcePartyType === 'STORE' && $sourceStoreId <= 0) || ($sourcePartyType === 'HQ' && $sourceStoreId !== 0)) throw new \InvalidArgumentException('inventory_cross_transfer_source_invalid');

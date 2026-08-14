@@ -9,7 +9,7 @@ use app\services\mobile\reservation\MobileReservationServices;
 use mohe\basic\BaseController;
 use think\facade\App;
 
-/** Mobile endpoints for the released C3 reservation-create slice only. */
+/** Mobile HTTP boundary for the V3 reservation lifecycle. */
 class Reservation extends BaseController
 {
     private $merchantContext;
@@ -27,6 +27,20 @@ class Reservation extends BaseController
     public function listing()
     {
         return $this->read('RESERVATION_VIEW', function (array $merchant): array { return $this->reservations->list($merchant); });
+    }
+
+    public function detail(int $reservationId)
+    {
+        return $this->read('RESERVATION_VIEW', function (array $merchant) use ($reservationId): array {
+            return $this->reservations->detail($merchant, ['reservationId' => $reservationId]);
+        });
+    }
+
+    public function projectCatalog()
+    {
+        return $this->read('RESERVATION_CREATE', function (array $merchant): array {
+            return $this->reservations->projectCatalog($merchant, $this->payload());
+        });
     }
 
     public function editor()
@@ -49,6 +63,34 @@ class Reservation extends BaseController
     public function create()
     {
         return $this->read('RESERVATION_CREATE', function (array $merchant): array { return $this->reservations->create($merchant, $this->payload()); });
+    }
+
+    public function update(int $reservationId)
+    {
+        return $this->read('RESERVATION_CREATE', function (array $merchant) use ($reservationId): array {
+            return $this->reservations->update($merchant, $reservationId, $this->payload());
+        });
+    }
+
+    public function delete(int $reservationId)
+    {
+        return $this->read('RESERVATION_MANAGE', function (array $merchant) use ($reservationId): array {
+            return $this->reservations->delete($merchant, $reservationId, $this->payload());
+        });
+    }
+
+    public function startService(int $reservationId)
+    {
+        return $this->read('RESERVATION_MANAGE', function (array $merchant) use ($reservationId): array {
+            return $this->reservations->startService($merchant, $reservationId, $this->payload());
+        });
+    }
+
+    public function endService(int $reservationId)
+    {
+        return $this->read('RESERVATION_MANAGE', function (array $merchant) use ($reservationId): array {
+            return $this->reservations->endService($merchant, $reservationId, $this->payload());
+        });
     }
 
     private function read(string $requiredAction, callable $callback)

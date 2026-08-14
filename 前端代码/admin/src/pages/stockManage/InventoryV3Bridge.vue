@@ -25,10 +25,18 @@ export default {
   computed: {
     inventoryUrl() {
       const page = pageByRoute[this.$route.name] || 'overview'
-      // Keep the inventory workbench inside the platform integration page.
-      // The standalone Vite server is only a source-development tool and must
-      // never replace the platform user's normal inventory entry.
-      const inventoryOrigin = window.location.origin
+      const isLocalDevelopment = process.env.NODE_ENV === 'development'
+        && typeof window !== 'undefined'
+        && ['127.0.0.1', 'localhost'].includes(window.location.hostname)
+      // The inventory Vue 3 source has its own dev server. In the platform's
+      // local hot-update mode, point the iframe there; otherwise use the
+      // same-origin published integration bundle (8080/production).
+      const configuredDevOrigin = String(process.env.VUE_APP_INVENTORY_V3_DEV_ORIGIN || '')
+        .trim()
+        .replace(/\/+$/, '')
+      const inventoryOrigin = isLocalDevelopment && configuredDevOrigin
+        ? configuredDevOrigin
+        : window.location.origin
       const query = new URLSearchParams({
         source: 'platform',
         page,

@@ -56,6 +56,7 @@ Route::group('api/mobile/merchant', function () {
         Route::post('customers/unified-query/commands', 'Customer/unifiedQueryCommand')->option(['real_name' => '手机商家端客户统一查询操作']);
         Route::get('customer-audiences', 'Customer/audiences')->option(['real_name' => '手机商家端我的客群']);
         Route::post('customer-audiences', 'Customer/createAudience')->option(['real_name' => '手机商家端创建客群']);
+        Route::get('customer-audiences/:audienceId/overview', 'Customer/audienceOverview')->pattern(['audienceId' => '\\d+'])->option(['real_name' => '手机商家端客群概况']);
         Route::post('customer-audiences/:audienceId/members/query', 'Customer/audienceMembers')->pattern(['audienceId' => '\\d+'])->option(['real_name' => '手机商家端客群实时成员']);
         Route::patch('customer-audiences/:audienceId', 'Customer/updateAudience')->option(['real_name' => '手机商家端更新客群']);
         Route::delete('customer-audiences/:audienceId', 'Customer/archiveAudience')->option(['real_name' => '手机商家端归档客群']);
@@ -65,10 +66,16 @@ Route::group('api/mobile/merchant', function () {
             ->option(['real_name' => '手机商家端客情操作']);
         Route::post('warehouse/overview', 'Warehouse/overview')->option(['real_name' => '手机商家端组织业绩数仓']);
         Route::get('reservations', 'Reservation/listing')->option(['real_name' => '手机商家端预约列表']);
+        Route::get('reservations/:reservationId', 'Reservation/detail')->pattern(['reservationId' => '\\d+'])->option(['real_name' => '手机商家端预约详情']);
         Route::post('reservations/editor', 'Reservation/editor')->option(['real_name' => '手机商家端预约编辑准备']);
+        Route::post('reservations/project-catalog', 'Reservation/projectCatalog')->option(['real_name' => '手机商家端预约项目目录']);
         Route::post('reservations/member-candidates', 'Reservation/memberCandidates')->option(['real_name' => '手机商家端预约会员选择']);
         Route::post('reservations/recalculate', 'Reservation/recalculate')->option(['real_name' => '手机商家端预约时间计算']);
         Route::post('reservations', 'Reservation/create')->option(['real_name' => '手机商家端创建预约']);
+        Route::put('reservations/:reservationId', 'Reservation/update')->pattern(['reservationId' => '\\d+'])->option(['real_name' => '手机商家端编辑预约']);
+        Route::delete('reservations/:reservationId', 'Reservation/delete')->pattern(['reservationId' => '\\d+'])->option(['real_name' => '手机商家端删除预约']);
+        Route::post('reservations/:reservationId/start-service', 'Reservation/startService')->pattern(['reservationId' => '\\d+'])->option(['real_name' => '手机商家端开始服务']);
+        Route::post('reservations/:reservationId/end-service', 'Reservation/endService')->pattern(['reservationId' => '\\d+'])->option(['real_name' => '手机商家端结束服务']);
     })->middleware([MobileMerchantSessionMiddleware::class]);
 })->prefix('mobile.merchant.')->middleware([
     InstallMiddleware::class,

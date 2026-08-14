@@ -31,7 +31,8 @@ test('unfinished customer-care todo opens the matching server-side filter', () =
 test('due-not-arrived count uses only V3 reservation and authoritative service start state', () => {
 	assert.equal(reservationProjection.includes("Db::name('cashier_v3_reservation')->alias('r')"), true)
 	assert.equal(reservationProjection.includes("join('cashier_v3_service_order s', 's.id=r.service_order_id')"), true)
-	assert.equal(reservationProjection.includes("whereIn('r.status', ['PENDING_CONFIRMATION', 'CONFIRMED'])"), true)
+	assert.equal(reservationProjection.includes("where('r.status', 'UNSTARTED')"), true)
+	assert.equal(reservationProjection.includes("whereIn('status', ['UNSTARTED', 'IN_SERVICE', 'COMPLETED'])"), true)
 	assert.equal(reservationProjection.includes("where('r.appointment_start_at', '<=', $now)"), true)
 	assert.equal(reservationProjection.includes("where('s.status', 'OPEN')->where('s.service_started_at', 0)"), true)
 	assert.equal(reservationProjection.includes("'dueNotArrived' => $dueNotArrivedCount"), true)

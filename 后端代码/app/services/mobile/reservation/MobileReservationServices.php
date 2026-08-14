@@ -11,7 +11,7 @@ use app\services\cashier\v3\bootstrap\CashierV3Bootstrap;
 use think\facade\Db;
 
 /**
- * Mobile boundary for the released C3 reservation slice.
+ * Mobile boundary for the V3 reservation lifecycle.
  *
  * This adapter intentionally owns no reservation SQL. Reads and writes go
  * through the frozen Cashier V3 dispatcher; `cashier_v3_reservation` remains
@@ -23,6 +23,20 @@ final class MobileReservationServices
     public function list(array $merchant): array
     {
         return $this->dispatch($merchant, 'query-reservations', []);
+    }
+
+    public function detail(array $merchant, array $payload): array
+    {
+        return $this->dispatch($merchant, 'open-reservation-detail', [
+            'reservationId' => (int)($payload['reservationId'] ?? $payload['id'] ?? 0),
+        ]);
+    }
+
+    public function projectCatalog(array $merchant, array $payload): array
+    {
+        return $this->dispatch($merchant, 'query-reservation-project-catalog', [
+            'memberId' => (int)($payload['memberId'] ?? 0),
+        ]);
     }
 
     public function openEditor(array $merchant): array
@@ -58,6 +72,41 @@ final class MobileReservationServices
             'reservation' => is_array($payload['reservation'] ?? null) ? $payload['reservation'] : [],
             'command' => $command,
         ]);
+    }
+
+    public function update(array $merchant, int $reservationId, array $payload): array
+    {
+        $command = is_array($payload['command'] ?? null) ? $payload['command'] : [];
+        $command['action'] = 'update-reservation';
+        return $this->dispatch($merchant, 'update-reservation', [
+            'reservationId' => $reservationId,
+            'reservation' => is_array($payload['reservation'] ?? null) ? $payload['reservation'] : [],
+            'command' => $command,
+        ]);
+    }
+
+    public function delete(array $merchant, int $reservationId, array $payload): array
+    {
+        return $this->dispatch($merchant, 'cancel-reservation', $this->actionPayload($reservationId, $payload));
+    }
+
+    public function startService(array $merchant, int $reservationId, array $payload): array
+    {
+        return $this->dispatch($merchant, 'start-reservation-service', $this->actionPayload($reservationId, $payload));
+    }
+
+    public function endService(array $merchant, int $reservationId, array $payload): array
+    {
+        return $this->dispatch($merchant, 'end-reservation-service', $this->actionPayload($reservationId, $payload));
+    }
+
+    private function actionPayload(int $reservationId, array $payload): array
+    {
+        $command = is_array($payload['command'] ?? null) ? $payload['command'] : [];
+        return [
+            'reservationId' => $reservationId,
+            'command' => $command,
+        ];
     }
 
     private function dispatch(array $merchant, string $action, array $payload): array
