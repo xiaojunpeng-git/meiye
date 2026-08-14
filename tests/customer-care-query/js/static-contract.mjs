@@ -48,6 +48,10 @@ const repository = fs.readFileSync(
   path.join(queryDir, 'ThinkPhpCustomerCareQueryRepository.php'),
   'utf8'
 )
+const merchantResolver = fs.readFileSync(
+  path.join(root, '后端代码/app/services/mobile/merchant/MobileMerchantRequestContextResolver.php'),
+  'utf8'
+)
 
 ok('contract version frozen', sources.includes("CONTRACT_VERSION = 'customer-care.v1'"))
 for (const block of ['taskView', 'customerView', 'recordView', 'statistics', 'settings']) {
@@ -146,6 +150,12 @@ ok('no arbitrary URL navigation', !/['"](?:url|href)['"]\s*=>/i.test(sources)
 ok('shared cashier v3 is not registered or imported', !sources.includes('CashierV3Bootstrap')
   && !sources.includes('CashierV3ActionManifest')
   && !sources.includes('CashierV3ActionDispatcher'))
+ok('organization-direct managers are query-only and cannot receive customer-care write',
+  sources.includes('queryStaffId')
+    && sources.includes("$permissions['canViewAllTasks']")
+    && merchantResolver.includes("$staffId <= 0")
+    && merchantResolver.includes("$action !== 'CUSTOMER_CARE_WRITE'")
+    && merchantResolver.includes("(int)$context['staffId'] > 0"))
 
 console.log(`CUSTOMER_CARE_QUERY_STATIC passed=${passed} failed=${failed}`)
 if (failed) process.exit(1)

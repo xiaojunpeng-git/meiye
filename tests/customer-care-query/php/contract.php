@@ -240,6 +240,16 @@ function careTrustedContext(bool $manager = true): array
     ];
 }
 
+function careManagerWithoutAssignmentContext(): array
+{
+    $context = careTrustedContext(true);
+    $context['staffId'] = 0;
+    $context['canCreateTask'] = false;
+    $context['canCreateRecord'] = false;
+    $context['canReassign'] = false;
+    return $context;
+}
+
 $clock = new CareQueryFixedClock();
 $repo = new CareQueryFakeRepository();
 $cursorSecret = 'care-query-contract-secret-32-bytes-minimum';
@@ -258,6 +268,16 @@ careQueryAssert('non-manager all scope denied', careQueryThrows(static function 
     $scope = CustomerCareQueryScope::fromTrustedContext(careTrustedContext(false));
     CustomerCareProjectionContract::normalizeTaskQuery(['scope' => 'all'], $scope);
 }, 'CARE_QUERY_FORBIDDEN'));
+
+$managerWithoutAssignment = CustomerCareQueryScope::fromTrustedContext(careManagerWithoutAssignmentContext());
+careQueryAssert('organization-direct manager can read authorized team tasks without a staff assignment',
+    $managerWithoutAssignment->staffId() === 0
+        && CustomerCareProjectionContract::normalizeTaskQuery(['scope' => 'all'], $managerWithoutAssignment)['scope'] === 'all');
+careQueryAssert('organization-direct manager cannot be trusted as a customer-care command actor', careQueryThrows(static function () {
+    $context = careManagerWithoutAssignmentContext();
+    $context['canCreateTask'] = true;
+    CustomerCareQueryScope::fromTrustedContext($context);
+}, 'CARE_QUERY_INVALID'));
 
 $managerDefaultTaskQuery = CustomerCareProjectionContract::normalizeTaskQuery([], $scope);
 careQueryAssert('manager defaults to all tasks and all statuses',

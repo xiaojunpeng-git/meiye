@@ -50,10 +50,11 @@ final class CustomerCareQueryScope
             }
             $permissions[$permission] = $input[$permission];
         }
+        $staffId = self::queryStaffId($input['staffId'] ?? null, $permissions);
 
         return new self(array_merge($permissions, [
             'tenantId' => self::identifier($input['tenantId'] ?? null, 'tenantId', 32),
-            'staffId' => self::positiveInt($input['staffId'] ?? null, 'staffId'),
+            'staffId' => $staffId,
             'employeeId' => self::positiveInt($input['employeeId'] ?? null, 'employeeId'),
             'staffName' => self::text($input['staffName'] ?? null, 'staffName', 64),
             'operationStoreId' => $operationStoreId,
@@ -151,6 +152,28 @@ final class CustomerCareQueryScope
             }
         }
         throw self::invalid($field, '客情正整数参数无效。');
+    }
+
+    /**
+     * An organization-direct manager may have no store assignment. That identity
+     * can only read the already server-scoped team view; command actors stay tied
+     * to a real active staff assignment.
+     */
+    private static function queryStaffId($value, array $permissions): int
+    {
+        if ((is_int($value) && $value > 0)
+            || (is_string($value) && preg_match('/^[1-9][0-9]*$/D', $value))) {
+            return self::positiveInt($value, 'staffId');
+        }
+        $isZero = $value === 0 || $value === '0';
+        if ($isZero
+            && $permissions['canViewAllTasks']
+            && !$permissions['canCreateTask']
+            && !$permissions['canCreateRecord']
+            && !$permissions['canReassign']) {
+            return 0;
+        }
+        throw self::invalid('staffId', '客情查询需要有效任职；无任职管理者只能查看授权门店。');
     }
 
     private static function identifier($value, string $field, int $maxLength): string
