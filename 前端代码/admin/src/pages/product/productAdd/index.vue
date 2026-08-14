@@ -3671,6 +3671,7 @@ export default {
     async handleSubmit() {
       this.normalizeRetailDeliveryBeforeSave(this.formData);
       let formData = this.summarizeData();
+      this.normalizeRetailDeliveryBeforeSave(formData);
       if (Number(formData.product_type) === 5) formData.unit_name = '张';
       if (Number(formData.product_type) === 6) formData.unit_name = '次';
       if (formData.store_name == '') {

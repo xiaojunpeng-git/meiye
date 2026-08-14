@@ -8,8 +8,8 @@ const source = fs.readFileSync(sourcePath, 'utf8');
 
 const checks = [
   [
-    'retail save normalizes delivery before collecting form data',
-    /async handleSubmit\(\) \{\s*this\.normalizeRetailDeliveryBeforeSave\(this\.formData\);\s*let formData = this\.summarizeData\(\);/s.test(source),
+    'retail save normalizes both the page state and final submit payload',
+    /async handleSubmit\(\) \{\s*this\.normalizeRetailDeliveryBeforeSave\(this\.formData\);\s*let formData = this\.summarizeData\(\);\s*this\.normalizeRetailDeliveryBeforeSave\(formData\);/s.test(source),
   ],
   [
     'retail delivery is normalized before every next-step form validation',
