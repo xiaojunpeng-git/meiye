@@ -3160,6 +3160,11 @@ function closeMoreActionEditor() {
   moreActionValidationMessage.value = ''
 }
 
+function handleMoreActionReasonInput(event) {
+  moreActionReason.value = String(event?.target?.value || '')
+  moreActionValidationMessage.value = ''
+}
+
 async function saveMoreActionEditor() {
   const editor = moreActionEditor.value
   if (!editor || isSavingMoreAction.value) return
@@ -3199,7 +3204,10 @@ async function saveMoreActionEditor() {
       ...payload,
       idempotencyKey: createCashierV3CommandId('CASHIER_MORE')
     })
-    if (!['success', 'succeeded'].includes(resultStatus(result))) return
+    if (!['success', 'succeeded'].includes(resultStatus(result))) {
+      moreActionValidationMessage.value = resultMessage(result, '保存失败，请重试。')
+      return
+    }
     const draft = responseDataBlock(result).cashierDraft
     if (!await applyCommittedCashierDraft(draft, requestScopeKey)) return
     isSavingMoreAction.value = false
@@ -5118,7 +5126,7 @@ onBeforeUnmount(() => {
             </label>
             <label>
               <span>改价原因</span>
-              <textarea v-model.trim="moreActionReason" rows="3" maxlength="255" placeholder="必填"></textarea>
+              <textarea :value="moreActionReason" rows="3" maxlength="255" placeholder="必填" @input="handleMoreActionReasonInput"></textarea>
             </label>
           </template>
           <template v-else>
@@ -5128,7 +5136,7 @@ onBeforeUnmount(() => {
             </label>
             <label>
               <span>补单原因</span>
-              <textarea v-model.trim="moreActionReason" rows="3" maxlength="255" placeholder="必填"></textarea>
+              <textarea :value="moreActionReason" rows="3" maxlength="255" placeholder="必填" @input="handleMoreActionReasonInput"></textarea>
             </label>
           </template>
           <p v-if="moreActionValidationMessage" class="cashier-card-operation-editor__error" role="alert">{{ moreActionValidationMessage }}</p>

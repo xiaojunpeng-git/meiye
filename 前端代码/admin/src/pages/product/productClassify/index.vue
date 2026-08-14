@@ -70,23 +70,20 @@
                         </i-switch>
                     </template>
                 </vxe-table-column>
-                <vxe-table-column field="partner_name" title="合作方配置" min-width="300">
+                <vxe-table-column field="partner_enabled" title="合作方配置" min-width="170">
                     <template v-slot="{ row }">
                         <div class="partner-config-cell">
-                            <Input
-                                v-model="row.partner_name"
-                                clearable
-                                placeholder="填写合作方名称，留空即停用"
+                            <i-switch
+                                v-model="row.partner_enabled"
+                                :true-value="1"
+                                :false-value="0"
                                 :disabled="Number(row.is_show) !== 1 || row.partnerSaving"
-                                style="width: 190px"
-                            />
-                            <Button
-                                size="small"
-                                type="primary"
-                                :loading="row.partnerSaving"
-                                :disabled="Number(row.is_show) !== 1"
-                                @click="savePartnerConfig(row)"
-                            >保存</Button>
+                                @on-change="savePartnerConfig(row, $event)"
+                                size="large"
+                            >
+                                <span slot="open">合作方</span>
+                                <span slot="close">非合作方</span>
+                            </i-switch>
                         </div>
                     </template>
                 </vxe-table-column>
@@ -195,36 +192,50 @@
             },
             normalizeCategoryRow (row) {
                 const config = this.partnerConfigs[String(row.id)] || {};
+                const hasPartnerConfig = Object.prototype.hasOwnProperty.call(config, 'enabled');
                 return {
                     ...row,
                     mobile_card_show: row.mobile_card_show === undefined || row.mobile_card_show === null ? 1 : row.mobile_card_show,
-                    partner_name: row.partner_name !== undefined ? row.partner_name : (config.partner_name || ''),
-                    partner_enabled: row.partner_enabled !== undefined ? row.partner_enabled : Number(config.enabled || 0),
-                    partner_version: row.partner_version !== undefined ? row.partner_version : Number(config.version || 0),
+                    partner_label: row.partner_label !== undefined ? row.partner_label : (config.partner_label || config.category_path_snapshot || ''),
+                    partner_enabled: hasPartnerConfig ? Number(config.enabled) : (row.partner_enabled !== undefined ? Number(row.partner_enabled) : 0),
+                    partner_default_ratio: hasPartnerConfig
+                        ? Number(config.partner_default_ratio !== undefined ? config.partner_default_ratio : (config.partnerDefaultRatio !== undefined ? config.partnerDefaultRatio : 0))
+                        : Number(row.partner_default_ratio || 0),
+                    partner_version: hasPartnerConfig ? Number(config.version || 0) : Number(row.partner_version || 0),
                     partnerSaving: false
                 };
             },
-            savePartnerConfig (row) {
+            savePartnerConfig (row, nextEnabled) {
+                if (nextEnabled !== undefined) {
+                    row.partner_enabled = Number(nextEnabled) === 1 ? 1 : 0;
+                }
                 if (Number(row.is_show) !== 1) {
                     this.$Message.warning('停用分类不能配置合作方');
                     return;
                 }
+                const previousEnabled = Number(row.partner_enabled) === 1 ? 1 : 0;
+                const previousRatio = Number(row.partner_default_ratio || 0);
                 row.partnerSaving = true;
                 const idempotencyKey = (typeof crypto !== 'undefined' && crypto.randomUUID)
                     ? crypto.randomUUID()
                     : `category_partner_${row.id}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
                 saveReportOperationCategory({
                     category_id: String(row.id),
-                    partner_name: String(row.partner_name || '').trim(),
+                    enabled: Number(row.partner_enabled) === 1 ? 1 : 0,
+                    partner_default_ratio: Math.max(0, Math.min(100, Math.trunc(Number(row.partner_default_ratio || 0)))),
+                    expected_version: Number(row.partner_version || 0),
                     idempotency_key: idempotencyKey,
                 }).then((res) => {
                     const saved = res.data || {};
-                    row.partner_name = saved.partner_name || '';
-                    row.partner_enabled = Number(saved.enabled || 0);
+                    row.partner_enabled = Number(saved.enabled || saved.partner_enabled || 0);
+                    row.partner_default_ratio = Number(saved.partner_default_ratio !== undefined ? saved.partner_default_ratio : (saved.partnerDefaultRatio !== undefined ? saved.partnerDefaultRatio : 0));
+                    row.partner_label = saved.partner_label || row.partner_label || '';
                     row.partner_version = Number(saved.version || 0);
                     this.$set(this.partnerConfigs, String(row.id), saved);
                     this.$Message.success('合作方配置已保存');
                 }).catch((res) => {
+                    row.partner_enabled = previousEnabled;
+                    row.partner_default_ratio = previousRatio;
                     this.$Message.error(res.msg || '合作方配置保存失败');
                 }).finally(() => {
                     row.partnerSaving = false;
@@ -253,7 +264,38 @@
             },
             // 编辑
             edit (row) {
-                this.$modalForm(productEditApi(row.id)).then(() => {
+                this.$modalForm(productEditApi(row.id).then((response) => {
+                    // 合作方配置属于分类编辑的一部分；列表只负责快速开关，不再显示比例输入。
+                    // 仅对启用分类注入编辑字段，停用分类仍只能通过列表恢复后配置。
+                    if (Number(row.is_show) === 1 && response && response.data && Array.isArray(response.data.rules)) {
+                        response.data.rules.push({
+                            type: 'switch',
+                            field: 'partner_enabled',
+                            title: '合作方：',
+                            value: Number(row.partner_enabled) === 1 ? 1 : 0,
+                            props: {
+                                trueValue: 1,
+                                falseValue: 0,
+                                size: 'large',
+                                open: '开启',
+                                close: '关闭'
+                            }
+                        });
+                        response.data.rules.push({
+                            type: 'inputNumber',
+                            field: 'partner_default_ratio',
+                            title: '合作方默认比例：',
+                            value: Number(row.partner_default_ratio || 0),
+                            props: {
+                                min: 0,
+                                max: 100,
+                                precision: 0,
+                                step: 1
+                            }
+                        });
+                    }
+                    return response;
+                })).then(() => {
                     this.artFrom.pid = 0;
                     this.getList();
                     this.goodsCategory();

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# 本机串行构建 admin / store 生产包（原生 arm64 Node，禁止 Docker amd64 并行）
+# 本机串行构建 admin 生产包（原生 arm64 Node，禁止 Docker amd64 并行）。
+# 旧门店端已迁移到 美容源码/旧端口/18082/，不再作为当前构建入口。
 # 用法：
-#   bash 美容源码/scripts/build-frontend.sh           # 先 admin 再 store
+#   bash 美容源码/scripts/build-frontend.sh           # 构建 admin
 #   bash 美容源码/scripts/build-frontend.sh admin     # 只打 admin
-#   bash 美容源码/scripts/build-frontend.sh store     # 只打 store
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -40,21 +40,19 @@ build_one() {
     test -f dist/system.html || test -f dist/index.html
     test -d dist/view_admin
   else
-    test -f dist/index.html || test -f dist/store.html
-    test -d dist/view_store
+    echo "不支持构建旧门店端：$name 已迁移到 美容源码/旧端口/18082/" >&2
+    exit 2
   fi
   echo "========== BUILD $name OK $(date '+%F %T') =========="
 }
 
 case "$TARGET" in
   admin) build_one admin ;;
-  store) build_one store ;;
   all)
     build_one admin
-    build_one store
     ;;
   *)
-    echo "用法: $0 [all|admin|store]"
+    echo "用法: $0 [all|admin]"
     exit 2
     ;;
 esac
@@ -62,5 +60,5 @@ esac
 echo
 echo "产物目录："
 echo "  admin: $ROOT/前端代码/admin/dist/  （system.html + view_admin/）"
-echo "  store: $ROOT/前端代码/store/dist/  （index.html/store.html + view_store/）"
+echo "  旧门店端：已迁移到 $ROOT/旧端口/18082/（仅备份，不参与当前构建）"
 echo "下一步上传：bash 美容源码/scripts/deploy-frontend-dist.sh <站点名>"

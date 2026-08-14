@@ -327,10 +327,20 @@ final class CashierV3CashierMoreActionServices
                 'service_object' => (string)($row['service_object'] ?? ''),
                 'craftsmen_json' => (string)($row['craftsmen_json'] ?? ''),
                 'salespeople_json' => (string)($row['salespeople_json'] ?? ''),
+                'guide_selections_json' => (string)($row['guide_selections_json'] ?? ''),
+                'sales_manager_selections_json' => (string)($row['sales_manager_selections_json'] ?? ''),
+                'friend_counts_as_customer' => (int)($row['friend_counts_as_customer'] ?? 1),
                 'is_experience' => (int)($row['is_experience'] ?? 0),
+                'is_presale' => (int)($row['is_presale'] ?? 0),
                 'display_snapshot_json' => (string)($row['display_snapshot_json'] ?? ''),
                 'sort_no' => (int)($row['sort_no'] ?? 0),
             ];
+            if ($row['manual_labor_fee_cents'] !== null) {
+                $item['manual_labor_fee_cents'] = (int)$row['manual_labor_fee_cents'];
+            }
+            if ((int)($row['inventory_outbound_required'] ?? 1) !== 1) {
+                $item['inventory_outbound_required'] = 0;
+            }
             if ((string)($row['line_role'] ?? '') === 'sale') {
                 $item['catalog_product_id'] = (int)($row['catalog_product_id'] ?? 0);
                 $item['catalog_sku_id'] = (int)($row['catalog_sku_id'] ?? 0);
@@ -343,6 +353,9 @@ final class CashierV3CashierMoreActionServices
                 $item['price_changed_by'] = (int)($row['price_changed_by'] ?? 0);
                 $item['price_changed_by_name_snapshot'] = (string)($row['price_changed_by_name_snapshot'] ?? '');
                 $item['price_changed_at'] = (int)($row['price_changed_at'] ?? 0);
+                $item['coupon_user_id'] = (int)($row['coupon_user_id'] ?? 0);
+                $item['coupon_name_snapshot'] = (string)($row['coupon_name_snapshot'] ?? '');
+                $item['coupon_discount_cents'] = (int)($row['coupon_discount_cents'] ?? 0);
                 $item['authority_fingerprint'] = (string)($row['authority_fingerprint'] ?? '');
                 $item['authority_snapshot_json'] = (string)($row['authority_snapshot_json'] ?? '');
             }

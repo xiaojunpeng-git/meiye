@@ -3,7 +3,8 @@
 # 用法：
 #   bash 美容源码/scripts/deploy-frontend-dist.sh 008
 #   bash 美容源码/scripts/deploy-frontend-dist.sh 008 admin
-#   bash 美容源码/scripts/deploy-frontend-dist.sh 008 store
+#   bash 美容源码/scripts/deploy-frontend-dist.sh 008 cashier
+#   bash 美容源码/scripts/deploy-frontend-dist.sh 008 inventory
 #   bash 美容源码/scripts/deploy-frontend-dist.sh 007
 #
 # 前置：已用 build-frontend.sh 打好对应 dist；SSH 别名 aliyun-ecs 可用。
@@ -11,6 +12,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+FRONTEND_DIST_ROOT="${FRONTEND_DIST_ROOT:-$ROOT/前端代码}"
 SITE_KEY="${1:-}"
 WHICH="${2:-all}"
 ALLOW_RH="${3:-}"
@@ -43,7 +45,7 @@ SSH_HOST="${MOHE_SSH_HOST:-aliyun-ecs}"
 PUBLIC="$REMOTE_ROOT/public"
 
 deploy_admin() {
-  local dist="$ROOT/前端代码/admin/dist"
+  local dist="$FRONTEND_DIST_ROOT/admin/dist"
   test -d "$dist/view_admin"
   local html="$dist/system.html"
   [ -f "$html" ] || html="$dist/index.html"
@@ -55,17 +57,22 @@ deploy_admin() {
   ssh "$SSH_HOST" "chown -R www:www '$PUBLIC/view_admin' '$PUBLIC/system.html' 2>/dev/null || true"
 }
 
-deploy_store() {
-  local dist="$ROOT/前端代码/store/dist"
-  test -d "$dist/view_store"
-  local html="$dist/store.html"
-  [ -f "$html" ] || html="$dist/index.html"
-  test -f "$html"
-  echo "→ 上传 store → $PUBLIC/view_store + store.html"
-  ssh "$SSH_HOST" "mkdir -p '$PUBLIC/view_store' && rm -rf '$PUBLIC/view_store'/*"
-  rsync -az --delete "$dist/view_store/" "$SSH_HOST:$PUBLIC/view_store/"
-  scp "$html" "$SSH_HOST:$PUBLIC/store.html"
-  ssh "$SSH_HOST" "chown -R www:www '$PUBLIC/view_store' '$PUBLIC/store.html' 2>/dev/null || true"
+deploy_cashier_v3() {
+  local dist="$FRONTEND_DIST_ROOT/cashier-v3/dist"
+  test -f "$dist/index.html"
+  echo "→ 上传 cashier-v3 → $PUBLIC/view_cashier_v3"
+  ssh "$SSH_HOST" "mkdir -p '$PUBLIC/view_cashier_v3' && rm -rf '$PUBLIC/view_cashier_v3'/*"
+  rsync -az --delete "$dist/" "$SSH_HOST:$PUBLIC/view_cashier_v3/"
+  ssh "$SSH_HOST" "chown -R www:www '$PUBLIC/view_cashier_v3' 2>/dev/null || true"
+}
+
+deploy_inventory_v3() {
+  local dist="$FRONTEND_DIST_ROOT/inventory-vue3/dist"
+  test -f "$dist/index.html"
+  echo "→ 上传 inventory-v3 → $PUBLIC/view_inventory_v3"
+  ssh "$SSH_HOST" "mkdir -p '$PUBLIC/view_inventory_v3' && rm -rf '$PUBLIC/view_inventory_v3'/*"
+  rsync -az --delete "$dist/" "$SSH_HOST:$PUBLIC/view_inventory_v3/"
+  ssh "$SSH_HOST" "chown -R www:www '$PUBLIC/view_inventory_v3' 2>/dev/null || true"
 }
 
 echo "目标：渼约/瑞昊站点 key=$SITE_KEY  path=$REMOTE_ROOT  which=$WHICH"
@@ -73,13 +80,15 @@ echo "请确认服务器名与站点（铁律 2）：渼约=121 / 瑞昊=47；00
 
 case "$WHICH" in
   admin) deploy_admin ;;
-  store) deploy_store ;;
+  cashier) deploy_cashier_v3 ;;
+  inventory) deploy_inventory_v3 ;;
   all)
     deploy_admin
-    deploy_store
+    deploy_cashier_v3
+    deploy_inventory_v3
     ;;
   *)
-    echo "第二参数应为 all|admin|store"
+    echo "第二参数应为 all|admin|cashier|inventory"
     exit 2
     ;;
 esac

@@ -17,6 +17,10 @@ const service = fs.readFileSync(
   path.join(root, '后端代码/app/services/product/product/StoreProductServices.php'),
   'utf8',
 )
+const performanceRuleService = fs.readFileSync(
+  path.join(root, '后端代码/app/services/product/CashierV3PerformanceRuleAdminServices.php'),
+  'utf8',
+)
 
 const checks = [
   [
@@ -44,6 +48,15 @@ const checks = [
     form.includes('/^(?:0|[1-9]\\d*)(?:\\.0+)?$/') &&
       memberPrice.includes('/^(?:0|[1-9]\\d*)(?:\\.0+)?$/') &&
       form.includes('normalizeWholeYuanMoney(value)'),
+  ],
+  [
+    'project manual fee is displayed and retained as a nonnegative integer',
+    form.includes(':precision="0"') &&
+      form.includes('@on-change="normalizeLaborFeeInput"') &&
+      form.includes('Math.trunc(amount)') &&
+      form.includes('consumption_configured_unit_amount: Number.isFinite(consumptionAmount)') &&
+      form.includes('this.normalizePerformanceRule(') &&
+      performanceRuleService.includes("/^(?:0|[1-9]\\d*)(?:\\.0+)?$/D"),
   ],
   [
     'disabled paid-member and brokerage fields are normalized to zero',

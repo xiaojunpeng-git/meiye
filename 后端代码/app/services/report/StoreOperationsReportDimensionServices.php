@@ -35,8 +35,10 @@ final class StoreOperationsReportDimensionServices
             // 停用/隐藏分类不参与新事实维度；已经写入的历史快照不回算。
             $category = $categoryId > 0 ? Db::name('store_product_category')->where('id', $categoryId)->where('is_show', 1)->find() : null;
             $path = $this->categoryPath($category);
+            // 合作方是分类开关。启用时使用服务端解析出的分类路径作为只读标签，
+            // 不再依赖人工输入的 partner_name；历史维度快照不回算。
             $partner = $categoryId > 0
-                ? Db::name('cashier_v3_report_category_config')->where('tenant_id', $context['tenant_id'])->where('category_id', $categoryId)->where('enabled', 1)->value('partner_name')
+                ? (Db::name('cashier_v3_report_category_config')->where('tenant_id', $context['tenant_id'])->where('category_id', $categoryId)->where('enabled', 1)->value('id') ? $path : '')
                 : '';
             $row = [
                 'tenant_id' => (string)$context['tenant_id'], 'store_id' => (int)$context['store_id'],

@@ -33,6 +33,8 @@ if (strpos($dimension, "->where('is_show', 1)") === false) {
 }
 foreach ([
     'enabled' => 'array_key_exists(\'enabled\', $payload)',
+    'partner_default_ratio' => 'partner_default_ratio',
+    'ratio_validation' => '合作方默认比例必须是 0 到 100 的整数',
     'switch_rejects_name' => "合作方配置只支持开关，不支持输入名称",
     'server_derived_partner_label' => '$partnerLabel = mb_substr($this->categoryPath',
 ] as $name => $needle) {
@@ -40,9 +42,17 @@ foreach ([
         throw new RuntimeException("partner category switch contract missing {$name}");
     }
 }
+if (strpos($annotation, "'partner_default_ratio' => " . '$partnerDefaultRatio') === false
+    || strpos($annotation, "'partnerDefaultRatio' => " . '$ratio') === false) {
+    throw new RuntimeException('partner category ratio projection contract missing');
+}
 foreach ([
     'switch' => 'v-model="row.partner_enabled"',
     'boolean_payload' => 'enabled: Number(row.partner_enabled) === 1 ? 1 : 0',
+    // The ratio is edited in the category dialog; the table intentionally only
+    // exposes the partner enable/disable switch.
+    'ratio_input' => "field: 'partner_default_ratio'",
+    'ratio_payload' => 'partner_default_ratio:',
     'no_name_payload' => 'partner_name:',
 ] as $name => $needle) {
     if ($name === 'no_name_payload' ? strpos($categoryPage, $needle) !== false : strpos($categoryPage, $needle) === false) {

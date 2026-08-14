@@ -28,10 +28,10 @@ try {
     Db::name('organization')->insert(['id'=>$ids['org'],'pid'=>$ids['root'],'name'=>'TEST 生命周期组织','status'=>1,'is_del'=>0]);
     Db::name('organization')->insert(['id'=>$ids['targetOrg'],'pid'=>$ids['root'],'name'=>'TEST 生命周期调入组织','status'=>1,'is_del'=>0]);
     Db::name('system_store')->insert(['id'=>$ids['store'],'name'=>'TEST 生命周期门店','is_del'=>0,'is_show'=>1]);
-    Db::name('system_store_staff')->insert(['id'=>$ids['staff'],'store_id'=>$ids['store'],'status'=>1,'is_del'=>0]);
+    Db::name('system_store_staff')->insert(['id'=>$ids['staff'],'store_id'=>$ids['store'],'staff_name'=>'TEST 生命周期调出人','status'=>1,'is_del'=>0]);
     Db::name('organization_store')->insert(['store_id'=>$ids['store'],'org_id'=>$ids['org']]);
     Db::name('system_store')->insert(['id'=>$ids['targetStore'],'name'=>'TEST 生命周期调入门店','is_del'=>0,'is_show'=>1]);
-    Db::name('system_store_staff')->insert(['id'=>$ids['targetStaff'],'store_id'=>$ids['targetStore'],'status'=>1,'is_del'=>0]);
+    Db::name('system_store_staff')->insert(['id'=>$ids['targetStaff'],'store_id'=>$ids['targetStore'],'staff_name'=>'TEST 生命周期调入人','status'=>1,'is_del'=>0]);
     Db::name('organization_store')->insert(['store_id'=>$ids['targetStore'],'org_id'=>$ids['targetOrg']]);
     Db::name('inventory_location')->insert(['id'=>$ids['location'],'tenant_id'=>'0','organization_id'=>(string)$ids['org'],'organization_path'=>'/'.$ids['root'].'/'.$ids['org'].'/','organization_name_snapshot'=>'TEST 生命周期组织','location_type'=>'STORE','owner_id'=>$ids['store'],'location_code'=>'TEST-LIFECYCLE-STORE','location_name'=>'默认门店仓','store_id'=>$ids['store'],'store_name_snapshot'=>'TEST 生命周期门店','is_default'=>1,'location_status'=>'ACTIVE','version'=>1,'created_at'=>$now,'updated_at'=>$now]);
     Db::name('inventory_location')->insert(['id'=>$ids['targetLocation'],'tenant_id'=>'0','organization_id'=>(string)$ids['targetOrg'],'organization_path'=>'/'.$ids['root'].'/'.$ids['targetOrg'].'/','organization_name_snapshot'=>'TEST 生命周期调入组织','location_type'=>'STORE','owner_id'=>$ids['targetStore'],'location_code'=>'TEST-LIFECYCLE-TARGET','location_name'=>'默认门店仓','store_id'=>$ids['targetStore'],'store_name_snapshot'=>'TEST 生命周期调入门店','is_default'=>1,'location_status'=>'ACTIVE','version'=>1,'created_at'=>$now,'updated_at'=>$now]);

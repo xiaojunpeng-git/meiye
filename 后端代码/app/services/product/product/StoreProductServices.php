@@ -204,9 +204,14 @@ class StoreProductServices extends BaseServices
         if ($list) {
             // 项目手工费来自收银 V3 项目业绩规则权威表，批量读取避免逐行查询。
             $laborFeeByProject = [];
-            $projectIds = array_values(array_filter(array_map(function ($item) {
-                return (int)($item['product_type'] ?? 0) === 6 ? (int)($item['id'] ?? 0) : 0;
-            }, $list)));
+            // 门店项目是平台主项目的复制行（type=1，pid=主项目ID）。
+            // 手工费规则只保存在主项目规则上，因此列表必须按主项目 ID
+            // 批量读取，再把结果投影回门店复制行，不能直接按门店行 ID 查。
+            $projectIds = array_values(array_unique(array_filter(array_map(function ($item) {
+                if ((int)($item['product_type'] ?? 0) !== 6) return 0;
+                $masterId = (int)($item['pid'] ?? 0);
+                return $masterId > 0 ? $masterId : (int)($item['id'] ?? 0);
+            }, $list))));
             if ($projectIds) {
                 try {
                     $laborFeeByProject = Db::name('cashier_v3_project_performance_rule')
@@ -260,8 +265,11 @@ class StoreProductServices extends BaseServices
             $userLabelServices = app()->make(UserLabelServices::class);
             foreach ($list as &$item) {
                 $projectId = (int)($item['id'] ?? 0);
+                $ruleProjectId = ((int)($item['type'] ?? 0) === 1 && (int)($item['pid'] ?? 0) > 0)
+                    ? (int)$item['pid']
+                    : $projectId;
                 $item['labor_fee'] = (int)($item['product_type'] ?? 0) === 6
-                    ? intdiv((int)($laborFeeByProject[$projectId] ?? 0), 100)
+                    ? intdiv((int)($laborFeeByProject[$ruleProjectId] ?? 0), 100)
                     : 0;
                 if ($item['spec_type'] == 0 && $is_move) {
                     $item['attr_value'] = $attrValueList[$item['id']] ?? [];
@@ -1035,6 +1043,32 @@ class StoreProductServices extends BaseServices
         return $item;
     }
 
+    private function buildDefaultReservationTimeData(string $startTime, string $endTime, int $interval): array
+    {
+        $interval = $interval > 0 ? $interval : 60;
+        $startTimestamp = strtotime(date('Y-m-d') . ' ' . ($startTime ?: '10:00'));
+        $endTimestamp = strtotime(date('Y-m-d') . ' ' . ($endTime ?: '22:00'));
+        if (!$startTimestamp || !$endTimestamp || $endTimestamp <= $startTimestamp) {
+            $startTimestamp = strtotime(date('Y-m-d') . ' 10:00');
+            $endTimestamp = strtotime(date('Y-m-d') . ' 22:00');
+        }
+
+        $result = [];
+        for ($cursor = $startTimestamp; $cursor < $endTimestamp; $cursor += $interval * 60) {
+            $slotEnd = min($cursor + ($interval * 60), $endTimestamp);
+            if ($slotEnd <= $cursor) {
+                break;
+            }
+            $result[] = [
+                'show_time' => date('H:i', $cursor) . '-' . date('H:i', $slotEnd),
+                'start' => date('H:i', $cursor),
+                'end' => date('H:i', $slotEnd),
+                'stock' => 0,
+            ];
+        }
+        return $result;
+    }
+
     /**
      * 新增编辑商品
      * @param int $id
@@ -1330,6 +1364,13 @@ class StoreProductServices extends BaseServices
                 }
             } elseif ($data['product_type'] == 6) {//验证预约商品数据
                 if (!isset($item['reservation_time_data']) || !$item['reservation_time_data']) {
+                    $item['reservation_time_data'] = $this->buildDefaultReservationTimeData(
+                        (string)($data['reservation_time_start'] ?? '10:00'),
+                        (string)($data['reservation_time_end'] ?? '22:00'),
+                        (int)($data['reservation_time_interval'] ?? 60)
+                    );
+                }
+                if (!$item['reservation_time_data']) {
                     throw new AdminException('预约商品：请选择确认时段划分');
                 }
                 $item['stock'] = array_sum(array_column($item['reservation_time_data'], 'stock'));

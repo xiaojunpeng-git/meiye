@@ -12,6 +12,7 @@ namespace app\controller\admin\v1\product;
 
 use app\controller\admin\AuthController;
 use app\services\product\category\StoreProductCategoryServices;
+use app\services\report\StoreOperationsReportAnnotationServices;
 use think\facade\App;
 
 /**
@@ -155,7 +156,7 @@ class StoreProductCategory extends AuthController
      * @param $id
      * @return mixed
      */
-    public function update($id)
+    public function update($id, StoreOperationsReportAnnotationServices $annotationServices)
     {
         $data = $this->request->postMore([
             ['pid', []],
@@ -163,13 +164,33 @@ class StoreProductCategory extends AuthController
             ['pic', ''],
             ['big_pic', ''],
             ['sort', 0],
-            ['is_show', 0]
+            ['is_show', 0],
+            ['partner_enabled', null],
+            ['partner_default_ratio', null]
         ]);
         if (!$data['cate_name']) {
             return $this->fail('请输入分类名称');
         }
         $data['pid'] = end($data['pid']);
+        $partnerEnabled = $data['partner_enabled'];
+        $partnerDefaultRatio = $data['partner_default_ratio'];
+        unset($data['partner_enabled'], $data['partner_default_ratio']);
         $this->service->editData((int)$id, $data);
+        // 合作方默认值与分类编辑同一提交入口保存；列表开关仍走独立幂等接口。
+        if ($partnerEnabled !== null && $partnerDefaultRatio !== null && (int)$data['is_show'] === 1) {
+            $annotationServices->saveCategoryConfig([
+                'tenant_id' => '0',
+                'admin_id' => (int)$this->adminId,
+                'admin_name' => (string)($this->adminInfo['real_name'] ?? $this->adminInfo['account'] ?? ''),
+                'store_ids' => null,
+                'store_id' => 0,
+            ], [
+                'category_id' => (string)$id,
+                'enabled' => (int)$partnerEnabled === 1 ? 1 : 0,
+                'partner_default_ratio' => $partnerDefaultRatio,
+                'idempotency_key' => 'category-form-' . $id . '-' . bin2hex(random_bytes(12)),
+            ]);
+        }
         return $this->success('修改成功!');
     }
 

@@ -65,6 +65,7 @@
                 v-model="performanceRule.labor_configured_unit_amount"
                 :min="0"
                 :precision="0"
+                @on-change="normalizeLaborFeeInput"
                 style="width: 220px"
               />
             </FormItem>
@@ -3159,14 +3160,37 @@ export default {
     loadPerformanceRule(id) {
       if (!id) return;
       performanceRuleApi(Number(id)).then((res) => {
-        this.performanceRule = { ...this.performanceRule, ...(res.data || {}) };
+        this.performanceRule = this.normalizePerformanceRule({
+          ...this.performanceRule,
+          ...(res.data || {}),
+        });
       }).catch((res) => {
         this.$Message.error(res.msg || '读取项目业绩配置失败');
       });
     },
+    normalizeLaborFeeInput(value) {
+      const amount = Number(value);
+      this.performanceRule.labor_configured_unit_amount = Number.isFinite(amount)
+        ? Math.max(0, Math.trunc(amount))
+        : 0;
+    },
+    normalizePerformanceRule(rule = {}) {
+      const amount = Number(rule.labor_configured_unit_amount);
+      const consumptionAmount = Number(rule.consumption_configured_unit_amount);
+      return {
+        ...rule,
+        labor_configured_unit_amount: Number.isFinite(amount)
+          ? Math.max(0, Math.trunc(amount))
+          : 0,
+        consumption_configured_unit_amount: Number.isFinite(consumptionAmount)
+          ? Math.max(0, Math.trunc(consumptionAmount))
+          : 0,
+      };
+    },
     savePerformanceRule() {
       const id = Number(this.$route.params.id || 0);
       if (!id) return;
+      this.performanceRule = this.normalizePerformanceRule(this.performanceRule);
       this.performanceRuleSaving = true;
       savePerformanceRuleApi(id, {
         labor_mode: 'project_configured_amount',
@@ -3174,7 +3198,10 @@ export default {
         consumption_mode: this.performanceRule.consumption_mode,
         consumption_configured_unit_amount: this.performanceRule.consumption_configured_unit_amount,
       }).then((res) => {
-        this.performanceRule = { ...this.performanceRule, ...(res.data || {}) };
+        this.performanceRule = this.normalizePerformanceRule({
+          ...this.performanceRule,
+          ...(res.data || {}),
+        });
         this.$Message.success(res.msg || '保存成功');
       }).catch((res) => {
         this.$Message.error(res.msg || '保存项目业绩配置失败');
@@ -3287,15 +3314,9 @@ export default {
       if (this.$route.params.id && this.formData.delivery_type.includes('3') && !this.formData.store_delivery_type.length) {
         this.formData.store_delivery_type = ['1', '2'];
       }
-      if (Array.isArray(data.sale_time_week)) {
+      if (Array.isArray(data.sale_time_week) && this.$refs.reservationSet && Array.isArray(this.$refs.reservationSet.weekList)) {
         this.$refs.reservationSet.weekList.forEach(item=>{
-          data.sale_time_week.forEach(j=>{
-            if(item.id == j){
-              item.selected = true
-            }else{
-              item.selected = false
-            }
-          })
+          item.selected = data.sale_time_week.includes(item.id);
         })
       }
       // 生成规格表头
@@ -3715,11 +3736,14 @@ export default {
       formData.applicable_store_id = storeId;
       formData.type = this.type;
 	  let weekId = [];
-	  this.$refs.reservationSet.weekList.forEach(item=>{
+	  const reservationSetRef = this.$refs.reservationSet;
+	  if (reservationSetRef && Array.isArray(reservationSetRef.weekList)) {
+	    reservationSetRef.weekList.forEach(item=>{
 		  if(item.selected){
 			  weekId.push(item.id);
 		  }
-	  })
+	    })
+	  }
 	  formData.sale_time_week = weekId;
     // 商品规格的验证
     for (let i = 0; i < formData.items.length; i++) {

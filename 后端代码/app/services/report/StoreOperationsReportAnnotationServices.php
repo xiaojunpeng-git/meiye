@@ -167,27 +167,41 @@ final class StoreOperationsReportAnnotationServices
                 'parent_id' => (string)($row['pid'] ?? 0),
                 'category_name' => (string)$row['cate_name'],
                 'category_path' => $this->categoryPath((int)$row['id']),
+                'partner_label' => $this->categoryPath((int)$row['id']),
+                // partner_name 仅为旧响应兼容字段，前端不得编辑。
                 'partner_name' => (string)($config['partner_name'] ?? ''),
                 'enabled' => (int)($config['enabled'] ?? 0),
+                'partner_enabled' => (int)($config['enabled'] ?? 0),
+                'partner_default_ratio' => $this->partnerRatio($config),
+                'partnerDefaultRatio' => $this->partnerRatio($config),
                 'version' => (int)($config['version'] ?? 0),
             ];
         }
         return $result;
     }
 
-    /** 保存分类的合作方名称；名称为空即关闭合作方统计。 */
+    /** 保存分类级合作方开关；合作方名称不再由客户端维护。 */
     public function saveCategoryConfig(array $context, array $payload): array
     {
         $scope = $this->scope($context);
         $categoryId = $this->opaque($payload['category_id'] ?? '', 'category_id', 64);
         $category = Db::name('store_product_category')->where('id', $categoryId)->where('is_show', 1)->find();
         if (!is_array($category)) throw new \InvalidArgumentException('商品分类不存在或已停用');
-        $partnerName = mb_substr(trim((string)($payload['partner_name'] ?? '')), 0, 128);
+        if (array_key_exists('partner_name', $payload)) {
+            throw new \InvalidArgumentException('合作方配置只支持开关，不支持输入名称');
+        }
+        if (!array_key_exists('enabled', $payload) || !in_array((string)$payload['enabled'], ['0', '1'], true)) {
+            throw new \InvalidArgumentException('合作方开关值无效');
+        }
+        $enabled = (int)$payload['enabled'];
+        $partnerDefaultRatio = $this->partnerRatioValue($payload['partner_default_ratio'] ?? 0);
+        $expectedVersion = array_key_exists('expected_version', $payload) ? (int)$payload['expected_version'] : null;
+        $partnerLabel = mb_substr($this->categoryPath((int)$category['id']), 0, 128);
         $idempotencyKey = $this->opaque($payload['idempotency_key'] ?? '', 'idempotency_key', 128);
         $operatorId = (int)($context['operator_id'] ?? $context['admin_id'] ?? 0);
         $operatorName = mb_substr((string)($context['operator_name'] ?? $context['admin_name'] ?? ''), 0, 128);
         $now = time();
-        return Db::transaction(function () use ($scope, $categoryId, $category, $partnerName, $idempotencyKey, $operatorId, $operatorName, $now): array {
+        return Db::transaction(function () use ($scope, $categoryId, $category, $enabled, $partnerDefaultRatio, $expectedVersion, $partnerLabel, $idempotencyKey, $operatorId, $operatorName, $now): array {
             $audit = Db::name(self::CATEGORY_AUDIT_TABLE)->where('tenant_id', $scope['tenant_id'])->where('idempotency_key', $idempotencyKey)->lock(true)->find();
             if (is_array($audit)) {
                 if ((string)$audit['category_id'] !== $categoryId) {
@@ -195,19 +209,25 @@ final class StoreOperationsReportAnnotationServices
                 }
                 $replay = Db::name(self::CATEGORY_TABLE)->where('id', (int)$audit['category_config_id'])->find();
                 if (!is_array($replay)) throw new \RuntimeException('分类配置审计存在但当前配置缺失');
-                if ((string)($replay['partner_name'] ?? '') !== $partnerName) {
-                    throw new \InvalidArgumentException('幂等标识已用于其他合作方配置');
+                if ((int)($replay['enabled'] ?? 0) !== $enabled
+                    || $this->partnerRatio($replay) !== $partnerDefaultRatio) {
+                    throw new \InvalidArgumentException('幂等标识已用于其他合作方开关');
                 }
                 return $this->categoryProjection($replay);
             }
             $row = Db::name(self::CATEGORY_TABLE)->where('tenant_id', $scope['tenant_id'])->where('category_id', $categoryId)->lock(true)->find();
             $before = is_array($row) ? $row : [];
+            if ($expectedVersion !== null && (int)($row['version'] ?? 0) !== $expectedVersion) {
+                throw new \InvalidArgumentException('合作方配置已被其他人修改，请刷新后重试');
+            }
             $data = [
                 'category_name_snapshot' => mb_substr((string)$category['cate_name'], 0, 128),
                 'category_parent_id_snapshot' => (string)($category['pid'] ?? 0),
                 'category_parent_name_snapshot' => $this->categoryParentName((int)($category['pid'] ?? 0)),
                 'category_path_snapshot' => mb_substr($this->categoryPath((int)$category['id']), 0, 512),
-                'partner_name' => $partnerName, 'enabled' => $partnerName === '' ? 0 : 1,
+                // 旧表结构保留 partner_name，但值由服务端从分类路径推导，不接受人工名称。
+                'partner_name' => $enabled === 1 ? $partnerLabel : '', 'enabled' => $enabled,
+                'partner_default_ratio' => $partnerDefaultRatio,
                 'updated_by' => $operatorId, 'updated_by_name_snapshot' => $operatorName, 'updated_at' => $now,
             ];
             if (is_array($row)) {
@@ -271,7 +291,27 @@ final class StoreOperationsReportAnnotationServices
 
     private function categoryProjection(array $row): array
     {
-        return ['id' => (int)($row['id'] ?? 0), 'category_id' => (string)($row['category_id'] ?? ''), 'category_name_snapshot' => (string)($row['category_name_snapshot'] ?? ''), 'category_path_snapshot' => (string)($row['category_path_snapshot'] ?? ''), 'partner_name' => (string)($row['partner_name'] ?? ''), 'enabled' => (int)($row['enabled'] ?? 0), 'version' => (int)($row['version'] ?? 0), 'updated_at' => (int)($row['updated_at'] ?? 0)];
+        $enabled = (int)($row['enabled'] ?? 0);
+        $ratio = $this->partnerRatio($row);
+        return ['id' => (int)($row['id'] ?? 0), 'category_id' => (string)($row['category_id'] ?? ''), 'category_name_snapshot' => (string)($row['category_name_snapshot'] ?? ''), 'category_path_snapshot' => (string)($row['category_path_snapshot'] ?? ''), 'partner_label' => (string)($row['category_path_snapshot'] ?? ''), 'partner_name' => (string)($row['partner_name'] ?? ''), 'enabled' => $enabled, 'partner_enabled' => $enabled, 'partner_default_ratio' => $ratio, 'partnerDefaultRatio' => $ratio, 'version' => (int)($row['version'] ?? 0), 'updated_at' => (int)($row['updated_at'] ?? 0)];
+    }
+
+    private function partnerRatio(array $row): int
+    {
+        return max(0, min(100, (int)($row['partner_default_ratio'] ?? $row['partnerDefaultRatio'] ?? 0)));
+    }
+
+    private function partnerRatioValue($value): int
+    {
+        $value = trim((string)$value);
+        if ($value === '' || !preg_match('/^(?:0|[1-9][0-9]*)$/D', $value)) {
+            throw new \InvalidArgumentException('合作方默认比例必须是 0 到 100 的整数');
+        }
+        $ratio = (int)$value;
+        if ($ratio < 0 || $ratio > 100) {
+            throw new \InvalidArgumentException('合作方默认比例必须是 0 到 100 的整数');
+        }
+        return $ratio;
     }
 
     private function json(array $value): string

@@ -22,6 +22,11 @@ const cashierApiProxy = {
   '/adminapi': {
     target: cashierApiTarget,
     changeOrigin: false
+  },
+  // 员工默认头像等公共资源由收银专用后端提供，避免 18091 Vite 直接 404。
+  '/static': {
+    target: cashierApiTarget,
+    changeOrigin: false
   }
 }
 

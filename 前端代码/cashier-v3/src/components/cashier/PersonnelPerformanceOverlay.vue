@@ -106,6 +106,32 @@ function equalWeights(records) {
   })
 }
 
+function splitWeight(total, records) {
+  const selected = records.filter((record) => record.selected)
+  if (!selected.length) return
+  const base = Math.floor(total / selected.length)
+  let remainder = total - base * selected.length
+  selected.forEach((record) => {
+    record.performance = base + (remainder > 0 ? 1 : 0)
+    remainder = Math.max(0, remainder - 1)
+  })
+}
+
+function salespersonDefaultWeights(records) {
+  const selected = records.filter((record) => record.selected)
+  if (!selected.length) return
+  const ratio = Math.max(0, Math.min(100, Math.trunc(Number(selected[0].partnerDefaultRatio || 0))))
+  const partners = selected.filter((record) => String(record.employeeTypeCode || '').toLowerCase() === 'partner')
+  const others = selected.filter((record) => String(record.employeeTypeCode || '').toLowerCase() !== 'partner')
+  if (ratio <= 0 || !partners.length || !others.length) {
+    splitWeight(100, selected)
+  } else {
+    splitWeight(ratio, partners)
+    splitWeight(100 - ratio, others)
+  }
+  selected.forEach((record) => { record.performanceTouched = false })
+}
+
 function mergeCandidates(candidates, selected, role) {
   const selectedById = new Map(
     (Array.isArray(selected) ? selected : [])
@@ -129,7 +155,9 @@ function mergeCandidates(candidates, selected, role) {
       selected: Boolean(saved),
       marked: Boolean(saved?.marked ?? saved?.isPreSale ?? saved?.isPointCustomer),
       performance: Number(saved?.allocationWeight ?? saved?.laborWeight ?? saved?.performance ?? 0),
+      performanceTouched: Boolean(saved && Number(saved.allocationWeight ?? saved.performance ?? 0) > 0),
       craftsmanPerformanceType: craftsmanType(saved || candidate),
+      partnerDefaultRatio: Number(candidate.partnerDefaultRatio ?? saved?.partnerDefaultRatio ?? 0),
       laborFeeCents: laborFeeCentsFor({ ...candidate, ...(saved || {}) }),
       laborFeeYuan: laborFeeCentsFor({ ...candidate, ...(saved || {}) }) / 100,
       role
@@ -149,7 +177,9 @@ function mergeCandidates(candidates, selected, role) {
       selected: true,
       marked: Boolean(saved.marked ?? saved.isPreSale ?? saved.isPointCustomer),
       performance: Number(saved.allocationWeight ?? saved.laborWeight ?? saved.performance ?? 0),
+      performanceTouched: Boolean(Number(saved.allocationWeight ?? saved.performance ?? 0) > 0),
       craftsmanPerformanceType: craftsmanType(saved),
+      partnerDefaultRatio: Number(saved.partnerDefaultRatio ?? 0),
       laborFeeCents: laborFeeCentsFor(saved),
       laborFeeYuan: laborFeeCentsFor(saved) / 100,
       role
@@ -157,7 +187,8 @@ function mergeCandidates(candidates, selected, role) {
   }
   const selectedRecords = merged.filter((record) => record.selected)
   if (!['guides', 'salesManagers'].includes(role) && selectedRecords.length && selectedRecords.some((record) => !Number.isInteger(record.performance) || record.performance <= 0)) {
-    equalWeights(merged)
+    if (role === 'salespeople' && !selectedRecords.some((record) => record.performanceTouched)) salespersonDefaultWeights(merged)
+    if (role !== 'salespeople') equalWeights(merged)
   }
   return merged
 }
@@ -243,7 +274,15 @@ function selectRecord(item) {
   item.selected = !item.selected
   if (!item.selected) item.marked = false
   if (item.role === 'craftsmen') equalWeights(craftsmen.value)
-  if (item.role === 'salespeople') equalWeights(salespeople.value)
+  if (item.role === 'salespeople') {
+    const selected = salespeople.value.filter((record) => record.selected)
+    if (selected.length && !selected.some((record) => record.performanceTouched)) salespersonDefaultWeights(salespeople.value)
+  }
+  validationMessage.value = ''
+}
+
+function markPerformanceTouched(item) {
+  item.performanceTouched = true
   validationMessage.value = ''
 }
 
@@ -279,6 +318,7 @@ function setMarked(item, checked) {
   } else {
     item.marked = checked
   }
+  validationMessage.value = ''
 }
 
 function allocationIsValid(records) {
@@ -401,6 +441,14 @@ function applySelectionToAll() {
 }
 
 function confirm() {
+  // 简易选择只负责选人；确认时先把默认分配写入当前选择，再做完整性校验。
+  // 否则默认比例要等切到完整模式后才生成，导致本来可提交的选择被错误切页拦截。
+  const simpleMode = mode.value === 'simple'
+  if (simpleMode) {
+    // 简易模式没有手工编辑比例的入口，当前选人必须重新按默认规则生成。
+    equalWeights(craftsmen.value)
+    salespersonDefaultWeights(salespeople.value)
+  }
   const selectedCraftsmen = craftsmen.value.filter((item) => item.selected)
   const selectedSalespeople = salespeople.value.filter((item) => item.selected)
   const selectedGuides = guides.value.filter((item) => item.selected)
@@ -413,11 +461,11 @@ function confirm() {
     activateInvalidTab('guides', '已选择导购，请选择本次导购第几轮。')
     return
   }
-  if (!allocationIsValid(selectedCraftsmen)) {
+  if (!simpleMode && !allocationIsValid(selectedCraftsmen)) {
     activateInvalidTab('craftsmen', '手艺人分配比例必须为正整数，合计为 100%。')
     return
   }
-  if (props.showSalespeople && !allocationIsValid(selectedSalespeople)) {
+  if (!simpleMode && props.showSalespeople && !allocationIsValid(selectedSalespeople)) {
     activateInvalidTab('salespeople', '销售人分配比例必须为正整数，合计为 100%。')
     return
   }
@@ -466,8 +514,8 @@ function searchGroupPersonnel(scope) {
       <div class="personnel-performance-toolbar">
         <label v-if="!isAttributionTab"><span class="sr-only">搜索员工</span><input v-model="keyword" type="search" placeholder="输入关键词搜索员工"></label>
         <div class="personnel-performance-mode" aria-label="分配模式">
-          <button type="button" :class="{ 'is-active': mode === 'simple' }" @click="mode = 'simple'">简易选择</button>
-          <button type="button" :class="{ 'is-active': mode === 'full' }" @click="mode = 'full'">完整分配</button>
+          <button type="button" :class="{ 'is-active': mode === 'simple' }" @click="validationMessage = ''; mode = 'simple'">简易选择</button>
+          <button type="button" :class="{ 'is-active': mode === 'full' }" @click="validationMessage = ''; mode = 'full'">完整分配</button>
         </div>
       </div>
 
@@ -540,7 +588,7 @@ function searchGroupPersonnel(scope) {
             <span v-if="!activeIsNonPerformance && activeTab === 'craftsmen'">{{ performanceTypeLabel(item) }}</span>
             <span v-else-if="!activeIsNonPerformance"></span>
             <label v-if="!activeIsNonPerformance" class="personnel-toggle"><input :checked="item.marked" type="checkbox" @change="setMarked(item, $event.target.checked)"><span>{{ item.marked ? '是' : '否' }}</span></label>
-            <label v-if="!activeIsNonPerformance" class="personnel-allocation-input"><input v-model.number="item.performance" type="number" min="0" max="100" step="1" inputmode="numeric" aria-label="业绩分配比例" :disabled="activeTab === 'craftsmen' && craftsmanType(item) === PERFORMANCE_TYPES.LABOR"><b>%</b></label>
+            <label v-if="!activeIsNonPerformance" class="personnel-allocation-input"><input v-model.number="item.performance" type="number" min="0" max="100" step="1" inputmode="numeric" aria-label="业绩分配比例" :disabled="activeTab === 'craftsmen' && craftsmanType(item) === PERFORMANCE_TYPES.LABOR" @input="markPerformanceTouched(item)"><b>%</b></label>
             <label v-if="activeTab === 'craftsmen' && !activeIsNonPerformance" class="personnel-allocation-input personnel-allocation-input--labor"><input v-model.number="item.laborFeeYuan" type="number" min="0" step="1" inputmode="numeric" aria-label="每人手工费" :disabled="craftsmanType(item) === PERFORMANCE_TYPES.COMMISSION" @input="item.laborFeeCents = Math.max(0, Number(item.laborFeeYuan || 0) * 100)"><b>元/次</b></label>
             <button type="button" @click="selectRecord(item)">删除</button>
           </div>

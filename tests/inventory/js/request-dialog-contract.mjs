@@ -5,6 +5,16 @@ import { createInventoryApi, createPlatformInventoryApi } from '../../../前端�
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..')
 const modal = fs.readFileSync(path.join(root, '前端代码/inventory-vue3/src/components/InventoryBusinessModal.vue'), 'utf8')
+const requestController = fs.readFileSync(path.join(root, '后端代码/app/controller/store/product/inventory/InventoryStockRequest.php'), 'utf8')
+
+if (!modal.includes('const commonPayload = { idempotency_key: transferIdempotencyKey()')
+  || !modal.includes('await inventoryApi.createCrossTransfer(commonPayload)')
+  || !modal.includes('await platformInventoryApi.createHqCrossTransfer({ ...commonPayload, source_party_type: type')) {
+  throw new Error('跨店调拨必须区分门店旧契约和平台来源字段')
+}
+if (modal.includes("{ type: 'HQ', id: 0 }") || modal.includes('source_party_type: source.type')) {
+  throw new Error('门店调拨不得伪造或发送平台来源字段')
+}
 const selector = fs.readFileSync(path.join(root, '前端代码/inventory-vue3/src/components/InventoryStoreSelector.vue'), 'utf8')
 const app = fs.readFileSync(path.join(root, '前端代码/inventory-vue3/src/App.vue'), 'utf8')
 let passed = 0
@@ -56,6 +66,10 @@ check('request dialog omits scan entry and cost estimates that do not belong to 
   && !modal.includes("pageKey === 'request' ? '预计金额由服务端按仓库成本快照计算'"))
 check('request date uses one native calendar control', modal.includes('<input v-model="requestDate" type="date" />')
   && !modal.includes('<CalendarDays :size="16" /><input v-model="requestDate" type="date" />'))
+check('request submission explains when every selected product has zero supplier stock',
+  modal.includes('function areAllRequestedProductsOutOfStock()')
+  && modal.includes('所选商品在供货方库存均为 0，请更换供货方或选择有库存的商品。')
+  && modal.includes('if (areAllRequestedProductsOutOfStock())'))
 check('other inventory documents reuse the request-style inline document header layout',
   modal.includes("<section v-if=\"pageKey === 'inbound' || pageKey === 'outbound'\" class=\"form-grid\">")
   && modal.includes('<label class="form-grid__inline form-grid__full"><span class="field-label">备注</span><input v-if="pageKey === \'inbound\'"')
@@ -63,6 +77,13 @@ check('other inventory documents reuse the request-style inline document header 
   && modal.includes('<span class="field-label">调出方<i>*</i></span>')
   && modal.includes('<span class="field-label">调入方<i>*</i></span>')
   && modal.includes('<span class="field-label">操作人</span>'))
+check('store transfer binds responsibility to the current logged-in operator instead of showing an empty staff selector',
+  modal.includes("{{ isPlatformHeadquarters ? '调拨人' : '当前操作人' }}")
+  && modal.includes('<select v-if="isPlatformHeadquarters" v-model.number="transferStaffId"')
+  && modal.includes('<input v-else value="当前登录人员" disabled />')
+  && modal.includes('transfer_staff_id: Number(transferStaffId.value)')
+  && modal.includes('await inventoryApi.createCrossTransfer(commonPayload)')
+  && modal.includes("isPlatformHeadquarters && !transferStaffOptions.length"))
 check('searchable supplier control filters options, opens without triggering a parent reload and does not allow arbitrary typed values', selector.includes('visibleOptions')
   && selector.includes("emit('update:modelValue', String(option.key || ''))")
   && selector.includes('没有可选供货方')
@@ -82,6 +103,8 @@ check('requester defaults from the authenticated server session but remains edit
   && modal.includes('select v-model="requesterSelection"')
   && modal.includes('requestRequester()')
   && modal.includes('hqRequestRequester('))
+check('store request controller retains the requester name submitted by the dialog',
+  (requestController.match(/\['requester_name',''\]/g) || []).length === 2)
 check('platform store filters reuse the searchable store selector', app.includes('<InventoryStoreSelector v-model="platformStoreSelection"')
   && app.includes("{ key: '0', name: '全部授权门店', type: 'ALL' }"))
 check('stock search preserves the toolbar keyword and inbound rows expose outbound trace', app.includes("typeof query?.keyword === 'string' ? query.keyword.trim()")

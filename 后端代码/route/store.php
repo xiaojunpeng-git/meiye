@@ -342,24 +342,19 @@ Route::group('storeapi', function () {
         Route::get('statisticsHeader', 'staff.StoreStaff/getStaffStatisticsHeader')->option(['real_name' => '获取店员交易头部数据']);
 		//获取门店所有店员
 		Route::get('staff/all', 'staff.StoreStaff/getStaffSelect')->option(['real_name' => '获取门店所有店员']);
-		Route::get('staff/positions', 'staff.StoreStaff/selectablePositions')->option(['real_name' => '获取门店可选岗位']);
 		//获取门店店员列表
-		Route::get('workMember/list', 'staff.StoreStaff/getWorkMemberList')->option(['real_name' => '获取门店店员列表']);
 		//获取门店店员列表
 		Route::get('staff', 'staff.StoreStaff/index')->option(['real_name' => '获取门店店员列表']);
         //获取门店店员详情
-        Route::get('read/:id', 'staff.StoreStaff/read')->option(['real_name' => '获取门店店员详情']);
         //店员专属客户（须在 staff/:id 之前，避免被 :id 吞掉）
         Route::get('staff/customer/:id', 'staff.StoreStaff/getStaffCustomer')->option(['real_name' => '获取店员专属客户']);
         //店员业绩订单
         Route::get('staff/performance/:id', 'staff.StoreStaff/getStaffPerformance')->option(['real_name' => '获取店员业绩列表']);
-        Route::get('staff/person_complete/:id', 'staff.StoreStaff/personComplete')->option(['real_name' => '人员完整详情']);
         //获取门店店员详情
         Route::get('staff/:id', 'staff.StoreStaff/read')->option(['real_name' => '获取门店店员详情']);
 		//获取店员详情
 		Route::get('staff_info', 'staff.StoreStaff/info')->option(['real_name' => '获取店员详情']);
 		//添加、编辑店员
-		Route::post('staff/:id', 'staff.StoreStaff/save')->option(['real_name' => '添加、编辑店员']);
         //列表列配置
         Route::get('column_setting', 'staff.StoreStaff/getColumnSetting')->option(['real_name' => '获取店员列表列配置']);
         Route::post('column_setting', 'staff.StoreStaff/saveColumnSetting')->option(['real_name' => '保存店员列表列配置']);
@@ -768,8 +763,6 @@ Route::group('storeapi', function () {
         Route::put('file/do_move', 'file.SystemAttachment/moveImageCate')->option(['real_name' => '移动图片分类']);
         //修改图片名称
         Route::put('file/update/:id', 'file.SystemAttachment/update')->option(['real_name' => '修改图片名称']);
-        //上传图片
-        Route::post('upload/[:upload_type]', 'file.SystemAttachment/upload')->option(['real_name' => '上传图片']);
 		//获取上传类型
         Route::get('upload_type', 'file.SystemAttachment/uploadType')->option(['real_name' => '上传类型']);
 		//分片上传本地视频

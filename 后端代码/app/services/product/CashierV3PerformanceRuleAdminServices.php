@@ -93,7 +93,8 @@ final class CashierV3PerformanceRuleAdminServices
     {
         $text = trim((string)$value);
         if ($text === '') $text = '0';
-        if (!preg_match('/^(?:0|[1-9]\d*)$/D', $text)) {
+        // 允许接口回填的整数等价金额（例如 `13.00`），但仍拒绝真正的小数（例如 `13.5`）。
+        if (!preg_match('/^(?:0|[1-9]\d*)(?:\.0+)?$/D', $text)) {
             throw new \InvalidArgumentException('手工费必须是非负整数');
         }
         [$whole, $fraction] = array_pad(explode('.', $text, 2), 2, '');

@@ -71,6 +71,9 @@ final class CashierV3QueryEntitySelectorServices
         }
         $requiresEmploymentType = self::PERSON_SCOPES[$selectorScope];
         $projectId = (int)($selectorContext['projectId'] ?? $selectorContext['project_id'] ?? 0);
+        $partnerDefaultRatio = $selectorScope === 'sales_performance_assignees'
+            ? $this->partnerDefaultRatioForProject($dataScope->tenantId(), $projectId)
+            : 0;
         $laborDefaultFeeCents = 0;
         if ($selectorScope === 'service_actual_craftsmen' && $projectId > 0) {
             $ruleQuery = Db::name('cashier_v3_project_performance_rule')
@@ -183,6 +186,7 @@ final class CashierV3QueryEntitySelectorServices
                 'storeName' => $storeName,
                 'employeeTypeCode' => (string)($row['employment_type_code'] ?? ''),
                 'employeeTypeAuthorityVersion' => (int)($row['employment_type_version'] ?? 0),
+                'partnerDefaultRatio' => $partnerDefaultRatio,
                 'salespersonEligible' => (int)($row['cashier_salesperson_enabled'] ?? 0) === 1,
                 'craftsmanEligible' => (int)($row['cashier_craftsman_enabled'] ?? 0) === 1,
                 // The service-performance type is configured on the store
@@ -207,6 +211,61 @@ final class CashierV3QueryEntitySelectorServices
             'isLoading' => false,
             'requiresKeyword' => false,
         ];
+    }
+
+    /**
+     * 分类比例只是销售人选择器的默认值。它不参与结账校验、事实写入或
+     * 最终业绩计算；没有分类配置时返回 0，由前端沿用原有均分默认。
+     */
+    private function partnerDefaultRatioForProject(string $tenantId, int $projectId): int
+    {
+        if ($tenantId === '' || $projectId <= 0) {
+            return 0;
+        }
+        try {
+            $product = Db::name('store_product')->where('id', $projectId)->field('id,pid,cate_id')->find();
+            if (!is_array($product)) {
+                return 0;
+            }
+            $categoryIds = $this->positiveIds((string)($product['cate_id'] ?? ''));
+            $masterId = (int)($product['pid'] ?? 0);
+            if (!$categoryIds && $masterId > 0 && $masterId !== $projectId) {
+                $master = Db::name('store_product')->where('id', $masterId)->field('cate_id')->find();
+                $categoryIds = $this->positiveIds((string)($master['cate_id'] ?? ''));
+            }
+            if (!$categoryIds) {
+                return 0;
+            }
+            $configs = Db::name('cashier_v3_report_category_config')
+                ->where('tenant_id', $tenantId)
+                ->whereIn('category_id', $categoryIds)
+                ->where('enabled', 1)
+                ->order('version', 'desc')
+                ->select()
+                ->toArray();
+            foreach ($configs as $config) {
+                $ratio = (int)($config['partner_default_ratio'] ?? 0);
+                if ($ratio >= 0 && $ratio <= 100) {
+                    return $ratio;
+                }
+            }
+        } catch (\Throwable $e) {
+            // 迁移尚未执行时不阻断旧收银流程，回退到原有均分默认。
+        }
+        return 0;
+    }
+
+    /** @return array<int,string> */
+    private function positiveIds(string $raw): array
+    {
+        $result = [];
+        foreach (explode(',', $raw) as $part) {
+            $id = trim($part);
+            if ($id !== '' && ctype_digit($id) && (int)$id > 0) {
+                $result[] = (string)(int)$id;
+            }
+        }
+        return array_values(array_unique($result));
     }
 
     private function invalid(string $message, string $reason): CashierV3CommandException
