@@ -28,11 +28,17 @@ final class InventoryPlatformWarehouseServices
             $storeIds = array_values(array_filter(array_map('intval', (array)$access['store_ids'])));
             $hqIds = array_map('intval', array_column((new InventoryHqLocationServices())->locationsForAccess($access), 'id'));
             $query->where(function ($scope) use ($storeIds, $hqIds): void {
-                $scope->where(function ($stores) use ($storeIds): void {
-                    $stores->where('location_type', 'STORE')->whereIn('store_id', $storeIds);
-                });
+                // An HQ-only platform account has no store ids by design. Do
+                // not emit an empty whereIn() branch; it must still resolve
+                // its server-authorized headquarters locations.
+                if ($storeIds) {
+                    $scope->where(function ($stores) use ($storeIds): void {
+                        $stores->where('location_type', 'STORE')->whereIn('store_id', $storeIds);
+                    });
+                }
                 if ($hqIds) {
-                    $scope->whereOr(function ($hq) use ($hqIds): void {
+                    $method = $storeIds ? 'whereOr' : 'where';
+                    $scope->{$method}(function ($hq) use ($hqIds): void {
                         $hq->where('location_type', 'HQ')->whereIn('id', $hqIds);
                     });
                 }

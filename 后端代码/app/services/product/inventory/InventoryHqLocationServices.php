@@ -63,7 +63,7 @@ final class InventoryHqLocationServices
             ->where('location_type', 'HQ')
             ->where('is_default', 1)
             ->where('location_status', 'ACTIVE');
-        if (empty($access['is_super_admin'])) {
+        if (empty($access['is_super_admin']) && empty($access['headquarters_only'])) {
             $roots = $this->rootsForStores((array)($access['store_ids'] ?? []));
             if (!$roots) return [];
             $query->whereIn('owner_id', $roots);

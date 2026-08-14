@@ -37,6 +37,9 @@ final class InventoryPlatformUnifiedQueryContextFactory
             : $policy->resolveByAdminId($adminId);
         $subject = strtoupper(trim($subject));
         if (!in_array($subject, ['HQ', 'STORE'], true)) throw new UnifiedQueryException('UNIFIED_QUERY_SCOPE_INVALID', '库存主体参数不合法。', []);
+        if ($subject === 'STORE' && empty($access['is_super_admin']) && empty($access['store_ids'])) {
+            throw new UnifiedQueryException('UNIFIED_QUERY_SCOPE_INVALID', '当前平台账号未被授予任何门店库存范围。', []);
+        }
         $locationsQuery = Db::name('inventory_location')->where('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
             ->where('location_status', 'ACTIVE')->where('location_type', $subject);
         if ($subject === 'HQ') {

@@ -12,9 +12,9 @@ use think\facade\Db;
  * Trusted platform-inventory authority boundary.
  *
  * The browser supplies neither features nor stores.  A platform administrator
- * must hold both an enabled inventory API grant and an organization-admin
- * relation whose resolved stores contain the requested warehouse.  Level-0
- * platform administrators are the only intentionally global reader.
+ * must hold an enabled inventory API grant.  Store inventory is additionally
+ * limited by the organization-admin relation; the platform default HQ
+ * inventory does not require a store appointment.
  */
 final class InventoryPlatformAccessPolicy
 {
@@ -25,7 +25,7 @@ final class InventoryPlatformAccessPolicy
     public const AUTH_WAREHOUSE_MANAGE = 'inventory-v3-platform-warehouse-manage';
 
     /**
-     * @return array{admin_id:int,is_super_admin:bool,store_ids:array,unique_auth:array,features:array,permission_version:string}
+     * @return array{admin_id:int,is_super_admin:bool,headquarters_only:bool,store_ids:array,unique_auth:array,features:array,permission_version:string}
      */
     public function resolve(array $adminInfo): array
     {
@@ -40,7 +40,7 @@ final class InventoryPlatformAccessPolicy
      * Used by the export worker, which reconstructs authority from the saved
      * account identity rather than trusting a serialized browser profile.
      *
-     * @return array{admin_id:int,is_super_admin:bool,store_ids:array,unique_auth:array,features:array,permission_version:string}
+     * @return array{admin_id:int,is_super_admin:bool,headquarters_only:bool,store_ids:array,unique_auth:array,features:array,permission_version:string}
      */
     public function resolveByAdminId(int $adminId): array
     {
@@ -65,9 +65,10 @@ final class InventoryPlatformAccessPolicy
         }
 
         $storeIds = $isSuperAdmin ? $this->allActiveStoreIds() : $this->organizationStoreIds($adminId);
-        if (!$storeIds) {
-            throw $this->denied('当前平台账号未被授予任何门店库存范围。');
-        }
+        // HQ is the platform inventory default.  A platform operator may be
+        // authorized for HQ inventory without holding any store appointment;
+        // store scope is checked later when the STORE subject is requested.
+        $headquartersOnly = !$isSuperAdmin && !$storeIds;
 
         $features = [InventoryBatchStockQueryContract::PERMISSION_VIEW];
         if ($isSuperAdmin || in_array(self::AUTH_COST, $uniqueAuth, true)) {
@@ -91,6 +92,7 @@ final class InventoryPlatformAccessPolicy
         return [
             'admin_id' => $adminId,
             'is_super_admin' => $isSuperAdmin,
+            'headquarters_only' => $headquartersOnly,
             'store_ids' => $storeIds,
             'unique_auth' => $uniqueAuth,
             'features' => $features,
@@ -99,6 +101,7 @@ final class InventoryPlatformAccessPolicy
                 (string)(int)($admin['level'] ?? 1),
                 implode(',', $uniqueAuth),
                 implode(',', $storeIds),
+                $headquartersOnly ? 'hq-only' : 'hq-and-store',
             ])),
         ];
     }
