@@ -3536,6 +3536,9 @@ export default {
     },
     // 下一页；
     downTab(name) {
+      if (String(this.currentTab) === '4') {
+        this.normalizeRetailDeliveryBeforeSave(this.formData);
+      }
       this.$refs[name].validate((valid) => {
         if (valid) {
           if (this.formData.is_show == 2 && !this.formData.auto_on_time) {
@@ -3555,9 +3558,6 @@ export default {
 				  return
 			  }
 		  }
-          if (this.currentTab == 4 && !this.formData.delivery_type.length) {
-            return this.$Message.warning('请选择配送方式');
-          }
           if (this.currentTab == 10) {
             if (!this.$refs.vipPriceBrokerageSet.validateForm()) {
               return;

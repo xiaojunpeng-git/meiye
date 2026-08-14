@@ -12,6 +12,10 @@ const checks = [
     /this\.normalizeRetailDeliveryBeforeSave\(formData\);\s*productAddApi\(formData\)/s.test(source),
   ],
   [
+    'retail delivery is normalized before the delivery-step form validation',
+    /downTab\(name\) \{\s*if \(String\(this\.currentTab\) === '4'\) \{\s*this\.normalizeRetailDeliveryBeforeSave\(this\.formData\);\s*\}\s*this\.\$refs\[name\]\.validate/s.test(source),
+  ],
+  [
     'empty retail delivery defaults to store pickup',
     /if \(!deliveryTypes\.length \|\| hasIncompleteStoreDelivery\) \{\s*deliveryTypes = \['2'\];\s*formData\.delivery_type = deliveryTypes;\s*formData\.store_delivery_type = \[\];/s.test(source),
   ],
@@ -33,7 +37,8 @@ const checks = [
   ],
   [
     'legacy delivery warning no longer blocks retail save',
-    !source.includes("return this.$Message.warning('请选择配送类型');"),
+    !source.includes("return this.$Message.warning('请选择配送方式');") &&
+      !source.includes("return this.$Message.warning('请选择配送类型');"),
   ],
 ];
 
