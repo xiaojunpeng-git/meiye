@@ -378,12 +378,12 @@ final class CashierV3CashierWorkspaceServices
             );
         }
 
-        // 销售人属于销售明细，不依赖项目服务设置；产品和卡项同样可以分配销售业绩。
+        // 销售人和集团归属属于销售明细，不依赖项目服务设置；产品和卡项同样可以保存。
         if ($isSale && !$isSaleProject) {
             if ($hasServiceObject || $hasCraftsmen || $hasExperience || $hasFriendCounts || $hasLaborManualFee) {
                 throw new CashierV3CommandException(
                     CashierV3ResultCode::ENTITLEMENT_LINE_INVALID,
-                    '该商品只支持设置销售人。',
+                    '该商品不支持设置服务对象、手艺人或体验标记。',
                     CashierV3ResultCode::STATUS_FAILED,
                     ['line_id' => $lineKey, 'reason' => 'sale_non_project_setting_invalid']
                 );
@@ -408,6 +408,14 @@ final class CashierV3CashierWorkspaceServices
                 if (!is_array($settings['salespeople'])) throw $this->incompleteLineSettings($lineKey, 'salespeople_invalid');
                 $salespeople = $this->authoritativeSalespeopleInTx($settings['salespeople'], $operatorScope);
             }
+            $guides = $this->decodeStoredGuideSelections($line, $lineKey);
+            if ($hasGuides) {
+                if (!is_array($settings['guideSelections'])) throw $this->incompleteLineSettings($lineKey, 'guide_selections_invalid');
+                $guides = $this->authoritativeGuideSelectionsInTx(
+                    $settings['guideSelections'],
+                    $operatorScope
+                );
+            }
             $salesManagers = $this->decodeStoredSalesManagerSelections($line, $lineKey);
             if ($hasSalesManagers) {
                 if (!is_array($settings['salesManagerSelections'])) throw $this->incompleteLineSettings($lineKey, 'sales_manager_selections_invalid');
@@ -419,6 +427,7 @@ final class CashierV3CashierWorkspaceServices
                 ->where('line_key', $lineKey)
                 ->update([
                     'salespeople_json' => $this->encodeJson($salespeople),
+                    'guide_selections_json' => $this->encodeJson($guides),
                     'sales_manager_selections_json' => $this->encodeJson($salesManagers),
                     'is_presale' => $isPresale,
                     'inventory_outbound_required' => $inventoryOutboundRequired,
@@ -532,9 +541,7 @@ final class CashierV3CashierWorkspaceServices
             }
             $guides = $this->authoritativeGuideSelectionsInTx(
                 $settings['guideSelections'],
-                $operatorScope,
-                (int)($draft['member_id'] ?? 0),
-                trim((string)($draft['supplement_business_date'] ?? '')) ?: date('Y-m-d')
+                $operatorScope
             );
         }
         $salesManagers = $this->decodeStoredSalesManagerSelections($line, $lineKey);
@@ -597,7 +604,7 @@ final class CashierV3CashierWorkspaceServices
         return array_values($decoded);
     }
 
-    private function authoritativeGuideSelectionsInTx(array $guides, CashierV3OperatorScope $operatorScope, int $memberId = 0, string $businessDate = ''): array
+    private function authoritativeGuideSelectionsInTx(array $guides, CashierV3OperatorScope $operatorScope): array
     {
         $ids = [];
         $rounds = [];
@@ -611,7 +618,6 @@ final class CashierV3CashierWorkspaceServices
         }
         if (!$ids) return [];
         if (count($rounds) !== 1) throw $this->incompleteLineSettings('', 'guide_round_conflict');
-        $this->assertGuideRoundDateInTx($rounds, $memberId, $businessDate, $operatorScope->tenantId());
         $this->assertAttributionEmployeesInScope(array_keys($ids), $operatorScope, 'guide_employee_out_of_scope');
         $rows = Db::name('employee')->whereIn('id', array_keys($ids))->where('status', 1)->where('is_del', 0)->lock(true)->select()->toArray();
         if (count($rows) !== count($ids)) throw $this->incompleteLineSettings('', 'guide_employee_not_active');
@@ -619,37 +625,6 @@ final class CashierV3CashierWorkspaceServices
         $roundNo = (int)array_key_first($rounds);
         foreach ($rows as $row) $result[] = ['employeeId' => (int)$row['id'], 'name' => (string)$row['name'], 'guideRoundNo' => $roundNo];
         return $result;
-    }
-
-    private function assertGuideRoundDateInTx(array $rounds, int $memberId, string $businessDate, string $tenantId): void
-    {
-        if ($memberId <= 0 || !preg_match('/^\d{4}-\d{2}-\d{2}$/D', $businessDate)) return;
-        $history = Db::name('cashier_v3_customer_guide_round_fact')
-            ->where('tenant_id', $tenantId)
-            ->where('member_id', $memberId)
-            ->where('status', 'effective')
-            ->field('guide_round_no,business_date')
-            ->select()->toArray();
-        $roundNo = (int)array_key_first($rounds);
-        $roundDates = [];
-        $dateRounds = [];
-        foreach ($history as $row) {
-            $existingRound = (int)($row['guide_round_no'] ?? 0);
-            $existingDate = (string)($row['business_date'] ?? '');
-            if ($existingRound >= 1 && $existingRound <= 3 && $existingDate !== '') {
-                $roundDates[$existingRound] = $existingDate;
-                $dateRounds[$existingDate] = $existingRound;
-            }
-        }
-        if (isset($roundDates[$roundNo]) && $roundDates[$roundNo] !== $businessDate) {
-            throw $this->incompleteLineSettings('', 'guide_round_date_conflict');
-        }
-        if (isset($dateRounds[$businessDate]) && $dateRounds[$businessDate] !== $roundNo) {
-            throw $this->incompleteLineSettings('', 'guide_date_round_conflict');
-        }
-        if (!isset($dateRounds[$businessDate]) && count($dateRounds) >= 3) {
-            throw $this->incompleteLineSettings('', 'guide_round_date_limit_exceeded');
-        }
     }
 
     private function authoritativeSalesManagerSelectionsInTx(array $managers, CashierV3OperatorScope $operatorScope): array
@@ -1543,8 +1518,15 @@ final class CashierV3CashierWorkspaceServices
                     (int)($workspaceLine['unit_price_cents'] ?? -1),
                     $quantity
                 ) === (int)($checkoutLine['sale_amount_cents'] ?? -1)
+                // Older SKU rows can persist a zero list price. The workspace
+                // projection already displays that as the current sale price,
+                // so completion must apply the same normalized list price.
+                && (int)($workspaceLine['original_unit_price_cents'] ?? -1) >= 0
                 && $this->checkedLineAmount(
-                    (int)($workspaceLine['original_unit_price_cents'] ?? -1),
+                    max(
+                        (int)($workspaceLine['original_unit_price_cents'] ?? -1),
+                        (int)($workspaceLine['unit_price_cents'] ?? -1)
+                    ),
                     $quantity
                 ) === (int)($checkoutLine['original_amount_cents'] ?? -1);
             $entitlementMatches = $role === self::ROLE_ENTITLEMENT

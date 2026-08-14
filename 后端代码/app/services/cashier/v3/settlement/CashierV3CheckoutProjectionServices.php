@@ -1449,10 +1449,21 @@ final class CashierV3CheckoutProjectionServices
             // of the canonical line fingerprint. Keep the same normalized
             // shape as CheckoutSettlementKernel so payment projection cannot
             // reject a freshly prepared line as fingerprint drift.
-            $result[] = [
+            $snapshot = [
                 'employeeId' => $id,
                 'name' => (string)($row['name'] ?? $row['employeeNameSnapshot'] ?? ''),
             ];
+            if (array_key_exists('guideRoundNo', $row) || array_key_exists('guide_round_no', $row)) {
+                $roundNo = self::positiveInt(
+                    $row['guideRoundNo'] ?? $row['guide_round_no'] ?? null,
+                    'line.guide_round_no'
+                );
+                if ($roundNo > 3) {
+                    throw self::failure('checkout_projection_guide_round_invalid');
+                }
+                $snapshot['guideRoundNo'] = $roundNo;
+            }
+            $result[] = $snapshot;
         }
         return $result;
     }

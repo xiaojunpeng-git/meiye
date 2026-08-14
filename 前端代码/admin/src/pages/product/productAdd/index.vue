@@ -3147,7 +3147,9 @@ export default {
         .then(async (res) => {
           let data = res.data.productInfo;
           this.infoData(data);
-          this.loadPerformanceRule(data.id || this.$route.params.id);
+          if (Number(data.product_type) === 6) {
+            this.loadPerformanceRule(data.id || this.$route.params.id);
+          }
           // 生成规格
           this.spinShow = false;
           this.success = true;
@@ -3158,7 +3160,7 @@ export default {
         });
     },
     loadPerformanceRule(id) {
-      if (!id) return;
+      if (!id || Number(this.formData.product_type) !== 6) return;
       performanceRuleApi(Number(id)).then((res) => {
         this.performanceRule = this.normalizePerformanceRule({
           ...this.performanceRule,
@@ -3796,9 +3798,7 @@ export default {
       formData.attr.level_price=vipPriceBrokerageData.attrData[0].level_price;
     }
     if (!this.validateWholeYuanMoney(formData)) return;
-    if (!formData.product_type && formData.delivery_type.includes('3') && !formData.store_delivery_type.length) {
-      return this.$Message.warning('请选择配送类型');
-    }
+    this.normalizeRetailDeliveryBeforeSave(formData);
       productAddApi(formData)
         .then(async (res) => {
           this.openSubimit = true;
@@ -4249,6 +4249,30 @@ export default {
   onDeliveryTypeChange(value) {
     if (!value.includes('3')) {
       this.formData.store_delivery_type = [];
+    }
+  },
+  normalizeRetailDeliveryBeforeSave(formData) {
+    if (Number(formData.product_type) !== 0) return;
+
+    let deliveryTypes = Array.isArray(formData.delivery_type) ? formData.delivery_type.map(String) : [];
+    const storeDeliveryTypes = Array.isArray(formData.store_delivery_type) ? formData.store_delivery_type.map(String) : [];
+    const hasIncompleteStoreDelivery = deliveryTypes.includes('3') && !storeDeliveryTypes.length;
+
+    if (!deliveryTypes.length || hasIncompleteStoreDelivery) {
+      deliveryTypes = ['2'];
+      formData.delivery_type = deliveryTypes;
+      formData.store_delivery_type = [];
+      this.formData.delivery_type = deliveryTypes;
+      this.formData.store_delivery_type = [];
+    }
+
+    if (!deliveryTypes.includes('1') && !deliveryTypes.includes('3')) {
+      formData.freight = 1;
+      formData.postage = 0;
+      formData.temp_id = 0;
+      this.formData.freight = 1;
+      this.formData.postage = 0;
+      this.formData.temp_id = 0;
     }
   },
   },

@@ -254,7 +254,10 @@ final class CashierV3CheckoutSettlementKernel
         $intent = self::normalizeCommand($command, $expectedOperation);
         $snapshot = self::normalizeAuthoritySnapshot(
             $authoritativeSnapshot,
-            $expectedOperation === self::OPERATION_SAVE_DRAFT
+            in_array($expectedOperation, [
+                self::OPERATION_SAVE_DRAFT,
+                self::OPERATION_PREPARE_SUBMISSION,
+            ], true)
         );
         self::assertIntentMatchesSnapshot($intent, $snapshot);
         $current = self::normalizeCurrentRequest($currentRequest);
@@ -299,6 +302,14 @@ final class CashierV3CheckoutSettlementKernel
                 'debtAmountCents' => $debtAmountCents,
                 'differenceCents' => $receivableAmountCents - $settlementAmountCents,
             ]);
+        }
+        // A zero-receivable checkout still records the cashier's selected
+        // bookkeeping route in its immutable checkout draft. It is selection
+        // evidence only: no zero-value payment collection/fact is produced.
+        if ($requireBalanced
+            && $receivableAmountCents === 0
+            && count($snapshot['paymentDetails']) === 0) {
+            throw self::failure('checkout_zero_receivable_payment_method_required');
         }
 
         $aggregateFingerprint = CashierV3CheckoutSettlementCanonicalizer::fingerprint([
@@ -878,10 +889,21 @@ final class CashierV3CheckoutSettlementKernel
                         throw self::failure('sale_line_attribution_snapshot_invalid', ['authorityKey' => $authorityKey]);
                     }
                     $employeeId = self::positiveInt($selection['employeeId'] ?? 0, 'saleLine.attribution.employeeId');
-                    $normalizedSelections[] = [
+                    $normalizedSelection = [
                         'employeeId' => $employeeId,
                         'name' => self::text($selection['name'] ?? '', 128, 'saleLine.attribution.name', true),
                     ];
+                    if ($attributionKey === 'guideSelections') {
+                        $roundNo = self::positiveInt(
+                            $selection['guideRoundNo'] ?? $selection['guide_round_no'] ?? 0,
+                            'saleLine.guideRoundNo'
+                        );
+                        if ($roundNo > 3) {
+                            throw self::failure('sale_line_guide_round_invalid', ['authorityKey' => $authorityKey]);
+                        }
+                        $normalizedSelection['guideRoundNo'] = $roundNo;
+                    }
+                    $normalizedSelections[] = $normalizedSelection;
                 }
                 $normalized[$attributionKey] = $normalizedSelections;
             }

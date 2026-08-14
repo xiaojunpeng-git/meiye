@@ -28,6 +28,7 @@ function ok(name, condition) {
 const closeMethod = workbench.match(/async function closeCheckoutOverlay\(options = \{\}\) \{([\s\S]*?)\n}\n\nasync function closeSucceededCheckoutAndRefreshWorkbench/)?.[1] || ''
 const closeSucceededMethod = workbench.match(/async function closeSucceededCheckoutAndRefreshWorkbench\(submissionResponse = \{\}\) \{([\s\S]*?)\n}\n\nfunction closeHangOrderOverlay/)?.[1] || ''
 const openCheckout = workbench.match(/async function openCheckout\(\) \{([\s\S]*?)\n}\n\nasync function openHangOrder/)?.[1] || ''
+const clearFailedCheckoutComputed = overlay.match(/const canClearFailedCheckout = computed\(\(\) => \([\s\S]*?\n\)\)/)?.[0] || ''
 
 ok(
   'a failed checkout with no successful collection always exposes 返回收银',
@@ -48,6 +49,19 @@ ok(
     && controller.includes('public function discardCheckout()')
 )
 ok(
+  'a failed checkout with no successful collection exposes a clear-and-return recovery action',
+  /const canClearFailedCheckout = computed\(\(\) => \(\s*isFailed\.value && !isPartialPaymentRecovery\.value\s*\)\)/.test(overlay)
+    && overlay.includes('function clearFailedCheckout()')
+    && overlay.includes("emit('close', { clearFailedCheckout: true })")
+    && overlay.includes('清空并返回收银')
+    && /if \(options\?\.clearFailedCheckout === true\) \{[\s\S]*?return confirmClearCart\(\)/.test(closeMethod)
+)
+ok(
+  'clear-and-return is unavailable for partial payment and result-unknown recovery',
+  clearFailedCheckoutComputed.includes('isFailed.value && !isPartialPaymentRecovery.value')
+    && !clearFailedCheckoutComputed.includes('isUncertain.value')
+)
+ok(
   'failed-return waits for server discard and a fresh empty-workbench projection before hiding the overlay',
   closeMethod.includes('await discardCashierCheckout(String(state.stateContextId || \'\'))')
     && closeMethod.includes("await requestAction('open-cashier-workbench', { silent: true })")
@@ -55,20 +69,21 @@ ok(
     && /isCheckoutOpen\.value = false[\s\S]*?checkoutPreparationId\.value = null[\s\S]*?checkoutSession\.value = null[\s\S]*?checkoutRecoveryActiveStep\.value = null[\s\S]*?checkoutLocalOutcome\.value = \{\}/.test(closeMethod)
 )
 ok(
-  'discard is limited to non-terminal draft statuses and refuses every formal business fact',
-  discard.includes("->whereIn('request_status', ['editing', 'ready_for_submit', 'failed'])")
+  'discard is limited to non-terminal draft statuses and preserves every formal business fact',
+  discard.includes("->whereIn('request_status', ['editing', 'ready_for_submit', 'failed', 'processing', 'pending_confirmation', 'result_unknown'])")
     && discard.includes('ENTITLEMENT_COMPLETION_RECEIPT_TABLE')
     && discard.includes('PAYMENT_FACT_TABLE')
     && discard.includes('BALANCE_FACT_TABLE')
-    && discard.includes("'该结账已产生业务事实，不能直接清空，请先核对收款结果。'")
+    && discard.includes('protectedRequestIds')
+    && discard.includes('protectedRequestCount')
 )
 ok(
-  'discard removes old payment, line, source and resource-plan drafts before deleting the checkout request',
+  'discard removes only unfinished payment, line, source and resource-plan drafts before deleting their checkout request',
   discard.includes('RESOURCE_PLAN_ROW_TABLE')
-    && discard.includes('Db::name(self::LINE_TABLE)->whereIn(\'request_id\', $requestIds)->delete()')
-    && discard.includes('Db::name(self::PAYMENT_TABLE)->whereIn(\'request_id\', $requestIds)->delete()')
-    && discard.includes('Db::name(self::SOURCE_TABLE)->whereIn(\'request_id\', $requestIds)->delete()')
-    && discard.includes('Db::name(self::REQUEST_TABLE)->whereIn(\'request_id\', $requestIds)->delete()')
+    && discard.includes('Db::name(self::LINE_TABLE)->whereIn(\'request_id\', $discardRequestIds)->delete()')
+    && discard.includes('Db::name(self::PAYMENT_TABLE)->whereIn(\'request_id\', $discardRequestIds)->delete()')
+    && discard.includes('Db::name(self::SOURCE_TABLE)->whereIn(\'request_id\', $discardRequestIds)->delete()')
+    && discard.includes('Db::name(self::REQUEST_TABLE)->whereIn(\'request_id\', $discardRequestIds)->delete()')
 )
 ok(
   'the next confirm creates a new preparation id after the old local identity is cleared',

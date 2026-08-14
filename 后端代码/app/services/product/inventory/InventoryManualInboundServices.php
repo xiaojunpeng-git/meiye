@@ -254,8 +254,7 @@ final class InventoryManualInboundServices
             throw new \RuntimeException('inventory_manual_inbound_default_location_ambiguous');
         }
         if (count($rows) === 1) {
-            $this->assertDefaultLocationScope((array)$rows[0], $scope, 'inventory_manual_inbound_location_scope_invalid');
-            return (array)$rows[0];
+            return $this->reconcileDefaultLocationScope((array)$rows[0], $scope, $now, 'inventory_manual_inbound_location_scope_invalid');
         }
 
         $locationCode = 'STORE-' . (int)$scope['storeId'];
@@ -296,6 +295,53 @@ final class InventoryManualInboundServices
         }
         $this->assertDefaultLocationScope((array)$location, $scope, 'inventory_manual_inbound_location_scope_invalid');
         return (array)$location;
+    }
+
+    /**
+     * A default STORE location belongs to one store, while its organization
+     * dimensions are current master-data snapshots. A store can be moved in
+     * the organization tree after the location was created; refresh only those
+     * snapshots under the existing location lock and never rewrite stock,
+     * batches, or historical movement facts.
+     */
+    private function reconcileDefaultLocationScope(array $location, array $scope, int $now, string $reason): array
+    {
+        $this->assertDefaultLocationIdentity($location, $scope, $reason);
+
+        $changes = [];
+        foreach ([
+            'organization_id' => (string)$scope['organizationId'],
+            'organization_path' => (string)$scope['organizationPath'],
+            'organization_name_snapshot' => (string)$scope['organizationName'],
+            'store_name_snapshot' => (string)$scope['storeName'],
+        ] as $column => $expected) {
+            if ((string)($location[$column] ?? '') !== $expected) {
+                $changes[$column] = $expected;
+            }
+        }
+        if (!$changes) {
+            return $location;
+        }
+
+        $changes['version'] = (int)$location['version'] + 1;
+        $changes['updated_at'] = $now;
+        Db::name('inventory_location')->where('id', (int)$location['id'])->update($changes);
+        return array_merge($location, $changes);
+    }
+
+    private function assertDefaultLocationIdentity(array $location, array $scope, string $reason): void
+    {
+        if ((int)($location['id'] ?? 0) <= 0
+            || (string)($location['tenant_id'] ?? '') !== (string)$scope['tenantId']
+            || (string)($location['location_type'] ?? '') !== 'STORE'
+            || (int)($location['owner_id'] ?? 0) !== (int)$scope['storeId']
+            || (int)($location['store_id'] ?? 0) !== (int)$scope['storeId']
+            || trim((string)($location['location_code'] ?? '')) === ''
+            || (int)($location['is_default'] ?? 0) !== 1
+            || (string)($location['location_status'] ?? '') !== 'ACTIVE'
+            || (int)($location['version'] ?? 0) <= 0) {
+            throw new \RuntimeException($reason);
+        }
     }
 
     private function assertDefaultLocationScope(array $location, array $scope, string $reason): void
@@ -339,7 +385,7 @@ final class InventoryManualInboundServices
             ->where('consumable_product_id', (int)$catalog['product_id'])->where('sku_id', (int)$catalog['sku_id'])
             ->where('stock_status', InventoryEntitlementCompletionContract::STOCK_STATUS_GOOD);
         $stock = $query->lock(true)->find();
-        if ($stock) return $stock;
+        if ($stock) return $this->reconcileStockScope((array)$stock, $location, $now);
         try {
             $id = Db::name('inventory_stock')->insertGetId([
                 'tenant_id' => $location['tenant_id'], 'organization_id' => $location['organization_id'], 'organization_path' => $location['organization_path'],
@@ -354,6 +400,37 @@ final class InventoryManualInboundServices
             if (!$stock) throw $exception;
         }
         return $stock;
+    }
+
+    /** Inventory stock is a current location projection, unlike movement facts. */
+    private function reconcileStockScope(array $stock, array $location, int $now): array
+    {
+        if ((int)($stock['id'] ?? 0) <= 0
+            || (string)($stock['tenant_id'] ?? '') !== (string)$location['tenant_id']
+            || (int)($stock['location_id'] ?? 0) !== (int)$location['id']
+            || (int)($stock['store_id'] ?? 0) !== (int)$location['store_id']
+            || (int)($stock['version'] ?? 0) <= 0) {
+            throw new \RuntimeException('inventory_manual_inbound_stock_scope_invalid');
+        }
+        if ((string)($stock['organization_id'] ?? '') === (string)$location['organization_id']
+            && (string)($stock['organization_path'] ?? '') === (string)$location['organization_path']) {
+            return $stock;
+        }
+        $nextVersion = (int)$stock['version'] + 1;
+        if (Db::name('inventory_stock')->where('id', (int)$stock['id'])->where('version', (int)$stock['version'])->update([
+            'organization_id' => (string)$location['organization_id'],
+            'organization_path' => (string)$location['organization_path'],
+            'version' => $nextVersion,
+            'updated_at' => $now,
+        ]) !== 1) {
+            throw new \RuntimeException('inventory_manual_inbound_stock_changed');
+        }
+        return array_merge($stock, [
+            'organization_id' => (string)$location['organization_id'],
+            'organization_path' => (string)$location['organization_path'],
+            'version' => $nextVersion,
+            'updated_at' => $now,
+        ]);
     }
 
     private function lockOrCreateBatch(array $stock, array $catalog, array $line, array $command, int $index): array
@@ -412,8 +489,6 @@ final class InventoryManualInboundServices
     {
         if ((string)$fact['source_type'] !== 'manual_inbound' || (string)$fact['source_id'] !== $command['idempotencyKey']
             || (string)$fact['source_detail_id'] !== (string)$index || (string)$fact['tenant_id'] !== (string)$location['tenant_id']
-            || (string)$fact['organization_id'] !== (string)$location['organization_id']
-            || (string)$fact['organization_path'] !== (string)$location['organization_path']
             || (int)$fact['location_id'] !== (int)$location['id']
             || (int)$fact['store_id'] !== (int)$location['store_id']) {
             throw new \RuntimeException('inventory_manual_inbound_idempotency_conflict');
@@ -422,8 +497,6 @@ final class InventoryManualInboundServices
         $batch = Db::name('inventory_batch')->where('id', (int)$fact['batch_id'])->lock(true)->find();
         if (!$stock || !$batch
             || (string)$stock['tenant_id'] !== (string)$location['tenant_id']
-            || (string)$stock['organization_id'] !== (string)$location['organization_id']
-            || (string)$stock['organization_path'] !== (string)$location['organization_path']
             || (int)$stock['location_id'] !== (int)$location['id']
             || (int)$stock['store_id'] !== (int)$location['store_id']
             || (int)$stock['consumable_product_id'] !== (int)$line['productId']

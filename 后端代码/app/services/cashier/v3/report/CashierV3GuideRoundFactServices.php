@@ -10,9 +10,10 @@ use think\facade\Db;
 /**
  * 正式结账导购轮次事实写入器。
  *
- * 轮次不是客户端字段：同一顾客同一正式订单重放时复用原轮次；
- * 新正式订单按历史订单轮次推进。每轮可以有任意多名导购，但本表
- * 不含金额、比例或业绩字段，避免把导购归属误当成现金业绩分配。
+ * 导购和轮次先随购物车草稿保存；只有正式结账成功才写入本表。
+ * 同一顾客的同一轮次允许在同一结账日期重复出现，跨日期则拒绝。
+ * 每轮可以有任意多名导购，但本表不含金额、比例或业绩字段，避免
+ * 把导购归属误当成现金业绩分配。
  */
 final class CashierV3GuideRoundFactServices
 {
@@ -42,16 +43,40 @@ final class CashierV3GuideRoundFactServices
         foreach ($normalized as $rows) foreach ($rows as $row) $rounds[(int)$row['guideRoundNo']] = true;
         if (count($rounds) !== 1) throw $this->invalid('guide_round_conflict');
         $roundNo = (int)array_key_first($rounds);
-        $existing = Db::name(self::TABLE)->where('tenant_id', $tenant)->where('member_id', $memberId)
-            ->where('status', 'effective')->lock(true)->select()->toArray();
+        // 只把已成功结账且尚未退款/作废的销售单视为轮次历史。草稿、
+        // 失败结账和之后已经撤销的单据均不占用本次导购轮次。
+        $existing = Db::name(self::TABLE)->alias('guide_fact')
+            ->where('guide_fact.tenant_id', $tenant)
+            ->where('guide_fact.member_id', $memberId)
+            ->where('guide_fact.status', 'effective')
+            ->whereExists(function ($order) {
+                $order->name('cashier_v3_sales_order')->alias('sales_order')
+                    ->whereRaw('sales_order.tenant_id = guide_fact.tenant_id')
+                    ->whereRaw('sales_order.order_id = guide_fact.order_id')
+                    ->where('sales_order.order_status', 'settled')
+                    ->where('sales_order.order_direction', 'forward')
+                    ->where('sales_order.settled_at', '>', 0);
+            })
+            ->whereNotExists(function ($operation) {
+                $operation->name('cashier_v3_order_lifecycle_operation')->alias('lifecycle')
+                    ->whereRaw('lifecycle.tenant_id = guide_fact.tenant_id')
+                    ->whereRaw('lifecycle.source_order_id = guide_fact.order_id')
+                    ->where('lifecycle.source_type', 'sales')
+                    ->where('lifecycle.status', 'succeeded')
+                    ->whereIn('lifecycle.operation_type', ['refund', 'void']);
+            })
+            ->field('guide_fact.*')->lock(true)->select()->toArray();
+        $businessDate = (string)$authority['business_date'];
         foreach ($existing as $row) {
             $round = (int)$row['guide_round_no'];
             if ($round < 1 || $round > 3) throw $this->invalid('guide_round_history_invalid');
             if ((string)$row['order_id'] === (string)$authority['order_id'] && $round !== $roundNo) {
                 throw $this->invalid('guide_round_order_conflict');
             }
+            if ($round === $roundNo && (string)$row['business_date'] !== $businessDate) {
+                throw $this->invalid('guide_round_date_conflict:' . (string)$row['business_date']);
+            }
         }
-        $businessDate = (string)$authority['business_date'];
         $employeeIds = [];
         foreach ($normalized as $rows) foreach ($rows as $row) $employeeIds[(int)$row['employeeId']] = true;
         $employees = $this->lockEmployees(array_keys($employeeIds));
@@ -97,6 +122,48 @@ final class CashierV3GuideRoundFactServices
             }
         }
         return ['round_no' => $roundNo, 'inserted' => $inserted, 'replayed' => $replayed, 'guide_count' => $guideCount];
+    }
+
+    /**
+     * Check a locked checkout snapshot before the cashier enters payment.
+     * This is deliberately read-only: guide-round facts remain a successful
+     * checkout effect and are never created by this preflight.
+     *
+     * @return array{round_no:int,guide_count:int}
+     */
+    public function assertAvailableInTx(
+        array $authority,
+        array $selectionsByLine,
+        CashierV3OperatorScope $operatorScope,
+        CashierV3DataScopeContext $dataScope
+    ): array {
+        CashierV3TransactionGuard::assertInTransaction('guideRoundFact.assertAvailableInTx');
+        if ($selectionsByLine === []) return ['round_no' => 0, 'guide_count' => 0];
+        $this->assertPreflightScope($authority, $operatorScope, $dataScope);
+
+        $normalized = $this->normalizeSelections($selectionsByLine);
+        $rounds = [];
+        $guideCount = 0;
+        foreach ($normalized as $rows) {
+            foreach ($rows as $row) {
+                $rounds[(int)$row['guideRoundNo']] = true;
+                $guideCount++;
+            }
+        }
+        if (count($rounds) !== 1) throw $this->invalid('guide_round_conflict');
+        $roundNo = (int)array_key_first($rounds);
+        $existing = $this->effectiveHistoryRowsInTx(
+            (string)$authority['tenant_id'],
+            (int)$authority['member_id']
+        );
+        foreach ($existing as $row) {
+            $round = (int)$row['guide_round_no'];
+            if ($round < 1 || $round > 3) throw $this->invalid('guide_round_history_invalid');
+            if ($round === $roundNo && (string)$row['business_date'] !== (string)$authority['business_date']) {
+                throw $this->invalid('guide_round_date_conflict:' . (string)$row['business_date']);
+            }
+        }
+        return ['round_no' => $roundNo, 'guide_count' => $guideCount];
     }
 
     /** Read-only helper used by report filters; no amount is returned. */
@@ -149,6 +216,46 @@ final class CashierV3GuideRoundFactServices
     private function assertScope(array $authority, CashierV3OperatorScope $operator, CashierV3DataScopeContext $scope): void
     {
         if (!hash_equals($operator->tenantId(), (string)$authority['tenant_id']) || !hash_equals($operator->organizationId(), (string)$authority['organization_id']) || $operator->storeId() !== (int)$authority['store_id'] || $operator->operatorId() !== (int)$authority['operator_id'] || !$scope->allowsStore($operator->storeId())) throw $this->invalid('guide_data_scope_denied');
+    }
+
+    private function assertPreflightScope(array $authority, CashierV3OperatorScope $operator, CashierV3DataScopeContext $scope): void
+    {
+        foreach (['tenant_id', 'organization_id', 'store_id', 'member_id', 'business_date', 'operator_id'] as $key) {
+            if (!array_key_exists($key, $authority)
+                || (is_string($authority[$key]) && trim($authority[$key]) === '')
+                || (is_int($authority[$key]) && $authority[$key] <= 0)) {
+                throw $this->invalid('guide_preflight_authority_missing_' . $key);
+            }
+        }
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/D', (string)$authority['business_date'])) {
+            throw $this->invalid('guide_business_date_invalid');
+        }
+        $this->assertScope($authority, $operator, $scope);
+    }
+
+    private function effectiveHistoryRowsInTx(string $tenant, int $memberId): array
+    {
+        return Db::name(self::TABLE)->alias('guide_fact')
+            ->where('guide_fact.tenant_id', $tenant)
+            ->where('guide_fact.member_id', $memberId)
+            ->where('guide_fact.status', 'effective')
+            ->whereExists(function ($order) {
+                $order->name('cashier_v3_sales_order')->alias('sales_order')
+                    ->whereRaw('sales_order.tenant_id = guide_fact.tenant_id')
+                    ->whereRaw('sales_order.order_id = guide_fact.order_id')
+                    ->where('sales_order.order_status', 'settled')
+                    ->where('sales_order.order_direction', 'forward')
+                    ->where('sales_order.settled_at', '>', 0);
+            })
+            ->whereNotExists(function ($operation) {
+                $operation->name('cashier_v3_order_lifecycle_operation')->alias('lifecycle')
+                    ->whereRaw('lifecycle.tenant_id = guide_fact.tenant_id')
+                    ->whereRaw('lifecycle.source_order_id = guide_fact.order_id')
+                    ->where('lifecycle.source_type', 'sales')
+                    ->where('lifecycle.status', 'succeeded')
+                    ->whereIn('lifecycle.operation_type', ['refund', 'void']);
+            })
+            ->field('guide_fact.*')->lock(true)->select()->toArray();
     }
 
     private function invalid(string $reason): \InvalidArgumentException { return new \InvalidArgumentException($reason); }

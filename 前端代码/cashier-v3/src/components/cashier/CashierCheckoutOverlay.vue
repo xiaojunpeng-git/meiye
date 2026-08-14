@@ -51,6 +51,7 @@ const emit = defineEmits([
 const localStep = ref(1)
 const submitCommandId = ref(null)
 const isSubmitRequested = ref(false)
+const isCheckingGuideRound = ref(false)
 // 本地验收夹具只模拟“未产生任何收款事实”的最终失败展示；生产构建会
 // 删除触发分支。它不覆盖服务端真实结账状态。
 const developmentFailureResult = ref(null)
@@ -149,7 +150,7 @@ const isFailed = computed(() => checkoutStatus.value === 'failed')
 const isSucceeded = computed(() => checkoutStatus.value === 'succeeded')
 const isPaymentSucceededServicePending = computed(() => checkoutStatus.value === 'payment_succeeded_service_pending')
 const isResultStep = computed(() => isProcessing.value || isUncertain.value || isFailed.value || isSucceeded.value || isPaymentSucceededServicePending.value)
-const isSubmissionLocked = computed(() => isSubmitRequested.value || isProcessing.value || isUncertain.value)
+const isSubmissionLocked = computed(() => isSubmitRequested.value || isCheckingGuideRound.value || isProcessing.value || isUncertain.value)
 const resultStepNumber = computed(() => steps.value.find((step) => step.key === 'result')?.number || 4)
 const currentStep = computed(() => (isResultStep.value ? resultStepNumber.value : localStep.value))
 const currentStepPosition = computed(() => {
@@ -268,22 +269,27 @@ const displayedPaymentSummary = computed(() => {
   }
 })
 const hasPendingPaymentLineAmountDraft = computed(() => Object.keys(paymentLineAmountDrafts.value).length > 0)
+const isZeroReceivable = computed(() => Number(displayedPaymentSummary.value.receivableAmount) === 0)
 const firstInvalidPaymentLine = computed(() => {
   for (const line of selectedPaymentLines.value) {
     const draft = paymentLineAmountDrafts.value[paymentLineAmountKey(line)]
     const amount = draft
       ? wholeYuanAmount(draft.value)
       : authoritativeWholeYuanAmount(line?.amount)
-    if (amount === null || amount <= 0) return { line, amount }
+    if (amount === null || amount < 0 || (!isZeroReceivable.value && amount === 0)) return { line, amount }
   }
   return null
 })
 const hasNonPositivePaymentLine = computed(() => firstInvalidPaymentLine.value !== null)
 const invalidPaymentLineMessage = computed(() => {
   const invalid = firstInvalidPaymentLine.value
-  if (!invalid) return ''
+  if (!invalid) {
+    return isZeroReceivable.value && selectedPaymentLines.value.length === 0
+      ? '应收为0时仍请选择一种记账收款方式。'
+      : ''
+  }
   const name = String(invalid.line?.name || '当前收款方式').trim() || '当前收款方式'
-  return invalid.amount === 0
+  return invalid.amount === 0 && !isZeroReceivable.value
     ? `${name}的收款金额不能为0。`
     : `${name}的收款金额必须为大于0的整数。`
 })
@@ -421,6 +427,11 @@ const checkoutRequestIdentity = computed(() => (
 // 当前未完成结账现场并回到空收银台；正式订单/收款事实仍由后端保留。
 const canRestartCheckout = computed(() => (
   isUncertain.value && Boolean(checkoutRequestIdentity.value)
+))
+// 失败但未发生任何成功收款时，允许操作人直接放弃本次未完成现场。
+// 部分收款、结果未知和成功结账仍必须保留原请求，不能从这里清空。
+const canClearFailedCheckout = computed(() => (
+  isFailed.value && !isPartialPaymentRecovery.value
 ))
 const recoveredCheckoutIdempotencyKey = computed(() => {
   const key = String(props.checkout.originalIdempotencyKey || '')
@@ -954,7 +965,7 @@ function useDevelopmentNoPaymentFailureFixture() {
     && new URLSearchParams(window.location.search).get('test') === 'checkout-no-payment-failure'
 }
 
-function goNext() {
+async function goNext() {
   if (!hasCurrentStepSnapshot.value) return
   if (currentStep.value === 1) {
     if (customerSourceMissing.value) {
@@ -983,6 +994,20 @@ function goNext() {
   const currentIndex = editableSteps.value.findIndex((step) => step.number === currentStep.value)
   const nextStep = currentIndex >= 0 ? editableSteps.value[currentIndex + 1] : null
   if (nextStep) {
+    if (currentStep.value === 1 && !isDebtRepayment.value) {
+      isCheckingGuideRound.value = true
+      try {
+        const response = await request('validate-guide-round-before-payment')
+        if (!['success', 'succeeded'].includes(submissionResponseStatus(response))) {
+          window.dispatchEvent(new CustomEvent('cashier-v3:ui-result', {
+            detail: { status: 'failed', message: submissionResponseMessage(response) }
+          }))
+          return
+        }
+      } finally {
+        isCheckingGuideRound.value = false
+      }
+    }
     localStep.value = nextStep.number
     return
   }
@@ -1058,6 +1083,11 @@ function restartCheckout() {
     discardCheckoutRecovery: true,
     restartNewCheckout: true
   })
+}
+
+function clearFailedCheckout() {
+  if (!canClearFailedCheckout.value) return
+  emit('close', { clearFailedCheckout: true })
 }
 
 function finishCheckoutAndReturn() {
@@ -1642,6 +1672,7 @@ onBeforeUnmount(() => {
         <span v-if="!canReturnToPaymentEdit && !canRetryCheckout && !canContinuePartialPaymentRecovery" class="checkout-overlay__locked-tip">
           后端尚未明确允许修改或重试；请保留本页并按失败原因处理。
         </span>
+        <button v-if="canClearFailedCheckout" type="button" class="button button--secondary" @click="clearFailedCheckout">清空并返回收银</button>
         <button v-if="canReturnToCashierEdit" type="button" class="button button--secondary" @click="returnToCashierEdit">返回收银补选手艺人</button>
         <button v-else-if="canReturnToPaymentEdit" type="button" class="button button--secondary" @click="returnToPaymentEdit">返回修改收款</button>
         <button v-if="canRetryCheckout" type="button" class="button button--primary" :disabled="isSubmissionLocked" @click="retryCheckout">重新支付</button>

@@ -17,7 +17,7 @@ import {
 } from '@/services/cashierV3EntitlementDraftContract'
 import { useCashierV3DraftCommandRecovery } from '@/services/cashierV3DraftCommandRecovery'
 import { roomOpenIntentFromRouteQuery, roomOpenIntentHangPayload } from '@/services/cashierV3RoomOpenIntent'
-import { clearCashierDraft, discardCashierCheckout, saveHangDraft } from '@/services/hangDraftApi'
+import { clearCashierDraft, discardCashierCheckout, saveHangDraft, validateCashierGuideRound } from '@/services/hangDraftApi'
 import {
   authoritativeCheckoutResult,
   cashierV3ResponseEnvelope,
@@ -808,6 +808,7 @@ const serviceBoundActions = new Set([
 const checkoutRequestActions = new Set([
   'checkout-step-back',
   'checkout-step-next',
+  'validate-guide-round-before-payment',
   'open-balance-payment',
   'open-balance-payment-identity-verification',
   'apply-balance-payment',
@@ -2914,10 +2915,10 @@ async function removeCartLine(line) {
 }
 
 async function confirmClearCart() {
-  const hasRecoveryState = cashierDraftHasUnresolvedCommand.value
-    || Boolean(checkoutSession.value)
-    || Boolean(checkoutPreparationId.value)
-  if ((!hasCartLines.value && !hasRecoveryState) || isClearingCart.value) return
+  // “清空”同时是收银台的恢复出口。即使当前购物车已经为空，仍需让
+  // 收银员释放未完成结账草稿、前端遮罩和恢复票据，避免失败页或强刷后
+  // 的旧状态继续锁住下一单。
+  if (isClearingCart.value) return
   isClearingCart.value = true
   try {
     const saved = await clearCashierDraft(String(state.stateContextId || ''))
@@ -3817,6 +3818,24 @@ async function requestCheckoutAction({ action, payload }) {
 
   if (action === 'open-checkout-source-selector') return openCheckoutBusinessSourceSelector('sale')
 
+  if (action === 'validate-guide-round-before-payment') {
+    const session = checkoutSession.value
+    const current = currentCheckoutCommandContexts(session)
+    if (!session || !current) {
+      return { result: { status: 'failed', code: 'CHECKOUT_SESSION_EXPIRED', message: '结账版本已失效，请关闭后重新结账。' } }
+    }
+    try {
+      const validated = await validateCashierGuideRound({
+        stateContextId: String(state.stateContextId || ''),
+        checkoutRequestId: session.checkoutRequestId,
+        checkoutRequestVersion: current.checkoutRequestVersion
+      })
+      return { result: { status: 'succeeded', message: String(validated?.message || '导购轮次校验通过。') }, data: { guideRoundPreflight: validated } }
+    } catch (error) {
+      return { result: { status: 'failed', code: 'GUIDE_ROUND_PREFLIGHT_FAILED', message: String(error?.message || '导购轮次校验失败，请返回购物车重新选择后再结账。') } }
+    }
+  }
+
   if (action === 'prepare-service-completion') {
     if (!serviceOrder.value?.id) {
       return { result: { status: 'failed', code: 'SERVICE_ORDER_MISSING', message: '未找到需要完成的服务单。' } }
@@ -4373,6 +4392,12 @@ function resetCashierLocalContext() {
 }
 
 async function closeCheckoutOverlay(options = {}) {
+  if (options?.clearFailedCheckout === true) {
+    // 失败结果页的“清空”与工作台清空共用同一个原子服务端动作：
+    // 未完成结账草稿、购物车和本地恢复票据一起释放，避免强刷后旧遮罩再次恢复。
+    // 该选项只由子组件在未产生成功收款的失败态发出。
+    return confirmClearCart()
+  }
   if (options?.discardCheckoutRecovery === true) {
     // “重新开单”是结果未知现场的统一出口：先清理未完成结账草稿，
     // 再重建空收银台并释放本地恢复票据，避免刷新后旧支付结果再次弹出。
@@ -4386,7 +4411,10 @@ async function closeCheckoutOverlay(options = {}) {
     window.location.reload()
     return
   }
-  if (options?.discardFailedCheckout === true) {
+  const requestStatus = String(checkout.value?.requestStatus || checkout.value?.status || '')
+  const shouldDiscardUnfinishedCheckout = options?.discardFailedCheckout === true
+    || ['editing', 'ready_for_submit', 'failed', 'processing', 'pending_confirmation', 'result_unknown'].includes(requestStatus)
+  if (shouldDiscardUnfinishedCheckout) {
     try {
       await discardCashierCheckout(String(state.stateContextId || ''))
       // discard-checkout 是独立 HTTP 命令，不能让前端继续保留它之前的
@@ -4972,7 +5000,7 @@ onBeforeUnmount(() => {
         <button
           type="button"
           class="button button--secondary cashier-checkout-actions__clear"
-          :disabled="(!hasCartLines && !cashierDraftHasUnresolvedCommand && !checkoutSession && !checkoutPreparationId) || isClearingCart"
+          :disabled="isClearingCart"
           @click="confirmClearCart"
         >{{ isClearingCart ? '清空中…' : '清空' }}</button>
         <button

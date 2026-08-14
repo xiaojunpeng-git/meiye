@@ -1461,6 +1461,7 @@ final class CashierV3SalesOrderQueryServices
                         'name' => (string)$person['employee_name_snapshot'],
                         'isPointCustomer' => strpos((string)($person['role_snapshot'] ?? ''), ':point') !== false,
                         'laborPerformanceAmount' => $this->moneyFromCents((int)$person['amount_cents']),
+                        'laborFeeAmount' => $this->moneyFromCents((int)($person['labor_fee_amount_cents'] ?? 0)),
                     ];
                 }, $craftsmen)
                 : $this->craftsmenForLine($line),
@@ -1488,7 +1489,7 @@ final class CashierV3SalesOrderQueryServices
             ->whereIn('performance_type', ['sales_performance_allocated', 'labor_performance_allocated'])
             ->where('status', 'effective')
             ->whereIn('fact_direction', ['forward', 'reversal'])
-            ->field('id,fact_id,order_id,source_line_id,performance_type,employee_id,employee_name_snapshot,employee_type_snapshot,role_snapshot,allocation_weight_numerator,allocation_weight_denominator,amount_cents,fact_direction,reversal_of,command_idempotency_key')
+            ->field('id,fact_id,order_id,source_line_id,performance_type,employee_id,employee_name_snapshot,employee_type_snapshot,role_snapshot,allocation_weight_numerator,allocation_weight_denominator,amount_cents,labor_fee_amount_cents,fact_direction,reversal_of,command_idempotency_key')
             ->order('id', 'asc')->select()->toArray();
         return $this->displayedPersonnelFacts($rows, $adjustmentCommandKeys);
     }

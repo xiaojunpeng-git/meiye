@@ -3,8 +3,7 @@
 namespace app\services\cashier\v3\fact;
 
 use app\services\cashier\v3\order\settlement\CashierV3SalesOrderPlanV1;
-use app\services\cashier\v3\checkout\CashierV3EntitlementCompletionKernel;
-use app\services\cashier\v3\settlement\CashierV3CheckoutCraftsmenSnapshot;
+use app\services\cashier\v3\settlement\CashierV3PaidProjectCraftsmanPerformanceServices;
 use app\services\cashier\v3\settlement\CashierV3CheckoutVerifiedSourceSet;
 use app\services\cashier\v3\settlement\payment\CashierV3PaymentCollectionPlanV1;
 use app\services\cashier\v3\settlement\CashierV3CheckoutDebtAuthorityServices;
@@ -289,60 +288,22 @@ final class CashierV3SaleOnlyFactAssembler
               }
             }
 
-            // A complete-mode temporary labor fee is a checkout-scoped
-            // snapshot.  For paid project lines it becomes labor performance
-            // facts in the same immutable checkout fact plan; it never changes
-            // the project's configured default rule.
-            $manualLaborFeeCents = (int)($orderLine['manual_labor_fee_cents'] ?? 0);
-            if (($manualLaborFeeCents > 0 || !empty($orderLine['craftsmen_snapshot_json'])) && (string)$orderLine['item_type'] === 'project') {
+            if ((string)$orderLine['item_type'] === 'project'
+                && !empty($orderLine['craftsmen_snapshot_json'])) {
                 try {
-                    $craftsmen = CashierV3CheckoutCraftsmenSnapshot::decode(
-                        (string)$orderLine['craftsmen_snapshot_json']
+                    $craftsmanPlan = CashierV3PaidProjectCraftsmanPerformanceServices::planInTx(
+                        $orderLine,
+                        (string)$order['tenant_id']
                     );
                 } catch (\InvalidArgumentException $exception) {
-                    throw self::failure('sale_only_fact_manual_labor_craftsmen_snapshot_invalid');
+                    throw self::failure('sale_only_fact_craftsman_performance_plan_invalid');
                 }
-                if (!$craftsmen) {
-                    throw self::failure('sale_only_fact_manual_labor_craftsman_required');
-                }
-                $staffIds = [];
-                $weights = [];
-                $perPersonFees = [];
-                foreach ($craftsmen as $craftsman) {
-                    $staffId = (int)($craftsman['staffId'] ?? 0);
-                    $weight = (int)($craftsman['laborWeight'] ?? 0);
-                    $fee = max(0, (int)($craftsman['laborFeeCents'] ?? $craftsman['labor_fee_cents'] ?? 0));
-                    if ($staffId <= 0 || $weight < 0 || ($weight === 0 && $fee <= 0)) {
-                        throw self::failure('sale_only_fact_manual_labor_craftsman_snapshot_invalid');
+                foreach ($craftsmanPlan['allocations'] as $allocation) {
+                    if ((int)$allocation['laborPerformanceCents'] === 0
+                        && (int)$allocation['laborFeeCents'] === 0) {
+                        continue;
                     }
-                    $staffIds[] = $staffId;
-                    $weights[$staffId] = $weight;
-                    $perPersonFees[$staffId] = $fee;
-                }
-                if ($manualLaborFeeCents <= 0 && array_sum($perPersonFees) <= 0) {
-                    continue;
-                }
-                $hasPerPersonFee = array_sum($perPersonFees) > 0;
-                $totalLabor = $hasPerPersonFee
-                    ? array_sum($perPersonFees) * (int)$orderLine['quantity']
-                    : $manualLaborFeeCents * (int)$orderLine['quantity'];
-                $allocations = $hasPerPersonFee
-                    ? array_map(static function (int $staffId) use ($perPersonFees, $orderLine): array {
-                        return ['staffId' => $staffId, 'amountCents' => $perPersonFees[$staffId] * (int)$orderLine['quantity']];
-                    }, $staffIds)
-                    : CashierV3EntitlementCompletionKernel::allocateLaborAmount($totalLabor, $staffIds, $weights);
-                foreach ($allocations as $allocation) {
                     $staffId = (int)$allocation['staffId'];
-                    $craftsman = null;
-                    foreach ($craftsmen as $candidate) {
-                        if ((int)($candidate['staffId'] ?? 0) === $staffId) {
-                            $craftsman = $candidate;
-                            break;
-                        }
-                    }
-                    if (!is_array($craftsman)) {
-                        throw self::failure('sale_only_fact_manual_labor_craftsman_missing');
-                    }
                     $naturalKey = 'sale-project-labor:' . (string)$order['order_id'] . ':'
                         . (string)$orderLine['order_line_id'] . ':' . $staffId;
                     $performanceFacts[] = [
@@ -353,18 +314,19 @@ final class CashierV3SaleOnlyFactAssembler
                         'status' => CashierV3CheckoutFactPlanV1::STATUS_EFFECTIVE,
                         'sourceLineId' => (string)$orderLine['order_line_id'],
                         'performanceType' => CashierV3CheckoutFactPlanV1::LABOR_PERFORMANCE,
-                        'employeeId' => max(1, (int)($craftsman['employeeId'] ?? $staffId)),
-                        'employeeNameSnapshot' => (string)($craftsman['name'] ?? ''),
+                        'employeeId' => (int)$allocation['employeeId'],
+                        'employeeNameSnapshot' => (string)$allocation['name'],
                         'employeeTypeSnapshot' => 'internal',
                         'employeeTypeAuthorityVersion' => 1,
-                        'roleSnapshot' => !empty($craftsman['isPrimary']) ? 'primary_craftsman' : 'craftsman',
-                        'allocationWeightNumerator' => (int)($craftsman['laborWeight'] ?? 0),
-                        'allocationWeightDenominator' => max(1, array_sum($weights)),
-                        'allocationBaseAmountCents' => $totalLabor,
-                        'amountCents' => (int)$allocation['amountCents'],
-                        'ruleCodeSnapshot' => 'SALE-PROJECT-MANUAL-LABOR-V1',
-                        'ruleNameSnapshot' => '本次结账临时手工费',
-                        'ruleVersionSnapshot' => 'checkout-manual-labor-v1',
+                        'roleSnapshot' => !empty($allocation['isPrimary']) ? 'primary_craftsman' : 'craftsman',
+                        'allocationWeightNumerator' => (int)$allocation['laborWeight'],
+                        'allocationWeightDenominator' => 100,
+                        'allocationBaseAmountCents' => (int)$craftsmanPlan['laborAmountCents'],
+                        'amountCents' => (int)$allocation['laborPerformanceCents'],
+                        'laborFeeAmountCents' => (int)$allocation['laborFeeCents'],
+                        'ruleCodeSnapshot' => 'SALE-PROJECT-LABOR-V1',
+                        'ruleNameSnapshot' => '项目劳动业绩',
+                        'ruleVersionSnapshot' => 'project-rule:' . (int)$craftsmanPlan['ruleVersion'],
                     ];
                 }
             }
@@ -752,8 +714,24 @@ final class CashierV3SaleOnlyFactAssembler
         }
         $hasNonCollectionSettlement = (int)($request['balance_deduction_amount_cents'] ?? 0) > 0
             || (int)($request['debt_amount_cents'] ?? 0) > 0;
-        if ((count($collections) === 0 && !$hasNonCollectionSettlement)
-            || count($collections) !== count($aggregate['payments'])
+        $positivePaymentCount = 0;
+        $hasZeroAmountMethodSelection = false;
+        foreach ($aggregate['payments'] as $payment) {
+            $amount = (int)($payment['amount_cents'] ?? -1);
+            if ($amount < 0) {
+                throw self::failure('sale_only_fact_payment_amount_invalid');
+            }
+            if ($amount === 0) {
+                $hasZeroAmountMethodSelection = true;
+                continue;
+            }
+            $positivePaymentCount++;
+        }
+        $zeroReceivableMethodSelection = $hasZeroAmountMethodSelection
+            && (int)($request['selected_payment_amount_cents'] ?? -1) === 0
+            && (int)($request['receivable_amount_cents'] ?? -1) === 0;
+        if ((count($collections) === 0 && !$hasNonCollectionSettlement && !$zeroReceivableMethodSelection)
+            || count($collections) !== $positivePaymentCount
             || count($collections) !== (int)$batch['collection_count']) {
             throw self::failure('sale_only_fact_payment_collection_count_mismatch');
         }

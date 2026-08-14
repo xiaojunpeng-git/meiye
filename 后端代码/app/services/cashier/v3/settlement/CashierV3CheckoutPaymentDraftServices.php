@@ -170,8 +170,8 @@ final class CashierV3CheckoutPaymentDraftServices
             // current draft is already fully allocated, start that new line
             // at zero so the cashier can split the existing collection
             // amounts without being blocked by a premature "no remaining"
-            // rule. Final checkout still requires every retained line to be
-            // a positive whole-yuan amount and the overall total to balance.
+            // rule. A zero-receivable checkout may retain one selected
+            // bookkeeping method at zero; it is not a payment collection.
             'amountCents' => self::nextPaymentInitialAmount($snapshot),
             'businessTime' => $now,
             'externalTransactionNo' => '',

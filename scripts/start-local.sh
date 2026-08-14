@@ -151,7 +151,7 @@ docker run -d --name mohe-cashier-nginx --platform linux/amd64 --network mohe-ne
 # 平台前端开发预览（18081，热更新；仅首次缺依赖时 install，避免每次启动重装）
 ADMIN_SRC="$ROOT/前端代码/admin"
 ADMIN_NM_VOLUME="mohe_admin_src_nm"
-ADMIN_DEV_CMD="if [ ! -x ./node_modules/.bin/vue-cli-service ]; then npm config set registry https://registry.npmmirror.com && npm install --no-audit --no-fund; fi && VUE_APP_API_URL='http://127.0.0.1:${PLATFORM_API_PORT}/adminapi' VUE_APP_INVENTORY_V3_DEV_ORIGIN='http://127.0.0.1:18086' VUE_APP_INVENTORY_V3_DEV_PROXY_TARGET='http://host.docker.internal:18086' ./node_modules/.bin/vue-cli-service serve --mode=dev --host 0.0.0.0 --port 8081"
+ADMIN_DEV_CMD="if [ ! -x ./node_modules/.bin/vue-cli-service ]; then npm config set registry https://registry.npmmirror.com && npm install --no-audit --no-fund; fi && VUE_APP_API_URL='http://127.0.0.1:${PLATFORM_API_PORT}/adminapi' VUE_APP_INVENTORY_V3_DEV_ORIGIN='http://127.0.0.1:18086' VUE_APP_INVENTORY_V3_DEV_PROXY_TARGET='http://host.docker.internal:18086' VUE_APP_ADMIN_DEV_PUBLIC='127.0.0.1:18081' VUE_APP_ADMIN_DEV_SOCKET_HOST='127.0.0.1' VUE_APP_ADMIN_DEV_SOCKET_PORT='18081' ./node_modules/.bin/vue-cli-service serve --mode=dev --host 0.0.0.0 --port 8081"
 
 ensure_admin_dev() {
   if docker ps -a --format '{{.Names}}' | grep -qx mohe-admin-src; then
@@ -237,6 +237,8 @@ ensure_cashier_v3_dev() {
     --add-host host.docker.internal:host-gateway \
     -e CASHIER_V3_API_PROXY_TARGET="http://host.docker.internal:${CASHIER_API_PORT}" \
     -v "$CASHIER_V3_SRC:/app" \
+    -v "$ROOT/前端代码/inventory-vue3:/inventory-vue3:ro" \
+    -v "$ROOT/前端代码/shared:/shared:ro" \
     -v "$CASHIER_V3_NM_VOLUME:/app/node_modules" \
     -w /app \
     node:14-bullseye \

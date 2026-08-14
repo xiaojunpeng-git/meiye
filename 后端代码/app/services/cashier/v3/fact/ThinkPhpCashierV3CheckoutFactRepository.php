@@ -278,7 +278,7 @@ final class ThinkPhpCashierV3CheckoutFactRepository
             return ['principal_delta_cents', 'bonus_delta_cents'];
         }
         if ($domain === 'performance') {
-            return ['allocation_base_amount_cents', 'amount_cents'];
+            return ['allocation_base_amount_cents', 'amount_cents', 'labor_fee_amount_cents'];
         }
         return ['amount_cents'];
     }

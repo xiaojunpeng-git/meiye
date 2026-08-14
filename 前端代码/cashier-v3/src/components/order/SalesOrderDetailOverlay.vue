@@ -650,6 +650,7 @@ async function runAction(action, payload = {}) {
                   <div v-for="(person, personIndex) in peopleFor(item, ['craftsmen', 'craftspeople', 'artisans', 'craftsmanAllocations'])" :key="pickValue(person, ['id', 'staffId', 'employeeId']) || `${personName(person)}-${personIndex}`">
                     <span>{{ craftsmanDisplayName(person) }}</span>
                     <strong v-if="hasValue(performanceAmount(person, ['laborPerformanceAmount', 'performanceAmount', 'laborAmount']))">劳动业绩 {{ displayAmount(performanceAmount(person, ['laborPerformanceAmount', 'performanceAmount', 'laborAmount'])) }}</strong>
+                    <strong v-if="hasValue(performanceAmount(person, ['laborFeeAmount', 'manualLaborFeeAmount']))">手工费 {{ displayAmount(performanceAmount(person, ['laborFeeAmount', 'manualLaborFeeAmount'])) }}</strong>
                   </div>
                 </div>
                 <p v-else-if="hasValue(pickValue(item, ['laborPerformanceAmount', 'laborAmount']))" class="sales-order-detail-allocation__single-performance">劳动业绩 {{ displayAmount(pickValue(item, ['laborPerformanceAmount', 'laborAmount'])) }}</p>

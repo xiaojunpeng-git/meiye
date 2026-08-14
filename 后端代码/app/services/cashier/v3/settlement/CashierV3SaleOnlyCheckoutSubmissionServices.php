@@ -516,11 +516,16 @@ final class CashierV3SaleOnlyCheckoutSubmissionServices
                     'recorded_at' => $now,
                     ], $guideSelectionsByLine, $operatorScope, $dataScope);
                 } catch (\InvalidArgumentException $exception) {
+                    $reason = $exception->getMessage();
+                    $message = '导购轮次保存失败，本次结账已回滚。';
+                    if (preg_match('/^guide_round_date_conflict:(\d{4}-\d{2}-\d{2})$/D', $reason, $matches)) {
+                        $message = '该会员已于 ' . $matches[1] . ' 使用本轮导购，请选择其他轮次。';
+                    }
                     throw new CashierV3CommandException(
                         CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
-                        '导购轮次保存失败，本次结账已回滚。',
+                        $message,
                         CashierV3ResultCode::STATUS_FAILED,
-                        ['reason' => $exception->getMessage()]
+                        ['reason' => $reason]
                     );
                 }
             }

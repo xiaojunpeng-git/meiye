@@ -133,7 +133,16 @@ assert.match(cashierModule, /'reason' => 'entitlement_salespeople_forbidden'/, '
 assert.match(cashierModule, /'apply-cashier-craftsmen-to-all-service-lines'/, '后端命令模块必须登记手艺人应用全部动作')
 assert.match(cashierModule, /registerCommand\('apply-cashier-personnel-to-all-lines'[\s\S]*applyCraftsmenToAllServiceLinesInTx[\s\S]*applySalespeopleToAllSaleLinesInTx/, '后端统一命令必须在同一事务中依次应用手艺人和销售人')
 assert.match(workspace, /\$salespeople = \$lineRole === self::ROLE_SALE[\s\S]*: \[\];/, '权益草稿投影不得加载或展示销售人快照')
-assert.match(workspace, /if \(\$isSale && !\$isSaleProject\) \{[\s\S]*\$hasSalespeople/, '产品和普通卡项仍只允许销售人')
+assert.match(
+  workspace,
+  /if \(\$isSale && !\$isSaleProject\) \{[\s\S]*\$hasGuides[\s\S]*authoritativeGuideSelectionsInTx[\s\S]*guide_selections_json/,
+  '产品和普通卡项必须持久化导购归属快照'
+)
+assert.match(
+  cashierModule,
+  /\$hasAttributions = array_key_exists\('guideSelections', \$payload\)[\s\S]*?!\$hasSalespeople && !\$hasAttributions && !\$hasInventoryRule/,
+  '产品和普通卡项的命令策略必须允许导购和销售经理归属保存'
+)
 assert.doesNotMatch(component, /本次手工费/, '完整模式不再显示独立的本次临时手工费说明')
 assert.match(component, /<b>元\/次<\/b>/, '完整模式手工费单位必须显示为元\/次')
 assert.doesNotMatch(component, /<b>元\/人<\/b>/, '完整模式不得继续显示元\/人')

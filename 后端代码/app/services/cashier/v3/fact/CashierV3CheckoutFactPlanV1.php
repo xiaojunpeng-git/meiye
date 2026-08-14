@@ -253,7 +253,17 @@ final class CashierV3CheckoutFactPlanV1
         string $commandKey
     ): array {
         $specificKeys = self::specificKeys($domain);
-        self::assertExactKeys($fact, array_merge(self::COMMON_FACT_KEYS, $specificKeys), $domain);
+        $requiredKeys = array_merge(self::COMMON_FACT_KEYS, $specificKeys);
+        if ($domain === 'performance') {
+            self::assertAllowedKeys(
+                $fact,
+                $requiredKeys,
+                array_merge($requiredKeys, ['laborFeeAmountCents']),
+                $domain
+            );
+        } else {
+            self::assertExactKeys($fact, $requiredKeys, $domain);
+        }
         $reversalOf = self::optionalToken($fact['reversalOf'], 64, 'reversal_of_invalid');
         $direction = $reversalOf === '' ? self::DIRECTION_FORWARD : self::DIRECTION_REVERSAL;
         if ($fact['status'] !== self::STATUS_EFFECTIVE) {
@@ -389,6 +399,7 @@ final class CashierV3CheckoutFactPlanV1
             'allocation_weight_denominator' => $denominator,
             'allocation_base_amount_cents' => self::signedMoney($fact['allocationBaseAmountCents'], $direction, 'performance_base_amount_invalid', true),
             'amount_cents' => self::signedMoney($fact['amountCents'], $direction, 'performance_amount_invalid', true),
+            'labor_fee_amount_cents' => self::signedMoney($fact['laborFeeAmountCents'] ?? 0, $direction, 'performance_labor_fee_amount_invalid', true),
             'rule_code_snapshot' => self::requiredToken($fact['ruleCodeSnapshot'], 64, 'performance_rule_code_invalid'),
             'rule_name_snapshot' => self::text($fact['ruleNameSnapshot'], 128, 'performance_rule_name_invalid'),
             'rule_version_snapshot' => self::requiredToken($fact['ruleVersionSnapshot'], 64, 'performance_rule_version_invalid'),
@@ -565,6 +576,20 @@ final class CashierV3CheckoutFactPlanV1
         sort($actual, SORT_STRING);
         sort($required, SORT_STRING);
         if ($actual !== $required) {
+            throw self::failure('fact_shape_invalid', [
+                'path' => $path,
+                'actualKeys' => $actual,
+                'requiredKeys' => $required,
+            ]);
+        }
+    }
+
+    private static function assertAllowedKeys(array $value, array $required, array $allowed, string $path): void
+    {
+        $actual = array_keys($value);
+        $missing = array_diff($required, $actual);
+        $extra = array_diff($actual, $allowed);
+        if ($missing !== [] || $extra !== []) {
             throw self::failure('fact_shape_invalid', [
                 'path' => $path,
                 'actualKeys' => $actual,

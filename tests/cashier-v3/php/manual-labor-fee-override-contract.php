@@ -5,6 +5,7 @@ declare(strict_types=1);
 $root = dirname(__DIR__, 3);
 $workspace = $root . '/后端代码/app/services/cashier/v3/cashier/CashierV3CashierWorkspaceServices.php';
 $assembler = $root . '/后端代码/app/services/cashier/v3/fact/CashierV3SaleOnlyFactAssembler.php';
+$paidProjectPerformance = $root . '/后端代码/app/services/cashier/v3/settlement/CashierV3PaidProjectCraftsmanPerformanceServices.php';
 $adapter = $root . '/后端代码/app/services/cashier/v3/checkout/CashierV3EntitlementCompletionAuthorityAdapter.php';
 $service = $root . '/后端代码/app/services/cashier/v3/settlement/CashierV3SaleProjectServiceCompletionServices.php';
 $rebuilder = $root . '/后端代码/app/services/cashier/v3/settlement/CashierV3CheckoutDraftAuthorityRebuilder.php';
@@ -38,25 +39,29 @@ $checks = [
         $adapter,
         "laborManualFeeCents",
     ],
-    'sale fact plan records labor performance for a manual project fee' => [
+    'sale fact plan stores manual fees independently from labor performance' => [
         $assembler,
-        "SALE-PROJECT-MANUAL-LABOR-V1",
+        "'laborFeeAmountCents' => (int)\$allocation['laborFeeCents']",
     ],
-    'completed service fact stores labor amount and mode' => [
+    'paid project plan reads the project labor rule and keeps a separate fee total' => [
+        $paidProjectPerformance,
+        "'laborFeeAmountCents' => array_sum(\$fees)",
+    ],
+    'completed service fact stores labor performance, manual fee and mode separately' => [
         $service,
-        "'labor_amount_cents'",
+        "'labor_fee_amount_cents'",
     ],
-    'database migration carries workspace, draft, order and service snapshots' => [
+    'existing database migration carries workspace, draft, order and service snapshots' => [
         $migration,
         "eb_cashier_v3_sales_order_line",
     ],
-    'complete mode exposes a one-time labor fee field' => [
+    'complete mode exposes a per-craftsman labor fee field' => [
         $view,
-        '本次手工费',
+        '每人手工费',
     ],
-    'front end only submits override after explicit editing' => [
+    'front end submits each selected craftsman labor fee with its performance type' => [
         $view,
-        'laborFeeDirty.value',
+        'laborFeeCents: craftsmanType(item)',
     ],
     'unset override is omitted from the draft authority' => [
         $rebuilder,

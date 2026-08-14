@@ -373,6 +373,27 @@ checkoutAssert(
 $snapshot = checkoutSnapshot();
 $saveCommand = checkoutCommand(CashierV3CheckoutSettlementKernel::OPERATION_SAVE_DRAFT, 1);
 $draft = CashierV3CheckoutSettlementKernel::saveDraft($saveCommand, $snapshot, null, $secret);
+// A guide round is a formal checkout attribution dimension. It must survive
+// the kernel's normalized line snapshot instead of degrading to employee-only.
+$guideSnapshot = checkoutSnapshot();
+$guideSnapshot['saleLines'][0]['guideSelections'] = [[
+    'employeeId' => 490,
+    'name' => '测试导购',
+    'guideRoundNo' => 1,
+]];
+checkoutResign($guideSnapshot);
+$guideDraft = CashierV3CheckoutSettlementKernel::saveDraft(
+    checkoutCommand(CashierV3CheckoutSettlementKernel::OPERATION_SAVE_DRAFT, 33),
+    $guideSnapshot,
+    null,
+    $secret
+);
+$guideDraftRows = (array)($guideDraft['persistencePlan']['lineDrafts'] ?? []);
+$guideDraftSelections = json_decode((string)($guideDraftRows[0]['guideSelectionsJson'] ?? ''), true);
+checkoutAssert('guide round survives the checkout draft kernel',
+    is_array($guideDraftSelections)
+    && (int)($guideDraftSelections[0]['employeeId'] ?? 0) === 490
+    && (int)($guideDraftSelections[0]['guideRoundNo'] ?? 0) === 1);
 checkoutAssert('mixed composition is server classified', $draft['composition'] === 'mixed');
 checkoutAssert('draft remains eventless editing state',
     $draft['requestStatus'] === 'editing' && $draft['eventless'] === true);
@@ -672,6 +693,19 @@ $entitlementOnly['balanceDeduction'] = [
 ];
 $entitlementOnly['debt'] = ['authorityKey' => '', 'policyVersion' => 0, 'amountCents' => 0];
 checkoutResign($entitlementOnly);
+$zeroReceivableWithoutMethod = $entitlementOnly;
+checkoutAssert('zero receivable still requires a selected bookkeeping method',
+    checkoutReason(static function () use ($zeroReceivableWithoutMethod, $secret): void {
+        CashierV3CheckoutSettlementKernel::prepareSubmission(
+            checkoutCommand(CashierV3CheckoutSettlementKernel::OPERATION_PREPARE_SUBMISSION, 7),
+            $zeroReceivableWithoutMethod,
+            null,
+            $secret
+        );
+    }) === 'checkout_zero_receivable_payment_method_required');
+$entitlementOnly['paymentDetails'] = [$snapshot['paymentDetails'][0]];
+$entitlementOnly['paymentDetails'][0]['amountCents'] = 0;
+checkoutResign($entitlementOnly);
 $entitlementOnlyResult = CashierV3CheckoutSettlementKernel::prepareSubmission(
     checkoutCommand(CashierV3CheckoutSettlementKernel::OPERATION_PREPARE_SUBMISSION, 7),
     $entitlementOnly,
@@ -824,7 +858,7 @@ checkoutAssert('a further bookkeeping-method click is retained as a zero-value d
         'balanceDeduction' => ['amountCents' => 0],
         'debt' => ['amountCents' => 0],
     ]) === 0);
-checkoutAssert('submission preparation rejects every zero-valued payment draft',
+checkoutAssert('positive receivable still rejects a zero-valued payment draft as unbalanced',
     checkoutReason(static function () use ($zeroPaymentDraft, $secret): void {
         CashierV3CheckoutSettlementKernel::prepareSubmission(
             checkoutCommand(CashierV3CheckoutSettlementKernel::OPERATION_PREPARE_SUBMISSION, 30),
@@ -832,7 +866,7 @@ checkoutAssert('submission preparation rejects every zero-valued payment draft',
             null,
             $secret
         );
-    }) === 'payment_amount_must_be_positive');
+    }) === 'checkout_receivable_not_balanced');
 
 $floatMoney = $snapshot;
 $floatMoney['saleLines'][0]['saleAmountCents'] = '9000';

@@ -29,6 +29,12 @@ module.exports = {
   productionSourceMap: false, //关闭生产环境下的SourceMap映射文件
   devServer: {
     publicPath: Setting.publicPath,
+    // 容器内 8081 映射到宿主机 18081 时，HMR 必须连接浏览器可访问的宿主机端口。
+    // 当前项目的 webpack-dev-server 2.x 以 public 生成客户端连接地址；仅设置
+    // sockHost/sockPort 不会覆盖注入 app.js 的 localhost:8081。
+    public: process.env.VUE_APP_ADMIN_DEV_PUBLIC || undefined,
+    sockHost: process.env.VUE_APP_ADMIN_DEV_SOCKET_HOST || undefined,
+    sockPort: Number(process.env.VUE_APP_ADMIN_DEV_SOCKET_PORT) || undefined,
     // 直接访问 18081/view_inventory_v3/ 时，也转发到库存 Vue 3 热更新服务。
     // 平台页面内嵌库存时仍由 InventoryV3Bridge 直接指向 18086；这里覆盖
     // 用户手动打开旧路径的场景，避免回退到 Admin 的空壳 index.html。

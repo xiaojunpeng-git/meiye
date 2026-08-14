@@ -33,6 +33,7 @@ const deferredPersistence = body('persistDeferredLineServiceSettings()')
 const checkoutEntry = body('openCheckout()')
 const resetContext = body('resetCashierLocalContext()')
 const clearCart = body('confirmClearCart()')
+const checkoutBar = source.match(/<footer class="cashier-checkout-bar">[\s\S]*?<\/footer>/)?.[0] || ''
 const discard = fs.readFileSync(path.join(repo, '后端代码/app/services/cashier/v3/settlement/CashierV3CheckoutDraftDiscardServices.php'), 'utf8')
 
 check(
@@ -63,9 +64,11 @@ check(
 check(
   /draftCommandRecovery\.clear\(\)/.test(clearCart)
     && /clear-negative-state/.test(clearCart)
-    && /hasRecoveryState/.test(clearCart)
+    && /if \(isClearingCart\.value\) return/.test(clearCart)
+    && !/hasCartLines\.value/.test(clearCart)
+    && /cashier-checkout-actions__clear[\s\S]*?:disabled="isClearingCart"[\s\S]*?@click="confirmClearCart"/.test(checkoutBar)
     && clearCart.indexOf("await requestAction('open-cashier-workbench'") < clearCart.indexOf('clear-negative-state'),
-  '清空购物车同时释放未决恢复状态并关闭结果未知提示'
+  '清空始终可用作恢复出口，同时释放未决状态并关闭结果未知提示'
 )
 check(
   /protectedRequestIds/.test(discard)

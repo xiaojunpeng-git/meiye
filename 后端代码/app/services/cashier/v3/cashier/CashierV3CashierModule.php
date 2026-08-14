@@ -963,7 +963,7 @@ final class CashierV3CashierModule
         self::registerClearCartLinesPolicy($dispatcher);
         self::registerChangeQuantityPolicy($dispatcher, $readiness, $saleCatalog);
         self::registerUpdateServiceSettingsPolicy($dispatcher, $readiness);
-        self::registerMoreActionPolicies($dispatcher, $readiness, $saleCatalog);
+        self::registerMoreActionPolicies($dispatcher, $readiness);
         self::registerLineCouponPolicies($dispatcher, $readiness);
         self::registerPrepareCheckoutPolicy($dispatcher, $checkoutPreparation);
         self::registerDebtRepaymentPolicies($dispatcher);
@@ -1590,13 +1590,17 @@ final class CashierV3CashierModule
                         $hasSalespeople = array_key_exists('salespeople', $payload);
                         $hasProjectSettings = array_key_exists('serviceObject', $payload)
                             || array_key_exists('craftsmen', $payload)
-                            || array_key_exists('isExperience', $payload);
+                            || array_key_exists('isExperience', $payload)
+                            || array_key_exists('friendCountsAsCustomer', $payload)
+                            || array_key_exists('laborManualFee', $payload);
+                        $hasAttributions = array_key_exists('guideSelections', $payload)
+                            || array_key_exists('salesManagerSelections', $payload);
                         $hasInventoryRule = array_key_exists('isPresale', $payload)
                             || array_key_exists('inventoryOutboundRequired', $payload);
-                        if ($hasProjectSettings || (!$hasSalespeople && !$hasInventoryRule)) {
+                        if ($hasProjectSettings || (!$hasSalespeople && !$hasAttributions && !$hasInventoryRule)) {
                             throw new CashierV3CommandException(
                                 CashierV3ResultCode::ENTITLEMENT_LINE_INVALID,
-                                '该商品只支持设置销售人。',
+                                '该商品不支持设置服务对象、手艺人或体验标记。',
                                 CashierV3ResultCode::STATUS_FAILED,
                                 ['line_id' => $lineKey, 'reason' => 'sale_non_project_setting_invalid']
                             );
@@ -1687,8 +1691,7 @@ final class CashierV3CashierModule
 
     private static function registerMoreActionPolicies(
         CashierV3ActionDispatcher $dispatcher,
-        CashierV3CashierReadinessGuard $readiness,
-        CashierV3SaleCatalogServices $saleCatalog
+        CashierV3CashierReadinessGuard $readiness
     ): void {
         foreach ([
             'apply-cashier-salespeople-to-all-sale-lines',
@@ -1708,58 +1711,13 @@ final class CashierV3CashierModule
                 $action,
                 ['cashier_workspace'],
                 [],
-                function (array $payload, array $base) use ($action, $readiness, $saleCatalog): array {
+                function (array $payload, array $base) use ($readiness): array {
                     $readiness->assertReady();
-                    $resolved = self::workspaceOnlyPolicyResult($base);
-                    if ($action !== 'update-cashier-line-price') {
-                        return $resolved;
-                    }
-                    $workspaceId = (string)($base['session']['workspace_id'] ?? '');
-                    $lineKey = self::lineKey($payload['lineId'] ?? $payload['line_id'] ?? null);
-                    $row = Db::name('cashier_v3_workspace_line')
-                        ->where('workspace_id', $workspaceId)
-                        ->where('line_key', $lineKey)
-                        ->where('line_role', 'sale')
-                        ->find();
-                    if (!$row) {
-                        throw new CashierV3CommandException(
-                            CashierV3ResultCode::RESOURCE_NOT_FOUND,
-                            '该购物车商品不存在或已经删除。',
-                            CashierV3ResultCode::STATUS_FAILED,
-                            ['line_id' => $lineKey]
-                        );
-                    }
-                    $resolved['expand_from_server_resource_discovery'] = true;
-                    $resolved['server_resource_discoverer'] = static function (array $scope) use (
-                        $saleCatalog,
-                        $workspaceId,
-                        $lineKey
-                    ): array {
-                        $current = Db::name('cashier_v3_workspace_line')
-                            ->where('workspace_id', $workspaceId)
-                            ->where('line_key', $lineKey)
-                            ->where('line_role', 'sale')
-                            ->find();
-                        if (!$current) {
-                            throw new CashierV3CommandException(
-                                CashierV3ResultCode::RESOURCE_NOT_FOUND,
-                                '该购物车商品不存在或已经删除。',
-                                CashierV3ResultCode::STATUS_FAILED,
-                                ['line_id' => $lineKey]
-                            );
-                        }
-                        return ['resources' => $saleCatalog->discoverStoredLineResources(
-                            (array)$current,
-                            (int)($current['quantity'] ?? 0),
-                            $scope['operator_scope'],
-                            $scope['data_scope']
-                        )];
-                    };
-                    return $resolved;
+                    return self::workspaceOnlyPolicyResult($base);
                 },
                 ['cashier_workspace'],
-                ['cashier_workspace', 'catalog_card_definition', 'catalog_product', 'catalog_sku'],
-                ['catalog_card_definition', 'catalog_product', 'catalog_sku']
+                ['cashier_workspace'],
+                []
             ));
         }
     }

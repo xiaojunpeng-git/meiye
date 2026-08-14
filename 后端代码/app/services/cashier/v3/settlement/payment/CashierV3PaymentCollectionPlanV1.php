@@ -740,8 +740,19 @@ final class CashierV3PaymentCollectionPlanV1
                 $row['amount_cents'],
                 'payment_collection_amount_invalid'
             );
-            if ($amount <= 0) {
+            if ($amount < 0) {
                 throw self::failure('payment_collection_amount_invalid');
+            }
+            // For an exactly-zero receivable, the selected bookkeeping method
+            // is retained on the immutable checkout draft as operational
+            // evidence. It must not become a zero-value collection or a
+            // payment_collected fact.
+            if ($amount === 0) {
+                if ($request['selected_payment_amount_cents'] !== 0
+                    || $request['receivable_amount_cents'] !== 0) {
+                    throw self::failure('payment_collection_zero_amount_not_allowed');
+                }
+                continue;
             }
             $paymentTime = self::positiveInt(
                 $row['operation_occurred_at'],

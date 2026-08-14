@@ -79,6 +79,14 @@ final class CashierV3SaleProjectServiceCompletionServices
                 }
             }
             $naturalKey = 'sale_project_service:' . (string)$header['checkout_request_id'] . ':' . $sourceLineId;
+            try {
+                $craftsmanPlan = CashierV3PaidProjectCraftsmanPerformanceServices::planInTx(
+                    $line,
+                    (string)$header['tenant_id']
+                );
+            } catch (\InvalidArgumentException $exception) {
+                throw self::failure('sale_project_service_craftsman_performance_invalid');
+            }
             $row = [
                 'service_fact_id' => 'SSF-' . substr(hash('sha256', $naturalKey), 0, 40),
                 'natural_key' => $naturalKey,
@@ -113,11 +121,9 @@ final class CashierV3SaleProjectServiceCompletionServices
                 'quantity' => (int)$line['quantity'],
                 'service_object' => (string)$line['service_object'],
                 'is_experience' => (int)$line['is_experience'],
-                'labor_amount_cents' => max(0, (int)($line['manual_labor_fee_cents'] ?? 0))
-                    * max(1, (int)$line['quantity']),
-                'labor_mode' => ((int)($line['manual_labor_fee_cents'] ?? 0)) > 0
-                    ? 'checkout_manual_override'
-                    : 'project_rule',
+                'labor_amount_cents' => (int)$craftsmanPlan['laborAmountCents'],
+                'labor_fee_amount_cents' => (int)$craftsmanPlan['laborFeeAmountCents'],
+                'labor_mode' => (string)$craftsmanPlan['laborMode'],
                 // A paid project is immediately completed service. Preserve the
                 // locked checkout line's personnel snapshot, not a later staff
                 // lookup, so the service record stays historically traceable.
@@ -161,6 +167,7 @@ final class CashierV3SaleProjectServiceCompletionServices
                 'serviceObject' => $row['service_object'],
                 'isExperience' => (bool)$row['is_experience'],
                 'laborAmountCents' => (int)$row['labor_amount_cents'],
+                'laborFeeAmountCents' => (int)$row['labor_fee_amount_cents'],
                 'laborMode' => (string)$row['labor_mode'],
             ];
         }

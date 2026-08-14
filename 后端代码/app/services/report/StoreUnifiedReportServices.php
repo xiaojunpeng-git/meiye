@@ -183,9 +183,12 @@ class StoreUnifiedReportServices extends BaseServices
 
     private function craftsmanConsumption($storeId, array $range, array $input): array
     {
-        $query = $this->withStoreScope(Db::name('cashier_v3_performance_fact'), $storeId)->whereBetween('business_date',[$range['start'],$range['end']])->where('status','effective')->whereIn('performance_type',['consumption_performance_recorded','labor_performance_allocated'])->where('employee_id','>',0);
+        $query = $this->withStoreScope(Db::name('cashier_v3_performance_fact'), $storeId)->whereBetween('business_date',[$range['start'],$range['end']])->where('status','effective')->where('performance_type','labor_performance_allocated')->where('employee_id','>',0);
         if ((int)($input['craftsman_id'] ?? 0) > 0) $query->where('employee_id',(int)$input['craftsman_id']);
-        $raw = $query->fieldRaw("store_id,MAX(store_name_snapshot) AS store_name,MAX(employee_name_snapshot) AS employee_name,employee_id,DAY(business_date) AS day_no,SUM(CASE WHEN performance_type='consumption_performance_recorded' THEN amount_cents ELSE 0 END) AS consumption_amount_cents,SUM(CASE WHEN performance_type='labor_performance_allocated' THEN amount_cents ELSE 0 END) AS labor_amount_cents,MAX(rule_code_snapshot) AS labor_rule_snapshot")->group('store_id,employee_id,day_no')->order('employee_name','asc')->select()->toArray();
+        // This report is a craftsman projection. "消耗" is the craftsman's
+        // allocated labor performance; "手工" is the independent fee saved
+        // with that allocation, never a second use of amount_cents.
+        $raw = $query->fieldRaw("store_id,MAX(store_name_snapshot) AS store_name,MAX(employee_name_snapshot) AS employee_name,employee_id,DAY(business_date) AS day_no,SUM(CASE WHEN performance_type='labor_performance_allocated' THEN amount_cents ELSE 0 END) AS consumption_amount_cents,SUM(CASE WHEN performance_type='labor_performance_allocated' THEN labor_fee_amount_cents ELSE 0 END) AS labor_amount_cents,MAX(rule_code_snapshot) AS labor_rule_snapshot")->group('store_id,employee_id,day_no')->order('employee_name','asc')->select()->toArray();
         $by = [];
         foreach ($raw as $row) {
             $key = (int)$row['store_id'].'|'.(int)$row['employee_id'];

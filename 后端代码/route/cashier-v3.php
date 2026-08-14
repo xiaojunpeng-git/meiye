@@ -80,6 +80,8 @@ Route::group('cashierapi/v3', function () {
             ->option(['real_name' => '收银草稿直接清空']);
         Route::post('cashier-drafts/discard-checkout', 'HangDraft/discardCheckout')
             ->option(['real_name' => '收银失败结账草稿废弃']);
+        Route::post('cashier-drafts/validate-guide-round', 'HangDraft/validateGuideRound')
+            ->option(['real_name' => '收银导购轮次结账前校验']);
         Route::post('customer-care/actions', 'CustomerCare/action')
             ->option(['real_name' => '门店PC客情工作台']);
         Route::get('unified-query/exports/:taskNo/download', 'Command/downloadUnifiedQueryExport')

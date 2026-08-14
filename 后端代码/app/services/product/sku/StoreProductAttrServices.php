@@ -257,7 +257,9 @@ class StoreProductAttrServices extends BaseServices
                         ? (int)$value['unit_convert']
                         : round((float)$value['unit_convert'], 4))
                     : 1,
-                'decimal_scale' => in_array((int)($value['decimal_scale'] ?? 0), [0, 2], true) ? (int)$value['decimal_scale'] : 0,
+                'decimal_scale' => in_array((int)($value['decimal_scale'] ?? 0), [0, 2], true)
+                    ? (int)($value['decimal_scale'] ?? 0)
+                    : 0,
                 'type' => $type,
                 'quota' => $value['quota'] ?? 0,
                 'quota_show' => $value['quota'] ?? 0,

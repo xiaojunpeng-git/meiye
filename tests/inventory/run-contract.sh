@@ -37,6 +37,12 @@ docker run --rm --cpus 1 --memory 256m \
   --volume "$repo_dir:/workspace:ro" \
   --entrypoint php \
   "$php_image" \
+  /workspace/tests/inventory/php/default-location-scope-reconciliation-contract.php
+
+docker run --rm --cpus 1 --memory 256m \
+  --volume "$repo_dir:/workspace:ro" \
+  --entrypoint php \
+  "$php_image" \
   /workspace/tests/inventory/php/manual-inbound-detail-contract.php
 
 docker run --rm --cpus 1 --memory 256m \

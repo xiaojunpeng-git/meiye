@@ -301,5 +301,49 @@ inboundAssert('later-line failure rolls back initialized location, stock, batch 
     && (int)Db::name('inventory_stock')->where('tenant_id', '0')->where('store_id', 99004)->count() === 0
     && (int)Db::name('inventory_batch_movement_fact')->where('tenant_id', '0')->where('store_id', 99004)->count() === 0);
 
+$scopeRepairLocationId = (int)$location['id'];
+$scopeRepairStockBefore = (int)Db::name('inventory_stock')->where('id', (int)$stock['id'])->value('available_quantity_units');
+$scopeRepairFactCountBefore = (int)Db::name('inventory_batch_movement_fact')->where('tenant_id', '0')->where('store_id', $primaryStoreId)->count();
+Db::name('inventory_location')->where('id', $scopeRepairLocationId)->update([
+    'organization_id' => '99000',
+    'organization_path' => '/99000/obsolete/',
+    'organization_name_snapshot' => 'TEST-过期组织',
+    'store_name_snapshot' => 'TEST-过期门店',
+]);
+Db::name('inventory_stock')->where('id', (int)$stock['id'])->update([
+    'organization_id' => '99000',
+    'organization_path' => '/99000/obsolete/',
+]);
+$scopeRepairResult = $service->create($primaryStoreId, $primaryOperatorId, inboundCommand('TEST-inbound-scope-repair-20260730-001', [
+    inboundLine($primaryProductId, $primarySkuId, $primarySkuUnique, 'TEST-BATCH-SCOPE-REPAIR-20260730-001', '1'),
+]));
+$scopeRepairedLocation = Db::name('inventory_location')->where('id', $scopeRepairLocationId)->find();
+$scopeRepairedStock = Db::name('inventory_stock')->where('id', (int)$stock['id'])->find();
+inboundAssert('an existing default store location with stale organization snapshots is repaired before inbound writes',
+    (string)($scopeRepairedLocation['organization_id'] ?? '') === (string)$primaryStoreId
+    && (string)($scopeRepairedLocation['organization_path'] ?? '') === '/99000/' . $primaryStoreId . '/'
+    && (string)($scopeRepairedLocation['organization_name_snapshot'] ?? '') === 'TEST-入库隔离组织'
+    && (string)($scopeRepairedLocation['store_name_snapshot'] ?? '') === 'TEST-入库隔离门店'
+    && (int)($scopeRepairedLocation['version'] ?? 0) === 2
+    && (string)($scopeRepairedStock['organization_id'] ?? '') === (string)$primaryStoreId
+    && (string)($scopeRepairedStock['organization_path'] ?? '') === '/99000/' . $primaryStoreId . '/'
+    && (int)Db::name('inventory_stock')->where('id', (int)$stock['id'])->value('available_quantity_units') === $scopeRepairStockBefore + 1
+    && (int)Db::name('inventory_batch_movement_fact')->where('tenant_id', '0')->where('store_id', $primaryStoreId)->count() === $scopeRepairFactCountBefore + 1
+    && (int)($scopeRepairResult['lines'][0]['idempotent'] ?? 1) === 0
+);
+
+$historicalFactId = (int)$first['lines'][0]['movement_fact_id'];
+Db::name('inventory_batch_movement_fact')->where('id', $historicalFactId)->update([
+    'organization_id' => '99000',
+    'organization_path' => '/99000/legacy/',
+]);
+$historicalReplay = $service->create($primaryStoreId, $primaryOperatorId, $firstCommand);
+$historicalFact = Db::name('inventory_batch_movement_fact')->where('id', $historicalFactId)->find();
+inboundAssert('an idempotent replay accepts an immutable historical organization snapshot after a store move',
+    (int)($historicalReplay['lines'][0]['idempotent'] ?? 0) === 1
+    && (int)($historicalReplay['lines'][0]['movement_fact_id'] ?? 0) === $historicalFactId
+    && (string)($historicalFact['organization_path'] ?? '') === '/99000/legacy/'
+);
+
 echo "INVENTORY_MANUAL_INBOUND_RESULT failed={$failed}\n";
 exit($failed === 0 ? 0 : 1);

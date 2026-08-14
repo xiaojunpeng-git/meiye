@@ -13,6 +13,13 @@ $service = (string)file_get_contents($root . '/后端代码/app/services/cashier
 $submission = (string)file_get_contents($root . '/后端代码/app/services/cashier/v3/settlement/CashierV3SaleOnlyCheckoutSubmissionServices.php');
 $workspace = (string)file_get_contents($root . '/后端代码/app/services/cashier/v3/cashier/CashierV3CashierWorkspaceServices.php');
 $workspaceMigration = (string)file_get_contents($root . '/后端代码/database/upgrades/2026-08-13-收银V3导购轮次事实/05-工作台导购选择快照.sql');
+$draftAuthorityRebuilder = (string)file_get_contents($root . '/后端代码/app/services/cashier/v3/settlement/CashierV3CheckoutDraftAuthorityRebuilder.php');
+$checkoutProjection = (string)file_get_contents($root . '/后端代码/app/services/cashier/v3/settlement/CashierV3CheckoutProjectionServices.php');
+$checkoutKernel = (string)file_get_contents($root . '/后端代码/app/services/cashier/v3/settlement/CashierV3CheckoutSettlementKernel.php');
+$salesOrderPlan = (string)file_get_contents($root . '/后端代码/app/services/cashier/v3/order/settlement/CashierV3SalesOrderPlanV1.php');
+$preflight = (string)file_get_contents($root . '/后端代码/app/services/cashier/v3/settlement/CashierV3CheckoutGuideRoundPreflightServices.php');
+$hangDraftController = (string)file_get_contents($root . '/后端代码/app/controller/cashier/v3/HangDraft.php');
+$hangDraftRoute = (string)file_get_contents($root . '/后端代码/route/cashier-v3.php');
 
 $checks = [
     'guide round fact table is immutable and tenant idempotent' => strpos($migration, 'eb_cashier_v3_customer_guide_round_fact') !== false
@@ -45,9 +52,28 @@ $checks = [
         && strpos($submission, 'preparationToken') !== false,
     'workspace stores server locked guide selections' => strpos($workspaceMigration, 'guide_selections_json') !== false
         && strpos($submission, 'lockedGuideSelectionsByCheckoutLine') !== false,
-    'guide save binds each selected round to one of at most three dates' => strpos($workspace, 'assertGuideRoundDateInTx') !== false
-        && strpos($workspace, 'guide_round_date_limit_exceeded') !== false
-        && strpos($workspace, 'guide_round_date_conflict') !== false,
+    'guide save only persists a validated guide and round snapshot' => strpos($workspace, 'authoritativeGuideSelectionsInTx') !== false
+        && strpos($workspace, 'assertGuideRoundDateInTx') === false
+        && strpos($workspace, 'guide_round_date_limit_exceeded') === false,
+    'formal checkout rejects only a same round used on another date' => strpos($service, 'guide_round_date_conflict:') !== false
+        && strpos($service, '$round === $roundNo && (string)$row[\'business_date\'] !== $businessDate') !== false
+        && strpos($service, 'guide_date_round_conflict') === false,
+    'only settled normal sales orders occupy a guide round' => strpos($service, "->where('sales_order.order_status', 'settled')") !== false
+        && strpos($service, "->whereIn('lifecycle.operation_type', ['refund', 'void'])") !== false,
+    'cross-date conflict returns the occupied settlement date to the cashier' => strpos($submission, 'guide_round_date_conflict:(\d{4}-\d{2}-\d{2})') !== false
+        && strpos($submission, '该会员已于 ') !== false,
+    'payment-step preflight checks the locked snapshot without creating guide facts' => strpos($preflight, 'validateInTx(') !== false
+        && strpos($preflight, 'assertAvailableInTx(') !== false
+        && strpos($preflight, 'persistInTx(') === false
+        && strpos($hangDraftController, 'public function validateGuideRound()') !== false
+        && strpos($hangDraftRoute, "cashier-drafts/validate-guide-round") !== false,
+    'guide round survives every checkout snapshot rebuild' => strpos($draftAuthorityRebuilder, "\$snapshot['guideRoundNo'] = \$roundNo") !== false
+        && strpos($checkoutProjection, "\$snapshot['guideRoundNo'] = \$roundNo") !== false
+        && strpos($checkoutKernel, "\$normalizedSelection['guideRoundNo'] = \$roundNo") !== false
+        && strpos($salesOrderPlan, "\$snapshot['guideRoundNo'] = \$roundNo") !== false
+        && strpos($draftAuthorityRebuilder, 'checkout_draft_guide_round_invalid') !== false
+        && strpos($checkoutProjection, 'checkout_projection_guide_round_invalid') !== false
+        && strpos($salesOrderPlan, 'sales_order_guide_round_invalid') !== false,
 ];
 $failed = [];
 foreach ($checks as $name => $passed) {

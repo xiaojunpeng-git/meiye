@@ -1493,10 +1493,21 @@ final class CashierV3SalesOrderPlanV1
                 $row['employeeId'] ?? $row['employee_id'] ?? $row['id'] ?? null,
                 'sales_order_attribution_employee_invalid'
             );
-            $result[] = [
+            $snapshot = [
                 'employeeId' => $employeeId,
                 'name' => (string)($row['name'] ?? $row['employeeNameSnapshot'] ?? ''),
             ];
+            if (array_key_exists('guideRoundNo', $row) || array_key_exists('guide_round_no', $row)) {
+                $roundNo = self::positiveInt(
+                    $row['guideRoundNo'] ?? $row['guide_round_no'] ?? null,
+                    'sales_order_guide_round_invalid'
+                );
+                if ($roundNo > 3) {
+                    throw self::failure('sales_order_guide_round_invalid');
+                }
+                $snapshot['guideRoundNo'] = $roundNo;
+            }
+            $result[] = $snapshot;
         }
         return $result;
     }

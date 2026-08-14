@@ -492,7 +492,7 @@ final class CashierV3OrderLifecycleServices
         if (!$amountOverrides) {
             $columns = $table === 'cashier_v3_sale_fact'
                 ? ['original_amount_cents', 'discount_amount_cents', 'coupon_discount_cents', 'sale_amount_cents', 'debt_amount_cents']
-                : ($table === 'cashier_v3_performance_fact' ? ['allocation_base_amount_cents', 'amount_cents'] : ['amount_cents']);
+                : ($table === 'cashier_v3_performance_fact' ? ['allocation_base_amount_cents', 'amount_cents', 'labor_fee_amount_cents'] : ['amount_cents']);
             foreach ($columns as $column) $row[$column] = -(int)($source[$column] ?? 0);
         }
         foreach ($amountOverrides as $column => $amount) $row[$column] = (int)$amount;
