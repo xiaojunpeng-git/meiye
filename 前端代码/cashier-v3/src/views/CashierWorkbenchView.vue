@@ -2307,6 +2307,7 @@ async function queryPersonnelCandidates(scope, line, keyword = '') {
         scope,
         lineId: line.id,
         lineRole: cartLineRole(line),
+        projectId: line.projectId || line.catalogProductId || line.productId || line.catalog_product_id || '',
         memberId: line.memberId || currentMemberId.value || '',
         entitlementInstanceId: line.entitlementInstanceId || line.cardHolderId || '',
         entitlementSourceDetailId: line.entitlementSourceDetailId || line.memberBenefitPoolId || ''
@@ -2592,7 +2593,9 @@ async function confirmPersonnelAssignment(result = {}) {
     const craftsmen = (result.craftsmen || []).map((record) => ({
       staffId: record.staffId || record.id,
       laborWeight: Number(record.laborWeight),
-      isPointCustomer: Boolean(record.isPointCustomer ?? record.marked)
+      isPointCustomer: Boolean(record.isPointCustomer ?? record.marked),
+      craftsmanPerformanceType: record.craftsmanPerformanceType || record.craftsman_performance_type,
+      laborFeeCents: Number(record.laborFeeCents ?? record.labor_fee_cents ?? 0)
     }))
     const salespeople = (result.salespeople || []).map((record) => ({
       staffId: record.staffId || record.id,
@@ -2601,7 +2604,8 @@ async function confirmPersonnelAssignment(result = {}) {
     const guideSelections = (result.guideSelections || []).map((record) => ({
       staffId: record.staffId || record.id,
       employeeId: record.employeeId || record.staffId || record.id,
-      name: record.name
+      name: record.name,
+      guideRoundNo: Number(record.guideRoundNo ?? record.guide_round_no ?? 0)
     }))
     const salesManagerSelections = (result.salesManagerSelections || []).map((record) => ({
       staffId: record.staffId || record.id,
@@ -2663,7 +2667,9 @@ async function applyPersonnelAssignmentToAll(result = {}) {
   const craftsmen = (result.craftsmen || []).map((record) => ({
     staffId: record.staffId || record.id,
     laborWeight: Number(record.laborWeight),
-    isPointCustomer: Boolean(record.isPointCustomer ?? record.marked)
+    isPointCustomer: Boolean(record.isPointCustomer ?? record.marked),
+    craftsmanPerformanceType: record.craftsmanPerformanceType || record.craftsman_performance_type,
+    laborFeeCents: Number(record.laborFeeCents ?? record.labor_fee_cents ?? 0)
   }))
   const salespeople = (result.salespeople || []).map((record) => ({
     staffId: record.staffId || record.id,
@@ -2672,7 +2678,8 @@ async function applyPersonnelAssignmentToAll(result = {}) {
   const guideSelections = (result.guideSelections || []).map((record) => ({
     staffId: record.staffId || record.id,
     employeeId: record.employeeId || record.staffId || record.id,
-    name: record.name
+    name: record.name,
+    guideRoundNo: Number(record.guideRoundNo ?? record.guide_round_no ?? 0)
   }))
   const salesManagerSelections = (result.salesManagerSelections || []).map((record) => ({
     staffId: record.staffId || record.id,

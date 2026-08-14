@@ -2,6 +2,8 @@
 
 namespace app\services\cashier\v3\cashier;
 
+use app\services\employee\EmployeeCraftsmanPerformanceTypeServices;
+
 use app\services\cashier\v3\CashierV3CommandException;
 use app\services\cashier\v3\CashierV3OperatorScope;
 use app\services\cashier\v3\CashierV3CheckoutWorkspaceIdentity;
@@ -480,13 +482,15 @@ final class CashierV3CashierWorkspaceServices
             }
             $craftsmen = $this->authoritativeCraftsmenInTx(
                 array_values($settings['craftsmen']),
-                $operatorScope
+                $operatorScope,
+                $this->laborProjectIdFromLine($line)
             );
         } else {
             // partial 更新也重验已保存人员，避免手艺人离职后通过切换其它字段继续保留。
             $craftsmen = $this->authoritativeCraftsmenInTx(
                 $this->craftsmanSelectionsFromSnapshot($craftsmen, $lineKey),
-                $operatorScope
+                $operatorScope,
+                $this->laborProjectIdFromLine($line)
             );
         }
 
@@ -526,7 +530,12 @@ final class CashierV3CashierWorkspaceServices
             if (!is_array($settings['guideSelections'])) {
                 throw $this->incompleteLineSettings($lineKey, 'guide_selections_invalid');
             }
-            $guides = $this->authoritativeGuideSelectionsInTx($settings['guideSelections'], $operatorScope);
+            $guides = $this->authoritativeGuideSelectionsInTx(
+                $settings['guideSelections'],
+                $operatorScope,
+                (int)($draft['member_id'] ?? 0),
+                trim((string)($draft['supplement_business_date'] ?? '')) ?: date('Y-m-d')
+            );
         }
         $salesManagers = $this->decodeStoredSalesManagerSelections($line, $lineKey);
         if ($hasSalesManagers) {
@@ -588,21 +597,59 @@ final class CashierV3CashierWorkspaceServices
         return array_values($decoded);
     }
 
-    private function authoritativeGuideSelectionsInTx(array $guides, CashierV3OperatorScope $operatorScope): array
+    private function authoritativeGuideSelectionsInTx(array $guides, CashierV3OperatorScope $operatorScope, int $memberId = 0, string $businessDate = ''): array
     {
         $ids = [];
+        $rounds = [];
         foreach ($guides as $guide) {
             $id = (int)($guide['employeeId'] ?? $guide['employee_id'] ?? $guide['id'] ?? 0);
             if ($id <= 0 || isset($ids[$id])) throw $this->incompleteLineSettings('', 'guide_selection_invalid');
+            $roundNo = (int)($guide['guideRoundNo'] ?? $guide['guide_round_no'] ?? 0);
+            if ($roundNo < 1 || $roundNo > 3) throw $this->incompleteLineSettings('', 'guide_round_required');
             $ids[$id] = true;
+            $rounds[$roundNo] = true;
         }
         if (!$ids) return [];
+        if (count($rounds) !== 1) throw $this->incompleteLineSettings('', 'guide_round_conflict');
+        $this->assertGuideRoundDateInTx($rounds, $memberId, $businessDate, $operatorScope->tenantId());
         $this->assertAttributionEmployeesInScope(array_keys($ids), $operatorScope, 'guide_employee_out_of_scope');
         $rows = Db::name('employee')->whereIn('id', array_keys($ids))->where('status', 1)->where('is_del', 0)->lock(true)->select()->toArray();
         if (count($rows) !== count($ids)) throw $this->incompleteLineSettings('', 'guide_employee_not_active');
         $result = [];
-        foreach ($rows as $row) $result[] = ['employeeId' => (int)$row['id'], 'name' => (string)$row['name']];
+        $roundNo = (int)array_key_first($rounds);
+        foreach ($rows as $row) $result[] = ['employeeId' => (int)$row['id'], 'name' => (string)$row['name'], 'guideRoundNo' => $roundNo];
         return $result;
+    }
+
+    private function assertGuideRoundDateInTx(array $rounds, int $memberId, string $businessDate, string $tenantId): void
+    {
+        if ($memberId <= 0 || !preg_match('/^\d{4}-\d{2}-\d{2}$/D', $businessDate)) return;
+        $history = Db::name('cashier_v3_customer_guide_round_fact')
+            ->where('tenant_id', $tenantId)
+            ->where('member_id', $memberId)
+            ->where('status', 'effective')
+            ->field('guide_round_no,business_date')
+            ->select()->toArray();
+        $roundNo = (int)array_key_first($rounds);
+        $roundDates = [];
+        $dateRounds = [];
+        foreach ($history as $row) {
+            $existingRound = (int)($row['guide_round_no'] ?? 0);
+            $existingDate = (string)($row['business_date'] ?? '');
+            if ($existingRound >= 1 && $existingRound <= 3 && $existingDate !== '') {
+                $roundDates[$existingRound] = $existingDate;
+                $dateRounds[$existingDate] = $existingRound;
+            }
+        }
+        if (isset($roundDates[$roundNo]) && $roundDates[$roundNo] !== $businessDate) {
+            throw $this->incompleteLineSettings('', 'guide_round_date_conflict');
+        }
+        if (isset($dateRounds[$businessDate]) && $dateRounds[$businessDate] !== $roundNo) {
+            throw $this->incompleteLineSettings('', 'guide_date_round_conflict');
+        }
+        if (!isset($dateRounds[$businessDate]) && count($dateRounds) >= 3) {
+            throw $this->incompleteLineSettings('', 'guide_round_date_limit_exceeded');
+        }
     }
 
     private function authoritativeSalesManagerSelectionsInTx(array $managers, CashierV3OperatorScope $operatorScope): array
@@ -1820,7 +1867,8 @@ final class CashierV3CashierWorkspaceServices
     /** @return array<int,array> */
     private function authoritativeCraftsmenInTx(
         array $selections,
-        CashierV3OperatorScope $operatorScope
+        CashierV3OperatorScope $operatorScope,
+        int $projectId = 0
     ): array {
         CashierV3TransactionGuard::assertInTransaction('cashierWorkspaceResolveCraftsmen');
         if (!$selections) {
@@ -1837,13 +1885,20 @@ final class CashierV3CashierWorkspaceServices
 
         $seen = [];
         $weights = [];
+        $types = [];
+        $requestedFees = [];
         $pointFlags = [];
-        $weightSum = 0;
         foreach ($selections as $selection) {
             $staffId = is_array($selection) ? (int)($selection['staffId'] ?? 0) : 0;
             $weight = is_array($selection) ? (int)($selection['laborWeight'] ?? 0) : 0;
+            $requestedType = is_array($selection)
+                ? trim((string)($selection['craftsmanPerformanceType'] ?? $selection['craftsman_performance_type'] ?? ''))
+                : '';
+            $normalizedType = in_array($requestedType, EmployeeCraftsmanPerformanceTypeServices::TYPES, true)
+                ? $requestedType
+                : EmployeeCraftsmanPerformanceTypeServices::COMMISSION_LABOR;
             $duplicate = $staffId > 0 && isset($seen[$staffId]);
-            if ($staffId <= 0 || $weight <= 0 || $weight > 100 || $duplicate) {
+            if ($staffId <= 0 || $weight < 0 || $weight > 100 || $duplicate) {
                 throw new CashierV3CommandException(
                     CashierV3ResultCode::ENTITLEMENT_LINE_INVALID,
                     '所选手艺人无效，请重新选择。',
@@ -1853,10 +1908,19 @@ final class CashierV3CashierWorkspaceServices
             }
             $seen[$staffId] = true;
             $weights[$staffId] = $weight;
+            $types[$staffId] = $normalizedType;
+            $requestedFees[$staffId] = max(0, (int)($selection['laborFeeCents'] ?? $selection['labor_fee_cents'] ?? 0));
             $pointFlags[$staffId] = is_array($selection) && !empty($selection['isPointCustomer']);
-            $weightSum += $weight;
         }
-        if ($weightSum !== 100) {
+        // Labor-only craftsmen do not participate in the commission ratio.
+        // For mixed selections, only commission-capable rows must total 100.
+        $commissionWeight = 0;
+        foreach ($weights as $staffId => $weight) {
+            if ($types[$staffId] !== EmployeeCraftsmanPerformanceTypeServices::LABOR) {
+                $commissionWeight += $weight;
+            }
+        }
+        if ($commissionWeight > 0 && $commissionWeight !== 100) {
             throw new CashierV3CommandException(
                 CashierV3ResultCode::ENTITLEMENT_LINE_INVALID,
                 '手艺人分配比例合计必须为 100%。',
@@ -1877,7 +1941,7 @@ final class CashierV3CashierWorkspaceServices
             ->where('ss.cashier_craftsman_enabled', 1)
             ->where('e.status', 1)
             ->where('e.is_del', 0)
-            ->field('ss.id,ss.employee_id,ss.store_id,ss.staff_name,ss.cashier_craftsman_enabled,e.name as employee_name')
+            ->field('ss.id,ss.employee_id,ss.store_id,ss.staff_name,ss.cashier_craftsman_enabled,ss.craftsman_performance_type,e.name as employee_name')
             ->order('ss.id asc')
             ->lock(true)
             ->select();
@@ -1898,6 +1962,8 @@ final class CashierV3CashierWorkspaceServices
         }
 
         $craftsmen = [];
+        $defaultLaborFeeCents = $projectId > 0 ? $this->projectLaborDefaultCents($projectId) : 0;
+        $authoritativeCommissionWeight = 0;
         foreach ($selections as $index => $selection) {
             $staffId = (int)$selection['staffId'];
             $row = $byId[$staffId] ?? null;
@@ -1913,6 +1979,23 @@ final class CashierV3CashierWorkspaceServices
                     ['staff_id' => $staffId, 'reason' => 'craftsman_profile_incomplete']
                 );
             }
+            $type = trim((string)($row['craftsman_performance_type'] ?? ''));
+            if (!in_array($type, EmployeeCraftsmanPerformanceTypeServices::TYPES, true)) {
+                $type = $types[$staffId] ?? EmployeeCraftsmanPerformanceTypeServices::COMMISSION_LABOR;
+            }
+            $effectiveWeight = $type === EmployeeCraftsmanPerformanceTypeServices::LABOR ? 0 : $weights[$staffId];
+            if ($effectiveWeight <= 0 && $type !== EmployeeCraftsmanPerformanceTypeServices::LABOR) {
+                throw new CashierV3CommandException(
+                    CashierV3ResultCode::ENTITLEMENT_LINE_INVALID,
+                    '业绩提成类型的手艺人比例必须为正整数。',
+                    CashierV3ResultCode::STATUS_FAILED,
+                    ['reason' => 'craftsman_weight_invalid']
+                );
+            }
+            $authoritativeCommissionWeight += $effectiveWeight;
+            $laborFeeCents = $type === EmployeeCraftsmanPerformanceTypeServices::COMMISSION
+                ? 0
+                : ($requestedFees[$staffId] > 0 ? $requestedFees[$staffId] : $defaultLaborFeeCents);
             $craftsmen[] = [
                 'id' => $staffId,
                 'staffId' => $staffId,
@@ -1921,9 +2004,19 @@ final class CashierV3CashierWorkspaceServices
                 'name' => $name,
                 'isPrimary' => $index === 0,
                 'sequence' => $index + 1,
-                'laborWeight' => $weights[$staffId],
+                'laborWeight' => $effectiveWeight,
+                'craftsmanPerformanceType' => $type,
+                'laborFeeCents' => $laborFeeCents,
                 'isPointCustomer' => $pointFlags[$staffId],
             ];
+        }
+        if ($authoritativeCommissionWeight > 0 && $authoritativeCommissionWeight !== 100) {
+            throw new CashierV3CommandException(
+                CashierV3ResultCode::ENTITLEMENT_LINE_INVALID,
+                '手艺人业绩比例合计必须为 100%。',
+                CashierV3ResultCode::STATUS_FAILED,
+                ['reason' => 'craftsman_weight_sum_invalid']
+            );
         }
         return $craftsmen;
     }
@@ -2054,7 +2147,11 @@ final class CashierV3CashierWorkspaceServices
             $seen[$staffId] = true;
             $hasWeight = array_key_exists('laborWeight', $craftsman);
             $weight = $hasWeight ? (int)$craftsman['laborWeight'] : 0;
-            if ($hasWeight && ($weight <= 0 || $weight > 100)) {
+            $type = trim((string)($craftsman['craftsmanPerformanceType'] ?? $craftsman['craftsman_performance_type'] ?? ''));
+            if (!in_array($type, EmployeeCraftsmanPerformanceTypeServices::TYPES, true)) {
+                $type = EmployeeCraftsmanPerformanceTypeServices::COMMISSION_LABOR;
+            }
+            if ($hasWeight && (($type !== EmployeeCraftsmanPerformanceTypeServices::LABOR && $weight <= 0) || $weight > 100 || $weight < 0)) {
                 throw $this->incompleteLineSettings($lineKey, 'stored_craftsman_weight_invalid');
             }
             $needsLegacyEqualWeights = $needsLegacyEqualWeights || !$hasWeight;
@@ -2062,6 +2159,8 @@ final class CashierV3CashierWorkspaceServices
                 'staffId' => $staffId,
                 'laborWeight' => $weight,
                 'isPointCustomer' => !empty($craftsman['isPointCustomer']),
+                'craftsmanPerformanceType' => $type,
+                'laborFeeCents' => max(0, (int)($craftsman['laborFeeCents'] ?? $craftsman['labor_fee_cents'] ?? 0)),
             ];
         }
         if ($needsLegacyEqualWeights && $selections) {
@@ -2078,7 +2177,14 @@ final class CashierV3CashierWorkspaceServices
             }
             unset($selection);
         }
-        if ($selections && array_sum(array_column($selections, 'laborWeight')) !== 100) {
+        $commissionWeight = 0;
+        foreach ($selections as $selection) {
+            if (($selection['craftsmanPerformanceType'] ?? EmployeeCraftsmanPerformanceTypeServices::COMMISSION_LABOR)
+                !== EmployeeCraftsmanPerformanceTypeServices::LABOR) {
+                $commissionWeight += (int)$selection['laborWeight'];
+            }
+        }
+        if ($selections && $commissionWeight !== 100 && $commissionWeight !== 0) {
             throw $this->incompleteLineSettings($lineKey, 'stored_craftsman_weight_sum_invalid');
         }
         return $selections;
@@ -2542,7 +2648,11 @@ final class CashierV3CashierWorkspaceServices
             $manualLaborFeeCents = $row['manual_labor_fee_cents'] === null
                 ? null
                 : $this->storedNonnegativeInteger($row['manual_labor_fee_cents'], $lineKey, 'manual_labor_fee_cents');
-            $laborDefaultFeeCents = $this->projectLaborDefaultCents((int)($row['project_id'] ?? 0));
+            // 项目固定手工费属于当前租户的项目配置。工作台行同时保留
+            // catalog_product_id 作为旧快照兜底，避免历史行只保存产品 ID
+            // 时把固定手工费误读成 0。
+            $projectIdForLabor = $this->laborProjectIdFromLine($row);
+            $laborDefaultFeeCents = $this->projectLaborDefaultCents($projectIdForLabor);
             // 损坏的手艺人快照不能被静默显示为“待分配”。
             $this->craftsmanIdsFromSnapshot($craftsmen, $lineKey);
             $storedServiceObject = (string)($row['service_object'] ?? '');
@@ -3151,10 +3261,42 @@ final class CashierV3CashierWorkspaceServices
     private function projectLaborDefaultCents(int $projectId): int
     {
         if ($projectId <= 0) return 0;
-        return (int)(Db::name('cashier_v3_project_performance_rule')
+        $ruleQuery = Db::name('cashier_v3_project_performance_rule')
+            ->where('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
             ->where('project_id', $projectId)
+            ->order('id', 'desc');
+        $rule = $ruleQuery->find();
+        if (is_array($rule) && array_key_exists('labor_configured_unit_amount_cents', $rule)) {
+            return max(0, (int)$rule['labor_configured_unit_amount_cents']);
+        }
+        // 门店商品是平台项目的复制行（type=1，pid=平台项目ID）。项目业绩规则
+        // 只归属于平台主项目，不能按门店复制行 ID 查，否则固定手工费会变成 0。
+        $masterId = (int)(Db::name('store_product')
+            ->where('id', $projectId)
+            ->where('type', 1)
+            ->where('product_type', 6)
+            ->value('pid') ?: 0);
+        if ($masterId <= 0 || $masterId === $projectId) return 0;
+        $masterRule = Db::name('cashier_v3_project_performance_rule')
+            ->where('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
+            ->where('project_id', $masterId)
             ->order('id', 'desc')
-            ->value('labor_configured_unit_amount_cents') ?: 0);
+            ->find();
+        return is_array($masterRule) && array_key_exists('labor_configured_unit_amount_cents', $masterRule)
+            ? max(0, (int)$masterRule['labor_configured_unit_amount_cents'])
+            : 0;
+    }
+
+    private function laborProjectIdFromLine(array $line): int
+    {
+        $projectId = (int)($line['project_id'] ?? $line['projectId'] ?? 0);
+        // 项目销售行的权威项目就是目录商品本身。优先使用 catalog_product_id，
+        // 兼容旧购物车快照 project_id 缺失或被旧流程写成 0 的情况。
+        if ((int)($line['catalog_product_type'] ?? -1) === 6
+            && (int)($line['catalog_product_id'] ?? 0) > 0) {
+            return (int)$line['catalog_product_id'];
+        }
+        return $projectId;
     }
 
     private function manualLaborFeeCents($value, string $lineKey): ?int

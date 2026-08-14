@@ -37,31 +37,21 @@ final class CashierV3GuideRoundFactServices
 
         $tenant = (string)$authority['tenant_id'];
         $memberId = (int)$authority['member_id'];
+        $normalized = $this->normalizeSelections($selectionsByLine);
+        $rounds = [];
+        foreach ($normalized as $rows) foreach ($rows as $row) $rounds[(int)$row['guideRoundNo']] = true;
+        if (count($rounds) !== 1) throw $this->invalid('guide_round_conflict');
+        $roundNo = (int)array_key_first($rounds);
         $existing = Db::name(self::TABLE)->where('tenant_id', $tenant)->where('member_id', $memberId)
             ->where('status', 'effective')->lock(true)->select()->toArray();
-        $orderRounds = [];
-        $maxRound = 0;
         foreach ($existing as $row) {
             $round = (int)$row['guide_round_no'];
             if ($round < 1 || $round > 3) throw $this->invalid('guide_round_history_invalid');
-            $orderId = (string)$row['order_id'];
-            if (isset($orderRounds[$orderId]) && $orderRounds[$orderId] !== $round) {
+            if ((string)$row['order_id'] === (string)$authority['order_id'] && $round !== $roundNo) {
                 throw $this->invalid('guide_round_order_conflict');
             }
-            $orderRounds[$orderId] = $round;
-            $maxRound = max($maxRound, $round);
-        }
-        $orderId = (string)$authority['order_id'];
-        if (isset($orderRounds[$orderId])) {
-            $roundNo = (int)$orderRounds[$orderId];
-        } else {
-            $next = $maxRound + 1;
-            if ($next > 3) throw $this->invalid('guide_round_limit_exceeded');
-            $roundNo = $next;
         }
         $businessDate = (string)$authority['business_date'];
-
-        $normalized = $this->normalizeSelections($selectionsByLine);
         $employeeIds = [];
         foreach ($normalized as $rows) foreach ($rows as $row) $employeeIds[(int)$row['employeeId']] = true;
         $employees = $this->lockEmployees(array_keys($employeeIds));
@@ -129,7 +119,9 @@ final class CashierV3GuideRoundFactServices
             foreach ($rows as $row) {
                 $employeeId = is_array($row) ? (int)($row['employeeId'] ?? $row['employee_id'] ?? 0) : 0;
                 if ($employeeId <= 0 || isset($seen[$employeeId])) throw $this->invalid('guide_selection_duplicate_or_invalid');
-                $seen[$employeeId] = true; $result[$line][] = ['employeeId' => $employeeId];
+                $roundNo = is_array($row) ? (int)($row['guideRoundNo'] ?? $row['guide_round_no'] ?? 0) : 0;
+                if ($roundNo < 1 || $roundNo > 3) throw $this->invalid('guide_round_required');
+                $seen[$employeeId] = true; $result[$line][] = ['employeeId' => $employeeId, 'guideRoundNo' => $roundNo];
             }
         }
         return $result;

@@ -4533,6 +4533,28 @@ button:disabled {
   align-self: flex-start;
 }
 
+.personnel-guide-round {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.personnel-guide-round label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+}
+
+.personnel-guide-round legend {
+  align-self: flex-start;
+  white-space: nowrap;
+}
+
 .personnel-attribution-search-overlay {
   position: absolute;
   inset: 0;
@@ -4641,6 +4663,15 @@ button:disabled {
   grid-template-columns: 1.2fr 1fr 1fr 1fr 1fr .8fr;
 }
 
+.personnel-full-table--craftsmen {
+  min-width: 900px;
+}
+
+.personnel-full-table--craftsmen .personnel-full-table__head,
+.personnel-full-table--craftsmen .personnel-full-table__row {
+  grid-template-columns: 1.2fr .95fr .75fr 1.1fr .9fr .9fr .9fr .65fr;
+}
+
 .personnel-full-table__head > *,
 .personnel-full-table__row > * {
   display: flex;
@@ -4665,6 +4696,20 @@ button:disabled {
   border: 1px solid #cfd8e3;
   border-radius: 5px;
   text-align: center;
+}
+
+.personnel-allocation-input--labor {
+  gap: 3px;
+}
+
+.personnel-allocation-input--labor input[type="number"] {
+  width: 58px;
+  min-height: 32px;
+}
+
+.personnel-allocation-input--labor b {
+  white-space: nowrap;
+  font-size: 12px;
 }
 
 .personnel-allocation-input {

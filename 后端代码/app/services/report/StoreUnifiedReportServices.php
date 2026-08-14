@@ -210,10 +210,12 @@ class StoreUnifiedReportServices extends BaseServices
         if ((int)($input['salesperson_id'] ?? 0) > 0) $query->where('employee_id',(int)$input['salesperson_id']);
         $raw = $query->fieldRaw("store_id,MAX(store_name_snapshot) AS store_name,MAX(employee_name_snapshot) AS employee_name,employee_id,DAY(business_date) AS day_no,SUM(amount_cents) AS amount_cents")->group('store_id,employee_id,day_no')->order('employee_name','asc')->select()->toArray();
         $by=[];
-        foreach($raw as $row){$key=(int)$row['store_id'].'|'.(int)$row['employee_id'];if(!isset($by[$key]))$by[$key]=['store_name'=>(string)$row['store_name'],'employee_name'=>(string)$row['employee_name'],'employee_id'=>(int)$row['employee_id']];$day=(int)$row['day_no'];$by[$key]['day_'.$day.'_consume']=$this->money((int)$row['amount_cents']);$by[$key]['total_consume_cents']=(int)($by[$key]['total_consume_cents']??0)+(int)$row['amount_cents'];}
-        $columns=[['key'=>'employee_name','label'=>'销售人']]; foreach(range(1,31) as $day){$columns[]=['key'=>'day_'.$day.'_consume','label'=>$day.'日消耗','group_label'=>$day.'日'];$columns[]=['key'=>'day_'.$day.'_labor','label'=>$day.'日手工','group_label'=>$day.'日'];} $columns[]=['key'=>'total_consume','label'=>'合计消耗'];$columns[]=['key'=>'total_labor','label'=>'合计手工'];
-        foreach($by as &$row){$row['total_consume']=$this->money((int)($row['total_consume_cents']??0));$row['total_labor']='0';} unset($row);
-        return ['title'=>'门店销售人消耗','columns'=>$columns,'column_groups'=>$this->columnGroups($columns),'records'=>array_values($by),'total'=>count($by),'page'=>1,'page_size'=>count($by)];
+        foreach($raw as $row){$key=(int)$row['store_id'].'|'.(int)$row['employee_id'];if(!isset($by[$key]))$by[$key]=['store_name'=>(string)$row['store_name'],'employee_name'=>(string)$row['employee_name'],'employee_id'=>(int)$row['employee_id']];$day=(int)$row['day_no'];$by[$key]['day_'.$day.'_performance']=$this->money((int)$row['amount_cents']);$by[$key]['total_performance_cents']=(int)($by[$key]['total_performance_cents']??0)+(int)$row['amount_cents'];}
+        // 销售人只产生销售业绩事实，不产生手艺人手工费；日期直接作为列名展示，
+        // 不再返回二级日期分组表头或无意义的手工列。
+        $columns=[['key'=>'employee_name','label'=>'销售人']]; foreach(range(1,31) as $day){$columns[]=['key'=>'day_'.$day.'_performance','label'=>$day.'日业绩'];} $columns[]=['key'=>'total_performance','label'=>'合计业绩'];
+        foreach($by as &$row){$row['total_performance']=$this->money((int)($row['total_performance_cents']??0));} unset($row);
+        return ['title'=>'门店销售人业绩','columns'=>$columns,'records'=>array_values($by),'total'=>count($by),'page'=>1,'page_size'=>count($by)];
     }
 
     private function marketPerformance($storeId, array $range, array $input): array

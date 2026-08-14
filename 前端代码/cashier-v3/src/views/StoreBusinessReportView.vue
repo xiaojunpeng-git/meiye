@@ -397,13 +397,6 @@ onMounted(async () => {
 
     <p v-if="errorMessage" class="store-business-report__error" role="alert">{{ errorMessage }}</p>
 
-    <section class="store-business-report__meta" aria-label="报表数据状态">
-      <span>覆盖起始日：{{ result.coverage_start || COVERAGE_START }}</span>
-      <span>数据更新至：{{ result.data_as_of || '-' }}</span>
-      <span>口径版本：{{ result.metric_version || 'store-unified-report-v1' }}</span>
-      <span :class="result.aggregation_caught_up === false ? 'is-pending' : 'is-ready'">聚合：{{ result.aggregation_caught_up === false ? '追赶中' : '已追平' }}</span>
-    </section>
-
     <section class="store-business-report__panel store-business-report__panel--table">
       <div v-if="pendingMetrics.length" class="store-business-report__pending"><strong>口径待确认</strong><span v-for="item in pendingMetrics" :key="item">{{ item }}</span></div>
       <div class="store-business-report__table-scroll">

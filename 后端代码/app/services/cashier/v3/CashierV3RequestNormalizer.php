@@ -1,6 +1,8 @@
 <?php
 namespace app\services\cashier\v3;
 
+use app\services\employee\EmployeeCraftsmanPerformanceTypeServices;
+
 /**
  * 写命令唯一请求规范化阶段。
  *
@@ -596,7 +598,9 @@ class CashierV3RequestNormalizer
                 if (!is_array($guide)) throw self::invalidCartLineSetting('guideSelections', 'guide_selection_invalid');
                 $id = (int)($guide['employeeId'] ?? $guide['employee_id'] ?? $guide['id'] ?? 0);
                 if ($id <= 0) throw self::invalidCartLineSetting('guideSelections', 'guide_selection_invalid');
-                $normalizedGuides[] = ['employeeId' => $id];
+                $roundNo = (int)($guide['guideRoundNo'] ?? $guide['guide_round_no'] ?? 0);
+                if ($roundNo < 1 || $roundNo > 3) throw self::invalidCartLineSetting('guideSelections', 'guide_round_required');
+                $normalizedGuides[] = ['employeeId' => $id, 'guideRoundNo' => $roundNo];
             }
         }
         if ($hasManagers) {
@@ -694,7 +698,7 @@ class CashierV3RequestNormalizer
                 if (!is_array($row)) {
                     throw self::invalidCartLineSetting('salespeople', 'salesperson_not_object');
                 }
-                $staffId = self::canonicalPositiveInteger(
+                $staffId = self::cartSettingPositiveInteger(
                     CashierV3AliasResolver::resolveString(
                         $row,
                         ['staffId', 'staff_id', 'id', 'systemStoreStaffId', 'system_store_staff_id'],
@@ -702,7 +706,7 @@ class CashierV3RequestNormalizer
                     ),
                     'salespersonId'
                 );
-                $weight = self::canonicalPositiveInteger(
+                $weight = self::cartSettingPositiveInteger(
                     CashierV3AliasResolver::resolveString(
                         $row,
                         ['allocationWeight', 'allocation_weight', 'weight'],
@@ -778,7 +782,7 @@ class CashierV3RequestNormalizer
             if (!is_array($row)) {
                 throw self::invalidCartLineSetting('craftsmen', 'craftsman_not_object');
             }
-            $id = self::canonicalPositiveInteger(
+            $id = self::cartSettingPositiveInteger(
                 CashierV3AliasResolver::resolveString(
                     $row,
                     ['id', 'staffId', 'staff_id', 'systemStoreStaffId', 'system_store_staff_id'],
@@ -796,18 +800,28 @@ class CashierV3RequestNormalizer
             if ($hasExplicitWeight !== null && $hasExplicitWeight !== $rowHasWeight) {
                 throw self::invalidCartLineSetting('craftsmen', 'craftsman_weight_partial');
             }
+            $performanceType = trim((string)($row['craftsmanPerformanceType'] ?? $row['craftsman_performance_type'] ?? ''));
+            if (!in_array($performanceType, EmployeeCraftsmanPerformanceTypeServices::TYPES, true)) {
+                $performanceType = EmployeeCraftsmanPerformanceTypeServices::COMMISSION_LABOR;
+            }
             $hasExplicitWeight = $rowHasWeight;
-            $weight = $rowHasWeight
-                ? self::canonicalPositiveInteger(
-                    CashierV3AliasResolver::resolveString(
-                        $row,
-                        ['laborWeight', 'labor_weight', 'allocationWeight', 'allocation_weight', 'weight'],
-                        true
-                    ),
-                    'craftsmanLaborWeight'
-                )
-                : 0;
-            if ($weight > 100) {
+            $weightRaw = '0';
+            if ($rowHasWeight) {
+                foreach (['laborWeight', 'labor_weight', 'allocationWeight', 'allocation_weight', 'weight'] as $weightKey) {
+                    if (array_key_exists($weightKey, $row)) {
+                        $weightRaw = (string)$row[$weightKey];
+                        break;
+                    }
+                }
+            }
+            if ($performanceType === EmployeeCraftsmanPerformanceTypeServices::LABOR
+                && preg_match('/^(?:0|[1-9][0-9]*)$/D', trim($weightRaw)) !== 1) {
+                throw self::invalidCartLineSetting('craftsmen', 'craftsman_weight_invalid');
+            }
+            $weight = $performanceType === EmployeeCraftsmanPerformanceTypeServices::LABOR
+                ? max(0, (int)$weightRaw)
+                : ($rowHasWeight ? self::cartSettingPositiveInteger($weightRaw, 'craftsmanLaborWeight') : 0);
+            if ($weight > 100 || ($performanceType !== EmployeeCraftsmanPerformanceTypeServices::LABOR && $weight === 0)) {
                 throw self::invalidCartLineSetting('craftsmen', 'craftsman_weight_invalid');
             }
             $pointCustomer = false;
@@ -822,12 +836,23 @@ class CashierV3RequestNormalizer
                 'staffId' => $id,
                 'laborWeight' => $weight,
                 'isPointCustomer' => $pointCustomer,
+                'craftsmanPerformanceType' => $performanceType,
+                'laborFeeCents' => self::canonicalNonNegativeInteger(
+                    $row['laborFeeCents'] ?? $row['labor_fee_cents'] ?? 0,
+                    'craftsmanLaborFeeCents'
+                ),
             ];
         }
         if (!$assignments) {
             return [];
         }
-        if ($hasExplicitWeight && $weightSum !== 100) {
+        $commissionWeight = 0;
+        foreach ($assignments as $assignment) {
+            if (($assignment['craftsmanPerformanceType'] ?? '') !== EmployeeCraftsmanPerformanceTypeServices::LABOR) {
+                $commissionWeight += (int)$assignment['laborWeight'];
+            }
+        }
+        if ($hasExplicitWeight && (($commissionWeight > 0 && $commissionWeight !== 100) || ($commissionWeight === 0 && $weightSum !== 0))) {
             throw self::invalidCartLineSetting('craftsmen', 'craftsman_weight_sum_invalid');
         }
         if (!$hasExplicitWeight) {
@@ -848,7 +873,7 @@ class CashierV3RequestNormalizer
         $assignments = [];
         $seen = [];
         foreach ($rows as $row) {
-            $id = self::canonicalPositiveInteger($row, 'craftsmanId');
+            $id = self::cartSettingPositiveInteger($row, 'craftsmanId');
             if (isset($seen[$id])) {
                 throw self::invalidCartLineSetting('craftsmanIds', 'duplicate_craftsman');
             }
@@ -857,6 +882,8 @@ class CashierV3RequestNormalizer
                 'staffId' => $id,
                 'laborWeight' => 0,
                 'isPointCustomer' => false,
+                'craftsmanPerformanceType' => EmployeeCraftsmanPerformanceTypeServices::COMMISSION_LABOR,
+                'laborFeeCents' => 0,
             ];
         }
         self::assignEqualLaborWeights($assignments);
@@ -868,13 +895,22 @@ class CashierV3RequestNormalizer
         if (!$assignments) {
             return;
         }
-        $base = intdiv(100, count($assignments));
-        $remaining = 100 - ($base * count($assignments));
-        foreach ($assignments as &$assignment) {
-            $assignment['laborWeight'] = $base + ($remaining > 0 ? 1 : 0);
+        $commissionIndexes = [];
+        foreach ($assignments as $index => $assignment) {
+            if (($assignment['craftsmanPerformanceType'] ?? EmployeeCraftsmanPerformanceTypeServices::COMMISSION_LABOR)
+                !== EmployeeCraftsmanPerformanceTypeServices::LABOR) {
+                $commissionIndexes[] = $index;
+            } else {
+                $assignments[$index]['laborWeight'] = 0;
+            }
+        }
+        if (!$commissionIndexes) return;
+        $base = intdiv(100, count($commissionIndexes));
+        $remaining = 100 - ($base * count($commissionIndexes));
+        foreach ($commissionIndexes as $index) {
+            $assignments[$index]['laborWeight'] = $base + ($remaining > 0 ? 1 : 0);
             $remaining = max(0, $remaining - 1);
         }
-        unset($assignment);
     }
 
     private static function resolveBooleanAliases(array $payload, array $keys): bool
@@ -972,6 +1008,40 @@ class CashierV3RequestNormalizer
             );
         }
         return $normalized;
+    }
+
+    /**
+     * IDs and allocation weights in an ordinary cart service-settings command
+     * are not entitlement/card-detail identities. Keep the strict integer
+     * validation, but return the cart-settings error envelope so a normal
+     * project cannot be reported as an invalid card item.
+     */
+    private static function cartSettingPositiveInteger($value, string $field, int $maximum = 0): int
+    {
+        if (is_bool($value) || is_array($value) || $value === null || is_float($value)) {
+            throw self::invalidCartLineSetting($field, 'positive_integer_invalid');
+        }
+        $raw = trim((string)$value);
+        if (preg_match('/^[1-9][0-9]*$/', $raw) !== 1 || (string)(int)$raw !== $raw) {
+            throw self::invalidCartLineSetting($field, 'positive_integer_invalid');
+        }
+        $normalized = (int)$raw;
+        if ($normalized <= 0 || ($maximum > 0 && $normalized > $maximum)) {
+            throw self::invalidCartLineSetting($field, 'positive_integer_invalid');
+        }
+        return $normalized;
+    }
+
+    private static function canonicalNonNegativeInteger($value, string $field): int
+    {
+        if (is_bool($value) || is_array($value) || $value === null || is_float($value)) {
+            throw self::invalidCartLineSetting('craftsmen', 'craftsman_labor_fee_invalid');
+        }
+        $raw = trim((string)$value);
+        if (preg_match('/^(?:0|[1-9][0-9]*)$/D', $raw) !== 1 || (string)(int)$raw !== $raw) {
+            throw self::invalidCartLineSetting('craftsmen', 'craftsman_labor_fee_invalid');
+        }
+        return (int)$raw;
     }
 
     private static function invalidEntitlementLine(int $index, string $reason): CashierV3CommandException

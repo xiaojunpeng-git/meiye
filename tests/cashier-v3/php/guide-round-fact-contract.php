@@ -11,6 +11,7 @@ $root = dirname(__DIR__, 3);
 $migration = (string)file_get_contents($root . '/后端代码/database/upgrades/2026-08-13-收银V3导购轮次事实/02-正式升级.sql');
 $service = (string)file_get_contents($root . '/后端代码/app/services/cashier/v3/report/CashierV3GuideRoundFactServices.php');
 $submission = (string)file_get_contents($root . '/后端代码/app/services/cashier/v3/settlement/CashierV3SaleOnlyCheckoutSubmissionServices.php');
+$workspace = (string)file_get_contents($root . '/后端代码/app/services/cashier/v3/cashier/CashierV3CashierWorkspaceServices.php');
 $workspaceMigration = (string)file_get_contents($root . '/后端代码/database/upgrades/2026-08-13-收银V3导购轮次事实/05-工作台导购选择快照.sql');
 
 $checks = [
@@ -22,11 +23,11 @@ $checks = [
         && strpos($migration, 'business_date') !== false
         && strpos($migration, 'order_no_snapshot') !== false,
     'round number is bounded to three' => strpos($service, 'guide_round_no') !== false
-        && strpos($service, '$next > 3') !== false
-        && strpos($service, 'guide_round_limit_exceeded') !== false,
-    'same formal order reuses its round and new orders advance' => strpos($service, 'isset($orderRounds[$orderId])') !== false
-        && strpos($service, '$roundNo = (int)$orderRounds[$orderId]') !== false
-        && strpos($service, '$maxRound + 1') !== false,
+        && strpos($service, 'guide_round_required') !== false
+        && strpos($service, '$roundNo < 1 || $roundNo > 3') !== false,
+    'round is explicitly selected and an order cannot mix rounds' => strpos($service, 'guideRoundNo') !== false
+        && strpos($service, 'guide_round_conflict') !== false
+        && strpos($service, 'guide_round_order_conflict') !== false,
     'each round allows multiple guides without amount allocation' => strpos($service, 'foreach ($rows as $row)') !== false
         && strpos($service, 'guide_employee_id') !== false
         && strpos($service, 'allocationWeight') === false
@@ -44,6 +45,9 @@ $checks = [
         && strpos($submission, 'preparationToken') !== false,
     'workspace stores server locked guide selections' => strpos($workspaceMigration, 'guide_selections_json') !== false
         && strpos($submission, 'lockedGuideSelectionsByCheckoutLine') !== false,
+    'guide save binds each selected round to one of at most three dates' => strpos($workspace, 'assertGuideRoundDateInTx') !== false
+        && strpos($workspace, 'guide_round_date_limit_exceeded') !== false
+        && strpos($workspace, 'guide_round_date_conflict') !== false,
 ];
 $failed = [];
 foreach ($checks as $name => $passed) {

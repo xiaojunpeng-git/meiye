@@ -53,22 +53,39 @@ const craftsmen = ref([])
 const salespeople = ref([])
 const guides = ref([])
 const salesManagers = ref([])
+const guideRoundNo = ref('')
 const attributionSearchOpen = ref(false)
-const laborManualFee = ref(props.laborManualFee === null || props.laborManualFee === undefined
-  ? Number(props.laborDefaultFee || 0)
-  : Number(props.laborManualFee))
-const laborFeeDirty = ref(false)
 const validationMessage = ref('')
+const PERFORMANCE_TYPES = {
+  COMMISSION: 'commission',
+  LABOR: 'labor',
+  COMMISSION_LABOR: 'commission_labor'
+}
 
-watch(
-  () => [props.laborManualFee, props.laborDefaultFee], ([manual, fallback]) => {
-    if (laborFeeDirty.value) return
-    laborManualFee.value = manual === null || manual === undefined
-      ? Number(fallback || 0)
-      : Number(manual)
-  },
-  { immediate: true }
-)
+function craftsmanType(item = {}) {
+  const type = String(item.craftsmanPerformanceType || item.craftsman_performance_type || '')
+  return Object.values(PERFORMANCE_TYPES).includes(type) ? type : PERFORMANCE_TYPES.COMMISSION
+}
+
+function performanceTypeLabel(item = {}) {
+  const type = craftsmanType(item)
+  return type === PERFORMANCE_TYPES.COMMISSION ? '消耗业绩'
+    : type === PERFORMANCE_TYPES.LABOR ? '手工费'
+      : '消耗业绩+手工费'
+}
+
+function defaultLaborFeeCents() {
+  return Math.max(0, Number(props.laborDefaultFee || 0) * 100)
+}
+
+function laborFeeCentsFor(item = {}) {
+  if (craftsmanType(item) === PERFORMANCE_TYPES.COMMISSION) return 0
+  const saved = Number(item.laborFeeCents ?? item.labor_fee_cents ?? 0)
+  const candidateDefault = Number(item.laborDefaultFeeCents ?? item.labor_default_fee_cents ?? 0)
+  return saved > 0
+    ? saved
+    : (candidateDefault > 0 ? candidateDefault : defaultLaborFeeCents())
+}
 
 function recordId(record = {}) {
   return String(record.staffId || record.id || record.systemStoreStaffId || '')
@@ -79,7 +96,7 @@ function recordName(record = {}) {
 }
 
 function equalWeights(records) {
-  const selected = records.filter((record) => record.selected)
+  const selected = records.filter((record) => record.selected && craftsmanType(record) !== PERFORMANCE_TYPES.LABOR)
   if (!selected.length) return
   const base = Math.floor(100 / selected.length)
   let remainder = 100 - base * selected.length
@@ -112,6 +129,9 @@ function mergeCandidates(candidates, selected, role) {
       selected: Boolean(saved),
       marked: Boolean(saved?.marked ?? saved?.isPreSale ?? saved?.isPointCustomer),
       performance: Number(saved?.allocationWeight ?? saved?.laborWeight ?? saved?.performance ?? 0),
+      craftsmanPerformanceType: craftsmanType(saved || candidate),
+      laborFeeCents: laborFeeCentsFor({ ...candidate, ...(saved || {}) }),
+      laborFeeYuan: laborFeeCentsFor({ ...candidate, ...(saved || {}) }) / 100,
       role
     })
   }
@@ -129,6 +149,9 @@ function mergeCandidates(candidates, selected, role) {
       selected: true,
       marked: Boolean(saved.marked ?? saved.isPreSale ?? saved.isPointCustomer),
       performance: Number(saved.allocationWeight ?? saved.laborWeight ?? saved.performance ?? 0),
+      craftsmanPerformanceType: craftsmanType(saved),
+      laborFeeCents: laborFeeCentsFor(saved),
+      laborFeeYuan: laborFeeCentsFor(saved) / 100,
       role
     })
   }
@@ -158,6 +181,16 @@ watch(
 watch(
   () => [props.guideCandidates, props.selectedGuides],
   ([candidates, selected]) => { guides.value = mergeWithLocalSelections(candidates, selected, guides.value, 'guides') },
+  { immediate: true, deep: true }
+)
+watch(
+  () => props.selectedGuides,
+  (selected) => {
+    const rounds = [...new Set((Array.isArray(selected) ? selected : [])
+      .map((item) => Number(item?.guideRoundNo ?? item?.guide_round_no ?? 0))
+      .filter((round) => Number.isInteger(round) && round >= 1 && round <= 3))]
+    guideRoundNo.value = rounds.length === 1 ? String(rounds[0]) : ''
+  },
   { immediate: true, deep: true }
 )
 watch(
@@ -221,6 +254,7 @@ function openAttributionSearch() {
 }
 
 function addGuide(item) {
+  if (!guides.value.some((record) => record.selected)) guideRoundNo.value = ''
   const guide = guides.value.find((record) => record.id === item.id)
   if (guide) guide.selected = true
   attributionSearchOpen.value = false
@@ -235,6 +269,7 @@ function removeAttribution(item, role) {
   const records = role === 'guide' ? guides.value : salesManagers.value
   const target = records.find((record) => record.id === item.id)
   if (target) target.selected = false
+  if (role === 'guide' && !guides.value.some((record) => record.selected)) guideRoundNo.value = ''
 }
 
 function setMarked(item, checked) {
@@ -248,9 +283,12 @@ function setMarked(item, checked) {
 
 function allocationIsValid(records) {
   const selected = records.filter((record) => record.selected)
+  const commissionSelected = selected.filter((record) => craftsmanType(record) !== PERFORMANCE_TYPES.LABOR)
   return !selected.length || (
-    selected.every((record) => Number.isInteger(Number(record.performance)) && Number(record.performance) > 0)
-    && selected.reduce((total, record) => total + Number(record.performance), 0) === 100
+    selected.every((record) => Number.isInteger(Number(record.performance)) && Number(record.performance) >= 0)
+    && commissionSelected.every((record) => Number(record.performance) > 0)
+    && commissionSelected.reduce((total, record) => total + Number(record.performance), 0) === (commissionSelected.length ? 100 : 0)
+    && selected.every((record) => craftsmanType(record) !== PERFORMANCE_TYPES.LABOR || Number(record.performance) === 0)
   )
 }
 
@@ -279,6 +317,8 @@ function selectedCraftsmenPayload() {
     marked: Boolean(item.marked),
     isPointCustomer: Boolean(item.marked),
     laborWeight: Number(item.performance),
+    craftsmanPerformanceType: craftsmanType(item),
+    laborFeeCents: craftsmanType(item) === PERFORMANCE_TYPES.COMMISSION ? 0 : Math.max(0, Number(item.laborFeeYuan || 0) * 100),
     isPrimary: index === 0,
     sequence: index + 1
   }))
@@ -315,7 +355,9 @@ function attributionRoleAllows(item = {}, role = '') {
 }
 
 function selectedGuidePayload(records = []) {
+  const roundNo = Number(guideRoundNo.value)
   return selectedAttributionPayload(records.filter((record) => attributionRoleAllows(record, 'guide')))
+    .map((record) => ({ ...record, guideRoundNo: roundNo }))
 }
 
 function selectedSalesManagerPayload(records = []) {
@@ -367,6 +409,10 @@ function confirm() {
     activateInvalidTab('craftsmen', '当前项目至少需要选择一名手艺人。')
     return
   }
+  if (selectedGuides.length && ![1, 2, 3].includes(Number(guideRoundNo.value))) {
+    activateInvalidTab('guides', '已选择导购，请选择本次导购第几轮。')
+    return
+  }
   if (!allocationIsValid(selectedCraftsmen)) {
     activateInvalidTab('craftsmen', '手艺人分配比例必须为正整数，合计为 100%。')
     return
@@ -384,6 +430,8 @@ function confirm() {
       marked: Boolean(item.marked),
       isPointCustomer: Boolean(item.marked),
       laborWeight: Number(item.performance),
+      craftsmanPerformanceType: craftsmanType(item),
+      laborFeeCents: craftsmanType(item) === PERFORMANCE_TYPES.COMMISSION ? 0 : Math.max(0, Number(item.laborFeeYuan || 0) * 100),
       isPrimary: index === 0,
       sequence: index + 1
     }))
@@ -393,9 +441,6 @@ function confirm() {
   }
   if (props.showGuides) assignment.guideSelections = selectedGuidePayload(guides.value)
   if (props.showSalesManagers) assignment.salesManagerSelections = selectedSalesManagerPayload(salesManagers.value)
-  if (props.allowLaborOverride && mode.value === 'full' && laborFeeDirty.value) {
-    assignment.laborManualFee = Number(laborManualFee.value)
-  }
   emit('confirm', assignment)
 }
 
@@ -457,6 +502,10 @@ function searchGroupPersonnel(scope) {
               <span v-for="item in selectedGuides" :key="`selected-guide-${item.id}`">{{ item.name }}<button type="button" :aria-label="`移除导购 ${item.name}`" @click="removeAttribution(item, 'guide')">×</button></span>
               <em v-if="!selectedGuides.length">暂未添加</em>
             </div>
+            <fieldset v-if="selectedGuides.length" class="personnel-guide-round" aria-label="本次导购轮次">
+              <legend>导购第几轮<strong>*</strong></legend>
+              <label v-for="round in [1, 2, 3]" :key="round"><input v-model="guideRoundNo" type="radio" :value="String(round)"><span>第{{ round }}轮</span></label>
+            </fieldset>
           </div>
           <div v-if="showSalesManagers" class="personnel-attribution-role">
             <strong>销售经理</strong><small>仅 1 人</small>
@@ -480,28 +529,19 @@ function searchGroupPersonnel(scope) {
           <button type="button" class="button button--primary" @click="mode = 'simple'">添加人员</button>
           <strong>已选择 {{ selectedRecords.length }} 人<span v-if="!activeIsNonPerformance">，分配合计 {{ activeTotal }}%</span><span v-else>（仅记录归属，不分配比例）</span></strong>
         </div>
-        <div v-if="allowLaborOverride" class="personnel-labor-override">
-          <label>
-            <span>本次手工费</span>
-            <input
-              v-model.number="laborManualFee"
-              type="number"
-              min="0"
-              step="1"
-              inputmode="decimal"
-              aria-label="本次手工费"
-              @input="laborFeeDirty = true"
-            >
-            <b>元</b>
-          </label>
-          <small>默认带入项目固定手工费；仅本次结账生效，不修改项目默认配置。</small>
-        </div>
-        <div class="personnel-full-table" role="table" aria-label="完整人员分配">
-          <div role="row" class="personnel-full-table__head"><span>员工</span><span>职位</span><span>职级</span><span v-if="!activeIsNonPerformance">{{ activeTab === 'craftsmen' ? '是否点客' : '是否售前' }}</span><span v-if="!activeIsNonPerformance">分配比例</span><span>操作</span></div>
+        <fieldset v-if="activeTab === 'guides' && selectedGuides.length" class="personnel-guide-round" aria-label="本次导购轮次">
+          <legend>导购第几轮<strong>*</strong></legend>
+          <label v-for="round in [1, 2, 3]" :key="round"><input v-model="guideRoundNo" type="radio" :value="String(round)"><span>第{{ round }}轮</span></label>
+        </fieldset>
+        <div class="personnel-full-table" :class="{ 'personnel-full-table--craftsmen': activeTab === 'craftsmen' && !activeIsNonPerformance }" role="table" aria-label="完整人员分配">
+          <div role="row" class="personnel-full-table__head"><span>员工</span><span>职位</span><span>职级</span><span v-if="!activeIsNonPerformance">服务业绩类型</span><span v-if="!activeIsNonPerformance">{{ activeTab === 'craftsmen' ? '是否点客' : '是否售前' }}</span><span v-if="!activeIsNonPerformance">业绩比例</span><span v-if="activeTab === 'craftsmen' && !activeIsNonPerformance">手工费</span><span>操作</span></div>
           <div v-for="item in selectedRecords" :key="item.id" role="row" class="personnel-full-table__row">
             <strong>{{ item.name }}</strong><span>{{ item.position }}</span><span>{{ item.level }}</span>
+            <span v-if="!activeIsNonPerformance && activeTab === 'craftsmen'">{{ performanceTypeLabel(item) }}</span>
+            <span v-else-if="!activeIsNonPerformance"></span>
             <label v-if="!activeIsNonPerformance" class="personnel-toggle"><input :checked="item.marked" type="checkbox" @change="setMarked(item, $event.target.checked)"><span>{{ item.marked ? '是' : '否' }}</span></label>
-            <label v-if="!activeIsNonPerformance" class="personnel-allocation-input"><input v-model.number="item.performance" type="number" min="1" max="100" step="1" inputmode="numeric" aria-label="业绩分配比例"><b>%</b></label>
+            <label v-if="!activeIsNonPerformance" class="personnel-allocation-input"><input v-model.number="item.performance" type="number" min="0" max="100" step="1" inputmode="numeric" aria-label="业绩分配比例" :disabled="activeTab === 'craftsmen' && craftsmanType(item) === PERFORMANCE_TYPES.LABOR"><b>%</b></label>
+            <label v-if="activeTab === 'craftsmen' && !activeIsNonPerformance" class="personnel-allocation-input personnel-allocation-input--labor"><input v-model.number="item.laborFeeYuan" type="number" min="0" step="1" inputmode="numeric" aria-label="每人手工费" :disabled="craftsmanType(item) === PERFORMANCE_TYPES.COMMISSION" @input="item.laborFeeCents = Math.max(0, Number(item.laborFeeYuan || 0) * 100)"><b>元/次</b></label>
             <button type="button" @click="selectRecord(item)">删除</button>
           </div>
           <p v-if="!selectedRecords.length" class="personnel-empty">请先在简易选择中添加人员</p>
