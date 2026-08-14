@@ -544,7 +544,7 @@ final class CashierV3CashierWorkspaceServices
             }
             $salesManagers = $this->authoritativeSalesManagerSelectionsInTx($settings['salesManagerSelections'], $operatorScope);
         }
-        $manualLaborFeeCents = $line['manual_labor_fee_cents'] === null
+        $manualLaborFeeCents = ($line['manual_labor_fee_cents'] ?? null) === null
             ? null
             : $this->storedNonnegativeInteger($line['manual_labor_fee_cents'], $lineKey, 'manual_labor_fee_cents');
         if ($hasLaborManualFee) {
@@ -1506,7 +1506,7 @@ final class CashierV3CashierWorkspaceServices
                     []
                 ),
                 'craftsmen' => $craftsmen,
-                'laborManualFeeCents' => $workspaceLine['manual_labor_fee_cents'] === null
+                'laborManualFeeCents' => ($workspaceLine['manual_labor_fee_cents'] ?? null) === null
                     ? null
                     : $this->storedNonnegativeInteger($workspaceLine['manual_labor_fee_cents'], $lineKey, 'manual_labor_fee_cents'),
                 'displaySnapshot' => $this->decodeStoredDisplaySnapshot($workspaceLine, $lineKey),
@@ -2645,7 +2645,7 @@ final class CashierV3CashierWorkspaceServices
                 : [];
             $guides = $this->decodeStoredGuideSelections($row, $lineKey);
             $salesManagers = $this->decodeStoredSalesManagerSelections($row, $lineKey);
-            $manualLaborFeeCents = $row['manual_labor_fee_cents'] === null
+            $manualLaborFeeCents = ($row['manual_labor_fee_cents'] ?? null) === null
                 ? null
                 : $this->storedNonnegativeInteger($row['manual_labor_fee_cents'], $lineKey, 'manual_labor_fee_cents');
             // 项目固定手工费属于当前租户的项目配置。工作台行同时保留

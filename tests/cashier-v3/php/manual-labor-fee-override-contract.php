@@ -22,6 +22,10 @@ $checks = [
         $workspace,
         "if ((\$row['manual_labor_fee_cents'] ?? null) !== null)",
     ],
+    'workspace service projections tolerate an absent optional labor fee snapshot' => [
+        $workspace,
+        "\$manualLaborFeeCents = (\$row['manual_labor_fee_cents'] ?? null) === null",
+    ],
     'workspace validates a nonnegative integer-yuan override' => [
         $workspace,
         'manualLaborFeeCents($settings[\'laborManualFee\']',
