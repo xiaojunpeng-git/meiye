@@ -19,6 +19,11 @@ export function unifiedBusinessReportExport(data) {
   return request({ url: 'report/unified/export', method: 'get', params: data });
 }
 
+/** 平台端门店运营报表补充字段，与门店 V3 使用同一注释事实。 */
+export function saveUnifiedBusinessReportAnnotation(data) {
+  return request({ url: 'report/operations/annotation', method: 'post', data });
+}
+
 /**
  * 门店运营报表范围选择器：组织树与门店列表均由平台后端按当前账号权限返回。
  * 报表查询仍由后端对 org_id / store_id 再次裁剪，前端只用于缩小范围。
