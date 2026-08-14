@@ -3053,7 +3053,7 @@ final class CashierV3CashierWorkspaceServices
                 'display_snapshot_json' => (string)($row['display_snapshot_json'] ?? ''),
                 'sort_no' => (int)($row['sort_no'] ?? 0),
             ];
-            if ($row['manual_labor_fee_cents'] !== null) {
+            if (($row['manual_labor_fee_cents'] ?? null) !== null) {
                 $item['manual_labor_fee_cents'] = (int)$row['manual_labor_fee_cents'];
             }
             if ((int)($row['inventory_outbound_required'] ?? 1) !== 1) {

@@ -18,6 +18,10 @@ $checks = [
         $workspace,
         "'manual_labor_fee_cents' => \$manualLaborFeeCents",
     ],
+    'workspace fingerprint accepts a legacy row without the optional labor fee snapshot' => [
+        $workspace,
+        "if ((\$row['manual_labor_fee_cents'] ?? null) !== null)",
+    ],
     'workspace validates a nonnegative integer-yuan override' => [
         $workspace,
         'manualLaborFeeCents($settings[\'laborManualFee\']',
