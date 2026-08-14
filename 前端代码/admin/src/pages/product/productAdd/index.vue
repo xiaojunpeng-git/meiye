@@ -1368,14 +1368,14 @@
         </div>
         <div v-show="currentTab === '4'">
           <!-- 物流设置 -->
-          <FormItem label="配送方式：" prop="delivery_type" :rules="ruleValidate.delivery_type">
+          <FormItem label="配送方式：">
             <CheckboxGroup v-model="formData.delivery_type" @on-change="onDeliveryTypeChange">
               <Checkbox label="1" v-if="merchantType != 1">平台配送</Checkbox>
               <Checkbox label="3">门店配送</Checkbox>
               <Checkbox label="2">到店自提</Checkbox>
             </CheckboxGroup>
           </FormItem>
-          <FormItem label="配送类型：" prop="store_delivery_type" v-show="formData.delivery_type.includes('3')" :rules="ruleValidate.store_delivery_type">
+          <FormItem label="配送类型：" v-show="formData.delivery_type.includes('3')">
             <CheckboxGroup v-model="formData.store_delivery_type">
               <Checkbox label="1">快递发货</Checkbox>
               <Checkbox label="2">同城配送</Checkbox>
@@ -1741,36 +1741,6 @@ export default {
             }
           },
           required: true,
-        },
-        delivery_type: {
-          validator: (rule, value, callback) => {
-            if (this.formData.product_type != 0 || Array.isArray(value) && value.length) {
-              callback();
-            } else {
-              if (this.currentTab == 4) {
-                callback(new Error('请选择配送方式'));
-              } else {
-                callback();
-              }
-            }
-          },
-          required: true,
-          type: 'array',
-        },
-        store_delivery_type: {
-          validator: (rule, value, callback) => {
-            if (this.formData.product_type != 0 || !this.formData.delivery_type.includes('3') || Array.isArray(value) && value.length) {
-              callback();
-            } else {
-              if (this.currentTab == 4) {
-                callback(new Error('请选择配送类型'));
-              } else {
-                callback();
-              }
-            }
-          },
-          required: true,
-          type: 'array',
         },
       },
       currentTab: '1',
@@ -3536,9 +3506,7 @@ export default {
     },
     // 下一页；
     downTab(name) {
-      if (String(this.currentTab) === '4') {
-        this.normalizeRetailDeliveryBeforeSave(this.formData);
-      }
+      this.normalizeRetailDeliveryBeforeSave(this.formData);
       this.$refs[name].validate((valid) => {
         if (valid) {
           if (this.formData.is_show == 2 && !this.formData.auto_on_time) {
@@ -3701,6 +3669,7 @@ export default {
       return true;
     },
     async handleSubmit() {
+      this.normalizeRetailDeliveryBeforeSave(this.formData);
       let formData = this.summarizeData();
       if (Number(formData.product_type) === 5) formData.unit_name = '张';
       if (Number(formData.product_type) === 6) formData.unit_name = '次';
@@ -3798,7 +3767,6 @@ export default {
       formData.attr.level_price=vipPriceBrokerageData.attrData[0].level_price;
     }
     if (!this.validateWholeYuanMoney(formData)) return;
-    this.normalizeRetailDeliveryBeforeSave(formData);
       productAddApi(formData)
         .then(async (res) => {
           this.openSubimit = true;

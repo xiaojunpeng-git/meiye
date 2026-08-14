@@ -8,12 +8,12 @@ const source = fs.readFileSync(sourcePath, 'utf8');
 
 const checks = [
   [
-    'retail save normalizes delivery before submitting',
-    /this\.normalizeRetailDeliveryBeforeSave\(formData\);\s*productAddApi\(formData\)/s.test(source),
+    'retail save normalizes delivery before collecting form data',
+    /async handleSubmit\(\) \{\s*this\.normalizeRetailDeliveryBeforeSave\(this\.formData\);\s*let formData = this\.summarizeData\(\);/s.test(source),
   ],
   [
-    'retail delivery is normalized before the delivery-step form validation',
-    /downTab\(name\) \{\s*if \(String\(this\.currentTab\) === '4'\) \{\s*this\.normalizeRetailDeliveryBeforeSave\(this\.formData\);\s*\}\s*this\.\$refs\[name\]\.validate/s.test(source),
+    'retail delivery is normalized before every next-step form validation',
+    /downTab\(name\) \{\s*this\.normalizeRetailDeliveryBeforeSave\(this\.formData\);\s*this\.\$refs\[name\]\.validate/s.test(source),
   ],
   [
     'empty retail delivery defaults to store pickup',
@@ -36,9 +36,11 @@ const checks = [
     /if \(Number\(formData\.product_type\) !== 0\) return;/.test(source),
   ],
   [
-    'legacy delivery warning no longer blocks retail save',
-    !source.includes("return this.$Message.warning('请选择配送方式');") &&
-      !source.includes("return this.$Message.warning('请选择配送类型');"),
+    'delivery is no longer an artificial required field',
+    !source.includes('请选择配送方式') &&
+      !source.includes('请选择配送类型') &&
+      !/<FormItem label="配送方式："[^>]*prop="delivery_type"/.test(source) &&
+      !/<FormItem label="配送类型："[^>]*prop="store_delivery_type"/.test(source),
   ],
 ];
 
