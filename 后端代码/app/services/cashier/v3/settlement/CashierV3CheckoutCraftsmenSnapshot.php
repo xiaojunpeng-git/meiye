@@ -22,15 +22,19 @@ final class CashierV3CheckoutCraftsmenSnapshot
 
         $normalized = [];
         $staffIds = [];
-        $weightTotal = 0;
         foreach ($rows as $index => $row) {
             if (!is_array($row)) {
                 throw new \InvalidArgumentException('craftsmen_snapshot_item_invalid');
             }
-            self::assertExactKeys($row, [
+            $baseKeys = [
                 'id', 'staffId', 'employeeId', 'storeId', 'name', 'isPrimary',
                 'sequence', 'laborWeight', 'isPointCustomer',
-            ]);
+            ];
+            $hasPerformanceFields = array_key_exists('craftsmanPerformanceType', $row)
+                || array_key_exists('laborFeeCents', $row);
+            self::assertExactKeys($row, $hasPerformanceFields
+                ? array_merge($baseKeys, ['craftsmanPerformanceType', 'laborFeeCents'])
+                : $baseKeys);
             $staffId = self::positiveInt($row['staffId']);
             if (self::positiveInt($row['id']) !== $staffId || isset($staffIds[$staffId])) {
                 throw new \InvalidArgumentException('craftsmen_snapshot_staff_invalid');
@@ -49,11 +53,21 @@ final class CashierV3CheckoutCraftsmenSnapshot
                 || $row['isPrimary'] !== ($index === 0)) {
                 throw new \InvalidArgumentException('craftsmen_snapshot_sequence_invalid');
             }
-            $laborWeight = self::positiveInt($row['laborWeight']);
+            $laborWeight = self::nonNegativeInt($row['laborWeight']);
             if ($laborWeight > 100) {
                 throw new \InvalidArgumentException('craftsmen_snapshot_weight_invalid');
             }
-            $weightTotal += $laborWeight;
+            $performanceType = $hasPerformanceFields ? (string)$row['craftsmanPerformanceType'] : 'commission_labor';
+            if (!in_array($performanceType, ['commission', 'labor', 'commission_labor'], true)) {
+                throw new \InvalidArgumentException('craftsmen_snapshot_performance_type_invalid');
+            }
+            if ($performanceType !== 'labor' && $laborWeight <= 0) {
+                throw new \InvalidArgumentException('craftsmen_snapshot_weight_invalid');
+            }
+            $laborFeeCents = $hasPerformanceFields ? self::nonNegativeInt($row['laborFeeCents']) : 0;
+            if ($performanceType === 'commission' && $laborFeeCents !== 0) {
+                throw new \InvalidArgumentException('craftsmen_snapshot_labor_fee_invalid');
+            }
             $normalized[] = [
                 'id' => $staffId,
                 'staffId' => $staffId,
@@ -65,8 +79,18 @@ final class CashierV3CheckoutCraftsmenSnapshot
                 'laborWeight' => $laborWeight,
                 'isPointCustomer' => $row['isPointCustomer'],
             ];
+            if ($hasPerformanceFields) {
+                $normalized[count($normalized) - 1]['craftsmanPerformanceType'] = $performanceType;
+                $normalized[count($normalized) - 1]['laborFeeCents'] = $laborFeeCents;
+            }
         }
-        if ($normalized !== [] && $weightTotal !== 100) {
+        $commissionWeight = 0;
+        foreach ($normalized as $row) {
+            if (($row['craftsmanPerformanceType'] ?? 'commission_labor') !== 'labor') {
+                $commissionWeight += (int)$row['laborWeight'];
+            }
+        }
+        if ($normalized !== [] && $commissionWeight !== 100 && $commissionWeight !== 0) {
             throw new \InvalidArgumentException('craftsmen_snapshot_weight_sum_invalid');
         }
         return $normalized;
@@ -104,6 +128,14 @@ final class CashierV3CheckoutCraftsmenSnapshot
     {
         if (!is_int($value) || $value <= 0) {
             throw new \InvalidArgumentException('craftsmen_snapshot_positive_integer_invalid');
+        }
+        return $value;
+    }
+
+    private static function nonNegativeInt($value): int
+    {
+        if (!is_int($value) || $value < 0) {
+            throw new \InvalidArgumentException('craftsmen_snapshot_non_negative_integer_invalid');
         }
         return $value;
     }

@@ -58,6 +58,7 @@ final class CashierV3OrderCenterUnifiedQueryContract
                 ['service_record_no', '服务记录号', 'text', true, true], ['business_date', '业务日期', 'date', true, true],
                 ['member_name', '会员姓名'], ['service_project', '服务项目'], ['entitlement_source', '权益来源'], ['source_card', '来源卡名称'],
                 ['source_card_no', '完整卡号'], ['used_times', '本次使用次数', 'integer'], ['store', '服务门店'], ['craftsman', '手艺人'],
+                ['labor_fee_amount', '手工费', 'amount'], ['labor_performance_type', '服务业绩类型'], ['labor_performance_ratio', '业绩比例'],
                 ['labor_performance_amount', '劳动业绩', 'amount'], ['operator', '操作人'], ['service_status', '状态'], ['service_completed_at', '服务完成时间', 'datetime'],
             ], ['service_record_no', 'member_name', 'service_project', 'entitlement_source', 'source_card_no', 'craftsman']],
             'supplement' => ['补交记录', [

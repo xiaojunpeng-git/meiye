@@ -70,6 +70,37 @@ final class CashierV3QueryEntitySelectorServices
             return $this->queryGroupAttributions($keyword, $page, $pageSize, $operatorScope);
         }
         $requiresEmploymentType = self::PERSON_SCOPES[$selectorScope];
+        $projectId = (int)($selectorContext['projectId'] ?? $selectorContext['project_id'] ?? 0);
+        $laborDefaultFeeCents = 0;
+        if ($selectorScope === 'service_actual_craftsmen' && $projectId > 0) {
+            $ruleQuery = Db::name('cashier_v3_project_performance_rule')
+                ->where('tenant_id', $dataScope->tenantId())
+                ->where('project_id', $projectId)
+                ->order('id', 'desc');
+            $rule = $ruleQuery->find();
+            if (is_array($rule) && array_key_exists('labor_configured_unit_amount_cents', $rule)) {
+                $configured = $rule['labor_configured_unit_amount_cents'];
+                $laborDefaultFeeCents = max(0, (int)$configured);
+            } else {
+                // 门店商品是平台项目的复制行（type=1，pid=平台项目ID），
+                // 固定手工费规则归属于平台主项目，需回溯 pid 读取。
+                $masterId = (int)(Db::name('store_product')
+                    ->where('id', $projectId)
+                    ->where('type', 1)
+                    ->where('product_type', 6)
+                    ->value('pid') ?: 0);
+                if ($masterId > 0 && $masterId !== $projectId) {
+                    $masterRule = Db::name('cashier_v3_project_performance_rule')
+                        ->where('tenant_id', $dataScope->tenantId())
+                        ->where('project_id', $masterId)
+                        ->order('id', 'desc')
+                        ->find();
+                    if (is_array($masterRule) && array_key_exists('labor_configured_unit_amount_cents', $masterRule)) {
+                        $laborDefaultFeeCents = max(0, (int)$masterRule['labor_configured_unit_amount_cents']);
+                    }
+                }
+            }
+        }
         $eligibilityColumn = $requiresEmploymentType
             ? 'ss.cashier_salesperson_enabled'
             : 'ss.cashier_craftsman_enabled';
@@ -123,7 +154,7 @@ final class CashierV3QueryEntitySelectorServices
         $rows = $query
             ->field($isGroupAttribution
                 ? 'e.id as employee_id,MIN(ss.id) as staff_id,MIN(ss.store_id) as store_id,e.name as employee_name,MAX(ss.account) as account,MAX(ss.staff_name) as staff_name,e.employment_type_code,e.employment_type_version'
-                : 'ss.id as staff_id,ss.employee_id,ss.store_id,ss.account,ss.staff_name,ss.cashier_salesperson_enabled,ss.cashier_craftsman_enabled,e.name as employee_name,e.employment_type_code,e.employment_type_version')
+                : 'ss.id as staff_id,ss.employee_id,ss.store_id,ss.account,ss.staff_name,ss.cashier_salesperson_enabled,ss.cashier_craftsman_enabled,ss.craftsman_performance_type,e.name as employee_name,e.employment_type_code,e.employment_type_version')
             ->order($isGroupAttribution ? 'e.id asc' : 'ss.id asc')
             ->page($page, $pageSize)
             ->select()
@@ -154,6 +185,12 @@ final class CashierV3QueryEntitySelectorServices
                 'employeeTypeAuthorityVersion' => (int)($row['employment_type_version'] ?? 0),
                 'salespersonEligible' => (int)($row['cashier_salesperson_enabled'] ?? 0) === 1,
                 'craftsmanEligible' => (int)($row['cashier_craftsman_enabled'] ?? 0) === 1,
+                // The service-performance type is configured on the store
+                // tenure row.  Returning it with the candidate lets the UI
+                // zero the inapplicable fields before submit; the write side
+                // still re-reads this value under lock.
+                'craftsmanPerformanceType' => (string)($row['craftsman_performance_type'] ?? 'commission_labor'),
+                'laborDefaultFeeCents' => $selectorScope === 'service_actual_craftsmen' ? $laborDefaultFeeCents : 0,
                 'selectable' => true,
                 'groupScoped' => $isGroupAttribution,
                 'attributionRole' => $selectorScope === 'group_sales_managers'

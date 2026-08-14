@@ -100,6 +100,10 @@ export function saveStoreStaff(staffId, values) {
       status: normalizedBoolean(values.status),
       cashier_salesperson_enabled: normalizedBoolean(values.salespersonEnabled),
       cashier_craftsman_enabled: normalizedBoolean(values.craftsmanEnabled),
+      craftsman_performance_type: ['commission', 'labor', 'commission_labor'].includes(String(values.craftsmanPerformanceType || ''))
+        ? String(values.craftsmanPerformanceType)
+        : 'commission',
+      mobile_enabled: normalizedBoolean(values.mobileEnabled),
       is_customer: normalizedBoolean(values.isCustomer),
       customer_url: String(values.customerUrl || '').trim(),
       is_reservable: normalizedBoolean(values.isReservable),

@@ -99,6 +99,15 @@
               <template slot-scope="{ row }" slot="cashier_craftsman_enabled">
                 {{ row.cashier_craftsman_enabled == 1 ? '是' : '否' }}
               </template>
+              <template slot-scope="{ row }" slot="craftsman_performance_type">
+                {{ { commission: '消耗业绩', labor: '手工费', commission_labor: '消耗业绩+手工费' }[row.craftsman_performance_type] || '消耗业绩' }}
+              </template>
+              <template slot-scope="{ row }" slot="employment_type_code">
+                {{ { internal: '内部员工', partner: '合作方', outsourced: '外包' }[row.employment_type_code] || '内部员工' }}
+              </template>
+              <template slot-scope="{ row }" slot="mobile_enabled">
+                {{ row.mobile_enabled == 1 ? '开启' : '关闭' }}
+              </template>
               <template slot-scope="{ row }" slot="status">
                 {{ row.status == 1 ? '在职' : '离职' }}
               </template>
@@ -345,17 +354,20 @@ function resolveStaffAvatar(url) {
 const COLUMNS_META = [
   { key: 'id', title: 'ID', minWidth: 60 },
   { key: 'organization_name', title: '所属组织', minWidth: 180 },
-  { key: 'store_name', title: '任职门店', minWidth: 120, slot: 'store_name' },
-  { key: 'staff_name', title: '店员名称', minWidth: 150, slot: 'staff_name' },
+  { key: 'store_name', title: '所属门店', minWidth: 120, slot: 'store_name' },
+  { key: 'staff_name', title: '员工姓名', minWidth: 150, slot: 'staff_name' },
   { key: 'nickname', title: '昵称', minWidth: 100 },
-  { key: 'phone', title: '手机号', minWidth: 110 },
+  { key: 'phone', title: '员工手机', minWidth: 110 },
   { key: 'roles', title: '店员身份', minWidth: 120 },
-  { key: 'position_label', title: '职位', minWidth: 100 },
+  { key: 'position_label', title: '岗位', minWidth: 100 },
   { key: 'position_level_label', title: '职级', minWidth: 100 },
   { key: 'is_manager', title: '店长', minWidth: 80, slot: 'is_manager' },
   { key: 'cashier_salesperson_enabled', title: '可作为销售人', minWidth: 110, slot: 'cashier_salesperson_enabled' },
   { key: 'cashier_craftsman_enabled', title: '可作为手艺人', minWidth: 110, slot: 'cashier_craftsman_enabled' },
+  { key: 'craftsman_performance_type', title: '手艺人服务业绩类型', minWidth: 150, slot: 'craftsman_performance_type' },
+  { key: 'employment_type_code', title: '人员类型', minWidth: 100, slot: 'employment_type_code' },
   { key: 'status', title: '在职状态', minWidth: 80, slot: 'status' },
+  { key: 'mobile_enabled', title: '手机端', minWidth: 80, slot: 'mobile_enabled' },
   { key: 'is_fencheng', title: '参与分成', minWidth: 90, slot: 'is_fencheng' },
   { key: 'employee_number', title: '工号', minWidth: 100 },
   { key: 'join_date', title: '入职日期', minWidth: 110 },
@@ -380,21 +392,30 @@ const COLUMNS_META = [
 ];
 
 const DEFAULT_COLUMN_CONFIG = [
-  { key: 'organization_name', show: true },
   { key: 'store_name', show: true },
   { key: 'staff_name', show: true },
-  { key: 'nickname', show: true },
   { key: 'phone', show: true },
-  { key: 'roles', show: true },
   { key: 'position_label', show: true },
-  { key: 'position_level_label', show: true },
-  { key: 'is_manager', show: true },
   { key: 'cashier_salesperson_enabled', show: true },
   { key: 'cashier_craftsman_enabled', show: true },
+  { key: 'craftsman_performance_type', show: true },
+  { key: 'employment_type_code', show: true },
   { key: 'status', show: true },
-  { key: 'is_fencheng', show: true },
+  { key: 'mobile_enabled', show: true },
   { key: 'action', show: true },
 ];
+
+const LEGACY_DEFAULT_COLUMN_KEYS = [
+  'organization_name', 'store_name', 'staff_name', 'nickname', 'phone', 'roles',
+  'position_label', 'position_level_label', 'is_manager', 'cashier_salesperson_enabled',
+  'cashier_craftsman_enabled', 'status', 'is_fencheng', 'action',
+];
+
+function isLegacyDefaultColumnConfig(columns) {
+  const keys = (columns || []).map((column) => column.key);
+  return LEGACY_DEFAULT_COLUMN_KEYS.every((key) => keys.includes(key))
+    && !['craftsman_performance_type', 'employment_type_code', 'mobile_enabled'].some((key) => keys.includes(key));
+}
 
 export default {
   name: 'setting_staff_index',
@@ -604,6 +625,10 @@ export default {
         .then((res) => {
           const columns = res.data && res.data.columns;
           if (Array.isArray(columns) && columns.length) {
+            if (isLegacyDefaultColumnConfig(columns)) {
+              this.columnConfig = [...DEFAULT_COLUMN_CONFIG];
+              return;
+            }
             // 旧用户保存的列配置没有“所属组织”，补到 ID 后面，
             // 避免新字段因历史配置而永远不可见。
             const nextColumns = columns.map((column) => ({ ...column }));

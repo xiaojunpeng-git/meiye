@@ -32,22 +32,26 @@ const editorStaffId = ref(0)
 const positionOptions = ref([])
 const workMemberOptions = ref([])
 const avatarUploading = ref(false)
+const positionKeyword = ref('')
 
 const PAGE_CODE = 'staff_list'
 const DATE_FIELDS = ['joinDate', 'birthdayDate', 'contractBegin', 'contractEnd']
 const baseQueryFields = [
   { key: 'staff_id', label: 'ID', type: 'number', defaultVisible: false },
   { key: 'store_name', label: '所属门店', defaultVisible: true },
-  { key: 'staff_name', label: '店员名称', defaultVisible: true, defaultQuick: true },
-  { key: 'nickname', label: '昵称', defaultVisible: true, defaultQuick: true },
-  { key: 'phone', label: '手机号', defaultVisible: true, defaultQuick: true },
-  { key: 'roles', label: '店员身份', defaultVisible: true },
-  { key: 'position_label', label: '职位', defaultVisible: true },
-  { key: 'position_level_label', label: '职级', defaultVisible: true },
-  { key: 'is_manager', label: '店长', defaultVisible: true },
+  { key: 'staff_name', label: '员工姓名', defaultVisible: true, defaultQuick: true },
+  { key: 'nickname', label: '昵称', defaultVisible: false, defaultQuick: true },
+  { key: 'phone', label: '员工手机', defaultVisible: true, defaultQuick: true },
+  { key: 'roles', label: '店员身份', defaultVisible: false },
+  { key: 'position_label', label: '岗位', defaultVisible: true },
+  { key: 'position_level_label', label: '职级', defaultVisible: false },
+  { key: 'is_manager', label: '店长', defaultVisible: false },
   { key: 'cashier_salesperson_enabled', label: '可作为销售人', defaultVisible: true },
   { key: 'cashier_craftsman_enabled', label: '可作为手艺人', defaultVisible: true },
-  { key: 'status', label: '在职状态', defaultVisible: true, type: 'enum' },
+  { key: 'craftsman_performance_type', label: '手艺人服务业绩类型', defaultVisible: true },
+  { key: 'employment_type_code', label: '人员类型', defaultVisible: true },
+  { key: 'status', label: '在职状态', defaultVisible: false, type: 'enum' },
+  { key: 'mobile_enabled', label: '手机端', defaultVisible: true },
   { key: 'is_fencheng', label: '参与分成' },
   { key: 'employee_number', label: '工号' },
   { key: 'join_date', label: '入职日期', type: 'date' },
@@ -74,7 +78,7 @@ function defaultEditorValues() {
   return {
     staffName: '', phone: '', avatar: '/static/images/staff/avatar_male.png', account: '', password: '',
     positionIds: [], scopeMode: 'personal', workMemberId: 0, notify: false, status: true,
-    salespersonEnabled: true, craftsmanEnabled: true, isCustomer: false, customerUrl: '',
+    salespersonEnabled: true, craftsmanEnabled: true, craftsmanPerformanceType: 'commission', mobileEnabled: false, isCustomer: false, customerUrl: '',
     isReservable: true, employeeNumber: '', idCard: '', age: '', joinArea: '', joinDate: '',
     birthdayDate: '', birthdayType: 1, birthdayArea: '', nowArea: '', contractBegin: '',
     contractEnd: '', salaryStatus: true, department: '', employmentTypeCode: 'internal', employmentTypeVersion: 1
@@ -82,6 +86,21 @@ function defaultEditorValues() {
 }
 
 const editorValues = reactive(defaultEditorValues())
+const selectedPositionOptions = computed(() => {
+  const selected = new Set((Array.isArray(editorValues.positionIds) ? editorValues.positionIds : []).map(Number))
+  return positionOptions.value.filter((option) => selected.has(Number(option.value)))
+})
+const filteredPositionOptions = computed(() => {
+  const keyword = positionKeyword.value.trim().toLowerCase()
+  return keyword
+    ? positionOptions.value.filter((option) => option.label.toLowerCase().includes(keyword))
+    : positionOptions.value
+})
+
+function removePosition(value) {
+  const id = Number(value)
+  editorValues.positionIds = editorValues.positionIds.filter((item) => Number(item) !== id)
+}
 
 function replaceEditorValues(values = {}) {
   Object.assign(editorValues, defaultEditorValues(), values)
@@ -111,8 +130,15 @@ const visibleKeys = ref([])
 const visibleFields = computed(() => visibleKeys.value.map((key) => fieldMap.value.get(key)).filter(Boolean))
 
 function applyQuerySettings(settings) {
-  const configured = Array.isArray(settings?.visibleFields) ? settings.visibleFields : defaultVisibleKeys.value
-  visibleKeys.value = [...new Set(configured)].filter((key) => fieldMap.value.has(key))
+  const configured = Array.isArray(settings?.visibleFields) ? settings.visibleFields : null
+  // 旧版本把一整组员工扩展字段作为默认列保存过。将这份旧默认配置一次性
+  // 收敛为当前确认的四列；用户后续主动保存的自定义列配置仍然保留。
+  const legacyDefaultKeys = ['store_name', 'staff_name', 'nickname', 'phone', 'roles', 'position_label', 'position_level_label', 'is_manager']
+  const isLegacyDefault = configured
+    && legacyDefaultKeys.every((key) => configured.includes(key))
+    && configured.every((key) => legacyDefaultKeys.includes(key) || key === 'staff_id' || key === 'cashier_salesperson_enabled' || key === 'cashier_craftsman_enabled' || key === 'status')
+  const nextKeys = !configured || isLegacyDefault ? defaultVisibleKeys.value : configured
+  visibleKeys.value = [...new Set(nextKeys)].filter((key) => fieldMap.value.has(key))
 }
 
 watch(() => [effectiveQuerySettings.value, queryFields.value.map((field) => field.key).join('|')], ([settings]) => applyQuerySettings(settings), { deep: true, immediate: true })
@@ -215,7 +241,10 @@ function mapDetail(detail) {
     account: String(detail?.account || ''), positionIds: Array.isArray(detail?.position_ids) ? detail.position_ids.map(Number).filter(Boolean) : [],
     scopeMode, workMemberId: Number(detail?.work_member_id || 0), notify: Number(detail?.notify || 0) === 1,
     status: Number(detail?.status ?? 1) === 1, salespersonEnabled: Number(detail?.cashier_salesperson_enabled ?? 1) === 1,
-    craftsmanEnabled: Number(detail?.cashier_craftsman_enabled ?? 1) === 1, isCustomer: Number(detail?.is_customer || 0) === 1,
+    craftsmanEnabled: Number(detail?.cashier_craftsman_enabled ?? 1) === 1,
+    craftsmanPerformanceType: ['commission', 'labor', 'commission_labor'].includes(String(detail?.craftsman_performance_type || ''))
+      ? String(detail.craftsman_performance_type) : 'commission', isCustomer: Number(detail?.is_customer || 0) === 1,
+    mobileEnabled: Number(detail?.mobile_enabled || 0) === 1,
     customerUrl: String(detail?.customer_url || ''), isReservable: Number(detail?.is_reservable ?? 1) === 1,
     employeeNumber: String(detail?.employee_number || ''), idCard: String(detail?.id_card || ''), age: detail?.age ?? '',
     joinArea: String(detail?.join_area || ''), joinDate: detail?.join_date || '', birthdayDate: detail?.birthday_date || '',
@@ -258,7 +287,7 @@ function validateEditor() {
   if (!/^1[3-9]\d{9}$/.test(editorValues.phone.trim())) return '手机号码格式不正确。'
   if (!editorValues.avatar.trim()) return '请设置员工头像。'
   if (!editorValues.positionIds.length) return '请选择岗位。'
-  if (!['internal', 'partner', 'outsourced'].includes(editorValues.employmentTypeCode)) return '请选择人员类型。'
+  if (!['internal', 'partner'].includes(editorValues.employmentTypeCode)) return '请选择人员类型。'
   if (!Number.isInteger(editorValues.employmentTypeVersion) || editorValues.employmentTypeVersion < 0) return '人员类型版本无效，请刷新后重试。'
   if (!editorStaffId.value && !editorValues.account.trim()) return '请填写登录账号。'
   if (!editorStaffId.value && !editorValues.password) return '请设置登录密码。'
@@ -354,14 +383,17 @@ async function onAvatarFileChange(event) {
               <label>员工姓名<input v-model.trim="editorValues.staffName" maxlength="64" required></label>
               <label>手机号码<input v-model.trim="editorValues.phone" inputmode="numeric" maxlength="11" required></label>
               <div class="staff-editor__avatar-field"><span>员工头像</span><div><img :src="avatarSource(editorValues.avatar)" alt="员工头像"><label class="button button--secondary">{{ avatarUploading ? '上传中…' : '上传头像' }}<input type="file" accept="image/*" :disabled="avatarUploading || editorSaving" @change="onAvatarFileChange"></label></div></div>
-              <label>岗位<select v-model="editorValues.positionIds" multiple required><option v-for="option in positionOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label>
-              <label class="staff-editor__toggle"><input v-model="editorValues.salespersonEnabled" type="checkbox"><span>可作为销售人</span></label>
-              <label class="staff-editor__toggle"><input v-model="editorValues.craftsmanEnabled" type="checkbox"><span>可作为手艺人</span></label>
-              <label>人员类型<select v-model="editorValues.employmentTypeCode"><option value="internal">内部员工</option><option value="partner">合作方</option><option value="outsourced">外包</option></select></label>
-              <label class="staff-editor__toggle"><input v-model="editorValues.status" type="checkbox"><span>在职状态</span></label>
+              <div class="staff-editor__field"><span>岗位</span><details class="staff-editor__select-dropdown"><summary><span v-for="option in selectedPositionOptions" :key="option.value" class="staff-editor__select-tag"><span>{{ option.label }}</span><button type="button" aria-label="移除岗位" @click.stop.prevent="removePosition(option.value)">×</button></span><input v-model="positionKeyword" class="staff-editor__select-search" type="search" placeholder="请选择岗位" @click.stop></summary><div class="staff-editor__select-options"><label v-for="option in filteredPositionOptions" :key="option.value" :class="{ selected: editorValues.positionIds.includes(option.value) }"><input v-model="editorValues.positionIds" type="checkbox" :value="option.value"><span>{{ option.label }}</span><b v-if="editorValues.positionIds.includes(option.value)">✓</b></label><p v-if="!filteredPositionOptions.length">暂无可选岗位</p></div></details></div>
+              <label class="staff-editor__toggle"><input v-model="editorValues.salespersonEnabled" type="checkbox"><span>可作为销售人：</span></label>
+              <label class="staff-editor__toggle"><input v-model="editorValues.craftsmanEnabled" type="checkbox"><span>可作为手艺人：</span></label>
+              <fieldset v-if="editorValues.salespersonEnabled" class="staff-editor__choice-field"><legend>人员类型</legend><label><input v-model="editorValues.employmentTypeCode" type="radio" value="internal"><span>内部员工</span></label><label><input v-model="editorValues.employmentTypeCode" type="radio" value="partner"><span>合作方</span></label></fieldset>
+              <fieldset v-if="editorValues.craftsmanEnabled" class="staff-editor__choice-field"><legend>手艺人服务业绩类型</legend><label><input v-model="editorValues.craftsmanPerformanceType" type="radio" value="commission"><span>消耗业绩</span></label><label><input v-model="editorValues.craftsmanPerformanceType" type="radio" value="labor"><span>手工费</span></label><label><input v-model="editorValues.craftsmanPerformanceType" type="radio" value="commission_labor"><span>消耗业绩+手工费</span></label></fieldset>
+              <label class="staff-editor__toggle"><input v-model="editorValues.status" type="checkbox"><span>在职状态：</span></label>
             </div>
             <div v-show="editorTab === 'scope'" class="staff-editor__section">
-              <fieldset><legend>数据范围</legend><label><input v-model="editorValues.scopeMode" type="radio" value="personal">个人</label><label><input v-model="editorValues.scopeMode" type="radio" value="store_self">门店</label></fieldset>
+              <p class="staff-editor__hint">所属组织、任职门店由当前门店关系自动确定，门店端不可编辑。</p>
+              <fieldset class="staff-editor__scope-field"><legend>数据范围：</legend><label><input v-model="editorValues.scopeMode" type="radio" value="personal"><span>个人</span></label><label><input v-model="editorValues.scopeMode" type="radio" value="store_self"><span>门店</span></label></fieldset>
+              <label class="staff-editor__toggle"><input v-model="editorValues.mobileEnabled" type="checkbox"><span>手机端：</span></label>
             </div>
             <div v-show="editorTab === 'login'" class="staff-editor__grid">
               <label>登录账号<input v-model.trim="editorValues.account" maxlength="35" autocomplete="username" :required="!editorStaffId"></label>
@@ -369,16 +401,16 @@ async function onAvatarFileChange(event) {
             </div>
             <div v-show="editorTab === 'other'" class="staff-editor__grid">
               <label>关联企微<select v-model="editorValues.workMemberId"><option :value="0">请选择</option><option v-for="option in workMemberOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label>
-              <label class="staff-editor__toggle"><input v-model="editorValues.isCustomer" type="checkbox"><span>客服开关</span></label>
+              <label class="staff-editor__toggle"><input v-model="editorValues.isCustomer" type="checkbox"><span>客服开关：</span></label>
               <label v-if="editorValues.isCustomer" class="staff-editor__wide">客服二维码地址<input v-model.trim="editorValues.customerUrl" maxlength="255" required></label>
-              <label class="staff-editor__toggle"><input v-model="editorValues.isReservable" type="checkbox"><span>可被预约</span></label>
+              <label class="staff-editor__toggle"><input v-model="editorValues.isReservable" type="checkbox"><span>可被预约：</span></label>
               <label>工号<input v-model.trim="editorValues.employeeNumber" maxlength="255"></label><label>身份证号<input v-model.trim="editorValues.idCard" maxlength="255"></label>
               <label>年龄<input v-model="editorValues.age" type="number" min="0" max="150" step="1"></label><label>劳动关系所在地<input v-model.trim="editorValues.joinArea" maxlength="255"></label>
               <label>入职日期<input v-model="editorValues.joinDate" type="date"></label><label>生日日期<input v-model="editorValues.birthdayDate" type="date"></label>
               <label>生日类型<select v-model.number="editorValues.birthdayType"><option :value="1">农历</option><option :value="2">新历</option></select></label><label>籍贯<input v-model.trim="editorValues.birthdayArea" maxlength="255"></label>
               <label>现居地<input v-model.trim="editorValues.nowArea" maxlength="255"></label><label>合同起始日<input v-model="editorValues.contractBegin" type="date"></label>
-              <label>合同终止日<input v-model="editorValues.contractEnd" type="date"></label><label class="staff-editor__toggle"><input v-model="editorValues.salaryStatus" type="checkbox"><span>工资状态</span></label>
-              <label>部门<input v-model.trim="editorValues.department" maxlength="255"></label><label class="staff-editor__toggle"><input v-model="editorValues.notify" type="checkbox"><span>通知开关</span></label>
+              <label>合同终止日<input v-model="editorValues.contractEnd" type="date"></label><label class="staff-editor__toggle"><input v-model="editorValues.salaryStatus" type="checkbox"><span>工资状态：</span></label>
+              <label>部门<input v-model.trim="editorValues.department" maxlength="255"></label><label class="staff-editor__toggle"><input v-model="editorValues.notify" type="checkbox"><span>通知开关：</span></label>
             </div>
             <p v-if="editorError" class="staff-editor__error">{{ editorError }}</p>
           </div>
@@ -398,6 +430,12 @@ async function onAvatarFileChange(event) {
 .staff-list-message { margin:0; padding:9px 12px; border:1px solid #b9d4ff; border-radius:7px; background:#f7fbff; color:#35658f; font-size:13px; }.staff-list-message--error { border-color:#ffccc7; background:#fff2f0; color:#cf1322; }
 .staff-list-wrap { min-width:0; overflow:auto; border:1px solid #dde4ed; border-radius:8px; background:#fff; }.staff-list-table { width:100%; min-width:1080px; border-collapse:collapse; color:#303133; font-size:13px; white-space:nowrap; }.staff-list-table th,.staff-list-table td { padding:11px 12px; border-bottom:1px solid #edf1f5; text-align:left; }.staff-list-table th { position:sticky; top:0; z-index:1; background:#f8fafc; color:#697586; font-size:12px; font-weight:600; }.staff-list-table__action { position:sticky; right:0; width:72px; background:#fff; }.staff-list-empty { display:grid; min-height:220px; place-items:center; color:#8a94a3; font-size:13px; }
 .staff-editor-backdrop { position:fixed; inset:0; z-index:1200; display:grid; place-items:center; padding:20px; background:rgba(20,29,40,.42); }.staff-editor { width:min(960px,100%); max-height:calc(100vh - 40px); overflow:hidden; border-radius:8px; background:#fff; box-shadow:0 22px 60px rgba(20,29,40,.24); }.staff-editor header,.staff-editor footer { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:16px 18px; border-bottom:1px solid #edf1f5; }.staff-editor footer { justify-content:flex-end; border-top:1px solid #edf1f5; border-bottom:0; }.staff-editor h2 { margin:0; font-size:17px; }.staff-editor__close { width:32px; height:32px; border:0; background:transparent; color:#697586; font-size:24px; cursor:pointer; }.staff-editor__loading { display:grid; min-height:280px; place-items:center; color:#7a8696; }.staff-editor__tabs { display:flex; gap:4px; padding:0 18px; border-bottom:1px solid #edf1f5; }.staff-editor__tabs button { padding:12px 16px; border:0; border-bottom:2px solid transparent; background:transparent; color:#697586; cursor:pointer; }.staff-editor__tabs button.active { border-color:#2f80ed; color:#2f80ed; }.staff-editor__body { min-height:300px; max-height:calc(100vh - 250px); overflow:auto; padding:18px; }.staff-editor__grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }.staff-editor__grid>label,.staff-editor__avatar-field { display:grid; gap:6px; color:#697586; font-size:13px; }.staff-editor input:not([type=checkbox]):not([type=file]),.staff-editor select { box-sizing:border-box; width:100%; min-height:36px; padding:7px 9px; border:1px solid #d9e1eb; border-radius:6px; background:#fff; color:#303133; font:inherit; }.staff-editor select[multiple] { min-height:112px; }.staff-editor__wide { grid-column:1 / -1; }.staff-editor__toggle { display:flex !important; align-items:center; gap:9px; padding:10px; border:1px solid #dbe4ef; border-radius:7px; color:#303133 !important; cursor:pointer; }.staff-editor__toggle input { width:18px; height:18px; }.staff-editor__avatar-field>div { display:flex; align-items:center; gap:12px; }.staff-editor__avatar-field img { width:56px; height:56px; border-radius:50%; object-fit:cover; border:1px solid #dbe4ef; }.staff-editor__avatar-field .button { position:relative; display:inline-grid; place-items:center; min-height:34px; overflow:hidden; cursor:pointer; }.staff-editor__avatar-field input[type=file] { position:absolute; inset:0; opacity:0; cursor:pointer; }.staff-editor__section fieldset { display:flex; gap:20px; margin:0; padding:16px; border:1px solid #dbe4ef; border-radius:7px; }.staff-editor__section label { display:flex; align-items:center; gap:6px; cursor:pointer; }.staff-editor__error { margin:16px 0 0; color:#cf1322; font-size:13px; }
+.staff-editor__choice-field { display:flex; align-items:center; gap:20px; min-width:0; width:100%; box-sizing:border-box; margin:0; padding:10px 12px; border:1px solid #dbe4ef; border-radius:7px; }.staff-editor__choice-field legend { padding:0 4px; color:#697586; font-size:13px; }.staff-editor__choice-field label { display:flex; align-items:center; gap:6px; cursor:pointer; color:#303133; }.staff-editor__hint { margin:0; color:#697586; font-size:13px; line-height:1.5; }
+.staff-editor__field { display:grid; grid-template-columns:92px minmax(0,1fr); align-items:center; gap:12px; min-width:0; color:#697586; font-size:13px; }.staff-editor__select-dropdown { position:relative; min-width:0; }.staff-editor__select-dropdown summary { display:flex; align-items:center; min-height:36px; box-sizing:border-box; padding:7px 30px 7px 9px; overflow:hidden; border:1px solid #d9e1eb; border-radius:6px; background:#fff; color:#303133; cursor:pointer; list-style:none; white-space:nowrap; text-overflow:ellipsis; }.staff-editor__select-dropdown summary::-webkit-details-marker { display:none; }.staff-editor__select-dropdown summary::after { content:'⌄'; position:absolute; right:10px; color:#697586; font-size:16px; }.staff-editor__select-options { position:absolute; inset:40px 0 auto; z-index:10; display:grid; gap:4px; max-height:220px; overflow:auto; padding:8px; border:1px solid #d9e1eb; border-radius:6px; background:#fff; box-shadow:0 8px 20px rgba(20,29,40,.16); }.staff-editor__select-options label { display:flex; align-items:center; gap:8px; padding:7px 6px; border-radius:4px; color:#303133; cursor:pointer; }.staff-editor__select-options label:hover { background:#f3f7ff; }.staff-editor__select-options input { width:16px; height:16px; }.staff-editor__select-options p { margin:4px; color:#8a94a3; }.staff-editor__grid > .staff-editor__toggle { display:flex !important; align-items:center; gap:10px; min-height:36px; box-sizing:border-box; padding:0; border:0; color:#303133 !important; background:transparent; }.staff-editor__toggle input { appearance:none; position:relative; width:38px; height:22px; flex:0 0 38px; margin:0; border:1px solid #b9c4d3; border-radius:999px; background:#cbd3df; cursor:pointer; transition:background .15s,border-color .15s; }.staff-editor__toggle input::after { content:''; position:absolute; top:2px; left:2px; width:16px; height:16px; border-radius:50%; background:#fff; box-shadow:0 1px 3px rgba(0,0,0,.18); transition:transform .15s; }.staff-editor__toggle input:checked { border-color:#2f80ed; background:#2f80ed; }.staff-editor__toggle input:checked::after { transform:translateX(16px); }
+.staff-editor__grid > label:not(.staff-editor__toggle),.staff-editor__avatar-field { display:grid; grid-template-columns:92px minmax(0,1fr); align-items:center; gap:12px; }.staff-editor__grid > .staff-editor__toggle { flex-direction:row-reverse; justify-content:flex-end; }
+.staff-editor__choice-field { display:flex; flex-wrap:wrap; gap:0; padding:0; border:0; border-radius:0; }.staff-editor__choice-field legend { flex:0 0 100%; box-sizing:border-box; padding:0 0 6px; color:#697586; font-size:13px; }.staff-editor__choice-field label { position:relative; flex:1 1 0; justify-content:center; min-height:38px; box-sizing:border-box; margin-left:-1px; padding:7px 12px; border:1px solid #d9e1eb; background:#fff; color:#697586; white-space:nowrap; }.staff-editor__choice-field label:first-of-type { margin-left:0; border-radius:6px 0 0 6px; }.staff-editor__choice-field label:last-of-type { border-radius:0 6px 6px 0; }.staff-editor__choice-field label:has(input:checked) { z-index:1; border-color:#2f80ed; background:#f0f7ff; color:#2f80ed; }.staff-editor__choice-field input { position:absolute; width:1px; height:1px; opacity:0; pointer-events:none; }
+.staff-editor__select-dropdown summary { flex-wrap:wrap; gap:4px; padding:4px 30px 4px 6px; }.staff-editor__select-tag { display:inline-flex; align-items:center; gap:6px; min-height:26px; padding:2px 7px; border:1px solid #d9e1eb; border-radius:4px; background:#f4f6f8; color:#4c596a; }.staff-editor__select-tag button { width:16px; height:16px; padding:0; border:0; background:transparent; color:#8a94a3; font-size:16px; line-height:14px; cursor:pointer; }.staff-editor__select-tag button:hover { color:#2f80ed; }.staff-editor__select-search { flex:1 1 80px; min-width:70px; height:28px; padding:2px 4px; border:0 !important; outline:0; background:transparent !important; color:#303133; font:inherit; }.staff-editor__select-search::placeholder { color:#8a94a3; }.staff-editor__select-options label.selected { background:#f3f7ff; color:#2f80ed; }.staff-editor__select-options label b { margin-left:auto; color:#2f80ed; font-size:16px; }.staff-editor__select-options input { position:absolute; width:1px; height:1px; opacity:0; pointer-events:none; }
+.staff-editor__select-dropdown summary { overflow:auto; white-space:normal; }.staff-editor__scope-field { display:flex !important; align-items:center; gap:20px; width:100%; box-sizing:border-box; margin:0; padding:0; border:0 !important; }.staff-editor__scope-field legend { flex:0 0 auto; padding:0; color:#697586; font-size:13px; }.staff-editor__scope-field label { display:inline-flex !important; align-items:center; gap:7px; flex:0 0 auto; white-space:nowrap; color:#303133; cursor:pointer; }.staff-editor__scope-field input { width:18px; height:18px; margin:0; }
 @media (max-width:760px) {
   .staff-list-page { padding:12px; }
   .staff-list-page__head { flex-direction:column; align-items:stretch; padding:14px 16px; }

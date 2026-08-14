@@ -791,6 +791,7 @@ final class CashierV3OrderCenterRecordQueryServices
             'sf.craftsmen_snapshot_json', 'sf.service_status', 'sf.source_document_type', 'wf.is_gift', 'wf.source_kind',
             'wf.source_name_snapshot AS source_name_snapshot',
             'wf.source_code_snapshot AS source_code_snapshot',
+            'sf.labor_amount_cents', 'sf.labor_mode',
         ]));
         $laborByLine = $this->laborPerformanceByServiceLine($rows, $scope->tenantId());
 
@@ -818,6 +819,11 @@ final class CashierV3OrderCenterRecordQueryServices
                 'storeName' => (string)$row['store_name_snapshot'],
                 'craftsmenSummary' => $craftsmen,
                 'laborPerformanceAmount' => $this->centsToMoney((int)$labor['amountCents']),
+                'laborFeeAmount' => $this->centsToMoney((int)($row['labor_amount_cents'] ?? 0)),
+                'laborPerformanceType' => (string)($row['labor_mode'] ?? 'project_rule'),
+                'laborPerformanceTypeLabel' => $this->laborPerformanceTypeLabel((string)($row['labor_mode'] ?? 'project_rule')),
+                'laborPerformanceRatio' => $this->laborPerformanceRatio($labor['allocations'] ?? []),
+                'laborPerformanceAllocations' => $labor['allocations'] ?? [],
                 'operatorName' => (string)$row['operator_name_snapshot'],
                 'serviceStatus' => '已完成',
                 'serviceCompletedAt' => $this->dateTime((int)($row['settled_at'] ?: $row['occurred_at'])),
@@ -827,7 +833,7 @@ final class CashierV3OrderCenterRecordQueryServices
 
     /**
      * @param array<int,array<string,mixed>> $serviceRows
-     * @return array<string,array{amountCents:int,names:array<int,string>}>
+     * @return array<string,array{amountCents:int,names:array<int,string>,allocations:array<int,array<string,mixed>>}>
      */
     private function laborPerformanceByServiceLine(array $serviceRows, string $tenantId): array
     {
@@ -849,21 +855,58 @@ final class CashierV3OrderCenterRecordQueryServices
             ->where('status', 'effective')
             ->whereIn('checkout_request_id', array_values($checkoutIds))
             ->whereIn('source_line_id', array_values($lineIds))
-            ->field('checkout_request_id,source_line_id,amount_cents,employee_name_snapshot')
+            ->field('checkout_request_id,source_line_id,amount_cents,employee_id,employee_name_snapshot,employee_type_snapshot,role_snapshot,allocation_weight_numerator,allocation_weight_denominator,rule_code_snapshot,rule_name_snapshot,rule_version_snapshot')
             ->select()
             ->toArray();
         $result = [];
         foreach ($facts as $fact) {
             $key = $this->serviceLineKey($fact);
             if ($key === '') continue;
-            if (!isset($result[$key])) $result[$key] = ['amountCents' => 0, 'names' => []];
+            if (!isset($result[$key])) $result[$key] = ['amountCents' => 0, 'names' => [], 'allocations' => []];
             $result[$key]['amountCents'] += (int)($fact['amount_cents'] ?? 0);
             $name = trim((string)($fact['employee_name_snapshot'] ?? ''));
             if ($name !== '' && !in_array($name, $result[$key]['names'], true)) {
                 $result[$key]['names'][] = $name;
             }
+            $numerator = max(0, (int)($fact['allocation_weight_numerator'] ?? 0));
+            $denominator = max(1, (int)($fact['allocation_weight_denominator'] ?? 1));
+            $result[$key]['allocations'][] = [
+                'employeeId' => (int)($fact['employee_id'] ?? 0),
+                'employeeName' => $name,
+                'employeeType' => (string)($fact['employee_type_snapshot'] ?? ''),
+                'roleSnapshot' => (string)($fact['role_snapshot'] ?? ''),
+                'allocationWeightNumerator' => $numerator,
+                'allocationWeightDenominator' => $denominator,
+                'allocationRatio' => $numerator . '/' . $denominator,
+                'allocationRatioPercent' => $denominator > 0 ? round($numerator * 100 / $denominator, 2) : 0,
+                'amount' => $this->centsToMoney((int)($fact['amount_cents'] ?? 0)),
+                'ruleCodeSnapshot' => (string)($fact['rule_code_snapshot'] ?? ''),
+                'ruleNameSnapshot' => (string)($fact['rule_name_snapshot'] ?? ''),
+                'ruleVersionSnapshot' => (string)($fact['rule_version_snapshot'] ?? ''),
+            ];
         }
         return $result;
+    }
+
+    private function laborPerformanceTypeLabel(string $mode): string
+    {
+        return [
+            'checkout_manual_override' => '本次手工费',
+            'project_rule' => '项目固定手工费',
+            'actual_entitlement_amount' => '按实际项目金额',
+            'project_configured_amount' => '按项目配置金额',
+        ][$mode] ?? ($mode !== '' ? $mode : '项目固定手工费');
+    }
+
+    private function laborPerformanceRatio(array $allocations): string
+    {
+        $parts = [];
+        foreach ($allocations as $allocation) {
+            $name = trim((string)($allocation['employeeName'] ?? '')) ?: '未命名手艺人';
+            $percent = (float)($allocation['allocationRatioPercent'] ?? 0);
+            $parts[] = $name . ' ' . rtrim(rtrim(number_format($percent, 2, '.', ''), '0'), '.') . '%';
+        }
+        return implode('、', $parts);
     }
 
     private function serviceLineKey(array $row): string

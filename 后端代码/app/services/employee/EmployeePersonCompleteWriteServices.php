@@ -113,6 +113,7 @@ class EmployeePersonCompleteWriteServices extends BaseServices
             'can_choose' => (int)($input['can_choose'] ?? 1),
             'cashier_salesperson_enabled' => (int)($input['cashier_salesperson_enabled'] ?? 1),
             'cashier_craftsman_enabled' => (int)($input['cashier_craftsman_enabled'] ?? 1),
+            'craftsman_performance_type' => trim((string)($input['craftsman_performance_type'] ?? EmployeeCraftsmanPerformanceTypeServices::COMMISSION)),
             'is_fencheng' => (int)($input['is_fencheng'] ?? 0),
             'mobile_enabled_present' => $mobileEnabledPresent ? 1 : 0,
             'mobile_enabled' => $mobileEnabledPresent ? $mobileEnabled : null,
@@ -363,6 +364,10 @@ class EmployeePersonCompleteWriteServices extends BaseServices
             'is_fencheng' => $staff ? (int)($staff['is_fencheng'] ?? 0) : 0,
             'status' => (int)($emp['status'] ?? 1),
         ];
+        $craftsmanType = $staff
+            ? (string)($staff['craftsman_performance_type'] ?? EmployeeCraftsmanPerformanceTypeServices::COMMISSION)
+            : EmployeeCraftsmanPerformanceTypeServices::COMMISSION;
+        $result = array_merge($result, app()->make(EmployeeCraftsmanPerformanceTypeServices::class)->project($craftsmanType));
         // 员工授权是手机端唯一入口开关。任职渠道记录仅供兼容和审计，
         // 无店直属员工没有任职记录也可以由组织数据权限限定可操作门店。
         $mobileAuthOn = $this->hasEmployeeMobileAuthTable()
@@ -554,6 +559,8 @@ class EmployeePersonCompleteWriteServices extends BaseServices
                 'can_choose' => (int)($input['can_choose'] ?? 1) === 1 ? 1 : 0,
                 'cashier_salesperson_enabled' => (int)($input['cashier_salesperson_enabled'] ?? 1) === 1 ? 1 : 0,
                 'cashier_craftsman_enabled' => (int)($input['cashier_craftsman_enabled'] ?? 1) === 1 ? 1 : 0,
+                'craftsman_performance_type' => app()->make(EmployeeCraftsmanPerformanceTypeServices::class)
+                    ->normalize($input['craftsman_performance_type'] ?? EmployeeCraftsmanPerformanceTypeServices::COMMISSION),
                 'is_fencheng' => (int)($input['is_fencheng'] ?? 0) === 1 ? 1 : 0,
                 'is_reservable' => array_key_exists('is_reservable', $input)
                     ? ((int)$input['is_reservable'] === 1 ? 1 : 0) : 1,
@@ -744,12 +751,17 @@ class EmployeePersonCompleteWriteServices extends BaseServices
             'cashier_craftsman_enabled' => $staffId > 0
                 ? (int)Db::name('system_store_staff')->where('id', $staffId)->value('cashier_craftsman_enabled')
                 : 1,
+            'craftsman_performance_type' => $staffId > 0
+                ? (string)Db::name('system_store_staff')->where('id', $staffId)->value('craftsman_performance_type')
+                : EmployeeCraftsmanPerformanceTypeServices::COMMISSION,
             'mobile_enabled' => $mobileAccessOut !== null
                 ? (int)$mobileAccessOut['enabled']
                 : ($this->hasEmployeeMobileAuthTable()
                     && (int)Db::name('employee_mobile_auth')->where('employee_id', $employeeId)->where('is_del', 0)->where('status', 1)->count() > 0 ? 1 : 0),
             'auth_version' => (int)($authProjection['auth_version'] ?? 0),
         ];
+        $out = array_merge($out, app()->make(EmployeeCraftsmanPerformanceTypeServices::class)
+            ->project((string)($out['craftsman_performance_type'] ?? EmployeeCraftsmanPerformanceTypeServices::COMMISSION)));
         if ($employmentTypeOut !== null) {
             $out['employment_type_code'] = (string)$employmentTypeOut['employment_type_code'];
             $out['employment_type_version'] = (int)$employmentTypeOut['employment_type_version'];

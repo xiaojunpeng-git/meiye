@@ -135,6 +135,7 @@ class StaffUnifiedQueryProvider implements UnifiedQueryProvider
             ->field([
                 'ss.*',
                 'e.name' => 'employee_name',
+                'e.employment_type_code' => 'employment_type_code',
                 's.name' => 'store_name_value',
                 'u.nickname' => 'user_nickname',
                 'p.name' => 'position_name',
@@ -151,6 +152,9 @@ class StaffUnifiedQueryProvider implements UnifiedQueryProvider
                 ['max_rows' => UnifiedQueryExecutionServices::MAX_SOURCE_ROWS]
             );
         }
+
+        $positionLabelsByStaff = $this->positionLabelsByStaff($rows);
+        $mobileAuthEmployeeIds = $this->mobileAuthEmployeeIds($rows);
 
         /** @var SystemRoleServices $roleServices */
         $roleServices = app()->make(SystemRoleServices::class);
@@ -204,12 +208,18 @@ class StaffUnifiedQueryProvider implements UnifiedQueryProvider
                 'roles' => (int)($row['level'] ?? 1) === 0
                     ? '超级管理员'
                     : ($roleNames ? implode(',', $roleNames) : '-'),
-                'position_label' => (string)($row['position_name'] ?? '-'),
+                'position_label' => $positionLabelsByStaff[(int)($row['id'] ?? 0)]
+                    ?? ((string)($row['position_name'] ?? '-') ?: '-'),
                 'position_level_label' => (string)($row['position_level_name'] ?? '-'),
                 'is_manager' => (int)($row['is_manager'] ?? 0) === 1 ? '是' : '否',
                 'cashier_salesperson_enabled' => (int)($row['cashier_salesperson_enabled'] ?? 1) === 1 ? '是' : '否',
                 'cashier_craftsman_enabled' => (int)($row['cashier_craftsman_enabled'] ?? 1) === 1 ? '是' : '否',
+                'craftsman_performance_type' => $this->craftsmanPerformanceTypeLabel($row['craftsman_performance_type'] ?? ''),
+                'employment_type_code' => $this->employmentTypeLabel($row['employment_type_code'] ?? ''),
                 'status' => (int)($row['status'] ?? 0) === 1 ? '在职' : '离职',
+                // 手机端开关的权威来源是员工授权表，与人员编辑页保持同一口径；
+                // system_store_staff.mobile_enabled 仅作为历史兼容字段，不再直接展示。
+                'mobile_enabled' => isset($mobileAuthEmployeeIds[(int)($row['employee_id'] ?? 0)]) ? '开启' : '关闭',
                 'is_fencheng' => (int)($row['is_fencheng'] ?? 0) === 1 ? '参与' : '不参与',
                 'employee_number' => (string)($row['employee_number'] ?? ''),
                 'join_date' => $this->date($row['join_date'] ?? ''),
@@ -239,6 +249,78 @@ class StaffUnifiedQueryProvider implements UnifiedQueryProvider
             ];
         }
         return $records;
+    }
+
+    protected function craftsmanPerformanceTypeLabel($type): string
+    {
+        return [
+            'commission' => '消耗业绩',
+            'labor' => '手工费',
+            'commission_labor' => '消耗业绩+手工费',
+        ][trim((string)$type)] ?? '消耗业绩';
+    }
+
+    protected function positionLabelsByStaff(array $rows): array
+    {
+        $staffIds = array_values(array_unique(array_filter(array_map(static function (array $row): int {
+            return (int)($row['id'] ?? 0);
+        }, $rows))));
+        if (!$staffIds) return [];
+        $jobRows = Db::name('staff_job_position')->alias('j')
+            ->leftJoin('position p', 'p.id = j.position_id')
+            ->whereIn('j.staff_id', $staffIds)
+            ->where('j.is_del', 0)
+            ->where('j.status', 1)
+            ->where('j.end_time', 0)
+            ->field('j.staff_id,p.name AS position_name')
+            ->order('j.staff_id', 'asc')->order('j.id', 'asc')
+            ->select()->toArray();
+        $labels = [];
+        foreach ($jobRows as $job) {
+            $staffId = (int)($job['staff_id'] ?? 0);
+            $label = trim((string)($job['position_name'] ?? ''));
+            if ($staffId <= 0 || $label === '') continue;
+            $labels[$staffId][] = $label;
+        }
+        $result = [];
+        foreach ($labels as $staffId => $names) {
+            $result[(int)$staffId] = implode('、', array_values(array_unique($names)));
+        }
+        return $result;
+    }
+
+    protected function mobileAuthEmployeeIds(array $rows): array
+    {
+        $employeeIds = array_values(array_unique(array_filter(array_map(
+            static function (array $row): int {
+                return (int)($row['employee_id'] ?? 0);
+            },
+            $rows
+        ))));
+        if (!$employeeIds) return [];
+        try {
+            $ids = Db::name('employee_mobile_auth')
+                ->whereIn('employee_id', $employeeIds)
+                ->where('is_del', 0)
+                ->where('status', 1)
+                ->column('employee_id');
+        } catch (\Throwable $e) {
+            return [];
+        }
+        $result = [];
+        foreach ($ids as $id) {
+            $result[(int)$id] = true;
+        }
+        return $result;
+    }
+
+    protected function employmentTypeLabel($type): string
+    {
+        return [
+            'internal' => '内部员工',
+            'partner' => '合作方',
+            'outsourced' => '外包',
+        ][trim((string)$type)] ?? '内部员工';
     }
 
     protected function rowAllowed(array $row, array $scope): bool

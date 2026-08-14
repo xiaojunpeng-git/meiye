@@ -155,8 +155,8 @@
                 </FormItem>
               </Col>
             </Row>
-            <Row :gutter="24">
-              <Col :span="12">
+            <Row :gutter="24" v-if="Number(formInline.cashier_salesperson_enabled) === 1">
+              <Col :span="24">
                 <FormItem label="人员类型：">
                   <RadioGroup v-model="formInline.employment_type_code" type="button">
                     <Radio label="internal" :disabled="!canEditEmploymentType">内部员工</Radio>
@@ -170,6 +170,20 @@
                   </div>
                   <div v-else-if="!formInline.employment_type_code" class="form-tip scope-warn">
                     该员工尚未分类，请选择人员类型。
+                  </div>
+                </FormItem>
+              </Col>
+            </Row>
+            <Row :gutter="24" v-if="Number(formInline.cashier_craftsman_enabled) === 1">
+              <Col :span="24">
+                <FormItem label="手艺人服务业绩类型：">
+                  <RadioGroup v-model="formInline.craftsman_performance_type" type="button">
+                    <Radio label="commission">消耗业绩</Radio>
+                    <Radio label="labor">手工费</Radio>
+                    <Radio label="commission_labor">消耗业绩+手工费</Radio>
+                  </RadioGroup>
+                  <div class="form-tip">
+                    消耗业绩、手工费或两者同时参与服务结算。
                   </div>
                 </FormItem>
               </Col>
@@ -573,6 +587,7 @@ function getDefaultStaffForm() {
     can_choose: 1,
     cashier_salesperson_enabled: 1,
     cashier_craftsman_enabled: 1,
+    craftsman_performance_type: 'commission',
     is_reservable: 1,
     is_fencheng: 0,
     mobile_enabled: 0,
@@ -991,6 +1006,9 @@ export default {
             ? data.cashier_craftsman_enabled
             : base.cashier_craftsman_enabled,
         ),
+        craftsman_performance_type: ['commission', 'labor', 'commission_labor'].includes(String((data && data.craftsman_performance_type) || ''))
+          ? String(data.craftsman_performance_type)
+          : base.craftsman_performance_type,
         is_fencheng: Number((data && data.is_fencheng) != null ? data.is_fencheng : base.is_fencheng),
         mobile_enabled: mobileAuthLoaded
           ? (Number(data.mobile_enabled) === 1 ? 1 : 0)
@@ -1242,6 +1260,9 @@ export default {
       payload.store_ids = [];
       payload.cashier_salesperson_enabled = Number(this.formInline.cashier_salesperson_enabled) === 1 ? 1 : 0;
       payload.cashier_craftsman_enabled = Number(this.formInline.cashier_craftsman_enabled) === 1 ? 1 : 0;
+      payload.craftsman_performance_type = ['commission', 'labor', 'commission_labor'].includes(String(this.formInline.craftsman_performance_type || ''))
+        ? String(this.formInline.craftsman_performance_type)
+          : 'commission';
       // Legacy consumers still read can_choose. Keep it as an OR projection
       // while V3 uses the two role-specific authoritative switches.
       payload.can_choose = payload.cashier_salesperson_enabled === 1

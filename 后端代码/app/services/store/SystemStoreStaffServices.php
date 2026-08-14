@@ -358,6 +358,8 @@ class SystemStoreStaffServices extends BaseServices
                 $this->enrichStaffListItem($item, $allRole, $userService, $hideFencheng);
             }
             unset($item);
+            $this->enrichStaffPositionLabels($list);
+            $this->enrichMobileEnabled($list);
         }
         $count = $this->dao->count($where);
         return compact('list', 'count');
@@ -382,6 +384,12 @@ class SystemStoreStaffServices extends BaseServices
         $allRole = $storeRows ? $this->loadRoleMapForStaffList($storeRows) : [];
         /** @var UserServices $userService */
         $userService = app()->make(UserServices::class);
+        $employeeIds = array_values(array_unique(array_filter(array_map(static function ($row) {
+            return (int)($row['employee_id'] ?? 0);
+        }, $storeRows ?: []))));
+        $employmentTypeByEmployee = $employeeIds
+            ? Db::name('employee')->whereIn('id', $employeeIds)->column('employment_type_code', 'id')
+            : [];
 
         // 组织与任职门店是两条独立关系：门店行的组织取门店绑定组织，
         // 不能再把组织名称塞进 store_name。
@@ -409,6 +417,7 @@ class SystemStoreStaffServices extends BaseServices
         }
         $byEmployee = [];
         foreach ($storeRows as &$row) {
+            $row['employment_type_code'] = (string)($employmentTypeByEmployee[(int)($row['employee_id'] ?? 0)] ?? 'internal');
             $this->enrichStaffListItem($row, $allRole, $userService, $hideFencheng);
             $row['is_organization_direct'] = 0;
             $storeOrganization = $organizationNameByStore[(int)($row['store_id'] ?? 0)] ?? null;
@@ -449,7 +458,7 @@ class SystemStoreStaffServices extends BaseServices
             $directRows = [];
         } else {
             $directRows = $directQuery
-                ->field('oe.org_id,oe.employee_id,oe.job_title,oe.source,e.id,e.uid,e.name,e.phone,e.avatar,e.status,u.nickname,o.name as org_name')
+                ->field('oe.org_id,oe.employee_id,oe.job_title,oe.source,e.id,e.uid,e.name,e.phone,e.avatar,e.status,e.employment_type_code,u.nickname,o.name as org_name')
                 ->order('e.id', 'asc')
                 ->select()
                 ->toArray();
@@ -507,6 +516,11 @@ class SystemStoreStaffServices extends BaseServices
                 'status' => (int)($row['status'] ?? 0),
                 'is_manager' => 0,
                 'can_choose' => 0,
+                'cashier_salesperson_enabled' => 0,
+                'cashier_craftsman_enabled' => 0,
+                'craftsman_performance_type' => 'commission',
+                'employment_type_code' => (string)($row['employment_type_code'] ?? 'internal'),
+                'mobile_enabled' => 0,
                 'is_fencheng' => 0,
                 'has_pwd' => 0,
                 'is_customer' => 0,
@@ -516,6 +530,8 @@ class SystemStoreStaffServices extends BaseServices
             ];
         }
         $list = array_values($byEmployee);
+        $this->enrichStaffPositionLabels($list);
+        $this->enrichMobileEnabled($list);
         usort($list, static function (array $left, array $right): int {
             return ((int)($left['is_organization_direct'] ?? 0) <=> (int)($right['is_organization_direct'] ?? 0))
                 ?: ((int)($left['id'] ?? 0) <=> (int)($right['id'] ?? 0));
@@ -569,6 +585,8 @@ class SystemStoreStaffServices extends BaseServices
                 $item['performance_price'] = $orderData['sum'];
             }
             unset($item);
+            $this->enrichStaffPositionLabels($list);
+            $this->enrichMobileEnabled($list);
         }
         $count = $this->dao->count($where);
         return compact('list', 'count');
@@ -1730,6 +1748,17 @@ class SystemStoreStaffServices extends BaseServices
         $item['is_fencheng'] = (int)($item['is_fencheng'] ?? 0);
         $item['cashier_salesperson_enabled'] = (int)($item['cashier_salesperson_enabled'] ?? 1);
         $item['cashier_craftsman_enabled'] = (int)($item['cashier_craftsman_enabled'] ?? 1);
+        $type = (string)($item['craftsman_performance_type'] ?? 'commission');
+        if (!in_array($type, ['commission', 'labor', 'commission_labor'], true)) {
+            $type = 'commission';
+        }
+        $item['craftsman_performance_type'] = $type;
+        $item['craftsman_performance_enabled'] = $type === 'labor' ? 0 : 1;
+        $item['craftsman_labor_enabled'] = $type === 'commission' ? 0 : 1;
+        $item['mobile_enabled'] = (int)($item['mobile_enabled'] ?? 0) === 1 ? 1 : 0;
+        $employmentType = (string)($item['employment_type_code'] ?? 'internal');
+        $item['employment_type_code'] = in_array($employmentType, ['internal', 'partner', 'outsourced'], true)
+            ? $employmentType : 'internal';
         if ($hideFencheng) {
             unset($item['is_fencheng']);
         }
@@ -1742,6 +1771,71 @@ class SystemStoreStaffServices extends BaseServices
     }
 
     /**
+     * 手机端开关统一读取员工授权表，与人员详情页保持同一权威口径。
+     * system_store_staff.mobile_enabled 仅保留为历史兼容字段，不参与列表展示。
+     */
+    protected function enrichMobileEnabled(array &$list): void
+    {
+        $employeeIds = array_values(array_unique(array_filter(array_map(static function ($row) {
+            return (int)($row['employee_id'] ?? 0);
+        }, $list))));
+        if (!$employeeIds) return;
+        try {
+            $enabledIds = Db::name('employee_mobile_auth')
+                ->whereIn('employee_id', $employeeIds)
+                ->where('is_del', 0)
+                ->where('status', 1)
+                ->column('employee_id');
+        } catch (\Throwable $e) {
+            $enabledIds = [];
+        }
+        $enabled = [];
+        foreach ($enabledIds as $employeeId) {
+            $enabled[(int)$employeeId] = true;
+        }
+        foreach ($list as &$item) {
+            $item['mobile_enabled'] = isset($enabled[(int)($item['employee_id'] ?? 0)]) ? 1 : 0;
+        }
+        unset($item);
+    }
+
+    /**
+     * 岗位权威来源是 staff_job_position；system_store_staff.position 仅兼容旧数据。
+     * 列表按当前页批量回显全部有效岗位，避免逐员工查询。
+     */
+    protected function enrichStaffPositionLabels(array &$list): void
+    {
+        $staffIds = array_values(array_unique(array_filter(array_map(static function ($row) {
+            return (int)($row['id'] ?? 0);
+        }, $list))));
+        if (!$staffIds) return;
+        $rows = Db::name('staff_job_position')->alias('j')
+            ->leftJoin('position p', 'p.id = j.position_id')
+            ->whereIn('j.staff_id', $staffIds)
+            ->where('j.is_del', 0)
+            ->where('j.status', 1)
+            ->where('j.end_time', 0)
+            ->field('j.staff_id,p.name AS position_name')
+            ->order('j.staff_id', 'asc')
+            ->order('j.id', 'asc')
+            ->select()->toArray();
+        $labels = [];
+        foreach ($rows as $row) {
+            $staffId = (int)($row['staff_id'] ?? 0);
+            $label = trim((string)($row['position_name'] ?? ''));
+            if ($staffId <= 0 || $label === '') continue;
+            $labels[$staffId][] = $label;
+        }
+        foreach ($list as &$item) {
+            $staffId = (int)($item['id'] ?? 0);
+            if ($staffId > 0 && !empty($labels[$staffId])) {
+                $item['position_label'] = implode('、', array_values(array_unique($labels[$staffId])));
+            }
+        }
+        unset($item);
+    }
+
+    /**
      * 详情读取格式化
      */
     public function formatStaffRead(array $staffInfo, bool $hideFencheng = false): array
@@ -1751,6 +1845,13 @@ class SystemStoreStaffServices extends BaseServices
         $staffInfo['is_fencheng'] = (int)($staffInfo['is_fencheng'] ?? 0);
         $staffInfo['cashier_salesperson_enabled'] = (int)($staffInfo['cashier_salesperson_enabled'] ?? 1);
         $staffInfo['cashier_craftsman_enabled'] = (int)($staffInfo['cashier_craftsman_enabled'] ?? 1);
+        $type = (string)($staffInfo['craftsman_performance_type'] ?? 'commission');
+        if (!in_array($type, ['commission', 'labor', 'commission_labor'], true)) {
+            $type = 'commission';
+        }
+        $staffInfo['craftsman_performance_type'] = $type;
+        $staffInfo['craftsman_performance_enabled'] = $type === 'labor' ? 0 : 1;
+        $staffInfo['craftsman_labor_enabled'] = $type === 'commission' ? 0 : 1;
         if ($hideFencheng) {
             unset($staffInfo['is_fencheng']);
         }

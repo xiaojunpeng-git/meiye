@@ -180,6 +180,17 @@ recordOk('服务记录使用会员详情同源的可见服务单号并携带会�
 recordOk('劳动业绩只汇总有效正向的劳动事实', strpos($source, "->where('performance_type', 'labor_performance_allocated')") !== false
     && strpos($source, "->where('fact_direction', 'forward')") !== false
     && strpos($source, "->where('status', 'effective')") !== false);
+recordOk('服务记录携带服务事实手工费与服务业绩类型快照', strpos($source, "'sf.labor_amount_cents'") !== false
+    && strpos($source, "'sf.labor_mode'") !== false
+    && strpos($source, "'laborFeeAmount' =>") !== false
+    && strpos($source, "'laborPerformanceType' =>") !== false
+    && strpos($source, "'laborPerformanceTypeLabel' =>") !== false);
+recordOk('服务记录携带劳动业绩分配比例和人员快照', strpos($source, 'allocation_weight_numerator') !== false
+    && strpos($source, 'allocation_weight_denominator') !== false
+    && strpos($source, "'laborPerformanceRatio' =>") !== false
+    && strpos($source, "'laborPerformanceAllocations' =>") !== false
+    && strpos($source, "employee_type_snapshot") !== false
+    && strpos($source, "rule_version_snapshot") !== false);
 recordOk('补交记录同时读取销售与充值 V3 权威补交和旧兼容记录，展示不回写旧表', strpos($source, "readV3SalesDebtRepayments") !== false
     && strpos($source, "cashier_v3_debt_repayment_collection") !== false
     && strpos($source, "readV3RechargeDebtRepayments") !== false

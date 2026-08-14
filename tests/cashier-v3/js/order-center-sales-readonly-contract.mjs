@@ -177,6 +177,16 @@ ok('订单列表中的真实会员可打开既有会员详情，游客保持普�
   assert.match(view, /查看\$\{displayRecordField\(record, fieldItem\.key\)\}的会员详情/)
 })
 
+ok('服务记录列表展示结账事实中的手工费、服务业绩类型与业绩比例', () => {
+  const view = readFileSync(new URL('../../../前端代码/cashier-v3/src/views/OrderCenterView.vue', import.meta.url), 'utf8')
+  assert.match(view, /field\('labor_fee_amount', '手工费', 'money'\)/)
+  assert.match(view, /field\('labor_performance_type', '服务业绩类型'\)/)
+  assert.match(view, /field\('labor_performance_ratio', '业绩比例'\)/)
+  assert.match(view, /labor_fee_amount: \['laborFeeAmount', 'manualLaborFeeAmount'\]/)
+  assert.match(view, /labor_performance_type: \['laborPerformanceTypeLabel', 'laborPerformanceType'\]/)
+  assert.match(view, /labor_performance_ratio: \['laborPerformanceRatio'\]/)
+})
+
 process.stdout.write(`ASSERT_PASSED=${passed}\n`)
 process.stdout.write('ASSERT_FAILED=0\n')
 process.stdout.write('C5_O1_FRONTEND_PROJECTION=PASS\n')

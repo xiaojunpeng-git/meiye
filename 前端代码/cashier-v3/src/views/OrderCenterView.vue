@@ -118,7 +118,9 @@ const ORDER_TABS = [
       field('entitlement_source', '权益来源'), field('source_card', '来源卡名称'),
       field('source_card_no', '完整卡号'), field('used_times', '本次使用次数', 'number'),
       field('store', '服务门店', 'store'), field('craftsman', '手艺人', 'person'),
-      field('labor_performance_amount', '劳动业绩', 'money'), field('operator', '操作人', 'person'),
+      field('labor_fee_amount', '手工费', 'money'), field('labor_performance_type', '服务业绩类型'),
+      field('labor_performance_ratio', '业绩比例'), field('labor_performance_amount', '劳动业绩', 'money'),
+      field('operator', '操作人', 'person'),
       field('service_status', '状态', 'status'), field('service_completed_at', '服务完成时间', 'date')
     ]
   },
@@ -207,6 +209,9 @@ const FIELD_ALIASES = {
   service_record_no: ['serviceRecordNo', 'serviceFactId'], service_project: ['serviceProject', 'projectName'],
   entitlement_source: ['entitlementSource'], source_card_no: ['sourceCardNo', 'sourceCode'],
   used_times: ['usedTimes', 'quantity'], craftsman: ['craftsmenSummary', 'craftsmen'],
+  labor_fee_amount: ['laborFeeAmount', 'manualLaborFeeAmount'],
+  labor_performance_type: ['laborPerformanceTypeLabel', 'laborPerformanceType'],
+  labor_performance_ratio: ['laborPerformanceRatio'],
   labor_performance_amount: ['laborPerformanceAmount'], service_status: ['serviceStatus'],
   service_completed_at: ['serviceCompletedAt', 'completedAt']
 }

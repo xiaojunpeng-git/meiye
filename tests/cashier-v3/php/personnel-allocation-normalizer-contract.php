@@ -21,15 +21,11 @@ $weighted = CashierV3RequestNormalizer::normalize('update-cart-line-service-sett
     ],
 ])['normalized'];
 personnelAllocationAssert(
-    ($weighted['craftsmen'][0] ?? null) === [
-        'staffId' => 11,
-        'laborWeight' => 60,
-        'isPointCustomer' => true,
-    ] && ($weighted['craftsmen'][1] ?? null) === [
-        'staffId' => 12,
-        'laborWeight' => 40,
-        'isPointCustomer' => false,
-    ],
+    ($weighted['craftsmen'][0]['staffId'] ?? 0) === 11
+        && ($weighted['craftsmen'][0]['laborWeight'] ?? 0) === 60
+        && ($weighted['craftsmen'][0]['craftsmanPerformanceType'] ?? '') === 'commission_labor'
+        && ($weighted['craftsmen'][1]['staffId'] ?? 0) === 12
+        && ($weighted['craftsmen'][1]['laborWeight'] ?? 0) === 40,
     '完整模式手艺人比例和点客标记必须进入规范化命令'
 );
 
@@ -86,5 +82,22 @@ try {
     $decimalRejected = ($exception->getDetail()['reason'] ?? '') === 'labor_manual_fee_invalid';
 }
 personnelAllocationAssert($decimalRejected, '小数临时手工费必须拒绝');
+
+$ordinarySettingError = false;
+try {
+    CashierV3RequestNormalizer::normalize('update-cart-line-service-settings', [
+        'lineId' => 'sale:ordinary-project',
+        'craftsmen' => [
+            ['staffId' => 11, 'laborWeight' => 0],
+        ],
+    ]);
+} catch (CashierV3CommandException $exception) {
+    $ordinarySettingError = $exception->getMessage() === '购物车服务设置无效，请重新选择。'
+        && ($exception->getDetail()['reason'] ?? '') === 'craftsman_weight_invalid';
+}
+personnelAllocationAssert(
+    $ordinarySettingError,
+    '普通项目人员分配校验失败不得误报为卡内项目明细无效'
+);
 
 echo "PASS personnel-allocation-normalizer-contract\n";

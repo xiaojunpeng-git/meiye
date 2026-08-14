@@ -294,7 +294,7 @@ final class CashierV3SaleOnlyFactAssembler
             // facts in the same immutable checkout fact plan; it never changes
             // the project's configured default rule.
             $manualLaborFeeCents = (int)($orderLine['manual_labor_fee_cents'] ?? 0);
-            if ($manualLaborFeeCents > 0 && (string)$orderLine['item_type'] === 'project') {
+            if (($manualLaborFeeCents > 0 || !empty($orderLine['craftsmen_snapshot_json'])) && (string)$orderLine['item_type'] === 'project') {
                 try {
                     $craftsmen = CashierV3CheckoutCraftsmenSnapshot::decode(
                         (string)$orderLine['craftsmen_snapshot_json']
@@ -307,21 +307,30 @@ final class CashierV3SaleOnlyFactAssembler
                 }
                 $staffIds = [];
                 $weights = [];
+                $perPersonFees = [];
                 foreach ($craftsmen as $craftsman) {
                     $staffId = (int)($craftsman['staffId'] ?? 0);
                     $weight = (int)($craftsman['laborWeight'] ?? 0);
-                    if ($staffId <= 0 || $weight <= 0) {
+                    $fee = max(0, (int)($craftsman['laborFeeCents'] ?? $craftsman['labor_fee_cents'] ?? 0));
+                    if ($staffId <= 0 || $weight < 0 || ($weight === 0 && $fee <= 0)) {
                         throw self::failure('sale_only_fact_manual_labor_craftsman_snapshot_invalid');
                     }
                     $staffIds[] = $staffId;
                     $weights[$staffId] = $weight;
+                    $perPersonFees[$staffId] = $fee;
                 }
-                $totalLabor = $manualLaborFeeCents * (int)$orderLine['quantity'];
-                $allocations = CashierV3EntitlementCompletionKernel::allocateLaborAmount(
-                    $totalLabor,
-                    $staffIds,
-                    $weights
-                );
+                if ($manualLaborFeeCents <= 0 && array_sum($perPersonFees) <= 0) {
+                    continue;
+                }
+                $hasPerPersonFee = array_sum($perPersonFees) > 0;
+                $totalLabor = $hasPerPersonFee
+                    ? array_sum($perPersonFees) * (int)$orderLine['quantity']
+                    : $manualLaborFeeCents * (int)$orderLine['quantity'];
+                $allocations = $hasPerPersonFee
+                    ? array_map(static function (int $staffId) use ($perPersonFees, $orderLine): array {
+                        return ['staffId' => $staffId, 'amountCents' => $perPersonFees[$staffId] * (int)$orderLine['quantity']];
+                    }, $staffIds)
+                    : CashierV3EntitlementCompletionKernel::allocateLaborAmount($totalLabor, $staffIds, $weights);
                 foreach ($allocations as $allocation) {
                     $staffId = (int)$allocation['staffId'];
                     $craftsman = null;
@@ -350,7 +359,7 @@ final class CashierV3SaleOnlyFactAssembler
                         'employeeTypeAuthorityVersion' => 1,
                         'roleSnapshot' => !empty($craftsman['isPrimary']) ? 'primary_craftsman' : 'craftsman',
                         'allocationWeightNumerator' => (int)($craftsman['laborWeight'] ?? 0),
-                        'allocationWeightDenominator' => array_sum($weights),
+                        'allocationWeightDenominator' => max(1, array_sum($weights)),
                         'allocationBaseAmountCents' => $totalLabor,
                         'amountCents' => (int)$allocation['amountCents'],
                         'ruleCodeSnapshot' => 'SALE-PROJECT-MANUAL-LABOR-V1',

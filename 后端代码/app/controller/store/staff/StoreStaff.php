@@ -260,6 +260,8 @@ class StoreStaff extends AuthController
             'status' => (int)($raw['status'] ?? 1),
             'cashier_salesperson_enabled' => (int)($raw['cashier_salesperson_enabled'] ?? 1),
             'cashier_craftsman_enabled' => (int)($raw['cashier_craftsman_enabled'] ?? 1),
+            'craftsman_performance_type' => (string)($raw['craftsman_performance_type'] ?? 'commission'),
+            'mobile_enabled' => (int)($raw['mobile_enabled'] ?? 0),
             'request_token' => $bodyToken,
         ];
         // 档案字段全部由人员完整保存编排在同一事务内落库；不接受角色、规则或门店范围等扩权字段。

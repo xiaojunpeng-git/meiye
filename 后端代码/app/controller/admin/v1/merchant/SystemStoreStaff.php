@@ -602,6 +602,7 @@ class SystemStoreStaff extends AuthController
             'can_choose' => (int)($raw['can_choose'] ?? 1),
             'cashier_salesperson_enabled' => (int)($raw['cashier_salesperson_enabled'] ?? 1),
             'cashier_craftsman_enabled' => (int)($raw['cashier_craftsman_enabled'] ?? 1),
+            'craftsman_performance_type' => (string)($raw['craftsman_performance_type'] ?? 'commission'),
             'is_fencheng' => (int)($raw['is_fencheng'] ?? 0),
             'is_reservable' => (int)($raw['is_reservable'] ?? 1),
             'verify_status' => (int)($raw['verify_status'] ?? 1),

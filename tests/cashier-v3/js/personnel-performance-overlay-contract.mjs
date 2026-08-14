@@ -29,6 +29,14 @@ const completionAuthority = fs.readFileSync(
   path.join(root, '后端代码/app/services/cashier/v3/checkout/CashierV3EntitlementCompletionAuthorityAdapter.php'),
   'utf8'
 )
+const selector = fs.readFileSync(
+  path.join(root, '后端代码/app/services/cashier/v3/member/CashierV3QueryEntitySelectorServices.php'),
+  'utf8'
+)
+const craftsmanSnapshot = fs.readFileSync(
+  path.join(root, '后端代码/app/services/cashier/v3/settlement/CashierV3CheckoutCraftsmenSnapshot.php'),
+  'utf8'
+)
 const idempotencyKeys = fs.readFileSync(
   path.join(root, '后端代码/app/services/cashier/v3/CashierV3IdempotencyKeyServices.php'),
   'utf8'
@@ -92,6 +100,11 @@ assert.match(workbench, /const showSalesManagers = !isEntitlementLine\(line\) &&
 assert.match(workbench, /导购\/销售经理<span/, '未选择时入口不得显示待选择文案')
 assert.match(workbench, /v-if="!isEntitlementLine\(line\)" class="cart-line__meta-slot cart-line__meta-slot--salesperson"/, '权益行不得展示销售人入口')
 assert.match(workbench, /if \(!isEntitlementLine\(line\)\) payload\.salespeople = salespeople/, '权益行确认载荷不得携带销售人')
+assert.match(
+  workbench,
+  /craftsmanPerformanceType: record\.craftsmanPerformanceType \|\| record\.craftsman_performance_type,[\s\S]*laborFeeCents: Number\(record\.laborFeeCents \?\? record\.labor_fee_cents \?\? 0\)/,
+  '确认手艺人分配时不得丢失服务业绩类型和每人手工费'
+)
 assert.match(workbench, /requestAction\('apply-cashier-personnel-to-all-lines',[\s\S]*craftsmen,[\s\S]*salespeople,/, '应用全部人必须一次提交双角色权威事务命令')
 assert.match(
   idempotencyKeys,
@@ -109,7 +122,9 @@ assert.match(
 )
 assert.match(workspace, /function applySalespeopleToAllSaleLinesInTx\(/, '后端必须在同一事务中更新全部本次购买明细')
 assert.match(workspace, /function applyCraftsmenToAllServiceLinesInTx\([\s\S]*?\$isSaleProject[\s\S]*?\$isEntitlementService[\s\S]*?'craftsmen_json'/, '后端必须在同一事务中更新项目和权益服务行的手艺人')
-assert.match(workspace, /'laborWeight' => \$weights\[\$staffId\]/, '手艺人比例必须写入权威购物车草稿')
+assert.match(workspace, /'laborWeight' => \$effectiveWeight/, '手艺人比例必须写入权威购物车草稿')
+assert.match(workspace, /'craftsmanPerformanceType' => \$type/, '手艺人服务业绩类型必须写入权威购物车草稿')
+assert.match(workspace, /'laborFeeCents' => \$laborFeeCents/, '手工费必须按每人金额写入权威购物车草稿')
 assert.match(completionAuthority, /'laborWeight' => \(int\)\(\$settings\['laborWeight'\]/, '结账权威快照必须继续使用购物车手艺人比例')
 assert.match(workspace, /if \(\$isEntitlement && \(\$hasSalespeople \|\| \$hasGuides \|\| \$hasSalesManagers\)\)/, '事务服务必须拒绝权益行销售人及集团归属写入')
 assert.match(workspace, /sales_manager_selections_json/, '工作台必须持久化销售经理选择快照')
@@ -119,9 +134,30 @@ assert.match(cashierModule, /'apply-cashier-craftsmen-to-all-service-lines'/, '�
 assert.match(cashierModule, /registerCommand\('apply-cashier-personnel-to-all-lines'[\s\S]*applyCraftsmenToAllServiceLinesInTx[\s\S]*applySalespeopleToAllSaleLinesInTx/, '后端统一命令必须在同一事务中依次应用手艺人和销售人')
 assert.match(workspace, /\$salespeople = \$lineRole === self::ROLE_SALE[\s\S]*: \[\];/, '权益草稿投影不得加载或展示销售人快照')
 assert.match(workspace, /if \(\$isSale && !\$isSaleProject\) \{[\s\S]*\$hasSalespeople/, '产品和普通卡项仍只允许销售人')
-assert.match(component, /本次手工费/, '完整模式必须提供本次临时手工费输入')
-assert.match(component, /laborDefaultFee/, '临时手工费必须接收项目默认手工费')
-assert.match(component, /laborFeeDirty\.value/, '只有显式修改临时手工费才提交覆盖值')
+assert.doesNotMatch(component, /本次手工费/, '完整模式不再显示独立的本次临时手工费说明')
+assert.match(component, /<b>元\/次<\/b>/, '完整模式手工费单位必须显示为元\/次')
+assert.doesNotMatch(component, /<b>元\/人<\/b>/, '完整模式不得继续显示元\/人')
+assert.match(component, /personnel-allocation-input--labor/, '手工费输入格必须使用独立紧凑样式')
+assert.match(component, /laborDefaultFee/, '手工费默认值必须接收项目固定手工费')
+assert.match(workbench, /projectId: line\.projectId/, '人员候选查询必须携带当前项目 ID')
+assert.match(component, /candidateDefault/, '手艺人候选返回的项目固定手工费必须作为默认值')
+assert.match(selector, /labor_configured_unit_amount_cents/, '手艺人候选必须读取项目固定手工费')
+assert.match(selector, /where\('tenant_id', \$dataScope->tenantId\(\)\)/, '候选手工费读取必须限定当前租户')
+assert.match(
+  workspace,
+  /private function projectLaborDefaultCents\(int \$projectId\)[\s\S]*?where\('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID\)/,
+  '项目固定手工费读取必须限定当前租户，不能被其他租户同项目配置覆盖'
+)
+assert.match(
+  workspace,
+  /private function laborProjectIdFromLine\(array \$line\)[\s\S]*catalog_product_id/,
+  '历史项目行缺少 project_id 时必须用项目产品 ID 回读固定手工费'
+)
+assert.doesNotMatch(component, /laborFeeDirty\.value/, '完整模式不再提交独立的临时手工费覆盖值')
+assert.match(component, /服务业绩类型/, '完整模式必须展示手艺人服务业绩类型')
+assert.match(component, /手工费/, '完整模式必须固定展示手工费栏')
+assert.match(craftsmanSnapshot, /craftsmanPerformanceType/, '结账快照必须保留手艺人服务业绩类型')
+assert.match(craftsmanSnapshot, /laborFeeCents/, '结账快照必须保留每人手工费')
 assert.match(workbench, /laborManualFee: line\.laborManualFee/, '工作台必须回读本次手工费快照')
 assert.match(workbench, /payload\.laborManualFee = Number\(result\.laborManualFee\)/, '工作台必须把临时手工费写入权威草稿')
 assert.match(workspace, /manual_labor_fee_cents/, '后端工作台必须持久化临时手工费快照')

@@ -33,8 +33,8 @@ expect(staffView.includes("key: 'uid', label: '商城用户ID'"), '员工页缺�
 expect(staffView.includes('salespersonEnabled') && staffView.includes('craftsmanEnabled'), '员工编辑缺少独立资格开关')
 expect(router.includes("path: 'management-center/staff'"), '员工列表路由未登记')
 expect(
-  management.includes("id: 'staff-list-v3'")
-    && management.includes("router.push({ name: 'cashier-v3-staff-list' })"),
+  management.includes("{ id: 'staff', label: '人员管理' }")
+    && management.includes('<StaffListView v-if="activeTab === \'staff\'" />'),
   '管理菜单未登记员工列表'
 )
 expect(
@@ -57,9 +57,9 @@ expect(
   '员工新增/编辑未提供完整四页签'
 )
 expect(
-  staffApi.includes('readStoreStaffComplete')
+    staffApi.includes('readStoreStaffComplete')
     && staffApi.includes('readStoreStaffPositions')
-    && staffApi.includes('/storeapi/staff/staff/positions')
+    && staffApi.includes('/cashierapi/v3/management/staff/positions')
     && staffApi.includes('readStoreStaffWorkMembers')
     && staffApi.includes('uploadStoreStaffAvatar')
     && staffApi.includes('saveStoreStaff'),
@@ -77,10 +77,11 @@ expect(
   '员工完整资料字段未提交'
 )
 expect(
-  staffView.includes("employmentTypeCode: 'internal'")
+    staffView.includes("employmentTypeCode: 'internal'")
     && staffView.includes('employmentTypeVersion: 1')
-    && staffView.includes("['internal', 'partner', 'outsourced'].includes(editorValues.employmentTypeCode)")
-    && staffView.includes('<option value="partner">合作方</option>'),
+    && staffView.includes("['internal', 'partner'].includes(editorValues.employmentTypeCode)")
+    && staffView.includes('value="partner"')
+    && staffView.includes('>合作方</span>'),
   '门店员工人员类型选择或版本校验未接入'
 )
 expect(

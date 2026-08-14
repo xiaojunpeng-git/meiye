@@ -3,6 +3,12 @@
 $root = dirname(__DIR__, 3);
 $providerPath = $root
     . '/后端代码/app/services/cashier/v3/checkout/provider/CashierV3PerformanceRuleProvider.php';
+$storeProductPath = $root
+    . '/后端代码/app/services/product/product/StoreProductServices.php';
+$selectorPath = $root
+    . '/后端代码/app/services/cashier/v3/member/CashierV3QueryEntitySelectorServices.php';
+$workspacePath = $root
+    . '/后端代码/app/services/cashier/v3/cashier/CashierV3CashierWorkspaceServices.php';
 $migrationDir = $root
     . '/后端代码/database/upgrades/2026-07-29-收银V3项目业绩规则权威';
 
@@ -25,6 +31,9 @@ function performanceRuleRead(string $path): string
 }
 
 $provider = performanceRuleRead($providerPath);
+$storeProduct = performanceRuleRead($storeProductPath);
+$selector = performanceRuleRead($selectorPath);
+$workspace = performanceRuleRead($workspacePath);
 $precheck = performanceRuleRead($migrationDir . '/01-升级前检查.sql');
 $apply = performanceRuleRead($migrationDir . '/02-正式升级.sql');
 $postcheck = performanceRuleRead($migrationDir . '/03-升级后验证.sql');
@@ -54,6 +63,19 @@ performanceRuleOk('default creation uses the configured table prefix and only to
 performanceRuleOk('checkout cannot mutate a read-only configuration version',
     strpos($provider, "throw self::failure('performance_rule_read_only'") !== false
         && strpos($provider, "Db::raw('current_version + 1')") === false);
+
+performanceRuleOk('store copies project manual fee from their master product rule',
+    strpos($storeProduct, '(int)($item[\'pid\'] ?? 0)') !== false
+        && strpos($storeProduct, '$ruleProjectId') !== false
+        && strpos($storeProduct, 'intdiv((int)($laborFeeByProject[$ruleProjectId] ?? 0), 100)') !== false);
+
+performanceRuleOk('cashier selector and workspace resolve a missing store-copy rule through pid',
+    strpos($selector, "->where('type', 1)") !== false
+        && strpos($selector, "->where('product_type', 6)") !== false
+        && strpos($selector, '->find()') !== false
+        && strpos($workspace, "->where('type', 1)") !== false
+        && strpos($workspace, "->where('product_type', 6)") !== false
+        && strpos($workspace, 'array_key_exists(\'labor_configured_unit_amount_cents\', $masterRule)') !== false);
 
 performanceRuleOk('provider validates supported modes and the kernel money ceiling',
     strpos($provider, 'private const MAX_MONEY_CENTS = 100000000000;') !== false
