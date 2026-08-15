@@ -214,6 +214,12 @@ const MANUAL_COLUMN_KEYS = new Set(['medical_elevation', 'medical_followup', 'ex
 
 function tableHeaderTone(column) {
   const key = String(column?.key || '')
+  if (key.startsWith('item_analysis_')) {
+    if (key.includes('_share_') || key.endsWith('_share')) return 'partner'
+    if (key.includes('_actual_')) return 'result'
+    if (key.includes('_consume_') || key.endsWith('_consume')) return 'consumption'
+    if (key.includes('_cash_') || key.endsWith('_cash')) return 'payment'
+  }
   if (key.startsWith('payment_') || key === 'receipt_total') return 'payment'
   if (key.startsWith('partner_category_') || key === 'partner_performance') return 'partner'
   if (RESULT_COLUMN_KEYS.has(key)) return 'result'
@@ -227,22 +233,31 @@ function derivedHeaderGroupLabel(column) {
     payment: '支付现金业绩方式',
     partner: '合作方分成业绩',
     result: '经营结果',
+    consumption: '消耗业绩',
     manual: '手动补充'
   })[tableHeaderTone(column)]
 }
 
-function headerGroupClasses(group) {
-  return ['store-business-report__header-group', `store-business-report__header-group--${tableHeaderTone(group.columns[0])}`]
+function headerGroupClasses(group, groupIndex) {
+  const tone = String(group?.tone || tableHeaderTone(group.columns[0]))
+  return [
+    'store-business-report__header-group',
+    `store-business-report__header-group--${tone}`,
+    { 'store-business-report__header-group--group-end': groupIndex < columnGroups.value.length - 1 && Number(group?.rowspan) <= 1 }
+  ]
 }
 
-function headerColumnClasses(column, index) {
+function headerColumnClasses(column) {
   const tone = tableHeaderTone(column)
-  const nextTone = index < columns.value.length - 1 ? tableHeaderTone(columns.value[index + 1]) : ''
   return [
     'store-business-report__header-column',
     `store-business-report__header-column--${tone}`,
-    { 'store-business-report__header-column--group-end': tone !== nextTone }
+    { 'store-business-report__header-column--group-end': reportColumnGroupEndKeys.value.has(String(column.key)) }
   ]
+}
+
+function cellClasses(column) {
+  return { 'store-business-report__cell--group-end': reportColumnGroupEndKeys.value.has(String(column.key)) }
 }
 
 // 列和列分组由统一报表服务返回。支付方式、合作方、门店、康美单和系统
@@ -251,7 +266,7 @@ const columnGroups = computed(() => {
   const rawGroups = result.value.column_groups || result.value.columnGroups
   if (Array.isArray(rawGroups) && rawGroups.length) {
     const byKey = new Map(columns.value.map((column) => [String(column.key), column]))
-    const groupLabelByKey = new Map()
+    const groupMetaByKey = new Map()
     rawGroups.forEach((group) => {
       const keys = Array.isArray(group?.column_keys)
         ? group.column_keys
@@ -260,14 +275,21 @@ const columnGroups = computed(() => {
           : Array.isArray(group?.columns)
             ? group.columns.map((column) => typeof column === 'string' ? column : column?.key)
             : []
-      const label = String(group?.label || group?.name || '')
-      keys.forEach((key) => { if (byKey.has(String(key))) groupLabelByKey.set(String(key), label) })
+      const meta = {
+        label: String(group?.label || group?.name || ''),
+        tone: String(group?.tone || ''),
+        rowspan: Number(group?.rowspan || group?.row_span || 0)
+      }
+      keys.forEach((key) => { if (byKey.has(String(key))) groupMetaByKey.set(String(key), meta) })
     })
     const groups = []
     columns.value.forEach((column) => {
-      const label = groupLabelByKey.get(String(column.key)) || derivedHeaderGroupLabel(column)
+      const meta = groupMetaByKey.get(String(column.key)) || { label: derivedHeaderGroupLabel(column), tone: '', rowspan: 0 }
+      const label = meta.label
       const current = groups[groups.length - 1]
-      if (!current || current.label !== label) groups.push({ label, columns: [] })
+      if (!current || current.label !== label || current.tone !== meta.tone || current.rowspan !== meta.rowspan) {
+        groups.push({ label, tone: meta.tone, rowspan: meta.rowspan, columns: [] })
+      }
       groups[groups.length - 1].columns.push(column)
     })
     if (groups.length) return groups
@@ -291,6 +313,21 @@ const columnGroups = computed(() => {
   return groupedCount === columns.value.length && groups.length ? groups : []
 })
 const hasGroupedColumns = computed(() => columnGroups.value.length > 0)
+const groupedHeaderColumns = computed(() => {
+  const skipped = new Set()
+  columnGroups.value.forEach((group) => {
+    if (Number(group?.rowspan) > 1) group.columns.forEach((column) => skipped.add(String(column.key)))
+  })
+  return columns.value.filter((column) => !skipped.has(String(column.key)))
+})
+const reportColumnGroupEndKeys = computed(() => {
+  const ends = new Set()
+  columnGroups.value.forEach((group, index) => {
+    const last = group.columns[group.columns.length - 1]
+    if (index < columnGroups.value.length - 1 && Number(group?.rowspan) <= 1 && last) ends.add(String(last.key))
+  })
+  return ends
+})
 const records = computed(() => Array.isArray(result.value.records) ? result.value.records : [])
 const pendingMetrics = computed(() => Array.isArray(result.value.pending_metrics) ? result.value.pending_metrics : [])
 const total = computed(() => Number(result.value.total || 0))
@@ -857,15 +894,15 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateTabsLayout))
         <table v-if="columns.length">
           <thead v-if="hasGroupedColumns">
             <tr>
-              <th v-for="(group, groupIndex) in columnGroups" :key="`${group.label}-${groupIndex}`" :class="headerGroupClasses(group)" :colspan="group.columns.length">{{ group.label }}</th>
+              <th v-for="(group, groupIndex) in columnGroups" :key="`${group.label}-${groupIndex}`" :class="headerGroupClasses(group, groupIndex)" :colspan="group.rowspan > 1 ? null : group.columns.length" :rowspan="group.rowspan > 1 ? group.rowspan : null">{{ group.label }}</th>
               <th v-if="editableReport" rowspan="2" class="store-business-report__header-column store-business-report__header-column--manual">操作</th>
             </tr>
-            <tr><th v-for="(column, columnIndex) in columns" :key="column.key" :class="headerColumnClasses(column, columnIndex)">{{ column.label }}</th></tr>
+            <tr><th v-for="column in groupedHeaderColumns" :key="column.key" :class="headerColumnClasses(column)">{{ column.label }}</th></tr>
           </thead>
-          <thead v-else><tr><th v-for="(column, columnIndex) in columns" :key="column.key" :class="headerColumnClasses(column, columnIndex)">{{ column.label }}</th><th v-if="editableReport" class="store-business-report__header-column store-business-report__header-column--manual">操作</th></tr></thead>
+          <thead v-else><tr><th v-for="column in columns" :key="column.key" :class="headerColumnClasses(column)">{{ column.label }}</th><th v-if="editableReport" class="store-business-report__header-column store-business-report__header-column--manual">操作</th></tr></thead>
           <tbody>
             <tr v-for="(row, rowIndex) in records" :key="row.source_line_id || `${row.order_id || ''}:${rowIndex}`">
-              <td v-for="column in columns" :key="column.key">
+              <td v-for="column in columns" :key="column.key" :class="cellClasses(column)">
                 <template v-if="editingRow === row && editableFieldByKey.has(column.key)">
                   <select
                     v-if="manualFieldIsSelect(editableFieldByKey.get(column.key))"
@@ -1019,7 +1056,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateTabsLayout))
 .store-business-report__top-summaries strong { margin-right: 7px; color: #607086; font-weight: 600; }
 .store-business-report__pending { display: flex; flex-wrap: wrap; gap: 8px 12px; border-bottom: 1px solid #f2d49a; padding: 10px 16px; background: #fff9ed; color: #9a6509; font-size: 12px; }
 .store-business-report__table-scroll { min-width: 0; overflow: auto; }
-.store-business-report table { width: 100%; border-collapse: collapse; white-space: nowrap; font-size: 13px; }
+.store-business-report table { width: 100%; border-collapse: separate; border-spacing: 0; white-space: nowrap; font-size: 13px; }
 .store-business-report th, .store-business-report td { border-bottom: 1px solid #edf1f5; padding: 11px 12px; text-align: left; }
 .store-business-report th { background: #fafbfd; color: #667386; font-size: 12px; font-weight: 600; }
 .store-business-report__header-group { height: 34px; border-bottom: 1px solid #dce4ed; padding-top: 8px; padding-bottom: 8px; color: #536274; text-align: center; }
@@ -1031,8 +1068,11 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateTabsLayout))
 .store-business-report__header-column--partner { background: #fff3e2; color: #9e651d; }
 .store-business-report__header-group--result { background: #dceedd; color: #3d744b; }
 .store-business-report__header-column--result { background: #eff8ef; color: #477c53; }
+.store-business-report__header-group--consumption { background: #f5dfea; color: #87516f; }
+.store-business-report__header-column--consumption { background: #fdf0f7; color: #925b79; }
+.store-business-report__header-group--category { background: #e5edf0; color: #526b75; }
 .store-business-report__header-group--manual, .store-business-report__header-column--manual { background: #f1eafa; color: #735687; }
-.store-business-report__header-column--group-end { border-right: 2px solid #cbd7e3; }
+.store-business-report__header-group--group-end, .store-business-report__header-column--group-end, .store-business-report__cell--group-end { border-right: 8px solid #f5f7fa; }
 .store-business-report td { color: #303946; }
 .store-business-report__drilldown { border: 0; padding: 0; background: transparent; color: #1769aa; font: inherit; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
 .store-business-report__inline-input { min-width: 120px; min-height: 30px; box-sizing: border-box; border: 1px solid #b8c7d9; border-radius: 5px; padding: 5px 7px; font: inherit; color: #303946; }

@@ -3,6 +3,7 @@
 namespace app\services\report;
 
 use app\services\BaseServices;
+use app\services\cashier\v3\CashierV3ScopeResolver;
 use app\services\metric\MetricDictionaryServices;
 use think\facade\Db;
 
@@ -235,15 +236,238 @@ class StoreUnifiedReportServices extends BaseServices
 
     private function storeItemAnalysis($storeId, array $range, array $input): array
     {
-        $query = $this->operationSaleQuery($storeId, $range, $input);
-        $rows = $query->fieldRaw('s.store_id,MAX(s.store_name_snapshot) AS store_name,SUM(COALESCE(c.sale_amount_cents,s.sale_amount_cents)) AS total_sale_amount_cents,SUM(CASE WHEN d.is_experience=0 OR d.is_experience IS NULL THEN COALESCE(c.cash_performance_amount_cents,s.sale_amount_cents) ELSE 0 END) AS cash_amount_cents')->group('s.store_id')->orderRaw('total_sale_amount_cents DESC')->select()->toArray();
-        $definitions = [
-            ['key'=>'today_cash_performance','label'=>'当天现金业绩'],['key'=>'cumulative_cash_performance','label'=>'截止本日累计业绩'],['key'=>'home_cash_performance','label'=>'家居产品现金业绩'],['key'=>'beauty_card_cash_performance','label'=>'生美卡项现金业绩'],['key'=>'haomei_cash_performance','label'=>'昊美现金业绩'],['key'=>'haomei_partner_performance','label'=>'昊美现金分成业绩'],['key'=>'garden_cash_performance','label'=>'花园现金业绩'],['key'=>'garden_partner_performance','label'=>'花园现金分成业绩'],['key'=>'sixway_self_cash_performance','label'=>'六维自营现金业绩'],['key'=>'sixway_self_partner_performance','label'=>'六维自营现金分成业绩'],['key'=>'sixway_coop_cash_performance','label'=>'六维合作现金业绩'],['key'=>'sixway_coop_partner_performance','label'=>'六维合作现金分成业绩'],['key'=>'garden_cash_performance_2','label'=>'花园现金业绩'],['key'=>'garden_partner_performance_2','label'=>'花园现金分成业绩'],['key'=>'garden_ticket_cash_performance','label'=>'花园门票现金业绩'],['key'=>'garden_ticket_partner_performance','label'=>'花园门票现金业绩分成后'],['key'=>'kangmei_cash_performance','label'=>'康美现金业绩'],['key'=>'kangmei_partner_performance','label'=>'康美现金分成业绩'],['key'=>'huaxiangrong_cash_performance','label'=>'花享容现金业绩'],['key'=>'huaxiangrong_partner_performance','label'=>'花享容现金分成业绩'],['key'=>'beauty_card_consume_performance','label'=>'生美卡项消耗业绩'],['key'=>'sixway_consume_performance','label'=>'六维消耗业绩'],['key'=>'garden_consume_performance','label'=>'花园消耗业绩'],['key'=>'garden_ticket_consume_performance','label'=>'花园门票消耗业绩'],['key'=>'haomei_consume_performance','label'=>'昊美消耗业绩'],['key'=>'huaxiangrong_consume_performance','label'=>'花享容消耗业绩'],['key'=>'kangmei_consume_performance','label'=>'康美消耗业绩'],
-        ];
-        foreach ($rows as &$row) { $row['today_cash_performance'] = $this->money((int)$row['cash_amount_cents']); $row['cumulative_cash_performance'] = $row['today_cash_performance']; foreach ($definitions as $definition) if (!array_key_exists($definition['key'],$row)) $row[$definition['key']] = '0'; }
+        $today = ['start' => $range['end'], 'end' => $range['end']];
+        $cumulative = ['start' => self::COVERAGE_START, 'end' => $range['end']];
+        // Header categories come from the current product-category configuration,
+        // never from whichever facts happened to occur in the selected period.
+        $definitions = $this->itemAnalysisCategoryDefinitions($storeId);
+        $period = $this->itemAnalysisMetricRows($storeId, $range, $input, $definitions);
+        $daily = $this->itemAnalysisMetricRows($storeId, $today, $input, $definitions);
+        $total = $this->itemAnalysisMetricRows($storeId, $cumulative, $input, $definitions);
+        $rows = [];
+        foreach ([$period, $daily, $total] as $metrics) {
+            foreach ($metrics['stores'] as $storeIdKey => $store) {
+                if (!isset($rows[$storeIdKey])) {
+                    $rows[$storeIdKey] = ['store_name' => $store['store_name']];
+                }
+            }
+        }
+        foreach ($rows as &$row) {
+            foreach (['cash', 'share', 'actual', 'consume'] as $metric) {
+                $row['item_analysis_' . $metric . '_today'] = '0';
+                $row['item_analysis_' . $metric . '_cumulative'] = '0';
+            }
+            foreach ($definitions as $definition) {
+                foreach (['cash', 'share', 'consume'] as $metric) {
+                    $row[$definition['key'] . '_' . $metric] = '0';
+                }
+            }
+        }
         unset($row);
-        $columns=[['key'=>'store_name','label'=>'门店']]; foreach($definitions as $definition) $columns[]=['key'=>$definition['key'],'label'=>$definition['label']];
-        return ['title'=>'门店品项分析','columns'=>$columns,'records'=>$rows,'total'=>count($rows),'page'=>1,'page_size'=>count($rows)];
+        foreach (['today' => $daily, 'cumulative' => $total] as $suffix => $metrics) {
+            foreach ($metrics['stores'] as $storeIdKey => $store) {
+                if (!isset($rows[$storeIdKey])) continue;
+                $cash = (int)$store['cash_cents'];
+                $share = (int)$store['share_cents'];
+                $rows[$storeIdKey]['item_analysis_cash_' . $suffix] = $this->money($cash);
+                $rows[$storeIdKey]['item_analysis_share_' . $suffix] = $this->money($share);
+                $rows[$storeIdKey]['item_analysis_actual_' . $suffix] = $this->money($cash - $share);
+                $rows[$storeIdKey]['item_analysis_consume_' . $suffix] = $this->money((int)$store['consume_cents']);
+            }
+        }
+        foreach ($period['categories'] as $storeIdKey => $categories) {
+            if (!isset($rows[$storeIdKey])) continue;
+            foreach ($categories as $categoryKey => $amounts) {
+                if (!isset($definitions[$categoryKey])) continue;
+                $base = $definitions[$categoryKey]['key'];
+                $rows[$storeIdKey][$base . '_cash'] = $this->money((int)$amounts['cash_cents']);
+                $rows[$storeIdKey][$base . '_share'] = $this->money((int)$amounts['share_cents']);
+                $rows[$storeIdKey][$base . '_consume'] = $this->money((int)$amounts['consume_cents']);
+            }
+        }
+        uasort($rows, static function (array $left, array $right): int {
+            return strcmp((string)$left['store_name'], (string)$right['store_name']);
+        });
+
+        $columns = [[
+            'key' => 'store_name', 'label' => '门店',
+            'logic' => '当前数据权限和筛选范围内的门店名称。',
+        ]];
+        $groups = [['label' => '门店', 'column_keys' => ['store_name'], 'rowspan' => 2, 'tone' => 'basic']];
+        foreach ([
+            ['cash', '现金业绩', '成功记账收款按销售明细分摊后的金额；不含余额支付和欠款。', 'payment'],
+            ['share', '分成业绩', '各分类现金业绩按结账时冻结的合作方默认比例计算后的合计。', 'partner'],
+            ['actual', '实际业绩', '现金业绩扣除分成业绩后的金额。', 'result'],
+            ['consume', '消耗业绩', '实际完成服务或核销后形成的消耗业绩。', 'consumption'],
+        ] as $summary) {
+            [$metric, $label, $logic, $tone] = $summary;
+            $keys = [];
+            foreach ([['today', '当日'], ['cumulative', '累计']] as $periodLabel) {
+                $key = 'item_analysis_' . $metric . '_' . $periodLabel[0];
+                $keys[] = $key;
+                $timeLogic = $periodLabel[0] === 'today'
+                    ? '统计查询截止日当天。'
+                    : '从 V3 报表覆盖起始日累计至查询截止日。';
+                $columns[] = ['key' => $key, 'label' => $periodLabel[1], 'logic' => $logic . $timeLogic];
+            }
+            $groups[] = ['label' => $label, 'column_keys' => $keys, 'tone' => $tone];
+        }
+        foreach ($definitions as $definition) {
+            $keys = [];
+            foreach ([
+                ['cash', '现金业绩', '本分类在所选日期范围内成功记账收款按销售明细分摊后的金额。'],
+                ['share', '现金分成业绩', '本分类现金业绩按结账时冻结的合作方默认比例计算后的金额。'],
+                ['consume', '消耗业绩', '本分类在所选日期范围内实际完成服务或核销后形成的消耗业绩。'],
+            ] as $metric) {
+                $key = $definition['key'] . '_' . $metric[0];
+                $keys[] = $key;
+                $columns[] = ['key' => $key, 'label' => $metric[1], 'logic' => $metric[2]];
+            }
+            $groups[] = ['label' => $definition['label'], 'column_keys' => $keys, 'tone' => 'category'];
+        }
+        return [
+            'title' => '门店品项分析', 'columns' => $columns,
+            'column_groups' => $groups, 'records' => array_values($rows),
+            'total' => count($rows), 'page' => 1, 'page_size' => count($rows),
+        ];
+    }
+
+    /** @return array{stores:array<int,array>,categories:array<int,array>} */
+    private function itemAnalysisMetricRows($storeId, array $range, array $input, array $definitions): array
+    {
+        $stores = [];
+        $categories = [];
+        $cashRows = $this->operationSaleQuery($storeId, $range, $input)
+            ->fieldRaw("s.store_id,s.store_name_snapshot,COALESCE(c.partner_category_id_snapshot,d.partner_category_id_snapshot,0) AS partner_category_id_snapshot,COALESCE(c.partner_category_path_snapshot,d.partner_category_path_snapshot,c.category_path_snapshot,d.category_path_snapshot) AS category_path_snapshot,COALESCE(c.cash_performance_amount_cents,d.cash_performance_amount_cents,0) AS cash_cents,COALESCE(c.partner_share_amount_cents,d.partner_share_amount_cents,0) AS share_cents")
+            ->select()->toArray();
+        foreach ($cashRows as $entry) {
+            $storeKey = (int)$entry['store_id'];
+            $this->itemAnalysisStore($stores, $storeKey, (string)$entry['store_name_snapshot']);
+            $stores[$storeKey]['cash_cents'] += (int)$entry['cash_cents'];
+            $stores[$storeKey]['share_cents'] += (int)$entry['share_cents'];
+            $category = $this->itemAnalysisConfiguredCategory(
+                $definitions,
+                (int)($entry['partner_category_id_snapshot'] ?? 0),
+                (string)$entry['category_path_snapshot']
+            );
+            if ($category === null) continue;
+            $this->itemAnalysisCategoryAmount($categories, $storeKey, $category);
+            $categories[$storeKey][$category['id']]['cash_cents'] += (int)$entry['cash_cents'];
+            $categories[$storeKey][$category['id']]['share_cents'] += (int)$entry['share_cents'];
+        }
+        $consume = Db::name('cashier_v3_performance_fact')->alias('p')
+            ->leftJoin('cashier_v3_entitlement_service_fact es', 'es.tenant_id=p.tenant_id AND es.checkout_request_id=p.checkout_request_id AND es.source_line_id=p.source_line_id')
+            ->whereBetween('p.business_date', [$range['start'], $range['end']])
+            ->where('p.status', 'effective')->where('p.performance_type', 'consumption_performance_recorded');
+        if (is_array($storeId)) {
+            $consume->whereIn('p.store_id', array_values(array_unique(array_map('intval', $storeId))));
+        } else {
+            $consume->where('p.store_id', (int)$storeId);
+        }
+        if ($this->participantEmployeeId > 0) {
+            (new StoreReportParticipantScopeServices())->applyCheckout($consume, 'p.checkout_request_id', $this->participantEmployeeId);
+        }
+        $this->itemAnalysisConsumptionFilters($consume, $input);
+        foreach ($consume->fieldRaw("p.store_id,p.store_name_snapshot,es.project_category_id_snapshot,COALESCE(NULLIF(es.project_category_path_snapshot,''),es.project_category_name_snapshot) AS category_path_snapshot,SUM(p.amount_cents) AS consume_cents")
+            ->group('p.store_id,p.store_name_snapshot,es.project_category_id_snapshot,es.project_category_path_snapshot,es.project_category_name_snapshot')->select()->toArray() as $entry) {
+            $storeKey = (int)$entry['store_id'];
+            $this->itemAnalysisStore($stores, $storeKey, (string)$entry['store_name_snapshot']);
+            $stores[$storeKey]['consume_cents'] += (int)$entry['consume_cents'];
+            $category = $this->itemAnalysisConfiguredCategory(
+                $definitions,
+                (int)($entry['project_category_id_snapshot'] ?? 0),
+                (string)$entry['category_path_snapshot']
+            );
+            if ($category === null) continue;
+            $this->itemAnalysisCategoryAmount($categories, $storeKey, $category);
+            $categories[$storeKey][$category['id']]['consume_cents'] += (int)$entry['consume_cents'];
+        }
+        return compact('stores', 'categories');
+    }
+
+    private function itemAnalysisConsumptionFilters($query, array $input): void
+    {
+        $categoryId = (int)($input['category_id'] ?? 0);
+        $path = trim((string)($input['category_path'] ?? ''));
+        $type = trim((string)($input['product_type'] ?? ''));
+        if ($categoryId > 0) $query->where('es.project_category_id_snapshot', $categoryId);
+        if ($path !== '') $query->whereLike('es.project_category_path_snapshot', $path . '%');
+        if ($type !== '' && $type !== 'project') $query->whereRaw('1=0');
+    }
+
+    private function itemAnalysisStore(array &$stores, int $storeId, string $name): void
+    {
+        if (!isset($stores[$storeId])) {
+            $stores[$storeId] = ['store_name' => $name, 'cash_cents' => 0, 'share_cents' => 0, 'consume_cents' => 0];
+        }
+    }
+
+    private function itemAnalysisCategoryAmount(array &$categories, int $storeId, array $category): void
+    {
+        if (!isset($categories[$storeId][$category['id']])) {
+            $categories[$storeId][$category['id']] = ['label' => $category['label'], 'cash_cents' => 0, 'share_cents' => 0, 'consume_cents' => 0];
+        }
+    }
+
+    /**
+     * Facts keep their own category snapshots.  Match the frozen effective
+     * category ID first; a frozen project below a configured second level then
+     * falls back to its frozen path, never to a current product category tree.
+     *
+     * @param array<string,array{key:string,label:string,category_id:int,category_path:string}> $definitions
+     * @return array{id:string,label:string}|null
+     */
+    private function itemAnalysisConfiguredCategory(array $definitions, int $categoryId, string $path): ?array
+    {
+        if ($categoryId > 0 && isset($definitions[(string)$categoryId])) {
+            $definition = $definitions[(string)$categoryId];
+            return ['id' => (string)$definition['category_id'], 'label' => $definition['label']];
+        }
+        $path = $this->itemAnalysisCategoryPath($path);
+        if ($path === '') return null;
+
+        $matched = null;
+        foreach ($definitions as $definition) {
+            $configuredPath = $this->itemAnalysisCategoryPath((string)$definition['category_path']);
+            if ($configuredPath === '' || ($path !== $configuredPath && strpos($path, $configuredPath . '/') !== 0)) {
+                continue;
+            }
+            if ($matched === null || strlen($configuredPath) > strlen($matched['path'])) {
+                $matched = ['path' => $configuredPath, 'definition' => $definition];
+            }
+        }
+        if ($matched === null) return null;
+        $definition = $matched['definition'];
+        return ['id' => (string)$definition['category_id'], 'label' => $definition['label']];
+    }
+
+    private function itemAnalysisCategoryPath(string $path): string
+    {
+        $parts = preg_split('/\\s*\\/\\s*/u', trim($path)) ?: [];
+        $parts = array_values(array_filter(array_map('trim', $parts), static function (string $part): bool {
+            return $part !== '' && $part !== '全部';
+        }));
+        return implode('/', array_slice($parts, 0, 2));
+    }
+
+    /**
+     * @return array<string,array{key:string,label:string,category_id:int,category_path:string}>
+     */
+    private function itemAnalysisCategoryDefinitions($storeId): array
+    {
+        $definitions = [];
+        foreach ($this->partnerPerformanceDefinitions($storeId) as $partnerDefinition) {
+            $categoryId = (int)($partnerDefinition['category_id'] ?? 0);
+            $categoryPath = $this->itemAnalysisCategoryPath((string)($partnerDefinition['category_path'] ?? ''));
+            if ($categoryId <= 0 || $categoryPath === '') continue;
+            $definitions[(string)$categoryId] = [
+                'key' => 'item_analysis_category_' . $categoryId,
+                'label' => $categoryPath,
+                'category_id' => $categoryId,
+                'category_path' => $categoryPath,
+            ];
+        }
+        return $definitions;
     }
 
     private function craftsmanConsumption($storeId, array $range, array $input): array
@@ -649,6 +873,7 @@ class StoreUnifiedReportServices extends BaseServices
             $definitions[$effectiveId] = [
                 'key' => 'partner_category_' . $effectiveId,
                 'category_id' => $effectiveId,
+                'category_path' => $this->partnerCategoryPathLabel($chain, $effectiveId),
                 'label' => $this->partnerCategoryPathLabel($chain, $effectiveId) . '分成业绩',
                 'sort_path' => $this->partnerCategoryPathLabel($chain, $effectiveId),
             ];
@@ -665,12 +890,9 @@ class StoreUnifiedReportServices extends BaseServices
     /** @return array<int,string> */
     private function partnerCategoryTenantIds($storeId): array
     {
-        $query = Db::name('cashier_v3_sale_fact')->where('status', 'effective');
-        $this->withStoreScope($query, $storeId);
-        $ids = $query->distinct(true)->column('tenant_id');
-        return array_values(array_unique(array_filter(array_map('strval', (array)$ids), static function (string $id): bool {
-            return $id !== '';
-        })));
+        // Each customer instance has one database tenant.  Header configuration
+        // must be available even before the selected store has any V3 facts.
+        return [CashierV3ScopeResolver::TENANT_SCOPE_ID];
     }
 
     /** @return array<int,array> root first */

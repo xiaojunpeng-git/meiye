@@ -6,6 +6,7 @@ use app\services\cashier\v3\card\CashierV3CardRuleEntitlementAuthorityServices;
 use app\services\cashier\v3\CashierV3BusinessDocumentNumberServices;
 use app\services\cashier\v3\CashierV3TransactionGuard;
 use app\services\report\CustomerLifecycleFactServices;
+use app\services\report\StoreReportServiceCategorySnapshotServices;
 use think\facade\Db;
 
 /**
@@ -61,7 +62,9 @@ final class ThinkPhpCashierV3EntitlementCompletionWriter
         // Service document numbers are allocated only after this command has
         // claimed its completion receipt. A replay returns above without
         // creating document mappings for historical ESF rows.
-        $serviceRows = $this->allocateServiceDocumentNumbersInTx($plan->serviceRows(), $context);
+        $serviceRows = $this->decorateServiceCategorySnapshotsInTx(
+            $this->allocateServiceDocumentNumbersInTx($plan->serviceRows(), $context)
+        );
         $inserted = [
             'writeoff' => $this->persistRows(self::WRITEOFF_TABLE, 'writeoff', $plan->writeoffRows()),
             'service' => $this->persistRows(self::SERVICE_TABLE, 'service', $serviceRows),
@@ -556,6 +559,21 @@ final class ThinkPhpCashierV3EntitlementCompletionWriter
                 (string)$context['business_date'],
                 (int)$context['recorded_at']
             );
+            $serviceRows[$index] = $row;
+        }
+        return $serviceRows;
+    }
+
+    private function decorateServiceCategorySnapshotsInTx(array $serviceRows): array
+    {
+        $snapshots = new StoreReportServiceCategorySnapshotServices();
+        foreach ($serviceRows as $index => $row) {
+            $snapshot = $snapshots->resolveInTx(
+                (int)($row['project_category_id_snapshot'] ?? 0),
+                (string)($row['project_category_name_snapshot'] ?? '')
+            );
+            $row['project_category_path_snapshot'] = (string)$snapshot['project_category_path_snapshot'];
+            $row['immutable_fingerprint'] = hash('sha256', json_encode($row, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
             $serviceRows[$index] = $row;
         }
         return $serviceRows;

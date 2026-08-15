@@ -9,6 +9,7 @@ use app\services\cashier\v3\CashierV3TransactionGuard;
 use app\services\cashier\v3\order\settlement\CashierV3SalesOrderPlanV1;
 use app\services\cashier\v3\order\settlement\ThinkPhpCashierV3SalesOrderAuthorityWriter;
 use app\services\report\CustomerLifecycleFactServices;
+use app\services\report\StoreReportServiceCategorySnapshotServices;
 use think\facade\Db;
 
 /**
@@ -84,6 +85,10 @@ final class CashierV3SaleProjectServiceCompletionServices
                     $line,
                     (string)$header['tenant_id']
                 );
+                $categorySnapshot = (new StoreReportServiceCategorySnapshotServices())->resolveInTx(
+                    (int)$line['category_id_snapshot'],
+                    (string)$line['category_name_snapshot']
+                );
             } catch (\InvalidArgumentException $exception) {
                 throw self::failure('sale_project_service_craftsman_performance_invalid');
             }
@@ -118,6 +123,7 @@ final class CashierV3SaleProjectServiceCompletionServices
                 'project_name_snapshot' => (string)$line['item_name_snapshot'],
                 'project_category_id_snapshot' => (int)$line['category_id_snapshot'],
                 'project_category_name_snapshot' => (string)$line['category_name_snapshot'],
+                'project_category_path_snapshot' => (string)$categorySnapshot['project_category_path_snapshot'],
                 'quantity' => (int)$line['quantity'],
                 'service_object' => (string)$line['service_object'],
                 'is_experience' => (int)$line['is_experience'],
