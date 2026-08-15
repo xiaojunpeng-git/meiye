@@ -373,14 +373,16 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         // 把整张混合卡重复算入。旧成交没有分摊事实时保留原分类兼容。
         $cardCategorySql=Db::name('cashier_v3_card_sale_category_allocation_fact')->alias('ccf')
             ->where('ccf.status','effective')
-            ->fieldRaw("ccf.sale_fact_id,SUM(ccf.sale_amount_cents) allocated_total_cents,SUM(CASE WHEN ccf.category_name_snapshot LIKE '%生美%' THEN ccf.sale_amount_cents ELSE 0 END) beauty_amount_cents")
-            ->group('ccf.sale_fact_id')->buildSql();
+            ->whereIn('ccf.store_id',$stores)
+            ->whereBetween('ccf.business_date',[$range['start'],$range['end']])
+            ->fieldRaw("ccf.tenant_id,ccf.sale_fact_id,SUM(ccf.sale_amount_cents) allocated_sale_total_cents,SUM(ccf.cash_performance_amount_cents) allocated_cash_total_cents,SUM(CASE WHEN COALESCE(NULLIF(ccf.category_path_snapshot,''),ccf.category_name_snapshot) LIKE '%生美%' THEN ccf.cash_performance_amount_cents ELSE 0 END) beauty_cash_amount_cents")
+            ->group('ccf.tenant_id,ccf.sale_fact_id')->buildSql();
         $facts=$this->participantEmployeeFact($this->scope(Db::name('cashier_v3_performance_fact')->alias('p'),$stores,'p'),'p.employee_id')
-            ->join('cashier_v3_sale_fact s','s.source_line_id=p.source_line_id AND s.status=\'effective\'')
-            ->leftJoin([$cardCategorySql=>'cc'],'cc.sale_fact_id=s.fact_id')
+            ->join('cashier_v3_sale_fact s','s.tenant_id=p.tenant_id AND s.store_id=p.store_id AND s.source_line_id=p.source_line_id AND s.status=\'effective\'')
+            ->leftJoin([$cardCategorySql=>'cc'],'cc.tenant_id=s.tenant_id AND cc.sale_fact_id=s.fact_id')
             ->whereBetween('p.business_date',[$range['start'],$range['end']])->where('p.status','effective')->where('p.performance_type','sales_performance_allocated')
-            ->whereRaw("((cc.sale_fact_id IS NOT NULL AND cc.beauty_amount_cents>0) OR (cc.sale_fact_id IS NULL AND s.category_name_snapshot LIKE '%生美%'))")
-            ->fieldRaw("p.store_id,MAX(p.organization_name_snapshot) division_name,MAX(p.store_name_snapshot) store_name,p.business_date,p.employee_id,MAX(p.employee_name_snapshot) salesperson,p.member_id,SUM(CASE WHEN cc.sale_fact_id IS NULL THEN p.amount_cents WHEN cc.allocated_total_cents>0 THEN ROUND(p.amount_cents*cc.beauty_amount_cents/cc.allocated_total_cents) ELSE 0 END) amount_cents")
+            ->whereRaw("((cc.sale_fact_id IS NOT NULL AND cc.allocated_sale_total_cents=s.sale_amount_cents AND cc.beauty_cash_amount_cents>0) OR (cc.sale_fact_id IS NULL AND s.category_name_snapshot LIKE '%生美%'))")
+            ->fieldRaw("p.store_id,MAX(p.organization_name_snapshot) division_name,MAX(p.store_name_snapshot) store_name,p.business_date,p.employee_id,MAX(p.employee_name_snapshot) salesperson,p.member_id,SUM(CASE WHEN cc.sale_fact_id IS NULL THEN p.amount_cents WHEN cc.allocated_cash_total_cents>0 THEN ROUND(p.amount_cents*cc.beauty_cash_amount_cents/cc.allocated_cash_total_cents) ELSE 0 END) amount_cents")
             ->group('p.store_id,p.business_date,p.employee_id,p.member_id')->order('p.business_date','desc')->select()->toArray();
         usort($facts,static function(array $a,array $b):int{return strcmp((string)$a['business_date'],(string)$b['business_date']);});$cumulative=[];foreach($facts as &$row){$key=(int)$row['member_id'].'|'.(int)$row['employee_id'];$after=(int)($cumulative[$key]??0)+(int)$row['amount_cents'];$cumulative[$key]=$after;$row['daily_cash']=$this->money((int)$row['amount_cents']);$row['cumulative_cash']=$this->money($after);$row['share_30000_before']='';$row['share_30000_after']='';$row['share_50000_before']='';foreach(range(1,5)as$i)$row['share_50000_after_'.$i]='';$row['remark']='';}unset($row);usort($facts,static function(array $a,array $b):int{return strcmp((string)$b['business_date'],(string)$a['business_date']);});
         $columns=$this->columns(['division_name'=>'分公司','store_name'=>'门店','business_date'=>'成交日期','salesperson'=>'销售人/销售经理','daily_cash'=>'当日现金业绩','cumulative_cash'=>'累计现金业绩','share_30000_before'=>'3万生美卡项分成前','share_30000_after'=>'3万生美卡项分成后','share_50000_before'=>'5万生美卡项分成前']);foreach(range(1,5)as$i)$columns[]=['key'=>'share_50000_after_'.$i,'label'=>'5万生美卡项分成后'];$columns[]=['key'=>'remark','label'=>'备注'];
