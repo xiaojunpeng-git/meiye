@@ -48,6 +48,49 @@ final class StoreReportPaymentSaleAllocationFactServices
     }
 
     /**
+     * Records a sales-debt repayment against the original sale facts.  The
+     * repayment payment fact has its own repayment document id, while reports
+     * need the amount on the original sale line that incurred the debt.
+     *
+     * @param array<string,mixed> $context Original sales-order snapshots.
+     * @param array<int,array<string,mixed>> $paymentFacts Successful repayment payment facts.
+     * @param array<int,array<string,mixed>> $sales Original sale facts with this repayment's line allocation base.
+     * @return array{inserted:int,replayed:int}
+     */
+    public function persistDebtRepaymentInTx(array $context, array $paymentFacts, array $sales): array
+    {
+        CashierV3TransactionGuard::assertInTransaction('storeReportDebtRepaymentPaymentAllocation');
+        if ($paymentFacts === [] || $sales === []) return ['inserted' => 0, 'replayed' => 0];
+
+        $weights = [];
+        foreach ($sales as $sale) {
+            $factId = trim((string)($sale['fact_id'] ?? ''));
+            $base = (int)($sale['allocation_base_amount_cents'] ?? 0);
+            if ($factId === '' || $base <= 0 || isset($weights[$factId])) {
+                throw new \InvalidArgumentException('debt_repayment_payment_allocation_sale_invalid');
+            }
+            $weights[$factId] = ['fact_id' => $factId, 'sale_amount_cents' => $base];
+        }
+
+        $inserted = 0;
+        $replayed = 0;
+        foreach ($paymentFacts as $payment) {
+            $paymentFactId = trim((string)($payment['fact_id'] ?? ''));
+            $amount = (int)($payment['amount_cents'] ?? 0);
+            if ($paymentFactId === '' || $amount <= 0) {
+                throw new \InvalidArgumentException('debt_repayment_payment_allocation_payment_invalid');
+            }
+            $allocations = self::allocatePaymentToSales($amount, array_values($weights));
+            foreach ($sales as $sale) {
+                $factId = (string)$sale['fact_id'];
+                $result = $this->persistAllocation($context, $payment, $sale, (int)($allocations[$factId] ?? 0));
+                $result === 'inserted' ? $inserted++ : $replayed++;
+            }
+        }
+        return compact('inserted', 'replayed');
+    }
+
+    /**
      * Largest-remainder allocation in cents. The sign comes from the payment
      * fact, allowing an immutable reversal to produce matching negative rows.
      *
@@ -96,7 +139,9 @@ final class StoreReportPaymentSaleAllocationFactServices
             'source_line_id' => (string)$sale['source_line_id'],
             'sale_amount_cents' => (int)$sale['sale_amount_cents'],
             'debt_amount_cents' => (int)$sale['debt_amount_cents'],
-            'allocation_base_amount_cents' => abs((int)$sale['sale_amount_cents']) - abs((int)$sale['debt_amount_cents']),
+            'allocation_base_amount_cents' => array_key_exists('allocation_base_amount_cents', $sale)
+                ? (int)$sale['allocation_base_amount_cents']
+                : abs((int)$sale['sale_amount_cents']) - abs((int)$sale['debt_amount_cents']),
             'amount_cents' => $amountCents,
             'business_date' => (string)$context['business_date'],
             'occurred_at' => (int)$context['occurred_at'],

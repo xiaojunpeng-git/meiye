@@ -77,11 +77,19 @@ class StoreUnifiedReportServices extends BaseServices
 
     public function export($storeId, array $input)
     {
-        $result = $this->query($storeId, $input);
+        // Export is the same complete authorized result set as the screen,
+        // rather than the first browser page capped at 100 records.
+        $result = $this->query($storeId, array_merge($input, ['_internal_all' => true, 'page' => 1]));
         return [
             'filename' => '门店经营报表-' . ($result['title'] ?? '数据') . '-' . date('YmdHis') . '.csv',
             'columns' => $result['columns'] ?? [], 'records' => $result['records'] ?? [],
-            'metric_version' => self::METRIC_VERSION,
+            // Keep the export metadata aligned with the queried report. Phase
+            // two reports have an independent metric version and summary row.
+            'summary_row' => $result['summary_row'] ?? [],
+            'column_groups' => $result['column_groups'] ?? [],
+            'metric_version' => $result['metric_version'] ?? self::METRIC_VERSION,
+            'data_as_of' => $result['data_as_of'] ?? '',
+            'aggregation_status' => $result['aggregation_status'] ?? '',
         ];
     }
 

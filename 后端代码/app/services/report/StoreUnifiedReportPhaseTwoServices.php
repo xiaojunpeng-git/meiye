@@ -34,10 +34,10 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             'member_visit_annual_summary' => '会员进店年度汇总表',
             'field_acquisition_detail' => '地推拓客明细表',
             'field_acquisition_summary' => '地推拓客汇总表',
-            'cross_industry_customer_detail' => '异业收客明细分析表',
-            'cross_industry_customer_summary' => '异业收客汇总分析表',
-            'new_customer_analysis' => '新客分析表',
-            'new_customer_analysis_summary' => '新客分析表汇总',
+            'cross_industry_customer_detail' => '异业收客明细表',
+            'cross_industry_customer_summary' => '异业收客汇总表',
+            'new_customer_analysis' => '新客明细表',
+            'new_customer_analysis_summary' => '新客汇总表',
             'salesperson_large_order_statistics' => '销售人生美大单统计表',
             'store_refund_ledger' => '院店退款台账',
         ];
@@ -171,7 +171,9 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             foreach ([['visits','人次'],['effective','有效人员'],['amount','金额']] as $definition) {
                 $key = 'channel_' . $sourceId . '_' . $definition[0];
                 $columns[] = ['key'=>$key,'label'=>$definition[1],'group_label'=>(string)$source['name']]; $keys[] = $key;
-                $columns[count($columns)-1]['drilldown']=['report'=>'market_detail','params'=>['dimension_code'=>(string)$sourceId]];
+                $params = ['dimension_code'=>(string)$sourceId];
+                if ($definition[0] === 'effective') $params['metric_code'] = 'effective_people';
+                $columns[count($columns)-1]['drilldown']=['report'=>'market_detail','params'=>$params];
             }
             $groups[] = ['label'=>(string)$source['name'],'dimension_code'=>(string)$sourceId,'column_keys'=>$keys];
         }
@@ -202,23 +204,31 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
     {
         $query = $this->cashFacts($stores, 'p')
             ->whereBetween('p.business_date', [$range['start'], $range['end']])->where('p.status', 'effective');
-        if (($dimension = trim((string)($input['dimension_code'] ?? ''))) !== '') $query->where('p.business_source_primary_id', (int)$dimension);
+        $dimension = trim((string)($input['dimension_code'] ?? ''));
+        $metricCode = trim((string)($input['metric_code'] ?? ''));
+        if ($dimension !== '') $query->where('p.business_source_primary_id', (int)$dimension);
         if (($method = trim((string)($input['payment_method_code'] ?? ''))) !== '') $query->where('p.payment_method', $method);
-        $rows = $query->fieldRaw('p.store_id,p.order_id,p.checkout_request_id,p.order_no_snapshot,p.store_name_snapshot,p.business_source_primary_id,p.business_source_primary_name_snapshot,p.business_source_label_snapshot,p.business_date,MAX(p.operator_name_snapshot) creator_name,SUM(p.amount_cents) amount_cents,MAX(p.recorded_at) recorded_at')
+        $rows = $query->leftJoin('user market_detail_member', 'market_detail_member.uid = p.member_id')
+            ->fieldRaw('p.store_id,p.order_id,p.checkout_request_id,p.order_no_snapshot,p.store_name_snapshot,MAX(p.member_id) member_id,MAX(p.member_name_snapshot) member_name_snapshot,MAX(market_detail_member.phone) member_phone,p.business_source_primary_id,p.business_source_primary_name_snapshot,p.business_source_label_snapshot,p.business_date,MAX(p.operator_name_snapshot) creator_name,SUM(p.amount_cents) amount_cents,MAX(p.recorded_at) recorded_at')
             ->group('p.store_id,p.order_id,p.business_source_primary_id,p.business_date')->order('p.business_date','desc')->order('p.order_id','desc')->select()->toArray();
+        // The detail query already contains every matching payment record before
+        // pagination, so derive effective members here instead of running another
+        // aggregate query solely for the summary row or drilldown filter.
+        $effectiveMemberKeys = $this->marketEffectiveMemberKeys($rows);
+        if ($metricCode === 'effective_people') {
+            $rows = array_values(array_filter($rows, function (array $row) use ($effectiveMemberKeys): bool {
+                return isset($effectiveMemberKeys[(int)$row['store_id'] . '|' . (int)$row['business_source_primary_id'] . '|' . (int)$row['member_id']]);
+            }));
+        }
         $orderIds = array_values(array_unique(array_column($rows, 'order_id')));
-        $visits = $effective = [];
+        $visits = [];
         if ($orderIds) {
             foreach ($this->participantCheckout($this->scope(Db::name('cashier_v3_entitlement_service_fact')->alias('market_detail_service'), $stores,'market_detail_service'),'market_detail_service.checkout_request_id')->whereIn('market_detail_service.checkout_request_id', function ($sub) use ($orderIds) { $sub->name('cashier_v3_sales_order')->whereIn('order_id',$orderIds)->field('checkout_request_id'); })->where('market_detail_service.service_status','completed')->fieldRaw('market_detail_service.checkout_request_id,COUNT(*) amount')->group('market_detail_service.checkout_request_id')->select()->toArray() as $row) $visits[(string)$row['checkout_request_id']] = (int)$row['amount'];
-            foreach ($rows as $row) {
-                $source = (string)($row['business_source_primary_name_snapshot'] ?? '');
-                $threshold = preg_match('/^A(?:\\b|[^A-Z])/u', $source) ? 100000 : 50000;
-                if ((int)$row['amount_cents'] >= $threshold) $effective[(string)$row['order_id']] = 1;
-            }
         }
         foreach ($rows as &$row) {
             $row['dimension'] = (string)$row['business_source_label_snapshot'];
-            $row['walk_in'] = 0; $row['visits'] = 0; $row['effective_people'] = (int)($effective[(string)$row['order_id']] ?? 0);
+            $row['walk_in'] = 0; $row['visits'] = 0;
+            $row['effective_people'] = isset($effectiveMemberKeys[(int)$row['store_id'] . '|' . (int)$row['business_source_primary_id'] . '|' . (int)$row['member_id']]) ? 1 : 0;
             $row['visits'] = (int)($visits[(string)($row['checkout_request_id'] ?? '')] ?? 0);
             $row['amount'] = $this->money((int)$row['amount_cents']);
             $row['registered_date'] = (string)$row['business_date'];
@@ -229,8 +239,14 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         unset($row);
         $keys=array_values(array_unique(array_column($rows,'order_id')));$manual=$this->annotations('market_detail',$stores,$keys);
         foreach($rows as &$row){$key=(string)$row['order_id'];$row['walk_in']=(int)($manual[$key]['walk_in']['value']??0);$row['walk_in_version']=(int)($manual[$key]['walk_in']['version']??0);}unset($row);
-        $columns = $this->columns(['order_no_snapshot'=>'单据号','store_name_snapshot'=>'门店名称','dimension'=>'维度','walk_in'=>'进店','visits'=>'人次','effective_people'=>'有效人员','amount'=>'金额','registered_date'=>'登记日期','reviewer'=>'审核人','reviewed_at'=>'审核时间','creator_name'=>'制单人','created_at'=>'制单日期']);
-        return $this->result('市场明细表', $columns, $rows, $input, [], ['amount_cents'=>$this->sumField($rows,'amount_cents')]);
+        $columns = $this->columns(['order_no_snapshot'=>'单据号','store_name_snapshot'=>'门店名称','member_name_snapshot'=>'会员','member_phone'=>'手机','dimension'=>'来源','walk_in'=>'进店','visits'=>'人次','effective_people'=>'有效人员','amount'=>'金额','registered_date'=>'登记日期','reviewer'=>'审核人','reviewed_at'=>'审核时间','creator_name'=>'制单人','created_at'=>'制单日期']);
+        foreach (['order_no_snapshot'=>126, 'store_name_snapshot'=>112, 'member_name_snapshot'=>82, 'member_phone'=>116, 'dimension'=>108] as $key => $width) {
+            foreach ($columns as &$column) if ($column['key'] === $key) { $column['fixed'] = 'left'; $column['fixed_width'] = $width; break; }
+            unset($column);
+        }
+        $result = $this->result('市场明细表', $columns, $rows, $input, [], ['amount_cents'=>$this->sumField($rows,'amount_cents')]);
+        $result['summary_row'] = $this->marketDetailSummaryRow($rows);
+        return $result;
     }
 
     private function memberVisitAnalysis(array $stores, array $range, array $input): array
@@ -290,10 +306,11 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
 
     private function fieldMarketingDetail(array $stores,array $range,array $input):array
     {
-        $sourceIds=$this->sourceIds('E');
+        $sourceIds=$this->sourceIds('E');$memberId=(int)($input['member_id']??0);
         $base=$this->participantOrder($this->scope(Db::name('cashier_v3_sale_fact')->alias('s'),$stores,'s'),'s.order_id')->leftJoin('cashier_v3_sales_order o','o.order_id=s.order_id')
-            ->whereBetween('s.business_date',[$range['start'],$range['end']])->where('s.status','effective')->whereIn('s.business_source_primary_id',$sourceIds?:[-1])
-            ->fieldRaw('s.store_id,s.organization_name_snapshot,s.store_name_snapshot,s.member_id,s.member_name_snapshot,s.business_source_secondary_name_snapshot,s.order_id,s.source_line_id,s.business_date,MAX(o.order_note) remark')
+            ->whereBetween('s.business_date',[$range['start'],$range['end']])->where('s.status','effective')->whereIn('s.business_source_primary_id',$sourceIds?:[-1]);
+        if($memberId>0)$base->where('s.member_id',$memberId);
+        $base=$base->fieldRaw('s.store_id,s.organization_name_snapshot,s.store_name_snapshot,s.member_id,s.member_name_snapshot,s.business_source_secondary_name_snapshot,s.order_id,s.source_line_id,s.business_date,MAX(o.order_note) remark')
             ->group('s.store_id,s.member_id,s.order_id,s.source_line_id')->order('s.business_date','desc')->select()->toArray();
         $memberIds=array_values(array_unique(array_filter(array_column($base,'member_id'))));$phones=$this->phones($memberIds);
         $services=$this->servicesByMember($stores,$memberIds);$cash=$this->cashByMemberAndMonth($stores,$memberIds,$range['start'],$range['end']);
@@ -311,19 +328,19 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         $detail=$this->fieldMarketingDetail($stores,$range,array_merge($input,['page'=>1,'limit'=>100,'_internal_all'=>true]));$records=[];$year=(int)substr($range['end'],0,4);
         foreach($detail['records'] as $row){$member=(int)$row['member_id'];if(isset($records[$member]))continue;$records[$member]=['member_id'=>$member,'card_sale_date'=>$row['card_sale_date'],'member_name_snapshot'=>$row['member_name_snapshot'],'phone'=>$row['phone'],'source'=>$row['source'],'first_visit_date'=>$row['visit_1_date'],'remark'=>$row['remark'],'annotation_subject_key'=>$row['annotation_subject_key']];}
         $memberIds=array_keys($records);$cash=$this->cashMonthlyTotals($stores,$memberIds,$year.'-01-01',$year.'-12-31');
-        foreach($records as &$row){$row['annual_total_cents']=0;foreach(range(1,12)as$m){$c=(int)($cash[(int)$row['member_id']][$m]??0);$row['month_'.$m]=$this->money($c);$row['annual_total_cents']+=$c;}$row['annual_total']=$this->money($row['annual_total_cents']);}unset($row);
+        foreach($records as &$row){$row['annual_total_cents']=0;$row['_drilldown']=[];foreach(range(1,12)as$m){$c=(int)($cash[(int)$row['member_id']][$m]??0);$monthKey='month_'.$m;$row[$monthKey]=$this->money($c);$row['annual_total_cents']+=$c;if($c!==0)$row['_drilldown'][$monthKey]=['report'=>'field_acquisition_detail','params'=>['start_date'=>sprintf('%04d-%02d-01',$year,$m),'end_date'=>date('Y-m-t',strtotime(sprintf('%04d-%02d-01',$year,$m)))],'param_map'=>['member_id'=>'member_id']];}$row['annual_total']=$this->money($row['annual_total_cents']);if((int)$row['annual_total_cents']!==0)$row['_drilldown']['annual_total']=['report'=>'field_acquisition_detail','params'=>['start_date'=>$year.'-01-01','end_date'=>$year.'-12-31'],'param_map'=>['member_id'=>'member_id']];}unset($row);
         $columns=$this->columns(['card_sale_date'=>'卖卡日期','member_name_snapshot'=>'会员','phone'=>'手机号码','source'=>'来源','first_visit_date'=>'首次护理日期','annual_total'=>'首年业绩合计']);foreach(range(1,12)as$m)$columns[]=['key'=>'month_'.$m,'label'=>$m.'月'];$columns[]=['key'=>'remark','label'=>'备注'];
         return $this->result('地推拓客汇总表',$columns,array_values($records),$input,[],['natural_year'=>$year,'annual_total_cents'=>$this->sumField($records,'annual_total_cents')]);
     }
 
     private function crossIndustryDetail(array $stores,array $range,array $input):array
     {
-        $sourceIds=$this->sourceIds('G');$payments=$this->cashFacts($stores)->whereBetween('business_date',[$range['start'],$range['end']])->where('status','effective')->whereIn('business_source_primary_id',$sourceIds?:[-1])->fieldRaw('store_id,order_id,checkout_request_id,member_id,MAX(member_name_snapshot) member_name,MAX(store_name_snapshot) store_name,MAX(business_source_label_snapshot) source,SUM(amount_cents) amount_cents')->group('store_id,order_id,checkout_request_id,member_id')->select()->toArray();
+        $sourceIds=$this->sourceIds('G');$memberId=(int)($input['member_id']??0);$includeFollowupCash=(int)($input['include_followup_cash']??0)===1&&$memberId>0;$payments=$this->cashFacts($stores)->whereBetween('business_date',[$range['start'],$range['end']])->where('status','effective');if(!$includeFollowupCash)$payments->whereIn('business_source_primary_id',$sourceIds?:[-1]);if($memberId>0)$payments->where('member_id',$memberId);$payments=$payments->fieldRaw('store_id,order_id,checkout_request_id,member_id,MAX(member_name_snapshot) member_name,MAX(store_name_snapshot) store_name,MAX(business_source_label_snapshot) source,SUM(amount_cents) amount_cents')->group('store_id,order_id,checkout_request_id,member_id')->select()->toArray();
         $keys=array_values(array_unique(array_column($payments,'order_id')));$orders=[];if($keys){$fields=$this->hasColumn('cashier_v3_sales_order','reward_amount_cents')?'order_id,order_note,reward_amount_cents':'order_id,order_note';foreach(Db::name('cashier_v3_sales_order')->whereIn('order_id',$keys)->field($fields)->select()->toArray()as$r)$orders[(string)$r['order_id']]=$r;}
         $memberIds=array_values(array_unique(array_filter(array_column($payments,'member_id'))));$careDates=[];
         if($memberIds){foreach($this->participantCheckout($this->scope(Db::name('cashier_v3_entitlement_service_fact')->alias('cross_care_service'),$stores,'cross_care_service'),'cross_care_service.checkout_request_id')->whereIn('cross_care_service.member_id',$memberIds)->where('cross_care_service.service_status','completed')->fieldRaw('cross_care_service.store_id,cross_care_service.member_id,MIN(cross_care_service.business_date) care_date')->group('cross_care_service.store_id,cross_care_service.member_id')->select()->toArray()as$r)$careDates[(int)$r['store_id'].'|'.(int)$r['member_id']]=(string)$r['care_date'];}
         foreach($payments as &$row){$key=(string)$row['order_id'];$row['care_date']=$careDates[(int)$row['store_id'].'|'.(int)$row['member_id']]??'';$row['full_payment']=$this->money((int)$row['amount_cents']);$row['reward']=$this->money((int)($orders[$key]['reward_amount_cents']??0));$row['remark']=(string)($orders[$key]['order_note']??'');$row['annotation_subject_key']=$key;$row['annotation_subject_type']='sales_order';$row['source_order_id']=$key;}unset($row);
-        return $this->result('异业收客明细分析表',$this->columns(['source'=>'来源','care_date'=>'护理日期','store_name'=>'门店','member_name'=>'会员','full_payment'=>'收客全款业绩','reward'=>'奖励','remark'=>'备注']),$payments,$input);
+        return $this->result('异业收客明细表',$this->columns(['source'=>'来源','care_date'=>'护理日期','store_name'=>'门店','member_name'=>'会员','full_payment'=>'收客全款业绩','reward'=>'奖励','remark'=>'备注']),$payments,$input);
     }
 
     private function crossIndustrySummary(array $stores,array $range,array $input):array
@@ -334,21 +351,23 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             $id=(int)$row['member_id'];$key=(string)$row['source_line_id'];$row['customer_acquired_at']=$manual[$key]['customer_acquired_at']['value']??'';$row['customer_acquired_at_version']=(int)($manual[$key]['customer_acquired_at']['version']??0);$row['partner_store_name']=$manual[$key]['partner_store_name']['value']??'';$row['partner_store_name_version']=(int)($manual[$key]['partner_store_name']['version']??0);$row['phone']=$phones[$id]??'';$row['remaining_service_count']=(int)($entitlements[$id]['remaining_count']??0);$row['remaining_service_amount']=$this->money((int)($entitlements[$id]['remaining_amount_cents']??0));$row['first_visit_at']=(string)($services[$id][0]['business_date']??'');
             $annual=0;foreach(range(1,12)as$m){$c=(int)($cash[$id][$m]??0);$row['month_'.$m]=$this->money($c);$annual+=$c;}$row['annual_cash']=$this->money($annual);
             $first500=0;$reached2400=0;$running=0;foreach($dailyCash[$id]??[]as$day){$amount=(int)$day['amount_cents'];if($first500===0&&$amount>=50000)$first500=$amount;$before=$running;$running+=$amount;if($reached2400===0&&$before<240000&&$running>=240000)$reached2400=$running;}
-            $row['first_500']=$this->money($first500);$row['reached_2400']=$this->money($reached2400);$total500+=$first500;$total2400+=$reached2400;$row['annotation_subject_key']=$key;$row['annotation_subject_type']='sale_line';$row['source_line_id']=$key;
+            $row['first_500']=$this->money($first500);$row['reached_2400']=$this->money($reached2400);$total500+=$first500;$total2400+=$reached2400;$row['annotation_subject_key']=$key;$row['annotation_subject_type']='sale_line';$row['source_line_id']=$key;$row['_drilldown']=[];$annualConfig=['report'=>'cross_industry_customer_detail','params'=>['start_date'=>$year.'-01-01','end_date'=>$year.'-12-31','include_followup_cash'=>1],'param_map'=>['member_id'=>'member_id']];foreach(range(1,12)as$m){$monthKey='month_'.$m;if((int)($cash[$id][$m]??0)===0)continue;$row['_drilldown'][$monthKey]=['report'=>'cross_industry_customer_detail','params'=>['start_date'=>sprintf('%04d-%02d-01',$year,$m),'end_date'=>date('Y-m-t',strtotime(sprintf('%04d-%02d-01',$year,$m))),'include_followup_cash'=>1],'param_map'=>['member_id'=>'member_id']];}if($annual!==0)$row['_drilldown']['annual_cash']=$annualConfig;if($first500!==0)$row['_drilldown']['first_500']=$annualConfig;if($reached2400!==0)$row['_drilldown']['reached_2400']=$annualConfig;
         }unset($row);
         $columns=$this->columns(['customer_acquired_at'=>'收客时间','partner_store_name'=>'异业店名','member_name'=>'会员','phone'=>'手机号码','card_name'=>'卡项名称','remaining_service_count'=>'剩余服务次数','remaining_service_amount'=>'剩余服务金额','first_500'=>'首次成交满500','reached_2400'=>'成交满2400','first_visit_at'=>'首次到店时间','annual_cash'=>'全年现金业绩']);foreach(range(1,12)as$m)$columns[]=['key'=>'month_'.$m,'label'=>$m.'月'];
-        return $this->result('异业收客汇总分析表',$columns,$sales,$input,[],['first_500_total'=>$this->money($total500),'reached_2400_total'=>$this->money($total2400),'natural_year'=>$year]);
+        return $this->result('异业收客汇总表',$columns,$sales,$input,[],['first_500_total'=>$this->money($total500),'reached_2400_total'=>$this->money($total2400),'natural_year'=>$year]);
     }
 
     private function newCustomerAnalysis(array $stores,array $range,array $input):array
     {
-        $excluded=$this->sourceIdsMany(['A','H']);$sales=$this->participantOrder($this->scope(Db::name('cashier_v3_sale_fact')->alias('s'),$stores,'s'),'s.order_id')->leftJoin('cashier_v3_sales_order o','o.order_id=s.order_id')->leftJoin('user u','u.uid=s.member_id')->whereBetween('s.business_date',[$range['start'],$range['end']])->where('s.status','effective');if($excluded)$sales->whereNotIn('s.business_source_primary_id',$excluded);
-        $rows=$sales->fieldRaw('s.store_id,s.organization_name_snapshot,s.store_name_snapshot,s.business_date,s.order_id,s.source_line_id,s.member_id,s.member_name_snapshot,s.business_source_label_snapshot,s.item_name_snapshot,s.sale_amount_cents,s.debt_amount_cents,u.phone,MAX(o.order_note) remark')->group('s.source_line_id')->order('s.business_date','desc')->select()->toArray();$orderIds=array_values(array_unique(array_column($rows,'order_id')));$lineIds=array_values(array_unique(array_column($rows,'source_line_id')));$payments=$performance=$guides=[];
-        if($orderIds){foreach($this->cashFacts($stores)->whereIn('order_id',$orderIds)->whereBetween('business_date',[$range['start'],$range['end']])->where('status','effective')->fieldRaw('order_id,source_document_type,SUM(amount_cents) amount_cents')->group('order_id,source_document_type')->select()->toArray()as$r)$payments[(string)$r['order_id']][]=$r;foreach($this->scope(Db::name('cashier_v3_customer_guide_round_fact'),$stores)->whereIn('order_id',$orderIds)->where('status','effective')->select()->toArray()as$r)$guides[(string)$r['order_id']][]=$r;}
+        $excluded=$this->sourceIdsMany(['A','H']);$memberId=(int)($input['member_id']??0);$sourceId=(int)($input['source_id']??0);$sourceLabel=trim((string)($input['source_label']??''));$salespersonFilter=trim((string)($input['salesperson']??''));$sales=$this->participantOrder($this->scope(Db::name('cashier_v3_sale_fact')->alias('s'),$stores,'s'),'s.order_id')->leftJoin('cashier_v3_sales_order o','o.order_id=s.order_id')->leftJoin('user u','u.uid=s.member_id')->whereBetween('s.business_date',[$range['start'],$range['end']])->where('s.status','effective');if($excluded)$sales->whereNotIn('s.business_source_primary_id',$excluded);if($memberId>0)$sales->where('s.member_id',$memberId);if($sourceId>0)$sales->where('s.business_source_primary_id',$sourceId);elseif($sourceLabel!=='')$sales->where('s.business_source_label_snapshot',$sourceLabel);
+        $rows=$sales->fieldRaw('s.fact_id,s.store_id,s.organization_name_snapshot,s.store_name_snapshot,s.business_date,s.order_id,s.source_line_id,s.member_id,s.member_name_snapshot,s.business_source_label_snapshot,s.item_name_snapshot,s.sale_amount_cents,s.debt_amount_cents,u.phone,MAX(o.order_note) remark')->group('s.source_line_id')->order('s.business_date','desc')->select()->toArray();$orderIds=array_values(array_unique(array_column($rows,'order_id')));$saleFactIds=array_values(array_unique(array_filter(array_column($rows,'fact_id'))));$lineIds=array_values(array_unique(array_column($rows,'source_line_id')));$payments=$performance=$guides=[];
+        if($saleFactIds){foreach($this->cashFacts($stores,'payment')->join('cashier_v3_payment_sale_allocation_fact allocation',"allocation.tenant_id=payment.tenant_id AND allocation.payment_fact_id=payment.fact_id AND allocation.status='effective'")->whereIn('allocation.sale_fact_id',$saleFactIds)->whereBetween('payment.business_date',[$range['start'],$range['end']])->where('payment.status','effective')->fieldRaw('allocation.sale_fact_id,payment.source_document_type,SUM(allocation.amount_cents) amount_cents')->group('allocation.sale_fact_id,payment.source_document_type')->select()->toArray()as$r)$payments[(string)$r['sale_fact_id']][]=$r;}
+        if($orderIds)foreach($this->scope(Db::name('cashier_v3_customer_guide_round_fact'),$stores)->whereIn('order_id',$orderIds)->where('status','effective')->select()->toArray()as$r)$guides[(string)$r['order_id']][]=$r;
         if($lineIds)foreach($this->scope(Db::name('cashier_v3_performance_fact'),$stores)->whereIn('source_line_id',$lineIds)->where('status','effective')->select()->toArray()as$r)$performance[(string)$r['source_line_id']][]=$r;
         $manual=$this->annotations('new_customer_analysis',$stores,$lineIds);
-        foreach($rows as &$row){$line=(string)$row['source_line_id'];$order=(string)$row['order_id'];$salesNames=[];$craftNames=[];$fee=0;foreach($performance[$line]??[]as$f){if((string)$f['performance_type']==='sales_performance_allocated')$salesNames[]=(string)$f['employee_name_snapshot'];if((string)$f['performance_type']==='labor_performance_allocated'){$craftNames[]=(string)$f['employee_name_snapshot'];$fee+=(int)$f['labor_fee_amount_cents'];}}$row['division_name']=(string)$row['organization_name_snapshot'];$row['customer']=(string)$row['member_name_snapshot'];$row['salesperson']=implode('、',array_unique(array_filter($salesNames)));$row['source']=(string)$row['business_source_label_snapshot'];$row['age']='';$row['care_project']=(string)$row['item_name_snapshot'];$row['craftsman']=implode('、',array_unique(array_filter($craftNames)));$row['experience_card_amount']=$this->money((int)$row['sale_amount_cents']);$row['care_duration']=$manual[$line]['care_duration']['value']??'';$row['care_duration_version']=(int)($manual[$line]['care_duration']['version']??0);$row['labor_fee']=$this->money($fee);$row['guide_effective_count']=count($guides[$order]??[]);$row['guide_performance_round']=implode('、',array_unique(array_map(static fn($g)=>(string)$g['guide_round_no'],$guides[$order]??[])));$collected=0;$cleared=0;foreach($payments[$order]??[]as$p){if((string)$p['source_document_type']==='debt_repayment')$cleared+=(int)$p['amount_cents'];else$collected+=(int)$p['amount_cents'];}$hasDebt=(int)$row['debt_amount_cents']>0;$row['full_payment']=$this->money($hasDebt?0:$collected);$row['deposit_payment']=$this->money($hasDebt?$collected:0);$row['cleared_payment']=$this->money($cleared);$row['annotation_subject_key']=$line;$row['annotation_subject_type']='sale_line';}unset($row);
-        return $this->result('新客分析表',$this->columns(['division_name'=>'分公司','store_name_snapshot'=>'门店','business_date'=>'日期','customer'=>'顾客','salesperson'=>'销售人','source'=>'来源','age'=>'年龄','phone'=>'手机号码','care_project'=>'护理项目','craftsman'=>'护理手艺人','experience_card_amount'=>'体验卡金额','care_duration'=>'手艺人护理时长','labor_fee'=>'手艺人手工费','guide_effective_count'=>'导购有效人次','guide_performance_round'=>'导购业绩次数','full_payment'=>'全款业绩','deposit_payment'=>'定金业绩','cleared_payment'=>'清款业绩','remark'=>'备注']),$rows,$input);
+        foreach($rows as &$row){$line=(string)$row['source_line_id'];$order=(string)$row['order_id'];$salesFact=(string)$row['fact_id'];$salesNames=[];$craftNames=[];$fee=0;foreach($performance[$line]??[]as$f){if((string)$f['performance_type']==='sales_performance_allocated')$salesNames[]=(string)$f['employee_name_snapshot'];if((string)$f['performance_type']==='labor_performance_allocated'){$craftNames[]=(string)$f['employee_name_snapshot'];$fee+=(int)$f['labor_fee_amount_cents'];}}$row['division_name']=(string)$row['organization_name_snapshot'];$row['customer']=(string)$row['member_name_snapshot'];$row['salesperson']=implode('、',array_unique(array_filter($salesNames)));$row['source']=(string)$row['business_source_label_snapshot'];$row['age']='';$row['care_project']=(string)$row['item_name_snapshot'];$row['craftsman']=implode('、',array_unique(array_filter($craftNames)));$row['experience_card_amount']=$this->money((int)$row['sale_amount_cents']);$row['care_duration']=$manual[$line]['care_duration']['value']??'';$row['care_duration_version']=(int)($manual[$line]['care_duration']['version']??0);$row['labor_fee']=$this->money($fee);$row['guide_effective_count']=count($guides[$order]??[]);$row['guide_performance_round']=implode('、',array_unique(array_map(static fn($g)=>(string)$g['guide_round_no'],$guides[$order]??[])));$collected=0;$cleared=0;foreach($payments[$salesFact]??[]as$p){if((string)$p['source_document_type']==='debt_repayment')$cleared+=(int)$p['amount_cents'];else$collected+=(int)$p['amount_cents'];}$hasDebt=(int)$row['debt_amount_cents']>0;$row['full_payment']=$this->money($hasDebt?0:$collected);$row['deposit_payment']=$this->money($hasDebt?$collected:0);$row['cleared_payment']=$this->money($cleared);$row['annotation_subject_key']=$line;$row['annotation_subject_type']='sale_line';}unset($row);
+        if($salespersonFilter!=='')$rows=array_values(array_filter($rows,static fn(array $row):bool=>(string)($row['salesperson']??'')===$salespersonFilter));
+        return $this->result('新客明细表',$this->columns(['division_name'=>'分公司','store_name_snapshot'=>'门店','business_date'=>'日期','customer'=>'顾客','salesperson'=>'销售人','source'=>'来源','age'=>'年龄','phone'=>'手机号码','care_project'=>'护理项目','craftsman'=>'护理手艺人','experience_card_amount'=>'体验卡金额','care_duration'=>'手艺人护理时长','labor_fee'=>'手艺人手工费','guide_effective_count'=>'导购有效人次','guide_performance_round'=>'导购业绩次数','full_payment'=>'全款业绩','deposit_payment'=>'定金业绩','cleared_payment'=>'清款业绩','remark'=>'备注']),$rows,$input);
     }
 
     private function newCustomerSummary(array $stores,array $range,array $input):array
@@ -357,13 +376,13 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         // 现金列以 payment_fact.business_date 为唯一统计时间，因此退款反向事实
         // 只落在退款实际发生月份，不回写原订单月份。
         $query=$this->cashFacts($stores)->whereBetween('business_date',[$range['start'],$range['end']])->where('status','effective')->where('member_id','>',0);if($excluded)$query->whereNotIn('business_source_primary_id',$excluded);
-        $payments=$query->fieldRaw('store_id,MAX(organization_name_snapshot) division_name,MAX(store_name_snapshot) store_name,member_id,MAX(member_name_snapshot) member_name,order_id,MAX(business_source_label_snapshot) source,source_document_type,MONTH(business_date) month_no,SUM(amount_cents) amount_cents')->group('store_id,member_id,order_id,source_document_type,MONTH(business_date)')->select()->toArray();
+        $payments=$query->fieldRaw('store_id,MAX(organization_name_snapshot) division_name,MAX(store_name_snapshot) store_name,member_id,MAX(member_name_snapshot) member_name,order_id,business_source_primary_id,MAX(business_source_label_snapshot) source,source_document_type,MONTH(business_date) month_no,SUM(amount_cents) amount_cents')->group('store_id,member_id,order_id,business_source_primary_id,source_document_type,MONTH(business_date)')->select()->toArray();
         $orderIds=array_values(array_unique(array_column($payments,'order_id')));$debts=$salespeople=$guides=[];
         if($orderIds){foreach(Db::name('cashier_v3_sale_fact')->whereIn('order_id',$orderIds)->where('fact_direction','forward')->fieldRaw('order_id,SUM(debt_amount_cents) debt_cents')->group('order_id')->select()->toArray()as$r)$debts[(string)$r['order_id']]=(int)$r['debt_cents'];foreach($this->scope(Db::name('cashier_v3_performance_fact'),$stores)->whereIn('order_id',$orderIds)->where('status','effective')->where('performance_type','sales_performance_allocated')->field('order_id,employee_name_snapshot')->select()->toArray()as$r)$salespeople[(string)$r['order_id']][]=(string)$r['employee_name_snapshot'];foreach($this->scope(Db::name('cashier_v3_customer_guide_round_fact'),$stores)->whereIn('order_id',$orderIds)->where('status','effective')->fieldRaw('order_id,COUNT(*) amount')->group('order_id')->select()->toArray()as$r)$guides[(string)$r['order_id']]=(int)$r['amount'];}
-        foreach($payments as$row){$order=(string)$row['order_id'];$salesperson=implode('、',array_unique(array_filter($salespeople[$order]??[])));$key=(int)$row['member_id'].'|'.$salesperson.'|'.(string)$row['source'];if(!isset($records[$key]))$records[$key]=['system_name'=>'瑞昊','division_name'=>(string)$row['division_name'],'store_name'=>(string)$row['store_name'],'member'=>(string)$row['member_name'],'salesperson'=>$salesperson,'source'=>(string)$row['source'],'annual_cash_cents'=>0];$month=(int)$row['month_no'];$records[$key]['month_'.$month.'_count']=(int)($records[$key]['month_'.$month.'_count']??0)+(int)($guides[$order]??0);$suffix=(string)$row['source_document_type']==='debt_repayment'?'cleared':(((int)($debts[$order]??0)>0)?'deposit':'full');$records[$key]['month_'.$month.'_'.$suffix.'_cents']=(int)($records[$key]['month_'.$month.'_'.$suffix.'_cents']??0)+(int)$row['amount_cents'];$records[$key]['annual_cash_cents']+=(int)$row['amount_cents'];}
+        foreach($payments as$row){$order=(string)$row['order_id'];$salesperson=implode('、',array_unique(array_filter($salespeople[$order]??[])));$sourceId=(int)$row['business_source_primary_id'];$sourceLabel=(string)$row['source'];$sourceKey=$sourceId>0?'id:'.$sourceId:'label:'.$sourceLabel;$key=(int)$row['member_id'].'|'.$salesperson.'|'.$sourceKey;if(!isset($records[$key]))$records[$key]=['system_name'=>'瑞昊','division_name'=>(string)$row['division_name'],'store_name'=>(string)$row['store_name'],'member'=>(string)$row['member_name'],'member_id'=>(int)$row['member_id'],'salesperson'=>$salesperson,'source'=>$sourceLabel,'source_id'=>$sourceId,'source_label'=>$sourceLabel,'annual_cash_cents'=>0];$month=(int)$row['month_no'];$records[$key]['month_'.$month.'_count']=(int)($records[$key]['month_'.$month.'_count']??0)+(int)($guides[$order]??0);$suffix=(string)$row['source_document_type']==='debt_repayment'?'cleared':(((int)($debts[$order]??0)>0)?'deposit':'full');$records[$key]['month_'.$month.'_'.$suffix.'_cents']=(int)($records[$key]['month_'.$month.'_'.$suffix.'_cents']??0)+(int)$row['amount_cents'];$records[$key]['annual_cash_cents']+=(int)$row['amount_cents'];}
         $columns=$this->columns(['system_name'=>'系统名称','division_name'=>'分公司','store_name'=>'门店','member'=>'会员','salesperson'=>'销售人','source'=>'来源']);$groups=[];foreach(range(1,$lastMonth)as$m){$keys=[];foreach([['count','人次'],['full','全款'],['deposit','定金'],['cleared','清款']]as$d){$key='month_'.$m.'_'.$d[0];$columns[]=['key'=>$key,'label'=>$d[1],'group_label'=>$m.'月'];$keys[]=$key;}$groups[]=['label'=>$m.'月','column_keys'=>$keys];}$columns[]=['key'=>'annual_cash','label'=>'全年现金业绩'];
-        foreach($records as &$row){foreach(range(1,$lastMonth)as$m){$row['month_'.$m.'_count']=(int)($row['month_'.$m.'_count']??0);foreach(['full','deposit','cleared']as$s)$row['month_'.$m.'_'.$s]=$this->money((int)($row['month_'.$m.'_'.$s.'_cents']??0));}$row['annual_cash']=$this->money((int)$row['annual_cash_cents']);}unset($row);
-        return $this->result('新客分析表汇总',$columns,array_values($records),$input,$groups,['natural_year'=>$year,'visible_months'=>$lastMonth]);
+        foreach($records as &$row){$row['_drilldown']=[];foreach(range(1,$lastMonth)as$m){$countKey='month_'.$m.'_count';$row[$countKey]=(int)($row[$countKey]??0);foreach(['full','deposit','cleared']as$s){$key='month_'.$m.'_'.$s;$row[$key]=$this->money((int)($row[$key.'_cents']??0));}$monthStart=max($range['start'],sprintf('%04d-%02d-01',$year,$m));$monthEnd=min($range['end'],date('Y-m-t',strtotime($monthStart)));$config=['report'=>'new_customer_analysis','params'=>['start_date'=>$monthStart,'end_date'=>$monthEnd],'param_map'=>['member_id'=>'member_id','source_id'=>'source_id','source_label'=>'source_label','salesperson'=>'salesperson']];if($row[$countKey]!==0)$row['_drilldown'][$countKey]=$config;foreach(['full','deposit','cleared']as$s){$key='month_'.$m.'_'.$s;if((int)($row[$key.'_cents']??0)!==0)$row['_drilldown'][$key]=$config;}}$row['annual_cash']=$this->money((int)$row['annual_cash_cents']);if((int)$row['annual_cash_cents']!==0)$row['_drilldown']['annual_cash']=['report'=>'new_customer_analysis','param_map'=>['member_id'=>'member_id','source_id'=>'source_id','source_label'=>'source_label','salesperson'=>'salesperson']];}unset($row);
+        return $this->result('新客汇总表',$columns,array_values($records),$input,$groups,['natural_year'=>$year,'visible_months'=>$lastMonth]);
     }
 
     private function salespersonBeautyLargeOrder(array $stores,array $range,array $input):array
@@ -402,6 +421,43 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
     }
 
     private function primarySources():array{return Db::name('cashier_v3_business_source')->where('parent_id',0)->where('status',1)->order('sort','asc')->order('id','asc')->field('id,name,sort')->select()->toArray();}
+    private function marketEffectiveMemberKeys(array $rows):array
+    {
+        $sources = [];
+        foreach ($this->primarySources() as $source) $sources[(int)$source['id']] = $source;
+        $amounts = [];
+        foreach ($rows as $row) {
+            $memberId = (int)($row['member_id'] ?? 0);
+            $sourceId = (int)($row['business_source_primary_id'] ?? 0);
+            if ($memberId <= 0 || !isset($sources[$sourceId])) continue;
+            $key = (int)$row['store_id'] . '|' . $sourceId . '|' . $memberId;
+            $amounts[$key] = (int)($amounts[$key] ?? 0) + (int)($row['amount_cents'] ?? 0);
+        }
+        $keys = [];
+        foreach ($amounts as $key => $amount) {
+            $parts = explode('|', $key);
+            $source = $sources[(int)$parts[1]];
+            $threshold = $this->sourcePrefix($source) === 'A' ? 100000 : 50000;
+            if ($amount >= $threshold) $keys[$key] = true;
+        }
+        return $keys;
+    }
+    private function marketDetailSummaryRow(array $rows):array
+    {
+        $walkIn = $visits = $amountCents = 0; $effectiveMembers = [];
+        foreach ($rows as $row) {
+            $walkIn += (int)($row['walk_in'] ?? 0);
+            $visits += (int)($row['visits'] ?? 0);
+            $amountCents += (int)($row['amount_cents'] ?? 0);
+            if ((int)($row['effective_people'] ?? 0) === 1 && (int)($row['member_id'] ?? 0) > 0) $effectiveMembers[(int)$row['member_id']] = true;
+        }
+        return [
+            'order_no_snapshot' => '合计', 'store_name_snapshot' => '-', 'member_name_snapshot' => '-', 'member_phone' => '-',
+            'dimension' => '-', 'walk_in' => $walkIn, 'visits' => $visits, 'effective_people' => count($effectiveMembers),
+            'amount' => $this->money($amountCents), 'registered_date' => '-', 'reviewer' => '-', 'reviewed_at' => '-',
+            'creator_name' => '-', 'created_at' => '-',
+        ];
+    }
     private function sourceIds(string $prefix):array{return $this->sourceIdsMany([$prefix]);}
     private function sourceIdsMany(array $prefixes):array{$ids=[];foreach($this->primarySources()as$s)if(in_array($this->sourcePrefix($s),$prefixes,true))$ids[]=(int)$s['id'];return $ids;}
     private function sourcePrefix(array $source):string{$name=trim((string)($source['name']??''));return preg_match('/^([A-Z])/u',$name,$m)?$m[1]:'';}
@@ -415,12 +471,55 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
     private function result(string $title,array $columns,array $records,array $input,array $groups=[],array $totals=[]):array
     {
         $page=max(1,(int)($input['page']??1));$limit=min(100,max(10,(int)($input['limit']??20)));
+        $columns=$this->fixedColumns($title,$columns);
         $visible=!empty($input['_internal_all'])?$records:array_slice($records,($page-1)*$limit,$limit);
-        $result=['title'=>$title,'columns'=>$columns,'records'=>$visible,'total'=>count($records),'page'=>$page,'page_size'=>$limit,'totals'=>$totals,'drilldown_keys'=>['organization_id','store_id','dimension_code','payment_method_code','metric_code','start_date','end_date']];
+        $result=['title'=>$title,'columns'=>$columns,'records'=>$visible,'total'=>count($records),'page'=>$page,'page_size'=>$limit,'totals'=>$totals,'drilldown_keys'=>['organization_id','store_id','dimension_code','payment_method_code','metric_code','start_date','end_date'],'table_layout'=>['fixed'=>true,'sticky_header'=>true,'sticky_summary'=>true,'result_scroll'=>true],'metric_version'=>'store-operations-phase-two-v1','data_as_of'=>date('Y-m-d H:i:s'),'aggregation_status'=>'reconciled'];
+        $summary=$this->summaryRow($title,$columns,$records);if($summary)$result['summary_row']=$summary;
         if($groups)$result['column_groups']=$groups;
         $metadata=$this->metadataForTitle($title,$totals);
         foreach($metadata as $key=>$value)$result[$key]=$value;
         return$result;
+    }
+    private function fixedColumns(string $title,array $columns):array
+    {
+        $maps=[
+            '市场业绩表'=>['division_name'=>130,'store_name'=>140],
+            '市场明细表'=>['order_no_snapshot'=>126,'store_name_snapshot'=>112,'member_name_snapshot'=>82,'member_phone'=>116,'dimension'=>108],
+            '会员进店分析表'=>['member_name'=>100,'phone'=>116],
+            '会员进店年度汇总表'=>['row_label'=>82,'year'=>76],
+            '地推拓客明细表'=>['division_name'=>120,'store_name_snapshot'=>120,'source'=>110,'member_name_snapshot'=>90,'phone'=>116],
+            '地推拓客汇总表'=>['card_sale_date'=>106,'member_name_snapshot'=>90,'phone'=>116,'source'=>110],
+            '异业收客明细表'=>['source'=>110,'care_date'=>106,'store_name'=>120,'member_name'=>90],
+            '异业收客汇总表'=>['customer_acquired_at'=>106,'partner_store_name'=>120,'member_name'=>90,'phone'=>116],
+            '新客明细表'=>['division_name'=>120,'store_name_snapshot'=>120,'business_date'=>106,'customer'=>90,'phone'=>116],
+            '新客汇总表'=>['system_name'=>90,'division_name'=>120,'store_name'=>120,'member'=>90,'salesperson'=>100,'source'=>110],
+            '销售人生美大单统计表'=>['division_name'=>120,'store_name'=>120,'business_date'=>106,'salesperson'=>110],
+            '院店退款台账'=>['market'=>120,'store_name'=>120,'customer'=>90,'refund_date'=>130],
+        ];
+        foreach($columns as &$column){$key=(string)($column['key']??'');if(isset($maps[$title][$key])&&empty($column['fixed'])){$column['fixed']='left';$column['fixed_width']=$maps[$title][$key];}}unset($column);
+        return$columns;
+    }
+    private function summaryRow(string $title,array $columns,array $records):array
+    {
+        if(!$records||!$columns)return[];$row=[];$first=(string)($columns[0]['key']??'');foreach($columns as$column)$row[(string)$column['key']]='-';$row[$first]='合计';
+        foreach($columns as$column){$key=(string)$column['key'];$kind=$this->summaryMetricKind($title,$key);if($kind==='')continue;$total=0;foreach($records as$record)$total+=$kind==='money'?$this->decimalCents($record[$key]??''):(int)($record[$key]??0);$row[$key]=$kind==='money'?$this->money($total):$total;}
+        return$row;
+    }
+    private function summaryMetricKind(string $title,string $key):string
+    {
+        if($title==='市场业绩表')return preg_match('/^(channel_\d+_(walk_in|visits|effective)|payment_.+|channel_\d+_amount|total_performance)$/',$key)?(preg_match('/_(walk_in|visits|effective)$/',$key)?'count':'money'):'';
+        if($title==='市场明细表')return in_array($key,['walk_in','visits','amount'],true)?($key==='amount'?'money':'count'):'';
+        if($title==='会员进店分析表')return $key==='total_visits'||preg_match('/^month_\d+_visits$/',$key)?'count':($key==='annual_cash'||preg_match('/^month_\d+_cash$/',$key)?'money':'');
+        if($title==='会员进店年度汇总表')return $key==='total'||strpos($key,'store_')===0?'count':'';
+        if($title==='地推拓客明细表')return in_array($key,['visit_over_one_hour','fourth_and_above'],true)?'count':(in_array($key,['labor_fee','cash_1','cash_2','cash_3'],true)?'money':'');
+        if($title==='地推拓客汇总表')return $key==='annual_total'||preg_match('/^month_\d+$/',$key)?'money':'';
+        if($title==='异业收客明细表')return in_array($key,['full_payment','reward'],true)?'money':'';
+        if($title==='异业收客汇总表')return $key==='remaining_service_count'?'count':(in_array($key,['remaining_service_amount','first_500','reached_2400','annual_cash'],true)||preg_match('/^month_\d+$/',$key)?'money':'');
+        if($title==='新客明细表')return $key==='guide_effective_count'?'count':(in_array($key,['experience_card_amount','labor_fee','full_payment','deposit_payment','cleared_payment'],true)?'money':'');
+        if($title==='新客汇总表')return preg_match('/^month_\d+_count$/',$key)?'count':($key==='annual_cash'||preg_match('/^month_\d+_(full|deposit|cleared)$/',$key)?'money':'');
+        if($title==='销售人生美大单统计表')return $key==='daily_cash'?'money':'';
+        if($title==='院店退款台账')return $key==='refund_amount'?'money':'';
+        return'';
     }
     private function metadataForTitle(string $title,array $totals):array
     {
@@ -429,8 +528,8 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             '市场明细表'=>['editable_fields'=>[['key'=>'walk_in','label'=>'进店','type'=>'number','min'=>0]],'drilldown'=>['report'=>'market_detail']],
             '会员进店年度汇总表'=>['filter_schema'=>[['key'=>'mode','label'=>'统计方式','type'=>'select','options'=>[['value'=>'count','label'=>'按次数'],['value'=>'people','label'=>'按人头'],['value'=>'project','label'=>'按项目']]]]],
             '地推拓客明细表'=>['editable_fields'=>[['key'=>'card_sale_date','label'=>'卖卡日期','type'=>'date'],['key'=>'visit_over_one_hour','label'=>'进店满1小时','type'=>'number','min'=>0]]],
-            '异业收客汇总分析表'=>['editable_fields'=>[['key'=>'customer_acquired_at','label'=>'收客时间','type'=>'date'],['key'=>'partner_store_name','label'=>'异业店名','type'=>'text']],'top_summaries'=>[['key'=>'first_500_total','label'=>'成交满500元合计：','value'=>$totals['first_500_total']??'0'],['key'=>'reached_2400_total','label'=>'成交满2400元合计：','value'=>$totals['reached_2400_total']??'0']],'drilldown'=>['report'=>'cross_industry_customer_detail']],
-            '新客分析表'=>['editable_fields'=>[['key'=>'care_duration','label'=>'手艺人护理时长','type'=>'text']]],
+            '异业收客汇总表'=>['editable_fields'=>[['key'=>'customer_acquired_at','label'=>'收客时间','type'=>'date'],['key'=>'partner_store_name','label'=>'异业店名','type'=>'text']],'top_summaries'=>[['key'=>'first_500_total','label'=>'成交满500元合计：','value'=>$totals['first_500_total']??'0'],['key'=>'reached_2400_total','label'=>'成交满2400元合计：','value'=>$totals['reached_2400_total']??'0']]],
+            '新客明细表'=>['editable_fields'=>[['key'=>'care_duration','label'=>'手艺人护理时长','type'=>'text']]],
             '销售人生美大单统计表'=>['pending_metrics'=>['分成前、分成后和兑现月份尚无权威分成计划事实，当前不猜算这些数值。']],
         ];
         $defaults=['filter_schema'=>[],'editable_fields'=>[],'top_summaries'=>[],'drilldown'=>[]];

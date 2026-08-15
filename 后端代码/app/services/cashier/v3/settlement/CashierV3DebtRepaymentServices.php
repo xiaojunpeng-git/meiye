@@ -15,6 +15,7 @@ use app\services\cashier\v3\event\CashierV3BusinessEventRecorder;
 use app\services\cashier\v3\fact\CashierV3CheckoutFactPlanV1;
 use app\services\cashier\v3\fact\ThinkPhpCashierV3CheckoutFactRepository;
 use app\services\report\CustomerLifecycleFactServices;
+use app\services\report\StoreReportPaymentSaleAllocationFactServices;
 use think\facade\Db;
 
 /** Sales-debt repayment authority. Legacy debts are deliberately unsupported. */
@@ -316,7 +317,7 @@ final class CashierV3DebtRepaymentServices
             'aggregate_name_snapshot' => $repaymentNo, 'store_name_snapshot' => $dimensions['storeName'],
             'payload' => ['contractVersion' => self::SUBMIT_CONTRACT_VERSION, 'debtId' => $debtId, 'amountCents' => $amount, 'salesOrderId' => (string)$authority['sales_order_id'], 'salespeopleSnapshotFingerprint' => hash('sha256', json_encode($selectedSalespeople, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES))],
         ]);
-        $this->persistFactsInTx($payments, $authority, $selectedSalespeople, $repaymentId, $repaymentNo, $requestId, $amount, $commandKey, $event, $dimensions, $operator, $dataScope, $now);
+        $this->persistFactsInTx($payments, $authority, $items, $itemTargets, $personnel, $selectedSalespeople, $repaymentId, $repaymentNo, $requestId, $amount, $commandKey, $event, $dimensions, $operator, $dataScope, $now);
         if ($repaidAfter === $total) {
             (new CustomerLifecycleFactServices())->recordDebtCompletionInTx(
                 $dataScope->tenantId(), (string)$authority['sales_order_id'], $now
@@ -714,7 +715,7 @@ final class CashierV3DebtRepaymentServices
         return $out;
     }
 
-    private function persistFactsInTx(array $payments, array $authority, array $selectedSalespeople, string $repaymentId, string $repaymentNo, string $requestId, int $amount, string $commandKey, array $event, array $dimensions, CashierV3OperatorScope $operator, CashierV3DataScopeContext $scope, int $now): void
+    private function persistFactsInTx(array $payments, array $authority, array $items, array $itemTargets, array $personnel, array $selectedSalespeople, string $repaymentId, string $repaymentNo, string $requestId, int $amount, string $commandKey, array $event, array $dimensions, CashierV3OperatorScope $operator, CashierV3DataScopeContext $scope, int $now): void
     {
         $ids = new CashierV3DebtRepaymentIdFactory($this->secret()); $paymentFacts = [];
         foreach ($payments as $index => $payment) {
@@ -729,6 +730,71 @@ final class CashierV3DebtRepaymentServices
         ]);
         try { (new ThinkPhpCashierV3CheckoutFactRepository())->persistInTx($plan,$operator,$scope); }
         catch (\Throwable $e) { throw self::failure('debt_repayment_fact_write_failed',['cause'=>get_class($e)]); }
+        try {
+            $this->persistOriginalSalePaymentAllocationsInTx(
+                $paymentFacts, $authority, $items, $itemTargets, $personnel,
+                $commandKey, $event, $dimensions, $operator, $scope, $now
+            );
+        } catch (\Throwable $e) {
+            throw self::failure('debt_repayment_payment_allocation_write_failed', ['cause' => get_class($e)]);
+        }
+    }
+
+    /**
+     * A repayment belongs to the original debt-item lines, not to the synthetic
+     * repayment document line.  Preserve that relationship in the same
+     * immutable allocation fact used by every item-level cash report.
+     */
+    private function persistOriginalSalePaymentAllocationsInTx(array $paymentFacts, array $authority, array $items, array $itemTargets, array $personnel, string $commandKey, array $event, array $dimensions, CashierV3OperatorScope $operator, CashierV3DataScopeContext $scope, int $now): void
+    {
+        $lineBases = [];
+        foreach ($items as $item) {
+            $itemId = (int)($item['id'] ?? 0);
+            $allocated = (int)($itemTargets[$itemId] ?? 0) - self::storedMoneyCents($item['repaid_debt'] ?? null, 'item_repaid');
+            $lineId = trim((string)($personnel[$itemId]['authority']['order_line_id'] ?? ''));
+            if ($itemId <= 0 || $allocated < 0 || $lineId === '') {
+                throw self::failure('debt_repayment_payment_allocation_authority_invalid');
+            }
+            if ($allocated > 0) $lineBases[$lineId] = (int)($lineBases[$lineId] ?? 0) + $allocated;
+        }
+        if (!$lineBases) throw self::failure('debt_repayment_payment_allocation_empty');
+        if (array_sum($lineBases) !== array_sum(array_map(static function (array $payment): int { return (int)$payment['amountCents']; }, $paymentFacts))) {
+            throw self::failure('debt_repayment_payment_allocation_total_invalid');
+        }
+
+        $saleRows = Db::name('cashier_v3_sale_fact')->where('tenant_id', $scope->tenantId())
+            ->where('store_id', $operator->storeId())->where('order_id', (string)$authority['sales_order_id'])
+            ->whereIn('source_line_id', array_keys($lineBases))->where('fact_direction', 'forward')->where('status', 'effective')
+            ->field('fact_id,source_line_id,sale_amount_cents,debt_amount_cents')->order('id asc')->lock(true)->select()->toArray();
+        $salesByLine = [];
+        foreach ($saleRows as $sale) {
+            $lineId = (string)$sale['source_line_id'];
+            if ($lineId === '' || isset($salesByLine[$lineId])) throw self::failure('debt_repayment_payment_allocation_sale_ambiguous');
+            $salesByLine[$lineId] = $sale;
+        }
+        if (count($salesByLine) !== count($lineBases)) throw self::failure('debt_repayment_payment_allocation_sale_missing');
+
+        $sales = [];
+        foreach ($lineBases as $lineId => $base) {
+            $sale = (array)$salesByLine[$lineId];
+            $sale['allocation_base_amount_cents'] = $base;
+            $sales[] = $sale;
+        }
+        $normalizedPayments = [];
+        foreach ($paymentFacts as $payment) {
+            $normalizedPayments[] = [
+                'fact_id' => (string)$payment['factId'], 'payment_method' => (string)$payment['paymentMethod'],
+                'amount_cents' => (int)$payment['amountCents'], 'fact_direction' => 'forward', 'status' => 'effective',
+                'command_idempotency_key' => $commandKey,
+            ];
+        }
+        (new StoreReportPaymentSaleAllocationFactServices())->persistDebtRepaymentInTx([
+            'tenant_id' => $scope->tenantId(), 'organization_id' => $operator->organizationId(),
+            'store_id' => $operator->storeId(), 'member_id' => (int)$authority['member_id'],
+            'order_id' => (string)$authority['sales_order_id'], 'order_no_snapshot' => (string)$authority['sales_order_no_snapshot'],
+            'business_date' => date('Y-m-d', $now), 'occurred_at' => $now, 'settled_at' => $now, 'recorded_at' => $now,
+            'business_event_no' => (string)$event['event_no'], 'checkout_request_id' => (string)$event['source_id'],
+        ], $normalizedPayments, $sales);
     }
 
     private function performanceFacts(array $selectedSalespeople, string $repaymentId, int $amount, CashierV3DebtRepaymentIdFactory $ids): array

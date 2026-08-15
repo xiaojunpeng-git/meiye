@@ -3,7 +3,6 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Download from '@lucide/vue/dist/esm/icons/download.mjs'
 import BookOpen from '@lucide/vue/dist/esm/icons/book-open.mjs'
-import Network from '@lucide/vue/dist/esm/icons/network.mjs'
 import RefreshCw from '@lucide/vue/dist/esm/icons/refresh-cw.mjs'
 import ChevronDown from '@lucide/vue/dist/esm/icons/chevron-down.mjs'
 import ChevronUp from '@lucide/vue/dist/esm/icons/chevron-up.mjs'
@@ -35,10 +34,10 @@ const REPORT_TABS = Object.freeze([
   { code: 'member_visit_annual_summary', name: '会员进店年度汇总表' },
   { code: 'field_acquisition_detail', name: '地推拓客明细表' },
   { code: 'field_acquisition_summary', name: '地推拓客汇总表' },
-  { code: 'cross_industry_customer_detail', name: '异业收客明细分析表' },
-  { code: 'cross_industry_customer_summary', name: '异业收客汇总分析表' },
-  { code: 'new_customer_analysis', name: '新客分析表' },
-  { code: 'new_customer_analysis_summary', name: '新客分析表汇总' },
+  { code: 'cross_industry_customer_summary', name: '异业收客汇总表' },
+  { code: 'cross_industry_customer_detail', name: '异业收客明细表' },
+  { code: 'new_customer_analysis_summary', name: '新客汇总表' },
+  { code: 'new_customer_analysis', name: '新客明细表' },
   { code: 'salesperson_large_order_statistics', name: '销售人生美大单统计表' },
   { code: 'store_refund_ledger', name: '院店退款台账' }
 ])
@@ -137,7 +136,64 @@ const FIELD_LOGIC = Object.freeze({
   total_labor: '所选期间内，该手艺人每日手工费的合计。',
   total_performance: '所选期间内，该销售人每日销售业绩的合计。',
   today_cash_performance: '所选日期范围内，非体验项目结账成功后形成的现金业绩。',
-  cumulative_cash_performance: '当前与“当天现金业绩”使用相同统计范围和金额。'
+  cumulative_cash_performance: '当前与“当天现金业绩”使用相同统计范围和金额。',
+  order_no_snapshot: '结账成功后生成的业务单据编号。',
+  dimension: '成交时选择并保存的来源渠道。',
+  walk_in: '运营人员对该笔业务手动登记的进店次数；未登记时为 0。',
+  visits: '该会员在当前查询日期内已完成护理的次数。',
+  effective_people: '同一门店、同一来源下，当前查询日期内累计现金业绩达到门槛的不同会员数；A 类来源为 1000 元，其他来源为 500 元。',
+  amount: '本行成交明细分摊到的成功记账收款金额。',
+  registered_date: '该笔业务归入报表的经营日期。',
+  reviewer: '该笔业务的审核人员；未审核时显示“-”。',
+  reviewed_at: '该笔业务的审核时间；未审核时显示“-”。',
+  creator_name: '完成这笔业务制单的人员。',
+  created_at: '这笔业务实际制单的时间。',
+  total_visits: '该会员在当前统计年度内完成护理的总次数。',
+  annual_cash: '该会员在当前统计年度内分摊到的所有成功记账收款金额。',
+  source: '该笔首次疗程卡成交时选择并保存的来源渠道。',
+  row_label: '统计行对应的门店或汇总名称。',
+  year: '当前报表按此自然年度统计。',
+  card_sale_date: '该会员首次办理疗程卡的经营日期。',
+  first_visit_date: '该会员首次完成护理的经营日期；尚未护理时显示“-”。',
+  annual_total: '该会员在首次办卡后首个自然年度内分摊到的成功记账收款金额。',
+  first_visit_at: '该会员第一次完成护理的实际时间。',
+  visit_over_one_hour: '运营人员对该会员首次到店后停留满一小时的手动登记；未登记时为 0。',
+  fourth_and_above: '该会员在当前范围内完成的第四次及之后护理次数。',
+  cash_1: '该会员第一次成交分摊到的成功记账收款金额。',
+  cash_2: '该会员第二次成交分摊到的成功记账收款金额。',
+  cash_3: '该会员第三次成交分摊到的成功记账收款金额。',
+  customer_acquired_at: '运营人员登记该会员由异业渠道收客的日期。',
+  partner_store_name: '运营人员登记的异业合作门店名称。',
+  remaining_service_count: '截至查询日，该会员已生效卡项中尚可使用的服务次数。',
+  remaining_service_amount: '截至查询日，尚未使用服务按原成交分摊金额计算的金额。',
+  first_500: '该会员首次成交分摊到的成功记账收款达到 500 元时显示对应金额，否则为 0。',
+  reached_2400: '该会员累计成功记账收款达到 2400 元时显示对应累计金额，否则为 0。',
+  full_payment: '该笔业务结账成功且没有产生欠款时，分摊到本销售明细的成功记账收款金额。',
+  reward: '异业收客已达到奖励条件后，按已确认规则记录的奖励金额。',
+  customer: '该笔业务发生时关联的会员姓名。',
+  age: '会员资料中已登记的年龄；未登记时留空。',
+  care_project: '该笔成交关联的护理项目或商品名称。',
+  craftsman: '完成该笔护理并形成劳动业绩的手艺人。',
+  experience_card_amount: '该笔体验卡或项目成交时记入的成交金额。',
+  care_duration: '运营人员手动填写的该次护理时长。',
+  guide_effective_count: '该笔业务已确认并生效的导购有效人次。',
+  guide_performance_round: '该笔业务中导购参与的轮次；没有导购时留空。',
+  deposit_payment: '该笔业务产生欠款时，在本次结账成功记入本销售明细的收款金额。',
+  cleared_payment: '该笔欠款后续补交成功时，按原销售明细分摊回来的收款金额。',
+  system_name: '当前报表所属系统名称。',
+  member: '该行统计对应的会员姓名。',
+  daily_cash: '销售人在当日分配到的生美成交成功记账收款金额。',
+  cumulative_cash: '同一会员、同一销售人截至当日累计分配到的生美成交成功记账收款金额。',
+  share_30000_before: '该会员生美累计金额达到 3 万前的分成前金额；尚未形成权威分成计划时留空。',
+  share_30000_after: '该会员生美累计金额达到 3 万后的分成后金额；尚未形成权威分成计划时留空。',
+  share_50000_before: '该会员生美累计金额达到 5 万前的分成前金额；尚未形成权威分成计划时留空。',
+  market: '该笔退款发生时所属的市场或业务区域。',
+  refund_date: '退款申请提交的日期。',
+  original_sale_date: '被退款原销售明细的成交日期。',
+  card_name: '被退款的卡项或商品名称。',
+  refund_items: '本次退款涉及的项目或商品。',
+  refund_amount: '退款成功后实际退回的金额。',
+  refund_remark: '本次退款登记的原因或备注。'
 })
 
 function fieldLogic(column) {
@@ -152,6 +208,11 @@ function fieldLogic(column) {
   if (/^day_\d+_consume$/.test(key)) return `${label.replace('消耗', '')}该手艺人按项目分配到的劳动业绩合计。`
   if (/^day_\d+_labor$/.test(key)) return `${label.replace('手工', '')}该手艺人按项目分配到的手工费合计；手工费和劳动业绩可以不同。`
   if (/^day_\d+_performance$/.test(key)) return `${label.replace('业绩', '')}该销售人按成交项目分配到的销售业绩合计。`
+  if (/^month_\d+_count$/.test(key)) return `该会员在${label}对应自然月内形成的导购有效人次。`
+  if (/^month_\d+_(full|deposit|cleared)$/.test(key)) return `该会员在${label.replace(/全款|定金|清款/, '')}对应自然月内的${label}，按销售明细分摊后的成功记账收款金额统计。`
+  if (/^month_\d+$/.test(key)) return `该会员在${label}对应自然月内分摊到的成功记账收款金额。`
+  if (/^store_\d+$/.test(key)) return `该门店在当前统计年度内完成护理的次数。`
+  if (/^share_50000_after_\d+$/.test(key)) return `${label}对应的兑现阶段；尚未形成权威分成计划时留空。`
   if (key.endsWith('_cash_performance') || key.endsWith('_partner_performance') || key.endsWith('_consume_performance')) return `“${label}”当前尚未形成独立归集金额，因此统一显示 0；这不表示相关业务没有发生。`
   return `“${label}”按当前查询条件展示本表对应的业务结果。`
 }
@@ -464,6 +525,19 @@ function csvValue(value) {
   return /[",\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text
 }
 
+function exportGroupHeader(columns, rawGroups) {
+  const groupByColumn = new Map()
+  ;(Array.isArray(rawGroups) ? rawGroups : []).forEach((group) => {
+    const keys = Array.isArray(group?.column_keys)
+      ? group.column_keys
+      : Array.isArray(group?.columnKeys)
+        ? group.columnKeys
+        : []
+    keys.forEach((key) => groupByColumn.set(String(key), String(group?.label || group?.name || '')))
+  })
+  return columns.map((column) => groupByColumn.get(String(column?.key || '')) || '')
+}
+
 async function exportReport() {
   exporting.value = true
   errorMessage.value = ''
@@ -472,10 +546,18 @@ async function exportReport() {
     const exported = await exportStoreBusinessReport(reportParams({ page: 1, limit: 100 }), reportRuntime.value)
     const exportColumns = Array.isArray(exported.columns) ? exported.columns : []
     const exportRecords = Array.isArray(exported.records) ? exported.records : []
-    const lines = [
-      exportColumns.map((column) => csvValue(column.label)).join(','),
-      ...exportRecords.map((row) => exportColumns.map((column) => csvValue(row?.[column.key])).join(','))
-    ]
+    const summaryRow = exported.summary_row || exported.summaryRow
+    const groupHeader = exportGroupHeader(exportColumns, exported.column_groups || exported.columnGroups)
+    const lines = []
+    if (groupHeader.some(Boolean)) lines.push(groupHeader.map(csvValue).join(','))
+    lines.push(exportColumns.map((column) => csvValue(column.label)).join(','))
+    if (summaryRow && typeof summaryRow === 'object' && Object.keys(summaryRow).length) {
+      lines.push(exportColumns.map((column) => csvValue(summaryRow[column.key] ?? '-')).join(','))
+    }
+    exportRecords.forEach((row) => lines.push(exportColumns.map((column) => csvValue(row?.[column.key])).join(',')))
+    lines.push('')
+    lines.push([csvValue('列名取值来源'), csvValue(`口径版本：${exported.metric_version || result.value.metric_version || '-'}`)].join(','))
+    exportColumns.forEach((column) => lines.push([csvValue(column.label), csvValue(fieldLogic(column))].join(',')))
     const url = URL.createObjectURL(new Blob([`\ufeff${lines.join('\n')}`], { type: 'text/csv;charset=utf-8' }))
     const link = document.createElement('a')
     link.href = url
@@ -815,24 +897,6 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateTabsLayout))
 
 <template>
   <main class="store-business-report" :class="{ 'store-business-report--market-detail': activeReport === 'market_detail', 'store-business-report--fixed-table': usesFixedTableLayout }" aria-label="门店运营报表">
-    <header class="store-business-report__header">
-      <div>
-        <p class="store-business-report__eyebrow">数据</p>
-        <h1>门店运营报表</h1>
-      </div>
-      <div class="store-business-report__actions">
-        <button type="button" class="button button--secondary" @click="isFieldGuideOpen = true">
-          <BookOpen :size="15" aria-hidden="true" /> 列名取值来源
-        </button>
-        <button type="button" class="button button--secondary" :disabled="loading" @click="loadReport">
-          <RefreshCw :size="15" aria-hidden="true" /> 刷新
-        </button>
-        <button type="button" class="button button--primary" :disabled="exporting" @click="exportReport">
-          <Download :size="15" aria-hidden="true" /> {{ exporting ? '正在导出' : '导出' }}
-        </button>
-      </div>
-    </header>
-
     <div class="store-business-report__tabs-shell" :class="{ 'store-business-report__tabs-shell--expanded': tabsExpanded }">
       <nav ref="tabsElement" class="store-business-report__tabs" aria-label="门店运营报表功能">
         <button
@@ -853,43 +917,8 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateTabsLayout))
     </div>
 
     <section class="store-business-report__filters" aria-label="报表查询条件">
-      <div class="store-business-report__scope-field">
-        <span>组织</span>
-        <div class="store-business-report__scope-picker">
-        <button type="button" class="store-business-report__scope-trigger" :disabled="scopePicker.loading" @click="scopePicker.open = !scopePicker.open">
-          <Network :size="16" aria-hidden="true" /> {{ scopePicker.loading ? '读取权限范围' : scopePicker.label }}
-        </button>
-        <section v-if="scopePicker.open" class="store-business-report__scope-panel" aria-label="组织和门店权限范围">
-          <header>组织 / 门店</header>
-          <div class="store-business-report__scope-panel-body">
-            <div class="store-business-report__scope-tree" aria-label="组织树">
-              <p v-if="scopePicker.loading" class="store-business-report__scope-empty">正在读取组织范围。</p>
-              <template v-else>
-                <button
-                  v-for="option in scopeTreeOptions"
-                  :key="option.key"
-                  type="button"
-                  class="store-business-report__scope-option"
-                  :class="{ 'store-business-report__scope-option--selected': scopePicker.selectedOrganizationKey === option.key, 'store-business-report__scope-option--store': option.storeId > 0 }"
-                  :style="{ paddingLeft: `${10 + option.depth * 18}px` }"
-                  @click="selectScopeNode(option)"
-                >{{ option.node?.title || option.node?.name || option.node?.label || '-' }}</button>
-              </template>
-            </div>
-            <div class="store-business-report__scope-stores" aria-label="可选门店">
-              <p class="store-business-report__scope-stores-title">{{ scopePicker.selectedOrganizationName || '选择组织后查看组织及下级门店' }}</p>
-              <div v-if="scopePicker.stores.length" class="store-business-report__scope-store-list">
-                <button v-for="store in scopePicker.stores" :key="store.id" type="button" :class="{ 'is-active': scopePicker.selectedStoreIds.length === 1 && scopePicker.selectedStoreIds[0] === Number(store.id) }" @click="selectScopeStore(store)">{{ store.name }}</button>
-              </div>
-              <p v-else class="store-business-report__scope-empty">该组织及下级暂无门店</p>
-            </div>
-          </div>
-          <footer><button type="button" @click="chooseAllScope">当前权限范围</button><span>选择组织查询其全部下级门店；选择门店仅查询该门店。</span></footer>
-        </section>
-        </div>
-      </div>
-      <label>开始日期<input v-model="startDate" type="date" :min="isFirstPhaseReport ? COVERAGE_START : undefined" :max="endDate" /></label>
-      <label>结束日期<input v-model="endDate" type="date" :min="startDate" :max="today()" /></label>
+      <label class="store-business-report__date-field"><span>从</span><input v-model="startDate" type="date" aria-label="开始日期" :min="isFirstPhaseReport ? COVERAGE_START : undefined" :max="endDate" /></label>
+      <label class="store-business-report__date-field"><span>至</span><input v-model="endDate" type="date" aria-label="结束日期" :min="startDate" :max="today()" /></label>
       <label v-for="field in filterSchema" :key="field.key">{{ field.label || field.name || field.key }}
         <select v-if="field.type === 'select'" v-model="dynamicFilters[field.key]">
           <option value="">{{ field.placeholder || '全部' }}</option>
@@ -905,6 +934,17 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateTabsLayout))
       </label>
       <button v-if="isFirstPhaseReport" type="button" class="button button--secondary" @click="isAdvancedFiltersOpen = !isAdvancedFiltersOpen">{{ isAdvancedFiltersOpen ? '收起筛选' : '更多筛选' }}</button>
       <button type="button" class="button button--primary" :disabled="loading" @click="query">{{ loading ? '查询中' : '查询' }}</button>
+      <div class="store-business-report__query-actions" aria-label="报表操作">
+        <button type="button" class="button button--secondary" @click="isFieldGuideOpen = true">
+          <BookOpen :size="15" aria-hidden="true" /> 列名取值来源
+        </button>
+        <button type="button" class="button button--secondary" :disabled="loading" @click="loadReport">
+          <RefreshCw :size="15" aria-hidden="true" /> 刷新
+        </button>
+        <button type="button" class="button button--primary" :disabled="exporting" @click="exportReport">
+          <Download :size="15" aria-hidden="true" /> {{ exporting ? '正在导出' : '导出' }}
+        </button>
+      </div>
     </section>
 
     <section v-if="isFirstPhaseReport && isAdvancedFiltersOpen" class="store-business-report__filters store-business-report__filters--advanced" aria-label="报表高级筛选">
@@ -1031,13 +1071,8 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateTabsLayout))
 
 <style scoped>
 .store-business-report { display: grid; align-content: start; gap: 14px; min-width: 0; min-height: 0; height: 100%; box-sizing: border-box; padding: 20px; overflow: auto; background: #f5f7fa; color: #252a34; }
-.store-business-report--market-detail, .store-business-report--fixed-table { grid-template-rows: auto auto auto minmax(0, 1fr); align-content: stretch; overflow: hidden; }
-.store-business-report__header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
-.store-business-report__eyebrow { margin: 0 0 4px; color: #1769aa; font-size: 12px; font-weight: 700; letter-spacing: 0; }
+.store-business-report--market-detail, .store-business-report--fixed-table { grid-template-rows: auto auto minmax(0, 1fr); align-content: stretch; overflow: hidden; }
 .store-business-report h1, .store-business-report h2, .store-business-report p { margin: 0; }
-.store-business-report h1 { font-size: 21px; line-height: 1.25; }
-.store-business-report__actions { display: flex; flex: none; gap: 8px; }
-.store-business-report__actions .button { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; }
 .store-business-report__tabs-shell { display: flex; align-items: flex-start; min-width: 0; border-bottom: 1px solid #d9e1eb; background: #fff; }
 .store-business-report__tabs { display: flex; flex: 1; flex-wrap: wrap; min-width: 0; max-height: 43px; gap: 0 2px; overflow: hidden; padding: 0 12px; }
 .store-business-report__tabs-shell--expanded .store-business-report__tabs { max-height: 86px; }
@@ -1047,27 +1082,12 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateTabsLayout))
 .store-business-report__tab--active { border-bottom-color: #1769aa; color: #1769aa; font-weight: 700; }
 .store-business-report__filters, .store-business-report__panel { border: 1px solid #dde4ed; border-radius: 8px; background: #fff; }
 .store-business-report__filters { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; padding: 13px 16px; }
-.store-business-report__scope-field { display: grid; gap: 5px; flex: none; color: #687586; font-size: 12px; }
-.store-business-report__scope-picker { position: relative; flex: none; }
-.store-business-report__scope-trigger { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; border: 1px solid #dcdee2; border-radius: 4px; padding: 6px 11px; background: #fff; color: #515a6e; font: inherit; cursor: pointer; }
-.store-business-report__scope-trigger:hover { border-color: #57a3f3; color: #2d8cf0; }
-.store-business-report__scope-trigger:disabled { cursor: wait; opacity: .65; }
-.store-business-report__scope-panel { position: absolute; z-index: 30; top: calc(100% + 6px); left: 0; width: min(480px, calc(100vw - 48px)); border: 1px solid #dcdee2; border-radius: 4px; background: #fff; box-shadow: 0 2px 12px rgba(0, 0, 0, .14); overflow: hidden; }
-.store-business-report__scope-panel header { padding: 12px 14px 8px; border-bottom: 1px solid #edf0f5; color: #17233d; font-weight: 600; }
-.store-business-report__scope-panel-body { display: flex; min-height: 230px; }
-.store-business-report__scope-tree { position: relative; flex: 1; max-height: 260px; overflow: auto; padding: 7px 8px; border-right: 1px solid #edf0f5; }
-.store-business-report__scope-option { display: block; width: 100%; min-height: 31px; border: 0; border-radius: 3px; padding-right: 8px; background: #fff; color: #515a6e; text-align: left; font: inherit; font-size: 13px; cursor: pointer; }
-.store-business-report__scope-option:hover, .store-business-report__scope-option--selected { background: #edf5ff; color: #2d8cf0; }
-.store-business-report__scope-option--store { color: #657386; }
-.store-business-report__scope-stores { width: 205px; max-height: 260px; overflow: auto; padding: 10px 12px; }
-.store-business-report__scope-stores-title { min-height: 18px; margin: 0 0 8px; color: #666; font-size: 12px; line-height: 18px; }
-.store-business-report__scope-store-list button { display: block; width: 100%; min-height: 31px; border: 0; border-radius: 3px; padding: 5px 8px; background: transparent; color: #515a6e; text-align: left; font: inherit; font-size: 13px; cursor: pointer; }
-.store-business-report__scope-store-list button:hover, .store-business-report__scope-store-list button.is-active { background: #edf5ff; color: #2d8cf0; }
-.store-business-report__scope-empty { margin: 0; padding: 8px 2px; color: #bbb; font-size: 12px; line-height: 1.55; }
-.store-business-report__scope-panel footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 14px; border-top: 1px solid #edf0f5; color: #999; font-size: 12px; line-height: 1.45; }
-.store-business-report__scope-panel footer button { flex: none; border: 0; padding: 0; background: transparent; color: #2d8cf0; font: inherit; font-size: 12px; cursor: pointer; }
+.store-business-report__query-actions { display: flex; flex: none; align-items: center; gap: 8px; margin-left: auto; }
+.store-business-report__query-actions .button { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; }
 .store-business-report__filters--advanced { border-top: 0; border-radius: 0 0 8px 8px; padding-top: 2px; }
 .store-business-report__filters label { display: grid; gap: 5px; min-width: 140px; color: #687586; font-size: 12px; }
+.store-business-report__filters .store-business-report__date-field { display: inline-flex; min-width: 0; align-items: center; gap: 6px; color: #526174; font-size: 13px; }
+.store-business-report__date-field input { width: 116px; }
 .store-business-report__filters input, .store-business-report__filters select { min-height: 34px; box-sizing: border-box; border: 1px solid #d8e0ea; border-radius: 6px; padding: 6px 8px; background: #fff; color: #252a34; font: inherit; }
 .store-business-report__person-picker-trigger { min-height: 34px; border: 1px solid #d8e0ea; border-radius: 6px; padding: 6px 8px; background: #fff; color: #1769aa; text-align: left; font: inherit; cursor: pointer; }
 .store-business-report__modal { position: fixed; z-index: 100; inset: 0; display: grid; place-items: center; padding: 20px; background: rgba(24, 39, 58, .38); }
@@ -1150,5 +1170,5 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateTabsLayout))
 .store-business-report__pagination button { min-height: 30px; border: 1px solid #d7e0eb; border-radius: 5px; padding: 4px 9px; background: #fff; color: #445365; cursor: pointer; }
 .store-business-report__pagination button:disabled { cursor: not-allowed; opacity: .45; }
 @media (max-width: 1100px) { .store-business-report__metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-@media (max-width: 760px) { .store-business-report { padding: 12px; } .store-business-report__header { display: grid; } .store-business-report__actions { flex-wrap: wrap; } .store-business-report__metrics, .store-business-report__overview-grid { grid-template-columns: 1fr; } .store-business-report__filters label { flex: 1 1 160px; } .store-business-report__field-guide-item { grid-template-columns: 1fr; gap: 5px; } }
+@media (max-width: 760px) { .store-business-report { padding: 12px; } .store-business-report__query-actions { width: 100%; flex-wrap: wrap; margin-left: 0; } .store-business-report__metrics, .store-business-report__overview-grid { grid-template-columns: 1fr; } .store-business-report__filters label { flex: 1 1 160px; } .store-business-report__field-guide-item { grid-template-columns: 1fr; gap: 5px; } }
 </style>
