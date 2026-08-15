@@ -89,6 +89,10 @@ class StoreUnifiedReportServices extends BaseServices
     {
         $query = Db::name('cashier_v3_sale_fact')->alias('s')
             ->leftJoin('cashier_v3_report_sale_dimension_fact d', 'd.sale_fact_id=s.fact_id')
+            // A new card may carry several component categories.  For card
+            // rows c is the authoritative checkout-time allocation fact;
+            // ordinary products/projects remain on their original dimension.
+            ->leftJoin('cashier_v3_card_sale_category_allocation_fact c', "c.sale_fact_id=s.fact_id AND c.status='effective'")
             ->whereBetween('s.business_date', [$range['start'], $range['end']])
             ->where('s.status', 'effective');
         if (is_array($storeId)) $query->whereIn('s.store_id', array_values(array_unique(array_map('intval', $storeId))));
@@ -99,10 +103,10 @@ class StoreUnifiedReportServices extends BaseServices
 
     private function operationFilters($query, array $input): void
     {
-        if ((int)($input['category_id'] ?? 0) > 0) $query->where('d.category_id_snapshot', (int)$input['category_id']);
-        if (($path = trim((string)($input['category_path'] ?? ''))) !== '') $query->whereLike('d.category_path_snapshot', $path . '%');
-        if (($type = trim((string)($input['product_type'] ?? ''))) !== '') $query->where('d.product_type_snapshot', $type);
-        if (($partner = trim((string)($input['partner_name'] ?? ''))) !== '') $query->where('d.partner_name_snapshot', $partner);
+        if ((int)($input['category_id'] ?? 0) > 0) $query->whereRaw('COALESCE(c.category_id_snapshot,d.category_id_snapshot)=?', [(int)$input['category_id']]);
+        if (($path = trim((string)($input['category_path'] ?? ''))) !== '') $query->whereRaw('COALESCE(c.category_path_snapshot,d.category_path_snapshot) LIKE ?', [$path . '%']);
+        if (($type = trim((string)($input['product_type'] ?? ''))) !== '') $query->whereRaw('COALESCE(c.product_type_snapshot,d.product_type_snapshot)=?', [$type]);
+        if (($partner = trim((string)($input['partner_name'] ?? ''))) !== '') $query->whereRaw('COALESCE(c.partner_name_snapshot,d.partner_name_snapshot)=?', [$partner]);
         if ((int)($input['salesperson_id'] ?? 0) > 0) $query->whereExists(function ($sub) use ($input) {
             $sub->name('cashier_v3_performance_fact')->whereRaw('source_line_id=s.source_line_id')->where('employee_id', (int)$input['salesperson_id'])->where('performance_type', 'sales_performance_allocated')->where('status', 'effective');
         });
@@ -116,9 +120,9 @@ class StoreUnifiedReportServices extends BaseServices
 
     private function partnerItemSummary($storeId, array $range, array $input): array
     {
-        $query = $this->operationSaleQuery($storeId, $range, $input)->where('d.partner_name_snapshot', '<>', '');
-        $rows = $query->fieldRaw("DATE_FORMAT(s.business_date,'%Y-%m') AS month,MAX(s.organization_name_snapshot) AS division_name,s.store_id,MAX(s.store_name_snapshot) AS store_name,d.category_path_snapshot,SUBSTRING_INDEX(d.category_path_snapshot,'/',1) AS performance_type,SUM(s.sale_amount_cents) AS sale_amount_cents,SUM(CASE WHEN d.is_experience=1 THEN s.quantity ELSE 0 END) AS experience_count,COUNT(DISTINCT NULLIF(s.member_id,0)) AS member_count,SUM(s.quantity) AS quantity,SUM((SELECT COALESCE(SUM(pf.amount_cents),0) FROM eb_cashier_v3_performance_fact pf WHERE pf.source_line_id=s.source_line_id AND pf.performance_type='consumption_performance_recorded' AND pf.status='effective')) AS consumption_amount_cents,SUM((SELECT COALESCE(SUM(pf.amount_cents),0) FROM eb_cashier_v3_performance_fact pf WHERE pf.source_line_id=s.source_line_id AND pf.performance_type='labor_performance_allocated' AND pf.status='effective')) AS labor_amount_cents,SUM((SELECT COALESCE(SUM(pf.amount_cents),0) FROM eb_cashier_v3_performance_fact pf WHERE pf.source_line_id=s.source_line_id AND pf.performance_type='actual_performance_recorded' AND pf.status='effective')) AS actual_performance_cents")
-            ->group('month,s.store_id,d.partner_name_snapshot,d.category_path_snapshot')->orderRaw('month DESC,sale_amount_cents DESC')->select()->toArray();
+        $query = $this->operationSaleQuery($storeId, $range, $input)->whereRaw("COALESCE(c.partner_name_snapshot,d.partner_name_snapshot)<>''");
+        $rows = $query->fieldRaw("DATE_FORMAT(s.business_date,'%Y-%m') AS month,MAX(s.organization_name_snapshot) AS division_name,s.store_id,MAX(s.store_name_snapshot) AS store_name,COALESCE(c.category_path_snapshot,d.category_path_snapshot) AS category_path_snapshot,SUBSTRING_INDEX(COALESCE(c.category_path_snapshot,d.category_path_snapshot),'/',1) AS performance_type,SUM(COALESCE(c.sale_amount_cents,s.sale_amount_cents)) AS sale_amount_cents,SUM(CASE WHEN COALESCE(d.is_experience,0)=1 THEN s.quantity ELSE 0 END) AS experience_count,COUNT(DISTINCT NULLIF(s.member_id,0)) AS member_count,SUM(s.quantity) AS quantity,SUM((SELECT COALESCE(SUM(pf.amount_cents),0) FROM eb_cashier_v3_performance_fact pf WHERE pf.source_line_id=s.source_line_id AND pf.performance_type='consumption_performance_recorded' AND pf.status='effective')) AS consumption_amount_cents,SUM((SELECT COALESCE(SUM(pf.amount_cents),0) FROM eb_cashier_v3_performance_fact pf WHERE pf.source_line_id=s.source_line_id AND pf.performance_type='labor_performance_allocated' AND pf.status='effective')) AS labor_amount_cents,SUM(COALESCE(c.cash_performance_amount_cents,(SELECT COALESCE(SUM(pf.amount_cents),0) FROM eb_cashier_v3_performance_fact pf WHERE pf.source_line_id=s.source_line_id AND pf.performance_type='actual_performance_recorded' AND pf.status='effective'))) AS actual_performance_cents")
+            ->group("month,s.store_id,COALESCE(c.partner_name_snapshot,d.partner_name_snapshot),COALESCE(c.category_path_snapshot,d.category_path_snapshot)")->orderRaw('month DESC,sale_amount_cents DESC')->select()->toArray();
         foreach ($rows as &$row) { $row['store_summary'] = (string)$row['store_name']; $row['sale_amount'] = $this->money((int)$row['sale_amount_cents']); $row['actual_performance'] = $this->money((int)$row['actual_performance_cents']); $row['consumption_amount'] = $this->money((int)$row['consumption_amount_cents']); $row['labor_amount'] = $this->money((int)$row['labor_amount_cents']); $row['experience_count'] = (int)$row['experience_count']; $row['member_count'] = (int)$row['member_count']; }
         unset($row);
         return ['title'=>'合作方品项汇总','columns'=>[['key'=>'month','label'=>'月份'],['key'=>'division_name','label'=>'分公司'],['key'=>'store_summary','label'=>'门店汇总'],['key'=>'performance_type','label'=>'分类'],['key'=>'experience_count','label'=>'体验人次'],['key'=>'member_count','label'=>'成交人头'],['key'=>'consumption_amount','label'=>'消耗业绩'],['key'=>'labor_amount','label'=>'手工汇总'],['key'=>'sale_amount','label'=>'成交业绩']], 'records'=>$rows,'total'=>count($rows),'page'=>1,'page_size'=>count($rows)];
@@ -126,10 +130,10 @@ class StoreUnifiedReportServices extends BaseServices
 
     private function partnerItemDetail($storeId, array $range, array $input): array
     {
-        $query = $this->operationSaleQuery($storeId, $range, $input)->where('d.partner_name_snapshot', '<>', '');
+        $query = $this->operationSaleQuery($storeId, $range, $input)->whereRaw("COALESCE(c.partner_name_snapshot,d.partner_name_snapshot)<>''");
         $total = (int)(clone $query)->count('s.id');
         $rows = (clone $query)->leftJoin('user u', 'u.uid = s.member_id')
-            ->fieldRaw("s.store_id,s.business_date,s.organization_name_snapshot,s.store_name_snapshot,s.order_no_snapshot,s.member_id,s.member_name_snapshot,u.phone AS member_phone,s.item_name_snapshot,s.source_type,s.quantity,s.sale_amount_cents,d.product_type_snapshot,d.category_path_snapshot,d.partner_name_snapshot,d.is_experience,s.source_line_id,s.fact_id,(SELECT COALESCE(SUM(pf.amount_cents),0) FROM eb_cashier_v3_performance_fact pf WHERE pf.source_line_id=s.source_line_id AND pf.performance_type='consumption_performance_recorded' AND pf.status='effective') AS consumption_amount_cents,(SELECT COALESCE(SUM(pf.amount_cents),0) FROM eb_cashier_v3_performance_fact pf WHERE pf.source_line_id=s.source_line_id AND pf.performance_type='labor_performance_allocated' AND pf.status='effective') AS labor_amount_cents,(SELECT COALESCE(SUM(pf.amount_cents),0) FROM eb_cashier_v3_performance_fact pf WHERE pf.source_line_id=s.source_line_id AND pf.performance_type='actual_performance_recorded' AND pf.status='effective') AS actual_performance_cents")
+            ->fieldRaw("s.store_id,s.business_date,s.organization_name_snapshot,s.store_name_snapshot,s.order_no_snapshot,s.member_id,s.member_name_snapshot,u.phone AS member_phone,s.item_name_snapshot,s.source_type,s.quantity,COALESCE(c.sale_amount_cents,s.sale_amount_cents) AS sale_amount_cents,COALESCE(c.product_type_snapshot,d.product_type_snapshot) AS product_type_snapshot,COALESCE(c.category_path_snapshot,d.category_path_snapshot) AS category_path_snapshot,COALESCE(c.partner_name_snapshot,d.partner_name_snapshot) AS partner_name_snapshot,d.is_experience,s.source_line_id,s.fact_id,(SELECT COALESCE(SUM(pf.amount_cents),0) FROM eb_cashier_v3_performance_fact pf WHERE pf.source_line_id=s.source_line_id AND pf.performance_type='consumption_performance_recorded' AND pf.status='effective') AS consumption_amount_cents,(SELECT COALESCE(SUM(pf.amount_cents),0) FROM eb_cashier_v3_performance_fact pf WHERE pf.source_line_id=s.source_line_id AND pf.performance_type='labor_performance_allocated' AND pf.status='effective') AS labor_amount_cents,COALESCE(c.cash_performance_amount_cents,(SELECT COALESCE(SUM(pf.amount_cents),0) FROM eb_cashier_v3_performance_fact pf WHERE pf.source_line_id=s.source_line_id AND pf.performance_type='actual_performance_recorded' AND pf.status='effective')) AS actual_performance_cents")
             ->order('s.business_date','desc')->order('s.id','desc')->page($this->page($input),$this->limit($input))->select()->toArray();
         $rows = $this->attachAnnotations($rows, 'partner_item_detail', $storeId);
         foreach ($rows as &$row) { $row['sale_amount'] = $this->money((int)$row['sale_amount_cents']); $row['actual_performance'] = $this->money((int)$row['actual_performance_cents']); $row['consumption_amount'] = $this->money((int)$row['consumption_amount_cents']); $row['labor_amount'] = $this->money((int)$row['labor_amount_cents']); $row['experience'] = (int)$row['is_experience'] === 1 ? '是' : '否'; }
@@ -143,7 +147,7 @@ class StoreUnifiedReportServices extends BaseServices
     {
         $query = $this->operationSaleQuery($storeId, $range, $input);
         $total = (int)(clone $query)->count('s.id');
-        $rows = (clone $query)->fieldRaw("s.store_id,s.business_date,s.store_name_snapshot,s.order_no_snapshot,s.order_id,s.source_line_id,s.member_id,s.member_name_snapshot,s.item_name_snapshot,d.category_path_snapshot,d.product_type_snapshot,s.source_type,s.quantity,s.sale_amount_cents,s.business_source_label_snapshot,s.source_attribution_type_snapshot,d.is_experience")->order('s.business_date','desc')->order('s.id','desc')->page($this->page($input),$this->limit($input))->select()->toArray();
+        $rows = (clone $query)->fieldRaw("s.store_id,s.business_date,s.store_name_snapshot,s.order_no_snapshot,s.order_id,s.source_line_id,s.member_id,s.member_name_snapshot,s.item_name_snapshot,COALESCE(c.category_path_snapshot,d.category_path_snapshot) AS category_path_snapshot,COALESCE(c.product_type_snapshot,d.product_type_snapshot) AS product_type_snapshot,s.source_type,s.quantity,COALESCE(c.sale_amount_cents,s.sale_amount_cents) AS sale_amount_cents,c.allocation_fact_id AS card_category_allocation_fact_id,COALESCE(c.cash_performance_amount_cents,0) AS card_cash_performance_amount_cents,s.business_source_label_snapshot,s.source_attribution_type_snapshot,d.is_experience")->order('s.business_date','desc')->order('s.id','desc')->page($this->page($input),$this->limit($input))->select()->toArray();
         $this->decorateMemberConsumptionRows($rows, $storeId);
         foreach ($rows as &$row) {
             $row['sale_amount'] = $this->money((int)$row['sale_amount_cents']);
@@ -167,7 +171,7 @@ class StoreUnifiedReportServices extends BaseServices
         ];
         foreach ($this->paymentMethodDefinitions() as $method) $columns[] = ['key'=>'payment_'.$method['code'],'label'=>$method['label'],'group_label'=>'支付现金业绩方式'];
         $columns[] = ['key'=>'receipt_total','label'=>'收款总金额','group_label'=>'支付现金业绩方式'];
-        foreach ($this->fixedPartnerPerformanceDefinitions() as $definition) $columns[] = ['key'=>$definition['key'],'label'=>$definition['label'],'group_label'=>'销售人分配是合作方的现金业绩'];
+        foreach ($this->fixedPartnerPerformanceDefinitions() as $definition) $columns[] = ['key'=>$definition['key'],'label'=>$definition['label'],'group_label'=>'按成交时分类归集的现金业绩'];
         foreach ([['partner_performance','合作方业绩'],['actual_cash_performance','实际现金业绩'],['experience_cash','体验现金业绩'],['experience_payment_method','体验现金业绩支付方式']] as $column) $columns[] = ['key'=>$column[0],'label'=>$column[1]];
         return ['title'=>'会员消费明细','columns'=>$columns,'column_groups'=>$this->columnGroups($columns),'records'=>$rows,'total'=>$total,'page'=>$this->page($input),'page_size'=>$this->limit($input)];
     }
@@ -175,7 +179,7 @@ class StoreUnifiedReportServices extends BaseServices
     private function storeItemAnalysis($storeId, array $range, array $input): array
     {
         $query = $this->operationSaleQuery($storeId, $range, $input);
-        $rows = $query->fieldRaw('s.store_id,MAX(s.store_name_snapshot) AS store_name,SUM(s.sale_amount_cents) AS total_sale_amount_cents,SUM(CASE WHEN d.is_experience=0 OR d.is_experience IS NULL THEN s.sale_amount_cents ELSE 0 END) AS cash_amount_cents')->group('s.store_id')->orderRaw('total_sale_amount_cents DESC')->select()->toArray();
+        $rows = $query->fieldRaw('s.store_id,MAX(s.store_name_snapshot) AS store_name,SUM(COALESCE(c.sale_amount_cents,s.sale_amount_cents)) AS total_sale_amount_cents,SUM(CASE WHEN d.is_experience=0 OR d.is_experience IS NULL THEN COALESCE(c.cash_performance_amount_cents,s.sale_amount_cents) ELSE 0 END) AS cash_amount_cents')->group('s.store_id')->orderRaw('total_sale_amount_cents DESC')->select()->toArray();
         $definitions = [
             ['key'=>'today_cash_performance','label'=>'当天现金业绩'],['key'=>'cumulative_cash_performance','label'=>'截止本日累计业绩'],['key'=>'home_cash_performance','label'=>'家居产品现金业绩'],['key'=>'beauty_card_cash_performance','label'=>'生美卡项现金业绩'],['key'=>'haomei_cash_performance','label'=>'昊美现金业绩'],['key'=>'haomei_partner_performance','label'=>'昊美现金分成业绩'],['key'=>'garden_cash_performance','label'=>'花园现金业绩'],['key'=>'garden_partner_performance','label'=>'花园现金分成业绩'],['key'=>'sixway_self_cash_performance','label'=>'六维自营现金业绩'],['key'=>'sixway_self_partner_performance','label'=>'六维自营现金分成业绩'],['key'=>'sixway_coop_cash_performance','label'=>'六维合作现金业绩'],['key'=>'sixway_coop_partner_performance','label'=>'六维合作现金分成业绩'],['key'=>'garden_cash_performance_2','label'=>'花园现金业绩'],['key'=>'garden_partner_performance_2','label'=>'花园现金分成业绩'],['key'=>'garden_ticket_cash_performance','label'=>'花园门票现金业绩'],['key'=>'garden_ticket_partner_performance','label'=>'花园门票现金业绩分成后'],['key'=>'kangmei_cash_performance','label'=>'康美现金业绩'],['key'=>'kangmei_partner_performance','label'=>'康美现金分成业绩'],['key'=>'huaxiangrong_cash_performance','label'=>'花享容现金业绩'],['key'=>'huaxiangrong_partner_performance','label'=>'花享容现金分成业绩'],['key'=>'beauty_card_consume_performance','label'=>'生美卡项消耗业绩'],['key'=>'sixway_consume_performance','label'=>'六维消耗业绩'],['key'=>'garden_consume_performance','label'=>'花园消耗业绩'],['key'=>'garden_ticket_consume_performance','label'=>'花园门票消耗业绩'],['key'=>'haomei_consume_performance','label'=>'昊美消耗业绩'],['key'=>'huaxiangrong_consume_performance','label'=>'花享容消耗业绩'],['key'=>'kangmei_consume_performance','label'=>'康美消耗业绩'],
         ];
@@ -594,8 +598,25 @@ class StoreUnifiedReportServices extends BaseServices
             $row['member_source'] = (string)($row['business_source_label_snapshot'] ?? '');
             foreach ($partnerDefs as $definition) $row[$definition['key']] = '0';
             $row['partner_performance'] = '0'; $row['actual_cash_performance'] = $row['receipt_total'];
+            // Card rows have already been expanded by the immutable component
+            // category fact. Their fixed category columns must use that
+            // category's allocated cash amount, never the outer-card category
+            // or a repeated salesperson allocation.
+            if ((string)($row['source_type'] ?? '') === 'card'
+                && trim((string)($row['card_category_allocation_fact_id'] ?? '')) !== '') {
+                $path = (string)($row['category_path_snapshot'] ?? '');
+                $categoryCash = (int)$row['card_cash_performance_amount_cents'];
+                foreach ($partnerDefs as $definition) {
+                    if ($definition['path'] !== '__source_h_sleeping'
+                        && ($path === $definition['path'] || str_starts_with($path, $definition['path'] . '/'))) {
+                        $row[$definition['key']] = $this->money($categoryCash);
+                    }
+                }
+            }
             foreach ($partnerByLine[$line] ?? [] as $fact) {
                 $amount = (int)$fact['amount_cents']; $row['partner_performance'] = $this->money((int)round(((float)$row['partner_performance'] * 100) + $amount));
+                if ((string)($row['source_type'] ?? '') === 'card'
+                    && trim((string)($row['card_category_allocation_fact_id'] ?? '')) !== '') continue;
                 $path = (string)($row['category_path_snapshot'] ?? '');
                 foreach ($partnerDefs as $definition) {
                     if ($definition['path'] === '__source_h_sleeping') continue;
