@@ -148,6 +148,7 @@ function fieldLogic(column) {
   if (FIELD_LOGIC[key]) return FIELD_LOGIC[key]
   if (key.startsWith('payment_')) return `本单使用“${label}”且成功记账的金额；未使用或未成功记账时显示 0。`
   if (key.startsWith('partner_category_')) return `普通商品和项目按自身成交分类归集；卡项按卡内项目的成交分类归集，卡内有多个分类时按各项目配置金额分摊。该分类的现金业绩乘以成交时设置的合作方默认比例，得到“${label}”；后续修改分类或比例不会改写已成交数据。`
+  if (/^channel_\d+_effective$/.test(key)) return '同一门店、同一渠道中，在当前日期内累计现金业绩达到有效门槛的不同会员人数：A 类渠道为 1000 元，其他渠道为 500 元。点击后仅显示这些会员的成交明细。'
   if (/^day_\d+_consume$/.test(key)) return `${label.replace('消耗', '')}该手艺人按项目分配到的劳动业绩合计。`
   if (/^day_\d+_labor$/.test(key)) return `${label.replace('手工', '')}该手艺人按项目分配到的手工费合计；手工费和劳动业绩可以不同。`
   if (/^day_\d+_performance$/.test(key)) return `${label.replace('业绩', '')}该销售人按成交项目分配到的销售业绩合计。`
@@ -209,6 +210,17 @@ const topSummaries = computed(() => {
   const items = result.value.top_summaries || result.value.topSummaries
   return Array.isArray(items) ? items : []
 })
+const summaryRow = computed(() => {
+  const row = result.value.summary_row || result.value.summaryRow
+  return row && typeof row === 'object' && !Array.isArray(row) ? row : null
+})
+const usesFixedTableLayout = computed(() => {
+  const layout = result.value.table_layout || result.value.tableLayout || {}
+  return activeReport.value === 'market_detail' || layout.fixed === true
+})
+const tableHeaderHeight = computed(() => hasGroupedColumns.value ? '74px' : '40px')
+const fixedLeftColumns = computed(() => columns.value.filter((column) => String(column?.fixed || '') === 'left'))
+const lastFixedLeftColumnKey = computed(() => String(fixedLeftColumns.value.at(-1)?.key || ''))
 const RESULT_COLUMN_KEYS = new Set(['actual_cash_performance', 'experience_cash', 'experience_payment_method'])
 const MANUAL_COLUMN_KEYS = new Set(['medical_elevation', 'medical_followup', 'expert_name', 'remark'])
 
@@ -240,10 +252,16 @@ function derivedHeaderGroupLabel(column) {
 
 function headerGroupClasses(group, groupIndex) {
   const tone = String(group?.tone || tableHeaderTone(group.columns[0]))
+  const allFixedLeft = group.columns.length > 0 && group.columns.every((column) => String(column?.fixed || '') === 'left')
+  const lastKey = String(group.columns.at(-1)?.key || '')
   return [
     'store-business-report__header-group',
     `store-business-report__header-group--${tone}`,
-    { 'store-business-report__header-group--group-end': groupIndex < columnGroups.value.length - 1 && Number(group?.rowspan) <= 1 }
+    {
+      'store-business-report__header-group--group-end': groupIndex < columnGroups.value.length - 1 && Number(group?.rowspan) <= 1,
+      'store-business-report__column--sticky-left': allFixedLeft,
+      'store-business-report__column--fixed-last': allFixedLeft && lastKey === lastFixedLeftColumnKey.value
+    }
   ]
 }
 
@@ -252,12 +270,37 @@ function headerColumnClasses(column) {
   return [
     'store-business-report__header-column',
     `store-business-report__header-column--${tone}`,
-    { 'store-business-report__header-column--group-end': reportColumnGroupEndKeys.value.has(String(column.key)) }
+    {
+      'store-business-report__header-column--group-end': reportColumnGroupEndKeys.value.has(String(column.key)),
+      'store-business-report__column--sticky-left': String(column?.fixed || '') === 'left',
+      'store-business-report__column--fixed-last': String(column.key) === lastFixedLeftColumnKey.value
+    }
   ]
 }
 
 function cellClasses(column) {
-  return { 'store-business-report__cell--group-end': reportColumnGroupEndKeys.value.has(String(column.key)) }
+  return {
+    'store-business-report__cell--group-end': reportColumnGroupEndKeys.value.has(String(column.key)),
+    'store-business-report__column--sticky-left': String(column?.fixed || '') === 'left',
+    'store-business-report__column--fixed-last': String(column.key) === lastFixedLeftColumnKey.value
+  }
+}
+
+function fixedColumnStyle(column) {
+  if (String(column?.fixed || '') !== 'left') return {}
+  const fixedColumns = columns.value.filter((item) => String(item?.fixed || '') === 'left')
+  let left = 0
+  for (const item of fixedColumns) {
+    if (String(item.key) === String(column.key)) break
+    left += Number(item.fixed_width || item.fixedWidth || 100)
+  }
+  const width = Number(column.fixed_width || column.fixedWidth || 100)
+  return { left: `${left}px`, minWidth: `${width}px`, width: `${width}px` }
+}
+
+function fixedGroupStyle(group) {
+  if (!group?.columns?.length || !group.columns.every((column) => String(column?.fixed || '') === 'left')) return {}
+  return fixedColumnStyle(group.columns[0])
 }
 
 // 列和列分组由统一报表服务返回。支付方式、合作方、门店、康美单和系统
@@ -771,7 +814,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateTabsLayout))
 </script>
 
 <template>
-  <main class="store-business-report" aria-label="门店运营报表">
+  <main class="store-business-report" :class="{ 'store-business-report--market-detail': activeReport === 'market_detail', 'store-business-report--fixed-table': usesFixedTableLayout }" aria-label="门店运营报表">
     <header class="store-business-report__header">
       <div>
         <p class="store-business-report__eyebrow">数据</p>
@@ -891,18 +934,22 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateTabsLayout))
       </div>
       <div v-if="pendingMetrics.length" class="store-business-report__pending"><strong>口径待确认</strong><span v-for="item in pendingMetrics" :key="item">{{ item }}</span></div>
       <div class="store-business-report__table-scroll">
-        <table v-if="columns.length">
+        <table v-if="columns.length" :style="{ '--report-table-header-height': tableHeaderHeight }">
           <thead v-if="hasGroupedColumns">
             <tr>
-              <th v-for="(group, groupIndex) in columnGroups" :key="`${group.label}-${groupIndex}`" :class="headerGroupClasses(group, groupIndex)" :colspan="group.rowspan > 1 ? null : group.columns.length" :rowspan="group.rowspan > 1 ? group.rowspan : null">{{ group.label }}</th>
+              <th v-for="(group, groupIndex) in columnGroups" :key="`${group.label}-${groupIndex}`" :class="headerGroupClasses(group, groupIndex)" :style="fixedGroupStyle(group)" :colspan="group.rowspan > 1 ? null : group.columns.length" :rowspan="group.rowspan > 1 ? group.rowspan : null">{{ group.label }}</th>
               <th v-if="editableReport" rowspan="2" class="store-business-report__header-column store-business-report__header-column--manual">操作</th>
             </tr>
-            <tr><th v-for="column in groupedHeaderColumns" :key="column.key" :class="headerColumnClasses(column)">{{ column.label }}</th></tr>
+            <tr><th v-for="column in groupedHeaderColumns" :key="column.key" :class="headerColumnClasses(column)" :style="fixedColumnStyle(column)">{{ column.label }}</th></tr>
           </thead>
-          <thead v-else><tr><th v-for="column in columns" :key="column.key" :class="headerColumnClasses(column)">{{ column.label }}</th><th v-if="editableReport" class="store-business-report__header-column store-business-report__header-column--manual">操作</th></tr></thead>
+          <thead v-else><tr><th v-for="column in columns" :key="column.key" :class="headerColumnClasses(column)" :style="fixedColumnStyle(column)">{{ column.label }}</th><th v-if="editableReport" class="store-business-report__header-column store-business-report__header-column--manual">操作</th></tr></thead>
           <tbody>
+            <tr v-if="summaryRow" class="store-business-report__summary-row">
+              <td v-for="column in columns" :key="column.key" :class="cellClasses(column)" :style="fixedColumnStyle(column)">{{ formatCell(summaryRow[column.key]) }}</td>
+              <td v-if="editableReport">-</td>
+            </tr>
             <tr v-for="(row, rowIndex) in records" :key="row.source_line_id || `${row.order_id || ''}:${rowIndex}`">
-              <td v-for="column in columns" :key="column.key" :class="cellClasses(column)">
+              <td v-for="column in columns" :key="column.key" :class="cellClasses(column)" :style="fixedColumnStyle(column)">
                 <template v-if="editingRow === row && editableFieldByKey.has(column.key)">
                   <select
                     v-if="manualFieldIsSelect(editableFieldByKey.get(column.key))"
@@ -983,7 +1030,8 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateTabsLayout))
 </template>
 
 <style scoped>
-.store-business-report { display: grid; align-content: start; gap: 14px; min-width: 0; height: 100%; box-sizing: border-box; padding: 20px; overflow: auto; background: #f5f7fa; color: #252a34; }
+.store-business-report { display: grid; align-content: start; gap: 14px; min-width: 0; min-height: 0; height: 100%; box-sizing: border-box; padding: 20px; overflow: auto; background: #f5f7fa; color: #252a34; }
+.store-business-report--market-detail, .store-business-report--fixed-table { grid-template-rows: auto auto auto minmax(0, 1fr); align-content: stretch; overflow: hidden; }
 .store-business-report__header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
 .store-business-report__eyebrow { margin: 0 0 4px; color: #1769aa; font-size: 12px; font-weight: 700; letter-spacing: 0; }
 .store-business-report h1, .store-business-report h2, .store-business-report p { margin: 0; }
@@ -1052,15 +1100,17 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateTabsLayout))
 .store-business-report__simple-table > div { display: flex; justify-content: space-between; gap: 12px; border-top: 1px solid #edf1f5; padding: 10px 2px; color: #647184; font-size: 13px; }
 .store-business-report__simple-table strong { color: #26364a; }
 .store-business-report__panel--table { padding: 0; }
+.store-business-report--market-detail .store-business-report__panel--table, .store-business-report--fixed-table .store-business-report__panel--table { display: flex; min-height: 0; flex-direction: column; overflow: hidden; }
 .store-business-report__top-summaries { display: flex; flex-wrap: wrap; gap: 12px 28px; border-bottom: 1px solid #e1e8f0; padding: 12px 16px; background: #f8fbff; color: #23364d; font-size: 13px; }
 .store-business-report__top-summaries strong { margin-right: 7px; color: #607086; font-weight: 600; }
 .store-business-report__pending { display: flex; flex-wrap: wrap; gap: 8px 12px; border-bottom: 1px solid #f2d49a; padding: 10px 16px; background: #fff9ed; color: #9a6509; font-size: 12px; }
 .store-business-report__table-scroll { min-width: 0; overflow: auto; }
+.store-business-report--market-detail .store-business-report__table-scroll, .store-business-report--fixed-table .store-business-report__table-scroll { min-height: 0; flex: 1; }
 .store-business-report table { width: 100%; border-collapse: separate; border-spacing: 0; white-space: nowrap; font-size: 13px; }
 .store-business-report th, .store-business-report td { border-bottom: 1px solid #edf1f5; padding: 11px 12px; text-align: left; }
 .store-business-report th { background: #fafbfd; color: #667386; font-size: 12px; font-weight: 600; }
-.store-business-report__header-group { height: 34px; border-bottom: 1px solid #dce4ed; padding-top: 8px; padding-bottom: 8px; color: #536274; text-align: center; }
-.store-business-report__header-column { border-top: 1px solid #e3eaf1; }
+.store-business-report__header-group { box-sizing: border-box; height: 34px; border-bottom: 1px solid #dce4ed; padding-top: 8px; padding-bottom: 8px; color: #536274; text-align: center; }
+.store-business-report__header-column { box-sizing: border-box; height: 40px; border-top: 1px solid #e3eaf1; padding-top: 10px; padding-bottom: 10px; }
 .store-business-report__header-group--basic, .store-business-report__header-column--basic { background: #eef2f7; color: #536274; }
 .store-business-report__header-group--payment { background: #d9ecfa; color: #2d668c; }
 .store-business-report__header-column--payment { background: #edf7ff; color: #3b7397; }
@@ -1074,7 +1124,17 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateTabsLayout))
 .store-business-report__header-group--manual, .store-business-report__header-column--manual { background: #f1eafa; color: #735687; }
 .store-business-report__header-group--group-end, .store-business-report__header-column--group-end, .store-business-report__cell--group-end { border-right: 8px solid #f5f7fa; }
 .store-business-report td { color: #303946; }
+.store-business-report--market-detail table, .store-business-report--fixed-table table { width: max-content; min-width: 100%; }
+.store-business-report--market-detail thead th, .store-business-report--fixed-table thead th { position: sticky; top: 0; z-index: 5; }
+.store-business-report--fixed-table thead tr:nth-child(2) th { top: 34px; }
+.store-business-report--market-detail .store-business-report__summary-row td { position: sticky; top: 40px; z-index: 4; }
+.store-business-report--fixed-table .store-business-report__summary-row td { position: sticky; top: var(--report-table-header-height); z-index: 4; }
+.store-business-report--market-detail .store-business-report__column--sticky-left, .store-business-report--fixed-table .store-business-report__column--sticky-left { position: sticky; z-index: 2; background: #fff; }
+.store-business-report--market-detail thead .store-business-report__column--sticky-left, .store-business-report--fixed-table thead .store-business-report__column--sticky-left { z-index: 8; }
+.store-business-report--market-detail .store-business-report__summary-row .store-business-report__column--sticky-left, .store-business-report--fixed-table .store-business-report__summary-row .store-business-report__column--sticky-left { z-index: 7; background: #f2f8ff; }
+.store-business-report--market-detail .store-business-report__column--fixed-last, .store-business-report--fixed-table .store-business-report__column--fixed-last { box-shadow: 5px 0 8px -7px rgba(30, 62, 90, .65); }
 .store-business-report__drilldown { border: 0; padding: 0; background: transparent; color: #1769aa; font: inherit; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.store-business-report__summary-row td { background: #f2f8ff; border-bottom: 1px solid #b9d8f3; color: #174d73; font-weight: 700; }
 .store-business-report__inline-input { min-width: 120px; min-height: 30px; box-sizing: border-box; border: 1px solid #b8c7d9; border-radius: 5px; padding: 5px 7px; font: inherit; color: #303946; }
 .store-business-report__field-guide { width: min(720px, calc(100vw - 32px)); max-height: min(760px, calc(100vh - 32px)); }
 .store-business-report__field-guide header { align-items: flex-start; }
