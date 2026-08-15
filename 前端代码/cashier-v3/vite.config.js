@@ -4,6 +4,7 @@ import vue from '@vitejs/plugin-vue'
 
 // 收银 V3 热更新使用自己的本地后端入口；8080 是集成构建/平台入口。
 const cashierApiTarget = process.env.CASHIER_V3_API_PROXY_TARGET || 'http://127.0.0.1:18092'
+const platformApiTarget = process.env.PLATFORM_API_PROXY_TARGET || 'http://127.0.0.1:18093'
 const cashierSourceRoot = fileURLToPath(new URL('.', import.meta.url))
 const inventoryPackageRoot = fileURLToPath(new URL('../inventory-vue3', import.meta.url))
 const unifiedQueryPackageRoot = fileURLToPath(new URL('../shared/unified-query-vue3', import.meta.url))
@@ -18,7 +19,13 @@ const cashierApiProxy = {
     target: cashierApiTarget,
     changeOrigin: false
   },
-  // 库存模块在集团模式下可能访问 adminapi，也固定走收银专用后端。
+  // Vue 3 平台报表使用后台管理员会话；本地开发时必须命中平台专用网关。
+  // 该精确前缀置于通用 adminapi 之前，避免影响库存模块的既有网关。
+  '/adminapi/report': {
+    target: platformApiTarget,
+    changeOrigin: false
+  },
+  // 库存模块在集团模式下可能访问 adminapi，其他接口继续走收银专用后端。
   '/adminapi': {
     target: cashierApiTarget,
     changeOrigin: false

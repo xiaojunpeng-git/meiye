@@ -24,7 +24,6 @@ class StoreUnifiedReportServices extends BaseServices
             ['folder' => '门店运营', 'code' => 'store_item_analysis', 'name' => '门店品项分析'],
             ['folder' => '门店运营', 'code' => 'store_craftsman_consumption', 'name' => '门店手艺人消耗'],
             ['folder' => '门店运营', 'code' => 'store_salesperson_performance', 'name' => '门店销售人业绩'],
-            ['folder' => '门店运营', 'code' => 'market_performance', 'name' => '市场业绩'],
         ];
     }
 
@@ -46,7 +45,7 @@ class StoreUnifiedReportServices extends BaseServices
         if (in_array($report, [
             'partner_item_summary', 'partner_item_detail', 'member_consumption_detail',
             'store_item_analysis', 'store_craftsman_consumption',
-            'store_salesperson_performance', 'market_performance',
+            'store_salesperson_performance',
         ], true)) {
             return array_merge($meta, $this->operationsReport($report, $storeId, $range, $input));
         }
@@ -70,7 +69,7 @@ class StoreUnifiedReportServices extends BaseServices
     }
 
     /**
-     * 第一阶段门店运营七表。所有金额均来自正式 V3 事实；分类、合作方和体验
+     * 第一阶段门店运营六表。所有金额均来自正式 V3 事实；分类、合作方和体验
      * 维度来自成交时写入的 report_sale_dimension_fact 快照，绝不按当前配置回算历史。
      */
     private function operationsReport(string $report, $storeId, array $range, array $input): array
@@ -82,7 +81,6 @@ class StoreUnifiedReportServices extends BaseServices
             case 'store_item_analysis': return $this->storeItemAnalysis($storeId, $range, $input);
             case 'store_craftsman_consumption': return $this->craftsmanConsumption($storeId, $range, $input);
             case 'store_salesperson_performance': return $this->salespersonPerformance($storeId, $range, $input);
-            case 'market_performance': return $this->marketPerformance($storeId, $range, $input);
             default: throw new \InvalidArgumentException('不支持的门店运营报表类型');
         }
     }
@@ -123,27 +121,29 @@ class StoreUnifiedReportServices extends BaseServices
             ->group('month,s.store_id,d.partner_name_snapshot,d.category_path_snapshot')->orderRaw('month DESC,sale_amount_cents DESC')->select()->toArray();
         foreach ($rows as &$row) { $row['store_summary'] = (string)$row['store_name']; $row['sale_amount'] = $this->money((int)$row['sale_amount_cents']); $row['actual_performance'] = $this->money((int)$row['actual_performance_cents']); $row['consumption_amount'] = $this->money((int)$row['consumption_amount_cents']); $row['labor_amount'] = $this->money((int)$row['labor_amount_cents']); $row['experience_count'] = (int)$row['experience_count']; $row['member_count'] = (int)$row['member_count']; }
         unset($row);
-        return ['title'=>'合作方品项汇总','columns'=>[['key'=>'month','label'=>'月份'],['key'=>'division_name','label'=>'分公司'],['key'=>'store_summary','label'=>'门店汇总'],['key'=>'performance_type','label'=>'业绩类型'],['key'=>'experience_count','label'=>'体验人次'],['key'=>'member_count','label'=>'成交人头'],['key'=>'consumption_amount','label'=>'消耗业绩'],['key'=>'labor_amount','label'=>'手工汇总'],['key'=>'sale_amount','label'=>'成交业绩']], 'records'=>$rows,'total'=>count($rows),'page'=>1,'page_size'=>count($rows)];
+        return ['title'=>'合作方品项汇总','columns'=>[['key'=>'month','label'=>'月份'],['key'=>'division_name','label'=>'分公司'],['key'=>'store_summary','label'=>'门店汇总'],['key'=>'performance_type','label'=>'分类'],['key'=>'experience_count','label'=>'体验人次'],['key'=>'member_count','label'=>'成交人头'],['key'=>'consumption_amount','label'=>'消耗业绩'],['key'=>'labor_amount','label'=>'手工汇总'],['key'=>'sale_amount','label'=>'成交业绩']], 'records'=>$rows,'total'=>count($rows),'page'=>1,'page_size'=>count($rows)];
     }
 
     private function partnerItemDetail($storeId, array $range, array $input): array
     {
         $query = $this->operationSaleQuery($storeId, $range, $input)->where('d.partner_name_snapshot', '<>', '');
         $total = (int)(clone $query)->count('s.id');
-        $rows = (clone $query)->fieldRaw("s.business_date,s.organization_name_snapshot,s.store_name_snapshot,s.order_no_snapshot,s.member_id,s.member_name_snapshot,s.item_name_snapshot,s.source_type,s.quantity,s.sale_amount_cents,d.product_type_snapshot,d.category_path_snapshot,d.partner_name_snapshot,d.is_experience,s.source_line_id,s.fact_id,(SELECT COALESCE(SUM(pf.amount_cents),0) FROM eb_cashier_v3_performance_fact pf WHERE pf.source_line_id=s.source_line_id AND pf.performance_type='consumption_performance_recorded' AND pf.status='effective') AS consumption_amount_cents,(SELECT COALESCE(SUM(pf.amount_cents),0) FROM eb_cashier_v3_performance_fact pf WHERE pf.source_line_id=s.source_line_id AND pf.performance_type='labor_performance_allocated' AND pf.status='effective') AS labor_amount_cents,(SELECT COALESCE(SUM(pf.amount_cents),0) FROM eb_cashier_v3_performance_fact pf WHERE pf.source_line_id=s.source_line_id AND pf.performance_type='actual_performance_recorded' AND pf.status='effective') AS actual_performance_cents")->order('s.business_date','desc')->order('s.id','desc')->page($this->page($input),$this->limit($input))->select()->toArray();
+        $rows = (clone $query)->leftJoin('user u', 'u.uid = s.member_id')
+            ->fieldRaw("s.store_id,s.business_date,s.organization_name_snapshot,s.store_name_snapshot,s.order_no_snapshot,s.member_id,s.member_name_snapshot,u.phone AS member_phone,s.item_name_snapshot,s.source_type,s.quantity,s.sale_amount_cents,d.product_type_snapshot,d.category_path_snapshot,d.partner_name_snapshot,d.is_experience,s.source_line_id,s.fact_id,(SELECT COALESCE(SUM(pf.amount_cents),0) FROM eb_cashier_v3_performance_fact pf WHERE pf.source_line_id=s.source_line_id AND pf.performance_type='consumption_performance_recorded' AND pf.status='effective') AS consumption_amount_cents,(SELECT COALESCE(SUM(pf.amount_cents),0) FROM eb_cashier_v3_performance_fact pf WHERE pf.source_line_id=s.source_line_id AND pf.performance_type='labor_performance_allocated' AND pf.status='effective') AS labor_amount_cents,(SELECT COALESCE(SUM(pf.amount_cents),0) FROM eb_cashier_v3_performance_fact pf WHERE pf.source_line_id=s.source_line_id AND pf.performance_type='actual_performance_recorded' AND pf.status='effective') AS actual_performance_cents")
+            ->order('s.business_date','desc')->order('s.id','desc')->page($this->page($input),$this->limit($input))->select()->toArray();
         $rows = $this->attachAnnotations($rows, 'partner_item_detail', $storeId);
         foreach ($rows as &$row) { $row['sale_amount'] = $this->money((int)$row['sale_amount_cents']); $row['actual_performance'] = $this->money((int)$row['actual_performance_cents']); $row['consumption_amount'] = $this->money((int)$row['consumption_amount_cents']); $row['labor_amount'] = $this->money((int)$row['labor_amount_cents']); $row['experience'] = (int)$row['is_experience'] === 1 ? '是' : '否'; }
         unset($row);
-        foreach ($rows as &$row) { $row['division_name'] = (string)($row['organization_name_snapshot'] ?? ''); $row['member_phone'] = ''; $row['performance_type'] = strtok((string)$row['category_path_snapshot'], '/'); $row['experience_project'] = $row['experience']; $row['deal_headcount'] = (int)($row['member_id'] ?? 0) > 0 ? 1 : 0; $row['deal_project'] = $row['item_name_snapshot']; $row['consumption'] = $row['consumption_amount'] ?? '0'; $row['consumption_amount'] = $row['consumption_amount'] ?? '0'; $row['labor_fee'] = $row['labor_amount'] ?? '0'; $row['deal_amount'] = $row['sale_amount']; $row['partner_label'] = $row['partner_name_snapshot']; }
+        foreach ($rows as &$row) { $row['division_name'] = (string)($row['organization_name_snapshot'] ?? ''); $row['member_phone'] = (string)($row['member_phone'] ?? ''); $row['performance_type'] = strtok((string)$row['category_path_snapshot'], '/'); $row['experience_project'] = $row['experience']; $row['deal_headcount'] = (int)($row['member_id'] ?? 0) > 0 ? 1 : 0; $row['deal_project'] = $row['item_name_snapshot']; $row['consumption'] = $row['consumption_amount'] ?? '0'; $row['consumption_amount'] = $row['consumption_amount'] ?? '0'; $row['labor_fee'] = $row['labor_amount'] ?? '0'; $row['deal_amount'] = $row['sale_amount']; $row['partner_label'] = $row['partner_name_snapshot']; }
         unset($row);
-        return ['title'=>'合作方品项明细','columns'=>[['key'=>'division_name','label'=>'分公司'],['key'=>'store_name_snapshot','label'=>'门店'],['key'=>'member_name_snapshot','label'=>'顾客姓名'],['key'=>'member_phone','label'=>'电话'],['key'=>'performance_type','label'=>'业绩类型'],['key'=>'business_date','label'=>'日期'],['key'=>'experience_project','label'=>'体验项目'],['key'=>'medical_elevation','label'=>'医美上提/医美复诊'],['key'=>'medical_followup','label'=>'医美上提类型'],['key'=>'deal_headcount','label'=>'成交人头'],['key'=>'deal_project','label'=>'成交项目'],['key'=>'consumption','label'=>'消耗'],['key'=>'consumption_amount','label'=>'消耗金额'],['key'=>'labor_fee','label'=>'手工费'],['key'=>'quantity','label'=>'数量'],['key'=>'deal_amount','label'=>'成交金额'],['key'=>'expert_name','label'=>'专家姓名'],['key'=>'partner_label','label'=>'合作方'],['key'=>'remark','label'=>'备注']], 'records'=>$rows,'total'=>$total,'page'=>$this->page($input),'page_size'=>$this->limit($input)];
+        return ['title'=>'合作方品项明细','columns'=>[['key'=>'division_name','label'=>'分公司'],['key'=>'store_name_snapshot','label'=>'门店'],['key'=>'member_name_snapshot','label'=>'会员'],['key'=>'member_phone','label'=>'手机'],['key'=>'performance_type','label'=>'业绩类型'],['key'=>'business_date','label'=>'日期'],['key'=>'experience_project','label'=>'体验项目'],['key'=>'medical_elevation','label'=>'私美复诊'],['key'=>'medical_followup','label'=>'私美类型'],['key'=>'deal_headcount','label'=>'成交人头'],['key'=>'deal_project','label'=>'成交项目'],['key'=>'consumption','label'=>'消耗'],['key'=>'consumption_amount','label'=>'消耗金额'],['key'=>'labor_fee','label'=>'手工费'],['key'=>'quantity','label'=>'数量'],['key'=>'deal_amount','label'=>'成交金额'],['key'=>'expert_name','label'=>'专家姓名'],['key'=>'partner_label','label'=>'合作方'],['key'=>'remark','label'=>'备注']], 'records'=>$rows,'total'=>$total,'page'=>$this->page($input),'page_size'=>$this->limit($input)];
     }
 
     private function memberConsumptionDetail($storeId, array $range, array $input): array
     {
         $query = $this->operationSaleQuery($storeId, $range, $input);
         $total = (int)(clone $query)->count('s.id');
-        $rows = (clone $query)->fieldRaw("s.business_date,s.store_name_snapshot,s.order_no_snapshot,s.order_id,s.source_line_id,s.member_id,s.member_name_snapshot,s.item_name_snapshot,d.category_path_snapshot,d.product_type_snapshot,s.source_type,s.quantity,s.sale_amount_cents,s.business_source_label_snapshot,s.source_attribution_type_snapshot,d.is_experience")->order('s.business_date','desc')->order('s.id','desc')->page($this->page($input),$this->limit($input))->select()->toArray();
+        $rows = (clone $query)->fieldRaw("s.store_id,s.business_date,s.store_name_snapshot,s.order_no_snapshot,s.order_id,s.source_line_id,s.member_id,s.member_name_snapshot,s.item_name_snapshot,d.category_path_snapshot,d.product_type_snapshot,s.source_type,s.quantity,s.sale_amount_cents,s.business_source_label_snapshot,s.source_attribution_type_snapshot,d.is_experience")->order('s.business_date','desc')->order('s.id','desc')->page($this->page($input),$this->limit($input))->select()->toArray();
         $this->decorateMemberConsumptionRows($rows, $storeId);
         foreach ($rows as &$row) {
             $row['sale_amount'] = $this->money((int)$row['sale_amount_cents']);
@@ -155,6 +155,10 @@ class StoreUnifiedReportServices extends BaseServices
             $row['experience_payment_method'] = !empty($row['is_experience']) ? $row['payment_method_names'] : '';
         }
         unset($row);
+        // Apply persisted manual overrides after deriving fact defaults.  The
+        // annotation is the controlled projection for these two editable
+        // columns and must win on every subsequent query/refresh.
+        $rows = $this->attachAnnotations($rows, 'member_consumption_detail', $storeId);
         $columns = [
             ['key'=>'business_date','label'=>'日期'], ['key'=>'consume_type','label'=>'消费类型'], ['key'=>'member_name','label'=>'姓名'],
             ['key'=>'consumption_detail','label'=>'消费明细'], ['key'=>'category','label'=>'分类'], ['key'=>'sales_manager_name','label'=>'销售经理'],
@@ -219,25 +223,6 @@ class StoreUnifiedReportServices extends BaseServices
         $columns=[['key'=>'employee_name','label'=>'销售人']]; foreach(range(1,31) as $day){$columns[]=['key'=>'day_'.$day.'_performance','label'=>$day.'日业绩'];} $columns[]=['key'=>'total_performance','label'=>'合计业绩'];
         foreach($by as &$row){$row['total_performance']=$this->money((int)($row['total_performance_cents']??0));} unset($row);
         return ['title'=>'门店销售人业绩','columns'=>$columns,'records'=>array_values($by),'total'=>count($by),'page'=>1,'page_size'=>count($by)];
-    }
-
-    private function marketPerformance($storeId, array $range, array $input): array
-    {
-        $query = $this->operationSaleQuery($storeId, $range, $input);
-        $rows = $query->fieldRaw('s.store_id,MAX(s.store_name_snapshot) AS store_name,s.business_source_primary_id,s.business_source_primary_name_snapshot,s.source_attribution_type_snapshot,COUNT(DISTINCT NULLIF(s.member_id,0)) AS member_count,COUNT(DISTINCT s.order_id) AS order_count,SUM(s.sale_amount_cents) AS sale_amount_cents,SUM(CASE WHEN d.is_experience=1 THEN 1 ELSE 0 END) AS experience_count')->group('s.store_id,s.business_source_primary_id,s.business_source_primary_name_snapshot,s.source_attribution_type_snapshot')->orderRaw('sale_amount_cents DESC')->select()->toArray();
-        $rows = $this->attachAnnotations($rows, 'market_performance', $storeId);
-        $paymentMethods = $this->paymentMethodDefinitions();
-        $storeIds = array_values(array_unique(array_map(static function ($row) { return (int)$row['store_id']; }, $rows)));
-        $paymentTotals = [];
-        if ($storeIds) {
-            $payments = Db::name('cashier_v3_payment_fact')->whereIn('store_id',$storeIds)->whereBetween('business_date',[$range['start'],$range['end']])->where('status','effective')
-                ->field('store_id,payment_method,SUM(amount_cents) amount_cents')->group('store_id,payment_method')->select()->toArray();
-            foreach($payments as $payment) $paymentTotals[(int)$payment['store_id']][(string)$payment['payment_method']] = (int)$payment['amount_cents'];
-        }
-        foreach ($rows as &$row) { $row['sale_amount'] = $this->money((int)$row['sale_amount_cents']); $row['member_count'] = (int)$row['member_count']; foreach($paymentMethods as $method) $row['payment_'.$method['code']]=$this->money((int)($paymentTotals[(int)$row['store_id']][$method['code']]??0)); $row['payment_total']=$this->money(array_sum($paymentTotals[(int)$row['store_id']]??[])); }
-        unset($row);
-        $columns=[['key'=>'store_name','label'=>'门店'],['key'=>'business_source_primary_name_snapshot','label'=>'一级来源'],['key'=>'source_attribution_type_snapshot','label'=>'归因类型'],['key'=>'member_count','label'=>'成交顾客'],['key'=>'order_count','label'=>'成交单数'],['key'=>'experience_count','label'=>'体验人次'],['key'=>'sale_amount','label'=>'成交金额'],['key'=>'walk_in_manual_count','label'=>'手动进店'],['key'=>'refund_headcount_manual','label'=>'退款人数'],['key'=>'manual_cash_amount','label'=>'手工现金'],['key'=>'remark','label'=>'备注']]; foreach($paymentMethods as $method)$columns[]=['key'=>'payment_'.$method['code'],'label'=>$method['label'],'group_label'=>'系统操作']; $columns[]=['key'=>'payment_total','label'=>'合计','group_label'=>'系统操作'];
-        return ['title'=>'市场业绩','columns'=>$columns,'column_groups'=>$this->columnGroups($columns),'records'=>$rows,'total'=>count($rows),'page'=>1,'page_size'=>count($rows)];
     }
 
     private function overview($storeId, array $range, array $input)
@@ -508,9 +493,13 @@ class StoreUnifiedReportServices extends BaseServices
         $query = Db::name('cashier_v3_report_annotation')->where('report_code', $reportCode);
         if (is_array($storeId)) $query->whereIn('store_id', array_values(array_unique(array_map('intval', $storeId))));
         else $query->where('store_id', (int)$storeId);
-        $annotations = $query->field('subject_key,field_key,field_value')->select()->toArray();
+        $annotations = $query->field('subject_key,field_key,field_value,version')->select()->toArray();
         $byKey = [];
-        foreach ($annotations as $annotation) $byKey[(string)$annotation['subject_key']][(string)$annotation['field_key']] = (string)$annotation['field_value'];
+        foreach ($annotations as $annotation) {
+            $field = (string)$annotation['field_key'];
+            $byKey[(string)$annotation['subject_key']][$field] = (string)$annotation['field_value'];
+            $byKey[(string)$annotation['subject_key']][$field . '_version'] = (int)$annotation['version'];
+        }
         foreach ($rows as &$row) {
             // Preserve the valid source id "0" (the default/other source)
             // when resolving editable market rows; array_filter's default
@@ -520,7 +509,10 @@ class StoreUnifiedReportServices extends BaseServices
                 static fn(string $value): bool => $value !== ''
             );
             foreach ($candidates as $candidate) foreach ((array)($byKey[$candidate] ?? []) as $field => $value) $row[$field] = $value;
-            foreach (['medical_elevation','medical_followup','expert_name','remark','walk_in_manual_count','refund_headcount_manual','manual_cash_amount'] as $field) if (!array_key_exists($field, $row)) $row[$field] = '';
+            foreach (['medical_elevation','medical_followup','expert_name','remark','walk_in_manual_count','refund_headcount_manual','manual_cash_amount','experience_cash','experience_payment_method'] as $field) {
+                if (!array_key_exists($field, $row)) $row[$field] = '';
+                if (!array_key_exists($field . '_version', $row)) $row[$field . '_version'] = 0;
+            }
         }
         unset($row);
         return $rows;

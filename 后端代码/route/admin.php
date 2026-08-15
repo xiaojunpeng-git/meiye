@@ -1636,6 +1636,8 @@ Route::group('adminapi', function () {
     Route::group('report', function () {
         Route::get('business-catalog', 'v1.report.BusinessReportCatalog/index')->option(['real_name' => '业务报表中心目录']);
         Route::get('unified/catalog', 'v1.report.UnifiedReport/catalog')->option(['real_name' => '门店业务报表目录']);
+        Route::get('unified/scope', 'v1.report.UnifiedReport/scope')->option(['real_name' => '门店业务报表权限范围']);
+        Route::get('unified/personnel', 'v1.report.UnifiedReport/personnel')->option(['real_name' => '门店业务报表人员筛选']);
         Route::get('unified/query', 'v1.report.UnifiedReport/query')->option(['real_name' => '门店业务报表查询']);
         Route::get('unified/export', 'v1.report.UnifiedReport/export')->option(['real_name' => '门店业务报表导出']);
         Route::get('operations/categories', 'v1.report.UnifiedReport/operationsCategories')->option(['real_name' => '门店运营商品分类']);

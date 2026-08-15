@@ -7,6 +7,8 @@ use app\Request;
 use app\services\report\StoreUnifiedReportServices;
 use app\services\report\StoreOperationsReportAnnotationServices;
 use app\services\cashier\v3\bootstrap\CashierV3Bootstrap;
+use app\services\organization\OrganizationScopeService;
+use think\facade\Db;
 
 /** Cashier V3 门店经营报表的会话受控只读入口。 */
 class Report extends AuthController
@@ -14,6 +16,21 @@ class Report extends AuthController
     public function catalog(StoreUnifiedReportServices $services)
     {
         return $this->success('ok', $services->catalog());
+    }
+
+    public function scope(OrganizationScopeService $organizations)
+    {
+        if ((int)$this->storeId <= 0) return app('json')->fail('门店未登录');
+        $dataScope = $this->dataScope();
+        $allowed = $dataScope->visibleStoreIds();
+        if ($allowed === null) $allowed = Db::name('system_store')->where('is_del', 0)->where('is_show', 1)->column('id');
+        $allowed = array_values(array_unique(array_filter(array_map('intval', (array)$allowed))));
+        return $this->success('ok', [
+            'tree' => $organizations->buildPickerTree($allowed),
+            'allowed_store_ids' => $allowed,
+            'authorization_mode' => $dataScope->authorizationMode(),
+            'permission_version' => $dataScope->permissionVersion(),
+        ]);
     }
 
     public function query(Request $request, StoreUnifiedReportServices $services)
@@ -64,9 +81,9 @@ class Report extends AuthController
         if ((int)$this->storeId <= 0) return app('json')->fail('门店未登录');
         try {
             $input = $request->getMore($this->inputRules());
-            $result = $export
-                ? $services->export((int)$this->storeId, $input)
-                : $services->query((int)$this->storeId, $input);
+            $storeIds = $this->scopeStoreIds($input);
+            if (!$storeIds) return app('json')->fail('当前账号没有可查看的门店范围');
+            $result = $export ? $services->export($storeIds, $input) : $services->query($storeIds, $input);
             return $this->success('ok', $result);
         } catch (\InvalidArgumentException $exception) {
             return app('json')->fail($exception->getMessage());
@@ -83,7 +100,32 @@ class Report extends AuthController
             ['consumption_metric', 'cash'], ['sleep_months', 3], ['year', 0],
             ['category_id', 0], ['category_path', ''], ['product_type', ''], ['partner_name', ''],
             ['salesperson_id', 0], ['sales_manager_id', 0], ['guide_id', 0], ['craftsman_id', 0],
+            ['store_ids', ''],
             ['page', 1], ['limit', 20],
         ];
+    }
+
+    private function dataScope()
+    {
+        $dispatcher = CashierV3Bootstrap::dispatcher();
+        $operatorScope = $dispatcher->scopeResolver()->operatorScope((int)$this->storeId, (int)$this->cashierId);
+        return $dispatcher->dataScopeFactory()->build(
+            (int)$this->storeId,
+            (int)$this->cashierId,
+            is_array($this->cashierInfo) ? $this->cashierInfo : [],
+            $operatorScope->tenantId(),
+            $operatorScope->organizationId()
+        );
+    }
+
+    private function scopeStoreIds(array $input): array
+    {
+        $allowed = $this->dataScope()->visibleStoreIds();
+        if ($allowed === null) $allowed = Db::name('system_store')->where('is_del', 0)->where('is_show', 1)->column('id');
+        $allowed = array_values(array_unique(array_filter(array_map('intval', (array)$allowed))));
+        $requested = $input['store_ids'] ?? '';
+        if (is_string($requested)) $requested = preg_split('/[,\s]+/', trim($requested), -1, PREG_SPLIT_NO_EMPTY);
+        $requested = array_values(array_unique(array_filter(array_map('intval', (array)$requested))));
+        return $requested ? array_values(array_intersect($requested, $allowed)) : $allowed;
     }
 }

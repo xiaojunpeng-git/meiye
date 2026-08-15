@@ -41,9 +41,7 @@ export default {
       component: () => import('@/pages/report/data/store_business')
     },
     {
-      // Each second-level menu item opens the same report workspace with a
-      // stable report code. The component is reused and reacts to param
-      // changes, so switching reports does not rebuild or refresh the menu.
+      // 此入口由 Vue 3 平台报表兼容跳转接管；保留稳定报表 code 供书签和菜单使用。
       path: 'store-operations/:report',
       name: `${pre}store_operations_report`,
       meta: {
@@ -53,7 +51,7 @@ export default {
       component: () => import('@/pages/report/data/store_business')
     },
     {
-      // Legacy URL: keep bookmarked links safe while the seven reports move
+      // Legacy URL: keep bookmarked links safe while the six reports move
       // into direct second-level menu entries.
       path: 'store-business',
       name: `${pre}store_business_legacy`,

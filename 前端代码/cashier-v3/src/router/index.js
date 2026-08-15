@@ -52,6 +52,12 @@ function firstGrantedRouteName() {
 const routes = [
   { path: '/login', name: 'cashier-v3-login', component: StoreLoginView, meta: { title: '门店端登录' } },
   {
+    path: '/platform/reports/:report?',
+    name: 'cashier-v3-platform-store-business-reports',
+    component: StoreBusinessReportView,
+    meta: { platformReport: true, title: '门店运营报表' }
+  },
+  {
     path: '/',
     component: CashierShell,
     redirect: '/cashier',
@@ -142,7 +148,7 @@ const routes = [
         path: 'data/reports/:report?',
         name: 'cashier-v3-store-business-reports',
         component: StoreBusinessReportView,
-        meta: { title: '门店运营', description: '门店运营七张报表，统一读取 V3 事实与指标服务。' }
+        meta: { title: '门店运营', description: '门店运营六张报表，统一读取 V3 事实与指标服务。' }
       }
     ]
   }
@@ -185,6 +191,8 @@ const router = createRouter({
 
 router.beforeEach(async (to) => {
   if (to.path === '/login' || to.name === 'cashier-v3-login') return true
+  // 平台报表使用后台管理员登录态，不能初始化或依赖收银工作台会话。
+  if (to.meta.platformReport === true) return true
   if (to.path !== '/' && !String(to.name || '').startsWith('cashier-v3-')) return true
 
   // 空会话不能渲染游客收银壳。否则目录和当前门店均为空，容易被误判为商品

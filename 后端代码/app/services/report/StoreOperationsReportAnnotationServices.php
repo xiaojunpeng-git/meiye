@@ -5,7 +5,7 @@ namespace app\services\report;
 use think\facade\Db;
 
 /**
- * 门店运营七表的受控补充记录服务。
+ * 门店运营六表的受控补充记录服务。
  *
  * 该服务只保存报表补充字段和商品分类合作方配置；销售、收款、服务、
  * 业绩事实仍由 V3 事实写入器维护。调用方必须传入已经由认证中间件
@@ -21,12 +21,12 @@ final class StoreOperationsReportAnnotationServices
     private const REPORT_CODES = [
         'partner_item_summary', 'partner_item_detail', 'member_consumption_detail',
         'store_item_analysis', 'store_craftsman_consumption',
-        'store_salesperson_performance', 'market_performance',
+        'store_salesperson_performance',
     ];
 
     private const FIELD_RULES = [
         'partner_item_detail' => ['medical_elevation', 'medical_followup', 'expert_name', 'remark'],
-        'market_performance' => ['walk_in_manual_count', 'refund_headcount_manual', 'manual_cash_amount', 'remark'],
+        'member_consumption_detail' => ['experience_cash', 'experience_payment_method'],
     ];
 
     private const FIELD_TYPES = [

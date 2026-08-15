@@ -16,7 +16,6 @@ $codes = [
     'store_item_analysis',
     'store_craftsman_consumption',
     'store_salesperson_performance',
-    'market_performance',
 ];
 
 foreach ($codes as $code) {
@@ -62,6 +61,43 @@ foreach ([
 foreach (['medical_elevation', 'medical_followup', 'expert_name', 'remark'] as $field) {
     if (strpos($annotation, "'{$field}'") === false) {
         throw new RuntimeException("annotation whitelist missing {$field}");
+    }
+}
+foreach (['experience_cash', 'experience_payment_method'] as $field) {
+    if (strpos($annotation, "'{$field}'") === false) {
+        throw new RuntimeException("annotation whitelist missing {$field}");
+    }
+}
+if (strpos($annotation, "\$value = (string)(\$payload['field_value'] ?? '');") === false
+    || strpos($service, "\$row[\$field] = \$value;") === false
+    || strpos($service, "if (!empty(\$value))") !== false) {
+    throw new RuntimeException('manual annotation empty-string clear contract missing');
+}
+$memberDetailStart = strpos($service, 'private function memberConsumptionDetail');
+$memberDetailEnd = strpos($service, 'private function storeItemAnalysis', $memberDetailStart);
+$memberDetail = substr($service, $memberDetailStart, $memberDetailEnd - $memberDetailStart);
+$partnerSummaryStart = strpos($service, 'private function partnerItemSummary');
+$partnerSummaryEnd = strpos($service, 'private function partnerItemDetail', $partnerSummaryStart);
+$partnerSummary = substr($service, $partnerSummaryStart, $partnerSummaryEnd - $partnerSummaryStart);
+if (strpos($partnerSummary, "'performance_type','label'=>'分类'") === false) {
+    throw new RuntimeException('partner summary performance type label must be 分类');
+}
+$defaultsPos = strpos($memberDetail, "\$row['experience_payment_method'] =");
+$annotationsPos = strpos($memberDetail, "\$rows = \$this->attachAnnotations(\$rows, 'member_consumption_detail', \$storeId);");
+if ($defaultsPos === false || $annotationsPos === false || $annotationsPos < $defaultsPos) {
+    throw new RuntimeException('member detail annotations must override fact defaults after decoration');
+}
+foreach ([
+    'member_phone_source' => "leftJoin('user u', 'u.uid = s.member_id')",
+    'member_label' => "'member_name_snapshot','label'=>'会员'",
+    'phone_label' => "'member_phone','label'=>'手机'",
+    'private_beauty_followup_label' => "'medical_elevation','label'=>'私美复诊'",
+    'private_beauty_type_label' => "'medical_followup','label'=>'私美类型'",
+    'partner_manual_fields' => "'medical_elevation', 'medical_followup', 'expert_name'",
+] as $name => $needle) {
+    $source = $name === 'partner_manual_fields' ? $annotation : $service;
+    if (strpos($source, $needle) === false) {
+        throw new RuntimeException("partner detail contract missing {$name}");
     }
 }
 foreach (['catalog', 'query', 'export', 'operationsCategories', 'saveCategory', 'annotations', 'saveAnnotation'] as $method) {

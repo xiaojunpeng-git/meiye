@@ -236,6 +236,7 @@ ensure_cashier_v3_dev() {
     -p 18091:18087 \
     --add-host host.docker.internal:host-gateway \
     -e CASHIER_V3_API_PROXY_TARGET="http://host.docker.internal:${CASHIER_API_PORT}" \
+    -e PLATFORM_API_PROXY_TARGET="http://host.docker.internal:${PLATFORM_API_PORT}" \
     -v "$CASHIER_V3_SRC:/app" \
     -v "$ROOT/前端代码/inventory-vue3:/inventory-vue3:ro" \
     -v "$ROOT/前端代码/shared:/shared:ro" \

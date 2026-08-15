@@ -23,8 +23,7 @@ const STORE_OPERATION_REPORTS = [
   { code: 'member_consumption_detail', title: '会员消费明细' },
   { code: 'store_item_analysis', title: '门店品项分析' },
   { code: 'store_craftsman_consumption', title: '门店手艺人消耗' },
-  { code: 'store_salesperson_performance', title: '门店销售人业绩' },
-  { code: 'market_performance', title: '市场业绩' }
+  { code: 'store_salesperson_performance', title: '门店销售人业绩' }
 ];
 
 // "出入库记录" has been consolidated into inventory query/statistics.  Filter
@@ -97,7 +96,7 @@ function withOperatingScreenMenu(menuData) {
   return menuData;
 }
 
-// 门店运营七表是平台“数据”菜单下的统一入口。部分本地账号的菜单权限缓存
+// 门店运营六表是平台“数据”菜单下的统一入口。部分本地账号的菜单权限缓存
 // 仍来自旧菜单树，后端不会把新节点返回到该账号的 role rules 中；这里补齐
 // 受控的前端入口，路由和接口权限仍由后端/路由守卫校验，不改变数据范围。
 function withStoreOperationsMenu(menuData) {
@@ -126,7 +125,7 @@ function withStoreOperationsMenu(menuData) {
       || path.startsWith(reportPathPrefix);
   };
   // Replace the old single hub entry (including stale cached menu nodes) with
-  // seven ordinary second-level links. No menu API call or menu-state refresh
+  // six ordinary second-level links. No menu API call or menu-state refresh
   // is needed when switching between these links; they are normal router paths.
   dataMenu.children = dataMenu.children.filter(child => !isGeneratedReport(child));
   menuData.forEach(item => {

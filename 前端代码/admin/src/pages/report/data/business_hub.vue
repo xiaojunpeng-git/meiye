@@ -30,8 +30,7 @@ export default {
         { code: 'member_consumption_detail', name: '会员消费明细', description: '会员消费、收款、退款与人员归属明细' },
         { code: 'store_item_analysis', name: '门店品项分析', description: '按商品分类、商品类型与品项分析经营数据' },
         { code: 'store_craftsman_consumption', name: '门店手艺人消耗', description: '按手艺人和日期分析消耗与手工费' },
-        { code: 'store_salesperson_performance', name: '门店销售人业绩', description: '按销售人分析订单、顾客、现金与实际业绩' },
-        { code: 'market_performance', name: '市场业绩', description: '按来源和门店展示市场到店、成交与业绩' }
+        { code: 'store_salesperson_performance', name: '门店销售人业绩', description: '按销售人分析订单、顾客、现金与实际业绩' }
       ]
     }
   },
