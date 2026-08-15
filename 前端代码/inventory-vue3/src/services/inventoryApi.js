@@ -27,7 +27,31 @@ function tokenFromBrowser(browserWindow) {
 
 function messageOf(body, fallback) {
   const message = body && typeof body === 'object' ? String(body.msg || body.message || '').trim() : ''
+  const code = body && typeof body === 'object' ? String(body?.data?.code || body.code || '').trim() : ''
   const businessMessages = {
+    inventory_manual_inbound_scope_invalid: '入库操作范围无效，请重新进入库存页面后再试。',
+    inventory_manual_inbound_input_invalid: '入库信息不完整，请检查入库日期和商品明细。',
+    inventory_manual_inbound_idempotency_invalid: '本次入库请求已失效，请刷新页面后重新提交。',
+    inventory_manual_inbound_line_invalid: '入库商品明细不完整，请检查商品、批次、数量和单价。',
+    inventory_manual_inbound_dates_required: '请为每个入库商品填写生产日期和到期日。',
+    inventory_manual_inbound_date_order_invalid: '到期日不能早于生产日期。',
+    inventory_manual_inbound_date_invalid: '入库日期格式不正确，请重新选择日期。',
+    inventory_manual_inbound_identifier_invalid: '入库商品标识无效，请重新选择商品。',
+    inventory_manual_inbound_cost_invalid: '入库单价格式不正确，请输入不小于 0 的金额。',
+    inventory_manual_inbound_store_scope_invalid: '当前门店状态异常，暂时不能入库，请重新登录后再试。',
+    inventory_manual_inbound_operator_scope_denied: '当前员工无权操作本门店库存。',
+    inventory_manual_inbound_organization_scope_invalid: '当前门店的组织归属异常，请联系管理员处理。',
+    inventory_manual_inbound_organization_cycle: '当前门店的组织层级异常，请联系管理员处理。',
+    inventory_manual_inbound_default_location_ambiguous: '当前门店存在多个默认库存仓，请联系管理员处理。',
+    inventory_manual_inbound_location_scope_invalid: '当前门店默认库存仓归属异常，请联系管理员处理。',
+    inventory_manual_inbound_default_location_conflict: '当前门店默认库存仓配置冲突，请联系管理员处理。',
+    inventory_manual_inbound_default_location_create_failed: '当前门店默认库存仓创建失败，请稍后重试。',
+    inventory_manual_inbound_sku_not_found: '所选商品规格已失效，请重新选择商品。',
+    inventory_manual_inbound_stock_scope_invalid: '当前商品库存归属异常，请联系管理员处理。',
+    inventory_manual_inbound_stock_changed: '库存数据刚发生变化，请刷新后重新提交。',
+    inventory_manual_inbound_batch_not_active: '该批次已停用，不能继续入库。',
+    inventory_manual_inbound_batch_cost_conflict: '同一批次的入库单价必须保持一致，请更换批次或核对单价。',
+    inventory_manual_inbound_batch_changed: '批次库存刚发生变化，请刷新后重新提交。',
     inventory_manual_inbound_idempotency_conflict: '本次入库内容与已提交记录不一致，请刷新后重新操作。',
     inventory_manual_outbound_stock_insufficient: '当前库存不足，请核对出库数量后重试。',
     inventory_salon_usage_date_invalid: '院装业务日期格式不正确，请重新选择日期。',
@@ -37,7 +61,7 @@ function messageOf(body, fallback) {
     inventory_stock_request_line_invalid: '请货明细不合法，请检查商品和数量。',
     inventory_platform_warehouse_idempotency_conflict: '本次建仓内容与已提交记录不一致，请刷新后重新操作。'
   }
-  return businessMessages[message] || message || fallback
+  return businessMessages[code] || businessMessages[message] || message || fallback
 }
 
 function normalizeEnvelope(body) {

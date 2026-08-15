@@ -11,6 +11,12 @@ $cases = [
     'inventory_batch_transfer_input_invalid' => '调拨信息不完整，请检查调入仓和明细。',
     'inventory_stock_request_line_invalid' => '请货明细不合法，请检查商品和数量。',
     'inventory_platform_warehouse_idempotency_conflict' => '本次建仓内容与已提交记录不一致，请刷新后重新操作。',
+    'inventory_manual_inbound_sku_not_found' => '所选商品规格已失效，请重新选择商品。',
+    'inventory_manual_inbound_dates_required' => '请为每个入库商品填写生产日期和到期日。',
+    'inventory_manual_inbound_default_location_ambiguous' => '当前门店存在多个默认库存仓，请联系管理员处理。',
+    'inventory_manual_inbound_location_scope_invalid' => '当前门店默认库存仓归属异常，请联系管理员处理。',
+    'inventory_manual_inbound_stock_changed' => '库存数据刚发生变化，请刷新后重新提交。',
+    'inventory_manual_inbound_batch_cost_conflict' => '同一批次的入库单价必须保持一致，请更换批次或核对单价。',
 ];
 $failed = 0;
 foreach ($cases as $code => $message) {

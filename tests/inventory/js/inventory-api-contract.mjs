@@ -164,6 +164,24 @@ try {
 }
 check('inventory API surfaces server-side scope rejection instead of returning rows', rejected)
 
+const inboundCodeFailures = [
+  ['inventory_manual_inbound_sku_not_found', '所选商品规格已失效，请重新选择商品。'],
+  ['inventory_manual_inbound_location_scope_invalid', '当前门店默认库存仓归属异常，请联系管理员处理。']
+]
+for (const [code, expectedMessage] of inboundCodeFailures) {
+  const codeApi = createInventoryApi({
+    prefix: '/storeapi/product/inventory',
+    fetchImpl: async () => ({ ok: true, status: 200, text: async () => JSON.stringify({ status: 400, msg: '库存操作未完成，请核对数据后重试。', data: { code } }) })
+  })
+  let mapped = false
+  try {
+    await codeApi.createInbound({ idempotency_key: 'error-message-contract', business_date: '2026-08-15', remark: '', lines: [] })
+  } catch (error) {
+    mapped = error instanceof Error && error.message === expectedMessage
+  }
+  check(`inventory API reads the backend code for ${code}`, mapped)
+}
+
 let invalidPage = false
 try {
   api.list('recipe')
