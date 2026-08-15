@@ -22,17 +22,31 @@ final class StoreOperationsReportAnnotationServices
         'partner_item_summary', 'partner_item_detail', 'member_consumption_detail',
         'store_item_analysis', 'store_craftsman_consumption',
         'store_salesperson_performance',
+        'market_performance', 'market_detail',
+        'field_acquisition_detail', 'field_acquisition_summary',
+        'cross_industry_customer_detail', 'cross_industry_customer_summary',
+        'new_customer_analysis',
     ];
 
     private const FIELD_RULES = [
         'partner_item_detail' => ['medical_elevation', 'medical_followup', 'expert_name', 'remark'],
         'member_consumption_detail' => ['experience_cash', 'experience_payment_method'],
+        'market_performance' => [],
+        'market_detail' => ['walk_in'],
+        'field_acquisition_detail' => ['card_sale_date', 'visit_over_one_hour'],
+        'field_acquisition_summary' => [],
+        'cross_industry_customer_detail' => [],
+        'cross_industry_customer_summary' => ['customer_acquired_at', 'partner_store_name'],
+        'new_customer_analysis' => ['care_duration'],
     ];
 
     private const FIELD_TYPES = [
-        'walk_in_manual_count' => 'integer',
+        'walk_in' => 'integer',
         'refund_headcount_manual' => 'integer',
         'manual_cash_amount' => 'integer_cents',
+        'visit_over_one_hour' => 'integer',
+        'card_sale_date' => 'date',
+        'customer_acquired_at' => 'date',
     ];
 
     /** @return array<int,array<string,mixed>> */
@@ -49,7 +63,14 @@ final class StoreOperationsReportAnnotationServices
         foreach (['subject_type', 'subject_key', 'field_key'] as $key) {
             if (($value = trim((string)($filter[$key] ?? ''))) !== '') $query->where($key, $value);
         }
-        return $query->order('updated_at', 'desc')->order('id', 'desc')->select()->toArray();
+        $rows = $query->order('updated_at', 'desc')->order('id', 'desc')->select()->toArray();
+        if ($scope['authorization_mode'] === 'self_participant') {
+            $participant = new StoreReportParticipantScopeServices();
+            $rows = array_values(array_filter($rows, function (array $row) use ($participant, $scope): bool {
+                return $participant->annotationIsVisible($row, $scope['tenant_id'], $scope['participant_employee_id']);
+            }));
+        }
+        return $rows;
     }
 
     /**
@@ -66,22 +87,37 @@ final class StoreOperationsReportAnnotationServices
         $idempotencyKey = $this->opaque($payload['idempotency_key'] ?? '', 'idempotency_key', 128);
         $value = (string)($payload['field_value'] ?? '');
         $valueType = (string)(self::FIELD_TYPES[$fieldKey] ?? 'text');
-        if ($valueType !== 'text' && !preg_match('/^-?\d+$/D', trim($value))) {
-            throw new \InvalidArgumentException('该补充字段必须填写整数');
-        }
+        $this->validateFieldValue($valueType, $value);
         if (mb_strlen($value, 'UTF-8') > 65535) throw new \InvalidArgumentException('补充字段内容不能超过 65535 个字符');
         $storeId = (int)($payload['store_id'] ?? ($context['store_id'] ?? 0));
-        $this->assertStoreAllowed($scope, $storeId);
         $expectedVersion = (int)($payload['expected_version'] ?? 0);
         $operatorId = (int)($context['operator_id'] ?? $context['admin_id'] ?? 0);
         $operatorName = mb_substr((string)($context['operator_name'] ?? $context['admin_name'] ?? ''), 0, 128);
+        $sourceFactId = max(0, (int)($payload['source_fact_id'] ?? 0));
+        $sourceOrderId = mb_substr(trim((string)($payload['source_order_id'] ?? '')), 0, 64);
+        $sourceLineId = mb_substr(trim((string)($payload['source_line_id'] ?? '')), 0, 64);
+        if ($scope['authorization_mode'] === 'self_participant') {
+            $resolved = (new StoreReportParticipantScopeServices())->resolveSubject(
+                $scope['tenant_id'], $subjectType, $subjectKey, $scope['participant_employee_id']
+            );
+            if ($resolved === null) throw new \InvalidArgumentException('无权编辑非本人参与的报表数据');
+            $storeId = (int)$resolved['store_id'];
+            $sourceOrderId = (string)$resolved['source_order_id'];
+            $sourceLineId = (string)$resolved['source_line_id'];
+        }
+        $this->assertStoreAllowed($scope, $storeId);
+        $organizationId = (string)($context['organization_id'] ?? '');
         $now = time();
 
-        return Db::transaction(function () use ($scope, $reportCode, $subjectType, $subjectKey, $fieldKey, $idempotencyKey, $value, $valueType, $storeId, $expectedVersion, $operatorId, $operatorName, $now): array {
+        return Db::transaction(function () use ($scope, $reportCode, $subjectType, $subjectKey, $fieldKey, $idempotencyKey, $value, $valueType, $storeId, $expectedVersion, $operatorId, $operatorName, $sourceFactId, $sourceOrderId, $sourceLineId, $organizationId, $now): array {
             $audit = Db::name(self::ANNOTATION_AUDIT_TABLE)
                 ->where('tenant_id', $scope['tenant_id'])->where('idempotency_key', $idempotencyKey)->lock(true)->find();
             if (is_array($audit)) {
-                if ((string)$audit['report_code'] !== $reportCode || (string)$audit['field_key'] !== $fieldKey || (string)$audit['after_value'] !== $value) {
+                if ((string)$audit['report_code'] !== $reportCode
+                    || (string)$audit['subject_type'] !== $subjectType
+                    || (string)$audit['subject_key'] !== $subjectKey
+                    || (string)$audit['field_key'] !== $fieldKey
+                    || (string)$audit['after_value'] !== $value) {
                     throw new \InvalidArgumentException('幂等标识已用于其他补充内容');
                 }
                 $row = Db::name(self::ANNOTATION_TABLE)->where('id', (int)$audit['annotation_id'])->find();
@@ -114,11 +150,10 @@ final class StoreOperationsReportAnnotationServices
                 $beforeValue = '';
                 $newVersion = 1;
                 $annotationId = (int)Db::name(self::ANNOTATION_TABLE)->insertGetId([
-                    'tenant_id' => $scope['tenant_id'], 'organization_id' => (string)($context['organization_id'] ?? ''),
+                    'tenant_id' => $scope['tenant_id'], 'organization_id' => $organizationId,
                     'store_id' => $storeId, 'report_code' => $reportCode, 'subject_type' => $subjectType,
-                    'subject_key' => $subjectKey, 'source_fact_id' => (int)($context['source_fact_id'] ?? 0),
-                    'source_order_id' => mb_substr((string)($context['source_order_id'] ?? ''), 0, 64),
-                    'source_line_id' => mb_substr((string)($context['source_line_id'] ?? ''), 0, 64),
+                    'subject_key' => $subjectKey, 'source_fact_id' => $sourceFactId,
+                    'source_order_id' => $sourceOrderId, 'source_line_id' => $sourceLineId,
                     'field_key' => $fieldKey, 'value_type' => $valueType,
                     'field_value' => $value, 'version' => 1, 'created_by' => $operatorId,
                     'created_by_name_snapshot' => $operatorName, 'updated_by' => $operatorId,
@@ -255,7 +290,19 @@ final class StoreOperationsReportAnnotationServices
         if ($tenant === '') throw new \InvalidArgumentException('报表数据范围缺少租户');
         $ids = array_values(array_filter(array_map('intval', (array)($context['store_ids'] ?? []))));
         if (array_key_exists('store_id', $context) && (int)$context['store_id'] > 0 && !$ids) $ids = [(int)$context['store_id']];
-        return ['tenant_id' => $tenant, 'store_ids' => $ids ?: null];
+        $authorizationMode = trim((string)($context['authorization_mode'] ?? 'stores'));
+        $participantEmployeeId = $authorizationMode === 'self_participant'
+            ? max(0, (int)($context['participant_employee_id'] ?? 0)) : 0;
+        if ($authorizationMode === 'none') throw new \InvalidArgumentException('当前账号没有可查看的数据范围');
+        if ($authorizationMode === 'self_participant' && $participantEmployeeId <= 0) {
+            throw new \InvalidArgumentException('个人数据权限缺少有效员工身份');
+        }
+        return [
+            'tenant_id' => $tenant,
+            'store_ids' => $authorizationMode === 'self_participant' ? null : ($ids ?: null),
+            'authorization_mode' => $authorizationMode,
+            'participant_employee_id' => $participantEmployeeId,
+        ];
     }
 
     private function assertStoreAllowed(array $scope, int $storeId): void
@@ -275,6 +322,22 @@ final class StoreOperationsReportAnnotationServices
         $key = trim((string)$value);
         if (!in_array($key, self::FIELD_RULES[$reportCode] ?? [], true)) throw new \InvalidArgumentException('该报表字段不允许编辑');
         return $key;
+    }
+
+    private function validateFieldValue(string $valueType, string $value): void
+    {
+        // Empty string is a deliberate manual clear and must survive readback.
+        if ($value === '' || $valueType === 'text') return;
+        if (in_array($valueType, ['integer', 'integer_cents'], true)
+            && !preg_match('/^-?\d+$/D', trim($value))) {
+            throw new \InvalidArgumentException('该补充字段必须填写整数');
+        }
+        if ($valueType === 'date') {
+            $date = \DateTimeImmutable::createFromFormat('!Y-m-d', $value);
+            if (!$date || $date->format('Y-m-d') !== $value) {
+                throw new \InvalidArgumentException('日期格式必须为 YYYY-MM-DD');
+            }
+        }
     }
 
     private function opaque($value, string $field, int $max): string

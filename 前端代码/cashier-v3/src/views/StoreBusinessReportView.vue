@@ -1,10 +1,12 @@
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Download from '@lucide/vue/dist/esm/icons/download.mjs'
 import BookOpen from '@lucide/vue/dist/esm/icons/book-open.mjs'
 import Network from '@lucide/vue/dist/esm/icons/network.mjs'
 import RefreshCw from '@lucide/vue/dist/esm/icons/refresh-cw.mjs'
+import ChevronDown from '@lucide/vue/dist/esm/icons/chevron-down.mjs'
+import ChevronUp from '@lucide/vue/dist/esm/icons/chevron-up.mjs'
 import { requestCashierV3Action } from '@/services/cashierV3Bridge'
 import {
   exportStoreBusinessReport,
@@ -18,7 +20,7 @@ import {
 
 const COVERAGE_START = '2026-08-10'
 const DEFAULT_LIMIT = 20
-// 第一阶段门店运营报表目录。经营看板是数据入口，不属于本目录；
+// 门店运营报表目录。经营看板是数据入口，不属于本目录；
 // 报表结果、金额和筛选能力全部由统一查询服务返回，浏览器不参与计算。
 const REPORT_TABS = Object.freeze([
   { code: 'partner_item_summary', name: '合作方品项汇总' },
@@ -26,7 +28,19 @@ const REPORT_TABS = Object.freeze([
   { code: 'member_consumption_detail', name: '会员消费明细' },
   { code: 'store_item_analysis', name: '门店品项分析' },
   { code: 'store_craftsman_consumption', name: '门店手艺人消耗' },
-  { code: 'store_salesperson_performance', name: '门店销售人业绩' }
+  { code: 'store_salesperson_performance', name: '门店销售人业绩' },
+  { code: 'market_performance', name: '市场业绩表' },
+  { code: 'market_detail', name: '市场明细表' },
+  { code: 'member_visit_analysis', name: '会员进店分析表' },
+  { code: 'member_visit_annual_summary', name: '会员进店年度汇总表' },
+  { code: 'field_acquisition_detail', name: '地推拓客明细表' },
+  { code: 'field_acquisition_summary', name: '地推拓客汇总表' },
+  { code: 'cross_industry_customer_detail', name: '异业收客明细分析表' },
+  { code: 'cross_industry_customer_summary', name: '异业收客汇总分析表' },
+  { code: 'new_customer_analysis', name: '新客分析表' },
+  { code: 'new_customer_analysis_summary', name: '新客分析表汇总' },
+  { code: 'salesperson_large_order_statistics', name: '销售人生美大单统计表' },
+  { code: 'store_refund_ledger', name: '院店退款台账' }
 ])
 const PERSON_FILTERS = Object.freeze([
   ['salesperson_id', '销售人编号'],
@@ -50,6 +64,7 @@ const categoryPath = ref('')
 const productType = ref('')
 const partnerName = ref('')
 const personFilters = ref({})
+const dynamicFilters = ref({})
 const isAdvancedFiltersOpen = ref(false)
 const personnelPicker = ref({
   open: false,
@@ -63,17 +78,17 @@ const personnelPicker = ref({
 })
 const scopePicker = ref({ open: false, loading: false, tree: [], allowedStoreIds: [], selectedStoreIds: [], label: '当前权限范围', selectedOrganizationKey: '', selectedOrganizationName: '', stores: [] })
 const page = ref(1)
-const editingPartnerRow = ref(null)
-const partnerEditDraft = ref({ medical_elevation: '', medical_followup: '', expert_name: '' })
-const editingMemberRow = ref(null)
-const memberEditDraft = ref({ experience_cash: '', experience_payment_method: '' })
+const tabsElement = ref(null)
+const tabsExpanded = ref(false)
+const tabsOverflow = ref(false)
+const editingRow = ref(null)
+const editDraft = ref({})
 const savingEdit = ref(false)
 const PARTNER_MANUAL_FIELDS = Object.freeze([
   { key: 'medical_elevation', label: '私美复诊' },
   { key: 'medical_followup', label: '私美类型' },
   { key: 'expert_name', label: '专家姓名' }
 ])
-const partnerManualFieldKeys = PARTNER_MANUAL_FIELDS.map((field) => field.key)
 const isFieldGuideOpen = ref(false)
 
 const FIELD_LOGIC = Object.freeze({
@@ -112,11 +127,11 @@ const FIELD_LOGIC = Object.freeze({
   guide_names: '本单已确认的导购人员；多人时并列显示。',
   salesperson_names: '本条成交分配到的销售人员。',
   member_source: '本次成交时记录的会员来源。',
-  receipt_total: '本单选择“其他收款”并成功记账的金额；当前不汇总其他支付方式。',
-  partner_performance: '本条成交中分配给合作方销售人的现金业绩合计。',
-  actual_cash_performance: '本单“其他收款”的成功记账金额，扣除分配给合作方销售人的业绩后得到的金额。',
-  experience_cash: '体验项目默认取本单“其他收款”的成功记账金额；运营人员手动保存后以保存金额为准。',
-  experience_payment_method: '体验项目默认显示本单实际使用的记账收款方式；运营人员手动保存后以保存内容为准。',
+  receipt_total: '本行销售明细分摊到的所有成功记账收款方式金额合计；未成功的收款不计入。',
+  partner_performance: '本条成交各合作方分类分成业绩的合计；每个分类均按成交时的现金业绩乘以当时设置的合作方默认比例计算。',
+  actual_cash_performance: '本行销售明细分摊到的成功记账收款金额，扣除本条成交的合作方业绩后得到的金额。',
+  experience_cash: '体验项目默认取本行销售明细分摊到的成功记账收款金额；运营人员手动保存后以保存金额为准。',
+  experience_payment_method: '体验项目默认显示本行销售明细实际分摊到的记账收款方式；运营人员手动保存后以保存内容为准。',
   employee_name: '业绩或手工费实际分配到的员工。',
   total_consume: '所选期间内，该手艺人每日劳动业绩的合计。',
   total_labor: '所选期间内，该手艺人每日手工费的合计。',
@@ -128,9 +143,11 @@ const FIELD_LOGIC = Object.freeze({
 function fieldLogic(column) {
   const key = String(column?.key || '')
   const label = String(column?.label || '该字段')
+  const serverLogic = String(column?.logic || column?.explanation || column?.source_description || '').trim()
+  if (serverLogic) return serverLogic
   if (FIELD_LOGIC[key]) return FIELD_LOGIC[key]
   if (key.startsWith('payment_')) return `本单使用“${label}”且成功记账的金额；未使用或未成功记账时显示 0。`
-  if (key.startsWith('partner_')) return `本条成交中分配给合作方销售人的现金业绩，且仅统计“${label.replace(/分成业绩$/, '')}”对应的分类或来源。`
+  if (key.startsWith('partner_category_')) return `普通商品和项目按自身成交分类归集；卡项按卡内项目的成交分类归集，卡内有多个分类时按各项目配置金额分摊。该分类的现金业绩乘以成交时设置的合作方默认比例，得到“${label}”；后续修改分类或比例不会改写已成交数据。`
   if (/^day_\d+_consume$/.test(key)) return `${label.replace('消耗', '')}该手艺人按项目分配到的劳动业绩合计。`
   if (/^day_\d+_labor$/.test(key)) return `${label.replace('手工', '')}该手艺人按项目分配到的手工费合计；手工费和劳动业绩可以不同。`
   if (/^day_\d+_performance$/.test(key)) return `${label.replace('业绩', '')}该销售人按成交项目分配到的销售业绩合计。`
@@ -162,7 +179,72 @@ const reportTabs = computed(() => REPORT_TABS.map((tab) => ({
   ...tab,
   ...(serverCatalogByCode.value.get(tab.code) || {})
 })))
+const isFirstPhaseReport = computed(() => REPORT_TABS.slice(0, 6).some((item) => item.code === activeReport.value))
 const columns = computed(() => Array.isArray(result.value.columns) ? result.value.columns : [])
+const filterSchema = computed(() => {
+  const schema = result.value.filter_schema || result.value.filterSchema
+  return (Array.isArray(schema) ? schema : []).filter((field) => {
+    const key = String(field?.key || '')
+    return key && !['organization', 'organization_id', 'store', 'store_id', 'store_ids', 'start_date', 'end_date'].includes(key)
+  })
+})
+const editableFields = computed(() => {
+  const declared = result.value.editable_fields || result.value.editableFields
+  const entries = Array.isArray(declared) ? declared : []
+  const normalized = entries.map((field) => typeof field === 'string'
+    ? { key: field, label: columns.value.find((column) => column.key === field)?.label || field, type: 'text' }
+    : { ...field, key: String(field?.key || field?.field_key || '') }
+  ).filter((field) => field.key)
+  if (normalized.length) return normalized
+  if (activeReport.value === 'partner_item_detail') return PARTNER_MANUAL_FIELDS
+  if (activeReport.value === 'member_consumption_detail') return [
+    { key: 'experience_cash', label: '体验现金业绩', type: 'money' },
+    { key: 'experience_payment_method', label: '体验收款方式', type: 'text' }
+  ]
+  return []
+})
+const editableFieldByKey = computed(() => new Map(editableFields.value.map((field) => [field.key, field])))
+const editableReport = computed(() => editableFields.value.length > 0)
+const topSummaries = computed(() => {
+  const items = result.value.top_summaries || result.value.topSummaries
+  return Array.isArray(items) ? items : []
+})
+const RESULT_COLUMN_KEYS = new Set(['actual_cash_performance', 'experience_cash', 'experience_payment_method'])
+const MANUAL_COLUMN_KEYS = new Set(['medical_elevation', 'medical_followup', 'expert_name', 'remark'])
+
+function tableHeaderTone(column) {
+  const key = String(column?.key || '')
+  if (key.startsWith('payment_') || key === 'receipt_total') return 'payment'
+  if (key.startsWith('partner_category_') || key === 'partner_performance') return 'partner'
+  if (RESULT_COLUMN_KEYS.has(key)) return 'result'
+  if (MANUAL_COLUMN_KEYS.has(key) || editableFieldByKey.value.has(key)) return 'manual'
+  return 'basic'
+}
+
+function derivedHeaderGroupLabel(column) {
+  return ({
+    basic: '基础信息',
+    payment: '支付现金业绩方式',
+    partner: '合作方分成业绩',
+    result: '经营结果',
+    manual: '手动补充'
+  })[tableHeaderTone(column)]
+}
+
+function headerGroupClasses(group) {
+  return ['store-business-report__header-group', `store-business-report__header-group--${tableHeaderTone(group.columns[0])}`]
+}
+
+function headerColumnClasses(column, index) {
+  const tone = tableHeaderTone(column)
+  const nextTone = index < columns.value.length - 1 ? tableHeaderTone(columns.value[index + 1]) : ''
+  return [
+    'store-business-report__header-column',
+    `store-business-report__header-column--${tone}`,
+    { 'store-business-report__header-column--group-end': tone !== nextTone }
+  ]
+}
+
 // 列和列分组由统一报表服务返回。支付方式、合作方、门店、康美单和系统
 // 操作等动态列只负责展示，不在浏览器端重新计算或拼接金额。
 const columnGroups = computed(() => {
@@ -183,7 +265,7 @@ const columnGroups = computed(() => {
     })
     const groups = []
     columns.value.forEach((column) => {
-      const label = groupLabelByKey.get(String(column.key)) || ''
+      const label = groupLabelByKey.get(String(column.key)) || derivedHeaderGroupLabel(column)
       const current = groups[groups.length - 1]
       if (!current || current.label !== label) groups.push({ label, columns: [] })
       groups[groups.length - 1].columns.push(column)
@@ -238,6 +320,7 @@ function reportParams(overrides = {}) {
     product_type: productType.value,
     partner_name: partnerName.value,
     ...personFilters.value,
+    ...dynamicFilters.value,
     ...(scopePicker.value.selectedStoreIds.length ? { store_ids: scopePicker.value.selectedStoreIds.join(',') } : {}),
     page: page.value,
     limit: DEFAULT_LIMIT,
@@ -263,6 +346,20 @@ function selectReport(code) {
   if (code === activeReport.value) return
   page.value = 1
   router.push({ name: reportRouteName.value, params: { report: code } })
+}
+
+function updateTabsLayout() {
+  const element = tabsElement.value
+  if (!element) return
+  const buttons = [...element.querySelectorAll('.store-business-report__tab')]
+  const firstTop = buttons[0]?.offsetTop
+  tabsOverflow.value = buttons.some((button) => button.offsetTop > firstTop)
+  const active = buttons.find((button) => button.getAttribute('aria-current') === 'page')
+  if (active && firstTop !== undefined && active.offsetTop > firstTop) tabsExpanded.value = true
+}
+
+function toggleTabs() {
+  tabsExpanded.value = !tabsExpanded.value
 }
 
 function query() {
@@ -326,6 +423,22 @@ function syncActiveReportFromRoute() {
   activeReport.value = REPORT_TABS.some((item) => item.code === requested)
     ? requested
     : REPORT_TABS[0].code
+  if (isFirstPhaseReport.value && startDate.value < COVERAGE_START) startDate.value = COVERAGE_START
+  if (!isFirstPhaseReport.value && startDate.value === COVERAGE_START) startDate.value = `${today().slice(0, 4)}-01-01`
+}
+
+function syncFiltersFromRoute() {
+  const query = route.query || {}
+  if (query.start_date) startDate.value = String(query.start_date)
+  if (query.end_date) endDate.value = String(query.end_date)
+  const storeIds = String(query.store_ids || '').split(',').map(Number).filter(Boolean)
+  if (storeIds.length) {
+    scopePicker.value = { ...scopePicker.value, selectedStoreIds: storeIds, label: String(query.scope_label || '下钻范围') }
+  }
+  const reserved = new Set(['start_date', 'end_date', 'store_ids', 'scope_label'])
+  dynamicFilters.value = Object.fromEntries(Object.entries(query)
+    .filter(([key, value]) => !reserved.has(key) && value !== undefined && value !== '')
+    .map(([key, value]) => [key, String(value)]))
 }
 
 function clearAdvancedFilters() {
@@ -334,13 +447,25 @@ function clearAdvancedFilters() {
   productType.value = ''
   partnerName.value = ''
   personFilters.value = {}
+  dynamicFilters.value = {}
 }
 
 function loadReportScope() {
   scopePicker.value = { ...scopePicker.value, loading: true }
   return queryStoreBusinessReportScope(reportRuntime.value).then((data) => {
     const allowed = Array.isArray(data?.allowed_store_ids) ? data.allowed_store_ids.map(Number).filter(Boolean) : []
-    scopePicker.value = { ...scopePicker.value, loading: false, tree: data?.tree || [], allowedStoreIds: allowed, selectedStoreIds: [], label: '当前权限范围', selectedOrganizationKey: '', selectedOrganizationName: '', stores: [] }
+    const requested = String(route.query?.store_ids || '').split(',').map(Number).filter((id) => allowed.includes(id))
+    scopePicker.value = {
+      ...scopePicker.value,
+      loading: false,
+      tree: data?.tree || [],
+      allowedStoreIds: allowed,
+      selectedStoreIds: requested,
+      label: requested.length ? String(route.query?.scope_label || '下钻范围') : '当前权限范围',
+      selectedOrganizationKey: '',
+      selectedOrganizationName: '',
+      stores: []
+    }
   }).catch((error) => {
     scopePicker.value = { ...scopePicker.value, loading: false, tree: [], allowedStoreIds: [], selectedStoreIds: [], selectedOrganizationKey: '', selectedOrganizationName: '', stores: [] }
     errorMessage.value = error?.message || '权限范围读取失败，请稍后重试。'
@@ -472,9 +597,8 @@ function choosePersonnel(record) {
   personnelPicker.value = { ...picker, open: false }
 }
 
-const editableReport = computed(() => ['partner_item_detail', 'member_consumption_detail'].includes(activeReport.value))
 function rowKey(row) {
-  return String(row?.source_line_id || row?.order_id || row?.order_no_snapshot || '')
+  return String(row?.annotation_subject_key || row?.source_line_id || row?.order_line_id || row?.order_id || row?.order_no_snapshot || '')
 }
 
 function annotationStoreScope(row) {
@@ -484,101 +608,129 @@ function annotationStoreScope(row) {
   return { store_id: storeId }
 }
 
-function beginPartnerEdit(row) {
-  editingPartnerRow.value = row
-  partnerEditDraft.value = Object.fromEntries(PARTNER_MANUAL_FIELDS.map(({ key }) => [key, String(row?.[key] ?? '')]))
+function beginEdit(row) {
+  if (!rowKey(row)) {
+    errorMessage.value = '当前报表行缺少明细级唯一标识，无法保存手动字段。'
+    return
+  }
+  editingRow.value = row
+  editDraft.value = Object.fromEntries(editableFields.value.map(({ key }) => [key, String(row?.[key] ?? '')]))
 }
 
-function cancelPartnerEdit() {
-  editingPartnerRow.value = null
-  partnerEditDraft.value = { medical_elevation: '', medical_followup: '', expert_name: '' }
+function cancelEdit() {
+  editingRow.value = null
+  editDraft.value = {}
 }
 
-async function savePartnerEdit() {
-  const row = editingPartnerRow.value
+function manualFieldInputType(field) {
+  const type = String(field?.type || field?.input_type || '').toLowerCase()
+  if (['date', 'datetime-local', 'number'].includes(type)) return type
+  return 'text'
+}
+
+function manualFieldInputMode(field) {
+  return ['money', 'decimal', 'number', 'integer'].includes(String(field?.type || field?.input_type || '').toLowerCase()) ? 'decimal' : undefined
+}
+
+function manualFieldIsSelect(field) {
+  return String(field?.type || field?.input_type || '').toLowerCase() === 'select' && Array.isArray(field?.options)
+}
+
+async function saveEdit() {
+  const row = editingRow.value
   if (!row) return
-  const changedFields = PARTNER_MANUAL_FIELDS.filter(({ key }) => String(row[key] ?? '') !== String(partnerEditDraft.value[key] ?? '').trim())
+  const changedFields = editableFields.value.filter(({ key }) => String(row[key] ?? '') !== String(editDraft.value[key] ?? '').trim())
   if (!changedFields.length) {
-    cancelPartnerEdit()
+    cancelEdit()
     return
   }
   savingEdit.value = true
+  errorMessage.value = ''
   try {
-    for (const { key } of changedFields) {
-      const value = String(partnerEditDraft.value[key] ?? '').trim()
+    for (const field of changedFields) {
+      const value = String(editDraft.value[field.key] ?? '').trim()
       const response = await saveStoreBusinessReportAnnotation({
         ...annotationStoreScope(row),
-        report_code: 'partner_item_detail',
-        subject_type: 'report_row',
+        report_code: activeReport.value,
+        subject_type: String(row?.annotation_subject_type || field?.subject_type || 'report_row'),
         subject_key: rowKey(row),
-        field_key: key,
+        field_key: field.key,
         field_value: value,
-        expected_version: Number(row[`${key}_version`] || 0),
-        idempotency_key: `ui-partner-${rowKey(row)}-${key}-${Date.now()}-${Math.random().toString(16).slice(2)}`
+        expected_version: Number(row[`${field.key}_version`] ?? row?._field_versions?.[field.key] ?? 0),
+        idempotency_key: `ui-rpt-${Date.now().toString(36)}-${Math.random().toString(16).slice(2)}-${field.key.slice(0, 24)}`
       }, reportRuntime.value)
-      row[key] = value
-      row[`${key}_version`] = Number(response?.version || 1)
+      row[field.key] = value
+      row[`${field.key}_version`] = Number(response?.version || 1)
+      row._field_versions = { ...(row._field_versions || {}), [field.key]: Number(response?.version || 1) }
     }
-    cancelPartnerEdit()
+    cancelEdit()
   } catch (error) {
     errorMessage.value = error?.message || '保存报表补充内容失败。'
   } finally { savingEdit.value = false }
 }
 
-function beginMemberEdit(row) {
-  editingMemberRow.value = row
-  memberEditDraft.value = {
-    experience_cash: String(row?.experience_cash ?? ''),
-    experience_payment_method: String(row?.experience_payment_method ?? '')
-  }
+function drilldownConfig(row, column) {
+  const rowConfig = row?._drilldown?.[column.key] || row?._drilldowns?.[column.key]
+  const declared = result.value.drilldown || result.value.drilldowns
+  const responseConfig = Array.isArray(declared)
+    ? declared.find((item) => String(item?.column_key || item?.column || '') === String(column.key) || item?.column_keys?.includes(column.key))
+    : declared?.[column.key] || (declared?.column_keys?.includes(column.key) ? declared : null)
+  const columnConfig = column?.drilldown || (column?.drilldown_report ? { report: column.drilldown_report } : null)
+  const config = rowConfig || columnConfig || responseConfig
+  if (!config) return null
+  if (typeof config === 'string') return { report: config }
+  return config
 }
 
-function cancelMemberEdit() {
-  editingMemberRow.value = null
-  memberEditDraft.value = { experience_cash: '', experience_payment_method: '' }
+function canDrilldown(row, column) {
+  return Boolean(drilldownConfig(row, column)?.report || drilldownConfig(row, column)?.report_code)
 }
 
-async function saveMemberEdit() {
-  const row = editingMemberRow.value
-  if (!row) return
-  savingEdit.value = true
-  try {
-    for (const field of ['experience_cash', 'experience_payment_method']) {
-      const response = await saveStoreBusinessReportAnnotation({
-        ...annotationStoreScope(row),
-        report_code: 'member_consumption_detail',
-        subject_type: 'report_row',
-        subject_key: rowKey(row),
-        field_key: field,
-        field_value: String(memberEditDraft.value[field] ?? '').trim(),
-        expected_version: Number(row[`${field}_version`] || 0),
-        idempotency_key: `ui-member-${rowKey(row)}-${field}-${Date.now()}-${Math.random().toString(16).slice(2)}`
-      }, reportRuntime.value)
-      row[field] = String(memberEditDraft.value[field] ?? '').trim()
-      row[`${field}_version`] = Number(response?.version || 1)
+function openDrilldown(row, column) {
+  const config = drilldownConfig(row, column)
+  const report = String(config?.report || config?.report_code || '')
+  if (!report || !REPORT_TABS.some((tab) => tab.code === report)) return
+  const params = { ...(config.params || config.query || {}) }
+  const mapping = config.param_map || config.paramMap || {}
+  Object.entries(mapping).forEach(([target, source]) => { params[target] = row?.[source] ?? '' })
+  router.push({
+    name: reportRouteName.value,
+    params: { report },
+    query: {
+      start_date: startDate.value,
+      end_date: endDate.value,
+      ...(scopePicker.value.selectedStoreIds.length ? { store_ids: scopePicker.value.selectedStoreIds.join(','), scope_label: scopePicker.value.label } : {}),
+      ...dynamicFilters.value,
+      ...params
     }
-    cancelMemberEdit()
-  } catch (error) {
-    errorMessage.value = error?.message || '保存体验现金业绩失败。'
-  } finally { savingEdit.value = false }
+  })
 }
 
-watch(() => route.params.report, () => {
+watch(() => route.fullPath, () => {
   syncActiveReportFromRoute()
+  syncFiltersFromRoute()
   page.value = 1
+  cancelEdit()
   loadReport()
+  nextTick(updateTabsLayout)
 })
 
 onMounted(async () => {
   syncActiveReportFromRoute()
+  syncFiltersFromRoute()
+  window.addEventListener('resize', updateTabsLayout)
   try {
     const [response] = await Promise.all([queryStoreBusinessReportCatalog(reportRuntime.value), loadReportScope()])
     catalog.value = Array.isArray(response) ? response : []
     await loadReport()
+    await nextTick()
+    updateTabsLayout()
   } catch (error) {
     errorMessage.value = error?.message || '经营报表目录读取失败，请稍后重试。'
   }
 })
+
+onBeforeUnmount(() => window.removeEventListener('resize', updateTabsLayout))
 </script>
 
 <template>
@@ -601,20 +753,29 @@ onMounted(async () => {
       </div>
     </header>
 
-    <nav class="store-business-report__tabs" aria-label="门店运营报表功能">
-      <button
-        v-for="item in reportTabs"
-        :key="item.code"
-        type="button"
-        class="store-business-report__tab"
-        :class="{ 'store-business-report__tab--active': activeReport === item.code }"
-        :aria-current="activeReport === item.code ? 'page' : undefined"
-        @click="selectReport(item.code)"
-      >{{ item.name }}</button>
-    </nav>
+    <div class="store-business-report__tabs-shell" :class="{ 'store-business-report__tabs-shell--expanded': tabsExpanded }">
+      <nav ref="tabsElement" class="store-business-report__tabs" aria-label="门店运营报表功能">
+        <button
+          v-for="item in reportTabs"
+          :key="item.code"
+          type="button"
+          class="store-business-report__tab"
+          :class="{ 'store-business-report__tab--active': activeReport === item.code }"
+          :aria-current="activeReport === item.code ? 'page' : undefined"
+          @click="selectReport(item.code)"
+        >{{ item.name }}</button>
+      </nav>
+      <button v-if="tabsOverflow" type="button" class="store-business-report__tabs-toggle" :aria-expanded="tabsExpanded" @click="toggleTabs">
+        <ChevronUp v-if="tabsExpanded" :size="15" aria-hidden="true" />
+        <ChevronDown v-else :size="15" aria-hidden="true" />
+        {{ tabsExpanded ? '收起' : '展开' }}
+      </button>
+    </div>
 
     <section class="store-business-report__filters" aria-label="报表查询条件">
-      <div class="store-business-report__scope-picker">
+      <div class="store-business-report__scope-field">
+        <span>组织</span>
+        <div class="store-business-report__scope-picker">
         <button type="button" class="store-business-report__scope-trigger" :disabled="scopePicker.loading" @click="scopePicker.open = !scopePicker.open">
           <Network :size="16" aria-hidden="true" /> {{ scopePicker.loading ? '读取权限范围' : scopePicker.label }}
         </button>
@@ -645,14 +806,28 @@ onMounted(async () => {
           </div>
           <footer><button type="button" @click="chooseAllScope">当前权限范围</button><span>选择组织查询其全部下级门店；选择门店仅查询该门店。</span></footer>
         </section>
+        </div>
       </div>
-      <label>开始日期<input v-model="startDate" type="date" :min="COVERAGE_START" :max="endDate" /></label>
+      <label>开始日期<input v-model="startDate" type="date" :min="isFirstPhaseReport ? COVERAGE_START : undefined" :max="endDate" /></label>
       <label>结束日期<input v-model="endDate" type="date" :min="startDate" :max="today()" /></label>
-      <button type="button" class="button button--secondary" @click="isAdvancedFiltersOpen = !isAdvancedFiltersOpen">{{ isAdvancedFiltersOpen ? '收起筛选' : '更多筛选' }}</button>
+      <label v-for="field in filterSchema" :key="field.key">{{ field.label || field.name || field.key }}
+        <select v-if="field.type === 'select'" v-model="dynamicFilters[field.key]">
+          <option value="">{{ field.placeholder || '全部' }}</option>
+          <option v-for="option in (field.options || [])" :key="String(option.value ?? option.code)" :value="String(option.value ?? option.code)">{{ option.label ?? option.name }}</option>
+        </select>
+        <input
+          v-else
+          v-model.trim="dynamicFilters[field.key]"
+          :type="['date', 'number'].includes(field.type) ? field.type : 'text'"
+          :inputmode="field.type === 'number' ? 'decimal' : undefined"
+          :placeholder="field.placeholder || ''"
+        />
+      </label>
+      <button v-if="isFirstPhaseReport" type="button" class="button button--secondary" @click="isAdvancedFiltersOpen = !isAdvancedFiltersOpen">{{ isAdvancedFiltersOpen ? '收起筛选' : '更多筛选' }}</button>
       <button type="button" class="button button--primary" :disabled="loading" @click="query">{{ loading ? '查询中' : '查询' }}</button>
     </section>
 
-    <section v-if="isAdvancedFiltersOpen" class="store-business-report__filters store-business-report__filters--advanced" aria-label="报表高级筛选">
+    <section v-if="isFirstPhaseReport && isAdvancedFiltersOpen" class="store-business-report__filters store-business-report__filters--advanced" aria-label="报表高级筛选">
       <label>商品分类编号<input v-model.trim="categoryId" inputmode="numeric" placeholder="由分类选择器带入" /></label>
       <label>分类路径<input v-model.trim="categoryPath" placeholder="例如：六维 / 自营" /></label>
       <label>商品类型
@@ -674,46 +849,54 @@ onMounted(async () => {
     <p v-if="errorMessage" class="store-business-report__error" role="alert">{{ errorMessage }}</p>
 
     <section class="store-business-report__panel store-business-report__panel--table">
+      <div v-if="topSummaries.length" class="store-business-report__top-summaries" aria-label="报表合计">
+        <span v-for="item in topSummaries" :key="item.key || item.label"><strong>{{ item.label }}</strong>{{ formatCell(item.value) }}</span>
+      </div>
       <div v-if="pendingMetrics.length" class="store-business-report__pending"><strong>口径待确认</strong><span v-for="item in pendingMetrics" :key="item">{{ item }}</span></div>
       <div class="store-business-report__table-scroll">
         <table v-if="columns.length">
           <thead v-if="hasGroupedColumns">
             <tr>
-              <th v-for="group in columnGroups" :key="group.label" :colspan="group.columns.length">{{ group.label }}</th>
-              <th v-if="editableReport" rowspan="2">操作</th>
+              <th v-for="(group, groupIndex) in columnGroups" :key="`${group.label}-${groupIndex}`" :class="headerGroupClasses(group)" :colspan="group.columns.length">{{ group.label }}</th>
+              <th v-if="editableReport" rowspan="2" class="store-business-report__header-column store-business-report__header-column--manual">操作</th>
             </tr>
-            <tr><th v-for="column in columns" :key="column.key">{{ column.label }}</th></tr>
+            <tr><th v-for="(column, columnIndex) in columns" :key="column.key" :class="headerColumnClasses(column, columnIndex)">{{ column.label }}</th></tr>
           </thead>
-          <thead v-else><tr><th v-for="column in columns" :key="column.key">{{ column.label }}</th><th v-if="editableReport">操作</th></tr></thead>
+          <thead v-else><tr><th v-for="(column, columnIndex) in columns" :key="column.key" :class="headerColumnClasses(column, columnIndex)">{{ column.label }}</th><th v-if="editableReport" class="store-business-report__header-column store-business-report__header-column--manual">操作</th></tr></thead>
           <tbody>
             <tr v-for="(row, rowIndex) in records" :key="row.source_line_id || `${row.order_id || ''}:${rowIndex}`">
               <td v-for="column in columns" :key="column.key">
-                <template v-if="activeReport === 'partner_item_detail' && editingPartnerRow === row && partnerManualFieldKeys.includes(column.key)">
-                  <input v-model="partnerEditDraft[column.key]" :aria-label="column.label" class="store-business-report__inline-input" />
+                <template v-if="editingRow === row && editableFieldByKey.has(column.key)">
+                  <select
+                    v-if="manualFieldIsSelect(editableFieldByKey.get(column.key))"
+                    v-model="editDraft[column.key]"
+                    :aria-label="column.label"
+                    class="store-business-report__inline-input"
+                  >
+                    <option v-for="option in editableFieldByKey.get(column.key).options" :key="String(option.value ?? option.code)" :value="String(option.value ?? option.code)">{{ option.label ?? option.name }}</option>
+                  </select>
+                  <input
+                    v-else
+                    v-model="editDraft[column.key]"
+                    :aria-label="column.label"
+                    class="store-business-report__inline-input"
+                    :type="manualFieldInputType(editableFieldByKey.get(column.key))"
+                    :inputmode="manualFieldInputMode(editableFieldByKey.get(column.key))"
+                    :maxlength="editableFieldByKey.get(column.key)?.max_length"
+                  />
                 </template>
-                <template v-else-if="activeReport === 'member_consumption_detail' && editingMemberRow === row && ['experience_cash', 'experience_payment_method'].includes(column.key)">
-                  <input v-model="memberEditDraft[column.key]" :aria-label="column.label" class="store-business-report__inline-input" :inputmode="column.key === 'experience_cash' ? 'decimal' : 'text'" />
-                </template>
+                <button v-else-if="canDrilldown(row, column)" type="button" class="store-business-report__drilldown" @click="openDrilldown(row, column)">{{ formatCell(row[column.key]) }}</button>
                 <template v-else>{{ formatCell(row[column.key]) }}</template>
               </td>
               <td v-if="editableReport">
-                <template v-if="activeReport === 'partner_item_detail'">
-                  <button v-if="editingPartnerRow !== row" type="button" class="button button--text" @click="beginPartnerEdit(row)">编辑</button>
-                  <template v-else>
-                    <button type="button" class="button button--text" :disabled="savingEdit" @click="savePartnerEdit">{{ savingEdit ? '保存中' : '保存' }}</button>
-                    <button type="button" class="button button--text" :disabled="savingEdit" @click="cancelPartnerEdit">取消</button>
-                  </template>
-                </template>
-                <template v-else-if="activeReport === 'member_consumption_detail'">
-                  <button v-if="editingMemberRow !== row" type="button" class="button button--text" @click="beginMemberEdit(row)">编辑</button>
-                  <template v-else>
-                    <button type="button" class="button button--text" :disabled="savingEdit" @click="saveMemberEdit">{{ savingEdit ? '保存中' : '保存' }}</button>
-                    <button type="button" class="button button--text" :disabled="savingEdit" @click="cancelMemberEdit">取消</button>
-                  </template>
+                <button v-if="editingRow !== row" type="button" class="button button--text" @click="beginEdit(row)">编辑</button>
+                <template v-else>
+                  <button type="button" class="button button--text" :disabled="savingEdit" @click="saveEdit">{{ savingEdit ? '保存中' : '保存' }}</button>
+                  <button type="button" class="button button--text" :disabled="savingEdit" @click="cancelEdit">取消</button>
                 </template>
               </td>
             </tr>
-            <tr v-if="!loading && !records.length"><td :colspan="columns.length" class="store-business-report__empty-cell">当前条件下暂无数据。</td></tr>
+            <tr v-if="!loading && !records.length"><td :colspan="columns.length + (editableReport ? 1 : 0)" class="store-business-report__empty-cell">当前条件下暂无数据。</td></tr>
           </tbody>
         </table>
         <p v-else class="store-business-report__empty">{{ loading ? '正在读取报表数据。' : '当前报表暂无可展示的明细。' }}</p>
@@ -770,12 +953,16 @@ onMounted(async () => {
 .store-business-report h1 { font-size: 21px; line-height: 1.25; }
 .store-business-report__actions { display: flex; flex: none; gap: 8px; }
 .store-business-report__actions .button { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; }
-.store-business-report__tabs { display: flex; min-height: 43px; gap: 2px; overflow-x: auto; overflow-y: hidden; border-bottom: 1px solid #d9e1eb; background: #fff; padding: 0 12px; }
+.store-business-report__tabs-shell { display: flex; align-items: flex-start; min-width: 0; border-bottom: 1px solid #d9e1eb; background: #fff; }
+.store-business-report__tabs { display: flex; flex: 1; flex-wrap: wrap; min-width: 0; max-height: 43px; gap: 0 2px; overflow: hidden; padding: 0 12px; }
+.store-business-report__tabs-shell--expanded .store-business-report__tabs { max-height: 86px; }
+.store-business-report__tabs-toggle { display: inline-flex; flex: none; align-items: center; gap: 4px; min-height: 42px; border: 0; border-left: 1px solid #edf1f5; padding: 0 12px; background: #fff; color: #1769aa; font: inherit; font-size: 12px; cursor: pointer; }
 .store-business-report__tab { flex: none; min-height: 42px; padding: 0 15px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: #697586; font: inherit; font-size: 13px; cursor: pointer; }
 .store-business-report__tab:hover { color: #1769aa; background: #f7fbff; }
 .store-business-report__tab--active { border-bottom-color: #1769aa; color: #1769aa; font-weight: 700; }
 .store-business-report__filters, .store-business-report__panel { border: 1px solid #dde4ed; border-radius: 8px; background: #fff; }
 .store-business-report__filters { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; padding: 13px 16px; }
+.store-business-report__scope-field { display: grid; gap: 5px; flex: none; color: #687586; font-size: 12px; }
 .store-business-report__scope-picker { position: relative; flex: none; }
 .store-business-report__scope-trigger { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; border: 1px solid #dcdee2; border-radius: 4px; padding: 6px 11px; background: #fff; color: #515a6e; font: inherit; cursor: pointer; }
 .store-business-report__scope-trigger:hover { border-color: #57a3f3; color: #2d8cf0; }
@@ -828,12 +1015,26 @@ onMounted(async () => {
 .store-business-report__simple-table > div { display: flex; justify-content: space-between; gap: 12px; border-top: 1px solid #edf1f5; padding: 10px 2px; color: #647184; font-size: 13px; }
 .store-business-report__simple-table strong { color: #26364a; }
 .store-business-report__panel--table { padding: 0; }
+.store-business-report__top-summaries { display: flex; flex-wrap: wrap; gap: 12px 28px; border-bottom: 1px solid #e1e8f0; padding: 12px 16px; background: #f8fbff; color: #23364d; font-size: 13px; }
+.store-business-report__top-summaries strong { margin-right: 7px; color: #607086; font-weight: 600; }
 .store-business-report__pending { display: flex; flex-wrap: wrap; gap: 8px 12px; border-bottom: 1px solid #f2d49a; padding: 10px 16px; background: #fff9ed; color: #9a6509; font-size: 12px; }
 .store-business-report__table-scroll { min-width: 0; overflow: auto; }
 .store-business-report table { width: 100%; border-collapse: collapse; white-space: nowrap; font-size: 13px; }
 .store-business-report th, .store-business-report td { border-bottom: 1px solid #edf1f5; padding: 11px 12px; text-align: left; }
 .store-business-report th { background: #fafbfd; color: #667386; font-size: 12px; font-weight: 600; }
+.store-business-report__header-group { height: 34px; border-bottom: 1px solid #dce4ed; padding-top: 8px; padding-bottom: 8px; color: #536274; text-align: center; }
+.store-business-report__header-column { border-top: 1px solid #e3eaf1; }
+.store-business-report__header-group--basic, .store-business-report__header-column--basic { background: #eef2f7; color: #536274; }
+.store-business-report__header-group--payment { background: #d9ecfa; color: #2d668c; }
+.store-business-report__header-column--payment { background: #edf7ff; color: #3b7397; }
+.store-business-report__header-group--partner { background: #ffe4bd; color: #985c16; }
+.store-business-report__header-column--partner { background: #fff3e2; color: #9e651d; }
+.store-business-report__header-group--result { background: #dceedd; color: #3d744b; }
+.store-business-report__header-column--result { background: #eff8ef; color: #477c53; }
+.store-business-report__header-group--manual, .store-business-report__header-column--manual { background: #f1eafa; color: #735687; }
+.store-business-report__header-column--group-end { border-right: 2px solid #cbd7e3; }
 .store-business-report td { color: #303946; }
+.store-business-report__drilldown { border: 0; padding: 0; background: transparent; color: #1769aa; font: inherit; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
 .store-business-report__inline-input { min-width: 120px; min-height: 30px; box-sizing: border-box; border: 1px solid #b8c7d9; border-radius: 5px; padding: 5px 7px; font: inherit; color: #303946; }
 .store-business-report__field-guide { width: min(720px, calc(100vw - 32px)); max-height: min(760px, calc(100vh - 32px)); }
 .store-business-report__field-guide header { align-items: flex-start; }

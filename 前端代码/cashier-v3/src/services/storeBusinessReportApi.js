@@ -11,7 +11,7 @@ function isPlatformRuntime(runtime) {
 
 function readPlatformAdminToken() {
   try {
-    const matched = document.cookie.match(/(?:^|;\s*)token=([^;]*)/)
+    const matched = document.cookie.match(/(?:^|;\s*)admin-token=([^;]*)/)
     return matched ? decodeURIComponent(matched[1]).trim() : ''
   } catch (_) {
     return ''

@@ -7,6 +7,7 @@ use app\services\cashier\v3\CashierV3OperatorScope;
 use app\services\cashier\v3\CashierV3TransactionGuard;
 use app\services\report\CustomerLifecycleFactServices;
 use app\services\report\StoreOperationsReportDimensionServices;
+use app\services\report\StoreReportPaymentSaleAllocationFactServices;
 use think\facade\Db;
 
 /**
@@ -47,6 +48,11 @@ final class ThinkPhpCashierV3CheckoutFactRepository
                 $result === 'inserted' ? $inserted[$domain]++ : $replayed[$domain]++;
             }
         }
+
+        // Each successful payment is frozen against every sale line before
+        // report dimensions are projected, so item rows never repeat an
+        // order-level payment total.
+        (new StoreReportPaymentSaleAllocationFactServices())->persistInTx($plan);
 
         // Category/experience/partner dimensions are written in the same
         // transaction as the immutable sale facts, so reports never need to

@@ -148,7 +148,7 @@ const routes = [
         path: 'data/reports/:report?',
         name: 'cashier-v3-store-business-reports',
         component: StoreBusinessReportView,
-        meta: { title: '门店运营', description: '门店运营六张报表，统一读取 V3 事实与指标服务。' }
+        meta: { title: '门店运营', description: '门店运营报表统一读取 V3 事实、指标与数据权限服务。' }
       }
     ]
   }

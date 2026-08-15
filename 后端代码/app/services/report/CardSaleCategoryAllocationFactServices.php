@@ -47,17 +47,14 @@ final class CardSaleCategoryAllocationFactServices
             throw new \LogicException('card_category_sale_fact_missing');
         }
 
-        $cashTotal = 0;
-        foreach ((array)($plan->rows()['payment'] ?? []) as $payment) {
-            $amount = (int)($payment['amount_cents'] ?? -1);
-            if ($amount < 0) {
-                throw new \LogicException('card_category_payment_fact_invalid');
-            }
-            $cashTotal += $amount;
-        }
-        $cashByLine = $this->allocateByAmounts($cashTotal, $sales, 'sale_amount_cents');
+        // Cash performance is first allocated across every sale line in the
+        // order. A mixed card/project checkout must not allocate all cash to
+        // its card rows before card components are split further.
+        $cashBySaleFact = StoreReportPartnerCategorySnapshotServices::cashPerformanceBySaleFact($plan);
+        $partnerSnapshots = new StoreReportPartnerCategorySnapshotServices();
 
         $receiptsByLine = [];
+        $receiptLines = [];
         foreach ($receipts as $receipt) {
             if (!is_array($receipt)) {
                 throw new \LogicException('card_category_receipt_invalid');
@@ -69,9 +66,15 @@ final class CardSaleCategoryAllocationFactServices
                 || !is_array($receipt['reportCategoryComponents'] ?? null)) {
                 throw new \LogicException('card_category_receipt_snapshot_invalid');
             }
+            $receiptLines[$lineId] = true;
+            // Count/time cards may have no contained service project. They do
+            // not have a project category to project, but must remain saleable.
+            if ($receipt['reportCategoryComponents'] === []) {
+                continue;
+            }
             $receiptsByLine[$lineId][] = $receipt;
         }
-        if (count($receiptsByLine) !== count($sales)) {
+        if (count($receiptLines) !== count($sales)) {
             throw new \LogicException('card_category_receipt_line_missing');
         }
 
@@ -84,7 +87,11 @@ final class CardSaleCategoryAllocationFactServices
                 $receiptWeights[(string)$receipt['receiptId']] = ['amount_cents' => 1];
             }
             $saleByReceipt = $this->allocateByAmounts((int)$sales[$lineId]['sale_amount_cents'], $receiptWeights, 'amount_cents');
-            $cashByReceipt = $this->allocateByAmounts((int)($cashByLine[$lineId] ?? 0), $receiptWeights, 'amount_cents');
+            $cashByReceipt = $this->allocateByAmounts(
+                (int)($cashBySaleFact[(string)$sales[$lineId]['fact_id']] ?? 0),
+                $receiptWeights,
+                'amount_cents'
+            );
             foreach ($lineReceipts as $receipt) {
                 $categories = $this->categoriesFromReceipt((array)$receipt['reportCategoryComponents']);
                 $saleAllocations = (new CardSaleCategoryAllocationServices())->allocate(
@@ -104,6 +111,7 @@ final class CardSaleCategoryAllocationFactServices
                         $receipt,
                         $allocation,
                         (int)($cashByCategory[(string)$allocation['stableKey']] ?? 0),
+                        $partnerSnapshots,
                         $inserted,
                         $replayed
                     );
@@ -156,6 +164,7 @@ final class CardSaleCategoryAllocationFactServices
         array $receipt,
         array $allocation,
         int $cashPerformanceAmount,
+        StoreReportPartnerCategorySnapshotServices $partnerSnapshots,
         int &$inserted,
         int &$replayed
     ): void {
@@ -168,12 +177,11 @@ final class CardSaleCategoryAllocationFactServices
         if ($path === '') {
             throw new \LogicException('card_category_path_invalid');
         }
-        $partner = Db::name('cashier_v3_report_category_config')
-            ->where('tenant_id', (string)$context['tenant_id'])
-            ->where('category_id', $categoryId)
-            ->where('enabled', 1)
-            ->lock(true)
-            ->value('id') ? $path : '';
+        $partnerSnapshot = $partnerSnapshots->resolveInTx(
+            (string)$context['tenant_id'],
+            $categoryId,
+            $cashPerformanceAmount
+        );
         $receiptId = (string)$receipt['receiptId'];
         $planKey = trim((string)($sale['command_idempotency_key'] ?? ''));
         if ($planKey === '') {
@@ -201,7 +209,13 @@ final class CardSaleCategoryAllocationFactServices
             'category_id_snapshot' => $categoryId,
             'category_name_snapshot' => (string)$allocation['categoryNameSnapshot'],
             'category_path_snapshot' => $path,
-            'partner_name_snapshot' => $partner,
+            'partner_name_snapshot' => (string)$partnerSnapshot['partner_category_path_snapshot'],
+            'partner_category_id_snapshot' => (int)$partnerSnapshot['partner_category_id_snapshot'],
+            'partner_category_name_snapshot' => (string)$partnerSnapshot['partner_category_name_snapshot'],
+            'partner_category_path_snapshot' => (string)$partnerSnapshot['partner_category_path_snapshot'],
+            'partner_default_ratio_snapshot' => (int)$partnerSnapshot['partner_default_ratio_snapshot'],
+            'partner_config_version_snapshot' => (int)$partnerSnapshot['partner_config_version_snapshot'],
+            'partner_share_amount_cents' => (int)$partnerSnapshot['partner_share_amount_cents'],
             'product_type_snapshot' => 'project',
             'component_count' => (int)$allocation['allocationCount'],
             'configured_amount_cents' => (int)$allocation['amountWeightCents'],
@@ -248,6 +262,18 @@ final class CardSaleCategoryAllocationFactServices
 
     private function assertReplay(array $expected, array $actual): void
     {
+        // This migration intentionally does not backfill historical facts. A
+        // pre-upgrade successful command may still be replayed by its client;
+        // the migration-added fields are zero there, so preserve that original
+        // immutable result instead of recomputing it from today's config.
+        if ((int)($actual['partner_category_id_snapshot'] ?? 0) === 0
+            && (int)($actual['partner_config_version_snapshot'] ?? 0) === 0
+            && (int)($actual['partner_share_amount_cents'] ?? 0) === 0
+            && ((int)($expected['partner_category_id_snapshot'] ?? 0) !== 0
+                || (int)($expected['partner_config_version_snapshot'] ?? 0) !== 0
+                || (int)($expected['partner_share_amount_cents'] ?? 0) !== 0)) {
+            return;
+        }
         foreach ($expected as $column => $value) {
             if (!array_key_exists($column, $actual) || (string)$actual[$column] !== (string)$value) {
                 throw new \LogicException('card_category_allocation_replay_conflict');

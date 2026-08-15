@@ -20,6 +20,8 @@ final class StoreOperationsReportDimensionServices
     {
         CashierV3TransactionGuard::assertInTransaction('storeOperationsReportDimensions');
         $context = $plan->context();
+        $cashBySaleFact = StoreReportPartnerCategorySnapshotServices::cashPerformanceBySaleFact($plan);
+        $partnerSnapshots = new StoreReportPartnerCategorySnapshotServices();
         $inserted = 0;
         foreach ($plan->rows()['sale'] ?? [] as $sale) {
             $saleFactId = (string)$sale['fact_id'];
@@ -35,11 +37,10 @@ final class StoreOperationsReportDimensionServices
             // 停用/隐藏分类不参与新事实维度；已经写入的历史快照不回算。
             $category = $categoryId > 0 ? Db::name('store_product_category')->where('id', $categoryId)->where('is_show', 1)->find() : null;
             $path = $this->categoryPath($category);
-            // 合作方是分类开关。启用时使用服务端解析出的分类路径作为只读标签，
-            // 不再依赖人工输入的 partner_name；历史维度快照不回算。
-            $partner = $categoryId > 0
-                ? (Db::name('cashier_v3_report_category_config')->where('tenant_id', $context['tenant_id'])->where('category_id', $categoryId)->where('enabled', 1)->value('id') ? $path : '')
-                : '';
+            $cashPerformanceAmount = (int)($cashBySaleFact[$saleFactId] ?? 0);
+            $partnerSnapshot = $category !== null
+                ? $partnerSnapshots->resolveInTx((string)$context['tenant_id'], $categoryId, $cashPerformanceAmount)
+                : $this->emptyPartnerSnapshot();
             $row = [
                 'tenant_id' => (string)$context['tenant_id'], 'store_id' => (int)$context['store_id'],
                 'organization_id' => (string)$context['organization_id'], 'member_id' => (int)$context['member_id'],
@@ -51,7 +52,16 @@ final class StoreOperationsReportDimensionServices
                 'category_parent_id_snapshot' => (int)($category['pid'] ?? 0),
                 'category_parent_name_snapshot' => $this->parentName((int)($category['pid'] ?? 0)),
                 'category_path_snapshot' => $path !== '' ? $path : (string)$sale['category_name_snapshot'],
-                'partner_name_snapshot' => (string)($partner ?? ''),
+                // Legacy partner_name remains a label-only compatibility field.
+                // All report amounts use the frozen id, rate and cents below.
+                'partner_name_snapshot' => (string)$partnerSnapshot['partner_category_path_snapshot'],
+                'cash_performance_amount_cents' => $cashPerformanceAmount,
+                'partner_category_id_snapshot' => (int)$partnerSnapshot['partner_category_id_snapshot'],
+                'partner_category_name_snapshot' => (string)$partnerSnapshot['partner_category_name_snapshot'],
+                'partner_category_path_snapshot' => (string)$partnerSnapshot['partner_category_path_snapshot'],
+                'partner_default_ratio_snapshot' => (int)$partnerSnapshot['partner_default_ratio_snapshot'],
+                'partner_config_version_snapshot' => (int)$partnerSnapshot['partner_config_version_snapshot'],
+                'partner_share_amount_cents' => (int)$partnerSnapshot['partner_share_amount_cents'],
                 'is_experience' => (int)($line['is_experience'] ?? 0),
                 'created_at' => time(), 'updated_at' => time(),
             ];
@@ -63,6 +73,19 @@ final class StoreOperationsReportDimensionServices
             }
         }
         return $inserted;
+    }
+
+    /** @return array{partner_category_id_snapshot:int,partner_category_name_snapshot:string,partner_category_path_snapshot:string,partner_default_ratio_snapshot:int,partner_config_version_snapshot:int,partner_share_amount_cents:int} */
+    private function emptyPartnerSnapshot(): array
+    {
+        return [
+            'partner_category_id_snapshot' => 0,
+            'partner_category_name_snapshot' => '',
+            'partner_category_path_snapshot' => '',
+            'partner_default_ratio_snapshot' => 0,
+            'partner_config_version_snapshot' => 0,
+            'partner_share_amount_cents' => 0,
+        ];
     }
 
     private function categoryPath(?array $category): string

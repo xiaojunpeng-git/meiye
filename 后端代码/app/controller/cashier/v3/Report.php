@@ -6,7 +6,9 @@ use app\controller\cashier\AuthController;
 use app\Request;
 use app\services\report\StoreUnifiedReportServices;
 use app\services\report\StoreOperationsReportAnnotationServices;
+use app\services\report\StoreReportParticipantScopeServices;
 use app\services\cashier\v3\bootstrap\CashierV3Bootstrap;
+use app\services\cashier\v3\CashierV3DataScopeContext;
 use app\services\organization\OrganizationScopeService;
 use think\facade\Db;
 
@@ -22,13 +24,24 @@ class Report extends AuthController
     {
         if ((int)$this->storeId <= 0) return app('json')->fail('门店未登录');
         $dataScope = $this->dataScope();
-        $allowed = $dataScope->visibleStoreIds();
-        if ($allowed === null) $allowed = Db::name('system_store')->where('is_del', 0)->where('is_show', 1)->column('id');
+        $selfParticipant = $dataScope->isSelfParticipantMode();
+        if ($selfParticipant) {
+            $tenantId = CashierV3Bootstrap::dispatcher()->scopeResolver()
+                ->operatorScope((int)$this->storeId, (int)$this->cashierId)->tenantId();
+            $allowed = (new StoreReportParticipantScopeServices())
+                ->participatingStoreIds($tenantId, $dataScope->employeeId());
+        } else {
+            $allowed = $dataScope->visibleStoreIds();
+            if ($allowed === null) $allowed = Db::name('system_store')->where('is_del', 0)->where('is_show', 1)->column('id');
+        }
         $allowed = array_values(array_unique(array_filter(array_map('intval', (array)$allowed))));
         return $this->success('ok', [
             'tree' => $organizations->buildPickerTree($allowed),
             'allowed_store_ids' => $allowed,
-            'authorization_mode' => $dataScope->authorizationMode(),
+            'authorization_mode' => $selfParticipant
+                ? CashierV3DataScopeContext::MODE_SELF_PARTICIPANT
+                : ($dataScope->authorizationMode() === CashierV3DataScopeContext::MODE_NONE
+                    ? CashierV3DataScopeContext::MODE_NONE : CashierV3DataScopeContext::MODE_STORES),
             'permission_version' => $dataScope->permissionVersion(),
         ]);
     }
@@ -56,23 +69,27 @@ class Report extends AuthController
 
     public function annotations(Request $request, StoreOperationsReportAnnotationServices $services)
     {
-        return $this->success('ok', $services->listAnnotations($this->annotationContext(), $request->get()));
+        return $this->success('ok', $services->listAnnotations($this->annotationContext(true), $request->get()));
     }
 
     public function saveAnnotation(Request $request, StoreOperationsReportAnnotationServices $services)
     {
-        try { return $this->success('ok', $services->saveAnnotation($this->annotationContext(), $request->post())); }
+        try { return $this->success('ok', $services->saveAnnotation($this->annotationContext(true), $request->post())); }
         catch (\InvalidArgumentException $e) { return app('json')->fail($e->getMessage()); }
     }
 
-    private function annotationContext(): array
+    private function annotationContext(bool $participantAware = false): array
     {
         $scope = CashierV3Bootstrap::dispatcher()->scopeResolver()->operatorScope((int)$this->storeId, (int)$this->cashierId);
+        $dataScope = $this->dataScope();
         $info = is_array($this->cashierInfo) ? $this->cashierInfo : [];
+        $selfParticipant = $participantAware && $dataScope->isSelfParticipantMode();
         return [
             'tenant_id' => $scope->tenantId(), 'organization_id' => $scope->organizationId(),
-            'store_id' => $scope->storeId(), 'store_ids' => [$scope->storeId()],
+            'store_id' => $scope->storeId(), 'store_ids' => $selfParticipant ? null : [$scope->storeId()],
             'operator_id' => $scope->operatorId(), 'operator_name' => (string)($info['real_name'] ?? $info['nickname'] ?? ''),
+            'authorization_mode' => $dataScope->authorizationMode(),
+            'participant_employee_id' => $selfParticipant ? $dataScope->employeeId() : 0,
         ];
     }
 
@@ -81,7 +98,20 @@ class Report extends AuthController
         if ((int)$this->storeId <= 0) return app('json')->fail('门店未登录');
         try {
             $input = $request->getMore($this->inputRules());
-            $storeIds = $this->scopeStoreIds($input);
+            $dataScope = $this->dataScope();
+            if ($dataScope->authorizationMode() === CashierV3DataScopeContext::MODE_NONE) {
+                return app('json')->fail('当前账号没有可查看的数据范围');
+            }
+            if ($dataScope->isSelfParticipantMode()) {
+                if ($dataScope->employeeId() <= 0) return app('json')->fail('当前账号未绑定有效员工');
+                $input['_report_scope'] = [
+                    'mode' => CashierV3DataScopeContext::MODE_SELF_PARTICIPANT,
+                    'employee_id' => $dataScope->employeeId(),
+                ];
+                $storeIds = $this->selfParticipantStoreIds($input);
+            } else {
+                $storeIds = $this->scopeStoreIds($input, $dataScope);
+            }
             if (!$storeIds) return app('json')->fail('当前账号没有可查看的门店范围');
             $result = $export ? $services->export($storeIds, $input) : $services->query($storeIds, $input);
             return $this->success('ok', $result);
@@ -101,6 +131,8 @@ class Report extends AuthController
             ['category_id', 0], ['category_path', ''], ['product_type', ''], ['partner_name', ''],
             ['salesperson_id', 0], ['sales_manager_id', 0], ['guide_id', 0], ['craftsman_id', 0],
             ['store_ids', ''],
+            ['dimension_code', ''], ['payment_method_code', ''], ['metric_code', ''],
+            ['mode', 'count'],
             ['page', 1], ['limit', 20],
         ];
     }
@@ -118,14 +150,25 @@ class Report extends AuthController
         );
     }
 
-    private function scopeStoreIds(array $input): array
+    private function scopeStoreIds(array $input, $dataScope = null): array
     {
-        $allowed = $this->dataScope()->visibleStoreIds();
+        $allowed = ($dataScope ?: $this->dataScope())->visibleStoreIds();
         if ($allowed === null) $allowed = Db::name('system_store')->where('is_del', 0)->where('is_show', 1)->column('id');
         $allowed = array_values(array_unique(array_filter(array_map('intval', (array)$allowed))));
         $requested = $input['store_ids'] ?? '';
         if (is_string($requested)) $requested = preg_split('/[,\s]+/', trim($requested), -1, PREG_SPLIT_NO_EMPTY);
         $requested = array_values(array_unique(array_filter(array_map('intval', (array)$requested))));
         return $requested ? array_values(array_intersect($requested, $allowed)) : $allowed;
+    }
+
+    private function selfParticipantStoreIds(array $input): array
+    {
+        $requested = $input['store_ids'] ?? '';
+        if (is_string($requested)) $requested = preg_split('/[,\s]+/', trim($requested), -1, PREG_SPLIT_NO_EMPTY);
+        $requested = array_values(array_unique(array_filter(array_map('intval', (array)$requested))));
+        if ($requested) {
+            return Db::name('system_store')->whereIn('id', $requested)->where('is_del', 0)->where('is_show', 1)->column('id');
+        }
+        return array_values(array_unique(array_map('intval', Db::name('system_store')->where('is_del', 0)->where('is_show', 1)->column('id'))));
     }
 }

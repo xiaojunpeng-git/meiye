@@ -15,16 +15,19 @@ class StoreUnifiedReportServices extends BaseServices
     const METRIC_VERSION = 'store-unified-report-v1';
     const COVERAGE_START = '2026-08-10';
 
+    /** @var int 仅由认证后的门店报表控制器注入 */
+    private $participantEmployeeId = 0;
+
     public function catalog()
     {
-        return [
+        return array_merge([
             ['folder' => '门店运营', 'code' => 'partner_item_summary', 'name' => '合作方品项汇总'],
             ['folder' => '门店运营', 'code' => 'partner_item_detail', 'name' => '合作方品项明细'],
             ['folder' => '门店运营', 'code' => 'member_consumption_detail', 'name' => '会员消费明细'],
             ['folder' => '门店运营', 'code' => 'store_item_analysis', 'name' => '门店品项分析'],
             ['folder' => '门店运营', 'code' => 'store_craftsman_consumption', 'name' => '门店手艺人消耗'],
             ['folder' => '门店运营', 'code' => 'store_salesperson_performance', 'name' => '门店销售人业绩'],
-        ];
+        ], StoreUnifiedReportPhaseTwoServices::catalogEntries());
     }
 
     public function definitions()
@@ -39,9 +42,22 @@ class StoreUnifiedReportServices extends BaseServices
 
     public function query($storeId, array $input)
     {
+        $reportScope = is_array($input['_report_scope'] ?? null) ? $input['_report_scope'] : [];
+        if ((string)($reportScope['mode'] ?? '') === 'none') {
+            throw new \InvalidArgumentException('当前账号没有可查看的数据范围');
+        }
+        $this->participantEmployeeId = (string)($reportScope['mode'] ?? '') === 'self_participant'
+            ? max(0, (int)($reportScope['employee_id'] ?? 0)) : 0;
+        if ((string)($reportScope['mode'] ?? '') === 'self_participant' && $this->participantEmployeeId <= 0) {
+            throw new \InvalidArgumentException('个人数据权限缺少有效员工身份');
+        }
         $report = (string)($input['report'] ?? 'overview');
         $range = $this->range($input);
         $meta = $this->meta($range);
+        $phaseTwo = new StoreUnifiedReportPhaseTwoServices();
+        if ($phaseTwo->supports($report)) {
+            return array_merge($meta, $phaseTwo->query($report, $storeId, $range, $input));
+        }
         if (in_array($report, [
             'partner_item_summary', 'partner_item_detail', 'member_consumption_detail',
             'store_item_analysis', 'store_craftsman_consumption',
@@ -85,28 +101,68 @@ class StoreUnifiedReportServices extends BaseServices
         }
     }
 
-    private function operationSaleQuery($storeId, array $range, array $input)
+    private function operationSaleQuery($storeId, array $range, array $input, bool $expandCardCategories = true)
     {
         $query = Db::name('cashier_v3_sale_fact')->alias('s')
             ->leftJoin('cashier_v3_report_sale_dimension_fact d', 'd.sale_fact_id=s.fact_id')
-            // A new card may carry several component categories.  For card
-            // rows c is the authoritative checkout-time allocation fact;
-            // ordinary products/projects remain on their original dimension.
-            ->leftJoin('cashier_v3_card_sale_category_allocation_fact c', "c.sale_fact_id=s.fact_id AND c.status='effective'")
             ->whereBetween('s.business_date', [$range['start'], $range['end']])
             ->where('s.status', 'effective');
+        // Summary/detail projections expand a card by its contained project
+        // category. The member-consumption table intentionally keeps one row
+        // per sold card, then aggregates its component shares in PHP.
+        if ($expandCardCategories) {
+            $query->leftJoin('cashier_v3_card_sale_category_allocation_fact c', "c.sale_fact_id=s.fact_id AND c.status='effective'");
+        }
         if (is_array($storeId)) $query->whereIn('s.store_id', array_values(array_unique(array_map('intval', $storeId))));
         else $query->where('s.store_id', (int)$storeId);
-        $this->operationFilters($query, $input);
+        if ($this->participantEmployeeId > 0) {
+            (new StoreReportParticipantScopeServices())->applyOrder($query, 's.order_id', $this->participantEmployeeId);
+        }
+        $this->operationFilters($query, $input, $expandCardCategories);
         return $query;
     }
 
-    private function operationFilters($query, array $input): void
+    private function operationFilters($query, array $input, bool $expandCardCategories = true): void
     {
-        if ((int)($input['category_id'] ?? 0) > 0) $query->whereRaw('COALESCE(c.category_id_snapshot,d.category_id_snapshot)=?', [(int)$input['category_id']]);
-        if (($path = trim((string)($input['category_path'] ?? ''))) !== '') $query->whereRaw('COALESCE(c.category_path_snapshot,d.category_path_snapshot) LIKE ?', [$path . '%']);
-        if (($type = trim((string)($input['product_type'] ?? ''))) !== '') $query->whereRaw('COALESCE(c.product_type_snapshot,d.product_type_snapshot)=?', [$type]);
-        if (($partner = trim((string)($input['partner_name'] ?? ''))) !== '') $query->whereRaw('COALESCE(c.partner_name_snapshot,d.partner_name_snapshot)=?', [$partner]);
+        $categoryId = (int)($input['category_id'] ?? 0);
+        $path = trim((string)($input['category_path'] ?? ''));
+        $type = trim((string)($input['product_type'] ?? ''));
+        $partner = trim((string)($input['partner_name'] ?? ''));
+        if ($expandCardCategories) {
+            if ($categoryId > 0) $query->whereRaw('COALESCE(c.category_id_snapshot,d.category_id_snapshot)=?', [$categoryId]);
+            if ($path !== '') $query->whereRaw('COALESCE(c.category_path_snapshot,d.category_path_snapshot) LIKE ?', [$path . '%']);
+            if ($type !== '') $query->whereRaw('COALESCE(c.product_type_snapshot,d.product_type_snapshot)=?', [$type]);
+            if ($partner !== '') $query->whereRaw('COALESCE(c.partner_name_snapshot,d.partner_name_snapshot)=?', [$partner]);
+        } else {
+            if ($categoryId > 0) $query->where(function ($sub) use ($categoryId) {
+                $sub->where('d.category_id_snapshot', $categoryId)->whereExists(function ($card) use ($categoryId) {
+                    $card->name('cashier_v3_card_sale_category_allocation_fact')
+                        ->whereRaw('sale_fact_id=s.fact_id')->where('status', 'effective')
+                        ->where('category_id_snapshot', $categoryId);
+                }, 'OR');
+            });
+            if ($path !== '') $query->where(function ($sub) use ($path) {
+                $sub->whereLike('d.category_path_snapshot', $path . '%')->whereExists(function ($card) use ($path) {
+                    $card->name('cashier_v3_card_sale_category_allocation_fact')
+                        ->whereRaw('sale_fact_id=s.fact_id')->where('status', 'effective')
+                        ->whereLike('category_path_snapshot', $path . '%');
+                }, 'OR');
+            });
+            if ($type !== '') $query->where(function ($sub) use ($type) {
+                $sub->where('d.product_type_snapshot', $type)->whereExists(function ($card) use ($type) {
+                    $card->name('cashier_v3_card_sale_category_allocation_fact')
+                        ->whereRaw('sale_fact_id=s.fact_id')->where('status', 'effective')
+                        ->where('product_type_snapshot', $type);
+                }, 'OR');
+            });
+            if ($partner !== '') $query->where(function ($sub) use ($partner) {
+                $sub->where('d.partner_name_snapshot', $partner)->whereExists(function ($card) use ($partner) {
+                    $card->name('cashier_v3_card_sale_category_allocation_fact')
+                        ->whereRaw('sale_fact_id=s.fact_id')->where('status', 'effective')
+                        ->where('partner_name_snapshot', $partner);
+                }, 'OR');
+            });
+        }
         if ((int)($input['salesperson_id'] ?? 0) > 0) $query->whereExists(function ($sub) use ($input) {
             $sub->name('cashier_v3_performance_fact')->whereRaw('source_line_id=s.source_line_id')->where('employee_id', (int)$input['salesperson_id'])->where('performance_type', 'sales_performance_allocated')->where('status', 'effective');
         });
@@ -145,10 +201,11 @@ class StoreUnifiedReportServices extends BaseServices
 
     private function memberConsumptionDetail($storeId, array $range, array $input): array
     {
-        $query = $this->operationSaleQuery($storeId, $range, $input);
+        $query = $this->operationSaleQuery($storeId, $range, $input, false);
         $total = (int)(clone $query)->count('s.id');
-        $rows = (clone $query)->fieldRaw("s.store_id,s.business_date,s.store_name_snapshot,s.order_no_snapshot,s.order_id,s.source_line_id,s.member_id,s.member_name_snapshot,s.item_name_snapshot,COALESCE(c.category_path_snapshot,d.category_path_snapshot) AS category_path_snapshot,COALESCE(c.product_type_snapshot,d.product_type_snapshot) AS product_type_snapshot,s.source_type,s.quantity,COALESCE(c.sale_amount_cents,s.sale_amount_cents) AS sale_amount_cents,c.allocation_fact_id AS card_category_allocation_fact_id,COALESCE(c.cash_performance_amount_cents,0) AS card_cash_performance_amount_cents,s.business_source_label_snapshot,s.source_attribution_type_snapshot,d.is_experience")->order('s.business_date','desc')->order('s.id','desc')->page($this->page($input),$this->limit($input))->select()->toArray();
-        $this->decorateMemberConsumptionRows($rows, $storeId);
+        $partnerDefinitions = $this->partnerPerformanceDefinitions($storeId);
+        $rows = (clone $query)->fieldRaw("s.fact_id,s.tenant_id,s.store_id,s.business_date,s.store_name_snapshot,s.order_no_snapshot,s.order_id,s.source_line_id,s.member_id,s.member_name_snapshot,s.item_name_snapshot,d.category_path_snapshot,d.product_type_snapshot,s.source_type,s.quantity,s.sale_amount_cents,d.partner_category_id_snapshot,d.partner_category_path_snapshot,d.partner_share_amount_cents,s.business_source_label_snapshot,s.source_attribution_type_snapshot,d.is_experience")->order('s.business_date','desc')->order('s.id','desc')->page($this->page($input),$this->limit($input))->select()->toArray();
+        $this->decorateMemberConsumptionRows($rows, $storeId, $partnerDefinitions, $this->cardPartnerSharesBySaleFact($rows, $storeId));
         foreach ($rows as &$row) {
             $row['sale_amount'] = $this->money((int)$row['sale_amount_cents']);
             $row['consume_type'] = in_array((string)$row['source_type'], ['refund','void','cancel'], true) ? (string)$row['source_type'] : '正常';
@@ -171,7 +228,7 @@ class StoreUnifiedReportServices extends BaseServices
         ];
         foreach ($this->paymentMethodDefinitions() as $method) $columns[] = ['key'=>'payment_'.$method['code'],'label'=>$method['label'],'group_label'=>'支付现金业绩方式'];
         $columns[] = ['key'=>'receipt_total','label'=>'收款总金额','group_label'=>'支付现金业绩方式'];
-        foreach ($this->fixedPartnerPerformanceDefinitions() as $definition) $columns[] = ['key'=>$definition['key'],'label'=>$definition['label'],'group_label'=>'按成交时分类归集的现金业绩'];
+        foreach ($partnerDefinitions as $definition) $columns[] = ['key'=>$definition['key'],'label'=>$definition['label'],'group_label'=>'合作方分成业绩'];
         foreach ([['partner_performance','合作方业绩'],['actual_cash_performance','实际现金业绩'],['experience_cash','体验现金业绩'],['experience_payment_method','体验现金业绩支付方式']] as $column) $columns[] = ['key'=>$column[0],'label'=>$column[1]];
         return ['title'=>'会员消费明细','columns'=>$columns,'column_groups'=>$this->columnGroups($columns),'records'=>$rows,'total'=>$total,'page'=>$this->page($input),'page_size'=>$this->limit($input)];
     }
@@ -192,6 +249,7 @@ class StoreUnifiedReportServices extends BaseServices
     private function craftsmanConsumption($storeId, array $range, array $input): array
     {
         $query = $this->withStoreScope(Db::name('cashier_v3_performance_fact'), $storeId)->whereBetween('business_date',[$range['start'],$range['end']])->where('status','effective')->where('performance_type','labor_performance_allocated')->where('employee_id','>',0);
+        if ($this->participantEmployeeId > 0) $query->where('employee_id', $this->participantEmployeeId);
         if ((int)($input['craftsman_id'] ?? 0) > 0) $query->where('employee_id',(int)$input['craftsman_id']);
         // This report is a craftsman projection. "消耗" is the craftsman's
         // allocated labor performance; "手工" is the independent fee saved
@@ -218,6 +276,7 @@ class StoreUnifiedReportServices extends BaseServices
     private function salespersonPerformance($storeId, array $range, array $input): array
     {
         $query = $this->withStoreScope(Db::name('cashier_v3_performance_fact'), $storeId)->whereBetween('business_date',[$range['start'],$range['end']])->where('status','effective')->where('performance_type','sales_performance_allocated')->where('employee_id','>',0);
+        if ($this->participantEmployeeId > 0) $query->where('employee_id', $this->participantEmployeeId);
         if ((int)($input['salesperson_id'] ?? 0) > 0) $query->where('employee_id',(int)$input['salesperson_id']);
         $raw = $query->fieldRaw("store_id,MAX(store_name_snapshot) AS store_name,MAX(employee_name_snapshot) AS employee_name,employee_id,DAY(business_date) AS day_no,SUM(amount_cents) AS amount_cents")->group('store_id,employee_id,day_no')->order('employee_name','asc')->select()->toArray();
         $by=[];
@@ -537,35 +596,149 @@ class StoreUnifiedReportServices extends BaseServices
         return $out;
     }
 
-    private function fixedPartnerPerformanceDefinitions(): array
+    /**
+     * Column metadata follows the current category switches, while row values
+     * come only from the successful-checkout snapshots.  This deliberately
+     * keeps a later ratio/configuration edit from recalculating past orders.
+     *
+     * A configured root is shown only when none of its direct second-level
+     * children is configured.  Once a second-level category is configured,
+     * the root column is replaced by that second-level column.  Deeper levels
+     * never create a third-level column.
+     */
+    private function partnerPerformanceDefinitions($storeId): array
     {
-        return [
-            ['key'=>'partner_sixway_self','label'=>'六维/自营分成业绩','path'=>'六维/自营'],
-            ['key'=>'partner_sixway_coop','label'=>'六维/合作分成业绩','path'=>'六维/合作'],
-            ['key'=>'partner_garden','label'=>'花园分成业绩','path'=>'花园'],
-            ['key'=>'partner_garden_card','label'=>'花园卡项分成业绩','path'=>'花园/卡项'],
-            ['key'=>'partner_haomei','label'=>'昊美分成业绩','path'=>'昊美'],
-            ['key'=>'partner_huaxiangrong','label'=>'花享容分成业绩','path'=>'花享容'],
-            ['key'=>'partner_garden_ticket','label'=>'花园/门票分成业绩','path'=>'花园/门票'],
-            ['key'=>'partner_sleeping','label'=>'来源H/睡眠的分成业绩','path'=>'__source_h_sleeping'],
-        ];
+        $tenantIds = $this->partnerCategoryTenantIds($storeId);
+        if ($tenantIds === []) return [];
+
+        $configs = Db::name('cashier_v3_report_category_config')
+            ->whereIn('tenant_id', $tenantIds)->where('enabled', 1)
+            ->field('tenant_id,category_id')->select()->toArray();
+        if ($configs === []) return [];
+
+        $categories = [];
+        foreach (Db::name('store_product_category')->where('is_show', 1)
+            ->field('id,pid,cate_name')->select()->toArray() as $category) {
+            $id = (int)($category['id'] ?? 0);
+            if ($id > 0) $categories[$id] = $category;
+        }
+        $enabled = [];
+        foreach ($configs as $config) {
+            $id = (int)($config['category_id'] ?? 0);
+            if ($id > 0 && isset($categories[$id])) $enabled[$id] = true;
+        }
+
+        $definitions = [];
+        foreach (array_keys($enabled) as $configuredId) {
+            $chain = $this->partnerCategoryChain((int)$configuredId, $categories);
+            if ($chain === []) continue;
+            $effective = null;
+            if (count($chain) === 1) {
+                $rootId = (int)$chain[0]['id'];
+                if (!$this->hasEnabledPartnerSecondLevel($rootId, $enabled, $categories)) {
+                    $effective = $chain[0];
+                }
+            } elseif ((int)$chain[1]['id'] === (int)$configuredId) {
+                // The checkout snapshot uses the configured second-level
+                // category for all deeper product classifications.
+                $effective = $chain[1];
+            }
+            if ($effective === null) continue;
+
+            $effectiveId = (int)$effective['id'];
+            $definitions[$effectiveId] = [
+                'key' => 'partner_category_' . $effectiveId,
+                'category_id' => $effectiveId,
+                'label' => $this->partnerCategoryPathLabel($chain, $effectiveId) . '分成业绩',
+                'sort_path' => $this->partnerCategoryPathLabel($chain, $effectiveId),
+            ];
+        }
+        uasort($definitions, static function (array $left, array $right): int {
+            return strcmp((string)$left['sort_path'], (string)$right['sort_path'])
+                ?: ((int)$left['category_id'] <=> (int)$right['category_id']);
+        });
+        foreach ($definitions as &$definition) unset($definition['sort_path']);
+        unset($definition);
+        return array_values($definitions);
     }
 
-    private function decorateMemberConsumptionRows(array &$rows, $storeId): void
+    /** @return array<int,string> */
+    private function partnerCategoryTenantIds($storeId): array
+    {
+        $query = Db::name('cashier_v3_sale_fact')->where('status', 'effective');
+        $this->withStoreScope($query, $storeId);
+        $ids = $query->distinct(true)->column('tenant_id');
+        return array_values(array_unique(array_filter(array_map('strval', (array)$ids), static function (string $id): bool {
+            return $id !== '';
+        })));
+    }
+
+    /** @return array<int,array> root first */
+    private function partnerCategoryChain(int $categoryId, array $categories): array
+    {
+        $chain = [];
+        $seen = [];
+        for ($guard = 0; $categoryId > 0 && $guard < 16; $guard++) {
+            if (isset($seen[$categoryId]) || !isset($categories[$categoryId])) return [];
+            $seen[$categoryId] = true;
+            array_unshift($chain, $categories[$categoryId]);
+            $categoryId = (int)($categories[$categoryId]['pid'] ?? 0);
+        }
+        return $categoryId > 0 ? [] : $chain;
+    }
+
+    private function hasEnabledPartnerSecondLevel(int $rootId, array $enabled, array $categories): bool
+    {
+        foreach (array_keys($enabled) as $categoryId) {
+            if ((int)($categories[(int)$categoryId]['pid'] ?? 0) === $rootId) return true;
+        }
+        return false;
+    }
+
+    private function partnerCategoryPathLabel(array $chain, int $effectiveId): string
+    {
+        $parts = [];
+        foreach ($chain as $category) {
+            $parts[] = trim((string)($category['cate_name'] ?? ''));
+            if ((int)($category['id'] ?? 0) === $effectiveId) break;
+        }
+        return implode('/', array_values(array_filter($parts, static function (string $value): bool {
+            return $value !== '';
+        })));
+    }
+
+    /** @return array<string,array<int,int>> sale fact id => partner category id => share cents */
+    private function cardPartnerSharesBySaleFact(array $rows, $storeId): array
+    {
+        $saleFactIds = array_values(array_unique(array_filter(array_map(static function (array $row): string {
+            return (string)($row['source_type'] ?? '') === 'card' ? trim((string)($row['fact_id'] ?? '')) : '';
+        }, $rows))));
+        if ($saleFactIds === []) return [];
+
+        $facts = $this->withStoreScope(Db::name('cashier_v3_card_sale_category_allocation_fact'), $storeId)
+            ->whereIn('sale_fact_id', $saleFactIds)->where('status', 'effective')
+            ->field('sale_fact_id,partner_category_id_snapshot,partner_share_amount_cents')->select()->toArray();
+        $shares = [];
+        foreach ($facts as $fact) {
+            $saleFactId = trim((string)($fact['sale_fact_id'] ?? ''));
+            $categoryId = (int)($fact['partner_category_id_snapshot'] ?? 0);
+            if ($saleFactId === '' || $categoryId <= 0) continue;
+            $shares[$saleFactId][$categoryId] = (int)($shares[$saleFactId][$categoryId] ?? 0)
+                + (int)($fact['partner_share_amount_cents'] ?? 0);
+        }
+        return $shares;
+    }
+
+    private function decorateMemberConsumptionRows(array &$rows, $storeId, array $partnerDefinitions, array $cardPartnerSharesBySaleFact): void
     {
         $orderIds = array_values(array_unique(array_filter(array_map(static function ($row) { return trim((string)($row['order_id'] ?? '')); }, $rows))));
-        $lineIds = array_values(array_unique(array_filter(array_map(static function ($row) { return trim((string)($row['source_line_id'] ?? '')); }, $rows))));
-        $paymentByOrder = [];
-        if ($orderIds) {
-            $payments = $this->withStoreScope(Db::name('cashier_v3_payment_fact'), $storeId)->whereIn('order_id', $orderIds)->where('status','effective')
-                ->field('order_id,payment_method,SUM(amount_cents) amount_cents')->group('order_id,payment_method')->select()->toArray();
-            foreach ($payments as $payment) $paymentByOrder[(string)$payment['order_id']][(string)$payment['payment_method']] = (int)$payment['amount_cents'];
-        }
-        $partnerByLine = [];
-        if ($lineIds) {
-            $performance = $this->withStoreScope(Db::name('cashier_v3_performance_fact'), $storeId)->whereIn('source_line_id', $lineIds)->where('status','effective')->where('performance_type','sales_performance_allocated')->where('employee_type_snapshot','partner')
-                ->field('source_line_id,employee_id,employee_name_snapshot,amount_cents')->select()->toArray();
-            foreach ($performance as $fact) $partnerByLine[(string)$fact['source_line_id']][] = $fact;
+        $saleFactIds = array_values(array_unique(array_filter(array_map(static function ($row) { return trim((string)($row['fact_id'] ?? '')); }, $rows))));
+        $paymentBySaleFact = [];
+        if ($saleFactIds) {
+            $payments = $this->withStoreScope(Db::name('cashier_v3_payment_sale_allocation_fact'), $storeId)
+                ->whereIn('sale_fact_id', $saleFactIds)->where('status', 'effective')
+                ->field('sale_fact_id,payment_method,SUM(amount_cents) amount_cents')->group('sale_fact_id,payment_method')->select()->toArray();
+            foreach ($payments as $payment) $paymentBySaleFact[(string)$payment['sale_fact_id']][(string)$payment['payment_method']] = (int)$payment['amount_cents'];
         }
         $guideByOrder = $managerByOrder = [];
         if ($orderIds) {
@@ -575,15 +748,14 @@ class StoreUnifiedReportServices extends BaseServices
             foreach ($managers as $manager) $managerByOrder[(string)$manager['order_id']][] = $manager;
         }
         $methods = $this->paymentMethodDefinitions();
-        $partnerDefs = $this->fixedPartnerPerformanceDefinitions();
         foreach ($rows as &$row) {
             $order = (string)($row['order_id'] ?? '');
-            $line = (string)($row['source_line_id'] ?? '');
-            $payments = $paymentByOrder[$order] ?? [];
+            $payments = $paymentBySaleFact[(string)($row['fact_id'] ?? '')] ?? [];
             $receiptTotal = 0; $paymentNames = [];
             foreach ($methods as $method) {
                 $amount = (int)($payments[$method['code']] ?? 0);
-                if ($method['code'] === 'other_collection') $receiptTotal = $amount;
+                // 收款总金额只汇总当前销售明细分摊到的成功记账收款。
+                $receiptTotal += $amount;
                 $row['payment_'.$method['code']] = $this->money($amount);
                 if ($amount > 0) $paymentNames[] = $method['label'];
             }
@@ -596,35 +768,34 @@ class StoreUnifiedReportServices extends BaseServices
             $row['sales_manager_name'] = implode('、', array_values(array_unique(array_map(static function ($item) { return (string)$item['sales_manager_name_snapshot']; }, $managerByOrder[$order] ?? []))));
             $row['salesperson_names'] = '';
             $row['member_source'] = (string)($row['business_source_label_snapshot'] ?? '');
-            foreach ($partnerDefs as $definition) $row[$definition['key']] = '0';
-            $row['partner_performance'] = '0'; $row['actual_cash_performance'] = $row['receipt_total'];
-            // Card rows have already been expanded by the immutable component
-            // category fact. Their fixed category columns must use that
-            // category's allocated cash amount, never the outer-card category
-            // or a repeated salesperson allocation.
-            if ((string)($row['source_type'] ?? '') === 'card'
-                && trim((string)($row['card_category_allocation_fact_id'] ?? '')) !== '') {
-                $path = (string)($row['category_path_snapshot'] ?? '');
-                $categoryCash = (int)$row['card_cash_performance_amount_cents'];
-                foreach ($partnerDefs as $definition) {
-                    if ($definition['path'] !== '__source_h_sleeping'
-                        && ($path === $definition['path'] || str_starts_with($path, $definition['path'] . '/'))) {
-                        $row[$definition['key']] = $this->money($categoryCash);
+            $partnerCategoryCents = array_fill_keys(array_column($partnerDefinitions, 'key'), 0);
+            if ((string)($row['source_type'] ?? '') === 'card') {
+                foreach ((array)($cardPartnerSharesBySaleFact[(string)($row['fact_id'] ?? '')] ?? []) as $categoryId => $share) {
+                    foreach ($partnerDefinitions as $definition) {
+                        if ((int)$categoryId === (int)$definition['category_id']) {
+                            $partnerCategoryCents[(string)$definition['key']] += (int)$share;
+                            break;
+                        }
+                    }
+                }
+            } else {
+                $partnerCategoryId = (int)($row['partner_category_id_snapshot'] ?? 0);
+                $partnerShare = (int)($row['partner_share_amount_cents'] ?? 0);
+                foreach ($partnerDefinitions as $definition) {
+                    if ($partnerCategoryId === (int)$definition['category_id']) {
+                        $partnerCategoryCents[(string)$definition['key']] += $partnerShare;
+                        break;
                     }
                 }
             }
-            foreach ($partnerByLine[$line] ?? [] as $fact) {
-                $amount = (int)$fact['amount_cents']; $row['partner_performance'] = $this->money((int)round(((float)$row['partner_performance'] * 100) + $amount));
-                if ((string)($row['source_type'] ?? '') === 'card'
-                    && trim((string)($row['card_category_allocation_fact_id'] ?? '')) !== '') continue;
-                $path = (string)($row['category_path_snapshot'] ?? '');
-                foreach ($partnerDefs as $definition) {
-                    if ($definition['path'] === '__source_h_sleeping') continue;
-                    if ($path === $definition['path'] || str_starts_with($path, $definition['path'].'/')) $row[$definition['key']] = $this->money((int)round(((float)$row[$definition['key']] * 100) + $amount));
-                }
+            $partnerPerformanceCents = 0;
+            foreach ($partnerDefinitions as $definition) {
+                $key = (string)$definition['key'];
+                $row[$key] = $this->money((int)$partnerCategoryCents[$key]);
+                $partnerPerformanceCents += (int)$partnerCategoryCents[$key];
             }
-            if (stripos((string)($row['business_source_label_snapshot'] ?? ''), 'H沉睡唤醒') !== false) $row['partner_sleeping'] = $row['partner_performance'];
-            $row['actual_cash_performance'] = $this->money(max(0, $receiptTotal - (int)round((float)$row['partner_performance'] * 100)));
+            $row['partner_performance'] = $this->money($partnerPerformanceCents);
+            $row['actual_cash_performance'] = $this->money($receiptTotal - $partnerPerformanceCents);
         }
         unset($row);
     }
