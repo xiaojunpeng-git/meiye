@@ -5,6 +5,7 @@ declare(strict_types=1);
 $root = dirname(__DIR__, 3);
 $service = (string)file_get_contents($root . '/后端代码/app/services/report/StoreUnifiedReportPhaseTwoServices.php');
 $report = (string)file_get_contents($root . '/后端代码/app/services/report/StoreUnifiedReportServices.php');
+$view = (string)file_get_contents($root . '/前端代码/cashier-v3/src/views/StoreBusinessReportView.vue');
 
 foreach ([
     "'table_layout'=>['fixed'=>true,'sticky_header'=>true,'sticky_summary'=>true,'result_scroll'=>true]",
@@ -37,6 +38,9 @@ foreach ([
     "'report'=>'field_acquisition_detail'",
 ] as $needle) {
     if (strpos($service, $needle) === false) throw new RuntimeException('new-customer drilldown contract missing: ' . $needle);
+}
+if (preg_match('/\.\.\.\(serverCatalogByCode\.value\.get\(tab\.code\) \|\| \{\}\),\s*\.\.\.tab/s', $view) !== 1) {
+    throw new RuntimeException('report navigation must keep the confirmed standard names when historical catalog labels exist');
 }
 
 echo "PASS phase-two report projection contract\n";

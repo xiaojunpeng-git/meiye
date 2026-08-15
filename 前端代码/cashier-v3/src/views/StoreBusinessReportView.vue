@@ -238,8 +238,9 @@ const serverCatalogByCode = computed(() => new Map(
   catalog.value.filter((item) => item && item.code).map((item) => [item.code, item])
 ))
 const reportTabs = computed(() => REPORT_TABS.map((tab) => ({
-  ...tab,
-  ...(serverCatalogByCode.value.get(tab.code) || {})
+  // 历史目录名称可能仍保留在服务器配置中，门店端以已确认的标准名称为准。
+  ...(serverCatalogByCode.value.get(tab.code) || {}),
+  ...tab
 })))
 const isFirstPhaseReport = computed(() => REPORT_TABS.slice(0, 6).some((item) => item.code === activeReport.value))
 const columns = computed(() => Array.isArray(result.value.columns) ? result.value.columns : [])
