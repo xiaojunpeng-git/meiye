@@ -16,6 +16,15 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
     /** @var int 仅由认证后的门店报表控制器注入 */
     private $participantEmployeeId = 0;
 
+    /** @var StoreUnifiedReportOrganizationDimensionServices|null */
+    private $organizationDimensionServices;
+
+    /** @var array{start:string,end:string} */
+    private $activeRange = ['start' => '', 'end' => ''];
+
+    /** @var array<string,mixed> */
+    private $activeInput = [];
+
     private const REPORTS = [
         'market_performance', 'market_detail', 'member_visit_analysis',
         'member_visit_annual_summary', 'field_acquisition_detail',
@@ -53,6 +62,8 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
 
     public function query(string $report, $storeIds, array $range, array $input): array
     {
+        $this->activeRange = ['start' => (string)$range['start'], 'end' => (string)$range['end']];
+        $this->activeInput = $input;
         $reportScope = is_array($input['_report_scope'] ?? null) ? $input['_report_scope'] : [];
         if ((string)($reportScope['mode'] ?? '') === 'none') {
             throw new \InvalidArgumentException('当前账号没有可查看的数据范围');
@@ -119,7 +130,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             $rows[$storeId]['payment_' . $method . '_cents'] = (int)($rows[$storeId]['payment_' . $method . '_cents'] ?? 0) + (int)$fact['amount_cents'];
             $rows[$storeId]['total_performance_cents'] = (int)($rows[$storeId]['total_performance_cents'] ?? 0) + (int)$fact['amount_cents'];
         }
-        $visits = $this->participantCheckout($this->scope(Db::name('cashier_v3_entitlement_service_fact')->alias('sv'), $stores, 'sv'),'sv.checkout_request_id')
+        $visits = $this->participantCheckout($this->applyOrganizationFilters($this->scope(Db::name('cashier_v3_entitlement_service_fact')->alias('sv'), $stores, 'sv'), 'sv', $input, $range),'sv.checkout_request_id')
             ->join('cashier_v3_sales_order o', 'o.checkout_request_id=sv.checkout_request_id AND o.store_id=sv.store_id')
             ->whereBetween('sv.business_date', [$range['start'], $range['end']])->where('sv.service_status', 'completed')
             ->fieldRaw('sv.store_id,o.business_source_primary_id,COUNT(DISTINCT sv.service_fact_id) visit_count')
@@ -209,7 +220,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         if ($dimension !== '') $query->where('p.business_source_primary_id', (int)$dimension);
         if (($method = trim((string)($input['payment_method_code'] ?? ''))) !== '') $query->where('p.payment_method', $method);
         $rows = $query->leftJoin('user market_detail_member', 'market_detail_member.uid = p.member_id')
-            ->fieldRaw('p.store_id,p.order_id,p.checkout_request_id,p.order_no_snapshot,p.store_name_snapshot,MAX(p.member_id) member_id,MAX(p.member_name_snapshot) member_name_snapshot,MAX(market_detail_member.phone) member_phone,p.business_source_primary_id,p.business_source_primary_name_snapshot,p.business_source_label_snapshot,p.business_date,MAX(p.operator_name_snapshot) creator_name,SUM(p.amount_cents) amount_cents,MAX(p.recorded_at) recorded_at')
+            ->fieldRaw('p.store_id,p.order_id,p.checkout_request_id,p.order_no_snapshot,p.store_name_snapshot,MAX(p.organization_id) organization_id,MAX(p.organization_path_snapshot) organization_path_snapshot,MAX(p.member_id) member_id,MAX(p.member_name_snapshot) member_name_snapshot,MAX(market_detail_member.phone) member_phone,p.business_source_primary_id,p.business_source_primary_name_snapshot,p.business_source_label_snapshot,p.business_date,MAX(p.operator_name_snapshot) creator_name,SUM(p.amount_cents) amount_cents,MAX(p.recorded_at) recorded_at')
             ->group('p.store_id,p.order_id,p.business_source_primary_id,p.business_date')->order('p.business_date','desc')->order('p.order_id','desc')->select()->toArray();
         // The detail query already contains every matching payment record before
         // pagination, so derive effective members here instead of running another
@@ -252,7 +263,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
     private function memberVisitAnalysis(array $stores, array $range, array $input): array
     {
         $year = (int)substr($range['end'], 0, 4);
-        $services = $this->participantCheckout($this->scope(Db::name('cashier_v3_entitlement_service_fact')->alias('member_visit_service'), $stores,'member_visit_service'),'member_visit_service.checkout_request_id')
+        $services = $this->participantCheckout($this->applyOrganizationFilters($this->scope(Db::name('cashier_v3_entitlement_service_fact')->alias('member_visit_service'), $stores,'member_visit_service'), 'member_visit_service', $input, $range),'member_visit_service.checkout_request_id')
             ->whereBetween('business_date', [$range['start'], $range['end']])->where('service_status','completed')->where('member_id','>',0)
             ->fieldRaw("member_id,MAX(member_name_snapshot) member_name,COUNT(*) total_visits,MONTH(business_date) month_no,COUNT(*) month_visits")
             ->group('member_id,MONTH(business_date)')->select()->toArray();
@@ -294,7 +305,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
     {
         $year=(int)substr($range['end'],0,4);$mode=(string)($input['mode']??'count');
         if(!in_array($mode,['count','people','project'],true)) throw new \InvalidArgumentException('年度进店统计方式无效');
-        $query=$this->participantCheckout($this->scope(Db::name('cashier_v3_entitlement_service_fact')->alias('annual_visit_service'),$stores,'annual_visit_service'),'annual_visit_service.checkout_request_id')->whereBetween('annual_visit_service.business_date',[$range['start'],$range['end']])->where('annual_visit_service.service_status','completed');
+        $query=$this->participantCheckout($this->applyOrganizationFilters($this->scope(Db::name('cashier_v3_entitlement_service_fact')->alias('annual_visit_service'),$stores,'annual_visit_service'), 'annual_visit_service', $input, $range),'annual_visit_service.checkout_request_id')->whereBetween('annual_visit_service.business_date',[$range['start'],$range['end']])->where('annual_visit_service.service_status','completed');
         $expression=$mode==='people'?'COUNT(DISTINCT member_id)':($mode==='project'?'SUM(quantity)':'COUNT(*)');
         $facts=$query->fieldRaw('store_id,MAX(store_name_snapshot) store_name,MONTH(business_date) month_no,'.$expression.' amount')->group('store_id,MONTH(business_date)')->select()->toArray();
         $storeNames=[];$records=[];foreach(range(1,12) as $month)$records[$month]=['row_label'=>$month.'月','year'=>$year.'年','total'=>0];
@@ -307,10 +318,10 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
     private function fieldMarketingDetail(array $stores,array $range,array $input):array
     {
         $sourceIds=$this->sourceIds('E');$memberId=(int)($input['member_id']??0);
-        $base=$this->participantOrder($this->scope(Db::name('cashier_v3_sale_fact')->alias('s'),$stores,'s'),'s.order_id')->leftJoin('cashier_v3_sales_order o','o.order_id=s.order_id')
+        $base=$this->participantOrder($this->applyOrganizationFilters($this->scope(Db::name('cashier_v3_sale_fact')->alias('s'),$stores,'s'), 's', $input, $range),'s.order_id')->leftJoin('cashier_v3_sales_order o','o.order_id=s.order_id')
             ->whereBetween('s.business_date',[$range['start'],$range['end']])->where('s.status','effective')->whereIn('s.business_source_primary_id',$sourceIds?:[-1]);
         if($memberId>0)$base->where('s.member_id',$memberId);
-        $base=$base->fieldRaw('s.store_id,s.organization_name_snapshot,s.store_name_snapshot,s.member_id,s.member_name_snapshot,s.business_source_secondary_name_snapshot,s.order_id,s.source_line_id,s.business_date,MAX(o.order_note) remark')
+        $base=$base->fieldRaw('s.store_id,s.organization_id,s.organization_path_snapshot,s.organization_name_snapshot,s.store_name_snapshot,s.member_id,s.member_name_snapshot,s.business_source_secondary_name_snapshot,s.order_id,s.source_line_id,s.business_date,MAX(o.order_note) remark')
             ->group('s.store_id,s.member_id,s.order_id,s.source_line_id')->order('s.business_date','desc')->select()->toArray();
         $memberIds=array_values(array_unique(array_filter(array_column($base,'member_id'))));$phones=$this->phones($memberIds);
         $services=$this->servicesByMember($stores,$memberIds);$cash=$this->cashByMemberAndMonth($stores,$memberIds,$range['start'],$range['end']);
@@ -345,7 +356,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
 
     private function crossIndustrySummary(array $stores,array $range,array $input):array
     {
-        $sourceIds=$this->sourceIds('G');$year=(int)substr($range['end'],0,4);$sales=$this->participantOrder($this->scope(Db::name('cashier_v3_sale_fact')->alias('cross_sale'),$stores,'cross_sale'),'cross_sale.order_id')->whereBetween('cross_sale.business_date',[$year.'-01-01',$year.'-12-31'])->where('cross_sale.status','effective')->whereIn('cross_sale.business_source_primary_id',$sourceIds?:[-1])->fieldRaw('cross_sale.store_id,cross_sale.member_id,MAX(cross_sale.member_name_snapshot) member_name,MIN(cross_sale.source_line_id) source_line_id,MAX(cross_sale.item_name_snapshot) card_name,MIN(cross_sale.business_date) first_sale_date')->group('cross_sale.store_id,cross_sale.member_id')->select()->toArray();
+        $sourceIds=$this->sourceIds('G');$year=(int)substr($range['end'],0,4);$sales=$this->participantOrder($this->applyOrganizationFilters($this->scope(Db::name('cashier_v3_sale_fact')->alias('cross_sale'),$stores,'cross_sale'),'cross_sale',$input,['start'=>$year.'-01-01','end'=>$year.'-12-31']),'cross_sale.order_id')->whereBetween('cross_sale.business_date',[$year.'-01-01',$year.'-12-31'])->where('cross_sale.status','effective')->whereIn('cross_sale.business_source_primary_id',$sourceIds?:[-1])->fieldRaw('cross_sale.store_id,cross_sale.member_id,MAX(cross_sale.member_name_snapshot) member_name,MIN(cross_sale.source_line_id) source_line_id,MAX(cross_sale.item_name_snapshot) card_name,MIN(cross_sale.business_date) first_sale_date')->group('cross_sale.store_id,cross_sale.member_id')->select()->toArray();
         $memberIds=array_values(array_unique(array_filter(array_column($sales,'member_id'))));$phones=$this->phones($memberIds);$cash=$this->cashMonthlyTotals($stores,$memberIds,$year.'-01-01',$year.'-12-31');$dailyCash=$this->cashByMemberAndMonth($stores,$memberIds,$year.'-01-01',$year.'-12-31');$services=$this->servicesByMember($stores,$memberIds);$entitlements=$this->activeCardEntitlements($stores,$memberIds);$keys=array_values(array_unique(array_column($sales,'source_line_id')));$manual=$this->annotations('cross_industry_customer_summary',$stores,$keys);$total500=0;$total2400=0;
         foreach($sales as &$row){
             $id=(int)$row['member_id'];$key=(string)$row['source_line_id'];$row['customer_acquired_at']=$manual[$key]['customer_acquired_at']['value']??'';$row['customer_acquired_at_version']=(int)($manual[$key]['customer_acquired_at']['version']??0);$row['partner_store_name']=$manual[$key]['partner_store_name']['value']??'';$row['partner_store_name_version']=(int)($manual[$key]['partner_store_name']['version']??0);$row['phone']=$phones[$id]??'';$row['remaining_service_count']=(int)($entitlements[$id]['remaining_count']??0);$row['remaining_service_amount']=$this->money((int)($entitlements[$id]['remaining_amount_cents']??0));$row['first_visit_at']=(string)($services[$id][0]['business_date']??'');
@@ -360,7 +371,8 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
     private function newCustomerAnalysis(array $stores,array $range,array $input):array
     {
         $excluded=$this->sourceIdsMany(['A','H']);$memberId=(int)($input['member_id']??0);$sourceId=(int)($input['source_id']??0);$sourceLabel=trim((string)($input['source_label']??''));$salespersonFilter=trim((string)($input['salesperson']??''));$sales=$this->participantOrder($this->scope(Db::name('cashier_v3_sale_fact')->alias('s'),$stores,'s'),'s.order_id')->leftJoin('cashier_v3_sales_order o','o.order_id=s.order_id')->leftJoin('user u','u.uid=s.member_id')->whereBetween('s.business_date',[$range['start'],$range['end']])->where('s.status','effective');if($excluded)$sales->whereNotIn('s.business_source_primary_id',$excluded);if($memberId>0)$sales->where('s.member_id',$memberId);if($sourceId>0)$sales->where('s.business_source_primary_id',$sourceId);elseif($sourceLabel!=='')$sales->where('s.business_source_label_snapshot',$sourceLabel);
-        $rows=$sales->fieldRaw('s.fact_id,s.store_id,s.organization_name_snapshot,s.store_name_snapshot,s.business_date,s.order_id,s.source_line_id,s.member_id,s.member_name_snapshot,s.business_source_label_snapshot,s.item_name_snapshot,s.sale_amount_cents,s.debt_amount_cents,u.phone,MAX(o.order_note) remark')->group('s.source_line_id')->order('s.business_date','desc')->select()->toArray();$orderIds=array_values(array_unique(array_column($rows,'order_id')));$saleFactIds=array_values(array_unique(array_filter(array_column($rows,'fact_id'))));$lineIds=array_values(array_unique(array_column($rows,'source_line_id')));$payments=$performance=$guides=[];
+        $this->applyOrganizationFilters($sales,'s',$input,$range);
+        $rows=$sales->fieldRaw('s.fact_id,s.store_id,s.organization_id,s.organization_path_snapshot,s.organization_name_snapshot,s.store_name_snapshot,s.business_date,s.order_id,s.source_line_id,s.member_id,s.member_name_snapshot,s.business_source_label_snapshot,s.item_name_snapshot,s.sale_amount_cents,s.debt_amount_cents,u.phone,MAX(o.order_note) remark')->group('s.source_line_id')->order('s.business_date','desc')->select()->toArray();$orderIds=array_values(array_unique(array_column($rows,'order_id')));$saleFactIds=array_values(array_unique(array_filter(array_column($rows,'fact_id'))));$lineIds=array_values(array_unique(array_column($rows,'source_line_id')));$payments=$performance=$guides=[];
         if($saleFactIds){foreach($this->cashFacts($stores,'payment')->join('cashier_v3_payment_sale_allocation_fact allocation',"allocation.tenant_id=payment.tenant_id AND allocation.payment_fact_id=payment.fact_id AND allocation.status='effective'")->whereIn('allocation.sale_fact_id',$saleFactIds)->whereBetween('payment.business_date',[$range['start'],$range['end']])->where('payment.status','effective')->fieldRaw('allocation.sale_fact_id,payment.source_document_type,SUM(allocation.amount_cents) amount_cents')->group('allocation.sale_fact_id,payment.source_document_type')->select()->toArray()as$r)$payments[(string)$r['sale_fact_id']][]=$r;}
         if($orderIds)foreach($this->scope(Db::name('cashier_v3_customer_guide_round_fact'),$stores)->whereIn('order_id',$orderIds)->where('status','effective')->select()->toArray()as$r)$guides[(string)$r['order_id']][]=$r;
         if($lineIds)foreach($this->scope(Db::name('cashier_v3_performance_fact'),$stores)->whereIn('source_line_id',$lineIds)->where('status','effective')->select()->toArray()as$r)$performance[(string)$r['source_line_id']][]=$r;
@@ -396,13 +408,13 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             ->whereBetween('ccf.business_date',[$range['start'],$range['end']])
             ->fieldRaw("ccf.tenant_id,ccf.sale_fact_id,SUM(ccf.sale_amount_cents) allocated_sale_total_cents,SUM(ccf.cash_performance_amount_cents) allocated_cash_total_cents,SUM(CASE WHEN COALESCE(NULLIF(ccf.category_path_snapshot,''),ccf.category_name_snapshot) LIKE '%生美%' THEN ccf.cash_performance_amount_cents ELSE 0 END) beauty_cash_amount_cents")
             ->group('ccf.tenant_id,ccf.sale_fact_id')->buildSql();
-        $facts=$this->participantEmployeeFact($this->scope(Db::name('cashier_v3_performance_fact')->alias('p'),$stores,'p'),'p.employee_id')
+        $facts=$this->participantEmployeeFact($this->applyOrganizationFilters($this->scope(Db::name('cashier_v3_performance_fact')->alias('p'),$stores,'p'),'p',$input,$range),'p.employee_id')
             ->join('cashier_v3_sale_fact s','s.tenant_id=p.tenant_id AND s.store_id=p.store_id AND s.source_line_id=p.source_line_id AND s.status=\'effective\'')
             ->leftJoin([$cardCategorySql=>'cc'],'cc.tenant_id=s.tenant_id AND cc.sale_fact_id=s.fact_id')
             ->whereBetween('p.business_date',[$range['start'],$range['end']])->where('p.status','effective')->where('p.performance_type','sales_performance_allocated')
             ->whereRaw("((cc.sale_fact_id IS NOT NULL AND cc.allocated_sale_total_cents=s.sale_amount_cents AND cc.beauty_cash_amount_cents>0) OR (cc.sale_fact_id IS NULL AND s.category_name_snapshot LIKE '%生美%'))")
-            ->fieldRaw("p.store_id,MAX(p.organization_name_snapshot) division_name,MAX(p.store_name_snapshot) store_name,p.business_date,p.employee_id,MAX(p.employee_name_snapshot) salesperson,p.member_id,SUM(CASE WHEN cc.sale_fact_id IS NULL THEN p.amount_cents WHEN cc.allocated_cash_total_cents>0 THEN ROUND(p.amount_cents*cc.beauty_cash_amount_cents/cc.allocated_cash_total_cents) ELSE 0 END) amount_cents")
-            ->group('p.store_id,p.business_date,p.employee_id,p.member_id')->order('p.business_date','desc')->select()->toArray();
+            ->fieldRaw("p.store_id,p.organization_id,p.organization_path_snapshot,MAX(p.organization_name_snapshot) division_name,MAX(p.store_name_snapshot) store_name,p.business_date,p.employee_id,MAX(p.employee_name_snapshot) salesperson,p.member_id,SUM(CASE WHEN cc.sale_fact_id IS NULL THEN p.amount_cents WHEN cc.allocated_cash_total_cents>0 THEN ROUND(p.amount_cents*cc.beauty_cash_amount_cents/cc.allocated_cash_total_cents) ELSE 0 END) amount_cents")
+            ->group('p.store_id,p.organization_id,p.organization_path_snapshot,p.business_date,p.employee_id,p.member_id')->order('p.business_date','desc')->select()->toArray();
         usort($facts,static function(array $a,array $b):int{return strcmp((string)$a['business_date'],(string)$b['business_date']);});$cumulative=[];foreach($facts as &$row){$key=(int)$row['member_id'].'|'.(int)$row['employee_id'];$after=(int)($cumulative[$key]??0)+(int)$row['amount_cents'];$cumulative[$key]=$after;$row['daily_cash']=$this->money((int)$row['amount_cents']);$row['cumulative_cash']=$this->money($after);$row['share_30000_before']='';$row['share_30000_after']='';$row['share_50000_before']='';foreach(range(1,5)as$i)$row['share_50000_after_'.$i]='';$row['remark']='';}unset($row);usort($facts,static function(array $a,array $b):int{return strcmp((string)$b['business_date'],(string)$a['business_date']);});
         $columns=$this->columns(['division_name'=>'分公司','store_name'=>'门店','business_date'=>'成交日期','salesperson'=>'销售人/销售经理','daily_cash'=>'当日现金业绩','cumulative_cash'=>'累计现金业绩','share_30000_before'=>'3万生美卡项分成前','share_30000_after'=>'3万生美卡项分成后','share_50000_before'=>'5万生美卡项分成前']);foreach(range(1,5)as$i)$columns[]=['key'=>'share_50000_after_'.$i,'label'=>'5万生美卡项分成后'];$columns[]=['key'=>'remark','label'=>'备注'];
         return $this->result('销售人生美大单统计表',$columns,$facts,$input);
@@ -414,7 +426,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             ->join('cashier_v3_sales_order o','o.order_id=r.source_order_id AND o.tenant_id=r.tenant_id')
             ->whereBetween('r.business_date',[$range['start'],$range['end']])
             ->where('r.source_type','sales')->where('r.operation_type','refund')->where('r.status','succeeded')
-            ->field('r.operation_id,r.store_id,r.business_date refund_date,r.source_order_id order_id,r.reason_snapshot refund_reason,r.request_json,r.cash_refund_cents refund_amount_cents,r.restored_principal_cents,r.restored_bonus_cents,o.organization_name_snapshot market,o.store_name_snapshot store_name,o.member_name_snapshot customer,o.business_date original_sale_date,o.order_note original_remark')
+            ->field('r.operation_id,r.store_id,r.business_date,r.business_date refund_date,r.source_order_id order_id,r.reason_snapshot refund_reason,r.request_json,r.cash_refund_cents refund_amount_cents,r.restored_principal_cents,r.restored_bonus_cents,o.organization_id,o.organization_path_snapshot,o.organization_name_snapshot market,o.store_name_snapshot store_name,o.member_name_snapshot customer,o.business_date original_sale_date,o.order_note original_remark')
             ->order('r.business_date','desc')->order('r.id','desc')->select()->toArray();
         foreach($rows as &$row){$request=json_decode((string)$row['request_json'],true);$names=[];foreach((array)($request['refundLines']??[])as$line){$name=trim((string)($line['itemName']??''));if($name!=='')$names[]=$name;}$row['refund_items']=implode('、',array_values(array_unique($names)));$row['refund_amount']=$this->money((int)$row['refund_amount_cents']);$row['refund_remark']=trim((string)$row['refund_reason'])?:trim((string)$row['original_remark']);}unset($row);
         return $this->result('院店退款台账',$this->columns(['market'=>'市场','store_name'=>'院店','customer'=>'顾客姓名','refund_date'=>'退款申请时间','refund_items'=>'退款项目','original_sale_date'=>'原销售日期','refund_amount'=>'退款金额','refund_remark'=>'退款原因']),$rows,$input,[],['refund_amount_cents'=>$this->sumField($rows,'refund_amount_cents')]);
@@ -467,16 +479,26 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
     private function participantOrder($query,string $orderField){return $this->participantEmployeeId>0?(new StoreReportParticipantScopeServices())->applyOrder($query,$orderField,$this->participantEmployeeId):$query;}
     private function participantCheckout($query,string $checkoutField){return $this->participantEmployeeId>0?(new StoreReportParticipantScopeServices())->applyCheckout($query,$checkoutField,$this->participantEmployeeId):$query;}
     private function participantEmployeeFact($query,string $employeeField){return $this->participantEmployeeId>0?(new StoreReportParticipantScopeServices())->applyEmployeeFact($query,$employeeField,$this->participantEmployeeId):$query;}
-    private function columns(array $map):array{$out=[];foreach($map as$key=>$label)$out[]=['key'=>$key,'label'=>$label];return$out;}
+    private function columns(array $map):array{$out=[];foreach($map as$key=>$label)$out[]=['key'=>$key,'label'=>$label,'source_explanation'=>$this->columnExplanation((string)$key,(string)$label)];return$out;}
     private function result(string $title,array $columns,array $records,array $input,array $groups=[],array $totals=[]):array
     {
         $page=max(1,(int)($input['page']??1));$limit=min(100,max(10,(int)($input['limit']??20)));
-        $columns=$this->fixedColumns($title,$columns);
+        $hasOrganizationProjection=$this->projectOrganizationRows($records);
+        if($hasOrganizationProjection)$records=array_values(array_filter($records,fn(array $row):bool=>$this->selectedDimensionMatches($row,$input)));
+        if($hasOrganizationProjection&&!array_filter($columns,static fn($column)=>(string)($column['key']??'')==='company'))$columns=$this->withDimensions($columns);
+        $columns=$this->fixedColumns($title,$this->withColumnExplanations($columns));
+        $this->appendDimensionFiltersToColumns($columns);
+        $this->appendDimensionFiltersToRows($records);
         $visible=!empty($input['_internal_all'])?$records:array_slice($records,($page-1)*$limit,$limit);
         $result=['title'=>$title,'columns'=>$columns,'records'=>$visible,'total'=>count($records),'page'=>$page,'page_size'=>$limit,'totals'=>$totals,'drilldown_keys'=>['organization_id','store_id','dimension_code','payment_method_code','metric_code','start_date','end_date'],'table_layout'=>['fixed'=>true,'sticky_header'=>true,'sticky_summary'=>true,'result_scroll'=>true],'metric_version'=>'store-operations-phase-two-v1','data_as_of'=>date('Y-m-d H:i:s'),'aggregation_status'=>'reconciled'];
         $summary=$this->summaryRow($title,$columns,$records);if($summary)$result['summary_row']=$summary;
         if($groups)$result['column_groups']=$groups;
         $metadata=$this->metadataForTitle($title,$totals);
+        $metadata['filter_schema']=array_merge(
+            $this->organizationDimensions()->filterSchema($this->activeRange),
+            (array)($metadata['filter_schema']??[])
+        );
+        if(!empty($metadata['drilldown']))$metadata['drilldown']=$this->withDimensionFilterParams((array)$metadata['drilldown']);
         foreach($metadata as $key=>$value)$result[$key]=$value;
         return$result;
     }
@@ -565,11 +587,88 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
     private function cents($money):int{return$this->decimalCents($money);}
     private function dateTime(int $timestamp):string{return$timestamp>0?date('Y-m-d H:i:s',$timestamp):'';}
     private function hasColumn(string $table,string $column):bool{static$cache=[];$key=$table.'.'.$column;if(!array_key_exists($key,$cache))$cache[$key]=Db::query("SHOW COLUMNS FROM `eb_".$table."` LIKE '".addslashes($column)."'")!==[];return$cache[$key];}
+    private function organizationDimensions():StoreUnifiedReportOrganizationDimensionServices
+    {
+        if(!$this->organizationDimensionServices)$this->organizationDimensionServices=new StoreUnifiedReportOrganizationDimensionServices();
+        return$this->organizationDimensionServices;
+    }
+    private function applyOrganizationFilters($query,string $alias,array $input,array $range)
+    {
+        $this->organizationDimensions()->applyFilters($query,$alias,$input,$range);
+        return$query;
+    }
+    private function projectOrganization(array &$row,string $organizationId,string $organizationPath,string $businessDate):void
+    {
+        $this->organizationDimensions()->project($row,$organizationId,$organizationPath,$businessDate);
+        if(array_key_exists('division_name',$row))$row['division_name']=(string)$row['company'];
+    }
+    private function projectOrganizationRows(array &$records):bool
+    {
+        $projected=false;
+        foreach($records as&$row){
+            $date=(string)($row['business_date']??'');
+            if($date==='')continue;
+            $this->projectOrganization($row,(string)($row['organization_id']??''),(string)($row['organization_path_snapshot']??''),$date);
+            $projected=true;
+        }
+        unset($row);
+        return$projected;
+    }
+    private function organizationKey(array $row):string
+    {
+        return(string)($row['company_dimension_id']??'').'|'.(string)($row['city_manager_dimension_id']??'');
+    }
+    private function selectedDimensionMatches(array $row,array $input):bool
+    {
+        foreach(['company_dimension_id','city_manager_dimension_id']as$key){$selected=trim((string)($input[$key]??''));if($selected!==''&&$selected!==(string)($row[$key]??''))return false;}
+        return true;
+    }
+    private function dimensionColumns():array
+    {
+        return[
+            ['key'=>'company','label'=>'分公司','source_explanation'=>$this->organizationDimensions()->sourceExplanation('company')],
+        ];
+    }
+    private function withDimensions(array $columns):array
+    {
+        foreach($columns as$index=>$column){
+            if((string)($column['key']??'')!=='division_name')continue;
+            return$columns;
+        }
+        return array_merge($this->dimensionColumns(),$columns);
+    }
+    private function columnExplanation(string $key,string $label):string
+    {
+        if($key==='company')return$this->organizationDimensions()->sourceExplanation('company');
+        if($key==='city_manager')return$this->organizationDimensions()->sourceExplanation('city_manager');
+        return$label.'按本报表已确认的统一事实口径、业务日期和当前权限范围读取。';
+    }
+    private function withColumnExplanations(array $columns):array
+    {
+        foreach($columns as&$column){if(trim((string)($column['source_explanation']??''))==='')$column['source_explanation']=$this->columnExplanation((string)($column['key']??''),(string)($column['label']??''));}unset($column);return$columns;
+    }
+    private function dimensionFilterParams():array
+    {
+        $params=[];foreach(['company_dimension_id','city_manager_dimension_id']as$key){$value=trim((string)($this->activeInput[$key]??''));if($value!=='')$params[$key]=$value;}return$params;
+    }
+    private function withDimensionFilterParams(array $drilldown):array
+    {
+        $drilldown['params']=array_merge((array)($drilldown['params']??[]),$this->dimensionFilterParams());return$drilldown;
+    }
+    private function appendDimensionFiltersToColumns(array &$columns):void
+    {
+        foreach($columns as&$column)if(!empty($column['drilldown']))$column['drilldown']=$this->withDimensionFilterParams((array)$column['drilldown']);unset($column);
+    }
+    private function appendDimensionFiltersToRows(array &$records):void
+    {
+        foreach($records as&$row){if(empty($row['_drilldown'])||!is_array($row['_drilldown']))continue;foreach($row['_drilldown']as$key=>$drilldown)$row['_drilldown'][$key]=$this->withDimensionFilterParams((array)$drilldown);}unset($row);
+    }
     private function cashFacts(array $stores,string $alias='')
     {
         $alias=$alias!==''?$alias:'report_payment';
         $query=Db::name('cashier_v3_payment_fact')->alias($alias);
         $this->scope($query,$stores,$alias);
+        $this->applyOrganizationFilters($query, $alias, $this->activeInput, $this->activeRange);
         $column=$alias.'.';
         $query->whereRaw("({$column}fact_direction='forward' OR ({$column}fact_direction='reversal' AND EXISTS (SELECT 1 FROM eb_cashier_v3_order_lifecycle_operation refund_operation WHERE refund_operation.tenant_id={$column}tenant_id AND refund_operation.command_idempotency_key={$column}command_idempotency_key AND refund_operation.operation_type='refund' AND refund_operation.status='succeeded')))" );
         return $this->participantOrder($query,$column.'order_id');

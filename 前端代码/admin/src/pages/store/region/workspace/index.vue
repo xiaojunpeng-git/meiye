@@ -1204,6 +1204,13 @@
               <input v-model.number="orgFormModal.sort" type="number" min="0" step="1" placeholder="0" :disabled="writeSubmitting" />
               <span class="field-hint">数字越小越靠前</span>
             </div>
+            <div class="form-field full">
+              <label>统计维度</label>
+              <select v-model="orgFormModal.statisticDimensionCode" :disabled="writeSubmitting">
+                <option value="">未设置</option>
+                <option v-for="option in statisticDimensionOptions" :key="option.value" :value="option.value">{{ option.label || option.value }}</option>
+              </select>
+            </div>
           </div>
         </div>
         <div class="modal-footer">
@@ -1355,6 +1362,7 @@
 <script>
 import {
   getOrganizationTree,
+  getOrganizationStatisticDimensions,
   getOrganizationWorkspaceOverview,
   getOrganizationWorkspaceStores,
   getOrganizationWorkspaceEmployees,
@@ -1492,7 +1500,8 @@ export default {
       draftStoreOrgId: 0,
       pendingRequestToken: '',
       pendingWriteFingerprint: '',
-      orgFormModal: { open: false, mode: 'create', orgId: 0, pid: 0, name: '', sort: 0 },
+      statisticDimensionOptions: [],
+      orgFormModal: { open: false, mode: 'create', orgId: 0, pid: 0, name: '', sort: 0, statisticDimensionCode: '' },
       deleteModal: { open: false, step: 1, orgId: 0, name: '', loading: false, canDelete: false, blockers: [], error: '' },
       writeSubmitting: false,
       treeState: emptyLoadState(),
@@ -2552,8 +2561,10 @@ export default {
         orgId: 0,
         pid: parentId,
         name: '',
-        sort: 0
+        sort: 0,
+        statisticDimensionCode: ''
       };
+      this.loadStatisticDimensions(0);
     },
     openEditOrgModal() {
       if (!this.canWrite) {
@@ -2570,8 +2581,10 @@ export default {
         orgId: Number(org.id),
         pid: Number(org.pid || 0),
         name: org.name || '',
-        sort: Number(org.sort || 0)
+        sort: Number(org.sort || 0),
+        statisticDimensionCode: ''
       };
+      this.loadStatisticDimensions(Number(org.id));
     },
     closeOrgFormModal() {
       if (this.writeSubmitting) return;
@@ -2593,7 +2606,8 @@ export default {
       const payload = {
         pid,
         name,
-        sort: Number(modal.sort || 0)
+        sort: Number(modal.sort || 0),
+        statistic_dimension_code: String(modal.statisticDimensionCode || '')
       };
       const orgId = modal.mode === 'edit' ? Number(modal.orgId) : 0;
       const action = modal.mode === 'edit' ? 'saveOrganization:edit' : 'saveOrganization:create';
@@ -2610,6 +2624,20 @@ export default {
         })
         .catch((err) => { this.handleWriteCatch(err); })
         .finally(() => { this.writeSubmitting = false; });
+    },
+    loadStatisticDimensions(orgId) {
+      const modalOrgId = Number(orgId || 0);
+      getOrganizationStatisticDimensions({ org_id: modalOrgId })
+        .then((res) => {
+          if (!this.orgFormModal.open || Number(this.orgFormModal.orgId || 0) !== modalOrgId) return;
+          const data = (res && res.data) || {};
+          this.statisticDimensionOptions = Array.isArray(data.options) ? data.options : [];
+          this.orgFormModal.statisticDimensionCode = String(data.current_value || '');
+        })
+        .catch(() => {
+          if (!this.orgFormModal.open || Number(this.orgFormModal.orgId || 0) !== modalOrgId) return;
+          this.statisticDimensionOptions = [];
+        });
     },
     openDeleteOrgModal(orgId, orgName) {
       if (!this.canWrite) {

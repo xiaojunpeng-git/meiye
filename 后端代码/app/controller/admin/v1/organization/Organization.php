@@ -40,6 +40,21 @@ class Organization extends AuthController
         return $this->success($this->services->getRegionCountsMap());
     }
 
+    /** 组织编辑弹窗的统计维度选项及当前选择。 */
+    public function statistic_dimensions()
+    {
+        [$orgId] = $this->request->getMore([
+            ['org_id', 0],
+        ], true);
+        try {
+            /** @var OrganizationWorkspaceReadServices $workspace */
+            $workspace = app()->make(OrganizationWorkspaceReadServices::class);
+            return $this->success($workspace->getStatisticDimensions((int)$orgId));
+        } catch (\Throwable $e) {
+            return $this->fail($e->getMessage());
+        }
+    }
+
     public function write_status()
     {
         try {
@@ -57,8 +72,11 @@ class Organization extends AuthController
             [['pid', 'd'], 0],
             [['name', 's'], ''],
             [['sort', 'd'], 0],
+            [['statistic_dimension_code', 's'], ''],
             [['request_token', 's'], ''],
         ]);
+        // 兼容旧组织保存调用：只有显式提交该字段才改变已有统计维度。
+        $data['statistic_dimension_provided'] = $this->request->has('statistic_dimension_code', 'post');
         try {
             /** @var OrganizationWorkspaceWriteServices $write */
             $write = app()->make(OrganizationWorkspaceWriteServices::class);

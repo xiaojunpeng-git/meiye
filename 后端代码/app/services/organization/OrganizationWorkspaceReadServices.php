@@ -37,6 +37,52 @@ class OrganizationWorkspaceReadServices extends BaseServices
         return $this->manageServices->getTree();
     }
 
+    /**
+     * 组织编辑弹窗的统计维度下拉。
+     * 选项完全来自已落库的报表统计维度记录；这里不推断组织层级，也不定义维度白名单。
+     *
+     * @return array{options:array<int,array{value:string,label:string}>,current_value:string}
+     */
+    public function getStatisticDimensions(int $orgId = 0): array
+    {
+        $options = Db::name('cashier_v3_report_organization_dimension')
+            ->where('tenant_id', '0')
+            ->field('dimension_code,MIN(display_order) AS display_order,MIN(id) AS first_id')
+            ->group('dimension_code')
+            ->orderRaw('MIN(display_order) ASC, MIN(id) ASC')
+            ->select()
+            ->toArray();
+
+        $currentValue = '';
+        if ($orgId > 0) {
+            $this->assertOrgId($orgId);
+            $today = date('Y-m-d');
+            $currentValue = (string)(Db::name('cashier_v3_report_organization_dimension')
+                ->where('tenant_id', '0')
+                ->where('organization_id', (string)$orgId)
+                ->where('enabled', 1)
+                ->where('valid_from', '<=', $today)
+                ->where(function ($query) use ($today): void {
+                    $query->whereNull('valid_to')->whereOr('valid_to', '>=', $today);
+                })
+                ->order('valid_from', 'desc')
+                ->order('id', 'desc')
+                ->value('dimension_code') ?: '');
+        }
+
+        return [
+            'options' => array_map(static function (array $row): array {
+                $value = (string)($row['dimension_code'] ?? '');
+                $labels = [
+                    'company' => '分公司',
+                    'city_manager' => '城市经理',
+                ];
+                return ['value' => $value, 'label' => $labels[$value] ?? $value];
+            }, $options),
+            'current_value' => $currentValue,
+        ];
+    }
+
     public function getOverview(int $orgId): array
     {
         $orgId = $this->assertOrgId($orgId);

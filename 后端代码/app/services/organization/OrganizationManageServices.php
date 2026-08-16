@@ -162,6 +162,116 @@ class OrganizationManageServices extends BaseServices
         return $newId;
     }
 
+    /**
+     * 锁内/事务内保存组织当前选择的统计维度。
+     * 本方法只持久化选择本身，不对组织层级、维度代码或报表口径作业务判断。
+     *
+     * @return array{value:string,changed:bool}
+     */
+    public function applySaveOrganizationStatisticDimension(
+        int $orgId,
+        string $dimensionCode,
+        int $operatorId = 0,
+        string $operatorName = '',
+        array $auditMeta = []
+    ): array {
+        $org = Db::name('organization')->where('id', $orgId)->where('is_del', 0)->lock(true)->find();
+        if (!$org) {
+            throw new \Exception('组织不存在或已删除');
+        }
+
+        $dimensionCode = trim($dimensionCode);
+        if (strlen($dimensionCode) > 32) {
+            throw new \Exception('统计维度长度不能超过 32 个字符');
+        }
+
+        $today = date('Y-m-d');
+        $yesterday = date('Y-m-d', strtotime('-1 day'));
+        $now = time();
+        $rows = Db::name('cashier_v3_report_organization_dimension')
+            ->where('tenant_id', '0')
+            ->where('organization_id', (string)$orgId)
+            ->where('enabled', 1)
+            ->where('valid_from', '<=', $today)
+            ->where(function ($query) use ($today): void {
+                $query->whereNull('valid_to')->whereOr('valid_to', '>=', $today);
+            })
+            ->order('valid_from', 'desc')
+            ->order('id', 'desc')
+            ->lock(true)
+            ->select()
+            ->toArray();
+        $current = $rows[0] ?? null;
+        $currentValue = (string)($current['dimension_code'] ?? '');
+        if (count($rows) === 1 && $currentValue === $dimensionCode) {
+            return ['value' => $dimensionCode, 'changed' => false];
+        }
+
+        if ($rows) {
+            Db::name('cashier_v3_report_organization_dimension')
+                ->whereIn('id', array_map('intval', array_column($rows, 'id')))
+                ->update([
+                    'valid_to' => $yesterday,
+                    'updated_by' => $operatorId,
+                    'updated_at' => $now,
+                    'version' => Db::raw('version + 1'),
+                ]);
+        }
+
+        if ($dimensionCode !== '') {
+            // 同日反复切换回已选值时复用当日记录，避免违反 (tenant, org, code, valid_from) 唯一键。
+            $existing = Db::name('cashier_v3_report_organization_dimension')
+                ->where('tenant_id', '0')
+                ->where('organization_id', (string)$orgId)
+                ->where('dimension_code', $dimensionCode)
+                ->where('valid_from', $today)
+                ->lock(true)
+                ->find();
+            $save = [
+                'organization_name_snapshot' => (string)($org['name'] ?? ''),
+                'valid_to' => null,
+                'enabled' => 1,
+                'updated_by' => $operatorId,
+                'updated_at' => $now,
+                'version' => Db::raw('version + 1'),
+            ];
+            if ($existing) {
+                Db::name('cashier_v3_report_organization_dimension')->where('id', (int)$existing['id'])->update($save);
+            } else {
+                Db::name('cashier_v3_report_organization_dimension')->insert([
+                    'tenant_id' => '0',
+                    'organization_id' => (string)$orgId,
+                    'organization_name_snapshot' => (string)($org['name'] ?? ''),
+                    'dimension_code' => $dimensionCode,
+                    'display_order' => 0,
+                    'valid_from' => $today,
+                    'valid_to' => null,
+                    'enabled' => 1,
+                    'version' => 1,
+                    'created_by' => $operatorId,
+                    'updated_by' => $operatorId,
+                    'created_at' => $now,
+                    'updated_at' => $now,
+                ]);
+            }
+        }
+
+        $this->writeLog(
+            $orgId,
+            'save_statistic_dimension',
+            'organization_statistic_dimension',
+            $orgId,
+            ['statistic_dimension_code' => $currentValue],
+            ['statistic_dimension_code' => $dimensionCode],
+            '保存组织统计维度',
+            $operatorId,
+            $operatorName,
+            $auditMeta
+        );
+
+        return ['value' => $dimensionCode, 'changed' => true];
+    }
+
     public function deleteOrganization(int $id, int $operatorId = 0, string $operatorName = '', array $auditMeta = []): bool
     {
         if ($id <= 0) {

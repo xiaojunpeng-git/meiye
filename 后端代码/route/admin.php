@@ -1175,6 +1175,7 @@ Route::group('adminapi', function () {
 		// 组织架构（新）— 静态路径必须写在 organization/:id 之前，避免 migrate/bind_store 被当成 id
 		Route::get('organization/tree', 'v1.organization.Organization/tree')->option(['real_name' => '组织架构树']);
 		Route::get('organization/counts', 'v1.organization.Organization/counts')->option(['real_name' => '组织架构数量']);
+		Route::get('organization/statistic_dimensions', 'v1.organization.Organization/statistic_dimensions')->option(['real_name' => '组织统计维度选项']);
 		Route::get('organization/overview', 'v1.organization.Organization/overview')->option(['real_name' => '组织权限概况']);
 		Route::get('organization/stores', 'v1.organization.Organization/stores')->option(['real_name' => '组织工作台门店分页']);
 		Route::get('organization/employees', 'v1.organization.Organization/employees')->option(['real_name' => '组织工作台人员分页']);

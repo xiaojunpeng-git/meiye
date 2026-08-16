@@ -1106,6 +1106,15 @@ export function getOrganizationTree() {
   });
 }
 
+/** 组织编辑统计维度：选项与当前选择均由后端从已保存记录读取。 */
+export function getOrganizationStatisticDimensions(params = {}) {
+  return request({
+    url: '/region/organization/statistic_dimensions',
+    method: 'get',
+    params
+  });
+}
+
 /**
  * @description 组织架构-保存（O4：需 X-Request-Token）
  */

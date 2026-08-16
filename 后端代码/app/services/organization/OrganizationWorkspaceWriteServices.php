@@ -80,6 +80,8 @@ class OrganizationWorkspaceWriteServices
             'pid' => (int)($data['pid'] ?? 0),
             'name' => trim((string)($data['name'] ?? '')),
             'sort' => (int)($data['sort'] ?? 0),
+            'statistic_dimension_provided' => !empty($data['statistic_dimension_provided']) ? 1 : 0,
+            'statistic_dimension_code' => trim((string)($data['statistic_dimension_code'] ?? '')),
         ];
         $scopeKey = $id > 0 ? ('org:' . $id) : ('org:create:' . $payload['pid']);
         return $this->runWrite(
@@ -96,7 +98,18 @@ class OrganizationWorkspaceWriteServices
                     (string)$auditMeta['operator_name'],
                     $auditMeta
                 );
-                return ['msg' => '保存成功', 'data' => ['id' => $newId]];
+                $data = ['id' => $newId];
+                if ((int)$payload['statistic_dimension_provided'] === 1) {
+                    $dimension = $this->manage->applySaveOrganizationStatisticDimension(
+                        $newId,
+                        (string)$payload['statistic_dimension_code'],
+                        (int)$auditMeta['operator_id'],
+                        (string)$auditMeta['operator_name'],
+                        $auditMeta
+                    );
+                    $data['statistic_dimension_code'] = $dimension['value'];
+                }
+                return ['msg' => '保存成功', 'data' => $data];
             }
         );
     }
