@@ -37,7 +37,8 @@ export default {
       })
       const suffix = query.toString() ? `?${query.toString()}` : ''
       const vue3Origin = String(process.env.VUE_APP_CASHIER_V3_DEV_ORIGIN || window.location.origin).replace(/\/$/, '')
-      return `${vue3Origin}/view_cashier_v3/#/platform/reports/${encodeURIComponent(this.reportCode)}${suffix}`
+      const reportVersion = encodeURIComponent(String(process.env.VUE_APP_CASHIER_V3_REPORT_VERSION || '44aa777b'))
+      return `${vue3Origin}/view_cashier_v3/?release=${reportVersion}#/platform/reports/${encodeURIComponent(this.reportCode)}${suffix}`
     }
   },
 }
