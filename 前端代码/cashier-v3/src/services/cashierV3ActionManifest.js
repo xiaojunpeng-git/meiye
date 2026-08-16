@@ -150,6 +150,7 @@ const C2_ACTIONS = {
   ...entries(C2, ACTION_TYPE_PROJECTION, {
     'open-line-assignment': FEATURE_CASHIER,
     'open-line-coupon': FEATURE_CASHIER,
+    'open-local-line-coupon': FEATURE_CASHIER,
     'open-line-debt': FEATURE_CASHIER,
     'open-price-change': FEATURE_CASHIER,
     'open-card-upgrade': FEATURE_CASHIER,

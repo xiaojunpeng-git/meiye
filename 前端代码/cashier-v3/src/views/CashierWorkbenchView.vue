@@ -305,13 +305,17 @@ const isRechargeDebtRepaymentCheckout = computed(() => (
   && checkout.value.orderLines.some((line) => String(line?.name || '') === '充值欠款补交')
 ))
 const checkoutLocalOutcome = ref({})
+// 编辑阶段的结账预览不创建 checkout_request。第三步确认时才把本地购物车
+// 与收款选择一次性写入既有结账流程，由服务端读取最新余额与权益后完成校验。
+const localCheckoutPreview = ref(null)
+const localCheckoutPaymentOperations = ref([])
 // A recovered draft can safely reopen on the final confirmation step only
 // when the authoritative payment snapshot is already fully balanced.  This
 // is a display position, never a settlement instruction.
 const checkoutRecoveryActiveStep = ref(null)
 const checkoutRequiresRootReload = ref(false)
 const checkoutOverlayState = computed(() => ({
-  ...checkout.value,
+  ...(localCheckoutPreview.value || checkout.value),
   ...checkoutLocalOutcome.value,
   ...(activeCardOperationUpgrade.value
     ? {
@@ -395,20 +399,29 @@ function localDraftBase() {
   }
 }
 
+function moneyToCents(value) {
+  const amount = Number(value)
+  return Number.isFinite(amount) ? Math.max(0, Math.round(amount * 100)) : 0
+}
+
+function centsToMoney(value) {
+  return Math.max(0, Number(value) || 0) / 100
+}
+
 function recalculateLocalCashierDraft(draft) {
   const lines = Array.isArray(draft.lines) ? draft.lines : []
-  const originalAmount = lines.reduce((total, line) => (
-    total + Math.max(0, Number(line.originalAmount ?? getLineAmount(line) ?? 0)) * Math.max(1, Number(line.quantity || 1))
+  const originalAmountCents = lines.reduce((total, line) => (
+    total + moneyToCents(line.originalAmount ?? getLineAmount(line)) * Math.max(1, Number(line.quantity || 1))
   ), 0)
-  const receivableAmount = lines.reduce((total, line) => (
-    total + Math.max(0, Number(getLineAmount(line) || 0)) * Math.max(1, Number(line.quantity || 1))
+  const receivableAmountCents = lines.reduce((total, line) => (
+    total + moneyToCents(getLineAmount(line)) * Math.max(1, Number(line.quantity || 1))
   ), 0)
   draft.summary = {
     ...(draft.summary || {}),
     selectedCount: lines.reduce((total, line) => total + Math.max(1, Number(line.quantity || 1)), 0),
-    originalAmount,
-    discountAmount: Math.max(0, originalAmount - receivableAmount),
-    receivableAmount,
+    originalAmount: centsToMoney(originalAmountCents),
+    discountAmount: centsToMoney(Math.max(0, originalAmountCents - receivableAmountCents)),
+    receivableAmount: centsToMoney(receivableAmountCents),
     orderNote: String(draft.orderNote || ''),
     hasOrderNote: Boolean(String(draft.orderNote || '').trim())
   }
@@ -432,6 +445,18 @@ function appendLocalCashierDraftOperation(operation, mutate) {
 
 function localDraftResult(message = '') {
   return { result: { status: 'succeeded', message } }
+}
+
+function isLocalCashierDraftLine(line = {}) {
+  return String(line?.id || '').startsWith('local-')
+}
+
+// 纯本地草稿的行都能由 operations 重新建立。兼容旧工作台或旧挂单时，
+// 草稿里可能已经有服务端行；只保存 operations 会在提单后遗漏这些行，
+// 因此该兼容场景必须先物化为完整的服务端草稿再按原挂单流程保存。
+function localDraftContainsPersistedCartLines() {
+  const lines = localCashierDraft.value?.lines
+  return Array.isArray(lines) && lines.some((line) => !isLocalCashierDraftLine(line))
 }
 
 function applyLocalCashierDraftMutation(action, line, payload = {}) {
@@ -458,10 +483,23 @@ function applyLocalCashierDraftMutation(action, line, payload = {}) {
     }
     if (action === 'apply-line-coupon') {
       target.couponId = String(payload.couponId || '')
+      target.couponSummary = String(payload.couponSummary || '已选优惠券')
+      const baseAmount = moneyToCents(target.couponBaseAmount ?? target.finalAmount ?? target.amount)
+      target.couponBaseAmount = centsToMoney(baseAmount)
+      target.couponDiscountCents = Math.min(baseAmount, Math.max(0, Number(payload.discountAmountCents || 0)))
+      target.finalAmount = centsToMoney(baseAmount - target.couponDiscountCents)
+      target.amount = target.finalAmount
       return
     }
     if (action === 'remove-line-coupon') {
       delete target.couponId
+      delete target.couponSummary
+      delete target.couponDiscountCents
+      if (target.couponBaseAmount !== undefined) {
+        target.finalAmount = target.couponBaseAmount
+        target.amount = target.finalAmount
+        delete target.couponBaseAmount
+      }
     }
   })
   return localDraftResult()
@@ -1298,7 +1336,7 @@ function cartLineRoleLabel(line) {
 }
 
 function getLineAmount(line) {
-  return line.finalAmount ?? line.amount ?? 0
+  return line.finalAmount ?? line.actualAmount ?? line.amount ?? 0
 }
 
 function linePriceChanged(line = {}) {
@@ -1847,6 +1885,46 @@ async function submitDirectCardOperation({ source, date = '', reason = '' } = {}
     return { result: { status: 'success', preview: true } }
   }
 
+  if (cardOperationUpgradeTypes.has(operationType)) {
+    const localLineId = `local-card-operation-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    const targetAmount = Math.max(0, Number(operation.target?.price || operation.target?.amount || 0))
+    const sourceBalance = Math.max(0, Number(source.remainingAmount || source.remainingValue || 0))
+    const receivableAmount = Math.max(0, targetAmount - sourceBalance)
+    appendLocalCashierDraftOperation({
+      action: 'submit-card-operation',
+      localLineId,
+      payload
+    }, (draft) => {
+      draft.lines.push({
+        id: localLineId,
+        lineRole: 'sale',
+        catalogItemId: Number(payload.targetCatalogId || 0),
+        productId: Number(payload.targetCatalogId || 0),
+        name: String(operation.target?.name || (operationType === 'card_upgrade' ? '升级卡项' : '升级项目')),
+        kind: String(operation.target?.kind || (operationType === 'card_upgrade' ? '卡项' : '项目')),
+        productType: Number(operation.target?.productType || (operationType === 'project_upgrade' ? 6 : 0)),
+        quantity: 1,
+        amount: receivableAmount,
+        finalAmount: receivableAmount,
+        originalAmount: targetAmount,
+        debtAmountCents: 0,
+        cardOperationUpgrade: {
+          operationType,
+          sourceRemainingValueCents: moneyToCents(sourceBalance),
+          targetAmountCents: moneyToCents(targetAmount),
+          deltaAmountCents: moneyToCents(receivableAmount)
+        },
+        localCardOperation: clonePlain(payload)
+      })
+    })
+    finalizeEntitlementSelector()
+    previewCardOperation.value = null
+    window.dispatchEvent(new CustomEvent('cashier-v3:ui-result', {
+      detail: { status: 'success', message: '升级项目已加入本次购物车。' }
+    }))
+    return localDraftResult('升级项目已加入本次购物车。')
+  }
+
   if (isSubmittingCardOperation.value) {
     return { result: { status: 'failed', code: 'CARD_OPERATION_SUBMITTING', message: '正在提交卡操作，请勿重复点击。' } }
   }
@@ -2093,7 +2171,6 @@ async function addEntitlementLines(payload = {}) {
   if (isAddingEntitlementLines.value || !isCompleteEntitlementSelector(entitlementSelector.value, entitlementSelectorRequestId.value)) {
     return { result: { status: 'failed', code: 'ENTITLEMENT_SELECTOR_SESSION_EXPIRED', message: '权益选择会话已失效，请关闭后重新打开。' } }
   }
-  const requestScopeKey = currentCashierDraftScopeKey.value
   const projectKey = String(payload.projectKey || '')
   const addIntentId = String(payload.addIntentId || createCashierV3CommandId('ENTITLEMENT_ADD'))
   // 普通“使用权益”在打开选择器时已经取得最新展示数据。这里仅确保该
@@ -2105,80 +2182,102 @@ async function addEntitlementLines(payload = {}) {
     mutationMode: 'append'
   }
   delete commandPayload.projectKey
-  const existingLineIds = new Set(cartLines.value.map((line) => String(line?.id || '')))
-  const retryTicket = draftCommandRecovery.begin({
-    operationKey: `add-entitlement:${draftRecoveryScopeKey.value}:${projectKey}`,
-    scopeKey: draftRecoveryScopeKey.value,
-    action: 'add-checkout-entitlement-lines',
-    payload: commandPayload,
-    idempotencyPrefix: 'ADD_ENTITLEMENT'
-  })
-  cashierDraftHasUnresolvedCommand.value = true
-  if (!retryTicket.accepted) {
-    // A previous draft response can be lost while the server has already
-    // accepted it. Recover that exact command first, then continue the
-    // operator's current edit without asking them to decide what to retry.
-    const recovered = await recoverPendingDraftCommand()
-    if (!recovered) return unresolvedDraftCommandResult(retryTicket)
-    return addEntitlementLines(payload)
+  const appendLine = commandPayload.lines[0]
+  if (!appendLine) {
+    return { result: { status: 'failed', code: 'ENTITLEMENT_LINE_INVALID', message: '权益项目数据不完整，请重新打开后选择。' } }
   }
   pendingEntitlementProjectKey.value = projectKey
   isAddingEntitlementLines.value = true
   try {
-    const result = await requestAction('add-checkout-entitlement-lines', {
-      ...retryTicket.payload,
-      idempotencyKey: retryTicket.idempotencyKey
+    const localLineId = `local-entitlement-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    const localLine = localEntitlementDraftLine(appendLine, localLineId)
+    appendLocalCashierDraftOperation({
+      action: 'add-checkout-entitlement-lines',
+      localLineId,
+      payload: commandPayload
+    }, (draft) => {
+      localLine.actualAmount = localEntitlementAmount(draft.lines || [], localLine)
+      localLine.amount = localLine.actualAmount
+      localLine.finalAmount = localLine.actualAmount
+      localLine.originalAmount = localLine.actualAmount
+      draft.lines.push(localLine)
     })
-    const status = resultStatus(result)
-    if (['failed', 'conflict'].includes(status)) {
-      draftCommandRecovery.settle(retryTicket, status)
-      cashierDraftHasUnresolvedCommand.value = Boolean(
-        draftCommandRecovery.pendingForScope(draftRecoveryScopeKey.value)
-      )
+    if (projectKey) {
+      addedEntitlementProjectKey.value = projectKey
+      activeCartLineId.value = localLineId
+      addedEntitlementLineId.value = localLineId
+      if (entitlementAddedTimer) window.clearTimeout(entitlementAddedTimer)
+      entitlementAddedTimer = window.setTimeout(() => {
+        addedEntitlementProjectKey.value = ''
+        addedEntitlementLineId.value = ''
+        entitlementAddedTimer = null
+      }, 700)
     }
-    if (['succeeded', 'success'].includes(status)) {
-      const draft = responseDataBlock(result).cashierDraft
-      if (!await applyCommittedCashierDraft(draft, requestScopeKey)) {
-        const invalidDraft = {
-          result: {
-            status: 'failed',
-            code: 'CASHIER_DRAFT_INCOMPLETE',
-            message: '购物车权威数据尚未完整返回，系统已自动刷新工作台；如仍未显示请稍后重试。'
-          },
-          requiresRefresh: true
-        }
-        reportEntitlementContractError(invalidDraft.result)
-        return invalidDraft
-      }
-      draftCommandRecovery.settle(retryTicket, status)
-      cashierDraftHasUnresolvedCommand.value = Boolean(
-        draftCommandRecovery.pendingForScope(draftRecoveryScopeKey.value)
-      )
-      if (projectKey) {
-        addedEntitlementProjectKey.value = projectKey
-        const appendedLine = (draft.lines || []).find((line) => (
-          line?.lineRole === 'entitlement_service'
-          && !existingLineIds.has(String(line.id || ''))
-        ))
-        activeCartLineId.value = appendedLine?.id || null
-        addedEntitlementLineId.value = String(appendedLine?.id || '')
-        if (entitlementAddedTimer) window.clearTimeout(entitlementAddedTimer)
-        entitlementAddedTimer = window.setTimeout(() => {
-          addedEntitlementProjectKey.value = ''
-          addedEntitlementLineId.value = ''
-          entitlementAddedTimer = null
-        }, 700)
-      }
-      // 添加草稿不会消耗权益；响应若未携带下一版工作台上下文，就在
-      // 当前页面静默换取新的选择器会话，保留组件内的查询与筛选状态。
-      if (!preserveEntitlementSelectorAfterDraftCommit(result)) {
-        await openEntitlementSelector({ preserveSnapshot: true })
-      }
-    }
-    return result
+    return localDraftResult('卡内项目已加入本次购物车。')
   } finally {
     pendingEntitlementProjectKey.value = ''
     isAddingEntitlementLines.value = false
+  }
+}
+
+function localEntitlementAmount(lines = [], line = {}) {
+  const sourceKey = `${line.entitlementInstanceId || line.cardHolderId || ''}:${line.entitlementSourceDetailId || line.memberBenefitPoolId || ''}`
+  const selectedBefore = (Array.isArray(lines) ? lines : []).reduce((total, current) => {
+    if (!isEntitlementLine(current)) return total
+    const currentKey = `${current.entitlementInstanceId || current.cardHolderId || ''}:${current.entitlementSourceDetailId || current.memberBenefitPoolId || ''}`
+    return currentKey === sourceKey ? total + Math.max(1, Number(current.quantity || 1)) : total
+  }, 0)
+  const totalCents = moneyToCents(line.purchaseAmount)
+  const totalTimes = Number(line.totalPurchaseTimes || 0)
+  const consumedTimes = Number(line.consumedTimesAtSelection || 0) + selectedBefore
+  const quantity = Math.max(1, Number(line.quantity || 1))
+  // 编辑态只按当前展示权益计算应收，不以剩余次数阻止加入；实际余次由
+  // 第三步确认时的权威结账事务重新读取并校验。
+  if (!totalCents || !Number.isInteger(totalTimes) || totalTimes <= 0) return 0
+  const cumulative = (times) => Math.round((totalCents * times) / totalTimes)
+  return centsToMoney(cumulative(consumedTimes + quantity) - cumulative(consumedTimes))
+}
+
+function localEntitlementDraftLine(line = {}, id = '') {
+  const snapshot = clonePlain(line.displaySnapshot || {})
+  return {
+    id,
+    lineRole: 'entitlement_service',
+    memberId: currentMemberId.value,
+    cardHolderId: String(line.cardHolderId || ''),
+    memberBenefitPoolId: String(line.memberBenefitPoolId || ''),
+    entitlementInstanceId: String(line.entitlementInstanceId || line.cardHolderId || ''),
+    entitlementInstanceType: String(line.entitlementInstanceType || snapshot.entitlementInstanceType || ''),
+    entitlementSourceDetailId: String(line.entitlementSourceDetailId || line.memberBenefitPoolId || ''),
+    entitlementSourceVersion: Number(line.entitlementSourceVersion || 0),
+    projectId: String(line.projectId || ''),
+    projectVersion: Number(line.projectVersion || snapshot.detailVersion || 0),
+    name: String(snapshot.name || '项目'),
+    kind: String(snapshot.kind || '项目'),
+    entitlementSourceName: String(snapshot.entitlementSourceName || ''),
+    fullCardNo: String(snapshot.fullCardNo || ''),
+    remainingTimes: Number(snapshot.remainingTimes || 0),
+    occupiedTimes: Number(snapshot.occupiedTimes || 0),
+    availableTimes: Number(snapshot.availableTimes || 0),
+    productType: 6,
+    quantity: Math.max(1, Number(line.quantity || 1)),
+    purchaseAmount: snapshot.purchaseAmount,
+    totalPurchaseTimes: Number(snapshot.totalPurchaseTimes || 0),
+    consumedTimesAtSelection: Number(snapshot.consumedTimesAtSelection || 0),
+    sourceConsumedTimesAtSelection: Number(snapshot.consumedTimesAtSelection || 0),
+    amountSourceVersion: Number(snapshot.amountSourceVersion || 0),
+    amountCalculationVersion: String(snapshot.amountCalculationVersion || ''),
+    amountRole: 'entitlement_actual',
+    serviceObject: '本人',
+    craftsmen: [],
+    craftsmenSummary: '待选择手艺人',
+    isExperience: false,
+    serviceSource: '卡内项目',
+    displaySnapshot: snapshot,
+    actualAmount: 0,
+    amount: 0,
+    finalAmount: 0,
+    originalAmount: 0
   }
 }
 
@@ -2386,6 +2485,72 @@ async function synchronizeLocalCashierDraft() {
         consumeSynchronizedLocalCashierOperation()
         continue
       }
+      if (action === 'add-checkout-entitlement-lines') {
+        const previousIds = new Set(cartLines.value.map((line) => String(line?.id || '')))
+        result = await requestAction(action, {
+          ...clonePlain(operation.payload || {}),
+          idempotencyKey: createCashierV3CommandId('ADD_ENTITLEMENT')
+        })
+        if (!['success', 'succeeded'].includes(resultStatus(result))) return result
+        const draft = responseDataBlock(result).cashierDraft
+        if (!await applyCommittedCashierDraft(draft, currentCashierDraftScopeKey.value)) {
+          return { result: { status: 'failed', code: 'CASHIER_DRAFT_SYNC_INCOMPLETE', message: '权益项目未能保存，请重新结账。' } }
+        }
+        const appended = cartLines.value.find((line) => !previousIds.has(String(line?.id || '')))
+        if (!appended?.id) {
+          return { result: { status: 'failed', code: 'CASHIER_DRAFT_SYNC_LINE_MISSING', message: '权益项目未能保存，请重新结账。' } }
+        }
+        lineIdMap.set(String(operation.localLineId || ''), String(appended.id))
+        localCashierPersistedLineIds.value = {
+          ...localCashierPersistedLineIds.value,
+          [String(operation.localLineId || '')]: String(appended.id)
+        }
+        consumeSynchronizedLocalCashierOperation()
+        continue
+      }
+      if (action === 'create-custom-card-configuration') {
+        const previousIds = new Set(cartLines.value.map((line) => String(line?.id || '')))
+        result = await requestAction(action, {
+          ...clonePlain(operation.payload || {}),
+          idempotencyKey: createCashierV3CommandId('CUSTOM_CARD')
+        })
+        if (!['success', 'succeeded'].includes(resultStatus(result))) return result
+        const draft = responseDataBlock(result).cashierDraft
+        if (!await applyCommittedCashierDraft(draft, currentCashierDraftScopeKey.value)) {
+          return { result: { status: 'failed', code: 'CASHIER_DRAFT_SYNC_INCOMPLETE', message: '定制卡未能保存，请重新结账。' } }
+        }
+        const appended = cartLines.value.find((line) => !previousIds.has(String(line?.id || '')))
+        if (!appended?.id) {
+          return { result: { status: 'failed', code: 'CASHIER_DRAFT_SYNC_LINE_MISSING', message: '定制卡未能保存，请重新结账。' } }
+        }
+        lineIdMap.set(String(operation.localLineId || ''), String(appended.id))
+        localCashierPersistedLineIds.value = {
+          ...localCashierPersistedLineIds.value,
+          [String(operation.localLineId || '')]: String(appended.id)
+        }
+        consumeSynchronizedLocalCashierOperation()
+        continue
+      }
+      if (action === 'submit-card-operation') {
+        const previousIds = new Set(cartLines.value.map((line) => String(line?.id || '')))
+        result = await requestCashierV3Action(action, clonePlain(operation.payload || {}))
+        if (!['success', 'succeeded'].includes(resultStatus(result))) return result
+        const draft = responseDataBlock(result).cashierDraft
+        if (!await applyCommittedCashierDraft(draft, currentCashierDraftScopeKey.value)) {
+          return { result: { status: 'failed', code: 'CASHIER_DRAFT_SYNC_INCOMPLETE', message: '升级项目未能保存，请重新结账。' } }
+        }
+        const appended = cartLines.value.find((line) => !previousIds.has(String(line?.id || '')))
+        if (!appended?.id) {
+          return { result: { status: 'failed', code: 'CASHIER_DRAFT_SYNC_LINE_MISSING', message: '升级项目未能保存，请重新结账。' } }
+        }
+        lineIdMap.set(String(operation.localLineId || ''), String(appended.id))
+        localCashierPersistedLineIds.value = {
+          ...localCashierPersistedLineIds.value,
+          [String(operation.localLineId || '')]: String(appended.id)
+        }
+        consumeSynchronizedLocalCashierOperation()
+        continue
+      }
       if (action === 'clear-cart-lines') {
         const saved = await clearCashierDraft(String(state.stateContextId || ''))
         if (!await applyCommittedCashierDraft(saved?.cashierDraft, currentCashierDraftScopeKey.value)) {
@@ -2396,12 +2561,12 @@ async function synchronizeLocalCashierDraft() {
         consumeSynchronizedLocalCashierOperation()
         continue
       }
-      if (['update-cashier-order-note', 'update-cashier-supplement', 'update-cashier-line-price'].includes(action)) {
+      if (['update-cashier-order-note', 'update-cashier-supplement', 'update-cashier-line-price', 'apply-cashier-personnel-to-all-lines'].includes(action)) {
         const payload = clonePlain(operation.payload || {})
         if (payload.lineId) payload.lineId = lineIdMap.get(String(payload.lineId)) || payload.lineId
         result = await requestAction(action, {
           ...payload,
-          idempotencyKey: createCashierV3CommandId('CASHIER_MORE')
+          idempotencyKey: createCashierV3CommandId(action === 'apply-cashier-personnel-to-all-lines' ? 'CASHIER_APPLY_PERSONNEL_ALL' : 'CASHIER_MORE')
         })
         if (!['success', 'succeeded'].includes(resultStatus(result))) return result
         if (!await applyCommittedCashierDraft(responseDataBlock(result).cashierDraft, currentCashierDraftScopeKey.value)) {
@@ -2731,7 +2896,23 @@ function normalizeCouponSelector(selector = {}, line = {}) {
 async function openCartLineCoupon(line) {
   if (isEntitlementLine(line)) return
   activeCartLineId.value = line.id
-  const result = await requestAction('open-line-coupon', { lineId: line.id })
+  // 本地草稿可能同时投影旧服务端行和新临时行。只要当前存在本地草稿，
+  // 所有券选择都必须写入同一份本地快照，不能按单行 ID 退回旧接口。
+  const localDraft = Boolean(localCashierDraft.value)
+  const reservedCouponIds = localDraft
+    ? cartLines.value
+      .filter((candidate) => String(candidate?.id || '') !== String(line.id || ''))
+      .map((candidate) => Number(candidate?.couponId || 0))
+      .filter((couponId) => Number.isInteger(couponId) && couponId > 0)
+    : []
+  const lineAmountCents = moneyToCents(getLineAmount(line))
+  const couponThresholdCents = Math.max(
+    lineAmountCents,
+    Number(line?.cardOperationUpgrade?.targetAmountCents || 0)
+  )
+  const result = await requestAction(localDraft ? 'open-local-line-coupon' : 'open-line-coupon', localDraft
+    ? { lineId: line.id, lineAmountCents, couponThresholdCents, reservedCouponIds }
+    : { lineId: line.id })
   if (!['success', 'succeeded'].includes(resultStatus(result))) return
   const selector = responseDataBlock(result).couponSelector
   if (!selector || String(selector.lineId || '') !== String(line.id || '') || !Array.isArray(selector.coupons)) {
@@ -2753,7 +2934,15 @@ async function saveLineCoupon(action, couponId = '') {
   }
   isSavingLineCoupon.value = true
   try {
-    let result = await mutateCashierDraft(action, line, couponId ? { couponId } : {})
+    const coupon = (couponSelector.value?.coupons || []).find((item) => String(item?.couponId || '') === String(couponId || ''))
+    const payload = couponId
+      ? {
+          couponId,
+          couponSummary: String(coupon?.name || '已选优惠券'),
+          discountAmountCents: Math.max(0, Number(coupon?.discountAmountCents || 0))
+        }
+      : {}
+    let result = await mutateCashierDraft(action, line, payload)
     if (resultStatus(result) === 'result_unknown') {
       const recovered = await recoverPendingDraftCommand()
       if (!recovered) return
@@ -2938,25 +3127,24 @@ async function applyPersonnelAssignmentToAll(result = {}) {
   if (!craftsmen.length && !salespeople.length && !guideSelections.length && !salesManagerSelections.length) return
   isSavingPersonnelAssignment.value = true
   try {
-    const requestScopeKey = currentCashierDraftScopeKey.value
-    const response = await requestAction('apply-cashier-personnel-to-all-lines', {
+    const payload = {
       craftsmen,
       salespeople,
       guideSelections,
-      salesManagerSelections,
-      idempotencyKey: createCashierV3CommandId('CASHIER_APPLY_PERSONNEL_ALL')
+      salesManagerSelections
+    }
+    appendLocalCashierDraftOperation({ action: 'apply-cashier-personnel-to-all-lines', payload }, (draft) => {
+      for (const line of draft.lines || []) {
+        if (craftsmen.length && isProjectLine(line) && !isCustomCardPurchase(line)) line.craftsmen = clonePlain(result.craftsmen || [])
+        if (salespeople.length && !isEntitlementLine(line)) line.salespeople = clonePlain(result.salespeople || [])
+        if (!isEntitlementLine(line)) {
+          line.guideSelections = clonePlain(result.guideSelections || [])
+          line.salesManagerSelections = clonePlain(result.salesManagerSelections || [])
+        }
+      }
     })
-    if (!['success', 'succeeded'].includes(resultStatus(response))) {
-      reportPersonnelAssignmentFailure(response, '应用全部人员失败，请保留当前选择后重试。')
-      return
-    }
-    const draft = responseDataBlock(response).cashierDraft
-    if (!await applyCommittedCashierDraft(draft, requestScopeKey)) {
-      reportPersonnelAssignmentFailure(null, '人员分配已提交，但权威购物车未完整返回，系统正在刷新。')
-      return
-    }
     const assignments = { ...localPersonnelAssignments.value }
-    for (const line of Array.isArray(draft?.lines) ? draft.lines : []) {
+    for (const line of cartLines.value) {
       const current = { ...(assignments[line.id] || {}) }
       if (craftsmen.length && isProjectLine(line) && !isCustomCardPurchase(line)) {
         current.craftsmen = clonePlain(result.craftsmen || [])
@@ -3302,14 +3490,33 @@ async function confirmGuidedBusiness(result = {}) {
     if (isCreatingCustomCard.value) return
     isCreatingCustomCard.value = true
     try {
-      const response = await requestAction('create-custom-card-configuration', result.payload || {})
-      if (resultStatus(response) === 'success') {
-        // The configuration command mutates the authoritative workspace draft.
-        // Its compact success response intentionally omits a full root state, so
-        // immediately reload the workbench before hiding the guided panel.
-        await requestAction('open-cashier-workbench', { silent: true })
-        guidedBusinessMode.value = ''
-      }
+      const payload = clonePlain(result.payload || {})
+      const amount = Math.max(0, Number(result.amount || 0))
+      if (!String(payload.cardName || '').trim() || !amount) return
+      const localLineId = `local-custom-card-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+      appendLocalCashierDraftOperation({
+        action: 'create-custom-card-configuration',
+        localLineId,
+        payload
+      }, (draft) => {
+        draft.lines.push({
+          id: localLineId,
+          lineRole: 'sale',
+          name: String(payload.cardName || result.title || '定制卡'),
+          kind: '卡项',
+          kindCode: 'custom_card',
+          sourceKind: 'custom_card',
+          productType: 0,
+          quantity: 1,
+          amount,
+          finalAmount: amount,
+          originalAmount: amount,
+          debtAmountCents: 0,
+          cardPurchaseSnapshot: { sourceKind: 'custom_card' },
+          localCustomCardConfiguration: payload
+        })
+      })
+      guidedBusinessMode.value = ''
     } finally {
       isCreatingCustomCard.value = false
     }
@@ -3507,6 +3714,66 @@ async function setLineQuantity(line, event) {
   return result
 }
 
+function localCheckoutPaymentMethods() {
+  return [
+    ['unionpay', '银联'], ['wechat', '微信'], ['alipay', '支付宝'],
+    ['dianping_voucher', '大众验券'], ['douyin_voucher', '抖音验券'],
+    ['partner_collection', '合作方收款'], ['other_collection', '其他收款']
+  ].map(([id, name]) => ({ id, name, canAdd: true }))
+}
+
+function localCheckoutPreviewSnapshot() {
+  const draft = clonePlain(localCashierDraft.value || localDraftBase())
+  const lines = Array.isArray(draft.lines) ? draft.lines : []
+  const composition = clonePlain(draft.checkoutComposition || {})
+  const hasSale = lines.some((line) => String(line?.lineRole || '') === 'sale')
+  const hasEntitlement = lines.some((line) => String(line?.lineRole || '') === 'entitlement_service')
+  const primaryAction = hasSale && hasEntitlement
+    ? 'collect_and_complete'
+    : (hasEntitlement ? 'complete_service' : 'collect_payment')
+  const primaryActionLabel = {
+    collect_payment: '确认收款', complete_service: '确认完成服务', collect_and_complete: '收款并完成服务'
+  }[primaryAction]
+  const receivableAmount = Number(draft.summary?.receivableAmount || 0)
+  const debtAmount = centsToMoney(lines.reduce((total, line) => (
+    total + lineDebtAmountCents(line)
+  ), 0))
+  return {
+    localDraftPreview: true,
+    status: 'editing',
+    requestStatus: 'editing',
+    businessType: 'sale',
+    member: clonePlain(member.value || {}),
+    orderLines: lines,
+    summary: clonePlain(draft.summary || {}),
+    orderSummary: clonePlain(draft.summary || {}),
+    // The preview deliberately has no server checkout request yet.  These
+    // values make its third step a complete local projection; the final click
+    // replaces it with the authoritative checkout snapshot before submission.
+    debtAmount,
+    debtAmountCents: moneyToCents(debtAmount),
+    cashPerformanceAmount: 0,
+    balancePaymentAmount: 0,
+    finalChanges: [],
+    composition: {
+      ...composition,
+      lineRoles: [hasSale && 'sale', hasEntitlement && 'entitlement_service'].filter(Boolean),
+      hasSale, hasEntitlement, primaryAction, primaryActionLabel,
+      steps: [
+        { key: 'order', number: 1, label: hasEntitlement ? '确认本次内容' : '确认订单' },
+        ...(hasSale ? [{ key: 'payment', number: 2, label: '收款信息' }] : []),
+        { key: 'final', number: 3, label: primaryActionLabel },
+        { key: 'result', number: 4, label: '处理结果' }
+      ]
+    },
+    payment: {
+      methods: localCheckoutPaymentMethods(),
+      selectedLines: [],
+      summary: { receivableAmount, selectedAmount: 0, remainingAmount: receivableAmount, overpaidAmount: 0 }
+    }
+  }
+}
+
 async function openCheckout() {
   try {
     if (cartQuantityValidationError.value) {
@@ -3539,6 +3806,13 @@ async function openCheckout() {
     if (!hasCartLines.value) {
     return { result: { status: 'failed', code: 'CASHIER_CART_EMPTY', message: '请先添加需要结算或服务的项目。' } }
   }
+    if (localCashierDraftOperations.value.length > 0) {
+      localCheckoutPreview.value = localCheckoutPreviewSnapshot()
+      localCheckoutPaymentOperations.value = []
+      checkoutSession.value = null
+      isCheckoutOpen.value = true
+      return localDraftResult('已进入结账预览。')
+    }
     if (!await persistDeferredLineServiceSettings()) {
       return { result: { status: 'failed', code: 'CASHIER_LINE_SERVICE_SETTINGS_SAVE_FAILED', message: '本次服务设置保存失败，请重试。' } }
     }
@@ -3679,11 +3953,26 @@ async function openHangOrder() {
   // 库存、权益、价格等结账校验。从房间进入时只把房间写进草稿关联。
   isSavingHangDraft.value = true
   try {
-    if (!await persistDeferredLineServiceSettings()) {
-      return { result: { status: 'failed', code: 'CASHIER_LINE_SERVICE_SETTINGS_SAVE_FAILED', message: '本次服务设置保存失败，请重试。' } }
+    const hasLocalOperations = localCashierDraftOperations.value.length > 0
+    const hasPersistedLines = hasLocalOperations && localDraftContainsPersistedCartLines()
+    if (hasPersistedLines) {
+      const synchronized = await synchronizeLocalCashierDraft()
+      if (!['success', 'succeeded'].includes(resultStatus(synchronized))) return synchronized
     }
-    const synchronized = await synchronizeLocalCashierDraft()
-    if (!['success', 'succeeded'].includes(resultStatus(synchronized))) return synchronized
+    const remainingLocalOperations = localCashierDraftOperations.value.length > 0
+    const localDraft = remainingLocalOperations
+      ? {
+          ...clonePlain(localCashierDraft.value || localDraftBase()),
+          operations: clonePlain(localCashierDraftOperations.value)
+        }
+      : null
+    if (!remainingLocalOperations) {
+      if (!await persistDeferredLineServiceSettings()) {
+        return { result: { status: 'failed', code: 'CASHIER_LINE_SERVICE_SETTINGS_SAVE_FAILED', message: '本次服务设置保存失败，请重试。' } }
+      }
+      const synchronized = await synchronizeLocalCashierDraft()
+      if (!['success', 'succeeded'].includes(resultStatus(synchronized))) return synchronized
+    }
     const intent = roomOpenIntent.value
     const saved = await saveHangDraft({
       stateContextId: String(state.stateContextId || ''),
@@ -3693,13 +3982,16 @@ async function openHangOrder() {
       roomNameSnapshot: intent?.roomName || '',
       roomVersion: intent?.roomVersion || 0,
       roomTimeSlotId: intent?.roomTimeSlotId || '',
-      roomTimeSlotVersion: intent?.roomTimeSlotVersion || 0
+      roomTimeSlotVersion: intent?.roomTimeSlotVersion || 0,
+      ...(localDraft ? { localDraft } : {})
     })
     const draft = saved?.cashierDraft
     if (!await applyCommittedCashierDraft(draft, currentCashierDraftScopeKey.value)) {
       throw new Error('挂单已保存，但购物车清空状态尚未完整返回，请刷新收银台。')
     }
     cashierDraftHasUnresolvedCommand.value = false
+    localCashierDraftOperations.value = []
+    localCashierPersistedLineIds.value = {}
     hangOrderPreparationId.value = null
     hangOrderSession.value = null
     isHangOrderOpen.value = false
@@ -3914,8 +4206,84 @@ async function queryHangOrderResult(command = {}) {
   }
 }
 
+async function finalizeLocalCheckoutPreview(event = {}) {
+  const paymentOperations = clonePlain(localCheckoutPaymentOperations.value)
+  const preview = localCheckoutPreview.value
+  localCheckoutPreview.value = null
+  try {
+    const synchronized = await synchronizeLocalCashierDraft()
+    if (!['success', 'succeeded'].includes(resultStatus(synchronized))) {
+      event?.resolve?.(synchronized)
+      return synchronized
+    }
+    const prepared = await openCheckout()
+    if (!['success', 'succeeded'].includes(resultStatus(prepared))) {
+      event?.resolve?.(prepared)
+      return prepared
+    }
+    for (const operation of paymentOperations) {
+      const applied = await requestCheckoutAction(operation)
+      if (!['success', 'succeeded'].includes(resultStatus(applied))) {
+        event?.resolve?.(applied)
+        return applied
+      }
+    }
+    localCheckoutPaymentOperations.value = []
+    const submitted = await requestCheckoutAction({ action: 'submit-checkout', payload: event?.payload || {} })
+    event?.resolve?.(submitted)
+    return submitted
+  } finally {
+    if (!isCheckoutOpen.value) localCheckoutPreview.value = preview || null
+  }
+}
+
 function enqueueCheckoutAction(event = {}) {
   const action = String(event?.action || '')
+  if (localCheckoutPreview.value?.localDraftPreview === true) {
+    const payload = isRecord(event?.payload) ? clonePlain(event.payload) : {}
+    const preview = clonePlain(localCheckoutPreview.value)
+    const payment = preview.payment || { methods: [], selectedLines: [], summary: {} }
+    const lines = Array.isArray(payment.selectedLines) ? payment.selectedLines : []
+    const receivable = Number(payment.summary?.receivableAmount || 0)
+    if (action === 'add-payment-method') {
+      const method = (payment.methods || []).find((item) => String(item?.id || '') === String(payload.paymentMethodId || ''))
+      if (!method || lines.some((line) => String(line.method || '') === String(method.id))) {
+        const result = { result: { status: 'failed', message: '请选择未重复的收款方式。' } }
+        event?.resolve?.(result)
+        return result
+      }
+      lines.push({ id: `local-payment-${Date.now()}`, method: method.id, name: method.name, amount: 0, status: 'editing', canEdit: true, canRemove: true })
+    } else if (action === 'remove-payment-line') {
+      payment.selectedLines = lines.filter((line) => String(line.id) !== String(payload.paymentLineId || ''))
+    } else if (action === 'update-payment-line') {
+      const line = lines.find((item) => String(item.id) === String(payload.paymentLineId || ''))
+      if (line) Object.assign(line, { amount: Number(payload.amount || 0), externalTransactionNo: String(payload.externalTransactionNo || ''), remark: String(payload.remark || '') })
+    } else if (action === 'validate-guide-round-before-payment') {
+      const result = localDraftResult()
+      event?.resolve?.(result)
+      return result
+    } else if (action === 'submit-checkout') {
+      return finalizeLocalCheckoutPreview(event)
+    } else {
+      const result = { result: { status: 'failed', message: '该收款操作将在确认收款时按最新结账单处理。' } }
+      event?.resolve?.(result)
+      return result
+    }
+    const selectedAmount = (payment.selectedLines || []).reduce((total, line) => total + Math.max(0, Number(line.amount || 0)), 0)
+    payment.summary = { receivableAmount: receivable, selectedAmount, remainingAmount: Math.max(0, receivable - selectedAmount), overpaidAmount: Math.max(0, selectedAmount - receivable) }
+    preview.payment = payment
+    localCheckoutPreview.value = preview
+    localCheckoutPaymentOperations.value = [...localCheckoutPaymentOperations.value, { action, payload }]
+    const result = localDraftResult()
+    // CashierCheckoutOverlay uses this receipt to release its temporary
+    // “添加中” and amount-input states.  Local preview mutations have no
+    // server response, so provide the same successful receipt immediately.
+    window.dispatchEvent(new CustomEvent('cashier-v3:checkout-draft-mutation-result', {
+      detail: { action, payload, status: 'succeeded', message: '' }
+    }))
+    event?.resolve?.(result)
+    return result
+  }
   if (!checkoutDraftMutationActions.has(action)) {
     const direct = requestCheckoutAction(event)
     if (direct && typeof direct.then === 'function') {
@@ -4699,6 +5067,14 @@ function closeHangOrderOverlay() {
 }
 
 function applyRestoredHangDraft(detail = {}) {
+  const local = detail?.localDraft
+  if (isRecord(local) && Array.isArray(local.lines) && Array.isArray(local.operations)) {
+    commitLocalCashierDraft(clonePlain(local))
+    localCashierDraftOperations.value = clonePlain(local.operations)
+    localCashierPersistedLineIds.value = {}
+    cashierDraftHasUnresolvedCommand.value = false
+    return true
+  }
   const draft = detail?.cashierDraft
   if (!isResponseBoundCommittedCashierDraft(draft)) return false
   if (String(draft.stateContextId || '') !== String(state.stateContextId || '')) return false

@@ -78,6 +78,8 @@ const paymentValidationPromptMessage = ref('')
 const receiptPrintError = ref('')
 const receiptPrintLoading = ref(false)
 const pendingPrimarySourceId = ref(0)
+const pendingSecondarySourceId = ref(0)
+const rewardAmountDraft = ref('0')
 const salesDateDraft = ref('')
 const salesDateReason = ref('')
 const pendingPaymentMethodIds = ref(new Set())
@@ -200,7 +202,7 @@ const selectedPrimarySource = computed(() => businessSourceRoots.value.find((sou
 const selectedSecondarySourceId = computed(() => (
   pendingPrimarySourceId.value
   && Number(pendingPrimarySourceId.value) !== Number(props.checkout.primarySourceId || 0)
-    ? 0
+    ? Number(pendingSecondarySourceId.value || 0)
     : Number(props.checkout.secondarySourceId || 0)
 ))
 const selectedSecondarySources = computed(() => Array.isArray(selectedPrimarySource.value?.children)
@@ -210,6 +212,19 @@ const selectedPrimaryRequiresSecondary = computed(() => (
   selectedPrimarySource.value?.requireSecondary === true
   || Number(selectedPrimarySource.value?.requireSecondary) === 1
 ))
+const selectedPrimaryIsCrossIndustry = computed(() => /^G(?:\s|异业|$)/u.test(String(selectedPrimarySource.value?.name || '').trim()))
+const rewardAmountCents = computed(() => {
+  const value = String(rewardAmountDraft.value || '').trim()
+  if (!/^(?:0|[1-9]\d*)(?:\.\d{1,2})?$/.test(value)) return null
+  const [yuan, fraction = ''] = value.split('.')
+  const cents = Number(yuan) * 100 + Number(fraction.padEnd(2, '0'))
+  return Number.isSafeInteger(cents) && cents <= 100000000000 ? cents : null
+})
+const crossIndustrySourceUnsaved = computed(() => selectedPrimaryIsCrossIndustry.value && (
+  pendingPrimarySourceId.value > 0
+  || rewardAmountCents.value === null
+  || rewardAmountCents.value !== Number(props.checkout.rewardAmountCents || 0)
+))
 const customerSourceRequired = computed(() => (
   (props.checkout.sourceEnabled === true || Number(props.checkout.sourceEnabled) === 1)
   && props.checkout.sourceSelectable !== false
@@ -217,7 +232,8 @@ const customerSourceRequired = computed(() => (
 const customerSourceMissing = computed(() => (
   customerSourceRequired.value
   && (!selectedPrimarySourceId.value
-    || (selectedPrimaryRequiresSecondary.value && !selectedSecondarySourceId.value))
+    || (selectedPrimaryRequiresSecondary.value && !selectedSecondarySourceId.value)
+    || crossIndustrySourceUnsaved.value)
 ))
 const salesDateIsHistorical = computed(() => (
   salesDateDraft.value !== ''
@@ -268,7 +284,13 @@ const displayedPaymentSummary = computed(() => {
     overpaidAmount: Math.max(0, Number(summary.overpaidAmount || 0) - remainingAmount + selectedDelta)
   }
 })
-const hasPendingPaymentLineAmountDraft = computed(() => Object.keys(paymentLineAmountDrafts.value).length > 0)
+// 编辑阶段的本地预览没有 checkout_request 投影可等待；其 payment 已由
+// 父级同步回填，允许按当前前端金额进入第三步。最终确认仍会先取得并校验
+// 服务端权威结账快照。
+const hasPendingPaymentLineAmountDraft = computed(() => (
+  props.checkout.localDraftPreview !== true
+  && Object.keys(paymentLineAmountDrafts.value).length > 0
+))
 const isZeroReceivable = computed(() => Number(displayedPaymentSummary.value.receivableAmount) === 0)
 const firstInvalidPaymentLine = computed(() => {
   for (const line of selectedPaymentLines.value) {
@@ -536,10 +558,13 @@ watch(
 )
 
 watch(
-  () => [props.checkout.primarySourceId, props.checkout.secondarySourceId],
+  () => [props.checkout.primarySourceId, props.checkout.secondarySourceId, props.checkout.rewardAmountCents],
   () => {
     pendingPrimarySourceId.value = 0
+    pendingSecondarySourceId.value = 0
+    rewardAmountDraft.value = (Number(props.checkout.rewardAmountCents || 0) / 100).toFixed(2).replace(/\.00$/, '')
   }
+  , { immediate: true }
 )
 
 watch(
@@ -621,20 +646,36 @@ function handleSubmissionResponse(response) {
 function chooseBusinessSourcePrimary(source) {
   if (props.businessSourceSaving || Number(source?.id) <= 0) return
   pendingPrimarySourceId.value = Number(source.id)
+  pendingSecondarySourceId.value = 0
   const children = Array.isArray(source.children) ? source.children.filter((item) => Number(item?.id) > 0) : []
   const requiresSecondary = source.requireSecondary === true || Number(source.requireSecondary) === 1
-  if (!requiresSecondary) {
-    emit('business-source-change', { primarySourceId: Number(source.id), secondarySourceId: 0 })
-  } else if (!children.length) {
+  if (!requiresSecondary && !/^G(?:\s|异业|$)/u.test(String(source.name || '').trim())) {
+    emit('business-source-change', { primarySourceId: Number(source.id), secondarySourceId: 0, rewardAmountCents: 0 })
+  } else if (requiresSecondary && !children.length) {
     pendingPrimarySourceId.value = 0
   }
 }
 
 function chooseBusinessSourceSecondary(secondarySourceId) {
   if (props.businessSourceSaving || !selectedPrimarySourceId.value) return
+  if (selectedPrimaryIsCrossIndustry.value) {
+    pendingSecondarySourceId.value = Number(secondarySourceId || 0)
+    return
+  }
   emit('business-source-change', {
     primarySourceId: selectedPrimarySourceId.value,
-    secondarySourceId: Number(secondarySourceId || 0)
+    secondarySourceId: Number(secondarySourceId || 0),
+    rewardAmountCents: 0
+  })
+}
+
+function saveCrossIndustrySource() {
+  if (props.businessSourceSaving || rewardAmountCents.value === null) return
+  if (selectedPrimaryRequiresSecondary.value && !selectedSecondarySourceId.value) return
+  emit('business-source-change', {
+    primarySourceId: selectedPrimarySourceId.value,
+    secondarySourceId: selectedSecondarySourceId.value,
+    rewardAmountCents: rewardAmountCents.value
   })
 }
 
@@ -1337,6 +1378,14 @@ onBeforeUnmount(() => {
                 >{{ source.name }}</button>
               </div>
             </div>
+            <div v-if="selectedPrimaryIsCrossIndustry" class="checkout-business-sources__reward">
+              <label for="cross-industry-reward">奖励金额</label>
+              <div>
+                <input id="cross-industry-reward" v-model.trim="rewardAmountDraft" inputmode="decimal" maxlength="12" :disabled="businessSourceSaving" aria-label="奖励金额" />
+                <button type="button" class="button button--secondary" :disabled="businessSourceSaving || rewardAmountCents === null || (selectedPrimaryRequiresSecondary && !selectedSecondarySourceId)" @click="saveCrossIndustrySource">保存来源与奖励</button>
+              </div>
+              <span v-if="rewardAmountCents === null" role="alert">请输入不超过两位小数的非负金额。</span>
+            </div>
           </template>
         </section>
 
@@ -1785,6 +1834,18 @@ onBeforeUnmount(() => {
   padding-top: 10px;
   border-top: 1px solid #e5eaf0;
 }
+
+.checkout-business-sources__reward {
+  display: grid;
+  gap: 7px;
+  padding-top: 10px;
+  border-top: 1px solid #e5eaf0;
+}
+
+.checkout-business-sources__reward > label { color: #303133; font-size: 13px; font-weight: 600; }
+.checkout-business-sources__reward > div { display: flex; flex-wrap: wrap; gap: 8px; }
+.checkout-business-sources__reward input { width: 180px; min-height: 36px; padding: 0 10px; border: 1px solid #cfd7e3; border-radius: 5px; }
+.checkout-business-sources__reward > span { color: #c63434; font-size: 12px; }
 
 .checkout-business-sources__state {
   min-height: 34px;

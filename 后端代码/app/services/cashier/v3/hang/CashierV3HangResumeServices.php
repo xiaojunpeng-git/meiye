@@ -154,6 +154,26 @@ final class CashierV3HangResumeServices
         if (!is_array($header)) {
             throw CashierV3CommandException::versionConflict('该挂单不存在，请刷新列表后重试。');
         }
+        if ((string)($header['hang_mode'] ?? '') === 'local_draft'
+            && (string)($header['resume_contract_version'] ?? '') === 'cashier-v3-hang-resume-local-draft-v1') {
+            $localDraft = json_decode((string)($header['local_draft_snapshot_json'] ?? ''), true);
+            if (!is_array($localDraft) || !is_array($localDraft['lines'] ?? null) || !is_array($localDraft['operations'] ?? null)) {
+                throw self::invalid('hang_local_draft_snapshot_invalid');
+            }
+            $workspaceId = self::workspaceId($operator, $stateContextId);
+            $cashierDraft = $this->workspace->restoreLocalHangDraftShellInTx(
+                $workspaceId, $stateContextId, $operator, $hangOrderId, (int)($header['member_id'] ?? 0)
+            );
+            return [
+                'hangOrderId' => $hangOrderId,
+                'hangOrderNo' => (string)($header['hang_order_no'] ?? ''),
+                'status' => 'restored',
+                'sourceRetained' => true,
+                'hangVersion' => (int)($header['hang_version'] ?? 0),
+                'cashierDraft' => $cashierDraft,
+                'localDraft' => $localDraft,
+            ];
+        }
         $rows = Db::name(ThinkPhpCashierV3HangOrderRepository::LINE_TABLE)
             ->where('tenant_id', $dataScope->tenantId())
             ->where('store_id', $operator->storeId())

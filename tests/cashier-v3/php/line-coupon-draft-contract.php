@@ -31,15 +31,23 @@ $check = static function (bool $condition, string $message) use (&$failed): void
 
 $check(
     strpos($module, "registerProjection('open-line-coupon'") !== false
+        && strpos($module, "registerProjection('open-local-line-coupon'") !== false
         && strpos($module, "['apply-line-coupon', 'remove-line-coupon']") !== false
         && substr_count($c2, "'open-line-coupon'") === 1
+        && substr_count($c2, "'open-local-line-coupon'") === 1
         && strpos($c2, "'apply-line-coupon'") !== false,
-    'coupon projection and draft commands are registered'
+    'normal/local coupon projections and draft commands are registered'
 );
 $check(
     strpos($module, 'self::workspaceIdForProjection($scope)') !== false
         && strpos($module, 'Projection 不能携带写命令 contexts') !== false,
     'coupon projection derives the workspace only from the authenticated state context'
+);
+$check(
+    strpos($workspace, 'public function localCouponSelector(') !== false
+        && strpos($workspace, 'array $reservedCouponIds = []') !== false
+        && strpos($workspace, 'array $reservedCouponIds = []') !== false,
+    'local draft coupon selector reads candidates without requiring a persisted cart line'
 );
 $check(
     strpos($idempotency, "'APPLY_LINE_COUPON'") !== false

@@ -860,6 +860,35 @@ final class CashierV3CashierWorkspaceServices
         ];
     }
 
+    /** Read applicable coupons for a browser-only line without creating it. */
+    public function localCouponSelector(
+        string $workspaceId,
+        string $stateContextId,
+        CashierV3OperatorScope $operatorScope,
+        string $lineKey,
+        int $lineAmountCents,
+        int $thresholdCents,
+        array $reservedCouponIds = []
+    ): array {
+        $draft = $this->readDraft($workspaceId, $stateContextId, $operatorScope, false);
+        $memberId = (int)($draft['memberId'] ?? 0);
+        if ($memberId <= 0) {
+            throw CashierV3CommandException::invalidContext('请先选择会员后再使用优惠券。');
+        }
+        if ($lineKey === '' || $lineAmountCents < 0 || $thresholdCents < $lineAmountCents) {
+            throw $this->incompleteDraft('local_coupon_line_invalid');
+        }
+        $amounts = ['threshold' => $thresholdCents, 'base' => $lineAmountCents, 'cap' => $lineAmountCents];
+        return [
+            'lineId' => $lineKey,
+            'lineAmountCents' => $thresholdCents,
+            'coupons' => $this->availableCoupons(
+                $memberId, $operatorScope->storeId(), $amounts, false, $workspaceId, $lineKey, 0, $reservedCouponIds
+            ),
+            'selectedCouponId' => 0,
+        ];
+    }
+
     public function applyLineCouponInTx(
         string $workspaceId,
         string $stateContextId,
@@ -1399,6 +1428,29 @@ final class CashierV3CashierWorkspaceServices
             'customer_mode' => $memberId > 0 ? self::MODE_MEMBER : self::MODE_GUEST,
             'draft_status' => self::STATUS_EDITING,
             'resumed_hang_order_id' => '',
+        ]);
+        return $this->readDraft($workspaceId, $stateContextId, $operatorScope, true);
+    }
+
+    /** Restore only the member shell for a local-operation hang draft. */
+    public function restoreLocalHangDraftShellInTx(
+        string $workspaceId,
+        string $stateContextId,
+        CashierV3OperatorScope $operatorScope,
+        string $hangOrderId,
+        int $memberId
+    ): array {
+        CashierV3TransactionGuard::assertInTransaction('cashierWorkspaceRestoreLocalHangDraft');
+        if (preg_match('/^HGO[0-9a-f]{40}$/D', $hangOrderId) !== 1 || $memberId < 0) {
+            throw $this->incompleteDraft('cashier_local_hang_restore_identity_invalid');
+        }
+        $this->lockOrCreateDraft($workspaceId, $stateContextId, $operatorScope);
+        Db::name(self::LINE_TABLE)->where('workspace_id', $workspaceId)->delete();
+        $this->updateDraft($workspaceId, [
+            'member_id' => $memberId,
+            'customer_mode' => $memberId > 0 ? self::MODE_MEMBER : self::MODE_GUEST,
+            'draft_status' => self::STATUS_EDITING,
+            'resumed_hang_order_id' => $hangOrderId,
         ]);
         return $this->readDraft($workspaceId, $stateContextId, $operatorScope, true);
     }
@@ -3118,7 +3170,8 @@ final class CashierV3CashierWorkspaceServices
         bool $lock,
         string $workspaceId,
         string $lineKey,
-        int $onlyCouponId = 0
+        int $onlyCouponId = 0,
+        array $reservedCouponIds = []
     ): array {
         $now = time();
         $query = Db::name('store_coupon_user')->alias('cu')
@@ -3133,7 +3186,7 @@ final class CashierV3CashierWorkspaceServices
         $rows = is_object($rows) && method_exists($rows, 'toArray') ? $rows->toArray() : (array)$rows;
         $usedIds = Db::name(self::LINE_TABLE)->where('workspace_id', $workspaceId)
             ->where('line_key', '<>', $lineKey)->where('coupon_user_id', '>', 0)->column('coupon_user_id');
-        $used = array_fill_keys(array_map('intval', $usedIds), true);
+        $used = array_fill_keys(array_merge(array_map('intval', $usedIds), array_map('intval', $reservedCouponIds)), true);
         $out = [];
         foreach ($rows as $row) {
             $id = (int)($row['id'] ?? 0);

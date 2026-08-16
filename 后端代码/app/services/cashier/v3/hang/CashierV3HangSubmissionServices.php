@@ -279,6 +279,17 @@ final class CashierV3HangSubmissionServices
             $operatorScope->storeId(),
             $stateContextId
         );
+
+        if (is_array($payload['localDraft'] ?? null)) {
+            return $this->saveLocalDraftInTx(
+                $workspaceId,
+                $stateContextId,
+                $commandKey,
+                $payload,
+                $operatorScope,
+                $dataScope
+            );
+        }
         // 挂单始终只是购物车草稿。即使从房间入口进入，也只保存房间关联，
         // 不创建服务、不占房、不读取或校验当前房态。
         $mode = CashierV3HangOrderPlanV1::MODE_NORMAL;
@@ -352,6 +363,67 @@ final class CashierV3HangSubmissionServices
             'roomOccupation' => null,
             'cashierDraft' => (array)($transferred['cashierDraft'] ?? []),
         ];
+    }
+
+    /**
+     * A local draft hang records a bounded UI snapshot and its ordered command
+     * queue. It is not a business order, and no catalog, balance or entitlement
+     * resource is read or locked here.
+     */
+    private function saveLocalDraftInTx(
+        string $workspaceId,
+        string $stateContextId,
+        string $commandKey,
+        array $payload,
+        CashierV3OperatorScope $operatorScope,
+        CashierV3DataScopeContext $dataScope
+    ): array {
+        $local = (array)$payload['localDraft'];
+        $lines = array_values(is_array($local['lines'] ?? null) ? $local['lines'] : []);
+        $operations = array_values(is_array($local['operations'] ?? null) ? $local['operations'] : []);
+        $memberId = (int)($local['memberId'] ?? 0);
+        $customerMode = (string)($local['customerMode'] ?? 'guest');
+        if ($lines === [] || count($lines) > 1000 || count($operations) > 3000
+            || $memberId < 0 || !in_array($customerMode, ['member', 'guest'], true)
+            || ($customerMode === 'member' && $memberId <= 0)
+            || ($customerMode === 'guest' && $memberId !== 0)) {
+            throw new CashierV3CommandException(CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE, '本地挂单草稿不完整，请重新操作。', CashierV3ResultCode::STATUS_FAILED);
+        }
+        $snapshotJson = json_encode($local, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        if (!is_string($snapshotJson) || strlen($snapshotJson) > 2 * 1024 * 1024) {
+            throw new CashierV3CommandException(CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE, '本地挂单草稿过大，请减少商品后重试。', CashierV3ResultCode::STATUS_FAILED);
+        }
+        $identity = hash('sha256', $dataScope->tenantId() . "\0" . $commandKey);
+        $hangOrderId = 'HGO' . substr($identity, 0, 40);
+        $existing = Db::name(\app\services\cashier\v3\hang\authority\ThinkPhpCashierV3HangOrderRepository::HEADER_TABLE)
+            ->where('tenant_id', $dataScope->tenantId())->where('command_idempotency_key', $commandKey)->lock(true)->find();
+        if (is_array($existing)) {
+            return ['hangOrder' => ['hangOrderId' => (string)$existing['hang_order_id'], 'hangOrderNo' => (string)$existing['hang_order_no'], 'replayed' => true], 'cashierDraft' => $this->workspace->readDraft($workspaceId, $stateContextId, $operatorScope, true)];
+        }
+        $now = time();
+        $dimensions = $this->dimensions($operatorScope, $dataScope);
+        $memberName = $memberId > 0 ? trim((string)($this->members->read($memberId, $operatorScope->storeId())['name'] ?? '')) : '';
+        $summary = (array)($local['summary'] ?? []);
+        $fingerprint = hash('sha256', $snapshotJson);
+        $header = [
+            'hang_order_id' => $hangOrderId, 'hang_order_no' => 'HGD' . date('YmdHis', $now) . substr($identity, 0, 8),
+            'natural_key' => 'local_hang:' . substr($identity, 0, 48), 'contract_version' => 'cashier-v3-local-draft-hang-v1',
+            'resume_contract_version' => 'cashier-v3-hang-resume-local-draft-v1', 'command_idempotency_key' => $commandKey,
+            'immutable_fingerprint' => $fingerprint, 'tenant_id' => $dataScope->tenantId(), 'organization_id' => $operatorScope->organizationId(),
+            'organization_path_snapshot' => $dimensions['organizationPath'], 'organization_name_snapshot' => $dimensions['organizationName'],
+            'store_id' => $operatorScope->storeId(), 'store_name_snapshot' => $dimensions['storeName'], 'member_id' => $memberId, 'member_name_snapshot' => $memberName,
+            'operator_id' => $operatorScope->operatorId(), 'operator_name_snapshot' => $dimensions['operatorName'], 'workspace_id' => $workspaceId,
+            'state_context_id' => $stateContextId, 'workspace_line_fingerprint' => $fingerprint, 'preparation_request_id' => 'HANG_LOCAL_' . substr($identity, 0, 48),
+            'preparation_token' => hash('sha256', 'local-hang:' . $commandKey), 'hang_mode' => 'local_draft', 'room_id' => 0, 'room_name_snapshot' => '',
+            'room_version' => 0, 'room_time_slot_id' => '', 'room_time_slot_version' => 0, 'room_guard_fingerprint' => '',
+            'line_count' => count($lines), 'total_quantity' => array_sum(array_map(static function ($line): int { return max(1, (int)($line['quantity'] ?? 1)); }, $lines)),
+            'sale_amount_cents' => (int)round((float)($summary['receivableAmount'] ?? 0) * 100), 'entitlement_actual_amount_cents' => 0,
+            'hang_status' => CashierV3HangOrderPlanV1::STATUS_PENDING_CHECKOUT, 'hang_version' => 1, 'business_date' => date('Y-m-d', $now), 'business_timezone' => 'Asia/Shanghai',
+            'occurred_at' => $now, 'recorded_at' => $now, 'local_draft_snapshot_json' => $snapshotJson, 'add_time' => $now, 'update_time' => $now,
+        ];
+        Db::name(\app\services\cashier\v3\hang\authority\ThinkPhpCashierV3HangOrderRepository::HEADER_TABLE)->insert($header);
+        $cleared = $this->workspace->clearLinesInTx($workspaceId, $stateContextId, $operatorScope);
+        return ['hangOrder' => ['hangOrderId' => $hangOrderId, 'hangOrderNo' => $header['hang_order_no'], 'replayed' => false], 'cashierDraft' => $cleared];
     }
 
     private function assertWorkspaceContext(array $contexts, string $workspaceId): void

@@ -164,11 +164,9 @@ final class CashierV3CheckoutPreparationServices
         $storedDraft = (array)($authority['storedDraft'] ?? []);
         $storedRows = array_values((array)($authority['storedRows'] ?? []));
         $debtAmountCents = $this->saleDebtAmountCents((array)($authority['lines'] ?? []));
-        $this->assertEntitlementRowsAfterGatewayLocks(
-            $storedRows,
-            $contexts,
-            $operatorScope
-        );
+        // 这里仅创建可编辑的结账请求。权益余次、余额和服务资源统一由
+        // prepare-checkout-submission 在第三步确认时重读并校验，不能在
+        // 点击“立即结账”时提前阻断草稿。
 
         $snapshot = $this->authoritySnapshot(
             $authority,

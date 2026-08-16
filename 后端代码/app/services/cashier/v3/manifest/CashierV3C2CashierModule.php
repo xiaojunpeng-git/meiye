@@ -91,6 +91,7 @@ class CashierV3C2CashierModule implements CashierV3ActionModule
         foreach ([
             'open-line-assignment',
             'open-line-coupon',
+            'open-local-line-coupon',
             'open-line-debt',
             'open-price-change',
             'open-card-upgrade',

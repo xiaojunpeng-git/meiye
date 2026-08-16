@@ -246,7 +246,9 @@ function sourceOrderRemark(source = {}) {
 
 function projectDisabled(source = {}, project = {}) {
   if (props.submitting || !selectorReady.value) return true
-  return !isSourceAvailable(source) || project.disabled === true || project.selectable === false
+  // 次数不足只在最终确认服务/收款时校验。这里仍保留卡失效、停用等
+  // 非次数原因，避免把不可用权益伪装成可选项目。
+  return !isSourceAvailable(source) || project.disabled === true
 }
 
 function addProject(source = {}, project = {}) {

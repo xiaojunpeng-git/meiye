@@ -618,6 +618,26 @@ final class CashierV3CashierModule
             ];
         });
 
+        if ($handlers->hasProjection('open-local-line-coupon')) {
+            throw new \LogicException('C2 cashier module: open local line coupon duplicate handler');
+        }
+        $handlers->registerProjection('open-local-line-coupon', function (array $scope) use ($workspace): array {
+            $payload = is_array($scope['payload'] ?? null) ? $scope['payload'] : [];
+            $selector = $workspace->localCouponSelector(
+                self::workspaceIdForProjection($scope),
+                (string)($scope['state_context_id'] ?? ''),
+                $scope['operator_scope'],
+                self::lineKey($payload['lineId'] ?? $payload['line_id'] ?? null),
+                (int)($payload['lineAmountCents'] ?? $payload['line_amount_cents'] ?? -1),
+                (int)($payload['couponThresholdCents'] ?? $payload['coupon_threshold_cents'] ?? -1),
+                is_array($payload['reservedCouponIds'] ?? null) ? $payload['reservedCouponIds'] : []
+            );
+            return [
+                'data' => ['couponSelector' => $selector],
+                'message' => '可用优惠券已读取。',
+            ];
+        });
+
         foreach (['apply-line-coupon', 'remove-line-coupon'] as $action) {
             if ($handlers->hasCommand($action)) {
                 throw new \LogicException('C2 cashier module: line coupon command duplicate handler');
