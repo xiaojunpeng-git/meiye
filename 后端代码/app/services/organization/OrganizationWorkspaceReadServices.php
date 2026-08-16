@@ -264,8 +264,10 @@ class OrganizationWorkspaceReadServices extends BaseServices
             $this->applyRoleFilter($base, $role);
         }
 
-        // 门店任职 + 组织直属：SQL UNION 去重后 COUNT/LIMIT（禁止全量 PHP array_slice）
-        $includeDirectMembers = $storeId <= 0 && $role === '';
+        // 门店任职、组织直属、组织管理员授权统一按 employee_id 去重并分页。
+        // 组织管理员可以是总部岗位，未必存在门店任职或直属名册关系；漏掉这条
+        // 有效授权会使组织树的“找人”无法定位其明确可管理的组织。
+        $includeOrganizationRelationships = $storeId <= 0 && $role === '';
         $orgIdSql = implode(',', array_map('intval', $orgIds));
         if ($orgIdSql === '') {
             return ['list' => [], 'count' => 0, 'page' => $page, 'limit' => $limit];
@@ -310,7 +312,7 @@ class OrganizationWorkspaceReadServices extends BaseServices
             {$roleJoin}
             WHERE {$staffWhere}{$kwSql}{$roleSql}";
 
-        if ($includeDirectMembers) {
+        if ($includeOrganizationRelationships) {
             $directKw = '';
             if ($keyword !== '') {
                 $directKw = ' AND (e2.name LIKE :dkw1 OR e2.phone LIKE :dkw2)';
@@ -325,7 +327,22 @@ class OrganizationWorkspaceReadServices extends BaseServices
                 INNER JOIN eb_employee e2 ON e2.id = oe.employee_id
                 WHERE oe.org_id IN ({$orgIdSql}) AND oe.is_del=0{$statusFilter}
                   AND e2.status=1 AND e2.is_del=0{$directKw}";
-            $unionSql = "({$staffPart}) UNION ({$directPart})";
+
+            $adminKw = '';
+            if ($keyword !== '') {
+                $adminKw = ' AND (e3.name LIKE :akw1 OR e3.phone LIKE :akw2)';
+                $binds['akw1'] = '%' . $keyword . '%';
+                $binds['akw2'] = '%' . $keyword . '%';
+            }
+            $adminPart = "SELECT oa.employee_id AS employee_id
+                FROM eb_organization_admin oa
+                INNER JOIN eb_employee e3 ON e3.id = oa.employee_id
+                INNER JOIN eb_system_admin sa ON sa.id = oa.admin_id AND sa.employee_id = oa.employee_id
+                WHERE oa.org_id IN ({$orgIdSql}) AND oa.is_del=0
+                  AND oa.employee_id>0 AND oa.admin_id>0
+                  AND e3.status=1 AND e3.is_del=0
+                  AND sa.status=1 AND sa.is_del=0{$adminKw}";
+            $unionSql = "({$staffPart}) UNION ({$directPart}) UNION ({$adminPart})";
         } else {
             $unionSql = "({$staffPart})";
         }
@@ -421,7 +438,7 @@ class OrganizationWorkspaceReadServices extends BaseServices
             }
         }
         $jobRowsByDirectEmployee = [];
-        if ($pageEmployeeIds && $includeDirectMembers) {
+        if ($pageEmployeeIds && $includeOrganizationRelationships) {
             $directJobRows = Db::name('staff_job_position')->alias('j')
                 ->leftJoin('position p', 'p.id = j.position_id')
                 ->whereIn('j.employee_id', $pageEmployeeIds)
@@ -465,6 +482,7 @@ class OrganizationWorkspaceReadServices extends BaseServices
                     'roles' => [],
                     'assignments' => [],
                     'direct_memberships' => [],
+                    'admin_grants' => [],
                 ];
             }
             $posName = $this->normalizePositionLabel(
@@ -499,7 +517,7 @@ class OrganizationWorkspaceReadServices extends BaseServices
             ];
         }
 
-        if ($includeDirectMembers) {
+        if ($includeOrganizationRelationships) {
             $directMembershipQuery = Db::name('organization_employee')->alias('oe')
                 ->join('organization o', 'o.id = oe.org_id')
                 ->whereIn('oe.org_id', $orgIds)
@@ -529,6 +547,7 @@ class OrganizationWorkspaceReadServices extends BaseServices
                         'roles' => [],
                         'assignments' => [],
                         'direct_memberships' => [],
+                        'admin_grants' => [],
                     ];
                 }
                 $directJobPositions = $jobRowsByDirectEmployee[$eid] ?? [];
@@ -547,6 +566,53 @@ class OrganizationWorkspaceReadServices extends BaseServices
                     'source' => (string)($row['source'] ?? ''),
                     'job_positions' => $directJobPositions,
                     'job_names' => $directJobNames,
+                ];
+            }
+
+            // 组织管理员授权是独立于门店任职和直属名册的组织关联。仅返回当前
+            // 查询范围内、账号和员工均有效的授权，供列表说明与“找人”精确定位。
+            $adminGrantRows = Db::name('organization_admin')->alias('oa')
+                ->join('organization o', 'o.id = oa.org_id')
+                ->join('employee e', 'e.id = oa.employee_id')
+                ->join('system_admin sa', 'sa.id = oa.admin_id AND sa.employee_id = oa.employee_id')
+                ->whereIn('oa.org_id', $orgIds)
+                ->whereIn('oa.employee_id', $pageEmployeeIds)
+                ->where('oa.is_del', 0)
+                ->where('oa.employee_id', '>', 0)
+                ->where('oa.admin_id', '>', 0)
+                ->where('o.is_del', 0)
+                ->where('e.status', 1)
+                ->where('e.is_del', 0)
+                ->where('sa.status', 1)
+                ->where('sa.is_del', 0)
+                ->field('oa.id as org_admin_id,oa.org_id,oa.employee_id,oa.admin_id,o.name as org_name,sa.account')
+                ->order('oa.employee_id', 'asc')
+                ->order('oa.id', 'asc')
+                ->select()
+                ->toArray();
+            foreach ($adminGrantRows as $row) {
+                $eid = (int)$row['employee_id'];
+                if (!isset($byEmployee[$eid])) {
+                    $emp = $empMap[$eid] ?? [];
+                    $byEmployee[$eid] = [
+                        'employee_id' => $eid,
+                        'name' => (string)($emp['name'] ?? ''),
+                        'avatar' => (string)($emp['avatar'] ?? ''),
+                        'avatar_type' => (int)($emp['avatar_type'] ?? 0),
+                        'phone_masked' => $this->maskPhone((string)($emp['phone'] ?? '')),
+                        'status' => (int)($emp['status'] ?? 0) === 1 ? 1 : 0,
+                        'roles' => [],
+                        'assignments' => [],
+                        'direct_memberships' => [],
+                        'admin_grants' => [],
+                    ];
+                }
+                $byEmployee[$eid]['admin_grants'][] = [
+                    'org_admin_id' => (int)$row['org_admin_id'],
+                    'org_id' => (int)$row['org_id'],
+                    'org_name' => (string)($row['org_name'] ?? ''),
+                    'admin_id' => (int)$row['admin_id'],
+                    'account' => (string)($row['account'] ?? ''),
                 ];
             }
         }
@@ -598,6 +664,7 @@ class OrganizationWorkspaceReadServices extends BaseServices
                 'roles' => $item['roles'],
                 'assignments' => $item['assignments'],
                 'direct_memberships' => $item['direct_memberships'],
+                'admin_grants' => $item['admin_grants'],
                 'scope_assignment_count' => $scopeCount,
                 'total_assignment_count' => $total,
                 'has_out_of_scope_assignments' => $total > $scopeCount,

@@ -286,7 +286,7 @@
                           <div class="person-cell">
                             <img v-if="person.avatar" class="avatar-img" :src="person.avatar" alt="" @error="onAvatarError" />
                             <span v-else class="avatar avatar-indigo">{{ avatarText(person.name) }}</span>
-                            <div><strong>{{ person.name }}</strong><small>{{ person.scope_assignment_count ? `${person.scope_assignment_count} 家门店任职` : '组织直属人员' }}</small></div>
+                            <div><strong>{{ person.name }}</strong><small>{{ personRelationText(person) }}</small></div>
                           </div>
                         </td>
                         <td>{{ assignmentOrganizationText(person) }}</td>
@@ -2033,6 +2033,11 @@ export default {
         const oid = Number(assigns[i].org_id || 0);
         if (oid > 0) return oid;
       }
+      const grants = person.admin_grants || [];
+      for (let i = 0; i < grants.length; i++) {
+        const oid = Number(grants[i].org_id || 0);
+        if (oid > 0) return oid;
+      }
       return 0;
     },
     locatePersonInTree() {
@@ -2426,7 +2431,7 @@ export default {
     assignmentStoreText(person) {
       const list = person.assignments || [];
       if (!list.length) {
-        return (person.direct_memberships || []).length ? '无任职门店' : '—';
+        return ((person.direct_memberships || []).length || (person.admin_grants || []).length) ? '无任职门店' : '—';
       }
       if (list.length === 1) return list[0].store_name;
       return `${list[0].store_name} 等${list.length}家`;
@@ -2441,9 +2446,20 @@ export default {
         const name = String(item.org_name || '').trim();
         if (name && !names.includes(name)) names.push(name);
       });
+      (person.admin_grants || []).forEach((item) => {
+        const name = String(item.org_name || '').trim();
+        if (name && !names.includes(name)) names.push(name);
+      });
       if (!names.length) return '—';
       if (names.length === 1) return names[0];
       return `${names[0]} 等${names.length}个组织`;
+    },
+    personRelationText(person) {
+      const assignmentCount = Number((person && person.scope_assignment_count) || 0);
+      if (assignmentCount > 0) return `${assignmentCount} 家门店任职`;
+      if (((person && person.admin_grants) || []).length) return '组织管理员（无任职门店）';
+      if (((person && person.direct_memberships) || []).length) return '组织直属人员（无任职门店）';
+      return '无任职门店';
     },
     displayRoles(person) {
       const roles = Array.isArray(person.roles) ? person.roles.slice() : [];
