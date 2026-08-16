@@ -18,8 +18,8 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
 {
     public const METRIC_VERSION = 'six-dimension-phase-three-v1';
     // The card-item projection is introduced by the Phase 3 release and has no
-    // historical backfill. 2026-08-17 is the earliest possible complete day;
-    // later customer deployments advance this boundary from the upgrade log.
+    // historical backfill. This date remains the first-purchase classification
+    // boundary, but it must not prevent operators from querying earlier facts.
     public const COVERAGE_START = '2026-08-17';
     private const UPGRADE_KEY = '20260816-002-phase-three-six-dimension-report-foundation';
 
@@ -483,9 +483,6 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
         [$monthStart, $monthEnd] = $this->naturalMonth($range);
         $previousStart = date('Y-m-01', strtotime($monthStart . ' -1 month'));
         $previousEnd = date('Y-m-t', strtotime($previousStart));
-        if ($previousStart < $this->coverageStart()) {
-            throw new \InvalidArgumentException('所选月份的上月早于第三阶段完整事实覆盖期');
-        }
         $dimensions = $this->organizationDimensions('city_manager', $stores, $monthEnd);
         $sixDimensionCategories = $this->sixDimensionCategoryIds();
         $currentCash = $this->cashByDimension(
@@ -1557,10 +1554,6 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
             || preg_match('/^\d{4}-\d{2}-\d{2}$/', $end) !== 1
             || $start > $end) {
             throw new \InvalidArgumentException('日期范围不正确');
-        }
-        $coverageStart = $this->coverageStart();
-        if ($start < $coverageStart || $end < $coverageStart) {
-            throw new \InvalidArgumentException('所选日期早于第三阶段完整事实覆盖开始日 ' . $coverageStart);
         }
         return ['start' => $start, 'end' => $end];
     }

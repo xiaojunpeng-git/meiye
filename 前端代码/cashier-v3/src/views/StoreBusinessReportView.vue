@@ -21,9 +21,6 @@ import {
 } from '@/services/storeBusinessReportApi'
 
 const LEGACY_COVERAGE_START = '2026-08-10'
-const COVERAGE_START = '2026-08-17'
-const SIX_DIMENSION_COVERAGE_START = COVERAGE_START
-const PERFORMANCE_DISTRIBUTION_MIN_MONTH = addMonths(firstCompleteMonth(SIX_DIMENSION_COVERAGE_START), 1)
 const DEFAULT_LIMIT = 20
 // 门店运营报表目录。经营看板是数据入口，不属于本目录；
 // 报表结果、金额和筛选能力全部由统一查询服务返回，浏览器不参与计算。
@@ -72,9 +69,7 @@ const exporting = ref(false)
 const errorMessage = ref('')
 const startDate = ref(LEGACY_COVERAGE_START)
 const endDate = ref(today() < LEGACY_COVERAGE_START ? LEGACY_COVERAGE_START : today())
-const selectedMonth = ref(today().slice(0, 7) < PERFORMANCE_DISTRIBUTION_MIN_MONTH
-  ? PERFORMANCE_DISTRIBUTION_MIN_MONTH
-  : today().slice(0, 7))
+const selectedMonth = ref(today().slice(0, 7))
 const categoryId = ref('')
 const categoryPath = ref('')
 const productType = ref('')
@@ -494,7 +489,6 @@ const canPageForward = computed(() => page.value < pageCount.value && !loading.v
 const currentReportName = computed(() => reportTabs.value.find((item) => item.code === activeReport.value)?.name || '门店运营报表')
 const currentReportDescription = computed(() => reportTabs.value.find((item) => item.code === activeReport.value)?.description || '')
 const isPlatformReport = computed(isPlatformRuntimeRoute)
-const coveragePending = computed(() => isSixDimensionReport.value && today() < SIX_DIMENSION_COVERAGE_START)
 const reportRuntime = computed(() => isPlatformReport.value ? STORE_BUSINESS_REPORT_RUNTIME.PLATFORM : STORE_BUSINESS_REPORT_RUNTIME.STORE)
 const reportRouteName = computed(() => isPlatformReport.value ? 'cashier-v3-platform-store-business-reports' : 'cashier-v3-store-business-reports')
 
@@ -502,17 +496,6 @@ function today() {
   const date = new Date()
   const offset = date.getTimezoneOffset() * 60000
   return new Date(date.getTime() - offset).toISOString().slice(0, 10)
-}
-
-function addMonths(month, offset) {
-  const [year, monthNumber] = String(month).slice(0, 7).split('-').map(Number)
-  const value = new Date(year, monthNumber - 1 + offset, 1)
-  return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}`
-}
-
-function firstCompleteMonth(date) {
-  const month = String(date).slice(0, 7)
-  return String(date).slice(8, 10) === '01' ? month : addMonths(month, 1)
 }
 
 function monthBounds(month) {
@@ -683,7 +666,7 @@ function syncActiveReportFromRoute() {
     : String(allowedReportTabs.value[0]?.code || '')
   if (isFirstPhaseReport.value && startDate.value < LEGACY_COVERAGE_START) startDate.value = LEGACY_COVERAGE_START
   if (!isFirstPhaseReport.value && !isSixDimensionReport.value && startDate.value === LEGACY_COVERAGE_START) startDate.value = `${today().slice(0, 4)}-01-01`
-  if (isSixDimensionReport.value && startDate.value < SIX_DIMENSION_COVERAGE_START) startDate.value = SIX_DIMENSION_COVERAGE_START
+  if (isSixDimensionReport.value && startDate.value === LEGACY_COVERAGE_START) startDate.value = `${today().slice(0, 4)}-01-01`
 }
 
 function syncFiltersFromRoute() {
@@ -1103,10 +1086,10 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateTabsLayout))
           <footer><button type="button" @click="chooseAllScope">当前权限范围</button><span>选择组织查询其全部下级门店；选择门店仅查询该门店。</span></footer>
         </section>
       </div>
-      <label v-if="usesNaturalMonthFilter" class="store-business-report__date-field"><span>月份</span><input v-model="selectedMonth" type="month" aria-label="统计月份" :min="PERFORMANCE_DISTRIBUTION_MIN_MONTH" :max="today().slice(0, 7) < PERFORMANCE_DISTRIBUTION_MIN_MONTH ? PERFORMANCE_DISTRIBUTION_MIN_MONTH : today().slice(0, 7)" /></label>
+      <label v-if="usesNaturalMonthFilter" class="store-business-report__date-field"><span>月份</span><input v-model="selectedMonth" type="month" aria-label="统计月份" :max="today().slice(0, 7)" /></label>
       <template v-else>
-        <label class="store-business-report__date-field"><span>从</span><input v-model="startDate" type="date" aria-label="开始日期" :min="isFirstPhaseReport || isSixDimensionReport ? COVERAGE_START : undefined" :max="endDate" /></label>
-        <label class="store-business-report__date-field"><span>至</span><input v-model="endDate" type="date" aria-label="结束日期" :min="startDate" :max="today() < COVERAGE_START ? COVERAGE_START : today()" /></label>
+        <label class="store-business-report__date-field"><span>从</span><input v-model="startDate" type="date" aria-label="开始日期" :min="isFirstPhaseReport ? LEGACY_COVERAGE_START : undefined" :max="endDate" /></label>
+        <label class="store-business-report__date-field"><span>至</span><input v-model="endDate" type="date" aria-label="结束日期" :min="startDate" :max="today()" /></label>
       </template>
       <label v-for="field in filterSchema" :key="field.key">{{ field.label || field.name || field.key }}
         <select v-if="['select', 'category_tree'].includes(field.type)" v-model="dynamicFilters[field.key]">
@@ -1135,8 +1118,6 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateTabsLayout))
         </button>
       </div>
     </section>
-
-    <p v-if="coveragePending" class="store-business-report__coverage-notice" role="status">第三阶段统一事实从 {{ COVERAGE_START }} 开始完整统计，当前日期尚未进入覆盖期。</p>
 
     <section v-if="isFirstPhaseReport && isAdvancedFiltersOpen" class="store-business-report__filters store-business-report__filters--advanced" aria-label="报表高级筛选">
       <label>商品分类编号<input v-model.trim="categoryId" inputmode="numeric" placeholder="由分类选择器带入" /></label>

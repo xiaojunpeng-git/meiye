@@ -63,11 +63,12 @@ check('field explanations read server business metadata first',
     && reportView.includes('`${group}/${label}`')
     && reportView.includes('label: columnDisplayLabel(column)')
     && reportView.includes('csvValue(columnDisplayLabel(column))'))
-check('six-dimension date shown in the query matches the backend coverage boundary',
+check('six-dimension reports allow the selected historical date and month without frontend cutoff',
   reportView.includes("const LEGACY_COVERAGE_START = '2026-08-10'")
-    && reportView.includes("const COVERAGE_START = '2026-08-17'")
-    && reportView.includes('isSixDimensionReport.value && startDate.value < SIX_DIMENSION_COVERAGE_START')
-    && reportView.includes('isFirstPhaseReport.value && startDate.value < LEGACY_COVERAGE_START'))
+    && reportView.includes('isSixDimensionReport.value && startDate.value === LEGACY_COVERAGE_START')
+    && reportView.includes(':min="isFirstPhaseReport ? LEGACY_COVERAGE_START : undefined"')
+    && !reportView.includes('SIX_DIMENSION_COVERAGE_START')
+    && !reportView.includes('PERFORMANCE_DISTRIBUTION_MIN_MONTH'))
 check('performance distribution uses one natural-month selector',
   reportView.includes("activeReport.value === 'six_dimension_performance_distribution'")
     && reportView.includes('type="month"')

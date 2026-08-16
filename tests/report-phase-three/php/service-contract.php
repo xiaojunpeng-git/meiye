@@ -108,8 +108,10 @@ phaseThreeReportAssert(
         && str_contains($foundation, "memberOrigins(")
         && str_contains($foundation, "memberIdentityKeys")
         && str_contains($service, "COVERAGE_START = '2026-08-17'")
-        && str_contains($service, 'private function coverageStart()'),
-    'cutoff assignment, historical member evidence and phone identity are explicit'
+        && str_contains($service, 'private function coverageStart()')
+        && !str_contains($service, '所选日期早于第三阶段完整事实覆盖开始日')
+        && !str_contains($service, '所选月份的上月早于第三阶段完整事实覆盖期'),
+    'first-purchase cutoff, historical member evidence and phone identity are explicit without rejecting query dates'
 );
 phaseThreeReportAssert(
     str_contains($service, "'complaint_count_version'")
