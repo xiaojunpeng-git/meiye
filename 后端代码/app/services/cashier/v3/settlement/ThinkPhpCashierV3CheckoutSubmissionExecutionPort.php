@@ -27,6 +27,7 @@ use app\services\cashier\v3\fact\ThinkPhpCashierV3CheckoutFactRepository;
 use app\services\cashier\v3\order\settlement\CashierV3SalesOrderAuthorityException;
 use app\services\cashier\v3\order\settlement\CashierV3SalesOrderPlanV1;
 use app\services\cashier\v3\order\settlement\ThinkPhpCashierV3SalesOrderAuthorityWriter;
+use app\services\cashier\v3\presale\CashierV3PresaleClaimServices;
 use app\services\cashier\v3\service\CashierV3ServiceOrderAuthorityException;
 use app\services\cashier\v3\settlement\payment\CashierV3PaymentCollectionAuthorityException;
 use app\services\cashier\v3\settlement\payment\CashierV3PaymentCollectionPlanV1;
@@ -259,6 +260,10 @@ final class ThinkPhpCashierV3CheckoutSubmissionExecutionPort
                 $context->operatorScope(),
                 $context->dataScope()
             );
+            // The sale line is the only authority for a presale entitlement.
+            // Registration remains in this checkout transaction, so a failed
+            // payment or later settlement slice cannot leave a claimable row.
+            (new CashierV3PresaleClaimServices())->registerSettledSalesOrderInTx($plan);
             $this->coupons->consumeInTx(
                 $plan, $salesResult, $context->dataScope(), (int)$authority['settledAt']
             );

@@ -12,6 +12,41 @@ import axios from 'axios';
 import Setting from '@/setting';
 import util from '@/libs/util';
 
+/** 平台预售领用列表。组织和门店仅作服务端权限范围内的收窄筛选。 */
+export function presaleClaimListApi(params) {
+  return request({
+    url: '/product/inventory/v3/presale-claims',
+    method: 'get',
+    params
+  });
+}
+
+/** 平台预售销售行的全部领用记录。 */
+export function presaleClaimDetailApi(claimableLineId) {
+  return request({
+    url: `/product/inventory/v3/presale-claims/${encodeURIComponent(String(claimableLineId || ''))}`,
+    method: 'get'
+  });
+}
+
+/** 平台代门店执行一次预售领用出库。 */
+export function createPresaleClaimApi(data) {
+  return request({
+    url: '/product/inventory/v3/presale-claims/claim',
+    method: 'post',
+    data
+  });
+}
+
+/** 作废预售领用，并按原库存批次退回。 */
+export function voidPresaleClaimApi(claimId, data) {
+  return request({
+    url: `/product/inventory/v3/presale-claims/${encodeURIComponent(String(claimId || ''))}/void`,
+    method: 'post',
+    data
+  });
+}
+
 /**
  入库管理-添加表单-提交
  * @param {Object} param data {Object} 传值参数

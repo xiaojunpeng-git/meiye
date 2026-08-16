@@ -235,6 +235,7 @@ export function createInventoryApi(options = {}) {
     inboundOutboundDetails(id) { return request(`/v3/inbound/${encodeURIComponent(String(id || ''))}/outbound-details`) },
     voidInbound(id, body) { return request(`/v3/inbound/${encodeURIComponent(String(id || ''))}/void`, { method: 'POST', body }) },
     createOutbound(body) { return request('/v3/outbound', { method: 'POST', body }) },
+    outboundDetail(id) { return request(`/v3/outbound/${encodeURIComponent(String(id || ''))}/detail`) },
     voidOutbound(id, body) { return request(`/v3/outbound/${encodeURIComponent(String(id || ''))}/void`, { method: 'POST', body }) },
     confirmCount(body) { return request('/v3/count/confirm', { method: 'POST', body }) },
     applyRequest(body) { return request('/v3/request/apply', { method: 'POST', body }) },

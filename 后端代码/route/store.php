@@ -605,6 +605,11 @@ Route::group('storeapi', function () {
 		Route::get('v3/dashboard', 'product.inventory.InventoryStoreReadModel/dashboard')->option(['real_name' => '库存首页权威概览']);
 		Route::get('v3/product-summary', 'product.inventory.InventoryStoreReadModel/productSummary')->option(['real_name' => '库存商品汇总查询']);
 		Route::get('v3/product-summary/:productId/detail', 'product.inventory.InventoryStoreReadModel/productDetail')->option(['real_name' => '库存商品批次与流水详情']);
+		// 收银预售商品多次领用。领用的库存扣减与作废退库均由服务端事务处理。
+		Route::get('v3/presale-claims', 'product.inventory.PresaleClaim/index')->option(['real_name' => '门店预售领用列表']);
+		Route::get('v3/presale-claims/:id', 'product.inventory.PresaleClaim/detail')->pattern(['id' => '[A-Za-z0-9-]+'])->option(['real_name' => '门店预售领用明细']);
+		Route::post('v3/presale-claims/claim', 'product.inventory.PresaleClaim/claim')->option(['real_name' => '门店预售领用出库']);
+		Route::post('v3/presale-claims/:id/void', 'product.inventory.PresaleClaim/void')->pattern(['id' => '[A-Za-z0-9-]+'])->option(['real_name' => '门店预售领用作废']);
 		Route::get('v3/unified-query/batch-stock', 'product.inventory.InventoryUnifiedQuery/batchStock')->option(['real_name' => '统一查询批次库存']);
 		Route::get('v3/unified-query/operational', 'product.inventory.InventoryUnifiedQuery/operational')->option(['real_name' => '统一查询库存业务单据']);
 		Route::get('v3/unified-query/capabilities', 'product.inventory.InventoryUnifiedQuery/capabilities')->option(['real_name' => '库存统一查询能力']);
@@ -624,6 +629,7 @@ Route::group('storeapi', function () {
 		Route::get('v3/inbound/:id/outbound-details', 'product.inventory.InventoryManualInbound/outboundDetails')->pattern(['id' => '[A-Za-z0-9-]+'])->option(['real_name' => '入库批次后续出库明细']);
 		Route::post('v3/inbound/:id/void', 'product.inventory.InventoryManualInbound/void')->pattern(['id' => '[A-Za-z0-9-]+'])->option(['real_name' => '批次手工入库作废']);
 		Route::post('v3/outbound', 'product.inventory.InventoryManualOutbound/create')->option(['real_name' => '批次手工出库']);
+		Route::get('v3/outbound/:id/detail', 'product.inventory.InventoryManualOutbound/detail')->pattern(['id' => '[A-Za-z0-9-]+'])->option(['real_name' => '批次出库详情']);
 		Route::post('v3/outbound/:id/void', 'product.inventory.InventoryManualOutbound/void')->pattern(['id' => '[A-Za-z0-9-]+'])->option(['real_name' => '批次手工出库作废']);
 		Route::get('v3/movement', 'product.inventory.InventoryMovementQuery/index')->option(['real_name' => '批次事实出入库记录查询']);
 		Route::get('v3/movement-statistics', 'product.inventory.InventoryMovementAnalytics/index')->option(['real_name' => '批次事实出入库统计']);

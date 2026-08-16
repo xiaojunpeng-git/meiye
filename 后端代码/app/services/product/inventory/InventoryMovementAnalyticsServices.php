@@ -27,7 +27,13 @@ final class InventoryMovementAnalyticsServices
         $rows = Db::name('inventory_batch_movement_fact')->alias('f')
             ->join('inventory_batch b', 'b.id=f.batch_id')->join('inventory_stock s', 's.id=f.stock_id')
             ->where('f.tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)->whereIn('f.location_id', $locationIds)
+            ->leftJoin('cashier_v3_presale_claim pc', 'pc.tenant_id=f.tenant_id AND pc.claim_id=f.source_id AND f.source_type=\'presale_claim_outbound\'')
             ->where('f.fact_status', 'SETTLED')->where('f.direction', $direction)->whereBetween('f.business_date', [$from, $to])
+            ->where(function ($query): void {
+                $query->where('f.source_type', '<>', 'presale_claim_outbound')
+                    ->whereOr('pc.claim_status', '<>', 'VOIDED')
+                    ->whereOrNull('pc.claim_status');
+            })
             ->field([
                 'f.business_date', 'f.source_type', 's.consumable_product_id' => 'product_id', 's.sku_id', 's.stock_unit', 's.quantity_scale',
                 'b.product_name_snapshot' => 'product_name', 'b.sku_name_snapshot' => 'sku_name',
@@ -77,7 +83,7 @@ final class InventoryMovementAnalyticsServices
             'stock_count_gain' => '盘盈', 'stock_count_loss' => '盘亏',
             'batch_transfer_in' => '调拨入库', 'batch_transfer_out' => '调拨出库',
             'salon_usage_issue' => '院装领用', 'salon_usage_return' => '院装退回',
-            'completion_batch' => '项目耗材核销',
+            'completion_batch' => '项目耗材核销', 'presale_claim_outbound' => '预售领用出库',
         ][$type] ?? $type;
     }
 }

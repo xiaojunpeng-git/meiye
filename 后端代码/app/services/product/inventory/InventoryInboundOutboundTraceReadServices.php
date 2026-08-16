@@ -13,6 +13,7 @@ final class InventoryInboundOutboundTraceReadServices
 {
     private const OUTBOUND_TYPES = [
         'manual_outbound' => '手工出库',
+        'presale_claim_outbound' => '预售领用出库',
         'batch_transfer_out' => '仓库调拨出库',
         'cross_transfer_out' => '门店调拨出库',
         'salon_usage_issue' => '院装领用',

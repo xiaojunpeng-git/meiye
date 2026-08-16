@@ -30,6 +30,64 @@ final class InventoryMovementQueryServices
         return $this->documentRows((int)$location['id'], $kind, $keyword, $page, $limit, $canViewCost);
     }
 
+    /** Read one immutable outbound document from the caller's default store warehouse. */
+    public function outboundDetail(int $storeId, int $operatorId, string $sourceId, bool $canViewCost = false): array
+    {
+        $location = $this->defaultLocation($storeId, $operatorId);
+        $sourceId = trim($sourceId);
+        if ($sourceId === '' || strlen($sourceId) > 96) {
+            throw new \InvalidArgumentException('inventory_outbound_detail_invalid');
+        }
+
+        $facts = Db::name('inventory_batch_movement_fact')->alias('f')
+            ->join('inventory_batch b', 'b.id=f.batch_id')
+            ->join('inventory_stock s', 's.id=f.stock_id')
+            ->leftJoin('inventory_business_document_no n', 'n.tenant_id=f.tenant_id AND n.source_type=f.source_type AND n.source_id=f.source_id')
+            ->leftJoin('cashier_v3_presale_claim pc', 'pc.tenant_id=f.tenant_id AND pc.claim_id=f.source_id AND f.source_type=\'presale_claim_outbound\'')
+            ->where('f.tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
+            ->where('f.location_id', (int)$location['id'])->where('f.fact_status', 'SETTLED')
+            ->where('f.source_id', $sourceId)->whereIn('f.source_type', ['manual_outbound', 'presale_claim_outbound'])
+            ->fieldRaw("COALESCE(n.document_no, f.source_id) AS order_sn, f.source_type, pc.claim_status AS presale_claim_status, pc.void_reason_snapshot AS presale_void_reason, pc.voided_at AS presale_voided_at, f.business_date, f.recorded_at, b.product_name_snapshot AS product_name, b.sku_name_snapshot AS sku_name, b.barcode_snapshot AS barcode, b.batch_no, b.manufactured_date, b.expire_date, s.stock_unit, s.quantity_scale, f.quantity_units, f.unit_cost_cents, f.cost_amount_cents")
+            ->order('f.id asc')->select()->toArray();
+        if (!$facts) throw new \InvalidArgumentException('inventory_outbound_detail_missing');
+
+        $sourceType = (string)$facts[0]['source_type'];
+        foreach ($facts as &$fact) {
+            $fact['quantity'] = $this->quantity((int)$fact['quantity_units'], (int)$fact['quantity_scale']);
+            if (!$canViewCost) {
+                $fact['unit_cost_cents'] = null;
+                $fact['cost_amount_cents'] = null;
+            }
+        }
+        unset($fact);
+
+        if ($sourceType === 'presale_claim_outbound') {
+            $voided = (string)($facts[0]['presale_claim_status'] ?? '') === 'VOIDED';
+            $document = [
+                'order_sn' => (string)$facts[0]['order_sn'], 'business_date' => (string)$facts[0]['business_date'],
+                'recorded_at' => (int)$facts[0]['recorded_at'], 'location_name' => (string)($location['location_name'] ?? '当前门店默认仓'),
+                'status_name' => $voided ? '已作废' : '已完成', 'can_void' => false,
+                'void_reason' => $voided ? (string)($facts[0]['presale_void_reason'] ?? '') : '',
+                'voided_at' => $voided ? (int)($facts[0]['presale_voided_at'] ?? 0) : 0,
+            ];
+        } else {
+            $reversal = (new InventoryManualDocumentReversalProjectionServices())->settledIndex(
+                CashierV3ScopeResolver::TENANT_SCOPE_ID,
+                'manual_outbound',
+                [$sourceId],
+                [(int)$location['id']]
+            );
+            $voided = $reversal[$sourceId] ?? null;
+            $document = [
+                'order_sn' => (string)$facts[0]['order_sn'], 'business_date' => (string)$facts[0]['business_date'],
+                'recorded_at' => (int)$facts[0]['recorded_at'], 'location_name' => (string)($location['location_name'] ?? '当前门店默认仓'),
+                'status_name' => $voided ? '已作废' : '已完成', 'can_void' => $voided === null,
+                'void_reason' => $voided ? (string)$voided['reason'] : '', 'voided_at' => $voided ? (int)$voided['settled_at'] : 0,
+            ];
+        }
+        return ['document' => $document, 'lines' => $facts];
+    }
+
     private function defaultLocation(int $storeId, int $operatorId): array
     {
         $staff = Db::name('system_store_staff')
@@ -48,7 +106,7 @@ final class InventoryMovementQueryServices
 
     private function documentRows(int $locationId, string $kind, string $keyword, int $page, int $limit, bool $canViewCost): array
     {
-        $types = $kind === 'inbound' ? ['manual_inbound'] : ['manual_outbound'];
+        $types = $kind === 'inbound' ? ['manual_inbound'] : ['manual_outbound', 'presale_claim_outbound'];
         $base = Db::name('inventory_batch_movement_fact')->alias('f')
             ->leftJoin('inventory_batch b', 'b.id=f.batch_id')
             ->leftJoin('inventory_business_document_no n', 'n.tenant_id=f.tenant_id AND n.source_type=f.source_type AND n.source_id=f.source_id')
@@ -61,27 +119,51 @@ final class InventoryMovementQueryServices
         }
         $rows = $base->field([
                 'f.source_id', 'COALESCE(n.document_no,f.source_id)' => 'order_sn', 'f.source_type', 'f.business_date',
+                'MAX(pc.claim_status)' => 'presale_claim_status',
                 'MAX(f.recorded_at)' => 'add_time',
                 'MAX(COALESCE(NULLIF(f.occurred_at, 0), f.recorded_at))' => 'operation_at',
                 'COUNT(f.id)' => 'detail_count',
                 'SUM(f.quantity_units)' => 'quantity_units', 'SUM(f.cost_amount_cents)' => 'cost_amount_cents',
                 'GROUP_CONCAT(DISTINCT CONCAT(IFNULL(b.product_name_snapshot, \'商品\'), \' / \', IFNULL(b.sku_name_snapshot, \'默认规格\')) SEPARATOR \'、\')' => 'product_summary',
             ])
+            ->leftJoin('cashier_v3_presale_claim pc', 'pc.tenant_id=f.tenant_id AND pc.claim_id=f.source_id AND f.source_type=\'presale_claim_outbound\'')
             ->group('f.source_id,n.document_no,f.source_type,f.business_date')
             ->order('add_time desc')->page($page, $limit)->select()->toArray();
         $count = count((clone $base)->field('f.source_id')->group('f.source_id,n.document_no,f.source_type,f.business_date')->select()->toArray());
         foreach ($rows as &$row) {
             if (!$canViewCost) $row['cost_amount_cents'] = null;
-            $row['order_type_name'] = $kind === 'inbound' ? '手工入库' : '手工出库';
+            $row['order_type_name'] = $kind === 'inbound' ? '手工入库' : $this->outboundTypeName((string)$row['source_type']);
             $row['location_name'] = '当前门店默认仓';
+            if ((string)$row['source_type'] === 'presale_claim_outbound') {
+                $row['status_name'] = (string)$row['presale_claim_status'] === 'VOIDED' ? '已作废' : '已完成';
+                $row['can_void'] = false;
+            }
         }
         unset($row);
-        $rows = (new InventoryManualDocumentReversalProjectionServices())->apply(
-            $rows,
-            CashierV3ScopeResolver::TENANT_SCOPE_ID,
-            $types[0],
-            [$locationId]
-        );
+        if ($kind === 'inbound') {
+            $rows = (new InventoryManualDocumentReversalProjectionServices())->apply(
+                $rows,
+                CashierV3ScopeResolver::TENANT_SCOPE_ID,
+                $types[0],
+                [$locationId]
+            );
+        } else {
+            $manualRows = [];
+            foreach ($rows as $index => $row) {
+                if ((string)$row['source_type'] === 'manual_outbound') $manualRows[$index] = $row;
+            }
+            $manualRows = (new InventoryManualDocumentReversalProjectionServices())->apply(
+                array_values($manualRows),
+                CashierV3ScopeResolver::TENANT_SCOPE_ID,
+                'manual_outbound',
+                [$locationId]
+            );
+            $manualIndex = 0;
+            foreach ($rows as &$row) {
+                if ((string)$row['source_type'] === 'manual_outbound') $row = $manualRows[$manualIndex++];
+            }
+            unset($row);
+        }
         return ['count' => $count, 'list' => $rows];
     }
 
@@ -127,8 +209,21 @@ final class InventoryMovementQueryServices
             'batch_transfer_in' => '调拨入库', 'batch_transfer_out' => '调拨出库',
             'stock_count_gain' => '盘盈', 'stock_count_loss' => '盘亏',
             'salon_usage_issue' => '院装领用', 'salon_usage_return' => '院装退回',
-            'completion_batch' => '项目耗材核销',
+            'completion_batch' => '项目耗材核销', 'presale_claim_outbound' => '预售领用出库',
         ][$sourceType] ?? $sourceType;
+    }
+
+    private function outboundTypeName(string $sourceType): string
+    {
+        return $sourceType === 'presale_claim_outbound' ? '预售领用出库' : '手工出库';
+    }
+
+    private function quantity(int $units, int $scale): string
+    {
+        $scale = max(0, min(4, $scale));
+        if ($scale === 0) return (string)$units;
+        $digits = str_pad((string)$units, $scale + 1, '0', STR_PAD_LEFT);
+        return rtrim(rtrim(substr($digits, 0, -$scale) . '.' . substr($digits, -$scale), '0'), '.');
     }
 
     /** @return int[] */

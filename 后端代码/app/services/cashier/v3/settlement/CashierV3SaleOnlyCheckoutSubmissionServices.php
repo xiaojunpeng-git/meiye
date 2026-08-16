@@ -26,6 +26,7 @@ use app\services\cashier\v3\hang\CashierV3HangCheckoutBindingServices;
 use app\services\cashier\v3\order\settlement\CashierV3SalesOrderAuthorityException;
 use app\services\cashier\v3\order\settlement\CashierV3SalesOrderPlanV1;
 use app\services\cashier\v3\order\settlement\ThinkPhpCashierV3SalesOrderAuthorityWriter;
+use app\services\cashier\v3\presale\CashierV3PresaleClaimServices;
 use app\services\cashier\v3\settlement\payment\CashierV3PaymentCollectionAuthorityException;
 use app\services\cashier\v3\settlement\payment\CashierV3PaymentCollectionPlanV1;
 use app\services\cashier\v3\settlement\payment\ThinkPhpCashierV3PaymentCollectionAuthorityWriter;
@@ -261,6 +262,7 @@ final class CashierV3SaleOnlyCheckoutSubmissionServices
                 $operatorScope,
                 $dataScope
             );
+            (new CashierV3PresaleClaimServices())->registerSettledSalesOrderInTx($salesPlan);
             $couponResult = (new CashierV3CheckoutCouponSettlementServices())->consumeInTx(
                 $salesPlan, $salesResult, $dataScope, $now
             );

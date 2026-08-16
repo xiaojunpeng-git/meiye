@@ -167,7 +167,9 @@ function movementTypeName(sourceType) {
     stock_count_gain: '盘盈入库',
     stock_count_loss: '盘亏出库',
     salon_usage_out: '院装领用出库',
-    salon_usage_return: '院装退回入库'
+    salon_usage_return: '院装退回入库',
+    presale_claim_outbound: '预售领用出库',
+    presale_claim_void: '预售领用作废退库'
   }[String(sourceType || '')] || '库存调整'
 }
 

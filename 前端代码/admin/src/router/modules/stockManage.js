@@ -133,6 +133,15 @@ export default {
 		        title: '院装管理'
 		    },
 		    component: () => import('@/pages/stockManage/InventoryV3Bridge')
+    },
+    {
+      path: `${Setting.roterPre}/stock/presale-claim`,
+      name: 'presaleClaimManage',
+      meta: {
+        auth: ['admin-stock-manage'],
+        title: '预售领用'
+      },
+      component: () => import('@/pages/stockManage/presaleClaim/list.vue')
     }
   ]
 };

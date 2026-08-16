@@ -4,8 +4,10 @@ declare(strict_types=1);
 namespace app\controller\store\product\inventory;
 
 use app\controller\store\AuthController;
+use app\services\product\inventory\InventoryMovementQueryServices;
 use app\services\product\inventory\InventoryManualOutboundServices;
 use app\services\product\inventory\InventoryManualDocumentReversalServices;
+use app\services\product\inventory\InventoryStoreAccessPolicy;
 use think\facade\App;
 
 class InventoryManualOutbound extends AuthController
@@ -22,6 +24,27 @@ class InventoryManualOutbound extends AuthController
             ['idempotency_key', ''], ['business_date', ''], ['remark', ''], ['lines', []],
         ]);
         return $this->success($this->services->create((int)$this->storeId, (int)$this->storeStaffId, $data));
+    }
+
+    public function detail(string $id, InventoryMovementQueryServices $readServices)
+    {
+        try {
+            $canViewCost = in_array(
+                'inventory.cost.view',
+                (new InventoryStoreAccessPolicy())->features((int)$this->storeId, (int)$this->storeStaffId),
+                true
+            );
+            return $this->success($readServices->outboundDetail(
+                (int)$this->storeId,
+                (int)$this->storeStaffId,
+                $id,
+                $canViewCost
+            ));
+        } catch (\InvalidArgumentException $exception) {
+            return $this->fail('出库单详情不存在或无权查看。', ['code' => $exception->getMessage()]);
+        } catch (\RuntimeException $exception) {
+            return $this->fail('当前门店库存范围不可用，请刷新后重试。', ['code' => $exception->getMessage()]);
+        }
     }
 
     public function void(string $id, InventoryManualDocumentReversalServices $reversalServices)

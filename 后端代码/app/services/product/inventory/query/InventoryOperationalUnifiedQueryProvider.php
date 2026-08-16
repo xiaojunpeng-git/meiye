@@ -73,7 +73,7 @@ abstract class InventoryOperationalUnifiedQueryProvider implements UnifiedQueryP
         $canViewCost = in_array(InventoryBatchStockQueryContract::PERMISSION_COST, (array)$context['permissions'], true);
         switch ($this->pageCode()) {
             case 'inventory_inbound': $rows = $this->documentRows($tenantId, $storeId, $locationIds, 'manual_inbound', $canViewCost); break;
-            case 'inventory_outbound': $rows = $this->documentRows($tenantId, $storeId, $locationIds, 'manual_outbound', $canViewCost); break;
+            case 'inventory_outbound': $rows = $this->documentRows($tenantId, $storeId, $locationIds, ['manual_outbound', 'presale_claim_outbound'], $canViewCost); break;
             case 'inventory_movement': $rows = $this->movementRows($tenantId, $storeId, $locationIds, $canViewCost); break;
             case 'inventory_count': $rows = $this->countRows($tenantId, $storeId, $locationIds, $canViewCost); break;
             case 'inventory_request': $rows = $this->requestRows($tenantId, $storeId, $locationIds, $canViewCost); break;
@@ -111,19 +111,36 @@ abstract class InventoryOperationalUnifiedQueryProvider implements UnifiedQueryP
         return $normalized;
     }
 
-    private function documentRows(string $tenantId, int $storeId, array $locationIds, string $type, bool $canViewCost): array
+    private function documentRows(string $tenantId, int $storeId, array $locationIds, $types, bool $canViewCost): array
     {
+        $types = is_array($types) ? $types : [(string)$types];
         $rows = Db::name('inventory_batch_movement_fact')->alias('f')->leftJoin('inventory_batch b', 'b.id=f.batch_id')
             ->leftJoin('inventory_location l', 'l.id=f.location_id')
-            ->leftJoin('inventory_business_document_no n', 'n.tenant_id=f.tenant_id AND n.source_type=f.source_type AND n.source_id=f.source_id')->where('f.tenant_id', $tenantId)->where('f.store_id', $storeId)
-            ->whereIn('f.location_id', $locationIds)->where('f.fact_status', 'SETTLED')->where('f.source_type', $type)
+            ->leftJoin('inventory_business_document_no n', 'n.tenant_id=f.tenant_id AND n.source_type=f.source_type AND n.source_id=f.source_id')
+            ->leftJoin('cashier_v3_presale_claim pc', 'pc.tenant_id=f.tenant_id AND pc.claim_id=f.source_id AND f.source_type=\'presale_claim_outbound\'')->where('f.tenant_id', $tenantId)->where('f.store_id', $storeId)
+            ->whereIn('f.location_id', $locationIds)->where('f.fact_status', 'SETTLED')->whereIn('f.source_type', $types)
             // Query expressions cannot be used as PHP array keys. Use one raw
             // projection so ThinkORM receives the SQL aliases directly.
-            ->fieldRaw("f.source_id AS source_id, COALESCE(n.document_no, f.source_id) AS order_sn, f.business_date, f.location_id, l.location_name, MAX(f.recorded_at) AS add_time, MAX(COALESCE(NULLIF(f.occurred_at, 0), f.recorded_at)) AS operation_at, COUNT(f.id) AS detail_count, SUM(f.cost_amount_cents) AS cost_amount_cents, GROUP_CONCAT(DISTINCT CONCAT(IFNULL(b.product_name_snapshot, '商品'), ' / ', IFNULL(b.sku_name_snapshot, '默认规格')) SEPARATOR '、') AS product_summary")
-            ->group('f.source_id,n.document_no,f.business_date,f.location_id,l.location_name')->order('add_time desc')->limit(UnifiedQueryExecutionServices::MAX_SOURCE_ROWS + 1)->select()->toArray();
-        foreach ($rows as &$row) { $row['source_id'] = (string)($row['source_id'] ?? ''); $row['order_type_name'] = $type === 'manual_inbound' ? '手工入库' : '手工出库'; if (!$canViewCost) $row['cost_amount_cents'] = null; }
+            ->fieldRaw("f.source_id AS source_id, f.source_type AS source_type, MAX(pc.claim_status) AS presale_claim_status, COALESCE(n.document_no, f.source_id) AS order_sn, f.business_date, f.location_id, l.location_name, MAX(f.recorded_at) AS add_time, MAX(COALESCE(NULLIF(f.occurred_at, 0), f.recorded_at)) AS operation_at, COUNT(f.id) AS detail_count, SUM(f.cost_amount_cents) AS cost_amount_cents, GROUP_CONCAT(DISTINCT CONCAT(IFNULL(b.product_name_snapshot, '商品'), ' / ', IFNULL(b.sku_name_snapshot, '默认规格')) SEPARATOR '、') AS product_summary")
+            ->group('f.source_id,f.source_type,n.document_no,f.business_date,f.location_id,l.location_name')->order('add_time desc')->limit(UnifiedQueryExecutionServices::MAX_SOURCE_ROWS + 1)->select()->toArray();
+        foreach ($rows as &$row) {
+            $row['source_id'] = (string)($row['source_id'] ?? '');
+            $presale = (string)$row['source_type'] === 'presale_claim_outbound';
+            $row['order_type_name'] = $types === ['manual_inbound'] ? '手工入库' : ($presale ? '预售领用出库' : '手工出库');
+            if ($presale) { $row['status_name'] = (string)$row['presale_claim_status'] === 'VOIDED' ? '已作废' : '已完成'; $row['can_void'] = false; }
+            if (!$canViewCost) $row['cost_amount_cents'] = null;
+        }
         unset($row);
-        $rows = (new \app\services\product\inventory\InventoryManualDocumentReversalProjectionServices())->apply($rows, $tenantId, $type, $locationIds);
+        if ($types === ['manual_inbound'] || $types === ['manual_outbound']) {
+            $rows = (new \app\services\product\inventory\InventoryManualDocumentReversalProjectionServices())->apply($rows, $tenantId, $types[0], $locationIds);
+        } elseif (in_array('manual_outbound', $types, true)) {
+            $manualRows = [];
+            foreach ($rows as $index => $row) if ((string)$row['source_type'] === 'manual_outbound') $manualRows[$index] = $row;
+            $manualRows = (new \app\services\product\inventory\InventoryManualDocumentReversalProjectionServices())->apply(array_values($manualRows), $tenantId, 'manual_outbound', $locationIds);
+            $manualIndex = 0;
+            foreach ($rows as &$row) if ((string)$row['source_type'] === 'manual_outbound') $row = $manualRows[$manualIndex++];
+            unset($row);
+        }
         return $this->bounded($rows);
     }
 
@@ -222,7 +239,7 @@ abstract class InventoryOperationalUnifiedQueryProvider implements UnifiedQueryP
     }
 
     private function bounded(array $rows): array { if (count($rows) > UnifiedQueryExecutionServices::MAX_SOURCE_ROWS) throw new UnifiedQueryException('UNIFIED_QUERY_SOURCE_WINDOW_TOO_LARGE', '当前数据量较大，请缩小业务日期范围后再查询。', []); return $rows; }
-    private function movementName(string $type): string { return ['manual_inbound' => '手工入库', 'manual_outbound' => '手工出库', 'batch_transfer_in' => '调拨入库', 'batch_transfer_out' => '调拨出库', 'cross_transfer_in_reversal' => '调拨入库冲销', 'cross_transfer_out_reversal' => '调拨出库冲销', 'stock_count_gain' => '盘盈', 'stock_count_loss' => '盘亏', 'salon_usage_issue' => '院装领用', 'salon_usage_return' => '院装退回', 'completion_batch' => '项目耗材核销'][$type] ?? $type; }
+    private function movementName(string $type): string { return ['manual_inbound' => '手工入库', 'manual_outbound' => '手工出库', 'presale_claim_outbound' => '预售领用出库', 'presale_claim_void' => '预售领用作废退库', 'batch_transfer_in' => '调拨入库', 'batch_transfer_out' => '调拨出库', 'cross_transfer_in_reversal' => '调拨入库冲销', 'cross_transfer_out_reversal' => '调拨出库冲销', 'stock_count_gain' => '盘盈', 'stock_count_loss' => '盘亏', 'salon_usage_issue' => '院装领用', 'salon_usage_return' => '院装退回', 'completion_batch' => '项目耗材核销'][$type] ?? $type; }
     private function transferStatusName(string $status): string { return ['DRAFT' => '草稿', 'DISPATCHED' => '在途', 'RECEIVED' => '已收货', 'CANCELLED' => '已取消', 'REVERSED' => '已作废'][$status] ?? $status; }
     private function requestStatusName(string $status): string { return ['APPLIED' => '申请中', 'PARTIAL' => '部分履约', 'DONE' => '已完成', 'CANCELLED' => '已取消', 'TERMINATED' => '已终止剩余请货'][$status] ?? $status; }
 

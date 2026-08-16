@@ -12,6 +12,7 @@ use app\services\cashier\v3\cashier\CashierV3SaleCatalogServices;
 use app\services\cashier\v3\checkout\provider\CashierV3MemberBalanceProvider;
 use app\services\cashier\v3\event\CashierV3BusinessEventExecution;
 use app\services\cashier\v3\event\CashierV3BusinessEventRecorder;
+use app\services\cashier\v3\presale\CashierV3PresaleClaimServices;
 use think\facade\Db;
 
 /**
@@ -147,6 +148,12 @@ final class CashierV3OrderLifecycleServices
             );
             $financial = $this->assertFinancialReversalEligible(
                 $source, $action, $input, $dataScope, (int)$cardOperationReversal['entitlementCreditCents']
+            );
+            // A financial reversal never pulls back a completed presale
+            // delivery. It only closes all remaining claim opportunities for
+            // this source order, inside the same transaction as the reversal.
+            (new CashierV3PresaleClaimServices())->closeForSalesOrderReversalInTx(
+                $dataScope->tenantId(), (string)$source['sourceId'], $operationId, $now
             );
             $input['cashRefundCents'] = (int)$financial['cashRefundCents'];
             $input['restorePrincipalCents'] = (int)$financial['restorePrincipalCents'];

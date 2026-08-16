@@ -625,7 +625,8 @@ async function openInboundOutboundDetails(row) {
 async function openOutboundDetail(row) {
   try {
     if (mode.value !== 'platform') {
-      openEditor('outbound-detail', row)
+      selectedDetail.value = await inventoryApi.outboundDetail(row.source_id || row.id)
+      editor.value = 'outbound-detail'
       return
     }
     selectedDetail.value = await platformInventoryApi.hqOutboundDetail(row.id, { hq_location_id: Number(platformHqLocationId.value) })

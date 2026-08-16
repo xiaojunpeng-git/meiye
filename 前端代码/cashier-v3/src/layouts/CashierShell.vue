@@ -133,7 +133,8 @@ const inventoryFeatureItems = [
   { key: 'request', label: '请货', featureCode: 'cashier.v3.inventory.request' },
   { key: 'transfer', label: '调拨', featureCode: 'cashier.v3.inventory.transfer' },
   { key: 'usage', label: '院装', featureCode: 'cashier.v3.inventory.usage' },
-  { key: 'import', label: '导入', featureCode: 'cashier.v3.inventory.import' }
+  { key: 'import', label: '导入', featureCode: 'cashier.v3.inventory.import' },
+  { key: 'presale-claim', label: '预售领用', featureCode: 'cashier.v3.inventory.outbound', to: { name: 'cashier-v3-presale-claim' } }
 ]
 const visibleInventoryFeatureItems = computed(() => inventoryFeatureItems.filter((entry) => canUseFeature(entry.featureCode)))
 const isInventoryWorkspaceOpen = ref(false)
@@ -275,6 +276,11 @@ function openInventoryWorkspace(entry = visibleInventoryFeatureItems.value[0]) {
 
 function closeInventoryWorkspace() {
   isInventoryWorkspaceOpen.value = false
+}
+
+function isInventoryFeatureActive(entry) {
+  if (entry?.to?.name) return route.name === entry.to.name
+  return activeInventoryFeatureKey.value === entry?.key && isInventoryWorkspaceOpen.value
 }
 
 function isMenuItemActive(item) {
@@ -2362,14 +2368,22 @@ onBeforeUnmount(() => {
               </button>
             </div>
             <div v-if="isInventoryMenuExpanded && !isSidebarCollapsed" class="cashier-inventory-grid" aria-label="库存管理功能">
+              <template v-for="entry in visibleInventoryFeatureItems" :key="entry.key">
+                <RouterLink
+                  v-if="entry.to"
+                  class="cashier-inventory-grid__item"
+                  :class="{ 'cashier-inventory-grid__item--active': isInventoryFeatureActive(entry) }"
+                  :to="entry.to"
+                  @click="closeInventoryWorkspace"
+                >{{ entry.label }}</RouterLink>
                 <a
-                  v-for="entry in visibleInventoryFeatureItems"
-                :key="entry.key"
-                class="cashier-inventory-grid__item"
-                :class="{ 'cashier-inventory-grid__item--active': activeInventoryFeatureKey === entry.key && isInventoryWorkspaceOpen }"
-                href="#/cashier"
-                @click.prevent="openInventoryWorkspace(entry)"
-              >{{ entry.label }}</a>
+                  v-else
+                  class="cashier-inventory-grid__item"
+                  :class="{ 'cashier-inventory-grid__item--active': isInventoryFeatureActive(entry) }"
+                  href="#/cashier"
+                  @click.prevent="openInventoryWorkspace(entry)"
+                >{{ entry.label }}</a>
+              </template>
             </div>
           </div>
           <a

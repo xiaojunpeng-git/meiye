@@ -15,6 +15,7 @@ import StaffListView from '@/views/StaffListView.vue'
 import RoomSettingsView from '@/views/RoomSettingsView.vue'
 import RoutePlaceholderView from '@/views/RoutePlaceholderView.vue'
 import StoreLoginView from '@/views/StoreLoginView.vue'
+import PresaleClaimView from '@/views/PresaleClaimView.vue'
 import { bootstrapCashierV3Workbench, hasCashierV3Session } from '@/services/cashierV3SessionLifecycle'
 import { canUseCashierV3Feature } from '@/services/cashierV3Bridge'
 
@@ -26,6 +27,7 @@ const routeFeatureCodes = Object.freeze({
   'cashier-v3-reservation': 'cashier.v3.reservation',
   'cashier-v3-member': 'cashier.v3.member',
   'cashier-v3-care': 'cashier.v3.member',
+  'cashier-v3-presale-claim': 'cashier.v3.inventory.outbound',
   'cashier-v3-hang': 'cashier.v3.hang',
   'cashier-v3-order-center': 'cashier.v3.order_center',
   'cashier-v3-management-center': 'cashier.v3.management_center',
@@ -107,6 +109,12 @@ const routes = [
           emptyTitle: '暂无待处理客情任务',
           emptyDescription: '会员客情记录会显示在这里。'
         }
+      },
+      {
+        path: 'presale-claim',
+        name: 'cashier-v3-presale-claim',
+        component: PresaleClaimView,
+        meta: { title: '预售领用', description: '预售商品可分次领用，领用后自动生成出库单。' }
       },
       {
         path: 'hang',
