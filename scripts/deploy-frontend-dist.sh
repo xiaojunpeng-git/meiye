@@ -4,6 +4,7 @@
 #   bash 美容源码/scripts/deploy-frontend-dist.sh 008
 #   bash 美容源码/scripts/deploy-frontend-dist.sh 008 admin
 #   bash 美容源码/scripts/deploy-frontend-dist.sh 008 cashier
+#   bash 美容源码/scripts/deploy-frontend-dist.sh 008 fund
 #   bash 美容源码/scripts/deploy-frontend-dist.sh 008 inventory
 #   bash 美容源码/scripts/deploy-frontend-dist.sh 007
 #
@@ -66,6 +67,15 @@ deploy_cashier_v3() {
   ssh "$SSH_HOST" "chown -R www:www '$PUBLIC/view_cashier_v3' 2>/dev/null || true"
 }
 
+deploy_fund_v3() {
+  local dist="$FRONTEND_DIST_ROOT/fund-vue3/dist"
+  test -f "$dist/index.html"
+  echo "→ 上传 fund-vue3 → $PUBLIC/view_fund_v3"
+  ssh "$SSH_HOST" "mkdir -p '$PUBLIC/view_fund_v3' && rm -rf '$PUBLIC/view_fund_v3'/*"
+  rsync -az --delete "$dist/" "$SSH_HOST:$PUBLIC/view_fund_v3/"
+  ssh "$SSH_HOST" "chown -R www:www '$PUBLIC/view_fund_v3' 2>/dev/null || true"
+}
+
 deploy_inventory_v3() {
   local dist="$FRONTEND_DIST_ROOT/inventory-vue3/dist"
   test -f "$dist/index.html"
@@ -81,14 +91,16 @@ echo "请确认服务器名与站点（铁律 2）：渼约=121 / 瑞昊=47；00
 case "$WHICH" in
   admin) deploy_admin ;;
   cashier) deploy_cashier_v3 ;;
+  fund) deploy_fund_v3 ;;
   inventory) deploy_inventory_v3 ;;
   all)
     deploy_admin
     deploy_cashier_v3
+    deploy_fund_v3
     deploy_inventory_v3
     ;;
   *)
-    echo "第二参数应为 all|admin|cashier|inventory"
+    echo "第二参数应为 all|admin|cashier|fund|inventory"
     exit 2
     ;;
 esac
