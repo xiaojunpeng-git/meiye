@@ -41,11 +41,10 @@ export default {
       component: () => import('@/pages/report/data/store_business')
     },
     {
-      // 此入口由 Vue 3 平台报表兼容跳转接管；保留稳定报表 code 供书签和菜单使用。
+      // 每个稳定报表 code 都形成独立 URL；页面实现统一由 Vue 3 报表运行时承载。
       path: 'store-operations/:report',
       name: `${pre}store_operations_report`,
       meta: {
-        auth: ['report-sale-info'],
         title: '门店运营报表'
       },
       component: () => import('@/pages/report/data/store_business')

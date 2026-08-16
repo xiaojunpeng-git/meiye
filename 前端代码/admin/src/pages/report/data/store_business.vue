@@ -1,38 +1,60 @@
-const REPORT_CODES = Object.freeze([
-  'partner_item_summary',
-  'partner_item_detail',
-  'member_consumption_detail',
-  'store_item_analysis',
-  'store_craftsman_consumption',
-  'store_salesperson_performance'
-])
+<template>
+  <section class="store-business-report-frame">
+    <iframe
+      :key="reportUrl"
+      class="store-business-report-frame__content"
+      :src="reportUrl"
+      :title="reportTitle"
+    />
+  </section>
+</template>
+
+<script>
+import { STORE_OPERATION_REPORT_CODES } from '@/libs/storeOperationReports'
 
 function resolveReportCode(route) {
-  const requested = String(route?.params?.report || route?.query?.report || '').trim()
-  return REPORT_CODES.includes(requested) ? requested : REPORT_CODES[0]
+  const params = route && route.params ? route.params : {}
+  const query = route && route.query ? route.query : {}
+  const requested = String(params.report || query.report || '').trim()
+  return STORE_OPERATION_REPORT_CODES.includes(requested) ? requested : STORE_OPERATION_REPORT_CODES[0]
 }
 
-/**
- * Vue 2 只保留旧菜单和书签的兼容入口；报表页面实现统一由 Vue 3 承担。
- */
 export default {
-  name: 'StoreBusinessReportCompatibilityRedirect',
-  created () {
-    this.redirectToVue3()
-  },
-  watch: {
-    '$route.fullPath' () {
-      this.redirectToVue3()
+  name: 'StoreBusinessReportFrame',
+  computed: {
+    reportCode () {
+      return resolveReportCode(this.$route)
+    },
+    reportTitle () {
+      return this.$route.meta.title || '门店运营报表'
+    },
+    reportUrl () {
+      const query = new URLSearchParams()
+      Object.entries(this.$route.query || {}).forEach(([key, value]) => {
+        if (key === 'report' || value == null) return
+        const values = Array.isArray(value) ? value : [value]
+        values.forEach(item => query.append(key, String(item)))
+      })
+      const suffix = query.toString() ? `?${query.toString()}` : ''
+      const vue3Origin = String(process.env.VUE_APP_CASHIER_V3_DEV_ORIGIN || window.location.origin).replace(/\/$/, '')
+      return `${vue3Origin}/view_cashier_v3/#/platform/reports/${encodeURIComponent(this.reportCode)}${suffix}`
     }
   },
-  methods: {
-    redirectToVue3 () {
-      const code = resolveReportCode(this.$route)
-      const target = `${window.location.origin}/view_cashier_v3/#/platform/reports/${encodeURIComponent(code)}`
-      if (window.location.href !== target) window.location.replace(target)
-    }
-  },
-  render (createElement) {
-    return createElement('div')
-  }
 }
+</script>
+
+<style scoped>
+.store-business-report-frame {
+  height: calc(100vh - 118px);
+  min-height: 640px;
+  background: #f5f7f9;
+}
+
+.store-business-report-frame__content {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  display: block;
+  background: #fff;
+}
+</style>

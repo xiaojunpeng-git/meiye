@@ -10,7 +10,7 @@
         <Col v-for="item in reports" :key="item.code" :xs="24" :sm="12" :lg="8" class="ivu-mb">
           <div class="report-card" @click="openReport(item)">
             <Icon type="ios-stats" class="report-icon" />
-            <div><strong>{{ item.name }}</strong><p>{{ item.description }}</p></div>
+            <div><strong>{{ item.title }}</strong><p>{{ item.description }}</p></div>
             <Icon type="ios-arrow-forward" class="report-arrow" />
           </div>
         </Col>
@@ -20,23 +20,18 @@
 </template>
 
 <script>
+import { STORE_OPERATION_REPORTS } from '@/libs/storeOperationReports'
+
 export default {
   name: 'BusinessReportHub',
   data () {
     return {
-      reports: [
-        { code: 'partner_item_summary', name: '合作方品项汇总', description: '合作方品项的体验、成交、消耗与手工汇总' },
-        { code: 'partner_item_detail', name: '合作方品项明细', description: '合作方成交、消耗与人工补充明细' },
-        { code: 'member_consumption_detail', name: '会员消费明细', description: '会员消费、收款、退款与人员归属明细' },
-        { code: 'store_item_analysis', name: '门店品项分析', description: '按商品分类、商品类型与品项分析经营数据' },
-        { code: 'store_craftsman_consumption', name: '门店手艺人消耗', description: '按手艺人和日期分析消耗与手工费' },
-        { code: 'store_salesperson_performance', name: '门店销售人业绩', description: '按销售人分析订单、顾客、现金与实际业绩' }
-      ]
+      reports: STORE_OPERATION_REPORTS
     }
   },
   methods: {
     openReport (item) {
-      this.$router.push({ name: 'report_store_operations', query: { report: item.code } })
+      this.$router.push({ name: 'report_store_operations_report', params: { report: item.code } })
     }
   }
 }
