@@ -18,7 +18,7 @@ export function businessSourceListApi() {
   });
 }
 
-export function businessSourceCreateApi(data) {
+export function businessSecondarySourceCreateApi(data) {
   return request({
     url: 'product/business-config/sources',
     method: 'post',

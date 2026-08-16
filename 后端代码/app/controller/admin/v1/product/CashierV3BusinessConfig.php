@@ -17,21 +17,21 @@ final class CashierV3BusinessConfig extends AuthController
 
     public function sources()
     {
-        return $this->success($this->services->sourceTree(false));
+        return $this->success($this->services->existingSources());
     }
 
-    public function createSource()
+    public function updateSource(int $id)
     {
-        return $this->success('新增成功', $this->services->createSource(
+        return $this->success('保存成功', $this->services->updateExistingSource(
+            $id,
             (array)$this->request->post(),
             (int)$this->adminId
         ));
     }
 
-    public function updateSource(int $id)
+    public function createSecondarySource()
     {
-        return $this->success('保存成功', $this->services->updateSource(
-            $id,
+        return $this->success('保存成功', $this->services->createSecondarySource(
             (array)$this->request->post(),
             (int)$this->adminId
         ));

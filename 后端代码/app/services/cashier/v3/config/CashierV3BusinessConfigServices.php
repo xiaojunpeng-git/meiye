@@ -59,6 +59,116 @@ final class CashierV3BusinessConfigServices extends BaseServices
         return array_values($roots);
     }
 
+    /** 平台来源设置按既有 parent_id 展示两级目录，禁止在此页面创建或调整层级。 */
+    public function existingSources(): array
+    {
+        return $this->sourceTree(false);
+    }
+
+    /** 只允许维护既有二级来源的显示名称和启停状态，固定标记可单独维护。 */
+    public function updateExistingSource(int $id, array $input, int $adminId): array
+    {
+        if ($id <= 0) {
+            throw new ValidateException('来源不存在');
+        }
+        $this->assertExistingSourceUpdatePayload($input);
+        if (array_key_exists('isFixed', $input)) {
+            return $this->updateSourceFixed($id, $this->normalizeStatus($input['isFixed']), $adminId);
+        }
+        $name = $this->normalizeName($input['name']);
+        $status = $this->normalizeStatus($input['status']);
+        $idempotencyKey = 'ADMIN-SOURCE-SETTINGS-' . $id . '-' . bin2hex(random_bytes(16));
+
+        return Db::transaction(function () use ($id, $name, $status, $adminId, $idempotencyKey): array {
+            $row = Db::name('cashier_v3_business_source')->where('id', $id)->lock(true)->find();
+            if (!$row) {
+                throw new ValidateException('来源不存在');
+            }
+            if ((int)$row['parent_id'] === 0) {
+                throw new ValidateException('一级来源不允许修改或启停');
+            }
+            $before = $this->sourceView($row);
+            Db::name('cashier_v3_business_source')->where('id', $id)->update([
+                'name' => $name,
+                'status' => $status,
+                'version' => (int)$row['version'] + 1,
+                'updated_at' => time(),
+            ]);
+            $after = $this->sourceById($id);
+            $this->writeAudit('source_settings_update', 'business_source', (string)$id, $idempotencyKey, $adminId, $before, $after);
+
+            return [
+                'id' => (int)$after['id'],
+                'name' => (string)$after['name'],
+                'status' => (int)$after['status'],
+            ];
+        });
+    }
+
+    /** 固定标记仅作为来源目录配置保存，不参与结账、订单或报表处理。 */
+    private function updateSourceFixed(int $id, int $isFixed, int $adminId): array
+    {
+        $idempotencyKey = 'ADMIN-SOURCE-SETTINGS-FIXED-' . $id . '-' . bin2hex(random_bytes(16));
+
+        return Db::transaction(function () use ($id, $isFixed, $adminId, $idempotencyKey): array {
+            $row = Db::name('cashier_v3_business_source')->where('id', $id)->lock(true)->find();
+            if (!$row) {
+                throw new ValidateException('来源不存在');
+            }
+            $before = $this->sourceView($row);
+            Db::name('cashier_v3_business_source')->where('id', $id)->update([
+                'is_fixed' => $isFixed,
+                'version' => (int)$row['version'] + 1,
+                'updated_at' => time(),
+            ]);
+            $after = $this->sourceById($id);
+            $this->writeAudit('source_settings_fixed_update', 'business_source', (string)$id, $idempotencyKey, $adminId, $before, $after);
+
+            return [
+                'id' => (int)$after['id'],
+                'isFixed' => (int)$after['isFixed'],
+            ];
+        });
+    }
+
+    /** 只能在既有一级来源下新增二级来源，层级和归属类型由服务端固定。 */
+    public function createSecondarySource(array $input, int $adminId): array
+    {
+        $this->assertSecondarySourceCreatePayload($input);
+        $parentId = (int)$input['parentId'];
+        $name = $this->normalizeName($input['name']);
+        if ($parentId <= 0) {
+            throw new ValidateException('请选择已有一级来源');
+        }
+
+        return Db::transaction(function () use ($parentId, $name, $adminId): array {
+            $parent = Db::name('cashier_v3_business_source')->where('id', $parentId)->lock(true)->find();
+            if (!$parent || (int)$parent['parent_id'] !== 0) {
+                throw new ValidateException('上级来源必须是已有一级来源');
+            }
+            if (Db::name('cashier_v3_business_source')->where('parent_id', $parentId)->where('name', $name)->lock(true)->find()) {
+                throw new ValidateException('该一级来源下已存在同名二级来源');
+            }
+
+            $now = time();
+            $id = (int)Db::name('cashier_v3_business_source')->insertGetId([
+                'parent_id' => $parentId,
+                'name' => $name,
+                'status' => 1,
+                'sort' => (int)Db::name('cashier_v3_business_source')->where('parent_id', $parentId)->max('sort') + 1,
+                'require_secondary' => 0,
+                'attribution_type' => (string)($parent['attribution_type'] ?? 'other'),
+                'version' => 1,
+                'created_at' => $now,
+                'updated_at' => $now,
+            ]);
+            $created = $this->sourceById($id);
+            $this->writeAudit('source_settings_create_secondary', 'business_source', (string)$id, 'ADMIN-SOURCE-SETTINGS-CREATE-' . bin2hex(random_bytes(16)), $adminId, [], $created);
+
+            return $created;
+        });
+    }
+
     public function accountingMethods(bool $enabledOnly = false): array
     {
         $query = Db::name('cashier_v3_payment_method_config')->order('sort asc,id asc');
@@ -343,6 +453,36 @@ final class CashierV3BusinessConfigServices extends BaseServices
         return $this->sourceView($row);
     }
 
+    private function assertExistingSourceUpdatePayload(array $input): void
+    {
+        if (array_key_exists('isFixed', $input)) {
+            if (array_diff(array_keys($input), ['isFixed']) !== []) {
+                throw new ValidateException('固定来源只允许提交启用状态');
+            }
+            return;
+        }
+        $allowed = ['name', 'status'];
+        $unsupported = array_diff(array_keys($input), $allowed);
+        if ($unsupported !== []) {
+            throw new ValidateException('结账来源只允许修改名称和状态');
+        }
+        if (!array_key_exists('name', $input) || !array_key_exists('status', $input)) {
+            throw new ValidateException('请提交来源名称和状态');
+        }
+    }
+
+    private function assertSecondarySourceCreatePayload(array $input): void
+    {
+        $allowed = ['parentId', 'name'];
+        $unsupported = array_diff(array_keys($input), $allowed);
+        if ($unsupported !== []) {
+            throw new ValidateException('二级来源只允许提交上级来源和名称');
+        }
+        if (!array_key_exists('parentId', $input) || !array_key_exists('name', $input)) {
+            throw new ValidateException('请提交上级来源和二级来源名称');
+        }
+    }
+
     private function paymentByCode(string $code): array
     {
         $row = Db::name('cashier_v3_payment_method_config')->where('code', $code)->find();
@@ -359,6 +499,7 @@ final class CashierV3BusinessConfigServices extends BaseServices
             'name' => (string)$row['name'],
             'parentId' => (int)$row['parent_id'],
             'status' => (int)$row['status'],
+            'isFixed' => (int)($row['is_fixed'] ?? 0),
             'sort' => (int)$row['sort'],
             'requireSecondary' => (int)$row['require_secondary'],
             'attributionType' => (string)($row['attribution_type'] ?? 'other'),

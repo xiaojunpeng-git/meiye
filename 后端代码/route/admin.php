@@ -1900,10 +1900,10 @@ Route::group('adminapi', function () {
      * 商品路由
      */
     Route::group('product', function () {
-        // 收银 V3 来源与记账设置（总部统一配置）
-        Route::get('business-config/sources', 'v1.product.CashierV3BusinessConfig/sources')->option(['real_name' => '读取收银来源设置']);
-        Route::post('business-config/sources', 'v1.product.CashierV3BusinessConfig/createSource')->option(['real_name' => '新增收银来源']);
-        Route::put('business-config/sources/:id', 'v1.product.CashierV3BusinessConfig/updateSource')->option(['real_name' => '修改收银来源']);
+        // 结账来源仅允许在既有一级来源下新增、维护二级来源；不提供删除或一级来源维护入口。
+        Route::get('business-config/sources', 'v1.product.CashierV3BusinessConfig/sources')->option(['real_name' => '读取结账来源设置']);
+        Route::post('business-config/sources', 'v1.product.CashierV3BusinessConfig/createSecondarySource')->option(['real_name' => '新增二级结账来源']);
+        Route::put('business-config/sources/:id', 'v1.product.CashierV3BusinessConfig/updateSource')->option(['real_name' => '修改结账来源']);
         Route::get('business-config/accounting-methods', 'v1.product.CashierV3BusinessConfig/accountingMethods')->option(['real_name' => '读取记账设置']);
         Route::put('business-config/accounting-methods/:code', 'v1.product.CashierV3BusinessConfig/updateAccountingMethod')->option(['real_name' => '修改记账设置']);
         Route::post('business-config/accounting-methods/restore-defaults', 'v1.product.CashierV3BusinessConfig/restoreAccountingDefaults')->option(['real_name' => '恢复记账默认名称']);
