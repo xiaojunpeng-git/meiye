@@ -45,6 +45,7 @@ export default {
       path: 'store-operations/:report',
       name: `${pre}store_operations_report`,
       meta: {
+        auth: ['report-sale-info'],
         title: '门店运营报表'
       },
       component: () => import('@/pages/report/data/store_business')
