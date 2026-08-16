@@ -419,8 +419,13 @@ final class CashierV3HangOrderPlanV1
             'line_key', 'line_role', 'member_id', 'holder_id', 'source_detail_id', 'project_id',
             'catalog_product_id', 'catalog_sku_id', 'catalog_product_type', 'quantity',
             'source_version', 'detail_version', 'unit_price_cents', 'original_unit_price_cents',
+            'configured_cost_cents', 'debt_amount_cents', 'coupon_user_id', 'coupon_name_snapshot',
+            'coupon_discount_cents', 'price_change_reason', 'price_changed_by',
+            'price_changed_by_name_snapshot', 'price_changed_at',
             'authority_fingerprint', 'authority_snapshot_json', 'service_object', 'craftsmen_json',
-            'salespeople_json', 'is_experience', 'display_snapshot_json', 'sort_no',
+            'salespeople_json', 'guide_selections_json', 'sales_manager_selections_json',
+            'manual_labor_fee_cents', 'friend_counts_as_customer', 'is_experience', 'is_presale',
+            'inventory_outbound_required', 'display_snapshot_json', 'sort_no',
         ];
         $snapshot = [];
         foreach ($fields as $field) {

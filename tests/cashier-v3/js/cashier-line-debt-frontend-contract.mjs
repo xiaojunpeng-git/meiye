@@ -8,6 +8,14 @@ const styles = fs.readFileSync(new URL('前端代码/cashier-v3/src/styles/base.
 assert.match(workbench, /mutateCashierDraft\('update-cashier-line-debt', line, \{\s*debtAmountCents: amountCents/s,
   '欠款必须写入当前选择的购物车行')
 assert.match(workbench, /checkoutDebtSummary\(line\)/, '每条购物车行必须显示自己的欠款')
+assert.match(workbench, /function canSetCartLineDebt\(line = \{\}\) \{[\s\S]*?cashier\.value\.customerMode !== 'guest'[\s\S]*?!isProjectLine\(line\)[\s\S]*?isProductLine\(line\) \|\| line\.kind === '卡项'/,
+  '欠款仅对会员购买的产品和卡项开放')
+assert.match(workbench, /<div class="cart-line__meta-slot cart-line__meta-slot--debt">\s*<button\s*v-if="canSetCartLineDebt\(line\)"/s,
+  '欠款隐藏时必须保留固定位置插槽')
+assert.match(workbench, /function handleDebtEditorAmountInput\(event\) \{[\s\S]*?replace\(\/\\D\/g, ''\)/,
+  '欠款输入框必须在输入时过滤非数字字符')
+assert.doesNotMatch(workbench, /function confirmCheckoutDebt\(\) \{[\s\S]*?欠款金额必须为整数元。/,
+  '确认欠款不再承担输入格式校验')
 assert.doesNotMatch(workbench, /debtAmountCents:\s*checkoutDebtAmountCents\.value/,
   '准备结账不得把客户端整单欠款作为权威输入')
 assert.match(workbench, /const checkoutDebtAmountCents = computed\(\(\) => cartLines\.value/,

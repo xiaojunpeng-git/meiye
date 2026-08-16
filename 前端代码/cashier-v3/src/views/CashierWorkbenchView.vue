@@ -64,7 +64,6 @@ const selectedCardOperationProjectKeys = computed(() => (previewCardOperation.va
 )))
 const guidedBusinessMode = ref('')
 const isCustomCardConflictOpen = ref(false)
-const isMemberRequiredOpen = ref(false)
 const pendingCardPurchase = ref(null)
 const isConfirmingCardPurchase = ref(false)
 const personnelOverlay = ref(null)
@@ -117,9 +116,15 @@ const addedEntitlementLineId = ref('')
 const cashierContextEpoch = ref(0)
 const entitlementSelectorSnapshot = ref(null)
 const cashierDraftSnapshot = ref(null)
+// 收银编辑阶段只维护浏览器内的草稿。每一项操作保留为顺序命令，直到
+// 收银员点击挂单或立即结账时才统一写入当前工作台。
+const localCashierDraftOperations = ref([])
+const localCashierPersistedLineIds = ref({})
+const isSynchronizingLocalCashierDraft = ref(false)
 const draftCommandRecovery = useCashierV3DraftCommandRecovery(createCashierV3CommandId)
 const cashierDraftHasUnresolvedCommand = ref(false)
 let entitlementAddedTimer = null
+let localCashierDraftSyncFailureConsumed = false
 
 const defaultTypes = [...preferredCatalogTypeOrder]
 
@@ -371,6 +376,160 @@ function hasOwn(record, key) {
 
 function clonePlain(value = {}) {
   return JSON.parse(JSON.stringify(value && typeof value === 'object' ? value : {}))
+}
+
+function localDraftBase() {
+  const currentCart = cashier.value.cart || {}
+  return {
+    workspaceId: String(state.workspace?.id || ''),
+    stateContextId: String(state.stateContextId || ''),
+    customerMode: String(cashier.value.customerMode || 'guest'),
+    memberId: Number(currentMemberId.value || 0),
+    lines: clonePlain(currentCart.lines || []),
+    summary: clonePlain(currentCart.summary || {}),
+    primaryAction: String(currentCart.primaryAction || cashier.value.checkoutComposition?.primaryAction || ''),
+    primaryActionLabel: String(currentCart.primaryActionLabel || cashier.value.checkoutComposition?.primaryActionLabel || ''),
+    checkoutComposition: clonePlain(cashier.value.checkoutComposition || {}),
+    orderNote: String(cashier.value.orderNote || currentCart.summary?.orderNote || ''),
+    supplement: clonePlain(cashier.value.supplement || {})
+  }
+}
+
+function recalculateLocalCashierDraft(draft) {
+  const lines = Array.isArray(draft.lines) ? draft.lines : []
+  const originalAmount = lines.reduce((total, line) => (
+    total + Math.max(0, Number(line.originalAmount ?? getLineAmount(line) ?? 0)) * Math.max(1, Number(line.quantity || 1))
+  ), 0)
+  const receivableAmount = lines.reduce((total, line) => (
+    total + Math.max(0, Number(getLineAmount(line) || 0)) * Math.max(1, Number(line.quantity || 1))
+  ), 0)
+  draft.summary = {
+    ...(draft.summary || {}),
+    selectedCount: lines.reduce((total, line) => total + Math.max(1, Number(line.quantity || 1)), 0),
+    originalAmount,
+    discountAmount: Math.max(0, originalAmount - receivableAmount),
+    receivableAmount,
+    orderNote: String(draft.orderNote || ''),
+    hasOrderNote: Boolean(String(draft.orderNote || '').trim())
+  }
+  return draft
+}
+
+function commitLocalCashierDraft(draft) {
+  const next = recalculateLocalCashierDraft(draft)
+  cashierDraftSnapshot.value = Object.freeze({
+    scopeKey: currentCashierDraftScopeKey.value,
+    snapshot: Object.freeze(clonePlain(next))
+  })
+}
+
+function appendLocalCashierDraftOperation(operation, mutate) {
+  const draft = clonePlain(localCashierDraft.value || localDraftBase())
+  mutate(draft)
+  commitLocalCashierDraft(draft)
+  localCashierDraftOperations.value = [...localCashierDraftOperations.value, clonePlain(operation)]
+}
+
+function localDraftResult(message = '') {
+  return { result: { status: 'succeeded', message } }
+}
+
+function applyLocalCashierDraftMutation(action, line, payload = {}) {
+  const lineId = String(line?.id || '')
+  if (!lineId) return { result: { status: 'failed', code: 'CASHIER_DRAFT_LINE_MISSING', message: '当前商品不存在，请重新选择。' } }
+  appendLocalCashierDraftOperation({ action, lineId, payload: clonePlain(payload) }, (draft) => {
+    const target = (draft.lines || []).find((item) => String(item?.id || '') === lineId)
+    if (!target) return
+    if (action === 'remove-cart-line') {
+      draft.lines = draft.lines.filter((item) => String(item?.id || '') !== lineId)
+      return
+    }
+    if (action === 'change-cart-line-quantity') {
+      target.quantity = Math.max(1, Number(target.quantity || 1) + Number(payload.delta || 0))
+      return
+    }
+    if (action === 'update-cashier-line-debt') {
+      target.debtAmountCents = Math.max(0, Number(payload.debtAmountCents || 0))
+      return
+    }
+    if (action === 'update-cart-line-service-settings') {
+      Object.assign(target, clonePlain(payload))
+      return
+    }
+    if (action === 'apply-line-coupon') {
+      target.couponId = String(payload.couponId || '')
+      return
+    }
+    if (action === 'remove-line-coupon') {
+      delete target.couponId
+    }
+  })
+  return localDraftResult()
+}
+
+function applyLocalCashierRootMutation(action, payload = {}) {
+  appendLocalCashierDraftOperation({ action, payload: clonePlain(payload) }, (draft) => {
+    if (action === 'clear-cart-lines') {
+      draft.lines = []
+      return
+    }
+    if (action === 'update-cashier-order-note') {
+      draft.orderNote = String(payload.orderNote || '')
+      return
+    }
+    if (action === 'update-cashier-supplement') {
+      draft.supplement = clonePlain(payload)
+      return
+    }
+    if (action === 'update-cashier-line-price') {
+      const target = (draft.lines || []).find((line) => String(line?.id || '') === String(payload.lineId || ''))
+      if (target) {
+        target.originalAmount = Number(target.originalAmount ?? (getLineAmount(target) || 0))
+        target.finalAmount = Number(payload.lineAmountCents || 0) / 100
+        target.amount = target.finalAmount
+        for (const line of draft.lines || []) line.debtAmountCents = 0
+      }
+    }
+  })
+  return localDraftResult()
+}
+
+function consumeSynchronizedLocalCashierOperation() {
+  localCashierDraftOperations.value = localCashierDraftOperations.value.slice(1)
+}
+
+function restoreLocalCashierDraftAfterSyncFailure(draft) {
+  const restored = clonePlain(draft)
+  const persistedIds = localCashierPersistedLineIds.value
+  for (const line of restored.lines || []) {
+    const persistedId = persistedIds[String(line?.id || '')]
+    if (persistedId) line.id = persistedId
+  }
+  commitLocalCashierDraft(restored)
+}
+
+function localCashierDraftSyncFailureAt() {
+  if (!import.meta.env.DEV || typeof window === 'undefined') return 0
+  if (!new Set(['127.0.0.1', 'localhost', '::1']).has(window.location.hostname)) return 0
+  const query = new URLSearchParams(window.location.search)
+  if (query.get('test') !== 'local-draft-sync-failure') return 0
+  const operationIndex = Number(query.get('syncFailAt') || '0')
+  return Number.isInteger(operationIndex) && operationIndex > 0 ? operationIndex : 0
+}
+
+function localCashierDraftSyncFailure(operationIndex, action) {
+  if (localCashierDraftSyncFailureConsumed
+    || localCashierDraftSyncFailureAt() !== operationIndex) return null
+  // The fixture must exercise exactly one interrupted attempt. Remaining
+  // queued operations need to reach the real hang/checkout flow on retry.
+  localCashierDraftSyncFailureConsumed = true
+  return {
+    result: {
+      status: 'failed',
+      code: 'CASHIER_LOCAL_DRAFT_SYNC_TEST_FAILURE',
+      message: `本地验收已在第${operationIndex}条草稿操作前中断（${action}）。`
+    }
+  }
 }
 
 function valueOf(source, keys) {
@@ -963,6 +1122,7 @@ async function openCheckoutBusinessSourceSelector(kind) {
     sources: [],
     primarySourceId: Number(current.primarySourceId || 0),
     secondarySourceId: Number(current.secondarySourceId || 0),
+    rewardAmountCents: Number(current.rewardAmountCents || 0),
     loadError: ''
   }
   // ref 会将对象转成 Proxy；后续身份判断必须使用 ref 内的同一代理对象，
@@ -999,6 +1159,7 @@ async function persistCheckoutBusinessSource(kind, selection = {}) {
   const current = kind === 'recharge' ? rechargeCheckout.value : checkout.value
   const primarySourceId = Number(selection.primarySourceId || 0)
   const secondarySourceId = Number(selection.secondarySourceId || 0)
+  const rewardAmountCents = Number(selection.rewardAmountCents ?? current?.rewardAmountCents ?? 0)
   if (!current || primarySourceId <= 0 || secondarySourceId < 0) return null
   isSavingCheckoutBusinessSource.value = true
   try {
@@ -1018,6 +1179,7 @@ async function persistCheckoutBusinessSource(kind, selection = {}) {
         payload: {
           primarySourceId,
           secondarySourceId,
+          rewardAmountCents,
           sourceSelectionVersion: Number(current.sourceSelectionVersion || 0),
           // 来源选择也是结账草稿命令，使用已登记的 CHECKOUT 前缀，
           // 不能自行派生 CHECKOUT_SOURCE 等未登记前缀。
@@ -1237,7 +1399,9 @@ async function selectCatalogItem(item) {
   if (item.id === 'custom-card-entry') {
     if (hasCartLines.value) isCustomCardConflictOpen.value = true
     else if (!currentMemberId.value || cashier.value.customerMode === 'guest') {
-      isMemberRequiredOpen.value = true
+      window.dispatchEvent(new CustomEvent('cashier-v3:open-member-selector', {
+        detail: { context: 'cashier', selectorContext: 'cashier' }
+      }))
     } else guidedBusinessMode.value = 'custom-card'
     return
   }
@@ -1274,7 +1438,9 @@ async function selectCatalogItem(item) {
     return
   }
   if (item.kind === '卡项' && (!currentMemberId.value || cashier.value.customerMode === 'guest')) {
-    isMemberRequiredOpen.value = true
+    window.dispatchEvent(new CustomEvent('cashier-v3:open-member-selector', {
+      detail: { context: 'cashier', selectorContext: 'cashier' }
+    }))
     return
   }
   if (isRuleCardPurchase(item)) {
@@ -1288,34 +1454,32 @@ let catalogItemAppendQueue = Promise.resolve()
 async function appendCatalogItemToDraft(item) {
   const itemId = Number(item?.id || 0)
   const catalogKind = String(item?.kind || '').trim()
-  const queued = catalogItemAppendQueue.then(async () => {
-    const requestScopeKey = currentCashierDraftScopeKey.value
-    // 每次用户点击都由 action bridge 生成新的命令标识，因此同一商品
-    // 连续点击会追加多条独立购物车行；只有同一次请求的网络重试才复用
-    // 原标识，交由后端幂等保护避免重复写入。
-    // 普通项目／产品没有卡内组成资源，提示仅用于省去一次无意义的
-    // 服务端目录展开；最终商品、上架和价格仍由事务内权威行锁定校验。
-    // 缺失提示时后端按旧客户端兼容路径处理，不能把它当授权依据。
-    const result = await requestAction('choose-catalog-item', { itemId, catalogKind })
-
-    // Choosing a catalog item is a write command but intentionally returns a
-    // scoped draft instead of replacing the entire workbench root projection.
-    // Keep that authoritative draft locally so the cart reflects the committed
-    // workspace mutation before the next command is prepared.
-    if (['succeeded', 'success'].includes(resultStatus(result))) {
-      const draft = responseDataBlock(result).cashierDraft
-      // The action bridge may have already applied a verified full root
-      // projection while the local scoped-draft contract rejects its response
-      // (for example, after the root revision advances). Do not turn a
-      // successfully rendered cart into a false user-facing failure.
-      if (!await applyCommittedCashierDraft(draft, requestScopeKey)) {
-        reportEntitlementContractError({
-          code: 'CASHIER_DRAFT_INCOMPLETE',
-          message: '购物车权威数据尚未完整返回，系统已自动刷新工作台；如仍未显示请稍后重试。'
-        })
-      }
+  const queued = catalogItemAppendQueue.then(() => {
+    if (!itemId || !catalogKind) {
+      return { result: { status: 'failed', code: 'CASHIER_CATALOG_ITEM_INVALID', message: '商品信息不完整，请重新选择。' } }
     }
-    return result
+    const localLineId = `local-sale-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    const amount = Number(item.price || 0)
+    const line = {
+      id: localLineId,
+      lineRole: 'sale',
+      catalogItemId: itemId,
+      productId: itemId,
+      itemId,
+      name: String(item.name || ''),
+      kind: catalogKind,
+      productType: Number(item.productType || (catalogKind === '项目' ? 6 : 0)),
+      quantity: 1,
+      amount,
+      finalAmount: amount,
+      originalAmount: amount,
+      debtAmountCents: 0,
+      localCatalogItem: { itemId, catalogKind }
+    }
+    appendLocalCashierDraftOperation({ action: 'choose-catalog-item', localLineId, itemId, catalogKind }, (draft) => {
+      draft.lines.push(line)
+    })
+    return { result: { status: 'succeeded', message: '商品已加入本次购物车。' } }
   })
   catalogItemAppendQueue = queued.catch(() => null)
   return queued
@@ -2115,13 +2279,11 @@ function enqueueCashierDraftMutation(action, line, payload, executor) {
 }
 
 function mutateCashierDraft(action, line, payload = {}) {
-  return enqueueCashierDraftMutation(action, line, payload, executeCashierDraftMutation)
+  return Promise.resolve(applyLocalCashierDraftMutation(action, line, payload))
 }
 
 function mutateRootCashierDraft(action, line, payload = {}) {
-  return enqueueCashierDraftMutation(action, line, payload, (queuedAction, latestLine, queuedPayload) => (
-    requestAction(queuedAction, { ...queuedPayload, lineId: latestLine.id })
-  ))
+  return Promise.resolve(applyLocalCashierDraftMutation(action, line, payload))
 }
 
 async function executeCashierDraftMutation(action, line, payload = {}) {
@@ -2183,6 +2345,92 @@ async function executeCashierDraftMutation(action, line, payload = {}) {
     )
   }
   return result
+}
+
+async function synchronizeLocalCashierDraft() {
+  const operations = clonePlain(localCashierDraftOperations.value)
+  if (!operations.length) return localDraftResult()
+  if (isSynchronizingLocalCashierDraft.value) {
+    return { result: { status: 'failed', code: 'CASHIER_DRAFT_SYNCING', message: '正在保存本次收银内容，请稍候。' } }
+  }
+  isSynchronizingLocalCashierDraft.value = true
+  const visibleDraft = clonePlain(localCashierDraft.value || localDraftBase())
+  const lineIdMap = new Map(Object.entries(localCashierPersistedLineIds.value))
+  let completed = false
+  try {
+    for (const [operationIndex, operation] of operations.entries()) {
+      const action = String(operation?.action || '')
+      const injectedFailure = localCashierDraftSyncFailure(operationIndex + 1, action)
+      if (injectedFailure) return injectedFailure
+      let result
+      if (action === 'choose-catalog-item') {
+        const previousIds = new Set(cartLines.value.map((line) => String(line?.id || '')))
+        result = await requestAction(action, {
+          itemId: Number(operation.itemId || 0),
+          catalogKind: String(operation.catalogKind || '')
+        })
+        if (!['success', 'succeeded'].includes(resultStatus(result))) return result
+        const draft = responseDataBlock(result).cashierDraft
+        if (!await applyCommittedCashierDraft(draft, currentCashierDraftScopeKey.value)) {
+          return { result: { status: 'failed', code: 'CASHIER_DRAFT_SYNC_INCOMPLETE', message: '本次商品未能保存，请重新结账。' } }
+        }
+        const appended = cartLines.value.find((line) => !previousIds.has(String(line?.id || '')))
+        if (!appended?.id) {
+          return { result: { status: 'failed', code: 'CASHIER_DRAFT_SYNC_LINE_MISSING', message: '本次商品未能保存，请重新结账。' } }
+        }
+        lineIdMap.set(String(operation.localLineId || ''), String(appended.id))
+        localCashierPersistedLineIds.value = {
+          ...localCashierPersistedLineIds.value,
+          [String(operation.localLineId || '')]: String(appended.id)
+        }
+        consumeSynchronizedLocalCashierOperation()
+        continue
+      }
+      if (action === 'clear-cart-lines') {
+        const saved = await clearCashierDraft(String(state.stateContextId || ''))
+        if (!await applyCommittedCashierDraft(saved?.cashierDraft, currentCashierDraftScopeKey.value)) {
+          return { result: { status: 'failed', code: 'CASHIER_DRAFT_SYNC_CLEAR_FAILED', message: '购物车未能清空，请重新操作。' } }
+        }
+        lineIdMap.clear()
+        localCashierPersistedLineIds.value = {}
+        consumeSynchronizedLocalCashierOperation()
+        continue
+      }
+      if (['update-cashier-order-note', 'update-cashier-supplement', 'update-cashier-line-price'].includes(action)) {
+        const payload = clonePlain(operation.payload || {})
+        if (payload.lineId) payload.lineId = lineIdMap.get(String(payload.lineId)) || payload.lineId
+        result = await requestAction(action, {
+          ...payload,
+          idempotencyKey: createCashierV3CommandId('CASHIER_MORE')
+        })
+        if (!['success', 'succeeded'].includes(resultStatus(result))) return result
+        if (!await applyCommittedCashierDraft(responseDataBlock(result).cashierDraft, currentCashierDraftScopeKey.value)) {
+          return { result: { status: 'failed', code: 'CASHIER_DRAFT_SYNC_INCOMPLETE', message: '本次修改未能保存，请重新结账。' } }
+        }
+        consumeSynchronizedLocalCashierOperation()
+        continue
+      }
+      const sourceLineId = String(operation.lineId || '')
+      const persistedLineId = lineIdMap.get(sourceLineId) || sourceLineId
+      const persistedLine = cartLines.value.find((line) => String(line?.id || '') === persistedLineId)
+      if (!persistedLine) {
+        if (action === 'remove-cart-line') continue
+        return { result: { status: 'failed', code: 'CASHIER_DRAFT_SYNC_LINE_MISSING', message: '购物车商品已变化，请重新结账。' } }
+      }
+      result = await executeCashierDraftMutation(action, persistedLine, clonePlain(operation.payload || {}))
+      if (!['success', 'succeeded'].includes(resultStatus(result))) return result
+      consumeSynchronizedLocalCashierOperation()
+    }
+    completed = true
+    return localDraftResult()
+  } finally {
+    if (completed) {
+      localCashierPersistedLineIds.value = {}
+    } else {
+      restoreLocalCashierDraftAfterSyncFailure(visibleDraft)
+    }
+    isSynchronizingLocalCashierDraft.value = false
+  }
 }
 
 function sameStaffIds(left = [], right = []) {
@@ -2281,6 +2529,15 @@ function cartLineFriendCountsAsCustomer(line = {}) {
 
 function isProductLine(line = {}) {
   return cartLineRole(line) === 'sale' && (Number(line.productType) === 0 || line.kind === '产品')
+}
+
+function canSetCartLineDebt(line = {}) {
+  const memberId = String(line.memberId || currentMemberId.value || '').trim()
+  return memberId !== ''
+    && cashier.value.customerMode !== 'guest'
+    && cartLineRole(line) === 'sale'
+    && !isProjectLine(line)
+    && (isProductLine(line) || line.kind === '卡项')
 }
 
 function cartLinePresaleSelected(line = {}) {
@@ -2441,19 +2698,17 @@ async function saveCartLineSalespeople(line, salespeople) {
 }
 
 function openCartLineDebt(line) {
-  if (isEntitlementLine(line)) return
-  const memberId = String(line.memberId || currentMemberId.value || '').trim()
-  if (!memberId || cashier.value.customerMode === 'guest') {
-    window.dispatchEvent(new CustomEvent('cashier-v3:open-member-selector', {
-      detail: { context: 'cashier', selectorContext: 'cashier' }
-    }))
-    return
-  }
   const debtAmountCents = lineDebtAmountCents(line)
   debtEditorAmount.value = debtAmountCents > 0
     ? String(Math.trunc(debtAmountCents / 100))
     : ''
   debtEditor.value = { line: clonePlain(line) }
+}
+
+function handleDebtEditorAmountInput(event) {
+  const amount = String(event?.target?.value || '').replace(/\D/g, '')
+  debtEditorAmount.value = amount
+  if (event?.target) event.target.value = amount
 }
 
 function normalizeCouponSelector(selector = {}, line = {}) {
@@ -2541,18 +2796,11 @@ function checkoutSaleAmountCents() {
 }
 
 async function confirmCheckoutDebt() {
-  const raw = String(debtEditorAmount.value || '').trim()
-  if (!/^(?:0|[1-9]\d*)$/.test(raw)) {
-    window.dispatchEvent(new CustomEvent('cashier-v3:ui-result', {
-      detail: { status: 'failed', message: '欠款金额必须为整数元。' }
-    }))
-    return
-  }
-  const amountCents = Number(raw) * 100
+  const amountCents = Number(debtEditorAmount.value || 0) * 100
   const line = debtEditor.value?.line
   if (!line?.id) return
   const saleAmountCents = lineSaleAmountCents(line)
-  if (!Number.isSafeInteger(amountCents) || amountCents < 0 || amountCents > saleAmountCents) {
+  if (amountCents > saleAmountCents) {
     window.dispatchEvent(new CustomEvent('cashier-v3:ui-result', {
       detail: { status: 'failed', message: '欠款金额不能超过该商品金额。' }
     }))
@@ -2921,27 +3169,11 @@ async function confirmClearCart() {
   if (isClearingCart.value) return
   isClearingCart.value = true
   try {
-    const saved = await clearCashierDraft(String(state.stateContextId || ''))
-    const draft = saved?.cashierDraft
-    if (!await applyCommittedCashierDraft(draft, currentCashierDraftScopeKey.value)) {
-      throw new Error('购物车已清空，但空草稿状态尚未完整返回，请刷新收银台。')
-    }
-    // 服务端已确认当前工作台及未完成结账草稿清理成功，释放本标签的原请求
-    // 恢复票据，避免清空后继续弹出“结果未知”或阻止下一单操作。
+    applyLocalCashierRootMutation('clear-cart-lines')
     draftCommandRecovery.clear()
     cashierDraftHasUnresolvedCommand.value = false
-    resetCashierLocalContext()
-    // resetCashierLocalContext 清理结账/权益现场时会同时丢弃临时草稿投影；
-    // 保留这次服务端返回的空草稿，避免等待后台刷新期间旧购物车闪回。
-    cashierDraftSnapshot.value = Object.freeze({
-      scopeKey: currentCashierDraftScopeKey.value,
-      snapshot: Object.freeze(clonePlain(draft))
-    })
-    // 先完成空工作台刷新，再关闭全局反馈；否则刷新请求的旧/未知回执可能
-    // 在清空事件之后重新打开“正在确认操作结果”弹窗。
-    await requestAction('open-cashier-workbench', { silent: true }).catch(() => undefined)
     window.dispatchEvent(new CustomEvent('cashier-v3:clear-negative-state'))
-    return { result: { status: 'succeeded' }, data: saved }
+    return localDraftResult()
   } catch (error) {
     window.dispatchEvent(new CustomEvent('cashier-v3:ui-result', {
       detail: { status: 'failed', message: String(error?.message || '购物车清空失败，请重试。') }
@@ -3199,19 +3431,8 @@ async function saveMoreActionEditor() {
   }
   if (!action) return
   isSavingMoreAction.value = true
-  const requestScopeKey = currentCashierDraftScopeKey.value
   try {
-    const result = await requestAction(action, {
-      ...payload,
-      idempotencyKey: createCashierV3CommandId('CASHIER_MORE')
-    })
-    if (!['success', 'succeeded'].includes(resultStatus(result))) {
-      moreActionValidationMessage.value = resultMessage(result, '保存失败，请重试。')
-      return
-    }
-    const draft = responseDataBlock(result).cashierDraft
-    if (!await applyCommittedCashierDraft(draft, requestScopeKey)) return
-    isSavingMoreAction.value = false
+    applyLocalCashierRootMutation(action, payload)
     closeMoreActionEditor()
   } finally {
     isSavingMoreAction.value = false
@@ -3321,6 +3542,8 @@ async function openCheckout() {
     if (!await persistDeferredLineServiceSettings()) {
       return { result: { status: 'failed', code: 'CASHIER_LINE_SERVICE_SETTINGS_SAVE_FAILED', message: '本次服务设置保存失败，请重试。' } }
     }
+    const synchronized = await synchronizeLocalCashierDraft()
+    if (!['success', 'succeeded'].includes(resultStatus(synchronized))) return synchronized
     const craftsmenRequiredLine = firstCartLineMissingCraftsmen()
     if (craftsmenRequiredLine) {
       activeCartLineId.value = craftsmenRequiredLine.id
@@ -3456,6 +3679,11 @@ async function openHangOrder() {
   // 库存、权益、价格等结账校验。从房间进入时只把房间写进草稿关联。
   isSavingHangDraft.value = true
   try {
+    if (!await persistDeferredLineServiceSettings()) {
+      return { result: { status: 'failed', code: 'CASHIER_LINE_SERVICE_SETTINGS_SAVE_FAILED', message: '本次服务设置保存失败，请重试。' } }
+    }
+    const synchronized = await synchronizeLocalCashierDraft()
+    if (!['success', 'succeeded'].includes(resultStatus(synchronized))) return synchronized
     const intent = roomOpenIntent.value
     const saved = await saveHangDraft({
       stateContextId: String(state.stateContextId || ''),
@@ -4361,6 +4589,8 @@ function clearEntitlementBoundSnapshots({ preservePending = false } = {}) {
   entitlementSelectorRequestId.value = null
   entitlementSelectorSnapshot.value = null
   cashierDraftSnapshot.value = null
+  localCashierDraftOperations.value = []
+  localCashierPersistedLineIds.value = {}
   cashierDraftHasUnresolvedCommand.value = Boolean(
     draftCommandRecovery.pendingForScope(draftRecoveryScopeKey.value)
   )
@@ -4840,7 +5070,6 @@ onBeforeUnmount(() => {
                   <button
                     type="button"
                     class="cart-line__delete"
-                    :disabled="Boolean(cardOperationUpgradeBinding(line))"
                     :aria-label="`删除${line.name}`"
                     title="删除"
                     @click.stop="removeCartLine(line)"
@@ -4852,11 +5081,11 @@ onBeforeUnmount(() => {
 
               <div class="cart-line__meta">
                 <div class="cart-line__secondary-meta" :class="{ 'is-guest-order': cashier.customerMode === 'guest' }">
-                  <div v-if="cashier.customerMode !== 'guest'" class="cart-line__meta-slot cart-line__meta-slot--debt">
+                  <div class="cart-line__meta-slot cart-line__meta-slot--debt">
                     <button
+                      v-if="canSetCartLineDebt(line)"
                       type="button"
                       class="cart-line__meta-action cart-line__meta-action--enabled"
-                      :disabled="isEntitlementLine(line)"
                       :title="cartActionLabel('欠款', checkoutDebtSummary(line))"
                       @click="openCartLineDebt(line)"
                     >
@@ -5051,6 +5280,7 @@ onBeforeUnmount(() => {
       :sources="checkoutBusinessSourceSelector.sources"
       :primary-source-id="checkoutBusinessSourceSelector.primarySourceId"
       :secondary-source-id="checkoutBusinessSourceSelector.secondarySourceId"
+      :reward-amount-cents="checkoutBusinessSourceSelector.rewardAmountCents"
       :saving="isSavingCheckoutBusinessSource"
       :load-error="checkoutBusinessSourceSelector.loadError"
       @close="closeCheckoutBusinessSourceSelector"
@@ -5195,11 +5425,12 @@ onBeforeUnmount(() => {
           <label class="cashier-debt-editor__field">
             <span>欠款金额</span>
             <input
-              v-model="debtEditorAmount"
+              :value="debtEditorAmount"
               type="text"
               inputmode="numeric"
               autocomplete="off"
               placeholder="0"
+              @input="handleDebtEditorAmountInput"
               @keydown.enter.prevent="confirmCheckoutDebt"
             >
           </label>
@@ -5213,18 +5444,6 @@ onBeforeUnmount(() => {
               @click="debtEditorAmount = '0'; confirmCheckoutDebt()"
             >清除欠款</button>
             <button type="button" class="button button--primary" @click="confirmCheckoutDebt">确认</button>
-          </footer>
-        </div>
-      </div>
-    </Teleport>
-
-    <Teleport to="body">
-      <div v-if="isMemberRequiredOpen" class="cashier-card-operation-editor" role="dialog" aria-modal="true" aria-label="购买卡项需要会员档案" @click.self="isMemberRequiredOpen = false">
-        <div class="cashier-card-operation-editor__panel">
-          <header><strong>购买卡项需要会员档案</strong></header>
-          <span>请先创建会员档案，再购买卡项。</span>
-          <footer>
-            <button type="button" class="button button--primary" @click="isMemberRequiredOpen = false">我知道了</button>
           </footer>
         </div>
       </div>

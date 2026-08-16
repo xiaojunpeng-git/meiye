@@ -64,6 +64,8 @@ $checks = [
         && strpos($service, "'price_change_reason'") !== false
         && strpos($service, "'price_changed_by_name_snapshot'") !== false
         && strpos($service, "'price_changed_at'") !== false,
+    'price change clears every current-cart debt' => strpos($service, "->where('debt_amount_cents', '<>', 0)") !== false
+        && strpos($service, "'debt_amount_cents' => 0") !== false,
     'supplement keeps real operation time' => strpos($service, "'supplement_business_date'") !== false
         && strpos($service, "'supplement_operated_at' => \$now") !== false
         && strpos($service, "'update_time' => time()") !== false,

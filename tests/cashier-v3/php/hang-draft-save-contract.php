@@ -14,6 +14,7 @@ $files = [
     'list' => $root . '/后端代码/app/services/cashier/v3/hang/CashierV3HangOrderListServices.php',
     'resume' => $root . '/后端代码/app/services/cashier/v3/hang/CashierV3HangResumeServices.php',
     'binding' => $root . '/后端代码/app/services/cashier/v3/hang/CashierV3HangCheckoutBindingServices.php',
+    'plan' => $root . '/后端代码/app/services/cashier/v3/hang/authority/CashierV3HangOrderPlanV1.php',
 ];
 
 $failed = 0;
@@ -56,6 +57,14 @@ expectContract(strpos($source['submission'], 'transferToHangInTx(') !== false
     && strpos($source['submission'], "true,\n            false") !== false, 'direct save snapshots and clears without fingerprint preparation');
 expectContract(strpos($source['workspace'], 'bool $retainMember = false') !== false
     && strpos($source['workspace'], "if (!\$retainMember)") !== false, 'direct clear can retain selected member');
+$removeOffset = strpos($source['workspace'], 'public function removeLineInTx');
+$removeEnd = $removeOffset === false ? false : strpos($source['workspace'], 'public function clearLinesInTx', $removeOffset);
+$removeMethod = $removeOffset === false ? '' : substr($source['workspace'], $removeOffset, $removeEnd === false ? null : $removeEnd - $removeOffset);
+expectContract($removeMethod !== ''
+    && strpos($removeMethod, 'assertNotResumedHangMutation') === false
+    && strpos($removeMethod, 'lockLine($workspaceId, $lineKey)') !== false
+    && strpos($removeMethod, "->delete()") !== false,
+    'single-line delete directly removes any current draft line without hang or entitlement eligibility checks');
 expectContract(strpos($source['api'], 'hang-drafts/save') !== false, 'frontend posts to direct save endpoint');
 expectContract(strpos($source['api'], 'hang-drafts/resume') !== false, 'frontend posts to direct resume endpoint');
 expectContract(strpos($source['api'], 'cashier-drafts/clear') !== false, 'frontend posts to direct clear endpoint');
@@ -80,6 +89,14 @@ expectContract(strpos($source['binding'], "resumed_hang_order_id") !== false
     && strpos($source['binding'], 'readResumedHeader(') !== false
     && strpos($source['binding'], 'hang_checkout_completion_source_delete_incomplete') === false,
     'successful checkout directly deletes the retained draft without treating it as a checkout resource');
+expectContract(strpos($source['plan'], "'debt_amount_cents'") !== false
+    && strpos($source['plan'], "'price_change_reason'") !== false
+    && strpos($source['plan'], "'coupon_discount_cents'") !== false,
+    'new hang snapshots preserve line debt, price changes, and coupons');
+expectContract(strpos($source['workspace'], "'debt_amount_cents' => (int)(\$line['debt_amount_cents'] ?? 0)") !== false
+    && strpos($source['workspace'], "'price_change_reason' => (string)(\$line['price_change_reason'] ?? '')") !== false
+    && strpos($source['workspace'], "'coupon_discount_cents' => (int)(\$line['coupon_discount_cents'] ?? 0)") !== false,
+    'hang resume restores the frozen line financial fields instead of resetting them');
 expectContract(strpos($source['view'], 'saveHangDraft({') !== false
     && strpos($source['view'], "mode: 'normal'") !== false
     && strpos($source['view'], 'roomNameSnapshot: intent?.roomName ||') !== false

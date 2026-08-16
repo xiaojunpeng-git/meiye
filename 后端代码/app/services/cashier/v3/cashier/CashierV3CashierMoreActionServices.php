@@ -204,6 +204,14 @@ final class CashierV3CashierMoreActionServices
         if ((int)$affected !== 1) {
             throw self::invalid('price_change_line_update_failed');
         }
+        // Any successful price revision invalidates the cart's prior debt split.
+        Db::name(self::LINE_TABLE)
+            ->where('workspace_id', $workspaceId)
+            ->where('debt_amount_cents', '<>', 0)
+            ->update([
+                'debt_amount_cents' => 0,
+                'update_time' => $now,
+            ]);
         $this->refreshLineFingerprint($workspaceId);
         return '商品价格已更新。';
     }

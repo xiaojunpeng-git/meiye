@@ -798,6 +798,16 @@ final class CashierV3CashierWorkspaceServices
                 ['line_id' => $lineKey]
             );
         }
+        $memberId = (int)($draft['member_id'] ?? 0);
+        $productType = (int)($line['catalog_product_type'] ?? -1);
+        if ($memberId <= 0 || !in_array($productType, [0, 4, 5], true)) {
+            throw new CashierV3CommandException(
+                CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
+                '只有会员购买的卡项或产品可以设置欠款。',
+                CashierV3ResultCode::STATUS_FAILED,
+                ['reason' => 'cashier_line_debt_not_supported', 'line_id' => $lineKey]
+            );
+        }
         $lineAmountCents = $this->multiplyCents(
             (int)($line['unit_price_cents'] ?? -1),
             (int)($line['quantity'] ?? 0),
@@ -940,7 +950,6 @@ final class CashierV3CashierWorkspaceServices
     ): array {
         CashierV3TransactionGuard::assertInTransaction('cashierWorkspaceRemoveLine');
         $draft = $this->lockOrCreateDraft($workspaceId, $stateContextId, $operatorScope);
-        $this->assertNotResumedHangMutation($draft);
         $line = $this->lockLine($workspaceId, $lineKey);
         if (!$line) {
             throw CashierV3ScopeResolver::notFound('cashier_workspace_line', $lineKey);
@@ -2476,6 +2485,15 @@ final class CashierV3CashierWorkspaceServices
         $displayJson = (string)($line['display_snapshot_json'] ?? '');
         $craftsmenJson = (string)($line['craftsmen_json'] ?? '');
         $salespeopleJson = (string)($line['salespeople_json'] ?? '');
+        // Hangs written before the richer workspace snapshot are still
+        // resumable. New hangs always include these fields, while old hangs
+        // retain their former empty/default representation.
+        $guideSelectionsJson = array_key_exists('guide_selections_json', $line)
+            ? (string)$line['guide_selections_json']
+            : $this->encodeJson([]);
+        $salesManagerSelectionsJson = array_key_exists('sales_manager_selections_json', $line)
+            ? (string)$line['sales_manager_selections_json']
+            : $this->encodeJson([]);
         if ($lineKey === ''
             || !in_array($role, [self::ROLE_SALE, self::ROLE_ENTITLEMENT], true)
             || (int)($line['member_id'] ?? -1) !== $memberId
@@ -2505,19 +2523,27 @@ final class CashierV3CashierWorkspaceServices
             'detail_version' => $detailVersion,
             'unit_price_cents' => (int)($line['unit_price_cents'] ?? 0),
             'original_unit_price_cents' => (int)($line['original_unit_price_cents'] ?? 0),
-            'configured_cost_cents' => 0,
-            'debt_amount_cents' => 0,
-            'price_change_reason' => '',
-            'price_changed_by' => 0,
-            'price_changed_by_name_snapshot' => '',
-            'price_changed_at' => 0,
+            'configured_cost_cents' => (int)($line['configured_cost_cents'] ?? 0),
+            'debt_amount_cents' => (int)($line['debt_amount_cents'] ?? 0),
+            'coupon_user_id' => (int)($line['coupon_user_id'] ?? 0),
+            'coupon_name_snapshot' => (string)($line['coupon_name_snapshot'] ?? ''),
+            'coupon_discount_cents' => (int)($line['coupon_discount_cents'] ?? 0),
+            'price_change_reason' => (string)($line['price_change_reason'] ?? ''),
+            'price_changed_by' => (int)($line['price_changed_by'] ?? 0),
+            'price_changed_by_name_snapshot' => (string)($line['price_changed_by_name_snapshot'] ?? ''),
+            'price_changed_at' => (int)($line['price_changed_at'] ?? 0),
             'authority_fingerprint' => (string)($line['authority_fingerprint'] ?? ''),
             'authority_snapshot_json' => (string)($line['authority_snapshot_json'] ?? ''),
             'service_object' => (string)($line['service_object'] ?? ''),
             'craftsmen_json' => $craftsmenJson,
             'salespeople_json' => $salespeopleJson,
+            'guide_selections_json' => $guideSelectionsJson,
+            'sales_manager_selections_json' => $salesManagerSelectionsJson,
             'manual_labor_fee_cents' => isset($line['manual_labor_fee_cents']) ? (int)$line['manual_labor_fee_cents'] : null,
+            'friend_counts_as_customer' => (int)($line['friend_counts_as_customer'] ?? 1),
             'is_experience' => (int)($line['is_experience'] ?? 0),
+            'is_presale' => (int)($line['is_presale'] ?? 0),
+            'inventory_outbound_required' => (int)($line['inventory_outbound_required'] ?? 1),
             'display_snapshot_json' => $displayJson,
             'sort_no' => $sortNo,
         ];
