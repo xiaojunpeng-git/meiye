@@ -6,6 +6,8 @@ import BookOpen from '@lucide/vue/dist/esm/icons/book-open.mjs'
 import RefreshCw from '@lucide/vue/dist/esm/icons/refresh-cw.mjs'
 import ChevronDown from '@lucide/vue/dist/esm/icons/chevron-down.mjs'
 import ChevronUp from '@lucide/vue/dist/esm/icons/chevron-up.mjs'
+import ChevronRight from '@lucide/vue/dist/esm/icons/chevron-right.mjs'
+import Network from '@lucide/vue/dist/esm/icons/network.mjs'
 import { requestCashierV3Action } from '@/services/cashierV3Bridge'
 import {
   exportStoreBusinessReport,
@@ -76,6 +78,7 @@ const personnelPicker = ref({
   error: ''
 })
 const scopePicker = ref({ open: false, loading: false, tree: [], allowedStoreIds: [], selectedStoreIds: [], label: '当前权限范围', selectedOrganizationKey: '', selectedOrganizationName: '', stores: [] })
+const expandedScopeKeys = ref(new Set())
 const page = ref(1)
 const tabsElement = ref(null)
 const tabsExpanded = ref(false)
@@ -227,13 +230,14 @@ const scopeTreeOptions = computed(() => {
   const walk = (nodes, depth = 0, parentKey = '') => (Array.isArray(nodes) ? nodes : []).forEach((node, index) => {
     const storeId = Number(node?.store_id || (node?.node_type === 'store' ? node?.id : 0))
     const key = `${parentKey}/${node?.node_type || 'org'}-${node?.id || node?.org_id || index}`
-    output.push({ node, depth, key, storeId })
-    walk(node?.children, depth + 1, key)
+    const hasChildren = Array.isArray(node?.children) && node.children.length > 0
+    const isExpanded = expandedScopeKeys.value.has(key)
+    output.push({ node, depth, key, storeId, hasChildren, isExpanded })
+    if (hasChildren && isExpanded) walk(node.children, depth + 1, key)
   })
   walk(scopePicker.value.tree)
   return output
 })
-
 const serverCatalogByCode = computed(() => new Map(
   catalog.value.filter((item) => item && item.code).map((item) => [item.code, item])
 ))
@@ -657,6 +661,14 @@ function scopeNodeStores(node) {
   return stores.filter((store, index, all) => all.findIndex((item) => item.id === store.id) === index)
 }
 
+function toggleScopeNode(option) {
+  if (!option?.hasChildren) return
+  const next = new Set(expandedScopeKeys.value)
+  if (next.has(option.key)) next.delete(option.key)
+  else next.add(option.key)
+  expandedScopeKeys.value = next
+}
+
 function selectScopeOrganization(option) {
   const ids = scopeNodeStoreIds(option.node)
   if (!ids.length) return
@@ -898,7 +910,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateTabsLayout))
 
 <template>
   <main class="store-business-report" :class="{ 'store-business-report--market-detail': activeReport === 'market_detail', 'store-business-report--fixed-table': usesFixedTableLayout }" aria-label="门店运营报表">
-    <div class="store-business-report__tabs-shell" :class="{ 'store-business-report__tabs-shell--expanded': tabsExpanded }">
+    <div v-if="!isPlatformReport" class="store-business-report__tabs-shell" :class="{ 'store-business-report__tabs-shell--expanded': tabsExpanded }">
       <nav ref="tabsElement" class="store-business-report__tabs" aria-label="门店运营报表功能">
         <button
           v-for="item in reportTabs"
@@ -918,6 +930,54 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateTabsLayout))
     </div>
 
     <section class="store-business-report__filters" aria-label="报表查询条件">
+      <div v-if="isPlatformReport" class="store-business-report__scope-picker">
+        <button type="button" class="store-business-report__scope-trigger" :disabled="scopePicker.loading" @click="scopePicker.open = !scopePicker.open">
+          <Network :size="16" aria-hidden="true" /> {{ scopePicker.loading ? '读取权限范围' : scopePicker.label }}
+        </button>
+        <section v-if="scopePicker.open" class="store-business-report__scope-panel" aria-label="组织和门店权限范围">
+          <header>组织 / 门店</header>
+          <div class="store-business-report__scope-panel-body">
+            <div class="store-business-report__scope-tree" aria-label="组织树">
+              <p v-if="scopePicker.loading" class="store-business-report__scope-empty">正在读取组织范围。</p>
+              <template v-else>
+                <div
+                  v-for="option in scopeTreeOptions"
+                  :key="option.key"
+                  class="store-business-report__scope-tree-row"
+                  :style="{ paddingLeft: `${8 + option.depth * 18}px` }"
+                >
+                  <button
+                    v-if="option.hasChildren"
+                    type="button"
+                    class="store-business-report__scope-toggle"
+                    :aria-label="`${option.isExpanded ? '折叠' : '展开'}${option.node?.title || option.node?.name || '组织'}`"
+                    :aria-expanded="option.isExpanded"
+                    @click="toggleScopeNode(option)"
+                  >
+                    <ChevronDown v-if="option.isExpanded" :size="15" aria-hidden="true" />
+                    <ChevronRight v-else :size="15" aria-hidden="true" />
+                  </button>
+                  <span v-else class="store-business-report__scope-toggle-placeholder" aria-hidden="true"></span>
+                  <button
+                    type="button"
+                    class="store-business-report__scope-option"
+                    :class="{ 'store-business-report__scope-option--selected': scopePicker.selectedOrganizationKey === option.key, 'store-business-report__scope-option--store': option.storeId > 0 }"
+                    @click="selectScopeNode(option)"
+                  >{{ option.node?.title || option.node?.name || option.node?.label || '-' }}</button>
+                </div>
+              </template>
+            </div>
+            <div class="store-business-report__scope-stores" aria-label="可选门店">
+              <p class="store-business-report__scope-stores-title">{{ scopePicker.selectedOrganizationName || '选择组织后查看组织及下级门店' }}</p>
+              <div v-if="scopePicker.stores.length" class="store-business-report__scope-store-list">
+                <button v-for="store in scopePicker.stores" :key="store.id" type="button" :class="{ 'is-active': scopePicker.selectedStoreIds.length === 1 && scopePicker.selectedStoreIds[0] === Number(store.id) }" @click="selectScopeStore(store)">{{ store.name }}</button>
+              </div>
+              <p v-else class="store-business-report__scope-empty">该组织及下级暂无门店</p>
+            </div>
+          </div>
+          <footer><button type="button" @click="chooseAllScope">当前权限范围</button><span>选择组织查询其全部下级门店；选择门店仅查询该门店。</span></footer>
+        </section>
+      </div>
       <label class="store-business-report__date-field"><span>从</span><input v-model="startDate" type="date" aria-label="开始日期" :min="isFirstPhaseReport ? COVERAGE_START : undefined" :max="endDate" /></label>
       <label class="store-business-report__date-field"><span>至</span><input v-model="endDate" type="date" aria-label="结束日期" :min="startDate" :max="today()" /></label>
       <label v-for="field in filterSchema" :key="field.key">{{ field.label || field.name || field.key }}
@@ -1083,6 +1143,28 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateTabsLayout))
 .store-business-report__tab--active { border-bottom-color: #1769aa; color: #1769aa; font-weight: 700; }
 .store-business-report__filters, .store-business-report__panel { border: 1px solid #dde4ed; border-radius: 8px; background: #fff; }
 .store-business-report__filters { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; padding: 13px 16px; }
+.store-business-report__scope-picker { position: relative; flex: none; }
+.store-business-report__scope-trigger { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; border: 1px solid #dcdee2; border-radius: 4px; padding: 6px 11px; background: #fff; color: #515a6e; font: inherit; cursor: pointer; }
+.store-business-report__scope-trigger:hover { border-color: #57a3f3; color: #2d8cf0; }
+.store-business-report__scope-trigger:disabled { cursor: wait; opacity: .65; }
+.store-business-report__scope-panel { position: absolute; z-index: 30; top: calc(100% + 6px); left: 0; width: min(480px, calc(100vw - 48px)); border: 1px solid #dcdee2; border-radius: 4px; background: #fff; box-shadow: 0 2px 12px rgba(0, 0, 0, .14); overflow: hidden; }
+.store-business-report__scope-panel header { padding: 12px 14px 8px; border-bottom: 1px solid #edf0f5; color: #17233d; font-weight: 600; }
+.store-business-report__scope-panel-body { display: flex; min-height: 230px; }
+.store-business-report__scope-tree { position: relative; flex: 1; max-height: 260px; overflow: auto; padding: 7px 8px; border-right: 1px solid #edf0f5; }
+.store-business-report__scope-tree-row { display: flex; align-items: center; min-height: 31px; }
+.store-business-report__scope-toggle, .store-business-report__scope-toggle-placeholder { display: inline-grid; flex: none; width: 22px; height: 31px; place-items: center; }
+.store-business-report__scope-toggle { border: 0; border-radius: 3px; padding: 0; background: transparent; color: #657386; cursor: pointer; }
+.store-business-report__scope-toggle:hover { background: #edf5ff; color: #2d8cf0; }
+.store-business-report__scope-option { display: block; flex: 1; min-width: 0; min-height: 31px; border: 0; border-radius: 3px; padding: 0 8px; background: #fff; color: #515a6e; text-align: left; font: inherit; font-size: 13px; cursor: pointer; }
+.store-business-report__scope-option:hover, .store-business-report__scope-option--selected { background: #edf5ff; color: #2d8cf0; }
+.store-business-report__scope-option--store { color: #657386; }
+.store-business-report__scope-stores { width: 205px; max-height: 260px; overflow: auto; padding: 10px 12px; }
+.store-business-report__scope-stores-title { min-height: 18px; margin: 0 0 8px; color: #666; font-size: 12px; line-height: 18px; }
+.store-business-report__scope-store-list button { display: block; width: 100%; min-height: 31px; border: 0; border-radius: 3px; padding: 5px 8px; background: transparent; color: #515a6e; text-align: left; font: inherit; font-size: 13px; cursor: pointer; }
+.store-business-report__scope-store-list button:hover, .store-business-report__scope-store-list button.is-active { background: #edf5ff; color: #2d8cf0; }
+.store-business-report__scope-empty { margin: 0; padding: 8px 2px; color: #bbb; font-size: 12px; line-height: 1.55; }
+.store-business-report__scope-panel footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 14px; border-top: 1px solid #edf0f5; color: #999; font-size: 12px; line-height: 1.45; }
+.store-business-report__scope-panel footer button { flex: none; border: 0; padding: 0; background: transparent; color: #2d8cf0; font: inherit; font-size: 12px; cursor: pointer; }
 .store-business-report__query-actions { display: flex; flex: none; align-items: center; gap: 8px; margin-left: auto; }
 .store-business-report__query-actions .button { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; }
 .store-business-report__filters--advanced { border-top: 0; border-radius: 0 0 8px 8px; padding-top: 2px; }
