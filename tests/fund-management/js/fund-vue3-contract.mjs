@@ -7,6 +7,7 @@ const scopePicker = readFileSync(resolve(sourceRoot, '前端代码/fund-vue3/src
 const vite = readFileSync(resolve(sourceRoot, '前端代码/fund-vue3/vite.config.js'), 'utf8')
 const platformRoute = readFileSync(resolve(sourceRoot, '前端代码/admin/src/router/modules/fundManage.js'), 'utf8')
 const platformMenuMigration = readFileSync(resolve(sourceRoot, '后端代码/database/upgrades/2026-08-17-费用模块平台权限入口/02-正式升级.sql'), 'utf8')
+const integrationBuild = readFileSync(resolve(sourceRoot, 'scripts/build-local-8080-integration.sh'), 'utf8')
 for (const text of ['收支单录入', '收支台账', '费用统计与专项报表', "active==='settings'", '撤销审核', '冲销']) {
   if (!app.includes(text)) throw new Error(`资金 Vue3 工作台缺少功能：${text}`)
 }
@@ -23,4 +24,5 @@ for (const text of ['reportFilters', 'income_amount', 'expense_amount', 'net_amo
 if (!vite.includes("'http://127.0.0.1:18092'") || !vite.includes("'http://127.0.0.1:18093'")) throw new Error('资金 Vue3 本地代理未对接独立门店和平台 API')
 if (!platformRoute.includes('/finance/store_fund') || !platformRoute.includes("admin-fund-manage")) throw new Error('平台费用路由未绑定独立权限入口')
 if (!platformMenuMigration.includes("admin-store-finance") || !platformMenuMigration.includes("admin-fund-manage") || platformMenuMigration.includes('1043')) throw new Error('平台费用菜单迁移未按权限规则定位门店财务')
+if (!integrationBuild.includes('build_vite_app fund-vue3') || !integrationBuild.includes('switch_target view_fund_v3 view_fund_v3')) throw new Error('8080 集成构建未纳入费用前端产物')
 console.log('fund-vue3-contract: PASS')

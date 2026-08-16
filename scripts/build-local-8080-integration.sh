@@ -32,7 +32,7 @@ require_build_output() {
 source_snapshot() {
   local snapshot_file="$1"
   local source_dir
-  local source_dirs=(cashier-v3 inventory-vue3 admin)
+  local source_dirs=(cashier-v3 inventory-vue3 fund-vue3 admin)
 
   : > "$snapshot_file"
   for source_dir in "${source_dirs[@]}"; do
@@ -81,6 +81,7 @@ build_vite_app() {
 
 build_vite_app cashier-v3
 build_vite_app inventory-vue3
+build_vite_app fund-vue3
 
 admin_build_mode="rebuilt"
 if [[ "${LOCAL_8080_INTEGRATION_REUSE_ADMIN_DIST:-}" == "1" ]]; then
@@ -101,15 +102,17 @@ if [[ "${LOCAL_8080_INTEGRATION_INCLUDE_STORE:-0}" == "1" ]]; then
   exit 2
 fi
 
-mkdir -p "$staging_dir/cashier-v3" "$staging_dir/view_cashier_v3" "$staging_dir/view_inventory_v3" "$staging_dir/view_admin"
+mkdir -p "$staging_dir/cashier-v3" "$staging_dir/view_cashier_v3" "$staging_dir/view_inventory_v3" "$staging_dir/view_fund_v3" "$staging_dir/view_admin"
 cp -R "$repo_dir/前端代码/cashier-v3/dist/." "$staging_dir/cashier-v3/"
 cp -R "$repo_dir/前端代码/cashier-v3/dist/." "$staging_dir/view_cashier_v3/"
 cp -R "$repo_dir/前端代码/inventory-vue3/dist/." "$staging_dir/view_inventory_v3/"
+cp -R "$repo_dir/前端代码/fund-vue3/dist/." "$staging_dir/view_fund_v3/"
 cp -R "$repo_dir/前端代码/admin/dist/view_admin/." "$staging_dir/view_admin/"
 cp "$repo_dir/前端代码/admin/dist/system.html" "$staging_dir/system.html"
 
 cashier_assets="$(sed -nE 's#.*(assets/index-[A-Za-z0-9]+\.(js|css)).*#\1#p' "$staging_dir/view_cashier_v3/index.html" | sort -u | paste -sd, -)"
 inventory_assets="$(sed -nE 's#.*(assets/index-[A-Za-z0-9]+\.(js|css)).*#\1#p' "$staging_dir/view_inventory_v3/index.html" | sort -u | paste -sd, -)"
+fund_assets="$(sed -nE 's#.*(assets/index-[A-Za-z0-9]+\.(js|css)).*#\1#p' "$staging_dir/view_fund_v3/index.html" | sort -u | paste -sd, -)"
 admin_assets="$(find "$staging_dir/view_admin" -maxdepth 2 -type f \( -name 'app.*.js' -o -name 'app.*.css' \) -print | sort | xargs shasum -a 256 | shasum -a 256 | awk '{print $1}')"
 admin_entry_digest="$(shasum -a 256 "$staging_dir/system.html" | awk '{print $1}')"
 source_snapshot_file="$staging_dir/source-snapshot.sha256"
@@ -117,7 +120,7 @@ source_snapshot "$source_snapshot_file"
 source_snapshot_digest="$(shasum -a 256 "$source_snapshot_file" | awk '{print $1}')"
 builder_script_digest="$(shasum -a 256 "$repo_dir/scripts/build-local-8080-integration.sh" | awk '{print $1}')"
 overlay_digest="${LOCAL_8080_INTEGRATION_OVERLAY_SHA256:-}"
-build_id="$(printf '%s\n%s\n%s\n%s\n%s\n' "$cashier_assets" "$inventory_assets" "$admin_assets" "$admin_entry_digest" "$source_snapshot_digest" | shasum -a 256 | cut -c1-16)"
+build_id="$(printf '%s\n%s\n%s\n%s\n%s\n%s\n' "$cashier_assets" "$inventory_assets" "$fund_assets" "$admin_assets" "$admin_entry_digest" "$source_snapshot_digest" | shasum -a 256 | cut -c1-16)"
 release_dir="$release_root/$build_id"
 
 mkdir -p "$release_root"
@@ -125,13 +128,14 @@ if [[ ! -d "$release_dir" ]]; then
   mkdir -p "$release_dir"
   cp -R "$staging_dir/." "$release_dir/"
   cat > "$release_dir/build-manifest.json" <<EOF
-{"build_id":"$build_id","source_commit":"$(git -C "$repo_dir" rev-parse HEAD)","overlay_sha256":"$overlay_digest","source_snapshot_digest":"$source_snapshot_digest","builder_script_digest":"$builder_script_digest","built_at":"$(date -u +%Y-%m-%dT%H:%M:%SZ)","cashier_assets":"$cashier_assets","inventory_assets":"$inventory_assets","admin_asset_digest":"$admin_assets","admin_entry_digest":"$admin_entry_digest","includes_store":false,"admin_build_mode":"$admin_build_mode"}
+{"build_id":"$build_id","source_commit":"$(git -C "$repo_dir" rev-parse HEAD)","overlay_sha256":"$overlay_digest","source_snapshot_digest":"$source_snapshot_digest","builder_script_digest":"$builder_script_digest","built_at":"$(date -u +%Y-%m-%dT%H:%M:%SZ)","cashier_assets":"$cashier_assets","inventory_assets":"$inventory_assets","fund_assets":"$fund_assets","admin_asset_digest":"$admin_assets","admin_entry_digest":"$admin_entry_digest","includes_store":false,"includes_fund":true,"admin_build_mode":"$admin_build_mode"}
 EOF
 fi
 
 switch_target cashier-v3 cashier-v3
 switch_target view_cashier_v3 view_cashier_v3
 switch_target view_inventory_v3 view_inventory_v3
+switch_target view_fund_v3 view_fund_v3
 switch_target view_admin view_admin
 switch_target system.html system.html
 echo "LOCAL_8080_INTEGRATION_BUILD_ID=$build_id"
