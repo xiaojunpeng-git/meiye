@@ -34,7 +34,7 @@ WHERE data_menu.`unique_auth`='admin-report' AND data_menu.`type`=1 AND data_men
 
 INSERT INTO `eb_system_menus`
 (`pid`,`type`,`icon`,`menu_name`,`module`,`controller`,`action`,`api_url`,`methods`,`params`,`sort`,`is_show`,`is_show_path`,`access`,`menu_path`,`path`,`auth_type`,`header`,`is_header`,`unique_auth`,`is_del`)
-SELECT parent_menu.id,1,'ios-stats-outline',r.menu_name,'admin','','','','[]','[]',1000-r.sort_order,1,0,1,
+SELECT parent_menu.id,1,'ios-stats-outline',r.menu_name,'admin','','','','[]','[]',19-r.sort_order,1,0,1,
   CONCAT('/report/store-operations/',r.report_code),CONCAT(data_menu.id,'/',parent_menu.id),1,'',0,
   CONCAT('admin-report-store-operations-',r.report_code),0
 FROM (
