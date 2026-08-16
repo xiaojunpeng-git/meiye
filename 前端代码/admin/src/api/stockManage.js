@@ -440,21 +440,6 @@ export function stockOutImportApi(data) {
   });
 }
 
-function decodeArrayBufferText(buf) {
-  try {
-    if (typeof TextDecoder !== 'undefined') {
-      return new TextDecoder('utf-8').decode(buf);
-    }
-  } catch (e) {
-    /* fallthrough */
-  }
-  const view = new Uint8Array(buf);
-  let s = '';
-  const len = Math.min(view.length, 4000);
-  for (let i = 0; i < len; i++) s += String.fromCharCode(view[i]);
-  return s;
-}
-
 function downloadBlobRequest(urlPath, params, fileName) {
   const token = util.cookies.get('token') || '';
   const excelType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
