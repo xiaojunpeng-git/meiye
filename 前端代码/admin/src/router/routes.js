@@ -31,6 +31,7 @@ import frameOut from './modules/frameOut';
 import work from './modules/work';
 import community from './modules/community';
 import stockManage from './modules/stockManage';
+import fundManage from './modules/fundManage';
 import Setting from '@/setting';
 /**
  * 在主框架内显示
@@ -271,7 +272,8 @@ const frameIn = [
   statistic,
   work,
   community,
-  stockManage
+  stockManage,
+  fundManage
 ];
 
 /**

@@ -5,10 +5,17 @@ import vue from '@vitejs/plugin-vue'
 // 收银 V3 热更新使用自己的本地后端入口；8080 是集成构建/平台入口。
 const cashierApiTarget = process.env.CASHIER_V3_API_PROXY_TARGET || 'http://127.0.0.1:18092'
 const platformApiTarget = process.env.PLATFORM_API_PROXY_TARGET || 'http://127.0.0.1:18093'
+const fundV3Target = process.env.FUND_V3_DEV_PROXY_TARGET || 'http://127.0.0.1:18089'
 const cashierSourceRoot = fileURLToPath(new URL('.', import.meta.url))
 const inventoryPackageRoot = fileURLToPath(new URL('../inventory-vue3', import.meta.url))
 const unifiedQueryPackageRoot = fileURLToPath(new URL('../shared/unified-query-vue3', import.meta.url))
 const cashierApiProxy = {
+  // 费用 V3 通过门店 Vite 同源代理加载，使 iframe 复用当前门店会话。
+  '/view_fund_v3': {
+    target: fundV3Target,
+    changeOrigin: false,
+    ws: true
+  },
   '/cashierapi': {
     target: cashierApiTarget,
     changeOrigin: false

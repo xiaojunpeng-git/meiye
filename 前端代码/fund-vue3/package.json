@@ -1,0 +1,1 @@
+{"name":"@mohe/fund-vue3","version":"0.1.0","private":true,"type":"module","scripts":{"dev":"vite --host 127.0.0.1 --port 18089 --strictPort","build":"vite build"},"dependencies":{"@lucide/vue":"^1.27.0","vue":"^3.4.38"},"devDependencies":{"@vitejs/plugin-vue":"^4.6.2","vite":"^4.5.3"}}

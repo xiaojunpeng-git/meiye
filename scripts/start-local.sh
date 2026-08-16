@@ -151,7 +151,7 @@ docker run -d --name mohe-cashier-nginx --platform linux/amd64 --network mohe-ne
 # 平台前端开发预览（18081，热更新；仅首次缺依赖时 install，避免每次启动重装）
 ADMIN_SRC="$ROOT/前端代码/admin"
 ADMIN_NM_VOLUME="mohe_admin_src_nm"
-ADMIN_DEV_CMD="if [ ! -x ./node_modules/.bin/vue-cli-service ]; then npm config set registry https://registry.npmmirror.com && npm install --no-audit --no-fund; fi && VUE_APP_API_URL='http://127.0.0.1:${PLATFORM_API_PORT}/adminapi' VUE_APP_INVENTORY_V3_DEV_ORIGIN='http://127.0.0.1:18086' VUE_APP_INVENTORY_V3_DEV_PROXY_TARGET='http://host.docker.internal:18086' VUE_APP_ADMIN_DEV_PUBLIC='127.0.0.1:18081' VUE_APP_ADMIN_DEV_SOCKET_HOST='127.0.0.1' VUE_APP_ADMIN_DEV_SOCKET_PORT='18081' ./node_modules/.bin/vue-cli-service serve --mode=dev --host 0.0.0.0 --port 8081"
+ADMIN_DEV_CMD="if [ ! -x ./node_modules/.bin/vue-cli-service ]; then npm config set registry https://registry.npmmirror.com && npm install --no-audit --no-fund; fi && VUE_APP_API_URL='http://127.0.0.1:${PLATFORM_API_PORT}/adminapi' VUE_APP_INVENTORY_V3_DEV_ORIGIN='http://127.0.0.1:18086' VUE_APP_INVENTORY_V3_DEV_PROXY_TARGET='http://host.docker.internal:18086' VUE_APP_FUND_V3_DEV_PROXY_TARGET='http://host.docker.internal:18089' VUE_APP_CASHIER_V3_DEV_ORIGIN='http://127.0.0.1:18091' VUE_APP_ADMIN_DEV_PUBLIC='127.0.0.1:18081' VUE_APP_ADMIN_DEV_SOCKET_HOST='127.0.0.1' VUE_APP_ADMIN_DEV_SOCKET_PORT='18081' ./node_modules/.bin/vue-cli-service serve --mode=dev --host 0.0.0.0 --port 8081"
 
 ensure_admin_dev() {
   if docker ps -a --format '{{.Names}}' | grep -qx mohe-admin-src; then
@@ -176,6 +176,7 @@ ensure_admin_dev() {
   fi
   docker run -d --name mohe-admin-src --platform linux/amd64 \
     -p 18081:8081 \
+    --add-host host.docker.internal:host-gateway \
     -v "$ADMIN_SRC:/app" \
     -v "$ADMIN_NM_VOLUME:/app/node_modules" \
     -w /app \
@@ -210,6 +211,38 @@ docker run -d --name mohe-inventory-v3-src --platform linux/amd64 \
   "$INVENTORY_NODE_IMAGE" \
   bash -lc "$INVENTORY_V3_DEV_CMD"
 
+# 费用 Vue 3 独立热更新入口（18089）。门店与平台均通过 iframe 复用该界面，
+# 分别将 /storeapi 和 /adminapi 代理到各自独立网关。
+FUND_V3_SRC="$ROOT/前端代码/fund-vue3"
+FUND_V3_NM_VOLUME="mohe_fund_v3_src_nm"
+FUND_V3_DEV_CMD='if [ ! -x ./node_modules/.bin/vite ]; then npm config set registry https://registry.npmjs.org && npm install --no-audit --no-fund; fi && FUND_V3_STORE_API_PROXY_TARGET="http://host.docker.internal:'"${CASHIER_API_PORT}"'" FUND_V3_PLATFORM_API_PROXY_TARGET="http://host.docker.internal:'"${PLATFORM_API_PORT}"'" ./node_modules/.bin/vite --host 0.0.0.0 --port 18089 --strictPort'
+
+docker rm -f mohe-fund-v3-src >/dev/null 2>&1 || true
+docker volume create "$FUND_V3_NM_VOLUME" >/dev/null 2>&1 || true
+docker run -d --name mohe-fund-v3-src --platform linux/amd64 \
+  -p 18089:18089 \
+  --add-host host.docker.internal:host-gateway \
+  -v "$FUND_V3_SRC:/app" \
+  -v "$FUND_V3_NM_VOLUME:/app/node_modules" \
+  -w /app \
+  "$INVENTORY_NODE_IMAGE" \
+  bash -lc "$FUND_V3_DEV_CMD"
+
+echo "等待费用 Vue 3 热更新服务..."
+fund_ready=0
+for i in $(seq 1 60); do
+  if docker exec mohe-fund-v3-src node -e "fetch('http://127.0.0.1:18089/').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))" >/dev/null 2>&1; then
+    fund_ready=1
+    break
+  fi
+  sleep 1
+done
+if [ "$fund_ready" -ne 1 ]; then
+  echo "费用 Vue 3 热更新服务未在 60 秒内就绪"
+  docker logs --tail 40 mohe-fund-v3-src || true
+  exit 1
+fi
+
 # 旧门店端 18082 已迁移到 美容源码/旧端口/18082/，仅作备份，不再启动热更新。
 
 # 当前门店端唯一开发入口（18091，热更新）。源码正本为 cashier-v3。
@@ -237,6 +270,7 @@ ensure_cashier_v3_dev() {
     --add-host host.docker.internal:host-gateway \
     -e CASHIER_V3_API_PROXY_TARGET="http://host.docker.internal:${CASHIER_API_PORT}" \
     -e PLATFORM_API_PROXY_TARGET="http://host.docker.internal:${PLATFORM_API_PORT}" \
+    -e FUND_V3_DEV_PROXY_TARGET="http://host.docker.internal:18089" \
     -v "$CASHIER_V3_SRC:/app" \
     -v "$ROOT/前端代码/inventory-vue3:/inventory-vue3:ro" \
     -v "$ROOT/前端代码/shared:/shared:ro" \
@@ -254,6 +288,7 @@ echo
 echo "已启动（Nginx + Swoole，挂载：美容源码/后端代码）："
 echo "  平台开发预览: http://127.0.0.1:18081/admin/login  （改代码用，首次编译约 5-10 分钟）"
 echo "  库存前端开发预览: http://127.0.0.1:18086/view_inventory_v3/  （inventory-vue3 热更新）"
+echo "  费用前端开发预览: http://127.0.0.1:18089/?source=store  （fund-vue3 热更新）"
 echo "  当前门店端开发预览: http://127.0.0.1:18091/view_cashier_v3/#/cashier  （cashier-v3 热更新）"
 echo "  收银 V3 专用后端: http://127.0.0.1:${CASHIER_API_PORT}  （独立 PHP/Swoole + Nginx）"
 echo "  平台专用后端: http://127.0.0.1:${PLATFORM_API_PORT}  （独立 PHP/Swoole + Nginx）"

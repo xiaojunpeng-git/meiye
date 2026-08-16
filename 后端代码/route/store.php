@@ -1104,6 +1104,20 @@ Route::group('storeapi', function () {
         Route::get('download/:id', 'system.TrainingDocument/download')->option(['real_name' => '下载培训资料']);
     })->middleware([AuthTokenMiddleware::class, ForceStoreSessionMiddleware::class, StoreCkeckRoleMiddleware::class])->middleware(\app\http\middleware\SystemLogMiddleware::class, 'store');
 
+    Route::group('fund', function () {
+        Route::get('subjects', 'fund.StoreFund/subjects')->option(['real_name' => '费用科目']);
+        Route::get('documents', 'fund.StoreFund/documents')->option(['real_name' => '费用收支单']);
+        Route::get('documents/:id', 'fund.StoreFund/detail')->option(['real_name' => '费用收支单详情']);
+        Route::post('documents', 'fund.StoreFund/save')->option(['real_name' => '保存费用收支单']);
+        Route::post('documents/:id/audit', 'fund.StoreFund/audit')->option(['real_name' => '审核费用收支单']);
+        Route::post('documents/:id/reverse', 'fund.StoreFund/reverse')->option(['real_name' => '冲销费用收支单']);
+        Route::get('ledger', 'fund.StoreFund/ledger')->option(['real_name' => '费用收支台账']);
+        Route::get('report', 'fund.StoreFund/report')->option(['real_name' => '费用专项报表']);
+        Route::get('ledger/export', 'fund.StoreFund/exportLedger')->option(['real_name' => '导出费用收支台账']);
+        Route::get('report/export', 'fund.StoreFund/exportReport')->option(['real_name' => '导出费用专项报表']);
+        Route::get('export-files/:fileKey', 'fund.StoreFund/exportFile')->option(['real_name' => '下载费用导出文件']);
+    })->middleware([AuthTokenMiddleware::class, ForceStoreSessionMiddleware::class, StoreCkeckRoleMiddleware::class])->middleware(\app\http\middleware\SystemLogMiddleware::class, 'store');
+
     /**
      * miss 路由
      */

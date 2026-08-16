@@ -15,6 +15,7 @@ import StaffListView from '@/views/StaffListView.vue'
 import RoomSettingsView from '@/views/RoomSettingsView.vue'
 import RoutePlaceholderView from '@/views/RoutePlaceholderView.vue'
 import StoreLoginView from '@/views/StoreLoginView.vue'
+import FundManagementView from '@/views/FundManagementView.vue'
 import PresaleClaimView from '@/views/PresaleClaimView.vue'
 import { bootstrapCashierV3Workbench, hasCashierV3Session } from '@/services/cashierV3SessionLifecycle'
 import { canUseCashierV3Feature } from '@/services/cashierV3Bridge'
@@ -27,6 +28,7 @@ const routeFeatureCodes = Object.freeze({
   'cashier-v3-reservation': 'cashier.v3.reservation',
   'cashier-v3-member': 'cashier.v3.member',
   'cashier-v3-care': 'cashier.v3.member',
+  'cashier-v3-fund': 'cashier.v3.member',
   'cashier-v3-presale-claim': 'cashier.v3.inventory.outbound',
   'cashier-v3-hang': 'cashier.v3.hang',
   'cashier-v3-order-center': 'cashier.v3.order_center',
@@ -109,6 +111,12 @@ const routes = [
           emptyTitle: '暂无待处理客情任务',
           emptyDescription: '会员客情记录会显示在这里。'
         }
+      },
+      {
+        path: 'fund',
+        name: 'cashier-v3-fund',
+        component: FundManagementView,
+        meta: { title: '费用', description: '录入、审核、冲销、台账与专项统计。' }
       },
       {
         path: 'presale-claim',

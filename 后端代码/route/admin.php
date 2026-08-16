@@ -3177,6 +3177,7 @@ Route::group('adminapi', function () {
     Route::group('fund', function () {
         Route::get('subjects', 'v1.fund.StoreFund/subjects')->option(['real_name' => '费用科目']);
         Route::post('subjects', 'v1.fund.StoreFund/saveSubject')->option(['real_name' => '保存费用科目']);
+        Route::get('scope', 'v1.fund.StoreFund/scope')->option(['real_name' => '费用可选门店范围']);
         Route::get('documents', 'v1.fund.StoreFund/documents')->option(['real_name' => '费用收支单']);
         Route::get('documents/:id', 'v1.fund.StoreFund/detail')->option(['real_name' => '费用收支单详情']);
         Route::post('documents', 'v1.fund.StoreFund/save')->option(['real_name' => '保存费用收支单']);
@@ -3184,6 +3185,9 @@ Route::group('adminapi', function () {
         Route::post('documents/:id/reverse', 'v1.fund.StoreFund/reverse')->option(['real_name' => '冲销费用收支单']);
         Route::get('ledger', 'v1.fund.StoreFund/ledger')->option(['real_name' => '费用收支台账']);
         Route::get('report', 'v1.fund.StoreFund/report')->option(['real_name' => '费用专项报表']);
+        Route::get('ledger/export', 'v1.fund.StoreFund/exportLedger')->option(['real_name' => '导出费用收支台账']);
+        Route::get('report/export', 'v1.fund.StoreFund/exportReport')->option(['real_name' => '导出费用专项报表']);
+        Route::get('export-files/:fileKey', 'v1.fund.StoreFund/exportFile')->option(['real_name' => '下载费用导出文件']);
     })->middleware([
         \app\http\middleware\admin\AdminAuthTokenMiddleware::class,
         \app\http\middleware\admin\AdminCkeckRoleMiddleware::class

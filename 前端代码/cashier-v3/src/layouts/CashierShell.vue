@@ -10,6 +10,7 @@ import CircleUserRound from '@lucide/vue/dist/esm/icons/circle-user-round.mjs'
 import ClipboardList from '@lucide/vue/dist/esm/icons/clipboard-list.mjs'
 import DoorOpen from '@lucide/vue/dist/esm/icons/door-open.mjs'
 import HeartHandshake from '@lucide/vue/dist/esm/icons/heart-handshake.mjs'
+import WalletCards from '@lucide/vue/dist/esm/icons/wallet-cards.mjs'
 import KeyRound from '@lucide/vue/dist/esm/icons/key-round.mjs'
 import LogOut from '@lucide/vue/dist/esm/icons/log-out.mjs'
 import PanelLeftClose from '@lucide/vue/dist/esm/icons/panel-left-close.mjs'
@@ -152,6 +153,7 @@ const menuItems = [
   { key: 'room', label: '房间', icon: DoorOpen, featureCode: 'cashier.v3.room', to: { name: 'cashier-v3-room' } },
   { key: 'reservation', label: '预约', icon: CalendarDays, featureCode: 'cashier.v3.reservation', to: { name: 'cashier-v3-reservation' } },
   { key: 'member', label: '会员', icon: Users, featureCode: 'cashier.v3.member', to: { name: 'cashier-v3-member' } },
+  { key: 'fund', label: '费用', icon: WalletCards, featureCode: 'cashier.v3.member', to: { name: 'cashier-v3-fund' } },
   { key: 'care', label: '客情', icon: HeartHandshake, featureCode: 'cashier.v3.member', to: { name: 'cashier-v3-care' } },
   { key: 'order', label: '订单', icon: ReceiptText, featureCode: 'cashier.v3.order_center', to: { name: 'cashier-v3-order-center' } },
   {
