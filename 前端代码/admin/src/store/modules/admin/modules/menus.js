@@ -17,15 +17,6 @@ import { isAgentPath } from '@/utils/pathUtils';
 import { normalizeOrganizationWorkspaceMenu } from '@/libs/organizationWorkspaceMenu';
 import { normalizeProductBusinessConfigMenu } from '@/libs/productBusinessConfigMenu';
 
-const STORE_OPERATION_REPORTS = [
-  { code: 'partner_item_summary', title: '合作方品项汇总' },
-  { code: 'partner_item_detail', title: '合作方品项明细' },
-  { code: 'member_consumption_detail', title: '会员消费明细' },
-  { code: 'store_item_analysis', title: '门店品项分析' },
-  { code: 'store_craftsman_consumption', title: '门店手艺人消耗' },
-  { code: 'store_salesperson_performance', title: '门店销售人业绩' }
-];
-
 // "出入库记录" has been consolidated into inventory query/statistics.  Filter
 // the legacy entry here as well as in the menu migration so a browser with an
 // older cached menu cannot keep exposing a closed workflow after refresh.
@@ -96,66 +87,40 @@ function withOperatingScreenMenu(menuData) {
   return menuData;
 }
 
-// 门店运营六表是平台“数据”菜单下的统一入口。部分本地账号的菜单权限缓存
-// 仍来自旧菜单树，后端不会把新节点返回到该账号的 role rules 中；这里补齐
-// 受控的前端入口，路由和接口权限仍由后端/路由守卫校验，不改变数据范围。
-function withStoreOperationsMenu(menuData) {
+// 门店运营报表必须由权限菜单返回，不能由浏览器补造。仅移除旧版缓存中前端
+// 补造的节点；数据库返回的菜单 ID 为数字，必须保留其真实父子层级。
+function withoutLegacyStoreOperationsMenu(menuData) {
   if (!Array.isArray(menuData)) return [];
-  const routePrefix = isAgentPath() ? Setting.routePreAgent : Setting.roterPre;
-  const dataMenu = menuData.find(item => {
-    if (!item) return false;
-    const path = String(item.path || item.menu_path || '').replace(/\/$/, '');
-    return item.header === 'data'
-      || path === `${routePrefix}/data`
-      || item.title === '数据'
-      || item.menu_name === '数据';
+  return menuData
+    .filter((item) => {
+      if (!item) return false;
+      return !String(item.id || '').startsWith('admin-report-store-operations-');
+    })
+    .map(item => ({
+      ...item,
+      children: Array.isArray(item.children) ? withoutLegacyStoreOperationsMenu(item.children) : item.children
+    }));
+}
+
+// 门店运营的报表名称已经表达清楚功能。18 个二级报表共用统计图标会造成
+// 视觉噪音，因此只在平台菜单渲染模型中清空这一组图标；父级菜单及其他模块不受影响。
+function withoutStoreOperationsReportIcons(menuData) {
+  if (!Array.isArray(menuData)) return [];
+  return menuData.map(item => {
+    if (!item) return item;
+    const children = Array.isArray(item.children) ? withoutStoreOperationsReportIcons(item.children) : item.children;
+    if (String(item.unique_auth || '').startsWith('admin-report-store-operations-')) {
+      return { ...item, icon: '', custom: '', children };
+    }
+    return { ...item, children };
   });
-  if (!dataMenu) return menuData;
-  if (!Array.isArray(dataMenu.children)) dataMenu.children = [];
-  const reportPathPrefix = `${routePrefix}/report/store-operations/`;
-  const isGeneratedReport = (item) => {
-    if (!item) return false;
-    const path = String(item.path || item.menu_path || '').replace(/\/$/, '');
-    return item.unique_auth === 'admin-report-store-operations'
-      || String(item.unique_auth || '').startsWith('admin-report-store-operations-')
-      || item.title === '门店运营'
-      || item.menu_name === '门店运营'
-      || path === `${routePrefix}/report/business-center`
-      || path === `${routePrefix}/report/store-operations`
-      || path.startsWith(reportPathPrefix);
-  };
-  // Replace the old single hub entry (including stale cached menu nodes) with
-  // six ordinary second-level links. No menu API call or menu-state refresh
-  // is needed when switching between these links; they are normal router paths.
-  dataMenu.children = dataMenu.children.filter(child => !isGeneratedReport(child));
-  menuData.forEach(item => {
-    if (!item || item === dataMenu || !Array.isArray(item.children)) return;
-    item.children = item.children.filter(child => !isGeneratedReport(child));
-  });
-  STORE_OPERATION_REPORTS.forEach((report, index) => {
-    dataMenu.children.push({
-      id: `admin-report-store-operations-${report.code}`,
-      pid: dataMenu.id,
-      title: report.title,
-      menu_name: report.title,
-      icon: index === 0 ? 'ios-pie-outline' : 'ios-stats-outline',
-      path: `${reportPathPrefix}${report.code}`,
-      target: '_self',
-      header: '',
-      is_header: 0,
-      is_show_path: 0,
-      unique_auth: `admin-report-store-operations-${report.code}`,
-      children: []
-    });
-  });
-  return menuData;
 }
 
 function normalizeMenus(menuData, prefix) {
-  return withStoreOperationsMenu(withOperatingScreenMenu(normalizeProductBusinessConfigMenu(
-    normalizeOrganizationWorkspaceMenu(withoutLegacyInventoryMovement(menuData), prefix),
+  return withOperatingScreenMenu(normalizeProductBusinessConfigMenu(
+    normalizeOrganizationWorkspaceMenu(withoutStoreOperationsReportIcons(withoutLegacyStoreOperationsMenu(withoutLegacyInventoryMovement(menuData))), prefix),
     prefix
-  )));
+  ));
 }
 
 function getMenusName() {
