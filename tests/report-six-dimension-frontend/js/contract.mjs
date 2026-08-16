@@ -49,10 +49,11 @@ check('consumption tier config has its own permission route',
 check('platform iframe targets the platform-only report runtime',
   adminFrame.includes('/platform/reports/${encodeURIComponent(this.reportCode)}')
     && adminFrame.includes("'/platform/six-dimension/consumption-tiers'"))
-check('store runtime does not add six-dimension report codes',
-  reportView.includes('isPlatformRuntimeRoute() ? SIX_DIMENSION_REPORT_TABS : REPORT_TABS')
-    && reportView.includes('tabs.filter((tab) => serverCatalogByCode.value.has(tab.code))')
-    && reportView.includes("String(route.path || '').startsWith('/platform/')"))
+check('platform legacy and six-dimension report routes keep independent tab directories',
+  reportView.includes('function isSixDimensionRoute()')
+    && reportView.includes("SIX_DIMENSION_REPORT_TABS.some((tab) => tab.code === requested)")
+    && reportView.includes('isSixDimensionRoute() ? SIX_DIMENSION_REPORT_TABS : REPORT_TABS')
+    && reportView.includes('tabs.filter((tab) => serverCatalogByCode.value.has(tab.code))'))
 check('platform-only routes bypass store session while store report route remains separate',
   cashierRouter.includes("path: '/platform/six-dimension/consumption-tiers'")
     && cashierRouter.includes('meta: { platformReport: true'))
@@ -63,9 +64,10 @@ check('field explanations read server business metadata first',
     && reportView.includes('label: columnDisplayLabel(column)')
     && reportView.includes('csvValue(columnDisplayLabel(column))'))
 check('six-dimension date shown in the query matches the backend coverage boundary',
-  reportView.includes('!isSixDimensionReport.value && startDate.value === COVERAGE_START')
-    && reportView.includes('isSixDimensionReport.value && startDate.value < COVERAGE_START')
-    && reportView.includes('isFirstPhaseReport || isSixDimensionReport ? COVERAGE_START : undefined'))
+  reportView.includes("const LEGACY_COVERAGE_START = '2026-08-10'")
+    && reportView.includes("const COVERAGE_START = '2026-08-17'")
+    && reportView.includes('isSixDimensionReport.value && startDate.value < SIX_DIMENSION_COVERAGE_START')
+    && reportView.includes('isFirstPhaseReport.value && startDate.value < LEGACY_COVERAGE_START'))
 check('performance distribution uses one natural-month selector',
   reportView.includes("activeReport.value === 'six_dimension_performance_distribution'")
     && reportView.includes('type="month"')

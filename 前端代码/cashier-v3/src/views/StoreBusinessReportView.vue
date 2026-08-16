@@ -20,8 +20,10 @@ import {
   STORE_BUSINESS_REPORT_RUNTIME
 } from '@/services/storeBusinessReportApi'
 
+const LEGACY_COVERAGE_START = '2026-08-10'
 const COVERAGE_START = '2026-08-17'
-const PERFORMANCE_DISTRIBUTION_MIN_MONTH = addMonths(firstCompleteMonth(COVERAGE_START), 1)
+const SIX_DIMENSION_COVERAGE_START = COVERAGE_START
+const PERFORMANCE_DISTRIBUTION_MIN_MONTH = addMonths(firstCompleteMonth(SIX_DIMENSION_COVERAGE_START), 1)
 const DEFAULT_LIMIT = 20
 // 门店运营报表目录。经营看板是数据入口，不属于本目录；
 // 报表结果、金额和筛选能力全部由统一查询服务返回，浏览器不参与计算。
@@ -68,8 +70,8 @@ const result = ref({})
 const loading = ref(false)
 const exporting = ref(false)
 const errorMessage = ref('')
-const startDate = ref(COVERAGE_START)
-const endDate = ref(today() < COVERAGE_START ? COVERAGE_START : today())
+const startDate = ref(LEGACY_COVERAGE_START)
+const endDate = ref(today() < LEGACY_COVERAGE_START ? LEGACY_COVERAGE_START : today())
 const selectedMonth = ref(today().slice(0, 7) < PERFORMANCE_DISTRIBUTION_MIN_MONTH
   ? PERFORMANCE_DISTRIBUTION_MIN_MONTH
   : today().slice(0, 7))
@@ -264,8 +266,12 @@ const serverCatalogByCode = computed(() => new Map(
 function isPlatformRuntimeRoute() {
   return route.meta.platformReport === true || String(route.path || '').startsWith('/platform/')
 }
+function isSixDimensionRoute() {
+  const requested = String(route.params.report || '').trim()
+  return SIX_DIMENSION_REPORT_TABS.some((tab) => tab.code === requested)
+}
 const allowedReportTabs = computed(() => {
-  const tabs = isPlatformRuntimeRoute() ? SIX_DIMENSION_REPORT_TABS : REPORT_TABS
+  const tabs = isSixDimensionRoute() ? SIX_DIMENSION_REPORT_TABS : REPORT_TABS
   if (!serverCatalogByCode.value.size) return tabs
   const authorized = tabs.filter((tab) => serverCatalogByCode.value.has(tab.code))
   return authorized.length ? authorized : tabs
@@ -488,7 +494,7 @@ const canPageForward = computed(() => page.value < pageCount.value && !loading.v
 const currentReportName = computed(() => reportTabs.value.find((item) => item.code === activeReport.value)?.name || '门店运营报表')
 const currentReportDescription = computed(() => reportTabs.value.find((item) => item.code === activeReport.value)?.description || '')
 const isPlatformReport = computed(isPlatformRuntimeRoute)
-const coveragePending = computed(() => isSixDimensionReport.value && today() < COVERAGE_START)
+const coveragePending = computed(() => isSixDimensionReport.value && today() < SIX_DIMENSION_COVERAGE_START)
 const reportRuntime = computed(() => isPlatformReport.value ? STORE_BUSINESS_REPORT_RUNTIME.PLATFORM : STORE_BUSINESS_REPORT_RUNTIME.STORE)
 const reportRouteName = computed(() => isPlatformReport.value ? 'cashier-v3-platform-store-business-reports' : 'cashier-v3-store-business-reports')
 
@@ -675,9 +681,9 @@ function syncActiveReportFromRoute() {
   activeReport.value = allowedReportTabs.value.some((item) => item.code === requested)
     ? requested
     : String(allowedReportTabs.value[0]?.code || '')
-  if (isFirstPhaseReport.value && startDate.value < COVERAGE_START) startDate.value = COVERAGE_START
-  if (!isFirstPhaseReport.value && !isSixDimensionReport.value && startDate.value === COVERAGE_START) startDate.value = `${today().slice(0, 4)}-01-01`
-  if (isSixDimensionReport.value && startDate.value < COVERAGE_START) startDate.value = COVERAGE_START
+  if (isFirstPhaseReport.value && startDate.value < LEGACY_COVERAGE_START) startDate.value = LEGACY_COVERAGE_START
+  if (!isFirstPhaseReport.value && !isSixDimensionReport.value && startDate.value === LEGACY_COVERAGE_START) startDate.value = `${today().slice(0, 4)}-01-01`
+  if (isSixDimensionReport.value && startDate.value < SIX_DIMENSION_COVERAGE_START) startDate.value = SIX_DIMENSION_COVERAGE_START
 }
 
 function syncFiltersFromRoute() {
