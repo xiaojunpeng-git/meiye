@@ -132,9 +132,14 @@ async function handleAuthenticatedRoute(to, next, agent_access, access) {
     });
   }
 
+  // 动态子路由可继承父级权限；不能假定末级路由自身声明 auth。
+  const permissionRoute = [...to.matched]
+    .reverse()
+    .find(route => route.meta && route.meta.auth);
+  const meta = permissionRoute ? permissionRoute.meta : {};
   const isPermission = includeArray(
-    to.meta.auth,
-    to.meta.isAgentRoute ? agent_access : access
+    meta.auth,
+    meta.isAgentRoute ? agent_access : access
   );
 
   return next(isPermission ? undefined : { name: '403' });

@@ -35,56 +35,20 @@ function withoutLegacyInventoryMovement(menuData) {
     }));
 }
 
-// 数据大屏作为总部下的普通菜单项，紧跟“概况”；同时补齐旧登录缓存。
-function withOperatingScreenMenu(menuData) {
+// 数据大屏不再作为平台端侧栏入口。同步过滤旧版本写入浏览器缓存的节点，
+// 避免用户刷新后继续看到已下线的固定菜单。
+function withoutOperatingScreenMenu(menuData) {
   if (!Array.isArray(menuData)) return [];
-  const routePrefix = isAgentPath() ? Setting.routePreAgent : Setting.roterPre;
-  const screenPath = `${routePrefix}/operating-screen`;
-  const homeMenu = menuData.find(item => item && item.header === 'home');
-  if (!homeMenu || !Array.isArray(homeMenu.children)) return menuData;
-
-  const overviewIndex = homeMenu.children.findIndex(item => item && (
-    item.unique_auth === 'admin-index-index' || item.title === '概况'
-  ));
-  const existedIndex = homeMenu.children.findIndex(item => item && (
-    item.unique_auth === 'admin-operating-screen' ||
-    /\/operating-screen\/?$/.test(item.path || '')
-  ));
-  const insertScreenAt = (screenMenu) => {
-    screenMenu.target = '_blank';
-    screenMenu.icon = screenMenu.icon || 'md-podium';
-    // 有「概况」则紧跟其后；没有则追加到末尾，禁止插到首位以免登录误进大屏
-    const idx = overviewIndex >= 0 ? overviewIndex + 1 : homeMenu.children.length;
-    homeMenu.children.splice(idx, 0, screenMenu);
-  };
-
-  if (existedIndex >= 0) {
-    const screenMenu = homeMenu.children.splice(existedIndex, 1)[0];
-    const currentOverviewIndex = homeMenu.children.findIndex(item => item && (
-      item.unique_auth === 'admin-index-index' || item.title === '概况'
-    ));
-    // 重新计算概况下标后再插入
-    const insertIdx = currentOverviewIndex >= 0 ? currentOverviewIndex + 1 : homeMenu.children.length;
-    screenMenu.target = '_blank';
-    screenMenu.icon = screenMenu.icon || 'md-podium';
-    homeMenu.children.splice(insertIdx, 0, screenMenu);
-    return menuData;
-  }
-
-  insertScreenAt({
-    id: 'operating-screen',
-    pid: homeMenu.id,
-    title: '数据大屏',
-    menu_name: '数据大屏',
-    icon: 'md-podium',
-    path: screenPath,
-    target: '_blank',
-    header: '',
-    is_header: 0,
-    is_show_path: 0,
-    unique_auth: 'admin-operating-screen'
-  });
-  return menuData;
+  return menuData
+    .filter((item) => {
+      const path = String((item && (item.path || item.menu_path)) || '');
+      return item && item.unique_auth !== 'admin-operating-screen'
+        && !/\/operating-screen\/?$/.test(path);
+    })
+    .map(item => ({
+      ...item,
+      children: Array.isArray(item.children) ? withoutOperatingScreenMenu(item.children) : item.children
+    }));
 }
 
 // 门店运营报表必须由权限菜单返回，不能由浏览器补造。仅移除旧版缓存中前端
@@ -117,10 +81,10 @@ function withoutStoreOperationsReportIcons(menuData) {
 }
 
 function normalizeMenus(menuData, prefix) {
-  return withOperatingScreenMenu(normalizeProductBusinessConfigMenu(
-    normalizeOrganizationWorkspaceMenu(withoutStoreOperationsReportIcons(withoutLegacyStoreOperationsMenu(withoutLegacyInventoryMovement(menuData))), prefix),
+  return normalizeProductBusinessConfigMenu(
+    normalizeOrganizationWorkspaceMenu(withoutStoreOperationsReportIcons(withoutLegacyStoreOperationsMenu(withoutOperatingScreenMenu(withoutLegacyInventoryMovement(menuData)))), prefix),
     prefix
-  ));
+  );
 }
 
 function getMenusName() {

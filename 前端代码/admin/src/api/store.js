@@ -1136,6 +1136,13 @@ export function deleteOrganization(id, data = {}, headers = {}) {
   }));
 }
 
+export function getOrganizationDeleteBlockers(id) {
+  return request({
+    url: `/region/organization/${id}/delete_blockers`,
+    method: 'get'
+  });
+}
+
 /** 门店绑定组织 */
 export function bindOrganizationStore(data, headers = {}) {
   return wrapOrgWriteResponse(request({
@@ -1267,6 +1274,15 @@ export function deleteOrganizationOrgEmployee(id, headers = {}) {
   return wrapOrgWriteResponse(request({
     url: `/region/organization/org_employees/${id}`,
     method: 'delete',
+    headers
+  }));
+}
+
+export function removeOrganizationEmployeeCompletely(orgId, relationId, data = {}, headers = {}) {
+  return wrapOrgWriteResponse(request({
+    url: `/region/organization/${orgId}/org_employees/${relationId}/remove_completely`,
+    method: 'post',
+    data,
     headers
   }));
 }

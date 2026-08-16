@@ -177,13 +177,13 @@ class OrganizationEmployeeServices extends BaseServices
         return Db::transaction($runner);
     }
 
-    public function softDelete(int $id, array $operatorContext = []): void
+    public function softDelete(int $id, array $operatorContext = [], array $options = []): array
     {
         /** @var OrganizationWorkspaceWriteGate $gate */
         $gate = app()->make(OrganizationWorkspaceWriteGate::class);
         $gate->assertCanWrite();
 
-        Db::transaction(function () use ($id, $operatorContext) {
+        $runner = function () use ($id, $operatorContext) {
             $row = Db::name('organization_employee')->where('id', $id)->lock(true)->find();
             if (!$row || (int)($row['is_del'] ?? 0) === 1) {
                 throw new AdminException('直属关系不存在');
@@ -213,7 +213,16 @@ class OrganizationEmployeeServices extends BaseServices
                 'request_id' => (string)($operatorContext['request_id'] ?? ''),
                 'add_time' => $now,
             ]);
-        });
+            return [
+                'id' => $id,
+                'org_id' => (int)($row['org_id'] ?? 0),
+                'employee_id' => (int)($row['employee_id'] ?? 0),
+            ];
+        };
+        if (!empty($options['use_outer_transaction'])) {
+            return $runner();
+        }
+        return Db::transaction($runner);
     }
 
     protected function hasColumn(string $column): bool

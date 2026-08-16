@@ -713,7 +713,19 @@
               </div>
 
               <div class="form-section">
-                <div class="form-section-title">5. 授权与变更记录</div>
+                <div class="form-section-title">5. 组织管理授权</div>
+                <div class="permission-note"><strong>说明</strong><span>组织管理授权独立于人员归属和门店任职，会决定可管理的组织范围。</span></div>
+                <div v-for="grant in personOrganizationAdminGrants" :key="`oga-${grant.org_admin_id}`" class="auth-write-box">
+                  <div class="permission-note"><strong>{{ grant.org_name || ('组织#' + grant.org_id) }}</strong><span>{{ grant.scope_mode === 'custom' ? '自定义门店范围' : '继承组织范围' }} · 账号 {{ grant.account || '—' }}</span></div>
+                  <div v-if="canWrite" class="auth-actions" style="margin-top:10px">
+                    <button class="button secondary compact-button danger-button" type="button" :disabled="writeSubmitting" @click="revokePersonOrganizationGrant(grant)">解除组织管理授权</button>
+                  </div>
+                </div>
+                <div v-if="!personOrganizationAdminGrants.length" class="empty-inline">未配置组织管理授权</div>
+              </div>
+
+              <div class="form-section">
+                <div class="form-section-title">6. 授权与变更记录</div>
                 <div class="permission-note"><strong>说明</strong><span>岗位、入口、数据权限和任职相关操作记录，便于追溯。</span></div>
                 <div v-for="log in personAudits" :key="log.id" class="permission-note">
                   <strong>{{ log.action }}</strong><span>{{ log.operator_name }} · {{ log.reason || '—' }}</span>
@@ -1208,12 +1220,20 @@
           <button class="icon-button" type="button" @click="closeDeleteModal"><svg-icon name="x" /></button>
         </div>
         <div class="modal-body">
-          <p v-if="deleteModal.step === 1">确定要删除组织「{{ deleteModal.name }}」吗？删除后不可通过本操作恢复。</p>
+          <p v-if="deleteModal.loading">正在检查下级组织、门店、负责人和管理授权…</p>
+          <template v-else-if="deleteModal.blockers.length">
+            <p>当前不能删除组织「{{ deleteModal.name }}」，请先处理以下关联关系：</p>
+            <div v-for="blocker in deleteModal.blockers" :key="blocker.type" class="permission-note">
+              <strong>{{ blocker.title }}</strong><span>{{ (blocker.items || []).join('、') }}</span>
+            </div>
+          </template>
+          <p v-else-if="deleteModal.error">{{ deleteModal.error }}</p>
+          <p v-else-if="deleteModal.step === 1">确定要删除组织「{{ deleteModal.name }}」吗？删除后不可通过本操作恢复。</p>
           <p v-else>此操作不可恢复，请再次确认删除组织「{{ deleteModal.name }}」。</p>
         </div>
         <div class="modal-footer">
           <button class="button secondary" type="button" :disabled="writeSubmitting" @click="closeDeleteModal">取消</button>
-          <button v-if="deleteModal.step === 1" class="button secondary danger-button" type="button" :disabled="writeSubmitting" @click="deleteModal.step = 2">继续删除</button>
+          <button v-if="deleteModal.step === 1" class="button secondary danger-button" type="button" :disabled="writeSubmitting || deleteModal.loading || !deleteModal.canDelete" @click="deleteModal.step = 2">{{ deleteModal.canDelete ? '继续删除' : '存在阻断项' }}</button>
           <button v-else class="button primary danger-button" type="button" :disabled="writeSubmitting" @click="submitDeleteOrg">{{ writeSubmitting ? '删除中…' : '确认删除' }}</button>
         </div>
       </div>
@@ -1226,7 +1246,7 @@
           <button class="icon-button" type="button" @click="orgDirectModal.open = false"><svg-icon name="x" /></button>
         </div>
         <div class="modal-body">
-          <p class="muted">不创建门店任职与权限，仅组织名册关系。</p>
+          <p class="muted">“移除名册”只删除组织名册关系，不影响门店任职或组织管理授权；完整移除会同时撤销本组织的管理授权。</p>
           <div class="list-toolbar" style="margin-bottom:12px;">
             <input v-model.trim="orgDirectModal.phone" class="input" placeholder="手机号" style="width:140px;" :disabled="!canEditStaff" />
             <input v-model.trim="orgDirectModal.name" class="input" placeholder="姓名" style="width:120px;" :disabled="!canEditStaff" />
@@ -1241,7 +1261,8 @@
                 <td>{{ row.phone }}</td>
                 <td>{{ row.job_title || '—' }}</td>
                 <td>
-                  <button class="table-action" type="button" :disabled="!canEditStaff" @click="removeOrgDirect(row)">移除</button>
+                  <button class="table-action" type="button" :disabled="!canEditStaff" @click="removeOrgDirect(row)">移除名册</button>
+                  <button v-if="canWrite" class="table-action danger-text" type="button" :disabled="writeSubmitting" @click="removeOrgDirectCompletely(row)">完整移除</button>
                   <button class="table-action" type="button" :disabled="!canEditStaff" @click="leaveEmployeeGlobal(row)">全局离职</button>
                 </td>
               </tr>
@@ -1344,6 +1365,7 @@ import {
   getOrganizationWriteStatus,
   saveOrganization,
   deleteOrganization,
+  getOrganizationDeleteBlockers,
   bindOrganizationStore,
   saveOrganizationLeaders,
   saveOrganizationAdminPermission,
@@ -1352,6 +1374,7 @@ import {
   getOrganizationOrgEmployees,
   saveOrganizationOrgEmployee,
   deleteOrganizationOrgEmployee,
+  removeOrganizationEmployeeCompletely,
   leaveOrganizationEmployee,
   softDeleteOrganizationEmployeeArchive,
   getOrganizationTransferApplies,
@@ -1378,7 +1401,7 @@ import {
   saveEmployeeAuthEntries,
   saveEmployeeAuthTenure,
   saveOrganizationOpsStatus,
-  saveStoreOpsStatus,
+  saveStoreOpsStatus
 } from '@/api/store';
 import SvgIcon from './components/SvgIcon';
 import OrganizationTree from './components/OrganizationTree';
@@ -1458,7 +1481,7 @@ export default {
         reason_code: 'WRITE_DISABLED',
         reason_text: READONLY_TIP,
         source_mode: '',
-        is_super_admin: false,
+        is_super_admin: false
       },
       draftLeaders: [],
       draftScopeMode: 'inherit',
@@ -1470,7 +1493,7 @@ export default {
       pendingRequestToken: '',
       pendingWriteFingerprint: '',
       orgFormModal: { open: false, mode: 'create', orgId: 0, pid: 0, name: '', sort: 0 },
-      deleteModal: { open: false, step: 1, orgId: 0, name: '' },
+      deleteModal: { open: false, step: 1, orgId: 0, name: '', loading: false, canDelete: false, blockers: [], error: '' },
       writeSubmitting: false,
       treeState: emptyLoadState(),
       overviewState: emptyLoadState(),
@@ -1488,7 +1511,7 @@ export default {
         platform: { admin_id: 0 },
         jobs: {},
         entries: {},
-        dataScope: { scope_mode: 'personal', org_ids: [], store_ids: [] },
+        dataScope: { scope_mode: 'personal', org_ids: [], store_ids: [] }
       },
       rolePublishModal: {
         open: false,
@@ -1505,7 +1528,7 @@ export default {
         scope_type: 'store',
         channel: 'store_backend',
         allow_store_select: 1,
-        publishes: [],
+        publishes: []
       },
       jobPositionModal: {
         open: false,
@@ -1525,15 +1548,15 @@ export default {
           use_platform: 0,
           use_store: 1,
           use_mobile: 0,
-          channel_rules: {},
+          channel_rules: {}
         },
         publish: { scope_type: 'store', scope_id: 0 },
-        publishes: [],
+        publishes: []
       },
       jobPositionConfirmModal: {
         open: false,
         content: '',
-        resolver: null,
+        resolver: null
       },
       opsConfirmModal: {
         open: false,
@@ -1541,13 +1564,13 @@ export default {
         id: 0,
         status: 0,
         name: '',
-        reason: '',
+        reason: ''
       },
       tenureConfirmModal: {
         open: false,
         action: '',
         staff: null,
-        reason: '',
+        reason: ''
       },
       personAudits: [],
       storeModal: { open: false, organizationId: 0, organizationName: '' },
@@ -1561,7 +1584,7 @@ export default {
         fromStoreId: 0,
         fromStoreName: '',
         toStoreId: 0,
-        reason: '',
+        reason: ''
       },
       /** 调店目标：全部门店（启用），不限当前组织 */
       transferAllStoreOptions: [],
@@ -1575,10 +1598,10 @@ export default {
         { key: 'open', label: '营业中' },
         { key: 'closed', label: '停用/未营业' },
         { key: 'attention', label: '待完善' },
-        { key: 'direct', label: '直属门店' },
+        { key: 'direct', label: '直属门店' }
       ],
       defaultAvatar: '/static/images/staff/avatar_male.png',
-      READONLY_TIP,
+      READONLY_TIP
     };
   },
   computed: {
@@ -1625,7 +1648,7 @@ export default {
         stores: ov.all_store_count != null ? ov.all_store_count : (fromTree.stores || 0),
         employees: ov.employee_count != null ? ov.employee_count : (fromTree.employees || 0),
         leaders: ov.leaders || [],
-        attention: (ov.attention && ov.attention.total) || fromTree.attention || 0,
+        attention: (ov.attention && ov.attention.total) || fromTree.attention || 0
       };
     },
     parentOrgName() {
@@ -1658,7 +1681,7 @@ export default {
           name: c.name,
           stores: c.all_store_count,
           employees: c.employee_count,
-          attention: c.attention_count,
+          attention: c.attention_count
         }));
       }
       return this.orgs
@@ -1668,7 +1691,7 @@ export default {
           name: c.name,
           stores: c.stores,
           employees: c.employees,
-          attention: c.attention,
+          attention: c.attention
         }));
     },
     selectedLeaders() {
@@ -1693,8 +1716,26 @@ export default {
         { key: 'stores', label: '门店', count: this.selectedOrg.stores },
         { key: 'employees', label: '员工', count: this.selectedOrg.employees },
         { key: 'permissions', label: '权限范围' },
-        { key: 'logs', label: '变更记录' },
+        { key: 'logs', label: '变更记录' }
       ];
+    },
+    personOrganizationAdminGrants() {
+      const grants = [];
+      const seen = new Set();
+      ((this.personAuth && this.personAuth.platform) || []).forEach((account) => {
+        (account.org_admins || []).forEach((grant) => {
+          const orgAdminId = Number(grant.id || grant.org_admin_id || 0);
+          if (!orgAdminId || seen.has(orgAdminId)) return;
+          seen.add(orgAdminId);
+          grants.push({
+            ...grant,
+            org_admin_id: orgAdminId,
+            org_id: Number(grant.org_id || 0),
+            account: account.account || account.real_name || ''
+          });
+        });
+      });
+      return grants;
     },
     metrics() {
       return [
@@ -1702,7 +1743,7 @@ export default {
         { label: '直属门店', value: this.selectedOrg.directStores, unit: '家', icon: 'store', color: '#e8f7f3', ink: '#1f9d70' },
         { label: '全部门店', value: this.selectedOrg.stores, unit: '家', icon: 'building', color: '#ebf4ff', ink: '#4384cf' },
         { label: '在职人员', value: this.selectedOrg.employees, unit: '人', icon: 'users', color: '#fff3e8', ink: '#d9822b' },
-        { label: '本级负责人', value: this.selectedLeaders.length, unit: '人', icon: 'shield', color: '#f5efff', ink: '#8854c7' },
+        { label: '本级负责人', value: this.selectedLeaders.length, unit: '人', icon: 'shield', color: '#f5efff', ink: '#8854c7' }
       ];
     },
     roleLegend() {
@@ -1820,7 +1861,7 @@ export default {
           period_text: `${this.formatUnixTime(start)} ~ ${end ? this.formatUnixTime(end) : '至今'}`,
           reason: p.reason || this.tenureActionLabel(p.action),
           status_text: statusOn ? '当前有效' : (this.tenureActionLabel(p.action) || '已结束'),
-          can_resume: !statusOn && !!assignment && Number(assignment.status) !== 1,
+          can_resume: !statusOn && !!assignment && Number(assignment.status) !== 1
         });
       });
       if (!rows.length) {
@@ -1830,7 +1871,7 @@ export default {
             store_name: a.store_name || (`门店#${a.store_id}`),
             period_text: `${this.formatUnixTime(a.add_time)} ~ —`,
             reason: '历史任职',
-            status_text: '已结束',
+            status_text: '已结束'
           });
         });
       }
@@ -1848,7 +1889,7 @@ export default {
         ? this.transferAllStoreOptions
         : (Array.isArray(this.orgStoreOptions) ? this.orgStoreOptions : []);
       return opts.filter((s) => Number(s.id) !== fromId);
-    },
+    }
   },
   created() {
     const entryTab = String((this.$route && this.$route.query && this.$route.query.tab) || '');
@@ -1906,7 +1947,7 @@ export default {
           this.reloadCurrentList();
         }
       }
-    },
+    }
   },
   beforeDestroy() {
     if (this._onDocClickCloseOps) {
@@ -2012,7 +2053,7 @@ export default {
         scope: 'all',
         keyword,
         page: 1,
-        limit: 50,
+        limit: 50
       })
         .then((res) => {
           const list = (res.data && res.data.list) || [];
@@ -2058,13 +2099,13 @@ export default {
         this.showToast('请先选择组织');
         return;
       }
-      const orgName = (this.selectedOrg && this.selectedOrg.name)
-        || ((this.orgs || []).find((o) => Number(o.id) === orgId) || {}).name
-        || '';
+      const orgName = (this.selectedOrg && this.selectedOrg.name) ||
+        ((this.orgs || []).find((o) => Number(o.id) === orgId) || {}).name ||
+        '';
       this.storeModal = {
         open: true,
         organizationId: orgId,
-        organizationName: String(orgName || ''),
+        organizationName: String(orgName || '')
       };
     },
     onStoreCreated() {
@@ -2121,7 +2162,7 @@ export default {
             staffId: 0,
             defaultStoreId: defaultStoreId > 0 && allowed.includes(defaultStoreId) ? defaultStoreId : 0,
             allowedStoreIds: allowed,
-            defaultOrgId: orgId,
+            defaultOrgId: orgId
           };
         })
         .catch((err) => {
@@ -2149,9 +2190,9 @@ export default {
         return;
       }
       const assignments = (person && person.assignments) || [];
-      const current = assignments.find((a) => Number(a.status) === 1 || Number(a.is_current) === 1)
-        || assignments[0]
-        || null;
+      const current = assignments.find((a) => Number(a.status) === 1 || Number(a.is_current) === 1) ||
+        assignments[0] ||
+        null;
       const staffId = Number((current && (current.staff_id || current.id)) || person.staff_id || 0);
       this.ensureOrgStoreOptions()
         .then((options) => {
@@ -2163,7 +2204,7 @@ export default {
             staffId: staffId > 0 ? staffId : 0,
             defaultStoreId: 0,
             allowedStoreIds: allowed,
-            defaultOrgId: orgId,
+            defaultOrgId: orgId
           };
           if (this.staffModal && this.staffModal.open) {
             this.staffModal = {
@@ -2172,7 +2213,7 @@ export default {
               staffId: 0,
               defaultStoreId: 0,
               allowedStoreIds: allowed,
-              defaultOrgId: orgId,
+              defaultOrgId: orgId
             };
             this.$nextTick(() => {
               this.staffModal = nextModal;
@@ -2192,7 +2233,7 @@ export default {
         staffId: 0,
         defaultStoreId: 0,
         allowedStoreIds: [],
-        defaultOrgId: Number(this.selectedOrgId || 0),
+        defaultOrgId: Number(this.selectedOrgId || 0)
       };
       this.activeTab = 'employees';
       this.dataView = 'people';
@@ -2215,8 +2256,8 @@ export default {
           employee_id: employeeId,
           lock_employee: 1,
           from: 'organization',
-          return_org_id: Number(this.selectedOrgId || 0),
-        },
+          return_org_id: Number(this.selectedOrgId || 0)
+        }
       });
     },
     openGrantDrawer() {
@@ -2235,7 +2276,7 @@ export default {
         kicker: '组织授权',
         store: null,
         person: null,
-        search: '',
+        search: ''
       };
       this.ensureOrgStoreOptions().finally(() => {
         this.loadGrantCandidates(1);
@@ -2248,7 +2289,7 @@ export default {
       getOrganizationAdminCandidates(orgId, {
         keyword: this.grantSearch,
         page: page || 1,
-        limit: 20,
+        limit: 20
       })
         .then((res) => {
           if (!this.endLoad('grantCandidateState', seq)) return;
@@ -2292,7 +2333,7 @@ export default {
         employee_id: employeeId,
         admin_id: adminId,
         scope_mode: scopeMode,
-        allowed_store_ids: allowed,
+        allowed_store_ids: allowed
       };
       const headers = this.writeHeadersFor('grantOrganizationAdmin', { orgId, ...body });
       this.writeSubmitting = true;
@@ -2331,6 +2372,34 @@ export default {
           this.loadOverview();
         })
         .catch((err) => { this.handleWriteCatch(err); })
+        .finally(() => { this.writeSubmitting = false; });
+    },
+    revokePersonOrganizationGrant(grant) {
+      if (!this.canWrite || this.writeSubmitting || !grant) {
+        if (!this.canWrite) this.blockWrite();
+        return;
+      }
+      const orgId = Number(grant.org_id || 0);
+      const orgAdminId = Number(grant.org_admin_id || 0);
+      if (!orgId || !orgAdminId) return;
+      // eslint-disable-next-line no-alert
+      if (!window.confirm(`确认解除「${grant.org_name || '该组织'}」的组织管理授权？该账号将失去该组织范围的数据管理权限。`)) {
+        return;
+      }
+      const headers = this.writeHeadersFor('revokeOrganizationAdminGrant', { orgId, orgAdminId });
+      this.writeSubmitting = true;
+      revokeOrganizationAdminGrant(orgId, orgAdminId, { request_token: headers['X-Request-Token'] }, headers)
+        .then((res) => {
+          this.finishWriteSuccess();
+          this.showToast((res && res.msg) || '已解除组织管理授权');
+          return this.refreshPersonAuth();
+        })
+        .then(() => {
+          this.loadTree();
+          this.loadOverview();
+          if (Number(this.selectedOrgId) === orgId) this.loadPermissions();
+        })
+        .catch((err) => this.handleWriteCatch(err))
         .finally(() => { this.writeSubmitting = false; });
     },
     orgById(id) {
@@ -2400,7 +2469,7 @@ export default {
       const bound = resolveOrgWriteToken(
         {
           token: this.pendingRequestToken,
-          fingerprint: this.pendingWriteFingerprint,
+          fingerprint: this.pendingWriteFingerprint
         },
         action,
         payload,
@@ -2467,7 +2536,7 @@ export default {
         orgId: 0,
         pid: parentId,
         name: '',
-        sort: 0,
+        sort: 0
       };
     },
     openEditOrgModal() {
@@ -2485,7 +2554,7 @@ export default {
         orgId: Number(org.id),
         pid: Number(org.pid || 0),
         name: org.name || '',
-        sort: Number(org.sort || 0),
+        sort: Number(org.sort || 0)
       };
     },
     closeOrgFormModal() {
@@ -2508,7 +2577,7 @@ export default {
       const payload = {
         pid,
         name,
-        sort: Number(modal.sort || 0),
+        sort: Number(modal.sort || 0)
       };
       const orgId = modal.mode === 'edit' ? Number(modal.orgId) : 0;
       const action = modal.mode === 'edit' ? 'saveOrganization:edit' : 'saveOrganization:create';
@@ -2536,7 +2605,20 @@ export default {
       if (!id) return;
       const name = orgName || (this.orgById(id) && this.orgById(id).name) || this.selectedOrg.name || '';
       this.resetWriteToken();
-      this.deleteModal = { open: true, step: 1, orgId: id, name };
+      this.deleteModal = { open: true, step: 1, orgId: id, name, loading: true, canDelete: false, blockers: [], error: '' };
+      getOrganizationDeleteBlockers(id)
+        .then((res) => {
+          if (!this.deleteModal.open || Number(this.deleteModal.orgId) !== id) return;
+          const data = (res && res.data) || {};
+          this.deleteModal.loading = false;
+          this.deleteModal.canDelete = !!data.can_delete;
+          this.deleteModal.blockers = Array.isArray(data.blockers) ? data.blockers : [];
+        })
+        .catch((err) => {
+          if (!this.deleteModal.open || Number(this.deleteModal.orgId) !== id) return;
+          this.deleteModal.loading = false;
+          this.deleteModal.error = (err && err.msg) || '删除检查失败，请稍后重试';
+        });
     },
     closeDeleteModal() {
       if (this.writeSubmitting) return;
@@ -2598,7 +2680,7 @@ export default {
             reason_code: data.reason_code || 'WRITE_DISABLED',
             reason_text: data.reason_text || READONLY_TIP,
             source_mode: data.source_mode || '',
-            is_super_admin: !!data.is_super_admin,
+            is_super_admin: !!data.is_super_admin
           };
         })
         .catch(() => {
@@ -2608,7 +2690,7 @@ export default {
             reason_code: 'WRITE_DISABLED',
             reason_text: READONLY_TIP,
             source_mode: '',
-            is_super_admin: false,
+            is_super_admin: false
           };
         });
     },
@@ -2630,7 +2712,7 @@ export default {
         this.draftLeaders.push({
           employee_id: id,
           name: person.name || '',
-          sort: this.draftLeaders.length + 1,
+          sort: this.draftLeaders.length + 1
         });
       }
     },
@@ -2650,7 +2732,7 @@ export default {
       if (!orgId) return;
       const leaders = this.draftLeaders.map((x, i) => ({
         employee_id: Number(x.employee_id),
-        sort: i + 1,
+        sort: i + 1
       }));
       const payload = { orgId, leaders };
       const headers = this.writeHeadersFor('saveOrganizationLeaders', payload);
@@ -2745,7 +2827,7 @@ export default {
           sort: node.sort != null ? Number(node.sort) : 0,
           updated: node.update_time_text || '',
           open: prev != null ? prev : (parentId == null),
-          agent_count: node.agent_count || 0,
+          agent_count: node.agent_count || 0
         });
         this.flattenTree(node.children || [], id, openMap, acc);
       });
@@ -2866,7 +2948,7 @@ export default {
         scope: this.dataFilter === 'direct' ? 'direct' : 'all',
         keyword: this.dataSearch,
         page: this.listPage,
-        limit: this.listLimit,
+        limit: this.listLimit
       };
       if (this.dataFilter === 'open' || this.dataFilter === 'closed') params.status = this.dataFilter;
       if (this.dataFilter === 'attention') params.attention = 'attention';
@@ -2914,7 +2996,7 @@ export default {
         phone: this.orgDirectModal.phone,
         name: this.orgDirectModal.name,
         job_title: this.orgDirectModal.jobTitle,
-        request_token: token,
+        request_token: token
       }, { 'X-Request-Token': token })
         .then(() => {
           this.showToast('已保存组织直属');
@@ -2937,13 +3019,38 @@ export default {
       const token = newRequestToken();
       deleteOrganizationOrgEmployee(row.id, { 'X-Request-Token': token })
         .then(() => {
-          this.showToast('已移除');
+          this.showToast('已移除组织名册关系，管理授权未改变');
           this.loadOrgDirectList();
           this.loadEmployees();
           this.loadTree();
           this.loadOverview();
         })
         .catch((err) => this.showToast((err && err.msg) || '移除失败'));
+    },
+    removeOrgDirectCompletely(row) {
+      if (!this.canWrite || !row || !row.id) {
+        if (!this.canWrite) this.blockWrite();
+        return;
+      }
+      const orgName = (this.selectedOrg && this.selectedOrg.name) || '当前组织';
+      // eslint-disable-next-line no-alert
+      if (!window.confirm(`确认完整移除「${row.name || '该人员'}」与「${orgName}」的关系？这会同时撤销其在本组织的管理权限，不影响其他组织、门店任职、后台账号和员工档案。`)) {
+        return;
+      }
+      const orgId = Number(this.selectedOrgId || 0);
+      const token = newRequestToken();
+      this.writeSubmitting = true;
+      removeOrganizationEmployeeCompletely(orgId, Number(row.id), { request_token: token }, { 'X-Request-Token': token })
+        .then((res) => {
+          this.showToast((res && res.msg) || '已完整移除');
+          this.loadOrgDirectList();
+          this.loadEmployees();
+          this.loadPermissions();
+          this.loadTree();
+          this.loadOverview();
+        })
+        .catch((err) => this.showToast((err && err.msg) || '完整移除失败'))
+        .finally(() => { this.writeSubmitting = false; });
     },
     leaveEmployeeGlobal(row) {
       this.confirmLeavePerson(row);
@@ -2982,7 +3089,7 @@ export default {
           id: Number(hit.staff_id || hit.id || 0),
           store_id: Number(hit.store_id || 0),
           store_name: hit.store_name || '',
-          status: 1,
+          status: 1
         };
       }
       const authList = (this.personAuth && this.personAuth.store_assignments) || [];
@@ -3003,7 +3110,7 @@ export default {
         suspend: '停职',
         delete: '删除关系',
         leave: '离职',
-        transfer: '调离',
+        transfer: '调离'
       };
       return map[String(action || '')] || '';
     },
@@ -3074,7 +3181,7 @@ export default {
         this.transferAllStoreOptions = list
           .map((s) => ({
             id: Number(s.id || s.store_id || 0),
-            name: String(s.name || s.store_name || ''),
+            name: String(s.name || s.store_name || '')
           }))
           .filter((s) => s.id > 0);
         return this.transferAllStoreOptions;
@@ -3106,7 +3213,7 @@ export default {
             fromStoreId: fromId,
             fromStoreName: tenure.store_name || '',
             toStoreId: 0,
-            reason: '',
+            reason: ''
           };
         })
         .catch((err) => this.showToast((err && err.msg) || '无法加载门店列表'));
@@ -3132,7 +3239,7 @@ export default {
         request_token: token,
         source_staff_id: Number(m.sourceStaffId),
         to_store_id: Number(m.toStoreId),
-        reason: String(m.reason).trim(),
+        reason: String(m.reason).trim()
       }, { 'X-Request-Token': token })
         .then((res) => {
           this.showToast((res && res.msg) || '调店申请已提交');
@@ -3156,7 +3263,7 @@ export default {
         status: this.transferModal.status || '',
         employee_id: Number(this.transferModal.employeeId || 0) || undefined,
         page: 1,
-        limit: 50,
+        limit: 50
       })
         .then((res) => {
           this.transferModal.list = (res.data && res.data.list) || [];
@@ -3201,7 +3308,7 @@ export default {
         scope: 'all',
         keyword: this.dataSearch,
         page: this.listPage,
-        limit: this.listLimit,
+        limit: this.listLimit
       })
         .then((res) => {
           if (!this.endLoad('listState', seq)) return;
@@ -3231,7 +3338,7 @@ export default {
           this.permissionHolders = data.permission_holders || [];
           this.orgStoreOptions = (data.org_store_options || []).map((s) => ({
             id: Number(s.id),
-            name: s.name || '',
+            name: s.name || ''
           }));
           this.tabLoaded.permissions = true;
           if (this.drawer.open && this.drawer.mode === 'permission' && this.drawer.person) {
@@ -3272,7 +3379,7 @@ export default {
         org_id: orgId,
         keyword: this.logSearch,
         page: this.logPage,
-        limit: this.logLimit,
+        limit: this.logLimit
       })
         .then((res) => {
           if (!this.endLoad('logState', seq)) return;
@@ -3322,7 +3429,7 @@ export default {
         open: true,
         node,
         x: Math.min(window.innerWidth - 180, point.left),
-        y: Math.min(window.innerHeight - 100, point.bottom + 4),
+        y: Math.min(window.innerHeight - 100, point.bottom + 4)
       };
     },
     onTreeMenu(action) {
@@ -3343,7 +3450,7 @@ export default {
       this.draftLeaders = (this.selectedLeaders || []).map((x, i) => ({
         employee_id: Number(x.employee_id),
         name: x.name || '',
-        sort: i + 1,
+        sort: i + 1
       }));
       this.drawer = {
         open: true,
@@ -3352,7 +3459,7 @@ export default {
         kicker: this.canWrite ? '人员关系' : '人员关系（只读）',
         store: null,
         person: null,
-        search: '',
+        search: ''
       };
       this.loadLeaderCandidates(1);
     },
@@ -3362,7 +3469,7 @@ export default {
       getOrganizationLeaderCandidates({
         keyword: this.drawer.search || '',
         page: this.candidatePage,
-        limit: this.candidateLimit,
+        limit: this.candidateLimit
       })
         .then((res) => {
           if (!this.endLoad('candidateState', seq)) return;
@@ -3387,7 +3494,7 @@ export default {
         kicker: '门店与人员',
         store,
         person: null,
-        search: '',
+        search: ''
       };
       this.loadStoreStaff(1);
     },
@@ -3401,7 +3508,7 @@ export default {
         org_id: orgId,
         store_id: storeId,
         page: this.storeStaffPage,
-        limit: this.storeStaffLimit,
+        limit: this.storeStaffLimit
       })
         .then((res) => {
           if (!this.endLoad('storeStaffState', seq)) return;
@@ -3428,7 +3535,7 @@ export default {
         jobs: '岗位决定能做什么功能。一人可在同一门店兼任多个岗位，功能权限按有效岗位取并集；岗位不会自动扩大数据查看范围。',
         entries: '入口只决定能不能登录对应端。开通前须已有有效岗位覆盖该端功能，否则无法保存空入口。',
         data_scope: '数据权限由人员决定。总部可设个人/组织/门店；门店只能设个人或本店。未配置时默认只能看本人参与的数据。',
-        function_preview: '功能权限预览只读展示当前岗位计算结果，请到岗位策略里调整，不要在人员上直接勾功能菜单。',
+        function_preview: '功能权限预览只读展示当前岗位计算结果，请到岗位策略里调整，不要在人员上直接勾功能菜单。'
       };
       return help[key] || fallback[key] || '';
     },
@@ -3448,9 +3555,9 @@ export default {
           map[id] = { value: id, label: j.position_name || ('岗位#' + id), keep_only: !!j.keep_only };
         }
       });
-      const hints = (((this.personAuth.selectable_hints || {}).by_store || {})[assignment.store_id])
-        || (((this.personAuth.selectable_hints || {}).by_store || {})[String(assignment.store_id)])
-        || [];
+      const hints = (((this.personAuth.selectable_hints || {}).by_store || {})[assignment.store_id]) ||
+        (((this.personAuth.selectable_hints || {}).by_store || {})[String(assignment.store_id)]) ||
+        [];
       hints.forEach((opt) => {
         const id = Number(opt.value || opt.id || 0);
         if (id > 0 && !map[id]) {
@@ -3488,7 +3595,7 @@ export default {
           this.jobPositionOptions = list.map((row) => ({
             value: Number(row.id),
             label: row.name,
-            keep_only: false,
+            keep_only: false
           }));
         })
         .catch(() => {
@@ -3498,7 +3605,7 @@ export default {
     syncAuthFormsFromBundle() {
       const plat = (this.personAuth.platform || [])[0];
       this.authForms.platform = {
-        admin_id: plat ? Number(plat.id) : Number((this.authForms.platform && this.authForms.platform.admin_id) || 0),
+        admin_id: plat ? Number(plat.id) : Number((this.authForms.platform && this.authForms.platform.admin_id) || 0)
       };
       const jobsMap = {};
       const entriesMap = {};
@@ -3521,7 +3628,7 @@ export default {
       this.authForms.dataScope = {
         scope_mode: (hqScope && hqScope.scope_mode) || 'personal',
         org_ids: hqScope && Array.isArray(hqScope.org_ids) ? hqScope.org_ids.slice() : [],
-        store_ids: hqScope && Array.isArray(hqScope.store_ids) ? hqScope.store_ids.slice() : [],
+        store_ids: hqScope && Array.isArray(hqScope.store_ids) ? hqScope.store_ids.slice() : []
       };
     },
     refreshPersonAuth() {
@@ -3531,7 +3638,7 @@ export default {
       return Promise.all([
         getEmployeeAuthBundle(employeeId),
         getEmployeeAuthAudits(employeeId, { page: 1, limit: 20 }),
-        this.loadJobPositionOptions(),
+        this.loadJobPositionOptions()
       ])
         .then(([authRes, auditRes]) => {
           this.personAuth = (authRes && authRes.data) || {};
@@ -3588,7 +3695,7 @@ export default {
         admin_id: adminId,
         action: 'bind',
         roles,
-        reason: '开通平台入口',
+        reason: '开通平台入口'
       });
     },
     savePlatformEntry(p, action) {
@@ -3597,7 +3704,7 @@ export default {
         admin_id: Number(p.id),
         action,
         roles: [],
-        reason: action === 'enable' ? '开通平台入口' : '关闭平台入口',
+        reason: action === 'enable' ? '开通平台入口' : '关闭平台入口'
       });
     },
     saveStaffJobs(a) {
@@ -3607,20 +3714,20 @@ export default {
         staff_id: Number(a.id),
         store_id: Number(a.store_id),
         position_ids: positionIds,
-        reason: '保存本店岗位',
+        reason: '保存本店岗位'
       });
     },
     saveStaffEntries(a) {
       const state = this.authForms.entries[a.id] || {};
       const entries = [
         { channel: 'store_v3', status: Number(state.store_v3) === 1 ? 1 : 0 },
-        { channel: 'mobile', status: Number(state.mobile) === 1 ? 1 : 0 },
+        { channel: 'mobile', status: Number(state.mobile) === 1 ? 1 : 0 }
       ];
       this.resetWriteToken();
       return this.runEmployeeAuthWrite('employee_auth_entries', saveEmployeeAuthEntries, {
         staff_id: Number(a.id),
         entries,
-        reason: '保存本店入口',
+        reason: '保存本店入口'
       });
     },
     saveDataScope() {
@@ -3652,7 +3759,7 @@ export default {
         scope_mode: scopeMode,
         org_ids: orgIds,
         store_ids: storeIds,
-        reason: '保存总部数据权限',
+        reason: '保存总部数据权限'
       });
     },
     openTenureConfirm(staff, action) {
@@ -3664,7 +3771,7 @@ export default {
         open: true,
         action,
         staff,
-        reason: '',
+        reason: ''
       };
     },
     closeTenureConfirm() {
@@ -3684,7 +3791,7 @@ export default {
       return this.runEmployeeAuthWrite('employee_auth_tenure', saveEmployeeAuthTenure, {
         staff_id: Number(m.staff.id),
         action: m.action,
-        reason,
+        reason
       }).then(() => {
         this.closeTenureConfirm();
       });
@@ -3700,7 +3807,7 @@ export default {
         id: Number(id),
         status: Number(status) === 1 ? 1 : 0,
         name: name || '',
-        reason: '',
+        reason: ''
       };
     },
     closeOpsConfirm() {
@@ -3724,7 +3831,7 @@ export default {
       const payload = { status: m.status, reason };
       const headers = this.writeHeadersFor(m.target === 'store' ? 'store_ops_status' : 'organization_ops_status', {
         id: m.id,
-        ...payload,
+        ...payload
       });
       payload.request_token = headers['X-Request-Token'];
       this.writeSubmitting = true;
@@ -3777,7 +3884,7 @@ export default {
         use_platform: 0,
         use_store: 1,
         use_mobile: 0,
-        channel_rules: {},
+        channel_rules: {}
       };
     },
     openCreateJobPosition() {
@@ -3792,7 +3899,7 @@ export default {
     onJobPositionFormPublish(publish) {
       this.jobPositionModal.publish = {
         scope_type: (publish && publish.scope_type) || 'store',
-        scope_id: Number((publish && publish.scope_id) || 0),
+        scope_id: Number((publish && publish.scope_id) || 0)
       };
       this.jobPositionModal.form.id = Number(this.jobPositionModal.selectedId) || 0;
       this.submitJobPositionPublish();
@@ -3827,7 +3934,7 @@ export default {
         use_mobile: Number(formPayload.use_mobile) === 1 ? 1 : 0,
         platform_rules: Number(formPayload.use_platform) === 1 ? (formPayload.platform_rules || []) : [],
         store_v3_rules: Number(formPayload.use_store) === 1 ? (formPayload.store_v3_rules || []) : [],
-        mobile_rules: Number(formPayload.use_mobile) === 1 ? (formPayload.mobile_rules || []) : [],
+        mobile_rules: Number(formPayload.use_mobile) === 1 ? (formPayload.mobile_rules || []) : []
       };
       const headers = this.writeHeadersFor('job_position_save', payload);
       payload.request_token = headers['X-Request-Token'];
@@ -3880,7 +3987,7 @@ export default {
         this.jobPositionConfirmModal = {
           open: true,
           content: String(content || ''),
-          resolver: resolve,
+          resolver: resolve
         };
       });
     },
@@ -3918,7 +4025,7 @@ export default {
         use_platform: Number(src.use_platform) === 1 ? 1 : 0,
         use_store: Number(src.use_store) === 1 ? 1 : 0,
         use_mobile: Number(src.use_mobile) === 1 ? 1 : 0,
-        channel_rules: this.normalizeJobChannelRules(src.channel_rules),
+        channel_rules: this.normalizeJobChannelRules(src.channel_rules)
       };
     },
     async onJobPositionStatusSwitch(row) {
@@ -3972,17 +4079,17 @@ export default {
       this.setJobPositionToggleBusy(positionId, true);
       this.writeSubmitting = true;
       try {
-        if (Object.prototype.hasOwnProperty.call(patch, 'status')
-          && !Object.prototype.hasOwnProperty.call(patch, 'allow_store_select')) {
+        if (Object.prototype.hasOwnProperty.call(patch, 'status') &&
+          !Object.prototype.hasOwnProperty.call(patch, 'allow_store_select')) {
           this.resetWriteToken();
           const statusPayload = {
             id: positionId,
             status: Number(patch.status) === 1 ? 1 : 0,
-            status_only: 1,
+            status_only: 1
           };
           const statusHeaders = this.writeHeadersFor('job_position_status', {
             id: positionId,
-            ...statusPayload,
+            ...statusPayload
           });
           statusPayload.request_token = statusHeaders['X-Request-Token'];
           const statusRes = await saveJobPosition(statusPayload, statusHeaders);
@@ -4008,7 +4115,7 @@ export default {
           use_platform: p.use_platform == null ? Number(row.use_platform) : Number(p.use_platform),
           use_store: p.use_store == null ? Number(row.use_store) : Number(p.use_store),
           use_mobile: p.use_mobile == null ? Number(row.use_mobile) : Number(p.use_mobile),
-          channel_rules: data.channel_rules || row.channel_rules || {},
+          channel_rules: data.channel_rules || row.channel_rules || {}
         }, patch);
         if (!payload.name) {
           throw Object.assign(new Error('岗位名称无效'), { msg: '岗位名称无效', __orgWriteKind: 'business_fail' });
@@ -4047,7 +4154,7 @@ export default {
             use_platform: Number(p.use_platform) === 1 ? 1 : 0,
             use_store: Number(p.use_store) === 1 ? 1 : 0,
             use_mobile: Number(p.use_mobile) === 1 ? 1 : 0,
-            channel_rules: this.normalizeJobChannelRules(data.channel_rules || {}),
+            channel_rules: this.normalizeJobChannelRules(data.channel_rules || {})
           };
           if (openForm) {
             this.jobPositionModal.formOpen = true;
@@ -4106,7 +4213,7 @@ export default {
       const payload = {
         position_id: positionId,
         scope_type: this.jobPositionModal.publish.scope_type || 'store',
-        scope_id: scopeId,
+        scope_id: scopeId
       };
       const headers = this.writeHeadersFor('job_position_publish', payload);
       payload.request_token = headers['X-Request-Token'];
@@ -4270,7 +4377,7 @@ export default {
         store_id: scopeType === 'store' ? storeId : 0,
         org_id: scopeType === 'org' ? orgId : 0,
         channel: this.rolePublishModal.channel || 'store_backend',
-        allow_store_select: Number(this.rolePublishModal.allow_store_select) === 1 ? 1 : 0,
+        allow_store_select: Number(this.rolePublishModal.allow_store_select) === 1 ? 1 : 0
       };
       const headers = this.writeHeadersFor('role_template_publish', payload);
       payload.request_token = headers['X-Request-Token'];
@@ -4315,7 +4422,7 @@ export default {
         kicker: '统一员工档案',
         store: null,
         person,
-        search: '',
+        search: ''
       };
       this.personAuth = {};
       this.personAudits = [];
@@ -4334,7 +4441,7 @@ export default {
         kicker: editable ? '权限范围' : '权限范围（只读）',
         store: null,
         person,
-        search: '',
+        search: ''
       };
       if (editable && !this.permissionRangeReady) {
         this.loadPermissions();
@@ -4343,8 +4450,8 @@ export default {
     closeDrawer() {
       this.drawer.open = false;
       this.closePersonOps();
-    },
-  },
+    }
+  }
 };
 </script>
 
@@ -4404,7 +4511,6 @@ export default {
 
 .is-readonly-disabled:hover
   opacity 0.55
-
 
 .auth-write-box
   margin-top 10px

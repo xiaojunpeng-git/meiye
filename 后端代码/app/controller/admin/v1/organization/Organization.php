@@ -99,6 +99,15 @@ class Organization extends AuthController
         }
     }
 
+    public function delete_blockers($id)
+    {
+        try {
+            return $this->success($this->services->getDeleteBlockers((int)$id));
+        } catch (\Throwable $e) {
+            return $this->fail($e->getMessage());
+        }
+    }
+
     public function bind_store()
     {
         [$storeId, $orgId, $requestToken] = $this->request->postMore([
@@ -584,6 +593,24 @@ class Organization extends AuthController
                 'source' => 'admin',
             ]);
             return $this->success('已移除');
+        } catch (\Throwable $e) {
+            return $this->fail($e->getMessage());
+        }
+    }
+
+    /** 完整移除组织名册及本组织管理员授权。 */
+    public function org_employees_remove_completely($orgId = 0, $id = 0)
+    {
+        try {
+            $data = $this->request->postMore([['request_token', '']]);
+            $write = app()->make(OrganizationWorkspaceWriteServices::class);
+            $ret = $write->removeOrganizationEmployeeCompletely(
+                (int)$orgId,
+                (int)$id,
+                is_array($this->adminInfo) ? $this->adminInfo : [],
+                $this->buildWriteRequestCtx((string)($data['request_token'] ?? ''))
+            );
+            return $this->success($ret['msg'], $ret['data']);
         } catch (\Throwable $e) {
             return $this->fail($e->getMessage());
         }

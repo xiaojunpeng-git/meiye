@@ -183,6 +183,75 @@ class OrganizationManageServices extends BaseServices
     }
 
     /**
+     * 删除预检只读返回具体阻断项。最终删除仍在结构锁和事务内复核。
+     */
+    public function getDeleteBlockers(int $id): array
+    {
+        $org = Db::name('organization')->where('id', $id)->where('is_del', 0)->field('id,pid,name')->find();
+        if (!$org) {
+            throw new \Exception('组织不存在或已删除');
+        }
+        $blockers = [];
+        if ((int)($org['pid'] ?? 0) === 0) {
+            $blockers[] = ['type' => 'root', 'title' => '最高级组织', 'items' => [(string)($org['name'] ?? '')]];
+        }
+        $children = Db::name('organization')->where('pid', $id)->where('is_del', 0)->field('id,name')->select()->toArray();
+        if ($children) {
+            $blockers[] = ['type' => 'child_org', 'title' => '下级组织', 'items' => array_map(static function ($row) {
+                return (string)($row['name'] ?? ('组织#' . (int)($row['id'] ?? 0)));
+            }, $children)];
+        }
+        $stores = Db::name('organization_store')->alias('os')
+            ->leftJoin('system_store st', 'st.id=os.store_id')
+            ->where('os.org_id', $id)
+            ->field('os.store_id,st.name,st.is_del')
+            ->select()->toArray();
+        if ($stores) {
+            $blockers[] = ['type' => 'store', 'title' => '关联门店', 'items' => array_map(static function ($row) {
+                $name = (string)($row['name'] ?? '已删除门店');
+                return $name . ((int)($row['is_del'] ?? 0) === 1 ? '（已删除记录）' : '');
+            }, $stores)];
+        }
+        $leaders = Db::name('organization_leader')->alias('l')
+            ->leftJoin('employee e', 'e.id=l.employee_id')
+            ->where('l.org_id', $id)->where('l.is_del', 0)
+            ->field('l.employee_id,e.name')
+            ->select()->toArray();
+        if ($leaders) {
+            $blockers[] = ['type' => 'leader', 'title' => '组织负责人', 'items' => array_map(static function ($row) {
+                return (string)($row['name'] ?? ('员工#' . (int)($row['employee_id'] ?? 0)));
+            }, $leaders)];
+        }
+        $admins = Db::name('organization_admin')->alias('oa')
+            ->leftJoin('employee e', 'e.id=oa.employee_id')
+            ->leftJoin('system_admin sa', 'sa.id=oa.admin_id')
+            ->where('oa.org_id', $id)->where('oa.is_del', 0)
+            ->field('oa.id,oa.employee_id,oa.name,e.name as employee_name,sa.account')
+            ->select()->toArray();
+        if ($admins) {
+            $blockers[] = ['type' => 'admin', 'title' => '组织管理员授权', 'items' => array_map(static function ($row) {
+                $name = (string)($row['employee_name'] ?? $row['name'] ?? ('员工#' . (int)($row['employee_id'] ?? 0)));
+                $account = trim((string)($row['account'] ?? ''));
+                return $account !== '' ? $name . '（' . $account . '）' : $name;
+            }, $admins)];
+        }
+        $orphanCount = (int)(Db::query(
+            'SELECT COUNT(*) AS c FROM `eb_organization_admin_store_exclude` ex LEFT JOIN `eb_organization_admin` a ON a.id = ex.org_admin_id WHERE a.id IS NULL'
+        )[0]['c'] ?? 0);
+        if ($orphanCount > 0) {
+            $blockers[] = ['type' => 'orphan_exclude', 'title' => '异常排除门店数据', 'items' => [$orphanCount . ' 条孤儿记录']];
+        }
+        $deadAdminIds = array_map('intval', Db::name('organization_admin')->where('org_id', $id)->where('is_del', 1)->column('id') ?: []);
+        if ($deadAdminIds) {
+            $deadExcludeCount = (int)Db::name('organization_admin_store_exclude')->whereIn('org_admin_id', $deadAdminIds)->count();
+            if ($deadExcludeCount > 0) {
+                $blockers[] = ['type' => 'dead_admin_exclude', 'title' => '异常排除门店数据', 'items' => [$deadExcludeCount . ' 条已撤销授权残留']];
+            }
+        }
+        return ['can_delete' => $blockers === [], 'blockers' => $blockers];
+    }
+
+    /**
      * 锁内/事务内：删除组织
      */
     public function applyDeleteOrganization(int $id, int $operatorId = 0, string $operatorName = '', array $auditMeta = []): void

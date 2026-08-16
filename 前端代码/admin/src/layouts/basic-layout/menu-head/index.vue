@@ -7,7 +7,7 @@
             <Dropdown trigger="click" :class="{ 'i-layout-menu-head-mobile-drop': isMobile }">
                 <Icon type="ios-apps" />
                 <DropdownMenu slot="list">
-                    <i-link v-for="item in filterHeader" :to="item.path"  :key="item.path">
+                    <i-link v-for="item in filterHeader" :to="resolveDefaultMenuPath(item)" :key="item.path">
                         <DropdownItem>
                             <i-menu-head-title :item="item" />
                         </DropdownItem>
@@ -23,6 +23,7 @@ import { mapState, mapGetters } from 'vuex';
 import { getStyle } from 'view-design/src/utils/assist';
 import { on, off } from 'view-design/src/utils/dom';
 import { throttle } from 'lodash';
+import util from '@/libs/util';
 
 export default {
   name: 'iMenuHead',
@@ -60,12 +61,17 @@ export default {
       } else if (menuWidth > this.menuMaxWidth) {
         this.isMenuLimit = false;
       } else {
-				        	  this.isMenuLimit = true;
-		      	   	}
+        this.isMenuLimit = true;
+      }
     },
     tabClick(name) {
       const tab = this.filterHeader.find(item => item.header === name);
-      this.$router.push(tab.path);
+      if (!tab) return;
+      // 顶级菜单只是布局路由时，进入其首个可访问的业务页面。
+      this.$router.push(this.resolveDefaultMenuPath(tab));
+    },
+    resolveDefaultMenuPath(menu) {
+      return util.resolveDefaultMenuPath(menu);
     }
   },
   watch: {

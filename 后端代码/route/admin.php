@@ -1186,6 +1186,7 @@ Route::group('adminapi', function () {
 		Route::get('organization/org_employees', 'v1.organization.Organization/org_employees')->option(['real_name' => '组织直属人员列表']);
 		Route::post('organization/org_employees', 'v1.organization.Organization/org_employees_save')->option(['real_name' => '组织直属人员保存']);
 		Route::delete('organization/org_employees/:id', 'v1.organization.Organization/org_employees_delete')->option(['real_name' => '组织直属人员删除']);
+		Route::post('organization/:orgId/org_employees/:id/remove_completely', 'v1.organization.Organization/org_employees_remove_completely')->option(['real_name' => '完整移除组织人员']);
 		Route::post('organization/employees/:id/leave', 'v1.organization.Organization/employee_leave')->option(['real_name' => '员工全局离职']);
 		Route::post('organization/employees/:id/archive_delete', 'v1.organization.Organization/employee_archive_delete')->option(['real_name' => '软删除人员档案']);
 		Route::get('organization/transfer_applies', 'v1.organization.Organization/transfer_applies')->option(['real_name' => '调店申请列表']);
@@ -1220,6 +1221,7 @@ Route::group('adminapi', function () {
 		Route::post('organization/role_publishes/:id/disable', 'v1.organization.Organization/role_publish_disable')->option(['real_name' => '角色发布停用']);
 		Route::get('organization/resource_selector', 'v1.organization.Organization/resource_selector')->option(['real_name' => '组织资源选择']);
 		Route::get('organization/:id/permissions', 'v1.organization.Organization/permissions')->option(['real_name' => '组织工作台权限只读']);
+		Route::get('organization/:id/delete_blockers', 'v1.organization.Organization/delete_blockers')->option(['real_name' => '组织删除阻断项']);
 		Route::get('organization/:id/admin_candidates', 'v1.organization.Organization/admin_candidates')->option(['real_name' => '组织权限授权候选']);
 		Route::post('organization/migrate', 'v1.organization.Organization/migrate')->option(['real_name' => '组织架构数据迁移']);
 		Route::post('organization/bind_store', 'v1.organization.Organization/bind_store')->option(['real_name' => '门店绑定组织']);
@@ -2198,6 +2200,10 @@ Route::group('adminapi', function () {
 			Route::post('v3/hq/cross-transfer/:id/reverse', 'v1.product.inventory.InventoryPlatformHqCrossTransfer/reverse')->option(['real_name' => '平台总部仓跨主体调拨作废']);
 			Route::get('v3/batch-stock', 'v1.product.inventory.InventoryPlatformWarehouse/batchStock')->option(['real_name' => '平台批次库存查询']);
 			Route::get('v3/dashboard', 'v1.product.inventory.InventoryPlatformWarehouse/dashboard')->option(['real_name' => '平台库存首页权威概览']);
+			Route::get('v3/presale-claims', 'v1.product.inventory.PresaleClaim/index')->option(['real_name' => '平台预售领用列表']);
+			Route::get('v3/presale-claims/:id', 'v1.product.inventory.PresaleClaim/detail')->pattern(['id' => '[A-Za-z0-9-]+'])->option(['real_name' => '平台预售领用明细']);
+			Route::post('v3/presale-claims/claim', 'v1.product.inventory.PresaleClaim/claim')->option(['real_name' => '平台预售领用出库']);
+			Route::post('v3/presale-claims/:id/void', 'v1.product.inventory.PresaleClaim/void')->pattern(['id' => '[A-Za-z0-9-]+'])->option(['real_name' => '平台预售领用作废']);
 			Route::get('v3/unified-query/batch-stock', 'v1.product.inventory.InventoryPlatformWarehouse/unifiedBatchStock')->option(['real_name' => '平台统一查询批次库存']);
 			Route::get('v3/unified-query/operational', 'v1.product.inventory.InventoryPlatformWarehouse/unifiedOperational')->option(['real_name' => '平台统一查询库存业务单据']);
 			Route::get('v3/unified-query/capabilities', 'v1.product.inventory.InventoryPlatformWarehouse/unifiedCapabilities')->option(['real_name' => '平台库存统一查询能力']);
@@ -3163,6 +3169,21 @@ Route::group('adminapi', function () {
         Route::post('save', 'v1.system.TrainingDocument/save')->option(['real_name' => '保存培训资料']);
         Route::post('status/:id', 'v1.system.TrainingDocument/status')->option(['real_name' => '更新培训资料状态']);
         Route::get('download/:id', 'v1.system.TrainingDocument/download')->option(['real_name' => '下载培训资料']);
+    })->middleware([
+        \app\http\middleware\admin\AdminAuthTokenMiddleware::class,
+        \app\http\middleware\admin\AdminCkeckRoleMiddleware::class
+    ])->middleware(\app\http\middleware\SystemLogMiddleware::class, 'admin');
+
+    Route::group('fund', function () {
+        Route::get('subjects', 'v1.fund.StoreFund/subjects')->option(['real_name' => '费用科目']);
+        Route::post('subjects', 'v1.fund.StoreFund/saveSubject')->option(['real_name' => '保存费用科目']);
+        Route::get('documents', 'v1.fund.StoreFund/documents')->option(['real_name' => '费用收支单']);
+        Route::get('documents/:id', 'v1.fund.StoreFund/detail')->option(['real_name' => '费用收支单详情']);
+        Route::post('documents', 'v1.fund.StoreFund/save')->option(['real_name' => '保存费用收支单']);
+        Route::post('documents/:id/audit', 'v1.fund.StoreFund/audit')->option(['real_name' => '审核费用收支单']);
+        Route::post('documents/:id/reverse', 'v1.fund.StoreFund/reverse')->option(['real_name' => '冲销费用收支单']);
+        Route::get('ledger', 'v1.fund.StoreFund/ledger')->option(['real_name' => '费用收支台账']);
+        Route::get('report', 'v1.fund.StoreFund/report')->option(['real_name' => '费用专项报表']);
     })->middleware([
         \app\http\middleware\admin\AdminAuthTokenMiddleware::class,
         \app\http\middleware\admin\AdminCkeckRoleMiddleware::class

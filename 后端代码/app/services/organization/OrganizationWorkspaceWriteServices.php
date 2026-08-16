@@ -407,6 +407,72 @@ class OrganizationWorkspaceWriteServices
     }
 
     /**
+     * 移除组织名册并撤销该组织下的管理员授权。
+     * 员工主档、其他组织授权和门店任职均保持不变。
+     * @return array{msg:string,data:array,replay:bool}
+     */
+    public function removeOrganizationEmployeeCompletely(int $orgId, int $relationId, array $adminInfo, array $requestCtx): array
+    {
+        $payload = ['org_id' => $orgId, 'relation_id' => $relationId];
+        return $this->runWrite(
+            'org_remove_employee_completely',
+            'org:' . $orgId,
+            $payload,
+            $adminInfo,
+            $requestCtx,
+            function (array $auditMeta) use ($orgId, $relationId) {
+                $relation = Db::name('organization_employee')
+                    ->where('id', $relationId)
+                    ->where('org_id', $orgId)
+                    ->where('is_del', 0)
+                    ->lock(true)
+                    ->find();
+                if (!$relation) {
+                    throw new \Exception('组织名册关系不存在或已移除');
+                }
+                $employeeId = (int)($relation['employee_id'] ?? 0);
+                /** @var OrganizationEmployeeServices $employeeService */
+                $employeeService = app()->make(OrganizationEmployeeServices::class);
+                $employeeService->softDelete($relationId, $auditMeta, ['use_outer_transaction' => true]);
+
+                $grants = Db::name('organization_admin')
+                    ->where('org_id', $orgId)
+                    ->where('employee_id', $employeeId)
+                    ->where('is_del', 0)
+                    ->lock(true)
+                    ->field('id')
+                    ->select()
+                    ->toArray();
+                $revokedGrantIds = [];
+                foreach ($grants as $grant) {
+                    $grantId = (int)($grant['id'] ?? 0);
+                    if ($grantId <= 0) {
+                        continue;
+                    }
+                    $this->manage->applyRevokeAdminGrant(
+                        $orgId,
+                        $grantId,
+                        (int)$auditMeta['operator_id'],
+                        (string)$auditMeta['operator_name'],
+                        $auditMeta
+                    );
+                    $revokedGrantIds[] = $grantId;
+                }
+
+                return [
+                    'msg' => $revokedGrantIds ? '已移除名册并撤销组织管理权限' : '已移除组织名册关系',
+                    'data' => [
+                        'org_id' => $orgId,
+                        'relation_id' => $relationId,
+                        'employee_id' => $employeeId,
+                        'revoked_org_admin_ids' => $revokedGrantIds,
+                    ],
+                ];
+            }
+        );
+    }
+
+    /**
      * @param callable(array):array{msg:string,data:array} $business
      * @return array{msg:string,data:array,replay:bool}
      */
