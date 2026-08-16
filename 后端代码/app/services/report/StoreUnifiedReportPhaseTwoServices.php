@@ -501,7 +501,9 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
     }
     private function summaryRow(string $title,array $columns,array $records):array
     {
-        if(!$records||!$columns)return[];$row=[];$first=(string)($columns[0]['key']??'');foreach($columns as$column)$row[(string)$column['key']]='-';$row[$first]='合计';
+        // A report result always has a total row. Empty result sets therefore make
+        // the "no data" state explicit instead of changing the table structure.
+        if(!$columns)return[];$row=[];$first=(string)($columns[0]['key']??'');foreach($columns as$column)$row[(string)$column['key']]='-';$row[$first]='合计';
         foreach($columns as$column){$key=(string)$column['key'];$kind=$this->summaryMetricKind($title,$key);if($kind==='')continue;$total=0;foreach($records as$record)$total+=$kind==='money'?$this->decimalCents($record[$key]??''):(int)($record[$key]??0);$row[$key]=$kind==='money'?$this->money($total):$total;}
         return$row;
     }

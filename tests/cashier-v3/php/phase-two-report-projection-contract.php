@@ -14,8 +14,12 @@ foreach ([
     'private function summaryMetricKind',
     "'metric_version'=>'store-operations-phase-two-v1'",
     "'data_as_of'=>date('Y-m-d H:i:s')",
+    'if(!$columns)return[]',
 ] as $needle) {
     if (strpos($service, $needle) === false) throw new RuntimeException('phase-two table projection contract missing: ' . $needle);
+}
+if (strpos($service, 'if(!$records||!$columns)return[]') !== false) {
+    throw new RuntimeException('phase-two reports must keep a summary row when the result set is empty');
 }
 foreach ([
     "array_merge(\$input, ['_internal_all' => true, 'page' => 1])",
