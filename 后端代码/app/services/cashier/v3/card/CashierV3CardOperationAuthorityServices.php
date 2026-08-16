@@ -758,6 +758,7 @@ final class CashierV3CardOperationAuthorityServices
         int $now
     ): array {
         $resultSnapshot = is_array($plan['resultSnapshot'] ?? null) ? $plan['resultSnapshot'] : [];
+        $organizationSnapshot = $this->organizationSnapshot($operatorScope);
         $row = [
             'operation_id' => (string)$plan['operationId'],
             'operation_no' => (string)$plan['operationNo'],
@@ -765,9 +766,9 @@ final class CashierV3CardOperationAuthorityServices
             'operation_status' => (string)$plan['operationStatus'],
             'contract_version' => (string)$plan['contractVersion'],
             'tenant_id' => $operatorScope->tenantId(),
-            'organization_id' => $operatorScope->organizationId() !== '' ? $operatorScope->organizationId() : '0',
-            'organization_path_snapshot' => '',
-            'organization_name_snapshot' => '',
+            'organization_id' => (string)$organizationSnapshot['id'],
+            'organization_path_snapshot' => $organizationSnapshot['path'],
+            'organization_name_snapshot' => $organizationSnapshot['name'],
             'store_id' => $operatorScope->storeId(),
             'store_name_snapshot' => mb_substr((string)$auditSnapshots['storeName'], 0, 128),
             'source_card_holder_id' => (int)$source['holderId'],
@@ -823,6 +824,34 @@ final class CashierV3CardOperationAuthorityServices
             return $this->replayOperation($existing, $plan)['operation'];
         }
         return $row;
+    }
+
+    /** Freeze the server-authoritative root-to-leaf organization path for later reporting. */
+    private function organizationSnapshot(CashierV3OperatorScope $operatorScope): array
+    {
+        $organizationId = (int)$operatorScope->organizationId();
+        if ($organizationId <= 0) {
+            $organizationId = (int)(Db::name('organization_store')
+                ->where('store_id', $operatorScope->storeId())->value('org_id') ?? 0);
+        }
+        $leafOrganizationId = $organizationId;
+        $path = [];
+        $name = '';
+        $seen = [];
+        for ($guard = 0; $organizationId > 0 && $guard < 64; $guard++) {
+            if (isset($seen[$organizationId])) throw new \RuntimeException('组织路径存在循环，无法保存转卡事实');
+            $seen[$organizationId] = true;
+            $node = Db::name('organization')->where('id', $organizationId)->where('is_del', 0)
+                ->field('id,pid,name')->find();
+            if (!$node) break;
+            if ($name === '') $name = mb_substr((string)($node['name'] ?? ''), 0, 128);
+            array_unshift($path, (string)$node['id']);
+            $organizationId = (int)$node['pid'];
+        }
+        if ($path === [] || trim($name) === '' || $leafOrganizationId <= 0) {
+            throw self::failure('card_operation_organization_snapshot_missing');
+        }
+        return ['id' => $leafOrganizationId, 'path' => implode('/', $path), 'name' => $name];
     }
 
     private function insertOperationLines(array $plan, string $tenantId, int $now): void

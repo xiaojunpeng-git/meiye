@@ -79,6 +79,16 @@ export default {
       component: () => import('@/pages/product/businessConfig/accounting')
     },
     {
+      path: 'shop/six-dimension-consumption-tier',
+      name: `${pre}shop_six_dimension_consumption_tier`,
+      meta: {
+        auth: ['setting-shop-six-dimension-consumption-tier'],
+        title: '消费分级设置',
+        settingsPage: 'consumption-tiers'
+      },
+      component: () => import('@/pages/report/data/six_dimension')
+    },
+    {
 		    path: 'shop/eshop',
 		    name: `${pre}shop_eshop`,
 		    meta: {

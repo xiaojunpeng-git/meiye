@@ -19,6 +19,7 @@ use app\services\cashier\v3\event\CashierV3BusinessEventRecorder;
 use app\services\cashier\v3\fact\CashierV3CheckoutFactContractException;
 use app\services\cashier\v3\fact\CashierV3SaleOnlyFactAssembler;
 use app\services\report\CardSaleCategoryAllocationFactServices;
+use app\services\report\CardSaleItemAllocationFactServices;
 use app\services\cashier\v3\fact\ThinkPhpCashierV3CheckoutFactRepository;
 use app\services\cashier\v3\report\CashierV3GuideRoundFactServices;
 use app\services\cashier\v3\report\CashierV3SalesManagerFactServices;
@@ -546,6 +547,8 @@ final class CashierV3SaleOnlyCheckoutSubmissionServices
             // the outer card catalog category. This projection is part of the
             // same successful checkout transaction as every other final fact.
             $cardCategoryAllocationResult = (new CardSaleCategoryAllocationFactServices())
+                ->persistInTx($factPlan, $cardPurchaseResult);
+            $cardItemAllocationResult = (new CardSaleItemAllocationFactServices())
                 ->persistInTx($factPlan, $cardPurchaseResult);
             $requestResult = $this->requests->markSucceededInTx(
                 $requestId,

@@ -36,6 +36,7 @@ use app\services\order\StoreOrderTakeServices;
 use app\services\order\StoreReservationOrderServices;
 use app\services\other\QrcodeServices;
 use app\services\product\product\StoreProductLogServices;
+use app\services\report\StoreUnifiedReportPhaseThreeFoundationServices;
 use app\services\other\queue\QueueServices;
 use app\services\message\SystemMessageServices;
 use app\services\store\finance\StaffFlowingWaterServices;
@@ -61,6 +62,7 @@ use think\db\exception\DbException;
 use think\db\exception\ModelNotFoundException;
 use think\Exception;
 use think\exception\ValidateException;
+use think\facade\Db;
 use think\facade\Route as Url;
 
 /**
@@ -366,12 +368,28 @@ class UserServices extends BaseServices
             $created = true;
             return (int)$res->uid;
         };
-        $uid = $phone === ''
-            ? $identityServices->createUserWithoutPhoneIdentity($createUser)
-            : $identityServices->ensureUserIdentity($phone, $createUser, [
-                'operator_type' => 'SYSTEM',
-                'source' => 'USER_SET_INFO',
-            ]);
+        $uid = Db::transaction(function () use ($phone, $identityServices, $createUser, &$created, $userType): int {
+            $uid = $phone === ''
+                ? $identityServices->createUserWithoutPhoneIdentity($createUser)
+                : $identityServices->ensureUserIdentity($phone, $createUser, [
+                    'operator_type' => 'SYSTEM',
+                    'source' => 'USER_SET_INFO',
+                ]);
+            if ($created) {
+                (new StoreUnifiedReportPhaseThreeFoundationServices())->recordMemberOrigin(
+                    ['tenant_id' => '0', 'operator_id' => 0],
+                    [
+                        'member_id' => $uid,
+                        'origin_type' => $userType === 'import' ? 'IMPORTED' : 'SYSTEM_CREATED',
+                        'source_type' => 'USER_SET_INFO',
+                        'source_id' => (string)$uid,
+                        'member_created_at' => time(),
+                        'idempotency_key' => 'phase3-member-origin:user:' . $uid,
+                    ]
+                );
+            }
+            return $uid;
+        });
         $res = $this->dao->get($uid);
         if (!$res) {
             throw new AdminException('保存用户信息失败');

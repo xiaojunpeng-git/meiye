@@ -26,6 +26,7 @@ final class StoreOperationsReportAnnotationServices
         'field_acquisition_detail', 'field_acquisition_summary',
         'cross_industry_customer_detail', 'cross_industry_customer_summary',
         'new_customer_analysis',
+        'six_dimension_consumption_refund_detail',
     ];
 
     private const FIELD_RULES = [
@@ -38,6 +39,7 @@ final class StoreOperationsReportAnnotationServices
         'cross_industry_customer_detail' => [],
         'cross_industry_customer_summary' => ['customer_acquired_at', 'partner_store_name'],
         'new_customer_analysis' => ['care_duration'],
+        'six_dimension_consumption_refund_detail' => ['complaint_count'],
     ];
 
     private const FIELD_TYPES = [
@@ -45,6 +47,7 @@ final class StoreOperationsReportAnnotationServices
         'refund_headcount_manual' => 'integer',
         'manual_cash_amount' => 'integer_cents',
         'visit_over_one_hour' => 'integer',
+        'complaint_count' => 'nonnegative_integer',
         'card_sale_date' => 'date',
         'customer_acquired_at' => 'date',
     ];
@@ -53,13 +56,12 @@ final class StoreOperationsReportAnnotationServices
     public function listAnnotations(array $context, array $filter = []): array
     {
         $scope = $this->scope($context);
+        $reportCode = $this->assertReportCode($filter['report_code'] ?? '');
+        if ($scope['store_ids'] === []) return [];
         $query = Db::name(self::ANNOTATION_TABLE)
-            ->where('tenant_id', $scope['tenant_id']);
+            ->where('tenant_id', $scope['tenant_id'])
+            ->where('report_code', $reportCode);
         if ($scope['store_ids'] !== null) $query->whereIn('store_id', $scope['store_ids']);
-        if (($reportCode = trim((string)($filter['report_code'] ?? ''))) !== '') {
-            $this->assertReportCode($reportCode);
-            $query->where('report_code', $reportCode);
-        }
         foreach (['subject_type', 'subject_key', 'field_key'] as $key) {
             if (($value = trim((string)($filter[$key] ?? ''))) !== '') $query->where($key, $value);
         }
@@ -96,12 +98,26 @@ final class StoreOperationsReportAnnotationServices
         $sourceFactId = max(0, (int)($payload['source_fact_id'] ?? 0));
         $sourceOrderId = mb_substr(trim((string)($payload['source_order_id'] ?? '')), 0, 64);
         $sourceLineId = mb_substr(trim((string)($payload['source_line_id'] ?? '')), 0, 64);
-        if ($scope['authorization_mode'] === 'self_participant') {
+        if ($reportCode === 'six_dimension_consumption_refund_detail') {
+            if ($subjectType !== 'business_event_line') {
+                throw new \InvalidArgumentException('客诉数量必须绑定真实业务事件');
+            }
+            $resolved = (new StoreReportParticipantScopeServices())->resolveSubject(
+                $scope['tenant_id'], $subjectType, $subjectKey,
+                $scope['authorization_mode'] === 'self_participant' ? $scope['participant_employee_id'] : 0
+            );
+            if ($resolved === null) throw new \InvalidArgumentException('业务事件不存在或无权编辑');
+            $storeId = (int)$resolved['store_id'];
+            $sourceFactId = (int)$resolved['source_fact_id'];
+            $sourceOrderId = (string)$resolved['source_order_id'];
+            $sourceLineId = (string)$resolved['source_line_id'];
+        } elseif ($scope['authorization_mode'] === 'self_participant') {
             $resolved = (new StoreReportParticipantScopeServices())->resolveSubject(
                 $scope['tenant_id'], $subjectType, $subjectKey, $scope['participant_employee_id']
             );
             if ($resolved === null) throw new \InvalidArgumentException('无权编辑非本人参与的报表数据');
             $storeId = (int)$resolved['store_id'];
+            $sourceFactId = (int)$resolved['source_fact_id'];
             $sourceOrderId = (string)$resolved['source_order_id'];
             $sourceLineId = (string)$resolved['source_line_id'];
         }
@@ -122,6 +138,9 @@ final class StoreOperationsReportAnnotationServices
                 }
                 $row = Db::name(self::ANNOTATION_TABLE)->where('id', (int)$audit['annotation_id'])->find();
                 if (!$row) throw new \RuntimeException('补充记录审计存在但当前记录缺失');
+                $row['field_value'] = (string)$audit['after_value'];
+                $row['version'] = (int)$audit['after_version'];
+                $row['updated_at'] = (int)$audit['occurred_at'];
                 return $this->projection($row, true);
             }
 
@@ -299,7 +318,7 @@ final class StoreOperationsReportAnnotationServices
         }
         return [
             'tenant_id' => $tenant,
-            'store_ids' => $authorizationMode === 'self_participant' ? null : ($ids ?: null),
+            'store_ids' => $authorizationMode === 'self_participant' ? null : $ids,
             'authorization_mode' => $authorizationMode,
             'participant_employee_id' => $participantEmployeeId,
         ];
@@ -328,9 +347,12 @@ final class StoreOperationsReportAnnotationServices
     {
         // Empty string is a deliberate manual clear and must survive readback.
         if ($value === '' || $valueType === 'text') return;
-        if (in_array($valueType, ['integer', 'integer_cents'], true)
+        if (in_array($valueType, ['integer', 'integer_cents', 'nonnegative_integer'], true)
             && !preg_match('/^-?\d+$/D', trim($value))) {
             throw new \InvalidArgumentException('该补充字段必须填写整数');
+        }
+        if ($valueType === 'nonnegative_integer' && (int)$value < 0) {
+            throw new \InvalidArgumentException('客诉数量不能小于 0');
         }
         if ($valueType === 'date') {
             $date = \DateTimeImmutable::createFromFormat('!Y-m-d', $value);

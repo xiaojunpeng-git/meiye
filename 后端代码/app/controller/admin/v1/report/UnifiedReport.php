@@ -10,14 +10,27 @@ use app\services\organization\EmployeeDataScopeServices;
 use app\services\report\StoreUnifiedReportServices;
 use app\services\report\StoreOperationsReportAnnotationServices;
 use app\services\report\StoreReportParticipantScopeServices;
+use app\services\report\StoreUnifiedReportPhaseThreeFoundationServices;
+use app\services\report\StoreUnifiedReportPhaseThreeServices;
+use app\services\system\SystemRoleServices;
 use think\facade\Db;
 
 /** 平台端复用门店业务部门的统一事实报表，范围由组织权限服务裁剪。 */
 class UnifiedReport extends AuthController
 {
-    public function catalog(StoreUnifiedReportServices $services)
+    private const SIX_DIMENSION_REPORTS = [
+        'six_dimension_item_deal_analysis', 'six_dimension_cash_consumption_analysis',
+        'six_dimension_consumption_refund_detail', 'six_dimension_performance_deal',
+        'six_dimension_performance_distribution', 'six_dimension_performance_market_distribution',
+    ];
+
+    public function catalog(StoreUnifiedReportServices $services, StoreUnifiedReportPhaseThreeServices $phaseThree)
     {
-        return app('json')->success($services->catalog());
+        $entries = array_merge($services->catalog(), $phaseThree::catalogEntries());
+        return app('json')->success(array_values(array_filter($entries, function (array $entry): bool {
+            $code = (string)($entry['code'] ?? '');
+            return $this->canAccessSixDimensionReport($code);
+        })));
     }
 
     /**
@@ -36,14 +49,46 @@ class UnifiedReport extends AuthController
         ]);
     }
 
-    public function query(Request $request, StoreUnifiedReportServices $services)
+    public function query(Request $request, StoreUnifiedReportServices $services, StoreUnifiedReportPhaseThreeServices $phaseThree)
     {
-        return $this->respond($request, $services, false);
+        return $this->respond($request, $services, $phaseThree, false);
     }
 
-    public function export(Request $request, StoreUnifiedReportServices $services)
+    public function export(Request $request, StoreUnifiedReportServices $services, StoreUnifiedReportPhaseThreeServices $phaseThree)
     {
-        return $this->respond($request, $services, true);
+        return $this->respond($request, $services, $phaseThree, true);
+    }
+
+    public function consumptionTiers(StoreUnifiedReportPhaseThreeFoundationServices $services)
+    {
+        if (!$this->canManageConsumptionTiers()) return app('json')->fail('当前账号未配置消费分级设置权限');
+        return app('json')->success($services->consumptionTiers('0', false));
+    }
+
+    public function saveConsumptionTier(Request $request, StoreUnifiedReportPhaseThreeFoundationServices $services)
+    {
+        if (!$this->canManageConsumptionTiers()) return app('json')->fail('当前账号未配置消费分级设置权限');
+        try {
+            return app('json')->success($services->saveConsumptionTier([
+                'tenant_id' => '0', 'admin_id' => (int)$this->adminId,
+                'admin_name' => (string)($this->adminInfo['real_name'] ?? $this->adminInfo['account'] ?? ''),
+            ], $request->post()));
+        } catch (\InvalidArgumentException $e) {
+            return app('json')->fail($e->getMessage());
+        }
+    }
+
+    public function sortConsumptionTiers(Request $request, StoreUnifiedReportPhaseThreeFoundationServices $services)
+    {
+        if (!$this->canManageConsumptionTiers()) return app('json')->fail('当前账号未配置消费分级设置权限');
+        try {
+            return app('json')->success($services->sortConsumptionTiers([
+                'tenant_id' => '0', 'admin_id' => (int)$this->adminId,
+                'admin_name' => (string)($this->adminInfo['real_name'] ?? $this->adminInfo['account'] ?? ''),
+            ], $request->post()));
+        } catch (\InvalidArgumentException $e) {
+            return app('json')->fail($e->getMessage());
+        }
     }
 
     public function operationsCategories(StoreOperationsReportAnnotationServices $services)
@@ -62,12 +107,21 @@ class UnifiedReport extends AuthController
 
     public function annotations(Request $request, StoreOperationsReportAnnotationServices $services)
     {
-        return app('json')->success($services->listAnnotations($this->annotationContext(), $request->get()));
+        $report = trim((string)$request->get('report_code', ''));
+        if (!$this->canAccessAnnotationReport($report)) return app('json')->fail('当前账号未配置该报表权限');
+        try {
+            return app('json')->success($services->listAnnotations($this->annotationContext(), $request->get()));
+        } catch (\InvalidArgumentException $e) {
+            return app('json')->fail($e->getMessage());
+        }
     }
 
     public function saveAnnotation(Request $request, StoreOperationsReportAnnotationServices $services)
     {
         $payload = $request->post();
+        if (!$this->canAccessAnnotationReport(trim((string)($payload['report_code'] ?? '')))) {
+            return app('json')->fail('当前账号未配置该报表权限');
+        }
         $context = $this->annotationContext();
         if ((string)$context['authorization_mode'] !== 'self_participant') {
             $storeIds = $this->allowedStoreIds((int)($payload['org_id'] ?? 0), (int)($payload['store_id'] ?? 0));
@@ -158,10 +212,19 @@ class UnifiedReport extends AuthController
         ];
     }
 
-    private function respond(Request $request, StoreUnifiedReportServices $services, bool $export)
+    private function respond(
+        Request $request,
+        StoreUnifiedReportServices $services,
+        StoreUnifiedReportPhaseThreeServices $phaseThree,
+        bool $export
+    )
     {
         try {
             $input = $request->getMore($this->inputRules());
+            $report = trim((string)($input['report'] ?? ''));
+            if (!$this->canAccessSixDimensionReport($report)) {
+                return app('json')->fail('当前账号未配置该报表权限');
+            }
             $reportScope = $this->reportAuthorization();
             if ((string)$reportScope['mode'] === 'none') {
                 return app('json')->fail('当前账号没有可查看的数据范围');
@@ -174,11 +237,57 @@ class UnifiedReport extends AuthController
             }
             $storeIds = $this->scopedStoreIds($input);
             if (!$storeIds) return app('json')->fail('无权限或当前范围无门店');
-            $result = $export ? $services->export($storeIds, $input) : $services->query($storeIds, $input);
+            if ($phaseThree->supports($report)) {
+                $input['_authorized_store_ids'] = $this->allowedStoreIds(0, 0);
+                $range = ['start' => (string)($input['start_date'] ?? ''), 'end' => (string)($input['end_date'] ?? '')];
+                $result = $phaseThree->query($report, $storeIds, $range, $export ? array_merge($input, ['_internal_all' => true]) : $input);
+                if ($export) {
+                    $result = [
+                        'filename' => '六维数据中心-' . (string)($result['title'] ?? '报表') . '-' . date('YmdHis') . '.csv',
+                        'columns' => $result['columns'] ?? [], 'records' => $result['records'] ?? [],
+                        'summary_row' => $result['summary_row'] ?? [], 'column_groups' => $result['column_groups'] ?? [],
+                        'metric_version' => $result['metric_version'] ?? StoreUnifiedReportPhaseThreeServices::METRIC_VERSION,
+                        'data_as_of' => $result['data_as_of'] ?? '', 'aggregation_status' => $result['aggregation_status'] ?? '',
+                    ];
+                }
+            } else {
+                $result = $export ? $services->export($storeIds, $input) : $services->query($storeIds, $input);
+            }
             return app('json')->success($result);
         } catch (\InvalidArgumentException $e) {
             return app('json')->fail($e->getMessage());
         }
+    }
+
+    private function canAccessSixDimensionReport(string $report): bool
+    {
+        if (!in_array($report, self::SIX_DIMENSION_REPORTS, true)) return true;
+        return $this->hasMenuPermission('admin-report-six-dimension-' . $report);
+    }
+
+    private function canAccessAnnotationReport(string $report): bool
+    {
+        if (!in_array($report, self::SIX_DIMENSION_REPORTS, true)) {
+            return true;
+        }
+        return $this->canAccessSixDimensionReport($report);
+    }
+
+    private function canManageConsumptionTiers(): bool
+    {
+        return $this->hasMenuPermission('setting-shop-six-dimension-consumption-tier');
+    }
+
+    private function hasMenuPermission(string $uniqueAuth): bool
+    {
+        if (!(int)($this->adminInfo['level'] ?? 0) && (int)$this->adminType !== 3) return true;
+        $roles = $this->adminInfo['roles'] ?? [];
+        $roles = is_string($roles) ? array_filter(explode(',', $roles)) : (array)$roles;
+        if (!$roles) return false;
+        foreach (app()->make(SystemRoleServices::class)->getRolesByAuth($roles, 1) as $menu) {
+            if ((string)($menu['unique_auth'] ?? '') === $uniqueAuth) return true;
+        }
+        return false;
     }
 
     private function inputRules(): array
@@ -188,6 +297,9 @@ class UnifiedReport extends AuthController
             ['item_id', ''], ['payment_method', ''], ['operator_id', 0], ['channel_id', 0], ['customer_segment', 'all'], ['consumption_metric', 'cash'], ['sleep_months', 3], ['year', 0], ['category_id', 0], ['category_path', ''], ['product_type', ''], ['partner_name', ''], ['salesperson_id', 0], ['sales_manager_id', 0], ['guide_id', 0], ['craftsman_id', 0], ['page', 1], ['limit', 20],
             ['org_id', 0], ['store_id', 0], ['store_ids', ''],
             ['dimension_code', ''], ['payment_method_code', ''], ['metric_code', ''],
+            ['company_dimension_id', ''], ['city_manager_dimension_id', ''],
+            ['dimension_as_of', ''], ['drill_month', ''], ['six_dimension_only', 0],
+            ['tier_id', ''], ['month', ''],
             ['mode', 'count'],
         ];
     }

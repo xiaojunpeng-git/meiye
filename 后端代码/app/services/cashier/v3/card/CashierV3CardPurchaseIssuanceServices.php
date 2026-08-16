@@ -223,6 +223,9 @@ final class CashierV3CardPurchaseIssuanceServices
             $issueNo,
             $occurredAt
         );
+        $reportCategoryComponents = $this->reportCategoryComponents(
+            (array)($components['issuedComponents'] ?? [])
+        );
         $holder = $this->insertHolder(
             $legacyOrderId,
             $header,
@@ -262,6 +265,7 @@ final class CashierV3CardPurchaseIssuanceServices
             'cardNo' => (string)$holder['cardNo'],
             'baseCartId' => $baseCartId,
             'benefitDetailIds' => array_values((array)$components['benefitDetailIds']),
+            'reportCategoryComponents' => $reportCategoryComponents,
             'debtAmountCents' => 0,
             'cardRuleStateId' => (string)($ruleState['stateId'] ?? ''),
             'cardRuleType' => (string)($ruleState['ruleType'] ?? ''),
@@ -324,6 +328,105 @@ final class CashierV3CardPurchaseIssuanceServices
             return $this->replay($raced, $header, $salesLine, $issueNo, $commandIdempotencyKey);
         }
         return $result;
+    }
+
+    /**
+     * Freeze the category used by the six operating reports on each issued
+     * card receipt. A card's outer catalog category must not replace the
+     * category of its contained service projects.
+     *
+     * @param array<int,array{detailId:int,snapshot:array}> $issuedComponents
+     * @return array<int,array{productId:int,projectNameSnapshot:string,componentCount:int,categoryIdSnapshot:int,categoryNameSnapshot:string,allocationWeightCents:int}>
+     */
+    private function reportCategoryComponents(array $issuedComponents): array
+    {
+        $result = [];
+        $hasPositiveWeight = false;
+        foreach ($issuedComponents as $issuedComponent) {
+            $component = is_array($issuedComponent['snapshot'] ?? null)
+                ? $issuedComponent['snapshot'] : [];
+            $productId = (int)($component['productId'] ?? 0);
+            if ($productId <= 0 || (int)($component['productType'] ?? -1) !== 6) {
+                continue;
+            }
+            $projectName = trim((string)($component['nameSnapshot'] ?? ''));
+            if ($projectName === '') {
+                throw self::failure('card_purchase_component_report_name_missing');
+            }
+            $categoryId = (int)($component['categoryIdSnapshot'] ?? 0);
+            $categoryName = trim((string)($component['categoryNameSnapshot'] ?? ''));
+            if ($categoryId <= 0 || $categoryName === '') {
+                [$categoryId, $categoryName] = $this->lockProjectCategorySnapshot($productId);
+            }
+            $weight = array_key_exists('configuredAmountCents', $component)
+                ? (int)$component['configuredAmountCents']
+                : $this->multiply(
+                    (int)($component['configuredPriceCents'] ?? 0),
+                    max(1, (int)($component['writeTimes'] ?? 0))
+                );
+            if ($weight < 0) {
+                throw self::failure('card_purchase_component_report_weight_invalid');
+            }
+            $hasPositiveWeight = $hasPositiveWeight || $weight > 0;
+            $result[] = [
+                'productId' => $productId,
+                'projectNameSnapshot' => $projectName,
+                'componentCount' => max(0, (int)($component['writeTimes'] ?? 0)),
+                'categoryIdSnapshot' => $categoryId,
+                'categoryNameSnapshot' => $categoryName,
+                'allocationWeightCents' => $weight,
+            ];
+        }
+        // A zero-price card still needs a visible, zero-value category fact.
+        // Equal unit weights make that deterministic without inventing money.
+        if ($result !== [] && !$hasPositiveWeight) {
+            foreach ($result as &$component) {
+                $component['allocationWeightCents'] = 1;
+            }
+            unset($component);
+        }
+        return $result;
+    }
+
+    /** @return array{0:int,1:string} */
+    private function lockProjectCategorySnapshot(int $projectId): array
+    {
+        $project = Db::name('store_product')
+            ->where('id', $projectId)
+            ->lock(true)
+            ->field('id,pid,cate_id')
+            ->find();
+        $categoryIds = $this->categoryIds((string)($project['cate_id'] ?? ''));
+        if ($categoryIds === [] && (int)($project['pid'] ?? 0) > 0) {
+            $parent = Db::name('store_product')
+                ->where('id', (int)$project['pid'])
+                ->lock(true)
+                ->field('cate_id')
+                ->find();
+            $categoryIds = $this->categoryIds((string)($parent['cate_id'] ?? ''));
+        }
+        $categoryId = (int)($categoryIds[0] ?? 0);
+        $category = $categoryId > 0
+            ? Db::name('store_product_category')->where('id', $categoryId)->lock(true)->field('id,cate_name')->find()
+            : null;
+        $categoryName = trim((string)($category['cate_name'] ?? ''));
+        if ($categoryId <= 0 || $categoryName === '') {
+            throw self::failure('card_purchase_component_report_category_missing');
+        }
+        return [$categoryId, $categoryName];
+    }
+
+    /** @return array<int,int> */
+    private function categoryIds(string $value): array
+    {
+        $ids = [];
+        foreach (explode(',', $value) as $candidate) {
+            $id = (int)trim($candidate);
+            if ($id > 0 && !in_array($id, $ids, true)) {
+                $ids[] = $id;
+            }
+        }
+        return $ids;
     }
 
     private function insertLegacyOrder(

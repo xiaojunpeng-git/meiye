@@ -11,6 +11,7 @@ import OrderCenterView from '@/views/OrderCenterView.vue'
 import ManagementCenterView from '@/views/ManagementCenterView.vue'
 import BusinessDashboardView from '@/views/BusinessDashboardView.vue'
 import StoreBusinessReportView from '@/views/StoreBusinessReportView.vue'
+import ConsumptionTierConfigView from '@/views/ConsumptionTierConfigView.vue'
 import StaffListView from '@/views/StaffListView.vue'
 import RoomSettingsView from '@/views/RoomSettingsView.vue'
 import RoutePlaceholderView from '@/views/RoutePlaceholderView.vue'
@@ -60,6 +61,12 @@ const routes = [
     name: 'cashier-v3-platform-store-business-reports',
     component: StoreBusinessReportView,
     meta: { platformReport: true, title: '门店运营报表' }
+  },
+  {
+    path: '/platform/six-dimension/consumption-tiers',
+    name: 'cashier-v3-platform-six-dimension-consumption-tiers',
+    component: ConsumptionTierConfigView,
+    meta: { platformReport: true, title: '消费分级设置' }
   },
   {
     path: '/',

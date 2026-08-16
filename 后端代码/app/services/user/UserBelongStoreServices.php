@@ -14,7 +14,9 @@ namespace app\services\user;
 
 use app\dao\user\UserBelongStoreDao;
 use app\services\BaseServices;
+use app\services\report\StoreUnifiedReportPhaseThreeFoundationServices;
 use app\services\store\StoreUserServices;
+use think\facade\Db;
 
 
 /**
@@ -104,8 +106,26 @@ class UserBelongStoreServices extends BaseServices
             } else {
                 $data['group'] = 1;
             }
-            $this->dao->save($data);
-            $userServices->update($uid, ['belong_store_id' => $store_id]);
+            Db::transaction(function () use ($data, $uid, $store_id, $userServices): void {
+                $history = $this->dao->save($data);
+                $historyId = (int)($history->id ?? 0);
+                if ($historyId <= 0) {
+                    throw new \RuntimeException('会员归属历史保存失败');
+                }
+                $userServices->update($uid, ['belong_store_id' => $store_id]);
+                (new StoreUnifiedReportPhaseThreeFoundationServices())->recordMemberStoreAssignmentInTx(
+                    ['tenant_id' => '0'],
+                    [
+                        'member_id' => $uid,
+                        'assigned' => true,
+                        'store_id' => $store_id,
+                        'effective_at' => (int)$data['add_time'],
+                        'source_type' => 'USER_BELONG_STORE',
+                        'source_event_id' => (string)$historyId,
+                        'idempotency_key' => 'phase3-member-store:' . $historyId,
+                    ]
+                );
+            });
             $userServices->cacheTag()->clear();
         }
         return true;

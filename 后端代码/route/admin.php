@@ -1642,6 +1642,9 @@ Route::group('adminapi', function () {
         Route::get('unified/personnel', 'v1.report.UnifiedReport/personnel')->option(['real_name' => '门店业务报表人员筛选']);
         Route::get('unified/query', 'v1.report.UnifiedReport/query')->option(['real_name' => '门店业务报表查询']);
         Route::get('unified/export', 'v1.report.UnifiedReport/export')->option(['real_name' => '门店业务报表导出']);
+        Route::get('six-dimension/consumption-tiers', 'v1.report.UnifiedReport/consumptionTiers')->option(['real_name' => '消费分级设置列表']);
+        Route::post('six-dimension/consumption-tiers', 'v1.report.UnifiedReport/saveConsumptionTier')->option(['real_name' => '保存消费分级设置']);
+        Route::post('six-dimension/consumption-tiers/sort', 'v1.report.UnifiedReport/sortConsumptionTiers')->option(['real_name' => '消费分级排序']);
         Route::get('operations/categories', 'v1.report.UnifiedReport/operationsCategories')->option(['real_name' => '门店运营商品分类']);
         Route::post('operations/category', 'v1.report.UnifiedReport/saveCategory')->option(['real_name' => '保存合作方分类配置']);
         Route::get('operations/annotations', 'v1.report.UnifiedReport/annotations')->option(['real_name' => '门店运营补充记录']);

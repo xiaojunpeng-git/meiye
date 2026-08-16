@@ -33,20 +33,24 @@ final class StoreReportParticipantScopeServices
     public function applyOrder($query, string $orderField, int $employeeId)
     {
         $this->assertEmployee($employeeId);
-        return $query->where(function ($participant) use ($orderField, $employeeId) {
-            $participant->whereExists(function ($fact) use ($orderField, $employeeId) {
+        $tenantField = $this->tenantFieldFor($orderField);
+        return $query->where(function ($participant) use ($orderField, $tenantField, $employeeId) {
+            $participant->whereExists(function ($fact) use ($orderField, $tenantField, $employeeId) {
                 $fact->name('cashier_v3_performance_fact')->alias('report_participant_pf')
                     ->whereRaw('report_participant_pf.order_id=' . $orderField)
+                    ->whereRaw('report_participant_pf.tenant_id=' . $tenantField)
                     ->where('report_participant_pf.employee_id', $employeeId)
                     ->where('report_participant_pf.status', 'effective');
-            })->whereExists(function ($fact) use ($orderField, $employeeId) {
+            })->whereExists(function ($fact) use ($orderField, $tenantField, $employeeId) {
                 $fact->name('cashier_v3_customer_guide_round_fact')->alias('report_participant_gf')
                     ->whereRaw('report_participant_gf.order_id=' . $orderField)
+                    ->whereRaw('report_participant_gf.tenant_id=' . $tenantField)
                     ->where('report_participant_gf.guide_employee_id', $employeeId)
                     ->where('report_participant_gf.status', 'effective');
-            }, 'OR')->whereExists(function ($fact) use ($orderField, $employeeId) {
+            }, 'OR')->whereExists(function ($fact) use ($orderField, $tenantField, $employeeId) {
                 $fact->name('cashier_v3_sales_manager_fact')->alias('report_participant_mf')
                     ->whereRaw('report_participant_mf.order_id=' . $orderField)
+                    ->whereRaw('report_participant_mf.tenant_id=' . $tenantField)
                     ->where('report_participant_mf.sales_manager_employee_id', $employeeId)
                     ->where('report_participant_mf.status', 'effective');
             }, 'OR');
@@ -56,20 +60,24 @@ final class StoreReportParticipantScopeServices
     public function applyCheckout($query, string $checkoutField, int $employeeId)
     {
         $this->assertEmployee($employeeId);
-        return $query->where(function ($participant) use ($checkoutField, $employeeId) {
-            $participant->whereExists(function ($fact) use ($checkoutField, $employeeId) {
+        $tenantField = $this->tenantFieldFor($checkoutField);
+        return $query->where(function ($participant) use ($checkoutField, $tenantField, $employeeId) {
+            $participant->whereExists(function ($fact) use ($checkoutField, $tenantField, $employeeId) {
                 $fact->name('cashier_v3_performance_fact')->alias('report_checkout_pf')
                     ->whereRaw('report_checkout_pf.checkout_request_id=' . $checkoutField)
+                    ->whereRaw('report_checkout_pf.tenant_id=' . $tenantField)
                     ->where('report_checkout_pf.employee_id', $employeeId)
                     ->where('report_checkout_pf.status', 'effective');
-            })->whereExists(function ($fact) use ($checkoutField, $employeeId) {
+            })->whereExists(function ($fact) use ($checkoutField, $tenantField, $employeeId) {
                 $fact->name('cashier_v3_customer_guide_round_fact')->alias('report_checkout_gf')
                     ->whereRaw('report_checkout_gf.checkout_request_id=' . $checkoutField)
+                    ->whereRaw('report_checkout_gf.tenant_id=' . $tenantField)
                     ->where('report_checkout_gf.guide_employee_id', $employeeId)
                     ->where('report_checkout_gf.status', 'effective');
-            }, 'OR')->whereExists(function ($fact) use ($checkoutField, $employeeId) {
+            }, 'OR')->whereExists(function ($fact) use ($checkoutField, $tenantField, $employeeId) {
                 $fact->name('cashier_v3_sales_manager_fact')->alias('report_checkout_mf')
                     ->whereRaw('report_checkout_mf.checkout_request_id=' . $checkoutField)
+                    ->whereRaw('report_checkout_mf.tenant_id=' . $tenantField)
                     ->where('report_checkout_mf.sales_manager_employee_id', $employeeId)
                     ->where('report_checkout_mf.status', 'effective');
             }, 'OR');
@@ -83,19 +91,22 @@ final class StoreReportParticipantScopeServices
     }
 
     /**
-     * @return array{store_id:int,source_order_id:string,source_line_id:string}|null
+     * Resolve a persisted report subject. employeeId=0 validates existence and
+     * tenant only; a positive employee id additionally enforces participant scope.
+     *
+     * @return array{store_id:int,source_fact_id:int,source_order_id:string,source_line_id:string}|null
      */
-    public function resolveSubject(string $tenantId, string $subjectType, string $subjectKey, int $employeeId): ?array
+    public function resolveSubject(string $tenantId, string $subjectType, string $subjectKey, int $employeeId = 0): ?array
     {
-        $this->assertEmployee($employeeId);
         if (in_array($subjectType, ['sale_line', 'report_row'], true)) {
             $line = Db::name('cashier_v3_sale_fact')->alias('subject_sale')
                 ->where('subject_sale.tenant_id', $tenantId)->where('subject_sale.source_line_id', $subjectKey)
                 ->where('subject_sale.status', 'effective');
-            $this->applyOrder($line, 'subject_sale.order_id', $employeeId);
-            $row = $line->field('subject_sale.store_id,subject_sale.order_id,subject_sale.source_line_id')->find();
+            if ($employeeId > 0) $this->applyOrder($line, 'subject_sale.order_id', $employeeId);
+            $row = $line->field('subject_sale.id,subject_sale.store_id,subject_sale.order_id,subject_sale.source_line_id')->find();
             if (is_array($row)) return [
                 'store_id' => (int)$row['store_id'],
+                'source_fact_id' => (int)$row['id'],
                 'source_order_id' => (string)$row['order_id'],
                 'source_line_id' => (string)$row['source_line_id'],
             ];
@@ -103,13 +114,93 @@ final class StoreReportParticipantScopeServices
         if (in_array($subjectType, ['sales_order', 'report_row'], true)) {
             $order = Db::name('cashier_v3_sales_order')->alias('subject_order')
                 ->where('subject_order.tenant_id', $tenantId)->where('subject_order.order_id', $subjectKey);
-            $this->applyOrder($order, 'subject_order.order_id', $employeeId);
-            $row = $order->field('subject_order.store_id,subject_order.order_id')->find();
+            if ($employeeId > 0) $this->applyOrder($order, 'subject_order.order_id', $employeeId);
+            $row = $order->field('subject_order.id,subject_order.store_id,subject_order.order_id')->find();
             if (is_array($row)) return [
                 'store_id' => (int)$row['store_id'],
+                'source_fact_id' => (int)$row['id'],
                 'source_order_id' => (string)$row['order_id'],
                 'source_line_id' => '',
             ];
+        }
+        if ($subjectType === 'business_event_line') {
+            if (strpos($subjectKey, 'payment-allocation:') === 0) {
+                $parts = explode(':', substr($subjectKey, strlen('payment-allocation:')), 2);
+                $allocationId = (string)($parts[0] ?? '');
+                $itemAllocationId = (string)($parts[1] ?? '');
+                $payment = Db::name('cashier_v3_payment_sale_allocation_fact')->alias('subject_payment')
+                    ->where('subject_payment.tenant_id', $tenantId)
+                    ->where('subject_payment.allocation_fact_id', $allocationId)
+                    ->where('subject_payment.status', 'effective');
+                if ($employeeId > 0) $this->applyOrder($payment, 'subject_payment.order_id', $employeeId);
+                $row = $payment->field('subject_payment.id,subject_payment.store_id,subject_payment.order_id,subject_payment.source_line_id')->find();
+                if (is_array($row) && $itemAllocationId !== '') {
+                    $itemExists = Db::name('cashier_v3_card_sale_item_allocation_fact')
+                        ->where('tenant_id', $tenantId)->where('allocation_fact_id', $itemAllocationId)
+                        ->where('order_id', (string)$row['order_id'])
+                        ->where('source_line_id', (string)$row['source_line_id'])
+                        ->where('status', 'effective')->value('id');
+                    if (!$itemExists) return null;
+                }
+                if (is_array($row)) return [
+                    'store_id' => (int)$row['store_id'], 'source_fact_id' => (int)$row['id'],
+                    'source_order_id' => (string)$row['order_id'],
+                    'source_line_id' => (string)$row['source_line_id'],
+                ];
+            }
+            if (strpos($subjectKey, 'service:') === 0) {
+                $serviceFactId = substr($subjectKey, strlen('service:'));
+                $service = Db::name('cashier_v3_entitlement_service_fact')->alias('subject_service')
+                    ->leftJoin(
+                        'cashier_v3_entitlement_writeoff_fact subject_writeoff',
+                        "subject_writeoff.tenant_id=subject_service.tenant_id"
+                        . " AND subject_writeoff.checkout_request_id=subject_service.checkout_request_id"
+                        . " AND subject_writeoff.source_line_id=subject_service.source_line_id"
+                        . " AND subject_writeoff.status='effective'"
+                    )
+                    ->where('subject_service.tenant_id', $tenantId)
+                    ->where('subject_service.service_fact_id', $serviceFactId)
+                    ->where('subject_service.service_status', 'completed');
+                if ($employeeId > 0) $this->applyCheckout($service, 'subject_service.checkout_request_id', $employeeId);
+                $row = $service->field('subject_service.id,subject_service.store_id,subject_writeoff.origin_order_id,subject_service.source_line_id')->find();
+                if (is_array($row)) return [
+                    'store_id' => (int)$row['store_id'], 'source_fact_id' => (int)$row['id'],
+                    'source_order_id' => (string)$row['origin_order_id'],
+                    'source_line_id' => (string)$row['source_line_id'],
+                ];
+            }
+            if (strpos($subjectKey, 'card-operation:') === 0) {
+                $operationId = substr($subjectKey, strlen('card-operation:'));
+                $operation = Db::name('cashier_v3_card_operation')->alias('subject_operation')
+                    ->where('subject_operation.tenant_id', $tenantId)
+                    ->where('subject_operation.operation_id', $operationId)
+                    ->where('subject_operation.operation_status', 'succeeded')
+                    ->where('subject_operation.operation_type', 'card_upgrade');
+                if ($employeeId > 0) $this->applyCheckout($operation, 'subject_operation.checkout_request_id', $employeeId);
+                $row = $operation->field('subject_operation.id,subject_operation.store_id,subject_operation.origin_order_id,subject_operation.operation_id')->find();
+                if (is_array($row)) return [
+                    'store_id' => (int)$row['store_id'], 'source_fact_id' => (int)$row['id'],
+                    'source_order_id' => (string)$row['origin_order_id'],
+                    'source_line_id' => (string)$row['operation_id'],
+                ];
+            }
+            if (strpos($subjectKey, 'card-operation-line:') === 0) {
+                $operationLineId = substr($subjectKey, strlen('card-operation-line:'));
+                $operation = Db::name('cashier_v3_card_operation_line')->alias('subject_operation_line')
+                    ->join('cashier_v3_card_operation subject_operation', 'subject_operation.tenant_id=subject_operation_line.tenant_id AND subject_operation.operation_id=subject_operation_line.operation_id')
+                    ->where('subject_operation_line.tenant_id', $tenantId)
+                    ->where('subject_operation_line.operation_line_id', $operationLineId)
+                    ->where('subject_operation_line.line_role', 'source_project')
+                    ->where('subject_operation.operation_status', 'succeeded')
+                    ->whereIn('subject_operation.operation_type', ['project_upgrade', 'project_replacement']);
+                if ($employeeId > 0) $this->applyCheckout($operation, 'subject_operation.checkout_request_id', $employeeId);
+                $row = $operation->field('subject_operation_line.id,subject_operation.store_id,subject_operation.origin_order_id,subject_operation_line.operation_line_id')->find();
+                if (is_array($row)) return [
+                    'store_id' => (int)$row['store_id'], 'source_fact_id' => (int)$row['id'],
+                    'source_order_id' => (string)$row['origin_order_id'],
+                    'source_line_id' => (string)$row['operation_line_id'],
+                ];
+            }
         }
         return null;
     }
@@ -127,5 +218,13 @@ final class StoreReportParticipantScopeServices
     private function assertEmployee(int $employeeId): void
     {
         if ($employeeId <= 0) throw new \InvalidArgumentException('个人数据权限缺少有效员工身份');
+    }
+
+    private function tenantFieldFor(string $factField): string
+    {
+        if (preg_match('/^([A-Za-z_][A-Za-z0-9_]*)\.[A-Za-z_][A-Za-z0-9_]*$/D', $factField, $matches) !== 1) {
+            throw new \InvalidArgumentException('报表参与范围缺少明确事实别名');
+        }
+        return $matches[1] . '.tenant_id';
     }
 }

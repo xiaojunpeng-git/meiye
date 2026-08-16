@@ -51,6 +51,10 @@ export const queryStoreBusinessReportPersonnel = (query = {}, runtime = STORE_BU
   if (isPlatformRuntime(runtime)) return request(runtime, endpoint(runtime, 'unified/personnel'), query)
   throw new Error('当前门店端人员选择器应由收银会话服务处理。')
 }
+export const queryStoreBusinessReportCategories = (runtime = STORE_BUSINESS_REPORT_RUNTIME.STORE) => {
+  if (isPlatformRuntime(runtime)) return request(runtime, endpoint(runtime, 'operations/categories'))
+  throw new Error('商品分类选择器仅由平台报表运行时读取。')
+}
 export const listStoreBusinessReportAnnotations = (query = {}, runtime = STORE_BUSINESS_REPORT_RUNTIME.STORE) => request(runtime, endpoint(runtime, 'operations/annotations'), query)
 
 async function write(runtime, path, body = {}) {

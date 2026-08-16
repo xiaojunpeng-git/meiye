@@ -15,11 +15,13 @@ import {
   queryStoreBusinessReportCatalog,
   queryStoreBusinessReportScope,
   queryStoreBusinessReportPersonnel,
+  queryStoreBusinessReportCategories,
   saveStoreBusinessReportAnnotation,
   STORE_BUSINESS_REPORT_RUNTIME
 } from '@/services/storeBusinessReportApi'
 
-const COVERAGE_START = '2026-08-10'
+const COVERAGE_START = '2026-08-17'
+const PERFORMANCE_DISTRIBUTION_MIN_MONTH = addMonths(firstCompleteMonth(COVERAGE_START), 1)
 const DEFAULT_LIMIT = 20
 // 门店运营报表目录。经营看板是数据入口，不属于本目录；
 // 报表结果、金额和筛选能力全部由统一查询服务返回，浏览器不参与计算。
@@ -43,6 +45,14 @@ const REPORT_TABS = Object.freeze([
   { code: 'salesperson_large_order_statistics', name: '销售人生美大单统计表' },
   { code: 'store_refund_ledger', name: '院店退款台账' }
 ])
+const SIX_DIMENSION_REPORT_TABS = Object.freeze([
+  { code: 'six_dimension_item_deal_analysis', name: '品项成交分析表' },
+  { code: 'six_dimension_cash_consumption_analysis', name: '现金消费分析表' },
+  { code: 'six_dimension_consumption_refund_detail', name: '消耗及退款明细' },
+  { code: 'six_dimension_performance_deal', name: '业绩成交表' },
+  { code: 'six_dimension_performance_distribution', name: '业绩分布表' },
+  { code: 'six_dimension_performance_market_distribution', name: '业绩市场分布表' }
+])
 const PERSON_FILTERS = Object.freeze([
   ['salesperson_id', '销售人编号'],
   ['sales_manager_id', '销售经理编号'],
@@ -59,13 +69,17 @@ const loading = ref(false)
 const exporting = ref(false)
 const errorMessage = ref('')
 const startDate = ref(COVERAGE_START)
-const endDate = ref(today())
+const endDate = ref(today() < COVERAGE_START ? COVERAGE_START : today())
+const selectedMonth = ref(today().slice(0, 7) < PERFORMANCE_DISTRIBUTION_MIN_MONTH
+  ? PERFORMANCE_DISTRIBUTION_MIN_MONTH
+  : today().slice(0, 7))
 const categoryId = ref('')
 const categoryPath = ref('')
 const productType = ref('')
 const partnerName = ref('')
 const personFilters = ref({})
 const dynamicFilters = ref({})
+const categoryOptions = ref([])
 const isAdvancedFiltersOpen = ref(false)
 const personnelPicker = ref({
   open: false,
@@ -202,7 +216,7 @@ const FIELD_LOGIC = Object.freeze({
 function fieldLogic(column) {
   const key = String(column?.key || '')
   const label = String(column?.label || '该字段')
-  const serverLogic = String(column?.logic || column?.explanation || column?.source_description || '').trim()
+  const serverLogic = String(column?.source_explanation || column?.logic || column?.explanation || column?.source_description || '').trim()
   if (serverLogic) return serverLogic
   if (FIELD_LOGIC[key]) return FIELD_LOGIC[key]
   if (key.startsWith('payment_')) return `本单使用“${label}”且成功记账的金额；未使用或未成功记账时显示 0。`
@@ -220,9 +234,15 @@ function fieldLogic(column) {
   return `“${label}”按当前查询条件展示本表对应的业务结果。`
 }
 
+function columnDisplayLabel(column) {
+  const group = String(column?.group_label || column?.groupLabel || column?.group || '').trim()
+  const label = String(column?.label || '未命名字段').trim()
+  return group && group !== label ? `${group}/${label}` : label
+}
+
 const currentFieldExplanations = computed(() => columns.value.map((column) => ({
   key: String(column?.key || ''),
-  label: String(column?.label || '未命名字段'),
+  label: columnDisplayLabel(column),
   logic: fieldLogic(column)
 })))
 const scopeTreeOptions = computed(() => {
@@ -241,18 +261,32 @@ const scopeTreeOptions = computed(() => {
 const serverCatalogByCode = computed(() => new Map(
   catalog.value.filter((item) => item && item.code).map((item) => [item.code, item])
 ))
-const reportTabs = computed(() => REPORT_TABS.map((tab) => ({
+function isPlatformRuntimeRoute() {
+  return route.meta.platformReport === true || String(route.path || '').startsWith('/platform/')
+}
+const allowedReportTabs = computed(() => {
+  const tabs = isPlatformRuntimeRoute() ? SIX_DIMENSION_REPORT_TABS : REPORT_TABS
+  if (!serverCatalogByCode.value.size) return tabs
+  const authorized = tabs.filter((tab) => serverCatalogByCode.value.has(tab.code))
+  return authorized.length ? authorized : tabs
+})
+const reportTabs = computed(() => allowedReportTabs.value.map((tab) => ({
   // 历史目录名称可能仍保留在服务器配置中，门店端以已确认的标准名称为准。
   ...(serverCatalogByCode.value.get(tab.code) || {}),
   ...tab
 })))
 const isFirstPhaseReport = computed(() => REPORT_TABS.slice(0, 6).some((item) => item.code === activeReport.value))
+const isSixDimensionReport = computed(() => SIX_DIMENSION_REPORT_TABS.some((item) => item.code === activeReport.value))
+const usesNaturalMonthFilter = computed(() => activeReport.value === 'six_dimension_performance_distribution')
 const columns = computed(() => Array.isArray(result.value.columns) ? result.value.columns : [])
 const filterSchema = computed(() => {
   const schema = result.value.filter_schema || result.value.filterSchema
   return (Array.isArray(schema) ? schema : []).filter((field) => {
     const key = String(field?.key || '')
-    return key && !['organization', 'organization_id', 'store', 'store_id', 'store_ids', 'start_date', 'end_date'].includes(key)
+    const type = String(field?.type || '')
+    return key
+      && !['organization', 'organization_id', 'organization_store_scope', 'store', 'store_id', 'store_ids', 'start_date', 'end_date', 'date_range', 'month'].includes(key)
+      && !['organization_store_scope', 'date_range', 'month'].includes(type)
   })
 })
 const editableFields = computed(() => {
@@ -288,7 +322,7 @@ const tableHeaderHeight = computed(() => hasGroupedColumns.value ? '74px' : '40p
 const fixedLeftColumns = computed(() => columns.value.filter((column) => String(column?.fixed || '') === 'left'))
 const lastFixedLeftColumnKey = computed(() => String(fixedLeftColumns.value.at(-1)?.key || ''))
 const RESULT_COLUMN_KEYS = new Set(['actual_cash_performance', 'experience_cash', 'experience_payment_method'])
-const MANUAL_COLUMN_KEYS = new Set(['medical_elevation', 'medical_followup', 'expert_name', 'remark'])
+const MANUAL_COLUMN_KEYS = new Set(['medical_elevation', 'medical_followup', 'expert_name', 'remark', 'complaint_count'])
 
 function tableHeaderTone(column) {
   const key = String(column?.key || '')
@@ -353,7 +387,10 @@ function cellClasses(column) {
 }
 
 function fixedColumnStyle(column) {
-  if (String(column?.fixed || '') !== 'left') return {}
+  const declaredWidth = Number(column?.width || column?.fixed_width || column?.fixedWidth || 0)
+  if (String(column?.fixed || '') !== 'left') {
+    return declaredWidth > 0 ? { minWidth: `${declaredWidth}px`, width: `${declaredWidth}px` } : {}
+  }
   const fixedColumns = columns.value.filter((item) => String(item?.fixed || '') === 'left')
   let left = 0
   for (const item of fixedColumns) {
@@ -387,17 +424,21 @@ const columnGroups = computed(() => {
       const meta = {
         label: String(group?.label || group?.name || ''),
         tone: String(group?.tone || ''),
-        rowspan: Number(group?.rowspan || group?.row_span || 0)
+        rowspan: Number(group?.rowspan || group?.row_span || 0),
+        colspan: Number(group?.colspan || group?.col_span || 0)
       }
       keys.forEach((key) => { if (byKey.has(String(key))) groupMetaByKey.set(String(key), meta) })
     })
     const groups = []
     columns.value.forEach((column) => {
-      const meta = groupMetaByKey.get(String(column.key)) || { label: derivedHeaderGroupLabel(column), tone: '', rowspan: 0 }
+      const declaredRowspan = Number(column?.header_rowspan || column?.headerRowspan || 0)
+      const meta = groupMetaByKey.get(String(column.key)) || (declaredRowspan > 1
+        ? { label: String(column.label || ''), tone: String(column?.tone || ''), rowspan: declaredRowspan, colspan: 1 }
+        : { label: derivedHeaderGroupLabel(column), tone: '', rowspan: 0, colspan: 0 })
       const label = meta.label
       const current = groups[groups.length - 1]
-      if (!current || current.label !== label || current.tone !== meta.tone || current.rowspan !== meta.rowspan) {
-        groups.push({ label, tone: meta.tone, rowspan: meta.rowspan, columns: [] })
+      if (!current || current.label !== label || current.tone !== meta.tone || current.rowspan !== meta.rowspan || current.colspan !== meta.colspan) {
+        groups.push({ label, tone: meta.tone, rowspan: meta.rowspan, colspan: meta.colspan, columns: [] })
       }
       groups[groups.length - 1].columns.push(column)
     })
@@ -446,7 +487,8 @@ const canPageBack = computed(() => page.value > 1 && !loading.value)
 const canPageForward = computed(() => page.value < pageCount.value && !loading.value)
 const currentReportName = computed(() => reportTabs.value.find((item) => item.code === activeReport.value)?.name || '门店运营报表')
 const currentReportDescription = computed(() => reportTabs.value.find((item) => item.code === activeReport.value)?.description || '')
-const isPlatformReport = computed(() => route.meta.platformReport === true)
+const isPlatformReport = computed(isPlatformRuntimeRoute)
+const coveragePending = computed(() => isSixDimensionReport.value && today() < COVERAGE_START)
 const reportRuntime = computed(() => isPlatformReport.value ? STORE_BUSINESS_REPORT_RUNTIME.PLATFORM : STORE_BUSINESS_REPORT_RUNTIME.STORE)
 const reportRouteName = computed(() => isPlatformReport.value ? 'cashier-v3-platform-store-business-reports' : 'cashier-v3-store-business-reports')
 
@@ -456,11 +498,33 @@ function today() {
   return new Date(date.getTime() - offset).toISOString().slice(0, 10)
 }
 
+function addMonths(month, offset) {
+  const [year, monthNumber] = String(month).slice(0, 7).split('-').map(Number)
+  const value = new Date(year, monthNumber - 1 + offset, 1)
+  return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}`
+}
+
+function firstCompleteMonth(date) {
+  const month = String(date).slice(0, 7)
+  return String(date).slice(8, 10) === '01' ? month : addMonths(month, 1)
+}
+
+function monthBounds(month) {
+  const normalized = /^\d{4}-\d{2}$/.test(String(month || '')) ? String(month) : today().slice(0, 7)
+  const [year, monthNumber] = normalized.split('-').map(Number)
+  const lastDay = new Date(year, monthNumber, 0).getDate()
+  return { start: `${normalized}-01`, end: `${normalized}-${String(lastDay).padStart(2, '0')}` }
+}
+
 function reportParams(overrides = {}) {
+  const dates = usesNaturalMonthFilter.value
+    ? monthBounds(selectedMonth.value)
+    : { start: startDate.value, end: endDate.value }
   return {
     report: activeReport.value,
-    start_date: startDate.value,
-    end_date: endDate.value,
+    start_date: dates.start,
+    end_date: dates.end,
+    ...(usesNaturalMonthFilter.value ? { month: selectedMonth.value } : {}),
     category_id: categoryId.value,
     category_path: categoryPath.value,
     product_type: productType.value,
@@ -510,7 +574,28 @@ function toggleTabs() {
 
 function query() {
   page.value = 1
-  return loadReport()
+  return syncCurrentFiltersToRoute()
+}
+
+function currentRouteQuery() {
+  const params = reportParams({ page: undefined, limit: undefined })
+  const query = {}
+  Object.entries(params).forEach(([key, value]) => {
+    if (['report', 'page', 'limit'].includes(key) || value === undefined || value === null || value === '') return
+    query[key] = String(value)
+  })
+  if (scopePicker.value.selectedStoreIds.length) query.scope_label = scopePicker.value.label
+  return query
+}
+
+function syncCurrentFiltersToRoute() {
+  const target = {
+    name: reportRouteName.value,
+    params: { report: activeReport.value },
+    query: currentRouteQuery()
+  }
+  if (router.resolve(target).fullPath === route.fullPath) return loadReport()
+  return router.replace(target)
 }
 
 function previousPage() {
@@ -562,7 +647,7 @@ async function exportReport() {
     exportRecords.forEach((row) => lines.push(exportColumns.map((column) => csvValue(row?.[column.key])).join(',')))
     lines.push('')
     lines.push([csvValue('列名取值来源'), csvValue(`口径版本：${exported.metric_version || result.value.metric_version || '-'}`)].join(','))
-    exportColumns.forEach((column) => lines.push([csvValue(column.label), csvValue(fieldLogic(column))].join(',')))
+    exportColumns.forEach((column) => lines.push([csvValue(columnDisplayLabel(column)), csvValue(fieldLogic(column))].join(',')))
     const url = URL.createObjectURL(new Blob([`\ufeff${lines.join('\n')}`], { type: 'text/csv;charset=utf-8' }))
     const link = document.createElement('a')
     link.href = url
@@ -587,22 +672,25 @@ function formatCell(value) {
 
 function syncActiveReportFromRoute() {
   const requested = String(route.params.report || '').trim()
-  activeReport.value = REPORT_TABS.some((item) => item.code === requested)
+  activeReport.value = allowedReportTabs.value.some((item) => item.code === requested)
     ? requested
-    : REPORT_TABS[0].code
+    : String(allowedReportTabs.value[0]?.code || '')
   if (isFirstPhaseReport.value && startDate.value < COVERAGE_START) startDate.value = COVERAGE_START
-  if (!isFirstPhaseReport.value && startDate.value === COVERAGE_START) startDate.value = `${today().slice(0, 4)}-01-01`
+  if (!isFirstPhaseReport.value && !isSixDimensionReport.value && startDate.value === COVERAGE_START) startDate.value = `${today().slice(0, 4)}-01-01`
+  if (isSixDimensionReport.value && startDate.value < COVERAGE_START) startDate.value = COVERAGE_START
 }
 
 function syncFiltersFromRoute() {
   const query = route.query || {}
   if (query.start_date) startDate.value = String(query.start_date)
   if (query.end_date) endDate.value = String(query.end_date)
+  if (query.month && /^\d{4}-\d{2}$/.test(String(query.month))) selectedMonth.value = String(query.month)
+  else if (usesNaturalMonthFilter.value && query.start_date) selectedMonth.value = String(query.start_date).slice(0, 7)
   const storeIds = String(query.store_ids || '').split(',').map(Number).filter(Boolean)
   if (storeIds.length) {
     scopePicker.value = { ...scopePicker.value, selectedStoreIds: storeIds, label: String(query.scope_label || '下钻范围') }
   }
-  const reserved = new Set(['start_date', 'end_date', 'store_ids', 'scope_label'])
+  const reserved = new Set(['start_date', 'end_date', 'month', 'store_ids', 'scope_label'])
   dynamicFilters.value = Object.fromEntries(Object.entries(query)
     .filter(([key, value]) => !reserved.has(key) && value !== undefined && value !== '')
     .map(([key, value]) => [key, String(value)]))
@@ -683,7 +771,7 @@ function selectScopeOrganization(option) {
     open: true
   }
   page.value = 1
-  loadReport()
+  syncCurrentFiltersToRoute()
 }
 
 function selectScopeNode(option) {
@@ -699,13 +787,13 @@ function selectScopeStore(store) {
   if (!storeId) return
   scopePicker.value = { ...scopePicker.value, selectedStoreIds: [storeId], label: store?.name || `门店${storeId}`, open: false }
   page.value = 1
-  loadReport()
+  syncCurrentFiltersToRoute()
 }
 
 function chooseAllScope() {
   scopePicker.value = { ...scopePicker.value, selectedStoreIds: [], label: '当前权限范围', selectedOrganizationKey: '', selectedOrganizationName: '', stores: [], open: false }
   page.value = 1
-  loadReport()
+  syncCurrentFiltersToRoute()
 }
 
 function openPersonnelPicker(role, label, scope) {
@@ -799,16 +887,38 @@ function cancelEdit() {
 
 function manualFieldInputType(field) {
   const type = String(field?.type || field?.input_type || '').toLowerCase()
-  if (['date', 'datetime-local', 'number'].includes(type)) return type
+  if (['number', 'integer', 'money', 'decimal'].includes(type)) return 'number'
+  if (['date', 'datetime-local'].includes(type)) return type
   return 'text'
 }
 
 function manualFieldInputMode(field) {
+  if (field?.integer === true) return 'numeric'
   return ['money', 'decimal', 'number', 'integer'].includes(String(field?.type || field?.input_type || '').toLowerCase()) ? 'decimal' : undefined
+}
+
+function manualFieldStep(field) {
+  return field?.integer === true || String(field?.type || field?.input_type || '').toLowerCase() === 'integer' ? 1 : 'any'
 }
 
 function manualFieldIsSelect(field) {
   return String(field?.type || field?.input_type || '').toLowerCase() === 'select' && Array.isArray(field?.options)
+}
+
+function filterFieldOptions(field) {
+  if (String(field?.type || '') === 'category_tree') return categoryOptions.value
+  return Array.isArray(field?.options) ? field.options : []
+}
+
+async function loadCategoryOptions() {
+  if (!isPlatformReport.value || categoryOptions.value.length) return
+  const rows = await queryStoreBusinessReportCategories(reportRuntime.value)
+  const uniquePaths = new Map()
+  ;(Array.isArray(rows) ? rows : []).forEach((row) => {
+    const path = String(row?.category_path || row?.category_name || row?.name || '').trim()
+    if (path && !uniquePaths.has(path)) uniquePaths.set(path, { value: path, label: path })
+  })
+  categoryOptions.value = Array.from(uniquePaths.values()).sort((left, right) => left.label.localeCompare(right.label, 'zh-CN'))
 }
 
 async function saveEdit() {
@@ -829,6 +939,9 @@ async function saveEdit() {
         report_code: activeReport.value,
         subject_type: String(row?.annotation_subject_type || field?.subject_type || 'report_row'),
         subject_key: rowKey(row),
+        source_fact_id: Number(row?.source_fact_id || 0),
+        source_order_id: String(row?.source_order_id || ''),
+        source_line_id: String(row?.source_line_id || ''),
         field_key: field.key,
         field_value: value,
         expected_version: Number(row[`${field.key}_version`] ?? row?._field_versions?.[field.key] ?? 0),
@@ -839,6 +952,7 @@ async function saveEdit() {
       row._field_versions = { ...(row._field_versions || {}), [field.key]: Number(response?.version || 1) }
     }
     cancelEdit()
+    await loadReport()
   } catch (error) {
     errorMessage.value = error?.message || '保存报表补充内容失败。'
   } finally { savingEdit.value = false }
@@ -864,7 +978,7 @@ function canDrilldown(row, column) {
 function openDrilldown(row, column) {
   const config = drilldownConfig(row, column)
   const report = String(config?.report || config?.report_code || '')
-  if (!report || !REPORT_TABS.some((tab) => tab.code === report)) return
+  if (!report || !allowedReportTabs.value.some((tab) => tab.code === report)) return
   const params = { ...(config.params || config.query || {}) }
   const mapping = config.param_map || config.paramMap || {}
   Object.entries(mapping).forEach(([target, source]) => { params[target] = row?.[source] ?? '' })
@@ -898,6 +1012,11 @@ onMounted(async () => {
     const [response] = await Promise.all([queryStoreBusinessReportCatalog(reportRuntime.value), loadReportScope()])
     catalog.value = Array.isArray(response) ? response : []
     await loadReport()
+    if (filterSchema.value.some((field) => String(field?.type || '') === 'category_tree')) {
+      await loadCategoryOptions().catch((error) => {
+        errorMessage.value = error?.message || '商品分类读取失败，请稍后重试。'
+      })
+    }
     await nextTick()
     updateTabsLayout()
   } catch (error) {
@@ -909,7 +1028,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateTabsLayout))
 </script>
 
 <template>
-  <main class="store-business-report" :class="{ 'store-business-report--market-detail': activeReport === 'market_detail', 'store-business-report--fixed-table': usesFixedTableLayout }" aria-label="门店运营报表">
+  <main class="store-business-report" :class="{ 'store-business-report--market-detail': activeReport === 'market_detail', 'store-business-report--fixed-table': usesFixedTableLayout }" :aria-label="isSixDimensionReport ? '六维数据中心报表' : '门店运营报表'">
     <div v-if="!isPlatformReport" class="store-business-report__tabs-shell" :class="{ 'store-business-report__tabs-shell--expanded': tabsExpanded }">
       <nav ref="tabsElement" class="store-business-report__tabs" aria-label="门店运营报表功能">
         <button
@@ -978,12 +1097,15 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateTabsLayout))
           <footer><button type="button" @click="chooseAllScope">当前权限范围</button><span>选择组织查询其全部下级门店；选择门店仅查询该门店。</span></footer>
         </section>
       </div>
-      <label class="store-business-report__date-field"><span>从</span><input v-model="startDate" type="date" aria-label="开始日期" :min="isFirstPhaseReport ? COVERAGE_START : undefined" :max="endDate" /></label>
-      <label class="store-business-report__date-field"><span>至</span><input v-model="endDate" type="date" aria-label="结束日期" :min="startDate" :max="today()" /></label>
+      <label v-if="usesNaturalMonthFilter" class="store-business-report__date-field"><span>月份</span><input v-model="selectedMonth" type="month" aria-label="统计月份" :min="PERFORMANCE_DISTRIBUTION_MIN_MONTH" :max="today().slice(0, 7) < PERFORMANCE_DISTRIBUTION_MIN_MONTH ? PERFORMANCE_DISTRIBUTION_MIN_MONTH : today().slice(0, 7)" /></label>
+      <template v-else>
+        <label class="store-business-report__date-field"><span>从</span><input v-model="startDate" type="date" aria-label="开始日期" :min="isFirstPhaseReport || isSixDimensionReport ? COVERAGE_START : undefined" :max="endDate" /></label>
+        <label class="store-business-report__date-field"><span>至</span><input v-model="endDate" type="date" aria-label="结束日期" :min="startDate" :max="today() < COVERAGE_START ? COVERAGE_START : today()" /></label>
+      </template>
       <label v-for="field in filterSchema" :key="field.key">{{ field.label || field.name || field.key }}
-        <select v-if="field.type === 'select'" v-model="dynamicFilters[field.key]">
+        <select v-if="['select', 'category_tree'].includes(field.type)" v-model="dynamicFilters[field.key]">
           <option value="">{{ field.placeholder || '全部' }}</option>
-          <option v-for="option in (field.options || [])" :key="String(option.value ?? option.code)" :value="String(option.value ?? option.code)">{{ option.label ?? option.name }}</option>
+          <option v-for="option in filterFieldOptions(field)" :key="String(option.value ?? option.code)" :value="String(option.value ?? option.code)">{{ option.label ?? option.name }}</option>
         </select>
         <input
           v-else
@@ -1007,6 +1129,8 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateTabsLayout))
         </button>
       </div>
     </section>
+
+    <p v-if="coveragePending" class="store-business-report__coverage-notice" role="status">第三阶段统一事实从 {{ COVERAGE_START }} 开始完整统计，当前日期尚未进入覆盖期。</p>
 
     <section v-if="isFirstPhaseReport && isAdvancedFiltersOpen" class="store-business-report__filters store-business-report__filters--advanced" aria-label="报表高级筛选">
       <label>商品分类编号<input v-model.trim="categoryId" inputmode="numeric" placeholder="由分类选择器带入" /></label>
@@ -1038,7 +1162,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateTabsLayout))
         <table v-if="columns.length" :style="{ '--report-table-header-height': tableHeaderHeight }">
           <thead v-if="hasGroupedColumns">
             <tr>
-              <th v-for="(group, groupIndex) in columnGroups" :key="`${group.label}-${groupIndex}`" :class="headerGroupClasses(group, groupIndex)" :style="fixedGroupStyle(group)" :colspan="group.rowspan > 1 ? null : group.columns.length" :rowspan="group.rowspan > 1 ? group.rowspan : null">{{ group.label }}</th>
+              <th v-for="(group, groupIndex) in columnGroups" :key="`${group.label}-${groupIndex}`" :class="headerGroupClasses(group, groupIndex)" :style="fixedGroupStyle(group)" :colspan="group.rowspan > 1 ? null : (group.colspan || group.columns.length)" :rowspan="group.rowspan > 1 ? group.rowspan : null">{{ group.label }}</th>
               <th v-if="editableReport" rowspan="2" class="store-business-report__header-column store-business-report__header-column--manual">操作</th>
             </tr>
             <tr><th v-for="column in groupedHeaderColumns" :key="column.key" :class="headerColumnClasses(column)" :style="fixedColumnStyle(column)">{{ column.label }}</th></tr>
@@ -1049,7 +1173,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateTabsLayout))
               <td v-for="column in columns" :key="column.key" :class="cellClasses(column)" :style="fixedColumnStyle(column)">{{ formatCell(summaryRow[column.key]) }}</td>
               <td v-if="editableReport">-</td>
             </tr>
-            <tr v-for="(row, rowIndex) in records" :key="row.source_line_id || `${row.order_id || ''}:${rowIndex}`">
+            <tr v-for="(row, rowIndex) in records" :key="rowKey(row) || `${activeReport}:${rowIndex}`">
               <td v-for="column in columns" :key="column.key" :class="cellClasses(column)" :style="fixedColumnStyle(column)">
                 <template v-if="editingRow === row && editableFieldByKey.has(column.key)">
                   <select
@@ -1068,6 +1192,9 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateTabsLayout))
                     :type="manualFieldInputType(editableFieldByKey.get(column.key))"
                     :inputmode="manualFieldInputMode(editableFieldByKey.get(column.key))"
                     :maxlength="editableFieldByKey.get(column.key)?.max_length"
+                    :min="editableFieldByKey.get(column.key)?.min"
+                    :max="editableFieldByKey.get(column.key)?.max"
+                    :step="manualFieldStep(editableFieldByKey.get(column.key))"
                   />
                 </template>
                 <button v-else-if="canDrilldown(row, column)" type="button" class="store-business-report__drilldown" @click="openDrilldown(row, column)">{{ formatCell(row[column.key]) }}</button>
@@ -1185,6 +1312,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateTabsLayout))
 .store-business-report__person-results small { color: #7a8798; }
 .store-business-report__filters .button { min-height: 34px; }
 .store-business-report__error { border: 1px solid #ffcaca; border-radius: 7px; padding: 10px 14px; background: #fff5f5; color: #b42318; font-size: 13px; }
+.store-business-report__coverage-notice { border: 1px solid #f0d79e; border-radius: 7px; padding: 10px 14px; background: #fff9ec; color: #815c13; font-size: 13px; }
 .store-business-report__description { color: #687586; font-size: 12px; }
 .store-business-report__meta { display: flex; flex-wrap: wrap; gap: 8px 18px; color: #738095; font-size: 12px; }
 .store-business-report__meta .is-pending { color: #9a6509; }

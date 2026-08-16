@@ -9,6 +9,7 @@
 // +----------------------------------------------------------------------
 import BasicLayout from '@/layouts/basic-layout';
 import Setting from '@/setting';
+import { SIX_DIMENSION_REPORTS } from '@/libs/sixDimensionReports';
 
 const pre = 'report_';
 
@@ -50,6 +51,16 @@ export default {
       },
       component: () => import('@/pages/report/data/store_business')
     },
+    ...SIX_DIMENSION_REPORTS.map(report => ({
+      path: `six-dimension-center/${report.code}`,
+      name: `${pre}${report.code}`,
+      meta: {
+        auth: [`admin-report-six-dimension-${report.code}`],
+        title: report.title,
+        reportCode: report.code
+      },
+      component: () => import('@/pages/report/data/six_dimension')
+    })),
     {
       // Legacy URL: keep bookmarked links safe while the six reports move
       // into direct second-level menu entries.

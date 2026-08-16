@@ -15,9 +15,18 @@ use think\facade\Db;
 /** Cashier V3 门店经营报表的会话受控只读入口。 */
 class Report extends AuthController
 {
+    private const PLATFORM_ONLY_REPORTS = [
+        'six_dimension_item_deal_analysis', 'six_dimension_cash_consumption_analysis',
+        'six_dimension_consumption_refund_detail', 'six_dimension_performance_deal',
+        'six_dimension_performance_distribution', 'six_dimension_performance_market_distribution',
+    ];
+
     public function catalog(StoreUnifiedReportServices $services)
     {
-        return $this->success('ok', $services->catalog());
+        $catalog = array_values(array_filter($services->catalog(), function (array $report): bool {
+            return !$this->isPlatformOnlyReport((string)($report['code'] ?? ''));
+        }));
+        return $this->success('ok', $catalog);
     }
 
     public function scope(OrganizationScopeService $organizations)
@@ -69,12 +78,20 @@ class Report extends AuthController
 
     public function annotations(Request $request, StoreOperationsReportAnnotationServices $services)
     {
-        return $this->success('ok', $services->listAnnotations($this->annotationContext(true), $request->get()));
+        if ($this->isPlatformOnlyReport((string)$request->get('report_code', ''))) {
+            return app('json')->fail('该报表仅支持平台端访问');
+        }
+        try { return $this->success('ok', $services->listAnnotations($this->annotationContext(true), $request->get())); }
+        catch (\InvalidArgumentException $e) { return app('json')->fail($e->getMessage()); }
     }
 
     public function saveAnnotation(Request $request, StoreOperationsReportAnnotationServices $services)
     {
-        try { return $this->success('ok', $services->saveAnnotation($this->annotationContext(true), $request->post())); }
+        $payload = $request->post();
+        if ($this->isPlatformOnlyReport((string)($payload['report_code'] ?? ''))) {
+            return app('json')->fail('该报表仅支持平台端访问');
+        }
+        try { return $this->success('ok', $services->saveAnnotation($this->annotationContext(true), $payload)); }
         catch (\InvalidArgumentException $e) { return app('json')->fail($e->getMessage()); }
     }
 
@@ -98,6 +115,9 @@ class Report extends AuthController
         if ((int)$this->storeId <= 0) return app('json')->fail('门店未登录');
         try {
             $input = $request->getMore($this->inputRules());
+            if ($this->isPlatformOnlyReport((string)($input['report'] ?? ''))) {
+                return app('json')->fail('该报表仅支持平台端访问');
+            }
             $dataScope = $this->dataScope();
             if ($dataScope->authorizationMode() === CashierV3DataScopeContext::MODE_NONE) {
                 return app('json')->fail('当前账号没有可查看的数据范围');
@@ -170,5 +190,10 @@ class Report extends AuthController
             return Db::name('system_store')->whereIn('id', $requested)->where('is_del', 0)->where('is_show', 1)->column('id');
         }
         return array_values(array_unique(array_map('intval', Db::name('system_store')->where('is_del', 0)->where('is_show', 1)->column('id'))));
+    }
+
+    private function isPlatformOnlyReport(string $report): bool
+    {
+        return in_array(trim($report), self::PLATFORM_ONLY_REPORTS, true);
     }
 }

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace app\services\mobile\customer;
 
 use app\services\mobile\protocol\MobileApiException;
+use app\services\report\StoreUnifiedReportPhaseThreeFoundationServices;
 use app\services\user\UserServices;
 use think\facade\Db;
 
@@ -66,6 +67,18 @@ final class MobileCustomerCreateServices
             ]) !== 1) {
                 throw MobileApiException::business('LEGACY_PHONE_CONFLICT', '客户门店关系创建失败，请稍后重试。');
             }
+            (new StoreUnifiedReportPhaseThreeFoundationServices())->recordMemberStoreAssignmentInTx(
+                ['tenant_id' => '0'],
+                [
+                    'member_id' => $uid,
+                    'assigned' => true,
+                    'store_id' => $storeId,
+                    'effective_at' => $now,
+                    'source_type' => 'MOBILE_CUSTOMER_CREATE',
+                    'source_event_id' => (string)$uid,
+                    'idempotency_key' => 'phase3-member-store:mobile:' . $uid,
+                ]
+            );
             $storeName = (string)Db::name('system_store')->where('id', $storeId)->value('name');
             $result = ['customer' => [
                 'id' => (string)$uid, 'name' => $name, 'phone' => $phone,

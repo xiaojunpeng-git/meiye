@@ -91,6 +91,66 @@ final class StoreReportPaymentSaleAllocationFactServices
     }
 
     /**
+     * Mirrors lifecycle payment reversals onto the original sale-line
+     * allocation facts. The original allocation weights are the authority, so
+     * partial refunds and voids remain cent-conserving and line-exact.
+     *
+     * @param array<string,mixed> $context Lifecycle event snapshots.
+     * @param array<int,array<string,mixed>> $paymentFacts Reversal payment facts.
+     * @return array{inserted:int,replayed:int}
+     */
+    public function persistLifecycleReversalsInTx(array $context, array $paymentFacts): array
+    {
+        CashierV3TransactionGuard::assertInTransaction('storeReportLifecyclePaymentAllocationReversal');
+        $inserted = 0;
+        $replayed = 0;
+        foreach ($paymentFacts as $payment) {
+            $paymentFactId = trim((string)($payment['fact_id'] ?? ''));
+            $originalPaymentFactId = trim((string)($payment['reversal_of'] ?? ''));
+            $amount = (int)($payment['amount_cents'] ?? 0);
+            if ($paymentFactId === '' || $originalPaymentFactId === '' || $amount >= 0
+                || (string)($payment['fact_direction'] ?? '') !== CashierV3CheckoutFactPlanV1::DIRECTION_REVERSAL) {
+                throw new \InvalidArgumentException('lifecycle_payment_allocation_reversal_payment_invalid');
+            }
+            $originals = Db::name(self::TABLE)
+                ->where('tenant_id', (string)$context['tenant_id'])
+                ->where('payment_fact_id', $originalPaymentFactId)
+                ->where('status', CashierV3CheckoutFactPlanV1::STATUS_EFFECTIVE)
+                ->where('fact_direction', CashierV3CheckoutFactPlanV1::DIRECTION_FORWARD)
+                ->lock(true)->order('id', 'asc')->select()->toArray();
+            if ($originals === []) {
+                throw new \LogicException('lifecycle_payment_allocation_reversal_target_missing');
+            }
+            $weights = array_map(static function (array $original): array {
+                return [
+                    'fact_id' => (string)$original['allocation_fact_id'],
+                    'sale_amount_cents' => abs((int)$original['amount_cents']),
+                ];
+            }, $originals);
+            $allocations = self::allocatePaymentToSales(abs($amount), $weights);
+            foreach ($originals as $original) {
+                $allocationId = (string)$original['allocation_fact_id'];
+                $sale = [
+                    'fact_id' => (string)$original['sale_fact_id'],
+                    'source_line_id' => (string)$original['source_line_id'],
+                    'sale_amount_cents' => (int)$original['sale_amount_cents'],
+                    'debt_amount_cents' => (int)$original['debt_amount_cents'],
+                    'allocation_base_amount_cents' => (int)$original['allocation_base_amount_cents'],
+                ];
+                $result = $this->persistAllocation(
+                    $context,
+                    $payment,
+                    $sale,
+                    -(int)($allocations[$allocationId] ?? 0),
+                    $allocationId
+                );
+                $result === 'inserted' ? $inserted++ : $replayed++;
+            }
+        }
+        return compact('inserted', 'replayed');
+    }
+
+    /**
      * Largest-remainder allocation in cents. The sign comes from the payment
      * fact, allowing an immutable reversal to produce matching negative rows.
      *
@@ -105,17 +165,21 @@ final class StoreReportPaymentSaleAllocationFactServices
         return StoreReportPartnerCategorySnapshotServices::allocateAmountBySaleFact($paymentAmountCents, $sales);
     }
 
-    private function persistAllocation(array $context, array $payment, array $sale, int $amountCents): string
+    private function persistAllocation(
+        array $context,
+        array $payment,
+        array $sale,
+        int $amountCents,
+        string $reversalOfOverride = ''
+    ): string
     {
         $paymentFactId = trim((string)$payment['fact_id']);
         $saleFactId = trim((string)$sale['fact_id']);
         $naturalKey = 'payment-sale-allocation:' . $paymentFactId . ':' . $saleFactId;
         $reversalOf = '';
         if ((string)$payment['fact_direction'] === CashierV3CheckoutFactPlanV1::DIRECTION_REVERSAL) {
-            $reversalOf = $this->originalAllocationId(
-                (string)$context['tenant_id'],
-                (string)$payment['reversal_of'],
-                (string)$sale['source_line_id']
+            $reversalOf = $reversalOfOverride !== '' ? $reversalOfOverride : $this->originalAllocationId(
+                (string)$context['tenant_id'], (string)$payment['reversal_of'], (string)$sale['source_line_id']
             );
         }
         $row = [

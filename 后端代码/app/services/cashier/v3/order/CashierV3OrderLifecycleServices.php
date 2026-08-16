@@ -13,6 +13,7 @@ use app\services\cashier\v3\checkout\provider\CashierV3MemberBalanceProvider;
 use app\services\cashier\v3\event\CashierV3BusinessEventExecution;
 use app\services\cashier\v3\event\CashierV3BusinessEventRecorder;
 use app\services\cashier\v3\presale\CashierV3PresaleClaimServices;
+use app\services\report\StoreReportPaymentSaleAllocationFactServices;
 use think\facade\Db;
 
 /**
@@ -169,7 +170,23 @@ final class CashierV3OrderLifecycleServices
             (new CashierV3CardOperationReversalServices())->apply(
                 $cardOperationReversal, $action, $operationId, $operator, $dataScope, $now
             );
-            $this->writeFactReversals($source, $action, $financial, $operationId, $commandKey, $event, $operator, $dataScope, $now);
+            $paymentReversals = $this->writeFactReversals(
+                $source, $action, $financial, $operationId, $commandKey, $event, $operator, $dataScope, $now
+            );
+            (new StoreReportPaymentSaleAllocationFactServices())->persistLifecycleReversalsInTx([
+                'tenant_id' => $dataScope->tenantId(),
+                'organization_id' => $dataScope->organizationId(),
+                'store_id' => (int)$source['storeId'],
+                'member_id' => (int)$source['memberId'],
+                'order_id' => (string)$source['sourceId'],
+                'order_no_snapshot' => (string)$source['sourceNo'],
+                'business_date' => date('Y-m-d', $now),
+                'occurred_at' => $now,
+                'settled_at' => $now,
+                'recorded_at' => $now,
+                'business_event_no' => (string)$event['event_no'],
+                'checkout_request_id' => (string)$source['checkoutRequestId'],
+            ], $paymentReversals);
             $this->recordFinancialReversal($source, $action, $operationId, $commandKey, $input, $financial, $dataScope, $now);
         }
 
@@ -312,14 +329,19 @@ final class CashierV3OrderLifecycleServices
         );
     }
 
-    private function writeFactReversals(array $source, string $action, array $financial, string $operationId, string $commandKey, array $event, CashierV3OperatorScope $operator, CashierV3DataScopeContext $scope, int $now): void
+    /** @return array<int,array<string,mixed>> */
+    private function writeFactReversals(array $source, string $action, array $financial, string $operationId, string $commandKey, array $event, CashierV3OperatorScope $operator, CashierV3DataScopeContext $scope, int $now): array
     {
+        $paymentReversals = [];
         $tables = ['cashier_v3_sale_fact', 'cashier_v3_payment_fact', 'cashier_v3_performance_fact'];
         foreach ($tables as $table) {
             $rows = Db::name($table)->where('tenant_id', $scope->tenantId())->where('order_id', $source['sourceId'])
                 ->where('fact_direction', 'forward')->where('status', 'effective')->lock(true)->order('id', 'asc')->select()->toArray();
             if ($action === 'void-sales-order') {
-                foreach ($rows as $row) $this->insertReversal($table, $row, $operationId, $commandKey, $event, $operator, $now);
+                foreach ($rows as $row) {
+                    $reversal = $this->insertReversal($table, $row, $operationId, $commandKey, $event, $operator, $now);
+                    if ($table === 'cashier_v3_payment_fact') $paymentReversals[] = $reversal;
+                }
                 continue;
             }
             if ($table === 'cashier_v3_sale_fact') {
@@ -338,7 +360,10 @@ final class CashierV3OrderLifecycleServices
             if ($table === 'cashier_v3_payment_fact') {
                 $amounts = $this->allocateFactAmount($rows, (int)$financial['cashReversalCents'], 'amount_cents');
                 foreach ($rows as $index => $row) if (($amounts[$index] ?? 0) > 0) {
-                    $this->insertReversal($table, $row, $operationId, $commandKey, $event, $operator, $now, ['amount_cents' => -(int)$amounts[$index]]);
+                    $paymentReversals[] = $this->insertReversal(
+                        $table, $row, $operationId, $commandKey, $event, $operator, $now,
+                        ['amount_cents' => -(int)$amounts[$index]]
+                    );
                 }
                 continue;
             }
@@ -356,6 +381,7 @@ final class CashierV3OrderLifecycleServices
                 }
             }
         }
+        return $paymentReversals;
     }
 
     private function recordFinancialReversal(array $source, string $action, string $operationId, string $commandKey, array $input, array $financial, CashierV3DataScopeContext $scope, int $now): void
@@ -491,7 +517,8 @@ final class CashierV3OrderLifecycleServices
         return $out;
     }
 
-    private function insertReversal(string $table, array $source, string $operationId, string $commandKey, array $event, CashierV3OperatorScope $operator, int $now, array $amountOverrides = []): void
+    /** @return array<string,mixed> */
+    private function insertReversal(string $table, array $source, string $operationId, string $commandKey, array $event, CashierV3OperatorScope $operator, int $now, array $amountOverrides = []): array
     {
         $factId = 'OLR-' . strtoupper(substr(hash_hmac('sha256', $table . '|' . $source['fact_id'] . '|' . $operationId, $this->secret()), 0, 40));
         $row = $source; unset($row['id']);
@@ -507,6 +534,7 @@ final class CashierV3OrderLifecycleServices
         // their amount columns directly; fact_direction remains an audit tag.
         $row['immutable_fingerprint'] = hash('sha256', json_encode($row, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
         if ((int)Db::name($table)->insert($row) !== 1) throw self::failure('order_lifecycle_reversal_insert_failed');
+        return $row;
     }
 
     private function insertAdjustedPerformance(array $template, string $operationId, string $commandKey, array $event, CashierV3OperatorScope $operator, int $now, array $staff, string $role, string $factType, int $amount, string $lineId, bool $marked): void

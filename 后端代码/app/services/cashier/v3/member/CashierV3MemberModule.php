@@ -20,6 +20,7 @@ use app\services\cashier\v3\cashier\CashierV3EntitlementResourceVersionProvider;
 use app\services\cashier\v3\cashier\CashierV3CashierWorkspaceServices;
 use app\services\cashier\v3\cashier\CashierV3SaleCatalogServices;
 use app\services\cashier\v3\checkout\provider\CashierV3MemberBalanceProvider;
+use app\services\report\StoreUnifiedReportPhaseThreeFoundationServices;
 use mohe\services\SystemConfigService;
 use think\facade\Db;
 
@@ -1226,6 +1227,30 @@ final class CashierV3MemberModule
                 );
             }
         }
+        $phaseThreeFoundation = new StoreUnifiedReportPhaseThreeFoundationServices();
+        $phaseThreeFoundation->recordMemberOrigin(
+            ['tenant_id' => '0', 'operator_id' => (int)($operator['id'] ?? $operator['operator_id'] ?? $dataScope->operatorId())],
+            [
+                'member_id' => $uid,
+                'origin_type' => 'SYSTEM_CREATED',
+                'source_type' => 'CASHIER_V3_MEMBER_CREATE',
+                'source_id' => (string)$uid,
+                'member_created_at' => $now,
+                'idempotency_key' => 'phase3-member-origin:cashier-v3:' . $uid,
+            ]
+        );
+        $phaseThreeFoundation->recordMemberStoreAssignmentInTx(
+            ['tenant_id' => '0'],
+            [
+                'member_id' => $uid,
+                'assigned' => true,
+                'store_id' => $operatorScope->storeId(),
+                'effective_at' => $now,
+                'source_type' => 'CASHIER_V3_MEMBER_CREATE',
+                'source_event_id' => (string)$uid,
+                'idempotency_key' => 'phase3-member-store:cashier-v3:' . $uid,
+            ]
+        );
         if ((int)$profile['level_id'] > 0) {
             try {
                 /** @var \app\services\user\level\UserLevelServices $levelServices */
