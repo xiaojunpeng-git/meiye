@@ -380,6 +380,7 @@ class EmployeePersonCompleteWriteServices extends BaseServices
                 'employee_number', 'id_card', 'age', 'join_area', 'join_date', 'birthday_date',
                 'birthday_type', 'birthday_area', 'now_area', 'contract_begin', 'contract_end',
                 'salary_status', 'department',
+                'mentor_employee_id',
             ] as $field) {
                 $result[$field] = $staff[$field] ?? null;
             }
@@ -579,6 +580,7 @@ class EmployeePersonCompleteWriteServices extends BaseServices
                 'employee_number', 'id_card', 'age', 'join_area', 'join_date', 'birthday_date',
                 'birthday_type', 'birthday_area', 'now_area', 'contract_begin', 'contract_end',
                 'salary_status', 'department',
+                'mentor_employee_id',
             ] as $field) {
                 if (array_key_exists($field, $input)) {
                     $staffPayload[$field] = $input[$field];

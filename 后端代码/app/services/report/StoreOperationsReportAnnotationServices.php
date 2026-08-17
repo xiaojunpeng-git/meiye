@@ -27,6 +27,20 @@ final class StoreOperationsReportAnnotationServices
         'cross_industry_customer_detail', 'cross_industry_customer_summary',
         'new_customer_analysis',
         'six_dimension_consumption_refund_detail',
+        'operations_pre_sale_bdegh', 'operations_customer_status_bdegh', 'operations_referral_beautician_pre_sale',
+        'operations_performance_comparison', 'operations_health_data', 'operations_beauty_item',
+        'operations_annual_member_consumption', 'six_dimension_analysis', 'marketing_acquisition_pre_sale',
+        'marketing_referral_pre_sale', 'marketing_post_sale_performance', 'marketing_health_data',
+        'marketing_beauty_new_item', 'marketing_customer_status', 'product_monetization_performance_total',
+        'product_monetization_beauty_performance_total', 'product_monetization_beauty_item',
+        'product_monetization_beauty_market_distribution', 'product_monetization_six_dimension_performance',
+        'product_monetization_six_dimension_item_performance', 'product_monetization_six_dimension_efficiency',
+        'product_monetization_six_dimension_market_distribution', 'product_monetization_haomei_performance',
+        'product_monetization_private_performance', 'product_monetization_private_item_performance',
+        'product_monetization_private_efficiency', 'product_monetization_private_market_distribution',
+        'phase_six_garden_item_analysis', 'phase_six_monthly_featured_item', 'phase_six_headquarters_acquisition',
+        'phase_six_other_multi_payment', 'phase_six_salary_summary', 'phase_six_salary_detail',
+        'phase_six_training_employee', 'phase_six_acquisition_source', 'phase_six_human_store_health',
     ];
 
     private const FIELD_RULES = [
@@ -40,6 +54,28 @@ final class StoreOperationsReportAnnotationServices
         'cross_industry_customer_summary' => ['customer_acquired_at', 'partner_store_name'],
         'new_customer_analysis' => ['care_duration'],
         'six_dimension_consumption_refund_detail' => ['complaint_count'],
+        'operations_pre_sale_bdegh' => ['experience_people'],
+        'operations_referral_beautician_pre_sale' => ['experience_people'],
+        'marketing_acquisition_pre_sale' => ['experience_target', 'new_customer_target', 'new_customer_amount_target'],
+        'marketing_referral_pre_sale' => ['experience_target', 'new_customer_target', 'new_customer_amount_target'],
+        'operations_performance_comparison' => ['full_target_amount'],
+        'operations_health_data' => ['actual_staff'],
+        'marketing_health_data' => ['performance_target', 'required_staff', 'actual_staff'],
+        'product_monetization_beauty_performance_total' => ['target_amount'],
+        'product_monetization_beauty_market_distribution' => ['target_amount'],
+        'product_monetization_six_dimension_performance' => ['target_amount'],
+        'product_monetization_six_dimension_efficiency' => ['visit_count', 'new_visit_count'],
+        'product_monetization_six_dimension_market_distribution' => ['target_amount'],
+        'product_monetization_haomei_performance' => ['target_amount'],
+        'product_monetization_private_performance' => ['target_amount'],
+        'product_monetization_private_efficiency' => ['visit_count', 'new_visit_count'],
+        'product_monetization_private_market_distribution' => ['target_amount'],
+        'phase_six_garden_item_analysis' => ['expert_name'],
+        'phase_six_monthly_featured_item' => ['target_amount'],
+        'phase_six_other_multi_payment' => ['unit_price', '领取日期', '领取数量', '备注'],
+        'phase_six_salary_detail' => ['备注'],
+        'phase_six_training_employee' => ['mentor_name', 'exam_apply_time', 'exam_level', 'passed_level', 'skill_score', 'professional_score'],
+        'phase_six_human_store_health' => ['beautician_establishment_count'],
     ];
 
     private const FIELD_TYPES = [
@@ -48,8 +84,32 @@ final class StoreOperationsReportAnnotationServices
         'manual_cash_amount' => 'integer_cents',
         'visit_over_one_hour' => 'integer',
         'complaint_count' => 'nonnegative_integer',
+        'target_amount' => 'integer_cents',
+        'target_count' => 'nonnegative_integer',
+        'visit_count' => 'nonnegative_integer',
+        'new_visit_count' => 'nonnegative_integer',
+        'experience_people' => 'nonnegative_integer',
+        'experience_target' => 'nonnegative_integer',
+        'new_customer_target' => 'nonnegative_integer',
+        'new_customer_amount_target' => 'integer_cents',
+        'full_target_amount' => 'integer_cents',
+        'performance_target' => 'integer_cents',
+        'required_staff' => 'nonnegative_integer',
+        'actual_staff' => 'nonnegative_integer',
         'card_sale_date' => 'date',
         'customer_acquired_at' => 'date',
+        'unit_price' => 'integer_cents',
+        '领取日期' => 'date',
+        '领取数量' => 'nonnegative_integer',
+        '备注' => 'text',
+        'expert_name' => 'text',
+        'mentor_name' => 'text',
+        'exam_apply_time' => 'date',
+        'exam_level' => 'text',
+        'passed_level' => 'text',
+        'skill_score' => 'decimal',
+        'professional_score' => 'decimal',
+        'beautician_establishment_count' => 'nonnegative_integer',
     ];
 
     /** @return array<int,array<string,mixed>> */
@@ -88,7 +148,7 @@ final class StoreOperationsReportAnnotationServices
         $fieldKey = $this->fieldKey($reportCode, $payload['field_key'] ?? '');
         $idempotencyKey = $this->opaque($payload['idempotency_key'] ?? '', 'idempotency_key', 128);
         $value = (string)($payload['field_value'] ?? '');
-        $valueType = (string)(self::FIELD_TYPES[$fieldKey] ?? 'text');
+        $valueType = $this->fieldType($fieldKey);
         $this->validateFieldValue($valueType, $value);
         if (mb_strlen($value, 'UTF-8') > 65535) throw new \InvalidArgumentException('补充字段内容不能超过 65535 个字符');
         $storeId = (int)($payload['store_id'] ?? ($context['store_id'] ?? 0));
@@ -111,6 +171,8 @@ final class StoreOperationsReportAnnotationServices
             $sourceFactId = (int)$resolved['source_fact_id'];
             $sourceOrderId = (string)$resolved['source_order_id'];
             $sourceLineId = (string)$resolved['source_line_id'];
+        } elseif ($subjectType === 'phase_four_month') {
+            if ($storeId !== 0) throw new \InvalidArgumentException('月度手动字段只能保存到当前报表汇总行');
         } elseif ($scope['authorization_mode'] === 'self_participant') {
             $resolved = (new StoreReportParticipantScopeServices())->resolveSubject(
                 $scope['tenant_id'], $subjectType, $subjectKey, $scope['participant_employee_id']
@@ -121,7 +183,7 @@ final class StoreOperationsReportAnnotationServices
             $sourceOrderId = (string)$resolved['source_order_id'];
             $sourceLineId = (string)$resolved['source_line_id'];
         }
-        $this->assertStoreAllowed($scope, $storeId);
+        if ($storeId !== 0) $this->assertStoreAllowed($scope, $storeId);
         $organizationId = (string)($context['organization_id'] ?? '');
         $now = time();
 
@@ -150,7 +212,7 @@ final class StoreOperationsReportAnnotationServices
             $existing = $query->find();
             if (is_array($existing)) {
                 if ((int)$existing['store_id'] !== $storeId
-                    || ($scope['store_ids'] !== null && !in_array((int)$existing['store_id'], $scope['store_ids'], true))) {
+                    || ($scope['store_ids'] !== null && $storeId !== 0 && !in_array((int)$existing['store_id'], $scope['store_ids'], true))) {
                     throw new \InvalidArgumentException('补充记录不属于当前门店数据范围');
                 }
                 if ($expectedVersion <= 0 || $expectedVersion !== (int)$existing['version']) {
@@ -339,8 +401,16 @@ final class StoreOperationsReportAnnotationServices
     private function fieldKey(string $reportCode, $value): string
     {
         $key = trim((string)$value);
+        if ($reportCode === 'product_monetization_beauty_market_distribution'
+            && preg_match('/^company_[1-9][0-9]*_target_amount$/D', $key)) return $key;
         if (!in_array($key, self::FIELD_RULES[$reportCode] ?? [], true)) throw new \InvalidArgumentException('该报表字段不允许编辑');
         return $key;
+    }
+
+    private function fieldType(string $fieldKey): string
+    {
+        if (preg_match('/^company_[1-9][0-9]*_target_amount$/D', $fieldKey)) return 'integer_cents';
+        return (string)(self::FIELD_TYPES[$fieldKey] ?? 'text');
     }
 
     private function validateFieldValue(string $valueType, string $value): void

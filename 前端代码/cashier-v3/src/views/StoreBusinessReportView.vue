@@ -10,6 +10,12 @@ import ChevronRight from '@lucide/vue/dist/esm/icons/chevron-right.mjs'
 import Network from '@lucide/vue/dist/esm/icons/network.mjs'
 import { requestCashierV3Action } from '@/services/cashierV3Bridge'
 import {
+  PHASE_FOUR_ANNUAL_REPORT_CODES,
+  PHASE_FOUR_CROSS_END_REPORT_TABS,
+  PHASE_FOUR_REPORT_TABS
+} from '@/constants/phaseFourReports'
+import { PHASE_SIX_REPORTS, PHASE_SIX_REPORT_CODES, PHASE_SIX_CROSS_END_REPORT_TABS } from '@/constants/phaseSixReports'
+import {
   exportStoreBusinessReport,
   queryStoreBusinessReport,
   queryStoreBusinessReportCatalog,
@@ -42,7 +48,13 @@ const REPORT_TABS = Object.freeze([
   { code: 'new_customer_analysis_summary', name: '新客汇总表' },
   { code: 'new_customer_analysis', name: '新客明细表' },
   { code: 'salesperson_large_order_statistics', name: '销售人生美大单统计表' },
-  { code: 'store_refund_ledger', name: '院店退款台账' }
+  { code: 'store_refund_ledger', name: '院店退款台账' },
+  { code: 'phase_six_other_multi_payment', name: '其他多收款业绩表' },
+  { code: 'phase_six_salary_summary', name: '员工薪资汇总月报表' },
+  { code: 'phase_six_salary_detail', name: '员工薪资明细月报表' },
+  // The confirmed cross-end report is the only fourth-stage report exposed
+  // through the store Data menu; the remaining 26 stay platform-only.
+  { code: 'six_dimension_analysis', name: '六维数据分析表' }
 ])
 const SIX_DIMENSION_REPORT_TABS = Object.freeze([
   { code: 'six_dimension_item_deal_analysis', name: '品项成交分析表' },
@@ -52,6 +64,7 @@ const SIX_DIMENSION_REPORT_TABS = Object.freeze([
   { code: 'six_dimension_performance_distribution', name: '业绩分布表' },
   { code: 'six_dimension_performance_market_distribution', name: '业绩市场分布表' }
 ])
+const PHASE_SIX_REPORT_TABS = PHASE_SIX_REPORTS
 const PERSON_FILTERS = Object.freeze([
   ['salesperson_id', '销售人编号'],
   ['sales_manager_id', '销售经理编号'],
@@ -70,6 +83,7 @@ const errorMessage = ref('')
 const startDate = ref(LEGACY_COVERAGE_START)
 const endDate = ref(today() < LEGACY_COVERAGE_START ? LEGACY_COVERAGE_START : today())
 const selectedMonth = ref(today().slice(0, 7))
+const selectedYear = ref(today().slice(0, 4))
 const categoryId = ref('')
 const categoryPath = ref('')
 const productType = ref('')
@@ -232,9 +246,8 @@ function fieldLogic(column) {
 }
 
 function columnDisplayLabel(column) {
-  const group = String(column?.group_label || column?.groupLabel || column?.group || '').trim()
-  const label = String(column?.label || '未命名字段').trim()
-  return group && group !== label ? `${group}/${label}` : label
+  const labels = declaredHeaderPath(column).filter(Boolean)
+  return labels.join('/') || '未命名字段'
 }
 
 const currentFieldExplanations = computed(() => columns.value.map((column) => ({
@@ -258,15 +271,54 @@ const scopeTreeOptions = computed(() => {
 const serverCatalogByCode = computed(() => new Map(
   catalog.value.filter((item) => item && item.code).map((item) => [item.code, item])
 ))
+function requestedReportCode() {
+  const fromRoute = String(route.params.report || '').trim()
+  if (fromRoute) return fromRoute
+  // Some embedded Vue 2 -> Vue 3 iframe transitions retain the hash URL while
+  // Vue Router has not hydrated its optional parameter yet. The URL is still
+  // the authoritative navigation input, so recover only the declared code.
+  const matched = String(window.location.hash || '').match(/\/platform\/reports\/([^/?#]+)/)
+  if (!matched) return ''
+  try { return decodeURIComponent(matched[1]).trim() } catch (_) { return String(matched[1] || '').trim() }
+}
 function isPlatformRuntimeRoute() {
-  return route.meta.platformReport === true || String(route.path || '').startsWith('/platform/')
+  // The platform embeds this shared Vue 3 report page in an iframe. A directly
+  // opened cashier URL must remain a store-runtime request, so the store API can
+  // reject all platform-only phase-four report codes.
+  return (route.meta.platformReport === true || String(route.path || '').startsWith('/platform/'))
+    && window.top !== window
 }
 function isSixDimensionRoute() {
-  const requested = String(route.params.report || '').trim()
+  const requested = requestedReportCode()
   return SIX_DIMENSION_REPORT_TABS.some((tab) => tab.code === requested)
 }
+function isPhaseFourRoute() {
+  const requested = requestedReportCode()
+  return PHASE_FOUR_REPORT_TABS.some((tab) => tab.code === requested)
+}
+function isPhaseSixRoute() {
+  return PHASE_SIX_REPORT_CODES.includes(requestedReportCode())
+}
+const blocksDirectPlatformOnlyReport = computed(() => {
+  const requested = requestedReportCode()
+  const phaseFourBlocked = PHASE_FOUR_REPORT_TABS.some((tab) => tab.code === requested)
+    && !PHASE_FOUR_CROSS_END_REPORT_TABS.some((tab) => tab.code === requested)
+  const phaseSixBlocked = PHASE_SIX_REPORT_CODES.includes(requested)
+    && !['phase_six_other_multi_payment', 'phase_six_salary_summary', 'phase_six_salary_detail'].includes(requested)
+  return !isPlatformRuntimeRoute() && (phaseFourBlocked || phaseSixBlocked)
+})
 const allowedReportTabs = computed(() => {
-  const tabs = isSixDimensionRoute() ? SIX_DIMENSION_REPORT_TABS : REPORT_TABS
+  const requested = requestedReportCode()
+  if (blocksDirectPlatformOnlyReport.value) return []
+  const tabs = isSixDimensionRoute()
+    ? SIX_DIMENSION_REPORT_TABS
+    : isPhaseFourRoute()
+      ? (PHASE_FOUR_CROSS_END_REPORT_TABS.some((tab) => tab.code === requested)
+          ? PHASE_FOUR_CROSS_END_REPORT_TABS
+          : isPlatformRuntimeRoute() ? PHASE_FOUR_REPORT_TABS.filter((tab) => !PHASE_FOUR_CROSS_END_REPORT_TABS.some((crossEnd) => crossEnd.code === tab.code)) : PHASE_FOUR_CROSS_END_REPORT_TABS)
+      : isPhaseSixRoute()
+        ? (isPlatformRuntimeRoute() ? PHASE_SIX_REPORT_TABS : PHASE_SIX_CROSS_END_REPORT_TABS)
+        : REPORT_TABS
   if (!serverCatalogByCode.value.size) return tabs
   const authorized = tabs.filter((tab) => serverCatalogByCode.value.has(tab.code))
   return authorized.length ? authorized : tabs
@@ -278,7 +330,9 @@ const reportTabs = computed(() => allowedReportTabs.value.map((tab) => ({
 })))
 const isFirstPhaseReport = computed(() => REPORT_TABS.slice(0, 6).some((item) => item.code === activeReport.value))
 const isSixDimensionReport = computed(() => SIX_DIMENSION_REPORT_TABS.some((item) => item.code === activeReport.value))
-const usesNaturalMonthFilter = computed(() => activeReport.value === 'six_dimension_performance_distribution')
+const isPhaseFourReport = computed(() => PHASE_FOUR_REPORT_TABS.some((item) => item.code === activeReport.value))
+const isPhaseSixReport = computed(() => PHASE_SIX_REPORT_CODES.includes(activeReport.value))
+const usesNaturalMonthFilter = computed(() => ['six_dimension_performance_distribution', 'operations_beauty_item'].includes(activeReport.value))
 const columns = computed(() => Array.isArray(result.value.columns) ? result.value.columns : [])
 const filterSchema = computed(() => {
   const schema = result.value.filter_schema || result.value.filterSchema
@@ -287,11 +341,11 @@ const filterSchema = computed(() => {
     const type = String(field?.type || '')
     return key
       && !['organization', 'organization_id', 'organization_store_scope', 'store', 'store_id', 'store_ids', 'start_date', 'end_date', 'date_range', 'month'].includes(key)
-      && !['organization_store_scope', 'date_range', 'month'].includes(type)
-      // 门店端范围由登录会话固定，组织统计维度筛选只属于平台端。
-      && (isPlatformReport.value || !['company_dimension_id', 'city_manager_dimension_id'].includes(key))
+      && !['organization_store_scope', 'date_range', 'month', 'year'].includes(type)
   })
 })
+const usesAnnualYearFilter = computed(() => PHASE_FOUR_ANNUAL_REPORT_CODES.includes(activeReport.value)
+  || filterSchema.value.some((field) => String(field?.type || '') === 'year'))
 const editableFields = computed(() => {
   const declared = result.value.editable_fields || result.value.editableFields
   const entries = Array.isArray(declared) ? declared : []
@@ -300,6 +354,24 @@ const editableFields = computed(() => {
     : { ...field, key: String(field?.key || field?.field_key || '') }
   ).filter((field) => field.key)
   if (normalized.length) return normalized
+  // 第四阶段在列契约上声明可编辑字段。页面不按列名猜测，而是严格读取
+  // manual_input 的字段键、类型和稳定主题类型。
+  const fromColumns = columns.value
+    .filter((column) => column?.manual_input || column?.manualInput)
+    .map((column) => {
+      const manual = column.manual_input || column.manualInput || {}
+      const valueType = String(manual.value_type || manual.valueType || 'text')
+      return {
+        key: String(manual.field_key || manual.fieldKey || column.key),
+        label: String(column.label || ''),
+        type: valueType === 'integer_cents' ? 'money' : valueType,
+        integer: valueType === 'integer',
+        subject_type: String(manual.subject_type || manual.subjectType || ''),
+        subject_key_template: String(manual.subject_key_template || manual.subjectKeyTemplate || '')
+      }
+    })
+    .filter((field) => field.key)
+  if (fromColumns.length) return fromColumns
   if (activeReport.value === 'partner_item_detail') return PARTNER_MANUAL_FIELDS
   if (activeReport.value === 'member_consumption_detail') return [
     { key: 'experience_cash', label: '体验现金业绩', type: 'money' },
@@ -321,7 +393,7 @@ const usesFixedTableLayout = computed(() => {
   const layout = result.value.table_layout || result.value.tableLayout || {}
   return activeReport.value === 'market_detail' || layout.fixed === true
 })
-const tableHeaderHeight = computed(() => hasGroupedColumns.value ? '74px' : '40px')
+const tableHeaderHeight = computed(() => `${headerRows.value.length * 40}px`)
 const fixedLeftColumns = computed(() => columns.value.filter((column) => String(column?.fixed || '') === 'left'))
 const lastFixedLeftColumnKey = computed(() => String(fixedLeftColumns.value.at(-1)?.key || ''))
 const RESULT_COLUMN_KEYS = new Set(['actual_cash_performance', 'experience_cash', 'experience_payment_method'])
@@ -353,21 +425,6 @@ function derivedHeaderGroupLabel(column) {
   })[tableHeaderTone(column)]
 }
 
-function headerGroupClasses(group, groupIndex) {
-  const tone = String(group?.tone || tableHeaderTone(group.columns[0]))
-  const allFixedLeft = group.columns.length > 0 && group.columns.every((column) => String(column?.fixed || '') === 'left')
-  const lastKey = String(group.columns.at(-1)?.key || '')
-  return [
-    'store-business-report__header-group',
-    `store-business-report__header-group--${tone}`,
-    {
-      'store-business-report__header-group--group-end': groupIndex < columnGroups.value.length - 1 && Number(group?.rowspan) <= 1,
-      'store-business-report__column--sticky-left': allFixedLeft,
-      'store-business-report__column--fixed-last': allFixedLeft && lastKey === lastFixedLeftColumnKey.value
-    }
-  ]
-}
-
 function headerColumnClasses(column) {
   const tone = tableHeaderTone(column)
   return [
@@ -379,6 +436,30 @@ function headerColumnClasses(column) {
       'store-business-report__column--fixed-last': String(column.key) === lastFixedLeftColumnKey.value
     }
   ]
+}
+
+function headerCellClasses(cell) {
+  if (cell?.column) return headerColumnClasses(cell.column)
+  const tone = String(cell?.tone || tableHeaderTone(cell?.columns?.[0]))
+  const allFixedLeft = cell?.columns?.length > 0 && cell.columns.every((column) => String(column?.fixed || '') === 'left')
+  const lastKey = String(cell?.columns?.at(-1)?.key || '')
+  return [
+    'store-business-report__header-group',
+    `store-business-report__header-group--${tone}`,
+    {
+      'store-business-report__column--sticky-left': allFixedLeft,
+      'store-business-report__column--fixed-last': allFixedLeft && lastKey === lastFixedLeftColumnKey.value
+    }
+  ]
+}
+
+function headerCellStyle(cell, rowIndex) {
+  const style = cell?.column
+    ? fixedColumnStyle(cell.column)
+    : cell?.columns?.length && cell.columns.every((column) => String(column?.fixed || '') === 'left')
+      ? fixedColumnStyle(cell.columns[0])
+      : {}
+  return { ...style, '--report-header-row-index': String(rowIndex) }
 }
 
 function cellClasses(column) {
@@ -402,11 +483,6 @@ function fixedColumnStyle(column) {
   }
   const width = Number(column.fixed_width || column.fixedWidth || 100)
   return { left: `${left}px`, minWidth: `${width}px`, width: `${width}px` }
-}
-
-function fixedGroupStyle(group) {
-  if (!group?.columns?.length || !group.columns.every((column) => String(column?.fixed || '') === 'left')) return {}
-  return fixedColumnStyle(group.columns[0])
 }
 
 // 列和列分组由统一报表服务返回。支付方式、合作方、门店、康美单和系统
@@ -465,13 +541,103 @@ const columnGroups = computed(() => {
   })
   return groupedCount === columns.value.length && groups.length ? groups : []
 })
-const hasGroupedColumns = computed(() => columnGroups.value.length > 0)
-const groupedHeaderColumns = computed(() => {
-  const skipped = new Set()
-  columnGroups.value.forEach((group) => {
-    if (Number(group?.rowspan) > 1) group.columns.forEach((column) => skipped.add(String(column.key)))
-  })
-  return columns.value.filter((column) => !skipped.has(String(column.key)))
+function declaredHeaderPath(column) {
+  const raw = column?.header_path || column?.headerPath || column?.header_levels || column?.headerLevels
+  const declared = Array.isArray(raw) ? raw : typeof raw === 'string' ? raw.split('/').map((item) => item.trim()) : []
+  const labels = declared.map((item) => String(item?.label || item?.name || item || '').trim()).filter(Boolean)
+  if (labels.length) return labels
+  const group = String(column?.group_label || column?.groupLabel || column?.group || '').trim()
+  return group ? [group, String(column?.label || '')] : [String(column?.label || '')]
+}
+
+function headerPathPart(column, depth) {
+  const labels = declaredHeaderPath(column)
+  const label = String(labels[depth] || '')
+  // 叶子单元格用稳定列键区分，即使两个列名相同也不能被浏览器错误合并。
+  return { label, identity: depth === labels.length - 1 ? `column:${String(column?.key || '')}` : `group:${label}`, leaf: depth === labels.length - 1 }
+}
+
+function sameHeaderPrefix(left, right, depth) {
+  for (let index = 0; index <= depth; index += 1) {
+    if (headerPathPart(left, index).identity !== headerPathPart(right, index).identity) return false
+  }
+  return true
+}
+
+// 后端可用 header_path/header_levels 声明任意层级表头；旧契约的 group_label
+// 自动映射为两层。前端只排版，绝不以列名推断业绩分组或重新计算指标。
+function buildHeaderRows(reportColumns) {
+  if (!reportColumns.length) return []
+  const depth = Math.max(...reportColumns.map((column) => declaredHeaderPath(column).length), 1)
+  const rows = Array.from({ length: depth }, () => [])
+  for (let level = 0; level < depth; level += 1) {
+    let index = 0
+    while (index < reportColumns.length) {
+      const column = reportColumns[index]
+      const path = declaredHeaderPath(column)
+      if (level >= path.length) {
+        index += 1
+        continue
+      }
+      const part = headerPathPart(column, level)
+      let end = index + 1
+      while (end < reportColumns.length) {
+        const candidate = reportColumns[end]
+        const candidatePath = declaredHeaderPath(candidate)
+        if (level >= candidatePath.length || headerPathPart(candidate, level).leaf !== part.leaf || !sameHeaderPrefix(column, candidate, level)) break
+        end += 1
+      }
+      const leaf = part.leaf
+      rows[level].push({
+        label: part.label,
+        column: leaf ? column : null,
+        columns: reportColumns.slice(index, end),
+        tone: String(column?.tone || ''),
+        startIndex: index,
+        colspan: leaf ? 1 : end - index,
+        rowspan: leaf ? depth - level : 1
+      })
+      index = end
+    }
+  }
+  return rows
+}
+
+function explicitHeaderRows(rawRows, reportColumns) {
+  if (!Array.isArray(rawRows) || !rawRows.length || !reportColumns.length) return []
+  const byKey = new Map(reportColumns.map((column, index) => [String(column?.key || ''), { column, index }]))
+  const normalized = rawRows.map((rawRow) => {
+    const cells = Array.isArray(rawRow) ? rawRow : Array.isArray(rawRow?.cells) ? rawRow.cells : Array.isArray(rawRow?.columns) ? rawRow.columns : []
+    return cells.map((rawCell) => {
+      const keys = Array.isArray(rawCell?.column_keys)
+        ? rawCell.column_keys
+        : Array.isArray(rawCell?.columnKeys)
+          ? rawCell.columnKeys
+          : rawCell?.column_key || rawCell?.columnKey || rawCell?.key
+            ? [rawCell.column_key || rawCell.columnKey || rawCell.key]
+            : []
+      const resolved = keys.map((key) => byKey.get(String(key))).filter(Boolean)
+      if (!resolved.length) return null
+      const first = resolved[0]
+      const leaf = resolved.length === 1 && Number(rawCell?.colspan || rawCell?.col_span || 1) <= 1
+      return {
+        label: String(rawCell?.label || rawCell?.name || first.column?.label || ''),
+        column: leaf ? first.column : null,
+        columns: resolved.map((item) => item.column),
+        tone: String(rawCell?.tone || ''),
+        startIndex: first.index,
+        colspan: Number(rawCell?.colspan || rawCell?.col_span || resolved.length || 1),
+        rowspan: Number(rawCell?.rowspan || rawCell?.row_span || 1)
+      }
+    }).filter(Boolean)
+  }).filter((row) => row.length)
+  return normalized.length ? normalized : []
+}
+
+const headerRows = computed(() => {
+  const raw = result.value.header_rows || result.value.headerRows || result.value.header_levels || result.value.headerLevels
+  const declared = explicitHeaderRows(raw, columns.value)
+  return declared.length ? declared : buildHeaderRows(columns.value)
 })
 const reportColumnGroupEndKeys = computed(() => {
   const ends = new Set()
@@ -507,14 +673,22 @@ function monthBounds(month) {
   return { start: `${normalized}-01`, end: `${normalized}-${String(lastDay).padStart(2, '0')}` }
 }
 
+function yearBounds(year) {
+  const normalized = /^\d{4}$/.test(String(year || '')) ? String(year) : today().slice(0, 4)
+  return { start: `${normalized}-01-01`, end: `${normalized}-12-31` }
+}
+
 function reportParams(overrides = {}) {
-  const dates = usesNaturalMonthFilter.value
+  const dates = usesAnnualYearFilter.value
+    ? yearBounds(selectedYear.value)
+    : usesNaturalMonthFilter.value
     ? monthBounds(selectedMonth.value)
     : { start: startDate.value, end: endDate.value }
   return {
     report: activeReport.value,
     start_date: dates.start,
     end_date: dates.end,
+    ...(usesAnnualYearFilter.value ? { year: selectedYear.value } : {}),
     ...(usesNaturalMonthFilter.value ? { month: selectedMonth.value } : {}),
     category_id: categoryId.value,
     category_path: categoryPath.value,
@@ -530,6 +704,11 @@ function reportParams(overrides = {}) {
 }
 
 async function loadReport() {
+  if (blocksDirectPlatformOnlyReport.value) {
+    result.value = {}
+    errorMessage.value = '该报表仅支持平台端访问'
+    return
+  }
   if (!activeReport.value) return
   loading.value = true
   errorMessage.value = ''
@@ -606,17 +785,14 @@ function csvValue(value) {
   return /[",\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text
 }
 
-function exportGroupHeader(columns, rawGroups) {
-  const groupByColumn = new Map()
-  ;(Array.isArray(rawGroups) ? rawGroups : []).forEach((group) => {
-    const keys = Array.isArray(group?.column_keys)
-      ? group.column_keys
-      : Array.isArray(group?.columnKeys)
-        ? group.columnKeys
-        : []
-    keys.forEach((key) => groupByColumn.set(String(key), String(group?.label || group?.name || '')))
+function exportHeaderRows(exportColumns) {
+  return buildHeaderRows(exportColumns).map((headerRow) => {
+    const values = Array.from({ length: exportColumns.length }, () => '')
+    headerRow.forEach((cell) => {
+      values[cell.startIndex] = cell.label
+    })
+    return values
   })
-  return columns.map((column) => groupByColumn.get(String(column?.key || '')) || '')
 }
 
 async function exportReport() {
@@ -628,10 +804,9 @@ async function exportReport() {
     const exportColumns = Array.isArray(exported.columns) ? exported.columns : []
     const exportRecords = Array.isArray(exported.records) ? exported.records : []
     const summaryRow = exported.summary_row || exported.summaryRow
-    const groupHeader = exportGroupHeader(exportColumns, exported.column_groups || exported.columnGroups)
+    const headers = exportHeaderRows(exportColumns)
     const lines = []
-    if (groupHeader.some(Boolean)) lines.push(groupHeader.map(csvValue).join(','))
-    lines.push(exportColumns.map((column) => csvValue(column.label)).join(','))
+    headers.forEach((header) => lines.push(header.map(csvValue).join(',')))
     if (summaryRow && typeof summaryRow === 'object' && Object.keys(summaryRow).length) {
       lines.push(exportColumns.map((column) => csvValue(summaryRow[column.key] ?? '-')).join(','))
     }
@@ -662,13 +837,14 @@ function formatCell(value) {
 }
 
 function syncActiveReportFromRoute() {
-  const requested = String(route.params.report || '').trim()
+  const requested = requestedReportCode()
   activeReport.value = allowedReportTabs.value.some((item) => item.code === requested)
     ? requested
     : String(allowedReportTabs.value[0]?.code || '')
   if (isFirstPhaseReport.value && startDate.value < LEGACY_COVERAGE_START) startDate.value = LEGACY_COVERAGE_START
   if (!isFirstPhaseReport.value && !isSixDimensionReport.value && startDate.value === LEGACY_COVERAGE_START) startDate.value = `${today().slice(0, 4)}-01-01`
   if (isSixDimensionReport.value && startDate.value === LEGACY_COVERAGE_START) startDate.value = `${today().slice(0, 4)}-01-01`
+  if (usesAnnualYearFilter.value && !/^\d{4}$/.test(selectedYear.value)) selectedYear.value = today().slice(0, 4)
 }
 
 function syncFiltersFromRoute() {
@@ -677,11 +853,13 @@ function syncFiltersFromRoute() {
   if (query.end_date) endDate.value = String(query.end_date)
   if (query.month && /^\d{4}-\d{2}$/.test(String(query.month))) selectedMonth.value = String(query.month)
   else if (usesNaturalMonthFilter.value && query.start_date) selectedMonth.value = String(query.start_date).slice(0, 7)
+  if (query.year && /^\d{4}$/.test(String(query.year))) selectedYear.value = String(query.year)
+  else if (usesAnnualYearFilter.value && query.start_date) selectedYear.value = String(query.start_date).slice(0, 4)
   const storeIds = String(query.store_ids || '').split(',').map(Number).filter(Boolean)
   if (storeIds.length) {
     scopePicker.value = { ...scopePicker.value, selectedStoreIds: storeIds, label: String(query.scope_label || '下钻范围') }
   }
-  const reserved = new Set(['start_date', 'end_date', 'month', 'store_ids', 'scope_label'])
+  const reserved = new Set(['start_date', 'end_date', 'month', 'year', 'store_ids', 'scope_label'])
   dynamicFilters.value = Object.fromEntries(Object.entries(query)
     .filter(([key, value]) => !reserved.has(key) && value !== undefined && value !== '')
     .map(([key, value]) => [key, String(value)]))
@@ -857,6 +1035,7 @@ function rowKey(row) {
 
 function annotationStoreScope(row) {
   if (!isPlatformReport.value) return {}
+  if (String(row?.annotation_subject_type || '') === 'phase_four_month') return { store_id: 0 }
   const storeId = Number(row?.store_id || 0)
   if (storeId <= 0) throw new Error('当前报表行缺少门店归属，无法保存补充字段。')
   return { store_id: storeId }
@@ -896,6 +1075,17 @@ function manualFieldIsSelect(field) {
   return String(field?.type || field?.input_type || '').toLowerCase() === 'select' && Array.isArray(field?.options)
 }
 
+function manualFieldValueForSave(field, value) {
+  const text = String(value ?? '').trim()
+  if (text === '') return ''
+  if (String(field?.type || field?.input_type || '').toLowerCase() !== 'money') return text
+  if (!/^-?\d+(?:\.\d{1,2})?$/.test(text)) throw new Error('金额最多保留两位小数。')
+  const negative = text.startsWith('-')
+  const [whole, decimal = ''] = text.replace(/^-/, '').split('.')
+  const cents = Number(whole) * 100 + Number(`${decimal}00`.slice(0, 2))
+  return String(negative ? -cents : cents)
+}
+
 function filterFieldOptions(field) {
   if (String(field?.type || '') === 'category_tree') return categoryOptions.value
   return Array.isArray(field?.options) ? field.options : []
@@ -924,7 +1114,8 @@ async function saveEdit() {
   errorMessage.value = ''
   try {
     for (const field of changedFields) {
-      const value = String(editDraft.value[field.key] ?? '').trim()
+      const displayValue = String(editDraft.value[field.key] ?? '').trim()
+      const value = manualFieldValueForSave(field, displayValue)
       const response = await saveStoreBusinessReportAnnotation({
         ...annotationStoreScope(row),
         report_code: activeReport.value,
@@ -938,7 +1129,7 @@ async function saveEdit() {
         expected_version: Number(row[`${field.key}_version`] ?? row?._field_versions?.[field.key] ?? 0),
         idempotency_key: `ui-rpt-${Date.now().toString(36)}-${Math.random().toString(16).slice(2)}-${field.key.slice(0, 24)}`
       }, reportRuntime.value)
-      row[field.key] = value
+      row[field.key] = displayValue
       row[`${field.key}_version`] = Number(response?.version || 1)
       row._field_versions = { ...(row._field_versions || {}), [field.key]: Number(response?.version || 1) }
     }
@@ -1019,7 +1210,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateTabsLayout))
 </script>
 
 <template>
-  <main class="store-business-report" :class="{ 'store-business-report--market-detail': activeReport === 'market_detail', 'store-business-report--fixed-table': usesFixedTableLayout }" :aria-label="isSixDimensionReport ? '六维数据中心报表' : '门店运营报表'">
+  <main class="store-business-report" :class="{ 'store-business-report--market-detail': activeReport === 'market_detail', 'store-business-report--fixed-table': usesFixedTableLayout }" :aria-label="isSixDimensionReport ? '六维数据中心报表' : isPhaseFourReport ? '运营中心数据报表' : isPhaseSixReport ? '其他报表' : '门店运营报表'">
     <div v-if="!isPlatformReport" class="store-business-report__tabs-shell" :class="{ 'store-business-report__tabs-shell--expanded': tabsExpanded }">
       <nav ref="tabsElement" class="store-business-report__tabs" aria-label="门店运营报表功能">
         <button
@@ -1088,7 +1279,8 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateTabsLayout))
           <footer><button type="button" @click="chooseAllScope">当前权限范围</button><span>选择组织查询其全部下级门店；选择门店仅查询该门店。</span></footer>
         </section>
       </div>
-      <label v-if="usesNaturalMonthFilter" class="store-business-report__date-field"><span>月份</span><input v-model="selectedMonth" type="month" aria-label="统计月份" :max="today().slice(0, 7)" /></label>
+      <label v-if="usesAnnualYearFilter" class="store-business-report__date-field"><span>年份</span><input v-model="selectedYear" type="number" inputmode="numeric" min="2000" :max="today().slice(0, 4)" aria-label="统计年份" /></label>
+      <label v-else-if="usesNaturalMonthFilter" class="store-business-report__date-field"><span>月份</span><input v-model="selectedMonth" type="month" aria-label="统计月份" :max="today().slice(0, 7)" /></label>
       <template v-else>
         <label class="store-business-report__date-field"><span>从</span><input v-model="startDate" type="date" aria-label="开始日期" :min="isFirstPhaseReport ? LEGACY_COVERAGE_START : undefined" :max="endDate" /></label>
         <label class="store-business-report__date-field"><span>至</span><input v-model="endDate" type="date" aria-label="结束日期" :min="startDate" :max="today()" /></label>
@@ -1098,6 +1290,10 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateTabsLayout))
           <option value="">{{ field.placeholder || '全部' }}</option>
           <option v-for="option in filterFieldOptions(field)" :key="String(option.value ?? option.code)" :value="String(option.value ?? option.code)">{{ option.label ?? option.name }}</option>
         </select>
+        <template v-else-if="field.type === 'money_range'">
+          <input v-model.trim="dynamicFilters[field.min_key]" type="number" min="0" inputmode="decimal" placeholder="最低金额" />
+          <input v-model.trim="dynamicFilters[field.max_key]" type="number" min="0" inputmode="decimal" placeholder="最高金额" />
+        </template>
         <input
           v-else
           v-model.trim="dynamicFilters[field.key]"
@@ -1149,14 +1345,19 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateTabsLayout))
       <div v-if="pendingMetrics.length" class="store-business-report__pending"><strong>口径待确认</strong><span v-for="item in pendingMetrics" :key="item">{{ item }}</span></div>
       <div class="store-business-report__table-scroll">
         <table v-if="columns.length" :style="{ '--report-table-header-height': tableHeaderHeight }">
-          <thead v-if="hasGroupedColumns">
-            <tr>
-              <th v-for="(group, groupIndex) in columnGroups" :key="`${group.label}-${groupIndex}`" :class="headerGroupClasses(group, groupIndex)" :style="fixedGroupStyle(group)" :colspan="group.rowspan > 1 ? null : (group.colspan || group.columns.length)" :rowspan="group.rowspan > 1 ? group.rowspan : null">{{ group.label }}</th>
-              <th v-if="editableReport" rowspan="2" class="store-business-report__header-column store-business-report__header-column--manual">操作</th>
+          <thead>
+            <tr v-for="(headerRow, rowIndex) in headerRows" :key="`header-row-${rowIndex}`">
+              <th
+                v-for="(cell, cellIndex) in headerRow"
+                :key="`header-${rowIndex}-${cellIndex}-${cell.label}`"
+                :class="headerCellClasses(cell)"
+                :style="headerCellStyle(cell, rowIndex)"
+                :colspan="cell.colspan > 1 ? cell.colspan : null"
+                :rowspan="cell.rowspan > 1 ? cell.rowspan : null"
+              >{{ cell.label }}</th>
+              <th v-if="editableReport && rowIndex === 0" :rowspan="headerRows.length" class="store-business-report__header-column store-business-report__header-column--manual" :style="{ '--report-header-row-index': String(rowIndex) }">操作</th>
             </tr>
-            <tr><th v-for="column in groupedHeaderColumns" :key="column.key" :class="headerColumnClasses(column)" :style="fixedColumnStyle(column)">{{ column.label }}</th></tr>
           </thead>
-          <thead v-else><tr><th v-for="column in columns" :key="column.key" :class="headerColumnClasses(column)" :style="fixedColumnStyle(column)">{{ column.label }}</th><th v-if="editableReport" class="store-business-report__header-column store-business-report__header-column--manual">操作</th></tr></thead>
           <tbody>
             <tr v-if="summaryRow" class="store-business-report__summary-row">
               <td v-for="column in columns" :key="column.key" :class="cellClasses(column)" :style="fixedColumnStyle(column)">{{ formatCell(summaryRow[column.key]) }}</td>
@@ -1329,7 +1530,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateTabsLayout))
 .store-business-report table { width: 100%; border-collapse: separate; border-spacing: 0; white-space: nowrap; font-size: 13px; }
 .store-business-report th, .store-business-report td { border-bottom: 1px solid #edf1f5; padding: 11px 12px; text-align: left; }
 .store-business-report th { background: #fafbfd; color: #667386; font-size: 12px; font-weight: 600; }
-.store-business-report__header-group { box-sizing: border-box; height: 34px; border-bottom: 1px solid #dce4ed; padding-top: 8px; padding-bottom: 8px; color: #536274; text-align: center; }
+.store-business-report__header-group { box-sizing: border-box; height: 40px; border-bottom: 1px solid #dce4ed; padding-top: 10px; padding-bottom: 10px; color: #536274; text-align: center; }
 .store-business-report__header-column { box-sizing: border-box; height: 40px; border-top: 1px solid #e3eaf1; padding-top: 10px; padding-bottom: 10px; }
 .store-business-report__header-group--basic, .store-business-report__header-column--basic { background: #eef2f7; color: #536274; }
 .store-business-report__header-group--payment { background: #d9ecfa; color: #2d668c; }
@@ -1345,8 +1546,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateTabsLayout))
 .store-business-report__header-group--group-end, .store-business-report__header-column--group-end, .store-business-report__cell--group-end { border-right: 8px solid #f5f7fa; }
 .store-business-report td { color: #303946; }
 .store-business-report--market-detail table, .store-business-report--fixed-table table { width: max-content; min-width: 100%; }
-.store-business-report--market-detail thead th, .store-business-report--fixed-table thead th { position: sticky; top: 0; z-index: 5; }
-.store-business-report--fixed-table thead tr:nth-child(2) th { top: 34px; }
+.store-business-report--market-detail thead th, .store-business-report--fixed-table thead th { position: sticky; top: calc(var(--report-header-row-index, 0) * 40px); z-index: 5; }
 .store-business-report--market-detail .store-business-report__summary-row td { position: sticky; top: 40px; z-index: 4; }
 .store-business-report--fixed-table .store-business-report__summary-row td { position: sticky; top: var(--report-table-header-height); z-index: 4; }
 .store-business-report--market-detail .store-business-report__column--sticky-left, .store-business-report--fixed-table .store-business-report__column--sticky-left { position: sticky; z-index: 2; background: #fff; }

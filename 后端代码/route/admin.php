@@ -1650,6 +1650,8 @@ Route::group('adminapi', function () {
         Route::post('operations/category', 'v1.report.UnifiedReport/saveCategory')->option(['real_name' => '保存合作方分类配置']);
         Route::get('operations/annotations', 'v1.report.UnifiedReport/annotations')->option(['real_name' => '门店运营补充记录']);
         Route::post('operations/annotation', 'v1.report.UnifiedReport/saveAnnotation')->option(['real_name' => '保存门店运营补充记录']);
+        Route::get('phase-six/staffing', 'v1.report.UnifiedReport/phaseSixStaffing')->option(['real_name' => '第六阶段美容师编制人数']);
+        Route::post('phase-six/staffing', 'v1.report.UnifiedReport/savePhaseSixStaffing')->option(['real_name' => '保存第六阶段美容师编制人数']);
         Route::get('reportSale', 'v1.report.ReportData/reportSale')->name('reportColumn')->option(['real_name' => '报表列信息']);
         Route::get('operating_screen', 'v1.report.ReportData/operatingScreen')->name('operatingScreen')->option(['real_name' => '总部经营数据大屏']);
         Route::get('reportList', 'v1.report.ReportData/reportList')->name('reportList')->option(['real_name' => '报表列表']);

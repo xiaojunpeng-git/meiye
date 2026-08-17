@@ -5,6 +5,8 @@ namespace app\controller\cashier\v3;
 use app\controller\cashier\AuthController;
 use app\Request;
 use app\services\report\StoreUnifiedReportServices;
+use app\services\report\StoreUnifiedReportPhaseFourServices;
+use app\services\report\StoreUnifiedReportPhaseSixServices;
 use app\services\report\StoreOperationsReportAnnotationServices;
 use app\services\report\StoreReportParticipantScopeServices;
 use app\services\cashier\v3\bootstrap\CashierV3Bootstrap;
@@ -21,9 +23,9 @@ class Report extends AuthController
         'six_dimension_performance_distribution', 'six_dimension_performance_market_distribution',
     ];
 
-    public function catalog(StoreUnifiedReportServices $services)
+    public function catalog(StoreUnifiedReportServices $services, StoreUnifiedReportPhaseFourServices $phaseFour, StoreUnifiedReportPhaseSixServices $phaseSix)
     {
-        $catalog = array_values(array_filter($services->catalog(), function (array $report): bool {
+        $catalog = array_values(array_filter(array_merge($services->catalog(), $phaseFour::catalogEntries(false), $phaseSix::catalogEntries(false)), function (array $report): bool {
             return !$this->isPlatformOnlyReport((string)($report['code'] ?? ''));
         }));
         return $this->success('ok', $catalog);
@@ -55,14 +57,14 @@ class Report extends AuthController
         ]);
     }
 
-    public function query(Request $request, StoreUnifiedReportServices $services)
+    public function query(Request $request, StoreUnifiedReportServices $services, StoreUnifiedReportPhaseFourServices $phaseFour, StoreUnifiedReportPhaseSixServices $phaseSix)
     {
-        return $this->respond($request, $services, false);
+        return $this->respond($request, $services, $phaseFour, $phaseSix, false);
     }
 
-    public function export(Request $request, StoreUnifiedReportServices $services)
+    public function export(Request $request, StoreUnifiedReportServices $services, StoreUnifiedReportPhaseFourServices $phaseFour, StoreUnifiedReportPhaseSixServices $phaseSix)
     {
-        return $this->respond($request, $services, true);
+        return $this->respond($request, $services, $phaseFour, $phaseSix, true);
     }
 
     public function operationsCategories(StoreOperationsReportAnnotationServices $services)
@@ -110,7 +112,7 @@ class Report extends AuthController
         ];
     }
 
-    private function respond(Request $request, StoreUnifiedReportServices $services, bool $export)
+    private function respond(Request $request, StoreUnifiedReportServices $services, StoreUnifiedReportPhaseFourServices $phaseFour, StoreUnifiedReportPhaseSixServices $phaseSix, bool $export)
     {
         if ((int)$this->storeId <= 0) return app('json')->fail('门店未登录');
         try {
@@ -128,26 +130,17 @@ class Report extends AuthController
                     'mode' => CashierV3DataScopeContext::MODE_SELF_PARTICIPANT,
                     'employee_id' => $dataScope->employeeId(),
                 ];
-                $storeIds = $this->selfParticipantStoreIds($input);
+                $storeIds = $this->selfParticipantStoreIds($input, $dataScope);
             } else {
                 $storeIds = $this->scopeStoreIds($input, $dataScope);
             }
             if (!$storeIds) return app('json')->fail('当前账号没有可查看的门店范围');
-            $result = $export ? $services->export($storeIds, $input) : $services->query($storeIds, $input);
-            // 组织统计维度是平台报表的缩小条件。门店端范围由会话固定，
-            // 不向门店客户端下发无效的分公司/城市经理筛选控件。
-            if (!$export && is_array($result)) {
-                foreach (['filter_schema', 'filterSchema'] as $schemaKey) {
-                    if (!isset($result[$schemaKey]) || !is_array($result[$schemaKey])) continue;
-                    $result[$schemaKey] = array_values(array_filter(
-                        $result[$schemaKey],
-                        static function ($field): bool {
-                            $key = is_array($field) ? (string)($field['key'] ?? '') : '';
-                            return !in_array($key, ['company_dimension_id', 'city_manager_dimension_id'], true);
-                        }
-                    ));
-                }
-            }
+            $report = (string)($input['report'] ?? '');
+            $result = $phaseSix->supports($report)
+                ? $phaseSix->query($report, $storeIds, ['start' => (string)($input['start_date'] ?? ''), 'end' => (string)($input['end_date'] ?? '')], $export ? array_merge($input, ['_internal_all' => true]) : $input)
+                : ($phaseFour->supports($report)
+                ? $phaseFour->query($report, $storeIds, ['start' => (string)($input['start_date'] ?? ''), 'end' => (string)($input['end_date'] ?? '')], $export ? array_merge($input, ['_internal_all' => true]) : $input)
+                : ($export ? $services->export($storeIds, $input) : $services->query($storeIds, $input)));
             return $this->success('ok', $result);
         } catch (\InvalidArgumentException $exception) {
             return app('json')->fail($exception->getMessage());
@@ -166,6 +159,7 @@ class Report extends AuthController
             ['salesperson_id', 0], ['sales_manager_id', 0], ['guide_id', 0], ['craftsman_id', 0],
             ['store_ids', ''],
             ['dimension_code', ''], ['payment_method_code', ''], ['metric_code', ''],
+            ['unit_price_min', ''], ['unit_price_max', ''],
             ['mode', 'count'],
             ['page', 1], ['limit', 20],
         ];
@@ -195,19 +189,26 @@ class Report extends AuthController
         return $requested ? array_values(array_intersect($requested, $allowed)) : $allowed;
     }
 
-    private function selfParticipantStoreIds(array $input): array
+    /** Restrict personal reports before querying facts; service-level participant filters remain in force. */
+    private function selfParticipantStoreIds(array $input, $dataScope): array
     {
+        $operatorScope = CashierV3Bootstrap::dispatcher()->scopeResolver()
+            ->operatorScope((int)$this->storeId, (int)$this->cashierId);
+        $allowed = (new StoreReportParticipantScopeServices())->participatingStoreIds(
+            $operatorScope->tenantId(),
+            $dataScope->employeeId()
+        );
         $requested = $input['store_ids'] ?? '';
         if (is_string($requested)) $requested = preg_split('/[,\s]+/', trim($requested), -1, PREG_SPLIT_NO_EMPTY);
         $requested = array_values(array_unique(array_filter(array_map('intval', (array)$requested))));
-        if ($requested) {
-            return Db::name('system_store')->whereIn('id', $requested)->where('is_del', 0)->where('is_show', 1)->column('id');
-        }
-        return array_values(array_unique(array_map('intval', Db::name('system_store')->where('is_del', 0)->where('is_show', 1)->column('id'))));
+        return $requested ? array_values(array_intersect($requested, $allowed)) : $allowed;
     }
 
     private function isPlatformOnlyReport(string $report): bool
     {
-        return in_array(trim($report), self::PLATFORM_ONLY_REPORTS, true);
+        $report = trim($report);
+        return in_array($report, self::PLATFORM_ONLY_REPORTS, true)
+            || in_array($report, StoreUnifiedReportPhaseFourServices::platformOnlyReportCodes(), true)
+            || in_array($report, StoreUnifiedReportPhaseSixServices::platformOnlyReportCodes(), true);
     }
 }

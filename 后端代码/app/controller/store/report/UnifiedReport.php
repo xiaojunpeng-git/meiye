@@ -4,6 +4,8 @@ namespace app\controller\store\report;
 use app\controller\store\AuthController;
 use app\Request;
 use app\services\report\StoreUnifiedReportServices;
+use app\services\report\StoreUnifiedReportPhaseFourServices;
+use app\services\report\StoreUnifiedReportPhaseSixServices;
 use app\services\report\StoreOperationsReportAnnotationServices;
 
 class UnifiedReport extends AuthController
@@ -14,28 +16,28 @@ class UnifiedReport extends AuthController
         'six_dimension_performance_distribution', 'six_dimension_performance_market_distribution',
     ];
 
-    public function catalog(StoreUnifiedReportServices $services)
+    public function catalog(StoreUnifiedReportServices $services, StoreUnifiedReportPhaseFourServices $phaseFour, StoreUnifiedReportPhaseSixServices $phaseSix)
     {
-        $catalog = array_values(array_filter($services->catalog(), function (array $report): bool {
+        $catalog = array_values(array_filter(array_merge($services->catalog(), $phaseFour::catalogEntries(false), $phaseSix::catalogEntries(false)), function (array $report): bool {
             return !$this->isPlatformOnlyReport((string)($report['code'] ?? ''));
         }));
         return $this->success($catalog);
     }
     public function definitions(StoreUnifiedReportServices $services) { return $this->success($services->definitions()); }
-    public function query(Request $request, StoreUnifiedReportServices $services)
+    public function query(Request $request, StoreUnifiedReportServices $services, StoreUnifiedReportPhaseFourServices $phaseFour, StoreUnifiedReportPhaseSixServices $phaseSix)
     {
         if ((int)$this->storeId <= 0) return app('json')->fail('门店未登录');
         $input = $request->getMore($this->inputRules());
         if ($this->isPlatformOnlyReport((string)($input['report'] ?? ''))) return app('json')->fail('该报表仅支持平台端访问');
-        try { return $this->success($services->query((int)$this->storeId, $input)); }
+        try { $report = (string)($input['report'] ?? ''); return $this->success($phaseSix->supports($report) ? $phaseSix->query($report, [(int)$this->storeId], ['start' => (string)($input['start_date'] ?? ''), 'end' => (string)($input['end_date'] ?? '')], $input) : ($phaseFour->supports($report) ? $phaseFour->query($report, [(int)$this->storeId], ['start' => (string)($input['start_date'] ?? ''), 'end' => (string)($input['end_date'] ?? '')], $input) : $services->query((int)$this->storeId, $input))); }
         catch (\InvalidArgumentException $e) { return app('json')->fail($e->getMessage()); }
     }
-    public function export(Request $request, StoreUnifiedReportServices $services)
+    public function export(Request $request, StoreUnifiedReportServices $services, StoreUnifiedReportPhaseFourServices $phaseFour, StoreUnifiedReportPhaseSixServices $phaseSix)
     {
         if ((int)$this->storeId <= 0) return app('json')->fail('门店未登录');
         $input = $request->getMore($this->inputRules());
         if ($this->isPlatformOnlyReport((string)($input['report'] ?? ''))) return app('json')->fail('该报表仅支持平台端访问');
-        try { return $this->success($services->export((int)$this->storeId, $input)); }
+        try { $report = (string)($input['report'] ?? ''); if ($phaseSix->supports($report) || $phaseFour->supports($report)) { $result = ($phaseSix->supports($report) ? $phaseSix : $phaseFour)->query($report, [(int)$this->storeId], ['start' => (string)($input['start_date'] ?? ''), 'end' => (string)($input['end_date'] ?? '')], array_merge($input, ['_internal_all' => true])); return $this->success(['filename' => '统一数据报表-' . date('YmdHis') . '.csv', 'columns' => $result['columns'], 'records' => $result['records'], 'summary_row' => $result['summary_row'], 'column_groups' => $result['column_groups'], 'metric_version' => $result['metric_version']]); } return $this->success($services->export((int)$this->storeId, $input)); }
         catch (\InvalidArgumentException $e) { return app('json')->fail($e->getMessage()); }
     }
 
@@ -76,11 +78,14 @@ class UnifiedReport extends AuthController
     }
     private function inputRules(): array
     {
-        return [['report','partner_item_summary'],['start_date',''],['end_date',''],['dataset','sale'],['metric','cash_performance'],['item_id',''],['payment_method',''],['operator_id',0],['channel_id',0],['customer_segment','all'],['consumption_metric','cash'],['sleep_months',3],['year',0],['category_id',0],['category_path',''],['product_type',''],['partner_name',''],['salesperson_id',0],['sales_manager_id',0],['guide_id',0],['craftsman_id',0],['page',1],['limit',20]];
+        return [['report','partner_item_summary'],['start_date',''],['end_date',''],['dataset','sale'],['metric','cash_performance'],['item_id',''],['payment_method',''],['operator_id',0],['channel_id',0],['customer_segment','all'],['consumption_metric','cash'],['sleep_months',3],['year',0],['category_id',0],['category_path',''],['product_type',''],['partner_name',''],['salesperson_id',0],['sales_manager_id',0],['guide_id',0],['craftsman_id',0],['unit_price_min',''],['unit_price_max',''],['page',1],['limit',20]];
     }
 
     private function isPlatformOnlyReport(string $report): bool
     {
-        return in_array(trim($report), self::PLATFORM_ONLY_REPORTS, true);
+        $report = trim($report);
+        return in_array($report, self::PLATFORM_ONLY_REPORTS, true)
+            || in_array($report, StoreUnifiedReportPhaseFourServices::platformOnlyReportCodes(), true)
+            || in_array($report, StoreUnifiedReportPhaseSixServices::platformOnlyReportCodes(), true);
     }
 }

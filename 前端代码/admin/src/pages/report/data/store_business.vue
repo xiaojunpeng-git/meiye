@@ -11,12 +11,14 @@
 
 <script>
 import { STORE_OPERATION_REPORT_CODES } from '@/libs/storeOperationReports'
+import { PHASE_SIX_REPORT_CODES } from '@/libs/phaseSixReports'
 
 function resolveReportCode(route) {
   const params = route && route.params ? route.params : {}
   const query = route && route.query ? route.query : {}
   const requested = String(params.report || query.report || '').trim()
-  return STORE_OPERATION_REPORT_CODES.includes(requested) ? requested : STORE_OPERATION_REPORT_CODES[0]
+  const allowed = STORE_OPERATION_REPORT_CODES.concat(PHASE_SIX_REPORT_CODES)
+  return allowed.includes(requested) ? requested : STORE_OPERATION_REPORT_CODES[0]
 }
 
 export default {
