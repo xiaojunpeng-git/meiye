@@ -37,12 +37,12 @@ SET @sql := IF((SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHE
   'SELECT ''project_count_already_present'' AS apply_result');
 PREPARE phase_six_stmt FROM @sql; EXECUTE phase_six_stmt; DEALLOCATE PREPARE phase_six_stmt;
 
-SET @sql := IF((SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=@db AND TABLE_NAME='employee' AND COLUMN_NAME='mentor_employee_id')=0,
-  'ALTER TABLE `employee` ADD COLUMN `mentor_employee_id` bigint(20) unsigned NOT NULL DEFAULT 0 COMMENT ''教培师傅员工ID''',
+SET @sql := IF((SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=@db AND TABLE_NAME='eb_employee' AND COLUMN_NAME='mentor_employee_id')=0,
+  'ALTER TABLE `eb_employee` ADD COLUMN `mentor_employee_id` bigint(20) unsigned NOT NULL DEFAULT 0 COMMENT ''教培师傅员工ID''',
   'SELECT ''mentor_employee_id_already_present'' AS apply_result');
 PREPARE phase_six_stmt FROM @sql; EXECUTE phase_six_stmt; DEALLOCATE PREPARE phase_six_stmt;
 
-SET @sql := IF((SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=@db AND TABLE_NAME='system_store_staff' AND COLUMN_NAME='mentor_employee_id')=0,
+SET @sql := IF((SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=@db AND TABLE_NAME='eb_system_store_staff' AND COLUMN_NAME='mentor_employee_id')=0,
   'ALTER TABLE `eb_system_store_staff` ADD COLUMN `mentor_employee_id` bigint(20) unsigned NOT NULL DEFAULT 0 COMMENT ''门店任职师傅员工ID''',
   'SELECT ''staff_mentor_employee_id_already_present'' AS apply_result');
 PREPARE phase_six_stmt FROM @sql; EXECUTE phase_six_stmt; DEALLOCATE PREPARE phase_six_stmt;
