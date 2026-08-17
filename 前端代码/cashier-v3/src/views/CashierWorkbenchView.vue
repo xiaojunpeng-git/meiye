@@ -431,14 +431,18 @@ function recalculateLocalCashierDraft(draft) {
   const originalAmountCents = saleLines.reduce((total, line) => (
     total + localDraftLineTotalAmountCents(line, line.originalAmount ?? getLineAmount(line))
   ), 0)
-  const receivableAmountCents = saleLines.reduce((total, line) => (
+  const saleAmountCents = saleLines.reduce((total, line) => (
     total + localDraftLineTotalAmountCents(line)
   ), 0)
+  const debtAmountCents = saleLines.reduce((total, line) => (
+    total + lineDebtAmountCents(line)
+  ), 0)
+  const receivableAmountCents = Math.max(0, saleAmountCents - debtAmountCents)
   draft.summary = {
     ...(draft.summary || {}),
     selectedCount: lines.reduce((total, line) => total + Math.max(1, Number(line.quantity || 1)), 0),
     originalAmount: centsToMoney(originalAmountCents),
-    discountAmount: centsToMoney(Math.max(0, originalAmountCents - receivableAmountCents)),
+    discountAmount: centsToMoney(Math.max(0, originalAmountCents - saleAmountCents)),
     receivableAmount: centsToMoney(receivableAmountCents),
     orderNote: String(draft.orderNote || ''),
     hasOrderNote: Boolean(String(draft.orderNote || '').trim())

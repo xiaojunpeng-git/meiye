@@ -688,23 +688,23 @@ checkoutAssert('sale-only composition is supported',
 $entitlementOnly = $snapshot;
 $entitlementOnly['saleLines'] = [];
 $entitlementOnly['paymentDetails'] = [];
+$secondEntitlementLine = $entitlementOnly['entitlementLines'][0];
+$secondEntitlementLine['authorityKey'] = 'entitlement:opaque-cart-row-beta';
+$secondEntitlementLine['sourceKind'] = 'unknown';
+$secondEntitlementLine['holderId'] = 702;
+$secondEntitlementLine['entitlementSourceDetailId'] = 1702;
+$secondEntitlementLine['sourceVersion'] = 12;
+$secondEntitlementLine['projectId'] = 503;
+$secondEntitlementLine['projectVersion'] = 7;
+$secondEntitlementLine['sourceNameSnapshot'] = '历史定制卡';
+$secondEntitlementLine['sourceCodeSnapshot'] = 'CARD-702';
+$secondEntitlementLine['projectNameSnapshot'] = '清润护理';
+$entitlementOnly['entitlementLines'][] = $secondEntitlementLine;
 $entitlementOnly['balanceDeduction'] = [
     'authorityKey' => '', 'accountId' => '', 'accountVersion' => 0, 'amountCents' => 0,
 ];
 $entitlementOnly['debt'] = ['authorityKey' => '', 'policyVersion' => 0, 'amountCents' => 0];
 checkoutResign($entitlementOnly);
-$zeroReceivableWithoutMethod = $entitlementOnly;
-checkoutAssert('zero receivable still requires a selected bookkeeping method',
-    checkoutReason(static function () use ($zeroReceivableWithoutMethod, $secret): void {
-        CashierV3CheckoutSettlementKernel::prepareSubmission(
-            checkoutCommand(CashierV3CheckoutSettlementKernel::OPERATION_PREPARE_SUBMISSION, 7),
-            $zeroReceivableWithoutMethod,
-            null,
-            $secret
-        );
-    }) === 'checkout_zero_receivable_payment_method_required');
-$entitlementOnly['paymentDetails'] = [$snapshot['paymentDetails'][0]];
-$entitlementOnly['paymentDetails'][0]['amountCents'] = 0;
 checkoutResign($entitlementOnly);
 $entitlementOnlyResult = CashierV3CheckoutSettlementKernel::prepareSubmission(
     checkoutCommand(CashierV3CheckoutSettlementKernel::OPERATION_PREPARE_SUBMISSION, 7),
@@ -714,9 +714,11 @@ $entitlementOnlyResult = CashierV3CheckoutSettlementKernel::prepareSubmission(
 );
 checkoutAssert('entitlement-only composition has zero receivable and cash performance',
     $entitlementOnlyResult['composition'] === 'entitlement_only'
+        && count($entitlementOnlyResult['lineDrafts']) === 2
+        && count($entitlementOnlyResult['paymentDrafts']) === 0
         && $entitlementOnlyResult['totals']['receivableAmountCents'] === 0
         && $entitlementOnlyResult['totals']['cashPerformanceAmountCents'] === 0
-        && $entitlementOnlyResult['totals']['entitlementActualAmountCents'] === 2000);
+        && $entitlementOnlyResult['totals']['entitlementActualAmountCents'] === 4000);
 
 $legacyUnknownEntitlement = $entitlementOnly;
 $legacyUnknownEntitlement['entitlementLines'][0]['sourceKind'] = 'unknown';

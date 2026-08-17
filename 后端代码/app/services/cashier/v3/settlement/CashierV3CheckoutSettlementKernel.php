@@ -303,10 +303,11 @@ final class CashierV3CheckoutSettlementKernel
                 'differenceCents' => $receivableAmountCents - $settlementAmountCents,
             ]);
         }
-        // A zero-receivable checkout still records the cashier's selected
-        // bookkeeping route in its immutable checkout draft. It is selection
-        // evidence only: no zero-value payment collection/fact is produced.
+        // A sale checkout with zero receivable still records the cashier's
+        // selected bookkeeping route. A pure entitlement completion has no
+        // collection at all and must not invent a zero-value payment method.
         if ($requireBalanced
+            && $composition !== self::COMPOSITION_ENTITLEMENT_ONLY
             && $receivableAmountCents === 0
             && count($snapshot['paymentDetails']) === 0) {
             throw self::failure('checkout_zero_receivable_payment_method_required');

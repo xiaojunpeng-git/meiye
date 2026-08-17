@@ -170,18 +170,24 @@ final class CardSaleCategoryAllocationFactServices
     ): void {
         $categoryId = (int)$allocation['categoryIdSnapshot'];
         $category = Db::name('store_product_category')->where('id', $categoryId)->lock(true)->find();
-        if (!$category) {
-            throw new \LogicException('card_category_snapshot_not_found');
-        }
-        $path = $this->categoryPath($category);
+        // The receipt already carries the category name captured when the card
+        // was issued. A later catalog deletion must not make a valid sale fail
+        // after the card has been issued. Keep that immutable label as the
+        // historical path and only resolve partner configuration when the
+        // current category still exists.
+        $path = $category
+            ? $this->categoryPath($category)
+            : trim((string)$allocation['categoryNameSnapshot']);
         if ($path === '') {
             throw new \LogicException('card_category_path_invalid');
         }
-        $partnerSnapshot = $partnerSnapshots->resolveInTx(
-            (string)$context['tenant_id'],
-            $categoryId,
-            $cashPerformanceAmount
-        );
+        $partnerSnapshot = $category
+            ? $partnerSnapshots->resolveInTx(
+                (string)$context['tenant_id'],
+                $categoryId,
+                $cashPerformanceAmount
+            )
+            : $this->emptyPartnerSnapshot();
         $receiptId = (string)$receipt['receiptId'];
         $planKey = trim((string)($sale['command_idempotency_key'] ?? ''));
         if ($planKey === '') {
@@ -324,5 +330,18 @@ final class CardSaleCategoryAllocationFactServices
             $parentId = (int)$parent['pid'];
         }
         return implode(' / ', array_filter($parts));
+    }
+
+    /** @return array{partner_category_id_snapshot:int,partner_category_name_snapshot:string,partner_category_path_snapshot:string,partner_default_ratio_snapshot:int,partner_config_version_snapshot:int,partner_share_amount_cents:int} */
+    private function emptyPartnerSnapshot(): array
+    {
+        return [
+            'partner_category_id_snapshot' => 0,
+            'partner_category_name_snapshot' => '',
+            'partner_category_path_snapshot' => '',
+            'partner_default_ratio_snapshot' => 0,
+            'partner_config_version_snapshot' => 0,
+            'partner_share_amount_cents' => 0,
+        ];
     }
 }

@@ -410,8 +410,15 @@ final class CashierV3CardPurchaseIssuanceServices
             ? Db::name('store_product_category')->where('id', $categoryId)->lock(true)->field('id,cate_name')->find()
             : null;
         $categoryName = trim((string)($category['cate_name'] ?? ''));
-        if ($categoryId <= 0 || $categoryName === '') {
+        if ($categoryId <= 0) {
             throw self::failure('card_purchase_component_report_category_missing');
+        }
+        // Historical products may still reference a deleted category. Keep
+        // the non-reusable category id for audit grouping and make the missing
+        // label explicit; downstream allocation will not assign partner share
+        // without a current category authority row.
+        if ($categoryName === '') {
+            $categoryName = '未分类';
         }
         return [$categoryId, $categoryName];
     }

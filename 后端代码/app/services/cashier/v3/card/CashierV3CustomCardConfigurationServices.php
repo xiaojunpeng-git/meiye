@@ -93,6 +93,14 @@ final class CashierV3CustomCardConfigurationServices
             }
             $authority = is_array($line['authority_snapshot'] ?? null) ? $line['authority_snapshot'] : [];
             $display = is_array($line['display_snapshot'] ?? null) ? $line['display_snapshot'] : [];
+            $categoryId = (int)($display['categoryId'] ?? 0);
+            $categoryName = trim((string)($display['category'] ?? ''));
+            if ($categoryId <= 0) {
+                throw self::failure('custom_card_component_category_invalid', '定制卡卡内项目分类资料不完整，请重新配置。');
+            }
+            if ($categoryName === '' || $categoryName === '全部') {
+                $categoryName = '未分类';
+            }
             $configuredCostCents = (int)($line['configured_cost_cents'] ?? -1);
             if ($configuredCostCents < 0) {
                 throw self::failure('custom_card_component_cost_invalid', '定制卡卡内项目成本资料不完整，请重新配置。');
@@ -111,6 +119,8 @@ final class CashierV3CustomCardConfigurationServices
                 'skuId' => (int)$line['catalog_sku_id'],
                 'skuUnique' => (string)($authority['sku']['unique'] ?? ''),
                 'nameSnapshot' => (string)($display['name'] ?? ''),
+                'categoryIdSnapshot' => $categoryId,
+                'categoryNameSnapshot' => $categoryName,
                 'writeTimes' => $component['times'],
                 // A configured amount belongs to the entire project entitlement,
                 // not to each individual use. It therefore may not be multiplied.

@@ -567,6 +567,13 @@ watch(
   , { immediate: true }
 )
 
+watch(() => props.businessSourceSaving, (saving, wasSaving) => {
+  if (wasSaving && !saving) {
+    pendingPrimarySourceId.value = 0
+    pendingSecondarySourceId.value = 0
+  }
+})
+
 watch(
   () => props.checkout.businessDate,
   (businessDate) => {
@@ -704,6 +711,13 @@ function checkoutLineRole(line = {}) {
 
 function isEntitlementCheckoutLine(line = {}) {
   return checkoutLineRole(line) === 'entitlement_service'
+}
+
+function checkoutLineDebtAmount(line = {}) {
+  const cents = Number(line.debtAmountCents)
+  if (Number.isSafeInteger(cents) && cents > 0) return cents / 100
+  const amount = Number(line.debtAmount)
+  return Number.isFinite(amount) && amount > 0 ? amount : 0
 }
 
 function checkoutLineServiceTags(line = {}) {
@@ -1419,6 +1433,7 @@ onBeforeUnmount(() => {
                 {{ [isEntitlementCheckoutLine(line) ? '本次使用权益' : '本次购买', line.entitlementSourceName, line.fullCardNo, line.serviceRole].filter(Boolean).join(' · ') }}
               </span>
               <span v-if="checkoutLineServiceTags(line).length">{{ checkoutLineServiceTags(line).join(' · ') }}</span>
+              <span v-if="checkoutLineDebtAmount(line) > 0">欠款 {{ formatMoney(checkoutLineDebtAmount(line)) }}</span>
             </div>
             <span>×{{ line.quantity || 1 }}</span>
             <strong v-if="!isEntitlementCheckoutLine(line)">{{ formatMoney(line.finalAmount ?? line.amount) }}</strong>
