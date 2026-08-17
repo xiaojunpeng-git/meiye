@@ -17,14 +17,27 @@ ok('销售退款分别采集实际退款、本金退回、赠金退回和原因'
     && detail.includes('赠金退回金额')
     && detail.includes('退款原因'))
 
+ok('退款项目按表格展示成交金额，并提示按勾选项成交价分摊',
+  detail.includes('商品／项目')
+    && detail.includes('成交金额')
+    && detail.includes('selectedRefundSaleAmount')
+    && detail.includes('本次退款会按所选成交价比例分摊到每项'))
+
+ok('订单详情展示不可变退款明细，而不是仅显示退款总额',
+  detail.includes('退款明细')
+    && detail.includes('原成交金额')
+    && detail.includes('totalRefundAmount'))
+
 ok('实际退款金额保持退款统计口径，本金和赠金仅作为账户冲销字段',
   detail.includes('refundAmount: refundAmount.value')
     && detail.includes('actualRefundAmount: refundAmount.value')
     && detail.includes('balancePrincipalRefundAmount: balancePrincipalAmount')
     && detail.includes('balanceGiftRefundAmount: balanceGiftAmount')
+    && detail.includes('refundLineIds: refundLineIds.value.map(String)')
     && center.includes('actualRefundAmount: payload.actualRefundAmount')
     && center.includes('balancePrincipalRefundAmount: payload.balancePrincipalRefundAmount')
-    && center.includes('balanceGiftRefundAmount: payload.balanceGiftRefundAmount'))
+    && center.includes('balanceGiftRefundAmount: payload.balanceGiftRefundAmount')
+    && center.includes('refundLineIds: Array.isArray(payload.refundLineIds) ? payload.refundLineIds.map(String) : []'))
 
 ok('游客退款不展示余额退回字段且强制按零提交',
   detail.includes('const isGuestOrder = computed(')
@@ -68,14 +81,14 @@ const shell = readFileSync(new URL('../../../前端代码/cashier-v3/src/layouts
 const workbench = readFileSync(new URL('../../../前端代码/cashier-v3/src/views/CashierWorkbenchView.vue', import.meta.url), 'utf8')
 const bridge = readFileSync(new URL('../../../前端代码/cashier-v3/src/services/cashierV3Bridge.js', import.meta.url), 'utf8')
 const debtPreparationStart = shell.indexOf('const prepareAction = payload.rechargeDebt === true')
-const debtHandoffStart = shell.indexOf("await requestCashierV3Action('open-cashier-workbench', { silent: true })", debtPreparationStart)
-ok('用户确认还款后才从权威工作台草稿接力到收银结账页',
+const debtPreparationEnd = shell.indexOf('\nasync function loadMemberDetailTab', debtPreparationStart)
+const debtPreparation = shell.slice(debtPreparationStart, debtPreparationEnd)
+ok('用户确认还款后直接使用准备响应接力到收银结账页',
   debtPreparationStart >= 0
-    && debtHandoffStart > debtPreparationStart
-    && shell.includes('const preparedCheckout = state.cashier?.checkout')
-    && shell.includes("preparedCheckout.businessType === 'debt_repayment'")
-    && shell.includes("String(preparedCheckout.preparationRequestId || '') === preparationRequestId")
-    && shell.indexOf('openDebtRepaymentCheckout(preparationRequestId, payload.debtRecordId)', debtPreparationStart) > debtPreparationStart
+    && debtPreparationEnd > debtPreparationStart
+    && !debtPreparation.includes("requestCashierV3Action('open-cashier-workbench'")
+    && debtPreparation.includes('prepared?.preparationRequestId')
+    && debtPreparation.includes('openDebtRepaymentCheckout(String(prepared.preparationRequestId), payload.debtRecordId)')
     && shell.includes("window.sessionStorage.setItem('cashier-v3:prepared-checkout-handoff'")
     && shell.includes("window.location.hash = '#/cashier'")
     && workbench.includes("function consumePreparedCheckoutHandoff()")

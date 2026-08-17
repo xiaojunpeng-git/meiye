@@ -29,6 +29,7 @@ final class CashierV3OrderLifecycleServices
 {
     public const OPERATION_TABLE = 'cashier_v3_order_lifecycle_operation';
     public const REOPEN_TABLE = 'cashier_v3_order_reopen_draft';
+    public const REFUND_LINE_TABLE = 'cashier_v3_order_lifecycle_refund_line';
     public const CONTRACT_VERSION = 'cashier-v3-order-lifecycle-v1';
 
     private const SALES_ACTIONS = [
@@ -170,8 +171,11 @@ final class CashierV3OrderLifecycleServices
             (new CashierV3CardOperationReversalServices())->apply(
                 $cardOperationReversal, $action, $operationId, $operator, $dataScope, $now
             );
+            if ($action === 'refund-sales-order') {
+                $input['refundLines'] = $this->allocateRefundLines($input['refundLines'], $input, $financial);
+            }
             $paymentReversals = $this->writeFactReversals(
-                $source, $action, $financial, $operationId, $commandKey, $event, $operator, $dataScope, $now
+                $source, $action, $input, $financial, $operationId, $commandKey, $event, $operator, $dataScope, $now
             );
             (new StoreReportPaymentSaleAllocationFactServices())->persistLifecycleReversalsInTx([
                 'tenant_id' => $dataScope->tenantId(),
@@ -186,8 +190,11 @@ final class CashierV3OrderLifecycleServices
                 'recorded_at' => $now,
                 'business_event_no' => (string)$event['event_no'],
                 'checkout_request_id' => (string)$source['checkoutRequestId'],
-            ], $paymentReversals);
-            $this->recordFinancialReversal($source, $action, $operationId, $commandKey, $input, $financial, $dataScope, $now);
+            ], $paymentReversals, $action === 'refund-sales-order' ? $input['refundLines'] : []);
+            $reversalId = $this->recordFinancialReversal($source, $action, $operationId, $commandKey, $input, $financial, $dataScope, $now);
+            if ($action === 'refund-sales-order') {
+                $this->recordRefundLineDetails($source, $operationId, $reversalId, $commandKey, $input['refundLines'], $dataScope, $now);
+            }
         }
 
         $row = [
@@ -298,7 +305,44 @@ final class CashierV3OrderLifecycleServices
             $amount = $cashRefund + $restorePrincipal + $restoreBonus + max(0, $upgradeCredit);
             if ($amount <= 0 || $amount > (int)$source['amountCents']) throw self::failure('order_lifecycle_refund_amount_invalid');
         }
-        return ['reason' => $reason, 'cashRefundCents' => $cashRefund, 'restorePrincipalCents' => $restorePrincipal, 'restoreBonusCents' => $restoreBonus, 'replaceWorkspace' => !empty($payload['replaceWorkspace']), 'personnel' => is_array($payload['personnel'] ?? null) ? array_values($payload['personnel']) : []];
+        $refundLines = $action === 'refund-sales-order'
+            ? $this->refundLineSnapshots((array)($payload['refundLineIds'] ?? []), $source)
+            : [];
+        return ['reason' => $reason, 'cashRefundCents' => $cashRefund, 'restorePrincipalCents' => $restorePrincipal, 'restoreBonusCents' => $restoreBonus, 'refundLines' => $refundLines, 'replaceWorkspace' => !empty($payload['replaceWorkspace']), 'personnel' => is_array($payload['personnel'] ?? null) ? array_values($payload['personnel']) : []];
+    }
+
+    /** @return array<int,array{lineId:string,itemName:string,itemType:string,quantity:int}> */
+    private function refundLineSnapshots(array $rawLineIds, array $source): array
+    {
+        $lineIds = array_values(array_unique(array_filter(array_map(static function ($value): string {
+            $lineId = trim((string)$value);
+            return preg_match('/^[A-Za-z0-9_.:-]{1,64}$/D', $lineId) === 1 ? $lineId : '';
+        }, $rawLineIds))));
+        if (!$lineIds || count($lineIds) > 200) {
+            throw self::failure('order_lifecycle_refund_lines_invalid');
+        }
+        $rows = Db::name('cashier_v3_sales_order_line')
+            ->where('tenant_id', (string)$source['tenantId'])
+            ->where('store_id', (int)$source['storeId'])
+            ->where('order_id', (string)$source['sourceId'])
+            ->whereIn('order_line_id', $lineIds)
+            ->where('line_direction', 'forward')
+            ->where('line_status', 'settled')
+            ->field('order_line_id,item_name_snapshot,item_type,quantity,line_no,sale_amount_cents')
+            ->lock(true)->order('line_no', 'asc')->select()->toArray();
+        if (count($rows) !== count($lineIds)) {
+            throw self::failure('order_lifecycle_refund_line_scope_invalid');
+        }
+        return array_map(static function (array $row): array {
+            return [
+                'lineId' => (string)$row['order_line_id'],
+                'itemName' => (string)$row['item_name_snapshot'],
+                'itemType' => (string)$row['item_type'],
+                'quantity' => (int)$row['quantity'],
+                'lineNo' => (int)$row['line_no'],
+                'saleAmountCents' => (int)$row['sale_amount_cents'],
+            ];
+        }, $rows);
     }
 
     /** @return array<string,mixed> */
@@ -330,7 +374,7 @@ final class CashierV3OrderLifecycleServices
     }
 
     /** @return array<int,array<string,mixed>> */
-    private function writeFactReversals(array $source, string $action, array $financial, string $operationId, string $commandKey, array $event, CashierV3OperatorScope $operator, CashierV3DataScopeContext $scope, int $now): array
+    private function writeFactReversals(array $source, string $action, array $input, array $financial, string $operationId, string $commandKey, array $event, CashierV3OperatorScope $operator, CashierV3DataScopeContext $scope, int $now): array
     {
         $paymentReversals = [];
         $tables = ['cashier_v3_sale_fact', 'cashier_v3_payment_fact', 'cashier_v3_performance_fact'];
@@ -345,6 +389,23 @@ final class CashierV3OrderLifecycleServices
                 continue;
             }
             if ($table === 'cashier_v3_sale_fact') {
+                if ($action === 'refund-sales-order') {
+                    $lineRefunds = [];
+                    foreach ((array)$input['refundLines'] as $line) {
+                        $lineRefunds[(string)$line['lineId']] = (int)$line['totalRefundCents'];
+                    }
+                    foreach ($rows as $row) {
+                        $lineId = (string)($row['source_line_id'] ?? '');
+                        $amount = (int)($lineRefunds[$lineId] ?? 0);
+                        if ($amount <= 0) continue;
+                        if ($amount > (int)$row['sale_amount_cents']) throw self::failure('order_lifecycle_refund_line_amount_exceeds_sale');
+                        $this->insertReversal($table, $row, $operationId, $commandKey, $event, $operator, $now, [
+                            'original_amount_cents' => -$amount, 'discount_amount_cents' => 0,
+                            'sale_amount_cents' => -$amount, 'debt_amount_cents' => 0,
+                        ]);
+                    }
+                    continue;
+                }
                 $amounts = $this->allocateFactAmount($rows, (int)$financial['economicReversalCents'], 'sale_amount_cents');
                 $debts = $this->allocateFactAmount($rows, (int)$financial['cancelledDebtCents'], 'debt_amount_cents');
                 foreach ($rows as $index => $row) {
@@ -370,6 +431,22 @@ final class CashierV3OrderLifecycleServices
             $groups = [];
             foreach ($rows as $index => $row) $groups[(string)($row['performance_type'] ?? '')][$index] = $row;
             foreach ($groups as $group) {
+                if ($action === 'refund-sales-order') {
+                    $cashByLine = [];
+                    foreach ((array)$input['refundLines'] as $line) $cashByLine[(string)$line['lineId']] = (int)$line['cashRefundCents'];
+                    $selected = [];
+                    foreach ($group as $index => $row) if (isset($cashByLine[(string)($row['source_line_id'] ?? '')])) $selected[$index] = $row;
+                    if ($selected === []) continue;
+                    $target = min(array_sum(array_map(static function (array $line): int { return (int)$line['amount_cents']; }, $selected)), (int)$financial['cashReversalCents']);
+                    $amounts = $this->allocateFactAmount($selected, $target, 'amount_cents');
+                    foreach ($selected as $index => $row) if (($amounts[$index] ?? 0) > 0) {
+                        $amount = (int)$amounts[$index];
+                        $this->insertReversal($table, $row, $operationId, $commandKey, $event, $operator, $now, [
+                            'allocation_base_amount_cents' => -$amount, 'amount_cents' => -$amount,
+                        ]);
+                    }
+                    continue;
+                }
                 $groupTotal = array_sum(array_map(static function (array $row): int { return (int)($row['amount_cents'] ?? 0); }, $group));
                 $target = min($groupTotal, (int)$financial['cashReversalCents']);
                 $amounts = $this->allocateFactAmount($group, $target, 'amount_cents');
@@ -384,7 +461,7 @@ final class CashierV3OrderLifecycleServices
         return $paymentReversals;
     }
 
-    private function recordFinancialReversal(array $source, string $action, string $operationId, string $commandKey, array $input, array $financial, CashierV3DataScopeContext $scope, int $now): void
+    private function recordFinancialReversal(array $source, string $action, string $operationId, string $commandKey, array $input, array $financial, CashierV3DataScopeContext $scope, int $now): string
     {
         $cash = (int)$input['cashRefundCents'];
         $reversedCash = (int)$financial['cashReversalCents'];
@@ -398,6 +475,76 @@ final class CashierV3OrderLifecycleServices
             'command_idempotency_key' => $commandKey, 'status' => 'succeeded', 'occurred_at' => $now, 'created_at' => $now,
         ];
         if ((int)Db::name('cashier_v3_order_lifecycle_financial_reversal')->insert($row) !== 1) throw self::failure('order_lifecycle_financial_reversal_insert_failed');
+        return (string)$row['reversal_id'];
+    }
+
+    /**
+     * Allocates each refund component by immutable sale amounts.  The largest
+     * remainder rule keeps every component exact to the cent and deterministic.
+     */
+    private function allocateRefundLines(array $lines, array $input, array $financial): array
+    {
+        $selectedAmount = array_sum(array_map(static function (array $line): int { return (int)$line['saleAmountCents']; }, $lines));
+        $economic = (int)$financial['economicReversalCents'];
+        if ($selectedAmount <= 0 || $economic <= 0 || $economic > $selectedAmount) {
+            throw self::failure('order_lifecycle_refund_selected_sale_amount_invalid');
+        }
+        $cash = $this->allocateRefundComponent($lines, (int)$input['cashRefundCents']);
+        $principal = $this->allocateRefundComponent($lines, (int)$input['restorePrincipalCents']);
+        $bonus = $this->allocateRefundComponent($lines, (int)$input['restoreBonusCents']);
+        foreach ($lines as $index => $line) {
+            $line['cashRefundCents'] = (int)$cash[$index];
+            $line['restorePrincipalCents'] = (int)$principal[$index];
+            $line['restoreBonusCents'] = (int)$bonus[$index];
+            $line['totalRefundCents'] = $line['cashRefundCents'] + $line['restorePrincipalCents'] + $line['restoreBonusCents'];
+            $line['allocationWeightNumerator'] = (int)$line['saleAmountCents'];
+            $line['allocationWeightDenominator'] = $selectedAmount;
+            $lines[$index] = $line;
+        }
+        return $lines;
+    }
+
+    /** @return array<int,int> */
+    private function allocateRefundComponent(array $lines, int $target): array
+    {
+        $result = array_fill(0, count($lines), 0);
+        if ($target === 0) return $result;
+        $total = array_sum(array_map(static function (array $line): int { return (int)$line['saleAmountCents']; }, $lines));
+        if ($target < 0 || $total <= 0) throw self::failure('order_lifecycle_refund_line_allocation_invalid');
+        $allocated = 0;
+        $remainders = [];
+        foreach ($lines as $index => $line) {
+            $product = bcmul((string)$target, (string)(int)$line['saleAmountCents'], 0);
+            $result[$index] = (int)bcdiv($product, (string)$total, 0);
+            $allocated += $result[$index];
+            $remainders[] = ['index' => $index, 'remainder' => (int)bcmod($product, (string)$total), 'lineNo' => (int)$line['lineNo'], 'lineId' => (string)$line['lineId']];
+        }
+        usort($remainders, static function (array $left, array $right): int {
+            return $right['remainder'] <=> $left['remainder'] ?: ($left['lineNo'] <=> $right['lineNo']) ?: strcmp($left['lineId'], $right['lineId']);
+        });
+        for ($remaining = $target - $allocated, $index = 0; $remaining > 0; $remaining--, $index++) $result[$remainders[$index]['index']]++;
+        return $result;
+    }
+
+    private function recordRefundLineDetails(array $source, string $operationId, string $financialReversalId, string $commandKey, array $lines, CashierV3DataScopeContext $scope, int $now): void
+    {
+        foreach ($lines as $line) {
+            $row = [
+                'refund_line_id' => 'OLFL-' . strtoupper(substr(hash_hmac('sha256', $operationId . '|' . (string)$line['lineId'], $this->secret()), 0, 40)),
+                'operation_id' => $operationId, 'financial_reversal_id' => $financialReversalId,
+                'tenant_id' => $scope->tenantId(), 'store_id' => (int)$source['storeId'], 'member_id' => (int)$source['memberId'],
+                'source_order_id' => (string)$source['sourceId'], 'source_order_no_snapshot' => (string)$source['sourceNo'],
+                'sales_order_line_id' => (string)$line['lineId'], 'line_no' => (int)$line['lineNo'],
+                'item_type_snapshot' => (string)$line['itemType'], 'item_name_snapshot' => (string)$line['itemName'], 'original_quantity' => (int)$line['quantity'],
+                'selected_sale_amount_cents' => (int)$line['saleAmountCents'], 'cash_refund_cents' => (int)$line['cashRefundCents'],
+                'restored_principal_cents' => (int)$line['restorePrincipalCents'], 'restored_bonus_cents' => (int)$line['restoreBonusCents'],
+                'total_refund_cents' => (int)$line['totalRefundCents'], 'allocation_weight_numerator' => (int)$line['allocationWeightNumerator'],
+                'allocation_weight_denominator' => (int)$line['allocationWeightDenominator'], 'command_idempotency_key' => $commandKey,
+                'status' => 'succeeded', 'business_date' => date('Y-m-d', $now), 'occurred_at' => $now, 'settled_at' => $now, 'recorded_at' => $now,
+            ];
+            $row['immutable_fingerprint'] = hash('sha256', json_encode($row, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+            if ((int)Db::name(self::REFUND_LINE_TABLE)->insert($row) !== 1) throw self::failure('order_lifecycle_refund_line_insert_failed');
+        }
     }
 
     private function adjustPersonnelFacts(array $source, array $input, string $operationId, string $commandKey, array $event, CashierV3OperatorScope $operator, CashierV3DataScopeContext $scope, int $now): void

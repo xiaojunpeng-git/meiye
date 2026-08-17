@@ -5,6 +5,7 @@ namespace app\services\cashier\v3\presale;
 
 use app\services\cashier\v3\CashierV3ScopeResolver;
 use app\services\cashier\v3\CashierV3TransactionGuard;
+use app\services\cashier\v3\CashierV3OperatorScope;
 use app\services\cashier\v3\order\settlement\CashierV3SalesOrderPlanV1;
 use app\services\organization\OrganizationScopeService;
 use app\services\product\inventory\InventoryBusinessDocumentNumberServices;
@@ -29,6 +30,8 @@ final class CashierV3PresaleClaimServices
     private const STATUS_CLOSED = 'CLOSED_AFTER_SALE_REVERSAL';
     private const CLAIM_SETTLED = 'SETTLED';
     private const CLAIM_VOIDED = 'VOIDED';
+    private const SOURCE_PRESALE = 'PRESALE';
+    private const SOURCE_GIFT = 'GIFT';
 
     /** Register current checkout presale product lines inside the outer settlement transaction. */
     public function registerSettledSalesOrderInTx(CashierV3SalesOrderPlanV1 $plan): array
@@ -52,6 +55,9 @@ final class CashierV3PresaleClaimServices
             $claimableId = 'PCL-' . strtoupper(substr(hash('sha256', $tenantId . '|' . $sourceLineId), 0, 40));
             $row = [
                 'claimable_line_id' => $claimableId,
+                'source_kind' => self::SOURCE_PRESALE,
+                'gift_id' => '',
+                'gift_item_id' => '',
                 'tenant_id' => $tenantId,
                 'organization_id' => $this->token((string)($header['organization_id'] ?? ''), 32, 'presale_claim_organization_invalid'),
                 'organization_path_snapshot' => $this->path((string)($header['organization_path_snapshot'] ?? '')),
@@ -94,6 +100,92 @@ final class CashierV3PresaleClaimServices
             $registered[] = $claimableId;
         }
         return ['claimableLineIds' => $registered];
+    }
+
+    /**
+     * Register one independently issued product gift as a claimable inventory
+     * obligation. The issuance transaction intentionally does not read or
+     * change inventory; only claimInTx does that under inventory locks.
+     */
+    public function registerIssuedGiftProductInTx(
+        string $giftId,
+        string $giftNo,
+        array $giftItem,
+        array $member,
+        CashierV3OperatorScope $operatorScope
+    ): string {
+        CashierV3TransactionGuard::assertInTransaction('presaleClaim.registerIssuedGiftProductInTx');
+        $giftId = $this->token($giftId, 64, 'gift_claim_gift_invalid');
+        $giftNo = $this->text($giftNo, 64);
+        $itemId = $this->token((string)($giftItem['item_id'] ?? ''), 64, 'gift_claim_item_invalid');
+        $tenantId = $this->token($operatorScope->tenantId(), 32, 'gift_claim_tenant_invalid');
+        $storeId = $this->positiveInt($operatorScope->storeId(), 'gift_claim_store_invalid');
+        $itemId = $this->token($itemId, 64, 'gift_claim_item_invalid');
+        $productId = $this->positiveInt($giftItem['catalog_product_id'] ?? 0, 'gift_claim_product_invalid');
+        $snapshot = json_decode((string)($giftItem['content_snapshot_json'] ?? ''), true);
+        $snapshot = is_array($snapshot) ? $snapshot : [];
+        $skuId = $this->positiveInt($snapshot['skuId'] ?? $snapshot['sku_id'] ?? 0, 'gift_claim_sku_invalid');
+        $skuUnique = $this->token((string)($snapshot['skuUnique'] ?? $snapshot['sku_unique'] ?? ''), 64, 'gift_claim_sku_unique_invalid');
+        $quantity = $this->positiveInt($giftItem['quantity'] ?? 0, 'gift_claim_quantity_invalid');
+        $now = $this->positiveInt($giftItem['recorded_at'] ?? time(), 'gift_claim_recorded_at_invalid');
+        $location = Db::name('inventory_location')->where('tenant_id', $tenantId)->where('store_id', $storeId)
+            ->where('location_type', 'STORE')->where('is_default', 1)->where('location_status', 'ACTIVE')
+            ->order('id', 'asc')->limit(2)->lock(true)->select()->toArray();
+        if (count($location) !== 1) throw new \RuntimeException('gift_claim_default_location_missing');
+        $location = (array)$location[0];
+        if ((string)$location['organization_id'] !== $operatorScope->organizationId()) {
+            throw new \RuntimeException('gift_claim_organization_changed');
+        }
+        $storeName = $this->text((string)Db::name('system_store')->where('id', $storeId)->value('name'), 128);
+        $memberId = max(0, (int)($member['uid'] ?? $member['id'] ?? 0));
+        $memberPhone = $memberId > 0
+            ? $this->text((string)Db::name('user')->where('uid', $memberId)->value('phone'), 32)
+            : '';
+        $claimableId = 'GCL-' . strtoupper(substr(hash('sha256', $tenantId . '|' . $itemId), 0, 40));
+        $row = [
+            'claimable_line_id' => $claimableId,
+            'source_kind' => self::SOURCE_GIFT,
+            'gift_id' => $giftId,
+            'gift_item_id' => $itemId,
+            'tenant_id' => $tenantId,
+            'organization_id' => $this->token((string)$location['organization_id'], 32, 'gift_claim_organization_invalid'),
+            'organization_path_snapshot' => $this->path((string)$location['organization_path']),
+            'organization_name_snapshot' => '',
+            'store_id' => $storeId,
+            'store_name_snapshot' => $storeName,
+            'source_order_id' => $giftId,
+            'source_order_no_snapshot' => $giftNo,
+            'source_order_line_id' => $itemId,
+            'source_checkout_request_id' => $giftId,
+            'member_id' => $memberId,
+            'member_name_snapshot' => $this->text(
+                trim((string)($member['real_name'] ?? ''))
+                    ?: (trim((string)($member['nickname'] ?? '')) ?: trim((string)($member['name'] ?? ''))),
+                128
+            ),
+            'member_phone_snapshot' => $memberPhone,
+            'product_id' => $productId,
+            'sku_id' => $skuId,
+            'sku_unique_snapshot' => $skuUnique,
+            'product_name_snapshot' => $this->text((string)($giftItem['content_name_snapshot'] ?? ''), 255),
+            'quantity' => $quantity,
+            'claimed_quantity' => 0,
+            'claim_status' => self::STATUS_AVAILABLE,
+            'close_operation_id' => '', 'closed_at' => 0, 'version' => 1,
+            'business_date' => $this->date(date('Y-m-d', $now), 'gift_claim_business_date_invalid'),
+            'occurred_at' => $now, 'settled_at' => $now, 'recorded_at' => $now,
+            'created_at' => $now, 'updated_at' => $now,
+        ];
+        $existing = Db::name(self::CLAIMABLE_TABLE)->where('tenant_id', $tenantId)
+            ->where('source_order_line_id', $itemId)->lock(true)->find();
+        if ($existing) {
+            foreach (['claimable_line_id', 'source_kind', 'gift_id', 'gift_item_id', 'store_id', 'product_id', 'sku_id', 'sku_unique_snapshot', 'quantity'] as $field) {
+                if ((string)$existing[$field] !== (string)$row[$field]) throw new \RuntimeException('gift_claim_registration_conflict');
+            }
+            return (string)$existing['claimable_line_id'];
+        }
+        if ((int)Db::name(self::CLAIMABLE_TABLE)->insert($row) !== 1) throw new \RuntimeException('gift_claim_registration_failed');
+        return $claimableId;
     }
 
     /** Financial reversal closes remaining eligibility but never changes completed claims or inventory. */
@@ -181,16 +273,21 @@ final class CashierV3PresaleClaimServices
         $limit = max(1, min(100, (int)($criteria['limit'] ?? 20)));
         $keyword = mb_substr(trim((string)($criteria['keyword'] ?? '')), 0, 80);
         $status = trim((string)($criteria['status'] ?? ''));
+        $sourceKind = strtoupper(trim((string)($criteria['source_kind'] ?? self::SOURCE_PRESALE)));
         $startDate = $this->optionalDate((string)($criteria['start_date'] ?? ''), 'presale_claim_sales_date_invalid');
         $endDate = $this->optionalDate((string)($criteria['end_date'] ?? ''), 'presale_claim_sales_date_invalid');
         if ($status !== '' && !in_array($status, [self::STATUS_AVAILABLE, self::STATUS_FULLY_CLAIMED, self::STATUS_CLOSED], true)) {
             throw new \InvalidArgumentException('presale_claim_status_invalid');
+        }
+        if (!in_array($sourceKind, [self::SOURCE_PRESALE, self::SOURCE_GIFT], true)) {
+            throw new \InvalidArgumentException('presale_claim_source_kind_invalid');
         }
         if ($startDate !== '' && $endDate !== '' && $startDate > $endDate) throw new \InvalidArgumentException('presale_claim_sales_date_range_invalid');
         $query = Db::name(self::CLAIMABLE_TABLE)->where('tenant_id', (string)$scope['tenantId']);
         $storeIds = array_values(array_unique(array_filter(array_map('intval', (array)($scope['storeIds'] ?? [])))));
         if (!$storeIds) return ['list' => [], 'count' => 0, 'page' => $page, 'limit' => $limit, 'data_as_of' => time()];
         $query->whereIn('store_id', $storeIds);
+        $query->where('source_kind', $sourceKind);
         if ($status !== '') $query->where('claim_status', $status);
         if ($startDate !== '') $query->where('business_date', '>=', $startDate);
         if ($endDate !== '') $query->where('business_date', '<=', $endDate);
@@ -207,7 +304,8 @@ final class CashierV3PresaleClaimServices
         return ['list' => array_map(function (array $row): array {
             $quantity = (int)$row['quantity']; $claimed = (int)$row['claimed_quantity'];
             return [
-                'claimable_line_id' => (string)$row['claimable_line_id'], 'presale_order_no' => (string)$row['source_order_no_snapshot'],
+                'claimable_line_id' => (string)$row['claimable_line_id'], 'source_kind' => (string)$row['source_kind'],
+                'presale_order_no' => (string)$row['source_order_no_snapshot'],
                 'sales_date' => (string)$row['business_date'], 'store_id' => (int)$row['store_id'], 'store_name' => (string)$row['store_name_snapshot'],
                 'organization_id' => (string)$row['organization_id'], 'organization_name' => (string)$row['organization_name_snapshot'],
                 'member_id' => (int)$row['member_id'], 'member_name' => (string)$row['member_name_snapshot'], 'member_phone' => (string)$row['member_phone_snapshot'],
@@ -225,7 +323,7 @@ final class CashierV3PresaleClaimServices
             ->where('claimable_line_id', (string)$claimable['claimable_line_id'])->order('id', 'desc')->select()->toArray();
         return ['claimable' => $this->claimableProjection($claimable), 'claims' => array_map(static function (array $claim): array {
             return ['claim_id' => (string)$claim['claim_id'], 'claim_no' => (string)$claim['claim_no'], 'quantity' => (int)$claim['quantity'],
-                'status' => (string)$claim['claim_status'], 'operator_name' => (string)$claim['operator_name_snapshot'],
+                'source_kind' => (string)$claim['source_kind'], 'status' => (string)$claim['claim_status'], 'operator_name' => (string)$claim['operator_name_snapshot'],
                 'occurred_at' => (int)$claim['occurred_at'], 'voided_at' => (int)$claim['voided_at'], 'void_reason' => (string)$claim['void_reason_snapshot']];
         }, $claims)];
     }
@@ -249,17 +347,25 @@ final class CashierV3PresaleClaimServices
         $allocations = $this->allocateBatches((int)$stock['id'], $units);
         $now = $command['now'];
         $claimId = 'PCC-' . strtoupper(substr(hash('sha256', $scope['tenantId'] . '|' . $command['claimableLineId'] . '|' . $command['idempotencyKey']), 0, 40));
-        $claimNo = (new InventoryBusinessDocumentNumberServices())->next($scope['tenantId'], InventoryBusinessDocumentNumberServices::PRESALE_CLAIM, $command['businessDate'], $now);
+        $sourceKind = (string)$claimable['source_kind'];
+        $isGift = $sourceKind === self::SOURCE_GIFT;
+        $claimNo = (new InventoryBusinessDocumentNumberServices())->next(
+            $scope['tenantId'],
+            $isGift ? InventoryBusinessDocumentNumberServices::GIFT_PRODUCT_CLAIM : InventoryBusinessDocumentNumberServices::PRESALE_CLAIM,
+            $command['businessDate'],
+            $now
+        );
         $claimPk = (int)Db::name(self::CLAIM_TABLE)->insertGetId([
             'claim_id' => $claimId, 'tenant_id' => $scope['tenantId'], 'claimable_line_id' => $command['claimableLineId'],
             'store_id' => $scope['storeId'], 'location_id' => (int)$location['id'], 'claim_no' => $claimNo,
             'idempotency_key' => $command['idempotencyKey'], 'request_fingerprint' => $command['fingerprint'], 'quantity' => $command['quantity'],
-            'claim_status' => self::CLAIM_SETTLED, 'operator_type' => $scope['operatorType'], 'operator_id' => $scope['operatorId'],
+            'source_kind' => $sourceKind, 'claim_status' => self::CLAIM_SETTLED, 'operator_type' => $scope['operatorType'], 'operator_id' => $scope['operatorId'],
             'operator_name_snapshot' => $scope['operatorName'], 'void_idempotency_key' => '', 'void_reason_snapshot' => '', 'void_operator_id' => 0, 'voided_at' => 0,
             'business_date' => $command['businessDate'], 'occurred_at' => $now, 'settled_at' => $now, 'recorded_at' => $now, 'created_at' => $now, 'updated_at' => $now,
         ]);
         if ($claimPk <= 0) throw new \RuntimeException('presale_claim_insert_failed');
-        Db::name('inventory_business_document_no')->insert(['tenant_id' => $scope['tenantId'], 'source_type' => 'presale_claim_outbound', 'source_id' => $claimId, 'business_date' => $command['businessDate'], 'document_no' => $claimNo, 'created_at' => $now]);
+        $outboundSourceType = $isGift ? 'gift_product_claim_outbound' : 'presale_claim_outbound';
+        Db::name('inventory_business_document_no')->insert(['tenant_id' => $scope['tenantId'], 'source_type' => $outboundSourceType, 'source_id' => $claimId, 'business_date' => $command['businessDate'], 'document_no' => $claimNo, 'created_at' => $now]);
         // A claim header and its formal outbound facts are created before the
         // stock balance changes; the surrounding transaction commits all or none.
         foreach ($allocations as $index => $allocation) {
@@ -270,7 +376,7 @@ final class CashierV3PresaleClaimServices
                 'tenantId' => $scope['tenantId'], 'organizationId' => $scope['organizationId'], 'organizationPath' => $scope['organizationPath'], 'storeId' => $scope['storeId'],
                 'stockId' => (int)$stock['id'], 'batchId' => (int)$batch['id'], 'direction' => -1, 'quantityUnits' => $allocation['units'],
                 'unitCostCents' => (int)$batch['unit_cost_cents'], 'costAmountCents' => $cost,
-                'sourceType' => 'presale_claim_outbound', 'sourceId' => $claimId, 'sourceDetailId' => (string)$claimPk . ':' . $index,
+                'sourceType' => $outboundSourceType, 'sourceId' => $claimId, 'sourceDetailId' => (string)$claimPk . ':' . $index,
                 'reversalOf' => 0, 'businessDate' => $command['businessDate'], 'occurredAt' => $now, 'settledAt' => $now, 'recordedAt' => $now,
             ]);
             Db::name(self::CLAIM_BATCH_TABLE)->insert(['tenant_id' => $scope['tenantId'], 'claim_id' => $claimId, 'claim_line_id' => $claimPk,
@@ -319,7 +425,7 @@ final class CashierV3PresaleClaimServices
                 'tenantId' => $scope['tenantId'], 'organizationId' => $scope['organizationId'], 'organizationPath' => $scope['organizationPath'], 'storeId' => $scope['storeId'],
                 'stockId' => (int)$stock['id'], 'batchId' => (int)$batch['id'], 'direction' => 1, 'quantityUnits' => $units,
                 'unitCostCents' => (int)$allocation['unit_cost_cents'], 'costAmountCents' => (int)$allocation['cost_amount_cents'],
-                'sourceType' => 'presale_claim_void', 'sourceId' => $claimId, 'sourceDetailId' => (string)$allocation['id'], 'reversalOf' => (int)$allocation['movement_fact_id'],
+                'sourceType' => (string)$claim['source_kind'] === self::SOURCE_GIFT ? 'gift_product_claim_void' : 'presale_claim_void', 'sourceId' => $claimId, 'sourceDetailId' => (string)$allocation['id'], 'reversalOf' => (int)$allocation['movement_fact_id'],
                 'businessDate' => $command['businessDate'], 'occurredAt' => $now, 'settledAt' => $now, 'recordedAt' => $now,
             ]);
         }
@@ -449,7 +555,7 @@ final class CashierV3PresaleClaimServices
     private function claimableProjection(array $row): array
     {
         $quantity = (int)$row['quantity']; $claimed = (int)$row['claimed_quantity'];
-        return ['claimable_line_id' => (string)$row['claimable_line_id'], 'presale_order_no' => (string)$row['source_order_no_snapshot'], 'sales_date' => (string)$row['business_date'],
+        return ['claimable_line_id' => (string)$row['claimable_line_id'], 'source_kind' => (string)$row['source_kind'], 'presale_order_no' => (string)$row['source_order_no_snapshot'], 'sales_date' => (string)$row['business_date'],
             'member_name' => (string)$row['member_name_snapshot'], 'member_phone' => (string)$row['member_phone_snapshot'], 'product_name' => (string)$row['product_name_snapshot'],
             'quantity' => $quantity, 'claimed_quantity' => $claimed, 'unclaimed_quantity' => max(0, $quantity - $claimed), 'claim_status' => (string)$row['claim_status']];
     }

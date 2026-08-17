@@ -19,6 +19,7 @@ final class InventoryBusinessDocumentNumberServices
     public const SALON_ISSUE = 'SALON_ISSUE';
     public const SALON_RETURN = 'SALON_RETURN';
     public const PRESALE_CLAIM = 'PRESALE_CLAIM';
+    public const GIFT_PRODUCT_CLAIM = 'GIFT_PRODUCT_CLAIM';
 
     private const PREFIXES = [
         self::INBOUND => 'RK',
@@ -29,6 +30,7 @@ final class InventoryBusinessDocumentNumberServices
         self::SALON_ISSUE => 'YZLY',
         self::SALON_RETURN => 'YZTH',
         self::PRESALE_CLAIM => 'PSLY',
+        self::GIFT_PRODUCT_CLAIM => 'ZPLY',
     ];
 
     /**

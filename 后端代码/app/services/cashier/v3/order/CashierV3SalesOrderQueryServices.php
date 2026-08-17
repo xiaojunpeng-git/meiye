@@ -1171,6 +1171,19 @@ final class CashierV3SalesOrderQueryServices
             ->order('id', 'asc')->select()->toArray() as $operation) {
             $operationsByOrder[(string)$operation['source_order_id']][] = $operation;
         }
+        $refundLinesByOperation = [];
+        foreach (Db::name(CashierV3OrderLifecycleServices::REFUND_LINE_TABLE)
+            ->where('tenant_id', $tenantIds[0])->whereIn('source_order_id', $orderIds)->where('status', 'succeeded')
+            ->field('operation_id,refund_line_id,sales_order_line_id,line_no,item_type_snapshot,item_name_snapshot,original_quantity,selected_sale_amount_cents,cash_refund_cents,restored_principal_cents,restored_bonus_cents,total_refund_cents,occurred_at')
+            ->order('id', 'asc')->select()->toArray() as $refundLine) {
+            $refundLinesByOperation[(string)$refundLine['operation_id']][] = $refundLine;
+        }
+        foreach ($operationsByOrder as $orderId => $operations) {
+            foreach ($operations as $index => $operation) {
+                $operations[$index]['refund_lines'] = $refundLinesByOperation[(string)$operation['operation_id']] ?? [];
+            }
+            $operationsByOrder[$orderId] = $operations;
+        }
         $debtAuthoritiesByOrder = [];
         foreach (Db::name('cashier_v3_debt_authority')
             ->whereIn('sales_order_id', $orderIds)
@@ -1284,9 +1297,15 @@ final class CashierV3SalesOrderQueryServices
         foreach ($operations as $operation) {
             if (in_array((string)$operation['operation_type'], ['refund', 'void'], true)) $terminal = $operation;
         }
+        $refundLineCount = $terminal && (string)$terminal['operation_type'] === 'refund'
+            ? count((array)($terminal['refund_lines'] ?? [])) : 0;
+        $refundTotalCents = 0;
+        foreach ((array)($terminal['refund_lines'] ?? []) as $refundLine) $refundTotalCents += (int)($refundLine['total_refund_cents'] ?? 0);
+        $isPartialRefund = $terminal && (string)$terminal['operation_type'] === 'refund'
+            && ($refundLineCount < count($items) || $refundTotalCents < (int)$header['sale_amount_cents']);
         $orderStatus = !$settlementEquationValid
             ? '数据异常'
-            : ($terminal ? ((string)$terminal['operation_type'] === 'void' ? '已作废' : '已退款作废') : '正常');
+            : ($terminal ? ((string)$terminal['operation_type'] === 'void' ? '已作废' : ($isPartialRefund ? '部分退款' : '已退款')) : '正常');
         $paymentStatus = !$settlementEquationValid
             ? '数据异常'
             : ($debtCents > 0 ? '部分支付（含欠款）' : '已支付');
@@ -1373,6 +1392,17 @@ final class CashierV3SalesOrderQueryServices
                 'reversedCashAmount' => $this->moneyFromCents((int)$operation['reversed_cash_cents']),
                 'restoredPrincipalAmount' => $this->moneyFromCents((int)$operation['restored_principal_cents']),
                 'restoredBonusAmount' => $this->moneyFromCents((int)$operation['restored_bonus_cents']),
+                'refundLines' => array_map(function (array $line): array {
+                    return [
+                        'id' => (string)$line['refund_line_id'], 'orderLineId' => (string)$line['sales_order_line_id'],
+                        'itemName' => (string)$line['item_name_snapshot'], 'itemType' => (string)$line['item_type_snapshot'],
+                        'quantity' => (int)$line['original_quantity'], 'saleAmount' => $this->moneyFromCents((int)$line['selected_sale_amount_cents']),
+                        'cashRefundAmount' => $this->moneyFromCents((int)$line['cash_refund_cents']),
+                        'restoredPrincipalAmount' => $this->moneyFromCents((int)$line['restored_principal_cents']),
+                        'restoredBonusAmount' => $this->moneyFromCents((int)$line['restored_bonus_cents']),
+                        'totalRefundAmount' => $this->moneyFromCents((int)$line['total_refund_cents']),
+                    ];
+                }, (array)($operation['refund_lines'] ?? [])),
                 'operatorId' => (int)$operation['operator_id'], 'operatorName' => '操作人#' . (int)$operation['operator_id'],
                 'businessDate' => (string)$operation['business_date'],
                 'occurredAt' => $this->formatTimestamp((int)$operation['occurred_at'], 'Y-m-d H:i:s')];
@@ -1415,6 +1445,14 @@ final class CashierV3SalesOrderQueryServices
             'reopenings' => array_values(array_filter($operationRecords, static function (array $row): bool { return $row['operationType'] === 'reopen'; })),
             'upgrades' => $upgradeRecord, 'gifts' => [], 'services' => [], 'writeoffs' => [], 'operationLogs' => $operationRecords,
         ];
+        $refundLineDetails = [];
+        foreach ($operationRecords as $operation) {
+            if ($operation['operationType'] !== 'refund') continue;
+            foreach ((array)($operation['refundLines'] ?? []) as $refundLine) {
+                $refundLineDetails[] = $refundLine;
+            }
+        }
+        $mapped['refundLineDetails'] = $refundLineDetails;
         $mapped['relatedDataStatus'] = 'ready';
         return $mapped;
     }

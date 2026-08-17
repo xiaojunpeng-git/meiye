@@ -13,6 +13,7 @@ use app\services\cashier\v3\cashier\CashierV3CashierReadinessGuard;
 use app\services\cashier\v3\cashier\CashierV3EntitlementResourceVersionProvider;
 use app\services\cashier\v3\event\CashierV3BusinessEventExecution;
 use app\services\cashier\v3\event\CashierV3BusinessEventRecorder;
+use app\services\cashier\v3\presale\CashierV3PresaleClaimServices;
 use think\facade\Db;
 
 /**
@@ -155,7 +156,7 @@ final class CashierV3DirectGiftIssuanceServices
             }
             $items[] = ['itemNo' => count($items) + 1, 'kind' => $kind, 'productId' => $productId, 'productType' => $productType,
                 'couponIssueId' => 0, 'quantity' => $quantity, 'name' => trim((string)($product['store_name'] ?? '')) ?: '赠送内容',
-                'skuUnique' => (string)($sku['unique'] ?? ''), 'skuWriteTimes' => $kind === 'project' ? max(1, (int)($sku['write_times'] ?? 1)) : 0,
+                'skuId' => $skuId, 'skuUnique' => (string)($sku['unique'] ?? ''), 'skuWriteTimes' => $kind === 'project' ? max(1, (int)($sku['write_times'] ?? 1)) : 0,
                 'validityStart' => $now, 'validityEnd' => $itemValidityEnd];
             $seen[$kind . ':' . $skuId] = true;
         }
@@ -182,6 +183,17 @@ final class CashierV3DirectGiftIssuanceServices
             throw self::failure('direct_gift_item_duplicate', '赠送明细重复，本次操作已取消。');
         }
         $row['id'] = $id;
+        if ($item['kind'] === 'product') {
+            // A product gift is issued now but only becomes an inventory
+            // outbound when staff later claim it from the inventory module.
+            (new CashierV3PresaleClaimServices())->registerIssuedGiftProductInTx(
+                $giftId,
+                $giftNo,
+                $row,
+                $member,
+                $scope
+            );
+        }
         $event = $recorder->recordInTx($execution, $contract, [
             'event_type' => 'gift.issued', 'aggregate_type' => 'direct_gift', 'aggregate_id' => $giftId, 'aggregate_version' => 1,
             'event_version' => 1, 'detail_id' => $itemId, 'source_type' => 'submit-direct-gift', 'source_id' => $giftId,

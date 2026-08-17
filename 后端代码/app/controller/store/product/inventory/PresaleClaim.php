@@ -21,6 +21,7 @@ final class PresaleClaim extends AuthController
             $criteria = [
                 'page' => $this->request->get('page', 1), 'limit' => $this->request->get('limit', 20),
                 'keyword' => $this->request->get('keyword', ''), 'status' => $this->request->get('status', ''),
+                'source_kind' => $this->request->get('source_kind', 'PRESALE'),
                 'start_date' => $this->request->get('start_date', ''), 'end_date' => $this->request->get('end_date', ''),
             ];
             return $this->success($this->services->listForStore((int)$this->storeId, (int)$this->storeStaffId, $criteria));
@@ -56,6 +57,7 @@ final class PresaleClaim extends AuthController
             'presale_claim_fully_claimed' => '该预售商品已全部领用。',
             'presale_claim_exceeds_remaining' => '领用数量不能超过未领用数量。',
             'presale_claim_stock_insufficient' => '默认门店仓可用库存不足。',
+            'presale_claim_source_kind_invalid' => '领用来源无效，请重新选择预售或赠送。',
             'presale_claim_sales_date_invalid' => '销售日期格式不正确。',
             'presale_claim_sales_date_range_invalid' => '销售开始日期不能晚于结束日期。',
             'presale_claim_already_voided' => '该领用记录已经作废。',

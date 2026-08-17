@@ -328,6 +328,12 @@ final class CashierV3RechargeGiftIssuanceServices
         if (($item['kind'] ?? '') === 'coupon') {
             return $this->issueCouponInTx($item, $memberId, $now, 'cashier_v3_direct_gift');
         }
+        if (($item['kind'] ?? '') === 'product') {
+            // Direct product gifts are an issuance record, not a zero-price
+            // sales order or an inventory movement. Inventory changes later
+            // through the gift claim outbound transaction.
+            return ['legacyOrderId' => 0, 'holderId' => 0, 'benefitDetailId' => 0, 'couponUserIds' => []];
+        }
         return $this->issueProductInTx(
             $itemId,
             $item,

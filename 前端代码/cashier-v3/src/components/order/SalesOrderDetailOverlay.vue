@@ -68,6 +68,7 @@ const refundAmount = ref('')
 const balancePrincipalRefundAmount = ref('0')
 const balanceGiftRefundAmount = ref('0')
 const refundReason = ref('')
+const refundLineIds = ref([])
 const voidReason = ref('')
 const actionPanelRef = ref(null)
 const reopenConfirmationVisible = ref(false)
@@ -80,6 +81,7 @@ const isGuestOrder = computed(() => sourceOrder.value.isGuest === true
   || Number(sourceOrder.value.memberId || sourceOrder.value.member_id || 0) <= 0)
 const itemLines = computed(() => firstList(sourceOrder.value, ['items', 'orderItems', 'lines', 'details']))
 const paymentLines = computed(() => firstList(sourceOrder.value, ['paymentDetails', 'paymentLines', 'receipts', 'payments']))
+const refundLineDetails = computed(() => firstList(sourceOrder.value, ['refundLineDetails', 'refundLines']))
 const relatedSource = computed(() => {
   const value = sourceOrder.value.related || sourceOrder.value.relations || {}
   return value && typeof value === 'object' ? value : {}
@@ -341,11 +343,28 @@ const adjustmentCraftsmen = computed(() => Array.isArray(personnelAdjustment.val
 const canOpenOperationLogs = computed(() => hasAction('open-order-operation-logs') || hasAction('open-operation-logs'))
 const quickActions = computed(() => [
   { action: 'open-sales-order-personnel-adjustment', label: '人员调整' },
-  { action: 'refund-sales-order', label: '退款并作废' },
+  { action: 'refund-sales-order', label: '退款' },
   { action: 'void-sales-order', label: '作废订单' },
   { action: 'reopen-sales-order', label: '重开' },
   { action: 'upgrade-sales-order', label: '卡项／项目升级' }
 ].filter((item) => hasAction(item.action)))
+
+function refundLineId(line) {
+  return String(line?.id || line?.orderItemId || '')
+}
+
+function refundLineSaleAmount(line) {
+  const value = pickValue(line, ['payableAmount', 'saleAmount', 'sale_amount', 'amount'])
+  const cents = moneyCents(value)
+  return Number.isFinite(cents) && cents >= 0 ? cents : 0
+}
+
+const selectedRefundLines = computed(() => {
+  const selected = new Set(refundLineIds.value.map(String))
+  return itemLines.value.filter((line) => selected.has(refundLineId(line)))
+})
+
+const selectedRefundSaleAmount = computed(() => selectedRefundLines.value.reduce((total, line) => total + refundLineSaleAmount(line), 0))
 
 function submitPersonnelAdjustment() {
   const personnel = []
@@ -363,18 +382,22 @@ async function revealActionPanel() {
   actionPanelRef.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
-async function openLifecycleForm(action) {
+function openLifecycleForm(action) {
   actionError.value = ''
   if (action === 'refund-sales-order') activeLifecycleForm.value = 'refund'
   if (action === 'void-sales-order') activeLifecycleForm.value = 'void'
-  await revealActionPanel()
+  void revealActionPanel()
 }
 
-async function runQuickAction(action) {
+function runQuickAction(action) {
   if (['refund-sales-order', 'void-sales-order'].includes(action)) {
-    await openLifecycleForm(action)
+    openLifecycleForm(action)
     return
   }
+  void runNonLifecycleQuickAction(action)
+}
+
+async function runNonLifecycleQuickAction(action) {
   if (action === 'reopen-sales-order' && props.cartLineCount > 0) {
     reopenConfirmationVisible.value = true
     return
@@ -411,6 +434,7 @@ function resetRefundForm() {
   balancePrincipalRefundAmount.value = '0'
   balanceGiftRefundAmount.value = '0'
   refundReason.value = ''
+  refundLineIds.value = []
 }
 
 async function submitRefund() {
@@ -438,12 +462,17 @@ async function submitRefund() {
     actionError.value = '请填写退款原因。'
     return
   }
+  if (!refundLineIds.value.length) {
+    actionError.value = '请选择本次退款对应的订单明细。'
+    return
+  }
   const response = await runAction('refund-sales-order', {
     // refundAmount remains the authoritative refund-statistics amount.
     refundAmount: refundAmount.value,
     actualRefundAmount: refundAmount.value,
     balancePrincipalRefundAmount: balancePrincipalAmount,
     balanceGiftRefundAmount: balanceGiftAmount,
+    refundLineIds: refundLineIds.value.map(String),
     reason: refundReason.value
   })
   if (['success', 'succeeded'].includes(actionStatusFromResponse(response))) {
@@ -723,6 +752,24 @@ async function runAction(action, payload = {}) {
           </div>
         </section>
 
+        <section v-if="refundLineDetails.length" class="sales-order-detail-section">
+          <header class="sales-order-detail-section__header">
+            <div><h3>退款明细</h3><span>按退款时勾选商品的原成交金额分摊，金额为不可变历史记录。</span></div>
+          </header>
+          <div class="sales-order-detail-table-wrap">
+            <table class="sales-order-detail-table sales-order-detail-refund-history">
+              <thead><tr><th>商品／项目</th><th>数量</th><th>原成交金额</th><th>实际退款</th><th>本金退回</th><th>赠金退回</th><th>本次合计</th></tr></thead>
+              <tbody>
+                <tr v-for="line in refundLineDetails" :key="line.id || `${line.orderLineId}-${line.totalRefundAmount}`">
+                  <td>{{ line.itemName }}</td><td>{{ line.quantity }}</td><td>{{ displayAmount(line.saleAmount) }}</td>
+                  <td>{{ displayAmount(line.cashRefundAmount) }}</td><td>{{ displayAmount(line.restoredPrincipalAmount) }}</td>
+                  <td>{{ displayAmount(line.restoredBonusAmount) }}</td><td>{{ displayAmount(line.totalRefundAmount) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
         <section v-if="relatedGroups.length" class="sales-order-detail-section">
           <header class="sales-order-detail-section__header">
             <div><h3>关联业务</h3><span>关联记录均通过业务单号下钻，不在订单详情内改写历史。</span></div>
@@ -757,15 +804,26 @@ async function runAction(action, payload = {}) {
           <p v-if="actionError" class="sales-order-detail-error" role="alert">{{ actionError }}</p>
 
           <section v-if="activeLifecycleForm === 'refund'" class="sales-order-detail-section sales-order-detail-section--actions">
-          <header class="sales-order-detail-section__header"><div><h3>退款并作废</h3><span>退款金额由本次人工填写；成功后该订单只能保留查看，不能再次退款或作废。卡项、权益、库存、已完成服务和欠款不会随本次退款回退。</span></div></header>
+          <header class="sales-order-detail-section__header"><div><h3>退款</h3><span>只冲销本次勾选明细的成交与收款事实；已完成服务、已出库产品和已签发权益不会自动回退。</span></div></header>
           <div class="sales-order-detail-lifecycle-form">
+            <fieldset class="sales-order-detail-refund-lines">
+              <legend>退款项目</legend>
+              <div class="sales-order-detail-refund-lines__head" aria-hidden="true"><span></span><span>商品／项目</span><span>数量</span><span>成交金额</span></div>
+              <label v-for="line in itemLines" :key="refundLineId(line)" class="sales-order-detail-refund-line">
+                <input v-model="refundLineIds" type="checkbox" :value="refundLineId(line)" :disabled="Boolean(pendingAction)" />
+                <strong>{{ line.name }}</strong>
+                <span>{{ line.quantity }}</span>
+                <b>{{ displayAmount(pickValue(line, ['payableAmount', 'saleAmount', 'sale_amount', 'amount'])) }}</b>
+              </label>
+              <p class="sales-order-detail-refund-lines__summary">已选 {{ selectedRefundLines.length }} 项，成交金额 {{ displayAmount(selectedRefundSaleAmount / 100) }}。本次退款会按所选成交价比例分摊到每项。</p>
+            </fieldset>
             <div class="sales-order-detail-refund-amounts">
               <label>实际退款金额<input v-model.trim="refundAmount" inputmode="decimal" placeholder="输入实际退给客户的金额" /></label>
               <label v-if="!isGuestOrder">余额本金退回金额<input v-model.trim="balancePrincipalRefundAmount" inputmode="decimal" placeholder="输入退回账户本金" /></label>
               <label v-if="!isGuestOrder">赠金退回金额<input v-model.trim="balanceGiftRefundAmount" inputmode="decimal" placeholder="输入退回账户赠金" /></label>
             </div>
             <label>退款原因<textarea v-model.trim="refundReason" maxlength="255" rows="3" placeholder="填写退款原因" /></label>
-            <div class="sales-order-detail-quick-actions"><button type="button" class="sales-order-detail-button sales-order-detail-button--text" :disabled="Boolean(pendingAction)" @click="activeLifecycleForm = ''">取消</button><button type="button" class="sales-order-detail-button sales-order-detail-button--secondary" :disabled="Boolean(pendingAction)" @click="submitRefund">确认退款并作废</button></div>
+            <div class="sales-order-detail-quick-actions"><button type="button" class="sales-order-detail-button sales-order-detail-button--text" :disabled="Boolean(pendingAction)" @click="activeLifecycleForm = ''">取消</button><button type="button" class="sales-order-detail-button sales-order-detail-button--secondary" :disabled="Boolean(pendingAction)" @click="submitRefund">确认退款</button></div>
           </div>
           </section>
 
@@ -960,6 +1018,19 @@ async function runAction(action, payload = {}) {
   gap: 12px;
 }
 
+.sales-order-detail-refund-lines { display: grid; gap: 0; margin: 0; padding: 0; border: 1px solid #dfe5ec; border-radius: 6px; overflow: hidden; }
+.sales-order-detail-refund-lines legend { padding: 0 6px; color: #303133; font-weight: 600; }
+.sales-order-detail-refund-lines__head,
+.sales-order-detail-refund-line { display: grid; grid-template-columns: 28px minmax(0, 1fr) 56px 108px; align-items: center; column-gap: 10px; min-width: 0; padding: 10px 12px; }
+.sales-order-detail-refund-lines__head { color: #667085; background: #f8fafc; border-bottom: 1px solid #dfe5ec; font-size: 12px; }
+.sales-order-detail-refund-line { cursor: pointer; border-bottom: 1px solid #eef1f5; color: #344054; }
+.sales-order-detail-refund-line:last-of-type { border-bottom: 0; }
+.sales-order-detail-refund-line input { width: 16px; height: 16px; margin: 0; }
+.sales-order-detail-refund-line strong { min-width: 0; overflow-wrap: anywhere; font-weight: 500; }
+.sales-order-detail-refund-line span { color: #667085; text-align: center; }
+.sales-order-detail-refund-line b { color: #1d2939; font-weight: 600; text-align: right; }
+.sales-order-detail-refund-lines__summary { margin: 0; padding: 10px 12px; color: #667085; background: #f8fafc; border-top: 1px solid #dfe5ec; font-size: 12px; line-height: 1.5; }
+
 .sales-order-detail-lifecycle-form input,
 .sales-order-detail-lifecycle-form textarea {
   width: 100%;
@@ -976,6 +1047,8 @@ async function runAction(action, payload = {}) {
   .sales-order-detail-refund-amounts {
     grid-template-columns: 1fr;
   }
+  .sales-order-detail-refund-lines__head,
+  .sales-order-detail-refund-line { grid-template-columns: 24px minmax(0, 1fr) 36px 82px; column-gap: 6px; padding: 10px 8px; }
 }
 
 .sales-order-detail-overlay__body {

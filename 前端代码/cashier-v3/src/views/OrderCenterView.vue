@@ -741,6 +741,7 @@ async function handleSalesOrderDetailAction(payload = {}) {
     actualRefundAmount: payload.actualRefundAmount,
     balancePrincipalRefundAmount: payload.balancePrincipalRefundAmount,
     balanceGiftRefundAmount: payload.balanceGiftRefundAmount,
+    refundLineIds: Array.isArray(payload.refundLineIds) ? payload.refundLineIds.map(String) : [],
     replaceWorkspace: payload.replaceWorkspace === true,
     personnel: payload.personnel,
     ...(idempotencyKey ? { idempotencyKey } : {})
