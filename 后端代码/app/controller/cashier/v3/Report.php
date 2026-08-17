@@ -134,6 +134,20 @@ class Report extends AuthController
             }
             if (!$storeIds) return app('json')->fail('当前账号没有可查看的门店范围');
             $result = $export ? $services->export($storeIds, $input) : $services->query($storeIds, $input);
+            // 组织统计维度是平台报表的缩小条件。门店端范围由会话固定，
+            // 不向门店客户端下发无效的分公司/城市经理筛选控件。
+            if (!$export && is_array($result)) {
+                foreach (['filter_schema', 'filterSchema'] as $schemaKey) {
+                    if (!isset($result[$schemaKey]) || !is_array($result[$schemaKey])) continue;
+                    $result[$schemaKey] = array_values(array_filter(
+                        $result[$schemaKey],
+                        static function ($field): bool {
+                            $key = is_array($field) ? (string)($field['key'] ?? '') : '';
+                            return !in_array($key, ['company_dimension_id', 'city_manager_dimension_id'], true);
+                        }
+                    ));
+                }
+            }
             return $this->success('ok', $result);
         } catch (\InvalidArgumentException $exception) {
             return app('json')->fail($exception->getMessage());

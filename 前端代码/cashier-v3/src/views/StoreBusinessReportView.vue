@@ -288,6 +288,8 @@ const filterSchema = computed(() => {
     return key
       && !['organization', 'organization_id', 'organization_store_scope', 'store', 'store_id', 'store_ids', 'start_date', 'end_date', 'date_range', 'month'].includes(key)
       && !['organization_store_scope', 'date_range', 'month'].includes(type)
+      // 门店端范围由登录会话固定，组织统计维度筛选只属于平台端。
+      && (isPlatformReport.value || !['company_dimension_id', 'city_manager_dimension_id'].includes(key))
   })
 })
 const editableFields = computed(() => {
