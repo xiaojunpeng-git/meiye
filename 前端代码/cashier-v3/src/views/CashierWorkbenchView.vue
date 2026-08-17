@@ -4918,15 +4918,12 @@ async function requestCheckoutAction({ action, payload }) {
           // 最终校验会推进 checkout_request 与 workspace 的版本。即使命令
           // 响应因页面时序未带完整根，也必须只读重取同一工作台，不能沿用旧
           // 版本、更不能重新创建或提交另一张结账请求。
-          let refreshed = currentCheckoutCommandContexts(checkoutSession.value)
-          // A normal preparation response already replaces the complete root
-          // state with the newly signed checkout version. Re-bootstrap only if
-          // that response was unavailable, otherwise this extra read can switch
-          // the active workbench before the final command is sent.
-          if (!refreshed || String(checkout.value?.requestStatus || '') !== 'ready_for_submit') {
-            await requestAction('open-cashier-workbench', { silent: true })
-            refreshed = currentCheckoutCommandContexts(checkoutSession.value)
-          }
+          // The final preparation advances both the checkout request and the
+          // workspace. Always read back that committed projection before the
+          // irreversible submit: a compact response can expose the new status
+          // while retaining the preceding signed command contexts.
+          await requestAction('open-cashier-workbench', { silent: true })
+          const refreshed = currentCheckoutCommandContexts(checkoutSession.value)
           const serverPrepared = refreshed
             && String(checkout.value?.requestStatus || '') === 'ready_for_submit'
             // 同一幂等键重放时，最终校验已经在此前成功推进版本；重取的版本会
