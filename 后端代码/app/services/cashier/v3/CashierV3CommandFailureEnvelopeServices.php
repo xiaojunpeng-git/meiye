@@ -16,6 +16,18 @@ final class CashierV3CommandFailureEnvelopeServices
 {
     public function fromException(array $body, CashierV3CommandException $exception): array
     {
+        try {
+            Log::error('[cashier_v3_command_rejected] ' . json_encode([
+                'action' => (string)($body['action'] ?? (($body['command']['action'] ?? '') ?: '')),
+                'correlationId' => (string)($body['correlationId'] ?? $body['correlation_id'] ?? ''),
+                'code' => $exception->getResultCode(),
+                'status' => $exception->getResultStatus(),
+                'message' => $exception->getMessage(),
+                'detail' => $exception->getDetail(),
+            ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+        } catch (\Throwable $ignored) {
+            // Logging failure must never change the deterministic error envelope.
+        }
         $envelope = [
             'result' => [
                 'status' => $exception->getResultStatus(),

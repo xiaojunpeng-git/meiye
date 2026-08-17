@@ -629,15 +629,38 @@ final class ThinkPhpCashierV3EntitlementCompletionWriter
         return $this->authorityFingerprint([
             'holder' => $snapshot,
             'order' => $this->orderFingerprintFields($order),
-            // This must exactly match CashierV3EntitlementResourceVersionProvider.
-            // Otherwise a fresh shadow version can never pass final persistence.
-            'card_state' => $this->cardOperationState((int)$holder['id']),
+            // Match CashierV3EntitlementResourceVersionProvider exactly. A
+            // freshly materialized V3 state row is a baseline projection for
+            // an existing legacy card and is intentionally represented as
+            // null until a card operation changes it.
+            'card_state' => $this->entitlementCardStateSnapshot(
+                $this->cardOperationState((int)$holder['id']),
+                $holder,
+                $order
+            ),
             'card_rule_state' => $this->cardRules()->fingerprintSnapshotForHolder(
                 $tenantId,
                 (int)$holder['id'],
                 false
             ),
         ]);
+    }
+
+    private function entitlementCardStateSnapshot(?array $state, array $holder, array $order): ?array
+    {
+        if ($state === null) {
+            return null;
+        }
+        $isBaseline = (int)($state['origin_order_id'] ?? 0) === (int)($order['id'] ?? 0)
+            && (int)($state['origin_member_id'] ?? 0) === (int)($order['uid'] ?? 0)
+            && (int)($state['current_member_id'] ?? 0) === (int)($holder['uid'] ?? 0)
+            && (string)($state['card_status'] ?? '') === 'enabled'
+            && (string)($state['status_reason_snapshot'] ?? '') === ''
+            && (int)($state['effective_write_start'] ?? -1) === (int)($holder['write_start'] ?? 0)
+            && (int)($state['effective_write_end'] ?? -1) === (int)($holder['write_end'] ?? 0)
+            && (int)($state['current_version'] ?? 0) === 1
+            && (string)($state['last_operation_id'] ?? '') === '';
+        return $isBaseline ? null : $state;
     }
 
     /**
@@ -710,7 +733,11 @@ final class ThinkPhpCashierV3EntitlementCompletionWriter
             'cart' => $cartSnapshot,
             'order' => $this->orderFingerprintFields($order),
             'holder' => $holderSnapshot,
-            'card_state' => $this->cardOperationState((int)$holder['id']),
+            'card_state' => $this->entitlementCardStateSnapshot(
+                $this->cardOperationState((int)$holder['id']),
+                $holder,
+                $order
+            ),
             'card_rule_state' => $this->cardRules()->fingerprintSnapshotForDetail(
                 $tenantId,
                 (int)$holder['id'],

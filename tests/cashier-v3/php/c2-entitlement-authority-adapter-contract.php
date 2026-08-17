@@ -92,13 +92,14 @@ authorityContractAssert(
 );
 authorityContractAssert(
     'final entitlement persistence shares the card-state fingerprint boundary with the version provider',
-    strpos($writer, "'card_state' => \$this->cardOperationState") !== false
+    strpos($writer, "'card_state' => \$this->entitlementCardStateSnapshot") !== false
+        && strpos($writer, 'private function entitlementCardStateSnapshot(?array $state, array $holder, array $order): ?array') !== false
         && strpos($writer, 'private function cardOperationState(int $holderId): ?array') !== false
 );
 authorityContractAssert(
     'final benefit-pool persistence includes the locked holder and card state in its fingerprint',
     strpos($writer, "'holder' => \$holderSnapshot") !== false
-        && strpos($writer, "'card_state' => \$this->cardOperationState") !== false
+        && strpos($writer, "'card_state' => \$this->entitlementCardStateSnapshot") !== false
 );
 authorityContractAssert(
     'locked authorities are rebuilt from legacy entitlement source tables and shadow versions',
