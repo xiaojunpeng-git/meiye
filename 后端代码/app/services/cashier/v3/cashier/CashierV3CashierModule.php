@@ -1640,48 +1640,14 @@ final class CashierV3CashierModule
                     );
                 }
 
-                $memberId = self::canonicalPositiveId($row['member_id'] ?? null, 'memberId');
-                $holderId = self::canonicalPositiveId($row['holder_id'] ?? null, 'entitlementInstanceId');
-                $detailId = self::canonicalPositiveId(
-                    $row['source_detail_id'] ?? null,
-                    'entitlementSourceDetailId'
-                );
-                $entitlementIdentities = [
-                    ['role' => 'member', 'kind' => 'member', 'id' => (string)$memberId, 'required' => true],
-                    [
-                        'role' => 'member_benefit_pool:' . $detailId,
-                        'kind' => 'member_benefit_pool',
-                        'id' => (string)$detailId,
-                        'required' => true,
-                    ],
-                    [
-                        'role' => 'card_holder:' . $holderId,
-                        'kind' => 'card_holder',
-                        'id' => (string)$holderId,
-                        'required' => true,
-                    ],
-                ];
-                $resolved['required'] = [
-                    'cashier_workspace',
-                    'member',
-                    'member_benefit_pool',
-                    'card_holder',
-                ];
-                $resolved['identities'] = array_merge(
-                    $entitlementIdentities,
-                    $resolved['identities']
-                );
-                $resolved['required_read_roles'] = array_values(array_map(
-                    static function (array $identity): string {
-                        return (string)$identity['role'];
-                    },
-                    $resolved['identities']
-                ));
+                // 编辑权益服务行只修改当前工作台草稿。会员、卡和权益次数
+                // 都在最终结账事务内锁定并校验，不能提前作为本地草稿编辑的
+                // contexts，否则浏览器仅携带工作台版本时会被错误拒绝。
                 return $resolved;
             },
             ['cashier_workspace'],
-            ['cashier_workspace', 'member', 'member_benefit_pool', 'card_holder'],
-            ['member', 'member_benefit_pool', 'card_holder']
+            ['cashier_workspace'],
+            []
         ));
     }
 
