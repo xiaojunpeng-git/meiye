@@ -688,6 +688,7 @@ $settingsKey = 'CART_SERVICE_SETTINGS-' . MemberIntegrationFixture::uuid();
 $settingsBody = c2CommandBody($session, 'update-cart-line-service-settings', [
     'lineId' => $firstEntitlementLineId,
     'serviceObject' => 'friend',
+    'friendCountsAsCustomer' => false,
     'craftsmen' => [[
         'id' => 20,
         'name' => '客户端伪造姓名',
@@ -716,9 +717,10 @@ $storedSettings = Db::name('cashier_v3_workspace_line')
     ->where('line_key', $firstEntitlementLineId)
     ->find();
 ok(
-    '权益项目三项服务设置同命令保存',
+    '权益项目四项服务设置同命令保存',
     ($settingsSaved['result']['status'] ?? '') === 'success'
         && ($settingsLine['serviceObject'] ?? '') === '朋友'
+        && ($settingsLine['friendCountsAsCustomer'] ?? true) === false
         && !empty($settingsLine['isExperience'])
         && (int)($settingsLine['craftsmen'][0]['id'] ?? 0) === 20
         && ($unmodifiedSettingsLine['serviceObject'] ?? '') === '本人'
@@ -732,6 +734,7 @@ ok(
     ($settingsLine['craftsmen'][0]['name'] ?? '') === '专属服务人甲'
         && strpos(json_encode($settingsLine, JSON_UNESCAPED_UNICODE), '客户端伪造姓名') === false
         && ($storedSettings['service_object'] ?? '') === 'friend'
+        && (int)($storedSettings['friend_counts_as_customer'] ?? 1) === 0
         && (int)($storedSettings['is_experience'] ?? 0) === 1,
     json_encode($settingsLine, JSON_UNESCAPED_UNICODE),
     'C2-A1-BE-16'
@@ -758,6 +761,7 @@ $partialLine = c2FindDraftLine((array)($partialSaved['data']['cashierDraft'] ?? 
 ok(
     '单字段更新保留已选服务对象和手艺人',
     ($partialLine['serviceObject'] ?? '') === '朋友'
+        && ($partialLine['friendCountsAsCustomer'] ?? true) === false
         && empty($partialLine['isExperience'])
         && ($partialLine['craftsmen'][0]['name'] ?? '') === '专属服务人甲',
     json_encode($partialLine, JSON_UNESCAPED_UNICODE),

@@ -65,6 +65,12 @@ assert.match(workbench, /function adoptLatestCashierWorkspaceRevision\(\)[\s\S]*
   '延迟同步完成后采用命令回执中的最新工作台版本，使首次点击直接继续准备结账')
 assert.match(workbench, /if \(deferProjection\) \{[\s\S]*?draftCommandRecovery\.settle\(retryTicket, status\)[\s\S]*?cashierDraftHasUnresolvedCommand\.value = Boolean\([\s\S]*?return \{ \.\.\.result, deferredCashierDraft: draft \}/,
   '延迟投影模式的成功行级命令会释放恢复票据，后续数量和人员命令可以继续同步')
+assert.match(workbench, /await persistDeferredLineServiceSettings\(\)[\s\S]*?if \(localCashierDraftOperations\.value\.length > 0\) \{[\s\S]*?synchronizeLocalCashierDraft\(\{ deferProjection: true \}\)/,
+  '不出库、预售、体验和服务对象先进入本地操作队列，再随新增行按顺序一次性同步')
+assert.match(workbench, /if \(action === 'create-custom-card-configuration'\)[\s\S]*?requestAction\(action,[\s\S]*?createCashierV3CommandId\('CASHIER_MORE'\)/,
+  '定制卡同步使用后端已登记的根级收银请求标识前缀')
+assert.doesNotMatch(workbench, /createCashierV3CommandId\('CUSTOM_CARD'\)/,
+  '定制卡不再使用未登记的 CUSTOM_CARD 请求标识前缀')
 assert.match(workbench, /function localDraftLineTotalAmountCents\(line = \{\}, amount = getLineAmount\(line\)\)[\s\S]*?isLocalCashierDraftLine\(line\)[\s\S]*?cents \* Math\.max\(1, Number\(line\.quantity \|\| 1\)\)[\s\S]*?: cents/,
   '本地汇总只对 local 行按数量乘单价，服务端行使用已返回的行合计')
 assert.match(workbench, /localDraftLineTotalAmountCents\(line, line\.originalAmount \?\? getLineAmount\(line\)\)[\s\S]*?localDraftLineTotalAmountCents\(line\)/,
@@ -91,4 +97,4 @@ assert.ok(
   '本地挂单提单恢复会员壳和前端快照'
 )
 
-console.log('LOCAL_DRAFT_FINAL_CONFIRMATION_CONTRACT passed=27 failed=0')
+console.log('LOCAL_DRAFT_FINAL_CONFIRMATION_CONTRACT passed=30 failed=0')

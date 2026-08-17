@@ -2654,7 +2654,7 @@ async function synchronizeLocalCashierDraft({ deferProjection = false } = {}) {
         const previousIds = new Set(cashierDraftLines(deferredCashierDraft || cashier.value).map((line) => String(line?.id || '')))
         result = await requestAction(action, {
           ...clonePlain(operation.payload || {}),
-          idempotencyKey: createCashierV3CommandId('CUSTOM_CARD')
+          idempotencyKey: createCashierV3CommandId('CASHIER_MORE')
         })
         if (!['success', 'succeeded'].includes(resultStatus(result))) return result
         const draft = responseDataBlock(result).cashierDraft
@@ -3972,6 +3972,11 @@ async function openCheckout({ forceFreshCheckout = false } = {}) {
         )
       }
     }
+    // 把不出库、预售、体验和服务对象先固化为本地操作。随后同一批次按
+    // “新增行 -> 行设置”顺序回放，新增行取得服务端 ID 后即可保存设置。
+    if (!await persistDeferredLineServiceSettings()) {
+      return { result: { status: 'failed', code: 'CASHIER_LINE_SERVICE_SETTINGS_SAVE_FAILED', message: '本次服务设置保存失败，请重试。' } }
+    }
     if (localCashierDraftOperations.value.length > 0) {
       // 所有本地操作仍按既有命令契约写入服务端，但同步期间保留当前
       // 购物车投影，等最后一条完成后一次性替换，避免出现商品逐条加载。
@@ -3985,9 +3990,6 @@ async function openCheckout({ forceFreshCheckout = false } = {}) {
       // 已有待结账请求不能直接恢复旧快照；prepare-checkout 会按当前
       // 工作台版本更新它，使本次页面所见内容成为新的待结账版本。
       shouldForceFreshCheckout = true
-    }
-    if (!await persistDeferredLineServiceSettings()) {
-      return { result: { status: 'failed', code: 'CASHIER_LINE_SERVICE_SETTINGS_SAVE_FAILED', message: '本次服务设置保存失败，请重试。' } }
     }
     const synchronized = await synchronizeLocalCashierDraft()
     if (!['success', 'succeeded'].includes(resultStatus(synchronized))) return synchronized

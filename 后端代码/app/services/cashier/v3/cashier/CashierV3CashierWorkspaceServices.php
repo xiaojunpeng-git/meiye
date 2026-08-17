@@ -463,7 +463,7 @@ final class CashierV3CashierWorkspaceServices
             throw $this->incompleteLineSettings($lineKey, 'stored_friend_counts_as_customer_invalid');
         }
         if ($hasFriendCounts) {
-            if (!$isSaleProject
+            if ((!$isSaleProject && !$isEntitlement)
                 || (!is_bool($settings['friendCountsAsCustomer'])
                     && !(is_int($settings['friendCountsAsCustomer'])
                         && in_array($settings['friendCountsAsCustomer'], [0, 1], true)))) {

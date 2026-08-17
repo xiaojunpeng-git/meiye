@@ -30,7 +30,7 @@ function body(functionName) {
 const serviceObjectToggle = body('setCartLineServiceObject(line, serviceObject, friendCountsAsCustomer = true)')
 const experienceToggle = body('toggleCartLineExperience(line)')
 const deferredPersistence = body('persistDeferredLineServiceSettings()')
-const checkoutEntry = body('openCheckout()')
+const checkoutEntry = body('openCheckout({ forceFreshCheckout = false } = {})')
 const resetContext = body('resetCashierLocalContext()')
 const clearCart = body('confirmClearCart()')
 const checkoutBar = source.match(/<footer class="cashier-checkout-bar">[\s\S]*?<\/footer>/)?.[0] || ''
@@ -54,8 +54,9 @@ check(
 )
 check(
   /if \(!await persistDeferredLineServiceSettings\(\)\)/.test(checkoutEntry)
-    && checkoutEntry.indexOf('persistDeferredLineServiceSettings') < checkoutEntry.indexOf('firstCartLineMissingCraftsmen'),
-  'checkout persists deferred settings before service prerequisites and checkout preparation'
+    && checkoutEntry.indexOf('firstCartLineMissingCraftsmen') < checkoutEntry.indexOf('persistDeferredLineServiceSettings')
+    && checkoutEntry.indexOf('persistDeferredLineServiceSettings') < checkoutEntry.indexOf('synchronizeLocalCashierDraft'),
+  'checkout validates craftsmen before persisting deferred settings and preparing checkout'
 )
 check(
   /localLineServiceSettings\.value\s*=\s*\{\}/.test(resetContext),
