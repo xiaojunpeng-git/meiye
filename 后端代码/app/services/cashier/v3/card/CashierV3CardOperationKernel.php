@@ -255,6 +255,7 @@ final class CashierV3CardOperationKernel
         $lines = [];
         $mutations = [];
         $sourceValue = 0;
+        $totalQuantity = 0;
         $lineNo = 0;
         foreach ($selectedByDetail as $detailId => $quantity) {
             $project = $sourceByDetail[$detailId] ?? null;
@@ -267,6 +268,7 @@ final class CashierV3CardOperationKernel
             // immutable plan disagree with the concrete target right.
             $lineValue = self::allocateValue($project['totalValueCents'], $project['totalTimes'], $quantity);
             $sourceValue += $lineValue;
+            $totalQuantity += $quantity;
             $mutations[] = [
                 'sourceDetailId' => $detailId,
                 'sourceDetailVersion' => $project['detailVersion'],
@@ -288,8 +290,8 @@ final class CashierV3CardOperationKernel
                 'amountCents' => $lineValue,
             ];
         }
-        // A replacement may consume several source rights, but it always
-        // creates one target right. The target row remains a new current-right
+        // A replacement creates the same number of target rights as the
+        // selected source rights. The target row remains a new current-right
         // record on the same original card sale; no sales fact or historic
         // order amount is rewritten.
         if (!$isUpgrade) {
@@ -301,8 +303,8 @@ final class CashierV3CardOperationKernel
                 'sourceProjectId' => 0,
                 'targetCatalogId' => $targetCatalogId,
                 'quantityBefore' => 0,
-                'quantityDelta' => 1,
-                'quantityAfter' => 1,
+                'quantityDelta' => $totalQuantity,
+                'quantityAfter' => $totalQuantity,
                 'amountCents' => $sourceValue,
             ];
         }

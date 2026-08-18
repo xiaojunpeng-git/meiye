@@ -1882,6 +1882,38 @@ function handleOperationProject({ source, project } = {}) {
   }
 }
 
+function cardOperationSourceMaximum(source = {}) {
+  const availableTimes = Number(source.availableTimes ?? source.remainingTimes ?? 0)
+  return Number.isInteger(availableTimes) && availableTimes > 0 ? availableTimes : 0
+}
+
+function changeCardOperationSourceQuantity(source, delta) {
+  const operation = previewCardOperation.value
+  const detailId = String(entitlementBenefitPoolId(source) || '').trim()
+  const maximum = cardOperationSourceMaximum(source)
+  if (!operation || !detailId || maximum <= 0) return
+  const current = Math.max(1, Math.floor(Number(source.quantity || 1)))
+  const next = Math.min(maximum, Math.max(1, current + Number(delta || 0)))
+  if (next === current) return
+  previewCardOperation.value = {
+    ...operation,
+    sources: operation.sources.map((candidate) => (
+      String(entitlementBenefitPoolId(candidate) || '').trim() === detailId
+        ? { ...candidate, quantity: next }
+        : candidate
+    ))
+  }
+}
+
+function setCardOperationSourceQuantity(source, event) {
+  const maximum = cardOperationSourceMaximum(source)
+  const current = Math.max(1, Math.floor(Number(source.quantity || 1)))
+  const requested = Math.max(1, Math.floor(Number(event?.target?.value) || 1))
+  const next = maximum > 0 ? Math.min(maximum, requested) : current
+  if (event?.target) event.target.value = String(next)
+  changeCardOperationSourceQuantity(source, next - current)
+}
+
 function handleOperationTargetSelection() {
   const operation = previewCardOperation.value
   if (operation?.mode !== 'project-replacement' || !operation.sources?.length) return
@@ -1922,6 +1954,17 @@ function operationEndOfDayTimestamp(date = '') {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) return null
   const value = Date.parse(`${normalized}T23:59:59+08:00`)
   return Number.isFinite(value) ? Math.floor(value / 1000) : null
+}
+
+function cardOperationSourceBalance(source = {}, quantity = 1) {
+  const remainingValue = Math.max(0, Number(source.remainingAmount ?? source.remainingValue ?? 0))
+  const remainingTimes = Math.floor(Number(source.availableTimes ?? source.remainingTimes ?? 0))
+  const selectedQuantity = Math.max(1, Math.floor(Number(quantity || 1)))
+  if (!remainingValue || remainingTimes <= 0 || selectedQuantity >= remainingTimes) return remainingValue
+  // The selector exposes the current remaining value. Reconstruct the
+  // immutable unit value before allocating only the edited operation count;
+  // otherwise an upgrade of two out of three rights would credit all three.
+  return Math.round((remainingValue * selectedQuantity / remainingTimes) * 100) / 100
 }
 
 async function submitDirectCardOperation({ source, date = '', reason = '' } = {}) {
@@ -1999,7 +2042,13 @@ async function submitDirectCardOperation({ source, date = '', reason = '' } = {}
         reportEntitlementContractError({ message: '原项目权益不完整，请重新选择。' })
         return { result: { status: 'failed', code: 'CARD_OPERATION_SOURCE_PROJECT_MISSING' } }
       }
-      linesByDetail.set(detailId, (linesByDetail.get(detailId) || 0) + 1)
+      const quantity = Math.floor(Number(selected.quantity || 0))
+      const maximum = cardOperationSourceMaximum(selected)
+      if (!Number.isInteger(quantity) || quantity < 1 || maximum < quantity) {
+        reportEntitlementContractError({ message: '项目操作次数已变化，请重新选择来源项目。' })
+        return { result: { status: 'failed', code: 'CARD_OPERATION_SOURCE_QUANTITY_INVALID' } }
+      }
+      linesByDetail.set(detailId, (linesByDetail.get(detailId) || 0) + quantity)
     }
     payload.projectLines = Array.from(linesByDetail, ([sourceDetailId, quantity]) => ({ sourceDetailId, quantity }))
   }
@@ -2016,7 +2065,10 @@ async function submitDirectCardOperation({ source, date = '', reason = '' } = {}
   if (cardOperationUpgradeTypes.has(operationType)) {
     const localLineId = `local-card-operation-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
     const targetAmount = Math.max(0, Number(operation.target?.price || operation.target?.amount || 0))
-    const sourceBalance = Math.max(0, Number(source.remainingAmount || source.remainingValue || 0))
+    const sourceQuantity = cardOperationProjectTypes.has(operationType)
+      ? (operation.sources || []).reduce((total, selected) => total + Math.max(1, Math.floor(Number(selected.quantity || 1))), 0)
+      : 1
+    const sourceBalance = cardOperationSourceBalance(source, sourceQuantity)
     const receivableAmount = Math.max(0, targetAmount - sourceBalance)
     appendLocalCashierDraftOperation({
       action: 'submit-card-operation',
@@ -5631,7 +5683,35 @@ onBeforeUnmount(() => {
             </header>
             <div v-for="source in previewCardOperation.sources" :key="source.id || source.projectId || source.name" class="cashier-operation-preview__source">
               <strong>{{ source.name }}</strong>
-              <span v-if="source.cardName">来源：{{ source.cardName }}</span>
+              <div class="cashier-operation-preview__source-meta">
+                <span v-if="source.cardName">来源：{{ source.cardName }}</span>
+                <template v-if="['project-replacement', 'project-upgrade'].includes(previewCardOperation.mode)">
+                  <span>本次 {{ previewCardOperation.mode === 'project-replacement' ? '替换' : '升级' }} {{ source.quantity || 1 }} 次 / 可用 {{ cardOperationSourceMaximum(source) }} 次</span>
+                  <div class="quantity-stepper cashier-operation-preview__quantity-stepper" aria-label="本次项目操作次数">
+                    <button
+                      type="button"
+                      aria-label="减少本次次数"
+                      :disabled="Number(source.quantity || 1) <= 1"
+                      @click="changeCardOperationSourceQuantity(source, -1)"
+                    >−</button>
+                    <input
+                      :value="source.quantity || 1"
+                      type="number"
+                      min="1"
+                      :max="cardOperationSourceMaximum(source)"
+                      inputmode="numeric"
+                      aria-label="本次项目操作次数"
+                      @change="setCardOperationSourceQuantity(source, $event)"
+                    >
+                    <button
+                      type="button"
+                      aria-label="增加本次次数"
+                      :disabled="Number(source.quantity || 1) >= cardOperationSourceMaximum(source)"
+                      @click="changeCardOperationSourceQuantity(source, 1)"
+                    >＋</button>
+                  </div>
+                </template>
+              </div>
             </div>
             <div class="cashier-operation-preview__arrow" aria-hidden="true">↓</div>
             <div class="cashier-operation-preview__target" :class="{ 'is-filled': previewCardOperation.target }">

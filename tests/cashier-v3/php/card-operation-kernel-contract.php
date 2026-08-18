@@ -83,8 +83,8 @@ check_card_operation($replacement['lines'][0]['quantityAfter'] === 2, 'replaceme
 check_card_operation(
     count($replacement['lines']) === 2
     && ($replacement['lines'][1]['lineRole'] ?? '') === 'target_project'
-    && (int)($replacement['lines'][1]['quantityAfter'] ?? 0) === 1,
-    'replacement freezes one target right line regardless of selected source quantity'
+    && (int)($replacement['lines'][1]['quantityAfter'] ?? 0) === 2,
+    'replacement freezes target-right count from selected source quantity'
 );
 $replacementRepeated = CashierV3CardOperationKernel::plan([
     'operationType' => 'project_replacement', 'sourceCardHolderId' => 10, 'sourceCardHolderVersion' => 7,
@@ -112,8 +112,20 @@ $replacementMultipleSources = CashierV3CardOperationKernel::plan([
 check_card_operation(
     count($replacementMultipleSources['stateMutation']['projectMutations'] ?? []) === 2
     && count($replacementMultipleSources['lines'] ?? []) === 3
-    && (int)($replacementMultipleSources['lines'][2]['quantityAfter'] ?? 0) === 1,
-    'multiple source projects still create exactly one target right'
+    && (int)($replacementMultipleSources['lines'][2]['quantityAfter'] ?? 0) === 5,
+    'multiple source projects create target rights equal to the selected total'
+);
+$projectUpgrade = CashierV3CardOperationKernel::plan([
+    'operationType' => 'project_upgrade', 'sourceCardHolderId' => 10, 'sourceCardHolderVersion' => 7,
+    'idempotencyKey' => 'PROJECT-UPGRADE-0001', 'reason' => '项目升级',
+    'projectLines' => [['sourceDetailId' => 301, 'quantity' => 2]],
+], $source, ['catalogId' => 601, 'catalogName' => '升级目标项目', 'priceCents' => 20000], $context);
+check_card_operation(
+    $projectUpgrade['operationStatus'] === 'awaiting_checkout'
+    && (int)($projectUpgrade['stateMutation']['projectMutations'][0]['quantityAfter'] ?? -1) === 2
+    && (int)($projectUpgrade['stateMutation']['projectMutations'][0]['quantityDelta'] ?? 0) === -2
+    && (int)($projectUpgrade['checkoutSettlement']['sourceRemainingValueCents'] ?? -1) === 4000,
+    'project upgrade freezes the edited source quantity until checkout settlement'
 );
 $roundingSource = $source;
 $roundingSource['projects'] = [[
@@ -177,6 +189,7 @@ $runtimeTables = [
     'eb_cashier_v3_card_state',
     'eb_cashier_v3_card_operation',
     'eb_cashier_v3_card_operation_line',
+    'eb_cashier_v3_card_operation_settlement',
 ];
 $readyGuard = new CashierV3CardOperationReadinessGuard();
 $readyGuard->setInspector(static function () use ($runtimeTables): array {

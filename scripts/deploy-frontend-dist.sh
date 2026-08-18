@@ -44,6 +44,15 @@ esac
 
 SSH_HOST="${MOHE_SSH_HOST:-aliyun-ecs}"
 PUBLIC="$REMOTE_ROOT/public"
+if [ "$SITE_KEY" = "rh" ]; then
+  # /store-v3 is an explicit 8080 preview entry on the 瑞昊服务器.  It is
+  # served from the isolated integration root rather than the normal public
+  # directory used by /view_cashier_v3.
+  SSH_HOST="${MOHE_RH_SSH_HOST:-root@47.96.103.107}"
+  CASHIER_PUBLIC="/www/wwwroot/rh.cc3798.com-8080/public"
+else
+  CASHIER_PUBLIC="$PUBLIC"
+fi
 
 deploy_admin() {
   local dist="$FRONTEND_DIST_ROOT/admin/dist"
@@ -61,10 +70,10 @@ deploy_admin() {
 deploy_cashier_v3() {
   local dist="$FRONTEND_DIST_ROOT/cashier-v3/dist"
   test -f "$dist/index.html"
-  echo "→ 上传 cashier-v3 → $PUBLIC/view_cashier_v3"
-  ssh "$SSH_HOST" "mkdir -p '$PUBLIC/view_cashier_v3' && rm -rf '$PUBLIC/view_cashier_v3'/*"
-  rsync -az --delete "$dist/" "$SSH_HOST:$PUBLIC/view_cashier_v3/"
-  ssh "$SSH_HOST" "chown -R www:www '$PUBLIC/view_cashier_v3' 2>/dev/null || true"
+  echo "→ 上传 cashier-v3 → $CASHIER_PUBLIC/view_cashier_v3"
+  ssh "$SSH_HOST" "mkdir -p '$CASHIER_PUBLIC/view_cashier_v3' && rm -rf '$CASHIER_PUBLIC/view_cashier_v3'/*"
+  rsync -az --delete "$dist/" "$SSH_HOST:$CASHIER_PUBLIC/view_cashier_v3/"
+  ssh "$SSH_HOST" "chown -R www:www '$CASHIER_PUBLIC/view_cashier_v3' 2>/dev/null || true"
 }
 
 deploy_fund_v3() {

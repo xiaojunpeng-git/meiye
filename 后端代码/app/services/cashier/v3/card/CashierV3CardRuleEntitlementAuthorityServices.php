@@ -349,9 +349,11 @@ final class CashierV3CardRuleEntitlementAuthorityServices
         }
 
         $usesIndependentTimes = in_array($ruleType, ['normal', 'choice_kind'], true);
-        // Source rights can be deducted in aggregate, while a replacement
-        // always grants exactly one target-project right.
-        $targetTimes = $usesIndependentTimes ? 1 : 0;
+        // For independent-count rules the replacement must expose exactly the
+        // same count as the selected source rights. Choice-count rules use the
+        // card-level shared counter, so their component keeps the established
+        // virtual count of zero.
+        $targetTimes = $usesIndependentTimes ? $totalQuantity : 0;
         $componentSnapshot = [
             'relationId' => $relationId,
             'productId' => (int)$target['catalogId'],

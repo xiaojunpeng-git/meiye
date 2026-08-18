@@ -669,7 +669,7 @@ try {
         && (int)Db::name('store_order')->where('id', 4501)->value('uid') === 4101,
         json_encode($extensionAudit, JSON_UNESCAPED_UNICODE), 'C2-CARDOP-BE-12A');
 
-    cardOpSection('project replacement grants one target right');
+    cardOpSection('project replacement grants target rights equal to selected source count');
     $replacementVersion = cardOpVersion('card_holder', 4601);
     $replacementKey = 'CARD_OPERATION-' . MemberIntegrationFixture::uuid();
     $replacementBody = cardOpBody($session, [
@@ -686,11 +686,11 @@ try {
     $replacementTarget = (array)Db::name('store_order_cart_info')
         ->where('oid', 4501)->where('product_id', 4802)->where('cart_type', 2)->where('product_type', 6)
         ->find();
-    ok('项目替换扣减来源权益并固定创建一个目标权益',
+    ok('项目替换扣减来源权益并按所选次数创建目标权益',
         ($replacement['result']['status'] ?? '') === 'success'
         && (int)Db::name('store_order_cart_info')->where('id', 4701)->value('write_surplus_times') === 6
-        && (int)($replacementTarget['write_times'] ?? 0) === 1
-        && (int)($replacementTarget['write_surplus_times'] ?? 0) === 1
+        && (int)($replacementTarget['write_times'] ?? 0) === 2
+        && (int)($replacementTarget['write_surplus_times'] ?? 0) === 2
         && (int)($replacementTarget['uid'] ?? 0) === 4101
         && (string)($replacementTarget['pay_price'] ?? '') === '20.00'
         && (int)Db::name('user_card_holder')->where('id', 4601)->value('write_surplus_times') === 8,
@@ -721,7 +721,7 @@ try {
         ->find();
     ok('项目替换在同一事务同步规则组件，后续权益选择可读取目标项目',
         (int)($replacementSourceRule['remainingTimes'] ?? -1) === 6
-        && (int)($replacementTargetRule['remainingTimes'] ?? -1) === 1
+        && (int)($replacementTargetRule['remainingTimes'] ?? -1) === 2
         && (int)($replacementTargetComponent['project_product_id'] ?? 0) === 4802
         && (string)($replacementTargetComponent['status'] ?? '') === 'active',
         json_encode($replacementTargetComponent, JSON_UNESCAPED_UNICODE), 'C2-CARDOP-BE-12E');

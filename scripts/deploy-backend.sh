@@ -26,6 +26,7 @@ case "$SITE_KEY" in
       exit 3
     fi
     REMOTE="/www/wwwroot/rh.cc3798.com"
+    SSH_HOST="${MOHE_RH_SSH_HOST:-root@47.96.103.107}"
     ;;
   *) echo "未知站点 $SITE_KEY"; exit 2 ;;
 esac

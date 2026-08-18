@@ -24,6 +24,7 @@ HANG_ORDER_AUTHORITY_UPGRADE="$UPGRADE_DIR/2026-07-29-收银V3正式挂单权威
 HANG_RESUME_CHECKOUT_UPGRADE="$UPGRADE_DIR/2026-07-30-收银V3普通商品挂单恢复结账"
 SALESPERSON_DRAFT_UPGRADE="$UPGRADE_DIR/2026-07-31-收银V3销售人分配草稿"
 CARD_UPGRADE="$UPGRADE_DIR/2026-07-30-收银V3卡操作权威"
+CARD_OPERATION_SETTLEMENT_UPGRADE="$UPGRADE_DIR/2026-08-11-收银V3卡操作权益余额结算"
 CARD_ISSUANCE_UPGRADE="$UPGRADE_DIR/2026-07-30-收银V3卡项权益签发"
 ISSUED_CARD_RULE_UPGRADE="$UPGRADE_DIR/2026-08-03-收银V3新卡项规则签发状态"
 RECHARGE_DEBT_UPGRADE="$UPGRADE_DIR/2026-08-02-收银V3充值欠款权威"
@@ -115,10 +116,12 @@ docker run -d --name "$MYSQL_CONTAINER" --network "$NETWORK" --platform linux/am
   --sql-mode=STRICT_ALL_TABLES --innodb-large-prefix=0 --innodb-file-format=Antelope >/dev/null
 
 for _ in $(seq 1 90); do
-  docker exec "$MYSQL_CONTAINER" mysqladmin ping -uroot --silent >/dev/null 2>&1 && break
+  # mysqladmin without -h can succeed against the temporary bootstrap
+  # server's Unix socket before the final TCP listener is available.
+  docker exec "$MYSQL_CONTAINER" mysql -h "$MYSQL_CONTAINER" -uroot -e 'SELECT 1' >/dev/null 2>&1 && break
   sleep 1
 done
-docker exec "$MYSQL_CONTAINER" mysqladmin ping -uroot --silent >/dev/null
+docker exec "$MYSQL_CONTAINER" mysql -h "$MYSQL_CONTAINER" -uroot -e 'SELECT 1' >/dev/null
 MYSQL_VERSION="$(docker exec "$MYSQL_CONTAINER" mysql -uroot -Nse 'SELECT VERSION()')"
 [[ "$MYSQL_VERSION" == '5.6.51' ]]
 echo "MYSQL_VERSION=$MYSQL_VERSION"
@@ -152,9 +155,11 @@ register_upgrade() {
 }
 
 start_php_env() {
-  docker run -d --name "$PHP_CONTAINER" --network "$NETWORK" --platform "$PHP_PLATFORM" \
+docker run -d --name "$PHP_CONTAINER" --network "$NETWORK" --platform "$PHP_PLATFORM" \
     --cpus 1 --memory "$PHP_MEMORY" \
     -e DB_HOST="$MYSQL_CONTAINER" -e DB_PORT=3306 -e DB_DATABASE="$DB_NAME" \
+    -e HOSTNAME="$MYSQL_CONTAINER" -e HOSTPORT=3306 -e DATABASE="$DB_NAME" \
+    -e USERNAME=root -e PASSWORD= \
     -e DB_USERNAME=root -e DB_PASSWORD= -e CACHE_DRIVER=file -e DRIVER=file \
     -v "$BACKEND_DIR:/source:ro" -v "$ROOT_DIR/tests:/tests:ro" \
     -v "$WORK_DIR:/test-env:ro" --tmpfs /var/www/html:rw,size=384m \
@@ -197,6 +202,9 @@ mysql_expect "$ENTITLEMENT_UPGRADE/01-升级前检查.sql" 'PRECHECK_OK'
 mysql_expect "$ENTITLEMENT_UPGRADE/02-正式升级.sql" 'APPLY_OK'
 mysql_expect "$ENTITLEMENT_UPGRADE/03-升级后验证.sql" 'VERIFY_OK'
 register_upgrade '20260728-005-cashier-v3-entitlement-draft' 'card operation focused dependency' "$ENTITLEMENT_UPGRADE/02-正式升级.sql"
+# The entitlement migration creates the workspace tables; run the fixture
+# schema extender once more so compatibility columns are added after creation.
+run_php 'php /tests/cashier-v3/php/member-prepare-schema.php | grep -q C5_LEGACY_SCHEMA_READY=1'
 
 mysql_expect "$EVENT_UPGRADE/01-升级前检查.sql" 'PRECHECK_OK'
 mysql_expect "$EVENT_UPGRADE/02-正式升级.sql" 'APPLY_OK'
@@ -364,6 +372,15 @@ echo 'CARD_OPERATION_PHASE=card-operation-authority-postcheck'
 mysql_expect "$CARD_UPGRADE/03-升级后验证.sql" 'POSTCHECK_OK'
 echo 'CARD_OPERATION_PHASE=card-operation-authority-register'
 register_upgrade '20260730-021-cashier-v3-card-operation-authority-v1' 'card operation authority' "$CARD_UPGRADE/02-正式升级.sql"
+
+# Upgrade/project settlement writes the authoritative positive entitlement
+# credit for card and project upgrades. The integration fixture requires this
+# table before it can exercise the checkout-owned settlement boundary.
+echo 'CARD_OPERATION_PHASE=card-operation-settlement'
+mysql_expect "$CARD_OPERATION_SETTLEMENT_UPGRADE/01-升级前检查.sql" 'PRECHECK_OK'
+mysql_expect "$CARD_OPERATION_SETTLEMENT_UPGRADE/02-正式升级.sql" 'APPLY_OK'
+mysql_expect "$CARD_OPERATION_SETTLEMENT_UPGRADE/03-升级后验证.sql" '1'
+register_upgrade '20260811-001-cashier-v3-card-operation-entitlement-credit-v1' 'card operation settlement authority' "$CARD_OPERATION_SETTLEMENT_UPGRADE/02-正式升级.sql"
 
 # The regression below covers a direct project replacement on a newly issued
 # four-rule card. Install its real prerequisites in the same order as a
