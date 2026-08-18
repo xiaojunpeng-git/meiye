@@ -297,11 +297,17 @@ final class ThinkPhpCashierV3CheckoutSubmissionExecutionPort
             $salesPlan = $this->salesPlan($context, $authority);
             $aggregate = $context->aggregate();
             $request = (array)$aggregate['request'];
-            $salespeopleByCheckoutLine = $this->workspace->lockedSalespeopleByCheckoutLineInTx(
-                (string)$request['workspace_id'],
+            $salespeopleByCheckoutLine = $this->workspace->salespeopleFromCheckoutRequestLinesInTx(
                 (array)$aggregate['lines'],
                 $context->operatorScope()
             );
+            if ($salespeopleByCheckoutLine === null) {
+                $salespeopleByCheckoutLine = $this->workspace->lockedSalespeopleByCheckoutLineInTx(
+                    (string)$request['workspace_id'],
+                    (array)$aggregate['lines'],
+                    $context->operatorScope()
+                );
+            }
             $result = $this->debts->persistInTx(
                 $request,
                 $salesPlan,

@@ -76,6 +76,19 @@ final class CashierV3DebtRepaymentServices
         $debtFingerprint = self::debtFingerprint($authority, $debt, $items, $personnel);
         $dimensions = $this->dimensions($operator, $dataScope, (int)$authority['member_id']);
         $workspaceVersion = self::contextVersion((array)($scope['contexts'] ?? []), 'cashier_workspace', $workspaceId);
+        $editingDraft = $this->lockReusableEditingDraft(
+            $authority,
+            $amountCents,
+            $repaid,
+            $debtFingerprint,
+            $selectedSalespeople,
+            $workspaceId,
+            $stateContextId,
+            $operator,
+            $dataScope
+        );
+        $preparationRequestId = $idempotencyKey;
+        $current = null;
         $now = time();
         $snapshot = [
             'contractVersion' => CashierV3CheckoutSettlementKernel::AUTHORITY_CONTRACT_VERSION,
@@ -125,6 +138,10 @@ final class CashierV3DebtRepaymentServices
                 'sourceCodeSnapshot' => (string)$authority['sales_order_no_snapshot'],
                 'categoryIdSnapshot' => 0,
                 'categoryNameSnapshot' => '',
+                // Persist explicit empty arrays so the editing projection signs
+                // exactly the same personnel attribution shape as the kernel.
+                'guideSelections' => [],
+                'salesManagerSelections' => [],
                 'serviceObject' => '',
                 'craftsmen' => [],
                 'isExperience' => 0,
@@ -135,15 +152,33 @@ final class CashierV3DebtRepaymentServices
             'debt' => ['authorityKey' => '', 'policyVersion' => 0, 'amountCents' => 0],
         ];
         $snapshot['authoritySnapshotFingerprint'] = CashierV3CheckoutSettlementKernel::authorityFingerprint($snapshot);
-        $current = $this->requests->lockCurrentForKernelInTx('', $idempotencyKey, $operator, $dataScope);
-        $kernel = CashierV3CheckoutSettlementKernel::saveDraft([
+        $command = [
             'contractVersion' => CashierV3CheckoutSettlementKernel::CONTRACT_VERSION,
             'operation' => CashierV3CheckoutSettlementKernel::OPERATION_SAVE_DRAFT,
             'idempotencyKey' => $idempotencyKey,
             'workspaceId' => $workspaceId,
             'stateContextId' => $stateContextId,
             'permissionSnapshotFingerprint' => $dataScope->permissionVersion(),
-        ], $snapshot, $current, $this->secret());
+        ];
+        if ($editingDraft !== null) {
+            $preparationRequestId = $editingDraft['preparationRequestId'];
+            $command['requestId'] = $editingDraft['requestId'];
+            $command['expectedVersion'] = $editingDraft['requestVersion'];
+            $current = $this->requests->lockCurrentForKernelInTx(
+                $editingDraft['requestId'],
+                $idempotencyKey,
+                $operator,
+                $dataScope
+            );
+        } else {
+            $current = $this->requests->lockCurrentForKernelInTx('', $idempotencyKey, $operator, $dataScope);
+        }
+        $kernel = CashierV3CheckoutSettlementKernel::saveDraft(
+            $command,
+            $snapshot,
+            $current,
+            $this->secret()
+        );
         $sources = CashierV3CheckoutVerifiedSourceSet::fromServerVerifiedAuthorityRows(
             $dataScope->tenantId(),
             $operator->storeId(),
@@ -157,11 +192,11 @@ final class CashierV3DebtRepaymentServices
             ]]
         );
         $persisted = $this->requests->persistKernelPlanInTx($kernel, $sources, $operator, $dataScope);
-        $this->persistDraftInTx($kernel, $authority, $amountCents, $repaid, $debtFingerprint, $selectedSalespeople, $workspaceId, $stateContextId, $operator, $idempotencyKey, $now);
+        $this->persistDraftInTx($kernel, $authority, $amountCents, $repaid, $debtFingerprint, $selectedSalespeople, $workspaceId, $stateContextId, $operator, $preparationRequestId, $idempotencyKey, $now);
 
         return [
             'contractVersion' => self::PREPARE_CONTRACT_VERSION,
-            'preparationRequestId' => $idempotencyKey,
+            'preparationRequestId' => $preparationRequestId,
             'checkoutRequestId' => (string)$kernel['requestId'],
             'checkoutRequestVersion' => (int)$kernel['requestVersion'],
             'requestStatus' => (string)$kernel['requestStatus'],
@@ -511,7 +546,7 @@ final class CashierV3DebtRepaymentServices
         ksort($out, SORT_NUMERIC); return $out;
     }
 
-    private function persistDraftInTx(array $kernel, array $authority, int $amount, int $repaid, string $fingerprint, array $selectedSalespeople, string $workspaceId, string $stateContextId, CashierV3OperatorScope $operator, string $key, int $now): void
+    private function persistDraftInTx(array $kernel, array $authority, int $amount, int $repaid, string $fingerprint, array $selectedSalespeople, string $workspaceId, string $stateContextId, CashierV3OperatorScope $operator, string $preparationRequestId, string $lastIdempotencyKey, int $now): void
     {
         $draftId = (new CashierV3DebtRepaymentIdFactory($this->secret()))->draftId((string)$authority['tenant_id'], (int)$authority['debt_id'], $workspaceId);
         $stored = (array)Db::name('cashier_v3_debt_repayment_draft')->where('tenant_id', (string)$authority['tenant_id'])
@@ -524,12 +559,14 @@ final class CashierV3DebtRepaymentServices
             'debt_version_fingerprint' => $fingerprint,
             'salespeople_snapshot_json' => json_encode($selectedSalespeople, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
             'payment_lines_json' => '[]', 'draft_status' => 'editing',
-            'draft_version' => (int)$kernel['requestVersion'], 'prepare_idempotency_key' => $key,
-            'last_idempotency_key' => $key, 'update_time' => $now,
+            'draft_version' => (int)$kernel['requestVersion'], 'prepare_idempotency_key' => $preparationRequestId,
+            'last_idempotency_key' => $lastIdempotencyKey, 'update_time' => $now,
         ];
         if ($stored) {
-            $same = (string)$stored['prepare_idempotency_key'] === $key;
-            if (!$same && (string)$stored['draft_status'] === 'editing') throw self::failure('debt_repayment_draft_already_editing');
+            if ((string)$stored['draft_status'] === 'editing'
+                && !hash_equals((string)$stored['prepare_idempotency_key'], $preparationRequestId)) {
+                throw self::failure('debt_repayment_draft_already_editing');
+            }
             Db::name('cashier_v3_debt_repayment_draft')->where('id', (int)$stored['id'])->update($row);
             $verified = (array)Db::name('cashier_v3_debt_repayment_draft')->where('id', (int)$stored['id'])->lock(true)->find();
             foreach ($row as $column => $value) {
@@ -539,6 +576,68 @@ final class CashierV3DebtRepaymentServices
         }
         $row['add_time'] = $now;
         if ((int)Db::name('cashier_v3_debt_repayment_draft')->insert($row) !== 1) throw self::failure('debt_repayment_draft_insert_failed');
+    }
+
+    /**
+     * An editable repayment draft carries no payment or debt fact. Rebuild it
+     * only when it is the same authority snapshot in this exact workbench;
+     * this repairs an interrupted projection without ever creating a second
+     * checkout request or changing a completed repayment.
+     */
+    private function lockReusableEditingDraft(
+        array $authority,
+        int $amount,
+        int $repaid,
+        string $fingerprint,
+        array $salespeople,
+        string $workspaceId,
+        string $stateContextId,
+        CashierV3OperatorScope $operator,
+        CashierV3DataScopeContext $scope
+    ): ?array {
+        $draft = (array)Db::name('cashier_v3_debt_repayment_draft')
+            ->where('tenant_id', (string)$authority['tenant_id'])
+            ->where('workspace_id', $workspaceId)
+            ->where('debt_id', (int)$authority['debt_id'])
+            ->lock(true)->find();
+        if (!$draft || (string)($draft['draft_status'] ?? '') !== 'editing') {
+            return null;
+        }
+        $storedSalespeople = json_encode($salespeople, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        if ((int)($draft['store_id'] ?? 0) !== $operator->storeId()
+            || (int)($draft['member_id'] ?? 0) !== (int)$authority['member_id']
+            || (int)($draft['operator_id'] ?? 0) !== $operator->operatorId()
+            || (string)($draft['state_context_id'] ?? '') !== $stateContextId
+            || (int)($draft['repayment_amount_cents'] ?? -1) !== $amount
+            || (int)($draft['debt_repaid_snapshot_cents'] ?? -1) !== $repaid
+            || !hash_equals((string)($draft['debt_version_fingerprint'] ?? ''), $fingerprint)
+            || !hash_equals((string)($draft['salespeople_snapshot_json'] ?? ''), (string)$storedSalespeople)) {
+            throw self::failure('debt_repayment_draft_already_editing');
+        }
+        $preparationRequestId = trim((string)($draft['prepare_idempotency_key'] ?? ''));
+        $current = $this->requests->lockCurrentForKernelInTx('', $preparationRequestId, $operator, $scope);
+        if ($current === null || (string)($current['status'] ?? '') !== 'editing'
+            || !hash_equals((string)($current['workspaceId'] ?? ''), $workspaceId)) {
+            throw self::failure('debt_repayment_draft_recovery_invalid');
+        }
+        $request = (array)Db::name('cashier_v3_checkout_request')
+            ->where('request_id', (string)$current['requestId'])
+            ->where('tenant_id', $scope->tenantId())
+            ->where('store_id', $operator->storeId())
+            ->lock(true)->find();
+        if (!$request
+            || (string)($request['source_document_type'] ?? '') !== 'debt_repayment'
+            || (string)($request['source_document_id'] ?? '') !== (string)$authority['debt_id']
+            || (int)($request['request_version'] ?? 0) !== (int)$current['version']
+            || (int)($draft['draft_version'] ?? 0) !== (int)$current['version']
+            || !hash_equals((string)($request['creation_idempotency_key'] ?? ''), $preparationRequestId)) {
+            throw self::failure('debt_repayment_draft_recovery_invalid');
+        }
+        return [
+            'preparationRequestId' => $preparationRequestId,
+            'requestId' => (string)$current['requestId'],
+            'requestVersion' => (int)$current['version'],
+        ];
     }
 
     private function lockDebtAuthority(int $debtId, CashierV3OperatorScope $operator, CashierV3DataScopeContext $scope): array
@@ -733,9 +832,13 @@ final class CashierV3DebtRepaymentServices
         try {
             $this->persistOriginalSalePaymentAllocationsInTx(
                 $paymentFacts, $authority, $items, $itemTargets, $personnel,
-                $commandKey, $event, $dimensions, $operator, $scope, $now
+                $commandKey, $event, $requestId, $dimensions, $operator, $scope, $now
             );
         } catch (\Throwable $e) {
+            \think\facade\Log::error('[cashier_v3_debt_repayment_payment_allocation_failed] ' . json_encode([
+                'exceptionClass' => get_class($e),
+                'exceptionMessage' => $e->getMessage(),
+            ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
             throw self::failure('debt_repayment_payment_allocation_write_failed', ['cause' => get_class($e)]);
         }
     }
@@ -745,7 +848,7 @@ final class CashierV3DebtRepaymentServices
      * repayment document line.  Preserve that relationship in the same
      * immutable allocation fact used by every item-level cash report.
      */
-    private function persistOriginalSalePaymentAllocationsInTx(array $paymentFacts, array $authority, array $items, array $itemTargets, array $personnel, string $commandKey, array $event, array $dimensions, CashierV3OperatorScope $operator, CashierV3DataScopeContext $scope, int $now): void
+    private function persistOriginalSalePaymentAllocationsInTx(array $paymentFacts, array $authority, array $items, array $itemTargets, array $personnel, string $commandKey, array $event, string $checkoutRequestId, array $dimensions, CashierV3OperatorScope $operator, CashierV3DataScopeContext $scope, int $now): void
     {
         $lineBases = [];
         foreach ($items as $item) {
@@ -793,7 +896,7 @@ final class CashierV3DebtRepaymentServices
             'store_id' => $operator->storeId(), 'member_id' => (int)$authority['member_id'],
             'order_id' => (string)$authority['sales_order_id'], 'order_no_snapshot' => (string)$authority['sales_order_no_snapshot'],
             'business_date' => date('Y-m-d', $now), 'occurred_at' => $now, 'settled_at' => $now, 'recorded_at' => $now,
-            'business_event_no' => (string)$event['event_no'], 'checkout_request_id' => (string)$event['source_id'],
+            'business_event_no' => (string)$event['event_no'], 'checkout_request_id' => $checkoutRequestId,
         ], $normalizedPayments, $sales);
     }
 

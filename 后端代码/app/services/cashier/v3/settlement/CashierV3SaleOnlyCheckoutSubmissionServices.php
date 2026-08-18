@@ -206,11 +206,17 @@ final class CashierV3SaleOnlyCheckoutSubmissionServices
             );
             self::assertPreparationIdentity($payload, $aggregate['request']);
             $this->assertSupportedSaleLines($aggregate['lines'], $dataScope);
-            $salespeopleByCheckoutLine = $this->workspace->lockedSalespeopleByCheckoutLineInTx(
-                $workspaceId,
+            $salespeopleByCheckoutLine = $this->workspace->salespeopleFromCheckoutRequestLinesInTx(
                 (array)$aggregate['lines'],
                 $operatorScope
             );
+            if ($salespeopleByCheckoutLine === null) {
+                $salespeopleByCheckoutLine = $this->workspace->lockedSalespeopleByCheckoutLineInTx(
+                    $workspaceId,
+                    (array)$aggregate['lines'],
+                    $operatorScope
+                );
+            }
 
             // Guide attribution is a reporting-only snapshot. It is read from
             // the server-locked aggregate (never from the browser payload),
@@ -569,11 +575,13 @@ final class CashierV3SaleOnlyCheckoutSubmissionServices
                 $eventExecution,
                 $eventContract
             );
-            $cashierDraft = $this->workspace->completeSaleOnlyCheckoutInTx(
+            // The checkout request is the authority for snapshot submissions.
+            // Do not require its lines to exist in cashier_workspace; that
+            // projection is only the editable shell and may be empty.
+            $cashierDraft = $this->workspace->completeSnapshotCheckoutInTx(
                 $workspaceId,
                 $stateContextId,
-                $operatorScope,
-                $aggregate['lines']
+                $operatorScope
             );
 
             return [

@@ -62,6 +62,11 @@ class CashierV3RequestNormalizer
             $out = self::normalizeCheckoutBusinessSource($out);
         }
 
+        if ($canonicalAction === 'prepare-checkout'
+            && array_key_exists('checkoutSnapshot', $out)) {
+            $out['checkoutSnapshot'] = self::normalizeCheckoutSnapshot($out['checkoutSnapshot']);
+        }
+
         if (in_array($canonicalAction, [
             'prepare-checkout-submission',
             'submit-checkout',
@@ -80,6 +85,126 @@ class CashierV3RequestNormalizer
         }
 
         return ['normalized' => $out, 'warnings' => $warnings];
+    }
+
+    private static function normalizeCheckoutSnapshot($snapshot): array
+    {
+        if (!is_array($snapshot)) {
+            throw self::invalidCheckoutSnapshot('snapshot_not_object');
+        }
+        $encoded = json_encode($snapshot, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        if (!is_string($encoded) || strlen($encoded) > 1048576) {
+            throw self::invalidCheckoutSnapshot('snapshot_too_large');
+        }
+        $memberId = self::canonicalNonNegativeInteger(
+            $snapshot['memberId'] ?? $snapshot['member_id'] ?? 0,
+            'memberId'
+        );
+        $customerMode = trim((string)($snapshot['customerMode'] ?? $snapshot['customer_mode'] ?? ($memberId > 0 ? 'member' : 'guest')));
+        if (!in_array($customerMode, ['member', 'guest'], true)
+            || ($customerMode === 'member') !== ($memberId > 0)) {
+            throw self::invalidCheckoutSnapshot('member_binding_invalid');
+        }
+        $lines = $snapshot['lines'] ?? null;
+        if (!is_array($lines) || $lines === [] || count($lines) > 200) {
+            throw self::invalidCheckoutSnapshot('line_count_invalid');
+        }
+        $normalized = [];
+        $seen = [];
+        foreach (array_values($lines) as $index => $line) {
+            if (!is_array($line)) {
+                throw self::invalidCheckoutSnapshot('line_not_object', $index);
+            }
+            $lineId = trim((string)($line['lineId'] ?? $line['line_id'] ?? $line['id'] ?? ''));
+            if ($lineId === '' || strlen($lineId) > 64 || strpos($lineId, "\0") !== false || isset($seen[$lineId])) {
+                throw self::invalidCheckoutSnapshot('line_identity_invalid', $index);
+            }
+            $seen[$lineId] = true;
+            $role = trim((string)($line['lineRole'] ?? $line['line_role'] ?? ''));
+            if (in_array($role, ['entitlement', 'benefit_service'], true)) {
+                $role = 'entitlement_service';
+            }
+            if (!in_array($role, ['sale', 'entitlement_service'], true)) {
+                throw self::invalidCheckoutSnapshot('line_role_invalid', $index);
+            }
+            $quantity = self::canonicalPositiveInteger($line['quantity'] ?? null, 'quantity', 1000000);
+            if ($quantity > 1000000) {
+                throw self::invalidCheckoutSnapshot('line_quantity_invalid', $index);
+            }
+            $row = $line;
+            $row['lineId'] = $lineId;
+            $row['lineRole'] = $role;
+            $row['quantity'] = $quantity;
+            unset($row['line_id'], $row['line_role']);
+            if ($role === 'sale') {
+                $isCustomCard = (string)($line['kindCode'] ?? $line['sourceKind'] ?? '') === 'custom_card'
+                    || is_array($line['customCardConfiguration'] ?? null)
+                    || is_array($line['localCustomCardConfiguration'] ?? null);
+                if ($isCustomCard) {
+                    $row['itemId'] = 0;
+                    $configuration = $line['customCardConfiguration']
+                        ?? ($line['localCustomCardConfiguration'] ?? null);
+                    if (!is_array($configuration)) {
+                        throw self::invalidCheckoutSnapshot('custom_card_configuration_invalid', $index);
+                    }
+                    $row['customCardConfiguration'] = $configuration;
+                } else {
+                    $row['itemId'] = self::canonicalPositiveInteger(
+                        $line['itemId'] ?? $line['catalogItemId'] ?? $line['productId'] ?? null,
+                        'itemId'
+                    );
+                }
+            } else {
+                $row['entitlementInstanceId'] = self::canonicalPositiveInteger(
+                    $line['entitlementInstanceId'] ?? $line['cardHolderId'] ?? null,
+                    'entitlementInstanceId'
+                );
+                $row['entitlementSourceDetailId'] = self::canonicalPositiveInteger(
+                    $line['entitlementSourceDetailId'] ?? $line['memberBenefitPoolId'] ?? null,
+                    'entitlementSourceDetailId'
+                );
+                $row['entitlementSourceVersion'] = self::canonicalPositiveInteger(
+                    $line['entitlementSourceVersion'] ?? $line['sourceVersion'] ?? null,
+                    'entitlementSourceVersion'
+                );
+                $row['projectId'] = self::canonicalPositiveInteger(
+                    $line['projectId'] ?? $line['project_id'] ?? null,
+                    'projectId'
+                );
+                $row['projectVersion'] = self::canonicalPositiveInteger(
+                    $line['projectVersion'] ?? $line['detailVersion'] ?? null,
+                    'projectVersion'
+                );
+            }
+            foreach (['craftsmen', 'salespeople', 'guideSelections', 'salesManagerSelections'] as $peopleField) {
+                if (array_key_exists($peopleField, $row)
+                    && (!is_array($row[$peopleField]) || count($row[$peopleField]) > 20)) {
+                    throw self::invalidCheckoutSnapshot('line_personnel_invalid', $index);
+                }
+            }
+            $normalized[] = $row;
+        }
+        // Keep the complete browser snapshot.  The normalizer canonicalizes
+        // identity aliases and bounds nested lists, but must not drop business
+        // date, source, payment, coupon, debt or attribution fields before
+        // the final checkout authority consumes them.
+        $result = $snapshot;
+        $result['contractVersion'] = 'cashier-v3-checkout-snapshot-v1';
+        $result['customerMode'] = $customerMode;
+        $result['memberId'] = $memberId;
+        $result['lines'] = $normalized;
+        unset($result['customer_mode'], $result['member_id']);
+        return $result;
+    }
+
+    private static function invalidCheckoutSnapshot(string $reason, int $index = -1): CashierV3CommandException
+    {
+        $detail = ['reason' => $reason];
+        if ($index >= 0) $detail['index'] = $index;
+        return CashierV3CommandException::invalidContext(
+            '本次结账快照格式无效，请返回收银页后重试。',
+            $detail
+        );
     }
 
     private static function normalizeCardOperation(array $payload): array
@@ -521,7 +646,7 @@ class CashierV3RequestNormalizer
                     CashierV3AliasResolver::resolveString($line, ['projectVersion', 'project_version'], true),
                     'projectVersion'
                 ),
-                'quantity' => self::canonicalPositiveInteger($line['quantity'] ?? null, 'quantity', 1),
+                'quantity' => self::canonicalPositiveInteger($line['quantity'] ?? null, 'quantity', 1000000),
                 // “使用权益”打开时已取得当前权益展示快照。加入购物车只是保存草稿，
                 // 标准化层不能在此丢弃它；最终结账再以权威权益事实完成校验与核销。
                 'displaySnapshot' => is_array($line['displaySnapshot'] ?? null)

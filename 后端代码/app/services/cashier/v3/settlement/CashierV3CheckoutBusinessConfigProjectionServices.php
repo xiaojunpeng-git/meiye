@@ -42,6 +42,7 @@ final class CashierV3CheckoutBusinessConfigProjectionServices
         $projection['sourceSelectionVersion'] = (int)($selection['selectionVersion'] ?? 0);
         $projection['primarySourceId'] = (int)($selection['primarySourceId'] ?? 0);
         $projection['secondarySourceId'] = (int)($selection['secondarySourceId'] ?? 0);
+        $projection['rewardAmountCents'] = (int)($selection['rewardAmountCents'] ?? 0);
 
         return $this->applyAccountingMethodNames($projection);
     }

@@ -25,6 +25,7 @@ $checks = [
     'sales order detail projects labor fee with each craftsman allocation' => [$salesOrderQuery, "'laborFeeAmount' => \$this->moneyFromCents"],
     'sales order detail renders the separate craftsman labor fee' => [$detail, '手工费 {{ displayAmount'],
     'craftsman report reads the independent fee field instead of labor performance' => [$report, "THEN labor_fee_amount_cents ELSE 0 END) AS labor_amount_cents"],
+    'partner summary reads the independent fee field instead of labor performance' => [$report, "SUM(pf.labor_fee_amount_cents),0) FROM eb_cashier_v3_performance_fact pf WHERE pf.source_line_id=s.source_line_id AND pf.performance_type='labor_performance_allocated'"],
     'migration adds the two independent labor fee columns idempotently' => [$migration, 'performance_labor_fee_already_present'],
 ];
 

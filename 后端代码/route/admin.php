@@ -3179,9 +3179,9 @@ Route::group('adminapi', function () {
     ])->middleware(\app\http\middleware\SystemLogMiddleware::class, 'admin');
 
     Route::group('fund', function () {
+        Route::get('scope', 'v1.fund.StoreFund/scope')->option(['real_name' => '费用可选门店范围']);
         Route::get('subjects', 'v1.fund.StoreFund/subjects')->option(['real_name' => '费用科目']);
         Route::post('subjects', 'v1.fund.StoreFund/saveSubject')->option(['real_name' => '保存费用科目']);
-        Route::get('scope', 'v1.fund.StoreFund/scope')->option(['real_name' => '费用可选门店范围']);
         Route::get('documents', 'v1.fund.StoreFund/documents')->option(['real_name' => '费用收支单']);
         Route::get('documents/:id', 'v1.fund.StoreFund/detail')->option(['real_name' => '费用收支单详情']);
         Route::post('documents', 'v1.fund.StoreFund/save')->option(['real_name' => '保存费用收支单']);

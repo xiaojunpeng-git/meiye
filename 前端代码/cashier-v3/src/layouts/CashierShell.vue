@@ -54,6 +54,9 @@ const route = useRoute()
 const router = useRouter()
 const state = useCashierV3State()
 const isOperationHelpOpen = ref(false)
+const toolbarBusinessDate = ref(new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(new Date()))
+const toolbarBusinessDateReason = ref('')
+const toolbarBusinessSource = ref({ displayNameSnapshot: '', primarySourceId: 0, secondarySourceId: 0 })
 const isMemberSelectorOpen = ref(false)
 const memberSelectorContext = ref('cashier')
 let memberSelectorQuerySequence = 0
@@ -74,6 +77,7 @@ let memberDetailLoadSequence = 0
 const isDebtReminderOpen = ref(false)
 const debtReminderMember = ref(null)
 const deferredMemberSelection = ref(null)
+const pendingDebtReminderAfterSource = ref(null)
 const isMemberDebtOpen = ref(false)
 const activeDebtMember = ref(null)
 const initialDebtRecordId = ref('')
@@ -116,6 +120,46 @@ const isPasswordSubmitting = ref(false)
 const passwordChange = ref({ currentPassword: '', newPassword: '', confirmation: '' })
 const passwordChangeError = ref('')
 let feedbackTimeoutId = null
+
+function openToolbarBusinessSource() {
+  window.dispatchEvent(new CustomEvent('cashier-v3:open-toolbar-business-source'))
+}
+
+function updateToolbarBusinessDate(event) {
+  toolbarBusinessDate.value = String(event?.target?.value || '')
+  window.dispatchEvent(new CustomEvent('cashier-v3:update-toolbar-business-date', {
+    detail: {
+      businessDate: toolbarBusinessDate.value,
+      reason: toolbarBusinessDateReason.value
+    }
+  }))
+}
+
+function handleToolbarCheckoutContextUpdated(event) {
+  const detail = event?.detail || {}
+  if (detail.businessDate) toolbarBusinessDate.value = String(detail.businessDate)
+  toolbarBusinessDateReason.value = String(detail.businessDateReason || '')
+  toolbarBusinessSource.value = detail.source && typeof detail.source === 'object'
+    ? { ...toolbarBusinessSource.value, ...detail.source }
+    : toolbarBusinessSource.value
+}
+
+watch(
+  () => state.cashier?.checkout,
+  (checkout) => {
+    if (!checkout || typeof checkout !== 'object') return
+    if (checkout.businessDate) toolbarBusinessDate.value = String(checkout.businessDate)
+    toolbarBusinessDateReason.value = String(checkout.businessDateReason || '')
+    if (Number(checkout.primarySourceId || 0) > 0) {
+      toolbarBusinessSource.value = {
+        ...toolbarBusinessSource.value,
+        primarySourceId: Number(checkout.primarySourceId || 0),
+        secondarySourceId: Number(checkout.secondarySourceId || 0)
+      }
+    }
+  },
+  { immediate: true }
+)
 
 const sidebarPreferenceKey = 'cashier-v3-sidebar-collapsed'
 const isSidebarCollapsed = ref(readSidebarPreference())
@@ -693,6 +737,7 @@ function openMemberSelector(payload = {}) {
   const context = detail.context || detail.selectorContext
   if (!allowedMemberSelectorContexts.has(context)) return false
   deferredMemberSelection.value = null
+  pendingDebtReminderAfterSource.value = null
   memberSelectorContext.value = context
   memberSelectorInitialView.value = detail.initialView === 'creator' ? 'creator' : 'selector'
   memberSelectorRequiresMember.value = detail.requireMember === true
@@ -784,9 +829,10 @@ async function selectMemberFromSelector(record) {
     if (memberSelectorContext.value === 'cashier') {
       const selectedMember = cashierMember.value || record
       if (memberDebtAmount(selectedMember) > 0) {
-        deferredMemberSelection.value = selectedDetail
-        debtReminderMember.value = selectedMember
-        isDebtReminderOpen.value = true
+        // Customer source is the first post-selection interaction. Keep the
+        // debt reminder queued so the two modal layers never overlap.
+        pendingDebtReminderAfterSource.value = { member: selectedMember }
+        await completeMemberSelection(selectedDetail)
         return result
       }
     }
@@ -836,6 +882,15 @@ async function completeMemberSelection(detail) {
   window.dispatchEvent(new CustomEvent('cashier-v3:member-selector-selected', {
     detail: { context: detail.context, record: detail.record }
   }))
+  // A normal cashier member selection starts the customer-source interaction
+  // immediately. Source is a browser-side checkout field and is confirmed by
+  // the existing source overlay; recharge/debt/top-action flows keep their
+  // own follow-up dialog instead of opening two overlays at once.
+  if (detail.context === 'cashier' && !pendingMemberTopAction.value && !pendingCashierWorkflowTarget.value) {
+    window.dispatchEvent(new CustomEvent('cashier-v3:open-toolbar-business-source', {
+      detail: { reason: 'member-selected' }
+    }))
+  }
   const pendingTopAction = pendingMemberTopAction.value
   if (pendingTopAction) {
     pendingMemberTopAction.value = null
@@ -1014,6 +1069,15 @@ function closeDebtReminder() {
   isDebtReminderOpen.value = false
   debtReminderMember.value = null
   deferredMemberSelection.value = null
+  pendingDebtReminderAfterSource.value = null
+}
+
+function handleCheckoutBusinessSourceSettled() {
+  const pending = pendingDebtReminderAfterSource.value
+  if (!pending?.member) return
+  pendingDebtReminderAfterSource.value = null
+  debtReminderMember.value = pending.member
+  isDebtReminderOpen.value = true
 }
 
 async function cancelDebtReminder() {
@@ -1136,7 +1200,6 @@ async function prepareDebtRepayment(payload = {}) {
   )
   isDebtRepaymentPreparing.value = true
   try {
-    await requestCashierV3Action('open-cashier-workbench', { silent: true })
     const currentCheckout = state.cashier?.checkout
     if (currentCheckout
       && currentCheckout.businessType === 'debt_repayment'
@@ -1166,22 +1229,10 @@ async function prepareDebtRepayment(payload = {}) {
       await openDebtRepaymentCheckout(String(prepared.preparationRequestId), payload.debtRecordId)
       return result
     }
-    // 准备命令的响应可能因订单中心仍持有旧根投影而不能被当前页面接纳。
-    // 重新读取工作台中的已持久化草稿，只有确认是本次请求才跨页接力，不能
-    // 仅凭前端响应状态猜测是否可收款。
-    await requestCashierV3Action('open-cashier-workbench', { silent: true })
-    const preparedCheckout = state.cashier?.checkout
-    if (preparedCheckout
-      && preparedCheckout.businessType === 'debt_repayment'
-      && String(preparedCheckout.sourceDocumentId || '') === String(payload.debtRecordId || '')
-      && String(preparedCheckout.requestStatus || '') === 'editing'
-      && checkoutMatchesRequestedAmount(preparedCheckout)
-      && String(preparedCheckout.preparationRequestId || '') === preparationRequestId) {
-      await openDebtRepaymentCheckout(preparationRequestId, payload.debtRecordId)
-      return result
-    }
-    // 读取失败时保留原始业务结果，由调用方展示服务端返回的真实原因；不得
-    // 在没有权威草稿时伪造跳转到收银台。
+    // 欠款明细打开时已经取得 debt_record 和 workspace 的同一工作台版本。
+    // 这里额外重读工作台会推进 workspace 版本，却不会同步公开版本仓；下一条
+    // prepare 命令随即携带旧版本并被服务端拒绝。准备响应缺少交接凭证时保留
+    // 原始业务结果，由调用方展示服务端原因，不能猜测草稿已存在而跳转。
     return result
   } finally {
     isDebtRepaymentPreparing.value = false
@@ -2289,6 +2340,9 @@ onMounted(() => {
   window.addEventListener('cashier-v3:open-service-completion', openServiceCompletion)
   window.addEventListener('cashier-v3:register-service-completion-request', registerServiceCompletionPreparation)
   window.addEventListener('cashier-v3:register-room-assignment-request', registerRoomAssignmentPreparation)
+  window.addEventListener('cashier-v3:toolbar-context-updated', handleToolbarCheckoutContextUpdated)
+  window.addEventListener('cashier-v3:checkout-business-source-confirmed', handleCheckoutBusinessSourceSettled)
+  window.addEventListener('cashier-v3:checkout-business-source-closed', handleCheckoutBusinessSourceSettled)
 })
 onBeforeUnmount(() => {
   window.removeEventListener('cashier-v3:ui-result', handleUiResult)
@@ -2302,6 +2356,9 @@ onBeforeUnmount(() => {
   window.removeEventListener('cashier-v3:open-service-completion', openServiceCompletion)
   window.removeEventListener('cashier-v3:register-service-completion-request', registerServiceCompletionPreparation)
   window.removeEventListener('cashier-v3:register-room-assignment-request', registerRoomAssignmentPreparation)
+  window.removeEventListener('cashier-v3:toolbar-context-updated', handleToolbarCheckoutContextUpdated)
+  window.removeEventListener('cashier-v3:checkout-business-source-confirmed', handleCheckoutBusinessSourceSettled)
+  window.removeEventListener('cashier-v3:checkout-business-source-closed', handleCheckoutBusinessSourceSettled)
   closeQueryEntitySelector({ reason: 'shell-unmounted' })
   closeServiceCompletion()
   closeRoomAssignment()
@@ -2552,6 +2609,27 @@ onBeforeUnmount(() => {
                   <span v-if="cashierServiceOrderDisplayNo">服务单：{{ cashierServiceOrderDisplayNo }}</span>
                 </template>
               </div>
+            </div>
+            <div class="cashier-workflow-toolbar__context-settings" aria-label="本次结账信息">
+              <label class="cashier-workflow-context-date">
+                <CalendarDays :size="14" aria-hidden="true" />
+                <span>业务日期</span>
+                <input
+                  v-model="toolbarBusinessDate"
+                  type="date"
+                  aria-label="业务日期"
+                  @change="updateToolbarBusinessDate"
+                >
+              </label>
+              <button
+                type="button"
+                class="cashier-workflow-context-source"
+                aria-label="选择客户来源"
+                @click="openToolbarBusinessSource"
+              >
+                <span class="cashier-workflow-context-source__label">来源</span>
+                <strong>{{ toolbarBusinessSource.displayNameSnapshot || '未选择' }}</strong>
+              </button>
             </div>
             <div class="cashier-workflow-toolbar__operation-actions">
               <button

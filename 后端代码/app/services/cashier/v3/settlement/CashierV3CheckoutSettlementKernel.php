@@ -725,7 +725,7 @@ final class CashierV3CheckoutSettlementKernel
                 'priceChangedByNameSnapshot',
                 'priceChangedAt',
                 'craftsmen',
-            ], ['catalogSkuId', 'serviceObject', 'friendCountsAsCustomer', 'isExperience', 'isPresale', 'inventoryOutboundRequired', 'guideSelections', 'salesManagerSelections', 'manualLaborFeeCents'], 'saleLines[' . $index . ']');
+            ], ['catalogSkuId', 'serviceObject', 'friendCountsAsCustomer', 'isExperience', 'isPresale', 'inventoryOutboundRequired', 'salespeople', 'guideSelections', 'salesManagerSelections', 'manualLaborFeeCents'], 'saleLines[' . $index . ']');
             if ($line['saleClassification'] !== 'formal_sale') {
                 throw self::failure('sale_line_not_formal', ['index' => $index]);
             }
@@ -875,6 +875,29 @@ final class CashierV3CheckoutSettlementKernel
             ];
             if ($manualLaborFeeCents !== null) {
                 $normalized['manualLaborFeeCents'] = $manualLaborFeeCents;
+            }
+            if (array_key_exists('salespeople', $line)) {
+                if (!is_array($line['salespeople']) || !self::isList($line['salespeople'])) {
+                    throw self::failure('sale_line_salespeople_snapshot_invalid', ['authorityKey' => $authorityKey]);
+                }
+                $salespeople = [];
+                $weight = 0;
+                foreach ($line['salespeople'] as $person) {
+                    if (!is_array($person)) {
+                        throw self::failure('sale_line_salespeople_snapshot_invalid', ['authorityKey' => $authorityKey]);
+                    }
+                    $staffId = self::positiveInt($person['staffId'] ?? $person['id'] ?? 0, 'saleLine.salesperson.staffId');
+                    $allocation = self::positiveInt($person['allocationWeight'] ?? 0, 'saleLine.salesperson.allocationWeight');
+                    if ($allocation > 100) {
+                        throw self::failure('sale_line_salespeople_snapshot_invalid', ['authorityKey' => $authorityKey]);
+                    }
+                    $salespeople[] = ['staffId' => $staffId, 'allocationWeight' => $allocation];
+                    $weight += $allocation;
+                }
+                if ($salespeople !== [] && $weight !== 100) {
+                    throw self::failure('sale_line_salespeople_weight_invalid', ['authorityKey' => $authorityKey]);
+                }
+                $normalized['salespeople'] = $salespeople;
             }
             foreach (['guideSelections', 'salesManagerSelections'] as $attributionKey) {
                 if (!array_key_exists($attributionKey, $line)) {
@@ -1314,6 +1337,7 @@ final class CashierV3CheckoutSettlementKernel
                 'craftsmenSnapshotJson' => CashierV3CheckoutCraftsmenSnapshot::encode(
                     $line['craftsmen']
                 ),
+                'salespeopleSnapshotJson' => json_encode($line['salespeople'] ?? [], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
                 'guideSelectionsJson' => json_encode($line['guideSelections'] ?? [], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
                 'salesManagerSelectionsJson' => json_encode($line['salesManagerSelections'] ?? [], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
                 'manualLaborFeeCents' => $line['manualLaborFeeCents'] ?? null,
@@ -1374,6 +1398,7 @@ final class CashierV3CheckoutSettlementKernel
                 'priceChangedByNameSnapshot' => '',
                 'priceChangedAt' => 0,
                 'craftsmenSnapshotJson' => '[]',
+                'salespeopleSnapshotJson' => '[]',
                 'guideSelectionsJson' => '[]',
                 'salesManagerSelectionsJson' => '[]',
                 'manualLaborFeeCents' => null,

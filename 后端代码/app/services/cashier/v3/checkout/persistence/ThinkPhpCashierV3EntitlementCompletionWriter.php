@@ -260,7 +260,12 @@ final class ThinkPhpCashierV3EntitlementCompletionWriter
                 || (int)($holder['oid'] ?? 0) !== $expected['origin_order_id']
                 || (int)($holder['is_del'] ?? 0) !== 0
                 || (int)($holder['write_surplus_times'] ?? -1) < $expected['deduct_times']
-                || !$this->activeOrder($order, $context['member_id'])
+                // A card may have been transferred to the current member.
+                // The holder row is the authoritative current ownership check;
+                // the origin order only needs to remain an active paid order.
+                // Requiring origin-order uid == current member incorrectly
+                // rejects legitimate transferred entitlements.
+                || !$this->activeOrder($order)
                 || (int)($version['member_id'] ?? 0) !== $context['member_id']
                 || (int)($version['current_version'] ?? 0) !== $expected['source_version']) {
                 throw self::failure('completion_holder_authority_changed', ['holderId' => $holderId]);
@@ -751,8 +756,12 @@ final class ThinkPhpCashierV3EntitlementCompletionWriter
 
     private function pendingDebt(array $order, int $memberId): string
     {
+        // An entitlement's origin order can belong to the previous member
+        // after a card transfer. Debt projection is only relevant to the
+        // current member, so an origin order from another member contributes
+        // no pending debt to this service completion.
         if ((int)($order['uid'] ?? 0) !== $memberId) {
-            throw self::failure('completion_order_member_mismatch');
+            return '0.00';
         }
         $rows = $this->rows(Db::name('store_debt')
             ->field('id,order_id,status,total_debt,repaid_debt')
@@ -825,10 +834,9 @@ final class ThinkPhpCashierV3EntitlementCompletionWriter
         ];
     }
 
-    private function activeOrder(array $order, int $memberId): bool
+    private function activeOrder(array $order): bool
     {
         return (int)($order['id'] ?? 0) > 0
-            && (int)($order['uid'] ?? 0) === $memberId
             && (int)($order['paid'] ?? 0) === 1
             && (int)($order['is_del'] ?? 0) === 0
             && (int)($order['is_system_del'] ?? 0) === 0

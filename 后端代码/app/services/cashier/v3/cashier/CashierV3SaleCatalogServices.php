@@ -158,6 +158,22 @@ final class CashierV3SaleCatalogServices
         return $this->serverResources($normalized);
     }
 
+    /**
+     * Snapshot checkout discovery deliberately does not apply product
+     * lifecycle/show/verify predicates. The final preparation transaction
+     * locks the SKU and reconstructs its authority row; only entitlement,
+     * balance and inventory providers decide final availability.
+     */
+    public function discoverSnapshotSaleResources(
+        $itemId,
+        CashierV3OperatorScope $operatorScope,
+        CashierV3DataScopeContext $dataScope
+    ): array {
+        $this->assertStoreScope($operatorScope, $dataScope);
+        self::positiveId($itemId, 'itemId');
+        return [];
+    }
+
     /** Resources for the configured-card host. The host itself is never directly sellable. */
     public function discoverCustomCardShellResources(
         CashierV3OperatorScope $operatorScope,
@@ -482,6 +498,7 @@ final class CashierV3SaleCatalogServices
             'catalog_product_id' => $normalized['productId'],
             'catalog_sku_id' => $normalized['skuId'],
             'catalog_product_type' => $normalized['productType'],
+            'kind_code' => $normalized['kindCode'],
             'project_id' => $isServiceProject ? $normalized['productId'] : 0,
             'quantity' => 1,
             'source_version' => $normalized['productVersion'],

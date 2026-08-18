@@ -337,6 +337,7 @@ final class CashierV3SalesOrderPlanV1
             'business_source_secondary_id' => $businessSource['secondarySourceId'],
             'business_source_secondary_name_snapshot' => $businessSource['secondarySourceNameSnapshot'],
             'business_source_label_snapshot' => $businessSource['displayNameSnapshot'],
+            'reward_amount_cents' => $businessSource['rewardAmountCents'],
             'line_count' => count($orderLines),
             'total_quantity' => $totalQuantity,
             'original_amount_cents' => $originalAmount,
@@ -417,6 +418,7 @@ final class CashierV3SalesOrderPlanV1
                 'secondarySourceId' => 0,
                 'secondarySourceNameSnapshot' => '',
                 'displayNameSnapshot' => '',
+                'rewardAmountCents' => 0,
             ];
         }
         $primaryId = (int)($source['primarySourceId'] ?? 0);
@@ -424,7 +426,9 @@ final class CashierV3SalesOrderPlanV1
         $primaryName = trim((string)($source['primarySourceNameSnapshot'] ?? ''));
         $secondaryName = trim((string)($source['secondarySourceNameSnapshot'] ?? ''));
         $label = trim((string)($source['displayNameSnapshot'] ?? ''));
+        $rewardAmountCents = (int)($source['rewardAmountCents'] ?? 0);
         if ($primaryId <= 0 || $secondaryId < 0 || $primaryName === '' || $label === ''
+            || $rewardAmountCents < 0 || $rewardAmountCents > self::MAX_MONEY_CENTS
             || mb_strlen($primaryName) > 64 || mb_strlen($secondaryName) > 64 || mb_strlen($label) > 140) {
             throw self::failure('sales_order_business_source_invalid');
         }
@@ -437,6 +441,7 @@ final class CashierV3SalesOrderPlanV1
             'secondarySourceId' => $secondaryId,
             'secondarySourceNameSnapshot' => $secondaryName,
             'displayNameSnapshot' => $label,
+            'rewardAmountCents' => preg_match('/^G(?:\s|异业|$)/u', $primaryName) === 1 ? $rewardAmountCents : 0,
         ];
     }
 

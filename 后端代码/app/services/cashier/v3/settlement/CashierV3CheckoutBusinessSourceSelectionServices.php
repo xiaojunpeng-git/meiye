@@ -91,7 +91,18 @@ final class CashierV3CheckoutBusinessSourceSelectionServices
         );
     }
 
-    /** Locks and rechecks current config before the successful business write. */
+    /**
+     * Locks the source selection captured by this checkout.
+     *
+     * Source is a user-facing attribution snapshot, not a checkout
+     * eligibility guard.  Re-resolving the live configuration here made an
+     * otherwise valid checkout fail when an administrator renamed, disabled,
+     * or removed a source after the cashier selected it.  The selection row
+     * is already tenant/store scoped and locked by the final transaction, so
+     * settlement must persist that snapshot as-is.  Payment, entitlement,
+     * balance, and inventory authorities remain separately rechecked by the
+     * settlement pipeline.
+     */
     public function lockResolvedForSettlementInTx(string $kind, string $requestId, string $tenantId, int $storeId): array
     {
         $row = (array)Db::name(self::TABLE)
@@ -116,15 +127,7 @@ final class CashierV3CheckoutBusinessSourceSelectionServices
                 true
             );
         }
-        $source = $this->config->resolveSourceSnapshot(
-            (int)$row['primary_source_id'],
-            (int)$row['secondary_source_id'],
-            true
-        );
-        return array_merge($source, [
-            'selectionVersion' => (int)$row['selection_version'],
-            'rewardAmountCents' => (int)($row['reward_amount_cents'] ?? 0),
-        ]);
+        return self::rowProjection($row);
     }
 
     public function read(string $kind, string $requestId, string $tenantId, int $storeId): array
@@ -138,6 +141,86 @@ final class CashierV3CheckoutBusinessSourceSelectionServices
             return self::emptySelection();
         }
         return self::rowProjection($row);
+    }
+
+    /**
+     * Save the source chosen in a browser checkout snapshot.
+     *
+     * This is intentionally distinct from mutateSaleInTx(): a final checkout
+     * snapshot preserves the operator's visible selection as historical
+     * attribution, so it must not be rejected because the live source catalog
+     * was renamed, disabled or removed after that selection was made.
+     */
+    public function captureSaleSnapshotInTx(
+        string $requestId,
+        string $tenantId,
+        int $storeId,
+        int $operatorId,
+        array $source
+    ): array {
+        CashierV3TransactionGuard::assertInTransaction('checkoutBusinessSourceSnapshot');
+        $requestId = trim($requestId);
+        if (preg_match('/^CKR-[0-9a-f]{40}$/D', $requestId) !== 1
+            || $tenantId === '' || $storeId <= 0 || $operatorId <= 0) {
+            throw self::invalid('business_source_snapshot_identity_invalid', '结账来源快照无效，请重新进入结账。');
+        }
+        $primaryId = (int)($source['primarySourceId'] ?? 0);
+        $secondaryId = (int)($source['secondarySourceId'] ?? 0);
+        $rewardAmountCents = (int)($source['rewardAmountCents'] ?? 0);
+        if ($primaryId < 0 || $secondaryId < 0 || $rewardAmountCents < 0) {
+            throw self::invalid('business_source_snapshot_invalid', '结账来源快照无效，请重新进入结账。');
+        }
+        if ($primaryId === 0) {
+            return self::emptySelection();
+        }
+        $primaryName = trim((string)($source['primarySourceNameSnapshot'] ?? ''));
+        $secondaryName = trim((string)($source['secondarySourceNameSnapshot'] ?? ''));
+        $label = trim((string)($source['displayNameSnapshot'] ?? ''));
+        if ($label === '') {
+            $label = $primaryName;
+            if ($secondaryName !== '') $label .= ' / ' . $secondaryName;
+        }
+        $existing = (array)Db::name(self::TABLE)
+            ->where('checkout_kind', self::KIND_SALE)
+            ->where('checkout_request_id', $requestId)
+            ->where('tenant_id', $tenantId)
+            ->where('store_id', $storeId)
+            ->lock(true)->find();
+        $now = time();
+        $row = [
+            'primary_source_id' => $primaryId,
+            'primary_source_name_snapshot' => $primaryName,
+            'secondary_source_id' => $secondaryId,
+            'secondary_source_name_snapshot' => $secondaryName,
+            'source_label_snapshot' => $label,
+            'reward_amount_cents' => $rewardAmountCents,
+            'updated_by_operator_id' => $operatorId,
+            'updated_at' => $now,
+        ];
+        if ($existing) {
+            Db::name(self::TABLE)->where('id', (int)$existing['id'])->update($row + [
+                'selection_version' => (int)($existing['selection_version'] ?? 0) + 1,
+            ]);
+            $version = (int)($existing['selection_version'] ?? 0) + 1;
+        } else {
+            Db::name(self::TABLE)->insert($row + [
+                'checkout_kind' => self::KIND_SALE,
+                'checkout_request_id' => $requestId,
+                'tenant_id' => $tenantId,
+                'store_id' => $storeId,
+                'selection_version' => 1,
+            ]);
+            $version = 1;
+        }
+        return [
+            'primarySourceId' => $primaryId,
+            'primarySourceNameSnapshot' => $primaryName,
+            'secondarySourceId' => $secondaryId,
+            'secondarySourceNameSnapshot' => $secondaryName,
+            'displayNameSnapshot' => $label,
+            'selectionVersion' => $version,
+            'rewardAmountCents' => $rewardAmountCents,
+        ];
     }
 
     /**

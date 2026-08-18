@@ -37,7 +37,7 @@ $check = static function (bool $condition, string $message) use (&$failed): void
 $check(
     strpos($snapshot, "'id', 'staffId', 'employeeId', 'storeId', 'name', 'isPrimary'") !== false
         && strpos($snapshot, "'sequence', 'laborWeight', 'isPointCustomer'") !== false
-        && strpos($snapshot, "if (\$normalized !== [] && \$weightTotal !== 100)") !== false
+        && strpos($snapshot, "if (\$normalized !== [] && \$commissionWeight !== 100 && \$commissionWeight !== 0)") !== false
         && strpos($snapshot, 'if (self::isLegacyEmpty($json))') !== false
         && strpos($snapshot, 'return [];') !== false,
     'shared snapshot normalizer requires complete server-locked people and keeps historical empty values empty'
@@ -51,13 +51,14 @@ $check(
     'checkout preparation, normalization, line fingerprint input, and line drafts preserve craftsmen'
 );
 $check(
-    strpos($kernel, "} elseif (\$serviceObject !== '' || \$isExperience !== 0 || \$craftsmen !== [])") !== false
+    strpos($kernel, "} elseif (\$serviceObject !== '' || \$friendCountsAsCustomer !== 1 || \$isExperience !== 0 || \$craftsmen !== [])") !== false
         && strpos($kernel, "'craftsmenSnapshotJson' => '[]'") !== false,
     'non-project checkout lines cannot carry craftsmen and entitlement lines persist an explicit empty snapshot'
 );
 $check(
     strpos($repository, "'craftsmenSnapshotJson' => 'craftsmen_snapshot_json'") !== false
-        && strpos($repository, 'craftsmen_snapshot_json,line_fingerprint') !== false
+        && strpos($repository, 'craftsmen_snapshot_json,salespeople_snapshot_json') !== false
+        && strpos($repository, 'inventory_outbound_required,line_fingerprint') !== false
         && strpos($repository, "'craftsmen_snapshot_json' => (string)\$row['craftsmenSnapshotJson']") !== false
         && strpos($rebuilder, "'craftsmen' => self::craftsmenSnapshot") !== false
         && strpos($projection, "'craftsmen' => \$craftsmen") !== false,
@@ -66,12 +67,12 @@ $check(
 $check(
     strpos($snapshot, 'public static function isLegacyEmpty') !== false
         && strpos($projection, 'CashierV3CheckoutCraftsmenSnapshot::isLegacyEmpty($craftsmenJson)') !== false
-        && strpos($plan, 'CashierV3CheckoutCraftsmenSnapshot::isLegacyEmpty($craftsmenJson)') !== false,
+        && strpos($plan, 'CashierV3CheckoutCraftsmenSnapshot::decode($json)') !== false,
     'pre-migration blank snapshots keep their original line fingerprint until explicitly rewritten'
 );
 $check(
     strpos($plan, "'craftsmen_snapshot_json',") !== false
-        && strpos($plan, "\$authority['craftsmen'] = \$craftsmen") !== false
+        && strpos($plan, "'craftsmen' => \$craftsmen") !== false
         && strpos($plan, "'craftsmen_snapshot_json' => CashierV3CheckoutCraftsmenSnapshot::encode(\$craftsmen)") !== false
         && strpos($plan, "'craftsmen_snapshot_json' => \$line['craftsmen_snapshot_json']") !== false
         && strpos($writer, 'insertAll($lineRows)') !== false
@@ -80,7 +81,7 @@ $check(
 );
 $check(
     substr_count($query, 'craftsmen_snapshot_json') >= 3
-        && strpos($query, "'craftsmen' => \$this->craftsmenForLine(\$line)") !== false
+        && strpos($query, 'craftsmenForLine($line)') !== false
         && strpos($query, "'craftsmen' => \$v3Ready ? \$this->craftsmenForLine(\$authority) : []") !== false
         && strpos($query, 'CashierV3CheckoutCraftsmenSnapshot::decode') !== false
         && strpos($detail, "['name', 'staffName', 'employeeName'") !== false,

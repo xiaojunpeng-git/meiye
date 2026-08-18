@@ -96,7 +96,7 @@ recordOk('退款记录只读取收银 V3 退款生命周期事实，不兼容旧
     && strpos($orderCenterSource, "->where('rlo.operation_type', 'refund')") !== false
     && strpos($orderCenterSource, "->where('rlo.status', 'succeeded')") !== false
     && strpos($orderCenterSource, "Db::name('store_order_refund')") === false
-    && strpos($orderCenterSource, "'refundStatus' => '已退款作废'") !== false);
+    && strpos($orderCenterSource, "'refundStatus' => '已退款'") !== false);
 recordOk('退款页签使用退款记录名称', strpos($orderCenterSource, "['key' => 'refund', 'label' => '退款记录'") !== false);
 recordOk('订单中心投影合同统一升级至退款事实 v3',
     strpos($orderCenterSource, "CONTRACT_VERSION = 'cashier-v3.order-center.v3'") !== false
@@ -108,6 +108,9 @@ recordOk('卡升级和项目升级的关联销售订单号只从结算权威记�
     && strpos($orderCenterSource, "'o.order_no AS sales_order_no'") !== false
     && strpos($orderCenterSource, "'salesOrderNo' => \$row['sales_order_no']") !== false
     && strpos($orderCenterSource, "'salesOrderNo' => \$row['checkout_request_id']") === false);
+recordOk('卡转让进入订单中心卡操作白名单并使用中文筛选标签',
+    strpos($orderCenterSource, "'card_transfer',") !== false
+    && strpos($orderCenterSource, "'card_transfer' => '卡转让'") !== false);
 
 $beforeBlocked = count($calls);
 $blocked = $service->queryRecords([

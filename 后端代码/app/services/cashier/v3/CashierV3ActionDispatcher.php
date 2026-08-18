@@ -546,11 +546,12 @@ class CashierV3ActionDispatcher
             return $envelope;
         }
 
-        // 目录加购已经在命令结果中返回完整 cashierDraft，前端只回填购物车。
-        // 这里若再重建整套根状态，会重复加载目录、会员、房间、订单和报表
-        // 分区，导致一次普通点击被拖到秒级；需要显式当前根状态时仍允许
+        // 目录加购和删除草稿行已经在命令结果中返回完整 cashierDraft，前端只
+        // 回填购物车。这里若再重建整套根状态，会重复加载目录、会员、房间、
+        // 订单和报表分区，导致一次删除被拖到秒级；需要显式当前根状态时仍允许
         // 通过 returnCurrentState 请求重建。
-        $skipDefaultRootProjection = $canonical === 'choose-catalog-item' && !$wantCurrentState;
+        $skipDefaultRootProjection = in_array($canonical, ['choose-catalog-item', 'remove-cart-line'], true)
+            && !$wantCurrentState;
         $shouldProject = (!$outcome['replay'] || $wantCurrentState)
             && $outcome['status'] === CashierV3ResultCode::STATUS_SUCCESS
             && $checkoutDraftProjection === null

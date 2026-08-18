@@ -32,6 +32,8 @@ if (strpos($summarySource, 'CashierV3MemberDebtProjectionServices') === false
     || strpos($readerSource, "return 'legacy_sale';") === false
     || strpos($readerSource, "return 'recharge';") === false
     || strpos($moduleSource, "registerProjection('open-member-debt-repayment'") === false
+    || strpos($moduleSource, 'CashierV3CheckoutWorkspaceIdentity::id') === false
+    || strpos($moduleSource, "'kind' => 'cashier_workspace'") === false
     || strpos($moduleSource, "'kind' => 'member'") === false
     || strpos($moduleSource, 'synchronizeProjectionVersion') === false
     || strpos($moduleSource, "'kind' => 'debt_record'") === false

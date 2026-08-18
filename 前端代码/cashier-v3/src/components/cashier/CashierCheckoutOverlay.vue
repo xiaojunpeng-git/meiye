@@ -225,16 +225,6 @@ const crossIndustrySourceUnsaved = computed(() => selectedPrimaryIsCrossIndustry
   || rewardAmountCents.value === null
   || rewardAmountCents.value !== Number(props.checkout.rewardAmountCents || 0)
 ))
-const customerSourceRequired = computed(() => (
-  (props.checkout.sourceEnabled === true || Number(props.checkout.sourceEnabled) === 1)
-  && props.checkout.sourceSelectable !== false
-))
-const customerSourceMissing = computed(() => (
-  customerSourceRequired.value
-  && (!selectedPrimarySourceId.value
-    || (selectedPrimaryRequiresSecondary.value && !selectedSecondarySourceId.value)
-    || crossIndustrySourceUnsaved.value)
-))
 const salesDateIsHistorical = computed(() => (
   salesDateDraft.value !== ''
   && props.salesDateMax !== ''
@@ -1023,12 +1013,6 @@ function useDevelopmentNoPaymentFailureFixture() {
 async function goNext() {
   if (!hasCurrentStepSnapshot.value) return
   if (currentStep.value === 1) {
-    if (customerSourceMissing.value) {
-      window.dispatchEvent(new CustomEvent('cashier-v3:ui-result', {
-        detail: { status: 'failed', message: '请选择客户来源后再继续。' }
-      }))
-      return
-    }
     if (salesDateIsDirty.value) {
       window.dispatchEvent(new CustomEvent('cashier-v3:ui-result', {
         detail: { status: 'failed', message: `${dateLabel.value}已修改，请先保存${dateLabel.value}。` }
@@ -1049,7 +1033,9 @@ async function goNext() {
   const currentIndex = editableSteps.value.findIndex((step) => step.number === currentStep.value)
   const nextStep = currentIndex >= 0 ? editableSteps.value[currentIndex + 1] : null
   if (nextStep) {
-    if (currentStep.value === 1 && !isDebtRepayment.value) {
+    // Guide rounds belong to sale lines. Pure entitlement service has no
+    // sales attribution to validate and must proceed to service completion.
+    if (currentStep.value === 1 && !isDebtRepayment.value && hasSaleLines.value) {
       isCheckingGuideRound.value = true
       try {
         const response = await request('validate-guide-round-before-payment')
@@ -1348,7 +1334,7 @@ onBeforeUnmount(() => {
 
         <div v-if="hasEntitlementLines" class="checkout-service-hint">本次包含会员已有权益；权益服务与销售收款分别处理，权益行不计入本次应付。</div>
 
-        <section v-if="checkout.sourceEnabled" class="checkout-business-sources" aria-label="客户来源">
+        <section v-if="isRechargeCheckout && checkout.sourceEnabled" class="checkout-business-sources" aria-label="客户来源">
           <div class="checkout-business-sources__heading">
             <strong>客户来源</strong>
             <span v-if="checkout.sourceSelectable === false">{{ checkout.sourceLabel || '继承原订单来源' }}</span>
@@ -1403,7 +1389,7 @@ onBeforeUnmount(() => {
           </template>
         </section>
 
-        <dl class="checkout-order-details checkout-order-details--source-date">
+        <dl v-if="isRechargeCheckout" class="checkout-order-details checkout-order-details--source-date">
           <div v-if="checkout.businessDate" class="checkout-sales-date">
             <dt>{{ dateLabel }}</dt>
             <dd>
@@ -1606,7 +1592,7 @@ onBeforeUnmount(() => {
           <div v-if="hasSaleLines || isDebtRepayment"><dt>现金业绩</dt><dd>{{ formatMoney(checkout.cashPerformanceAmount) }}</dd></div>
           <div v-if="!isCardOperationUpgrade && (hasSaleLines || isDebtRepayment)"><dt>余额支付</dt><dd>{{ formatMoney(checkout.balancePaymentAmount) }}</dd></div>
           <div v-if="hasEntitlementLines"><dt>权益服务</dt><dd>{{ checkoutOrderLines.filter(isEntitlementCheckoutLine).length }} 项</dd></div>
-          <div v-if="checkout.businessDate"><dt>{{ dateLabel }}</dt><dd>{{ checkout.businessDate }}</dd></div>
+          <div v-if="isRechargeCheckout && checkout.businessDate"><dt>{{ dateLabel }}</dt><dd>{{ checkout.businessDate }}</dd></div>
           <div v-if="isRechargeCheckout && checkout.businessDateReason"><dt>补单原因</dt><dd>{{ checkout.businessDateReason }}</dd></div>
         </dl>
         <section v-if="showSubmissionLongRunning" class="checkout-processing-hint" role="status" aria-live="polite">

@@ -129,6 +129,7 @@ final class ThinkPhpCashierV3CheckoutRequestRepository implements CashierV3Check
         'couponNameSnapshot' => 'coupon_name_snapshot',
         'couponDiscountCents' => 'coupon_discount_cents',
         'craftsmenSnapshotJson' => 'craftsmen_snapshot_json',
+        'salespeopleSnapshotJson' => 'salespeople_snapshot_json',
         'guideSelectionsJson' => 'guide_selections_json',
         'salesManagerSelectionsJson' => 'sales_manager_selections_json',
         'manualLaborFeeCents' => 'manual_labor_fee_cents',
@@ -1229,7 +1230,7 @@ final class ThinkPhpCashierV3CheckoutRequestRepository implements CashierV3Check
         $actualLines = $this->rows(Db::name(self::LINE_TABLE)
             ->where('request_id', $requestId)
             ->field(
-                'line_id,draft_version,line_role,entitlement_source_detail_id,friend_counts_as_customer,craftsmen_snapshot_json,guide_selections_json,sales_manager_selections_json,manual_labor_fee_cents,is_presale,inventory_outbound_required,line_fingerprint'
+                'line_id,draft_version,line_role,entitlement_source_detail_id,friend_counts_as_customer,craftsmen_snapshot_json,salespeople_snapshot_json,guide_selections_json,sales_manager_selections_json,manual_labor_fee_cents,is_presale,inventory_outbound_required,line_fingerprint'
             )
             ->order('line_id asc')
             ->lock(true)
@@ -1242,6 +1243,7 @@ final class ThinkPhpCashierV3CheckoutRequestRepository implements CashierV3Check
                 'entitlement_source_detail_id' => (string)$row['entitlementSourceDetailId'],
                 'friend_counts_as_customer' => (int)($row['friendCountsAsCustomer'] ?? 1),
                 'craftsmen_snapshot_json' => (string)$row['craftsmenSnapshotJson'],
+                'salespeople_snapshot_json' => (string)($row['salespeopleSnapshotJson'] ?? ''),
                 'guide_selections_json' => (string)($row['guideSelectionsJson'] ?? ''),
                 'sales_manager_selections_json' => (string)($row['salesManagerSelectionsJson'] ?? ''),
                 'manual_labor_fee_cents' => $row['manualLaborFeeCents'] === null ? null : (int)$row['manualLaborFeeCents'],
@@ -1261,6 +1263,7 @@ final class ThinkPhpCashierV3CheckoutRequestRepository implements CashierV3Check
                 'entitlement_source_detail_id' => (string)$row['entitlement_source_detail_id'],
                 'friend_counts_as_customer' => (int)($row['friend_counts_as_customer'] ?? 1),
                 'craftsmen_snapshot_json' => (string)$row['craftsmen_snapshot_json'],
+                'salespeople_snapshot_json' => (string)($row['salespeople_snapshot_json'] ?? ''),
                 'guide_selections_json' => (string)($row['guide_selections_json'] ?? ''),
                 'sales_manager_selections_json' => (string)($row['sales_manager_selections_json'] ?? ''),
                 'manual_labor_fee_cents' => $row['manual_labor_fee_cents'] === null ? null : (int)$row['manual_labor_fee_cents'],

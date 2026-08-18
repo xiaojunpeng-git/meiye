@@ -19,8 +19,15 @@ $source = (string)file_get_contents($service);
 foreach (['cashier_v3_debt_authority','cashier_v3_debt_item_personnel_authority','cashier_v3_debt_repayment_draft','cashier_v3_debt_repayment_collection','debt.repaid','paymentFacts','performanceFacts','proportionalCumulativeAllocation','debt_repayment_v3_authority_missing','debt_repayment_header_item_amount_drift','debt_repayment_personnel_authority_missing','debt_repayment_selected_salesperson_allocation'] as $needle) {
     if (strpos($source, $needle) === false) throw new RuntimeException('missing contract: ' . $needle);
 }
+if (strpos($source, "'checkout_request_id' => \$checkoutRequestId") === false
+    || strpos($source, "(string)\$event['source_id']") !== false) {
+    throw new RuntimeException('debt repayment allocation must use the verified checkout request identity');
+}
 foreach (["'couponUserId' => 0", "'couponNameSnapshot' => ''", "'couponDiscountCents' => 0"] as $needle) {
     if (strpos($source, $needle) === false) throw new RuntimeException('debt repayment kernel sale-line coupon snapshot missing: ' . $needle);
+}
+foreach (["'guideSelections' => []", "'salesManagerSelections' => []", 'lockReusableEditingDraft(', "'debt_repayment_draft_recovery_invalid'"] as $needle) {
+    if (strpos($source, $needle) === false) throw new RuntimeException('debt repayment editing-draft recovery contract missing: ' . $needle);
 }
 foreach (['resolveRepaymentSalespeople(', 'verifyRepaymentSalespeopleSnapshot(', "'salespeople_snapshot_json'", "'allocationWeightDenominator'=>100"] as $needle) {
     if (strpos($source, $needle) === false) throw new RuntimeException('selected repayment salesperson authority missing: ' . $needle);
@@ -78,8 +85,12 @@ foreach ([
     'async function openDebtRepaymentCheckout(preparationRequestId, debtRecordId)',
     "await router.push({ name: 'cashier-v3-cashier' })",
     'await openDebtRepaymentCheckout(currentCheckout.preparationRequestId, payload.debtRecordId)',
-    'await openDebtRepaymentCheckout(preparationRequestId, payload.debtRecordId)',
+    'await openDebtRepaymentCheckout(String(prepared.preparationRequestId), payload.debtRecordId)',
 ] as $needle) if (strpos($cashierShellSource, $needle) === false) throw new RuntimeException('cross-route debt repayment checkout handoff missing: ' . $needle);
+if (preg_match('/async function prepareDebtRepayment[\\s\\S]*?\\nasync function loadMemberDetailTab/', $cashierShellSource, $matches) !== 1
+    || strpos((string)$matches[0], "requestCashierV3Action('open-cashier-workbench'") !== false) {
+    throw new RuntimeException('debt repayment preparation must not reread the workspace with a stale public version');
+}
 $cashierWorkbenchSource = (string)file_get_contents($cashierWorkbench);
 if (strpos($cashierWorkbenchSource, "if (!isCompleteCheckoutPreparation(snapshot, detail.preparationRequestId))") === false) throw new RuntimeException('debt repayment checkout projection reload guard missing');
 if (strpos($cashierWorkbenchSource, "if (snapshot.businessType === 'debt_repayment') return false") !== false) throw new RuntimeException('persisted debt repayment checkout recovery must not be blocked');

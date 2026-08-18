@@ -534,8 +534,12 @@ final class CashierV3CashierWorkspaceServices
             }
             $salespeople = $this->authoritativeSalespeopleInTx($settings['salespeople'], $operatorScope);
         }
-        $guides = $this->decodeStoredGuideSelections($line, $lineKey);
-        if (array_key_exists('guideSelections', $settings)) {
+        // Guide attribution belongs to a sale line. Entitlement service rows
+        // carry only service craftsmen; retaining legacy guide snapshots on
+        // those rows makes the final authority fingerprint drift between
+        // pure-entitlement and mixed checkout paths.
+        $guides = $isSale ? $this->decodeStoredGuideSelections($line, $lineKey) : [];
+        if ($isSale && array_key_exists('guideSelections', $settings)) {
             if (!is_array($settings['guideSelections'])) {
                 throw $this->incompleteLineSettings($lineKey, 'guide_selections_invalid');
             }
@@ -544,8 +548,8 @@ final class CashierV3CashierWorkspaceServices
                 $operatorScope
             );
         }
-        $salesManagers = $this->decodeStoredSalesManagerSelections($line, $lineKey);
-        if ($hasSalesManagers) {
+        $salesManagers = $isSale ? $this->decodeStoredSalesManagerSelections($line, $lineKey) : [];
+        if ($isSale && $hasSalesManagers) {
             if (!is_array($settings['salesManagerSelections'])) {
                 throw $this->incompleteLineSettings($lineKey, 'sales_manager_selections_invalid');
             }
@@ -1234,6 +1238,48 @@ final class CashierV3CashierWorkspaceServices
     }
 
     /**
+     * New checkout requests persist salesperson allocations with the immutable
+     * request line.  Returning null keeps historical workspace-backed drafts
+     * on the existing compatibility path.
+     *
+     * @return array<string,array<int,array>>|null
+     */
+    public function salespeopleFromCheckoutRequestLinesInTx(
+        array $checkoutLines,
+        CashierV3OperatorScope $operatorScope
+    ): ?array {
+        CashierV3TransactionGuard::assertInTransaction('cashierCheckoutRequestSalespeople');
+        $result = [];
+        foreach ($checkoutLines as $line) {
+            if ((string)($line['line_role'] ?? '') !== self::ROLE_SALE) continue;
+            $checkoutLineId = trim((string)($line['line_id'] ?? ''));
+            if ($checkoutLineId === '' || !array_key_exists('salespeople_snapshot_json', $line)) {
+                return null;
+            }
+            $raw = $line['salespeople_snapshot_json'];
+            if ($raw === null || trim((string)$raw) === '') return null;
+            $stored = json_decode((string)$raw, true);
+            if (!is_array($stored)) {
+                throw $this->incompleteLineSettings($checkoutLineId, 'checkout_salespeople_snapshot_invalid');
+            }
+            $selections = [];
+            foreach ($stored as $person) {
+                if (!is_array($person)) {
+                    throw $this->incompleteLineSettings($checkoutLineId, 'checkout_salespeople_snapshot_invalid');
+                }
+                $selections[] = [
+                    'staffId' => (int)($person['staffId'] ?? $person['id'] ?? 0),
+                    'allocationWeight' => (int)($person['allocationWeight'] ?? 0),
+                ];
+            }
+            $result[$checkoutLineId] = $selections
+                ? $this->authoritativeSalespeopleInTx($selections, $operatorScope)
+                : [];
+        }
+        return $result;
+    }
+
+    /**
      * Clear the exact sale-only cart that produced a succeeded checkout and
      * return the workspace to its default guest state. The request drafts are
      * rechecked against locked workspace rows before anything is deleted.
@@ -1252,6 +1298,49 @@ final class CashierV3CashierWorkspaceServices
             $operatorScope,
             $checkoutLines
         );
+    }
+
+    /**
+     * Complete a checkout whose authority lives in checkout_request rows.
+     *
+     * The browser snapshot is deliberately not materialized into this
+     * workspace, so completion must never compare checkout lines with the
+     * presentation cart. The gateway has already locked the workspace
+     * context; this method only clears its shell after all sale facts commit.
+     */
+    public function completeSnapshotCheckoutInTx(
+        string $workspaceId,
+        string $stateContextId,
+        CashierV3OperatorScope $operatorScope
+    ): array {
+        CashierV3TransactionGuard::assertInTransaction('cashierWorkspaceSnapshotCheckoutCompletion');
+        $this->lockOrCreateDraft($workspaceId, $stateContextId, $operatorScope);
+        $workspaceRows = $this->lineRows($workspaceId, true);
+        $deleted = (int)Db::name(self::LINE_TABLE)
+            ->where('workspace_id', $workspaceId)
+            ->delete();
+        if ($deleted !== count($workspaceRows)) {
+            throw new CashierV3CommandException(
+                CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
+                '结账后购物车清理失败，本次操作已回滚，请重试。',
+                CashierV3ResultCode::STATUS_FAILED,
+                ['reason' => 'cashier_snapshot_workspace_clear_incomplete']
+            );
+        }
+        $this->updateDraft($workspaceId, [
+            'member_id' => 0,
+            'customer_mode' => self::MODE_GUEST,
+            'draft_status' => self::STATUS_EDITING,
+            'resumed_hang_order_id' => '',
+            'order_note' => '',
+            'supplement_enabled' => 0,
+            'supplement_business_date' => null,
+            'supplement_reason' => '',
+            'supplement_operator_id' => 0,
+            'supplement_operator_name_snapshot' => '',
+            'supplement_operated_at' => 0,
+        ]);
+        return $this->readDraft($workspaceId, $stateContextId, $operatorScope, true);
     }
 
     public function completeCheckoutInTx(
@@ -2703,8 +2792,15 @@ final class CashierV3CashierWorkspaceServices
             $salespeople = $lineRole === self::ROLE_SALE
                 ? $this->decodeStoredSalespeople($row, $lineKey)
                 : [];
-            $guides = $this->decodeStoredGuideSelections($row, $lineKey);
-            $salesManagers = $this->decodeStoredSalesManagerSelections($row, $lineKey);
+            // Legacy rows may still contain attribution JSON from before the
+            // entitlement boundary was enforced. Never expose or reuse it:
+            // only sale rows have guide/sales-manager attribution.
+            $guides = $lineRole === self::ROLE_SALE
+                ? $this->decodeStoredGuideSelections($row, $lineKey)
+                : [];
+            $salesManagers = $lineRole === self::ROLE_SALE
+                ? $this->decodeStoredSalesManagerSelections($row, $lineKey)
+                : [];
             $manualLaborFeeCents = ($row['manual_labor_fee_cents'] ?? null) === null
                 ? null
                 : $this->storedNonnegativeInteger($row['manual_labor_fee_cents'], $lineKey, 'manual_labor_fee_cents');

@@ -27,7 +27,7 @@ function ok(name, condition) {
 
 const closeMethod = workbench.match(/async function closeCheckoutOverlay\(options = \{\}\) \{([\s\S]*?)\n}\n\nasync function closeSucceededCheckoutAndRefreshWorkbench/)?.[1] || ''
 const closeSucceededMethod = workbench.match(/async function closeSucceededCheckoutAndRefreshWorkbench\(submissionResponse = \{\}\) \{([\s\S]*?)\n}\n\nfunction closeHangOrderOverlay/)?.[1] || ''
-const openCheckout = workbench.match(/async function openCheckout\(\) \{([\s\S]*?)\n}\n\nasync function openHangOrder/)?.[1] || ''
+const openCheckout = workbench.match(/async function openCheckout\([^)]*\) \{([\s\S]*?)\n}\n\nasync function openHangOrder/)?.[1] || ''
 const clearFailedCheckoutComputed = overlay.match(/const canClearFailedCheckout = computed\(\(\) => \([\s\S]*?\n\)\)/)?.[0] || ''
 
 ok(
@@ -42,8 +42,9 @@ ok(
     && workbench.includes("if (['succeeded', 'success', 'processing', 'pending', 'pending_confirmation'].includes(status))")
 )
 ok(
-  'returning from that failure explicitly requests discard of only the old checkout draft',
+  'returning from that failure first preserves the cart as a hang draft, then discards the old checkout request',
   /discardFailedCheckout: isFailed\.value && !isPartialPaymentRecovery\.value/.test(overlay)
+    && /if \(options\?\.discardFailedCheckout === true && hasCartLines\.value\) \{[\s\S]*?await openHangOrder\(\)/.test(closeMethod)
     && api.includes("'/cashierapi/v3/cashier-drafts/discard-checkout'")
     && route.includes("Route::post('cashier-drafts/discard-checkout', 'HangDraft/discardCheckout')")
     && controller.includes('public function discardCheckout()')

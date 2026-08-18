@@ -607,6 +607,27 @@ final class MemberIntegrationFixture
         self::ensureColumn('eb_store_order', 'add_time', "int unsigned NOT NULL DEFAULT 0");
         self::ensureColumn('eb_store_order', 'pay_time', "int unsigned NOT NULL DEFAULT 0");
         self::ensureColumn('eb_store_order_cart_info', 'uid', "int unsigned NOT NULL DEFAULT 0");
+        self::ensureColumn('eb_store_order_cart_info', 'cart_num', "int NOT NULL DEFAULT 1");
+        self::ensureColumn('eb_store_order_cart_info', 'surplus_num', "int NOT NULL DEFAULT 0");
+        self::ensureColumn('eb_store_order_cart_info', 'split_surplus_num', "int NOT NULL DEFAULT 0");
+        self::ensureColumn('eb_cashier_v3_workspace_line', 'guide_selections_json', "MEDIUMTEXT NULL");
+        self::ensureColumn('eb_cashier_v3_workspace_line', 'sales_manager_selections_json', "MEDIUMTEXT NULL");
+        self::ensureColumn('eb_cashier_v3_workspace_line', 'friend_counts_as_customer', "tinyint(1) unsigned NOT NULL DEFAULT 1");
+        self::ensureColumn('eb_cashier_v3_workspace_line', 'is_presale', "tinyint(1) unsigned NOT NULL DEFAULT 0");
+        self::ensureColumn('eb_cashier_v3_workspace_line', 'inventory_outbound_required', "tinyint(1) unsigned NOT NULL DEFAULT 1");
+        self::ensureColumn('eb_cashier_v3_workspace_line', 'manual_labor_fee_cents', "bigint(20) unsigned NULL");
+        self::ensureColumn('eb_cashier_v3_checkout_line_draft', 'is_experience', "tinyint(3) unsigned NOT NULL DEFAULT 0");
+        self::ensureColumn('eb_cashier_v3_checkout_line_draft', 'craftsmen_snapshot_json', "MEDIUMTEXT NOT NULL");
+        self::ensureColumn('eb_cashier_v3_checkout_line_draft', 'salespeople_snapshot_json', "MEDIUMTEXT NULL");
+        self::ensureColumn('eb_cashier_v3_checkout_line_draft', 'guide_selections_json', "MEDIUMTEXT NULL");
+        self::ensureColumn('eb_cashier_v3_checkout_line_draft', 'sales_manager_selections_json', "MEDIUMTEXT NULL");
+        self::ensureColumn('eb_cashier_v3_checkout_line_draft', 'friend_counts_as_customer', "tinyint(1) unsigned NOT NULL DEFAULT 1");
+        self::ensureColumn('eb_cashier_v3_checkout_line_draft', 'is_presale', "tinyint(1) unsigned NOT NULL DEFAULT 0");
+        self::ensureColumn('eb_cashier_v3_checkout_line_draft', 'inventory_outbound_required', "tinyint(1) unsigned NOT NULL DEFAULT 1");
+        self::ensureColumn('eb_cashier_v3_checkout_line_draft', 'manual_labor_fee_cents', "bigint(20) unsigned NULL");
+        self::ensureColumn('eb_cashier_v3_sales_order_line', 'is_experience', "tinyint(3) unsigned NOT NULL DEFAULT 0");
+        self::ensureColumn('eb_cashier_v3_sales_order_line', 'craftsmen_snapshot_json', "MEDIUMTEXT NOT NULL");
+        self::ensureColumn('eb_cashier_v3_sales_order_line', 'manual_labor_fee_cents', "bigint(20) unsigned NULL");
         self::ensureColumn('eb_store_debt', 'uid', "int unsigned NOT NULL DEFAULT 0");
         self::ensureColumn('eb_store_debt', 'store_id', "int unsigned NOT NULL DEFAULT 0");
         self::ensureColumn('eb_store_debt', 'debt_no', "varchar(32) NOT NULL DEFAULT ''");
@@ -838,6 +859,13 @@ final class MemberIntegrationFixture
 
     private static function ensureColumn(string $table, string $column, string $definition): void
     {
+        $tableRows = Db::query(
+            'SELECT COUNT(*) AS c FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=?',
+            [$table]
+        );
+        if ((int)($tableRows[0]['c'] ?? 0) === 0) {
+            return;
+        }
         $rows = Db::query(
             'SELECT COUNT(*) AS c FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME=?',
             [$table, $column]

@@ -29,6 +29,7 @@ final class CashierV3OrderCenterRecordQueryServices
     ];
 
     private const CARD_OPERATION_TYPES = [
+        'card_transfer',
         'card_upgrade',
         'card_disable',
         'card_enable',
@@ -747,7 +748,7 @@ final class CashierV3OrderCenterRecordQueryServices
                 'refundMethod' => '原记账方式退回',
                 'storeName' => (string)$row['store_name'],
                 'operatorName' => (string)$row['staff_name'],
-                'refundStatus' => '已退款作废',
+                'refundStatus' => '已退款',
                 'refundCompletedAt' => $this->dateTime((int)$row['settled_at']),
                 'refundSourceType' => (string)$row['source_type'],
             ];
@@ -1536,7 +1537,7 @@ final class CashierV3OrderCenterRecordQueryServices
         }
         if ($type === 'refund') {
             return array_merge($options, [
-                ['value' => 'completed', 'label' => '已退款作废'],
+                ['value' => 'completed', 'label' => '已退款'],
             ]);
         }
         if ($type === 'debt') {
@@ -1643,6 +1644,7 @@ final class CashierV3OrderCenterRecordQueryServices
     private function cardOperationLabel(string $type): string
     {
         $labels = [
+            'card_transfer' => '卡转让',
             'card_upgrade' => '卡升级',
             'card_disable' => '卡停用',
             'card_enable' => '卡启用',

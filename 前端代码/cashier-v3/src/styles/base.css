@@ -741,6 +741,68 @@ button:disabled {
   min-width: 0;
 }
 
+.cashier-workflow-toolbar__context-settings {
+  display: flex;
+  grid-column: 1;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  color: #52606d;
+}
+
+.cashier-workflow-context-date,
+.cashier-workflow-context-source {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  height: 34px;
+  box-sizing: border-box;
+  border: 1px solid #d7e0ea;
+  border-radius: 6px;
+  background: #fff;
+  color: #52606d;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.cashier-workflow-context-date {
+  padding: 0 8px;
+}
+
+.cashier-workflow-context-date input {
+  width: 122px;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  color: #303133;
+  font: inherit;
+  background: transparent;
+}
+
+.cashier-workflow-context-source {
+  max-width: 220px;
+  padding: 0 10px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.cashier-workflow-context-source:hover {
+  border-color: #8bb9f0;
+  color: #1677cc;
+}
+
+.cashier-workflow-context-source__label {
+  flex: none;
+}
+
+.cashier-workflow-context-source strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #303133;
+  font-weight: 600;
+}
+
 /* 1280px 常用桌面宽度下给房间和服务单编号保留完整展示空间。 */
 @media (min-width: 1101px) and (max-width: 1300px) {
   .cashier-workflow-toolbar__operation-actions {
@@ -2507,23 +2569,6 @@ button:disabled {
   z-index: 1;
 }
 
-/* 游客没有欠款能力：移除该格后，后续操作从最左侧连续排布。 */
-.cart-line__secondary-meta.is-guest-order {
-  grid-template-columns:
-    minmax(62px, .75fr)
-    minmax(80px, 1.1fr)
-    minmax(78px, .95fr)
-    minmax(90px, 1.1fr)
-    minmax(90px, 1.2fr)
-    minmax(140px, 1.15fr)
-    auto;
-}
-
-.cart-line__secondary-meta.is-guest-order .cart-line__meta-slot--coupon,
-.cart-line__secondary-meta.is-guest-order .cart-line__meta-slot--salesperson {
-  left: 0;
-}
-
 .cart-line .quantity-stepper--editable {
   gap: 5px;
   margin-left: auto;
@@ -4251,6 +4296,40 @@ button:disabled {
   background: #fff;
   color: #4e5969;
   font-size: 12px;
+}
+
+.cashier-operation-preview__source-meta {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  color: #6b7785;
+  font-size: 12px;
+  text-align: right;
+}
+
+.cashier-operation-preview__quantity-stepper {
+  flex: 0 0 auto;
+  margin-left: 0;
+}
+
+.cashier-operation-preview__quantity-stepper input {
+  width: 38px;
+  height: 28px;
+  padding: 0 3px;
+  border: 0;
+  outline: 0;
+  color: #1f2329;
+  font-size: 12px;
+  text-align: center;
+  appearance: textfield;
+}
+
+.cashier-operation-preview__quantity-stepper input::-webkit-inner-spin-button,
+.cashier-operation-preview__quantity-stepper input::-webkit-outer-spin-button {
+  margin: 0;
+  appearance: none;
 }
 
 .cashier-operation-preview__arrow {

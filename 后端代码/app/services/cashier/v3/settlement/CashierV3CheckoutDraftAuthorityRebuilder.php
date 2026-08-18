@@ -116,6 +116,9 @@ final class CashierV3CheckoutDraftAuthorityRebuilder
                     'craftsmen' => self::craftsmenSnapshot(
                         $row['craftsmen_snapshot_json'] ?? null
                     ),
+                    'salespeople' => self::salespeopleSnapshot(
+                        $row['salespeople_snapshot_json'] ?? null
+                    ),
                     'guideSelections' => self::attributionSnapshot($row['guide_selections_json'] ?? null),
                     'salesManagerSelections' => self::attributionSnapshot($row['sales_manager_selections_json'] ?? null),
                 ];
@@ -307,6 +310,27 @@ final class CashierV3CheckoutDraftAuthorityRebuilder
             }
             $result[] = $snapshot;
         }
+        return $result;
+    }
+
+    private static function salespeopleSnapshot($raw): array
+    {
+        if ($raw === null || trim((string)$raw) === '') return [];
+        $decoded = is_array($raw) ? $raw : json_decode((string)$raw, true);
+        if (!is_array($decoded)) throw self::failure('checkout_draft_salespeople_snapshot_invalid');
+        $result = [];
+        $weight = 0;
+        foreach ($decoded as $row) {
+            if (!is_array($row)) throw self::failure('checkout_draft_salespeople_snapshot_invalid');
+            $staffId = (int)($row['staffId'] ?? $row['id'] ?? 0);
+            $allocation = (int)($row['allocationWeight'] ?? 0);
+            if ($staffId <= 0 || $allocation <= 0 || $allocation > 100) {
+                throw self::failure('checkout_draft_salespeople_snapshot_invalid');
+            }
+            $result[] = ['staffId' => $staffId, 'allocationWeight' => $allocation];
+            $weight += $allocation;
+        }
+        if ($result !== [] && $weight !== 100) throw self::failure('checkout_draft_salespeople_weight_invalid');
         return $result;
     }
 

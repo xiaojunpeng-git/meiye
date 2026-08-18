@@ -109,6 +109,7 @@ final class CashierV3HangOrderListServices
                 'canResume' => in_array((string)($row['hang_mode'] ?? ''), [
                     CashierV3HangOrderPlanV1::MODE_NORMAL,
                     CashierV3HangOrderPlanV1::MODE_START_SERVICE,
+                    'local_draft',
                 ], true)
                     && in_array((string)($row['hang_status'] ?? ''), [
                         CashierV3HangOrderPlanV1::STATUS_PENDING_CHECKOUT,

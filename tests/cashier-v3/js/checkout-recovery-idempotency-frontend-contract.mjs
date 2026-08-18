@@ -72,6 +72,12 @@ ok(
     && /requestAction\('prepare-checkout-submission',[\s\S]{0,220}commandContexts: preparationContexts/.test(workbench)
 )
 ok(
+  'every persisted checkout follow-up filters out the server-built resource plan',
+  /if \(checkoutRequestActions\.has\(action\) && !isRechargeDebtRepaymentCheckout\.value\) \{[\s\S]{0,500}const checkoutContexts = checkoutSubmissionCommandContexts\(current\.commandContexts\)[\s\S]{0,800}approvedPayload\.commandContexts = checkoutContexts/.test(workbench)
+    && workbench.includes("'go-to-writeoff-after-checkout'")
+    && workbench.includes("'finish-checkout-and-return'")
+)
+ok(
   'returning to payment edit always resets the overlay to payment step two',
   /function returnToPaymentEdit\(\) \{[\s\S]{0,260}localStep\.value = 2/.test(overlay)
     && overlay.includes("cashier-v3:checkout-returned-to-payment-edit")

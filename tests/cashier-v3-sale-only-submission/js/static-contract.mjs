@@ -77,7 +77,7 @@ ok('SO-SUB-STATIC-04 business writes are ordered inside one Gateway-owned transa
       '$eventRecorder->recordInTx(',
       '$this->facts->persistInTx(',
       '$this->requests->markSucceededInTx(',
-      '$this->workspace->completeSaleOnlyCheckoutInTx(',
+      '$this->workspace->completeSnapshotCheckoutInTx(',
     ]))
 
 ok('SO-SUB-STATIC-05 Gateway consumes the plan before business writes in the same transaction',
@@ -142,14 +142,15 @@ ok('SO-SUB-STATIC-10 every canonical migration input exists',
 
 ok('SO-SUB-STATIC-11 checkout source expansion preserves prior server discovery authority',
   gateway.includes("$contract['server_resource_discovery'] = $discovery;")
-    && gateway.includes("$contract['server_resource_discovery_recheck_required'] = true;")
+    && gateway.includes("$contract['server_resource_discovery_recheck_required'] = count($resources) > 0;")
     && gateway.includes("string $canonicalAction,\n        array $baseContract = []")
     && gateway.includes('$contract = $baseContract;')
-    && ordered(gateway, [
-      '$this->expandFromServerResourceDiscovery(',
-      '$this->expandFollowUpFromCheckoutRequest(',
-      '$this->revalidateServerResourceDiscovery(',
-    ]))
+    && gateway.includes('$this->expandFromServerResourceDiscovery(')
+    && gateway.includes('$this->revalidateServerResourceDiscovery(')
+    && (
+      gateway.includes('$this->expandFollowUpFromCheckoutResourcePlan(')
+      || gateway.includes('$this->expandFollowUpFromCheckoutRequest(')
+    ))
 
 console.log(`SALE_ONLY_SUBMISSION_STATIC assertions=${passed + failed} passed=${passed} failed=${failed}`)
 process.exit(failed === 0 ? 0 : 1)

@@ -195,17 +195,30 @@ final class CashierV3CashierModule
         if ($handlers->hasProjection('open-member-debt-repayment')) {
             throw new \LogicException('C2 cashier module: member debt projection duplicate handler');
         }
-        $handlers->registerProjection('open-member-debt-repayment', function (array $scope) use ($memberDebtProjection, $provider): array {
+        $handlers->registerProjection('open-member-debt-repayment', function (array $scope) use ($memberDebtProjection, $provider, $versionServices): array {
             $payload = is_array($scope['payload'] ?? null) ? $scope['payload'] : [];
             $memberId = (int)($payload['memberId'] ?? $payload['member_id'] ?? 0);
-            return Db::transaction(function () use ($memberDebtProjection, $provider, $scope, $memberId): array {
+            return Db::transaction(function () use ($memberDebtProjection, $provider, $versionServices, $scope, $memberId): array {
                 $snapshot = $memberDebtProjection->read(
                     $memberId,
                     $scope['operator_scope'],
                     $scope['data_scope']
                 );
-                // 补交命令需要 member + member_balance。欠款页必须公开二者的
-                // 同一时点版本，否则前端会在发送前 fail-closed。
+                // 补交命令同时依赖工作台、会员和欠款记录。欠款页必须公开同一
+                // 时点的全部版本，不能让用户打开明细后仍携带旧 workspace 版本。
+                $workspaceId = \app\services\cashier\v3\CashierV3CheckoutWorkspaceIdentity::id(
+                    $scope['operator_scope']->storeId(),
+                    (string)$scope['state_context_id']
+                );
+                $workspaceVersion = $versionServices->ensureRegistered(
+                    \app\services\cashier\v3\CashierV3ResourceScope::of(
+                        \app\services\cashier\v3\CashierV3ResourceScope::TYPE_STORE,
+                        (string)$scope['operator_scope']->storeId()
+                    ),
+                    'cashier_workspace',
+                    $workspaceId,
+                    $scope['data_scope']
+                );
                 $memberVersion = $provider->synchronizeProjectionVersion(
                     'member',
                     (string)$memberId,
@@ -213,6 +226,11 @@ final class CashierV3CashierModule
                     $scope['data_scope']
                 );
                 $versions = [
+                    [
+                        'kind' => 'cashier_workspace',
+                        'id' => $workspaceId,
+                        'version' => $workspaceVersion,
+                    ],
                     [
                         'kind' => 'member',
                         'id' => (string)$memberId,
@@ -553,20 +571,46 @@ final class CashierV3CashierModule
             $stateContextId = (string)($scope['state_context_id'] ?? '');
             $draft = null;
             if ($craftsmen) {
-                $draft = $workspace->applyCraftsmenToAllServiceLinesInTx(
-                    $workspaceId,
-                    $stateContextId,
-                    $scope['operator_scope'],
-                    $craftsmen
-                );
+                try {
+                    $draft = $workspace->applyCraftsmenToAllServiceLinesInTx(
+                        $workspaceId,
+                        $stateContextId,
+                        $scope['operator_scope'],
+                        $craftsmen
+                    );
+                } catch (CashierV3CommandException $exception) {
+                    // The combined personnel action is allowed to carry both
+                    // roles. A sale-only cart may have no service rows even
+                    // though the overlay still has craftsmen candidates; in
+                    // that case skip only the inapplicable role and continue
+                    // applying salespeople below.
+                    if (($exception->getDetail()['reason'] ?? '') !== 'service_lines_missing_for_apply_all') {
+                        throw $exception;
+                    }
+                    $draft = $workspace->readDraft($workspaceId, $stateContextId, $scope['operator_scope'], true);
+                }
             }
             if ($salespeople) {
-                $draft = $workspace->applySalespeopleToAllSaleLinesInTx(
-                    $workspaceId,
-                    $stateContextId,
-                    $scope['operator_scope'],
-                    $salespeople
-                );
+                try {
+                    $draft = $workspace->applySalespeopleToAllSaleLinesInTx(
+                        $workspaceId,
+                        $stateContextId,
+                        $scope['operator_scope'],
+                        $salespeople
+                    );
+                } catch (CashierV3CommandException $exception) {
+                    // A pure entitlement cart can still carry the combined
+                    // personnel payload from the overlay. Salespeople are
+                    // inapplicable there; skip only that role while keeping
+                    // all validation failures for real sale lines intact.
+                    if (($exception->getDetail()['reason'] ?? '') !== 'sale_lines_missing_for_apply_all') {
+                        throw $exception;
+                    }
+                    $draft = $workspace->readDraft($workspaceId, $stateContextId, $scope['operator_scope'], true);
+                }
+            }
+            if ($draft === null) {
+                $draft = $workspace->readDraft($workspaceId, $stateContextId, $scope['operator_scope'], true);
             }
             return [
                 'data' => ['cashierDraft' => $draft],

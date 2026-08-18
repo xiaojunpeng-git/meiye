@@ -11,8 +11,8 @@ const submission = read('后端代码/app/services/cashier/v3/hang/CashierV3Hang
 const resume = read('后端代码/app/services/cashier/v3/hang/CashierV3HangResumeServices.php')
 const cashierModule = read('后端代码/app/services/cashier/v3/cashier/CashierV3CashierModule.php')
 
-assert.match(workbench, /if \(localCashierDraftOperations\.value\.length > 0\) \{[\s\S]*?await synchronizeLocalCashierDraft\(\{ deferProjection: true \}\)[\s\S]*?localCheckoutPreview\.value = null[\s\S]*?shouldForceFreshCheckout = true/,
-  '本地编辑进入结账前完整同步当前工作台草稿，并在完成后一次更新页面')
+assert.match(workbench, /if \(localCashierDraftOperations\.value\.length > 0 && !snapshotOnlyCheckout\) \{[\s\S]*?await synchronizeLocalCashierDraft\(\{ deferProjection: true \}\)[\s\S]*?localCheckoutPreview\.value = null[\s\S]*?shouldForceFreshCheckout = true/,
+  '兼容旧入口时同步工作台草稿；完整快照入口跳过逐条回放')
 assert.match(workbench, /let shouldForceFreshCheckout = forceFreshCheckout[\s\S]*?!shouldForceFreshCheckout && resumePersistedCheckout\(\)/,
   '有本地修改时不恢复旧结账快照，而是按最新工作台版本准备结账')
 assert.match(workbench, /function applyDiscardedCheckoutProjection\(result = \{\}\)[\s\S]*?checkout: discarded[\s\S]*?return String\(checkoutRequestIdentity\(checkout\.value\) \|\| ''\) === ''/,
@@ -59,7 +59,7 @@ assert.match(workbench, /function cartLineRole\(line = \{\}\)[\s\S]*?entitlement
   '兼容权益行投影缺少 lineRole 时仍识别为权益服务')
 assert.match(workbench, /function firstCartLineMissingCraftsmen\(\)[\s\S]*?isProjectLine\(line\)[\s\S]*?!hasCartLineCraftsmen\(line\)/,
   '纯权益行与购买项目一样必须参与手艺人前置检查')
-assert.match(workbench, /const craftsmenRequiredLine = firstCartLineMissingCraftsmen\(\)[\s\S]*?await openCartLineCraftsmen\(craftsmenRequiredLine\)[\s\S]*?return result[\s\S]*?if \(cashierDraftHasUnresolvedCommand\.value\)[\s\S]*?recoverPendingDraftCommand\(\)[\s\S]*?if \(localCashierDraftOperations\.value\.length > 0\)/,
+assert.match(workbench, /const craftsmenRequiredLine = firstCartLineMissingCraftsmen\(\)[\s\S]*?await openCartLineCraftsmen\(craftsmenRequiredLine\)[\s\S]*?return result[\s\S]*?if \(cashierDraftHasUnresolvedCommand\.value\)[\s\S]*?recoverPendingDraftCommand\(\)[\s\S]*?if \(localCashierDraftOperations\.value\.length > 0 && !snapshotOnlyCheckout\)/,
   '进入结账前先在前端检查手艺人，未选择时不启动恢复、草稿同步或结账请求')
 assert.match(workbench, /const canSubmitCart = computed\(\(\) => hasCartLines\.value\)/,
   '未知草稿命令保留结账入口，使其能按原幂等键回放恢复')
@@ -67,12 +67,22 @@ assert.match(workbench, /if \(cashierDraftHasUnresolvedCommand\.value\) \{\s*con
   '结账入口优先回放未知草稿命令，不允许创建新请求')
 assert.match(workbench, /async function synchronizeLocalCashierDraft\(\{ deferProjection = false \} = \{\}\)[\s\S]*?if \(deferProjection && !await applyCommittedCashierDraft\(deferredCashierDraft/,
   '草稿同步完成后才一次性应用服务端完整投影')
+assert.match(workbench, /async function resolveDeferredCashierDraftLine\([\s\S]*?requestAction\('open-cashier-workbench', \{ silent: true \}\)[\s\S]*?refreshedLine/,
+  '行级回放遇到暂未投影的服务端行时先静默刷新权威草稿，不把投影延迟误报为购物车变化')
+assert.match(workbench, /const resolvedLine = await resolveDeferredCashierDraftLine\([\s\S]*?const persistedLine = resolvedLine\.line/,
+  '朋友/本人等行设置回放使用刷新后的权威行，不依赖过期 deferred 投影')
+assert.match(workbench, /function buildCheckoutSnapshot\(preview = \{\}\)[\s\S]*?lines: Array\.isArray\(snapshot\.orderLines\)[\s\S]*?source:[\s\S]*?payment:/,
+  '结账把购物车行、客户来源和支付明细统一封装为单一前端快照')
+assert.match(workbench, /requestAction\('prepare-checkout', \{[\s\S]*?checkoutSnapshot: buildCheckoutSnapshot\(localCheckoutPreview\.value\)/,
+  '结账准备请求携带完整前端 checkoutSnapshot')
+assert.match(workbench, /action === 'update-checkout-sales-date'[\s\S]*?preview\.businessDate[\s\S]*?preview\.businessDateReason/,
+  '业务日期修改只写入本地结账快照')
 assert.match(workbench, /function adoptLatestCashierWorkspaceRevision\(\)[\s\S]*?getCashierV3PublicVersion\('cashier_workspace', workspaceId\)[\s\S]*?if \(deferProjection\) adoptLatestCashierWorkspaceRevision\(\)/,
   '延迟同步完成后采用命令回执中的最新工作台版本，使首次点击直接继续准备结账')
 assert.match(workbench, /if \(deferProjection\) \{[\s\S]*?draftCommandRecovery\.settle\(retryTicket, status\)[\s\S]*?cashierDraftHasUnresolvedCommand\.value = Boolean\([\s\S]*?return \{ \.\.\.result, deferredCashierDraft: draft \}/,
   '延迟投影模式的成功行级命令会释放恢复票据，后续数量和人员命令可以继续同步')
-assert.match(workbench, /await persistDeferredLineServiceSettings\(\)[\s\S]*?if \(localCashierDraftOperations\.value\.length > 0\) \{[\s\S]*?synchronizeLocalCashierDraft\(\{ deferProjection: true \}\)/,
-  '不出库、预售、体验和服务对象先进入本地操作队列，再随新增行按顺序一次性同步')
+assert.match(workbench, /await persistDeferredLineServiceSettings\(\)[\s\S]*?if \(localCashierDraftOperations\.value\.length > 0 && !snapshotOnlyCheckout\) \{[\s\S]*?synchronizeLocalCashierDraft\(\{ deferProjection: true \}\)/,
+  '不出库、预售、体验和服务对象先进入本地快照；兼容旧入口时才回放工作台')
 assert.match(workbench, /if \(action === 'create-custom-card-configuration'\)[\s\S]*?requestAction\(action,[\s\S]*?createCashierV3CommandId\('CASHIER_MORE'\)/,
   '定制卡同步使用后端已登记的根级收银请求标识前缀')
 assert.doesNotMatch(workbench, /createCashierV3CommandId\('CUSTOM_CARD'\)/,
