@@ -1548,6 +1548,19 @@ function reportHangOrderFailure(result, fallback) {
   }))
 }
 
+function reportCheckoutEntryFailure(result, fallback = '结账资料保存失败，请重试。') {
+  const status = resultStatus(result)
+  if (!['failed', 'conflict'].includes(status)) return result
+  window.dispatchEvent(new CustomEvent('cashier-v3:ui-result', {
+    detail: {
+      status: status === 'conflict' ? 'conflict' : 'failed',
+      code: result?.result?.code || result?.code || '',
+      message: resultMessage(result, fallback)
+    }
+  }))
+  return result
+}
+
 async function selectCatalogItem(item) {
   if (activeCardOperationUpgrade.value) {
     reportEntitlementContractError({ message: '当前只能完成本次升级结账；如需重新选择，请先清空购物车。' })
@@ -1716,6 +1729,27 @@ function adoptLatestCashierWorkspaceRevision() {
   if (!workspaceId || !Number.isInteger(revision) || revision <= 0) return false
   if (Number(state.workspace?.revision || 0) === revision) return true
   state.workspace = { ...state.workspace, revision }
+  return true
+}
+
+// A deferred local-draft replay deliberately keeps the cart projection in the
+// browser until the batch finishes, but command contexts must still advance
+// after every successful server mutation. Otherwise the next queued command
+// reuses the previous workspace revision and is rejected as stale.
+function adoptCashierWorkspaceRevisionFromResult(result = {}) {
+  const response = responseDataBlock(result)
+  const versions = Array.isArray(response?.versions)
+    ? response.versions
+    : (Array.isArray(result?.versions) ? result.versions : [])
+  const workspaceId = String(state.workspace?.id || '')
+  const row = versions.find((version) => (
+    version?.kind === 'cashier_workspace'
+    && String(version?.id || '') === workspaceId
+    && Number.isInteger(Number(version?.version))
+    && Number(version.version) > 0
+  ))
+  if (!row || !workspaceId) return adoptLatestCashierWorkspaceRevision()
+  state.workspace = { ...state.workspace, revision: Number(row.version) }
   return true
 }
 
@@ -2665,6 +2699,7 @@ async function synchronizeLocalCashierDraft({ deferProjection = false } = {}) {
           catalogKind: String(operation.catalogKind || '')
         })
         if (!['success', 'succeeded'].includes(resultStatus(result))) return result
+        adoptCashierWorkspaceRevisionFromResult(result)
         const draft = responseDataBlock(result).cashierDraft
         deferredCashierDraft = draft
         if (!deferProjection && !await applyCommittedCashierDraft(draft, currentCashierDraftScopeKey.value)) {
@@ -2689,6 +2724,7 @@ async function synchronizeLocalCashierDraft({ deferProjection = false } = {}) {
           idempotencyKey: createCashierV3CommandId('ADD_ENTITLEMENT')
         })
         if (!['success', 'succeeded'].includes(resultStatus(result))) return result
+        adoptCashierWorkspaceRevisionFromResult(result)
         const draft = responseDataBlock(result).cashierDraft
         deferredCashierDraft = draft
         if (!deferProjection && !await applyCommittedCashierDraft(draft, currentCashierDraftScopeKey.value)) {
@@ -2713,6 +2749,7 @@ async function synchronizeLocalCashierDraft({ deferProjection = false } = {}) {
           idempotencyKey: createCashierV3CommandId('CASHIER_MORE')
         })
         if (!['success', 'succeeded'].includes(resultStatus(result))) return result
+        adoptCashierWorkspaceRevisionFromResult(result)
         const draft = responseDataBlock(result).cashierDraft
         deferredCashierDraft = draft
         if (!deferProjection && !await applyCommittedCashierDraft(draft, currentCashierDraftScopeKey.value)) {
@@ -2734,6 +2771,7 @@ async function synchronizeLocalCashierDraft({ deferProjection = false } = {}) {
         const previousIds = new Set(cashierDraftLines(deferredCashierDraft || cashier.value).map((line) => String(line?.id || '')))
         result = await requestCashierV3Action(action, clonePlain(operation.payload || {}))
         if (!['success', 'succeeded'].includes(resultStatus(result))) return result
+        adoptCashierWorkspaceRevisionFromResult(result)
         const draft = responseDataBlock(result).cashierDraft
         deferredCashierDraft = draft
         if (!deferProjection && !await applyCommittedCashierDraft(draft, currentCashierDraftScopeKey.value)) {
@@ -2753,6 +2791,7 @@ async function synchronizeLocalCashierDraft({ deferProjection = false } = {}) {
       }
       if (action === 'clear-cart-lines') {
         const saved = await clearCashierDraft(String(state.stateContextId || ''))
+        adoptCashierWorkspaceRevisionFromResult(saved)
         deferredCashierDraft = saved?.cashierDraft
         if (!deferProjection && !await applyCommittedCashierDraft(deferredCashierDraft, currentCashierDraftScopeKey.value)) {
           return { result: { status: 'failed', code: 'CASHIER_DRAFT_SYNC_CLEAR_FAILED', message: '购物车未能清空，请重新操作。' } }
@@ -2770,6 +2809,7 @@ async function synchronizeLocalCashierDraft({ deferProjection = false } = {}) {
           idempotencyKey: createCashierV3CommandId('CASHIER_MORE')
         })
         if (!['success', 'succeeded'].includes(resultStatus(result))) return result
+        adoptCashierWorkspaceRevisionFromResult(result)
         deferredCashierDraft = responseDataBlock(result).cashierDraft
         if (!deferProjection && !await applyCommittedCashierDraft(deferredCashierDraft, currentCashierDraftScopeKey.value)) {
           return { result: { status: 'failed', code: 'CASHIER_DRAFT_SYNC_INCOMPLETE', message: '本次修改未能保存，请重新结账。' } }
@@ -2787,6 +2827,7 @@ async function synchronizeLocalCashierDraft({ deferProjection = false } = {}) {
       }
       result = await executeCashierDraftMutation(action, persistedLine, clonePlain(operation.payload || {}), { deferProjection })
       if (!['success', 'succeeded'].includes(resultStatus(result))) return result
+      adoptCashierWorkspaceRevisionFromResult(result)
       if (deferProjection) deferredCashierDraft = result.deferredCashierDraft || deferredCashierDraft
       consumeSynchronizedLocalCashierOperation()
     }
@@ -4037,7 +4078,9 @@ async function openCheckout({ forceFreshCheckout = false } = {}) {
       // 所有本地操作仍按既有命令契约写入服务端，但同步期间保留当前
       // 购物车投影，等最后一条完成后一次性替换，避免出现商品逐条加载。
       const synchronized = await synchronizeLocalCashierDraft({ deferProjection: true })
-      if (!['success', 'succeeded'].includes(resultStatus(synchronized))) return synchronized
+      if (!['success', 'succeeded'].includes(resultStatus(synchronized))) {
+        return reportCheckoutEntryFailure(synchronized)
+      }
       localCheckoutPreview.value = null
       localCheckoutPaymentOperations.value = []
       checkoutPreparationId.value = null
@@ -4048,7 +4091,9 @@ async function openCheckout({ forceFreshCheckout = false } = {}) {
       shouldForceFreshCheckout = true
     }
     const synchronized = await synchronizeLocalCashierDraft()
-    if (!['success', 'succeeded'].includes(resultStatus(synchronized))) return synchronized
+    if (!['success', 'succeeded'].includes(resultStatus(synchronized))) {
+      return reportCheckoutEntryFailure(synchronized)
+    }
     if (shouldForceFreshCheckout && String(checkoutRequestIdentity(checkout.value) || '')) {
       // 购物车已在本地重新编辑。旧待结账快照不再代表本次内容，先移除
       // 这张没有正式事实的草稿，再以当前工作台完整内容创建新的一张。
