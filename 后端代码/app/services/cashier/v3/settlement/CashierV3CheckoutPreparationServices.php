@@ -674,15 +674,9 @@ final class CashierV3CheckoutPreparationServices
         $now = time();
         $browserSnapshot = is_array($authority['browserSnapshot'] ?? null)
             ? $authority['browserSnapshot'] : [];
+        $browserBusinessDate = trim((string)($browserSnapshot['businessDate'] ?? ''));
         $supplementEnabled = (int)($authority['storedDraft']['supplement_enabled'] ?? 0) === 1;
         $supplementBusinessDate = (string)($authority['storedDraft']['supplement_business_date'] ?? '');
-        if ($browserSnapshot !== []) {
-            $businessDate = trim((string)($browserSnapshot['businessDate'] ?? ''));
-            if ($businessDate !== '') {
-                $supplementEnabled = true;
-                $supplementBusinessDate = $businessDate;
-            }
-        }
         if ($supplementEnabled
             && preg_match('/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/D', $supplementBusinessDate) !== 1) {
             throw self::incomplete('checkout_supplement_business_date_invalid');
@@ -706,7 +700,11 @@ final class CashierV3CheckoutPreparationServices
             'memberName' => $memberName,
             'operatorId' => $operatorScope->operatorId(),
             'operatorName' => $dimensions['operatorName'],
-            'businessDate' => $supplementEnabled ? $supplementBusinessDate : date('Y-m-d', $now),
+            // A normal front-end business date is part of the checkout
+            // snapshot. It must not implicitly turn on supplement audit.
+            'businessDate' => $supplementEnabled
+                ? $supplementBusinessDate
+                : ($browserBusinessDate !== '' ? $browserBusinessDate : date('Y-m-d', $now)),
             'businessTimezone' => 'Asia/Shanghai',
             'occurredAt' => $now,
             'recordedAt' => $now,

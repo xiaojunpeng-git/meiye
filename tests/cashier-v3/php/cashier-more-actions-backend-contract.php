@@ -84,11 +84,17 @@ $checks = [
         && substr_count($applySql, "'order_note'") === 3,
     'workspace audit enters locked checkout snapshot' => strpos(
         $preparation,
-        "'businessDate' => \$supplementEnabled ? \$supplementBusinessDate : date('Y-m-d', \$now)"
+        "'businessDate' => \$supplementEnabled"
     ) !== false
         && strpos($preparation, "'occurredAt' => \$now") !== false
         && strpos($preparation, "'orderNote' =>") !== false
         && strpos($preparation, "'configuredCostCents' =>") !== false,
+    'ordinary browser business date does not enable supplement audit' => strpos(
+        $preparation,
+        "\$browserBusinessDate = trim((string)(\$browserSnapshot['businessDate'] ?? ''))"
+    ) !== false
+        && strpos($preparation, "\$supplementEnabled = true") === false
+        && strpos($preparation, "\$browserBusinessDate !== '' ? \$browserBusinessDate : date('Y-m-d', \$now)") !== false,
     'checkout request and lines persist full audit' => strpos($kernel, "'orderNote' => \$snapshot['orderNote']") !== false
         && strpos($kernel, "'supplementOperatedAt' => \$snapshot['supplement']['operatedAt']") !== false
         && strpos($kernel, "'configuredCostCents' => \$line['configuredCostCents']") !== false
