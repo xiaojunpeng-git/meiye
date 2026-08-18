@@ -41,6 +41,12 @@ assert.match(workbench, /function persistedCashierDraftLineIds\(\)[\s\S]*?cashie
   '本地草稿同步以服务端工作台行作为新增行映射基准')
 assert.match(workbench, /if \(action === 'add-checkout-entitlement-lines'\) \{[\s\S]*?const previousIds = new Set\(cashierDraftLines\(deferredCashierDraft \|\| cashier\.value\)[\s\S]*?const appended = cashierDraftLines\(draft\)\.find\(\(line\) => !previousIds\.has/s,
   '权益新增只会映射为后端新增的对应行，并在加载期间不改写前端草稿')
+assert.match(workbench, /const addIntentId = String\(payload\.addIntentId \|\| createCashierV3CommandId\('ENTITLEMENT_ADD'\)\)[\s\S]*?const idempotencyKey = String\(payload\.idempotencyKey \|\| createCashierV3CommandId\('ADD_ENTITLEMENT'\)\)[\s\S]*?appendLocalCashierDraftOperation\(\{[\s\S]*?idempotencyKey/s,
+  '权益本地草稿在创建时固定保存追加命令的幂等键')
+assert.match(workbench, /if \(action === 'add-checkout-entitlement-lines'\) \{[\s\S]*?const idempotencyKey = String\(operation\.idempotencyKey \|\| createCashierV3CommandId\('ADD_ENTITLEMENT'\)\)[\s\S]*?operation\.idempotencyKey = idempotencyKey[\s\S]*?idempotencyKey\n\s*}\)/s,
+  '权益草稿同步与重试复用同一幂等键，不会对同一添加意图重复追加')
+assert.match(workbench, /function duplicateEntitlementLineId\(result = \{\}\)[\s\S]*?add_intent_reused_with_new_key[\s\S]*?async function recoverDuplicateEntitlementDraftOperation[\s\S]*?open-cashier-workbench[\s\S]*?localCashierPersistedLineIds\.value/s,
+  '旧版本已写入但未回填的权益操作按服务端行标识刷新并认领，不重发新增')
 assert.match(workbench, /function captureLocalCashierDraftForEntitlementSelector\(\)[\s\S]*?function restoreLocalCashierDraftAfterEntitlementSelector\(checkpoint = null\)[\s\S]*?localCashierDraftOperations\.value = clonePlain\(checkpoint\.operations\)/,
   '打开权益选择器只读取权益来源，延迟投影不能覆盖当前本地购买草稿')
 assert.match(workbench, /await requestAction\('open-add-card-service-project'[\s\S]*?await nextTick\(\)[\s\S]*?restoreLocalCashierDraftAfterEntitlementSelector\(localDraftCheckpoint\)/,

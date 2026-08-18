@@ -2396,6 +2396,10 @@ async function addEntitlementLines(payload = {}) {
   }
   const projectKey = String(payload.projectKey || '')
   const addIntentId = String(payload.addIntentId || createCashierV3CommandId('ENTITLEMENT_ADD'))
+  // addIntentId identifies the business row. Its command key must survive a
+  // local-draft retry, otherwise the gateway correctly rejects the same row
+  // as a second append with a different idempotency key.
+  const idempotencyKey = String(payload.idempotencyKey || createCashierV3CommandId('ADD_ENTITLEMENT'))
   // 普通“使用权益”在打开选择器时已经取得最新展示数据。这里仅确保该
   // 快照随着命令完整传递；不会为添加动作再次读取卡项、余次或库存。
   const commandPayload = {
@@ -2417,7 +2421,8 @@ async function addEntitlementLines(payload = {}) {
     appendLocalCashierDraftOperation({
       action: 'add-checkout-entitlement-lines',
       localLineId,
-      payload: commandPayload
+      payload: commandPayload,
+      idempotencyKey
     }, (draft) => {
       localLine.actualAmount = localEntitlementAmount(draft.lines || [], localLine)
       localLine.amount = localLine.actualAmount
@@ -2675,6 +2680,43 @@ async function executeCashierDraftMutation(action, line, payload = {}, { deferPr
   return result
 }
 
+function duplicateEntitlementLineId(result = {}) {
+  const candidates = [result, result?.data, result?.data?.data]
+  for (const candidate of candidates) {
+    const conflict = candidate?.conflict
+    if (String(conflict?.reason || '') === 'add_intent_reused_with_new_key'
+      && String(conflict?.line_id || '').trim() !== '') {
+      return String(conflict.line_id).trim()
+    }
+  }
+  return ''
+}
+
+function authoritativeCashierDraftFromCurrentRoot() {
+  return {
+    ...localDraftBase(),
+    complete: true
+  }
+}
+
+async function recoverDuplicateEntitlementDraftOperation(result, operation, lineIdMap) {
+  const persistedLineId = duplicateEntitlementLineId(result)
+  if (!persistedLineId) return null
+
+  const refreshed = await requestAction('open-cashier-workbench', { silent: true })
+  if (!['success', 'succeeded'].includes(resultStatus(refreshed))) return null
+  const persistedLine = cashierDraftLines(cashier.value)
+    .find((line) => String(line?.id || '') === persistedLineId)
+  if (!persistedLine) return null
+
+  lineIdMap.set(String(operation.localLineId || ''), persistedLineId)
+  localCashierPersistedLineIds.value = {
+    ...localCashierPersistedLineIds.value,
+    [String(operation.localLineId || '')]: persistedLineId
+  }
+  return authoritativeCashierDraftFromCurrentRoot()
+}
+
 async function synchronizeLocalCashierDraft({ deferProjection = false } = {}) {
   const operations = clonePlain(localCashierDraftOperations.value)
   if (!operations.length) return localDraftResult()
@@ -2719,11 +2761,26 @@ async function synchronizeLocalCashierDraft({ deferProjection = false } = {}) {
       }
       if (action === 'add-checkout-entitlement-lines') {
         const previousIds = new Set(cashierDraftLines(deferredCashierDraft || cashier.value).map((line) => String(line?.id || '')))
+        const idempotencyKey = String(operation.idempotencyKey || createCashierV3CommandId('ADD_ENTITLEMENT'))
+        // Legacy local drafts may not carry the key yet. Persist it before
+        // sending so an unknown-result retry is a replay, never a new append.
+        if (!operation.idempotencyKey) {
+          operation.idempotencyKey = idempotencyKey
+          localCashierDraftOperations.value = localCashierDraftOperations.value.map((queued, index) => (
+            index === 0 ? { ...queued, idempotencyKey } : queued
+          ))
+        }
         result = await requestAction(action, {
           ...clonePlain(operation.payload || {}),
-          idempotencyKey: createCashierV3CommandId('ADD_ENTITLEMENT')
+          idempotencyKey
         })
-        if (!['success', 'succeeded'].includes(resultStatus(result))) return result
+        if (!['success', 'succeeded'].includes(resultStatus(result))) {
+          const recoveredDraft = await recoverDuplicateEntitlementDraftOperation(result, operation, lineIdMap)
+          if (!recoveredDraft) return result
+          deferredCashierDraft = recoveredDraft
+          consumeSynchronizedLocalCashierOperation()
+          continue
+        }
         adoptCashierWorkspaceRevisionFromResult(result)
         const draft = responseDataBlock(result).cashierDraft
         deferredCashierDraft = draft
