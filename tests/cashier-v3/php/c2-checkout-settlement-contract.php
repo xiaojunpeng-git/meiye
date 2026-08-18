@@ -637,6 +637,42 @@ checkoutAssert('child identities survive versioned edit',
         && $ready['paymentDrafts'][0]['paymentDraftId'] === $draft['paymentDrafts'][0]['paymentDraftId']
         && $ready['paymentDrafts'][0]['draftVersion'] === 2);
 
+$legacySupplement = $snapshot;
+$legacySupplement['supplement'] = [
+    'enabled' => false,
+    'reason' => '历史草稿残留',
+    'operatorId' => 21,
+    'operatorNameSnapshot' => '旧收银员',
+    'operatedAt' => 1785258001,
+    'legacyField' => 'ignored',
+];
+checkoutResign($legacySupplement);
+$legacySupplementResult = CashierV3CheckoutSettlementKernel::prepareSubmission(
+    checkoutCommand(CashierV3CheckoutSettlementKernel::OPERATION_PREPARE_SUBMISSION, 31),
+    $legacySupplement,
+    null,
+    $secret
+);
+checkoutAssert('disabled legacy supplement audit is normalized without blocking checkout',
+    $legacySupplementResult['requestStatus'] === 'ready_for_submit'
+        && $legacySupplementResult['persistencePlan']['request']['supplementEnabled'] === 0
+        && $legacySupplementResult['persistencePlan']['request']['supplementReason'] === ''
+        && $legacySupplementResult['persistencePlan']['request']['supplementOperatorId'] === 0
+        && $legacySupplementResult['persistencePlan']['request']['supplementOperatedAt'] === 0);
+
+$missingSupplement = $snapshot;
+unset($missingSupplement['supplement']);
+checkoutResign($missingSupplement);
+$missingSupplementResult = CashierV3CheckoutSettlementKernel::prepareSubmission(
+    checkoutCommand(CashierV3CheckoutSettlementKernel::OPERATION_PREPARE_SUBMISSION, 32),
+    $missingSupplement,
+    null,
+    $secret
+);
+checkoutAssert('missing legacy supplement block defaults to disabled',
+    $missingSupplementResult['requestStatus'] === 'ready_for_submit'
+        && $missingSupplementResult['persistencePlan']['request']['supplementEnabled'] === 0);
+
 $staleCommand = $prepareCommand;
 $staleCommand['idempotencyKey'] = checkoutIdem(3, 'CHECKOUT_PREPARE');
 checkoutAssert('stale expected version is rejected',

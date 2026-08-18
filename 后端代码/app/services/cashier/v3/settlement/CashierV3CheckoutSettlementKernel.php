@@ -525,7 +525,6 @@ final class CashierV3CheckoutSettlementKernel
                 'occurredAt',
                 'recordedAt',
                 'orderNote',
-                'supplement',
                 'sourceDocument',
                 'saleLines',
                 'entitlementLines',
@@ -533,7 +532,7 @@ final class CashierV3CheckoutSettlementKernel
                 'balanceDeduction',
                 'debt',
             ],
-            [],
+            ['supplement'],
             'authoritySnapshot'
         );
         if ($snapshot['contractVersion'] !== self::AUTHORITY_CONTRACT_VERSION) {
@@ -591,40 +590,44 @@ final class CashierV3CheckoutSettlementKernel
             throw self::failure('sale_line_debt_total_mismatch');
         }
         $orderNote = self::text($snapshot['orderNote'], 500, 'authoritySnapshot.orderNote', true);
-        $supplement = $snapshot['supplement'];
-        self::assertExactKeys(
-            $supplement,
-            ['enabled', 'reason', 'operatorId', 'operatorNameSnapshot', 'operatedAt'],
-            [],
-            'authoritySnapshot.supplement'
-        );
-        $supplementEnabled = $supplement['enabled'] === true;
-        $supplementReason = self::text(
-            $supplement['reason'],
-            255,
-            'authoritySnapshot.supplement.reason',
-            true
-        );
-        $supplementOperatorId = self::nonNegativeInt(
-            $supplement['operatorId'],
-            'authoritySnapshot.supplement.operatorId'
-        );
-        $supplementOperatorName = self::text(
-            $supplement['operatorNameSnapshot'],
-            128,
-            'authoritySnapshot.supplement.operatorNameSnapshot',
-            true
-        );
-        $supplementOperatedAt = self::nonNegativeInt(
-            $supplement['operatedAt'],
-            'authoritySnapshot.supplement.operatedAt'
-        );
-        if ($supplementEnabled
-            ? ($supplementReason === '' || $supplementOperatorId <= 0
-                || $supplementOperatorName === '' || $supplementOperatedAt <= 0)
-            : ($supplementReason !== '' || $supplementOperatorId !== 0
-                || $supplementOperatorName !== '' || $supplementOperatedAt !== 0)) {
-            throw self::failure('supplement_audit_invalid');
+        // The supplement block is a legacy-compatible audit projection. The
+        // final snapshot owns the checkout decision; stale audit values from
+        // older drafts must not block an otherwise valid sale-only checkout.
+        $supplement = is_array($snapshot['supplement'] ?? null)
+            ? $snapshot['supplement']
+            : [];
+        $enabledValue = $supplement['enabled'] ?? false;
+        $supplementEnabled = $enabledValue === true || $enabledValue === 1 || $enabledValue === '1';
+        if (!$supplementEnabled) {
+            $supplementReason = '';
+            $supplementOperatorId = 0;
+            $supplementOperatorName = '';
+            $supplementOperatedAt = 0;
+        } else {
+            $supplementReason = self::text(
+                $supplement['reason'] ?? '',
+                255,
+                'authoritySnapshot.supplement.reason',
+                true
+            );
+            $supplementOperatorId = self::nonNegativeInt(
+                $supplement['operatorId'] ?? 0,
+                'authoritySnapshot.supplement.operatorId'
+            );
+            $supplementOperatorName = self::text(
+                $supplement['operatorNameSnapshot'] ?? '',
+                128,
+                'authoritySnapshot.supplement.operatorNameSnapshot',
+                true
+            );
+            $supplementOperatedAt = self::nonNegativeInt(
+                $supplement['operatedAt'] ?? 0,
+                'authoritySnapshot.supplement.operatedAt'
+            );
+            if ($supplementReason === '' || $supplementOperatorId <= 0
+                || $supplementOperatorName === '' || $supplementOperatedAt <= 0) {
+                throw self::failure('supplement_audit_invalid');
+            }
         }
 
         return [
