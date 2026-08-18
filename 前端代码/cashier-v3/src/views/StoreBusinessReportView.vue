@@ -1193,6 +1193,11 @@ onMounted(async () => {
   try {
     const [response] = await Promise.all([queryStoreBusinessReportCatalog(reportRuntime.value), loadReportScope()])
     catalog.value = Array.isArray(response) ? response : []
+    // The platform embeds this view before the hash route's optional parameter
+    // is always hydrated. Re-read the route after the catalog is available so
+    // the first query cannot fall back to the legacy partner report.
+    syncActiveReportFromRoute()
+    syncFiltersFromRoute()
     await loadReport()
     if (filterSchema.value.some((field) => String(field?.type || '') === 'category_tree')) {
       await loadCategoryOptions().catch((error) => {
