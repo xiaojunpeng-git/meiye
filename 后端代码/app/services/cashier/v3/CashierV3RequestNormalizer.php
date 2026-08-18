@@ -309,7 +309,7 @@ class CashierV3RequestNormalizer
 
     private static function normalizeCheckoutBusinessSource(array $payload): array
     {
-        $allowed = ['checkoutRequestId', 'checkoutRequestVersion', 'preparationRequestId', 'preparationToken', 'primarySourceId', 'secondarySourceId', 'sourceSelectionVersion'];
+        $allowed = ['checkoutRequestId', 'checkoutRequestVersion', 'preparationRequestId', 'preparationToken', 'primarySourceId', 'secondarySourceId', 'sourceSelectionVersion', 'rewardAmountCents'];
         $actual = array_keys($payload);
         sort($allowed, SORT_STRING);
         sort($actual, SORT_STRING);
@@ -326,10 +326,13 @@ class CashierV3RequestNormalizer
             throw self::invalidCheckoutPayment('update-checkout-business-source', 'checkout_preparation_identity_invalid');
         }
         $primary = self::strictPositiveInt($payload['primarySourceId'], 'primarySourceId', 'update-checkout-business-source');
-        foreach (['secondarySourceId', 'sourceSelectionVersion'] as $field) {
+        foreach (['secondarySourceId', 'sourceSelectionVersion', 'rewardAmountCents'] as $field) {
             if (!is_int($payload[$field]) && !is_string($payload[$field]) || !preg_match('/^(?:0|[1-9][0-9]*)$/D', (string)$payload[$field])) {
                 throw self::invalidCheckoutPayment('update-checkout-business-source', $field . '_invalid');
             }
+        }
+        if ((int)$payload['rewardAmountCents'] > 100000000000) {
+            throw self::invalidCheckoutPayment('update-checkout-business-source', 'reward_amount_cents_invalid');
         }
         return [
             'checkoutRequestId' => $requestId,
@@ -339,6 +342,7 @@ class CashierV3RequestNormalizer
             'primarySourceId' => $primary,
             'secondarySourceId' => (int)$payload['secondarySourceId'],
             'sourceSelectionVersion' => (int)$payload['sourceSelectionVersion'],
+            'rewardAmountCents' => (int)$payload['rewardAmountCents'],
         ];
     }
 

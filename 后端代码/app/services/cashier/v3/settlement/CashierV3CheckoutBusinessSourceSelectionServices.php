@@ -121,7 +121,10 @@ final class CashierV3CheckoutBusinessSourceSelectionServices
             (int)$row['secondary_source_id'],
             true
         );
-        return array_merge($source, ['selectionVersion' => (int)$row['selection_version']]);
+        return array_merge($source, [
+            'selectionVersion' => (int)$row['selection_version'],
+            'rewardAmountCents' => (int)($row['reward_amount_cents'] ?? 0),
+        ]);
     }
 
     public function read(string $kind, string $requestId, string $tenantId, int $storeId): array
@@ -178,7 +181,7 @@ final class CashierV3CheckoutBusinessSourceSelectionServices
         } catch (\Throwable $exception) {
             return self::emptySelection();
         }
-        return array_merge($source, ['selectionVersion' => 0]);
+        return array_merge($source, ['selectionVersion' => 0, 'rewardAmountCents' => 0]);
     }
 
     private function saveSelectionInTx(string $kind, string $requestId, string $tenantId, int $storeId, int $operatorId, array $payload): array
@@ -190,6 +193,13 @@ final class CashierV3CheckoutBusinessSourceSelectionServices
             throw self::invalid('business_source_payload_invalid', '请选择有效的业务来源。');
         }
         $snapshot = $this->config->resolveSourceSnapshot($primaryId, $secondaryId, true);
+        $rewardAmountCents = (int)($payload['rewardAmountCents'] ?? 0);
+        if ($rewardAmountCents < 0 || $rewardAmountCents > 100000000000) {
+            throw self::invalid('business_source_reward_invalid', '奖励金额无效，请重新输入。');
+        }
+        if ($kind !== self::KIND_SALE || preg_match('/^G(?:\s|异业|$)/u', trim((string)$snapshot['primarySourceNameSnapshot'])) !== 1) {
+            $rewardAmountCents = 0;
+        }
         $existing = (array)Db::name(self::TABLE)
             ->where('checkout_kind', $kind)
             ->where('checkout_request_id', $requestId)
@@ -209,11 +219,12 @@ final class CashierV3CheckoutBusinessSourceSelectionServices
                 'secondary_source_id' => $snapshot['secondarySourceId'],
                 'secondary_source_name_snapshot' => $snapshot['secondarySourceNameSnapshot'],
                 'source_label_snapshot' => $snapshot['displayNameSnapshot'],
+                'reward_amount_cents' => $rewardAmountCents,
                 'selection_version' => 1,
                 'updated_by_operator_id' => $operatorId,
                 'updated_at' => $now,
             ]);
-            return array_merge($snapshot, ['selectionVersion' => 1]);
+            return array_merge($snapshot, ['selectionVersion' => 1, 'rewardAmountCents' => $rewardAmountCents]);
         }
         if ((int)$existing['selection_version'] !== $expected) {
             throw CashierV3CommandException::versionConflict('业务来源已变化，请刷新后重新选择。');
@@ -226,6 +237,7 @@ final class CashierV3CheckoutBusinessSourceSelectionServices
                 'secondary_source_id' => $snapshot['secondarySourceId'],
                 'secondary_source_name_snapshot' => $snapshot['secondarySourceNameSnapshot'],
                 'source_label_snapshot' => $snapshot['displayNameSnapshot'],
+                'reward_amount_cents' => $rewardAmountCents,
                 'selection_version' => $next,
                 'updated_by_operator_id' => $operatorId,
                 'updated_at' => $now,
@@ -233,7 +245,7 @@ final class CashierV3CheckoutBusinessSourceSelectionServices
         if ($affected !== 1) {
             throw CashierV3CommandException::versionConflict('业务来源已变化，请刷新后重新选择。');
         }
-        return array_merge($snapshot, ['selectionVersion' => $next]);
+        return array_merge($snapshot, ['selectionVersion' => $next, 'rewardAmountCents' => $rewardAmountCents]);
     }
 
     private static function rowProjection(array $row): array
@@ -245,6 +257,7 @@ final class CashierV3CheckoutBusinessSourceSelectionServices
             'secondarySourceNameSnapshot' => (string)($row['secondary_source_name_snapshot'] ?? ''),
             'displayNameSnapshot' => (string)($row['source_label_snapshot'] ?? ''),
             'selectionVersion' => (int)($row['selection_version'] ?? 0),
+            'rewardAmountCents' => (int)($row['reward_amount_cents'] ?? 0),
         ];
     }
 
@@ -257,6 +270,7 @@ final class CashierV3CheckoutBusinessSourceSelectionServices
             'secondarySourceNameSnapshot' => '',
             'displayNameSnapshot' => '',
             'selectionVersion' => 0,
+            'rewardAmountCents' => 0,
         ];
     }
 
