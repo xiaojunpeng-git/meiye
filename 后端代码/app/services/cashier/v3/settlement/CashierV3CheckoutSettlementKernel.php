@@ -1022,7 +1022,8 @@ final class CashierV3CheckoutSettlementKernel
                 'quantity' => self::boundedQuantity($line['quantity'], 'entitlementLine.quantity'),
                 'actualEntitlementAmountCents' => self::money(
                     $line['actualEntitlementAmountCents'],
-                    'entitlementLine.actualEntitlementAmountCents'
+                    'entitlementLine.actualEntitlementAmountCents',
+                    false
                 ),
                 'sourceNameSnapshot' => self::text(
                     $line['sourceNameSnapshot'],
@@ -1555,7 +1556,7 @@ final class CashierV3CheckoutSettlementKernel
         return $left + $right;
     }
 
-    private static function money($value, string $path): int
+    private static function money($value, string $path, bool $wholeYuan = true): int
     {
         if (!is_int($value) || $value < 0 || $value > self::MAX_MONEY_CENTS) {
             throw self::failure('money_cents_invalid', ['path' => $path]);
@@ -1563,7 +1564,7 @@ final class CashierV3CheckoutSettlementKernel
         // V3 persists money as cents, while the approved cashier rule is
         // whole RMB for every newly written monetary fact. Never round a
         // client value here: a fractional request must fail before settlement.
-        if ($value % 100 !== 0) {
+        if ($wholeYuan && $value % 100 !== 0) {
             throw self::failure('money_whole_yuan_required', ['path' => $path]);
         }
         return $value;

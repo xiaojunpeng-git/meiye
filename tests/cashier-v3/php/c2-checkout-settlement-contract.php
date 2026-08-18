@@ -756,6 +756,21 @@ checkoutAssert('entitlement-only composition has zero receivable and cash perfor
         && $entitlementOnlyResult['totals']['cashPerformanceAmountCents'] === 0
         && $entitlementOnlyResult['totals']['entitlementActualAmountCents'] === 4000);
 
+$fractionalEntitlement = $entitlementOnly;
+$fractionalEntitlement['entitlementLines'][0]['actualEntitlementAmountCents'] = 155333;
+$fractionalEntitlement['entitlementLines'][1]['actualEntitlementAmountCents'] = 4667;
+checkoutResign($fractionalEntitlement);
+$fractionalEntitlementResult = CashierV3CheckoutSettlementKernel::prepareSubmission(
+    checkoutCommand(CashierV3CheckoutSettlementKernel::OPERATION_PREPARE_SUBMISSION, 71),
+    $fractionalEntitlement,
+    null,
+    $secret
+);
+checkoutAssert('entitlement actual amounts may preserve fractional yuan allocation',
+    $fractionalEntitlementResult['composition'] === 'entitlement_only'
+        && $fractionalEntitlementResult['totals']['receivableAmountCents'] === 0
+        && $fractionalEntitlementResult['totals']['entitlementActualAmountCents'] === 160000);
+
 $legacyUnknownEntitlement = $entitlementOnly;
 $legacyUnknownEntitlement['entitlementLines'][0]['sourceKind'] = 'unknown';
 checkoutResign($legacyUnknownEntitlement);
