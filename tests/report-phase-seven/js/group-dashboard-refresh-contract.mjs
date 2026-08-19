@@ -16,5 +16,10 @@ assert(source.includes('const DASHBOARD_REFRESH_INTERVAL_MS = 15 * 60 * 1000'), 
 assert(source.includes('window.setInterval(refreshDashboardOnSchedule, DASHBOARD_REFRESH_INTERVAL_MS)'), 'dashboard schedules a periodic refresh')
 assert(source.includes('window.clearInterval(dashboardRefreshTimer)'), 'dashboard clears the refresh timer on unmount')
 assert(source.includes('if (!loading.value) void loadDashboard()'), 'scheduled refresh does not overlap an active request')
+assert(source.includes('queryGroupManagementDashboardScope'), 'group dashboard reads the unified permission scope')
+assert(source.includes('group-dashboard__scope-trigger'), 'permission scope is rendered as an interactive trigger')
+assert(source.includes('store_ids: scopePicker.value.selectedStoreIds.join'), 'selected stores are passed back to the dashboard query')
+assert(source.includes('function chooseAllScope()'), 'permission picker can restore the current authorized scope')
+assert(source.includes('--metric-consumption:#b7791f'), 'consumption trend uses the consumption card color')
 
 console.log('group dashboard refresh contract: PASS')

@@ -43,6 +43,10 @@ export function queryGroupManagementDashboard(filters = {}) {
   return request('/adminapi/report/group-dashboard', { query: filters })
 }
 
+export function queryGroupManagementDashboardScope() {
+  return request('/adminapi/report/unified/scope')
+}
+
 export function queryGroupManagementDashboardTargets(filters = {}) {
   return request('/adminapi/report/group-dashboard/targets', { query: filters })
 }
