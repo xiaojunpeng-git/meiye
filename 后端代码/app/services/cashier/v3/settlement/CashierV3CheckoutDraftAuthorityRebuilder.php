@@ -147,7 +147,7 @@ final class CashierV3CheckoutDraftAuthorityRebuilder
             if ($role !== 'entitlement_service') {
                 throw self::failure('checkout_draft_line_role_invalid');
             }
-            $entitlementLines[] = [
+            $entitlementLine = [
                 'authorityKey' => (string)($row['authority_key'] ?? ''),
                 'sourceKind' => (string)($row['source_kind'] ?? ''),
                 'holderId' => self::positiveInt(
@@ -186,7 +186,30 @@ final class CashierV3CheckoutDraftAuthorityRebuilder
                     'entitlement.category_id_snapshot'
                 ),
                 'projectCategoryNameSnapshot' => (string)($row['category_name_snapshot'] ?? ''),
+                // Service settings are part of the checkout-line snapshot. They
+                // are not entitlement authority, but final completion must use
+                // the exact selection made in the browser snapshot.
+                // Entitlement service rows carry the browser's compact
+                // selection (staffId/laborWeight/flags). They are expanded
+                // to authoritative staff snapshots by the entitlement
+                // completion adapter after its final locks. Do not decode
+                // this selection with the sale-line snapshot contract, which
+                // requires employee/name/store fields that are not part of
+                // the browser-owned entitlement intent.
+                'craftsmen' => self::entitlementCraftsmenSnapshot(
+                    $row['craftsmen_snapshot_json'] ?? null
+                ),
+                'serviceObject' => (string)($row['service_object'] ?? ''),
+                'friendCountsAsCustomer' => (int)($row['friend_counts_as_customer'] ?? 1) === 1,
+                'isExperience' => (int)($row['is_experience'] ?? 0) === 1,
             ];
+            if (($row['manual_labor_fee_cents'] ?? null) !== null) {
+                $entitlementLine['manualLaborFeeCents'] = self::nonNegativeInt(
+                    $row['manual_labor_fee_cents'],
+                    'entitlement.manual_labor_fee_cents'
+                );
+            }
+            $entitlementLines[] = $entitlementLine;
         }
 
         $paymentDetails = [];
@@ -395,6 +418,18 @@ final class CashierV3CheckoutDraftAuthorityRebuilder
         return (int)$value;
     }
 
+    private static function isList(array $value): bool
+    {
+        $expected = 0;
+        foreach ($value as $key => $_item) {
+            if ($key !== $expected) {
+                return false;
+            }
+            $expected++;
+        }
+        return true;
+    }
+
     private static function craftsmenSnapshot($json): array
     {
         try {
@@ -402,6 +437,80 @@ final class CashierV3CheckoutDraftAuthorityRebuilder
         } catch (\Throwable $exception) {
             throw self::failure('checkout_draft_craftsmen_snapshot_invalid');
         }
+    }
+
+    /**
+     * Decode the compact, browser-owned entitlement service intent.
+     *
+     * Sales lines persist the immutable personnel snapshot and therefore use
+     * CashierV3CheckoutCraftsmenSnapshot::decode(). Entitlement lines instead
+     * persist only the selection needed by the completion authority; that
+     * authority locks staff profiles and creates the historical snapshot later
+     * in the same final transaction.
+     */
+    private static function entitlementCraftsmenSnapshot($json): array
+    {
+        if ($json === null || $json === '') {
+            return [];
+        }
+        $decoded = is_array($json) ? $json : json_decode((string)$json, true);
+        if (!is_array($decoded) || !self::isList($decoded) || count($decoded) > 20) {
+            throw self::failure('checkout_draft_entitlement_craftsmen_snapshot_invalid');
+        }
+        $result = [];
+        $seen = [];
+        $weight = 0;
+        foreach ($decoded as $row) {
+            if (!is_array($row)) {
+                throw self::failure('checkout_draft_entitlement_craftsmen_snapshot_invalid');
+            }
+            $allowed = [
+                'staffId', 'laborWeight', 'isPointCustomer',
+                'craftsmanPerformanceType', 'laborFeeCents',
+            ];
+            $actual = array_keys($row);
+            sort($actual, SORT_STRING);
+            $expected = $allowed;
+            sort($expected, SORT_STRING);
+            if ($actual !== $expected) {
+                throw self::failure('checkout_draft_entitlement_craftsmen_snapshot_invalid');
+            }
+            $staffId = self::positiveInt($row['staffId'], 'entitlement.craftsman.staff_id');
+            if (isset($seen[$staffId])) {
+                throw self::failure('checkout_draft_entitlement_craftsmen_duplicate');
+            }
+            $seen[$staffId] = true;
+            $laborWeight = self::nonNegativeInt(
+                $row['laborWeight'],
+                'entitlement.craftsman.labor_weight'
+            );
+            if ($laborWeight <= 0 || $laborWeight > 100 || !is_bool($row['isPointCustomer'])) {
+                throw self::failure('checkout_draft_entitlement_craftsmen_snapshot_invalid');
+            }
+            $performanceType = (string)$row['craftsmanPerformanceType'];
+            if (!in_array($performanceType, ['commission', 'labor', 'commission_labor'], true)) {
+                throw self::failure('checkout_draft_entitlement_craftsmen_snapshot_invalid');
+            }
+            $laborFeeCents = self::nonNegativeInt(
+                $row['laborFeeCents'],
+                'entitlement.craftsman.labor_fee_cents'
+            );
+            if ($performanceType === 'commission' && $laborFeeCents !== 0) {
+                throw self::failure('checkout_draft_entitlement_craftsmen_snapshot_invalid');
+            }
+            $weight += $laborWeight;
+            $result[] = [
+                'staffId' => $staffId,
+                'laborWeight' => $laborWeight,
+                'isPointCustomer' => $row['isPointCustomer'],
+                'craftsmanPerformanceType' => $performanceType,
+                'laborFeeCents' => $laborFeeCents,
+            ];
+        }
+        if ($result !== [] && $weight !== 100) {
+            throw self::failure('checkout_draft_entitlement_craftsmen_weight_invalid');
+        }
+        return $result;
     }
 
     private static function failure(

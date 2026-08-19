@@ -5,6 +5,8 @@ namespace app\services\cashier\v3\cashier;
 use app\services\cashier\v3\CashierV3CommandException;
 use app\services\cashier\v3\CashierV3DataScopeContext;
 use app\services\cashier\v3\CashierV3OperatorScope;
+use app\services\cashier\v3\CashierV3ResourceVersionServices;
+use think\facade\Db;
 use app\services\cashier\v3\CashierV3ResultCode;
 use app\services\cashier\v3\CashierV3TransactionGuard;
 
@@ -170,8 +172,43 @@ final class CashierV3SaleCatalogServices
         CashierV3DataScopeContext $dataScope
     ): array {
         $this->assertStoreScope($operatorScope, $dataScope);
-        self::positiveId($itemId, 'itemId');
-        return [];
+        $skuId = self::positiveId($itemId, 'itemId');
+        // A browser snapshot is not allowed to trust the display row, but it
+        // also must not be rejected here because a product lifecycle flag
+        // changed after the item was added. Read the authoritative joined
+        // product/SKU row only to derive stable resource identities; the
+        // final settlement transaction performs the inventory/entitlement/
+        // balance checks and any product-specific business validation.
+        $row = $this->authority->readStoreItemBySkuId($operatorScope->storeId(), $skuId);
+        if (!is_array($row)) {
+            throw self::notAvailable($skuId);
+        }
+        $item = $this->normalizeAuthorityRow($row, false);
+        $resources = $this->serverResources($item);
+        // Snapshot checkout owns the browser values, but resource locking must
+        // use the central current version at the final boundary. A catalog
+        // authority row can legitimately lag that registry after a catalog
+        // update; carrying its display-era version would reject an otherwise
+        // valid checkout before inventory, entitlement, or balance checks.
+        foreach ($resources as &$resource) {
+            $kind = (string)($resource['kind'] ?? '');
+            $id = (string)($resource['id'] ?? '');
+            if ($kind === '' || $id === '') {
+                continue;
+            }
+            $current = (int)Db::name(CashierV3ResourceVersionServices::TABLE)
+                ->where('scope_type', 'store')
+                ->where('scope_id', (string)$operatorScope->storeId())
+                ->where('resource_kind', $kind)
+                ->where('resource_id', $id)
+                ->value('current_version');
+            if ($current > 0) {
+                $resource['expectedVersion'] = $current;
+                $resource['authorityFingerprint'] = hash('sha256', $kind . '|' . $id . '|' . $current);
+            }
+        }
+        unset($resource);
+        return $resources;
     }
 
     /** Resources for the configured-card host. The host itself is never directly sellable. */
@@ -499,6 +536,8 @@ final class CashierV3SaleCatalogServices
             'catalog_sku_id' => $normalized['skuId'],
             'catalog_product_type' => $normalized['productType'],
             'kind_code' => $normalized['kindCode'],
+            'category_id_snapshot' => (int)($normalized['categoryId'] ?? 0),
+            'category_name_snapshot' => (string)($normalized['categoryName'] ?? ''),
             'project_id' => $isServiceProject ? $normalized['productId'] : 0,
             'quantity' => 1,
             'source_version' => $normalized['productVersion'],
@@ -1646,6 +1685,10 @@ final class CashierV3SaleCatalogServices
             'catalogItemId' => $item['skuId'],
             'productId' => $item['productId'],
             'skuId' => $item['skuId'],
+            // Snapshot settlement uses this immutable SKU identity to create
+            // inventory movement facts. Keep it in the server display DTO so
+            // it is not lost before final submission.
+            'skuUnique' => $item['skuUnique'],
             'productType' => $item['productType'],
             'kindCode' => $item['kindCode'],
             'kind' => $item['kind'],
@@ -1723,6 +1766,11 @@ final class CashierV3SaleCatalogServices
             'catalogItemId' => $item['skuId'],
             'productId' => $item['productId'],
             'skuId' => $item['skuId'],
+            // Keep the immutable inventory identity in the line snapshot.
+            // The final settlement must use the same SKU that was shown when
+            // the browser added the item; dropping it here produces an empty
+            // inventory lookup at submit time.
+            'skuUnique' => $item['skuUnique'],
             'productType' => $item['productType'],
             'kindCode' => $item['kindCode'],
             'kind' => $item['kind'],

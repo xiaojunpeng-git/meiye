@@ -1253,11 +1253,21 @@ final class CashierV3CashierWorkspaceServices
         foreach ($checkoutLines as $line) {
             if ((string)($line['line_role'] ?? '') !== self::ROLE_SALE) continue;
             $checkoutLineId = trim((string)($line['line_id'] ?? ''));
-            if ($checkoutLineId === '' || !array_key_exists('salespeople_snapshot_json', $line)) {
+            if ($checkoutLineId === '') {
+                return null;
+            }
+            // A persisted snapshot with no salesperson is a valid empty
+            // selection. Only a missing column/key means this request was
+            // built before salesperson snapshots were available and must use
+            // the legacy workspace compatibility path.
+            if (!array_key_exists('salespeople_snapshot_json', $line)) {
                 return null;
             }
             $raw = $line['salespeople_snapshot_json'];
-            if ($raw === null || trim((string)$raw) === '') return null;
+            if ($raw === null || trim((string)$raw) === '') {
+                $result[$checkoutLineId] = [];
+                continue;
+            }
             $stored = json_decode((string)$raw, true);
             if (!is_array($stored)) {
                 throw $this->incompleteLineSettings($checkoutLineId, 'checkout_salespeople_snapshot_invalid');

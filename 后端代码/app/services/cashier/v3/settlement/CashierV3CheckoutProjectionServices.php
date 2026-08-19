@@ -421,8 +421,11 @@ final class CashierV3CheckoutProjectionServices
             'workspaceCurrentVersion'
         );
         $exactRequestProjection = ($aggregate['exactRequestProjection'] ?? false) === true;
+        $workspaceVersionInvalid = $exactRequestProjection
+            ? $workspaceCurrentVersion < $workspaceVersion
+            : $workspaceCurrentVersion <= $workspaceVersion;
         if ($workspaceVersion >= PHP_INT_MAX
-            || $workspaceCurrentVersion <= $workspaceVersion
+            || $workspaceVersionInvalid
             || (!$exactRequestProjection
                 && $workspaceCurrentVersion !== $workspaceVersion + 1)) {
             throw self::failure('checkout_projection_workspace_version_drift');
@@ -634,6 +637,8 @@ final class CashierV3CheckoutProjectionServices
                     : self::nonNegativeInt($row['manual_labor_fee_cents'], 'line.manual_labor_fee_cents');
                 $craftsmenJson = $row['craftsmen_snapshot_json'] ?? null;
                 $craftsmen = self::craftsmenSnapshot($craftsmenJson);
+                $salespeopleJson = $row['salespeople_snapshot_json'] ?? null;
+                $salespeople = self::salespeopleSnapshot($salespeopleJson);
                 $guideSelections = self::attributionSnapshot($row['guide_selections_json'] ?? null);
                 $salesManagerSelections = self::attributionSnapshot($row['sales_manager_selections_json'] ?? null);
                 if (!in_array($serviceObject, ['', 'self', 'friend'], true)
@@ -673,8 +678,6 @@ final class CashierV3CheckoutProjectionServices
                     'isExperience' => $isExperience,
                     'isPresale' => $isPresale,
                     'inventoryOutboundRequired' => $inventoryOutboundRequired,
-                    'guideSelections' => $guideSelections,
-                    'salesManagerSelections' => $salesManagerSelections,
                 ];
                 if ($isPresale === 0) {
                     unset($fingerprintInput['isPresale']);
@@ -694,8 +697,24 @@ final class CashierV3CheckoutProjectionServices
                 // Existing drafts predate this column and their fingerprint did
                 // not contain craftsmen. Preserve that immutable contract until
                 // a user action rewrites the draft with an explicit [] value.
-                if (!CashierV3CheckoutCraftsmenSnapshot::isLegacyEmpty($craftsmenJson)) {
+                if ((string)($request['source_document_type'] ?? '') === 'cashier_snapshot'
+                    || !CashierV3CheckoutCraftsmenSnapshot::isLegacyEmpty($craftsmenJson)) {
                     $fingerprintInput['craftsmen'] = $craftsmen;
+                }
+                // Snapshot requests persist an explicit [] even when no
+                // salesperson was selected. Include that field in the
+                // fingerprint; legacy rows with NULL/empty storage predate
+                // the snapshot column and must retain their old contract.
+                if ($salespeopleJson !== null && trim((string)$salespeopleJson) !== '') {
+                    $fingerprintInput['salespeople'] = $salespeople;
+                }
+                if (($guideJson = $row['guide_selections_json'] ?? null) !== null
+                    && trim((string)$guideJson) !== '') {
+                    $fingerprintInput['guideSelections'] = $guideSelections;
+                }
+                if (($salesManagerJson = $row['sales_manager_selections_json'] ?? null) !== null
+                    && trim((string)$salesManagerJson) !== '') {
+                    $fingerprintInput['salesManagerSelections'] = $salesManagerSelections;
                 }
                 if ($catalogSkuId <= 0) {
                     unset($fingerprintInput['catalogSkuId']);
@@ -1464,6 +1483,44 @@ final class CashierV3CheckoutProjectionServices
                 $snapshot['guideRoundNo'] = $roundNo;
             }
             $result[] = $snapshot;
+        }
+        return $result;
+    }
+
+    private static function salespeopleSnapshot($json): array
+    {
+        if ($json === null || trim((string)$json) === '') {
+            return [];
+        }
+        $decoded = is_array($json) ? $json : json_decode((string)$json, true);
+        if (!is_array($decoded)) {
+            throw self::failure('checkout_projection_salespeople_snapshot_invalid');
+        }
+        $result = [];
+        $weight = 0;
+        foreach ($decoded as $row) {
+            if (!is_array($row)) {
+                throw self::failure('checkout_projection_salespeople_snapshot_invalid');
+            }
+            $staffId = self::positiveInt(
+                $row['staffId'] ?? $row['id'] ?? null,
+                'line.salesperson.staff_id'
+            );
+            $allocation = self::positiveInt(
+                $row['allocationWeight'] ?? null,
+                'line.salesperson.allocation_weight'
+            );
+            if ($allocation > 100) {
+                throw self::failure('checkout_projection_salespeople_snapshot_invalid');
+            }
+            $result[] = [
+                'staffId' => $staffId,
+                'allocationWeight' => $allocation,
+            ];
+            $weight += $allocation;
+        }
+        if ($result !== [] && $weight !== 100) {
+            throw self::failure('checkout_projection_salespeople_weight_invalid');
         }
         return $result;
     }

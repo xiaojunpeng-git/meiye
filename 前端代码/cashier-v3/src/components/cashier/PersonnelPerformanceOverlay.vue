@@ -9,6 +9,7 @@ const props = defineProps({
   showSalesManagers: { type: Boolean, default: false },
   requireCraftsmen: { type: Boolean, default: false },
   craftsmenCandidates: { type: Array, default: () => [] },
+  storeId: { type: [Number, String], default: 0 },
   salespersonCandidates: { type: Array, default: () => [] },
   guideCandidates: { type: Array, default: () => [] },
   salesManagerCandidates: { type: Array, default: () => [] },
@@ -353,6 +354,8 @@ function selectedCraftsmenPayload() {
   return craftsmen.value.filter((item) => item.selected).map((item, index) => ({
     id: item.id,
     staffId: item.id,
+    employeeId: Number(item.employeeId || item.employee_id || item.id),
+    storeId: Number(item.storeId || item.store_id || props.storeId || 0),
     name: item.name,
     marked: Boolean(item.marked),
     isPointCustomer: Boolean(item.marked),

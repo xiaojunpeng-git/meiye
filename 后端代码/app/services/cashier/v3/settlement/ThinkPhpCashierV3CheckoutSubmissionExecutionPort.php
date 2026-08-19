@@ -302,6 +302,9 @@ final class ThinkPhpCashierV3CheckoutSubmissionExecutionPort
                 $context->operatorScope()
             );
             if ($salespeopleByCheckoutLine === null) {
+                if ((string)($request['source_document_type'] ?? '') === 'cashier_snapshot') {
+                    throw self::failure('checkout_salespeople_snapshot_missing');
+                }
                 $salespeopleByCheckoutLine = $this->workspace->lockedSalespeopleByCheckoutLineInTx(
                     (string)$request['workspace_id'],
                     (array)$aggregate['lines'],
@@ -648,12 +651,20 @@ final class ThinkPhpCashierV3CheckoutSubmissionExecutionPort
     {
         return $this->domainCall(function () use ($authority): array {
             $context = $this->context($authority);
-            $draft = $this->workspace->completeCheckoutInTx(
-                $authority['workspaceId'],
-                $authority['stateContextId'],
-                $context->operatorScope(),
-                (array)$context->aggregate()['lines']
-            );
+            $request = (array)($context->aggregate()['request'] ?? []);
+            $isSnapshot = (string)($request['source_document_type'] ?? '') === 'cashier_snapshot';
+            $draft = $isSnapshot
+                ? $this->workspace->completeSnapshotCheckoutInTx(
+                    $authority['workspaceId'],
+                    $authority['stateContextId'],
+                    $context->operatorScope()
+                )
+                : $this->workspace->completeCheckoutInTx(
+                    $authority['workspaceId'],
+                    $authority['stateContextId'],
+                    $context->operatorScope(),
+                    (array)$context->aggregate()['lines']
+                );
             return [
                 'workspaceId' => $authority['workspaceId'],
                 'cleared' => true,

@@ -52,8 +52,9 @@ $check(
 );
 $check(
     strpos($kernel, "} elseif (\$serviceObject !== '' || \$friendCountsAsCustomer !== 1 || \$isExperience !== 0 || \$craftsmen !== [])") !== false
-        && strpos($kernel, "'craftsmenSnapshotJson' => '[]'") !== false,
-    'non-project checkout lines cannot carry craftsmen and entitlement lines persist an explicit empty snapshot'
+        && strpos($kernel, "'craftsmenSnapshotJson' => CashierV3CheckoutSettlementCanonicalizer::encode(") !== false
+        && strpos($kernel, "'craftsmen' => self::normalizeEntitlementCraftsmen(") !== false,
+    'non-project checkout lines cannot carry craftsmen while entitlement lines preserve their selected craftsmen snapshot'
 );
 $check(
     strpos($repository, "'craftsmenSnapshotJson' => 'craftsmen_snapshot_json'") !== false

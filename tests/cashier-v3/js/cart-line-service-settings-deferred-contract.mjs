@@ -7,6 +7,10 @@ const dirname = path.dirname(fileURLToPath(import.meta.url))
 const repo = path.resolve(dirname, '../../..')
 const sourcePath = path.join(repo, '前端代码/cashier-v3/src/views/CashierWorkbenchView.vue')
 const source = fs.readFileSync(sourcePath, 'utf8')
+const personnelOverlay = fs.readFileSync(
+  path.join(repo, '前端代码/cashier-v3/src/components/cashier/PersonnelPerformanceOverlay.vue'),
+  'utf8'
+)
 
 let failed = 0
 function check(condition, message) {
@@ -30,7 +34,8 @@ function body(functionName) {
 const serviceObjectToggle = body('setCartLineServiceObject(line, serviceObject, friendCountsAsCustomer = true)')
 const experienceToggle = body('toggleCartLineExperience(line)')
 const deferredPersistence = body('persistDeferredLineServiceSettings()')
-const checkoutEntry = body('openCheckout({ forceFreshCheckout = false } = {})')
+const localPreview = body('localCheckoutPreviewSnapshot()')
+const checkoutEntry = body('openCheckout({ forceFreshCheckout = false, checkoutSnapshot = null } = {})')
 const resetContext = body('resetCashierLocalContext()')
 const clearCart = body('confirmClearCart()')
 const checkoutBar = source.match(/<footer class="cashier-checkout-bar">[\s\S]*?<\/footer>/)?.[0] || ''
@@ -47,16 +52,54 @@ check(
   'experience toggle updates local state without a request'
 )
 check(
-  /mutateCashierDraft\('update-cart-line-service-settings', line, payload\)/.test(deferredPersistence)
-    && /payload\.friendCountsAsCustomer/.test(deferredPersistence)
-    && /payload\.isExperience/.test(deferredPersistence),
-  'deferred save writes both friend customer-count and experience settings through the existing draft command'
+  /return true/.test(deferredPersistence)
+    && !/requestAction\(|mutateCashierDraft\(/.test(deferredPersistence),
+  'deferred service-setting hook remains browser-only and does not write a server draft'
+)
+const localDraftRecalculation = source.slice(
+  source.indexOf('function recalculateLocalCashierDraft'),
+  source.indexOf('function commitLocalCashierDraft')
+)
+check(
+  /recalculateLocalCashierDraft\(/.test(localPreview)
+    && /localCashierDraft\.value \|\| localDraftBase\(\)/.test(localPreview)
+    && /localLineServiceSettings/.test(localDraftRecalculation)
+    && /serviceObject/.test(localDraftRecalculation)
+    && /friendCountsAsCustomer/.test(localDraftRecalculation)
+    && /isExperience/.test(localDraftRecalculation),
+  'immediate checkout merges the latest browser service settings into the local snapshot'
+)
+check(
+  /canonicalCheckoutCraftsmen\(craftsmen\)/.test(localPreview)
+    && /function canonicalCheckoutCraftsmen/.test(source)
+    && /employeeId/.test(source.slice(source.indexOf('function canonicalCheckoutCraftsmen'), source.indexOf('function commitLocalCashierDraft')))
+    && /storeId/.test(source.slice(source.indexOf('function canonicalCheckoutCraftsmen'), source.indexOf('function commitLocalCashierDraft')))
+    && /isPrimary/.test(source.slice(source.indexOf('function canonicalCheckoutCraftsmen'), source.indexOf('function commitLocalCashierDraft')))
+    && /sequence/.test(source.slice(source.indexOf('function canonicalCheckoutCraftsmen'), source.indexOf('function commitLocalCashierDraft'))),
+  'sale-project craftsmen are canonicalized only when the final browser checkout snapshot is built'
+)
+check(
+  /const salespeople = Array\.isArray\(localPersonnel\.salespeople\)/.test(localPreview)
+    && /const guideSelections = Array\.isArray\(localPersonnel\.guideSelections\)/.test(localPreview)
+    && /const salesManagerSelections = Array\.isArray\(localPersonnel\.salesManagerSelections\)/.test(localPreview)
+    && /canonicalCheckoutSalespeople\(salespeople\)/.test(localPreview)
+    && /canonicalCheckoutAttributions\(guideSelections, true\)/.test(localPreview)
+    && /canonicalCheckoutAttributions\(salesManagerSelections\)/.test(localPreview)
+    && /function canonicalCheckoutSalespeople/.test(source)
+    && /function canonicalCheckoutAttributions/.test(source),
+  'all personnel IDs are read and canonicalized from browser state at the final snapshot boundary'
+)
+check(
+  /selectedCraftsmenPayload[\s\S]*employeeId/.test(personnelOverlay)
+    && /selectedCraftsmenPayload[\s\S]*storeId/.test(personnelOverlay)
+    && /storeId: \{ type: \[Number, String\]/.test(personnelOverlay),
+  'personnel selection payload carries employee and store identity into the browser snapshot boundary'
 )
 check(
   /if \(!await persistDeferredLineServiceSettings\(\)\)/.test(checkoutEntry)
     && checkoutEntry.indexOf('firstCartLineMissingCraftsmen') < checkoutEntry.indexOf('persistDeferredLineServiceSettings')
     && checkoutEntry.indexOf('persistDeferredLineServiceSettings') < checkoutEntry.indexOf('synchronizeLocalCashierDraft'),
-  'checkout validates craftsmen before persisting deferred settings and preparing checkout'
+  'checkout validates craftsmen before building the local snapshot and preparing checkout'
 )
 check(
   /localLineServiceSettings\.value\s*=\s*\{\}/.test(resetContext),

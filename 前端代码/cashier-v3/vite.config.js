@@ -50,9 +50,20 @@ export default defineConfig({
   resolve: {
     preserveSymlinks: true,
     dedupe: ['vue', '@lucide/vue'],
-    alias: {
-      '@': fileURLToPath(new URL('./src', import.meta.url))
-    }
+    alias: [
+      {
+        find: '@mohe/inventory-vue3/styles.css',
+        replacement: fileURLToPath(new URL('../inventory-vue3/src/styles.css', import.meta.url))
+      },
+      {
+        find: '@mohe/inventory-vue3',
+        replacement: fileURLToPath(new URL('../inventory-vue3/src/index.js', import.meta.url))
+      },
+      {
+        find: '@',
+        replacement: fileURLToPath(new URL('./src', import.meta.url))
+      }
+    ]
   },
   optimizeDeps: {
     exclude: ['@mohe/inventory-vue3', '@mohe/unified-query-vue3']

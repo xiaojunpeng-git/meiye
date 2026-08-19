@@ -53,7 +53,18 @@ authorityContractAssert(
         && strpos($adapter, "->where('state_context_id', \$stateContextId)") !== false
         && strpos($adapter, "->where('tenant_id', \$dataScope->tenantId())") !== false
         && strpos($adapter, "->where('store_id', \$dataScope->forcedStoreId())") !== false
-        && strpos($adapter, 'assertDiscoveryWorkspaceMatchesRequest(') !== false
+        && strpos($adapter, 'requestLinesForDiscovery(') !== false
+);
+authorityContractAssert(
+    'discovery builds service intent from persisted checkout-line snapshots, not workspace rows',
+    strpos($adapter, '$this->workspace->discoverCheckoutDraft(') === false
+        && strpos($adapter, 'assertDiscoveryWorkspaceMatchesRequest(') === false
+        && strpos($adapter, 'serviceIntentsFromCheckoutLines(') !== false
+        && strpos($adapter, "'quantity' => (int)\$line['quantity']") !== false
+        && strpos($adapter, 'craftsmen_snapshot_json') !== false
+        && strpos($adapter, 'service_object') !== false
+        && strpos($adapter, 'friend_counts_as_customer') !== false
+        && strpos($adapter, 'is_experience') !== false
 );
 authorityContractAssert(
     'discovery supports idempotent preparation replay but excludes terminal checkout states',
@@ -79,10 +90,10 @@ authorityContractAssert(
         && strpos($adapter, 'InventoryCompletionDataScope') !== false
 );
 authorityContractAssert(
-    'locked build starts from the locked checkout aggregate and workspace service intents',
+    'locked build starts from the locked checkout aggregate and persisted service intents',
     strpos($adapter, 'public function buildAfterGatewayLocks(array $aggregate, array $scope): array') !== false
         && strpos($adapter, "CashierV3TransactionGuard::assertInTransaction('entitlementCompletionAuthorityAdapter')") !== false
-        && strpos($adapter, '$this->workspace->lockCheckoutServiceIntentsInTx(') !== false
+        && strpos($adapter, 'serviceIntentsFromCheckoutLines(') !== false
         && strpos($adapter, '$this->assertLockedAggregate(') !== false
 );
 authorityContractAssert(

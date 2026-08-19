@@ -150,8 +150,8 @@ assertContract('CATALOG-GATEWAY-03 sku-only discovery cannot bypass product or c
   && saleCatalog.includes("'kind' => 'catalog_card_definition'")
   && saleCatalog.includes("foreach ($component['authoritySnapshot']['resourceSources'] as $resource)")
   && saleCatalog.includes('foreach ($this->serverResources($item) as $resource)')
-  && cashierModule.includes('$saleCatalog->selectSaleLineAfterGatewayLocksInTx(')
-  && cashierModule.includes('$saleCatalog->assertStoredSaleQuantityAfterGatewayLocksInTx(')
+  && cashierModule.includes('$saleCatalog->selectDraftSaleLineAfterGatewayLocksInTx(')
+  && cashierModule.includes('$saleCatalog->discoverStoredLineResources(')
   && saleCatalog.includes("'cashier_sale_locked_context_mismatch'"))
 
 process.stdout.write('C2_CATALOG_LOCK_ORDER_CONTRACT=PASS\n')

@@ -31,6 +31,11 @@ function body(source, name) {
 
 const modeSwitch = body(view, 'setCartLineInventoryMode(line, mode)')
 const deferred = body(view, 'persistDeferredLineServiceSettings()')
+const localPreview = body(view, 'localCheckoutPreviewSnapshot()')
+const localDraftRecalculation = view.slice(
+  view.indexOf('function recalculateLocalCashierDraft'),
+  view.indexOf('function commitLocalCashierDraft')
+)
 
 check(
   /isProductLine\(line\)/.test(modeSwitch)
@@ -47,10 +52,13 @@ check(
   '三按钮只渲染在产品行'
 )
 check(
-  /payload\.isPresale/.test(deferred)
-    && /payload\.inventoryOutboundRequired/.test(deferred)
-    && /mutateCashierDraft\('update-cart-line-service-settings', line, payload\)/.test(deferred),
-  '产品库存规则只在结账前通过既有草稿命令保存'
+  /return true/.test(deferred)
+    && !/requestAction\(|mutateCashierDraft\(/.test(deferred)
+    && /recalculateLocalCashierDraft\(/.test(localPreview)
+    && /localLineServiceSettings/.test(localDraftRecalculation)
+    && /isPresale/.test(localDraftRecalculation)
+    && /inventoryOutboundRequired/.test(localDraftRecalculation),
+  '产品库存规则只在立即结账时合并到前端快照，不提前保存草稿'
 )
 check(
   /inventory_rule_product_only/.test(workspace)
@@ -60,7 +68,7 @@ check(
 )
 check(
   /\$hasInventoryRule\s*=/.test(cashierModule)
-    && /!\$hasSalespeople\s*&&\s*!\$hasInventoryRule/.test(cashierModule),
+    && /!\$hasSalespeople\s*&&\s*!\$hasAttributions\s*&&\s*!\$hasInventoryRule/.test(cashierModule),
   '产品仅提交出库/预售规则时不强制携带销售人'
 )
 check(

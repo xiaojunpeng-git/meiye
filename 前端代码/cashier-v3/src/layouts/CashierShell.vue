@@ -148,6 +148,17 @@ watch(
   () => state.cashier?.checkout,
   (checkout) => {
     if (!checkout || typeof checkout !== 'object') return
+    // 游客订单不允许继承任何会员来源；根投影刷新时也不能把旧来源重新带回。
+    if (String(state.cashier?.customerMode || '') === 'guest') {
+      toolbarBusinessSource.value = {
+        displayNameSnapshot: '',
+        primarySourceId: 0,
+        secondarySourceId: 0,
+        rewardAmountCents: 0,
+        sourceSelectionVersion: 0
+      }
+      return
+    }
     if (checkout.businessDate) toolbarBusinessDate.value = String(checkout.businessDate)
     toolbarBusinessDateReason.value = String(checkout.businessDateReason || '')
     if (Number(checkout.primarySourceId || 0) > 0) {
@@ -913,6 +924,17 @@ async function selectGuestOrderFromSelector() {
   })
   if (!isSucceededResult(result)) return result
   applyCashierMemberDraft(result, null)
+
+  // 游客没有客户来源；切换身份时必须同时清掉工具栏显示和本地结账快照，
+  // 避免上一位会员的来源被带入游客订单。
+  toolbarBusinessSource.value = {
+    displayNameSnapshot: '',
+    primarySourceId: 0,
+    secondarySourceId: 0,
+    rewardAmountCents: 0,
+    sourceSelectionVersion: 0
+  }
+  window.dispatchEvent(new CustomEvent('cashier-v3:clear-toolbar-business-source'))
 
   // 游客不能进入核销或项目替换；成功切换后统一回到结账收款。
   pendingCashierWorkflowTarget.value = null

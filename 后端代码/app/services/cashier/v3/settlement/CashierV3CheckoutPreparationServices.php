@@ -149,11 +149,10 @@ final class CashierV3CheckoutPreparationServices
             $memberVersion = $this->shadowVersion('member', $memberId);
             $resources[] = self::resource('member', $memberId, $memberVersion, 'checkout_member');
         }
-        $result = [
+        return [
             'contractVersion' => self::DISCOVERY_CONTRACT_VERSION,
             'resources' => $resources,
         ];
-        return $result;
     }
 
     /**
@@ -191,10 +190,12 @@ final class CashierV3CheckoutPreparationServices
                     continue;
                 }
                 if ($itemId <= 0) throw self::incomplete('checkout_snapshot_sale_identity_invalid');
-                // The final snapshot transaction locks the SKU authority
-                // itself. Discovery must not reject a browser snapshot merely
-                // because a display-era product active flag changed; product
-                // effective status is intentionally outside this contract.
+                // The final snapshot transaction reads and locks the SKU while
+                // materializing the sale line. Do not add display-era catalog
+                // versions to the Gateway context set: those versions can be
+                // stale independently of the current inventory/entitlement/
+                // balance authorities and would reintroduce the old-version
+                // blocker that snapshot checkout is designed to remove.
                 continue;
             }
             if (!in_array($role, ['entitlement_service', 'entitlement', 'benefit_service'], true)) {
@@ -405,6 +406,15 @@ final class CashierV3CheckoutPreparationServices
             $stateContextId,
             $debtAmountCents
         );
+        if ($checkoutSnapshot !== null) {
+            $snapshot['sourceDocument'] = [
+                'type' => 'cashier_snapshot',
+                'id' => $workspaceId,
+                'no' => $workspaceId,
+            ];
+            $snapshot['authoritySnapshotFingerprint'] =
+                CashierV3CheckoutSettlementKernel::authorityFingerprint($snapshot);
+        }
         $command = [
             'contractVersion' => CashierV3CheckoutSettlementKernel::CONTRACT_VERSION,
             'operation' => CashierV3CheckoutSettlementKernel::OPERATION_SAVE_DRAFT,
@@ -566,8 +576,12 @@ final class CashierV3CheckoutPreparationServices
                         : ((string)($line['kindCode'] ?? $server['kind_code'] ?? '') === 'project'
                             || (int)($server['catalog_product_type'] ?? 0) === 6 ? 'project' : 'product'),
                     'nameSnapshot' => (string)($server['display_snapshot']['name'] ?? ''),
-                    'categoryIdSnapshot' => 0,
-                    'categoryNameSnapshot' => '',
+                    // The catalog row is the authority for the historical
+                    // category snapshot. Keeping this on the checkout line
+                    // lets paid project service facts resolve their category
+                    // without consulting a mutable workspace projection.
+                    'categoryIdSnapshot' => (int)($server['category_id_snapshot'] ?? $server['categoryId'] ?? 0),
+                    'categoryNameSnapshot' => (string)($server['category_name_snapshot'] ?? $server['categoryName'] ?? ''),
                     'quantity' => $customCard ? 1 : $quantity,
                     'couponUserId' => (int)($line['couponUserId'] ?? $coupon['id'] ?? $line['couponId'] ?? 0),
                     'couponNameSnapshot' => (string)($line['couponNameSnapshot'] ?? $coupon['name'] ?? $line['couponSummary'] ?? ''),
@@ -591,7 +605,7 @@ final class CashierV3CheckoutPreparationServices
                 continue;
             }
             if ($role === 'entitlement_service') {
-                $entitlementLines[] = [
+                $entitlementLine = [
                     'id' => (string)($line['lineId'] ?? 'snapshot-' . $index),
                     'lineRole' => 'entitlement_service',
                     'entitlementInstanceId' => (int)($line['entitlementInstanceId'] ?? 0),
@@ -605,7 +619,18 @@ final class CashierV3CheckoutPreparationServices
                     'entitlementSourceName' => (string)($line['entitlementSourceName'] ?? ''),
                     'fullCardNo' => (string)($line['fullCardNo'] ?? ''),
                     'name' => (string)($line['name'] ?? ($line['displaySnapshot']['name'] ?? '')),
+                    'craftsmen' => is_array($line['craftsmen'] ?? null) ? $line['craftsmen'] : [],
+                    'serviceObject' => (string)($line['serviceObject'] ?? ''),
+                    'friendCountsAsCustomer' => !array_key_exists('friendCountsAsCustomer', $line) || !empty($line['friendCountsAsCustomer']),
+                    'isExperience' => !empty($line['isExperience']) ? 1 : 0,
                 ];
+                $manualLaborFee = array_key_exists('laborManualFeeCents', $line)
+                    ? $line['laborManualFeeCents']
+                    : ($line['manualLaborFeeCents'] ?? null);
+                if ($manualLaborFee !== null) {
+                    $entitlementLine['manualLaborFeeCents'] = (int)$manualLaborFee;
+                }
+                $entitlementLines[] = $entitlementLine;
                 continue;
             }
             throw self::incomplete('checkout_snapshot_line_role_invalid');
@@ -674,6 +699,15 @@ final class CashierV3CheckoutPreparationServices
         $now = time();
         $browserSnapshot = is_array($authority['browserSnapshot'] ?? null)
             ? $authority['browserSnapshot'] : [];
+        // A browser-owned checkout snapshot intentionally bypasses the mutable
+        // cashier workspace projection. It therefore has no workspace
+        // projection revision to carry into the settlement kernel. Keep the
+        // kernel's positive version contract with a local snapshot revision;
+        // resource concurrency is still enforced by the final catalog,
+        // entitlement and balance locks.
+        $authoritySnapshotVersion = $browserSnapshot !== []
+            ? 1
+            : $this->contextVersion($contexts, 'cashier_workspace', $workspaceId);
         $browserBusinessDate = trim((string)($browserSnapshot['businessDate'] ?? ''));
         $supplementEnabled = (int)($authority['storedDraft']['supplement_enabled'] ?? 0) === 1;
         $supplementBusinessDate = (string)($authority['storedDraft']['supplement_business_date'] ?? '');
@@ -685,7 +719,7 @@ final class CashierV3CheckoutPreparationServices
         $snapshot = [
             'contractVersion' => CashierV3CheckoutSettlementKernel::AUTHORITY_CONTRACT_VERSION,
             'authorityOrigin' => 'server_final_lock_snapshot',
-            'authoritySnapshotVersion' => $this->contextVersion($contexts, 'cashier_workspace', $workspaceId),
+            'authoritySnapshotVersion' => $authoritySnapshotVersion,
             'authoritySnapshotFingerprint' => '',
             'tenantId' => $dataScope->tenantId(),
             'organizationId' => $operatorScope->organizationId(),
@@ -993,7 +1027,7 @@ final class CashierV3CheckoutPreparationServices
                     = (int)($row['current_version'] ?? 0);
             }
         }
-        return [
+        $result = [
             'authorityKey' => (string)($line['id'] ?? ''),
             'sourceKind' => (string)($line['entitlementSourceKind'] ?? ''),
             'holderId' => $holderId,
@@ -1010,7 +1044,20 @@ final class CashierV3CheckoutPreparationServices
             'projectNameSnapshot' => (string)($line['name'] ?? ''),
             'projectCategoryIdSnapshot' => 0,
             'projectCategoryNameSnapshot' => '',
+            // Service settings belong to the browser checkout snapshot. Keep
+            // them when converting the UI line into the immutable authority
+            // line; dropping them here would make final completion see an
+            // empty craftsman selection even though the user chose one.
+            'craftsmen' => is_array($line['craftsmen'] ?? null) ? $line['craftsmen'] : [],
+            'serviceObject' => (string)($line['serviceObject'] ?? ''),
+            'friendCountsAsCustomer' => !array_key_exists('friendCountsAsCustomer', $line)
+                || !empty($line['friendCountsAsCustomer']),
+            'isExperience' => !empty($line['isExperience']) ? 1 : 0,
         ];
+        if (array_key_exists('manualLaborFeeCents', $line)) {
+            $result['manualLaborFeeCents'] = (int)$line['manualLaborFeeCents'];
+        }
+        return $result;
     }
 
     private function verifiedNavigationSources(

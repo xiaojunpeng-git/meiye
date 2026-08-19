@@ -534,6 +534,97 @@ function recalculateLocalCashierDraft(draft) {
   return draft
 }
 
+function canonicalCheckoutPositiveId(...values) {
+  for (const value of values) {
+    const numeric = Number(value)
+    if (Number.isSafeInteger(numeric) && numeric > 0) return numeric
+  }
+  // Some legacy local rows use a prefixed DOM identity (for example
+  // `staff-915`) while still carrying the numeric employee identity in the
+  // same row. Accept the trailing numeric token only at the browser snapshot
+  // boundary; the server continues to receive a strict positive integer.
+  for (const value of values) {
+    const match = String(value ?? '').match(/(\d+)$/)
+    if (!match) continue
+    const numeric = Number(match[1])
+    if (Number.isSafeInteger(numeric) && numeric > 0) return numeric
+  }
+  return 0
+}
+
+// The browser may keep compact personnel rows for editing and display. A
+// sale-project checkout snapshot has a stricter immutable shape, so expand
+// those rows only at the final snapshot boundary. No server lookup or current
+// workspace projection is used here; employee/store identity comes from the
+// selection payload, with the active store as the final local fallback.
+function canonicalCheckoutCraftsmen(records = []) {
+  const storeId = Number(state.currentStore?.id || 0)
+  const input = Array.isArray(records) ? records : []
+  const rows = input.map((record, index) => {
+    const staffId = canonicalCheckoutPositiveId(
+      record?.staffId,
+      record?.staff_id,
+      record?.systemStoreStaffId,
+      record?.id,
+      record?.employeeId,
+      record?.employee_id
+    )
+    const employeeId = canonicalCheckoutPositiveId(
+      record?.employeeId,
+      record?.employee_id,
+      staffId
+    )
+    const performanceType = String(record?.craftsmanPerformanceType || record?.craftsman_performance_type || '')
+    const row = {
+      id: staffId,
+      staffId,
+      employeeId,
+      storeId: Number(record?.storeId || record?.store_id || storeId),
+      name: String(record?.name || record?.staffName || record?.employeeName || '').trim(),
+      isPrimary: index === 0,
+      sequence: index + 1,
+      laborWeight: Math.max(0, Math.trunc(Number(record?.laborWeight ?? record?.performance ?? 0))),
+      isPointCustomer: Boolean(record?.isPointCustomer ?? record?.marked)
+    }
+    row.craftsmanPerformanceType = ['commission', 'labor', 'commission_labor'].includes(performanceType)
+      ? performanceType
+      : 'commission_labor'
+    row.laborFeeCents = Math.max(0, Math.trunc(Number(record?.laborFeeCents ?? record?.labor_fee_cents ?? 0)))
+    return row
+  })
+  // Older projected rows only retained the selected staff identity. At the
+  // final browser-snapshot boundary, fill the missing commission allocation
+  // deterministically instead of emitting an invalid zero-weight snapshot.
+  const commissionRows = rows.filter((row) => row.craftsmanPerformanceType !== 'labor')
+  const hasExplicitWeight = commissionRows.some((row) => row.laborWeight > 0)
+  if (!hasExplicitWeight && commissionRows.length > 0) {
+    const base = Math.floor(100 / commissionRows.length)
+    let remainder = 100 - base * commissionRows.length
+    commissionRows.forEach((row) => {
+      row.laborWeight = base + (remainder > 0 ? 1 : 0)
+      remainder = Math.max(0, remainder - 1)
+    })
+  }
+  return rows
+}
+
+function canonicalCheckoutSalespeople(records = []) {
+  return (Array.isArray(records) ? records : []).map((record) => ({
+    staffId: canonicalCheckoutPositiveId(record?.staffId, record?.staff_id, record?.systemStoreStaffId, record?.id, record?.employeeId, record?.employee_id),
+    allocationWeight: Math.max(0, Math.trunc(Number(record?.allocationWeight ?? record?.allocation_weight ?? record?.performance ?? 0)))
+  }))
+}
+
+function canonicalCheckoutAttributions(records = [], includeRound = false) {
+  return (Array.isArray(records) ? records : []).map((record) => ({
+    employeeId: canonicalCheckoutPositiveId(record?.employeeId, record?.employee_id, record?.staffId, record?.staff_id, record?.systemStoreStaffId, record?.id),
+    name: String(record?.name || record?.employeeName || record?.employee_name || '').trim(),
+    ...(includeRound ? {
+      guideRoundNo: Math.max(0, Math.trunc(Number(record?.guideRoundNo ?? record?.guide_round_no ?? 0)))
+    } : {})
+  }))
+}
+
 function commitLocalCashierDraft(draft) {
   const next = recalculateLocalCashierDraft(draft)
   cashierDraftSnapshot.value = Object.freeze({
@@ -1366,10 +1457,9 @@ async function persistCheckoutBusinessSource(kind, selection = {}) {
   const secondarySourceId = Number(selection.secondarySourceId || 0)
   const rewardAmountCents = Number(selection.rewardAmountCents ?? current?.rewardAmountCents ?? 0)
   if ((kind === 'recharge' && !current) || primarySourceId <= 0 || secondarySourceId < 0) return null
-  if (kind !== 'recharge'
-    && (localCheckoutPreview.value?.localDraftPreview === true
-      || !isCheckoutOpen.value
-      || !checkoutRequestIsPersisted(current))) {
+  // 普通销售的来源始终是工具栏前端值；结账预览和最终快照都在浏览器内
+  // 读取该值，不能因结账步骤变化而提前写入服务端 checkout_request。
+  if (kind !== 'recharge') {
     localCheckoutBusinessSource.value = {
       primarySourceId,
       secondarySourceId,
@@ -1473,29 +1563,16 @@ async function saveCheckoutSalesDate(selection = {}) {
   const businessDate = String(selection.businessDate || '').trim()
   const reason = String(selection.reason || '').trim()
   if (!/^\d{4}-\d{2}-\d{2}$/.test(businessDate)) return null
-  if (!isCheckoutOpen.value || !checkoutRequestIsPersisted(checkout.value)) {
-    localCheckoutBusinessDate.value = businessDate
-    localCheckoutBusinessDateReason.value = reason
-    if (localCheckoutPreview.value?.localDraftPreview === true) {
-      localCheckoutPreview.value.businessDate = businessDate
-      localCheckoutPreview.value.businessDateReason = reason
-    }
-    publishToolbarCheckoutContext()
-    return localDraftResult('业务日期已回填到本地结账快照。')
+  // 业务日期与来源相同，只是工具栏当前值；点击立即结账时由
+  // localCheckoutPreviewSnapshot 一次性读取，普通销售不维护服务端草稿。
+  localCheckoutBusinessDate.value = businessDate
+  localCheckoutBusinessDateReason.value = reason
+  if (localCheckoutPreview.value?.localDraftPreview === true) {
+    localCheckoutPreview.value.businessDate = businessDate
+    localCheckoutPreview.value.businessDateReason = reason
   }
-  isSavingCheckoutSalesDate.value = true
-  try {
-    return await enqueueCheckoutAction({
-      action: 'update-checkout-sales-date',
-      payload: {
-        businessDate,
-        reason,
-        idempotencyKey: createCashierV3CommandId('CHECKOUT')
-      }
-    })
-  } finally {
-    isSavingCheckoutSalesDate.value = false
-  }
+  publishToolbarCheckoutContext()
+  return localDraftResult('业务日期已回填到工具栏结账上下文。')
 }
 
 function isCustomCardPurchase(line = {}) {
@@ -1512,7 +1589,8 @@ function isProjectLine(line) {
   // authoritative product type plus the purchase kind because the legacy
   // custom-card shell is physically a project product but never a service.
   return isEntitlementLine(line)
-    || ((Number(line.productType) === 6 || String(line.kind || '') === '项目') && !isCustomCardPurchase(line))
+    || (Number(line.productType) === 6 && !isCustomCardPurchase(line))
+    || (String(line.kind || '') === '项目' && !isCustomCardPurchase(line))
 }
 
 function cartLineRole(line = {}) {
@@ -3472,25 +3550,25 @@ async function confirmPersonnelAssignment(result = {}) {
   isSavingPersonnelAssignment.value = true
   try {
     const craftsmen = (result.craftsmen || []).map((record) => ({
-      staffId: record.staffId || record.id,
+      staffId: canonicalCheckoutPositiveId(record.staffId, record.id, record.employeeId, record.employee_id),
       laborWeight: Number(record.laborWeight),
       isPointCustomer: Boolean(record.isPointCustomer ?? record.marked),
       craftsmanPerformanceType: record.craftsmanPerformanceType || record.craftsman_performance_type,
       laborFeeCents: Number(record.laborFeeCents ?? record.labor_fee_cents ?? 0)
     }))
     const salespeople = (result.salespeople || []).map((record) => ({
-      staffId: record.staffId || record.id,
+      staffId: canonicalCheckoutPositiveId(record.staffId, record.id, record.employeeId, record.employee_id),
       allocationWeight: Number(record.allocationWeight)
     }))
     const guideSelections = (result.guideSelections || []).map((record) => ({
-      staffId: record.staffId || record.id,
-      employeeId: record.employeeId || record.staffId || record.id,
+      staffId: canonicalCheckoutPositiveId(record.staffId, record.id, record.employeeId, record.employee_id),
+      employeeId: canonicalCheckoutPositiveId(record.employeeId, record.staffId, record.id, record.employee_id),
       name: record.name,
       guideRoundNo: Number(record.guideRoundNo ?? record.guide_round_no ?? 0)
     }))
     const salesManagerSelections = (result.salesManagerSelections || []).map((record) => ({
-      staffId: record.staffId || record.id,
-      employeeId: record.employeeId || record.staffId || record.id,
+      staffId: canonicalCheckoutPositiveId(record.staffId, record.id, record.employeeId, record.employee_id),
+      employeeId: canonicalCheckoutPositiveId(record.employeeId, record.staffId, record.id, record.employee_id),
       name: record.name
     }))
     const payload = {}
@@ -3547,25 +3625,25 @@ async function applyPersonnelAssignmentToAll(result = {}) {
   if (isSavingPersonnelAssignment.value) return
   const hasPurchaseLines = cartLines.value.some((line) => !isEntitlementLine(line))
   const craftsmen = (result.craftsmen || []).map((record) => ({
-    staffId: record.staffId || record.id,
+    staffId: canonicalCheckoutPositiveId(record.staffId, record.id, record.employeeId, record.employee_id),
     laborWeight: Number(record.laborWeight),
     isPointCustomer: Boolean(record.isPointCustomer ?? record.marked),
     craftsmanPerformanceType: record.craftsmanPerformanceType || record.craftsman_performance_type,
     laborFeeCents: Number(record.laborFeeCents ?? record.labor_fee_cents ?? 0)
   }))
   const salespeople = (hasPurchaseLines ? (result.salespeople || []) : []).map((record) => ({
-    staffId: record.staffId || record.id,
+    staffId: canonicalCheckoutPositiveId(record.staffId, record.id, record.employeeId, record.employee_id),
     allocationWeight: Number(record.allocationWeight)
   }))
   const guideSelections = (result.guideSelections || []).map((record) => ({
-    staffId: record.staffId || record.id,
-    employeeId: record.employeeId || record.staffId || record.id,
+    staffId: canonicalCheckoutPositiveId(record.staffId, record.id, record.employeeId, record.employee_id),
+    employeeId: canonicalCheckoutPositiveId(record.employeeId, record.staffId, record.id, record.employee_id),
     name: record.name,
     guideRoundNo: Number(record.guideRoundNo ?? record.guide_round_no ?? 0)
   }))
   const salesManagerSelections = (result.salesManagerSelections || []).map((record) => ({
-    staffId: record.staffId || record.id,
-    employeeId: record.employeeId || record.staffId || record.id,
+    staffId: canonicalCheckoutPositiveId(record.staffId, record.id, record.employeeId, record.employee_id),
+    employeeId: canonicalCheckoutPositiveId(record.employeeId, record.staffId, record.id, record.employee_id),
     name: record.name
   }))
   if (!craftsmen.length && !salespeople.length && !guideSelections.length && !salesManagerSelections.length) return
@@ -4138,10 +4216,60 @@ function localCheckoutPaymentMethods() {
 }
 
 function localCheckoutPreviewSnapshot() {
-  const draft = clonePlain(localCashierDraft.value || localDraftBase())
+  // 行服务设置和人员分配分别保存在浏览器编辑态。只在“立即结账”这
+  // 一个入口把它们合并进本次结账草稿；选择按钮本身不能触发服务端写入。
+  // Recalculate on a clone so the preview contains the latest UI values even
+  // when the last interaction was a service-setting toggle with no cart command.
+  const draft = recalculateLocalCashierDraft(
+    clonePlain(localCashierDraft.value || localDraftBase())
+  )
   const checkoutProjection = clonePlain(cashier.value.checkout || {})
-  const lines = Array.isArray(draft.lines) ? draft.lines : []
+  const lines = (Array.isArray(draft.lines) ? draft.lines : []).map((line) => {
+    const projectLine = isProjectLine(line)
+    const saleLine = cartLineRole(line) === 'sale'
+    const entitlementLine = cartLineRole(line) === 'entitlement_service'
+    const localPersonnel = localPersonnelAssignments.value[String(line?.id || '')] || {}
+    const craftsmen = Array.isArray(localPersonnel.craftsmen)
+      ? localPersonnel.craftsmen
+      : (Array.isArray(line.craftsmen) ? line.craftsmen : [])
+    const salespeople = Array.isArray(localPersonnel.salespeople)
+      ? localPersonnel.salespeople
+      : (Array.isArray(line.salespeople) ? line.salespeople : [])
+    const guideSelections = Array.isArray(localPersonnel.guideSelections)
+      ? localPersonnel.guideSelections
+      : (Array.isArray(line.guideSelections) ? line.guideSelections : [])
+    const salesManagerSelections = Array.isArray(localPersonnel.salesManagerSelections)
+      ? localPersonnel.salesManagerSelections
+      : (Array.isArray(line.salesManagerSelections) ? line.salesManagerSelections : [])
+    // Read the service-object controls from the current browser cart at the
+    // snapshot boundary. This prevents a stale projected line field from
+    // replacing a just-selected 本人/朋友/朋友算口径.
+    return {
+      ...line,
+      // Both sale-project and entitlement rows cross the same immutable
+      // snapshot boundary. Normalize staff identities here so browser-local
+      // string IDs cannot reach the final authority as invalid staffId values.
+      ...(saleLine || entitlementLine
+        ? { craftsmen: canonicalCheckoutCraftsmen(craftsmen) }
+        : {}),
+      ...(saleLine
+        ? {
+            salespeople: canonicalCheckoutSalespeople(salespeople),
+            guideSelections: canonicalCheckoutAttributions(guideSelections, true),
+            salesManagerSelections: canonicalCheckoutAttributions(salesManagerSelections)
+          }
+        : {}),
+      ...(projectLine
+        ? {
+            serviceObject: cartLineServiceObject(line),
+            friendCountsAsCustomer: cartLineFriendCountsAsCustomer(line)
+          }
+        : {})
+    }
+  })
   const composition = clonePlain(draft.checkoutComposition || {})
+  const customerMode = String(cashier.value.customerMode || draft.customerMode || 'guest')
+  const checkoutSourceProjection = customerMode === 'guest' ? {} : checkoutProjection
   const hasSale = lines.some((line) => String(line?.lineRole || '') === 'sale')
   const hasEntitlement = lines.some((line) => String(line?.lineRole || '') === 'entitlement_service')
   const primaryAction = hasSale && hasEntitlement
@@ -4162,15 +4290,15 @@ function localCheckoutPreviewSnapshot() {
     businessType: 'sale',
     member: clonePlain(member.value || {}),
     memberId: Number(draft.memberId || currentMemberId.value || 0),
-    customerMode: String(draft.customerMode || cashier.value.customerMode || 'guest'),
+    customerMode,
     businessDate: String(localCheckoutBusinessDate.value || cashier.value.checkout?.businessDate || cashierToday || ''),
     businessDateReason: String(localCheckoutBusinessDateReason.value || cashier.value.checkout?.businessDateReason || ''),
     sourceEnabled: checkoutProjection.sourceEnabled !== false,
     sourceSelectable: checkoutProjection.sourceSelectable !== false,
-    primarySourceId: Number(localCheckoutBusinessSource.value.primarySourceId || checkoutProjection.primarySourceId || 0),
-    secondarySourceId: Number(localCheckoutBusinessSource.value.secondarySourceId || checkoutProjection.secondarySourceId || 0),
-    rewardAmountCents: Number(localCheckoutBusinessSource.value.rewardAmountCents || checkoutProjection.rewardAmountCents || 0),
-    sourceSelectionVersion: Number(localCheckoutBusinessSource.value.sourceSelectionVersion || checkoutProjection.sourceSelectionVersion || 0),
+    primarySourceId: Number(localCheckoutBusinessSource.value.primarySourceId || checkoutSourceProjection.primarySourceId || 0),
+    secondarySourceId: Number(localCheckoutBusinessSource.value.secondarySourceId || checkoutSourceProjection.secondarySourceId || 0),
+    rewardAmountCents: Number(localCheckoutBusinessSource.value.rewardAmountCents || checkoutSourceProjection.rewardAmountCents || 0),
+    sourceSelectionVersion: Number(localCheckoutBusinessSource.value.sourceSelectionVersion || checkoutSourceProjection.sourceSelectionVersion || 0),
     orderLines: lines,
     summary: clonePlain(draft.summary || {}),
     orderSummary: clonePlain(draft.summary || {}),
@@ -4226,13 +4354,27 @@ function checkoutSourceSnapshot(primarySourceId, secondarySourceId, rewardAmount
 function buildCheckoutSnapshot(preview = {}) {
   const snapshot = clonePlain(preview)
   delete snapshot.localDraftPreview
+  // The final request boundary is authoritative for browser-local personnel
+  // values. Re-normalize here as well as in the preview builder so recovered
+  // or hot-reloaded previews cannot reintroduce string staff IDs.
+  const lines = (Array.isArray(snapshot.orderLines) ? snapshot.orderLines : []).map((line) => {
+    const role = cartLineRole(line)
+    if (role !== 'sale' && role !== 'entitlement_service') return line
+    const next = { ...line, craftsmen: canonicalCheckoutCraftsmen(line.craftsmen) }
+    if (role === 'sale') {
+      next.salespeople = canonicalCheckoutSalespeople(line.salespeople)
+      next.guideSelections = canonicalCheckoutAttributions(line.guideSelections, true)
+      next.salesManagerSelections = canonicalCheckoutAttributions(line.salesManagerSelections)
+    }
+    return next
+  })
   return {
     contractVersion: 'cashier-v3-checkout-snapshot-v1',
     memberId: Number(snapshot.memberId || 0),
     customerMode: String(snapshot.customerMode || 'guest'),
     businessDate: String(snapshot.businessDate || ''),
     businessDateReason: String(snapshot.businessDateReason || ''),
-    lines: Array.isArray(snapshot.orderLines) ? clonePlain(snapshot.orderLines) : [],
+    lines,
     summary: clonePlain(snapshot.summary || {}),
     source: checkoutSourceSnapshot(
       snapshot.primarySourceId,
@@ -4870,9 +5012,12 @@ async function discardStaleCheckoutBeforeLocalFinalization() {
     return { result: { status: 'succeeded' } }
   }
   try {
-    await discardCashierCheckout(String(state.stateContextId || ''))
-    await requestAction('open-cashier-workbench', { silent: true })
-    if (String(checkoutRequestIdentity(checkout.value) || '') !== '') {
+    const discarded = await discardCashierCheckout(String(state.stateContextId || ''))
+    // The discard endpoint returns the authoritative empty checkout shell.
+    // Do not immediately rebuild the full root here: a delayed root response
+    // can still contain the just-discarded request and overwrite this receipt,
+    // recreating the stale projection that this boundary is removing.
+    if (!applyDiscardedCheckoutProjection(discarded)) {
       throw new Error('旧结账草稿尚未清理完成，请刷新后重试。')
     }
     checkoutPreparationId.value = null
@@ -5181,7 +5326,19 @@ async function requestCheckoutAction({ action, payload }) {
 
   const session = checkoutSession.value
   const current = currentCheckoutCommandContexts(session)
-  if (!session || !current) {
+  const queryCanUseOverlayIdentity = action === 'query-checkout-result'
+    && (!session || !current)
+  const actionSession = queryCanUseOverlayIdentity
+    ? {
+        checkoutRequestId: String(payload?.checkoutRequestId || payload?.requestId || checkout.value?.checkoutRequestId || checkout.value?.requestId || ''),
+        stateContextId: String(state.stateContextId || ''),
+        preparationRequestId: '',
+      }
+    : session
+  const actionCurrent = queryCanUseOverlayIdentity
+    ? { checkoutRequestVersion: 0, commandContexts: [] }
+    : current
+  if (!actionSession || !actionCurrent) {
     return {
       result: {
         status: 'failed',
@@ -5208,17 +5365,19 @@ async function requestCheckoutAction({ action, payload }) {
   }
   const approvedPayload = {
     ...approvedPayloadInput,
-    checkoutRequestId: session.checkoutRequestId,
-    checkoutRequestVersion: current.checkoutRequestVersion,
-    preparationRequestId: session.preparationRequestId,
+    checkoutRequestId: actionSession.checkoutRequestId,
+    checkoutRequestVersion: actionCurrent.checkoutRequestVersion,
+    preparationRequestId: actionSession.preparationRequestId,
     preparationToken: String(checkoutPreparationToken(checkout.value) || ''),
-    commandContexts: current.commandContexts
+    commandContexts: actionCurrent.commandContexts
   }
-  if (checkoutRequestActions.has(action) && !isRechargeDebtRepaymentCheckout.value) {
+  if (checkoutRequestActions.has(action)
+    && action !== 'query-checkout-result'
+    && !isRechargeDebtRepaymentCheckout.value) {
     // The checkout projection also contains the server-built resource plan.
     // Follow-up commands must not replay that plan as client contexts: their
     // authorities are rebuilt from the persisted checkout request instead.
-    const checkoutContexts = checkoutSubmissionCommandContexts(current.commandContexts)
+    const checkoutContexts = checkoutSubmissionCommandContexts(actionCurrent.commandContexts)
     if (!checkoutContexts) {
       return {
         result: {
@@ -5239,7 +5398,7 @@ async function requestCheckoutAction({ action, payload }) {
     delete approvedPayload.commandContexts
   }
   if (checkoutDraftMutationActions.has(action)) {
-    const draftContexts = checkoutSubmissionCommandContexts(current.commandContexts)
+    const draftContexts = checkoutSubmissionCommandContexts(actionCurrent.commandContexts)
     if (!draftContexts) {
       return {
         result: {
@@ -5442,7 +5601,7 @@ async function requestCheckoutAction({ action, payload }) {
     && originalIdempotencyKey.startsWith('CHECKOUT-')
   if (shouldQueryCommittedResult) {
     result = await requestAction('query-checkout-result', {
-      checkoutRequestId: session.checkoutRequestId,
+      checkoutRequestId: actionSession.checkoutRequestId,
       requestNo: checkout.value.requestNo,
       originalIdempotencyKey
     })
@@ -5458,7 +5617,7 @@ async function requestCheckoutAction({ action, payload }) {
     && resultStatus(result) === 'result_unknown'
     && originalIdempotencyKey.startsWith('CHECKOUT-')) {
     result = await requestAction('query-checkout-result', {
-      checkoutRequestId: session.checkoutRequestId,
+      checkoutRequestId: actionSession.checkoutRequestId,
       requestNo: checkout.value.requestNo,
       originalIdempotencyKey,
       queryOnly: true
@@ -5468,10 +5627,51 @@ async function requestCheckoutAction({ action, payload }) {
   }
   const resultEnvelope = response?.result && typeof response.result === 'object' ? response.result : {}
   const hasAuthoritativeCheckoutState = isRecord(response?.state?.cashier?.checkout)
+  const submittedCheckout = responseDataBlock(result).checkoutSubmission
+  const submittedCheckoutRequestId = String(submittedCheckout?.checkoutRequestId || '')
+  const submittedCheckoutStatus = String(submittedCheckout?.requestStatus || '').toLowerCase()
+  const submittedSalesOrder = isRecord(submittedCheckout?.salesOrder)
+    ? submittedCheckout.salesOrder
+    : null
+  const submittedEntitlement = isRecord(submittedCheckout?.entitlementCompletion)
+    ? submittedCheckout.entitlementCompletion
+    : null
+  const submittedBusinessNo = String(
+    submittedSalesOrder?.orderNo
+      || submittedEntitlement?.receiptId
+      || submittedCheckout?.completionReferenceId
+      || ''
+  )
+  const hasCommittedSubmitReceipt = action === 'submit-checkout'
+    && !isDebtRepaymentCheckout.value
+    && submittedCheckoutRequestId !== ''
+    && submittedCheckoutRequestId === String(session.checkoutRequestId || '')
+    && submittedCheckoutStatus === 'succeeded'
+    && submittedBusinessNo !== ''
   if (hasAuthoritativeCheckoutState) {
     // 命令信封的 success 只表示命令已被可靠处理，不能解释成顾客已经支付成功。
     // 支付领域状态只能由已通过根状态门禁的 cashier.checkout.status 驱动。
-    checkoutLocalOutcome.value = {}
+    // submit-checkout also returns the committed empty cashier draft. That
+    // root state is intentionally no longer a checkout result, so use the
+    // same request-bound submission receipt before returning. Otherwise the
+    // cart clears while the overlay remains stuck on the final confirmation.
+    if (hasCommittedSubmitReceipt) {
+      checkoutRequiresRootReload.value = true
+      checkoutLocalOutcome.value = {
+        status: 'succeeded',
+        message: resultEnvelope.message || '结账已完成。',
+        completionDescription: resultEnvelope.message || '本单已正式完成，可以继续后续操作。',
+        requestNo: submittedSalesOrder?.orderNo || submittedEntitlement?.receiptId || submittedBusinessNo,
+        checkoutRequestId: submittedCheckoutRequestId,
+        salesOrderId: submittedSalesOrder?.orderId || '',
+        salesOrderNo: submittedSalesOrder?.orderNo || '',
+        originalIdempotencyKey,
+        canClose: true,
+        canRetry: false
+      }
+    } else {
+      checkoutLocalOutcome.value = {}
+    }
     return result
   }
   const debtRepaymentResult = isDebtRepaymentCheckout.value
@@ -5507,8 +5707,8 @@ async function requestCheckoutAction({ action, payload }) {
   const projectedResult = !isDebtRepaymentCheckout.value
     ? authoritativeCheckoutResult(result, {
         originalIdempotencyKey,
-        checkoutRequestId: session.checkoutRequestId,
-        stateContextId: session.stateContextId
+        checkoutRequestId: actionSession.checkoutRequestId,
+        stateContextId: actionSession.stateContextId
       })
     : null
   if (projectedResult?.status === 'succeeded') {
@@ -5831,6 +6031,28 @@ function handleToolbarBusinessSourceOpen() {
   void openCheckoutBusinessSourceSelector('sale')
 }
 
+function handleToolbarBusinessSourceClear() {
+  localCheckoutBusinessSource.value = {
+    primarySourceId: 0,
+    secondarySourceId: 0,
+    rewardAmountCents: 0,
+    sourceSelectionVersion: 0
+  }
+  if (localCheckoutPreview.value?.localDraftPreview === true) {
+    localCheckoutPreview.value.primarySourceId = 0
+    localCheckoutPreview.value.secondarySourceId = 0
+    localCheckoutPreview.value.rewardAmountCents = 0
+    localCheckoutPreview.value.sourceSelectionVersion = 0
+    if (localCheckoutPreview.value.payment && typeof localCheckoutPreview.value.payment === 'object') {
+      localCheckoutPreview.value.payment.primarySourceId = 0
+      localCheckoutPreview.value.payment.secondarySourceId = 0
+      localCheckoutPreview.value.payment.rewardAmountCents = 0
+      localCheckoutPreview.value.payment.sourceSelectionVersion = 0
+    }
+  }
+  publishToolbarCheckoutContext()
+}
+
 function handleToolbarBusinessDateChange(event) {
   const detail = event?.detail || {}
   void saveCheckoutSalesDate({
@@ -5898,6 +6120,7 @@ onMounted(() => {
   window.addEventListener('cashier-v3:refresh-workbench', refreshWorkbenchAfterContextConflict)
   window.addEventListener('cashier-v3:hang-draft-restored', handleRestoredHangDraft)
   window.addEventListener('cashier-v3:open-toolbar-business-source', handleToolbarBusinessSourceOpen)
+  window.addEventListener('cashier-v3:clear-toolbar-business-source', handleToolbarBusinessSourceClear)
   window.addEventListener('cashier-v3:update-toolbar-business-date', handleToolbarBusinessDateChange)
   publishToolbarCheckoutContext()
   if (window.__cashierV3PendingHangDraft) {
@@ -5925,6 +6148,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('cashier-v3:refresh-workbench', refreshWorkbenchAfterContextConflict)
   window.removeEventListener('cashier-v3:hang-draft-restored', handleRestoredHangDraft)
   window.removeEventListener('cashier-v3:open-toolbar-business-source', handleToolbarBusinessSourceOpen)
+  window.removeEventListener('cashier-v3:clear-toolbar-business-source', handleToolbarBusinessSourceClear)
   window.removeEventListener('cashier-v3:update-toolbar-business-date', handleToolbarBusinessDateChange)
 })
 </script>
@@ -6493,6 +6717,7 @@ onBeforeUnmount(() => {
         :show-guides="personnelOverlay.showGuides"
         :show-sales-managers="personnelOverlay.showSalesManagers"
         :require-craftsmen="personnelOverlay.requireCraftsmen"
+        :store-id="Number(state.currentStore?.id || 0)"
         :craftsmen-candidates="personnelOverlay.craftsmenCandidates"
         :salesperson-candidates="personnelOverlay.salespersonCandidates"
         :guide-candidates="personnelOverlay.guideCandidates"

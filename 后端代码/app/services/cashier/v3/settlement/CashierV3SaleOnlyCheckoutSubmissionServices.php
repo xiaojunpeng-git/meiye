@@ -211,6 +211,9 @@ final class CashierV3SaleOnlyCheckoutSubmissionServices
                 $operatorScope
             );
             if ($salespeopleByCheckoutLine === null) {
+                if ((string)($aggregate['request']['source_document_type'] ?? '') === 'cashier_snapshot') {
+                    throw self::failure('checkout_salespeople_snapshot_missing');
+                }
                 $salespeopleByCheckoutLine = $this->workspace->lockedSalespeopleByCheckoutLineInTx(
                     $workspaceId,
                     (array)$aggregate['lines'],
@@ -664,7 +667,6 @@ final class CashierV3SaleOnlyCheckoutSubmissionServices
                 ->where('id', $productId)
                 ->where('relation_id', $dataScope->forcedStoreId())
                 ->where('type', 1)
-                ->where('is_del', 0)
                 ->field('id,pid,product_type,is_inventory')
                 ->find();
             if (!$product || !self::isSupportedSaleProduct($sourceType, $product)) {

@@ -71,6 +71,10 @@ try {
 $check('member snapshot cannot be submitted without a member id', $rejected);
 
 $service = file_get_contents($backend . '/app/services/cashier/v3/settlement/CashierV3CheckoutPreparationServices.php');
+$rebuilder = file_get_contents($backend . '/app/services/cashier/v3/settlement/CashierV3CheckoutDraftAuthorityRebuilder.php');
+$executionPort = file_get_contents($backend . '/app/services/cashier/v3/settlement/ThinkPhpCashierV3CheckoutSubmissionExecutionPort.php');
+$saleOnly = file_get_contents($backend . '/app/services/cashier/v3/settlement/CashierV3SaleOnlyCheckoutSubmissionServices.php');
+$workspace = file_get_contents($backend . '/app/services/cashier/v3/cashier/CashierV3CashierWorkspaceServices.php');
 $start = is_string($service) ? strpos($service, 'public function prepareInTx') : false;
 $end = is_string($service) ? strpos($service, '$authority = $this->workspace->checkoutSaleSourceSetInTx', $start === false ? 0 : $start) : false;
 $prefix = $start === false || $end === false ? '' : substr($service, $start, $end - $start);
@@ -78,8 +82,55 @@ $check('snapshot path builds authority before any workspace materializer',
     str_contains($prefix, 'authorityFromCheckoutSnapshot(')
     && !str_contains($prefix, 'materializeCheckoutSnapshotInTx(')
     && !str_contains($prefix, 'checkoutSaleSourceSetInTx('));
+$check('browser snapshot authority does not depend on workspace projection version',
+    is_string($service)
+    && str_contains($service, "\$authoritySnapshotVersion = \$browserSnapshot !== []")
+    && str_contains($service, "? 1\n            : \$this->contextVersion(\$contexts, 'cashier_workspace', \$workspaceId)")
+);
 $check('no row-by-row snapshot workspace materializer remains',
     is_string($service) && !str_contains($service, 'function materializeCheckoutSnapshotInTx'));
+$check('snapshot completion clears the shell without comparing legacy workspace lines',
+    is_string($service) && str_contains($service, "'type' => 'cashier_snapshot'")
+    && is_string($executionPort) && str_contains($executionPort, 'completeSnapshotCheckoutInTx('));
+$check('snapshot salespeople never fall back to legacy workspace rows',
+    is_string($saleOnly)
+    && str_contains($saleOnly, "source_document_type'] ?? '') === 'cashier_snapshot'")
+    && is_string($executionPort)
+    && str_contains($executionPort, "source_document_type'] ?? '') === 'cashier_snapshot'")
+    && substr_count($saleOnly, 'lockedSalespeopleByCheckoutLineInTx(') === 1
+    && substr_count($executionPort, 'lockedSalespeopleByCheckoutLineInTx(') === 1);
+$check('empty salesperson snapshot is a valid no-salesperson selection',
+    is_string($workspace)
+    && str_contains($workspace, 'A persisted snapshot with no salesperson is a valid empty')
+    && str_contains($workspace, '$result[$checkoutLineId] = [];'));
+$catalog = file_get_contents($backend . '/app/services/cashier/v3/cashier/CashierV3SaleCatalogServices.php');
+$check('snapshot sale authority preserves locked catalog category for service facts',
+    is_string($service)
+    && str_contains($service, "'categoryIdSnapshot' => (int)(\$server['category_id_snapshot'] ?? \$server['categoryId'] ?? 0)")
+    && is_string($catalog)
+    && str_contains($catalog, "'category_id_snapshot' => (int)(\$normalized['categoryId'] ?? 0)"));
+$check('snapshot entitlement authority preserves selected service settings',
+    is_string($service)
+    && str_contains($service, "'craftsmen' => is_array(\$line['craftsmen'] ?? null) ? \$line['craftsmen'] : []")
+    && str_contains($service, "'serviceObject' => (string)(\$line['serviceObject'] ?? '')"));
+$check('entitlement service intent is decoded separately from sale personnel snapshot',
+    is_string($rebuilder)
+    && str_contains($rebuilder, "'craftsmen' => self::entitlementCraftsmenSnapshot(")
+    && str_contains($rebuilder, 'private static function entitlementCraftsmenSnapshot($json)')
+    && str_contains($rebuilder, 'checkout_draft_entitlement_craftsmen_weight_invalid'));
+$check('final snapshot sale validation does not reject product lifecycle status',
+    is_string($saleOnly)
+    && !str_contains($saleOnly, "->where('is_del', 0)"));
+$projection = file_get_contents($backend . '/app/services/cashier/v3/settlement/CashierV3CheckoutProjectionServices.php');
+$check('snapshot salesperson array participates in projection fingerprint',
+    is_string($projection)
+    && str_contains($projection, '$salespeopleJson = $row[\'salespeople_snapshot_json\'] ?? null;')
+    && str_contains($projection, "\$fingerprintInput['salespeople'] = \$salespeople;")
+    && str_contains($projection, 'checkout_projection_salespeople_weight_invalid'));
+$repository = file_get_contents($backend . '/app/services/cashier/v3/settlement/ThinkPhpCashierV3CheckoutRequestRepository.php');
+$check('snapshot projection keeps a positive workspace version when the shell is uninitialized',
+    is_string($repository)
+    && str_contains($repository, "'workspaceCurrentVersion' => \$isSnapshot\n                ? max(\$workspaceVersion, 1)\n                : \$workspaceVersion,"));
 
 echo sprintf('checkout-snapshot-direct-authority-contract: %d passed, %d failed', $passed, $failed) . PHP_EOL;
 exit($failed > 0 ? 1 : 0);

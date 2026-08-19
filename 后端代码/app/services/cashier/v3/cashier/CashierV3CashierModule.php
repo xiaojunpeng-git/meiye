@@ -1532,10 +1532,21 @@ final class CashierV3CashierModule
             'choose-catalog-item',
             ['cashier_workspace'],
             [],
-            function (array $payload, array $base) use ($readiness): array {
+            function (array $payload, array $base) use ($readiness, $saleCatalog): array {
                 $readiness->assertReady();
                 // 目录点击只创建草稿行；商品可售、库存和卡项有效性统一在结账事务中校验。
-                return self::workspaceOnlyPolicyResult($base);
+                $resolved = self::workspaceOnlyPolicyResult($base);
+                $resolved['expand_from_server_resource_discovery'] = true;
+                $resolved['server_resource_discoverer'] = static function (array $scope) use ($saleCatalog, $payload): array {
+                    return [
+                        'resources' => $saleCatalog->discoverItemResources(
+                            $payload['itemId'] ?? null,
+                            $scope['operator_scope'],
+                            $scope['data_scope']
+                        ),
+                    ];
+                };
+                return $resolved;
             },
             ['cashier_workspace'],
             ['cashier_workspace'],
@@ -1586,7 +1597,7 @@ final class CashierV3CashierModule
             'change-cart-line-quantity',
             ['cashier_workspace'],
             [],
-            function (array $payload, array $base) use ($readiness): array {
+            function (array $payload, array $base) use ($readiness, $saleCatalog): array {
                 $readiness->assertReady();
                 $lineKey = self::lineKey($payload['lineId'] ?? $payload['line_id'] ?? null);
                 $delta = self::quantityDelta($payload['delta'] ?? null);
@@ -1604,6 +1615,22 @@ final class CashierV3CashierModule
                     );
                 }
                 $resolved = self::workspaceOnlyPolicyResult($base);
+                if ((string)($row['line_role'] ?? '') === 'sale') {
+                    $resolved['expand_from_server_resource_discovery'] = true;
+                    $resolved['server_resource_discoverer'] = static function (array $scope) use ($saleCatalog, $row, $delta): array {
+                        $quantity = (int)($row['quantity'] ?? 0) + $delta;
+                        return [
+                            'resources' => $quantity > 0
+                                ? $saleCatalog->discoverStoredLineResources(
+                                    (array)$row,
+                                    $quantity,
+                                    $scope['operator_scope'],
+                                    $scope['data_scope']
+                                )
+                                : [],
+                        ];
+                    };
+                }
                 return $resolved;
             },
             ['cashier_workspace'],

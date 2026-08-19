@@ -29,8 +29,13 @@ const quantityInput = workbench.match(
 
 assert.match(
   finalization,
-  /const applied = await persistLocalCheckoutPaymentPreview\(preview\)[\s\S]*?localCheckoutPaymentOperations\.value = \[\][\s\S]*?requestCheckoutAction\(\{ action: 'submit-checkout'/,
-  '最终确认先按当前本地预览同步收款行，再提交结账'
+  /const checkoutSnapshot = buildCheckoutSnapshot\(preview \|\| \{\}\)[\s\S]*?openCheckout\(\{ forceFreshCheckout: true, checkoutSnapshot \}\)[\s\S]*?requestCheckoutAction\(\{ action: 'submit-checkout'/,
+  '最终确认先从当前本地预览生成完整快照，再提交结账'
+)
+assert.doesNotMatch(
+  finalization,
+  /persistLocalCheckoutPaymentPreview\(preview\)/,
+  '最终确认不得先逐条回放收款行'
 )
 assert.doesNotMatch(
   finalization,
@@ -39,8 +44,8 @@ assert.doesNotMatch(
 )
 assert.match(
   paymentReplay,
-  /action: 'add-payment-method'[\s\S]*?paymentMethodId: method[\s\S]*?\^CKP-\[0-9a-f\]\{40\}\$[\s\S]*?action: 'update-payment-line'[\s\S]*?paymentLineId: String\(paymentLine\.id\)/,
-  '收款金额更新只使用 add-payment-method 返回的 CKP 正式收款行 ID'
+  /const selectedLines = Array\.isArray\(preview\?\.payment\?\.selectedLines\)/,
+  '收款预览仍保留在浏览器本地状态'
 )
 assert.match(
   paymentReplay,
@@ -77,5 +82,20 @@ assert.match(
   /const result = await mutateCashierDraft\([\s\S]*?'change-cart-line-quantity'[\s\S]*?delta: nextQuantity - currentQuantity/,
   '已有服务端行的手输数量只写本地草稿'
 )
+assert.match(
+  checkoutOverlay,
+  /function queryOriginalCheckoutResult\(\) \{[\s\S]*?request\('query-checkout-result',[\s\S]*?\}\)\.then\(handleSubmissionResponse\)/,
+  '所有结账类型的原回执查询必须把结果回写结账弹窗'
+)
+assert.match(
+  checkoutOverlay,
+  /const canQueryCheckoutResult = computed\(\(\) => \([\s\S]*?showSubmissionLongRunning\.value/,
+  '提交超时状态必须允许查询原结账回执，不得只限充值'
+)
+assert.match(
+  workbench,
+  /const queryCanUseOverlayIdentity = action === 'query-checkout-result'[\s\S]*?actionSession[\s\S]*?actionCurrent/,
+  '成功清空根投影后仍用弹窗原请求标识执行只读结果查询'
+)
 
-console.log('LOCAL_CHECKOUT_PAYMENT_REPLAY_CONTRACT passed=9 failed=0')
+console.log('LOCAL_CHECKOUT_PAYMENT_REPLAY_CONTRACT passed=12 failed=0')

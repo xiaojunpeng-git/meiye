@@ -218,6 +218,15 @@ class CashierV3ContextPolicy
             'required_touched_roles' => array_values(array_unique($touchedRoles)),
             'allows_empty_contexts' => $this->allowsEmptyContexts,
         ];
+        // Browser-owned checkout snapshots do not use catalog display rows as
+        // Gateway version contexts. The final transaction resolves the sale
+        // identity and performs inventory/entitlement/balance checks directly;
+        // guest snapshots may therefore legitimately discover no extra
+        // catalog resources.
+        if ($this->action === 'prepare-checkout'
+            && is_array($payload['checkoutSnapshot'] ?? null)) {
+            $out['allow_empty_server_resource_discovery'] = true;
+        }
         // 透传 Gateway／事务内依赖的动态合同字段（禁止在此丢弃）
         if ($this->dynamicResolver !== null && isset($extra) && is_array($extra)) {
             foreach ([

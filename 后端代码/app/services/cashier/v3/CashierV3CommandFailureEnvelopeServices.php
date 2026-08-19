@@ -83,6 +83,13 @@ final class CashierV3CommandFailureEnvelopeServices
             : '操作失败，请稍后重试。';
         $code = CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE;
         $raw = $exception->getMessage();
+        $contractDetail = [];
+        if ($exception instanceof \app\services\cashier\v3\settlement\CashierV3CheckoutSettlementContractException) {
+            $contractDetail = [
+                'reason' => $exception->reason(),
+                'detail' => $exception->detail(),
+            ];
+        }
         if (preg_match('/42S02|42S22|Base table or view not found|Unknown column|doesn\'t exist/i', $raw)) {
             $message = $isCheckout
                 ? '收银服务依赖尚未完成升级，当前结账未提交，业务数据已回滚，请联系管理员完成数据库升级。'
@@ -97,6 +104,7 @@ final class CashierV3CommandFailureEnvelopeServices
                 'exceptionMessage' => $raw,
                 'exceptionFile' => basename($exception->getFile()),
                 'exceptionLine' => $exception->getLine(),
+                'contractDetail' => $contractDetail,
             ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
         } catch (\Throwable $ignored) {
             // Logging failure must never turn a deterministic checkout failure

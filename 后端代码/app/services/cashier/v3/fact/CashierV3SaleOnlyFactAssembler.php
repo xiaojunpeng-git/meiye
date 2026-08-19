@@ -57,6 +57,7 @@ final class CashierV3SaleOnlyFactAssembler
         'configured_cost_cents', 'price_change_reason', 'price_changed_by',
         'price_changed_by_name_snapshot', 'price_changed_at',
         'craftsmen_snapshot_json',
+        'salespeople_snapshot_json',
         'guide_selections_json', 'sales_manager_selections_json',
         'manual_labor_fee_cents',
         'sort_no', 'add_time', 'update_time',

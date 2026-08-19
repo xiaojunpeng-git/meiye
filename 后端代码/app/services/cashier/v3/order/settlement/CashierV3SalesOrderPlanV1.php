@@ -75,6 +75,7 @@ final class CashierV3SalesOrderPlanV1
         'configured_cost_cents', 'price_change_reason', 'price_changed_by',
         'price_changed_by_name_snapshot', 'price_changed_at',
         'craftsmen_snapshot_json',
+        'salespeople_snapshot_json',
         'guide_selections_json', 'sales_manager_selections_json',
         'manual_labor_fee_cents',
         'sort_no', 'add_time', 'update_time',
@@ -269,6 +270,9 @@ final class CashierV3SalesOrderPlanV1
                 'service_object' => $line['service_object'],
                 'friend_counts_as_customer' => $line['friend_counts_as_customer'],
                 'craftsmen_snapshot_json' => $line['craftsmen_snapshot_json'],
+                'salespeople_snapshot_json' => CashierV3CheckoutSettlementCanonicalizer::encode(
+                    self::salespeopleSnapshot($line['salespeople_snapshot_json'] ?? null)
+                ),
                 'is_experience' => $line['is_experience'],
                 'is_presale' => $line['is_presale'],
                 'inventory_outbound_required' => $line['inventory_outbound_required'],
@@ -427,13 +431,20 @@ final class CashierV3SalesOrderPlanV1
         $secondaryName = trim((string)($source['secondarySourceNameSnapshot'] ?? ''));
         $label = trim((string)($source['displayNameSnapshot'] ?? ''));
         $rewardAmountCents = (int)($source['rewardAmountCents'] ?? 0);
-        if ($primaryId <= 0 || $secondaryId < 0 || $primaryName === '' || $label === ''
+        // Customer source is an operator-selected attribution snapshot. Its
+        // IDs and display text are historical data, not a live catalog
+        // eligibility check. Preserve the snapshot even if the source was
+        // renamed or disabled after selection.
+        if ($primaryId <= 0 || $secondaryId < 0
             || $rewardAmountCents < 0 || $rewardAmountCents > self::MAX_MONEY_CENTS
             || mb_strlen($primaryName) > 64 || mb_strlen($secondaryName) > 64 || mb_strlen($label) > 140) {
             throw self::failure('sales_order_business_source_invalid');
         }
-        if ($secondaryId > 0 && $secondaryName === '') {
-            throw self::failure('sales_order_business_source_secondary_snapshot_missing');
+        if ($label === '') {
+            $label = $primaryName;
+            if ($secondaryName !== '') {
+                $label .= ' / ' . $secondaryName;
+            }
         }
         return [
             'primarySourceId' => $primaryId,
@@ -884,6 +895,7 @@ final class CashierV3SalesOrderPlanV1
             : self::nonNegativeInt($row['manual_labor_fee_cents'], 'sales_order_manual_labor_fee_invalid');
         $craftsmenJson = $row['craftsmen_snapshot_json'];
         $craftsmen = self::craftsmenSnapshot($craftsmenJson);
+        $salespeople = self::salespeopleSnapshot($row['salespeople_snapshot_json'] ?? null);
         $guideSelections = self::attributionSnapshot($row['guide_selections_json'] ?? null);
         $salesManagerSelections = self::attributionSnapshot($row['sales_manager_selections_json'] ?? null);
         if ($isExperience > 1 || $friendCountsAsCustomer > 1 || $isPresale > 1 || $inventoryOutboundRequired > 1 || ($isPresale === 1 && $inventoryOutboundRequired === 1)) {
@@ -940,6 +952,7 @@ final class CashierV3SalesOrderPlanV1
             // Keep the sales-order authority shape identical to the V3
             // settlement kernel, including empty attribution snapshots.
             'craftsmen' => $craftsmen,
+            'salespeople' => $salespeople,
             'guideSelections' => $guideSelections,
             'salesManagerSelections' => $salesManagerSelections,
         ];
@@ -1479,11 +1492,50 @@ final class CashierV3SalesOrderPlanV1
 
     private static function craftsmenSnapshot($json): array
     {
+        // Older sale drafts stored an empty string when no craftsman was
+        // selected. Treat that legacy representation as an empty snapshot;
+        // non-empty values still go through the strict snapshot contract.
+        if ($json === null || trim((string)$json) === '') {
+            return [];
+        }
         try {
             return CashierV3CheckoutCraftsmenSnapshot::decode($json);
         } catch (\Throwable $exception) {
             throw self::failure('sales_order_craftsmen_snapshot_invalid');
         }
+    }
+
+    private static function salespeopleSnapshot($json): array
+    {
+        if ($json === null || trim((string)$json) === '') return [];
+        $decoded = is_array($json) ? $json : json_decode((string)$json, true);
+        if (!is_array($decoded)) throw self::failure('sales_order_salespeople_snapshot_invalid');
+        $result = [];
+        $weight = 0;
+        $seen = [];
+        foreach ($decoded as $row) {
+            if (!is_array($row)) throw self::failure('sales_order_salespeople_snapshot_invalid');
+            $staffId = self::positiveInt(
+                $row['staffId'] ?? $row['staff_id'] ?? $row['id'] ?? null,
+                'sales_order_salesperson_staff_invalid'
+            );
+            if (isset($seen[$staffId])) throw self::failure('sales_order_salespeople_snapshot_invalid');
+            $seen[$staffId] = true;
+            $allocation = self::positiveInt(
+                $row['allocationWeight'] ?? $row['allocation_weight'] ?? $row['performance'] ?? null,
+                'sales_order_salesperson_allocation_invalid'
+            );
+            if ($allocation > 100) throw self::failure('sales_order_salespeople_snapshot_invalid');
+            $result[] = [
+                'staffId' => $staffId,
+                'allocationWeight' => $allocation,
+            ];
+            $weight += $allocation;
+        }
+        if ($result !== [] && $weight !== 100) {
+            throw self::failure('sales_order_salespeople_weight_invalid');
+        }
+        return $result;
     }
 
     private static function attributionSnapshot($json): array

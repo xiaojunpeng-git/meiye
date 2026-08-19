@@ -458,7 +458,7 @@ const originalCheckoutIdempotencyKey = computed(() => (
 ))
 const showSubmissionLongRunning = computed(() => isSubmitRequested.value && submissionLongRunning.value && !isResultStep.value)
 const canQueryCheckoutResult = computed(() => (
-  (isUncertain.value || isPaymentSucceededServicePending.value || (isRechargeCheckout.value && showSubmissionLongRunning.value))
+  (isUncertain.value || isPaymentSucceededServicePending.value || showSubmissionLongRunning.value)
   && Boolean(checkoutRequestIdentity.value)
   && Boolean(originalCheckoutIdempotencyKey.value)
 ))
@@ -1115,7 +1115,7 @@ function queryOriginalCheckoutResult() {
     requestNo: props.checkout.requestNo,
     originalIdempotencyKey: originalCheckoutIdempotencyKey.value,
     queryOnly: true
-  })
+  }).then(handleSubmissionResponse)
 }
 
 function restartCheckout() {

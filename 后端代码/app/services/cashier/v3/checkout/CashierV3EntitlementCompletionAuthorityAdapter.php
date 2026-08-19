@@ -147,16 +147,7 @@ final class CashierV3EntitlementCompletionAuthorityAdapter
             $operatorScope,
             $dataScope
         );
-        $draft = $this->workspace->discoverCheckoutDraft(
-            $workspaceId,
-            $stateContextId,
-            $operatorScope
-        );
         $checkoutLines = $this->requestLinesForDiscovery($requestId, $requestVersion);
-        $this->assertDiscoveryWorkspaceMatchesRequest(
-            (array)$draft['rows'],
-            $checkoutLines
-        );
         $entitlementLines = $this->entitlementCheckoutLines($checkoutLines);
         if ($entitlementLines === []) {
             return [
@@ -177,7 +168,7 @@ final class CashierV3EntitlementCompletionAuthorityAdapter
             $operatorScope,
             $dataScope
         );
-        $intents = $this->serviceIntentsFromWorkspaceRows((array)$draft['rows'], $entitlementLines);
+        $intents = $this->serviceIntentsFromCheckoutLines($entitlementLines);
 
         $resources = [];
         $this->addResource(
@@ -327,13 +318,10 @@ final class CashierV3EntitlementCompletionAuthorityAdapter
             $request['member_id'] ?? null,
             'authority_locked_member_invalid'
         );
-        $serviceIntents = $this->workspace->lockCheckoutServiceIntentsInTx(
-            $workspaceId,
-            $stateContextId,
-            $operatorScope,
-            (array)$aggregate['lines']
-        );
-        $intentsByLine = $this->serviceIntentsByLine($serviceIntents, $entitlementLines);
+        // Service settings are already part of the immutable checkout request
+        // line snapshot. Re-reading cashier_workspace here would make a
+        // local-only cart look empty or stale during final submission.
+        $intentsByLine = $this->serviceIntentsFromCheckoutLines($entitlementLines);
         $authorities = $this->loadEntitlementAuthorities(
             $entitlementLines,
             $memberId,
@@ -783,39 +771,6 @@ final class CashierV3EntitlementCompletionAuthorityAdapter
         return $rows;
     }
 
-    private function assertDiscoveryWorkspaceMatchesRequest(
-        array $workspaceRows,
-        array $checkoutLines
-    ): void {
-        if (count($workspaceRows) !== count($checkoutLines)) {
-            throw self::failure('authority_discovery_workspace_line_count_changed');
-        }
-        $workspaceByKey = [];
-        foreach ($workspaceRows as $row) {
-            $workspaceByKey[(string)($row['line_key'] ?? '')] = $row;
-        }
-        foreach ($checkoutLines as $line) {
-            $role = (string)($line['line_role'] ?? '');
-            $authorityKey = (string)($line['authority_key'] ?? '');
-            $lineKey = $role === 'sale' && strpos($authorityKey, 'sale:') === 0
-                ? substr($authorityKey, 5)
-                : $authorityKey;
-            $workspace = $workspaceByKey[$lineKey] ?? null;
-            if (!is_array($workspace)
-                || (string)($workspace['line_role'] ?? '') !== $role
-                || (int)($workspace['quantity'] ?? 0) !== (int)($line['quantity'] ?? -1)
-                || ($role === self::ENTITLEMENT_ROLE
-                    && ((int)($workspace['holder_id'] ?? 0) !== (int)($line['source_id'] ?? -1)
-                        || (int)($workspace['source_detail_id'] ?? 0)
-                            !== (int)($line['entitlement_source_detail_id'] ?? -1)
-                        || (int)($workspace['project_id'] ?? 0) !== (int)($line['project_id'] ?? -1)
-                        || (int)($workspace['source_version'] ?? 0) !== (int)($line['source_version'] ?? -1)
-                        || (int)($workspace['detail_version'] ?? 0) !== (int)($line['project_version'] ?? -1)))) {
-                throw self::failure('authority_discovery_workspace_line_changed', ['lineId' => $lineKey]);
-            }
-        }
-    }
-
     private function entitlementCheckoutLines(array $lines): array
     {
         $result = [];
@@ -849,20 +804,12 @@ final class CashierV3EntitlementCompletionAuthorityAdapter
         return array_values($result);
     }
 
-    private function serviceIntentsFromWorkspaceRows(array $workspaceRows, array $checkoutLines): array
+    private function serviceIntentsFromCheckoutLines(array $checkoutLines): array
     {
-        $byKey = [];
-        foreach ($workspaceRows as $row) {
-            $byKey[(string)($row['line_key'] ?? '')] = $row;
-        }
         $result = [];
         foreach ($checkoutLines as $line) {
             $lineId = (string)$line['line_id'];
-            $workspace = $byKey[(string)$line['authority_key']] ?? null;
-            if (!is_array($workspace)) {
-                throw self::failure('authority_service_intent_missing', ['lineId' => $lineId]);
-            }
-            $craftsmen = json_decode((string)($workspace['craftsmen_json'] ?? ''), true);
+            $craftsmen = json_decode((string)($line['craftsmen_snapshot_json'] ?? ''), true);
             $staffIds = [];
             $settingsById = [];
             foreach (is_array($craftsmen) ? $craftsmen : [] as $craftsman) {
@@ -884,8 +831,19 @@ final class CashierV3EntitlementCompletionAuthorityAdapter
                 throw self::failure('authority_service_intent_craftsman_weight_invalid', ['lineId' => $lineId]);
             }
             $result[$lineId] = [
+                // The checkout line quantity is the immutable service intent
+                // sent to the completion kernel. Omitting it leaves the final
+                // command incomplete even though preparation succeeded.
+                'quantity' => (int)$line['quantity'],
                 'craftsmanIds' => array_values($staffIds),
                 'craftsmanSettingsById' => $settingsById,
+                'laborManualFeeCents' => !array_key_exists('manual_labor_fee_cents', $line)
+                    || $line['manual_labor_fee_cents'] === null
+                    ? null
+                    : (int)$line['manual_labor_fee_cents'],
+                'serviceObject' => (string)($line['service_object'] ?? ''),
+                'friendCountsAsCustomer' => (int)($line['friend_counts_as_customer'] ?? 1) === 1,
+                'isExperience' => (int)($line['is_experience'] ?? 0) === 1,
             ];
         }
         return $result;

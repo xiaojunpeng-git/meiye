@@ -565,20 +565,38 @@ final class ThinkPhpCashierV3CheckoutRequestRepository implements CashierV3Check
             ->where('resource_kind', 'cashier_workspace')
             ->where('resource_id', $workspaceId)
             ->value('current_version');
-        if ($workspaceVersion <= 1) {
-            return null;
-        }
-        $preparedWorkspaceVersion = $workspaceVersion - 1;
-
-        $request = Db::name(self::REQUEST_TABLE)
+        // A browser-owned snapshot is an exact checkout request, not a
+        // projection of cashier_workspace. Find it by request identity/state
+        // first so a newly-created workspace at revision 1 can still render
+        // the checkout that was just prepared.
+        $latestRequest = Db::name(self::REQUEST_TABLE)
             ->where('tenant_id', $dataScope->tenantId())
             ->where('store_id', $dataScope->forcedStoreId())
             ->where('workspace_id', $workspaceId)
             ->where('state_context_id', $stateContextId)
             ->whereIn('request_status', ['editing', 'ready_for_submit'])
-            ->where('authority_snapshot_version', $preparedWorkspaceVersion)
             ->order('update_time desc,id desc')
             ->find();
+        $isSnapshot = is_array($latestRequest)
+            && (string)($latestRequest['source_document_type'] ?? '') === 'cashier_snapshot';
+        if ($isSnapshot) {
+            $request = $latestRequest;
+            $preparedWorkspaceVersion = (int)($request['authority_snapshot_version'] ?? 0);
+        } else {
+            if ($workspaceVersion <= 1) {
+                return null;
+            }
+            $preparedWorkspaceVersion = $workspaceVersion - 1;
+            $request = Db::name(self::REQUEST_TABLE)
+                ->where('tenant_id', $dataScope->tenantId())
+                ->where('store_id', $dataScope->forcedStoreId())
+                ->where('workspace_id', $workspaceId)
+                ->where('state_context_id', $stateContextId)
+                ->whereIn('request_status', ['editing', 'ready_for_submit'])
+                ->where('authority_snapshot_version', $preparedWorkspaceVersion)
+                ->order('update_time desc,id desc')
+                ->find();
+        }
         if (!$request) {
             return null;
         }
@@ -624,11 +642,12 @@ final class ThinkPhpCashierV3CheckoutRequestRepository implements CashierV3Check
                 . 'aggregate_fingerprint,last_operation_fingerprint'
             )
             ->find();
-        if ($workspaceVersionAfter !== $workspaceVersion
+        if ((!$isSnapshot && $workspaceVersionAfter !== $workspaceVersion)
             || !$requestAfter
             || (int)($requestAfter['request_version'] ?? 0) !== $requestVersion
             || (string)($requestAfter['request_status'] ?? '') !== $requestStatus
-            || (int)($requestAfter['authority_snapshot_version'] ?? 0) !== $preparedWorkspaceVersion
+            || (!$isSnapshot
+                && (int)($requestAfter['authority_snapshot_version'] ?? 0) !== $preparedWorkspaceVersion)
             || !hash_equals(
                 (string)($request['aggregate_fingerprint'] ?? ''),
                 (string)($requestAfter['aggregate_fingerprint'] ?? '')
@@ -645,7 +664,10 @@ final class ThinkPhpCashierV3CheckoutRequestRepository implements CashierV3Check
             'lines' => $lines,
             'payments' => $payments,
             'sources' => $sources,
-            'workspaceCurrentVersion' => $workspaceVersion,
+            'workspaceCurrentVersion' => $isSnapshot
+                ? max($workspaceVersion, 1)
+                : $workspaceVersion,
+            'exactRequestProjection' => $isSnapshot,
         ];
     }
 
@@ -675,10 +697,6 @@ final class ThinkPhpCashierV3CheckoutRequestRepository implements CashierV3Check
             ->where('resource_kind', 'cashier_workspace')
             ->where('resource_id', $workspaceId)
             ->value('current_version');
-        if ($workspaceVersion <= 1) {
-            return null;
-        }
-
         $request = Db::name(self::REQUEST_TABLE)
             ->where('request_id', $requestId)
             ->where('tenant_id', $dataScope->tenantId())
@@ -691,12 +709,17 @@ final class ThinkPhpCashierV3CheckoutRequestRepository implements CashierV3Check
             return null;
         }
 
+        $isSnapshot = (string)($request['source_document_type'] ?? '') === 'cashier_snapshot';
+        if (!$isSnapshot && $workspaceVersion <= 1) {
+            return null;
+        }
+
         $requestVersion = (int)($request['request_version'] ?? 0);
         $requestStatus = (string)($request['request_status'] ?? '');
         $authoritySnapshotVersion = (int)($request['authority_snapshot_version'] ?? 0);
         if ($requestVersion <= 0
             || $authoritySnapshotVersion <= 0
-            || $authoritySnapshotVersion >= $workspaceVersion) {
+            || (!$isSnapshot && $authoritySnapshotVersion >= $workspaceVersion)) {
             return null;
         }
         $lines = $this->rows(Db::name(self::LINE_TABLE)
@@ -733,11 +756,12 @@ final class ThinkPhpCashierV3CheckoutRequestRepository implements CashierV3Check
                 . 'aggregate_fingerprint,last_operation_fingerprint'
             )
             ->find();
-        if ($workspaceVersionAfter !== $workspaceVersion
+        if ((!$isSnapshot && $workspaceVersionAfter !== $workspaceVersion)
             || !$requestAfter
             || (int)($requestAfter['request_version'] ?? 0) !== $requestVersion
             || (string)($requestAfter['request_status'] ?? '') !== $requestStatus
-            || (int)($requestAfter['authority_snapshot_version'] ?? 0) !== $authoritySnapshotVersion
+            || (!$isSnapshot
+                && (int)($requestAfter['authority_snapshot_version'] ?? 0) !== $authoritySnapshotVersion)
             || !hash_equals(
                 (string)($request['aggregate_fingerprint'] ?? ''),
                 (string)($requestAfter['aggregate_fingerprint'] ?? '')
@@ -754,7 +778,9 @@ final class ThinkPhpCashierV3CheckoutRequestRepository implements CashierV3Check
             'lines' => $lines,
             'payments' => $payments,
             'sources' => $sources,
-            'workspaceCurrentVersion' => $workspaceVersion,
+            'workspaceCurrentVersion' => $isSnapshot
+                ? max($workspaceVersion, 1)
+                : $workspaceVersion,
             // Only a committed command receipt may select this exact request.
             // Workspace-only draft settings can legitimately advance beyond
             // the original checkout authority snapshot without rebuilding it.

@@ -978,7 +978,13 @@ final class CashierV3CheckoutSettlementKernel
                 'projectNameSnapshot',
                 'projectCategoryIdSnapshot',
                 'projectCategoryNameSnapshot',
-            ], [], 'entitlementLines[' . $index . ']');
+            ], [
+                'craftsmen',
+                'serviceObject',
+                'friendCountsAsCustomer',
+                'isExperience',
+                'manualLaborFeeCents',
+            ], 'entitlementLines[' . $index . ']');
             if (!in_array($line['sourceKind'], self::ENTITLEMENT_SOURCE_KINDS, true)) {
                 throw self::failure('entitlement_source_kind_invalid', ['index' => $index]);
             }
@@ -1045,9 +1051,79 @@ final class CashierV3CheckoutSettlementKernel
                 ),
                 'projectCategoryIdSnapshot' => $categoryId,
                 'projectCategoryNameSnapshot' => $categoryName,
+                // Entitlement service settings originate in the browser
+                // snapshot as a selection. The final authority adapter locks
+                // staff profiles and expands it into historical snapshots.
+                'craftsmen' => self::normalizeEntitlementCraftsmen(
+                    $line['craftsmen'] ?? [],
+                    'entitlementLines[' . $index . '].craftsmen'
+                ),
+                'serviceObject' => self::text($line['serviceObject'] ?? '', 16, 'entitlementLine.serviceObject', true),
+                'friendCountsAsCustomer' => !array_key_exists('friendCountsAsCustomer', $line)
+                    || !empty($line['friendCountsAsCustomer']) ? 1 : 0,
+                'isExperience' => !empty($line['isExperience']) ? 1 : 0,
             ];
-            $normalized['lineFingerprint'] = CashierV3CheckoutSettlementCanonicalizer::fingerprint($normalized);
+            if (array_key_exists('manualLaborFeeCents', $line)) {
+                $normalized['manualLaborFeeCents'] = self::nonNegativeInt(
+                    $line['manualLaborFeeCents'],
+                    'entitlementLine.manualLaborFeeCents'
+                );
+            }
+            // Service-assignment fields are persisted on the checkout line for
+            // final entitlement completion, but the legacy projection
+            // fingerprint intentionally remains based on entitlement authority
+            // identity and amount fields only.
+            $fingerprintInput = $normalized;
+            unset(
+                $fingerprintInput['craftsmen'],
+                $fingerprintInput['serviceObject'],
+                $fingerprintInput['friendCountsAsCustomer'],
+                $fingerprintInput['isExperience'],
+                $fingerprintInput['manualLaborFeeCents']
+            );
+            $normalized['lineFingerprint'] = CashierV3CheckoutSettlementCanonicalizer::fingerprint($fingerprintInput);
             $result[] = $normalized;
+        }
+        return $result;
+    }
+
+    /**
+     * Normalize the browser-owned entitlement service selection without
+     * consulting the mutable cashier workspace. Staff identity, name, store
+     * and profile version are added later by the final authority adapter.
+     */
+    private static function normalizeEntitlementCraftsmen($rows, string $path): array
+    {
+        if (!is_array($rows) || !self::isList($rows) || count($rows) > 20) {
+            throw self::failure('entitlement_craftsmen_selection_shape_invalid', ['path' => $path]);
+        }
+        $result = [];
+        $seen = [];
+        foreach ($rows as $index => $row) {
+            if (!is_array($row)) {
+                throw self::failure('entitlement_craftsman_selection_invalid', ['path' => $path, 'index' => $index]);
+            }
+            $staffId = self::positiveInt($row['staffId'] ?? $row['id'] ?? 0, $path . '.staffId');
+            if (isset($seen[$staffId])) {
+                throw self::failure('entitlement_craftsman_selection_duplicate', ['path' => $path, 'staffId' => $staffId]);
+            }
+            $seen[$staffId] = true;
+            $weight = self::nonNegativeInt($row['laborWeight'] ?? 0, $path . '.laborWeight');
+            if ($weight > 100) {
+                throw self::failure('entitlement_craftsman_selection_weight_invalid', ['path' => $path, 'staffId' => $staffId]);
+            }
+            $performanceType = (string)($row['craftsmanPerformanceType'] ?? 'commission_labor');
+            if (!in_array($performanceType, ['commission', 'labor', 'commission_labor'], true)) {
+                throw self::failure('entitlement_craftsman_selection_performance_invalid', ['path' => $path, 'staffId' => $staffId]);
+            }
+            $laborFeeCents = self::nonNegativeInt($row['laborFeeCents'] ?? 0, $path . '.laborFeeCents');
+            $result[] = [
+                'staffId' => $staffId,
+                'laborWeight' => $weight,
+                'isPointCustomer' => !empty($row['isPointCustomer']),
+                'craftsmanPerformanceType' => $performanceType,
+                'laborFeeCents' => $laborFeeCents,
+            ];
         }
         return $result;
     }
@@ -1341,9 +1417,18 @@ final class CashierV3CheckoutSettlementKernel
                 'craftsmenSnapshotJson' => CashierV3CheckoutCraftsmenSnapshot::encode(
                     $line['craftsmen']
                 ),
-                'salespeopleSnapshotJson' => json_encode($line['salespeople'] ?? [], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
-                'guideSelectionsJson' => json_encode($line['guideSelections'] ?? [], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
-                'salesManagerSelectionsJson' => json_encode($line['salesManagerSelections'] ?? [], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                // Keep absent optional attribution columns empty for legacy
+                // drafts; an explicit [] is part of a new browser snapshot
+                // and therefore participates in its immutable fingerprint.
+                'salespeopleSnapshotJson' => array_key_exists('salespeople', $line)
+                    ? json_encode($line['salespeople'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
+                    : '',
+                'guideSelectionsJson' => array_key_exists('guideSelections', $line)
+                    ? json_encode($line['guideSelections'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
+                    : '',
+                'salesManagerSelectionsJson' => array_key_exists('salesManagerSelections', $line)
+                    ? json_encode($line['salesManagerSelections'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
+                    : '',
                 'manualLaborFeeCents' => $line['manualLaborFeeCents'] ?? null,
                 'lineFingerprint' => $line['lineFingerprint'],
                 'sortNo' => ++$sortNo,
@@ -1377,9 +1462,9 @@ final class CashierV3CheckoutSettlementKernel
                 // These columns belong to the shared line-draft schema. Entitlement
                 // service tags are frozen by the entitlement completion authority,
                 // not by the sales-order checkout line.
-                'serviceObject' => '',
-                'friendCountsAsCustomer' => 1,
-                'isExperience' => 0,
+                'serviceObject' => $line['serviceObject'] ?? '',
+                'friendCountsAsCustomer' => $line['friendCountsAsCustomer'] ?? 1,
+                'isExperience' => $line['isExperience'] ?? 0,
                 'isPresale' => 0,
                 'inventoryOutboundRequired' => 1,
                 'quantity' => $line['quantity'],
@@ -1401,11 +1486,13 @@ final class CashierV3CheckoutSettlementKernel
                 'priceChangedBy' => 0,
                 'priceChangedByNameSnapshot' => '',
                 'priceChangedAt' => 0,
-                'craftsmenSnapshotJson' => '[]',
+                'craftsmenSnapshotJson' => CashierV3CheckoutSettlementCanonicalizer::encode(
+                    $line['craftsmen'] ?? []
+                ),
                 'salespeopleSnapshotJson' => '[]',
                 'guideSelectionsJson' => '[]',
                 'salesManagerSelectionsJson' => '[]',
-                'manualLaborFeeCents' => null,
+                'manualLaborFeeCents' => $line['manualLaborFeeCents'] ?? null,
                 'lineFingerprint' => $line['lineFingerprint'],
                 'sortNo' => ++$sortNo,
             ];
@@ -1581,6 +1668,9 @@ final class CashierV3CheckoutSettlementKernel
 
     private static function positiveInt($value, string $path): int
     {
+        if (is_string($value) && preg_match('/^[1-9][0-9]*$/D', $value) === 1) {
+            $value = (int)$value;
+        }
         if (!is_int($value) || $value <= 0) {
             throw self::failure('positive_integer_required', ['path' => $path]);
         }
@@ -1589,6 +1679,9 @@ final class CashierV3CheckoutSettlementKernel
 
     private static function nonNegativeInt($value, string $path): int
     {
+        if (is_string($value) && preg_match('/^(?:0|[1-9][0-9]*)$/D', $value) === 1) {
+            $value = (int)$value;
+        }
         if (!is_int($value) || $value < 0) {
             throw self::failure('non_negative_integer_required', ['path' => $path]);
         }

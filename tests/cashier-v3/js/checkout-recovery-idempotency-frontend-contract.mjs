@@ -73,7 +73,7 @@ ok(
 )
 ok(
   'every persisted checkout follow-up filters out the server-built resource plan',
-  /if \(checkoutRequestActions\.has\(action\) && !isRechargeDebtRepaymentCheckout\.value\) \{[\s\S]{0,500}const checkoutContexts = checkoutSubmissionCommandContexts\(current\.commandContexts\)[\s\S]{0,800}approvedPayload\.commandContexts = checkoutContexts/.test(workbench)
+  /if \(checkoutRequestActions\.has\(action\)[\s\S]{0,240}action !== 'query-checkout-result'[\s\S]{0,240}!isRechargeDebtRepaymentCheckout\.value\) \{[\s\S]{0,500}const checkoutContexts = checkoutSubmissionCommandContexts\(actionCurrent\.commandContexts\)[\s\S]{0,800}approvedPayload\.commandContexts = checkoutContexts/.test(workbench)
     && workbench.includes("'go-to-writeoff-after-checkout'")
     && workbench.includes("'finish-checkout-and-return'")
 )
@@ -115,6 +115,15 @@ ok(
     return !restoreBlock.includes("requestAction('prepare-checkout'")
       && !restoreBlock.includes("requestAction('submit-checkout'")
       && !restoreBlock.includes("requestCheckoutAction({ action: 'submit-checkout'")
+  })()
+)
+ok(
+  'stale checkout discard trusts the discard receipt instead of a delayed root rebuild',
+  (() => {
+    const discardBlock = workbench.match(/async function discardStaleCheckoutBeforeLocalFinalization\(\)[\s\S]*?\n}\n\nfunction enqueueCheckoutAction/)?.[0] || ''
+    return discardBlock.includes('const discarded = await discardCashierCheckout')
+      && discardBlock.includes('applyDiscardedCheckoutProjection(discarded)')
+      && !discardBlock.includes("requestAction('open-cashier-workbench'")
   })()
 )
 

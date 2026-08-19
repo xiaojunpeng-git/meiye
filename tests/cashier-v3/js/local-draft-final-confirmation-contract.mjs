@@ -71,7 +71,7 @@ assert.match(workbench, /async function resolveDeferredCashierDraftLine\([\s\S]*
   '行级回放遇到暂未投影的服务端行时先静默刷新权威草稿，不把投影延迟误报为购物车变化')
 assert.match(workbench, /const resolvedLine = await resolveDeferredCashierDraftLine\([\s\S]*?const persistedLine = resolvedLine\.line/,
   '朋友/本人等行设置回放使用刷新后的权威行，不依赖过期 deferred 投影')
-assert.match(workbench, /function buildCheckoutSnapshot\(preview = \{\}\)[\s\S]*?lines: Array\.isArray\(snapshot\.orderLines\)[\s\S]*?source:[\s\S]*?payment:/,
+assert.match(workbench, /function buildCheckoutSnapshot\(preview = \{\}\)[\s\S]*?const lines = \(Array\.isArray\(snapshot\.orderLines\)[\s\S]*?\n\s*lines,[\s\S]*?source:[\s\S]*?payment:/,
   '结账把购物车行、客户来源和支付明细统一封装为单一前端快照')
 assert.match(workbench, /requestAction\('prepare-checkout', \{[\s\S]*?checkoutSnapshot: buildCheckoutSnapshot\(localCheckoutPreview\.value\)/,
   '结账准备请求携带完整前端 checkoutSnapshot')
