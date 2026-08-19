@@ -23,7 +23,7 @@ const check = (name, condition) => { if (condition) console.log(`PASS ${name}`);
 for (const [code, title] of reports) check(`report ${code}`, admin.includes(code) && admin.includes(title) && cashier.includes(code) && cashier.includes(title))
 check('platform other reports route', router.includes('other-reports/${report.code}') && router.includes('admin-report-phase-six-${report.code}'))
 check('platform frame accepts phase six code', frame.includes('PHASE_SIX_REPORT_CODES') && frame.includes('allowed.includes(requested)'))
-check('platform frame cache-busts the embedded cashier release', frame.includes("VUE_APP_CASHIER_V3_REPORT_VERSION || '7fec5256'") && adminProductionEnv.includes("VUE_APP_CASHIER_V3_REPORT_VERSION='7fec5256'"))
+check('platform frame cache-busts the embedded cashier release', frame.includes("VUE_APP_CASHIER_V3_REPORT_VERSION || '7fec5256'") && adminProductionEnv.includes("VUE_APP_CASHIER_V3_REPORT_VERSION='e5f93865'"))
 check('store only exposes three cross-end reports', view.includes('phase_six_other_multi_payment') && view.includes('phase_six_salary_summary') && view.includes('phase_six_salary_detail') && view.includes('PHASE_SIX_CROSS_END_REPORT_TABS'))
 check('platform-only phase six reports are blocked in direct store runtime', view.includes('phaseSixBlocked') && view.includes('isPlatformRuntimeRoute()'))
 check('embedded report re-syncs route after async catalog load', view.includes('catalog.value = Array.isArray(response) ? response : []') && view.includes('syncActiveReportFromRoute()\n    syncFiltersFromRoute()\n    await loadReport()'))
