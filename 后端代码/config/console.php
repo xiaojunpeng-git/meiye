@@ -27,5 +27,6 @@ return [
         'reservationJindu' => \app\command\ReservationJindu::class,
         'migrate' => \app\command\Migrate::class,
         'unified-query:export-worker' => \app\command\UnifiedQueryExportWorker::class,
+        'group-dashboard:aggregate' => \app\command\GroupManagementDashboardAggregate::class,
     ],
 ];
