@@ -335,7 +335,10 @@ new Vue({
             this.$store.commit('admin/menu/setSider', menuSider);
           }
           // 指定当前菜单，即高亮项
-          this.$store.commit('admin/menu/setActivePath', path);
+          // Duplicate menu entries carry a stable query marker so the same
+          // business route can remain highlighted under the entered parent.
+          const activePath = to.query && to.query.menu_entry ? to.fullPath : path;
+          this.$store.commit('admin/menu/setActivePath', activePath);
           // 找到其所有父菜单 path 进行展开
           // const openNames = getSiderSubmenu(path, menuSider);
           const openNames = getSiderSubmenu(to, menuSider);

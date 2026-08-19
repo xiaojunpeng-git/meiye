@@ -21,7 +21,7 @@ function getHeaderName(to, menuList) {
     menus.forEach(item => allMenus.push(item));
   });
   const currentMenu = allMenus.find(item => {
-    if (item.path === to.path) { return true; } else { return to.path === getPath(to, item.path); }
+    return isMenuPathMatch(to, item.path);
   });
   return currentMenu ? currentMenu.header : null;
 }
@@ -53,7 +53,33 @@ function transferMenu(menu, headerName) {
   }
 }
 
-export { getHeaderName, getPath };
+function splitMenuPath(menuPath) {
+  const value = String(menuPath || '');
+  const index = value.indexOf('?');
+  return index === -1
+    ? { pathname: value, query: new URLSearchParams() }
+    : { pathname: value.slice(0, index), query: new URLSearchParams(value.slice(index + 1)) };
+}
+
+/** Match both ordinary routes and duplicate-menu entry markers. */
+function isMenuPathMatch(to, menuPath) {
+  const { pathname, query } = splitMenuPath(menuPath);
+  const normalize = (path) => (path || '').replace(/\/$/, '');
+  const currentEntry = String((to && to.query && to.query.menu_entry) || '');
+  const targetEntry = query.get('menu_entry') || '';
+  const currentPath = normalize(to && to.path);
+  const targetPath = normalize(pathname);
+
+  if (targetPath !== currentPath && currentPath !== normalize(getPath(to, pathname))) return false;
+  if (currentEntry || targetEntry) return currentEntry === targetEntry;
+
+  const targetTab = query.get('tab') || '';
+  if (targetTab) return String((to && to.query && to.query.tab) || '') === targetTab;
+  if (['stores', 'people'].includes(String((to && to.query && to.query.tab) || ''))) return false;
+  return true;
+}
+
+export { getHeaderName, getPath, isMenuPathMatch };
 
 /**
  * @description 根据当前路由，找打顶部菜单名称
@@ -111,9 +137,7 @@ function getSiderSubmenu(to, menuList) {
     menus.forEach(item => allMenus.push(item));
   });
   const currentMenu = allMenus.find(item => {
-    if (item.openNames.length) {
-      return item.path === to.path || to.path === getPath(to, item.path);
-    }
+    if (item.openNames.length) return isMenuPathMatch(to, item.path);
   });
   return currentMenu ? currentMenu.openNames : [];
 }

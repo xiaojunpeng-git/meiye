@@ -67,10 +67,18 @@ export default {
       path: 'member-management-dashboard',
       name: `${pre}member_management_dashboard`,
       meta: {
-        // Keep existing group-dashboard sessions usable until their menu
-        // permission cache is refreshed; the backend still enforces the
-        // member-dashboard permission for every data request.
-        auth: ['admin-report-member-management-dashboard', 'admin-report-group-management-dashboard'],
+        auth: ['admin-report-member-management-dashboard'],
+        title: '会员看板'
+      },
+      component: () => import('@/pages/report/data/member_management_dashboard')
+    },
+    {
+      // Compatibility route for a second menu entry under another parent.
+      // The page, API and permission remain shared with the canonical route.
+      path: 'member-management-dashboard-customer',
+      name: `${pre}member_management_dashboard_customer`,
+      meta: {
+        auth: ['admin-report-member-management-dashboard'],
         title: '会员看板'
       },
       component: () => import('@/pages/report/data/member_management_dashboard')

@@ -74,7 +74,7 @@ import { mapState, mapGetters, mapMutations } from 'vuex';
 import Setting from '@/setting';
 
 import { requestAnimation } from '@/libs/util';
-import { getPath } from '@/libs/system';
+import { isMenuPathMatch } from '@/libs/system';
 
 export default {
   name: 'BasicLayout',
@@ -225,21 +225,7 @@ export default {
       'getOrderNum'
     ]),
     isRouteMatch(to, menuPath) {
-      const normalize = (path) => (path || '').replace(/\/$/, '');
-      const [targetPath, targetQuery = ''] = String(menuPath || '').split('?');
-      const targetTab = targetQuery.split('&').reduce((tab, item) => {
-        const [key, value = ''] = item.split('=');
-        return key === 'tab' ? decodeURIComponent(value) : tab;
-      }, '');
-      const current = normalize(to.path);
-      const target = normalize(targetPath);
-      if (target === current && targetTab) {
-        return String(to.query.tab || '') === targetTab;
-      }
-      if (target === current && ['stores', 'people'].includes(String(to.query.tab || ''))) {
-        return false;
-      }
-      return target === current || current === normalize(getPath(to, targetPath));
+      return isMenuPathMatch(to, menuPath);
     },
     isRechargeRoute(to) {
       return /\/marketing\/(setup_recharge|balance_recharge)$/.test((to.path || '').replace(/\/$/, ''));

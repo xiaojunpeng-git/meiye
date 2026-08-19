@@ -16,6 +16,7 @@ import util from '@/libs/util';
 import { isAgentPath } from '@/utils/pathUtils';
 import { normalizeOrganizationWorkspaceMenu } from '@/libs/organizationWorkspaceMenu';
 import { normalizeProductBusinessConfigMenu } from '@/libs/productBusinessConfigMenu';
+import { disambiguateDuplicateMenuPaths } from '@/libs/menuRouteDisambiguation';
 
 // "出入库记录" has been consolidated into inventory query/statistics.  Filter
 // the legacy entry here as well as in the menu migration so a browser with an
@@ -81,10 +82,10 @@ function withoutStoreOperationsReportIcons(menuData) {
 }
 
 function normalizeMenus(menuData, prefix) {
-  return normalizeProductBusinessConfigMenu(
+  return disambiguateDuplicateMenuPaths(normalizeProductBusinessConfigMenu(
     normalizeOrganizationWorkspaceMenu(withoutStoreOperationsReportIcons(withoutLegacyStoreOperationsMenu(withoutOperatingScreenMenu(withoutLegacyInventoryMovement(menuData)))), prefix),
     prefix
-  );
+  ));
 }
 
 function getMenusName() {
