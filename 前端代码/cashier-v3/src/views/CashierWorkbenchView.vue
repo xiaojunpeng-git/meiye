@@ -696,6 +696,16 @@ function applyLocalCashierDraftMutation(action, line, payload = {}) {
     }
     if (action === 'change-cart-line-quantity') {
       target.quantity = Math.max(1, Number(target.quantity || 1) + Number(payload.delta || 0))
+      if (isEntitlementLine(target) && isLocalCashierDraftLine(target)) {
+        // The local row stores the amount for its whole selected quantity.
+        // Rebuild it after a quantity edit so the final checkout snapshot
+        // stays aligned with the server's per-occurrence allocation.
+        const otherLines = (draft.lines || []).filter((item) => String(item?.id || '') !== lineId)
+        target.actualAmount = localEntitlementAmount(otherLines, target)
+        target.amount = target.actualAmount
+        target.finalAmount = target.actualAmount
+        target.originalAmount = target.actualAmount
+      }
       return
     }
     if (action === 'update-cashier-line-debt') {

@@ -25,5 +25,8 @@ assert.match(workbench, /const totalWholeYuan = Math\.floor\(totalCents \/ 100\)
 assert.match(workbench, /const regularWholeYuan = Math\.floor\(totalWholeYuan \/ totalTimes\)/)
 assert.match(workbench, /times >= totalTimes/)
 assert.doesNotMatch(workbench, /const cumulative = \(times\) => Math\.round\(\(totalCents \* times\) \/ totalTimes\)/)
+assert.match(workbench, /if \(isEntitlementLine\(target\) && isLocalCashierDraftLine\(target\)\)/)
+assert.match(workbench, /const otherLines = \(draft\.lines \|\| \[\]\)\.filter\(\(item\) => String\(item\?\.id \|\| ''\) !== lineId\)/)
+assert.match(workbench, /target\.actualAmount = localEntitlementAmount\(otherLines, target\)/)
 
 console.log('MEMBER_ENTITLEMENT_WHOLE_YUAN_CONTRACT_OK')
