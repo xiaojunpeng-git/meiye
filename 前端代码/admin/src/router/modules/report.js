@@ -64,6 +64,15 @@ export default {
       component: () => import('@/pages/report/data/group_management_dashboard')
     },
     {
+      path: 'member-management-dashboard',
+      name: `${pre}member_management_dashboard`,
+      meta: {
+        auth: ['admin-report-member-management-dashboard'],
+        title: '会员看板'
+      },
+      component: () => import('@/pages/report/data/member_management_dashboard')
+    },
+    {
       // 每个稳定报表 code 都形成独立 URL；页面实现统一由 Vue 3 报表运行时承载。
       path: 'store-operations/:report',
       name: `${pre}store_operations_report`,

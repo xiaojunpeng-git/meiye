@@ -16,6 +16,7 @@ use app\services\report\StoreUnifiedReportPhaseFourServices;
 use app\services\report\StoreUnifiedReportPhaseSixServices;
 use app\services\report\GroupManagementDashboardServices;
 use app\services\report\GroupManagementDashboardTargetServices;
+use app\services\report\MemberManagementDashboardServices;
 use app\services\system\SystemRoleServices;
 use think\facade\Db;
 
@@ -135,6 +136,33 @@ class UnifiedReport extends AuthController
                 ['org_id', 0], ['store_id', 0], ['metric_code', 'cash_performance'],
             ]);
             return app('json')->success($services->drilldown($this->groupDashboardContext($input), $input));
+        } catch (\InvalidArgumentException $e) {
+            return app('json')->fail($e->getMessage());
+        }
+    }
+
+    /** Phase 7 member dashboard; store scope is intersected again in the service. */
+    public function memberDashboard(Request $request, MemberManagementDashboardServices $services)
+    {
+        if (!$this->hasMenuPermission('admin-report-member-management-dashboard')) {
+            return app('json')->fail('当前账号未配置会员看板权限');
+        }
+        try {
+            $input = $request->getMore([
+                ['period', 'today'], ['start_date', ''], ['end_date', ''], ['store_ids', ''],
+                ['org_id', 0], ['store_id', 0], ['category_id', 0],
+            ]);
+            $scopeStores = $this->scopedStoreIds([
+                'org_id' => (int)$input['org_id'],
+                'store_id' => (int)$input['store_id'],
+                'store_ids' => (string)$input['store_ids'],
+            ]);
+            return app('json')->success($services->dashboard([
+                'tenant_id' => '0',
+                'store_ids' => $scopeStores,
+                'admin_id' => (int)$this->adminId,
+                'admin_name' => (string)($this->adminInfo['real_name'] ?? $this->adminInfo['account'] ?? ''),
+            ], $input));
         } catch (\InvalidArgumentException $e) {
             return app('json')->fail($e->getMessage());
         }

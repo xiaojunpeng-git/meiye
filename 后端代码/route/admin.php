@@ -1643,6 +1643,7 @@ Route::group('adminapi', function () {
         Route::get('unified/personnel', 'v1.report.UnifiedReport/personnel')->option(['real_name' => '门店业务报表人员筛选']);
         Route::get('unified/query', 'v1.report.UnifiedReport/query')->option(['real_name' => '门店业务报表查询']);
         Route::get('unified/export', 'v1.report.UnifiedReport/export')->option(['real_name' => '门店业务报表导出']);
+        Route::get('member-dashboard', 'v1.report.UnifiedReport/memberDashboard')->option(['real_name' => '会员看板查询']);
         Route::get('six-dimension/consumption-tiers', 'v1.report.UnifiedReport/consumptionTiers')->option(['real_name' => '消费分级设置列表']);
         Route::post('six-dimension/consumption-tiers', 'v1.report.UnifiedReport/saveConsumptionTier')->option(['real_name' => '保存消费分级设置']);
         Route::post('six-dimension/consumption-tiers/sort', 'v1.report.UnifiedReport/sortConsumptionTiers')->option(['real_name' => '消费分级排序']);
