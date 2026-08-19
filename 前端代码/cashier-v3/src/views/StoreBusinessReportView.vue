@@ -65,6 +65,13 @@ const SIX_DIMENSION_REPORT_TABS = Object.freeze([
   { code: 'six_dimension_performance_market_distribution', name: '业绩市场分布表' }
 ])
 const PHASE_SIX_REPORT_TABS = PHASE_SIX_REPORTS
+// 门店端的报表导航是一个统一工作区。跨端报表切换时继续保留原有门店报表，
+// 仅追加已确认可在门店端访问的阶段四/阶段六页签。
+const STORE_REPORT_TABS = Object.freeze([
+  ...REPORT_TABS,
+  ...PHASE_FOUR_CROSS_END_REPORT_TABS,
+  ...PHASE_SIX_CROSS_END_REPORT_TABS
+].filter((tab, index, all) => all.findIndex((item) => item.code === tab.code) === index))
 const PERSON_FILTERS = Object.freeze([
   ['salesperson_id', '销售人编号'],
   ['sales_manager_id', '销售经理编号'],
@@ -314,12 +321,14 @@ const allowedReportTabs = computed(() => {
     ? SIX_DIMENSION_REPORT_TABS
     : isPhaseFourRoute()
       ? (PHASE_FOUR_CROSS_END_REPORT_TABS.some((tab) => tab.code === requested)
-          ? PHASE_FOUR_CROSS_END_REPORT_TABS
+          ? (isPlatformRuntimeRoute() ? PHASE_FOUR_CROSS_END_REPORT_TABS : STORE_REPORT_TABS)
           : isPlatformRuntimeRoute() ? PHASE_FOUR_REPORT_TABS.filter((tab) => !PHASE_FOUR_CROSS_END_REPORT_TABS.some((crossEnd) => crossEnd.code === tab.code)) : PHASE_FOUR_CROSS_END_REPORT_TABS)
       : isPhaseSixRoute()
-        ? (isPlatformRuntimeRoute() ? PHASE_SIX_REPORT_TABS : PHASE_SIX_CROSS_END_REPORT_TABS)
+        ? (isPlatformRuntimeRoute() ? PHASE_SIX_REPORT_TABS : STORE_REPORT_TABS)
         : REPORT_TABS
-  if (!serverCatalogByCode.value.size) return tabs
+  // 门店端的基础报表页签是固定业务入口。目录接口只用于补充动态报表和
+  // 校验平台端授权，不能因为接口暂时只返回新增报表而隐藏既有页签。
+  if (!isPlatformRuntimeRoute() || !serverCatalogByCode.value.size) return tabs
   const authorized = tabs.filter((tab) => serverCatalogByCode.value.has(tab.code))
   return authorized.length ? authorized : tabs
 })
@@ -1116,7 +1125,7 @@ async function saveEdit() {
     for (const field of changedFields) {
       const displayValue = String(editDraft.value[field.key] ?? '').trim()
       const value = manualFieldValueForSave(field, displayValue)
-      const response = await saveStoreBusinessReportAnnotation({
+      const payload = {
         ...annotationStoreScope(row),
         report_code: activeReport.value,
         subject_type: String(row?.annotation_subject_type || field?.subject_type || 'report_row'),
@@ -1126,12 +1135,17 @@ async function saveEdit() {
         source_line_id: String(row?.source_line_id || ''),
         field_key: field.key,
         field_value: value,
-        expected_version: Number(row[`${field.key}_version`] ?? row?._field_versions?.[field.key] ?? 0),
         idempotency_key: `ui-rpt-${Date.now().toString(36)}-${Math.random().toString(16).slice(2)}-${field.key.slice(0, 24)}`
-      }, reportRuntime.value)
+      }
+      if (field.key !== 'complaint_count') {
+        payload.expected_version = Number(row[`${field.key}_version`] ?? row?._field_versions?.[field.key] ?? 0)
+      }
+      const response = await saveStoreBusinessReportAnnotation(payload, reportRuntime.value)
       row[field.key] = displayValue
-      row[`${field.key}_version`] = Number(response?.version || 1)
-      row._field_versions = { ...(row._field_versions || {}), [field.key]: Number(response?.version || 1) }
+      if (field.key !== 'complaint_count') {
+        row[`${field.key}_version`] = Number(response?.version || 1)
+        row._field_versions = { ...(row._field_versions || {}), [field.key]: Number(response?.version || 1) }
+      }
     }
     cancelEdit()
     await loadReport()

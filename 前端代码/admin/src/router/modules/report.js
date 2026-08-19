@@ -10,6 +10,8 @@
 import BasicLayout from '@/layouts/basic-layout';
 import Setting from '@/setting';
 import { SIX_DIMENSION_REPORTS } from '@/libs/sixDimensionReports';
+import { PHASE_FOUR_OPERATION_REPORTS, PHASE_FOUR_CROSS_END_REPORTS } from '@/libs/phaseFourReports';
+import { PHASE_SIX_REPORTS } from '@/libs/phaseSixReports';
 
 const pre = 'report_';
 
@@ -41,6 +43,26 @@ export default {
       },
       component: () => import('@/pages/report/data/store_business')
     },
+    ...PHASE_SIX_REPORTS.map(report => ({
+      path: `other-reports/${report.code}`,
+      name: `${pre}${report.code}`,
+      meta: {
+        auth: [`admin-report-phase-six-${report.code}`],
+        title: report.title,
+        reportCode: report.code,
+        phaseSixReport: true
+      },
+      component: () => import('@/pages/report/data/store_business')
+    })),
+    {
+      path: 'group-management-dashboard',
+      name: `${pre}group_management_dashboard`,
+      meta: {
+        auth: ['admin-report-group-management-dashboard'],
+        title: '集团管理看板'
+      },
+      component: () => import('@/pages/report/data/group_management_dashboard')
+    },
     {
       // 每个稳定报表 code 都形成独立 URL；页面实现统一由 Vue 3 报表运行时承载。
       path: 'store-operations/:report',
@@ -58,6 +80,28 @@ export default {
         auth: [`admin-report-six-dimension-${report.code}`],
         title: report.title,
         reportCode: report.code
+      },
+      component: () => import('@/pages/report/data/six_dimension')
+    })),
+    ...PHASE_FOUR_OPERATION_REPORTS.map(report => ({
+      path: `operations-center/${report.code}`,
+      name: `${pre}${report.code}`,
+      meta: {
+        auth: [`admin-report-phase-four-${report.code}`],
+        title: report.title,
+        reportCode: report.code,
+        phaseFourReport: true
+      },
+      component: () => import('@/pages/report/data/six_dimension')
+    })),
+    ...PHASE_FOUR_CROSS_END_REPORTS.map(report => ({
+      path: `finance-center/front-desk/${report.code}`,
+      name: `${pre}${report.code}`,
+      meta: {
+        auth: [`admin-report-phase-four-${report.code}`],
+        title: report.title,
+        reportCode: report.code,
+        phaseFourReport: true
       },
       component: () => import('@/pages/report/data/six_dimension')
     })),

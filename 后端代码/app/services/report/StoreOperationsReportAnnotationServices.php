@@ -132,13 +132,14 @@ final class StoreOperationsReportAnnotationServices
                 return $participant->annotationIsVisible($row, $scope['tenant_id'], $scope['participant_employee_id']);
             }));
         }
+        foreach ($rows as &$row) {
+            if ((string)($row['field_key'] ?? '') === 'complaint_count') unset($row['version']);
+        }
+        unset($row);
         return $rows;
     }
 
-    /**
-     * 保存一项报表补充字段。新建使用 expected_version=0，更新必须提交服务端
-     * 上次返回的 version；相同幂等键重放只返回第一次结果。
-     */
+    /** 保存一项报表补充字段；客诉数量按产品要求不使用版本冲突机制。 */
     public function saveAnnotation(array $context, array $payload): array
     {
         $scope = $this->scope($context);
@@ -152,7 +153,8 @@ final class StoreOperationsReportAnnotationServices
         $this->validateFieldValue($valueType, $value);
         if (mb_strlen($value, 'UTF-8') > 65535) throw new \InvalidArgumentException('补充字段内容不能超过 65535 个字符');
         $storeId = (int)($payload['store_id'] ?? ($context['store_id'] ?? 0));
-        $expectedVersion = (int)($payload['expected_version'] ?? 0);
+        $versioned = $fieldKey !== 'complaint_count';
+        $expectedVersion = $versioned ? (int)($payload['expected_version'] ?? 0) : null;
         $operatorId = (int)($context['operator_id'] ?? $context['admin_id'] ?? 0);
         $operatorName = mb_substr((string)($context['operator_name'] ?? $context['admin_name'] ?? ''), 0, 128);
         $sourceFactId = max(0, (int)($payload['source_fact_id'] ?? 0));
@@ -187,7 +189,7 @@ final class StoreOperationsReportAnnotationServices
         $organizationId = (string)($context['organization_id'] ?? '');
         $now = time();
 
-        return Db::transaction(function () use ($scope, $reportCode, $subjectType, $subjectKey, $fieldKey, $idempotencyKey, $value, $valueType, $storeId, $expectedVersion, $operatorId, $operatorName, $sourceFactId, $sourceOrderId, $sourceLineId, $organizationId, $now): array {
+        return Db::transaction(function () use ($scope, $reportCode, $subjectType, $subjectKey, $fieldKey, $idempotencyKey, $value, $valueType, $storeId, $versioned, $expectedVersion, $operatorId, $operatorName, $sourceFactId, $sourceOrderId, $sourceLineId, $organizationId, $now): array {
             $audit = Db::name(self::ANNOTATION_AUDIT_TABLE)
                 ->where('tenant_id', $scope['tenant_id'])->where('idempotency_key', $idempotencyKey)->lock(true)->find();
             if (is_array($audit)) {
@@ -215,11 +217,11 @@ final class StoreOperationsReportAnnotationServices
                     || ($scope['store_ids'] !== null && $storeId !== 0 && !in_array((int)$existing['store_id'], $scope['store_ids'], true))) {
                     throw new \InvalidArgumentException('补充记录不属于当前门店数据范围');
                 }
-                if ($expectedVersion <= 0 || $expectedVersion !== (int)$existing['version']) {
+                if ($versioned && ($expectedVersion <= 0 || $expectedVersion !== (int)$existing['version'])) {
                     throw new \InvalidArgumentException('补充记录已更新，请刷新后再保存');
                 }
                 $beforeValue = (string)$existing['field_value'];
-                $newVersion = (int)$existing['version'] + 1;
+                $newVersion = $versioned ? (int)$existing['version'] + 1 : (int)$existing['version'];
                 Db::name(self::ANNOTATION_TABLE)->where('id', (int)$existing['id'])->update([
                     'field_value' => $value, 'version' => $newVersion, 'updated_by' => $operatorId,
                     'updated_by_name_snapshot' => $operatorName, 'updated_at' => $now,
@@ -227,7 +229,7 @@ final class StoreOperationsReportAnnotationServices
                 $annotationId = (int)$existing['id'];
                 $action = 'updated';
             } else {
-                if ($expectedVersion !== 0) throw new \InvalidArgumentException('新补充记录的版本必须为 0');
+                if ($versioned && $expectedVersion !== 0) throw new \InvalidArgumentException('新补充记录的版本必须为 0');
                 $beforeValue = '';
                 $newVersion = 1;
                 $annotationId = (int)Db::name(self::ANNOTATION_TABLE)->insertGetId([
@@ -274,16 +276,27 @@ final class StoreOperationsReportAnnotationServices
         }
         $rows = Db::name('store_product_category')->where('is_show', 1)
             ->field('id,pid,cate_name')->order('pid', 'asc')->order('id', 'asc')->select()->toArray();
+        $categoryById = [];
+        foreach ($rows as $row) $categoryById[(int)$row['id']] = $row;
         $result = [];
         foreach ($rows as $row) {
             $id = (string)$row['id'];
             $config = $configs[$id] ?? [];
+            $pathParts = [];
+            $cursor = (int)$row['id'];
+            $seen = [];
+            while ($cursor > 0 && isset($categoryById[$cursor]) && !isset($seen[$cursor])) {
+                $seen[$cursor] = true;
+                array_unshift($pathParts, trim((string)$categoryById[$cursor]['cate_name']));
+                $cursor = (int)$categoryById[$cursor]['pid'];
+            }
+            $categoryPath = implode(' / ', array_filter($pathParts, static fn(string $part): bool => $part !== ''));
             $result[] = [
                 'category_id' => $id,
                 'parent_id' => (string)($row['pid'] ?? 0),
                 'category_name' => (string)$row['cate_name'],
-                'category_path' => $this->categoryPath((int)$row['id']),
-                'partner_label' => $this->categoryPath((int)$row['id']),
+                'category_path' => $categoryPath,
+                'partner_label' => $categoryPath,
                 // partner_name 仅为旧响应兼容字段，前端不得编辑。
                 'partner_name' => (string)($config['partner_name'] ?? ''),
                 'enabled' => (int)($config['enabled'] ?? 0),
@@ -441,7 +454,9 @@ final class StoreOperationsReportAnnotationServices
 
     private function projection(array $row, bool $replayed): array
     {
-        return ['id' => (int)$row['id'], 'report_code' => (string)$row['report_code'], 'subject_type' => (string)$row['subject_type'], 'subject_key' => (string)$row['subject_key'], 'field_key' => (string)$row['field_key'], 'field_value' => (string)$row['field_value'], 'version' => (int)$row['version'], 'replayed' => $replayed, 'updated_at' => (int)$row['updated_at']];
+        $result = ['id' => (int)$row['id'], 'report_code' => (string)$row['report_code'], 'subject_type' => (string)$row['subject_type'], 'subject_key' => (string)$row['subject_key'], 'field_key' => (string)$row['field_key'], 'field_value' => (string)$row['field_value'], 'replayed' => $replayed, 'updated_at' => (int)$row['updated_at']];
+        if ((string)$row['field_key'] !== 'complaint_count') $result['version'] = (int)$row['version'];
+        return $result;
     }
 
     private function categoryProjection(array $row): array

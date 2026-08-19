@@ -22,6 +22,15 @@ use think\facade\Db;
 /** 平台端复用门店业务部门的统一事实报表，范围由组织权限服务裁剪。 */
 class UnifiedReport extends AuthController
 {
+    private const STORE_OPERATION_REPORTS = [
+        'partner_item_summary', 'partner_item_detail', 'member_consumption_detail',
+        'store_item_analysis', 'store_craftsman_consumption', 'store_salesperson_performance',
+        'market_performance', 'market_detail', 'member_visit_analysis', 'member_visit_annual_summary',
+        'field_acquisition_detail', 'field_acquisition_summary', 'cross_industry_customer_detail',
+        'cross_industry_customer_summary', 'new_customer_analysis', 'new_customer_analysis_summary',
+        'salesperson_large_order_statistics', 'store_refund_ledger',
+    ];
+
     private const SIX_DIMENSION_REPORTS = [
         'six_dimension_item_deal_analysis', 'six_dimension_cash_consumption_analysis',
         'six_dimension_consumption_refund_detail', 'six_dimension_performance_deal',
@@ -409,6 +418,27 @@ class UnifiedReport extends AuthController
         }
     }
 
+    /**
+     * 平台报表的页面菜单是授权权威源。第一阶段与第二阶段的门店运营报表
+     * 共用查询接口，因此必须按 report 参数再次校验，不能只依赖前端菜单。
+     */
+    private function canAccessStoreOperationReport(string $report): bool
+    {
+        if (!in_array($report, self::STORE_OPERATION_REPORTS, true)) return true;
+        if (!(int)($this->adminInfo['level'] ?? 0) && (int)$this->adminType !== 3) return true;
+
+        $roles = $this->adminInfo['roles'] ?? [];
+        $roles = is_string($roles) ? array_filter(explode(',', $roles)) : (array)$roles;
+        if (!$roles) return false;
+
+        $expected = 'admin-report-store-operations-' . $report;
+        $menus = app()->make(SystemRoleServices::class)->getRolesByAuth($roles, 1);
+        foreach ($menus as $menu) {
+            if ((string)($menu['unique_auth'] ?? '') === $expected) return true;
+        }
+        return false;
+    }
+
     private function canAccessSixDimensionReport(string $report): bool
     {
         if (!in_array($report, self::SIX_DIMENSION_REPORTS, true)) return true;
@@ -438,18 +468,20 @@ class UnifiedReport extends AuthController
     {
         if (in_array($report, self::SIX_DIMENSION_REPORTS, true)) return $this->canAccessSixDimensionReport($report);
         if (in_array($report, self::PHASE_SIX_REPORTS, true)) return $this->hasMenuPermission('admin-report-phase-six-' . $report);
-        if (!in_array($report, self::PHASE_FOUR_REPORTS, true)) return true;
-        return $this->hasMenuPermission('admin-report-phase-four-' . $report);
+        if (in_array($report, self::PHASE_FOUR_REPORTS, true)) return $this->hasMenuPermission('admin-report-phase-four-' . $report);
+        if (in_array($report, self::STORE_OPERATION_REPORTS, true)) return $this->canAccessStoreOperationReport($report);
+        return true;
     }
 
     private function canAccessAnnotationReport(string $report): bool
     {
-        if (!in_array($report, self::SIX_DIMENSION_REPORTS, true)
-            && !in_array($report, self::PHASE_FOUR_REPORTS, true)
-            && !in_array($report, self::PHASE_SIX_REPORTS, true)) {
-            return true;
+        if (in_array($report, self::STORE_OPERATION_REPORTS, true)
+            || in_array($report, self::SIX_DIMENSION_REPORTS, true)
+            || in_array($report, self::PHASE_FOUR_REPORTS, true)
+            || in_array($report, self::PHASE_SIX_REPORTS, true)) {
+            return $this->canAccessReport($report);
         }
-        return $this->canAccessReport($report);
+        return true;
     }
 
     /** Fourth-stage yearly/monthly targets belong to the authorized report scope, not a single store. */
