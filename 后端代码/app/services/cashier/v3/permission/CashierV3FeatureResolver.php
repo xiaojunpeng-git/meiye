@@ -21,6 +21,16 @@ class CashierV3FeatureResolver
 {
     public const FEATURE_CODES = [
         'cashier.v3.cashier',
+        'cashier.v3.cashier.recharge',
+        'cashier.v3.cashier.gift',
+        'cashier.v3.cashier.checkout',
+        'cashier.v3.cashier.card.upgrade',
+        'cashier.v3.cashier.card.extend',
+        'cashier.v3.cashier.card.transfer',
+        'cashier.v3.cashier.card.disable',
+        'cashier.v3.cashier.card.enable',
+        'cashier.v3.cashier.card.project_replace',
+        'cashier.v3.cashier.card.project_upgrade',
         'cashier.v3.writeoff',
         'cashier.v3.room',
         'cashier.v3.reservation',
@@ -29,6 +39,7 @@ class CashierV3FeatureResolver
         'cashier.v3.order_center',
         'cashier.v3.management_center',
         'cashier.v3.member.create',
+        'cashier.v3.member.edit',
         'cashier.v3.member.batch',
         'cashier.v3.inventory.overview',
         'cashier.v3.inventory.inbound',
@@ -41,6 +52,21 @@ class CashierV3FeatureResolver
         'cashier.v3.inventory.transfer',
         'cashier.v3.inventory.usage',
         'cashier.v3.inventory.import',
+        'cashier.v3.order.staff_adjust',
+        'cashier.v3.order.refund',
+        'cashier.v3.order.void',
+        'cashier.v3.order.reopen',
+        'cashier.v3.order.receipt_print',
+        'cashier.v3.order.debt_view',
+        'cashier.v3.order.service_detail',
+        'cashier.v3.order.service_void',
+        'cashier.v3.staff.create',
+        'cashier.v3.staff.edit',
+        'cashier.v3.staff.permission_edit',
+        'cashier.v3.staff.export',
+        'cashier.v3.inventory.presale_claim.create',
+        'cashier.v3.inventory.presale_claim.detail',
+        'cashier.v3.inventory.presale_claim.void',
     ];
 
     public const UNIQUE_AUTH_TO_FEATURE = [
@@ -120,6 +146,28 @@ class CashierV3FeatureResolver
         return array_values(array_unique($granted));
     }
 
+    /**
+     * 返回可进入页面的菜单权限。组织人员的门店会话是只读浏览，
+     * 页面入口全部可见，但不会获得任何可操作的细粒度权限。
+     * @return string[]
+     */
+    public function resolveVisibleFeatures(array $operatorProfile): array
+    {
+        if (!empty($operatorProfile['_cashier_v3_delegated'])) {
+            $visible = [];
+            $walk = static function (array $nodes) use (&$walk, &$visible): void {
+                foreach ($nodes as $node) {
+                    $code = trim((string)($node['feature_code'] ?? ''));
+                    if ($code !== '') $visible[$code] = true;
+                    $walk((array)($node['children'] ?? []));
+                }
+            };
+            $walk(JobPositionPolicyServices::STORE_V3_MENU_TREE);
+            return array_keys($visible);
+        }
+        return $this->resolveGrantedFeatures($operatorProfile);
+    }
+
     /** @return string[] */
     private function storeV3GrantedFeatures(array $operatorProfile): array
     {
@@ -127,7 +175,9 @@ class CashierV3FeatureResolver
         $employeeId = (int)($operatorProfile['employee_id'] ?? 0);
         $storeId = (int)($operatorProfile['store_id'] ?? 0);
         if (!empty($operatorProfile['_cashier_v3_delegated'])) {
-            return $this->employeeStoreV3GrantedFeatures($employeeId);
+            // delegated 会话只读：页面由 resolveVisibleFeatures 放行，
+            // 这里不返回任何可操作权限，避免只读身份被误当作员工授权。
+            return [];
         }
         if ($staffId <= 0 || $employeeId <= 0 || $storeId <= 0) {
             return [];
@@ -162,10 +212,34 @@ class CashierV3FeatureResolver
                     if ($ruleId > 0) $ruleIds[$ruleId] = $ruleId;
                 }
             }
-            return JobPositionPolicyServices::storeV3FeaturesFromRuleIds(array_values($ruleIds));
+            $base = JobPositionPolicyServices::storeV3FeaturesFromRuleIds(array_values($ruleIds));
+            return $this->mergeEmployeeOverrides($staffId, $employeeId, $storeId, $base);
         } catch (\Throwable $exception) {
             return [];
         }
+    }
+
+    /** @return string[] */
+    private function mergeEmployeeOverrides(int $staffId, int $employeeId, int $storeId, array $base): array
+    {
+        if ($staffId <= 0 || $employeeId <= 0 || $storeId <= 0) return array_values(array_unique($base));
+        try {
+            $rows = Db::name('staff_store_v3_feature_override')
+                ->where('staff_id', $staffId)->where('employee_id', $employeeId)->where('store_id', $storeId)
+                ->where('status', 1)->where('is_del', 0)->select()->toArray();
+        } catch (\Throwable $e) {
+            // Upgrade 尚未执行时保持岗位权限，避免登录整体不可用；写接口仍会提示升级未完成。
+            return array_values(array_unique($base));
+        }
+        $allowed = array_fill_keys(array_values(array_intersect($base, self::FEATURE_CODES)), true);
+        foreach ($rows as $row) {
+            $code = trim((string)($row['feature_code'] ?? ''));
+            if (!in_array($code, self::FEATURE_CODES, true)) continue;
+            $effect = (string)($row['effect'] ?? 'inherit');
+            if ($effect === 'deny') unset($allowed[$code]);
+            if ($effect === 'allow') $allowed[$code] = true;
+        }
+        return array_keys($allowed);
     }
 
     /**

@@ -127,6 +127,18 @@ class CashierV3PermissionPolicyRegistry
 
         $this->register('policy:unified_query_page', function (CashierV3DataScopeContext $scope, array $payload, string $action) {
             $pageCode = trim((string)($payload['pageCode'] ?? $payload['page_code'] ?? ''));
+            if ($action === 'create-unified-query-export' && $pageCode === 'staff_list') {
+                $feature = 'cashier.v3.staff.export';
+                if (!$scope->hasFeature($feature)) {
+                    throw new CashierV3CommandException(
+                        CashierV3ResultCode::PERMISSION_DENIED,
+                        '当前账号没有导出员工权限，请联系管理员。',
+                        CashierV3ResultCode::STATUS_FAILED,
+                        ['action' => $action, 'page_code' => $pageCode, 'feature' => $feature]
+                    );
+                }
+                return;
+            }
             $pageFeatures = [
                 'member_list' => 'cashier.v3.member',
                 'staff_list' => 'cashier.v3.management_center',

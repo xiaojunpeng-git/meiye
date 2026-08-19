@@ -64,7 +64,7 @@ class StaffUnifiedQueryPageRegistrar implements UnifiedQueryPageRegistrar
             [
                 'keywordFields' => ['staff_name', 'nickname', 'phone'],
                 'requiredFeature' => 'cashier.v3.management_center',
-                'exportFeature' => 'cashier.v3.management_center',
+                'exportFeature' => 'cashier.v3.staff.export',
             ]
         );
     }

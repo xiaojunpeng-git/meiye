@@ -14,6 +14,10 @@ final class CashierV3OrderLifecycleModule
     public static function install(CashierV3ActionDispatcher $dispatcher, CashierV3CashierWorkspaceServices $workspace): void
     {
         $service = new CashierV3OrderLifecycleServices($workspace, new CashierV3SaleCatalogServices());
+        $entitlementProvider = $dispatcher->versionServices()
+            ? $dispatcher->versionServices()->providerFor('member_benefit_pool')
+            : null;
+        $serviceVoid = new CashierV3ServiceRecordVoidServices($entitlementProvider);
         $dispatcher->versionServices()->registerProvider('sales_order', new CashierV3OrderLifecycleVersionProvider());
         foreach (['adjust-sales-order-personnel','refund-sales-order','void-sales-order','reopen-sales-order'] as $action) {
             $isReopen = $action === 'reopen-sales-order';
@@ -110,5 +114,49 @@ final class CashierV3OrderLifecycleModule
             $policy->configureServerResourceDiscovery([$recharge, 'discover'], ['recharge_order', 'member_balance'], ['recharge_order', 'member_balance']);
             $dispatcher->policies()->register($policy);
         }
+
+        if ($dispatcher->handlers()->hasCommand('void-service-record') || $dispatcher->policies()->has('void-service-record')) {
+            throw new \LogicException('service record void duplicate action');
+        }
+        $dispatcher->handlers()->registerCommand('void-service-record', static function (array $scope) use ($serviceVoid): array {
+            $result = $serviceVoid->executeInTx('void-service-record', $scope);
+            return [
+                'data' => ['serviceRecordVoid' => $result],
+                'business_no' => (string)$result['operationNo'],
+                'touched' => (array)($result['touchedRoles'] ?? ['cashier_workspace']),
+                'message' => (string)$result['message'],
+            ];
+        });
+        $serviceVoidPolicy = new CashierV3ContextPolicy(
+            'void-service-record',
+            ['cashier_workspace'],
+            [],
+            static function (array $payload, array $base): array {
+                $serviceFactId = trim((string)($payload['serviceFactId'] ?? $payload['service_fact_id'] ?? ''));
+                if (preg_match('/^[1-9][0-9]*$/D', $serviceFactId) !== 1) {
+                    throw CashierV3CommandException::invalidContext('未找到需要作废的服务记录，请重新打开记录。', ['reason' => 'service_void_identity_missing']);
+                }
+                $workspaceId = trim((string)($base['session']['workspace_id'] ?? ''));
+                if ($workspaceId === '') {
+                    throw CashierV3CommandException::invalidContext('当前收银工作台会话无效，请刷新页面后再试。', ['reason' => 'service_void_workspace_missing']);
+                }
+                return [
+                    'identities' => [[
+                        'role' => 'cashier_workspace', 'kind' => 'cashier_workspace', 'id' => $workspaceId, 'required' => true,
+                    ]],
+                    'required_read_roles' => ['cashier_workspace'],
+                    'required_touched_roles' => ['cashier_workspace'],
+                ];
+            },
+            ['cashier_workspace'],
+            [],
+            ['member_benefit_pool', 'card_holder']
+        );
+        $serviceVoidPolicy->configureServerResourceDiscovery(
+            [$serviceVoid, 'discover'],
+            ['member_benefit_pool', 'card_holder'],
+            ['member_benefit_pool', 'card_holder']
+        );
+        $dispatcher->policies()->register($serviceVoidPolicy);
     }
 }

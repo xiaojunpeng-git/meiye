@@ -9,6 +9,7 @@ import {
   readStorePresaleClaim,
   voidStorePresaleClaim
 } from '@/services/presaleClaimApi'
+import { canUseCashierV3Operation } from '@/services/cashierV3Bridge'
 
 const rows = ref([])
 const total = ref(0)
@@ -48,6 +49,9 @@ const sourceLabel = computed(() => sourceKind.value === 'GIFT' ? '赠送产品' 
 const sourceDocumentLabel = computed(() => sourceKind.value === 'GIFT' ? '赠送单号' : '预售订单')
 const sourceQuantityLabel = computed(() => sourceKind.value === 'GIFT' ? '赠送' : '预售')
 const outboundDocumentLabel = computed(() => sourceKind.value === 'GIFT' ? '赠送产品出库单' : '预售领用出库单')
+const canClaim = computed(() => canUseCashierV3Operation('cashier.v3.inventory.presale_claim.create'))
+const canViewClaimDetail = computed(() => canUseCashierV3Operation('cashier.v3.inventory.presale_claim.detail'))
+const canVoidClaim = computed(() => canUseCashierV3Operation('cashier.v3.inventory.presale_claim.void'))
 
 function today() {
   const date = new Date()
@@ -110,6 +114,7 @@ function reset() {
 }
 
 function openClaim(line) {
+  if (!canClaim.value) return
   selectedLine.value = line
   claimQuantity.value = 1
   claimDate.value = today()
@@ -157,6 +162,7 @@ async function submitClaim() {
 }
 
 async function openDetail(line) {
+  if (!canViewClaimDetail.value) return
   selectedLine.value = line
   detailOpen.value = true
   detailLoading.value = true
@@ -172,6 +178,7 @@ async function openDetail(line) {
 
 function closeDetail() { detailOpen.value = false }
 function openVoid(row) {
+  if (!canVoidClaim.value) return
   voidTarget.value = row
   voidReason.value = ''
   voidOpen.value = true
@@ -262,9 +269,9 @@ onMounted(() => load(1))
             <td class="align-right">{{ row.unclaimed_quantity }}</td>
             <td><span class="presale-status" :class="`presale-status--${String(row.claim_status || '').toLowerCase()}`">{{ statusLabel(row.claim_status) }}</span></td>
             <td class="presale-claim-table__actions">
-              <button v-if="row.can_claim" class="button button--text" type="button" @click="openClaim(row)">领用</button>
+              <button v-if="row.can_claim && canClaim" class="button button--text" type="button" @click="openClaim(row)">领用</button>
               <span v-else class="muted">不可领用</span>
-              <button class="button button--text" type="button" @click="openDetail(row)">明细</button>
+              <button v-if="canViewClaimDetail" class="button button--text" type="button" @click="openDetail(row)">明细</button>
             </td>
           </tr>
           <tr v-if="!loading && !rows.length"><td colspan="9" class="presale-empty">暂无{{ sourceLabel }}</td></tr>
@@ -303,7 +310,7 @@ onMounted(() => load(1))
         <template v-else>
           <p v-if="detail.claimable" class="presale-detail-summary">{{ detail.claimable.product_name }}：{{ sourceQuantityLabel }} {{ detail.claimable.quantity }}，已领用 {{ detail.claimable.claimed_quantity }}，未领用 {{ detail.claimable.unclaimed_quantity }}</p>
           <table class="presale-detail-table"><thead><tr><th>{{ outboundDocumentLabel }}</th><th class="align-right">数量</th><th>状态</th><th>操作人</th><th>领用时间</th><th>作废时间</th><th>作废原因</th><th>操作</th></tr></thead><tbody>
-            <tr v-for="row in detail.claims || []" :key="row.claim_id"><td>{{ row.claim_no }}</td><td class="align-right">{{ row.quantity }}</td><td>{{ statusLabel(row.status) }}</td><td>{{ row.operator_name }}</td><td>{{ timestamp(row.occurred_at) }}</td><td>{{ timestamp(row.voided_at) }}</td><td>{{ row.void_reason || '-' }}</td><td><button v-if="row.status === 'SETTLED'" class="button button--text button--danger" type="button" @click="openVoid(row)">作废领用</button><span v-else class="muted">已作废</span></td></tr>
+            <tr v-for="row in detail.claims || []" :key="row.claim_id"><td>{{ row.claim_no }}</td><td class="align-right">{{ row.quantity }}</td><td>{{ statusLabel(row.status) }}</td><td>{{ row.operator_name }}</td><td>{{ timestamp(row.occurred_at) }}</td><td>{{ timestamp(row.voided_at) }}</td><td>{{ row.void_reason || '-' }}</td><td><button v-if="row.status === 'SETTLED' && canVoidClaim" class="button button--text button--danger" type="button" @click="openVoid(row)">作废领用</button><span v-else class="muted">已作废</span></td></tr>
             <tr v-if="!(detail.claims || []).length"><td colspan="8" class="presale-empty">暂无领用记录</td></tr>
           </tbody></table>
         </template>

@@ -85,6 +85,16 @@ class CashierV3ResourceVersionServices
         return $this->providers;
     }
 
+    /**
+     * Return a registered provider for modules that need an optional domain
+     * adapter during bootstrap. Keeping this lookup on the version service
+     * preserves the single provider registry used for locking and bumping.
+     */
+    public function providerFor(string $kind)
+    {
+        return $this->providers[$kind] ?? null;
+    }
+
     public function scopeResolver(): CashierV3ScopeResolver
     {
         return $this->scopeResolver;

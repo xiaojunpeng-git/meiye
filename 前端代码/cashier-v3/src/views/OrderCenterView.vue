@@ -10,6 +10,7 @@ import UnifiedQueryToolbar from '@/components/query/UnifiedQueryToolbar.vue'
 import { useUnifiedQueryPage } from '@mohe/unified-query-vue3/composable'
 import {
   createCashierV3CommandId,
+  canUseCashierV3Operation,
   formatMoney,
   requestCashierV3Action,
   useCashierV3State
@@ -25,6 +26,12 @@ import {
 
 const field = (key, label, type = 'text', extra = {}) => ({ key, label, type, defaultVisible: true, ...extra })
 const isPrinterSetupOpen = ref(false)
+const serviceVoidNotice = ref('')
+const serviceVoidRecord = ref(null)
+const serviceVoidReason = ref('')
+const serviceVoidError = ref('')
+const serviceVoidSubmitting = ref(false)
+const serviceVoidCommandIds = ref({})
 
 const ORDER_TABS = [
   {
@@ -110,7 +117,7 @@ const ORDER_TABS = [
     stateKey: 'serviceRecords',
     primaryField: 'service_record_no',
     searchPlaceholder: '搜索服务记录号、会员、项目、权益来源、卡号或手艺人',
-    emptyText: '暂无真实完成的服务记录。未完成、已取消和已作废服务不会显示在这里。',
+    emptyText: '暂无服务记录。',
     fields: [
       field('service_record_no', '服务记录号', 'text', { defaultQuick: true }),
       field('business_date', '业务日期', 'date', { defaultQuick: true }),
@@ -121,7 +128,8 @@ const ORDER_TABS = [
       field('labor_fee_amount', '手工费', 'money'), field('labor_performance_type', '服务业绩类型'),
       field('labor_performance_ratio', '业绩比例'), field('labor_performance_amount', '劳动业绩', 'money'),
       field('operator', '操作人', 'person'),
-      field('service_status', '状态', 'status'), field('service_completed_at', '服务完成时间', 'date')
+      field('service_status', '状态', 'status'), field('service_completed_at', '服务完成时间', 'date'),
+      field('voided_at', '作废时间', 'date'), field('void_reason', '作废原因'), field('void_operator', '作废操作人', 'person')
     ]
   },
   {
@@ -213,7 +221,8 @@ const FIELD_ALIASES = {
   labor_performance_type: ['laborPerformanceTypeLabel', 'laborPerformanceType'],
   labor_performance_ratio: ['laborPerformanceRatio'],
   labor_performance_amount: ['laborPerformanceAmount'], service_status: ['serviceStatus'],
-  service_completed_at: ['serviceCompletedAt', 'completedAt']
+  service_completed_at: ['serviceCompletedAt', 'completedAt'], voided_at: ['voidedAt'],
+  void_reason: ['voidReason'], void_operator: ['voidOperatorName']
 }
 
 const state = useCashierV3State()
@@ -282,6 +291,12 @@ const visibleFields = computed(() => {
     items.push(available.get(key))
     return items
   }, [])
+})
+const detailFields = computed(() => {
+  if (activeTabKey.value !== 'service' || !genericDetailRecord.value?.voidedAt) return visibleFields.value
+  const present = new Set(visibleFields.value.map((item) => item.key))
+  const extras = queryFields.value.filter((item) => ['voided_at', 'void_reason', 'void_operator'].includes(item.key) && !present.has(item.key))
+  return [...visibleFields.value, ...extras]
 })
 
 const allowedSalesOrderDetailActions = new Set([
@@ -659,8 +674,62 @@ function closeSalesDetail() {
 
 function openRecordDetail(record) {
   if (activeTabKey.value === 'sales') return openSalesOrderDetail({ orderId: record.id })
+  if (activeTabKey.value === 'service' && !canUseCashierV3Operation('cashier.v3.order.service_detail')) return
   genericDetailRecord.value = record
   return null
+}
+
+function openServiceVoid(record) {
+  if (!record || activeTabKey.value !== 'service' || record.serviceStatus === '已作废' || record.voidedAt) return
+  serviceVoidRecord.value = record
+  serviceVoidReason.value = ''
+  serviceVoidError.value = ''
+}
+
+function closeServiceVoid(force = false) {
+  if (serviceVoidSubmitting.value && !force) return
+  serviceVoidRecord.value = null
+  serviceVoidReason.value = ''
+  serviceVoidError.value = ''
+}
+
+async function submitServiceVoid() {
+  const record = serviceVoidRecord.value
+  const reason = String(serviceVoidReason.value || '').trim()
+  if (!record) return
+  if (!reason) {
+    serviceVoidError.value = '请填写作废原因。'
+    return
+  }
+  if (reason.length > 255) {
+    serviceVoidError.value = '作废原因不能超过255字。'
+    return
+  }
+  const serviceFactId = record.serviceFactId || String(record.id || '').replace(/^service:/, '')
+  if (!/^[1-9][0-9]*$/.test(String(serviceFactId))) {
+    serviceVoidError.value = '服务记录标识无效，请刷新后重试。'
+    return
+  }
+  const key = String(serviceFactId)
+  const idempotencyKey = serviceVoidCommandIds.value[key] || createCashierV3CommandId()
+  serviceVoidCommandIds.value = { ...serviceVoidCommandIds.value, [key]: idempotencyKey }
+  serviceVoidSubmitting.value = true
+  serviceVoidError.value = ''
+  try {
+    const result = await requestAction('void-service-record', { serviceFactId, reason, idempotencyKey })
+    const status = actionStatus(result)
+    if (isTerminalActionStatus(status)) {
+      serviceVoidCommandIds.value = { ...serviceVoidCommandIds.value, [key]: null }
+    }
+    if (status === 'success' || status === 'succeeded') {
+      closeServiceVoid(true)
+      await queryRecords({}, false)
+    } else {
+      serviceVoidError.value = result?.result?.message || result?.data?.result?.message || '作废未完成，请稍后重试。'
+    }
+  } finally {
+    serviceVoidSubmitting.value = false
+  }
 }
 
 async function openDebtRepayment(record) {
@@ -795,6 +864,11 @@ function resetLocalContext() {
   salesDetailOrder.value = {}
   isSalesDetailLoading.value = false
   genericDetailRecord.value = null
+  serviceVoidRecord.value = null
+  serviceVoidReason.value = ''
+  serviceVoidError.value = ''
+  serviceVoidSubmitting.value = false
+  serviceVoidCommandIds.value = {}
   salesOrderActionIds.value = {}
   rechargeOrderActionIds.value = {}
 }
@@ -839,6 +913,8 @@ onBeforeUnmount(() => {
         打印设置
       </button>
     </header>
+
+    <p v-if="serviceVoidNotice" class="order-center-notice" role="status">{{ serviceVoidNotice }}</p>
 
     <UnifiedQueryToolbar
       :key="activeTabKey"
@@ -902,7 +978,18 @@ onBeforeUnmount(() => {
               <span v-else>{{ displayRecordField(record, fieldItem.key) }}</span>
             </td>
             <td>
-              <button type="button" class="button button--text" @click="openRecordDetail(record)">查看详情</button>
+              <button
+                v-if="activeTabKey !== 'service' || canUseCashierV3Operation('cashier.v3.order.service_detail')"
+                type="button"
+                class="button button--text"
+                @click="openRecordDetail(record)"
+              >查看详情</button>
+              <button
+                v-if="activeTabKey === 'service' && !record.voidedAt && record.serviceStatus !== '已作废' && canUseCashierV3Operation('cashier.v3.order.service_void')"
+                type="button"
+                class="button button--text button--danger"
+                @click="openServiceVoid(record)"
+              >作废</button>
               <button
                 v-if="activeTabKey === 'debt' && record.canRepay"
                 type="button"
@@ -938,7 +1025,7 @@ onBeforeUnmount(() => {
       v-if="genericDetailRecord"
       :title="`${activeTab.label}详情`"
       :record="genericDetailRecord"
-      :fields="visibleFields"
+      :fields="detailFields"
       :resolve-value="recordFieldValue"
       :lifecycle-actions="rechargeLifecycleActions"
       :on-lifecycle-action="handleRechargeLifecycleAction"
@@ -950,11 +1037,41 @@ onBeforeUnmount(() => {
       :store-name="state.currentStore?.name || state.currentStore?.storeName || ''"
       @close="isPrinterSetupOpen = false"
     />
+
+    <div v-if="serviceVoidRecord" class="service-void-modal" role="dialog" aria-modal="true" aria-labelledby="service-void-title">
+      <div class="service-void-modal__backdrop" @click="closeServiceVoid"></div>
+      <section class="service-void-modal__panel">
+        <header class="service-void-modal__head">
+          <h2 id="service-void-title">作废服务记录</h2>
+          <button type="button" class="service-void-modal__close" :disabled="serviceVoidSubmitting" @click="closeServiceVoid">×</button>
+        </header>
+        <p class="service-void-modal__record">{{ serviceVoidRecord.serviceRecordNo || serviceVoidRecord.serviceFactId }}</p>
+        <label class="service-void-modal__label" for="service-void-reason">作废原因</label>
+        <textarea id="service-void-reason" v-model="serviceVoidReason" class="service-void-modal__textarea" maxlength="255" rows="4" placeholder="请输入作废原因"></textarea>
+        <p v-if="serviceVoidError" class="service-void-modal__error" role="alert">{{ serviceVoidError }}</p>
+        <footer class="service-void-modal__actions">
+          <button type="button" class="button" :disabled="serviceVoidSubmitting" @click="closeServiceVoid">取消</button>
+          <button type="button" class="button button--danger" :disabled="serviceVoidSubmitting" @click="submitServiceVoid">{{ serviceVoidSubmitting ? '提交中…' : '确认作废' }}</button>
+        </footer>
+      </section>
+    </div>
   </section>
 </template>
 
 <style scoped>
 .order-center-page { position: relative; }
+.order-center-notice { margin: 12px 0 0; padding: 9px 12px; border-left: 3px solid #c83c3c; background: #fff4f4; color: #8a3030; }
+.service-void-modal { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; }
+.service-void-modal__backdrop { position: absolute; inset: 0; background: rgba(16, 24, 40, .42); }
+.service-void-modal__panel { position: relative; width: min(460px, calc(100vw - 32px)); padding: 20px; border-radius: 8px; background: #fff; box-shadow: 0 18px 48px rgba(16, 24, 40, .2); }
+.service-void-modal__head { display: flex; align-items: center; justify-content: space-between; }
+.service-void-modal__head h2 { margin: 0; font-size: 18px; color: #101828; }
+.service-void-modal__close { border: 0; background: transparent; color: #667085; font-size: 24px; cursor: pointer; }
+.service-void-modal__record { margin: 12px 0 18px; color: #667085; }
+.service-void-modal__label { display: block; margin-bottom: 8px; color: #344054; font-weight: 600; }
+.service-void-modal__textarea { width: 100%; resize: vertical; box-sizing: border-box; padding: 10px; border: 1px solid #d0d5dd; border-radius: 6px; font: inherit; }
+.service-void-modal__error { margin: 8px 0 0; color: #b42318; }
+.service-void-modal__actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
 
 .order-center-page__head {
   display: flex;

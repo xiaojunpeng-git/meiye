@@ -197,6 +197,7 @@ abstract class AbstractCashierV3OrderCenterUnifiedQueryProvider implements Unifi
             'labor_performance_ratio' => ['laborPerformanceRatio'],
             'labor_performance_amount' => ['laborPerformanceAmount'],
             'service_status' => ['serviceStatus'], 'service_completed_at' => ['serviceCompletedAt', 'completedAt'],
+            'voided_at' => ['voidedAt'], 'void_reason' => ['voidReason'], 'void_operator' => ['voidOperatorName'],
             'supplement_order_no' => ['supplementOrderNo', 'repayNo', 'orderNo'], 'debt_summary' => ['debtSummary', 'summary'],
             'supplement_amount' => ['supplementAmount', 'repayAmount'], 'gift_record_no' => ['giftRecordNo', 'giftNo'], 'gift_source' => ['giftSource'],
             'gift_type' => ['giftType', 'typeLabel'], 'gift_content' => ['giftContent', 'contentSummary'], 'gift_quantity' => ['giftQuantity', 'quantity'],

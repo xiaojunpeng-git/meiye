@@ -202,6 +202,10 @@ final class CashierV3OrderCenterRecordQueryServices
             ? mb_substr($keyword, 0, 100, 'UTF-8')
             : substr($keyword, 0, 100);
         $status = $this->scalar($payload['businessStatus'] ?? $payload['status'] ?? '');
+        $scopeMode = strtolower($this->scalar($payload['dataScope'] ?? $payload['data_scope'] ?? 'normal'));
+        if (!in_array($scopeMode, ['normal', 'all'], true)) {
+            $scopeMode = 'normal';
+        }
         $validStatuses = array_column($this->statusOptions($type), 'value');
         if (!in_array($status, $validStatuses, true)) {
             $status = '';
@@ -221,6 +225,7 @@ final class CashierV3OrderCenterRecordQueryServices
             'pageSize' => min(self::MAX_PAGE_SIZE, max(1, (int)($payload['pageSize'] ?? $payload['limit'] ?? 20))),
             'keyword' => $keyword,
             'status' => $status,
+            'dataScope' => $scopeMode,
             'operationType' => $operationType,
             'topFilters' => $type === 'service' ? $this->serviceTopFilters($payload) : [],
             'sorts' => $type === 'service' ? $this->serviceSorts($payload) : [],
@@ -769,6 +774,10 @@ final class CashierV3OrderCenterRecordQueryServices
                 'cashier_v3_entitlement_writeoff_fact wf',
                 'wf.tenant_id = sf.tenant_id AND wf.checkout_request_id = sf.checkout_request_id AND wf.source_line_id = sf.source_line_id'
             )
+            ->leftJoin(
+                'cashier_v3_service_record_void_operation vo',
+                'vo.tenant_id = sf.tenant_id AND vo.service_fact_id = sf.id AND vo.status = \'succeeded\''
+            )
             ->where('sf.tenant_id', $scope->tenantId())
             ->where('sf.service_status', 'completed');
         $this->applyStoreScope($query, 'sf.store_id', $criteria['allowedStoreIds']);
@@ -778,7 +787,13 @@ final class CashierV3OrderCenterRecordQueryServices
             'wf.source_name_snapshot', 'wf.source_code_snapshot',
         ]);
         $this->applyServiceTopFilters($query, $criteria['topFilters']);
-        if ($criteria['status'] !== '' && $criteria['status'] !== 'completed') {
+        // “正常数据” is the default view and must contain completed service
+        // facts that have not been voided. “全部数据” is the explicit audit
+        // view where the status selector can narrow to completed/voided.
+        if (($criteria['dataScope'] ?? 'normal') !== 'all' && $criteria['status'] === '') {
+            $query->whereNull('vo.id');
+        }
+        if ($criteria['status'] !== '' && !in_array($criteria['status'], ['completed', 'voided', '已完成', '已作废'], true)) {
             return [[], 0];
         }
         $total = (int)(clone $query)->count('sf.id');
@@ -793,6 +808,8 @@ final class CashierV3OrderCenterRecordQueryServices
             'wf.source_name_snapshot AS source_name_snapshot',
             'wf.source_code_snapshot AS source_code_snapshot',
             'sf.labor_amount_cents', 'sf.labor_fee_amount_cents', 'sf.labor_mode',
+            'vo.id AS void_operation_id', 'vo.occurred_at AS voided_at', 'vo.reason_snapshot AS void_reason',
+            'vo.operator_name_snapshot AS void_operator_name', 'vo.operation_no AS void_operation_no',
         ]));
         $laborByLine = $this->laborPerformanceByServiceLine($rows, $scope->tenantId());
 
@@ -805,6 +822,7 @@ final class CashierV3OrderCenterRecordQueryServices
             }
             return [
                 'id' => 'service:' . $row['id'],
+                'serviceFactId' => (int)$row['id'],
                 // The member-detail writeoff tab displays the immutable visible
                 // service document number. ESF remains only an internal fallback
                 // for historical rows created before that number was allocated.
@@ -819,6 +837,10 @@ final class CashierV3OrderCenterRecordQueryServices
                 'usedTimes' => (int)$row['quantity'],
                 'storeName' => (string)$row['store_name_snapshot'],
                 'craftsmenSummary' => $craftsmen,
+                // A void is an adjustment fact. Keep the original service
+                // snapshot visible in the detail/list and expose the void
+                // audit fields separately; do not overwrite historical facts
+                // with the reversal amount.
                 'laborPerformanceAmount' => $this->centsToMoney((int)$labor['amountCents']),
                 'laborFeeAmount' => $this->centsToMoney(
                     (int)($labor['laborFeeCents'] ?? 0) > 0
@@ -828,10 +850,14 @@ final class CashierV3OrderCenterRecordQueryServices
                 'laborPerformanceType' => (string)($row['labor_mode'] ?? 'project_rule'),
                 'laborPerformanceTypeLabel' => $this->laborPerformanceTypeLabel((string)($row['labor_mode'] ?? 'project_rule')),
                 'laborPerformanceRatio' => $this->laborPerformanceRatio($labor['allocations'] ?? []),
-                'laborPerformanceAllocations' => $labor['allocations'] ?? [],
+                'laborPerformanceAllocations' => ($labor['allocations'] ?? []),
                 'operatorName' => (string)$row['operator_name_snapshot'],
-                'serviceStatus' => '已完成',
+                'serviceStatus' => !empty($row['void_operation_id']) ? '已作废' : '已完成',
                 'serviceCompletedAt' => $this->dateTime((int)($row['settled_at'] ?: $row['occurred_at'])),
+                'voidedAt' => !empty($row['voided_at']) ? $this->dateTime((int)$row['voided_at']) : '',
+                'voidReason' => (string)($row['void_reason'] ?? ''),
+                'voidOperatorName' => (string)($row['void_operator_name'] ?? ''),
+                'voidOperationNo' => (string)($row['void_operation_no'] ?? ''),
             ];
         }, $rows), $total];
     }
@@ -984,7 +1010,7 @@ final class CashierV3OrderCenterRecordQueryServices
             $value = $this->scalar($filter['value'] ?? '');
             if ($value === '' || !in_array($field, $allowed, true) || isset($filters[$field])) continue;
             if ($field === 'business_date' && preg_match('/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/D', $value) !== 1) continue;
-            if ($field === 'service_status' && $value !== 'completed' && $value !== '已完成') continue;
+            if ($field === 'service_status' && !in_array($value, ['completed', 'voided', '已完成', '已作废'], true)) continue;
             $filters[$field] = $value;
         }
         return $filters;
@@ -1025,7 +1051,11 @@ final class CashierV3OrderCenterRecordQueryServices
             if ($field === 'business_date') {
                 $query->where('sf.business_date', $value);
             } elseif ($field === 'service_status') {
-                $query->where('sf.service_status', 'completed');
+                if (in_array($value, ['voided', '已作废'], true)) {
+                    $query->whereNotNull('vo.id');
+                } else {
+                    $query->whereNull('vo.id');
+                }
             } elseif (isset($likeFields[$field])) {
                 $query->where($likeFields[$field], 'like', '%' . addcslashes($value, "\\%_") . '%');
             }
@@ -1557,6 +1587,12 @@ final class CashierV3OrderCenterRecordQueryServices
                 ['value' => 'completed', 'label' => '已完成'],
                 ['value' => 'awaiting_checkout', 'label' => '待结账'],
                 ['value' => 'cancelled', 'label' => '已取消'],
+            ]);
+        }
+        if ($type === 'service') {
+            return array_merge($options, [
+                ['value' => 'completed', 'label' => '已完成'],
+                ['value' => 'voided', 'label' => '已作废'],
             ]);
         }
         return $options;

@@ -5,6 +5,7 @@ import MemberCreatorPanel from '@/components/member/MemberCreatorPanel.vue'
 import UnifiedQueryToolbar from '@/components/query/UnifiedQueryToolbar.vue'
 import { useUnifiedQueryPage } from '@/composables/useUnifiedQueryPage'
 import {
+  canUseCashierV3Operation,
   formatMoney,
   openCashierV3QueryEntitySelector,
   requestCashierV3Action,
@@ -19,6 +20,8 @@ import {
 } from '@/services/unifiedQueryContract'
 
 const state = useCashierV3State()
+const canCreateMember = computed(() => canUseCashierV3Operation('cashier.v3.member.create'))
+const canEditMember = computed(() => canUseCashierV3Operation('cashier.v3.member.edit'))
 const selectedMemberIds = ref([])
 const isMemberCreatorOpen = ref(false)
 const editingMember = ref(null)
@@ -197,6 +200,7 @@ async function requestAction(action, payload = {}) {
 }
 
 function openMemberCreator(event = null) {
+  if (!canCreateMember.value) return
   const schema = event?.detail?.creatorSchema
   if (schema && typeof schema === 'object') creatorSchema.value = schema
   isMemberCreatorOpen.value = true
@@ -214,6 +218,7 @@ function closeMemberMutation() {
 }
 
 async function createMemberFromList(payload = {}) {
+  if (!canCreateMember.value) return { result: { status: 'failed', message: '当前账号没有新增会员权限。' } }
   // 头像文件不进入 JSON 命令；会员归属门店和组织继续由后端当前会话强制决定。
   const { avatarFile: _avatarFile, ...serializablePayload } = payload && typeof payload === 'object'
     ? payload
@@ -222,6 +227,7 @@ async function createMemberFromList(payload = {}) {
 }
 
 async function submitMemberMutation(payload = {}) {
+  if (editingMember.value && !canEditMember.value) return { result: { status: 'failed', message: '当前账号没有编辑会员权限。' } }
   if (!editingMember.value) return createMemberFromList(payload)
   const { avatarFile: _avatarFile, profileMode: _profileMode, ...serializablePayload } = payload && typeof payload === 'object'
     ? payload
@@ -586,6 +592,9 @@ async function openBatchAction() {
 
 <template>
   <section class="member-list-page" :class="{ 'member-list-page--batch': canBatchOperate, 'member-list-page--insights': hasQueryInsights }" aria-label="会员列表">
+    <header v-if="canCreateMember" class="member-list-page__head">
+      <button type="button" class="button button--primary" @click="openMemberCreator()">新增会员</button>
+    </header>
     <UnifiedQueryToolbar
       search-placeholder="搜索会员姓名、完整手机号或会员编号"
       settings-button-label="查询设置"
@@ -656,7 +665,7 @@ async function openBatchAction() {
             <td>
               <div class="member-row-actions">
                 <button type="button" class="button button--text" @click="openMemberDetail(record)">查看</button>
-                <button v-if="record.status !== '已注销'" type="button" class="button button--text" @click="openMemberEditor(record)">编辑</button>
+                <button v-if="canEditMember && record.status !== '已注销'" type="button" class="button button--text" @click="openMemberEditor(record)">编辑</button>
                 <button v-if="record.status !== '已注销'" type="button" class="button button--text button--danger" @click="deletingMember = record">注销</button>
               </div>
             </td>
@@ -705,6 +714,7 @@ async function openBatchAction() {
 </template>
 
 <style scoped>
+.member-list-page__head { display: flex; justify-content: flex-end; margin: 0 0 12px; }
 .member-list-query-message {
   margin: 0;
   padding: 9px 12px;

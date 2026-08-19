@@ -9,40 +9,26 @@ use app\services\employee\EmployeeInternalLoginServices;
 use app\services\organization\EmployeeDataScopeServices;
 use mohe\exceptions\AdminException;
 use mohe\services\CacheService;
-use think\facade\Cache;
 use think\facade\Db;
 
 /**
- * 门店端 Vue 3 登录：单店直接进入，多店登录时选店，正式会话锁定当前门店。
+ * 门店端 Vue 3 登录分流契约：
+ * 1. 有唯一有效任职门店的门店人员：直接进入该门店，不走选店票据；
+ * 2. 没有任职门店、但具备组织数据权限和门店端入口的组织人员：只能从权限范围选店，
+ *    进入后创建只读 delegated store session，不写入或恢复 system_store_staff 任职；
+ * 3. 无论哪种入口，选定门店都会绑定到当前会话，登录后不支持切店。
  *
- * 没有直接任职的员工，只有在有效数据权限 + 组织直属收银 V3 岗位同时满足时，
- * 才能创建 delegated store session；该会话不写入或恢复 system_store_staff 任职。
+ * 组织人员的多门店选店不能被误判为“门店人员多店任职”。两者是不同的登录模式。
  */
 class CashierV3StoreLoginServices extends BaseServices
 {
-    private const SELECT_TICKET_PREFIX = 'cashier_v3_store_select:';
-    private const SELECT_TICKET_TTL = 300;
     private const DELEGATED_SESSION_TTL = 28800;
 
     /** @return array */
     public function login(string $account, string $password, int $storeId = 0, string $ticket = ''): array
     {
-        $ticket = trim($ticket);
-        if ($ticket !== '') {
-            $pending = Cache::get(self::SELECT_TICKET_PREFIX . $ticket);
-            if (!is_array($pending) || (int)($pending['employee_id'] ?? 0) <= 0) {
-                throw new AdminException('选店凭证已失效，请重新登录');
-            }
-            // 一次性消费；随后仍重新解析数据权限，不能信任票据中的门店列表。
-            Cache::delete(self::SELECT_TICKET_PREFIX . $ticket);
-            $employeeId = (int)$pending['employee_id'];
-            $eligible = $this->loginCandidates($employeeId);
-            return $this->issueSelectedStore(
-                $employeeId,
-                $storeId,
-                (int)($pending['account_id'] ?? 0),
-                $eligible
-            );
+        if (trim($ticket) !== '') {
+            throw new AdminException('门店端登录不支持选择门店，请重新输入账号密码');
         }
 
         /** @var EmployeeInternalAccountServices $accounts */
@@ -51,60 +37,52 @@ class CashierV3StoreLoginServices extends BaseServices
         $employeeId = (int)$auth['employee_id'];
         /** @var EmployeeInternalLoginServices $employees */
         $employees = app()->make(EmployeeInternalLoginServices::class);
-        $direct = $employees->listEligibleStoreV3Staff($employeeId);
-        $eligible = $direct ?: $this->eligibleStores($employeeId);
-        if (!$eligible) {
-            /** @var EmployeeDataScopeServices $scope */
-            $scope = app()->make(EmployeeDataScopeServices::class);
-            $scopeIds = $scope->resolveEffectiveStoreIds($employeeId, 0, ['admin_type' => 3]);
-            if ($scopeIds !== [] && !$employees->employeeHasStoreV3Entry($employeeId)) {
-                throw new AdminException('当前账号已有数据权限，但未配置门店端岗位或功能入口');
+        // 门店人员分支：唯一有效任职门店固定直登；不能被数据权限门店覆盖。
+        $direct = $employees->resolveUniqueStoreV3Staff($employeeId);
+        if ($direct) {
+            if ($storeId > 0 && $storeId !== (int)$direct['store_id']) {
+                throw new AdminException('员工只能进入当前任职门店');
             }
+            return $this->issueSelectedStore(
+                $employeeId,
+                (int)$direct['store_id'],
+                (int)($auth['account_row']['id'] ?? 0),
+                [$direct]
+            );
+        }
+
+        // A direct tenure exists but has no V3 entry: do not silently turn it
+        // into an organization read-only session.
+        $activeTenureCount = (int)Db::name('system_store_staff')
+            ->where('employee_id', $employeeId)->where('status', 1)->where('is_del', 0)
+            ->where('store_id', '>', 0)->count();
+        if ($activeTenureCount > 0) {
+            throw new AdminException('当前任职未开通门店端入口，请联系管理员');
+        }
+
+        // 组织人员分支：没有任职门店时，数据权限内的门店才是可选入口；
+        // 选择后仍只绑定一个具体门店，不能把门店端变成跨店查询。
+        $delegated = array_values(array_filter(
+            $this->eligibleStores($employeeId),
+            static fn(array $row): bool => !empty($row['delegated'])
+        ));
+        // 产品规则要求多门店 delegated 账号在登录时选择门店。当前接口尚未恢复
+        // 两步选店交互，因此暂时明确拦截并提示；这不是门店人员单店规则的冲突结论。
+        if (count($delegated) > 1) {
+            throw new AdminException('当前账号有多个数据权限门店，请从指定门店入口进入');
+        }
+        if (!$delegated) {
             throw new AdminException('当前账号没有可进入的有效门店权限');
         }
-        // 有直接任职时优先使用直接任职；数据权限门店不覆盖已有任职入口。
-        if (count($direct) === 1 && $storeId <= 0) {
-            return $this->issueSelectedStore(
-                $employeeId,
-                (int)$direct[0]['store_id'],
-                (int)($auth['account_row']['id'] ?? 0),
-                $direct
-            );
-        }
-        if ($storeId > 0) {
-            return $this->issueSelectedStore(
-                $employeeId,
-                $storeId,
-                (int)($auth['account_row']['id'] ?? 0),
-                $eligible
-            );
-        }
-        if (count($eligible) > 1) {
-            $ticket = bin2hex(random_bytes(24));
-            Cache::set(self::SELECT_TICKET_PREFIX . $ticket, [
-                'employee_id' => $employeeId,
-                'account_id' => (int)($auth['account_row']['id'] ?? 0),
-            ], self::SELECT_TICKET_TTL);
-            return [
-                'need_select_store' => true,
-                'login_ticket' => $ticket,
-                'stores' => $this->presentStores($eligible),
-                'message' => '该账号可进入多个门店，请选择门店后登录',
-            ];
+        if ($storeId > 0 && $storeId !== (int)$delegated[0]['store_id']) {
+            throw new AdminException('员工只能进入当前指定门店');
         }
         return $this->issueSelectedStore(
             $employeeId,
-            (int)$eligible[0]['store_id'],
+            (int)$delegated[0]['store_id'],
             (int)($auth['account_row']['id'] ?? 0),
-            $eligible
+            $delegated
         );
-    }
-
-    /** 登录候选：有直接任职时只展示直接任职；无直接任职时才使用数据权限门店。 */
-    private function loginCandidates(int $employeeId): array
-    {
-        $direct = app()->make(EmployeeInternalLoginServices::class)->listEligibleStoreV3Staff($employeeId);
-        return $direct ?: $this->eligibleStores($employeeId);
     }
 
     /** 登录后不开放切店，门店在会话签发时固定。 */
@@ -121,9 +99,9 @@ class CashierV3StoreLoginServices extends BaseServices
         }
         /** @var EmployeeInternalLoginServices $employees */
         $employees = app()->make(EmployeeInternalLoginServices::class);
-        $direct = $employees->listEligibleStoreV3Staff($employeeId);
+        $direct = $employees->resolveUniqueStoreV3Staff($employeeId);
         $byStore = [];
-        foreach ($direct as $row) {
+        foreach ($direct ? [$direct] : [] as $row) {
             $sid = (int)($row['store_id'] ?? 0);
             if ($sid > 0 && !isset($byStore[$sid])) {
                 $row['source'] = 'direct_tenure';
@@ -221,8 +199,6 @@ class CashierV3StoreLoginServices extends BaseServices
         if ($accountId > 0) {
             app()->make(EmployeeInternalAccountServices::class)->touchLogin($accountId, (string)app('request')->ip());
         }
-        $result['need_select_store'] = false;
-        $result['stores'] = $this->presentStores($eligible);
         return $result;
     }
 
@@ -267,7 +243,7 @@ class CashierV3StoreLoginServices extends BaseServices
         ];
         /** @var CashierV3FeatureResolver $resolver */
         $resolver = app()->make(CashierV3FeatureResolver::class);
-        $features = $resolver->resolveGrantedFeatures($profile);
+        $features = $resolver->resolveVisibleFeatures($profile);
         if (!$features) {
             Db::name('cashier_v3_store_session')->where('id', $sessionId)->update(['status' => 0, 'update_time' => $now]);
             throw new AdminException('当前岗位未开通门店端功能');
@@ -283,8 +259,10 @@ class CashierV3StoreLoginServices extends BaseServices
             'token' => $token['token'],
             'expires_time' => $token['params']['exp'],
             'features' => $features,
-            'need_select_store' => false,
-            'stores' => $this->presentStores($eligible),
+            'visible_features' => $features,
+            'operation_features' => [],
+            'feature_permissions' => [],
+            'permission_version' => 'readonly:' . md5($employeeId . ':' . $storeId . ':' . $authVersion),
             'store_id' => $storeId,
             'read_only' => true,
             'session_mode' => 'store_read_only',

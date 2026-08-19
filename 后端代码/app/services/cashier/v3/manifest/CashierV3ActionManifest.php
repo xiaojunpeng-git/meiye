@@ -324,6 +324,7 @@ class CashierV3ActionManifest
                     'inventory.service_consumption.resolved',
                     'hang_order.settled',
                     'debt.recorded',
+                    'card.operation.recorded',
                     'card.operation.settled',
                 ],
                 'event_rules' => [
@@ -414,6 +415,13 @@ class CashierV3ActionManifest
                         'source_type' => 'submit-checkout',
                         'aggregate_version' => 1,
                     ],
+                    'card.operation.recorded' => [
+                        'min_count' => 0,
+                        'max_count' => 1,
+                        'aggregate_type' => 'card_operation',
+                        'source_type' => 'submit-checkout',
+                        'aggregate_version' => null,
+                    ],
                     'card.operation.settled' => [
                         'min_count' => 0,
                         'max_count' => 1,
@@ -439,6 +447,7 @@ class CashierV3ActionManifest
                     'inventory.service_consumption.resolved' => [],
                     'hang_order.settled' => [],
                     'debt.recorded' => [],
+                    'card.operation.recorded' => [],
                     'card.operation.settled' => [],
                 ],
             ],
@@ -693,6 +702,13 @@ class CashierV3ActionManifest
                 'required_event_types' => ['sales_order.voided'], 'allowed_event_types' => ['sales_order.voided'],
                 'event_rules' => ['sales_order.voided' => ['min_count' => 1, 'max_count' => 1, 'aggregate_type' => 'sales_order', 'source_type' => 'void-sales-order']],
                 'eventless_reason' => '', 'activation_blocked_until_event_contract' => false, 'consumers' => ['sales_order.voided' => []],
+            ],
+            'void-service-record' => [
+                'required_event_types' => ['service_record.voided'],
+                'allowed_event_types' => ['service_record.voided'],
+                'event_rules' => ['service_record.voided' => ['min_count' => 1, 'max_count' => 1, 'aggregate_type' => 'service_record', 'source_type' => 'void-service-record']],
+                'eventless_reason' => '', 'activation_blocked_until_event_contract' => false,
+                'consumers' => ['service_record.voided' => []],
             ],
             'refund-recharge-order' => [
                 'required_event_types' => ['recharge.refunded'], 'allowed_event_types' => ['recharge.refunded'],

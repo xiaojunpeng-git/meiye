@@ -28,13 +28,22 @@ const FEATURE_WRITEOFF = 'cashier.v3.writeoff'
 const FEATURE_ROOM = 'cashier.v3.room'
 const FEATURE_RESERVATION = 'cashier.v3.reservation'
 const FEATURE_MEMBER = 'cashier.v3.member'
-// 本次改造只落功能入口权限；会员新增属于会员入口内的操作，不能假造
-// 一个当前菜单系统不存在的细粒度 unique_auth。
-const FEATURE_MEMBER_CREATE = 'cashier.v3.member'
+// 门店端重构时已经把 action 统一登记在这份清单；第一期只替换其
+// permission 锚点，页面 action 名和 canonical 不变。
+const FEATURE_MEMBER_CREATE = 'cashier.v3.member.create'
+const FEATURE_MEMBER_EDIT = 'cashier.v3.member.edit'
 const FEATURE_MEMBER_BATCH = 'cashier.v3.member.batch'
 const FEATURE_HANG = 'cashier.v3.hang'
 const FEATURE_ORDER_CENTER = 'cashier.v3.order_center'
 const FEATURE_MANAGEMENT = 'cashier.v3.management_center'
+const FEATURE_ORDER_STAFF_ADJUST = 'cashier.v3.order.staff_adjust'
+const FEATURE_ORDER_REFUND = 'cashier.v3.order.refund'
+const FEATURE_ORDER_VOID = 'cashier.v3.order.void'
+const FEATURE_ORDER_REOPEN = 'cashier.v3.order.reopen'
+const FEATURE_ORDER_RECEIPT_PRINT = 'cashier.v3.order.receipt_print'
+const FEATURE_ORDER_DEBT_VIEW = 'cashier.v3.order.debt_view'
+const FEATURE_ORDER_SERVICE_DETAIL = 'cashier.v3.order.service_detail'
+const FEATURE_ORDER_SERVICE_VOID = 'cashier.v3.order.service_void'
 
 function entries(owner, type, table) {
   const out = {}
@@ -253,7 +262,7 @@ const C4_ACTIONS = entries(C4, ACTION_TYPE_PROJECTION, {
 const C5_ACTIONS = {
   ...entries(C5, ACTION_TYPE_COMMAND, {
     'create-member': FEATURE_MEMBER_CREATE,
-    'update-member': FEATURE_MEMBER,
+    'update-member': FEATURE_MEMBER_EDIT,
     'deactivate-member': FEATURE_MEMBER,
     'submit-recharge': FEATURE_MEMBER,
     'prepare-recharge-checkout': FEATURE_MEMBER,
@@ -267,14 +276,15 @@ const C5_ACTIONS = {
     'submit-recharge-checkout': FEATURE_MEMBER,
     'submit-recharge-debt-repayment': FEATURE_MEMBER,
     'submit-direct-gift': FEATURE_MEMBER,
-    'adjust-sales-order-personnel': FEATURE_ORDER_CENTER,
-    'refund-sales-order': FEATURE_ORDER_CENTER,
-    'void-sales-order': FEATURE_ORDER_CENTER,
-    'refund-recharge-order': FEATURE_ORDER_CENTER,
-    'void-recharge-order': FEATURE_ORDER_CENTER,
-    'reopen-sales-order': FEATURE_ORDER_CENTER,
+    'adjust-sales-order-personnel': FEATURE_ORDER_STAFF_ADJUST,
+    'refund-sales-order': FEATURE_ORDER_REFUND,
+    'void-sales-order': FEATURE_ORDER_VOID,
+    'void-service-record': FEATURE_ORDER_SERVICE_VOID,
+    'refund-recharge-order': FEATURE_ORDER_REFUND,
+    'void-recharge-order': FEATURE_ORDER_VOID,
+    'reopen-sales-order': FEATURE_ORDER_REOPEN,
     'upgrade-sales-order': FEATURE_ORDER_CENTER,
-    'print-sales-order-receipt': FEATURE_ORDER_CENTER,
+    'print-sales-order-receipt': FEATURE_ORDER_RECEIPT_PRINT,
     'save-reservation-query-settings': FEATURE_RESERVATION,
     'save-hang-order-query-settings': FEATURE_HANG,
     'save-order-center-query-settings': FEATURE_ORDER_CENTER,
@@ -296,7 +306,7 @@ const C5_ACTIONS = {
     'open-member-detail': FEATURE_MEMBER,
     'load-member-detail-tab': FEATURE_MEMBER,
     'open-member-more-actions': FEATURE_MEMBER,
-    'open-member-editor': FEATURE_MEMBER,
+    'open-member-editor': FEATURE_MEMBER_EDIT,
     'open-member-creator': FEATURE_MEMBER_CREATE,
     'open-member-batch-actions': FEATURE_MEMBER_BATCH,
     'open-recharge': FEATURE_MEMBER,
@@ -306,19 +316,19 @@ const C5_ACTIONS = {
     'view-sales-order': FEATURE_ORDER_CENTER,
     'open-order-operation-logs': FEATURE_ORDER_CENTER,
     'open-operation-logs': FEATURE_ORDER_CENTER,
-    'open-order-debt-settlements': FEATURE_ORDER_CENTER,
-    'open-sales-order-personnel-adjustment': FEATURE_ORDER_CENTER,
-    'open-debt-settlements': FEATURE_ORDER_CENTER,
-    'open-order-refunds': FEATURE_ORDER_CENTER,
-    'open-refunds': FEATURE_ORDER_CENTER,
-    'open-order-void': FEATURE_ORDER_CENTER,
-    'open-void-record': FEATURE_ORDER_CENTER,
-    'open-order-reopenings': FEATURE_ORDER_CENTER,
-    'open-reopen-records': FEATURE_ORDER_CENTER,
+    'open-order-debt-settlements': FEATURE_ORDER_DEBT_VIEW,
+    'open-sales-order-personnel-adjustment': FEATURE_ORDER_STAFF_ADJUST,
+    'open-debt-settlements': FEATURE_ORDER_DEBT_VIEW,
+    'open-order-refunds': FEATURE_ORDER_REFUND,
+    'open-refunds': FEATURE_ORDER_REFUND,
+    'open-order-void': FEATURE_ORDER_VOID,
+    'open-void-record': FEATURE_ORDER_VOID,
+    'open-order-reopenings': FEATURE_ORDER_REOPEN,
+    'open-reopen-records': FEATURE_ORDER_REOPEN,
     'open-order-upgrades': FEATURE_ORDER_CENTER,
     'open-upgrade-records': FEATURE_ORDER_CENTER,
-    'open-order-services': FEATURE_ORDER_CENTER,
-    'open-service-records': FEATURE_ORDER_CENTER,
+    'open-order-services': FEATURE_ORDER_SERVICE_DETAIL,
+    'open-service-records': FEATURE_ORDER_SERVICE_DETAIL,
     'open-order-writeoffs': FEATURE_ORDER_CENTER,
     'open-order-gifts': FEATURE_ORDER_CENTER,
     'open-gift-records': FEATURE_ORDER_CENTER,

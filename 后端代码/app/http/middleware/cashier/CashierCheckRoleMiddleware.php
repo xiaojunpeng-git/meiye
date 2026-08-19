@@ -55,8 +55,15 @@ class CashierCheckRoleMiddleware implements MiddlewareInterface
             }
             /** @var CashierV3FeatureResolver $resolver */
             $resolver = app()->make(CashierV3FeatureResolver::class);
-            if (!$resolver->resolveGrantedFeatures($cashierInfo)) {
+            $features = !empty($cashierInfo['_cashier_v3_delegated'])
+                ? $resolver->resolveVisibleFeatures($cashierInfo)
+                : $resolver->resolveGrantedFeatures($cashierInfo);
+            if (!$features) {
                 throw new AuthException(ApiErrorCode::ERR_AUTH);
+            }
+            $requiredFeature = $this->directOperationFeature($path, $method);
+            if ($requiredFeature !== '' && !in_array($requiredFeature, $features, true)) {
+                throw new AuthException('当前账号没有该功能的操作权限，请联系管理员。', 403);
             }
             return $next($request);
         }
@@ -68,5 +75,21 @@ class CashierCheckRoleMiddleware implements MiddlewareInterface
         }
 
         return $next($request);
+    }
+
+    /**
+     * V3 仍有少量不经过统一 action gateway 的直连写接口。
+     * 这里只登记已纳入一期操作权限的员工保存入口；其他直连接口继续沿用原门禁。
+     */
+    private function directOperationFeature(string $path, string $method): string
+    {
+        if ($method !== 'POST') {
+            return '';
+        }
+        $path = ltrim($path, '/');
+        if (preg_match('#^cashierapi/v3/management/staff/([0-9]+)$#D', $path, $match) !== 1) {
+            return '';
+        }
+        return (int)$match[1] > 0 ? 'cashier.v3.staff.edit' : 'cashier.v3.staff.create';
     }
 }

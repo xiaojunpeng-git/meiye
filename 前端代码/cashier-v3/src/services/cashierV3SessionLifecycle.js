@@ -59,8 +59,16 @@ function applyBootstrapFeatureSnapshot(result) {
   const envelope = result?.data?.result && typeof result.data.result === 'object'
     ? result.data
     : result
-  const features = envelope?.data?.bootstrap?.features
-  if (Array.isArray(features)) applyCashierV3LoginFeatures(features)
+  const bootstrap = envelope?.data?.bootstrap
+  const features = bootstrap?.features
+  if (Array.isArray(features)) {
+    applyCashierV3LoginFeatures(features, {
+      visibleFeatures: features,
+      operationFeatures: Array.isArray(bootstrap?.operationFeatures) ? bootstrap.operationFeatures : [],
+      readOnly: bootstrap?.readOnly === true,
+      sessionMode: bootstrap?.sessionMode
+    })
+  }
 }
 
 export function hasCashierV3Session(browserWindow = typeof window !== 'undefined' ? window : null) {

@@ -10,13 +10,17 @@ const account = ref('')
 const password = ref('')
 const submitting = ref(false)
 const error = ref('')
-const storeChoices = ref([])
-const loginTicket = ref('')
-const selectingStore = ref(false)
 
 async function finishLogin(result) {
   persistStoreV3Token(result.token)
-  applyCashierV3LoginFeatures(result.features)
+  applyCashierV3LoginFeatures(result.features, {
+    readOnly: result.read_only === true,
+    sessionMode: result.session_mode,
+    visibleFeatures: Array.isArray(result.visible_features) ? result.visible_features : result.features,
+    operationFeatures: Array.isArray(result.operation_features)
+      ? result.operation_features
+      : (result.feature_permissions ? Object.keys(result.feature_permissions).filter((key) => result.feature_permissions[key]) : [])
+  })
   const bootstrap = await onCashierStoreOrAccountChanged({
     reason: 'account',
     storeId: Number(result.store_id || 0),
@@ -40,15 +44,9 @@ async function submit() {
   }
   submitting.value = true
   try {
+    // 门店人员唯一任职门店直接登录；组织人员无任职门店时应在登录阶段
+    // 从数据权限范围选择门店，不能把两种入口规则混为“全部取消选店”。
     const result = await loginStoreV3({ account: account.value.trim(), pwd: password.value })
-    if (result.need_select_store) {
-      storeChoices.value = Array.isArray(result.stores) ? result.stores : []
-      loginTicket.value = String(result.login_ticket || '')
-      if (!loginTicket.value || !storeChoices.value.length) {
-        throw new Error('当前账号没有可选择的有效门店。')
-      }
-      return
-    }
     await finishLogin(result)
   } catch (reason) {
     error.value = reason instanceof Error ? reason.message : '登录未完成，请稍后重试。'
@@ -57,31 +55,6 @@ async function submit() {
   }
 }
 
-async function selectStore(store) {
-  if (submitting.value || !loginTicket.value) return
-  error.value = ''
-  submitting.value = true
-  selectingStore.value = true
-  try {
-    const result = await loginStoreV3({
-      login_ticket: loginTicket.value,
-      store_id: Number(store?.store_id || 0)
-    })
-    await finishLogin(result)
-  } catch (reason) {
-    error.value = reason instanceof Error ? reason.message : '门店选择未完成，请重新登录。'
-  } finally {
-    submitting.value = false
-    selectingStore.value = false
-  }
-}
-
-function backToAccountLogin() {
-  if (submitting.value) return
-  storeChoices.value = []
-  loginTicket.value = ''
-  error.value = ''
-}
 </script>
 
 <template>
@@ -96,7 +69,7 @@ function backToAccountLogin() {
           </h2>
         </div>
 
-        <form v-if="!loginTicket" class="store-login__panel" @submit.prevent="submit">
+        <form class="store-login__panel" @submit.prevent="submit">
           <header>
             <p>欢迎回来</p>
             <h1>门店端登录</h1>
@@ -112,28 +85,6 @@ function backToAccountLogin() {
           <p v-if="error" class="store-login__error" role="alert">{{ error }}</p>
           <button class="store-login__submit" type="submit" :disabled="submitting">{{ submitting ? '处理中…' : '登录' }}</button>
         </form>
-        <section v-else class="store-login__panel store-login__store-picker" aria-labelledby="store-picker-title">
-          <header>
-            <p>请选择进入门店</p>
-            <h1 id="store-picker-title">选择门店后登录</h1>
-          </header>
-          <p class="store-login__hint">进入后当前门店会固定，工作台内不再切换门店。</p>
-          <div class="store-login__stores">
-            <button
-              v-for="store in storeChoices"
-              :key="`${store.store_id}-${store.staff_id}`"
-              class="store-login__store"
-              type="button"
-              :disabled="submitting"
-              @click="selectStore(store)"
-            >
-              <span class="store-login__store-name">{{ store.store_name || `门店 ${store.store_id}` }}</span>
-              <span class="store-login__store-meta">{{ store.org_name || '当前数据权限范围' }} · {{ store.source === 'direct_tenure' ? '直接任职' : '数据权限' }}</span>
-            </button>
-          </div>
-          <button class="store-login__back" type="button" :disabled="submitting" @click="backToAccountLogin">返回重新登录</button>
-          <p v-if="error" class="store-login__error" role="alert">{{ error }}</p>
-        </section>
       </div>
     </section>
 

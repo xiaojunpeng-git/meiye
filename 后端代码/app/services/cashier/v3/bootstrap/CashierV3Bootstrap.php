@@ -262,9 +262,18 @@ class CashierV3Bootstrap
                 'visibleStoreIds' => $dataScope->visibleStoreIds(),
                 'authorizationMode' => $dataScope->authorizationMode(),
                 'permissionVersion' => $dataScope->permissionVersion(),
+                'readOnly' => $dataScope->isReadOnlySession(),
+                'sessionMode' => $dataScope->isReadOnlySession() ? 'store_read_only' : 'store_staff',
                 // 轻量 bootstrap 尚未返回完整根投影时，也必须带回服务端已解析
                 // 的门店端功能码；客户端只把它用于当前会话的页面可见性。
                 'features' => array_values($dataScope->grantedFeatures()),
+                'operationFeatures' => $dataScope->isReadOnlySession() ? [] : array_values(array_filter(
+                    app()->make(\app\services\cashier\v3\permission\CashierV3FeatureResolver::class)
+                        ->resolveGrantedFeatures($dataScope->operatorProfile()),
+                    static function ($feature) {
+                        return in_array((string)$feature, \app\services\cashier\v3\permission\CashierV3StaffFeatureOverrideServices::operationFeatureCodes(), true);
+                    }
+                )),
             ];
             $result = [
                 'message' => 'ok',

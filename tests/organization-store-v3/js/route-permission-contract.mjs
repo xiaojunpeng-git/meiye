@@ -22,14 +22,16 @@ const assertions = [
   ['guard waits for server-backed bootstrap', router.includes("await ensureCashierV3RouterBootstrap({ reason: 'route-permission', silent: true })")],
   ['guard redirects unauthorized routes', router.includes('const fallbackRoute = firstGrantedRouteName()')],
   ['guard fails closed to login when no feature is granted', router.includes("return { name: 'cashier-v3-login' }")],
-  ['login applies server-returned feature snapshot before navigation', loginView.includes('applyCashierV3LoginFeatures(result.features)')],
-  ['login snapshot allowlists only known V3 feature codes', bridge.includes('export function applyCashierV3LoginFeatures(features = [])') && bridge.includes('Object.keys(EMPTY_BOOTSTRAP.featurePermissions)')],
+  ['login applies visible and operation snapshots before navigation', loginView.includes('applyCashierV3LoginFeatures(result.features, {') && loginView.includes('visibleFeatures:') && loginView.includes('operationFeatures:')],
+  ['login snapshot separates visible and operation permissions', bridge.includes('export function applyCashierV3LoginFeatures(features = [], options = {})') && bridge.includes('options.visibleFeatures') && bridge.includes('options.operationFeatures') && bridge.includes('cashierV3State.operationPermissions')],
+  ['login snapshot marks delegated sessions read-only', loginView.includes('readOnly: result.read_only === true') && bridge.includes('options.readOnly === true')],
   ['lightweight bootstrap returns server-resolved feature codes', backendBootstrap.includes("'features' => array_values($dataScope->grantedFeatures())")],
-  ['lightweight bootstrap refreshes the same allowlisted feature snapshot', sessionLifecycle.includes('function applyBootstrapFeatureSnapshot(result)') && sessionLifecycle.includes('applyCashierV3LoginFeatures(features)')],
+  ['lightweight bootstrap refreshes visible and operation snapshots', sessionLifecycle.includes('function applyBootstrapFeatureSnapshot(result)') && sessionLifecycle.includes('visibleFeatures: features') && sessionLifecycle.includes('operationFeatures:') && sessionLifecycle.includes('applyCashierV3LoginFeatures(features, {')],
   ['frontend bootstrap uses session policy rather than cashier feature', frontendManifest.includes("'open-cashier-workbench': 'policy:store_v3_session'")],
   ['backend bootstrap uses matching session policy', backendManifest.includes("'open-cashier-workbench' => self::POLICY_STORE_V3_SESSION")],
   ['session policy requires at least one server-resolved feature', policies.includes("register('policy:store_v3_session'") && policies.includes('$scope->grantedFeatures()')],
   ['delegated read-only middleware leaves action gateway for manifest-level projection/command checks', cashierRoleMiddleware.includes('$isV3ActionGateway') && cashierRoleMiddleware.includes('workbenches/actions') && cashierRoleMiddleware.includes('!$isV3ActionGateway')],
+  ['direct employee save routes have separate create/edit gates', cashierRoleMiddleware.includes("'cashier.v3.staff.edit' : 'cashier.v3.staff.create'") && cashierRoleMiddleware.includes('cashierapi/v3/management/staff/')],
 ]
 
 let failed = 0

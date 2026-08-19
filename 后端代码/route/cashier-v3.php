@@ -104,6 +104,10 @@ Route::group('cashierapi/v3', function () {
 // 这些入口复用既有门店控制器，必须放在 cashier.v3.* 前缀组外，
 // 否则会被解析为 app\\controller\\cashier\\v3\\store\\staff\\StoreStaff。
 Route::group('cashierapi/v3/management', function () {
+    Route::get('staff/:staffId/feature-permissions', 'cashier.v3.StaffFeaturePermission/read')
+        ->option(['real_name' => 'V3读取员工功能权限']);
+    Route::put('staff/:staffId/feature-permissions', 'cashier.v3.StaffFeaturePermission/save')
+        ->option(['real_name' => 'V3保存员工功能权限']);
     Route::get('staff/read/:id', 'store.staff.StoreStaff/read')
         ->option(['real_name' => 'V3读取门店员工']);
     Route::get('staff/person-complete/:id', 'store.staff.StoreStaff/personComplete')

@@ -44,11 +44,14 @@ class CashierV3DataScopeFactory
             ? 'cashier_level_0_menus_unfiltered(SystemMenusServices::getMenusList type=3)'
             : '';
 
-        $granted = $this->featureResolver->resolveGrantedFeatures($operatorProfile);
+        $readOnlySession = !empty($operatorProfile['_cashier_v3_delegated']);
+        // 只读组织会话需要加载全部页面投影，但不应获得任何写授权；
+        // CashierV3PermissionGuard 会在 command 类型统一拒绝写操作。
+        $granted = $readOnlySession
+            ? $this->featureResolver->resolveVisibleFeatures($operatorProfile)
+            : $this->featureResolver->resolveGrantedFeatures($operatorProfile);
         // 数据权限选店会话没有 system_store_staff 任职，只能进入门店查看。
         // 该身份由服务端 delegated token 产生，不能由客户端 profile 注入。
-        $readOnlySession = !empty($operatorProfile['_cashier_v3_delegated']);
-
         $adminInfoForScope = $operatorProfile;
         if (!array_key_exists('admin_type', $adminInfoForScope)) {
             $adminInfoForScope['admin_type'] = 3;

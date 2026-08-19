@@ -28,14 +28,42 @@ class JobPositionPolicyServices extends BaseServices
 
     /** @var array<int, array{id:int,title:string,feature_code:string,children?:array}> */
     public const STORE_V3_MENU_TREE = [
-        ['id' => 301001, 'title' => '收银', 'feature_code' => 'cashier.v3.cashier'],
+        ['id' => 301001, 'title' => '收银', 'feature_code' => 'cashier.v3.cashier', 'children' => [
+            ['id' => 301010, 'title' => '充值', 'feature_code' => 'cashier.v3.cashier.recharge'],
+            ['id' => 301011, 'title' => '赠送', 'feature_code' => 'cashier.v3.cashier.gift'],
+            ['id' => 301012, 'title' => '结账', 'feature_code' => 'cashier.v3.cashier.checkout'],
+            ['id' => 301013, 'title' => '卡升级', 'feature_code' => 'cashier.v3.cashier.card.upgrade'],
+            ['id' => 301014, 'title' => '卡延期', 'feature_code' => 'cashier.v3.cashier.card.extend'],
+            ['id' => 301015, 'title' => '卡转让', 'feature_code' => 'cashier.v3.cashier.card.transfer'],
+            ['id' => 301016, 'title' => '卡停用', 'feature_code' => 'cashier.v3.cashier.card.disable'],
+            ['id' => 301017, 'title' => '卡启用', 'feature_code' => 'cashier.v3.cashier.card.enable'],
+            ['id' => 301018, 'title' => '项目替换', 'feature_code' => 'cashier.v3.cashier.card.project_replace'],
+            ['id' => 301019, 'title' => '项目升级', 'feature_code' => 'cashier.v3.cashier.card.project_upgrade'],
+        ]],
         ['id' => 301002, 'title' => '挂单', 'feature_code' => 'cashier.v3.hang'],
         ['id' => 301003, 'title' => '房间', 'feature_code' => 'cashier.v3.room'],
         ['id' => 301004, 'title' => '预约', 'feature_code' => 'cashier.v3.reservation'],
-        ['id' => 301005, 'title' => '会员', 'feature_code' => 'cashier.v3.member'],
+        ['id' => 301005, 'title' => '会员', 'feature_code' => 'cashier.v3.member', 'children' => [
+            ['id' => 301020, 'title' => '新增会员', 'feature_code' => 'cashier.v3.member.create'],
+            ['id' => 301021, 'title' => '编辑会员', 'feature_code' => 'cashier.v3.member.edit'],
+        ]],
         ['id' => 301008, 'title' => '客情', 'feature_code' => 'cashier.v3.member'],
-        ['id' => 301006, 'title' => '订单中心', 'feature_code' => 'cashier.v3.order_center'],
-        ['id' => 301007, 'title' => '管理', 'feature_code' => 'cashier.v3.management_center'],
+        ['id' => 301006, 'title' => '订单中心', 'feature_code' => 'cashier.v3.order_center', 'children' => [
+            ['id' => 301030, 'title' => '人员调整', 'feature_code' => 'cashier.v3.order.staff_adjust'],
+            ['id' => 301031, 'title' => '退款', 'feature_code' => 'cashier.v3.order.refund'],
+            ['id' => 301032, 'title' => '作废订单', 'feature_code' => 'cashier.v3.order.void'],
+            ['id' => 301033, 'title' => '重开', 'feature_code' => 'cashier.v3.order.reopen'],
+            ['id' => 301034, 'title' => '小票打印', 'feature_code' => 'cashier.v3.order.receipt_print'],
+            ['id' => 301035, 'title' => '查看欠款/补交', 'feature_code' => 'cashier.v3.order.debt_view'],
+            ['id' => 301036, 'title' => '查看服务记录详情', 'feature_code' => 'cashier.v3.order.service_detail'],
+            ['id' => 301037, 'title' => '作废服务记录', 'feature_code' => 'cashier.v3.order.service_void'],
+        ]],
+        ['id' => 301007, 'title' => '管理', 'feature_code' => 'cashier.v3.management_center', 'children' => [
+            ['id' => 301040, 'title' => '新增员工', 'feature_code' => 'cashier.v3.staff.create'],
+            ['id' => 301041, 'title' => '编辑员工', 'feature_code' => 'cashier.v3.staff.edit'],
+            ['id' => 301042, 'title' => '编辑员工权限', 'feature_code' => 'cashier.v3.staff.permission_edit'],
+            ['id' => 301043, 'title' => '导出员工', 'feature_code' => 'cashier.v3.staff.export'],
+        ]],
         ['id' => 301100, 'title' => '库存管理', 'feature_code' => 'cashier.v3.inventory.overview', 'children' => [
             ['id' => 301101, 'title' => '入库', 'feature_code' => 'cashier.v3.inventory.inbound'],
             ['id' => 301102, 'title' => '出库', 'feature_code' => 'cashier.v3.inventory.outbound'],
@@ -47,6 +75,9 @@ class JobPositionPolicyServices extends BaseServices
             ['id' => 301108, 'title' => '调拨', 'feature_code' => 'cashier.v3.inventory.transfer'],
             ['id' => 301109, 'title' => '院装', 'feature_code' => 'cashier.v3.inventory.usage'],
             ['id' => 301110, 'title' => '导入', 'feature_code' => 'cashier.v3.inventory.import'],
+            ['id' => 301120, 'title' => '发起预售领用', 'feature_code' => 'cashier.v3.inventory.presale_claim.create'],
+            ['id' => 301121, 'title' => '查看预售领用明细', 'feature_code' => 'cashier.v3.inventory.presale_claim.detail'],
+            ['id' => 301122, 'title' => '作废预售领用', 'feature_code' => 'cashier.v3.inventory.presale_claim.void'],
         ]],
     ];
 
@@ -769,7 +800,64 @@ class JobPositionPolicyServices extends BaseServices
                 $features[$feature] = true;
             }
         }
-        return array_keys($features);
+        // 兼容尚未迁移的老岗位：只有父节点单独存在时，才把它解释为
+        // “该模块全部默认操作”。一旦规则中出现任一子节点，就严格按
+        // 子节点集合计算，不能再由父节点把被取消的操作补回来。
+        $selected = array_fill_keys(array_map('intval', $ruleIds), true);
+        $hasSelectedDescendant = static function (array $children) use (&$hasSelectedDescendant, $selected): bool {
+            foreach ($children as $child) {
+                $childId = (int)($child['id'] ?? 0);
+                if ($childId > 0 && isset($selected[$childId])) return true;
+                if ($hasSelectedDescendant((array)($child['children'] ?? []))) return true;
+            }
+            return false;
+        };
+        $addDescendants = static function (array $nodes) use (&$addDescendants, &$features, $selected, $hasSelectedDescendant): void {
+            foreach ($nodes as $node) {
+                $id = (int)($node['id'] ?? 0);
+                $children = (array)($node['children'] ?? []);
+                if ($id > 0 && isset($selected[$id]) && !$hasSelectedDescendant($children)) {
+                    $collect = static function (array $children) use (&$collect, &$features): void {
+                        foreach ($children as $child) {
+                            $code = trim((string)($child['feature_code'] ?? ''));
+                            if ($code !== '') $features[$code] = true;
+                            $collect((array)($child['children'] ?? []));
+                        }
+                    };
+                    $collect($children);
+                }
+                $addDescendants($children);
+            }
+        };
+        $addDescendants(self::STORE_V3_MENU_TREE);
+        return self::storeV3FeaturesWithAncestors(array_keys($features));
+    }
+
+    /**
+     * 子操作权限必须同时具备对应页面入口，避免仅勾选“编辑会员”后无法进入会员页。
+     * @param string[] $features
+     * @return string[]
+     */
+    public static function storeV3FeaturesWithAncestors(array $features): array
+    {
+        $set = [];
+        foreach ($features as $feature) {
+            $feature = trim((string)$feature);
+            if ($feature !== '') $set[$feature] = true;
+        }
+        $walk = static function (array $nodes, array $parents = []) use (&$walk, &$set): void {
+            foreach ($nodes as $node) {
+                $code = trim((string)($node['feature_code'] ?? ''));
+                $nextParents = $parents;
+                if ($code !== '') $nextParents[] = $code;
+                if ($code !== '' && isset($set[$code])) {
+                    foreach ($parents as $parent) $set[$parent] = true;
+                }
+                $walk((array)($node['children'] ?? []), $nextParents);
+            }
+        };
+        $walk(self::STORE_V3_MENU_TREE);
+        return array_keys($set);
     }
 
     /** @param int[] $ruleIds */

@@ -301,6 +301,8 @@ const EMPTY_BOOTSTRAP = {
   // 后端为当前浏览器工作台完整根投影签发的严格单调序号；不是业务资源版本号。
   stateContextId: '',
   stateRevision: '0',
+  readOnly: false,
+  sessionMode: 'store_staff',
   storeName: '当前门店',
   currentStore: {
     id: null,
@@ -328,6 +330,36 @@ const EMPTY_BOOTSTRAP = {
     'cashier.v3.inventory.transfer': false,
     'cashier.v3.inventory.usage': false,
     'cashier.v3.inventory.import': false
+  },
+  operationPermissions: {
+    'cashier.v3.cashier.recharge': false,
+    'cashier.v3.cashier.gift': false,
+    'cashier.v3.cashier.checkout': false,
+    'cashier.v3.cashier.card.upgrade': false,
+    'cashier.v3.cashier.card.extend': false,
+    'cashier.v3.cashier.card.transfer': false,
+    'cashier.v3.cashier.card.disable': false,
+    'cashier.v3.cashier.card.enable': false,
+    'cashier.v3.cashier.card.project_replace': false,
+    'cashier.v3.cashier.card.project_upgrade': false,
+    'cashier.v3.member.create': false,
+    'cashier.v3.member.edit': false,
+    'cashier.v3.member.batch': false,
+    'cashier.v3.order.staff_adjust': false,
+    'cashier.v3.order.refund': false,
+    'cashier.v3.order.void': false,
+    'cashier.v3.order.reopen': false,
+    'cashier.v3.order.receipt_print': false,
+    'cashier.v3.order.debt_view': false,
+    'cashier.v3.order.service_detail': false,
+    'cashier.v3.order.service_void': false,
+    'cashier.v3.staff.create': false,
+    'cashier.v3.staff.edit': false,
+    'cashier.v3.staff.permission_edit': false,
+    'cashier.v3.staff.export': false,
+    'cashier.v3.inventory.presale_claim.create': false,
+    'cashier.v3.inventory.presale_claim.detail': false,
+    'cashier.v3.inventory.presale_claim.void': false
   },
   workspace: {
     id: null,
@@ -1399,6 +1431,7 @@ export function validateRootStateSchema(state = {}) {
   ;[
     'currentStore',
     'featurePermissions',
+    'operationPermissions',
     'workspace',
     'operator',
     'cashier',
@@ -1870,12 +1903,17 @@ function normalizeBootstrap(rawBootstrap = {}) {
   const incomingFeaturePermissions = raw.featurePermissions && typeof raw.featurePermissions === 'object'
     ? raw.featurePermissions
     : {}
+  const incomingOperationPermissions = raw.operationPermissions && typeof raw.operationPermissions === 'object'
+    ? raw.operationPermissions
+    : {}
 
   return {
     ...base,
     ...raw,
     stateContextId: stateContextIdOf(raw) || base.stateContextId,
     stateRevision: stateRevisionOf(raw) || base.stateRevision,
+    readOnly: raw.readOnly === true || raw.read_only === true,
+    sessionMode: String(raw.sessionMode || raw.session_mode || base.sessionMode || 'store_staff'),
     storeName: typeof raw.storeName === 'string' && raw.storeName.trim() ? raw.storeName : base.storeName,
     currentStore: {
       ...base.currentStore,
@@ -1887,6 +1925,10 @@ function normalizeBootstrap(rawBootstrap = {}) {
       ...base.featurePermissions,
       ...incomingFeaturePermissions
     },
+    operationPermissions: Object.fromEntries(Object.keys(base.operationPermissions).map((feature) => [
+      feature,
+      incomingOperationPermissions[feature] === true
+    ])),
     workspace: {
       ...base.workspace,
       ...incomingWorkspace,
@@ -2200,15 +2242,25 @@ export function useCashierV3State() {
  * 在首个工作台根投影回来前，路由只能使用这份登录响应决定可进入的首屏；
  * 仅接受已登记功能码，且不把客户端传入的未知码扩展成 UI 权限。
  */
-export function applyCashierV3LoginFeatures(features = []) {
+export function applyCashierV3LoginFeatures(features = [], options = {}) {
   const granted = new Set(Array.isArray(features)
     ? features.filter((feature) => typeof feature === 'string')
     : [])
   const known = Object.keys(EMPTY_BOOTSTRAP.featurePermissions)
+  const visible = new Set(Array.isArray(options.visibleFeatures) ? options.visibleFeatures : features)
   cashierV3State.featurePermissions = Object.fromEntries(known.map((feature) => [
     feature,
-    granted.has(feature)
+    options.readOnly === true ? visible.has(feature) : granted.has(feature)
   ]))
+  const knownOperations = Object.keys(EMPTY_BOOTSTRAP.operationPermissions)
+  const operationGranted = new Set((Array.isArray(options.operationFeatures) ? options.operationFeatures : features)
+    .filter((feature) => knownOperations.includes(feature)))
+  cashierV3State.operationPermissions = Object.fromEntries(knownOperations.map((feature) => [
+    feature,
+    options.readOnly !== true && operationGranted.has(feature)
+  ]))
+  cashierV3State.readOnly = options.readOnly === true
+  cashierV3State.sessionMode = options.sessionMode || (options.readOnly ? 'store_read_only' : 'store_staff')
 }
 
 /**
@@ -2513,6 +2565,10 @@ export function canUseCashierV3Feature(featureCode) {
   return cashierV3State.featurePermissions?.[featureCode] === true
 }
 
+export function canUseCashierV3Operation(featureCode) {
+  return cashierV3State.operationPermissions?.[featureCode] === true
+}
+
 function normalizeExpectedVersion(value) {
   const normalized = Number(value)
   return Number.isSafeInteger(normalized) && normalized > 0 ? normalized : null
@@ -2659,6 +2715,7 @@ function isCashierWorkspaceAction(action) {
     'continue-partial-payment-recovery',
     'go-to-writeoff-after-checkout',
     'view-sales-order',
+    'void-service-record',
     'finish-checkout-and-return'
   ]
   return cashierWorkspaceActions.includes(action)

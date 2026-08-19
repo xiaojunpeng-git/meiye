@@ -281,6 +281,9 @@ export default {
       immediate: true,
       handler(v) {
         this.localEntries = normalizeEntries(v);
+        // 菜单树和入口开关是异步到达的；入口状态更新后必须再次套用
+        // 已保存的规则，否则首次打开岗位时会把所有节点误显示为未选中。
+        this.applyValue(true);
         this.applyEntryLocks(true);
       },
     },

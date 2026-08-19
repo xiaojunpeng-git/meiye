@@ -168,6 +168,17 @@ class CashierV3PermissionSnapshotServices
                     ->lock(true)
                     ->select()
                     ->toArray();
+                // 个人门店端功能覆盖与员工权限版本是同一权限快照的一部分。
+                // 表尚未升级时不影响历史环境登录，实际写接口会在升级缺失时失败。
+                try {
+                    Db::name('staff_store_v3_feature_override')
+                        ->where('employee_id', $employeeId)
+                        ->where('is_del', 0)
+                        ->lock(true)
+                        ->select()
+                        ->toArray();
+                } catch (\Throwable $ignore) {
+                }
             } catch (\Throwable $e) {
                 throw new CashierV3CommandException(
                     CashierV3ResultCode::ACTION_DEPENDENCY_NOT_READY,

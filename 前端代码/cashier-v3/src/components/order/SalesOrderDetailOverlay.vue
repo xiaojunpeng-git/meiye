@@ -1,6 +1,6 @@
 <script setup>
 import { computed, nextTick, ref } from 'vue'
-import { formatMoney } from '@/services/cashierV3Bridge'
+import { canUseCashierV3Operation, formatMoney } from '@/services/cashierV3Bridge'
 import SalesOrderReceiptPrintButton from '@/components/order/SalesOrderReceiptPrintButton.vue'
 
 /**
@@ -320,18 +320,19 @@ function relatedRecords(keys) {
 
 const relatedGroups = computed(() => {
   const groups = [
-    { key: 'debt', label: '欠款／补交', action: 'open-order-debt-settlements', actionAliases: ['open-order-debt-settlements', 'open-debt-settlements'], records: relatedRecords(['debtSettlements', 'debts', 'supplementPayments']) },
-    { key: 'refund', label: '退款', action: 'open-order-refunds', actionAliases: ['open-order-refunds', 'open-refunds'], records: relatedRecords(['refunds', 'refundRecords']) },
-    { key: 'void', label: '作废', action: 'open-order-void', actionAliases: ['open-order-void', 'open-void-record'], records: relatedRecords(['voids', 'voidRecords']) },
+    { key: 'debt', label: '欠款／补交', permission: 'cashier.v3.order.debt_view', action: 'open-order-debt-settlements', actionAliases: ['open-order-debt-settlements', 'open-debt-settlements'], records: relatedRecords(['debtSettlements', 'debts', 'supplementPayments']) },
+    { key: 'refund', label: '退款', permission: 'cashier.v3.order.refund', action: 'open-order-refunds', actionAliases: ['open-order-refunds', 'open-refunds'], records: relatedRecords(['refunds', 'refundRecords']) },
+    { key: 'void', label: '作废', permission: 'cashier.v3.order.void', action: 'open-order-void', actionAliases: ['open-order-void', 'open-void-record'], records: relatedRecords(['voids', 'voidRecords']) },
     { key: 'upgrade', label: '升级', action: 'open-order-upgrades', actionAliases: ['open-order-upgrades', 'open-upgrade-records'], records: relatedRecords(['upgrades', 'upgradeRecords']) },
     { key: 'gift', label: '随单赠送', action: 'open-order-gifts', actionAliases: ['open-order-gifts', 'open-gift-records'], records: relatedRecords(['gifts', 'giftRecords', 'orderGifts']) },
-    { key: 'service', label: '服务', action: 'open-order-services', actionAliases: ['open-order-services', 'open-service-records'], records: relatedRecords(['services', 'serviceRecords']) },
+    { key: 'service', label: '服务', permission: 'cashier.v3.order.service_detail', action: 'open-order-services', actionAliases: ['open-order-services', 'open-service-records'], records: relatedRecords(['services', 'serviceRecords']) },
     { key: 'writeoff', label: '核销', action: 'open-order-writeoffs', actionAliases: ['open-order-writeoffs', 'open-writeoff-records'], records: relatedRecords(['writeoffs', 'writeoffRecords']) }
   ]
   return groups.filter((group) => {
     // 后端不应为游客下发补交能力；这里再兜底，避免异常旧投影误露入口。
     if (group.key === 'debt' && (sourceOrder.value.isGuest === true || Number(sourceOrder.value.memberId || 0) <= 0)) return false
-    return group.records.length || group.actionAliases.some(hasAction)
+    return (!group.permission || canUseCashierV3Operation(group.permission))
+      && (group.records.length || group.actionAliases.some(hasAction))
   })
 })
 
@@ -342,12 +343,12 @@ const adjustmentSalespeople = computed(() => Array.isArray(personnelAdjustment.v
 const adjustmentCraftsmen = computed(() => Array.isArray(personnelAdjustment.value?.craftsmen) ? personnelAdjustment.value.craftsmen : [])
 const canOpenOperationLogs = computed(() => hasAction('open-order-operation-logs') || hasAction('open-operation-logs'))
 const quickActions = computed(() => [
-  { action: 'open-sales-order-personnel-adjustment', label: '人员调整' },
-  { action: 'refund-sales-order', label: '退款' },
-  { action: 'void-sales-order', label: '作废订单' },
-  { action: 'reopen-sales-order', label: '重开' },
+  { action: 'open-sales-order-personnel-adjustment', label: '人员调整', permission: 'cashier.v3.order.staff_adjust' },
+  { action: 'refund-sales-order', label: '退款', permission: 'cashier.v3.order.refund' },
+  { action: 'void-sales-order', label: '作废订单', permission: 'cashier.v3.order.void' },
+  { action: 'reopen-sales-order', label: '重开', permission: 'cashier.v3.order.reopen' },
   { action: 'upgrade-sales-order', label: '卡项／项目升级' }
-].filter((item) => hasAction(item.action)))
+].filter((item) => hasAction(item.action) && (!item.permission || canUseCashierV3Operation(item.permission))))
 
 function refundLineId(line) {
   return String(line?.id || line?.orderItemId || '')
@@ -589,6 +590,7 @@ async function runAction(action, payload = {}) {
           @click="runQuickAction(item.action)"
         >{{ pendingAction === item.action ? '处理中…' : item.label }}</button>
         <SalesOrderReceiptPrintButton
+          v-if="canUseCashierV3Operation('cashier.v3.order.receipt_print')"
           class="sales-order-detail-button sales-order-detail-button--secondary"
           :order="sourceOrder"
           :disabled="isLoading"
