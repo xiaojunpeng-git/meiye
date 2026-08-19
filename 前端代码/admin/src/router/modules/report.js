@@ -67,7 +67,10 @@ export default {
       path: 'member-management-dashboard',
       name: `${pre}member_management_dashboard`,
       meta: {
-        auth: ['admin-report-member-management-dashboard'],
+        // Keep existing group-dashboard sessions usable until their menu
+        // permission cache is refreshed; the backend still enforces the
+        // member-dashboard permission for every data request.
+        auth: ['admin-report-member-management-dashboard', 'admin-report-group-management-dashboard'],
         title: '会员看板'
       },
       component: () => import('@/pages/report/data/member_management_dashboard')
@@ -77,7 +80,10 @@ export default {
       path: 'store-operations/:report',
       name: `${pre}store_operations_report`,
       meta: {
-        auth: ['report-sale-info'],
+        // The report code is the authorization boundary. The page and export
+        // APIs perform the concrete report permission check after resolving
+        // :report; inheriting the legacy sales permission here would allow an
+        // unrelated sales role to enter every store-operations report.
         title: '门店运营报表'
       },
       component: () => import('@/pages/report/data/store_business')
