@@ -2657,7 +2657,15 @@ function localEntitlementAmount(lines = [], line = {}) {
   // 编辑态只按当前展示权益计算应收，不以剩余次数阻止加入；实际余次由
   // 第三步确认时的权威结账事务重新读取并校验。
   if (!totalCents || !Number.isInteger(totalTimes) || totalTimes <= 0) return 0
-  const cumulative = (times) => Math.round((totalCents * times) / totalTimes)
+  // Keep the browser snapshot identical to the final entitlement kernel:
+  // amounts are allocated in whole yuan, with the final occurrence carrying
+  // the remainder. Proportional cent rounding (for example 4660 / 3 =>
+  // 1553.33) cannot be accepted by the authority snapshot check.
+  const totalWholeYuan = Math.floor(totalCents / 100)
+  const regularWholeYuan = Math.floor(totalWholeYuan / totalTimes)
+  const cumulative = (times) => times >= totalTimes
+    ? totalWholeYuan * 100
+    : regularWholeYuan * 100 * Math.max(0, times)
   return centsToMoney(cumulative(consumedTimes + quantity) - cumulative(consumedTimes))
 }
 

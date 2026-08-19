@@ -10,6 +10,7 @@ const summary = read('前端代码/cashier-v3/src/components/common/MemberSummar
 const detail = read('前端代码/cashier-v3/src/components/member/MemberDetailOverlay.vue')
 const shell = read('前端代码/cashier-v3/src/layouts/CashierShell.vue')
 const selector = read('前端代码/cashier-v3/src/components/cashier/EntitlementSelectorOverlay.vue')
+const workbench = read('前端代码/cashier-v3/src/views/CashierWorkbenchView.vue')
 
 assert.match(summary, /<span>权益金额：<\/span>/)
 assert.doesNotMatch(summary, /<span>次卡：<\/span>/)
@@ -19,5 +20,10 @@ assert.match(shell, /void loadMemberDetailTab\(\{ memberId: openedMemberId, tab:
 assert.match(shell, /loadSequence === memberDetailLoadSequence/)
 assert.match(selector, /whole-yuan-floor-final-remainder-v1/)
 assert.match(selector, /\\\.0\{1,2\}/)
+assert.match(workbench, /function localEntitlementAmount\(lines = \[\], line = \{\}\) \{/)
+assert.match(workbench, /const totalWholeYuan = Math\.floor\(totalCents \/ 100\)/)
+assert.match(workbench, /const regularWholeYuan = Math\.floor\(totalWholeYuan \/ totalTimes\)/)
+assert.match(workbench, /times >= totalTimes/)
+assert.doesNotMatch(workbench, /const cumulative = \(times\) => Math\.round\(\(totalCents \* times\) \/ totalTimes\)/)
 
 console.log('MEMBER_ENTITLEMENT_WHOLE_YUAN_CONTRACT_OK')
