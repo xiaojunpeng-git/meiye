@@ -176,7 +176,17 @@ final class CashierV3ServiceRecordCraftsmanAdjustmentServices
             ->where('performance_type', 'consumption_performance_recorded')->where('status', 'effective')
             ->field('amount_cents')->select()->toArray();
         foreach ($rows as $row) $amount += (int)($row['amount_cents'] ?? 0);
-        return max(0, $amount);
+        if ($amount > 0) return $amount;
+
+        // 兼容已存在的历史服务记录：旧事实表没有保存项目级核销金额时，
+        // 以该服务有效劳动业绩的净额作为本次必须重分配的固定金额。后续
+        // 调整写入的反向及新正向事实会相互抵消，净额仍保持原项目金额。
+        $laborAmount = (int)Db::name('cashier_v3_performance_fact')->where('tenant_id', $tenantId)
+            ->where('checkout_request_id', (string)$source['checkout_request_id'])
+            ->where('source_line_id', (string)$source['source_line_id'])
+            ->where('performance_type', 'labor_performance_allocated')->where('status', 'effective')
+            ->sum('amount_cents');
+        return max(0, $laborAmount);
     }
 
     /** @return array<int,array<string,mixed>> */

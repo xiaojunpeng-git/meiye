@@ -75,6 +75,12 @@ adjustmentCheck(
     && str_contains($personnelOverlay, 'Math.floor(historyTotalCents.value * ratio / 10000) * 100')
 );
 adjustmentCheck(
+    'legacy service records fall back to the effective labor-performance net amount',
+    str_contains($adjustment, "->where('performance_type', 'labor_performance_allocated')->where('status', 'effective')")
+    && str_contains($adjustment, "->sum('amount_cents')")
+    && str_contains($adjustment, '兼容已存在的历史服务记录')
+);
+adjustmentCheck(
     'project count uses signed half-unit facts and one-decimal UI',
     str_contains($migration, '`project_count_half_units` bigint(20) NOT NULL DEFAULT 0')
     && !str_contains($migration, '`project_count_half_units` bigint(20) unsigned')
