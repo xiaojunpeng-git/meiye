@@ -21,6 +21,14 @@ export function presaleClaimListApi(params) {
   });
 }
 
+/** 平台预售领用的组织/门店权限范围。 */
+export function presaleClaimScopeApi() {
+  return request({
+    url: '/product/inventory/v3/presale-claims/scope',
+    method: 'get'
+  });
+}
+
 /** 平台预售销售行的全部领用记录。 */
 export function presaleClaimDetailApi(claimableLineId) {
   return request({

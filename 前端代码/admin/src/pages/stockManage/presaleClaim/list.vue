@@ -3,18 +3,12 @@
     <Card :bordered="false" dis-hover :padding="0" class="ivu-mt">
       <div class="new_card_pd">
         <Form inline :label-width="76" @submit.native.prevent>
-          <FormItem label="组织：">
-            <OrganizationResourceSelector
-              v-model="filters.organization_id"
-              resource="organization"
-              picker-mode="modal"
-              :tree-mode="true"
-              selection-mode="org_only"
-              modal-title="选择组织"
-              trigger-placeholder="全部组织"
-              placeholder="搜索组织名称"
-              :clearable="true"
-              @change="search"
+          <FormItem label="组织 / 门店：">
+            <OrganizationStoreScopePicker
+              ref="scopePicker"
+              v-model="filters.store_ids"
+              :load-scope="loadPresaleClaimScope"
+              @change="onScopeChange"
             />
           </FormItem>
           <FormItem label="状态：">
@@ -125,11 +119,12 @@
 </template>
 
 <script>
-import OrganizationResourceSelector from '@/components/organization/OrganizationResourceSelector.vue';
+import OrganizationStoreScopePicker from '@/components/organization/OrganizationStoreScopePicker.vue';
 import {
   createPresaleClaimApi,
   presaleClaimDetailApi,
   presaleClaimListApi,
+  presaleClaimScopeApi,
   voidPresaleClaimApi
 } from '@/api/stockManage';
 
@@ -155,10 +150,10 @@ function businessDate(value) {
 
 export default {
   name: 'PresaleClaimList',
-  components: { OrganizationResourceSelector },
+  components: { OrganizationStoreScopePicker },
   data() {
     return {
-      filters: { page: 1, limit: 20, keyword: '', status: '', organization_id: 0 },
+      filters: { page: 1, limit: 20, keyword: '', status: '', store_ids: [] },
       rows: [], total: 0, loading: false,
       activeLine: null, claimModalOpen: false, claimSubmitting: false,
       claimForm: { quantity: 1, business_date: today() },
@@ -191,6 +186,8 @@ export default {
   },
   created() { this.load(); },
   methods: {
+    loadPresaleClaimScope() { return presaleClaimScopeApi(); },
+    onScopeChange() { this.search(); },
     statusLabel(status) { return ({ AVAILABLE: '可领用', FULLY_CLAIMED: '已全部领用', CLOSED: '已关闭' })[status] || '-'; },
     statusColor(status) { return ({ AVAILABLE: 'green', FULLY_CLAIMED: 'blue', CLOSED: 'default' })[status] || 'default'; },
     claimStatusLabel(status) { return status === 'SETTLED' ? '已领用' : status === 'VOIDED' ? '已作废' : '-'; },
@@ -215,7 +212,8 @@ export default {
     },
     search() { this.filters.page = 1; this.load(); },
     reset() {
-      this.filters = { page: 1, limit: 20, keyword: '', status: '', organization_id: 0 };
+      this.filters = { page: 1, limit: 20, keyword: '', status: '', store_ids: [] };
+      this.$nextTick(() => this.$refs.scopePicker && this.$refs.scopePicker.reset());
       this.load();
     },
     changePage(page) { this.filters.page = page; this.load(); },

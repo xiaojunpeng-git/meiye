@@ -219,10 +219,31 @@ final class CashierV3PresaleClaimServices
     {
         $access = (new InventoryPlatformAccessPolicy())->resolve($adminInfo);
         $allowed = (array)($access['store_ids'] ?? []);
-        $organizationId = max(0, (int)($criteria['organization_id'] ?? 0));
-        $storeId = max(0, (int)($criteria['store_id'] ?? 0));
-        $stores = (new OrganizationScopeService())->resolveDashboardStoreIds($organizationId, $storeId, $allowed);
+        /** @var OrganizationScopeService $organizationScope */
+        $organizationScope = app()->make(OrganizationScopeService::class);
+        $hasStoreIds = trim(is_array($criteria['store_ids'] ?? null) ? implode(',', $criteria['store_ids']) : (string)($criteria['store_ids'] ?? '')) !== '';
+        $stores = $hasStoreIds
+            ? $organizationScope->resolveScopedStoreIdsFromRequest($allowed, ['store_ids' => $criteria['store_ids']])
+            : $organizationScope->resolveDashboardStoreIds(
+                max(0, (int)($criteria['organization_id'] ?? 0)),
+                max(0, (int)($criteria['store_id'] ?? 0)),
+                $allowed
+            );
         return $this->list(['tenantId' => CashierV3ScopeResolver::TENANT_SCOPE_ID, 'storeIds' => $stores, 'platform' => true], $criteria);
+    }
+
+    /** Read-only inventory permission range for the standard organization/store picker. */
+    public function scopeForPlatform(array $adminInfo): array
+    {
+        $access = (new InventoryPlatformAccessPolicy())->resolve($adminInfo);
+        $allowed = array_values(array_unique(array_filter(array_map('intval', (array)($access['store_ids'] ?? [])))));
+        /** @var OrganizationScopeService $organizationScope */
+        $organizationScope = app()->make(OrganizationScopeService::class);
+        return [
+            'tree' => $organizationScope->buildPickerTree($allowed),
+            'allowed_store_ids' => $allowed,
+            'permission_version' => (string)($access['permission_version'] ?? ''),
+        ];
     }
 
     public function claimForStore(int $storeId, int $operatorId, array $input): array

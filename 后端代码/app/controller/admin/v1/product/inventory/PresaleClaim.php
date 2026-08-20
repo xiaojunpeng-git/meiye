@@ -24,9 +24,16 @@ final class PresaleClaim extends AuthController
                 'source_kind' => $this->request->get('source_kind', 'PRESALE'),
                 'start_date' => $this->request->get('start_date', ''), 'end_date' => $this->request->get('end_date', ''),
                 'organization_id' => $this->request->get('organization_id', 0), 'store_id' => $this->request->get('store_id', 0),
+                'store_ids' => $this->request->get('store_ids', ''),
             ];
             return $this->success($this->services->listForPlatform((array)$this->adminInfo, $criteria));
         } catch (\Throwable $exception) { return $this->fail($this->message($exception), ['code' => $exception->getMessage()]); }
+    }
+
+    public function scope()
+    {
+        try { return $this->success($this->services->scopeForPlatform((array)$this->adminInfo)); }
+        catch (\Throwable $exception) { return $this->fail($this->message($exception), ['code' => $exception->getMessage()]); }
     }
 
     public function detail(string $id)

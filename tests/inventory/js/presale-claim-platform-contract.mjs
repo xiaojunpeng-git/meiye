@@ -11,8 +11,10 @@ const requireFromAdmin = createRequire(path.join(adminRoot, 'package.json'))
 const { parseComponent } = requireFromAdmin('vue-template-compiler')
 
 const pagePath = path.join(adminRoot, 'src/pages/stockManage/presaleClaim/list.vue')
+const scopePickerPath = path.join(adminRoot, 'src/components/organization/OrganizationStoreScopePicker.vue')
 const apiPath = path.join(adminRoot, 'src/api/stockManage.js')
 const routePath = path.join(adminRoot, 'src/router/modules/stockManage.js')
+const backendRoutePath = path.join(root, '后端代码/route/admin.php')
 const cashierRoot = path.join(root, '前端代码/cashier-v3')
 const storeViewPath = path.join(cashierRoot, 'src/views/PresaleClaimView.vue')
 const storeApiPath = path.join(cashierRoot, 'src/services/presaleClaimApi.js')
@@ -24,8 +26,10 @@ const platformControllerPath = path.join(root, '后端代码/app/controller/admi
 const migrationPath = path.join(root, '后端代码/database/upgrades/2026-08-16-收银V3预售领用出库/02-正式升级.sql')
 
 const page = fs.readFileSync(pagePath, 'utf8')
+const scopePicker = fs.readFileSync(scopePickerPath, 'utf8')
 const api = fs.readFileSync(apiPath, 'utf8')
 const route = fs.readFileSync(routePath, 'utf8')
+const backendRoute = fs.readFileSync(backendRoutePath, 'utf8')
 const storeView = fs.readFileSync(storeViewPath, 'utf8')
 const storeApi = fs.readFileSync(storeApiPath, 'utf8')
 const cashierRoute = fs.readFileSync(cashierRoutePath, 'utf8')
@@ -35,6 +39,7 @@ const storeController = fs.readFileSync(storeControllerPath, 'utf8')
 const platformController = fs.readFileSync(platformControllerPath, 'utf8')
 const migration = fs.readFileSync(migrationPath, 'utf8')
 const parsed = parseComponent(page, { pad: 'line' })
+const scopePickerParsed = parseComponent(scopePicker, { pad: 'line' })
 
 let failed = 0
 function check(name, passed) {
@@ -43,25 +48,42 @@ function check(name, passed) {
 }
 
 check('platform page is a valid Vue SFC', !parsed.errors?.length && Boolean(parsed.template) && Boolean(parsed.script))
-check('organization filter uses the shared organization picker in org-only tree mode',
-  page.includes('<OrganizationResourceSelector')
-  && page.includes('resource="organization"')
-  && page.includes(':tree-mode="true"')
-  && page.includes('selection-mode="org_only"')
-  && page.includes('v-model="filters.organization_id"'))
+check('Vue 2 organization/store scope picker is a valid Vue SFC',
+  !scopePickerParsed.errors?.length && Boolean(scopePickerParsed.template) && Boolean(scopePickerParsed.script))
+check('organization filter uses the standard Vue 2 organization/store scope picker',
+  page.includes('<OrganizationStoreScopePicker')
+  && page.includes('v-model="filters.store_ids"')
+  && page.includes(':load-scope="loadPresaleClaimScope"')
+  && page.includes('presaleClaimScopeApi')
+  && !page.includes('OrganizationResourceSelector')
+  && !page.includes('getOrganizationTree'))
+check('Vue 2 scope picker follows the standard two-column organization/store interaction',
+  scopePicker.includes('组织 / 门店')
+  && scopePicker.includes('选择组织查询其全部下级门店；选择门店仅查询该门店。')
+  && scopePicker.includes('当前权限范围')
+  && scopePicker.includes('nodeStoreIds')
+  && scopePicker.includes('selectStore'))
 check('page supports repeated claim, detail, and void actions',
   page.includes('openClaim(row)') && page.includes('openDetail(row)') && page.includes('openVoid(row)')
   && page.includes('idempotency_key: idempotencyKey'))
 check('platform API module targets all four presale claim routes',
   api.includes("'/product/inventory/v3/presale-claims'")
+  && api.includes("'/product/inventory/v3/presale-claims/scope'")
   && api.includes('presale-claims/claim')
   && api.includes('presale-claims/${encodeURIComponent(String(claimId || \'\'))}/void'))
+check('scope route is registered before the dynamic presale-claim detail route',
+  backendRoute.indexOf("v3/presale-claims/scope") < backendRoute.indexOf("v3/presale-claims/:id"))
 check('stock route reuses the existing inventory menu authorization',
   route.includes("name: 'presaleClaimManage'")
   && route.includes("auth: ['admin-stock-manage']"))
 check('backend claim and void require existing platform warehouse-manage capability',
   service.includes("assertFeature($access, 'inventory.location.manage'")
   && service.includes("'当前岗位未配置“平台仓库管理”权限。'"))
+check('platform presale list resolves organization scope through the application container',
+  service.includes('app()->make(OrganizationScopeService::class)')
+  && !service.includes('new OrganizationScopeService()')
+  && service.includes('resolveScopedStoreIdsFromRequest')
+  && service.includes('buildPickerTree'))
 check('migration keeps API grants separate and reuses the existing stock menu grant',
   migration.includes("'inventory-v3-platform-batch-view'")
   && migration.includes("'inventory-v3-platform-warehouse-manage'")
@@ -70,7 +92,7 @@ check('migration keeps API grants separate and reuses the existing stock menu gr
 check('store page supports the same repeated claim and void lifecycle',
   storeView.includes('createStorePresaleClaim')
   && storeView.includes('voidStorePresaleClaim')
-  && storeView.includes('领用成功，已生成预售领用出库单。'))
+  && storeView.includes('领用成功，已生成${outboundDocumentLabel.value}。'))
 check('store transport uses the session token and never shared cookies',
   storeApi.includes('readStoreV3SessionToken')
   && storeApi.includes("credentials: 'omit'")
@@ -100,8 +122,8 @@ check('store route is guarded by the existing inventory outbound feature',
   cashierRoute.includes("'cashier-v3-presale-claim': 'cashier.v3.inventory.outbound'")
   && cashierRoute.includes("path: 'presale-claim'"))
 check('presale claim creates an outbound fact before deducting stock in the same transaction',
-  service.indexOf("'sourceType' => 'presale_claim_outbound'") >= 0
-  && service.indexOf("'sourceType' => 'presale_claim_outbound'") < service.indexOf('$this->decreaseBalances($stock, $allocations, $units, $now);'))
+  service.indexOf("$outboundSourceType = $isGift ? 'gift_product_claim_outbound' : 'presale_claim_outbound';") >= 0
+  && service.indexOf("'sourceType' => $outboundSourceType") < service.indexOf('$this->decreaseBalances($stock, $allocations, $units, $now);'))
 check('inventory detail labels presale claim movements as outbound documents',
   inventoryModal.includes("presale_claim_outbound: '预售领用出库'")
   && inventoryModal.includes("presale_claim_void: '预售领用作废退库'"))

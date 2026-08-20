@@ -2212,6 +2212,7 @@ Route::group('adminapi', function () {
 			Route::get('v3/batch-stock', 'v1.product.inventory.InventoryPlatformWarehouse/batchStock')->option(['real_name' => '平台批次库存查询']);
 			Route::get('v3/dashboard', 'v1.product.inventory.InventoryPlatformWarehouse/dashboard')->option(['real_name' => '平台库存首页权威概览']);
 			Route::get('v3/presale-claims', 'v1.product.inventory.PresaleClaim/index')->option(['real_name' => '平台预售领用列表']);
+			Route::get('v3/presale-claims/scope', 'v1.product.inventory.PresaleClaim/scope')->option(['real_name' => '平台预售领用权限范围']);
 			Route::get('v3/presale-claims/:id', 'v1.product.inventory.PresaleClaim/detail')->pattern(['id' => '[A-Za-z0-9-]+'])->option(['real_name' => '平台预售领用明细']);
 			Route::post('v3/presale-claims/claim', 'v1.product.inventory.PresaleClaim/claim')->option(['real_name' => '平台预售领用出库']);
 			Route::post('v3/presale-claims/:id/void', 'v1.product.inventory.PresaleClaim/void')->pattern(['id' => '[A-Za-z0-9-]+'])->option(['real_name' => '平台预售领用作废']);
