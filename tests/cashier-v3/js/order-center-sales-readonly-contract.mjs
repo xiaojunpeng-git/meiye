@@ -168,6 +168,27 @@ ok('销售页启用默认关闭的顺序分页，不改变其他列表默认行�
   assert.match(view, /:has-more="hasMore"/)
 })
 
+ok('销售订单正常数据和全部数据都绑定后端状态过滤', () => {
+  const view = readFileSync(new URL('../../../前端代码/cashier-v3/src/views/OrderCenterView.vue', import.meta.url), 'utf8')
+  const toolbar = readFileSync(new URL('../../../前端代码/shared/unified-query-vue3/src/components/UnifiedQueryToolbar.vue', import.meta.url), 'utf8')
+  const query = readFileSync(new URL('../../../后端代码/app/services/cashier/v3/order/CashierV3SalesOrderQueryServices.php', import.meta.url), 'utf8')
+  assert.match(view, /function normalizeSalesOrderQuery\(query = \{\}\)/)
+  assert.match(view, /scope === 'normal'[\s\S]*?status = 'normal'/)
+  assert.match(view, /scope === 'all'[\s\S]*?businessStatus \?\? query\.business_status/)
+  assert.match(view, /const nextQuery = normalizeSalesOrderQuery\(/)
+  assert.match(toolbar, /function selectScope\(scope\)[\s\S]*?query\.status = scope === 'normal' \? 'normal' : String\(businessStatus\.value \|\| ''\)/)
+  assert.match(query, /首次进入默认展示正常数据[\s\S]*?\$scope === 'all'[\s\S]*?\$payload\['status'\] = \$businessStatus/)
+  assert.match(query, /根快照或旧调用即使带了空 status[\s\S]*?\$payload\['status'\] = \$businessStatus !== '' \? \$businessStatus : 'normal'/)
+  assert.match(query, /if \(\$status === 'normal'\)[\s\S]*?whereIn\('olo\.operation_type', \['refund', 'void'\]\)/)
+})
+
+ok('订单中心首屏收到根快照后主动查询正常销售订单', () => {
+  const view = readFileSync(new URL('../../../前端代码/cashier-v3/src/views/OrderCenterView.vue', import.meta.url), 'utf8')
+  assert.match(view, /根分区是登录时的通用快照/)
+  assert.match(view, /\(\) => state\.stateContextId/)
+  assert.match(view, /queryRecords\(\{ dataScope: 'normal', businessStatus: '' \}, true\)/)
+})
+
 ok('订单列表中的真实会员可打开既有会员详情，游客保持普通文本', () => {
   const view = readFileSync(new URL('../../../前端代码/cashier-v3/src/views/OrderCenterView.vue', import.meta.url), 'utf8')
   assert.match(view, /function memberDetailPayload\(record = \{\}\)/)

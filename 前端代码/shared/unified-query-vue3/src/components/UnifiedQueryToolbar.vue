@@ -464,7 +464,11 @@ function selectScope(scope) {
   } else if (!availableStatusOptions.value.some((option) => option.value === businessStatus.value)) {
     businessStatus.value = ''
   }
-  submitQuery()
+  // 范围切换必须把最终业务状态一并冻结到本次查询：全部数据传空值，
+  // 防止页面之前的 normal 状态从当前查询模型中继承下来。
+  const query = buildQueryPayload()
+  query.status = scope === 'normal' ? 'normal' : String(businessStatus.value || '')
+  emit('query', query)
 }
 
 async function persistSettings(settings, options = {}) {

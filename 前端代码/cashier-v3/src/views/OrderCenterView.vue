@@ -43,6 +43,21 @@ const serviceCraftsmanReason = ref('')
 const serviceCraftsmanError = ref('')
 const serviceCraftsmanSubmitting = ref(false)
 const serviceCraftsmanCommandIds = ref({})
+const salesPersonnelEntry = ref(null)
+const salesPersonnelTarget = ref(null)
+const salesPersonnelEditorOpen = ref(false)
+const salesPersonnelPendingAssignment = ref(null)
+const salesPersonnelReason = ref('')
+const salesPersonnelError = ref('')
+const salesPersonnelSubmitting = ref(false)
+const salesPersonnelCommandIds = ref({})
+const salesOrderNoteRecord = ref(null)
+const salesOrderNoteValue = ref('')
+const salesOrderNoteError = ref('')
+const salesOrderNoteSubmitting = ref(false)
+const salesOrderNoteCommandIds = ref({})
+const salesDetailFocus = ref({ lifecycleAction: '', personnelRole: '', personnelLineId: '' })
+const salesDetailActionOnly = ref(false)
 
 const ORDER_TABS = [
   {
@@ -317,11 +332,17 @@ const allowedSalesOrderDetailActions = new Set([
   'open-order-refunds', 'open-order-void', 'open-order-reopenings', 'open-order-upgrades', 'open-order-gifts',
   'open-order-services', 'open-order-writeoffs', 'open-order-operation-logs', 'refund-sales-order',
   'void-sales-order', 'reopen-sales-order', 'upgrade-sales-order', 'open-sales-order-personnel-adjustment',
-  'adjust-sales-order-personnel'
+  'adjust-sales-order-personnel', 'update-sales-order-note'
 ])
 const salesOrderDetailCommandActions = new Set([
   'print-sales-order-receipt', 'refund-sales-order', 'void-sales-order', 'reopen-sales-order', 'upgrade-sales-order',
-  'adjust-sales-order-personnel'
+  'adjust-sales-order-personnel', 'update-sales-order-note'
+])
+// Only these actions are backed by the V3 sales-order lifecycle resource.
+// Other historical detail affordances keep their existing display-ID contract.
+const salesOrderLifecycleResourceActions = new Set([
+  'adjust-sales-order-personnel', 'update-sales-order-note', 'refund-sales-order',
+  'void-sales-order', 'reopen-sales-order', 'open-order-debt-settlements', 'open-debt-settlements'
 ])
 
 watch(
@@ -478,6 +499,285 @@ function recordKey(record, index) {
   return record?.id || record?.recordId || recordFieldValue(record, activeTab.value.primaryField) || `${activeTabKey.value}-${index}`
 }
 
+const salesOrderListColumns = [
+  '商品', '单价', '数量', '手艺人', '销售人', '销售经理', '导购', '金额', '应收金额', '欠款', '已收金额', '记账收款', '下单门店', '状态'
+]
+
+function salesOrderItems(record) {
+  if (Array.isArray(record?.items) && record.items.length) return record.items
+  return [{
+    id: `${recordKey(record, 0)}-summary`,
+    name: displayRecordField(record, 'item_summary'),
+    itemType: '',
+    quantity: displayRecordField(record, 'item_count'),
+    unitPrice: null,
+    payableAmount: recordFieldValue(record, 'receivable_amount'),
+    craftsmen: [],
+    salespeople: [],
+    salesManagers: [],
+    guides: []
+  }]
+}
+
+function personnelNames(item, key) {
+  const records = Array.isArray(item?.[key]) ? item[key] : []
+  return records.map((person) => person?.name || person?.employeeName || person?.employee_name_snapshot || '').filter(Boolean).join('、') || '—'
+}
+
+function salesOrderActionAvailable(record, action, permission) {
+  const actions = record?.availableActions
+  const available = Array.isArray(actions) ? actions.includes(action) : actions?.[action] === true
+  return available && (!permission || canUseCashierV3Operation(permission))
+}
+
+/**
+ * 订单列表可保留旧订单展示 ID，但所有生命周期写命令必须使用后端签发的
+ * V3 销售订单资源 ID。两者混用会造成 expectedVersion 锁定到错误资源。
+ */
+function salesOrderLifecycleId(record) {
+  const explicit = record?.lifecycleOrderId || record?.lifecycle_order_id
+    || record?.authorityOrderId || record?.authority_order_id || record?.salesOrderId
+  if (explicit) return String(explicit)
+  const fallback = String(record?.id || record?.orderId || '')
+  return /^[A-Za-z][A-Za-z0-9_-]{1,63}$/.test(fallback) ? fallback : ''
+}
+
+function salesOrderDisplayId(record) {
+  return String(record?.id || record?.orderId || record?.salesOrderId || '')
+}
+
+function salesOrderPersonnelLineId(item) {
+  return String(item?.id || item?.orderItemId || item?.lineId || '')
+}
+
+function salesOrderPersonnelTargetRole(role) {
+  return role === 'salespeople' ? 'salesperson' : role === 'salesManagers' ? 'sales_manager' : 'guide'
+}
+
+async function openSalesOrderPersonnelEditor(record, item, role) {
+  const orderId = salesOrderLifecycleId(record)
+  const lineId = salesOrderPersonnelLineId(item)
+  if (!orderId || !lineId || !salesOrderActionAvailable(record, 'open-sales-order-personnel-adjustment', 'cashier.v3.order.staff_adjust')) return
+  salesPersonnelError.value = ''
+  salesPersonnelEntry.value = null
+  salesPersonnelTarget.value = { orderId: String(orderId), lineId, role: salesOrderPersonnelTargetRole(role), uiRole: role, recordVersion: record?.revision ?? record?.recordVersion }
+  salesPersonnelSubmitting.value = false
+  const result = await requestAction('open-sales-order-personnel-adjustment', {
+    orderId,
+    recordVersion: record?.revision ?? record?.recordVersion,
+    targetOrderLineId: lineId,
+    targetRole: salesOrderPersonnelTargetRole(role)
+  })
+  const entry = actionData(result).orderPersonnelAdjustment
+  if (!entry || !['success', 'succeeded'].includes(String(actionStatus(result)))) {
+    salesPersonnelError.value = result?.result?.message || result?.data?.result?.message || '人员资料读取失败，请刷新后重试。'
+    return
+  }
+  const target = salesPersonnelTarget.value
+  const line = Array.isArray(entry.lines) ? entry.lines.find((candidate) => String(candidate.orderLineId) === lineId) : null
+  if (!target || !line) {
+    salesPersonnelError.value = '订单明细已变化，请刷新后重试。'
+    return
+  }
+  const authoritativeVersion = Number(entry.recordVersion)
+  const stateContextId = String(state.stateContextId || '')
+  if (!Number.isSafeInteger(authoritativeVersion) || authoritativeVersion <= 0 || !stateContextId) {
+    salesPersonnelError.value = '订单版本读取失败，请刷新后重新打开。'
+    return
+  }
+  // This projection is opened outside the root order-center query. Register
+  // the server-issued version explicitly so the subsequent single-line
+  // personnel command cannot fall back to the stale table-row revision.
+  mergeCashierV3PublicVersions([{
+    kind: 'sales_order', id: String(entry.salesOrderId || orderId), version: authoritativeVersion
+  }], stateContextId, { requestStateContextId: stateContextId })
+  salesPersonnelEntry.value = { ...entry, lines: [line] }
+  salesPersonnelEditorOpen.value = true
+}
+
+function salesPersonnelCandidates(role) {
+  const entry = salesPersonnelEntry.value || {}
+  return role === 'guide' ? (entry.guides || []) : role === 'sales_manager' ? (entry.salesManagers || []) : (entry.salespeople || [])
+}
+
+function salesPersonnelSelected(role, line) {
+  if (role === 'guide') return line?.currentGuides || []
+  if (role === 'sales_manager') return line?.currentSalesManagers || []
+  return line?.currentSalespeople || []
+}
+
+function salesPersonnelInitialSelection(role, line) {
+  const candidates = salesPersonnelCandidates(role)
+  return salesPersonnelSelected(role, line).map((selected) => {
+    const employeeId = Number(selected.employeeId || selected.staffId || selected.id || 0)
+    const candidate = candidates.find((entry) => Number(entry.employeeId || entry.staffId || entry.id || 0) === employeeId)
+    return {
+      ...selected,
+      ...(candidate || {}),
+      id: candidate?.staffId || employeeId,
+      staffId: candidate?.staffId || employeeId,
+      employeeId,
+      selected: true
+    }
+  })
+}
+
+function closeSalesPersonnelEditor() {
+  if (salesPersonnelSubmitting.value) return
+  salesPersonnelEditorOpen.value = false
+  salesPersonnelEntry.value = null
+  salesPersonnelTarget.value = null
+}
+
+function prepareSalesPersonnelReason(assignment = {}) {
+  salesPersonnelPendingAssignment.value = assignment
+  salesPersonnelReason.value = ''
+  salesPersonnelError.value = ''
+  salesPersonnelEditorOpen.value = false
+}
+
+function cancelSalesPersonnelReason() {
+  if (salesPersonnelSubmitting.value) return
+  salesPersonnelPendingAssignment.value = null
+  salesPersonnelReason.value = ''
+  salesPersonnelError.value = ''
+  salesPersonnelEditorOpen.value = Boolean(salesPersonnelEntry.value)
+}
+
+function salesPersonnelPayload() {
+  const target = salesPersonnelTarget.value
+  const assignment = salesPersonnelPendingAssignment.value || {}
+  if (!target) return []
+  if (target.role === 'salesperson') {
+    return (assignment.salespeople || []).map((item) => ({
+      orderLineId: target.lineId,
+      role: target.role,
+      staffId: Number(item.staffId || item.id || 0),
+      allocationWeight: Number(item.allocationWeight || item.performance || 0),
+      isPreSale: Boolean(item.isPreSale || item.marked)
+    }))
+  }
+  if (target.role === 'guide') {
+    return (assignment.guideSelections || []).map((item) => ({
+      orderLineId: target.lineId,
+      role: target.role,
+      staffId: Number(item.employeeId || item.staffId || item.id || 0),
+      guideRoundNo: Number(item.guideRoundNo || 0)
+    }))
+  }
+  return (assignment.salesManagerSelections || []).map((item) => ({
+    orderLineId: target.lineId,
+    role: target.role,
+    staffId: Number(item.employeeId || item.staffId || item.id || 0)
+  }))
+}
+
+async function submitSalesPersonnelAdjustment() {
+  const target = salesPersonnelTarget.value
+  const entry = salesPersonnelEntry.value
+  const reason = String(salesPersonnelReason.value || '').trim()
+  const personnel = salesPersonnelPayload()
+  if (!target || !entry) return
+  if (!reason) { salesPersonnelError.value = '请填写修改原因。'; return }
+  if (reason.length > 255) { salesPersonnelError.value = '修改原因不能超过255字。'; return }
+  if (!personnel.length) { salesPersonnelError.value = '请至少选择一名人员。'; return }
+  const key = `${target.orderId}:${target.lineId}:${target.role}:${entry.recordVersion || target.recordVersion || ''}`
+  const idempotencyKey = salesPersonnelCommandIds.value[key] || createCashierV3CommandId()
+  salesPersonnelCommandIds.value = { ...salesPersonnelCommandIds.value, [key]: idempotencyKey }
+  salesPersonnelSubmitting.value = true
+  salesPersonnelError.value = ''
+  try {
+    const result = await requestAction('adjust-sales-order-personnel', {
+      orderId: target.orderId,
+      recordVersion: entry.recordVersion ?? target.recordVersion,
+      targetOrderLineId: target.lineId,
+      targetRole: target.role,
+      personnel,
+      reason,
+      idempotencyKey
+    })
+    const status = actionStatus(result)
+    if (isTerminalActionStatus(status)) salesPersonnelCommandIds.value = { ...salesPersonnelCommandIds.value, [key]: null }
+    if (['success', 'succeeded'].includes(String(status))) {
+      closeSalesPersonnelEditor()
+      salesPersonnelPendingAssignment.value = null
+      // A personnel write changes this order's lifecycle version. The current
+      // sales cursor is a signed pre-write snapshot, so reuse would be
+      // rejected even though the write succeeded. Refresh the first page with
+      // a new cursor instead of showing a false failure message.
+      await queryRecords({}, true)
+      return
+    }
+    salesPersonnelError.value = result?.result?.message || result?.data?.result?.message || '人员修改未完成，请稍后重试。'
+  } finally {
+    salesPersonnelSubmitting.value = false
+  }
+}
+
+function openSalesOrderNoteEditor(record) {
+  if (!record?.id && !record?.orderId) return
+  salesOrderNoteRecord.value = record
+  salesOrderNoteValue.value = String(record.orderNote ?? record.remark ?? record.note ?? '')
+  salesOrderNoteError.value = ''
+}
+
+function closeSalesOrderNoteEditor() {
+  if (salesOrderNoteSubmitting.value) return
+  salesOrderNoteRecord.value = null
+  salesOrderNoteValue.value = ''
+  salesOrderNoteError.value = ''
+}
+
+async function submitSalesOrderNote() {
+  const record = salesOrderNoteRecord.value
+  if (!record) return
+  const orderId = salesOrderLifecycleId(record)
+  if (!orderId) { salesOrderNoteError.value = '订单资源未绑定，请刷新订单列表后重试。'; return }
+  const note = String(salesOrderNoteValue.value || '').trim()
+  if (note.length > 500) { salesOrderNoteError.value = '备注不能超过500字。'; return }
+  const key = `${orderId}:${record.revision ?? record.recordVersion ?? ''}`
+  const idempotencyKey = salesOrderNoteCommandIds.value[key] || createCashierV3CommandId()
+  salesOrderNoteCommandIds.value = { ...salesOrderNoteCommandIds.value, [key]: idempotencyKey }
+  salesOrderNoteSubmitting.value = true
+  salesOrderNoteError.value = ''
+  try {
+    const result = await requestAction('update-sales-order-note', {
+      orderId,
+      recordVersion: record.revision ?? record.recordVersion,
+      orderNote: note,
+      idempotencyKey
+    })
+    const status = actionStatus(result)
+    if (isTerminalActionStatus(status)) salesOrderNoteCommandIds.value = { ...salesOrderNoteCommandIds.value, [key]: null }
+    if (['success', 'succeeded'].includes(String(status))) {
+      closeSalesOrderNoteEditor()
+      // See personnel adjustment above: a lifecycle write invalidates the
+      // signed list cursor, therefore refresh from a fresh first-page query.
+      await queryRecords({}, true)
+      return
+    }
+    salesOrderNoteError.value = result?.result?.message || result?.data?.result?.message || '备注保存失败，请稍后重试。'
+  } finally {
+    salesOrderNoteSubmitting.value = false
+  }
+}
+
+async function openSalesOrderLifecycle(record, action, permission) {
+  const orderId = record?.id || record?.orderId
+  if (!orderId || !salesOrderActionAvailable(record, action, permission)) return
+  await openSalesOrderDetail({ orderId, actionOnly: true, initialLifecycleAction: action })
+}
+
+function itemMoney(value) {
+  return value === undefined || value === null || value === '' ? '—' : formatMoney(value)
+}
+
+function orderPaymentDetails(record) {
+  return Array.isArray(record?.paymentDetails)
+    ? record.paymentDetails.filter((payment) => payment && payment.methodName && payment.amount !== undefined && payment.amount !== null)
+    : []
+}
+
 function applyQuerySettings(settings = {}) {
   querySettings.value = settings && typeof settings === 'object' ? { ...settings } : {}
 }
@@ -489,6 +789,21 @@ function switchTab(tab) {
   genericDetailRecord.value = null
   closeSalesDetail()
   if (tab.key !== 'sales') queryRecords({}, true)
+}
+
+// 销售订单的范围由统一工具栏驱动：正常数据必须落到后端 normal
+// 状态过滤，全部数据才允许使用空状态；不能在前端拿当前页再隐藏。
+function normalizeSalesOrderQuery(query = {}) {
+  const scope = String(query.dataScope ?? query.data_scope ?? query.scope ?? '').trim()
+  let status = String(query.status || '').trim()
+  if (scope === 'normal') {
+    status = 'normal'
+  } else if (scope === 'all') {
+    status = String(query.businessStatus ?? query.business_status ?? '').trim()
+  } else if (!status) {
+    status = String(query.businessStatus ?? query.business_status ?? '').trim() || 'normal'
+  }
+  return { ...query, status }
 }
 
 async function queryRecords(query = {}, resetPage = true) {
@@ -535,13 +850,13 @@ async function queryRecords(query = {}, resetPage = true) {
       }
     }
   }
-  const nextQuery = {
+  const nextQuery = normalizeSalesOrderQuery({
     ...currentQuery,
     ...query,
     recordType,
     page: targetPage,
     pageSize: requestedPageSize
-  }
+  })
   const cursorQuery = nextSalesOrderQueryWithCursor(nextQuery, cursor)
   queryModelByType.value = { ...queryModelByType.value, sales: cursorQuery }
 
@@ -623,6 +938,12 @@ function showSalesOrderDetail(payload = {}) {
     : detail
   const orderId = detail.orderId || record?.id
   if (!orderId) return null
+  salesDetailFocus.value = {
+    lifecycleAction: String(payload.initialLifecycleAction || ''),
+    personnelRole: String(payload.focusPersonnelRole || ''),
+    personnelLineId: String(payload.focusPersonnelLineId || '')
+  }
+  salesDetailActionOnly.value = payload.actionOnly === true
   const backendDetail = salesDetailBelongsToOrder(orderCenter.value.salesOrderDetail, orderId)
     ? orderCenter.value.salesOrderDetail
     : null
@@ -640,7 +961,7 @@ async function openSalesOrderDetail(payload = {}) {
   try {
     const result = await requestAction('open-sales-order-detail', {
       orderId: current.orderId,
-      recordVersion: current.record?.revision
+      recordVersion: current.record?.revision ?? current.record?.recordVersion
     })
     const projection = salesOrderProjectionFromResult(result)
     const activeOrderId = salesDetailOrder.value.id
@@ -683,6 +1004,8 @@ function closeSalesDetail() {
   isSalesDetailOpen.value = false
   salesDetailOrder.value = {}
   isSalesDetailLoading.value = false
+  salesDetailFocus.value = { lifecycleAction: '', personnelRole: '', personnelLineId: '' }
+  salesDetailActionOnly.value = false
 }
 
 function openRecordDetail(record) {
@@ -911,18 +1234,22 @@ async function handleSalesOrderDetailAction(payload = {}) {
   if (!allowedSalesOrderDetailActions.has(action)) {
     return { result: { status: 'failed', code: 'SALES_ORDER_ACTION_NOT_ALLOWED', message: '该订单操作未进入前端允许清单。' } }
   }
-  const currentOrderId = salesDetailOrder.value.id || salesDetailOrder.value.orderId || salesDetailOrder.value.salesOrderId
+  const currentOrderId = salesOrderDisplayId(salesDetailOrder.value)
+  const lifecycleOrderId = salesOrderLifecycleId(salesDetailOrder.value)
   const currentRevision = salesDetailOrder.value.revision ?? salesDetailOrder.value.recordVersion
-  if (!currentOrderId || String(payload.orderId || '') !== String(currentOrderId)) {
+  const usesLifecycleResource = salesOrderLifecycleResourceActions.has(action)
+  if (!currentOrderId || (usesLifecycleResource && !lifecycleOrderId)
+    || String(payload.orderId || '') !== String(currentOrderId)) {
     return { result: { status: 'failed', code: 'SALES_ORDER_CONTEXT_MISMATCH', message: '订单详情已经变化，请重新打开后操作。' } }
   }
-  const commandKey = `${action}:${currentOrderId}:${currentRevision ?? 'no-version'}:${payload.relationId || ''}`
+  const requestOrderId = usesLifecycleResource ? lifecycleOrderId : currentOrderId
+  const commandKey = `${action}:${requestOrderId}:${currentRevision ?? 'no-version'}:${payload.relationId || ''}`
   const idempotencyKey = salesOrderDetailCommandActions.has(action)
     ? (salesOrderActionIds.value[commandKey] || createCashierV3CommandId())
     : null
   if (idempotencyKey) salesOrderActionIds.value = { ...salesOrderActionIds.value, [commandKey]: idempotencyKey }
   const result = await requestAction(action, {
-    orderId: currentOrderId,
+    orderId: requestOrderId,
     recordVersion: currentRevision,
     relationType: payload.relationType,
     relationId: payload.relationId,
@@ -935,7 +1262,10 @@ async function handleSalesOrderDetailAction(payload = {}) {
     balanceGiftRefundAmount: payload.balanceGiftRefundAmount,
     refundLineIds: Array.isArray(payload.refundLineIds) ? payload.refundLineIds.map(String) : [],
     replaceWorkspace: payload.replaceWorkspace === true,
+    targetOrderLineId: payload.targetOrderLineId,
+    targetRole: payload.targetRole,
     personnel: payload.personnel,
+    orderNote: payload.orderNote,
     ...(idempotencyKey ? { idempotencyKey } : {})
   })
   const businessData = actionData(result)
@@ -994,6 +1324,19 @@ function resetLocalContext() {
   serviceVoidCommandIds.value = {}
   closeServiceCraftsmanAdjustment()
   serviceCraftsmanCommandIds.value = {}
+  salesPersonnelEntry.value = null
+  salesPersonnelTarget.value = null
+  salesPersonnelEditorOpen.value = false
+  salesPersonnelPendingAssignment.value = null
+  salesPersonnelReason.value = ''
+  salesPersonnelError.value = ''
+  salesPersonnelSubmitting.value = false
+  salesPersonnelCommandIds.value = {}
+  salesOrderNoteRecord.value = null
+  salesOrderNoteValue.value = ''
+  salesOrderNoteError.value = ''
+  salesOrderNoteSubmitting.value = false
+  salesOrderNoteCommandIds.value = {}
   salesOrderActionIds.value = {}
   rechargeOrderActionIds.value = {}
 }
@@ -1007,6 +1350,18 @@ onMounted(() => {
 watch(activeTabKey, () => {
   activeUnifiedQuery.value?.load({ silent: true })
 }, { immediate: true })
+
+// 根分区是登录时的通用快照，不能直接当作销售订单的“正常数据”结果。
+// 首次拿到当前工作台上下文后主动执行一次后端 normal 查询，避免首屏把
+// 已退款／已作废订单带进正常列表；切换账号或门店时同样重新收敛到正常范围。
+watch(
+  () => state.stateContextId,
+  (stateContextId) => {
+    if (!stateContextId) return
+    queryRecords({ dataScope: 'normal', businessStatus: '' }, true)
+  },
+  { immediate: true }
+)
 
 onBeforeUnmount(() => {
   window.removeEventListener('cashier-v3:open-sales-order-detail', showSalesOrderDetail)
@@ -1069,7 +1424,90 @@ onBeforeUnmount(() => {
     />
 
     <main class="order-center-list-wrap">
-      <table class="order-center-list-table" :style="{ '--order-column-count': visibleFields.length }">
+      <table v-if="activeTabKey === 'sales'" class="order-center-list-table sales-order-query-table" :style="{ '--order-column-count': salesOrderListColumns.length }">
+        <thead>
+          <tr>
+            <th v-for="column in salesOrderListColumns" :key="column">{{ column }}</th>
+          </tr>
+        </thead>
+        <tbody v-for="(record, recordIndex) in records" :key="recordKey(record, recordIndex)" class="sales-order-query-group">
+          <tr class="sales-order-query-group__header">
+            <td :colspan="salesOrderListColumns.length">
+              <span>下单时间：{{ displayRecordField(record, 'payment_completed_at') }}</span>
+              <span>订单编号：{{ displayRecordField(record, 'sales_order_no') }}</span>
+              <span v-if="record.upgradeTypeLabel" class="sales-order-query-group__upgrade-tag">{{ record.upgradeTypeLabel }}</span>
+              <span>门店：{{ displayRecordField(record, 'store') }}</span>
+              <span>客户：{{ displayRecordField(record, 'member_name') }}</span>
+              <span>来源：{{ displayRecordField(record, 'source') }}</span>
+              <span class="sales-order-query-group__actions">
+                <button type="button" class="button button--text" @click="openRecordDetail(record)">订单详情</button>
+                <button
+                  v-if="salesOrderActionAvailable(record, 'refund-sales-order', 'cashier.v3.order.refund')"
+                  type="button"
+                  class="button button--text"
+                  @click="openSalesOrderLifecycle(record, 'refund-sales-order', 'cashier.v3.order.refund')"
+                >退款</button>
+                <button
+                  v-if="salesOrderActionAvailable(record, 'void-sales-order', 'cashier.v3.order.void')"
+                  type="button"
+                  class="button button--text"
+                  @click="openSalesOrderLifecycle(record, 'void-sales-order', 'cashier.v3.order.void')"
+                >作废</button>
+                <button
+                  v-if="salesOrderActionAvailable(record, 'update-sales-order-note', 'cashier.v3.order_center')"
+                  type="button"
+                  class="button button--text"
+                  @click="openSalesOrderNoteEditor(record)"
+                >备注</button>
+              </span>
+            </td>
+          </tr>
+          <tr v-for="(item, itemIndex) in salesOrderItems(record)" :key="item.id || item.orderItemId || `${recordKey(record, recordIndex)}-${item.name}-${itemIndex}`">
+            <td class="sales-order-query-item-cell">
+              <span class="sales-order-query-item-cell__line">
+                <strong class="sales-order-query-item-cell__name">{{ item.name || '未命名商品' }}</strong>
+                <small v-if="item.itemType" class="sales-order-query-item-cell__type">{{ item.itemType }}</small>
+              </span>
+            </td>
+            <td>{{ itemMoney(item.unitPrice) }}</td>
+            <td>x {{ item.quantity ?? '—' }}</td>
+            <td>{{ personnelNames(item, 'craftsmen') }}</td>
+            <td>
+              <button v-if="salesOrderActionAvailable(record, 'open-sales-order-personnel-adjustment', 'cashier.v3.order.staff_adjust')" type="button" class="order-link" @click="openSalesOrderPersonnelEditor(record, item, 'salespeople')">{{ personnelNames(item, 'salespeople') }}</button>
+              <span v-else>{{ personnelNames(item, 'salespeople') }}</span>
+            </td>
+            <td>
+              <button v-if="salesOrderActionAvailable(record, 'open-sales-order-personnel-adjustment', 'cashier.v3.order.staff_adjust')" type="button" class="order-link" @click="openSalesOrderPersonnelEditor(record, item, 'salesManagers')">{{ personnelNames(item, 'salesManagers') }}</button>
+              <span v-else>{{ personnelNames(item, 'salesManagers') }}</span>
+            </td>
+            <td>
+              <button v-if="salesOrderActionAvailable(record, 'open-sales-order-personnel-adjustment', 'cashier.v3.order.staff_adjust')" type="button" class="order-link" @click="openSalesOrderPersonnelEditor(record, item, 'guides')">{{ personnelNames(item, 'guides') }}</button>
+              <span v-else>{{ personnelNames(item, 'guides') }}</span>
+            </td>
+            <td>{{ itemMoney(item.payableAmount) }}</td>
+            <td v-if="itemIndex === 0" :rowspan="salesOrderItems(record).length" class="sales-order-query-order-cell">
+              {{ itemMoney(record.receivableAmount ?? record.receivable_amount) }}
+            </td>
+            <td v-if="itemIndex === 0" :rowspan="salesOrderItems(record).length" class="sales-order-query-order-cell">
+              {{ itemMoney(record.debtAmount ?? record.debt_amount) }}
+            </td>
+            <td v-if="itemIndex === 0" :rowspan="salesOrderItems(record).length" class="sales-order-query-order-cell">
+              {{ itemMoney(record.actualReceivedAmount ?? record.actual_received_amount) }}
+            </td>
+            <td v-if="itemIndex === 0" :rowspan="salesOrderItems(record).length" class="sales-order-query-order-cell sales-order-query-payment-cell">
+              <template v-if="orderPaymentDetails(record).length">
+                <span v-for="payment in orderPaymentDetails(record)" :key="payment.id" class="sales-order-query-payment-cell__line">
+                  {{ payment.methodName }} {{ itemMoney(payment.amount) }}
+                </span>
+              </template>
+              <span v-else>—</span>
+            </td>
+            <td>{{ displayRecordField(record, 'store') }}</td>
+            <td><span class="order-status" :class="statusClass(recordFieldValue(record, 'order_status'))">{{ displayRecordField(record, 'order_status') }}</span></td>
+          </tr>
+        </tbody>
+      </table>
+      <table v-else class="order-center-list-table" :style="{ '--order-column-count': visibleFields.length }">
         <thead>
           <tr>
             <th v-for="fieldItem in visibleFields" :key="fieldItem.key">{{ fieldItem.label }}</th>
@@ -1157,9 +1595,33 @@ onBeforeUnmount(() => {
       v-if="isSalesDetailOpen"
       :order="salesDetailOrder"
       :is-loading="isSalesDetailLoading"
+      :action-only="salesDetailActionOnly"
+      :initial-lifecycle-action="salesDetailFocus.lifecycleAction"
+      :focus-personnel-role="salesDetailFocus.personnelRole"
+      :focus-personnel-line-id="salesDetailFocus.personnelLineId"
       :cart-line-count="Array.isArray(state.cashier?.cart?.lines) ? state.cashier.cart.lines.length : 0"
       :on-action="handleSalesOrderDetailAction"
       @close="closeSalesDetail"
+    />
+
+    <PersonnelPerformanceOverlay
+      v-if="salesPersonnelEditorOpen && salesPersonnelEntry && salesPersonnelTarget"
+      :initial-tab="salesPersonnelTarget.uiRole"
+      initial-mode="full"
+      :show-craftsmen="false"
+      :show-salespeople="salesPersonnelTarget.role === 'salesperson'"
+      :show-guides="salesPersonnelTarget.role === 'guide'"
+      :show-sales-managers="salesPersonnelTarget.role === 'sales_manager'"
+      :salesperson-candidates="salesPersonnelTarget.role === 'salesperson' ? salesPersonnelCandidates('salesperson') : []"
+      :guide-candidates="salesPersonnelTarget.role === 'guide' ? salesPersonnelCandidates('guide') : []"
+      :sales-manager-candidates="salesPersonnelTarget.role === 'sales_manager' ? salesPersonnelCandidates('sales_manager') : []"
+      :selected-salespeople="salesPersonnelTarget.role === 'salesperson' ? salesPersonnelInitialSelection('salesperson', salesPersonnelEntry.lines?.[0]) : []"
+      :selected-guides="salesPersonnelTarget.role === 'guide' ? salesPersonnelInitialSelection('guide', salesPersonnelEntry.lines?.[0]) : []"
+      :selected-sales-managers="salesPersonnelTarget.role === 'sales_manager' ? salesPersonnelInitialSelection('sales_manager', salesPersonnelEntry.lines?.[0]) : []"
+      :saving="salesPersonnelSubmitting"
+      :load-error="salesPersonnelError"
+      @close="closeSalesPersonnelEditor"
+      @confirm="prepareSalesPersonnelReason"
     />
 
     <BusinessRecordDetailOverlay
@@ -1238,6 +1700,42 @@ onBeforeUnmount(() => {
         </footer>
       </section>
     </div>
+
+    <div v-if="salesPersonnelPendingAssignment && salesPersonnelTarget" class="service-void-modal" role="dialog" aria-modal="true" aria-labelledby="sales-personnel-reason-title">
+      <div class="service-void-modal__backdrop" @click="cancelSalesPersonnelReason"></div>
+      <section class="service-void-modal__panel">
+        <header class="service-void-modal__head">
+          <h2 id="sales-personnel-reason-title">填写修改原因</h2>
+          <button type="button" class="service-void-modal__close" :disabled="salesPersonnelSubmitting" @click="cancelSalesPersonnelReason">×</button>
+        </header>
+        <p class="service-void-modal__record">{{ salesPersonnelEntry?.salesOrderNo }} · {{ salesPersonnelEntry?.lines?.[0]?.itemName }}</p>
+        <label class="service-void-modal__label" for="sales-personnel-reason">修改原因</label>
+        <textarea id="sales-personnel-reason" v-model="salesPersonnelReason" class="service-void-modal__textarea" maxlength="255" rows="4" placeholder="请输入修改原因"></textarea>
+        <p v-if="salesPersonnelError" class="service-void-modal__error" role="alert">{{ salesPersonnelError }}</p>
+        <footer class="service-void-modal__actions">
+          <button type="button" class="button" :disabled="salesPersonnelSubmitting" @click="cancelSalesPersonnelReason">返回修改</button>
+          <button type="button" class="button button--primary" :disabled="salesPersonnelSubmitting" @click="submitSalesPersonnelAdjustment">{{ salesPersonnelSubmitting ? '保存中…' : '确认保存' }}</button>
+        </footer>
+      </section>
+    </div>
+
+    <div v-if="salesOrderNoteRecord" class="service-void-modal" role="dialog" aria-modal="true" aria-labelledby="sales-order-note-title">
+      <div class="service-void-modal__backdrop" @click="closeSalesOrderNoteEditor"></div>
+      <section class="service-void-modal__panel">
+        <header class="service-void-modal__head">
+          <h2 id="sales-order-note-title">订单备注</h2>
+          <button type="button" class="service-void-modal__close" :disabled="salesOrderNoteSubmitting" @click="closeSalesOrderNoteEditor">×</button>
+        </header>
+        <p class="service-void-modal__record">{{ displayRecordField(salesOrderNoteRecord, 'sales_order_no') }}</p>
+        <label class="service-void-modal__label" for="sales-order-note">备注内容</label>
+        <textarea id="sales-order-note" v-model="salesOrderNoteValue" class="service-void-modal__textarea" maxlength="500" rows="4" placeholder="请输入订单备注"></textarea>
+        <p v-if="salesOrderNoteError" class="service-void-modal__error" role="alert">{{ salesOrderNoteError }}</p>
+        <footer class="service-void-modal__actions">
+          <button type="button" class="button" :disabled="salesOrderNoteSubmitting" @click="closeSalesOrderNoteEditor">取消</button>
+          <button type="button" class="button button--primary" :disabled="salesOrderNoteSubmitting" @click="submitSalesOrderNote">{{ salesOrderNoteSubmitting ? '保存中…' : '保存备注' }}</button>
+        </footer>
+      </section>
+    </div>
   </section>
 </template>
 
@@ -1256,6 +1754,80 @@ onBeforeUnmount(() => {
 .service-void-modal__textarea { width: 100%; resize: vertical; box-sizing: border-box; padding: 10px; border: 1px solid #d0d5dd; border-radius: 6px; font: inherit; }
 .service-void-modal__error { margin: 8px 0 0; color: #b42318; }
 .service-void-modal__actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+
+.sales-order-query-table { min-width: 1320px; }
+.sales-order-query-table th,
+.sales-order-query-table td { white-space: nowrap; }
+.sales-order-query-table th { background: #f6f7f9; }
+.sales-order-query-table > thead > tr > th:first-child {
+  position: sticky;
+  left: 0;
+  top: 0;
+  z-index: 7;
+  background: #f6f7f9;
+  box-shadow: 1px 0 0 #dfe5ec;
+}
+.sales-order-query-table > thead > tr > th {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  background: #f6f7f9;
+  box-shadow: 0 1px 0 #dfe5ec;
+}
+.sales-order-query-table > tbody.sales-order-query-group > tr:not(.sales-order-query-group__header) > td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: #fff;
+  box-shadow: 1px 0 0 #e4e7ec;
+}
+.sales-order-query-table td:first-child { min-width: 220px; white-space: normal; }
+.sales-order-query-table td:first-child strong,
+.sales-order-query-table td:first-child small { display: block; }
+.sales-order-query-table td:first-child small { margin-top: 4px; color: #98a2b3; }
+.sales-order-query-group + .sales-order-query-group { border-top: 14px solid #fff; }
+.order-center-list-table .sales-order-query-group__header td {
+  padding: 6px 18px;
+  background: #e4e7ec;
+  color: #344054;
+  line-height: 1.35;
+  font-size: 13px;
+}
+.order-center-list-table .sales-order-query-group:not(:first-of-type) .sales-order-query-group__header td { border-top: 1px solid #e4e7ec; }
+.sales-order-query-group > tr:not(.sales-order-query-group__header) td {
+  padding: 2px 18px;
+  background: #fff;
+  line-height: 1.15;
+  vertical-align: top;
+}
+.sales-order-query-group > tr:not(.sales-order-query-group__header) .button {
+  min-height: 22px;
+  padding: 0 6px;
+}
+.sales-order-query-item-cell__line { display: inline-flex; align-items: flex-end; gap: 8px; }
+.sales-order-query-item-cell__name { display: inline-block; line-height: 1.2; }
+.sales-order-query-item-cell__type {
+  display: inline-block;
+  color: #98a2b3;
+  font-size: 11px;
+  line-height: 1.1;
+}
+.sales-order-query-order-cell { vertical-align: top; }
+.sales-order-query-payment-cell { white-space: normal; }
+.sales-order-query-payment-cell__line { display: block; white-space: nowrap; }
+.sales-order-query-group__header td > span { display: inline-block; margin-right: 24px; }
+.sales-order-query-group__header .sales-order-query-group__upgrade-tag {
+  margin-right: 24px;
+  padding: 1px 7px;
+  border: 1px solid #b7d4fe;
+  border-radius: 4px;
+  background: #eff6ff;
+  color: #175cd3;
+  font-size: 12px;
+  font-weight: 600;
+}
+.sales-order-query-group__header .sales-order-query-group__actions { display: inline-flex; gap: 10px; float: right; margin-right: 0; }
+.sales-order-query-group__header .button { padding: 0; color: #6941c6; }
 
 .order-center-page__head {
   display: flex;

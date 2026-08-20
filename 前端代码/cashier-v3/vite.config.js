@@ -56,6 +56,24 @@ export default defineConfig({
         replacement: fileURLToPath(new URL('../inventory-vue3/src/styles.css', import.meta.url))
       },
       {
+        // The dev server must consume the shared query package from the
+        // canonical source tree, not a stale file: symlink under node_modules.
+        find: /^@mohe\/unified-query-vue3$/,
+        replacement: unifiedQueryPackageRoot + '/src/index.js'
+      },
+      {
+        find: /^@mohe\/unified-query-vue3\/composable$/,
+        replacement: unifiedQueryPackageRoot + '/src/composables/useUnifiedQueryPage.js'
+      },
+      {
+        find: /^@mohe\/unified-query-vue3\/contract$/,
+        replacement: unifiedQueryPackageRoot + '/src/contracts/unifiedQueryContract.js'
+      },
+      {
+        find: /^@mohe\/unified-query-vue3\/styles\.css$/,
+        replacement: unifiedQueryPackageRoot + '/src/styles/unified-query.css'
+      },
+      {
         find: '@mohe/inventory-vue3',
         replacement: fileURLToPath(new URL('../inventory-vue3/src/index.js', import.meta.url))
       },

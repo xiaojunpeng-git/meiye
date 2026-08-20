@@ -140,6 +140,16 @@ final class CashierV3SalesOrderQueryServices
         array $hints = []
     ): array {
         $payload = is_array($hints['salesQuery'] ?? null) ? $hints['salesQuery'] : [];
+        // 订单中心首次进入默认展示正常数据；全部数据必须由工具栏显式发空状态。
+        $scope = $this->scalarString($payload['dataScope'] ?? $payload['data_scope'] ?? '');
+        $businessStatus = $this->scalarString($payload['businessStatus'] ?? $payload['business_status'] ?? '');
+        if ($scope === 'all') {
+            // 全部数据只能由工具栏显式选择；其业务状态为空时保留全量。
+            $payload['status'] = $businessStatus;
+        } elseif ($this->scalarString($payload['status'] ?? '') === '') {
+            // 根快照或旧调用即使带了空 status，也不能绕过正常范围。
+            $payload['status'] = $businessStatus !== '' ? $businessStatus : 'normal';
+        }
         $payload['page'] = max(1, (int)($payload['page'] ?? 1));
         $payload['pageSize'] = max(1, (int)($payload['pageSize'] ?? 20));
         $page = $this->querySalesOrders($payload, $operatorScope, $dataScope);
@@ -828,7 +838,7 @@ final class CashierV3SalesOrderQueryServices
             'o.store_id', 'o.order_type', 'o.is_debt_repay', 'o.paid',
             'o.is_del', 'o.is_system_del', 'o.pid',
             'o.terminal_action', 'o.refund_status', 'o.status', 'o.total_num',
-            'o.pay_time', 'o.remark', 'o.total_price', 'o.pay_price',
+            'o.pay_time', 'o.remark', 'o.order_note', 'o.total_price', 'o.pay_price',
             'o.cash_pay_price', 'o.debt_amount',
         ]);
         if ($operation === 'detail') {
@@ -980,7 +990,7 @@ final class CashierV3SalesOrderQueryServices
                 . 'recorded_at,source_document_type,source_document_id,source_document_no_snapshot,'
                 . 'business_source_primary_id,business_source_primary_name_snapshot,'
                 . 'business_source_secondary_id,business_source_secondary_name_snapshot,business_source_label_snapshot,'
-                . 'original_amount_cents,discount_amount_cents,sale_amount_cents,order_version'
+                . 'original_amount_cents,discount_amount_cents,sale_amount_cents,order_version,order_note'
             )
             ->select()
             ->toArray();
@@ -988,6 +998,7 @@ final class CashierV3SalesOrderQueryServices
         foreach ($headers as $header) {
             $headersById[(string)$header['order_id']] = $header;
         }
+        $snapshotTenantId = trim((string)($headers[0]['tenant_id'] ?? ''));
 
         $formalLines = Db::name('cashier_v3_sales_order_line')
             ->whereIn('order_id', $salesOrderIds)
@@ -1061,6 +1072,26 @@ final class CashierV3SalesOrderQueryServices
             $salespeopleByOrderAndLine[(string)$performance['order_id']]
                 [(string)$performance['source_line_id']][] = $performance;
         }
+        $guidesByOrderAndLine = [];
+        foreach (Db::name('cashier_v3_customer_guide_round_fact')
+            ->where('tenant_id', $snapshotTenantId)->whereIn('order_id', $salesOrderIds)->where('status', 'effective')
+            ->field('order_id,source_line_id,guide_employee_id,guide_employee_name_snapshot,guide_round_no')
+            ->order('id', 'asc')->select()->toArray() as $fact) {
+            $guidesByOrderAndLine[(string)$fact['order_id']][(string)$fact['source_line_id']][] = [
+                'id' => (string)$fact['guide_employee_id'], 'employeeId' => (int)$fact['guide_employee_id'],
+                'name' => (string)$fact['guide_employee_name_snapshot'], 'guideRoundNo' => (int)$fact['guide_round_no'],
+            ];
+        }
+        $salesManagersByOrderAndLine = [];
+        foreach (Db::name('cashier_v3_sales_manager_fact')
+            ->where('tenant_id', $snapshotTenantId)->whereIn('order_id', $salesOrderIds)->where('status', 'effective')
+            ->field('order_id,source_line_id,sales_manager_employee_id,sales_manager_name_snapshot')
+            ->order('id', 'asc')->select()->toArray() as $fact) {
+            $salesManagersByOrderAndLine[(string)$fact['order_id']][(string)$fact['source_line_id']][] = [
+                'id' => (string)$fact['sales_manager_employee_id'], 'employeeId' => (int)$fact['sales_manager_employee_id'],
+                'name' => (string)$fact['sales_manager_name_snapshot'],
+            ];
+        }
 
         $result = [];
         foreach ($salesOrderIdByLegacyOrder as $legacyOrderId => $salesOrderId) {
@@ -1080,6 +1111,8 @@ final class CashierV3SalesOrderQueryServices
                 $linkedLines[$legacyLineId] = [
                     'authority' => $formalLinesById[$formalLineId],
                     'salespeople' => $salespeopleByOrderAndLine[$salesOrderId][$formalLineId] ?? [],
+                    'salesManagers' => $salesManagersByOrderAndLine[$salesOrderId][$formalLineId] ?? [],
+                    'guides' => $guidesByOrderAndLine[$salesOrderId][$formalLineId] ?? [],
                 ];
             }
             $result[(int)$legacyOrderId] = [
@@ -1172,6 +1205,8 @@ final class CashierV3SalesOrderQueryServices
         }
         $salespeopleByOrderAndLine = [];
         $craftsmenByOrderAndLine = [];
+        $guidesByOrderAndLine = [];
+        $salesManagersByOrderAndLine = [];
         foreach ($this->effectivePersonnelFacts($orderIds, $tenantIds[0]) as $fact) {
             $lineKey = (string)$fact['source_line_id'];
             if ((string)$fact['performance_type'] === 'sales_performance_allocated') {
@@ -1179,6 +1214,24 @@ final class CashierV3SalesOrderQueryServices
             } elseif ((string)$fact['performance_type'] === 'labor_performance_allocated') {
                 $craftsmenByOrderAndLine[(string)$fact['order_id']][$lineKey][] = $fact;
             }
+        }
+        foreach (Db::name('cashier_v3_customer_guide_round_fact')
+            ->whereIn('order_id', $orderIds)->where('tenant_id', $tenantIds[0])->where('status', 'effective')
+            ->field('order_id,source_line_id,guide_employee_id,guide_employee_name_snapshot,guide_round_no')
+            ->order('id', 'asc')->select()->toArray() as $fact) {
+            $guidesByOrderAndLine[(string)$fact['order_id']][(string)$fact['source_line_id']][] = [
+                'id' => (string)$fact['guide_employee_id'], 'employeeId' => (int)$fact['guide_employee_id'],
+                'name' => (string)$fact['guide_employee_name_snapshot'], 'guideRoundNo' => (int)$fact['guide_round_no'],
+            ];
+        }
+        foreach (Db::name('cashier_v3_sales_manager_fact')
+            ->whereIn('order_id', $orderIds)->where('tenant_id', $tenantIds[0])->where('status', 'effective')
+            ->field('order_id,source_line_id,sales_manager_employee_id,sales_manager_name_snapshot')
+            ->order('id', 'asc')->select()->toArray() as $fact) {
+            $salesManagersByOrderAndLine[(string)$fact['order_id']][(string)$fact['source_line_id']][] = [
+                'id' => (string)$fact['sales_manager_employee_id'], 'employeeId' => (int)$fact['sales_manager_employee_id'],
+                'name' => (string)$fact['sales_manager_name_snapshot'],
+            ];
         }
         $operationsByOrder = [];
         foreach (Db::name(CashierV3OrderLifecycleServices::OPERATION_TABLE)
@@ -1225,6 +1278,8 @@ final class CashierV3SalesOrderQueryServices
                 'collections' => $collectionsByOrder[$orderId] ?? [],
                 'salespeopleByLine' => $salespeopleByOrderAndLine[$orderId] ?? [],
                 'craftsmenByLine' => $craftsmenByOrderAndLine[$orderId] ?? [],
+                'guidesByLine' => $guidesByOrderAndLine[$orderId] ?? [],
+                'salesManagersByLine' => $salesManagersByOrderAndLine[$orderId] ?? [],
                 'lifecycleOperations' => $operationsByOrder[$orderId] ?? [],
                 'upgradeSettlement' => $upgradeSettlementsByOrder[$orderId] ?? [],
                 'debtAuthorities' => $debtAuthoritiesByOrder[$orderId] ?? [],
@@ -1265,6 +1320,10 @@ final class CashierV3SalesOrderQueryServices
             ? $snapshot['upgradeSettlement'] : [];
         $entitlementCreditCents = (int)($upgradeSettlement['entitlement_credit_cents'] ?? 0);
         $hasUpgradeSettlement = $upgradeSettlement !== [];
+        $upgradeType = (string)($upgradeSettlement['operation_type'] ?? '');
+        $upgradeTypeLabel = (string)($upgradeSettlement['settlement_status'] ?? '') === 'settled'
+            ? ($upgradeType === 'project_upgrade' ? '项目升级' : ($upgradeType === 'card_upgrade' ? '卡升级' : ''))
+            : '';
         $upgradeSettlementValid = !$hasUpgradeSettlement || (
             (string)($upgradeSettlement['settlement_status'] ?? '') === 'settled'
             && in_array((string)($upgradeSettlement['operation_type'] ?? ''), ['card_upgrade', 'project_upgrade'], true)
@@ -1294,7 +1353,9 @@ final class CashierV3SalesOrderQueryServices
             $items[] = $this->mapAuthorityLine(
                 $line,
                 $snapshot['salespeopleByLine'][(string)$line['order_line_id']] ?? [],
-                $snapshot['craftsmenByLine'][(string)$line['order_line_id']] ?? []
+                $snapshot['craftsmenByLine'][(string)$line['order_line_id']] ?? [],
+                $snapshot['salesManagersByLine'][(string)$line['order_line_id']] ?? [],
+                $snapshot['guidesByLine'][(string)$line['order_line_id']] ?? []
             );
             foreach ($snapshot['salespeopleByLine'][(string)$line['order_line_id']] ?? [] as $person) {
                 $name = $this->salespersonDisplayName($person);
@@ -1329,8 +1390,14 @@ final class CashierV3SalesOrderQueryServices
         $economicsStatus = $settlementEquationValid ? 'ready' : 'integrity_failed';
         $mapped = [
             'id' => (string)$header['order_id'], 'orderId' => (string)$header['order_id'],
+            // 订单中心可由旧订单投影展示，但所有退款、作废、备注和人员
+            // 调整命令必须绑定 V3 销售订单资源，而不是浏览器展示行 ID。
+            'lifecycleOrderId' => (string)$header['order_id'],
             'revision' => 1 + count($operations),
             'salesOrderNo' => (string)$header['order_no'], 'sales_order_no' => (string)$header['order_no'],
+            // 主项标签只来自已结算的升级事实，避免根据商品名称猜测升级类型。
+            'upgradeType' => $upgradeType,
+            'upgradeTypeLabel' => $upgradeTypeLabel,
             'memberId' => (int)$header['member_id'], 'memberName' => $memberName !== '' ? $memberName : '游客',
             'member_name' => $memberName !== '' ? $memberName : '游客', 'phone' => '',
             'isGuest' => (int)$header['member_id'] <= 0,
@@ -1356,12 +1423,14 @@ final class CashierV3SalesOrderQueryServices
             'actual_received_amount' => $settlementEquationValid ? $this->moneyFromCents($cashPerformanceCents) : null,
             'paymentMethod' => implode('、', array_keys($paymentNames)), 'payment_method' => implode('、', array_keys($paymentNames)),
             'salespersonSummary' => implode('、', array_keys($salespersonNames)), 'cashierName' => (string)$header['operator_name_snapshot'],
+            'orderNote' => (string)($header['order_note'] ?? ''),
             'source' => $this->businessSourceLabel($header),
             'economicsDataStatus' => $economicsStatus, 'cashPerformanceDataStatus' => $economicsStatus,
             'dataIntegrityStatus' => $settlementEquationValid ? 'valid' : 'settlement_equation_invalid',
             'contractVersion' => self::CONTRACT_VERSION,
             'availableActions' => !$settlementEquationValid ? [] : ($terminal ? ['reopen-sales-order'] : array_values(array_filter([
                 'open-sales-order-personnel-adjustment', 'adjust-sales-order-personnel',
+                'update-sales-order-note',
                 'reopen-sales-order',
                 // 游客没有会员欠款账户，不能进入补交链路。
                 (int)$header['member_id'] > 0 ? 'open-order-debt-settlements' : null,
@@ -1372,9 +1441,24 @@ final class CashierV3SalesOrderQueryServices
                 'void-sales-order',
             ]))),
         ];
-        if (!$detail) return $mapped;
-        $mapped['orderNote'] = '';
+        // 查询列表也需要明细行来保持“正常列表”的分组展示；明细页继续复用同一份权威快照。
         $mapped['items'] = $items;
+        // 列表与详情复用同一批已结算记账收款事实，避免前端按金额反推收款方式。
+        $mapped['paymentDetails'] = !$settlementEquationValid ? [] : array_map(function (array $collection): array {
+            return [
+                'id' => (string)$collection['collection_id'],
+                'paymentMethodCode' => (string)$collection['payment_method'],
+                'methodName' => $this->paymentMethodName($collection),
+                'amount' => $this->moneyFromCents((int)$collection['amount_cents']),
+                'externalTransactionNo' => (string)$collection['external_transaction_no_snapshot'],
+                'remark' => (string)$collection['remark_snapshot'],
+                'occurredAt' => $this->formatTimestamp((int)$collection['occurred_at'], 'Y-m-d H:i:s'),
+            ];
+        }, $snapshot['collections']);
+        if (!$detail) return $mapped;
+        // The order note is a sales-order header fact. Do not replace it with
+        // payment collection remarks when opening the detail projection.
+        $mapped['orderNote'] = (string)($header['order_note'] ?? '');
         $mapped['amountSummary'] = [
             'originalAmount' => $settlementEquationValid ? $this->moneyFromCents((int)$header['original_amount_cents']) : null,
             'priceChangeDiscountAmount' => $settlementEquationValid ? $this->moneyFromCents($priceChangeDiscountCents) : null,
@@ -1487,7 +1571,7 @@ final class CashierV3SalesOrderQueryServices
         ][$status] ?? (preg_match('/[\\x{4e00}-\\x{9fff}]/u', $status) === 1 ? $status : '处理中');
     }
 
-    private function mapAuthorityLine(array $line, array $salespeople, array $craftsmen = []): array
+    private function mapAuthorityLine(array $line, array $salespeople, array $craftsmen = [], array $salesManagers = [], array $guides = []): array
     {
         $quantity = max(0, (int)$line['quantity']);
         $type = strtolower((string)$line['item_type']) === 'card' ? '卡项' : (strtolower((string)$line['item_type']) === 'project' ? '项目' : '商品');
@@ -1518,8 +1602,10 @@ final class CashierV3SalesOrderQueryServices
                         'laborPerformanceAmount' => $this->moneyFromCents((int)$person['amount_cents']),
                         'laborFeeAmount' => $this->moneyFromCents((int)($person['labor_fee_amount_cents'] ?? 0)),
                     ];
-                }, $craftsmen)
+            }, $craftsmen)
                 : $this->craftsmenForLine($line),
+            'salesManagers' => array_values($salesManagers),
+            'guides' => array_values($guides),
         ];
     }
 
@@ -1712,6 +1798,9 @@ final class CashierV3SalesOrderQueryServices
         $mapped = [
             'id' => (string)(int)$row['id'],
             'orderId' => (int)$row['id'],
+            // 旧订单列表的 id 仅供详情定位；V3 生命周期命令必须使用
+            // 对应权威销售单 order_id，否则客户端会取到错误版本并冲突。
+            'lifecycleOrderId' => $v3Ready ? (string)$v3Header['order_id'] : '',
             'salesOrderNo' => $v3Ready
                 ? (string)$v3Header['order_no'] : (string)($row['order_id'] ?? ''),
             'sales_order_no' => $v3Ready
@@ -1773,12 +1862,27 @@ final class CashierV3SalesOrderQueryServices
             'contractVersion' => self::CONTRACT_VERSION,
             'availableActions' => [],
         ];
+        // 列表投影保留同一批商品明细，前端只做表格展示，不重新计算金额。
+        $mapped['items'] = $items;
+        // 列表与详情复用同一批已结算记账收款事实，避免前端按金额反推收款方式。
+        $mapped['paymentDetails'] = !$v3Ready ? [] : array_map(function (array $collection): array {
+            return [
+                'id' => (string)$collection['collection_id'],
+                'paymentMethodCode' => (string)$collection['payment_method'],
+                'methodName' => $this->paymentMethodName($collection),
+                'amount' => $this->moneyFromCents((int)$collection['amount_cents']),
+                'externalTransactionNo' => (string)$collection['external_transaction_no_snapshot'],
+                'remark' => (string)$collection['remark_snapshot'],
+                'occurredAt' => $this->formatTimestamp((int)$collection['occurred_at'], 'Y-m-d H:i:s'),
+            ];
+        }, $collections);
         if (!$detail) {
             return $mapped;
         }
 
-        $mapped['orderNote'] = (string)($row['remark'] ?? '');
-        $mapped['items'] = $items;
+        // 订单备注与每笔记账收款的 remark_snapshot 是两个不同事实，
+        // 详情只能读取订单自身 order_note，不能把收款备注冒充订单备注。
+        $mapped['orderNote'] = (string)($row['order_note'] ?? '');
         $mapped['amountSummary'] = [
             'originalAmount' => $v3Ready
                 ? $this->moneyFromCents((int)$v3Header['original_amount_cents']) : null,
@@ -1883,6 +1987,8 @@ final class CashierV3SalesOrderQueryServices
             'economicsDataStatus' => $v3Ready ? 'ready' : self::ECONOMICS_STATUS,
             'snapshotStatus' => $name === '' ? 'invalid' : 'ready',
             'salespeople' => $salespeople,
+            'salesManagers' => array_values((array)($v3['salesManagers'] ?? [])),
+            'guides' => array_values((array)($v3['guides'] ?? [])),
             'craftsmen' => $v3Ready ? $this->craftsmenForLine($authority) : [],
         ];
     }
