@@ -85,10 +85,8 @@ function entries(owner, type, table) {
 }
 
 /**
- * 三个「去结账」页面动作 → 规范写命令。
- *
- * 它们会创建或复用 JZ 结账请求，不是纯展示，因此不能按 projection 剥离 command。
- * Vue 页面本轮不改，别名映射全部落在桥接层。
+ * 兼容其他业务入口的去结账动作映射。普通收银台不走这些别名；普通销售、权益、
+ * 混合和卡操作都在浏览器中生成唯一快照，最终确认才发送 submit-checkout。
  */
 export const CHECKOUT_ACTION_ALIASES = {
   'open-reservation-checkout': 'prepare-reservation-checkout',
@@ -130,27 +128,14 @@ const C2_ACTIONS = {
     'set-guest-order': FEATURE_CASHIER,
     'change-supplement-date': FEATURE_CASHIER,
     'exit-supplement': FEATURE_CASHIER,
-    'prepare-checkout': FEATURE_CASHIER,
     'prepare-debt-repayment': FEATURE_CASHIER,
     'checkout-step-back': FEATURE_CASHIER,
     'checkout-step-next': FEATURE_CASHIER,
     'toggle-combination-payment': FEATURE_CASHIER,
-    'add-payment-method': FEATURE_CASHIER,
-    'update-payment-line': FEATURE_CASHIER,
-    'remove-payment-line': FEATURE_CASHIER,
-    // 来源选择会写入结账草稿；漏登记会被桥接层 fail-closed 拦截，导致来源快照为空。
-    'update-checkout-business-source': FEATURE_CASHIER,
-    'update-checkout-sales-date': FEATURE_CASHIER,
-    // 余额按钮在页面层会映射为草稿写命令；实际扣款仍只发生在正式结账事务。
-    'apply-balance-payment': FEATURE_CASHIER,
-    'remove-balance-payment': FEATURE_CASHIER,
-    'update-balance-payment': FEATURE_CASHIER,
-    'prepare-checkout-submission': FEATURE_CASHIER,
     'confirm-debt-warning': FEATURE_CASHIER,
     'confirm-checkout-final-changes': FEATURE_CASHIER,
     'submit-checkout': FEATURE_CASHIER,
     'submit-debt-repayment': FEATURE_CASHIER,
-    'return-to-payment-edit': FEATURE_CASHIER,
     'retry-checkout': FEATURE_CASHIER,
     'continue-partial-payment-recovery': FEATURE_CASHIER,
     'go-to-writeoff-after-checkout': FEATURE_CASHIER,
@@ -280,6 +265,7 @@ const C5_ACTIONS = {
     'refund-sales-order': FEATURE_ORDER_REFUND,
     'void-sales-order': FEATURE_ORDER_VOID,
     'void-service-record': FEATURE_ORDER_SERVICE_VOID,
+    'adjust-service-record-craftsmen': FEATURE_ORDER_SERVICE_DETAIL,
     'refund-recharge-order': FEATURE_ORDER_REFUND,
     'void-recharge-order': FEATURE_ORDER_VOID,
     'reopen-sales-order': FEATURE_ORDER_REOPEN,
@@ -329,6 +315,7 @@ const C5_ACTIONS = {
     'open-upgrade-records': FEATURE_ORDER_CENTER,
     'open-order-services': FEATURE_ORDER_SERVICE_DETAIL,
     'open-service-records': FEATURE_ORDER_SERVICE_DETAIL,
+    'open-service-record-craftsman-adjustment': FEATURE_ORDER_SERVICE_DETAIL,
     'open-order-writeoffs': FEATURE_ORDER_CENTER,
     'open-order-gifts': FEATURE_ORDER_CENTER,
     'open-gift-records': FEATURE_ORDER_CENTER,

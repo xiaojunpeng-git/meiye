@@ -39,6 +39,9 @@ class CashierV3ResourceKindCatalog
         'member_debt_guard' => ['scope' => CashierV3ResourceScope::TYPE_TENANT, 'lock' => 58, 'ownership' => self::OWNERSHIP_DOMAIN],
         'recharge_order' => ['scope' => CashierV3ResourceScope::TYPE_STORE, 'lock' => 59, 'ownership' => self::OWNERSHIP_DOMAIN],
         'sales_order' => ['scope' => CashierV3ResourceScope::TYPE_STORE, 'lock' => 60, 'ownership' => self::OWNERSHIP_DOMAIN],
+        // 服务记录的历史人员调整独立于收银工作台。其版本由成功的调整操作数派生，
+        // 防止两个门店人员基于同一条服务记录同时覆盖手艺人分配。
+        'service_record' => ['scope' => CashierV3ResourceScope::TYPE_STORE, 'lock' => 61, 'ownership' => self::OWNERSHIP_DOMAIN],
         // 按原始权益订单稳定存在的欠款并发门闩；建欠与还款路径必须共锁。
         'entitlement_debt_guard' => ['scope' => CashierV3ResourceScope::TYPE_TENANT, 'lock' => 64, 'ownership' => self::OWNERSHIP_DOMAIN],
         'debt_record' => ['scope' => CashierV3ResourceScope::TYPE_TENANT, 'lock' => 65, 'ownership' => self::OWNERSHIP_DOMAIN],

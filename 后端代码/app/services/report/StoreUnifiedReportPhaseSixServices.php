@@ -180,9 +180,9 @@ final class StoreUnifiedReportPhaseSixServices
                 'store_name' => $f['store_name'], 'employee_name' => $f['employee_name'],
                 'member_name' => $f['member_name'], 'card_type' => (string)($f['card_type'] ?: '-'),
                 'performance_category' => $f['category_path'], 'detail' => $f['item_name'],
-                'project_count' => (int)$f['project_count'],
+                'project_count' => number_format((float)$f['project_count'], 1, '.', ''),
                 'consumption_amount' => $this->money((int)$f['consumption_cents']),
-                'cash_amount' => $this->money((int)$f['amount_cents']),
+                'cash_amount' => $this->money((int)($f['cash_cents'] ?? 0)),
                 'labor_fee' => $this->money((int)$f['labor_fee_cents']), 'row_key' => $f['row_key'],
             ];
         }
@@ -195,7 +195,7 @@ final class StoreUnifiedReportPhaseSixServices
             $this->column('card_type','卡类型','卡内项目核销的卡类型，非卡内显示-。'),
             $this->column('performance_category','业绩分类','统一业绩分类。'),
             $this->column('detail','明细','项目或产品名称。'),
-            $this->column('project_count','项目数','分配手艺人时保存的项目数，仅记录不参与计算。',true),
+            $this->column('project_count','项目数','服务记录分配给该手艺人的工资项目数；人工调整时只能按0.5递增。',true),
             $this->column('consumption_amount','消耗业绩','服务完成后的消耗业绩事实。',true),
             $this->column('cash_amount','现金业绩','销售明细现金业绩分摊事实。',true),
             $this->column('labor_fee','手工费','分配手艺人时保存的手工费。',true),
@@ -209,17 +209,17 @@ final class StoreUnifiedReportPhaseSixServices
         foreach($this->salaryFacts($stores,$range) as $f){
             $key=(int)$f['store_id'].'|'.(int)$f['employee_id'];
             if(!isset($rows[$key]))$rows[$key]=['company_name'=>$f['company_name'],'store_name'=>$f['store_name'],'employee_name'=>$f['employee_name'],'project_count'=>0,'consumption_cents'=>0,'cash_cents'=>0,'labor_fee_cents'=>0];
-            $rows[$key]['project_count']+=(int)$f['project_count'];
+            $rows[$key]['project_count']+=(float)$f['project_count'];
             $rows[$key]['consumption_cents']+=(int)$f['consumption_cents'];
-            $rows[$key]['cash_cents']+=(int)$f['amount_cents'];
+            $rows[$key]['cash_cents']+=(int)($f['cash_cents'] ?? 0);
             $rows[$key]['labor_fee_cents']+=(int)$f['labor_fee_cents'];
         }
-        foreach($rows as &$r){$r['consumption_amount']=$this->money($r['consumption_cents']);$r['cash_amount']=$this->money($r['cash_cents']);$r['labor_fee']=$this->money($r['labor_fee_cents']);unset($r['consumption_cents'],$r['cash_cents'],$r['labor_fee_cents']);}unset($r);
+        foreach($rows as &$r){$r['project_count']=number_format((float)$r['project_count'],1,'.','');$r['consumption_amount']=$this->money($r['consumption_cents']);$r['cash_amount']=$this->money($r['cash_cents']);$r['labor_fee']=$this->money($r['labor_fee_cents']);unset($r['consumption_cents'],$r['cash_cents'],$r['labor_fee_cents']);}unset($r);
         return $this->result('员工薪资汇总月报表',[
             $this->column('company_name','分公司','员工发生业务时组织快照。',false,true),
             $this->column('store_name','门店','员工发生业务时门店快照。',false,true),
             $this->column('employee_name','销售人','员工历史姓名快照。'),
-            $this->column('project_count','项目数','分配手艺人明细项目数量，仅记录不参与计算。',true),
+            $this->column('project_count','项目数','员工薪资明细中工资项目数的合计；人工调整值按0.5递增。',true),
             $this->column('consumption_amount','消耗','服务完成或核销形成的消耗业绩。',true),
             $this->column('labor_fee','手工','服务明细手工费。',true),
             $this->column('cash_amount','产品业绩','产品现金业绩事实。',true)
@@ -276,16 +276,66 @@ final class StoreUnifiedReportPhaseSixServices
     private function salaryFacts(array $stores,array $range):array
     {
         $rows=Db::name('cashier_v3_performance_fact')->alias('pf')
-            ->leftJoin('cashier_v3_sale_fact s','s.tenant_id=pf.tenant_id AND s.source_line_id=pf.source_line_id AND s.fact_direction=\'forward\' AND s.status=\'effective\'')
-            ->leftJoin('cashier_v3_report_sale_dimension_fact d','d.tenant_id=pf.tenant_id AND d.sale_fact_id=s.fact_id')
+            ->leftJoin('cashier_v3_entitlement_service_fact sv','sv.tenant_id=pf.tenant_id AND sv.checkout_request_id=pf.checkout_request_id AND sv.source_line_id=pf.source_line_id AND sv.service_status=\'completed\'')
             ->where('pf.tenant_id',CashierV3ScopeResolver::TENANT_SCOPE_ID)->whereIn('pf.store_id',$stores)->whereBetween('pf.business_date',[$range['start'],$range['end']])
-            ->where('pf.performance_type','sales_performance_allocated')->where('pf.status','effective')
-            ->field('pf.fact_id row_key,pf.store_id,pf.employee_id,pf.employee_name_snapshot employee_name,pf.business_date,pf.source_line_id,pf.amount_cents,s.member_id,s.member_name_snapshot member_name,s.store_name_snapshot store_name,s.organization_name_snapshot company_name,s.quantity,d.item_name_snapshot item_name,d.category_path_snapshot category_path,s.source_type')
+            ->where('pf.performance_type','labor_performance_allocated')->where('pf.status','effective')
+            ->field('pf.id,pf.fact_id,pf.reversal_of,pf.fact_id row_key,pf.store_id,pf.employee_id,pf.employee_name_snapshot employee_name,pf.business_date,pf.checkout_request_id,pf.source_line_id,pf.amount_cents,pf.labor_fee_amount_cents,pf.project_count_half_units,pf.rule_code_snapshot,pf.fact_direction,sv.member_id,sv.member_name_snapshot member_name,sv.store_name_snapshot store_name,sv.organization_name_snapshot company_name,sv.quantity,sv.project_count,sv.project_name_snapshot item_name,sv.project_category_name_snapshot category_path,sv.source_document_type source_type')
+            ->order('pf.id','asc')
             ->select()->toArray();
         if($rows===[])return[];
-        $services=$this->serviceFacts($stores,$range);$serviceByLine=[];foreach($services as $s){$serviceByLine[(string)$s['source_line_id']]=$s;}
-        foreach($rows as &$row){$service=$serviceByLine[(string)$row['source_line_id']]??[];$row['project_count']=(int)($service['project_count']??$row['quantity']??0);$row['consumption_cents']=(int)($service['consumption_cents']??0);$row['labor_fee_cents']=(int)($service['labor_fee_cents']??0);$row['card_type']='';$row['item_name']=(string)($row['item_name']??'');$row['category_path']=(string)($row['category_path']??'');}
-        unset($row);return $rows;
+        $reversed=[];
+        foreach($rows as $row){if((string)$row['fact_direction']==='reversal'&&trim((string)$row['reversal_of'])!=='')$reversed[(string)$row['reversal_of']]=true;}
+        $grouped=[];
+        foreach($rows as $row){
+            if((string)$row['fact_direction']!=='forward'||isset($reversed[(string)$row['fact_id']]))continue;
+            $key=(string)$row['checkout_request_id'].'|'.(string)$row['source_line_id'].'|'.(int)$row['employee_id'];
+            if(!isset($grouped[$key])){
+                $grouped[$key]=$row;
+                $grouped[$key]['amount_cents']=0;
+                $grouped[$key]['labor_fee_amount_cents']=0;
+                $grouped[$key]['project_count_half_units']=0;
+                $grouped[$key]['has_explicit_project_count']=false;
+            }
+            $grouped[$key]['amount_cents']+=(int)$row['amount_cents'];
+            $grouped[$key]['labor_fee_amount_cents']+=(int)$row['labor_fee_amount_cents'];
+            $grouped[$key]['project_count_half_units']+=(int)$row['project_count_half_units'];
+            $grouped[$key]['has_explicit_project_count']=$grouped[$key]['has_explicit_project_count']
+                ||(string)$row['rule_code_snapshot']==='SERVICE-RECORD-CRAFTSMAN-ADJUST-V1'
+                ||(int)$row['project_count_half_units']!==0;
+            foreach(['row_key','employee_name','member_id','member_name','store_name','company_name','item_name','category_path','source_type'] as $field)$grouped[$key][$field]=$row[$field]??$grouped[$key][$field]??'';
+        }
+        $lineGroups=[];
+        foreach($grouped as $key=>$row){$lineKey=(string)$row['checkout_request_id'].'|'.(string)$row['source_line_id'];$lineGroups[$lineKey][]=$key;}
+        foreach($lineGroups as $keys){
+            $hasExplicitProjectCount=false;
+            foreach($keys as $key)$hasExplicitProjectCount=$hasExplicitProjectCount||!empty($grouped[$key]['has_explicit_project_count']);
+            if($hasExplicitProjectCount)continue;
+            $sample=$grouped[$keys[0]];
+            $legacyProjectCount=(int)($sample['project_count'] ?? 0);
+            if($legacyProjectCount<=0)$legacyProjectCount=(int)($sample['quantity'] ?? 0);
+            $totalHalfUnits=max(0,$legacyProjectCount)*2;
+            $base=intdiv($totalHalfUnits,count($keys));$remainder=$totalHalfUnits-$base*count($keys);
+            foreach($keys as $index=>$key)$grouped[$key]['project_count_half_units']=$base+($index>=count($keys)-$remainder?1:0);
+        }
+        $salesRows=Db::name('cashier_v3_performance_fact')->where('tenant_id',CashierV3ScopeResolver::TENANT_SCOPE_ID)
+            ->whereIn('store_id',$stores)->whereBetween('business_date',[$range['start'],$range['end']])
+            ->where('performance_type','sales_performance_allocated')->where('status','effective')
+            ->field('store_id,employee_id,checkout_request_id,source_line_id,amount_cents')->select()->toArray();
+        $salesByEmployeeLine=[];
+        foreach($salesRows as $sale){$salesKey=(int)$sale['store_id'].'|'.(int)$sale['employee_id'].'|'.(string)$sale['checkout_request_id'].'|'.(string)$sale['source_line_id'];$salesByEmployeeLine[$salesKey]=($salesByEmployeeLine[$salesKey]??0)+(int)$sale['amount_cents'];}
+        $out=[];
+        foreach($grouped as $row){
+            $halfUnits=(int)$row['project_count_half_units'];
+            $row['project_count']=$halfUnits/2;
+            $row['consumption_cents']=(int)$row['amount_cents'];
+            $row['labor_fee_cents']=(int)$row['labor_fee_amount_cents'];
+            $salesKey=(int)$row['store_id'].'|'.(int)$row['employee_id'].'|'.(string)$row['checkout_request_id'].'|'.(string)$row['source_line_id'];
+            $row['cash_cents']=(int)($salesByEmployeeLine[$salesKey]??0);
+            $row['card_type']='';$row['item_name']=(string)($row['item_name']??'');$row['category_path']=(string)($row['category_path']??'');
+            if((int)$row['consumption_cents']===0&&(int)$row['labor_fee_cents']===0&&(float)$row['project_count']===0.0)continue;
+            $out[]=$row;
+        }
+        return $out;
     }
 
     private function topCategory(string $path): string
@@ -298,7 +348,7 @@ final class StoreUnifiedReportPhaseSixServices
         $totals=[];foreach($facts as $f){if($this->topCategory((string)($f['category_path']??''))!==$category)continue;$id=(int)($f['member_id']??0);if($id>0)$totals[$id]=($totals[$id]??0)+(int)($f['amount_cents']??0);}return count(array_filter($totals,static fn(int $amount):bool=>$amount>=$thresholdCents));
     }
     private function range(array $range,array $input):array{$start=trim((string)($range['start']??$input['start_date']??''));$end=trim((string)($range['end']??$input['end_date']??''));if($start===''||$end===''){ $year=max(2000,(int)($input['year']??date('Y')));$start=$year.'-01-01';$end=$year.'-12-31'; }if(!preg_match('/^\d{4}-\d{2}-\d{2}$/',$start)||!preg_match('/^\d{4}-\d{2}-\d{2}$/',$end)||$start>$end)throw new \InvalidArgumentException('日期范围不正确');return['start'=>$start,'end'=>$end];}
-    private function result(string $title,array $columns,array $records,array $range):array{$summary=[];foreach($columns as $c){$summary[$c['key']]='-';if(!empty($c['summable'])){$sum=0;$has=false;$moneyKey=(bool)preg_match('/amount|cash|fee|labor|consumption|performance|target|unit_output|average_order|sales_efficiency/i',(string)$c['key']);foreach($records as $r){$v=$r[$c['key']]??null;if($moneyKey&&is_string($v)&&preg_match('/^-?\d+(?:\.\d{1,2})?$/',$v)){ $sum+=$this->cents($v);$has=true; }elseif(!$moneyKey&&is_numeric($v)){ $sum+=(int)$v;$has=true; }}$summary[$c['key']]=$has?($moneyKey?$this->money($sum):(string)$sum):'0';}}return['title'=>$title,'columns'=>$columns,'records'=>array_values($records),'summary_row'=>$summary,'column_groups'=>[],'metric_version'=>self::METRIC_VERSION,'data_as_of'=>date('c'),'aggregation_status'=>'caught_up','filters'=>['start_date'=>$range['start'],'end_date'=>$range['end']],'table_layout'=>['fixed'=>true,'summary_fixed'=>true]];}
+    private function result(string $title,array $columns,array $records,array $range):array{$summary=[];foreach($columns as $c){$summary[$c['key']]='-';if(!empty($c['summable'])){$sum=0;$has=false;$moneyKey=(bool)preg_match('/amount|cash|fee|labor|consumption|performance|target|unit_output|average_order|sales_efficiency/i',(string)$c['key']);$halfUnitKey=(string)$c['key']==='project_count';foreach($records as $r){$v=$r[$c['key']]??null;if($moneyKey&&is_string($v)&&preg_match('/^-?\d+(?:\.\d{1,2})?$/',$v)){ $sum+=$this->cents($v);$has=true; }elseif($halfUnitKey&&is_numeric($v)){ $sum+=(int)round((float)$v*2);$has=true; }elseif(!$moneyKey&&is_numeric($v)){ $sum+=(int)$v;$has=true; }}$summary[$c['key']]=$has?($moneyKey?$this->money($sum):($halfUnitKey?number_format($sum/2,1,'.',''):(string)$sum)):'0';}}return['title'=>$title,'columns'=>$columns,'records'=>array_values($records),'summary_row'=>$summary,'column_groups'=>[],'metric_version'=>self::METRIC_VERSION,'data_as_of'=>date('c'),'aggregation_status'=>'caught_up','filters'=>['start_date'=>$range['start'],'end_date'=>$range['end']],'table_layout'=>['fixed'=>true,'summary_fixed'=>true]];}
     private function column(string $key,string $label,string $explanation,bool $summable=false,bool $fixed=false,int $width=120,array $drilldown=[],string $group=''):array{$c=['key'=>$key,'label'=>$label,'source_explanation'=>$explanation,'summable'=>$summable,'width'=>$width];if($fixed)$c['fixed']='left';if($group!=='')$c['group_label']=$group;if($drilldown)$c['drilldown']=$drilldown;return$c;}
     private function manualColumn(string $key,string $label,string $explanation,string $group=''):array{$c=$this->column($key,$label,$explanation,false,false,120,[],$group);$c['manual_input']=['subject_type'=>'phase_six_row','field_key'=>$key,'value_type'=>'text'];return$c;}
     private function money(int $cents):string{$negative=$cents<0;$cents=abs($cents);$value=intdiv($cents,100).'.'.str_pad((string)($cents%100),2,'0',STR_PAD_LEFT);$value=rtrim(rtrim($value,'0'),'.');return($negative?'-':'').($value===''?'0':$value);}

@@ -699,15 +699,16 @@ final class CashierV3SalesOrderQueryServices
             $like = '%' . addcslashes((string)$criteria['keyword'], "\\%_") . '%';
             $query->where('o.settled_at', '>=', (int)$criteria['keywordWindowStartTimestamp'])
                 ->where(function ($nested) use ($like) {
-                    $nested->where('o.order_no', 'like', $like)
-                        ->whereOr('o.member_name_snapshot', 'like', $like)
+                    $this->whereUtf8Like($nested, 'o.order_no', $like);
+                    $this->whereUtf8Like($nested, 'o.member_name_snapshot', $like, true);
+                    $nested
                         ->whereOr(function ($lineMatch) use ($like) {
                             $lineMatch->whereExists(function ($line) use ($like) {
                                 $line->name('cashier_v3_sales_order_line')->alias('l')
                                     ->whereRaw('l.order_id = o.order_id')
                                     ->where('l.line_status', 'settled')
-                                    ->where('l.line_direction', 'forward')
-                                    ->where('l.item_name_snapshot', 'like', $like);
+                                    ->where('l.line_direction', 'forward');
+                                $this->whereUtf8Like($line, 'l.item_name_snapshot', $like);
                             });
                         })
                         ->whereOr(function ($personMatch) use ($like) {
@@ -715,8 +716,8 @@ final class CashierV3SalesOrderQueryServices
                                 $person->name('cashier_v3_performance_fact')->alias('pf')
                                     ->whereRaw('pf.order_id = o.order_id')
                                     ->where('pf.fact_direction', 'forward')
-                                    ->where('pf.status', 'effective')
-                                    ->where('pf.employee_name_snapshot', 'like', $like);
+                                    ->where('pf.status', 'effective');
+                                $this->whereUtf8Like($person, 'pf.employee_name_snapshot', $like);
                             });
                         });
                 });
@@ -804,16 +805,17 @@ final class CashierV3SalesOrderQueryServices
                 $like = '%' . addcslashes($keyword, "\\%_") . '%';
                 $query->where('o.pay_time', '>=', (int)$criteria['keywordWindowStartTimestamp'])
                     ->where(function ($nested) use ($like) {
-                        $nested->where('o.order_id', 'like', $like)
-                            ->whereOr('o.real_name', 'like', $like)
-                            ->whereOr('o.user_phone', 'like', $like)
+                        $this->whereUtf8Like($nested, 'o.order_id', $like);
+                        $this->whereUtf8Like($nested, 'o.real_name', $like, true);
+                        $this->whereUtf8Like($nested, 'o.user_phone', $like, true);
+                        $nested
                             ->whereOr(function ($lineMatch) use ($like) {
                                 $lineMatch->whereExists(function ($searchLine) use ($like) {
                                     $searchLine->name('store_order_cart_info')->alias('search_ci')
                                         ->whereRaw('search_ci.oid = o.id')
                                         ->whereRaw('IFNULL(search_ci.cart_type, 0) IN (0,3)')
-                                        ->whereRaw('IFNULL(search_ci.is_gift, 0) = 0')
-                                        ->where('search_ci.cart_info', 'like', $like);
+                                        ->whereRaw('IFNULL(search_ci.is_gift, 0) = 0');
+                                    $this->whereUtf8Like($searchLine, 'search_ci.cart_info', $like);
                                 });
                             });
                     });
@@ -897,6 +899,21 @@ final class CashierV3SalesOrderQueryServices
         } elseif ($status === 'voided') {
             $query->where('o.terminal_action', 2);
         }
+    }
+
+    /**
+     * 订单编号存在 ascii_bin 历史列，关键词可为中文。统一转换 LIKE 两边
+     * 的表达式，避免同一 OR 查询组中发生字符集／排序规则冲突。
+     * 调用处字段均为本服务固定 SQL 字段，不接受客户端输入。
+     */
+    private function whereUtf8Like($query, string $field, string $like, bool $or = false): void
+    {
+        $expression = 'CONVERT(' . $field . ' USING utf8mb4) COLLATE utf8mb4_general_ci LIKE ?';
+        if ($or) {
+            $query->whereOrRaw($expression, [$like]);
+            return;
+        }
+        $query->whereRaw($expression, [$like]);
     }
 
     private function databaseLineRows(array $orderIds): array

@@ -18,7 +18,12 @@ final class CashierV3OrderLifecycleModule
             ? $dispatcher->versionServices()->providerFor('member_benefit_pool')
             : null;
         $serviceVoid = new CashierV3ServiceRecordVoidServices($entitlementProvider);
+        $serviceCraftsmanAdjustment = new CashierV3ServiceRecordCraftsmanAdjustmentServices();
         $dispatcher->versionServices()->registerProvider('sales_order', new CashierV3OrderLifecycleVersionProvider());
+        $dispatcher->versionServices()->registerProvider(
+            CashierV3ServiceRecordCraftsmanAdjustmentVersionProvider::KIND,
+            new CashierV3ServiceRecordCraftsmanAdjustmentVersionProvider()
+        );
         foreach (['adjust-sales-order-personnel','refund-sales-order','void-sales-order','reopen-sales-order'] as $action) {
             $isReopen = $action === 'reopen-sales-order';
             $requiredKinds = $isReopen ? ['sales_order', 'cashier_workspace'] : ['sales_order'];
@@ -158,5 +163,58 @@ final class CashierV3OrderLifecycleModule
             ['member_benefit_pool', 'card_holder']
         );
         $dispatcher->policies()->register($serviceVoidPolicy);
+
+        if ($handlers->hasProjection('open-service-record-craftsman-adjustment')) {
+            throw new \LogicException('service record craftsman adjustment projection duplicate');
+        }
+        $handlers->registerProjection('open-service-record-craftsman-adjustment', static function (array $scope) use ($serviceCraftsmanAdjustment): array {
+            $entry = $serviceCraftsmanAdjustment->entry(
+                (array)($scope['payload'] ?? []), $scope['operator_scope'], $scope['data_scope']
+            );
+            return [
+                'data' => ['serviceRecordCraftsmanAdjustment' => $entry],
+                'versions' => [[
+                    'kind' => CashierV3ServiceRecordCraftsmanAdjustmentVersionProvider::KIND,
+                    'id' => (string)$entry['serviceFactId'],
+                    'version' => (int)$entry['recordVersion'],
+                ]],
+                'message' => '服务记录手艺人分配已读取。',
+            ];
+        });
+        if ($handlers->hasCommand('adjust-service-record-craftsmen') || $dispatcher->policies()->has('adjust-service-record-craftsmen')) {
+            throw new \LogicException('service record craftsman adjustment command duplicate');
+        }
+        $handlers->registerCommand('adjust-service-record-craftsmen', static function (array $scope) use ($serviceCraftsmanAdjustment): array {
+            $result = $serviceCraftsmanAdjustment->executeInTx($scope);
+            return [
+                'data' => ['serviceRecordCraftsmanAdjustment' => $result],
+                'business_no' => (string)$result['operationNo'],
+                'touched' => (array)($result['touchedRoles'] ?? ['service_record']),
+                'message' => (string)$result['message'],
+            ];
+        });
+        $serviceAdjustmentPolicy = new CashierV3ContextPolicy(
+            'adjust-service-record-craftsmen',
+            ['service_record'],
+            [],
+            static function (array $payload): array {
+                $serviceFactId = trim((string)($payload['serviceFactId'] ?? $payload['service_fact_id'] ?? ''));
+                if (preg_match('/^[1-9][0-9]*$/D', $serviceFactId) !== 1) {
+                    throw CashierV3CommandException::invalidContext('未找到需要修改的服务记录，请重新打开记录。');
+                }
+                return [
+                    'identities' => [[
+                        'role' => 'service_record', 'kind' => CashierV3ServiceRecordCraftsmanAdjustmentVersionProvider::KIND,
+                        'id' => $serviceFactId, 'required' => true,
+                    ]],
+                    'required_read_roles' => ['service_record'],
+                    'required_touched_roles' => ['service_record'],
+                ];
+            },
+            ['service_record'],
+            [],
+            []
+        );
+        $dispatcher->policies()->register($serviceAdjustmentPolicy);
     }
 }

@@ -12,6 +12,13 @@ import { isCompleteCheckoutCompositionContract } from './cashierV3EntitlementDra
 /** 三个去结账映射后的规范写命令名 */
 const CHECKOUT_COMMAND_ACTIONS = CHECKOUT_ACTION_ALIASES
 
+// Shared shape guard for command normalization. Keep this at module scope so
+// the direct checkout-snapshot branch can bypass projection contexts without
+// depending on a validator's local helper.
+function isRecord(value) {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value))
+}
+
 /**
  * 新收银台前端与后端的唯一适配边界。
  *
@@ -52,12 +59,6 @@ const ROOM_ASSIGNMENT_PREPARATION_ACTIONS = new Set(
 // 再由某个页面决定是否打开弹层。
 let latestServiceCompletionPreparationIntent = null
 let latestRoomAssignmentPreparationIntent = null
-
-/** 公开资源版本仓：绑定 stateContextId，供后续命令冻结 contexts */
-let cashierV3PublicVersionStore = {
-  stateContextId: '',
-  versions: new Map()
-}
 
 /** 显式 context switch 意图：仅匹配最新 epoch／token 的响应可切换 */
 let contextSwitchIntent = null
@@ -101,12 +102,12 @@ function allowsDirectResultLookup(action, payload = {}) {
     && Boolean(String(payload.taskId || payload.task_id || '').trim())
 }
 
+// Kept only for legacy reservation/room screens. The cashier checkout path
+// never reads this store for a browser-owned final snapshot.
+let cashierV3PublicVersionStore = { stateContextId: '', versions: new Map() }
+
 function currentPublicVersionContextId() {
   return String(cashierV3PublicVersionStore.stateContextId || '')
-}
-
-function versionStoreKey(kind, id) {
-  return `${String(kind)}:${String(id)}`
 }
 
 function normalizePublicVersionRow(row) {
@@ -114,83 +115,50 @@ function normalizePublicVersionRow(row) {
   const kind = String(row.kind || '')
   const id = String(row.id || '')
   const version = Number(row.version)
-  if (!kind || !id || !Number.isInteger(version) || version <= 0) return null
-  return { kind, id, version }
+  return kind && id && Number.isInteger(version) && version > 0 ? { kind, id, version } : null
 }
 
-/**
- * 合并公开 versions；同一 context、同一 kind+id 仅允许单调增加。
- * @returns {{ merged: number, refused: number }}
- */
 export function mergeCashierV3PublicVersions(versions, stateContextId, options = {}) {
-  const refusedDowngrade = options.refusedDowngrade !== false
-  const requestContextId = String(options.requestStateContextId || '')
   const responseContextId = String(stateContextId || '')
-  // 必须同时绑定请求上下文与响应上下文；缺任一拒绝，不得默认“当前”
-  if (!responseContextId || !requestContextId || requestContextId !== responseContextId) {
+  const requestContextId = String(options.requestStateContextId || '')
+  if (!responseContextId || responseContextId !== requestContextId || !Array.isArray(versions)) {
     return { merged: 0, refused: Array.isArray(versions) ? versions.length : 0 }
   }
-  if (!Array.isArray(versions)) {
-    return { merged: 0, refused: 0 }
+  if (currentPublicVersionContextId() !== responseContextId) {
+    cashierV3PublicVersionStore = { stateContextId: responseContextId, versions: new Map() }
   }
-  if (currentPublicVersionContextId() && currentPublicVersionContextId() !== responseContextId) {
-    return { merged: 0, refused: versions.length }
-  }
-  cashierV3PublicVersionStore.stateContextId = responseContextId
   let merged = 0
   let refused = 0
   for (const row of versions) {
     const normalized = normalizePublicVersionRow(row)
-    if (!normalized) {
-      refused += 1
-      continue
-    }
-    const key = versionStoreKey(normalized.kind, normalized.id)
-    const existing = cashierV3PublicVersionStore.versions.get(key)
-    if (existing !== undefined && normalized.version <= existing) {
-      refused += 1
-      if (refusedDowngrade) continue
-    }
+    if (!normalized) { refused += 1; continue }
+    const key = `${normalized.kind}:${normalized.id}`
+    const current = cashierV3PublicVersionStore.versions.get(key)
+    if (current !== undefined && normalized.version <= current) { refused += 1; continue }
     cashierV3PublicVersionStore.versions.set(key, normalized.version)
     merged += 1
   }
   return { merged, refused }
 }
 
-/**
- * 完整根投影只在工作台上下文真实改变时重置版本仓。
- *
- * 某些只读详情会预先返回其命令资源版本，而随后一次完整工作台投影
- * 不会重复携带该版本。若同一 context 的根替换也清仓，下一条写命令
- * 会失去刚读取的对象版本，继而错误进入恢复循环。
- */
-function replaceCashierV3PublicVersionStore(stateContextId, versions = null) {
-  const contextId = String(stateContextId || '')
-  if (currentPublicVersionContextId() !== contextId) {
-    cashierV3PublicVersionStore = {
-      stateContextId: contextId,
-      versions: new Map()
-    }
-  }
-  if (Array.isArray(versions) && versions.length) {
-    mergeCashierV3PublicVersions(versions, contextId, { requestStateContextId: contextId })
-  }
-}
-
 export function getCashierV3PublicVersion(kind, id) {
-  const currentContextId = stateContextIdOf(cashierV3State)
-  if (!currentContextId) return null
-  if (currentPublicVersionContextId() && currentPublicVersionContextId() !== currentContextId) return null
-  return cashierV3PublicVersionStore.versions.get(versionStoreKey(kind, id)) ?? null
+  return cashierV3PublicVersionStore.versions.get(`${String(kind)}:${String(id)}`) ?? null
 }
 
 export function clearCashierV3PublicVersions(stateContextId = '') {
-  const targetContextId = String(stateContextId || '')
-  if (!targetContextId || currentPublicVersionContextId() === targetContextId) {
-    cashierV3PublicVersionStore = {
-      stateContextId: '',
-      versions: new Map()
-    }
+  const target = String(stateContextId || '')
+  if (!target || target === currentPublicVersionContextId()) {
+    cashierV3PublicVersionStore = { stateContextId: '', versions: new Map() }
+  }
+}
+
+function replaceCashierV3PublicVersionStore(stateContextId, versions = null) {
+  const contextId = String(stateContextId || '')
+  if (currentPublicVersionContextId() !== contextId) {
+    cashierV3PublicVersionStore = { stateContextId: contextId, versions: new Map() }
+  }
+  if (Array.isArray(versions) && versions.length) {
+    mergeCashierV3PublicVersions(versions, contextId, { requestStateContextId: contextId })
   }
 }
 
@@ -212,7 +180,6 @@ export function beginCashierV3ContextSwitch(token = '') {
     epoch: contextSwitchEpoch,
     token: token ? String(token) : createContextSwitchToken()
   }
-  clearCashierV3PublicVersions()
   latestServiceCompletionPreparationIntent = null
   latestRoomAssignmentPreparationIntent = null
   // 原子清空完整旧根，pending／切换失败期间不得保留旧账号／旧门店业务数据
@@ -229,7 +196,6 @@ export function currentCashierV3ContextSwitchIntent() {
 
 /** 测试重置：版本仓、context switch 意图与准备态现场 */
 export function resetCashierV3BridgeForTests() {
-  clearCashierV3PublicVersions()
   contextSwitchIntent = null
   contextSwitchEpoch = 0
   latestServiceCompletionPreparationIntent = null
@@ -1557,16 +1523,8 @@ export function validateRootStateSchema(state = {}) {
             problems.push(`cashier_cart_line_${index}_identity_invalid`)
           }
           if (line.lineRole === 'entitlement_service') {
-            const sourceVersion = Number(line.entitlementSourceVersion ?? line.sourceVersion)
-            const projectVersion = Number(line.projectVersion)
             if (!line.entitlementInstanceId || !line.entitlementSourceDetailId) {
               problems.push(`cashier_cart_line_${index}_entitlement_source_missing`)
-            }
-            if (!Number.isInteger(sourceVersion) || sourceVersion < 1) {
-              problems.push(`cashier_cart_line_${index}_entitlement_version_invalid`)
-            }
-            if (!Number.isInteger(projectVersion) || projectVersion < 1) {
-              problems.push(`cashier_cart_line_${index}_project_version_invalid`)
             }
           }
         })
@@ -1590,7 +1548,6 @@ export function validateRootStateSchema(state = {}) {
       const selector = cashier.entitlementSelector
       if (typeof selector.ready !== 'boolean') problems.push('cashier_entitlementSelector_ready_invalid')
       checkArrayField(selector, 'sources', 'cashier_entitlementSelector_sources')
-      checkArrayField(selector, 'commandContexts', 'cashier_entitlementSelector_commandContexts')
       if (selector.ready === true) {
         const selectorMember = isRecord(selector.member) ? selector.member : null
         if (!selector.selectorRequestId || !selector.selectorToken || !selectorMember || !(selectorMember.id || selectorMember.memberId)) {
@@ -1602,8 +1559,7 @@ export function validateRootStateSchema(state = {}) {
             return
           }
           const sourceId = source.entitlementInstanceId || source.id
-          const sourceVersion = Number(source.version ?? source.revision)
-          if (!sourceId || !Number.isInteger(sourceVersion) || sourceVersion < 1) {
+          if (!sourceId) {
             problems.push(`cashier_entitlementSelector_source_${sourceIndex}_identity_invalid`)
           }
           if (!Array.isArray(source.projects)) {
@@ -1618,8 +1574,7 @@ export function validateRootStateSchema(state = {}) {
             }
             const projectId = project.projectId || project.id
             const detailId = project.entitlementSourceDetailId || project.sourceDetailId
-            const projectVersion = Number(project.version ?? project.revision)
-            if (!projectId || !detailId || !Number.isInteger(projectVersion) || projectVersion < 1) {
+            if (!projectId || !detailId) {
               problems.push(`${prefix}_identity_invalid`)
             }
             ;['remainingTimes', 'occupiedTimes', 'availableTimes'].forEach((key) => {
@@ -2686,27 +2641,18 @@ function isCashierWorkspaceAction(action) {
     'resume-hang-order',
     'void-hang-order',
     'prepare-service-completion',
-    'prepare-checkout',
     'prepare-debt-repayment',
     'checkout-step-back',
     'checkout-step-next',
     'open-balance-payment',
     'open-balance-payment-identity-verification',
     'toggle-combination-payment',
-    'add-payment-method',
     'open-payment-note',
-    'update-payment-line',
-    'remove-payment-line',
-    'update-checkout-business-source',
-    'apply-balance-payment',
-    'remove-balance-payment',
-    'update-balance-payment',
     'open-checkout-source-selector',
     'confirm-debt-warning',
     'confirm-checkout-final-changes',
     'submit-checkout',
     'submit-debt-repayment',
-    'return-to-payment-edit',
     'retry-checkout',
     // 重开会把当前订单快照重新装入当前购物车，必须与普通购物车写入
     // 使用同一 cashier_workspace 版本锁，防止覆盖并发中的购物车编辑。
@@ -2741,6 +2687,13 @@ function isCashierWorkspaceAction(action) {
  * 也不再接受单个 command.context——少传一个对象就是少校验一个版本。
  */
 function resolveCommandContexts(action, payload) {
+  // A final browser-owned checkout snapshot is self-contained. Never carry
+  // the workspace or selector projection revision into this request; the
+  // server discovers and locks current inventory, entitlement and balance
+  // authorities inside the final transaction.
+  if (action === 'submit-checkout' && isRecord(payload?.checkoutSnapshot)) {
+    return { invalid: false, contexts: [] }
+  }
   // 只接受完整的 commandContexts 数组；单个 commandContext 回退已删除
   const suppliedContexts = Array.isArray(payload.commandContexts) ? payload.commandContexts : []
 
@@ -2824,6 +2777,12 @@ function resolveCommandContexts(action, payload) {
   if (['adjust-sales-order-personnel', 'refund-sales-order', 'void-sales-order', 'reopen-sales-order'].includes(action)
     && payload.orderId) {
     contexts.push(buildCommandContext('sales_order', payload.orderId))
+  }
+
+  // 服务记录手艺人调整是订单中心的独立历史修正，不依赖或改写收银草稿。
+  // 它必须携带打开编辑窗时服务端签发的服务记录版本。
+  if (action === 'adjust-service-record-craftsmen' && payload.serviceFactId) {
+    contexts.push(buildCommandContext('service_record', payload.serviceFactId))
   }
 
   if (['refund-recharge-order', 'void-recharge-order'].includes(action) && payload.rechargeId && payload.memberId) {
@@ -3514,6 +3473,8 @@ export async function requestCashierV3Action(action, payload = {}) {
 
   const canonicalAction = canonicalCashierV3Action(action)
   const readOnly = isReadOnlyAction(canonicalAction)
+  const directCheckoutSnapshot = canonicalAction === 'submit-checkout'
+    && isRecord(requestBody.checkoutSnapshot)
   // 预约只是单据资料保存。它不依赖收银工作台或预约资源版本，直接按
   // 服务端单据写入结果处理，也不应因工作台投影未同步而拒绝提交。
   const reservationDataWrite = ['create-reservation', 'update-reservation'].includes(canonicalAction)
@@ -3588,7 +3549,8 @@ export async function requestCashierV3Action(action, payload = {}) {
     if (!silent) emitCashierV3UiResult(invalidPreparationRequest)
     return invalidPreparationRequest
   }
-  if (!readOnly && !reservationDataWrite && (resolvedContexts.invalid || hasInvalidWriteContexts(contexts))) {
+  if (!readOnly && !reservationDataWrite && !directCheckoutSnapshot
+    && (resolvedContexts.invalid || hasInvalidWriteContexts(contexts))) {
     // No command has been sent yet, so a single automatic root recovery is
     // safe. This covers the narrow interval after entering the cashier where
     // the UI is visible but the root's authoritative versions are still

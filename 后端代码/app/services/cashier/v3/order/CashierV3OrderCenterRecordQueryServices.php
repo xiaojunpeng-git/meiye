@@ -802,7 +802,7 @@ final class CashierV3OrderCenterRecordQueryServices
         $rows = $this->pageServiceRows($query, $criteria, implode(',', [
             'sf.id', 'sf.service_fact_id', 'sf.service_record_no', 'sf.tenant_id', 'sf.checkout_request_id', 'sf.source_line_id',
             'sf.business_date', 'sf.member_id', 'sf.member_name_snapshot', 'sf.project_id',
-            'sf.project_name_snapshot', 'sf.quantity', 'sf.store_id', 'sf.store_name_snapshot',
+            'sf.project_name_snapshot', 'sf.quantity', 'sf.project_count', 'sf.store_id', 'sf.store_name_snapshot',
             'sf.operator_id', 'sf.operator_name_snapshot', 'sf.settled_at', 'sf.occurred_at',
             'sf.craftsmen_snapshot_json', 'sf.service_status', 'sf.source_document_type', 'wf.is_gift', 'wf.source_kind',
             'wf.source_name_snapshot AS source_name_snapshot',
@@ -815,11 +815,14 @@ final class CashierV3OrderCenterRecordQueryServices
 
         return [array_map(function (array $row) use ($laborByLine): array {
             $key = $this->serviceLineKey($row);
-            $labor = $laborByLine[$key] ?? ['amountCents' => 0, 'laborFeeCents' => 0, 'names' => []];
-            $craftsmen = $this->craftsmenSummary((string)$row['craftsmen_snapshot_json']);
-            if ($craftsmen === '') {
-                $craftsmen = implode('、', $labor['names']);
-            }
+            $labor = $laborByLine[$key] ?? [
+                'amountCents' => 0, 'laborFeeCents' => 0, 'projectCountHalfUnits' => 0,
+                'hasExplicitProjectCount' => false, 'names' => [],
+            ];
+            // 调整后优先展示当前有效员工事实；原始 craftsmen 快照只用于
+            // 尚未形成可读业绩分配的历史服务记录。
+            $craftsmen = implode('、', $labor['names']);
+            if ($craftsmen === '') $craftsmen = $this->craftsmenSummary((string)$row['craftsmen_snapshot_json']);
             return [
                 'id' => 'service:' . $row['id'],
                 'serviceFactId' => (int)$row['id'],
@@ -851,6 +854,12 @@ final class CashierV3OrderCenterRecordQueryServices
                 'laborPerformanceTypeLabel' => $this->laborPerformanceTypeLabel((string)($row['labor_mode'] ?? 'project_rule')),
                 'laborPerformanceRatio' => $this->laborPerformanceRatio($labor['allocations'] ?? []),
                 'laborPerformanceAllocations' => ($labor['allocations'] ?? []),
+                'projectCount' => number_format(
+                    !empty($labor['hasExplicitProjectCount'])
+                        ? (int)$labor['projectCountHalfUnits'] / 2
+                        : (int)($row['project_count'] ?: $row['quantity']),
+                    1, '.', ''
+                ),
                 'operatorName' => (string)$row['operator_name_snapshot'],
                 'serviceStatus' => !empty($row['void_operation_id']) ? '已作废' : '已完成',
                 'serviceCompletedAt' => $this->dateTime((int)($row['settled_at'] ?: $row['occurred_at'])),
@@ -882,42 +891,88 @@ final class CashierV3OrderCenterRecordQueryServices
         $facts = Db::name('cashier_v3_performance_fact')
             ->where('tenant_id', $tenantId)
             ->where('performance_type', 'labor_performance_allocated')
-            ->where('fact_direction', 'forward')
             ->where('status', 'effective')
             ->whereIn('checkout_request_id', array_values($checkoutIds))
             ->whereIn('source_line_id', array_values($lineIds))
-            ->field('checkout_request_id,source_line_id,amount_cents,labor_fee_amount_cents,employee_id,employee_name_snapshot,employee_type_snapshot,role_snapshot,allocation_weight_numerator,allocation_weight_denominator,rule_code_snapshot,rule_name_snapshot,rule_version_snapshot')
+            ->field('id,checkout_request_id,source_line_id,fact_direction,amount_cents,labor_fee_amount_cents,project_count_half_units,employee_id,employee_name_snapshot,employee_type_snapshot,role_snapshot,allocation_weight_numerator,allocation_weight_denominator,rule_code_snapshot,rule_name_snapshot,rule_version_snapshot')
+            ->order('id', 'asc')
             ->select()
             ->toArray();
-        $result = [];
+        $grouped = [];
         foreach ($facts as $fact) {
             $key = $this->serviceLineKey($fact);
             if ($key === '') continue;
-            if (!isset($result[$key])) $result[$key] = ['amountCents' => 0, 'laborFeeCents' => 0, 'names' => [], 'allocations' => []];
-            $result[$key]['amountCents'] += (int)($fact['amount_cents'] ?? 0);
-            $result[$key]['laborFeeCents'] += (int)($fact['labor_fee_amount_cents'] ?? 0);
-            $name = trim((string)($fact['employee_name_snapshot'] ?? ''));
-            if ($name !== '' && !in_array($name, $result[$key]['names'], true)) {
-                $result[$key]['names'][] = $name;
+            $employeeId = (int)($fact['employee_id'] ?? 0);
+            if ($employeeId <= 0) continue;
+            $groupKey = $key . '|' . $employeeId;
+            if (!isset($grouped[$groupKey])) $grouped[$groupKey] = [
+                'key' => $key, 'employeeId' => $employeeId, 'employeeName' => '', 'employeeType' => '',
+                'roleSnapshot' => '', 'amountCents' => 0, 'laborFeeCents' => 0,
+                'projectCountHalfUnits' => 0, 'hasExplicitProjectCount' => false,
+                'ruleCodeSnapshot' => '', 'ruleNameSnapshot' => '',
+                'ruleVersionSnapshot' => '',
+            ];
+            $grouped[$groupKey]['amountCents'] += (int)($fact['amount_cents'] ?? 0);
+            $grouped[$groupKey]['laborFeeCents'] += (int)($fact['labor_fee_amount_cents'] ?? 0);
+            $grouped[$groupKey]['projectCountHalfUnits'] += (int)($fact['project_count_half_units'] ?? 0);
+            if ((string)($fact['fact_direction'] ?? '') === 'forward') {
+                $grouped[$groupKey]['employeeName'] = trim((string)($fact['employee_name_snapshot'] ?? ''));
+                $grouped[$groupKey]['employeeType'] = (string)($fact['employee_type_snapshot'] ?? '');
+                $grouped[$groupKey]['roleSnapshot'] = (string)($fact['role_snapshot'] ?? '');
+                $grouped[$groupKey]['ruleCodeSnapshot'] = (string)($fact['rule_code_snapshot'] ?? '');
+                $grouped[$groupKey]['ruleNameSnapshot'] = (string)($fact['rule_name_snapshot'] ?? '');
+                $grouped[$groupKey]['ruleVersionSnapshot'] = (string)($fact['rule_version_snapshot'] ?? '');
+                $grouped[$groupKey]['hasExplicitProjectCount'] =
+                    (string)($fact['rule_code_snapshot'] ?? '') === 'SERVICE-RECORD-CRAFTSMAN-ADJUST-V1'
+                    || (int)($fact['project_count_half_units'] ?? 0) !== 0;
             }
-            $numerator = max(0, (int)($fact['allocation_weight_numerator'] ?? 0));
-            $denominator = max(1, (int)($fact['allocation_weight_denominator'] ?? 1));
+        }
+        $result = [];
+        foreach ($grouped as $allocation) {
+            if ((int)$allocation['amountCents'] === 0 && (int)$allocation['laborFeeCents'] === 0
+                && (int)$allocation['projectCountHalfUnits'] === 0
+                && empty($allocation['hasExplicitProjectCount'])) continue;
+            $key = (string)$allocation['key'];
+            if (!isset($result[$key])) $result[$key] = [
+                'amountCents' => 0, 'laborFeeCents' => 0, 'projectCountHalfUnits' => 0,
+                'hasExplicitProjectCount' => false, 'names' => [], 'allocations' => [],
+            ];
+            $result[$key]['amountCents'] += (int)$allocation['amountCents'];
+            $result[$key]['laborFeeCents'] += (int)$allocation['laborFeeCents'];
+            $result[$key]['projectCountHalfUnits'] += (int)$allocation['projectCountHalfUnits'];
+            $result[$key]['hasExplicitProjectCount'] = $result[$key]['hasExplicitProjectCount']
+                || !empty($allocation['hasExplicitProjectCount']);
+            $name = (string)$allocation['employeeName'];
+            if ($name !== '' && !in_array($name, $result[$key]['names'], true)) $result[$key]['names'][] = $name;
+            $baseAmount = max(0, (int)$result[$key]['amountCents']);
             $result[$key]['allocations'][] = [
-                'employeeId' => (int)($fact['employee_id'] ?? 0),
+                'employeeId' => (int)$allocation['employeeId'],
                 'employeeName' => $name,
-                'employeeType' => (string)($fact['employee_type_snapshot'] ?? ''),
-                'roleSnapshot' => (string)($fact['role_snapshot'] ?? ''),
-                'allocationWeightNumerator' => $numerator,
-                'allocationWeightDenominator' => $denominator,
-                'allocationRatio' => $numerator . '/' . $denominator,
-                'allocationRatioPercent' => $denominator > 0 ? round($numerator * 100 / $denominator, 2) : 0,
-                'amount' => $this->centsToMoney((int)($fact['amount_cents'] ?? 0)),
-                'laborFeeAmount' => $this->centsToMoney((int)($fact['labor_fee_amount_cents'] ?? 0)),
-                'ruleCodeSnapshot' => (string)($fact['rule_code_snapshot'] ?? ''),
-                'ruleNameSnapshot' => (string)($fact['rule_name_snapshot'] ?? ''),
-                'ruleVersionSnapshot' => (string)($fact['rule_version_snapshot'] ?? ''),
+                'employeeType' => (string)$allocation['employeeType'],
+                'roleSnapshot' => (string)$allocation['roleSnapshot'],
+                'allocationWeightNumerator' => (int)$allocation['amountCents'],
+                'allocationWeightDenominator' => max(1, $baseAmount),
+                'allocationRatio' => (int)$allocation['amountCents'] . '/' . max(1, $baseAmount),
+                'allocationRatioPercent' => 0,
+                'amount' => $this->centsToMoney((int)$allocation['amountCents']),
+                'laborFeeAmount' => $this->centsToMoney((int)$allocation['laborFeeCents']),
+                'projectCount' => number_format((int)$allocation['projectCountHalfUnits'] / 2, 1, '.', ''),
+                'projectCountHalfUnits' => (int)$allocation['projectCountHalfUnits'],
+                'ruleCodeSnapshot' => (string)$allocation['ruleCodeSnapshot'],
+                'ruleNameSnapshot' => (string)$allocation['ruleNameSnapshot'],
+                'ruleVersionSnapshot' => (string)$allocation['ruleVersionSnapshot'],
             ];
         }
+        foreach ($result as &$line) {
+            $total = max(0, (int)$line['amountCents']);
+            foreach ($line['allocations'] as &$allocation) {
+                $allocation['allocationWeightDenominator'] = max(1, $total);
+                $allocation['allocationRatio'] = (int)$allocation['allocationWeightNumerator'] . '/' . max(1, $total);
+                $allocation['allocationRatioPercent'] = $total > 0 ? round((int)$allocation['allocationWeightNumerator'] * 100 / $total, 2) : 0;
+            }
+            unset($allocation);
+        }
+        unset($line);
         return $result;
     }
 
@@ -1057,7 +1112,11 @@ final class CashierV3OrderCenterRecordQueryServices
                     $query->whereNull('vo.id');
                 }
             } elseif (isset($likeFields[$field])) {
-                $query->where($likeFields[$field], 'like', '%' . addcslashes($value, "\\%_") . '%');
+                $this->whereUtf8Like(
+                    $query,
+                    $likeFields[$field],
+                    '%' . addcslashes($value, "\\%_") . '%'
+                );
             }
         }
     }
@@ -1522,10 +1581,25 @@ final class CashierV3OrderCenterRecordQueryServices
         $like = '%' . addcslashes($keyword, "\\%_") . '%';
         $query->where(function ($nested) use ($fields, $like) {
             foreach ($fields as $index => $field) {
-                if ($index === 0) $nested->where($field, 'like', $like);
-                else $nested->whereOr($field, 'like', $like);
+                $this->whereUtf8Like($nested, $field, $like, $index !== 0);
             }
         });
+    }
+
+    /**
+     * 历史订单编号等字段仍是 ascii_bin，而姓名和项目名称是 utf8mb4。
+     * 关键词检索会把它们放在同一个 LIKE 条件组中，必须显式统一表达式
+     * 字符集，避免中文关键词触发 MySQL 的 Illegal mix of collations。
+     * $field 仅来自本类固定白名单，绝不接收客户端字段名。
+     */
+    private function whereUtf8Like($query, string $field, string $like, bool $or = false): void
+    {
+        $expression = 'CONVERT(' . $field . ' USING utf8mb4) COLLATE utf8mb4_general_ci LIKE ?';
+        if ($or) {
+            $query->whereOrRaw($expression, [$like]);
+            return;
+        }
+        $query->whereRaw($expression, [$like]);
     }
 
     private function pagePayload(array $criteria, array $records, int $total, string $status): array

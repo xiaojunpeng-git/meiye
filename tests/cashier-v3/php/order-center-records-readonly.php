@@ -142,6 +142,12 @@ recordOk('服务统一查询只接受白名单筛选与排序字段', ($serviceC
 ] && ($serviceCall['sorts'] ?? []) === [[
     'field' => 'service_completed_at', 'direction' => 'asc',
 ]], $serviceCall);
+recordOk('订单中心关键词检索统一转换历史 ascii 编号与中文字段，避免中文查询排序规则冲突',
+    strpos($orderCenterSource, 'CONVERT(') !== false
+    && strpos($orderCenterSource, 'USING utf8mb4') !== false
+    && strpos($orderCenterSource, 'COLLATE utf8mb4_general_ci LIKE ?') !== false
+    && strpos($orderCenterSource, 'whereUtf8Like') !== false
+    && strpos($salesOrderQuerySource, 'whereUtf8Like') !== false);
 
 $invalid = $service->queryRecords(['recordType' => 'unknown'], $operator, $storesScope);
 recordOk('不在订单中心清单中的记录类型被拒绝', $invalid['recordType'] === ''
@@ -180,9 +186,10 @@ recordOk('服务记录只读取完成态服务事实，不从销售订单回推'
 recordOk('服务记录使用会员详情同源的可见服务单号并携带会员编号', strpos($source, "'sf.service_record_no'") !== false
     && strpos($source, "'serviceRecordNo' => (string)(\$row['service_record_no'] ?: \$row['service_fact_id'])") !== false
     && strpos($source, "'memberId' => (int)\$row['member_id']") !== false);
-recordOk('劳动业绩只汇总有效正向的劳动事实', strpos($source, "->where('performance_type', 'labor_performance_allocated')") !== false
-    && strpos($source, "->where('fact_direction', 'forward')") !== false
-    && strpos($source, "->where('status', 'effective')") !== false);
+recordOk('劳动业绩汇总有效事实的正负净额，服务记录调整后不保留旧分配', strpos($source, "->where('performance_type', 'labor_performance_allocated')") !== false
+    && strpos($source, "->where('status', 'effective')") !== false
+    && strpos($source, "'fact_direction'") !== false
+    && strpos($source, "['amountCents'] += (int)(\$fact['amount_cents'] ?? 0)") !== false);
 recordOk('服务记录携带服务事实手工费与服务业绩类型快照', strpos($source, "'sf.labor_amount_cents'") !== false
     && strpos($source, "'sf.labor_mode'") !== false
     && strpos($source, "'laborFeeAmount' =>") !== false

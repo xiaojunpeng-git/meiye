@@ -236,11 +236,19 @@ final class CashierV3ServiceRecordVoidServices
     {
         $rows = Db::name('cashier_v3_performance_fact')->where('tenant_id', $scope->tenantId())
             ->where('checkout_request_id', (string)$source['checkout_request_id'])->where('source_line_id', (string)$source['source_line_id'])
-            ->where('fact_direction', 'forward')->where('status', 'effective')
+            ->where('status', 'effective')
             ->whereIn('performance_type', ['consumption_performance_recorded', 'labor_performance_allocated'])
             ->lock(true)->select()->toArray();
+        $reversed = [];
+        foreach ((array)$rows as $row) {
+            if ((string)($row['fact_direction'] ?? '') === 'reversal' && trim((string)($row['reversal_of'] ?? '')) !== '') {
+                $reversed[(string)$row['reversal_of']] = true;
+            }
+        }
         $totals = ['consumptionCents' => 0, 'laborCents' => 0, 'laborFeeCents' => 0];
         foreach ((array)$rows as $row) {
+            if ((string)($row['fact_direction'] ?? '') !== 'forward'
+                || isset($reversed[(string)($row['fact_id'] ?? '')])) continue;
             $type = (string)($row['performance_type'] ?? '');
             $amount = (int)($row['amount_cents'] ?? 0);
             $laborFee = (int)($row['labor_fee_amount_cents'] ?? 0);

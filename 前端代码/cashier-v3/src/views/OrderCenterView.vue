@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import BusinessRecordDetailOverlay from '@/components/order/BusinessRecordDetailOverlay.vue'
 import ReceiptPrinterSetupOverlay from '@/components/order/ReceiptPrinterSetupOverlay.vue'
 import SalesOrderDetailOverlay from '@/components/order/SalesOrderDetailOverlay.vue'
+import PersonnelPerformanceOverlay from '@/components/cashier/PersonnelPerformanceOverlay.vue'
 import Printer from '@lucide/vue/dist/esm/icons/printer.mjs'
 import TablePagination from '@/components/common/TablePagination.vue'
 import UnifiedQueryToolbar from '@/components/query/UnifiedQueryToolbar.vue'
@@ -12,6 +13,7 @@ import {
   createCashierV3CommandId,
   canUseCashierV3Operation,
   formatMoney,
+  mergeCashierV3PublicVersions,
   requestCashierV3Action,
   useCashierV3State
 } from '@/services/cashierV3Bridge'
@@ -32,6 +34,15 @@ const serviceVoidReason = ref('')
 const serviceVoidError = ref('')
 const serviceVoidSubmitting = ref(false)
 const serviceVoidCommandIds = ref({})
+const serviceCraftsmanRecord = ref(null)
+const serviceCraftsmanEntry = ref(null)
+const serviceCraftsmanEditorOpen = ref(false)
+const serviceCraftsmanLoading = ref(false)
+const serviceCraftsmanPendingAssignment = ref(null)
+const serviceCraftsmanReason = ref('')
+const serviceCraftsmanError = ref('')
+const serviceCraftsmanSubmitting = ref(false)
+const serviceCraftsmanCommandIds = ref({})
 
 const ORDER_TABS = [
   {
@@ -126,7 +137,8 @@ const ORDER_TABS = [
       field('source_card_no', '完整卡号'), field('used_times', '本次使用次数', 'number'),
       field('store', '服务门店', 'store'), field('craftsman', '手艺人', 'person'),
       field('labor_fee_amount', '手工费', 'money'), field('labor_performance_type', '服务业绩类型'),
-      field('labor_performance_ratio', '业绩比例'), field('labor_performance_amount', '劳动业绩', 'money'),
+      field('labor_performance_ratio', '业绩比例'), field('labor_performance_amount', '消耗业绩', 'money'),
+      field('project_count', '工资项目数', 'number'),
       field('operator', '操作人', 'person'),
       field('service_status', '状态', 'status'), field('service_completed_at', '服务完成时间', 'date'),
       field('voided_at', '作废时间', 'date'), field('void_reason', '作废原因'), field('void_operator', '作废操作人', 'person')
@@ -221,6 +233,7 @@ const FIELD_ALIASES = {
   labor_performance_type: ['laborPerformanceTypeLabel', 'laborPerformanceType'],
   labor_performance_ratio: ['laborPerformanceRatio'],
   labor_performance_amount: ['laborPerformanceAmount'], service_status: ['serviceStatus'],
+  project_count: ['projectCount'],
   service_completed_at: ['serviceCompletedAt', 'completedAt'], voided_at: ['voidedAt'],
   void_reason: ['voidReason'], void_operator: ['voidOperatorName']
 }
@@ -679,6 +692,116 @@ function openRecordDetail(record) {
   return null
 }
 
+function serviceRecordIsNormal(record = {}) {
+  return activeTabKey.value === 'service' && !record.voidedAt && record.serviceStatus !== '已作废'
+}
+
+async function openServiceCraftsmanAdjustment(record) {
+  if (!serviceRecordIsNormal(record) || !canUseCashierV3Operation('cashier.v3.order.service_detail')) return
+  const serviceFactId = record.serviceFactId || String(record.id || '').replace(/^service:/, '')
+  if (!/^[1-9][0-9]*$/.test(String(serviceFactId))) return
+  serviceCraftsmanLoading.value = true
+  serviceCraftsmanError.value = ''
+  serviceCraftsmanRecord.value = record
+  try {
+    const result = await requestAction('open-service-record-craftsman-adjustment', { serviceFactId })
+    const entry = actionData(result).serviceRecordCraftsmanAdjustment
+    if (!entry || !['success', 'succeeded'].includes(String(actionStatus(result)))) {
+      serviceCraftsmanError.value = result?.result?.message || result?.data?.result?.message || '手艺人分配读取失败，请刷新后重试。'
+      return
+    }
+    const recordVersion = Number(entry.recordVersion)
+    const stateContextId = String(state.stateContextId || '')
+    if (!Number.isSafeInteger(recordVersion) || recordVersion <= 0 || !stateContextId) {
+      serviceCraftsmanError.value = '服务记录版本读取失败，请刷新后重新打开。'
+      return
+    }
+    // 这是刚由服务端读取接口签发的同一条服务记录版本。即使中间响应
+    // 没有透传顶层 versions，也必须在打开编辑窗前进入受 stateContextId
+    // 约束的公共版本仓，保存仍由后端以该版本再次锁定和复核。
+    mergeCashierV3PublicVersions([{
+      kind: 'service_record', id: String(entry.serviceFactId), version: recordVersion
+    }], stateContextId, { requestStateContextId: stateContextId })
+    serviceCraftsmanEntry.value = entry
+    serviceCraftsmanEditorOpen.value = true
+  } catch (error) {
+    serviceCraftsmanError.value = error instanceof Error && error.message
+      ? error.message
+      : '手艺人分配读取失败，请刷新后重试。'
+  } finally {
+    serviceCraftsmanLoading.value = false
+  }
+}
+
+function handleDetailFieldAction(payload = {}) {
+  if (payload.key === 'craftsman') openServiceCraftsmanAdjustment(payload.record || genericDetailRecord.value)
+}
+
+function prepareServiceCraftsmanReason(assignment = {}) {
+  serviceCraftsmanPendingAssignment.value = assignment
+  serviceCraftsmanReason.value = ''
+  serviceCraftsmanError.value = ''
+  serviceCraftsmanEditorOpen.value = false
+}
+
+function cancelServiceCraftsmanReason() {
+  if (serviceCraftsmanSubmitting.value) return
+  serviceCraftsmanPendingAssignment.value = null
+  serviceCraftsmanReason.value = ''
+  serviceCraftsmanError.value = ''
+  serviceCraftsmanEditorOpen.value = Boolean(serviceCraftsmanEntry.value)
+}
+
+function closeServiceCraftsmanAdjustment(force = false) {
+  if (serviceCraftsmanSubmitting.value && !force) return
+  serviceCraftsmanRecord.value = null
+  serviceCraftsmanEntry.value = null
+  serviceCraftsmanEditorOpen.value = false
+  serviceCraftsmanPendingAssignment.value = null
+  serviceCraftsmanReason.value = ''
+  serviceCraftsmanError.value = ''
+}
+
+async function submitServiceCraftsmanAdjustment() {
+  const entry = serviceCraftsmanEntry.value
+  const assignment = serviceCraftsmanPendingAssignment.value
+  const reason = String(serviceCraftsmanReason.value || '').trim()
+  if (!entry || !assignment) return
+  if (!reason) {
+    serviceCraftsmanError.value = '请填写修改原因。'
+    return
+  }
+  if (reason.length > 255) {
+    serviceCraftsmanError.value = '修改原因不能超过255字。'
+    return
+  }
+  const serviceFactId = String(entry.serviceFactId || '')
+  const commandKey = `${serviceFactId}:${entry.recordVersion}`
+  const idempotencyKey = serviceCraftsmanCommandIds.value[commandKey] || createCashierV3CommandId()
+  serviceCraftsmanCommandIds.value = { ...serviceCraftsmanCommandIds.value, [commandKey]: idempotencyKey }
+  serviceCraftsmanSubmitting.value = true
+  serviceCraftsmanError.value = ''
+  try {
+    const result = await requestAction('adjust-service-record-craftsmen', {
+      serviceFactId: entry.serviceFactId,
+      recordVersion: entry.recordVersion,
+      allocations: Array.isArray(assignment.craftsmen) ? assignment.craftsmen : [],
+      reason,
+      idempotencyKey
+    })
+    const status = actionStatus(result)
+    if (isTerminalActionStatus(status)) serviceCraftsmanCommandIds.value = { ...serviceCraftsmanCommandIds.value, [commandKey]: null }
+    if (['success', 'succeeded'].includes(String(status))) {
+      closeServiceCraftsmanAdjustment(true)
+      await queryRecords({}, false)
+      return
+    }
+    serviceCraftsmanError.value = result?.result?.message || result?.data?.result?.message || '手艺人修改未完成，请稍后重试。'
+  } finally {
+    serviceCraftsmanSubmitting.value = false
+  }
+}
+
 function openServiceVoid(record) {
   if (!record || activeTabKey.value !== 'service' || record.serviceStatus === '已作废' || record.voidedAt) return
   serviceVoidRecord.value = record
@@ -869,6 +992,8 @@ function resetLocalContext() {
   serviceVoidError.value = ''
   serviceVoidSubmitting.value = false
   serviceVoidCommandIds.value = {}
+  closeServiceCraftsmanAdjustment()
+  serviceCraftsmanCommandIds.value = {}
   salesOrderActionIds.value = {}
   rechargeOrderActionIds.value = {}
 }
@@ -971,6 +1096,16 @@ onBeforeUnmount(() => {
               >
                 {{ displayRecordField(record, fieldItem.key) }}
               </button>
+              <button
+                v-else-if="fieldItem.key === 'craftsman' && serviceRecordIsNormal(record) && canUseCashierV3Operation('cashier.v3.order.service_detail')"
+                type="button"
+                class="order-link"
+                title="修改该服务记录的手艺人分配"
+                :data-service-fact-id="record.serviceFactId || record.id"
+                @click="openServiceCraftsmanAdjustment(record)"
+              >
+                {{ displayRecordField(record, fieldItem.key) }}
+              </button>
               <span v-else-if="fieldItem.type === 'money'">{{ displayMoneyField(record, fieldItem.key) }}</span>
               <span v-else-if="fieldItem.type === 'status'" class="order-status" :class="statusClass(recordFieldValue(record, fieldItem.key))">
                 {{ displayRecordField(record, fieldItem.key) }}
@@ -984,6 +1119,12 @@ onBeforeUnmount(() => {
                 class="button button--text"
                 @click="openRecordDetail(record)"
               >查看详情</button>
+              <button
+                v-if="serviceRecordIsNormal(record) && canUseCashierV3Operation('cashier.v3.order.service_detail')"
+                type="button"
+                class="button button--text"
+                @click="openServiceCraftsmanAdjustment(record)"
+              >修改手艺人</button>
               <button
                 v-if="activeTabKey === 'service' && !record.voidedAt && record.serviceStatus !== '已作废' && canUseCashierV3Operation('cashier.v3.order.service_void')"
                 type="button"
@@ -1029,7 +1170,31 @@ onBeforeUnmount(() => {
       :resolve-value="recordFieldValue"
       :lifecycle-actions="rechargeLifecycleActions"
       :on-lifecycle-action="handleRechargeLifecycleAction"
+      :field-action-keys="serviceRecordIsNormal(genericDetailRecord) ? ['craftsman'] : []"
+      @field-action="handleDetailFieldAction"
       @close="genericDetailRecord = null"
+    />
+
+    <p v-if="serviceCraftsmanError && !serviceCraftsmanEditorOpen && !serviceCraftsmanPendingAssignment" class="order-center-page__inline-error" role="alert">
+      {{ serviceCraftsmanError }}
+    </p>
+
+    <PersonnelPerformanceOverlay
+      v-if="serviceCraftsmanEditorOpen && serviceCraftsmanEntry"
+      initial-tab="craftsmen"
+      :show-craftsmen="true"
+      :show-salespeople="false"
+      :require-craftsmen="true"
+      :craftsmen-candidates="serviceCraftsmanEntry.craftsmenCandidates || []"
+      :selected-craftsmen="serviceCraftsmanEntry.allocations || []"
+      :store-id="state.currentStore?.id || state.currentStore?.storeId || 0"
+      :allocation-total-amount-cents="serviceCraftsmanEntry.allocationTotalAmountCents || 0"
+      history-adjustment
+      :loading="serviceCraftsmanLoading"
+      :saving="serviceCraftsmanSubmitting"
+      :load-error="serviceCraftsmanError"
+      @close="closeServiceCraftsmanAdjustment"
+      @confirm="prepareServiceCraftsmanReason"
     />
 
     <ReceiptPrinterSetupOverlay
@@ -1055,12 +1220,31 @@ onBeforeUnmount(() => {
         </footer>
       </section>
     </div>
+
+    <div v-if="serviceCraftsmanPendingAssignment" class="service-void-modal" role="dialog" aria-modal="true" aria-labelledby="service-craftsman-reason-title">
+      <div class="service-void-modal__backdrop" @click="cancelServiceCraftsmanReason"></div>
+      <section class="service-void-modal__panel">
+        <header class="service-void-modal__head">
+          <h2 id="service-craftsman-reason-title">填写修改原因</h2>
+          <button type="button" class="service-void-modal__close" :disabled="serviceCraftsmanSubmitting" @click="cancelServiceCraftsmanReason">×</button>
+        </header>
+        <p class="service-void-modal__record">{{ serviceCraftsmanEntry?.serviceRecordNo }} · {{ serviceCraftsmanEntry?.serviceProject }}</p>
+        <label class="service-void-modal__label" for="service-craftsman-reason">修改原因</label>
+        <textarea id="service-craftsman-reason" v-model="serviceCraftsmanReason" class="service-void-modal__textarea" maxlength="255" rows="4" placeholder="请输入修改原因"></textarea>
+        <p v-if="serviceCraftsmanError" class="service-void-modal__error" role="alert">{{ serviceCraftsmanError }}</p>
+        <footer class="service-void-modal__actions">
+          <button type="button" class="button" :disabled="serviceCraftsmanSubmitting" @click="cancelServiceCraftsmanReason">返回修改</button>
+          <button type="button" class="button button--primary" :disabled="serviceCraftsmanSubmitting" @click="submitServiceCraftsmanAdjustment">{{ serviceCraftsmanSubmitting ? '保存中…' : '确认保存' }}</button>
+        </footer>
+      </section>
+    </div>
   </section>
 </template>
 
 <style scoped>
 .order-center-page { position: relative; }
 .order-center-notice { margin: 12px 0 0; padding: 9px 12px; border-left: 3px solid #c83c3c; background: #fff4f4; color: #8a3030; }
+.order-center-page__inline-error { position: fixed; right: 20px; bottom: 20px; z-index: 90; max-width: min(420px, calc(100vw - 40px)); margin: 0; padding: 10px 14px; border: 1px solid #fecdca; border-radius: 6px; background: #fff4f4; color: #b42318; box-shadow: 0 8px 24px rgba(16, 24, 40, .14); }
 .service-void-modal { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; }
 .service-void-modal__backdrop { position: absolute; inset: 0; background: rgba(16, 24, 40, .42); }
 .service-void-modal__panel { position: relative; width: min(460px, calc(100vw - 32px)); padding: 20px; border-radius: 8px; background: #fff; box-shadow: 0 18px 48px rgba(16, 24, 40, .2); }
