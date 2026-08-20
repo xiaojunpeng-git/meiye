@@ -1,7 +1,6 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import {
-  canonicalEntitlementCommandContexts,
   entitlementBenefitPoolId,
   entitlementCardHolderId
 } from '@/services/cashierV3EntitlementDraftContract'
@@ -73,39 +72,19 @@ const selectorIdentity = computed(() => [
   member.value?.id || member.value?.memberId || ''
 ].join(':'))
 
-function positiveVersion(value) {
-  const version = Number(value)
-  return Number.isInteger(version) && version > 0 ? version : null
-}
-
-function validActualAmountAllocation(project = {}) {
-  const purchaseAmount = project.purchaseAmount
-  const totalPurchaseTimes = Number(project.totalPurchaseTimes)
-  const consumedTimes = Number(project.consumedTimesAtSelection)
-  const sourceVersion = Number(project.amountSourceVersion ?? project.version ?? project.revision)
-  return typeof purchaseAmount === 'string'
-    && /^(?:0|[1-9]\d*)(?:\.0{1,2})?$/.test(purchaseAmount)
-    && Number.isInteger(totalPurchaseTimes)
-    && totalPurchaseTimes > 0
-    && Number.isInteger(consumedTimes)
-    && consumedTimes >= 0
-    && consumedTimes <= totalPurchaseTimes
-    && positiveVersion(sourceVersion) !== null
-    && typeof project.amountCalculationVersion === 'string'
-    && project.amountCalculationVersion.endsWith('whole-yuan-floor-final-remainder-v1')
-}
-
 function sourceContractReady(source = {}) {
   const sourceId = entitlementCardHolderId(source)
-  if (!sourceId || positiveVersion(source.version ?? source.revision) === null || !Array.isArray(source.projects)) return false
+  if (!sourceId) return false
+  // 延期、转让、停用、启用只操作卡本身；不应因历史卡没有项目明细
+  // 或旧的金额/版本坐标而阻止生成本次浏览器快照。
+  if (['card-extension', 'card-transfer', 'card-disable', 'card-enable'].includes(props.operationMode)) return true
+  if (!Array.isArray(source.projects)) return false
   return source.projects.every((project) => (
     Boolean(project.projectId || project.id)
     && Boolean(entitlementBenefitPoolId(project))
-    && positiveVersion(project.version ?? project.revision) !== null
     && Number(project.remainingTimes) >= 0
     && Number(project.occupiedTimes ?? project.reservedTimes) >= 0
     && Number(project.availableTimes) >= 0
-    && (project.selectable === false || validActualAmountAllocation(project))
   ))
 }
 
@@ -117,7 +96,6 @@ const selectorReady = computed(() => Boolean(
   && Boolean(props.workspaceId)
   && (props.selector.selectorToken || props.selector.snapshotToken)
   && Array.isArray(props.selector.sources)
-  && Array.isArray(props.selector.commandContexts)
   && props.selector.sources.every(sourceContractReady)
 ))
 const isLoading = computed(() => props.loadState === 'loading')
@@ -263,9 +241,7 @@ function addProject(source = {}, project = {}) {
     entitlementInstanceId: source.entitlementInstanceId || source.id,
     entitlementInstanceType: source.entitlementInstanceType || source.sourceType,
     entitlementSourceDetailId: project.entitlementSourceDetailId || project.sourceDetailId || project.id,
-    entitlementSourceVersion: Number(source.version || source.revision),
     projectId: project.projectId || project.id,
-    projectVersion: Number(project.version || project.revision),
     quantity: 1,
     displaySnapshot: {
       name: String(project.name || project.projectName || '项目'),
@@ -275,7 +251,6 @@ function addProject(source = {}, project = {}) {
       isGift: Boolean(project.isGift),
       giftSourceType: project.isGift ? 'holder_backed' : 'none',
       sourceDetailId: Number(project.entitlementSourceDetailId || project.sourceDetailId || project.id || 0),
-      detailVersion: Number(project.version || project.revision || 0),
       entitlementSourceName: String(source.name || ''),
       fullCardNo: String(source.fullCardNo || ''),
       remainingTimes: Number(project.remainingTimes || 0),
@@ -284,7 +259,6 @@ function addProject(source = {}, project = {}) {
       purchaseAmount: String(project.purchaseAmount || ''),
       totalPurchaseTimes: Number(project.totalPurchaseTimes || 0),
       consumedTimesAtSelection: Number(project.consumedTimesAtSelection || 0),
-      amountSourceVersion: Number(project.version || project.revision || 0),
       amountCalculationVersion: String(project.amountCalculationVersion || ''),
       amountRole: 'entitlement_actual',
       validThroughLabel: String(project.validThroughLabel || source.validThroughLabel || ''),
@@ -293,24 +267,10 @@ function addProject(source = {}, project = {}) {
       serviceSource: '卡内项目'
     }
   }
-  const commandContexts = canonicalEntitlementCommandContexts({
-    suppliedContexts: props.selector.commandContexts,
-    selectedLines: [line],
-    workspaceId: props.workspaceId,
-    memberId: props.currentMemberId
-  })
-  if (!commandContexts) {
-    emit('contract-error', {
-      code: 'ENTITLEMENT_COMMAND_CONTEXT_INCOMPLETE',
-      message: '会员权益版本数据不完整，请重新打开。'
-    })
-    return
-  }
   emit('add', {
     selectorRequestId: props.selector.selectorRequestId,
     selectorToken: props.selector.selectorToken || props.selector.snapshotToken,
     memberId: member.value.id || member.value.memberId,
-    commandContexts,
     mutationMode: 'append',
     projectKey: projectKey(source, project),
     lines: [line]

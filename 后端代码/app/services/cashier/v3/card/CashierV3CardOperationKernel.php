@@ -129,9 +129,38 @@ final class CashierV3CardOperationKernel
                     'source_card_value_invalid'
                 );
             }
-            $settlementDeltaCents = $targetPriceCents - $sourceRemainingValueCents;
-            if ($settlementDeltaCents < 0) {
-                throw self::invalid('upgrade_negative_delta_not_supported');
+            if ($type === self::TYPE_PROJECT_UPGRADE) {
+                // The generated target-right count is an explicit checkout
+                // snapshot value, independent from source quantities consumed.
+                $mutation['targetEntitlementQuantity'] = self::positiveInt(
+                    $intent['targetEntitlementQuantity'] ?? 1,
+                    'target_project_quantity_invalid'
+                );
+            }
+            // An upgrade never creates a negative payment. If the selected
+            // source-right value is higher than the target price, the source
+            // right is consumed and the payable delta is simply zero.
+            $settlementDeltaCents = max(0, $targetPriceCents - $sourceRemainingValueCents);
+            $snapshotSettlement = $intent['snapshotSettlement'];
+            if ($snapshotSettlement !== []) {
+                $snapshotTarget = self::nonnegativeInt(
+                    $snapshotSettlement['targetPriceCents'] ?? null,
+                    'upgrade_snapshot_target_price_invalid'
+                );
+                $snapshotCredit = self::nonnegativeInt(
+                    $snapshotSettlement['sourceRemainingValueCents'] ?? null,
+                    'upgrade_snapshot_credit_invalid'
+                );
+                $snapshotDelta = self::nonnegativeInt(
+                    $snapshotSettlement['settlementDeltaCents'] ?? null,
+                    'upgrade_snapshot_delta_invalid'
+                );
+                if (max(0, $snapshotTarget - $snapshotCredit) !== $snapshotDelta) {
+                    throw self::invalid('upgrade_snapshot_amount_equation_invalid');
+                }
+                $targetPriceCents = $snapshotTarget;
+                $sourceRemainingValueCents = $snapshotCredit;
+                $settlementDeltaCents = $snapshotDelta;
             }
             // 即使差额为零，升级仍须生成一笔正式销售／权益变更事务：
             // 目标卡（或项目）必须有可追溯的成交来源，原权益也只能在同
@@ -171,6 +200,9 @@ final class CashierV3CardOperationKernel
             'settlementDeltaCents' => $settlementDeltaCents,
             'stateMutation' => $mutation,
         ];
+        if (is_array($intent['replacementSnapshot'] ?? null)) {
+            $resultSnapshot['replacementSnapshot'] = $intent['replacementSnapshot'];
+        }
         $fingerprint = self::fingerprint([
             'contractVersion' => self::CONTRACT_VERSION,
             'operationId' => $operationId,
@@ -235,8 +267,11 @@ final class CashierV3CardOperationKernel
             $detailId = self::positiveInt($project['detailId'] ?? null, 'source_project_detail_invalid');
             $sourceByDetail[$detailId] = [
                 'detailId' => $detailId,
-                'detailVersion' => self::positiveInt($project['detailVersion'] ?? null, 'source_project_version_invalid'),
+                'detailVersion' => $isUpgrade
+                    ? self::positiveInt($project['detailVersion'] ?? null, 'source_project_version_invalid')
+                    : self::nonnegativeInt($project['detailVersion'] ?? 0, 'source_project_version_invalid'),
                 'projectId' => self::positiveInt($project['projectId'] ?? null, 'source_project_invalid'),
+                'projectName' => trim((string)($project['projectName'] ?? '')) ?: '原项目',
                 'remainingTimes' => self::nonnegativeInt($project['remainingTimes'] ?? null, 'source_project_times_invalid'),
                 'remainingValueCents' => self::nonnegativeInt($project['remainingValueCents'] ?? null, 'source_project_value_invalid'),
                 'totalTimes' => self::positiveInt($project['totalTimes'] ?? $project['remainingTimes'] ?? null, 'source_project_total_times_invalid'),
@@ -259,8 +294,16 @@ final class CashierV3CardOperationKernel
         $lineNo = 0;
         foreach ($selectedByDetail as $detailId => $quantity) {
             $project = $sourceByDetail[$detailId] ?? null;
-            if ($project === null || $quantity > $project['remainingTimes']) {
+            if ($project === null) {
                 throw self::conflict('project_source_changed');
+            }
+            if ($quantity > $project['remainingTimes']) {
+                throw self::replacementInsufficient(
+                    $project['projectName'],
+                    $project['remainingTimes'],
+                    $quantity,
+                    $detailId
+                );
             }
             // Allocate from the original right price and original configured
             // times, exactly as the transactional writer does. Allocating
@@ -290,11 +333,15 @@ final class CashierV3CardOperationKernel
                 'amountCents' => $lineValue,
             ];
         }
-        // A replacement creates the same number of target rights as the
-        // selected source rights. The target row remains a new current-right
-        // record on the same original card sale; no sales fact or historic
-        // order amount is rewritten.
+        // A replacement creates the explicitly selected target-right count.
+        // The target row remains a new current-right record on the same
+        // original card sale; no sales fact or historic order amount is
+        // rewritten.
         if (!$isUpgrade) {
+            $targetQuantity = self::positiveInt(
+                $intent['targetQuantity'] ?? $totalQuantity,
+                'target_project_quantity_invalid'
+            );
             $lines[] = [
                 'lineNo' => ++$lineNo,
                 'lineRole' => 'target_project',
@@ -303,8 +350,8 @@ final class CashierV3CardOperationKernel
                 'sourceProjectId' => 0,
                 'targetCatalogId' => $targetCatalogId,
                 'quantityBefore' => 0,
-                'quantityDelta' => $totalQuantity,
-                'quantityAfter' => $totalQuantity,
+                'quantityDelta' => $targetQuantity,
+                'quantityAfter' => $targetQuantity,
                 'amountCents' => $sourceValue,
             ];
         }
@@ -358,6 +405,13 @@ final class CashierV3CardOperationKernel
             'reason' => $reason,
             'newWriteEnd' => $intent['newWriteEnd'] ?? null,
             'projectLines' => $intent['projectLines'] ?? [],
+            'targetQuantity' => $intent['targetQuantity'] ?? null,
+            'targetEntitlementQuantity' => $intent['targetEntitlementQuantity'] ?? null,
+            'replacementSnapshot' => is_array($intent['replacementSnapshot'] ?? null)
+                ? $intent['replacementSnapshot'] : [],
+            'snapshotSettlement' => is_array($intent['snapshotSettlement'] ?? null)
+                ? $intent['snapshotSettlement']
+                : [],
             'businessDocumentNo' => trim((string)($intent['businessDocumentNo'] ?? '')),
         ];
     }
@@ -525,6 +579,27 @@ final class CashierV3CardOperationKernel
         return CashierV3CommandException::versionConflict(
             '卡或项目权益已经变化，请重新打开后再办理。',
             ['reason' => $reason]
+        );
+    }
+
+    private static function replacementInsufficient(
+        string $projectName,
+        int $remaining,
+        int $required,
+        int $detailId
+    ): CashierV3CommandException {
+        $name = $projectName !== '' ? $projectName : '原项目';
+        return new CashierV3CommandException(
+            CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
+            $name . '剩余 ' . $remaining . ' 次，本次需要 ' . $required . ' 次，项目替换失败。',
+            CashierV3ResultCode::STATUS_FAILED,
+            [
+                'reason' => 'project_replacement_insufficient_quantity',
+                'project_name' => $name,
+                'remaining_times' => $remaining,
+                'required_times' => $required,
+                'source_detail_id' => $detailId,
+            ]
         );
     }
 }

@@ -302,7 +302,8 @@ final class ThinkPhpCashierV3CheckoutResourcePlanRepository implements CashierV3
             $plan->tenantId(),
             $plan->storeId(),
             $plan->boundRequestVersion(),
-            $this->authorityRows($rows)
+            $this->authorityRows($rows),
+            $plan->resourceCount() === 0
         );
         if (!hash_equals($rehydrated->fingerprint(), $plan->fingerprint())) {
             throw self::failure('checkout_resource_plan_rows_drift');

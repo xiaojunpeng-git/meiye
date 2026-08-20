@@ -19,8 +19,10 @@ assert.match(workbench, /firstCartLineMissingCraftsmen[\s\S]*?!isCustomCardPurch
 assert.match(workspace, /applyCraftsmenToAllServiceLinesInTx[\s\S]*?\$isCustomCard[\s\S]*?&& !\$isCustomCard/)
 assert.match(catalog, /\$isServiceProject = \$normalized\['productType'\] === 6[\s\S]*?!== 'custom_card'/)
 
-assert.match(workbench, /checkoutDraftMutationTail\.then\(run, run\)/)
-assert.match(workbench, /requestCheckoutDraftMutationWithSingleConflictReplay/)
+// 普通收银结账步骤只编辑浏览器快照；不再串行写入服务端 checkout draft。
+assert.match(workbench, /localCheckoutPreview\.value = localCheckoutPreviewSnapshot\(\)/)
+assert.match(workbench, /async function finalizeLocalCheckoutPreview[\s\S]*?checkoutSnapshot/)
+assert.doesNotMatch(workbench, /checkoutDraftMutationTail|requestCheckoutDraftMutationWithSingleConflictReplay/)
 assert.match(rechargeCheckout, /requestRechargeCheckoutMutationWithSingleConflictReplay/)
 assert.match(rechargeCheckout, /\['add-payment-method', 'update-payment-line', 'remove-payment-line', 'update-checkout-business-source'\]\.includes\(action\)/)
 assert.match(rechargeCheckout, /requestCashierV3Action\('reload-recharge-checkout'/)

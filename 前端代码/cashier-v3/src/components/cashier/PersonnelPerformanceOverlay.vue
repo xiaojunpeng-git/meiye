@@ -7,6 +7,8 @@ const props = defineProps({
   showSalespeople: { type: Boolean, default: true },
   showGuides: { type: Boolean, default: false },
   showSalesManagers: { type: Boolean, default: false },
+  // 订单中心单行调整复用同一控件，但需要直接进入完整分配模式；收银默认行为不变。
+  initialMode: { type: String, default: '' },
   requireCraftsmen: { type: Boolean, default: false },
   craftsmenCandidates: { type: Array, default: () => [] },
   storeId: { type: [Number, String], default: 0 },
@@ -20,13 +22,15 @@ const props = defineProps({
   laborDefaultFee: { type: [Number, String], default: 0 },
   laborManualFee: { type: [Number, String], default: null },
   allowLaborOverride: { type: Boolean, default: false },
+  historyAdjustment: { type: Boolean, default: false },
+  allocationTotalAmountCents: { type: [Number, String], default: 0 },
   loading: { type: Boolean, default: false },
   saving: { type: Boolean, default: false },
   loadError: { type: String, default: '' }
 })
 const emit = defineEmits(['close', 'confirm', 'apply-all', 'retry', 'search-personnel'])
 
-const mode = ref('simple')
+const mode = ref(props.historyAdjustment || props.initialMode === 'full' ? 'full' : 'simple')
 const resolveInitialTab = (tab = '') => {
   return tab
 }
@@ -86,6 +90,24 @@ function laborFeeCentsFor(item = {}) {
   return saved > 0
     ? saved
     : (candidateDefault > 0 ? candidateDefault : defaultLaborFeeCents())
+}
+
+function allocationAmountCentsFor(item = {}) {
+  return Math.max(0, Math.trunc(Number(item.allocationAmountCents ?? item.amountCents ?? 0)))
+}
+
+function allocationAmountYuanText(item = {}) {
+  const cents = allocationAmountCentsFor(item)
+  // 历史服务调整的消耗业绩按整元分配。若旧数据本身不是整元，
+  // 保留原值供校验提示，不能在前端静默截断。
+  return String(cents / 100)
+}
+
+function projectCountHalfUnitsFor(item = {}) {
+  const saved = Number(item.projectCountHalfUnits)
+  if (Number.isInteger(saved) && saved >= 0) return saved
+  const projectCount = Number(item.projectCount ?? 0)
+  return Number.isFinite(projectCount) && projectCount >= 0 ? Math.round(projectCount * 2) : 0
 }
 
 function recordId(record = {}) {
@@ -161,6 +183,10 @@ function mergeCandidates(candidates, selected, role) {
       partnerDefaultRatio: Number(candidate.partnerDefaultRatio ?? saved?.partnerDefaultRatio ?? 0),
       laborFeeCents: laborFeeCentsFor({ ...candidate, ...(saved || {}) }),
       laborFeeYuan: laborFeeCentsFor({ ...candidate, ...(saved || {}) }) / 100,
+      allocationAmountCents: allocationAmountCentsFor(saved || {}),
+      allocationAmountYuan: allocationAmountYuanText(saved || {}),
+      projectCountHalfUnits: projectCountHalfUnitsFor(saved || {}),
+      projectCountText: (projectCountHalfUnitsFor(saved || {}) / 2).toFixed(1),
       role
     })
   }
@@ -183,11 +209,15 @@ function mergeCandidates(candidates, selected, role) {
       partnerDefaultRatio: Number(saved.partnerDefaultRatio ?? 0),
       laborFeeCents: laborFeeCentsFor(saved),
       laborFeeYuan: laborFeeCentsFor(saved) / 100,
+      allocationAmountCents: allocationAmountCentsFor(saved),
+      allocationAmountYuan: allocationAmountYuanText(saved),
+      projectCountHalfUnits: projectCountHalfUnitsFor(saved),
+      projectCountText: (projectCountHalfUnitsFor(saved) / 2).toFixed(1),
       role
     })
   }
   const selectedRecords = merged.filter((record) => record.selected)
-  if (!['guides', 'salesManagers'].includes(role) && selectedRecords.length && selectedRecords.some((record) => !Number.isInteger(record.performance) || record.performance <= 0)) {
+  if (!props.historyAdjustment && !['guides', 'salesManagers'].includes(role) && selectedRecords.length && selectedRecords.some((record) => !Number.isInteger(record.performance) || record.performance <= 0)) {
     if (role === 'salespeople' && !selectedRecords.some((record) => record.performanceTouched)) salespersonDefaultWeights(merged)
     if (role !== 'salespeople') equalWeights(merged)
   }
@@ -268,13 +298,22 @@ const activeRecords = computed(() => activeTab.value === 'craftsmen'
 const selectedRecords = computed(() => activeRecords.value.filter((item) => item.selected))
 const activeTotal = computed(() => selectedRecords.value.reduce((total, item) => total + Number(item.performance || 0), 0))
 const activeIsNonPerformance = computed(() => isAttributionTab.value)
+const historyTotalCents = computed(() => Math.max(0, Math.trunc(Number(props.allocationTotalAmountCents || 0))))
+const historyAllocatedCents = computed(() => craftsmen.value
+  .filter((item) => item.selected)
+  .reduce((total, item) => total + allocationAmountCentsFor(item), 0))
 function selectRecord(item) {
   if (item.role === 'salesManagers' && !item.selected) {
     salesManagers.value.forEach((record) => { record.selected = false })
   }
   item.selected = !item.selected
   if (!item.selected) item.marked = false
-  if (item.role === 'craftsmen') equalWeights(craftsmen.value)
+  if (item.role === 'craftsmen') {
+    equalWeights(craftsmen.value)
+    if (props.historyAdjustment) {
+      distributeHistoryAmountsByRatio()
+    }
+  }
   if (item.role === 'salespeople') {
     const selected = salespeople.value.filter((record) => record.selected)
     if (selected.length && !selected.some((record) => record.performanceTouched)) salespersonDefaultWeights(salespeople.value)
@@ -284,6 +323,66 @@ function selectRecord(item) {
 
 function markPerformanceTouched(item) {
   item.performanceTouched = true
+  if (props.historyAdjustment && item.role === 'craftsmen') syncHistoryAmountFromRatio(item)
+  validationMessage.value = ''
+}
+
+function historyPerformanceRows() {
+  return craftsmen.value.filter((item) => item.selected && craftsmanType(item) !== PERFORMANCE_TYPES.LABOR)
+}
+
+function syncHistoryAmountFromRatio(item) {
+  if (!props.historyAdjustment || craftsmanType(item) === PERFORMANCE_TYPES.LABOR) return
+  const ratio = Math.max(0, Math.min(100, Number(item.performance || 0)))
+  item.allocationAmountCents = Math.floor(historyTotalCents.value * ratio / 10000) * 100
+  item.allocationAmountYuan = allocationAmountYuanText(item)
+  balanceHistoryTail(item)
+}
+
+function syncHistoryRatioFromAmount(item) {
+  const yuan = String(item.allocationAmountYuan ?? '').trim()
+  const cents = /^\d+$/.test(yuan) ? Number(yuan) * 100 : 0
+  item.allocationAmountCents = Math.max(0, Math.trunc(cents))
+  item.allocationAmountYuan = allocationAmountYuanText(item)
+  item.performance = historyTotalCents.value > 0
+    ? Number((item.allocationAmountCents * 100 / historyTotalCents.value).toFixed(2))
+    : 0
+  balanceHistoryTail(item)
+  validationMessage.value = ''
+}
+
+function balanceHistoryTail(changedItem) {
+  const rows = historyPerformanceRows()
+  if (!rows.length) return
+  const tail = rows[rows.length - 1]
+  const otherTotal = rows.reduce((total, row) => row === tail ? total : total + allocationAmountCentsFor(row), 0)
+  // 尾差固定归最后一人：前面人员都是整元后，剩余金额全部落到最后一位。
+  // 若前面已超出项目核销金额，保留 0 并由提交校验提示用户调整。
+  tail.allocationAmountCents = Math.max(0, historyTotalCents.value - otherTotal)
+  tail.allocationAmountYuan = allocationAmountYuanText(tail)
+  tail.performance = historyTotalCents.value > 0
+    ? Number((tail.allocationAmountCents * 100 / historyTotalCents.value).toFixed(2))
+    : 0
+}
+
+function distributeHistoryAmountsByRatio() {
+  const rows = historyPerformanceRows()
+  if (!rows.length) return
+  const tail = rows[rows.length - 1]
+  rows.forEach((record) => {
+    if (record === tail) return
+    const ratio = Math.max(0, Math.min(100, Number(record.performance || 0)))
+    record.allocationAmountCents = Math.floor(historyTotalCents.value * ratio / 10000) * 100
+    record.allocationAmountYuan = allocationAmountYuanText(record)
+  })
+  balanceHistoryTail(null)
+}
+
+function normalizeProjectCount(item) {
+  const value = Number(item.projectCountText)
+  if (!Number.isFinite(value) || value < 0 || !Number.isInteger(value * 2)) return
+  item.projectCountHalfUnits = Math.round(value * 2)
+  item.projectCountText = (item.projectCountHalfUnits / 2).toFixed(1)
   validationMessage.value = ''
 }
 
@@ -331,6 +430,20 @@ function allocationIsValid(records) {
     && commissionSelected.reduce((total, record) => total + Number(record.performance), 0) === (commissionSelected.length ? 100 : 0)
     && selected.every((record) => craftsmanType(record) !== PERFORMANCE_TYPES.LABOR || Number(record.performance) === 0)
   )
+}
+
+function historyAllocationIsValid(records) {
+  const selected = records.filter((record) => record.selected)
+  if (!selected.length) return false
+  if (historyTotalCents.value % 100 !== 0) return false
+  if (selected.some((record) => {
+    const value = Number(record.projectCountText)
+    return !Number.isFinite(value) || value < 0 || !Number.isInteger(value * 2)
+  })) return false
+  if (selected.some((record) => craftsmanType(record) === PERFORMANCE_TYPES.LABOR && allocationAmountCentsFor(record) !== 0)) return false
+  if (selected.some((record) => craftsmanType(record) === PERFORMANCE_TYPES.COMMISSION && Number(record.laborFeeYuan || 0) !== 0)) return false
+  if (selected.some((record) => allocationAmountCentsFor(record) % 100 !== 0)) return false
+  return selected.reduce((total, record) => total + allocationAmountCentsFor(record), 0) === historyTotalCents.value
 }
 
 function activateInvalidTab(tab, message) {
@@ -446,7 +559,7 @@ function applySelectionToAll() {
 function confirm() {
   // 简易选择只负责选人；确认时先把默认分配写入当前选择，再做完整性校验。
   // 否则默认比例要等切到完整模式后才生成，导致本来可提交的选择被错误切页拦截。
-  const simpleMode = mode.value === 'simple'
+  const simpleMode = mode.value === 'simple' && !props.historyAdjustment
   if (simpleMode) {
     // 简易模式没有手工编辑比例的入口，当前选人必须重新按默认规则生成。
     equalWeights(craftsmen.value)
@@ -460,11 +573,15 @@ function confirm() {
     activateInvalidTab('craftsmen', '当前项目至少需要选择一名手艺人。')
     return
   }
+  if (props.historyAdjustment && !historyAllocationIsValid(selectedCraftsmen)) {
+    activateInvalidTab('craftsmen', '消耗业绩必须按整元分配，合计等于项目核销金额；余数给最后一位手艺人，项目数只能按0.5递增。')
+    return
+  }
   if (selectedGuides.length && ![1, 2, 3].includes(Number(guideRoundNo.value))) {
     activateInvalidTab('guides', '已选择导购，请选择本次导购第几轮。')
     return
   }
-  if (!simpleMode && !allocationIsValid(selectedCraftsmen)) {
+  if (!simpleMode && !props.historyAdjustment && !allocationIsValid(selectedCraftsmen)) {
     activateInvalidTab('craftsmen', '手艺人分配比例必须为正整数，合计为 100%。')
     return
   }
@@ -483,6 +600,9 @@ function confirm() {
       laborWeight: Number(item.performance),
       craftsmanPerformanceType: craftsmanType(item),
       laborFeeCents: craftsmanType(item) === PERFORMANCE_TYPES.COMMISSION ? 0 : Math.max(0, Number(item.laborFeeYuan || 0) * 100),
+      allocationAmountCents: allocationAmountCentsFor(item),
+      projectCountHalfUnits: Math.round(Number(item.projectCountText || 0) * 2),
+      projectCount: Number(item.projectCountText || 0).toFixed(1),
       isPrimary: index === 0,
       sequence: index + 1
     }))
@@ -510,13 +630,13 @@ function searchGroupPersonnel(scope) {
   <div class="personnel-performance-overlay" role="dialog" aria-modal="true" aria-label="业绩分配">
     <section class="personnel-performance-panel">
       <header>
-        <div><strong>业绩分配</strong><span>{{ mode === 'simple' ? '简易选择' : '完整分配' }}</span></div>
+        <div><strong>{{ historyAdjustment ? '修改服务记录手艺人' : '业绩分配' }}</strong><span>{{ historyAdjustment ? '历史服务调整' : (mode === 'simple' ? '简易选择' : '完整分配') }}</span></div>
         <button type="button" aria-label="关闭" title="关闭" @click="emit('close')">×</button>
       </header>
 
       <div class="personnel-performance-toolbar">
         <label v-if="!isAttributionTab"><span class="sr-only">搜索员工</span><input v-model="keyword" type="search" placeholder="输入关键词搜索员工"></label>
-        <div class="personnel-performance-mode" aria-label="分配模式">
+        <div v-if="!historyAdjustment" class="personnel-performance-mode" aria-label="分配模式">
           <button type="button" :class="{ 'is-active': mode === 'simple' }" @click="validationMessage = ''; mode = 'simple'">简易选择</button>
           <button type="button" :class="{ 'is-active': mode === 'full' }" @click="validationMessage = ''; mode = 'full'">完整分配</button>
         </div>
@@ -578,21 +698,23 @@ function searchGroupPersonnel(scope) {
         </div>
         <div class="personnel-full-summary">
           <button type="button" class="button button--primary" @click="mode = 'simple'">添加人员</button>
-          <strong>已选择 {{ selectedRecords.length }} 人<span v-if="!activeIsNonPerformance">，分配合计 {{ activeTotal }}%</span><span v-else>（仅记录归属，不分配比例）</span></strong>
+          <strong>已选择 {{ selectedRecords.length }} 人<span v-if="historyAdjustment">，已分配 ¥{{ (historyAllocatedCents / 100).toFixed(2) }} / ¥{{ (historyTotalCents / 100).toFixed(2) }}</span><span v-else-if="!activeIsNonPerformance">，分配合计 {{ activeTotal }}%</span><span v-else>（仅记录归属，不分配比例）</span></strong>
         </div>
         <fieldset v-if="activeTab === 'guides' && selectedGuides.length" class="personnel-guide-round" aria-label="本次导购轮次">
           <legend>导购第几轮<strong>*</strong></legend>
           <label v-for="round in [1, 2, 3]" :key="round"><input v-model="guideRoundNo" type="radio" :value="String(round)"><span>第{{ round }}轮</span></label>
         </fieldset>
-        <div class="personnel-full-table" :class="{ 'personnel-full-table--craftsmen': activeTab === 'craftsmen' && !activeIsNonPerformance }" role="table" aria-label="完整人员分配">
-          <div role="row" class="personnel-full-table__head"><span>员工</span><span>职位</span><span>职级</span><span v-if="!activeIsNonPerformance">服务业绩类型</span><span v-if="!activeIsNonPerformance">{{ activeTab === 'craftsmen' ? '是否点客' : '是否售前' }}</span><span v-if="!activeIsNonPerformance">业绩比例</span><span v-if="activeTab === 'craftsmen' && !activeIsNonPerformance">手工费</span><span>操作</span></div>
+        <div class="personnel-full-table" :class="{ 'personnel-full-table--craftsmen': activeTab === 'craftsmen' && !activeIsNonPerformance, 'personnel-full-table--history': historyAdjustment && activeTab === 'craftsmen' }" role="table" aria-label="完整人员分配">
+          <div role="row" class="personnel-full-table__head"><span>员工</span><span>职位</span><span>职级</span><span v-if="!activeIsNonPerformance">服务业绩类型</span><span v-if="!activeIsNonPerformance">{{ activeTab === 'craftsmen' ? '是否点客' : '是否售前' }}</span><span v-if="!activeIsNonPerformance">业绩比例</span><span v-if="historyAdjustment && activeTab === 'craftsmen'">消耗业绩</span><span v-if="activeTab === 'craftsmen' && !activeIsNonPerformance">手工费</span><span v-if="historyAdjustment && activeTab === 'craftsmen'">项目数</span><span>操作</span></div>
           <div v-for="item in selectedRecords" :key="item.id" role="row" class="personnel-full-table__row">
             <strong>{{ item.name }}</strong><span>{{ item.position }}</span><span>{{ item.level }}</span>
             <span v-if="!activeIsNonPerformance && activeTab === 'craftsmen'">{{ performanceTypeLabel(item) }}</span>
             <span v-else-if="!activeIsNonPerformance"></span>
             <label v-if="!activeIsNonPerformance" class="personnel-toggle"><input :checked="item.marked" type="checkbox" @change="setMarked(item, $event.target.checked)"><span>{{ item.marked ? '是' : '否' }}</span></label>
-            <label v-if="!activeIsNonPerformance" class="personnel-allocation-input"><input v-model.number="item.performance" type="number" min="0" max="100" step="1" inputmode="numeric" aria-label="业绩分配比例" :disabled="activeTab === 'craftsmen' && craftsmanType(item) === PERFORMANCE_TYPES.LABOR" @input="markPerformanceTouched(item)"><b>%</b></label>
+            <label v-if="!activeIsNonPerformance" class="personnel-allocation-input"><input v-model.number="item.performance" type="number" min="0" max="100" :step="historyAdjustment ? '0.01' : '1'" inputmode="decimal" aria-label="业绩分配比例" :disabled="activeTab === 'craftsmen' && craftsmanType(item) === PERFORMANCE_TYPES.LABOR" @input="markPerformanceTouched(item)"><b>%</b></label>
+            <label v-if="historyAdjustment && activeTab === 'craftsmen'" class="personnel-allocation-input personnel-allocation-input--money"><input v-model.trim="item.allocationAmountYuan" type="number" min="0" step="1" inputmode="numeric" aria-label="分配消耗业绩" :disabled="craftsmanType(item) === PERFORMANCE_TYPES.LABOR" @input="syncHistoryRatioFromAmount(item)"><b>元</b></label>
             <label v-if="activeTab === 'craftsmen' && !activeIsNonPerformance" class="personnel-allocation-input personnel-allocation-input--labor"><input v-model.number="item.laborFeeYuan" type="number" min="0" step="1" inputmode="numeric" aria-label="每人手工费" :disabled="craftsmanType(item) === PERFORMANCE_TYPES.COMMISSION" @input="item.laborFeeCents = Math.max(0, Number(item.laborFeeYuan || 0) * 100)"><b>元/次</b></label>
+            <label v-if="historyAdjustment && activeTab === 'craftsmen'" class="personnel-allocation-input personnel-allocation-input--project"><input v-model.trim="item.projectCountText" type="number" min="0" step="0.5" inputmode="decimal" aria-label="工资项目数" @blur="normalizeProjectCount(item)"><b>个</b></label>
             <button type="button" @click="selectRecord(item)">删除</button>
           </div>
           <p v-if="!selectedRecords.length" class="personnel-empty">请先在简易选择中添加人员</p>
@@ -623,7 +745,7 @@ function searchGroupPersonnel(scope) {
       <footer>
         <p v-if="validationMessage" role="alert">{{ validationMessage }}</p>
         <button type="button" class="button button--secondary" :disabled="saving" @click="emit('close')">取消</button>
-        <button v-if="showCraftsmen || showSalespeople" type="button" class="button button--secondary" :disabled="loading || saving || Boolean(loadError)" @click="applySelectionToAll">应用全部人</button>
+        <button v-if="!historyAdjustment && (showCraftsmen || showSalespeople)" type="button" class="button button--secondary" :disabled="loading || saving || Boolean(loadError)" @click="applySelectionToAll">应用全部人</button>
         <button type="button" class="button button--primary" :disabled="loading || saving || Boolean(loadError)" @click="confirm">确认</button>
       </footer>
     </section>

@@ -58,6 +58,17 @@ final class CashierV3CardOperationModule
                     'cardOperation' => $operation,
                     'cardState' => is_array($result['state'] ?? null) ? $result['state'] : [],
                     'cashierDraft' => $cashierDraft,
+                    'replacementSnapshot' => $type === CashierV3CardOperationKernel::TYPE_PROJECT_REPLACEMENT
+                        ? ($result['replacementSnapshot'] ?? null) : null,
+                    'result' => $type === CashierV3CardOperationKernel::TYPE_PROJECT_REPLACEMENT
+                        ? [
+                            'status' => (string)($operation['operationStatus'] ?? ''),
+                            'operationNo' => (string)($operation['operationNo'] ?? ''),
+                            'sourceProjects' => is_array($result['replacementSnapshot']['sourceLines'] ?? null)
+                                ? $result['replacementSnapshot']['sourceLines'] : [],
+                            'targetProject' => is_array($result['replacementSnapshot']['target'] ?? null)
+                                ? $result['replacementSnapshot']['target'] : null,
+                        ] : null,
                 ],
                 'business_no' => (string)($operation['operationNo'] ?? ''),
                 'touched' => array_values(array_unique($touched)),
@@ -74,11 +85,23 @@ final class CashierV3CardOperationModule
         }
         $policy = new CashierV3ContextPolicy(
             $action,
-            ['card_holder'],
-            ['member', 'cashier_workspace'],
+            [],
+            ['card_holder', 'member', 'cashier_workspace'],
             static function (array $payload, array $base = []): array {
                 $type = trim((string)($payload['operationType'] ?? ''));
                 $holderId = self::positiveId($payload['sourceCardHolderId'] ?? null, 'source_card_missing');
+                if ($type === CashierV3CardOperationKernel::TYPE_PROJECT_REPLACEMENT) {
+                    return [
+                        'required' => [],
+                        'allowed' => [],
+                        'identities' => [],
+                        'required_read_roles' => [],
+                        'required_touched_roles' => [],
+                        'allows_empty_contexts' => true,
+                        'allows_empty_touched_result' => true,
+                        'expand_from_server_resource_discovery' => false,
+                    ];
+                }
                 $identities = [[
                     'role' => 'source_card',
                     'kind' => 'card_holder',

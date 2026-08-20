@@ -104,7 +104,9 @@ class CashierV3ContextPolicy
         array $declaredRoles,
         array $declaredKinds
     ): void {
-        if ($this->serverResourceDiscoverer !== null) {
+        if ($this->serverResourceDiscoverer !== null
+            && ($this->action !== 'submit-checkout'
+                || is_array($payload['checkoutSnapshot'] ?? null))) {
             throw new \LogicException(sprintf('%s 的服务端资源发现器重复配置', $this->action));
         }
         foreach ($declaredKinds as $kind) {
@@ -208,6 +210,10 @@ class CashierV3ContextPolicy
             $touchedRoles = $this->requiredTouchedRoles;
         }
 
+        $allowsEmptyContexts = $this->allowsEmptyContexts;
+        if (isset($extra['allows_empty_contexts'])) {
+            $allowsEmptyContexts = (bool)$extra['allows_empty_contexts'];
+        }
         $out = [
             'action' => $this->action,
             'required' => array_values(array_unique($required)),
@@ -216,16 +222,20 @@ class CashierV3ContextPolicy
             'identities' => $identities,
             'required_read_roles' => array_values(array_unique($readRoles)),
             'required_touched_roles' => array_values(array_unique($touchedRoles)),
-            'allows_empty_contexts' => $this->allowsEmptyContexts,
+            'allows_empty_contexts' => $allowsEmptyContexts,
         ];
         // Browser-owned checkout snapshots do not use catalog display rows as
         // Gateway version contexts. The final transaction resolves the sale
         // identity and performs inventory/entitlement/balance checks directly;
         // guest snapshots may therefore legitimately discover no extra
         // catalog resources.
-        if ($this->action === 'prepare-checkout'
+        if ($this->action === 'submit-checkout'
             && is_array($payload['checkoutSnapshot'] ?? null)) {
             $out['allow_empty_server_resource_discovery'] = true;
+            // The final snapshot owns no browser resource version. Server
+            // discovery still locks the real resources, but they are domain
+            // writes and must not be reported as Gateway projection bumps.
+            $out['allows_empty_touched_result'] = true;
         }
         // 透传 Gateway／事务内依赖的动态合同字段（禁止在此丢弃）
         if ($this->dynamicResolver !== null && isset($extra) && is_array($extra)) {
@@ -239,13 +249,17 @@ class CashierV3ContextPolicy
                 'normalized_payload',
                 'server_checkout_sources',
                 'allow_empty_server_resource_discovery',
+                'allows_empty_contexts',
+                'allows_empty_touched_result',
+                'expand_from_server_resource_discovery',
             ] as $passKey) {
                 if (array_key_exists($passKey, $extra)) {
                     $out[$passKey] = $extra[$passKey];
                 }
             }
         }
-        if ($this->serverResourceDiscoverer !== null) {
+        if ($this->serverResourceDiscoverer !== null
+            && ($out['expand_from_server_resource_discovery'] ?? true) !== false) {
             $out['expand_from_server_resource_discovery'] = true;
             $out['server_resource_discoverer'] = $this->serverResourceDiscoverer;
         }

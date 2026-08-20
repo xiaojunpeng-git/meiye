@@ -8,6 +8,10 @@ const overlay = fs.readFileSync(
   path.join(root, '前端代码/cashier-v3/src/components/cashier/CashierCheckoutOverlay.vue'),
   'utf8'
 )
+const workbench = fs.readFileSync(
+  path.join(root, '前端代码/cashier-v3/src/views/CashierWorkbenchView.vue'),
+  'utf8'
+)
 
 let passed = 0
 let failed = 0
@@ -24,16 +28,18 @@ function ok(name, condition) {
 const addMethodBlock = overlay.match(/function addPaymentMethod\(method = \{\}\) \{[\s\S]*?\n\}/)?.[0] || ''
 
 ok(
-  'ordinary collection switches an existing balance or bookkeeping payment before adding the new method',
-  addMethodBlock.includes('const isCombinedCollection = combinationMode.value || selectedPaymentLines.value.length > 1')
-    && addMethodBlock.includes("request('remove-balance-payment')")
-    && addMethodBlock.includes("request('remove-payment-line', { paymentLineId: line.id })")
-    && addMethodBlock.lastIndexOf("request('add-payment-method', { paymentMethodId: method.id })")
-      > addMethodBlock.indexOf("request('remove-balance-payment')")
+  'ordinary collection starts without a selected method and adds the chosen method to the browser draft',
+  addMethodBlock.includes("request('add-payment-method', { paymentMethodId: method.id })")
+    && workbench.includes("action === 'add-payment-method'")
+    && workbench.includes('const checkoutLines = Array.isArray(preview.lines) ? preview.lines : []')
+    && workbench.includes('localCheckoutPreview.value = preview')
 )
 ok(
-  'combined collection retains existing payment lines and does not silently replace them',
-  addMethodBlock.includes('if (!isCombinedCollection)')
+  'chosen collection method receives the snapshot remaining amount and can still be combined',
+  workbench.includes('const remainingAmount = Math.max(0, receivable - selectedCollectionAmount - balancePaymentAmount)')
+    && workbench.includes("checkoutLines.push({ id: `local-payment-${Date.now()}`, lineRole: 'payment', method: method.id")
+    && workbench.includes("preview.lines = checkoutLines.filter((line) => String(line.id) !== String(payload.paymentLineId || ''))")
+    && workbench.includes('checkoutSnapshot')
 )
 
 console.log(`\n${passed} passed, ${failed} failed`)

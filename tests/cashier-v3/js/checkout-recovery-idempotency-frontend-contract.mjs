@@ -4,127 +4,44 @@ import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..')
-const overlay = fs.readFileSync(
-  path.join(root, '前端代码/cashier-v3/src/components/cashier/CashierCheckoutOverlay.vue'),
-  'utf8'
-)
-const workbench = fs.readFileSync(
-  path.join(root, '前端代码/cashier-v3/src/views/CashierWorkbenchView.vue'),
-  'utf8'
-)
+const read = (relativePath) => fs.readFileSync(path.join(root, relativePath), 'utf8')
+const overlay = read('前端代码/cashier-v3/src/components/cashier/CashierCheckoutOverlay.vue')
+const workbench = read('前端代码/cashier-v3/src/views/CashierWorkbenchView.vue')
 
 let passed = 0
 let failed = 0
 function ok(name, condition) {
-  if (condition) {
-    passed += 1
-    console.log(`PASS ${name}`)
-    return
-  }
-  failed += 1
-  console.log(`FAIL ${name}`)
+  if (condition) passed += 1
+  else failed += 1
+  console.log(`${condition ? 'PASS' : 'FAIL'} ${name}`)
 }
 
-ok(
-  'recovered checkout key is accepted only in canonical CHECKOUT UUID form',
-  overlay.includes('const recoveredCheckoutIdempotencyKey = computed(() => {')
-    && overlay.includes('/^CHECKOUT-[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(key)')
+const finalSubmit = workbench.match(/async function finalizeLocalCheckoutPreview\([^)]*\) \{([\s\S]*?)\n}\n\nfunction localCheckoutPaymentAmount/)?.[1] || ''
+const snapshotBuilder = workbench.match(/function buildCheckoutSnapshot\([^)]*\) \{([\s\S]*?)\n}\n\nasync function openCheckout/)?.[1] || ''
+
+ok('final idempotency key is generated only for the final command',
+  /createCashierV3CommandId\('CHECKOUT'\)/.test(overlay)
+  && finalSubmit.includes("action: 'submit-checkout'")
 )
-ok(
-  'final submit reuses a recovered key before generating a new checkout identity',
-  /submitCommandId\.value = recoveredCheckoutIdempotencyKey\.value\s*\|\| createCashierV3CommandId\('CHECKOUT'\)/.test(overlay)
+ok('final submit carries the complete browser snapshot',
+  finalSubmit.includes('checkoutSnapshot')
+  && !snapshotBuilder.includes("contractVersion: 'cashier-v3-checkout-snapshot-v1'")
+  && !workbench.includes('snapshotContractVersion:')
+  && snapshotBuilder.includes('businessDate')
+  && snapshotBuilder.includes('source: checkoutSourceSnapshot')
 )
-ok(
-  'editing checkout retains new final-key generation fallback',
-  overlay.includes("|| createCashierV3CommandId('CHECKOUT')")
+ok('snapshot strips generated versions and recovery metadata',
+  snapshotBuilder.includes('stripGeneratedMetadata')
+  && /version|revision|token|commandcontexts|recoveryready|preparationready|snapshotready/.test(snapshotBuilder)
 )
-ok(
-  'recovered prepared checkout submits directly without replaying its preparation receipt',
-  workbench.includes("String(checkout.value?.requestStatus || '') === 'ready_for_submit'")
-    && workbench.includes("String(checkout.value?.originalIdempotencyKey || '') === submissionKey")
-    && /if \(recoveredPreparedCheckout\) \{[\s\S]*?requestAction\(effectiveAction, approvedPayload\)[\s\S]*?\} else \{\s*const prepareKey/.test(workbench)
+ok('no persisted checkout recovery path remains',
+  !workbench.includes('persistedEditingCheckoutRecoveryKey')
+  && !workbench.includes('resumePersistedCheckout')
+  && !workbench.includes("requestAction('prepare-checkout'")
 )
-ok(
-  'successful checkout opens the authoritative sales-order detail before navigating',
-  /if \(action === 'view-sales-order'(?: \|\| action === 'print-sales-order-receipt')?\) \{[\s\S]*?requestAction\('open-sales-order-detail', \{ orderId: salesOrderId \}\)[\s\S]*?if \(action === 'view-sales-order'\) \{[\s\S]*?router\.push\(\{ name: 'cashier-v3-order-center' \}\)[\s\S]*?cashier-v3:open-sales-order-detail/.test(workbench)
-    && !/requestAction\('view-sales-order'/.test(workbench)
-)
-ok(
-  'only a final member-balance version conflict starts automatic draft recovery',
-  workbench.includes("action === 'submit-checkout'")
-    && workbench.includes("String(conflict.reason || '') === 'member_balance_version_conflict'")
-    && workbench.includes("Number(checkout.value?.balancePaymentAmount || 0) > 0")
-)
-ok(
-  'automatic balance recovery is once per final checkout version and returns to payment edit',
-  workbench.includes('const automaticBalanceConflictRecoveries = new Set()')
-    && workbench.includes("automaticBalanceConflictRecoveries.add(recoveryKey)")
-    && /requestCheckoutAction\(\{\s*action: 'return-to-payment-edit'/.test(workbench)
-    && workbench.includes("cashier-v3:checkout-returned-to-payment-edit")
-)
-ok(
-  'recovery does not invoke another final checkout command',
-  !/action: 'return-to-payment-edit'[\s\S]{0,600}action: 'submit-checkout'/.test(workbench)
-)
-ok(
-  'final preparation sends only workspace and checkout request contexts',
-  workbench.includes('const preparationContexts = checkoutSubmissionCommandContexts(current.commandContexts)')
-    && /requestAction\('prepare-checkout-submission',[\s\S]{0,220}commandContexts: preparationContexts/.test(workbench)
-)
-ok(
-  'every persisted checkout follow-up filters out the server-built resource plan',
-  /if \(checkoutRequestActions\.has\(action\)[\s\S]{0,240}action !== 'query-checkout-result'[\s\S]{0,240}!isRechargeDebtRepaymentCheckout\.value\) \{[\s\S]{0,500}const checkoutContexts = checkoutSubmissionCommandContexts\(actionCurrent\.commandContexts\)[\s\S]{0,800}approvedPayload\.commandContexts = checkoutContexts/.test(workbench)
-    && workbench.includes("'go-to-writeoff-after-checkout'")
-    && workbench.includes("'finish-checkout-and-return'")
-)
-ok(
-  'returning to payment edit always resets the overlay to payment step two',
-  /function returnToPaymentEdit\(\) \{[\s\S]{0,260}localStep\.value = 2/.test(overlay)
-    && overlay.includes("cashier-v3:checkout-returned-to-payment-edit")
-    && /function handleCheckoutReturnedToPaymentEdit\(\) \{[\s\S]{0,160}localStep\.value = 2/.test(overlay)
-)
-ok(
-  'initial root hydration reopens only the same persisted editing checkout request',
-  workbench.includes('const persistedEditingCheckoutRecoveryKey = computed(() => {')
-    && workbench.includes("snapshot.resumeOnLoad !== true || String(snapshot.requestStatus || '') !== 'editing'")
-    && /watch\(\s*persistedEditingCheckoutRecoveryKey,[\s\S]{0,260}resumePersistedCheckout\(\)/.test(workbench)
-)
-ok(
-  'editing balance drafts restore at confirmation only after their authoritative payment is fully balanced',
-  workbench.includes('const isEditingPaymentDraft = String(snapshot.requestStatus || \'\') === \'editing\'')
-    && workbench.includes('Number(paymentSummary.selectedAmount || 0) > 0')
-    && workbench.includes('const isFullyPaid = Number(paymentSummary.remainingAmount) === 0')
-    && workbench.includes('checkoutRecoveryActiveStep.value = isFullyPaid')
-    && workbench.includes('? 3')
-)
-ok(
-  'a persisted balance deduction line is accepted without external-payment fields',
-  (() => {
-    const paymentLineContract = workbench.match(/function isAuthoritativeCheckoutPaymentLine\([\s\S]*?\n}\n\nfunction checkoutRequestIdentity/)?.[0] || ''
-    return paymentLineContract.includes("line.kind === 'balance_deduction'")
-      && paymentLineContract.includes("line.id === 'balance-deduction'")
-      && paymentLineContract.includes("line.editAction === 'update-balance-payment'")
-      && paymentLineContract.includes("line.removalAction === 'remove-balance-payment'")
-      && paymentLineContract.includes("return hasOwn(line, 'externalTransactionNo') && hasOwn(line, 'remark')")
-  })()
-)
-ok(
-  'persisted draft recovery has no prepare or final submit command',
-  (() => {
-    const restoreBlock = workbench.match(/function resumePersistedCheckout\(\)[\s\S]*?\n}\n\n\/\*\*/)?.[0] || ''
-    return !restoreBlock.includes("requestAction('prepare-checkout'")
-      && !restoreBlock.includes("requestAction('submit-checkout'")
-      && !restoreBlock.includes("requestCheckoutAction({ action: 'submit-checkout'")
-  })()
-)
-ok(
-  'stale checkout discard trusts the discard receipt instead of a delayed root rebuild',
-  (() => {
-    const discardBlock = workbench.match(/async function discardStaleCheckoutBeforeLocalFinalization\(\)[\s\S]*?\n}\n\nfunction enqueueCheckoutAction/)?.[0] || ''
-    return discardBlock.includes('const discarded = await discardCashierCheckout')
-      && discardBlock.includes('applyDiscardedCheckoutProjection(discarded)')
-      && !discardBlock.includes("requestAction('open-cashier-workbench'")
-  })()
+ok('payment, source and date edits do not create server drafts',
+  /该收款操作将在确认收款时按最新结账单处理/.test(workbench)
+  && !/requestAction\(['"](?:prepare-checkout|prepare-checkout-submission)/.test(workbench)
 )
 
 console.log(`\n${passed} passed, ${failed} failed`)

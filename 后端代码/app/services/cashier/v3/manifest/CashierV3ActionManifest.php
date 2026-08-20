@@ -290,23 +290,12 @@ class CashierV3ActionManifest
                 'consumers' => ['gift.issued' => ['cashier_v3.direct_gift.reconcile']],
             ],
 
-            // C2 | checkout request preparation and inactive settlement
-            'prepare-checkout' => $eventless($checkoutPreparation),
+            // C2 | checkout editing remains browser-local; only final submit
+            // reaches the settlement gateway.
             'prepare-debt-repayment' => $eventless($checkoutPreparation),
             'checkout-step-back' => $eventless($checkoutPreparation),
             'checkout-step-next' => $eventless($checkoutPreparation),
             'toggle-combination-payment' => $eventless($checkoutPreparation),
-            'add-payment-method' => $eventless($checkoutPreparation),
-            'update-payment-line' => $eventless($checkoutPreparation),
-            'remove-payment-line' => $eventless($checkoutPreparation),
-            // 余额支付在此阶段仅写入结账草稿；实际余额扣减和
-            // balance_changed 事实必须随 submit-checkout 的同一事务产生。
-            'apply-balance-payment' => $eventless($checkoutPreparation),
-            'remove-balance-payment' => $eventless($checkoutPreparation),
-            'update-balance-payment' => $eventless($checkoutPreparation),
-            'update-checkout-business-source' => $eventless($checkoutPreparation),
-            'update-checkout-sales-date' => $eventless($checkoutPreparation),
-            'prepare-checkout-submission' => $eventless($checkoutPreparation),
             'confirm-debt-warning' => $eventless($checkoutPreparation),
             'confirm-checkout-final-changes' => $eventless($checkoutPreparation),
             'submit-checkout' => [
@@ -467,7 +456,6 @@ class CashierV3ActionManifest
                 'activation_blocked_until_event_contract' => false,
                 'consumers' => ['debt.repaid' => []],
             ],
-            'return-to-payment-edit' => $eventless($checkoutPreparation),
             'retry-checkout' => $deferred($inactiveCheckout),
             'continue-partial-payment-recovery' => $deferred($inactiveCheckout),
             'go-to-writeoff-after-checkout' => $eventless($checkoutPreparation),
@@ -693,6 +681,12 @@ class CashierV3ActionManifest
                 'event_rules' => ['sales_order.personnel_adjusted' => ['min_count' => 1, 'max_count' => 1, 'aggregate_type' => 'sales_order', 'source_type' => 'adjust-sales-order-personnel']],
                 'eventless_reason' => '', 'activation_blocked_until_event_contract' => false, 'consumers' => ['sales_order.personnel_adjusted' => []],
             ],
+            'update-sales-order-note' => [
+                'required_event_types' => ['sales_order.note_updated'],
+                'allowed_event_types' => ['sales_order.note_updated'],
+                'event_rules' => ['sales_order.note_updated' => ['min_count' => 1, 'max_count' => 1, 'aggregate_type' => 'sales_order', 'source_type' => 'update-sales-order-note']],
+                'eventless_reason' => '', 'activation_blocked_until_event_contract' => false, 'consumers' => ['sales_order.note_updated' => []],
+            ],
             'refund-sales-order' => [
                 'required_event_types' => ['sales_order.refunded'], 'allowed_event_types' => ['sales_order.refunded'],
                 'event_rules' => ['sales_order.refunded' => ['min_count' => 1, 'max_count' => 1, 'aggregate_type' => 'sales_order', 'source_type' => 'refund-sales-order']],
@@ -709,6 +703,17 @@ class CashierV3ActionManifest
                 'event_rules' => ['service_record.voided' => ['min_count' => 1, 'max_count' => 1, 'aggregate_type' => 'service_record', 'source_type' => 'void-service-record']],
                 'eventless_reason' => '', 'activation_blocked_until_event_contract' => false,
                 'consumers' => ['service_record.voided' => []],
+            ],
+            'adjust-service-record-craftsmen' => [
+                'required_event_types' => ['service_record.craftsmen_adjusted'],
+                'allowed_event_types' => ['service_record.craftsmen_adjusted'],
+                'event_rules' => ['service_record.craftsmen_adjusted' => [
+                    'min_count' => 1, 'max_count' => 1,
+                    'aggregate_type' => 'service_record',
+                    'source_type' => 'adjust-service-record-craftsmen',
+                ]],
+                'eventless_reason' => '', 'activation_blocked_until_event_contract' => false,
+                'consumers' => ['service_record.craftsmen_adjusted' => []],
             ],
             'refund-recharge-order' => [
                 'required_event_types' => ['recharge.refunded'], 'allowed_event_types' => ['recharge.refunded'],

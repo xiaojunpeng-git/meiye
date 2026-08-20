@@ -31,9 +31,18 @@ final class CashierV3CustomCardConfigurationServices
     public function discoverCreateResources(
         array $payload,
         CashierV3OperatorScope $operatorScope,
-        CashierV3DataScopeContext $dataScope
+        CashierV3DataScopeContext $dataScope,
+        bool $directSnapshot = false
     ): array {
         $input = $this->normalizeInput($payload);
+        // Browser snapshot checkout has no pre-submit catalogue eligibility
+        // phase. The final transaction itself locks and materializes the
+        // custom-card shell and components, then performs the applicable
+        // entitlement/balance/inventory checks. A later show/verify flag must
+        // not reject the browser snapshot before that final boundary.
+        if ($directSnapshot) {
+            return [];
+        }
         $resources = $this->catalog->discoverCustomCardShellResources($operatorScope, $dataScope);
         foreach ($input['components'] as $component) {
             foreach ($this->catalog->discoverItemResources($component['skuId'], $operatorScope, $dataScope) as $resource) {
@@ -50,7 +59,10 @@ final class CashierV3CustomCardConfigurationServices
         string $idempotencyKey,
         array $lockedContexts,
         CashierV3OperatorScope $operatorScope,
-        CashierV3DataScopeContext $dataScope
+        CashierV3DataScopeContext $dataScope,
+        int $snapshotMemberId = 0,
+        bool $directSnapshot = false,
+        string $snapshotLineId = ''
     ): array {
         CashierV3TransactionGuard::assertInTransaction('customCardConfigurationCreate');
         $input = $this->normalizeInput($payload);
@@ -58,36 +70,49 @@ final class CashierV3CustomCardConfigurationServices
         if ($workspaceId === '' || $stateContextId === '' || $idempotencyKey === '') {
             throw self::failure('custom_card_command_context_invalid', '定制卡工作台已失效，请刷新后重新配置。');
         }
-        $draft = (array)Db::name('cashier_v3_workspace_draft')
-            ->where('workspace_id', $workspaceId)
-            ->where('store_id', $operatorScope->storeId())
-            ->lock(true)
-            ->find();
-        $memberId = (int)($draft['member_id'] ?? 0);
-        if ((string)($draft['state_context_id'] ?? '') !== $stateContextId || $memberId <= 0
-            || (string)($draft['customer_mode'] ?? '') !== 'member') {
-            throw self::failure('custom_card_member_required', '请先创建会员档案，再购买卡项。');
+        $memberId = $snapshotMemberId;
+        if (!$directSnapshot) {
+            $draft = (array)Db::name('cashier_v3_workspace_draft')
+                ->where('workspace_id', $workspaceId)
+                ->where('store_id', $operatorScope->storeId())
+                ->lock(true)
+                ->find();
+            $memberId = (int)($draft['member_id'] ?? 0);
+            if ((string)($draft['state_context_id'] ?? '') !== $stateContextId || $memberId <= 0
+                || (string)($draft['customer_mode'] ?? '') !== 'member') {
+                throw self::failure('custom_card_member_required', '请先创建会员档案，再购买卡项。');
+            }
+            $existingRows = Db::name('cashier_v3_workspace_line')
+                ->where('workspace_id', $workspaceId)
+                ->lock(true)
+                ->field('line_key')
+                ->select();
+            $existingRows = is_object($existingRows) && method_exists($existingRows, 'toArray') ? $existingRows->toArray() : (array)$existingRows;
+            if ($existingRows) {
+                throw self::failure('custom_card_cart_conflict', '定制卡不能与其他商品同时结账，请先处理当前订单。');
+            }
         }
-        $existingRows = Db::name('cashier_v3_workspace_line')
-            ->where('workspace_id', $workspaceId)
-            ->lock(true)
-            ->field('line_key')
-            ->select();
-        $existingRows = is_object($existingRows) && method_exists($existingRows, 'toArray') ? $existingRows->toArray() : (array)$existingRows;
-        if ($existingRows) {
-            throw self::failure('custom_card_cart_conflict', '定制卡不能与其他商品同时结账，请先处理当前订单。');
+        if ($memberId <= 0) {
+            throw self::failure('custom_card_member_required', '请先选择会员，再购买卡项。');
         }
 
         $components = [];
         $configuredCostTotalCents = 0;
         foreach ($input['components'] as $index => $component) {
-            $line = $this->catalog->selectSaleLineAfterGatewayLocksInTx(
-                $component['skuId'],
-                $idempotencyKey . '-C' . ($index + 1),
-                $lockedContexts,
-                $operatorScope,
-                $dataScope
-            );
+            $line = $directSnapshot
+                ? $this->catalog->selectDraftSaleLineAfterGatewayLocksInTx(
+                    $component['skuId'],
+                    $idempotencyKey . '-C' . ($index + 1),
+                    $operatorScope,
+                    $dataScope
+                )
+                : $this->catalog->selectSaleLineAfterGatewayLocksInTx(
+                    $component['skuId'],
+                    $idempotencyKey . '-C' . ($index + 1),
+                    $lockedContexts,
+                    $operatorScope,
+                    $dataScope
+                );
             if ((int)($line['catalog_product_type'] ?? 0) !== 6) {
                 throw self::failure('custom_card_component_not_project', '定制卡只能配置项目。');
             }
@@ -159,7 +184,15 @@ final class CashierV3CustomCardConfigurationServices
         $configurationId = 'CCD-' . strtoupper(substr(hash('sha256', implode('|', [
             $dataScope->tenantId(), $operatorScope->storeId(), $workspaceId, $idempotencyKey,
         ])), 0, 40));
-        $lineKey = 'sale:' . substr(hash('sha256', $idempotencyKey), 0, 48);
+        // The persisted checkout line is keyed from the browser snapshot's
+        // lineId. Use exactly that identity for a direct snapshot so card
+        // issuance can find this configuration without falling back to the
+        // hidden legacy shell SKU. Legacy mutable-workspace commands retain
+        // their idempotency-derived line key.
+        $snapshotLineId = trim($snapshotLineId);
+        $lineKey = $directSnapshot && $snapshotLineId !== ''
+            ? 'sale:' . substr($snapshotLineId, 0, 59)
+            : 'sale:' . substr(hash('sha256', $idempotencyKey), 0, 48);
         $configuration = (array)Db::name(self::TABLE)
             ->where('configuration_id', $configurationId)
             ->where('tenant_id', $dataScope->tenantId())
@@ -210,7 +243,8 @@ final class CashierV3CustomCardConfigurationServices
             $idempotencyKey,
             $lockedContexts,
             $operatorScope,
-            $dataScope
+            $dataScope,
+            $directSnapshot
         );
     }
 

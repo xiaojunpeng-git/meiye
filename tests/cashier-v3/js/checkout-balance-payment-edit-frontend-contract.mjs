@@ -72,23 +72,15 @@ ok(
     && overlay.includes("if (line.kind === 'balance_deduction')")
 )
 ok(
-  'checkout validates a zero-valued payment method only when the operator clicks next',
+  'payment step blocks final confirmation until the browser payment snapshot is balanced',
   overlay.includes('const hasPendingPaymentLineAmountDraft = computed(() =>')
-    && overlay.includes('const firstInvalidPaymentLine = computed(() =>')
-    && overlay.includes('const hasNonPositivePaymentLine = computed(() =>')
-    && overlay.includes('`${name}的收款金额不能为0。`')
     && overlay.includes('const isPaymentDraftReady = computed(() =>')
+    && overlay.includes("const isPaymentAmountBalanced = computed(() => paymentAmountValidation.value.state === 'balanced')")
     && overlay.includes('if (currentStep.value === 2) {')
-    && overlay.includes('showPaymentValidationPrompt(invalidPaymentLineMessage.value)')
-    && overlay.includes('!isPaymentDraftReady && !invalidPaymentLineMessage')
-    && !overlay.includes('watch(\n  invalidPaymentLineMessage,')
+    && overlay.includes('if (!isPaymentDraftReady.value || !isPaymentAmountBalanced.value)')
+    && overlay.includes("showPaymentValidationPrompt(paymentAmountValidation.value.message || '请先完成本次收款金额。')")
     && overlay.includes('[key]: { ...draft, value: normalizedAmount, pending: false }')
-    && overlay.includes('(currentStep === 2 && !isPaymentDraftReady && !invalidPaymentLineMessage)')
-    && overlay.includes('if (activeStep === 3 && invalidLine) localStep.value = 2')
-    && overlay.includes('v-if="paymentValidationPromptMessage"')
-    && overlay.includes('role="alertdialog"')
-    && overlay.includes('收款信息有误')
-    && overlay.includes("paymentAmountValidation.state !== 'invalid'")
+    && overlay.includes('(currentStep === 2 && (!isPaymentDraftReady || !isPaymentAmountBalanced))')
 )
 ok(
   'the serialized parent queue settles successful drafts and rolls failed drafts back to authority',
@@ -100,6 +92,18 @@ ok(
     && overlay.includes('clearPaymentLineAmountDraft(key)')
     && overlay.includes('clearPaymentLineAmountError(key)')
     && overlay.includes("setPaymentLineAmountError(key, detail.message || '收款金额没有保存，已恢复原金额。')")
+)
+ok(
+  'final confirmation collection is recalculated from the same local payment snapshot',
+  workbench.includes('cashPerformanceAmount: 0,')
+    && workbench.includes('const checkoutPaymentLines = checkoutSnapshotPaymentLines(preview.lines || [])')
+    && workbench.includes(".filter((line) => checkoutLineRole(line) === 'payment')")
+    && workbench.includes('preview.cashPerformanceAmount = cashPerformanceAmount')
+    && workbench.includes('payment.cashPerformanceAmount = cashPerformanceAmount')
+    && overlay.includes('const checkoutCollectionAmount = computed(() => selectedPaymentLines.value.reduce(')
+    && overlay.includes('const checkoutBalancePaymentAmount = computed(() => selectedPaymentLines.value.reduce(')
+    && overlay.includes('<dt>收款</dt><dd>{{ formatMoney(checkoutCollectionAmount) }}</dd>')
+    && !overlay.includes('<dt>现金业绩</dt><dd>{{ formatMoney(checkout.cashPerformanceAmount) }}</dd>')
 )
 
 console.log(`\n${passed} passed, ${failed} failed`)

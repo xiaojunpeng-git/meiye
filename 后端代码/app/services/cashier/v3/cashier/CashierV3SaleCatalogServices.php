@@ -52,7 +52,11 @@ final class CashierV3SaleCatalogServices
         $catalogItems = [];
         $categories = [];
         foreach ($rows as $row) {
-            $normalized = $this->normalizeAuthorityRow($row, false);
+            // The browser owns the only checkout snapshot, so every card
+            // directory item must already contain its complete component
+            // definition before it can be selected. Final confirmation must
+            // never have to reload that definition from the catalogue.
+            $normalized = $this->normalizeAuthorityRow($row, true);
             // 定制卡壳是隐藏的配置依赖，不是普通目录商品。页面只提供一个
             // “新建定制卡”入口，避免把价格为零的旧壳再次展示给收银员。
             if ($normalized['kindCode'] === 'custom_card') {
@@ -229,15 +233,22 @@ final class CashierV3SaleCatalogServices
         string $idempotencyKey,
         array $lockedContexts,
         CashierV3OperatorScope $operatorScope,
-        CashierV3DataScopeContext $dataScope
+        CashierV3DataScopeContext $dataScope,
+        bool $directSnapshot = false
     ): array {
         CashierV3TransactionGuard::assertInTransaction('cashierCustomCardSelectAfterGatewayLocks');
-        $shell = $this->readCustomCardShell($operatorScope, $dataScope, true);
+        // The legacy custom-card shell is a hidden configuration host, not a
+        // sellable SKU or an inventory authority.  A browser snapshot must
+        // therefore not fail because that hidden host is off shelf.  The
+        // configuration and its actual project components are materialized
+        // inside this final transaction; entitlement/balance/inventory checks
+        // remain in their respective final authorities.
+        $shell = $this->readCustomCardShell($operatorScope, $dataScope, !$directSnapshot);
         $current = $this->customCardCurrentFromConfiguration($shell, $configuration);
-        // The configuration is created by this command, so it correctly has
-        // no pre-existing command.context. The shell and every selected
-        // project remain Gateway-locked before the insert.
-        $this->assertLockedContextsCover($current, $lockedContexts, ['custom_card_configuration']);
+        if (!$directSnapshot) {
+            // Legacy mutable-workspace command path only.
+            $this->assertLockedContextsCover($current, $lockedContexts, ['custom_card_configuration']);
+        }
         if ((int)($configuration['total_amount_cents'] ?? 0) <= 0) {
             throw self::failure(CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE, '定制卡金额必须大于 0。', 'custom_card_total_invalid');
         }
@@ -251,7 +262,9 @@ final class CashierV3SaleCatalogServices
         CashierV3DataScopeContext $dataScope
     ): array {
         CashierV3TransactionGuard::assertInTransaction('cashierCustomCardIssuanceLine');
-        $shell = $this->readCustomCardShell($operatorScope, $dataScope, true);
+        // See customCardSaleLineAfterGatewayLocksInTx(): the host is only a
+        // configuration template and is not an eligible product resource.
+        $shell = $this->readCustomCardShell($operatorScope, $dataScope, false);
         return $this->saleLineFromItem($this->customCardCurrentFromConfiguration($shell, $configuration), 'custom-card-issue:' . (string)$configuration['configuration_id']);
     }
 
@@ -370,6 +383,38 @@ final class CashierV3SaleCatalogServices
     }
 
     /**
+     * Final card issuance consumes the browser's checkout snapshot, not the
+     * mutable catalogue lifecycle flags. The SKU identity remains locked in
+     * this transaction; stock, balance and entitlement checks remain at their
+     * dedicated final authorities.
+     */
+    public function selectCheckoutSaleLineInTx(
+        $itemId,
+        string $idempotencyKey,
+        CashierV3OperatorScope $operatorScope,
+        CashierV3DataScopeContext $dataScope
+    ): array {
+        CashierV3TransactionGuard::assertInTransaction('cashierSaleCatalogCheckoutSelect');
+        $this->assertStoreScope($operatorScope, $dataScope);
+        $idempotencyKey = trim($idempotencyKey);
+        if ($idempotencyKey === '' || strlen($idempotencyKey) > 128 || strpos($idempotencyKey, "\0") !== false) {
+            throw self::failure(
+                CashierV3ResultCode::INVALID_IDEMPOTENCY_KEY,
+                '本次签发请求标识无效，请重新操作。',
+                'cashier_sale_idempotency_key_invalid'
+            );
+        }
+        $skuId = self::positiveId($itemId, 'itemId');
+        $row = $this->authority->lockStoreItemBySkuId($operatorScope->storeId(), $skuId);
+        if (!is_array($row)) {
+            throw self::notAvailable($skuId);
+        }
+        // The final card definition comes from the one browser snapshot. This
+        // lock supplies SKU identity only; it must not reload card components.
+        return $this->saleLineFromItem($this->normalizeAuthorityRow($row, false), $idempotencyKey);
+    }
+
+    /**
      * Build the one server-managed sale line for a pending card/project
      * upgrade. The target's normal catalogue price remains the original
      * amount; the consumed old-right value is represented as a frozen discount
@@ -380,7 +425,8 @@ final class CashierV3SaleCatalogServices
         string $idempotencyKey,
         array $lockedContexts,
         CashierV3OperatorScope $operatorScope,
-        CashierV3DataScopeContext $dataScope
+        CashierV3DataScopeContext $dataScope,
+        bool $directSnapshot = false
     ): array {
         CashierV3TransactionGuard::assertInTransaction('cashierCardOperationUpgradeSaleLine');
         $this->assertStoreScope($operatorScope, $dataScope);
@@ -399,7 +445,7 @@ final class CashierV3SaleCatalogServices
             || $targetSkuId <= 0 || $targetProductId <= 0
             || !is_int($targetPriceCents) || !is_int($sourceValueCents) || !is_int($deltaCents)
             || $targetPriceCents < 0 || $sourceValueCents < 0 || $deltaCents < 0
-            || $targetPriceCents - $sourceValueCents !== $deltaCents
+            || max(0, $targetPriceCents - $sourceValueCents) !== $deltaCents
             || (int)($source['holderId'] ?? 0) <= 0
             || (int)($source['holderVersion'] ?? 0) <= 0
             || !preg_match('/^[a-f0-9]{64}$/D', (string)($plan['immutableFingerprint'] ?? ''))) {
@@ -417,18 +463,27 @@ final class CashierV3SaleCatalogServices
                 'card_operation_upgrade_idempotency_invalid'
             );
         }
-        $current = $this->lockedActiveItem($operatorScope->storeId(), $targetSkuId);
-        $this->assertLockedContextsCover($current, $lockedContexts);
-        $requiredProductType = $operationType === 'card_upgrade' ? 5 : 6;
-        if ((int)$current['productId'] !== $targetProductId
-            || (int)$current['productType'] !== $requiredProductType
-            || (int)$current['unitPriceCents'] !== $targetPriceCents) {
-            throw CashierV3CommandException::versionConflict(
-                '目标项目或卡项的资料已经变化，请重新打开后办理。',
-                ['reason' => 'card_operation_upgrade_target_changed']
-            );
+        $current = $directSnapshot
+            ? $this->lockedSnapshotItem($operatorScope->storeId(), $targetSkuId)
+            : $this->lockedActiveItem($operatorScope->storeId(), $targetSkuId);
+        // A browser checkout snapshot is the only authority for the selected
+        // target and its transaction price. The final command locks current
+        // inventory only; it must not turn an earlier catalogue projection,
+        // price edit, or product-state change into a stale-version rejection.
+        // Legacy direct card-operation commands retain their old contract.
+        if (!$directSnapshot) {
+            $this->assertLockedContextsCover($current, $lockedContexts);
+            $requiredProductType = $operationType === 'card_upgrade' ? 5 : 6;
+            if ((int)$current['productId'] !== $targetProductId
+                || (int)$current['productType'] !== $requiredProductType
+                || (int)$current['unitPriceCents'] !== $targetPriceCents) {
+                throw CashierV3CommandException::versionConflict(
+                    '目标项目或卡项的资料已经变化，请重新打开后办理。',
+                    ['reason' => 'card_operation_upgrade_target_changed']
+                );
+            }
+            $this->assertPurchasable($current, 1);
         }
-        $this->assertPurchasable($current, 1);
         $this->assertInventoryAvailableForSale($current, 1, $dataScope);
 
         $extraResources = [[
@@ -456,6 +511,13 @@ final class CashierV3SaleCatalogServices
         if ($operationType === 'project_upgrade' && $projectMutations === []) {
             throw self::failure(CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE, '项目升级来源资料不完整，请重新打开后办理。', 'card_operation_project_upgrade_sources_missing');
         }
+        $targetEntitlementQuantity = 1;
+        if ($operationType === 'project_upgrade') {
+            $targetEntitlementQuantity = (int)($plan['stateMutation']['targetEntitlementQuantity'] ?? 1);
+            if ($targetEntitlementQuantity <= 0) {
+                throw self::failure(CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE, '项目升级次数无效，请重新打开后办理。', 'card_operation_project_upgrade_quantity_invalid');
+            }
+        }
         $binding = [
             'contractVersion' => 'cashier-v3-card-operation-upgrade-sale-v1',
             'operationId' => $operationId,
@@ -472,6 +534,9 @@ final class CashierV3SaleCatalogServices
             'targetPriceCents' => $targetPriceCents,
             'sourceRemainingValueCents' => $sourceValueCents,
             'settlementDeltaCents' => $deltaCents,
+            // This is the same selected source quantity that the checkout
+            // settlement writes as the new target right's write_times.
+            'targetEntitlementQuantity' => $targetEntitlementQuantity,
             'projectMutations' => $projectMutations,
             'sourceResources' => $extraResources,
         ];
@@ -563,7 +628,7 @@ final class CashierV3SaleCatalogServices
     }
 
     /**
-     * prepare-checkout 可直接消费的单行 DTO。该方法只重验并返回来源，不写正式事实。
+     * 快照提交可直接消费的单行 DTO。该方法只重验并返回来源，不写正式事实。
      */
     public function checkoutSourceLineInTx(
         array $storedLine,
@@ -692,14 +757,16 @@ final class CashierV3SaleCatalogServices
             }
             $configuration = $this->readStoredCustomCardConfiguration($storedSnapshot, $operatorScope, $dataScope, $lock);
             $shell = $this->readCustomCardShell($operatorScope, $dataScope, $lock);
-            $current = $this->customCardCurrentFromConfiguration($shell, $configuration);
-            $this->assertStoredAuthorityMatches($storedLine, $current);
-            return $current;
+            return $this->customCardCurrentFromConfiguration($shell, $configuration);
         }
         $skuId = (int)($storedLine['catalog_sku_id'] ?? 0);
+        // A submitted checkout snapshot owns its product name, price and
+        // line-level business settings. Re-read the row only to obtain the
+        // final inventory authority; do not re-apply a mutable catalogue
+        // availability/price/version decision to an already formed snapshot.
         $current = $lock
-            ? $this->lockedActiveItem($operatorScope->storeId(), $skuId)
-            : $this->readActiveItem($operatorScope->storeId(), $skuId);
+            ? $this->lockedSnapshotItem($operatorScope->storeId(), $skuId)
+            : $this->readSnapshotItem($operatorScope->storeId(), $skuId);
         if (is_array($storedSnapshot['cardOperationUpgrade'] ?? null)) {
             $current = $this->cardOperationUpgradeCurrentForStoredLine(
                 $storedLine,
@@ -707,8 +774,6 @@ final class CashierV3SaleCatalogServices
                 (array)$storedSnapshot['cardOperationUpgrade']
             );
         }
-        $this->assertStoredAuthorityMatches($storedLine, $current);
-        $this->assertPurchasable($current, $quantity);
         // Products explicitly marked as presale or non-outbound are still
         // saleable without an inbound stock record. Inventory is only checked
         // and deducted for the immutable outbound path at final settlement.
@@ -740,15 +805,11 @@ final class CashierV3SaleCatalogServices
             || !preg_match('/^[a-f0-9]{64}$/D', (string)($binding['operationFingerprint'] ?? ''))
             || !is_int($targetPrice) || !is_int($sourceValue) || !is_int($delta)
             || $targetPrice < 0 || $sourceValue < 0 || $delta < 0
-            || $targetPrice - $sourceValue !== $delta
-            || (int)($binding['targetProductId'] ?? 0) !== (int)$current['productId']
-            || (int)($binding['targetSkuId'] ?? 0) !== (int)$current['skuId']
-            || (int)$current['unitPriceCents'] !== $targetPrice
+            || max(0, $targetPrice - $sourceValue) !== $delta
             // 行券只降低本次应收，绝不能改写升级操作冻结的原始补价。
             || $couponDiscount < 0 || $couponDiscount > $delta
             || (int)$storedLine['unit_price_cents'] !== $delta - $couponDiscount
             || (int)$storedLine['original_unit_price_cents'] !== $targetPrice
-            || (int)$current['productType'] !== ($operationType === 'card_upgrade' ? 5 : 6)
             || $sourceResources === []) {
             throw CashierV3CommandException::versionConflict(
                 '升级结算资料已经变化，请删除后重新办理。',
@@ -925,6 +986,21 @@ final class CashierV3SaleCatalogServices
         return $normalized;
     }
 
+    /** Lock a catalogue row for final inventory use without treating current
+     * product visibility, verification, price or resource version as a
+     * validation rule for a browser-owned checkout snapshot. */
+    private function lockedSnapshotItem(int $storeId, int $skuId): array
+    {
+        if ($this->readiness !== null) {
+            $this->readiness->assertSaleCatalogReady();
+        }
+        $row = $this->authority->lockStoreItemBySkuId($storeId, $skuId);
+        if (!is_array($row)) {
+            throw self::notAvailable($skuId);
+        }
+        return $this->normalizeAuthorityRow($row, false);
+    }
+
     private function readActiveItem(int $storeId, int $skuId): array
     {
         if ($this->readiness !== null) {
@@ -939,6 +1015,18 @@ final class CashierV3SaleCatalogServices
             throw self::notAvailable($skuId);
         }
         return $normalized;
+    }
+
+    private function readSnapshotItem(int $storeId, int $skuId): array
+    {
+        if ($this->readiness !== null) {
+            $this->readiness->assertSaleCatalogReady();
+        }
+        $row = $this->authority->readStoreItemBySkuId($storeId, $skuId);
+        if (!is_array($row)) {
+            throw self::notAvailable($skuId);
+        }
+        return $this->normalizeAuthorityRow($row, false);
     }
 
     /** @return array<int,array> */
@@ -1198,7 +1286,7 @@ final class CashierV3SaleCatalogServices
         // 历史普通卡项（product_type=5）的一部分 SKU 仍沿用 product_type=0。
         // 它不是跨商品或跨门店关系，主商品、SKU、门店和 SKU 唯一标识仍须完整一致；
         // 因此只兼容这一种已验证的旧列形态，其他类型不一致继续拒绝。
-        $isLegacyCardSkuType = $productType === 5 && $skuProductType === 0;
+        $isLegacyCardSkuType = in_array($productType, [5, 6], true) && $skuProductType === 0;
         if ($productId <= 0 || $skuId <= 0 || $skuProductId !== $productId || $storeId <= 0
             || !in_array($productType, [0, 4, 5, 6], true)
             || ($skuProductType !== $productType && !$isLegacyCardSkuType) || $name === '' || $skuUnique === '') {
@@ -1369,8 +1457,13 @@ final class CashierV3SaleCatalogServices
                     );
                 }
                 $component = $this->normalizeAuthorityRow($item, false);
-                if (!$this->isCardComponentSnapshotEligible($component)
-                    || (int)($relation['product_id'] ?? 0) !== $component['productId']
+                // The checkout snapshot owns the selected card definition.
+                // A component's current catalogue visibility, verification or
+                // deletion flag must never turn an already selected card into
+                // a failed checkout.  Keep only structural identity checks
+                // here; final entitlement and inventory authorities validate
+                // their own mutable balances in the settlement transaction.
+                if ((int)($relation['product_id'] ?? 0) !== $component['productId']
                     || (int)($relation['product_type'] ?? -1) !== $component['productType']
                     || !in_array($component['productType'], [0, 6], true)
                     || trim((string)($relation['product_attr_unique'] ?? '')) !== $component['skuUnique']) {
@@ -1535,20 +1628,6 @@ final class CashierV3SaleCatalogServices
     }
 
     /**
-     * 父卡是否可售只由父卡上架状态决定；卡内项目后来被隐藏时，仍应以本次
-     * 购卡冻结的项目、次数和金额签发权益。这里仍拒绝删除、未审核、跨店或
-     * 身份不一致的配置，避免把损坏定义写入新的正式权益。
-     */
-    private function isCardComponentSnapshotEligible(array $component): bool
-    {
-        $snapshot = is_array($component['authoritySnapshot'] ?? null)
-            ? $component['authoritySnapshot'] : [];
-        $product = is_array($snapshot['product'] ?? null) ? $snapshot['product'] : [];
-        return (int)($product['isDeleted'] ?? 1) === 0
-            && (int)($product['isVerified'] ?? 0) === 1;
-    }
-
-    /**
      * Builds the catalog stock projection from the same V3 default-location
      * stock and active batches used by add-to-cart and final settlement.
      *
@@ -1694,9 +1773,12 @@ final class CashierV3SaleCatalogServices
             'kind' => $item['kind'],
             'cardRuleType' => $item['cardRuleType'],
             'cardRuleLabel' => self::cardRuleLabel($item['cardRuleType']),
-            // 目录只需要展示购卡前确认的规则内容；权威快照、资源版本和
-            // 指纹仍只在服务端选品及结账事务内使用，不能由页面回传。
+            // Display fields drive the confirmation dialog. The complete card
+            // business definition is also kept in the browser cart so clicking
+            // checkout can freeze the only issuance snapshot.
             'cardPreview' => self::publicCardPreview($item),
+            'cardPurchaseSnapshot' => in_array($item['kindCode'], ['count_card', 'card_package'], true)
+                ? $item['authoritySnapshot']['cardPurchase'] : null,
             'name' => $item['name'],
             'specification' => $item['specification'],
             'code' => $item['code'],

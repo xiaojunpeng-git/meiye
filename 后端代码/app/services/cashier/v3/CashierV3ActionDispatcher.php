@@ -7,7 +7,6 @@ use app\services\cashier\v3\manifest\CashierV3ActionManifest;
 use app\services\cashier\v3\permission\CashierV3FeatureResolver;
 use app\services\cashier\v3\permission\CashierV3PermissionPolicyRegistry;
 use app\services\cashier\v3\projection\CashierV3RootProjector;
-use app\services\cashier\v3\settlement\CashierV3CheckoutProjectionServices;
 use app\services\cashier\v3\projection\CashierV3RootStateContract;
 use app\services\cashier\v3\readiness\CashierV3TableReadinessGuard;
 use app\services\cashier\v3\registry\CashierV3ContextPolicyRegistry;
@@ -522,24 +521,6 @@ class CashierV3ActionDispatcher
             $envelope['idempotencyKey'] = (string)$outcome['idempotency_key'];
         }
 
-        // Payment-draft edits only need the same persisted checkout request.
-        // Rebuilding every workbench partition here also reloads the complete
-        // sale catalog, which makes a simple payment-line edit take seconds.
-        // The projection is deliberately read after the gateway transaction
-        // commits, so its workspace/request command contexts contain the
-        // versions advanced by this command.
-        $checkoutDraftProjection = $this->readCheckoutDraftProjection(
-            $outcome,
-            $operatorScope,
-            $dataScope
-        );
-        if ($checkoutDraftProjection !== null) {
-            $envelope['data'] = $this->attachCheckoutDraftProjection(
-                $envelope['data'],
-                $checkoutDraftProjection
-            );
-        }
-
         // 撤权重放：最小结果，不重建投影、不夹带业务副作用字段
         if (!empty($outcome['permission_denied_on_replay'])) {
             $envelope['requiresRefresh'] = true;
@@ -550,11 +531,14 @@ class CashierV3ActionDispatcher
         // 回填购物车。这里若再重建整套根状态，会重复加载目录、会员、房间、
         // 订单和报表分区，导致一次删除被拖到秒级；需要显式当前根状态时仍允许
         // 通过 returnCurrentState 请求重建。
-        $skipDefaultRootProjection = in_array($canonical, ['choose-catalog-item', 'remove-cart-line'], true)
-            && !$wantCurrentState;
+        $skipDefaultRootProjection = (in_array($canonical, ['choose-catalog-item', 'remove-cart-line'], true)
+                && !$wantCurrentState)
+            // A final browser-owned checkout has already returned its formal
+            // settlement receipt. Never rebuild the old workspace projection
+            // while returning that receipt to the browser.
+            || ($canonical === 'submit-checkout' && is_array($payload['checkoutSnapshot'] ?? null));
         $shouldProject = (!$outcome['replay'] || $wantCurrentState)
             && $outcome['status'] === CashierV3ResultCode::STATUS_SUCCESS
-            && $checkoutDraftProjection === null
             && !$skipDefaultRootProjection
             && $this->rootProjector !== null
             && $this->rootProjector->isReadyForFullRoot()
@@ -595,70 +579,6 @@ class CashierV3ActionDispatcher
         }
 
         return $envelope;
-    }
-
-    /**
-     * Return a narrow, authority-checked checkout projection after a payment
-     * draft mutation. The marker is persisted with the idempotency receipt so
-     * a replay receives the same current projection without duplicating the
-     * original business mutation.
-     */
-    protected function readCheckoutDraftProjection(
-        array $outcome,
-        CashierV3OperatorScope $operatorScope,
-        $dataScope
-    ): ?array {
-        $data = is_array($outcome['data'] ?? null) ? $outcome['data'] : [];
-        $edit = is_array($data['checkoutDraftEdit'] ?? null)
-            ? $data['checkoutDraftEdit']
-            : [];
-        $requestId = trim((string)($edit['_checkoutProjectionRequestId'] ?? ''));
-        if ($outcome['status'] !== CashierV3ResultCode::STATUS_SUCCESS
-            || $requestId === ''
-            || !($dataScope instanceof CashierV3DataScopeContext)) {
-            return null;
-        }
-
-        try {
-            $stateContextId = trim((string)($outcome['state_context_id'] ?? ''));
-            if ($stateContextId === '') {
-                return null;
-            }
-            $workspaceId = CashierV3CheckoutWorkspaceIdentity::id(
-                $operatorScope->storeId(),
-                $stateContextId
-            );
-            $projection = (new CashierV3CheckoutProjectionServices())->readEditingRequest(
-                $requestId,
-                $workspaceId,
-                $stateContextId,
-                $operatorScope,
-                $dataScope
-            );
-            if (!is_array($projection)
-                || !hash_equals($requestId, (string)($projection['checkoutRequestId'] ?? ''))
-                || !is_array($projection['commandContexts'] ?? null)) {
-                return null;
-            }
-            return $projection;
-        } catch (\Throwable $exception) {
-            // A projection issue must not hide a committed draft mutation.
-            // The normal full-root path below remains the safe automatic
-            // fallback when this narrow read is unavailable.
-            return null;
-        }
-    }
-
-    protected function attachCheckoutDraftProjection(array $data, array $projection): array
-    {
-        unset($data['_checkout_draft_projection']);
-        $edit = is_array($data['checkoutDraftEdit'] ?? null)
-            ? $data['checkoutDraftEdit']
-            : [];
-        unset($edit['_checkoutProjectionRequestId']);
-        $edit['checkoutProjection'] = $projection;
-        $data['checkoutDraftEdit'] = $edit;
-        return $data;
     }
 
     public static function projectionRebuildFallback(array $committedEnvelope): array

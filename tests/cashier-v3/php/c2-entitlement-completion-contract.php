@@ -416,14 +416,16 @@ function b1LockedPlan(array $snapshot): array
             'reservation'
         );
     }
-    b1AddLockedResource(
-        $resources,
-        'cashier_workspace',
-        $snapshot['workspaceId'],
-        150,
-        $snapshot['workspaceVersion'],
-        'workspace'
-    );
+    if (($snapshot['workspaceLockRequired'] ?? true) === true) {
+        b1AddLockedResource(
+            $resources,
+            'cashier_workspace',
+            $snapshot['workspaceId'],
+            150,
+            $snapshot['workspaceVersion'],
+            'workspace'
+        );
+    }
     $plan = array_values($resources);
     foreach ($plan as &$row) {
         sort($row['roles'], SORT_STRING);
@@ -507,6 +509,22 @@ b1Assert(
     $plan['persistenceStatus'] === 'not_persisted'
         && $plan['requiresGatewayTransaction'] === true
         && $plan['composition'] === 'entitlement_only'
+);
+$directSnapshot = b1Snapshot();
+$directSnapshot['workspaceLockRequired'] = false;
+$directLockedPlan = b1LockedPlan($directSnapshot);
+$directPlan = b1Plan(null, $directSnapshot, $directLockedPlan);
+b1Assert(
+    'direct browser snapshot does not require a legacy workspace lock',
+    !in_array('cashier_workspace', array_column($directLockedPlan, 'kind'), true)
+        && $directPlan['composition'] === 'entitlement_only'
+);
+$missingLegacyWorkspace = b1RemoveLockedRole(b1LockedPlan(b1Snapshot()), 'workspace');
+b1Assert(
+    'legacy workspace flow still requires its workspace lock',
+    b1Reason(static function () use ($missingLegacyWorkspace): void {
+        b1Plan(null, b1Snapshot(), $missingLegacyWorkspace);
+    }) === 'locked_resource_coverage_missing'
 );
 b1Assert(
     'gateway permission fingerprint and both inventory adapter contract gates are frozen',

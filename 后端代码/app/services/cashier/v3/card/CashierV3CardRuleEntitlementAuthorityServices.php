@@ -135,7 +135,9 @@ final class CashierV3CardRuleEntitlementAuthorityServices
         $tenantId = trim((string)($context['tenant_id'] ?? ''));
         $storeId = (int)($context['store_id'] ?? 0);
         $memberId = (int)($context['member_id'] ?? 0);
-        $occurredAt = (int)($context['recorded_at'] ?? 0);
+        // Entitlement validity belongs to the submitted checkout snapshot,
+        // not to the server's later persistence timestamp.
+        $occurredAt = (int)($context['occurred_at'] ?? 0);
         if ($tenantId === '' || $storeId <= 0 || $memberId <= 0 || $occurredAt <= 0) {
             throw self::failure('card_rule_deduction_context_invalid');
         }
@@ -253,13 +255,14 @@ final class CashierV3CardRuleEntitlementAuthorityServices
         string $tenantId,
         int $holderId,
         array $sourceLines,
+        int $targetQuantity,
         array $target,
         int $targetDetailId,
         string $operationId,
         int $occurredAt
     ): void {
         CashierV3TransactionGuard::assertInTransaction('cardRuleProjectReplacement');
-        if ($tenantId === '' || $holderId <= 0 || $targetDetailId <= 0 || $operationId === '' || $occurredAt <= 0
+        if ($tenantId === '' || $holderId <= 0 || $targetQuantity <= 0 || $targetDetailId <= 0 || $operationId === '' || $occurredAt <= 0
             || (int)($target['catalogId'] ?? 0) <= 0 || (int)($target['skuId'] ?? 0) <= 0
             || trim((string)($target['skuUnique'] ?? '')) === '') {
             throw self::failure('card_rule_replacement_context_invalid');
@@ -349,11 +352,11 @@ final class CashierV3CardRuleEntitlementAuthorityServices
         }
 
         $usesIndependentTimes = in_array($ruleType, ['normal', 'choice_kind'], true);
-        // For independent-count rules the replacement must expose exactly the
-        // same count as the selected source rights. Choice-count rules use the
+        // For independent-count rules the replacement exposes the target
+        // count frozen in its operation plan. Choice-count rules use the
         // card-level shared counter, so their component keeps the established
         // virtual count of zero.
-        $targetTimes = $usesIndependentTimes ? $totalQuantity : 0;
+        $targetTimes = $usesIndependentTimes ? $targetQuantity : 0;
         $componentSnapshot = [
             'relationId' => $relationId,
             'productId' => (int)$target['catalogId'],

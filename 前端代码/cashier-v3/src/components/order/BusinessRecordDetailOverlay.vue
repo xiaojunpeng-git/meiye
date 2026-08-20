@@ -20,10 +20,11 @@ const props = defineProps({
     required: true
   },
   lifecycleActions: { type: Array, default: () => [] },
-  onLifecycleAction: { type: Function, default: null }
+  onLifecycleAction: { type: Function, default: null },
+  fieldActionKeys: { type: Array, default: () => [] }
 })
 
-defineEmits(['close'])
+const emit = defineEmits(['close', 'field-action'])
 
 const activeForm = ref('')
 const cashRefundAmount = ref('')
@@ -101,7 +102,10 @@ async function submitLifecycleAction() {
         <dl class="business-record-detail__grid">
           <div v-for="row in rows" :key="row.key" :class="{ 'business-record-detail__money': row.type === 'money' }">
             <dt>{{ row.label }}</dt>
-            <dd>{{ row.displayValue }}</dd>
+            <dd>
+              <button v-if="fieldActionKeys.includes(row.key)" type="button" class="business-record-detail__field-action" @click="emit('field-action', { key: row.key, record })">{{ row.displayValue }}</button>
+              <template v-else>{{ row.displayValue }}</template>
+            </dd>
           </div>
         </dl>
         <section v-if="activeForm" class="business-record-detail__lifecycle">
@@ -251,6 +255,18 @@ async function submitLifecycleAction() {
   font-size: 16px;
   font-variant-numeric: tabular-nums;
   font-weight: 700;
+}
+
+.business-record-detail__field-action {
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #175cd3;
+  font: inherit;
+  text-align: left;
+  text-decoration: underline;
+  cursor: pointer;
 }
 
 .business-record-detail__footer {

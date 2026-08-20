@@ -2,7 +2,7 @@
 declare(strict_types=1);
 
 $root = is_dir('/var/www/html/app') ? '/var/www/html' : dirname(__DIR__, 3) . '/后端代码';
-$adapter = file_get_contents($root . '/app/services/cashier/v3/checkout/CashierV3EntitlementCompletionAuthorityAdapter.php');
+$adapter = file_get_contents($root . '/app/services/cashier/v3/checkout/CashierV3DirectSnapshotEntitlementSettlementServices.php');
 $kernel = file_get_contents($root . '/app/services/cashier/v3/checkout/CashierV3EntitlementCompletionKernel.php');
 $gateway = file_get_contents($root . '/app/services/cashier/v3/CashierV3CommandGatewayServices.php');
 if ($adapter === false || $kernel === false || $gateway === false) {

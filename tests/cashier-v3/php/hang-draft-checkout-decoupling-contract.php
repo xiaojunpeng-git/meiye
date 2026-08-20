@@ -35,15 +35,15 @@ $assert('completion no longer scans generic checkout sources for the hang', strp
 $assert('submission preparation does not lock or rediscover the resumed draft', strpos($preparation, 'discoverSettlementCleanupResource') === false);
 $assert('completion physically deletes the request-local draft without re-reading it', strpos($binding, 'readResumedHeader(') !== false
     && strpos($binding, "->where('hang_order_id', \$hangOrderId)\n            ->delete();") !== false);
-$submissionPolicyOffset = strpos($module, 'private static function registerSubmissionPreparationPolicy');
+$submissionPolicyOffset = strpos($module, 'private static function registerSubmitCheckoutPolicy');
 $submissionPolicyEnd = $submissionPolicyOffset === false
     ? false
     : strpos($module, '$dispatcher->policies()->register($policy);', $submissionPolicyOffset);
 $submissionPolicy = $submissionPolicyOffset === false
     ? ''
     : substr($module, $submissionPolicyOffset, $submissionPolicyEnd === false ? null : $submissionPolicyEnd - $submissionPolicyOffset);
-$assert('submission policy does not declare a resumed draft resource', $submissionPolicy !== ''
-    && strpos($submissionPolicy, "'hang_order'") === false);
+$assert('submission policy does not declare the internal resumed-draft reference', $submissionPolicy !== ''
+    && strpos($submissionPolicy, "'resumed_hang_order_id'") === false);
 $assert('sales plan accepts the internal cleanup reference', strpos($salesPlan, "'resumed_hang_order_id'") !== false);
 $assert('fact assembler accepts the internal cleanup reference', strpos($factAssembler, "'resumed_hang_order_id'") !== false);
 $assert('payment plan accepts the internal cleanup reference', strpos($paymentPlan, "'resumed_hang_order_id'") !== false);

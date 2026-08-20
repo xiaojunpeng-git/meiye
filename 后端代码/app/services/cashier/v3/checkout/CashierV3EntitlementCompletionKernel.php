@@ -116,7 +116,14 @@ final class CashierV3EntitlementCompletionKernel
             $snapshotByLine[$line['lineId']] = $line;
         }
 
-        self::assertLockedResourceCoverage($lockedPlan, $snapshot);
+        // A browser-owned checkout has exactly one business snapshot. It does
+        // not inherit the persisted-draft resource-version graph. The final
+        // writer locks the real entitlement rows and verifies remaining
+        // quantity in its transaction, so this legacy coverage check would
+        // only create a second, stale-version gate.
+        if ($snapshot['workspaceLockRequired']) {
+            self::assertLockedResourceCoverage($lockedPlan, $snapshot);
+        }
 
         $sourceGroups = self::sourceGroups($intent['lines'], $snapshotByLine);
         $lineAmounts = self::actualAmountsByLine($sourceGroups);
@@ -584,10 +591,17 @@ final class CashierV3EntitlementCompletionKernel
 
     private static function normalizeSnapshot(array $snapshot): array
     {
+        // Older internal callers represent the persisted-workspace flow and
+        // therefore retain its lock requirement by default. The direct browser
+        // snapshot adapter sets this explicitly from its trusted scope.
+        if (!array_key_exists('workspaceLockRequired', $snapshot)) {
+            $snapshot['workspaceLockRequired'] = true;
+        }
         self::assertExactKeys($snapshot, [
             'workspaceId',
             'stateContextId',
             'workspaceVersion',
+            'workspaceLockRequired',
             'tenantId',
             'organizationId',
             'organizationName',
@@ -620,6 +634,9 @@ final class CashierV3EntitlementCompletionKernel
         self::assertToken($snapshot['workspaceId'], 'snapshot.workspaceId', 128);
         self::assertToken($snapshot['stateContextId'], 'snapshot.stateContextId', 128);
         self::assertPositiveInt($snapshot['workspaceVersion'], 'snapshot.workspaceVersion');
+        if (!is_bool($snapshot['workspaceLockRequired'])) {
+            throw self::failure('workspace_lock_requirement_invalid');
+        }
         self::assertToken($snapshot['tenantId'], 'snapshot.tenantId', 64);
         self::assertNonnegativeInt($snapshot['organizationId'], 'snapshot.organizationId');
         self::assertNonemptyString($snapshot['organizationName'], 'snapshot.organizationName', 128);
@@ -1954,13 +1971,15 @@ final class CashierV3EntitlementCompletionKernel
             (string)$snapshot['memberId'],
             $snapshot['memberVersion']
         );
-        self::addRequiredLock(
-            $required,
-            'workspace',
-            'cashier_workspace',
-            $snapshot['workspaceId'],
-            $snapshot['workspaceVersion']
-        );
+        if ($snapshot['workspaceLockRequired']) {
+            self::addRequiredLock(
+                $required,
+                'workspace',
+                'cashier_workspace',
+                $snapshot['workspaceId'],
+                $snapshot['workspaceVersion']
+            );
+        }
         if ($snapshot['source']['serviceOrderId'] > 0) {
             self::addRequiredLock(
                 $required,

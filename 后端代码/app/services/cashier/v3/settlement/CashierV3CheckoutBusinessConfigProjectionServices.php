@@ -39,7 +39,9 @@ final class CashierV3CheckoutBusinessConfigProjectionServices
         $projection['sourceEnabled'] = true;
         $projection['sourceSelectable'] = (string)($projection['businessType'] ?? '') !== 'debt_repayment';
         $projection['sourceLabel'] = (string)($selection['displayNameSnapshot'] ?? '');
-        $projection['sourceSelectionVersion'] = (int)($selection['selectionVersion'] ?? 0);
+        if ($kind !== CashierV3CheckoutBusinessSourceSelectionServices::KIND_SALE) {
+            $projection['sourceSelectionVersion'] = (int)($selection['selectionVersion'] ?? 0);
+        }
         $projection['primarySourceId'] = (int)($selection['primarySourceId'] ?? 0);
         $projection['secondarySourceId'] = (int)($selection['secondarySourceId'] ?? 0);
         $projection['rewardAmountCents'] = (int)($selection['rewardAmountCents'] ?? 0);

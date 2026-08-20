@@ -171,7 +171,7 @@ final class CashierV3IssuedCardRuleStateServices
         array $components
     ): void {
         if (!in_array($ruleType, ['normal', 'choice_kind', 'choice_count', 'time'], true)
-            || $ruleVersion <= 0 || $definitionVersion <= 0 || $holderId <= 0 || !$components
+            || $holderId <= 0 || !$components
             || ($ruleType === 'choice_kind' ? ($choiceLimit <= 0 || $choiceLimit > count($components)) : $choiceLimit !== 0)
             || ($ruleType === 'choice_count' ? $sharedTimes <= 0 : $sharedTimes !== 0)) {
             throw self::failure('issued_card_rule_definition_invalid');

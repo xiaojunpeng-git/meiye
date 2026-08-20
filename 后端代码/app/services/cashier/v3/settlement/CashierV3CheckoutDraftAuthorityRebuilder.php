@@ -121,6 +121,10 @@ final class CashierV3CheckoutDraftAuthorityRebuilder
                     ),
                     'guideSelections' => self::attributionSnapshot($row['guide_selections_json'] ?? null),
                     'salesManagerSelections' => self::attributionSnapshot($row['sales_manager_selections_json'] ?? null),
+                    'cardPurchaseSnapshot' => self::cardPurchaseSnapshot(
+                        $row['card_purchase_snapshot_json'] ?? null,
+                        (string)($row['source_type'] ?? '')
+                    ),
                 ];
                 if (self::nonNegativeInt($row['is_presale'] ?? 0, 'sale.is_presale') !== 0) {
                     $saleLine['isPresale'] = 1;
@@ -437,6 +441,16 @@ final class CashierV3CheckoutDraftAuthorityRebuilder
         } catch (\Throwable $exception) {
             throw self::failure('checkout_draft_craftsmen_snapshot_invalid');
         }
+    }
+
+    private static function cardPurchaseSnapshot($json, string $sourceType): array
+    {
+        if ($sourceType !== 'card') return [];
+        $decoded = is_array($json) ? $json : json_decode((string)$json, true);
+        if (!is_array($decoded) || self::isList($decoded)) {
+            throw self::failure('checkout_draft_card_purchase_snapshot_invalid');
+        }
+        return $decoded;
     }
 
     /**

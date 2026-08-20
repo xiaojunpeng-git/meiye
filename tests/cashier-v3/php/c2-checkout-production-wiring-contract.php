@@ -154,7 +154,7 @@ $discoveryVariable = cpwConstructedVariable(
     $module,
     'CashierV3CheckoutSubmissionResourceDiscoveryComposite'
 );
-cpwCheck('C2-PW-06', 'prepare-checkout-submission uses the dedicated discovery composite',
+cpwCheck('C2-PW-06', 'final snapshot submit keeps discovery without legacy preparation policy',
     cpwHasAll($composite, [
         'final class CashierV3CheckoutSubmissionResourceDiscoveryComposite',
         'public function discover(array $scope): array',
@@ -164,17 +164,8 @@ cpwCheck('C2-PW-06', 'prepare-checkout-submission uses the dedicated discovery c
         'new CashierV3CheckoutSubmissionResourceDiscoveryComposite(',
     ])
     && $discoveryVariable !== ''
-    && preg_match(
-        '/registerSubmissionPreparationPolicy\s*\(\s*\$dispatcher\s*,\s*\$'
-            . preg_quote($discoveryVariable, '/') . '\s*\)/s',
-        $module
-    ) === 1
-    && preg_match(
-        '/registerSubmissionPreparationPolicy\s*\(\s*CashierV3ActionDispatcher\s+\$dispatcher\s*,'
-            . '\s*CashierV3CheckoutSubmissionResourceDiscoveryComposite\s+\$discovery\s*\)'
-            . '.*?\[\s*\$discovery\s*,\s*[\'\"]discover[\'\"]\s*\]/s',
-        $module
-    ) === 1);
+    && strpos($module, "'direct_snapshot_submission'") !== false
+    && strpos($module, 'registerSubmissionPreparationPolicy') === false);
 
 $singleKindProviders = [
     'CashierV3StaffProfileProvider' => 'staff_profile',
@@ -251,7 +242,8 @@ $prepareSubmissionBlock = cpwBlock(
 cpwCheck('C2-PW-10', 'submit handler delegates only through the final orchestrator',
     $submitBlock !== ''
     && $submissionVariable !== ''
-    && strpos($submitBlock, '$' . $submissionVariable . '->submitInTx($scope)') !== false
+    && (strpos($submitBlock, '$' . $submissionVariable . '->submitInTx($scope)') !== false
+        || strpos($submitBlock, '$' . $submissionVariable . '->submitInTx($submitScope)') !== false)
     && strpos($submitBlock, 'CashierV3SaleOnlyCheckoutSubmissionServices') === false);
 cpwCheck('C2-PW-11', 'business number branches by composition to order number or receipt id',
     cpwHasAll($submitBlock, [
@@ -289,9 +281,8 @@ if ($touchedOffset === false) {
 }
 cpwCheck('C2-PW-14', 'domain resources are mutated by their owners and never Gateway-bumped',
     $touchedOnlyTechnical);
-cpwCheck('C2-PW-16', 'submission preparation verifies balance without advancing its version',
-    strpos($prepareSubmissionBlock, $touchedBalanceBranch) === false
-    && strpos($prepareSubmissionBlock, "'touched' => ['cashier_workspace', 'checkout_request']") !== false);
+cpwCheck('C2-PW-16', 'legacy submission preparation policy is removed',
+    strpos($module, "'prepare-checkout-submission'") === false);
 
 echo "C2_CHECKOUT_PRODUCTION_WIRING_CONTRACT passed={$passed} failed={$failed}\n";
 exit($failed === 0 ? 0 : 1);

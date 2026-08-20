@@ -77,14 +77,16 @@ $replacement = CashierV3CardOperationKernel::plan([
     'operationType' => 'project_replacement', 'sourceCardHolderId' => 10, 'sourceCardHolderVersion' => 7,
     'idempotencyKey' => 'PROJECT-REPLACEMENT-0001', 'reason' => '项目调整',
     'projectLines' => [['sourceDetailId' => 301, 'quantity' => 2]],
+    'targetQuantity' => 3,
 ], $source, ['catalogId' => 501, 'catalogName' => '目标项目'], $context);
 check_card_operation($replacement['operationStatus'] === 'succeeded', 'replacement is direct');
 check_card_operation($replacement['lines'][0]['quantityAfter'] === 2, 'replacement quantity is frozen');
 check_card_operation(
     count($replacement['lines']) === 2
     && ($replacement['lines'][1]['lineRole'] ?? '') === 'target_project'
-    && (int)($replacement['lines'][1]['quantityAfter'] ?? 0) === 2,
-    'replacement freezes target-right count from selected source quantity'
+    && (int)($replacement['lines'][1]['quantityAfter'] ?? 0) === 3
+    && (int)($replacement['lines'][1]['quantityDelta'] ?? 0) === 3,
+    'replacement freezes independently selected target-right count'
 );
 $replacementRepeated = CashierV3CardOperationKernel::plan([
     'operationType' => 'project_replacement', 'sourceCardHolderId' => 10, 'sourceCardHolderVersion' => 7,
@@ -119,13 +121,40 @@ $projectUpgrade = CashierV3CardOperationKernel::plan([
     'operationType' => 'project_upgrade', 'sourceCardHolderId' => 10, 'sourceCardHolderVersion' => 7,
     'idempotencyKey' => 'PROJECT-UPGRADE-0001', 'reason' => '项目升级',
     'projectLines' => [['sourceDetailId' => 301, 'quantity' => 2]],
+    'targetEntitlementQuantity' => 3,
 ], $source, ['catalogId' => 601, 'catalogName' => '升级目标项目', 'priceCents' => 20000], $context);
 check_card_operation(
     $projectUpgrade['operationStatus'] === 'awaiting_checkout'
     && (int)($projectUpgrade['stateMutation']['projectMutations'][0]['quantityAfter'] ?? -1) === 2
     && (int)($projectUpgrade['stateMutation']['projectMutations'][0]['quantityDelta'] ?? 0) === -2
+    && (int)($projectUpgrade['stateMutation']['targetEntitlementQuantity'] ?? 0) === 3
     && (int)($projectUpgrade['checkoutSettlement']['sourceRemainingValueCents'] ?? -1) === 4000,
-    'project upgrade freezes the edited source quantity until checkout settlement'
+    'project upgrade freezes source quantity and independent target-right count until checkout settlement'
+);
+$projectUpgradeSourceExceedsTarget = CashierV3CardOperationKernel::plan([
+    'operationType' => 'project_upgrade', 'sourceCardHolderId' => 10, 'sourceCardHolderVersion' => 7,
+    'idempotencyKey' => 'PROJECT-UPGRADE-0002', 'reason' => '原权益高于目标仍升级',
+    'projectLines' => [['sourceDetailId' => 301, 'quantity' => 2]],
+], $source, ['catalogId' => 601, 'catalogName' => '低价升级目标', 'priceCents' => 3000], $context);
+check_card_operation(
+    $projectUpgradeSourceExceedsTarget['operationStatus'] === 'awaiting_checkout'
+    && (int)($projectUpgradeSourceExceedsTarget['checkoutSettlement']['sourceRemainingValueCents'] ?? -1) === 4000
+    && (int)($projectUpgradeSourceExceedsTarget['checkoutSettlement']['settlementDeltaCents'] ?? -1) === 0,
+    'project upgrade floors a negative source-to-target delta at zero'
+);
+$projectUpgradeSourceExceedsTargetSnapshot = CashierV3CardOperationKernel::plan([
+    'operationType' => 'project_upgrade', 'sourceCardHolderId' => 10, 'sourceCardHolderVersion' => 7,
+    'idempotencyKey' => 'PROJECT-UPGRADE-SNAPSHOT-02', 'reason' => '原权益高于目标快照升级',
+    'projectLines' => [['sourceDetailId' => 301, 'quantity' => 2]],
+    'snapshotSettlement' => [
+        'targetPriceCents' => 3000,
+        'sourceRemainingValueCents' => 4000,
+        'settlementDeltaCents' => 0,
+    ],
+], $source, ['catalogId' => 601, 'catalogName' => '低价升级目标', 'priceCents' => 3000], $context);
+check_card_operation(
+    (int)($projectUpgradeSourceExceedsTargetSnapshot['checkoutSettlement']['settlementDeltaCents'] ?? -1) === 0,
+    'checkout snapshot accepts a zero delta when source value exceeds target price'
 );
 $roundingSource = $source;
 $roundingSource['projects'] = [[
@@ -153,6 +182,21 @@ $upgrade = CashierV3CardOperationKernel::plan([
 ], $source, ['catalogId' => 601, 'catalogName' => '高级卡', 'priceCents' => 20000], $context);
 check_card_operation($upgrade['operationStatus'] === 'awaiting_checkout', 'positive upgrade waits for checkout');
 check_card_operation($upgrade['checkoutSettlement']['settlementDeltaCents'] === 8000, 'upgrade delta uses remaining value');
+$snapshotUpgrade = CashierV3CardOperationKernel::plan([
+    'operationType' => 'card_upgrade', 'sourceCardHolderId' => 10, 'sourceCardHolderVersion' => 7,
+    'idempotencyKey' => 'CARD-UPGRADE-SNAPSHOT-01', 'reason' => '按结账快照升级',
+    'snapshotSettlement' => [
+        'targetPriceCents' => 168000,
+        'sourceRemainingValueCents' => 29800,
+        'settlementDeltaCents' => 138200,
+    ],
+], $source, ['catalogId' => 601, 'catalogName' => '高级卡', 'priceCents' => 20000], $context);
+check_card_operation(
+    $snapshotUpgrade['checkoutSettlement']['targetPriceCents'] === 168000
+        && $snapshotUpgrade['checkoutSettlement']['sourceRemainingValueCents'] === 29800
+        && $snapshotUpgrade['checkoutSettlement']['settlementDeltaCents'] === 138200,
+    'upgrade settlement uses checkout snapshot monetary values'
+);
 check_card_operation(
     $upgrade['stateMutation']['cardStatus'] === 'enabled'
     && $upgrade['stateMutation']['projectMutations'] === []

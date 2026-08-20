@@ -7,6 +7,8 @@ $files = [
     'preparation' => $root . '/后端代码/app/services/cashier/v3/settlement/CashierV3CheckoutPreparationServices.php',
     'settlement' => $root . '/后端代码/app/services/cashier/v3/card/CashierV3CardOperationCheckoutSettlementServices.php',
     'frontend' => $root . '/前端代码/cashier-v3/src/views/CashierWorkbenchView.vue',
+    'cashier' => $root . '/后端代码/app/services/cashier/v3/cashier/CashierV3CashierModule.php',
+    'authority' => $root . '/后端代码/app/services/cashier/v3/card/CashierV3CardOperationAuthorityServices.php',
 ];
 
 $failed = 0;
@@ -80,8 +82,43 @@ upgradeResourceContextContract(
 );
 upgradeResourceContextContract(
     strpos($source['frontend'], "new Set(['cashier_workspace', 'checkout_request'])") !== false
-    && strpos($source['frontend'], 'checkoutSubmissionCommandContexts(current.commandContexts)') !== false,
+    && strpos($source['frontend'], 'checkoutSubmissionCommandContexts(actionCurrent.commandContexts)') !== false,
     'final checkout preparation does not forward selector entitlement contexts'
+);
+upgradeResourceContextContract(
+    strpos($source['frontend'], 'localCardOperation: clonePlain(line.localCardOperation)') !== false
+    && strpos($source['frontend'], 'action: \'submit-card-operation\'') !== false,
+    'browser snapshot preserves the local card-operation intent until final confirmation'
+);
+upgradeResourceContextContract(
+    strpos($source['cashier'], "\$line['localCardOperation']") !== false
+    && strpos($source['cashier'], "\$operationScope['direct_snapshot_operation'] = true") !== false
+    && strpos($source['cashier'], 'submitInTx($operationScope)') !== false
+    && strpos($source['cashier'], "\$snapshot['lines'][\$lineIndex]['cardOperationUpgrade'] = \$upgradeBinding") !== false,
+    'final submit materializes local card operation and injects its immutable upgrade binding in-transaction'
+);
+upgradeResourceContextContract(
+    strpos($source['catalog'], 'bool $directSnapshot = false') !== false
+    && strpos($source['catalog'], 'if (!$directSnapshot)') !== false
+    && strpos($source['authority'], "\$dataScope,\n                true") !== false,
+    'snapshot upgrade settlement re-reads current target without legacy catalog-version rejection'
+);
+upgradeResourceContextContract(
+    strpos($source['cashier'], "\$operationScope['contexts'] = (array)(\$scope['contexts'] ?? []);") !== false
+    && strpos($source['cashier'], "\$operationPayload['commandContexts']") === false
+    && strpos($source['cashier'], "\$operationScope['direct_snapshot_operation'] = true") !== false,
+    'snapshot upgrade never replays selector command-version contexts'
+);
+upgradeResourceContextContract(
+    strpos($source['authority'], 'lockedCardHolderVersion(') !== false
+    && strpos($source['authority'], "!empty(\$scope['direct_snapshot_operation'])") !== false
+    && strpos($source['authority'], "->where('resource_kind', 'card_holder')") !== false,
+    'snapshot upgrade reads the current card-holder resource at final confirmation'
+);
+upgradeResourceContextContract(
+    strpos($source['preparation'], 'bindSnapshotOperationInTx(') !== false
+    && strpos($source['preparation'], "\$line['cardOperationUpgrade']") !== false,
+    'the prepared checkout binds the materialized upgrade operation to the same checkout request'
 );
 upgradeResourceContextContract(
     strpos($source['preparation'], 'discoverStoredLineResources') !== false,

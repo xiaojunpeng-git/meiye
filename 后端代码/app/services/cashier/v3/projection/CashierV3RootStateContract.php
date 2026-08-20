@@ -12,9 +12,12 @@ class CashierV3RootStateContract
     public const REQUIRED_KEYS = [
         'stateContextId',
         'stateRevision',
+        'readOnly',
+        'sessionMode',
         'storeName',
         'currentStore',
         'featurePermissions',
+        'operationPermissions',
         'workspace',
         'operator',
         'pendingHangCount',
@@ -36,6 +39,7 @@ class CashierV3RootStateContract
     public const OBJECT_KEYS = [
         'currentStore',
         'featurePermissions',
+        'operationPermissions',
         'workspace',
         'operator',
         'cashier',
@@ -137,9 +141,12 @@ class CashierV3RootStateContract
         return [
             'stateContextId' => $stateContextId,
             'stateRevision' => $stateRevision,
+            'readOnly' => (bool)($extras['readOnly'] ?? false),
+            'sessionMode' => (string)($extras['sessionMode'] ?? 'store_staff'),
             'storeName' => (string)($extras['storeName'] ?? ''),
             'currentStore' => $extras['currentStore'] ?? ['id' => null, 'name' => ''],
             'featurePermissions' => $extras['featurePermissions'] ?? new \stdClass(),
+            'operationPermissions' => $extras['operationPermissions'] ?? new \stdClass(),
             'workspace' => $extras['workspace'] ?? [
                 'id' => null,
                 'revision' => 0,

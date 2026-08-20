@@ -38,27 +38,14 @@ final class CashierV3CheckoutBusinessSourceSelectionServices
             throw self::invalid('business_source_scope_missing', '当前收银账号或门店权限已失效，请重新登录后重试。');
         }
         $requestId = trim((string)($payload['checkoutRequestId'] ?? ''));
-        $requestVersion = (int)($payload['checkoutRequestVersion'] ?? 0);
-        if (preg_match('/^CKR-[0-9a-f]{40}$/D', $requestId) !== 1 || $requestVersion <= 0) {
-            throw self::invalid('business_source_sale_request_invalid', '结账来源选择已失效，请重新进入结账。');
-        }
-        $request = (array)Db::name('cashier_v3_checkout_request')
-            ->where('request_id', $requestId)
-            ->where('tenant_id', $dataScope->tenantId())
-            ->where('store_id', $operator->storeId())
-            ->where('request_version', $requestVersion)
-            ->where('request_status', 'editing')
-            ->lock(true)->find();
-        if (!$request) {
-            throw CashierV3CommandException::versionConflict('结账资料已变化，请刷新后重新选择来源。');
-        }
         return $this->saveSelectionInTx(
             self::KIND_SALE,
             $requestId,
             $dataScope->tenantId(),
             $operator->storeId(),
             $operator->operatorId(),
-            $payload
+            $payload,
+            false
         );
     }
 
@@ -87,7 +74,8 @@ final class CashierV3CheckoutBusinessSourceSelectionServices
             $dataScope->tenantId(),
             $operator->storeId(),
             $operator->operatorId(),
-            $payload
+            $payload,
+            true
         );
     }
 
@@ -198,19 +186,16 @@ final class CashierV3CheckoutBusinessSourceSelectionServices
             'updated_at' => $now,
         ];
         if ($existing) {
-            Db::name(self::TABLE)->where('id', (int)$existing['id'])->update($row + [
-                'selection_version' => (int)($existing['selection_version'] ?? 0) + 1,
-            ]);
-            $version = (int)($existing['selection_version'] ?? 0) + 1;
+            // Snapshot settlement is the sole write boundary. Source choice is
+            // attribution data, never an optimistic-versioned draft.
+            Db::name(self::TABLE)->where('id', (int)$existing['id'])->update($row);
         } else {
             Db::name(self::TABLE)->insert($row + [
                 'checkout_kind' => self::KIND_SALE,
                 'checkout_request_id' => $requestId,
                 'tenant_id' => $tenantId,
                 'store_id' => $storeId,
-                'selection_version' => 1,
             ]);
-            $version = 1;
         }
         return [
             'primarySourceId' => $primaryId,
@@ -218,7 +203,6 @@ final class CashierV3CheckoutBusinessSourceSelectionServices
             'secondarySourceId' => $secondaryId,
             'secondarySourceNameSnapshot' => $secondaryName,
             'displayNameSnapshot' => $label,
-            'selectionVersion' => $version,
             'rewardAmountCents' => $rewardAmountCents,
         ];
     }
@@ -267,9 +251,9 @@ final class CashierV3CheckoutBusinessSourceSelectionServices
         return array_merge($source, ['selectionVersion' => 0, 'rewardAmountCents' => 0]);
     }
 
-    private function saveSelectionInTx(string $kind, string $requestId, string $tenantId, int $storeId, int $operatorId, array $payload): array
+    private function saveSelectionInTx(string $kind, string $requestId, string $tenantId, int $storeId, int $operatorId, array $payload, bool $versioned = true): array
     {
-        $expected = (int)($payload['sourceSelectionVersion'] ?? 0);
+        $expected = $versioned ? (int)($payload['sourceSelectionVersion'] ?? 0) : 0;
         $primaryId = (int)($payload['primarySourceId'] ?? 0);
         $secondaryId = (int)($payload['secondarySourceId'] ?? 0);
         if ($expected < 0 || $primaryId <= 0 || $secondaryId < 0) {
@@ -289,10 +273,10 @@ final class CashierV3CheckoutBusinessSourceSelectionServices
             ->lock(true)->find();
         $now = time();
         if (!$existing) {
-            if ($expected !== 0) {
+            if ($versioned && $expected !== 0) {
                 throw CashierV3CommandException::versionConflict('业务来源已变化，请刷新后重新选择。');
             }
-            Db::name(self::TABLE)->insert([
+            $insert = [
                 'checkout_kind' => $kind,
                 'checkout_request_id' => $requestId,
                 'tenant_id' => $tenantId,
@@ -303,32 +287,35 @@ final class CashierV3CheckoutBusinessSourceSelectionServices
                 'secondary_source_name_snapshot' => $snapshot['secondarySourceNameSnapshot'],
                 'source_label_snapshot' => $snapshot['displayNameSnapshot'],
                 'reward_amount_cents' => $rewardAmountCents,
-                'selection_version' => 1,
                 'updated_by_operator_id' => $operatorId,
                 'updated_at' => $now,
-            ]);
-            return array_merge($snapshot, ['selectionVersion' => 1, 'rewardAmountCents' => $rewardAmountCents]);
+            ];
+            if ($versioned) $insert['selection_version'] = 1;
+            Db::name(self::TABLE)->insert($insert);
+            return array_merge($snapshot, $versioned ? ['selectionVersion' => 1] : [], ['rewardAmountCents' => $rewardAmountCents]);
         }
-        if ((int)$existing['selection_version'] !== $expected) {
+        if ($versioned && (int)$existing['selection_version'] !== $expected) {
             throw CashierV3CommandException::versionConflict('业务来源已变化，请刷新后重新选择。');
         }
-        $next = $expected + 1;
-        $affected = (int)Db::name(self::TABLE)->where('id', (int)$existing['id'])
-            ->where('selection_version', $expected)->update([
+        $next = $versioned ? $expected + 1 : 0;
+        $updateQuery = Db::name(self::TABLE)->where('id', (int)$existing['id']);
+        if ($versioned) $updateQuery->where('selection_version', $expected);
+        $update = [
                 'primary_source_id' => $snapshot['primarySourceId'],
                 'primary_source_name_snapshot' => $snapshot['primarySourceNameSnapshot'],
                 'secondary_source_id' => $snapshot['secondarySourceId'],
                 'secondary_source_name_snapshot' => $snapshot['secondarySourceNameSnapshot'],
                 'source_label_snapshot' => $snapshot['displayNameSnapshot'],
                 'reward_amount_cents' => $rewardAmountCents,
-                'selection_version' => $next,
                 'updated_by_operator_id' => $operatorId,
                 'updated_at' => $now,
-            ]);
+            ];
+        if ($versioned) $update['selection_version'] = $next;
+        $affected = (int)$updateQuery->update($update);
         if ($affected !== 1) {
             throw CashierV3CommandException::versionConflict('业务来源已变化，请刷新后重新选择。');
         }
-        return array_merge($snapshot, ['selectionVersion' => $next, 'rewardAmountCents' => $rewardAmountCents]);
+        return array_merge($snapshot, $versioned ? ['selectionVersion' => $next] : [], ['rewardAmountCents' => $rewardAmountCents]);
     }
 
     private static function rowProjection(array $row): array

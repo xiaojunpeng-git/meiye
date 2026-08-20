@@ -6,7 +6,8 @@ use app\services\cashier\v3\CashierV3ActionDispatcher;
 use app\services\cashier\v3\CashierV3CommandException;
 use app\services\cashier\v3\CashierV3OperatorScope;
 use app\services\cashier\v3\CashierV3ResultCode;
-use app\services\cashier\v3\checkout\CashierV3EntitlementCompletionAuthorityAdapter;
+use app\services\cashier\v3\card\CashierV3CardOperationAuthorityServices;
+use app\services\cashier\v3\checkout\CashierV3DirectSnapshotEntitlementSettlementServices;
 use app\services\cashier\v3\checkout\persistence\ThinkPhpCashierV3EntitlementCompletionWriter;
 use app\services\cashier\v3\checkout\provider\CashierV3EmployeeTypeAuthority;
 use app\services\cashier\v3\checkout\provider\CashierV3EntitlementDebtGuardProvider;
@@ -27,11 +28,8 @@ use app\services\cashier\v3\service\CashierV3ServiceOrderOccupationAuthorityProv
 use app\services\cashier\v3\service\ThinkPhpCashierV3EntitlementCompletionOccupationWriter;
 use app\services\cashier\v3\service\ThinkPhpCashierV3ServiceOrderRepository;
 use app\services\cashier\v3\settlement\CashierV3CheckoutPreparationServices;
-use app\services\cashier\v3\settlement\CashierV3CheckoutPaymentDraftServices;
 use app\services\cashier\v3\settlement\CashierV3CheckoutBalanceAuthorityDiscovery;
-use app\services\cashier\v3\settlement\CashierV3CheckoutBalanceDraftServices;
 use app\services\cashier\v3\settlement\CashierV3CheckoutProjectionServices;
-use app\services\cashier\v3\settlement\CashierV3CheckoutBusinessSourceSelectionServices;
 use app\services\cashier\v3\settlement\CashierV3CheckoutResultQueryServices;
 use app\services\cashier\v3\settlement\CashierV3DebtRepaymentServices;
 use app\services\cashier\v3\settlement\CashierV3DebtRepaymentResourceDiscovery;
@@ -111,7 +109,7 @@ final class CashierV3CashierModule
             null,
             $inventoryVersions
         );
-        $entitlementAuthority = new CashierV3EntitlementCompletionAuthorityAdapter(
+        $directSnapshotEntitlements = new CashierV3DirectSnapshotEntitlementSettlementServices(
             $workspace,
             $staffProfiles,
             $performanceRules,
@@ -148,14 +146,8 @@ final class CashierV3CashierModule
         );
         $submissionDiscovery = new CashierV3CheckoutSubmissionResourceDiscoveryComposite(
             [$checkoutPreparation, 'discover'],
-            [$entitlementAuthority, 'discover'],
+            [$directSnapshotEntitlements, 'discover'],
             [new CashierV3CheckoutBalanceAuthorityDiscovery($memberBalances), 'discover']
-        );
-        $paymentDrafts = new CashierV3CheckoutPaymentDraftServices($checkoutRequests);
-        $balanceDrafts = new CashierV3CheckoutBalanceDraftServices(
-            $checkoutRequests,
-            null,
-            $memberBalances
         );
         $submissionPreparation = new CashierV3CheckoutSubmissionPreparationServices(
             $checkoutRequests,
@@ -164,7 +156,7 @@ final class CashierV3CashierModule
         );
         $checkoutExecutionPort = new ThinkPhpCashierV3CheckoutSubmissionExecutionPort(
             $workspace,
-            $entitlementAuthority,
+            $directSnapshotEntitlements,
             null,
             $checkoutRequests,
             null,
@@ -187,7 +179,6 @@ final class CashierV3CashierModule
             $checkoutRequests,
             $checkoutResultReads
         );
-        $checkoutBusinessSources = new CashierV3CheckoutBusinessSourceSelectionServices();
         $debtRepayments = new CashierV3DebtRepaymentServices($checkoutRequests);
         $memberDebtProjection = new CashierV3MemberDebtProjectionServices();
 
@@ -740,142 +731,283 @@ final class CashierV3CashierModule
             });
         }
 
-        if ($handlers->hasCommand('prepare-checkout')) {
-            throw new \LogicException('C2 cashier module: prepare-checkout duplicate handler');
-        }
-        $handlers->registerCommand('prepare-checkout', function (array $scope) use ($checkoutPreparation): array {
-            $prepared = $checkoutPreparation->prepareInTx($scope);
-                return [
-                    'data' => ['checkoutPreparation' => $prepared],
-                    'business_no' => (string)$prepared['checkoutRequestId'],
-                    'touched' => ['cashier_workspace'],
-                    // 结账请求创建后必须以同一工作台的完整权威投影接续。
-                    // 不能让页面拿着创建前的 checkout_request 版本继续编辑收款。
-                    'return_root_state' => true,
-                    'message' => '结账信息已准备完成。',
-                ];
-            });
-
-        foreach (['add-payment-method', 'update-payment-line', 'remove-payment-line'] as $action) {
-            if ($handlers->hasCommand($action)) {
-                throw new \LogicException('C2 cashier module: checkout payment draft handler duplicate');
-            }
-            $handlers->registerCommand($action, function (array $scope) use ($paymentDrafts, $action): array {
-                $edited = $paymentDrafts->mutateInTx($action, $scope);
-                return [
-                    'data' => ['checkoutDraftEdit' => array_merge($edited, [
-                        '_checkoutProjectionRequestId' => (string)$edited['checkoutRequestId'],
-                    ])],
-                    'business_no' => (string)$edited['checkoutRequestId'],
-                    'touched' => ['cashier_workspace', 'checkout_request'],
-                    // 只回读当前结账草稿投影；Dispatcher 在事务提交后补齐
-                    // 新版本。不重建全量商品目录或其他工作台分区。
-                    'message' => (string)($edited['message'] ?? '收款明细已更新。'),
-                ];
-            });
-        }
-
-        if ($handlers->hasCommand('update-checkout-business-source')) {
-            throw new \LogicException('C2 cashier module: checkout business source handler duplicate');
-        }
-        $handlers->registerCommand('update-checkout-business-source', function (array $scope) use ($checkoutBusinessSources): array {
-            $edited = $checkoutBusinessSources->mutateSaleInTx($scope);
-            $payload = (array)($scope['payload'] ?? []);
-            $requestId = (string)($payload['checkoutRequestId'] ?? '');
-            $requestVersion = (int)($payload['checkoutRequestVersion'] ?? 0);
-            return [
-                'data' => ['checkoutDraftEdit' => [
-                    'businessSource' => $edited,
-                    'checkoutRequestId' => $requestId,
-                    'checkoutRequestVersion' => $requestVersion,
-                    // The dispatcher reads this projection only after the command
-                    // transaction has committed, so it contains the new workspace
-                    // context needed by the following payment-draft command.
-                    '_checkoutProjectionRequestId' => $requestId,
-                ]],
-                // The selection write advances the workspace only. The projection
-                // itself is intentionally deferred to ActionDispatcher post-commit.
-                'business_no' => $requestId,
-                'touched' => ['cashier_workspace'],
-                'message' => '业务来源已更新。',
-            ];
-        });
-
-        foreach (['apply-balance-payment', 'remove-balance-payment', 'update-balance-payment'] as $action) {
-            if ($handlers->hasCommand($action)) {
-                throw new \LogicException('C2 cashier module: checkout balance draft handler duplicate');
-            }
-            $handlers->registerCommand($action, function (array $scope) use ($balanceDrafts, $action): array {
-                $edited = $balanceDrafts->mutateInTx($action, $scope);
-                return [
-                    'data' => ['checkoutDraftEdit' => array_merge($edited, [
-                        '_checkoutProjectionRequestId' => (string)$edited['checkoutRequestId'],
-                    ])],
-                    'business_no' => (string)$edited['checkoutRequestId'],
-                    // 草稿只保存“本单计划使用余额”，实际余额账务变更由
-                    // submit-checkout 在最终资源锁与成功终态事务中完成。
-                    'touched' => ['cashier_workspace', 'checkout_request'],
-                    // 同外部收款草稿，事务提交后仅回读同一结账单的权威版本。
-                    'message' => (string)$edited['message'],
-                ];
-            });
-        }
-
-        if ($handlers->hasCommand('update-checkout-sales-date')) {
-            throw new \LogicException('C2 cashier module: checkout sales date handler duplicate');
-        }
-        $handlers->registerCommand('update-checkout-sales-date', function (array $scope) use ($balanceDrafts): array {
-            $edited = $balanceDrafts->mutateInTx('update-checkout-sales-date', $scope);
-            return [
-                'data' => ['checkoutDraftEdit' => array_merge($edited, [
-                    '_checkoutProjectionRequestId' => (string)$edited['checkoutRequestId'],
-                ])],
-                'business_no' => (string)$edited['checkoutRequestId'],
-                'touched' => ['cashier_workspace', 'checkout_request'],
-                'message' => (string)$edited['message'],
-            ];
-        });
-
-        if ($handlers->hasCommand('return-to-payment-edit')) {
-            throw new \LogicException('C2 cashier module: checkout payment-edit recovery handler duplicate');
-        }
-        $handlers->registerCommand('return-to-payment-edit', function (array $scope) use ($balanceDrafts): array {
-            $recovered = $balanceDrafts->returnToPaymentEditInTx($scope);
-            return [
-                'data' => ['checkoutBalanceRecovery' => $recovered],
-                'business_no' => (string)$recovered['checkoutRequestId'],
-                // The command only rewrites an editable draft after the final
-                // balance lock rejected submission. No settlement facts exist.
-                'touched' => ['cashier_workspace', 'checkout_request'],
-                'return_root_state' => true,
-                'message' => (string)$recovered['message'],
-            ];
-        });
-
-        if ($handlers->hasCommand('prepare-checkout-submission')) {
-            throw new \LogicException('C2 cashier module: submission preparation handler duplicate');
-        }
-        $handlers->registerCommand('prepare-checkout-submission', function (array $scope) use ($submissionPreparation): array {
-            $prepared = $submissionPreparation->prepareInTx($scope);
-            return [
-                'data' => ['checkoutSubmissionPreparation' => $prepared],
-                'business_no' => (string)$prepared['checkoutRequestId'],
-                // Preparation only advances the editable checkout aggregate.
-                // Balance is verified/read here and is mutated only by the
-                // final submit-checkout transaction.
-                'touched' => ['cashier_workspace', 'checkout_request'],
-                // 最终提交前的校验同样会推进结账请求版本；返回完整状态保证
-                // submit-checkout 只使用本次校验后的资源版本和令牌。
-                'return_root_state' => true,
-                'message' => (string)$prepared['message'],
-            ];
-        });
-
         if ($handlers->hasCommand('submit-checkout')) {
             throw new \LogicException('C2 cashier module: submit checkout handler duplicate');
         }
-        $handlers->registerCommand('submit-checkout', function (array $scope) use ($checkoutSubmission): array {
-            $submitted = $checkoutSubmission->submitInTx($scope);
+        $handlers->registerCommand('submit-checkout', function (array $scope) use ($checkoutSubmission, $checkoutPreparation, $submissionPreparation): array {
+            $payload = is_array($scope['payload'] ?? null) ? $scope['payload'] : [];
+            if (is_array($payload['checkoutSnapshot'] ?? null)) {
+                // Card upgrades are browser-owned until this final command.
+                // Materialize their pending operation inside the same
+                // transaction so the checkout snapshot remains the only
+                // client-to-server write before settlement.
+                $snapshot = $payload['checkoutSnapshot'];
+                $directOperationAuthority = new CashierV3CardOperationAuthorityServices();
+                $operationResults = [];
+                foreach (array_keys((array)($snapshot['lines'] ?? [])) as $lineIndex) {
+                    $line = is_array($snapshot['lines'][$lineIndex] ?? null)
+                        ? $snapshot['lines'][$lineIndex]
+                        : [];
+                    $operationPayload = is_array($line['localCardOperation'] ?? null)
+                        ? $line['localCardOperation']
+                        : [];
+                    $operationType = trim((string)($operationPayload['operationType'] ?? ''));
+                    if ($operationType === '') {
+                        continue;
+                    }
+                    $lineRole = trim((string)($line['lineRole'] ?? ''));
+                    $upgradeBinding = is_array($line['cardOperationUpgrade'] ?? null)
+                        ? $line['cardOperationUpgrade']
+                        : [];
+                    $isUpgradeOperation = in_array($operationType, ['card_upgrade', 'project_upgrade'], true);
+                    // Browser snapshots can survive a hot reload. A stale local
+                    // operation marker on a normal sale line is not business
+                    // intent and must never turn an ordinary card purchase into
+                    // an upgrade credit. Only the explicitly paired upgrade row
+                    // may materialize an upgrade operation here.
+                    if ($lineRole === 'sale' && (!$isUpgradeOperation
+                        || (string)($upgradeBinding['operationType'] ?? '') !== $operationType)) {
+                        unset($snapshot['lines'][$lineIndex]['localCardOperation']);
+                        unset($snapshot['lines'][$lineIndex]['cardOperationUpgrade']);
+                        continue;
+                    }
+                    if ($lineRole !== 'sale' && $lineRole !== 'card_operation') {
+                        unset($snapshot['lines'][$lineIndex]['localCardOperation']);
+                        continue;
+                    }
+                    if ($operationType === 'project_replacement') {
+                        $targetProjectSnapshot = is_array($line['targetProjectSnapshot'] ?? null)
+                            ? $line['targetProjectSnapshot']
+                            : [];
+                        $targetName = trim((string)($targetProjectSnapshot['name'] ?? ''));
+                        $targetQuantity = (int)($targetProjectSnapshot['targetQuantity'] ?? 0);
+                        if ($targetName === '' || $targetQuantity <= 0
+                            || $targetQuantity !== (int)($operationPayload['targetQuantity'] ?? 0)) {
+                            throw new CashierV3CommandException(
+                                CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
+                                '项目替换目标快照不完整，本次结账已回滚，请重试。',
+                                CashierV3ResultCode::STATUS_FAILED
+                            );
+                        }
+                        // The line-level target snapshot is the sole business
+                        // input for the new right. Do not re-read a projected
+                        // target name or count from the selector/catalogue.
+                        $operationPayload['targetSnapshot'] = [
+                            'catalogId' => (int)($targetProjectSnapshot['catalogId'] ?? 0),
+                            'name' => $targetName,
+                            'targetQuantity' => $targetQuantity,
+                        ];
+                        $operationPayload['targetQuantity'] = $targetQuantity;
+                    }
+                    $operationScope = $scope;
+                    $operationScope['action'] = 'submit-card-operation';
+                    if ($isUpgradeOperation && $upgradeBinding !== []) {
+                        // The checkout line is the frozen monetary snapshot.
+                        // Lock live identities, but do not re-price this checkout.
+                        $operationPayload['snapshotSettlement'] = [
+                            'targetPriceCents' => (int)($upgradeBinding['targetPriceCents'] ?? -1),
+                            'sourceRemainingValueCents' => (int)($upgradeBinding['sourceRemainingValueCents'] ?? -1),
+                            'settlementDeltaCents' => (int)($upgradeBinding['settlementDeltaCents'] ?? -1),
+                        ];
+                    }
+                    $operationScope['payload'] = $operationPayload;
+                    // A local operation selection can retain catalog/card
+                    // versions from the moment its dialog was opened. They
+                    // are not checkout authority. Keep only the current
+                    // final-command contexts; the card operation locks and
+                    // reads its current source rights inside this transaction.
+                    $operationScope['contexts'] = (array)($scope['contexts'] ?? []);
+                    $operationScope['idempotency_key'] = (string)($operationPayload['idempotencyKey'] ?? '');
+                    $operationScope['direct_snapshot_operation'] = true;
+                    $operationScope['snapshot_occurred_at'] = (int)($snapshot['occurredAt'] ?? 0);
+                    $operationScope['snapshot_business_date'] = (string)($snapshot['businessDate'] ?? '');
+                    $operationResult = $directOperationAuthority->submitInTx($operationScope);
+                    $operation = is_array($operationResult['operation'] ?? null)
+                        ? $operationResult['operation']
+                        : [];
+                    $operationId = trim((string)($operation['operationId'] ?? $operation['operation_id'] ?? ''));
+                    if ($operationId === '') {
+                        throw new CashierV3CommandException(
+                            CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
+                            '升级操作资料不完整，本次结账已回滚，请重试。',
+                            CashierV3ResultCode::STATUS_FAILED
+                        );
+                    }
+                    $operationResults[] = $operation;
+                    if (!$isUpgradeOperation) {
+                        unset($snapshot['lines'][$lineIndex]);
+                        continue;
+                    }
+                    $upgradeLine = is_array($operationResult['upgradeSaleLine'] ?? null)
+                        ? $operationResult['upgradeSaleLine']
+                        : [];
+                    $upgradeSnapshot = is_array($upgradeLine['authoritySnapshot'] ?? null)
+                        ? $upgradeLine['authoritySnapshot']
+                        : (is_array($upgradeLine['authority_snapshot'] ?? null)
+                            ? $upgradeLine['authority_snapshot']
+                            : []);
+                    $upgradeBinding = is_array($upgradeSnapshot['cardOperationUpgrade'] ?? null)
+                        ? $upgradeSnapshot['cardOperationUpgrade']
+                        : [];
+                    if ($upgradeBinding === []) {
+                        throw new CashierV3CommandException(
+                            CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
+                            '升级结账资料不完整，本次结账已回滚，请重试。',
+                            CashierV3ResultCode::STATUS_FAILED
+                        );
+                    }
+                    // The browser line is the user-facing intent, while the
+                    // operation plan is the final locked monetary authority.
+                    // Reconcile both in this same final transaction so the
+                    // checkout snapshot has one amount equation everywhere:
+                    // delta = max(0, target - source value). Financial credit
+                    // is capped to target later, so an excess source value
+                    // never becomes a negative payment or a refund.
+                    $targetPriceCents = (int)($upgradeBinding['targetPriceCents'] ?? -1);
+                    $creditCents = (int)($upgradeBinding['sourceRemainingValueCents'] ?? -1);
+                    $deltaCents = (int)($upgradeBinding['settlementDeltaCents'] ?? -1);
+                    $couponDiscountCents = max(0, (int)(
+                        $snapshot['lines'][$lineIndex]['couponDiscountCents']
+                        ?? $snapshot['lines'][$lineIndex]['coupon_discount_cents']
+                        ?? 0
+                    ));
+                    if ($targetPriceCents < 0 || $creditCents < 0 || $deltaCents < 0
+                        || max(0, $targetPriceCents - $creditCents) !== $deltaCents
+                        || $couponDiscountCents > $deltaCents) {
+                        throw new CashierV3CommandException(
+                            CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
+                            '升级结账金额不完整，本次结账已回滚，请重试。',
+                            CashierV3ResultCode::STATUS_FAILED
+                        );
+                    }
+                    $payableCents = $deltaCents - $couponDiscountCents;
+                    $snapshot['lines'][$lineIndex]['lineAmountCents'] = $payableCents;
+                    $snapshot['lines'][$lineIndex]['originalLineAmountCents'] = $targetPriceCents;
+                    $snapshot['lines'][$lineIndex]['amount'] = $payableCents / 100;
+                    $snapshot['lines'][$lineIndex]['finalAmount'] = $payableCents / 100;
+                    $snapshot['lines'][$lineIndex]['originalAmount'] = $targetPriceCents / 100;
+                    $snapshot['lines'][$lineIndex]['cardOperationUpgrade'] = $upgradeBinding;
+                }
+                $snapshot['lines'] = array_values((array)$snapshot['lines']);
+                if ($snapshot['lines'] === []) {
+                    $lastOperation = $operationResults === [] ? [] : $operationResults[count($operationResults) - 1];
+                    $operationId = trim((string)($lastOperation['operationId'] ?? ''));
+                    $operationNo = trim((string)($lastOperation['operationNo'] ?? $lastOperation['operation_no'] ?? ''));
+                    if ($operationId === '' || $operationNo === '') {
+                        throw new CashierV3CommandException(
+                            CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
+                            '卡操作结果不完整，本次操作已回滚，请重试。',
+                            CashierV3ResultCode::STATUS_FAILED
+                        );
+                    }
+                    $eventRecorder = $scope['event_recorder'] ?? null;
+                    $eventExecution = $scope['event_execution'] ?? null;
+                    if (!$eventRecorder || !$eventExecution) {
+                        throw new CashierV3CommandException(
+                            CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
+                            '卡操作结账记录不完整，本次操作已回滚，请重试。',
+                            CashierV3ResultCode::STATUS_FAILED
+                        );
+                    }
+                    $occurredAt = (int)($snapshot['occurredAt'] ?? 0);
+                    $eventRecorder->recordInTx(
+                        $eventExecution,
+                        (array)($scope['event_contract'] ?? []),
+                        [
+                            'event_type' => 'checkout.completed',
+                            'aggregate_type' => 'card_operation',
+                            'aggregate_id' => $operationId,
+                            'aggregate_version' => 1,
+                            'source_type' => 'submit-checkout',
+                            'source_id' => $operationId,
+                            'member_id' => (int)($lastOperation['memberIdAfter'] ?? 0),
+                            'business_date' => (string)($snapshot['businessDate'] ?? ''),
+                            'occurred_at' => $occurredAt,
+                            'settled_at' => $occurredAt,
+                            'recorded_at' => max(time(), $occurredAt),
+                            'aggregate_name_snapshot' => $operationNo,
+                            'payload' => [
+                                'composition' => 'card_operation_only',
+                                'operationId' => $operationId,
+                                'operationNo' => $operationNo,
+                            ],
+                        ]
+                    );
+                    return [
+                        'data' => ['checkoutSubmission' => [
+                            'requestStatus' => CashierV3ResultCode::STATUS_SUCCESS,
+                            'composition' => 'card_operation_only',
+                            'completionReferenceId' => $operationNo,
+                            'cardOperations' => $operationResults,
+                            'cashierDraft' => [],
+                        ]],
+                        'business_no' => $operationNo,
+                        // A card-operation-only browser snapshot has no
+                        // persisted workbench mutation.  Its operation row is
+                        // created and settled inside this final transaction.
+                        'touched' => [],
+                        'return_root_state' => true,
+                        'message' => '卡操作已完成。',
+                    ];
+                }
+                $payload['checkoutSnapshot'] = $snapshot;
+                $scope['payload'] = $payload;
+                $prepared = $checkoutPreparation->prepareInTx($scope);
+                $submitScope = $scope;
+                $submissionPreparationScope = $scope;
+                $submissionPreparationScope['action'] = 'finalize-checkout-snapshot';
+                $submissionPreparationScope['direct_snapshot_submission'] = true;
+                $submissionPreparationScope['idempotency_key'] = preg_replace(
+                    '/^CHECKOUT-/D',
+                    'CHECKOUT_PREPARE-',
+                    (string)($scope['idempotency_key'] ?? '')
+                );
+                $submissionPreparationScope['payload'] = [
+                    'checkoutRequestId' => (string)$prepared['checkoutRequestId'],
+                    'checkoutRequestVersion' => (int)$prepared['checkoutRequestVersion'],
+                    'preparationRequestId' => (string)$submissionPreparationScope['idempotency_key'],
+                ];
+                $promoted = $submissionPreparation->prepareInTx($submissionPreparationScope);
+                $submitPayload = [
+                    'checkoutRequestId' => (string)$prepared['checkoutRequestId'],
+                    'checkoutRequestVersion' => (int)$promoted['checkoutRequestVersion'],
+                    'preparationRequestId' => (string)$submissionPreparationScope['idempotency_key'],
+                ];
+                // The submission preparation creates the internal CHECKOUT_PREPARE
+                // identity used by the final executor. Keep the browser snapshot
+                // as the business authority while binding this transport identity
+                // to the promoted in-transaction preparation.
+                $submitPayload['preparationRequestId'] = (string)$submissionPreparationScope['idempotency_key'];
+                $submitScope['payload'] = $submitPayload;
+                $submitScope['direct_snapshot_submission'] = true;
+                $discoveredResources = (array)(
+                    is_array($scope['server_resource_discovery'] ?? null)
+                        ? ($scope['server_resource_discovery']['resources'] ?? [])
+                        : []
+                );
+                $submitScope['checkout_resource_plan'] = [
+                    'requestId' => (string)$prepared['checkoutRequestId'],
+                    'boundRequestVersion' => (int)$promoted['checkoutRequestVersion'],
+                    'tenantId' => $scope['data_scope']->tenantId(),
+                    'storeId' => $scope['data_scope']->forcedStoreId(),
+                    'resourcePlanFingerprint' => (string)($promoted['resourcePlanFingerprint'] ?? ''),
+                    'resources' => array_values(array_map(static function (array $resource): array {
+                        return [
+                            'kind' => (string)($resource['kind'] ?? ''),
+                            'id' => (string)($resource['id'] ?? ''),
+                            'expectedVersion' => (int)($resource['expectedVersion'] ?? 0),
+                            'roles' => array_values((array)($resource['roles'] ?? [])),
+                        ];
+                    }, $discoveredResources)),
+                ];
+                $submitted = $checkoutSubmission->submitInTx($submitScope);
+            } else {
+                throw new CashierV3CommandException(
+                    CashierV3ResultCode::INVALID_COMMAND_CONTEXT,
+                    '结账必须使用最终前端快照，旧结账草稿路径已删除。',
+                    CashierV3ResultCode::STATUS_FAILED
+                );
+            }
             $composition = (string)($submitted['composition'] ?? '');
             $salesOrder = is_array($submitted['salesOrder'] ?? null)
                 ? $submitted['salesOrder']
@@ -898,7 +1030,16 @@ final class CashierV3CashierModule
                 : ($composition === 'mixed'
                     ? '收款及权益使用成功，销售订单已完成。'
                     : '收款成功，销售订单已完成。');
+            // A direct snapshot command has no browser-provided workspace or
+            // checkout-request context. The request aggregate is created and
+            // consumed inside this transaction, so its result must not report
+            // a client projection version as changed.
+            $isBrowserSnapshot = is_array($payload['checkoutSnapshot'] ?? null)
+                || !empty($scope['direct_snapshot_submission']);
             $touched = ['cashier_workspace', 'checkout_request'];
+            if ($isBrowserSnapshot) {
+                $touched = [];
+            }
             foreach ((array)($scope['contexts'] ?? []) as $context) {
                 if (in_array('checkout_member_balance', (array)($context['roles'] ?? []), true)) {
                     $touched[] = 'checkout_member_balance';
@@ -1029,21 +1170,8 @@ final class CashierV3CashierModule
         self::registerUpdateServiceSettingsPolicy($dispatcher, $readiness);
         self::registerMoreActionPolicies($dispatcher, $readiness);
         self::registerLineCouponPolicies($dispatcher, $readiness);
-        self::registerPrepareCheckoutPolicy($dispatcher, $checkoutPreparation);
         self::registerDebtRepaymentPolicies($dispatcher);
-        self::registerSubmissionPreparationPolicy(
-            $dispatcher,
-            $submissionDiscovery
-        );
-        self::registerPaymentDraftPolicies($dispatcher);
-        self::registerCheckoutBusinessSourcePolicy($dispatcher);
-        self::registerCheckoutSalesDatePolicy($dispatcher);
-        self::registerBalanceDraftPolicies(
-            $dispatcher,
-            new CashierV3CheckoutBalanceAuthorityDiscovery($memberBalances)
-        );
-        self::registerReturnToPaymentEditPolicy($dispatcher);
-        self::registerSubmitCheckoutPolicy($dispatcher);
+        self::registerSubmitCheckoutPolicy($dispatcher, $submissionDiscovery);
 
         if ($assembler !== null) {
             $assembler->registerPartitionProvider(new CashierV3CashierPartitionProvider(
@@ -1055,46 +1183,6 @@ final class CashierV3CashierModule
         }
 
         return $workspace;
-    }
-
-    private static function registerPrepareCheckoutPolicy(
-        CashierV3ActionDispatcher $dispatcher,
-        CashierV3CheckoutPreparationServices $preparation
-    ): void {
-        if ($dispatcher->policies()->has('prepare-checkout')) {
-            throw new \LogicException('C2 cashier module: prepare-checkout context policy duplicate');
-        }
-        $policy = new CashierV3ContextPolicy(
-            'prepare-checkout',
-            ['cashier_workspace'],
-            ['service_order', 'checkout_request', 'hang_order', 'reservation', 'room'],
-            [$dispatcher->policies(), 'resolveCheckoutSourceBranch'],
-            ['cashier_workspace'],
-            ['service_order', 'checkout_request', 'hang_order', 'reservation', 'room'],
-            ['service_order', 'checkout_request', 'hang_order', 'reservation', 'room']
-        );
-        $policy->configureServerResourceDiscovery(
-            [$preparation, 'discover'],
-            [
-                'checkout_member',
-                'checkout_entitlement_pool',
-                'checkout_card_holder',
-                'checkout_catalog_card_definition',
-                'checkout_catalog_product',
-                'checkout_catalog_sku',
-                'checkout_custom_card_configuration',
-            ],
-            [
-                'member',
-                'member_benefit_pool',
-                'card_holder',
-                'catalog_card_definition',
-                'catalog_product',
-                'catalog_sku',
-                'custom_card_configuration',
-            ]
-        );
-        $dispatcher->policies()->register($policy);
     }
 
     private static function registerDebtRepaymentPolicies(CashierV3ActionDispatcher $dispatcher): void
@@ -1186,191 +1274,46 @@ final class CashierV3CashierModule
         ));
     }
 
-    private static function registerSubmissionPreparationPolicy(
+    private static function registerSubmitCheckoutPolicy(
         CashierV3ActionDispatcher $dispatcher,
-        CashierV3CheckoutSubmissionResourceDiscoveryComposite $discovery
-    ): void {
-        if ($dispatcher->policies()->has('prepare-checkout-submission')) {
-            throw new \LogicException('C2 cashier module: submission preparation context policy duplicate');
-        }
-        $policy = new CashierV3ContextPolicy(
-            'prepare-checkout-submission',
-            ['cashier_workspace', 'checkout_request'],
-            ['service_order', 'reservation', 'room'],
-            [$dispatcher->policies(), 'resolveCheckoutFollowUpBranch'],
-            ['cashier_workspace', 'checkout_request'],
-            ['service_order', 'reservation', 'room'],
-            ['service_order', 'reservation', 'room']
-        );
-        $policy->configureServerResourceDiscovery(
-            [$discovery, 'discover'],
-            [
-                'checkout_member',
-                'checkout_entitlement_pool',
-                'checkout_card_holder',
-                'checkout_catalog_card_definition',
-                'checkout_catalog_product',
-                'checkout_catalog_sku',
-                'checkout_custom_card_configuration',
-                'member',
-                'benefit_pool',
-                'card_holder',
-                'entitlement_debt_guard',
-                'occupation_guard',
-                'performance_rule',
-                'staff',
-                'occupation',
-                'inventory_policy',
-                'inventory_recipe',
-                'inventory_stock',
-                'inventory_batch',
-                'inventory_shortage_cursor',
-                'checkout_member_balance',
-            ],
-            [
-                'member',
-                'member_benefit_pool',
-                'card_holder',
-                'catalog_card_definition',
-                'catalog_product',
-                'catalog_sku',
-                'custom_card_configuration',
-                'entitlement_debt_guard',
-                'entitlement_occupation_guard',
-                'performance_rule',
-                'staff_profile',
-                'service_order',
-                'reservation',
-                'inventory_policy',
-                'inventory_recipe',
-                'inventory_stock',
-                'inventory_batch',
-                'inventory_shortage_cursor',
-                'member_balance',
-            ]
-        );
-        $dispatcher->policies()->register($policy);
-    }
-
-    private static function registerPaymentDraftPolicies(CashierV3ActionDispatcher $dispatcher): void
-    {
-        foreach (['add-payment-method', 'update-payment-line', 'remove-payment-line'] as $action) {
-            if ($dispatcher->policies()->has($action)) {
-                throw new \LogicException('C2 cashier module: payment draft context policy duplicate');
-            }
-            $dispatcher->policies()->register(new CashierV3ContextPolicy(
-                $action,
-                ['cashier_workspace', 'checkout_request'],
-                ['service_order', 'hang_order', 'reservation', 'room', 'debt_record'],
-                [$dispatcher->policies(), 'resolveCheckoutFollowUpBranch'],
-                ['cashier_workspace', 'checkout_request'],
-                ['service_order', 'hang_order', 'reservation', 'room', 'debt_record'],
-                ['service_order', 'hang_order', 'reservation', 'room', 'debt_record']
-            ));
-        }
-    }
-
-    private static function registerCheckoutBusinessSourcePolicy(CashierV3ActionDispatcher $dispatcher): void
-    {
-        $action = 'update-checkout-business-source';
-        if ($dispatcher->policies()->has($action)) {
-            throw new \LogicException('C2 cashier module: checkout business source context policy duplicate');
-        }
-        $dispatcher->policies()->register(new CashierV3ContextPolicy(
-            $action,
-            ['cashier_workspace', 'checkout_request'],
-            ['service_order', 'hang_order', 'reservation', 'room', 'debt_record'],
-            static function (array $payload, array $base) use ($dispatcher): array {
-                $resolved = $dispatcher->policies()->resolveCheckoutFollowUpBranch($payload, $base);
-                // 来源选择只写独立 selection_version；checkout_request 仅用于同版本锁读。
-                $resolved['required_touched_roles'] = ['cashier_workspace'];
-                return $resolved;
-            },
-            ['cashier_workspace'],
-            ['service_order', 'hang_order', 'reservation', 'room', 'debt_record'],
-            ['service_order', 'hang_order', 'reservation', 'room', 'debt_record']
-        ));
-    }
-
-    private static function registerCheckoutSalesDatePolicy(CashierV3ActionDispatcher $dispatcher): void
-    {
-        $action = 'update-checkout-sales-date';
-        if ($dispatcher->policies()->has($action)) {
-            throw new \LogicException('C2 cashier module: checkout sales date context policy duplicate');
-        }
-        $dispatcher->policies()->register(new CashierV3ContextPolicy(
-            $action,
-            ['cashier_workspace', 'checkout_request'],
-            ['service_order', 'hang_order', 'reservation', 'room', 'debt_record'],
-            [$dispatcher->policies(), 'resolveCheckoutFollowUpBranch'],
-            ['cashier_workspace', 'checkout_request'],
-            ['service_order', 'hang_order', 'reservation', 'room', 'debt_record'],
-            ['service_order', 'hang_order', 'reservation', 'room', 'debt_record']
-        ));
-    }
-
-    private static function registerBalanceDraftPolicies(
-        CashierV3ActionDispatcher $dispatcher,
-        CashierV3CheckoutBalanceAuthorityDiscovery $discovery
-    ): void {
-        foreach (['apply-balance-payment', 'remove-balance-payment', 'update-balance-payment'] as $action) {
-            if ($dispatcher->policies()->has($action)) {
-                throw new \LogicException('C2 cashier module: balance draft context policy duplicate');
-            }
-            $policy = new CashierV3ContextPolicy(
-                $action,
-                ['cashier_workspace', 'checkout_request'],
-                ['service_order', 'hang_order', 'reservation', 'room', 'debt_record'],
-                [$dispatcher->policies(), 'resolveCheckoutFollowUpBranch'],
-                ['cashier_workspace', 'checkout_request'],
-                ['service_order', 'hang_order', 'reservation', 'room', 'debt_record'],
-                ['service_order', 'hang_order', 'reservation', 'room', 'debt_record']
-            );
-            // Removing a balance-payment draft only clears the intention on
-            // the checkout request. It neither reads nor mutates the member
-            // balance row, so requiring a discovered balance resource would
-            // turn the correct empty discovery set into INVALID_COMMAND_CONTEXT.
-            if ($action !== 'remove-balance-payment') {
-                $policy->configureServerResourceDiscovery(
-                    [$discovery, 'discover'],
-                    ['checkout_member_balance'],
-                    ['member_balance']
-                );
-            }
-            $dispatcher->policies()->register($policy);
-        }
-    }
-
-    private static function registerSubmitCheckoutPolicy(CashierV3ActionDispatcher $dispatcher): void
+        CashierV3CheckoutSubmissionResourceDiscoveryComposite $submissionDiscovery
+    ): void
     {
         if ($dispatcher->policies()->has('submit-checkout')) {
             throw new \LogicException('C2 cashier module: submit checkout context policy duplicate');
         }
-        $dispatcher->policies()->register(new CashierV3ContextPolicy(
+        $policy = new CashierV3ContextPolicy(
             'submit-checkout',
-            ['cashier_workspace', 'checkout_request'],
+            [],
             [],
             [$dispatcher->policies(), 'resolveCheckoutSubmitBranch'],
-            ['cashier_workspace', 'checkout_request'],
+            [],
             ['service_order', 'hang_order', 'reservation', 'room'],
-            ['service_order', 'hang_order', 'reservation', 'room']
-        ));
-    }
-
-    private static function registerReturnToPaymentEditPolicy(CashierV3ActionDispatcher $dispatcher): void
-    {
-        if ($dispatcher->policies()->has('return-to-payment-edit')) {
-            throw new \LogicException('C2 cashier module: payment-edit recovery context policy duplicate');
-        }
-        $dispatcher->policies()->register(new CashierV3ContextPolicy(
-            'return-to-payment-edit',
-            ['cashier_workspace', 'checkout_request'],
-            ['service_order', 'hang_order', 'reservation', 'room', 'debt_record'],
-            [$dispatcher->policies(), 'resolveCheckoutFollowUpBranch'],
-            ['cashier_workspace', 'checkout_request'],
-            ['service_order', 'hang_order', 'reservation', 'room', 'debt_record'],
-            ['service_order', 'hang_order', 'reservation', 'room', 'debt_record']
-        ));
+            ['service_order', 'hang_order', 'reservation', 'room'],
+            true
+        );
+        $policy->configureServerResourceDiscovery(
+            [$submissionDiscovery, 'discover'],
+            [
+                'checkout_member', 'checkout_entitlement_pool', 'checkout_card_holder',
+                'checkout_catalog_card_definition', 'checkout_catalog_product',
+                'checkout_catalog_sku', 'checkout_custom_card_configuration',
+                'member', 'benefit_pool', 'card_holder', 'entitlement_debt_guard',
+                'occupation_guard', 'performance_rule', 'staff', 'occupation',
+                'inventory_policy', 'inventory_recipe', 'inventory_stock',
+                'inventory_batch', 'inventory_shortage_cursor', 'checkout_member_balance',
+            ],
+            [
+                'member', 'member_benefit_pool', 'card_holder',
+                'catalog_card_definition', 'catalog_product', 'catalog_sku',
+                'custom_card_configuration', 'entitlement_debt_guard',
+                'entitlement_occupation_guard', 'performance_rule', 'staff_profile',
+                'service_order', 'inventory_policy', 'inventory_recipe',
+                'inventory_stock', 'inventory_batch', 'inventory_shortage_cursor',
+                'member_balance',
+            ]
+        );
+        $dispatcher->policies()->register($policy);
     }
 
     private static function workspaceContextId(array $contexts): string

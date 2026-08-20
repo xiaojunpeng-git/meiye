@@ -1125,7 +1125,7 @@ final class CashierV3CashierWorkspaceServices
     }
 
     /**
-     * 最终 prepare-checkout 的 sale 来源集合。这里只做行锁内重验和 DTO 组装，
+     * 最终快照提交的 sale 来源集合。这里只做行锁内重验和 DTO 组装，
      * 不创建订单、支付、库存、业绩或会员卡事实。
      */
     public function checkoutSaleSourceSetInTx(

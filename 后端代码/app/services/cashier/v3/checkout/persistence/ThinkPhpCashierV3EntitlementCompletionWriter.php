@@ -208,6 +208,10 @@ final class ThinkPhpCashierV3EntitlementCompletionWriter
     private function loadAndAssertAuthorities(CashierV3EntitlementCompletionPlanV1 $plan): array
     {
         $context = $plan->context();
+        // A direct checkout is the one browser snapshot flow. The rows below
+        // are locked in this transaction; do not bring the retired generated
+        // resource-version/fingerprint graph back into its final write path.
+        $directSnapshot = (string)($context['source_type'] ?? '') === 'direct';
         $deductions = $plan->deductions();
         $holderIds = [];
         $detailIds = [];
@@ -240,7 +244,9 @@ final class ThinkPhpCashierV3EntitlementCompletionWriter
             ->whereIn('id', array_values($detailIds))->order('id asc')->lock(true)->select());
         $orders = $this->rowsById(Db::name(self::ORDER_TABLE)
             ->whereIn('id', array_values($orderIds))->order('id asc')->lock(true)->select());
-        $versions = $this->versionRows(array_values($holderIds), array_values($detailIds));
+        $versions = $directSnapshot
+            ? []
+            : $this->versionRows(array_values($holderIds), array_values($detailIds));
         $ruleAuthorities = [];
         foreach ($deductions as $deduction) {
             $ruleAuthorities[$deduction['source_detail_id']] = $this->cardRules()->authorityForDetail(
@@ -255,7 +261,7 @@ final class ThinkPhpCashierV3EntitlementCompletionWriter
             $holder = $holders[$holderId] ?? null;
             $order = $orders[$expected['origin_order_id']] ?? null;
             $version = $versions['card_holder:' . $holderId] ?? null;
-            if (!$holder || !$order || !$version
+            if (!$holder || !$order || (!$directSnapshot && !$version)
                 || (int)($holder['uid'] ?? 0) !== $context['member_id']
                 || (int)($holder['oid'] ?? 0) !== $expected['origin_order_id']
                 || (int)($holder['is_del'] ?? 0) !== 0
@@ -266,13 +272,15 @@ final class ThinkPhpCashierV3EntitlementCompletionWriter
                 // Requiring origin-order uid == current member incorrectly
                 // rejects legitimate transferred entitlements.
                 || !$this->activeOrder($order)
-                || (int)($version['member_id'] ?? 0) !== $context['member_id']
-                || (int)($version['current_version'] ?? 0) !== $expected['source_version']) {
+                || (!$directSnapshot && (int)($version['member_id'] ?? 0) !== $context['member_id'])
+                || (!$directSnapshot && (int)($version['current_version'] ?? 0) !== $expected['source_version'])) {
                 throw self::failure('completion_holder_authority_changed', ['holderId' => $holderId]);
             }
-            $preFingerprint = $this->holderFingerprint($holder, $order, $context['tenant_id']);
-            if (!hash_equals((string)$version['source_fingerprint'], $preFingerprint)) {
-                throw self::failure('completion_holder_fingerprint_changed', ['holderId' => $holderId]);
+            if (!$directSnapshot) {
+                $preFingerprint = $this->holderFingerprint($holder, $order, $context['tenant_id']);
+                if (!hash_equals((string)$version['source_fingerprint'], $preFingerprint)) {
+                    throw self::failure('completion_holder_fingerprint_changed', ['holderId' => $holderId]);
+                }
             }
             $holderExpectation[$holderId]['remaining_before'] = (int)$holder['write_surplus_times'];
         }
@@ -285,30 +293,32 @@ final class ThinkPhpCashierV3EntitlementCompletionWriter
             $ruleAuthority = $ruleAuthorities[$detailId] ?? null;
             $legacyRemainingMustMatch = !is_array($ruleAuthority)
                 || in_array((string)($ruleAuthority['ruleType'] ?? ''), ['normal', 'choice_kind'], true);
-            if (!$detail || !$order || !$version
+            if (!$detail || !$order || (!$directSnapshot && !$version)
                 || (int)($detail['oid'] ?? 0) !== $deduction['origin_order_id']
                 || (int)($detail['product_id'] ?? 0) !== $deduction['project_id']
                 || (int)($detail['cart_type'] ?? 0) !== 2
                 || (int)($detail['product_type'] ?? 0) !== 6
-                || ($legacyRemainingMustMatch
+                || (!$directSnapshot && $legacyRemainingMustMatch
                     && (int)($detail['write_surplus_times'] ?? -1)
                         !== $deduction['expected_physical_remaining_times'])
-                || (int)($version['member_id'] ?? 0) !== $context['member_id']
-                || (int)($version['current_version'] ?? 0) !== $deduction['detail_version']) {
+                || (!$directSnapshot && (int)($version['member_id'] ?? 0) !== $context['member_id'])
+                || (!$directSnapshot && (int)($version['current_version'] ?? 0) !== $deduction['detail_version'])) {
                 throw self::failure('completion_detail_authority_changed', ['sourceDetailId' => $detailId]);
             }
-            $preFingerprint = $this->detailFingerprint(
-                $detail,
-                $order,
-                $holders[$deduction['holder_id']] ?? [],
-                $context['member_id'],
-                $context['tenant_id']
-            );
-            if (!hash_equals((string)$version['source_fingerprint'], $preFingerprint)) {
-                throw self::failure('completion_detail_fingerprint_changed', ['sourceDetailId' => $detailId]);
+            if (!$directSnapshot) {
+                $preFingerprint = $this->detailFingerprint(
+                    $detail,
+                    $order,
+                    $holders[$deduction['holder_id']] ?? [],
+                    $context['member_id'],
+                    $context['tenant_id']
+                );
+                if (!hash_equals((string)$version['source_fingerprint'], $preFingerprint)) {
+                    throw self::failure('completion_detail_fingerprint_changed', ['sourceDetailId' => $detailId]);
+                }
             }
         }
-        return compact('holders', 'details', 'orders', 'versions', 'holderExpectation', 'ruleAuthorities');
+        return compact('holders', 'details', 'orders', 'versions', 'holderExpectation', 'ruleAuthorities', 'directSnapshot');
     }
 
     private function applyDeductions(
@@ -317,6 +327,7 @@ final class ThinkPhpCashierV3EntitlementCompletionWriter
         array $ruleDeductions
     ): array {
         $context = $plan->context();
+        $directSnapshot = !empty($authorities['directSnapshot']);
         $detailVersionsAfter = [];
         foreach ($plan->deductions() as $deduction) {
             $rule = $ruleDeductions[$deduction['source_detail_id']] ?? null;
@@ -346,7 +357,9 @@ final class ThinkPhpCashierV3EntitlementCompletionWriter
                     'sourceDetailId' => $deduction['source_detail_id'],
                 ]);
             }
-            $detailVersionsAfter[$deduction['source_detail_id']] = $deduction['detail_version'] + 1;
+            if (!$directSnapshot) {
+                $detailVersionsAfter[$deduction['source_detail_id']] = $deduction['detail_version'] + 1;
+            }
         }
 
         $holderVersionsAfter = [];
@@ -372,46 +385,50 @@ final class ThinkPhpCashierV3EntitlementCompletionWriter
             if ($affected !== 1 && !$keepProjection) {
                 throw self::failure('completion_holder_deduction_conflict', ['holderId' => $holderId]);
             }
-            $holderVersionsAfter[$holderId] = $expected['source_version'] + 1;
+            if (!$directSnapshot) {
+                $holderVersionsAfter[$holderId] = $expected['source_version'] + 1;
+            }
         }
 
-        $orders = $authorities['orders'];
-        foreach ($plan->deductions() as $deduction) {
-            $detail = $this->row(Db::name(self::DETAIL_TABLE)
-                ->where('id', $deduction['source_detail_id'])->find());
-            $holder = $this->row(Db::name(self::HOLDER_TABLE)
-                ->where('id', $deduction['holder_id'])->find());
-            $fingerprint = $this->detailFingerprint(
-                $detail ?: [],
-                $orders[$deduction['origin_order_id']],
-                $holder ?: [],
-                $context['member_id'],
-                $context['tenant_id']
-            );
-            $this->advanceVersion(
-                'member_benefit_pool',
-                $deduction['source_detail_id'],
-                $context['member_id'],
-                $deduction['detail_version'],
-                $fingerprint,
-                $context['recorded_at']
-            );
-        }
-        foreach ($authorities['holderExpectation'] as $holderId => $expected) {
-            $holder = $this->row(Db::name(self::HOLDER_TABLE)->where('id', $holderId)->find());
-            $fingerprint = $this->holderFingerprint(
-                $holder ?: [],
-                $orders[$expected['origin_order_id']],
-                $context['tenant_id']
-            );
-            $this->advanceVersion(
-                'card_holder',
-                $holderId,
-                $context['member_id'],
-                $expected['source_version'],
-                $fingerprint,
-                $context['recorded_at']
-            );
+        if (!$directSnapshot) {
+            $orders = $authorities['orders'];
+            foreach ($plan->deductions() as $deduction) {
+                $detail = $this->row(Db::name(self::DETAIL_TABLE)
+                    ->where('id', $deduction['source_detail_id'])->find());
+                $holder = $this->row(Db::name(self::HOLDER_TABLE)
+                    ->where('id', $deduction['holder_id'])->find());
+                $fingerprint = $this->detailFingerprint(
+                    $detail ?: [],
+                    $orders[$deduction['origin_order_id']],
+                    $holder ?: [],
+                    $context['member_id'],
+                    $context['tenant_id']
+                );
+                $this->advanceVersion(
+                    'member_benefit_pool',
+                    $deduction['source_detail_id'],
+                    $context['member_id'],
+                    $deduction['detail_version'],
+                    $fingerprint,
+                    $context['recorded_at']
+                );
+            }
+            foreach ($authorities['holderExpectation'] as $holderId => $expected) {
+                $holder = $this->row(Db::name(self::HOLDER_TABLE)->where('id', $holderId)->find());
+                $fingerprint = $this->holderFingerprint(
+                    $holder ?: [],
+                    $orders[$expected['origin_order_id']],
+                    $context['tenant_id']
+                );
+                $this->advanceVersion(
+                    'card_holder',
+                    $holderId,
+                    $context['member_id'],
+                    $expected['source_version'],
+                    $fingerprint,
+                    $context['recorded_at']
+                );
+            }
         }
         ksort($detailVersionsAfter, SORT_NUMERIC);
         ksort($holderVersionsAfter, SORT_NUMERIC);

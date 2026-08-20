@@ -2972,14 +2972,6 @@ const rawFixtureAdapter = {
       return successEnvelope(nextRootState(() => {}))
     }
 
-    if (action === 'prepare-checkout') {
-      const state = makeCheckoutState('checkout-order', {
-        preparationRequestId: payload.preparationRequestId,
-        cashierDraft: fixtureCashierDraft
-      })
-      return successEnvelope(state)
-    }
-
     if (action === 'prepare-debt-repayment') {
       const snapshot = cashierV3State.memberCenter?.debtSnapshot || {}
       const record = (snapshot.records || []).find((item) => String(item.id || item.debtItemId) === String(payload.debtRecordId || payload.debtItemId))
@@ -3058,29 +3050,6 @@ const rawFixtureAdapter = {
           .filter((line) => line.id !== payload.paymentLineId)
       })
       return successEnvelope(state, { message: '收款明细已删除。' })
-    }
-
-    if (action === 'prepare-checkout-submission') {
-      const checkout = cashierV3State.cashier?.checkout || {}
-      const remaining = Number(checkout.payment?.summary?.remainingAmount || 0)
-      if (remaining !== 0
-        || checkout.composition?.hasSale !== true
-        || checkout.composition?.hasEntitlement === true
-        || Number(checkout.balancePaymentAmount || 0) !== 0
-        || Number(checkout.debtAmount || 0) !== 0) {
-        return failedEnvelope(
-          'PD_FIXTURE_SALE_ONLY_SUBMISSION_NOT_READY',
-          '当前仅开放本次购买且已收齐的结账流程。'
-        )
-      }
-      const state = nextRootState((next) => {
-        const prepared = clone(next.cashier?.checkout || {})
-        advanceCheckoutPaymentDraft(prepared, next)
-        prepared.status = 'editing'
-        prepared.requestStatus = 'ready_for_submit'
-        next.cashier.checkout = prepared
-      })
-      return successEnvelope(state, { message: '结账资源已完成最终校验。' })
     }
 
     if (action === 'submit-checkout' || action === 'retry-checkout' || action === 'submit-debt-repayment') {

@@ -58,6 +58,7 @@ final class CashierV3CheckoutSubmissionOrchestrator
         $paymentCollection = [];
         $debt = [];
         $balancePayment = null;
+        $saleSettlementEffects = [];
         if ($authority['composition'] === self::COMPOSITION_MIXED) {
             $salesOrder = $this->normalizeSalesOrder(
                 $this->port->persistSalesOrderInTx($authority),
@@ -78,6 +79,10 @@ final class CashierV3CheckoutSubmissionOrchestrator
                 $salesOrder,
                 $paymentCollection
             );
+            $saleSettlementEffects = $this->port->persistSaleSettlementEffectsInTx(
+                $authority,
+                $salesOrder
+            );
         }
 
         $inventoryCompletion = $this->normalizeInventoryCompletion(
@@ -91,7 +96,8 @@ final class CashierV3CheckoutSubmissionOrchestrator
                 $paymentCollection,
                 $debt,
                 $entitlementPlan,
-                $inventoryCompletion
+                $inventoryCompletion,
+                $saleSettlementEffects
             )
         );
         $entitlementCompletion = $this->normalizeEntitlementCompletion(
@@ -130,6 +136,7 @@ final class CashierV3CheckoutSubmissionOrchestrator
                 'inventoryCompletion' => $inventoryCompletion,
                 'businessEvents' => $businessEvents,
                 'saleFacts' => $saleFacts,
+                'saleSettlementEffects' => $saleSettlementEffects,
             ]),
             $authority,
             $completionReferenceId
@@ -152,6 +159,8 @@ final class CashierV3CheckoutSubmissionOrchestrator
             'debt' => $debt ?: null,
             'entitlementCompletion' => $entitlementCompletion,
             'inventoryCompletion' => $inventoryCompletion,
+            'saleInventory' => $saleSettlementEffects['inventory'] ?? null,
+            'cardPurchase' => $saleSettlementEffects['cardPurchase'] ?? null,
             'businessEventNos' => $businessEvents['businessEventNos'],
             'factFingerprints' => [
                 'sale' => $saleFacts ? $saleFacts['planFingerprint'] : null,
@@ -161,6 +170,8 @@ final class CashierV3CheckoutSubmissionOrchestrator
             'cashierDraft' => $workspace['cashierDraft'],
             'replayed' => $salesOrder && $salesOrder['replayed']
                 || $paymentCollection && $paymentCollection['replayed']
+                || !empty($saleSettlementEffects['inventory']['replayed'])
+                || !empty($saleSettlementEffects['cardPurchase']['replayed'])
                 || $inventoryCompletion['replayed']
                 || $entitlementCompletion['replayed']
                 || $saleFacts && $saleFacts['replayed'],

@@ -17,7 +17,6 @@ $draftAuthorityRebuilder = (string)file_get_contents($root . '/后端代码/app/
 $checkoutProjection = (string)file_get_contents($root . '/后端代码/app/services/cashier/v3/settlement/CashierV3CheckoutProjectionServices.php');
 $checkoutKernel = (string)file_get_contents($root . '/后端代码/app/services/cashier/v3/settlement/CashierV3CheckoutSettlementKernel.php');
 $salesOrderPlan = (string)file_get_contents($root . '/后端代码/app/services/cashier/v3/order/settlement/CashierV3SalesOrderPlanV1.php');
-$preflight = (string)file_get_contents($root . '/后端代码/app/services/cashier/v3/settlement/CashierV3CheckoutGuideRoundPreflightServices.php');
 $hangDraftController = (string)file_get_contents($root . '/后端代码/app/controller/cashier/v3/HangDraft.php');
 $hangDraftRoute = (string)file_get_contents($root . '/后端代码/route/cashier-v3.php');
 
@@ -62,11 +61,9 @@ $checks = [
         && strpos($service, "->whereIn('lifecycle.operation_type', ['refund', 'void'])") !== false,
     'cross-date conflict returns the occupied settlement date to the cashier' => strpos($submission, 'guide_round_date_conflict:(\d{4}-\d{2}-\d{2})') !== false
         && strpos($submission, '该会员已于 ') !== false,
-    'payment-step preflight checks the locked snapshot without creating guide facts' => strpos($preflight, 'validateInTx(') !== false
-        && strpos($preflight, 'assertAvailableInTx(') !== false
-        && strpos($preflight, 'persistInTx(') === false
-        && strpos($hangDraftController, 'public function validateGuideRound()') !== false
-        && strpos($hangDraftRoute, "cashier-drafts/validate-guide-round") !== false,
+    'guide round has no payment-step preflight endpoint' => strpos($hangDraftController, 'public function validateGuideRound()') === false
+        && strpos($hangDraftRoute, "cashier-drafts/validate-guide-round") === false
+        && strpos($submission, 'guide_round_date_conflict:') !== false,
     'guide round survives every checkout snapshot rebuild' => strpos($draftAuthorityRebuilder, "\$snapshot['guideRoundNo'] = \$roundNo") !== false
         && strpos($checkoutProjection, "\$snapshot['guideRoundNo'] = \$roundNo") !== false
         && strpos($checkoutKernel, "\$normalizedSelection['guideRoundNo'] = \$roundNo") !== false

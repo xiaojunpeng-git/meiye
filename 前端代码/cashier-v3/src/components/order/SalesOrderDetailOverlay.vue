@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { canUseCashierV3Operation, formatMoney } from '@/services/cashierV3Bridge'
 import SalesOrderReceiptPrintButton from '@/components/order/SalesOrderReceiptPrintButton.vue'
 
@@ -52,17 +52,29 @@ const props = defineProps({
   cartLineCount: {
     type: Number,
     default: 0
+  },
+  initialLifecycleAction: {
+    type: String,
+    default: ''
+  },
+  // 保留外层旧调用契约；人员编辑已迁移到订单明细行弹窗，详情页不再消费这些参数。
+  focusPersonnelRole: {
+    type: String,
+    default: ''
+  },
+  focusPersonnelLineId: {
+    type: String,
+    default: ''
+  },
+  actionOnly: {
+    type: Boolean,
+    default: false
   }
 })
 
 const emit = defineEmits(['close'])
 const pendingAction = ref('')
 const actionError = ref('')
-const adjustmentReason = ref('')
-const salesSelections = ref({})
-const craftsmanSelections = ref({})
-const salesPreSaleSelections = ref({})
-const craftsmanPointSelections = ref({})
 const activeLifecycleForm = ref('')
 const refundAmount = ref('')
 const balancePrincipalRefundAmount = ref('0')
@@ -336,14 +348,22 @@ const relatedGroups = computed(() => {
   })
 })
 
-const operationRecords = computed(() => relatedRecords(['operationLogs', 'operations', 'operationRecords']))
-const personnelAdjustment = computed(() => sourceOrder.value.personnelAdjustment && typeof sourceOrder.value.personnelAdjustment === 'object' ? sourceOrder.value.personnelAdjustment : null)
-const adjustmentLines = computed(() => Array.isArray(personnelAdjustment.value?.lines) ? personnelAdjustment.value.lines : [])
-const adjustmentSalespeople = computed(() => Array.isArray(personnelAdjustment.value?.salespeople) ? personnelAdjustment.value.salespeople : [])
-const adjustmentCraftsmen = computed(() => Array.isArray(personnelAdjustment.value?.craftsmen) ? personnelAdjustment.value.craftsmen : [])
+// 订单中心人员调整按“直接改成最新人员”呈现；底层审计仍保留，但不在订单详情的普通操作区展示历史调整行。
+const operationRecords = computed(() => relatedRecords(['operationLogs', 'operations', 'operationRecords']).filter((record) => {
+  const type = String(pickValue(record, ['operationType', 'operation_type', 'action']) || '').toLowerCase()
+  return !['personnel_adjustment', 'order_note_update'].includes(type)
+}))
+watch(
+  () => props.initialLifecycleAction,
+  (lifecycleAction) => {
+    if (lifecycleAction === 'refund-sales-order' || lifecycleAction === 'void-sales-order') {
+      activeLifecycleForm.value = lifecycleAction === 'refund-sales-order' ? 'refund' : 'void'
+    }
+  },
+  { immediate: true }
+)
 const canOpenOperationLogs = computed(() => hasAction('open-order-operation-logs') || hasAction('open-operation-logs'))
 const quickActions = computed(() => [
-  { action: 'open-sales-order-personnel-adjustment', label: '人员调整', permission: 'cashier.v3.order.staff_adjust' },
   { action: 'refund-sales-order', label: '退款', permission: 'cashier.v3.order.refund' },
   { action: 'void-sales-order', label: '作废订单', permission: 'cashier.v3.order.void' },
   { action: 'reopen-sales-order', label: '重开', permission: 'cashier.v3.order.reopen' },
@@ -366,17 +386,6 @@ const selectedRefundLines = computed(() => {
 })
 
 const selectedRefundSaleAmount = computed(() => selectedRefundLines.value.reduce((total, line) => total + refundLineSaleAmount(line), 0))
-
-function submitPersonnelAdjustment() {
-  const personnel = []
-  for (const line of adjustmentLines.value) {
-    const salesStaffId = Number(salesSelections.value[line.orderLineId] || 0)
-    const craftsmanStaffId = Number(craftsmanSelections.value[line.orderLineId] || 0)
-    if (salesStaffId > 0) personnel.push({ orderLineId: line.orderLineId, role: 'salesperson', staffId: salesStaffId, isPreSale: Boolean(salesPreSaleSelections.value[line.orderLineId]) })
-    if (craftsmanStaffId > 0) personnel.push({ orderLineId: line.orderLineId, role: 'craftsman', staffId: craftsmanStaffId, isPointCustomer: Boolean(craftsmanPointSelections.value[line.orderLineId]) })
-  }
-  return runAction('adjust-sales-order-personnel', { reason: adjustmentReason.value, personnel })
-}
 
 async function revealActionPanel() {
   await nextTick()
@@ -582,6 +591,7 @@ async function runAction(action, payload = {}) {
       </div>
       <div class="sales-order-detail-overlay__header-actions">
         <button
+          v-if="!actionOnly"
           v-for="item in quickActions"
           :key="item.action"
           type="button"
@@ -620,6 +630,7 @@ async function runAction(action, payload = {}) {
       </div>
 
       <template v-else>
+        <template v-if="!actionOnly">
         <section v-if="basicInfoRows.length" class="sales-order-detail-section">
           <header class="sales-order-detail-section__header">
             <div><h3>基本信息</h3></div>
@@ -801,6 +812,7 @@ async function runAction(action, payload = {}) {
             </article>
           </div>
         </section>
+        </template>
 
         <div ref="actionPanelRef">
           <p v-if="actionError" class="sales-order-detail-error" role="alert">{{ actionError }}</p>
@@ -837,32 +849,6 @@ async function runAction(action, payload = {}) {
           </div>
           </section>
 
-          <section v-if="personnelAdjustment" class="sales-order-detail-section sales-order-detail-section--actions">
-          <header class="sales-order-detail-section__header"><div><h3>人员调整</h3><span>调整会保留原订单与原业绩快照，并写入新的调整事实。</span></div></header>
-          <div class="sales-order-detail-personnel-adjustment">
-            <article v-for="line in adjustmentLines" :key="line.orderLineId">
-              <strong>{{ line.itemName }}</strong>
-              <label>销售人
-                <select v-model="salesSelections[line.orderLineId]">
-                  <option value="">不调整</option>
-                  <option v-for="person in adjustmentSalespeople" :key="person.staffId" :value="person.staffId">{{ person.name }}</option>
-                </select>
-              </label>
-              <label v-if="salesSelections[line.orderLineId]" class="sales-order-detail-personnel-adjustment__flag"><input v-model="salesPreSaleSelections[line.orderLineId]" type="checkbox"> 售前</label>
-              <label v-if="line.canAdjustCraftsman">手艺人
-                <select v-model="craftsmanSelections[line.orderLineId]">
-                  <option value="">不调整</option>
-                  <option v-for="person in adjustmentCraftsmen" :key="person.staffId" :value="person.staffId">{{ person.name }}</option>
-                </select>
-              </label>
-              <label v-if="line.canAdjustCraftsman && craftsmanSelections[line.orderLineId]" class="sales-order-detail-personnel-adjustment__flag"><input v-model="craftsmanPointSelections[line.orderLineId]" type="checkbox"> 点客（未勾选为轮）</label>
-            </article>
-            <label class="sales-order-detail-personnel-adjustment__reason">调整原因
-              <textarea v-model.trim="adjustmentReason" maxlength="255" rows="3" placeholder="填写调整原因" />
-            </label>
-            <div class="sales-order-detail-quick-actions"><button type="button" class="sales-order-detail-button sales-order-detail-button--secondary" :disabled="Boolean(pendingAction)" @click="submitPersonnelAdjustment">确认调整</button></div>
-          </div>
-          </section>
         </div>
 
         <section v-if="operationRecords.length || canOpenOperationLogs" class="sales-order-detail-section">
@@ -964,42 +950,6 @@ async function runAction(action, payload = {}) {
   align-items: center;
   gap: 10px;
 }
-
-.sales-order-detail-personnel-adjustment {
-  display: grid;
-  gap: 12px;
-}
-
-.sales-order-detail-personnel-adjustment article {
-  display: grid;
-  grid-template-columns: minmax(180px, 1fr) repeat(2, minmax(180px, 1fr));
-  gap: 12px;
-  align-items: end;
-  padding: 12px;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-}
-
-.sales-order-detail-personnel-adjustment label {
-  display: grid;
-  gap: 6px;
-  color: #475467;
-  font-size: 13px;
-}
-
-.sales-order-detail-personnel-adjustment select,
-.sales-order-detail-personnel-adjustment textarea {
-  width: 100%;
-  box-sizing: border-box;
-  border: 1px solid #d0d5dd;
-  border-radius: 6px;
-  padding: 8px 10px;
-  color: #1f2937;
-  background: #fff;
-  font: inherit;
-}
-
-.sales-order-detail-personnel-adjustment__reason { max-width: 560px; }
 
 .sales-order-detail-lifecycle-form {
   display: grid;

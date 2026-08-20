@@ -124,7 +124,7 @@ final class ThinkPhpCashierV3CheckoutRequestRepository implements CashierV3Check
         'priceChangedAt' => 'price_changed_at',
         // Coupon identity and discount are part of the immutable checkout
         // line snapshot. Omitting these mappings silently downgraded a valid
-        // workspace coupon to coupon_user_id=0 during prepare-checkout.
+        // workspace coupon to coupon_user_id=0 during final snapshot materialization.
         'couponUserId' => 'coupon_user_id',
         'couponNameSnapshot' => 'coupon_name_snapshot',
         'couponDiscountCents' => 'coupon_discount_cents',
@@ -133,6 +133,7 @@ final class ThinkPhpCashierV3CheckoutRequestRepository implements CashierV3Check
         'guideSelectionsJson' => 'guide_selections_json',
         'salesManagerSelectionsJson' => 'sales_manager_selections_json',
         'manualLaborFeeCents' => 'manual_labor_fee_cents',
+        'cardPurchaseSnapshotJson' => 'card_purchase_snapshot_json',
         'lineFingerprint' => 'line_fingerprint',
         'sortNo' => 'sort_no',
     ];
@@ -1256,7 +1257,7 @@ final class ThinkPhpCashierV3CheckoutRequestRepository implements CashierV3Check
         $actualLines = $this->rows(Db::name(self::LINE_TABLE)
             ->where('request_id', $requestId)
             ->field(
-                'line_id,draft_version,line_role,entitlement_source_detail_id,friend_counts_as_customer,craftsmen_snapshot_json,salespeople_snapshot_json,guide_selections_json,sales_manager_selections_json,manual_labor_fee_cents,is_presale,inventory_outbound_required,line_fingerprint'
+                'line_id,draft_version,line_role,entitlement_source_detail_id,friend_counts_as_customer,craftsmen_snapshot_json,salespeople_snapshot_json,guide_selections_json,sales_manager_selections_json,manual_labor_fee_cents,card_purchase_snapshot_json,is_presale,inventory_outbound_required,line_fingerprint'
             )
             ->order('line_id asc')
             ->lock(true)
@@ -1273,6 +1274,7 @@ final class ThinkPhpCashierV3CheckoutRequestRepository implements CashierV3Check
                 'guide_selections_json' => (string)($row['guideSelectionsJson'] ?? ''),
                 'sales_manager_selections_json' => (string)($row['salesManagerSelectionsJson'] ?? ''),
                 'manual_labor_fee_cents' => $row['manualLaborFeeCents'] === null ? null : (int)$row['manualLaborFeeCents'],
+                'card_purchase_snapshot_json' => (string)$row['cardPurchaseSnapshotJson'],
                 'is_presale' => (int)($row['isPresale'] ?? 0),
                 'inventory_outbound_required' => (int)($row['inventoryOutboundRequired'] ?? 1),
                 'line_fingerprint' => (string)$row['lineFingerprint'],
@@ -1293,6 +1295,7 @@ final class ThinkPhpCashierV3CheckoutRequestRepository implements CashierV3Check
                 'guide_selections_json' => (string)($row['guide_selections_json'] ?? ''),
                 'sales_manager_selections_json' => (string)($row['sales_manager_selections_json'] ?? ''),
                 'manual_labor_fee_cents' => $row['manual_labor_fee_cents'] === null ? null : (int)$row['manual_labor_fee_cents'],
+                'card_purchase_snapshot_json' => (string)($row['card_purchase_snapshot_json'] ?? ''),
                 'is_presale' => (int)($row['is_presale'] ?? 0),
                 'inventory_outbound_required' => (int)($row['inventory_outbound_required'] ?? 1),
                 'line_fingerprint' => (string)$row['line_fingerprint'],

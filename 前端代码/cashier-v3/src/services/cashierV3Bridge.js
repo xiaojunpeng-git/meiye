@@ -2687,6 +2687,13 @@ function isCashierWorkspaceAction(action) {
  * 也不再接受单个 command.context——少传一个对象就是少校验一个版本。
  */
 function resolveCommandContexts(action, payload) {
+  // Project replacement is a live entitlement mutation. Its handler locks
+  // the current card and benefit rows inside the transaction, so no browser
+  // projection/version context is accepted or required for this branch.
+  if (action === 'submit-card-operation'
+    && String(payload?.operationType || '') === 'project_replacement') {
+    return { invalid: false, contexts: [] }
+  }
   // A final browser-owned checkout snapshot is self-contained. Never carry
   // the workspace or selector projection revision into this request; the
   // server discovers and locks current inventory, entitlement and balance
@@ -2774,7 +2781,7 @@ function resolveCommandContexts(action, payload) {
     contexts.push(buildCommandContext('recharge_checkout_request', payload.rechargeCheckoutRequestId))
   }
 
-  if (['adjust-sales-order-personnel', 'refund-sales-order', 'void-sales-order', 'reopen-sales-order'].includes(action)
+  if (['adjust-sales-order-personnel', 'refund-sales-order', 'void-sales-order', 'reopen-sales-order', 'update-sales-order-note'].includes(action)
     && payload.orderId) {
     contexts.push(buildCommandContext('sales_order', payload.orderId))
   }
@@ -3120,6 +3127,25 @@ function applyCashierV3EnvelopeState(rawResult, requestMeta = {}, options = {}) 
     }
   }
 
+  // A direct project replacement mutates member entitlements, not the
+  // browser's complete cashier projection. The adapter may include a
+  // backend-generated state envelope for diagnostics, but applying it here
+  // can replace the selected member with a guest root. Keep the command
+  // result and ignore only that root state for this explicitly scoped flow.
+  if (requestMeta.preserveRootState === true) {
+    return {
+      accepted: true,
+      envelopeRejected: false,
+      stateApplied: false,
+      stateIgnored: Boolean(response?.state),
+      requiresRefresh: false,
+      trustedConflictState: null,
+      response,
+      result,
+      status
+    }
+  }
+
   if (response?.state) {
     const envelopeConsistency = assertStateEnvelopeConsistency(response, requestMeta)
     if (!envelopeConsistency.accepted) {
@@ -3449,6 +3475,7 @@ export async function requestCashierV3Action(action, payload = {}) {
     commandContexts,
     idempotencyKey,
     silent,
+    preserveRootState,
     clientSessionId: ignoredClientSessionId,
     stateContextId: ignoredStateContextId,
     contextSwitchToken,
@@ -3473,6 +3500,8 @@ export async function requestCashierV3Action(action, payload = {}) {
 
   const canonicalAction = canonicalCashierV3Action(action)
   const readOnly = isReadOnlyAction(canonicalAction)
+  const liveProjectReplacement = canonicalAction === 'submit-card-operation'
+    && String(requestBody.operationType || '') === 'project_replacement'
   const directCheckoutSnapshot = canonicalAction === 'submit-checkout'
     && isRecord(requestBody.checkoutSnapshot)
   // 预约只是单据资料保存。它不依赖收银工作台或预约资源版本，直接按
@@ -3530,6 +3559,7 @@ export async function requestCashierV3Action(action, payload = {}) {
     requireIdempotencyBinding: !readOnly,
     correlationId,
     requireCorrelationBinding: true,
+    preserveRootState: preserveRootState === true,
     stateContextId: stateContextIdOf(cashierV3State) || '',
     requireOriginalIdempotencyKey: RESULT_QUERY_ACTIONS.has(canonicalAction) && Boolean(originalResultKey),
     originalIdempotencyKey: originalResultKey
@@ -3549,7 +3579,7 @@ export async function requestCashierV3Action(action, payload = {}) {
     if (!silent) emitCashierV3UiResult(invalidPreparationRequest)
     return invalidPreparationRequest
   }
-  if (!readOnly && !reservationDataWrite && !directCheckoutSnapshot
+  if (!readOnly && !reservationDataWrite && !directCheckoutSnapshot && !liveProjectReplacement
     && (resolvedContexts.invalid || hasInvalidWriteContexts(contexts))) {
     // No command has been sent yet, so a single automatic root recovery is
     // safe. This covers the narrow interval after entering the cashier where

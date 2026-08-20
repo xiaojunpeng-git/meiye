@@ -487,9 +487,14 @@ final class ThinkPhpCashierV3SaleCatalogAuthority implements CashierV3SaleCatalo
             $productId = (int)($relation['product_id'] ?? 0);
             $unique = trim((string)($relation['product_attr_unique'] ?? ''));
             $product = $productsById[$productId] ?? null;
-            if ($product && ((int)($product['type'] ?? 0) !== 1
-                || (int)($product['relation_id'] ?? 0) !== $storeId)) {
-                $product = null;
+            if ($product) {
+                $productOwnerType = (int)($product['type'] ?? -1);
+                $productOwnerId = (int)($product['relation_id'] ?? -1);
+                $belongsToHandlingStore = $productOwnerType === 1 && $productOwnerId === $storeId;
+                $isSharedLegacyComponent = $productOwnerType === 0 && $productOwnerId === 0;
+                if (!$belongsToHandlingStore && !$isSharedLegacyComponent) {
+                    $product = null;
+                }
             }
             $componentKey = $productId . ':' . $unique;
             $sku = isset($duplicateComponentKeys[$componentKey])
@@ -497,6 +502,12 @@ final class ThinkPhpCashierV3SaleCatalogAuthority implements CashierV3SaleCatalo
                 : ($skusByComponent[$componentKey] ?? null);
             $item = ($product && $sku) ? $this->combineRows($product, $sku) : null;
             if (is_array($item)) {
+                // Legacy card definitions legitimately reference headquarters
+                // projects (type=0, relation_id=0). Once the active card
+                // relation selects one for this store, freeze it under the
+                // handling store in the browser snapshot; do not reject it or
+                // re-read a store-local copy during final confirmation.
+                $item['product_relation_id'] = $storeId;
                 $item['category_names'] = $this->categoryNames(
                     (string)($item['product_cate_id'] ?? ''),
                     $categories

@@ -146,7 +146,7 @@ final class CashierV3CheckoutPreparationServices
             );
         }
         if ($memberId > 0) {
-            $memberVersion = $this->shadowVersion('member', $memberId);
+            $memberVersion = $this->currentAuthorityVersion('member', $memberId);
             $resources[] = self::resource('member', $memberId, $memberVersion, 'checkout_member');
         }
         return [
@@ -173,6 +173,13 @@ final class CashierV3CheckoutPreparationServices
         foreach ($lines as $line) {
             if (!is_array($line)) throw self::incomplete('checkout_snapshot_line_invalid');
             $role = (string)($line['lineRole'] ?? $line['line_role'] ?? '');
+            // Payment rows are part of the one browser checkout snapshot, but
+            // they do not identify a lockable catalog or entitlement resource.
+            // They are validated and persisted by authorityFromCheckoutSnapshot
+            // later in the same transaction.
+            if (in_array($role, ['payment', 'balance_payment'], true)) {
+                continue;
+            }
             if ($role === 'sale') {
                 $itemId = (int)($line['itemId'] ?? $line['catalogItemId'] ?? $line['productId'] ?? 0);
                 if ($this->isCustomCardSnapshotLine($line)) {
@@ -183,7 +190,8 @@ final class CashierV3CheckoutPreparationServices
                     foreach ($this->customCards->discoverCreateResources(
                         $configuration,
                         $operatorScope,
-                        $dataScope
+                        $dataScope,
+                        true
                     ) as $resource) {
                         $resources[] = $resource;
                     }
@@ -198,21 +206,27 @@ final class CashierV3CheckoutPreparationServices
                 // blocker that snapshot checkout is designed to remove.
                 continue;
             }
+            if ($role === 'card_operation') {
+                // Standalone card operations have no sale/entitlement resource
+                // of their own. Their source holder and selected project rows
+                // are locked by CardOperationAuthorityServices inside this same
+                // final submit transaction.
+                continue;
+            }
             if (!in_array($role, ['entitlement_service', 'entitlement', 'benefit_service'], true)) {
                 throw self::incomplete('checkout_snapshot_line_role_invalid');
             }
             $holderId = (int)($line['entitlementInstanceId'] ?? $line['cardHolderId'] ?? 0);
             $detailId = (int)($line['entitlementSourceDetailId'] ?? $line['memberBenefitPoolId'] ?? 0);
-            $holderVersion = (int)($line['entitlementSourceVersion'] ?? $line['sourceVersion'] ?? 0);
-            $detailVersion = (int)($line['projectVersion'] ?? $line['detailVersion'] ?? 0);
-            if ($holderId <= 0 || $detailId <= 0 || $holderVersion <= 0 || $detailVersion <= 0) {
+            if ($holderId <= 0 || $detailId <= 0) {
                 throw self::incomplete('checkout_snapshot_entitlement_identity_invalid');
             }
-            $resources[] = self::resource('member_benefit_pool', $detailId, $detailVersion, 'checkout_snapshot_entitlement_pool:' . $detailId);
-            $resources[] = self::resource('card_holder', $holderId, $holderVersion, 'checkout_snapshot_card_holder:' . $holderId);
-        }
-        if ($memberId > 0) {
-            $resources[] = self::resource('member', $memberId, $this->shadowVersion('member', $memberId), 'checkout_snapshot_member');
+            // A browser snapshot owns the entitlement identity. Do not turn
+            // its card/pool IDs into generated-version contexts: historical
+            // rights may not have a shadow-version row, and that old protocol
+            // must never reject a complete checkout snapshot. The final
+            // entitlement authority locks the actual holder/detail rows in
+            // its transaction and validates only the remaining entitlement.
         }
         return [
             'contractVersion' => self::DISCOVERY_CONTRACT_VERSION,
@@ -223,7 +237,7 @@ final class CashierV3CheckoutPreparationServices
     /**
      * Final submission discovery for a browser-origin checkout request.
      *
-     * Its line authority was persisted by prepare-checkout, so re-reading the
+     * Its line authority was materialized from the final snapshot, so re-reading the
      * mutable cashier workspace here would reintroduce the stale-projection
      * race that the snapshot flow removes. Product lifecycle flags are not an
      * eligibility check; only current resource versions are assembled for the
@@ -302,7 +316,7 @@ final class CashierV3CheckoutPreparationServices
             $resources[] = self::resource(
                 'member',
                 $memberId,
-                $this->shadowVersion('member', $memberId),
+                $this->currentAuthorityVersion('member', $memberId),
                 'checkout_request_member'
             );
         }
@@ -392,9 +406,8 @@ final class CashierV3CheckoutPreparationServices
             $storedRows = array_values((array)($authority['storedRows'] ?? []));
             $debtAmountCents = $this->saleDebtAmountCents((array)($authority['lines'] ?? []));
         }
-        // 这里仅创建可编辑的结账请求。权益余次、余额和服务资源统一由
-        // prepare-checkout-submission 在第三步确认时重读并校验，不能在
-        // 点击“立即结账”时提前阻断草稿。
+        // This internal materialization runs only inside the final snapshot
+        // transaction. Nothing is persisted while the browser edits preview.
 
         $snapshot = $this->authoritySnapshot(
             $authority,
@@ -480,6 +493,23 @@ final class CashierV3CheckoutPreparationServices
             $operatorScope,
             $dataScope
         );
+        if ($checkoutSnapshot !== null) {
+            foreach ((array)($checkoutSnapshot['lines'] ?? []) as $line) {
+                $binding = is_array($line['cardOperationUpgrade'] ?? null)
+                    ? $line['cardOperationUpgrade']
+                    : [];
+                $operationId = trim((string)($binding['operationId'] ?? ''));
+                if ($operationId === '') {
+                    continue;
+                }
+                $cardOperationBinding[] = $this->cardOperationSettlements->bindSnapshotOperationInTx(
+                    $operationId,
+                    (string)$kernel['requestId'],
+                    $operatorScope,
+                    $dataScope
+                );
+            }
+        }
 
         $result = [
             'contractVersion' => self::PREPARATION_CONTRACT_VERSION,
@@ -514,8 +544,21 @@ final class CashierV3CheckoutPreparationServices
         }
         $saleLines = [];
         $entitlementLines = [];
+        $snapshotPaymentLines = [];
+        $snapshotBalanceAmount = '0';
         foreach ($lines as $index => $line) {
             $role = (string)($line['lineRole'] ?? '');
+            if ($role === 'payment') {
+                $snapshotPaymentLines[] = $line;
+                continue;
+            }
+            if ($role === 'balance_payment') {
+                if ((float)($line['amount'] ?? 0) < 0 || $snapshotBalanceAmount !== '0') {
+                    throw self::incomplete('checkout_snapshot_balance_line_invalid');
+                }
+                $snapshotBalanceAmount = (string)($line['amount'] ?? '0');
+                continue;
+            }
             if ($role === 'sale') {
                 $itemId = (int)($line['itemId'] ?? 0);
                 $quantity = (int)($line['quantity'] ?? 0);
@@ -535,7 +578,9 @@ final class CashierV3CheckoutPreparationServices
                         $idempotencyKey . ':snapshot:' . $index,
                         $contexts,
                         $operatorScope,
-                        $dataScope
+                        $dataScope,
+                        (int)($snapshot['memberId'] ?? 0),
+                        true
                     );
                 } else {
                     $server = $this->saleCatalog->selectDraftSaleLineAfterGatewayLocksInTx(
@@ -563,6 +608,8 @@ final class CashierV3CheckoutPreparationServices
                     $snapshotOriginal !== null ? $snapshotOriginal : $originalUnit * $quantity
                 );
                 $coupon = is_array($line['coupon'] ?? null) ? $line['coupon'] : [];
+                $cardPurchaseSnapshot = $this->browserCardPurchaseSnapshot($line, $server);
+                $isPresale = !$customCard && !empty($line['isPresale']);
                 $saleLines[] = [
                     'lineId' => (string)($line['lineId'] ?? 'snapshot-' . $index),
                     'lineAmountCents' => $lineAmount,
@@ -586,6 +633,9 @@ final class CashierV3CheckoutPreparationServices
                     'couponUserId' => (int)($line['couponUserId'] ?? $coupon['id'] ?? $line['couponId'] ?? 0),
                     'couponNameSnapshot' => (string)($line['couponNameSnapshot'] ?? $coupon['name'] ?? $line['couponSummary'] ?? ''),
                     'couponDiscountCents' => (int)($line['couponDiscountCents'] ?? $coupon['discountAmountCents'] ?? 0),
+                    // The checkout snapshot owns the user's debt choice.
+                    // Upgrade entitlement credit is reconciled separately and
+                    // must not erase or reinterpret this line-level amount.
                     'debtAmountCents' => (int)($line['debtAmountCents'] ?? 0),
                     'serviceObject' => (string)($line['serviceObject'] ?? ''),
                     'friendCountsAsCustomer' => !array_key_exists('friendCountsAsCustomer', $line) || !empty($line['friendCountsAsCustomer']),
@@ -594,13 +644,19 @@ final class CashierV3CheckoutPreparationServices
                     'guideSelections' => is_array($line['guideSelections'] ?? null) ? $line['guideSelections'] : [],
                     'salesManagerSelections' => is_array($line['salesManagerSelections'] ?? null) ? $line['salesManagerSelections'] : [],
                     'isExperience' => !empty($line['isExperience']) ? 1 : 0,
-                    'isPresale' => !empty($line['isPresale']) ? 1 : 0,
-                    'inventoryOutboundRequired' => array_key_exists('inventoryOutboundRequired', $line) && empty($line['inventoryOutboundRequired']) ? 0 : 1,
+                    // A custom card only issues rights. Never permit it to
+                    // enter presale or physical inventory settlement.
+                    'isPresale' => $customCard ? 0 : (!empty($line['isPresale']) ? 1 : 0),
+                    'inventoryOutboundRequired' => $customCard
+                        || $isPresale
+                        ? 0
+                        : (array_key_exists('inventoryOutboundRequired', $line) && empty($line['inventoryOutboundRequired']) ? 0 : 1),
                     'configuredCostCents' => (int)($server['configured_cost_cents'] ?? 0),
                     'priceChangeReason' => '',
                     'priceChangedBy' => 0,
                     'priceChangedByNameSnapshot' => '',
                     'priceChangedAt' => 0,
+                    'cardPurchaseSnapshot' => $cardPurchaseSnapshot,
                 ];
                 continue;
             }
@@ -610,9 +666,9 @@ final class CashierV3CheckoutPreparationServices
                     'lineRole' => 'entitlement_service',
                     'entitlementInstanceId' => (int)($line['entitlementInstanceId'] ?? 0),
                     'entitlementSourceDetailId' => (int)($line['entitlementSourceDetailId'] ?? 0),
-                    'entitlementSourceVersion' => (int)($line['entitlementSourceVersion'] ?? 0),
+            'entitlementSourceVersion' => 1,
                     'projectId' => (int)($line['projectId'] ?? 0),
-                    'projectVersion' => (int)($line['projectVersion'] ?? 0),
+            'projectVersion' => 1,
                     'quantity' => (int)($line['quantity'] ?? 0),
                     'actualAmount' => (string)($line['actualAmount'] ?? $line['actualEntitlementAmount'] ?? '0'),
                     'entitlementSourceKind' => (string)($line['entitlementSourceKind'] ?? 'unknown'),
@@ -644,6 +700,12 @@ final class CashierV3CheckoutPreparationServices
             'supplement_enabled' => !empty($snapshot['supplement']['enabled']) ? 1 : 0,
             'supplement_reason' => (string)($snapshot['supplement']['reason'] ?? ''),
         ];
+        // Entitlement-only completion has no collection phase. Clear any
+        // stale payment or balance fields that may have survived a previous
+        // sale overlay before the final authority snapshot is fingerprinted.
+        $snapshot['payment'] = ['selectedLines' => $snapshotPaymentLines];
+        $snapshot['balancePaymentAmount'] = $snapshotBalanceAmount;
+        if ($saleLines === []) $snapshot['payment'] = ['selectedLines' => []];
         $authority = [
             'lines' => $saleLines,
             'storedDraft' => $storedDraft,
@@ -660,6 +722,30 @@ final class CashierV3CheckoutPreparationServices
         return $kind === 'custom_card'
             || is_array($line['customCardConfiguration'] ?? null)
             || is_array($line['localCustomCardConfiguration'] ?? null);
+    }
+
+    /** The browser's selected card definition travels with the one checkout snapshot. */
+    private function browserCardPurchaseSnapshot(array $line, array $server): array
+    {
+        $isCard = in_array((string)($server['kind_code'] ?? ''), ['count_card', 'card_package', 'custom_card'], true);
+        if (!$isCard) {
+            return [];
+        }
+        $snapshot = is_array($line['cardPurchaseSnapshot'] ?? null)
+            ? $line['cardPurchaseSnapshot']
+            : (is_array($line['authoritySnapshot']['cardPurchase'] ?? null)
+                ? $line['authoritySnapshot']['cardPurchase'] : []);
+        $sourceKind = (string)($snapshot['sourceKind'] ?? '');
+        if (!in_array($sourceKind, ['count_card', 'card_package', 'custom_card'], true)
+            || !is_array($snapshot['components'] ?? null)
+            || ($sourceKind === 'card_package' && $snapshot['components'] === [])) {
+            throw self::incomplete('checkout_snapshot_card_purchase_missing');
+        }
+        $encoded = json_encode($snapshot, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        if (!is_string($encoded) || strlen($encoded) > 1048576) {
+            throw self::incomplete('checkout_snapshot_card_purchase_invalid');
+        }
+        return $snapshot;
     }
 
     private function authoritySnapshot(
@@ -709,6 +795,9 @@ final class CashierV3CheckoutPreparationServices
             ? 1
             : $this->contextVersion($contexts, 'cashier_workspace', $workspaceId);
         $browserBusinessDate = trim((string)($browserSnapshot['businessDate'] ?? ''));
+        $snapshotOccurredAt = $browserSnapshot !== []
+            ? $this->snapshotOccurredAt($browserSnapshot)
+            : $now;
         $supplementEnabled = (int)($authority['storedDraft']['supplement_enabled'] ?? 0) === 1;
         $supplementBusinessDate = (string)($authority['storedDraft']['supplement_business_date'] ?? '');
         if ($supplementEnabled
@@ -738,10 +827,10 @@ final class CashierV3CheckoutPreparationServices
             // snapshot. It must not implicitly turn on supplement audit.
             'businessDate' => $supplementEnabled
                 ? $supplementBusinessDate
-                : ($browserBusinessDate !== '' ? $browserBusinessDate : date('Y-m-d', $now)),
+                : ($browserBusinessDate !== '' ? $browserBusinessDate : date('Y-m-d', $snapshotOccurredAt)),
             'businessTimezone' => 'Asia/Shanghai',
-            'occurredAt' => $now,
-            'recordedAt' => $now,
+            'occurredAt' => $snapshotOccurredAt,
+            'recordedAt' => max($now, $snapshotOccurredAt),
             'orderNote' => $browserSnapshot !== []
                 ? (string)($browserSnapshot['orderNote'] ?? '')
                 : (string)($authority['storedDraft']['order_note'] ?? ''),
@@ -757,7 +846,7 @@ final class CashierV3CheckoutPreparationServices
             'entitlementLines' => $entitlementLines,
             'paymentDetails' => $browserSnapshot === []
                 ? []
-                : $this->snapshotPaymentDetails($browserSnapshot, $now),
+                : $this->snapshotPaymentDetails($browserSnapshot, $snapshotOccurredAt),
             'balanceDeduction' => $balance,
             'debt' => [
                 'authorityKey' => $debtAmountCents > 0
@@ -818,6 +907,7 @@ final class CashierV3CheckoutPreparationServices
         if ($sale > $original) {
             $original = $sale;
         }
+        $isPresale = !empty($line['isPresale']);
         try {
             $craftsmen = $sourceType === 'project'
                 ? CashierV3CheckoutCraftsmenSnapshot::normalize($line['craftsmen'] ?? [])
@@ -865,10 +955,14 @@ final class CashierV3CheckoutPreparationServices
             // These flags are part of every persisted line snapshot. Keep the
             // ordinary sale defaults explicit so strict repository validation
             // cannot reject a line that did not use the presale/outbound UI.
-            'isPresale' => !empty($line['isPresale']) ? 1 : 0,
-            'inventoryOutboundRequired' => array_key_exists('inventoryOutboundRequired', $line)
-                ? (empty($line['inventoryOutboundRequired']) ? 0 : 1)
-                : 1,
+            'isPresale' => $isPresale ? 1 : 0,
+            'inventoryOutboundRequired' => $isPresale
+                ? 0
+                : (array_key_exists('inventoryOutboundRequired', $line)
+                    ? (empty($line['inventoryOutboundRequired']) ? 0 : 1)
+                    : 1),
+            'cardPurchaseSnapshot' => is_array($line['cardPurchaseSnapshot'] ?? null)
+                ? $line['cardPurchaseSnapshot'] : [],
         ];
         $manualLaborFeeCents = array_key_exists('laborManualFeeCents', $line)
             ? ($line['laborManualFeeCents'] === null ? null : (int)$line['laborManualFeeCents'])
@@ -930,6 +1024,18 @@ final class CashierV3CheckoutPreparationServices
             ];
         }
         return $details;
+    }
+
+    private function snapshotOccurredAt(array $snapshot): int
+    {
+        $value = $snapshot['occurredAt'] ?? $snapshot['occurred_at'] ?? null;
+        if (is_string($value) && preg_match('/^[1-9][0-9]*$/D', $value) === 1) {
+            $value = (int)$value;
+        }
+        if (!is_int($value) || $value <= 0) {
+            throw self::incomplete('checkout_snapshot_occurred_at_invalid');
+        }
+        return $value;
     }
 
     private function snapshotBalanceDeduction(
@@ -999,11 +1105,9 @@ final class CashierV3CheckoutPreparationServices
 
     private function entitlementSnapshotLine(array $line): array
     {
-        // The cart line is an editing projection and may have been created
-        // before the legacy entitlement shadow was synchronized. Rebind the
-        // final checkout snapshot to the latest shadow versions; submit still
-        // locks the holder/detail and verifies remaining authority in the same
-        // transaction, so this does not bypass entitlement validation.
+        // The browser line contains business facts only. Resolve the current
+        // authority rows inside the final transaction; no client revision is
+        // accepted or replayed here.
         $holderId = (int)($line['entitlementInstanceId'] ?? 0);
         $detailId = (int)($line['entitlementSourceDetailId'] ?? 0);
         $versions = [];
@@ -1226,7 +1330,7 @@ final class CashierV3CheckoutPreparationServices
         return $secret;
     }
 
-    private function shadowVersion(string $kind, int $resourceId): int
+    private function currentAuthorityVersion(string $kind, int $resourceId): int
     {
         $row = Db::name(CashierV3EntitlementResourceVersionProvider::VERSION_TABLE)
             ->where('resource_kind', $kind)

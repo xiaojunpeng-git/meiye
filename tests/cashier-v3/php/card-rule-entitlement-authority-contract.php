@@ -129,7 +129,7 @@ $projectionSource = (string)file_get_contents(
     $root . '/app/services/cashier/v3/cashier/CashierV3EntitlementProjectionServices.php'
 );
 $adapterSource = (string)file_get_contents(
-    $root . '/app/services/cashier/v3/checkout/CashierV3EntitlementCompletionAuthorityAdapter.php'
+    $root . '/app/services/cashier/v3/checkout/CashierV3DirectSnapshotEntitlementSettlementServices.php'
 );
 
 ruleAuthorityCheck('CARD-RULE-05 every successful service advances whole-card state version',

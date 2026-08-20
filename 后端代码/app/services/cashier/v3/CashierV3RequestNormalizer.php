@@ -50,29 +50,14 @@ class CashierV3RequestNormalizer
             $out = self::normalizeCardOperation($out);
         }
 
-        if (in_array($canonicalAction, [
-            'add-payment-method',
-            'update-payment-line',
-            'remove-payment-line',
-        ], true)) {
-            $out = self::normalizeCheckoutPaymentDraft($canonicalAction, $out);
-        }
-
-        if ($canonicalAction === 'update-checkout-business-source') {
-            $out = self::normalizeCheckoutBusinessSource($out);
-        }
-
-        if ($canonicalAction === 'prepare-checkout'
-            && array_key_exists('checkoutSnapshot', $out)) {
+        if ($canonicalAction === 'submit-checkout' && array_key_exists('checkoutSnapshot', $out)) {
+            $snapshotKeys = array_keys($out);
+            sort($snapshotKeys, SORT_STRING);
+            if ($canonicalAction === 'submit-checkout'
+                && $snapshotKeys !== ['checkoutSnapshot']) {
+                throw self::invalidCheckoutSnapshot('final_snapshot_payload_invalid');
+            }
             $out['checkoutSnapshot'] = self::normalizeCheckoutSnapshot($out['checkoutSnapshot']);
-        }
-
-        if (in_array($canonicalAction, [
-            'prepare-checkout-submission',
-            'submit-checkout',
-            'return-to-payment-edit',
-        ], true)) {
-            $out = self::normalizeCheckoutSubmissionPreparation($canonicalAction, $out);
         }
 
         // selectorEntry：只保留 canonical 键；双别名冲突拒绝
@@ -92,6 +77,11 @@ class CashierV3RequestNormalizer
         if (!is_array($snapshot)) {
             throw self::invalidCheckoutSnapshot('snapshot_not_object');
         }
+        // A browser checkout snapshot contains business intent only.  Strip
+        // generated projection coordinates even when an older client sends
+        // them back; server-side request/version rows remain internal to the
+        // settlement transaction and never become snapshot data.
+        $snapshot = self::stripGeneratedSnapshotMetadata($snapshot);
         $encoded = json_encode($snapshot, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         if (!is_string($encoded) || strlen($encoded) > 1048576) {
             throw self::invalidCheckoutSnapshot('snapshot_too_large');
@@ -105,6 +95,10 @@ class CashierV3RequestNormalizer
             || ($customerMode === 'member') !== ($memberId > 0)) {
             throw self::invalidCheckoutSnapshot('member_binding_invalid');
         }
+        $occurredAt = self::canonicalPositiveInteger(
+            $snapshot['occurredAt'] ?? $snapshot['occurred_at'] ?? null,
+            'occurredAt'
+        );
         $lines = $snapshot['lines'] ?? null;
         if (!is_array($lines) || $lines === [] || count($lines) > 200) {
             throw self::invalidCheckoutSnapshot('line_count_invalid');
@@ -124,7 +118,9 @@ class CashierV3RequestNormalizer
             if (in_array($role, ['entitlement', 'benefit_service'], true)) {
                 $role = 'entitlement_service';
             }
-            if (!in_array($role, ['sale', 'entitlement_service'], true)) {
+            if ($role === 'collection') $role = 'payment';
+            if ($role === 'balance') $role = 'balance_payment';
+            if (!in_array($role, ['sale', 'entitlement_service', 'card_operation', 'payment', 'balance_payment'], true)) {
                 throw self::invalidCheckoutSnapshot('line_role_invalid', $index);
             }
             $quantity = self::canonicalPositiveInteger($line['quantity'] ?? null, 'quantity', 1000000);
@@ -154,7 +150,7 @@ class CashierV3RequestNormalizer
                         'itemId'
                     );
                 }
-            } else {
+            } elseif ($role === 'entitlement_service') {
                 $row['entitlementInstanceId'] = self::canonicalPositiveInteger(
                     $line['entitlementInstanceId'] ?? $line['cardHolderId'] ?? null,
                     'entitlementInstanceId'
@@ -163,18 +159,46 @@ class CashierV3RequestNormalizer
                     $line['entitlementSourceDetailId'] ?? $line['memberBenefitPoolId'] ?? null,
                     'entitlementSourceDetailId'
                 );
-                $row['entitlementSourceVersion'] = self::canonicalPositiveInteger(
-                    $line['entitlementSourceVersion'] ?? $line['sourceVersion'] ?? null,
-                    'entitlementSourceVersion'
-                );
                 $row['projectId'] = self::canonicalPositiveInteger(
                     $line['projectId'] ?? $line['project_id'] ?? null,
                     'projectId'
                 );
-                $row['projectVersion'] = self::canonicalPositiveInteger(
-                    $line['projectVersion'] ?? $line['detailVersion'] ?? null,
-                    'projectVersion'
-                );
+            } elseif (in_array($role, ['payment', 'balance_payment'], true)) {
+                $method = trim((string)($line['method'] ?? $line['paymentMethod'] ?? ''));
+                $amount = $line['amount'] ?? null;
+                if ($role === 'payment' && $method === '') {
+                    throw self::invalidCheckoutSnapshot('payment_line_method_invalid', $index);
+                }
+                if ($amount === null || is_array($amount) || is_object($amount)) {
+                    throw self::invalidCheckoutSnapshot('payment_line_amount_invalid', $index);
+                }
+                $row['method'] = $method;
+                $row['amount'] = $amount;
+            } else {
+                // Card operations are browser intents, not persisted cart
+                // rows. They are materialized by the final submit-checkout
+                // transaction, so accept the displayed intent without any
+                // client-generated resource/version field.
+                $operation = $line['localCardOperation'] ?? $line['cardOperation'] ?? null;
+                if (!is_array($operation)) {
+                    throw self::invalidCheckoutSnapshot('card_operation_invalid', $index);
+                }
+                $row['localCardOperation'] = self::normalizeCardOperation($operation);
+                if ($row['localCardOperation']['operationType'] === 'project_replacement') {
+                    $targetSnapshot = $line['targetProjectSnapshot'] ?? null;
+                    if (!is_array($targetSnapshot)
+                        || trim((string)($targetSnapshot['name'] ?? '')) === ''
+                        || self::canonicalPositiveInteger($targetSnapshot['catalogId'] ?? null, 'targetProjectSnapshot.catalogId') <= 0
+                        || self::canonicalPositiveInteger($targetSnapshot['targetQuantity'] ?? null, 'targetProjectSnapshot.targetQuantity')
+                            !== (int)$row['localCardOperation']['targetQuantity']) {
+                        throw self::invalidCheckoutSnapshot('project_replacement_target_snapshot_invalid', $index);
+                    }
+                    $row['targetProjectSnapshot'] = [
+                        'catalogId' => self::canonicalPositiveInteger($targetSnapshot['catalogId'], 'targetProjectSnapshot.catalogId'),
+                        'name' => trim((string)$targetSnapshot['name']),
+                        'targetQuantity' => self::canonicalPositiveInteger($targetSnapshot['targetQuantity'], 'targetProjectSnapshot.targetQuantity'),
+                    ];
+                }
             }
             foreach (['craftsmen', 'salespeople', 'guideSelections', 'salesManagerSelections'] as $peopleField) {
                 if (array_key_exists($peopleField, $row)
@@ -189,12 +213,30 @@ class CashierV3RequestNormalizer
         // date, source, payment, coupon, debt or attribution fields before
         // the final checkout authority consumes them.
         $result = $snapshot;
-        $result['contractVersion'] = 'cashier-v3-checkout-snapshot-v1';
         $result['customerMode'] = $customerMode;
         $result['memberId'] = $memberId;
+        $result['occurredAt'] = $occurredAt;
         $result['lines'] = $normalized;
-        unset($result['customer_mode'], $result['member_id']);
+        unset($result['customer_mode'], $result['member_id'], $result['occurred_at']);
         return $result;
+    }
+
+    private static function stripGeneratedSnapshotMetadata($value)
+    {
+        if (!is_array($value)) return $value;
+        $clean = [];
+        foreach ($value as $key => $nested) {
+            $name = (string)$key;
+            $normalizedName = strtolower(str_replace(['_', '-'], '', $name));
+            if (preg_match('/(?:version|revision|token|commandcontexts|resumeonload|recoveryready|preparationready|snapshotready)/i', $normalizedName) === 1
+                || preg_match('/^(?:checkoutrequestid|preparationrequestid|statecontextid|staterevision|workspaceid|requeststatus)$/i', $normalizedName) === 1) {
+                continue;
+            }
+            $clean[$key] = is_array($nested)
+                ? self::stripGeneratedSnapshotMetadata($nested)
+                : $nested;
+        }
+        return $clean;
     }
 
     private static function invalidCheckoutSnapshot(string $reason, int $index = -1): CashierV3CommandException
@@ -223,22 +265,18 @@ class CashierV3RequestNormalizer
                 'project_upgrade',
             ]
         );
-        $holderId = self::canonicalPositiveInteger(
-            CashierV3AliasResolver::resolveString(
-                $payload,
-                ['sourceCardHolderId', 'source_card_holder_id'],
-                true
-            ),
-            'sourceCardHolderId'
-        );
-        $version = self::canonicalPositiveInteger(
-            CashierV3AliasResolver::resolveString(
-                $payload,
-                ['sourceCardHolderVersion', 'source_card_holder_version'],
-                true
-            ),
-            'sourceCardHolderVersion'
-        );
+        $isReplacementSnapshot = $type === 'project_replacement'
+            && array_key_exists('replacementSnapshot', $payload);
+        $holderId = $isReplacementSnapshot
+            ? 0
+            : self::canonicalPositiveInteger(
+                CashierV3AliasResolver::resolveString(
+                    $payload,
+                    ['sourceCardHolderId', 'source_card_holder_id'],
+                    true
+                ),
+                'sourceCardHolderId'
+            );
         $reasonRequired = in_array($type, [
             'card_extension',
             'card_transfer',
@@ -251,10 +289,46 @@ class CashierV3RequestNormalizer
         }
         $base = [
             'operationType' => $type,
-            'sourceCardHolderId' => $holderId,
-            'sourceCardHolderVersion' => $version,
             'reason' => $reason,
         ];
+        if (array_key_exists('idempotencyKey', $payload)) {
+            $base['idempotencyKey'] = trim((string)$payload['idempotencyKey']);
+        }
+        if (array_key_exists('targetSnapshot', $payload)) {
+            if (!is_array($payload['targetSnapshot'])) {
+                throw self::invalidCardOperation('target_snapshot_invalid');
+            }
+            $base['targetSnapshot'] = $payload['targetSnapshot'];
+        }
+        if ($type === 'project_replacement' && array_key_exists('replacementSnapshot', $payload)) {
+            $snapshot = self::normalizeReplacementSnapshot($payload['replacementSnapshot']);
+            $base['sourceCardHolderId'] = $snapshot['sourceCard']['id'];
+            $base['projectLines'] = array_map(static function (array $line): array {
+                return [
+                    'sourceDetailId' => $line['detailId'],
+                    'quantity' => $line['quantity'],
+                ];
+            }, $snapshot['sourceLines']);
+            $base['targetCatalogId'] = $snapshot['target']['skuId'];
+            $base['targetQuantity'] = $snapshot['target']['quantity'];
+            $base['targetSnapshot'] = [
+                'catalogId' => $snapshot['target']['projectId'],
+                'name' => $snapshot['target']['projectName'],
+                'targetQuantity' => $snapshot['target']['quantity'],
+            ];
+            $base['replacementSnapshot'] = $snapshot;
+            $base['replacementMemberId'] = $snapshot['member']['id'];
+
+            $actual = array_keys($payload);
+            sort($actual, SORT_STRING);
+            $allowed = ['operationType', 'idempotencyKey', 'reason', 'replacementSnapshot'];
+            sort($allowed, SORT_STRING);
+            if (array_diff($actual, $allowed) !== []) {
+                throw self::invalidCardOperation('replacement_snapshot_payload_shape_invalid');
+            }
+            return $base;
+        }
+        $base['sourceCardHolderId'] = $holderId;
         if ($type === 'card_transfer') {
             $base['targetMemberId'] = self::canonicalPositiveInteger(
                 CashierV3AliasResolver::resolveString(
@@ -308,12 +382,23 @@ class CashierV3RequestNormalizer
                 }
                 $base['projectLines'] = $normalizedLines;
             }
+            if ($type === 'project_replacement') {
+                $base['targetQuantity'] = self::canonicalPositiveInteger(
+                    $payload['targetQuantity'] ?? $payload['target_quantity'] ?? null,
+                    'targetQuantity'
+                );
+            } elseif ($type === 'project_upgrade') {
+                $base['targetEntitlementQuantity'] = self::canonicalPositiveInteger(
+                    $payload['targetEntitlementQuantity'] ?? $payload['target_entitlement_quantity'] ?? 1,
+                    'targetEntitlementQuantity'
+                );
+            }
         }
         $actual = array_keys($payload);
         sort($actual, SORT_STRING);
         $allowedVariants = [
             'operationType', 'operation_type', 'sourceCardHolderId', 'source_card_holder_id',
-            'sourceCardHolderVersion', 'source_card_holder_version', 'reason',
+            'reason', 'idempotencyKey', 'targetSnapshot',
         ];
         if ($type === 'card_transfer') {
             $allowedVariants = array_merge($allowedVariants, ['targetMemberId', 'target_member_id']);
@@ -324,6 +409,11 @@ class CashierV3RequestNormalizer
             if ($type !== 'card_upgrade') {
                 $allowedVariants = array_merge($allowedVariants, ['projectLines', 'project_lines']);
             }
+            if ($type === 'project_replacement') {
+                $allowedVariants = array_merge($allowedVariants, ['targetQuantity', 'target_quantity']);
+            } elseif ($type === 'project_upgrade') {
+                $allowedVariants = array_merge($allowedVariants, ['targetEntitlementQuantity', 'target_entitlement_quantity']);
+            }
         }
         sort($allowedVariants, SORT_STRING);
         if (array_diff($actual, $allowedVariants) !== []) {
@@ -332,216 +422,87 @@ class CashierV3RequestNormalizer
         return $base;
     }
 
+    private static function normalizeReplacementSnapshot($snapshot): array
+    {
+        if (!is_array($snapshot)) {
+            throw self::invalidCardOperation('replacement_snapshot_invalid');
+        }
+        $member = is_array($snapshot['member'] ?? null) ? $snapshot['member'] : [];
+        $sourceCard = is_array($snapshot['sourceCard'] ?? $snapshot['source_card'] ?? null)
+            ? ($snapshot['sourceCard'] ?? $snapshot['source_card']) : [];
+        $target = is_array($snapshot['target'] ?? null) ? $snapshot['target'] : [];
+        $memberId = self::canonicalPositiveInteger($member['id'] ?? $member['memberId'] ?? null, 'replacementSnapshot.member.id');
+        $holderId = self::canonicalPositiveInteger($sourceCard['id'] ?? $sourceCard['cardHolderId'] ?? null, 'replacementSnapshot.sourceCard.id');
+        $targetProductId = self::canonicalPositiveInteger(
+            $target['projectId'] ?? $target['productId'] ?? $target['catalogId'] ?? null,
+            'replacementSnapshot.target.projectId'
+        );
+        $targetSkuId = self::canonicalPositiveInteger(
+            $target['skuId'] ?? $target['catalogItemId'] ?? $target['id'] ?? null,
+            'replacementSnapshot.target.skuId'
+        );
+        $targetName = trim((string)($target['projectName'] ?? $target['name'] ?? ''));
+        if ($targetName === '' || mb_strlen($targetName) > 128) {
+            throw self::invalidCardOperation('replacement_snapshot_target_name_invalid');
+        }
+        $targetQuantity = self::canonicalPositiveInteger(
+            $target['quantity'] ?? $target['targetQuantity'] ?? null,
+            'replacementSnapshot.target.quantity'
+        );
+        $sourceLines = $snapshot['sourceLines'] ?? $snapshot['source_lines'] ?? null;
+        if (!is_array($sourceLines) || $sourceLines === [] || count($sourceLines) > 20) {
+            throw self::invalidCardOperation('replacement_snapshot_source_lines_invalid');
+        }
+        $seen = [];
+        $normalizedLines = [];
+        foreach (array_values($sourceLines) as $index => $line) {
+            if (!is_array($line)) {
+                throw self::invalidCardOperation('replacement_snapshot_source_line_invalid_' . $index);
+            }
+            $detailId = self::canonicalPositiveInteger(
+                $line['detailId'] ?? $line['sourceDetailId'] ?? null,
+                'replacementSnapshot.sourceLines.detailId'
+            );
+            if (isset($seen[$detailId])) {
+                throw self::invalidCardOperation('replacement_snapshot_source_duplicate');
+            }
+            $seen[$detailId] = true;
+            $projectId = self::canonicalPositiveInteger(
+                $line['projectId'] ?? $line['productId'] ?? null,
+                'replacementSnapshot.sourceLines.projectId'
+            );
+            $projectName = trim((string)($line['projectName'] ?? $line['name'] ?? ''));
+            if ($projectName === '' || mb_strlen($projectName) > 128) {
+                throw self::invalidCardOperation('replacement_snapshot_source_name_invalid');
+            }
+            $normalizedLines[] = [
+                'detailId' => $detailId,
+                'projectId' => $projectId,
+                'projectName' => $projectName,
+                'quantity' => self::canonicalPositiveInteger($line['quantity'] ?? null, 'replacementSnapshot.sourceLines.quantity'),
+            ];
+        }
+        return [
+            'member' => [
+                'id' => $memberId,
+                'name' => trim((string)($member['name'] ?? $member['realName'] ?? '')),
+            ],
+            'sourceCard' => ['id' => $holderId],
+            'sourceLines' => $normalizedLines,
+            'target' => [
+                'projectId' => $targetProductId,
+                'skuId' => $targetSkuId,
+                'projectName' => $targetName,
+                'quantity' => $targetQuantity,
+            ],
+        ];
+    }
+
     private static function invalidCardOperation(string $reason): CashierV3CommandException
     {
         return CashierV3CommandException::invalidContext(
             '卡操作资料无效，请刷新后重新填写。',
             ['action' => 'submit-card-operation', 'reason' => $reason]
-        );
-    }
-
-    private static function normalizeCheckoutPaymentDraft(string $action, array $payload): array
-    {
-        $common = [
-            'checkoutRequestId',
-            'checkoutRequestVersion',
-            'preparationRequestId',
-            'preparationToken',
-        ];
-        $specific = [
-            'add-payment-method' => ['paymentMethodId'],
-            'update-payment-line' => [
-                'paymentLineId',
-                'amount',
-                'externalTransactionNo',
-                'remark',
-            ],
-            'remove-payment-line' => ['paymentLineId'],
-        ][$action];
-        $allowed = array_merge($common, $specific);
-        $actual = array_keys($payload);
-        sort($allowed, SORT_STRING);
-        sort($actual, SORT_STRING);
-        if ($actual !== $allowed) {
-            throw CashierV3CommandException::invalidContext(
-                '本次收款明细格式无效，请刷新结账页面后重试。',
-                ['action' => $action, 'reason' => 'checkout_payment_payload_shape_invalid']
-            );
-        }
-
-        $requestId = trim((string)$payload['checkoutRequestId']);
-        if (preg_match('/^CKR-[0-9a-f]{40}$/D', $requestId) !== 1) {
-            throw self::invalidCheckoutPayment($action, 'checkout_request_id_invalid');
-        }
-        $requestVersion = self::strictPositiveInt(
-            $payload['checkoutRequestVersion'],
-            'checkoutRequestVersion',
-            $action
-        );
-        $preparationRequestId = trim((string)$payload['preparationRequestId']);
-        $preparationToken = trim((string)$payload['preparationToken']);
-        if ($preparationRequestId === ''
-            || strlen($preparationRequestId) > 128
-            || preg_match('/^[A-Za-z0-9_.:-]+$/D', $preparationRequestId) !== 1
-            || preg_match('/^CKPT-[0-9a-f]{64}$/D', $preparationToken) !== 1) {
-            throw self::invalidCheckoutPayment($action, 'checkout_preparation_identity_invalid');
-        }
-
-        $normalized = [
-            'checkoutRequestId' => $requestId,
-            'checkoutRequestVersion' => $requestVersion,
-            'preparationRequestId' => $preparationRequestId,
-            'preparationToken' => $preparationToken,
-        ];
-        if ($action === 'add-payment-method') {
-            $method = trim((string)$payload['paymentMethodId']);
-            if (!in_array($method, [
-                'unionpay',
-                'wechat',
-                'alipay',
-                'dianping_voucher',
-                'douyin_voucher',
-                'partner_collection',
-                'other_collection',
-                'old_card_entry',
-            ], true)) {
-                throw self::invalidCheckoutPayment($action, 'payment_method_invalid');
-            }
-            $normalized['paymentMethodId'] = $method;
-            return $normalized;
-        }
-
-        $paymentLineId = trim((string)$payload['paymentLineId']);
-        if (preg_match('/^CKP-[0-9a-f]{40}$/D', $paymentLineId) !== 1) {
-            throw self::invalidCheckoutPayment($action, 'payment_line_id_invalid');
-        }
-        $normalized['paymentLineId'] = $paymentLineId;
-        if ($action === 'update-payment-line') {
-            if (!is_string($payload['amount'])
-                || preg_match('/^(?:0|[1-9][0-9]*)$/D', $payload['amount']) !== 1
-                || !is_string($payload['externalTransactionNo'])
-                || strlen($payload['externalTransactionNo']) > 64
-                || !is_string($payload['remark'])
-                || strlen($payload['remark']) > 255) {
-                throw self::invalidCheckoutPayment($action, 'payment_line_fields_invalid');
-            }
-            $normalized['amount'] = $payload['amount'];
-            $normalized['externalTransactionNo'] = trim($payload['externalTransactionNo']);
-            $normalized['remark'] = trim($payload['remark']);
-        }
-        return $normalized;
-    }
-
-    private static function normalizeCheckoutBusinessSource(array $payload): array
-    {
-        $allowed = ['checkoutRequestId', 'checkoutRequestVersion', 'preparationRequestId', 'preparationToken', 'primarySourceId', 'secondarySourceId', 'sourceSelectionVersion', 'rewardAmountCents'];
-        $actual = array_keys($payload);
-        sort($allowed, SORT_STRING);
-        sort($actual, SORT_STRING);
-        if ($actual !== $allowed) {
-            throw CashierV3CommandException::invalidContext('业务来源资料无效，请刷新结账页面后重试。', ['action' => 'update-checkout-business-source', 'reason' => 'checkout_business_source_payload_shape_invalid']);
-        }
-        $requestId = trim((string)$payload['checkoutRequestId']);
-        if (preg_match('/^CKR-[0-9a-f]{40}$/D', $requestId) !== 1) {
-            throw self::invalidCheckoutPayment('update-checkout-business-source', 'checkout_request_id_invalid');
-        }
-        $preparationRequestId = trim((string)$payload['preparationRequestId']);
-        $preparationToken = trim((string)$payload['preparationToken']);
-        if ($preparationRequestId === '' || strlen($preparationRequestId) > 128 || preg_match('/^[A-Za-z0-9_.:-]+$/D', $preparationRequestId) !== 1 || preg_match('/^CKPT-[0-9a-f]{64}$/D', $preparationToken) !== 1) {
-            throw self::invalidCheckoutPayment('update-checkout-business-source', 'checkout_preparation_identity_invalid');
-        }
-        $primary = self::strictPositiveInt($payload['primarySourceId'], 'primarySourceId', 'update-checkout-business-source');
-        foreach (['secondarySourceId', 'sourceSelectionVersion', 'rewardAmountCents'] as $field) {
-            if (!is_int($payload[$field]) && !is_string($payload[$field]) || !preg_match('/^(?:0|[1-9][0-9]*)$/D', (string)$payload[$field])) {
-                throw self::invalidCheckoutPayment('update-checkout-business-source', $field . '_invalid');
-            }
-        }
-        if ((int)$payload['rewardAmountCents'] > 100000000000) {
-            throw self::invalidCheckoutPayment('update-checkout-business-source', 'reward_amount_cents_invalid');
-        }
-        return [
-            'checkoutRequestId' => $requestId,
-            'checkoutRequestVersion' => self::strictPositiveInt($payload['checkoutRequestVersion'], 'checkoutRequestVersion', 'update-checkout-business-source'),
-            'preparationRequestId' => $preparationRequestId,
-            'preparationToken' => $preparationToken,
-            'primarySourceId' => $primary,
-            'secondarySourceId' => (int)$payload['secondarySourceId'],
-            'sourceSelectionVersion' => (int)$payload['sourceSelectionVersion'],
-            'rewardAmountCents' => (int)$payload['rewardAmountCents'],
-        ];
-    }
-
-    private static function normalizeCheckoutSubmissionPreparation(
-        string $action,
-        array $payload
-    ): array
-    {
-        $allowed = [
-            'checkoutRequestId',
-            'checkoutRequestVersion',
-            'preparationRequestId',
-            'preparationToken',
-        ];
-        $actual = array_keys($payload);
-        sort($allowed, SORT_STRING);
-        sort($actual, SORT_STRING);
-        if ($actual !== $allowed) {
-            throw CashierV3CommandException::invalidContext(
-                '本次结账确认资料无效，请刷新结账页面后重试。',
-                [
-                    'action' => $action,
-                    'reason' => 'checkout_submission_preparation_payload_shape_invalid',
-                ]
-            );
-        }
-        $requestId = trim((string)$payload['checkoutRequestId']);
-        $requestVersion = self::strictPositiveInt(
-            $payload['checkoutRequestVersion'],
-            'checkoutRequestVersion',
-            $action
-        );
-        $preparationRequestId = trim((string)$payload['preparationRequestId']);
-        $preparationToken = trim((string)$payload['preparationToken']);
-        if (preg_match('/^CKR-[0-9a-f]{40}$/D', $requestId) !== 1
-            || $preparationRequestId === ''
-            || strlen($preparationRequestId) > 128
-            || preg_match('/^[A-Za-z0-9_.:-]+$/D', $preparationRequestId) !== 1
-            || preg_match('/^CKPT-[0-9a-f]{64}$/D', $preparationToken) !== 1) {
-            throw self::invalidCheckoutPayment(
-                $action,
-                'checkout_submission_preparation_identity_invalid'
-            );
-        }
-        return [
-            'checkoutRequestId' => $requestId,
-            'checkoutRequestVersion' => $requestVersion,
-            'preparationRequestId' => $preparationRequestId,
-            'preparationToken' => $preparationToken,
-        ];
-    }
-
-    private static function strictPositiveInt($value, string $field, string $action): int
-    {
-        if (is_bool($value) || is_float($value) || is_array($value) || $value === null) {
-            throw self::invalidCheckoutPayment($action, $field . '_invalid');
-        }
-        $raw = trim((string)$value);
-        if (preg_match('/^[1-9][0-9]*$/D', $raw) !== 1
-            || strlen($raw) > strlen((string)PHP_INT_MAX)
-            || (strlen($raw) === strlen((string)PHP_INT_MAX)
-                && strcmp($raw, (string)PHP_INT_MAX) > 0)) {
-            throw self::invalidCheckoutPayment($action, $field . '_invalid');
-        }
-        return (int)$raw;
-    }
-
-    private static function invalidCheckoutPayment(
-        string $action,
-        string $reason
-    ): CashierV3CommandException {
-        return CashierV3CommandException::invalidContext(
-            '本次收款明细格式无效，请刷新结账页面后重试。',
-            ['action' => $action, 'reason' => $reason]
         );
     }
 
@@ -630,21 +591,9 @@ class CashierV3RequestNormalizer
                 'entitlementInstanceId' => $holderId,
                 'entitlementInstanceType' => 'card_holder',
                 'entitlementSourceDetailId' => $detailId,
-                'entitlementSourceVersion' => self::canonicalPositiveInteger(
-                    CashierV3AliasResolver::resolveString(
-                        $line,
-                        ['entitlementSourceVersion', 'entitlement_source_version'],
-                        true
-                    ),
-                    'entitlementSourceVersion'
-                ),
                 'projectId' => self::canonicalPositiveInteger(
                     CashierV3AliasResolver::resolveString($line, ['projectId', 'project_id'], true),
                     'projectId'
-                ),
-                'projectVersion' => self::canonicalPositiveInteger(
-                    CashierV3AliasResolver::resolveString($line, ['projectVersion', 'project_version'], true),
-                    'projectVersion'
                 ),
                 'quantity' => self::canonicalPositiveInteger($line['quantity'] ?? null, 'quantity', 1000000),
                 // “使用权益”打开时已取得当前权益展示快照。加入购物车只是保存草稿，

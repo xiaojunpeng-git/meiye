@@ -12,14 +12,22 @@ class CashierV3C5MemberOrderModule implements CashierV3ActionModule
     public const OWNER = 'C5';
 
     private const FEATURE_MEMBER = 'cashier.v3.member';
-    // 本次只按功能入口授权；新增会员沿用会员入口，不引入不存在的细粒度菜单码。
-    private const FEATURE_MEMBER_CREATE = self::FEATURE_MEMBER;
+    private const FEATURE_MEMBER_CREATE = 'cashier.v3.member.create';
+    private const FEATURE_MEMBER_EDIT = 'cashier.v3.member.edit';
     private const FEATURE_MEMBER_BATCH = 'cashier.v3.member.batch';
     private const FEATURE_ORDER_CENTER = 'cashier.v3.order_center';
     private const FEATURE_MANAGEMENT = 'cashier.v3.management_center';
     private const FEATURE_CASHIER = 'cashier.v3.cashier';
     private const FEATURE_RESERVATION = 'cashier.v3.reservation';
     private const FEATURE_HANG = 'cashier.v3.hang';
+    private const FEATURE_ORDER_STAFF_ADJUST = 'cashier.v3.order.staff_adjust';
+    private const FEATURE_ORDER_REFUND = 'cashier.v3.order.refund';
+    private const FEATURE_ORDER_VOID = 'cashier.v3.order.void';
+    private const FEATURE_ORDER_REOPEN = 'cashier.v3.order.reopen';
+    private const FEATURE_ORDER_RECEIPT_PRINT = 'cashier.v3.order.receipt_print';
+    private const FEATURE_ORDER_DEBT_VIEW = 'cashier.v3.order.debt_view';
+    private const FEATURE_ORDER_SERVICE_DETAIL = 'cashier.v3.order.service_detail';
+    private const FEATURE_ORDER_SERVICE_VOID = 'cashier.v3.order.service_void';
 
     /** 选择器策略 ID（非单一 feature） */
     private const POLICY_MEMBER_SELECTOR = 'selector:member';
@@ -37,7 +45,7 @@ class CashierV3C5MemberOrderModule implements CashierV3ActionModule
         $projection = [];
 
         $command['create-member'] = self::FEATURE_MEMBER_CREATE;
-        $command['update-member'] = self::FEATURE_MEMBER;
+        $command['update-member'] = self::FEATURE_MEMBER_EDIT;
         $command['deactivate-member'] = self::FEATURE_MEMBER;
         $command['submit-recharge'] = self::FEATURE_MEMBER;
         $command['prepare-recharge-checkout'] = self::FEATURE_MEMBER;
@@ -56,7 +64,7 @@ class CashierV3C5MemberOrderModule implements CashierV3ActionModule
             'open-member-detail' => self::FEATURE_MEMBER,
             'load-member-detail-tab' => self::FEATURE_MEMBER,
             'open-member-more-actions' => self::FEATURE_MEMBER,
-            'open-member-editor' => self::FEATURE_MEMBER,
+            'open-member-editor' => self::FEATURE_MEMBER_EDIT,
             'open-member-creator' => self::FEATURE_MEMBER_CREATE,
             'open-member-batch-actions' => self::FEATURE_MEMBER_BATCH,
             'open-recharge' => self::FEATURE_MEMBER,
@@ -74,35 +82,36 @@ class CashierV3C5MemberOrderModule implements CashierV3ActionModule
             'view-sales-order' => self::FEATURE_ORDER_CENTER,
             'open-order-operation-logs' => self::FEATURE_ORDER_CENTER,
             'open-operation-logs' => self::FEATURE_ORDER_CENTER,
-            'open-order-debt-settlements' => self::FEATURE_ORDER_CENTER,
-            'open-debt-settlements' => self::FEATURE_ORDER_CENTER,
-            'open-sales-order-personnel-adjustment' => self::FEATURE_ORDER_CENTER,
-            'open-order-refunds' => self::FEATURE_ORDER_CENTER,
-            'open-refunds' => self::FEATURE_ORDER_CENTER,
-            'open-order-void' => self::FEATURE_ORDER_CENTER,
-            'open-void-record' => self::FEATURE_ORDER_CENTER,
-            'open-order-reopenings' => self::FEATURE_ORDER_CENTER,
-            'open-reopen-records' => self::FEATURE_ORDER_CENTER,
+            'open-order-debt-settlements' => self::FEATURE_ORDER_DEBT_VIEW,
+            'open-debt-settlements' => self::FEATURE_ORDER_DEBT_VIEW,
+            'open-sales-order-personnel-adjustment' => self::FEATURE_ORDER_STAFF_ADJUST,
+            'open-order-refunds' => self::FEATURE_ORDER_REFUND,
+            'open-refunds' => self::FEATURE_ORDER_REFUND,
+            'open-order-void' => self::FEATURE_ORDER_VOID,
+            'open-void-record' => self::FEATURE_ORDER_VOID,
+            'open-order-reopenings' => self::FEATURE_ORDER_REOPEN,
+            'open-reopen-records' => self::FEATURE_ORDER_REOPEN,
             'open-order-upgrades' => self::FEATURE_ORDER_CENTER,
             'open-upgrade-records' => self::FEATURE_ORDER_CENTER,
-            'open-order-services' => self::FEATURE_ORDER_CENTER,
-            'open-service-records' => self::FEATURE_ORDER_CENTER,
+            'open-order-services' => self::FEATURE_ORDER_SERVICE_DETAIL,
+            'open-service-records' => self::FEATURE_ORDER_SERVICE_DETAIL,
+            'open-service-record-craftsman-adjustment' => self::FEATURE_ORDER_SERVICE_DETAIL,
             'open-order-writeoffs' => self::FEATURE_ORDER_CENTER,
         ] as $action => $feature) {
             $projection[$action] = $feature;
         }
-        foreach ([
-            'adjust-sales-order-personnel',
-            'refund-sales-order',
-            'void-sales-order',
-            'refund-recharge-order',
-            'void-recharge-order',
-            'reopen-sales-order',
-            'upgrade-sales-order',
-            'print-sales-order-receipt',
-        ] as $action) {
-            $command[$action] = self::FEATURE_ORDER_CENTER;
-        }
+        $command['adjust-sales-order-personnel'] = self::FEATURE_ORDER_STAFF_ADJUST;
+        $command['update-sales-order-note'] = self::FEATURE_ORDER_CENTER;
+        $command['refund-sales-order'] = self::FEATURE_ORDER_REFUND;
+        $command['void-sales-order'] = self::FEATURE_ORDER_VOID;
+        $command['void-service-record'] = self::FEATURE_ORDER_SERVICE_VOID;
+        // 编辑入口与保存使用同一服务记录权限快照，不增加第二个功能权限点。
+        $command['adjust-service-record-craftsmen'] = self::FEATURE_ORDER_SERVICE_DETAIL;
+        $command['refund-recharge-order'] = self::FEATURE_ORDER_REFUND;
+        $command['void-recharge-order'] = self::FEATURE_ORDER_VOID;
+        $command['reopen-sales-order'] = self::FEATURE_ORDER_REOPEN;
+        $command['upgrade-sales-order'] = self::FEATURE_ORDER_CENTER;
+        $command['print-sales-order-receipt'] = self::FEATURE_ORDER_RECEIPT_PRINT;
 
         // 四个保存查询方案：C5 command，权限沿用各入口
         $command['save-reservation-query-settings'] = self::FEATURE_RESERVATION;

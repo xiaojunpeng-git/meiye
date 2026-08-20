@@ -13,6 +13,7 @@ foreach ([
     '/app/services/cashier/v3/CashierV3ResourceScope.php',
     '/app/services/cashier/v3/CashierV3OperatorScope.php',
     '/app/services/cashier/v3/CashierV3DataScopeContext.php',
+    '/app/services/cashier/v3/CashierV3CheckoutWorkspaceIdentity.php',
     '/app/services/cashier/v3/hang/authority/CashierV3HangOrderAuthorityException.php',
     '/app/services/cashier/v3/hang/authority/CashierV3HangOrderPlanV1.php',
     '/app/services/cashier/v3/cashier/CashierV3CashierWorkspaceServices.php',
@@ -22,6 +23,7 @@ foreach ([
 
 use app\services\cashier\v3\CashierV3CommandException;
 use app\services\cashier\v3\CashierV3DataScopeContext;
+use app\services\cashier\v3\CashierV3CheckoutWorkspaceIdentity;
 use app\services\cashier\v3\CashierV3OperatorScope;
 use app\services\cashier\v3\cashier\CashierV3CashierWorkspaceServices;
 use app\services\cashier\v3\hang\authority\CashierV3HangOrderPlanV1;
@@ -92,12 +94,27 @@ $trustedRow = [
     'detail_version' => 4,
     'unit_price_cents' => 8800,
     'original_unit_price_cents' => 8800,
+    'configured_cost_cents' => 0,
+    'debt_amount_cents' => 0,
+    'coupon_user_id' => 0,
+    'coupon_name_snapshot' => '',
+    'coupon_discount_cents' => 0,
+    'price_change_reason' => '',
+    'price_changed_by' => 0,
+    'price_changed_by_name_snapshot' => '',
+    'price_changed_at' => 0,
     'authority_fingerprint' => hash('sha256', json_encode($authoritySnapshot, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)),
     'authority_snapshot_json' => json_encode($authoritySnapshot, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
     'service_object' => '',
     'craftsmen_json' => '[]',
     'salespeople_json' => $salespeopleJson,
+    'guide_selections_json' => '[]',
+    'sales_manager_selections_json' => '[]',
+    'manual_labor_fee_cents' => 0,
+    'friend_counts_as_customer' => 0,
     'is_experience' => 0,
+    'is_presale' => 0,
+    'inventory_outbound_required' => 1,
     'display_snapshot_json' => json_encode([
         'productId' => 501,
         'skuId' => 1501,
@@ -123,6 +140,7 @@ $publicLine = [
     'kind' => '产品',
     'name' => '挂单恢复测试产品',
 ];
+$stateContextId = 'CTX-HANG-SALE-RESUME-01';
 $plan = CashierV3HangOrderPlanV1::fromLockedDraft([
     'commandIdempotencyKey' => 'HANG-SALE-RESUME-COMMAND-0001',
     'preparationRequestId' => 'HANG-SALE-RESUME-PREPARE-0001',
@@ -138,8 +156,8 @@ $plan = CashierV3HangOrderPlanV1::fromLockedDraft([
     'occurredAt' => 1785830400,
     'recordedAt' => 1785830401,
 ], [
-    'workspaceId' => 'ws:8:1:CTX-HANG-SALE-RESUME-01',
-    'stateContextId' => 'CTX-HANG-SALE-RESUME-01',
+    'workspaceId' => CashierV3CheckoutWorkspaceIdentity::id(8, $stateContextId),
+    'stateContextId' => $stateContextId,
     'customerMode' => 'guest',
     'memberId' => 0,
     'status' => 'editing',
@@ -165,7 +183,13 @@ hangSaleResumeAssert(
 );
 $workspace = $workspaceClass->newInstanceWithoutConstructor();
 $restore = $workspaceClass->getMethod('normalizeRestoredSaleLine');
-$restored = $restore->invoke($workspace, $snapshot, 'ws:8:1:CTX-HANG-SALE-RESUME-02', 0, 1);
+$restored = $restore->invoke(
+    $workspace,
+    $snapshot,
+    CashierV3CheckoutWorkspaceIdentity::id(8, 'CTX-HANG-SALE-RESUME-02'),
+    0,
+    1
+);
 hangSaleResumeAssert(
     'normal hang authority snapshot passes strict restore validation',
     is_array($restored)
@@ -178,7 +202,7 @@ unset($missingSalespeople['salespeople_json']);
 hangSaleResumeAssert(
     'missing salesperson authority remains fail-closed',
     hangSaleResumeFailure(function () use ($restore, $workspace, $missingSalespeople): void {
-        $restore->invoke($workspace, $missingSalespeople, 'ws:8:1:CTX-HANG-SALE-RESUME-03', 0, 1);
+        $restore->invoke($workspace, $missingSalespeople, CashierV3CheckoutWorkspaceIdentity::id(8, 'CTX-HANG-SALE-RESUME-03'), 0, 1);
     }) === 'cashier_hang_restore_sale_snapshot_invalid'
 );
 
@@ -189,7 +213,7 @@ $tamperedAuthority['authority_snapshot_json'] = json_encode([
 hangSaleResumeAssert(
     'tampered authority snapshot remains fail-closed',
     hangSaleResumeFailure(function () use ($restore, $workspace, $tamperedAuthority): void {
-        $restore->invoke($workspace, $tamperedAuthority, 'ws:8:1:CTX-HANG-SALE-RESUME-04', 0, 1);
+        $restore->invoke($workspace, $tamperedAuthority, CashierV3CheckoutWorkspaceIdentity::id(8, 'CTX-HANG-SALE-RESUME-04'), 0, 1);
     }) === 'cashier_hang_restore_authority_mismatch'
 );
 

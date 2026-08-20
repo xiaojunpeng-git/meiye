@@ -209,9 +209,11 @@ final class CashierV3InventoryResourceVersionProvider implements CashierV3DataSc
     {
         $row = Db::name('store_product')
             ->where('id', $projectId)
-            ->where('is_del', 0)
             ->field('id,type,relation_id,product_type')
             ->find();
+        // The project identity is taken from the already-selected entitlement
+        // snapshot. A catalogue lifecycle change after selection does not
+        // invalidate its consumable-inventory authority at final completion.
         if (!$row
             || (int)($row['product_type'] ?? 0) !== 6
             || !in_array((int)($row['type'] ?? -1), [0, 1], true)

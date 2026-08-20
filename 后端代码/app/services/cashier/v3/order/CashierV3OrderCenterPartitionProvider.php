@@ -72,7 +72,10 @@ final class CashierV3OrderCenterPartitionProvider implements CashierV3RootPartit
         $ids = [];
         foreach ($orders as $order) {
             if (!is_array($order)) continue;
-            $id = trim((string)($order['id'] ?? $order['orderId'] ?? $order['salesOrderId'] ?? ''));
+            // 列表可能以旧订单行 ID 展示；版本仓必须始终以生命周期命令
+            // 所需的 V3 销售订单 ID 为键，不能把展示 ID 当作资源 ID。
+            $id = trim((string)($order['lifecycleOrderId'] ?? $order['lifecycle_order_id']
+                ?? $order['salesOrderId'] ?? $order['id'] ?? $order['orderId'] ?? ''));
             if ($id !== '') $ids[$id] = true;
         }
         if ($ids === []) return [];

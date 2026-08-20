@@ -7,6 +7,7 @@ const dirname = path.dirname(fileURLToPath(import.meta.url))
 const repo = path.resolve(dirname, '../../..')
 const view = fs.readFileSync(path.join(repo, '前端代码/cashier-v3/src/views/CashierWorkbenchView.vue'), 'utf8')
 const workspace = fs.readFileSync(path.join(repo, '后端代码/app/services/cashier/v3/cashier/CashierV3CashierWorkspaceServices.php'), 'utf8')
+const preparation = fs.readFileSync(path.join(repo, '后端代码/app/services/cashier/v3/settlement/CashierV3CheckoutPreparationServices.php'), 'utf8')
 const inventory = fs.readFileSync(path.join(repo, '后端代码/app/services/cashier/v3/settlement/CashierV3SaleInventorySettlementServices.php'), 'utf8')
 const normalizer = fs.readFileSync(path.join(repo, '后端代码/app/services/cashier/v3/CashierV3RequestNormalizer.php'), 'utf8')
 const cashierModule = fs.readFileSync(path.join(repo, '后端代码/app/services/cashier/v3/cashier/CashierV3CashierModule.php'), 'utf8')
@@ -32,24 +33,25 @@ function body(source, name) {
 const modeSwitch = body(view, 'setCartLineInventoryMode(line, mode)')
 const deferred = body(view, 'persistDeferredLineServiceSettings()')
 const localPreview = body(view, 'localCheckoutPreviewSnapshot()')
+const finalSnapshot = body(view, 'buildCheckoutSnapshot(preview = {})')
 const localDraftRecalculation = view.slice(
   view.indexOf('function recalculateLocalCashierDraft'),
   view.indexOf('function commitLocalCashierDraft')
 )
 
 check(
-  /isProductLine\(line\)/.test(modeSwitch)
+  /isInventoryManagedProductLine\(line\)/.test(modeSwitch)
     && /isPresale\s*=\s*mode === 'presale'/.test(modeSwitch)
     && /inventoryOutboundRequired:\s*mode === 'outbound'/.test(modeSwitch)
     && !/requestAction\(|mutateCashierDraft\(/.test(modeSwitch),
-  '产品出库、不出库、预售切换只更新前端本地状态，预售自动不出库'
+  '库存管理商品的出库、不出库、预售切换只更新前端本地状态，预售自动不出库'
 )
 check(
-  /v-if="isProductLine\(line\)"/.test(view)
+  /v-if="isInventoryManagedProductLine\(line\)"/.test(view)
     && />出库<\/button>/.test(view)
     && />不出库<\/button>/.test(view)
     && />预售<\/button>/.test(view),
-  '三按钮只渲染在产品行'
+  '三按钮只渲染在库存管理商品行，定制卡不进入库存流程'
 )
 check(
   /return true/.test(deferred)
@@ -59,6 +61,24 @@ check(
     && /isPresale/.test(localDraftRecalculation)
     && /inventoryOutboundRequired/.test(localDraftRecalculation),
   '产品库存规则只在立即结账时合并到前端快照，不提前保存草稿'
+)
+check(
+  /isInventoryManagedProductLine\(line\)/.test(localPreview)
+    && /isPresale:\s*cartLinePresaleSelected\(line\)/.test(localPreview)
+    && /inventoryOutboundRequired:\s*cartLineInventoryOutboundRequired\(line\)/.test(localPreview)
+    && /isProjectLine\(line\)/.test(localPreview)
+    && /isExperience:\s*cartLineExperienceSelected\(line\)/.test(localPreview)
+    && /isInventoryManagedProductLine\(line\)/.test(finalSnapshot)
+    && /next\.isPresale\s*=\s*cartLinePresaleSelected\(line\)/.test(finalSnapshot)
+    && /next\.inventoryOutboundRequired\s*=\s*cartLineInventoryOutboundRequired\(line\)/.test(finalSnapshot)
+    && /next\.isExperience\s*=\s*cartLineExperienceSelected\(line\)/.test(finalSnapshot),
+  '体验、出库、不出库、预售均在预览和最终提交两个快照边界固定'
+)
+check(
+  /if \(cartLinePresaleSelected\(line\)\) return false/.test(view)
+    && /\$isPresale\s*=\s*!\$customCard && !empty\(\$line\['isPresale'\]\)/.test(preparation)
+    && /\$customCard\s*\|\|\s*\$isPresale/.test(preparation),
+  '预售快照强制不出库，旧投影不能把预售带入库存扣减'
 )
 check(
   /inventory_rule_product_only/.test(workspace)

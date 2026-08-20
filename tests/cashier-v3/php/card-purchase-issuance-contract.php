@@ -67,6 +67,9 @@ try {
 cardPurchaseCheck('CPU-03 invalid duration fails closed', $invalidReason === 'card_purchase_validity_invalid');
 
 $source = file_get_contents($root . '/app/services/cashier/v3/card/CashierV3CardPurchaseIssuanceServices.php');
+$catalogSource = file_get_contents($root . '/app/services/cashier/v3/cashier/CashierV3SaleCatalogServices.php');
+$salesPlanSource = file_get_contents($root . '/app/services/cashier/v3/order/settlement/CashierV3SalesOrderPlanV1.php');
+$factAssemblerSource = file_get_contents($root . '/app/services/cashier/v3/fact/CashierV3SaleOnlyFactAssembler.php');
 $settlement = file_get_contents($root . '/app/services/cashier/v3/settlement/CashierV3SaleOnlyCheckoutSubmissionServices.php');
 $inventory = file_get_contents($root . '/app/services/cashier/v3/settlement/CashierV3SaleInventorySettlementServices.php');
 $migration = file_get_contents($root . '/database/upgrades/2026-07-30-收银V3卡项权益签发/02-正式升级.sql');
@@ -80,9 +83,11 @@ cardPurchaseCheck('CPU-05 formal checkout signs cards before terminal facts are 
 cardPurchaseCheck('CPU-06 inventory ignores cards and non-stock projects but rejects unsupported sale types',
     strpos($inventory, "in_array((string)(\$line['item_type'] ?? ''), ['card', 'project'], true)") !== false
     && strpos($inventory, "if ((string)(\$line['item_type'] ?? '') !== 'product')") !== false);
-cardPurchaseCheck('CPU-07 card catalog authority is re-read under the final transaction',
-    strpos($source, '$this->catalog->selectSaleLineInTx(') !== false
-    && strpos($source, 'card_purchase_catalog_authority_changed') !== false);
+cardPurchaseCheck('CPU-07 final card issue locks identity without replaying catalogue version or price',
+    strpos($source, '$this->catalog->selectCheckoutSaleLineInTx(') !== false
+    && strpos($source, 'assertCardIssueSnapshotIdentity(') !== false
+    && strpos($source, "\$salesLine['item_version']") === false
+    && strpos($source, 'card_purchase_catalog_authority_changed') === false);
 cardPurchaseCheck('CPU-08 holder and each project benefit receive a projected version',
     substr_count($source, "'member_benefit_pool'") >= 1
     && strpos($source, "'card_holder'") !== false
@@ -111,27 +116,33 @@ cardPurchaseCheck('CPU-12 issued state supports independent, choice, shared and 
     && strpos($ruleSource, "'writeoff_amount_cents'") !== false
     && strpos($ruleMigration, 'No historic holder/card row is read or changed') !== false);
 
-$auditedPrice = $reflection->getMethod('isAuthorizedManualPriceSettlement');
-$auditedPrice->setAccessible(true);
-$auditedLine = [
-    'quantity' => 1,
-    'sale_amount_cents' => 100000,
-    'configured_cost_cents' => 100000,
-    'price_change_reason' => '真人验收改价',
-    'price_changed_by' => 871,
-    'price_changed_by_name_snapshot' => '店长',
-    'price_changed_at' => 1700000000,
-];
-cardPurchaseCheck('CPU-13 audited card price at current configured cost remains issuable',
-    $auditedPrice->invoke($service, $auditedLine, ['configured_cost_cents' => 100000]) === true);
-$belowCost = $auditedLine;
-$belowCost['sale_amount_cents'] = 99999;
-cardPurchaseCheck('CPU-14 audited card price below current configured cost fails closed',
-    $auditedPrice->invoke($service, $belowCost, ['configured_cost_cents' => 100000]) === false);
-$staleCost = $auditedLine;
-$staleCost['configured_cost_cents'] = 90000;
-cardPurchaseCheck('CPU-15 stale configured cost cannot authorize discounted card issuance',
-    $auditedPrice->invoke($service, $staleCost, ['configured_cost_cents' => 100000]) === false);
+cardPurchaseCheck('CPU-13 card issue does not compare the snapshot with current catalogue cost',
+    strpos($source, 'isAuthorizedManualPriceSettlement') === false
+    && strpos($source, "\$line['configured_cost_cents']") === false);
+cardPurchaseCheck('CPU-14 card issue does not compare a snapshot item version with the current catalogue',
+    strpos($source, "\$line['source_version']") === false
+    && strpos($source, "\$salesLine['item_version']") === false);
+cardPurchaseCheck('CPU-15 card issue retains only immutable snapshot structure checks',
+    strpos($source, 'card_purchase_snapshot_structure_invalid') !== false
+    && strpos($source, "\$salesLine['catalog_sku_id']") !== false);
+cardPurchaseCheck('CPU-16 final card issue locks SKU identity without reloading component structure',
+    strpos($catalogSource, "assertInTransaction('cashierSaleCatalogCheckoutSelect')") !== false
+    && strpos($catalogSource, 'selectCheckoutSaleLineInTx(') !== false
+    && strpos($catalogSource, 'must not reload card components') !== false);
+cardPurchaseCheck('CPU-17 issuance consumes the persisted browser card snapshot',
+    strpos($source, 'salesLineCardPurchaseSnapshot($salesLine)') !== false
+    && strpos($source, "\$salesLine['card_purchase_snapshot_json']") !== false
+    && strpos($source, "\$line['authority_snapshot']['cardPurchase'] = \$purchase") !== false);
+cardPurchaseCheck('CPU-18 sales order line carries the browser card snapshot into issuance',
+    substr_count($salesPlanSource, "'card_purchase_snapshot_json' =>") >= 2);
+cardPurchaseCheck('CPU-19 issued card rule does not require stripped browser version coordinates',
+    strpos($ruleSource, '$ruleVersion <= 0') === false
+    && strpos($ruleSource, '$definitionVersion <= 0') === false);
+cardPurchaseCheck('CPU-20 purchase receipt fingerprints the same browser card snapshot',
+    strpos($source, "'cardPurchaseSnapshot' => \$purchase") !== false
+    && strpos($source, "'catalog' => \$snapshot") === false);
+cardPurchaseCheck('CPU-21 formal fact input accepts the persisted card snapshot field',
+    strpos($factAssemblerSource, "'manual_labor_fee_cents', 'card_purchase_snapshot_json'") !== false);
 
 echo "CARD_PURCHASE_ISSUANCE_CONTRACT passed={$passed} failed={$failed}\n";
 exit($failed === 0 ? 0 : 1);

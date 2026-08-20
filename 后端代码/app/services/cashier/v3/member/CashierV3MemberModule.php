@@ -49,7 +49,7 @@ final class CashierV3MemberModule
     ): void
     {
         // 会员建档完成后必须在同一事务内初始化 member 资源版本。否则后续
-        // prepare-checkout 无法把新会员加入最终锁集合，会把一笔本可结账的卡项
+        // 旧的分步准备无法把新会员加入最终锁集合，会把一笔本可结账的卡项
         // 订单错误地拦截为资料不完整。
         $memberVersions = $memberVersions ?: new CashierV3EntitlementResourceVersionProvider(
             new CashierV3CashierReadinessGuard()

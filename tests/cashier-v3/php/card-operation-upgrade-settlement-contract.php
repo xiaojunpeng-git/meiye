@@ -2,7 +2,9 @@
 
 $root = dirname(__DIR__, 3);
 $files = [
+    'kernel' => $root . '/后端代码/app/services/cashier/v3/card/CashierV3CardOperationKernel.php',
     'settlement' => $root . '/后端代码/app/services/cashier/v3/card/CashierV3CardOperationCheckoutSettlementServices.php',
+    'authority' => $root . '/后端代码/app/services/cashier/v3/card/CashierV3CardOperationAuthorityServices.php',
     'salesPlan' => $root . '/后端代码/app/services/cashier/v3/order/settlement/CashierV3SalesOrderPlanV1.php',
     'submission' => $root . '/后端代码/app/services/cashier/v3/settlement/CashierV3SaleOnlyCheckoutSubmissionServices.php',
     'paymentPlan' => $root . '/后端代码/app/services/cashier/v3/settlement/payment/CashierV3PaymentCollectionPlanV1.php',
@@ -11,7 +13,9 @@ $files = [
     'entitlementProjection' => $root . '/后端代码/app/services/cashier/v3/cashier/CashierV3EntitlementProjectionServices.php',
     'resourceDiscovery' => $root . '/后端代码/app/services/cashier/v3/card/CashierV3CardOperationResourceDiscovery.php',
     'catalog' => $root . '/后端代码/app/services/cashier/v3/cashier/CashierV3SaleCatalogServices.php',
+    'preparation' => $root . '/后端代码/app/services/cashier/v3/settlement/CashierV3CheckoutPreparationServices.php',
     'issuance' => $root . '/后端代码/app/services/cashier/v3/card/CashierV3CardPurchaseIssuanceServices.php',
+    'cashierModule' => $root . '/后端代码/app/services/cashier/v3/cashier/CashierV3CashierModule.php',
     'manifest' => $root . '/后端代码/app/services/cashier/v3/manifest/CashierV3ActionManifest.php',
     'facts' => $root . '/后端代码/app/services/cashier/v3/fact/CashierV3SaleOnlyFactAssembler.php',
     'migration' => $root . '/后端代码/database/upgrades/2026-08-11-收银V3卡操作权益余额结算/02-正式升级.sql',
@@ -57,7 +61,7 @@ upgradeContract(strpos($source['settlement'], 'cashier_v3_card_operation_settlem
     'reversal-ready settlement authority is persisted');
 upgradeContract(strpos($source['workspace'], "\$line['cardOperationUpgrade'] = \$cardOperationUpgrade") !== false,
     'workspace exposes only the controlled upgrade binding');
-upgradeContract(strpos($source['workspace'], '&& (!$hasSalespeople || $hasServiceObject || $hasCraftsmen || $hasExperience)') !== false
+upgradeContract(strpos($source['workspace'], '&& (!$hasSalespeople || $hasGuides || $hasSalesManagers || $hasServiceObject || $hasCraftsmen || $hasExperience || $hasFriendCounts || $hasLaborManualFee || $hasPresale || $hasInventoryOutbound)') !== false
     && strpos($source['workspace'], 'applySalespeopleToAllSaleLinesInTx') !== false,
     'upgrade line allows salesperson assignment while keeping other line edits locked');
 upgradeContract(strpos($source['catalog'], "'sourceCardName'") !== false
@@ -72,6 +76,10 @@ upgradeContract(strpos($source['settlement'], "['editing', 'ready_for_submit']")
     && strpos($source['settlement'], 'if ($previous && !in_array') !== false
     && strpos($source['settlement'], "->where('checkout_request_id', \$existingRequestId)") !== false,
     'a failed unsubmitted checkout binding can move to a fresh checkout request');
+upgradeContract(strpos($source['settlement'], '$amount = min($sourceValue, $target)') !== false
+    && strpos($source['settlement'], '$delta = max(0, $target - $sourceValue)') !== false
+    && strpos($source['settlement'], 'effectiveEntitlementCreditCents') !== false,
+    'source value above target price yields zero payable while financial credit is capped to the target');
 upgradeContract(strpos($source['facts'], '$plannedById = [];') !== false
     && strpos($source['facts'], "\$plan->lines()") !== false
     && strpos($source['facts'], "\$planned['sale_amount_cents']") !== false,
@@ -79,12 +87,33 @@ upgradeContract(strpos($source['facts'], '$plannedById = [];') !== false
 upgradeContract(strpos($source['facts'], '$entitlementCredit = $sale - (int)$request[\'sales_amount_cents\'];') !== false
     && strpos($source['facts'], '$collected + $balance + $debt + $entitlementCredit !== $sale') !== false,
     'facts balance formal upgrade sales with the separate old-entitlement credit');
+upgradeContract(strpos($source['facts'], 'if ($sale < 0') !== false
+    && strpos($source['facts'], "if ((int)\$line['sale_amount_cents'] < 0") !== false,
+    'zero-delta upgrades keep a zero-value formal sale line while retaining the exact total equation');
 upgradeContract(strpos($source['workspace'], 'synchronizeUpgradeCouponSnapshot') === false
     && strpos($source['workspace'], '=== $unitPriceCents + $couponDiscountCents') !== false
     && strpos($source['catalog'], '!== $delta - $couponDiscount') !== false
     && strpos($source['settlement'], '!== (int)$operation[\'settlement_delta_cents\'] - $couponDiscount') !== false,
     'an upgrade coupon lowers only the sale receivable and never rewrites the immutable old-right credit');
-upgradeContract(strpos($source['issuance'], '$couponDiscount = (int)($salesLine[\'coupon_discount_cents\'] ?? 0)') !== false
-    && strpos($source['issuance'], "!== (int)(\$operation['target_price_cents'] ?? -2) - \$couponDiscount") !== false,
-    'card issuance validates the target sale line after an upgrade coupon');
+upgradeContract(strpos($source['issuance'], 'assertCardIssueSnapshotIdentity($salesLine, $line, $purchase)') !== false
+    && strpos($source['issuance'], "\$salesLine['catalog_sku_id']") !== false
+    && strpos($source['issuance'], "target_price_cents'] ?? -2") === false,
+    'card issuance validates snapshot identity without replaying target price after an upgrade coupon');
+upgradeContract(strpos($source['cashierModule'], "\$snapshot['lines'][\$lineIndex]['lineAmountCents'] = \$payableCents") !== false
+    && strpos($source['cashierModule'], "\$snapshot['lines'][\$lineIndex]['originalLineAmountCents'] = \$targetPriceCents") !== false
+    && strpos($source['cashierModule'], "max(0, \$targetPriceCents - \$creditCents) !== \$deltaCents") !== false,
+    'final snapshot reconciles upgrade target, credit, delta, and coupon with zero floor');
+upgradeContract(strpos($source['cashierModule'], "\$snapshot['lines'][\$lineIndex]['debtAmountCents'] = 0") === false,
+    'upgrade finalization does not erase the user-selected debt');
+upgradeContract(strpos($source['preparation'], "'debtAmountCents' => (int)(\$line['debtAmountCents'] ?? 0)") !== false
+    && strpos($source['preparation'], "'debtAmountCents' => \$isUpgradeDeltaLine") === false,
+    'card and project upgrade preparation preserves snapshot debt for receivable calculation');
+upgradeContract(strpos($source['authority'], "\$replayed['upgradeSaleLine'] = \$this->saleCatalog->cardOperationUpgradeSaleLineAfterGatewayLocksInTx") !== false
+    && strpos($source['authority'], "CashierV3CardOperationKernel::TYPE_PROJECT_UPGRADE") !== false,
+    'retrying a pending card or project upgrade rebuilds its immutable sale line');
+$removedNegativeDeltaReason = implode('_', ['upgrade', 'negative', 'delta', 'not', 'supported']);
+upgradeContract(strpos($source['kernel'], $removedNegativeDeltaReason) === false
+    && strpos($source['kernel'], "'snapshotSettlement' =>") !== false
+    && strpos($source['cashierModule'], "['snapshotSettlement'] =") !== false,
+    'upgrade amount uses the final checkout snapshot instead of recalculating live entitlement value');
 exit($failed === 0 ? 0 : 1);

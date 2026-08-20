@@ -99,7 +99,8 @@ final class CashierV3CheckoutResourcePlanLoader
             $tenantId,
             $storeId,
             $requestVersion,
-            $authorityRows
+            $authorityRows,
+            (int)($header['resource_count'] ?? 0) === 0
         );
         if ((int)($header['role_count'] ?? -1) !== $plan->roleCount()
             || !hash_equals((string)($header['resource_plan_fingerprint'] ?? ''), $plan->fingerprint())) {

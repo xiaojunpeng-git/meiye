@@ -398,11 +398,14 @@ final class CashierV3SaleInventorySettlementServices
                 ->where('id', $productId)
                 ->where('type', 1)
                 ->where('relation_id', $context['storeId'])
-                ->field('id,type,relation_id,product_type,is_inventory,is_del,is_show,is_verify,store_name')
+                ->field('id,type,relation_id,product_type,is_inventory,store_name')
                 ->lock(true)
                 ->find();
-            if (!$row || (int)$row['product_type'] !== 0 || (int)$row['is_del'] !== 0
-                || (int)$row['is_show'] !== 1 || (int)$row['is_verify'] !== 1) {
+            // A checkout snapshot owns the sale line that was already shown to
+            // the cashier. At final settlement this read establishes only the
+            // physical inventory identity; catalogue visibility, review and
+            // deletion flags must not turn a valid snapshot into a rejection.
+            if (!$row || (int)$row['product_type'] !== 0) {
                 throw $this->failure('sale_inventory_product_changed', ['productId' => $productId]);
             }
             $products[$productId] = (array)$row;
@@ -424,12 +427,11 @@ final class CashierV3SaleInventorySettlementServices
             $sku = Db::name('store_product_attr_value')
                 ->where('id', $candidate['skuId'])
                 ->where('type', 0)
-                ->field('id,product_id,unique,type,is_show')
+                ->field('id,product_id,unique,type')
                 ->lock(true)
                 ->find();
             if (!$sku || (int)$sku['product_id'] !== $candidate['productId']
-                || (string)$sku['unique'] !== $candidate['skuUnique']
-                || (int)$sku['is_show'] !== 1) {
+                || (string)$sku['unique'] !== $candidate['skuUnique']) {
                 throw $this->failure('sale_inventory_sku_changed', [
                     'productId' => $candidate['productId'],
                 ]);

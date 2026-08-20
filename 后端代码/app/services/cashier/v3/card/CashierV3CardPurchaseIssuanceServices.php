@@ -179,24 +179,29 @@ final class CashierV3CardPurchaseIssuanceServices
         $customConfiguration = $this->lockCustomConfiguration(
             $header,
             $workspaceId,
-            $workspaceLineKey
+            $workspaceLineKey,
+            $commandIdempotencyKey
         );
-        // Re-read under the transaction and require the exact priced catalog
-        // definition that the checkout request froze.  The Gateway already
-        // locked the same catalog resources; this is an explicit defence
-        // against a direct service call with a forged V3 order line.
+        // Lock the physical card SKU in the final transaction so issuance is
+        // bound to the selected store resource.  The browser checkout
+        // snapshot owns price and the displayed card data: never compare it
+        // with a later catalogue version, lifecycle flag or configured cost.
         $line = $customConfiguration
             ? $this->catalog->customCardIssuanceLineInTx($customConfiguration, $operatorScope, $dataScope)
-            : $this->catalog->selectSaleLineInTx(
+            : $this->catalog->selectCheckoutSaleLineInTx(
                 $skuId,
                 'card-issue:' . strtolower($receiptId),
                 $operatorScope,
                 $dataScope
             );
-        $snapshot = is_array($line['authority_snapshot'] ?? null)
-            ? $line['authority_snapshot'] : [];
-        $purchase = is_array($snapshot['cardPurchase'] ?? null) ? $snapshot['cardPurchase'] : [];
-        $this->assertSalesLineMatchesCatalog($salesLine, $line, $purchase, $header, $dataScope);
+        $purchase = $customConfiguration
+            ? (is_array($line['authority_snapshot']['cardPurchase'] ?? null)
+                ? $line['authority_snapshot']['cardPurchase'] : [])
+            : $this->salesLineCardPurchaseSnapshot($salesLine);
+        // The selected card definition is immutable browser intent. The locked
+        // catalogue row above supplies identity only and may not replace it.
+        $line['authority_snapshot']['cardPurchase'] = $purchase;
+        $this->assertCardIssueSnapshotIdentity($salesLine, $line, $purchase);
 
         $legacyOrderId = $this->insertLegacyOrder(
             $header,
@@ -280,7 +285,7 @@ final class CashierV3CardPurchaseIssuanceServices
             'header' => $header,
             'salesLine' => $salesLine,
             'issueNo' => $issueNo,
-            'catalog' => $snapshot,
+            'cardPurchaseSnapshot' => $purchase,
             'result' => $result,
         ]);
         try {
@@ -894,12 +899,10 @@ final class CashierV3CardPurchaseIssuanceServices
         }
     }
 
-    private function assertSalesLineMatchesCatalog(
+    private function assertCardIssueSnapshotIdentity(
         array $salesLine,
         array $line,
-        array $purchase,
-        array $header,
-        CashierV3DataScopeContext $dataScope
+        array $purchase
     ): void
     {
         $sourceKind = (string)($purchase['sourceKind'] ?? '');
@@ -908,86 +911,32 @@ final class CashierV3CardPurchaseIssuanceServices
                 ? (int)($line['catalog_product_type'] ?? -1) !== 6
                 : (int)($line['catalog_product_type'] ?? -1) !== 5)
             || (int)($salesLine['item_id'] ?? 0) !== (int)($line['catalog_product_id'] ?? 0)
-            || (int)($salesLine['catalog_sku_id'] ?? 0) !== (int)($line['catalog_sku_id'] ?? 0)
-            || (int)($salesLine['item_version'] ?? 0) !== (int)($line['source_version'] ?? 0);
-        $fullPriceCents = $this->multiply(
-            (int)($line['unit_price_cents'] ?? -1),
-            (int)($salesLine['quantity'] ?? 0)
-        );
-        $ordinaryPriceMatches = (int)($salesLine['sale_amount_cents'] ?? -1) === $fullPriceCents;
-        $auditedPriceChangeMatches = !$isCustom
-            && $this->isAuthorizedManualPriceSettlement($salesLine, $line);
-        $boundUpgrade = $this->isBoundCardUpgradeSettlement(
-            $salesLine,
-            $line,
-            $header,
-            $dataScope
-        );
+            || (int)($salesLine['catalog_sku_id'] ?? 0) !== (int)($line['catalog_sku_id'] ?? 0);
         if ($identityMismatch
             || (!$isCustom && $sourceKind !== 'card_package')
             || !is_array($purchase['components'] ?? null)
-            || !$purchase['components']
-            || (!$ordinaryPriceMatches && !$auditedPriceChangeMatches && !$boundUpgrade)) {
-            throw self::failure('card_purchase_catalog_authority_changed');
+            || !$purchase['components']) {
+            throw self::failure('card_purchase_snapshot_structure_invalid', [
+                'source_kind' => $sourceKind,
+                'snapshot_product_id' => (int)($purchase['productId'] ?? 0),
+                'sales_item_id' => (int)($salesLine['item_id'] ?? 0),
+                'sales_sku_id' => (int)($salesLine['catalog_sku_id'] ?? 0),
+                'catalog_product_id' => (int)($line['catalog_product_id'] ?? 0),
+                'catalog_sku_id' => (int)($line['catalog_sku_id'] ?? 0),
+                'catalog_product_type' => (int)($line['catalog_product_type'] ?? -1),
+                'component_count' => is_array($purchase['components'] ?? null)
+                    ? count($purchase['components']) : -1,
+            ]);
         }
     }
 
-    private function isAuthorizedManualPriceSettlement(array $salesLine, array $line): bool
+    private function salesLineCardPurchaseSnapshot(array $salesLine): array
     {
-        $quantity = (int)($salesLine['quantity'] ?? 0);
-        $saleAmount = (int)($salesLine['sale_amount_cents'] ?? -1);
-        $configuredCost = (int)($salesLine['configured_cost_cents'] ?? -1);
-        $currentCost = (int)($line['configured_cost_cents'] ?? -2);
-        if ($quantity <= 0 || $saleAmount < 0 || $configuredCost < 0
-            || $configuredCost !== $currentCost
-            || ($configuredCost > 0 && $quantity > intdiv(PHP_INT_MAX, $configuredCost))) {
-            return false;
+        $decoded = json_decode((string)($salesLine['card_purchase_snapshot_json'] ?? ''), true);
+        if (!is_array($decoded) || array_values($decoded) === $decoded) {
+            throw self::failure('card_purchase_snapshot_structure_invalid');
         }
-
-        return (int)($salesLine['price_changed_at'] ?? 0) > 0
-            && (int)($salesLine['price_changed_by'] ?? 0) > 0
-            && trim((string)($salesLine['price_changed_by_name_snapshot'] ?? '')) !== ''
-            && trim((string)($salesLine['price_change_reason'] ?? '')) !== ''
-            && $saleAmount >= $configuredCost * $quantity;
-    }
-
-    /**
-     * An upgrade credit is valid only for the pending card-operation row bound
-     * by checkout preparation. It cannot be reproduced by an ordinary card
-     * sale that happens to use the same member or catalogue SKU.
-     */
-    private function isBoundCardUpgradeSettlement(
-        array $salesLine,
-        array $line,
-        array $header,
-        CashierV3DataScopeContext $dataScope
-    ): bool {
-        if ((int)($salesLine['quantity'] ?? 0) !== 1
-            || (string)($header['tenant_id'] ?? '') !== $dataScope->tenantId()
-            || (string)($header['checkout_request_id'] ?? '') === ''
-            || (int)($salesLine['original_amount_cents'] ?? -1) !== (int)($line['unit_price_cents'] ?? -2)) {
-            return false;
-        }
-        $operation = Db::name('cashier_v3_card_operation')
-            ->where('tenant_id', $dataScope->tenantId())
-            ->where('checkout_request_id', (string)$header['checkout_request_id'])
-            ->where('operation_type', 'card_upgrade')
-            ->where('operation_status', 'awaiting_checkout')
-            ->lock(true)
-            ->find();
-        $couponDiscount = (int)($salesLine['coupon_discount_cents'] ?? 0);
-        if (!$operation
-            || (int)($operation['store_id'] ?? 0) !== (int)($header['store_id'] ?? 0)
-            || (int)($operation['member_id_before'] ?? 0) !== (int)($header['member_id'] ?? 0)
-            || (int)($operation['target_catalog_id'] ?? 0) !== (int)($salesLine['item_id'] ?? 0)
-            || (int)($operation['target_price_cents'] ?? -1) !== (int)($salesLine['original_amount_cents'] ?? -2)
-            || $couponDiscount < 0
-            || $couponDiscount > (int)($operation['target_price_cents'] ?? -1)
-            || (int)($salesLine['sale_amount_cents'] ?? -1)
-                !== (int)($operation['target_price_cents'] ?? -2) - $couponDiscount) {
-            return false;
-        }
-        return true;
+        return $decoded;
     }
 
     /** @return array<string,string> checkout line id => workspace line key */
@@ -1015,11 +964,9 @@ final class CashierV3CardPurchaseIssuanceServices
     private function lockCustomConfiguration(
         array $header,
         string $workspaceId,
-        string $workspaceLineKey
+        string $workspaceLineKey,
+        string $commandIdempotencyKey
     ): ?array {
-        if ($workspaceLineKey === '') {
-            return null;
-        }
         $row = Db::name(self::CUSTOM_CONFIGURATION_TABLE)
             ->where('tenant_id', (string)$header['tenant_id'])
             ->where('store_id', (int)$header['store_id'])
@@ -1027,6 +974,20 @@ final class CashierV3CardPurchaseIssuanceServices
             ->where('workspace_line_key', $workspaceLineKey)
             ->lock(true)
             ->find();
+        // Direct snapshot checkout creates the configuration and consumes it
+        // within one final command. A persisted checkout line ID is generated
+        // after that configuration, so it is not a reliable lookup key here.
+        // The command idempotency key is the immutable transaction identity;
+        // use it only as a precise fallback, never as a broad workspace scan.
+        if (!$row && $commandIdempotencyKey !== '') {
+            $row = Db::name(self::CUSTOM_CONFIGURATION_TABLE)
+                ->where('tenant_id', (string)$header['tenant_id'])
+                ->where('store_id', (int)$header['store_id'])
+                ->where('workspace_id', $workspaceId)
+                ->where('created_command_idempotency_key', $commandIdempotencyKey . ':snapshot:0')
+                ->lock(true)
+                ->find();
+        }
         if (!$row) {
             return null;
         }

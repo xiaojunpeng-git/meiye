@@ -169,7 +169,7 @@ final class CashierV3SaleOnlyCheckoutSubmissionServices
                 throw self::failure('checkout_submit_action_invalid');
             }
             $payload = is_array($scope['payload'] ?? null) ? $scope['payload'] : [];
-            self::assertPayload($payload);
+            self::assertPayload($payload, !empty($scope['direct_snapshot_submission']));
             $operatorScope = $scope['operator_scope'] ?? null;
             $dataScope = $scope['data_scope'] ?? null;
             if (!($operatorScope instanceof CashierV3OperatorScope)
@@ -187,13 +187,15 @@ final class CashierV3SaleOnlyCheckoutSubmissionServices
                 (array)($scope['locked_versions'] ?? []),
                 $workspaceId,
                 $requestId,
-                $requestVersion
+                $requestVersion,
+                !empty($scope['direct_snapshot_submission'])
             );
             self::assertResourcePlan(
                 $scope['checkout_resource_plan'] ?? null,
                 $requestId,
                 $requestVersion,
-                $dataScope
+                $dataScope,
+                !empty($scope['direct_snapshot_submission'])
             );
 
             $aggregate = $this->requests->lockAggregateForSubmitInTx(
@@ -204,7 +206,11 @@ final class CashierV3SaleOnlyCheckoutSubmissionServices
                 $operatorScope,
                 $dataScope
             );
-            self::assertPreparationIdentity($payload, $aggregate['request']);
+            self::assertPreparationIdentity(
+                $payload,
+                $aggregate['request'],
+                !empty($scope['direct_snapshot_submission'])
+            );
             $this->assertSupportedSaleLines($aggregate['lines'], $dataScope);
             $salespeopleByCheckoutLine = $this->workspace->salespeopleFromCheckoutRequestLinesInTx(
                 (array)$aggregate['lines'],
@@ -746,12 +752,15 @@ final class CashierV3SaleOnlyCheckoutSubmissionServices
         }
     }
 
-    private static function assertPayload(array $payload): void
+    private static function assertPayload(array $payload, bool $directSnapshot = false): void
     {
         $expected = [
             'checkoutRequestId', 'checkoutRequestVersion',
-            'preparationRequestId', 'preparationToken',
+            'preparationRequestId',
         ];
+        if (!$directSnapshot) {
+            $expected[] = 'preparationToken';
+        }
         $actual = array_keys($payload);
         sort($expected, SORT_STRING);
         sort($actual, SORT_STRING);
@@ -765,9 +774,9 @@ final class CashierV3SaleOnlyCheckoutSubmissionServices
                 '/^CHECKOUT_PREPARE-[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/D',
                 $payload['preparationRequestId']
             ) !== 1
-            || !is_string($payload['preparationToken'])
-            || preg_match('/^CKPT-[0-9a-f]{64}$/D', $payload['preparationToken']) !== 1) {
-            throw self::failure('checkout_submit_payload_invalid');
+            || (!$directSnapshot && (!is_string($payload['preparationToken'] ?? null)
+                || preg_match('/^CKPT-[0-9a-f]{64}$/D', $payload['preparationToken']) !== 1))) {
+            throw self::failure('checkout_sale_only_payload_invalid');
         }
     }
 
@@ -813,8 +822,15 @@ final class CashierV3SaleOnlyCheckoutSubmissionServices
         return $result;
     }
 
-    private static function assertPreparationIdentity(array $payload, array $request): void
+    private static function assertPreparationIdentity(
+        array $payload,
+        array $request,
+        bool $directSnapshotSubmission = false
+    ): void
     {
+        if ($directSnapshotSubmission) {
+            return;
+        }
         if (!hash_equals(
             (string)($request['creation_idempotency_key'] ?? ''),
             (string)$payload['preparationRequestId']
@@ -865,8 +881,16 @@ final class CashierV3SaleOnlyCheckoutSubmissionServices
         array $lockedVersions,
         string $workspaceId,
         string $requestId,
-        int $requestVersion
+        int $requestVersion,
+        bool $directSnapshotSubmission = false
     ): void {
+        // A direct browser snapshot deliberately has no client-provided
+        // workspace or checkout-request projection context. Its request
+        // aggregate and all business resources are created, discovered and
+        // locked inside this final transaction instead.
+        if ($directSnapshotSubmission) {
+            return;
+        }
         $found = [];
         foreach ($contexts as $context) {
             if (!is_array($context)) {
@@ -889,7 +913,8 @@ final class CashierV3SaleOnlyCheckoutSubmissionServices
                 $found[$kind] = $version;
             }
         }
-        if (!isset($found['cashier_workspace'], $found['checkout_request'])
+        if (!isset($found['cashier_workspace'])
+            || !isset($found['checkout_request'])
             || $found['checkout_request'] !== $requestVersion) {
             throw self::failure('checkout_submit_public_context_missing');
         }
@@ -899,7 +924,8 @@ final class CashierV3SaleOnlyCheckoutSubmissionServices
         $plan,
         string $requestId,
         int $requestVersion,
-        CashierV3DataScopeContext $dataScope
+        CashierV3DataScopeContext $dataScope,
+        bool $allowEmpty = false
     ): void {
         if (!is_array($plan)
             || (string)($plan['requestId'] ?? '') !== $requestId
@@ -907,7 +933,7 @@ final class CashierV3SaleOnlyCheckoutSubmissionServices
             || (string)($plan['tenantId'] ?? '') !== $dataScope->tenantId()
             || (int)($plan['storeId'] ?? 0) !== $dataScope->forcedStoreId()
             || !is_array($plan['resources'] ?? null)
-            || !$plan['resources']
+            || (!$plan['resources'] && !$allowEmpty)
             || preg_match(
                 '/^[0-9a-f]{64}$/D',
                 (string)($plan['resourcePlanFingerprint'] ?? '')

@@ -262,6 +262,7 @@ const C5_ACTIONS = {
     'submit-recharge-debt-repayment': FEATURE_MEMBER,
     'submit-direct-gift': FEATURE_MEMBER,
     'adjust-sales-order-personnel': FEATURE_ORDER_STAFF_ADJUST,
+    'update-sales-order-note': FEATURE_ORDER_CENTER,
     'refund-sales-order': FEATURE_ORDER_REFUND,
     'void-sales-order': FEATURE_ORDER_VOID,
     'void-service-record': FEATURE_ORDER_SERVICE_VOID,

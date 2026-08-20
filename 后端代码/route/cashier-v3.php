@@ -67,6 +67,11 @@ Route::group('cashierapi/v3', function () {
             ->option(['real_name' => '收银V3保存合作方分类配置']);
         Route::get('report/operations/annotations', 'Report/annotations')
             ->option(['real_name' => '收银V3门店运营补充记录']);
+        Route::get('engineering-ledger/catalog', 'EngineeringLedger/catalog')->option(['real_name' => 'V3工程管理台账目录']);
+        Route::get('engineering-ledger/list', 'EngineeringLedger/list')->option(['real_name' => 'V3工程管理台账列表']);
+        Route::get('engineering-ledger/read/:id', 'EngineeringLedger/read')->option(['real_name' => 'V3工程管理台账详情']);
+        Route::post('engineering-ledger/save', 'EngineeringLedger/save')->option(['real_name' => 'V3工程管理台账保存']);
+        Route::get('engineering-ledger/export', 'EngineeringLedger/export')->option(['real_name' => 'V3工程管理台账导出']);
         Route::post('report/operations/annotation', 'Report/saveAnnotation')
             ->option(['real_name' => '收银V3保存门店运营补充记录']);
         // 统一命令网关：白名单 action + 幂等键 + 多对象 contexts 严格校验
@@ -82,8 +87,6 @@ Route::group('cashierapi/v3', function () {
             ->option(['real_name' => '收银草稿直接清空']);
         Route::post('cashier-drafts/discard-checkout', 'HangDraft/discardCheckout')
             ->option(['real_name' => '收银失败结账草稿废弃']);
-        Route::post('cashier-drafts/validate-guide-round', 'HangDraft/validateGuideRound')
-            ->option(['real_name' => '收银导购轮次结账前校验']);
         Route::post('customer-care/actions', 'CustomerCare/action')
             ->option(['real_name' => '门店PC客情工作台']);
         Route::get('unified-query/exports/:taskNo/download', 'Command/downloadUnifiedQueryExport')

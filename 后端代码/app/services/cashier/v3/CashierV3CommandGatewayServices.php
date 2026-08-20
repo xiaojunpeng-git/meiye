@@ -1956,10 +1956,12 @@ class CashierV3CommandGatewayServices extends BaseServices
             );
         }
 
-        // 预约资料保存没有工作台或预约资源版本上下文。领域事务通过
-        // 幂等回执与预约主表状态写入保证一致性，因此不把业务结果再映射为
-        // 通用资源版本变更。
-        if (!empty($contract['allows_empty_contexts']) && !$contexts) {
+        // Some commands deliberately own all writes inside their domain
+        // transaction. In particular, the final browser checkout snapshot
+        // locks current inventory, entitlement and balance server-side, but
+        // has no browser projection version to bump.
+        if ((!empty($contract['allows_empty_contexts']) && !$contexts)
+            || !empty($contract['allows_empty_touched_result'])) {
             return [
                 'data' => $result['data'],
                 'message' => (string)($result['message'] ?? '操作成功'),

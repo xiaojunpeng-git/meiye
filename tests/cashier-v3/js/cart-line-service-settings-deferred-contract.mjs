@@ -35,7 +35,9 @@ const serviceObjectToggle = body('setCartLineServiceObject(line, serviceObject, 
 const experienceToggle = body('toggleCartLineExperience(line)')
 const deferredPersistence = body('persistDeferredLineServiceSettings()')
 const localPreview = body('localCheckoutPreviewSnapshot()')
-const checkoutEntry = body('openCheckout({ forceFreshCheckout = false, checkoutSnapshot = null } = {})')
+const checkoutEntryStart = source.indexOf('async function openCheckout()')
+const checkoutEntryEnd = source.indexOf('\nasync function openHangOrder', checkoutEntryStart)
+const checkoutEntry = source.slice(checkoutEntryStart, checkoutEntryEnd)
 const resetContext = body('resetCashierLocalContext()')
 const clearCart = body('confirmClearCart()')
 const checkoutBar = source.match(/<footer class="cashier-checkout-bar">[\s\S]*?<\/footer>/)?.[0] || ''
@@ -96,10 +98,9 @@ check(
   'personnel selection payload carries employee and store identity into the browser snapshot boundary'
 )
 check(
-  /if \(!await persistDeferredLineServiceSettings\(\)\)/.test(checkoutEntry)
-    && checkoutEntry.indexOf('firstCartLineMissingCraftsmen') < checkoutEntry.indexOf('persistDeferredLineServiceSettings')
-    && checkoutEntry.indexOf('persistDeferredLineServiceSettings') < checkoutEntry.indexOf('synchronizeLocalCashierDraft'),
-  'checkout validates craftsmen before building the local snapshot and preparing checkout'
+  /localCheckoutPreview\.value = localCheckoutPreviewSnapshot\(\)/.test(checkoutEntry)
+    && !/firstCartLineMissingCraftsmen|CASHIER_CRAFTSMAN_REQUIRED|persistDeferredLineServiceSettings|synchronizeLocalCashierDraft/.test(checkoutEntry),
+  '立即结账只生成浏览器快照，不提前校验手艺人或写服务端草稿'
 )
 check(
   /localLineServiceSettings\.value\s*=\s*\{\}/.test(resetContext),

@@ -5,7 +5,7 @@ declare(strict_types=1);
 $root = dirname(__DIR__, 3);
 $backend = $root . '/后端代码';
 $files = [
-    'adapter' => $backend . '/app/services/cashier/v3/checkout/CashierV3EntitlementCompletionAuthorityAdapter.php',
+    'adapter' => $backend . '/app/services/cashier/v3/checkout/CashierV3DirectSnapshotEntitlementSettlementServices.php',
     'exception' => $backend . '/app/services/cashier/v3/checkout/CashierV3EntitlementCompletionAuthorityException.php',
     'guard' => $backend . '/app/services/cashier/v3/checkout/provider/CashierV3EntitlementOccupationGuardVersionProvider.php',
     'contributor' => $backend . '/app/services/cashier/v3/checkout/provider/CashierV3EntitlementOccupationContributorVersionProvider.php',
@@ -43,7 +43,7 @@ $writer = (string)file_get_contents($files['writer']);
 authorityContractAssert(
     'adapter exposes a Gateway-compatible read-only discovery entry',
     strpos($adapter, 'public function discover(array $scope): array') !== false
-        && strpos($adapter, "private const DISCOVERY_ACTION = 'prepare-checkout-submission'") !== false
+        && strpos($adapter, "private const DISCOVERY_ACTION = 'finalize-checkout-snapshot'") !== false
         && strpos($adapter, 'requestRowForDiscovery(') !== false
         && strpos($adapter, 'requestLinesForDiscovery(') !== false
 );
@@ -117,8 +117,7 @@ authorityContractAssert(
     strpos($adapter, "Db::name('user_card_holder')") !== false
         && strpos($adapter, "Db::name('store_order_cart_info')") !== false
         && strpos($adapter, "Db::name('store_order')") !== false
-        && strpos($adapter, "shadowVersion('card_holder'") !== false
-        && strpos($adapter, "shadowVersion('member_benefit_pool'") !== false
+        && strpos($adapter, 'authorityForDetail(') !== false
         && strpos($adapter, 'authority_checkout_snapshot_changed') !== false
 );
 authorityContractAssert(

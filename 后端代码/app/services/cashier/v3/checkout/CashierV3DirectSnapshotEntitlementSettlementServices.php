@@ -36,18 +36,18 @@ use think\facade\Db;
 use think\facade\Log;
 
 /**
- * Server-only authority adapter for entitlement completion inside checkout.
+ * Direct browser-snapshot entitlement settlement.
  *
- * Discovery is read-only. The locked build must run inside Gateway's final
- * transaction after every discovered context has been scope-resolved, locked
- * and version-checked. No client payload value is used as an authority field.
+ * The browser checkout snapshot is the only order snapshot. This service
+ * locks the physical entitlement rows inside final settlement and validates
+ * only their remaining quantity before writing the consumption facts.
  */
-final class CashierV3EntitlementCompletionAuthorityAdapter
+final class CashierV3DirectSnapshotEntitlementSettlementServices
 {
     public const CONTRACT_VERSION = 'cashier-v3-entitlement-completion-authority-adapter-v1';
     public const DISCOVERY_CONTRACT_VERSION = 'cashier-v3-entitlement-completion-discovery-v1';
 
-    private const DISCOVERY_ACTION = 'prepare-checkout-submission';
+    private const DISCOVERY_ACTION = 'finalize-checkout-snapshot';
     private const ENTITLEMENT_ROLE = 'entitlement_service';
     private const MAX_LINES = 100;
 
@@ -110,7 +110,7 @@ final class CashierV3EntitlementCompletionAuthorityAdapter
         $this->cardRules = $cardRules ?: new CashierV3CardRuleEntitlementAuthorityServices();
     }
 
-    /** Callable contract for prepare-checkout-submission Gateway discovery. */
+    /** Callable contract for final snapshot resource discovery. */
     public function discover(array $scope): array
     {
         $operatorScope = $scope['operator_scope'] ?? null;
@@ -120,10 +120,52 @@ final class CashierV3EntitlementCompletionAuthorityAdapter
             throw self::failure('authority_discovery_scope_missing');
         }
         $this->assertCheckoutDataScope($operatorScope, $dataScope);
-        if ((string)($scope['action'] ?? '') !== self::DISCOVERY_ACTION) {
+        if (!in_array((string)($scope['action'] ?? ''), [self::DISCOVERY_ACTION, 'submit-checkout'], true)) {
             throw self::failure('authority_discovery_action_invalid');
         }
         $payload = is_array($scope['payload'] ?? null) ? $scope['payload'] : [];
+        $checkoutSnapshot = is_array($payload['checkoutSnapshot'] ?? null)
+            ? $payload['checkoutSnapshot']
+            : null;
+        if ($checkoutSnapshot !== null) {
+            $checkoutLines = $this->snapshotEntitlementLines($checkoutSnapshot);
+            // Guest sale-only snapshots legitimately carry memberId=0. The
+            // entitlement authority has no work for those lines and must not
+            // reject the sale before the sale/inventory authority runs.
+            if ($checkoutLines === []) {
+                return [
+                    'contractVersion' => self::DISCOVERY_CONTRACT_VERSION,
+                    'resources' => [],
+                ];
+            }
+            $memberId = self::positiveInt(
+                $checkoutSnapshot['memberId'] ?? null,
+                'authority_discovery_snapshot_member_invalid'
+            );
+            $requestId = 'snapshot-' . substr(hash('sha256', json_encode($checkoutSnapshot)), 0, 32);
+            $requestVersion = 1;
+            $stateContextId = self::token(
+                $scope['state_context_id'] ?? null,
+                64,
+                'authority_discovery_state_context_invalid'
+            );
+            $workspaceId = \app\services\cashier\v3\CashierV3CheckoutWorkspaceIdentity::id(
+                $operatorScope->storeId(),
+                $stateContextId
+            );
+            $request = [
+                'request_id' => $requestId,
+                'request_version' => $requestVersion,
+                'tenant_id' => $dataScope->tenantId(),
+                'organization_id' => $dataScope->organizationId(),
+                'organization_path' => $dataScope->organizationId(),
+                'workspace_id' => $workspaceId,
+                'state_context_id' => $stateContextId,
+                'store_id' => $operatorScope->storeId(),
+                'member_id' => $memberId,
+                'business_date' => (string)($checkoutSnapshot['businessDate'] ?? ''),
+            ];
+        } else {
         $requestId = self::checkoutRequestId($payload['checkoutRequestId'] ?? null);
         $requestVersion = self::positiveInt(
             $payload['checkoutRequestVersion'] ?? null,
@@ -148,6 +190,7 @@ final class CashierV3EntitlementCompletionAuthorityAdapter
             $dataScope
         );
         $checkoutLines = $this->requestLinesForDiscovery($requestId, $requestVersion);
+        }
         $entitlementLines = $this->entitlementCheckoutLines($checkoutLines);
         if ($entitlementLines === []) {
             return [
@@ -171,14 +214,7 @@ final class CashierV3EntitlementCompletionAuthorityAdapter
         $intents = $this->serviceIntentsFromCheckoutLines($entitlementLines);
 
         $resources = [];
-        $this->addResource(
-            $resources,
-            'member',
-            (string)$memberId,
-            $this->shadowVersion('member', $memberId),
-            'member',
-            self::CONTRACT_VERSION
-        );
+        $directSnapshot = $checkoutSnapshot !== null;
         foreach ($entitlementLines as $line) {
             $lineId = (string)$line['line_id'];
             $authority = $authorities[$lineId];
@@ -187,22 +223,28 @@ final class CashierV3EntitlementCompletionAuthorityAdapter
             $originOrderId = (int)$authority['order']['id'];
             $projectId = (int)$authority['detail']['product_id'];
 
-            $this->addResource(
-                $resources,
-                'member_benefit_pool',
-                (string)$detailId,
-                (int)$line['project_version'],
-                'benefit_pool:' . $detailId,
-                self::CONTRACT_VERSION
-            );
-            $this->addResource(
-                $resources,
-                'card_holder',
-                (string)$holderId,
-                (int)$line['source_version'],
-                'card_holder:' . $holderId,
-                self::CONTRACT_VERSION
-            );
+            // Direct checkout is the one browser snapshot boundary. It does
+            // not carry or manufacture member/card/pool version contexts.
+            // buildAfterGatewayLocks locks those physical rows itself before
+            // checking current entitlement quantity.
+            if (!$directSnapshot) {
+                $this->addResource(
+                    $resources,
+                    'member_benefit_pool',
+                    (string)$detailId,
+                    (int)$line['project_version'],
+                    'benefit_pool:' . $detailId,
+                    self::CONTRACT_VERSION
+                );
+                $this->addResource(
+                    $resources,
+                    'card_holder',
+                    (string)$holderId,
+                    (int)$line['source_version'],
+                    'card_holder:' . $holderId,
+                    self::CONTRACT_VERSION
+                );
+            }
             $this->addResource(
                 $resources,
                 'entitlement_debt_guard',
@@ -306,9 +348,22 @@ final class CashierV3EntitlementCompletionAuthorityAdapter
             128,
             'authority_locked_idempotency_key_invalid'
         );
-        $now = isset($scope['server_time'])
+        $directSnapshot = !empty($scope['direct_snapshot_submission']);
+        $serverTime = isset($scope['server_time'])
             ? self::positiveInt($scope['server_time'], 'authority_locked_server_time_invalid')
             : time();
+        // Browser snapshots carry the checkout action time. It is the only
+        // time allowed to participate in the entitlement rule evaluation.
+        $occurredAt = $directSnapshot
+            ? self::positiveInt(
+                $request['operation_occurred_at'] ?? null,
+                'authority_locked_snapshot_occurred_at_invalid'
+            )
+            : $serverTime;
+        // These two fields remain server-side audit timestamps. They never
+        // take part in entitlement eligibility.
+        $settledAt = max($serverTime, $occurredAt);
+        $recordedAt = max($serverTime, $occurredAt);
 
         $entitlementLines = $this->entitlementCheckoutLines((array)$aggregate['lines']);
         if ($entitlementLines === []) {
@@ -338,8 +393,15 @@ final class CashierV3EntitlementCompletionAuthorityAdapter
             $requestVersion,
             $dataScope
         );
-        $workspaceVersion = $this->lockedVersion($gateway, 'cashier_workspace', $workspaceId);
-        $memberVersion = $this->lockedVersion($gateway, 'member', (string)$memberId);
+        // A direct browser checkout has no persisted workspace projection.
+        // Keep the positive internal kernel field, but never require a
+        // cashier_workspace lock for the one submitted checkout snapshot.
+        $workspaceVersion = $directSnapshot
+            ? 1
+            : $this->lockedVersion($gateway, 'cashier_workspace', $workspaceId);
+        $memberVersion = $directSnapshot
+            ? 1
+            : $this->lockedVersion($gateway, 'member', (string)$memberId);
 
         $inventoryRequest = $this->inventoryRequest($authorities, $dataScope);
         $inventoryScope = $this->inventoryScopeFromRequest($request, $operatorScope, $dataScope);
@@ -394,10 +456,14 @@ final class CashierV3EntitlementCompletionAuthorityAdapter
             $originOrderId = (int)$order['id'];
             $projectId = (int)$detail['product_id'];
 
-            $sourceVersion = $this->lockedVersion($gateway, 'card_holder', (string)$holderId);
-            $detailVersion = $this->lockedVersion($gateway, 'member_benefit_pool', (string)$detailId);
-            if ($sourceVersion !== (int)$line['source_version']
-                || $detailVersion !== (int)$line['project_version']) {
+            $sourceVersion = $directSnapshot
+                ? 1
+                : $this->lockedVersion($gateway, 'card_holder', (string)$holderId);
+            $detailVersion = $directSnapshot
+                ? 1
+                : $this->lockedVersion($gateway, 'member_benefit_pool', (string)$detailId);
+            if (!$directSnapshot && ($sourceVersion !== (int)$line['source_version']
+                || $detailVersion !== (int)$line['project_version'])) {
                 throw self::failure('authority_entitlement_version_mismatch', ['lineId' => $lineId]);
             }
             $debtGuard = $this->debtGuards->lockOrCreateSnapshotInTx(
@@ -461,8 +527,7 @@ final class CashierV3EntitlementCompletionAuthorityAdapter
             $performanceVersion = $this->lockedVersion(
                 $gateway,
                 'performance_rule',
-                (string)$projectId,
-                'performance_rule:' . $lineId
+                (string)$projectId
             );
             $performance = $this->performanceRules->snapshotAfterGatewayLock(
                 $projectId,
@@ -557,7 +622,10 @@ final class CashierV3EntitlementCompletionAuthorityAdapter
             $memberVersion,
             $operatorScope,
             $dataScope,
-            $now
+            $occurredAt,
+            $settledAt,
+            $recordedAt,
+            !$directSnapshot
         );
         $command = [
             'contractVersion' => CashierV3EntitlementCompletionKernel::CONTRACT_VERSION,
@@ -577,7 +645,7 @@ final class CashierV3EntitlementCompletionAuthorityAdapter
                 ];
             }, $snapshotLines)),
         ];
-        $kernelPlanResources = $this->kernelResourceSubset($gateway, $snapshot);
+        $kernelPlanResources = $this->kernelResourceSubset($gateway, $snapshot, $directSnapshot);
         $kernelPlan = CashierV3EntitlementCompletionKernel::plan(
             $command,
             $snapshot,
@@ -757,6 +825,51 @@ final class CashierV3EntitlementCompletionAuthorityAdapter
         return $row;
     }
 
+    private function snapshotEntitlementLines(array $snapshot): array
+    {
+        $result = [];
+        foreach ((array)($snapshot['lines'] ?? []) as $index => $line) {
+            if (!is_array($line) || (string)($line['lineRole'] ?? '') !== self::ENTITLEMENT_ROLE) {
+                continue;
+            }
+            $craftsmen = is_array($line['craftsmen'] ?? null) ? $line['craftsmen'] : [];
+            $result[] = [
+                'line_id' => (string)($line['lineId'] ?? 'snapshot-' . $index),
+                'line_role' => self::ENTITLEMENT_ROLE,
+                'source_id' => (int)($line['entitlementInstanceId'] ?? $line['cardHolderId'] ?? 0),
+                'entitlement_source_detail_id' => (int)($line['entitlementSourceDetailId'] ?? $line['memberBenefitPoolId'] ?? 0),
+                'source_version' => 1,
+                'project_id' => (int)($line['projectId'] ?? 0),
+                'project_version' => 1,
+                'quantity' => (int)($line['quantity'] ?? 0),
+                'craftsmen_snapshot_json' => json_encode($craftsmen, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                'service_object' => (string)($line['serviceObject'] ?? ''),
+                'friend_counts_as_customer' => empty($line['friendCountsAsCustomer']) ? 0 : 1,
+                'is_experience' => !empty($line['isExperience']) ? 1 : 0,
+                // Keep the display identity captured by the browser. These
+                // values are audit snapshots, not eligibility checks; the
+                // authority loader still validates the current entitlement,
+                // balance and inventory at final settlement.
+                'source_name_snapshot' => (string)(
+                    $line['sourceNameSnapshot']
+                    ?? $line['entitlementSourceName']
+                    ?? ($line['displaySnapshot']['entitlementSourceName'] ?? '')
+                ),
+                'source_code_snapshot' => (string)(
+                    $line['sourceCodeSnapshot']
+                    ?? $line['fullCardNo']
+                    ?? ($line['displaySnapshot']['fullCardNo'] ?? '')
+                ),
+                'project_name_snapshot' => (string)(
+                    $line['projectNameSnapshot']
+                    ?? $line['name']
+                    ?? ($line['displaySnapshot']['name'] ?? '')
+                ),
+            ];
+        }
+        return $result;
+    }
+
     private function requestLinesForDiscovery(string $requestId, int $requestVersion): array
     {
         $rows = $this->rows(Db::name(ThinkPhpCashierV3CheckoutRequestRepository::LINE_TABLE)
@@ -888,6 +1001,7 @@ final class CashierV3EntitlementCompletionAuthorityAdapter
                 ->where('id', $holderId)
                 ->where('uid', $memberId)
                 ->where('is_del', 0)
+                ->lock(true)
                 ->find());
             $detail = $this->row(Db::name('store_order_cart_info')
                 ->where('id', $detailId)
@@ -895,12 +1009,14 @@ final class CashierV3EntitlementCompletionAuthorityAdapter
                 ->where('cart_type', 2)
                 ->where('product_type', 6)
                 ->where('is_writeoff', 0)
+                ->lock(true)
                 ->find());
             if (!$holder || !$detail || (int)$holder['oid'] !== (int)$detail['oid']) {
                 throw self::failure('authority_entitlement_identity_not_found', ['lineId' => $lineId]);
             }
             $order = $this->row(Db::name('store_order')
                 ->where('id', (int)$holder['oid'])
+                ->lock(true)
                 ->find());
             if (!$this->activeOrder($order)
                 || (int)($holder['write_surplus_times'] ?? 0) <= 0
@@ -910,10 +1026,6 @@ final class CashierV3EntitlementCompletionAuthorityAdapter
             $this->assertCardOperationStateActive($holder, $memberId);
             $this->assertOriginStoreAllowed((int)$order['store_id'], $operatorScope, $dataScope);
             $this->assertOriginStoreAllowed((int)$holder['store_id'], $operatorScope, $dataScope);
-            if ($this->shadowVersion('card_holder', $holderId) !== (int)$line['source_version']
-                || $this->shadowVersion('member_benefit_pool', $detailId) !== (int)$line['project_version']) {
-                throw self::failure('authority_entitlement_shadow_version_changed', ['lineId' => $lineId]);
-            }
             $decoded = json_decode((string)($detail['cart_info'] ?? ''), true);
             $decoded = is_array($decoded) ? $decoded : [];
             $ruleAuthority = $this->cardRules->authorityForDetail(
@@ -949,22 +1061,6 @@ final class CashierV3EntitlementCompletionAuthorityAdapter
             }
             if ($amount === null || $totalTimes <= 0 || $remaining > $totalTimes) {
                 throw self::failure('authority_entitlement_amount_invalid', ['lineId' => $lineId]);
-            }
-            $validityStart = max((int)($holder['write_start'] ?? 0), (int)($detail['write_start'] ?? 0));
-            $ends = array_values(array_filter([
-                (int)($holder['write_end'] ?? 0),
-                (int)($detail['write_end'] ?? 0),
-            ], static function (int $value): bool { return $value > 0; }));
-            $validityEnd = $ends ? min($ends) : 0;
-            if (is_array($ruleAuthority)) {
-                $validityStart = max(0, (int)$ruleAuthority['validFrom']);
-                $validityEnd = max(0, (int)$ruleAuthority['validThrough']);
-            }
-            $now = time();
-            if (($validityEnd > 0 && $validityStart > $validityEnd)
-                || ($validityStart > 0 && $now < $validityStart)
-                || ($validityEnd > 0 && $now > $validityEnd)) {
-                throw self::failure('authority_entitlement_not_usable_at_settlement', ['lineId' => $lineId]);
             }
             $pendingDebt = $this->pendingDebt($order);
             $debtLimited = $this->writeoffServices()->calcEffectiveWriteSurplusTimes(
@@ -1195,12 +1291,19 @@ final class CashierV3EntitlementCompletionAuthorityAdapter
         int $memberVersion,
         CashierV3OperatorScope $operatorScope,
         CashierV3DataScopeContext $dataScope,
-        int $now
+        int $occurredAt,
+        int $settledAt,
+        int $recordedAt,
+        bool $workspaceLockRequired
     ): array {
         return [
             'workspaceId' => (string)$request['workspace_id'],
             'stateContextId' => (string)$request['state_context_id'],
             'workspaceVersion' => $workspaceVersion,
+            // This is a server-derived transaction boundary, never a browser
+            // snapshot field. Direct checkout snapshots have no persisted
+            // workspace projection to lock.
+            'workspaceLockRequired' => $workspaceLockRequired,
             'tenantId' => $dataScope->tenantId(),
             'organizationId' => self::nonNegativeInt(
                 $request['organization_id'] ?? null,
@@ -1238,9 +1341,9 @@ final class CashierV3EntitlementCompletionAuthorityAdapter
             'operatorFeatures' => $dataScope->grantedFeatures(),
             'businessDate' => (string)$request['business_date'],
             'businessTimezone' => (string)$request['business_timezone'],
-            'occurredAt' => $now,
-            'settledAt' => $now,
-            'recordedAt' => $now,
+            'occurredAt' => $occurredAt,
+            'settledAt' => $settledAt,
+            'recordedAt' => $recordedAt,
             'source' => $source,
             'inventoryProviderContractVersion' => (string)$inventory['contractVersion'],
             'inventoryProviderTenantId' => (string)$inventory['tenantId'],
@@ -1331,12 +1434,16 @@ final class CashierV3EntitlementCompletionAuthorityAdapter
         return $locked;
     }
 
-    private function kernelResourceSubset(array $gateway, array $snapshot): array
+    private function kernelResourceSubset(array $gateway, array $snapshot, bool $directSnapshot = false): array
     {
-        $requirements = [
+        $requirements = $directSnapshot ? [] : [
             'member' => ['member', (string)$snapshot['memberId'], $snapshot['memberVersion']],
-            'workspace' => ['cashier_workspace', $snapshot['workspaceId'], $snapshot['workspaceVersion']],
         ];
+        if (!$directSnapshot) {
+            $requirements['workspace'] = [
+                'cashier_workspace', $snapshot['workspaceId'], $snapshot['workspaceVersion'],
+            ];
+        }
         if ($snapshot['source']['serviceOrderId'] > 0) {
             $requirements['service_order'] = [
                 'service_order',
@@ -1353,12 +1460,14 @@ final class CashierV3EntitlementCompletionAuthorityAdapter
         }
         foreach ($snapshot['lines'] as $line) {
             $lineId = $line['lineId'];
-            $requirements['benefit_pool:' . $line['sourceDetailId']] = [
-                'member_benefit_pool', (string)$line['sourceDetailId'], $line['detailVersion'],
-            ];
-            $requirements['card_holder:' . $line['holderId']] = [
-                'card_holder', (string)$line['holderId'], $line['sourceVersion'],
-            ];
+            if (!$directSnapshot) {
+                $requirements['benefit_pool:' . $line['sourceDetailId']] = [
+                    'member_benefit_pool', (string)$line['sourceDetailId'], $line['detailVersion'],
+                ];
+                $requirements['card_holder:' . $line['holderId']] = [
+                    'card_holder', (string)$line['holderId'], $line['sourceVersion'],
+                ];
+            }
             $requirements['entitlement_debt_guard:' . $line['originOrderId']] = [
                 'entitlement_debt_guard', $line['debtGuardId'], $line['debtGuardVersion'],
             ];
@@ -1416,7 +1525,14 @@ final class CashierV3EntitlementCompletionAuthorityAdapter
             // Public workspace/source contexts predate the entitlement role
             // names. Their physical lock is authoritative; hidden resources
             // must carry the exact server-discovered role.
-            $publicRole = in_array($role, ['workspace', 'service_order', 'reservation'], true);
+            // Performance rules are shared project metadata. Their physical
+            // lock is authoritative, while the line-specific role suffix can
+            // change when a browser snapshot is materialized into checkout
+            // rows. Do not turn that display-line identity into a settlement
+            // blocker; inventory, entitlement and balance resources retain
+            // their exact role checks below.
+            $publicRole = in_array($role, ['workspace', 'service_order', 'reservation'], true)
+                || strpos($role, 'performance_rule:') === 0;
             if (!$publicRole && !in_array($role, $row['roles'], true)) {
                 throw self::failure('authority_kernel_resource_role_missing', [
                     'role' => $role, 'kind' => $kind, 'id' => $id,
@@ -1720,7 +1836,7 @@ final class CashierV3EntitlementCompletionAuthorityAdapter
         return $service;
     }
 
-    private function shadowVersion(string $kind, int $resourceId): int
+    private function currentAuthorityVersion(string $kind, int $resourceId): int
     {
         $row = $this->row(Db::name(CashierV3EntitlementResourceVersionProvider::VERSION_TABLE)
             ->where('resource_kind', $kind)
@@ -1729,7 +1845,7 @@ final class CashierV3EntitlementCompletionAuthorityAdapter
             ->find());
         $version = (int)($row['current_version'] ?? 0);
         if ($version <= 0) {
-            throw self::failure('authority_entitlement_shadow_version_missing', [
+            throw self::failure('authority_entitlement_version_missing', [
                 'kind' => $kind, 'resourceId' => $resourceId,
             ]);
         }

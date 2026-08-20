@@ -728,7 +728,7 @@ final class CashierV3CheckoutSettlementKernel
                 'priceChangedByNameSnapshot',
                 'priceChangedAt',
                 'craftsmen',
-            ], ['catalogSkuId', 'serviceObject', 'friendCountsAsCustomer', 'isExperience', 'isPresale', 'inventoryOutboundRequired', 'salespeople', 'guideSelections', 'salesManagerSelections', 'manualLaborFeeCents'], 'saleLines[' . $index . ']');
+            ], ['catalogSkuId', 'serviceObject', 'friendCountsAsCustomer', 'isExperience', 'isPresale', 'inventoryOutboundRequired', 'salespeople', 'guideSelections', 'salesManagerSelections', 'manualLaborFeeCents', 'cardPurchaseSnapshot'], 'saleLines[' . $index . ']');
             if ($line['saleClassification'] !== 'formal_sale') {
                 throw self::failure('sale_line_not_formal', ['index' => $index]);
             }
@@ -807,6 +807,11 @@ final class CashierV3CheckoutSettlementKernel
             $manualLaborFeeCents = array_key_exists('manualLaborFeeCents', $line)
                 ? self::nonNegativeInt($line['manualLaborFeeCents'], 'saleLine.manualLaborFeeCents')
                 : null;
+            $cardPurchaseSnapshot = self::normalizeCardPurchaseSnapshot(
+                $line['cardPurchaseSnapshot'] ?? [],
+                (string)$line['sourceType'],
+                $authorityKey
+            );
             if ($isExperience > 1 || $friendCountsAsCustomer > 1 || $isPresale > 1 || $inventoryOutboundRequired > 1 || ($isPresale === 1 && $inventoryOutboundRequired === 1)) {
                 throw self::failure('sale_line_is_experience_invalid', ['authorityKey' => $authorityKey]);
             }
@@ -875,6 +880,7 @@ final class CashierV3CheckoutSettlementKernel
                 'isExperience' => $isExperience,
                 'isPresale' => $isPresale,
                 'inventoryOutboundRequired' => $inventoryOutboundRequired,
+                'cardPurchaseSnapshot' => $cardPurchaseSnapshot,
             ];
             if ($manualLaborFeeCents !== null) {
                 $normalized['manualLaborFeeCents'] = $manualLaborFeeCents;
@@ -945,6 +951,13 @@ final class CashierV3CheckoutSettlementKernel
             }
             if ($catalogSkuId <= 0) {
                 unset($fingerprintInput['catalogSkuId']);
+            }
+            // Empty card snapshots are the canonical absence value. Keep the
+            // optional field out of the fingerprint so ordinary sales remain
+            // compatible with the projection contract; non-empty card issue
+            // snapshots remain immutable fingerprint input.
+            if ($fingerprintInput['cardPurchaseSnapshot'] === []) {
+                unset($fingerprintInput['cardPurchaseSnapshot']);
             }
             $normalized['lineFingerprint'] = CashierV3CheckoutSettlementCanonicalizer::fingerprint($fingerprintInput);
             $result[] = $normalized;
@@ -1085,6 +1098,21 @@ final class CashierV3CheckoutSettlementKernel
             $result[] = $normalized;
         }
         return $result;
+    }
+
+    private static function normalizeCardPurchaseSnapshot($value, string $sourceType, string $authorityKey): array
+    {
+        if ($sourceType !== 'card') {
+            return [];
+        }
+        if (!is_array($value) || self::isList($value)) {
+            throw self::failure('card_purchase_snapshot_shape_invalid', ['authorityKey' => $authorityKey]);
+        }
+        $encoded = json_encode($value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        if (!is_string($encoded) || strlen($encoded) > 1048576) {
+            throw self::failure('card_purchase_snapshot_shape_invalid', ['authorityKey' => $authorityKey]);
+        }
+        return $value;
     }
 
     /**
@@ -1430,6 +1458,10 @@ final class CashierV3CheckoutSettlementKernel
                     ? json_encode($line['salesManagerSelections'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
                     : '',
                 'manualLaborFeeCents' => $line['manualLaborFeeCents'] ?? null,
+                'cardPurchaseSnapshotJson' => json_encode(
+                    $line['cardPurchaseSnapshot'],
+                    JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
+                ),
                 'lineFingerprint' => $line['lineFingerprint'],
                 'sortNo' => ++$sortNo,
             ];
@@ -1493,6 +1525,7 @@ final class CashierV3CheckoutSettlementKernel
                 'guideSelectionsJson' => '[]',
                 'salesManagerSelectionsJson' => '[]',
                 'manualLaborFeeCents' => $line['manualLaborFeeCents'] ?? null,
+                'cardPurchaseSnapshotJson' => '[]',
                 'lineFingerprint' => $line['lineFingerprint'],
                 'sortNo' => ++$sortNo,
             ];

@@ -160,6 +160,9 @@ const currentStepPosition = computed(() => {
   return index >= 0 ? index : 0
 })
 const checkoutOrderLines = computed(() => {
+  if (Array.isArray(props.checkout.lines)) return props.checkout.lines.filter((line) => (
+    ['sale', 'entitlement_service', 'card_operation'].includes(String(line?.lineRole || ''))
+  ))
   if (Array.isArray(props.checkout.orderLines)) return props.checkout.orderLines
   if (Array.isArray(props.checkout.orderSnapshot?.lines)) return props.checkout.orderSnapshot.lines
   if (Array.isArray(props.checkout.snapshot?.orderLines)) return props.checkout.snapshot.orderLines
@@ -169,18 +172,59 @@ const cardOperationUpgrade = computed(() => isRecord(props.checkout.cardOperatio
   ? props.checkout.cardOperationUpgrade
   : null)
 const isCardOperationUpgrade = computed(() => Boolean(cardOperationUpgrade.value))
-const cardOperationTargetAmount = computed(() => Number(cardOperationUpgrade.value?.targetPriceCents || 0) / 100)
+const cardOperationTargetAmount = computed(() => Number(
+  cardOperationUpgrade.value?.targetPriceCents
+  ?? cardOperationUpgrade.value?.targetAmountCents
+  ?? 0
+) / 100)
 const cardOperationCreditAmount = computed(() => Number(cardOperationUpgrade.value?.sourceRemainingValueCents || 0) / 100)
-const cardOperationDeltaAmount = computed(() => Number(cardOperationUpgrade.value?.settlementDeltaCents || 0) / 100)
+const cardOperationDeltaAmount = computed(() => Number(
+  cardOperationUpgrade.value?.settlementDeltaCents
+  ?? cardOperationUpgrade.value?.deltaAmountCents
+  ?? 0
+) / 100)
 const cardOperationSettlementResults = computed(() => Array.isArray(props.checkout.cardOperationSettlement?.operations)
   ? props.checkout.cardOperationSettlement.operations
   : [])
+const snapshotSaleAmount = (line = {}, original = false) => {
+  const explicitCents = Number(original ? line.originalLineAmountCents : line.lineAmountCents)
+  if (Number.isSafeInteger(explicitCents) && explicitCents >= 0) return explicitCents / 100
+  const raw = Number(original ? line.originalAmount : (line.finalAmount ?? line.amount ?? 0))
+  if (!Number.isFinite(raw) || raw < 0) return 0
+  // Local preview rows can still carry a unit amount. Persisted rows already
+  // carry the line total, so only browser-local rows are multiplied here.
+  const isLocal = String(line.id || '').startsWith('local-')
+  return raw * (isLocal ? Math.max(1, Number(line.quantity || 1)) : 1)
+}
+const snapshotReceivableSummary = computed(() => {
+  const lines = Array.isArray(props.checkout.lines) ? props.checkout.lines : []
+  const saleLines = lines.filter((line) => String(line?.lineRole || '') === 'sale')
+  if (!saleLines.length) return null
+  const originalAmount = saleLines.reduce((total, line) => total + snapshotSaleAmount(line, true), 0)
+  const saleAmount = saleLines.reduce((total, line) => total + snapshotSaleAmount(line), 0)
+  const debtAmount = saleLines.reduce((total, line) => {
+    const cents = Number(line?.debtAmountCents || 0)
+    return total + (Number.isSafeInteger(cents) && cents > 0 ? cents / 100 : 0)
+  }, 0)
+  const receivableAmount = Math.max(0, saleAmount - debtAmount)
+  return {
+    originalAmount,
+    discountAmount: Math.max(0, originalAmount - saleAmount),
+    receivableAmount
+  }
+})
 const checkoutSummary = computed(() => {
-  if (isRecord(props.checkout.summary)) return props.checkout.summary
-  if (isRecord(props.checkout.orderSummary)) return props.checkout.orderSummary
-  if (isRecord(props.checkout.orderSnapshot?.summary)) return props.checkout.orderSnapshot.summary
-  if (isRecord(props.checkout.snapshot?.summary)) return props.checkout.snapshot.summary
-  return {}
+  const fallback = isRecord(props.checkout.summary)
+    ? props.checkout.summary
+    : isRecord(props.checkout.orderSummary)
+      ? props.checkout.orderSummary
+      : isRecord(props.checkout.orderSnapshot?.summary)
+        ? props.checkout.orderSnapshot.summary
+        : isRecord(props.checkout.snapshot?.summary)
+          ? props.checkout.snapshot.summary
+          : {}
+  if (!snapshotReceivableSummary.value || isDebtRepayment.value || isRechargeCheckout.value) return fallback
+  return { ...fallback, ...snapshotReceivableSummary.value }
 })
 const checkoutMember = computed(() => {
   if (isRecord(props.checkout.member)) return props.checkout.member
@@ -241,11 +285,42 @@ const canSaveSalesDate = computed(() => (
   && (!salesDateIsHistorical.value || salesDateReason.value.trim() !== '')
   && !dateSaving.value
 ))
-const selectedPaymentLines = computed(() => Array.isArray(payment.value.selectedLines) ? payment.value.selectedLines : [])
-const hasBalancePayment = computed(() => selectedPaymentLines.value.some((line) => line?.kind === 'balance_deduction'))
-const hasNonBalancePayment = computed(() => selectedPaymentLines.value.some((line) => line?.kind !== 'balance_deduction'))
+const selectedPaymentLines = computed(() => Array.isArray(props.checkout.lines)
+  ? props.checkout.lines.filter((line) => ['payment', 'balance_payment'].includes(String(line?.lineRole || '')))
+  : (Array.isArray(payment.value.selectedLines) ? payment.value.selectedLines : []))
+const hasBalancePayment = computed(() => (
+  selectedPaymentLines.value.some((line) => String(line?.lineRole || '') === 'balance_payment')
+))
+const hasNonBalancePayment = computed(() => selectedPaymentLines.value.some((line) => String(line?.lineRole || '') === 'payment'))
 const paymentMethods = computed(() => Array.isArray(payment.value.methods) ? payment.value.methods : [])
-const paymentSummary = computed(() => payment.value.summary || props.checkout.paymentSummary || {})
+const paymentSummary = computed(() => {
+  const receivableAmount = Number(checkoutSummary.value.receivableAmount || 0)
+  const selectedAmount = selectedPaymentLines.value.reduce(
+    (total, line) => total + Math.max(0, Number(line?.amount || 0)),
+    0
+  )
+  return {
+    receivableAmount,
+    selectedAmount,
+    remainingAmount: Math.max(0, receivableAmount - selectedAmount),
+    overpaidAmount: Math.max(0, selectedAmount - receivableAmount)
+  }
+})
+// Final confirmation reads the same browser snapshot that final submission
+// sends. Do not display a separately cached cash-performance total here: it
+// can be stale after payment rows have changed.
+const checkoutCollectionAmount = computed(() => selectedPaymentLines.value.reduce(
+  (total, line) => String(line?.lineRole || '') === 'balance_payment'
+    ? total
+    : total + Math.max(0, Number(line?.amount || 0)),
+  0
+))
+const checkoutBalancePaymentAmount = computed(() => selectedPaymentLines.value.reduce(
+  (total, line) => String(line?.lineRole || '') === 'balance_payment'
+    ? total + Math.max(0, Number(line?.amount || 0))
+    : total,
+  0
+))
 const displayedPaymentSummary = computed(() => {
   const summary = paymentSummary.value
   const drafts = paymentLineAmountDrafts.value
@@ -274,41 +349,13 @@ const displayedPaymentSummary = computed(() => {
     overpaidAmount: Math.max(0, Number(summary.overpaidAmount || 0) - remainingAmount + selectedDelta)
   }
 })
-// 编辑阶段的本地预览没有 checkout_request 投影可等待；其 payment 已由
-// 父级同步回填，允许按当前前端金额进入第三步。最终确认仍会先取得并校验
-// 服务端权威结账快照。
+// 收款编辑只存在于浏览器快照中。金额是否相等由当前浏览器快照决定，
+// 不读取或写入服务端草稿；未结清不能进入最终确认。
 const hasPendingPaymentLineAmountDraft = computed(() => (
   props.checkout.localDraftPreview !== true
   && Object.keys(paymentLineAmountDrafts.value).length > 0
 ))
-const isZeroReceivable = computed(() => Number(displayedPaymentSummary.value.receivableAmount) === 0)
-const firstInvalidPaymentLine = computed(() => {
-  for (const line of selectedPaymentLines.value) {
-    const draft = paymentLineAmountDrafts.value[paymentLineAmountKey(line)]
-    const amount = draft
-      ? wholeYuanAmount(draft.value)
-      : authoritativeWholeYuanAmount(line?.amount)
-    if (amount === null || amount < 0 || (!isZeroReceivable.value && amount === 0)) return { line, amount }
-  }
-  return null
-})
-const hasNonPositivePaymentLine = computed(() => firstInvalidPaymentLine.value !== null)
-const invalidPaymentLineMessage = computed(() => {
-  const invalid = firstInvalidPaymentLine.value
-  if (!invalid) {
-    return isZeroReceivable.value && selectedPaymentLines.value.length === 0
-      ? '应收为0时仍请选择一种记账收款方式。'
-      : ''
-  }
-  const name = String(invalid.line?.name || '当前收款方式').trim() || '当前收款方式'
-  return invalid.amount === 0 && !isZeroReceivable.value
-    ? `${name}的收款金额不能为0。`
-    : `${name}的收款金额必须为大于0的整数。`
-})
 const paymentAmountValidation = computed(() => {
-  if (invalidPaymentLineMessage.value) {
-    return { state: 'invalid', message: invalidPaymentLineMessage.value }
-  }
   const summary = displayedPaymentSummary.value
   const receivable = Number(summary.receivableAmount)
   const selected = Number(summary.selectedAmount)
@@ -320,6 +367,7 @@ const paymentAmountValidation = computed(() => {
   if (delta < 0) return { state: 'overpaid', message: `超出 ${formatMoney(Math.abs(delta))}` }
   return { state: 'balanced', message: '收款金额已与应收金额相等。' }
 })
+const isPaymentAmountBalanced = computed(() => paymentAmountValidation.value.state === 'balanced')
 const toggleBalancePayment = () => {
   if (hasBalancePayment.value) {
     request('remove-balance-payment')
@@ -347,8 +395,6 @@ function closePaymentValidationPrompt() {
 const isPaymentDraftReady = computed(() => (
   hasAuthoritativePaymentSnapshot.value
   && !hasPendingPaymentLineAmountDraft.value
-  && !hasNonPositivePaymentLine.value
-  && paymentAmountValidation.value.state === 'balanced'
 ))
 const paymentResultLines = computed(() => Array.isArray(payment.value.resultLines) ? payment.value.resultLines : selectedPaymentLines.value)
 const finalChanges = computed(() => Array.isArray(props.checkout.finalChanges) ? props.checkout.finalChanges : [])
@@ -356,16 +402,14 @@ const childResults = computed(() => isRecord(props.checkout.childResults) ? prop
 const hasAuthoritativePaymentSnapshot = computed(() => (
   hasAuthoritativeOrderSnapshot.value
   && Array.isArray(payment.value.methods)
-  && Array.isArray(payment.value.selectedLines)
-  && isRecord(paymentSummary.value)
-  && hasOwn(paymentSummary.value, 'receivableAmount')
-  && hasOwn(paymentSummary.value, 'selectedAmount')
-  && hasOwn(paymentSummary.value, 'remainingAmount')
+  && Array.isArray(props.checkout.lines)
+  && Number.isFinite(Number(paymentSummary.value.receivableAmount))
+  && Number.isFinite(Number(paymentSummary.value.selectedAmount))
+  && Number.isFinite(Number(paymentSummary.value.remainingAmount))
 ))
 const hasAuthoritativeFinalSnapshot = computed(() => (
   hasAuthoritativePaymentSnapshot.value
   && hasOwn(props.checkout, 'debtAmount')
-  && hasOwn(props.checkout, 'cashPerformanceAmount')
   && hasOwn(props.checkout, 'balancePaymentAmount')
   && Array.isArray(props.checkout.finalChanges)
 ))
@@ -535,14 +579,6 @@ watch(
     if ([1, 2, 3].includes(activeStep)) {
       localStep.value = activeStep
     }
-  },
-  { immediate: true }
-)
-
-watch(
-  [() => props.checkout.activeStep, firstInvalidPaymentLine],
-  ([activeStep, invalidLine]) => {
-    if (activeStep === 3 && invalidLine) localStep.value = 2
   },
   { immediate: true }
 )
@@ -781,9 +817,8 @@ function closePaymentLineEditor() {
 
 function addPaymentMethod(method = {}) {
   if (method.canAdd === false || !method.id || pendingPaymentMethodIds.value.has(String(method.id))) return
-  // Selecting a method always adds an editable draft line. The cashier chooses
-  // all methods first and then adjusts their amounts; the only gate is the
-  // aggregate amount check before advancing to final confirmation.
+  // The selected method receives the current snapshot's remaining amount;
+  // split payments remain editable from the resulting line.
   pendingPaymentMethodIds.value = new Set(pendingPaymentMethodIds.value).add(String(method.id))
   request('add-payment-method', { paymentMethodId: method.id })
 }
@@ -1012,43 +1047,17 @@ function useDevelopmentNoPaymentFailureFixture() {
 
 async function goNext() {
   if (!hasCurrentStepSnapshot.value) return
-  if (currentStep.value === 1) {
-    if (salesDateIsDirty.value) {
-      window.dispatchEvent(new CustomEvent('cashier-v3:ui-result', {
-        detail: { status: 'failed', message: `${dateLabel.value}已修改，请先保存${dateLabel.value}。` }
-      }))
-      return
-    }
-  }
-  // Do not let the final-preparation command race a just-finished amount
-  // edit. The parent serializes each draft write and this component resumes
-  // navigation as soon as its authoritative projection arrives.
+  // Do not let navigation race a just-finished local amount edit. This is
+  // not a business validation and never invokes a server draft command.
   if (currentStep.value === 2) {
-    if (invalidPaymentLineMessage.value) {
-      showPaymentValidationPrompt(invalidPaymentLineMessage.value)
+    if (!isPaymentDraftReady.value || !isPaymentAmountBalanced.value) {
+      showPaymentValidationPrompt(paymentAmountValidation.value.message || '请先完成本次收款金额。')
       return
     }
-    if (!isPaymentDraftReady.value) return
   }
   const currentIndex = editableSteps.value.findIndex((step) => step.number === currentStep.value)
   const nextStep = currentIndex >= 0 ? editableSteps.value[currentIndex + 1] : null
   if (nextStep) {
-    // Guide rounds belong to sale lines. Pure entitlement service has no
-    // sales attribution to validate and must proceed to service completion.
-    if (currentStep.value === 1 && !isDebtRepayment.value && hasSaleLines.value) {
-      isCheckingGuideRound.value = true
-      try {
-        const response = await request('validate-guide-round-before-payment')
-        if (!['success', 'succeeded'].includes(submissionResponseStatus(response))) {
-          window.dispatchEvent(new CustomEvent('cashier-v3:ui-result', {
-            detail: { status: 'failed', message: submissionResponseMessage(response) }
-          }))
-          return
-        }
-      } finally {
-        isCheckingGuideRound.value = false
-      }
-    }
     localStep.value = nextStep.number
     return
   }
@@ -1419,7 +1428,9 @@ onBeforeUnmount(() => {
                 {{ [isEntitlementCheckoutLine(line) ? '本次使用权益' : '本次购买', line.entitlementSourceName, line.fullCardNo, line.serviceRole].filter(Boolean).join(' · ') }}
               </span>
               <span v-if="checkoutLineServiceTags(line).length">{{ checkoutLineServiceTags(line).join(' · ') }}</span>
-              <span v-if="checkoutLineDebtAmount(line) > 0">欠款 {{ formatMoney(checkoutLineDebtAmount(line)) }}</span>
+              <span v-if="checkoutLineDebtAmount(line) > 0" class="checkout-order-line__debt">
+                欠款 {{ formatMoney(checkoutLineDebtAmount(line)) }}
+              </span>
             </div>
             <span>×{{ line.quantity || 1 }}</span>
             <strong v-if="!isEntitlementCheckoutLine(line)">{{ formatMoney(line.finalAmount ?? line.amount) }}</strong>
@@ -1589,8 +1600,8 @@ onBeforeUnmount(() => {
           <div v-else-if="hasSaleLines || isDebtRepayment"><dt>应收</dt><dd>{{ formatMoney(checkoutSummary.receivableAmount) }}</dd></div>
           <div v-if="hasSaleLines"><dt>优惠</dt><dd>{{ formatMoney(checkoutSummary.discountAmount) }}</dd></div>
           <div v-if="hasSaleLines || isDebtRepayment"><dt>欠款</dt><dd>{{ formatMoney(checkout.debtAmount) }}</dd></div>
-          <div v-if="hasSaleLines || isDebtRepayment"><dt>现金业绩</dt><dd>{{ formatMoney(checkout.cashPerformanceAmount) }}</dd></div>
-          <div v-if="!isCardOperationUpgrade && (hasSaleLines || isDebtRepayment)"><dt>余额支付</dt><dd>{{ formatMoney(checkout.balancePaymentAmount) }}</dd></div>
+          <div v-if="hasSaleLines || isDebtRepayment"><dt>收款</dt><dd>{{ formatMoney(checkoutCollectionAmount) }}</dd></div>
+          <div v-if="!isCardOperationUpgrade && (hasSaleLines || isDebtRepayment)"><dt>余额支付</dt><dd>{{ formatMoney(checkoutBalancePaymentAmount) }}</dd></div>
           <div v-if="hasEntitlementLines"><dt>权益服务</dt><dd>{{ checkoutOrderLines.filter(isEntitlementCheckoutLine).length }} 项</dd></div>
           <div v-if="isRechargeCheckout && checkout.businessDate"><dt>{{ dateLabel }}</dt><dd>{{ checkout.businessDate }}</dd></div>
           <div v-if="isRechargeCheckout && checkout.businessDateReason"><dt>补单原因</dt><dd>{{ checkout.businessDateReason }}</dd></div>
@@ -1737,7 +1748,7 @@ onBeforeUnmount(() => {
       </template>
       <template v-else>
         <button type="button" class="button button--secondary" :disabled="currentStepPosition === 0" @click="goPrevious">上一步</button>
-        <button type="button" class="button button--primary" :disabled="isSubmissionLocked || !hasCurrentStepSnapshot || (currentStep === 2 && !isPaymentDraftReady && !invalidPaymentLineMessage)" @click="goNext">{{ nextLabel }}</button>
+        <button type="button" class="button button--primary" :disabled="isSubmissionLocked || !hasCurrentStepSnapshot || (currentStep === 2 && (!isPaymentDraftReady || !isPaymentAmountBalanced))" @click="goNext">{{ nextLabel }}</button>
       </template>
     </footer>
   </section>

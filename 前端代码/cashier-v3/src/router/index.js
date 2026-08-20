@@ -21,6 +21,7 @@ import RoutePlaceholderView from '@/views/RoutePlaceholderView.vue'
 import StoreLoginView from '@/views/StoreLoginView.vue'
 import FundManagementView from '@/views/FundManagementView.vue'
 import PresaleClaimView from '@/views/PresaleClaimView.vue'
+import EngineeringManagementView from '@/views/EngineeringManagementView.vue'
 import { bootstrapCashierV3Workbench, hasCashierV3Session } from '@/services/cashierV3SessionLifecycle'
 import { canUseCashierV3Feature } from '@/services/cashierV3Bridge'
 
@@ -40,7 +41,8 @@ const routeFeatureCodes = Object.freeze({
   'cashier-v3-staff-list': 'cashier.v3.management_center',
   'cashier-v3-room-settings': 'cashier.v3.management_center',
   'cashier-v3-business-dashboard': 'cashier.v3.management_center',
-  'cashier-v3-store-business-reports': 'cashier.v3.management_center'
+  'cashier-v3-store-business-reports': 'cashier.v3.management_center',
+  'cashier-v3-engineering-management': 'cashier.v3.management_center'
 })
 
 const defaultRouteNames = Object.freeze([
@@ -82,6 +84,13 @@ const routes = [
     name: 'cashier-v3-platform-product-dashboard',
     component: ProductDashboardView,
     meta: { platformReport: true, title: '商品看板' }
+  },
+  {
+    path: '/platform/engineering-management',
+    name: 'cashier-v3-platform-engineering-management',
+    component: EngineeringManagementView,
+    props: { platform: true },
+    meta: { platformReport: true, title: '工程管理' }
   },
   {
     path: '/platform/member-management-dashboard',
@@ -187,6 +196,12 @@ const routes = [
         name: 'cashier-v3-business-dashboard',
         component: BusinessDashboardView,
         meta: { title: '经营看板', description: 'V3 事实层经营指标、趋势、排行、明细与数据追平状态。' }
+      },
+      {
+        path: 'management-center/engineering-management',
+        name: 'cashier-v3-engineering-management',
+        component: EngineeringManagementView,
+        meta: { title: '工程管理', description: '建店、工程质量、维修与降租续签台账。', featureCode: 'cashier.v3.engineering_management' }
       },
       {
         path: 'data/reports/:report?',

@@ -125,6 +125,7 @@ namespace {
 
         /** @var bool */
         public $invalidEntitlementReceipt = false;
+        public $replaySaleEffects = false;
 
         public function __construct(array $authority)
         {
@@ -215,6 +216,15 @@ namespace {
             ];
         }
 
+        public function persistSaleSettlementEffectsInTx(array $authority, array $salesOrder): array
+        {
+            $this->step('sale-effects');
+            return [
+                'inventory' => ['receiptId' => 'SIR-001', 'replayed' => $this->replaySaleEffects],
+                'cardPurchase' => ['issuedCardCount' => 1, 'receipts' => [], 'replayed' => $this->replaySaleEffects],
+            ];
+        }
+
         public function planEntitlementCompletionInTx(array $authority): array
         {
             $this->step('entitlement-plan');
@@ -246,7 +256,8 @@ namespace {
             array $paymentCollection,
             array $debt,
             array $entitlementPlan,
-            array $inventoryCompletion
+            array $inventoryCompletion,
+            array $saleSettlementEffects
         ): array {
             $this->step('events');
             return [
@@ -509,13 +520,24 @@ namespace {
     c2SubmissionAssert(
         'C2-SUBMIT-04 mixed writes every slice before request success and cart cleanup',
         $port->calls === [
-            'lock', 'entitlement-plan', 'sales', 'payments', 'debt', 'balance', 'inventory', 'events',
+            'lock', 'entitlement-plan', 'sales', 'payments', 'debt', 'balance', 'sale-effects', 'inventory', 'events',
             'entitlement-persist', 'sale-facts', 'mark-succeeded', 'clear-workspace',
         ]
             && $result['salesOrder']['orderId'] === c2SubmissionId('CSO', 'b')
+            && $result['cardPurchase']['issuedCardCount'] === 1
             && $result['debt']['amountCents'] === 49600
             && $result['entitlementCompletion']['receiptId'] === c2SubmissionId('ECR', 'e')
             && $result['completionReferenceId'] === c2SubmissionId('CSO', 'b')
+    );
+
+    $port = new C2SubmissionTestPort(c2SubmissionAuthority('mixed'));
+    $port->replaySaleEffects = true;
+    $result = (new CashierV3CheckoutSubmissionOrchestrator($port))->submitInTx($scope);
+    c2SubmissionAssert(
+        'C2-SUBMIT-04A mixed replay state includes product inventory and card issuance effects',
+        $result['replayed'] === true
+            && $result['saleInventory']['receiptId'] === 'SIR-001'
+            && $result['cardPurchase']['issuedCardCount'] === 1
     );
 
     $authority = c2SubmissionAuthority('entitlement_only');

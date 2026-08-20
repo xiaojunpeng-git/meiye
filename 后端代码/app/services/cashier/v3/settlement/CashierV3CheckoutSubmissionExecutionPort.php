@@ -35,6 +35,16 @@ interface CashierV3CheckoutSubmissionExecutionPort
         array $paymentCollection
     ): ?array;
 
+    /**
+     * Applies sale-side physical effects for a mixed checkout: product stock
+     * movement and issued-card rights. Both remain inside the final checkout
+     * transaction and are not browser draft writes.
+     */
+    public function persistSaleSettlementEffectsInTx(
+        array $authority,
+        array $salesOrder
+    ): array;
+
     /** Builds the C2 entitlement kernel plan without writing business state. */
     public function planEntitlementCompletionInTx(array $authority): array;
 
@@ -53,7 +63,8 @@ interface CashierV3CheckoutSubmissionExecutionPort
         array $paymentCollection,
         array $debt,
         array $entitlementPlan,
-        array $inventoryCompletion
+        array $inventoryCompletion,
+        array $saleSettlementEffects
     ): array;
 
     public function persistEntitlementCompletionInTx(

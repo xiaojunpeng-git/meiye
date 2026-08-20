@@ -217,7 +217,7 @@ const menuItems = [
     icon: Settings,
     featureCode: 'cashier.v3.management_center',
     to: { name: 'cashier-v3-management-center' },
-    activeRouteNames: ['cashier-v3-management-center', 'cashier-v3-staff-list', 'cashier-v3-room-settings']
+    activeRouteNames: ['cashier-v3-management-center', 'cashier-v3-staff-list', 'cashier-v3-room-settings', 'cashier-v3-engineering-management']
   },
   {
     key: 'data',
@@ -262,7 +262,6 @@ const allowedTopActions = new Set([
 ])
 const allowedMemberSelectorContexts = new Set(['cashier', 'writeoff', 'reservation', 'card-transfer', 'customer-care', 'customer-care-record', 'member-referrer'])
 const memberSelectorActions = {
-  cashier: 'select-cashier-member',
   writeoff: 'select-writeoff-member',
   reservation: 'select-reservation-member'
 }
@@ -485,7 +484,7 @@ const hasMatchingRoomAssignmentSnapshot = computed(() => {
 const operatorLabel = computed(() => state.operator.roleName
   ? `${state.operator.name} · ${state.operator.roleName}`
   : state.operator.name)
-const hasPageHelp = computed(() => ['cashier-v3-cashier', 'cashier-v3-writeoff', 'cashier-v3-replacement', 'cashier-v3-room', 'cashier-v3-reservation', 'cashier-v3-member', 'cashier-v3-care', 'cashier-v3-hang', 'cashier-v3-order-center', 'cashier-v3-management-center', 'cashier-v3-staff-list', 'cashier-v3-business-dashboard', 'cashier-v3-store-business-reports'].includes(route.name))
+const hasPageHelp = computed(() => ['cashier-v3-cashier', 'cashier-v3-writeoff', 'cashier-v3-replacement', 'cashier-v3-room', 'cashier-v3-reservation', 'cashier-v3-member', 'cashier-v3-care', 'cashier-v3-hang', 'cashier-v3-order-center', 'cashier-v3-management-center', 'cashier-v3-staff-list', 'cashier-v3-business-dashboard', 'cashier-v3-store-business-reports', 'cashier-v3-engineering-management'].includes(route.name))
 watch(
   () => route.name,
   (routeName) => {
@@ -815,6 +814,25 @@ async function selectMemberFromSelector(record) {
     }))
     return { result: { status: 'success' } }
   }
+  if (memberSelectorContext.value === 'cashier') {
+    // 收银客户属于浏览器草稿。选择会员不能在立即结账前写入
+    // cashier_workspace，也不能从服务端读取一份待回放的购物车投影。
+    // 本次结账的唯一服务端写入发生在最终确认时提交的完整快照。
+    applyLocalCashierCustomerSelection({ customerMode: 'member', member: record })
+    // The member row is already authoritative for this browser draft. Close
+    // the selector immediately so a late selector response cannot replace the
+    // selected member with the guest root projection.
+    isMemberSelectorOpen.value = false
+    await nextTick()
+    const selectedDetail = localCashierCustomerSelectionDetail(record)
+    if (memberDebtAmount(record) > 0) {
+      // Customer source is the first post-selection interaction. Keep the
+      // debt reminder queued so the two modal layers never overlap.
+      pendingDebtReminderAfterSource.value = { member: record }
+    }
+    await completeMemberSelection(selectedDetail)
+    return { result: { status: 'success' } }
+  }
   const action = memberSelectorActions[memberSelectorContext.value]
   if (!action || !allowedMemberSelectorContexts.has(memberSelectorContext.value)) {
     return { result: { status: 'failed', code: 'MEMBER_SELECTOR_CONTEXT_INVALID', message: '会员选择来源无效。' } }
@@ -852,6 +870,54 @@ async function selectMemberFromSelector(record) {
   return result
 }
 
+function emptyLocalCashierCart() {
+  return {
+    ...(state.cashier?.cart || {}),
+    lines: [],
+    summary: {
+      selectedCount: 0,
+      originalAmount: 0,
+      discountAmount: 0,
+      receivableAmount: 0,
+      orderNote: '',
+      hasOrderNote: false
+    },
+    primaryAction: '',
+    primaryActionLabel: ''
+  }
+}
+
+function applyLocalCashierCustomerSelection({ customerMode, member = null } = {}) {
+  const isMember = customerMode === 'member' && memberDetailId(member)
+  state.cashier = {
+    ...(state.cashier || {}),
+    customerMode: isMember ? 'member' : 'guest',
+    member: isMember ? member : null,
+    cart: emptyLocalCashierCart(),
+    checkoutComposition: null,
+    orderNote: ''
+  }
+  // 来源是工具栏上的前端值。切换客户后不允许遗留到下一位客户；它只会
+  // 在点击立即结账时和其他前端草稿字段一起进入最终快照。
+  toolbarBusinessSource.value = {
+    displayNameSnapshot: '',
+    primarySourceId: 0,
+    secondarySourceId: 0,
+    rewardAmountCents: 0
+  }
+  window.dispatchEvent(new CustomEvent('cashier-v3:clear-toolbar-business-source'))
+}
+
+function localCashierCustomerSelectionDetail(record) {
+  return {
+    context: 'cashier',
+    record,
+    stateContextId: String(state.stateContextId || ''),
+    workspaceId: String(state.workspace?.id || ''),
+    storeId: String(state.currentStore?.id || state.storeId || state.store?.id || '')
+  }
+}
+
 function applyCashierMemberDraft(result, fallbackMember = null) {
   const data = responseDataBlock(result)
   const draft = data?.cashierDraft
@@ -884,10 +950,23 @@ function applyCashierMemberDraft(result, fallbackMember = null) {
 }
 
 async function completeMemberSelection(detail) {
-  if (!detail
-    || String(detail.stateContextId || '') !== String(state.stateContextId || '')
-    || String(detail.workspaceId || '') !== String(state.workspace?.id || '')
-    || String(detail.storeId || '') !== String(state.storeId || state.store?.id || '')) {
+  const contextMatches = detail
+    && String(detail.stateContextId || '') === String(state.stateContextId || '')
+    && String(detail.workspaceId || '') === String(state.workspace?.id || '')
+    && String(detail.storeId || '') === String(state.currentStore?.id || state.storeId || state.store?.id || '')
+  // Cashier member selection is a browser-local draft operation. A selector
+  // response can cross a projection refresh while the member row itself is
+  // still valid; do not silently discard that selection and leave the page in
+  // guest mode. The final checkout/card command still validates the member on
+  // the server.
+  if (!contextMatches) {
+    if (detail?.context === 'cashier' && memberDetailId(detail.record)) {
+      applyLocalCashierCustomerSelection({ customerMode: 'member', member: detail.record })
+      window.dispatchEvent(new CustomEvent('cashier-v3:member-selector-selected', {
+        detail: { context: detail.context, record: detail.record }
+      }))
+      return true
+    }
     return false
   }
   window.dispatchEvent(new CustomEvent('cashier-v3:member-selector-selected', {
@@ -916,25 +995,9 @@ async function completeMemberSelection(detail) {
 }
 
 async function selectGuestOrderFromSelector() {
-  // 游客归属结账收款，不沿用当前弹窗可能来自核销/替换的 selectorEntry。
-  // 服务端会再次校验 cashier 入口权限，成功后再切回结账页。
-  const result = await requestCashierV3Action('set-guest-order', {
-    selectorEntry: 'cashier',
-    selectorContext: 'cashier'
-  })
-  if (!isSucceededResult(result)) return result
-  applyCashierMemberDraft(result, null)
-
-  // 游客没有客户来源；切换身份时必须同时清掉工具栏显示和本地结账快照，
-  // 避免上一位会员的来源被带入游客订单。
-  toolbarBusinessSource.value = {
-    displayNameSnapshot: '',
-    primarySourceId: 0,
-    secondarySourceId: 0,
-    rewardAmountCents: 0,
-    sourceSelectionVersion: 0
-  }
-  window.dispatchEvent(new CustomEvent('cashier-v3:clear-toolbar-business-source'))
+  // 游客切换和会员选择一样，只更新浏览器草稿。不要在结账前调用
+  // set-guest-order 或生成服务端工作台版本。
+  applyLocalCashierCustomerSelection({ customerMode: 'guest' })
 
   // 游客不能进入核销或项目替换；成功切换后统一回到结账收款。
   pendingCashierWorkflowTarget.value = null
@@ -943,7 +1006,7 @@ async function selectGuestOrderFromSelector() {
   if (route.name !== 'cashier-v3-cashier') {
     await router.push({ name: 'cashier-v3-cashier' })
   }
-  return result
+  return { result: { status: 'success' } }
 }
 
 async function createMemberFromSelector(payload = {}) {
@@ -1980,25 +2043,16 @@ async function requestServiceCompletionAction({ action, payload = {} }) {
         await router.push({ name: 'cashier-v3-cashier' })
         await nextTick()
       }
-      // “继续结账”只完成服务确认后的页面交接。真正的 JZ 结账请求仍由 C2 的
-      // prepare-checkout 创建；它必须按确认成功后返回的同一服务单最新版本重新装载工作台。
+      // “继续结账”只完成服务确认后的页面交接。结账编辑全部保留在
+      // 收银页面本地，最终确认时才由 CashierWorkbenchView 生成唯一快照。
       const latestCompletionPayload = serviceCompletionCommandPayload()
       if (!latestCompletionPayload.serviceOrderId) {
         showServiceCompletionContractError()
         return { result: { status: 'failed', code: 'SERVICE_CHECKOUT_CONTEXT_MISSING', message: '服务确认后的结账现场未就绪，请刷新后重试。' } }
       }
-      const preparationRequestId = createCashierV3CommandId('SERVICE_CHECKOUT_PREPARE')
-      const preparation = await requestCashierV3Action('prepare-checkout', {
-        serviceOrderId: latestCompletionPayload.serviceOrderId,
-        serviceOrderVersion: latestCompletionPayload.serviceOrderVersion,
-        preparationRequestId,
-        idempotencyKey: preparationRequestId
-      })
-      if (!isSucceededResult(preparation)) return preparation
-
       closeServiceCompletion()
       window.dispatchEvent(new CustomEvent('cashier-v3:open-checkout', {
-        detail: { serviceOrderId: latestCompletionPayload.serviceOrderId, prepared: true }
+        detail: { serviceOrderId: latestCompletionPayload.serviceOrderId, localSnapshot: true }
       }))
     } else if (['finish-service-completion', 'return-to-service-edit'].includes(action)) {
       closeServiceCompletion()
@@ -2106,7 +2160,10 @@ async function openWorkflowMemberSelector(context = currentWorkflowSelectorConte
       selectorEntry: 'writeoff'
     })
   }
-  return requestCashierV3Action('open-member-selector', { selectorContext: 'cashier', selectorEntry: 'cashier' })
+  // 收银会员选择器只是读取会员列表，打开弹层不能生成或更新服务端
+  // cashier_workspace。当前会员和购物车在浏览器草稿中维护，直到最终确认
+  // 才提交唯一结账快照。
+  return { result: { status: 'success' } }
 }
 
 async function openWorkflowMemberDetail(memberId) {

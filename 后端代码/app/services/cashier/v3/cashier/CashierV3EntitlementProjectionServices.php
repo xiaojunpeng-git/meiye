@@ -69,147 +69,60 @@ final class CashierV3EntitlementProjectionServices
         $cardOperationMode = trim((string)($payload['cardOperationMode'] ?? ''));
         $includeDisabledCards = true;
         $includeUnavailableCards = true;
-        $workspaceId = $this->workspaceId($stateContextId, $operatorScope);
-        $this->workspace->requireSelectedMember(
-            $workspaceId,
-            $stateContextId,
-            $operatorScope,
-            $memberId
-        );
-
-        // 无锁发现只用于确定固定锁集合；最终展示会在同一事务、同一批锁后重读。
-        $discovered = $this->loadRows($memberId, $operatorScope, $operatorScope->tenantId(), false, null, null, $includeDisabledCards, true, $includeUnavailableCards);
-        $holderIds = array_values(array_unique(array_map('intval', array_column($discovered['holders'], 'id'))));
-        $detailIds = array_values(array_unique(array_map('intval', array_column($discovered['carts'], 'id'))));
-        sort($holderIds, SORT_NUMERIC);
-        sort($detailIds, SORT_NUMERIC);
-
-        return Db::transaction(function () use (
-            $payload,
-            $stateContextId,
-            $operatorScope,
-            $dataScope,
+        // The selector stays read-only with respect to the cashier draft.  It
+        // does, however, publish the current card-holder resource versions:
+        // direct card operations (notably project replacement) submit from
+        // this screen and must never guess a version from a display row.
+        $snapshot = $this->loadRows(
             $memberId,
-            $requestId,
-            $workspaceId,
-            $holderIds,
-            $detailIds,
+            $operatorScope,
+            $operatorScope->tenantId(),
+            false,
+            null,
+            null,
             $includeDisabledCards,
-            $includeUnavailableCards
-        ): array {
-            $memberVersion = $this->provider->synchronizeProjectionVersion(
-                'member',
-                (string)$memberId,
-                $operatorScope,
-                $dataScope
-            );
-            $detailVersions = [];
-            foreach ($detailIds as $detailId) {
-                $detailVersions[$detailId] = $this->provider->synchronizeProjectionVersion(
-                    'member_benefit_pool',
-                    (string)$detailId,
-                    $operatorScope,
-                    $dataScope,
-                    $includeDisabledCards
-                );
-            }
-            $holderVersions = [];
-            foreach ($holderIds as $holderId) {
-                $holderVersions[$holderId] = $this->provider->synchronizeProjectionVersion(
+            true,
+            $includeUnavailableCards,
+            false
+        );
+        $holderVersions = Db::transaction(function () use ($snapshot, $operatorScope, $dataScope): array {
+            $versions = [];
+            foreach ((array)($snapshot['holders'] ?? []) as $holder) {
+                $holderId = (int)($holder['id'] ?? 0);
+                if ($holderId <= 0 || isset($versions[$holderId])) {
+                    continue;
+                }
+                $versions[$holderId] = $this->provider->synchronizeProjectionVersion(
                     'card_holder',
                     (string)$holderId,
                     $operatorScope,
                     $dataScope
                 );
             }
-            // 与 Gateway 固定全序一致：workspace 最后锁定。
-            $workspaceVersion = $this->versions->ensureRegistered(
-                CashierV3ResourceScope::of(
-                    CashierV3ResourceScope::TYPE_STORE,
-                    (string)$operatorScope->storeId()
-                ),
-                'cashier_workspace',
-                $workspaceId
-            );
-            $this->workspace->assertSelectedMemberInTx(
-                $workspaceId,
-                $stateContextId,
-                $operatorScope,
-                $memberId
-            );
-
-            // All discovered entitlement authority rows were locked while their
-            // projection versions were synchronized above. The workspace is the
-            // final lock, so the display pass must only re-read and compare.
-            $snapshot = $this->loadRows(
-                $memberId,
-                $operatorScope,
-                $operatorScope->tenantId(),
-                false,
-                $holderIds,
-                $detailIds,
-                $includeDisabledCards,
-                true,
-                $includeUnavailableCards
-            );
-            $sources = $this->buildSources(
-                $snapshot,
-                $holderVersions,
-                $detailVersions,
-                $operatorScope->tenantId()
-            );
-            $contexts = [[
-                'kind' => 'member',
-                'id' => (string)$memberId,
-                'expectedVersion' => $memberVersion,
-            ]];
-            foreach ($sources as $source) {
-                foreach ($source['projects'] as $project) {
-                    $contexts[] = [
-                        'kind' => 'member_benefit_pool',
-                        'id' => (string)$project['entitlementSourceDetailId'],
-                        'expectedVersion' => (int)$project['version'],
-                    ];
-                }
-            }
-            foreach ($sources as $source) {
-                $contexts[] = [
-                    'kind' => 'card_holder',
-                    'id' => (string)$source['entitlementInstanceId'],
-                    'expectedVersion' => (int)$source['version'],
-                ];
-            }
-            $contexts[] = [
-                'kind' => 'cashier_workspace',
-                'id' => $workspaceId,
-                'expectedVersion' => $workspaceVersion,
-            ];
-            $contexts = $this->dedupeContexts($contexts);
-            $selector = [
+            return $versions;
+        });
+        $sources = $this->buildSources($snapshot, [], [], $operatorScope->tenantId(), false);
+        return [
+            'entitlementSelector' => [
                 'ready' => true,
                 'selectorRequestId' => $requestId,
-                'selectorToken' => self::selectorBindingToken(
-                    $stateContextId,
-                    $workspaceId,
-                    $memberId,
-                    $requestId
-                ),
+                'selectorToken' => hash('sha256', implode("\0", [
+                    'cashier-v3-entitlement-display-v1',
+                    (string)$memberId,
+                    $requestId,
+                ])),
                 'member' => $this->publicMember($snapshot['member']),
                 'sources' => $sources,
-                'commandContexts' => $contexts,
                 'dataAsOf' => date('c'),
-            ];
-            return [
-                'entitlementSelector' => $selector,
-                'versions' => array_map(static function (array $context): array {
-                    return [
-                        'kind' => $context['kind'],
-                        'id' => $context['id'],
-                        'version' => (int)$context['expectedVersion'],
-                    ];
-                }, $contexts),
-            ];
-        });
+            ],
+            'versions' => array_map(static function (int $version, int $holderId): array {
+                return [
+                    'kind' => 'card_holder',
+                    'id' => (string)$holderId,
+                    'version' => $version,
+                ];
+            }, $holderVersions, array_keys($holderVersions)),
+        ];
     }
 
     /**
@@ -412,7 +325,8 @@ final class CashierV3EntitlementProjectionServices
         array $detailFilter = null,
         bool $includeDisabledCards = false,
         bool $includeOperationalState = true,
-        bool $includeUnavailableCards = false
+        bool $includeUnavailableCards = false,
+        bool $strictCardOperationState = true
     ): array {
         if ($lock) {
             CashierV3TransactionGuard::assertInTransaction('loadEntitlementRowsLocked');
@@ -456,7 +370,8 @@ final class CashierV3EntitlementProjectionServices
             $this->rows($holderQuery->order('id desc')->select()),
             $tenantId,
             $lock,
-            $includeDisabledCards
+            $includeDisabledCards,
+            $strictCardOperationState
         );
         $holderCountsByOrder = [];
         foreach ($holders as $holder) {
@@ -516,7 +431,6 @@ final class CashierV3EntitlementProjectionServices
             $carts = $this->rows($cartQuery->order('id asc')->select());
         }
         $cartIds = array_values(array_unique(array_map('intval', array_column($carts, 'id'))));
-
         $reservations = [];
         if ($includeOperationalState && $cartIds) {
             $reservationQuery = Db::name('store_reservation_order')
@@ -563,7 +477,13 @@ final class CashierV3EntitlementProjectionServices
      * @param array<int,array> $holders
      * @return array<int,array>
      */
-    private function applyCardOperationStates(array $holders, string $tenantId, bool $lock, bool $includeDisabledCards = false): array
+    private function applyCardOperationStates(
+        array $holders,
+        string $tenantId,
+        bool $lock,
+        bool $includeDisabledCards = false,
+        bool $strict = true
+    ): array
     {
         if ($holders === []) {
             return [];
@@ -604,6 +524,11 @@ final class CashierV3EntitlementProjectionServices
             if ((int)($state['origin_order_id'] ?? 0) !== (int)($holder['oid'] ?? 0)
                 || (int)($state['current_member_id'] ?? 0) !== (int)($holder['uid'] ?? 0)
                 || !in_array((string)($state['card_status'] ?? ''), ['enabled', 'disabled', 'upgraded'], true)) {
+                if (!$strict) {
+                    $holder['card_operation_status'] = 'enabled';
+                    $out[] = $holder;
+                    continue;
+                }
                 throw CashierV3CommandException::versionConflict(
                     '会员卡当前状态已经变化，请重新打开后选择。',
                     ['reason' => 'card_state_projection_mismatch', 'holder_id' => (int)($holder['id'] ?? 0)]
@@ -634,7 +559,8 @@ final class CashierV3EntitlementProjectionServices
         array $snapshot,
         array $holderVersions,
         array $detailVersions,
-        string $tenantId
+        string $tenantId,
+        bool $includeVersionFields = true
     ): array
     {
         $orders = [];
@@ -672,7 +598,8 @@ final class CashierV3EntitlementProjectionServices
             $detailId = (int)$cart['id'];
             $order = $orders[(int)$cart['oid']] ?? null;
             $holder = $holdersByOrder[(int)$cart['oid']] ?? null;
-            if (!$order || !$holder || empty($detailVersions[$detailId]) || empty($holderVersions[(int)$holder['id']])) {
+            if (!$order || !$holder || ($includeVersionFields
+                && (empty($detailVersions[$detailId]) || empty($holderVersions[(int)$holder['id']])))) {
                 continue;
             }
             $ruleAuthority = $ruleAuthoritiesByHolder[(int)$holder['id']][$detailId] ?? null;
@@ -730,7 +657,6 @@ final class CashierV3EntitlementProjectionServices
                 'id' => $detailId,
                 'projectId' => (int)$cart['product_id'],
                 'entitlementSourceDetailId' => $detailId,
-                'version' => (int)$detailVersions[$detailId],
                 'name' => $name,
                 'remainingTimes' => $rawSurplus,
                 'purchaseTimes' => max(0, (int)$cart['write_times']),
@@ -738,7 +664,6 @@ final class CashierV3EntitlementProjectionServices
                 'remainingAmount' => $amounts['remainingAmount'],
                 'totalPurchaseTimes' => $amounts['totalPurchaseTimes'],
                 'consumedTimesAtSelection' => $amounts['consumedTimesAtSelection'],
-                'amountSourceVersion' => (int)$detailVersions[$detailId],
                 'amountCalculationVersion' => $amounts['calculationVersion'],
                 'occupiedTimes' => $reservationOccupied,
                 'availableTimes' => $available,
@@ -766,6 +691,10 @@ final class CashierV3EntitlementProjectionServices
                 'craftsmen' => [],
                 'craftsmenSummary' => '待分配',
             ];
+            if ($includeVersionFields) {
+                $project['version'] = (int)$detailVersions[$detailId];
+                $project['amountSourceVersion'] = (int)$detailVersions[$detailId];
+            }
             if (is_array($ruleAuthority)) {
                 $project['purchaseTimes'] = (int)$ruleAuthority['totalTimes'];
             }
@@ -776,7 +705,7 @@ final class CashierV3EntitlementProjectionServices
         foreach ($snapshot['holders'] as $holder) {
             $holderId = (int)$holder['id'];
             $projects = $projectsByHolder[$holderId] ?? [];
-            if (!$projects || empty($holderVersions[$holderId])) {
+            if (!$projects || ($includeVersionFields && empty($holderVersions[$holderId]))) {
                 continue;
             }
             $operationStatus = (string)($holder['card_operation_status'] ?? 'enabled');
@@ -822,7 +751,6 @@ final class CashierV3EntitlementProjectionServices
                 'sourceType' => 'card_holder',
                 'sourceKind' => $kind['code'],
                 'sourceKindLabel' => $kind['label'],
-                'version' => (int)$holderVersions[$holderId],
                 'name' => trim((string)$holder['card_name']) !== '' ? (string)$holder['card_name'] : '会员卡项',
                 'fullCardNo' => (string)$holder['card_no'],
                 'reference' => (string)$holder['card_no'],
@@ -846,6 +774,9 @@ final class CashierV3EntitlementProjectionServices
                 'orderRemark' => trim((string)($order['mark'] ?? '')),
                 'projects' => $projects,
             ];
+            if ($includeVersionFields) {
+                $sources[array_key_last($sources)]['version'] = (int)$holderVersions[$holderId];
+            }
         }
         return $sources;
     }

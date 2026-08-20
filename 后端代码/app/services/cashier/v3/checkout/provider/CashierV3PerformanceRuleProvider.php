@@ -235,10 +235,13 @@ final class CashierV3PerformanceRuleProvider implements CashierV3DataScopedVersi
         }
         $project = $this->row(Db::name('store_product')
             ->where('id', $projectId)
-            ->where('is_del', 0)
             ->where('product_type', 6)
             ->field('id,type,relation_id')
             ->find());
+        // A project already captured in the checkout snapshot can be
+        // completed even when its catalogue entry is later hidden, unverified
+        // or soft-deleted. This provider only establishes the project identity
+        // for its final performance-rule record.
         if ($project === null
             || (int)$project['id'] !== $projectId
             || !in_array((int)$project['type'], [0, 1], true)) {

@@ -7,13 +7,19 @@ const dirname = path.dirname(fileURLToPath(import.meta.url))
 const repo = path.resolve(dirname, '../../..')
 const shell = fs.readFileSync(path.join(repo, '前端代码/cashier-v3/src/layouts/CashierShell.vue'), 'utf8')
 const selector = fs.readFileSync(path.join(repo, '前端代码/cashier-v3/src/components/common/MemberSelectorOverlay.vue'), 'utf8')
-const memberSelection = shell.slice(shell.indexOf('async function selectMemberFromSelector'), shell.indexOf('async function completeMemberSelection'))
+const memberSelection = shell.slice(shell.indexOf('async function selectMemberFromSelector'), shell.indexOf('function applyCashierMemberDraft'))
+const guestSelection = shell.slice(shell.indexOf('async function selectGuestOrderFromSelector'), shell.indexOf('async function createMemberFromSelector'))
+const cashierSelectorOpen = shell.slice(shell.indexOf('async function openWorkflowMemberSelector'), shell.indexOf('async function openWorkflowMemberDetail'))
 
 const checks = [
-  ['会员选择直接消费 cashierDraft', /applyCashierMemberDraft\(result, record\)/.test(shell)],
-  ['会员选择路径不再二次读取完整工作台', !/open-cashier-workbench/.test(memberSelection)],
-  ['直接回填购物车行与汇总', /lines: draft\.lines[\s\S]*?summary: draft\.summary/.test(shell)],
-  ['游客切换也消费命令返回草稿', /applyCashierMemberDraft\(result, null\)/.test(shell)],
+  ['收银会员选择只写入浏览器草稿', /applyLocalCashierCustomerSelection\(\{ customerMode: 'member', member: record \}\)/.test(memberSelection)],
+  ['收银会员选择不再调用服务端选择命令', !/select-cashier-member/.test(memberSelection)],
+  ['收银会员选择不再二次读取完整工作台', !/open-cashier-workbench/.test(memberSelection)],
+  ['收银会员选择器打开不再写服务端工作台', !/requestCashierV3Action\(\s*['"]open-member-selector['"]/.test(cashierSelectorOpen)],
+  ['游客切换只写入浏览器草稿', /applyLocalCashierCustomerSelection\(\{ customerMode: 'guest' \}\)/.test(guestSelection)],
+  ['游客切换不再调用服务端命令', !/requestCashierV3Action\(\s*['"]set-guest-order['"]/.test(guestSelection)],
+  ['本地客户切换清空购物车与来源', /function emptyLocalCashierCart\([\s\S]*?lines: \[\]/.test(shell)
+    && /function applyLocalCashierCustomerSelection[\s\S]*?cashier-v3:clear-toolbar-business-source/.test(shell)],
   ['新增会员可触发推荐人选择', selector.includes('onSelectReferrer')
     && selector.includes(':on-select-referrer="onSelectReferrer"')
     && shell.includes('function selectMemberReferrer(')

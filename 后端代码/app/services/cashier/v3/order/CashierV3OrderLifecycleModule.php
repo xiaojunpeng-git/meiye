@@ -24,7 +24,7 @@ final class CashierV3OrderLifecycleModule
             CashierV3ServiceRecordCraftsmanAdjustmentVersionProvider::KIND,
             new CashierV3ServiceRecordCraftsmanAdjustmentVersionProvider()
         );
-        foreach (['adjust-sales-order-personnel','refund-sales-order','void-sales-order','reopen-sales-order'] as $action) {
+        foreach (['adjust-sales-order-personnel','update-sales-order-note','refund-sales-order','void-sales-order','reopen-sales-order'] as $action) {
             $isReopen = $action === 'reopen-sales-order';
             $requiredKinds = $isReopen ? ['sales_order', 'cashier_workspace'] : ['sales_order'];
             if ($dispatcher->handlers()->hasCommand($action) || $dispatcher->policies()->has($action)) throw new \LogicException('order lifecycle duplicate action: ' . $action);
@@ -75,7 +75,21 @@ final class CashierV3OrderLifecycleModule
         $handlers = $dispatcher->handlers();
         if ($handlers->hasProjection('open-sales-order-personnel-adjustment')) throw new \LogicException('order personnel adjustment projection duplicate');
         $handlers->registerProjection('open-sales-order-personnel-adjustment', static function (array $scope) use ($service): array {
-            return ['data' => ['orderPersonnelAdjustment' => $service->personnelAdjustmentEntry((array)($scope['payload'] ?? []), $scope['operator_scope'], $scope['data_scope'])], 'message' => '订单人员调整资料已读取。'];
+            $entry = $service->personnelAdjustmentEntry((array)($scope['payload'] ?? []), $scope['operator_scope'], $scope['data_scope']);
+            // The personnel editor is opened through a direct projection rather
+            // than the order-center root query. Publish the same authoritative
+            // sales-order version here so the following save can build a
+            // trusted command context; never fall back to the browser row's
+            // stale revision.
+            return [
+                'data' => ['orderPersonnelAdjustment' => $entry],
+                'versions' => [[
+                    'kind' => 'sales_order',
+                    'id' => (string)$entry['salesOrderId'],
+                    'version' => (int)$entry['recordVersion'],
+                ]],
+                'message' => '订单人员调整资料已读取。',
+            ];
         });
 
         $recharge = new CashierV3RechargeOrderLifecycleServices();

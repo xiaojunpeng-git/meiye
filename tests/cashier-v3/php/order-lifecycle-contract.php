@@ -22,6 +22,10 @@ $checks = [
     'personnel_reverses_then_reallocates' => strpos($service, 'insertReversal') !== false && strpos($service, 'insertAdjustedPerformance') !== false && strpos($service, 'personnel_adjustment_staff_ineligible') !== false
         && strpos($service, 'effectivePersonnelFactsForLine') !== false && strpos($service, 'cashPerformanceForLine') !== false
         && strpos($service, "'ORDER-PERSONNEL-ADJUST-V1'") !== false,
+    'personnel_adjustment_fact_ids_are_staff_scoped' => strpos($service, "'personnel_adjustment_duplicate_staff'") !== false
+        && strpos($service, '$allocationIdentity = $operationId . \'|\' . $lineId . \'|\' . $role . \'|\' . $staffId;') !== false
+        && strpos($service, 'hash_hmac(\'sha256\', $allocationIdentity') !== false
+        && strpos($service, 'hash(\'sha256\', $allocationIdentity)') !== false,
     'strict_void_restores_supported_authorities_and_inventory' => strpos($service, 'CashierV3SalesOrderInventoryReversalServices') !== false
         && strpos($inventoryReversalService, "'sourceType' => 'cashier_sale_void'") !== false
         && strpos($inventoryReversalService, "'reversalOf' => (int)\$fact['id']") !== false
@@ -62,6 +66,19 @@ $checks = [
         && strpos($orderPartition, 'CashierV3OrderLifecycleServices::OPERATION_TABLE') !== false
         && strpos($orderPartition, "'source_type', 'sales'") !== false
         && strpos($orderPartition, "'version' => 1 + (int)(\$operationCounts[\$id] ?? 0)") !== false,
+    'legacy_display_ids_do_not_replace_sales_order_resource_ids' => strpos($salesQuery, "'lifecycleOrderId' => \$v3Ready ? (string)\$v3Header['order_id'] : ''") !== false
+        && strpos($orderPartition, "\$order['lifecycleOrderId'] ?? \$order['lifecycle_order_id']") !== false
+        && strpos($frontend, 'function salesOrderLifecycleId(record)') !== false
+        && strpos($frontend, 'const salesOrderLifecycleResourceActions = new Set([') !== false
+        && strpos($frontend, 'orderId: requestOrderId,') !== false,
+    'sales_order_main_item_exposes_upgrade_type_tag' => strpos($salesQuery, "'upgradeTypeLabel' => \$upgradeTypeLabel") !== false
+        && strpos($salesQuery, "\$upgradeType === 'project_upgrade' ? '项目升级'") !== false
+        && strpos($salesQuery, "\$upgradeType === 'card_upgrade' ? '卡升级'") !== false
+        && strpos($frontend, 'record.upgradeTypeLabel') !== false,
+    'refund_line_allocation_uses_whole_yuan_largest_remainder' => strpos($service, 'if ($target % 100 === 0)') !== false
+        && strpos($service, '$targetYuan = intdiv($target, 100);') !== false
+        && strpos($service, '$result[$remainders[$index][\'index\']] += 100;') !== false
+        && strpos($service, 'Preserve cent-level accounting for a non-whole-yuan component') !== false,
     'sales_order_queries_refresh_lifecycle_versions' => substr_count($queryModule, "'versions' => (new CashierV3OrderCenterPartitionProvider") >= 2,
     'sales_order_authority_filters_terminal_lifecycle_status' => strpos($salesQuery, 'applyAuthorityStatusFilter') !== false
         && strpos($salesQuery, "['', 'normal', 'refunded', 'voided']") !== false

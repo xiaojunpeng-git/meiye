@@ -9,8 +9,9 @@ use app\services\cashier\v3\CashierV3OperatorScope;
 use app\services\cashier\v3\CashierV3ResultCode;
 use app\services\cashier\v3\CashierV3TransactionGuard;
 use app\services\cashier\v3\CashierV3CheckoutWorkspaceIdentity;
+use app\services\cashier\v3\card\CashierV3CardPurchaseIssuanceServices;
 use app\services\cashier\v3\cashier\CashierV3CashierWorkspaceServices;
-use app\services\cashier\v3\checkout\CashierV3EntitlementCompletionAuthorityAdapter;
+use app\services\cashier\v3\checkout\CashierV3DirectSnapshotEntitlementSettlementServices;
 use app\services\cashier\v3\checkout\CashierV3EntitlementCompletionAuthorityException;
 use app\services\cashier\v3\checkout\CashierV3EntitlementCompletionContractException;
 use app\services\cashier\v3\checkout\persistence\CashierV3EntitlementCompletionPersistenceException;
@@ -58,8 +59,8 @@ final class ThinkPhpCashierV3CheckoutSubmissionExecutionPort
     /** @var CashierV3SaleOnlyCheckoutSubmissionServices */
     private $saleOnly;
 
-    /** @var CashierV3EntitlementCompletionAuthorityAdapter */
-    private $entitlementAuthority;
+    /** @var CashierV3DirectSnapshotEntitlementSettlementServices */
+    private $directSnapshotEntitlements;
 
     /** @var CashierV3InventoryCompletionGatewayAdapter */
     private $inventory;
@@ -93,7 +94,7 @@ final class ThinkPhpCashierV3CheckoutSubmissionExecutionPort
 
     public function __construct(
         CashierV3CashierWorkspaceServices $workspace,
-        CashierV3EntitlementCompletionAuthorityAdapter $entitlementAuthority,
+        CashierV3DirectSnapshotEntitlementSettlementServices $directSnapshotEntitlements,
         ?CashierV3SaleOnlyCheckoutSubmissionServices $saleOnly = null,
         ?CashierV3CheckoutRequestRepository $requests = null,
         ?ThinkPhpCashierV3SalesOrderAuthorityWriter $salesOrders = null,
@@ -118,7 +119,7 @@ final class ThinkPhpCashierV3CheckoutSubmissionExecutionPort
         $this->balances = $balances ?: new CashierV3MemberBalanceWriterAdapter();
         $this->businessSources = $businessSources ?: new CashierV3CheckoutBusinessSourceSelectionServices();
         $this->coupons = $coupons ?: new CashierV3CheckoutCouponSettlementServices();
-        $this->entitlementAuthority = $entitlementAuthority;
+        $this->directSnapshotEntitlements = $directSnapshotEntitlements;
         $this->serverNamespaceSecret = $serverNamespaceSecret;
         $this->saleOnly = $saleOnly ?: new CashierV3SaleOnlyCheckoutSubmissionServices(
             $workspace,
@@ -138,7 +139,7 @@ final class ThinkPhpCashierV3CheckoutSubmissionExecutionPort
                 throw self::failure('checkout_submit_action_invalid');
             }
             $payload = is_array($scope['payload'] ?? null) ? $scope['payload'] : [];
-            self::assertPayload($payload);
+            self::assertPayload($payload, !empty($scope['direct_snapshot_submission']));
             $operatorScope = $scope['operator_scope'] ?? null;
             $dataScope = $scope['data_scope'] ?? null;
             $eventRecorder = $scope['event_recorder'] ?? null;
@@ -165,7 +166,11 @@ final class ThinkPhpCashierV3CheckoutSubmissionExecutionPort
                 $operatorScope,
                 $dataScope
             );
-            self::assertPreparationIdentity($payload, (array)$aggregate['request']);
+            self::assertPreparationIdentity(
+                $payload,
+                (array)$aggregate['request'],
+                !empty($scope['direct_snapshot_submission'])
+            );
             $request = (array)$aggregate['request'];
             $composition = (string)($request['composition'] ?? '');
             if (!in_array($composition, ['sale_only', 'entitlement_only', 'mixed'], true)) {
@@ -185,7 +190,7 @@ final class ThinkPhpCashierV3CheckoutSubmissionExecutionPort
             if ($composition !== 'sale_only') {
                 $authorityScope = $scope;
                 $authorityScope['server_time'] = $settledAt;
-                $entitlementBundle = $this->entitlementAuthority->buildAfterGatewayLocks(
+                $entitlementBundle = $this->directSnapshotEntitlements->buildAfterGatewayLocks(
                     $aggregate,
                     $authorityScope
                 );
@@ -367,6 +372,40 @@ final class ThinkPhpCashierV3CheckoutSubmissionExecutionPort
         });
     }
 
+    public function persistSaleSettlementEffectsInTx(array $authority, array $salesOrder): array
+    {
+        return $this->domainCall(function () use ($authority, $salesOrder): array {
+            $context = $this->context($authority);
+            $salesPlan = $this->salesPlan($context, $authority);
+            $header = $salesPlan->header();
+            if (($salesOrder['orderId'] ?? null) !== ($header['order_id'] ?? null)) {
+                throw self::failure('checkout_sale_effects_sales_order_mismatch');
+            }
+            $saleInventory = new CashierV3SaleInventorySettlementServices();
+            $inventoryPlan = $saleInventory->planInTx(
+                (array)$context->aggregate()['request'],
+                $header,
+                $salesPlan->lines(),
+                $context->operatorScope(),
+                $context->dataScope()
+            );
+            $inventory = $saleInventory->persistInTx($inventoryPlan);
+            $cardPurchase = (new CashierV3CardPurchaseIssuanceServices())->issueInTx(
+                $context->aggregate(),
+                $salesPlan,
+                $salesOrder,
+                $authority['commandIdempotencyKey'],
+                $authority['settledAt'],
+                $context->operatorScope(),
+                $context->dataScope()
+            );
+            return [
+                'inventory' => $inventory,
+                'cardPurchase' => $cardPurchase,
+            ];
+        });
+    }
+
     public function planEntitlementCompletionInTx(array $authority): array
     {
         return $this->domainCall(function () use ($authority): array {
@@ -425,7 +464,8 @@ final class ThinkPhpCashierV3CheckoutSubmissionExecutionPort
         array $paymentCollection,
         array $debt,
         array $entitlementPlan,
-        array $inventoryCompletion
+        array $inventoryCompletion,
+        array $saleSettlementEffects
     ): array {
         return $this->domainCall(function () use (
             $authority,
@@ -433,7 +473,8 @@ final class ThinkPhpCashierV3CheckoutSubmissionExecutionPort
             $paymentCollection,
             $debt,
             $entitlementPlan,
-            $inventoryCompletion
+            $inventoryCompletion,
+            $saleSettlementEffects
         ): array {
             $context = $this->context($authority);
             $bundle = $context->entitlementBundle();
@@ -447,6 +488,30 @@ final class ThinkPhpCashierV3CheckoutSubmissionExecutionPort
                 $debt,
                 $inventoryCompletion
             );
+            if ($authority['composition'] === 'mixed') {
+                $saleInventory = is_array($saleSettlementEffects['inventory'] ?? null)
+                    ? $saleSettlementEffects['inventory']
+                    : [];
+                $salesPlan = $this->salesPlan($context, $authority);
+                $saleOrderHeader = $salesPlan->header();
+                $saleEventCommon = [
+                    'source_type' => self::ACTION,
+                    'source_id' => $authority['checkoutRequestId'],
+                    'member_id' => (int)$saleOrderHeader['member_id'],
+                    'business_date' => (string)$saleOrderHeader['business_date'],
+                    'occurred_at' => (int)$authority['settledAt'],
+                    'settled_at' => (int)$authority['settledAt'],
+                    'recorded_at' => (int)$authority['settledAt'],
+                    'store_name_snapshot' => (string)$saleOrderHeader['store_name_snapshot'],
+                ];
+                $eventInputs = array_merge(
+                    $eventInputs,
+                    (new CashierV3SaleInventorySettlementServices())->eventInputs(
+                        $saleInventory,
+                        $saleEventCommon
+                    )
+                );
+            }
             $this->assertKernelEventCardinality($kernelPlan, $eventInputs);
             $recorded = [];
             $checkoutCompleted = null;
@@ -519,7 +584,7 @@ final class ThinkPhpCashierV3CheckoutSubmissionExecutionPort
                 )) {
                 throw self::failure('checkout_tenant_name_snapshot_mismatch');
             }
-            $plan = $this->entitlementAuthority->buildPersistencePlanAfterEvents(
+            $plan = $this->directSnapshotEntitlements->buildPersistencePlanAfterEvents(
                 (array)$bundle['kernelPlan'],
                 (array)$bundle['staffSnapshots'],
                 [
@@ -1034,7 +1099,7 @@ final class ThinkPhpCashierV3CheckoutSubmissionExecutionPort
                 throw self::failure('checkout_entitlement_authority_incomplete', ['field' => $key]);
             }
         }
-        if ($bundle['contractVersion'] !== CashierV3EntitlementCompletionAuthorityAdapter::CONTRACT_VERSION
+        if ($bundle['contractVersion'] !== CashierV3DirectSnapshotEntitlementSettlementServices::CONTRACT_VERSION
             || $bundle['checkoutRequestId'] !== $requestId
             || $bundle['checkoutRequestVersion'] !== $requestVersion
             || !is_object($bundle['inventoryDataScope'])) {
@@ -1042,12 +1107,15 @@ final class ThinkPhpCashierV3CheckoutSubmissionExecutionPort
         }
     }
 
-    private static function assertPayload(array $payload): void
+    private static function assertPayload(array $payload, bool $directSnapshot = false): void
     {
         $expected = [
             'checkoutRequestId', 'checkoutRequestVersion',
             'preparationRequestId', 'preparationToken',
         ];
+        if ($directSnapshot) {
+            $expected = ['checkoutRequestId', 'checkoutRequestVersion', 'preparationRequestId'];
+        }
         $actual = array_keys($payload);
         sort($expected, SORT_STRING);
         sort($actual, SORT_STRING);
@@ -1058,14 +1126,21 @@ final class ThinkPhpCashierV3CheckoutSubmissionExecutionPort
             || $payload['checkoutRequestVersion'] <= 0
             || !is_string($payload['preparationRequestId'])
             || preg_match('/^CHECKOUT_PREPARE-[0-9a-f-]{36}$/D', $payload['preparationRequestId']) !== 1
-            || !is_string($payload['preparationToken'])
-            || preg_match('/^CKPT-[0-9a-f]{64}$/D', $payload['preparationToken']) !== 1) {
-            throw self::failure('checkout_submit_payload_invalid');
+            || (!$directSnapshot && (!is_string($payload['preparationToken'] ?? null)
+                || preg_match('/^CKPT-[0-9a-f]{64}$/D', $payload['preparationToken']) !== 1))) {
+            throw self::failure('checkout_execution_payload_invalid');
         }
     }
 
-    private static function assertPreparationIdentity(array $payload, array $request): void
+    private static function assertPreparationIdentity(
+        array $payload,
+        array $request,
+        bool $directSnapshotSubmission = false
+    ): void
     {
+        if ($directSnapshotSubmission) {
+            return;
+        }
         if (!hash_equals(
             (string)($request['creation_idempotency_key'] ?? ''),
             (string)$payload['preparationRequestId']

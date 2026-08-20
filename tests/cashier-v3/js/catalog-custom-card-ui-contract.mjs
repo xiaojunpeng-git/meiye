@@ -21,4 +21,10 @@ assert.match(css, /\.cart-line__meta-slot--coupon \{[\s\S]*?left: 20px;/, '优�
 assert.match(css, /\.checkout-payment-line__amount \{[\s\S]*?justify-content: flex-start;/, '收款金额区域须靠左')
 assert.match(css, /\.checkout-payment-line__amount-input \{[\s\S]*?text-align: left;/, '收款金额输入内容须靠左')
 
+assert.match(workbench, /function isInventoryManagedProductLine\(line = \{\}\) \{\s*return isProductLine\(line\) && !isCustomCardPurchase\(line\)/, '定制卡不得被识别为库存商品')
+assert.match(workbench, /function customCardPurchaseSnapshot\(configuration = \{\}\)/, '定制卡必须从浏览器缓存配置形成完整结账快照')
+assert.match(workbench, /cardPurchaseSnapshot: customCardPurchaseSnapshot\(payload\)/, '创建定制卡时必须立即缓存完整卡项快照')
+assert.match(workbench, /if \(isCustomCardPurchase\(line\)\) \{[\s\S]*?return customCardPurchaseSnapshot\(/, '最终结账必须从定制卡行缓存重建唯一快照')
+assert.match(workbench, /v-if="isInventoryManagedProductLine\(line\)"[\s\S]*?>出库<\/button>[\s\S]*?v-if="isInventoryManagedProductLine\(line\)"[\s\S]*?>不出库<\/button>[\s\S]*?v-if="isInventoryManagedProductLine\(line\)"[\s\S]*?>预售<\/button>/, '定制卡不得渲染出库、不出库或预售控制')
+
 console.log('CATALOG_CUSTOM_CARD_UI_CONTRACT=PASS')

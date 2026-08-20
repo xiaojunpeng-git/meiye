@@ -42,6 +42,8 @@ final class CashierV3CardOperationCheckoutSettlementServices
      * The checkout draft remains payable only for the cash delta. This method
      * exposes the frozen old-right credit to the formal sales plan so the sale
      * is recorded at the target's catalogue price without touching stored value.
+     * When the source value exceeds the target price, only the target price is
+     * booked as financial credit; the source snapshot remains intact for audit.
      */
     public function creditForCheckoutInTx(string $checkoutRequestId, CashierV3DataScopeContext $dataScope): array
     {
@@ -58,10 +60,12 @@ final class CashierV3CardOperationCheckoutSettlementServices
             throw self::failure('card_operation_checkout_credit_ambiguous');
         }
         $row = $rows[0];
-        $amount = (int)($row['source_remaining_value_cents'] ?? -1);
+        $sourceValue = (int)($row['source_remaining_value_cents'] ?? -1);
         $target = (int)($row['target_price_cents'] ?? -1);
-        if ($amount < 0 || $target < $amount
-            || $target - $amount !== (int)($row['settlement_delta_cents'] ?? -1)) {
+        $amount = min($sourceValue, $target);
+        $delta = max(0, $target - $sourceValue);
+        if ($sourceValue < 0 || $target < 0
+            || $delta !== (int)($row['settlement_delta_cents'] ?? -1)) {
             throw self::failure('card_operation_checkout_credit_invalid');
         }
         return [
@@ -134,6 +138,55 @@ final class CashierV3CardOperationCheckoutSettlementServices
                 throw CashierV3CommandException::versionConflict(
                     '升级操作已经变化，请重新打开后处理。',
                     ['reason' => 'card_operation_upgrade_checkout_bind_race']
+                );
+            }
+            $operation['checkout_request_id'] = $checkoutRequestId;
+        }
+        return $this->publicBinding($operation);
+    }
+
+    /**
+     * Bind a browser-created upgrade operation after its snapshot checkout
+     * request has been materialized in the same final transaction.
+     */
+    public function bindSnapshotOperationInTx(
+        string $operationId,
+        string $checkoutRequestId,
+        CashierV3OperatorScope $operatorScope,
+        CashierV3DataScopeContext $dataScope
+    ): array {
+        CashierV3TransactionGuard::assertInTransaction('cardOperationBindSnapshot');
+        $operationId = trim($operationId);
+        $checkoutRequestId = self::checkoutRequestId($checkoutRequestId);
+        $operation = $this->lockOperation($operationId, $dataScope->tenantId());
+        if ((int)($operation['store_id'] ?? 0) !== $operatorScope->storeId()) {
+            throw self::failure('card_operation_snapshot_store_mismatch');
+        }
+        $status = (string)($operation['operation_status'] ?? '');
+        $existingRequestId = (string)($operation['checkout_request_id'] ?? '');
+        if ($status === 'succeeded' && $existingRequestId === $checkoutRequestId) {
+            return $this->publicBinding($operation);
+        }
+        if ($status !== 'awaiting_checkout'
+            || ($existingRequestId !== '' && $existingRequestId !== $checkoutRequestId)) {
+            throw CashierV3CommandException::versionConflict(
+                '升级操作已经进入其他结账流程，请重新打开后处理。',
+                ['reason' => 'card_operation_snapshot_already_bound']
+            );
+        }
+        if ($existingRequestId === '') {
+            $updated = Db::name(self::OPERATION_TABLE)
+                ->where('id', (int)$operation['id'])
+                ->where('operation_status', 'awaiting_checkout')
+                ->where('checkout_request_id', '')
+                ->update([
+                    'checkout_request_id' => $checkoutRequestId,
+                    'update_time' => time(),
+                ]);
+            if ((int)$updated !== 1) {
+                throw CashierV3CommandException::versionConflict(
+                    '升级操作已经变化，请重新打开后处理。',
+                    ['reason' => 'card_operation_snapshot_bind_race']
                 );
             }
             $operation['checkout_request_id'] = $checkoutRequestId;
@@ -278,6 +331,7 @@ final class CashierV3CardOperationCheckoutSettlementServices
                 'targetCatalogId' => (int)$operation['target_catalog_id'],
                 'targetPriceCents' => (int)$operation['target_price_cents'],
                 'sourceRemainingValueCents' => (int)$operation['source_remaining_value_cents'],
+                'entitlementCreditCents' => $this->effectiveEntitlementCreditCents($operation),
                 'settlementDeltaCents' => (int)$operation['settlement_delta_cents'],
             ],
         ]);
@@ -285,7 +339,7 @@ final class CashierV3CardOperationCheckoutSettlementServices
         $operation['settled_at'] = $settledAt;
         $binding = array_merge($this->publicBinding($operation), [
             'salesOrderId' => (string)$salesResult['orderId'],
-            'entitlementCreditCents' => (int)$operation['source_remaining_value_cents'],
+            'entitlementCreditCents' => $this->effectiveEntitlementCreditCents($operation),
         ], $targetAuthority);
         return ['settledOperationCount' => 1, 'operations' => [$binding], 'settlement' => $settlement, 'replayed' => false];
     }
@@ -391,7 +445,7 @@ final class CashierV3CardOperationCheckoutSettlementServices
         if (count($sourceLines) !== count($mutations)) {
             throw self::failure('card_operation_project_upgrade_audit_lines_missing');
         }
-        $totalQuantity = 0;
+        $sourceQuantity = 0;
         foreach ($mutations as $mutation) {
             if (!is_array($mutation)) {
                 throw self::failure('card_operation_project_upgrade_mutation_invalid');
@@ -443,7 +497,7 @@ final class CashierV3CardOperationCheckoutSettlementServices
                     ['reason' => 'card_operation_project_upgrade_source_update_race', 'source_detail_id' => $detailId]
                 );
             }
-            $totalQuantity += -$delta;
+            $sourceQuantity += -$delta;
             $this->versions->synchronizeProjectionVersion(
                 'member_benefit_pool',
                 (string)$detailId,
@@ -455,7 +509,12 @@ final class CashierV3CardOperationCheckoutSettlementServices
         $targetSkuId = (int)($target['skuId'] ?? 0);
         $targetProductId = (int)($target['catalogId'] ?? 0);
         $targetPrice = (int)($target['priceCents'] ?? -1);
-        if ($totalQuantity <= 0 || $targetSkuId <= 0 || $targetProductId <= 0 || $targetPrice < 0) {
+        // The target name is frozen from checkoutSnapshot.lines through the
+        // operation target snapshot. Do not rebuild it from entitlement or
+        // catalogue projections after settlement.
+        $targetName = trim((string)($target['catalogName'] ?? ''));
+        $targetQuantity = (int)($result['stateMutation']['targetEntitlementQuantity'] ?? 1);
+        if ($targetQuantity <= 0 || $sourceQuantity <= 0 || $targetSkuId <= 0 || $targetProductId <= 0 || $targetPrice < 0 || $targetName === '') {
             throw self::failure('card_operation_project_upgrade_target_invalid');
         }
         $cartId = 'copu' . substr(hash('sha256', (string)$operation['operation_id']), 0, 27);
@@ -481,11 +540,11 @@ final class CashierV3CardOperationCheckoutSettlementServices
             'product_id' => $targetProductId,
             'product_type' => 6,
             'pay_price' => $money,
-            'write_times' => $totalQuantity,
-            'write_surplus_times' => $totalQuantity,
-            'cart_num' => $totalQuantity,
-            'surplus_num' => $totalQuantity,
-            'split_surplus_num' => $totalQuantity,
+            'write_times' => $targetQuantity,
+            'write_surplus_times' => $targetQuantity,
+            'cart_num' => $targetQuantity,
+            'surplus_num' => $targetQuantity,
+            'split_surplus_num' => $targetQuantity,
             'write_start' => (int)($holder['write_start'] ?? 0),
             'write_end' => (int)($holder['write_end'] ?? 0),
             'is_writeoff' => 0,
@@ -496,7 +555,10 @@ final class CashierV3CardOperationCheckoutSettlementServices
                 'salesOrderLineId' => (string)($line['order_line_id'] ?? ''),
                 'product_id' => $targetProductId,
                 'product_attr_unique' => (string)($target['skuUnique'] ?? ''),
-                'cart_num' => $totalQuantity,
+                'productInfo' => [
+                    'store_name' => $targetName,
+                ],
+                'cart_num' => $targetQuantity,
                 'truePrice' => $money,
                 'pay_price' => $money,
             ]),
@@ -541,7 +603,7 @@ final class CashierV3CardOperationCheckoutSettlementServices
         $type = (string)$operation['operation_type'];
         $expectedItemType = $type === 'card_upgrade' ? 'card' : 'project';
         $targetSkuId = (int)($target['skuId'] ?? 0);
-        $expectedCredit = (int)$operation['source_remaining_value_cents'];
+        $expectedCredit = $this->effectiveEntitlementCreditCents($operation);
         $couponDiscount = (int)($line['coupon_discount_cents'] ?? 0);
         if ((string)($header['tenant_id'] ?? '') !== $dataScope->tenantId()
             || (int)($header['store_id'] ?? 0) !== $operatorScope->storeId()
@@ -573,7 +635,7 @@ final class CashierV3CardOperationCheckoutSettlementServices
         $legacyOrderNo = 'v3p' . substr(hash('sha256', (string)$salesResult['orderId']), 0, 28);
         $money = self::money((int)$operation['target_price_cents']);
         $cash = self::money((int)$operation['settlement_delta_cents']);
-        $credit = self::money((int)$operation['source_remaining_value_cents']);
+        $credit = self::money($this->effectiveEntitlementCreditCents($operation));
         $id = (int)Db::name('store_order')->insertGetId([
             'type' => 11,
             'pid' => 0,
@@ -648,7 +710,7 @@ final class CashierV3CardOperationCheckoutSettlementServices
             'target_card_holder_id' => (int)($targetAuthority['targetHolderId'] ?? 0),
             'target_legacy_order_id' => (int)($targetAuthority['targetLegacyOrderId'] ?? 0),
             'target_entitlement_detail_id' => (int)($targetAuthority['targetEntitlementDetailId'] ?? 0),
-            'entitlement_credit_cents' => (int)$operation['source_remaining_value_cents'],
+            'entitlement_credit_cents' => $this->effectiveEntitlementCreditCents($operation),
             'cash_delta_cents' => (int)$operation['settlement_delta_cents'],
             'settlement_status' => 'settled',
             'reversed_by_operation_id' => '',
@@ -663,6 +725,20 @@ final class CashierV3CardOperationCheckoutSettlementServices
             throw self::failure('card_operation_settlement_insert_failed');
         }
         return $row;
+    }
+
+    /**
+     * The source-right value remains the immutable operation snapshot. For
+     * financial facts, credit cannot exceed the target sale amount; any
+     * excess source value is consumed by the approved upgrade without
+     * creating a negative payment or a refund.
+     */
+    private function effectiveEntitlementCreditCents(array $operation): int
+    {
+        return min(
+            max(0, (int)($operation['source_remaining_value_cents'] ?? 0)),
+            max(0, (int)($operation['target_price_cents'] ?? 0))
+        );
     }
 
     private function onlySalesLine(CashierV3SalesOrderPlanV1 $salesPlan): array

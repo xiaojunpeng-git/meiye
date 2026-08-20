@@ -62,6 +62,7 @@ final class CashierV3CardOperationAuthorityServices
         $this->readiness->assertReady();
 
         $payload = is_array($scope['payload'] ?? null) ? $scope['payload'] : [];
+        $directSnapshot = !empty($scope['direct_snapshot_operation']);
         $operatorScope = $scope['operator_scope'] ?? null;
         $dataScope = $scope['data_scope'] ?? null;
         if (!$operatorScope instanceof CashierV3OperatorScope
@@ -80,13 +81,58 @@ final class CashierV3CardOperationAuthorityServices
             trim((string)($payload['operationType'] ?? '')),
             $payload
         );
-        $source['holderVersion'] = $this->lockedCardHolderVersion((array)($scope['contexts'] ?? []), $holderId);
+        $isReplacementSnapshot = (string)($payload['operationType'] ?? '')
+            === CashierV3CardOperationKernel::TYPE_PROJECT_REPLACEMENT
+            && is_array($payload['replacementSnapshot'] ?? null);
+        if ($isReplacementSnapshot) {
+            $this->assertReplacementSnapshotMatchesSource(
+                $payload['replacementSnapshot'],
+                $source
+            );
+        }
+        $source['holderVersion'] = $this->lockedCardHolderVersion(
+            (array)($scope['contexts'] ?? []),
+            $holderId,
+            $directSnapshot,
+            trim((string)($payload['operationType'] ?? ''))
+        );
+        // The final checkout command owns the current entitlement read. An
+        // old selector version is never an authority input for a browser
+        // snapshot and must not turn into a conflict inside the planner.
+        if ($directSnapshot) {
+            $payload['sourceCardHolderVersion'] = $source['holderVersion'];
+        }
         $state = $this->lockOrCreateState($source, $operatorScope->tenantId());
         $this->assertStateMatchesCurrentHolder($state, $source);
+        // Replacement has no browser/resource-version context. The locked
+        // card-state row remains the audit identity and concurrency boundary.
+        if ((string)($payload['operationType'] ?? '') === CashierV3CardOperationKernel::TYPE_PROJECT_REPLACEMENT) {
+            $source['holderVersion'] = max(1, (int)($state['current_version'] ?? 1));
+            $payload['sourceCardHolderVersion'] = $source['holderVersion'];
+        }
         $source = $this->applyStateToSource($source, $state);
 
-        $target = $this->loadTargetForOperation($payload, $operatorScope);
+        $target = $this->loadTargetForOperation(
+            $payload,
+            $operatorScope,
+            $directSnapshot || $isReplacementSnapshot
+        );
+        if ($isReplacementSnapshot) {
+            $this->assertReplacementSnapshotMatchesTarget(
+                $payload['replacementSnapshot'],
+                $target
+            );
+        }
         $now = time();
+        $occurredAt = $directSnapshot
+            ? (int)($scope['snapshot_occurred_at'] ?? 0)
+            : $now;
+        $businessDate = $directSnapshot
+            ? trim((string)($scope['snapshot_business_date'] ?? ''))
+            : date('Y-m-d', $now);
+        if ($occurredAt <= 0 || preg_match('/^\d{4}-\d{2}-\d{2}$/D', $businessDate) !== 1) {
+            throw self::failure('card_operation_snapshot_time_missing');
+        }
         $context = [
             'tenantId' => $operatorScope->tenantId(),
             'organizationId' => $operatorScope->organizationId() !== ''
@@ -94,10 +140,10 @@ final class CashierV3CardOperationAuthorityServices
                 : '0',
             'storeId' => $operatorScope->storeId(),
             'operatorId' => $operatorScope->operatorId(),
-            'businessDate' => date('Y-m-d', $now),
+            'businessDate' => $businessDate,
             'businessTimezone' => 'Asia/Shanghai',
-            'occurredAt' => $now,
-            'recordedAt' => $now,
+            'occurredAt' => $occurredAt,
+            'recordedAt' => max($now, $occurredAt),
         ];
         $intent = $payload;
         $intent['commandIdempotencyKey'] = $idempotencyKey;
@@ -105,7 +151,7 @@ final class CashierV3CardOperationAuthorityServices
             $operatorScope->tenantId(),
             $idempotencyKey,
             $context['businessDate'],
-            $now
+            $occurredAt
         );
         $plan = CashierV3CardOperationKernel::plan($intent, $source, $target, $context);
 
@@ -115,7 +161,32 @@ final class CashierV3CardOperationAuthorityServices
             ->lock(true)
             ->find();
         if ($existing) {
-            return $this->replayOperation($existing, $plan);
+            $replayed = $this->replayOperation($existing, $plan);
+            if ($isReplacementSnapshot) {
+                $replayed['replacementSnapshot'] = $payload['replacementSnapshot'];
+            }
+            // A failed final checkout can be retried with the same browser
+            // snapshot and idempotency key. The immutable operation header is
+            // correctly replayed, but its generated sale-line DTO is not
+            // persisted in the operation row. Rebuild that DTO here so the
+            // retry has the same upgrade/project-upgrade sale line as the
+            // first attempt instead of falling through as incomplete data.
+            if (!empty($scope['direct_snapshot_operation'])
+                && in_array((string)$plan['operationType'], [
+                    CashierV3CardOperationKernel::TYPE_CARD_UPGRADE,
+                    CashierV3CardOperationKernel::TYPE_PROJECT_UPGRADE,
+                ], true)
+                && (string)($plan['operationStatus'] ?? '') === 'awaiting_checkout') {
+                $replayed['upgradeSaleLine'] = $this->saleCatalog->cardOperationUpgradeSaleLineAfterGatewayLocksInTx(
+                    $plan,
+                    (string)($scope['idempotency_key'] ?? ''),
+                    (array)($scope['contexts'] ?? []),
+                    $operatorScope,
+                    $dataScope,
+                    true
+                );
+            }
+            return $replayed;
         }
 
         $type = (string)$plan['operationType'];
@@ -142,7 +213,21 @@ final class CashierV3CardOperationAuthorityServices
             $this->insertOperationLines($plan, $operatorScope->tenantId(), $now);
         }
         $cashierDraft = null;
-        if (!$isDirect) {
+        $upgradeSaleLine = null;
+        if (!$isDirect && !empty($scope['direct_snapshot_operation'])) {
+            // A browser checkout snapshot may contain an upgrade intent that
+            // has not created a pending operation yet. Build the immutable
+            // upgrade sale binding now, inside the final submit transaction,
+            // without writing a second workbench projection.
+            $upgradeSaleLine = $this->saleCatalog->cardOperationUpgradeSaleLineAfterGatewayLocksInTx(
+                $plan,
+                (string)($scope['idempotency_key'] ?? ''),
+                (array)($scope['contexts'] ?? []),
+                $operatorScope,
+                $dataScope,
+                true
+            );
+        } elseif (!$isDirect) {
             $cashierDraft = $this->appendUpgradeCheckoutLineInTx(
                 $scope,
                 $plan,
@@ -167,13 +252,16 @@ final class CashierV3CardOperationAuthorityServices
             $operationState,
             $auditSnapshots,
             $operatorScope,
-            $now
+            $now,
+            !empty($scope['direct_snapshot_operation'])
         );
 
         return [
             'operation' => $this->presentOperation($operation),
             'state' => $this->presentState($operationState),
             'cashierDraft' => $cashierDraft,
+            'upgradeSaleLine' => $upgradeSaleLine,
+            'replacementSnapshot' => $isReplacementSnapshot ? $payload['replacementSnapshot'] : null,
         ];
     }
 
@@ -249,6 +337,57 @@ final class CashierV3CardOperationAuthorityServices
         );
     }
 
+    private function assertReplacementSnapshotMatchesSource(array $snapshot, array $source): void
+    {
+        $memberId = (int)($snapshot['member']['id'] ?? 0);
+        if ($memberId <= 0 || $memberId !== (int)$source['currentMemberId']) {
+            throw CashierV3CommandException::versionConflict(
+                '会员权益归属已经变化，请重新打开后再替换。',
+                ['reason' => 'project_replacement_member_changed']
+            );
+        }
+        if ((int)($snapshot['sourceCard']['id'] ?? 0) !== (int)$source['holderId']) {
+            throw CashierV3CommandException::versionConflict(
+                '来源会员卡已经变化，请重新打开后再替换。',
+                ['reason' => 'project_replacement_source_card_changed']
+            );
+        }
+        $sourceLines = [];
+        foreach ((array)($snapshot['sourceLines'] ?? []) as $line) {
+            if (!is_array($line)) continue;
+            $sourceLines[(int)($line['detailId'] ?? 0)] = $line;
+        }
+        $currentLines = [];
+        foreach ((array)($source['projects'] ?? []) as $project) {
+            if (!is_array($project)) continue;
+            $currentLines[(int)($project['detailId'] ?? 0)] = $project;
+        }
+        foreach ($sourceLines as $detailId => $line) {
+            $current = $currentLines[$detailId] ?? null;
+            if (!$current
+                || (int)($line['projectId'] ?? 0) !== (int)($current['projectId'] ?? 0)
+                || (int)($line['quantity'] ?? 0) <= 0) {
+                throw CashierV3CommandException::versionConflict(
+                    '原项目权益已经变化，请重新打开后再替换。',
+                    ['reason' => 'project_replacement_source_snapshot_mismatch', 'source_detail_id' => $detailId]
+                );
+            }
+        }
+    }
+
+    private function assertReplacementSnapshotMatchesTarget(array $snapshot, array $target): void
+    {
+        $targetSnapshot = is_array($snapshot['target'] ?? null) ? $snapshot['target'] : [];
+        if ((int)($targetSnapshot['projectId'] ?? 0) !== (int)($target['catalogId'] ?? 0)
+            || (int)($targetSnapshot['skuId'] ?? 0) !== (int)($target['skuId'] ?? 0)
+            || trim((string)($targetSnapshot['projectName'] ?? '')) === '') {
+            throw CashierV3CommandException::versionConflict(
+                '目标项目资料已经变化，请重新选择目标项目。',
+                ['reason' => 'project_replacement_target_snapshot_mismatch']
+            );
+        }
+    }
+
     private function loadSourceCardForUpdate(
         int $holderId,
         CashierV3OperatorScope $operatorScope,
@@ -301,7 +440,11 @@ final class CashierV3CardOperationAuthorityServices
         ];
     }
 
-    private function loadTargetForOperation(array $payload, CashierV3OperatorScope $operatorScope): array
+    private function loadTargetForOperation(
+        array $payload,
+        CashierV3OperatorScope $operatorScope,
+        bool $directSnapshot = false
+    ): array
     {
         $type = trim((string)($payload['operationType'] ?? ''));
         if ($type === CashierV3CardOperationKernel::TYPE_CARD_UPGRADE) {
@@ -323,12 +466,17 @@ final class CashierV3CardOperationAuthorityServices
             if (!$row || (int)($row['product_id'] ?? 0) <= 0 || (int)($row['sku_id'] ?? 0) !== $skuId) {
                 throw self::notFound('target_card_not_active');
             }
+            $snapshotTarget = is_array($payload['targetSnapshot'] ?? null) ? $payload['targetSnapshot'] : [];
             return [
                 'catalogId' => (int)$row['product_id'],
-                'catalogName' => trim((string)($row['store_name'] ?? '')) ?: '卡项',
+                'catalogName' => $directSnapshot
+                    ? (trim((string)($snapshotTarget['name'] ?? '')) ?: trim((string)($row['store_name'] ?? '')) ?: '卡项')
+                    : (trim((string)($row['store_name'] ?? '')) ?: '卡项'),
                 'skuId' => $skuId,
                 'skuUnique' => trim((string)($row['sku_unique'] ?? '')),
-                'priceCents' => self::moneyToCents($row['price'] ?? null),
+                'priceCents' => $directSnapshot && is_int($snapshotTarget['priceCents'] ?? null)
+                    ? max(0, (int)$snapshotTarget['priceCents'])
+                    : self::moneyToCents($row['price'] ?? null),
             ];
         }
         if (in_array($type, [
@@ -353,24 +501,31 @@ final class CashierV3CardOperationAuthorityServices
             if (!$row || (int)($row['product_id'] ?? 0) <= 0 || (int)($row['sku_id'] ?? 0) !== $skuId) {
                 throw self::notFound('target_project_not_active');
             }
+            $snapshotTarget = is_array($payload['targetSnapshot'] ?? null) ? $payload['targetSnapshot'] : [];
+            if ($directSnapshot && trim((string)($snapshotTarget['name'] ?? '')) === '') {
+                throw self::failure('target_project_snapshot_name_missing');
+            }
             return [
                 'catalogId' => (int)$row['product_id'],
-                'catalogName' => trim((string)($row['store_name'] ?? '')) ?: '项目',
+                'catalogName' => $directSnapshot
+                    ? trim((string)$snapshotTarget['name'])
+                    : (trim((string)($row['store_name'] ?? '')) ?: '项目'),
                 'skuId' => $skuId,
                 'skuUnique' => trim((string)($row['sku_unique'] ?? '')),
-                'priceCents' => self::moneyToCents($row['price'] ?? null),
+                'priceCents' => $directSnapshot && is_int($snapshotTarget['priceCents'] ?? null)
+                    ? max(0, (int)$snapshotTarget['priceCents'])
+                    : self::moneyToCents($row['price'] ?? null),
             ];
         }
         if ($type !== CashierV3CardOperationKernel::TYPE_CARD_TRANSFER) {
             return [];
         }
         $memberId = self::positiveId($payload['targetMemberId'] ?? null, 'target_member_invalid');
-        $member = $this->row(Db::name('user')
-            ->where('uid', $memberId)
-            ->where('status', 1)
-            ->where('is_del', 0)
-            ->lock(true)
-            ->find());
+        $memberQuery = Db::name('user')->where('uid', $memberId);
+        if (!$directSnapshot) {
+            $memberQuery->where('status', 1)->where('is_del', 0);
+        }
+        $member = $this->row($memberQuery->lock(true)->find());
         if (!$member) {
             throw self::notFound('target_member_not_active');
         }
@@ -623,6 +778,18 @@ final class CashierV3CardOperationAuthorityServices
         if ($totalQuantity <= 0 || $totalValueCents < 0 || !$sourceRows) {
             throw self::failure('project_replacement_total_invalid');
         }
+        $targetLines = array_values(array_filter((array)($plan['lines'] ?? []), static function ($line): bool {
+            return is_array($line) && (string)($line['lineRole'] ?? '') === 'target_project';
+        }));
+        $targetLine = count($targetLines) === 1 ? $targetLines[0] : null;
+        $targetQuantity = (int)($targetLine['quantityAfter'] ?? 0);
+        if (!$targetLine
+            || (int)($targetLine['targetCatalogId'] ?? 0) !== (int)$target['catalogId']
+            || (int)($targetLine['quantityBefore'] ?? -1) !== 0
+            || (int)($targetLine['quantityDelta'] ?? 0) !== $targetQuantity
+            || $targetQuantity <= 0) {
+            throw self::failure('project_replacement_target_quantity_invalid');
+        }
         $first = $sourceRows[0];
         $cartId = 'cop' . substr(hash('sha256', (string)$plan['operationId']), 0, 28);
         $money = self::centsToMoney($totalValueCents);
@@ -631,12 +798,12 @@ final class CashierV3CardOperationAuthorityServices
             'product_id' => (int)$target['catalogId'],
             'product_type' => 6,
             'product_attr_unique' => (string)$target['skuUnique'],
-            'cart_num' => $totalQuantity,
+            'cart_num' => $targetQuantity,
             'productInfo' => [
                 'id' => (int)$target['catalogId'],
                 'store_name' => (string)$target['catalogName'],
                 'product_type' => 6,
-                'cart_num' => $totalQuantity,
+                'cart_num' => $targetQuantity,
                 'attrInfo' => ['unique' => (string)$target['skuUnique']],
             ],
             'attrInfo' => ['unique' => (string)$target['skuUnique']],
@@ -655,11 +822,11 @@ final class CashierV3CardOperationAuthorityServices
             'product_id' => (int)$target['catalogId'],
             'product_type' => 6,
             'pay_price' => $money,
-            'write_times' => $totalQuantity,
-            'write_surplus_times' => $totalQuantity,
-            'cart_num' => $totalQuantity,
-            'surplus_num' => $totalQuantity,
-            'split_surplus_num' => $totalQuantity,
+            'write_times' => $targetQuantity,
+            'write_surplus_times' => $targetQuantity,
+            'cart_num' => $targetQuantity,
+            'surplus_num' => $targetQuantity,
+            'split_surplus_num' => $targetQuantity,
             'write_start' => (int)$source['effectiveWriteStart'],
             'write_end' => (int)$source['effectiveWriteEnd'],
             'is_writeoff' => 0,
@@ -675,6 +842,7 @@ final class CashierV3CardOperationAuthorityServices
             $tenantId,
             (int)$source['holderId'],
             $ruleSourceLines,
+            $targetQuantity,
             $target,
             $targetDetailId,
             (string)$plan['operationId'],
@@ -707,32 +875,49 @@ final class CashierV3CardOperationAuthorityServices
             ->whereIn('id', $ids)
             ->where('cart_type', 2)
             ->where('product_type', 6)
-            ->field('id,product_id,write_times,write_surplus_times,pay_price,is_writeoff')
+            ->field('id,product_id,write_times,write_surplus_times,pay_price,is_writeoff,cart_info')
             ->lock(true)
             ->select();
         $projects = [];
+        $includeUnavailableForReplacement = $operationType === CashierV3CardOperationKernel::TYPE_PROJECT_REPLACEMENT;
         foreach ($this->rows($rows) as $row) {
             $detailId = (int)($row['id'] ?? 0);
             $times = (int)($row['write_times'] ?? 0);
             $remaining = (int)($row['write_surplus_times'] ?? -1);
-            if ($detailId <= 0 || $times <= 0 || $remaining <= 0 || $remaining > $times || (int)($row['is_writeoff'] ?? 0) !== 0) {
+            if ($detailId <= 0 || $times <= 0 || $remaining < 0 || $remaining > $times
+                || (!$includeUnavailableForReplacement && (int)($row['is_writeoff'] ?? 0) !== 0)
+                || (!$includeUnavailableForReplacement && $remaining <= 0)) {
                 continue;
             }
-            $version = $this->row(Db::name('cashier_v3_entitlement_resource_version')
-                ->where('resource_kind', 'member_benefit_pool')
-                ->where('resource_id', (string)$detailId)
-                ->lock(true)
-                ->find());
-            if ((int)($version['current_version'] ?? 0) <= 0) {
-                throw CashierV3CommandException::versionConflict(
-                    '卡内项目版本尚未同步，请重新打开使用权益后再办理。',
-                    ['reason' => 'project_source_version_missing', 'source_detail_id' => $detailId]
-                );
+            $cartInfo = json_decode((string)($row['cart_info'] ?? ''), true);
+            $projectName = is_array($cartInfo)
+                ? trim((string)(
+                    $cartInfo['productInfo']['store_name']
+                    ?? $cartInfo['productInfo']['name']
+                    ?? $cartInfo['store_name']
+                    ?? ''
+                ))
+                : '';
+            $version = [];
+            if ($operationType !== CashierV3CardOperationKernel::TYPE_PROJECT_REPLACEMENT) {
+                $version = $this->row(Db::name('cashier_v3_entitlement_resource_version')
+                    ->where('resource_kind', 'member_benefit_pool')
+                    ->where('resource_id', (string)$detailId)
+                    ->lock(true)
+                    ->find());
+                if ((int)($version['current_version'] ?? 0) <= 0) {
+                    throw CashierV3CommandException::versionConflict(
+                        '卡内项目版本尚未同步，请重新打开使用权益后再办理。',
+                        ['reason' => 'project_source_version_missing', 'source_detail_id' => $detailId]
+                    );
+                }
             }
             $projects[] = [
                 'detailId' => $detailId,
-                'detailVersion' => (int)$version['current_version'],
+                'detailVersion' => $operationType === CashierV3CardOperationKernel::TYPE_PROJECT_REPLACEMENT
+                    ? 0 : (int)$version['current_version'],
                 'projectId' => (int)($row['product_id'] ?? 0),
+                'projectName' => $projectName,
                 'remainingTimes' => $remaining,
                 'remainingValueCents' => self::allocateCents(
                     self::moneyToCents($row['pay_price'] ?? null),
@@ -759,7 +944,8 @@ final class CashierV3CardOperationAuthorityServices
         array $target,
         array $auditSnapshots,
         CashierV3OperatorScope $operatorScope,
-        int $now
+        int $now,
+        bool $directSnapshot = false
     ): array {
         $resultSnapshot = is_array($plan['resultSnapshot'] ?? null) ? $plan['resultSnapshot'] : [];
         $organizationSnapshot = $this->organizationSnapshot($operatorScope);
@@ -901,14 +1087,17 @@ final class CashierV3CardOperationAuthorityServices
         array $state,
         array $auditSnapshots,
         CashierV3OperatorScope $operatorScope,
-        int $now
+        int $now,
+        bool $directSnapshot = false
     ): void {
         $recorder->recordInTx($execution, $contract, [
             'event_type' => 'card.operation.recorded',
             'aggregate_type' => 'card_operation',
             'aggregate_id' => (string)$plan['operationId'],
             'aggregate_version' => max(1, (int)($state['current_version'] ?? 1)),
-            'source_type' => CashierV3CardOperationKernel::ACTION,
+            'source_type' => $directSnapshot
+                ? 'submit-checkout'
+                : CashierV3CardOperationKernel::ACTION,
             'source_id' => (string)$plan['operationId'],
             'member_id' => (int)($state['current_member_id'] ?? $plan['sourceCard']['currentMemberId'] ?? 0),
             'business_date' => (string)$plan['businessDate'],
@@ -1023,8 +1212,21 @@ final class CashierV3CardOperationAuthorityServices
         return ['operation' => $this->presentOperation($row), 'state' => []];
     }
 
-    private function lockedCardHolderVersion(array $contexts, int $holderId): int
+    private function lockedCardHolderVersion(array $contexts, int $holderId, bool $directSnapshot = false, string $operationType = ''): int
     {
+        if ($operationType === CashierV3CardOperationKernel::TYPE_PROJECT_REPLACEMENT) {
+            return 1;
+        }
+        if ($directSnapshot) {
+            $version = (int)Db::name('cashier_v3_entitlement_resource_version')
+                ->where('resource_kind', 'card_holder')
+                ->where('resource_id', (string)$holderId)
+                ->lock(true)
+                ->value('current_version');
+            if ($version > 0) {
+                return $version;
+            }
+        }
         foreach ($contexts as $context) {
             if ((string)($context['kind'] ?? '') === 'card_holder'
                 && (int)($context['id'] ?? 0) === $holderId

@@ -641,6 +641,9 @@ final class CashierV3CheckoutProjectionServices
                 $salespeople = self::salespeopleSnapshot($salespeopleJson);
                 $guideSelections = self::attributionSnapshot($row['guide_selections_json'] ?? null);
                 $salesManagerSelections = self::attributionSnapshot($row['sales_manager_selections_json'] ?? null);
+                $cardPurchaseSnapshot = self::cardPurchaseSnapshot(
+                    $row['card_purchase_snapshot_json'] ?? null
+                );
                 if (!in_array($serviceObject, ['', 'self', 'friend'], true)
                     || $isExperience > 1 || $friendCountsAsCustomer > 1
                     || ($sourceType === 'project'
@@ -715,6 +718,15 @@ final class CashierV3CheckoutProjectionServices
                 if (($salesManagerJson = $row['sales_manager_selections_json'] ?? null) !== null
                     && trim((string)$salesManagerJson) !== '') {
                     $fingerprintInput['salesManagerSelections'] = $salesManagerSelections;
+                }
+                // A snapshot card purchase carries immutable card components
+                // and must remain in the line fingerprint. Empty snapshots
+                // are the canonical absence value and must stay omitted so a
+                // normal sale line does not drift merely because projection
+                // normalization materialized an empty array.
+                if ((string)($request['source_document_type'] ?? '') === 'cashier_snapshot'
+                    && $cardPurchaseSnapshot !== []) {
+                    $fingerprintInput['cardPurchaseSnapshot'] = $cardPurchaseSnapshot;
                 }
                 if ($catalogSkuId <= 0) {
                     unset($fingerprintInput['catalogSkuId']);
@@ -993,10 +1005,11 @@ final class CashierV3CheckoutProjectionServices
                 'name' => '余额支付',
                 'amount' => self::money($balance),
                 'status' => '待收款',
-                'canEdit' => true,
-                'editAction' => 'update-balance-payment',
-                'canRemove' => true,
-                'removalAction' => 'remove-balance-payment',
+                // Payment and balance choices are browser-local until the
+                // final checkout snapshot. Persisted projections are read
+                // only and must not expose draft mutation actions.
+                'canEdit' => false,
+                'canRemove' => false,
             ];
         }
         $settlement = self::safeAdd($selectedPayment, $balance, 'settlement_total');
@@ -1485,6 +1498,16 @@ final class CashierV3CheckoutProjectionServices
             $result[] = $snapshot;
         }
         return $result;
+    }
+
+    private static function cardPurchaseSnapshot($json): array
+    {
+        if ($json === null || trim((string)$json) === '') return [];
+        $decoded = is_array($json) ? $json : json_decode((string)$json, true);
+        if (!is_array($decoded)) {
+            throw self::failure('checkout_projection_card_purchase_snapshot_invalid');
+        }
+        return $decoded;
     }
 
     private static function salespeopleSnapshot($json): array

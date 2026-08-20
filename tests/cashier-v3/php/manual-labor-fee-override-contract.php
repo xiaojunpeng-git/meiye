@@ -6,7 +6,7 @@ $root = dirname(__DIR__, 3);
 $workspace = $root . '/后端代码/app/services/cashier/v3/cashier/CashierV3CashierWorkspaceServices.php';
 $assembler = $root . '/后端代码/app/services/cashier/v3/fact/CashierV3SaleOnlyFactAssembler.php';
 $paidProjectPerformance = $root . '/后端代码/app/services/cashier/v3/settlement/CashierV3PaidProjectCraftsmanPerformanceServices.php';
-$adapter = $root . '/后端代码/app/services/cashier/v3/checkout/CashierV3EntitlementCompletionAuthorityAdapter.php';
+$adapter = $root . '/后端代码/app/services/cashier/v3/checkout/CashierV3DirectSnapshotEntitlementSettlementServices.php';
 $service = $root . '/后端代码/app/services/cashier/v3/settlement/CashierV3SaleProjectServiceCompletionServices.php';
 $rebuilder = $root . '/后端代码/app/services/cashier/v3/settlement/CashierV3CheckoutDraftAuthorityRebuilder.php';
 $kernel = $root . '/后端代码/app/services/cashier/v3/settlement/CashierV3CheckoutSettlementKernel.php';
@@ -77,7 +77,7 @@ $checks = [
     ],
     'resource discovery returns its resource result' => [
         $root . '/后端代码/app/services/cashier/v3/settlement/CashierV3CheckoutPreparationServices.php',
-        "'resources' => \$resources,\n        ];\n        return \$result;",
+        "'resources' => \$resources",
     ],
 ];
 

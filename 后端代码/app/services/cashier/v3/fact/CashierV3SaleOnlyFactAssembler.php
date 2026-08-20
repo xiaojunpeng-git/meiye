@@ -59,7 +59,7 @@ final class CashierV3SaleOnlyFactAssembler
         'craftsmen_snapshot_json',
         'salespeople_snapshot_json',
         'guide_selections_json', 'sales_manager_selections_json',
-        'manual_labor_fee_cents',
+        'manual_labor_fee_cents', 'card_purchase_snapshot_json',
         'sort_no', 'add_time', 'update_time',
     ];
 
@@ -849,7 +849,7 @@ final class CashierV3SaleOnlyFactAssembler
         // settlement component. The locked sales plan has already bound that
         // credit to the source operation; do not misclassify it as a discount.
         $entitlementCredit = $sale - (int)$request['sales_amount_cents'];
-        if ($sale <= 0
+        if ($sale < 0
             || $entitlementCredit < 0
             || $original - $discount !== $sale
             || $original !== (int)$order['original_amount_cents']
@@ -865,7 +865,7 @@ final class CashierV3SaleOnlyFactAssembler
             throw self::failure('sale_only_fact_total_equation_mismatch');
         }
         foreach ($orderLines as $index => $line) {
-            if ((int)$line['sale_amount_cents'] <= 0
+            if ((int)$line['sale_amount_cents'] < 0
                 || (int)$line['debt_amount_cents'] < 0
                 || (int)$line['debt_amount_cents'] > (int)$line['sale_amount_cents']
                 || (int)$line['original_amount_cents'] - (int)$line['discount_amount_cents']

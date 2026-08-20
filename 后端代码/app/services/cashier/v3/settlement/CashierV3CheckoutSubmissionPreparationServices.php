@@ -22,7 +22,7 @@ final class CashierV3CheckoutSubmissionPreparationServices
 {
     public const CONTRACT_VERSION = 'cashier-v3-checkout-submission-preparation-v1';
 
-    private const ACTION = 'prepare-checkout-submission';
+    private const ACTION = 'finalize-checkout-snapshot';
     private const DISCOVERY_CONTRACT_VERSION = 'cashier-v3-server-resource-discovery-v1';
     private const EXCLUDED_PLAN_KINDS = ['cashier_workspace', 'checkout_request'];
 
@@ -63,7 +63,7 @@ final class CashierV3CheckoutSubmissionPreparationServices
                 );
             }
             $payload = is_array($scope['payload'] ?? null) ? $scope['payload'] : [];
-            self::assertPayload($payload);
+            self::assertPayload($payload, !empty($scope['direct_snapshot_submission']));
             $operatorScope = $scope['operator_scope'] ?? null;
             $dataScope = $scope['data_scope'] ?? null;
             if (!($operatorScope instanceof CashierV3OperatorScope)
@@ -79,33 +79,45 @@ final class CashierV3CheckoutSubmissionPreparationServices
             $requestVersion = (int)$payload['checkoutRequestVersion'];
             $stateContextId = self::stateContextId($scope['state_context_id'] ?? null);
             $workspaceId = self::workspaceId($operatorScope, $stateContextId);
+            $directSnapshot = !empty($scope['direct_snapshot_submission']);
             $contexts = self::listValue($scope['contexts'] ?? null, 'checkout_submission_contexts_invalid');
             $lockedVersions = is_array($scope['locked_versions'] ?? null)
                 ? $scope['locked_versions']
                 : [];
-            $workspaceContext = self::lockedContext(
-                $contexts,
-                $lockedVersions,
-                'cashier_workspace',
-                $workspaceId,
-                $dataScope
-            );
-            $requestContext = self::lockedContext(
-                $contexts,
-                $lockedVersions,
-                'checkout_request',
-                $requestId,
-                $dataScope
-            );
-            if ((int)$requestContext['expected_version'] !== $requestVersion) {
-                throw self::versionConflict('checkout_submission_request_context_version_mismatch');
+            // Direct browser snapshots do not carry a workspace projection
+            // context. The positive authority snapshot version is an internal
+            // kernel contract only; current business resources are discovered
+            // and locked from the submitted snapshot in this transaction.
+            $workspaceContext = $directSnapshot
+                ? ['expected_version' => 1]
+                : self::lockedContext(
+                    $contexts,
+                    $lockedVersions,
+                    'cashier_workspace',
+                    $workspaceId,
+                    $dataScope
+                );
+            if (!$directSnapshot) {
+                $requestContext = self::lockedContext(
+                    $contexts,
+                    $lockedVersions,
+                    'checkout_request',
+                    $requestId,
+                    $dataScope
+                );
+                if ((int)$requestContext['expected_version'] !== $requestVersion) {
+                    throw self::versionConflict('checkout_submission_request_context_version_mismatch');
+                }
             }
 
             $idempotencyKey = self::submissionIdempotencyKey(
                 $scope['idempotency_key'] ?? null
             );
             $secret = $this->serverIdSecret();
-            $discovery = self::discoveryPack($scope['server_resource_discovery'] ?? null);
+            $discovery = self::discoveryPack(
+                $scope['server_resource_discovery'] ?? null,
+                $directSnapshot
+            );
 
             $aggregate = $this->requests->lockAggregateForEditInTx(
                 $requestId,
@@ -115,7 +127,7 @@ final class CashierV3CheckoutSubmissionPreparationServices
                 $operatorScope,
                 $dataScope
             );
-            self::assertPreparationIdentity($payload, $aggregate['request'] ?? null);
+            self::assertPreparationIdentity($payload, $aggregate['request'] ?? null, $directSnapshot);
 
             $now = time();
             $snapshot = $this->rebuilder->rebuild(
@@ -146,8 +158,11 @@ final class CashierV3CheckoutSubmissionPreparationServices
                     $discovery['resources'],
                     $contexts,
                     $lockedVersions,
-                    $dataScope
-                )
+                    $dataScope,
+                    $directSnapshot,
+                    $directSnapshot
+                ),
+                $directSnapshot
             );
 
             $persistedRequest = $this->requests->persistKernelPlanInTx(
@@ -184,14 +199,16 @@ final class CashierV3CheckoutSubmissionPreparationServices
         }
     }
 
-    private static function assertPayload(array $payload): void
+    private static function assertPayload(array $payload, bool $directSnapshot = false): void
     {
         $expected = [
             'checkoutRequestId',
             'checkoutRequestVersion',
             'preparationRequestId',
-            'preparationToken',
         ];
+        if (!$directSnapshot) {
+            $expected[] = 'preparationToken';
+        }
         $actual = array_keys($payload);
         sort($expected, SORT_STRING);
         sort($actual, SORT_STRING);
@@ -210,8 +227,8 @@ final class CashierV3CheckoutSubmissionPreparationServices
                 '/^(?:CHECKOUT|CHECKOUT_PREPARE)-[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/D',
                 $payload['preparationRequestId']
             ) !== 1
-            || !is_string($payload['preparationToken'])
-            || preg_match('/^CKPT-[0-9a-f]{64}$/D', $payload['preparationToken']) !== 1) {
+            || (!$directSnapshot && (!is_string($payload['preparationToken'] ?? null)
+                || preg_match('/^CKPT-[0-9a-f]{64}$/D', $payload['preparationToken']) !== 1))) {
             throw self::invalid(
                 'checkout_submission_identity_invalid',
                 '本次结账确认资料已失效，请关闭后重新进入。'
@@ -244,8 +261,15 @@ final class CashierV3CheckoutSubmissionPreparationServices
         }
     }
 
-    private static function assertPreparationIdentity(array $payload, $request): void
+    private static function assertPreparationIdentity(
+        array $payload,
+        $request,
+        bool $directSnapshot = false
+    ): void
     {
+        if ($directSnapshot) {
+            return;
+        }
         if (!is_array($request)) {
             throw self::invalid(
                 'checkout_submission_request_missing',
@@ -349,7 +373,7 @@ final class CashierV3CheckoutSubmissionPreparationServices
         }
     }
 
-    private static function discoveryPack($value): array
+    private static function discoveryPack($value, bool $allowEmpty = false): array
     {
         if (!is_array($value)) {
             throw self::invalid(
@@ -364,9 +388,11 @@ final class CashierV3CheckoutSubmissionPreparationServices
         if ($keys !== $expected
             || ($value['contractVersion'] ?? null) !== self::DISCOVERY_CONTRACT_VERSION
             || !is_array($value['resources'])
-            || !$value['resources']
+            || (!$allowEmpty && !$value['resources'])
             || count($value['resources']) > CashierV3CheckoutVerifiedResourcePlan::MAX_RESOURCES
-            || array_keys($value['resources']) !== range(0, count($value['resources']) - 1)
+            || array_keys($value['resources']) !== ($value['resources']
+                ? range(0, count($value['resources']) - 1)
+                : [])
             || !is_string($value['fingerprint'])
             || preg_match('/^[0-9a-f]{64}$/D', $value['fingerprint']) !== 1) {
             throw self::invalid(
@@ -402,7 +428,9 @@ final class CashierV3CheckoutSubmissionPreparationServices
         array $resources,
         array $contexts,
         array $lockedVersions,
-        CashierV3DataScopeContext $dataScope
+        CashierV3DataScopeContext $dataScope,
+        bool $allowEmptySalePlan = false,
+        bool $directSnapshot = false
     ): array {
         $rows = [];
         $rowIndexByPhysical = [];
@@ -445,13 +473,20 @@ final class CashierV3CheckoutSubmissionPreparationServices
             if (in_array($kind, self::EXCLUDED_PLAN_KINDS, true)) {
                 continue;
             }
-            $context = self::lockedContext(
-                $contexts,
-                $lockedVersions,
-                $kind,
-                $id,
-                $dataScope
-            );
+            // A browser-owned final snapshot intentionally carries no
+            // projection contexts. The discovery result above is already
+            // server-authoritative and was produced inside the same gateway
+            // transaction, so build the plan context directly from it. The
+            // legacy branch still requires its explicit locked contexts.
+            $context = $directSnapshot
+                ? self::discoveredContext($resource, $dataScope)
+                : self::lockedContext(
+                    $contexts,
+                    $lockedVersions,
+                    $kind,
+                    $id,
+                    $dataScope
+                );
             $contextProvider = $context['server_resource_provider_contract_version'] ?? null;
             $contextAuthority = $context['server_resource_authority_fingerprint'] ?? null;
             if ((int)$context['expected_version'] !== $resource['expectedVersion']
@@ -491,7 +526,7 @@ final class CashierV3CheckoutSubmissionPreparationServices
         // Navigation sources are server-bound by checkout_request, not by the
         // discovery provider. They still belong to the immutable final plan so
         // submit-checkout locks them again from server authority.
-        foreach ($contexts as $context) {
+        foreach ($directSnapshot ? [] : $contexts as $context) {
             if (!is_array($context)) {
                 throw self::invalid(
                     'checkout_submission_context_shape_invalid',
@@ -551,13 +586,40 @@ final class CashierV3CheckoutSubmissionPreparationServices
                 ]),
             ];
         }
-        if (!$rows) {
+        // A browser-owned sale-only snapshot may legitimately have no hidden
+        // entitlement resources; its SKU/inventory authority is resolved by
+        // the sale settlement inside the same final transaction. Entitlement
+        // and mixed checkouts still require their discovered resources.
+        if (!$rows && !$allowEmptySalePlan) {
             throw self::invalid(
                 'checkout_submission_hidden_resources_missing',
                 '结账所需的服务端资源尚未准备完成，请刷新后重试。'
             );
         }
         return $rows;
+    }
+
+    private static function discoveredContext(
+        array $resource,
+        CashierV3DataScopeContext $dataScope
+    ): array {
+        $kind = (string)($resource['kind'] ?? '');
+        $id = (string)($resource['id'] ?? '');
+        $scopeType = CashierV3ResourceKindCatalog::scopeTypeOf($kind);
+        $scopeId = $scopeType === CashierV3ResourceScope::TYPE_TENANT
+            ? $dataScope->tenantId()
+            : (string)$dataScope->forcedStoreId();
+        return [
+            'kind' => $kind,
+            'id' => $id,
+            'expected_version' => (int)($resource['expectedVersion'] ?? 0),
+            'roles' => array_values((array)($resource['roles'] ?? [])),
+            'scope' => CashierV3ResourceScope::of($scopeType, $scopeId),
+            'data_scope' => $dataScope,
+            'server_resource_access_mode' => (string)($resource['accessMode'] ?? 'read'),
+            'server_resource_provider_contract_version' => (string)($resource['providerContractVersion'] ?? ''),
+            'server_resource_authority_fingerprint' => (string)($resource['authorityFingerprint'] ?? ''),
+        ];
     }
 
     private static function planScope(
@@ -893,6 +955,12 @@ final class CashierV3CheckoutSubmissionPreparationServices
                 CashierV3ResultCode::IDEMPOTENCY_KEY_CONFLICT,
                 '本次操作请求标识已用于其他内容，请重新操作。',
                 CashierV3ResultCode::STATUS_FAILED,
+                ['reason' => $exception->reason(), 'contractDetail' => $exception->detail()]
+            );
+        }
+        if ($exception->reason() === 'checkout_receivable_not_balanced') {
+            return CashierV3CommandException::invalidContext(
+                '本次应收与收款金额不一致，请返回收款信息调整后再确认。',
                 ['reason' => $exception->reason(), 'contractDetail' => $exception->detail()]
             );
         }

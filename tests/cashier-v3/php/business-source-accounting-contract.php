@@ -23,8 +23,7 @@ $checks = [
     'source has isolated selection version' => str_contains($source, "'selection_version'"),
     'source final settlement locks configuration' => str_contains($source, 'lockResolvedForSettlementInTx'),
     'sales order has business source snapshots' => str_contains($salesPlan, 'business_source_label_snapshot'),
-    'G source reward is normalized and stored in integer cents' => str_contains($requestNormalizer, "'rewardAmountCents'")
-        && str_contains($source, "'reward_amount_cents'")
+    'source reward is stored only when present in the final snapshot' => str_contains($source, "'reward_amount_cents'")
         && str_contains($salesPlan, "'reward_amount_cents'")
         && substr_count($rewardUpgrade, 'reward_amount_cents') >= 2,
     'non-G source reward is forced to zero by server' => str_contains($source, "preg_match('/^G")
@@ -37,10 +36,8 @@ $checks = [
     'recharge authority snapshots configured accounting name' => str_contains($recharge, 'paymentMethodNameSnapshot'),
     'editing checkout delegates business configuration projection' => str_contains($projection, 'businessConfigProjection->apply'),
     'business configuration projection exposes configured accounting names' => str_contains($businessConfigProjection, 'applyAccountingMethodNames'),
-    'business source locks checkout but touches workspace only' => str_contains($cashierModule, "\$action = 'update-checkout-business-source';")
-        && str_contains($cashierModule, "['cashier_workspace', 'checkout_request']")
-        && str_contains($cashierModule, "\$resolved['required_touched_roles'] = ['cashier_workspace'];")
-        && str_contains($cashierModule, "'touched' => ['cashier_workspace']"),
+    'business source is captured only from the final snapshot' => !str_contains($cashierModule, "'update-checkout-business-source'")
+        && str_contains($read('后端代码/app/services/cashier/v3/settlement/CashierV3CheckoutPreparationServices.php'), 'captureSaleSnapshotInTx'),
 ];
 foreach ($checks as $label => $ok) {
     if (!$ok) throw new RuntimeException('FAIL: ' . $label);

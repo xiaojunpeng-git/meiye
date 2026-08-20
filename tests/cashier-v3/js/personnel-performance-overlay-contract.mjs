@@ -26,7 +26,7 @@ const bridge = fs.readFileSync(
   'utf8'
 )
 const completionAuthority = fs.readFileSync(
-  path.join(root, '后端代码/app/services/cashier/v3/checkout/CashierV3EntitlementCompletionAuthorityAdapter.php'),
+  path.join(root, '后端代码/app/services/cashier/v3/checkout/CashierV3DirectSnapshotEntitlementSettlementServices.php'),
   'utf8'
 )
 const selector = fs.readFileSync(
@@ -105,7 +105,11 @@ assert.match(
   /craftsmanPerformanceType: record\.craftsmanPerformanceType \|\| record\.craftsman_performance_type,[\s\S]*laborFeeCents: Number\(record\.laborFeeCents \?\? record\.labor_fee_cents \?\? 0\)/,
   '确认手艺人分配时不得丢失服务业绩类型和每人手工费'
 )
-assert.match(workbench, /requestAction\('apply-cashier-personnel-to-all-lines',[\s\S]*craftsmen,[\s\S]*salespeople,/, '应用全部人必须一次提交双角色权威事务命令')
+assert.match(
+  workbench,
+  /appendLocalCashierDraftOperation\(\{ action: 'apply-cashier-personnel-to-all-lines', payload \}/,
+  '应用全部人必须把双角色人员意图写入同一份本地结账快照'
+)
 assert.match(
   idempotencyKeys,
   /'CASHIER_APPLY_PERSONNEL_ALL'/,

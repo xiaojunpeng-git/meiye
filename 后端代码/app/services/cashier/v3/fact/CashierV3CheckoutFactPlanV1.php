@@ -229,16 +229,9 @@ final class CashierV3CheckoutFactPlanV1
             'business_source_secondary_name_snapshot' => self::text($context['businessSourceSecondaryNameSnapshot'], 64, 'business_source_secondary_name_invalid'),
             'business_source_label_snapshot' => self::text($context['businessSourceLabelSnapshot'], 140, 'business_source_label_invalid'),
         ];
-        if (($normalized['business_source_primary_id'] === 0)
-            !== ($normalized['business_source_primary_name_snapshot'] === '')
-            || ($normalized['business_source_primary_id'] === 0)
-            !== ($normalized['business_source_label_snapshot'] === '')) {
-            throw self::failure('business_source_snapshot_invalid');
-        }
-        if (($normalized['business_source_secondary_id'] === 0)
-            !== ($normalized['business_source_secondary_name_snapshot'] === '')) {
-            throw self::failure('business_source_snapshot_invalid');
-        }
+        // Customer source is attribution metadata from the browser snapshot.
+        // Preserve whatever was captured without requiring the live source
+        // projection or name fields to agree at settlement time.
         if ($normalized['settled_at'] < $normalized['occurred_at']
             || $normalized['recorded_at'] < $normalized['occurred_at']) {
             throw self::failure('fact_time_order_invalid');

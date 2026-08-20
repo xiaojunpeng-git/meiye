@@ -18,7 +18,6 @@ require_once $backendRoot . '/app/services/cashier/v3/settlement/CashierV3Checko
 require_once $backendRoot . '/app/services/cashier/v3/settlement/CashierV3CheckoutRequestRepository.php';
 require_once $backendRoot . '/app/services/cashier/v3/settlement/CashierV3CheckoutVerifiedSourceSet.php';
 require_once $backendRoot . '/app/services/cashier/v3/settlement/CashierV3CheckoutProjectionServices.php';
-require_once $backendRoot . '/app/services/cashier/v3/settlement/CashierV3CheckoutPaymentDraftServices.php';
 
 use app\services\cashier\v3\settlement\CashierV3CheckoutSettlementCanonicalizer;
 use app\services\cashier\v3\settlement\CashierV3CheckoutSettlementContractException;
@@ -26,7 +25,6 @@ use app\services\cashier\v3\settlement\CashierV3CheckoutSettlementIdFactory;
 use app\services\cashier\v3\settlement\CashierV3CheckoutSettlementKernel;
 use app\services\cashier\v3\settlement\CashierV3CheckoutSettlementStateMachine;
 use app\services\cashier\v3\settlement\CashierV3CheckoutProjectionServices;
-use app\services\cashier\v3\settlement\CashierV3CheckoutPaymentDraftServices;
 
 $passed = 0;
 $failed = 0;
@@ -893,24 +891,6 @@ checkoutAssert('editing draft can retain a selected payment method at zero pendi
         null,
         $secret
     )['paymentDrafts'][0]['amountCents'] === 0);
-$paymentInitialAmount = new ReflectionMethod(
-    CashierV3CheckoutPaymentDraftServices::class,
-    'nextPaymentInitialAmount'
-);
-checkoutAssert('the first bookkeeping method receives the entire authoritative remaining receivable',
-    $paymentInitialAmount->invoke(null, [
-        'saleLines' => [['saleAmountCents' => 9000]],
-        'paymentDetails' => [],
-        'balanceDeduction' => ['amountCents' => 0],
-        'debt' => ['amountCents' => 0],
-    ]) === 9000);
-checkoutAssert('a further bookkeeping-method click is retained as a zero-value draft after the current total is allocated',
-    $paymentInitialAmount->invoke(null, [
-        'saleLines' => [['saleAmountCents' => 9000]],
-        'paymentDetails' => [['amountCents' => 9000]],
-        'balanceDeduction' => ['amountCents' => 0],
-        'debt' => ['amountCents' => 0],
-    ]) === 0);
 checkoutAssert('positive receivable still rejects a zero-valued payment draft as unbalanced',
     checkoutReason(static function () use ($zeroPaymentDraft, $secret): void {
         CashierV3CheckoutSettlementKernel::prepareSubmission(

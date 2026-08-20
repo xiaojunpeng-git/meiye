@@ -132,6 +132,10 @@ class CashierV3RootDomainAssembler
         foreach ($dataScope->grantedFeatures() as $code) {
             $features[$code] = true;
         }
+        $operationFeatures = [];
+        foreach ($this->resolveOperationFeatures($dataScope) as $code) {
+            $operationFeatures[$code] = true;
+        }
 
         $extras = [
             'storeName' => (string)$store['name'],
@@ -140,6 +144,9 @@ class CashierV3RootDomainAssembler
                 'name' => (string)$store['name'],
             ],
             'featurePermissions' => $features ?: new \stdClass(),
+            'operationPermissions' => $operationFeatures ?: new \stdClass(),
+            'readOnly' => $dataScope->isReadOnlySession(),
+            'sessionMode' => $dataScope->isReadOnlySession() ? 'store_read_only' : 'store_staff',
             'workspace' => [
                 'id' => $workspaceId,
                 'revision' => $workspaceRevision,
@@ -190,6 +197,24 @@ class CashierV3RootDomainAssembler
 
         $extras['_public_versions'] = $publicVersions;
         return $extras;
+    }
+
+    /** @return string[] */
+    private function resolveOperationFeatures(CashierV3DataScopeContext $dataScope): array
+    {
+        if ($dataScope->isReadOnlySession()) {
+            return [];
+        }
+        try {
+            $features = app()->make(\app\services\cashier\v3\permission\CashierV3FeatureResolver::class)
+                ->resolveGrantedFeatures($dataScope->operatorProfile());
+            $allowed = array_fill_keys(\app\services\cashier\v3\permission\CashierV3StaffFeatureOverrideServices::operationFeatureCodes(), true);
+            return array_values(array_filter($features, static function ($feature) use ($allowed) {
+                return isset($allowed[(string)$feature]);
+            }));
+        } catch (\Throwable $e) {
+            return [];
+        }
     }
 
     /**

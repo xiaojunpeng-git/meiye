@@ -73,17 +73,3 @@ export async function discardCashierCheckout(stateContextId) {
   if (!response.ok || Number(body.status || 200) !== 200) throw new Error(String(body.msg || body.message || '结账草稿清理失败。'))
   return body.data?.data || body.data || body
 }
-
-export async function validateCashierGuideRound({ stateContextId, checkoutRequestId, checkoutRequestVersion }) {
-  const token = readStoreV3SessionToken()
-  const response = await fetch('/cashierapi/v3/cashier-drafts/validate-guide-round', {
-    method: 'POST', credentials: 'omit',
-    headers: { Accept: 'application/json', 'Content-Type': 'application/json', ...(token ? { 'Authori-zation': `Bearer ${token}` } : {}) },
-    body: JSON.stringify({ stateContextId, checkoutRequestId, checkoutRequestVersion })
-  })
-  const body = await response.json().catch(() => ({}))
-  if (!response.ok || Number(body.status || 200) !== 200) {
-    throw new Error(String(body.msg || body.message || '导购轮次校验失败，请返回购物车重新选择后再结账。'))
-  }
-  return body.data?.data || body.data || body
-}

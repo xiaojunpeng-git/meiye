@@ -8,7 +8,6 @@ use app\services\cashier\v3\hang\CashierV3HangSubmissionServices;
 use app\services\cashier\v3\hang\CashierV3HangResumeServices;
 use app\services\cashier\v3\hang\CashierV3HangVoidServices;
 use app\services\cashier\v3\settlement\CashierV3CheckoutDraftDiscardServices;
-use app\services\cashier\v3\settlement\CashierV3CheckoutGuideRoundPreflightServices;
 use think\facade\App;
 use think\facade\Db;
 
@@ -179,41 +178,4 @@ final class HangDraft extends AuthController
         }
     }
 
-    /**
-     * Payment-step preflight. It reads the locked checkout snapshot and never
-     * creates an order, payment attempt, fact or resource-version mutation.
-     */
-    public function validateGuideRound()
-    {
-        $body = $this->request->post();
-        $body = is_array($body) ? $body : [];
-        try {
-            $operator = $this->dispatcher->scopeResolver()->operatorScope((int)$this->storeId, (int)$this->cashierId);
-            $dataScope = $this->dispatcher->dataScopeFactory()->build(
-                (int)$this->storeId,
-                (int)$this->cashierId,
-                is_array($this->cashierInfo) ? $this->cashierInfo : [],
-                $operator->tenantId(),
-                $operator->organizationId()
-            );
-            $result = Db::transaction(function () use ($body, $operator, $dataScope): array {
-                return (new CashierV3CheckoutGuideRoundPreflightServices())->validateInTx(
-                    (string)($body['stateContextId'] ?? ''),
-                    (string)($body['checkoutRequestId'] ?? ''),
-                    (int)($body['checkoutRequestVersion'] ?? 0),
-                    $operator,
-                    $dataScope
-                );
-            });
-            return $this->success('ok', ['result' => ['status' => 'succeeded'], 'data' => $result]);
-        } catch (\InvalidArgumentException $exception) {
-            $reason = $exception->getMessage();
-            if (preg_match('/^guide_round_date_conflict:(\d{4}-\d{2}-\d{2})$/D', $reason, $matches)) {
-                return $this->fail('该导购轮次已存在其他结账日期（' . $matches[1] . '），请返回购物车重新选择轮次后再结账。');
-            }
-            return $this->fail('导购轮次校验未通过，请返回购物车重新选择后再结账。');
-        } catch (\Throwable $exception) {
-            return $this->fail($exception->getMessage() ?: '导购轮次校验失败，请返回购物车重新选择后再结账。');
-        }
-    }
 }

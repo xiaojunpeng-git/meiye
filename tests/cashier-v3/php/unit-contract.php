@@ -401,59 +401,6 @@ try {
     ok('enum alias conflict', $caughtObs !== '', $caughtObs, 'CP-8-01');
 }
 
-section('checkout follow-up rejects client source payload');
-$policiesFollow = new CashierV3ContextPolicyRegistry(true);
-$followThrew = '';
-try {
-    $policiesFollow->requirePolicy('add-payment-method')->resolve(
-        [
-            'checkoutRequestId' => 'CR1',
-            'serviceOrderId' => 'SO1',
-            'reservationId' => 'RSV1',
-        ],
-        ['store_id' => 8, 'operator_id' => 1, 'state_context_id' => 'ctx-x']
-    );
-} catch (CashierV3CommandException $e) {
-    $followThrew = (string)($e->getDetail()['reason'] ?? $e->getResultCode());
-}
-ok('follow-up 拒绝客户端夹带来源', $followThrew === 'follow_up_source_must_come_from_checkout_request', $followThrew, 'CP-8-02');
-$followOk = $policiesFollow->requirePolicy('add-payment-method')->resolve(
-    ['checkoutRequestId' => 'CR1'],
-    ['store_id' => 8, 'operator_id' => 1, 'state_context_id' => 'ctx-x']
-);
-ok('follow-up 仅 checkout_request', !empty($followOk['expand_from_checkout_request'])
-    && in_array('checkout_request', $followOk['required_touched_roles'], true), json_encode($followOk), 'CP-8-02');
-ok('follow-up 无 service_order identity', !in_array('service_order', array_column($followOk['identities'], 'kind'), true), '', 'CP-8-02');
-$followContexts = (new CashierV3CommandContextServices())->validate([
-    ['kind' => 'cashier_workspace', 'id' => 'ws:8:1:ctx-x', 'expectedVersion' => 3],
-    ['kind' => 'checkout_request', 'id' => 'CR1', 'expectedVersion' => 2],
-    ['kind' => 'service_order', 'id' => 'SO-FROM-CR', 'expectedVersion' => 7],
-], $followOk);
-ok(
-    'follow-up 允许来源版本延迟到 checkout_request 权威绑定',
-    count($followContexts) === 3
-        && in_array('service_order', array_column($followContexts, 'kind'), true)
-        && in_array('service_order', $followOk['deferred_identity_kinds'] ?? [], true),
-    json_encode($followContexts),
-    'CP-8-02'
-);
-$undeclaredDeferredRejected = '';
-try {
-    (new CashierV3CommandContextServices())->validate([
-        ['kind' => 'cashier_workspace', 'id' => 'ws:8:1:ctx-x', 'expectedVersion' => 3],
-        ['kind' => 'checkout_request', 'id' => 'CR1', 'expectedVersion' => 2],
-        ['kind' => 'member', 'id' => '99', 'expectedVersion' => 1],
-    ], $followOk);
-} catch (CashierV3CommandException $e) {
-    $undeclaredDeferredRejected = (string)($e->getDetail()['reason'] ?? $e->getResultCode());
-}
-ok(
-    'follow-up 未声明的延迟来源仍 fail-closed',
-    $undeclaredDeferredRejected === 'kind_not_allowed',
-    $undeclaredDeferredRejected,
-    'CP-8-02'
-);
-
 section('register freeze / duplicate zero side-effect');
 $handlers = new CashierV3HandlerRegistry();
 $handlers->registerCommand('save-member-query-settings', function () {

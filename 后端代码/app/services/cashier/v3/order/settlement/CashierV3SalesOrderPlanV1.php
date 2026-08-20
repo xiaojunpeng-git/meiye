@@ -77,7 +77,7 @@ final class CashierV3SalesOrderPlanV1
         'craftsmen_snapshot_json',
         'salespeople_snapshot_json',
         'guide_selections_json', 'sales_manager_selections_json',
-        'manual_labor_fee_cents',
+        'manual_labor_fee_cents', 'card_purchase_snapshot_json',
         'sort_no', 'add_time', 'update_time',
     ];
 
@@ -285,6 +285,7 @@ final class CashierV3SalesOrderPlanV1
                 'sale_amount_cents' => $line['sale_amount_cents'],
                 'debt_amount_cents' => $line['debt_amount_cents'],
                 'manual_labor_fee_cents' => $line['manual_labor_fee_cents'],
+                'card_purchase_snapshot_json' => $line['card_purchase_snapshot_json'],
                 'configured_cost_cents' => $line['configured_cost_cents'],
                 'price_change_reason' => $line['price_change_reason'],
                 'price_changed_by' => $line['price_changed_by'],
@@ -898,6 +899,10 @@ final class CashierV3SalesOrderPlanV1
         $salespeople = self::salespeopleSnapshot($row['salespeople_snapshot_json'] ?? null);
         $guideSelections = self::attributionSnapshot($row['guide_selections_json'] ?? null);
         $salesManagerSelections = self::attributionSnapshot($row['sales_manager_selections_json'] ?? null);
+        $cardPurchaseSnapshot = self::cardPurchaseSnapshot(
+            $row['card_purchase_snapshot_json'] ?? null,
+            $sourceType
+        );
         if ($isExperience > 1 || $friendCountsAsCustomer > 1 || $isPresale > 1 || $inventoryOutboundRequired > 1 || ($isPresale === 1 && $inventoryOutboundRequired === 1)) {
             throw self::failure('sales_order_is_experience_invalid');
         }
@@ -955,6 +960,7 @@ final class CashierV3SalesOrderPlanV1
             'salespeople' => $salespeople,
             'guideSelections' => $guideSelections,
             'salesManagerSelections' => $salesManagerSelections,
+            'cardPurchaseSnapshot' => $cardPurchaseSnapshot,
         ];
         if ($inventoryOutboundRequired !== 1) {
             $authority['inventoryOutboundRequired'] = 0;
@@ -1018,6 +1024,7 @@ final class CashierV3SalesOrderPlanV1
             'price_changed_by_name_snapshot' => $priceChangedByName,
             'price_changed_at' => $priceChangedAt,
             'manual_labor_fee_cents' => $manualLaborFeeCents,
+            'card_purchase_snapshot_json' => self::cardPurchaseSnapshotJson($cardPurchaseSnapshot),
         ];
     }
 
@@ -1162,7 +1169,10 @@ final class CashierV3SalesOrderPlanV1
             }
             $authorities[$authorityKey] = true;
             $amount = self::money($row['amount_cents'], 'locked_checkout_payment_amount_invalid');
-            if ($amount <= 0) {
+            if ($amount < 0
+                || ($amount === 0
+                    && ($request['selected_payment_amount_cents'] !== 0
+                        || $request['receivable_amount_cents'] !== 0))) {
                 throw self::failure('locked_checkout_payment_amount_invalid');
             }
             $authority = [
@@ -1503,6 +1513,27 @@ final class CashierV3SalesOrderPlanV1
         } catch (\Throwable $exception) {
             throw self::failure('sales_order_craftsmen_snapshot_invalid');
         }
+    }
+
+    private static function cardPurchaseSnapshot($json, string $sourceType): array
+    {
+        if ($sourceType !== 'card') {
+            return [];
+        }
+        $decoded = is_array($json) ? $json : json_decode((string)$json, true);
+        if (!is_array($decoded) || array_values($decoded) === $decoded) {
+            throw self::failure('sales_order_card_purchase_snapshot_invalid');
+        }
+        return $decoded;
+    }
+
+    private static function cardPurchaseSnapshotJson(array $snapshot): string
+    {
+        $encoded = json_encode($snapshot, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        if (!is_string($encoded) || strlen($encoded) > 1048576) {
+            throw self::failure('sales_order_card_purchase_snapshot_invalid');
+        }
+        return $encoded;
     }
 
     private static function salespeopleSnapshot($json): array

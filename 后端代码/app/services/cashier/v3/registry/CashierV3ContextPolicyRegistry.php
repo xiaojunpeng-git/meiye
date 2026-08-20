@@ -87,16 +87,6 @@ class CashierV3ContextPolicyRegistry
     protected function registerFrozenPolicies(): void
     {
         $this->register(new CashierV3ContextPolicy(
-            'prepare-checkout',
-            ['cashier_workspace'],
-            ['service_order', 'checkout_request', 'hang_order', 'reservation', 'room'],
-            [$this, 'resolveCheckoutSourceBranch'],
-            ['cashier_workspace'],
-            ['service_order', 'checkout_request', 'hang_order', 'reservation', 'room'],
-            ['service_order', 'checkout_request', 'hang_order', 'reservation', 'room']
-        ));
-
-        $this->register(new CashierV3ContextPolicy(
             'prepare-debt-repayment',
             ['cashier_workspace', 'debt_record'],
             [],
@@ -118,22 +108,7 @@ class CashierV3ContextPolicyRegistry
             ));
         }
 
-        foreach ([
-            'checkout-step-back',
-            'checkout-step-next',
-            'toggle-combination-payment',
-            'add-payment-method',
-            'update-payment-line',
-            'remove-payment-line',
-            'confirm-debt-warning',
-            'confirm-checkout-final-changes',
-            'return-to-payment-edit',
-            'retry-checkout',
-            'continue-partial-payment-recovery',
-            'go-to-writeoff-after-checkout',
-            'finish-checkout-and-return',
-            'submit-debt-repayment',
-        ] as $action) {
+        foreach (['submit-debt-repayment'] as $action) {
             // 后续步骤：客户端只提交 checkout_request；真实来源在事务内从持久化记录反推
             $touched = ['cashier_workspace', 'checkout_request'];
             if ($action === 'submit-debt-repayment') {
@@ -157,7 +132,8 @@ class CashierV3ContextPolicyRegistry
             [$this, 'resolveCheckoutSubmitBranch'],
             ['cashier_workspace', 'checkout_request'],
             ['service_order', 'hang_order', 'reservation', 'room'],
-            ['service_order', 'hang_order', 'reservation', 'room']
+            ['service_order', 'hang_order', 'reservation', 'room'],
+            true
         ));
 
         $this->register(new CashierV3ContextPolicy(
@@ -345,13 +321,39 @@ class CashierV3ContextPolicyRegistry
      */
     public function resolveCheckoutSubmitBranch(array $payload, array $base): array
     {
-        $base['required'] = ['cashier_workspace', 'checkout_request'];
-        $base['allowed'] = ['cashier_workspace', 'checkout_request'];
+        // Ordinary checkout has exactly one input boundary: the browser
+        // snapshot submitted by the final confirmation. There is no fallback
+        // to a persisted checkout_request or its revision/context chain.
+        if (!is_array($payload['checkoutSnapshot'] ?? null)) {
+            throw CashierV3CommandException::invalidContext(
+                '结账必须使用最终前端快照，旧结账草稿路径已删除。',
+                ['action' => 'submit-checkout', 'reason' => 'checkout_snapshot_required']
+            );
+        }
+        // A browser-owned final snapshot is the sole client input. Do not
+        // require or derive a stale workspace/version context from the page;
+        // the transaction discovers and locks its current authorities below.
+        if (is_array($payload['checkoutSnapshot'])) {
+            return [
+                'required' => [],
+                'allowed' => [],
+                'identities' => [],
+                'required_read_roles' => [],
+                'required_touched_roles' => [],
+                'deferred_identity_kinds' => [],
+                'expand_from_server_resource_discovery' => true,
+                'allow_empty_server_resource_discovery' => true,
+            ];
+        }
+        $base['required'] = [];
+        $base['allowed'] = [];
         $resolved = $this->resolveCheckoutSourceBranch($payload, $base);
+        $resolved['required'] = [];
+        $resolved['required_touched_roles'] = [];
+        $resolved['identities'] = [];
         $resolved['allowed'] = [];
         $resolved['deferred_identity_kinds'] = [];
-        unset($resolved['expand_from_checkout_request']);
-        $resolved['expand_from_checkout_resource_plan'] = true;
+        $resolved['expand_from_server_resource_discovery'] = true;
         return $resolved;
     }
 

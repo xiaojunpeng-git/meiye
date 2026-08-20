@@ -70,7 +70,8 @@ final class CashierV3CheckoutVerifiedResourcePlan
         string $tenantId,
         int $storeId,
         int $boundRequestVersion,
-        array $authorityRows
+        array $authorityRows,
+        bool $allowEmpty = false
     ): self {
         $tenantId = self::token($tenantId, 32, 'tenant_id');
         if ($storeId <= 0) {
@@ -79,7 +80,7 @@ final class CashierV3CheckoutVerifiedResourcePlan
         if ($boundRequestVersion <= 0) {
             throw self::failure('checkout_resource_plan_bound_version_invalid');
         }
-        if (!$authorityRows || count($authorityRows) > self::MAX_RESOURCES) {
+        if ((!$allowEmpty && !$authorityRows) || count($authorityRows) > self::MAX_RESOURCES) {
             throw self::failure('checkout_resource_plan_count_invalid', [
                 'count' => count($authorityRows),
                 'limit' => self::MAX_RESOURCES,
@@ -189,7 +190,7 @@ final class CashierV3CheckoutVerifiedResourcePlan
         }
 
         $resources = array_values($byPhysical);
-        if (!$resources || count($resources) > self::MAX_RESOURCES) {
+        if ((!$resources && !$allowEmpty) || count($resources) > self::MAX_RESOURCES) {
             throw self::failure('checkout_resource_plan_count_invalid');
         }
         usort($resources, static function (array $left, array $right): int {
