@@ -13,6 +13,7 @@ import BusinessDashboardView from '@/views/BusinessDashboardView.vue'
 import StoreBusinessReportView from '@/views/StoreBusinessReportView.vue'
 import MemberDashboardView from '@/views/MemberDashboardView.vue'
 import GroupManagementDashboardView from '@/views/GroupManagementDashboardView.vue'
+import ProductDashboardView from '@/views/ProductDashboardView.vue'
 import ConsumptionTierConfigView from '@/views/ConsumptionTierConfigView.vue'
 import StaffListView from '@/views/StaffListView.vue'
 import RoomSettingsView from '@/views/RoomSettingsView.vue'
@@ -75,6 +76,12 @@ const routes = [
     name: 'cashier-v3-platform-group-management-dashboard',
     component: GroupManagementDashboardView,
     meta: { platformReport: true, title: '集团管理看板' }
+  },
+  {
+    path: '/platform/product-dashboard',
+    name: 'cashier-v3-platform-product-dashboard',
+    component: ProductDashboardView,
+    meta: { platformReport: true, title: '商品看板' }
   },
   {
     path: '/platform/member-management-dashboard',

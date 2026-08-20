@@ -17,6 +17,7 @@ use app\services\report\StoreUnifiedReportPhaseSixServices;
 use app\services\report\GroupManagementDashboardServices;
 use app\services\report\GroupManagementDashboardTargetServices;
 use app\services\report\MemberManagementDashboardServices;
+use app\services\report\ProductManagementDashboardServices;
 use app\services\system\SystemRoleServices;
 use think\facade\Db;
 
@@ -160,6 +161,33 @@ class UnifiedReport extends AuthController
             return app('json')->success($services->dashboard([
                 'tenant_id' => '0',
                 'store_ids' => $scopeStores,
+                'admin_id' => (int)$this->adminId,
+                'admin_name' => (string)($this->adminInfo['real_name'] ?? $this->adminInfo['account'] ?? ''),
+            ], $input));
+        } catch (\InvalidArgumentException $e) {
+            return app('json')->fail($e->getMessage());
+        }
+    }
+
+    /** 第八阶段商品看板；与集团/会员看板使用独立菜单权限。 */
+    public function productDashboard(Request $request, ProductManagementDashboardServices $services)
+    {
+        if (!$this->hasMenuPermission('admin-report-product-dashboard')) {
+            return app('json')->fail('当前账号未配置商品看板权限');
+        }
+        try {
+            $input = $request->getMore([
+                ['period', 'month'], ['start_date', ''], ['end_date', ''], ['store_ids', ''],
+                ['org_id', 0], ['store_id', 0], ['category_id', 0], ['product_type', 'all'],
+            ]);
+            $stores = $this->scopedStoreIds([
+                'org_id' => (int)$input['org_id'], 'store_id' => (int)$input['store_id'],
+                'store_ids' => (string)$input['store_ids'],
+            ]);
+            if (!$stores) throw new \InvalidArgumentException('无权限或当前范围无门店');
+            $costVisible = $this->hasMenuPermission('inventory-v3-platform-batch-cost');
+            return app('json')->success($services->dashboard([
+                'tenant_id' => '0', 'store_ids' => $stores, 'cost_visible' => $costVisible,
                 'admin_id' => (int)$this->adminId,
                 'admin_name' => (string)($this->adminInfo['real_name'] ?? $this->adminInfo['account'] ?? ''),
             ], $input));

@@ -64,6 +64,15 @@ export default {
       component: () => import('@/pages/report/data/group_management_dashboard')
     },
     {
+      path: 'product-dashboard',
+      name: `${pre}product_dashboard`,
+      meta: {
+        auth: ['admin-report-product-dashboard'],
+        title: '商品看板'
+      },
+      component: () => import('@/pages/report/data/product_dashboard')
+    },
+    {
       path: 'member-management-dashboard',
       name: `${pre}member_management_dashboard`,
       meta: {

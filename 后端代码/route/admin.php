@@ -1648,6 +1648,7 @@ Route::group('adminapi', function () {
         Route::post('group-dashboard/targets', 'v1.report.UnifiedReport/saveGroupDashboardTarget')->option(['real_name' => '保存集团管理看板门店目标']);
         Route::get('group-dashboard/drilldown', 'v1.report.UnifiedReport/groupDashboardDrilldown')->option(['real_name' => '集团管理看板下钻']);
         Route::get('member-dashboard', 'v1.report.UnifiedReport/memberDashboard')->option(['real_name' => '会员看板查询']);
+        Route::get('product-dashboard', 'v1.report.UnifiedReport/productDashboard')->option(['real_name' => '商品看板查询']);
         Route::get('six-dimension/consumption-tiers', 'v1.report.UnifiedReport/consumptionTiers')->option(['real_name' => '消费分级设置列表']);
         Route::post('six-dimension/consumption-tiers', 'v1.report.UnifiedReport/saveConsumptionTier')->option(['real_name' => '保存消费分级设置']);
         Route::post('six-dimension/consumption-tiers/sort', 'v1.report.UnifiedReport/sortConsumptionTiers')->option(['real_name' => '消费分级排序']);
