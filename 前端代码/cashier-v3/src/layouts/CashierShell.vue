@@ -217,7 +217,7 @@ const menuItems = [
     icon: Settings,
     featureCode: 'cashier.v3.management_center',
     to: { name: 'cashier-v3-management-center' },
-    activeRouteNames: ['cashier-v3-management-center', 'cashier-v3-staff-list', 'cashier-v3-room-settings', 'cashier-v3-engineering-management']
+    activeRouteNames: ['cashier-v3-management-center', 'cashier-v3-staff-list', 'cashier-v3-room-settings']
   },
   {
     key: 'data',
@@ -484,7 +484,7 @@ const hasMatchingRoomAssignmentSnapshot = computed(() => {
 const operatorLabel = computed(() => state.operator.roleName
   ? `${state.operator.name} · ${state.operator.roleName}`
   : state.operator.name)
-const hasPageHelp = computed(() => ['cashier-v3-cashier', 'cashier-v3-writeoff', 'cashier-v3-replacement', 'cashier-v3-room', 'cashier-v3-reservation', 'cashier-v3-member', 'cashier-v3-care', 'cashier-v3-hang', 'cashier-v3-order-center', 'cashier-v3-management-center', 'cashier-v3-staff-list', 'cashier-v3-business-dashboard', 'cashier-v3-store-business-reports', 'cashier-v3-engineering-management'].includes(route.name))
+const hasPageHelp = computed(() => ['cashier-v3-cashier', 'cashier-v3-writeoff', 'cashier-v3-replacement', 'cashier-v3-room', 'cashier-v3-reservation', 'cashier-v3-member', 'cashier-v3-care', 'cashier-v3-hang', 'cashier-v3-order-center', 'cashier-v3-management-center', 'cashier-v3-staff-list', 'cashier-v3-business-dashboard', 'cashier-v3-store-business-reports'].includes(route.name))
 watch(
   () => route.name,
   (routeName) => {
