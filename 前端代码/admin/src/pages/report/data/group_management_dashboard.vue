@@ -21,7 +21,7 @@ export default {
       })
       const suffix = query.toString() ? `?${query.toString()}` : ''
       const vue3Origin = String(process.env.VUE_APP_CASHIER_V3_DEV_ORIGIN || window.location.origin).replace(/\/$/, '')
-      const version = encodeURIComponent(String(process.env.VUE_APP_CASHIER_V3_REPORT_VERSION || 'group-dashboard-v2'))
+      const version = encodeURIComponent(String(process.env.VUE_APP_CASHIER_V3_REPORT_VERSION || 'group-dashboard-v3'))
       return `${vue3Origin}/view_cashier_v3/?release=${version}#/platform/group-management-dashboard${suffix}`
     }
   }
