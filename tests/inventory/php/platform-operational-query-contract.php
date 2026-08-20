@@ -12,6 +12,7 @@ $dashboardMigration = (string)file_get_contents($root . '/后端代码/database/
 $policy = (string)file_get_contents($root . '/后端代码/app/services/product/inventory/InventoryPlatformAccessPolicy.php');
 $hqLocations = (string)file_get_contents($root . '/后端代码/app/services/product/inventory/InventoryHqLocationServices.php');
 $warehouse = (string)file_get_contents($root . '/后端代码/app/services/product/inventory/InventoryPlatformWarehouseServices.php');
+$movementAnalytics = (string)file_get_contents($root . '/后端代码/app/services/product/inventory/InventoryMovementAnalyticsServices.php');
 $failed = 0;
 function platformOperationalAssert(string $name, bool $ok): void { global $failed; echo ($ok ? 'PASS ' : 'FAIL ') . $name . PHP_EOL; if (!$ok) $failed++; }
 
@@ -35,6 +36,10 @@ platformOperationalAssert('platform location listing keeps HQ-only accounts on s
 platformOperationalAssert('movement statistics reuse the authenticated location scope without a store staff identity',
     strpos($statistics, 'listForLocations($locationIds') !== false
     && strpos($statistics, 'InventoryMovementAnalyticsServices())->list($storeId, $operatorId') === false);
+platformOperationalAssert('movement statistics exclude voided presale claims with a supported null predicate',
+    strpos($movementAnalytics, "->whereOrNull('pc.claim_status')") === false
+    && strpos($movementAnalytics, "->whereOr(function (\$or): void {") !== false
+    && strpos($movementAnalytics, "\$or->whereNull('pc.claim_status');") !== false);
 platformOperationalAssert('expiry query exposes authoritative batch balance quantity',
     strpos($contract, "field('batch_balance_quantity', '当前剩余库存'") !== false);
 platformOperationalAssert('platform route and middleware permission record are both registered',

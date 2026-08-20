@@ -32,7 +32,9 @@ final class InventoryMovementAnalyticsServices
             ->where(function ($query): void {
                 $query->where('f.source_type', '<>', 'presale_claim_outbound')
                     ->whereOr('pc.claim_status', '<>', 'VOIDED')
-                    ->whereOrNull('pc.claim_status');
+                    ->whereOr(function ($or): void {
+                        $or->whereNull('pc.claim_status');
+                    });
             })
             ->field([
                 'f.business_date', 'f.source_type', 's.consumable_product_id' => 'product_id', 's.sku_id', 's.stock_unit', 's.quantity_scale',
