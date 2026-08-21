@@ -60,6 +60,6 @@ assert.match(workbench, /function toggleCartLineExperience[\s\S]*localLineServic
 assert.match(workbench, /function setCartLineInventoryMode[\s\S]*localLineServiceSettings\.value/)
 assert.match(workbench, /if \(localCheckoutPreview\.value\?\.localDraftPreview === true\)[\s\S]*action === 'add-payment-method'/)
 assert.match(checkoutOverlay, /function queryOriginalCheckoutResult\(\)[\s\S]*request\('query-checkout-result'/)
-assert.match(actionManifest, /'submit-checkout': FEATURE_CASHIER/)
+assert.match(actionManifest, /'submit-checkout': FEATURE_CHECKOUT/)
 
 console.log('LOCAL_DRAFT_FINAL_CONFIRMATION_CONTRACT passed=21 failed=0')

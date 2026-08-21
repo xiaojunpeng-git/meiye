@@ -28,6 +28,7 @@ use mohe\utils\JwtAuth;
 use Firebase\JWT\ExpiredException;
 use think\exception\ValidateException;
 use think\facade\Cache;
+use think\facade\Db;
 
 
 /**
@@ -194,10 +195,26 @@ class LoginServices extends BaseServices
             /** @var SystemStoreServices $storeServices */
             $storeServices = app()->make(SystemStoreServices::class);
             $store = $storeServices->get((int)$storeStaffInfo['store_id'], ['id', 'image', 'name', 'product_category_status']);
+            $operationFeatures = array_values(array_intersect(
+                $v3Features,
+                \app\services\cashier\v3\permission\CashierV3StaffFeatureOverrideServices::operationFeatureCodes()
+            ));
             return [
                 'token' => $tokenInfo['token'],
                 'expires_time' => $tokenInfo['params']['exp'],
                 'features' => $v3Features,
+                'visible_features' => $v3Features,
+                'operation_features' => $operationFeatures,
+                // 兼容旧客户端字段，语义固定为操作快照。
+                'feature_permissions' => array_fill_keys($operationFeatures, true),
+                'permission_version' => 'staff:' . md5(json_encode([
+                    (int)($profile['employee_id'] ?? 0),
+                    (int)($profile['id'] ?? 0),
+                    (int)Db::name('employee')->where('id', (int)($profile['employee_id'] ?? 0))->value('auth_version'),
+                    $v3Features,
+                ], JSON_UNESCAPED_UNICODE)),
+                'read_only' => false,
+                'session_mode' => 'store_staff',
                 'user_info' => [
                     'id' => $storeStaffInfo->getData('id'),
                     'employee_id' => (int)($storeStaffInfo->getData('employee_id') ?? 0),
@@ -405,13 +422,16 @@ class LoginServices extends BaseServices
             'type' => 'cashier_v3_delegated',
         ];
         $features = app()->make(\app\services\cashier\v3\permission\CashierV3FeatureResolver::class)
-            ->resolveGrantedFeatures($profile);
+            ->resolveVisibleFeatures($profile);
         if (!$features) {
             $cacheService->clearToken($md5Token);
             throw new AuthException(ApiErrorCode::ERR_LOGIN_STATUS);
         }
         return $profile + [
             'features' => $features,
+            'visible_features' => $features,
+            'operation_features' => [],
+            'feature_permissions' => [],
             'read_only' => true,
             'session_mode' => 'store_read_only',
             'store_name' => (string)($store['name'] ?? ''),

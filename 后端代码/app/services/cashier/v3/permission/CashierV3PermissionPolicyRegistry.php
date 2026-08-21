@@ -125,6 +125,36 @@ class CashierV3PermissionPolicyRegistry
             );
         });
 
+        // submit-card-operation is a single existing action whose normalized
+        // operationType identifies one of the existing card menu leaves.
+        // Keep the action contract stable while enforcing the precise leaf
+        // permission server-side; the client cannot select the required code.
+        $this->register('policy:cashier_card_operation', function (CashierV3DataScopeContext $scope, array $payload, string $action) {
+            $featureByType = [
+                'card_upgrade' => 'cashier.v3.cashier.card.upgrade',
+                'card_extension' => 'cashier.v3.cashier.card.extend',
+                'card_transfer' => 'cashier.v3.cashier.card.transfer',
+                'card_disable' => 'cashier.v3.cashier.card.disable',
+                'card_enable' => 'cashier.v3.cashier.card.enable',
+                'project_replacement' => 'cashier.v3.cashier.card.project_replace',
+                'project_upgrade' => 'cashier.v3.cashier.card.project_upgrade',
+            ];
+            $operationType = trim((string)($payload['operationType'] ?? $payload['operation_type'] ?? ''));
+            $feature = $featureByType[$operationType] ?? '';
+            if ($feature === '' || !$scope->hasFeature($feature)) {
+                throw new CashierV3CommandException(
+                    CashierV3ResultCode::PERMISSION_DENIED,
+                    '当前账号没有该卡操作权限，请联系管理员。',
+                    CashierV3ResultCode::STATUS_FAILED,
+                    [
+                        'action' => $action,
+                        'operation_type' => $operationType,
+                        'feature' => $feature,
+                    ]
+                );
+            }
+        });
+
         $this->register('policy:unified_query_page', function (CashierV3DataScopeContext $scope, array $payload, string $action) {
             $pageCode = trim((string)($payload['pageCode'] ?? $payload['page_code'] ?? ''));
             if ($action === 'create-unified-query-export' && $pageCode === 'staff_list') {

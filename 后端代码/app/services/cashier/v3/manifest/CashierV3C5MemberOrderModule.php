@@ -18,6 +18,8 @@ class CashierV3C5MemberOrderModule implements CashierV3ActionModule
     private const FEATURE_ORDER_CENTER = 'cashier.v3.order_center';
     private const FEATURE_MANAGEMENT = 'cashier.v3.management_center';
     private const FEATURE_CASHIER = 'cashier.v3.cashier';
+    private const FEATURE_RECHARGE = 'cashier.v3.cashier.recharge';
+    private const FEATURE_GIFT = 'cashier.v3.cashier.gift';
     private const FEATURE_RESERVATION = 'cashier.v3.reservation';
     private const FEATURE_HANG = 'cashier.v3.hang';
     private const FEATURE_ORDER_STAFF_ADJUST = 'cashier.v3.order.staff_adjust';
@@ -47,17 +49,21 @@ class CashierV3C5MemberOrderModule implements CashierV3ActionModule
         $command['create-member'] = self::FEATURE_MEMBER_CREATE;
         $command['update-member'] = self::FEATURE_MEMBER_EDIT;
         $command['deactivate-member'] = self::FEATURE_MEMBER;
-        $command['submit-recharge'] = self::FEATURE_MEMBER;
-        $command['prepare-recharge-checkout'] = self::FEATURE_MEMBER;
-        $command['prepare-recharge-debt-repayment'] = self::FEATURE_MEMBER;
-        $command['add-recharge-checkout-payment-method'] = self::FEATURE_MEMBER;
-        $command['update-recharge-checkout-payment-line'] = self::FEATURE_MEMBER;
-        $command['remove-recharge-checkout-payment-line'] = self::FEATURE_MEMBER;
-        $command['update-recharge-checkout-business-source'] = self::FEATURE_MEMBER;
-        $command['update-recharge-checkout-business-date'] = self::FEATURE_MEMBER;
-        $command['reload-recharge-checkout'] = self::FEATURE_MEMBER;
-        $command['submit-recharge-checkout'] = self::FEATURE_MEMBER;
-        $command['submit-recharge-debt-repayment'] = self::FEATURE_MEMBER;
+        foreach ([
+            'submit-recharge',
+            'prepare-recharge-checkout',
+            'prepare-recharge-debt-repayment',
+            'add-recharge-checkout-payment-method',
+            'update-recharge-checkout-payment-line',
+            'remove-recharge-checkout-payment-line',
+            'update-recharge-checkout-business-source',
+            'update-recharge-checkout-business-date',
+            'reload-recharge-checkout',
+            'submit-recharge-checkout',
+            'submit-recharge-debt-repayment',
+        ] as $action) {
+            $command[$action] = self::FEATURE_RECHARGE;
+        }
 
         foreach ([
             'query-members' => self::FEATURE_MEMBER,
@@ -67,7 +73,7 @@ class CashierV3C5MemberOrderModule implements CashierV3ActionModule
             'open-member-editor' => self::FEATURE_MEMBER_EDIT,
             'open-member-creator' => self::FEATURE_MEMBER_CREATE,
             'open-member-batch-actions' => self::FEATURE_MEMBER_BATCH,
-            'open-recharge' => self::FEATURE_MEMBER,
+            'open-recharge' => self::FEATURE_RECHARGE,
             'open-member-selector' => self::FEATURE_CASHIER,
         ] as $action => $feature) {
             $projection[$action] = $feature;
@@ -118,7 +124,7 @@ class CashierV3C5MemberOrderModule implements CashierV3ActionModule
         $command['save-hang-order-query-settings'] = self::FEATURE_HANG;
         $command['save-order-center-query-settings'] = self::FEATURE_ORDER_CENTER;
         $command['save-member-query-settings'] = self::POLICY_UNIFIED_QUERY_PAGE;
-        $command['submit-direct-gift'] = self::FEATURE_MEMBER;
+        $command['submit-direct-gift'] = self::FEATURE_GIFT;
         foreach ([
             'save-unified-query-settings',
             'save-unified-query-field-aliases',
@@ -136,7 +142,7 @@ class CashierV3C5MemberOrderModule implements CashierV3ActionModule
 
         $projection['open-order-gifts'] = self::FEATURE_ORDER_CENTER;
         $projection['open-gift-records'] = self::FEATURE_ORDER_CENTER;
-        $projection['open-gift'] = self::FEATURE_MEMBER;
+        $projection['open-gift'] = self::FEATURE_GIFT;
         $projection['open-card-batch'] = self::FEATURE_MEMBER;
         $projection['open-card-benefits'] = self::FEATURE_MEMBER;
 

@@ -20,6 +20,10 @@ class CashierV3C2CashierModule implements CashierV3ActionModule
 
     /** 收银台功能入口权限码，与前端 featurePermissions 一致 */
     private const FEATURE_CASHIER = 'cashier.v3.cashier';
+    private const FEATURE_CHECKOUT = 'cashier.v3.cashier.checkout';
+    private const FEATURE_CARD_UPGRADE = 'cashier.v3.cashier.card.upgrade';
+    private const FEATURE_CARD_PROJECT_UPGRADE = 'cashier.v3.cashier.card.project_upgrade';
+    private const POLICY_CARD_OPERATION = 'policy:cashier_card_operation';
 
     public function owner(): string
     {
@@ -56,7 +60,10 @@ class CashierV3C2CashierModule implements CashierV3ActionModule
         $command['apply-cashier-craftsmen-to-all-service-lines'] = self::FEATURE_CASHIER;
         $command['apply-cashier-personnel-to-all-lines'] = self::FEATURE_CASHIER;
         $command['update-cashier-line-debt'] = self::FEATURE_CASHIER;
-        $command['submit-card-operation'] = self::FEATURE_CASHIER;
+        // Card operation type is part of the normalized command payload. The
+        // policy registry maps it to the existing leaf feature code so one
+        // action cannot grant all card operations at once.
+        $command['submit-card-operation'] = self::POLICY_CARD_OPERATION;
 
         // ---- 结账流程 ----
         foreach ([
@@ -73,7 +80,7 @@ class CashierV3C2CashierModule implements CashierV3ActionModule
             'go-to-writeoff-after-checkout',
             'finish-checkout-and-return',
         ] as $action) {
-            $command[$action] = self::FEATURE_CASHIER;
+            $command[$action] = self::FEATURE_CHECKOUT;
         }
 
         // ---- 收银台内的纯展示抽屉 ----
@@ -98,6 +105,8 @@ class CashierV3C2CashierModule implements CashierV3ActionModule
         ] as $action) {
             $projection[$action] = self::FEATURE_CASHIER;
         }
+        $projection['open-card-upgrade'] = self::FEATURE_CARD_UPGRADE;
+        $projection['open-project-upgrade'] = self::FEATURE_CARD_PROJECT_UPGRADE;
         $projection['open-add-card-service-project'] = 'policy:checkout_entitlement';
 
         return CashierV3ActionManifest::buildModuleActions(self::OWNER, $command, $projection);

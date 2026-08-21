@@ -2,6 +2,7 @@ import { reactive } from 'vue'
 import {
   CASHIER_V3_ACTION_MANIFEST,
   CHECKOUT_ACTION_ALIASES,
+  cashierV3ActionDefinition,
   canonicalCashierV3Action,
   hasCashierV3Action,
   isCashierV3CommandAction,
@@ -479,6 +480,36 @@ const DEV_PREVIEW_BOOTSTRAP = {
     'cashier.v3.inventory.transfer': true,
     'cashier.v3.inventory.usage': true,
     'cashier.v3.inventory.import': true
+  },
+  operationPermissions: {
+    'cashier.v3.cashier.recharge': true,
+    'cashier.v3.cashier.gift': true,
+    'cashier.v3.cashier.checkout': true,
+    'cashier.v3.cashier.card.upgrade': true,
+    'cashier.v3.cashier.card.extend': true,
+    'cashier.v3.cashier.card.transfer': true,
+    'cashier.v3.cashier.card.disable': true,
+    'cashier.v3.cashier.card.enable': true,
+    'cashier.v3.cashier.card.project_replace': true,
+    'cashier.v3.cashier.card.project_upgrade': true,
+    'cashier.v3.member.create': true,
+    'cashier.v3.member.edit': true,
+    'cashier.v3.member.batch': true,
+    'cashier.v3.order.staff_adjust': true,
+    'cashier.v3.order.refund': true,
+    'cashier.v3.order.void': true,
+    'cashier.v3.order.reopen': true,
+    'cashier.v3.order.receipt_print': true,
+    'cashier.v3.order.debt_view': true,
+    'cashier.v3.order.service_detail': true,
+    'cashier.v3.order.service_void': true,
+    'cashier.v3.staff.create': true,
+    'cashier.v3.staff.edit': true,
+    'cashier.v3.staff.permission_edit': true,
+    'cashier.v3.staff.export': true,
+    'cashier.v3.inventory.presale_claim.create': true,
+    'cashier.v3.inventory.presale_claim.detail': true,
+    'cashier.v3.inventory.presale_claim.void': true
   },
   workspace: {
     id: 'ws:1:preview-state-context-1',
@@ -2524,6 +2555,43 @@ export function canUseCashierV3Operation(featureCode) {
   return cashierV3State.operationPermissions?.[featureCode] === true
 }
 
+const CARD_OPERATION_FEATURE_BY_TYPE = Object.freeze({
+  card_upgrade: 'cashier.v3.cashier.card.upgrade',
+  card_extension: 'cashier.v3.cashier.card.extend',
+  card_transfer: 'cashier.v3.cashier.card.transfer',
+  card_disable: 'cashier.v3.cashier.card.disable',
+  card_enable: 'cashier.v3.cashier.card.enable',
+  project_replacement: 'cashier.v3.cashier.card.project_replace',
+  project_upgrade: 'cashier.v3.cashier.card.project_upgrade'
+})
+
+/**
+ * 前端 action 闸门只消费 bootstrap 已注入的权限快照；后端仍是最终校验方。
+ * 统一处理叶子 operation 权限和按 operationType 解析的卡操作策略，避免
+ * 顶部入口隐藏了但直接调用 requestCashierV3Action 仍发出请求。
+ */
+export function cashierV3ActionPermission(action, payload = {}) {
+  const canonicalAction = canonicalCashierV3Action(action)
+  const definition = cashierV3ActionDefinition(canonicalAction)
+  if (!definition) return { allowed: false, code: 'UNKNOWN_COMMAND_ACTION', feature: '' }
+  const policyId = String(definition.permissionPolicyId || '')
+  if (policyId === 'policy:cashier_card_operation') {
+    const operationType = String(payload.operationType || payload.operation_type || '').trim()
+    const feature = CARD_OPERATION_FEATURE_BY_TYPE[operationType] || ''
+    return {
+      allowed: Boolean(feature) && canUseCashierV3Operation(feature),
+      code: feature ? '' : 'CARD_OPERATION_TYPE_REQUIRED',
+      feature,
+      operationType
+    }
+  }
+  if (!policyId.startsWith('feature:')) return { allowed: true, code: '', feature: '' }
+  const feature = String(definition.permission || policyId.slice('feature:'.length))
+  const operationKnown = Object.prototype.hasOwnProperty.call(cashierV3State.operationPermissions || {}, feature)
+  const allowed = operationKnown ? canUseCashierV3Operation(feature) : canUseCashierV3Feature(feature)
+  return { allowed, code: allowed ? '' : 'FEATURE_PERMISSION_DENIED', feature }
+}
+
 function normalizeExpectedVersion(value) {
   const normalized = Number(value)
   return Number.isSafeInteger(normalized) && normalized > 0 ? normalized : null
@@ -3499,6 +3567,20 @@ export async function requestCashierV3Action(action, payload = {}) {
   }
 
   const canonicalAction = canonicalCashierV3Action(action)
+  const permissionCheck = cashierV3ActionPermission(canonicalAction, requestBody)
+  if (!permissionCheck.allowed) {
+    const denied = {
+      result: {
+        status: 'failed',
+        code: permissionCheck.code || 'FEATURE_PERMISSION_DENIED',
+        message: '当前账号没有该功能的操作权限，请联系管理员。',
+        feature: permissionCheck.feature || undefined,
+        operationType: permissionCheck.operationType || undefined
+      }
+    }
+    if (!silent) emitCashierV3UiResult(denied)
+    return denied
+  }
   const readOnly = isReadOnlyAction(canonicalAction)
   const liveProjectReplacement = canonicalAction === 'submit-card-operation'
     && String(requestBody.operationType || '') === 'project_replacement'

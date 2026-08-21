@@ -41,7 +41,7 @@ $checks = [
         && strpos($module, "'touched' => ['cashier_workspace']") !== false,
     'new context version provider and action module are installed' => strpos($bootstrap, 'CashierV3RechargeCheckoutRequestVersionProvider') !== false
         && strpos($bootstrap, 'CashierV3RechargeCheckoutModule::install') !== false,
-    'reload command is registered with an explicit eventless contract' => strpos($manifestModule, "\$command['reload-recharge-checkout'] = self::FEATURE_MEMBER") !== false
+    'reload command is registered with an explicit eventless contract' => strpos($manifestModule, "'reload-recharge-checkout'") !== false
         && strpos($manifest, "'reload-recharge-checkout' => \$eventless(\$checkoutPreparation)") !== false,
     'migration creates only dedicated recharge checkout draft tables' => strpos($migration, 'eb_cashier_v3_recharge_checkout_request') !== false
         && strpos($migration, 'eb_cashier_v3_recharge_checkout_payment_draft') !== false

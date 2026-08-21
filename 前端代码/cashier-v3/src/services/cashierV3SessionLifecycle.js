@@ -56,10 +56,22 @@ export async function bootstrapCashierV3Workbench(payload = {}) {
 }
 
 function applyBootstrapFeatureSnapshot(result) {
-  const envelope = result?.data?.result && typeof result.data.result === 'object'
-    ? result.data
-    : result
-  const bootstrap = envelope?.data?.bootstrap
+  // ThinkPHP success() wraps the V3 dispatcher envelope in `data`, while
+  // the dispatcher itself carries its projection payload in another `data`.
+  // Accept only these known response layers so the operation snapshot cannot
+  // silently fall back to the old login permissions when a wrapper is added.
+  const candidates = [
+    result,
+    result?.data,
+    result?.data?.data,
+    result?.data?.result,
+    result?.data?.result?.data,
+    result?.result,
+    result?.result?.data
+  ]
+  const envelope = candidates.find((candidate) => candidate && typeof candidate === 'object'
+    && candidate.bootstrap && typeof candidate.bootstrap === 'object') || null
+  const bootstrap = envelope?.bootstrap
   const features = bootstrap?.features
   if (Array.isArray(features)) {
     applyCashierV3LoginFeatures(features, {

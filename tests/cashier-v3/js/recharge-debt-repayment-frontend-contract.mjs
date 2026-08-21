@@ -75,7 +75,7 @@ if (bridge.includes("'submit-recharge-debt-repayment': 'query-debt-repayment-res
 if (!bridge.includes("|| action === 'submit-recharge-debt-repayment'")) {
   throw new Error('bridge does not derive the cashier workspace context for recharge repayment')
 }
-if (!manifest.includes("'submit-recharge': FEATURE_MEMBER") || !manifest.includes("'submit-recharge-debt-repayment': FEATURE_MEMBER") || !manifest.includes("'prepare-recharge-debt-repayment': FEATURE_MEMBER")) {
+if (!manifest.includes("'submit-recharge': FEATURE_RECHARGE") || !manifest.includes("'submit-recharge-debt-repayment': FEATURE_RECHARGE") || !manifest.includes("'prepare-recharge-debt-repayment': FEATURE_RECHARGE")) {
   throw new Error('recharge commands are not registered in the frontend action manifest')
 }
 if (!overlay.includes('<section v-if="selectedDebt" class="member-debt-overlay__recharge-salespeople"')

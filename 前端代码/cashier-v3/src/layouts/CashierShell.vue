@@ -35,6 +35,7 @@ import InventoryWorkbench from '@mohe/inventory-vue3'
 import '@mohe/inventory-vue3/styles.css'
 import {
   canUseCashierV3Feature,
+  canUseCashierV3Operation,
   createCashierV3CommandId,
   openCashierV3QueryEntitySelector,
   requestCashierV3Action,
@@ -239,19 +240,19 @@ const menuItems = [
   }
 ]
 const cashierWorkflowTabs = [
-  { key: 'checkout', label: '结账收款', icon: '¥', featureCode: 'cashier.v3.cashier', to: { name: 'cashier-v3-cashier' } },
+  { key: 'checkout', label: '结账收款', icon: '¥', featureCode: 'cashier.v3.cashier.checkout', to: { name: 'cashier-v3-cashier' } },
   { key: 'replacement', label: '项目替换', icon: '↔', featureCode: 'cashier.v3.writeoff', to: { name: 'cashier-v3-replacement' } }
 ]
 // 卡操作统一走 V3 写命令。尚未完成当前权益写入/结账绑定的升级与项目
 // 操作继续由后端 fail-closed，绝不回退调用旧收银接口。
 const cardOperationItems = Object.freeze([
-  { key: 'card-upgrade', label: '卡升级' },
-  { key: 'card-extension', label: '卡延期' },
-  { key: 'card-transfer', label: '卡转让' },
-  { key: 'card-disable', label: '卡停用' },
-  { key: 'card-enable', label: '卡启用' },
-  { key: 'project-replacement', label: '项目替换' },
-  { key: 'project-upgrade', label: '项目升级' }
+  { key: 'card-upgrade', label: '卡升级', featureCode: 'cashier.v3.cashier.card.upgrade' },
+  { key: 'card-extension', label: '卡延期', featureCode: 'cashier.v3.cashier.card.extend' },
+  { key: 'card-transfer', label: '卡转让', featureCode: 'cashier.v3.cashier.card.transfer' },
+  { key: 'card-disable', label: '卡停用', featureCode: 'cashier.v3.cashier.card.disable' },
+  { key: 'card-enable', label: '卡启用', featureCode: 'cashier.v3.cashier.card.enable' },
+  { key: 'project-replacement', label: '项目替换', featureCode: 'cashier.v3.cashier.card.project_replace' },
+  { key: 'project-upgrade', label: '项目升级', featureCode: 'cashier.v3.cashier.card.project_upgrade' }
 ])
 const allowedTopActions = new Set([
   'open-recharge',
@@ -2106,6 +2107,19 @@ function canUseFeature(featureCode) {
   return canUseCashierV3Feature(featureCode)
 }
 
+function canUseOperation(featureCode) {
+  const operationAllowed = canUseCashierV3Operation(featureCode)
+  // 叶子操作同时出现在服务端完整根投影的 featurePermissions 中时，
+  // 以该权威页面快照再次收窄入口；这样即使旧登录响应仍带着旧操作快照，
+  // 已明确禁止的叶子功能也不会在工作台短暂显示。
+  if (Object.prototype.hasOwnProperty.call(state.featurePermissions || {}, featureCode)) {
+    return operationAllowed && state.featurePermissions[featureCode] === true
+  }
+  return operationAllowed
+}
+
+const visibleCardOperationItems = computed(() => cardOperationItems.filter((item) => canUseOperation(item.featureCode)))
+
 async function navigateCashierWorkflow(tab) {
   if (!tab || !canUseFeature(tab.featureCode)) return
   const selectedMember = workflowMember.value
@@ -2662,6 +2676,7 @@ onBeforeUnmount(() => {
                 <span>选择会员</span>
               </button>
               <button
+                v-if="canUseOperation('cashier.v3.cashier.recharge')"
                 type="button"
                 class="button button--secondary cashier-workflow-action-button"
                 data-testid="cashier-workflow-recharge"
@@ -2718,12 +2733,13 @@ onBeforeUnmount(() => {
                 @click="openCashierEntitlementSelector"
               >使用权益</button>
               <button
+                v-if="canUseOperation('cashier.v3.cashier.gift')"
                 type="button"
                 class="button button--secondary cashier-workflow-action-button"
                 data-testid="cashier-workflow-gift"
                 @click="openCashierMemberTopAction('open-gift')"
               >赠送</button>
-              <div class="cashier-card-operation">
+              <div v-if="visibleCardOperationItems.length" class="cashier-card-operation">
                 <button
                   type="button"
                   class="button button--secondary cashier-workflow-action-button cashier-card-operation__trigger"
@@ -2736,7 +2752,7 @@ onBeforeUnmount(() => {
                 </button>
                 <div v-if="isCardOperationMenuOpen" class="cashier-card-operation__menu" role="menu" aria-label="卡操作菜单">
                   <button
-                    v-for="item in cardOperationItems"
+                    v-for="item in visibleCardOperationItems"
                     :key="item.key"
                     type="button"
                     role="menuitem"
