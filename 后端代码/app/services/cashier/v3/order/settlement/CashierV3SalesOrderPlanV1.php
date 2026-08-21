@@ -978,7 +978,26 @@ final class CashierV3SalesOrderPlanV1
             $row['line_fingerprint'],
             'sales_order_checkout_line_fingerprint_invalid'
         );
-        $expectedFingerprint = self::canonicalFingerprint($authority);
+        // Keep the sales-order verifier byte-for-byte compatible with the
+        // checkout settlement kernel. Optional defaults are represented
+        // sparsely there: ordinary lines omit empty card snapshots, the
+        // default outbound flag, the default presale flag, and an absent SKU.
+        // Including an empty [] here made a valid browser snapshot drift at
+        // the final order step even though the locked checkout line matched.
+        $fingerprintAuthority = $authority;
+        if (($fingerprintAuthority['cardPurchaseSnapshot'] ?? []) === []) {
+            unset($fingerprintAuthority['cardPurchaseSnapshot']);
+        }
+        if (($fingerprintAuthority['isPresale'] ?? 0) === 0) {
+            unset($fingerprintAuthority['isPresale']);
+        }
+        if (($fingerprintAuthority['inventoryOutboundRequired'] ?? 1) === 1) {
+            unset($fingerprintAuthority['inventoryOutboundRequired']);
+        }
+        if (($fingerprintAuthority['catalogSkuId'] ?? 0) <= 0) {
+            unset($fingerprintAuthority['catalogSkuId']);
+        }
+        $expectedFingerprint = self::canonicalFingerprint($fingerprintAuthority);
         if (!hash_equals($lineFingerprint, $expectedFingerprint)
             && !self::matchesLegacyUnchangedPriceFingerprint(
                 $lineFingerprint,
