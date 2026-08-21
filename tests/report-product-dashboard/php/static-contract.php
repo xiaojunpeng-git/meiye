@@ -19,6 +19,7 @@ $assert = static function (bool $condition, string $message): void {
 $route = $read('后端代码/route/admin.php');
 $controller = $read('后端代码/app/controller/admin/v1/report/UnifiedReport.php');
 $service = $read('后端代码/app/services/report/ProductManagementDashboardServices.php');
+$groupService = $read('后端代码/app/services/report/GroupManagementDashboardServices.php');
 $view = $read('前端代码/cashier-v3/src/views/ProductDashboardView.vue');
 $api = $read('前端代码/cashier-v3/src/services/productDashboardApi.js');
 
@@ -29,6 +30,8 @@ $assert(str_contains($service, "DASHBOARD_CODE = 'product_management_dashboard'"
 $assert(str_contains($service, "\$card['metric_code']") && str_contains($service, "\$card['value_cents']"), '顶部汇总必须读取统一指标契约字段');
 $assert(str_contains($service, "'metric_version'"), '接口必须返回指标版本');
 $assert(str_contains($service, "'aggregation_caught_up'"), '接口必须返回聚合追平状态');
+$assert(str_contains($service, "'summary_only' => true") && str_contains($service, 'unset($payload)'), '商品看板三期摘要不得保留完整集团投影');
+$assert(str_contains($groupService, "!empty(\$input['summary_only'])") && str_contains($groupService, 'performanceTotalScalar'), '商品看板摘要必须走轻量聚合查询');
 $assert(str_contains($service, "'data_as_of'"), '接口必须返回数据截至时间');
 $assert(str_contains($service, 'inventory_batch_movement_fact'), '库存必须从批次库存事实读取');
 $assert(str_contains($service, "'f.fact_status', 'SETTLED'"), '库存必须只计算已结算事实');

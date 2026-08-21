@@ -35,10 +35,19 @@ final class ProductManagementDashboardServices
         ];
         $group = [];
         foreach ($periods as $key => $period) {
-            $group[$key] = (new GroupManagementDashboardServices())->dashboard($scope, [
+            $payload = (new GroupManagementDashboardServices())->dashboard($scope, [
                 'start_date' => $period['start'], 'end_date' => $period['end'],
                 'category_id' => $categoryId, 'store_ids' => implode(',', $scope['store_ids']),
+                // The product dashboard only needs the three summary cards.
+                // Avoid retaining each full group-dashboard projection
+                // (trend, targets, sources and rankings) for all periods.
+                'summary_only' => true,
             ]);
+            $group[$key] = [
+                'cards' => (array)($payload['cards'] ?? []),
+                'aggregation_caught_up' => (bool)($payload['aggregation_caught_up'] ?? false),
+            ];
+            unset($payload);
         }
         $summary = $this->summary($group, $periods, $scope, $range, $categoryIds);
         $profit = $this->profitCategories($categories, $scope, $range, $categoryIds, $productType);

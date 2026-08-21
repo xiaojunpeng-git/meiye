@@ -72,6 +72,33 @@ final class GroupManagementDashboardServices
                 'checked_at' => (int)($aggregateStatus['checked_at'] ?? time()),
                 'scope' => 'unfiltered_overview',
             ];
+        // Product dashboard summary requests do not need row-level cash,
+        // service, trend or ranking projections. For an unfiltered scope,
+        // aggregate the two required facts in SQL so a high-volume month does
+        // not materialize every payment allocation in the PHP worker.
+        if (!empty($input['summary_only']) && $categoryIds === []) {
+            $cashTotals = $this->cashTotals($scope['tenant_id'], $scope['store_ids'], $range);
+            $consumption = $aggregateReady
+                ? $this->aggregatePerformanceTotal($scope['tenant_id'], $scope['store_ids'], $range, 'consumption_performance_recorded')
+                : $this->performanceTotalScalar($scope['tenant_id'], $scope['store_ids'], $range, 'consumption_performance_recorded');
+            $grossCash = (int)$cashTotals['gross_cents'];
+            $refund = (int)$cashTotals['refund_cents'];
+            $cash = $grossCash;
+            $actual = $grossCash + $refund;
+            return [
+                'cards' => [
+                    $this->metric('cash_performance', '现金业绩', $cash, 'money', '成功记账收款按销售明细及卡内项目分摊后的收款总额；退款单独按退款成功日期统计，不在此卡重复扣减。'),
+                    $this->metric('refund_amount', '退款金额', abs($refund), 'money', '退款成功后形成的退款金额，按退款成功日期统计，以绝对值展示。'),
+                    $this->metric('actual_performance', '实际业绩', $actual, 'money', '现金业绩减退款金额；现金业绩按成功记账收款正负事实汇总，退款按退款成功日期以负数冲减，不重复扣减。'),
+                    $this->metric('consumption_performance', '消耗业绩', $consumption, 'money', '项目实际完成服务后形成的项目级消耗业绩。'),
+                    $this->metric('consumption_count', '消耗数量', 0, 'count', '商品看板摘要不展示消耗数量。'),
+                    $this->metric('consumption_unit_price', '消耗单价', null, 'money', '商品看板摘要不展示消耗单价。'),
+                ],
+                'aggregation_caught_up' => $aggregateStatus === null
+                    ? false
+                    : (bool)$aggregateStatus['aggregation_caught_up'],
+            ];
+        }
         $cashRows = $this->cashRows($scope['tenant_id'], $scope['store_ids'], $range, $categoryIds);
         $serviceRows = $this->serviceRows($scope['tenant_id'], $scope['store_ids'], $range, $categoryIds);
         $consumption = $aggregateReady
@@ -90,13 +117,6 @@ final class GroupManagementDashboardServices
         $serviceCount = $this->sum($serviceRows, 'quantity');
         $month = substr($range['end'], 0, 7);
         $year = (int)substr($range['end'], 0, 4);
-        $goalMonths = $this->monthsForRange($range);
-        $targets = $this->targets->totals(['tenant_id' => $scope['tenant_id'], 'store_ids' => $scope['store_ids']], $year, $goalMonths);
-        $monthTargets = $this->targets->totals(['tenant_id' => $scope['tenant_id'], 'store_ids' => $scope['store_ids']], $year, [(int)substr($range['end'], 5, 2)]);
-        $categoryCashRows = array_values(array_filter($cashRows, static function (array $row): bool {
-            return (int)($row['amount_cents'] ?? 0) > 0;
-        }));
-        $categoryCards = $this->categoryCards($categoryTree['roots'], $categoryTree['children'], $categoryCashRows, $scope['store_ids'], $range);
         $cards = [
             $this->metric('cash_performance', '现金业绩', $cash, 'money', '成功记账收款按销售明细及卡内项目分摊后的收款总额；退款单独按退款成功日期统计，不在此卡重复扣减。'),
             $this->metric('refund_amount', '退款金额', abs($refund), 'money', '退款成功后形成的退款金额，按退款成功日期统计，以绝对值展示。'),
@@ -105,6 +125,21 @@ final class GroupManagementDashboardServices
             $this->metric('consumption_count', '消耗数量', $serviceCount, 'count', '所选期间内成功完成服务的项目数量；同一次项目服务只计一次。'),
             $this->metric('consumption_unit_price', '消耗单价', $serviceCount > 0 ? (int)round($consumption / $serviceCount) : null, 'money', '消耗业绩除以消耗数量；分母为零显示 -。'),
         ];
+        if (!empty($input['summary_only'])) {
+            return [
+                'cards' => $cards,
+                'aggregation_caught_up' => $aggregateStatus === null
+                    ? false
+                    : (bool)$aggregateStatus['aggregation_caught_up'],
+            ];
+        }
+        $goalMonths = $this->monthsForRange($range);
+        $targets = $this->targets->totals(['tenant_id' => $scope['tenant_id'], 'store_ids' => $scope['store_ids']], $year, $goalMonths);
+        $monthTargets = $this->targets->totals(['tenant_id' => $scope['tenant_id'], 'store_ids' => $scope['store_ids']], $year, [(int)substr($range['end'], 5, 2)]);
+        $categoryCashRows = array_values(array_filter($cashRows, static function (array $row): bool {
+            return (int)($row['amount_cents'] ?? 0) > 0;
+        }));
+        $categoryCards = $this->categoryCards($categoryTree['roots'], $categoryTree['children'], $categoryCashRows, $scope['store_ids'], $range);
         $currentTarget = array_sum($monthTargets);
         $yearTarget = array_sum($targets);
         $monthActual = $this->actualCashTotal($scope['tenant_id'], $scope['store_ids'], ['start' => $month . '-01', 'end' => $range['end']], $categoryIds);
@@ -301,7 +336,40 @@ final class GroupManagementDashboardServices
 
     private function performanceTotal(string $tenantId, array $stores, array $range, string $type, array $categoryIds): int
     {
+        if ($categoryIds === []) return $this->performanceTotalScalar($tenantId, $stores, $range, $type);
         return $this->sum($this->performanceRows($tenantId, $stores, $range, $type, $categoryIds), 'amount_cents');
+    }
+
+    private function performanceTotalScalar(string $tenantId, array $stores, array $range, string $type): int
+    {
+        $query = Db::name('cashier_v3_performance_fact')->alias('p')
+            ->where('p.tenant_id', $tenantId)->whereIn('p.store_id', $stores)
+            ->whereBetween('p.business_date', [$range['start'], $range['end']])
+            ->where('p.status', 'effective')->where('p.performance_type', $type);
+        if ($type === 'consumption_performance_recorded') {
+            $query->whereExists(function ($service) {
+                $service->name('cashier_v3_entitlement_service_fact')->whereRaw(
+                    "tenant_id=p.tenant_id AND checkout_request_id=p.checkout_request_id AND source_line_id=p.source_line_id AND service_status='completed'"
+                );
+            });
+        }
+        $row = $query->fieldRaw('COALESCE(SUM(p.amount_cents),0) amount_cents')->find() ?: [];
+        return (int)($row['amount_cents'] ?? 0);
+    }
+
+    /** @return array{gross_cents:int,refund_cents:int} */
+    private function cashTotals(string $tenantId, array $stores, array $range): array
+    {
+        $query = Db::name('cashier_v3_payment_sale_allocation_fact')->alias('p')
+            ->leftJoin('cashier_v3_payment_sale_allocation_fact original', 'original.tenant_id=p.tenant_id AND original.allocation_fact_id=p.reversal_of')
+            ->join('cashier_v3_sale_fact s', 's.tenant_id=p.tenant_id AND s.fact_id=COALESCE(original.sale_fact_id,p.sale_fact_id)')
+            ->where('p.tenant_id', $tenantId)->whereIn('p.store_id', $stores)
+            ->whereBetween('p.business_date', [$range['start'], $range['end']])->where('p.status', 'effective');
+        $row = $query->fieldRaw(
+            'COALESCE(SUM(CASE WHEN p.amount_cents > 0 THEN p.amount_cents ELSE 0 END),0) gross_cents,'
+            . 'COALESCE(SUM(CASE WHEN p.amount_cents < 0 THEN p.amount_cents ELSE 0 END),0) refund_cents'
+        )->find() ?: [];
+        return ['gross_cents' => (int)($row['gross_cents'] ?? 0), 'refund_cents' => (int)($row['refund_cents'] ?? 0)];
     }
 
     private function actualCashTotal(string $tenantId, array $stores, array $range, array $categoryIds): int
