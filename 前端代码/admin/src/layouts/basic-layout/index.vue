@@ -29,9 +29,20 @@
                 <transition name="fade-quick">
                     <i-tabs v-if="tabs" v-show="showHeader" />
                 </transition>
-				<Tabs v-if="menuData.length > 1" class="menuTabs" :animated="false" :value="menuPath" @on-click="tabClick">
-				  <TabPane style="margin-right: 32px;" v-for="item in menuData" :key="item.path" :label="item.title" :name="item.path"></TabPane>
-				</Tabs>
+				<div v-if="menuData.length > 1" class="menu-tabs" :class="{ 'menu-tabs--collapsed': !menuTabsExpanded }">
+					<Tabs class="menuTabs" :animated="false" :value="menuPath" @on-click="tabClick">
+						<TabPane v-for="item in menuData" :key="item.path" :label="item.title" :name="item.path"></TabPane>
+					</Tabs>
+					<button
+						type="button"
+						class="menu-tabs__toggle"
+						:aria-expanded="String(menuTabsExpanded)"
+						@click="toggleMenuTabs"
+					>
+						{{ menuTabsExpanded ? '收起' : '展开' }}
+						<Icon :type="menuTabsExpanded ? 'ios-arrow-up' : 'ios-arrow-down'" />
+					</button>
+				</div>
                 <div class="i-layout-content-main">
                     <keep-alive v-if="tabs" :include="keepAlive" :max="20">
                         <router-view v-if="loadRouter" />
@@ -93,7 +104,8 @@ export default {
       isDelayHideSider: false, // hack，当从隐藏侧边栏的 header 切换到正常 header 时，防止 Logo 抖动
       loadRouter: true,
       menuData: [],
-      menuPath: ''
+      menuPath: '',
+      menuTabsExpanded: false
     };
   },
   computed: {
@@ -281,6 +293,9 @@ export default {
 			  this.menuPath = path;
 			  this.$router.push(path);
     },
+    toggleMenuTabs() {
+      this.menuTabsExpanded = !this.menuTabsExpanded;
+    },
     handleToggleDrawer(state) {
       if (typeof state === 'boolean') {
         this.showDrawer = state;
@@ -345,19 +360,62 @@ export default {
 	/deep/.i-layout-header-trigger{
 		vertical-align: middle;
 	}
-	.menuTabs{
+	.menu-tabs{
+		position: relative;
 		margin: 0 14px;
+		padding-right: 64px;
+	}
+	.menu-tabs__toggle{
+		position: absolute;
+		top: 0;
+		right: 0;
+		height: 42px;
+		padding: 0 8px;
+		border: 0;
+		background: #fff;
+		color: #2d8cf0;
+		font-size: 14px;
+		line-height: 42px;
+		cursor: pointer;
+	}
+	.menu-tabs__toggle:focus{
+		outline: 2px solid rgba(45, 140, 240, .35);
+		outline-offset: -2px;
+	}
+	.menu-tabs__toggle .ivu-icon{
+		margin-left: 2px;
 	}
 	.menuTabs /deep/.ivu-tabs-bar{
 		margin-bottom: 1px;
 		border-bottom: 0;
 	}
+	.menuTabs /deep/.ivu-tabs-nav-wrap,
+	.menuTabs /deep/.ivu-tabs-nav-scroll{
+		overflow: visible;
+		white-space: normal;
+	}
+	.menuTabs /deep/.ivu-tabs-nav-wrap.ivu-tabs-nav-scrollable{
+		padding: 0;
+	}
+	.menuTabs /deep/.ivu-tabs-nav-prev,
+	.menuTabs /deep/.ivu-tabs-nav-next{
+		display: none;
+	}
+	.menuTabs /deep/.ivu-tabs-nav{
+		display: flex;
+		float: none;
+		flex-wrap: wrap;
+		width: 100%;
+		transform: none !important;
+		transition: none;
+	}
 	.menuTabs /deep/.ivu-tabs-nav .ivu-tabs-tab{
+		flex: 0 0 auto;
 		padding: 12px 0;
-		margin-right: 32px;
+		margin: 0 24px 0 0;
 	}
 	.menuTabs /deep/.ivu-tabs-ink-bar{
-		height: 0;
+		display: none;
 	}
 	.menuTabs /deep/.ivu-tabs-nav .ivu-tabs-tab-active:before{
 		content:'';
@@ -366,7 +424,11 @@ export default {
 		height: 2px;
 		background-color: #2d8cf0;
 		bottom: 1px;
-
+	}
+	.menu-tabs--collapsed .menuTabs /deep/.ivu-tabs-nav-wrap,
+	.menu-tabs--collapsed .menuTabs /deep/.ivu-tabs-nav-scroll{
+		height: 42px;
+		overflow: hidden;
 	}
 	/deep/.i-layout-menu-side .ivu-menu-submenu-title-icon{
 	   color: #C0C4CC;
