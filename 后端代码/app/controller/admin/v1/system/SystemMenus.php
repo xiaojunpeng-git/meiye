@@ -169,7 +169,9 @@ class SystemMenus extends AuthController
             ['path', []],
             ['sort', 0],
             ['pid', 0],
-            ['is_header', 0],
+            // 顶部菜单标识不在旧版编辑表单中展示；编辑名称、路由等字段时必须保留原值，
+            // 否则普通保存会把已有顶部一级菜单静默降级为侧边菜单。
+            ['is_header', (int)$menu['is_header']],
             ['header', ''],
             ['auth_type', 0],
             ['access', 1],
