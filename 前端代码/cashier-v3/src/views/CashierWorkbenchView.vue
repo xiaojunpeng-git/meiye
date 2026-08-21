@@ -4106,8 +4106,8 @@ async function openMoreAction(action) {
   }
 }
 
-function closeMoreActionEditor() {
-  if (isSavingMoreAction.value) return
+function closeMoreActionEditor({ force = false } = {}) {
+  if (isSavingMoreAction.value && !force) return
   moreActionEditor.value = null
   moreActionValue.value = ''
   moreActionReason.value = ''
@@ -4124,6 +4124,7 @@ async function saveMoreActionEditor() {
   if (!editor || isSavingMoreAction.value) return
   let action = ''
   let payload = {}
+  let savedPriceAmountCents = null
   if (editor.type === 'order-note') {
     const note = String(moreActionValue.value || '').trim()
     if (note.length > 500) return
@@ -4138,6 +4139,7 @@ async function saveMoreActionEditor() {
     }
     const lineAmountCents = Number(rawAmount) * 100
     if (!Number.isSafeInteger(lineAmountCents)) return
+    savedPriceAmountCents = lineAmountCents
     action = 'update-cashier-line-price'
     payload = { lineId: editor.line.id, lineAmountCents, reason }
   } else if (editor.type === 'supplement') {
@@ -4154,7 +4156,18 @@ async function saveMoreActionEditor() {
   isSavingMoreAction.value = true
   try {
     applyLocalCashierRootMutation(action, payload)
-    closeMoreActionEditor()
+    // The save guard prevents an accidental second click, but the successful
+    // save itself must still close the editor. Use the explicit force path so
+    // the updated amount is visible in the cart immediately.
+    closeMoreActionEditor({ force: true })
+    if (savedPriceAmountCents !== null) {
+      window.dispatchEvent(new CustomEvent('cashier-v3:ui-result', {
+        detail: {
+          status: 'info',
+          message: `改价已保存：${formatMoney(savedPriceAmountCents / 100)}；确认收款时将使用该金额。`
+        }
+      }))
+    }
   } finally {
     isSavingMoreAction.value = false
   }
@@ -6499,7 +6512,7 @@ onBeforeUnmount(() => {
               type="button"
               class="button button--primary"
               :disabled="isSavingMoreAction"
-              @click="saveMoreActionEditor"
+              @click.stop.prevent="saveMoreActionEditor"
             >{{ isSavingMoreAction ? '保存中…' : '保存' }}</button>
           </footer>
         </div>
