@@ -191,7 +191,7 @@ const inventoryFeatureItems = [
   { key: 'transfer', label: '调拨', featureCode: 'cashier.v3.inventory.transfer' },
   { key: 'usage', label: '院装', featureCode: 'cashier.v3.inventory.usage' },
   { key: 'import', label: '导入', featureCode: 'cashier.v3.inventory.import' },
-  { key: 'presale-claim', label: '预售领用', featureCode: 'cashier.v3.inventory.outbound', to: { name: 'cashier-v3-presale-claim' } }
+  { key: 'presale-claim', label: '客户领用', featureCode: 'cashier.v3.inventory.outbound', to: { name: 'cashier-v3-presale-claim' } }
 ]
 const visibleInventoryFeatureItems = computed(() => inventoryFeatureItems.filter((entry) => canUseFeature(entry.featureCode)))
 const isInventoryWorkspaceOpen = ref(false)
@@ -695,11 +695,36 @@ async function openCashierMemberTopAction(action) {
     return openWorkflowMemberSelector('cashier', { preservePending: true })
   }
 
-  return requestTopAction(action, {
+  const result = await requestTopAction(action, {
     memberId,
     selectorContext: 'cashier',
     selectorEntry: 'cashier'
   })
+  // 充值／赠送只消费本次返回的会员浮层，不回放旧收银根状态。
+  // 兼容适配器把 overlay 放在不同信封层级的情况，避免入口成功后无界面。
+  const data = responseDataBlock(result)
+  const overlay = result?.overlay
+    || result?.data?.overlay
+    || result?.result?.overlay
+    || result?.result?.data?.overlay
+  const normalizedOverlay = overlay && typeof overlay === 'object'
+    ? overlay
+    : action === 'open-gift' && data?.member && Array.isArray(data?.catalogItems)
+      ? { name: 'direct-gift', ...data }
+      : action === 'open-recharge' && data?.member && data?.balance
+        ? { name: 'recharge', ...data }
+        : null
+  if (isSucceededResult(result) && normalizedOverlay && typeof normalizedOverlay === 'object') {
+    if (normalizedOverlay.name === 'direct-gift') directGiftSession.value = normalizedOverlay
+    if (normalizedOverlay.name === 'recharge') {
+      if (isCashierPage.value) {
+        window.dispatchEvent(new CustomEvent('cashier-v3:open-recharge', { detail: normalizedOverlay }))
+      } else {
+        rechargeSession.value = normalizedOverlay
+      }
+    }
+  }
+  return result
 }
 
 async function submitRecharge(payload = {}) {
@@ -1113,6 +1138,40 @@ function closeMemberSelector(detail = {}) {
 function memberDetailId(detail) {
   const member = detail?.member && typeof detail.member === 'object' ? detail.member : detail || {}
   return member.id || member.memberId || member.uid || member.userId || null
+}
+
+async function openCashierForMember(event = {}) {
+  const detail = event?.detail || event || {}
+  const requestedMemberId = String(detail.memberId || memberDetailId(detail.member) || '').trim()
+  if (!requestedMemberId) return
+  try {
+    const result = await requestCashierV3Action('query-member-selector', {
+      keyword: requestedMemberId,
+      page: 1,
+      pageSize: 20,
+      selectorContext: 'cashier',
+      selectorEntry: 'cashier'
+    })
+    const projection = resultEnvelope(result)?.data && typeof resultEnvelope(result).data === 'object'
+      ? resultEnvelope(result).data
+      : {}
+    const records = Array.isArray(projection.records) ? projection.records : []
+    const selectedMember = records.find((record) => String(memberDetailId(record) || '') === requestedMemberId)
+      || (memberDetailId(detail.member) && String(memberDetailId(detail.member)) === requestedMemberId ? detail.member : null)
+    if (!selectedMember) {
+      window.dispatchEvent(new CustomEvent('cashier-v3:ui-result', {
+        detail: { status: 'failed', code: 'RESERVATION_MEMBER_NOT_FOUND', message: '未找到预约对应的会员，未打开收银来源选择。' }
+      }))
+      return
+    }
+    applyLocalCashierCustomerSelection({ customerMode: 'member', member: selectedMember })
+    await nextTick()
+    await completeMemberSelection(localCashierCustomerSelectionDetail(selectedMember))
+  } catch (error) {
+    window.dispatchEvent(new CustomEvent('cashier-v3:ui-result', {
+      detail: { status: 'failed', code: 'RESERVATION_CASHIER_HANDOFF_FAILED', message: String(error?.message || '会员收银开单初始化失败，请重试。') }
+    }))
+  }
 }
 
 function memberDebtAmount(member) {
@@ -2427,6 +2486,7 @@ onMounted(() => {
   window.addEventListener('cashier-v3:state-context-changing', handleStateContextChanged)
   window.addEventListener('cashier-v3:state-context-changed', handleStateContextChanged)
   window.addEventListener('cashier-v3:open-member-selector', openMemberSelector)
+  window.addEventListener('cashier-v3:open-cashier-member', openCashierForMember)
   window.addEventListener('cashier-v3:open-member-detail', showMemberDetail)
   window.addEventListener('cashier-v3:open-member-debt-repayment', handleOpenMemberDebt)
   window.addEventListener('cashier-v3:open-query-entity-selector', openQueryEntitySelector)
@@ -2443,6 +2503,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('cashier-v3:state-context-changing', handleStateContextChanged)
   window.removeEventListener('cashier-v3:state-context-changed', handleStateContextChanged)
   window.removeEventListener('cashier-v3:open-member-selector', openMemberSelector)
+  window.removeEventListener('cashier-v3:open-cashier-member', openCashierForMember)
   window.removeEventListener('cashier-v3:open-member-detail', showMemberDetail)
   window.removeEventListener('cashier-v3:open-member-debt-repayment', handleOpenMemberDebt)
   window.removeEventListener('cashier-v3:open-query-entity-selector', openQueryEntitySelector)

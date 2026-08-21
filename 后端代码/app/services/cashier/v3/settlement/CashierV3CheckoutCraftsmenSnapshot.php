@@ -32,9 +32,10 @@ final class CashierV3CheckoutCraftsmenSnapshot
             ];
             $hasPerformanceFields = array_key_exists('craftsmanPerformanceType', $row)
                 || array_key_exists('laborFeeCents', $row);
+            $hasProjectCount = array_key_exists('projectCountHalfUnits', $row);
             self::assertExactKeys($row, $hasPerformanceFields
-                ? array_merge($baseKeys, ['craftsmanPerformanceType', 'laborFeeCents'])
-                : $baseKeys);
+                ? array_merge($baseKeys, ['craftsmanPerformanceType', 'laborFeeCents'], $hasProjectCount ? ['projectCountHalfUnits'] : [])
+                : array_merge($baseKeys, $hasProjectCount ? ['projectCountHalfUnits'] : []));
             $staffId = self::positiveInt($row['staffId']);
             if (self::positiveInt($row['id']) !== $staffId || isset($staffIds[$staffId])) {
                 throw new \InvalidArgumentException('craftsmen_snapshot_staff_invalid');
@@ -82,6 +83,12 @@ final class CashierV3CheckoutCraftsmenSnapshot
             if ($hasPerformanceFields) {
                 $normalized[count($normalized) - 1]['craftsmanPerformanceType'] = $performanceType;
                 $normalized[count($normalized) - 1]['laborFeeCents'] = $laborFeeCents;
+            }
+            if ($hasProjectCount) {
+                $normalized[count($normalized) - 1]['projectCountHalfUnits'] = self::nonNegativeInt(
+                    $row['projectCountHalfUnits'],
+                    'craftsmen_snapshot_project_count_invalid'
+                );
             }
         }
         $commissionWeight = 0;

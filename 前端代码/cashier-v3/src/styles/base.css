@@ -4816,7 +4816,7 @@ button:disabled {
 
 .personnel-full-table--craftsmen .personnel-full-table__head,
 .personnel-full-table--craftsmen .personnel-full-table__row {
-  grid-template-columns: 1.2fr .95fr .75fr 1.1fr .9fr .9fr .9fr .65fr;
+  grid-template-columns: 1.2fr .95fr .75fr 1.1fr .9fr .9fr .9fr .75fr .65fr;
 }
 
 .personnel-full-table--history {
@@ -7558,8 +7558,10 @@ button:disabled {
 
 /* 会员列表：字段完整保留，横向滚动不压缩业务信息。 */
 .member-list-page {
-  display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  /* 会员列表包含可选的顶部操作、查询提示、合计和批量操作栏，
+     用纵向弹性布局让这些区域按内容占位，列表再占满剩余空间。 */
+  display: flex;
+  flex-direction: column;
   min-width: 0;
   min-height: 0;
   height: 100%;
@@ -7584,6 +7586,7 @@ button:disabled {
 }
 
 .member-list-wrap {
+  flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
   overflow: auto;
@@ -8651,22 +8654,6 @@ button:disabled {
 
 .order-center-page {
   grid-template-rows: auto auto minmax(0, 1fr) auto;
-}
-
-.member-list-page {
-  grid-template-rows: auto minmax(0, 1fr) auto;
-}
-
-.member-list-page--batch {
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
-}
-
-.member-list-page--insights {
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
-}
-
-.member-list-page--batch.member-list-page--insights {
-  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
 }
 
 .member-query-insights {

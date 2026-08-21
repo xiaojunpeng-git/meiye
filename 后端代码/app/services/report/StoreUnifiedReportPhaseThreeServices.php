@@ -301,9 +301,6 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
             $row['received_amount'] = $this->money((int)$row['received_amount_cents']);
             $row['transfer_amount'] = $this->money((int)$row['transfer_amount_cents']);
             $row['complaint_count'] = $manual === [] ? '' : (string)$manual['value'];
-            // The page uses the common manual-input component. The version is transport
-            // metadata only and is not presented as a business concept to the operator.
-            $row['complaint_count_version'] = (int)($manual['version'] ?? 0);
             $row['refund_amount'] = $this->money((int)$row['refund_amount_cents']);
             unset($row['event_sort_at']);
         }
@@ -1526,12 +1523,10 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
             ->where('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
             ->where('report_code', $report)
             ->whereIn('store_id', $stores)->whereIn('subject_key', array_values(array_unique($subjectKeys)))
-            ->field('subject_key,field_key,field_value,version')->select()->toArray();
+            ->field('subject_key,field_key,field_value')->select()->toArray();
         $result = [];
         foreach ($rows as $row) {
-            $result[(string)$row['subject_key']][(string)$row['field_key']] = [
-                'value' => (string)$row['field_value'], 'version' => (int)$row['version'],
-            ];
+            $result[(string)$row['subject_key']][(string)$row['field_key']] = ['value' => (string)$row['field_value']];
         }
         return $result;
     }

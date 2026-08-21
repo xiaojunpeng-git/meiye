@@ -2730,6 +2730,8 @@ function isCashierWorkspaceAction(action) {
     'go-to-writeoff-after-checkout',
     'view-sales-order',
     'void-service-record',
+    'void-order-center-supplement',
+    'void-order-center-gift',
     'finish-checkout-and-return'
   ]
   return cashierWorkspaceActions.includes(action)

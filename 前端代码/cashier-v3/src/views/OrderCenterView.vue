@@ -499,6 +499,27 @@ function recordKey(record, index) {
   return record?.id || record?.recordId || recordFieldValue(record, activeTab.value.primaryField) || `${activeTabKey.value}-${index}`
 }
 
+// The unified query adds a display-scoped record_id (for example
+// `gift:v3-direct-gift:<fact>`).  Lifecycle writes must never use that wrapper
+// or the human-facing ZS number; recover the canonical V3 fact identity from
+// the explicit field first, then from the legacy query wrapper for compatibility.
+function giftVoidRecordId(record) {
+  const candidates = [
+    record?.voidRecordId,
+    record?.void_record_id,
+    record?.id,
+    record?.recordId,
+    record?.record_id
+  ]
+  for (const candidate of candidates) {
+    const value = String(candidate || '')
+    const marker = 'v3-direct-gift:'
+    const markerIndex = value.indexOf(marker)
+    if (markerIndex >= 0) return value.slice(markerIndex)
+  }
+  return ''
+}
+
 const salesOrderListColumns = [
   '商品', '单价', '数量', '手艺人', '销售人', '销售经理', '导购', '金额', '应收金额', '欠款', '已收金额', '记账收款', '下单门店', '状态'
 ]
@@ -1194,6 +1215,12 @@ async function openDebtRepayment(record) {
 }
 
 const rechargeLifecycleActions = computed(() => {
+  if (['supplement', 'gift'].includes(activeTabKey.value) && genericDetailRecord.value) {
+    const id = giftVoidRecordId(genericDetailRecord.value) || String(genericDetailRecord.value.id || '')
+    if (activeTabKey.value === 'supplement' && id.startsWith('v3-') && genericDetailRecord.value.paymentStatus !== '已作废' && canUseCashierV3Operation('cashier.v3.order.void')) return ['supplement-void']
+    if (activeTabKey.value === 'gift' && id.startsWith('v3-direct-gift:') && genericDetailRecord.value.giftStatus !== '已作废' && canUseCashierV3Operation('cashier.v3.order.void')) return ['gift-void']
+    return []
+  }
   if (activeTabKey.value !== 'recharge' || !genericDetailRecord.value
     || genericDetailRecord.value.economicsDataStatus !== 'ready'
     || genericDetailRecord.value.orderStatus !== '正常') return []
@@ -1203,6 +1230,20 @@ const rechargeLifecycleActions = computed(() => {
 async function handleRechargeLifecycleAction(payload = {}) {
   const record = genericDetailRecord.value || {}
   const action = String(payload.action || '')
+  if (action === 'void-order-center-supplement' || action === 'void-order-center-gift') {
+    const recordId = action === 'void-order-center-gift' ? giftVoidRecordId(record) : String(record.id || '')
+    if (!recordId) return { result: { status: 'failed', message: '赠送记录标识已变化，请刷新后重试。' } }
+    const key = `${action}:${recordId}`
+    const idempotencyKey = rechargeOrderActionIds.value[key] || createCashierV3CommandId()
+    rechargeOrderActionIds.value = { ...rechargeOrderActionIds.value, [key]: idempotencyKey }
+    const result = await requestAction(action, { recordId, reason: payload.reason, idempotencyKey })
+    if (isTerminalActionStatus(actionStatus(result))) rechargeOrderActionIds.value = { ...rechargeOrderActionIds.value, [key]: null }
+    if (['success', 'succeeded'].includes(actionStatus(result))) {
+      genericDetailRecord.value = null
+      await queryRecords({}, false)
+    }
+    return result
+  }
   if (!['refund-recharge-order', 'void-recharge-order'].includes(action)
     || !record.rechargeId || !record.memberId) {
     return { result: { status: 'failed', message: '充值订单资料已变化，请重新打开后操作。' } }
@@ -1575,6 +1616,12 @@ onBeforeUnmount(() => {
                 class="button button--text"
                 @click="openDebtRepayment(record)"
               >去还款</button>
+              <button
+                v-if="canUseCashierV3Operation('cashier.v3.order.void') && ((activeTabKey === 'supplement' && String(record.id || '').startsWith('v3-') && record.paymentStatus !== '已作废') || (activeTabKey === 'gift' && giftVoidRecordId(record).startsWith('v3-direct-gift:') && record.giftStatus !== '已作废'))"
+                type="button"
+                class="button button--text button--danger"
+                @click="openRecordDetail(record)"
+              >作废</button>
             </td>
           </tr>
         </tbody>

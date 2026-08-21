@@ -18,6 +18,7 @@ final class CashierV3OrderLifecycleModule
             ? $dispatcher->versionServices()->providerFor('member_benefit_pool')
             : null;
         $serviceVoid = new CashierV3ServiceRecordVoidServices($entitlementProvider);
+        $orderCenterVoid = new CashierV3OrderCenterVoidServices();
         $serviceCraftsmanAdjustment = new CashierV3ServiceRecordCraftsmanAdjustmentServices();
         $dispatcher->versionServices()->registerProvider('sales_order', new CashierV3OrderLifecycleVersionProvider());
         $dispatcher->versionServices()->registerProvider(
@@ -177,6 +178,36 @@ final class CashierV3OrderLifecycleModule
             ['member_benefit_pool', 'card_holder']
         );
         $dispatcher->policies()->register($serviceVoidPolicy);
+
+        foreach (['void-order-center-supplement', 'void-order-center-gift'] as $action) {
+            if ($handlers->hasCommand($action) || $dispatcher->policies()->has($action)) {
+                throw new \LogicException('order center void duplicate action: ' . $action);
+            }
+            $dispatcher->handlers()->registerCommand($action, static function (array $scope) use ($orderCenterVoid, $action): array {
+                $result = $orderCenterVoid->executeInTx($action, $scope);
+                return [
+                    'data' => ['orderCenterVoid' => $result],
+                    'business_no' => (string)($result['business_no'] ?? ''),
+                    'touched' => (array)($result['touched'] ?? ['order_center']),
+                    'message' => (string)($result['message'] ?? '作废成功。'),
+                ];
+            });
+            $policy = new CashierV3ContextPolicy($action, ['cashier_workspace'], [], static function (array $payload, array $base): array {
+                $workspaceId = trim((string)($base['session']['workspace_id'] ?? ''));
+                if ($workspaceId === '') {
+                    throw CashierV3CommandException::invalidContext('当前收银工作台会话无效，请刷新页面后重试。', ['reason' => 'order_center_void_workspace_missing']);
+                }
+                $recordId = trim((string)($payload['recordId'] ?? $payload['id'] ?? ''));
+                if ($recordId === '') {
+                    throw CashierV3CommandException::invalidContext('未找到需要作废的记录，请重新打开记录。', ['reason' => 'order_center_void_record_missing']);
+                }
+                return [
+                    'identities' => [['role' => 'cashier_workspace', 'kind' => 'cashier_workspace', 'id' => $workspaceId, 'required' => true]],
+                    'required_read_roles' => ['cashier_workspace'], 'required_touched_roles' => ['cashier_workspace'],
+                ];
+            }, ['cashier_workspace'], [], ['cashier_workspace']);
+            $dispatcher->policies()->register($policy);
+        }
 
         if ($handlers->hasProjection('open-service-record-craftsman-adjustment')) {
             throw new \LogicException('service record craftsman adjustment projection duplicate');

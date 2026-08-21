@@ -704,6 +704,20 @@ class CashierV3ActionManifest
                 'eventless_reason' => '', 'activation_blocked_until_event_contract' => false,
                 'consumers' => ['service_record.voided' => []],
             ],
+            'void-order-center-supplement' => [
+                'required_event_types' => ['debt.repayment.voided'],
+                'allowed_event_types' => ['debt.repayment.voided'],
+                'event_rules' => ['debt.repayment.voided' => ['min_count' => 1, 'max_count' => 1, 'aggregate_type' => 'debt_repayment', 'source_type' => 'void-order-center-supplement']],
+                'eventless_reason' => '', 'activation_blocked_until_event_contract' => false,
+                'consumers' => ['debt.repayment.voided' => []],
+            ],
+            'void-order-center-gift' => [
+                'required_event_types' => ['gift.voided'],
+                'allowed_event_types' => ['gift.voided'],
+                'event_rules' => ['gift.voided' => ['min_count' => 1, 'max_count' => 1, 'aggregate_type' => 'direct_gift', 'source_type' => 'void-order-center-gift']],
+                'eventless_reason' => '', 'activation_blocked_until_event_contract' => false,
+                'consumers' => ['gift.voided' => []],
+            ],
             'adjust-service-record-craftsmen' => [
                 'required_event_types' => ['service_record.craftsmen_adjusted'],
                 'allowed_event_types' => ['service_record.craftsmen_adjusted'],

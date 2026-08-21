@@ -99,7 +99,7 @@ final class StoreReportPaymentSaleAllocationFactServices
      * @param array<int,array<string,mixed>> $paymentFacts Reversal payment facts.
      * @return array{inserted:int,replayed:int}
      */
-    public function persistLifecycleReversalsInTx(array $context, array $paymentFacts): array
+    public function persistLifecycleReversalsInTx(array $context, array $paymentFacts, array $refundLines = []): array
     {
         CashierV3TransactionGuard::assertInTransaction('storeReportLifecyclePaymentAllocationReversal');
         $inserted = 0;
@@ -120,6 +120,17 @@ final class StoreReportPaymentSaleAllocationFactServices
                 ->lock(true)->order('id', 'asc')->select()->toArray();
             if ($originals === []) {
                 throw new \LogicException('lifecycle_payment_allocation_reversal_target_missing');
+            }
+            $selectedLineIds = [];
+            if ($refundLines !== []) {
+                foreach ($refundLines as $line) {
+                    if ((int)($line['cashRefundCents'] ?? 0) > 0) $selectedLineIds[(string)($line['lineId'] ?? '')] = true;
+                }
+                if ($selectedLineIds === []) throw new \LogicException('lifecycle_payment_allocation_refund_line_missing');
+                $originals = array_values(array_filter($originals, static function (array $original) use ($selectedLineIds): bool {
+                    return isset($selectedLineIds[(string)($original['source_line_id'] ?? '')]);
+                }));
+                if ($originals === []) throw new \LogicException('lifecycle_payment_allocation_refund_line_scope_missing');
             }
             $weights = array_map(static function (array $original): array {
                 return [

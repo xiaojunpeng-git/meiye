@@ -3287,6 +3287,7 @@ async function loadPersonnelOverlay(line, initialTab, roleScope = 'personnel') {
     laborManualFee: line.laborManualFee === null || line.laborManualFee === undefined
       ? null
       : Number(line.laborManualFee),
+    projectCountTotal: Math.max(1, Number(line.quantity || 1)),
     requireCraftsmen: showCraftsmen,
     craftsmenCandidates: [],
     salespersonCandidates: [],
@@ -3546,7 +3547,8 @@ async function confirmPersonnelAssignment(result = {}) {
       laborWeight: Number(record.laborWeight),
       isPointCustomer: Boolean(record.isPointCustomer ?? record.marked),
       craftsmanPerformanceType: record.craftsmanPerformanceType || record.craftsman_performance_type,
-      laborFeeCents: Number(record.laborFeeCents ?? record.labor_fee_cents ?? 0)
+      laborFeeCents: Number(record.laborFeeCents ?? record.labor_fee_cents ?? 0),
+      projectCountHalfUnits: Math.max(0, Number(record.projectCountHalfUnits ?? record.project_count_half_units ?? 0))
     }))
     const salespeople = (result.salespeople || []).map((record) => ({
       staffId: canonicalCheckoutPositiveId(record.staffId, record.id, record.employeeId, record.employee_id),
@@ -6435,6 +6437,7 @@ onBeforeUnmount(() => {
         :labor-default-fee="personnelOverlay.laborDefaultFee"
         :labor-manual-fee="personnelOverlay.laborManualFee"
         :allow-labor-override="personnelOverlay.allowLaborOverride"
+        :project-count-total="personnelOverlay.projectCountTotal"
         :loading="personnelOverlay.loading"
         :saving="isSavingPersonnelAssignment"
         :load-error="personnelOverlay.loadError"

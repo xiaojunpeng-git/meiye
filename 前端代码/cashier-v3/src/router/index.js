@@ -158,7 +158,7 @@ const routes = [
         path: 'presale-claim',
         name: 'cashier-v3-presale-claim',
         component: PresaleClaimView,
-        meta: { title: '预售领用', description: '预售商品可分次领用，领用后自动生成出库单。' }
+        meta: { title: '客户领用', description: '客户权益商品可分次领用，领用后自动生成出库单。' }
       },
       {
         path: 'hang',

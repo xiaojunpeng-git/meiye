@@ -325,6 +325,7 @@ final class CashierV3SaleOnlyFactAssembler
                         'allocationBaseAmountCents' => (int)$craftsmanPlan['laborAmountCents'],
                         'amountCents' => (int)$allocation['laborPerformanceCents'],
                         'laborFeeAmountCents' => (int)$allocation['laborFeeCents'],
+                        'projectCountHalfUnits' => (int)($allocation['projectCountHalfUnits'] ?? 0),
                         'ruleCodeSnapshot' => 'SALE-PROJECT-LABOR-V1',
                         'ruleNameSnapshot' => '项目劳动业绩',
                         'ruleVersionSnapshot' => 'project-rule:' . (int)$craftsmanPlan['ruleVersion'],

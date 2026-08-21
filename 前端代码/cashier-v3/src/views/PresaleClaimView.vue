@@ -215,7 +215,7 @@ onMounted(() => load(1))
     <header class="presale-claim-view__header">
       <div>
         <p class="presale-claim-view__eyebrow">库存出库</p>
-        <h1>预售领用</h1>
+        <h1>客户领用</h1>
       </div>
     </header>
 

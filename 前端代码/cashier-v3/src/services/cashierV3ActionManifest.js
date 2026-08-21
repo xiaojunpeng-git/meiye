@@ -275,6 +275,8 @@ const C5_ACTIONS = {
     'adjust-service-record-craftsmen': FEATURE_ORDER_SERVICE_DETAIL,
     'refund-recharge-order': FEATURE_ORDER_REFUND,
     'void-recharge-order': FEATURE_ORDER_VOID,
+    'void-order-center-supplement': FEATURE_ORDER_VOID,
+    'void-order-center-gift': FEATURE_ORDER_VOID,
     'reopen-sales-order': FEATURE_ORDER_REOPEN,
     'upgrade-sales-order': FEATURE_ORDER_CENTER,
     'print-sales-order-receipt': FEATURE_ORDER_RECEIPT_PRINT,

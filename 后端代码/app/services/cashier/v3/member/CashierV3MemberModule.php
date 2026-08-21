@@ -210,14 +210,9 @@ final class CashierV3MemberModule
                 // 充值弹窗是只读准备动作，因此不会携带写命令的 contexts。
                 // 工作台 ID 由受控账号、强制门店和服务端 state context 唯一派生，
                 // 不能改为信任浏览器提交的 workspace ID。
-                $workspaceId = self::workspaceIdForProjection($scope);
-                return Db::transaction(function () use ($scope, $cashierWorkspace, $memberVersions, $memberId, $workspaceId): array {
-                    $cashierWorkspace->assertSelectedMemberInTx(
-                        $workspaceId,
-                        (string)($scope['state_context_id'] ?? ''),
-                        $scope['operator_scope'],
-                        $memberId
-                    );
+                return Db::transaction(function () use ($scope, $memberVersions, $memberId): array {
+                    // 充值入口只接收当前页面传入的会员身份；不读取或改写
+                    // 收银购物车草稿，具体充值校验仍在后续充值流程中完成。
                     $member = self::findSelectableMember((string)$memberId, $scope['operator_scope']);
                     $memberVersion = $memberVersions->synchronizeProjectionVersion(
                         'member',
@@ -260,9 +255,9 @@ final class CashierV3MemberModule
                 if ($memberId <= 0) {
                     throw CashierV3CommandException::invalidContext('请先选择需要赠送的会员。');
                 }
-                $workspaceId = self::workspaceIdForProjection($scope);
-                return Db::transaction(function () use ($scope, $cashierWorkspace, $memberVersions, $memberId, $workspaceId): array {
-                    $cashierWorkspace->assertSelectedMemberInTx($workspaceId, (string)($scope['state_context_id'] ?? ''), $scope['operator_scope'], $memberId);
+                return Db::transaction(function () use ($scope, $memberVersions, $memberId): array {
+                    // 赠送入口只接收当前页面传入的会员身份；不读取或改写
+                    // 收银购物车草稿，具体赠送校验仍在后续赠送流程中完成。
                     $member = self::findSelectableMember((string)$memberId, $scope['operator_scope']);
                     $memberVersion = $memberVersions->synchronizeProjectionVersion('member', (string)$memberId, $scope['operator_scope'], $scope['data_scope']);
                     $catalog = (new CashierV3SaleCatalogServices())->catalog($scope['operator_scope'], $scope['data_scope']);
@@ -421,12 +416,12 @@ final class CashierV3MemberModule
             });
         }
         if (!$handlers->hasCommand('submit-direct-gift')) {
-            $handlers->registerCommand('submit-direct-gift', function (array $scope) use ($cashierWorkspace): array {
+            $handlers->registerCommand('submit-direct-gift', function (array $scope): array {
                 $payload = is_array($scope['payload'] ?? null) ? $scope['payload'] : [];
                 self::assertSelectorEntry($payload, 'cashier', '赠送只能从当前收银工作台发起。');
                 $memberId = (int)($payload['memberId'] ?? $payload['member_id'] ?? 0);
-                $workspaceId = self::workspaceContextId((array)($scope['contexts'] ?? []));
-                $cashierWorkspace->assertSelectedMemberInTx($workspaceId, (string)($scope['state_context_id'] ?? ''), $scope['operator_scope'], $memberId);
+                // 赠送提交只使用本次命令锁定的 member 身份，不依赖收银草稿
+                // 中可能尚未同步的会员字段；赠送业务事务本身保持不变。
                 $member = self::findSelectableMember((string)$memberId, $scope['operator_scope']);
                 $result = (new CashierV3DirectGiftIssuanceServices())->issueInTx(
                     $payload, $member, $scope['operator_scope'], $scope['data_scope'], (string)$scope['idempotency_key'],

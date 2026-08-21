@@ -78,6 +78,7 @@ const actionErrorNeedsAnnouncement = computed(() => String(actionErrorCode.value
 const member = computed(() => {
   const source = firstObject(reservation.value, ['member', 'memberInfo', 'customer'])
   return {
+    id: firstValue(source, ['id', 'memberId', 'uid', 'userId']) || firstValue(reservation.value, ['memberId', 'member_id', 'uid', 'userId', 'customerId']),
     name: firstValue(source, ['name', 'memberName', 'customerName']) || firstValue(reservation.value, ['memberName', 'customerName']) || '—',
     phone: firstValue(source, ['phone', 'mobile', 'memberPhone']) || firstValue(reservation.value, ['memberPhone', 'phone', 'mobile']),
     memberNo: firstValue(source, ['memberNo', 'memberCode', 'code']) || firstValue(reservation.value, ['memberNo', 'memberCode']),
@@ -146,6 +147,13 @@ const availableActions = computed(() => {
         disabled: false,
         disabledReason: '',
         primary: true
+      },
+      {
+        key: 'go-to-cashier',
+        label: '去开单',
+        raw: { code: 'go-to-cashier' },
+        disabled: false,
+        disabledReason: ''
       }
     ]
   }

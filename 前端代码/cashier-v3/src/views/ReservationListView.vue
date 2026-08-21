@@ -1,5 +1,6 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import TablePagination from '@/components/common/TablePagination.vue'
 import UnifiedQueryToolbar from '@/components/query/UnifiedQueryToolbar.vue'
 import ReservationEditorOverlay from '@/components/reservation/ReservationEditorOverlay.vue'
@@ -13,6 +14,7 @@ import {
 } from '@/services/cashierV3Bridge'
 
 const state = useCashierV3State()
+const router = useRouter()
 const viewMode = ref('calendar')
 const calendarResourceMode = ref('staff')
 const activeQuickKey = ref('today')
@@ -705,6 +707,30 @@ function handleOpenReservationDetail(event) {
 }
 
 async function handleReservationDetailAction(payload = {}) {
+  if (payload.actionCode === 'go-to-cashier') {
+    const reservation = payload.reservation && typeof payload.reservation === 'object' ? payload.reservation : {}
+    const member = reservation.member && typeof reservation.member === 'object'
+      ? reservation.member
+      : reservation.memberInfo && typeof reservation.memberInfo === 'object'
+        ? reservation.memberInfo
+        : reservation.customer && typeof reservation.customer === 'object'
+          ? reservation.customer
+          : {}
+    const memberId = firstDefined(member, ['id', 'memberId', 'uid', 'userId'])
+      ?? firstDefined(reservation, ['memberId', 'member_id', 'uid', 'userId', 'customerId'])
+    if (!memberId) {
+      return { result: { status: 'failed', code: 'RESERVATION_MEMBER_MISSING', message: '该预约没有可用的会员资料，暂不能去开单。' } }
+    }
+    closeReservationDetail()
+    await router.push({ name: 'cashier-v3-cashier' })
+    window.dispatchEvent(new CustomEvent('cashier-v3:open-cashier-member', {
+      detail: {
+        memberId: String(memberId),
+        member: { ...member, id: member.id || member.memberId || member.uid || member.userId || memberId }
+      }
+    }))
+    return { result: { status: 'success', message: '已进入收银并打开会员来源选择。' } }
+  }
   if (payload.actionCode === 'edit-reservation') {
     const result = await openReservationEditor({
       reservationId: payload.reservationId,

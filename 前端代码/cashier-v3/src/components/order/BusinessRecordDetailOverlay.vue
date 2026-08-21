@@ -59,7 +59,12 @@ async function submitLifecycleAction() {
     actionError.value = activeForm.value === 'refund' ? '请填写退款原因。' : '请填写作废原因。'
     return
   }
-  const payload = { action: activeForm.value === 'refund' ? 'refund-recharge-order' : 'void-recharge-order', reason: reason.value.trim() }
+  const payload = {
+    action: activeForm.value === 'refund' ? 'refund-recharge-order'
+      : activeForm.value === 'supplement-void' ? 'void-order-center-supplement'
+        : activeForm.value === 'gift-void' ? 'void-order-center-gift' : 'void-recharge-order',
+    reason: reason.value.trim()
+  }
   if (activeForm.value === 'refund') {
     if (!validMoney(cashRefundAmount.value, true) || !validMoney(principalAmount.value, true) || !validMoney(bonusAmount.value, true)
       || Number(cashRefundAmount.value) + Number(principalAmount.value) + Number(bonusAmount.value) <= 0) {
@@ -109,7 +114,7 @@ async function submitLifecycleAction() {
           </div>
         </dl>
         <section v-if="activeForm" class="business-record-detail__lifecycle">
-          <h3>{{ activeForm === 'refund' ? '充值退款并作废' : '作废充值订单' }}</h3>
+          <h3>{{ activeForm === 'refund' ? '充值退款并作废' : activeForm === 'supplement-void' ? '作废补交记录' : activeForm === 'gift-void' ? '作废赠送记录' : '作废充值订单' }}</h3>
           <template v-if="activeForm === 'refund'">
             <label>实际退款金额<input v-model.trim="cashRefundAmount" inputmode="decimal" placeholder="实际退给客户的金额" /></label>
             <div class="business-record-detail__amount-row">
@@ -127,6 +132,8 @@ async function submitLifecycleAction() {
       <footer class="business-record-detail__footer">
         <button v-if="lifecycleActions.includes('refund')" type="button" class="button button--secondary" :disabled="pending" @click="activeForm = 'refund'">退款并作废</button>
         <button v-if="lifecycleActions.includes('void')" type="button" class="button button--secondary" :disabled="pending" @click="activeForm = 'void'">作废</button>
+        <button v-if="lifecycleActions.includes('supplement-void')" type="button" class="button button--secondary" :disabled="pending" @click="activeForm = 'supplement-void'">作废</button>
+        <button v-if="lifecycleActions.includes('gift-void')" type="button" class="button button--secondary" :disabled="pending" @click="activeForm = 'gift-void'">作废</button>
         <button type="button" class="button button--primary" @click="$emit('close')">关闭</button>
       </footer>
     </section>

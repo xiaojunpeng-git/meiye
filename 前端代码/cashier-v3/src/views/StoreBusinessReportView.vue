@@ -113,7 +113,17 @@ const scopePicker = ref({ open: false, loading: false, tree: [], allowedStoreIds
 const expandedScopeKeys = ref(new Set())
 const page = ref(1)
 const tabsElement = ref(null)
-const tabsExpanded = ref(false)
+const TABS_EXPANDED_STORAGE_KEY = 'cashier-v3.store-business-report.tabs-expanded'
+
+function readTabsExpandedPreference() {
+  try {
+    return window.sessionStorage.getItem(TABS_EXPANDED_STORAGE_KEY) === '1'
+  } catch (_) {
+    return false
+  }
+}
+
+const tabsExpanded = ref(readTabsExpandedPreference())
 const tabsOverflow = ref(false)
 const editingRow = ref(null)
 const editDraft = ref({})
@@ -209,7 +219,7 @@ const FIELD_LOGIC = Object.freeze({
   age: '会员资料中已登记的年龄；未登记时留空。',
   care_project: '该笔成交关联的护理项目或商品名称。',
   craftsman: '完成该笔护理并形成劳动业绩的手艺人。',
-  experience_card_amount: '该笔体验卡或项目成交时记入的成交金额。',
+  experience_card_amount: '默认取该笔销售明细的成交金额；手动录入后以本报表补充值为准，原始销售事实不被改写，并保留版本与审计记录。',
   care_duration: '运营人员手动填写的该次护理时长。',
   guide_effective_count: '该笔业务已确认并生效的导购有效人次。',
   guide_performance_round: '该笔业务中导购参与的轮次；没有导购时留空。',
@@ -612,6 +622,48 @@ function buildHeaderRows(reportColumns) {
   return rows
 }
 
+// 统一报表服务用 column_groups 描述动态指标的业务分组；当服务端未额外
+// 返回 header_rows 时，仍须把这份分组元数据投影成可见的两层表头。
+function buildColumnGroupHeaderRows(reportColumns, groups) {
+  if (!reportColumns.length || !Array.isArray(groups) || !groups.length) return []
+  const groupedColumns = groups.flatMap((group) => Array.isArray(group?.columns) ? group.columns : [])
+  if (groupedColumns.length !== reportColumns.length || groupedColumns.some((column, index) => column !== reportColumns[index])) return []
+
+  const hasLeafRow = groups.some((group) => Number(group?.rowspan || 0) <= 1)
+  const depth = hasLeafRow ? 2 : 1
+  const rows = [[], ...(depth === 2 ? [[]] : [])]
+  let startIndex = 0
+  groups.forEach((group) => {
+    const groupColumns = group.columns
+    const groupRowspan = Number(group?.rowspan || 0)
+    const isSingleColumnRowspan = groupColumns.length === 1 && groupRowspan > 1
+    rows[0].push({
+      label: String(group.label || groupColumns[0]?.label || ''),
+      column: isSingleColumnRowspan ? groupColumns[0] : null,
+      columns: groupColumns,
+      tone: String(group.tone || ''),
+      startIndex,
+      colspan: isSingleColumnRowspan ? 1 : groupColumns.length,
+      rowspan: isSingleColumnRowspan ? depth : 1
+    })
+    if (depth === 2 && !isSingleColumnRowspan) {
+      groupColumns.forEach((column) => {
+        rows[1].push({
+          label: String(column?.label || ''),
+          column,
+          columns: [column],
+          tone: String(column?.tone || ''),
+          startIndex: reportColumns.indexOf(column),
+          colspan: 1,
+          rowspan: 1
+        })
+      })
+    }
+    startIndex += groupColumns.length
+  })
+  return rows
+}
+
 function explicitHeaderRows(rawRows, reportColumns) {
   if (!Array.isArray(rawRows) || !rawRows.length || !reportColumns.length) return []
   const byKey = new Map(reportColumns.map((column, index) => [String(column?.key || ''), { column, index }]))
@@ -646,7 +698,9 @@ function explicitHeaderRows(rawRows, reportColumns) {
 const headerRows = computed(() => {
   const raw = result.value.header_rows || result.value.headerRows || result.value.header_levels || result.value.headerLevels
   const declared = explicitHeaderRows(raw, columns.value)
-  return declared.length ? declared : buildHeaderRows(columns.value)
+  if (declared.length) return declared
+  const grouped = buildColumnGroupHeaderRows(columns.value, columnGroups.value)
+  return grouped.length ? grouped : buildHeaderRows(columns.value)
 })
 const reportColumnGroupEndKeys = computed(() => {
   const ends = new Set()
@@ -743,12 +797,15 @@ function updateTabsLayout() {
   const buttons = [...element.querySelectorAll('.store-business-report__tab')]
   const firstTop = buttons[0]?.offsetTop
   tabsOverflow.value = buttons.some((button) => button.offsetTop > firstTop)
-  const active = buttons.find((button) => button.getAttribute('aria-current') === 'page')
-  if (active && firstTop !== undefined && active.offsetTop > firstTop) tabsExpanded.value = true
 }
 
 function toggleTabs() {
   tabsExpanded.value = !tabsExpanded.value
+  try {
+    window.sessionStorage.setItem(TABS_EXPANDED_STORAGE_KEY, tabsExpanded.value ? '1' : '0')
+  } catch (_) {
+    // Storage can be unavailable in privacy-restricted embedded contexts.
+  }
 }
 
 function query() {

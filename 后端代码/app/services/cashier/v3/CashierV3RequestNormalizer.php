@@ -910,7 +910,7 @@ class CashierV3RequestNormalizer
                 );
             }
             $weightSum += $weight;
-            $assignments[] = [
+            $assignment = [
                 'staffId' => $id,
                 'laborWeight' => $weight,
                 'isPointCustomer' => $pointCustomer,
@@ -920,6 +920,13 @@ class CashierV3RequestNormalizer
                     'craftsmanLaborFeeCents'
                 ),
             ];
+            if (CashierV3AliasResolver::hasAnyKey($row, ['projectCountHalfUnits', 'project_count_half_units'])) {
+                $assignment['projectCountHalfUnits'] = self::canonicalNonNegativeInteger(
+                    $row['projectCountHalfUnits'] ?? $row['project_count_half_units'],
+                    'craftsmanProjectCountHalfUnits'
+                );
+            }
+            $assignments[] = $assignment;
         }
         if (!$assignments) {
             return [];

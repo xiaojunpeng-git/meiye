@@ -280,6 +280,13 @@ final class CashierV3PresaleClaimServices
         });
     }
 
+    /** Reuse the inventory reversal inside an already-open business transaction. */
+    public function voidInExistingTransaction(array $scope, string $claimId, array $input): array
+    {
+        CashierV3TransactionGuard::assertInTransaction('presaleClaim.voidInExistingTransaction');
+        return $this->voidInTx($scope, $claimId, $input);
+    }
+
     public function voidForPlatform(array $adminInfo, string $claimId, array $input): array
     {
         return Db::transaction(function () use ($adminInfo, $claimId, $input): array {

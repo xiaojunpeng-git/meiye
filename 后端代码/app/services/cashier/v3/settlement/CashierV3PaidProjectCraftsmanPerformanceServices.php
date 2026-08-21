@@ -60,6 +60,21 @@ final class CashierV3PaidProjectCraftsmanPerformanceServices
         $performanceCraftsmen = [];
         $weights = [];
         $fees = [];
+        $hasExplicitProjectCount = array_key_exists('projectCountHalfUnits', $craftsmen[0] ?? []);
+        $projectCounts = [];
+        if ($hasExplicitProjectCount) {
+            foreach ($craftsmen as $craftsman) {
+                $projectCounts[(int)$craftsman['staffId']] = max(0, (int)($craftsman['projectCountHalfUnits'] ?? 0));
+            }
+        } else {
+            $totalHalfUnits = $quantity * 2;
+            $base = intdiv($totalHalfUnits, count($craftsmen));
+            $remainder = $totalHalfUnits - ($base * count($craftsmen));
+            foreach ($craftsmen as $index => $craftsman) {
+                $projectCounts[(int)$craftsman['staffId']] = $base
+                    + ($index >= count($craftsmen) - $remainder ? 1 : 0);
+            }
+        }
         foreach ($craftsmen as $craftsman) {
             $staffId = (int)$craftsman['staffId'];
             $type = (string)($craftsman['craftsmanPerformanceType'] ?? 'commission_labor');
@@ -117,6 +132,7 @@ final class CashierV3PaidProjectCraftsmanPerformanceServices
                 'laborWeight' => (int)($craftsman['laborWeight'] ?? 0),
                 'laborPerformanceCents' => (int)($performanceByStaff[$staffId] ?? 0),
                 'laborFeeCents' => (int)($fees[$staffId] ?? 0),
+                'projectCountHalfUnits' => (int)($projectCounts[$staffId] ?? 0),
             ];
         }
 

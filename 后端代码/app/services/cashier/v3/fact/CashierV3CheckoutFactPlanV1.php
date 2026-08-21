@@ -251,7 +251,7 @@ final class CashierV3CheckoutFactPlanV1
             self::assertAllowedKeys(
                 $fact,
                 $requiredKeys,
-                array_merge($requiredKeys, ['laborFeeAmountCents']),
+                array_merge($requiredKeys, ['laborFeeAmountCents', 'projectCountHalfUnits']),
                 $domain
             );
         } else {
@@ -393,6 +393,7 @@ final class CashierV3CheckoutFactPlanV1
             'allocation_base_amount_cents' => self::signedMoney($fact['allocationBaseAmountCents'], $direction, 'performance_base_amount_invalid', true),
             'amount_cents' => self::signedMoney($fact['amountCents'], $direction, 'performance_amount_invalid', true),
             'labor_fee_amount_cents' => self::signedMoney($fact['laborFeeAmountCents'] ?? 0, $direction, 'performance_labor_fee_amount_invalid', true),
+            'project_count_half_units' => self::nonNegativeInt($fact['projectCountHalfUnits'] ?? 0, 'performance_project_count_invalid'),
             'rule_code_snapshot' => self::requiredToken($fact['ruleCodeSnapshot'], 64, 'performance_rule_code_invalid'),
             'rule_name_snapshot' => self::text($fact['ruleNameSnapshot'], 128, 'performance_rule_name_invalid'),
             'rule_version_snapshot' => self::requiredToken($fact['ruleVersionSnapshot'], 64, 'performance_rule_version_invalid'),

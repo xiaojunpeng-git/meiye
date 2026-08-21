@@ -25,6 +25,10 @@ class UserBalanceAtomicServices extends BaseServices
             'ledger_type' => 'recharge_debt_repayment', 'pm' => 1,
             'title' => '充值欠款补交', 'mark' => '充值欠款补交{%num%}元',
         ],
+        'recharge_debt_void' => [
+            'ledger_type' => 'recharge_debt_void', 'pm' => 0,
+            'title' => '充值欠款补交作废', 'mark' => '作废充值欠款补交扣回{%num%}元',
+        ],
         'pay_product' => [
             'ledger_type' => 'pay_product', 'pm' => 0,
             'title' => '余额支付购买商品', 'mark' => '余额支付{%num%}元购买商品',

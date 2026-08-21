@@ -107,6 +107,7 @@ final class CashierV3OrderCenterRecordQueryServices
                 'pageSize' => 1,
                 'keyword' => '',
                 'status' => '',
+                'dataScope' => 'normal',
                 'operationType' => '',
                 // Counts traverse every record type, including service. Keep the
                 // same normalized empty query shape as a service-page request.
@@ -491,7 +492,11 @@ final class CashierV3OrderCenterRecordQueryServices
             ->leftJoin('user u', 'u.uid = r.member_id')
             ->leftJoin('system_store s', 's.id = r.store_id')
             ->leftJoin('system_store_staff st', 'st.id = r.operator_id')
-            ->where('r.status', 'succeeded');
+            ->where(function ($q) use ($criteria) {
+                if ($criteria['status'] === 'voided') $q->where('r.status', 'voided');
+                elseif ($criteria['dataScope'] === 'all' && $criteria['status'] === '') $q->whereIn('r.status', ['succeeded', 'voided']);
+                else $q->where('r.status', 'succeeded');
+            });
         $this->applyStoreScope($query, 'r.store_id', $criteria['allowedStoreIds']);
         $this->applyKeyword($query, $criteria['keyword'], [
             'r.repayment_no', 'r.debt_no', 'r.sales_order_no_snapshot',
@@ -503,7 +508,7 @@ final class CashierV3OrderCenterRecordQueryServices
         $limit = $criteria['page'] * $criteria['pageSize'];
         $rows = $query->field(implode(',', [
             'r.id', 'r.repayment_id', 'r.repayment_no', 'r.debt_no',
-            'r.sales_order_no_snapshot', 'r.repayment_amount_cents',
+            'r.sales_order_no_snapshot', 'r.repayment_amount_cents', 'r.status',
             'r.store_id', 'r.member_id', 'r.operator_id', 'r.business_date', 'r.settled_at',
             'u.real_name', 'u.nickname', 'u.phone', 's.name AS store_name',
             'st.staff_name',
@@ -539,7 +544,7 @@ final class CashierV3OrderCenterRecordQueryServices
                 'paymentMethod' => implode('、', array_values(array_unique($paymentMethods[$repaymentId] ?? []))) ?: '未标注',
                 'storeName' => (string)$row['store_name'],
                 'operatorName' => (string)$row['staff_name'],
-                'paymentStatus' => '补交成功',
+                'paymentStatus' => (string)($row['status'] ?? '') === 'voided' ? '已作废' : '补交成功',
                 'paymentCompletedAt' => $this->dateTime((int)$row['settled_at']),
                 '_sortTime' => (int)$row['settled_at'],
             ];
@@ -556,7 +561,11 @@ final class CashierV3OrderCenterRecordQueryServices
             ->leftJoin('user u', 'u.uid = r.member_id')
             ->leftJoin('system_store s', 's.id = r.store_id')
             ->leftJoin('system_store_staff st', 'st.id = r.operator_id')
-            ->where('r.status', 'succeeded');
+            ->where(function ($q) use ($criteria) {
+                if ($criteria['status'] === 'voided') $q->where('r.status', 'voided');
+                elseif ($criteria['dataScope'] === 'all' && $criteria['status'] === '') $q->whereIn('r.status', ['succeeded', 'voided']);
+                else $q->where('r.status', 'succeeded');
+            });
         $this->applyStoreScope($query, 'r.store_id', $criteria['allowedStoreIds']);
         $this->applyKeyword($query, $criteria['keyword'], [
             'r.repayment_no', 'd.debt_no', 'd.order_sn', 'u.real_name', 'u.nickname', 'u.phone',
@@ -568,7 +577,7 @@ final class CashierV3OrderCenterRecordQueryServices
         $rows = $query->field(implode(',', [
             'r.id', 'r.repayment_id', 'r.repayment_no', 'r.debt_id', 'r.amount_cents',
             'r.store_id', 'r.member_id', 'r.operator_id', 'r.business_date', 'r.settled_at', 'd.debt_no',
-            'd.order_sn', 'u.real_name', 'u.nickname', 'u.phone', 's.name AS store_name',
+            'd.order_sn', 'r.status', 'u.real_name', 'u.nickname', 'u.phone', 's.name AS store_name',
             'st.staff_name',
         ]))->order('r.settled_at', 'desc')->order('r.id', 'desc')->limit($limit)->select()->toArray();
         if ($rows === []) return [[], $total];
@@ -601,7 +610,7 @@ final class CashierV3OrderCenterRecordQueryServices
                 'paymentMethod' => implode('、', array_values(array_unique($paymentMethods[$repaymentId] ?? []))) ?: '未标注',
                 'storeName' => (string)$row['store_name'],
                 'operatorName' => (string)$row['staff_name'],
-                'paymentStatus' => '补交成功',
+                'paymentStatus' => (string)($row['status'] ?? '') === 'voided' ? '已作废' : '补交成功',
                 'paymentCompletedAt' => $this->dateTime((int)$row['settled_at']),
                 '_sortTime' => (int)$row['settled_at'],
             ];
@@ -1178,7 +1187,11 @@ final class CashierV3OrderCenterRecordQueryServices
             ->leftJoin('system_store_staff st', 'st.id = gf.operator_id')
             ->where('gf.source_type', 'recharge_gift')
             ->where('gf.status', 'effective')
-            ->where('ga.status', 'issued');
+            ->where(function ($q) use ($criteria) {
+                if ($criteria['status'] === 'voided') $q->where('ga.status', 'voided');
+                elseif ($criteria['dataScope'] === 'all' && $criteria['status'] === '') $q->whereIn('ga.status', ['issued', 'voided']);
+                else $q->where('ga.status', 'issued');
+            });
         $this->applyStoreScope($query, 'gf.store_id', $criteria['allowedStoreIds']);
         $this->applyKeyword($query, $criteria['keyword'], [
             'gf.gift_fact_id', 'ga.gift_no', 'ga.recharge_order_no_snapshot', 'gf.content_name_snapshot',
@@ -1191,7 +1204,7 @@ final class CashierV3OrderCenterRecordQueryServices
         $rows = $query->field(implode(',', [
             'gf.id', 'gf.gift_fact_id', 'gf.source_id', 'gf.source_detail_id', 'gf.gift_kind',
             'gf.quantity', 'gf.content_name_snapshot', 'gf.content_snapshot_json', 'gf.settled_at',
-            'gf.store_id', 'gf.member_id', 'gf.operator_id', 'ga.gift_no', 'ga.recharge_order_no_snapshot', 'u.real_name',
+            'gf.store_id', 'gf.member_id', 'gf.operator_id', 'ga.gift_no', 'ga.recharge_order_no_snapshot', 'ga.status AS authority_status', 'u.real_name',
             'u.nickname', 'u.phone', 's.name AS store_name', 'st.staff_name',
         ]))->order('gf.settled_at', 'desc')->order('gf.id', 'desc')->limit($limit)->select()->toArray();
         return [array_map(function (array $row): array {
@@ -1211,7 +1224,7 @@ final class CashierV3OrderCenterRecordQueryServices
                 'giftQuantity' => (int)$row['quantity'],
                 'effectiveAt' => $this->dateTime($time),
                 'expiresAt' => (int)($snapshot['validityEnd'] ?? 0) > 0 ? $this->dateTime((int)$snapshot['validityEnd']) : null,
-                'giftStatus' => '有效',
+                'giftStatus' => (string)($row['authority_status'] ?? '') === 'voided' ? '已作废' : '有效',
                 'storeName' => (string)$row['store_name'],
                 'operatorName' => (string)$row['staff_name'],
                 'giftReason' => '充值套餐赠送',
@@ -1236,7 +1249,21 @@ final class CashierV3OrderCenterRecordQueryServices
             ->leftJoin('system_store_staff st', 'st.id = gf.operator_id')
             ->where('gf.source_type', 'direct_gift')
             ->where('gf.status', 'effective')
-            ->where('ga.status', 'issued');
+            ->where(function ($q) use ($criteria) {
+                $allData = $criteria['dataScope'] === 'all' && $criteria['status'] === '';
+                if ($criteria['status'] === 'voided') {
+                    $q->where(function ($inner) {
+                        $inner->where('ga.status', 'voided')->whereOr('gi.status', 'voided');
+                    });
+                } elseif ($allData) {
+                    $q->where(function ($inner) {
+                        $inner->whereIn('ga.status', ['issued', 'voided'])
+                            ->whereIn('gi.status', ['issued', 'voided']);
+                    });
+                } else {
+                    $q->where('ga.status', 'issued')->where('gi.status', 'issued');
+                }
+            });
         $this->applyStoreScope($query, 'gf.store_id', $criteria['allowedStoreIds']);
         $this->applyKeyword($query, $criteria['keyword'], [
             'gf.gift_fact_id', 'ga.gift_no', 'ga.reason_snapshot', 'gf.content_name_snapshot',
@@ -1250,8 +1277,8 @@ final class CashierV3OrderCenterRecordQueryServices
             'gf.id', 'gf.gift_fact_id', 'gf.source_id', 'gf.source_detail_id', 'gf.gift_kind',
             'gf.quantity', 'gf.content_name_snapshot', 'gf.content_snapshot_json', 'gf.settled_at',
             'gf.store_id', 'gf.member_id', 'gf.operator_id', 'ga.gift_no', 'ga.reason_snapshot', 'ga.validity_end AS authority_validity_end',
-            'gi.content_snapshot_json AS item_content_snapshot_json', 'u.real_name',
-            'u.nickname', 'u.phone', 's.name AS store_name', 'st.staff_name',
+            'gi.content_snapshot_json AS item_content_snapshot_json', 'ga.status AS authority_status', 'u.real_name',
+            'gi.status AS item_status', 'u.nickname', 'u.phone', 's.name AS store_name', 'st.staff_name',
         ]))->order('gf.settled_at', 'desc')->order('gf.id', 'desc')->limit($limit)->select()->toArray();
         return [array_map(function (array $row): array {
             $snapshot = json_decode((string)($row['item_content_snapshot_json'] ?: $row['content_snapshot_json']), true);
@@ -1262,6 +1289,15 @@ final class CashierV3OrderCenterRecordQueryServices
             if ($validityEnd <= 0) $validityEnd = (int)($row['authority_validity_end'] ?? 0);
             return [
                 'id' => 'v3-direct-gift:' . (string)$row['gift_fact_id'],
+                // Lifecycle commands must use the immutable V3 gift fact identity,
+                // not the display number (a single gift number can contain
+                // multiple project/product rows).
+                'voidRecordId' => 'v3-direct-gift:' . (string)$row['gift_fact_id'],
+                // `record_id` is the hidden, stable key declared by the unified
+                // order-center contract. Keep it populated on the direct query
+                // path as well as on the export/provider path so the frontend
+                // never falls back to the human-facing ZS number.
+                'record_id' => 'gift:v3-direct-gift:' . (string)$row['gift_fact_id'],
                 'giftRecordNo' => trim((string)($row['gift_no'] ?? '')) ?: (string)$row['gift_fact_id'],
                 'businessDate' => $this->date($time),
                 'memberId' => (int)$row['member_id'],
@@ -1272,7 +1308,8 @@ final class CashierV3OrderCenterRecordQueryServices
                 'giftQuantity' => (int)$row['quantity'],
                 'effectiveAt' => $this->dateTime($time),
                 'expiresAt' => $validityEnd > 0 ? $this->dateTime($validityEnd) : null,
-                'giftStatus' => '有效',
+                'giftStatus' => (string)($row['authority_status'] ?? '') === 'voided'
+                    || (string)($row['item_status'] ?? '') === 'voided' ? '已作废' : '有效',
                 'storeName' => (string)$row['store_name'],
                 'operatorName' => (string)$row['staff_name'],
                 'giftReason' => (string)$row['reason_snapshot'],
@@ -1653,7 +1690,14 @@ final class CashierV3OrderCenterRecordQueryServices
         if ($type === 'gift') {
             return array_merge($options, [
                 ['value' => 'active', 'label' => '有效'],
+                ['value' => 'voided', 'label' => '已作废'],
                 ['value' => 'refunded', 'label' => '已失效'],
+            ]);
+        }
+        if ($type === 'supplement') {
+            return array_merge($options, [
+                ['value' => 'succeeded', 'label' => '补交成功'],
+                ['value' => 'voided', 'label' => '已作废'],
             ]);
         }
         if ($type === 'card_operation') {

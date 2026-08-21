@@ -22,6 +22,7 @@ const props = defineProps({
   laborDefaultFee: { type: [Number, String], default: 0 },
   laborManualFee: { type: [Number, String], default: null },
   allowLaborOverride: { type: Boolean, default: false },
+  projectCountTotal: { type: [Number, String], default: 1 },
   historyAdjustment: { type: Boolean, default: false },
   allocationTotalAmountCents: { type: [Number, String], default: 0 },
   loading: { type: Boolean, default: false },
@@ -110,6 +111,19 @@ function projectCountHalfUnitsFor(item = {}) {
   return Number.isFinite(projectCount) && projectCount >= 0 ? Math.round(projectCount * 2) : 0
 }
 
+function distributeProjectCounts(records) {
+  if (props.historyAdjustment || !Array.isArray(records)) return
+  const selected = records.filter((record) => record.selected && record.role === 'craftsmen')
+  if (!selected.length || selected.some((record) => record.projectCountTouched)) return
+  const totalHalfUnits = Math.max(0, Math.trunc(Number(props.projectCountTotal || 0) * 2))
+  const base = Math.floor(totalHalfUnits / selected.length)
+  const remainder = totalHalfUnits - base * selected.length
+  selected.forEach((record, index) => {
+    record.projectCountHalfUnits = base + (index >= selected.length - remainder ? 1 : 0)
+    record.projectCountText = (record.projectCountHalfUnits / 2).toFixed(1)
+  })
+}
+
 function recordId(record = {}) {
   return String(record.staffId || record.id || record.systemStoreStaffId || '')
 }
@@ -187,6 +201,8 @@ function mergeCandidates(candidates, selected, role) {
       allocationAmountYuan: allocationAmountYuanText(saved || {}),
       projectCountHalfUnits: projectCountHalfUnitsFor(saved || {}),
       projectCountText: (projectCountHalfUnitsFor(saved || {}) / 2).toFixed(1),
+      projectCountTouched: Object.prototype.hasOwnProperty.call(saved || {}, 'projectCountHalfUnits')
+        || Object.prototype.hasOwnProperty.call(saved || {}, 'projectCount'),
       role
     })
   }
@@ -213,6 +229,8 @@ function mergeCandidates(candidates, selected, role) {
       allocationAmountYuan: allocationAmountYuanText(saved),
       projectCountHalfUnits: projectCountHalfUnitsFor(saved),
       projectCountText: (projectCountHalfUnitsFor(saved) / 2).toFixed(1),
+      projectCountTouched: Object.prototype.hasOwnProperty.call(saved || {}, 'projectCountHalfUnits')
+        || Object.prototype.hasOwnProperty.call(saved || {}, 'projectCount'),
       role
     })
   }
@@ -221,6 +239,7 @@ function mergeCandidates(candidates, selected, role) {
     if (role === 'salespeople' && !selectedRecords.some((record) => record.performanceTouched)) salespersonDefaultWeights(merged)
     if (role !== 'salespeople') equalWeights(merged)
   }
+  if (role === 'craftsmen') distributeProjectCounts(merged)
   return merged
 }
 
@@ -310,6 +329,7 @@ function selectRecord(item) {
   if (!item.selected) item.marked = false
   if (item.role === 'craftsmen') {
     equalWeights(craftsmen.value)
+    distributeProjectCounts(craftsmen.value)
     if (props.historyAdjustment) {
       distributeHistoryAmountsByRatio()
     }
@@ -383,6 +403,7 @@ function normalizeProjectCount(item) {
   if (!Number.isFinite(value) || value < 0 || !Number.isInteger(value * 2)) return
   item.projectCountHalfUnits = Math.round(value * 2)
   item.projectCountText = (item.projectCountHalfUnits / 2).toFixed(1)
+  item.projectCountTouched = true
   validationMessage.value = ''
 }
 
@@ -589,6 +610,13 @@ function confirm() {
     activateInvalidTab('salespeople', '销售人分配比例必须为正整数，合计为 100%。')
     return
   }
+  if (selectedCraftsmen.some((item) => {
+    const value = Number(item.projectCountText)
+    return !Number.isFinite(value) || value < 0 || !Number.isInteger(value * 2)
+  })) {
+    activateInvalidTab('craftsmen', '项目数只能按 0.5 递增，且不能小于 0。')
+    return
+  }
   validationMessage.value = ''
   const assignment = {
     craftsmen: selectedCraftsmen.map((item, index) => ({
@@ -705,7 +733,7 @@ function searchGroupPersonnel(scope) {
           <label v-for="round in [1, 2, 3]" :key="round"><input v-model="guideRoundNo" type="radio" :value="String(round)"><span>第{{ round }}轮</span></label>
         </fieldset>
         <div class="personnel-full-table" :class="{ 'personnel-full-table--craftsmen': activeTab === 'craftsmen' && !activeIsNonPerformance, 'personnel-full-table--history': historyAdjustment && activeTab === 'craftsmen' }" role="table" aria-label="完整人员分配">
-          <div role="row" class="personnel-full-table__head"><span>员工</span><span>职位</span><span>职级</span><span v-if="!activeIsNonPerformance">服务业绩类型</span><span v-if="!activeIsNonPerformance">{{ activeTab === 'craftsmen' ? '是否点客' : '是否售前' }}</span><span v-if="!activeIsNonPerformance">业绩比例</span><span v-if="historyAdjustment && activeTab === 'craftsmen'">消耗业绩</span><span v-if="activeTab === 'craftsmen' && !activeIsNonPerformance">手工费</span><span v-if="historyAdjustment && activeTab === 'craftsmen'">项目数</span><span>操作</span></div>
+          <div role="row" class="personnel-full-table__head"><span>员工</span><span>职位</span><span>职级</span><span v-if="!activeIsNonPerformance">服务业绩类型</span><span v-if="!activeIsNonPerformance">{{ activeTab === 'craftsmen' ? '是否点客' : '是否售前' }}</span><span v-if="!activeIsNonPerformance">业绩比例</span><span v-if="historyAdjustment && activeTab === 'craftsmen'">消耗业绩</span><span v-if="activeTab === 'craftsmen' && !activeIsNonPerformance">手工费</span><span v-if="activeTab === 'craftsmen' && !activeIsNonPerformance">项目数</span><span>操作</span></div>
           <div v-for="item in selectedRecords" :key="item.id" role="row" class="personnel-full-table__row">
             <strong>{{ item.name }}</strong><span>{{ item.position }}</span><span>{{ item.level }}</span>
             <span v-if="!activeIsNonPerformance && activeTab === 'craftsmen'">{{ performanceTypeLabel(item) }}</span>
@@ -714,7 +742,7 @@ function searchGroupPersonnel(scope) {
             <label v-if="!activeIsNonPerformance" class="personnel-allocation-input"><input v-model.number="item.performance" type="number" min="0" max="100" :step="historyAdjustment ? '0.01' : '1'" inputmode="decimal" aria-label="业绩分配比例" :disabled="activeTab === 'craftsmen' && craftsmanType(item) === PERFORMANCE_TYPES.LABOR" @input="markPerformanceTouched(item)"><b>%</b></label>
             <label v-if="historyAdjustment && activeTab === 'craftsmen'" class="personnel-allocation-input personnel-allocation-input--money"><input v-model.trim="item.allocationAmountYuan" type="number" min="0" step="1" inputmode="numeric" aria-label="分配消耗业绩" :disabled="craftsmanType(item) === PERFORMANCE_TYPES.LABOR" @input="syncHistoryRatioFromAmount(item)"><b>元</b></label>
             <label v-if="activeTab === 'craftsmen' && !activeIsNonPerformance" class="personnel-allocation-input personnel-allocation-input--labor"><input v-model.number="item.laborFeeYuan" type="number" min="0" step="1" inputmode="numeric" aria-label="每人手工费" :disabled="craftsmanType(item) === PERFORMANCE_TYPES.COMMISSION" @input="item.laborFeeCents = Math.max(0, Number(item.laborFeeYuan || 0) * 100)"><b>元/次</b></label>
-            <label v-if="historyAdjustment && activeTab === 'craftsmen'" class="personnel-allocation-input personnel-allocation-input--project"><input v-model.trim="item.projectCountText" type="number" min="0" step="0.5" inputmode="decimal" aria-label="工资项目数" @blur="normalizeProjectCount(item)"><b>个</b></label>
+            <label v-if="activeTab === 'craftsmen' && !activeIsNonPerformance" class="personnel-allocation-input personnel-allocation-input--project"><input v-model.trim="item.projectCountText" type="number" min="0" step="0.5" inputmode="decimal" :aria-label="historyAdjustment ? '工资项目数' : '项目数'" @blur="normalizeProjectCount(item)"><b>个</b></label>
             <button type="button" @click="selectRecord(item)">删除</button>
           </div>
           <p v-if="!selectedRecords.length" class="personnel-empty">请先在简易选择中添加人员</p>

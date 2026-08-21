@@ -2029,6 +2029,8 @@ final class CashierV3CashierWorkspaceServices
         $weights = [];
         $types = [];
         $requestedFees = [];
+        $requestedProjectCounts = [];
+        $hasProjectCount = false;
         $pointFlags = [];
         foreach ($selections as $selection) {
             $staffId = is_array($selection) ? (int)($selection['staffId'] ?? 0) : 0;
@@ -2052,6 +2054,11 @@ final class CashierV3CashierWorkspaceServices
             $weights[$staffId] = $weight;
             $types[$staffId] = $normalizedType;
             $requestedFees[$staffId] = max(0, (int)($selection['laborFeeCents'] ?? $selection['labor_fee_cents'] ?? 0));
+            if (array_key_exists('projectCountHalfUnits', $selection)
+                || array_key_exists('project_count_half_units', $selection)) {
+                $requestedProjectCounts[$staffId] = max(0, (int)($selection['projectCountHalfUnits'] ?? $selection['project_count_half_units'] ?? 0));
+                $hasProjectCount = true;
+            }
             $pointFlags[$staffId] = is_array($selection) && !empty($selection['isPointCustomer']);
         }
         // Labor-only craftsmen do not participate in the commission ratio.
@@ -2138,7 +2145,7 @@ final class CashierV3CashierWorkspaceServices
             $laborFeeCents = $type === EmployeeCraftsmanPerformanceTypeServices::COMMISSION
                 ? 0
                 : ($requestedFees[$staffId] > 0 ? $requestedFees[$staffId] : $defaultLaborFeeCents);
-            $craftsmen[] = [
+            $craftsman = [
                 'id' => $staffId,
                 'staffId' => $staffId,
                 'employeeId' => (int)$row['employee_id'],
@@ -2151,6 +2158,10 @@ final class CashierV3CashierWorkspaceServices
                 'laborFeeCents' => $laborFeeCents,
                 'isPointCustomer' => $pointFlags[$staffId],
             ];
+            if ($hasProjectCount) {
+                $craftsman['projectCountHalfUnits'] = (int)($requestedProjectCounts[$staffId] ?? 0);
+            }
+            $craftsmen[] = $craftsman;
         }
         if ($authoritativeCommissionWeight > 0 && $authoritativeCommissionWeight !== 100) {
             throw new CashierV3CommandException(
@@ -2297,13 +2308,18 @@ final class CashierV3CashierWorkspaceServices
                 throw $this->incompleteLineSettings($lineKey, 'stored_craftsman_weight_invalid');
             }
             $needsLegacyEqualWeights = $needsLegacyEqualWeights || !$hasWeight;
-            $selections[] = [
+            $selection = [
                 'staffId' => $staffId,
                 'laborWeight' => $weight,
                 'isPointCustomer' => !empty($craftsman['isPointCustomer']),
                 'craftsmanPerformanceType' => $type,
                 'laborFeeCents' => max(0, (int)($craftsman['laborFeeCents'] ?? $craftsman['labor_fee_cents'] ?? 0)),
             ];
+            if (array_key_exists('projectCountHalfUnits', $craftsman)
+                || array_key_exists('project_count_half_units', $craftsman)) {
+                $selection['projectCountHalfUnits'] = max(0, (int)($craftsman['projectCountHalfUnits'] ?? $craftsman['project_count_half_units'] ?? 0));
+            }
+            $selections[] = $selection;
         }
         if ($needsLegacyEqualWeights && $selections) {
             if (count(array_filter($selections, static function (array $selection): bool {
