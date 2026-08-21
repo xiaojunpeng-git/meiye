@@ -73,6 +73,31 @@ export default {
       component: () => import('@/pages/report/data/product_dashboard')
     },
     {
+      path: 'engineering-management',
+      name: `${pre}engineering_management`,
+      meta: {
+        auth: ['admin-data-engineering-management'],
+        title: '工程管理'
+      },
+      // 工程管理只是“数据”菜单下的分组入口，不承载汇总或统计页面。
+      // 进入父级时直接落到四个原始表单中的第一个。
+      redirect: (to) => ({
+        name: `${pre}engineering_store_building`,
+        query: to.query
+      })
+    },
+    ...[
+      ['store-building', 'store_building', '建店明细', 'admin-data-engineering-management-store-building'],
+      ['engineering-quality', 'engineering_quality', '工程质量', 'admin-data-engineering-management-engineering-quality'],
+      ['engineering-repair', 'engineering_repair', '工程维修', 'admin-data-engineering-management-engineering-repair'],
+      ['rent-renewal', 'rent_renewal', '降租续签', 'admin-data-engineering-management-rent-renewal']
+    ].map(([path, ledgerType, title, auth]) => ({
+      path,
+      name: `${pre}engineering_${ledgerType}`,
+      meta: { auth: [auth], title, ledgerType },
+      component: () => import('@/pages/report/data/engineering_management')
+    })),
+    {
       path: 'member-management-dashboard',
       name: `${pre}member_management_dashboard`,
       meta: {

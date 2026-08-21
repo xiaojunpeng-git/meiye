@@ -3,13 +3,15 @@ import { ref } from 'vue'
 import { useCashierV3State } from '@/services/cashierV3Bridge'
 import StaffListView from '@/views/StaffListView.vue'
 import RoomSettingsView from '@/views/RoomSettingsView.vue'
+import EngineeringManagementView from '@/views/EngineeringManagementView.vue'
 
 const state = useCashierV3State()
 const activeTab = ref('staff')
 
 const tabs = [
   { id: 'staff', label: '人员管理' },
-  { id: 'room', label: '房间设置' }
+  { id: 'room', label: '房间设置' },
+  { id: 'engineering', label: '工程管理' }
 ]
 </script>
 
@@ -33,7 +35,8 @@ const tabs = [
 
     <KeepAlive>
       <StaffListView v-if="activeTab === 'staff'" />
-      <RoomSettingsView v-else embedded />
+      <RoomSettingsView v-else-if="activeTab === 'room'" embedded />
+      <EngineeringManagementView v-else />
     </KeepAlive>
   </section>
 </template>

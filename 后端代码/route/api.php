@@ -972,6 +972,11 @@ Route::group('api', function () {
 	 */
 	Route::post('merchant/login', 'v1.merchant.MerchantLogin/login')->option(['real_name' => '手机商家端员工账号登录']);
 	Route::group('merchant', function () {
+		Route::get('engineering-ledger/catalog', 'v1.merchant.EngineeringLedger/catalog')->option(['real_name' => '商家工程管理台账目录']);
+		Route::get('engineering-ledger/list', 'v1.merchant.EngineeringLedger/list')->option(['real_name' => '商家工程管理台账列表']);
+		Route::get('engineering-ledger/read/:id', 'v1.merchant.EngineeringLedger/read')->option(['real_name' => '商家工程管理台账详情']);
+		Route::post('engineering-ledger/save', 'v1.merchant.EngineeringLedger/save')->option(['real_name' => '商家工程管理台账保存']);
+		Route::get('engineering-ledger/export', 'v1.merchant.EngineeringLedger/export')->option(['real_name' => '商家工程管理台账导出']);
 		Route::get('access', 'v1.merchant.MerchantAccess/access')->option(['real_name' => '商家入口权限']);
 		Route::post('context/switch', 'v1.merchant.MerchantAccess/switchContext')->option(['real_name' => '切换商家身份上下文']);
 		Route::get('home', 'v1.merchant.MerchantBiz/home')->option(['real_name' => '商家首页聚合']);

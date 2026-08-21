@@ -18,6 +18,7 @@ use app\services\report\GroupManagementDashboardServices;
 use app\services\report\GroupManagementDashboardTargetServices;
 use app\services\report\MemberManagementDashboardServices;
 use app\services\report\ProductManagementDashboardServices;
+use app\services\report\BusinessLedgerServices;
 use app\services\system\SystemRoleServices;
 use think\facade\Db;
 
@@ -194,6 +195,65 @@ class UnifiedReport extends AuthController
         } catch (\InvalidArgumentException $e) {
             return app('json')->fail($e->getMessage());
         }
+    }
+
+    public function ledgerCatalog(BusinessLedgerServices $services)
+    {
+        if (!$this->hasMenuPermission('admin-data-engineering-management')) return app('json')->fail('当前账号未配置工程管理权限');
+        return app('json')->success($services->catalog());
+    }
+
+    public function ledgerList(Request $request, BusinessLedgerServices $services)
+    {
+        if (!$this->ledgerPermission((string)$request->param('type', ''))) return app('json')->fail('当前账号未配置该台账权限');
+        $input = $request->getMore([['type', ''], ['page', 1], ['limit', 20], ['keyword', ''], ['start_date', ''], ['end_date', ''], ['org_id', 0], ['store_id', 0], ['store_ids', '']]);
+        try { $stores = $this->scopedStoreIds($input); return app('json')->success($services->list((string)$input['type'], ['store_ids' => $stores], $input)); }
+        catch (\InvalidArgumentException $e) { return app('json')->fail($e->getMessage()); }
+    }
+
+    public function ledgerSave(Request $request, BusinessLedgerServices $services)
+    {
+        if (!$this->ledgerPermission((string)$request->param('type', $request->post('type', '')))) return app('json')->fail('当前账号未配置该台账权限');
+        $payload = $request->post(); $input = ['org_id' => (int)($payload['org_id'] ?? 0), 'store_id' => (int)($payload['store_id'] ?? 0), 'store_ids' => (string)($payload['store_ids'] ?? '')];
+        try { return app('json')->success($services->save((string)($payload['type'] ?? ''), ['store_ids' => $this->scopedStoreIds($input)], $payload, ['id' => $this->adminId, 'name' => (string)($this->adminInfo['real_name'] ?? $this->adminInfo['account'] ?? '')])); }
+        catch (\InvalidArgumentException $e) { return app('json')->fail($e->getMessage()); }
+    }
+
+    public function ledgerRead(Request $request, BusinessLedgerServices $services, $id = 0)
+    {
+        $input = $request->getMore([['type', ''], ['org_id', 0], ['store_id', 0], ['store_ids', '']]);
+        if (!$this->ledgerPermission((string)$input['type'])) return app('json')->fail('当前账号未配置该台账权限');
+        try { return app('json')->success($services->read((string)$input['type'], (int)($id ?: $request->param('id', 0)), ['store_ids' => $this->scopedStoreIds($input)])); }
+        catch (\InvalidArgumentException $e) { return app('json')->fail($e->getMessage()); }
+    }
+
+    public function ledgerVoid(Request $request, BusinessLedgerServices $services, $id = 0)
+    {
+        $payload = $request->post(); $input = ['org_id' => (int)($payload['org_id'] ?? 0), 'store_id' => (int)($payload['store_id'] ?? 0), 'store_ids' => (string)($payload['store_ids'] ?? '')];
+        if (!$this->ledgerPermission((string)($payload['type'] ?? ''))) return app('json')->fail('当前账号未配置该台账权限');
+        try { return app('json')->success($services->void((string)($payload['type'] ?? ''), (int)($id ?: ($payload['id'] ?? 0)), (int)($payload['version'] ?? 0), ['store_ids' => $this->scopedStoreIds($input)], ['id' => $this->adminId, 'name' => (string)($this->adminInfo['real_name'] ?? $this->adminInfo['account'] ?? '')])); }
+        catch (\InvalidArgumentException $e) { return app('json')->fail($e->getMessage()); }
+    }
+
+    public function ledgerExport(Request $request, BusinessLedgerServices $services)
+    {
+        if (!$this->ledgerPermission((string)$request->param('type', ''))) return app('json')->fail('当前账号未配置该台账权限');
+        $input = $request->getMore([['type', ''], ['keyword', ''], ['start_date', ''], ['end_date', ''], ['org_id', 0], ['store_id', 0], ['store_ids', '']]);
+        try { $file = $services->export((string)$input['type'], ['store_ids' => $this->scopedStoreIds($input)], $input); return download($file['path'], $file['filename']); }
+        catch (\InvalidArgumentException $e) { return app('json')->fail($e->getMessage()); }
+    }
+
+    public function ledgerReminders(Request $request, BusinessLedgerServices $services)
+    {
+        if (!$this->hasMenuPermission('admin-data-engineering-management')) return app('json')->fail('当前账号未配置工程管理权限');
+        $input = $request->getMore([['org_id', 0], ['store_id', 0], ['store_ids', '']]);
+        return app('json')->success($services->reminders(['store_ids' => $this->scopedStoreIds($input)]));
+    }
+
+    private function ledgerPermission(string $type): bool
+    {
+        $map = ['store_building' => 'store-building', 'engineering_quality' => 'engineering-quality', 'engineering_repair' => 'engineering-repair', 'rent_renewal' => 'rent-renewal'];
+        return $this->hasMenuPermission('admin-data-engineering-management') && isset($map[$type]) && $this->hasMenuPermission('admin-data-engineering-management-' . $map[$type]);
     }
 
     public function query(Request $request, StoreUnifiedReportServices $services, StoreUnifiedReportPhaseThreeServices $phaseThree, StoreUnifiedReportPhaseFourServices $phaseFour, StoreUnifiedReportPhaseSixServices $phaseSix)
