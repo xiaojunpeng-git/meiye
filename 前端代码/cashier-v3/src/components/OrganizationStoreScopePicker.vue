@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import ChevronDown from '@lucide/vue/dist/esm/icons/chevron-down.mjs'
 import ChevronRight from '@lucide/vue/dist/esm/icons/chevron-right.mjs'
 import Network from '@lucide/vue/dist/esm/icons/network.mjs'
@@ -14,10 +14,15 @@ const props = defineProps({
 
 const emit = defineEmits(['update:modelValue', 'change'])
 const open = ref(false)
+const triggerRef = ref(null)
+const panelRef = ref(null)
+const panelStyle = ref({})
 const expandedKeys = ref(new Set())
 const selectedOrganizationKey = ref('')
 const selectedOrganizationName = ref('')
 const selectedStores = ref([])
+let panelResizeHandler = null
+const panelScrollTargets = []
 
 const allowedStoreIdSet = computed(() => new Set((props.allowedStoreIds || []).map(Number).filter(Boolean)))
 const selectedStoreIds = computed(() => [...new Set((props.modelValue || []).map(Number).filter(Boolean))])
@@ -56,6 +61,64 @@ function emitChange(storeIds, label, close = false) {
   emit('update:modelValue', ids)
   emit('change', { storeIds: ids, label })
   if (close) open.value = false
+}
+
+function updatePanelPosition() {
+  if (!open.value || typeof window === 'undefined' || !triggerRef.value) return
+
+  const triggerRect = triggerRef.value.getBoundingClientRect()
+  const availableWidth = Math.max(240, window.innerWidth - 24)
+  const panelWidth = Math.min(480, availableWidth)
+  const targetHeight = Math.min(360, Math.max(280, window.innerHeight - 24))
+  const left = Math.min(
+    Math.max(12, triggerRect.left),
+    Math.max(12, window.innerWidth - panelWidth - 12)
+  )
+  const spaceBelow = window.innerHeight - triggerRect.bottom - 8
+  const spaceAbove = triggerRect.top - 8
+  const openAbove = spaceBelow < targetHeight && spaceAbove > spaceBelow
+  const top = openAbove
+    ? Math.max(8, triggerRect.top - targetHeight - 8)
+    : Math.min(window.innerHeight - targetHeight - 8, triggerRect.bottom + 8)
+
+  panelStyle.value = {
+    position: 'fixed',
+    zIndex: 2000,
+    left: `${left}px`,
+    top: `${Math.max(8, top)}px`,
+    width: `${panelWidth}px`,
+    maxHeight: `${targetHeight}px`
+  }
+}
+
+function bindPanelPositioning() {
+  if (typeof window === 'undefined' || panelResizeHandler) return
+  unbindPanelPositioning()
+  panelResizeHandler = () => updatePanelPosition()
+  window.addEventListener('resize', panelResizeHandler, { passive: true })
+  const trigger = triggerRef.value
+  const candidates = []
+  let parent = trigger?.parentElement || null
+  while (parent) {
+    const style = window.getComputedStyle(parent)
+    const overflow = `${style.overflow}${style.overflowX}${style.overflowY}`
+    if (/(auto|scroll|overlay)/i.test(overflow)) candidates.push(parent)
+    parent = parent.parentElement
+  }
+  candidates.push(window)
+  candidates.forEach((target) => {
+    target.addEventListener('scroll', panelResizeHandler, { passive: true })
+    panelScrollTargets.push(target)
+  })
+}
+
+function unbindPanelPositioning() {
+  if (typeof window === 'undefined') return
+  if (panelResizeHandler) window.removeEventListener('resize', panelResizeHandler)
+  panelScrollTargets.splice(0).forEach((target) => {
+    target.removeEventListener?.('scroll', panelResizeHandler)
+  })
+  panelResizeHandler = null
 }
 
 function toggleNode(option) {
@@ -114,17 +177,39 @@ function chooseAll() {
   selectedStores.value = []
   emitChange([], '当前权限范围', true)
 }
+
+watch(open, async (value) => {
+  if (value) {
+    bindPanelPositioning()
+    await nextTick()
+    updatePanelPosition()
+    return
+  }
+  panelStyle.value = {}
+  unbindPanelPositioning()
+})
+
+onMounted(() => {
+  if (open.value) {
+    bindPanelPositioning()
+    void nextTick().then(updatePanelPosition)
+  }
+})
+
+onBeforeUnmount(() => {
+  unbindPanelPositioning()
+})
 </script>
 
 <template>
   <div class="organization-store-scope-picker">
-    <button type="button" class="organization-store-scope-picker__trigger" :disabled="loading" @click="open = !open">
+    <button ref="triggerRef" type="button" class="organization-store-scope-picker__trigger" :disabled="loading" @click="open = !open">
       <Network :size="16" aria-hidden="true" />
       <span>{{ loading ? '读取权限范围' : label }}</span>
       <ChevronDown :size="15" aria-hidden="true" />
     </button>
 
-    <section v-if="open" class="organization-store-scope-picker__panel" aria-label="组织和门店权限范围">
+    <section ref="panelRef" v-if="open" class="organization-store-scope-picker__panel" :style="panelStyle" aria-label="组织和门店权限范围">
       <header>组织 / 门店</header>
       <div class="organization-store-scope-picker__body">
         <div class="organization-store-scope-picker__tree" aria-label="组织树">
@@ -157,7 +242,7 @@ function chooseAll() {
 .organization-store-scope-picker__trigger { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; border: 1px solid #dcdee2; border-radius: 4px; padding: 5px 10px; background: #fff; color: #515a6e; font: inherit; font-size: 13px; cursor: pointer; }
 .organization-store-scope-picker__trigger:hover { border-color: #57a3f3; color: #2d8cf0; }
 .organization-store-scope-picker__trigger:disabled { cursor: wait; opacity: .65; }
-.organization-store-scope-picker__panel { position: absolute; z-index: 1000; top: calc(100% + 6px); left: 0; width: min(480px, calc(100vw - 48px)); overflow: hidden; border: 1px solid #dcdee2; border-radius: 4px; background: #fff; box-shadow: 0 2px 12px rgba(0, 0, 0, .14); }
+.organization-store-scope-picker__panel { overflow: hidden; border: 1px solid #dcdee2; border-radius: 4px; background: #fff; box-shadow: 0 2px 12px rgba(0, 0, 0, .14); }
 .organization-store-scope-picker__panel header { padding: 12px 14px 8px; border-bottom: 1px solid #edf0f5; color: #17233d; font-size: 14px; font-weight: 600; }
 .organization-store-scope-picker__body { display: flex; min-height: 230px; }
 .organization-store-scope-picker__tree { position: relative; flex: 1; max-height: 260px; overflow: auto; padding: 7px 8px; border-right: 1px solid #edf0f5; }
