@@ -15,6 +15,9 @@ const checks = [
   ['收银会员选择只写入浏览器草稿', /applyLocalCashierCustomerSelection\(\{ customerMode: 'member', member: record \}\)/.test(memberSelection)],
   ['收银会员选择不再调用服务端选择命令', !/select-cashier-member/.test(memberSelection)],
   ['收银会员选择不再二次读取完整工作台', !/open-cashier-workbench/.test(memberSelection)],
+  ['收银会员选择读取权威欠款摘要', /requestCashierV3Action\(\s*['"]query-cashier-member-summary['"]/.test(memberSelection)
+    && /memberSummary/.test(memberSelection)
+    && /pendingDebtReminderAfterSource\.value = \{ member: selectedMember \}/.test(memberSelection)],
   ['收银会员选择器打开不再写服务端工作台', !/requestCashierV3Action\(\s*['"]open-member-selector['"]/.test(cashierSelectorOpen)],
   ['游客切换只写入浏览器草稿', /applyLocalCashierCustomerSelection\(\{ customerMode: 'guest' \}\)/.test(guestSelection)],
   ['游客切换不再调用服务端命令', !/requestCashierV3Action\(\s*['"]set-guest-order['"]/.test(guestSelection)],

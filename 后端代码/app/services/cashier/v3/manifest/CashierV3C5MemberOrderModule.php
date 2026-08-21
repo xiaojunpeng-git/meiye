@@ -80,6 +80,8 @@ class CashierV3C5MemberOrderModule implements CashierV3ActionModule
         }
         // 共用会员选择器：按可信 selectorContext 判权
         $projection['query-member-selector'] = self::POLICY_MEMBER_SELECTOR;
+        // 收银选择会员后的欠款提醒只读取权威会员摘要，不写入工作台或结账草稿。
+        $projection['query-cashier-member-summary'] = self::FEATURE_CASHIER;
 
         foreach ([
             'query-sales-orders' => self::FEATURE_ORDER_CENTER,

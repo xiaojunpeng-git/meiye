@@ -297,6 +297,7 @@ const C5_ACTIONS = {
     'query-unified-query-capabilities': 'policy:unified_query_page',
     'query-unified-query-export-task': 'policy:unified_query_page',
     'query-member-selector': 'selector:member',
+    'query-cashier-member-summary': FEATURE_CASHIER,
     'open-member-selector': FEATURE_CASHIER,
     'open-member-detail': FEATURE_MEMBER,
     'load-member-detail-tab': FEATURE_MEMBER,

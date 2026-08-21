@@ -850,11 +850,29 @@ async function selectMemberFromSelector(record) {
     // selected member with the guest root projection.
     isMemberSelectorOpen.value = false
     await nextTick()
-    const selectedDetail = localCashierCustomerSelectionDetail(record)
-    if (memberDebtAmount(record) > 0) {
+    // 会员选择仍然只改浏览器本地草稿；单独读取一次权威会员摘要，避免
+    // 选择器基础资料缺少欠款汇总而漏掉提醒。该 projection 不写工作台、
+    // 不创建结账请求，也不会改变最终唯一 checkoutSnapshot。
+    let selectedMember = record
+    const memberId = memberDetailId(record)
+    if (memberId) {
+      const summaryResult = await requestCashierV3Action('query-cashier-member-summary', {
+        memberId,
+        silent: true
+      })
+      if (isSucceededResult(summaryResult)) {
+        const summary = responseDataBlock(summaryResult)?.memberSummary
+        if (summary && typeof summary === 'object') {
+          selectedMember = { ...record, ...summary }
+          applyLocalCashierCustomerSelection({ customerMode: 'member', member: selectedMember })
+        }
+      }
+    }
+    const selectedDetail = localCashierCustomerSelectionDetail(selectedMember)
+    if (memberDebtAmount(selectedMember) > 0) {
       // Customer source is the first post-selection interaction. Keep the
       // debt reminder queued so the two modal layers never overlap.
-      pendingDebtReminderAfterSource.value = { member: record }
+      pendingDebtReminderAfterSource.value = { member: selectedMember }
     }
     await completeMemberSelection(selectedDetail)
     return { result: { status: 'success' } }

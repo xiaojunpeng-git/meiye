@@ -167,6 +167,20 @@ final class CashierV3MemberModule
                 ];
             });
         }
+        if (!$handlers->hasProjection('query-cashier-member-summary')) {
+            $handlers->registerProjection('query-cashier-member-summary', function (array $scope) use ($cashierMemberSummaries): array {
+                $payload = is_array($scope['payload'] ?? null) ? $scope['payload'] : [];
+                $memberId = (int)($payload['memberId'] ?? $payload['member_id'] ?? 0);
+                if ($memberId <= 0) {
+                    throw CashierV3CommandException::invalidContext('请选择有效会员后再读取欠款信息。');
+                }
+                $summary = $cashierMemberSummaries->read(
+                    $memberId,
+                    $scope['operator_scope']->storeId()
+                );
+                return ['data' => ['memberSummary' => $summary]];
+            });
+        }
         if (!$handlers->hasProjection('query-members')) {
             $handlers->registerProjection('query-members', function (array $scope): array {
                 return [
