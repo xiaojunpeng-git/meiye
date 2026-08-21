@@ -1105,6 +1105,14 @@ final class CashierV3CheckoutSettlementKernel
         if ($sourceType !== 'card') {
             return [];
         }
+        // 欠款补交复用 sale line 作为统一收款草稿的载体，但它不是一次
+        // 新购卡，因而没有 card purchase snapshot。普通卡销售仍必须提交
+        // 非列表快照；仅对稳定的 debt-repayment authority key 放行空快照，
+        // 避免把这个兼容分支扩大到普通卡购买。
+        if (strpos($authorityKey, 'debt-repayment:') === 0
+            && $value === []) {
+            return [];
+        }
         if (!is_array($value) || self::isList($value)) {
             throw self::failure('card_purchase_snapshot_shape_invalid', ['authorityKey' => $authorityKey]);
         }

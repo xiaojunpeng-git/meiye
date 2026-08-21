@@ -51,6 +51,16 @@ const salesPersonnelReason = ref('')
 const salesPersonnelError = ref('')
 const salesPersonnelSubmitting = ref(false)
 const salesPersonnelCommandIds = ref({})
+// Recharge and debt-repayment personnel adjustments use the same personnel
+// selector, but their authority records are not sales-order resources.
+const recordPersonnelEntry = ref(null)
+const recordPersonnelTarget = ref(null)
+const recordPersonnelEditorOpen = ref(false)
+const recordPersonnelPendingAssignment = ref(null)
+const recordPersonnelReason = ref('')
+const recordPersonnelError = ref('')
+const recordPersonnelSubmitting = ref(false)
+const recordPersonnelCommandIds = ref({})
 const salesOrderNoteRecord = ref(null)
 const salesOrderNoteValue = ref('')
 const salesOrderNoteError = ref('')
@@ -94,9 +104,9 @@ const ORDER_TABS = [
       field('recharge_order_no', '充值订单号', 'text', { defaultQuick: true }),
       field('business_date', '业务日期', 'date', { defaultQuick: true }),
       field('member_name', '会员姓名'), field('phone', '手机号'), field('store', '办理门店', 'store'),
-      field('recharge_plan', '充值方案'), field('recharge_amount', '充值金额', 'money'),
-      field('gift_amount', '赠送金额', 'money'), field('actual_received_amount', '现金业绩', 'money'),
-      field('payment_method', '收款方式'), field('salesperson', '销售人', 'person'),
+      field('recharge_plan', '充值方案'), field('salesperson', '销售人', 'person'),
+      field('recharge_amount', '充值金额', 'money'), field('gift_amount', '赠送金额', 'money'),
+      field('actual_received_amount', '现金业绩', 'money'), field('payment_method', '收款方式'),
       field('operator', '操作人', 'person'), field('payment_status', '支付状态', 'status'),
       field('order_status', '订单状态', 'status'), field('payment_completed_at', '支付完成时间', 'date')
     ]
@@ -172,7 +182,7 @@ const ORDER_TABS = [
       field('business_date', '业务日期', 'date', { defaultQuick: true }),
       field('debt_no', '欠款编号'), field('source_order_no', '来源订单号'),
       field('member_name', '会员姓名'), field('phone', '手机号'), field('debt_summary', '欠款摘要'),
-      field('supplement_amount', '补交金额', 'money'), field('payment_method', '收款方式'),
+      field('salesperson', '销售人', 'person'), field('supplement_amount', '补交金额', 'money'), field('payment_method', '收款方式'),
       field('store', '补交门店', 'store'), field('operator', '操作人', 'person'),
       field('payment_status', '支付状态', 'status'), field('payment_completed_at', '支付完成时间', 'date')
     ]
@@ -313,12 +323,23 @@ const visibleFields = computed(() => {
     ? configured
     : queryFields.value.filter((item) => item.defaultVisible !== false).map((item) => item.key)
   const seen = new Set()
-  return source.reduce((items, key) => {
+  const fields = source.reduce((items, key) => {
     if (seen.has(key) || !available.has(key)) return items
     seen.add(key)
     items.push(available.get(key))
     return items
   }, [])
+  // 销售人是充值/补交金额的归属字段，固定显示在金额左侧；旧版保存的
+  // 查询设置可能仍把它排在金额后面，这里只纠正这两个字段的相对位置。
+  if (['recharge', 'supplement'].includes(activeTabKey.value)) {
+    const salespersonIndex = fields.findIndex((item) => item.key === 'salesperson')
+    const amountIndex = fields.findIndex((item) => item.key === (activeTabKey.value === 'recharge' ? 'recharge_amount' : 'supplement_amount'))
+    if (salespersonIndex >= 0 && amountIndex >= 0 && salespersonIndex > amountIndex) {
+      const [salesperson] = fields.splice(salespersonIndex, 1)
+      fields.splice(amountIndex, 0, salesperson)
+    }
+  }
+  return fields
 })
 const detailFields = computed(() => {
   if (activeTabKey.value !== 'service' || !genericDetailRecord.value?.voidedAt) return visibleFields.value
@@ -643,8 +664,8 @@ function salesPersonnelInitialSelection(role, line) {
   })
 }
 
-function closeSalesPersonnelEditor() {
-  if (salesPersonnelSubmitting.value) return
+function closeSalesPersonnelEditor(force = false) {
+  if (salesPersonnelSubmitting.value && !force) return
   salesPersonnelEditorOpen.value = false
   salesPersonnelEntry.value = null
   salesPersonnelTarget.value = null
@@ -720,7 +741,7 @@ async function submitSalesPersonnelAdjustment() {
     const status = actionStatus(result)
     if (isTerminalActionStatus(status)) salesPersonnelCommandIds.value = { ...salesPersonnelCommandIds.value, [key]: null }
     if (['success', 'succeeded'].includes(String(status))) {
-      closeSalesPersonnelEditor()
+      closeSalesPersonnelEditor(true)
       salesPersonnelPendingAssignment.value = null
       // A personnel write changes this order's lifecycle version. The current
       // sales cursor is a signed pre-write snapshot, so reuse would be
@@ -732,6 +753,143 @@ async function submitSalesPersonnelAdjustment() {
     salesPersonnelError.value = result?.result?.message || result?.data?.result?.message || '人员修改未完成，请稍后重试。'
   } finally {
     salesPersonnelSubmitting.value = false
+  }
+}
+
+function recordPersonnelActionNames(type) {
+  return type === 'recharge'
+    ? { open: 'open-recharge-personnel-adjustment', adjust: 'adjust-recharge-personnel' }
+    : { open: 'open-supplement-personnel-adjustment', adjust: 'adjust-supplement-personnel' }
+}
+
+function recordPersonnelId(record, type) {
+  if (type === 'recharge') return String(record?.rechargeId || String(record?.id || '').replace(/^recharge:/, ''))
+  return String(record?.repaymentId || String(record?.id || '').replace(/^v3-(?:sales-)?supplement:/, ''))
+}
+
+function recordPersonnelSelected(line = {}) {
+  return Array.isArray(line.currentSalespeople) ? line.currentSalespeople : []
+}
+
+function recordPersonnelCandidates(entry = {}) {
+  return Array.isArray(entry.salespeople) ? entry.salespeople : []
+}
+
+function recordPersonnelInitialSelection(line = {}) {
+  const candidates = recordPersonnelCandidates(recordPersonnelEntry.value || {})
+  return recordPersonnelSelected(line).map((selected) => {
+    const employeeId = Number(selected.employeeId || selected.staffId || selected.id || 0)
+    const candidate = candidates.find((item) => Number(item.employeeId || item.staffId || item.id || 0) === employeeId)
+    return {
+      ...selected,
+      ...(candidate || {}),
+      id: candidate?.staffId || selected.staffId || employeeId,
+      staffId: candidate?.staffId || selected.staffId || employeeId,
+      employeeId,
+      selected: true
+    }
+  })
+}
+
+async function openRecordPersonnelEditor(record) {
+  const type = activeTabKey.value
+  if (!['recharge', 'supplement'].includes(type) || !record
+    || !canUseCashierV3Operation('cashier.v3.order.staff_adjust')) return
+  const recordId = recordPersonnelId(record, type)
+  if (!recordId) return
+  const actions = recordPersonnelActionNames(type)
+  recordPersonnelError.value = ''
+  recordPersonnelEntry.value = null
+  recordPersonnelTarget.value = { type, recordId }
+  recordPersonnelEditorOpen.value = false
+  recordPersonnelSubmitting.value = false
+  try {
+    const result = await requestAction(actions.open, { recordId })
+    const entry = actionData(result).personnelAdjustment
+    if (!entry || !['success', 'succeeded'].includes(String(actionStatus(result)))) {
+      recordPersonnelError.value = result?.result?.message || result?.data?.result?.message || '销售人资料读取失败，请刷新后重试。'
+      return
+    }
+    const recordVersion = Number(entry.recordVersion)
+    const stateContextId = String(state.stateContextId || '')
+    if (!Number.isSafeInteger(recordVersion) || recordVersion <= 0 || !stateContextId) {
+      recordPersonnelError.value = '销售人记录版本读取失败，请刷新后重新打开。'
+      return
+    }
+    const kind = type === 'recharge' ? 'recharge_order' : 'debt_repayment'
+    mergeCashierV3PublicVersions([{ kind, id: String(entry.recordId || recordId), version: recordVersion }], stateContextId, { requestStateContextId: stateContextId })
+    recordPersonnelEntry.value = entry
+    recordPersonnelEditorOpen.value = true
+  } catch (error) {
+    recordPersonnelError.value = error?.message || '销售人资料读取失败，请刷新后重试。'
+  }
+}
+
+function closeRecordPersonnelEditor(force = false) {
+  // A successful command resolves while the submitting flag is still true.
+  // Keep the guard for user-initiated close actions, but allow the confirmed
+  // success path to clear the editor immediately.
+  if (recordPersonnelSubmitting.value && !force) return
+  recordPersonnelEntry.value = null
+  recordPersonnelTarget.value = null
+  recordPersonnelEditorOpen.value = false
+  recordPersonnelPendingAssignment.value = null
+  recordPersonnelReason.value = ''
+}
+
+function prepareRecordPersonnelReason(assignment = {}) {
+  recordPersonnelPendingAssignment.value = assignment
+  recordPersonnelReason.value = ''
+  recordPersonnelError.value = ''
+  recordPersonnelEditorOpen.value = false
+}
+
+function cancelRecordPersonnelReason() {
+  if (recordPersonnelSubmitting.value) return
+  recordPersonnelPendingAssignment.value = null
+  recordPersonnelReason.value = ''
+  recordPersonnelError.value = ''
+  recordPersonnelEditorOpen.value = Boolean(recordPersonnelEntry.value)
+}
+
+async function submitRecordPersonnelAdjustment() {
+  const entry = recordPersonnelEntry.value
+  const target = recordPersonnelTarget.value
+  const assignment = recordPersonnelPendingAssignment.value || {}
+  const reason = String(recordPersonnelReason.value || '').trim()
+  if (!entry || !target) return
+  if (!reason) { recordPersonnelError.value = '请填写修改原因。'; return }
+  if (reason.length > 255) { recordPersonnelError.value = '修改原因不能超过255字。'; return }
+  const personnel = (assignment.salespeople || []).map((item) => ({
+    staffId: Number(item.staffId || item.id || 0),
+    allocationWeight: Number(item.allocationWeight || item.performance || 0),
+    isPreSale: Boolean(item.isPreSale || item.marked)
+  }))
+  if (!personnel.length) { recordPersonnelError.value = '请至少选择一名销售人。'; return }
+  const actions = recordPersonnelActionNames(target.type)
+  const key = `${target.type}:${target.recordId}:${entry.recordVersion || ''}`
+  const idempotencyKey = recordPersonnelCommandIds.value[key] || createCashierV3CommandId()
+  recordPersonnelCommandIds.value = { ...recordPersonnelCommandIds.value, [key]: idempotencyKey }
+  recordPersonnelSubmitting.value = true
+  recordPersonnelError.value = ''
+  try {
+    const result = await requestAction(actions.adjust, {
+      recordId: target.recordId,
+      recordVersion: entry.recordVersion,
+      personnel,
+      reason,
+      idempotencyKey
+    })
+    const status = actionStatus(result)
+    if (isTerminalActionStatus(status)) recordPersonnelCommandIds.value = { ...recordPersonnelCommandIds.value, [key]: null }
+    if (['success', 'succeeded'].includes(String(status))) {
+      closeRecordPersonnelEditor(true)
+      await queryRecords({}, false)
+      return
+    }
+    recordPersonnelError.value = result?.result?.message || result?.data?.result?.message || '销售人修改未完成，请稍后重试。'
+  } finally {
+    recordPersonnelSubmitting.value = false
   }
 }
 
@@ -931,8 +1089,15 @@ function saveQuerySettings(settings) {
 }
 
 function actionStatus(result) {
-  const response = result?.data && typeof result.data === 'object' ? result.data : result
-  return response?.result?.status || response?.status || ''
+  // V3 responses may be returned either directly or wrapped by the HTTP
+  // adapter under `data`; personnel-adjustment writes use the standard
+  // `{ result: { status }, data: ... }` envelope. Read all supported layers
+  // so a successful write closes its reason dialog instead of appearing stuck.
+  return result?.result?.status
+    || result?.data?.result?.status
+    || result?.status
+    || result?.data?.status
+    || ''
 }
 
 function isTerminalActionStatus(status) {
@@ -1576,6 +1741,15 @@ onBeforeUnmount(() => {
                 {{ displayRecordField(record, fieldItem.key) }}
               </button>
               <button
+                v-else-if="fieldItem.key === 'salesperson' && ['recharge', 'supplement'].includes(activeTabKey) && canUseCashierV3Operation('cashier.v3.order.staff_adjust')"
+                type="button"
+                class="order-link"
+                title="修改销售人"
+                @click="openRecordPersonnelEditor(record)"
+              >
+                {{ displayRecordField(record, fieldItem.key) }}
+              </button>
+              <button
                 v-else-if="fieldItem.key === 'craftsman' && serviceRecordIsNormal(record) && canUseCashierV3Operation('cashier.v3.order.service_detail')"
                 type="button"
                 class="order-link"
@@ -1617,11 +1791,11 @@ onBeforeUnmount(() => {
                 @click="openDebtRepayment(record)"
               >去还款</button>
               <button
-                v-if="canUseCashierV3Operation('cashier.v3.order.void') && ((activeTabKey === 'supplement' && String(record.id || '').startsWith('v3-') && record.paymentStatus !== '已作废') || (activeTabKey === 'gift' && giftVoidRecordId(record).startsWith('v3-direct-gift:') && record.giftStatus !== '已作废'))"
+                v-if="canUseCashierV3Operation('cashier.v3.order.void') && ((activeTabKey === 'recharge' && record.economicsDataStatus === 'ready' && record.orderStatus === '正常') || (activeTabKey === 'supplement' && String(record.id || '').startsWith('v3-') && record.paymentStatus !== '已作废') || (activeTabKey === 'gift' && giftVoidRecordId(record).startsWith('v3-direct-gift:') && record.giftStatus !== '已作废'))"
                 type="button"
                 class="button button--text button--danger"
                 @click="openRecordDetail(record)"
-              >作废</button>
+              >{{ activeTabKey === 'supplement' ? '取消欠款' : '作废' }}</button>
             </td>
           </tr>
         </tbody>
@@ -1669,6 +1843,21 @@ onBeforeUnmount(() => {
       :load-error="salesPersonnelError"
       @close="closeSalesPersonnelEditor"
       @confirm="prepareSalesPersonnelReason"
+    />
+
+    <PersonnelPerformanceOverlay
+      v-if="recordPersonnelEditorOpen && recordPersonnelEntry && recordPersonnelTarget"
+      initial-tab="salespeople"
+      initial-mode="full"
+      :show-craftsmen="false"
+      :show-salespeople="true"
+      :salesperson-candidates="recordPersonnelCandidates(recordPersonnelEntry)"
+      :selected-salespeople="recordPersonnelInitialSelection(recordPersonnelEntry.lines?.[0])"
+      :allocation-total-amount-cents="recordPersonnelEntry.totalAmountCents || 0"
+      :saving="recordPersonnelSubmitting"
+      :load-error="recordPersonnelError"
+      @close="closeRecordPersonnelEditor"
+      @confirm="prepareRecordPersonnelReason"
     />
 
     <BusinessRecordDetailOverlay
@@ -1762,6 +1951,24 @@ onBeforeUnmount(() => {
         <footer class="service-void-modal__actions">
           <button type="button" class="button" :disabled="salesPersonnelSubmitting" @click="cancelSalesPersonnelReason">返回修改</button>
           <button type="button" class="button button--primary" :disabled="salesPersonnelSubmitting" @click="submitSalesPersonnelAdjustment">{{ salesPersonnelSubmitting ? '保存中…' : '确认保存' }}</button>
+        </footer>
+      </section>
+    </div>
+
+    <div v-if="recordPersonnelPendingAssignment && recordPersonnelTarget" class="service-void-modal" role="dialog" aria-modal="true" aria-labelledby="record-personnel-reason-title">
+      <div class="service-void-modal__backdrop" @click="cancelRecordPersonnelReason"></div>
+      <section class="service-void-modal__panel">
+        <header class="service-void-modal__head">
+          <h2 id="record-personnel-reason-title">填写修改原因</h2>
+          <button type="button" class="service-void-modal__close" :disabled="recordPersonnelSubmitting" @click="cancelRecordPersonnelReason">×</button>
+        </header>
+        <p class="service-void-modal__record">{{ recordPersonnelTarget.type === 'recharge' ? '充值订单' : '补交记录' }} · {{ recordPersonnelTarget.recordId }}</p>
+        <label class="service-void-modal__label" for="record-personnel-reason">修改原因</label>
+        <textarea id="record-personnel-reason" v-model="recordPersonnelReason" class="service-void-modal__textarea" maxlength="255" rows="4" placeholder="请输入修改原因"></textarea>
+        <p v-if="recordPersonnelError" class="service-void-modal__error" role="alert">{{ recordPersonnelError }}</p>
+        <footer class="service-void-modal__actions">
+          <button type="button" class="button" :disabled="recordPersonnelSubmitting" @click="cancelRecordPersonnelReason">返回修改</button>
+          <button type="button" class="button button--primary" :disabled="recordPersonnelSubmitting" @click="submitRecordPersonnelAdjustment">{{ recordPersonnelSubmitting ? '保存中…' : '确认保存' }}</button>
         </footer>
       </section>
     </div>

@@ -402,7 +402,6 @@ const childResults = computed(() => isRecord(props.checkout.childResults) ? prop
 const hasAuthoritativePaymentSnapshot = computed(() => (
   hasAuthoritativeOrderSnapshot.value
   && Array.isArray(payment.value.methods)
-  && Array.isArray(props.checkout.lines)
   && Number.isFinite(Number(paymentSummary.value.receivableAmount))
   && Number.isFinite(Number(paymentSummary.value.selectedAmount))
   && Number.isFinite(Number(paymentSummary.value.remainingAmount))

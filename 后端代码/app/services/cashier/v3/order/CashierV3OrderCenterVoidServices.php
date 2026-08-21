@@ -27,6 +27,12 @@ final class CashierV3OrderCenterVoidServices
     /** @return array{resources:array} */
     public function discover(array $scope): array
     {
+        if ((string)($scope['action'] ?? '') === 'void-order-center-supplement') {
+            // The order-center row is not the cashier workspace. Discover the
+            // authoritative repayment resource directly so a stale workspace
+            // revision cannot block cancelling an already-settled debt.
+            return (new CashierV3SupplementSalespersonAdjustmentServices())->discover($scope);
+        }
         return ['resources' => []];
     }
 
@@ -49,11 +55,11 @@ final class CashierV3OrderCenterVoidServices
         $existing = Db::name(self::OPERATION_TABLE)->where('tenant_id', $dataScope->tenantId())
             ->where('command_idempotency_key', $key)->lock(true)->find();
         if ($existing) return ['data' => ['void' => ['operationNo' => (string)$existing['operation_no'], 'replayed' => true]],
-            'business_no' => (string)$existing['operation_no'], 'touched' => ['cashier_workspace'], 'message' => '该作废操作已完成。'];
+            'business_no' => (string)$existing['operation_no'], 'touched' => ['supplement_record'], 'message' => '该取消欠款操作已完成。'];
         $recordOperation = Db::name(self::OPERATION_TABLE)->where('tenant_id', $dataScope->tenantId())
             ->where('record_id', $recordId)->where('status', 'succeeded')->lock(true)->find();
         if ($recordOperation) return ['data' => ['void' => ['operationNo' => (string)$recordOperation['operation_no'], 'replayed' => true]],
-            'business_no' => (string)$recordOperation['operation_no'], 'touched' => ['cashier_workspace'], 'message' => '该记录已作废。'];
+            'business_no' => (string)$recordOperation['operation_no'], 'touched' => ['supplement_record'], 'message' => '该取消欠款操作已完成。'];
 
         if ($action === 'void-order-center-supplement') {
             return $this->voidSupplement($recordId, $reason, $key, $operator, $dataScope, $recorder, $execution, (array)($scope['event_contract'] ?? []));
@@ -135,7 +141,7 @@ final class CashierV3OrderCenterVoidServices
         ]);
         $this->appendRepaymentFactReversals($scope->tenantId(), (string)$row['repayment_id'], (string)$operation['operation_id'], $key, $event, $operator, $now);
         Db::name(self::OPERATION_TABLE)->where('id', (int)$operation['id'])->update(['business_event_no' => (string)$event['event_no'], 'status' => 'succeeded', 'updated_at' => $now]);
-        return ['data' => ['void' => ['operationNo' => $operation['operation_no'], 'replayed' => false]], 'business_no' => $operation['operation_no'], 'touched' => ['cashier_workspace'], 'message' => '补交记录已作废，欠款已恢复。'];
+        return ['data' => ['void' => ['operationNo' => $operation['operation_no'], 'replayed' => false]], 'business_no' => $operation['operation_no'], 'touched' => ['supplement_record'], 'message' => '补交记录已取消，欠款已恢复。'];
     }
 
     private function voidGift(string $recordId, string $reason, string $key, CashierV3OperatorScope $operator, CashierV3DataScopeContext $scope, CashierV3BusinessEventRecorder $recorder, CashierV3BusinessEventExecution $execution, array $contract): array

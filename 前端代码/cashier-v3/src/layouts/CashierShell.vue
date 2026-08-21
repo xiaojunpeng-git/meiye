@@ -1388,7 +1388,12 @@ async function prepareDebtRepayment(payload = {}) {
     const prepared = responseEnvelope?.data?.debtRepaymentPreparation
       || result?.data?.debtRepaymentPreparation
       || result?.result?.data?.debtRepaymentPreparation
-    if (isSucceededResult(result) && prepared?.preparationRequestId) {
+    // 欠款准备命令的业务草稿已经在服务端原子落库。即使完整根投影因
+    // 工作台并发版本被标记为 stateIgnored，也不能把已成功的准备凭证
+    // 当成失败；凭证本身足以安全交接到收款页，收款页随后会重新读取
+    // 权威结账草稿。否则会出现“后台已生成草稿、前台只提示操作失败”。
+    const preparedBusinessSucceeded = ['succeeded', 'success'].includes(resultStatus(result))
+    if (preparedBusinessSucceeded && prepared?.preparationRequestId) {
       await openDebtRepaymentCheckout(String(prepared.preparationRequestId), payload.debtRecordId)
       return result
     }

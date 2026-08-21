@@ -2730,7 +2730,6 @@ function isCashierWorkspaceAction(action) {
     'go-to-writeoff-after-checkout',
     'view-sales-order',
     'void-service-record',
-    'void-order-center-supplement',
     'void-order-center-gift',
     'finish-checkout-and-return'
   ]
@@ -2865,6 +2864,21 @@ function resolveCommandContexts(action, payload) {
   if (['refund-recharge-order', 'void-recharge-order'].includes(action) && payload.rechargeId && payload.memberId) {
     contexts.push(buildCommandContext('recharge_order', payload.rechargeId))
     contexts.push(buildCommandContext('member_balance', payload.memberId))
+  }
+
+  if (['open-recharge-personnel-adjustment', 'adjust-recharge-personnel'].includes(action) && payload.recordId) {
+    contexts.push(buildCommandContext('recharge_order', payload.recordId))
+  }
+
+  if (['open-supplement-personnel-adjustment', 'adjust-supplement-personnel'].includes(action) && payload.recordId) {
+    contexts.push(buildCommandContext('debt_repayment', payload.recordId))
+  }
+
+  // Cancelling a settled debt is an order-center mutation, not a cart edit.
+  // Let the backend discover and lock the authoritative repayment instead of
+  // attaching the currently displayed cashier workspace revision.
+  if (action === 'void-order-center-supplement') {
+    return { invalid: false, contexts: [] }
   }
 
   if ((action === 'submit-recharge' || action === 'prepare-recharge-checkout' || action === 'prepare-recharge-debt-repayment'
@@ -3663,7 +3677,9 @@ export async function requestCashierV3Action(action, payload = {}) {
     if (!silent) emitCashierV3UiResult(invalidPreparationRequest)
     return invalidPreparationRequest
   }
-  if (!readOnly && !reservationDataWrite && !directCheckoutSnapshot && !liveProjectReplacement
+  const serverDiscoverableContextAction = canonicalAction === 'void-order-center-supplement'
+    || action === 'void-order-center-supplement'
+  if (!readOnly && !reservationDataWrite && !directCheckoutSnapshot && !liveProjectReplacement && !serverDiscoverableContextAction
     && (resolvedContexts.invalid || hasInvalidWriteContexts(contexts))) {
     // No command has been sent yet, so a single automatic root recovery is
     // safe. This covers the narrow interval after entering the cashier where

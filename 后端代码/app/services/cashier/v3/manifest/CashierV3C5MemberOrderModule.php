@@ -93,6 +93,8 @@ class CashierV3C5MemberOrderModule implements CashierV3ActionModule
             'open-order-debt-settlements' => self::FEATURE_ORDER_DEBT_VIEW,
             'open-debt-settlements' => self::FEATURE_ORDER_DEBT_VIEW,
             'open-sales-order-personnel-adjustment' => self::FEATURE_ORDER_STAFF_ADJUST,
+            'open-recharge-personnel-adjustment' => self::FEATURE_ORDER_STAFF_ADJUST,
+            'open-supplement-personnel-adjustment' => self::FEATURE_ORDER_STAFF_ADJUST,
             'open-order-refunds' => self::FEATURE_ORDER_REFUND,
             'open-refunds' => self::FEATURE_ORDER_REFUND,
             'open-order-void' => self::FEATURE_ORDER_VOID,
@@ -109,6 +111,8 @@ class CashierV3C5MemberOrderModule implements CashierV3ActionModule
             $projection[$action] = $feature;
         }
         $command['adjust-sales-order-personnel'] = self::FEATURE_ORDER_STAFF_ADJUST;
+        $command['adjust-recharge-personnel'] = self::FEATURE_ORDER_STAFF_ADJUST;
+        $command['adjust-supplement-personnel'] = self::FEATURE_ORDER_STAFF_ADJUST;
         $command['update-sales-order-note'] = self::FEATURE_ORDER_CENTER;
         $command['refund-sales-order'] = self::FEATURE_ORDER_REFUND;
         $command['void-sales-order'] = self::FEATURE_ORDER_VOID;

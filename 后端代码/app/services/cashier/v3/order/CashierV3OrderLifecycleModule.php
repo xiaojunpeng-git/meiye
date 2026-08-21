@@ -20,6 +20,11 @@ final class CashierV3OrderLifecycleModule
         $serviceVoid = new CashierV3ServiceRecordVoidServices($entitlementProvider);
         $orderCenterVoid = new CashierV3OrderCenterVoidServices();
         $serviceCraftsmanAdjustment = new CashierV3ServiceRecordCraftsmanAdjustmentServices();
+        $supplementPersonnelAdjustment = new CashierV3SupplementSalespersonAdjustmentServices();
+        $dispatcher->versionServices()->registerProvider(
+            CashierV3SupplementSalespersonAdjustmentVersionProvider::KIND,
+            new CashierV3SupplementSalespersonAdjustmentVersionProvider()
+        );
         $dispatcher->versionServices()->registerProvider('sales_order', new CashierV3OrderLifecycleVersionProvider());
         $dispatcher->versionServices()->registerProvider(
             CashierV3ServiceRecordCraftsmanAdjustmentVersionProvider::KIND,
@@ -92,8 +97,30 @@ final class CashierV3OrderLifecycleModule
                 'message' => '订单人员调整资料已读取。',
             ];
         });
+        if ($handlers->hasProjection('open-supplement-personnel-adjustment')) throw new \LogicException('supplement personnel adjustment projection duplicate');
+        $handlers->registerProjection('open-supplement-personnel-adjustment', static function (array $scope) use ($supplementPersonnelAdjustment): array {
+            $entry = $supplementPersonnelAdjustment->entry((array)($scope['payload'] ?? []), $scope['operator_scope'], $scope['data_scope']);
+            return ['data' => ['personnelAdjustment' => $entry], 'versions' => [[
+                'kind' => CashierV3SupplementSalespersonAdjustmentVersionProvider::KIND,
+                'id' => (string)$entry['recordId'], 'version' => (int)$entry['recordVersion'],
+            ]], 'message' => '补交销售人调整资料已读取。'];
+        });
+        if ($handlers->hasCommand('adjust-supplement-personnel') || $dispatcher->policies()->has('adjust-supplement-personnel')) throw new \LogicException('supplement personnel adjustment command duplicate');
+        $handlers->registerCommand('adjust-supplement-personnel', static function (array $scope) use ($supplementPersonnelAdjustment): array {
+            $result = $supplementPersonnelAdjustment->executeInTx($scope);
+            return ['data' => ['supplementPersonnelAdjustment' => $result], 'business_no' => (string)$result['operationNo'], 'touched' => ['supplement_record'], 'message' => (string)$result['message']];
+        });
+        $supplementPolicy = new CashierV3ContextPolicy('adjust-supplement-personnel', ['debt_repayment'], [], static function (array $payload): array {
+            $id = trim((string)($payload['recordId'] ?? $payload['repaymentId'] ?? ''));
+            if (strpos($id, ':') !== false) $id = substr($id, strrpos($id, ':') + 1);
+            if ($id === '') throw CashierV3CommandException::invalidContext('未找到需要调整的补交记录，请重新打开。', ['reason' => 'supplement_personnel_record_missing']);
+            return ['required' => ['debt_repayment'], 'allowed' => [], 'identities' => [['role' => 'supplement_record', 'kind' => 'debt_repayment', 'id' => $id, 'required' => true]], 'required_read_roles' => ['supplement_record'], 'required_touched_roles' => ['supplement_record']];
+        }, ['debt_repayment'], ['supplement_record'], ['debt_repayment']);
+        $supplementPolicy->configureServerResourceDiscovery([$supplementPersonnelAdjustment, 'discover'], ['supplement_record'], ['debt_repayment']);
+        $dispatcher->policies()->register($supplementPolicy);
 
         $recharge = new CashierV3RechargeOrderLifecycleServices();
+        $rechargePersonnel = new CashierV3RechargePersonnelAdjustmentServices();
         $dispatcher->versionServices()->registerProvider(
             CashierV3RechargeOrderLifecycleVersionProvider::KIND,
             new CashierV3RechargeOrderLifecycleVersionProvider()
@@ -134,6 +161,49 @@ final class CashierV3OrderLifecycleModule
             $policy->configureServerResourceDiscovery([$recharge, 'discover'], ['recharge_order', 'member_balance'], ['recharge_order', 'member_balance']);
             $dispatcher->policies()->register($policy);
         }
+
+        // 充值订单销售人沿用统一 PersonnelPerformanceOverlay，但事实来源为
+        // recharge 的 sales_performance_allocated，不复用充值主表 staff_id（该字段是操作人）。
+        if ($handlers->hasProjection('open-recharge-personnel-adjustment')) {
+            throw new \LogicException('recharge personnel adjustment projection duplicate');
+        }
+        $handlers->registerProjection('open-recharge-personnel-adjustment', static function (array $scope) use ($rechargePersonnel): array {
+            $entry = $rechargePersonnel->entry((array)($scope['payload'] ?? []), $scope['operator_scope'], $scope['data_scope']);
+            return [
+                'data' => ['personnelAdjustment' => $entry],
+                'versions' => [[
+                    'kind' => CashierV3RechargeOrderLifecycleVersionProvider::KIND,
+                    'id' => (string)$entry['recordId'], 'version' => (int)$entry['recordVersion'],
+                ]],
+                'message' => '充值订单销售人资料已读取。',
+            ];
+        });
+        if ($handlers->hasCommand('adjust-recharge-personnel') || $dispatcher->policies()->has('adjust-recharge-personnel')) {
+            throw new \LogicException('recharge personnel adjustment command duplicate');
+        }
+        $handlers->registerCommand('adjust-recharge-personnel', static function (array $scope) use ($rechargePersonnel): array {
+            $result = $rechargePersonnel->executeInTx($scope);
+            return [
+                'data' => ['personnelAdjustment' => $result],
+                'business_no' => (string)$result['operationNo'],
+                'touched' => ['recharge_order'], 'message' => (string)$result['message'],
+            ];
+        });
+        $rechargePersonnelPolicy = new CashierV3ContextPolicy(
+            'adjust-recharge-personnel', ['recharge_order'], [], static function (array $payload): array {
+                $recordId = trim((string)($payload['recordId'] ?? $payload['rechargeId'] ?? ''));
+                if (preg_match('/^recharge:([1-9][0-9]*)$/D', $recordId, $match)) $recordId = $match[1];
+                if (preg_match('/^[1-9][0-9]*$/D', $recordId) !== 1) {
+                    throw CashierV3CommandException::invalidContext('未找到需要修改的充值订单，请重新打开订单。');
+                }
+                return [
+                    'identities' => [['role' => 'recharge_order', 'kind' => CashierV3RechargeOrderLifecycleVersionProvider::KIND, 'id' => $recordId, 'required' => true]],
+                    'required_read_roles' => ['recharge_order'], 'required_touched_roles' => ['recharge_order'],
+                ];
+            }, ['recharge_order'], [], ['recharge_order']
+        );
+        $rechargePersonnelPolicy->configureServerResourceDiscovery([$rechargePersonnel, 'discover'], ['recharge_order'], ['recharge_order']);
+        $dispatcher->policies()->register($rechargePersonnelPolicy);
 
         if ($dispatcher->handlers()->hasCommand('void-service-record') || $dispatcher->policies()->has('void-service-record')) {
             throw new \LogicException('service record void duplicate action');
@@ -192,6 +262,22 @@ final class CashierV3OrderLifecycleModule
                     'message' => (string)($result['message'] ?? '作废成功。'),
                 ];
             });
+            if ($action === 'void-order-center-supplement') {
+                // Order-center cancellation is an independent repayment
+                // mutation. It must not inherit the cashier workspace
+                // version, which is commonly stale while another tab edits
+                // the cart. The server discovers and locks the repayment.
+                $policy = new CashierV3ContextPolicy($action, [], [], static function (): array {
+                    return [
+                        'required' => [], 'allowed' => ['debt_repayment'], 'identities' => [],
+                        'required_read_roles' => [], 'required_touched_roles' => ['supplement_record'],
+                        'allows_empty_contexts' => true, 'allow_empty_server_resource_discovery' => true,
+                    ];
+                }, ['supplement_record'], ['supplement_record'], ['debt_repayment'], true);
+                $policy->configureServerResourceDiscovery([$orderCenterVoid, 'discover'], ['supplement_record'], ['debt_repayment']);
+                $dispatcher->policies()->register($policy);
+                continue;
+            }
             $policy = new CashierV3ContextPolicy($action, ['cashier_workspace'], [], static function (array $payload, array $base): array {
                 $workspaceId = trim((string)($base['session']['workspace_id'] ?? ''));
                 if ($workspaceId === '') {

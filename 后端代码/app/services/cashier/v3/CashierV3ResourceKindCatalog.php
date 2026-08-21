@@ -45,6 +45,8 @@ class CashierV3ResourceKindCatalog
         // 按原始权益订单稳定存在的欠款并发门闩；建欠与还款路径必须共锁。
         'entitlement_debt_guard' => ['scope' => CashierV3ResourceScope::TYPE_TENANT, 'lock' => 64, 'ownership' => self::OWNERSHIP_DOMAIN],
         'debt_record' => ['scope' => CashierV3ResourceScope::TYPE_TENANT, 'lock' => 65, 'ownership' => self::OWNERSHIP_DOMAIN],
+        // 补交记录销售人调整的稳定并发资源；销售欠款和充值欠款共用该门闩。
+        'debt_repayment' => ['scope' => CashierV3ResourceScope::TYPE_STORE, 'lock' => 66, 'ownership' => self::OWNERSHIP_DOMAIN],
         'service_order' => ['scope' => CashierV3ResourceScope::TYPE_STORE, 'lock' => 70, 'ownership' => self::OWNERSHIP_DOMAIN],
         'writeoff_draft' => ['scope' => CashierV3ResourceScope::TYPE_STORE, 'lock' => 80, 'ownership' => self::OWNERSHIP_DOMAIN],
         'hang_order' => ['scope' => CashierV3ResourceScope::TYPE_STORE, 'lock' => 90, 'ownership' => self::OWNERSHIP_DOMAIN],

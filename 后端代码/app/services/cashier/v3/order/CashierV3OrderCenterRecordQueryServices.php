@@ -293,9 +293,10 @@ final class CashierV3OrderCenterRecordQueryServices
             's.name AS store_name', 'st.staff_name',
         ]));
         $rechargeEconomics = $this->readRechargeEconomics($rows);
+        $rechargeSalespeople = $this->readRechargeSalespeople($rows, $tenantId);
         $rechargeBusinessDates = $this->readRechargeBusinessDates($rows);
         $rechargeLifecycleOperations = $this->readRechargeLifecycleOperations($rows, $tenantId);
-        return [array_map(function (array $row) use ($rechargeEconomics, $rechargeBusinessDates, $rechargeLifecycleOperations): array {
+        return [array_map(function (array $row) use ($rechargeEconomics, $rechargeSalespeople, $rechargeBusinessDates, $rechargeLifecycleOperations): array {
             $time = (int)($row['pay_time'] ?: $row['add_time']);
             $economicsKey = $this->rechargeFactKey((int)$row['store_id'], (string)$row['order_id']);
             $hasV3PaymentFacts = array_key_exists($economicsKey, $rechargeEconomics);
@@ -319,7 +320,10 @@ final class CashierV3OrderCenterRecordQueryServices
                     ? $this->centsToMoney((int)$rechargeEconomics[$economicsKey]) : null,
                 'economicsDataStatus' => $hasV3PaymentFacts ? 'ready' : 'not_ready',
                 'paymentMethod' => $this->rechargePaymentLabel($row),
-                'salespersonName' => (string)$row['staff_name'],
+                // user_recharge.staff_id is the operator, not the salesperson.
+                // V3 salespeople are read from immutable performance facts;
+                // legacy rows without that fact intentionally remain blank.
+                'salespersonName' => (string)($rechargeSalespeople[(int)$row['id']] ?? ''),
                 'operatorName' => (string)$row['staff_name'],
                 'paymentStatus' => (int)$row['paid'] === 1 ? '已支付' : '未支付',
                 'orderStatus' => $lifecycleOperation === 'void'
@@ -412,6 +416,39 @@ final class CashierV3OrderCenterRecordQueryServices
             $economics[$this->rechargeFactKey($storeId, $orderNo)] = (int)($fact['actual_received_cents'] ?? 0);
         }
         return $economics;
+    }
+
+    /** @return array<int,string> keyed by recharge ID */
+    private function readRechargeSalespeople(array $recharges, string $tenantId): array
+    {
+        $ids = array_values(array_unique(array_filter(array_map(static function (array $row): int {
+            return (int)($row['id'] ?? 0);
+        }, $recharges))));
+        if ($ids === []) return [];
+        $rows = Db::name('cashier_v3_performance_fact')
+            ->where('tenant_id', $tenantId)
+            ->where('source_document_type', 'recharge')->where('performance_type', 'sales_performance_allocated')
+            ->where('fact_direction', 'forward')->where('status', 'effective')
+            ->whereIn('order_id', array_map(static function (int $id): string { return 'RCH:' . $id; }, $ids))
+            ->field('fact_id,order_id,employee_name_snapshot')->order('id', 'asc')->select()->toArray();
+        $factIds = array_values(array_filter(array_map(static fn(array $row): string => (string)($row['fact_id'] ?? ''), $rows)));
+        $reversed = $factIds === [] ? [] : Db::name('cashier_v3_performance_fact')
+            ->where('tenant_id', $tenantId)->where('fact_direction', 'reversal')
+            ->whereIn('reversal_of', $factIds)->column('reversal_of');
+        $reversed = array_fill_keys(array_map('strval', $reversed), true);
+        $names = [];
+        foreach ($rows as $row) {
+            if (isset($reversed[(string)($row['fact_id'] ?? '')])) continue;
+            $orderId = (string)($row['order_id'] ?? '');
+            $name = trim((string)($row['employee_name_snapshot'] ?? ''));
+            if (!preg_match('/^RCH:([1-9][0-9]*)$/D', $orderId, $m) || $name === '') continue;
+            $id = (int)$m[1];
+            $names[$id] = $names[$id] ?? [];
+            if (!in_array($name, $names[$id], true)) $names[$id][] = $name;
+        }
+        $out = [];
+        foreach ($names as $id => $people) $out[$id] = implode('、', $people);
+        return $out;
     }
 
     /**
@@ -515,6 +552,8 @@ final class CashierV3OrderCenterRecordQueryServices
         ]))->order('r.settled_at', 'desc')->order('r.id', 'desc')->limit($limit)->select()->toArray();
         if ($rows === []) return [[], $total];
 
+        $salespeople = $this->supplementSalespeople(array_column($rows, 'repayment_id'), 'debt_repayment', $criteria['tenantId']);
+
         $repaymentIds = array_values(array_unique(array_filter(array_column($rows, 'repayment_id'))));
         $paymentMethods = [];
         if ($repaymentIds !== []) {
@@ -528,7 +567,7 @@ final class CashierV3OrderCenterRecordQueryServices
             }
         }
 
-        return [array_map(function (array $row) use ($paymentMethods): array {
+        return [array_map(function (array $row) use ($paymentMethods, $salespeople): array {
             $repaymentId = (string)$row['repayment_id'];
             return [
                 'id' => 'v3-sales-supplement:' . $repaymentId,
@@ -542,6 +581,7 @@ final class CashierV3OrderCenterRecordQueryServices
                 'debtSummary' => '销售欠款补交',
                 'supplementAmount' => $this->centsToMoney((int)$row['repayment_amount_cents']),
                 'paymentMethod' => implode('、', array_values(array_unique($paymentMethods[$repaymentId] ?? []))) ?: '未标注',
+                'salespersonName' => (string)($salespeople[$repaymentId] ?? ''),
                 'storeName' => (string)$row['store_name'],
                 'operatorName' => (string)$row['staff_name'],
                 'paymentStatus' => (string)($row['status'] ?? '') === 'voided' ? '已作废' : '补交成功',
@@ -582,6 +622,8 @@ final class CashierV3OrderCenterRecordQueryServices
         ]))->order('r.settled_at', 'desc')->order('r.id', 'desc')->limit($limit)->select()->toArray();
         if ($rows === []) return [[], $total];
 
+        $salespeople = $this->supplementSalespeople(array_column($rows, 'repayment_id'), 'recharge_debt_repayment', $criteria['tenantId']);
+
         $repaymentIds = array_values(array_unique(array_filter(array_column($rows, 'repayment_id'))));
         $paymentMethods = [];
         if ($repaymentIds !== []) {
@@ -594,7 +636,7 @@ final class CashierV3OrderCenterRecordQueryServices
                 if ($repaymentId !== '') $paymentMethods[$repaymentId][] = $this->paymentLabel((string)($payment['payment_method'] ?? ''));
             }
         }
-        return [array_map(function (array $row) use ($paymentMethods): array {
+        return [array_map(function (array $row) use ($paymentMethods, $salespeople): array {
             $repaymentId = (string)$row['repayment_id'];
             return [
                 'id' => 'v3-supplement:' . $repaymentId,
@@ -608,6 +650,7 @@ final class CashierV3OrderCenterRecordQueryServices
                 'debtSummary' => '充值欠款补交',
                 'supplementAmount' => $this->centsToMoney((int)$row['amount_cents']),
                 'paymentMethod' => implode('、', array_values(array_unique($paymentMethods[$repaymentId] ?? []))) ?: '未标注',
+                'salespersonName' => (string)($salespeople[$repaymentId] ?? ''),
                 'storeName' => (string)$row['store_name'],
                 'operatorName' => (string)$row['staff_name'],
                 'paymentStatus' => (string)($row['status'] ?? '') === 'voided' ? '已作废' : '补交成功',
@@ -657,6 +700,31 @@ final class CashierV3OrderCenterRecordQueryServices
                 '_sortTime' => (int)$row['add_time'],
             ];
         }, $rows), $total];
+    }
+
+    /** @return array<string,string> keyed by repayment id */
+    private function supplementSalespeople(array $repaymentIds, string $sourceDocumentType, string $tenantId): array
+    {
+        $ids = array_values(array_unique(array_filter(array_map('strval', $repaymentIds))));
+        if ($ids === []) return [];
+        $rows = Db::name('cashier_v3_performance_fact')->where('tenant_id', $tenantId)
+            ->where('source_document_type', $sourceDocumentType)->whereIn('order_id', $ids)
+            ->where('performance_type', 'sales_performance_allocated')->where('fact_direction', 'forward')->where('status', 'effective')
+            ->field('fact_id,order_id,employee_id,employee_name_snapshot,allocation_weight_numerator')->order('id asc')->select()->toArray();
+        $factIds = array_values(array_filter(array_map(static fn(array $row): string => (string)($row['fact_id'] ?? ''), $rows)));
+        $reversed = $factIds === [] ? [] : Db::name('cashier_v3_performance_fact')->where('tenant_id', $tenantId)->where('fact_direction', 'reversal')->whereIn('reversal_of', $factIds)->column('reversal_of');
+        $reversed = array_fill_keys(array_map('strval', $reversed), true);
+        $names = [];
+        foreach ($rows as $row) {
+            if (isset($reversed[(string)($row['fact_id'] ?? '')])) continue;
+            $id = trim((string)($row['order_id'] ?? '')); $name = trim((string)($row['employee_name_snapshot'] ?? ''));
+            if ($id === '' || $name === '') continue;
+            $weight = (int)($row['allocation_weight_numerator'] ?? 0);
+            $names[$id][] = $weight > 0 && $weight < 100 ? $name . ' (' . $weight . '%)' : $name;
+        }
+        $out = [];
+        foreach ($names as $id => $values) $out[$id] = implode('、', array_values(array_unique($values)));
+        return $out;
     }
 
     /**

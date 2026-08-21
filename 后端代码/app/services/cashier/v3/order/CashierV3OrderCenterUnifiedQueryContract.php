@@ -39,8 +39,8 @@ final class CashierV3OrderCenterUnifiedQueryContract
             'recharge' => ['充值订单', [
                 ['recharge_order_no', '充值订单号', 'text', true, true], ['business_date', '业务日期', 'date', true, true],
                 ['member_name', '会员姓名'], ['phone', '手机号'], ['store', '办理门店'], ['recharge_plan', '充值方案'],
-                ['recharge_amount', '充值金额', 'amount'], ['gift_amount', '赠送金额', 'amount'], ['actual_received_amount', '现金业绩', 'amount'],
-                ['payment_method', '收款方式'], ['salesperson', '销售人'], ['operator', '操作人'], ['payment_status', '支付状态'],
+                ['salesperson', '销售人'], ['recharge_amount', '充值金额', 'amount'], ['gift_amount', '赠送金额', 'amount'], ['actual_received_amount', '现金业绩', 'amount'],
+                ['payment_method', '收款方式'], ['operator', '操作人'], ['payment_status', '支付状态'],
                 ['order_status', '订单状态'], ['payment_completed_at', '支付完成时间', 'datetime'],
             ], ['recharge_order_no', 'member_name', 'phone']],
             'refund' => ['退款记录', [
@@ -65,7 +65,7 @@ final class CashierV3OrderCenterUnifiedQueryContract
             'supplement' => ['补交记录', [
                 ['supplement_order_no', '补交单号', 'text', true, true], ['business_date', '业务日期', 'date', true, true],
                 ['debt_no', '欠款编号'], ['source_order_no', '来源订单号'], ['member_name', '会员姓名'], ['phone', '手机号'],
-                ['debt_summary', '欠款摘要'], ['supplement_amount', '补交金额', 'amount'], ['payment_method', '收款方式'], ['store', '补交门店'],
+                ['debt_summary', '欠款摘要'], ['salesperson', '销售人'], ['supplement_amount', '补交金额', 'amount'], ['payment_method', '收款方式'], ['store', '补交门店'],
                 ['operator', '操作人'], ['payment_status', '支付状态'], ['payment_completed_at', '支付完成时间', 'datetime'],
             ], ['supplement_order_no', 'debt_no', 'source_order_no', 'member_name', 'phone']],
             'gift' => ['赠送记录', [

@@ -88,7 +88,14 @@ export function useRechargeCheckout({ member, currentMemberId, stateContextId, o
 
   async function requestRechargeCheckoutAction({ action, payload = {} }) {
     const checkout = rechargeCheckout.value
-    const memberId = unref(member)?.id || unref(currentMemberId)
+    // The root cashier projection can be refreshed while the recharge overlay
+    // is still open.  The recharge projection already carries the authoritative
+    // member/request identity, so do not lose the active session merely because
+    // the live toolbar member has temporarily become empty.
+    const memberId = unref(member)?.id
+      || unref(currentMemberId)
+      || checkout?.member?.id
+      || checkout?.memberId
     if (!checkout?.rechargeCheckoutRequestId || !memberId) {
       return { result: { status: 'failed', code: 'RECHARGE_CHECKOUT_SESSION_EXPIRED', message: '充值结账现场已失效，请重新进入。' } }
     }
@@ -105,13 +112,50 @@ export function useRechargeCheckout({ member, currentMemberId, stateContextId, o
     const targetAction = actionMap[action]
     if (!targetAction) return { result: { status: 'failed', code: 'RECHARGE_CHECKOUT_ACTION_NOT_ALLOWED', message: '该充值结账操作尚未开放。' } }
     const draftAction = ['add-payment-method', 'update-payment-line', 'remove-payment-line', 'update-checkout-business-source'].includes(action)
-    const response = await requestCashierV3Action(targetAction, {
+    const requestPayload = {
       ...payload,
       memberId,
       rechargeCheckoutRequestId: checkout.rechargeCheckoutRequestId,
       rechargeCheckoutRequestVersion: checkout.checkoutRequestVersion,
       silent: draftAction
-    })
+    }
+    if (action === 'submit-checkout' || action === 'retry-checkout') {
+      const orderLines = Array.isArray(checkout.orderLines) ? checkout.orderLines : []
+      const paymentLines = Array.isArray(checkout.payment?.selectedLines)
+        ? checkout.payment.selectedLines
+        : []
+      requestPayload.commandContexts = Array.isArray(checkout.commandContexts)
+        ? clonePlain(checkout.commandContexts)
+        : []
+      requestPayload.checkoutSnapshot = {
+        contractVersion: checkout.contractVersion || 'cashier-v3-recharge-checkout-v1',
+        businessType: 'recharge',
+        memberId: Number(memberId),
+        member: clonePlain(checkout.member || { id: Number(memberId) }),
+        rechargeCheckoutRequestId: checkout.rechargeCheckoutRequestId,
+        checkoutRequestId: checkout.checkoutRequestId || checkout.rechargeCheckoutRequestId,
+        checkoutRequestVersion: Number(checkout.checkoutRequestVersion || 0),
+        businessDate: checkout.businessDate || '',
+        businessDateReason: checkout.businessDateReason || '',
+        source: {
+          primarySourceId: Number(checkout.primarySourceId || 0),
+          secondarySourceId: Number(checkout.secondarySourceId || 0),
+          sourceSelectionVersion: Number(checkout.sourceSelectionVersion || 0),
+          sourceLabel: checkout.sourceLabel || ''
+        },
+        orderLines: clonePlain(orderLines),
+        paymentLines: clonePlain(paymentLines),
+        lines: [
+          ...clonePlain(orderLines),
+          ...paymentLines.map((line) => ({
+            ...clonePlain(line),
+            lineRole: 'payment'
+          }))
+        ],
+        summary: clonePlain(checkout.summary || {})
+      }
+    }
+    const response = await requestCashierV3Action(targetAction, requestPayload)
     setRechargeCheckout(response, { allowTerminalOutcome: !draftAction })
     if (typeof window !== 'undefined'
       && draftAction) {

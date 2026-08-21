@@ -681,6 +681,22 @@ class CashierV3ActionManifest
                 'event_rules' => ['sales_order.personnel_adjusted' => ['min_count' => 1, 'max_count' => 1, 'aggregate_type' => 'sales_order', 'source_type' => 'adjust-sales-order-personnel']],
                 'eventless_reason' => '', 'activation_blocked_until_event_contract' => false, 'consumers' => ['sales_order.personnel_adjusted' => []],
             ],
+            'adjust-recharge-personnel' => [
+                'required_event_types' => ['recharge_order.personnel_adjusted'],
+                'allowed_event_types' => ['recharge_order.personnel_adjusted'],
+                'event_rules' => ['recharge_order.personnel_adjusted' => [
+                    'min_count' => 1, 'max_count' => 1,
+                    'aggregate_type' => 'recharge_order', 'source_type' => 'adjust-recharge-personnel',
+                ]],
+                'eventless_reason' => '', 'activation_blocked_until_event_contract' => false,
+                'consumers' => ['recharge_order.personnel_adjusted' => []],
+            ],
+            'adjust-supplement-personnel' => [
+                'required_event_types' => ['supplement.personnel_adjusted'],
+                'allowed_event_types' => ['supplement.personnel_adjusted'],
+                'event_rules' => ['supplement.personnel_adjusted' => ['min_count' => 1, 'max_count' => 1, 'aggregate_type' => 'debt_repayment', 'source_type' => 'adjust-supplement-personnel']],
+                'eventless_reason' => '', 'activation_blocked_until_event_contract' => false, 'consumers' => ['supplement.personnel_adjusted' => []],
+            ],
             'update-sales-order-note' => [
                 'required_event_types' => ['sales_order.note_updated'],
                 'allowed_event_types' => ['sales_order.note_updated'],

@@ -142,11 +142,16 @@ final class CashierV3CheckoutProjectionServices
         if ((string)($request['source_document_type'] ?? '') !== 'debt_repayment'
             || (string)($request['request_status'] ?? '') !== 'succeeded') return null;
         $requestId = (string)($request['request_id'] ?? '');
+        // A request can remain succeeded after its repayment lifecycle has
+        // subsequently been cancelled. In that case the request must no
+        // longer keep the cashier root in a "succeeded repayment" overlay;
+        // treating the voided projection as missing makes every later root
+        // read fail with debt_repayment_succeeded_projection_missing.
         $repayment = (array)Db::name('cashier_v3_debt_repayment')
             ->where('tenant_id', $scope->tenantId())
             ->where('store_id', $operator->storeId())
-            ->where('natural_key', 'debt_repayment:' . $requestId)
-            ->where('status', 'succeeded')->find();
+            ->where('natural_key', 'debt_repayment:' . $requestId)->find();
+        if ($repayment && (string)($repayment['status'] ?? '') !== 'succeeded') return null;
         if (!$repayment) {
             $rechargeRepayment = (array)Db::name('cashier_v3_recharge_debt_repayment')
                 ->where('tenant_id', $scope->tenantId())->where('store_id', $operator->storeId())

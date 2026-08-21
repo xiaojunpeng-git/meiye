@@ -194,8 +194,18 @@ final class CashierV3RechargeCheckoutModule
     private function submitInTx(array $scope): array
     {
         CashierV3TransactionGuard::assertInTransaction('rechargeCheckoutSubmit');
-        [$payload,$operator,$data] = $this->scope($scope); $request = $this->lockEditing($payload,$operator,$data,(string)$scope['state_context_id']);
-        $payments = $this->payments((string)$request['request_id'],(int)$request['request_version'],true);
+        [$payload,$operator,$data] = $this->scope($scope);
+        $checkoutSnapshot = is_array($payload['checkoutSnapshot'] ?? null) ? $payload['checkoutSnapshot'] : null;
+        $request = $this->lockEditing(
+            $payload,
+            $operator,
+            $data,
+            (string)$scope['state_context_id'],
+            $checkoutSnapshot !== null
+        );
+        $payments = $checkoutSnapshot !== null
+            ? $this->snapshotPayments($checkoutSnapshot, (string)$request['request_id'])
+            : $this->payments((string)$request['request_id'],(int)$request['request_version'],true);
         if ($this->hasDuplicatePaymentMethods($payments)) {
             throw self::invalid('recharge_checkout_payment_method_duplicate', '同一种收款方式只能保留一行，请删除重复方式后重试。');
         }
@@ -279,7 +289,64 @@ final class CashierV3RechargeCheckoutModule
     private function assertBusinessSourcePayload(array $payload): void { $keys=['memberId','rechargeCheckoutRequestId','rechargeCheckoutRequestVersion','primarySourceId','secondarySourceId','sourceSelectionVersion']; sort($keys);$actual=array_keys($payload);sort($actual);if($actual!==$keys || (int)($payload['primarySourceId']??0)<=0 || (int)($payload['secondarySourceId']??0)<0 || (int)($payload['sourceSelectionVersion']??0)<0) throw self::invalid('recharge_business_source_payload_invalid','业务来源资料无效，请刷新结账页面后重试。'); }
     private function normalizeTerms(array $p): array { $id=(int)($p['memberId']??0);$mode=(string)($p['rechargeMode']??'custom');$pkg=(int)($p['rechargePackageId']??0);$principal=$mode==='package'?0:$this->moneyToCents($p['principalAmount']??null);$bonus=$mode==='package'?0:$this->moneyToCents($p['bonusAmount']??null);$debt=$this->moneyToCents($p['debtAmount']??'0');$version=(int)($p['balanceVersion']??0);if($id<=0||!in_array($mode,['package','custom'],true)||($mode==='package'&&$pkg<=0)||($mode==='custom'&&($principal<=0||$bonus<0))||$debt<0||$version<=0) throw self::invalid('recharge_checkout_terms_invalid','充值信息不完整或金额无效，请重新填写。');return ['memberId'=>$id,'mode'=>$mode,'packageId'=>$pkg,'principalCents'=>$principal,'bonusCents'=>$bonus,'debtCents'=>$debt,'balanceVersion'=>$version,'salespersonAllocations'=>array_values((array)($p['salespersonAllocations']??[]))]; }
     private function resolveTerms(array $input,array $member): array { if($input['mode']==='package'){foreach((array)(sys_data('user_recharge_quota')??[]) as $pkg){if(is_array($pkg)&&(int)($pkg['id']??0)===$input['packageId']){$input['principalCents']=$this->moneyToCents($pkg['price']??null);$input['bonusCents']=$this->moneyToCents($pkg['give_money']??0);break;}}}if($input['principalCents']<=0||$input['bonusCents']<0||$input['debtCents']>$input['principalCents']) throw self::invalid('recharge_checkout_terms_unavailable','所选充值套餐已下架或欠款金额无效，请重新填写。');$input['creditedPrincipalCents']=$input['principalCents']-$input['debtCents'];return $input; }
-    private function lockEditing(array $p,CashierV3OperatorScope $o,CashierV3DataScopeContext $d,string $state): array { $id=(string)($p['rechargeCheckoutRequestId']??'');$v=(int)($p['rechargeCheckoutRequestVersion']??$p['checkoutRequestVersion']??0);$row=(array)Db::name(self::REQUEST_TABLE)->where('request_id',$id)->where('tenant_id',$d->tenantId())->where('store_id',$o->storeId())->where('member_id',(int)($p['memberId']??0))->where('operator_id',$o->operatorId())->where('workspace_id',$this->workspaceId($o,$state))->where('state_context_id',$state)->where('request_status','editing')->lock(true)->find();if(!$row||$v<=0||(int)$row['request_version']!==$v) throw CashierV3CommandException::versionConflict('充值结账信息已被更新，请重新打开后重试。');return $row; }
+    private function lockEditing(array $p,CashierV3OperatorScope $o,CashierV3DataScopeContext $d,string $state,bool $allowSnapshotRecovery=false): array
+    {
+        $id=(string)($p['rechargeCheckoutRequestId']??'');
+        $v=(int)($p['rechargeCheckoutRequestVersion']??$p['checkoutRequestVersion']??0);
+        $memberId=(int)($p['memberId']??0);
+        $base=Db::name(self::REQUEST_TABLE)->where('request_id',$id)->where('tenant_id',$d->tenantId())->where('store_id',$o->storeId())->where('member_id',$memberId)->where('operator_id',$o->operatorId())->where('request_status','editing');
+        $row=(array)Db::name(self::REQUEST_TABLE)->where('request_id',$id)->where('tenant_id',$d->tenantId())->where('store_id',$o->storeId())->where('member_id',$memberId)->where('operator_id',$o->operatorId())->where('workspace_id',$this->workspaceId($o,$state))->where('state_context_id',$state)->where('request_status','editing')->lock(true)->find();
+        // A browser refresh can replace the live state context while the
+        // recharge overlay still owns an editing request. With a final
+        // checkout snapshot, recover the persisted request identity instead
+        // of treating the session as expired or creating a second recharge.
+        if (!$row && $allowSnapshotRecovery) {
+            $row=(array)Db::name(self::REQUEST_TABLE)->where('request_id',$id)->where('tenant_id',$d->tenantId())->where('store_id',$o->storeId())->where('member_id',$memberId)->where('operator_id',$o->operatorId())->where('request_status','editing')->lock(true)->find();
+        }
+        if(!$row||$v<=0||(int)$row['request_version']!==$v) throw CashierV3CommandException::versionConflict('充值结账信息已被更新，请重新打开后重试。');
+        return $row;
+    }
+
+    private function snapshotMoneyToCents($value): int
+    {
+        $raw = trim((string)$value);
+        if (preg_match('/^[1-9][0-9]*(?:\.00)?$/D', $raw) !== 1) {
+            throw self::invalid('recharge_checkout_snapshot_payment_invalid','充值收款快照金额无效，请返回收款信息后重试。');
+        }
+        $whole = strpos($raw, '.') === false ? $raw : substr($raw, 0, -3);
+        return (int)$whole * 100;
+    }
+
+    private function snapshotPayments(array $snapshot, string $requestId): array
+    {
+        $requestKey = (string)$requestId;
+        $raw = is_array($snapshot['paymentLines'] ?? null) ? $snapshot['paymentLines'] : [];
+        $out = [];
+        $seen = [];
+        foreach ($raw as $line) {
+            if (!is_array($line)) continue;
+            $method = (string)($line['paymentMethod'] ?? $line['method'] ?? $line['id'] ?? '');
+            $method = trim($method);
+            if ($method === '' || !in_array($method, self::METHODS, true) || isset($seen[$method])) {
+                throw self::invalid('recharge_checkout_snapshot_payment_invalid','充值收款快照资料无效，请返回收款信息后重试。');
+            }
+            $amount = $this->snapshotMoneyToCents($line['amount'] ?? null);
+            if ($amount <= 0) throw self::invalid('recharge_checkout_snapshot_payment_invalid','充值收款快照资料无效，请返回收款信息后重试。');
+            $seen[$method] = true;
+            $out[] = [
+                'request_id' => $requestKey,
+                'payment_authority_key' => 'snapshot:' . $method,
+                'draft_version' => 0,
+                'payment_method' => $method,
+                'amount_cents' => $amount,
+                'collection_reference' => (string)($line['externalTransactionNo'] ?? $line['collectionReference'] ?? ''),
+                'sort_no' => count($out) + 1,
+                'draft_status' => 'draft',
+            ];
+        }
+        if (!$out) throw self::invalid('recharge_checkout_snapshot_payment_invalid','充值收款快照资料不完整，请返回收款信息后重试。');
+        return $out;
+    }
     private function payments(string $id,int $version,bool $lock=false): array { $q=Db::name(self::PAYMENT_TABLE)->where('request_id',$id)->where('draft_version',$version)->where('draft_status','draft')->order('sort_no asc,id asc');if($lock)$q->lock(true);return $q->select()->toArray(); }
     private function insertPayment(string $id,int $version,string $method,int $amount,string $key,int $sort,int $now):void {Db::name(self::PAYMENT_TABLE)->insert(['payment_draft_id'=>'RCP-'.hash_hmac('sha1',$id."\0".$key,$this->secret()),'request_id'=>$id,'draft_version'=>$version,'payment_authority_key'=>$key,'payment_method'=>$method,'amount_cents'=>$amount,'collection_reference'=>'','sort_no'=>$sort,'draft_status'=>'draft','add_time'=>$now,'update_time'=>$now]);}
     private function copyPayments(array $payments,int $next,int $now,string $targetId,?array $replacement):void {foreach($payments as $i=>$p){if($targetId!==''&&(string)$p['payment_draft_id']===$targetId&&$replacement===null)continue;$authority=(string)$p['payment_authority_key'];$row=['payment_draft_id'=>'RCP-'.hash_hmac('sha1',(string)$p['request_id']."\0".$authority."\0".$next,$this->secret()),'request_id'=>(string)$p['request_id'],'draft_version'=>$next,'payment_authority_key'=>$authority,'payment_method'=>(string)$p['payment_method'],'amount_cents'=>(int)$p['amount_cents'],'collection_reference'=>(string)$p['collection_reference'],'sort_no'=>$i+1,'draft_status'=>'draft','add_time'=>$now,'update_time'=>$now];if($targetId!==''&&(string)$p['payment_draft_id']===$targetId)$row=array_merge($row,$replacement??[]);Db::name(self::PAYMENT_TABLE)->insert($row);}}

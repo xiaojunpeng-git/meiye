@@ -1095,7 +1095,13 @@ function activateCheckoutSession(snapshot, preparationRequestId, options = {}) {
 
 function currentCheckoutCommandContexts(session) {
   if (!session || session.stateContextId !== String(state.stateContextId || '')) return null
-  const snapshot = checkout.value
+  // Debt repayment is edited entirely in the browser-owned snapshot after
+  // the preparation handoff. The root projection still contains the old
+  // payment rows, so resolving command contexts from it makes a valid local
+  // snapshot look like an expired checkout session at final confirmation.
+  const snapshot = session.snapshot?.businessType === 'debt_repayment'
+    ? session.snapshot
+    : checkout.value
   if (String(checkoutRequestIdentity(snapshot) || '') !== session.checkoutRequestId) return null
   if (session.serviceOrderId && String(serviceOrder.value?.id || '') !== session.serviceOrderId) return null
   const contexts = Array.isArray(snapshot.commandContexts) ? clonePlain(snapshot.commandContexts) : []
@@ -4516,24 +4522,39 @@ function buildCheckoutSnapshot(preview = {}) {
   // or selected-lines side channel may influence final submission.
   const hasSaleLines = lines.some((line) => cartLineRole(line) === 'sale')
   const paymentLines = hasSaleLines
-    ? checkoutSnapshotPaymentLines(snapshotLines).map((line) => ({
+    ? checkoutSnapshotPaymentLines(snapshotLines)
+      // A newly added payment method is an editable zero-value placeholder.
+      // It is UI state, not a collection line, so never put it into the final
+      // snapshot where the server correctly rejects non-positive payments.
+      .filter((line) => Number(line?.amount || 0) > 0)
+      .map((line) => ({
         ...clonePlain(line),
         lineRole: checkoutLineRole(line),
         quantity: 1
       }))
     : []
+  const sourceSnapshot = isRecord(snapshot.source)
+    ? clonePlain(snapshot.source)
+    : checkoutSourceSnapshot(
+        snapshot.primarySourceId,
+        snapshot.secondarySourceId,
+        snapshot.rewardAmountCents
+      )
   const finalSnapshot = {
-    memberId: Number(snapshot.memberId || 0),
+    businessType: String(snapshot.businessType || ''),
+    // Debt repayment projections expose the member identity under `member`;
+    // freeze that same identity into the one final browser snapshot so the
+    // server can bind the payment lines to the selected member.
+    memberId: Number(snapshot.memberId || snapshot.member?.id || snapshot.member?.memberId || 0),
     customerMode: String(snapshot.customerMode || 'guest'),
     occurredAt: Number(snapshot.occurredAt || 0),
     businessDate: String(snapshot.businessDate || ''),
     businessDateReason: String(snapshot.businessDateReason || ''),
     lines: [...lines, ...paymentLines],
-    source: checkoutSourceSnapshot(
-      snapshot.primarySourceId,
-      snapshot.secondarySourceId,
-      snapshot.rewardAmountCents
-    ),
+    sourceDocument: isRecord(snapshot.sourceDocument)
+      ? clonePlain(snapshot.sourceDocument)
+      : undefined,
+    source: sourceSnapshot,
     orderNote: String(snapshot.orderNote || ''),
     supplement: clonePlain(snapshot.supplement || {})
   }
@@ -5067,7 +5088,9 @@ async function requestCheckoutAction({ action, payload }) {
   // Local preview submissions have no checkout session or server draft by
   // design. They bypass the follow-up command context builder and send the
   // immutable snapshot directly to the final settlement action.
-  if (action === 'submit-checkout' && isRecord(payload?.checkoutSnapshot)) {
+  if (action === 'submit-checkout'
+    && isRecord(payload?.checkoutSnapshot)
+    && String(payload.checkoutSnapshot.businessType || '') !== 'debt_repayment') {
     const direct = await requestAction('submit-checkout', {
       ...(isRecord(payload) ? payload : {}),
       idempotencyKey: String(payload?.idempotencyKey || createCashierV3CommandId('CHECKOUT'))
@@ -5173,19 +5196,47 @@ async function requestCheckoutAction({ action, payload }) {
   }
 
   const session = checkoutSession.value
+  const debtRepaymentSubmission = isDebtRepaymentCheckout.value
   const current = currentCheckoutCommandContexts(session)
+  const debtSnapshotCandidates = [
+    localCheckoutPreview.value,
+    session?.snapshot,
+    checkout.value
+  ].filter(isRecord)
+  const debtSnapshotFallback = debtSnapshotCandidates.find((candidate) => (
+    String(candidate.businessType || '') === 'debt_repayment'
+    || String(candidate.sourceDocumentType || '') === 'debt_repayment'
+    || String(candidate.sourceDocument?.type || '') === 'debt_repayment'
+  )) || null
   const queryCanUseOverlayIdentity = action === 'query-checkout-result'
     && (!session || !current)
-  const actionSession = queryCanUseOverlayIdentity
+  let actionSession = queryCanUseOverlayIdentity
     ? {
         checkoutRequestId: String(payload?.checkoutRequestId || payload?.requestId || checkout.value?.checkoutRequestId || checkout.value?.requestId || ''),
         stateContextId: String(state.stateContextId || ''),
         preparationRequestId: '',
       }
     : session
-  const actionCurrent = queryCanUseOverlayIdentity
+  let actionCurrent = queryCanUseOverlayIdentity
     ? { checkoutRequestVersion: 0, commandContexts: [] }
     : current
+  // The debt wizard keeps editing in localCheckoutPreview. If a hot reload or
+  // root projection refresh drops the in-memory session, recover the command
+  // identity from that same snapshot instead of declaring it expired.
+  if ((!actionSession || !actionCurrent) && debtSnapshotFallback) {
+    actionSession = {
+      checkoutRequestId: String(checkoutRequestIdentity(debtSnapshotFallback) || ''),
+      stateContextId: String(state.stateContextId || ''),
+      preparationRequestId: String(debtSnapshotFallback.preparationRequestId || ''),
+      preparationToken: String(checkoutPreparationToken(debtSnapshotFallback) || '')
+    }
+    actionCurrent = {
+      checkoutRequestVersion: Number(checkoutRequestVersion(debtSnapshotFallback) || 0),
+      commandContexts: Array.isArray(debtSnapshotFallback.commandContexts)
+        ? clonePlain(debtSnapshotFallback.commandContexts)
+        : []
+    }
+  }
   if (!actionSession || !actionCurrent) {
     return {
       result: {
@@ -5216,7 +5267,12 @@ async function requestCheckoutAction({ action, payload }) {
     checkoutRequestId: actionSession.checkoutRequestId,
     checkoutRequestVersion: actionCurrent.checkoutRequestVersion,
     preparationRequestId: actionSession.preparationRequestId,
-    preparationToken: String(checkoutPreparationToken(checkout.value) || ''),
+    preparationToken: String(
+      actionSession.preparationToken
+      || checkoutPreparationToken(checkout.value)
+      || checkoutPreparationToken(debtSnapshotFallback)
+      || ''
+    ),
     commandContexts: actionCurrent.commandContexts
   }
   if (checkoutRequestActions.has(action)
@@ -5225,8 +5281,10 @@ async function requestCheckoutAction({ action, payload }) {
     // The checkout projection also contains the server-built resource plan.
     // Follow-up commands must not replay that plan as client contexts: their
     // authorities are rebuilt from the persisted checkout request instead.
-    const checkoutContexts = checkoutSubmissionCommandContexts(actionCurrent.commandContexts)
-    if (!checkoutContexts) {
+    const checkoutContexts = isDebtRepaymentCheckout.value
+      ? actionCurrent.commandContexts
+      : checkoutSubmissionCommandContexts(actionCurrent.commandContexts)
+    if (!isDebtRepaymentCheckout.value && !checkoutContexts) {
       return {
         result: {
           status: 'failed',
@@ -5335,12 +5393,12 @@ async function requestCheckoutAction({ action, payload }) {
       || ''
   )
   const hasCommittedSubmitReceipt = action === 'submit-checkout'
-    && !isDebtRepaymentCheckout.value
+    && !debtRepaymentSubmission
     && submittedCheckoutRequestId !== ''
     && submittedCheckoutRequestId === String(session.checkoutRequestId || '')
     && submittedCheckoutStatus === 'succeeded'
     && submittedBusinessNo !== ''
-  if (hasAuthoritativeCheckoutState) {
+  if (hasAuthoritativeCheckoutState && !debtRepaymentSubmission) {
     // 命令信封的 success 只表示命令已被可靠处理，不能解释成顾客已经支付成功。
     // 支付领域状态只能由已通过根状态门禁的 cashier.checkout.status 驱动。
     // submit-checkout also returns the committed empty cashier draft. That
@@ -5366,9 +5424,28 @@ async function requestCheckoutAction({ action, payload }) {
     }
     return result
   }
-  const debtRepaymentResult = isDebtRepaymentCheckout.value
+  // A successful repayment may have committed its business row while the
+  // response envelope is rejected for a stale root projection.  Never retry
+  // the write in that case: resolve the same request once through the
+  // read-only result projection, bound to the original request key.
+  let debtRepaymentResult = debtRepaymentSubmission
     ? responseDataBlock(result).debtRepayment
     : null
+  if (!isRecord(debtRepaymentResult)
+    && debtRepaymentSubmission
+    && ['submit-checkout', 'retry-checkout'].includes(action)
+    && originalIdempotencyKey
+    && actionSession.checkoutRequestId) {
+    const queried = await requestAction('query-debt-repayment-result', {
+      checkoutRequestId: actionSession.checkoutRequestId,
+      originalIdempotencyKey
+    })
+    const queriedResult = responseDataBlock(queried).debtRepayment
+    if (isRecord(queriedResult)) {
+      result = queried
+      debtRepaymentResult = queriedResult
+    }
+  }
   if (isRecord(debtRepaymentResult) && debtRepaymentResult.status === 'succeeded') {
     checkoutRequiresRootReload.value = true
     checkoutLocalOutcome.value = {
@@ -5387,7 +5464,7 @@ async function requestCheckoutAction({ action, payload }) {
   // checkout.  A transport/command failure must return the operator to the
   // cashier immediately with a plain retry message.  Do not show the generic
   // “正在确认支付结果” / query-original-request flow for a single repayment.
-  if (isDebtRepaymentCheckout.value && ['submit-checkout', 'retry-checkout'].includes(action)) {
+  if (debtRepaymentSubmission && ['submit-checkout', 'retry-checkout'].includes(action)) {
     checkoutRequiresRootReload.value = false
     checkoutLocalOutcome.value = {}
     closeCheckoutOverlay()
@@ -5502,6 +5579,45 @@ async function openPreparedCheckout(event = {}) {
       }
     }))
     return
+  }
+  // 欠款补交从这里开始只保留一份浏览器快照。把服务端投影的业务行和
+  // 已选收款行合并到同一份 lines，后续收款方式、金额编辑和最终提交都
+  // 只改这份快照，不再回写或拼接旧 checkout 草稿字段。
+  if (snapshot.businessType === 'debt_repayment') {
+    const orderLines = Array.isArray(snapshot.lines)
+      ? snapshot.lines
+      : (Array.isArray(snapshot.orderLines) ? snapshot.orderLines : [])
+    const paymentLines = Array.isArray(snapshot.payment?.selectedLines)
+      ? snapshot.payment.selectedLines.map((line) => ({
+          ...clonePlain(line),
+          lineRole: String(line?.lineRole || 'payment'),
+          quantity: 1,
+          status: String(line?.status || 'editing')
+        }))
+      : []
+    localCheckoutPreview.value = {
+      ...snapshot,
+      lines: [...clonePlain(orderLines), ...paymentLines],
+      source: isRecord(snapshot.source)
+        ? clonePlain(snapshot.source)
+        : {
+            primarySourceId: Number(snapshot.primarySourceId || 0),
+            primarySourceNameSnapshot: '',
+            secondarySourceId: Number(snapshot.secondarySourceId || 0),
+            secondarySourceNameSnapshot: '',
+            displayNameSnapshot: String(snapshot.sourceLabel || ''),
+            rewardAmountCents: Number(snapshot.rewardAmountCents || 0)
+          },
+      sourceDocument: isRecord(snapshot.sourceDocument)
+        ? clonePlain(snapshot.sourceDocument)
+        : {
+            type: String(snapshot.sourceDocumentType || 'debt_repayment'),
+            id: String(snapshot.sourceDocumentId || ''),
+            no: String(snapshot.sourceDocumentNo || '')
+          },
+      localDraftPreview: true
+    }
+    localCheckoutPaymentOperations.value = []
   }
   isCheckoutOpen.value = true
 }

@@ -75,7 +75,6 @@ final class CashierV3DebtRepaymentServices
         );
         $debtFingerprint = self::debtFingerprint($authority, $debt, $items, $personnel);
         $dimensions = $this->dimensions($operator, $dataScope, (int)$authority['member_id']);
-        $workspaceVersion = self::contextVersion((array)($scope['contexts'] ?? []), 'cashier_workspace', $workspaceId);
         $editingDraft = $this->lockReusableEditingDraft(
             $authority,
             $amountCents,
@@ -87,6 +86,18 @@ final class CashierV3DebtRepaymentServices
             $operator,
             $dataScope
         );
+        // A browser refresh creates a new state-context id, but it must not
+        // turn an already prepared repayment into a second draft.  Resume
+        // the locked draft's original workspace/context and request version;
+        // the authority/member/debt fingerprint checks above still bind the
+        // recovery to the exact same business operation.
+        if ($editingDraft !== null) {
+            $workspaceId = (string)$editingDraft['workspaceId'];
+            $stateContextId = (string)$editingDraft['stateContextId'];
+            $workspaceVersion = (int)$editingDraft['requestVersion'];
+        } else {
+            $workspaceVersion = self::contextVersion((array)($scope['contexts'] ?? []), 'cashier_workspace', $workspaceId);
+        }
         $preparationRequestId = $idempotencyKey;
         $current = null;
         $now = time();
@@ -276,7 +287,22 @@ final class CashierV3DebtRepaymentServices
             || !hash_equals((string)$draft['debt_version_fingerprint'], self::debtFingerprint($authority, $debt, $items, $personnel))) {
             throw self::failure('debt_repayment_authority_outdated');
         }
-        $payments = $this->paymentLines((array)$aggregate['payments'], $amount);
+        $checkoutSnapshot = is_array($payload['checkoutSnapshot'] ?? null)
+            ? $payload['checkoutSnapshot']
+            : null;
+        if ($checkoutSnapshot === null) {
+            throw self::failure('debt_repayment_checkout_snapshot_required');
+        }
+        $payments = $this->paymentLinesFromCheckoutSnapshot(
+            $checkoutSnapshot,
+            $amount,
+            $debtId,
+            (int)$authority['member_id']
+        );
+        if (!is_array($checkoutSnapshot['source'] ?? null)) {
+            throw self::failure('debt_repayment_checkout_snapshot_source_required');
+        }
+        $businessSource = $checkoutSnapshot['source'];
         $repaymentId = (new CashierV3DebtRepaymentIdFactory($this->secret()))->repaymentId($dataScope->tenantId(), $debtId, $commandKey);
         $repaymentNo = (new \app\services\cashier\v3\CashierV3BusinessDocumentNumberServices())->allocateForSourceInTx(
             $dataScope->tenantId(),
@@ -352,22 +378,20 @@ final class CashierV3DebtRepaymentServices
             'aggregate_name_snapshot' => $repaymentNo, 'store_name_snapshot' => $dimensions['storeName'],
             'payload' => ['contractVersion' => self::SUBMIT_CONTRACT_VERSION, 'debtId' => $debtId, 'amountCents' => $amount, 'salesOrderId' => (string)$authority['sales_order_id'], 'salespeopleSnapshotFingerprint' => hash('sha256', json_encode($selectedSalespeople, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES))],
         ]);
-        $this->persistFactsInTx($payments, $authority, $items, $itemTargets, $personnel, $selectedSalespeople, $repaymentId, $repaymentNo, $requestId, $amount, $commandKey, $event, $dimensions, $operator, $dataScope, $now);
+        $this->persistFactsInTx($payments, $authority, $items, $itemTargets, $personnel, $selectedSalespeople, $repaymentId, $repaymentNo, $requestId, $amount, $commandKey, $event, $dimensions, $operator, $dataScope, $now, $businessSource);
         if ($repaidAfter === $total) {
             (new CustomerLifecycleFactServices())->recordDebtCompletionInTx(
                 $dataScope->tenantId(), (string)$authority['sales_order_id'], $now
             );
         }
-        $lineDraftCount = (int)Db::name('cashier_v3_checkout_line_draft')
-            ->where('request_id', $requestId)->where('draft_version', $requestVersion)
-            ->where('draft_status', 'draft')->lock(true)->count();
-        $paymentDraftCount = (int)Db::name('cashier_v3_checkout_payment_draft')
-            ->where('request_id', $requestId)->where('draft_version', $requestVersion)
-            ->where('draft_status', 'draft')->lock(true)->count();
-        $committedLines = (int)Db::name('cashier_v3_checkout_line_draft')
+        // The browser checkoutSnapshot is the sole payment authority. A
+        // payment draft row is intentionally absent in this flow; retain any
+        // prepared rows for audit but do not require their counts to match the
+        // final snapshot.
+        Db::name('cashier_v3_checkout_line_draft')
             ->where('request_id', $requestId)->where('draft_version', $requestVersion)
             ->where('draft_status', 'draft')->update(['draft_status' => 'committed', 'update_time' => $now]);
-        $committedPayments = (int)Db::name('cashier_v3_checkout_payment_draft')
+        Db::name('cashier_v3_checkout_payment_draft')
             ->where('request_id', $requestId)->where('draft_version', $requestVersion)
             ->where('draft_status', 'draft')->update(['draft_status' => 'committed', 'update_time' => $now]);
         if ((int)Db::name('cashier_v3_debt_repayment')->where('id', $recordId)->update(['status' => 'succeeded', 'update_time' => $now]) !== 1
@@ -382,8 +406,7 @@ final class CashierV3DebtRepaymentServices
                     'last_idempotency_key' => $commandKey, 'last_operation' => 'submit-debt-repayment',
                     'recorded_at' => $now, 'update_time' => $now,
                 ]) !== 1
-            || $lineDraftCount <= 0 || $paymentDraftCount !== count($payments)
-            || $committedLines !== $lineDraftCount || $committedPayments !== $paymentDraftCount) {
+            ) {
             throw self::failure('debt_repayment_terminal_update_failed');
         }
         return $this->successResult($repaymentId, $repaymentNo, $requestId, $requestVersion + 1, $amount, false);
@@ -607,7 +630,6 @@ final class CashierV3DebtRepaymentServices
         if ((int)($draft['store_id'] ?? 0) !== $operator->storeId()
             || (int)($draft['member_id'] ?? 0) !== (int)$authority['member_id']
             || (int)($draft['operator_id'] ?? 0) !== $operator->operatorId()
-            || (string)($draft['state_context_id'] ?? '') !== $stateContextId
             || (int)($draft['repayment_amount_cents'] ?? -1) !== $amount
             || (int)($draft['debt_repaid_snapshot_cents'] ?? -1) !== $repaid
             || !hash_equals((string)($draft['debt_version_fingerprint'] ?? ''), $fingerprint)
@@ -637,6 +659,8 @@ final class CashierV3DebtRepaymentServices
             'preparationRequestId' => $preparationRequestId,
             'requestId' => (string)$current['requestId'],
             'requestVersion' => (int)$current['version'],
+            'workspaceId' => (string)$draft['workspace_id'],
+            'stateContextId' => (string)$draft['state_context_id'],
         ];
     }
 
@@ -814,7 +838,42 @@ final class CashierV3DebtRepaymentServices
         return $out;
     }
 
-    private function persistFactsInTx(array $payments, array $authority, array $items, array $itemTargets, array $personnel, array $selectedSalespeople, string $repaymentId, string $repaymentNo, string $requestId, int $amount, string $commandKey, array $event, array $dimensions, CashierV3OperatorScope $operator, CashierV3DataScopeContext $scope, int $now): void
+    /** Read collection rows from the one browser checkout snapshot. */
+    private function paymentLinesFromCheckoutSnapshot(array $snapshot, int $expected, int $debtId, int $memberId): array
+    {
+        if ((string)($snapshot['businessType'] ?? '') !== 'debt_repayment'
+            || (int)($snapshot['memberId'] ?? 0) !== $memberId) {
+            throw self::failure('debt_repayment_checkout_snapshot_identity_invalid');
+        }
+        $sourceDocument = is_array($snapshot['sourceDocument'] ?? null) ? $snapshot['sourceDocument'] : [];
+        if ((string)($sourceDocument['type'] ?? '') !== 'debt_repayment'
+            || (string)($sourceDocument['id'] ?? '') !== (string)$debtId) {
+            throw self::failure('debt_repayment_checkout_snapshot_source_invalid');
+        }
+        $rows = [];
+        foreach ((array)($snapshot['lines'] ?? []) as $line) {
+            if (!is_array($line) || (string)($line['lineRole'] ?? '') !== 'payment') continue;
+            $method = trim((string)($line['method'] ?? $line['paymentMethod'] ?? ''));
+            $rawAmount = $line['amount'] ?? null;
+            $amount = self::inputMoneyCents($rawAmount, 'checkout_snapshot_payment_amount');
+            if (!in_array($method, self::PAYMENT_METHODS, true) || $amount <= 0) {
+                throw self::failure('debt_repayment_checkout_snapshot_payment_invalid');
+            }
+            $rows[] = [
+                'paymentMethod' => $method,
+                'paymentMethodName' => (new CashierV3BusinessConfigServices())->resolveAccountingMethodSnapshot($method, true)['displayNameSnapshot'],
+                'amountCents' => $amount,
+                'externalTransactionNo' => trim((string)($line['externalTransactionNo'] ?? $line['externalTradeNo'] ?? '')),
+                'remark' => trim((string)($line['remark'] ?? $line['note'] ?? '')),
+            ];
+        }
+        if ($rows === []) throw self::failure('debt_repayment_payment_missing');
+        $sum = array_sum(array_map(static function (array $line): int { return (int)$line['amountCents']; }, $rows));
+        if ($sum !== $expected) throw self::failure('debt_repayment_payment_total_invalid');
+        return $rows;
+    }
+
+    private function persistFactsInTx(array $payments, array $authority, array $items, array $itemTargets, array $personnel, array $selectedSalespeople, string $repaymentId, string $repaymentNo, string $requestId, int $amount, string $commandKey, array $event, array $dimensions, CashierV3OperatorScope $operator, CashierV3DataScopeContext $scope, int $now, array $businessSource = []): void
     {
         $ids = new CashierV3DebtRepaymentIdFactory($this->secret()); $paymentFacts = [];
         foreach ($payments as $index => $payment) {
@@ -824,7 +883,7 @@ final class CashierV3DebtRepaymentServices
         $performanceFacts = $this->performanceFacts($selectedSalespeople, $repaymentId, $amount, $ids);
         $plan = CashierV3CheckoutFactPlanV1::fromInternalAuthority([
             'contractVersion'=>CashierV3CheckoutFactPlanV1::CONTRACT_VERSION,'commandIdempotencyKey'=>$commandKey,
-            'context'=>['tenantId'=>$scope->tenantId(),'tenantNameSnapshot'=>'','organizationId'=>$operator->organizationId(),'organizationNameSnapshot'=>$dimensions['organizationName'],'organizationPathSnapshot'=>$dimensions['organizationPath'],'storeId'=>$operator->storeId(),'storeNameSnapshot'=>$dimensions['storeName'],'memberId'=>(int)$authority['member_id'],'memberNameSnapshot'=>$dimensions['memberName'],'operatorId'=>$operator->operatorId(),'operatorNameSnapshot'=>$dimensions['operatorName'],'businessDate'=>date('Y-m-d',$now),'businessTimezone'=>'Asia/Shanghai','occurredAt'=>$now,'settledAt'=>$now,'recordedAt'=>$now,'checkoutRequestId'=>$requestId,'orderId'=>$repaymentId,'orderNoSnapshot'=>$repaymentNo,'sourceDocumentType'=>'debt_repayment','businessEventNo'=>(string)$event['event_no'],'businessSourcePrimaryId'=>0,'businessSourcePrimaryNameSnapshot'=>'','businessSourceSecondaryId'=>0,'businessSourceSecondaryNameSnapshot'=>'','businessSourceLabelSnapshot'=>''],
+            'context'=>['tenantId'=>$scope->tenantId(),'tenantNameSnapshot'=>'','organizationId'=>$operator->organizationId(),'organizationNameSnapshot'=>$dimensions['organizationName'],'organizationPathSnapshot'=>$dimensions['organizationPath'],'storeId'=>$operator->storeId(),'storeNameSnapshot'=>$dimensions['storeName'],'memberId'=>(int)$authority['member_id'],'memberNameSnapshot'=>$dimensions['memberName'],'operatorId'=>$operator->operatorId(),'operatorNameSnapshot'=>$dimensions['operatorName'],'businessDate'=>date('Y-m-d',$now),'businessTimezone'=>'Asia/Shanghai','occurredAt'=>$now,'settledAt'=>$now,'recordedAt'=>$now,'checkoutRequestId'=>$requestId,'orderId'=>$repaymentId,'orderNoSnapshot'=>$repaymentNo,'sourceDocumentType'=>'debt_repayment','businessEventNo'=>(string)$event['event_no'],'businessSourcePrimaryId'=>(int)($businessSource['primarySourceId'] ?? 0),'businessSourcePrimaryNameSnapshot'=>(string)($businessSource['primarySourceNameSnapshot'] ?? ''),'businessSourceSecondaryId'=>(int)($businessSource['secondarySourceId'] ?? 0),'businessSourceSecondaryNameSnapshot'=>(string)($businessSource['secondarySourceNameSnapshot'] ?? ''),'businessSourceLabelSnapshot'=>(string)($businessSource['displayNameSnapshot'] ?? '')],
             'saleFacts'=>[],'paymentFacts'=>$paymentFacts,'balanceFacts'=>[],'performanceFacts'=>$performanceFacts,
         ]);
         try { (new ThinkPhpCashierV3CheckoutFactRepository())->persistInTx($plan,$operator,$scope); }
