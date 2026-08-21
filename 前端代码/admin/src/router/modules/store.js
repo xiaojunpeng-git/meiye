@@ -149,6 +149,15 @@ export default {
       component: () => import('@/pages/store/region/workspace/index')
     },
     {
+      path: 'region/job-positions',
+      name: `${pre}regionJobPositions`,
+      meta: {
+        auth: ['admin-store-region-job_positions'],
+        title: '岗位策略'
+      },
+      component: () => import('@/pages/store/region/job-positions/index')
+    },
+    {
       path: 'region/create/:id?',
       name: `${pre}addRegion`,
       meta: {

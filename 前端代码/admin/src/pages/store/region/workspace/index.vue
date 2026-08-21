@@ -95,7 +95,6 @@
                 </div>
                 <button v-auth="['admin-store-add_store']" class="button secondary" type="button" :disabled="!selectedOrgId" @click="goCreateStore"><svg-icon name="plus" />新建门店</button>
                 <button v-auth="['setting-staff-index']" class="button secondary" type="button" :disabled="!selectedOrgId && !rootOrgs.length" @click="openCreateStaff()"><svg-icon name="plus" />新建人员</button>
-                <button class="button secondary" type="button" :class="{ 'is-readonly-disabled': !canWrite || writeSubmitting }" :disabled="writeSubmitting" @click="openJobPositionModal"><svg-icon name="plus" />岗位策略</button>
                 <button class="button primary" :class="{ 'is-readonly-disabled': !canWrite || writeSubmitting }" type="button" :disabled="writeSubmitting" :aria-disabled="(!canWrite || writeSubmitting).toString()" @click="openCreateOrgModal()"><svg-icon name="plus" />新增组织</button>
                 <button class="button secondary" :class="{ 'is-readonly-disabled': !canWrite || writeSubmitting }" type="button" :disabled="writeSubmitting" :aria-disabled="(!canWrite || writeSubmitting).toString()" @click="openEditOrgModal"><svg-icon name="edit" />编辑组织</button>
                 <button class="button secondary" type="button" title="停用后下级组织与所属门店将继承停用；不会批量改写下级自身状态" :class="{ 'is-readonly-disabled': !canWrite || writeSubmitting }" :disabled="writeSubmitting" @click="openOpsConfirm('org', selectedOrg.id, 0, selectedOrg.name)">停用组织</button>

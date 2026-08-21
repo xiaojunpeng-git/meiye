@@ -261,6 +261,34 @@ export default {
 </script>
 
 <style scoped>
+.modal-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(23, 32, 51, .42);
+}
+.modal-dialog {
+  max-height: calc(100vh - 40px);
+  overflow: hidden;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 20px 45px rgba(16, 24, 40, .2);
+}
+.modal-head,
+.modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 20px;
+  border-bottom: 1px solid #eaecf0;
+}
+.modal-head h2 { margin: 0; font-size: 18px; }
+.modal-footer { justify-content: flex-end; border-top: 1px solid #eaecf0; border-bottom: 0; }
+.icon-button { border: 0; color: #667085; background: transparent; cursor: pointer; font-size: 24px; line-height: 1; }
 .modal-dialog.jp-workbench,
 .jp-workbench {
   width: min(1280px, 90vw) !important;
