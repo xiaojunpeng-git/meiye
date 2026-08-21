@@ -1,4 +1,4 @@
--- upgrade_key: 20260821-001-cashier-v3-order-center-void
+-- upgrade_key: 20260821-005-cashier-v3-order-center-void
 -- Read-only precheck; run before 02-正式升级.sql.
 SET NAMES utf8mb4;
 SET @ocv_db := DATABASE();

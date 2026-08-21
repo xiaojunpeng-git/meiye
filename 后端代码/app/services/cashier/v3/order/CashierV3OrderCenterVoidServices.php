@@ -34,6 +34,7 @@ final class CashierV3OrderCenterVoidServices
     public function executeInTx(string $action, array $scope): array
     {
         CashierV3TransactionGuard::assertInTransaction('orderCenterVoid.executeInTx');
+        $this->assertOperationTableReady();
         [$operator, $dataScope, $recorder, $execution] = $this->scopes($scope);
         $payload = (array)($scope['payload'] ?? []);
         $reason = trim((string)($payload['reason'] ?? ''));
@@ -111,7 +112,7 @@ final class CashierV3OrderCenterVoidServices
             foreach ($items as $item) Db::name('store_debt_item')->where('id', (int)$item['id'])->update(['repaid_debt' => $this->money($allocation[(int)$item['id']] ?? 0), 'update_time' => $now]);
             Db::name('user_recharge')->where('id', (int)$row['recharge_id'])->where('uid', (int)$row['member_id'])
                 ->update(['repaid_debt_amount' => $this->money($repaidAfter)]);
-            Db::name($table)->where('id', (int)$row['id'])->update(['balance_ledger_id' => $balanceLedgerId, 'status' => 'voided', 'updated_at' => $now]);
+            $this->updateRepaymentRow($table, (int)$row['id'], $type, $now, ['balance_ledger_id' => $balanceLedgerId]);
         } else {
             $repaidAfter = $repaid - $amountCents;
             $total = $this->moneyCents($debt['total_debt'] ?? '0');
@@ -121,10 +122,7 @@ final class CashierV3OrderCenterVoidServices
             foreach ($items as $item) Db::name('store_debt_item')->where('id', (int)$item['id'])->update(['repaid_debt' => $this->money($allocation[(int)$item['id']] ?? 0), 'update_time' => $now]);
             // Sales-debt repayment authority uses the legacy V3 timestamp name
             // `update_time`; recharge-debt repayment uses `updated_at`.
-            Db::name($table)->where('id', (int)$row['id'])->update([
-                'status' => 'voided',
-                $type === 'sales' ? 'update_time' : 'updated_at' => $now,
-            ]);
+            $this->updateRepaymentRow($table, (int)$row['id'], $type, $now);
         }
         $operation = $this->operation($scope, $operator, $key, $recordId, $type . '_supplement', (string)$row['repayment_id'], $reason, $now);
         $event = $recorder->recordInTx($execution, $contract, [
@@ -152,7 +150,22 @@ final class CashierV3OrderCenterVoidServices
         $kind = (string)($item['gift_kind'] ?? $fact['gift_kind'] ?? '');
         $claims = [];
         if ($kind === 'product') {
-            $claims = Db::name('cashier_v3_presale_claim')->where('tenant_id', $scope->tenantId())->where('gift_id', (string)$fact['source_id'])->where('gift_item_id', (string)$fact['source_detail_id'])->where('claim_status', 'SETTLED')->order('id', 'asc')->lock(true)->select()->toArray();
+            // Gift identity is stored on the claimable-line projection. The
+            // claim fact only carries claimable_line_id, so do not query
+            // non-existent gift_id/gift_item_id columns on the claim table.
+            $claimableLines = Db::name('cashier_v3_presale_claimable_line')
+                ->where('tenant_id', $scope->tenantId())
+                ->where('source_kind', 'GIFT')
+                ->where('gift_id', (string)$fact['source_id'])
+                ->where('gift_item_id', (string)$fact['source_detail_id'])
+                ->lock(true)->select()->toArray();
+            foreach ($claimableLines as $claimableLine) {
+                $claims = array_merge($claims, Db::name('cashier_v3_presale_claim')
+                    ->where('tenant_id', $scope->tenantId())
+                    ->where('claimable_line_id', (string)$claimableLine['claimable_line_id'])
+                    ->where('claim_status', 'SETTLED')
+                    ->order('id', 'asc')->lock(true)->select()->toArray());
+            }
         } elseif ($kind === 'project') {
             $detailId = (int)($item['benefit_detail_id'] ?? 0);
             if ($detailId > 0 && (Db::name('cashier_v3_entitlement_writeoff_fact')->where('tenant_id', $scope->tenantId())->where('source_detail_id', (string)$detailId)->count() > 0
@@ -225,6 +238,46 @@ final class CashierV3OrderCenterVoidServices
         $id = (int)Db::name(self::OPERATION_TABLE)->insertGetId(['operation_id' => $operationId, 'operation_no' => $operationNo, 'tenant_id' => $scope->tenantId(), 'store_id' => $operator->storeId(), 'operator_id' => $operator->operatorId(), 'record_id' => $recordId, 'source_kind' => $kind, 'source_id' => $sourceId, 'reason_snapshot' => $reason, 'command_idempotency_key' => $key, 'status' => 'processing', 'created_at' => $now, 'updated_at' => $now]);
         if ($id <= 0) throw self::failure('作废操作记录写入失败。', 'order_center_void_operation_insert_failed');
         return ['id' => $id, 'operation_id' => $operationId, 'operation_no' => $operationNo];
+    }
+
+    private function assertOperationTableReady(): void
+    {
+        $rows = Db::query(
+            'SELECT TABLE_NAME AS t FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?',
+            ['eb_' . self::OPERATION_TABLE]
+        );
+        if ((string)($rows[0]['t'] ?? $rows[0]['TABLE_NAME'] ?? '') === 'eb_' . self::OPERATION_TABLE) {
+            return;
+        }
+        throw new CashierV3CommandException(
+            CashierV3ResultCode::ACTION_DEPENDENCY_NOT_READY,
+            '订单作废功能尚未完成数据库升级，请联系管理员完成数据库升级后重试。',
+            CashierV3ResultCode::STATUS_FAILED,
+            ['reason' => 'order_center_void_operation_table_missing', 'missing_tables' => ['eb_' . self::OPERATION_TABLE]]
+        );
+    }
+
+    private function updateRepaymentRow(string $table, int $id, string $type, int $now, array $extra = []): void
+    {
+        $preferred = $type === 'sales' ? 'update_time' : 'updated_at';
+        $fallback = $preferred === 'update_time' ? 'updated_at' : 'update_time';
+        $columns = Db::query(
+            'SELECT COLUMN_NAME AS c FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME IN (?, ?)',
+            ['eb_' . $table, $preferred, $fallback]
+        );
+        $available = [];
+        foreach ((array)$columns as $column) {
+            $name = (string)($column['c'] ?? $column['COLUMN_NAME'] ?? '');
+            if ($name !== '') $available[$name] = true;
+        }
+        $timestampField = isset($available[$preferred]) ? $preferred : (isset($available[$fallback]) ? $fallback : '');
+        if ($timestampField === '') {
+            throw self::failure('补交记录时间字段缺失，无法安全作废。', 'supplement_timestamp_field_missing');
+        }
+        $data = array_merge(['status' => 'voided', $timestampField => $now], $extra);
+        if ((int)Db::name($table)->where('id', $id)->update($data) !== 1) {
+            throw self::failure('补交记录并发变化，作废未提交。', 'supplement_repayment_update_race');
+        }
     }
 
     private function allocate(int $repaidCents, array $items): array
