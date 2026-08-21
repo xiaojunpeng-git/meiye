@@ -1444,6 +1444,9 @@ Route::group('adminapi', function () {
         Route::get('staff/customer/:id', 'v1.merchant.SystemStoreStaff/getStoreStaffCustomer')->option(['real_name' => '获取店员专属客户']);
         //获取店员业绩列表
         Route::get('staff/performance/:id', 'v1.merchant.SystemStoreStaff/getStaffPerformance')->option(['real_name' => '获取店员业绩列表']);
+        //门店端员工功能权限（仅维护当前任职的权限覆盖，不改变组织/门店关系）
+        Route::get('staff/:staffId/feature-permissions', 'v1.merchant.SystemStoreStaff/featurePermissionRead')->option(['real_name' => '读取员工功能权限']);
+        Route::put('staff/:staffId/feature-permissions', 'v1.merchant.SystemStoreStaff/featurePermissionSave')->option(['real_name' => '保存员工功能权限']);
         //获取店员详情
         Route::get('staff/read/:id', 'v1.merchant.SystemStoreStaff/read')->option(['real_name' => '获取店员详情']);
         Route::get('staff/person_complete/:id', 'v1.merchant.SystemStoreStaff/personComplete')->option(['real_name' => '人员完整详情']);
@@ -1649,6 +1652,13 @@ Route::group('adminapi', function () {
         Route::get('group-dashboard/drilldown', 'v1.report.UnifiedReport/groupDashboardDrilldown')->option(['real_name' => '集团管理看板下钻']);
         Route::get('member-dashboard', 'v1.report.UnifiedReport/memberDashboard')->option(['real_name' => '会员看板查询']);
         Route::get('product-dashboard', 'v1.report.UnifiedReport/productDashboard')->option(['real_name' => '商品看板查询']);
+        Route::get('engineering-ledger/catalog', 'v1.report.UnifiedReport/ledgerCatalog')->option(['real_name' => '工程管理台账目录']);
+        Route::get('engineering-ledger/list', 'v1.report.UnifiedReport/ledgerList')->option(['real_name' => '工程管理台账列表']);
+        Route::get('engineering-ledger/read/:id', 'v1.report.UnifiedReport/ledgerRead')->option(['real_name' => '工程管理台账详情']);
+        Route::post('engineering-ledger/save', 'v1.report.UnifiedReport/ledgerSave')->option(['real_name' => '工程管理台账保存']);
+        Route::post('engineering-ledger/void/:id', 'v1.report.UnifiedReport/ledgerVoid')->option(['real_name' => '工程管理台账作废']);
+        Route::get('engineering-ledger/export', 'v1.report.UnifiedReport/ledgerExport')->option(['real_name' => '工程管理台账导出']);
+        Route::get('engineering-ledger/reminders', 'v1.report.UnifiedReport/ledgerReminders')->option(['real_name' => '降租续签提醒']);
         Route::get('six-dimension/consumption-tiers', 'v1.report.UnifiedReport/consumptionTiers')->option(['real_name' => '消费分级设置列表']);
         Route::post('six-dimension/consumption-tiers', 'v1.report.UnifiedReport/saveConsumptionTier')->option(['real_name' => '保存消费分级设置']);
         Route::post('six-dimension/consumption-tiers/sort', 'v1.report.UnifiedReport/sortConsumptionTiers')->option(['real_name' => '消费分级排序']);

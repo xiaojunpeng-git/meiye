@@ -126,6 +126,27 @@ export function getStaffColumnSetting(params) {
 }
 
 /**
+ * 获取门店端员工功能权限（三态覆盖）。
+ */
+export function getStaffFeaturePermissions(staffId) {
+  return request({
+    url: `merchant/staff/${staffId}/feature-permissions`,
+    method: 'get',
+  });
+}
+
+/**
+ * 保存门店端员工功能权限（三态覆盖）。
+ */
+export function saveStaffFeaturePermissions(staffId, data) {
+  return request({
+    url: `merchant/staff/${staffId}/feature-permissions`,
+    method: 'put',
+    data,
+  });
+}
+
+/**
  * 保存店员列表列配置
  */
 export function saveStaffColumnSetting(data) {

@@ -129,10 +129,11 @@ class CashierV3StaffFeatureOverrideServices
                 ]);
                 Db::name('employee_change_log')->insert([
                     'employee_id' => $employeeId, 'action' => 'store_v3_feature_override_save',
-                    'target_type' => 'store_v3_feature_override', 'target_id' => $staffId, 'source' => 'store_v3',
+                    'target_type' => 'store_v3_feature_override', 'target_id' => $staffId,
+                    'source' => (string)($operator['source'] ?? 'store_v3'),
                     'before_data' => json_encode($before, JSON_UNESCAPED_UNICODE),
                     'after_data' => json_encode($after, JSON_UNESCAPED_UNICODE), 'reason' => '门店端员工功能权限编辑',
-                    'operator_type' => 'store', 'operator_id' => (int)($operator['id'] ?? 0),
+                    'operator_type' => (string)($operator['type'] ?? 'store'), 'operator_id' => (int)($operator['id'] ?? 0),
                     'operator_name' => (string)($operator['name'] ?? ''), 'operator_ip' => (string)($operator['ip'] ?? ''),
                     'request_id' => (string)($operator['request_id'] ?? ''), 'add_time' => $now,
                 ]);

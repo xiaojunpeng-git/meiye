@@ -142,7 +142,13 @@ export default {
       const stores = [];
       const walk = (item) => {
         const storeId = Number(item && (item.store_id || (item.node_type === 'store' ? item.id : 0)));
-        if (storeId > 0) stores.push({ id: storeId, name: item.title || item.name || `门店${storeId}` });
+        if (storeId > 0) {
+          stores.push({
+            id: storeId,
+            name: item.title || item.name || `门店${storeId}`,
+            orgId: Number(item.org_id || item.organization_id || 0),
+          });
+        }
         (Array.isArray(item && item.children) ? item.children : []).forEach(walk);
       };
       walk(node);
@@ -150,7 +156,7 @@ export default {
     },
     selectNode(option) {
       if (option.storeId > 0) {
-        this.selectStore({ id: option.storeId, name: option.name });
+        this.selectStore({ id: option.storeId, name: option.name, orgId: option.node.org_id || option.node.organization_id || 0 });
         return;
       }
       const storeIds = this.nodeStoreIds(option.node);
@@ -159,14 +165,22 @@ export default {
       this.selectedOrganizationName = option.name;
       this.selectedStores = this.nodeStores(option.node);
       this.displayLabel = option.name;
-      this.emitChange(storeIds, option.name);
+      this.emitChange(storeIds, option.name, {
+        nodeType: 'org',
+        orgId: Number(option.node && option.node.id) || 0,
+        storeId: 0,
+      });
     },
     selectStore(store) {
       const storeId = Number(store && store.id);
       if (!storeId) return;
       this.displayLabel = store.name || `门店${storeId}`;
       this.open = false;
-      this.emitChange([storeId], this.displayLabel);
+      this.emitChange([storeId], this.displayLabel, {
+        nodeType: 'store',
+        orgId: Number(store.orgId || 0),
+        storeId,
+      });
     },
     chooseAll() {
       this.selectedOrganizationKey = '';
@@ -174,13 +188,13 @@ export default {
       this.selectedStores = [];
       this.displayLabel = '当前权限范围';
       this.open = false;
-      this.emitChange([], this.displayLabel);
+      this.emitChange([], this.displayLabel, { nodeType: 'all', orgId: 0, storeId: 0 });
     },
-    emitChange(storeIds, label) {
+    emitChange(storeIds, label, context = {}) {
       const ids = [...new Set((storeIds || []).map(Number).filter(Boolean))];
       this.selectedStoreIds = ids;
       this.$emit('input', ids);
-      this.$emit('change', { storeIds: ids, label });
+      this.$emit('change', { storeIds: ids, label, ...context });
     },
     reset() {
       this.selectedOrganizationKey = '';

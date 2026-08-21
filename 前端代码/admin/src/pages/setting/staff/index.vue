@@ -2,34 +2,6 @@
   <div class="staff-page">
     <Card :bordered="false" dis-hover :padding="16" class="staff-card">
       <div class="staff-mgmt">
-        <div class="org-tree-panel">
-          <div class="panel-header">
-            <h3 class="panel-title">组织</h3>
-            <div class="panel-actions">
-              <Tooltip content="展开全部" transfer>
-                <span class="btn-icon" @click="expandAllTree"><Icon type="md-expand" /></span>
-              </Tooltip>
-              <Tooltip content="收起全部" transfer>
-                <span class="btn-icon" @click="collapseAllTree"><Icon type="md-contract" /></span>
-              </Tooltip>
-            </div>
-          </div>
-          <div class="tree-wrap">
-            <Spin v-if="treeLoading" size="large" class="tree-spin"></Spin>
-            <div v-show="!treeLoading && orgTree.length" class="tree-container">
-              <org-tree-node
-                v-for="node in orgTree"
-                :key="node.id"
-                :node="node"
-                :selected-id="selectedOrgId"
-                @select="onTreeSelectNode"
-                @toggle="toggleTreeNode"
-              />
-            </div>
-            <div v-if="!treeLoading && !orgTree.length" class="tree-empty">暂无组织数据</div>
-          </div>
-        </div>
-
         <div class="staff-list-panel">
           <div class="filter-bar">
             <Input
@@ -39,16 +11,11 @@
               class="search-input"
               @on-enter="orderSearch"
             />
-            <Select
-              v-model="formData.store_id"
-              clearable
-              filterable
-              class="filter-select"
-              placeholder="所属门店"
-              @on-change="orderSearch"
-            >
-              <Option v-for="item in storeList" :value="item.id" :key="item.id">{{ item.name }}</Option>
-            </Select>
+            <OrganizationStoreScopePicker
+              v-model="scopeStoreIds"
+              :load-scope="loadStaffScope"
+              @change="onScopeChange"
+            />
             <Select
               v-model="formData.status"
               clearable
@@ -140,8 +107,14 @@
                   </div>
                   <div class="action-row">
                     <a @click="handleClick1(row.id)">专属客户</a>
-                    <Divider type="vertical" />
-                    <a @click="handleClick2(row.id)">业绩订单</a>
+                    <Divider
+                      v-if="Number(row.is_organization_direct || 0) !== 1 && Number(row.id || 0) > 0"
+                      type="vertical"
+                    />
+                    <a
+                      v-if="Number(row.is_organization_direct || 0) !== 1 && Number(row.id || 0) > 0"
+                      @click="openPermissionEditor(row)"
+                    >权限编辑</a>
                   </div>
                 </div>
               </template>
@@ -175,6 +148,11 @@
     />
     <transfer-modal v-model="showTransferModal" :staff-row="transferStaffRow" @success="getList" />
     <transfer-log-modal v-model="showTransferLogModal" :staff-id="transferLogStaffId" />
+    <staff-feature-permission-modal
+      v-model="permissionModal"
+      :staff="permissionStaff"
+      @success="getList"
+    />
 
     <Modal
       v-model="modal1"
@@ -234,76 +212,6 @@
       </div>
     </Modal>
 
-    <Modal
-      v-model="modal2"
-      :mask-closable="false"
-      title="业绩订单"
-      footer-hide
-      width="1000"
-      @on-cancel="onModal2Cancel"
-    >
-      <Form
-        inline
-        ref="form2"
-        :model="formData2"
-        :label-width="labelWidth"
-        :label-position="labelPosition"
-        @submit.native.prevent
-      >
-        <FormItem label="时间选择：">
-          <DatePicker
-            :editable="false"
-            @on-change="onDateChange2"
-            :value="timeVal2"
-            format="yyyy/MM/dd"
-            type="daterange"
-            placement="bottom-end"
-            placeholder="自定义时间"
-            class="input-add"
-            :options="options"
-          />
-        </FormItem>
-        <FormItem label="用户信息：">
-          <Input v-model="formData2.keyword" clearable class="input-add" />
-        </FormItem>
-        <FormItem label="订单号：">
-          <Input v-model="formData2.link_id" clearable class="input-add" />
-        </FormItem>
-        <FormItem label="业绩金额：">
-          <InputNumber v-model="performance.min" :max="9999999999" :min="0" placeholder="最小值" style="width: 109px" />
-          <span class="mr10 ml-10">一</span>
-          <InputNumber v-model="performance.max" :max="9999999999" :min="0" placeholder="最大值" style="width: 109px" />
-        </FormItem>
-        <FormItem label="订单金额：">
-          <InputNumber v-model="price.min" :max="9999999999" :min="0" placeholder="最小值" style="width: 109px" />
-          <span class="mr10 ml-10">一</span>
-          <InputNumber v-model="price.max" :max="9999999999" :min="0" placeholder="最大值" style="width: 109px" />
-        </FormItem>
-        <FormItem :label-width="0">
-          <Button type="primary" @click="handleSearch2">查询 <span class="enter-key">↵</span></Button>
-        </FormItem>
-      </Form>
-      <Table
-        highlight-row
-        no-data-text="暂无数据"
-        :columns="columns2"
-        :data="tableData2"
-      >
-        <template slot-scope="{ row }" slot="user">
-          <div>{{ row.user_nickname }}|{{ row.phone }}|ID:{{ row.uid }}</div>
-        </template>
-      </Table>
-      <div class="acea-row row-right page">
-        <Page
-          :total="total2"
-          show-elevator
-          show-total
-          :current="formData2.page"
-          @on-change="onPageChange2"
-          :page-size="formData2.limit"
-        />
-      </div>
-    </Modal>
   </div>
 </template>
 
@@ -311,21 +219,20 @@
 import { mapState } from 'vuex';
 import Setting from '@/setting';
 import {
-  merchantStoreListApi,
   merchantStaffList,
   merchantStaffCustomer,
-  merchantStaffPerformance,
   exportStaffListExport,
 } from '@/api/setting';
-import { getOrganizationTree } from '@/api/store';
+import { getOrganizationTree, getOrganizationResourceSelector } from '@/api/store';
 import { getStaffColumnSetting, saveStaffColumnSetting } from '@/api/staff';
 import exportExcel from '@/utils/newToExcel.js';
 import timeOptions from '@/utils/timeOptions';
 import FormModal from './add';
-import OrgTreeNode from './components/OrgTreeNode';
 import ColumnSetting from './components/ColumnSetting';
 import TransferModal from './components/TransferModal';
 import TransferLogModal from './components/TransferLogModal';
+import OrganizationStoreScopePicker from '@/components/organization/OrganizationStoreScopePicker.vue';
+import StaffFeaturePermissionModal from './components/StaffFeaturePermissionModal.vue';
 
 function resolveApiOrigin() {
   return String(Setting.apiBaseURL || '')
@@ -421,17 +328,15 @@ export default {
   name: 'setting_staff_index',
   components: {
     FormModal,
-    OrgTreeNode,
     ColumnSetting,
     TransferModal,
     TransferLogModal,
+    OrganizationStoreScopePicker,
+    StaffFeaturePermissionModal,
   },
   data() {
     return {
       options: timeOptions,
-      treeLoading: false,
-      orgTree: [],
-      selectedOrgId: 0,
       formModal: false,
       formEditId: 0,
       showColumnSetting: false,
@@ -439,6 +344,8 @@ export default {
       showTransferLogModal: false,
       transferStaffRow: {},
       transferLogStaffId: 0,
+      permissionModal: false,
+      permissionStaff: {},
       columnsMeta: COLUMNS_META,
       columnConfig: [...DEFAULT_COLUMN_CONFIG],
       defaultColumnConfig: DEFAULT_COLUMN_CONFIG,
@@ -451,8 +358,10 @@ export default {
         limit: 10,
       },
       loading: false,
+      listRequestSeq: 0,
       data: [],
-      storeList: [],
+      scopeStoreIds: [],
+      rootOrganizationId: 0,
       total: 0,
       currentId: 0,
       modal1: false,
@@ -472,28 +381,6 @@ export default {
       ],
       total1: 0,
       tableData1: [],
-      modal2: false,
-      formData2: {
-        data: '',
-        keyword: '',
-        link_id: '',
-        price: '',
-        performance: '',
-        page: 1,
-        limit: 20,
-      },
-      timeVal2: [],
-      performance: { min: '', max: '' },
-      price: { min: '', max: '' },
-      columns2: [
-        { title: '订单号', key: 'link_id' },
-        { title: '用户信息', slot: 'user' },
-        { title: '订单金额', key: 'number' },
-        { title: '业绩金额', key: 'number' },
-        { title: '下单时间', key: 'add_time' },
-      ],
-      total2: 0,
-      tableData2: [],
       tableBodyHeight: 420,
     };
   },
@@ -524,18 +411,15 @@ export default {
     },
   },
   created() {
-    this.getStoreList();
     this.loadColumnSetting();
-    this.loadOrgTree();
+    this.loadRootOrganization();
   },
   mounted() {
     this.updateTableHeight();
     window.addEventListener('resize', this.updateTableHeight);
   },
   activated() {
-    if (this.selectedOrgId) {
-      this.getList();
-    }
+    this.getList();
     this.$nextTick(this.updateTableHeight);
   },
   beforeDestroy() {
@@ -566,59 +450,19 @@ export default {
       }
       return col;
     },
-    initTreeNodes(list, level = 0) {
-      return (list || []).map((node) => ({
-        ...node,
-        expanded: level === 0,
-        children: node.children ? this.initTreeNodes(node.children, level + 1) : [],
-      }));
-    },
-    loadOrgTree() {
-      this.treeLoading = true;
+    loadRootOrganization() {
+      // 组织树只移除页面展示；默认仍以集团根组织查询，保留组织直属员工。
       getOrganizationTree()
         .then((res) => {
-          const list = res.data || [];
-          const firstRoot = list.length ? list[0] : null;
-          if (firstRoot && !this.selectedOrgId) {
-            this.selectedOrgId = firstRoot.id;
-          }
-          this.orgTree = this.initTreeNodes(list);
-          if (this.selectedOrgId) {
-            this.formData.org_id = this.selectedOrgId;
-            this.getList();
-          }
+          const root = (res.data || [])[0];
+          this.rootOrganizationId = root ? Number(root.id) || 0 : 0;
+          this.formData.org_id = this.rootOrganizationId;
+          this.getList();
         })
         .catch((err) => {
           this.$Message.error(err.msg);
-        })
-        .finally(() => {
-          this.treeLoading = false;
+          this.getList();
         });
-    },
-    onTreeSelectNode(node) {
-      if (!node) return;
-      this.selectedOrgId = node.id;
-      this.formData.org_id = node.id;
-      this.formData.store_id = '';
-      this.formData.page = 1;
-      this.getList();
-    },
-    toggleTreeNode(node) {
-      this.$set(node, 'expanded', !node.expanded);
-    },
-    expandAllTree() {
-      this.setTreeExpand(this.orgTree, true);
-    },
-    collapseAllTree() {
-      this.setTreeExpand(this.orgTree, false);
-    },
-    setTreeExpand(nodes, expand) {
-      (nodes || []).forEach((n) => {
-        if (n.children && n.children.length) {
-          this.$set(n, 'expanded', expand);
-          this.setTreeExpand(n.children, expand);
-        }
-      });
     },
     loadColumnSetting() {
       getStaffColumnSetting({ table_key: 'staff_list_admin' })
@@ -690,6 +534,27 @@ export default {
       this.formData.page = 1;
       this.getList();
     },
+    loadStaffScope() {
+      return getOrganizationResourceSelector({
+        resource: 'org_store_tree',
+        page: 1,
+        limit: 50,
+      });
+    },
+    onScopeChange(scope = {}) {
+      this.formData.page = 1;
+      if (scope.nodeType === 'org' && Number(scope.orgId) > 0) {
+        this.formData.org_id = Number(scope.orgId);
+        this.formData.store_id = '';
+      } else if (scope.nodeType === 'store' && Number(scope.storeId) > 0) {
+        this.formData.org_id = this.rootOrganizationId;
+        this.formData.store_id = Number(scope.storeId);
+      } else {
+        this.formData.org_id = this.rootOrganizationId;
+        this.formData.store_id = '';
+      }
+      this.getList();
+    },
     pageChange(index) {
       this.formData.page = index;
       this.getList();
@@ -699,44 +564,33 @@ export default {
       this.formData.page = 1;
       this.getList();
     },
-    getStoreList() {
-      merchantStoreListApi()
-        .then((res) => {
-          this.storeList = res.data || [];
-        })
-        .catch((err) => {
-          this.$Message.error(err.msg);
-        });
-    },
     getList() {
-      if (!this.formData.org_id) return;
+      const requestSeq = ++this.listRequestSeq;
       this.loading = true;
+      // 每次只请求当前页，门店筛选和后端数据权限仍由统一列表接口处理。
       const params = { ...this.formData };
       if (!params.store_id) delete params.store_id;
       if (params.status === '') delete params.status;
       merchantStaffList(params)
         .then((res) => {
+          // 快速翻页时旧请求可能晚返回；只允许最后一次请求更新清单。
+          if (requestSeq !== this.listRequestSeq) return;
           this.data = res.data.list || [];
           this.total = res.data.count || 0;
           this.updateTableHeight();
         })
         .catch((err) => {
+          if (requestSeq !== this.listRequestSeq) return;
           this.$Message.error(err.msg);
         })
         .finally(() => {
-          this.loading = false;
+          if (requestSeq === this.listRequestSeq) this.loading = false;
         });
     },
     getCustomerList() {
       merchantStaffCustomer(this.currentId, this.formData1).then((res) => {
         this.tableData1 = res.data.list || [];
         this.total1 = res.data.count || 0;
-      });
-    },
-    getPerformanceList() {
-      merchantStaffPerformance(this.currentId, this.formData2).then((res) => {
-        this.tableData2 = res.data.list || [];
-        this.total2 = res.data.count || 0;
       });
     },
     getExcelData(excelData) {
@@ -783,37 +637,10 @@ export default {
       this.formData1 = { keyword: '', data: '', page: 1, limit: 20 };
       this.timeVal1 = [];
     },
-    handleClick2(id) {
-      this.modal2 = true;
-      this.currentId = id;
-      this.getPerformanceList();
-    },
-    handleSearch2() {
-      this.formData2.page = 1;
-      this.formData2.performance = this.performance.min ? `${this.performance.min}-${this.performance.max}` : '';
-      this.formData2.price = this.price.min ? `${this.price.min}-${this.price.max}` : '';
-      this.getPerformanceList();
-    },
-    onDateChange2(date) {
-      this.formData2.data = date[0] ? date.join('-') : '';
-    },
-    onPageChange2(page) {
-      this.formData2.page = page;
-      this.getPerformanceList();
-    },
-    onModal2Cancel() {
-      this.formData2 = {
-        data: '',
-        keyword: '',
-        link_id: '',
-        price: '',
-        performance: '',
-        page: 1,
-        limit: 20,
-      };
-      this.timeVal2 = [];
-      this.performance = { min: '', max: '' };
-      this.price = { min: '', max: '' };
+    openPermissionEditor(row) {
+      if (!row || Number(row.is_organization_direct || 0) === 1 || Number(row.id || 0) <= 0) return;
+      this.permissionStaff = row;
+      this.permissionModal = true;
     },
   },
 };
@@ -842,66 +669,6 @@ export default {
   width 100%
   align-items stretch
   overflow hidden
-
-.org-tree-panel
-  width 250px
-  flex-shrink 0
-  background #fff
-  border-radius 8px
-  box-shadow 0 2px 8px rgba(0, 0, 0, 0.06)
-  display flex
-  flex-direction column
-  min-height 0
-  overflow hidden
-
-.panel-header
-  display flex
-  align-items center
-  justify-content space-between
-  padding 14px 16px
-  border-bottom 1px solid #f0f0f0
-  flex-shrink 0
-
-.panel-title
-  margin 0
-  font-size 15px
-  font-weight 600
-
-.panel-actions
-  display flex
-  gap 8px
-
-.btn-icon
-  width 28px
-  height 28px
-  display flex
-  align-items center
-  justify-content center
-  border-radius 4px
-  cursor pointer
-  color #666
-
-  &:hover
-    background #ecf5ff
-    color #2d8cf0
-
-.tree-wrap
-  flex 1
-  overflow auto
-  padding 8px
-  position relative
-  min-height 0
-
-.tree-spin
-  position absolute
-  top 50%
-  left 50%
-  transform translate(-50%, -50%)
-
-.tree-empty
-  text-align center
-  color #999
-  padding 40px 0
 
 .staff-list-panel
   flex 1
