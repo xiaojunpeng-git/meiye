@@ -594,10 +594,18 @@ class StoreProductServices extends BaseServices
         $productInfo['description'] = $storeDescriptionServices->getDescription(['product_id' => $id, 'type' => 0]);
         //系统表单
         $productInfo['custom_form'] = $productInfo['custom_form_info'] = [];
-        //无属性添加默认属性
-		$storeProductAttrResultServices->checkProductReseultAndSaveAttr($id, 0, $productInfo);
-        if ($productInfo['spec_type'] == 1) {
-            $result = $storeProductAttrResultServices->getResult(['product_id' => $id, 'type' => 0]);
+        // 商品详情接口必须保持只读。
+        // 旧逻辑在这里调用 checkProductReseultAndSaveAttr：打开编辑页时，
+        // 如果默认 SKU 缺失就会开启商品目录写事务并拿目录锁。平台商品还
+        // 可能已经有大量门店副本，导致“读取另一个商品”也被保存/同步任务
+        // 阻塞，最终返回“商品目录正在被其他操作修改”。保存接口本身会
+        // 按当前表单重新写入 SKU，因此详情读取只需在内存中提供默认值。
+        $result = $storeProductAttrResultServices->getResult(['product_id' => $id, 'type' => 0]);
+        $hasStructuredResult = is_array($result)
+            && isset($result['value'], $result['attr'])
+            && is_array($result['value'])
+            && is_array($result['attr']);
+        if ($productInfo['spec_type'] == 1 && $hasStructuredResult) {
             $attrInfo = $storeProductAttrValueServices->getColumn(['product_id' => $id, 'type' => 0], '*');
             foreach ($result['value'] as $k => $v) {
                 if (!isset($v['is_show'])) {
@@ -642,6 +650,9 @@ class StoreProductServices extends BaseServices
             $productInfo['attrs'] = $result['value'];
             $productInfo['attr'] = ['pic' => '', 'vip_price' => 0, 'price' => 0, 'settle_price' => 0, 'cost' => 0, 'ot_price' => 0, 'stock' => 0, 'bar_code' => '', 'weight' => 0, 'volume' => 0, 'brokerage' => 0, 'brokerage_two' => 0, 'code' => '', 'write_times' => 1, 'write_valid' => 1, 'days' => 0, 'section_time' => []];
         } else {
+            // 历史数据可能只有商品主表而没有规格结果。不要在 GET
+            // 请求中补写数据库，降级为单规格编辑模型即可。
+            $productInfo['spec_type'] = 0;
             /** @var StoreProductVirtualServices $virtualService */
             $virtualService = app()->make(StoreProductVirtualServices::class);
             /** @var StoreProductReservationTimeServices $reservationTimeServices */
