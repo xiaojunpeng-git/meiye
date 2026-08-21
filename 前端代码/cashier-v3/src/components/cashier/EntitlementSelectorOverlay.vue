@@ -250,6 +250,7 @@ function addProject(source = {}, project = {}) {
       entitlementSourceKind: project.isGift ? 'gift' : String(source.sourceKind || ''),
       isGift: Boolean(project.isGift),
       giftSourceType: project.isGift ? 'holder_backed' : 'none',
+      sourceType: String(project.sourceType || ''),
       sourceDetailId: Number(project.entitlementSourceDetailId || project.sourceDetailId || project.id || 0),
       entitlementSourceName: String(source.name || ''),
       fullCardNo: String(source.fullCardNo || ''),

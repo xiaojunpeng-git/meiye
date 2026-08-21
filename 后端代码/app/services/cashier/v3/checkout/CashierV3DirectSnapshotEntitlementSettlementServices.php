@@ -1047,7 +1047,8 @@ final class CashierV3DirectSnapshotEntitlementSettlementServices
             $amount = $this->purchaseAmount($detail, $decoded);
             $totalTimes = (int)($detail['write_times'] ?? 0);
             $amountCalculationVersion = $this->amountCalculationVersion($decoded);
-            if (is_array($ruleAuthority)) {
+            if (is_array($ruleAuthority)
+                && !CashierV3EntitlementActualAmountAllocator::isCentCapableSnapshot($decoded)) {
                 $remaining = (int)$ruleAuthority['remainingTimes'];
                 $amount = $this->centsToMoney((int)$ruleAuthority['purchaseAmountCents']);
                 $totalTimes = (int)$ruleAuthority['totalTimes'];
@@ -1804,6 +1805,9 @@ final class CashierV3DirectSnapshotEntitlementSettlementServices
 
     private function amountCalculationVersion(array $decoded): string
     {
+        if (CashierV3EntitlementActualAmountAllocator::isCentCapableSnapshot($decoded)) {
+            return 'operation-cent-' . CashierV3EntitlementActualAmountAllocator::CALCULATION_VERSION;
+        }
         $legacy = is_array($decoded['rh_source'] ?? null) ? $decoded['rh_source'] : [];
         $prefix = array_key_exists('source_line_paid_amount', $legacy)
             ? 'rh-source-line-payment-'

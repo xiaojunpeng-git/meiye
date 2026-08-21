@@ -629,9 +629,14 @@ final class CashierV3EntitlementProjectionServices
                 $name = '项目';
             }
             $debtBlocked = max(0, $rawSurplus - $effective);
-            $amounts = is_array($ruleAuthority)
-                ? $this->ruleProjectAmounts($ruleAuthority)
-                : $this->projectAmounts($cart, $rawSurplus);
+            // Operation-created benefits carry their authoritative cents in
+            // cart_info. Do not replace that snapshot with the card-rule
+            // whole-yuan projection for this one explicit source type.
+            $amounts = CashierV3EntitlementActualAmountAllocator::isCentCapableSnapshot($decoded)
+                ? $this->projectAmounts($cart, $rawSurplus)
+                : (is_array($ruleAuthority)
+                    ? $this->ruleProjectAmounts($ruleAuthority)
+                    : $this->projectAmounts($cart, $rawSurplus));
             $invalidAmount = $amounts['purchaseAmount'] === null
                 || $amounts['remainingAmount'] === null
                 || $amounts['totalPurchaseTimes'] <= 0;
@@ -657,6 +662,7 @@ final class CashierV3EntitlementProjectionServices
                 'id' => $detailId,
                 'projectId' => (int)$cart['product_id'],
                 'entitlementSourceDetailId' => $detailId,
+                'sourceType' => (string)($decoded['sourceType'] ?? ''),
                 'name' => $name,
                 'remainingTimes' => $rawSurplus,
                 'purchaseTimes' => max(0, (int)$cart['write_times']),
@@ -800,10 +806,11 @@ final class CashierV3EntitlementProjectionServices
         $consumedTimes = $totalTimes - $remainingTimes;
         return [
             'purchaseAmount' => $purchaseAmount,
-            'remainingAmount' => CashierV3EntitlementActualAmountAllocator::remaining(
+            'remainingAmount' => CashierV3EntitlementActualAmountAllocator::remainingForSnapshot(
                 $purchaseAmount,
                 $totalTimes,
-                $consumedTimes
+                $consumedTimes,
+                $authority
             ),
             'totalPurchaseTimes' => $totalTimes,
             'consumedTimesAtSelection' => $consumedTimes,
@@ -855,8 +862,13 @@ final class CashierV3EntitlementProjectionServices
         $legacySource = is_array($snapshot['rh_source'] ?? null) ? $snapshot['rh_source'] : [];
         $amount = null;
         $version = 'legacy-cart-line-payment-' . CashierV3EntitlementActualAmountAllocator::CALCULATION_VERSION;
+        if (CashierV3EntitlementActualAmountAllocator::isCentCapableSnapshot($snapshot)) {
+            $version = 'operation-cent-' . CashierV3EntitlementActualAmountAllocator::CALCULATION_VERSION;
+        }
         if (array_key_exists('source_line_paid_amount', $legacySource)) {
-            $amount = $this->nonnegativeMoney($legacySource['source_line_paid_amount']);
+            $amount = CashierV3EntitlementActualAmountAllocator::isCentCapableSnapshot($snapshot)
+                ? $this->nonnegativeCentMoney($legacySource['source_line_paid_amount'])
+                : $this->nonnegativeMoney($legacySource['source_line_paid_amount']);
             if ($amount === null) {
                 return [
                     'purchaseAmount' => null,
@@ -869,7 +881,9 @@ final class CashierV3EntitlementProjectionServices
             $version = 'rh-source-line-payment-' . CashierV3EntitlementActualAmountAllocator::CALCULATION_VERSION;
         }
         if ($amount === null) {
-            $amount = $this->nonnegativeMoney($cart['pay_price'] ?? null);
+            $amount = CashierV3EntitlementActualAmountAllocator::isCentCapableSnapshot($snapshot)
+                ? $this->nonnegativeCentMoney($cart['pay_price'] ?? null)
+                : $this->nonnegativeMoney($cart['pay_price'] ?? null);
         }
         if ($amount === null) {
             return [
@@ -893,10 +907,11 @@ final class CashierV3EntitlementProjectionServices
         $consumedTimes = $purchaseTimes - $remainingTimes;
         return [
             'purchaseAmount' => $amount,
-            'remainingAmount' => CashierV3EntitlementActualAmountAllocator::remaining(
+            'remainingAmount' => CashierV3EntitlementActualAmountAllocator::remainingForSnapshot(
                 $amount,
                 $purchaseTimes,
-                $consumedTimes
+                $consumedTimes,
+                $snapshot
             ),
             'totalPurchaseTimes' => $purchaseTimes,
             'consumedTimesAtSelection' => $consumedTimes,
@@ -1002,6 +1017,18 @@ final class CashierV3EntitlementProjectionServices
         }
         $raw = trim((string)$value);
         if (preg_match('/^(?:0|[1-9][0-9]*)(?:\.0{1,2})?$/D', $raw) !== 1) {
+            return null;
+        }
+        return bcadd($raw, '0', 2);
+    }
+
+    private function nonnegativeCentMoney($value): ?string
+    {
+        if (is_bool($value) || is_array($value) || is_object($value) || $value === null) {
+            return null;
+        }
+        $raw = trim((string)$value);
+        if (preg_match('/^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,2})?$/D', $raw) !== 1) {
             return null;
         }
         return bcadd($raw, '0', 2);

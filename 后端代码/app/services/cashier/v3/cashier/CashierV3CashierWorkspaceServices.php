@@ -3047,11 +3047,12 @@ final class CashierV3CashierWorkspaceServices
                     $line['actualAmount'] = '0.00';
                 } else {
                     try {
-                        $line['actualAmount'] = CashierV3EntitlementActualAmountAllocator::allocate(
+                        $line['actualAmount'] = CashierV3EntitlementActualAmountAllocator::allocateForSnapshot(
                             $purchaseAmount,
                             $totalPurchaseTimes,
                             $allocationStart,
-                            $allocatableQuantity
+                            $allocatableQuantity,
+                            is_array($snapshot) ? $snapshot : []
                         );
                     } catch (\InvalidArgumentException $exception) {
                         throw $this->incompleteLineSettings((string)$row['line_key'], 'actual_amount_allocation_failed');

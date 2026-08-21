@@ -2800,10 +2800,16 @@ function localEntitlementAmount(lines = [], line = {}) {
   // 编辑态只按当前展示权益计算应收，不以剩余次数阻止加入；实际余次由
   // 第三步确认时的权威结账事务重新读取并校验。
   if (!totalCents || !Number.isInteger(totalTimes) || totalTimes <= 0) return 0
-  // Keep the browser snapshot identical to the final entitlement kernel:
-  // amounts are allocated in whole yuan, with the final occurrence carrying
-  // the remainder. Proportional cent rounding (for example 4660 / 3 =>
-  // 1553.33) cannot be accepted by the authority snapshot check.
+  const centCapable = String(line.displaySnapshot?.sourceType || '').startsWith('cashier_v3_project_')
+    || String(line.amountCalculationVersion || '').startsWith('operation-cent-')
+    || String(line.displaySnapshot?.amountCalculationVersion || '').startsWith('operation-cent-')
+  if (centCapable) {
+    const regularCents = Math.floor(totalCents / totalTimes)
+    const cumulative = (times) => times >= totalTimes
+      ? totalCents
+      : regularCents * Math.max(0, times)
+    return centsToMoney(cumulative(consumedTimes + quantity) - cumulative(consumedTimes))
+  }
   const totalWholeYuan = Math.floor(totalCents / 100)
   const regularWholeYuan = Math.floor(totalWholeYuan / totalTimes)
   const cumulative = (times) => times >= totalTimes
@@ -2893,6 +2899,7 @@ function normalizeEntitlementAppendLines(lines = []) {
         entitlementSourceKind: project.isGift ? 'gift' : String(source.sourceKind || ''),
         isGift: Boolean(project.isGift),
         giftSourceType: project.isGift ? 'holder_backed' : 'none',
+        sourceType: String(project.sourceType || ''),
         sourceDetailId: Number(detailId || 0),
         entitlementSourceName: String(source.name || ''),
         fullCardNo: String(source.fullCardNo || ''),

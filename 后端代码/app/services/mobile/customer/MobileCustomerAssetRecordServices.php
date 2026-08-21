@@ -98,7 +98,14 @@ final class MobileCustomerAssetRecordServices
                 'purchaseTimes' => $total,
                 'usedTimes' => $total - $remaining,
                 'remainingTimes' => $remaining,
-                'remainingAmount' => CashierV3EntitlementActualAmountAllocator::remaining($this->money($row['pay_price'] ?? 0), $total, $total - $remaining),
+                'remainingAmount' => CashierV3EntitlementActualAmountAllocator::remainingForSnapshot(
+                    $this->money($row['pay_price'] ?? 0),
+                    $total,
+                    $total - $remaining,
+                    is_array($row['cart_info'] ?? null)
+                        ? $row['cart_info']
+                        : (is_string($row['cart_info'] ?? null) ? (json_decode((string)$row['cart_info'], true) ?: []) : [])
+                ),
             ];
         }
         $stores = Db::name('system_store')->whereIn('id', $storeIds)->column('name', 'id');

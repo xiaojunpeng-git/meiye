@@ -122,7 +122,7 @@ final class CashierV3CashierMemberSummaryServices
             ->where('product_type', 6)
             ->where('is_writeoff', 0)
             ->where('write_surplus_times', '>', 0)
-            ->field('oid,write_times,write_surplus_times,write_start,write_end,pay_price')
+            ->field('oid,write_times,write_surplus_times,write_start,write_end,pay_price,cart_info')
             ->order('oid asc,id asc')
             ->select());
         foreach ($carts as $cart) {
@@ -138,13 +138,18 @@ final class CashierV3CashierMemberSummaryServices
                 $remainingTimes += $remaining;
             }
             $consumed = $total - $remaining;
+            $snapshot = is_string($cart['cart_info'] ?? null)
+                ? json_decode((string)$cart['cart_info'], true)
+                : ($cart['cart_info'] ?? []);
+            $snapshot = is_array($snapshot) ? $snapshot : [];
             try {
                 $remainingAmount = bcadd(
                     $remainingAmount,
-                    CashierV3EntitlementActualAmountAllocator::remaining(
+                    CashierV3EntitlementActualAmountAllocator::remainingForSnapshot(
                         $this->money($cart['pay_price'] ?? 0),
                         $total,
-                        $consumed
+                        $consumed,
+                        $snapshot
                     ),
                     2
                 );

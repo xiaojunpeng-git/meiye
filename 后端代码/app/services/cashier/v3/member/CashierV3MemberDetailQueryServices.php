@@ -696,10 +696,15 @@ final class CashierV3MemberDetailQueryServices
                 continue;
             }
             try {
-                $amount = CashierV3EntitlementActualAmountAllocator::remaining(
+                $snapshot = is_string($row['cart_info'] ?? null)
+                    ? json_decode((string)$row['cart_info'], true)
+                    : ($row['cart_info'] ?? []);
+                $snapshot = is_array($snapshot) ? $snapshot : [];
+                $amount = CashierV3EntitlementActualAmountAllocator::remainingForSnapshot(
                     $this->money($row['pay_price'] ?? 0),
                     $total,
-                    $total - $remaining
+                    $total - $remaining,
+                    $snapshot
                 );
             } catch (\InvalidArgumentException $exception) {
                 throw new CashierV3CommandException(
