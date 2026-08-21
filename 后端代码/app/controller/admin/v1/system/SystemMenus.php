@@ -169,8 +169,8 @@ class SystemMenus extends AuthController
             ['path', []],
             ['sort', 0],
             ['pid', 0],
-            // 顶部菜单标识不在旧版编辑表单中展示；编辑名称、路由等字段时必须保留原值，
-            // 否则普通保存会把已有顶部一级菜单静默降级为侧边菜单。
+            // 旧版编辑表单会固定提交 is_header=0，但没有提供顶部菜单开关；
+            // 编辑其他字段时必须无条件保留原值，避免顶部一级菜单被静默降级。
             ['is_header', (int)$menu['is_header']],
             ['header', ''],
             ['auth_type', 0],
@@ -178,6 +178,8 @@ class SystemMenus extends AuthController
             ['is_show', 1],
             ['is_show_path', 0],
         ]);
+        // postMore 会读取表单提交的 0，覆盖上面的默认值；这里以数据库原值为准。
+        $data['is_header'] = (int)$menu['is_header'];
         if (!$data['menu_name'])
             return $this->fail('请输入按钮名称');
         $data['path'] = implode('/', $data['path']);
