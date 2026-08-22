@@ -334,7 +334,12 @@ class Common extends AuthController
 			$ids = $roleServices->getRoleIds($roles);
 			$where = ['rule' => $ids];
 		}
-        $cahcheKey = md5('admin_common_menu_list_' . $adminType);
+		// 菜单树受角色规则裁剪，缓存键必须包含规则集合；否则同一管理员类型
+		// 的不同角色会命中彼此的菜单缓存，造成入口越权或缺失。
+		$ruleIds = $where['rule'] ?? [];
+		$ruleIds = is_array($ruleIds) ? $ruleIds : [$ruleIds];
+		sort($ruleIds, SORT_NUMERIC);
+		$cahcheKey = md5('admin_common_menu_list_v2_' . $adminType . '_' . implode(',', $ruleIds));
 		$list = CacheService::redisHandler('system_menus')->remember($cahcheKey, function () use ($where, $menusServices) {
 
 			$menus = $menusServices->getSearchList(1, $where);

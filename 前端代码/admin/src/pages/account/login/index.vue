@@ -476,12 +476,13 @@ export default {
     },
     handleResize(event) {
       this.fullWidth = document.documentElement.clientWidth;
+      const canvas = document.getElementsByTagName("canvas")[0];
+      if (!canvas) return;
+
       if (this.fullWidth < 768) {
-        document
-          .getElementsByTagName("canvas")[0]
-          .removeAttribute("class", "index_bg");
+        canvas.removeAttribute("class");
       } else {
-        document.getElementsByTagName("canvas")[0].className = "index_bg";
+        canvas.className = "index_bg";
       }
     },
     captchas: function () {

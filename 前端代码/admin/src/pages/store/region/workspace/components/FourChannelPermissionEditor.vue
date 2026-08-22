@@ -77,7 +77,9 @@
         :key="current + '-' + treeEpoch"
         :data="displayTree"
         show-checkbox
+        check-directly
         :ref="'tree_' + current"
+        @on-toggle-expand="onToggleExpand"
         @on-check-change="onCheckChange"
       />
       <div v-else class="fcpe-locked"><p>权限菜单加载中…</p></div>
@@ -115,9 +117,42 @@ function setChecked(nodes, checked) {
   });
 }
 
+function collectExpandedIds(nodes, acc) {
+  (nodes || []).forEach((node) => {
+    if (node.expand) acc.add(Number(node.id));
+    if (node.children && node.children.length) collectExpandedIds(node.children, acc);
+  });
+}
+
+function applyExpandedIds(nodes, ids) {
+  (nodes || []).forEach((node) => {
+    node.expand = ids.has(Number(node.id));
+    if (node.children && node.children.length) applyExpandedIds(node.children, ids);
+  });
+}
+
+// iView Tree renders a cloned tree and stores expand state on that rendered copy.
+// Merge it back before syncing checks so a checkbox click cannot collapse parents.
+function mergeExpandState(nodes, renderedNodes) {
+  const renderedById = new Map(
+    (renderedNodes || []).map((node) => [Number(node.id), node])
+  );
+  (nodes || []).forEach((node) => {
+    const rendered = renderedById.get(Number(node.id));
+    if (rendered && Object.prototype.hasOwnProperty.call(rendered, 'expand')) {
+      node.expand = !!rendered.expand;
+    }
+    if (node.children && node.children.length) {
+      mergeExpandState(node.children, rendered && rendered.children);
+    }
+  });
+}
+
 function filterTree(nodes, keyword) {
   const kw = String(keyword || '').trim().toLowerCase();
-  if (!kw) return cloneMenus(nodes);
+  // 无搜索时直接复用当前树，避免 iView Tree 每次渲染都拿到新副本，
+  // 复选框同步会因此重置节点的展开状态。
+  if (!kw) return nodes;
   const walk = (list) => {
     const out = [];
     (list || []).forEach((n) => {
@@ -222,6 +257,13 @@ export default {
         platform: [],
         store_v3: [],
         mobile: [],
+      },
+      // iView Tree owns the live expand state on its node objects. Keep a
+      // small channel-level snapshot because permission sync may remount it.
+      expandedIds: {
+        platform: new Set(),
+        store_v3: new Set(),
+        mobile: new Set(),
       },
     };
   },
@@ -361,11 +403,18 @@ export default {
       const v = this.value || {};
       ['platform', 'store_v3', 'mobile'].forEach((key) => {
         if (!(this.trees[key] && this.trees[key].length)) return;
+        if (this.trees[key].some((node) => node.expand)) {
+          this.expandedIds[key] = new Set();
+          collectExpandedIds(this.trees[key], this.expandedIds[key]);
+        }
         const ids = this.isEntryOn(key) ? (v[key] || []) : [];
         markChecked(this.trees[key], new Set(ids.map(Number)));
+        applyExpandedIds(this.trees[key], this.expandedIds[key]);
         this.trees[key] = cloneMenus(this.trees[key]);
       });
-      this.treeEpoch += 1;
+      // Tree's data watcher can reconcile checked state in place. Bumping the
+      // key here destroys the iView nodes and also discards their expansion.
+      // Explicit channel/tree changes still bump treeEpoch at their call sites.
       if (!silent) this.emitChange();
     },
     clearChannel(key) {
@@ -390,18 +439,26 @@ export default {
       }
       this.emitChange();
     },
-    syncFromTreeRef() {
+    syncFromTreeRef(checkedNodes) {
       if (this.isCurrentLocked) return;
       const ref = this.$refs['tree_' + this.current];
       const tree = Array.isArray(ref) ? ref[0] : ref;
       if (!tree) return;
       let ids = [];
-      if (typeof tree.getCheckedAndIndeterminateNodes === 'function') {
+      if (Array.isArray(checkedNodes)) {
+        // iView emits the post-toggle checked list synchronously. Prefer it
+        // over reading flatState again after the parent value watcher runs.
+        ids = checkedNodes.map((n) => Number(n.id)).filter((n) => n > 0);
+      } else if (typeof tree.getCheckedAndIndeterminateNodes === 'function') {
         ids = (tree.getCheckedAndIndeterminateNodes() || []).map((n) => Number(n.id)).filter((n) => n > 0);
       } else if (typeof tree.getCheckedNodes === 'function') {
         ids = (tree.getCheckedNodes() || []).map((n) => Number(n.id)).filter((n) => n > 0);
       }
       const visibleSet = new Set(ids);
+      // Keep the rendered arrow state when the check sync replaces the source tree.
+      mergeExpandState(this.trees[this.current], tree.stateTree);
+      this.expandedIds[this.current] = new Set();
+      collectExpandedIds(this.trees[this.current], this.expandedIds[this.current]);
       const kw = String(this.keyword || '').trim().toLowerCase();
       if (!kw) {
         markChecked(this.trees[this.current], visibleSet);
@@ -428,12 +485,28 @@ export default {
       this.trees[this.current] = cloneMenus(this.trees[this.current]);
       this.emitChange();
     },
-    onCheckChange() {
-      this.$nextTick(() => this.syncFromTreeRef());
+    onToggleExpand(node) {
+      const ids = new Set(this.expandedIds[this.current] || []);
+      const id = Number(node && node.id);
+      if (id > 0) {
+        if (node.expand) ids.add(id);
+        else ids.delete(id);
+      }
+      this.expandedIds[this.current] = ids;
+    },
+    onCheckChange(checkedNodes) {
+      // Capture expansion synchronously while the iView node still has the
+      // user's current state. The parent input watcher may remount Tree before
+      // the nextTick check synchronization runs.
+      this.expandedIds[this.current] = new Set();
+      collectExpandedIds(this.trees[this.current], this.expandedIds[this.current]);
+      this.$nextTick(() => this.syncFromTreeRef(checkedNodes));
     },
     expandAll(expand) {
       if (this.isCurrentLocked) return;
       setExpand(this.trees[this.current], expand);
+      this.expandedIds[this.current] = new Set();
+      collectExpandedIds(this.trees[this.current], this.expandedIds[this.current]);
       this.trees[this.current] = cloneMenus(this.trees[this.current]);
       this.treeEpoch += 1;
     },

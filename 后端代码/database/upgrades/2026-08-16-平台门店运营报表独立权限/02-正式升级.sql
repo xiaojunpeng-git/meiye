@@ -2,23 +2,35 @@
 -- MySQL 5.6 compatible and idempotent.
 SET NAMES utf8mb4;
 
--- 将已有的历史总入口收敛为“数据”下可见的一级菜单。不能只隐藏它：
--- 记录仍存在时后续 INSERT 会跳过，最终会出现子菜单无可见父级的问题。
+-- 旧聚合入口只保留为兼容记录，不再作为平台侧栏入口；独立报表直接挂到“数据”下。
+-- 这里使用带别名的等价更新，避免联表 UPDATE 时误改同名字段。
 UPDATE `eb_system_menus` parent_menu
 JOIN `eb_system_menus` data_menu
   ON data_menu.`unique_auth`='admin-report' AND data_menu.`type`=1 AND data_menu.`is_del`=0
 SET parent_menu.`pid`=data_menu.`id`,
     parent_menu.`icon`='ios-pie-outline',
-    parent_menu.`menu_name`='门店运营',
+    parent_menu.`menu_name`='门店运营（旧入口）',
     parent_menu.`menu_path`='/report/business-center',
     parent_menu.`path`=CAST(data_menu.`id` AS CHAR),
-    parent_menu.`is_show`=1,
+    parent_menu.`is_show`=0,
     parent_menu.`is_show_path`=0,
     parent_menu.`access`=1,
     parent_menu.`is_header`=0
 WHERE parent_menu.`type`=1
   AND parent_menu.`unique_auth`='admin-report-store-operations'
   AND parent_menu.`is_del`=0;
+
+-- 兼容本迁移曾在部分环境先写入子菜单的情况：独立报表必须脱离隐藏的旧父级，
+-- 否则菜单接口按 is_show=1 查询时会把整组报表留在不可见父节点下。
+UPDATE `eb_system_menus` report_menu
+JOIN `eb_system_menus` parent_menu
+  ON parent_menu.`unique_auth`='admin-report-store-operations' AND parent_menu.`type`=1 AND parent_menu.`is_del`=0
+JOIN `eb_system_menus` data_menu
+  ON data_menu.`unique_auth`='admin-report' AND data_menu.`type`=1 AND data_menu.`is_del`=0
+SET report_menu.`pid`=data_menu.`id`,
+    report_menu.`path`=CAST(data_menu.`id` AS CHAR)
+WHERE report_menu.`unique_auth` LIKE 'admin-report-store-operations-%'
+  AND report_menu.`is_del`=0;
 
 -- 菜单 ID 会随实例不同而变化，按权限标识定位“数据”，不能写死历史 ID 1573。
 INSERT INTO `eb_system_menus`
@@ -34,8 +46,8 @@ WHERE data_menu.`unique_auth`='admin-report' AND data_menu.`type`=1 AND data_men
 
 INSERT INTO `eb_system_menus`
 (`pid`,`type`,`icon`,`menu_name`,`module`,`controller`,`action`,`api_url`,`methods`,`params`,`sort`,`is_show`,`is_show_path`,`access`,`menu_path`,`path`,`auth_type`,`header`,`is_header`,`unique_auth`,`is_del`)
-SELECT parent_menu.id,1,'ios-stats-outline',r.menu_name,'admin','','','','[]','[]',19-r.sort_order,1,0,1,
-  CONCAT('/report/store-operations/',r.report_code),CONCAT(data_menu.id,'/',parent_menu.id),1,'',0,
+SELECT data_menu.id,1,'ios-stats-outline',r.menu_name,'admin','','','','[]','[]',19-r.sort_order,1,0,1,
+  CONCAT('/report/store-operations/',r.report_code),CAST(data_menu.id AS CHAR),1,'',0,
   CONCAT('admin-report-store-operations-',r.report_code),0
 FROM (
   SELECT 1 AS sort_order,'partner_item_summary' AS report_code,'合作方品项汇总' AS menu_name UNION ALL
@@ -57,10 +69,8 @@ FROM (
   SELECT 17,'salesperson_large_order_statistics','销售人生美大单统计表' UNION ALL
   SELECT 18,'store_refund_ledger','院店退款台账'
 ) r
-JOIN `eb_system_menus` parent_menu
-  ON parent_menu.`unique_auth`='admin-report-store-operations' AND parent_menu.`type`=1 AND parent_menu.`is_del`=0
 JOIN `eb_system_menus` data_menu
-  ON data_menu.`id`=parent_menu.`pid` AND data_menu.`unique_auth`='admin-report' AND data_menu.`is_del`=0
+  ON data_menu.`unique_auth`='admin-report' AND data_menu.`type`=1 AND data_menu.`is_del`=0
 WHERE EXISTS (SELECT 1 FROM `eb_system_menus` WHERE `unique_auth`='admin-report' AND `is_del`=0)
   AND NOT EXISTS (
     SELECT 1 FROM `eb_system_menus` m
