@@ -289,8 +289,10 @@ final class CashierV3SaleOnlyFactAssembler
               }
             }
 
+            $craftsmenSnapshotJson = trim((string)($orderLine['craftsmen_snapshot_json'] ?? ''));
             if ((string)$orderLine['item_type'] === 'project'
-                && !empty($orderLine['craftsmen_snapshot_json'])) {
+                && $craftsmenSnapshotJson !== ''
+                && $craftsmenSnapshotJson !== '[]') {
                 try {
                     $craftsmanPlan = CashierV3PaidProjectCraftsmanPerformanceServices::planInTx(
                         $orderLine,

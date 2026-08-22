@@ -4,6 +4,8 @@ use app\services\cashier\v3\order\settlement\CashierV3SalesOrderPlanV1;
 use app\services\cashier\v3\settlement\CashierV3CheckoutSettlementCanonicalizer;
 use app\services\cashier\v3\settlement\payment\CashierV3PaymentCollectionPlanV1;
 
+require_once dirname(__DIR__, 3) . '/后端代码/app/services/cashier/v3/settlement/CashierV3CheckoutCraftsmenSnapshot.php';
+
 function saleOnlyFactPayment(
     int $index,
     string $method,

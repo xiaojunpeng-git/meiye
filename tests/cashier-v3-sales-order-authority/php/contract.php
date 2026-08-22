@@ -5,6 +5,7 @@ $base = $root . '/后端代码/app/services/cashier/v3';
 require $base . '/CashierV3BusinessDocumentNumberServices.php';
 require $base . '/settlement/CashierV3CheckoutSettlementContractException.php';
 require $base . '/settlement/CashierV3CheckoutSettlementCanonicalizer.php';
+require $base . '/settlement/CashierV3CheckoutCraftsmenSnapshot.php';
 require $base . '/settlement/CashierV3CheckoutVerifiedSourceSet.php';
 require $base . '/order/settlement/CashierV3SalesOrderAuthorityException.php';
 require $base . '/order/settlement/CashierV3SalesOrderIdFactory.php';

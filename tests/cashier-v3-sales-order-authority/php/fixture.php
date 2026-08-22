@@ -18,7 +18,8 @@ function salesOrderAuthoritySaleLine(
     string $type,
     int $original,
     int $discount,
-    int $quantity
+    int $quantity,
+    int $debt = 0
 ): array {
     $sourceId = 100 + $index;
     $sourceVersion = 10 + $index;
@@ -33,17 +34,41 @@ function salesOrderAuthoritySaleLine(
         'quantity' => $quantity,
         'originalAmountCents' => $original,
         'discountAmountCents' => $discount,
+        'couponUserId' => 0,
+        'couponNameSnapshot' => '',
+        'couponDiscountCents' => 0,
         'saleAmountCents' => $original - $discount,
+        'debtAmountCents' => $debt,
         'sourceNameSnapshot' => ['产品 A', '卡项 B', '项目 C'][$index - 1],
         'sourceCodeSnapshot' => strtoupper($type) . '-00' . $index,
         'categoryIdSnapshot' => $categoryId,
         'categoryNameSnapshot' => '分类 ' . $index,
+        'configuredCostCents' => 0,
+        'priceChangeReason' => '',
+        'priceChangedBy' => 0,
+        'priceChangedByNameSnapshot' => '',
+        'priceChangedAt' => 0,
         'serviceObject' => $type === 'project' ? 'self' : '',
+        'friendCountsAsCustomer' => 1,
         'isExperience' => 0,
+        'craftsmen' => [],
+        'salespeople' => [],
+        'guideSelections' => [],
+        'salesManagerSelections' => [],
     ];
+    if ($type === 'card') {
+        // Card sale lines must carry the immutable purchase snapshot required
+        // by the settlement authority. Keep the fixture fingerprint aligned
+        // with the locked line shape instead of weakening production checks.
+        $authority['cardPurchaseSnapshot'] = [
+            'sourceKind' => 'card_package',
+            'snapshotVersion' => 1,
+        ];
+    }
     if ($catalogSkuId > 0) {
         $authority['catalogSkuId'] = $catalogSkuId;
     }
+    $lineFingerprint = CashierV3CheckoutSettlementCanonicalizer::fingerprint($authority);
     return [
         'id' => $index,
         'line_id' => salesOrderAuthorityOpaqueId('CKL', $index),
@@ -64,18 +89,41 @@ function salesOrderAuthoritySaleLine(
         'project_id' => $type === 'project' ? $sourceId : 0,
         'project_version' => $type === 'project' ? $sourceVersion : 0,
         'service_object' => $type === 'project' ? 'self' : '',
+        'friend_counts_as_customer' => 1,
         'is_experience' => 0,
+        'is_presale' => 0,
+        'inventory_outbound_required' => 1,
         'quantity' => $quantity,
         'original_amount_cents' => $original,
         'discount_amount_cents' => $discount,
+        'coupon_user_id' => 0,
+        'coupon_name_snapshot' => '',
+        'coupon_discount_cents' => 0,
         'sale_amount_cents' => $original - $discount,
+        'debt_amount_cents' => $debt,
         'entitlement_actual_amount_cents' => 0,
         'source_name_snapshot' => $authority['sourceNameSnapshot'],
         'source_code_snapshot' => $authority['sourceCodeSnapshot'],
         'project_name_snapshot' => $type === 'project' ? $authority['sourceNameSnapshot'] : '',
         'category_id_snapshot' => $categoryId,
         'category_name_snapshot' => $authority['categoryNameSnapshot'],
-        'line_fingerprint' => CashierV3CheckoutSettlementCanonicalizer::fingerprint($authority),
+        'line_fingerprint' => $lineFingerprint,
+        'configured_cost_cents' => 0,
+        'price_change_reason' => '',
+        'price_changed_by' => 0,
+        'price_changed_by_name_snapshot' => '',
+        'price_changed_at' => 0,
+        'craftsmen_snapshot_json' => '',
+        'salespeople_snapshot_json' => '[]',
+        'guide_selections_json' => '[]',
+        'sales_manager_selections_json' => '[]',
+        'manual_labor_fee_cents' => null,
+        'card_purchase_snapshot_json' => $type === 'card'
+            ? json_encode([
+                'sourceKind' => 'card_package',
+                'snapshotVersion' => 1,
+            ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
+            : '',
         'sort_no' => $index,
         'add_time' => 1785283200,
         'update_time' => 1785283200,
@@ -120,11 +168,18 @@ function salesOrderAuthorityEntitlementLine(int $sortNo, int $memberId): array
         'project_id' => 703,
         'project_version' => 11,
         'service_object' => 'self',
+        'friend_counts_as_customer' => 1,
         'is_experience' => 0,
+        'is_presale' => 0,
+        'inventory_outbound_required' => 1,
         'quantity' => 1,
         'original_amount_cents' => 0,
         'discount_amount_cents' => 0,
+        'coupon_user_id' => 0,
+        'coupon_name_snapshot' => '',
+        'coupon_discount_cents' => 0,
         'sale_amount_cents' => 0,
+        'debt_amount_cents' => 0,
         'entitlement_actual_amount_cents' => 1200,
         'source_name_snapshot' => '护理次卡',
         'source_code_snapshot' => 'CARD-701',
@@ -132,6 +187,17 @@ function salesOrderAuthorityEntitlementLine(int $sortNo, int $memberId): array
         'category_id_snapshot' => 31,
         'category_name_snapshot' => '护理',
         'line_fingerprint' => CashierV3CheckoutSettlementCanonicalizer::fingerprint($authority),
+        'configured_cost_cents' => 0,
+        'price_change_reason' => '',
+        'price_changed_by' => 0,
+        'price_changed_by_name_snapshot' => '',
+        'price_changed_at' => 0,
+        'craftsmen_snapshot_json' => '[]',
+        'salespeople_snapshot_json' => '[]',
+        'guide_selections_json' => '[]',
+        'sales_manager_selections_json' => '[]',
+        'manual_labor_fee_cents' => null,
+        'card_purchase_snapshot_json' => '',
         'sort_no' => $sortNo,
         'add_time' => 1785283200,
         'update_time' => 1785283200,
@@ -189,9 +255,10 @@ function salesOrderAuthorityLockedAggregate(array $options = []): array
         : ($includeEntitlement ? 9 : 0);
     $lines = [];
     if ($includeSales) {
-        $lines[] = salesOrderAuthoritySaleLine(1, 'product', 2000, 200, 2);
-        $lines[] = salesOrderAuthoritySaleLine(2, 'card', 5000, 500, 1);
-        $lines[] = salesOrderAuthoritySaleLine(3, 'project', 3000, 800, 1);
+        $lineDebts = (array)($options['lineDebts'] ?? []);
+        $lines[] = salesOrderAuthoritySaleLine(1, 'product', 2000, 200, 2, (int)($lineDebts[0] ?? 0));
+        $lines[] = salesOrderAuthoritySaleLine(2, 'card', 5000, 500, 1, (int)($lineDebts[1] ?? 0));
+        $lines[] = salesOrderAuthoritySaleLine(3, 'project', 3000, 800, 1, (int)($lineDebts[2] ?? 0));
     }
     if ($includeEntitlement) {
         $lines[] = salesOrderAuthorityEntitlementLine(count($lines) + 1, $memberId);
@@ -236,9 +303,16 @@ function salesOrderAuthorityLockedAggregate(array $options = []): array
         'business_timezone' => 'Asia/Shanghai',
         'operation_occurred_at' => 1785283200,
         'recorded_at' => 1785283201,
+        'order_note' => '',
+        'supplement_enabled' => 0,
+        'supplement_reason' => '',
+        'supplement_operator_id' => 0,
+        'supplement_operator_name_snapshot' => '',
+        'supplement_operated_at' => 0,
         'source_document_type' => 'cashier_workspace',
         'source_document_id' => 'workspace-8-88',
         'source_document_no' => 'WS-20260729-1',
+        'resumed_hang_order_id' => '',
         'sales_amount_cents' => $saleAmount,
         'receivable_amount_cents' => $saleAmount,
         'selected_payment_amount_cents' => $saleAmount,

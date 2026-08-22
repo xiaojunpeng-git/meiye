@@ -13,10 +13,12 @@ require $cashier . '/settlement/payment/CashierV3PaymentCollectionAuthorityExcep
 require $cashier . '/settlement/payment/CashierV3PaymentCollectionIdFactory.php';
 require $cashier . '/settlement/payment/CashierV3PaymentCollectionPlanV1.php';
 require $cashier . '/settlement/CashierV3CheckoutDebtAuthorityServices.php';
+require $cashier . '/settlement/CashierV3PaidProjectCraftsmanPerformanceServices.php';
 require $cashier . '/fact/CashierV3CheckoutFactContractException.php';
 require $cashier . '/fact/CashierV3CheckoutFactIdFactory.php';
 require $cashier . '/fact/CashierV3CheckoutFactPlanV1.php';
 require $cashier . '/fact/CashierV3SaleOnlyFactAssembler.php';
+require __DIR__ . '/CashierV3BusinessConfigServicesStub.php';
 require $root . '/tests/cashier-v3-sales-order-authority/php/fixture.php';
 require __DIR__ . '/fixture.php';
 
@@ -179,11 +181,17 @@ saleOnlyFactOk('balance checkout writes one real balance change fact without inc
     && $balanceRows['performance'][0]['amount_cents'] === 5000
     && $balancePaymentCollection->batch()['collected_amount_cents'] === 5000);
 
-$debtAggregate = saleOnlyFactLockedAggregate();
+$debtAggregate = salesOrderAuthorityLockedAggregate([
+    'lineDebts' => [1800, 1700, 0],
+]);
+$debtAggregate['payments'] = [
+    saleOnlyFactPayment(1, 'wechat', 5000, 9),
+];
 $debtAggregate['request']['member_id'] = 9;
 $debtAggregate['request']['member_name_snapshot'] = '会员 A';
 $debtAggregate['request']['selected_payment_amount_cents'] = 5000;
 $debtAggregate['request']['cash_performance_amount_cents'] = 5000;
+$debtAggregate['request']['receivable_amount_cents'] = 5000;
 $debtAggregate['request']['debt_amount_cents'] = 3500;
 $debtAggregate['request']['debt_authority_key'] = 'checkout-debt-policy:store:8';
 $debtAggregate['request']['debt_policy_version'] = 1;
@@ -191,7 +199,6 @@ foreach ($debtAggregate['lines'] as &$debtLine) {
     $debtLine['member_id'] = 9;
 }
 unset($debtLine);
-$debtAggregate['payments'] = [saleOnlyFactPayment(1, 'wechat', 5000, 9)];
 [$debtPlan, $debtSalesOrder, $debtPaymentCollection] = saleOnlyFactBuild($debtAggregate);
 $debtRows = $debtPlan->rows();
 saleOnlyFactOk('debt checkout keeps full sales while payment and performance use collected cash only',

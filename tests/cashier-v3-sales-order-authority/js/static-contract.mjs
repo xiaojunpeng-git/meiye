@@ -173,9 +173,11 @@ check('sale-only submit-checkout persists the formal sales order in its final tr
     && executionPort.includes('CashierV3SaleOnlyCheckoutSubmissionServices')
     && executionPort.includes('return $this->saleOnly->submitInTx($scope)')
     && manifest.includes("'required_event_types' => ['checkout.completed']"))
-check('C5 legacy read model is not silently changed to the new authority tables',
-  !c5.includes('cashier_v3_sales_order')
-    && !c5.includes('CashierV3SalesOrderPlanV1'))
+check('sales order query prefers V3 authority and keeps explicit legacy compatibility',
+  c5.includes('queryAuthoritySalesOrders')
+    && c5.includes('cashier_v3_sales_order')
+    && c5.includes("Db::name('store_order')")
+    && c5.includes('partial_legacy_snapshot'))
 
 const phpFiles = [
   ...fs.readdirSync(domain).filter((name) => name.endsWith('.php')).map((name) => path.join(domain, name)),

@@ -88,10 +88,10 @@ check('salesperson and actual performance are materialized together',
     && assembler.includes("'employeeId' => 0")
     && assembler.includes("'performanceType' => CashierV3CheckoutFactPlanV1::SALES_PERFORMANCE")
     && assembler.includes("'amountCents' => $actualPerformanceAmount"))
-check('balance fact is optional and labor outputs remain absent',
+check('balance fact is optional and labor performance remains explicit',
   assembler.includes("'balanceFacts' => $balanceFact === null ? [] : [$balanceFact]")
-    && !assembler.includes('CONSUMPTION_PERFORMANCE')
-    && !assembler.includes('LABOR_PERFORMANCE'))
+    && assembler.includes("'performanceType' => CashierV3CheckoutFactPlanV1::LABOR_PERFORMANCE")
+    && !assembler.includes("'performanceType' => CashierV3CheckoutFactPlanV1::CONSUMPTION_PERFORMANCE"))
 check('a full balance or debt settlement may have zero accounting collections',
   assembler.includes('$hasNonCollectionSettlement')
     && assembler.includes("$request['balance_deduction_amount_cents']")
