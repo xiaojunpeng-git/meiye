@@ -17,6 +17,7 @@ import GroupManagementDashboardView from '@/views/GroupManagementDashboardView.v
 import ProductDashboardView from '@/views/ProductDashboardView.vue'
 import EngineeringManagementView from '@/views/EngineeringManagementView.vue'
 import CustomerAnalyticsView from '@/views/CustomerAnalyticsView.vue'
+import EmployeeDashboardView from '@/views/EmployeeDashboardView.vue'
 import ConsumptionTierConfigView from '@/views/ConsumptionTierConfigView.vue'
 import StaffListView from '@/views/StaffListView.vue'
 import RoomSettingsView from '@/views/RoomSettingsView.vue'
@@ -108,6 +109,14 @@ const routes = [
     component: CustomerAnalyticsView,
     props: true,
     meta: { platformReport: true, title: '客户分析' }
+  },
+  {
+    // 集团平台员工看板原型；section 仅用于保留平台入口的兼容路径。
+    path: '/platform/employee-dashboard/:section?',
+    name: 'cashier-v3-platform-employee-dashboard',
+    component: EmployeeDashboardView,
+    props: true,
+    meta: { platformReport: true, title: '员工看板' }
   },
   {
     path: '/',

@@ -20,6 +20,7 @@ use app\services\report\MemberManagementDashboardServices;
 use app\services\report\ProductManagementDashboardServices;
 use app\services\report\BusinessLedgerServices;
 use app\services\report\CustomerAnalyticsServices;
+use app\services\report\EmployeeDashboardServices;
 use app\services\system\SystemRoleServices;
 use think\facade\Db;
 
@@ -119,6 +120,29 @@ class UnifiedReport extends AuthController
             $input['_report_scope'] = $this->reportAuthorization();
             $file = $services->export((string)$input['report'], $stores, $range, $input);
             return download($file['path'], $file['filename']);
+        } catch (\InvalidArgumentException $e) {
+            return app('json')->fail($e->getMessage());
+        }
+    }
+
+    /** 员工看板统一聚合读取；客户端筛选只能缩小当前账号权限范围。 */
+    public function employeeDashboard(Request $request, EmployeeDashboardServices $services)
+    {
+        // The platform menu keeps the existing employee-area permission
+        // (admin-staff); accept the report-specific permission when a tenant
+        // has configured it, without changing any stored menu records.
+        if (!$this->hasMenuPermission('admin-report-employee-dashboard') && !$this->hasMenuPermission('admin-staff')) {
+            return app('json')->fail('当前账号未配置员工看板权限');
+        }
+        try {
+            $input = $request->getMore([
+                ['start_date', ''], ['end_date', ''], ['store_ids', ''],
+                ['org_id', 0], ['store_id', 0], ['role', ''],
+            ]);
+            $range = $this->employeeDashboardRange($input);
+            $stores = $this->scopedStoreIds($input);
+            if (!$stores) throw new \InvalidArgumentException('无权限或当前范围无门店');
+            return app('json')->success($services->dashboard($stores, $range, $input));
         } catch (\InvalidArgumentException $e) {
             return app('json')->fail($e->getMessage());
         }
@@ -673,6 +697,18 @@ class UnifiedReport extends AuthController
             $year = (int)date('Y');
             $start = $year . '-01-01'; $end = date('Y-m-d');
         }
+        $valid = static function (string $date): bool {
+            $parsed = \DateTimeImmutable::createFromFormat('!Y-m-d', $date);
+            return $parsed !== false && $parsed->format('Y-m-d') === $date;
+        };
+        if (!$valid($start) || !$valid($end) || $start > $end) throw new \InvalidArgumentException('统计日期范围不正确');
+        return ['start' => $start, 'end' => $end];
+    }
+
+    private function employeeDashboardRange(array $input): array
+    {
+        $start = trim((string)($input['start_date'] ?? '')) ?: date('Y-m-01');
+        $end = trim((string)($input['end_date'] ?? '')) ?: date('Y-m-d');
         $valid = static function (string $date): bool {
             $parsed = \DateTimeImmutable::createFromFormat('!Y-m-d', $date);
             return $parsed !== false && $parsed->format('Y-m-d') === $date;

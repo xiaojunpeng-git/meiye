@@ -87,6 +87,17 @@ export default {
       component: () => import('@/pages/report/data/product_dashboard')
     },
     {
+      // 原型阶段复用现有员工权限；真实报表权限在接口阶段配置。
+      path: 'employee-dashboard/:section?',
+      name: `${pre}employee_dashboard`,
+      meta: {
+        auth: ['admin-staff'],
+        title: '员工看板',
+        employeeDashboard: true
+      },
+      component: () => import('@/pages/report/data/employee_dashboard')
+    },
+    {
       path: 'customer-analytics',
       name: `${pre}customer_analytics_compatibility`,
       hidden: true,

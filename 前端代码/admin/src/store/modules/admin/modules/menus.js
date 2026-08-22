@@ -33,6 +33,48 @@ const CUSTOMER_ANALYTICS_MENU = Object.freeze([
   ['unconsumed-analysis', 'customer_unconsumed_analysis', '客户未耗分析']
 ]);
 
+const EMPLOYEE_DASHBOARD_AUTH = 'admin-staff';
+
+// 只向后端已返回的顶层“员工”菜单追加入口，不创建第二套顶栏菜单。
+function withEmployeeDashboardMenu(menuData, prefix) {
+  if (!Array.isArray(menuData)) return [];
+  return menuData.map(item => {
+    if (!item) return item;
+    const title = String(item.title || item.menu_name || '').trim();
+    const header = String(item.header || '').trim().toLowerCase();
+    const itemPath = String(item.path || item.menu_path || '').replace(/\/$/, '');
+    const isEmployeeRoot = title === '员工' ||
+      (header === 'staff' && Number(item.is_header) === 1) ||
+      itemPath === `${prefix}/staff`;
+    if (!isEmployeeRoot) return item;
+    const children = Array.isArray(item.children) ? item.children : [];
+    const dashboardPath = `${prefix}/report/employee-dashboard`;
+    const exists = children.some(child => child && (
+      String(child.path || child.menu_path || '').replace(/\/$/, '') === dashboardPath ||
+      String(child.unique_auth || '') === 'admin-report-employee-dashboard'
+    ));
+    if (exists) return item;
+    return {
+      ...item,
+      children: [{
+        id: 'employee-dashboard',
+        pid: item.id,
+        type: 1,
+        title: '员工看板',
+        menu_name: '员工看板',
+        path: dashboardPath,
+        menu_path: dashboardPath,
+        header: item.header || 'staff',
+        is_header: 0,
+        is_show: 1,
+        icon: 'ios-stats-outline',
+        sort: 1,
+        unique_auth: EMPLOYEE_DASHBOARD_AUTH
+      }, ...children]
+    };
+  });
+}
+
 function relocateCustomerAnalyticsToMember(menuData, prefix) {
   if (!Array.isArray(menuData)) return [];
   const authPrefix = 'admin-customer-analytics-';
@@ -274,10 +316,11 @@ function withoutStoreOperationsReportIcons(menuData) {
 
 function normalizeMenus(menuData, prefix) {
   const cleaned = withoutStoreOperationsReportIcons(withoutLegacyStoreOperationsMenu(withoutOperatingScreenMenu(withoutLegacyInventoryMovement(menuData))));
-  return disambiguateDuplicateMenuPaths(normalizeProductBusinessConfigMenu(
+  const normalized = normalizeProductBusinessConfigMenu(
     normalizeOrganizationWorkspaceMenu(cleaned, prefix),
     prefix
-  ));
+  );
+  return disambiguateDuplicateMenuPaths(withEmployeeDashboardMenu(normalized, prefix));
 }
 
 function getMenusName() {
