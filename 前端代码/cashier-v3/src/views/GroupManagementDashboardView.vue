@@ -10,6 +10,7 @@ import Hourglass from '@lucide/vue/dist/esm/icons/hourglass.mjs'
 import RefreshCw from '@lucide/vue/dist/esm/icons/refresh-cw.mjs'
 import TrendingDown from '@lucide/vue/dist/esm/icons/trending-down.mjs'
 import TrendingUp from '@lucide/vue/dist/esm/icons/trending-up.mjs'
+import OrganizationStoreScopePicker from '@/components/OrganizationStoreScopePicker.vue'
 import {
   queryGroupManagementDashboard,
   queryGroupManagementDashboardScope,
@@ -41,8 +42,7 @@ const selectedTargetYear = ref(String(new Date().getFullYear()))
 const drilldown = ref(null)
 const drilldownLoading = ref(false)
 const drilldownError = ref('')
-const scopePicker = ref({ open: false, loading: false, tree: [], allowedStoreIds: [], selectedStoreIds: [], label: '当前权限范围', selectedOrganizationKey: '', selectedOrganizationName: '', stores: [] })
-const expandedScopeKeys = ref(new Set())
+const scopePicker = ref({ loading: false, tree: [], allowedStoreIds: [], selectedStoreIds: [], label: '当前权限范围' })
 
 function today() {
   const date = new Date()
@@ -207,66 +207,12 @@ function categoryRankType(category) {
   return categoryRankTypes.value[category.category_id] || 'projects'
 }
 
-const scopeTreeOptions = computed(() => {
-  const output = []
-  const walk = (nodes, depth = 0, parentKey = '') => (Array.isArray(nodes) ? nodes : []).forEach((node, index) => {
-    const storeId = Number(node?.store_id || (node?.node_type === 'store' ? node?.id : 0))
-    const key = `${parentKey}/${node?.node_type || 'org'}-${node?.id || node?.org_id || index}`
-    const hasChildren = Array.isArray(node?.children) && node.children.length > 0
-    output.push({ node, depth, key, storeId, hasChildren, isExpanded: expandedScopeKeys.value.has(key) })
-    if (hasChildren && expandedScopeKeys.value.has(key)) walk(node.children, depth + 1, key)
-  })
-  walk(scopePicker.value.tree)
-  return output
-})
-
-function scopeNodeStoreIds(node) {
-  const ids = []
-  const walk = (item) => {
-    const id = Number(item?.store_id || (item?.node_type === 'store' ? item?.id : 0))
-    if (id > 0) ids.push(id)
-    ;(Array.isArray(item?.children) ? item.children : []).forEach(walk)
+function changeScope({ storeIds, label }) {
+  scopePicker.value = {
+    ...scopePicker.value,
+    selectedStoreIds: storeIds,
+    label
   }
-  walk(node)
-  return [...new Set(ids)].filter((id) => scopePicker.value.allowedStoreIds.includes(id))
-}
-
-function scopeNodeStores(node) {
-  const stores = []
-  const walk = (item) => {
-    const id = Number(item?.store_id || (item?.node_type === 'store' ? item?.id : 0))
-    if (id > 0 && scopePicker.value.allowedStoreIds.includes(id)) stores.push({ id, name: item?.title || item?.name || `门店${id}` })
-    ;(Array.isArray(item?.children) ? item.children : []).forEach(walk)
-  }
-  walk(node)
-  return stores.filter((store, index, all) => all.findIndex((item) => item.id === store.id) === index)
-}
-
-function toggleScopeNode(option) {
-  if (!option?.hasChildren) return
-  const next = new Set(expandedScopeKeys.value)
-  if (next.has(option.key)) next.delete(option.key)
-  else next.add(option.key)
-  expandedScopeKeys.value = next
-}
-
-function selectScopeNode(option) {
-  const ids = option.storeId > 0 ? [option.storeId] : scopeNodeStoreIds(option.node)
-  if (!ids.length) return
-  const name = option.node?.title || option.node?.name || '已选组织'
-  scopePicker.value = { ...scopePicker.value, selectedStoreIds: ids, label: name, selectedOrganizationKey: option.key, selectedOrganizationName: name, stores: scopeNodeStores(option.node), open: true }
-  void loadDashboard()
-}
-
-function selectScopeStore(store) {
-  const id = Number(store?.id)
-  if (!id || !scopePicker.value.allowedStoreIds.includes(id)) return
-  scopePicker.value = { ...scopePicker.value, selectedStoreIds: [id], label: store.name || `门店${id}`, open: false }
-  void loadDashboard()
-}
-
-function chooseAllScope() {
-  scopePicker.value = { ...scopePicker.value, selectedStoreIds: [], label: '当前权限范围', selectedOrganizationKey: '', selectedOrganizationName: '', stores: [], open: false }
   void loadDashboard()
 }
 
@@ -471,27 +417,14 @@ onBeforeUnmount(() => {
     </header>
 
     <section class="group-dashboard__filters" aria-label="查询条件">
-      <div class="group-dashboard__scope-picker">
-        <button type="button" class="dashboard-select group-dashboard__scope-trigger" :disabled="scopePicker.loading" @click="scopePicker.open = !scopePicker.open"><Funnel :size="15" aria-hidden="true" />{{ scopePicker.loading ? '读取权限范围' : scopeLabel }}</button>
-        <section v-if="scopePicker.open" class="group-dashboard__scope-panel" aria-label="组织和门店权限范围">
-          <header>组织 / 门店</header>
-          <div class="group-dashboard__scope-body">
-            <div class="group-dashboard__scope-tree" aria-label="组织树">
-              <p v-if="!scopeTreeOptions.length" class="group-dashboard__scope-empty">当前账号暂无可选择的组织范围。</p>
-              <div v-for="option in scopeTreeOptions" :key="option.key" class="group-dashboard__scope-row" :style="{ paddingLeft: `${8 + option.depth * 16}px` }">
-                <button v-if="option.hasChildren" type="button" class="group-dashboard__scope-toggle" :aria-expanded="option.isExpanded" @click="toggleScopeNode(option)">{{ option.isExpanded ? '−' : '+' }}</button><span v-else class="group-dashboard__scope-toggle-placeholder" aria-hidden="true"></span>
-                <button type="button" class="group-dashboard__scope-option" :class="{ 'is-selected': scopePicker.selectedOrganizationKey === option.key }" @click="selectScopeNode(option)">{{ option.node?.title || option.node?.name || option.node?.label || '-' }}</button>
-              </div>
-            </div>
-            <div class="group-dashboard__scope-stores" aria-label="可选门店">
-              <strong>{{ scopePicker.selectedOrganizationName || '选择组织后查看下级门店' }}</strong>
-              <button v-for="store in scopePicker.stores" :key="store.id" type="button" :class="{ 'is-active': scopePicker.selectedStoreIds.length === 1 && scopePicker.selectedStoreIds[0] === Number(store.id) }" @click="selectScopeStore(store)">{{ store.name }}</button>
-              <span v-if="!scopePicker.stores.length">请选择组织或门店。</span>
-            </div>
-          </div>
-          <footer><button type="button" @click="chooseAllScope">当前权限范围</button><span>组织选择包含下级门店；门店选择只查询该门店。</span></footer>
-        </section>
-      </div>
+      <OrganizationStoreScopePicker
+        v-model="scopePicker.selectedStoreIds"
+        :tree="scopePicker.tree"
+        :allowed-store-ids="scopePicker.allowedStoreIds"
+        :label="scopeLabel"
+        :loading="scopePicker.loading"
+        @change="changeScope"
+      />
       <nav class="group-dashboard__periods" aria-label="日期范围"><button v-for="item in [['today','今天'], ['month','本月'], ['year','本年'], ['custom','自定义']]" :key="item[0]" type="button" :class="{ 'is-active': period === item[0] }" @click="selectPeriod(item[0])">{{ item[1] }}</button></nav>
       <label v-if="period === 'custom'" class="dashboard-date">从 <input v-model="customStart" type="date" /></label>
       <label v-if="period === 'custom'" class="dashboard-date">至 <input v-model="customEnd" type="date" /></label>
@@ -529,7 +462,7 @@ onBeforeUnmount(() => {
 .group-dashboard{padding:10px}
 .group-dashboard__header,.group-dashboard__filters,.group-dashboard__section,.group-dashboard__target-progress-grid,.group-dashboard__target-rank-grid,.dashboard-panel,.dashboard-state{width:100%;max-width:none}
 /* Keep dashboard sections on one row; scroll only after cards reach a readable width. */
-.group-dashboard__filters{flex-wrap:nowrap;overflow-x:auto;white-space:nowrap}
+.group-dashboard__filters{flex-wrap:wrap;overflow:visible;white-space:normal}
 .group-dashboard__filters>*{flex:0 0 auto}
 .group-dashboard__metric-grid,.dashboard-source-grid,.group-dashboard__target-progress-grid,.group-dashboard__target-rank-grid{display:flex;flex-wrap:nowrap;overflow-x:auto;gap:10px;scrollbar-gutter:stable}
 .group-dashboard__metric-grid .dashboard-card-wrap{flex:1 1 0;min-width:140px}
@@ -602,7 +535,6 @@ onBeforeUnmount(() => {
 .dashboard-target-rank-list strong{color:var(--metric-activity)}
 .dashboard-target-rank-list strong.is-low{color:var(--metric-attention)}
 .dashboard-alert-list em{background:#fff8e6;color:var(--metric-attention)}
-.group-dashboard__scope-picker{position:relative;flex:none}.group-dashboard__scope-trigger{cursor:pointer}.group-dashboard__scope-trigger:hover{border-color:#5b9bd0;color:#1769aa}.group-dashboard__scope-trigger:disabled{cursor:wait;opacity:.7}.group-dashboard__scope-panel{position:absolute;z-index:30;top:calc(100% + 6px);left:0;width:min(560px,calc(100vw - 28px));overflow:hidden;border:1px solid #d8e0ea;border-radius:7px;background:#fff;box-shadow:0 12px 30px rgba(26,47,71,.18);white-space:normal}.group-dashboard__scope-panel>header{padding:11px 13px;border-bottom:1px solid #e8edf2;color:#344f65;font-size:12px;font-weight:700}.group-dashboard__scope-body{display:grid;grid-template-columns:minmax(0,1fr) minmax(190px,.8fr);max-height:320px}.group-dashboard__scope-tree,.group-dashboard__scope-stores{min-width:0;overflow:auto;padding:8px}.group-dashboard__scope-tree{border-right:1px solid #edf1f5}.group-dashboard__scope-row{display:flex;align-items:center;gap:4px;min-height:31px}.group-dashboard__scope-toggle,.group-dashboard__scope-toggle-placeholder{width:20px;height:23px;flex:none}.group-dashboard__scope-toggle{border:0;background:transparent;color:#6c8092;cursor:pointer}.group-dashboard__scope-option,.group-dashboard__scope-stores button{display:block;width:100%;border:0;border-radius:4px;padding:7px 8px;background:transparent;color:#526a7e;text-align:left;font:inherit;font-size:12px;cursor:pointer}.group-dashboard__scope-option:hover,.group-dashboard__scope-stores button:hover,.group-dashboard__scope-stores button.is-active{background:#edf6fd;color:#206b9e}.group-dashboard__scope-stores{display:flex;flex-direction:column;gap:5px}.group-dashboard__scope-stores strong{padding:5px 8px;color:#38566d;font-size:12px}.group-dashboard__scope-stores span,.group-dashboard__scope-empty{padding:8px;color:#8b9aa8;font-size:11px}.group-dashboard__scope-panel>footer{display:flex;align-items:center;gap:8px;padding:9px 13px;border-top:1px solid #e8edf2;color:#8292a0;font-size:11px}.group-dashboard__scope-panel>footer button{border:0;background:transparent;color:#2f79aa;cursor:pointer;font-size:11px}
 .group-dashboard{--metric-consumption:#b7791f}.dashboard-trend-legend--consumption::before{background:var(--metric-consumption)}.dashboard-trend-chart__line--consumption{stroke:var(--metric-consumption)}.dashboard-trend-chart__dot--consumption{fill:var(--metric-consumption)}.dashboard-trend-chart__value--consumption{fill:var(--metric-consumption)}
 
 /* The Vue 3 shell disables body scrolling; the embedded dashboard owns its vertical scroll. */
