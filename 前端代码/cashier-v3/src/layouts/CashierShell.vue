@@ -229,6 +229,13 @@ const menuItems = [
     activeRouteNames: ['cashier-v3-store-business-reports', 'cashier-v3-business-dashboard']
   },
   {
+    key: 'targets',
+    label: '目标',
+    icon: ChartNoAxesCombined,
+    featureCode: 'cashier.v3.management_center',
+    to: { name: 'cashier-v3-store-target-dashboard' }
+  },
+  {
     key: 'inventory',
     label: '库存',
     icon: Boxes,
@@ -356,6 +363,7 @@ const isStaffPage = computed(() => route.name === 'cashier-v3-staff-list')
 const isManagementCenterPage = computed(() => route.name === 'cashier-v3-management-center')
 const isBusinessDashboardPage = computed(() => route.name === 'cashier-v3-business-dashboard')
 const isStoreBusinessReportPage = computed(() => route.name === 'cashier-v3-store-business-reports')
+const isStoreTargetDashboardPage = computed(() => route.name === 'cashier-v3-store-target-dashboard')
 const activeCashierWorkflowMode = computed(() => {
   if (route.name === 'cashier-v3-writeoff') return 'writeoff'
   if (route.name === 'cashier-v3-replacement') return 'replacement'
@@ -485,7 +493,7 @@ const hasMatchingRoomAssignmentSnapshot = computed(() => {
 const operatorLabel = computed(() => state.operator.roleName
   ? `${state.operator.name} · ${state.operator.roleName}`
   : state.operator.name)
-const hasPageHelp = computed(() => ['cashier-v3-cashier', 'cashier-v3-writeoff', 'cashier-v3-replacement', 'cashier-v3-room', 'cashier-v3-reservation', 'cashier-v3-member', 'cashier-v3-care', 'cashier-v3-hang', 'cashier-v3-order-center', 'cashier-v3-management-center', 'cashier-v3-staff-list', 'cashier-v3-business-dashboard', 'cashier-v3-store-business-reports'].includes(route.name))
+const hasPageHelp = computed(() => ['cashier-v3-cashier', 'cashier-v3-writeoff', 'cashier-v3-replacement', 'cashier-v3-room', 'cashier-v3-reservation', 'cashier-v3-member', 'cashier-v3-care', 'cashier-v3-hang', 'cashier-v3-order-center', 'cashier-v3-management-center', 'cashier-v3-staff-list', 'cashier-v3-business-dashboard', 'cashier-v3-store-business-reports', 'cashier-v3-store-target-dashboard'].includes(route.name))
 watch(
   () => route.name,
   (routeName) => {
@@ -517,6 +525,18 @@ const helpContent = computed(() => {
         '默认趋势和排行仍是“现金业绩”降序；点击指标卡可切换趋势，明细由后端按相同口径下钻。',
         '“数据更新至”“口径版本”和“聚合是否追平”用于判断数据新鲜度；追平中不代表业务事实丢失。',
         '门店端固定当前登录门店；平台端才可以按授权选择组织或门店，页面选择不会扩大数据权限。'
+      ]
+    }
+  }
+
+  if (isStoreTargetDashboardPage.value) {
+    return {
+      title: '目标看板说明',
+      description: '目标进度与员工业绩排行仅读取当前登录门店的统一事实数据，目标卡只读展示。',
+      steps: [
+        '默认统计本月，可切换今日、本年或自定义日期范围。',
+        '现金排行按现金业绩降序，消耗排行按消耗业绩降序；成交人数和服务人数按顾客去重。',
+        '目标、排行和合计均由后端统一事实服务返回，页面不自行计算或扩大门店范围。'
       ]
     }
   }
@@ -2580,7 +2600,7 @@ onBeforeUnmount(() => {
       <nav id="cashier-primary-nav" class="cashier-nav" aria-label="日常业务">
         <span v-if="!isSidebarCollapsed" class="cashier-nav__section">日常业务</span>
         <template v-for="item in menuItems" :key="item.key">
-          <div v-if="canUseFeature(item.featureCode) && item.submenu && visibleInventoryFeatureItems.length" class="cashier-inventory-group">
+          <div v-if="item.key === 'inventory' && canUseFeature(item.featureCode) && item.submenu && visibleInventoryFeatureItems.length" class="cashier-inventory-group">
             <div class="cashier-inventory-entry" :class="{ 'cashier-inventory-entry--open': isInventoryMenuExpanded }">
               <a
                 href="#/cashier"
