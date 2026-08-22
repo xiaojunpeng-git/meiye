@@ -21,7 +21,10 @@ final class StaffingQuotaServices
         $limit = min(100000, max(1, (int)($input['limit'] ?? 100000)));
         $keyword = trim((string)($input['keyword'] ?? ''));
         // 岗位表没有排序字段；按主键保持配置表中岗位顺序稳定。
-        $positions = Db::name('position')->where('status', 1)->field('id,name')->order('id asc')->select()->toArray();
+        // 门店只能维护“门店可用”岗位，其余岗位归组织维护；该标识由岗位策略统一维护。
+        $positionsQuery = Db::name('position')->where('status', 1);
+        $positionsQuery->where('allow_store_select', $scopeType === 'store' ? 1 : 0);
+        $positions = $positionsQuery->field('id,name')->order('id asc')->select()->toArray();
         $scopes = $scopeType === 'store' ? $this->stores($keyword) : $this->organizations($keyword);
         $scopeIds = array_map(static fn(array $row): int => (int)$row['id'], $scopes);
         $positionIds = array_map(static fn(array $row): int => (int)$row['id'], $positions);
@@ -80,7 +83,11 @@ final class StaffingQuotaServices
         $tenantId = '0';
         $old = Db::name('staffing_quota_request')->where(['tenant_id' => $tenantId, 'request_id' => $requestId])->find();
         if ($old) return json_decode((string)$old['response_json'], true) ?: ['saved' => 0];
-        $validPositions = array_flip(array_map('intval', Db::name('position')->where('status', 1)->column('id')));
+        $positionRows = Db::name('position')->where('status', 1)->field('id,allow_store_select')->select()->toArray();
+        $validPositions = [];
+        foreach ($positionRows as $positionRow) {
+            $validPositions[(int)$positionRow['id']] = (int)$positionRow['allow_store_select'];
+        }
         $now = time();
         $saved = 0;
         $result = Db::transaction(function () use ($rows, $validPositions, $tenantId, $operator, $requestId, $now, &$saved): array {
@@ -89,7 +96,9 @@ final class StaffingQuotaServices
                 $scopeId = (int)($row['scope_id'] ?? 0);
                 $positionId = (int)($row['position_id'] ?? 0);
                 $quota = filter_var($row['quota_count'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 0]]);
-                if (!in_array($scopeType, ['organization', 'store'], true) || $scopeId <= 0 || $positionId <= 0 || $quota === false || !isset($validPositions[$positionId])) {
+                $storePosition = $validPositions[$positionId] ?? null;
+                $scopeMatchesPosition = $scopeType === 'store' ? $storePosition === 1 : $storePosition === 0;
+                if (!in_array($scopeType, ['organization', 'store'], true) || $scopeId <= 0 || $positionId <= 0 || $quota === false || $storePosition === null || !$scopeMatchesPosition) {
                     throw new \InvalidArgumentException('岗位编制数据不正确');
                 }
                 $where = ['tenant_id' => $tenantId, 'scope_type' => $scopeType, 'scope_id' => $scopeId, 'position_id' => $positionId];
