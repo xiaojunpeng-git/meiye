@@ -1652,6 +1652,8 @@ Route::group('adminapi', function () {
         Route::get('group-dashboard/drilldown', 'v1.report.UnifiedReport/groupDashboardDrilldown')->option(['real_name' => '集团管理看板下钻']);
         Route::get('member-dashboard', 'v1.report.UnifiedReport/memberDashboard')->option(['real_name' => '会员看板查询']);
         Route::get('product-dashboard', 'v1.report.UnifiedReport/productDashboard')->option(['real_name' => '商品看板查询']);
+        Route::get('customer-analytics', 'v1.report.UnifiedReport/customerAnalytics')->option(['real_name' => '客户分析查询']);
+        Route::get('customer-analytics/export', 'v1.report.UnifiedReport/customerAnalyticsExport')->option(['real_name' => '客户分析导出']);
         Route::get('engineering-ledger/catalog', 'v1.report.UnifiedReport/ledgerCatalog')->option(['real_name' => '工程管理台账目录']);
         Route::get('engineering-ledger/list', 'v1.report.UnifiedReport/ledgerList')->option(['real_name' => '工程管理台账列表']);
         Route::get('engineering-ledger/read/:id', 'v1.report.UnifiedReport/ledgerRead')->option(['real_name' => '工程管理台账详情']);
