@@ -1194,15 +1194,11 @@ async function saveEdit() {
         field_value: value,
         idempotency_key: `ui-rpt-${Date.now().toString(36)}-${Math.random().toString(16).slice(2)}-${field.key.slice(0, 24)}`
       }
-      if (field.key !== 'complaint_count') {
-        payload.expected_version = Number(row[`${field.key}_version`] ?? row?._field_versions?.[field.key] ?? 0)
-      }
+      payload.expected_version = Number(row[`${field.key}_version`] ?? row?._field_versions?.[field.key] ?? 0)
       const response = await saveStoreBusinessReportAnnotation(payload, reportRuntime.value)
       row[field.key] = displayValue
-      if (field.key !== 'complaint_count') {
-        row[`${field.key}_version`] = Number(response?.version || 1)
-        row._field_versions = { ...(row._field_versions || {}), [field.key]: Number(response?.version || 1) }
-      }
+      row[`${field.key}_version`] = Number(response?.version || 1)
+      row._field_versions = { ...(row._field_versions || {}), [field.key]: Number(response?.version || 1) }
     }
     cancelEdit()
     await loadReport()

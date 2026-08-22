@@ -85,7 +85,7 @@ check('category filter uses server category ids and descendant-aware backend con
   reportView.includes("field?.type || '') === 'category_tree'")
     && reportView.includes('queryStoreBusinessReportCategories')
     && reportApi.includes("endpoint(runtime, 'operations/categories')"))
-check('complaint count uses common row edit and save interaction without visible version field',
+check('complaint count uses common row edit and save interaction with version protection',
   reportView.includes("'complaint_count'")
     && reportView.includes('@click="beginEdit(row)"')
     && reportView.includes('@click="saveEdit"')
@@ -94,7 +94,8 @@ check('complaint count uses common row edit and save interaction without visible
     && reportView.includes("source_line_id: String(row?.source_line_id || '')")
     && reportView.includes(':key="rowKey(row) || `${activeReport}:${rowIndex}`"')
     && reportView.slice(reportView.indexOf('async function saveEdit()'), reportView.indexOf('function drilldownConfig')).includes('await loadReport()')
-    && !reportTemplate.includes('版本'))
+    && reportView.includes('payload.expected_version = Number(row[')
+    && !reportView.includes("if (field.key !== 'complaint_count')"))
 check('query and scope filters persist in the route before drilldown navigation',
   reportView.includes('function syncCurrentFiltersToRoute()')
     && reportView.includes('router.resolve(target).fullPath === route.fullPath')

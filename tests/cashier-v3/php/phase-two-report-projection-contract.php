@@ -43,6 +43,17 @@ foreach ([
 ] as $needle) {
     if (strpos($service, $needle) === false) throw new RuntimeException('new-customer drilldown contract missing: ' . $needle);
 }
+foreach ([
+    "'experience_card_amount_version'",
+    "array_key_exists('value',\$experienceCardAmount)",
+    "'新客明细表'=>['editable_fields'=>[['key'=>'experience_card_amount'",
+] as $needle) {
+    if (strpos($service, $needle) === false) throw new RuntimeException('new-customer manual experience amount contract missing: ' . $needle);
+}
+$annotation = (string)file_get_contents($root . '/后端代码/app/services/report/StoreOperationsReportAnnotationServices.php');
+foreach (["'new_customer_analysis' => ['experience_card_amount', 'care_duration']", "'experience_card_amount' => 'integer_cents'"] as $needle) {
+    if (strpos($annotation, $needle) === false) throw new RuntimeException('new-customer annotation contract missing: ' . $needle);
+}
 if (preg_match('/\.\.\.\(serverCatalogByCode\.value\.get\(tab\.code\) \|\| \{\}\),\s*\.\.\.tab/s', $view) !== 1) {
     throw new RuntimeException('report navigation must keep the confirmed standard names when historical catalog labels exist');
 }

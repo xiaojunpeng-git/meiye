@@ -309,6 +309,7 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
             $row['received_amount'] = $this->money((int)$row['received_amount_cents']);
             $row['transfer_amount'] = $this->money((int)$row['transfer_amount_cents']);
             $row['complaint_count'] = $manual === [] ? '' : (string)$manual['value'];
+            $row['complaint_count_version'] = $manual === [] ? 0 : (int)($manual['version'] ?? 0);
             $row['refund_amount'] = $this->money((int)$row['refund_amount_cents']);
             unset($row['event_sort_at']);
         }
@@ -1548,10 +1549,13 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
             ->where('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
             ->where('report_code', $report)
             ->whereIn('store_id', $stores)->whereIn('subject_key', array_values(array_unique($subjectKeys)))
-            ->field('subject_key,field_key,field_value')->select()->toArray();
+            ->field('subject_key,field_key,field_value,version')->select()->toArray();
         $result = [];
         foreach ($rows as $row) {
-            $result[(string)$row['subject_key']][(string)$row['field_key']] = ['value' => (string)$row['field_value']];
+            $result[(string)$row['subject_key']][(string)$row['field_key']] = [
+                'value' => (string)$row['field_value'],
+                'version' => (int)$row['version'],
+            ];
         }
         return $result;
     }
