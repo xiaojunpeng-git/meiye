@@ -98,6 +98,12 @@ export default {
       component: () => import('@/pages/report/data/employee_dashboard')
     },
     {
+      path: 'staffing',
+      name: `${pre}staffing_quota`,
+      meta: { auth: ['admin-organization-staffing'], title: '岗位编制' },
+      component: () => import('@/pages/report/data/staffing_quota')
+    },
+    {
       path: 'customer-analytics',
       name: `${pre}customer_analytics_compatibility`,
       hidden: true,

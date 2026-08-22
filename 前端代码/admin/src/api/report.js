@@ -19,6 +19,14 @@ export function unifiedBusinessReportExport(data) {
   return request({ url: 'report/unified/export', method: 'get', params: data });
 }
 
+export function staffingQuotaList(params) {
+  return request({ url: 'report/staffing-quota', method: 'get', params });
+}
+
+export function saveStaffingQuota(data) {
+  return request({ url: 'report/staffing-quota', method: 'post', data });
+}
+
 /** 平台端门店运营报表补充字段，与门店 V3 使用同一注释事实。 */
 export function saveUnifiedBusinessReportAnnotation(data) {
   return request({ url: 'report/operations/annotation', method: 'post', data });

@@ -21,6 +21,7 @@ use app\services\report\ProductManagementDashboardServices;
 use app\services\report\BusinessLedgerServices;
 use app\services\report\CustomerAnalyticsServices;
 use app\services\report\EmployeeDashboardServices;
+use app\services\report\StaffingQuotaServices;
 use app\services\system\SystemRoleServices;
 use think\facade\Db;
 
@@ -361,6 +362,34 @@ class UnifiedReport extends AuthController
         }
     }
 
+    /** 岗位编制功能权限用户可维护整张统一岗位编制表。 */
+    public function staffingQuota(Request $request, StaffingQuotaServices $services)
+    {
+        if (!$this->hasMenuPermission(StaffingQuotaServices::PERMISSION)) {
+            return app('json')->fail('当前账号未配置岗位编制功能');
+        }
+        try {
+            return app('json')->success($services->list($request->get()));
+        } catch (\InvalidArgumentException $e) {
+            return app('json')->fail($e->getMessage());
+        }
+    }
+
+    public function saveStaffingQuota(Request $request, StaffingQuotaServices $services)
+    {
+        if (!$this->hasMenuPermission(StaffingQuotaServices::PERMISSION)) {
+            return app('json')->fail('当前账号未配置岗位编制功能');
+        }
+        try {
+            return app('json')->success($services->save($request->post(), [
+                'id' => (int)$this->adminId,
+                'name' => (string)($this->adminInfo['real_name'] ?? $this->adminInfo['account'] ?? ''),
+            ]));
+        } catch (\InvalidArgumentException $e) {
+            return app('json')->fail($e->getMessage());
+        }
+    }
+
     public function consumptionTiers(StoreUnifiedReportPhaseThreeFoundationServices $services)
     {
         if (!$this->canManageConsumptionTiers()) return app('json')->fail('当前账号未配置消费分级设置权限');
@@ -426,19 +455,7 @@ class UnifiedReport extends AuthController
         }
         if ((string)($payload['report_code'] ?? '') === 'phase_six_human_store_health'
             && (string)($payload['field_key'] ?? '') === 'beautician_establishment_count') {
-            try {
-                return app('json')->success(app()->make(StoreUnifiedReportPhaseSixServices::class)->saveStaffing([
-                    'admin_id' => (int)$this->adminId,
-                    'admin_name' => (string)($this->adminInfo['real_name'] ?? $this->adminInfo['account'] ?? ''),
-                    'store_ids' => $this->allowedStoreIds(0, 0),
-                ], [
-                    'store_id' => (int)($payload['store_id'] ?? 0),
-                    'establishment_count' => (int)($payload['field_value'] ?? 0),
-                    'expected_version' => (int)($payload['expected_version'] ?? 0),
-                ]));
-            } catch (\InvalidArgumentException $e) {
-                return app('json')->fail($e->getMessage());
-            }
+            return app('json')->fail('美容师编制已统一到岗位编制功能维护');
         }
         $context = $this->annotationContext();
         $phaseFourMonthly = $this->isPhaseFourMonthlyAnnotation($payload);

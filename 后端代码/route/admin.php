@@ -1655,6 +1655,8 @@ Route::group('adminapi', function () {
         Route::get('customer-analytics', 'v1.report.UnifiedReport/customerAnalytics')->option(['real_name' => '客户分析查询']);
         Route::get('customer-analytics/export', 'v1.report.UnifiedReport/customerAnalyticsExport')->option(['real_name' => '客户分析导出']);
         Route::get('employee-dashboard', 'v1.report.UnifiedReport/employeeDashboard')->option(['real_name' => '员工看板查询']);
+        Route::get('staffing-quota', 'v1.report.UnifiedReport/staffingQuota')->option(['real_name' => '岗位编制列表']);
+        Route::post('staffing-quota', 'v1.report.UnifiedReport/saveStaffingQuota')->option(['real_name' => '保存岗位编制']);
         Route::get('engineering-ledger/catalog', 'v1.report.UnifiedReport/ledgerCatalog')->option(['real_name' => '工程管理台账目录']);
         Route::get('engineering-ledger/list', 'v1.report.UnifiedReport/ledgerList')->option(['real_name' => '工程管理台账列表']);
         Route::get('engineering-ledger/read/:id', 'v1.report.UnifiedReport/ledgerRead')->option(['real_name' => '工程管理台账详情']);

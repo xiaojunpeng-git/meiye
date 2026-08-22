@@ -97,9 +97,11 @@ final class EmployeeDashboardServices
     private function roles(array $staff, array $stores): array
     {
         $counts=[]; foreach($staff as $row){$name=trim((string)($row['position_name']??'')); if($name==='')$name=((int)($row['cashier_craftsman_enabled']??0)===1?'美容师':'未设置岗位'); $counts[$name]=($counts[$name]??0)+1;}
-        $beauticianQuota = 0;
-        try { $beauticianQuota = (int)Db::name('cashier_v3_report_beautician_establishment')->whereIn('store_id',$stores)->sum('establishment_count'); } catch (\Throwable $e) { $beauticianQuota = 0; }
-        $colors=['#3984ad','#3f9c92','#d29b45','#7a6ca8','#bb6d57']; $i=0; $out=[]; foreach($counts as $label=>$value){$quota=(str_contains($label,'美容师')&&$beauticianQuota>0)?$beauticianQuota:$value; $out[]=['label'=>$label,'value'=>$value,'quota'=>$quota,'color'=>$colors[$i++%count($colors)]];} return $out;
+        $positionIds = Db::name('position')->whereIn('name', array_keys($counts))->column('id', 'name');
+        $quotaRows = Db::name('staffing_quota')->where('tenant_id', '0')->where('scope_type', 'store')->whereIn('scope_id', $stores)->select()->toArray();
+        $quotas = [];
+        foreach ($quotaRows as $row) $quotas[(int)$row['position_id']] = ($quotas[(int)$row['position_id']] ?? 0) + (int)$row['quota_count'];
+        $colors=['#3984ad','#3f9c92','#d29b45','#7a6ca8','#bb6d57']; $i=0; $out=[]; foreach($counts as $label=>$value){$pid=(int)($positionIds[$label]??0); $quota=array_key_exists($pid,$quotas)?$quotas[$pid]:$value; $out[]=['label'=>$label,'value'=>$value,'quota'=>$quota,'color'=>$colors[$i++%count($colors)]];} return $out;
     }
 
     private function performance(array $stores, array $range): array

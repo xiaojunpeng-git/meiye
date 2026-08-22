@@ -240,7 +240,10 @@ final class StoreUnifiedReportPhaseSixServices
     private function health(array $stores,array $range):array
     {
         $facts=$this->cashFacts($stores,$range);$services=$this->serviceFacts($stores,$range);$rows=[];
-        $est=Db::name('cashier_v3_report_beautician_establishment')->whereIn('store_id',$stores)->column('establishment_count','store_id');
+        $beauticianPositionId=(int)Db::name('position')->where('name','美容师')->where('status',1)->value('id');
+        $est=$beauticianPositionId>0
+            ? Db::name('staffing_quota')->where('tenant_id','0')->where('scope_type','store')->whereIn('scope_id',$stores)->where('position_id',$beauticianPositionId)->column('quota_count','scope_id')
+            : [];
         foreach($stores as $storeId){
             $storeFacts=array_values(array_filter($facts,static fn(array $f):bool=>(int)$f['store_id']===$storeId));
             $storeServices=array_values(array_filter($services,static fn(array $f):bool=>(int)$f['store_id']===$storeId));
@@ -357,7 +360,10 @@ final class StoreUnifiedReportPhaseSixServices
     private function healthWithStaffing(array $stores, array $range): array
     {
         $result = $this->health($stores, $range);
-        $versions = Db::name('cashier_v3_report_beautician_establishment')->whereIn('store_id', $stores)->column('version', 'store_id');
+        $beauticianPositionId=(int)Db::name('position')->where('name','美容师')->where('status',1)->value('id');
+        $versions = $beauticianPositionId>0
+            ? Db::name('staffing_quota')->where('tenant_id','0')->where('scope_type','store')->whereIn('scope_id',$stores)->where('position_id',$beauticianPositionId)->column('version','scope_id')
+            : [];
         foreach ($result['records'] as &$row) {
             $storeId = (int)($row['store_id'] ?? 0);
             $row['store_id'] = $storeId;
