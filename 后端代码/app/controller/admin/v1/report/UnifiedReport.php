@@ -19,6 +19,7 @@ use app\services\report\GroupManagementDashboardTargetServices;
 use app\services\report\MemberManagementDashboardServices;
 use app\services\report\ProductManagementDashboardServices;
 use app\services\report\BusinessLedgerServices;
+use app\services\report\CustomerAnalyticsServices;
 use app\services\system\SystemRoleServices;
 use think\facade\Db;
 
@@ -62,13 +63,65 @@ class UnifiedReport extends AuthController
         'phase_six_acquisition_source', 'phase_six_human_store_health',
     ];
 
+    /** 第九阶段客户一级菜单专属报表，不继承会员看板权限。 */
+    private const CUSTOMER_ANALYTICS_REPORTS = [
+        'customer_overview', 'customer_source_analysis', 'customer_visit_analysis',
+        'customer_store_health', 'customer_consumption_tier', 'customer_cash_performance',
+        'customer_refund_performance', 'customer_item_analysis', 'customer_unconsumed_analysis',
+    ];
+
     public function catalog(StoreUnifiedReportServices $services, StoreUnifiedReportPhaseThreeServices $phaseThree, StoreUnifiedReportPhaseFourServices $phaseFour, StoreUnifiedReportPhaseSixServices $phaseSix)
     {
-        $entries = array_merge($services->catalog(), $phaseThree::catalogEntries(), $phaseFour::catalogEntries(true), $phaseSix::catalogEntries(true));
+        $entries = array_merge($services->catalog(), $phaseThree::catalogEntries(), $phaseFour::catalogEntries(true), $phaseSix::catalogEntries(true), CustomerAnalyticsServices::catalogEntries());
         return app('json')->success(array_values(array_filter($entries, function (array $entry): bool {
             $code = (string)($entry['code'] ?? '');
             return $this->canAccessReport($code);
         })));
+    }
+
+    /** 第九阶段客户分析统一查询；列表、合计、下钻和导出共享同一读取服务。 */
+    public function customerAnalytics(Request $request, CustomerAnalyticsServices $services)
+    {
+        if (!$this->canAccessCustomerAnalytics((string)$request->param('report', 'customer_overview'))) {
+            return app('json')->fail('当前账号未配置客户分析权限');
+        }
+        try {
+            $input = $request->getMore([
+                ['report', 'customer_overview'], ['start_date', ''], ['end_date', ''], ['store_ids', ''],
+                ['org_id', 0], ['store_id', 0], ['region_id', 0], ['source_id', 0], ['item_id', ''],
+                ['page', 1], ['limit', 20], ['consumption_metric', 'cash'], ['category_path', ''],
+            ]);
+            $range = $this->customerAnalyticsRange($input);
+            $stores = $this->scopedStoreIds($input);
+            if (!$stores) throw new \InvalidArgumentException('无权限或当前范围无门店');
+            $input['_report_scope'] = $this->reportAuthorization();
+            return app('json')->success($services->read((string)$input['report'], $stores, $range, $input));
+        } catch (\InvalidArgumentException $e) {
+            return app('json')->fail($e->getMessage());
+        }
+    }
+
+    /** 客户分析导出只改变分页，不改变查询条件、权限和指标口径。 */
+    public function customerAnalyticsExport(Request $request, CustomerAnalyticsServices $services)
+    {
+        if (!$this->canAccessCustomerAnalytics((string)$request->param('report', 'customer_overview'))) {
+            return app('json')->fail('当前账号未配置客户分析权限');
+        }
+        try {
+            $input = $request->getMore([
+                ['report', 'customer_overview'], ['start_date', ''], ['end_date', ''], ['store_ids', ''],
+                ['org_id', 0], ['store_id', 0], ['region_id', 0], ['source_id', 0], ['item_id', ''],
+                ['consumption_metric', 'cash'], ['category_path', ''],
+            ]);
+            $range = $this->customerAnalyticsRange($input);
+            $stores = $this->scopedStoreIds($input);
+            if (!$stores) throw new \InvalidArgumentException('无权限或当前范围无门店');
+            $input['_report_scope'] = $this->reportAuthorization();
+            $file = $services->export((string)$input['report'], $stores, $range, $input);
+            return download($file['path'], $file['filename']);
+        } catch (\InvalidArgumentException $e) {
+            return app('json')->fail($e->getMessage());
+        }
     }
 
     /**
@@ -582,11 +635,50 @@ class UnifiedReport extends AuthController
 
     private function canAccessReport(string $report): bool
     {
+        if (in_array($report, self::CUSTOMER_ANALYTICS_REPORTS, true)) return $this->canAccessCustomerAnalytics($report);
         if (in_array($report, self::SIX_DIMENSION_REPORTS, true)) return $this->canAccessSixDimensionReport($report);
         if (in_array($report, self::PHASE_SIX_REPORTS, true)) return $this->hasMenuPermission('admin-report-phase-six-' . $report);
         if (in_array($report, self::PHASE_FOUR_REPORTS, true)) return $this->hasMenuPermission('admin-report-phase-four-' . $report);
         if (in_array($report, self::STORE_OPERATION_REPORTS, true)) return $this->canAccessStoreOperationReport($report);
         return true;
+    }
+
+    private function canAccessCustomerAnalytics(string $report): bool
+    {
+        if (!in_array($report, self::CUSTOMER_ANALYTICS_REPORTS, true)) return false;
+        if ($this->hasMenuPermission('admin-customer-analytics')) return true;
+        return $this->hasMenuPermission('admin-customer-analytics-' . $this->customerAuthCode($report));
+    }
+
+    private function customerAuthCode(string $report): string
+    {
+        return [
+            'customer_overview' => 'customer_overview',
+            'customer_source_analysis' => 'customer_source_analysis',
+            'customer_visit_analysis' => 'customer_visit_analysis',
+            'customer_store_health' => 'customer_store_health',
+            'customer_consumption_tier' => 'customer_consumption_tier',
+            'customer_cash_performance' => 'customer_cash_performance',
+            'customer_refund_performance' => 'customer_refund_performance',
+            'customer_item_analysis' => 'customer_item_analysis',
+            'customer_unconsumed_analysis' => 'customer_unconsumed_analysis',
+        ][$report] ?? '';
+    }
+
+    private function customerAnalyticsRange(array $input): array
+    {
+        $start = trim((string)($input['start_date'] ?? ''));
+        $end = trim((string)($input['end_date'] ?? ''));
+        if ($start === '' || $end === '') {
+            $year = (int)date('Y');
+            $start = $year . '-01-01'; $end = date('Y-m-d');
+        }
+        $valid = static function (string $date): bool {
+            $parsed = \DateTimeImmutable::createFromFormat('!Y-m-d', $date);
+            return $parsed !== false && $parsed->format('Y-m-d') === $date;
+        };
+        if (!$valid($start) || !$valid($end) || $start > $end) throw new \InvalidArgumentException('统计日期范围不正确');
+        return ['start' => $start, 'end' => $end];
     }
 
     private function canAccessAnnotationReport(string $report): bool

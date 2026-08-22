@@ -420,13 +420,31 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         return $this->result('销售人生美大单统计表',$columns,$facts,$input);
     }
 
+    /** Read-only refund facts for customer analysis; uses the same successful
+     * refund operation source as the platform refund ledger. */
+    public function customerRefundRows(array $stores, array $range, array $input = []): array
+    {
+        $scope = is_array($input['_report_scope'] ?? null) ? $input['_report_scope'] : [];
+        if ((string)($scope['mode'] ?? '') === 'self_participant') {
+            $this->participantEmployeeId = max(0, (int)($scope['employee_id'] ?? 0));
+            if ($this->participantEmployeeId <= 0) {
+                throw new \InvalidArgumentException('个人数据权限缺少有效员工身份');
+            }
+        }
+        // Aggregates and exports must read every authorized refund fact; the
+        // ledger UI normally paginates, so explicitly request the shared
+        // all-rows mode without changing filters or permission scope.
+        $result = $this->storeRefundLedger($stores, $range, array_merge($input, ['_internal_all' => true, 'page' => 1]));
+        return (array)($result['records'] ?? []);
+    }
+
     private function storeRefundLedger(array $stores,array $range,array $input):array
     {
         $rows=$this->participantOrder($this->scope(Db::name('cashier_v3_order_lifecycle_operation')->alias('r'),$stores,'r'),'r.source_order_id')
             ->join('cashier_v3_sales_order o','o.order_id=r.source_order_id AND o.tenant_id=r.tenant_id')
             ->whereBetween('r.business_date',[$range['start'],$range['end']])
             ->where('r.source_type','sales')->where('r.operation_type','refund')->where('r.status','succeeded')
-            ->field('r.operation_id,r.store_id,r.business_date,r.business_date refund_date,r.source_order_id order_id,r.reason_snapshot refund_reason,r.request_json,r.cash_refund_cents refund_amount_cents,r.restored_principal_cents,r.restored_bonus_cents,o.organization_id,o.organization_path_snapshot,o.organization_name_snapshot market,o.store_name_snapshot store_name,o.member_name_snapshot customer,o.business_date original_sale_date,o.order_note original_remark')
+            ->field('r.operation_id,r.store_id,r.business_date,r.business_date refund_date,r.source_order_id order_id,r.reason_snapshot refund_reason,r.request_json,r.cash_refund_cents refund_amount_cents,r.restored_principal_cents,r.restored_bonus_cents,o.organization_id,o.organization_path_snapshot,o.organization_name_snapshot market,o.store_name_snapshot store_name,o.member_id,o.member_name_snapshot customer,o.business_date original_sale_date,o.order_note original_remark')
             ->order('r.business_date','desc')->order('r.id','desc')->select()->toArray();
         foreach($rows as &$row){$request=json_decode((string)$row['request_json'],true);$names=[];foreach((array)($request['refundLines']??[])as$line){$name=trim((string)($line['itemName']??''));if($name!=='')$names[]=$name;}$row['refund_items']=implode('、',array_values(array_unique($names)));$row['refund_amount']=$this->money((int)$row['refund_amount_cents']);$row['refund_remark']=trim((string)$row['refund_reason'])?:trim((string)$row['original_remark']);}unset($row);
         return $this->result('院店退款台账',$this->columns(['market'=>'市场','store_name'=>'院店','customer'=>'顾客姓名','refund_date'=>'退款申请时间','refund_items'=>'退款项目','original_sale_date'=>'原销售日期','refund_amount'=>'退款金额','refund_remark'=>'退款原因']),$rows,$input,[],['refund_amount_cents'=>$this->sumField($rows,'refund_amount_cents')]);

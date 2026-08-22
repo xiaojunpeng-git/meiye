@@ -12,22 +12,22 @@
         </i-link>
       </transition>
     </div>
-	<div class="h-52 lh-52px fs-16 mr-10 text-wlll-303133 fw-600 border-b-F0F1F5 acea-row row-between-wrapper overflow" :class='!menuCollapse && !isMobile?"ml-16":"ml-10"'>
-		<span v-if="!menuCollapse && !isMobile">{{headerTitle}}</span>
-		<i-header-collapse />
-	</div>
+  <div class="h-52 lh-52px fs-16 mr-10 text-wlll-303133 fw-600 border-b-F0F1F5 acea-row row-between-wrapper overflow" :class='!menuCollapse && !isMobile?"ml-16":"ml-10"'>
+    <span v-if="!menuCollapse && !isMobile">{{headerTitle}}</span>
+    <i-header-collapse />
+  </div>
     <Menu
       ref="menu"
       class="i-layout-menu-side i-scrollbar-hide"
-	  :class="menuOn?'on':''"
+    :class="menuOn?'on':''"
       :theme="siderTheme"
       :active-name="activePath"
       :open-names="openPath"
       width="auto"
-      v-if="filterSider.length"
-	  @on-open-change='menuTap'
+      v-if="displaySider.length"
+    @on-open-change='menuTap'
     >
-      <template v-if="!menuCollapse" v-for="(item, index) in filterSider">
+      <template v-if="!menuCollapse" v-for="(item, index) in displaySider">
         <i-menu-side-item
           v-if="item.children === undefined || !item.children.length"
           :menu="item"
@@ -50,14 +50,15 @@
   </div>
 </template>
 <script>
+/* eslint-disable indent */
 import iMenuSideItem from './menu-item';
 import iMenuSideSubmenu from './submenu';
 import iMenuSideCollapse from './menu-collapse';
 import iHeaderCollapse from '../header-collapse';
 import tTitle from '../mixins/translate-title';
+import Setting from '@/setting';
 
 import { mapState, mapGetters } from 'vuex';
-import { forEach } from 'lodash';
 
 export default {
   name: 'iMenuSide',
@@ -73,11 +74,22 @@ export default {
     return {
       logo: require('@/assets/images/logo.png'),
       logoSmall: require('@/assets/images/logo-small.png'),
-	  showDrawer: false,
-	  headerTitle: '',
-	  openPath: [],
-	  closePath: [],
-	  menuOn: false
+    showDrawer: false,
+    headerTitle: '',
+    openPath: [],
+    closePath: [],
+    menuOn: false,
+    customerAnalyticsEntries: [
+      { path: `${Setting.roterPre}/user/customer-analytics/overview`, title: '客户概况' },
+      { path: `${Setting.roterPre}/user/customer-analytics/source-analysis`, title: '客户开源分析' },
+      { path: `${Setting.roterPre}/user/customer-analytics/visit-analysis`, title: '到店数据分析' },
+      { path: `${Setting.roterPre}/user/customer-analytics/store-health`, title: '门店健康数据分析' },
+      { path: `${Setting.roterPre}/user/customer-analytics/consumption-tier`, title: '消费分级分析' },
+      { path: `${Setting.roterPre}/user/customer-analytics/cash-performance`, title: '现金业绩分析' },
+      { path: `${Setting.roterPre}/user/customer-analytics/refund-performance`, title: '退货业绩分析' },
+      { path: `${Setting.roterPre}/user/customer-analytics/item-analysis`, title: '客户品相分析' },
+      { path: `${Setting.roterPre}/user/customer-analytics/unconsumed-analysis`, title: '客户未耗分析' }
+    ]
     };
   },
   computed: {
@@ -85,10 +97,50 @@ export default {
       'siderTheme',
       'menuAccordion',
       'menuCollapse',
-	  'isMobile'
+    'isMobile'
     ]),
     ...mapState('admin/menu', ['activePath', 'openNames', 'headerName']),
-    ...mapGetters('admin/menu', ['filterSider', 'filterHeader'])
+    ...mapGetters('admin/menu', ['filterSider', 'filterHeader']),
+    displaySider() {
+      // 客户九张表统一归入“会员 → 看板”，由菜单树渲染真实父子层级。
+      // 不再为客户分析单独创建顶栏或平铺快捷入口。
+      const entries = this.customerAnalyticsEntries.map((entry, index) => ({
+        ...entry,
+        id: `customer-analytics-${index}`,
+        title: entry.title,
+        menu_name: entry.title,
+        is_show: 1,
+        children: undefined
+      }));
+      const inject = (items) => (items || []).map(item => {
+        if (!item) return item;
+        const title = String(item.title || item.menu_name || '').trim();
+        const children = Array.isArray(item.children) ? inject(item.children) : item.children;
+        if (title === '会员') {
+          const existingBoard = Array.isArray(children)
+            ? children.find(child => String(child.title || child.menu_name || '').trim() === '看板')
+            : null;
+          const board = existingBoard || {
+            id: 'customer-analytics-dashboard',
+            title: '看板',
+            menu_name: '看板',
+            path: `${Setting.roterPre}/user/customer-analytics`,
+            menu_path: `${Setting.roterPre}/user/customer-analytics`,
+            is_show: 1,
+            children: []
+          };
+          const boardChildren = Array.isArray(board.children) ? board.children : [];
+          const existing = new Set(boardChildren.map(child => String(child.path || child.menu_path || '')));
+          board.children = boardChildren.concat(entries.filter(entry => !existing.has(entry.path)));
+          return { ...item, children: (Array.isArray(children) ? children.filter(child => String(child.title || child.menu_name || '').trim() !== '看板') : []).concat(board) };
+        }
+        return Array.isArray(children) ? { ...item, children } : item;
+      });
+      return inject(this.filterSider);
+    },
+    showCustomerAnalyticsShortcuts() {
+      return false;
+    }
   },
   watch: {
     $route: {
@@ -99,7 +151,7 @@ export default {
         // 所有组件默认是打开的，所以用关闭的进行筛选；
         // 过滤出被打开的组件
         const array = this.filterSider.filter(item =>
-		  !closePath.some(j => j.id === item.id)
+      !closePath.some(j => j.id === item.id)
         );
         array.forEach(item => {
           itemPath.push(item.path);
@@ -107,7 +159,7 @@ export default {
         this.openPath = itemPath;
         // 获取一级导航标题；
         this.filterHeader.forEach(item => {
-          if (item.header == this.headerName) {
+          if (item.header === this.headerName) {
             this.headerTitle = item.title;
           }
         });
@@ -133,7 +185,7 @@ export default {
       const mergedArray = [...closePath, ...array];
       // 关闭组件去重
       const uniqueArray = mergedArray.filter((item, index, self) =>
-		  index === self.findIndex(t => t.id === item.id)
+      index === self.findIndex(t => t.id === item.id)
       );
       // 从关闭的组件里去除被打开的组件
       const newArray = uniqueArray.filter(item => e.indexOf(item.path) === -1);
@@ -163,3 +215,23 @@ export default {
   }
 };
 </script>
+
+<style lang="stylus" scoped>
+.customer-analytics-shortcuts
+  padding 8px 10px
+  border-bottom 1px solid #f0f1f5
+
+.customer-analytics-shortcut
+  display block
+  padding 9px 8px
+  color #515a6e
+  font-size 14px
+  line-height 20px
+  border-radius 4px
+  text-decoration none
+
+.customer-analytics-shortcut:hover,
+.customer-analytics-shortcut.router-link-active
+  color #2d8cf0
+  background #f0faff
+</style>

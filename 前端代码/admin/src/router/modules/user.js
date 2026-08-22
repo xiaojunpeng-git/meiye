@@ -15,6 +15,20 @@ const meta = {
 
 const pre = 'user_';
 
+// 客户分析原型页面目录。每个页面保持独立路由和权限标识，页面内容由
+// Vue 3 报表运行时承载；本阶段仅使用前端模拟数据。
+const CUSTOMER_ANALYTICS_REPORTS = Object.freeze([
+  ['overview', 'customer_overview', '客户概况'],
+  ['source-analysis', 'customer_source_analysis', '客户来源分析'],
+  ['visit-analysis', 'customer_visit_analysis', '到店数据分析'],
+  ['store-health', 'customer_store_health', '门店健康数据分析'],
+  ['consumption-tier', 'customer_consumption_tier', '消费分级分析'],
+  ['cash-performance', 'customer_cash_performance', '现金业绩分析'],
+  ['refund-performance', 'customer_refund_performance', '退货业绩分析'],
+  ['item-analysis', 'customer_item_analysis', '客户品相分析'],
+  ['unconsumed-analysis', 'customer_unconsumed_analysis', '客户未耗分析']
+]);
+
 export default {
   path: `${Setting.roterPre}/user`,
   name: 'user',
@@ -34,6 +48,30 @@ export default {
     //   },
     //   component: () => import("@/pages/user/list/index"),
     // },
+    {
+      path: 'customer-analytics',
+      name: `${pre}customer_analytics`,
+      meta: {
+        auth: ['admin-customer-analytics'],
+        title: '客户分析'
+      },
+      redirect: {
+        name: `${pre}customer_overview`
+      }
+    },
+    ...CUSTOMER_ANALYTICS_REPORTS.map(([path, code, title]) => ({
+      path: `customer-analytics/${path}`,
+      name: `${pre}${code}`,
+      meta: {
+        auth: [`admin-customer-analytics-${code}`],
+        title,
+        customerAnalytics: true,
+        // The embedded Vue 3 runtime uses the stable URL slug. Keep the
+        // permission code independent from the presentation route code.
+        reportCode: path
+      },
+      component: () => import('@/pages/report/data/customer_analytics')
+    })),
     {
       path: `list`,
       name: `${pre}list`,

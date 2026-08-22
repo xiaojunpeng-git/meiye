@@ -152,8 +152,14 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
         $authorizedStores = $this->storeIds((array)($input['_authorized_store_ids'] ?? $stores));
         if ($authorizedStores === []) $authorizedStores = $stores;
         $memberIds = $this->activeMemberIds($authorizedStores, $range);
-        $memberTotals = $this->memberCashTotals($authorizedStores, $range, []);
-        $categoryTotals = $this->memberCashTotals($authorizedStores, $range, $categoryIds);
+        $metric = (string)($input['consumption_metric'] ?? 'cash');
+        if (!in_array($metric, ['cash', 'consumption'], true)) $metric = 'cash';
+        $memberTotals = $metric === 'consumption'
+            ? $this->memberConsumptionTotals($authorizedStores, $range, [])
+            : $this->memberCashTotals($authorizedStores, $range, []);
+        $categoryTotals = $metric === 'consumption'
+            ? $this->memberConsumptionTotals($authorizedStores, $range, $categoryIds)
+            : $this->memberCashTotals($authorizedStores, $range, $categoryIds);
         $assignments = $this->memberStoreAssignments($memberIds, $range['end'], $authorizedStores);
         $tiers = $this->foundation()->consumptionTiers(CashierV3ScopeResolver::TENANT_SCOPE_ID);
         $records = [];
@@ -201,7 +207,9 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
             $this->column('total_consumption_amount', '总消费金额', '当前分级会员在期间内全部门店、全部商品分类产生的净现金业绩。', true, false, 130),
             $this->column('category_consumption_share', '分类消费金额占比', '当前分级分类消费金额合计除以当前分级总消费金额合计；分母为零时显示“-”。', false, false, 150),
         ];
-        return $this->result('现金消费分析表', $columns, array_values($records), $input, $range, ['category' => true]);
+        $result = $this->result($metric === 'consumption' ? '消耗业绩分级分析' : '现金业绩分级分析', $columns, array_values($records), $input, $range, ['category' => true]);
+        $result['consumption_metric'] = $metric;
+        return $result;
     }
 
     private function consumptionRefundDetail(array $stores, array $range, array $input): array
@@ -903,6 +911,23 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
             $memberId = (int)$row['member_id'];
             if ($memberId > 0) $totals[$memberId] = (int)($totals[$memberId] ?? 0) + (int)$row['amount_cents'];
         }
+        return $totals;
+    }
+
+    /** 按已完成服务对应的消耗业绩事实聚合会员金额，保留反向事实冲减。 */
+    private function memberConsumptionTotals(array $stores, array $range, array $categoryIds): array
+    {
+        $query = Db::name('cashier_v3_entitlement_service_fact')->alias('sv')
+            ->join('cashier_v3_performance_fact pf', 'pf.tenant_id=sv.tenant_id AND pf.checkout_request_id=sv.checkout_request_id AND pf.source_line_id=sv.source_line_id')
+            ->where('sv.tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
+            ->whereIn('sv.store_id', $stores)->whereBetween('sv.business_date', [$range['start'], $range['end']])
+            ->where('sv.service_status', 'completed')
+            ->where('pf.performance_type', 'consumption_performance_recorded')->where('pf.status', 'effective');
+        if ($categoryIds !== []) $query->whereIn('sv.project_category_id_snapshot', $categoryIds);
+        $rows = $query->fieldRaw("sv.member_id, SUM(CASE WHEN pf.fact_direction='reversal' THEN -ABS(pf.amount_cents) ELSE ABS(pf.amount_cents) END) amount_cents")
+            ->where('sv.member_id', '>', 0)->group('sv.member_id')->select()->toArray();
+        $totals = [];
+        foreach ($rows as $row) $totals[(int)$row['member_id']] = (int)$row['amount_cents'];
         return $totals;
     }
 

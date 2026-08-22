@@ -27,16 +27,8 @@ export default {
   },
   computed: {
     menuData() {
-      const menu = JSON.parse(JSON.stringify(this.menu));
-      if (menu.children && menu.children.length) {
-        menu.children.forEach((item, index) => {
-          if (item.children && item.children.length) {
-            item.path = item.children[0].path;
-            delete item.children;
-          }
-        });
-      }
-      return menu;
+      // 保留完整菜单树，支持“会员 → 看板 → 九张客户分析表”的三级入口。
+      return JSON.parse(JSON.stringify(this.menu));
     }
   }
 };

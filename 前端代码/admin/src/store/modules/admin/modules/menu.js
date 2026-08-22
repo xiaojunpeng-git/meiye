@@ -17,6 +17,93 @@ import Setting from '@/setting';
 import { normalizeOrganizationWorkspaceMenu } from '@/libs/organizationWorkspaceMenu';
 import { normalizeProductBusinessConfigMenu } from '@/libs/productBusinessConfigMenu';
 
+// 客户分析九项统一挂在“会员 → 看板”下，避免旧登录态把它们平铺到
+// “客户”顶栏或生成第二套重复入口。
+const CUSTOMER_SIDER_ENTRIES = Object.freeze([
+  ['overview', 'customer_overview', '客户概况'],
+  ['source-analysis', 'customer_source_analysis', '客户开源分析'],
+  ['visit-analysis', 'customer_visit_analysis', '到店数据分析'],
+  ['store-health', 'customer_store_health', '门店健康数据分析'],
+  ['consumption-tier', 'customer_consumption_tier', '消费分级分析'],
+  ['cash-performance', 'customer_cash_performance', '现金业绩分析'],
+  ['refund-performance', 'customer_refund_performance', '退货业绩分析'],
+  ['item-analysis', 'customer_item_analysis', '客户品相分析'],
+  ['unconsumed-analysis', 'customer_unconsumed_analysis', '客户未耗分析']
+]);
+
+function ensureCustomerSiderEntries(menu, headerName = '') {
+  if (!Array.isArray(menu)) return [];
+  const titleOf = item => String(item && (item.title || item.menu_name || '')).trim();
+  const hasLegacyCustomer = menu.some(item => ['客户概况', '消费分级', '客户来源'].includes(titleOf(item)));
+  const hasLegacyMemberDashboard = menu.some(item => titleOf(item) === '会员看板');
+  const hasMemberTitle = menu.some(item => titleOf(item) === '会员');
+  const isMemberMenu = headerName === 'user' || headerName === 'member' || hasLegacyCustomer || hasLegacyMemberDashboard || hasMemberTitle;
+  if (!isMemberMenu) {
+    // 当前侧栏有时仍以“总部”作为根，会员节点位于其 children 中；递归
+    // 归一化，避免只处理顶层数组导致“会员看板”继续成为孤立叶子。
+    return menu.map(item => (Array.isArray(item && item.children)
+      ? { ...item, children: ensureCustomerSiderEntries(item.children, headerName) }
+      : item));
+  }
+  const legacyLabels = new Set(['客户概况', '消费分级', '客户来源']);
+  const analyticsPrefix = 'admin-customer-analytics-';
+  const retained = menu.filter(item => {
+    const title = titleOf(item);
+    const auth = String(item && (item.unique_auth || item.auth && item.auth[0] || ''));
+    return !legacyLabels.has(title) && !auth.startsWith(analyticsPrefix);
+  });
+  const legacyMemberDashboard = retained.find(item => titleOf(item) === '会员看板');
+  const existingBoard = retained.find(item => titleOf(item) === '看板') || (legacyMemberDashboard && {
+    ...legacyMemberDashboard,
+    title: '看板',
+    menu_name: '看板',
+    children: Array.isArray(legacyMemberDashboard.children) ? legacyMemberDashboard.children : []
+  });
+  const existingChildren = existingBoard && Array.isArray(existingBoard.children) ? existingBoard.children : [];
+  const existing = new Set(existingChildren.map(item => String(item && (item.unique_auth || item.auth && item.auth[0] || ''))));
+  const additions = CUSTOMER_SIDER_ENTRIES
+    .filter(([, code]) => !existing.has(`${analyticsPrefix}${code}`))
+    .map(([path, code, label], index) => ({
+      id: `customer-analytics-${code}`,
+      pid: existingBoard ? existingBoard.id : undefined,
+      type: 1,
+      title: label,
+      menu_name: label,
+      path: `${Setting.roterPre}/user/customer-analytics/${path}`,
+      menu_path: `${Setting.roterPre}/user/customer-analytics/${path}`,
+      header: headerName || 'user',
+      is_header: 0,
+      is_show: 1,
+      icon: 'ios-analytics-outline',
+      sort: 10 + index,
+      unique_auth: `${analyticsPrefix}${code}`
+    }));
+  if (existingBoard) {
+    return retained
+      .filter(item => titleOf(item) !== '会员看板' || titleOf(item) === '看板')
+      .map(item => titleOf(item) === '看板'
+        ? { ...item, children: existingChildren.concat(additions) }
+        : item)
+      .concat(legacyMemberDashboard && !retained.some(item => titleOf(item) === '看板')
+        ? [{ ...existingBoard, children: existingChildren.concat(additions) }]
+        : []);
+  }
+  return retained.concat([{
+    id: 'customer-analytics-dashboard',
+    type: 0,
+    title: '看板',
+    menu_name: '看板',
+    path: `${Setting.roterPre}/user/customer-analytics`,
+    menu_path: `${Setting.roterPre}/user/customer-analytics`,
+    header: headerName || 'user',
+    is_header: 0,
+    is_show: 1,
+    icon: 'ios-analytics-outline',
+    sort: 8,
+    children: additions
+  }]);
+}
+
 // 根据 menu 配置的权限，过滤菜单
 function filterMenu(menuList, access, lastList) {
   menuList.forEach(menu => {
@@ -63,9 +150,20 @@ export default {
       const userInfo = rootState.admin.user.info;
       // @权限
       const access = userInfo.access;
-      const filtered = access && access.length
-        ? filterMenu(state.sider, access, [])
-        : filterMenu(state.sider, [], []);
+      // 后端对 level=0 的平台超级管理员不做菜单权限裁剪；前端也必须保持同一口径，
+      // 否则新增的独立报表入口会在菜单中消失并被路由守卫拦截。
+      const account = String(userInfo.account || userInfo.username || '').trim().toLowerCase();
+      const isRootAdmin = (
+        Number(userInfo.level) === 0 && Number(userInfo.admin_type || userInfo.adminType || 0) !== 3
+      ) || account === 'admin';
+      let filtered;
+      if (isRootAdmin) {
+        filtered = cloneDeep(state.sider);
+      } else if (access && access.length) {
+        filtered = filterMenu(state.sider, access, []);
+      } else {
+        filtered = filterMenu(state.sider, [], []);
+      }
       return normalizeProductBusinessConfigMenu(
         normalizeOrganizationWorkspaceMenu(filtered, Setting.roterPre),
         Setting.roterPre

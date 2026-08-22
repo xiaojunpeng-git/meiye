@@ -15,6 +15,20 @@ import { PHASE_SIX_REPORTS } from '@/libs/phaseSixReports';
 
 const pre = 'report_';
 
+// 客户一级菜单的兼容地址。正式入口位于 user 模块（顶部“客户”菜单），
+// 这里保留独立 report code 与权限元信息，兼容历史从“数据”菜单进入的链接。
+const CUSTOMER_ANALYTICS_REPORTS = Object.freeze([
+  ['overview', 'customer_overview', '客户概况'],
+  ['source-analysis', 'customer_source_analysis', '客户来源分析'],
+  ['visit-analysis', 'customer_visit_analysis', '到店数据分析'],
+  ['store-health', 'customer_store_health', '门店健康数据分析'],
+  ['consumption-tier', 'customer_consumption_tier', '消费分级分析'],
+  ['cash-performance', 'customer_cash_performance', '现金业绩分析'],
+  ['refund-performance', 'customer_refund_performance', '退货业绩分析'],
+  ['item-analysis', 'customer_item_analysis', '客户品相分析'],
+  ['unconsumed-analysis', 'customer_unconsumed_analysis', '客户未耗分析']
+]);
+
 export default {
   path: `${Setting.roterPre}/report`,
   name: 'report',
@@ -72,6 +86,30 @@ export default {
       },
       component: () => import('@/pages/report/data/product_dashboard')
     },
+    {
+      path: 'customer-analytics',
+      name: `${pre}customer_analytics_compatibility`,
+      hidden: true,
+      meta: {
+        auth: ['admin-customer-analytics'],
+        title: '客户分析'
+      },
+      redirect: {
+        name: `${pre}customer_overview_compatibility`
+      }
+    },
+    ...CUSTOMER_ANALYTICS_REPORTS.map(([path, code, title]) => ({
+      path: `customer-analytics/${path}`,
+      name: `${pre}${code}_compatibility`,
+      hidden: true,
+      meta: {
+        auth: [`admin-customer-analytics-${code}`],
+        title,
+        customerAnalytics: true,
+        reportCode: path
+      },
+      component: () => import('@/pages/report/data/customer_analytics')
+    })),
     {
       path: 'engineering-management',
       name: `${pre}engineering_management`,

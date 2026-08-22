@@ -931,6 +931,35 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
         return '-';
     }
 
+    /**
+     * Customer analysis read-only access to the same signed cash allocation
+     * facts used by phase-four reports.  Keeping the allocator here prevents
+     * customer pages from rebuilding a second payment/reversal join.
+     */
+    public function customerCashRows(array $stores, array $range, array $scope = []): array
+    {
+        $this->applyCustomerParticipantScope($scope);
+        return $this->cashRows($stores, $range, []);
+    }
+
+    /** Read-only service facts for customer analysis (same source as health/status reports). */
+    public function customerServiceRows(array $stores, array $range, array $scope = []): array
+    {
+        $this->applyCustomerParticipantScope($scope);
+        return $this->serviceRows($stores, $range, []);
+    }
+
+    /** Apply the authenticated report scope when customer analytics calls the
+     * read-only fact helpers directly instead of going through query(). */
+    private function applyCustomerParticipantScope(array $scope): void
+    {
+        if ((string)($scope['mode'] ?? '') !== 'self_participant') return;
+        $this->participantEmployeeId = max(0, (int)($scope['employee_id'] ?? 0));
+        if ($this->participantEmployeeId <= 0) {
+            throw new \InvalidArgumentException('个人数据权限缺少有效员工身份');
+        }
+    }
+
     private function cashRows(array $stores, array $range, array $categoryIds): array
     {
         $base = Db::name('cashier_v3_payment_sale_allocation_fact')->alias('p')
@@ -949,11 +978,11 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
         $direct->join('cashier_v3_report_sale_dimension_fact d', 'd.tenant_id=s.tenant_id AND d.sale_fact_id=s.fact_id')
             ->where('s.source_type', '<>', 'card');
         if ($categoryIds !== []) $direct->whereIn('d.category_id_snapshot', $categoryIds);
-        $rows = $direct->fieldRaw('p.id,p.store_id,p.member_id,p.order_id,p.source_line_id,p.business_date,p.amount_cents,p.sale_amount_cents,p.organization_id,s.organization_path_snapshot,MAX(s.store_name_snapshot) store_name,MAX(s.member_name_snapshot) member_name,MAX(s.business_source_label_snapshot) business_source_label,d.item_id,d.item_name_snapshot item_name,d.category_id_snapshot category_id,d.category_path_snapshot category_path,s.quantity')
+        $rows = $direct->fieldRaw('p.id,p.store_id,p.member_id,p.order_id,p.source_line_id,p.business_date,p.amount_cents,p.sale_amount_cents,p.organization_id,s.organization_path_snapshot,s.business_source_primary_id,MAX(s.store_name_snapshot) store_name,MAX(s.member_name_snapshot) member_name,MAX(s.business_source_label_snapshot) business_source_label,d.item_id,d.item_name_snapshot item_name,d.category_id_snapshot category_id,d.category_path_snapshot category_path,s.quantity')
             ->group('p.id')->select()->toArray();
 
         $card = clone $base;
-        $payments = $card->where('s.source_type', 'card')->fieldRaw('p.id,p.store_id,p.member_id,p.order_id,p.source_line_id,p.business_date,p.amount_cents,p.organization_id,s.organization_path_snapshot,MAX(s.store_name_snapshot) store_name,MAX(s.member_name_snapshot) member_name,MAX(s.business_source_label_snapshot) business_source_label,s.fact_id sale_fact_id')
+        $payments = $card->where('s.source_type', 'card')->fieldRaw('p.id,p.store_id,p.member_id,p.order_id,p.source_line_id,p.business_date,p.amount_cents,p.organization_id,s.organization_path_snapshot,s.business_source_primary_id,MAX(s.store_name_snapshot) store_name,MAX(s.member_name_snapshot) member_name,MAX(s.business_source_label_snapshot) business_source_label,s.fact_id sale_fact_id')
             ->group('p.id')->select()->toArray();
         if ($payments === []) return $rows;
         $saleFactIds = array_values(array_unique(array_filter(array_column($payments, 'sale_fact_id'))));
@@ -974,7 +1003,7 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
                 $rows[] = [
                     'id' => (int)$payment['id'], 'store_id' => (int)$payment['store_id'], 'member_id' => (int)$payment['member_id'],
                     'order_id' => (string)$payment['order_id'], 'source_line_id' => (string)$payment['source_line_id'], 'business_date' => (string)$payment['business_date'],
-                    'amount_cents' => (int)($allocated[(string)$item['allocation_fact_id']] ?? 0), 'sale_amount_cents' => (int)($item['sale_amount_cents'] ?? 0), 'organization_id' => (string)$payment['organization_id'],
+                    'amount_cents' => (int)($allocated[(string)$item['allocation_fact_id']] ?? 0), 'sale_amount_cents' => (int)($item['sale_amount_cents'] ?? 0), 'organization_id' => (string)$payment['organization_id'], 'business_source_primary_id' => (int)($payment['business_source_primary_id'] ?? 0),
                     'organization_path_snapshot' => (string)$payment['organization_path_snapshot'], 'store_name' => (string)$payment['store_name'], 'member_name' => (string)$payment['member_name'], 'business_source_label' => (string)$payment['business_source_label'],
                     'item_id' => (string)$item['component_product_id'], 'item_name' => (string)$item['item_name_snapshot'],
                     'category_id' => (int)$item['category_id_snapshot'], 'category_path' => (string)$item['category_path_snapshot'], 'quantity' => (int)$item['component_count'],

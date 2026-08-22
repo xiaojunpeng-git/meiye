@@ -10,11 +10,13 @@ import HangOrderListView from '@/views/HangOrderListView.vue'
 import OrderCenterView from '@/views/OrderCenterView.vue'
 import ManagementCenterView from '@/views/ManagementCenterView.vue'
 import BusinessDashboardView from '@/views/BusinessDashboardView.vue'
+import StoreTargetDashboardView from '@/views/StoreTargetDashboardView.vue'
 import StoreBusinessReportView from '@/views/StoreBusinessReportView.vue'
 import MemberDashboardView from '@/views/MemberDashboardView.vue'
 import GroupManagementDashboardView from '@/views/GroupManagementDashboardView.vue'
 import ProductDashboardView from '@/views/ProductDashboardView.vue'
 import EngineeringManagementView from '@/views/EngineeringManagementView.vue'
+import CustomerAnalyticsView from '@/views/CustomerAnalyticsView.vue'
 import ConsumptionTierConfigView from '@/views/ConsumptionTierConfigView.vue'
 import StaffListView from '@/views/StaffListView.vue'
 import RoomSettingsView from '@/views/RoomSettingsView.vue'
@@ -41,6 +43,7 @@ const routeFeatureCodes = Object.freeze({
   'cashier-v3-staff-list': 'cashier.v3.management_center',
   'cashier-v3-room-settings': 'cashier.v3.management_center',
   'cashier-v3-business-dashboard': 'cashier.v3.management_center',
+  'cashier-v3-store-target-dashboard': 'cashier.v3.management_center',
   'cashier-v3-store-business-reports': 'cashier.v3.management_center'
 })
 
@@ -96,6 +99,15 @@ const routes = [
     component: EngineeringManagementView,
     props: { platform: true },
     meta: { platformReport: true, title: '工程管理' }
+  },
+  {
+    // 集团平台客户分析原型。report 参数对应客户菜单下的九个分析页面；
+    // Vue 3 页面当前只使用本地模拟数据，后续接统一客户分析接口。
+    path: '/platform/customer-analytics/:report?',
+    name: 'cashier-v3-platform-customer-analytics',
+    component: CustomerAnalyticsView,
+    props: true,
+    meta: { platformReport: true, title: '客户分析' }
   },
   {
     path: '/',
@@ -195,6 +207,12 @@ const routes = [
         name: 'cashier-v3-business-dashboard',
         component: BusinessDashboardView,
         meta: { title: '经营看板', description: 'V3 事实层经营指标、趋势、排行、明细与数据追平状态。' }
+      },
+      {
+        path: 'management-center/targets',
+        name: 'cashier-v3-store-target-dashboard',
+        component: StoreTargetDashboardView,
+        meta: { title: '目标', description: '当前门店目标进度与员工现金、消耗业绩排行。' }
       },
       {
         path: 'data/reports/:report?',
