@@ -241,6 +241,12 @@ function applyCustomerPayload(payload) {
     data.returns.cards = [['退款人数', `${number(totalPeople)}人`, '按退款成功日期', 'blue'], ['退款金额', money(totalAmount), '按退款成功日期', 'red'], ['退款率', String(field(payload?.summary_row || {}, 'refund_rate') || '-'), '退款金额 / 现金业绩', 'amber']]
     data.returns.branches = source.map((row, i) => [String(field(row, 'company_name', 'branch_name') || '未配置分公司'), cents(field(row, 'refund_amount', 'amount')), tone[i % tone.length]])
     data.returns.rows = detailRows.map(row => [String(field(row, 'refund_date', 'date') || '-'), String(field(row, 'company_name') || '-'), String(field(row, 'store_name') || '-'), Number(field(row, 'refund_people', 'people')) || 0, String(field(row, 'refund_items', 'item_name') || '-'), money(cents(field(row, 'refund_amount', 'amount')))])
+    const itemRows = Array.isArray(payload?.item_proportions) ? payload.item_proportions : []
+    data.returns.itemProportions = itemRows.map((row, i) => [String(field(row, 'item_name', 'name') || '-'), numericOrNull(field(row, 'amount_share', 'share')), `#${['3681b2', '3d9187', 'c88727', '776aa7', '62a8ae', 'bb6b52'][i % 6]}`])
+    const managerRows = Array.isArray(payload?.manager_records) ? payload.manager_records : []
+    const storeRows = Array.isArray(payload?.store_records) ? payload.store_records : []
+    data.returns.managers = managerRows.map((row, i) => [String(field(row, 'manager_name', 'name') || '-'), cents(field(row, 'refund_amount', 'amount')), tone[i % tone.length]])
+    data.returns.stores = storeRows.map((row, i) => [String(field(row, 'store_name', 'name') || '-'), cents(field(row, 'refund_amount', 'amount')), tone[i % tone.length]])
   } else if (report === 'item_analysis') {
     data.appearance.items = records.map(row => [String(field(row, 'item_name', 'name') || '未命名品项'), cents(field(row, 'cash_amount', 'amount')), numericOrNull(field(row, 'deal_people', 'people')), cents(field(row, 'average_amount', 'unit_amount')), numericOrNull(String(field(row, 'people_share') ?? '').replace('%', '')), numericOrNull(String(field(row, 'amount_share') ?? '').replace('%', '')), numericOrNull(field(row, 'experience_people', 'experience_count')), numericOrNull(String(field(row, 'deal_rate') ?? '').replace('%', ''))])
     const hasKnown = value => value !== null && value !== undefined && value !== '' && value !== '-'
@@ -258,12 +264,21 @@ function applyCustomerPayload(payload) {
     const tenK = countKnown(['annual_30000'], row => String(field(row, 'annual_30000')).toLowerCase() === '1' || String(field(row, 'annual_30000')) === '是')
     const oldCount = newCount === null ? null : Math.max(records.length - newCount, 0)
     data.overview.cards = data.overview.cards.map(card => ({ ...card, value: ({ active: activeCount, valid: validCount, sleeping: sleepingCount, new: newCount, old: oldCount, tenK })[card.key], delta: '-' }))
-    data.overview.trend = []; data.overview.age = []; data.overview.structure = []
+    const trend = Array.isArray(payload?.trend) ? payload.trend : []
+    data.overview.trend = trend.map((row) => {
+      const value = numericOrNull(typeof row === 'object' ? field(row, 'value', 'count', 'member_count') : row)
+      return value === null ? null : { label: typeof row === 'object' ? String(field(row, 'label', 'month', 'period') || '-') : '-', value }
+    }).filter(Boolean)
+    const age = Array.isArray(payload?.age) ? payload.age : []
+    data.overview.age = age.map((row) => ({ label: String(field(row, 'label', 'age_band', 'name') || '-'), value: numericOrNull(field(row, 'value', 'count', 'member_count')), percent: numericOrNull(field(row, 'percent', 'share')) })).filter((row) => row.value !== null)
   } else if (report === 'visit_analysis') {
     const row = records[records.length - 1] || records[0]
     const get = (...keys) => field(row, ...keys)
     data.visits.cards = [['总活客数', get('active_members', 'total_active_members') ?? '-', '接口返回'], ['当月到店1–2次', get('one_to_two_visits') ?? '-', '接口返回'], ['当月到店3次以上', get('three_plus_visits') ?? '-', '接口返回'], ['常客（90天内）', get('regular_customers') ?? '-', '接口返回'], ['死客（90天以上）', get('inactive_customers') ?? '-', '接口返回'], ['活客率', get('active_rate') ?? '-', '接口返回']]
-    data.visits.frequency = []; data.visits.recency = []
+    const frequency = Array.isArray(payload?.frequency) ? payload.frequency : []
+    const recency = Array.isArray(payload?.recency) ? payload.recency : []
+    data.visits.frequency = frequency.map((item) => ({ label: String(field(item, 'label', 'band', 'visit_band') || '-'), value: numericOrNull(field(item, 'value', 'count', 'member_count')), percent: numericOrNull(field(item, 'percent', 'share')) })).filter((item) => item.value !== null)
+    data.visits.recency = recency.map((item) => ({ label: String(field(item, 'label', 'band', 'recency_band') || '-'), value: numericOrNull(field(item, 'value', 'count', 'member_count')), percent: numericOrNull(field(item, 'percent', 'share')) })).filter((item) => item.value !== null)
   } else if (report === 'store_health') {
     data.health = records.map(row => [field(row, 'month') || '-', numericOrNull(field(row, 'store_count')), numericOrNull(field(row, 'active_members')), numericOrNull(field(row, 'consuming_members')), numericOrNull(String(field(row, 'consumption_rate') ?? '').replace('%', '')), numericOrNull(field(row, 'post_sale_visits')), cents(field(row, 'staff_unit_output')), numericOrNull(field(row, 'monthly_service_visits', 'store_average_visits')), cents(field(row, 'consumption_amount')), cents(field(row, 'staff_consumption_output')), cents(field(row, 'store_average_amount'))])
   } else if (report === 'consumption_tier') {
@@ -350,8 +365,9 @@ function appearanceDonutStyle(items = []) {
   return { background: `conic-gradient(${stops.join(', ') || '#dfe7ec 0 100%'})` }
 }
 function sparkPoints(values) {
-  const max = Math.max(...values, 1); const step = 100 / Math.max(values.length - 1, 1)
-  return values.map((value, index) => `${(index * step).toFixed(1)},${(74 - (value / max) * 62).toFixed(1)}`).join(' ')
+  const numericValues = values.map((item) => Number(typeof item === 'object' ? item.value : item) || 0)
+  const max = Math.max(...numericValues, 1); const step = 100 / Math.max(numericValues.length - 1, 1)
+  return numericValues.map((value, index) => `${(index * step).toFixed(1)},${(74 - (value / max) * 62).toFixed(1)}`).join(' ')
 }
 
 function isEmpty() { return demoState.value === 'empty' }
@@ -411,8 +427,8 @@ function isError() { return demoState.value === 'error' }
         <template v-else>
           <section v-if="active === 'overview'" class="module-stack">
             <div class="metric-grid metric-grid--six"><article v-for="card in data.overview.cards" :key="card.key" class="metric-card" :class="`metric-card--${card.tone}`"><div class="metric-card__title"><component :is="iconFor(card)" :size="17" /><span>{{ card.label }}</span></div><strong>{{ number(card.value) }}<small>{{ card.unit }}</small></strong><span class="metric-card__delta" :class="{ 'is-negative': card.delta.startsWith('-') }">{{ card.delta }} 较上期</span></article></div>
-            <div class="panel-grid panel-grid--wide"><article class="panel chart-panel"><header class="panel__header"><div><span class="panel__kicker"><TrendingUp :size="15" />趋势分析</span><h2>客户数量趋势</h2></div><span class="panel__hint">近12个月</span></header><div v-if="data.overview.trend.length" class="line-chart"><div class="line-chart__grid"><span v-for="item in [100,75,50,25,0]" :key="item">{{ item }}%</span></div><svg viewBox="0 0 100 80" preserveAspectRatio="none" aria-label="客户数量趋势折线图"><polyline :key="trendSeed" :points="sparkPoints(data.overview.trend)" /></svg><div class="line-chart__labels"><span v-for="item in ['9月','10月','11月','12月','1月','2月','3月','4月','5月','6月','7月','8月']" :key="item">{{ item }}</span></div></div><div v-else class="state-panel state-panel--empty"><span>接口暂未返回趋势序列</span></div></article><article class="panel structure-panel"><header class="panel__header"><div><span class="panel__kicker"><Users :size="15" />客户结构</span><h2>客户类型分布</h2></div></header><div class="donut" aria-label="客户类型分布"><div class="donut__hole"><strong>{{ number(data.overview.cards[0]?.value) }}</strong><span>活客</span></div></div><div class="legend-list"><div v-for="item in data.overview.structure" :key="item.label"><i :style="{ background: item.color }"></i><span>{{ item.label }}</span><b>{{ number(item.value) }}</b><em>{{ item.percent }}%</em></div></div></article></div>
-            <div class="panel-grid panel-grid--wide"><article class="panel"><header class="panel__header"><div><span class="panel__kicker"><Users :size="15" />客户画像</span><h2>成交客户年龄分布</h2></div><button type="button" class="link-button">列名取值来源</button></header><div v-if="data.overview.age.length" class="horizontal-bars"> <div v-for="item in data.overview.age" :key="item.label" class="horizontal-bar"><span>{{ item.label }}</span><div><i :style="{ width: `${item.value / maxAge * 100}%` }"></i></div><b>{{ number(item.value) }}</b><em>{{ item.percent }}%</em></div></div><div v-else class="state-panel state-panel--empty"><span>接口暂未返回年龄分布</span></div></article><article class="panel panel--callout"><div class="callout-icon"><Crown :size="23" /></div><h3>客户经营提醒</h3><p>指标提醒以接口返回的客户汇总结果为准。</p><button type="button" class="link-button">查看客户明细 <ChevronRight :size="14" /></button></article></div>
+            <div class="panel-grid panel-grid--wide"><article class="panel chart-panel"><header class="panel__header"><div><span class="panel__kicker"><TrendingUp :size="15" />趋势分析</span><h2>客户数量趋势</h2></div><span class="panel__hint">接口返回月份</span></header><div v-if="data.overview.trend.length" class="line-chart"><div class="line-chart__grid"><span v-for="item in [100,75,50,25,0]" :key="item">{{ item }}%</span></div><svg viewBox="0 0 100 80" preserveAspectRatio="none" aria-label="客户数量趋势折线图"><polyline :key="trendSeed" :points="sparkPoints(data.overview.trend)" /></svg><div class="line-chart__labels"><span v-for="item in data.overview.trend" :key="item.label">{{ item.label }}</span></div></div><div v-else class="state-panel state-panel--empty"><span>接口暂未返回趋势序列</span></div></article><article class="panel structure-panel"><header class="panel__header"><div><span class="panel__kicker"><Users :size="15" />客户结构</span><h2>客户类型分布</h2></div></header><div class="donut" aria-label="客户类型分布"><div class="donut__hole"><strong>{{ number(data.overview.cards[0]?.value) }}</strong><span>活客</span></div></div><div class="legend-list"><div v-for="item in data.overview.structure" :key="item.label"><i :style="{ background: item.color }"></i><span>{{ item.label }}</span><b>{{ number(item.value) }}</b><em>{{ pct(item.percent) }}</em></div></div></article></div>
+            <div class="panel-grid panel-grid--wide"><article class="panel"><header class="panel__header"><div><span class="panel__kicker"><Users :size="15" />客户画像</span><h2>成交客户年龄分布</h2></div><button type="button" class="link-button">列名取值来源</button></header><div v-if="data.overview.age.length" class="horizontal-bars"> <div v-for="item in data.overview.age" :key="item.label" class="horizontal-bar"><span>{{ item.label }}</span><div><i :style="{ width: `${item.value / maxAge * 100}%` }"></i></div><b>{{ number(item.value) }}</b><em>{{ pct(item.percent) }}</em></div></div><div v-else class="state-panel state-panel--empty"><span>接口暂未返回年龄分布</span></div></article><article class="panel panel--callout"><div class="callout-icon"><Crown :size="23" /></div><h3>客户经营提醒</h3><p>指标提醒以接口返回的客户汇总结果为准。</p><button type="button" class="link-button">查看客户明细 <ChevronRight :size="14" /></button></article></div>
           </section>
 
           <section v-else-if="active === 'source'" class="module-stack">

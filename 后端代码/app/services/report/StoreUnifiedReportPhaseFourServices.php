@@ -759,7 +759,7 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
             $this->monthlySpec('three_plus_visit_share', '占比', '当月到店3次及以上人数除以当月总活客数；分母为零显示“-”。', false, ['占比']),
             $this->monthlySpec('regular_customers', '常客数(90天以内到店1次)', '截至当月末向前90天内完成有效服务恰好1次的不同会员数。', false, ['常客数(90天以内到店1次)']),
             $this->monthlySpec('inactive_customers', '死客（90天以上未到店）', '截至当月末向前90天以上未完成有效服务、且历史存在服务记录的不同会员数。', false, ['死客（90天以上未到店）']),
-            $this->monthlySpec('active_rate', "活客率\n(总活客数/常客数)", '活客数除以常客数；分母为零显示“-”。', false, ["活客率\n(总活客数/常客数)"]),
+            $this->monthlySpec('active_rate', "活客率\n(活客数/(活客数+死客数))", '活客数除以活客数与死客数之和；分母为零显示“-”。', false, ["活客率\n(活客数/(活客数+死客数))"]),
         ];
         if ($report !== 'operations_customer_status_bdegh') {
             $specs = array_values(array_filter($specs, static fn(array $spec): bool => !in_array((string)$spec['key'], ['one_to_two_visit_share', 'three_plus_visit_share'], true)));
@@ -887,7 +887,7 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
         if ($key === 'three_plus_visit_share') return $this->ratio((int)($row['three_plus_visits'] ?? 0), $active);
         if ($key === 'regular_customers') return $this->visitBandMembers($services, 1, 1);
         if ($key === 'inactive_customers') return $this->inactiveMemberCount((array)$context['serviceHistory'], (string)$context['monthRange']['end']);
-        if ($key === 'active_rate') return $this->ratio($active, (int)($row['regular_customers'] ?? 0));
+        if ($key === 'active_rate') return $this->ratio($active, $active + (int)($row['inactive_customers'] ?? 0));
         if ($key === 'consuming_members') return $this->memberCount($healthSourceCash);
         if ($key === 'consumption_rate') return $this->ratio((int)($row['consuming_members'] ?? 0), $active);
         if ($key === 'store_average_visits') return $this->moneyRatio($this->serviceCount($healthSourceServices) * 100, count((array)$context['stores']));

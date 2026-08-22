@@ -187,11 +187,13 @@ final class CustomerAnalyticsServices
 
         switch ($report) {
             case 'customer_overview':
-                return (new StoreUnifiedReportServices())->query($stores, array_merge($contextInput, ['report' => 'customers']));
+                $result = (new StoreUnifiedReportServices())->query($stores, array_merge($contextInput, ['report' => 'customers']));
+                return array_merge($result, $this->overviewVisuals($stores, $range, $contextInput));
             case 'customer_source_analysis':
                 return $this->sourceAnalysis($stores, $range, $contextInput);
             case 'customer_visit_analysis':
-                return (new StoreUnifiedReportPhaseFourServices())->query('operations_customer_status_bdegh', $stores, $range, $contextInput);
+                $result = (new StoreUnifiedReportPhaseFourServices())->query('operations_customer_status_bdegh', $stores, $range, $contextInput);
+                return array_merge($result, $this->visitVisuals($stores, $range, $contextInput));
             case 'customer_store_health':
                 return (new StoreUnifiedReportPhaseFourServices())->query('operations_health_data', $stores, $range, $contextInput);
             case 'customer_consumption_tier':
@@ -213,6 +215,79 @@ final class CustomerAnalyticsServices
                 return $this->unconsumedAnalysis($stores, $range, $contextInput);
         }
         throw new \InvalidArgumentException('不支持的客户分析功能');
+    }
+
+    /** Visual series are projections of the same completed-service facts used by the cards. */
+    private function overviewVisuals(array $stores, array $range, array $input): array
+    {
+        $phaseFour = new StoreUnifiedReportPhaseFourServices();
+        $facts = $phaseFour->customerServiceRows($stores, $range, (array)($input['_report_scope'] ?? []));
+        $cashFacts = $phaseFour->customerCashRows($stores, $range, (array)($input['_report_scope'] ?? []));
+        $months = [];
+        $members = [];
+        foreach ($facts as $fact) {
+            $date = (string)($fact['business_date'] ?? '');
+            if (preg_match('/^(\d{4}-\d{2})-\d{2}$/', $date, $m)) {
+                $months[$m[1]][(string)($fact['member_id'] ?? '')] = true;
+            }
+        }
+        // The age panel is explicitly a成交客户画像, so its denominator comes
+        // from successful signed cash facts, not from every service visit.
+        foreach ($cashFacts as $fact) {
+            $memberId = (int)($fact['member_id'] ?? 0);
+            if ($memberId > 0) $members[$memberId] = true;
+        }
+        ksort($months);
+        $trend = [];
+        foreach ($months as $month => $ids) $trend[] = ['label' => $month, 'value' => count($ids)];
+        $ageCounts = ['18–25岁' => 0, '26–35岁' => 0, '36–45岁' => 0, '46–55岁' => 0, '56岁以上' => 0];
+        if ($members) {
+            $endDate = (string)($range['end'] ?? date('Y-m-d'));
+            $endTs = strtotime($endDate . ' 23:59:59') ?: time();
+            foreach (Db::name('user')->whereIn('uid', array_keys($members))->field('uid,birthday')->select()->toArray() as $user) {
+                $birthday = (int)($user['birthday'] ?? 0);
+                if ($birthday <= 0) continue;
+                $age = (int)date('Y', $endTs) - (int)date('Y', $birthday);
+                if (date('md', $endTs) < date('md', $birthday)) $age--;
+                if ($age < 18) continue;
+                $bucket = $age <= 25 ? '18–25岁' : ($age <= 35 ? '26–35岁' : ($age <= 45 ? '36–45岁' : ($age <= 55 ? '46–55岁' : '56岁以上')));
+                $ageCounts[$bucket]++;
+            }
+        }
+        $ageTotal = array_sum($ageCounts);
+        $age = [];
+        foreach ($ageCounts as $label => $value) $age[] = ['label' => $label, 'value' => $value, 'percent' => $ageTotal > 0 ? round($value * 100 / $ageTotal, 1) : null];
+        return ['trend' => $trend, 'age' => $age];
+    }
+
+    /** Build frequency and recency distributions from completed service facts. */
+    private function visitVisuals(array $stores, array $range, array $input): array
+    {
+        $facts = (new StoreUnifiedReportPhaseFourServices())->customerServiceRows($stores, $range, (array)($input['_report_scope'] ?? []));
+        $byMember = [];
+        foreach ($facts as $fact) {
+            $member = (int)($fact['member_id'] ?? 0);
+            if ($member <= 0) continue;
+            $byMember[$member][] = (string)($fact['business_date'] ?? '');
+        }
+        $frequency = ['1次' => 0, '2次' => 0, '3次' => 0, '4次' => 0, '5次以上' => 0];
+        $recency = ['30天内到店' => 0, '31–60天' => 0, '61–90天' => 0, '91–180天' => 0, '180天以上' => 0];
+        $end = strtotime((string)$range['end'] . ' 23:59:59') ?: time();
+        foreach ($byMember as $dates) {
+            $count = count($dates);
+            $frequency[$count >= 5 ? '5次以上' : ($count . '次')]++;
+            $latest = 0;
+            foreach ($dates as $date) $latest = max($latest, strtotime($date . ' 23:59:59') ?: 0);
+            $days = $latest > 0 ? max(0, (int)floor(($end - $latest) / 86400)) : 9999;
+            $bucket = $days <= 30 ? '30天内到店' : ($days <= 60 ? '31–60天' : ($days <= 90 ? '61–90天' : ($days <= 180 ? '91–180天' : '180天以上')));
+            $recency[$bucket]++;
+        }
+        $toRows = static function (array $values): array {
+            $total = array_sum($values); $rows = [];
+            foreach ($values as $label => $value) $rows[] = ['label' => $label, 'value' => $value, 'percent' => $total > 0 ? round($value * 100 / $total, 1) : null];
+            return $rows;
+        };
+        return ['frequency' => $toRows($frequency), 'recency' => $toRows($recency)];
     }
 
     private function humanSources(string $report, array $columns, array $existing): array
@@ -277,7 +352,7 @@ final class CustomerAnalyticsServices
                 'three_plus_visit_share' => '3次及以上到店会员人数除以当期活客人数，分母为零显示“-”。',
                 'regular_customers' => '统计近90天内恰好完成1次有效服务的去重会员人数。',
                 'inactive_customers' => '统计超过90天未完成有效服务、但历史有服务记录的去重会员人数。',
-                'active_rate' => '活客人数除以常客人数，分母为零显示“-”。',
+                'active_rate' => '活客人数除以活客人数与死客人数之和，分母为零显示“-”。',
             ],
             'customer_store_health' => [
                 'month' => '按服务或收款业务日期归属自然月。',
@@ -523,8 +598,37 @@ final class CustomerAnalyticsServices
         // refund operation.
         $detailRecords = [];
         $refundCents = 0;
+        $itemTotals = [];
+        $managerTotals = [];
+        $storeTotals = [];
+        $orderIds = array_values(array_unique(array_filter(array_map(static fn(array $row): string => trim((string)($row['order_id'] ?? '')), $rows))));
+        $managerByOrder = [];
+        if ($orderIds !== []) {
+            foreach (Db::name('cashier_v3_sales_manager_fact')->where('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)->whereIn('order_id', $orderIds)->where('status', 'effective')->field('order_id,sales_manager_name_snapshot')->select()->toArray() as $manager) {
+                $name = trim((string)($manager['sales_manager_name_snapshot'] ?? ''));
+                if ($name !== '') $managerByOrder[(string)$manager['order_id']] = $name;
+            }
+        }
         foreach ($rows as $row) {
             $refundCents += (int)($row['refund_amount_cents'] ?? 0);
+            $amount = (int)($row['refund_amount_cents'] ?? 0);
+            $storeName = trim((string)($row['store_name'] ?? '')) ?: '未配置门店';
+            $storeTotals[$storeName] = (int)($storeTotals[$storeName] ?? 0) + $amount;
+            $managerName = $managerByOrder[(string)($row['order_id'] ?? '')] ?? '未配置经理';
+            $managerTotals[$managerName] = (int)($managerTotals[$managerName] ?? 0) + $amount;
+            $itemNames = array_values(array_unique(array_filter(array_map('trim', preg_split('/[、,，\/]+/u', (string)($row['refund_items'] ?? '-'))), static fn(string $name): bool => $name !== '' && $name !== '-')));
+            if ($itemNames !== []) {
+                // A refund operation can contain several item snapshots. Split
+                // its amount once across those items so the pie remains a true
+                // 100% composition instead of counting the same refund once
+                // per label.
+                $itemShare = intdiv($amount, count($itemNames));
+                $remainder = $amount - ($itemShare * count($itemNames));
+                foreach ($itemNames as $index => $itemName) {
+                    $itemAmount = $itemShare + ($index === 0 ? $remainder : 0);
+                    $itemTotals[$itemName] = (int)($itemTotals[$itemName] ?? 0) + $itemAmount;
+                }
+            }
             $detailRecords[] = [
             'company_name' => (string)($row['market'] ?? '未配置分公司'), 'store_name' => (string)($row['store_name'] ?? '-'),
             'refund_people' => 1, 'refund_amount' => (string)($row['refund_amount'] ?? '-'), 'refund_rate' => '-',
@@ -552,6 +656,15 @@ final class CustomerAnalyticsServices
         $result['aggregate_records'] = array_values($aggregateRecords);
         $result['detail_records'] = array_values($detailRecords);
         $result['aggregate_columns'] = $aggregateColumns;
+        arsort($itemTotals); arsort($managerTotals); arsort($storeTotals);
+        $result['item_proportions'] = [];
+        foreach ($itemTotals as $name => $amount) {
+            $result['item_proportions'][] = ['item_name' => $name, 'refund_amount' => $this->moneyValue($amount), 'amount_share' => $refundCents > 0 ? round($amount * 100 / $refundCents, 1) : null];
+        }
+        $result['manager_records'] = [];
+        foreach ($managerTotals as $name => $amount) $result['manager_records'][] = ['manager_name' => $name, 'refund_amount' => $this->moneyValue($amount)];
+        $result['store_records'] = [];
+        foreach ($storeTotals as $name => $amount) $result['store_records'][] = ['store_name' => $name, 'refund_amount' => $this->moneyValue($amount)];
         $result['sections'] = [
             ['key' => 'aggregates', 'label' => '分公司退款汇总', 'columns' => $aggregateColumns, 'records' => $aggregateRecords],
             ['key' => 'details', 'label' => '退款明细', 'columns' => $columns, 'records' => $detailRecords],

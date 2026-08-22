@@ -128,6 +128,21 @@ customerAnalyticsAssert(
     'customer cash and refund fact readers preserve the authenticated participant scope'
 );
 customerAnalyticsAssert(
+    str_contains($service, 'private function overviewVisuals')
+        && str_contains($service, "'trend' => \$trend")
+        && str_contains($service, "'age' => \$age")
+        && str_contains($service, 'private function visitVisuals')
+        && str_contains($service, "'frequency' => \$toRows(\$frequency)")
+        && str_contains($service, "'recency' => \$toRows(\$recency)"),
+    'overview and visit charts are returned from completed customer facts'
+);
+customerAnalyticsAssert(
+    str_contains($service, "'item_proportions'")
+        && str_contains($service, "'manager_records'")
+        && str_contains($service, "'store_records'"),
+    'refund item composition and manager/store rankings are returned by the backend'
+);
+customerAnalyticsAssert(
     !str_contains($service, "'process_status'")
         && !str_contains($service, "'rectification_rate'"),
     'refund contract contains real refund fields only; no invented process or rectification fields'
