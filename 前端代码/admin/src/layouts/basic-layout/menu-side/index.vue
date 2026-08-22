@@ -102,41 +102,9 @@ export default {
     ...mapState('admin/menu', ['activePath', 'openNames', 'headerName']),
     ...mapGetters('admin/menu', ['filterSider', 'filterHeader']),
     displaySider() {
-      // 客户九张表统一归入“会员 → 看板”，由菜单树渲染真实父子层级。
-      // 不再为客户分析单独创建顶栏或平铺快捷入口。
-      const entries = this.customerAnalyticsEntries.map((entry, index) => ({
-        ...entry,
-        id: `customer-analytics-${index}`,
-        title: entry.title,
-        menu_name: entry.title,
-        is_show: 1,
-        children: undefined
-      }));
-      const inject = (items) => (items || []).map(item => {
-        if (!item) return item;
-        const title = String(item.title || item.menu_name || '').trim();
-        const children = Array.isArray(item.children) ? inject(item.children) : item.children;
-        if (title === '会员') {
-          const existingBoard = Array.isArray(children)
-            ? children.find(child => String(child.title || child.menu_name || '').trim() === '看板')
-            : null;
-          const board = existingBoard || {
-            id: 'customer-analytics-dashboard',
-            title: '看板',
-            menu_name: '看板',
-            path: `${Setting.roterPre}/user/customer-analytics`,
-            menu_path: `${Setting.roterPre}/user/customer-analytics`,
-            is_show: 1,
-            children: []
-          };
-          const boardChildren = Array.isArray(board.children) ? board.children : [];
-          const existing = new Set(boardChildren.map(child => String(child.path || child.menu_path || '')));
-          board.children = boardChildren.concat(entries.filter(entry => !existing.has(entry.path)));
-          return { ...item, children: (Array.isArray(children) ? children.filter(child => String(child.title || child.menu_name || '').trim() !== '看板') : []).concat(board) };
-        }
-        return Array.isArray(children) ? { ...item, children } : item;
-      });
-      return inject(this.filterSider);
+      // 侧栏严格渲染系统菜单接口返回的树。管理员在系统菜单中配置的
+      // pid、名称、路由、显示状态和权限，不能被前端自动注入或重组。
+      return this.filterSider;
     },
     showCustomerAnalyticsShortcuts() {
       return false;

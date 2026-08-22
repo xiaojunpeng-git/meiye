@@ -295,6 +295,9 @@ new Vue({
       if (path === '/app/upload') return;
       // 是否使用动态侧边菜单
       if (Setting.dynamicSiderMenu) {
+        // 菜单完全以系统菜单配置接口返回的树为准。不要在平台端
+        // 自动注入、重命名或重组客户分析菜单，否则会绕过管理员在
+        // 系统菜单中配置的 pid、显示名称和权限关系。
         const menus = this.$store.state.admin.menus.menusName;
         // var storage = window.localStorage;
         // let menus = JSON.parse(storage.getItem('menuList'));
@@ -322,12 +325,11 @@ new Vue({
             // 指定当前侧边栏隶属顶部菜单名称。如果你没有使用顶部菜单，则设置为默认的（一般为 home）名称即可
             this.$store.commit('admin/menu/setHeaderName', headerName);
             // 获取侧边栏菜单
-            const filterMenuSider = getMenuSider(menuSider, headerName);
-            // 指定当前显示的侧边菜单
-            this.$store.commit(
-              'admin/menu/setSider',
-              filterMenuSider[0].children
-            );
+            let filterMenuSider = getMenuSider(menuSider, headerName);
+            // 侧栏直接使用管理员配置的当前顶栏节点，不再根据路由或标题
+            // 猜测客户菜单，也不补造任何入口。
+            let siderChildren = filterMenuSider[0] && filterMenuSider[0].children;
+            this.$store.commit('admin/menu/setSider', siderChildren || []);
           } else {
             // 指定当前侧边栏隶属顶部菜单名称。如果你没有使用顶部菜单，则设置为默认的（一般为 home）名称即可
             this.$store.commit('admin/menu/setHeaderName', 'home');
