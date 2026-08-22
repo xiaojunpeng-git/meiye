@@ -20,7 +20,8 @@ final class StaffingQuotaServices
         $page = 1;
         $limit = min(100000, max(1, (int)($input['limit'] ?? 100000)));
         $keyword = trim((string)($input['keyword'] ?? ''));
-        $positions = Db::name('position')->where('status', 1)->field('id,name')->order('sort desc,id asc')->select()->toArray();
+        // 岗位表没有排序字段；按主键保持配置表中岗位顺序稳定。
+        $positions = Db::name('position')->where('status', 1)->field('id,name')->order('id asc')->select()->toArray();
         $scopes = $scopeType === 'store' ? $this->stores($keyword) : $this->organizations($keyword);
         $scopeIds = array_map(static fn(array $row): int => (int)$row['id'], $scopes);
         $positionIds = array_map(static fn(array $row): int => (int)$row['id'], $positions);
