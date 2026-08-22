@@ -4,9 +4,10 @@ declare(strict_types=1);
 $root = dirname(__DIR__, 3);
 $service = (string)file_get_contents($root . '/后端代码/app/services/cashier/v3/order/CashierV3RechargeGiftReversalServices.php');
 $lifecycle = (string)file_get_contents($root . '/后端代码/app/services/cashier/v3/order/CashierV3RechargeOrderLifecycleServices.php');
-$precheck = (string)file_get_contents($root . '/后端代码/database/upgrades/2026-08-05-收银V3订单生命周期权威/01-升级前检查.sql');
-$migration = (string)file_get_contents($root . '/后端代码/database/upgrades/2026-08-05-收银V3订单生命周期权威/02-正式升级.sql');
-$postcheck = (string)file_get_contents($root . '/后端代码/database/upgrades/2026-08-05-收银V3订单生命周期权威/03-升级后验证.sql');
+$upgrade = $root . '/后端代码/database/upgrades/2026-08-22-收银V3充值赠送冲销审计';
+$precheck = (string)file_get_contents($upgrade . '/01-升级前检查.sql');
+$migration = (string)file_get_contents($upgrade . '/02-正式升级.sql');
+$postcheck = (string)file_get_contents($upgrade . '/03-升级后验证.sql');
 $failures = [];
 
 $requireAll = static function (string $name, string $haystack, array $needles) use (&$failures): void {
@@ -42,9 +43,10 @@ if (strpos($service, 'recharge_gift_reversal_unprovable_kind') === false) {
     $failures[] = 'unprovable physical gift kind must fail closed';
 }
 
-$existingPosition = strpos($lifecycle, '$existing = Db::name(self::OPERATION_TABLE)');
-$preparePosition = strpos($lifecycle, '$preparedGifts = $giftReversal->prepare');
-$eventPosition = strpos($lifecycle, '$event = $recorder->recordInTx');
+$executeLifecycle = substr($lifecycle, (int)strpos($lifecycle, 'public function executeInTx'));
+$existingPosition = strpos($executeLifecycle, '$existing = Db::name(self::OPERATION_TABLE)');
+$preparePosition = strpos($executeLifecycle, '$preparedGifts = $action === \'void-recharge-order\'');
+$eventPosition = strpos($executeLifecycle, '$event = $recorder->recordInTx');
 if ($existingPosition === false || $preparePosition === false || $eventPosition === false
     || !($existingPosition < $preparePosition && $preparePosition < $eventPosition)) {
     $failures[] = 'idempotency replay must return first and gift proof must run before lifecycle writes';
@@ -64,8 +66,8 @@ $requireAll('migration audit schema', $migration, [
     '`original_gift_fact_id`', '`reversal_gift_fact_id`',
 ]);
 $requireAll('migration postcheck', $postcheck, [
-    'eb_cashier_v3_recharge_gift_reversal', '@lifecycle_tables=6',
-    '@lifecycle_unique_keys=14', '@lifecycle_invalid_gift_reversals=0',
+    'eb_cashier_v3_recharge_gift_reversal', '@rgr_tables=1',
+    '@rgr_unique_keys=2', '@rgr_invalid=0',
 ]);
 if (stripos($migration, 'insert into') !== false || stripos($migration, 'update `eb_cashier_v3_recharge_gift') !== false) {
     $failures[] = 'migration must not backfill or mutate historical recharge gifts';
