@@ -137,7 +137,12 @@ async function handleAuthenticatedRoute(to, next, agent_access, access) {
     .reverse()
     .find(route => route.meta && route.meta.auth);
   const meta = permissionRoute ? permissionRoute.meta : {};
-  const isPermission = includeArray(
+  const userInfo = store.state.admin.user.info || {};
+  const account = String(userInfo.account || userInfo.username || '').trim().toLowerCase();
+  const isRootAdmin = (
+    Number(userInfo.level) === 0 && Number(userInfo.admin_type || userInfo.adminType || 0) !== 3
+  ) || account === 'admin';
+  const isPermission = isRootAdmin || includeArray(
     meta.auth,
     meta.isAgentRoute ? agent_access : access
   );
