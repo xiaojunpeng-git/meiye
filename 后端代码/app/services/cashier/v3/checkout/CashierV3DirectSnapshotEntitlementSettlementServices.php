@@ -842,6 +842,12 @@ final class CashierV3DirectSnapshotEntitlementSettlementServices
                 'project_id' => (int)($line['projectId'] ?? 0),
                 'project_version' => 1,
                 'quantity' => (int)($line['quantity'] ?? 0),
+                // Preserve the browser's allocated entitlement amount as a
+                // strict cent value so the final kernel can compare it with
+                // the authoritative card-rule allocation.
+                'entitlement_actual_amount_cents' => $this->snapshotActualAmountCents(
+                    $line['actualAmount'] ?? $line['actualEntitlementAmount'] ?? null
+                ),
                 'craftsmen_snapshot_json' => json_encode($craftsmen, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
                 'service_object' => (string)($line['serviceObject'] ?? ''),
                 'friend_counts_as_customer' => empty($line['friendCountsAsCustomer']) ? 0 : 1,
@@ -868,6 +874,26 @@ final class CashierV3DirectSnapshotEntitlementSettlementServices
             ];
         }
         return $result;
+    }
+
+    private function snapshotActualAmountCents($amount): int
+    {
+        if (is_int($amount)) {
+            $amount = (string)$amount;
+        } elseif (is_float($amount)) {
+            $amount = number_format($amount, 2, '.', '');
+        }
+        if (!is_string($amount)
+            || preg_match('/^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,2})?$/D', trim($amount)) !== 1) {
+            throw self::failure('authority_checkout_actual_amount_invalid');
+        }
+        $parts = explode('.', trim($amount), 2);
+        $digits = ltrim($parts[0] . str_pad($parts[1] ?? '', 2, '0'), '0');
+        $digits = $digits === '' ? '0' : $digits;
+        if (strlen($digits) > 12 || (string)(int)$digits !== $digits) {
+            throw self::failure('authority_checkout_actual_amount_overflow');
+        }
+        return (int)$digits;
     }
 
     private function requestLinesForDiscovery(string $requestId, int $requestVersion): array
@@ -1600,9 +1626,13 @@ final class CashierV3DirectSnapshotEntitlementSettlementServices
         }
         foreach ((array)$kernelPlan['linePlans'] as $line) {
             $lineId = (string)$line['lineId'];
-            if (!isset($expected[$lineId])
-                || $expected[$lineId] !== (int)$line['actualEntitlementAmountCents']) {
-                throw self::failure('authority_checkout_actual_amount_mismatch', ['lineId' => $lineId]);
+            $actual = (int)$line['actualEntitlementAmountCents'];
+            if (!isset($expected[$lineId]) || $expected[$lineId] !== $actual) {
+                throw self::failure('authority_checkout_actual_amount_mismatch', [
+                    'lineId' => $lineId,
+                    'checkoutAmountCents' => $expected[$lineId] ?? null,
+                    'kernelAmountCents' => $actual,
+                ]);
             }
             unset($expected[$lineId]);
         }

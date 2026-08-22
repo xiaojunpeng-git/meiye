@@ -188,6 +188,13 @@ $check('direct entitlement snapshot preserves source and project display identit
     && str_contains($entitlementAdapter, "'source_name_snapshot' => (string)(")
     && str_contains($entitlementAdapter, "'source_code_snapshot' => (string)(")
     && str_contains($entitlementAdapter, "'project_name_snapshot' => (string)("));
+$check('direct entitlement snapshot preserves the browser actual amount for kernel comparison',
+    is_string($entitlementAdapter)
+    && str_contains($entitlementAdapter, '\'entitlement_actual_amount_cents\' => $this->snapshotActualAmountCents(')
+    && str_contains($entitlementAdapter, '$line[\'actualAmount\'] ?? $line[\'actualEntitlementAmount\'] ?? null')
+    && str_contains($entitlementAdapter, 'private function snapshotActualAmountCents($amount): int')
+    && str_contains($entitlementAdapter, 'is_float($amount)')
+    && str_contains($entitlementAdapter, "authority_checkout_actual_amount_invalid"));
 $check('final entitlement snapshot does not apply current-time or validity-window blockers',
     is_string($entitlementAdapter)
     && !str_contains($entitlementAdapter, 'authority_entitlement_not_usable_at_settlement')

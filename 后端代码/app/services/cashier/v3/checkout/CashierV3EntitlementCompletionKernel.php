@@ -398,17 +398,27 @@ final class CashierV3EntitlementCompletionKernel
         int $purchaseAmountCents,
         int $totalPurchaseTimes,
         int $consumedTimes,
-        int $quantity
+        int $quantity,
+        string $amountCalculationVersion = self::AMOUNT_CALCULATION_VERSION
     ): int {
         self::assertNonnegativeInt($purchaseAmountCents, 'purchaseAmountCents', self::MAX_MONEY_CENTS);
-        if ($purchaseAmountCents % 100 !== 0) {
-            throw self::failure('entitlement_purchase_amount_not_whole_yuan');
-        }
         self::assertPositiveInt($totalPurchaseTimes, 'totalPurchaseTimes', self::MAX_TIMES);
         self::assertNonnegativeInt($consumedTimes, 'consumedTimes', $totalPurchaseTimes);
         self::assertPositiveInt($quantity, 'quantity', self::MAX_TIMES);
         if ($quantity > $totalPurchaseTimes - $consumedTimes) {
             throw self::failure('entitlement_allocation_times_invalid');
+        }
+        if (self::isCentCapableAmountCalculation($amountCalculationVersion)) {
+            $regularAmount = intdiv($purchaseAmountCents, $totalPurchaseTimes);
+            $start = $regularAmount * $consumedTimes;
+            $end = $regularAmount * ($consumedTimes + $quantity);
+            if ($consumedTimes + $quantity >= $totalPurchaseTimes) {
+                $end = $purchaseAmountCents;
+            }
+            return $end - $start;
+        }
+        if ($purchaseAmountCents % 100 !== 0) {
+            throw self::failure('entitlement_purchase_amount_not_whole_yuan');
         }
         $start = self::cumulativeAmount($purchaseAmountCents, $totalPurchaseTimes, $consumedTimes);
         $end = self::cumulativeAmount(
@@ -417,6 +427,11 @@ final class CashierV3EntitlementCompletionKernel
             $consumedTimes + $quantity
         );
         return $end - $start;
+    }
+
+    private static function isCentCapableAmountCalculation(string $version): bool
+    {
+        return str_starts_with($version, 'operation-cent-');
     }
 
     /**
@@ -1494,7 +1509,8 @@ final class CashierV3EntitlementCompletionKernel
                     $group['purchaseAmountCents'],
                     $group['totalPurchaseTimes'],
                     $consumedCursor,
-                    $line['quantity']
+                    $line['quantity'],
+                    $group['amountCalculationVersion']
                 );
                 $consumedCursor += $line['quantity'];
             }

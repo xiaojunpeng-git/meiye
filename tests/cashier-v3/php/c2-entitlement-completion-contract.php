@@ -1130,6 +1130,33 @@ for ($totalCents = 0; $totalCents <= 10000; $totalCents += 100) {
     }
 }
 b1Assert('all tested whole-yuan tails return to source total', $allocationInvariant);
+$centAmounts = [
+    CashierV3EntitlementCompletionKernel::allocateActualAmountCents(
+        39682,
+        3,
+        0,
+        1,
+        'operation-cent-whole-yuan-floor-final-remainder-v1'
+    ),
+    CashierV3EntitlementCompletionKernel::allocateActualAmountCents(
+        39682,
+        3,
+        1,
+        1,
+        'operation-cent-whole-yuan-floor-final-remainder-v1'
+    ),
+    CashierV3EntitlementCompletionKernel::allocateActualAmountCents(
+        39682,
+        3,
+        2,
+        1,
+        'operation-cent-whole-yuan-floor-final-remainder-v1'
+    ),
+];
+b1Assert(
+    'operation-cent allocation preserves cent-level amount and final remainder',
+    $centAmounts === [13227, 13227, 13228]
+);
 b1Assert(
     'fractional-yuan source amounts are rejected instead of rounded or truncated',
     b1Reason(static function (): void {
