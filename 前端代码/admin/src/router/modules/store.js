@@ -158,6 +158,15 @@ export default {
       component: () => import('@/pages/store/region/job-positions/index')
     },
     {
+      path: 'region/staffing',
+      name: `${pre}regionStaffingQuota`,
+      meta: {
+        auth: ['admin-organization-staffing'],
+        title: '岗位编制'
+      },
+      component: () => import('@/pages/report/data/staffing_quota')
+    },
+    {
       path: 'region/create/:id?',
       name: `${pre}addRegion`,
       meta: {
