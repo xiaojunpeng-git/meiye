@@ -7,6 +7,7 @@ set -euo pipefail
 
 APP_ROOT="${RH_SWOOLE_APP_ROOT:-/www/wwwroot/rh.cc3798.com}"
 PHP_BIN="${RH_SWOOLE_PHP_BIN:-/www/server/php/74/bin/php}"
+PHP_MEMORY_LIMIT="${RH_SWOOLE_PHP_MEMORY_LIMIT:-512M}"
 PORT="${RH_SWOOLE_PORT:-20800}"
 LOG_FILE="${RH_SWOOLE_LOG_FILE:-/www/wwwlogs/ruihao_swoole.log}"
 PID_FILE="${RH_SWOOLE_PID_FILE:-/run/ruihao_swoole.pid}"
@@ -116,7 +117,9 @@ start_manager() {
     cd "$APP_ROOT"
     # Do not let the long-lived manager inherit the orchestration lock fd;
     # otherwise every later status/stop call would see the lock as occupied.
-    nohup "$PHP_BIN" think swoole 9>&- >>"$LOG_FILE" 2>&1 &
+    # Swoole workers are long-lived; keep the web/FPM limit unchanged while
+    # giving the independent RH worker enough headroom for catalog writes.
+    nohup "$PHP_BIN" -d "memory_limit=$PHP_MEMORY_LIMIT" think swoole 9>&- >>"$LOG_FILE" 2>&1 &
     echo "$!" >"$PID_FILE"
   )
   local deadline=$((SECONDS + START_TIMEOUT))
