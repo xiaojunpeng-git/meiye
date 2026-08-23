@@ -130,11 +130,20 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             $rows[$storeId]['payment_' . $method . '_cents'] = (int)($rows[$storeId]['payment_' . $method . '_cents'] ?? 0) + (int)$fact['amount_cents'];
             $rows[$storeId]['total_performance_cents'] = (int)($rows[$storeId]['total_performance_cents'] ?? 0) + (int)$fact['amount_cents'];
         }
-        $visits = $this->participantCheckout($this->applyOrganizationFilters($this->scope(Db::name('cashier_v3_entitlement_service_fact')->alias('sv'), $stores, 'sv'), 'sv', $input, $range),'sv.checkout_request_id')
-            ->join('cashier_v3_sales_order o', 'o.checkout_request_id=sv.checkout_request_id AND o.store_id=sv.store_id')
-            ->whereBetween('sv.business_date', [$range['start'], $range['end']])->where('sv.service_status', 'completed')
-            ->fieldRaw('sv.store_id,o.business_source_primary_id,COUNT(DISTINCT sv.service_fact_id) visit_count')
-            ->group('sv.store_id,o.business_source_primary_id')->select()->toArray();
+        $visits = [];
+        foreach ($this->marketServiceVisitFacts($stores, $range, $input) as $fact) {
+            $sourceId = (int)($fact['business_source_primary_id'] ?? 0);
+            if ($sourceId <= 0) continue;
+            $key = (int)$fact['store_id'] . '|' . $sourceId;
+            if (!isset($visits[$key])) {
+                $visits[$key] = [
+                    'store_id' => (int)$fact['store_id'],
+                    'business_source_primary_id' => $sourceId,
+                    'visit_count' => 0,
+                ];
+            }
+            $visits[$key]['visit_count']++;
+        }
         foreach ($visits as $fact) if (isset($rows[(int)$fact['store_id']])) {
             $rows[(int)$fact['store_id']]['channel_' . (int)$fact['business_source_primary_id'] . '_visits'] = (int)$fact['visit_count'];
         }
@@ -231,16 +240,28 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
                 return isset($effectiveMemberKeys[(int)$row['store_id'] . '|' . (int)$row['business_source_primary_id'] . '|' . (int)$row['member_id']]);
             }));
         }
-        $orderIds = array_values(array_unique(array_column($rows, 'order_id')));
-        $visits = [];
-        if ($orderIds) {
-            foreach ($this->participantCheckout($this->scope(Db::name('cashier_v3_entitlement_service_fact')->alias('market_detail_service'), $stores,'market_detail_service'),'market_detail_service.checkout_request_id')->whereIn('market_detail_service.checkout_request_id', function ($sub) use ($orderIds) { $sub->name('cashier_v3_sales_order')->whereIn('order_id',$orderIds)->field('checkout_request_id'); })->where('market_detail_service.service_status','completed')->fieldRaw('market_detail_service.checkout_request_id,COUNT(*) amount')->group('market_detail_service.checkout_request_id')->select()->toArray() as $row) $visits[(string)$row['checkout_request_id']] = (int)$row['amount'];
+        $serviceVisits = $this->marketServiceVisitFacts($stores, $range, $input);
+        $visitsByCheckout = [];
+        $visitsByOrder = [];
+        foreach ($serviceVisits as $serviceVisit) {
+            $sourceId = (int)($serviceVisit['business_source_primary_id'] ?? 0);
+            if ($sourceId <= 0) continue;
+            $checkoutKey = (string)($serviceVisit['checkout_request_id'] ?? '');
+            $matchedOrderKey = (string)($serviceVisit['matched_order_id'] ?? '');
+            $orderKey = (string)($serviceVisit['origin_order_id'] ?? '');
+            $visit = ['source_id' => $sourceId, 'count' => 1];
+            if ($checkoutKey !== '') $visitsByCheckout[$checkoutKey . '|' . $sourceId][] = $visit;
+            if ($matchedOrderKey !== '') $visitsByOrder[$matchedOrderKey . '|' . $sourceId][] = $visit;
+            if ($orderKey !== '') $visitsByOrder[$orderKey . '|' . $sourceId][] = $visit;
         }
         foreach ($rows as &$row) {
             $row['dimension'] = (string)$row['business_source_label_snapshot'];
             $row['walk_in'] = 0; $row['visits'] = 0;
             $row['effective_people'] = isset($effectiveMemberKeys[(int)$row['store_id'] . '|' . (int)$row['business_source_primary_id'] . '|' . (int)$row['member_id']]) ? 1 : 0;
-            $row['visits'] = (int)($visits[(string)($row['checkout_request_id'] ?? '')] ?? 0);
+            $sourceKey = (string)(int)($row['business_source_primary_id'] ?? 0);
+            $checkoutVisits = $visitsByCheckout[(string)($row['checkout_request_id'] ?? '') . '|' . $sourceKey] ?? [];
+            $orderVisits = $visitsByOrder[(string)($row['order_id'] ?? '') . '|' . $sourceKey] ?? [];
+            $row['visits'] = count($checkoutVisits) > 0 ? count($checkoutVisits) : count($orderVisits);
             $row['amount'] = $this->money((int)$row['amount_cents']);
             $row['registered_date'] = (string)$row['business_date'];
             $row['reviewer'] = ''; $row['reviewed_at'] = ''; $row['created_at'] = $this->dateTime((int)$row['recorded_at']);
@@ -451,6 +472,82 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
     }
 
     private function primarySources():array{return Db::name('cashier_v3_business_source')->where('parent_id',0)->where('status',1)->order('sort','asc')->order('id','asc')->field('id,name,sort')->select()->toArray();}
+    /**
+     * Read completed service facts once and resolve their source without making
+     * sales_order an existence gate. New rows normally resolve by checkout
+     * request; historical/card-service rows can resolve through the immutable
+     * card-purchase receipt, then the origin order and its payment fact. A
+     * successful service void is excluded as a reversal, and service_fact_id
+     * remains the deduplication grain.
+     */
+    private function marketServiceVisitFacts(array $stores, array $range, array $input): array
+    {
+        $query = $this->participantCheckout(
+            $this->applyOrganizationFilters(
+                $this->scope(Db::name('cashier_v3_entitlement_service_fact')->alias('sv'), $stores, 'sv'),
+                'sv',
+                $input,
+                $range
+            ),
+            'sv.checkout_request_id'
+        )
+            ->leftJoin(
+                'cashier_v3_entitlement_writeoff_fact wf',
+                "wf.tenant_id=sv.tenant_id AND wf.checkout_request_id=sv.checkout_request_id AND wf.source_line_id=sv.source_line_id AND wf.status='effective'"
+            )
+            ->leftJoin(
+                'cashier_v3_service_record_void_operation vo',
+                "vo.tenant_id=sv.tenant_id AND vo.service_fact_id=sv.id AND vo.status='succeeded'"
+            )
+            ->leftJoin(
+                'cashier_v3_sales_order o1',
+                'o1.tenant_id=sv.tenant_id AND o1.store_id=sv.store_id AND o1.checkout_request_id=sv.checkout_request_id'
+            )
+            ->leftJoin(
+                'cashier_v3_sales_order o2',
+                'o2.tenant_id=sv.tenant_id AND o2.store_id=sv.store_id AND o2.order_id=wf.origin_order_id'
+            )
+            ->leftJoin(
+                'cashier_v3_card_purchase_receipt cr',
+                "cr.tenant_id=sv.tenant_id AND cr.store_id=sv.store_id AND cr.legacy_order_id=wf.origin_order_id AND cr.card_holder_id=wf.holder_id AND cr.status='completed'"
+            )
+            ->leftJoin(
+                'cashier_v3_sales_order o3',
+                'o3.tenant_id=sv.tenant_id AND o3.store_id=sv.store_id AND o3.order_id=cr.sales_order_id'
+            )
+            ->leftJoin(
+                'cashier_v3_payment_fact p1',
+                "p1.tenant_id=sv.tenant_id AND p1.store_id=sv.store_id AND p1.checkout_request_id=sv.checkout_request_id AND p1.status='effective'"
+            )
+            ->leftJoin(
+                'cashier_v3_payment_fact p2',
+                "p2.tenant_id=sv.tenant_id AND p2.store_id=sv.store_id AND p2.order_id=wf.origin_order_id AND p2.status='effective'"
+            )
+            ->leftJoin(
+                'cashier_v3_payment_fact p3',
+                "p3.tenant_id=sv.tenant_id AND p3.store_id=sv.store_id AND p3.order_id=cr.sales_order_id AND p3.status='effective'"
+            )
+            ->whereBetween('sv.business_date', [$range['start'], $range['end']])
+            ->where('sv.service_status', 'completed')
+            ->whereNull('vo.id')
+            ->fieldRaw(
+                'sv.store_id,sv.service_fact_id,sv.checkout_request_id,'
+                . 'COALESCE(NULLIF(wf.origin_order_id,0),0) origin_order_id,'
+                . "COALESCE(NULLIF(MAX(o1.order_id),''),NULLIF(MAX(cr.sales_order_id),''),'') matched_order_id,"
+                . 'COALESCE(NULLIF(MAX(o1.business_source_primary_id),0),'
+                . 'NULLIF(MAX(o3.business_source_primary_id),0),'
+                . 'NULLIF(MAX(o2.business_source_primary_id),0),'
+                . 'NULLIF(MAX(p1.business_source_primary_id),0),'
+                . 'NULLIF(MAX(p3.business_source_primary_id),0),'
+                . 'NULLIF(MAX(p2.business_source_primary_id),0),0) business_source_primary_id'
+            )
+            ->group('sv.store_id,sv.service_fact_id,sv.checkout_request_id,wf.origin_order_id,cr.sales_order_id')
+            ->select()
+            ->toArray();
+        return array_values(array_filter($query, static function (array $row): bool {
+            return (int)($row['business_source_primary_id'] ?? 0) > 0;
+        }));
+    }
     private function marketEffectiveMemberKeys(array $rows):array
     {
         $sources = [];
