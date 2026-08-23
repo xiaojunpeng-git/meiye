@@ -12,6 +12,9 @@ return strtoupper(substr(php_uname('s'), 0, 3)) === 'WIN' ? [] : [
         'worker_num' => swoole_cpu_num() * 2,
         'options' => [
             'package_max_length' => 50 * 1024 * 1024,
+            // Long-running workers can retain ORM/query allocations between
+            // requests. Recycle them before the PHP memory ceiling is hit.
+            'max_request' => (int) env('SWOOLE_MAX_REQUEST', 300),
         ],
     ],
     'websocket' => [
