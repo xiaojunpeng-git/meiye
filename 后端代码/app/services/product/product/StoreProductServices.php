@@ -1105,6 +1105,14 @@ class StoreProductServices extends BaseServices
             $data['allow_negative_stock'] = 1;
             $data['salon_stock_enabled'] = 0;
         }
+        // 历史商品可能只有主图而没有轮播图；编辑时沿用已有主图，避免
+        // 无实际内容变更的保存被“请上传商品轮播图”拦截。
+        if ($id > 0 && empty($data['slider_image'])) {
+            $existingImage = trim((string)Db::name('store_product')->where('id', $id)->value('image'));
+            if ($existingImage !== '') {
+                $data['slider_image'] = [$existingImage];
+            }
+        }
         if (count($data['cate_id']) < 1) throw new AdminException('请选择商品分类');
         if (!$data['store_name']) throw new AdminException('请输入商品名称');
         if (count($data['slider_image']) < 1) throw new AdminException('请上传商品轮播图');

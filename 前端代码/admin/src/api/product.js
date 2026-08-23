@@ -445,7 +445,7 @@ export function cacheDelete() {
  */
 export function getProductAttr(id) {
   return request({
-    url: 'product/product/get_attr/' + id,
+    url: `product/product/attrs/${id}`,
     method: 'get'
   });
 }
