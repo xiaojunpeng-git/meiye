@@ -1554,11 +1554,12 @@
         >
         <Button
           type="primary"
-          :disabled="openSubimit"
+          :disabled="openSubimit || saveSubmitting"
+          :loading="saveSubmitting"
           class="submission"
           @click="handleSubmit()"
           v-if="$route.params.id || currentTab === '6'"
-          >保存</Button
+          >{{ saveSubmitting ? '正在保存…' : '保存' }}</Button
         >
       </div>
     </Card>
@@ -1746,6 +1747,7 @@ export default {
       currentTab: '1',
       spinShow: false,
       openSubimit: false,
+      saveSubmitting: false,
       ruleList: [],
       attrs: [],
       formData: structuredClone(defaultObj),
@@ -3669,6 +3671,7 @@ export default {
       return true;
     },
     async handleSubmit() {
+      if (this.saveSubmitting || this.openSubimit) return;
       this.normalizeRetailDeliveryBeforeSave(this.formData);
       let formData = this.summarizeData();
       this.normalizeRetailDeliveryBeforeSave(formData);
@@ -3768,6 +3771,7 @@ export default {
       formData.attr.level_price=vipPriceBrokerageData.attrData[0].level_price;
     }
     if (!this.validateWholeYuanMoney(formData)) return;
+      this.saveSubmitting = true;
       productAddApi(formData)
         .then(async (res) => {
           this.openSubimit = true;
@@ -3783,6 +3787,7 @@ export default {
               });
             } catch (ruleError) {
               this.openSubimit = false;
+              this.saveSubmitting = false;
               this.$Message.error((ruleError && ruleError.msg) || '商品已创建，但手工费保存失败，请重试');
               return;
             }
@@ -3800,6 +3805,7 @@ export default {
         })
         .catch((res) => {
           this.openSubimit = false;
+          this.saveSubmitting = false;
           this.$Message.error(res.msg);
         });
     },
