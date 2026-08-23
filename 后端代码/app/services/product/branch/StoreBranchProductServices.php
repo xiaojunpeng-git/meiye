@@ -593,7 +593,7 @@ class StoreBranchProductServices extends BaseServices
      * @param int $applicable_type
      * @param array $store_ids
      * @param int $is_sync_stock 已忽略：始终不同步实物库存
-     * @param int $is_sync_show 状态同步到门店1：同平台商品状态0：同步至门店为下架状态
+     * @param int $is_sync_show 兼容旧调用参数；平台商品资料现在始终覆盖门店配置（库存事实除外）
      * @return bool
      * @throws \think\db\exception\DataNotFoundException
      * @throws \think\db\exception\DbException
@@ -671,7 +671,7 @@ class StoreBranchProductServices extends BaseServices
      * @param int $store_id
      * @param int $card_product_id
      * @param int $is_sync_stock 库存同步到门店1：同步0：门店库存为0
-     * @param int $is_sync_show 状态同步到门店1：同平台商品状态0：同步至门店为下架状态
+     * @param int $is_sync_show 兼容旧调用参数；平台商品资料现在始终覆盖门店配置（库存事实除外）
      * @return bool
      * @throws \think\db\exception\DataNotFoundException
      * @throws \think\db\exception\DbException
@@ -766,16 +766,7 @@ class StoreBranchProductServices extends BaseServices
         $description = $description ?: '';
         /** @var StoreProductReservationTimeServices $productReservationTimeServices */
         $productReservationTimeServices = app()->make(StoreProductReservationTimeServices::class);
-		/** @var SystemStoreServices $systemStoreServices */
-		$systemStoreServices = app()->make(SystemStoreServices::class);
-		$storeInfo = $systemStoreServices->get($store_id, ['id', 'product_change_price_status']);
-
         $branchProductInfo = $this->dao->get(['pid' => $product_id, 'type' => 1, 'relation_id' => $store_id]);
-        //存在修改
-        if ($branchProductInfo) {
-            $productInfo['store_cate_id'] = $branchProductInfo['store_cate_id'];
-            $relationData['store_cate_id'] = $branchProductInfo['store_cate_id'];
-        }
         $sourceCardRelated = [];
         $targetRefs = [];
         $explicitCardIds = $card_product_id > 0 ? [$card_product_id] : [];
@@ -802,8 +793,8 @@ class StoreBranchProductServices extends BaseServices
             $catalogProductIds,
             $targetRefs,
             function (StoreCatalogWriteLease $catalogLease) use (
-            $product_id, $branchProductInfo, &$productInfo, $store_id, $storeInfo, $attrInfo, $attrResult, $attrValue, &$description,
-            $productServices, $productAttrServices, $productAttrResultServices, $productAttrValueServices, $productDescriptionServices, $productReservationTimeServices, $card_product_id, $is_sync_stock, $is_sync_show,
+            $product_id, $branchProductInfo, &$productInfo, $store_id, $attrInfo, $attrResult, $attrValue, &$description,
+            $productServices, $productAttrServices, $productAttrResultServices, $productAttrValueServices, $productDescriptionServices, $productReservationTimeServices, $card_product_id, $is_sync_stock,
             $catalogGuard, &$sourceCardRelated, $applicableStoreIdUpdate, $sourceProductSnapshot, &$relationData
         ) {
             $currentProduct = $productServices->get([
@@ -825,10 +816,6 @@ class StoreBranchProductServices extends BaseServices
                 throw new StoreBranchProductSyncPlanChangedException('branch product changed');
             }
             $branchProductInfo = $currentBranchProductInfo;
-            if ($branchProductInfo) {
-                $productInfo['store_cate_id'] = $branchProductInfo['store_cate_id'];
-                $relationData['store_cate_id'] = $branchProductInfo['store_cate_id'];
-            }
 
             $where = ['product_id' => $product_id, 'type' => 0];
             $currentAttrInfo = $productAttrServices->getProductAttr($where);
@@ -861,7 +848,13 @@ class StoreBranchProductServices extends BaseServices
             if ($branchProductInfo) {//二次同步，编辑
                 $id = $branchProductInfo['id'];
                 $catalogLease->assertCoversProducts([(int)$id]);
-                unset($productInfo['stock'], $productInfo['is_show']);
+                // 平台资料覆盖门店资料；库存、销量和库存派生状态仍由门店库存事实维护。
+                unset(
+                    $productInfo['stock'],
+                    $productInfo['defective_stock'],
+                    $productInfo['sum_stock'],
+                    $productInfo['is_sold']
+                );
                 $res = $this->dao->update($id, $productInfo);
                 if (!$res) throw new ValidateException('商品添加失败');
 
@@ -874,38 +867,20 @@ class StoreBranchProductServices extends BaseServices
                 $dataAll = [];
                 $res1 = $res2 = $res3 = true;
                 foreach ($attrValue as $item) {
-                    unset($item['id'], $item['stock'], $item['sales']);
+                    // SKU 价格、成本、调价区间等商品资料全部以平台为准；库存事实不随商品同步覆盖。
+                    unset(
+                        $item['id'],
+                        $item['stock'],
+                        $item['defective_stock'],
+                        $item['sum_stock'],
+                        $item['old_stock'],
+                        $item['sales'],
+                        $item['inventory'],
+                        $item['pm']
+                    );
                     $item['product_id'] = $id;
                     $oldUnique = $item['unique'];
                     if ($oldSuks && in_array($item['suk'], $oldSuks) && isset($oldAttrValue[$item['suk']])) {
-						//默认平台商品售价
-						$price = $oldPrice = (float)$item['price'];
-						if (isset($item['price_range_min']) && isset($item['price_range_max']) && $storeInfo && $storeInfo['product_change_price_status']) {//v3.3改价区间 门店有改价权限
-							$oldAttrValueOne = $oldAttrValue[$item['suk']];
-							//门店商品改价后售价
-							$price = (float)$oldAttrValueOne['price'];
-							$min = (float)$item['price_range_min'];
-							$max = (float)$item['price_range_max'];
-							if ($oldPrice == $min && $oldPrice == $max) {//不允许改价
-								$price = $oldPrice;
-							} elseif ($min && $max) {//限制区间
-								if ($price < $min || $price > $max) {
-									$price = $oldPrice;
-								}
-							} elseif (!$min && $max) {//限制最大值
-								if ($price > $max) {
-									$price = $oldPrice;
-								}
-							} elseif ($min && !$max) {//限制最小值
-								if ($price < $min) {
-									$price = $oldPrice;
-								}
-							} else {//不限制改价
-
-							}
-						}
-						//重新赋值售价
-						$item['price'] = $price;
                         $attrId = $oldAttrValue[$item['suk']]['id'];
                         $unique = $oldAttrValue[$item['suk']]['unique'];
                         unset($item['suk'], $item['unique']);
@@ -941,9 +916,6 @@ class StoreBranchProductServices extends BaseServices
                 // if (!$is_sync_stock) { unset($productInfo['stock']); }
                 $productInfo['stock'] = 0;
                 $productInfo['defective_stock'] = $productInfo['defective_stock'] ?? 0;
-                if (!$is_sync_show) {//同步过去到门店为下架状态
-                    $productInfo['is_show'] = 0;
-                }
                 $res = $this->dao->save($productInfo);
                 if (!$res) throw new ValidateException('商品添加失败');
                 $id = (int)$res->id;

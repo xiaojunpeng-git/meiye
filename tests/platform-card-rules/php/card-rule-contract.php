@@ -124,6 +124,22 @@ $assert(
     'store sync clones the complete platform product row'
 );
 $assert(
+    strpos($syncServiceSource, '平台资料覆盖门店资料') !== false
+    && strpos($syncServiceSource, 'product_change_price_status') === false
+    && strpos($syncServiceSource, '$productInfo[\'store_cate_id\'] = $branchProductInfo[\'store_cate_id\']') === false,
+    'store sync force-overwrites platform product configuration without local price/category exceptions'
+);
+$assert(
+    strpos($syncServiceSource, "unset(\n                    \$productInfo['stock']") !== false
+    && strpos($syncServiceSource, "unset(\$productInfo['stock'], \$productInfo['is_show'])") === false,
+    'store sync protects inventory facts while allowing platform visibility to propagate'
+);
+$assert(
+    strpos($syncServiceSource, "\$item['price'] = \$price") === false
+    && strpos($syncServiceSource, "\$item['price'] = \$oldPrice") === false,
+    'store SKU price is no longer replaced by the previous store override'
+);
+$assert(
     strpos($relatedServiceSource, "'writeoff_amount' => \$item['writeoff_amount']") !== false,
     'store sync relation normalization keeps time-card writeoff amount'
 );
