@@ -8,6 +8,7 @@ if (!is_string($source)) {
 }
 
 $checks = [
+    'http port is instance-configurable' => strpos($source, "env('SWOOLE_PORT', 20700)") !== false,
     'http options define a worker request recycle limit' => strpos($source, "'max_request'") !== false,
     'recycle limit is environment-overridable' => strpos($source, "env('SWOOLE_MAX_REQUEST', 300)") !== false,
     'recycle limit is applied inside the Swoole HTTP options' => strpos($source, "'package_max_length'") < strpos($source, "'max_request'")

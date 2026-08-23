@@ -8,7 +8,9 @@ return strtoupper(substr(php_uname('s'), 0, 3)) === 'WIN' ? [] : [
     'http' => [
         'enable' => true,
         'host' => '0.0.0.0',
-        'port' => 20700,
+        // Each independent instance keeps its own listener port in .env;
+        // local development remains on 20700 while RH uses 20800.
+        'port' => (int) env('SWOOLE_PORT', 20700),
         'worker_num' => swoole_cpu_num() * 2,
         'options' => [
             'package_max_length' => 50 * 1024 * 1024,
