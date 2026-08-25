@@ -155,6 +155,7 @@ class CashierV3RootDomainAssembler
             ],
             'operator' => [
                 'name' => $operatorName,
+                'account' => (string)($dataScope->operatorProfile()['account'] ?? ''),
                 'roleName' => (string)($dataScope->operatorProfile()['role_name'] ?? ''),
             ],
         ];
@@ -241,7 +242,9 @@ class CashierV3RootDomainAssembler
      */
     protected function operatorDisplayName(array $profile): string
     {
-        foreach (['account', 'staff_name', 'name'] as $field) {
+        // 收银侧账号区展示员工姓名；登录账号只作为姓名缺失时的兜底，
+        // 避免把内部账号编号当成当前操作员工展示。
+        foreach (['staff_name', 'name', 'account'] as $field) {
             $value = trim((string)($profile[$field] ?? ''));
             if ($value !== '') {
                 return $value;

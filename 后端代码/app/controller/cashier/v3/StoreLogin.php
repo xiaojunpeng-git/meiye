@@ -35,11 +35,11 @@ class StoreLogin extends \app\controller\cashier\AuthController
 
     public function changePassword(Request $request, EmployeeInternalAccountServices $accounts, CashierV3StoreLoginServices $services)
     {
-        [$currentPassword, $newPassword] = $request->postMore([
-            ['current_password', ''], ['new_password', ''],
+        [$currentPassword, $newAccount, $newPassword] = $request->postMore([
+            ['current_password', ''], ['account', ''], ['new_password', ''],
         ], true);
         $employeeId = (int)($this->cashierInfo['employee_id'] ?? 0);
-        $accounts->changeOwnPassword($employeeId, (string)$currentPassword, (string)$newPassword, [
+        $accounts->changeOwnCredentials($employeeId, (string)$currentPassword, (string)$newAccount, (string)$newPassword, [
             'operator_id' => (int)$this->cashierId,
             'operator_name' => (string)($this->cashierInfo['staff_name'] ?? $this->cashierInfo['account'] ?? ''),
             'operator_ip' => (string)$request->ip(),

@@ -920,6 +920,13 @@ class CashierV3RequestNormalizer
                     'craftsmanLaborFeeCents'
                 ),
             ];
+            if (array_key_exists('personnelSource', $row) || array_key_exists('personnel_source', $row)) {
+                $personnelSource = trim((string)($row['personnelSource'] ?? $row['personnel_source'] ?? ''));
+                if (!in_array($personnelSource, ['store', 'other'], true)) {
+                    throw self::invalidCartLineSetting('craftsmen', 'craftsman_personnel_source_invalid');
+                }
+                $assignment['personnelSource'] = $personnelSource;
+            }
             if (CashierV3AliasResolver::hasAnyKey($row, ['projectCountHalfUnits', 'project_count_half_units'])) {
                 $assignment['projectCountHalfUnits'] = self::canonicalNonNegativeInteger(
                     $row['projectCountHalfUnits'] ?? $row['project_count_half_units'],

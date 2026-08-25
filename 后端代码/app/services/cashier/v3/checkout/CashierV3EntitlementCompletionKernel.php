@@ -1599,7 +1599,7 @@ final class CashierV3EntitlementCompletionKernel
         $weights = [];
         foreach ($authorityIds as $staffId) {
             $row = $byId[$staffId] ?? null;
-            if (!$row || $row['active'] !== true || $row['craftsmanEligible'] !== true || $row['storeId'] !== $storeId) {
+            if (!$row || $row['active'] !== true || $row['storeId'] !== $storeId) {
                 throw self::failure('craftsman_not_active_eligible_in_store', ['staffId' => $staffId]);
             }
             $weights[$staffId] = $row['laborWeight'];

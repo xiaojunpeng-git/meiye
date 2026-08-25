@@ -156,13 +156,19 @@ final class CashierV3MemberModule
         if (!$handlers->hasProjection('query-member-selector')) {
             $handlers->registerProjection('query-member-selector', function (array $scope): array {
                 $payload = is_array($scope['payload'] ?? null) ? $scope['payload'] : [];
+                $selectorContext = (string)($payload['selectorContext'] ?? $payload['selector_context'] ?? $payload['selectorEntry'] ?? $payload['selector_entry'] ?? '');
+                $isCashierSelector = $selectorContext === 'cashier';
+                $isAllScope = strtolower(trim((string)($payload['memberScope'] ?? $payload['member_scope'] ?? 'store'))) === 'all';
                 return [
                     'data' => self::querySelector(
                         $payload,
                         $scope['operator_scope'],
                         $scope['data_scope'],
-                        // 推荐人必须是当前门店可见会员；不能复用办理业务时的全集团选客例外。
-                        (string)($payload['selectorContext'] ?? $payload['selector_context'] ?? '') !== 'member-referrer'
+                        // 收银选择会员默认只查本店；只有明确选择“全部”才查全集团。
+                        // 推荐人固定只能查本店，不能通过查询范围扩大权限。
+                        $selectorContext !== 'member-referrer'
+                            && (!$isCashierSelector || $isAllScope),
+                        $isCashierSelector && !$isAllScope
                     ),
                 ];
             });
@@ -787,14 +793,19 @@ final class CashierV3MemberModule
         array $payload,
         CashierV3OperatorScope $operatorScope,
         CashierV3DataScopeContext $dataScope,
-        bool $globalSelector
+        bool $globalSelector,
+        bool $currentStoreOnly = false
     ): array {
         $page = max(1, (int)($payload['page'] ?? 1));
         $pageSize = min(100, max(1, (int)($payload['pageSize'] ?? 20)));
         $keyword = trim((string)($payload['keyword'] ?? $payload['search'] ?? ''));
-        // 产品已确认：办理业务的会员选择器可查全集团，员工数据权限只影响
-        // 会员中心等管理查询。该例外不扩展到编辑、导出或批量操作。
-        $storeIds = $globalSelector ? null : self::visibleStoreIds($dataScope);
+        // 收银选择器默认只查当前操作门店；调用方明确选择全部时才读取全集团。
+        // 其他选择器保持原有 DataScope 范围，避免影响会员中心等调用方。
+        $storeIds = $globalSelector
+            ? null
+            : ($currentStoreOnly
+                ? self::currentStoreIds($operatorScope, $dataScope)
+                : self::visibleStoreIds($dataScope));
         if ($storeIds === []) {
             return ['records' => [], 'total' => 0, 'page' => $page, 'pageSize' => $pageSize, 'isLoading' => false];
         }
@@ -854,6 +865,27 @@ final class CashierV3MemberModule
             'pageSize' => $pageSize,
             'isLoading' => false,
         ];
+    }
+
+    /** @return int[] */
+    private static function currentStoreIds(
+        CashierV3OperatorScope $operatorScope,
+        CashierV3DataScopeContext $dataScope
+    ): array {
+        $storeId = (int)$operatorScope->storeId();
+        if ($storeId <= 0) {
+            return [];
+        }
+        $mode = $dataScope->authorizationMode();
+        if ($mode === CashierV3DataScopeContext::MODE_NONE
+            || $mode === CashierV3DataScopeContext::MODE_SELF_PARTICIPANT) {
+            return [];
+        }
+        if ($mode === CashierV3DataScopeContext::MODE_ALL) {
+            return [$storeId];
+        }
+        $visible = array_values(array_unique(array_map('intval', (array)$dataScope->visibleStoreIds())));
+        return in_array($storeId, $visible, true) ? [$storeId] : [];
     }
 
     /**

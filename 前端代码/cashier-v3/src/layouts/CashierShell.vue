@@ -118,7 +118,7 @@ const uiFeedback = ref(null)
 const isAccountMenuOpen = ref(false)
 const isPasswordDialogOpen = ref(false)
 const isPasswordSubmitting = ref(false)
-const passwordChange = ref({ currentPassword: '', newPassword: '', confirmation: '' })
+const passwordChange = ref({ account: '', currentPassword: '', newPassword: '', confirmation: '' })
 const passwordChangeError = ref('')
 let feedbackTimeoutId = null
 
@@ -143,6 +143,14 @@ function handleToolbarCheckoutContextUpdated(event) {
   toolbarBusinessSource.value = detail.source && typeof detail.source === 'object'
     ? { ...toolbarBusinessSource.value, ...detail.source }
     : toolbarBusinessSource.value
+}
+
+function handleCheckoutBusinessSourceCancelled(event = {}) {
+  if (event.detail?.kind !== 'sale' || !isCashierPage.value) return
+  pendingDebtReminderAfterSource.value = null
+  pendingCashierWorkflowTarget.value = null
+  pendingMemberTopAction.value = null
+  applyLocalCashierCustomerSelection({ customerMode: 'guest' })
 }
 
 watch(
@@ -2311,7 +2319,7 @@ function clearCashierNegativeState() {
 
 function openPasswordDialog() {
   isAccountMenuOpen.value = false
-  passwordChange.value = { currentPassword: '', newPassword: '', confirmation: '' }
+  passwordChange.value = { account: String(state.operator.account || ''), currentPassword: '', newPassword: '', confirmation: '' }
   passwordChangeError.value = ''
   isPasswordDialogOpen.value = true
 }
@@ -2319,15 +2327,15 @@ function openPasswordDialog() {
 function closePasswordDialog() {
   if (isPasswordSubmitting.value) return
   isPasswordDialogOpen.value = false
-  passwordChange.value = { currentPassword: '', newPassword: '', confirmation: '' }
+  passwordChange.value = { account: '', currentPassword: '', newPassword: '', confirmation: '' }
   passwordChangeError.value = ''
 }
 
 async function submitPasswordChange() {
   if (isPasswordSubmitting.value) return
   const values = passwordChange.value
-  if (!values.currentPassword || !values.newPassword || !values.confirmation) {
-    passwordChangeError.value = '请完整填写密码。'
+  if (!values.account || !values.currentPassword || !values.newPassword || !values.confirmation) {
+    passwordChangeError.value = '请完整填写登录账号和密码。'
     return
   }
   if (values.newPassword !== values.confirmation) {
@@ -2337,10 +2345,10 @@ async function submitPasswordChange() {
   isPasswordSubmitting.value = true
   passwordChangeError.value = ''
   try {
-    await changeStoreV3Password(values.currentPassword, values.newPassword)
+    await changeStoreV3Password(values.account, values.currentPassword, values.newPassword)
     clearStoreV3Token()
     isPasswordDialogOpen.value = false
-    passwordChange.value = { currentPassword: '', newPassword: '', confirmation: '' }
+    passwordChange.value = { account: '', currentPassword: '', newPassword: '', confirmation: '' }
     await router.replace({ name: 'cashier-v3-login' })
   } catch (error) {
     passwordChangeError.value = error instanceof Error ? error.message : '密码修改失败，请稍后重试。'
@@ -2537,6 +2545,7 @@ onMounted(() => {
   window.addEventListener('cashier-v3:register-service-completion-request', registerServiceCompletionPreparation)
   window.addEventListener('cashier-v3:register-room-assignment-request', registerRoomAssignmentPreparation)
   window.addEventListener('cashier-v3:toolbar-context-updated', handleToolbarCheckoutContextUpdated)
+  window.addEventListener('cashier-v3:checkout-business-source-cancelled', handleCheckoutBusinessSourceCancelled)
   window.addEventListener('cashier-v3:checkout-business-source-confirmed', handleCheckoutBusinessSourceSettled)
   window.addEventListener('cashier-v3:checkout-business-source-closed', handleCheckoutBusinessSourceSettled)
 })
@@ -2554,6 +2563,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('cashier-v3:register-service-completion-request', registerServiceCompletionPreparation)
   window.removeEventListener('cashier-v3:register-room-assignment-request', registerRoomAssignmentPreparation)
   window.removeEventListener('cashier-v3:toolbar-context-updated', handleToolbarCheckoutContextUpdated)
+  window.removeEventListener('cashier-v3:checkout-business-source-cancelled', handleCheckoutBusinessSourceCancelled)
   window.removeEventListener('cashier-v3:checkout-business-source-confirmed', handleCheckoutBusinessSourceSettled)
   window.removeEventListener('cashier-v3:checkout-business-source-closed', handleCheckoutBusinessSourceSettled)
   closeQueryEntitySelector({ reason: 'shell-unmounted' })
@@ -2566,8 +2576,9 @@ onBeforeUnmount(() => {
 <template>
   <div class="cashier-shell" :class="{ 'cashier-shell--sidebar-collapsed': isSidebarCollapsed }">
     <div v-if="isPasswordDialogOpen" class="cashier-account-dialog-backdrop" @click.self="closePasswordDialog">
-      <form class="cashier-account-dialog" aria-label="修改密码" @submit.prevent="submitPasswordChange">
-        <header><h2>修改密码</h2><button type="button" class="cashier-account-dialog__close" aria-label="关闭" @click="closePasswordDialog">×</button></header>
+      <form class="cashier-account-dialog" aria-label="修改登录账号和密码" @submit.prevent="submitPasswordChange">
+        <header><h2>修改登录账号和密码</h2><button type="button" class="cashier-account-dialog__close" aria-label="关闭" @click="closePasswordDialog">×</button></header>
+        <label>登录账号<input v-model.trim="passwordChange.account" type="text" autocomplete="username" :disabled="isPasswordSubmitting" /></label>
         <label>原密码<input v-model="passwordChange.currentPassword" type="password" autocomplete="current-password" :disabled="isPasswordSubmitting" /></label>
         <label>新密码<input v-model="passwordChange.newPassword" type="password" autocomplete="new-password" :disabled="isPasswordSubmitting" /></label>
         <label>确认新密码<input v-model="passwordChange.confirmation" type="password" autocomplete="new-password" :disabled="isPasswordSubmitting" /></label>
@@ -2962,6 +2973,7 @@ onBeforeUnmount(() => {
     :is-loading="Boolean(memberSelector.isLoading)"
     :allow-guest="isCashierWorkflowPage && memberSelectorContext !== 'reservation' && !memberSelectorRequiresMember"
     :allow-create="canUseFeature('cashier.v3.member') && (isCashierWorkflowPage || memberSelectorInitialView === 'creator')"
+    :show-scope-toggle="memberSelectorContext === 'cashier'"
     :current-store-name="state.storeName || ''"
     :creator-schema="memberCreatorSchema"
     :initial-view="memberSelectorInitialView"

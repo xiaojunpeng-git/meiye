@@ -1428,7 +1428,13 @@ async function reloadCheckoutBusinessSourceCatalog() {
 
 function closeCheckoutBusinessSourceSelector() {
   if (!isSavingCheckoutBusinessSource.value) {
+    const kind = checkoutBusinessSourceSelector.value?.kind || 'sale'
     checkoutBusinessSourceSelector.value = null
+    if (kind === 'sale') {
+      window.dispatchEvent(new CustomEvent('cashier-v3:checkout-business-source-cancelled', {
+        detail: { kind }
+      }))
+    }
     window.dispatchEvent(new CustomEvent('cashier-v3:checkout-business-source-closed'))
   }
 }
@@ -3296,6 +3302,7 @@ async function loadPersonnelOverlay(line, initialTab, roleScope = 'personnel') {
     projectCountTotal: Math.max(1, Number(line.quantity || 1)),
     requireCraftsmen: showCraftsmen,
     craftsmenCandidates: [],
+    otherCraftsmanCandidates: [],
     salespersonCandidates: [],
     guideCandidates: [],
     salesManagerCandidates: [],
@@ -3334,17 +3341,18 @@ async function loadPersonnelOverlay(line, initialTab, roleScope = 'personnel') {
   }
 }
 
-async function searchPersonnelOverlay({ scope, keyword } = {}) {
+async function searchPersonnelOverlay({ scope, keyword, target } = {}) {
   const current = personnelOverlay.value
-  if (!current?.line || scope !== 'group_attributions') return
+  if (!current?.line || !['group_attributions', 'cashier_other_craftsmen'].includes(scope)) return
   const requestKey = current.requestKey
   try {
     const records = await queryPersonnelCandidates(scope, current.line, keyword)
     if (personnelOverlay.value?.requestKey !== requestKey) return
     personnelOverlay.value = {
       ...personnelOverlay.value,
-      guideCandidates: records,
-      salesManagerCandidates: records
+      ...(target === 'otherCraftsmen'
+        ? { otherCraftsmanCandidates: records }
+        : { guideCandidates: records, salesManagerCandidates: records })
     }
   } catch (error) {
     if (personnelOverlay.value?.requestKey !== requestKey) return
@@ -6540,9 +6548,11 @@ onBeforeUnmount(() => {
         :show-salespeople="personnelOverlay.showSalespeople"
         :show-guides="personnelOverlay.showGuides"
         :show-sales-managers="personnelOverlay.showSalesManagers"
+        :allow-other-craftsmen="personnelOverlay.showCraftsmen"
         :require-craftsmen="personnelOverlay.requireCraftsmen"
         :store-id="Number(state.currentStore?.id || 0)"
         :craftsmen-candidates="personnelOverlay.craftsmenCandidates"
+        :other-craftsman-candidates="personnelOverlay.otherCraftsmanCandidates"
         :salesperson-candidates="personnelOverlay.salespersonCandidates"
         :guide-candidates="personnelOverlay.guideCandidates"
         :sales-manager-candidates="personnelOverlay.salesManagerCandidates"

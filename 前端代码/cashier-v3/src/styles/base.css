@@ -4585,6 +4585,13 @@ button:disabled {
   border-bottom: 2px solid #409eff;
 }
 
+.personnel-role-heading__action {
+  flex: 0 0 auto;
+  min-height: 32px;
+  padding: 0 10px;
+  white-space: nowrap;
+}
+
 .personnel-simple-grid h3 {
   flex: 1;
   margin: 0;

@@ -75,6 +75,10 @@ const props = defineProps({
   onSelectReferrer: {
     type: Function,
     default: null
+  },
+  showScopeToggle: {
+    type: Boolean,
+    default: false
   }
 })
 
@@ -86,6 +90,7 @@ const selectingRecordId = ref(null)
 const queryError = ref('')
 const selectError = ref('')
 const activeView = ref(props.initialView === 'creator' ? 'creator' : 'selector')
+const memberScope = ref('store')
 const isSelectingGuest = ref(false)
 let querySequence = 0
 
@@ -136,17 +141,27 @@ async function runQuery(targetPage = 1) {
 
   isQuerying.value = true
   try {
-    const result = await props.onQuery({
+    const query = {
       keyword: keyword.value.trim(),
       page: targetPage,
       pageSize: props.pageSize
-    })
+    }
+    if (props.showScopeToggle) query.memberScope = memberScope.value
+    const result = await props.onQuery(query)
     if (sequence === querySequence) queryError.value = resultError(result, '会员查询失败，请稍后重试。')
   } catch (error) {
     if (sequence === querySequence) queryError.value = error?.message || '会员查询失败，请稍后重试。'
   } finally {
     if (sequence === querySequence) isQuerying.value = false
   }
+}
+
+function changeScope(scope) {
+  if (!props.showScopeToggle || isBusy.value || selectingRecordId.value !== null) return
+  const nextScope = scope === 'all' ? 'all' : 'store'
+  if (memberScope.value === nextScope) return
+  memberScope.value = nextScope
+  runQuery(1)
 }
 
 function submitQuery() {
@@ -259,6 +274,11 @@ async function handleCreated(payload = {}) {
           <span>查询会员</span>
           <input v-model="keyword" type="search" autocomplete="off" placeholder="姓名、完整手机号或会员编号" :disabled="isBusy || selectingRecordId !== null" @keydown.enter.prevent="submitQuery">
         </label>
+        <fieldset v-if="showScopeToggle" class="member-selector__scope-toggle" :disabled="isBusy || selectingRecordId !== null">
+          <legend>查询范围</legend>
+          <label><input type="radio" name="member-selector-scope" value="store" :checked="memberScope === 'store'" @change="changeScope('store')">本店</label>
+          <label><input type="radio" name="member-selector-scope" value="all" :checked="memberScope === 'all'" @change="changeScope('all')">全部</label>
+        </fieldset>
         <button type="submit" class="member-selector__button member-selector__button--primary" :disabled="isBusy || selectingRecordId !== null">
           <template v-if="isBusy">查询中…</template>
           <template v-else><span>查询</span><CornerDownLeft :size="15" :stroke-width="2" aria-hidden="true" /></template>
@@ -448,12 +468,47 @@ async function handleCreated(payload = {}) {
 
 .member-selector__search-field {
   display: grid;
-  min-width: 360px;
-  flex: 1;
+  min-width: min(320px, 34vw);
+  flex: 1 1 0;
   gap: 6px;
   color: #475467;
   font-size: 13px;
   font-weight: 600;
+}
+
+.member-selector__scope-toggle {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 36px;
+  margin: 0;
+  padding: 0 2px;
+  border: 0;
+  color: #475467;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.member-selector__scope-toggle legend {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.member-selector__scope-toggle label {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  cursor: pointer;
+}
+
+.member-selector__scope-toggle input {
+  margin: 0;
+  accent-color: #3b63e6;
 }
 
 .member-selector__search-field input {

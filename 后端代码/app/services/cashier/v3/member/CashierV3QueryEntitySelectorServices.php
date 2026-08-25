@@ -18,6 +18,9 @@ final class CashierV3QueryEntitySelectorServices
     private const PERSON_SCOPES = [
         'sales_performance_assignees' => true,
         'service_actual_craftsmen' => false,
+        // 可被收银临时加入手艺人分配的当前门店在职人员；不要求
+        // cashier_craftsman_enabled，结账仍由统一事实链路记录其分配。
+        'cashier_other_craftsmen' => false,
         'reservation_craftsmen' => false,
         'member_exclusive_service_staff' => false,
         // Group attribution selectors deliberately use employee identity, not
@@ -107,6 +110,7 @@ final class CashierV3QueryEntitySelectorServices
         $eligibilityColumn = $requiresEmploymentType
             ? 'ss.cashier_salesperson_enabled'
             : 'ss.cashier_craftsman_enabled';
+        $requiresCraftsmanEligibility = $selectorScope === 'service_actual_craftsmen';
 
         $query = Db::name('system_store_staff')->alias('ss')
             ->join('employee e', 'e.id = ss.employee_id')
@@ -133,8 +137,10 @@ final class CashierV3QueryEntitySelectorServices
             }
             $query->whereIn('ss.store_id', $groupStoreIds);
         } else {
-            $query->where('ss.store_id', $operatorScope->storeId())
-                ->where($eligibilityColumn, 1);
+            $query->where('ss.store_id', $operatorScope->storeId());
+            if ($requiresEmploymentType || $requiresCraftsmanEligibility) {
+                $query->where($eligibilityColumn, 1);
+            }
         }
         if ($requiresEmploymentType) {
             $query->whereIn('e.employment_type_code', ['internal', 'partner', 'outsourced'])
@@ -189,6 +195,7 @@ final class CashierV3QueryEntitySelectorServices
                 'partnerDefaultRatio' => $partnerDefaultRatio,
                 'salespersonEligible' => (int)($row['cashier_salesperson_enabled'] ?? 0) === 1,
                 'craftsmanEligible' => (int)($row['cashier_craftsman_enabled'] ?? 0) === 1,
+                'personnelSource' => $selectorScope === 'cashier_other_craftsmen' ? 'other' : 'store',
                 // The service-performance type is configured on the store
                 // tenure row.  Returning it with the candidate lets the UI
                 // zero the inapplicable fields before submit; the write side

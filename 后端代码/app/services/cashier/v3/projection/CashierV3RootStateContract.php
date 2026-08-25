@@ -153,7 +153,7 @@ class CashierV3RootStateContract
                 'status' => 'editing',
                 'serverTime' => null,
             ],
-            'operator' => $extras['operator'] ?? ['name' => '', 'roleName' => ''],
+            'operator' => $extras['operator'] ?? ['name' => '', 'account' => '', 'roleName' => ''],
             'pendingHangCount' => (int)($extras['pendingHangCount'] ?? 0),
             'cashier' => $extras['cashier'] ?? $emptyObj(),
             'serviceCompletion' => $extras['serviceCompletion'] ?? [

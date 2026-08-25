@@ -339,6 +339,7 @@ try {
     );
     $scopeSelector = c5Projection($dispatcher, 'query-member-selector', [
         'selectorEntry' => 'cashier',
+        'memberScope' => 'all',
         'keyword' => '范围',
         'page' => 1,
         'pageSize' => 20,
@@ -346,10 +347,25 @@ try {
     $selectorIds = array_map('intval', array_column((array)($scopeSelector['records'] ?? []), 'memberId'));
     sort($selectorIds);
     ok(
-        '前台选择器不被员工档案门店 DataScope 裁掉集团会员',
+        '收银选择器明确选择全部后查询集团会员',
         (int)($scopeSelector['total'] ?? -1) === 3 && $selectorIds === [201, 202, 203],
         json_encode(['total' => $scopeSelector['total'] ?? null, 'ids' => $selectorIds]),
         'C5-MEM-03'
+    );
+    $storeSelector = c5Projection($dispatcher, 'query-member-selector', [
+        'selectorContext' => 'cashier',
+        'selectorEntry' => 'cashier',
+        'memberScope' => 'store',
+        'keyword' => '范围',
+        'page' => 1,
+        'pageSize' => 20,
+    ], $projectionSession);
+    $storeSelectorIds = array_map('intval', array_column((array)($storeSelector['records'] ?? []), 'memberId'));
+    ok(
+        '收银选择器默认只查询当前门店并支持全部范围切换',
+        (int)($storeSelector['total'] ?? -1) === 1 && $storeSelectorIds === [201],
+        json_encode(['total' => $storeSelector['total'] ?? null, 'ids' => $storeSelectorIds]),
+        'C9-MEM-01'
     );
 
     c5Section('display store is stable across selector and selected member');

@@ -336,6 +336,7 @@ const EMPTY_BOOTSTRAP = {
   },
   operator: {
     name: '当前账号',
+    account: '',
     roleName: ''
   },
   pendingHangCount: 0,

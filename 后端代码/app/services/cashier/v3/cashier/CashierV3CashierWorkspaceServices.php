@@ -2032,6 +2032,7 @@ final class CashierV3CashierWorkspaceServices
         $requestedProjectCounts = [];
         $hasProjectCount = false;
         $pointFlags = [];
+        $personnelSources = [];
         foreach ($selections as $selection) {
             $staffId = is_array($selection) ? (int)($selection['staffId'] ?? 0) : 0;
             $weight = is_array($selection) ? (int)($selection['laborWeight'] ?? 0) : 0;
@@ -2051,6 +2052,7 @@ final class CashierV3CashierWorkspaceServices
                 );
             }
             $seen[$staffId] = true;
+            $personnelSources[$staffId] = trim((string)($selection['personnelSource'] ?? $selection['personnel_source'] ?? ''));
             $weights[$staffId] = $weight;
             $types[$staffId] = $normalizedType;
             $requestedFees[$staffId] = max(0, (int)($selection['laborFeeCents'] ?? $selection['labor_fee_cents'] ?? 0));
@@ -2080,7 +2082,10 @@ final class CashierV3CashierWorkspaceServices
 
         $lockIds = array_keys($seen);
         sort($lockIds, SORT_NUMERIC);
-        $rows = Db::name('system_store_staff')->alias('ss')
+        $otherStaffIds = array_keys(array_filter($personnelSources, static function (string $source): bool {
+            return $source === 'other';
+        }));
+        $staffQuery = Db::name('system_store_staff')->alias('ss')
             ->join('employee e', 'e.id = ss.employee_id')
             ->whereIn('ss.id', $lockIds)
             ->where('ss.store_id', $operatorScope->storeId())
@@ -2091,9 +2096,23 @@ final class CashierV3CashierWorkspaceServices
             ->where('e.status', 1)
             ->where('e.is_del', 0)
             ->field('ss.id,ss.employee_id,ss.store_id,ss.staff_name,ss.cashier_craftsman_enabled,ss.craftsman_performance_type,e.name as employee_name')
-            ->order('ss.id asc')
-            ->lock(true)
-            ->select();
+            ->order('ss.id asc');
+        if ($otherStaffIds !== []) {
+            // 临时加入的其他手艺人不受资格开关限制；门店、在职和租户
+            // 身份仍由同一条锁定查询保证。
+            $staffQuery = Db::name('system_store_staff')->alias('ss')
+                ->join('employee e', 'e.id = ss.employee_id')
+                ->whereIn('ss.id', $lockIds)
+                ->where('ss.store_id', $operatorScope->storeId())
+                ->where('ss.status', 1)
+                ->where('ss.is_del', 0)
+                ->where('ss.employee_id', '>', 0)
+                ->where('e.status', 1)
+                ->where('e.is_del', 0)
+                ->field('ss.id,ss.employee_id,ss.store_id,ss.staff_name,ss.cashier_craftsman_enabled,ss.craftsman_performance_type,e.name as employee_name')
+                ->order('ss.id asc');
+        }
+        $rows = $staffQuery->lock(true)->select();
         if (is_object($rows) && method_exists($rows, 'toArray')) {
             $rows = $rows->toArray();
         }
@@ -2104,7 +2123,7 @@ final class CashierV3CashierWorkspaceServices
         if (count($byId) !== count($selections)) {
             throw new CashierV3CommandException(
                 CashierV3ResultCode::ENTITLEMENT_LINE_INVALID,
-                '所选手艺人已停用、离职、不属于当前门店或已关闭手艺人资格，请重新选择。',
+                '所选手艺人已停用、离职或不属于当前门店，请重新选择。',
                 CashierV3ResultCode::STATUS_FAILED,
                 ['reason' => 'craftsman_not_active_in_store']
             );
@@ -2126,6 +2145,15 @@ final class CashierV3CashierWorkspaceServices
                     '所选手艺人资料不完整，请重新选择。',
                     CashierV3ResultCode::STATUS_FAILED,
                     ['staff_id' => $staffId, 'reason' => 'craftsman_profile_incomplete']
+                );
+            }
+            if (($personnelSources[$staffId] ?? '') !== 'other'
+                && (int)($row['cashier_craftsman_enabled'] ?? 0) !== 1) {
+                throw new CashierV3CommandException(
+                    CashierV3ResultCode::ENTITLEMENT_LINE_INVALID,
+                    '所选手艺人已关闭手艺人资格，请重新选择。',
+                    CashierV3ResultCode::STATUS_FAILED,
+                    ['staff_id' => $staffId, 'reason' => 'craftsman_not_active_in_store']
                 );
             }
             $type = trim((string)($row['craftsman_performance_type'] ?? ''));

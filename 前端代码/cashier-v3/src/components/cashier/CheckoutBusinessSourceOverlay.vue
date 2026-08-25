@@ -88,7 +88,7 @@ function confirm() {
           </section>
           <p v-if="validationMessage" class="checkout-source-panel__error" role="alert">{{ validationMessage }}</p>
         </template>
-        <footer><button type="button" class="button button--secondary" :disabled="saving" @click="emit('close')">取消</button><button type="button" class="button button--primary" :disabled="saving || Boolean(loadError) || !roots.length" @click="confirm()">{{ saving ? '正在保存' : '确认' }}</button></footer>
+        <footer><button type="button" class="button button--secondary" :disabled="saving" @click="emit('close')">取消</button><button type="button" class="button button--primary" :disabled="saving || Boolean(loadError) || !roots.length || !primaryId" @click="confirm()">{{ saving ? '正在保存' : '确认' }}</button></footer>
       </section>
     </section>
   </Teleport>

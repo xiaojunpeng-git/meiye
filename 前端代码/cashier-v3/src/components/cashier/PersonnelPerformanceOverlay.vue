@@ -11,6 +11,8 @@ const props = defineProps({
   initialMode: { type: String, default: '' },
   requireCraftsmen: { type: Boolean, default: false },
   craftsmenCandidates: { type: Array, default: () => [] },
+  allowOtherCraftsmen: { type: Boolean, default: false },
+  otherCraftsmanCandidates: { type: Array, default: () => [] },
   storeId: { type: [Number, String], default: 0 },
   salespersonCandidates: { type: Array, default: () => [] },
   guideCandidates: { type: Array, default: () => [] },
@@ -56,11 +58,14 @@ const activeTab = ref(
 const keyword = ref('')
 const groupKeyword = ref('')
 const craftsmen = ref([])
+const otherCraftsmanCandidates = ref([])
 const salespeople = ref([])
 const guides = ref([])
 const salesManagers = ref([])
 const guideRoundNo = ref('')
 const attributionSearchOpen = ref(false)
+const otherCraftsmanSearchOpen = ref(false)
+const otherCraftsmanKeyword = ref('')
 const validationMessage = ref('')
 const PERFORMANCE_TYPES = {
   COMMISSION: 'commission',
@@ -260,6 +265,11 @@ watch(
   { immediate: true, deep: true }
 )
 watch(
+  () => props.otherCraftsmanCandidates,
+  (candidates) => { otherCraftsmanCandidates.value = Array.isArray(candidates) ? candidates : [] },
+  { immediate: true, deep: true }
+)
+watch(
   () => [props.guideCandidates, props.selectedGuides],
   ([candidates, selected]) => { guides.value = mergeWithLocalSelections(candidates, selected, guides.value, 'guides') },
   { immediate: true, deep: true }
@@ -303,6 +313,12 @@ function matchesGroupKeyword(item) {
 }
 
 const filteredCraftsmen = computed(() => craftsmen.value.filter(matchesKeyword))
+const filteredOtherCraftsmen = computed(() => otherCraftsmanCandidates.value.filter((item) => {
+  const value = otherCraftsmanKeyword.value.trim().toLowerCase()
+  if (!value) return true
+  return [item.name, item.position, item.level, item.staffNo]
+    .some((field) => String(field || '').toLowerCase().includes(value))
+}))
 const filteredSalespeople = computed(() => salespeople.value.filter(matchesKeyword))
 const filteredGuides = computed(() => guides.value.filter(isAttributionTab.value ? matchesGroupKeyword : matchesKeyword))
 const filteredSalesManagers = computed(() => salesManagers.value.filter(isAttributionTab.value ? matchesGroupKeyword : matchesKeyword))
@@ -413,6 +429,40 @@ function openAttributionSearch() {
   attributionSearchOpen.value = true
 }
 
+function openOtherCraftsmanSearch() {
+  otherCraftsmanKeyword.value = ''
+  validationMessage.value = ''
+  otherCraftsmanSearchOpen.value = true
+}
+
+function searchOtherCraftsmen() {
+  const keywordValue = otherCraftsmanKeyword.value.trim()
+  if (keywordValue.length < 2) {
+    validationMessage.value = '请输入至少 2 个字符后搜索其他手艺人。'
+    return
+  }
+  validationMessage.value = ''
+  emit('search-personnel', {
+    scope: 'cashier_other_craftsmen',
+    keyword: keywordValue,
+    target: 'otherCraftsmen'
+  })
+}
+
+function addOtherCraftsman(item) {
+  const candidate = mergeCandidates([item], [], 'craftsmen')[0]
+  if (!candidate || craftsmen.value.some((record) => record.id === candidate.id)) {
+    otherCraftsmanSearchOpen.value = false
+    return
+  }
+  candidate.selected = true
+  craftsmen.value.push(candidate)
+  equalWeights(craftsmen.value)
+  distributeProjectCounts(craftsmen.value)
+  otherCraftsmanSearchOpen.value = false
+  validationMessage.value = ''
+}
+
 function addGuide(item) {
   if (!guides.value.some((record) => record.selected)) guideRoundNo.value = ''
   const guide = guides.value.find((record) => record.id === item.id)
@@ -496,6 +546,7 @@ function selectedCraftsmenPayload() {
     laborWeight: Number(item.performance),
     craftsmanPerformanceType: craftsmanType(item),
     laborFeeCents: craftsmanType(item) === PERFORMANCE_TYPES.COMMISSION ? 0 : Math.max(0, Number(item.laborFeeYuan || 0) * 100),
+    ...(item.personnelSource === 'other' ? { personnelSource: 'other' } : {}),
     isPrimary: index === 0,
     sequence: index + 1
   }))
@@ -628,6 +679,7 @@ function confirm() {
       laborWeight: Number(item.performance),
       craftsmanPerformanceType: craftsmanType(item),
       laborFeeCents: craftsmanType(item) === PERFORMANCE_TYPES.COMMISSION ? 0 : Math.max(0, Number(item.laborFeeYuan || 0) * 100),
+      ...(item.personnelSource === 'other' ? { personnelSource: 'other' } : {}),
       allocationAmountCents: allocationAmountCentsFor(item),
       projectCountHalfUnits: Math.round(Number(item.projectCountText || 0) * 2),
       projectCount: Number(item.projectCountText || 0).toFixed(1),
@@ -678,7 +730,10 @@ function searchGroupPersonnel(scope) {
 
       <div v-else-if="mode === 'simple'" class="personnel-simple-grid" :class="{ 'is-single': !showCraftsmen || !showSalespeople }">
         <section v-if="showCraftsmen">
-          <div class="personnel-role-heading"><h3>手艺人</h3></div>
+          <div class="personnel-role-heading">
+            <button v-if="allowOtherCraftsmen" type="button" class="button button--secondary personnel-role-heading__action" @click="openOtherCraftsmanSearch">添加其他手艺人</button>
+            <h3>手艺人</h3>
+          </div>
           <button v-for="item in filteredCraftsmen" :key="item.id" type="button" class="personnel-simple-item" :class="{ 'is-selected': item.selected }" @click="selectRecord(item)">
             <span>{{ item.name }}</span>
             <label @click.stop><input :checked="item.marked" type="checkbox" :disabled="!item.selected" @change="setMarked(item, $event.target.checked)">点客</label>
@@ -747,6 +802,24 @@ function searchGroupPersonnel(scope) {
           </div>
           <p v-if="!selectedRecords.length" class="personnel-empty">请先在简易选择中添加人员</p>
         </div>
+      </div>
+
+      <div v-if="otherCraftsmanSearchOpen" class="personnel-attribution-search-overlay" role="dialog" aria-modal="true" aria-label="添加其他手艺人">
+        <section class="personnel-attribution-search-panel">
+          <header><strong>添加其他手艺人</strong><button type="button" aria-label="关闭添加其他手艺人" @click="otherCraftsmanSearchOpen = false">×</button></header>
+          <div class="personnel-attribution-search-toolbar">
+            <input v-model="otherCraftsmanKeyword" type="search" placeholder="输入姓名或工号后搜索" @keyup.enter="searchOtherCraftsmen">
+            <button type="button" class="button button--primary" @click="searchOtherCraftsmen">搜索</button>
+          </div>
+          <p v-if="otherCraftsmanKeyword.trim().length < 2" class="personnel-empty">请输入至少 2 个字符后搜索其他手艺人</p>
+          <div v-else class="personnel-attribution-search-results">
+            <article v-for="item in filteredOtherCraftsmen" :key="`other-craftsman-${item.id}`">
+              <div><strong>{{ item.name }}</strong><small>{{ item.storeName || '当前门店人员' }}</small></div>
+              <div><button type="button" class="button button--primary" :disabled="craftsmen.some((record) => record.id === item.id)" @click="addOtherCraftsman(item)">{{ craftsmen.some((record) => record.id === item.id) ? '已添加' : '添加' }}</button></div>
+            </article>
+            <p v-if="!filteredOtherCraftsmen.length" class="personnel-empty">未找到匹配的在职人员</p>
+          </div>
+        </section>
       </div>
 
       <div v-if="attributionSearchOpen" class="personnel-attribution-search-overlay" role="dialog" aria-modal="true" aria-label="查找导购或销售经理">

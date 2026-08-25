@@ -43,8 +43,9 @@ export function clearStoreV3Token() {
   clearStoreV3SessionToken()
 }
 
-export function changeStoreV3Password(currentPassword, newPassword) {
+export function changeStoreV3Password(account, currentPassword, newPassword) {
   return post('/cashierapi/v3/session/change-password', {
+    account: String(account || '').trim(),
     current_password: String(currentPassword || ''),
     new_password: String(newPassword || '')
   })

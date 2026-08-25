@@ -342,6 +342,46 @@ class EmployeeInternalAccountServices extends BaseServices
         );
     }
 
+    /**
+     * 当前登录员工同时修改统一登录账号和密码。
+     * saveAccount 在事务内锁定账号并执行全局唯一性校验，兼容表由同一事务投影。
+     */
+    public function changeOwnCredentials(
+        int $employeeId,
+        string $currentPassword,
+        string $newAccount,
+        string $newPassword,
+        array $operatorContext = []
+    ): array {
+        $currentPassword = (string)$currentPassword;
+        $newPassword = (string)$newPassword;
+        $account = $this->getByEmployeeId($employeeId);
+        if ($employeeId <= 0 || !$account) {
+            throw new AdminException('当前登录身份无效，请重新登录');
+        }
+        if ($currentPassword === '' || !password_verify($currentPassword, (string)($account['pwd'] ?? ''))) {
+            throw new AdminException('原密码错误');
+        }
+        $this->assertValidAccountFormat($newAccount);
+        $newAccount = trim($newAccount);
+        if (strlen($newPassword) < 4 || strlen($newPassword) > 64) {
+            throw new AdminException('新密码必须为4到64位');
+        }
+        if ($currentPassword === $newPassword) {
+            throw new AdminException('新密码不能与原密码相同');
+        }
+        if ((int)($account['status'] ?? 0) !== 1) {
+            throw new AdminException('当前账号已失效，请重新登录');
+        }
+        return $this->saveAccount(
+            $employeeId,
+            $newAccount,
+            $newPassword,
+            1,
+            $operatorContext
+        );
+    }
+
     public function passwordHash(string $plainPwd): string
     {
         $plainPwd = (string)$plainPwd;
