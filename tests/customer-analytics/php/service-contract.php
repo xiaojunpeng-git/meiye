@@ -16,6 +16,7 @@ $routePath = $root . '/后端代码/route/admin.php';
 $phaseTwoPath = $root . '/后端代码/app/services/report/StoreUnifiedReportPhaseTwoServices.php';
 $phaseFourPath = $root . '/后端代码/app/services/report/StoreUnifiedReportPhaseFourServices.php';
 $frontendApiPath = $root . '/前端代码/cashier-v3/src/services/customerAnalyticsApi.js';
+$frontendViewPath = $root . '/前端代码/cashier-v3/src/views/CustomerAnalyticsView.vue';
 
 $service = (string)file_get_contents($servicePath);
 $controller = (string)file_get_contents($controllerPath);
@@ -23,6 +24,7 @@ $route = (string)file_get_contents($routePath);
 $phaseTwo = (string)file_get_contents($phaseTwoPath);
 $phaseFour = (string)file_get_contents($phaseFourPath);
 $frontendApi = (string)file_get_contents($frontendApiPath);
+$frontendView = (string)file_get_contents($frontendViewPath);
 
 function customerAnalyticsAssert(bool $condition, string $message): void
 {
@@ -122,6 +124,12 @@ customerAnalyticsAssert(
         && str_contains($frontendApi, "客户分析请求超时")
         && str_contains($frontendApi, "{ timeoutMs: CUSTOMER_ANALYTICS_TIMEOUT_MS }"),
     'customer analysis requests have a bounded timeout and actionable failure message'
+);
+customerAnalyticsAssert(
+    str_contains($frontendView, 'function money(cents)')
+        && str_contains($frontendView, "Math.round(Number(cents) / 100)")
+        && !str_contains($frontendView, 'maximumFractionDigits: 2'),
+    'customer analytics money formatter always displays integer yuan while preserving API cents'
 );
 customerAnalyticsAssert(
     str_contains($service, "\$sourceFilter = (int)(\$input['source_id'] ?? 0)")

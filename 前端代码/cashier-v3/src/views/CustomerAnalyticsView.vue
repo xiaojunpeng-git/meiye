@@ -152,7 +152,7 @@ const appearanceConsumptionRows = computed(() => (data.appearance.consumptionIte
 
 function money(cents) {
   if (cents === null || cents === undefined || cents === '') return '-'
-  return `¥${(Number(cents) / 100).toLocaleString('zh-CN', { maximumFractionDigits: 2 })}`
+  return `¥${Math.round(Number(cents) / 100).toLocaleString('zh-CN')}`
 }
 function number(value) { return value === null || value === undefined ? '-' : Number(value).toLocaleString('zh-CN') }
 function pct(value) { return value === null || value === undefined ? '-' : `${Number(value).toFixed(1).replace(/\.0$/, '')}%` }
@@ -305,7 +305,7 @@ function applyCustomerPayload(payload) {
     const amount = cents(field(summary, 'unconsumed_amount', 'amount', 'total_amount'))
     const people = numericOrNull(field(summary, 'unconsumed_people', 'people', 'member_count'))
     const rate = numericOrNull(String(field(summary, 'unconsumed_rate', 'rate') ?? '').replace('%', ''))
-    data.unconsumed.cards = [['未耗金额', amount === null ? '-' : money(amount), '按接口汇总', 'blue'], ['未耗人数', people === null ? '-' : `${number(people)}人`, '按接口汇总', 'green'], ['未耗率', rate === null ? '-' : pct(rate), '按接口汇总', 'amber']]
+    data.unconsumed.cards = [['未耗金额', amount === null ? '-' : money(amount), '按接口汇总（展示四舍五入，接口保留分）', 'blue'], ['未耗人数', people === null ? '-' : `${number(people)}人`, '按接口汇总', 'green'], ['未耗率', rate === null ? '-' : pct(rate), '按接口汇总', 'amber']]
     if (!branchRows.length && !itemRows.length && !storeRows.length && !Object.keys(summary).length) demoState.value = 'empty'
   }
 }
