@@ -78,10 +78,18 @@ final class MobileWarehouseServices
         unset($hierarchy['currentNode']['_storeIds']);
 
         $rankingCode = $this->rankingCode((string)($input['rankingCode'] ?? 'organization'));
+        $currentNode = (array)($hierarchy['currentNode'] ?? []);
+        $currentOrganizationId = (string)($currentNode['entityType'] ?? '') === 'organization'
+            ? (int)($currentNode['entityId'] ?? 0) : 0;
+        $permissionRanking = $this->permissionRankingSpec($merchant, (string)$period['endDate'], $currentOrganizationId);
         $rankingRows = $rankingCode === 'organization'
-            ? $hierarchy['rows']
+            ? $this->dashboardRanking($scopeStoreIds, $input, $permissionRanking['dimension'])
             : $this->factRanking($rankingCode, $scopeStoreIds, $period);
         $rankingCatalog = $this->rankingCatalog();
+        if ($rankingCode === 'organization') {
+            $rankingCatalog[0]['name'] = $permissionRanking['name'];
+            $rankingCatalog[0]['scopeRule'] = $permissionRanking['scopeRule'];
+        }
         $selectedRankingAvailable = true;
         foreach ($rankingCatalog as $rankingDefinition) {
             if ((string)$rankingDefinition['code'] === $rankingCode) {
@@ -114,6 +122,82 @@ final class MobileWarehouseServices
                     : '统一服务事实尚未保存点客标记，员工点客暂不展示旧口径数据。',
             ],
         ];
+    }
+
+    /** @return array{dimension:string,code:string,name:string,scopeRule:string} */
+    public function permissionRankingSpec(array $merchant, string $asOfDate, int $currentOrganizationId = 0): array
+    {
+        if ($currentOrganizationId > 0) {
+            $currentDimension = (string)(Db::name('cashier_v3_report_organization_dimension')
+                ->where('tenant_id', '0')->where('organization_id', (string)$currentOrganizationId)
+                ->where('enabled', 1)->where('valid_from', '<=', $asOfDate)
+                ->where(function ($builder) use ($asOfDate): void {
+                    $builder->whereNull('valid_to')->whereOr('valid_to', '>=', $asOfDate);
+                })->order('valid_from', 'desc')->order('id', 'desc')->value('dimension_code') ?: '');
+            if ($currentDimension === '') {
+                $parentId = (int)(Db::name('organization')->where('id', $currentOrganizationId)
+                    ->where('is_del', 0)->value('pid') ?: 0);
+                if ($parentId > 0) {
+                    $parentDimension = (string)(Db::name('cashier_v3_report_organization_dimension')
+                        ->where('tenant_id', '0')->where('organization_id', (string)$parentId)
+                        ->where('enabled', 1)->where('valid_from', '<=', $asOfDate)
+                        ->where(function ($builder) use ($asOfDate): void {
+                            $builder->whereNull('valid_to')->whereOr('valid_to', '>=', $asOfDate);
+                        })->order('valid_from', 'desc')->order('id', 'desc')->value('dimension_code') ?: '');
+                    if ($parentDimension === 'company') $currentDimension = 'city_manager';
+                    if ($parentDimension === 'city_manager') $currentDimension = 'store';
+                }
+            }
+            if ($currentDimension === 'city_manager') {
+                return ['dimension' => 'store', 'code' => 'store_cash_performance', 'name' => '门店现金业绩排行', 'scopeRule' => 'EMPLOYEE_DATA_SCOPE_NEXT_STORE'];
+            }
+            if ($currentDimension === 'company') {
+                return ['dimension' => 'city_manager', 'code' => 'manager_cash_performance', 'name' => '经理现金业绩排行', 'scopeRule' => 'EMPLOYEE_DATA_SCOPE_NEXT_MANAGER'];
+            }
+        }
+        $scopeRows = Db::name('employee_data_scope')
+            ->where('employee_id', (int)($merchant['employeeId'] ?? 0))
+            ->where('status', 1)->where('is_del', 0)
+            ->field('scope_mode,org_ids')->select()->toArray();
+        $orgIds = [];
+        $hasStoreScope = false;
+        foreach ($scopeRows as $row) {
+            $mode = (string)($row['scope_mode'] ?? 'personal');
+            if ($mode === 'org') {
+                $decoded = json_decode((string)($row['org_ids'] ?? '[]'), true);
+                foreach (is_array($decoded) ? $decoded : [] as $id) {
+                    $id = (int)$id;
+                    if ($id > 0) $orgIds[$id] = $id;
+                }
+            } elseif (in_array($mode, ['store', 'store_self'], true)) {
+                $hasStoreScope = true;
+            }
+        }
+        $dimensionByOrg = [];
+        if ($orgIds !== []) {
+            $query = Db::name('cashier_v3_report_organization_dimension')
+                ->where('tenant_id', '0')->whereIn('organization_id', array_values($orgIds))
+                ->where('enabled', 1)->where('valid_from', '<=', $asOfDate)
+                ->where(function ($builder) use ($asOfDate): void {
+                    $builder->whereNull('valid_to')->whereOr('valid_to', '>=', $asOfDate);
+                })->field('organization_id,dimension_code')->order('valid_from', 'desc')->order('id', 'desc');
+            foreach ($query->select()->toArray() as $row) {
+                $id = (int)($row['organization_id'] ?? 0);
+                if ($id > 0 && !isset($dimensionByOrg[$id])) $dimensionByOrg[$id] = (string)$row['dimension_code'];
+            }
+        }
+        $dimension = 'company';
+        if ($hasStoreScope && $orgIds === []) {
+            $dimension = 'store';
+        } else {
+            foreach ($dimensionByOrg as $code) {
+                if ($code === 'city_manager') { $dimension = 'store'; break; }
+                if ($code === 'company') $dimension = 'city_manager';
+            }
+        }
+        if ($dimension === 'store') return ['dimension' => 'store', 'code' => 'store_cash_performance', 'name' => '门店现金业绩排行', 'scopeRule' => 'EMPLOYEE_DATA_SCOPE_NEXT_STORE'];
+        if ($dimension === 'city_manager') return ['dimension' => 'city_manager', 'code' => 'manager_cash_performance', 'name' => '经理现金业绩排行', 'scopeRule' => 'EMPLOYEE_DATA_SCOPE_NEXT_MANAGER'];
+        return ['dimension' => 'company', 'code' => 'branch_cash_performance', 'name' => '分公司现金业绩排行', 'scopeRule' => 'EMPLOYEE_DATA_SCOPE_NEXT_BRANCH'];
     }
 
     /**
@@ -189,10 +273,13 @@ final class MobileWarehouseServices
                 ->where('is_del', 0)->column('name', 'id');
             $rows = [];
             foreach ($storeIds as $storeId) {
+                $amountCents = (int)($projection['cash_performance'][$storeId] ?? 0);
                 $rows[] = [
                     'entityType' => 'store', 'entityId' => $storeId,
                     'entityName' => (string)($names[$storeId] ?? ('门店#' . $storeId)),
-                    'rankingValue' => intdiv((int)($projection['cash_performance'][$storeId] ?? 0), 100),
+                    'rankingCents' => $amountCents,
+                    'rankingValue' => intdiv($amountCents, 100),
+                    'storeCount' => 1,
                 ];
             }
             usort($rows, [$this, 'compareDashboardRanking']);
@@ -210,11 +297,18 @@ final class MobileWarehouseServices
                     'entityType' => $dimension === 'company' ? 'branch' : 'manager',
                     'entityId' => $id,
                     'entityName' => (string)($row['dimension_name'] ?? ''),
+                    'rankingCents' => 0,
                     'rankingValue' => 0,
+                    'storeCount' => 0,
                 ];
             }
-            $grouped[$id]['rankingValue'] += intdiv((int)($projection['cash_performance'][$storeId] ?? 0), 100);
+            $grouped[$id]['rankingCents'] += (int)($projection['cash_performance'][$storeId] ?? 0);
+            $grouped[$id]['storeCount']++;
         }
+        foreach ($grouped as &$group) {
+            $group['rankingValue'] = intdiv((int)$group['rankingCents'], 100);
+        }
+        unset($group);
         $rows = array_values($grouped);
         usort($rows, [$this, 'compareDashboardRanking']);
         return $this->formatDashboardRanking(array_slice($rows, 0, 5), $dimension === 'company' ? 'branch' : 'manager');
@@ -232,10 +326,17 @@ final class MobileWarehouseServices
     {
         foreach ($rows as &$row) {
             $row['entityType'] = $entityType;
+            $row['name'] = (string)($row['entityName'] ?? '');
             $row['displayValue'] = number_format((int)$row['rankingValue'], 0, '.', ',');
             $row['metricCode'] = 'cash_performance';
             $row['unit'] = 'amount';
             $row['hasChildren'] = false;
+            $row['metrics'] = [[
+                'code' => 'cash_performance',
+                'value' => (int)$row['rankingValue'],
+                'displayValue' => (string)$row['displayValue'],
+                'available' => true,
+            ]];
         }
         unset($row);
         return $rows;
@@ -351,14 +452,66 @@ final class MobileWarehouseServices
                 'sort' => (int)$config['display_order'],
             ];
         }
+        // Prefer the explicit store-to-dimension binding.  It is the
+        // authoritative assignment for reporting and avoids losing a manager
+        // row when an organization path contains legacy or partial links.
+        $directStoreDimensions = [];
+        $storeIds = $this->positiveIds($stores);
+        if ($storeIds !== []) {
+            $bindings = Db::name('organization_store')->whereIn('store_id', $storeIds)
+                ->whereIn('org_id', array_keys($configured))->field('org_id,store_id')->select()->toArray();
+            foreach ($bindings as $binding) {
+                $storeId = (int)($binding['store_id'] ?? 0);
+                $organizationId = (int)($binding['org_id'] ?? 0);
+                if ($storeId > 0 && isset($configured[$organizationId]) && !isset($directStoreDimensions[$storeId])) {
+                    $directStoreDimensions[$storeId] = $organizationId;
+                }
+            }
+        }
+        $organizationIds = [];
+        $pathsByStore = [];
+        foreach ($stores as $storeId) {
+            $storeId = (int)$storeId;
+            $path = $this->storeOrganizationPath($storeId);
+            $pathsByStore[$storeId] = $path;
+            foreach ($path as $organizationId) {
+                $organizationIds[(int)$organizationId] = (int)$organizationId;
+            }
+        }
+        // A few legacy organizations do not have a snapshot row yet. Keep
+        // them in the same configured company tree using their current name.
+        $companyIds = [];
+        foreach (Db::name('cashier_v3_report_organization_dimension')
+            ->where('tenant_id', '0')->where('dimension_code', 'company')->where('enabled', 1)
+            ->where('valid_from', '<=', $date)->where(function ($query) use ($date): void {
+                $query->whereNull('valid_to')->whereOr('valid_to', '>=', $date);
+            })->column('organization_id') as $companyId) {
+            $companyIds[(int)$companyId] = true;
+        }
+        if ($organizationIds !== []) {
+            foreach (Db::name('organization')->whereIn('id', array_values($organizationIds))
+                ->where('is_del', 0)->field('id,pid,name')->select()->toArray() as $organization) {
+                $organizationId = (int)$organization['id'];
+                if ($type === 'city_manager' && !isset($configured[$organizationId])
+                    && isset($companyIds[(int)$organization['pid']])) {
+                    $configured[$organizationId] = [
+                        'name' => trim((string)$organization['name']) ?: ('组织 ' . $organizationId),
+                        'sort' => $organizationId,
+                    ];
+                }
+            }
+        }
         $rows = [];
         foreach ($stores as $storeId) {
-            $path = $this->storeOrganizationPath((int)$storeId);
-            $matchId = 0;
-            foreach (array_reverse($path) as $organizationId) {
-                if (isset($configured[(int)$organizationId])) {
-                    $matchId = (int)$organizationId;
-                    break;
+            $storeId = (int)$storeId;
+            $matchId = (int)($directStoreDimensions[$storeId] ?? 0);
+            if ($matchId <= 0) {
+                $path = $pathsByStore[$storeId] ?? [];
+                foreach (array_reverse($path) as $organizationId) {
+                    if (isset($configured[(int)$organizationId])) {
+                        $matchId = (int)$organizationId;
+                        break;
+                    }
                 }
             }
             if ($matchId <= 0) continue;
