@@ -116,6 +116,166 @@ final class MobileWarehouseServices
         ];
     }
 
+    /**
+     * Shared read-only projection for mobile merchant summary pages.
+     *
+     * The homepage uses the same immutable V3 facts, period parser, trend
+     * builder and metric dictionary as the warehouse page. It does not own a
+     * parallel dashboard SQL model.
+     *
+     * @param int[] $storeIds
+     * @return array<string,mixed>
+     */
+    public function dashboardProjection(array $storeIds, array $input = []): array
+    {
+        $storeIds = $this->positiveIds($storeIds);
+        $period = $this->periodForDashboard($input);
+        $projection = $this->factProjection($storeIds, $period);
+        $summary = $this->summaryMetrics($storeIds, $projection);
+        $trend = $this->trendProjection(
+            $storeIds,
+            $period,
+            $this->trendMetricCode((string)($input['trendMetricCode'] ?? 'cash_performance'))
+        );
+
+        $ranking = [];
+        $storeNames = $storeIds === [] ? [] : Db::name('system_store')
+            ->whereIn('id', $storeIds)->where('is_del', 0)->column('name', 'id');
+        foreach ($storeIds as $storeId) {
+            $amountCents = (int)($projection['cash_performance'][$storeId] ?? 0);
+            $ranking[] = [
+                'entityId' => $storeId,
+                'entityType' => 'store',
+                'entityName' => (string)($storeNames[$storeId] ?? ('门店#' . $storeId)),
+                'rankingValue' => intdiv($amountCents, 100),
+                'displayValue' => number_format(intdiv($amountCents, 100), 0, '.', ','),
+                'metricCode' => 'cash_performance',
+            ];
+        }
+        usort($ranking, static function (array $left, array $right): int {
+            if ((int)$left['rankingValue'] === (int)$right['rankingValue']) {
+                return (int)$left['entityId'] <=> (int)$right['entityId'];
+            }
+            return (int)$right['rankingValue'] <=> (int)$left['rankingValue'];
+        });
+
+        return [
+            'period' => $period,
+            'summaryMetrics' => $summary,
+            'trend' => $trend,
+            'rankingRows' => array_slice($ranking, 0, 5),
+            'metric_version' => self::METRIC_VERSION,
+            'data_as_of' => time(),
+            'aggregation_caught_up' => true,
+        ];
+    }
+
+    /** Normalize homepage period modes while retaining the warehouse contract. */
+    public function periodForDashboard(array $input): array
+    {
+        $mode = trim((string)($input['periodMode'] ?? 'month'));
+        if ($mode === 'year') {
+            $year = trim((string)($input['year'] ?? date('Y')));
+            if (!preg_match('/^\d{4}$/D', $year)) {
+                throw MobileApiException::protocol('INVALID_REQUEST_FIELD', '请选择有效年份。', 'year');
+            }
+            return [
+                'month' => $year . '-01',
+                'label' => $year . '年',
+                'startDate' => $year . '-01-01',
+                'endDate' => $year . '-12-31',
+                'timezone' => 'Asia/Shanghai',
+            ];
+        }
+        return $this->period((string)($input['month'] ?? ''));
+    }
+
+    private function trendProjection(array $storeIds, array $period, string $metricCode): array
+    {
+        $timezone = new DateTimeZone('Asia/Shanghai');
+        $start = new DateTimeImmutable((string)$period['startDate'], $timezone);
+        $end = new DateTimeImmutable((string)$period['endDate'], $timezone);
+        $monthly = $start->format('Y-m-d') === $start->format('Y-01-01') && $end->format('Y-m-d') === $end->format('Y-12-31');
+        $granularity = $monthly ? 'month' : 'day';
+        $currentStart = $monthly ? $start : $start->modify('first day of this month');
+        $currentEnd = $monthly ? $end : $end->modify('last day of this month');
+        $current = $this->trendAmounts($storeIds, $currentStart->format('Y-m-d'), $currentEnd->format('Y-m-d'), $metricCode, $granularity);
+        $today = new DateTimeImmutable('today', $timezone);
+        $points = [];
+        for ($cursor = $currentStart; $cursor <= $currentEnd; $cursor = $cursor->modify($monthly ? '+1 month' : '+1 day')) {
+            $key = $monthly ? $cursor->format('Y-m') : $cursor->format('Y-m-d');
+            $points[] = [
+                'key' => $key,
+                'label' => $monthly ? $cursor->format('n月') : $cursor->format('j'),
+                'current' => $cursor > $today ? null : (int)($current[$key] ?? 0),
+                'yoy' => 0,
+                'mom' => 0,
+            ];
+        }
+        return [
+            'metricCode' => $metricCode,
+            'metricName' => $this->trendMetricName($metricCode),
+            'granularity' => $granularity,
+            'points' => $points,
+            'periods' => ['current' => ['label' => '本期', 'range' => $currentStart->format('Y年n月')]],
+        ];
+    }
+
+    private function trendMetricCode(string $code): string
+    {
+        return in_array($code, ['cash_performance', 'actual_performance', 'consume_amount', 'refund_performance'], true) ? $code : 'cash_performance';
+    }
+
+    private function trendMetricName(string $code): string
+    {
+        return [
+            'cash_performance' => '现金业绩',
+            'actual_performance' => '实际业绩',
+            'consume_amount' => '消耗业绩',
+            'refund_performance' => '退款金额',
+        ][$code] ?? '现金业绩';
+    }
+
+    /** @return array<string,int> */
+    private function trendAmounts(array $storeIds, string $startDate, string $endDate, string $metricCode, string $granularity = 'day'): array
+    {
+        if ($storeIds === []) return [];
+        if ($metricCode === 'cash_performance') {
+            $rows = Db::name('cashier_v3_payment_fact')->where('tenant_id', '0')->whereIn('store_id', $storeIds)->whereBetween('business_date', [$startDate, $endDate])->where('status', 'effective')->fieldRaw('business_date,COALESCE(SUM(amount_cents),0) AS amount_cents')->group('business_date')->select()->toArray();
+        } elseif ($metricCode === 'refund_performance') {
+            $rows = Db::name('cashier_v3_order_lifecycle_operation')->where('tenant_id', '0')->whereIn('store_id', $storeIds)->whereBetween('business_date', [$startDate, $endDate])->where('operation_type', 'refund')->where('status', 'succeeded')->fieldRaw('business_date,COALESCE(SUM(cash_refund_cents),0) AS amount_cents')->group('business_date')->select()->toArray();
+        } elseif ($metricCode === 'actual_performance') {
+            $cash = $this->trendAmounts($storeIds, $startDate, $endDate, 'cash_performance', $granularity);
+            $refund = $this->trendAmounts($storeIds, $startDate, $endDate, 'refund_performance', $granularity);
+            $result = [];
+            foreach (array_unique(array_merge(array_keys($cash), array_keys($refund))) as $date) $result[$date] = (int)($cash[$date] ?? 0) - (int)($refund[$date] ?? 0);
+            return $result;
+        } else {
+            $rows = Db::name('cashier_v3_performance_fact')->where('tenant_id', '0')->whereIn('store_id', $storeIds)->whereBetween('business_date', [$startDate, $endDate])->where('status', 'effective')->where('performance_type', 'consumption_performance_recorded')->fieldRaw('business_date,COALESCE(SUM(amount_cents),0) AS amount_cents')->group('business_date')->select()->toArray();
+        }
+        $result = [];
+        foreach ($rows as $row) {
+            $date = (string)($row['business_date'] ?? '');
+            $key = $granularity === 'month' ? substr($date, 0, 7) : $date;
+            $result[$key] = (int)($result[$key] ?? 0) + intdiv((int)($row['amount_cents'] ?? 0), 100);
+        }
+        return $result;
+    }
+
+    /** @param mixed[] $values @return int[] */
+    private function positiveIds(array $values): array
+    {
+        $ids = [];
+        foreach ($values as $value) {
+            $id = (int)$value;
+            if ($id > 0) {
+                $ids[$id] = $id;
+            }
+        }
+        ksort($ids, SORT_NUMERIC);
+        return array_values($ids);
+    }
+
     private function assertWarehouseFeature(int $employeeId): void
     {
         $row = Db::name('employee_mobile_auth')->where('employee_id', $employeeId)
@@ -211,6 +371,7 @@ final class MobileWarehouseServices
             'cash_performance' => [],
             'actual_performance' => [],
             'consume_amount' => [],
+            'refund_performance' => [],
             'visit_members' => [],
         ];
         if ($storeIds === []) {
@@ -238,6 +399,21 @@ final class MobileWarehouseServices
                 : 'consume_amount';
             $projection[$code][(int)$row['store_id']] = (int)$row['amount_cents'];
         }
+        $refunds = Db::name('cashier_v3_order_lifecycle_operation')
+            ->where('tenant_id', '0')->whereIn('store_id', $storeIds)
+            ->whereBetween('business_date', [$period['startDate'], $period['endDate']])
+            ->where('operation_type', 'refund')->where('status', 'succeeded')
+            ->fieldRaw('store_id,COALESCE(SUM(cash_refund_cents),0) AS amount_cents')
+            ->group('store_id')->select()->toArray();
+        foreach ($refunds as $row) {
+            $projection['refund_performance'][(int)$row['store_id']] = (int)$row['amount_cents'];
+        }
+        foreach ($storeIds as $storeId) {
+            $storeId = (int)$storeId;
+            $projection['actual_performance'][$storeId] =
+                (int)($projection['cash_performance'][$storeId] ?? 0)
+                - (int)($projection['refund_performance'][$storeId] ?? 0);
+        }
         $visits = Db::name('cashier_v3_entitlement_service_fact')
             ->where('tenant_id', '0')->whereIn('store_id', $storeIds)
             ->whereBetween('business_date', [$period['startDate'], $period['endDate']])
@@ -251,7 +427,7 @@ final class MobileWarehouseServices
 
     private function summaryMetrics(array $storeIds, array $projection): array
     {
-        $amounts = ['cash_performance' => 0, 'actual_performance' => 0, 'consume_amount' => 0];
+        $amounts = ['cash_performance' => 0, 'refund_performance' => 0, 'actual_performance' => 0, 'consume_amount' => 0];
         $visitMembers = [];
         foreach ($storeIds as $storeId) {
             foreach (array_keys($amounts) as $code) {
@@ -264,13 +440,13 @@ final class MobileWarehouseServices
         $values = $amounts;
         $values['visit_customer'] = count($visitMembers);
         $items = [];
-        foreach (['cash_performance', 'actual_performance', 'consume_amount', 'visit_customer'] as $code) {
+        foreach (['cash_performance', 'refund_performance', 'actual_performance', 'consume_amount', 'visit_customer'] as $code) {
             $definition = $this->dictionary->getByCode($code);
             $value = (int)$values[$code];
             $isCount = $code === 'visit_customer';
             $items[] = [
                 'code' => $code,
-                'name' => (string)($definition['name'] ?? $code),
+                'name' => (string)($definition['name'] ?? ($code === 'refund_performance' ? '退款金额' : $code)),
                 'value' => $isCount ? $value : intdiv($value, 100),
                 'displayValue' => $isCount
                     ? number_format($value, 0, '.', ',')
