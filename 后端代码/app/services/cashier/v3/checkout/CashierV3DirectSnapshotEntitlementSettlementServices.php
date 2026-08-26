@@ -421,7 +421,8 @@ final class CashierV3DirectSnapshotEntitlementSettlementServices
                 $profile = $this->staffProfiles->lockProfileSnapshotInTx(
                     $staffId,
                     $operatorScope,
-                    $dataScope
+                    $dataScope,
+                    (string)($intent['craftsmanSettingsById'][$staffId]['personnelSource'] ?? 'store')
                 );
                 $expected = $this->lockedVersion($gateway, 'staff_profile', (string)$staffId);
                 if ((int)$profile['staffVersion'] !== $expected) {
@@ -961,6 +962,7 @@ final class CashierV3DirectSnapshotEntitlementSettlementServices
                 $settingsById[$staffId] = [
                     'laborWeight' => $laborWeight,
                     'isPointCustomer' => !empty($craftsman['isPointCustomer']),
+                    'personnelSource' => (string)($craftsman['personnelSource'] ?? 'store'),
                 ];
             }
             if (!$staffIds) {

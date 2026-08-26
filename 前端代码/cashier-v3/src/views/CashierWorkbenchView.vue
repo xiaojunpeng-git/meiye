@@ -663,11 +663,18 @@ function canonicalCheckoutCraftsmen(records = []) {
       record?.employee_id,
       staffId
     )
+    const personnelSource = record?.personnelSource === 'other' ? 'other' : 'store'
+    // Organization craftsmen use a reserved virtual staff key only for the
+    // staff-resource/profile lookup. The immutable checkout snapshot and all
+    // performance facts must carry the real employee identity.
+    const normalizedEmployeeId = personnelSource === 'other' && staffId > 1000000000
+      ? staffId - 1000000000
+      : employeeId
     const performanceType = String(record?.craftsmanPerformanceType || record?.craftsman_performance_type || '')
     const row = {
       id: staffId,
       staffId,
-      employeeId,
+      employeeId: normalizedEmployeeId,
       storeId: Number(record?.storeId || record?.store_id || storeId),
       name: String(record?.name || record?.staffName || record?.employeeName || '').trim(),
       isPrimary: index === 0,
@@ -675,6 +682,7 @@ function canonicalCheckoutCraftsmen(records = []) {
       laborWeight: Math.max(0, Math.trunc(Number(record?.laborWeight ?? record?.performance ?? 0))),
       isPointCustomer: Boolean(record?.isPointCustomer ?? record?.marked)
     }
+    if (personnelSource === 'other') row.personnelSource = 'other'
     row.craftsmanPerformanceType = ['commission', 'labor', 'commission_labor'].includes(performanceType)
       ? performanceType
       : 'commission_labor'
@@ -3558,11 +3566,13 @@ async function confirmPersonnelAssignment(result = {}) {
   try {
     const craftsmen = (result.craftsmen || []).map((record) => ({
       staffId: canonicalCheckoutPositiveId(record.staffId, record.id, record.employeeId, record.employee_id),
+      employeeId: canonicalCheckoutPositiveId(record.employeeId, record.employee_id, record.staffId, record.id),
       laborWeight: Number(record.laborWeight),
       isPointCustomer: Boolean(record.isPointCustomer ?? record.marked),
       craftsmanPerformanceType: record.craftsmanPerformanceType || record.craftsman_performance_type,
       laborFeeCents: Number(record.laborFeeCents ?? record.labor_fee_cents ?? 0),
-      projectCountHalfUnits: Math.max(0, Number(record.projectCountHalfUnits ?? record.project_count_half_units ?? 0))
+      projectCountHalfUnits: Math.max(0, Number(record.projectCountHalfUnits ?? record.project_count_half_units ?? 0)),
+      ...(record.personnelSource === 'other' ? { personnelSource: 'other' } : {})
     }))
     const salespeople = (result.salespeople || []).map((record) => ({
       staffId: canonicalCheckoutPositiveId(record.staffId, record.id, record.employeeId, record.employee_id),
@@ -3634,10 +3644,12 @@ async function applyPersonnelAssignmentToAll(result = {}) {
   const hasPurchaseLines = cartLines.value.some((line) => !isEntitlementLine(line))
   const craftsmen = (result.craftsmen || []).map((record) => ({
     staffId: canonicalCheckoutPositiveId(record.staffId, record.id, record.employeeId, record.employee_id),
+    employeeId: canonicalCheckoutPositiveId(record.employeeId, record.employee_id, record.staffId, record.id),
     laborWeight: Number(record.laborWeight),
     isPointCustomer: Boolean(record.isPointCustomer ?? record.marked),
     craftsmanPerformanceType: record.craftsmanPerformanceType || record.craftsman_performance_type,
-    laborFeeCents: Number(record.laborFeeCents ?? record.labor_fee_cents ?? 0)
+    laborFeeCents: Number(record.laborFeeCents ?? record.labor_fee_cents ?? 0),
+    ...(record.personnelSource === 'other' ? { personnelSource: 'other' } : {})
   }))
   const salespeople = (hasPurchaseLines ? (result.salespeople || []) : []).map((record) => ({
     staffId: canonicalCheckoutPositiveId(record.staffId, record.id, record.employeeId, record.employee_id),

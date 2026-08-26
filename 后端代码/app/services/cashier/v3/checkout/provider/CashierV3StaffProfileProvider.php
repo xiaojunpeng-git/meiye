@@ -5,6 +5,7 @@ namespace app\services\cashier\v3\checkout\provider;
 use app\services\cashier\v3\CashierV3DataScopedVersionProvider;
 use app\services\cashier\v3\CashierV3DataScopeContext;
 use app\services\cashier\v3\CashierV3OperatorScope;
+use app\services\cashier\v3\CashierV3PersonnelIdentity;
 use app\services\cashier\v3\CashierV3ResourceScope;
 use app\services\cashier\v3\CashierV3TransactionGuard;
 use think\facade\Db;
@@ -76,6 +77,12 @@ final class CashierV3StaffProfileProvider implements CashierV3DataScopedVersionP
                 return null;
             }
             $staffId = $this->positiveId($resourceId, 'staff_profile_identity_invalid');
+            if (CashierV3PersonnelIdentity::isOrganizationStaffId($staffId)) {
+                $employee = Db::name('employee')->where('id', CashierV3PersonnelIdentity::employeeIdFromStaffId($staffId))->find();
+                return $employee && $this->activeEmployee($employee)
+                    ? CashierV3ResourceScope::of(CashierV3ResourceScope::TYPE_STORE, (string)$dataScope->forcedStoreId())
+                    : null;
+            }
             $staff = Db::name('system_store_staff')->where('id', $staffId)->find();
             if (!$staff || !$this->activeStaff($staff)) {
                 return null;
@@ -107,7 +114,10 @@ final class CashierV3StaffProfileProvider implements CashierV3DataScopedVersionP
         CashierV3TransactionGuard::assertInTransaction('staffProfileLock');
         $this->assertKind($kind);
         try {
-            $profile = $this->lockProfile($this->positiveId($resourceId, 'staff_profile_identity_invalid'), $dataScope);
+            $staffId = $this->positiveId($resourceId, 'staff_profile_identity_invalid');
+            $profile = CashierV3PersonnelIdentity::isOrganizationStaffId($staffId)
+                ? $this->lockOrganizationProfile($staffId, $dataScope)
+                : $this->lockProfile($staffId, $dataScope);
             if ($scope->type() !== CashierV3ResourceScope::TYPE_STORE
                 || $scope->id() !== (string)$profile['storeId']) {
                 return null;
@@ -149,11 +159,14 @@ final class CashierV3StaffProfileProvider implements CashierV3DataScopedVersionP
     public function lockProfileSnapshotInTx(
         int $staffId,
         CashierV3OperatorScope $operatorScope,
-        CashierV3DataScopeContext $dataScope
+        CashierV3DataScopeContext $dataScope,
+        string $personnelSource = 'store'
     ): array {
         CashierV3TransactionGuard::assertInTransaction('staffProfileSnapshot');
         CashierV3EntitlementProviderDataScope::assertBase($operatorScope, $dataScope);
-        $profile = $this->lockProfile($staffId, $dataScope);
+        $profile = $personnelSource === 'other' && CashierV3PersonnelIdentity::isOrganizationStaffId($staffId)
+            ? $this->lockOrganizationProfile($staffId, $dataScope)
+            : $this->lockProfile($staffId, $dataScope);
         if ((int)$profile['storeId'] !== $operatorScope->storeId()) {
             throw self::failure('staff_profile_store_mismatch');
         }
@@ -239,6 +252,40 @@ final class CashierV3StaffProfileProvider implements CashierV3DataScopedVersionP
             'employeeTypeCodeSnapshot' => $typeCode,
             'employeeTypeAuthorityVersion' => $typeVersion,
             'profileFingerprint' => $fingerprint,
+        ];
+    }
+
+    private function lockOrganizationProfile(int $staffId, CashierV3DataScopeContext $dataScope): array
+    {
+        $employeeId = CashierV3PersonnelIdentity::employeeIdFromStaffId($staffId);
+        if ($employeeId <= 0 || empty($this->readinessStatus()['ready'])) {
+            throw self::failure('organization_staff_profile_not_ready');
+        }
+        $employee = Db::name('employee')->where('id', $employeeId)->lock(true)->find();
+        if (!$employee || !$this->activeEmployee($employee)) {
+            throw self::failure('organization_staff_employee_inactive');
+        }
+        $typeCode = (string)($employee['employment_type_code'] ?? 'internal');
+        $typeVersion = (int)($employee['employment_type_version'] ?? 1);
+        if (!in_array($typeCode, CashierV3EntitlementProviderContracts::staffTypes(), true) || $typeVersion <= 0) {
+            throw self::failure('organization_staff_type_unclassified');
+        }
+        $storeId = $dataScope->forcedStoreId();
+        $staffName = trim((string)($employee['name'] ?? ''));
+        if ($staffName === '' || mb_strlen($staffName) > 128) throw self::failure('organization_staff_profile_name_invalid');
+        $fingerprint = hash('sha256', json_encode([
+            'staffId' => $staffId, 'employeeId' => $employeeId, 'storeId' => $storeId,
+            'staffName' => $staffName, 'employeeStatus' => (int)$employee['status'],
+            'employeeIsDel' => (int)$employee['is_del'], 'personnelSource' => 'other',
+            'employeeTypeCode' => $typeCode, 'employeeTypeAuthorityVersion' => $typeVersion,
+        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+        $version = $this->synchronizeVersion($dataScope->tenantId(), $staffId, $employeeId, $storeId, $fingerprint);
+        return [
+            'contractVersion' => $this->contractVersion(), 'staffId' => $staffId,
+            'employeeId' => $employeeId, 'staffVersion' => $version, 'staffName' => $staffName,
+            'storeId' => $storeId, 'active' => true, 'craftsmanEligible' => true,
+            'employeeTypeCodeSnapshot' => $typeCode, 'employeeTypeAuthorityVersion' => $typeVersion,
+            'profileFingerprint' => $fingerprint, 'personnelSource' => 'other',
         ];
     }
 

@@ -2,6 +2,8 @@
 
 namespace app\services\cashier\v3\settlement;
 
+use app\services\cashier\v3\CashierV3PersonnelIdentity;
+
 /**
  * Canonical immutable craftsmen snapshot shared by checkout and sales orders.
  *
@@ -13,7 +15,7 @@ final class CashierV3CheckoutCraftsmenSnapshot
 {
     private const MAX_CRAFTSMEN = 20;
 
-    /** @return array<int,array{id:int,staffId:int,employeeId:int,storeId:int,name:string,isPrimary:bool,sequence:int,laborWeight:int,isPointCustomer:bool}> */
+    /** @return array<int,array{id:int,staffId:int,employeeId:int,storeId:int,name:string,isPrimary:bool,sequence:int,laborWeight:int,isPointCustomer:bool,personnelSource?:string}> */
     public static function normalize($rows): array
     {
         if (!is_array($rows) || !self::isList($rows) || count($rows) > self::MAX_CRAFTSMEN) {
@@ -33,15 +35,28 @@ final class CashierV3CheckoutCraftsmenSnapshot
             $hasPerformanceFields = array_key_exists('craftsmanPerformanceType', $row)
                 || array_key_exists('laborFeeCents', $row);
             $hasProjectCount = array_key_exists('projectCountHalfUnits', $row);
+            $hasPersonnelSource = array_key_exists('personnelSource', $row);
             self::assertExactKeys($row, $hasPerformanceFields
-                ? array_merge($baseKeys, ['craftsmanPerformanceType', 'laborFeeCents'], $hasProjectCount ? ['projectCountHalfUnits'] : [])
-                : array_merge($baseKeys, $hasProjectCount ? ['projectCountHalfUnits'] : []));
+                ? array_merge($baseKeys, ['craftsmanPerformanceType', 'laborFeeCents'], $hasProjectCount ? ['projectCountHalfUnits'] : [], $hasPersonnelSource ? ['personnelSource'] : [])
+                : array_merge($baseKeys, $hasProjectCount ? ['projectCountHalfUnits'] : [], $hasPersonnelSource ? ['personnelSource'] : []));
             $staffId = self::positiveInt($row['staffId']);
             if (self::positiveInt($row['id']) !== $staffId || isset($staffIds[$staffId])) {
                 throw new \InvalidArgumentException('craftsmen_snapshot_staff_invalid');
             }
             $staffIds[$staffId] = true;
             $employeeId = self::positiveInt($row['employeeId']);
+            $source = array_key_exists('personnelSource', $row)
+                ? (string)$row['personnelSource']
+                : (CashierV3PersonnelIdentity::isOrganizationStaffId($staffId) ? 'other' : 'store');
+            if (!in_array($source, ['store', 'other'], true)) {
+                throw new \InvalidArgumentException('craftsmen_snapshot_personnel_source_invalid');
+            }
+            // Virtual organization staff IDs are resource keys, never employee
+            // identities. Normalize them before persisting the immutable order
+            // snapshot so reports and facts aggregate by the real employee.
+            if ($source === 'other' && CashierV3PersonnelIdentity::isOrganizationStaffId($staffId)) {
+                $employeeId = CashierV3PersonnelIdentity::employeeIdFromStaffId($staffId);
+            }
             $storeId = self::positiveInt($row['storeId']);
             $name = trim((string)$row['name']);
             if ($name === '' || self::textLength($name) > 128) {
@@ -89,6 +104,9 @@ final class CashierV3CheckoutCraftsmenSnapshot
                     $row['projectCountHalfUnits'],
                     'craftsmen_snapshot_project_count_invalid'
                 );
+            }
+            if ($hasPersonnelSource || $source === 'other') {
+                $normalized[count($normalized) - 1]['personnelSource'] = $source;
             }
         }
         $commissionWeight = 0;

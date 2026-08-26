@@ -1153,12 +1153,17 @@ final class CashierV3CheckoutSettlementKernel
                 throw self::failure('entitlement_craftsman_selection_performance_invalid', ['path' => $path, 'staffId' => $staffId]);
             }
             $laborFeeCents = self::nonNegativeInt($row['laborFeeCents'] ?? 0, $path . '.laborFeeCents');
+            $personnelSource = (string)($row['personnelSource'] ?? 'store');
+            if (!in_array($personnelSource, ['store', 'other'], true)) {
+                throw self::failure('entitlement_craftsman_personnel_source_invalid', ['path' => $path, 'staffId' => $staffId]);
+            }
             $result[] = [
                 'staffId' => $staffId,
                 'laborWeight' => $weight,
                 'isPointCustomer' => !empty($row['isPointCustomer']),
                 'craftsmanPerformanceType' => $performanceType,
                 'laborFeeCents' => $laborFeeCents,
+                'personnelSource' => $personnelSource,
             ];
         }
         return $result;

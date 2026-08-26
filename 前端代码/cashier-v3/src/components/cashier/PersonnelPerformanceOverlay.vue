@@ -673,6 +673,7 @@ function confirm() {
     craftsmen: selectedCraftsmen.map((item, index) => ({
       id: item.id,
       staffId: item.id,
+      employeeId: Number(item.employeeId || item.employee_id || 0),
       name: item.name,
       marked: Boolean(item.marked),
       isPointCustomer: Boolean(item.marked),

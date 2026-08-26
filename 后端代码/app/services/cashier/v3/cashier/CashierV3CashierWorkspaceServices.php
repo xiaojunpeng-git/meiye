@@ -6,6 +6,7 @@ use app\services\employee\EmployeeCraftsmanPerformanceTypeServices;
 
 use app\services\cashier\v3\CashierV3CommandException;
 use app\services\cashier\v3\CashierV3OperatorScope;
+use app\services\cashier\v3\CashierV3PersonnelIdentity;
 use app\services\cashier\v3\CashierV3CheckoutWorkspaceIdentity;
 use app\services\cashier\v3\CashierV3ResultCode;
 use app\services\cashier\v3\CashierV3ScopeResolver;
@@ -2097,24 +2098,54 @@ final class CashierV3CashierWorkspaceServices
             ->where('e.is_del', 0)
             ->field('ss.id,ss.employee_id,ss.store_id,ss.staff_name,ss.cashier_craftsman_enabled,ss.craftsman_performance_type,e.name as employee_name')
             ->order('ss.id asc');
-        if ($otherStaffIds !== []) {
-            // 临时加入的其他手艺人不受资格开关限制；门店、在职和租户
-            // 身份仍由同一条锁定查询保证。
-            $staffQuery = Db::name('system_store_staff')->alias('ss')
-                ->join('employee e', 'e.id = ss.employee_id')
-                ->whereIn('ss.id', $lockIds)
-                ->where('ss.store_id', $operatorScope->storeId())
-                ->where('ss.status', 1)
-                ->where('ss.is_del', 0)
-                ->where('ss.employee_id', '>', 0)
-                ->where('e.status', 1)
-                ->where('e.is_del', 0)
-                ->field('ss.id,ss.employee_id,ss.store_id,ss.staff_name,ss.cashier_craftsman_enabled,ss.craftsman_performance_type,e.name as employee_name')
-                ->order('ss.id asc');
-        }
         $rows = $staffQuery->lock(true)->select();
-        if (is_object($rows) && method_exists($rows, 'toArray')) {
-            $rows = $rows->toArray();
+        if (is_object($rows) && method_exists($rows, 'toArray')) $rows = $rows->toArray();
+        if ($otherStaffIds !== []) {
+            $otherEmployeeIds = [];
+            foreach ($otherStaffIds as $virtualStaffId) {
+                $employeeId = CashierV3PersonnelIdentity::employeeIdFromStaffId((int)$virtualStaffId);
+                if ($employeeId <= 0) {
+                    throw new CashierV3CommandException(CashierV3ResultCode::ENTITLEMENT_LINE_INVALID, '所选组织手艺人身份无效，请重新选择。', CashierV3ResultCode::STATUS_FAILED, ['reason' => 'organization_craftsman_identity_invalid']);
+                }
+                $otherEmployeeIds[] = $employeeId;
+            }
+            $organizationId = (int)$operatorScope->organizationId();
+            $organizationScope = app()->make(\app\services\organization\OrganizationScopeService::class);
+            $organizationIds = $organizationId > 0 ? $organizationScope->getOrgIds($organizationId, true) : [];
+            // 与人员查询保持同一后端权限口径：门店账号锚定在“直属”等分支时，
+            // 允许选择同一集团根组织下的在职人员，但不接受客户端指定组织扩大范围。
+            $rootOrganizationId = $organizationId;
+            for ($i = 0; $i < 64 && $rootOrganizationId > 0; $i++) {
+                $parentId = (int)Db::name('organization')->where('id', $rootOrganizationId)->value('pid');
+                if ($parentId <= 0 || $parentId === $rootOrganizationId) break;
+                $rootOrganizationId = $parentId;
+            }
+            if ($rootOrganizationId > 0 && $rootOrganizationId !== $organizationId) {
+                $organizationIds = $organizationScope->getOrgIds($rootOrganizationId, true);
+            }
+            $organizationRows = $organizationIds === [] ? [] : Db::name('organization_employee')->alias('oe')
+                ->join('employee e', 'e.id = oe.employee_id')
+                ->whereIn('oe.employee_id', array_values(array_unique($otherEmployeeIds)))
+                ->whereIn('oe.org_id', $organizationIds)
+                ->where('oe.status', 1)->where('oe.is_del', 0)
+                ->where('e.status', 1)->where('e.is_del', 0)
+                ->field('oe.employee_id,e.name as employee_name')
+                ->group('oe.employee_id,e.name')
+                ->lock(true)->select()->toArray();
+            foreach ($organizationRows as $row) {
+                $employeeId = (int)($row['employee_id'] ?? 0);
+                $virtualStaffId = CashierV3PersonnelIdentity::organizationStaffId($employeeId);
+                $rows[] = [
+                    'id' => $virtualStaffId,
+                    'employee_id' => $employeeId,
+                    'store_id' => $operatorScope->storeId(),
+                    'staff_name' => (string)($row['employee_name'] ?? ''),
+                    'cashier_craftsman_enabled' => 1,
+                    'craftsman_performance_type' => EmployeeCraftsmanPerformanceTypeServices::COMMISSION_LABOR,
+                    'employee_name' => (string)($row['employee_name'] ?? ''),
+                    'personnel_source' => 'other',
+                ];
+            }
         }
         $byId = [];
         foreach ((array)$rows as $row) {
@@ -2173,10 +2204,25 @@ final class CashierV3CashierWorkspaceServices
             $laborFeeCents = $type === EmployeeCraftsmanPerformanceTypeServices::COMMISSION
                 ? 0
                 : ($requestedFees[$staffId] > 0 ? $requestedFees[$staffId] : $defaultLaborFeeCents);
+            $personnelSource = ($personnelSources[$staffId] ?? '') === 'other' ? 'other' : 'store';
+            // The virtual staff id is only the internal staff-resource key used to
+            // avoid collisions with system_store_staff.id. Facts and snapshots
+            // must always retain the real employee identity (for example 李倩=490).
+            $employeeId = $personnelSource === 'other'
+                ? CashierV3PersonnelIdentity::employeeIdFromStaffId($staffId)
+                : (int)$row['employee_id'];
+            if ($employeeId <= 0) {
+                throw new CashierV3CommandException(
+                    CashierV3ResultCode::ENTITLEMENT_LINE_INVALID,
+                    '所选手艺人身份无效，请重新选择。',
+                    CashierV3ResultCode::STATUS_FAILED,
+                    ['staff_id' => $staffId, 'reason' => 'craftsman_employee_identity_invalid']
+                );
+            }
             $craftsman = [
                 'id' => $staffId,
                 'staffId' => $staffId,
-                'employeeId' => (int)$row['employee_id'],
+                'employeeId' => $employeeId,
                 'storeId' => (int)$row['store_id'],
                 'name' => $name,
                 'isPrimary' => $index === 0,
@@ -2185,6 +2231,7 @@ final class CashierV3CashierWorkspaceServices
                 'craftsmanPerformanceType' => $type,
                 'laborFeeCents' => $laborFeeCents,
                 'isPointCustomer' => $pointFlags[$staffId],
+                'personnelSource' => $personnelSource,
             ];
             if ($hasProjectCount) {
                 $craftsman['projectCountHalfUnits'] = (int)($requestedProjectCounts[$staffId] ?? 0);

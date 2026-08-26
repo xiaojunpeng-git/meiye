@@ -5,6 +5,7 @@ namespace app\services\cashier\v3\member;
 use app\services\cashier\v3\CashierV3CommandException;
 use app\services\cashier\v3\CashierV3DataScopeContext;
 use app\services\cashier\v3\CashierV3OperatorScope;
+use app\services\cashier\v3\CashierV3PersonnelIdentity;
 use app\services\cashier\v3\CashierV3ResultCode;
 use app\services\organization\OrganizationScopeService;
 use think\facade\Db;
@@ -71,6 +72,9 @@ final class CashierV3QueryEntitySelectorServices
         }
         if ($selectorScope === 'group_attributions') {
             return $this->queryGroupAttributions($keyword, $page, $pageSize, $operatorScope);
+        }
+        if ($selectorScope === 'cashier_other_craftsmen') {
+            return $this->queryOrganizationCraftsmen($keyword, $page, $pageSize, $operatorScope);
         }
         $requiresEmploymentType = self::PERSON_SCOPES[$selectorScope];
         $projectId = (int)($selectorContext['projectId'] ?? $selectorContext['project_id'] ?? 0);
@@ -324,6 +328,85 @@ final class CashierV3QueryEntitySelectorServices
                 'selectable' => true,
                 'groupScoped' => true,
                 'attributionRole' => 'guide_and_sales_manager',
+            ];
+        }
+        return ['records' => $records, 'total' => $total, 'page' => $page, 'pageSize' => $pageSize, 'isLoading' => false, 'requiresKeyword' => false];
+    }
+
+    private function queryOrganizationCraftsmen(string $keyword, int $page, int $pageSize, CashierV3OperatorScope $operatorScope): array
+    {
+        $organizationId = (int)$operatorScope->organizationId();
+        if ($organizationId <= 0) {
+            return ['records' => [], 'total' => 0, 'page' => $page, 'pageSize' => $pageSize, 'isLoading' => false, 'requiresKeyword' => false];
+        }
+        /** @var OrganizationScopeService $organizationScope */
+        $organizationScope = app()->make(OrganizationScopeService::class);
+        $organizationIds = $organizationScope->getOrgIds($organizationId, true);
+        // 门店账号的组织锚点通常是“直属”等门店分支；其他手艺人属于同一集团的
+        // 其他组织时，也必须在集团根组织的后端数据权限范围内可检索，不能只看当前
+        // 门店分支。集团根由当前组织向上解析，绝不接受客户端传入组织参数。
+        $rootOrganizationId = $organizationId;
+        for ($i = 0; $i < 64 && $rootOrganizationId > 0; $i++) {
+            $parentId = (int)Db::name('organization')->where('id', $rootOrganizationId)->value('pid');
+            if ($parentId <= 0 || $parentId === $rootOrganizationId) break;
+            $rootOrganizationId = $parentId;
+        }
+        if ($rootOrganizationId > 0 && $rootOrganizationId !== $organizationId) {
+            $organizationIds = $organizationScope->getOrgIds($rootOrganizationId, true);
+        }
+        if ($organizationIds === []) {
+            return ['records' => [], 'total' => 0, 'page' => $page, 'pageSize' => $pageSize, 'isLoading' => false, 'requiresKeyword' => false];
+        }
+        $query = Db::name('organization_employee')->alias('oe')
+            ->join('employee e', 'e.id = oe.employee_id')
+            ->leftJoin('organization o', 'o.id = oe.org_id')
+            ->whereIn('oe.org_id', $organizationIds)
+            ->where('oe.status', 1)
+            ->where('oe.is_del', 0)
+            ->where('e.status', 1)
+            ->where('e.is_del', 0)
+            ->where('e.id', '>', 0);
+        if ($keyword !== '') {
+            $like = '%' . addcslashes($keyword, '%_') . '%';
+            $query->where(function ($subQuery) use ($like) {
+                $subQuery->whereLike('e.name', $like)
+                    ->whereLike('oe.job_title', $like, 'OR')
+                    ->whereLike('o.name', $like, 'OR');
+            });
+        }
+        $total = (int)(clone $query)->count('DISTINCT e.id');
+        $rows = $query
+            ->field('e.id as employee_id,e.name as employee_name,MAX(o.name) as organization_name')
+            ->group('e.id,e.name')
+            ->order('e.id asc')
+            ->page($page, $pageSize)
+            ->select()
+            ->toArray();
+        $records = [];
+        foreach ($rows as $row) {
+            $employeeId = (int)($row['employee_id'] ?? 0);
+            $name = trim((string)($row['employee_name'] ?? ''));
+            if ($employeeId <= 0 || $name === '') continue;
+            $records[] = [
+                'id' => CashierV3PersonnelIdentity::organizationStaffId($employeeId),
+                'staffId' => CashierV3PersonnelIdentity::organizationStaffId($employeeId),
+                'employeeId' => $employeeId,
+                'storeId' => $operatorScope->storeId(),
+                'name' => $name,
+                'staffName' => $name,
+                'staffNo' => '',
+                'storeName' => '组织：' . trim((string)($row['organization_name'] ?? '')),
+                'employeeTypeCode' => 'internal',
+                'employeeTypeAuthorityVersion' => 1,
+                'partnerDefaultRatio' => 0,
+                'salespersonEligible' => false,
+                'craftsmanEligible' => true,
+                'personnelSource' => 'other',
+                'craftsmanPerformanceType' => 'commission_labor',
+                'laborDefaultFeeCents' => 0,
+                'selectable' => true,
+                'groupScoped' => true,
+                'attributionRole' => '',
             ];
         }
         return ['records' => $records, 'total' => $total, 'page' => $page, 'pageSize' => $pageSize, 'isLoading' => false, 'requiresKeyword' => false];
