@@ -37,6 +37,9 @@ Route::group('api/mobile/merchant', function () {
         Route::get('bootstrap', 'MerchantSession/bootstrap')->option(['real_name' => '手机商家端根状态']);
         Route::post('context/switch', 'MerchantSession/switchContext')->option(['real_name' => '手机商家端切换上下文']);
         Route::post('logout', 'MerchantSession/logout')->option(['real_name' => '手机商家端退出']);
+		Route::get('profile/account', 'Profile/account')->option(['real_name' => '手机商家端账号资料']);
+		Route::get('profile/scope', 'Profile/scope')->option(['real_name' => '手机商家端组织权限范围']);
+		Route::post('profile/credentials', 'Profile/credentials')->option(['real_name' => '手机商家端修改账号密码']);
 		Route::get('personal-monthly-target/current', 'PersonalMonthlyTarget/current')->option(['real_name' => '手机端本月个人目标']);
 		Route::post('personal-monthly-target', 'PersonalMonthlyTarget/save')->option(['real_name' => '手机端保存个人目标']);
         Route::post('customers/query', 'Customer/query')->option(['real_name' => '手机商家端客户列表']);
