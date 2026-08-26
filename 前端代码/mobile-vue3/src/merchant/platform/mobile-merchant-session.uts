@@ -1,4 +1,4 @@
-import { currentMobilePlatform } from './mobile-platform.uts'
+import { currentMobilePlatform } from '../../shared/platform/mobile-platform.uts'
 
 const ROOT_STORAGE_KEY = 'mobile.merchant.root'
 

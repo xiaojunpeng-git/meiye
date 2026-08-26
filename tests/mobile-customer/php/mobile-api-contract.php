@@ -33,7 +33,7 @@ $controller = $read('后端代码/app/controller/mobile/merchant/Customer.php');
 $command = $read('后端代码/app/services/mobile/customer/MobileCustomerUnifiedQueryCommandServices.php');
 $routes = $read('后端代码/route/api-mobile.php');
 $exceptionHandle = $read('后端代码/app/ExceptionHandle.php');
-$contract = json_decode($read('前端代码/mobile-vue3/src/shared/contracts/mobile-customer-v1.contract.json'), true);
+$contract = json_decode($read('前端代码/mobile-vue3/src/merchant/contracts/mobile-customer-v1.contract.json'), true);
 
 $assert('MC-API-01',
 	str_contains($resolver, "public const CONTRACT_VERSION = 'mobile-merchant-v1'")

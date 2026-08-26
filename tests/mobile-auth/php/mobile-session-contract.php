@@ -28,7 +28,7 @@ $response = $read('后端代码/app/services/mobile/protocol/MobileApiResponse.p
 $metadata = $read('后端代码/app/services/mobile/protocol/MobileRequestMetadata.php');
 $cors = $read('后端代码/config/cookie.php');
 $authContract = json_decode($read('前端代码/mobile-vue3/src/shared/contracts/mobile-auth-v1.contract.json'), true);
-$merchantContract = json_decode($read('前端代码/mobile-vue3/src/shared/contracts/mobile-merchant-v1.contract.json'), true);
+$merchantContract = json_decode($read('前端代码/mobile-vue3/src/merchant/contracts/mobile-merchant-v1.contract.json'), true);
 
 $assert('MA-SESSION-01',
     str_contains($routes, "captcha/challenges") && str_contains($routes, "sms/challenges")

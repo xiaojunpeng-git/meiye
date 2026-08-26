@@ -27,7 +27,7 @@ function rootWith(root, overrides) {
 
 test('root policy freezes server-first cleanup and success reason codes', () => {
 	const policy = sourceJson('shared/state/merchant-root-policy-v1.json')
-	const contract = sourceJson('shared/contracts/mobile-merchant-v1.contract.json')
+	const contract = sourceJson('merchant/contracts/mobile-merchant-v1.contract.json')
 
 	assert.equal(policy.serverBeforeClient, true)
 	assert.deepEqual(policy.successRootReasonCodes, contract.merchantRoot.reasonCodeEnum)
@@ -96,7 +96,7 @@ test('compiled production UTS owns merchant root install decisions', () => {
 
 test('compiled production UTS rejects stale roots and unauthorised projections', () => {
 	const policy = sourceJson('shared/state/merchant-root-policy-v1.json')
-	const contract = sourceJson('shared/contracts/mobile-merchant-v1.contract.json')
+	const contract = sourceJson('merchant/contracts/mobile-merchant-v1.contract.json')
 	const root = fixtureJson('merchant/bootstrap-success.json')
 	const current = rootWith(root, { stateRevision: '5' })
 
@@ -116,7 +116,7 @@ test('compiled production UTS rejects stale roots and unauthorised projections',
 
 test('compiled production UTS permits only explicit context root replacement', () => {
 	const policy = sourceJson('shared/state/merchant-root-policy-v1.json')
-	const contract = sourceJson('shared/contracts/mobile-merchant-v1.contract.json')
+	const contract = sourceJson('merchant/contracts/mobile-merchant-v1.contract.json')
 	const current = fixtureJson('merchant/bootstrap-success.json')
 	const switched = fixtureJson('merchant/context-switch-after.json')
 

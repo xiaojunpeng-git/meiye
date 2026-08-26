@@ -55,10 +55,10 @@
 </template>
 
 <script setup lang="uts">
-	import { queryMobileCustomerCare } from '../../../shared/api/mobile-customer-care-client.uts'
-	import { queryMobileReservations } from '../../../shared/api/mobile-reservation-client.uts'
-	import { switchMobileMerchantContext } from '../../../shared/api/mobile-merchant-session-client.uts'
-	import { currentMerchantRoot } from '../../../shared/platform/mobile-merchant-session.uts'
+	import { queryMobileCustomerCare } from '../../api/mobile-customer-care-client.uts'
+	import { queryMobileReservations } from '../../api/mobile-reservation-client.uts'
+	import { switchMobileMerchantContext } from '../../api/mobile-merchant-session-client.uts'
+	import { currentMerchantRoot } from '../../platform/mobile-merchant-session.uts'
 	import { showMobileNotice } from '../../../shared/platform/mobile-platform.uts'
 
 	const openTaskCount = ref(0)

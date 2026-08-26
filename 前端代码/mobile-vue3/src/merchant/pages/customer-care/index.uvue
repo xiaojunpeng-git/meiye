@@ -45,7 +45,7 @@
 </template>
 
 <script setup lang="uts">
-	import { completeMobileCustomerCareTask, createMobileCustomerCareTask, queryMobileCustomerCare } from '../../../shared/api/mobile-customer-care-client.uts'
+	import { completeMobileCustomerCareTask, createMobileCustomerCareTask, queryMobileCustomerCare } from '../../api/mobile-customer-care-client.uts'
 	import { callMobilePhone } from '../../../shared/platform/mobile-platform.uts'
 	const tabs = [
 		{ key: 'tasks', label: '跟进任务' },

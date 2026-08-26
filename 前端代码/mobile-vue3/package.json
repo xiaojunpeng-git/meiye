@@ -7,6 +7,8 @@
 		"node": ">=22.22.0"
 	},
 	"scripts": {
-		"check": "sh ../../tests/mobile-vue3/run-all.sh"
+		"check": "sh ../../tests/mobile-vue3/run-all.sh",
+		"merchant:start": "sh ../../scripts/start-mobile-merchant.sh",
+		"merchant:check": "sh ../../scripts/check-mobile-merchant.sh"
 	}
 }

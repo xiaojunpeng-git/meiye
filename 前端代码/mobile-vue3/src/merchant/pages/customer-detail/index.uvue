@@ -89,11 +89,11 @@
 </template>
 
 <script setup lang="uts">
-	import { queryMobileCustomerAssetRecords, queryMobileCustomerOrderRecords, queryMobileCustomerRecentSummary, queryMobileCustomerServiceRecords, queryMobileCustomers } from '../../../shared/api/mobile-customer-client.uts'
-	import { queryMobileCustomerCare } from '../../../shared/api/mobile-customer-care-client.uts'
+	import { queryMobileCustomerAssetRecords, queryMobileCustomerOrderRecords, queryMobileCustomerRecentSummary, queryMobileCustomerServiceRecords, queryMobileCustomers } from '../../api/mobile-customer-client.uts'
+	import { queryMobileCustomerCare } from '../../api/mobile-customer-care-client.uts'
 	import { callMobilePhone } from '../../../shared/platform/mobile-platform.uts'
-	import { currentMerchantRoot, merchantRequestSession } from '../../../shared/platform/mobile-merchant-session.uts'
-	import { openMerchantBootstrapForCustomerDetail, openMerchantCustomerCare, openMerchantCustomerOrderDetail, openMerchantCustomerProfile, returnFromMerchantCustomerDetail } from '../../../shared/platform/mobile-navigation.uts'
+	import { currentMerchantRoot, merchantRequestSession } from '../../platform/mobile-merchant-session.uts'
+	import { openMerchantBootstrapForCustomerDetail, openMerchantCustomerCare, openMerchantCustomerOrderDetail, openMerchantCustomerProfile, returnFromMerchantCustomerDetail } from '../../platform/mobile-navigation.uts'
 
 	const tabs = [
 		{ key: 'overview', label: '近况' }, { key: 'profile', label: '资料' },

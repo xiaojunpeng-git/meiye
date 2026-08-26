@@ -74,9 +74,9 @@
 </template>
 
 <script setup lang="uts">
-	import { currentMerchantRoot } from '../../../shared/platform/mobile-merchant-session.uts'
-	import { logoutMobileMerchant } from '../../../shared/api/mobile-merchant-session-client.uts'
-	import { openMerchantBootstrap } from '../../../shared/platform/mobile-navigation.uts'
+	import { currentMerchantRoot } from '../../platform/mobile-merchant-session.uts'
+	import { logoutMobileMerchant } from '../../api/mobile-merchant-session-client.uts'
+	import { openMerchantBootstrap } from '../../platform/mobile-navigation.uts'
 	const accountEntries = [
 		{ key: 'account', label: '账号资料', detail: '查看登录账号和基础资料' },
 		{ key: 'security', label: '账号与安全', detail: '登录方式与设备管理' },

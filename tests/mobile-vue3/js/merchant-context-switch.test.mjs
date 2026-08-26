@@ -8,7 +8,7 @@ import { fixtureJson, mobileRoot, testRoot } from './helpers.mjs'
 
 const require = createRequire(import.meta.url)
 const rootCore = require(path.join(testRoot, '.generated', 'root-state-core.cjs'))
-const client = fs.readFileSync(path.join(mobileRoot, 'src/shared/api/mobile-merchant-session-client.uts'), 'utf8')
+const client = fs.readFileSync(path.join(mobileRoot, 'src/merchant/api/mobile-merchant-session-client.uts'), 'utf8')
 const workbench = fs.readFileSync(path.join(mobileRoot, 'src/merchant/pages/workbench/index.uvue'), 'utf8')
 
 test('merchant workbench exposes only authoritative contexts and hides the selector for one store', () => {

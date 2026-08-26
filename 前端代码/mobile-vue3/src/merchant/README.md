@@ -1,4 +1,14 @@
 # Merchant boundary
 
-Merchant pages and merchant-only orchestration belong here. M0-A intentionally
-contains no merchant business page or permission inference.
+这里是手机商家端的唯一业务边界：
+
+- `pages/`：商家端页面和页面交互
+- `api/`：商家端接口客户端与请求契约镜像
+- `contracts/`：商家端接口和数据权限协议
+- `platform/`：商家端会话、导航等业务编排
+
+商家端直接使用服务端员工身份和商家会话，不依赖会员端页面。网络请求、
+本地运行时配置和原生平台适配等纯技术能力才从 `../shared/` 引入。
+
+新增商家业务必须落在本目录，不得再放回 `src/shared/api` 或
+`src/shared/platform`。

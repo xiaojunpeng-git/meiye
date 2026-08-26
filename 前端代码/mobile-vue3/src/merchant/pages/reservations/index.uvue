@@ -16,9 +16,9 @@
 </template>
 
 <script setup lang="uts">
-	import { createMobileReservation, openMobileReservationEditor, queryMobileReservationMembers, queryMobileReservations, recalculateMobileReservation } from '../../../shared/api/mobile-reservation-client.uts'
-	import { openMerchantBootstrap } from '../../../shared/platform/mobile-navigation.uts'
-	import { currentMerchantRoot, merchantRequestSession } from '../../../shared/platform/mobile-merchant-session.uts'
+	import { createMobileReservation, openMobileReservationEditor, queryMobileReservationMembers, queryMobileReservations, recalculateMobileReservation } from '../../api/mobile-reservation-client.uts'
+	import { openMerchantBootstrap } from '../../platform/mobile-navigation.uts'
+	import { currentMerchantRoot, merchantRequestSession } from '../../platform/mobile-merchant-session.uts'
 	const records = ref<Array<any>>([])
 	const loading = ref(false)
 	const message = ref('')

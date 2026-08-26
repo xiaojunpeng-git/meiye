@@ -6,8 +6,8 @@ import test from 'node:test'
 import { mobileRoot } from './helpers.mjs'
 
 const page = fs.readFileSync(path.join(mobileRoot, 'src', 'merchant', 'pages', 'goals', 'index.uvue'), 'utf8')
-const client = fs.readFileSync(path.join(mobileRoot, 'src', 'shared', 'api', 'mobile-personal-target-client.uts'), 'utf8')
-const contract = JSON.parse(fs.readFileSync(path.join(mobileRoot, 'src', 'shared', 'contracts', 'mobile-merchant-v1.contract.json'), 'utf8'))
+const client = fs.readFileSync(path.join(mobileRoot, 'src', 'merchant', 'api', 'mobile-personal-target-client.uts'), 'utf8')
+const contract = JSON.parse(fs.readFileSync(path.join(mobileRoot, 'src', 'merchant', 'contracts', 'mobile-merchant-v1.contract.json'), 'utf8'))
 
 test('personal monthly target keeps the confirmed three fixed metrics', () => {
 	for (const item of ['SALES_PERFORMANCE', 'CONSUMPTION_PERFORMANCE', 'SERVICE_VISITS', '销售业绩', '消耗业绩', '服务客次']) assert.equal(page.includes(item), true, item)

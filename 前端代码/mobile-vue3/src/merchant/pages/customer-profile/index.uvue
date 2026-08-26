@@ -51,8 +51,8 @@
 </template>
 
 <script setup lang="uts">
-	import { createMobileCustomerProfile, queryMobileCustomerProfile, queryMobileCustomerProfileDraft, updateMobileCustomerProfile, uploadMobileCustomerProfileAvatar } from '../../../shared/api/mobile-customer-client.uts'
-	import { replaceMerchantCustomerDetail, returnFromMerchantCustomerProfile } from '../../../shared/platform/mobile-navigation.uts'
+	import { createMobileCustomerProfile, queryMobileCustomerProfile, queryMobileCustomerProfileDraft, updateMobileCustomerProfile, uploadMobileCustomerProfileAvatar } from '../../api/mobile-customer-client.uts'
+	import { replaceMerchantCustomerDetail, returnFromMerchantCustomerProfile } from '../../platform/mobile-navigation.uts'
 	import { chooseMobileImage } from '../../../shared/platform/mobile-platform.uts'
 
 	const loading = ref(false)

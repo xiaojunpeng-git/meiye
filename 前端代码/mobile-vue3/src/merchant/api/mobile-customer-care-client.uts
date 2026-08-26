@@ -1,5 +1,5 @@
-import { buildMobileRequestPlan, mobileRequestPlanMatchesContract } from './request-context.uts'
-import { sendMobileRequest } from './mobile-http.uts'
+import { buildMobileRequestPlan, mobileRequestPlanMatchesContract } from '../../shared/api/request-context.uts'
+import { sendMobileRequest } from '../../shared/api/mobile-http.uts'
 import { currentMerchantRoot, merchantRequestSession } from '../platform/mobile-merchant-session.uts'
 
 // Runtime mirror only. The frozen JSON contract remains the source checked by tests.

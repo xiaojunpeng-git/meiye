@@ -89,12 +89,18 @@ test('platform directives remain isolated and pages never call platform APIs dir
 		if (/\buni\s*\./.test(content)) {
 			assert.equal(
 				relativePath.startsWith(`src${path.sep}shared${path.sep}platform${path.sep}`) ||
-					relativePath.startsWith(`src${path.sep}shared${path.sep}api${path.sep}`),
+					relativePath.startsWith(`src${path.sep}shared${path.sep}api${path.sep}`) ||
+					relativePath.startsWith(`src${path.sep}merchant${path.sep}api${path.sep}`) ||
+					relativePath.startsWith(`src${path.sep}merchant${path.sep}platform${path.sep}`),
 				true
 			)
 		}
 		if (/\buni\s*\.\s*request\b/.test(content)) {
-			assert.equal(relativePath.startsWith(`src${path.sep}shared${path.sep}api${path.sep}`), true)
+			assert.equal(
+				relativePath.startsWith(`src${path.sep}shared${path.sep}api${path.sep}`) ||
+					relativePath.startsWith(`src${path.sep}merchant${path.sep}api${path.sep}`),
+				true
+			)
 		}
 	}
 })

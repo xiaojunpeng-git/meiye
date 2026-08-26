@@ -30,8 +30,8 @@
 </template>
 
 <script setup lang="uts">
-	import { queryMobileCustomerOrderRecordDetail } from '../../../shared/api/mobile-customer-client.uts'
-	import { returnFromMerchantCustomerOrderDetail } from '../../../shared/platform/mobile-navigation.uts'
+	import { queryMobileCustomerOrderRecordDetail } from '../../api/mobile-customer-client.uts'
+	import { returnFromMerchantCustomerOrderDetail } from '../../platform/mobile-navigation.uts'
 
 	const memberId = ref('')
 	const orderId = ref('')

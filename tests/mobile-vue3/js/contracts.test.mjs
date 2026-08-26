@@ -62,7 +62,7 @@ test('public auth endpoints derive their required metadata from the contract', (
 })
 
 test('merchant credential profiles prohibit token aliasing and bind every endpoint', () => {
-	const merchant = sourceJson('shared/contracts/mobile-merchant-v1.contract.json')
+	const merchant = sourceJson('merchant/contracts/mobile-merchant-v1.contract.json')
 	const password = merchant.requestMetadataProfiles.EMPLOYEE_PASSWORD
 	const exchange = merchant.requestMetadataProfiles.APP_SESSION_EXCHANGE
 	const session = merchant.requestMetadataProfiles.MERCHANT_SESSION
@@ -86,7 +86,7 @@ test('merchant credential profiles prohibit token aliasing and bind every endpoi
 })
 
 test('employee password sign-in creates only a new merchant session', () => {
-	const source = fs.readFileSync(path.join(sourceRoot, 'shared/api/mobile-login-client.uts'), 'utf8')
+	const source = fs.readFileSync(path.join(sourceRoot, 'merchant/api/mobile-login-client.uts'), 'utf8')
 	assert.equal(source.includes("'/mobile/merchant/password-login'"), true)
 	assert.equal(source.includes("commonHeaders('mobile-merchant-v1')"), true)
 	assert.equal(source.includes('installationId: deviceId'), true)
@@ -103,9 +103,9 @@ test('merchant session chooses an effective mobile appointment instead of the ne
 })
 
 test('customer UTS transport mirror stays exact with the frozen customer and merchant headers', () => {
-	const merchant = sourceJson('shared/contracts/mobile-merchant-v1.contract.json')
-	const customer = sourceJson('shared/contracts/mobile-customer-v1.contract.json')
-	const source = fs.readFileSync(path.join(sourceRoot, 'shared/api/mobile-customer-client.uts'), 'utf8')
+	const merchant = sourceJson('merchant/contracts/mobile-merchant-v1.contract.json')
+	const customer = sourceJson('merchant/contracts/mobile-customer-v1.contract.json')
+	const source = fs.readFileSync(path.join(sourceRoot, 'merchant/api/mobile-customer-client.uts'), 'utf8')
 	assert.match(source, /contractVersion: 'mobile-merchant-v1'/)
 	for (const endpoint of ['queryExclusiveCustomers', 'queryCustomers', 'queryCustomerServiceRecords', 'queryCustomerRecentSummary', 'queryCustomerOrderRecords', 'queryCustomerOrderRecordDetail', 'queryCustomerAssetRecords', 'customerProfileDraft', 'customerProfileAvatarUpload', 'customerProfileDetail', 'createCustomerProfile', 'updateCustomerProfile', 'createCustomer', 'unifiedQueryCapabilities', 'unifiedQueryCommand', 'listAudiences', 'createAudience', 'queryAudienceMembers']) {
 		const contractEndpoint = customer.endpoints[endpoint]
@@ -123,8 +123,8 @@ test('customer UTS transport mirror stays exact with the frozen customer and mer
 })
 
 test('customer-care UTS transport keeps the only supported merchant actions and headers', () => {
-	const merchant = sourceJson('shared/contracts/mobile-merchant-v1.contract.json')
-	const source = fs.readFileSync(path.join(sourceRoot, 'shared/api/mobile-customer-care-client.uts'), 'utf8')
+	const merchant = sourceJson('merchant/contracts/mobile-merchant-v1.contract.json')
+	const source = fs.readFileSync(path.join(sourceRoot, 'merchant/api/mobile-customer-care-client.uts'), 'utf8')
 	for (const endpoint of [
 		"queryWorkbench: { method: 'POST', path: '/mobile/merchant/customer-care/workbench', requestMetadataProfile: 'MERCHANT_SESSION' }",
 		"createTask: { method: 'POST', path: '/mobile/merchant/customer-care/actions/create-care-task', requestMetadataProfile: 'MERCHANT_SESSION' }",
@@ -139,7 +139,7 @@ test('customer-care UTS transport keeps the only supported merchant actions and 
 })
 
 test('merchant root and data scope remain fail-closed', () => {
-	const merchant = sourceJson('shared/contracts/mobile-merchant-v1.contract.json')
+	const merchant = sourceJson('merchant/contracts/mobile-merchant-v1.contract.json')
 	assert.deepEqual(merchant.merchantRoot.reasonCodeEnum, ['READY', 'BOOTSTRAPPED', 'CONTEXT_SWITCHED'])
 	assert.equal(merchant.dataScope.scopeEntryCountMustBePositiveForMerchantReady, true)
 	assert.deepEqual(merchant.authorizationSemantics.effectiveScopeIntersection, [

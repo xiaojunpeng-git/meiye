@@ -176,10 +176,10 @@
 </template>
 
 <script setup lang="uts">
-	import { createMobileCustomerAudience, listMobileCustomerAudiences, queryMobileCustomerAudienceMembers, queryMobileCustomerAudienceOverview, queryMobileCustomers } from '../../../shared/api/mobile-customer-client.uts'
+	import { createMobileCustomerAudience, listMobileCustomerAudiences, queryMobileCustomerAudienceMembers, queryMobileCustomerAudienceOverview, queryMobileCustomers } from '../../api/mobile-customer-client.uts'
 	import { mobileHttpResultRequiresMerchantLogin } from '../../../shared/api/mobile-http.uts'
-	import { clearMerchantRoot } from '../../../shared/platform/mobile-merchant-session.uts'
-	import { openMerchantBootstrapForCustomers, openMerchantCustomerDetail, openMerchantCustomerProfile } from '../../../shared/platform/mobile-navigation.uts'
+	import { clearMerchantRoot } from '../../platform/mobile-merchant-session.uts'
+	import { openMerchantBootstrapForCustomers, openMerchantCustomerDetail, openMerchantCustomerProfile } from '../../platform/mobile-navigation.uts'
 	const tabs = [
 		{ key: 'exclusive', label: '专属客户' },
 		{ key: 'groups', label: '我的客群' },

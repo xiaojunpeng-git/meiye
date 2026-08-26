@@ -25,8 +25,8 @@
 <script setup lang="uts">
 	import { currentMobilePlatform, declaredPlatformCapabilityCount } from '../../../shared/platform/mobile-platform.uts'
 	import { merchantContextIsComplete, merchantStateIdentifiersAreCleared } from '../../state/root-state.uts'
-	import { currentMobileApiOrigin, enterMerchantWithPassword, updateMobileApiOrigin } from '../../../shared/api/mobile-login-client.uts'
-	import { openMerchantCustomerDetailAfterBootstrap, openMerchantCustomers, openMerchantWorkbench } from '../../../shared/platform/mobile-navigation.uts'
+	import { currentMobileApiOrigin, enterMerchantWithPassword, updateMobileApiOrigin } from '../../../merchant/api/mobile-login-client.uts'
+	import { openMerchantCustomerDetailAfterBootstrap, openMerchantCustomers, openMerchantWorkbench } from '../../../merchant/platform/mobile-navigation.uts'
 
 	const platformCode = ref(currentMobilePlatform())
 	const foundationReady = ref(

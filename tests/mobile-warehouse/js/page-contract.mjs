@@ -6,8 +6,8 @@ import { fileURLToPath } from 'node:url'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
 const page = fs.readFileSync(path.join(root, '前端代码/mobile-vue3/src/merchant/pages/warehouse/index.uvue'), 'utf8')
-const client = fs.readFileSync(path.join(root, '前端代码/mobile-vue3/src/shared/api/mobile-warehouse-client.uts'), 'utf8')
-const contract = JSON.parse(fs.readFileSync(path.join(root, '前端代码/mobile-vue3/src/shared/contracts/mobile-merchant-v1.contract.json'), 'utf8'))
+const client = fs.readFileSync(path.join(root, '前端代码/mobile-vue3/src/merchant/api/mobile-warehouse-client.uts'), 'utf8')
+const contract = JSON.parse(fs.readFileSync(path.join(root, '前端代码/mobile-vue3/src/merchant/contracts/mobile-merchant-v1.contract.json'), 'utf8'))
 const service = fs.readFileSync(path.join(root, '后端代码/app/services/mobile/warehouse/MobileWarehouseServices.php'), 'utf8')
 const routes = fs.readFileSync(path.join(root, '后端代码/route/api-mobile.php'), 'utf8')
 

@@ -19,7 +19,7 @@
 </template>
 
 <script setup lang="uts">
-	import { queryMobilePersonalMonthlyTarget, saveMobilePersonalMonthlyTarget } from '../../../shared/api/mobile-personal-target-client.uts'
+	import { queryMobilePersonalMonthlyTarget, saveMobilePersonalMonthlyTarget } from '../../api/mobile-personal-target-client.uts'
 	import { showMobileNotice } from '../../../shared/platform/mobile-platform.uts'
 	const fixedMetricCatalog = [
 		{ code: 'SALES_PERFORMANCE', label: '销售业绩', unitCode: 'CNY_FEN', displayUnit: '元' },

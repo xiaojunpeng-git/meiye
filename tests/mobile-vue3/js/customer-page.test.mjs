@@ -117,7 +117,7 @@ test('customer detail re-queries the selected member within the current merchant
 	assert.equal(detail.includes('queryMobileCustomers(false'), true)
 	assert.equal(detail.includes('当前数据权限范围内'), true)
 	assert.equal(detail.includes('客户详情'), true)
-	assert.equal(detail.includes("import { currentMerchantRoot, merchantRequestSession } from '../../../shared/platform/mobile-merchant-session.uts'"), true)
+	assert.equal(detail.includes("import { currentMerchantRoot, merchantRequestSession } from '../../platform/mobile-merchant-session.uts'"), true)
 	assert.equal(detail.includes('openMerchantBootstrapForCustomerDetail'), true)
 	assert.equal(detail.includes('if (merchantLoginIsRequired()) { openMerchantBootstrapForCustomerDetail(memberId.value, lookup.value); return }'), true)
 	for (const label of ['近况', '资料', '客情', '服务', '记录']) {
@@ -184,7 +184,7 @@ test('merchant login has a fixed customer-detail return route without accepting 
 		'utf8'
 	)
 	const navigation = fs.readFileSync(
-		path.join(mobileRoot, 'src', 'shared', 'platform', 'mobile-navigation.uts'),
+		path.join(mobileRoot, 'src', 'merchant', 'platform', 'mobile-navigation.uts'),
 		'utf8'
 	)
 	assert.equal(navigation.includes('function openMerchantBootstrapForCustomerDetail(memberId : string, lookup : string)'), true)
@@ -239,7 +239,7 @@ test('each merchant primary page keeps the confirmed five-way navigation', () =>
 
 test('mobile customer contract keeps customer scope server enforced', () => {
 	const contract = JSON.parse(fs.readFileSync(
-		path.join(mobileRoot, 'src', 'shared', 'contracts', 'mobile-customer-v1.contract.json'),
+		path.join(mobileRoot, 'src', 'merchant', 'contracts', 'mobile-customer-v1.contract.json'),
 		'utf8'
 	))
 	assert.equal(contract.contractVersion, 'mobile-customer-v1')

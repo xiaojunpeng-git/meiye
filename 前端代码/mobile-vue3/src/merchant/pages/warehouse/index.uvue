@@ -26,7 +26,7 @@
 </template>
 
 <script setup lang="uts">
-	import { queryMobileWarehouse } from '../../../shared/api/mobile-warehouse-client.uts'
+	import { queryMobileWarehouse } from '../../api/mobile-warehouse-client.uts'
 	const now = new Date()
 	const initialMonth = now.getFullYear().toString() + '-' + twoDigits(now.getMonth() + 1)
 	const loading = ref(false)
