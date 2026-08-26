@@ -91,7 +91,7 @@ final class MobileMerchantDashboardServices
                 'mode' => (string)($merchant['dataScopeMode'] ?? ''),
                 'storeCount' => count($storeIds),
                 'storeIds' => $storeIds,
-                'label' => (string)($merchant['staffName'] ?? '当前授权范围'),
+                'label' => (string)($rankingSpec['scopeLabel'] ?? '当前授权范围'),
             ],
             'period' => $period,
             'blocks' => $blocks,
@@ -107,7 +107,7 @@ final class MobileMerchantDashboardServices
      * company root drills to city managers; a city-manager root drills to
      * stores. Personal/store scopes stay at store level.
      *
-     * @return array{dimension:string,code:string,name:string,source:string,scopeRule:string}
+     * @return array{dimension:string,code:string,name:string,source:string,scopeRule:string,scopeLabel:string}
      */
     private function rankingSpec(array $merchant, string $asOfDate): array
     {
@@ -116,10 +116,12 @@ final class MobileMerchantDashboardServices
             ->where('status', 1)->where('is_del', 0)
             ->field('scope_mode,org_ids')->select()->toArray();
         $orgIds = [];
+        $hasOrganizationScope = false;
         $hasStoreScope = false;
         foreach ($scopeRows as $row) {
             $mode = (string)($row['scope_mode'] ?? 'personal');
             if ($mode === 'org') {
+                $hasOrganizationScope = true;
                 $decoded = json_decode((string)($row['org_ids'] ?? '[]'), true);
                 foreach (is_array($decoded) ? $decoded : [] as $id) {
                     $id = (int)$id;
@@ -151,13 +153,24 @@ final class MobileMerchantDashboardServices
                 if ($code === 'company') $dimension = 'city_manager';
             }
         }
+        $scopeLabel = null;
+        if ($hasOrganizationScope && $orgIds !== []) {
+            $namesById = Db::name('organization')->whereIn('id', array_values($orgIds))
+                ->where('is_del', 0)->column('name', 'id');
+            $names = [];
+            foreach (array_keys($orgIds) as $organizationId) {
+                $name = trim((string)($namesById[$organizationId] ?? ''));
+                if ($name !== '') $names[] = $name;
+            }
+            if ($names !== []) $scopeLabel = implode('、', $names);
+        }
         if ($dimension === 'store') {
-            return ['dimension' => 'store', 'code' => 'store_cash_performance', 'name' => '门店现金业绩排行', 'source' => '统一现金业绩事实按员工授权门店汇总', 'scopeRule' => 'EMPLOYEE_DATA_SCOPE_NEXT_STORE'];
+            return ['dimension' => 'store', 'code' => 'store_cash_performance', 'name' => '门店现金业绩排行', 'source' => '统一现金业绩事实按员工授权门店汇总', 'scopeRule' => 'EMPLOYEE_DATA_SCOPE_NEXT_STORE', 'scopeLabel' => (string)($merchant['dataScopeMode'] ?? '') === 'PERSONAL_SELF' ? '个人权限' : ($scopeLabel ?? '门店权限')];
         }
         if ($dimension === 'city_manager') {
-            return ['dimension' => 'city_manager', 'code' => 'manager_cash_performance', 'name' => '经理现金业绩排行', 'source' => '统一现金业绩事实按员工授权范围汇总至城市经理统计维度', 'scopeRule' => 'EMPLOYEE_DATA_SCOPE_NEXT_MANAGER'];
+            return ['dimension' => 'city_manager', 'code' => 'manager_cash_performance', 'name' => '经理现金业绩排行', 'source' => '统一现金业绩事实按员工授权范围汇总至城市经理统计维度', 'scopeRule' => 'EMPLOYEE_DATA_SCOPE_NEXT_MANAGER', 'scopeLabel' => $scopeLabel ?? '分公司权限'];
         }
-        return ['dimension' => 'company', 'code' => 'branch_cash_performance', 'name' => '分公司现金业绩排行', 'source' => '统一现金业绩事实按员工授权范围汇总至分公司统计维度', 'scopeRule' => 'EMPLOYEE_DATA_SCOPE_NEXT_BRANCH'];
+        return ['dimension' => 'company', 'code' => 'branch_cash_performance', 'name' => '分公司现金业绩排行', 'source' => '统一现金业绩事实按员工授权范围汇总至分公司统计维度', 'scopeRule' => 'EMPLOYEE_DATA_SCOPE_NEXT_BRANCH', 'scopeLabel' => $scopeLabel ?? '组织权限'];
     }
 
     /** Merge server-built actual and consume series for the home chart. */
