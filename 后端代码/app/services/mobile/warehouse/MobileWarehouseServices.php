@@ -170,6 +170,77 @@ final class MobileWarehouseServices
         ];
     }
 
+    /**
+     * Build the homepage ranking at the permission-selected hierarchy level.
+     * The caller supplies only the already-resolved authorized stores and a
+     * server-selected dimension; the client cannot widen either scope.
+     *
+     * @param int[] $storeIds
+     * @return array<int,array<string,mixed>>
+     */
+    public function dashboardRanking(array $storeIds, array $input, string $dimension): array
+    {
+        $storeIds = $this->positiveIds($storeIds);
+        if ($storeIds === []) return [];
+        $period = $this->periodForDashboard($input);
+        $projection = $this->factProjection($storeIds, $period);
+        if ($dimension === 'store') {
+            $names = Db::name('system_store')->whereIn('id', $storeIds)
+                ->where('is_del', 0)->column('name', 'id');
+            $rows = [];
+            foreach ($storeIds as $storeId) {
+                $rows[] = [
+                    'entityType' => 'store', 'entityId' => $storeId,
+                    'entityName' => (string)($names[$storeId] ?? ('门店#' . $storeId)),
+                    'rankingValue' => intdiv((int)($projection['cash_performance'][$storeId] ?? 0), 100),
+                ];
+            }
+            usort($rows, [$this, 'compareDashboardRanking']);
+            return $this->formatDashboardRanking(array_slice($rows, 0, 5), 'store');
+        }
+
+        $dimensions = $this->organizationDimensions($dimension, $storeIds, (string)$period['endDate']);
+        $grouped = [];
+        foreach ($dimensions as $row) {
+            $id = (int)($row['dimension_id'] ?? 0);
+            $storeId = (int)($row['store_id'] ?? 0);
+            if ($id <= 0 || $storeId <= 0) continue;
+            if (!isset($grouped[$id])) {
+                $grouped[$id] = [
+                    'entityType' => $dimension === 'company' ? 'branch' : 'manager',
+                    'entityId' => $id,
+                    'entityName' => (string)($row['dimension_name'] ?? ''),
+                    'rankingValue' => 0,
+                ];
+            }
+            $grouped[$id]['rankingValue'] += intdiv((int)($projection['cash_performance'][$storeId] ?? 0), 100);
+        }
+        $rows = array_values($grouped);
+        usort($rows, [$this, 'compareDashboardRanking']);
+        return $this->formatDashboardRanking(array_slice($rows, 0, 5), $dimension === 'company' ? 'branch' : 'manager');
+    }
+
+    private function compareDashboardRanking(array $left, array $right): int
+    {
+        if ((int)$left['rankingValue'] === (int)$right['rankingValue']) {
+            return (int)$left['entityId'] <=> (int)$right['entityId'];
+        }
+        return (int)$right['rankingValue'] <=> (int)$left['rankingValue'];
+    }
+
+    private function formatDashboardRanking(array $rows, string $entityType): array
+    {
+        foreach ($rows as &$row) {
+            $row['entityType'] = $entityType;
+            $row['displayValue'] = number_format((int)$row['rankingValue'], 0, '.', ',');
+            $row['metricCode'] = 'cash_performance';
+            $row['unit'] = 'amount';
+            $row['hasChildren'] = false;
+        }
+        unset($row);
+        return $rows;
+    }
+
     /** Normalize homepage period modes while retaining the warehouse contract. */
     public function periodForDashboard(array $input): array
     {
@@ -260,6 +331,64 @@ final class MobileWarehouseServices
             $result[$key] = (int)($result[$key] ?? 0) + intdiv((int)($row['amount_cents'] ?? 0), 100);
         }
         return $result;
+    }
+
+    /** Resolve each store to the nearest configured reporting dimension. */
+    private function organizationDimensions(string $type, array $stores, string $date): array
+    {
+        $configs = Db::name('cashier_v3_report_organization_dimension')
+            ->where('tenant_id', '0')->where('dimension_code', $type)->where('enabled', 1)
+            ->where('valid_from', '<=', $date)
+            ->where(function ($query) use ($date): void {
+                $query->whereNull('valid_to')->whereOr('valid_to', '>=', $date);
+            })->field('organization_id,organization_name_snapshot,display_order')
+            ->order('display_order', 'asc')->order('id', 'asc')->select()->toArray();
+        if ($configs === []) return [];
+        $configured = [];
+        foreach ($configs as $config) {
+            $configured[(int)$config['organization_id']] = [
+                'name' => (string)$config['organization_name_snapshot'],
+                'sort' => (int)$config['display_order'],
+            ];
+        }
+        $rows = [];
+        foreach ($stores as $storeId) {
+            $path = $this->storeOrganizationPath((int)$storeId);
+            $matchId = 0;
+            foreach (array_reverse($path) as $organizationId) {
+                if (isset($configured[(int)$organizationId])) {
+                    $matchId = (int)$organizationId;
+                    break;
+                }
+            }
+            if ($matchId <= 0) continue;
+            $rows[] = [
+                'dimension_id' => $matchId,
+                'dimension_name' => $configured[$matchId]['name'],
+                'sort_order' => $configured[$matchId]['sort'],
+                'store_id' => (int)$storeId,
+            ];
+        }
+        return $rows;
+    }
+
+    /** @return string[] root-to-leaf organization ids */
+    private function storeOrganizationPath(int $storeId): array
+    {
+        $organizationId = (int)Db::name('organization_store')
+            ->where('store_id', $storeId)->value('org_id');
+        $path = [];
+        $seen = [];
+        for ($guard = 0; $organizationId > 0 && $guard < 64; $guard++) {
+            if (isset($seen[$organizationId])) break;
+            $seen[$organizationId] = true;
+            $node = Db::name('organization')->where('id', $organizationId)
+                ->where('is_del', 0)->field('id,pid')->find();
+            if (!is_array($node)) break;
+            array_unshift($path, (string)$node['id']);
+            $organizationId = (int)($node['pid'] ?? 0);
+        }
+        return $path;
     }
 
     /** @param mixed[] $values @return int[] */
