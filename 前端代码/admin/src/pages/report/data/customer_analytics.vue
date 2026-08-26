@@ -40,7 +40,11 @@ export default {
       const devOrigin = process.env.NODE_ENV === 'development' ? 'http://127.0.0.1:18091' : window.location.origin
       const vue3Origin = String(process.env.VUE_APP_CASHIER_V3_DEV_ORIGIN || devOrigin).replace(/\/$/, '')
       const version = encodeURIComponent(String(process.env.VUE_APP_CASHIER_V3_CUSTOMER_ANALYTICS_VERSION || 'customer-analytics-v1'))
-      return `${vue3Origin}/view_cashier_v3/?release=${version}#/platform/customer-analytics/${encodeURIComponent(this.reportCode)}${suffix}`
+      // Bump this token whenever the cashier-v3 customer analytics bundle
+      // changes; it prevents an already-open platform iframe from reusing a
+      // stale HTML entry and silently running an older report renderer.
+      const assetVersion = '20260827-analytics-v4'
+      return `${vue3Origin}/view_cashier_v3/?release=${version}&v=${assetVersion}#/platform/customer-analytics/${encodeURIComponent(this.reportCode)}${suffix}`
     }
   }
 }
