@@ -1022,7 +1022,12 @@ final class CustomerAnalyticsServices
         $itemRanks = []; $storeRanks = []; $companyRanks = [];
         foreach ($records as $record) {
             if ($record['_amount_known']) {
-                $itemKey = (string)$record['product_id'];
+                // The ranking is displayed by business item name.  Multiple
+                // catalogue IDs can represent the same named service across
+                // stores; keeping the ID as the grouping key made the UI show
+                // repeated names instead of a useful top-item ranking.
+                $itemKey = trim((string)$record['item_name']);
+                if ($itemKey === '' || $itemKey === '-') $itemKey = 'unknown:' . (string)$record['product_id'];
                 $storeKey = (string)$record['store_name'];
                 $companyKey = (string)$record['company_name'];
                 if (!isset($itemRanks[$itemKey])) $itemRanks[$itemKey] = ['name' => $record['item_name'], 'amount_cents' => 0, 'remaining_count' => 0];
@@ -1036,13 +1041,14 @@ final class CustomerAnalyticsServices
                 $companyRanks[$companyKey]['remaining_count'] += (int)$record['remaining_count'];
             }
         }
-        $rankRows = function (array $rows): array {
+        $rankRows = function (array $rows, int $totalCents = 0): array {
             $rows = array_values($rows);
             usort($rows, static fn(array $a, array $b): int => (int)$b['amount_cents'] <=> (int)$a['amount_cents']);
-            return array_map(function (array $row): array {
+            return array_map(function (array $row) use ($totalCents): array {
                 $amount = $this->moneyValue((int)$row['amount_cents']);
                 return [
-                    'name' => (string)$row['name'], 'unconsumed_amount' => $amount,
+                    'name' => (string)$row['name'], 'unconsumed_amount' => $amount, '_amount_cents' => (int)$row['amount_cents'],
+                    'amount_share' => $totalCents > 0 ? round((int)$row['amount_cents'] * 100 / $totalCents, 1) : null,
                     'unconsumed_count' => (int)$row['remaining_count'],
                     'remaining_count' => (int)$row['remaining_count'],
                 ];
@@ -1064,16 +1070,24 @@ final class CustomerAnalyticsServices
         ];
         $result['pending_metrics'] = ['未耗率', '未耗同比'];
         $result['unconsumed_snapshot'] = 'current_card_entitlement';
-        $itemRankRows = $rankRows($itemRanks);
+        $itemTotalCents = array_sum(array_map(static fn(array $row): int => (int)$row['amount_cents'], $itemRanks));
+        $itemRankRows = $rankRows($itemRanks, $itemTotalCents);
         $topItems = array_slice($itemRankRows, 0, 6);
         $topItemsTen = array_slice($itemRankRows, 0, 10);
+        $topItemTotalCents = array_sum(array_map(static fn(array $row): int => (int)$row['_amount_cents'], $topItems));
+        $itemProportions = array_map(static function (array $row) use ($topItemTotalCents): array {
+            $amountCents = (int)$row['_amount_cents'];
+            $row['amount_share'] = $topItemTotalCents > 0 ? round($amountCents * 100 / $topItemTotalCents, 1) : null;
+            return $row;
+        }, $topItems);
         $topStores = array_slice($rankRows($storeRanks), 0, 10);
         $companyAmount = array_slice($rankRows($companyRanks), 0, 10);
         $result['rankings'] = ['top_items' => $topItems, 'top_items_top10' => $topItemsTen, 'top_stores' => $topStores, 'company_amount' => $companyAmount];
         // These aliases are part of the page contract: the frontend can use
         // the same amounts/counts for the chart and the table without doing a
         // second aggregation or interpreting cents itself.
-        $result['items'] = array_map(static fn(array $row): array => ['item_name' => $row['name'], 'unconsumed_amount' => $row['unconsumed_amount'], 'unconsumed_count' => $row['unconsumed_count']], $topItemsTen);
+        $result['items'] = array_map(static fn(array $row): array => ['item_name' => $row['name'], 'unconsumed_amount' => $row['unconsumed_amount'], 'amount_share' => $row['amount_share'], 'unconsumed_count' => $row['unconsumed_count']], $topItemsTen);
+        $result['item_proportions'] = array_map(static fn(array $row): array => ['item_name' => $row['name'], 'unconsumed_amount' => $row['unconsumed_amount'], 'amount_share' => $row['amount_share']], $itemProportions);
         $result['stores'] = array_map(static fn(array $row): array => ['store_name' => $row['name'], 'unconsumed_amount' => $row['unconsumed_amount'], 'unconsumed_count' => $row['unconsumed_count']], $topStores);
         $result['branches'] = array_map(static fn(array $row): array => ['company_name' => $row['name'], 'unconsumed_amount' => $row['unconsumed_amount'], 'unconsumed_count' => $row['unconsumed_count']], $companyAmount);
         $result['aggregation_status'] = $amountComplete && $summaryAmountKnown

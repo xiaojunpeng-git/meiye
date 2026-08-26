@@ -293,13 +293,19 @@ function applyCustomerPayload(payload) {
       return [String(field(row, ...nameKeys) || '-'), cents(field(row, ...amountKeys)), numericOrNull(field(row, ...countKeys))]
     })
     const branchRows = rowsToArray(branches, ['company_name', 'branch_name', 'name'], ['unconsumed_amount', 'amount', 'value'], ['unconsumed_count', 'count', 'people'])
-    const itemRows = rowsToArray(items, ['item_name', 'name'], ['unconsumed_amount', 'amount', 'value'], ['unconsumed_count', 'count', 'people'])
+    const itemRows = (Array.isArray(items) ? items : []).map((row) => [
+      String(field(row, 'item_name', 'name') || '未命名品项'),
+      cents(field(row, 'unconsumed_amount', 'amount', 'value')),
+      numericOrNull(field(row, 'amount_share', 'share'))
+    ])
     const storeRows = rowsToArray(stores, ['store_name', 'name'], ['unconsumed_amount', 'amount', 'value'], ['unconsumed_count', 'count', 'people'])
     if (branchRows.length) data.unconsumed.branches = branchRows
     if (itemRows.length) {
       data.unconsumed.items = itemRows.map(row => [row[0], row[1]])
       data.unconsumed.topItems = data.unconsumed.items.slice(0, 10)
-      data.unconsumed.itemProportions = data.unconsumed.items.slice(0, 6).map((row, i) => [row[0], null, tone[i % tone.length], row[1]])
+      const proportionRows = Array.isArray(payload?.item_proportions) ? payload.item_proportions : itemRows.slice(0, 6).map(row => ({ item_name: row[0], unconsumed_amount: row[1], amount_share: row[2] }))
+      const pieColors = ['#3681b2', '#3d9187', '#c88727', '#776aa7', '#62a8ae', '#bb6b52']
+      data.unconsumed.itemProportions = proportionRows.slice(0, 6).map((row, i) => [String(field(row, 'item_name', 'name') || '-'), numericOrNull(field(row, 'amount_share', 'share')), pieColors[i % pieColors.length], cents(field(row, 'unconsumed_amount', 'amount', 'value'))])
     }
     if (storeRows.length) data.unconsumed.stores = storeRows.map(row => [row[0], row[1]])
     const amount = cents(field(summary, 'unconsumed_amount', 'amount', 'total_amount'))

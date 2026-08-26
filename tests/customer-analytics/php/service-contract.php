@@ -120,6 +120,15 @@ customerAnalyticsAssert(
     'unconsumed analysis batches entitlement ids and caches organization dimensions per store'
 );
 customerAnalyticsAssert(
+    str_contains($service, "'item_proportions'")
+        && str_contains($service, "'amount_share'")
+        && str_contains($service, "trim((string)\$record['item_name'])")
+        && str_contains($frontendView, "numericOrNull(field(row, 'amount_share', 'share'))")
+        && str_contains($frontendView, "const pieColors = ['#3681b2'")
+        && !str_contains($frontendView, 'itemRows.slice(0, 6).map((row, i) => [row[0], null,'),
+    'unconsumed item rankings aggregate displayed names and render backend pie proportions'
+);
+customerAnalyticsAssert(
     str_contains($frontendApi, 'CUSTOMER_ANALYTICS_TIMEOUT_MS')
         && str_contains($frontendApi, "客户分析请求超时")
         && str_contains($frontendApi, "{ timeoutMs: CUSTOMER_ANALYTICS_TIMEOUT_MS }"),
