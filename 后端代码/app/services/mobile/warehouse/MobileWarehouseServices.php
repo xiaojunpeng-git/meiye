@@ -87,7 +87,7 @@ final class MobileWarehouseServices
             : $this->factRanking($rankingCode, $scopeStoreIds, $period);
         $rankingCatalog = $this->rankingCatalog();
         if ($rankingCode === 'organization') {
-            $rankingCatalog[0]['name'] = $permissionRanking['name'];
+            $rankingCatalog[0]['name'] = '组织现金业绩';
             $rankingCatalog[0]['scopeRule'] = $permissionRanking['scopeRule'];
         }
         $selectedRankingAvailable = true;
