@@ -15,12 +15,14 @@ $controllerPath = $root . '/后端代码/app/controller/admin/v1/report/UnifiedR
 $routePath = $root . '/后端代码/route/admin.php';
 $phaseTwoPath = $root . '/后端代码/app/services/report/StoreUnifiedReportPhaseTwoServices.php';
 $phaseFourPath = $root . '/后端代码/app/services/report/StoreUnifiedReportPhaseFourServices.php';
+$frontendApiPath = $root . '/前端代码/cashier-v3/src/services/customerAnalyticsApi.js';
 
 $service = (string)file_get_contents($servicePath);
 $controller = (string)file_get_contents($controllerPath);
 $route = (string)file_get_contents($routePath);
 $phaseTwo = (string)file_get_contents($phaseTwoPath);
 $phaseFour = (string)file_get_contents($phaseFourPath);
+$frontendApi = (string)file_get_contents($frontendApiPath);
 
 function customerAnalyticsAssert(bool $condition, string $message): void
 {
@@ -108,6 +110,18 @@ customerAnalyticsAssert(
         && str_contains($service, "'unconsumed_rate'")
         && str_contains($service, "'unconsumed_yoy'"),
     'unconsumed analysis reads current card entitlement facts and leaves unsupported rates explicit'
+);
+customerAnalyticsAssert(
+    str_contains($service, 'UNCONSUMED_BATCH_SIZE')
+        && str_contains($service, 'array_chunk(array_keys($oids), self::UNCONSUMED_BATCH_SIZE)')
+        && str_contains($service, '$companyByStore'),
+    'unconsumed analysis batches entitlement ids and caches organization dimensions per store'
+);
+customerAnalyticsAssert(
+    str_contains($frontendApi, 'CUSTOMER_ANALYTICS_TIMEOUT_MS')
+        && str_contains($frontendApi, "客户分析请求超时")
+        && str_contains($frontendApi, "{ timeoutMs: CUSTOMER_ANALYTICS_TIMEOUT_MS }"),
+    'customer analysis requests have a bounded timeout and actionable failure message'
 );
 customerAnalyticsAssert(
     str_contains($service, "\$sourceFilter = (int)(\$input['source_id'] ?? 0)")

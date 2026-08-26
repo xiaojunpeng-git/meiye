@@ -18,6 +18,9 @@ final class CustomerAnalyticsServices
 {
     public const METRIC_VERSION = 'customer-analytics-v1';
 
+    /** Keep IN predicates below MySQL packet/optimizer limits on all-store queries. */
+    private const UNCONSUMED_BATCH_SIZE = 500;
+
     private const REPORTS = [
         'customer_overview' => '客户概况',
         'customer_source_analysis' => '客户开源分析',
@@ -853,14 +856,25 @@ final class CustomerAnalyticsServices
         }
         if ($oids === []) return $empty($columns, '当前权限范围内没有有效卡项权益。', $input);
 
+        // Do not build one unbounded IN (...) predicate for an all-store
+        // query.  Large entitlement sets otherwise make MySQL spend the
+        // request timeout parsing/optimizing a single statement and also
+        // exceed proxy packet limits.  Batching preserves the same facts and
+        // keeps each statement indexable by oid.
+        $carts = [];
+        $hasWriteoff = $this->hasColumn('store_order_cart_info', 'is_writeoff');
         try {
-            $cartQuery = Db::name('store_order_cart_info')
-                ->whereIn('oid', array_keys($oids))
-                ->where('write_surplus_times', '>', 0)
-                ->where('cart_type', 2)
-                ->where('product_type', 6);
-            if ($this->hasColumn('store_order_cart_info', 'is_writeoff')) $cartQuery->where('is_writeoff', 0);
-            $carts = $cartQuery->field('id,oid,product_id,pay_price,write_times,write_surplus_times,write_start,write_end')->select()->toArray();
+            foreach (array_chunk(array_keys($oids), self::UNCONSUMED_BATCH_SIZE) as $oidChunk) {
+                $cartQuery = Db::name('store_order_cart_info')
+                    ->whereIn('oid', $oidChunk)
+                    ->where('write_surplus_times', '>', 0)
+                    ->where('cart_type', 2)
+                    ->where('product_type', 6);
+                if ($hasWriteoff) $cartQuery->where('is_writeoff', 0);
+                foreach ($cartQuery->field('id,oid,product_id,pay_price,write_times,write_surplus_times,write_start,write_end')->select()->toArray() as $cart) {
+                    $carts[] = $cart;
+                }
+            }
         } catch (\Throwable $e) {
             return $empty($columns, '卡项项目权益明细暂不可读取，页面显示空态，不以0代替未知值。', $input);
         }
@@ -869,11 +883,13 @@ final class CustomerAnalyticsServices
         $products = [];
         if ($productIds !== []) {
             try {
-                foreach (Db::name('store_product')->whereIn('id', $productIds)->where('is_del', 0)->field('id,store_name,cate_id')->select()->toArray() as $product) {
-                    $products[(int)$product['id']] = [
-                        'item_name' => trim((string)($product['store_name'] ?? '')),
-                        'cate_id' => (string)($product['cate_id'] ?? ''),
-                    ];
+                foreach (array_chunk($productIds, self::UNCONSUMED_BATCH_SIZE) as $productChunk) {
+                    foreach (Db::name('store_product')->whereIn('id', $productChunk)->where('is_del', 0)->field('id,store_name,cate_id')->select()->toArray() as $product) {
+                        $products[(int)$product['id']] = [
+                            'item_name' => trim((string)($product['store_name'] ?? '')),
+                            'cate_id' => (string)($product['cate_id'] ?? ''),
+                        ];
+                    }
                 }
             } catch (\Throwable $e) {
                 // Product snapshots are optional enrichment.  Keep balances
@@ -975,11 +991,20 @@ final class CustomerAnalyticsServices
         $storeNames = [];
         try { $storeNames = Db::name('system_store')->whereIn('id', $stores)->column('name', 'id'); } catch (\Throwable $e) { $storeNames = []; }
         $organization = new StoreUnifiedReportOrganizationDimensionServices();
+        // Resolve each store's company once.  Resolving inside the record loop
+        // caused one organization lookup per item/store row (N+1 on large
+        // scopes) and was a major contributor to request timeouts.
+        $companyByStore = [];
+        foreach ($groups as $group) {
+            $storeId = (int)($group['store_id'] ?? 0);
+            if (array_key_exists($storeId, $companyByStore)) continue;
+            try { $company = (string)$organization->resolve('company', '', '', (string)$range['end'], $storeId)['name']; } catch (\Throwable $e) { $company = '-'; }
+            $companyByStore[$storeId] = ($company === '' || $company === '未配置分公司') ? '-' : $company;
+        }
         $records = [];
         foreach ($groups as $group) {
             $storeId = (int)$group['store_id'];
-            try { $company = (string)$organization->resolve('company', '', '', (string)$range['end'], $storeId)['name']; } catch (\Throwable $e) { $company = '-'; }
-            if ($company === '' || $company === '未配置分公司') $company = '-';
+            $company = $companyByStore[$storeId] ?? '-';
             $records[] = [
                 'company_name' => $company,
                 'store_name' => trim((string)($storeNames[$storeId] ?? '')) !== '' ? (string)$storeNames[$storeId] : '-',
