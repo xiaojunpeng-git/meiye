@@ -478,15 +478,20 @@ final class CashierV3CheckoutDraftAuthorityRebuilder
             if (!is_array($row)) {
                 throw self::failure('checkout_draft_entitlement_craftsmen_snapshot_invalid');
             }
+            // Older hot-reloaded tabs may still carry display/profile fields
+            // from the sale-line personnel shape. They are not checkout
+            // authority; accept and discard the known fields while retaining
+            // only the compact service intent below.
             $allowed = [
                 'staffId', 'laborWeight', 'isPointCustomer',
-                'craftsmanPerformanceType', 'laborFeeCents',
+                'craftsmanPerformanceType', 'laborFeeCents', 'personnelSource',
+                'id', 'employeeId', 'storeId', 'name', 'staffName', 'employeeName',
+                'isPrimary', 'sequence', 'projectCountHalfUnits',
             ];
             $actual = array_keys($row);
             sort($actual, SORT_STRING);
-            $expected = $allowed;
-            sort($expected, SORT_STRING);
-            if ($actual !== $expected) {
+            $unexpected = array_diff($actual, $allowed);
+            if ($unexpected !== []) {
                 throw self::failure('checkout_draft_entitlement_craftsmen_snapshot_invalid');
             }
             $staffId = self::positiveInt($row['staffId'], 'entitlement.craftsman.staff_id');
@@ -512,14 +517,24 @@ final class CashierV3CheckoutDraftAuthorityRebuilder
             if ($performanceType === 'commission' && $laborFeeCents !== 0) {
                 throw self::failure('checkout_draft_entitlement_craftsmen_snapshot_invalid');
             }
+            $personnelSource = array_key_exists('personnelSource', $row)
+                ? trim((string)$row['personnelSource'])
+                : 'store';
+            if (!in_array($personnelSource, ['store', 'other'], true)) {
+                throw self::failure('checkout_draft_entitlement_craftsmen_snapshot_invalid');
+            }
             $weight += $laborWeight;
-            $result[] = [
+            $assignment = [
                 'staffId' => $staffId,
                 'laborWeight' => $laborWeight,
                 'isPointCustomer' => $row['isPointCustomer'],
                 'craftsmanPerformanceType' => $performanceType,
                 'laborFeeCents' => $laborFeeCents,
             ];
+            if ($personnelSource === 'other') {
+                $assignment['personnelSource'] = 'other';
+            }
+            $result[] = $assignment;
         }
         if ($result !== [] && $weight !== 100) {
             throw self::failure('checkout_draft_entitlement_craftsmen_weight_invalid');

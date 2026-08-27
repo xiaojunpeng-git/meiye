@@ -705,6 +705,21 @@ function canonicalCheckoutCraftsmen(records = []) {
   return rows
 }
 
+// Entitlement rows persist only the compact service intent.  The sale-line
+// personnel snapshot carries display/profile fields, but the entitlement
+// authority contract intentionally accepts the five business fields below
+// (plus the optional personnelSource marker for organization craftsmen).
+function canonicalCheckoutEntitlementCraftsmen(records = []) {
+  return canonicalCheckoutCraftsmen(records).map((row) => ({
+    staffId: row.staffId,
+    laborWeight: row.laborWeight,
+    isPointCustomer: row.isPointCustomer,
+    craftsmanPerformanceType: row.craftsmanPerformanceType,
+    laborFeeCents: row.laborFeeCents,
+    ...(row.personnelSource === 'other' ? { personnelSource: 'other' } : {})
+  }))
+}
+
 function canonicalCheckoutSalespeople(records = []) {
   return (Array.isArray(records) ? records : []).map((record) => ({
     staffId: canonicalCheckoutPositiveId(record?.staffId, record?.staff_id, record?.systemStoreStaffId, record?.id, record?.employeeId, record?.employee_id),
@@ -4313,7 +4328,11 @@ function localCheckoutPreviewSnapshot() {
       // snapshot boundary. Normalize staff identities here so browser-local
       // string IDs cannot reach the final authority as invalid staffId values.
       ...(saleLine || entitlementLine
-        ? { craftsmen: canonicalCheckoutCraftsmen(craftsmen) }
+        ? {
+            craftsmen: entitlementLine
+              ? canonicalCheckoutEntitlementCraftsmen(craftsmen)
+              : canonicalCheckoutCraftsmen(craftsmen)
+          }
         : {}),
       ...(saleLine
         ? {
@@ -4491,7 +4510,9 @@ function buildCheckoutSnapshot(preview = {}) {
     const upgradeOperation = role === 'sale' && isLocalUpgradeOperationLine(line)
     const next = {
       ...line,
-      craftsmen: canonicalCheckoutCraftsmen(line.craftsmen),
+      craftsmen: role === 'entitlement_service'
+        ? canonicalCheckoutEntitlementCraftsmen(line.craftsmen)
+        : canonicalCheckoutCraftsmen(line.craftsmen),
       ...(upgradeOperation
         ? { cardOperationUpgrade: clonePlain(line.cardOperationUpgrade) }
         : {}),
