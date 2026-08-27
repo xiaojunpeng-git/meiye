@@ -37,10 +37,12 @@ itemAnalysisAssert(
 );
 itemAnalysisAssert(
     str_contains($service, '$definitions = $this->itemAnalysisCategoryDefinitions($storeId);')
-        && str_contains($service, 'foreach ($this->partnerPerformanceDefinitions($storeId) as $partnerDefinition)')
-        && str_contains($service, 'Header categories come from the current product-category configuration')
+        && str_contains($service, "Db::name('store_product_category')->where('type', 0)->where('relation_id', 0)")
+        && str_contains($service, "field('id,pid,cate_name,is_show')")
+        && str_contains($service, '(int)($category[\'is_show\'] ?? 0) === 1')
+        && str_contains($service, 'all currently visible product categories')
         && str_contains($service, 'CashierV3ScopeResolver::TENANT_SCOPE_ID'),
-    'category headers come from configured product categories even without period facts'
+    'category headers come from all visible product categories even without period facts'
 );
 itemAnalysisAssert(
     str_contains($service, 'cashier_v3_card_sale_category_allocation_fact')
@@ -51,9 +53,15 @@ itemAnalysisAssert(
     'cash and consumption use persisted category facts rather than browser calculation'
 );
 itemAnalysisAssert(
+    str_contains($service, 'COALESCE(c.category_id_snapshot,d.category_id_snapshot,0) AS category_id_snapshot')
+        && str_contains($service, 'COALESCE(c.partner_share_amount_cents,d.partner_share_amount_cents,0) AS share_cents')
+        && str_contains($service, '(int)($entry[\'category_id_snapshot\'] ?? 0)'),
+    'category grouping uses the product snapshot while partner amounts stay in frozen share cents'
+);
+itemAnalysisAssert(
     str_contains($service, "'rowspan' => 2")
         && str_contains($service, "'tone' => 'category'")
-        && str_contains($view, 'groupedHeaderColumns')
+        && str_contains($view, 'headerRows')
         && str_contains($view, 'store-business-report__header-group--consumption'),
     'two-line header supports a fixed summary region and semantic colors'
 );

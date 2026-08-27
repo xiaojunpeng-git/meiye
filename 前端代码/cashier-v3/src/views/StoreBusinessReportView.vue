@@ -27,7 +27,8 @@ import {
 } from '@/services/storeBusinessReportApi'
 
 const LEGACY_COVERAGE_START = '2026-08-10'
-const MARKET_MONTH_DEFAULT_REPORT_CODES = new Set(['market_performance', 'market_detail'])
+const MARKET_MONTH_DEFAULT_REPORT_CODES = new Set(['market_performance', 'market_detail', 'new_customer_analysis_summary', 'new_customer_analysis'])
+const TODAY_DEFAULT_REPORT_CODES = new Set(['store_item_analysis'])
 const DEFAULT_LIMIT = 20
 // 门店运营报表目录。经营看板是数据入口，不属于本目录；
 // 报表结果、金额和筛选能力全部由统一查询服务返回，浏览器不参与计算。
@@ -170,6 +171,7 @@ const FIELD_LOGIC = Object.freeze({
   sales_manager_name: '本单已确认的销售经理；多人时并列显示。',
   guide_round_no: '本单选择导购后的最早导购轮次；没有导购时留空。',
   guide_names: '本单已确认的导购人员；多人时并列显示。',
+  guide: '本笔新客业务在结账时确认的导购人员；多人时并列显示。新客汇总表和明细表只统计存在导购归属的业务。',
   salesperson_names: '本条成交分配到的销售人员。',
   member_source: '本次成交时记录的会员来源。',
   receipt_total: '本行销售明细分摊到的所有成功记账收款方式金额合计；未成功的收款不计入。',
@@ -359,6 +361,9 @@ const filterSchema = computed(() => {
   return (Array.isArray(schema) ? schema : []).filter((field) => {
     const key = String(field?.key || '')
     const type = String(field?.type || '')
+    // 门店端报表始终固定当前登录门店，不展示平台端的跨门店组织筛选。
+    // 平台端仍按权限显示分公司、城市经理等范围条件。
+    if (!isPlatformRuntimeRoute() && ['company_dimension_id', 'city_manager_dimension_id'].includes(key)) return false
     return key
       && !['organization', 'organization_id', 'organization_store_scope', 'store', 'store_id', 'store_ids', 'start_date', 'end_date', 'date_range', 'month'].includes(key)
       && !['organization_store_scope', 'date_range', 'month', 'year'].includes(type)
@@ -908,7 +913,10 @@ function syncActiveReportFromRoute() {
   activeReport.value = allowedReportTabs.value.some((item) => item.code === requested)
     ? requested
     : String(allowedReportTabs.value[0]?.code || '')
-  if (MARKET_MONTH_DEFAULT_REPORT_CODES.has(activeReport.value) && !route.query?.start_date) {
+  if (TODAY_DEFAULT_REPORT_CODES.has(activeReport.value) && !route.query?.start_date && !route.query?.end_date) {
+    startDate.value = today()
+    endDate.value = today()
+  } else if (MARKET_MONTH_DEFAULT_REPORT_CODES.has(activeReport.value) && !route.query?.start_date) {
     startDate.value = `${today().slice(0, 7)}-01`
   } else {
     if (isFirstPhaseReport.value && startDate.value < LEGACY_COVERAGE_START) startDate.value = LEGACY_COVERAGE_START

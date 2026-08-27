@@ -29,8 +29,9 @@ partnerProjectionAssert(
 partnerProjectionAssert(
     str_contains($service, 'd.partner_category_id_snapshot')
         && str_contains($service, 'd.partner_share_amount_cents')
-        && str_contains($service, 'c.partner_category_id_snapshot') === false,
-    'ordinary rows read frozen partner category and share facts rather than live ratios'
+        && str_contains($service, 'cc.partner_category_id_snapshot')
+        && str_contains($service, 'cc.partner_share_amount_cents'),
+    'ordinary rows and card allocations read frozen partner share facts rather than live ratios'
 );
 partnerProjectionAssert(
     str_contains($service, 'private function cardPartnerSharesBySaleFact')

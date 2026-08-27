@@ -381,7 +381,7 @@ class StoreUnifiedReportServices extends BaseServices
     {
         $today = ['start' => $range['end'], 'end' => $range['end']];
         $cumulative = ['start' => self::COVERAGE_START, 'end' => $range['end']];
-        // Header categories come from the current product-category configuration,
+        // Header categories come from all currently visible product categories,
         // never from whichever facts happened to occur in the selected period.
         $definitions = $this->itemAnalysisCategoryDefinitions($storeId);
         $period = $this->itemAnalysisMetricRows($storeId, $range, $input, $definitions);
@@ -514,7 +514,7 @@ class StoreUnifiedReportServices extends BaseServices
         $stores = [];
         $categories = [];
         $cashRows = $this->operationSaleQuery($storeId, $range, $input)
-            ->fieldRaw("s.store_id,s.store_name_snapshot,s.organization_id,s.organization_path_snapshot,s.business_date,COALESCE(c.partner_category_id_snapshot,d.partner_category_id_snapshot,0) AS partner_category_id_snapshot,COALESCE(c.partner_category_path_snapshot,d.partner_category_path_snapshot,c.category_path_snapshot,d.category_path_snapshot) AS category_path_snapshot,COALESCE(c.cash_performance_amount_cents,d.cash_performance_amount_cents,0) AS cash_cents,COALESCE(c.partner_share_amount_cents,d.partner_share_amount_cents,0) AS share_cents")
+            ->fieldRaw("s.store_id,s.store_name_snapshot,s.organization_id,s.organization_path_snapshot,s.business_date,COALESCE(c.category_id_snapshot,d.category_id_snapshot,0) AS category_id_snapshot,COALESCE(c.category_path_snapshot,d.category_path_snapshot) AS category_path_snapshot,COALESCE(c.cash_performance_amount_cents,d.cash_performance_amount_cents,0) AS cash_cents,COALESCE(c.partner_share_amount_cents,d.partner_share_amount_cents,0) AS share_cents")
             ->select()->toArray();
         foreach ($cashRows as $entry) {
             $this->applyOrganizationDimensions($entry);
@@ -523,7 +523,7 @@ class StoreUnifiedReportServices extends BaseServices
             $stores[$storeKey]['share_cents'] += (int)$entry['share_cents'];
             $category = $this->itemAnalysisConfiguredCategory(
                 $definitions,
-                (int)($entry['partner_category_id_snapshot'] ?? 0),
+                (int)($entry['category_id_snapshot'] ?? 0),
                 (string)$entry['category_path_snapshot']
             );
             if ($category === null) continue;
@@ -599,9 +599,9 @@ class StoreUnifiedReportServices extends BaseServices
     }
 
     /**
-     * Facts keep their own category snapshots.  Match the frozen effective
-     * category ID first; a frozen project below a configured second level then
-     * falls back to its frozen path, never to a current product category tree.
+     * Facts keep their own category snapshots. Match the frozen product
+     * category ID first; a product below a projected second level then falls
+     * back to its frozen path, never to a current product category tree.
      *
      * @param array<string,array{key:string,label:string,category_id:int,category_path:string}> $definitions
      * @return array{id:string,label:string}|null
@@ -644,18 +644,67 @@ class StoreUnifiedReportServices extends BaseServices
      */
     private function itemAnalysisCategoryDefinitions($storeId): array
     {
+        $categories = [];
+        foreach (Db::name('store_product_category')->where('type', 0)->where('relation_id', 0)
+            ->field('id,pid,cate_name,is_show')->select()->toArray() as $category) {
+            $id = (int)($category['id'] ?? 0);
+            if ($id > 0) $categories[$id] = $category;
+        }
+        if ($categories === []) return [];
+
+        $visible = [];
+        foreach ($categories as $id => $category) {
+            if ((int)($category['is_show'] ?? 0) === 1) $visible[$id] = true;
+        }
+        if ($visible === []) return [];
+
+        // Keep the same two-level projection used by partner columns, but
+        // apply it to every visible category. A visible root is replaced by
+        // its visible direct children; deeper categories roll up to that
+        // second level and never create a third-level header.
+        $visibleDirectChildren = [];
+        foreach (array_keys($visible) as $categoryId) {
+            $chain = $this->partnerCategoryChain((int)$categoryId, $categories);
+            if ($chain === []) continue;
+            $rootId = (int)$chain[0]['id'];
+            if (count($chain) >= 2 && (int)$chain[1]['id'] === (int)$categoryId) {
+                $visibleDirectChildren[$rootId][(int)$categoryId] = true;
+            }
+        }
+
         $definitions = [];
-        foreach ($this->partnerPerformanceDefinitions($storeId) as $partnerDefinition) {
-            $categoryId = (int)($partnerDefinition['category_id'] ?? 0);
-            $categoryPath = $this->itemAnalysisCategoryPath((string)($partnerDefinition['category_path'] ?? ''));
-            if ($categoryId <= 0 || $categoryPath === '') continue;
-            $definitions[(string)$categoryId] = [
-                'key' => 'item_analysis_category_' . $categoryId,
+        foreach (array_keys($visible) as $categoryId) {
+            $chain = $this->partnerCategoryChain((int)$categoryId, $categories);
+            if ($chain === []) continue;
+            $rootId = (int)$chain[0]['id'];
+            $effective = $chain[0];
+            if (count($chain) >= 2) {
+                $secondId = (int)$chain[1]['id'];
+                if (isset($visible[$secondId])) {
+                    $effective = $chain[1];
+                } elseif (isset($visibleDirectChildren[$rootId])) {
+                    // The current row is visible but its parent is hidden;
+                    // retain the visible root rather than exposing a hidden
+                    // category as a report column.
+                    $effective = $chain[0];
+                }
+            } elseif (isset($visibleDirectChildren[$rootId])) {
+                continue;
+            }
+            $effectiveId = (int)$effective['id'];
+            $categoryPath = $this->itemAnalysisCategoryPath($this->partnerCategoryPathLabel($chain, $effectiveId));
+            if ($effectiveId <= 0 || $categoryPath === '') continue;
+            $definitions[(string)$effectiveId] = [
+                'key' => 'item_analysis_category_' . $effectiveId,
                 'label' => $categoryPath,
-                'category_id' => $categoryId,
+                'category_id' => $effectiveId,
                 'category_path' => $categoryPath,
             ];
         }
+        uasort($definitions, static function (array $left, array $right): int {
+            return strcmp((string)$left['category_path'], (string)$right['category_path'])
+                ?: ((int)$left['category_id'] <=> (int)$right['category_id']);
+        });
         return $definitions;
     }
 
@@ -1174,12 +1223,31 @@ class StoreUnifiedReportServices extends BaseServices
     {
         $orderIds = array_values(array_unique(array_filter(array_map(static function ($row) { return trim((string)($row['order_id'] ?? '')); }, $rows))));
         $saleFactIds = array_values(array_unique(array_filter(array_map(static function ($row) { return trim((string)($row['fact_id'] ?? '')); }, $rows))));
+        $sourceLineIds = array_values(array_unique(array_filter(array_map(static function ($row) { return trim((string)($row['source_line_id'] ?? '')); }, $rows))));
         $paymentBySaleFact = [];
         if ($saleFactIds) {
             $payments = $this->withStoreScope(Db::name('cashier_v3_payment_sale_allocation_fact'), $storeId)
                 ->whereIn('sale_fact_id', $saleFactIds)->where('status', 'effective')
                 ->field('sale_fact_id,payment_method,SUM(amount_cents) amount_cents')->group('sale_fact_id,payment_method')->select()->toArray();
             foreach ($payments as $payment) $paymentBySaleFact[(string)$payment['sale_fact_id']][(string)$payment['payment_method']] = (int)$payment['amount_cents'];
+        }
+        $salespersonByLine = [];
+        if ($sourceLineIds) {
+            $salespeople = $this->withStoreScope(Db::name('cashier_v3_performance_fact'), $storeId)
+                ->whereIn('source_line_id', $sourceLineIds)
+                ->where('performance_type', 'sales_performance_allocated')
+                ->where('fact_direction', 'forward')
+                ->where('status', 'effective')
+                ->field('source_line_id,employee_name_snapshot')
+                ->order('id', 'asc')->select()->toArray();
+            foreach ($salespeople as $salesperson) {
+                $line = trim((string)($salesperson['source_line_id'] ?? ''));
+                $name = trim((string)($salesperson['employee_name_snapshot'] ?? ''));
+                if ($line !== '' && $name !== '') $salespersonByLine[$line][] = $name;
+            }
+            foreach ($salespersonByLine as $line => $names) {
+                $salespersonByLine[$line] = array_values(array_unique($names));
+            }
         }
         $guideByOrder = $managerByOrder = [];
         if ($orderIds) {
@@ -1207,7 +1275,8 @@ class StoreUnifiedReportServices extends BaseServices
             $row['guide_round_no'] = $guidesForOrder ? (int)min(array_map(static function ($item) { return (int)$item['guide_round_no']; }, $guidesForOrder)) : '';
             $row['guide_names'] = implode('、', array_values(array_unique(array_map(static function ($item) { return (string)$item['guide_employee_name_snapshot']; }, $guidesForOrder))));
             $row['sales_manager_name'] = implode('、', array_values(array_unique(array_map(static function ($item) { return (string)$item['sales_manager_name_snapshot']; }, $managerByOrder[$order] ?? []))));
-            $row['salesperson_names'] = '';
+            $line = trim((string)($row['source_line_id'] ?? ''));
+            $row['salesperson_names'] = implode('、', $salespersonByLine[$line] ?? []);
             $row['member_source'] = (string)($row['business_source_label_snapshot'] ?? '');
             $partnerCategoryCents = array_fill_keys(array_column($partnerDefinitions, 'key'), 0);
             if ((string)($row['source_type'] ?? '') === 'card') {
