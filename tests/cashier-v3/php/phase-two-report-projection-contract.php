@@ -54,6 +54,20 @@ foreach ([
 ] as $needle) {
     if (strpos($service, $needle) === false) throw new RuntimeException('new-customer manual experience amount contract missing: ' . $needle);
 }
+foreach ([
+    'cashier_v3_sales_manager_fact',
+    'cashier_v3_sales_order_line',
+    'checkout_line_id',
+    'sales_manager_name_snapshot',
+    'p.order_id,p.source_line_id',
+    "'salesperson'=>'销售人/销售经理'",
+] as $needle) {
+    if (strpos($service, $needle) === false) throw new RuntimeException('large-order salesperson/manager contract missing: ' . $needle);
+}
+$managerFact = (string)file_get_contents($root . '/后端代码/app/services/cashier/v3/report/CashierV3SalesManagerFactServices.php');
+foreach (['allocation_weight_numerator','allocation_weight_denominator','allocation_base_amount_cents','amount_cents','allocationWeight'] as $needle) {
+    if (strpos($managerFact, $needle) === false) throw new RuntimeException('sales-manager allocation fact contract missing: ' . $needle);
+}
 $annotation = (string)file_get_contents($root . '/后端代码/app/services/report/StoreOperationsReportAnnotationServices.php');
 foreach (["'new_customer_analysis' => ['experience_card_amount', 'care_duration']", "'experience_card_amount' => 'integer_cents'"] as $needle) {
     if (strpos($annotation, $needle) === false) throw new RuntimeException('new-customer annotation contract missing: ' . $needle);

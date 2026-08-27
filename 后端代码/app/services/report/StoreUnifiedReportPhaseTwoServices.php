@@ -434,9 +434,43 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             ->leftJoin([$cardCategorySql=>'cc'],'cc.tenant_id=s.tenant_id AND cc.sale_fact_id=s.fact_id')
             ->whereBetween('p.business_date',[$range['start'],$range['end']])->where('p.status','effective')->where('p.performance_type','sales_performance_allocated')
             ->whereRaw("((cc.sale_fact_id IS NOT NULL AND cc.allocated_sale_total_cents=s.sale_amount_cents AND cc.beauty_cash_amount_cents>0) OR (cc.sale_fact_id IS NULL AND s.category_name_snapshot LIKE '%生美%'))")
-            ->fieldRaw("p.store_id,p.organization_id,p.organization_path_snapshot,MAX(p.organization_name_snapshot) division_name,MAX(p.store_name_snapshot) store_name,p.business_date,p.employee_id,MAX(p.employee_name_snapshot) salesperson,p.member_id,SUM(CASE WHEN cc.sale_fact_id IS NULL THEN p.amount_cents WHEN cc.allocated_cash_total_cents>0 THEN ROUND(p.amount_cents*cc.beauty_cash_amount_cents/cc.allocated_cash_total_cents) ELSE 0 END) amount_cents")
-            ->group('p.store_id,p.organization_id,p.organization_path_snapshot,p.business_date,p.employee_id,p.member_id')->order('p.business_date','desc')->select()->toArray();
-        usort($facts,static function(array $a,array $b):int{return strcmp((string)$a['business_date'],(string)$b['business_date']);});$cumulative=[];foreach($facts as &$row){$key=(int)$row['member_id'].'|'.(int)$row['employee_id'];$after=(int)($cumulative[$key]??0)+(int)$row['amount_cents'];$cumulative[$key]=$after;$row['daily_cash']=$this->money((int)$row['amount_cents']);$row['cumulative_cash']=$this->money($after);$row['share_30000_before']='';$row['share_30000_after']='';$row['share_50000_before']='';foreach(range(1,5)as$i)$row['share_50000_after_'.$i]='';$row['remark']='';}unset($row);usort($facts,static function(array $a,array $b):int{return strcmp((string)$b['business_date'],(string)$a['business_date']);});
+            ->fieldRaw("p.tenant_id,p.store_id,p.organization_id,p.organization_path_snapshot,MAX(p.organization_name_snapshot) division_name,MAX(p.store_name_snapshot) store_name,p.business_date,p.employee_id,p.order_id,p.source_line_id,MAX(p.employee_name_snapshot) salesperson,p.member_id,SUM(CASE WHEN cc.sale_fact_id IS NULL THEN p.amount_cents WHEN cc.allocated_cash_total_cents>0 THEN ROUND(p.amount_cents*cc.beauty_cash_amount_cents/cc.allocated_cash_total_cents) ELSE 0 END) amount_cents")
+            ->group('p.tenant_id,p.store_id,p.organization_id,p.organization_path_snapshot,p.business_date,p.employee_id,p.order_id,p.source_line_id,p.member_id')->order('p.business_date','desc')->select()->toArray();
+        foreach ($facts as &$fact) $fact['role_snapshot'] = 'salesperson';
+        unset($fact);
+        // Manager facts use checkout-line IDs, while sale facts use order-line
+        // IDs. Join through the immutable order-line bridge and keep manager
+        // rows separate from salesperson rows; their ratios and amounts are
+        // independent snapshots.
+        // A small number of pre-fix manager facts were persisted with a zero
+        // amount after their order line had already moved to `settled`.  Keep
+        // that immutable source record untouched and recover its authoritative
+        // base from the settled collection batch in the report projection.
+        // New checkouts persist sm.amount_cents directly; the fallback only
+        // applies to a zero manager snapshot with a positive collected cash
+        // performance amount.
+        $managerPaymentSql = Db::name('cashier_v3_payment_collection_batch')->alias('smp')
+            ->whereIn('smp.batch_status', ['effective', 'settled'])
+            ->fieldRaw('smp.tenant_id,smp.sales_order_id,MAX(smp.cash_performance_amount_cents) cash_performance_amount_cents')
+            ->group('smp.tenant_id,smp.sales_order_id')
+            ->buildSql();
+        $managerAmountSql = 'CASE WHEN sm.amount_cents<>0 THEN sm.amount_cents '
+            . 'WHEN COALESCE(smp.cash_performance_amount_cents,0)>0 THEN ROUND('
+            . 'smp.cash_performance_amount_cents*sm.allocation_weight_numerator/'
+            . 'NULLIF(sm.allocation_weight_denominator,0)) ELSE 0 END';
+        $managerFacts = $this->participantEmployeeFact($this->applyOrganizationFilters($this->scope(Db::name('cashier_v3_sales_manager_fact')->alias('sm'),$stores,'sm'),'sm',$input,$range),'sm.sales_manager_employee_id')
+            ->join('cashier_v3_sales_order_line sol','sol.tenant_id=sm.tenant_id AND sol.order_id=sm.order_id AND sol.checkout_line_id=sm.source_line_id')
+            ->join('cashier_v3_sale_fact s','s.tenant_id=sol.tenant_id AND s.store_id=sol.store_id AND s.source_line_id=sol.order_line_id AND s.status=\'effective\'')
+            ->leftJoin([$managerPaymentSql=>'smp'],'smp.tenant_id=sm.tenant_id AND smp.sales_order_id=sm.order_id')
+            ->leftJoin([$cardCategorySql=>'cc'],'cc.tenant_id=s.tenant_id AND cc.sale_fact_id=s.fact_id')
+            ->whereBetween('sm.business_date',[$range['start'],$range['end']])->where('sm.status','effective')
+            ->whereRaw("((cc.sale_fact_id IS NOT NULL AND cc.allocated_sale_total_cents=s.sale_amount_cents AND cc.beauty_cash_amount_cents>0) OR (cc.sale_fact_id IS NULL AND s.category_name_snapshot LIKE '%生美%'))")
+            ->fieldRaw("sm.tenant_id,sm.store_id,sm.organization_id,sm.sales_manager_employee_id employee_id,MAX(sm.sales_manager_name_snapshot) salesperson,sm.order_id,sol.order_line_id source_line_id,sm.member_id,sm.business_date,MAX(s.organization_path_snapshot) organization_path_snapshot,MAX(s.organization_name_snapshot) division_name,MAX(s.store_name_snapshot) store_name,SUM(CASE WHEN cc.sale_fact_id IS NULL THEN {$managerAmountSql} WHEN cc.allocated_cash_total_cents>0 THEN ROUND(({$managerAmountSql})*cc.beauty_cash_amount_cents/cc.allocated_cash_total_cents) ELSE 0 END) amount_cents")
+            ->group('sm.tenant_id,sm.store_id,sm.organization_id,sm.sales_manager_employee_id,sm.order_id,sol.order_line_id,sm.member_id,sm.business_date')->select()->toArray();
+        foreach ($managerFacts as &$managerFact) $managerFact['role_snapshot'] = 'sales_manager';
+        unset($managerFact);
+        $facts = array_merge($facts, $managerFacts);
+        usort($facts,static function(array $a,array $b):int{return strcmp((string)$a['business_date'],(string)$b['business_date']);});$cumulative=[];foreach($facts as &$row){$key=(int)$row['member_id'].'|'.(string)($row['role_snapshot']??'').'|'.(int)$row['employee_id'];$after=(int)($cumulative[$key]??0)+(int)$row['amount_cents'];$cumulative[$key]=$after;$row['daily_cash']=$this->money((int)$row['amount_cents']);$row['cumulative_cash']=$this->money($after);$row['share_30000_before']='';$row['share_30000_after']='';$row['share_50000_before']='';foreach(range(1,5)as$i)$row['share_50000_after_'.$i]='';$row['remark']='';}unset($row);usort($facts,static function(array $a,array $b):int{return strcmp((string)$b['business_date'],(string)$a['business_date']);});
         $columns=$this->columns(['division_name'=>'分公司','store_name'=>'门店','business_date'=>'成交日期','salesperson'=>'销售人/销售经理','daily_cash'=>'当日现金业绩','cumulative_cash'=>'累计现金业绩','share_30000_before'=>'3万生美卡项分成前','share_30000_after'=>'3万生美卡项分成后','share_50000_before'=>'5万生美卡项分成前']);foreach(range(1,5)as$i)$columns[]=['key'=>'share_50000_after_'.$i,'label'=>'5万生美卡项分成后'];$columns[]=['key'=>'remark','label'=>'备注'];
         return $this->result('销售人生美大单统计表',$columns,$facts,$input);
     }
