@@ -275,11 +275,44 @@ final class CashierV3OrderLifecycleServices
             ->where('s.store_id', $operator->storeId())->where('s.status', 1)->where('s.is_del', 0)
             ->where('e.status', 1)->where('e.is_del', 0)
             ->field('s.id,s.employee_id,s.staff_name,s.cashier_salesperson_enabled,s.cashier_craftsman_enabled,e.name,e.employment_type_code')->order('s.id asc')->select()->toArray();
+        // Personnel adjustments are append-only: the latest effective
+        // allocation is represented by forward facts whose originals have
+        // not been reversed. Reading every forward row here would resurrect
+        // the pre-adjustment salesperson and, because the old rows do not
+        // carry the current role, make a presale appear as “否”.
         $salespeople = [];
-        foreach (Db::name('cashier_v3_performance_fact')->where('tenant_id', $scope->tenantId())->where('order_id', $source['sourceId'])
-            ->where('performance_type', 'sales_performance_allocated')->where('fact_direction', 'forward')->where('status', 'effective')
-            ->field('source_line_id,employee_id,employee_name_snapshot')->order('id asc')->select()->toArray() as $fact) {
-            $salespeople[(string)$fact['source_line_id']][] = ['employeeId' => (int)$fact['employee_id'], 'name' => (string)$fact['employee_name_snapshot']];
+        foreach ($lines as $line) {
+            $lineId = (string)$line['order_line_id'];
+            $facts = $this->effectivePersonnelFactsForLine(
+                $scope->tenantId(), $source['sourceId'], $lineId, 'sales_performance_allocated'
+            );
+            $totalAmount = array_sum(array_map(static function (array $fact): int {
+                return abs((int)($fact['amount_cents'] ?? 0));
+            }, $facts));
+            $allocatedWeight = 0;
+            $lastFactIndex = count($facts) - 1;
+            foreach ($facts as $factIndex => $fact) {
+                $roleSnapshot = (string)($fact['role_snapshot'] ?? '');
+                // Lifecycle-adjusted facts store exact cents as their
+                // allocation numerator/denominator. The editor contract is
+                // percentage-based, so derive a stable 0–100 percentage
+                // from the effective amounts instead of exposing 13400%.
+                $amount = abs((int)($fact['amount_cents'] ?? 0));
+                $allocationWeight = $lastFactIndex === $factIndex
+                    ? max(0, 100 - $allocatedWeight)
+                    : ($totalAmount > 0 ? intdiv($amount * 100, $totalAmount) : 0);
+                $allocatedWeight += $allocationWeight;
+                $salespeople[$lineId][] = [
+                    'factId' => (string)($fact['fact_id'] ?? ''),
+                    'employeeId' => (int)$fact['employee_id'],
+                    'name' => (string)$fact['employee_name_snapshot'],
+                    'roleSnapshot' => $roleSnapshot,
+                    'isPreSale' => str_ends_with(strtolower($roleSnapshot), ':presale'),
+                    'allocationWeight' => $allocationWeight,
+                    'allocationWeightDenominator' => 100,
+                    'salesPerformanceAmount' => (int)($fact['amount_cents'] ?? 0),
+                ];
+            }
         }
         // 导购/销售经理是独立归属事实，不参与销售业绩金额分配。
         $guides = [];

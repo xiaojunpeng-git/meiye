@@ -64,6 +64,7 @@ const guides = ref([])
 const salesManagers = ref([])
 const guideRoundNo = ref('')
 const attributionSearchOpen = ref(false)
+const attributionSearchRole = ref('guide')
 const otherCraftsmanSearchOpen = ref(false)
 const otherCraftsmanKeyword = ref('')
 const validationMessage = ref('')
@@ -324,7 +325,10 @@ const filteredGuides = computed(() => guides.value.filter(isAttributionTab.value
 const filteredSalesManagers = computed(() => salesManagers.value.filter(isAttributionTab.value ? matchesGroupKeyword : matchesKeyword))
 const selectedGuides = computed(() => guides.value.filter((item) => item.selected))
 const selectedSalesManagers = computed(() => salesManagers.value.filter((item) => item.selected))
-const attributionSearchResults = computed(() => guides.value.filter(matchesGroupKeyword))
+const attributionSearchResults = computed(() => {
+  const records = attributionSearchRole.value === 'salesManager' ? salesManagers.value : guides.value
+  return records.filter(matchesGroupKeyword)
+})
 const activeRecords = computed(() => activeTab.value === 'craftsmen'
   ? craftsmen.value
   : activeTab.value === 'salespeople' ? salespeople.value
@@ -423,7 +427,8 @@ function normalizeProjectCount(item) {
   validationMessage.value = ''
 }
 
-function openAttributionSearch() {
+function openAttributionSearch(role = 'guide') {
+  attributionSearchRole.value = role === 'salesManager' ? 'salesManager' : 'guide'
   groupKeyword.value = ''
   validationMessage.value = ''
   attributionSearchOpen.value = true
@@ -483,12 +488,15 @@ function removeAttribution(item, role) {
 }
 
 function setMarked(item, checked) {
-  if (!item.selected) return
-  if (item.role === 'salespeople' && checked) {
-    salespeople.value.forEach((record) => { record.marked = record.id === item.id })
-  } else {
-    item.marked = checked
+  // 售前复选框本身就是加入销售人的快捷入口；未选中的人员勾选时自动加入，
+  // 避免必须先点整行才能勾选，且允许多个销售人分别保留售前标记。
+  if (item.role === 'salespeople' && checked && !item.selected) {
+    item.selected = true
+    salespersonDefaultWeights(salespeople.value)
   }
+  if (!item.selected) return
+  // 售前标记允许同一明细多选；每名已选销售人的标记都要随快照提交。
+  item.marked = checked
   validationMessage.value = ''
 }
 
@@ -703,7 +711,7 @@ function searchGroupPersonnel(scope) {
     return
   }
   validationMessage.value = ''
-  emit('search-personnel', { scope, keyword: keywordValue })
+  emit('search-personnel', { scope, keyword: keywordValue, target: attributionSearchRole.value })
 }
 </script>
 
@@ -745,7 +753,7 @@ function searchGroupPersonnel(scope) {
           <div class="personnel-role-heading"><h3>销售人</h3></div>
           <button v-for="item in filteredSalespeople" :key="item.id" type="button" class="personnel-simple-item" :class="{ 'is-selected': item.selected }" @click="selectRecord(item)">
             <span>{{ item.name }}</span>
-            <label @click.stop><input :checked="item.marked" type="checkbox" :disabled="!item.selected" @change="setMarked(item, $event.target.checked)">售前</label>
+            <label @click.stop><input :checked="item.marked" type="checkbox" @change="setMarked(item, $event.target.checked)">售前</label>
           </button>
           <p v-if="!filteredSalespeople.length" class="personnel-empty">暂无可选择的销售人</p>
         </section>
@@ -761,6 +769,7 @@ function searchGroupPersonnel(scope) {
               <legend>导购第几轮<strong>*</strong></legend>
               <label v-for="round in [1, 2, 3]" :key="round"><input v-model="guideRoundNo" type="radio" :value="String(round)"><span>第{{ round }}轮</span></label>
             </fieldset>
+            <button type="button" class="button button--secondary personnel-attribution-add" @click="openAttributionSearch('guide')">查询导购</button>
           </div>
           <div v-if="showSalesManagers" class="personnel-attribution-role">
             <strong>销售经理</strong><small>仅 1 人</small>
@@ -768,8 +777,8 @@ function searchGroupPersonnel(scope) {
               <span v-for="item in selectedSalesManagers" :key="`selected-manager-${item.id}`">{{ item.name }}<button type="button" :aria-label="`移除销售经理 ${item.name}`" @click="removeAttribution(item, 'salesManager')">×</button></span>
               <em v-if="!selectedSalesManagers.length">暂未添加</em>
             </div>
+            <button type="button" class="button button--secondary personnel-attribution-add" @click="openAttributionSearch('salesManager')">查询销售经理</button>
           </div>
-          <button type="button" class="button button--secondary personnel-attribution-add" @click="openAttributionSearch">查找人员</button>
         </section>
       </div>
 
@@ -781,6 +790,7 @@ function searchGroupPersonnel(scope) {
           <button v-if="showSalesManagers" type="button" :class="{ 'is-active': activeTab === 'salesManagers' }" @click="activeTab = 'salesManagers'">销售经理</button>
         </div>
         <div class="personnel-full-summary">
+          <button v-if="allowOtherCraftsmen && activeTab === 'craftsmen'" type="button" class="button button--secondary" @click="openOtherCraftsmanSearch">添加其他手艺人</button>
           <button type="button" class="button button--primary" @click="mode = 'simple'">添加人员</button>
           <strong>已选择 {{ selectedRecords.length }} 人<span v-if="historyAdjustment">，已分配 ¥{{ (historyAllocatedCents / 100).toFixed(2) }} / ¥{{ (historyTotalCents / 100).toFixed(2) }}</span><span v-else-if="!activeIsNonPerformance">，分配合计 {{ activeTotal }}%</span><span v-else>（仅记录归属，不分配比例）</span></strong>
         </div>
@@ -823,9 +833,9 @@ function searchGroupPersonnel(scope) {
         </section>
       </div>
 
-      <div v-if="attributionSearchOpen" class="personnel-attribution-search-overlay" role="dialog" aria-modal="true" aria-label="查找导购或销售经理">
+      <div v-if="attributionSearchOpen" class="personnel-attribution-search-overlay" role="dialog" aria-modal="true" :aria-label="attributionSearchRole === 'salesManager' ? '查询销售经理' : '查询导购'">
         <section class="personnel-attribution-search-panel">
-          <header><strong>查找人员</strong><button type="button" aria-label="关闭查找人员" @click="attributionSearchOpen = false">×</button></header>
+          <header><strong>{{ attributionSearchRole === 'salesManager' ? '查询销售经理' : '查询导购' }}</strong><button type="button" aria-label="关闭人员查询" @click="attributionSearchOpen = false">×</button></header>
           <div class="personnel-attribution-search-toolbar">
             <input v-model="groupKeyword" type="search" placeholder="输入姓名或工号后搜索" @keyup.enter="searchGroupPersonnel('group_attributions')">
             <button type="button" class="button button--primary" @click="searchGroupPersonnel('group_attributions')">搜索</button>
@@ -835,8 +845,8 @@ function searchGroupPersonnel(scope) {
             <article v-for="item in attributionSearchResults" :key="`attribution-search-${item.id}`">
               <div><strong>{{ item.name }}</strong><small>{{ item.storeName || '集团人员' }}</small></div>
               <div>
-                <button v-if="showGuides" type="button" class="button button--secondary" @click="addGuide(item)">加入导购</button>
-                <button v-if="showSalesManagers" type="button" class="button button--primary" @click="setSalesManager(item)">设为销售经理</button>
+                <button v-if="attributionSearchRole === 'guide' && showGuides" type="button" class="button button--secondary" @click="addGuide(item)">加入导购</button>
+                <button v-if="attributionSearchRole === 'salesManager' && showSalesManagers" type="button" class="button button--primary" @click="setSalesManager(item)">设为销售经理</button>
               </div>
             </article>
             <p v-if="!attributionSearchResults.length" class="personnel-empty">未找到匹配的在职人员</p>

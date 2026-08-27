@@ -723,7 +723,10 @@ function canonicalCheckoutEntitlementCraftsmen(records = []) {
 function canonicalCheckoutSalespeople(records = []) {
   return (Array.isArray(records) ? records : []).map((record) => ({
     staffId: canonicalCheckoutPositiveId(record?.staffId, record?.staff_id, record?.systemStoreStaffId, record?.id, record?.employeeId, record?.employee_id),
-    allocationWeight: Math.max(0, Math.trunc(Number(record?.allocationWeight ?? record?.allocation_weight ?? record?.performance ?? 0)))
+    allocationWeight: Math.max(0, Math.trunc(Number(record?.allocationWeight ?? record?.allocation_weight ?? record?.performance ?? 0))),
+    // 售前标记属于销售人快照的一部分；否则多选售前虽然能保存分配比例，
+    // 最终销售订单和业绩事实会把它们误记成普通售后销售人。
+    isPreSale: Boolean(record?.isPreSale ?? record?.is_presale ?? record?.marked)
   }))
 }
 
@@ -3375,7 +3378,11 @@ async function searchPersonnelOverlay({ scope, keyword, target } = {}) {
       ...personnelOverlay.value,
       ...(target === 'otherCraftsmen'
         ? { otherCraftsmanCandidates: records }
-        : { guideCandidates: records, salesManagerCandidates: records })
+        : target === 'salesManager'
+          ? { salesManagerCandidates: records }
+          : target === 'guide'
+            ? { guideCandidates: records }
+            : { guideCandidates: records, salesManagerCandidates: records })
     }
   } catch (error) {
     if (personnelOverlay.value?.requestKey !== requestKey) return
@@ -3591,7 +3598,8 @@ async function confirmPersonnelAssignment(result = {}) {
     }))
     const salespeople = (result.salespeople || []).map((record) => ({
       staffId: canonicalCheckoutPositiveId(record.staffId, record.id, record.employeeId, record.employee_id),
-      allocationWeight: Number(record.allocationWeight)
+      allocationWeight: Number(record.allocationWeight),
+      isPreSale: Boolean(record.isPreSale ?? record.is_presale ?? record.marked)
     }))
     const guideSelections = (result.guideSelections || []).map((record) => ({
       staffId: canonicalCheckoutPositiveId(record.staffId, record.id, record.employeeId, record.employee_id),
@@ -3668,7 +3676,8 @@ async function applyPersonnelAssignmentToAll(result = {}) {
   }))
   const salespeople = (hasPurchaseLines ? (result.salespeople || []) : []).map((record) => ({
     staffId: canonicalCheckoutPositiveId(record.staffId, record.id, record.employeeId, record.employee_id),
-    allocationWeight: Number(record.allocationWeight)
+    allocationWeight: Number(record.allocationWeight),
+    isPreSale: Boolean(record.isPreSale ?? record.is_presale ?? record.marked)
   }))
   const guideSelections = (result.guideSelections || []).map((record) => ({
     staffId: canonicalCheckoutPositiveId(record.staffId, record.id, record.employeeId, record.employee_id),

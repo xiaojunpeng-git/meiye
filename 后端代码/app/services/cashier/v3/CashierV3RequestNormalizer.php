@@ -800,7 +800,13 @@ class CashierV3RequestNormalizer
                 }
                 $seen[$staffId] = true;
                 $weightSum += $weight;
-                $normalized[] = ['staffId' => $staffId, 'allocationWeight' => $weight];
+                $normalized[] = [
+                    'staffId' => $staffId,
+                    'allocationWeight' => $weight,
+                    'isPreSale' => !empty($row['isPreSale'])
+                        || !empty($row['is_presale'])
+                        || !empty($row['marked']),
+                ];
             }
             if ($normalized && $weightSum !== 100) {
                 throw self::invalidCartLineSetting('salespeople', 'salesperson_weight_sum_invalid');

@@ -985,7 +985,7 @@ final class CashierV3SalesOrderQueryServices
             ->where('order_status', 'settled')
             ->where('order_direction', 'forward')
             ->field(
-                'order_id,order_no,store_id,store_name_snapshot,member_id,member_name_snapshot,'
+                'order_id,order_no,tenant_id,store_id,store_name_snapshot,member_id,member_name_snapshot,'
                 . 'operator_id,operator_name_snapshot,business_date,business_timezone,occurred_at,settled_at,'
                 . 'recorded_at,source_document_type,source_document_id,source_document_no_snapshot,'
                 . 'business_source_primary_id,business_source_primary_name_snapshot,'
@@ -1006,7 +1006,7 @@ final class CashierV3SalesOrderQueryServices
             ->where('line_direction', 'forward')
             ->field(
                 'order_line_id,order_id,line_no,item_type,item_type_name_snapshot,item_id,'
-                . 'item_code_snapshot,item_name_snapshot,category_name_snapshot,service_object,is_experience,craftsmen_snapshot_json,quantity,'
+                . 'checkout_line_id,item_code_snapshot,item_name_snapshot,category_name_snapshot,service_object,is_experience,craftsmen_snapshot_json,quantity,'
                 . 'original_amount_cents,discount_amount_cents,sale_amount_cents,line_version'
             )
             ->select()
@@ -1108,11 +1108,20 @@ final class CashierV3SalesOrderQueryServices
                 if ($formalLineId === '' || !isset($formalLinesById[$formalLineId])) {
                     throw new \RuntimeException('sales_order_v3_line_snapshot_incomplete');
                 }
+                $checkoutLineId = trim((string)($formalLinesById[$formalLineId]['checkout_line_id'] ?? ''));
+                $guideFacts = $guidesByOrderAndLine[$salesOrderId][$formalLineId] ?? [];
+                if ($guideFacts === [] && $checkoutLineId !== '') {
+                    $guideFacts = $guidesByOrderAndLine[$salesOrderId][$checkoutLineId] ?? [];
+                }
+                $salesManagerFacts = $salesManagersByOrderAndLine[$salesOrderId][$formalLineId] ?? [];
+                if ($salesManagerFacts === [] && $checkoutLineId !== '') {
+                    $salesManagerFacts = $salesManagersByOrderAndLine[$salesOrderId][$checkoutLineId] ?? [];
+                }
                 $linkedLines[$legacyLineId] = [
                     'authority' => $formalLinesById[$formalLineId],
                     'salespeople' => $salespeopleByOrderAndLine[$salesOrderId][$formalLineId] ?? [],
-                    'salesManagers' => $salesManagersByOrderAndLine[$salesOrderId][$formalLineId] ?? [],
-                    'guides' => $guidesByOrderAndLine[$salesOrderId][$formalLineId] ?? [],
+                    'salesManagers' => $salesManagerFacts,
+                    'guides' => $guideFacts,
                 ];
             }
             $result[(int)$legacyOrderId] = [
@@ -1145,7 +1154,7 @@ final class CashierV3SalesOrderQueryServices
             ->whereIn('order_id', $orderIds)
             ->where('line_status', 'settled')
             ->where('line_direction', 'forward')
-            ->field('order_line_id,order_id,line_no,item_type,item_type_name_snapshot,item_id,item_code_snapshot,item_name_snapshot,category_name_snapshot,service_object,is_experience,craftsmen_snapshot_json,quantity,original_amount_cents,discount_amount_cents,sale_amount_cents,debt_amount_cents,coupon_user_id,coupon_name_snapshot,coupon_discount_cents,line_version')
+            ->field('order_line_id,checkout_line_id,order_id,line_no,item_type,item_type_name_snapshot,item_id,item_code_snapshot,item_name_snapshot,category_name_snapshot,service_object,is_experience,craftsmen_snapshot_json,quantity,original_amount_cents,discount_amount_cents,sale_amount_cents,debt_amount_cents,coupon_user_id,coupon_name_snapshot,coupon_discount_cents,line_version')
             ->order('order_id', 'asc')->order('line_no', 'asc')->select()->toArray() as $line) {
             $linesByOrder[(string)$line['order_id']][] = $line;
         }
@@ -1350,14 +1359,24 @@ final class CashierV3SalesOrderQueryServices
         $items = [];
         $salespersonNames = [];
         foreach ($snapshot['lines'] as $line) {
+            $lineId = (string)$line['order_line_id'];
+            $checkoutLineId = trim((string)($line['checkout_line_id'] ?? ''));
+            $salesManagers = $snapshot['salesManagersByLine'][$lineId] ?? [];
+            if ($salesManagers === [] && $checkoutLineId !== '') {
+                $salesManagers = $snapshot['salesManagersByLine'][$checkoutLineId] ?? [];
+            }
+            $guides = $snapshot['guidesByLine'][$lineId] ?? [];
+            if ($guides === [] && $checkoutLineId !== '') {
+                $guides = $snapshot['guidesByLine'][$checkoutLineId] ?? [];
+            }
             $items[] = $this->mapAuthorityLine(
                 $line,
-                $snapshot['salespeopleByLine'][(string)$line['order_line_id']] ?? [],
-                $snapshot['craftsmenByLine'][(string)$line['order_line_id']] ?? [],
-                $snapshot['salesManagersByLine'][(string)$line['order_line_id']] ?? [],
-                $snapshot['guidesByLine'][(string)$line['order_line_id']] ?? []
+                $snapshot['salespeopleByLine'][$lineId] ?? [],
+                $snapshot['craftsmenByLine'][$lineId] ?? [],
+                $salesManagers,
+                $guides
             );
-            foreach ($snapshot['salespeopleByLine'][(string)$line['order_line_id']] ?? [] as $person) {
+            foreach ($snapshot['salespeopleByLine'][$lineId] ?? [] as $person) {
                 $name = $this->salespersonDisplayName($person);
                 if ($name !== '') $salespersonNames[$name] = true;
             }

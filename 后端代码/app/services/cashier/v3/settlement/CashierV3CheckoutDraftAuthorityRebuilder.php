@@ -354,7 +354,16 @@ final class CashierV3CheckoutDraftAuthorityRebuilder
             if ($staffId <= 0 || $allocation <= 0 || $allocation > 100) {
                 throw self::failure('checkout_draft_salespeople_snapshot_invalid');
             }
-            $result[] = ['staffId' => $staffId, 'allocationWeight' => $allocation];
+            $result[] = [
+                'staffId' => $staffId,
+                'allocationWeight' => $allocation,
+                // Do not rely on a chained null-coalescing expression here:
+                // legacy PHP error handlers can still report the final alias
+                // as an undefined index while rebuilding an older snapshot.
+                'isPreSale' => !empty($row['isPreSale'])
+                    || !empty($row['is_presale'])
+                    || !empty($row['marked']),
+            ];
             $weight += $allocation;
         }
         if ($result !== [] && $weight !== 100) throw self::failure('checkout_draft_salespeople_weight_invalid');

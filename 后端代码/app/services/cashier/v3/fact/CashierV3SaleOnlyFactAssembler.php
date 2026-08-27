@@ -277,7 +277,7 @@ final class CashierV3SaleOnlyFactAssembler
                     'employeeNameSnapshot' => $employeeName,
                     'employeeTypeSnapshot' => $employeeType,
                     'employeeTypeAuthorityVersion' => $employeeTypeVersion,
-                    'roleSnapshot' => 'salesperson',
+                    'roleSnapshot' => 'salesperson:' . (!empty($person['isPreSale']) ? 'presale' : 'postsale'),
                     'allocationWeightNumerator' => $weight,
                     'allocationWeightDenominator' => 100,
                     'allocationBaseAmountCents' => $lineCash,
