@@ -1,4 +1,7 @@
 const API_ORIGIN_KEY = 'mobile.runtime.apiOrigin'
+// The released WeChat merchant program is provisioned for the Ruihao
+// production instance. H5 keeps its local-development origin below.
+const MP_WEIXIN_PRODUCTION_ORIGIN = 'https://rh.cc3798.com'
 
 function normalizedOrigin(value : any) : string {
 	if (typeof value != 'string') return ''
@@ -27,6 +30,11 @@ function localWebDevelopmentOrigin() : string {
 // as a customer-specific source branch. H5 local development inherits the
 // current private-network host so a network change cannot strand the preview.
 export function mobileApiOrigin() : string {
+	// #ifdef MP-WEIXIN
+	// Never reuse a simulator/local address saved in storage when the released
+	// mini program is running. Its service endpoint is fixed at build time.
+	return normalizedOrigin(MP_WEIXIN_PRODUCTION_ORIGIN)
+	// #endif
 	// The source preview must never be silently overridden by an old saved 8080
 	// address. Customer installations and other local previews keep their
 	// provisioned address unchanged.

@@ -212,7 +212,7 @@
 	.merchant-home-page__metric-card--target .merchant-home-page__metric-value { color: #6659a0; }
 	.merchant-home-page__metric-source { margin-top: auto; overflow: hidden; font-size: 9px; line-height: 13px; color: #a0aab4; text-overflow: ellipsis; white-space: nowrap; }
 	.merchant-home-page__trend-card, .merchant-home-page__summary-card, .merchant-home-page__ranking-card { overflow: hidden; border-radius: 14px; background-color: #ffffff; box-shadow: 0 5px 16px rgba(45, 74, 101, 0.06); }
-	.merchant-home-page__trend-card { padding: 13px; }
+	.merchant-home-page__trend-card { margin-top: 10px; padding: 13px; }
 	.merchant-home-page__card-head { display: flex; flex-direction: row; align-items: center; justify-content: space-between; }
 	.merchant-home-page__card-title { display: block; font-size: 14px; font-weight: 800; line-height: 19px; color: #304961; }
 	.merchant-home-page__card-note { display: block; margin-top: 2px; font-size: 10px; line-height: 14px; color: #93a0ad; }

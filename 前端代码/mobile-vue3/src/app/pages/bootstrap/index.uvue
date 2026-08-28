@@ -1,13 +1,12 @@
 <template>
 	<view class="page">
 		<view class="hero">
-			<text class="platform">{{ platformCode }}</text>
 			<text class="title">商家端登录</text>
 			<text class="subtitle">使用员工档案中的登录账号进入工作台</text>
 		</view>
 		<view class="login-card">
-			<text class="field-label">服务地址</text>
-			<input class="field-input" :value="apiOrigin" placeholder="例如 http://127.0.0.1:8080" @input="apiOrigin = $event.detail.value" />
+			<text v-if="platformCode !== 'MP_WEIXIN'" class="field-label">服务地址</text>
+			<input v-if="platformCode !== 'MP_WEIXIN'" class="field-input" :value="apiOrigin" placeholder="例如 http://127.0.0.1:8080" @input="apiOrigin = $event.detail.value" />
 			<text class="field-label">员工账号</text>
 			<input class="field-input" :value="account" placeholder="请输入员工账号" @input="account = $event.detail.value" />
 			<text class="field-label">登录密码</text>
@@ -17,7 +16,7 @@
 		</view>
 		<view class="status-row">
 			<view class="status-dot" :class="{ 'status-dot--error': !foundationReady }"></view>
-			<text class="status-text">{{ foundationReady ? '本机调试使用真实手机端接口' : '基础校验未通过' }}</text>
+			<text class="status-text">{{ foundationReady ? (platformCode === 'MP_WEIXIN' ? '已连接瑞昊正式服务' : '本机调试使用真实手机端接口') : '基础校验未通过' }}</text>
 		</view>
 	</view>
 </template>
@@ -60,7 +59,7 @@
 
 	function login() {
 		message.value = ''
-		if (!updateMobileApiOrigin(apiOrigin.value)) { message.value = '服务地址格式无效。'; return }
+		if (platformCode.value !== 'MP_WEIXIN' && !updateMobileApiOrigin(apiOrigin.value)) { message.value = '服务地址格式无效。'; return }
 		loading.value = true
 		enterMerchantWithPassword(account.value, password.value, (result : any) => {
 			loading.value = false

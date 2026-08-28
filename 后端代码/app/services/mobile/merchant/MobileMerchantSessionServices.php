@@ -43,9 +43,13 @@ final class MobileMerchantSessionServices
         $employeeId = (int)$authenticated['employee_id'];
         // Password login authenticates the employee account directly.  It must
         // not require a legacy member uid just to issue the merchant session.
+        // The current production schema keeps both provenance columns
+        // non-null. Password login has no preceding app session or phone
+        // verification, so issue opaque provenance IDs for this direct path;
+        // they are audit values only and are never treated as verified SMS.
         $root = $this->issueMerchantSession(
             $employeeId,
-            ['app_session_id' => null, 'installation_digest' => hash('sha256', $installationId)],
+            ['app_session_id' => $this->uuid(), 'installation_digest' => hash('sha256', $installationId)],
             null,
             $meta,
             $idempotencyKey
@@ -120,7 +124,7 @@ final class MobileMerchantSessionServices
                 'token_hash' => hash('sha256', $token), 'client_session_id_hash' => hash('sha256', (string)$meta['clientSessionId']),
                 'installation_digest' => (string)$app['installation_digest'], 'auth_version' => (int)$state['auth_version'],
                 'session_epoch' => $epoch, 'employee_phone_binding_version' => (int)$state['phone_binding_version'],
-                'elevation_use_id' => $this->uuid(), 'verification_id' => $verification['verification_id'] ?? null, 'state' => 'ACTIVE',
+                'elevation_use_id' => $this->uuid(), 'verification_id' => $verification['verification_id'] ?? $this->uuid(), 'state' => 'ACTIVE',
                 'expires_at' => $expiresAt, 'revoked_at' => 0, 'session_end_cause' => 'NONE', 'created_at' => $now, 'updated_at' => $now,
             ]);
             Db::name('mobile_merchant_lease')->where('id', (int)$lease['id'])->update([
