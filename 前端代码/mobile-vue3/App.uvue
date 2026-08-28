@@ -1,5 +1,8 @@
 <script setup lang="uts">
+	import { openMiniProgramMerchantBootstrapOnLaunch } from './src/shared/platform/mobile-navigation.uts'
+
 	onLaunch(() => {
+		openMiniProgramMerchantBootstrapOnLaunch()
 	})
 </script>
 

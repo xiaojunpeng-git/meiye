@@ -1,6 +1,7 @@
 {
 	"contractVersion": "mobile-platform-v1",
 	"platforms": [
+		"WEB",
 		"MP_WEIXIN",
 		"APP_ANDROID",
 		"APP_IOS",

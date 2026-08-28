@@ -1,102 +1,40 @@
 <template>
 	<view class="merchant-profile">
-		<view class="merchant-profile__header">
-			<text class="merchant-profile__eyebrow">商家端</text>
-			<text class="merchant-profile__title">我的</text>
-		</view>
+		<view class="merchant-profile__header"><text class="merchant-profile__eyebrow">商家端</text><text class="merchant-profile__title">我的</text></view>
 
-		<scroll-view scroll-y class="merchant-profile__content">
-			<view class="merchant-profile__account">
-				<view class="merchant-profile__avatar" :aria-label="accountName">
-					<text class="merchant-profile__avatar-label">{{ accountInitial }}</text>
-				</view>
-				<view class="merchant-profile__account-copy">
-					<text class="merchant-profile__account-title">{{ accountName }}</text>
-					<text class="merchant-profile__account-detail">{{ accountDetail }}</text>
-				</view>
-			</view>
+		<scroll-view scroll-y refresher-enabled="true" :refresher-triggered="refreshing" @refresherrefresh="onPullRefresh" class="merchant-profile__content">
+			<view class="merchant-profile__content-inner">
+				<view class="merchant-profile__account-card"><view class="merchant-profile__avatar" :aria-label="accountName"><text class="merchant-profile__avatar-label">{{ accountInitial }}</text></view><view class="merchant-profile__account-copy"><text class="merchant-profile__account-title">{{ accountName }}</text><text class="merchant-profile__account-detail">{{ accountDetail }}</text></view></view>
 
-			<view class="merchant-profile__section">
-				<text class="merchant-profile__section-title">账号与权限</text>
-				<view class="merchant-profile__list">
-					<view
-						v-for="entry in accountEntries"
-						:key="entry.key"
-						class="merchant-profile__entry"
-						role="button"
-						@tap="selectEntry(entry.label)"
-					>
-						<view class="merchant-profile__entry-copy">
-							<text class="merchant-profile__entry-label">{{ entry.label }}</text>
-							<text class="merchant-profile__entry-detail">{{ entry.detail }}</text>
-						</view>
-						<text class="merchant-profile__entry-arrow">&gt;</text>
-					</view>
-				</view>
-			</view>
+				<view class="merchant-profile__section"><view class="merchant-profile__section-heading"><text class="merchant-profile__section-kicker">账号信息</text><text class="merchant-profile__section-title">账号与权限</text></view><view class="merchant-profile__list-card"><view v-for="entry in accountEntries" :key="entry.key" class="merchant-profile__entry" role="button" @tap="openEntry(entry.key)"><view class="merchant-profile__entry-icon" :class="'merchant-profile__entry-icon--' + entry.key"><text>{{ entry.icon }}</text></view><view class="merchant-profile__entry-copy"><text class="merchant-profile__entry-label">{{ entry.label }}</text><text class="merchant-profile__entry-detail">{{ entry.detail }}</text></view><text class="merchant-profile__entry-arrow">›</text></view></view></view>
 
-			<view class="merchant-profile__section">
-				<text class="merchant-profile__section-title">工作支持</text>
-				<view class="merchant-profile__list">
-					<view
-						v-for="entry in supportEntries"
-						:key="entry.key"
-						class="merchant-profile__entry"
-						role="button"
-						@tap="selectEntry(entry.label)"
-					>
-						<view class="merchant-profile__entry-copy">
-							<text class="merchant-profile__entry-label">{{ entry.label }}</text>
-							<text class="merchant-profile__entry-detail">{{ entry.detail }}</text>
-						</view>
-						<text class="merchant-profile__entry-arrow">&gt;</text>
-					</view>
-				</view>
-			</view>
+				<view class="merchant-profile__logout" :class="{ 'merchant-profile__logout--disabled': loggingOut }" @tap="logout"><text>{{ loggingOut ? '正在退出商家端…' : '退出商家端' }}</text></view>
 
-			<view class="merchant-profile__session"><text class="merchant-profile__session-label">当前商家会话</text><text class="merchant-profile__session-value">{{ sessionState }}</text></view>
-			<view class="merchant-profile__logout" @tap="logout"><text>{{ loggingOut ? '正在退出商家端…' : '退出商家端' }}</text></view>
-
-			<view v-if="selectedEntry.length > 0" class="merchant-profile__notice" role="status">
-				<text class="merchant-profile__notice-title">{{ selectedEntry }}</text>
-				<text class="merchant-profile__notice-copy">该功能入口已预留，正在接入账号与权限服务。</text>
 			</view>
 		</scroll-view>
 
-		<view class="merchant-profile__tabs" role="tablist">
-			<navigator class="merchant-profile__tab" url="/src/merchant/pages/warehouse/index" open-type="navigate" role="tab" aria-selected="false"><text>数仓</text></navigator>
-			<navigator class="merchant-profile__tab" url="/src/merchant/pages/customers/index" open-type="navigate" role="tab" aria-selected="false"><text>客户</text></navigator>
-			<navigator class="merchant-profile__tab" url="/src/merchant/pages/workbench/index" open-type="navigate" role="tab" aria-selected="false"><text>工作台</text></navigator>
-			<navigator class="merchant-profile__tab" url="/src/merchant/pages/goals/index" open-type="navigate" role="tab" aria-selected="false"><text>目标</text></navigator>
-			<view class="merchant-profile__tab merchant-profile__tab--active" role="tab" aria-selected="true"><text>我的</text></view>
-		</view>
+		<MerchantPrimaryTabBar active-key="profile" />
 	</view>
 </template>
 
 <script setup lang="uts">
-	import { currentMerchantRoot } from '../../platform/mobile-merchant-session.uts'
-	import { logoutMobileMerchant } from '../../api/mobile-merchant-session-client.uts'
-	import { openMerchantBootstrap } from '../../platform/mobile-navigation.uts'
-	const accountEntries = [
-		{ key: 'account', label: '账号资料', detail: '查看登录账号和基础资料' },
-		{ key: 'security', label: '账号与安全', detail: '登录方式与设备管理' },
-		{ key: 'scope', label: '门店与权限', detail: '查看当前可用门店和权限范围' }
-	]
-	const supportEntries = [
-		{ key: 'notification', label: '消息通知', detail: '查看业务提醒和系统通知' },
-		{ key: 'help', label: '帮助与反馈', detail: '获取使用帮助并提交问题反馈' },
-		{ key: 'about', label: '关于', detail: '查看版本与服务信息' }
-	]
+	import MerchantPrimaryTabBar from '../../../shared/components/merchant-primary-tab-bar.uvue'
+	import { currentMerchantRoot } from '../../../shared/platform/mobile-merchant-session.uts'
+	import { logoutMobileMerchant } from '../../../shared/api/mobile-merchant-session-client.uts'
+	import { openMerchantAccount, openMerchantBootstrap, openMerchantScope } from '../../../shared/platform/mobile-navigation.uts'
 
-	const selectedEntry = ref('')
+	const accountEntries = [
+		{ key: 'account', icon: '账', label: '账号资料', detail: '查看并修改登录账号和密码' },
+		{ key: 'scope', icon: '权', label: '组织权限', detail: '按组织树查看当前数据权限范围' }
+	]
 	const accountName = ref('账号信息尚未加载')
 	const accountDetail = ref('登录后可查看姓名、门店与岗位信息')
 	const accountInitial = ref('账号')
-	const sessionState = ref('未登录商家端')
 	const loggingOut = ref(false)
+	const refreshing = ref(false)
 
 	onShow(() => loadAccount())
-
+	function onPullRefresh() : void { if (refreshing.value) return; refreshing.value = true; loadAccount(); setTimeout(() => { refreshing.value = false }, 900) }
 	function loadAccount() {
 		let root = currentMerchantRoot()
 		if (root == null || root.employee == null) return
@@ -107,221 +45,48 @@
 		let store = String(context.storeName || context.name || '')
 		let status = String(employee.status || '')
 		accountDetail.value = (store.length > 0 ? store + ' · ' : '') + (status == 'ACTIVE' ? '当前在职' : '账号状态待核对')
-		sessionState.value = String(root.reasonCode || '') == 'READY' ? '已登录 · 权限已加载' : '会话状态待刷新'
 	}
-
-	function selectEntry(label : string) {
-		selectedEntry.value = label
-	}
-
+	function openEntry(key : string) { if (key === 'account') { openMerchantAccount(); return }; if (key === 'scope') openMerchantScope() }
 	function logout() {
 		if (loggingOut.value) return
 		loggingOut.value = true
 		logoutMobileMerchant((result : any) => {
 			loggingOut.value = false
-			if (!result.ok) { selectedEntry.value = String(result.message || '退出商家端失败。'); return }
-			sessionState.value = '已退出商家端'
+			if (!result.ok) return
 			openMerchantBootstrap()
 		})
 	}
 </script>
 
 <style>
-	.merchant-profile {
-		display: flex;
-		min-height: 100%;
-		flex: 1;
-		flex-direction: column;
-		background-color: #f5f7fa;
-	}
-
-	.merchant-profile__header {
-		display: flex;
-		flex-direction: column;
-		padding: 52px 20px 18px 20px;
-		border-bottom-width: 1px;
-		border-bottom-style: solid;
-		border-bottom-color: #dde4ed;
-		background-color: #ffffff;
-	}
-
-	.merchant-profile__eyebrow {
-		font-size: 12px;
-		font-weight: 600;
-		line-height: 18px;
-		letter-spacing: 0px;
-		color: #697586;
-	}
-
-	.merchant-profile__title {
-		margin-top: 6px;
-		font-size: 24px;
-		font-weight: 700;
-		line-height: 34px;
-		letter-spacing: 0px;
-		color: #1f2329;
-	}
-
-	.merchant-profile__content {
-		min-height: 0;
-		flex: 1;
-	}
-
-	.merchant-profile__account {
-		display: flex;
-		flex-direction: row;
-		align-items: center;
-		padding: 20px;
-		border-bottom-width: 1px;
-		border-bottom-style: solid;
-		border-bottom-color: #dde4ed;
-		background-color: #ffffff;
-	}
-
-	.merchant-profile__avatar {
-		display: flex;
-		width: 52px;
-		height: 52px;
-		align-items: center;
-		justify-content: center;
-		border-radius: 26px;
-		background-color: #e8f1f9;
-	}
-
-	.merchant-profile__avatar-label {
-		font-size: 12px;
-		font-weight: 700;
-		line-height: 18px;
-		letter-spacing: 0px;
-		color: #1677cc;
-	}
-
-	.merchant-profile__account-copy {
-		display: flex;
-		min-width: 0;
-		flex: 1;
-		flex-direction: column;
-		margin-left: 14px;
-	}
-
-	.merchant-profile__account-title {
-		font-size: 16px;
-		font-weight: 700;
-		line-height: 24px;
-		letter-spacing: 0px;
-		color: #303133;
-	}
-
-	.merchant-profile__account-detail {
-		margin-top: 3px;
-		font-size: 13px;
-		line-height: 20px;
-		letter-spacing: 0px;
-		color: #697586;
-	}
-
-	.merchant-profile__section {
-		padding-top: 18px;
-	}
-
-	.merchant-profile__section-title {
-		display: block;
-		padding: 0px 20px 8px 20px;
-		font-size: 12px;
-		font-weight: 600;
-		line-height: 18px;
-		letter-spacing: 0px;
-		color: #697586;
-	}
-
-	.merchant-profile__list {
-		border-top-width: 1px;
-		border-top-style: solid;
-		border-top-color: #dde4ed;
-		border-bottom-width: 1px;
-		border-bottom-style: solid;
-		border-bottom-color: #dde4ed;
-		background-color: #ffffff;
-	}
-
-	.merchant-profile__entry {
-		display: flex;
-		min-height: 62px;
-		flex-direction: row;
-		align-items: center;
-		padding: 0px 20px 0px 20px;
-		border-bottom-width: 1px;
-		border-bottom-style: solid;
-		border-bottom-color: #edf1f5;
-	}
-
-	.merchant-profile__entry:last-child {
-		border-bottom-width: 0px;
-	}
-
-	.merchant-profile__entry-copy {
-		display: flex;
-		min-width: 0;
-		flex: 1;
-		flex-direction: column;
-	}
-
-	.merchant-profile__entry-label {
-		font-size: 15px;
-		font-weight: 600;
-		line-height: 22px;
-		letter-spacing: 0px;
-		color: #303133;
-	}
-
-	.merchant-profile__entry-detail {
-		margin-top: 2px;
-		font-size: 12px;
-		line-height: 18px;
-		letter-spacing: 0px;
-		color: #7c8795;
-	}
-
-	.merchant-profile__entry-arrow {
-		margin-left: 12px;
-		font-size: 18px;
-		font-weight: 500;
-		line-height: 20px;
-		letter-spacing: 0px;
-		color: #98a2b3;
-	}
-
-	.merchant-profile__notice {
-		display: flex;
-		flex-direction: column;
-		margin: 18px 20px 32px 20px;
-		padding: 14px 14px 14px 14px;
-		border-left-width: 3px;
-		border-left-style: solid;
-		border-left-color: #1677cc;
-		background-color: #f7fbff;
-	}
-
-	.merchant-profile__notice-title {
-		font-size: 14px;
-		font-weight: 700;
-		line-height: 20px;
-		letter-spacing: 0px;
-		color: #1f5f96;
-	}
-
-	.merchant-profile__notice-copy {
-		margin-top: 4px;
-		font-size: 13px;
-		line-height: 20px;
-		letter-spacing: 0px;
-		color: #526071;
-	}
-	.merchant-profile__logout { display: flex; min-height: 48px; flex-direction: row; align-items: center; justify-content: center; margin: 18px 20px 0px 20px; border-width: 1px; border-style: solid; border-color: #e6b7b7; background-color: #fffafa; color: #a44848; font-size: 14px; font-weight: 700; }
-	.merchant-profile__session { display: flex; flex-direction: row; align-items: center; justify-content: space-between; margin: 18px 20px 0px 20px; padding: 12px 0px; border-top-width: 1px; border-bottom-width: 1px; border-style: solid; border-color: #dde4ed; }
-	.merchant-profile__session-label { font-size: 13px; color: #697586; }
-	.merchant-profile__session-value { font-size: 13px; font-weight: 600; color: #1677cc; }
-	.merchant-profile__tabs { display: flex; min-height: 64px; flex-direction: row; align-items: stretch; border-top-width: 1px; border-top-style: solid; border-top-color: #dde4ed; background-color: #ffffff; }
-	.merchant-profile__tab { display: flex; min-width: 0; flex: 1; flex-direction: row; align-items: center; justify-content: center; border-top-width: 2px; border-top-style: solid; border-top-color: #ffffff; font-size: 12px; font-weight: 600; color: #526071; }
-	.merchant-profile__tab--active { border-top-color: #1677cc; background-color: #f7fbff; color: #1677cc; }
+	.merchant-profile { display: flex; min-height: 100%; flex: 1; flex-direction: column; background-color: #f4f7fa; }
+	.merchant-profile__header { display: flex; flex-direction: column; padding: 52px 18px 16px 18px; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #e5edf5; background-color: #ffffff; }
+	.merchant-profile__eyebrow, .merchant-profile__section-kicker { font-size: 12px; font-weight: 600; line-height: 18px; color: #71839a; }
+	.merchant-profile__title { margin-top: 4px; font-size: 25px; font-weight: 700; line-height: 34px; color: #26384d; }
+	.merchant-profile__content { min-height: 0; flex: 1; }
+	.merchant-profile__content-inner { width: 100%; max-width: 1200px; box-sizing: border-box; margin: 0 auto; padding: 18px 18px 112px 18px; }
+	.merchant-profile__account-card { display: flex; flex-direction: row; align-items: center; padding: 17px 15px; border-radius: 8px; background-color: #ffffff; box-shadow: 0 8px 20px rgba(60, 88, 130, 0.08); }
+	.merchant-profile__avatar { display: flex; width: 50px; height: 50px; flex-shrink: 0; flex-direction: row; align-items: center; justify-content: center; border-radius: 8px; background-color: #eaf1ff; }
+	.merchant-profile__avatar-label { font-size: 18px; font-weight: 700; line-height: 24px; color: #4a72c5; }
+	.merchant-profile__account-copy { display: flex; min-width: 0; flex: 1; flex-direction: column; margin-left: 13px; }
+	.merchant-profile__account-title { overflow: hidden; font-size: 17px; font-weight: 700; line-height: 25px; color: #26384d; text-overflow: ellipsis; white-space: nowrap; }
+	.merchant-profile__account-detail { overflow: hidden; margin-top: 3px; font-size: 12px; line-height: 18px; color: #71839a; text-overflow: ellipsis; white-space: nowrap; }
+	.merchant-profile__section { margin-top: 24px; }
+	.merchant-profile__section-heading { display: flex; flex-direction: column; margin-bottom: 10px; }
+	.merchant-profile__section-title { margin-top: 2px; font-size: 17px; font-weight: 700; line-height: 25px; color: #26384d; }
+	.merchant-profile__list-card { overflow: hidden; border-radius: 8px; background-color: #ffffff; box-shadow: 0 8px 20px rgba(60, 88, 130, 0.08); }
+	.merchant-profile__entry { display: flex; min-height: 68px; flex-direction: row; align-items: center; padding: 0 14px; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #edf1f5; }
+	.merchant-profile__entry:last-child { border-bottom-width: 0; }
+	.merchant-profile__entry-icon { display: flex; width: 34px; height: 34px; flex-shrink: 0; flex-direction: row; align-items: center; justify-content: center; border-radius: 8px; font-size: 13px; font-weight: 700; }
+	.merchant-profile__entry-icon--account { background-color: #eaf1ff; color: #4a72c5; }.merchant-profile__entry-icon--security { background-color: #e8f6f0; color: #21845f; }.merchant-profile__entry-icon--scope { background-color: #fff2df; color: #bf7726; }.merchant-profile__entry-icon--notification { background-color: #f1edff; color: #7963c7; }.merchant-profile__entry-icon--help { background-color: #e8f6f7; color: #287f90; }.merchant-profile__entry-icon--about { background-color: #edf1f6; color: #61748b; }
+	.merchant-profile__entry-copy { display: flex; min-width: 0; flex: 1; flex-direction: column; margin-left: 11px; }
+	.merchant-profile__entry-label { font-size: 14px; font-weight: 700; line-height: 21px; color: #38516a; }
+	.merchant-profile__entry-detail { overflow: hidden; margin-top: 1px; font-size: 11px; line-height: 17px; color: #8493a5; text-overflow: ellipsis; white-space: nowrap; }
+	.merchant-profile__entry-arrow { flex-shrink: 0; margin-left: 8px; font-size: 21px; line-height: 28px; color: #9eacbb; }
+	.merchant-profile__session { display: flex; flex-direction: row; align-items: center; justify-content: space-between; margin-top: 18px; padding: 10px 12px; border-radius: 8px; background-color: #edf5fb; }
+	.merchant-profile__session-label, .merchant-profile__session-value { font-size: 11px; line-height: 17px; color: #5f7890; }.merchant-profile__session-value { max-width: 65%; overflow: hidden; font-weight: 600; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+	.merchant-profile__logout { display: flex; min-height: 46px; flex-direction: row; align-items: center; justify-content: center; margin-top: 18px; border-radius: 8px; background-color: #fff2f0; font-size: 14px; font-weight: 700; color: #b14b44; }
+	.merchant-profile__logout--disabled { color: #ba8d87; }
+	.merchant-profile__notice { display: flex; flex-direction: column; margin-top: 14px; padding: 12px; border-radius: 8px; background-color: #f6f9fc; }
+	.merchant-profile__notice-title { font-size: 13px; font-weight: 700; line-height: 20px; color: #526f89; }.merchant-profile__notice-copy { margin-top: 3px; font-size: 11px; line-height: 17px; color: #8493a5; }
 </style>

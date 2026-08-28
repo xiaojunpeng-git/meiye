@@ -48,12 +48,6 @@ final class MobileMerchantRequestContextResolver
             $staffName = $this->employeeName($employeeId);
         }
         $actions = $this->availableActions($mobileAuth, $dataScope['mode']);
-        if ($staffId <= 0) {
-            // Customer-care commands must carry a real staff/employee owner snapshot.
-            $actions = array_values(array_filter($actions, static function (string $action): bool {
-                return $action !== 'CUSTOMER_CARE_WRITE';
-            }));
-        }
         $accountId = $this->internalAccountId($employeeId);
         return [
             'employeeId' => $employeeId,
@@ -104,6 +98,8 @@ final class MobileMerchantRequestContextResolver
             throw MobileApiException::business('STORE_DISABLED', '当前门店或组织已失效，请重新进入商家端。');
         }
         $actions = (array)$context['availableActions'];
+        // Managers without a concrete store-staff assignment can read their
+        // server-authorized store scope, but cannot create an unattributable record.
         $canWrite = (int)$context['staffId'] > 0
             && in_array('CUSTOMER_CARE_WRITE', $actions, true);
         return [
@@ -119,8 +115,10 @@ final class MobileMerchantRequestContextResolver
                 && in_array('CUSTOMER_CARE_VIEW', $actions, true),
             'canCreateTask' => $canWrite, 'canCreateRecord' => $canWrite,
             'canReassign' => false,
-            'canViewStatistics' => $context['dataScopeMode'] === 'STORES'
-                && in_array('CUSTOMER_CARE_VIEW', $actions, true),
+            // The projection always applies visibleStoreIds on the server.  A
+            // data-scope label must not hide those scoped metrics from an
+            // otherwise authorized mobile customer-care user.
+            'canViewStatistics' => in_array('CUSTOMER_CARE_VIEW', $actions, true),
         ];
     }
 

@@ -1,0 +1,65 @@
+import { currentMerchantRoot } from './mobile-merchant-session.uts'
+
+// The mobile merchant tab is an entrance permission, not a visual-only menu.
+// Keep the mapping in one place so the tab bar and deep-link guards enforce the
+// same contract returned by /mobile/merchant/bootstrap.
+const TAB_ACTIONS : any = {
+	home: ['MERCHANT_HOME_VIEW', 'mobile.merchant.home', '401009'],
+	warehouse: ['MERCHANT_WAREHOUSE_VIEW', 'mobile.merchant.warehouse', '401007'],
+	customers: ['CUSTOMER_VIEW', 'mobile.merchant.customers', '401004'],
+	workbench: ['RESERVATION_VIEW', 'mobile.merchant.workbench', '401001']
+}
+
+export function merchantTabAction(tabKey : string) : string {
+	let actions : any = TAB_ACTIONS[tabKey]
+	return actions != null && Array.isArray(actions) && actions.length > 0 ? String(actions[0]) : ''
+}
+
+export function merchantTabIsAllowed(tabKey : string, root : any = null) : boolean {
+	let state = root
+	if (state == null) state = currentMerchantRoot()
+	// “我的”是账号与退出入口，不属于四个业务 Tab 的功能权限控制范围。
+	if (tabKey === 'profile') return state != null
+	if (state == null || typeof state != 'object') return false
+	let source : any = Array.isArray(state.availableActions) ? state.availableActions : state.capabilities
+	if (!Array.isArray(source)) return false
+	let granted = new Array<string>()
+	for (let index = 0; index < source.length; index++) {
+		let value = source[index]
+		if (value != null && typeof value == 'object') {
+			let code = String(value.action || value.code || value.feature_code || value.featureCode || value.id || '')
+			if (code.length > 0) granted.push(code)
+		} else {
+			let code = String(value || '')
+			if (code.length > 0) granted.push(code)
+		}
+	}
+	let actions : any = TAB_ACTIONS[tabKey]
+	if (!Array.isArray(actions)) return false
+	for (let actionIndex = 0; actionIndex < actions.length; actionIndex++) {
+		if (granted.indexOf(String(actions[actionIndex])) >= 0) return true
+	}
+	return false
+}
+
+export function merchantPrimaryTabs(root : any = null) : Array<any> {
+	let keys = ['home', 'warehouse', 'customers', 'workbench']
+	let result : Array<any> = []
+	for (let index = 0; index < keys.length; index++) {
+		let key = keys[index]
+		if (merchantTabIsAllowed(key, root)) result.push({ key: key })
+	}
+	return result
+}
+
+export function firstAllowedMerchantTab(root : any = null) : string {
+	let tabs = merchantPrimaryTabs(root)
+	return tabs.length > 0 ? String(tabs[0].key) : ''
+}
+
+// Used by page entry guards. A missing root means the caller is unauthenticated
+// and must return to bootstrap; it must never be treated as “all tabs allowed”.
+export function merchantTabFallback(tabKey : string, root : any = null) : string {
+	if (merchantTabIsAllowed(tabKey, root)) return tabKey
+	return firstAllowedMerchantTab(root)
+}

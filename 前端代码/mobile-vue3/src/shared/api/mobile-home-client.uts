@@ -1,0 +1,53 @@
+import { buildMobileRequestPlan, mobileRequestPlanMatchesContract } from './request-context.uts'
+import { sendMobileRequest } from './mobile-http.uts'
+import { currentMerchantRoot, merchantRequestSession } from '../platform/mobile-merchant-session.uts'
+
+// 首页只声明手机端聚合查询契约，统计实现由后端统一事实层提供。
+// 页面不会在客户端拼接集团、会员或商品看板数据。
+const homeTransportContract : any = {
+	contractVersion: 'mobile-merchant-v1',
+	endpoints: {
+		queryHome: { method: 'GET', path: '/mobile/merchant/dashboard/home', requestMetadataProfile: 'MERCHANT_SESSION' }
+	},
+	requestMetadataProfiles: {
+		MERCHANT_SESSION: {
+			required: { 'X-Mobile-Contract-Version': 'contractVersion', 'X-Mobile-Client-Session-Id': 'clientSessionId', 'X-Mobile-Platform': 'platform', 'X-Mobile-Request-Id': 'requestId', Authorization: 'Bearer <merchantToken>', 'X-Mobile-Active-Context-Id': 'activeContextId', 'X-Mobile-State-Context-Id': 'stateContextId' },
+			forbidden: ['X-Mobile-App-Session', 'Cookie', 'queryToken', 'bodyToken', 'headerAlias']
+		}
+	}
+}
+
+const HOME_CACHE_KEY = 'mobile.merchant.home.cache'
+const HOME_CACHE_TTL_MS = 30 * 60 * 1000
+
+function readHomeCache(periodMode : string) : any {
+	let stored = uni.getStorageSync(HOME_CACHE_KEY)
+	if (stored == null || typeof stored != 'object') return null
+	if (String(stored.periodMode || '') != periodMode || Number(stored.savedAt || 0) + HOME_CACHE_TTL_MS < Date.now()) return null
+	let body = stored.body
+	return body != null && typeof body == 'object' ? body : null
+}
+
+function saveHomeCache(periodMode : string, body : any) : void {
+	if (body != null && typeof body == 'object') uni.setStorageSync(HOME_CACHE_KEY, { periodMode: periodMode, savedAt: Date.now(), body: body })
+}
+
+export function queryMobileMerchantHome(payload : any, done : (value : any) => void) : void {
+	let root = currentMerchantRoot()
+	let session = merchantRequestSession(root)
+	if (session == null) { done({ ok: false, message: '请先完成商家端登录。', body: null }); return }
+	let plan = buildMobileRequestPlan(homeTransportContract, 'queryHome', session)
+	if (!mobileRequestPlanMatchesContract(homeTransportContract, 'queryHome', session, plan)) { done({ ok: false, message: '经营首页请求上下文无效，请重新进入商家端。', body: null }); return }
+	let periodMode = String((payload || {}).periodMode || 'month')
+	let cached = readHomeCache(periodMode)
+	if (cached != null) done({ ok: true, body: cached, cached: true })
+	sendMobileRequest(plan, payload || {}, (response : any) => {
+		if (response != null && response.ok === true && response.body != null) saveHomeCache(periodMode, response.body)
+		// A cached projection keeps the page usable while the authoritative
+		// refresh is unavailable; do not replace visible values with an error.
+		if (cached != null && (response == null || response.ok !== true)) return
+		done(response)
+	})
+}
+
+export function merchantHomeContractVersion() : string { return homeTransportContract.contractVersion }

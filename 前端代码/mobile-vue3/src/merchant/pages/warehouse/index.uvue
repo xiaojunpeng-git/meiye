@@ -1,47 +1,82 @@
 <template>
-	<view class="warehouse-page">
+	<view class="warehouse-page" :class="{ 'warehouse-page--native-mini': platformUsesNativeCanvas }">
 		<view class="warehouse-page__header">
 			<text class="warehouse-page__eyebrow">区域经营</text>
 			<view class="warehouse-page__title-row"><text class="warehouse-page__title">数仓</text><picker mode="date" fields="month" :value="month" @change="changeMonth"><view class="warehouse-page__month"><text>{{ periodLabel }}</text><text class="warehouse-page__month-arrow">⌄</text></view></picker></view>
 			<scroll-view scroll-x class="warehouse-page__breadcrumbs"><view class="warehouse-page__breadcrumb-track"><view v-for="(item, index) in breadcrumbs" :key="item.entityType + '-' + item.entityId" class="warehouse-page__breadcrumb" @tap="openBreadcrumb(item)"><text :class="{ 'warehouse-page__breadcrumb--active': index === breadcrumbs.length - 1 }">{{ item.name }}</text><text v-if="index < breadcrumbs.length - 1" class="warehouse-page__breadcrumb-divider">›</text></view></view></scroll-view>
 		</view>
 
-		<scroll-view scroll-y class="warehouse-page__content">
+		<scroll-view scroll-y="true" refresher-enabled="true" :refresher-triggered="refreshing" @refresherrefresh="onPullRefresh" class="warehouse-page__content">
 			<view v-if="loading" class="warehouse-page__state"><text>正在读取授权组织范围…</text></view>
 			<view v-else-if="message.length > 0" class="warehouse-page__state"><text>{{ message }}</text><view class="warehouse-page__retry" @tap="reload"><text>重新加载</text></view></view>
-			<view v-else>
-				<view class="warehouse-page__scope"><view><text class="warehouse-page__scope-label">当前范围</text><text class="warehouse-page__scope-name">{{ currentNode.name }}</text></view><text class="warehouse-page__scope-count">{{ currentNode.storeCount }} 家门店</text></view>
-				<view class="warehouse-page__metrics"><view v-for="metric in summaryMetrics" :key="metric.code" class="warehouse-page__metric" :class="{ 'warehouse-page__metric--active': selectedMetricCode === metric.code }" @tap="selectMetric(metric)"><text class="warehouse-page__metric-name">{{ metric.name }}</text><text class="warehouse-page__metric-value">{{ metric.displayValue }}</text><text v-if="!metric.available" class="warehouse-page__metric-state">建设中</text></view></view>
+			<view v-else class="warehouse-page__content-inner">
+				<view class="warehouse-page__section-kicker"><text>经营概览</text><text class="warehouse-page__section-kicker-note">数据按当前可见范围汇总</text></view>
+					<view class="warehouse-page__overview-card">
+							<view v-if="organizationPickerEnabled" class="warehouse-page__org-filter-row"><view class="warehouse-page__filter-pill warehouse-page__filter-pill--org" @tap="openOrgPicker"><text>{{ organizationSelectorLabel() }}›</text></view></view>
+							<view class="warehouse-page__scope"><view class="warehouse-page__filter-pill" :class="{ 'warehouse-page__filter-pill--active': periodMode === 'today' }" @tap="selectQuickPeriod('today')"><text>今天</text></view><view class="warehouse-page__filter-pill" :class="{ 'warehouse-page__filter-pill--active': periodMode === 'yesterday' }" @tap="selectQuickPeriod('yesterday')"><text>昨天</text></view><view class="warehouse-page__filter-pill" :class="{ 'warehouse-page__filter-pill--active': periodMode === 'last_month' }" @tap="selectQuickPeriod('last_month')"><text>上月</text></view><view class="warehouse-page__filter-pill" :class="{ 'warehouse-page__filter-pill--active': periodMode === 'month' }" @tap="selectQuickPeriod('month')"><text>本月</text></view><view class="warehouse-page__filter-pill" :class="{ 'warehouse-page__filter-pill--active': periodMode === 'custom' }" @tap="openCustomRange"><text>自定义</text></view></view>
+					<view class="warehouse-page__metrics"><view v-for="(metric, index) in summaryMetrics" :key="metric.code" class="warehouse-page__metric" :class="{ 'warehouse-page__metric--active': selectedMetricCode === metric.code, 'warehouse-page__metric--tone-1': index === 0, 'warehouse-page__metric--tone-2': index === 1, 'warehouse-page__metric--tone-3': index === 2, 'warehouse-page__metric--tone-4': index === 3, 'warehouse-page__metric--unavailable': !metric.available }" @tap="selectMetric(metric)"><view class="warehouse-page__metric-badge"><text>{{ metricBadge(metric) }}</text></view><text class="warehouse-page__metric-name">{{ metric.name }}</text><text class="warehouse-page__metric-value">{{ metric.displayValue }}</text><text v-if="!metric.available" class="warehouse-page__metric-state">待接入</text></view></view>
+				</view>
 				<view v-if="!aggregationCaughtUp" class="warehouse-page__availability"><text>{{ availabilityMessage }}</text></view>
 
-				<scroll-view direction="horizontal" :show-scrollbar="false" class="warehouse-page__ranking-tabs"><view class="warehouse-page__ranking-track"><view v-for="item in rankingCatalog" :key="item.code" class="warehouse-page__ranking-tab" :class="{ 'warehouse-page__ranking-tab--active': selectedRankingCode === item.code }" @tap="selectRanking(item)"><text>{{ item.name }}</text></view></view></scroll-view>
-				<view class="warehouse-page__ranking-head"><text>{{ selectedRankingName }}</text><text class="warehouse-page__ranking-scope">{{ currentNode.name }} · {{ periodLabel }}</text></view>
-				<view v-if="rankingRows.length > 0" class="warehouse-page__ranking-list"><view v-for="(row, index) in rankingRows" :key="row.entityType + '-' + row.entityId" class="warehouse-page__ranking-row" @tap="openRow(row)"><text class="warehouse-page__rank">{{ index + 1 }}</text><view class="warehouse-page__ranking-copy"><view class="warehouse-page__ranking-name-row"><text class="warehouse-page__ranking-name">{{ row.name }}</text><text class="warehouse-page__entity-tag">{{ rowTypeLabel(row) }}</text></view><text class="warehouse-page__ranking-meta">{{ rowMeta(row) }}</text></view><text class="warehouse-page__ranking-value">{{ rowValue(row) }}</text><text v-if="rowCanOpen(row)" class="warehouse-page__chevron">›</text></view></view>
+				<scroll-view scroll-x="true" :show-scrollbar="false" class="warehouse-page__ranking-tabs"><view class="warehouse-page__ranking-track"><view v-for="item in rankingCatalog" :key="item.code" class="warehouse-page__ranking-tab" :class="{ 'warehouse-page__ranking-tab--active': selectedRankingCode === item.code }" @tap="selectRanking(item)"><text>{{ item.name }}</text></view></view></scroll-view>
+				<view v-if="selectedRankingCode === 'organization' && visibleRankingRows().length > 0 && trendPoints().length > 0" class="warehouse-page__trend-card"><view class="warehouse-page__trend-head"><text class="warehouse-page__trend-title">{{ trendMetricName() }}趋势</text><text class="warehouse-page__trend-granularity">{{ trendGranularityLabel() }}</text></view><image v-if="platformUsesNativeCanvas && nativeTrendImage.length > 0" :src="nativeTrendImage" mode="scaleToFill" class="warehouse-page__trend-canvas"></image><canvas v-else canvas-id="warehouse-trend" id="warehouse-trend" width="720" height="228" class="warehouse-page__trend-canvas"></canvas><view class="warehouse-page__trend-periods"><view class="warehouse-page__trend-period warehouse-page__trend-period--current"><text>本期</text><text>{{ trendPeriodRange('current') }}</text></view><view class="warehouse-page__trend-period warehouse-page__trend-period--yoy"><text>同比</text><text>{{ trendPeriodRange('yoy') }}</text></view><view class="warehouse-page__trend-period warehouse-page__trend-period--mom"><text>环比</text><text>{{ trendPeriodRange('mom') }}</text></view></view></view>
+				<view v-if="selectedRankingCode === 'organization' && visibleRankingRows().length > 0" class="warehouse-page__ranking-head"><view class="warehouse-page__pie-row"><view class="warehouse-page__pie-card"><text class="warehouse-page__pie-title">现金业绩占比</text><view class="warehouse-page__pie warehouse-page__pie--cash"><image v-if="platformUsesNativeCanvas && nativeCashPieImage.length > 0" :src="nativeCashPieImage" mode="scaleToFill" class="warehouse-page__pie-canvas"></image><canvas v-else canvas-id="warehouse-pie-cash" id="warehouse-pie-cash" width="356" height="356" class="warehouse-page__pie-canvas"></canvas><view v-if="!platformUsesNativeCanvas" v-for="item in visiblePieLabels('cash_performance')" :key="'cash-pie-' + item.name" class="warehouse-page__pie-label-inside" :style="pieLabelStyle(item)"><text>{{ item.name }}</text><text>{{ item.value }}</text></view><view v-if="!platformUsesNativeCanvas && rankingPieSegments('cash_performance').length === 0" class="warehouse-page__pie-center warehouse-page__pie-center--empty"><text>暂无数据</text><text>0</text></view></view></view><view class="warehouse-page__pie-card"><text class="warehouse-page__pie-title">退款金额占比</text><view class="warehouse-page__pie warehouse-page__pie--refund"><image v-if="platformUsesNativeCanvas && nativeRefundPieImage.length > 0" :src="nativeRefundPieImage" mode="scaleToFill" class="warehouse-page__pie-canvas"></image><canvas v-else canvas-id="warehouse-pie-refund" id="warehouse-pie-refund" width="356" height="356" class="warehouse-page__pie-canvas"></canvas><view v-if="!platformUsesNativeCanvas" v-for="item in visiblePieLabels('refund_performance')" :key="'refund-pie-' + item.name" class="warehouse-page__pie-label-inside warehouse-page__pie-label-inside--refund" :style="pieLabelStyle(item)"><text>{{ item.name }}</text><text>{{ item.value }}</text></view><view v-if="!platformUsesNativeCanvas && rankingPieSegments('refund_performance').length === 0" class="warehouse-page__pie-center warehouse-page__pie-center--empty"><text>暂无数据</text><text>0</text></view></view></view></view></view>
+				<view v-else-if="visibleRankingRows().length > 0" class="warehouse-page__bar-card"><view class="warehouse-page__bar-head"><text class="warehouse-page__bar-title">{{ selectedRankingName }}</text><view class="warehouse-page__sort-toggle" @tap="toggleRankingOrder"><text>{{ rankingOrderLabel() }}</text></view></view><view class="warehouse-page__column-scroll"><view class="warehouse-page__column-chart"><view v-for="(row, index) in visibleRankingRows()" :key="'bar-' + row.entityType + '-' + row.entityId" class="warehouse-page__column-item"><view class="warehouse-page__column-plot"><view class="warehouse-page__column-fill" :class="'warehouse-page__column-fill--' + (index % 5).toString()" :style="verticalBarStyle(row)"></view></view><text class="warehouse-page__column-name">{{ row.name }}</text><text class="warehouse-page__column-value">{{ rowValue(row) }}</text></view></view></view></view>
+				<view v-if="visibleRankingRows().length > 0" class="warehouse-page__ranking-list"><view v-for="(row, index) in visibleRankingRows()" :key="row.entityType + '-' + row.entityId" class="warehouse-page__ranking-row" :class="{ 'warehouse-page__ranking-row--clickable': rowCanOpen(row) }" @tap="openRow(row)"><text class="warehouse-page__rank">{{ index + 1 }}</text><view class="warehouse-page__ranking-copy"><view class="warehouse-page__ranking-name-row"><text class="warehouse-page__ranking-name">{{ row.name }}</text><text class="warehouse-page__entity-tag">{{ rowTypeLabel(row) }}</text></view><text class="warehouse-page__ranking-meta">{{ rowMeta(row) }}</text></view><text class="warehouse-page__ranking-value">{{ rowValue(row) }}</text><text v-if="rowCanOpen(row)" class="warehouse-page__chevron">›</text></view></view>
+				<view v-else class="warehouse-page__ranking-empty"><text class="warehouse-page__ranking-empty-title">暂无排行数据</text><text class="warehouse-page__ranking-empty-copy">切换其他指标或组织范围后再试</text></view>
 				<view class="warehouse-page__freshness"><text>更新于 {{ dataAsOf }}</text></view>
 			</view>
 		</scroll-view>
 
-		<view class="warehouse-page__tabs" role="tablist"><view class="warehouse-page__tab warehouse-page__tab--active" role="tab" aria-selected="true"><text>数仓</text></view><navigator class="warehouse-page__tab" url="/src/merchant/pages/customers/index" open-type="navigate" role="tab" aria-selected="false"><text>客户</text></navigator><navigator class="warehouse-page__tab" url="/src/merchant/pages/workbench/index" open-type="navigate" role="tab" aria-selected="false"><text>工作台</text></navigator><navigator class="warehouse-page__tab" url="/src/merchant/pages/goals/index" open-type="navigate" role="tab" aria-selected="false"><text>目标</text></navigator><navigator class="warehouse-page__tab" url="/src/merchant/pages/profile/index" open-type="navigate" role="tab" aria-selected="false"><text>我的</text></navigator></view>
+		<MerchantPrimaryTabBar active-key="warehouse" />
+		<view v-if="showCustomRange" class="warehouse-page__sheet-mask" @tap="closeCustomRange"><view class="warehouse-page__sheet" @tap.stop><view class="warehouse-page__sheet-head"><text>选择日期区间</text><text class="warehouse-page__sheet-close" @tap="closeCustomRange">×</text></view><view class="warehouse-page__range-row"><text>开始日期</text><picker mode="date" :value="customStartDate" @change="changeCustomStart"><view class="warehouse-page__range-value"><text>{{ customStartDate }}</text></view></picker></view><view class="warehouse-page__range-row"><text>结束日期</text><picker mode="date" :value="customEndDate" @change="changeCustomEnd"><view class="warehouse-page__range-value"><text>{{ customEndDate }}</text></view></picker></view><view class="warehouse-page__sheet-primary" @tap="applyCustomRange"><text>查看区间数据</text></view></view></view>
+		<view v-if="showOrgPicker" class="warehouse-page__sheet-mask warehouse-page__sheet-mask--full" @tap="closeOrgPicker"><view class="warehouse-page__sheet warehouse-page__sheet--org" @tap.stop><view class="warehouse-page__sheet-head warehouse-page__sheet-head--picker"><text class="warehouse-page__sheet-back" @tap="closeOrgPicker">‹</text><view class="warehouse-page__sheet-title"><text>选择组织/门店</text><text class="warehouse-page__sheet-tip">仅显示当前数据权限范围内的节点</text></view><text class="warehouse-page__sheet-close" @tap="closeOrgPicker">×</text></view><view class="warehouse-page__org-search-wrap"><input class="warehouse-page__org-search" :value="orgKeyword" placeholder="搜索区域或门店" @input="orgKeyword = $event.detail.value" /></view><scroll-view scroll-y="true" class="warehouse-page__org-tree"><view v-for="item in visibleOrganizationTree()" :key="'tree-' + item.entityType + '-' + item.entityId" class="warehouse-page__org-option warehouse-page__org-option--tree" :class="{ 'warehouse-page__org-option--selected': isPendingOrgNode(item) }" :style="orgTreeIndent(item)" @tap="selectPendingOrgNode(item)"><view v-if="item.hasChildren === true" class="warehouse-page__org-expand" @tap.stop="toggleOrgNode(item)"><text>{{ isOrgNodeCollapsed(item) ? '›' : '⌄' }}</text></view><view v-else class="warehouse-page__org-expand warehouse-page__org-expand--blank"></view><view class="warehouse-page__org-type" :class="{ 'warehouse-page__org-type--store': item.entityType === 'store' }"><text>{{ rowTypeLabel(item) === '组织' ? '区' : '店' }}</text></view><view class="warehouse-page__org-copy"><text class="warehouse-page__org-name">{{ item.name }}</text><text class="warehouse-page__org-meta">{{ orgOptionMeta(item) }}</text></view><text class="warehouse-page__org-select">{{ isPendingOrgNode(item) ? '已选' : '' }}</text></view></scroll-view><view class="warehouse-page__org-footer"><text>已选：{{ pendingOrgLabel() }}</text><view class="warehouse-page__org-clear" @tap="clearOrgSelection"><text>清空</text></view><view class="warehouse-page__org-confirm" @tap="confirmOrgNode"><text>确定</text></view></view></view></view>
 	</view>
 </template>
 
 <script setup lang="uts">
-	import { queryMobileWarehouse } from '../../api/mobile-warehouse-client.uts'
+	import { queryMobileWarehouse } from '../../../shared/api/mobile-warehouse-client.uts'
+	import MerchantPrimaryTabBar from '../../../shared/components/merchant-primary-tab-bar.uvue'
+	import { currentMobilePlatform, drawMobilePieCanvas, drawMobileTrendCanvas } from '../../../shared/platform/mobile-platform.uts'
+	import { openMerchantBootstrap, openMerchantEmployeePerformance, replaceMerchantEmployeePerformance } from '../../../shared/platform/mobile-navigation.uts'
+	import { currentMerchantRoot, merchantRequestSession } from '../../../shared/platform/mobile-merchant-session.uts'
 	const now = new Date()
 	const initialMonth = now.getFullYear().toString() + '-' + twoDigits(now.getMonth() + 1)
 	const loading = ref(false)
+	const refreshing = ref(false)
 	const message = ref('')
 	const month = ref(initialMonth)
+	const periodMode = ref('month')
+	const customStartDate = ref(now.getFullYear().toString() + '-' + twoDigits(now.getMonth() + 1) + '-01')
+	const customEndDate = ref(now.getFullYear().toString() + '-' + twoDigits(now.getMonth() + 1) + '-' + twoDigits(now.getDate()))
 	const periodLabel = ref('本月')
 	const currentNode = ref<any>({ entityType: 'virtual', entityId: 0, name: '授权范围', storeCount: 0 })
 	const breadcrumbs = ref<Array<any>>([])
+	const hierarchyRows = ref<Array<any>>([])
+	const organizationTree = ref<Array<any>>([])
+	const orgKeyword = ref('')
+	const collapsedOrgNodeKeys = ref<Array<string>>([])
+	const pendingOrgNode = ref<any>(null)
 	const summaryMetrics = ref<Array<any>>([])
 	const rankingRows = ref<Array<any>>([])
 	const rankingCatalog = ref<Array<any>>([])
+	const trend = ref<any>({ metricName: '现金业绩', granularity: 'day', points: [], periods: {} })
 	const selectedMetricCode = ref('cash_performance')
 	const selectedRankingCode = ref('organization')
 	const selectedRankingName = ref('组织排行')
 	const selectedRankingAvailable = ref(true)
+	const organizationPickerEnabled = ref(false)
+	// WeChat composites a type=2d canvas above scroll-view content. Only that
+	// target needs the image fallback; Android and iOS retain their native draw.
+	const platformUsesNativeCanvas = currentMobilePlatform() === 'MP_WEIXIN'
+	const nativeTrendImage = ref('')
+	const nativeCashPieImage = ref('')
+	const nativeRefundPieImage = ref('')
+	// Native mini-program canvases are scoped to this page component. Keep the
+	// host here and pass it through the platform renderer instead of resolving
+	// canvases globally like H5 does.
+	const canvasHost : any = getCurrentInstance().proxy
+	const rankingReversed = ref(false)
 	const metricVersion = ref('—')
 	const dataAsOf = ref('—')
 	const aggregationCaughtUp = ref(false)
@@ -49,48 +84,374 @@
 	let activeNodeType = ''
 	let activeNodeId = 0
 
-	onShow(() => reload())
+	onShow(() => {
+		if (merchantRequestSession(currentMerchantRoot()) == null) {
+			openMerchantBootstrap()
+			return
+		}
+		reload()
+	})
 
 	function reload() : void { loadNode(activeNodeType, activeNodeId) }
-	function loadNode(nodeType : string, nodeId : number) : void {
-		loading.value = true; message.value = ''
-		queryMobileWarehouse({ month: month.value, nodeType: nodeType, nodeId: nodeId, rankingCode: selectedRankingCode.value }, (response : any) => {
-			loading.value = false
+	function onPullRefresh() : void { if (refreshing.value) return; refreshing.value = true; reload(); setTimeout(() => { refreshing.value = false }, 900) }
+	function loadNode(nodeType : string, nodeId : number, keepPage : boolean = false) : void {
+		if (!keepPage) { loading.value = true; message.value = '' }
+		queryMobileWarehouse(periodPayload(nodeType, nodeId), (response : any) => {
+			if (!keepPage) loading.value = false
 			let payload = response != null && response.body != null ? response.body.warehouse : null
 			if (!response.ok || payload == null) { message.value = String(response.message || '数仓暂时不可用。'); return }
+			let entry = payload.entry || null
+			if (entry != null && String(entry.destination || '') === 'employee-performance') {
+				replaceMerchantEmployeePerformance(Number(entry.employeeId || 0), periodMode.value, month.value, customStartDate.value, customEndDate.value, 'cash')
+				return
+			}
+			nativeTrendImage.value = ''
+			nativeCashPieImage.value = ''
+			nativeRefundPieImage.value = ''
 			activeNodeType = nodeType; activeNodeId = nodeId
 			periodLabel.value = String((payload.period || {}).label || month.value)
 			currentNode.value = payload.currentNode || currentNode.value
 			breadcrumbs.value = Array.isArray(payload.breadcrumbs) ? payload.breadcrumbs : []
-			summaryMetrics.value = Array.isArray(payload.summaryMetrics) ? payload.summaryMetrics : []
+			hierarchyRows.value = Array.isArray(payload.hierarchyRows) ? payload.hierarchyRows : []
+			organizationTree.value = Array.isArray(payload.organizationTree) ? payload.organizationTree : []
+			summaryMetrics.value = normalizeSummaryMetrics(Array.isArray(payload.summaryMetrics) ? payload.summaryMetrics : [])
 			rankingRows.value = Array.isArray(payload.rankingRows) ? payload.rankingRows : []
 			rankingCatalog.value = Array.isArray(payload.rankingCatalog) ? payload.rankingCatalog : []
+			trend.value = payload.trend || trend.value
 			selectedRankingCode.value = String(payload.selectedRankingCode || selectedRankingCode.value)
 			selectedRankingAvailable.value = payload.selectedRankingAvailable !== false
+			organizationPickerEnabled.value = entry != null && entry.organizationPickerEnabled === true
 			metricVersion.value = String(payload.metric_version || '—')
 			dataAsOf.value = formatDataTime(Number(payload.data_as_of || 0))
 			aggregationCaughtUp.value = payload.aggregation_caught_up === true
 			availabilityMessage.value = String(payload.availabilityMessage || '')
+			queueChartDraw()
 		})
 	}
-	function changeMonth(event : any) : void { month.value = String(event.detail.value || initialMonth).slice(0, 7); loadNode(activeNodeType, activeNodeId) }
+	function periodPayload(nodeType : string, nodeId : number) : any {
+		let payload : any = { month: month.value, periodMode: periodMode.value, nodeType: nodeType, nodeId: nodeId, rankingCode: selectedRankingCode.value, rankingOrder: rankingReversed.value ? 'asc' : 'desc', trendMetricCode: selectedMetricCode.value }
+		if (periodMode.value === 'custom') { payload.startDate = customStartDate.value; payload.endDate = customEndDate.value }
+		return payload
+	}
+	function changeMonth(event : any) : void { periodMode.value = 'month'; month.value = String(event.detail.value || initialMonth).slice(0, 7); loadNode(activeNodeType, activeNodeId) }
+	function selectQuickPeriod(mode : string) : void {
+		if (mode === 'month') {
+			let current = new Date()
+			month.value = current.getFullYear().toString() + '-' + twoDigits(current.getMonth() + 1)
+		}
+		periodMode.value = mode
+		loadNode(activeNodeType, activeNodeId)
+	}
+	const showCustomRange = ref(false)
+	function openCustomRange() : void { showCustomRange.value = true }
+	function closeCustomRange() : void { showCustomRange.value = false }
+	function changeCustomStart(event : any) : void { customStartDate.value = String(event.detail.value || customStartDate.value).slice(0, 10) }
+	function changeCustomEnd(event : any) : void { customEndDate.value = String(event.detail.value || customEndDate.value).slice(0, 10) }
+	function applyCustomRange() : void { periodMode.value = 'custom'; showCustomRange.value = false; loadNode(activeNodeType, activeNodeId) }
+	const showOrgPicker = ref(false)
+	function openOrgPicker() : void {
+		orgKeyword.value = ''
+		pendingOrgNode.value = currentNode.value
+		// 默认折叠所有可展开节点，用户按层级逐级展开；搜索时仍直接显示命中项。
+		let collapsed : Array<string> = []
+		for (let index = 0; index < organizationTree.value.length; index++) {
+			let item = organizationTree.value[index]
+			if (item != null && item.hasChildren === true) collapsed.push(orgNodeKey(item))
+		}
+		collapsedOrgNodeKeys.value = collapsed
+		showOrgPicker.value = true
+	}
+	function closeOrgPicker() : void { showOrgPicker.value = false }
+	function selectPendingOrgNode(item : any) : void { pendingOrgNode.value = item }
+	function confirmOrgNode() : void {
+		let item = pendingOrgNode.value
+		if (item == null) return
+		showOrgPicker.value = false
+		let type = String(item.entityType || '')
+		if (type === 'virtual') loadNode('', 0)
+		else loadNode(type, Number(item.entityId || 0))
+	}
+	function clearOrgSelection() : void { showOrgPicker.value = false; loadNode('', 0) }
+	function orgNodeKey(item : any) : string { return String(item.entityType || '') + '-' + Number(item.entityId || 0).toString() }
+	function isOrgNodeCollapsed(item : any) : boolean { return collapsedOrgNodeKeys.value.indexOf(orgNodeKey(item)) >= 0 }
+	function toggleOrgNode(item : any) : void {
+		let key = orgNodeKey(item)
+		let index = collapsedOrgNodeKeys.value.indexOf(key)
+		if (index >= 0) collapsedOrgNodeKeys.value.splice(index, 1)
+		else collapsedOrgNodeKeys.value.push(key)
+	}
+	function isPendingOrgNode(item : any) : boolean {
+		let pending = pendingOrgNode.value
+		return pending != null && String(item.entityType || '') === String(pending.entityType || '') && Number(item.entityId || 0) === Number(pending.entityId || 0)
+	}
+	function pendingOrgLabel() : string { let pending = pendingOrgNode.value; return pending == null ? '请选择' : String(pending.name || '请选择') }
+	function visibleOrganizationTree() : Array<any> {
+		let keyword = String(orgKeyword.value || '').trim()
+		if (keyword.length > 0) {
+			let matched : Array<any> = []
+			for (let index = 0; index < organizationTree.value.length; index++) {
+				let item = organizationTree.value[index]
+				if (String(item.name || '').indexOf(keyword) >= 0) matched.push(item)
+			}
+			return matched
+		}
+		let result : Array<any> = []
+		let collapsedDepths : Array<number> = []
+		for (let index = 0; index < organizationTree.value.length; index++) {
+			let item = organizationTree.value[index]
+			let depth = Number(item.depth || 0)
+			while (collapsedDepths.length > 0 && depth <= collapsedDepths[collapsedDepths.length - 1]) collapsedDepths.pop()
+			if (collapsedDepths.length > 0) continue
+			result.push(item)
+			if (item.hasChildren === true && isOrgNodeCollapsed(item)) collapsedDepths.push(depth)
+		}
+		return result
+	}
+	function orgTreeIndent(item : any) : string { let depth = Number(item.depth || 0); if (depth < 0) depth = 0; return 'padding-left: ' + (13 + depth * 18).toString() + 'px;' }
 	function openBreadcrumb(item : any) : void {
 		let type = String(item.entityType || '')
 		if (type === 'virtual') loadNode('', 0)
 		else loadNode(type, Number(item.entityId || 0))
 	}
-	function openRow(row : any) : void { if (rowCanOpen(row)) loadNode(String(row.entityType || ''), Number(row.entityId || 0)) }
-	function selectMetric(metric : any) : void { selectedMetricCode.value = String(metric.code || 'cash_performance') }
-	function selectRanking(item : any) : void { selectedRankingCode.value = String(item.code || 'organization'); selectedRankingName.value = String(item.name || '组织排行'); loadNode(activeNodeType, activeNodeId) }
+	function openRow(row : any) : void {
+		if (!rowCanOpen(row)) return
+		if (String(row.entityType || '') === 'branch' || String(row.entityType || '') === 'manager') {
+			loadNode('organization', Number(row.entityId || 0))
+			return
+		}
+		if (String(row.entityType || '') === 'employee') {
+			openMerchantEmployeePerformance(Number(row.entityId || 0), periodMode.value, month.value, customStartDate.value, customEndDate.value, selectedRankingCode.value === 'staff_labor_performance' ? 'labor' : 'cash')
+			return
+		}
+		loadNode(String(row.entityType || ''), Number(row.entityId || 0))
+	}
+	function selectMetric(metric : any) : void {
+		let nextCode = String(metric.code || 'cash_performance')
+		if (nextCode === selectedMetricCode.value) return
+		selectedMetricCode.value = nextCode
+		loadNode(activeNodeType, activeNodeId, true)
+	}
+	function normalizeSummaryMetrics(metrics : Array<any>) : Array<any> {
+		let list = Array.isArray(metrics) ? metrics.slice() : []
+		function pickMetric(code : string, name : string, displayValue : string, available : boolean) : any {
+			for (let index = 0; index < list.length; index++) {
+				let currentCode = String(list[index].code || '')
+				if (currentCode === code || (code === 'refund_performance' && currentCode === 'refund_amount')) {
+					let metric = list[index]
+					list.splice(index, 1)
+					metric.code = code
+					metric.name = name
+					metric.displayValue = plainMetricValue(String(metric.displayValue || displayValue))
+					metric.available = metric.available !== false
+					return metric
+				}
+			}
+			return new UTSJSONObject({ code: code, name: name, displayValue: plainMetricValue(displayValue), available: available })
+		}
+		return [
+			pickMetric('cash_performance', '现金业绩', '—', false),
+			pickMetric('refund_performance', '退款金额', '0', true),
+			pickMetric('actual_performance', '实际业绩', '—', false),
+			pickMetric('consume_amount', '消耗业绩', '—', false),
+		]
+	}
+	function plainMetricValue(value : string) : string { return String(value || '—').split(',').join('') }
+	function metricBadge(metric : any) : string {
+		let code = String(metric.code || '')
+		if (code === 'refund_performance' || code === 'refund_amount') return '退'
+		if (code === 'cash_performance') return '¥'
+		if (code === 'actual_performance') return '实'
+		if (code === 'consume_amount') return '耗'
+		return '数'
+	}
+	function summaryMetricValue(code : string) : string {
+		for (let index = 0; index < summaryMetrics.value.length; index++) {
+			let item = summaryMetrics.value[index]
+			if (String(item.code || '') === code) return plainMetricValue(String(item.displayValue || '0'))
+		}
+		return '0'
+	}
+	function numericMetricValue(value : string) : number {
+		let normalized = plainMetricValue(String(value || '0'))
+		let amount = Number(normalized)
+		if (amount > 0) return amount
+		return 0
+	}
+	function rankingMetricNumber(row : any, code : string) : number {
+		let metrics = Array.isArray(row.metrics) ? row.metrics : []
+		for (let index = 0; index < metrics.length; index++) {
+			let item = metrics[index]
+			let itemCode = String(item.code || '')
+			if (itemCode === code || (code === 'refund_performance' && itemCode === 'refund_amount')) {
+				return numericMetricValue(String(item.displayValue || item.value || '0'))
+			}
+		}
+		if (String(row.metricCode || '') === code || selectedMetricCode.value === code) return numericMetricValue(String(row.displayValue || '0'))
+		return 0
+	}
+	function rankingMetricTotal(code : string) : string {
+		let total = 0
+		for (let index = 0; index < rankingRows.value.length; index++) total = total + rankingMetricNumber(rankingRows.value[index], code)
+		return plainMetricValue(total.toString())
+	}
+	function rankingTopRow(code : string) : any {
+		let topRow : any = null
+		let topAmount = 0
+		for (let index = 0; index < rankingRows.value.length; index++) {
+			let row = rankingRows.value[index]
+			let amount = rankingMetricNumber(row, code)
+			if (amount > topAmount) { topAmount = amount; topRow = row }
+		}
+		return topRow
+	}
+	function rankingTopName(code : string) : string {
+		let row = rankingTopRow(code)
+		if (row == null) return '暂无数据'
+		return String(row.name || '—')
+	}
+	function rankingTopValue(code : string) : string {
+		let row = rankingTopRow(code)
+		if (row == null) return '0'
+		return plainMetricValue(rankingMetricNumber(row, code).toString())
+	}
+	function rankingPieSegments(code : string) : Array<any> {
+		let rows = rankingRows.value.slice().sort((left : any, right : any) => rankingMetricNumber(right, code) - rankingMetricNumber(left, code))
+		let total = 0
+		for (let index = 0; index < rows.length; index++) total = total + rankingMetricNumber(rows[index], code)
+		let result : Array<any> = []
+		if (total <= 0) return result
+		let start = 0
+		for (let index = 0; index < rows.length; index++) {
+			let amount = rankingMetricNumber(rows[index], code)
+			if (amount <= 0) continue
+			let portion = amount / total
+			let end = start + portion * 360
+			let midpoint = (start + end) / 2 - 90
+			let radians = midpoint * Math.PI / 180
+			let left = 50 + Math.cos(radians) * 28
+			let top = 50 + Math.sin(radians) * 28
+			result.push(new UTSJSONObject({ name: String(rows[index].name || '—'), value: plainMetricValue(amount.toString()), share: portion, left: left, top: top }))
+			start = end
+		}
+		return result
+	}
+	function rankingPieStyle(code : string) : string {
+		let segmentsData = rankingPieSegments(code)
+		let total = 0
+		for (let index = 0; index < segmentsData.length; index++) total = total + Number(segmentsData[index].share || 0)
+		if (total <= 0) return 'background: conic-gradient(#edf3f8 0deg, #edf3f8 360deg);'
+		let cashColors = ['#4b9fd1', '#f39b7b', '#f6dc5b', '#62d1d0', '#8ba9f4']
+		let refundColors = ['#e76b7c', '#f2a0ad', '#f4c3cc', '#f7dce2', '#d9e1ea']
+		let colors = code === 'refund_performance' ? refundColors : cashColors
+		let start = 0
+		let segments : Array<string> = []
+		for (let index = 0; index < segmentsData.length; index++) {
+			let portion = Number(segmentsData[index].share || 0)
+			let end = start + portion * 360
+			let color = colors[index % colors.length]
+			let dividerStart = end - 1.2
+			if (dividerStart > start && end < 359.9) {
+				segments.push(color + ' ' + start.toString() + 'deg, ' + color + ' ' + dividerStart.toString() + 'deg, #ffffff ' + dividerStart.toString() + 'deg, #ffffff ' + end.toString() + 'deg')
+			} else {
+				segments.push(color + ' ' + start.toString() + 'deg, ' + color + ' ' + end.toString() + 'deg')
+			}
+			start = end
+		}
+		if (start < 360) segments.push('#edf3f8 ' + start.toString() + 'deg, #edf3f8 360deg')
+		return 'background: conic-gradient(' + segments.join(', ') + ');'
+	}
+	function pieLabelStyle(item : any) : string { return 'left: ' + Number(item.left || 50).toString() + '%; top: ' + Number(item.top || 50).toString() + '%;' }
+	function pieLabelVisible(item : any) : boolean { return Number(item.share || 0) >= 0.12 }
+	function visiblePieLabels(code : string) : Array<any> {
+		let labels : Array<any> = []
+		let segments = rankingPieSegments(code)
+		for (let index = 0; index < segments.length; index++) if (pieLabelVisible(segments[index])) labels.push(segments[index])
+		return labels
+	}
+	function visibleRankingRows() : Array<any> {
+		let rows = Array.isArray(rankingRows.value) ? rankingRows.value.slice() : []
+		rows.sort((left : any, right : any) => {
+			let leftValue = rowSortNumber(left)
+			let rightValue = rowSortNumber(right)
+			if (rankingReversed.value) return leftValue - rightValue
+			return rightValue - leftValue
+		})
+		return rows.slice(0, 10)
+	}
+	function rowSortNumber(row : any) : number {
+		let value = rowValue(row)
+		let amount = Number(plainMetricValue(String(value || '0')))
+		if (amount > 0) return amount
+		return 0
+	}
+	function rankingMaxValue() : number {
+		let rows = visibleRankingRows()
+		let maxValue = 0
+		for (let index = 0; index < rows.length; index++) {
+			let amount = rowSortNumber(rows[index])
+			if (amount > maxValue) maxValue = amount
+		}
+		if (maxValue > 0) return maxValue
+		return 1
+	}
+	function barStyle(row : any) : string {
+		let percent = Math.round(rowSortNumber(row) / rankingMaxValue() * 100)
+		if (percent < 3 && rowSortNumber(row) > 0) percent = 3
+		return 'width: ' + percent.toString() + '%;'
+	}
+	function verticalBarStyle(row : any) : string {
+		let percent = Math.round(rowSortNumber(row) / rankingMaxValue() * 100)
+		if (percent < 8 && rowSortNumber(row) > 0) percent = 8
+		return 'height: ' + percent.toString() + '%;'
+	}
+	function rankingOrderLabel() : string { return rankingReversed.value ? '正序' : '反序' }
+	function toggleRankingOrder() : void { rankingReversed.value = !rankingReversed.value; loadNode(activeNodeType, activeNodeId, true) }
+	function selectRanking(item : any) : void { selectedRankingCode.value = String(item.code || 'organization'); selectedRankingName.value = String(item.name || '组织排行'); rankingReversed.value = false; loadNode(activeNodeType, activeNodeId, true) }
 	function rowValue(row : any) : string {
-		if (selectedRankingCode.value !== 'organization') return String(row.displayValue || '—')
+		if (selectedRankingCode.value !== 'organization') return plainMetricValue(String(row.displayValue || '—'))
 		let values = Array.isArray(row.metrics) ? row.metrics : []
-		for (let index = 0; index < values.length; index++) if (String(values[index].code || '') === selectedMetricCode.value) return String(values[index].displayValue || '—')
+		for (let index = 0; index < values.length; index++) if (String(values[index].code || '') === selectedMetricCode.value) return plainMetricValue(String(values[index].displayValue || '—'))
 		return '—'
 	}
-	function rowTypeLabel(row : any) : string { let type = String(row.entityType || ''); if (type === 'organization') return '组织'; if (type === 'store') return '门店'; if (type === 'employee') return '员工'; return '项目' }
+	function rowTypeLabel(row : any) : string { let type = String(row.entityType || ''); if (type === 'branch') return '分公司'; if (type === 'manager') return '经理'; if (type === 'organization') return '组织'; if (type === 'store') return '门店'; if (type === 'employee') return '员工'; return '项目' }
+	function orgOptionMeta(row : any) : string { return rowTypeLabel(row) + ' · ' + Number(row.storeCount || 0).toString() + ' 家门店' }
+	function organizationSelectorLabel() : string { let name = currentNode.value != null ? String(currentNode.value.name || '').trim() : ''; return name.length > 0 ? name : '集团' }
 	function rowMeta(row : any) : string { if (selectedRankingCode.value === 'organization') return Number(row.storeCount || 0).toString() + ' 家门店'; return selectedRankingCode.value === 'project_count' ? '本月完成服务' : String(currentNode.value.name || '') }
-	function rowCanOpen(row : any) : boolean { let type = String(row.entityType || ''); return selectedRankingCode.value === 'organization' && (type === 'organization' || type === 'store') }
+	function rowCanOpen(row : any) : boolean {
+		let type = String(row.entityType || '')
+		if (selectedRankingCode.value === 'organization') return type === 'organization' || type === 'branch' || type === 'manager' || type === 'store'
+		return type === 'employee' && (selectedRankingCode.value === 'staff_cash_performance' || selectedRankingCode.value === 'staff_labor_performance' || selectedRankingCode.value === 'staff_designated_customer')
+	}
+	function trendMetricName() : string { return String((trend.value || {}).metricName || '现金业绩') }
+	function trendGranularityLabel() : string {
+		let granularity = String((trend.value || {}).granularity || 'day')
+		if (granularity === 'year') return '按年'
+		return granularity === 'month' ? '按月' : '按日'
+	}
+	function trendPeriodRange(key : string) : string {
+		let periods = (trend.value || {}).periods || {}
+		let item = periods[key] || {}
+		return String(item.range || '—')
+	}
+	function trendPoints() : Array<any> { let points = (trend.value || {}).points; return Array.isArray(points) ? points : [] }
+	function drawTrendCanvas() : void {
+		if (selectedRankingCode.value !== 'organization') return
+		let points = trendPoints()
+		if (points.length === 0) return
+		drawMobileTrendCanvas('warehouse-trend', points, canvasHost, (filePath : string) => { nativeTrendImage.value = filePath })
+	}
+	function drawRankingPieCanvases() : void {
+		if (selectedRankingCode.value !== 'organization') return
+		drawMobilePieCanvas('warehouse-pie-cash', rankingPieSegments('cash_performance'), ['#4b9fd1', '#f39b7b', '#f6dc5b', '#62d1d0', '#8ba9f4'], canvasHost, (filePath : string) => { nativeCashPieImage.value = filePath })
+		drawMobilePieCanvas('warehouse-pie-refund', rankingPieSegments('refund_performance'), ['#e76b7c', '#f2a0ad', '#f4c3cc', '#f7dce2', '#d9e1ea'], canvasHost, (filePath : string) => { nativeRefundPieImage.value = filePath })
+	}
+	function queueChartDraw() : void {
+		// H5 mounts uni-canvas asynchronously. The second pass is harmless on
+		// native targets and ensures the real canvas element is present on WEB.
+		setTimeout(() => { drawTrendCanvas(); drawRankingPieCanvases() }, 80)
+		setTimeout(() => { drawTrendCanvas(); drawRankingPieCanvases() }, 260)
+		setTimeout(() => { drawTrendCanvas(); drawRankingPieCanvases() }, 720)
+	}
 	function formatDataTime(timestamp : number) : string {
 		if (timestamp <= 0) return '—'
 		let value = new Date(timestamp * 1000)
@@ -150,4 +511,378 @@
 	.warehouse-page__tabs { display: flex; min-height: 62px; flex-direction: row; border-top-width: 1px; border-top-style: solid; border-top-color: #dde4ed; background-color: #ffffff; }
 	.warehouse-page__tab { display: flex; min-width: 0; flex: 1; flex-direction: row; align-items: center; justify-content: center; border-top-width: 2px; border-top-style: solid; border-top-color: #ffffff; font-size: 12px; font-weight: 600; color: #697586; }
 	.warehouse-page__tab--active { border-top-color: #1677cc; background-color: #f7fbff; color: #1677cc; }
+
+	/* Round 1 visual direction: compact operating cockpit */
+	.warehouse-page { background-color: #f4f7fb; }
+	.warehouse-page__header { padding: 30px 18px 17px 18px; border-bottom-color: transparent; background-color: #f4f7fb; }
+	.warehouse-page__eyebrow { letter-spacing: 1px; color: #728198; }
+	.warehouse-page__title { font-size: 28px; letter-spacing: -0.5px; color: #13263d; }
+	.warehouse-page__month { min-width: 106px; height: 36px; border-width: 1px; border-style: solid; border-color: #d8e3ef; border-radius: 18px; background-color: #ffffff; color: #1d3650; }
+	.warehouse-page__breadcrumbs { margin-top: 12px; }
+	.warehouse-page__breadcrumb { font-size: 12px; color: #8493a5; }
+	.warehouse-page__breadcrumb--active { color: #1976c9; }
+	.warehouse-page__content { padding: 0 14px 86px 14px; }
+	.warehouse-page__section-kicker { display: flex; flex-direction: row; align-items: center; justify-content: space-between; min-height: 28px; padding: 4px 4px 8px 4px; }
+	.warehouse-page__section-kicker text { font-size: 13px; font-weight: 700; color: #27425d; }
+	.warehouse-page__section-kicker-note { font-size: 10px !important; font-weight: 400 !important; color: #8a98a8 !important; }
+	.warehouse-page__overview-card { overflow: hidden; border-radius: 16px; background-color: #ffffff; box-shadow: 0 6px 18px rgba(29, 56, 86, 0.08); }
+	.warehouse-page__scope { padding: 18px 17px 15px 17px; background-color: #193a5a; }
+	.warehouse-page__scope-label { color: #a9c2d9; }
+	.warehouse-page__scope-name { margin-top: 4px; font-size: 22px; color: #ffffff; }
+	.warehouse-page__scope-side { display: flex; flex-direction: column; align-items: flex-end; }
+	.warehouse-page__scope-count { padding-bottom: 0; font-size: 13px; font-weight: 700; color: #ffffff; }
+	.warehouse-page__scope-hint { margin-top: 3px; font-size: 10px; color: #9db7cf; }
+	.warehouse-page__metrics { padding: 0; border-bottom-width: 0; }
+	.warehouse-page__metric { min-height: 88px; padding: 13px 15px; border-bottom-color: #edf2f6; }
+	.warehouse-page__metric:nth-child(odd) { border-right-color: #edf2f6; }
+	.warehouse-page__metric--active { background-color: #edf6ff; }
+	.warehouse-page__metric-name { font-size: 12px; color: #718096; }
+	.warehouse-page__metric-value { margin-top: 6px; font-size: 25px; line-height: 31px; color: #172a40; }
+	.warehouse-page__metric--active .warehouse-page__metric-name, .warehouse-page__metric--active .warehouse-page__metric-value { color: #1475c5; }
+	.warehouse-page__availability { margin-top: 10px; border-radius: 10px; border-bottom-width: 0; background-color: #fff8e9; }
+	.warehouse-page__ranking-tabs { margin-top: 14px; padding: 5px 4px; border-width: 0; border-radius: 13px; background-color: #e8eef5; }
+	.warehouse-page__ranking-track { width: 540px; }
+	.warehouse-page__ranking-tab { width: 108px; height: 36px; border-bottom-width: 0; border-radius: 9px; font-size: 12px; color: #738196; }
+	.warehouse-page__ranking-tab--active { background-color: #ffffff; box-shadow: 0 2px 8px rgba(29, 56, 86, 0.1); color: #173d61; }
+	.warehouse-page__ranking-head { min-height: 57px; padding: 0 5px; border-bottom-width: 0; background-color: transparent; }
+	.warehouse-page__ranking-title { display: block; font-size: 17px; line-height: 23px; color: #172b42; }
+	.warehouse-page__ranking-subtitle { display: block; margin-top: 2px; font-size: 11px; font-weight: 400; line-height: 16px; color: #8a98a8; }
+	.warehouse-page__ranking-scope { max-width: 48%; font-size: 10px; color: #8a98a8; }
+	.warehouse-page__ranking-list { overflow: hidden; border-radius: 14px; box-shadow: 0 4px 14px rgba(29, 56, 86, 0.06); }
+	.warehouse-page__ranking-row { min-height: 74px; padding: 0 15px; background-color: #ffffff; }
+	.warehouse-page__ranking-row--clickable:active { background-color: #f4f8fc; }
+	.warehouse-page__rank { width: 30px; height: 30px; border-radius: 10px; background-color: #edf2f6; color: #75869a; }
+	.warehouse-page__ranking-row:nth-child(1) .warehouse-page__rank { background-color: #e9c56a; color: #5e4210; }
+	.warehouse-page__ranking-row:nth-child(2) .warehouse-page__rank { background-color: #dce7f0; color: #49647c; }
+	.warehouse-page__ranking-row:nth-child(3) .warehouse-page__rank { background-color: #eadbd0; color: #795b46; }
+	.warehouse-page__ranking-copy { margin-left: 11px; }
+	.warehouse-page__ranking-name { font-size: 15px; color: #20344b; }
+	.warehouse-page__ranking-meta { margin-top: 3px; color: #8997a7; }
+	.warehouse-page__ranking-value { font-size: 18px; color: #163b5e; }
+	.warehouse-page__chevron { font-size: 22px; color: #6f91ad; }
+	.warehouse-page__ranking-empty { display: flex; min-height: 116px; flex-direction: column; align-items: center; justify-content: center; border-radius: 14px; background-color: #ffffff; box-shadow: 0 4px 14px rgba(29, 56, 86, 0.06); }
+	.warehouse-page__ranking-empty-title { font-size: 14px; font-weight: 700; color: #50677d; }
+	.warehouse-page__ranking-empty-copy { margin-top: 5px; font-size: 11px; color: #9aa7b5; }
+	.warehouse-page__freshness { padding: 12px 6px 18px 6px; background-color: transparent; color: #9aa7b5; }
+	.warehouse-page__tabs { min-height: 66px; }
+
+	/* Round 2 visual direction: uneven metric rhythm with comparison slots */
+	.warehouse-page__metrics { padding: 4px; background-color: #f7faff; }
+	.warehouse-page__metric { min-height: 96px; padding: 14px 15px 12px 15px; border-width: 0; border-radius: 0; background-color: #ffffff; }
+	.warehouse-page__metric:nth-child(odd) { border-right-width: 0; }
+	.warehouse-page__metric--primary { width: 58%; min-height: 112px; border-radius: 12px 0 0 12px; }
+	.warehouse-page__metric--secondary { width: 42%; min-height: 112px; border-radius: 0 12px 12px 0; }
+	.warehouse-page__metric:nth-child(n+3) { width: 33.3333%; min-height: 88px; margin-top: 8px; border-radius: 10px; }
+	.warehouse-page__metric:nth-child(4), .warehouse-page__metric:nth-child(5) { margin-left: 8px; }
+	.warehouse-page__metric-name { font-size: 11px; }
+	.warehouse-page__metric-value { margin-top: 5px; font-size: 23px; line-height: 28px; }
+	.warehouse-page__metric-trends { display: flex; flex-direction: row; margin-top: 6px; }
+	.warehouse-page__metric-trends text { margin-right: 9px; font-size: 10px; line-height: 14px; color: #8b9aab; }
+	.warehouse-page__metric--active { background-color: #edf6ff; box-shadow: inset 0 0 0 1px #d5eafa; }
+	.warehouse-page__metric--unavailable { background-color: #f3f6f8; }
+	.warehouse-page__metric--unavailable .warehouse-page__metric-value { color: #8998a7; }
+	.warehouse-page__metric-state { margin-top: 3px; }
+
+	/* Round 3 visual direction: light analytics dashboard, current fields only */
+	.warehouse-page { background-color: #eef6ff; }
+	.warehouse-page__header { padding: 34px 22px 18px 22px; background-color: #eef6ff; }
+	.warehouse-page__eyebrow { font-size: 12px; letter-spacing: 0; color: #8092ad; }
+	.warehouse-page__title { font-size: 30px; line-height: 38px; letter-spacing: 0; color: #071b38; }
+	.warehouse-page__month { min-width: 94px; height: 36px; border-color: #edf2fb; border-radius: 10px; box-shadow: 0 7px 16px rgba(40, 79, 130, 0.08); color: #1d2d47; }
+	.warehouse-page__breadcrumbs { margin-top: 10px; }
+	.warehouse-page__breadcrumb--active { color: #256fd4; }
+	.warehouse-page__content { padding: 0 18px 88px 18px; }
+	.warehouse-page__section-kicker { display: none; }
+	.warehouse-page__overview-card { border-radius: 18px; background-color: #ffffff; box-shadow: 0 10px 26px rgba(74, 102, 148, 0.1); }
+	.warehouse-page__scope { align-items: center; padding: 15px 18px 4px 18px; background-color: #ffffff; }
+	.warehouse-page__scope-label { font-size: 11px; color: #8c98aa; }
+	.warehouse-page__scope-name { margin-top: 2px; font-size: 17px; line-height: 24px; color: #0d213b; }
+	.warehouse-page__scope-count { font-size: 12px; color: #50617a; }
+	.warehouse-page__scope-hint { display: none; }
+	.warehouse-page__metrics { padding: 8px 0 13px 0; background-color: #ffffff; }
+	.warehouse-page__metric { width: 25%; min-height: 118px; align-items: center; justify-content: flex-start; padding: 13px 5px 10px 5px; border-radius: 0; border-right-width: 1px; border-right-style: solid; border-right-color: #edf2f7; background-color: #ffffff; }
+	.warehouse-page__metric:nth-child(4) { border-right-width: 0; margin-left: 0; }
+	.warehouse-page__metric:nth-child(n+3) { width: 25%; min-height: 118px; margin-top: 0; border-radius: 0; }
+	.warehouse-page__metric--active { background-color: #ffffff; box-shadow: none; }
+	.warehouse-page__metric-badge { display: flex; width: 34px; height: 34px; align-items: center; justify-content: center; border-radius: 17px; box-shadow: 0 7px 16px rgba(52, 95, 170, 0.16); }
+	.warehouse-page__metric-badge text { font-size: 15px; font-weight: 800; color: #ffffff; text-align: center; }
+	.warehouse-page__metric--tone-1 .warehouse-page__metric-badge { background-color: #386fe8; }
+	.warehouse-page__metric--tone-2 .warehouse-page__metric-badge { background-color: #7468e8; }
+	.warehouse-page__metric--tone-3 .warehouse-page__metric-badge { background-color: #38c99b; }
+	.warehouse-page__metric--tone-4 .warehouse-page__metric-badge { background-color: #f0a33a; }
+	.warehouse-page__metric--tone-5 .warehouse-page__metric-badge { background-color: #e96c7d; }
+	.warehouse-page__metric-name { margin-top: 11px; font-size: 11px; line-height: 16px; color: #778196; text-align: center; }
+	.warehouse-page__metric-value { margin-top: 7px; max-width: 100%; overflow: hidden; font-size: 20px; line-height: 25px; color: #081a35; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
+	.warehouse-page__metric-state, .warehouse-page__metric-trends { display: none; }
+	.warehouse-page__availability { margin: 12px 0 0 0; border-radius: 12px; background-color: #fff8eb; }
+	.warehouse-page__ranking-tabs { margin-top: 18px; padding: 4px; border-radius: 14px; background-color: rgba(255, 255, 255, 0.72); box-shadow: inset 0 0 0 1px rgba(217, 226, 240, 0.7); }
+	.warehouse-page__ranking-tab { height: 38px; border-radius: 11px; font-size: 12px; color: #75869f; }
+	.warehouse-page__ranking-tab--active { color: #163252; box-shadow: 0 5px 13px rgba(68, 101, 150, 0.12); }
+	.warehouse-page__ranking-head { min-height: 60px; padding: 2px 3px 0 3px; }
+	.warehouse-page__ranking-title { font-size: 18px; color: #0e2039; }
+	.warehouse-page__ranking-subtitle { color: #96a3b6; }
+	.warehouse-page__ranking-list { border-radius: 17px; box-shadow: 0 8px 22px rgba(74, 102, 148, 0.08); }
+	.warehouse-page__ranking-row { min-height: 72px; padding: 0 16px; }
+	.warehouse-page__rank { border-radius: 11px; }
+	.warehouse-page__ranking-name { color: #132941; }
+	.warehouse-page__ranking-value { color: #0b2a4b; }
+	.warehouse-page__metrics { flex-wrap: nowrap; padding: 8px 0 10px 0; background-color: transparent; }
+	.warehouse-page__metric { width: calc((100% - 32px) / 5); min-height: 118px; margin-right: 8px; align-items: center; justify-content: flex-start; padding: 13px 5px 10px 5px; border-width: 1px; border-style: solid; border-color: #edf2f7; border-radius: 14px; background-color: #ffffff; box-shadow: 0 8px 18px rgba(52, 95, 170, 0.08); }
+	.warehouse-page__metric:nth-child(5) { margin-right: 0; }
+	.warehouse-page__metric:nth-child(n+3) { width: calc((100% - 32px) / 5); margin-top: 0; }
+	/* Final metric layout: four identical independent cards in one row. */
+	.warehouse-page__metrics { display: flex; flex-direction: row; flex-wrap: nowrap; align-items: stretch; padding: 8px 0 10px 0; background-color: transparent; overflow: hidden; }
+	.warehouse-page__metric, .warehouse-page__metric:nth-child(n), .warehouse-page__metric:nth-child(odd) { display: flex; box-sizing: border-box; width: 132px; min-width: 132px; max-width: 132px; height: 118px; min-height: 118px; max-height: 118px; flex: 0 0 132px; flex-direction: column; align-items: center; justify-content: flex-start; margin: 0 8px 0 0; padding: 13px 5px 10px 5px; border-width: 1px; border-style: solid; border-color: #edf2f7; border-radius: 14px; background-color: #ffffff; box-shadow: 0 8px 18px rgba(52, 95, 170, 0.08); }
+	.warehouse-page__metric:nth-child(4) { margin-right: 0; }
+	.warehouse-page__metric::before { display: none; content: none; }
+	.warehouse-page__metric-badge { position: relative; display: flex; width: 34px; min-width: 34px; height: 34px; min-height: 34px; flex: 0 0 34px; align-items: center; justify-content: center; border-radius: 17px; box-shadow: 0 7px 16px rgba(52, 95, 170, 0.16); }
+	.warehouse-page__metric-badge text, .warehouse-page__metric-badge span { opacity: 0; font-size: 0; }
+	.warehouse-page__metric--tone-1 .warehouse-page__metric-badge { background-color: #386fe8; }
+	.warehouse-page__metric--tone-2 .warehouse-page__metric-badge { background-color: #7468e8; }
+	.warehouse-page__metric--tone-3 .warehouse-page__metric-badge { background-color: #38c99b; }
+	.warehouse-page__metric--tone-4 .warehouse-page__metric-badge { background-color: #e96c7d; }
+	.warehouse-page__metric-badge::before, .warehouse-page__metric-badge::after { position: absolute; display: block; content: ''; box-sizing: border-box; }
+	.warehouse-page__metric:nth-child(1) .warehouse-page__metric-badge::before { width: 16px; height: 16px; border-width: 2px; border-style: solid; border-color: #ffffff; border-radius: 8px; }
+	.warehouse-page__metric:nth-child(1) .warehouse-page__metric-badge::after { width: 8px; height: 2px; background-color: #ffffff; box-shadow: 0 -5px 0 #ffffff, 0 5px 0 #ffffff; }
+	.warehouse-page__metric:nth-child(2) .warehouse-page__metric-badge::before { width: 14px; height: 17px; border-width: 2px; border-style: solid; border-color: #ffffff; border-radius: 2px; }
+	.warehouse-page__metric:nth-child(2) .warehouse-page__metric-badge::after { width: 8px; height: 2px; background-color: #ffffff; box-shadow: 0 -5px 0 rgba(255, 255, 255, 0.8), 0 5px 0 rgba(255, 255, 255, 0.8); }
+	.warehouse-page__metric:nth-child(3) .warehouse-page__metric-badge::before { width: 17px; height: 17px; border-left-width: 3px; border-left-style: solid; border-left-color: #ffffff; border-bottom-width: 3px; border-bottom-style: solid; border-bottom-color: #ffffff; border-radius: 2px; transform: rotate(-45deg); }
+	.warehouse-page__metric:nth-child(3) .warehouse-page__metric-badge::after { width: 13px; height: 3px; background-color: #ffffff; border-radius: 2px; transform: rotate(-18deg); }
+	.warehouse-page__metric:nth-child(4) .warehouse-page__metric-badge::before { width: 17px; height: 17px; border-width: 2px; border-style: solid; border-color: #ffffff; border-right-color: transparent; border-radius: 9px; transform: rotate(-35deg); }
+	.warehouse-page__metric:nth-child(4) .warehouse-page__metric-badge::after { width: 7px; height: 7px; border-left-width: 2px; border-left-style: solid; border-left-color: #ffffff; border-bottom-width: 2px; border-bottom-style: solid; border-bottom-color: #ffffff; transform: translate(-7px, -6px) rotate(25deg); }
+	.warehouse-page__metric-name { display: block; width: 100%; margin-top: 11px; text-align: center; }
+	.warehouse-page__metric-value { display: block; width: 100%; margin-top: 7px; text-align: center; }
+	.warehouse-page__header { display: none; }
+	.warehouse-page__content { padding-top: 12px; }
+	.warehouse-page__overview-card { border-radius: 0; background-color: transparent; box-shadow: none; }
+	.warehouse-page__scope { display: flex; flex-direction: row; align-items: center; justify-content: flex-start; min-height: 42px; padding: 4px; border-width: 1px; border-style: solid; border-color: rgba(215, 226, 241, 0.9); border-radius: 16px; background-color: rgba(255, 255, 255, 0.76); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.7), 0 8px 20px rgba(63, 93, 137, 0.08); overflow: hidden; }
+	.warehouse-page__filter-pill { display: flex; flex: none; min-width: 58px; height: 34px; align-items: center; justify-content: center; padding: 0 10px; border-radius: 12px; }
+	.warehouse-page__filter-pill text { font-size: 13px; line-height: 20px; color: #71839a; }
+	.warehouse-page__filter-pill--active { background-color: #1677cc; box-shadow: 0 6px 14px rgba(22, 119, 204, 0.18); }
+	.warehouse-page__filter-pill--active text { font-weight: 700; color: #ffffff; }
+	.warehouse-page__filter-pill--org { margin-left: 6px; min-width: 78px; background-color: rgba(230, 242, 255, 0.72); }
+	.warehouse-page__filter-pill--org text { font-weight: 700; color: #1677cc; }
+	.warehouse-page__filter-pill text, .warehouse-page__filter-pill span { display: flex; height: 34px; line-height: 34px; align-items: center; justify-content: center; text-align: center; }
+	.warehouse-page__filter-pill--active text, .warehouse-page__filter-pill--active span, .warehouse-page__filter-pill--org text, .warehouse-page__filter-pill--org span { display: flex; height: 34px; line-height: 34px; align-items: center; justify-content: center; text-align: center; }
+	.warehouse-page__ranking-head { display: flex; flex-direction: column; align-items: stretch; min-height: 214px; padding: 8px 2px 10px 2px; }
+	.warehouse-page__ranking-head-top { display: none; }
+	/* Three-series trend: a full-width card immediately before the two pie cards. */
+	.warehouse-page__trend-card { display: flex; box-sizing: border-box; width: 100%; height: 198px; min-height: 198px; flex-direction: column; margin-top: 12px; margin-bottom: 8px; padding: 10px 12px 8px 12px; border-radius: 18px; background-color: #ffffff; box-shadow: 0 8px 20px rgba(60, 88, 130, 0.08); }
+	.warehouse-page__trend-head { display: flex; min-height: 18px; flex-direction: row; align-items: center; justify-content: space-between; }
+	.warehouse-page__trend-title { font-size: 14px; font-weight: 800; line-height: 18px; color: #173451; }
+	.warehouse-page__trend-granularity { padding: 2px 7px; border-radius: 9px; background-color: #eff6ff; font-size: 10px; line-height: 14px; color: #3777b6; }
+	.warehouse-page__trend-canvas { display: block; width: 100%; height: 120px; margin-top: 2px; }
+	.warehouse-page__trend-periods { display: flex; min-height: 32px; flex-direction: row; margin-top: 1px; overflow: hidden; border-radius: 9px; background-color: #f7f9fc; }
+	.warehouse-page__trend-period { display: flex; min-width: 0; flex: 1; flex-direction: column; justify-content: center; padding: 3px 7px; }
+	.warehouse-page__trend-period text:first-child { font-size: 10px; font-weight: 700; line-height: 13px; }
+	.warehouse-page__trend-period text:last-child { overflow: hidden; margin-top: 1px; font-size: 9px; line-height: 12px; color: #718096; text-overflow: ellipsis; white-space: nowrap; }
+	.warehouse-page__trend-period--current text:first-child { color: #1976d2; }
+	.warehouse-page__trend-period--yoy text:first-child { color: #e48467; }
+	.warehouse-page__trend-period--mom text:first-child { color: #6658cf; }
+	.warehouse-page__pie-row { display: flex; flex-direction: row; margin-top: 8px; }
+	.warehouse-page__pie-card { display: flex; flex: 1; min-width: 0; height: 198px; flex-direction: column; align-items: center; justify-content: center; padding: 5px; border-radius: 18px; background-color: #ffffff; box-shadow: 0 8px 20px rgba(60, 88, 130, 0.08); }
+	.warehouse-page__pie-card:first-child { margin-right: 12px; }
+	.warehouse-page__pie-title { display: block; width: 100%; margin-bottom: 2px; font-size: 12px; font-weight: 800; line-height: 16px; color: #52657a; text-align: center; }
+	.warehouse-page__pie { position: relative; width: 178px; height: 178px; flex: 0 0 178px; border-radius: 89px; overflow: hidden; background: conic-gradient(#edf3f8 0deg, #edf3f8 360deg); }
+	.warehouse-page__pie::after { display: none; }
+	.warehouse-page__pie-copy { display: none; }
+	.warehouse-page__pie-label { display: none; }
+	.warehouse-page__pie-value { display: none; }
+	.warehouse-page__pie-center { position: absolute; z-index: 1; left: 8px; right: 8px; top: 0; bottom: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+	.warehouse-page__pie-center-name { overflow: hidden; max-width: 108px; font-size: 12px; font-weight: 700; line-height: 16px; color: #ffffff; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
+	.warehouse-page__pie-center-value { margin-top: 4px; overflow: hidden; max-width: 108px; font-size: 15px; font-weight: 800; line-height: 18px; color: #ffffff; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
+	.warehouse-page__pie--refund .warehouse-page__pie-center-name, .warehouse-page__pie--refund .warehouse-page__pie-center-value { color: #748398; }
+	.warehouse-page__pie-label-inside { position: absolute; z-index: 1; display: flex; max-width: 76px; flex-direction: column; align-items: center; transform: translate(-50%, -50%); }
+	.warehouse-page__pie-label-inside text:first-child { overflow: hidden; max-width: 82px; font-size: 11px; font-weight: 700; line-height: 15px; color: #ffffff; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
+	.warehouse-page__pie-label-inside text:last-child { margin-top: 2px; font-size: 14px; font-weight: 800; line-height: 18px; color: #ffffff; text-align: center; }
+	.warehouse-page__pie-center--empty text:first-child { font-size: 13px; font-weight: 700; line-height: 18px; color: #748398; }
+	.warehouse-page__pie-center--empty text:last-child { margin-top: 3px; font-size: 16px; font-weight: 800; line-height: 20px; color: #748398; }
+
+	/* mobile-vue3 warehouse ranking pie larger override */
+	.warehouse-page__ranking-head { display: flex; flex-direction: column; align-items: stretch; min-height: 214px; padding: 8px 2px 10px 2px; }
+	.warehouse-page__ranking-head-top { display: none; }
+	.warehouse-page__pie-row { display: flex; flex-direction: row; margin-top: 8px; }
+	.warehouse-page__pie-card { display: flex; flex: 1; min-width: 0; height: 198px; flex-direction: column; align-items: center; justify-content: center; padding: 5px; border-radius: 18px; background-color: #ffffff; box-shadow: 0 8px 20px rgba(60, 88, 130, 0.08); }
+	.warehouse-page__pie-card:first-child { margin-right: 12px; }
+	.warehouse-page__pie { position: relative; width: 178px; height: 178px; flex: 0 0 178px; border-radius: 89px; overflow: hidden; background: conic-gradient(#edf3f8 0deg, #edf3f8 360deg); }
+	.warehouse-page__pie::after { display: none; }
+	.warehouse-page__pie-copy { display: none; }
+	.warehouse-page__pie-label { display: none; }
+	.warehouse-page__pie-value { display: none; }
+	.warehouse-page__pie-center { position: absolute; left: 8px; right: 8px; top: 0; bottom: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+	.warehouse-page__pie-center-name { overflow: hidden; max-width: 108px; font-size: 12px; font-weight: 700; line-height: 16px; color: #ffffff; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
+	.warehouse-page__pie-center-value { margin-top: 4px; overflow: hidden; max-width: 108px; font-size: 15px; font-weight: 800; line-height: 18px; color: #ffffff; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
+	.warehouse-page__pie--refund .warehouse-page__pie-center-name, .warehouse-page__pie--refund .warehouse-page__pie-center-value { color: #748398; }
+
+	/* Bar chart for employee and project rankings. */
+	.warehouse-page__bar-card { display: flex; flex-direction: column; margin-top: 10px; margin-bottom: 18px; padding: 14px 10px 18px 10px; border-radius: 18px; background-color: #ffffff; box-shadow: 0 8px 20px rgba(60, 88, 130, 0.08); }
+	.warehouse-page__bar-head { display: flex; min-height: 30px; flex-direction: row; align-items: center; justify-content: space-between; }
+	.warehouse-page__bar-title { font-size: 16px; font-weight: 800; line-height: 22px; color: #0e2039; }
+	.warehouse-page__sort-toggle { display: flex; min-width: 56px; height: 28px; align-items: center; justify-content: center; border-radius: 14px; background-color: #edf6ff; }
+	.warehouse-page__sort-toggle text { font-size: 12px; font-weight: 700; color: #1677cc; }
+	.warehouse-page__bar-row { display: flex; flex-direction: column; margin-top: 12px; }
+	.warehouse-page__bar-row-top { display: flex; flex-direction: row; align-items: center; }
+	.warehouse-page__bar-rank { display: flex; width: 22px; height: 22px; flex-shrink: 0; align-items: center; justify-content: center; border-radius: 8px; background-color: #eef4fa; font-size: 11px; font-weight: 800; color: #6d7f94; }
+	.warehouse-page__bar-name { overflow: hidden; flex: 1; margin-left: 9px; font-size: 13px; font-weight: 700; line-height: 18px; color: #1c3148; text-overflow: ellipsis; white-space: nowrap; }
+	.warehouse-page__bar-value { margin-left: 8px; font-size: 13px; font-weight: 800; line-height: 18px; color: #123658; }
+	.warehouse-page__bar-track { overflow: hidden; height: 8px; margin-top: 7px; margin-left: 31px; border-radius: 4px; background-color: #edf3f8; }
+	.warehouse-page__bar-fill { height: 8px; border-radius: 4px; background-color: #1677cc; box-shadow: 0 5px 10px rgba(22, 119, 204, 0.18); }
+	.warehouse-page__bar-row:nth-child(2) .warehouse-page__bar-fill { background-color: #386fe8; }
+	.warehouse-page__bar-row:nth-child(3) .warehouse-page__bar-fill { background-color: #5b8ff9; }
+	.warehouse-page__bar-row:nth-child(4) .warehouse-page__bar-fill { background-color: #6aa7ff; }
+	.warehouse-page__column-scroll { margin-top: 10px; overflow: hidden; }
+	.warehouse-page__column-chart { display: flex; width: 100%; height: 184px; flex-direction: row; align-items: flex-end; justify-content: space-between; padding: 8px 0 0 0; }
+	.warehouse-page__column-item { display: flex; width: 10%; min-width: 0; flex: 0 0 10%; flex-direction: column; align-items: center; justify-content: flex-end; margin-right: 0; }
+	.warehouse-page__column-plot { display: flex; width: 100%; height: 118px; flex-direction: column; align-items: center; justify-content: flex-end; }
+	.warehouse-page__column-fill { width: 24px; min-height: 2px; border-radius: 4px 4px 0 0; background-color: #9ccfeb; box-shadow: 0 8px 16px rgba(65, 137, 185, 0.1); }
+	.warehouse-page__column-fill--0 { background-color: #f2c34a; }
+	.warehouse-page__column-fill--1 { background-color: #9dd4f3; }
+	.warehouse-page__column-fill--2 { background-color: #d6c1ad; }
+	.warehouse-page__column-fill--3 { background-color: #d8d8d8; }
+	.warehouse-page__column-fill--4 { background-color: #cfcfcf; }
+	.warehouse-page__column-name { display: block; width: 100%; margin-top: 9px; overflow: hidden; font-size: 10px; font-weight: 700; line-height: 14px; color: #1f3146; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
+	.warehouse-page__column-value { display: block; width: 100%; margin-top: 2px; overflow: hidden; font-size: 9px; line-height: 12px; color: #314257; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
+	.warehouse-page__sheet-mask { position: fixed; left: 0; right: 0; top: 0; bottom: 0; z-index: 80; display: flex; flex-direction: column; justify-content: flex-end; background-color: rgba(8, 22, 38, 0.28); }
+	.warehouse-page__sheet { display: flex; flex-direction: column; padding: 16px 16px 22px 16px; border-radius: 22px 22px 0 0; background-color: #ffffff; box-shadow: 0 -12px 32px rgba(25, 49, 78, 0.16); }
+	.warehouse-page__sheet-mask--full { z-index: 90; justify-content: stretch; }
+	.warehouse-page__sheet--org { position: absolute; left: 0; right: 0; top: 0; bottom: 0; padding: 18px 16px 24px 16px; border-radius: 0; }
+	.warehouse-page__sheet-head { display: flex; min-height: 32px; flex-direction: row; align-items: center; justify-content: space-between; }
+	.warehouse-page__sheet-head--picker { min-height: 42px; }
+	.warehouse-page__sheet-back { display: flex; width: 32px; height: 32px; flex-shrink: 0; align-items: center; justify-content: center; font-size: 28px !important; font-weight: 400 !important; line-height: 28px !important; color: #40546b !important; text-align: center; }
+	.warehouse-page__sheet-title { display: flex; min-width: 0; flex: 1; flex-direction: column; align-items: center; padding: 0 8px; }
+	.warehouse-page__sheet-title > text:first-child { font-size: 17px; font-weight: 800; line-height: 24px; color: #10243b; }
+	.warehouse-page__sheet-head text:first-child { font-size: 17px; font-weight: 800; line-height: 24px; color: #10243b; }
+	.warehouse-page__sheet-tip { display: block; margin-top: 2px; font-size: 11px !important; font-weight: 400 !important; line-height: 16px !important; color: #8a99aa !important; }
+	.warehouse-page__sheet-close { display: flex; width: 32px; height: 32px; align-items: center; justify-content: center; border-radius: 16px; background-color: #eef4fa; font-size: 18px; color: #708196; text-align: center; }
+	.warehouse-page__org-search-wrap { display: flex; height: 48px; align-items: center; margin-top: 14px; padding: 0 14px; border-radius: 15px; background-color: #f1f5f9; }
+	.warehouse-page__org-search { width: 100%; height: 48px; border-width: 0; background-color: transparent; font-size: 15px; color: #172b42; }
+	.warehouse-page__range-row { display: flex; min-height: 52px; flex-direction: row; align-items: center; justify-content: space-between; margin-top: 10px; padding: 0 12px; border-radius: 14px; background-color: #f4f8fc; }
+	.warehouse-page__range-row text { font-size: 14px; color: #40546b; }
+	.warehouse-page__range-value { display: flex; min-width: 126px; height: 36px; align-items: center; justify-content: center; border-radius: 12px; background-color: #ffffff; }
+	.warehouse-page__range-value text { font-size: 14px; font-weight: 700; color: #1677cc; }
+	.warehouse-page__sheet-primary { display: flex; height: 44px; align-items: center; justify-content: center; margin-top: 16px; border-radius: 15px; background-color: #1677cc; }
+	.warehouse-page__sheet-primary text { font-size: 15px; font-weight: 800; color: #ffffff; }
+	.warehouse-page__org-path { display: flex; flex-direction: row; flex-wrap: wrap; margin-top: 8px; }
+	.warehouse-page__org-path-item { display: flex; height: 30px; align-items: center; justify-content: center; margin-right: 8px; margin-bottom: 8px; padding: 0 11px; border-radius: 11px; background-color: #eef6ff; }
+	.warehouse-page__org-path-item text { font-size: 12px; font-weight: 700; color: #1677cc; }
+	.warehouse-page__org-list { display: flex; flex-direction: column; overflow: hidden; margin-top: 4px; border-radius: 16px; background-color: #f7faff; }
+	.warehouse-page__org-tree { flex: 1; min-height: 0; margin-top: 14px; border-radius: 16px; background-color: #ffffff; }
+	.warehouse-page__org-option { display: flex; min-height: 58px; flex-direction: row; align-items: center; justify-content: space-between; padding: 0 13px; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #e8eef5; }
+	.warehouse-page__org-option--tree { min-height: 66px; padding-right: 13px; }
+	.warehouse-page__org-option--selected { background-color: #f4f7ff; }
+	.warehouse-page__org-expand { display: flex; width: 28px; height: 28px; flex-shrink: 0; align-items: center; justify-content: center; margin-right: 4px; border-radius: 14px; color: #8594a8; }
+	.warehouse-page__org-expand text { font-size: 18px; line-height: 24px; }
+	.warehouse-page__org-expand--blank { opacity: 0; }
+	.warehouse-page__org-type { display: flex; width: 34px; height: 34px; flex-shrink: 0; align-items: center; justify-content: center; margin-right: 9px; border-radius: 10px; background-color: #edf2ff; }
+	.warehouse-page__org-type text { font-size: 15px; font-weight: 800; color: #7162d9; }
+	.warehouse-page__org-type--store { background-color: #edfbf4; }
+	.warehouse-page__org-type--store text { color: #2abf83; }
+	.warehouse-page__org-copy { display: flex; min-width: 0; flex: 1; flex-direction: column; }
+	.warehouse-page__org-select { display: flex; min-width: 42px; height: 28px; align-items: center; justify-content: center; border-radius: 14px; background-color: transparent; font-size: 12px; font-weight: 700; color: #8a99aa; }
+	.warehouse-page__org-option--selected .warehouse-page__org-select { background-color: #e7f1ff; color: #1677cc; }
+	.warehouse-page__org-footer { display: flex; min-height: 64px; flex-direction: row; align-items: center; justify-content: space-between; margin: 14px -16px -24px -16px; padding: 0 16px; border-top-width: 1px; border-top-style: solid; border-top-color: #e8eef5; background-color: #ffffff; }
+	.warehouse-page__org-footer > text { overflow: hidden; max-width: 56%; font-size: 14px; font-weight: 700; color: #40546b; text-overflow: ellipsis; white-space: nowrap; }
+	.warehouse-page__org-clear { display: flex; width: 62px; height: 42px; align-items: center; justify-content: center; margin-left: auto; margin-right: 10px; border-radius: 13px; background-color: #edf4fb; }
+	.warehouse-page__org-clear text { font-size: 14px; font-weight: 700; color: #497092; }
+	.warehouse-page__org-confirm { display: flex; width: 100px; height: 42px; align-items: center; justify-content: center; border-radius: 13px; background-color: #1677cc; box-shadow: 0 7px 15px rgba(22, 119, 204, 0.2); }
+	.warehouse-page__org-confirm text { font-size: 15px; font-weight: 800; color: #ffffff; }
+	.warehouse-page__org-name { display: block; font-size: 15px; font-weight: 800; line-height: 21px; color: #142a42; }
+	.warehouse-page__org-meta { display: block; margin-top: 2px; font-size: 11px; line-height: 16px; color: #8a99aa; }
+
+	/* Fixed bottom icon tabbar. */
+	.warehouse-page__content { padding-bottom: 118px; }
+	.warehouse-page__tabs { position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; display: flex; min-height: 72px; flex-direction: row; padding: 6px 0 10px 0; border-top-width: 1px; border-top-style: solid; border-top-color: rgba(216, 226, 239, 0.92); background-color: rgba(255, 255, 255, 0.97); box-shadow: 0 -10px 26px rgba(35, 70, 110, 0.1); }
+	.warehouse-page__tab { position: relative; display: flex; min-width: 0; flex: 1; flex-direction: column; align-items: center; justify-content: center; border-top-width: 0; background-color: transparent; font-size: 11px; font-weight: 600; line-height: 15px; color: #728198; }
+	.warehouse-page__tab text { margin-top: 4px; font-size: 11px; line-height: 15px; color: #728198; text-align: center; }
+	.warehouse-page__tab--active { border-top-color: transparent; background-color: transparent; color: #1677cc; }
+	.warehouse-page__tab--active text { font-weight: 700; color: #1677cc; }
+	.warehouse-page__tab-icon { position: relative; display: flex; width: 24px; height: 24px; align-items: center; justify-content: center; border-radius: 12px; background-color: #edf3f8; box-shadow: inset 0 0 0 1px rgba(214, 225, 238, 0.9); }
+	.warehouse-page__tab-icon::before, .warehouse-page__tab-icon::after { position: absolute; display: block; content: ''; box-sizing: border-box; }
+	.warehouse-page__tab--active .warehouse-page__tab-icon { background-color: #1677cc; box-shadow: 0 6px 14px rgba(22, 119, 204, 0.22); }
+	.warehouse-page__tab--warehouse .warehouse-page__tab-icon::before { width: 15px; height: 12px; border-width: 2px; border-style: solid; border-color: #7d91a8; border-radius: 3px; }
+	.warehouse-page__tab--warehouse .warehouse-page__tab-icon::after { width: 9px; height: 2px; background-color: #7d91a8; box-shadow: 0 -4px 0 #7d91a8, 0 4px 0 #7d91a8; }
+	.warehouse-page__tab--customers .warehouse-page__tab-icon::before { width: 8px; height: 8px; margin-top: -6px; border-radius: 4px; background-color: #7d91a8; box-shadow: 7px 3px 0 -1px #7d91a8; }
+	.warehouse-page__tab--customers .warehouse-page__tab-icon::after { width: 17px; height: 8px; margin-top: 8px; border-radius: 8px 8px 3px 3px; background-color: #7d91a8; }
+	.warehouse-page__tab--workbench .warehouse-page__tab-icon::before { width: 15px; height: 15px; border-width: 2px; border-style: solid; border-color: #7d91a8; border-radius: 3px; }
+	.warehouse-page__tab--workbench .warehouse-page__tab-icon::after { width: 2px; height: 15px; background-color: #7d91a8; box-shadow: 6px 0 0 #7d91a8, -6px 0 0 #7d91a8; }
+	.warehouse-page__tab--goals .warehouse-page__tab-icon::before { width: 16px; height: 16px; border-width: 2px; border-style: solid; border-color: #7d91a8; border-radius: 8px; }
+	.warehouse-page__tab--goals .warehouse-page__tab-icon::after { width: 8px; height: 5px; border-left-width: 2px; border-left-style: solid; border-left-color: #7d91a8; border-bottom-width: 2px; border-bottom-style: solid; border-bottom-color: #7d91a8; transform: rotate(-45deg); }
+	.warehouse-page__tab--profile .warehouse-page__tab-icon::before { width: 8px; height: 8px; margin-top: -6px; border-radius: 4px; background-color: #7d91a8; }
+	.warehouse-page__tab--profile .warehouse-page__tab-icon::after { width: 15px; height: 8px; margin-top: 8px; border-radius: 8px 8px 3px 3px; background-color: #7d91a8; }
+	.warehouse-page__tab--active .warehouse-page__tab-icon::before { border-color: #ffffff; background-color: transparent; }
+	.warehouse-page__tab--active .warehouse-page__tab-icon::after { border-color: #ffffff; background-color: #ffffff; box-shadow: 0 -4px 0 #ffffff, 0 4px 0 #ffffff; }
+	.warehouse-page__tab--active.warehouse-page__tab--customers .warehouse-page__tab-icon::before, .warehouse-page__tab--active.warehouse-page__tab--customers .warehouse-page__tab-icon::after, .warehouse-page__tab--active.warehouse-page__tab--profile .warehouse-page__tab-icon::before, .warehouse-page__tab--active.warehouse-page__tab--profile .warehouse-page__tab-icon::after { background-color: #ffffff; box-shadow: none; }
+	.warehouse-page__tab--active.warehouse-page__tab--goals .warehouse-page__tab-icon::before { background-color: transparent; }
+	.warehouse-page__tab--active.warehouse-page__tab--goals .warehouse-page__tab-icon::after { background-color: transparent; box-shadow: none; }
+
+	/* One content gutter: all analysis modules share the same left and right edges. */
+	.warehouse-page__content { padding: 12px 18px 118px 18px; }
+	.warehouse-page__overview-card, .warehouse-page__scope, .warehouse-page__metrics, .warehouse-page__availability, .warehouse-page__ranking-tabs, .warehouse-page__ranking-head, .warehouse-page__bar-card, .warehouse-page__ranking-list, .warehouse-page__freshness { box-sizing: border-box; width: 100%; }
+	.warehouse-page__ranking-tabs { margin-left: 0; margin-right: 0; }
+	.warehouse-page__ranking-head { margin-left: 0; margin-right: 0; padding-left: 0; padding-right: 0; }
+	.warehouse-page__pie-row { margin-left: 0; margin-right: 0; }
+	.warehouse-page__ranking-list { margin-left: 0; margin-right: 0; }
+	.warehouse-page__bar-card { margin-left: 0; margin-right: 0; }
+	.warehouse-page__freshness { padding-left: 0; padding-right: 0; }
+	/* Responsive sizing: no module keeps a competing hard-coded content width. */
+	.warehouse-page__metrics { display: flex; flex-wrap: nowrap; gap: 8px; padding: 8px 0 10px 0; overflow: visible; }
+	.warehouse-page__metric, .warehouse-page__metric:nth-child(n), .warehouse-page__metric:nth-child(odd) { width: auto; min-width: 0; max-width: none; flex: 1 1 0; margin: 0; }
+	.warehouse-page__ranking-track { width: 100%; min-width: 540px; }
+	.warehouse-page__ranking-tab { width: auto; min-width: 108px; flex: 1 0 108px; }
+
+	/* Compact, aligned overview controls for the source H5 preview. */
+	.warehouse-page__org-filter-row { display: flex; padding: 0 0 6px 4px; }
+	.warehouse-page__org-filter-row .warehouse-page__filter-pill--org { box-sizing: border-box; width: 174px; min-width: 174px; margin-left: 0; padding: 0 12px; border-width: 1px; border-style: solid; border-color: rgba(215, 226, 241, 0.9); border-radius: 16px; background-color: rgba(255, 255, 255, 0.76); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.7), 0 8px 20px rgba(63, 93, 137, 0.08); }
+	.warehouse-page__org-filter-row .warehouse-page__filter-pill--org text, .warehouse-page__org-filter-row .warehouse-page__filter-pill--org span { display: flex; width: 100%; height: 34px; overflow: hidden; align-items: center; justify-content: center; font-weight: 600; line-height: 34px; color: #71839a; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
+	.warehouse-page__metric, .warehouse-page__metric:nth-child(n), .warehouse-page__metric:nth-child(odd) { height: 94px; min-height: 94px; max-height: 94px; padding: 9px 4px 7px 4px; }
+	.warehouse-page__metric-badge { width: 28px; min-width: 28px; height: 28px; min-height: 28px; flex-basis: 28px; border-radius: 14px; }
+	.warehouse-page__metric:nth-child(1) .warehouse-page__metric-badge::before { width: 13px; height: 13px; border-radius: 7px; }
+	.warehouse-page__metric:nth-child(1) .warehouse-page__metric-badge::after { width: 7px; box-shadow: 0 -4px 0 #ffffff, 0 4px 0 #ffffff; }
+	.warehouse-page__metric:nth-child(2) .warehouse-page__metric-badge::before { width: 12px; height: 14px; }
+	.warehouse-page__metric:nth-child(2) .warehouse-page__metric-badge::after { width: 7px; box-shadow: 0 -4px 0 rgba(255, 255, 255, 0.8), 0 4px 0 rgba(255, 255, 255, 0.8); }
+	.warehouse-page__metric:nth-child(3) .warehouse-page__metric-badge::before { width: 14px; height: 14px; }
+	.warehouse-page__metric:nth-child(3) .warehouse-page__metric-badge::after { width: 11px; height: 2px; }
+	.warehouse-page__metric:nth-child(4) .warehouse-page__metric-badge::before { width: 14px; height: 14px; border-radius: 8px; }
+	.warehouse-page__metric:nth-child(4) .warehouse-page__metric-badge::after { width: 6px; height: 6px; transform: translate(-6px, -5px) rotate(25deg); }
+	.warehouse-page__metric-name { margin-top: 7px; line-height: 14px; }
+	.warehouse-page__metric-value { margin-top: 3px; font-size: 18px; line-height: 22px; }
+	.warehouse-page__ranking-track { width: 540px; min-width: 540px; flex: none; }
+	.warehouse-page__ranking-tabs { margin-top: 8px; }
+	.warehouse-page__ranking-head { min-height: 0; padding-top: 4px; padding-bottom: 6px; }
+	.warehouse-page__pie-row { margin-top: 0; }
+	/* Keep both ranking cards unchanged while drawing each pie at 88% of 178px. */
+	.warehouse-page__pie { width: 157px; height: 157px; flex: 0 0 157px; border-radius: 79px; }
+	.warehouse-page__pie-canvas { position: absolute; z-index: 0; left: 0; top: 0; display: block; width: 100%; height: 100%; }
+	.warehouse-page__pie-label-inside { z-index: 2; }
+	.warehouse-page__pie-label-inside uni-text { display: block; color: #ffffff; text-align: center; }
+	.warehouse-page__pie-label-inside uni-text:first-child { overflow: hidden; max-width: 82px; font-size: 11px; font-weight: 700; line-height: 15px; text-overflow: ellipsis; white-space: nowrap; }
+	.warehouse-page__pie-label-inside uni-text:last-child { margin-top: 2px; font-size: 14px; font-weight: 800; line-height: 18px; }
+
+	/* Keep every business card on one visual left/right baseline. The native
+	 * scroll bar stays outside this wrapper, so it cannot consume the right gutter. */
+	.warehouse-page__content { box-sizing: border-box; padding: 0; }
+	.warehouse-page__content-inner { display: block; box-sizing: border-box; width: 100%; max-width: 1200px; margin-left: auto; margin-right: auto; padding: 12px 18px 118px 18px; }
+	.warehouse-page__content-inner > .warehouse-page__section-kicker,
+	.warehouse-page__content-inner > .warehouse-page__overview-card,
+	.warehouse-page__content-inner > .warehouse-page__availability,
+	.warehouse-page__content-inner > .warehouse-page__ranking-tabs,
+	.warehouse-page__content-inner > .warehouse-page__trend-card,
+	.warehouse-page__content-inner > .warehouse-page__ranking-head,
+	.warehouse-page__content-inner > .warehouse-page__bar-card,
+	.warehouse-page__content-inner > .warehouse-page__ranking-list,
+	.warehouse-page__content-inner > .warehouse-page__ranking-empty,
+	.warehouse-page__content-inner > .warehouse-page__freshness { box-sizing: border-box; width: 100%; margin-left: 0; margin-right: 0; }
+	/* MP-WEIXIN converts the transient type=2d drawing surface to an image. The
+	 * resulting image remains in the scroll-view flow instead of floating above it. */
+	/* The custom navigation layout on MP-WEIXIN does not reserve the status-bar
+	 * area for this page. Keep the first filter row below the system capsule.
+	 * The class is applied only on the WeChat mini-program target. */
+	.warehouse-page--native-mini .warehouse-page__content-inner { padding-top: 84px; }
+	/* The organization chooser uses the available space left of the WeChat
+	 * capsule. The quick-date row remains directly beneath it. */
+	.warehouse-page--native-mini .warehouse-page__org-filter-row { margin-top: -32px; }
+	@media (max-width: 1236px) {
+		.warehouse-page__content-inner { max-width: none; }
+	}
+
 </style>

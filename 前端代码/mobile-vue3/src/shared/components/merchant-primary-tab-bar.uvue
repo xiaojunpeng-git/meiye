@@ -1,0 +1,94 @@
+<template>
+	<view class="merchant-primary-tab-bar" role="tablist">
+		<view
+			v-for="tab in visibleTabs"
+			:key="tab.key"
+			class="merchant-primary-tab-bar__tab"
+			:class="{ 'merchant-primary-tab-bar__tab--active': props.activeKey === tab.key }"
+			role="tab"
+			:aria-selected="props.activeKey === tab.key"
+			@tap="openTab(tab.key)"
+		>
+			<text class="merchant-primary-tab-bar__label">{{ tab.label }}</text>
+		</view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	import { currentMerchantRoot } from '../platform/mobile-merchant-session.uts'
+	import { switchMerchantPrimaryTab } from '../platform/mobile-navigation.uts'
+	import { merchantTabIsAllowed } from '../platform/merchant-tab-permissions.uts'
+
+	const props = defineProps<{ activeKey : string }>()
+	const tabs = [
+		{ key: 'home', label: '经营', actions: ['MERCHANT_HOME_VIEW', 'mobile.merchant.home', '401009'] },
+		{ key: 'warehouse', label: '数据', actions: ['MERCHANT_WAREHOUSE_VIEW', 'mobile.merchant.warehouse', '401007'] },
+		{ key: 'customers', label: '客户', actions: ['CUSTOMER_VIEW', 'mobile.merchant.customers', '401004'] },
+		{ key: 'workbench', label: '工作台', actions: ['RESERVATION_VIEW', 'mobile.merchant.workbench', '401001'] },
+		// 账号与退出入口不属于四个业务 Tab 的权限控制范围。
+		{ key: 'profile', label: '我的', actions: [] }
+	]
+	// Fail closed while the merchant root is being read; never briefly render
+	// business entries before their server-authorized actions are known.
+	const visibleTabs = ref<Array<any>>([])
+
+	onMounted(() => refreshTabs())
+
+	function refreshTabs() : void {
+		let root = currentMerchantRoot()
+		let granted = grantedCapabilities(root)
+		// A session without entrance actions is not authorized for any tab. Do not
+		// fall back to rendering all entries: the server enforces the same action
+		// contract and the route guard will send the user back through bootstrap.
+		if (granted.length === 0) {
+			visibleTabs.value = root != null ? [tabs[4]] : []
+			return
+		}
+		let next : Array<any> = []
+		for (let index = 0; index < 4; index++) {
+			let tab = tabs[index]
+			if (Array.isArray(root.availableActions)) {
+				if (merchantTabIsAllowed(String(tab.key), root)) next.push(tab)
+			} else {
+				let actions : Array<any> = tab.actions
+				for (let actionIndex = 0; actionIndex < actions.length; actionIndex++) {
+					if (granted.indexOf(String(actions[actionIndex])) >= 0) {
+						next.push(tab)
+						break
+					}
+				}
+			}
+		}
+		if (root != null) next.push(tabs[4])
+		visibleTabs.value = next
+	}
+
+	function grantedCapabilities(root : any) : Array<string> {
+		if (root == null || typeof root != 'object') return []
+		let source : any = Array.isArray(root.availableActions) ? root.availableActions : root.capabilities
+		if (!Array.isArray(source)) return []
+		let result : Array<string> = []
+		for (let index = 0; index < source.length; index++) {
+			let value = source[index]
+			if (value != null && typeof value == 'object') {
+				let code = String(value.action || value.code || value.feature_code || value.featureCode || value.id || '')
+				if (code.length > 0) result.push(code)
+			} else {
+				let code = String(value || '')
+				if (code.length > 0) result.push(code)
+			}
+		}
+		return result
+	}
+
+	function openTab(key : string) : void {
+		switchMerchantPrimaryTab(key)
+	}
+</script>
+
+<style>
+	.merchant-primary-tab-bar { display: flex; min-height: 64px; flex-direction: row; align-items: stretch; border-top-width: 1px; border-top-style: solid; border-top-color: #dde4ed; background-color: #ffffff; }
+	.merchant-primary-tab-bar__tab { display: flex; min-width: 0; flex: 1; flex-direction: row; align-items: center; justify-content: center; border-top-width: 2px; border-top-style: solid; border-top-color: #ffffff; font-size: 13px; font-weight: 600; color: #526071; }
+	.merchant-primary-tab-bar__tab--active { border-top-color: #1677cc; background-color: #f7fbff; color: #1677cc; }
+	.merchant-primary-tab-bar__label { line-height: 20px; }
+</style>

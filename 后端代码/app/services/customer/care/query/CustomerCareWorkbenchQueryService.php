@@ -602,18 +602,29 @@ final class CustomerCareWorkbenchQueryService
     private function preparations(CustomerCareQueryScope $scope): array
     {
         $assignees = [];
-        foreach ($this->repository->activeAssignees($scope) as $row) {
-            if (!$scope->canReassign() && (int)$row['staff_id'] !== $scope->staffId()) {
-                continue;
-            }
+        if (!$scope->canReassign()) {
+            // The request context has already verified this exact active store-staff
+            // assignment. Do not make a self-assignment disappear because a separate
+            // cashier role switch is disabled on an otherwise authorized employee.
             $assignees[] = [
-                'value' => (string)(int)$row['staff_id'],
-                'label' => (string)$row['staff_name'],
-                'staffId' => (string)(int)$row['staff_id'],
-                'employeeId' => (string)(int)$row['employee_id'],
-                'storeId' => (string)(int)$row['store_id'],
+                'value' => (string)$scope->staffId(),
+                'label' => $scope->staffName(),
+                'staffId' => (string)$scope->staffId(),
+                'employeeId' => (string)$scope->employeeId(),
+                'storeId' => (string)$scope->operationStoreId(),
                 'enabled' => true,
             ];
+        } else {
+            foreach ($this->repository->activeAssignees($scope) as $row) {
+                $assignees[] = [
+                    'value' => (string)(int)$row['staff_id'],
+                    'label' => (string)$row['staff_name'],
+                    'staffId' => (string)(int)$row['staff_id'],
+                    'employeeId' => (string)(int)$row['employee_id'],
+                    'storeId' => (string)(int)$row['store_id'],
+                    'enabled' => true,
+                ];
+            }
         }
         return [
             'completion' => [
@@ -653,22 +664,26 @@ final class CustomerCareWorkbenchQueryService
                 [
                     'code' => 'care_open_workload', 'label' => '当前待跟进',
                     'value' => $counts['today'] + $counts['overdue'] + $counts['future'],
-                    'unit' => '项', 'userReady' => false, 'description' => '',
+                    'unit' => '项', 'userReady' => true,
+                    'description' => '未开始或进行中的任务总数。',
                 ],
                 [
                     'code' => 'care_completed', 'label' => '已完成',
                     'value' => $counts['completed'], 'unit' => '项',
-                    'userReady' => false, 'description' => '',
+                    'userReady' => true,
+                    'description' => '状态为已完成的任务数。',
                 ],
                 [
                     'code' => 'care_overdue_current', 'label' => '当前逾期',
                     'value' => $counts['overdue'], 'unit' => '项',
-                    'userReady' => false, 'description' => '',
+                    'userReady' => true,
+                    'description' => '计划时间早于当前时间、仍未完成的任务数。',
                 ],
                 [
                     'code' => 'care_activity_records', 'label' => '实际跟进记录',
                     'value' => (int)$team['validRecordCount'], 'unit' => '条',
-                    'userReady' => false, 'description' => '',
+                    'userReady' => true,
+                    'description' => '正常状态且已关联任务的客情记录数。',
                 ],
             ],
             'employeeRows' => array_values($team['employeeRows']),

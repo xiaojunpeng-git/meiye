@@ -1,0 +1,73 @@
+<template>
+	<view class="product-detail-page">
+		<view class="product-detail-page__header"><view class="product-detail-page__back" @tap="goBack"><text>‹</text><text>返回经营</text></view><text class="product-detail-page__eyebrow">经营首页 · 商品与库存</text><text class="product-detail-page__title">商品与库存明细</text><text class="product-detail-page__subtitle">按当前员工数据权限查看商品销售与库存提醒</text></view>
+		<scroll-view scroll-y="true" refresher-enabled="true" :refresher-triggered="refreshing" @refresherrefresh="onPullRefresh" class="product-detail-page__content"><view class="product-detail-page__content-inner">
+			<view class="product-detail-page__context"><view><text class="product-detail-page__context-label">当前范围</text><text class="product-detail-page__context-value">{{ scopeLabel }}</text></view><text class="product-detail-page__period">本月</text></view>
+			<view v-if="loading" class="product-detail-page__state product-detail-page__state--loading"><text class="product-detail-page__state-title">正在加载商品与库存明细</text><text class="product-detail-page__state-copy">数据按当前员工权限从统一经营接口返回</text></view>
+			<view v-else-if="message.length > 0" class="product-detail-page__state"><text class="product-detail-page__state-title">{{ message }}</text><view class="product-detail-page__retry" @tap="load"><text>重新加载</text></view></view>
+			<view v-else><view class="product-detail-page__metric-grid"><view v-for="metric in metrics" :key="metric.code" class="product-detail-page__metric" :class="{ 'product-detail-page__metric--unavailable': metric.state !== 'ready' }"><text class="product-detail-page__metric-label">{{ metric.name }}</text><text class="product-detail-page__metric-value">{{ displayMetric(metric) }}</text><text class="product-detail-page__metric-source">{{ metric.source || '统一商品经营事实' }}</text></view></view><view class="product-detail-page__section"><text class="product-detail-page__section-title">明细说明</text><text class="product-detail-page__section-copy">商品销售业绩来自统一商品现金有效销售事实；毛利、库存预警和临期商品按接口状态展示，不在手机端猜测或重复计算。</text></view></view>
+			<view class="product-detail-page__freshness"><text>数据更新时间：{{ freshness }}</text><text>口径版本：{{ metricVersion }}</text></view>
+		</view></scroll-view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	import { queryMobileMerchantHome } from '../../../shared/api/mobile-home-client.uts'
+	const loading = ref(false)
+	const refreshing = ref(false)
+	const message = ref('')
+	const scopeLabel = ref('授权组织范围')
+	const freshness = ref('—')
+	const metricVersion = ref('—')
+	const metrics = ref<Array<any>>([])
+
+	onShow(() => load())
+	function load() : void {
+		loading.value = true; message.value = ''
+		queryMobileMerchantHome({ periodMode: 'month' }, (response : any) => {
+			loading.value = false
+			if (response == null || response.ok !== true || response.body == null) { message.value = String(response == null ? '商品与库存明细暂时不可用。' : (response.message || '商品与库存明细暂时不可用。')); return }
+			let payload = response.body
+			scopeLabel.value = String((payload.scope || {}).label || '授权组织范围')
+			metricVersion.value = String(payload.metric_version || '—')
+			freshness.value = formatDate(Number(payload.data_as_of || 0))
+			let product = payload.product || {}
+			metrics.value = Array.isArray(product.metrics) ? product.metrics : []
+		})
+	}
+	function onPullRefresh() : void { if (refreshing.value) return; refreshing.value = true; load(); setTimeout(() => { refreshing.value = false }, 900) }
+	function displayMetric(metric : any) : string { if (metric == null || metric.value == null || String(metric.state || '') !== 'ready') return '—'; let value = Number(metric.value); if (!isFinite(value)) return '—'; return String(metric.unit || '') === 'amount' ? '¥' + value.toLocaleString() : value.toLocaleString() }
+	function formatDate(timestamp : number) : string { if (timestamp <= 0) return '—'; let date = new Date(timestamp * 1000); return date.getFullYear().toString() + '-' + (date.getMonth() + 1).toString().padStart(2, '0') + '-' + date.getDate().toString().padStart(2, '0') }
+	function goBack() : void { uni.navigateBack({ delta: 1 }) }
+</script>
+
+<style>
+	.product-detail-page { display:flex; height:100vh; min-height:0; flex-direction:column; background-color:#f4f7fb; color:#25364a; }
+	.product-detail-page__header { flex:none; padding:15px 18px 17px; background-color:#fff; border-bottom:1px solid #e4ebf2; }
+	.product-detail-page__back { display:flex; flex-direction:row; align-items:center; align-self:flex-start; padding:2px 0 7px; font-size:12px; color:#3976a6; }
+	.product-detail-page__back text:first-child { margin-right:3px; font-size:24px; line-height:18px; }
+	.product-detail-page__eyebrow { display:block; font-size:11px; line-height:16px; color:#6d8399; }
+	.product-detail-page__title { display:block; margin-top:3px; font-size:24px; font-weight:800; line-height:31px; color:#1e3349; }
+	.product-detail-page__subtitle { display:block; margin-top:4px; font-size:12px; line-height:18px; color:#8291a0; }
+	.product-detail-page__content { min-height:0; flex:1; }
+	.product-detail-page__content-inner { padding:14px 14px 28px; }
+	.product-detail-page__context { display:flex; min-height:66px; flex-direction:row; align-items:center; justify-content:space-between; padding:11px 13px; border-radius:14px; background-color:#fff6e8; }
+	.product-detail-page__context-label { display:block; font-size:10px; line-height:14px; color:#9a7b4a; }
+	.product-detail-page__context-value { display:block; margin-top:3px; font-size:14px; font-weight:700; line-height:19px; color:#6d512b; }
+	.product-detail-page__period { padding:5px 8px; border-radius:7px; background-color:#fff; font-size:11px; color:#a66d13; }
+	.product-detail-page__state { display:flex; min-height:156px; flex-direction:column; align-items:center; justify-content:center; margin-top:14px; padding:20px; border-radius:14px; background-color:#fff; text-align:center; }
+	.product-detail-page__state--loading { min-height:118px; background-color:#fffbf5; }
+	.product-detail-page__state-title { font-size:14px; font-weight:800; line-height:20px; color:#806638; }
+	.product-detail-page__state-copy,.product-detail-page__metric-source,.product-detail-page__section-copy { margin-top:6px; font-size:11px; line-height:18px; color:#8f8576; }
+	.product-detail-page__retry { margin-top:12px; padding:7px 12px; border-radius:7px; background-color:#b57a23; font-size:11px; color:#fff; }
+	.product-detail-page__metric-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:14px; }
+	.product-detail-page__metric { min-height:112px; padding:14px; border-radius:14px; background-color:#fff; box-shadow:0 5px 16px rgba(89,72,43,.05); }
+	.product-detail-page__metric--unavailable { background-color:#fafafa; }
+	.product-detail-page__metric-label { display:block; font-size:12px; color:#806638; }
+	.product-detail-page__metric-value { display:block; margin-top:8px; font-size:22px; font-weight:800; color:#5d4c34; }
+	.product-detail-page__metric-source { color:#a6967f; }
+	.product-detail-page__section { display:flex; flex-direction:column; margin-top:12px; padding:14px; border-radius:14px; background-color:#fff; }
+	.product-detail-page__section-title { font-size:13px; font-weight:800; line-height:18px; color:#5d4c34; }
+	.product-detail-page__freshness { display:flex; flex-direction:row; justify-content:space-between; margin-top:12px; padding:0 2px; font-size:9px; line-height:13px; color:#9ba6b0; }
+	@media all and (min-width:700px) { .product-detail-page__content-inner { max-width:720px; margin-left:auto; margin-right:auto; padding-left:22px; padding-right:22px; } }
+</style>

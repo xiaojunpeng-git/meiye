@@ -7,6 +7,24 @@
 			}
 		},
 		{
+			"path": "src/merchant/pages/home/index",
+			"style": {
+				"navigationStyle": "custom"
+			}
+		},
+		{
+			"path": "src/merchant/pages/member-dashboard/index",
+			"style": {
+				"navigationStyle": "custom"
+			}
+		},
+		{
+			"path": "src/merchant/pages/product-dashboard/index",
+			"style": {
+				"navigationStyle": "custom"
+			}
+		},
+		{
 			"path": "src/merchant/pages/workbench/index",
 			"style": {
 				"navigationStyle": "custom"
@@ -14,6 +32,12 @@
 		},
 		{
 			"path": "src/merchant/pages/warehouse/index",
+			"style": {
+				"navigationStyle": "custom"
+			}
+		},
+		{
+			"path": "src/merchant/pages/employee-performance/index",
 			"style": {
 				"navigationStyle": "custom"
 			}
@@ -50,6 +74,18 @@
 		},
 		{
 			"path": "src/merchant/pages/profile/index",
+			"style": {
+				"navigationStyle": "custom"
+			}
+		},
+		{
+			"path": "src/merchant/pages/account/index",
+			"style": {
+				"navigationStyle": "custom"
+			}
+		},
+		{
+			"path": "src/merchant/pages/scope/index",
 			"style": {
 				"navigationStyle": "custom"
 			}

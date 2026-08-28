@@ -16,13 +16,12 @@ $assert = static function (string $id, bool $ok) use (&$failed): void {
 $features = $catalog->features();
 $codes = array_column($features, 'feature_code');
 $assert('MOBILE-CATALOG-01', $catalog->allRuleIds() === [
-    401100, 401200, 401300, 401001, 401002, 401003, 401004, 401005, 401006, 401007, 401008,
+    401100, 401200, 401300, 401009, 401007, 401004, 401001, 401002, 401003, 401005, 401006, 401008,
 ]);
 $assert('MOBILE-CATALOG-02', $codes === [
-    'mobile.merchant.workbench', 'mobile.merchant.reservations', 'mobile.merchant.customer_care', 'mobile.merchant.customers',
-    'mobile.merchant.customer_settings', 'mobile.merchant.goals', 'mobile.merchant.warehouse', 'mobile.merchant.profile',
+    'mobile.merchant.home', 'mobile.merchant.warehouse', 'mobile.merchant.customers', 'mobile.merchant.workbench',
 ]);
-$assert('MOBILE-CATALOG-03', count($catalog->menuTree()) === 3 && count($catalog->menuTree()[1]['children']) === 3);
+$assert('MOBILE-CATALOG-03', count($catalog->menuTree()) === 4 && count($catalog->menuTree()[0]['actions']) === 1);
 $assert('MOBILE-CATALOG-04', $catalog->normalizeRuleIds([401004, 401200, 401003, 401004]) === [401004, 401200, 401003]);
 try {
     $catalog->normalizeRuleIds([999999]);

@@ -1,0 +1,59 @@
+import { buildMobileRequestPlan, mobileRequestPlanMatchesContract } from './request-context.uts'
+import { sendMobileRequest } from './mobile-http.uts'
+import { currentMerchantRoot, merchantRequestSession } from '../platform/mobile-merchant-session.uts'
+
+// Runtime mirror of the V3 reservation document contract. It intentionally
+// contains no legacy reservation, order, checkout, or room-lock endpoint.
+const reservationTransportContract : any = {
+	contractVersion: 'mobile-merchant-v1',
+	endpoints: {
+		listReservations: { method: 'GET', path: '/mobile/merchant/reservations', requestMetadataProfile: 'MERCHANT_SESSION' },
+		reservationDetail: { method: 'GET', path: '/mobile/merchant/reservations/:reservationId', requestMetadataProfile: 'MERCHANT_SESSION' },
+		openReservationEditor: { method: 'POST', path: '/mobile/merchant/reservations/editor', requestMetadataProfile: 'MERCHANT_SESSION' },
+		queryReservationProjectCatalog: { method: 'POST', path: '/mobile/merchant/reservations/project-catalog', requestMetadataProfile: 'MERCHANT_SESSION' },
+		queryMemberCandidates: { method: 'POST', path: '/mobile/merchant/reservations/member-candidates', requestMetadataProfile: 'MERCHANT_SESSION' },
+		recalculateReservation: { method: 'POST', path: '/mobile/merchant/reservations/recalculate', requestMetadataProfile: 'MERCHANT_SESSION' },
+		createReservation: { method: 'POST', path: '/mobile/merchant/reservations', requestMetadataProfile: 'MERCHANT_SESSION' },
+		updateReservation: { method: 'PUT', path: '/mobile/merchant/reservations/:reservationId', requestMetadataProfile: 'MERCHANT_SESSION' },
+		cancelReservation: { method: 'POST', path: '/mobile/merchant/reservations/:reservationId/cancel', requestMetadataProfile: 'MERCHANT_SESSION' },
+		startReservationService: { method: 'POST', path: '/mobile/merchant/reservations/:reservationId/start-service', requestMetadataProfile: 'MERCHANT_SESSION' },
+		endReservationService: { method: 'POST', path: '/mobile/merchant/reservations/:reservationId/end-service', requestMetadataProfile: 'MERCHANT_SESSION' }
+	},
+	requestMetadataProfiles: {
+		MERCHANT_SESSION: {
+			required: { 'X-Mobile-Contract-Version': 'contractVersion', 'X-Mobile-Client-Session-Id': 'clientSessionId', 'X-Mobile-Platform': 'platform', 'X-Mobile-Request-Id': 'requestId', Authorization: 'Bearer <merchantToken>', 'X-Mobile-Active-Context-Id': 'activeContextId', 'X-Mobile-State-Context-Id': 'stateContextId' },
+			forbidden: ['X-Mobile-App-Session', 'Cookie', 'queryToken', 'bodyToken', 'headerAlias']
+		}
+	}
+}
+
+function request(endpointName : string, payload : any, done : (value : any) => void) : void {
+	let root = currentMerchantRoot()
+	let session = merchantRequestSession(root)
+	if (session == null) { done({ ok: false, message: '请先完成商家端登录。', body: null }); return }
+	let plan = buildMobileRequestPlan(reservationTransportContract, endpointName, session)
+	if (!mobileRequestPlanMatchesContract(reservationTransportContract, endpointName, session, plan)) { done({ ok: false, message: '预约请求上下文无效，请重新进入商家端。', body: null }); return }
+	sendMobileRequest(plan, payload, done)
+}
+
+function reservationRequest(endpointName : string, reservationId : number, payload : any, done : (value : any) => void) : void {
+	let root = currentMerchantRoot()
+	let session = merchantRequestSession(root)
+	if (session == null || reservationId <= 0) { done({ ok: false, message: reservationId <= 0 ? '预约标识无效。' : '请先完成商家端登录。', body: null }); return }
+	let plan = buildMobileRequestPlan(reservationTransportContract, endpointName, session)
+	if (!mobileRequestPlanMatchesContract(reservationTransportContract, endpointName, session, plan)) { done({ ok: false, message: '预约请求上下文无效，请重新进入商家端。', body: null }); return }
+	plan.path = String(plan.path).replace(':reservationId', reservationId.toString())
+	sendMobileRequest(plan, payload, done)
+}
+
+export function queryMobileReservations(payload : any, done : (value : any) => void) : void { request('listReservations', payload, done) }
+export function queryMobileReservationDetail(reservationId : number, done : (value : any) => void) : void { reservationRequest('reservationDetail', reservationId, {}, done) }
+export function openMobileReservationEditor(payload : any, done : (value : any) => void) : void { request('openReservationEditor', payload, done) }
+export function queryMobileReservationProjectCatalog(memberId : number, done : (value : any) => void) : void { request('queryReservationProjectCatalog', { memberId: memberId }, done) }
+export function queryMobileReservationMembers(payload : any, done : (value : any) => void) : void { request('queryMemberCandidates', payload, done) }
+export function recalculateMobileReservation(payload : any, done : (value : any) => void) : void { request('recalculateReservation', payload, done) }
+export function createMobileReservation(payload : any, done : (value : any) => void) : void { request('createReservation', payload, done) }
+export function updateMobileReservation(reservationId : number, payload : any, done : (value : any) => void) : void { reservationRequest('updateReservation', reservationId, payload, done) }
+export function cancelMobileReservation(reservationId : number, payload : any, done : (value : any) => void) : void { reservationRequest('cancelReservation', reservationId, payload, done) }
+export function startMobileReservationService(reservationId : number, payload : any, done : (value : any) => void) : void { reservationRequest('startReservationService', reservationId, payload, done) }
+export function endMobileReservationService(reservationId : number, payload : any, done : (value : any) => void) : void { reservationRequest('endReservationService', reservationId, payload, done) }

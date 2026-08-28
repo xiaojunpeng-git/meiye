@@ -51,7 +51,15 @@ class Reservation extends BaseController
     public function memberCandidates()
     {
         return $this->read('RESERVATION_CREATE', function (array $merchant): array {
-            return ['memberCandidates' => $this->customers->query($merchant, $this->payload(), false)];
+            // Keep member lookup inside the same reservation transport
+            // envelope as editor/catalog commands.  The mobile client uses
+            // result.status to distinguish a successful empty page from a
+            // failed request; returning the provider page bare made every
+            // valid member response look like an error.
+            return [
+                'result' => ['status' => 'success', 'code' => 'QUERY_OK', 'message' => ''],
+                'data' => ['memberCandidates' => $this->customers->query($merchant, $this->payload(), false)],
+            ];
         });
     }
 

@@ -18,7 +18,7 @@
 </template>
 
 <script setup lang="uts">
-	import { dispatchMobileCustomerUnifiedQueryCommand, queryMobileCustomerUnifiedQueryCapabilities } from '../../api/mobile-customer-client.uts'
+	import { dispatchMobileCustomerUnifiedQueryCommand, queryMobileCustomerUnifiedQueryCapabilities } from '../../../shared/api/mobile-customer-client.uts'
 	const loading = ref(false)
 	const savingSettings = ref(false)
 	const savingAliases = ref(false)

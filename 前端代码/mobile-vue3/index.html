@@ -15,6 +15,7 @@
 	</head>
 	<body>
 		<div id="app"><!--app-html--></div>
-		<script type="module" src="/main.uts"></script>
+		<!-- Web 端由 uni-app x 编译器解析 /main 并选择 main.uts；直接指向 .uts 会被 Vite 当作静态文件返回。 -->
+		<script type="module" src="/main"></script>
 	</body>
 </html>

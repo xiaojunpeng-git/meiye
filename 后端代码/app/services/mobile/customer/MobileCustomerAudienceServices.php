@@ -16,10 +16,33 @@ class MobileCustomerAudienceServices
     public const STATE_ACTIVE = 'ACTIVE';
     public const STATE_ARCHIVED = 'ARCHIVED';
 
+    /** Stable keys are not employee-owned rows and are evaluated at read time. */
+    public const SYSTEM_BIRTHDAY_THIS_MONTH = 'system-birthday-this-month';
+    public const SYSTEM_SLEEPING_90D = 'system-sleeping-90d';
+    public const SYSTEM_FOLLOWUP_7D = 'system-followup-7d';
+    public const SYSTEM_INVITE_30D = 'system-invite-30d';
+    public const SYSTEM_BENEFIT_LOW_BALANCE = 'system-benefit-low-balance';
+
+    public static function systemDefinitions(): array
+    {
+        return [
+            self::SYSTEM_BIRTHDAY_THIS_MONTH => ['name' => '本月生日', 'rule' => '本月生日实时查询'],
+            self::SYSTEM_SLEEPING_90D => ['name' => '沉睡客户', 'rule' => '严格复用平台沉睡口径：90天未有效服务且历史有有效服务'],
+            self::SYSTEM_FOLLOWUP_7D => ['name' => '重点回访', 'rule' => '最近7天有有效消费或服务事实'],
+            self::SYSTEM_INVITE_30D => ['name' => '重点邀约', 'rule' => '最近30天有效到店且最近7天无到店'],
+            self::SYSTEM_BENEFIT_LOW_BALANCE => ['name' => '权益金额不足', 'rule' => '有效剩余权益金额大于0且小于500元'],
+        ];
+    }
+
+    public static function isSystemKey(string $key): bool
+    {
+        return isset(self::systemDefinitions()[$key]);
+    }
+
     public function list(array $identity): array
     {
         $owner = $this->owner($identity);
-        return array_map(function (array $row): array {
+        $custom = array_map(function (array $row): array {
             return $this->present($row);
         }, Db::name(self::TABLE)
             ->where('owner_employee_id', $owner['employeeId'])
@@ -28,16 +51,50 @@ class MobileCustomerAudienceServices
             ->order('id', 'desc')
             ->select()
             ->toArray());
+        $system = [];
+        foreach (self::systemDefinitions() as $key => $definition) {
+            $system[] = [
+                'audienceId' => $key,
+                'audienceKey' => $key,
+                'type' => 'SYSTEM',
+                'name' => $definition['name'],
+                'version' => 1,
+                'system' => true,
+                'description' => $definition['rule'],
+                'validatedRule' => ['systemKey' => $key, 'description' => $definition['rule']],
+                'updatedAt' => time(),
+            ];
+        }
+        return array_merge($system, $custom);
     }
 
-    public function find(array $identity, int $audienceId): array
+    public function find(array $identity, string $audienceId): array
     {
         $owner = $this->owner($identity);
-        if ($audienceId <= 0) {
+        $audienceId = trim($audienceId);
+        if (self::isSystemKey($audienceId)) {
+            $definition = self::systemDefinitions()[$audienceId];
+            return [
+                'audienceId' => $audienceId,
+                'audienceKey' => $audienceId,
+                'type' => 'SYSTEM',
+                'name' => $definition['name'],
+                'version' => 1,
+                'system' => true,
+                'description' => $definition['rule'],
+                'validatedRule' => ['systemKey' => $audienceId, 'description' => $definition['rule']],
+                'updatedAt' => time(),
+            ];
+        }
+        if (!ctype_digit($audienceId)) {
+            throw new ValidateException('客群不存在或已失效。');
+        }
+        $audienceNumericId = (int)$audienceId;
+        if ($audienceNumericId <= 0) {
             throw new ValidateException('客群不存在或已失效。');
         }
         $row = Db::name(self::TABLE)
-            ->where('id', $audienceId)
+            ->where('id', $audienceNumericId)
             ->where('owner_employee_id', $owner['employeeId'])
             ->where('state', self::STATE_ACTIVE)
             ->find();
@@ -45,25 +102,6 @@ class MobileCustomerAudienceServices
             throw new ValidateException('客群不存在或已失效。');
         }
         return $this->present($row);
-    }
-
-    /**
-     * Dynamic audience metadata plus a server-calculated member total. The
-     * total is supplied by the unified member query layer so no stale member
-     * snapshot is persisted.
-     */
-    public function overview(array $identity, int $audienceId, int $memberCount): array
-    {
-        $audience = $this->find($identity, $audienceId);
-        return [
-            'audience' => $audience,
-            'overview' => [
-                'memberCount' => max(0, $memberCount),
-                'membership' => 'DYNAMIC_QUERY',
-                'calculatedAt' => date('c'),
-                'dataScopeApplied' => true,
-            ],
-        ];
     }
 
     public function create(array $identity, array $payload): array
@@ -98,8 +136,15 @@ class MobileCustomerAudienceServices
         });
     }
 
-    public function update(array $identity, int $audienceId, array $payload): array
+    public function update(array $identity, string $audienceId, array $payload): array
     {
+        if (self::isSystemKey(trim($audienceId))) {
+            throw new ValidateException('系统客群只读，不能修改。');
+        }
+        if (!ctype_digit(trim($audienceId)) || (int)$audienceId <= 0) {
+            throw new ValidateException('客群不存在或已失效。');
+        }
+        $audienceId = (int)$audienceId;
         $owner = $this->owner($identity);
         $command = $this->command($payload, false);
         return Db::transaction(function () use ($owner, $command, $audienceId): array {
@@ -123,8 +168,15 @@ class MobileCustomerAudienceServices
         });
     }
 
-    public function archive(array $identity, int $audienceId, array $payload): array
+    public function archive(array $identity, string $audienceId, array $payload): array
     {
+        if (self::isSystemKey(trim($audienceId))) {
+            throw new ValidateException('系统客群只读，不能删除。');
+        }
+        if (!ctype_digit(trim($audienceId)) || (int)$audienceId <= 0) {
+            throw new ValidateException('客群不存在或已失效。');
+        }
+        $audienceId = (int)$audienceId;
         $owner = $this->owner($identity);
         $command = $this->command($payload, false, true);
         return Db::transaction(function () use ($owner, $command, $audienceId): array {
@@ -278,8 +330,12 @@ class MobileCustomerAudienceServices
     {
         return [
             'audienceId' => (string)($row['id'] ?? ''),
+            'audienceKey' => (string)($row['id'] ?? ''),
+            'type' => 'CUSTOM',
             'name' => (string)($row['name'] ?? ''),
             'version' => (int)($row['version'] ?? 0),
+            'system' => false,
+            'description' => '员工保存的实时筛选客群',
             'validatedRule' => json_decode((string)($row['rule_payload'] ?? ''), true) ?: [],
             'updatedAt' => (int)($row['updated_at'] ?? 0),
         ];

@@ -1,0 +1,53 @@
+<template>
+	<view class="merchant-account">
+		<view class="merchant-account__header"><view class="merchant-account__back" role="button" @tap="goBack"><text>‹</text></view><text class="merchant-account__title">账号资料</text><view class="merchant-account__spacer"></view></view>
+		<scroll-view class="merchant-account__content" scroll-y refresher-enabled="true" :refresher-triggered="refreshing" @refresherrefresh="onPullRefresh">
+			<view class="merchant-account__inner">
+				<view v-if="loading" class="merchant-account__state"><text>正在读取账号资料…</text></view>
+				<view v-else-if="message.length > 0" class="merchant-account__state"><text>{{ message }}</text><view class="merchant-account__retry" @tap="load"><text>重新加载</text></view></view>
+				<view v-else>
+					<view class="merchant-account__identity"><view class="merchant-account__avatar"><text>{{ initial }}</text></view><view><text class="merchant-account__name">{{ employeeName }}</text><text class="merchant-account__detail">{{ employeePhone.length > 0 ? employeePhone : '员工统一账号' }}</text></view></view>
+					<view class="merchant-account__section"><text class="merchant-account__section-title">登录账号</text><text class="merchant-account__section-tip">账号修改后，其他已登录设备会退出</text><view class="merchant-account__field"><text class="merchant-account__label">员工账号</text><input class="merchant-account__input" :value="account" maxlength="64" autocomplete="username" @input="account = $event.detail.value" /></view><view class="merchant-account__field"><text class="merchant-account__label">当前密码</text><input class="merchant-account__input" password autocomplete="current-password" placeholder="请输入当前密码" @input="currentPassword = $event.detail.value" /></view><view class="merchant-account__field"><text class="merchant-account__label">新密码</text><input class="merchant-account__input" password autocomplete="new-password" placeholder="请输入 4-64 位新密码" @input="newPassword = $event.detail.value" /></view><view class="merchant-account__field"><text class="merchant-account__label">确认新密码</text><input class="merchant-account__input" password autocomplete="new-password" placeholder="再次输入新密码" @input="confirmation = $event.detail.value" /></view></view>
+					<view class="merchant-account__security-note"><text class="merchant-account__security-title">密码安全提示</text><text class="merchant-account__security-copy">密码只允许验证和修改，系统不会返回或展示明文密码。</text></view>
+					<text v-if="saveMessage.length > 0" class="merchant-account__error" role="alert">{{ saveMessage }}</text><view class="merchant-account__submit" :class="{ 'merchant-account__submit--disabled': saving }" role="button" @tap="save"><text>{{ saving ? '保存中…' : '保存账号资料' }}</text></view>
+				</view>
+			</view>
+		</scroll-view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	import { changeMobileMerchantCredentials, queryMobileMerchantAccount } from '../../../shared/api/mobile-merchant-profile-client.uts'
+	import { clearMerchantRoot } from '../../../shared/platform/mobile-merchant-session.uts'
+	import { openMerchantBootstrap } from '../../../shared/platform/mobile-navigation.uts'
+
+	const loading = ref(false); const refreshing = ref(false); const saving = ref(false); const message = ref(''); const saveMessage = ref('')
+	const employeeName = ref('员工'); const employeePhone = ref(''); const initial = ref('员'); const account = ref(''); const currentPassword = ref(''); const newPassword = ref(''); const confirmation = ref('')
+	onShow(() => load())
+	function goBack() { uni.navigateBack() }
+	function onPullRefresh() : void { if (refreshing.value) return; refreshing.value = true; load(); setTimeout(() => { refreshing.value = false }, 900) }
+	function load() { loading.value = true; message.value = ''; queryMobileMerchantAccount((result : any) => { loading.value = false; if (!result.ok || result.body == null) { message.value = String(result.message || '账号资料加载失败。'); return }; let employee = result.body.employee || {}; employeeName.value = String(employee.name || '员工'); initial.value = employeeName.value.substring(0, 1); employeePhone.value = String(employee.phone || ''); account.value = String(result.body.account || '') }) }
+	function save() {
+		if (saving.value) return
+		saveMessage.value = ''
+		if (account.value.trim().length < 4) { saveMessage.value = '登录账号至少 4 位。'; return }
+		if (currentPassword.value.length === 0) { saveMessage.value = '请输入当前密码。'; return }
+		if (newPassword.value.length < 4 || newPassword.value.length > 64) { saveMessage.value = '新密码必须为 4-64 位。'; return }
+		if (newPassword.value !== confirmation.value) { saveMessage.value = '两次输入的新密码不一致。'; return }
+		saving.value = true
+		changeMobileMerchantCredentials({ currentPassword: currentPassword.value, account: account.value.trim(), newPassword: newPassword.value }, (result : any) => {
+			saving.value = false
+			if (!result.ok) { saveMessage.value = String(result.message || '账号资料保存失败。'); return }
+			clearMerchantRoot(); openMerchantBootstrap()
+		})
+	}
+</script>
+
+<style>
+	.merchant-account { display: flex; min-height: 100%; flex: 1; flex-direction: column; background-color: #f4f7fa; }
+	.merchant-account__header { display: flex; height: 56px; flex-direction: row; align-items: center; justify-content: space-between; padding: 0 18px; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #e5edf5; background-color: #ffffff; }
+	.merchant-account__back { display: flex; width: 38px; height: 38px; align-items: center; font-size: 34px; color: #26384d; }.merchant-account__title { font-size: 17px; font-weight: 700; color: #26384d; }.merchant-account__spacer { width: 38px; }
+	.merchant-account__content { min-height: 0; flex: 1; }.merchant-account__inner { padding: 18px 18px 38px; }.merchant-account__identity { display: flex; flex-direction: row; align-items: center; padding: 18px; border-radius: 12px; background-color: #ffffff; }.merchant-account__avatar { display: flex; width: 52px; height: 52px; align-items: center; justify-content: center; border-radius: 16px; background-color: #eaf1ff; }.merchant-account__avatar text { font-size: 19px; font-weight: 700; color: #4a72c5; }.merchant-account__name { display: block; margin-left: 13px; font-size: 18px; font-weight: 700; color: #26384d; }.merchant-account__detail { display: block; margin: 4px 0 0 13px; font-size: 12px; color: #71839a; }
+	.merchant-account__section { margin-top: 18px; padding: 16px 18px 4px; border-radius: 12px; background-color: #ffffff; }.merchant-account__section-title { display: block; font-size: 17px; font-weight: 700; color: #26384d; }.merchant-account__section-tip { display: block; margin-top: 4px; font-size: 11px; color: #8493a5; }.merchant-account__field { margin-top: 15px; }.merchant-account__label { display: block; margin-bottom: 7px; font-size: 13px; font-weight: 600; color: #526a80; }.merchant-account__input { box-sizing: border-box; width: 100%; height: 42px; padding: 0 12px; border-width: 1px; border-style: solid; border-color: #dce6ef; border-radius: 8px; background-color: #f8fafc; font-size: 14px; color: #26384d; }
+	.merchant-account__security-note { display: flex; margin-top: 14px; padding: 13px 15px; flex-direction: column; border-radius: 10px; background-color: #edf6ff; }.merchant-account__security-title { font-size: 13px; font-weight: 700; color: #356b98; }.merchant-account__security-copy { margin-top: 4px; font-size: 11px; line-height: 17px; color: #66839c; }.merchant-account__submit { display: flex; height: 46px; align-items: center; justify-content: center; margin-top: 18px; border-radius: 9px; background-color: #2878c9; font-size: 15px; font-weight: 700; color: #ffffff; }.merchant-account__submit--disabled { opacity: 0.55; }.merchant-account__error { display: block; margin-top: 13px; font-size: 13px; line-height: 20px; color: #b33d36; }.merchant-account__state { display: flex; min-height: 280px; align-items: center; justify-content: center; flex-direction: column; color: #71839a; font-size: 14px; text-align: center; }.merchant-account__retry { margin-top: 12px; color: #2878c9; font-weight: 700; }
+</style>

@@ -87,22 +87,23 @@ final class MobileReservationServices
 
     public function delete(array $merchant, int $reservationId, array $payload): array
     {
-        return $this->dispatch($merchant, 'cancel-reservation', $this->actionPayload($reservationId, $payload));
+        return $this->dispatch($merchant, 'cancel-reservation', $this->actionPayload('cancel-reservation', $reservationId, $payload));
     }
 
     public function startService(array $merchant, int $reservationId, array $payload): array
     {
-        return $this->dispatch($merchant, 'start-reservation-service', $this->actionPayload($reservationId, $payload));
+        return $this->dispatch($merchant, 'start-reservation-service', $this->actionPayload('start-reservation-service', $reservationId, $payload));
     }
 
     public function endService(array $merchant, int $reservationId, array $payload): array
     {
-        return $this->dispatch($merchant, 'end-reservation-service', $this->actionPayload($reservationId, $payload));
+        return $this->dispatch($merchant, 'end-reservation-service', $this->actionPayload('end-reservation-service', $reservationId, $payload));
     }
 
-    private function actionPayload(int $reservationId, array $payload): array
+    private function actionPayload(string $action, int $reservationId, array $payload): array
     {
         $command = is_array($payload['command'] ?? null) ? $payload['command'] : [];
+        $command['action'] = $action;
         return [
             'reservationId' => $reservationId,
             'command' => $command,
@@ -130,7 +131,11 @@ final class MobileReservationServices
     private function ensureWorkspace(array $merchant, string $stateContextId): void
     {
         $dispatcher = CashierV3Bootstrap::dispatcher();
-        $scope = $dispatcher->scopeResolver()->operatorScope((int)$merchant['storeId'], (int)$merchant['staffId']);
+        $operatorId = (int)($merchant['staffId'] ?? 0);
+        if ($operatorId <= 0) {
+            $operatorId = (int)($merchant['employeeId'] ?? 0);
+        }
+        $scope = $dispatcher->scopeResolver()->operatorScope((int)$merchant['storeId'], $operatorId);
         $versions = $dispatcher->versionServices();
         if ($versions === null) {
             throw new \LogicException('mobile_reservation_workspace_versions_missing');
@@ -150,8 +155,27 @@ final class MobileReservationServices
         $staffId = (int)($merchant['staffId'] ?? 0);
         $employeeId = (int)($merchant['employeeId'] ?? 0);
         $storeId = (int)($merchant['storeId'] ?? 0);
-        $staff = Db::name('system_store_staff')->where('id', $staffId)->where('employee_id', $employeeId)
-            ->where('store_id', $storeId)->where('status', 1)->where('is_del', 0)->find();
+        $staff = $staffId > 0
+            ? Db::name('system_store_staff')->where('id', $staffId)->where('employee_id', $employeeId)
+                ->where('store_id', $storeId)->where('status', 1)->where('is_del', 0)->find()
+            : null;
+        // 预约入口的授权主体是员工账号，而不是是否存在门店任职。
+        // 组织直属员工（staff_id=0）在已选门店上下文中仍可使用预约；
+        // 以员工 ID 作为 V3 操作人标识，避免伪造或借用其它门店员工。
+        if (!is_array($staff) && $staffId <= 0 && $employeeId > 0) {
+            $employee = Db::name('employee')->where('id', $employeeId)->where('status', 1)->where('is_del', 0)
+                ->field('id,name')->find();
+            if (is_array($employee)) {
+                $staff = [
+                    'id' => 0,
+                    'employee_id' => $employeeId,
+                    'store_id' => $storeId,
+                    'roles' => '',
+                    'level' => 1,
+                    'staff_name' => (string)($employee['name'] ?? ''),
+                ];
+            }
+        }
         if (!is_array($staff)) {
             throw new \LogicException('mobile_reservation_staff_context_missing');
         }
@@ -166,14 +190,24 @@ final class MobileReservationServices
         }
         return [
             'store_id' => $storeId,
-            'operator_id' => $staffId,
+            // CashierV3OperatorScope requires a positive operator id. For an
+            // organization-direct employee there is no store-staff row, so
+            // the authenticated employee id is the stable operator identity.
+            'operator_id' => $staffId > 0 ? $staffId : $employeeId,
             'operator_profile' => [
                 'employee_id' => $employeeId,
                 'roles' => array_values($roles),
                 'level' => (int)($staff['level'] ?? 1),
                 'admin_type' => 3,
                 'account' => (string)($staff['account'] ?? ''),
+                'staff_name' => (string)($staff['staff_name'] ?? ''),
                 'role_name' => (string)($staff['staff_name'] ?? ''),
+                // Organization-direct employees have no system_store_staff
+                // row. Mark this trusted projection as delegated so the V3
+                // permission snapshot validates the employee profile rather
+                // than rejecting it as a store-staff mismatch.
+                '_cashier_v3_delegated' => $staffId <= 0,
+                '_mobile_merchant_write' => true,
                 '_trusted_mobile_merchant_session' => true,
             ],
             'client_session_id' => 'SESSION-' . strtolower($sessionId),

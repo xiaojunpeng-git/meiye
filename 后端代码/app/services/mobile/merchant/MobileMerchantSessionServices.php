@@ -41,43 +41,15 @@ final class MobileMerchantSessionServices
         }
 
         $employeeId = (int)$authenticated['employee_id'];
-        $appToken = Db::transaction(function () use ($employeeId, $installationId, $meta): string {
-            $binding = Db::name('employee_phone_binding')->where('employee_id', $employeeId)->where('state', 'BOUND')->lock(true)->find();
-            if (!$binding) {
-                throw MobileApiException::business('PHONE_VERIFICATION_REQUIRED', '员工手机号尚未完成绑定，请联系管理员处理。');
-            }
-            $identity = Db::name('user_phone_identity')->where('phone_digest', (string)$binding['phone_digest'])->where('state', 'BOUND')->lock(true)->find();
-            $authState = Db::name('employee_mobile_auth_state')->where('employee_id', $employeeId)->lock(true)->find();
-            if (!$identity || (int)($identity['bound_uid'] ?? 0) <= 0 || !$authState) {
-                throw MobileApiException::business('PHONE_VERIFICATION_REQUIRED', '员工手机端身份尚未完成初始化，请联系管理员处理。');
-            }
-            $user = Db::name('user')->where('uid', (int)$identity['bound_uid'])->where('is_del', 0)->lock(true)->find();
-            if (!$user) {
-                throw MobileApiException::business('LEGACY_PHONE_CONFLICT', '员工手机号没有可用会员映射，请联系管理员处理。');
-            }
-            $now = time();
-            $appSessionId = $this->uuid();
-            $verificationId = $this->uuid();
-            $token = $this->token();
-            Db::name('mobile_app_session')->insert([
-                'app_session_id' => $appSessionId, 'uid' => (int)$user['uid'], 'verification_id' => $verificationId,
-                'token_hash' => hash('sha256', $token), 'client_session_id_hash' => hash('sha256', (string)$meta['clientSessionId']),
-                'installation_digest' => hash('sha256', $installationId), 'state' => 'ACTIVE',
-                'expires_at' => $now + (int)config('mobile_auth.app_session_seconds'), 'signed_out_at' => 0,
-                'created_at' => $now, 'updated_at' => $now,
-            ]);
-            Db::name('mobile_phone_verification')->insert([
-                'verification_id' => $verificationId, 'app_session_id' => $appSessionId,
-                'verified_phone_digest' => (string)$binding['phone_digest'], 'identity_version' => (int)$identity['identity_version'],
-                'employee_id_snapshot' => $employeeId, 'employee_phone_binding_version_snapshot' => (int)$authState['phone_binding_version'],
-                'method' => 'PASSWORD', 'state' => 'ACTIVE', 'verified_at' => $now, 'expires_at' => $now + 300,
-                'invalidated_at' => 0, 'merchant_consumed_at' => 0, 'merchant_consume_idempotency_hash' => null,
-                'created_at' => $now, 'updated_at' => $now,
-            ]);
-            return $token;
-        });
-
-        $root = $this->create(['idempotencyKey' => $idempotencyKey], array_merge($meta, ['appSession' => $appToken]));
+        // Password login authenticates the employee account directly.  It must
+        // not require a legacy member uid just to issue the merchant session.
+        $root = $this->issueMerchantSession(
+            $employeeId,
+            ['app_session_id' => null, 'installation_digest' => hash('sha256', $installationId)],
+            null,
+            $meta,
+            $idempotencyKey
+        );
         $accounts->touchLogin((int)($authenticated['account_row']['id'] ?? 0), (string)app('request')->ip());
         return $root;
     }
@@ -92,7 +64,17 @@ final class MobileMerchantSessionServices
             throw MobileApiException::business('PHONE_VERIFICATION_REQUIRED', '请重新完成手机号验证后进入商家端。');
         }
         $employeeId = (int)$verification['employee_id_snapshot'];
-        $requestHash = hash('sha256', 'create:' . (string)$app['app_session_id'] . ':' . (string)$verification['verification_id']);
+        return $this->issueMerchantSession($employeeId, $app, $verification, $meta, $key);
+    }
+
+    /**
+     * Issue the employee-owned merchant session.  A nullable app session and
+     * verification are intentional for password login; SMS/member login still
+     * supplies both and keeps the legacy identity checks in place.
+     */
+    private function issueMerchantSession(int $employeeId, array $app, ?array $verification, array $meta, string $key): array
+    {
+        $requestHash = hash('sha256', ($verification ? 'create:' . (string)$app['app_session_id'] . ':' . (string)$verification['verification_id'] : 'password:') . $employeeId . ':' . (string)$meta['clientSessionId'] . ':' . (string)($app['installation_digest'] ?? ''));
         return Db::transaction(function () use ($key, $app, $verification, $employeeId, $meta, $requestHash): array {
             $receipt = Db::name('mobile_merchant_idempotency')->where('employee_id', $employeeId)->where('command_code', 'CREATE_SESSION')
                 ->where('idempotency_key_hash', hash('sha256', $key))->lock(true)->find();
@@ -107,13 +89,18 @@ final class MobileMerchantSessionServices
             if (!$employee) throw MobileApiException::business('EMPLOYEE_NOT_FOUND', '未找到员工身份。');
             if ((int)($employee['status'] ?? 0) !== 1) throw MobileApiException::business('EMPLOYEE_DISABLED', '员工已停用。');
             $state = Db::name('employee_mobile_auth_state')->where('employee_id', $employeeId)->lock(true)->find();
-            $binding = Db::name('employee_phone_binding')->where('employee_id', $employeeId)->where('state', 'BOUND')->lock(true)->find();
-            $identity = Db::name('user_phone_identity')->where('phone_digest', (string)$verification['verified_phone_digest'])->lock(true)->find();
-            if (!$state || !$binding || !$identity
-                || !hash_equals((string)$binding['phone_digest'], (string)$verification['verified_phone_digest'])
-                || (int)$verification['employee_phone_binding_version_snapshot'] !== (int)$state['phone_binding_version']
-                || (int)$verification['identity_version'] !== (int)$identity['identity_version']) {
-                throw MobileApiException::business('PHONE_VERIFICATION_REQUIRED', '手机号验证已失效，请重新验证。');
+            if (!$state) {
+                throw MobileApiException::business('MOBILE_ENTRY_DISABLED', '当前员工未开通手机端。');
+            }
+            if ($verification !== null) {
+                $binding = Db::name('employee_phone_binding')->where('employee_id', $employeeId)->where('state', 'BOUND')->lock(true)->find();
+                $identity = Db::name('user_phone_identity')->where('phone_digest', (string)$verification['verified_phone_digest'])->lock(true)->find();
+                if (!$binding || !$identity
+                    || !hash_equals((string)$binding['phone_digest'], (string)$verification['verified_phone_digest'])
+                    || (int)$verification['employee_phone_binding_version_snapshot'] !== (int)$state['phone_binding_version']
+                    || (int)$verification['identity_version'] !== (int)$identity['identity_version']) {
+                    throw MobileApiException::business('PHONE_VERIFICATION_REQUIRED', '手机号验证已失效，请重新验证。');
+                }
             }
             $context = $this->currentContext($employeeId, $now);
             $lease = $this->lockOrCreateLease($employeeId, $now);
@@ -129,11 +116,11 @@ final class MobileMerchantSessionServices
             $projection = ['activeContextId' => $this->uuid(), 'stateContextId' => $this->uuid()];
             $expiresAt = $now + (int)config('mobile_auth.merchant_session_seconds');
             Db::name('mobile_merchant_session')->insert([
-                'session_id' => $sessionId, 'employee_id' => $employeeId, 'origin_app_session_id' => (string)$app['app_session_id'],
+                'session_id' => $sessionId, 'employee_id' => $employeeId, 'origin_app_session_id' => $app['app_session_id'] ?? null,
                 'token_hash' => hash('sha256', $token), 'client_session_id_hash' => hash('sha256', (string)$meta['clientSessionId']),
                 'installation_digest' => (string)$app['installation_digest'], 'auth_version' => (int)$state['auth_version'],
                 'session_epoch' => $epoch, 'employee_phone_binding_version' => (int)$state['phone_binding_version'],
-                'elevation_use_id' => $this->uuid(), 'verification_id' => (string)$verification['verification_id'], 'state' => 'ACTIVE',
+                'elevation_use_id' => $this->uuid(), 'verification_id' => $verification['verification_id'] ?? null, 'state' => 'ACTIVE',
                 'expires_at' => $expiresAt, 'revoked_at' => 0, 'session_end_cause' => 'NONE', 'created_at' => $now, 'updated_at' => $now,
             ]);
             Db::name('mobile_merchant_lease')->where('id', (int)$lease['id'])->update([
@@ -144,9 +131,11 @@ final class MobileMerchantSessionServices
                 'active_context_id' => $projection['activeContextId'], 'state_context_id' => $projection['stateContextId'],
                 'state_revision' => 1, 'state' => 'ACTIVE', 'created_at' => $now, 'updated_at' => $now,
             ]);
-            Db::name('mobile_phone_verification')->where('id', (int)$verification['id'])->update([
-                'state' => 'CONSUMED', 'merchant_consumed_at' => $now, 'merchant_consume_idempotency_hash' => hash('sha256', $key), 'updated_at' => $now,
-            ]);
+            if ($verification !== null) {
+                Db::name('mobile_phone_verification')->where('id', (int)$verification['id'])->update([
+                    'state' => 'CONSUMED', 'merchant_consumed_at' => $now, 'merchant_consume_idempotency_hash' => hash('sha256', $key), 'updated_at' => $now,
+                ]);
+            }
             Db::name('mobile_merchant_security_audit')->insert([
                 'employee_id' => $employeeId, 'actor_employee_id' => 0,
                 'event_code' => $oldSessionId === '' ? 'MERCHANT_SESSION_CREATED' : 'MERCHANT_SESSION_REPLACED',

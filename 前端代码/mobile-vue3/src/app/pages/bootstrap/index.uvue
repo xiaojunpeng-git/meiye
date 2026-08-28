@@ -7,11 +7,11 @@
 		</view>
 		<view class="login-card">
 			<text class="field-label">服务地址</text>
-			<input class="field-input" v-model="apiOrigin" placeholder="例如 http://127.0.0.1:8080" />
+			<input class="field-input" :value="apiOrigin" placeholder="例如 http://127.0.0.1:8080" @input="apiOrigin = $event.detail.value" />
 			<text class="field-label">员工账号</text>
-			<input class="field-input" v-model="account" placeholder="请输入员工账号" />
+			<input class="field-input" :value="account" placeholder="请输入员工账号" @input="account = $event.detail.value" />
 			<text class="field-label">登录密码</text>
-			<input class="field-input" v-model="password" password placeholder="请输入登录密码" />
+			<input class="field-input" :value="password" password placeholder="请输入登录密码" @input="password = $event.detail.value" />
 			<view class="login-command" @tap="login"><text>{{ loading ? '正在登录…' : '登录并进入商家端' }}</text></view>
 			<text v-if="message.length > 0" class="message">{{ message }}</text>
 		</view>
@@ -25,8 +25,8 @@
 <script setup lang="uts">
 	import { currentMobilePlatform, declaredPlatformCapabilityCount } from '../../../shared/platform/mobile-platform.uts'
 	import { merchantContextIsComplete, merchantStateIdentifiersAreCleared } from '../../state/root-state.uts'
-	import { currentMobileApiOrigin, enterMerchantWithPassword, updateMobileApiOrigin } from '../../../merchant/api/mobile-login-client.uts'
-	import { openMerchantCustomerDetailAfterBootstrap, openMerchantCustomers, openMerchantWorkbench } from '../../../merchant/platform/mobile-navigation.uts'
+	import { currentMobileApiOrigin, enterMerchantWithPassword, updateMobileApiOrigin } from '../../../shared/api/mobile-login-client.uts'
+	import { openMerchantCustomerDetailAfterBootstrap, openMerchantCustomers, openMerchantHome } from '../../../shared/platform/mobile-navigation.uts'
 
 	const platformCode = ref(currentMobilePlatform())
 	const foundationReady = ref(
@@ -78,7 +78,7 @@
 			openMerchantCustomerDetailAfterBootstrap(returnMemberId.value, returnLookup.value)
 			return
 		}
-		openMerchantWorkbench()
+		openMerchantHome()
 	}
 </script>
 

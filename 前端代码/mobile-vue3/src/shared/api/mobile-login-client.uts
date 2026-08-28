@@ -1,6 +1,6 @@
-import { mobileApiOrigin, setMobileApiOrigin } from '../../shared/platform/mobile-runtime-config.uts'
+import { mobileApiOrigin, setMobileApiOrigin } from '../platform/mobile-runtime-config.uts'
 import { saveMerchantRoot } from '../platform/mobile-merchant-session.uts'
-import { currentMobilePlatform } from '../../shared/platform/mobile-platform.uts'
+import { currentMobilePlatform } from '../platform/mobile-platform.uts'
 import { merchantRootInstallDecision } from '../../app/state/root-state.uts'
 
 const CLIENT_SESSION_KEY = 'mobile.client.session.id'

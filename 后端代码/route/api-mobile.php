@@ -59,8 +59,8 @@ Route::group('api/mobile/merchant', function () {
         Route::post('customers/unified-query/commands', 'Customer/unifiedQueryCommand')->option(['real_name' => '手机商家端客户统一查询操作']);
         Route::get('customer-audiences', 'Customer/audiences')->option(['real_name' => '手机商家端我的客群']);
         Route::post('customer-audiences', 'Customer/createAudience')->option(['real_name' => '手机商家端创建客群']);
-        Route::get('customer-audiences/:audienceId/overview', 'Customer/audienceOverview')->pattern(['audienceId' => '\\d+'])->option(['real_name' => '手机商家端客群概况']);
-        Route::post('customer-audiences/:audienceId/members/query', 'Customer/audienceMembers')->pattern(['audienceId' => '\\d+'])->option(['real_name' => '手机商家端客群实时成员']);
+        Route::get('customer-audiences/:audienceId/overview', 'Customer/audienceOverview')->pattern(['audienceId' => '[A-Za-z0-9][A-Za-z0-9._:-]*'])->option(['real_name' => '手机商家端客群概况']);
+        Route::post('customer-audiences/:audienceId/members/query', 'Customer/audienceMembers')->pattern(['audienceId' => '[A-Za-z0-9][A-Za-z0-9._:-]*'])->option(['real_name' => '手机商家端客群实时成员']);
         Route::patch('customer-audiences/:audienceId', 'Customer/updateAudience')->option(['real_name' => '手机商家端更新客群']);
         Route::delete('customer-audiences/:audienceId', 'Customer/archiveAudience')->option(['real_name' => '手机商家端归档客群']);
         Route::post('customer-care/workbench', 'CustomerCare/workbench')->option(['real_name' => '手机商家端客情工作台']);
@@ -68,6 +68,8 @@ Route::group('api/mobile/merchant', function () {
             ->pattern(['action' => '[A-Za-z0-9-]+'])
             ->option(['real_name' => '手机商家端客情操作']);
         Route::post('warehouse/overview', 'Warehouse/overview')->option(['real_name' => '手机商家端组织业绩数仓']);
+		Route::get('dashboard/home', 'Dashboard/home')->option(['real_name' => '手机商家端经营首页聚合']);
+		Route::post('dashboard/home', 'Dashboard/home')->option(['real_name' => '手机商家端经营首页聚合']);
         Route::get('reservations', 'Reservation/listing')->option(['real_name' => '手机商家端预约列表']);
         Route::get('reservations/:reservationId', 'Reservation/detail')->pattern(['reservationId' => '\\d+'])->option(['real_name' => '手机商家端预约详情']);
         Route::post('reservations/editor', 'Reservation/editor')->option(['real_name' => '手机商家端预约编辑准备']);

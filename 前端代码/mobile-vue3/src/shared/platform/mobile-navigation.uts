@@ -1,0 +1,133 @@
+import { showMobileNotice } from './mobile-platform.uts'
+import { currentMerchantRoot } from './mobile-merchant-session.uts'
+import { firstAllowedMerchantTab, merchantTabIsAllowed } from './merchant-tab-permissions.uts'
+
+// Page components stay platform-neutral.  Navigation is owned by this shared
+// capability boundary so App and mini-program adapters keep one route policy.
+// 小程序当前仅交付商家端：保留会员页面及 H5 的既有默认入口，仅在微信
+// 小程序启动时转入商家端登录，避免维护两份页面或路由表。
+export function openMiniProgramMerchantBootstrapOnLaunch() : void {
+	// #ifdef MP-WEIXIN
+	uni.reLaunch({ url: '/src/app/pages/bootstrap/index' })
+	// #endif
+}
+
+export function openMemberHome() : void {
+	uni.reLaunch({ url: '/src/member/pages/home/index' })
+}
+
+export function openMerchantCustomers() : void {
+	switchMerchantPrimaryTab('customers')
+}
+
+export function openMerchantHome() : void {
+	switchMerchantPrimaryTab('home')
+}
+
+export function openMerchantAccount() : void {
+	uni.navigateTo({ url: '/src/merchant/pages/account/index' })
+}
+
+export function openMerchantScope() : void {
+	uni.navigateTo({ url: '/src/merchant/pages/scope/index' })
+}
+
+// Primary tabs use a closed route map so that a merchant-page switch can never
+// fall through to a member or legacy surface.
+export function switchMerchantPrimaryTab(tabKey : string) : void {
+	let root = currentMerchantRoot()
+	if (!merchantTabIsAllowed(tabKey, root)) {
+		let fallback = firstAllowedMerchantTab(root)
+		if (fallback.length > 0 && fallback != tabKey) { switchMerchantPrimaryTab(fallback); return }
+		uni.reLaunch({ url: '/src/app/pages/bootstrap/index' }); return
+	}
+	if (tabKey === 'goals') { showMobileNotice('目标功能开发中'); return }
+	if (tabKey === 'home') { uni.redirectTo({ url: '/src/merchant/pages/home/index' }); return }
+	if (tabKey === 'warehouse') { uni.redirectTo({ url: '/src/merchant/pages/warehouse/index' }); return }
+	if (tabKey === 'customers') { uni.redirectTo({ url: '/src/merchant/pages/customers/index' }); return }
+	if (tabKey === 'workbench') { uni.redirectTo({ url: '/src/merchant/pages/workbench/index' }); return }
+	if (tabKey === 'profile') { uni.redirectTo({ url: '/src/merchant/pages/profile/index' }); return }
+}
+
+export function openMerchantWorkbench() : void {
+	switchMerchantPrimaryTab('workbench')
+}
+
+export function openMerchantCustomerCare(memberId : string = '') : void {
+	let suffix = memberId.length > 0 ? '?memberId=' + memberId : ''
+	uni.navigateTo({ url: '/src/merchant/pages/customer-care/index' + suffix })
+}
+
+export function openMerchantEmployeePerformance(employeeId : number, periodMode : string, month : string, startDate : string, endDate : string, detailMode : string = 'cash') : void {
+	uni.navigateTo({ url: merchantEmployeePerformanceUrl(employeeId, periodMode, month, startDate, endDate, detailMode) })
+}
+
+export function replaceMerchantEmployeePerformance(employeeId : number, periodMode : string, month : string, startDate : string, endDate : string, detailMode : string = 'cash') : void {
+	uni.redirectTo({ url: merchantEmployeePerformanceUrl(employeeId, periodMode, month, startDate, endDate, detailMode) })
+}
+
+function merchantEmployeePerformanceUrl(employeeId : number, periodMode : string, month : string, startDate : string, endDate : string, detailMode : string) : string {
+	let query = '?employeeId=' + employeeId.toString()
+	query += '&periodMode=' + encodeURIComponent(periodMode)
+	query += '&month=' + encodeURIComponent(month)
+	query += '&startDate=' + encodeURIComponent(startDate)
+	query += '&endDate=' + encodeURIComponent(endDate)
+	query += '&detailMode=' + encodeURIComponent(detailMode)
+	return '/src/merchant/pages/employee-performance/index' + query
+}
+
+export function returnFromMerchantEmployeePerformance() : void {
+	uni.navigateBack()
+}
+
+export function openMerchantBootstrap() : void {
+	uni.reLaunch({ url: '/src/app/pages/bootstrap/index' })
+}
+
+export function openMerchantBootstrapForCustomers() : void {
+	uni.reLaunch({ url: '/src/app/pages/bootstrap/index?returnTarget=customers' })
+}
+
+// Return routes are intentionally enumerated here.  Login must never accept a
+// caller-provided URL, otherwise an unauthenticated deep link could become an
+// open navigation surface after the merchant session is established.
+export function openMerchantBootstrapForCustomerDetail(memberId : string, lookup : string) : void {
+	uni.reLaunch({
+		url: '/src/app/pages/bootstrap/index?returnTarget=customer-detail&memberId=' + encodeURIComponent(memberId) + '&lookup=' + encodeURIComponent(lookup)
+	})
+}
+
+export function openMerchantCustomerDetail(memberId : string, lookup : string) : void {
+	uni.navigateTo({ url: '/src/merchant/pages/customer-detail/index?id=' + memberId + '&lookup=' + lookup })
+}
+
+export function openMerchantCustomerProfile(mode : string, memberId : string = '', lookup : string = '') : void {
+	let suffix = '?mode=' + encodeURIComponent(mode)
+	if (memberId.length > 0) suffix += '&id=' + encodeURIComponent(memberId)
+	if (lookup.length > 0) suffix += '&lookup=' + encodeURIComponent(lookup)
+	uni.navigateTo({ url: '/src/merchant/pages/customer-profile/index' + suffix })
+}
+
+export function replaceMerchantCustomerDetail(memberId : string, lookup : string) : void {
+	uni.redirectTo({ url: '/src/merchant/pages/customer-detail/index?id=' + encodeURIComponent(memberId) + '&lookup=' + encodeURIComponent(lookup) })
+}
+
+export function returnFromMerchantCustomerProfile() : void {
+	uni.navigateBack()
+}
+
+export function openMerchantCustomerDetailAfterBootstrap(memberId : string, lookup : string) : void {
+	uni.reLaunch({ url: '/src/merchant/pages/customer-detail/index?id=' + encodeURIComponent(memberId) + '&lookup=' + encodeURIComponent(lookup) })
+}
+
+export function openMerchantCustomerOrderDetail(memberId : string, orderId : string) : void {
+	uni.navigateTo({ url: '/src/merchant/pages/customer-order-detail/index?memberId=' + memberId + '&orderId=' + orderId })
+}
+
+export function returnFromMerchantCustomerOrderDetail() : void {
+	uni.navigateBack()
+}
+
+export function returnFromMerchantCustomerDetail() : void {
+	uni.navigateBack()
+}

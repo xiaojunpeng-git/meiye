@@ -14,12 +14,13 @@
 				<view class="goal-page__notice"><text class="goal-page__notice-title">完成值尚未接入</text><text class="goal-page__notice-copy">{{ progressMessage }}</text></view>
 			</view>
 		</scroll-view>
-		<view class="goal-page__tabs"><navigator class="goal-page__tab" url="/src/merchant/pages/warehouse/index" open-type="navigate"><text>数仓</text></navigator><navigator class="goal-page__tab" url="/src/merchant/pages/customers/index" open-type="navigate"><text>客户</text></navigator><navigator class="goal-page__tab" url="/src/merchant/pages/workbench/index" open-type="navigate"><text>工作台</text></navigator><view class="goal-page__tab goal-page__tab--active"><text>目标</text></view><navigator class="goal-page__tab" url="/src/merchant/pages/profile/index" open-type="navigate"><text>我的</text></navigator></view>
+		<MerchantPrimaryTabBar active-key="goals" />
 	</view>
 </template>
 
 <script setup lang="uts">
-	import { queryMobilePersonalMonthlyTarget, saveMobilePersonalMonthlyTarget } from '../../api/mobile-personal-target-client.uts'
+	import { queryMobilePersonalMonthlyTarget, saveMobilePersonalMonthlyTarget } from '../../../shared/api/mobile-personal-target-client.uts'
+	import MerchantPrimaryTabBar from '../../../shared/components/merchant-primary-tab-bar.uvue'
 	import { showMobileNotice } from '../../../shared/platform/mobile-platform.uts'
 	const fixedMetricCatalog = [
 		{ code: 'SALES_PERFORMANCE', label: '销售业绩', unitCode: 'CNY_FEN', displayUnit: '元' },

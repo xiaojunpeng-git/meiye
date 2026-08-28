@@ -1,0 +1,67 @@
+<template>
+	<view class="merchant-detail-page">
+		<view class="merchant-detail-page__header">
+			<view class="merchant-detail-page__back" @tap="goBack"><text>‹</text><text>返回</text></view>
+			<text class="merchant-detail-page__eyebrow">经营首页 · 客户概况</text>
+			<text class="merchant-detail-page__title">会员经营明细</text>
+			<text class="merchant-detail-page__subtitle">按授权组织范围查看客户规模与服务变化</text>
+		</view>
+
+		<scroll-view scroll-y="true" class="merchant-detail-page__content">
+			<view class="merchant-detail-page__content-inner">
+				<view class="merchant-detail-page__context"><view><text class="merchant-detail-page__context-label">当前范围</text><text class="merchant-detail-page__context-value">授权组织范围</text></view><text class="merchant-detail-page__period">本月</text></view>
+				<view class="merchant-detail-page__state merchant-detail-page__state--loading" v-if="loading"><text class="merchant-detail-page__state-title">正在加载会员明细</text><text class="merchant-detail-page__state-copy">数据将按当前商家权限范围返回</text></view>
+				<view class="merchant-detail-page__state" v-else-if="message.length > 0"><text class="merchant-detail-page__state-title">{{ message }}</text><view class="merchant-detail-page__retry" @tap="load"><text>重新加载</text></view></view>
+				<view v-else>
+					<view class="merchant-detail-page__state"><text class="merchant-detail-page__state-title">暂无会员明细</text><text class="merchant-detail-page__state-copy">当前接口尚未返回可展示的会员经营数据。</text></view>
+					<view class="merchant-detail-page__section"><text class="merchant-detail-page__section-title">指标说明</text><text class="merchant-detail-page__section-copy">客户总数、新客数、服务客户和沉睡客户均由统一客户事实统计，页面不在客户端计算经营指标。</text></view>
+					<view class="merchant-detail-page__section"><text class="merchant-detail-page__section-title">后续明细</text><text class="merchant-detail-page__section-copy">待接口返回趋势序列和组织分组后，将在此展示客户趋势、来源结构及可下钻列表。</text></view>
+				</view>
+				<view class="merchant-detail-page__freshness"><text>数据更新时间：—</text><text>口径版本：—</text></view>
+			</view>
+		</scroll-view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	const loading = ref(false)
+	const message = ref('')
+
+	onShow(() => load())
+
+	function load() : void {
+		loading.value = true
+		message.value = ''
+		setTimeout(() => { loading.value = false }, 260)
+	}
+
+	function goBack() : void {
+		uni.navigateBack({ delta: 1 })
+	}
+</script>
+
+<style>
+	.merchant-detail-page { display: flex; height: 100vh; min-height: 0; flex-direction: column; background-color: #f4f7fb; color: #25364a; }
+	.merchant-detail-page__header { flex: none; padding: 15px 18px 17px 18px; background-color: #ffffff; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #e4ebf2; }
+	.merchant-detail-page__back { display: flex; flex-direction: row; align-items: center; align-self: flex-start; padding: 2px 0 7px 0; font-size: 12px; color: #3976a6; }
+	.merchant-detail-page__back text:first-child { margin-right: 3px; font-size: 24px; line-height: 18px; }
+	.merchant-detail-page__eyebrow { display: block; font-size: 11px; line-height: 16px; color: #6d8399; }
+	.merchant-detail-page__title { display: block; margin-top: 3px; font-size: 24px; font-weight: 800; line-height: 31px; color: #1e3349; }
+	.merchant-detail-page__subtitle { display: block; margin-top: 4px; font-size: 12px; line-height: 18px; color: #8291a0; }
+	.merchant-detail-page__content { min-height: 0; flex: 1; }
+	.merchant-detail-page__content-inner { padding: 14px 14px 28px 14px; }
+	.merchant-detail-page__context { display: flex; min-height: 66px; flex-direction: row; align-items: center; justify-content: space-between; padding: 11px 13px; border-radius: 14px; background-color: #eaf3fb; }
+	.merchant-detail-page__context-label { display: block; font-size: 10px; line-height: 14px; color: #6d8399; }
+	.merchant-detail-page__context-value { display: block; margin-top: 3px; font-size: 14px; font-weight: 700; line-height: 19px; color: #284b68; }
+	.merchant-detail-page__period { padding: 5px 8px; border-radius: 7px; background-color: #ffffff; font-size: 11px; color: #2879ba; }
+	.merchant-detail-page__state { display: flex; min-height: 156px; flex-direction: column; align-items: center; justify-content: center; margin-top: 14px; padding: 20px; border-radius: 14px; background-color: #ffffff; box-shadow: 0 5px 16px rgba(45, 74, 101, 0.05); text-align: center; }
+	.merchant-detail-page__state--loading { min-height: 118px; background-color: #f8fbfd; box-shadow: none; }
+	.merchant-detail-page__state-title { font-size: 14px; font-weight: 800; line-height: 20px; color: #587086; }
+	.merchant-detail-page__state-copy { margin-top: 6px; font-size: 11px; line-height: 17px; color: #9aa8b5; }
+	.merchant-detail-page__retry { margin-top: 12px; padding: 7px 12px; border-radius: 7px; background-color: #2879ba; font-size: 11px; color: #ffffff; }
+	.merchant-detail-page__section { display: flex; flex-direction: column; margin-top: 12px; padding: 14px; border-radius: 14px; background-color: #ffffff; box-shadow: 0 5px 16px rgba(45, 74, 101, 0.05); }
+	.merchant-detail-page__section-title { font-size: 13px; font-weight: 800; line-height: 18px; color: #304961; }
+	.merchant-detail-page__section-copy { margin-top: 6px; font-size: 11px; line-height: 18px; color: #8493a1; }
+	.merchant-detail-page__freshness { display: flex; flex-direction: row; justify-content: space-between; margin-top: 12px; padding: 0 2px; font-size: 9px; line-height: 13px; color: #9ba6b0; }
+	@media all and (min-width: 700px) { .merchant-detail-page__content-inner { max-width: 720px; margin-left: auto; margin-right: auto; padding-left: 22px; padding-right: 22px; } }
+</style>

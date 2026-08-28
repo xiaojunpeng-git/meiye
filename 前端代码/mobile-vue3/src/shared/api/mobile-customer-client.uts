@@ -1,6 +1,6 @@
-import { buildMobileRequestPlan, mobileRequestPlanMatchesContract } from '../../shared/api/request-context.uts'
-import { sendMobileRequest } from '../../shared/api/mobile-http.uts'
-import { mobileApiOrigin } from '../../shared/platform/mobile-runtime-config.uts'
+import { buildMobileRequestPlan, mobileRequestPlanMatchesContract } from './request-context.uts'
+import { sendMobileRequest } from './mobile-http.uts'
+import { mobileApiOrigin } from '../platform/mobile-runtime-config.uts'
 import { currentMerchantRoot, merchantRequestSession } from '../platform/mobile-merchant-session.uts'
 
 // UTS cannot import JSON contract files in the HBuilderX compiler. This runtime
@@ -25,8 +25,8 @@ const customerTransportContract : any = {
 		unifiedQueryCapabilities: { method: 'GET', path: '/mobile/merchant/customers/unified-query-capabilities', requestMetadataProfile: 'MERCHANT_SESSION' },
 		unifiedQueryCommand: { method: 'POST', path: '/mobile/merchant/customers/unified-query/commands', requestMetadataProfile: 'MERCHANT_SESSION' },
 		listAudiences: { method: 'GET', path: '/mobile/merchant/customer-audiences', requestMetadataProfile: 'MERCHANT_SESSION' },
+		audienceOverview: { method: 'POST', path: '/mobile/merchant/customer-audiences/overview', requestMetadataProfile: 'MERCHANT_SESSION' },
 		createAudience: { method: 'POST', path: '/mobile/merchant/customer-audiences', requestMetadataProfile: 'MERCHANT_SESSION' },
-		overviewAudience: { method: 'GET', path: '/mobile/merchant/customer-audiences/:audienceId/overview', requestMetadataProfile: 'MERCHANT_SESSION' },
 		queryAudienceMembers: { method: 'POST', path: '/mobile/merchant/customer-audiences/:audienceId/members/query', requestMetadataProfile: 'MERCHANT_SESSION' }
 	},
 	requestMetadataProfiles: {
@@ -146,17 +146,16 @@ export function listMobileCustomerAudiences(done : (value : any) => void) : void
 	sendMobileRequest(plan, {}, done)
 }
 
-export function createMobileCustomerAudience(payload : any, done : (value : any) => void) : void {
-	let plan = merchantPlan('createAudience')
+export function queryMobileCustomerAudienceOverview(payload : any, done : (value : any) => void) : void {
+	let plan = merchantPlan('audienceOverview')
 	if (plan == null) { done({ ok: false, message: '请先完成商家端登录。', body: null }); return }
 	sendMobileRequest(plan, payload, done)
 }
 
-export function queryMobileCustomerAudienceOverview(audienceId : string, done : (value : any) => void) : void {
-	let plan = merchantPlan('overviewAudience')
+export function createMobileCustomerAudience(payload : any, done : (value : any) => void) : void {
+	let plan = merchantPlan('createAudience')
 	if (plan == null) { done({ ok: false, message: '请先完成商家端登录。', body: null }); return }
-	plan.path = plan.path.replace(':audienceId', audienceId)
-	sendMobileRequest(plan, {}, done)
+	sendMobileRequest(plan, payload, done)
 }
 
 export function queryMobileCustomerAudienceMembers(audienceId : string, payload : any, done : (value : any) => void) : void {

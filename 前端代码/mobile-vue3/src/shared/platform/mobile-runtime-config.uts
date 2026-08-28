@@ -15,7 +15,9 @@ function localWebDevelopmentOrigin() : string {
 	// #ifdef WEB
 	let host = String(location.hostname || '')
 	if (host == 'localhost' || host == '127.0.0.1' || /^192\.168\./.test(host) || /^10\./.test(host) || /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(host)) {
-		origin = 'http://' + host + ':8080'
+		// The H5 preview has no API proxy. Call the canonical local backend
+		// gateway directly so requests cannot fall through to the Vite page.
+		origin = 'http://' + host + ':18093'
 	}
 	// #endif
 	return normalizedOrigin(origin)
@@ -25,6 +27,17 @@ function localWebDevelopmentOrigin() : string {
 // as a customer-specific source branch. H5 local development inherits the
 // current private-network host so a network change cannot strand the preview.
 export function mobileApiOrigin() : string {
+	// The source preview must never be silently overridden by an old saved 8080
+	// address. Customer installations and other local previews keep their
+	// provisioned address unchanged.
+	// #ifdef WEB
+	if (String(location.port || '') == '18100') return localWebDevelopmentOrigin()
+	if (String(location.port || '') == '18104') {
+		// HBuilderX's current direct H5 preview also uses the canonical local
+		// backend gateway; 20704 is no longer a running service.
+		return normalizedOrigin('http://' + String(location.hostname || '127.0.0.1') + ':18093')
+	}
+	// #endif
 	let configured = normalizedOrigin(uni.getStorageSync(API_ORIGIN_KEY))
 	return configured.length > 0 ? configured : localWebDevelopmentOrigin()
 }

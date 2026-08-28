@@ -3,6 +3,7 @@
 namespace app\controller\mobile\merchant;
 
 use app\services\mobile\customer\MobileCustomerAudienceServices;
+use app\services\mobile\customer\MobileCustomerAudienceOverviewServices;
 use app\services\mobile\customer\MobileCustomerAssetRecordServices;
 use app\services\mobile\customer\MobileCustomerCreateServices;
 use app\services\mobile\customer\MobileCustomerQueryServices;
@@ -40,6 +41,8 @@ class Customer extends BaseController
     private $avatarUploads;
     /** @var MobileCustomerAudienceServices */
     private $audiences;
+    /** @var MobileCustomerAudienceOverviewServices */
+    private $audienceOverview;
     /** @var MobileCustomerUnifiedQueryCommandServices */
     private $unifiedCommands;
 
@@ -55,6 +58,7 @@ class Customer extends BaseController
         MobileCustomerProfileServices $profiles,
         MobileCustomerAvatarUploadServices $avatarUploads,
         MobileCustomerAudienceServices $audiences,
+        MobileCustomerAudienceOverviewServices $audienceOverview,
         MobileCustomerUnifiedQueryCommandServices $unifiedCommands
     ) {
         parent::__construct($app);
@@ -68,6 +72,7 @@ class Customer extends BaseController
         $this->profiles = $profiles;
         $this->avatarUploads = $avatarUploads;
         $this->audiences = $audiences;
+        $this->audienceOverview = $audienceOverview;
         $this->unifiedCommands = $unifiedCommands;
     }
 
@@ -162,50 +167,53 @@ class Customer extends BaseController
     {
         $context = $this->merchantContext->resolve($this->request);
         $this->merchantContext->assertAction($context, 'CUSTOMER_AUDIENCE_VIEW');
-        return $this->mobileSuccess(['audiences' => $this->audiences->list($this->identity($context))]);
+        // System audiences are read-only definitions evaluated against the
+        // current server scope. Reuse the overview projector so this list
+        // carries a realtime memberTotal instead of a stale employee row.
+        $projection = $this->audienceOverview->overview(
+            $context,
+            $this->identity($context),
+            ['listOnly' => true]
+        );
+        $overview = (array)($projection['audienceOverview'] ?? []);
+        return $this->mobileSuccess([
+            'audiences' => (array)($overview['audiences'] ?? []),
+            'metricVersion' => (string)($overview['metricVersion'] ?? 'mobile-customer-audience-overview-v1'),
+            'dataAsOf' => (int)($overview['dataAsOf'] ?? time()),
+            'aggregationCaughtUp' => (bool)($overview['aggregationCaughtUp'] ?? true),
+        ]);
+    }
+
+    public function audienceOverview()
+    {
+        $context = $this->merchantContext->resolve($this->request);
+        $this->merchantContext->assertAction($context, 'CUSTOMER_AUDIENCE_VIEW');
+        return $this->mobileSuccess($this->audienceOverview->overview($context, $this->identity($context), $this->payload()));
     }
 
     public function createAudience()
     {
-        return $this->writeAudience('create', 0);
+        return $this->writeAudience('create', '');
     }
 
-    public function audienceMembers(int $audienceId)
+    public function audienceMembers(string $audienceId)
     {
         $context = $this->merchantContext->resolve($this->request);
         $this->merchantContext->assertAction($context, 'CUSTOMER_AUDIENCE_VIEW');
-        $audience = $this->audiences->find($this->identity($context), $audienceId);
-        $page = $this->customers->queryAudience($context, (array)$audience['validatedRule'], $this->payload());
-        $page['audience'] = [
-            'audienceId' => $audience['audienceId'],
-            'name' => $audience['name'],
-            'version' => $audience['version'],
-        ];
-        return $this->mobileSuccess($page);
-    }
-
-    public function audienceOverview(int $audienceId)
-    {
-        $context = $this->merchantContext->resolve($this->request);
-        $this->merchantContext->assertAction($context, 'CUSTOMER_AUDIENCE_VIEW');
-        $audience = $this->audiences->find($this->identity($context), $audienceId);
-        $page = $this->customers->queryAudience($context, (array)$audience['validatedRule'], [
-            'page' => 1,
-            'limit' => 1,
-        ]);
-        return $this->mobileSuccess($this->audiences->overview(
+        return $this->mobileSuccess($this->audienceOverview->memberPage(
+            $context,
             $this->identity($context),
             $audienceId,
-            (int)($page['total'] ?? 0)
+            $this->payload()
         ));
     }
 
-    public function updateAudience(int $audienceId)
+    public function updateAudience(string $audienceId)
     {
         return $this->writeAudience('update', $audienceId);
     }
 
-    public function archiveAudience(int $audienceId)
+    public function archiveAudience(string $audienceId)
     {
         $context = $this->merchantContext->resolve($this->request);
         $this->merchantContext->assertAction($context, 'CUSTOMER_AUDIENCE_MANAGE');
@@ -236,10 +244,13 @@ class Customer extends BaseController
         return $this->mobileSuccess($this->customers->query($context, $this->payload(), $exclusive));
     }
 
-    private function writeAudience(string $operation, int $audienceId)
+    private function writeAudience(string $operation, string $audienceId)
     {
         $context = $this->merchantContext->resolve($this->request);
         $this->merchantContext->assertAction($context, 'CUSTOMER_AUDIENCE_MANAGE');
+        if (MobileCustomerAudienceServices::isSystemKey(trim($audienceId))) {
+            throw new \think\exception\ValidateException('系统客群只读，不能修改或删除。');
+        }
         $payload = $this->payload();
         $payload['validatedRule'] = $this->customers->validatedAudienceRule($context, $payload);
         $result = $operation === 'create'

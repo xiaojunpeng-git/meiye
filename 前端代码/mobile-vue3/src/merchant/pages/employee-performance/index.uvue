@@ -1,0 +1,175 @@
+<template>
+	<view class="employee-performance" :class="{ 'employee-performance--native-mini': platformUsesNativeCanvas }">
+		<view class="employee-performance__header">
+			<view class="employee-performance__back" @tap="returnToWarehouse"><text>‹</text></view>
+			<view class="employee-performance__heading"><text class="employee-performance__title">员工业绩</text><text class="employee-performance__subtitle">{{ employeeName }}</text></view>
+			<view class="employee-performance__header-space"></view>
+		</view>
+
+		<scroll-view scroll-y="true" class="employee-performance__content">
+			<view class="employee-performance__inner">
+				<view class="employee-performance__scope">
+					<view v-for="item in quickPeriods" :key="item.code" class="employee-performance__filter-pill" :class="{ 'employee-performance__filter-pill--active': periodMode === item.code }" @tap="selectQuickPeriod(item.code)"><text>{{ item.label }}</text></view>
+					<view class="employee-performance__filter-pill" :class="{ 'employee-performance__filter-pill--active': periodMode === 'custom' }" @tap="openCustomRange"><text>自定义</text></view>
+				</view>
+
+				<view v-if="loading" class="employee-performance__state"><text>正在读取员工业绩…</text></view>
+				<view v-else-if="message.length > 0" class="employee-performance__state"><text>{{ message }}</text><view class="employee-performance__retry" @tap="reload"><text>重新加载</text></view></view>
+				<template v-else>
+					<view class="employee-performance__identity-card"><view class="employee-performance__avatar"><text>{{ employeeInitial() }}</text></view><view class="employee-performance__identity-copy"><text class="employee-performance__name">{{ employeeName }}</text><text class="employee-performance__period">{{ periodLabel }}</text></view></view>
+					<view class="employee-performance__metrics"><view v-for="metric in metrics" :key="metric.code" class="employee-performance__metric"><text class="employee-performance__metric-name">{{ metric.name }}</text><text class="employee-performance__metric-value">{{ metric.value }}</text></view></view>
+					<view class="employee-performance__details-card"><view class="employee-performance__detail-tabs"><view class="employee-performance__detail-tab" :class="{ 'employee-performance__detail-tab--active': detailMode === 'cash' }" @tap="selectDetailMode('cash')"><text>现金业绩</text></view><view class="employee-performance__detail-tab" :class="{ 'employee-performance__detail-tab--active': detailMode === 'labor' }" @tap="selectDetailMode('labor')"><text>劳动业绩</text></view></view>
+						<view v-if="details.length === 0" class="employee-performance__empty"><text>当前时间范围内暂无{{ detailMode === 'cash' ? '现金' : '劳动' }}业绩明细</text></view>
+						<view v-for="item in details" :key="item.factId" class="employee-performance__detail-row"><view class="employee-performance__detail-copy"><text class="employee-performance__detail-order">{{ item.orderNo.length > 0 ? item.orderNo : item.sourceLineId }}</text><text class="employee-performance__detail-primary">{{ item.memberName.length > 0 ? item.memberName : '散客服务' }} · {{ item.storeName }}</text><text class="employee-performance__detail-meta">{{ item.businessDate }}{{ item.ruleName.length > 0 ? ' · ' + item.ruleName : '' }}</text></view><text class="employee-performance__detail-value">{{ item.displayValue }}</text></view>
+						<view v-if="hasMore" class="employee-performance__more" @tap="loadMore"><text>加载更多</text></view>
+					</view>
+				</template>
+			</view>
+		</scroll-view>
+
+		<view v-if="showCustomRange" class="employee-performance__sheet-mask" @tap="closeCustomRange"><view class="employee-performance__sheet" @tap.stop><view class="employee-performance__sheet-head"><text>选择日期区间</text><text class="employee-performance__sheet-close" @tap="closeCustomRange">×</text></view><view class="employee-performance__range-row"><text>开始日期</text><picker mode="date" :value="customStartDate" @change="changeCustomStart"><view class="employee-performance__range-value"><text>{{ customStartDate }}</text></view></picker></view><view class="employee-performance__range-row"><text>结束日期</text><picker mode="date" :value="customEndDate" @change="changeCustomEnd"><view class="employee-performance__range-value"><text>{{ customEndDate }}</text></view></picker></view><view class="employee-performance__sheet-primary" @tap="applyCustomRange"><text>查看区间数据</text></view></view></view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	import { queryMobileWarehouseEmployeePerformance } from '../../../shared/api/mobile-warehouse-client.uts'
+	import { mobileHttpResultRequiresMerchantLogin } from '../../../shared/api/mobile-http.uts'
+	import { currentMobilePlatform } from '../../../shared/platform/mobile-platform.uts'
+	import { clearMerchantRoot, currentMerchantRoot, merchantRequestSession } from '../../../shared/platform/mobile-merchant-session.uts'
+	import { openMerchantBootstrap, returnFromMerchantEmployeePerformance } from '../../../shared/platform/mobile-navigation.uts'
+
+	const now = new Date()
+	const quickPeriods = [{ code: 'today', label: '今天' }, { code: 'yesterday', label: '昨天' }, { code: 'last_month', label: '上月' }, { code: 'month', label: '本月' }]
+	const platformUsesNativeCanvas = currentMobilePlatform() === 'MP_WEIXIN'
+	const employeeId = ref(0)
+	const employeeName = ref('员工')
+	const periodMode = ref('month')
+	const month = ref(now.getFullYear().toString() + '-' + twoDigits(now.getMonth() + 1))
+	const customStartDate = ref(month.value + '-01')
+	const customEndDate = ref(now.getFullYear().toString() + '-' + twoDigits(now.getMonth() + 1) + '-' + twoDigits(now.getDate()))
+	const periodLabel = ref('本月')
+	const detailMode = ref('cash')
+	const metrics = ref<Array<any>>([])
+	const details = ref<Array<any>>([])
+	const page = ref(1)
+	const hasMore = ref(false)
+	const loading = ref(false)
+	const loadingMore = ref(false)
+	const message = ref('')
+	const showCustomRange = ref(false)
+
+	onLoad((options : any) => {
+		employeeId.value = Number(options != null ? options.employeeId || 0 : 0)
+		periodMode.value = String(options != null ? options.periodMode || 'month' : 'month')
+		month.value = String(options != null ? options.month || month.value : month.value)
+		customStartDate.value = String(options != null ? options.startDate || customStartDate.value : customStartDate.value)
+		customEndDate.value = String(options != null ? options.endDate || customEndDate.value : customEndDate.value)
+		detailMode.value = String(options != null ? options.detailMode || 'cash' : 'cash') === 'labor' ? 'labor' : 'cash'
+		if (employeeId.value <= 0) { message.value = '未识别到有效员工。'; return }
+		reload()
+	})
+
+	function twoDigits(value : number) : string { return value < 10 ? '0' + value.toString() : value.toString() }
+	function employeeInitial() : string { return employeeName.value.length > 0 ? employeeName.value.slice(0, 1) : '员' }
+	function returnToWarehouse() : void { returnFromMerchantEmployeePerformance() }
+	function selectQuickPeriod(mode : string) : void { periodMode.value = mode; reload() }
+	function openCustomRange() : void { showCustomRange.value = true }
+	function closeCustomRange() : void { showCustomRange.value = false }
+	function changeCustomStart(event : any) : void { customStartDate.value = String(event.detail.value || customStartDate.value) }
+	function changeCustomEnd(event : any) : void { customEndDate.value = String(event.detail.value || customEndDate.value) }
+	function applyCustomRange() : void { periodMode.value = 'custom'; showCustomRange.value = false; reload() }
+	function selectDetailMode(mode : string) : void { if (detailMode.value === mode) return; detailMode.value = mode; reload() }
+
+	function requestPayload(nextPage : number) : any {
+		return { employeeId: employeeId.value, periodMode: periodMode.value, month: month.value, startDate: customStartDate.value, endDate: customEndDate.value, detailMode: detailMode.value, page: nextPage, pageSize: 20 }
+	}
+	function reload() : void {
+		if (merchantRequestSession(currentMerchantRoot()) == null) { clearMerchantRoot(); openMerchantBootstrap(); return }
+		loading.value = true; loadingMore.value = false; message.value = ''; page.value = 1; details.value = []; hasMore.value = false
+		queryMobileWarehouseEmployeePerformance(requestPayload(1), (response : any) => {
+			loading.value = false
+			if (!response.ok || response.body == null || response.body.employeePerformance == null) {
+				if (mobileHttpResultRequiresMerchantLogin(response)) { clearMerchantRoot(); openMerchantBootstrap(); return }
+				message.value = String(response.message || '员工业绩暂时不可用。'); return
+			}
+			installProjection(response.body.employeePerformance, false)
+		})
+	}
+	function loadMore() : void {
+		if (!hasMore.value || loading.value || loadingMore.value) return
+		loadingMore.value = true
+		queryMobileWarehouseEmployeePerformance(requestPayload(page.value + 1), (response : any) => {
+			loadingMore.value = false
+			if (!response.ok || response.body == null || response.body.employeePerformance == null) { message.value = String(response.message || '更多业绩明细暂时不可用。'); return }
+			installProjection(response.body.employeePerformance, true)
+		})
+	}
+	function installProjection(payload : any, append : boolean) : void {
+		employeeName.value = String(payload.employee != null ? payload.employee.name || '员工' : '员工')
+		periodLabel.value = String(payload.period != null ? payload.period.label || '当前范围' : '当前范围')
+		metrics.value = Array.isArray(payload.metrics) ? payload.metrics : []
+		let nextDetails = Array.isArray(payload.details) ? payload.details : []
+		details.value = append ? details.value.concat(nextDetails) : nextDetails
+		page.value = Number(payload.pagination != null ? payload.pagination.page || 1 : 1)
+		hasMore.value = payload.pagination != null && payload.pagination.hasMore === true
+	}
+</script>
+
+<style>
+	.employee-performance { display: flex; min-height: 100%; flex: 1; flex-direction: column; background-color: #f6f9fc; }
+	.employee-performance__header { display: flex; min-height: 56px; flex-direction: row; align-items: center; padding: 18px 18px 8px 18px; }
+	.employee-performance__back, .employee-performance__header-space { display: flex; width: 36px; height: 36px; flex-shrink: 0; align-items: center; justify-content: center; }
+	.employee-performance__back { border-radius: 18px; background-color: #ffffff; box-shadow: 0 4px 12px rgba(60, 88, 130, 0.08); }
+	.employee-performance__back text { font-size: 28px; font-weight: 400; line-height: 30px; color: #40546b; }
+	.employee-performance__heading { display: flex; min-width: 0; flex: 1; flex-direction: column; align-items: center; }
+	.employee-performance__title { font-size: 18px; font-weight: 800; line-height: 24px; color: #173451; }
+	.employee-performance__subtitle { max-width: 180px; overflow: hidden; margin-top: 1px; font-size: 11px; line-height: 16px; color: #71839a; text-overflow: ellipsis; white-space: nowrap; }
+	.employee-performance__content { min-height: 0; flex: 1; }
+	.employee-performance__inner { box-sizing: border-box; width: 100%; max-width: 1200px; margin: 0 auto; padding: 8px 18px 32px 18px; }
+	.employee-performance__scope { display: flex; min-height: 42px; flex-direction: row; align-items: center; padding: 4px; border-width: 1px; border-style: solid; border-color: rgba(215, 226, 241, 0.9); border-radius: 16px; background-color: rgba(255, 255, 255, 0.76); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.7), 0 8px 20px rgba(63, 93, 137, 0.08); }
+	.employee-performance__filter-pill { display: flex; min-width: 0; flex: 1; height: 34px; align-items: center; justify-content: center; border-radius: 12px; }
+	.employee-performance__filter-pill text { font-size: 13px; line-height: 20px; color: #71839a; }
+	.employee-performance__filter-pill--active { background-color: #1677cc; box-shadow: 0 6px 14px rgba(22, 119, 204, 0.18); }
+	.employee-performance__filter-pill--active text { font-weight: 700; color: #ffffff; }
+	.employee-performance__identity-card { display: flex; min-height: 76px; flex-direction: row; align-items: center; margin-top: 12px; padding: 14px; border-radius: 8px; background-color: #ffffff; box-shadow: 0 8px 20px rgba(60, 88, 130, 0.08); }
+	.employee-performance__avatar { display: flex; width: 46px; height: 46px; flex-shrink: 0; align-items: center; justify-content: center; border-radius: 23px; background-color: #e7f1ff; }
+	.employee-performance__avatar text { font-size: 19px; font-weight: 800; line-height: 24px; color: #1677cc; }
+	.employee-performance__identity-copy { display: flex; min-width: 0; flex: 1; flex-direction: column; margin-left: 12px; }
+	.employee-performance__name { overflow: hidden; font-size: 17px; font-weight: 800; line-height: 23px; color: #173451; text-overflow: ellipsis; white-space: nowrap; }
+	.employee-performance__period { margin-top: 3px; font-size: 12px; line-height: 18px; color: #71839a; }
+	.employee-performance__metrics { display: flex; flex-direction: row; flex-wrap: wrap; margin-top: 10px; padding: 6px 0; border-radius: 8px; background-color: #ffffff; box-shadow: 0 8px 20px rgba(60, 88, 130, 0.08); }
+	.employee-performance__metric { display: flex; box-sizing: border-box; width: 33.33%; min-height: 64px; flex-direction: column; justify-content: center; padding: 8px 14px; }
+	.employee-performance__metric-name { font-size: 11px; line-height: 16px; color: #71839a; }
+	.employee-performance__metric-value { margin-top: 3px; overflow: hidden; font-size: 19px; font-weight: 800; line-height: 24px; color: #173451; text-overflow: ellipsis; white-space: nowrap; }
+	.employee-performance__details-card { margin-top: 12px; overflow: hidden; border-radius: 8px; background-color: #ffffff; box-shadow: 0 8px 20px rgba(60, 88, 130, 0.08); }
+	.employee-performance__detail-tabs { display: flex; min-height: 48px; flex-direction: row; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #edf2f7; }
+	.employee-performance__detail-tab { display: flex; flex: 1; align-items: center; justify-content: center; border-bottom-width: 2px; border-bottom-style: solid; border-bottom-color: transparent; }
+	.employee-performance__detail-tab text { font-size: 14px; font-weight: 600; line-height: 20px; color: #71839a; }
+	.employee-performance__detail-tab--active { border-bottom-color: #1677cc; }
+	.employee-performance__detail-tab--active text { color: #1677cc; }
+	.employee-performance__detail-row { display: flex; min-height: 72px; flex-direction: row; align-items: center; padding: 12px 14px; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #edf2f7; }
+	.employee-performance__detail-copy { display: flex; min-width: 0; flex: 1; flex-direction: column; }
+	.employee-performance__detail-order { overflow: hidden; font-size: 12px; font-weight: 700; line-height: 18px; color: #1677cc; text-overflow: ellipsis; white-space: nowrap; }
+	.employee-performance__detail-primary { overflow: hidden; margin-top: 2px; font-size: 13px; line-height: 18px; color: #314257; text-overflow: ellipsis; white-space: nowrap; }
+	.employee-performance__detail-meta { overflow: hidden; margin-top: 1px; font-size: 11px; line-height: 16px; color: #8a99aa; text-overflow: ellipsis; white-space: nowrap; }
+	.employee-performance__detail-value { flex-shrink: 0; margin-left: 10px; font-size: 17px; font-weight: 800; line-height: 22px; color: #173451; }
+	.employee-performance__empty, .employee-performance__state { display: flex; min-height: 110px; flex-direction: column; align-items: center; justify-content: center; padding: 18px; font-size: 13px; line-height: 20px; color: #71839a; text-align: center; }
+	.employee-performance__state { margin-top: 12px; border-radius: 8px; background-color: #ffffff; box-shadow: 0 8px 20px rgba(60, 88, 130, 0.08); }
+	.employee-performance__retry, .employee-performance__more { display: flex; min-height: 40px; align-items: center; justify-content: center; }
+	.employee-performance__retry { min-width: 88px; margin-top: 12px; border-radius: 8px; background-color: #1677cc; }
+	.employee-performance__retry text, .employee-performance__more text { font-size: 13px; font-weight: 700; color: #1677cc; }
+	.employee-performance__retry text { color: #ffffff; }
+	.employee-performance__sheet-mask { position: fixed; z-index: 80; top: 0; right: 0; bottom: 0; left: 0; display: flex; flex-direction: column; justify-content: flex-end; background-color: rgba(8, 22, 38, 0.28); }
+	.employee-performance__sheet { display: flex; flex-direction: column; padding: 16px 16px 22px 16px; border-radius: 22px 22px 0 0; background-color: #ffffff; }
+	.employee-performance__sheet-head { display: flex; min-height: 32px; flex-direction: row; align-items: center; justify-content: space-between; }
+	.employee-performance__sheet-head > text:first-child { font-size: 17px; font-weight: 800; line-height: 24px; color: #10243b; }
+	.employee-performance__sheet-close { display: flex; width: 32px; height: 32px; align-items: center; justify-content: center; border-radius: 16px; background-color: #eef4fa; font-size: 18px; color: #708196; }
+	.employee-performance__range-row { display: flex; min-height: 52px; flex-direction: row; align-items: center; justify-content: space-between; margin-top: 10px; padding: 0 12px; border-radius: 8px; background-color: #f4f8fc; }
+	.employee-performance__range-row text { font-size: 14px; color: #40546b; }
+	.employee-performance__range-value { display: flex; min-width: 126px; height: 36px; align-items: center; justify-content: center; border-radius: 8px; background-color: #ffffff; }
+	.employee-performance__range-value text { font-size: 14px; font-weight: 700; color: #1677cc; }
+	.employee-performance__sheet-primary { display: flex; height: 44px; align-items: center; justify-content: center; margin-top: 16px; border-radius: 8px; background-color: #1677cc; }
+	.employee-performance__sheet-primary text { font-size: 15px; font-weight: 800; color: #ffffff; }
+	.employee-performance--native-mini .employee-performance__header { padding-top: 84px; }
+	@media (max-width: 1236px) { .employee-performance__inner { max-width: none; } }
+</style>

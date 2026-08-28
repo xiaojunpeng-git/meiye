@@ -7,16 +7,15 @@ use app\services\query\UnifiedQueryRuntime;
 use app\services\query\provider\MemberUnifiedQueryProvider;
 use think\exception\ValidateException;
 use think\facade\Db;
+use DateTimeImmutable;
+use DateTimeZone;
 
 /** Mobile facade over the one member-list provider; it never owns member SQL. */
 final class MobileCustomerQueryServices
 {
     public function query(array $merchantContext, array $payload, bool $exclusiveOnly = false): array
     {
-        $context = $this->unifiedContextForMerchant($merchantContext);
-        if ($merchantContext['dataScopeMode'] === 'PERSONAL_SELF') {
-            return $this->personalExclusivePage($merchantContext, $payload, $exclusiveOnly);
-        }
+        $context = $this->unifiedContextForMerchant($merchantContext, $this->customerStoreIds($merchantContext));
         $runtime = UnifiedQueryRuntime::runtime();
         $saved = $runtime['preferences']->load($context, MemberUnifiedQueryProvider::PAGE_CODE);
         $payload = $this->queryPayload($payload, (array)($saved['settings'] ?? []));
@@ -37,7 +36,69 @@ final class MobileCustomerQueryServices
 
     public function queryAudience(array $merchantContext, array $validatedRule, array $payload): array
     {
-        $context = $this->unifiedContextForMerchant($merchantContext);
+        return $this->queryAudienceForStoreIds(
+            $merchantContext,
+            $validatedRule,
+            $payload,
+            $this->customerStoreIds($merchantContext)
+        );
+    }
+
+    /**
+     * Resolves one of the five built-in audiences without persisting a row.
+     * The resulting filters still flow through the same member-list provider,
+     * permission injection and projection as custom audiences.
+     *
+     * @param int[] $storeIds
+     */
+    public function querySystemAudienceForStoreIds(array $merchantContext, string $systemKey, array $payload, array $storeIds): array
+    {
+        if (!MobileCustomerAudienceServices::isSystemKey($systemKey)) {
+            throw new ValidateException('系统客群标识无效。');
+        }
+        $today = new DateTimeImmutable('today', new DateTimeZone('Asia/Shanghai'));
+        $filters = [];
+        if ($systemKey === MobileCustomerAudienceServices::SYSTEM_BIRTHDAY_THIS_MONTH) {
+            $filters[] = ['field_key' => 'birthday_month_day', 'operator' => 'starts_with', 'value' => $today->format('m-')];
+        } elseif ($systemKey === MobileCustomerAudienceServices::SYSTEM_SLEEPING_90D) {
+            // A missing latest date is not a sleeping customer: the platform
+            // definition requires at least one historical valid service. The
+            // lower bound excludes the empty projection value without using
+            // an invalid empty date literal.
+            $filters[] = ['field_key' => 'latest_visit_date', 'operator' => 'between', 'value' => ['1900-01-01', $today->modify('-90 days')->format('Y-m-d')]];
+        } elseif ($systemKey === MobileCustomerAudienceServices::SYSTEM_FOLLOWUP_7D) {
+            // Follow-up is driven by either a recent valid purchase or a
+            // completed service fact; the query engine applies this OR.
+            $filters[] = ['field_key' => 'latest_purchase_date', 'operator' => 'greater_or_equal', 'value' => $today->modify('-6 days')->format('Y-m-d')];
+            $filters[] = ['field_key' => 'latest_visit_date', 'operator' => 'greater_or_equal', 'value' => $today->modify('-6 days')->format('Y-m-d')];
+            $filterRelation = 'any';
+        } elseif ($systemKey === MobileCustomerAudienceServices::SYSTEM_INVITE_30D) {
+            $filters[] = ['field_key' => 'latest_visit_date', 'operator' => 'between', 'value' => [$today->modify('-30 days')->format('Y-m-d'), $today->modify('-8 days')->format('Y-m-d')]];
+        } elseif ($systemKey === MobileCustomerAudienceServices::SYSTEM_BENEFIT_LOW_BALANCE) {
+            $filters[] = ['field_key' => 'remaining_project_amount', 'operator' => 'greater_than', 'value' => '0'];
+            $filters[] = ['field_key' => 'remaining_project_amount', 'operator' => 'less_than', 'value' => '500'];
+        }
+        $rule = [
+            'page_code' => MemberUnifiedQueryProvider::PAGE_CODE,
+            'permission_must_be_injected_before_calculation' => true,
+            'filters' => $filters,
+            'filter_relation' => $filterRelation ?? 'all',
+            'top_filters' => [], 'keyword_filters' => [], 'sorts' => [['field_key' => 'member_id', 'direction' => 'asc']],
+            'domain_scope' => ['data_scope' => 'normal'],
+        ];
+        return $this->queryAudienceForStoreIds($merchantContext, $rule, $payload, $storeIds);
+    }
+
+    /**
+     * The caller supplies only a server-projected subset from its current
+     * hierarchy node. This method intentionally remains the only path that
+     * turns a dynamic audience rule into current members.
+     *
+     * @param int[] $storeIds
+     */
+    public function queryAudienceForStoreIds(array $merchantContext, array $validatedRule, array $payload, array $storeIds): array
+    {
+        $context = $this->unifiedContextForMerchant($merchantContext, $storeIds);
         if (($validatedRule['page_code'] ?? '') !== MemberUnifiedQueryProvider::PAGE_CODE
             || empty($validatedRule['permission_must_be_injected_before_calculation'])) {
             throw new ValidateException('客群筛选规则无效，请重新创建客群。');
@@ -83,6 +144,13 @@ final class MobileCustomerQueryServices
         return $page;
     }
 
+    /** @param int[] $storeIds */
+    public function audienceMemberCount(array $merchantContext, array $validatedRule, array $storeIds): int
+    {
+        $page = $this->queryAudienceForStoreIds($merchantContext, $validatedRule, ['page' => 1, 'limit' => 1], $storeIds);
+        return max(0, (int)($page['total'] ?? 0));
+    }
+
     /**
      * Revalidates a target member independently of a page query. Detail tabs
      * must not trust a member id from the mobile route or a previously loaded
@@ -93,21 +161,12 @@ final class MobileCustomerQueryServices
         if ($memberId <= 0) {
             throw new ValidateException('客户参数无效。');
         }
-        if ($merchantContext['dataScopeMode'] === 'PERSONAL_SELF') {
-            $visible = Db::name('member_exclusive_service')
-                ->where('member_id', $memberId)
-                ->where('staff_id', (int)$merchantContext['staffId'])
-                ->where('store_id', (int)$merchantContext['storeId'])
-                ->where('status', 1)
-                ->count() > 0;
-        } else {
-            $stores = array_values(array_filter(array_map('intval', (array)($merchantContext['visibleStoreIds'] ?? []))));
-            $visible = $stores !== [] && Db::name('store_user')
-                ->where('uid', $memberId)
-                ->where('status', 1)
-                ->whereIn('store_id', $stores)
-                ->count() > 0;
-        }
+        $stores = $this->customerStoreIds($merchantContext);
+        $visible = $stores !== [] && Db::name('store_user')
+            ->where('uid', $memberId)
+            ->where('status', 1)
+            ->whereIn('store_id', $stores)
+            ->count() > 0;
         if (!$visible || !Db::name('user')->where('uid', $memberId)->where('is_del', 0)->count()) {
             throw new ValidateException('该客户不在当前数据权限范围内，或数据已发生变化。');
         }
@@ -115,7 +174,7 @@ final class MobileCustomerQueryServices
 
     public function validatedAudienceRule(array $merchantContext, array $payload): array
     {
-        $context = $this->unifiedContextForMerchant($merchantContext);
+        $context = $this->unifiedContextForMerchant($merchantContext, $this->customerStoreIds($merchantContext));
 		$sourceFilters = array_values((array)($payload['filters'] ?? []));
 		$sourceFilterRelation = (string)($payload['filterRelation'] ?? 'all');
         $payload = $this->queryPayload($payload);
@@ -141,12 +200,11 @@ final class MobileCustomerQueryServices
      * metadata management must never turn a personal customer scope into a
      * store-wide member query scope.
      */
-    public function unifiedContextForMerchant(array $merchant): array
+    public function unifiedContextForMerchant(array $merchant, array $storeIds = []): array
     {
-        $stores = (array)($merchant['visibleStoreIds'] ?? []);
+        $stores = $storeIds !== [] ? $storeIds : $this->customerStoreIds($merchant);
         if (!$stores) {
-            // Personal mode is handled separately and must not be widened to its active store.
-            throw new ValidateException('当前数据权限仅允许查看本人专属客户。');
+            throw new ValidateException('当前数据权限范围内没有可查看的客户门店。');
         }
         $runtime = UnifiedQueryRuntime::runtime();
         return $runtime['contextFactory']->make([
@@ -174,7 +232,7 @@ final class MobileCustomerQueryServices
     /** Read-only capability projection; its scope is always server injected. */
     public function unifiedCapabilities(array $merchant): array
     {
-        $context = $this->unifiedContextForMerchant($merchant);
+        $context = $this->unifiedContextForMerchant($merchant, $this->customerStoreIds($merchant));
         $runtime = UnifiedQueryRuntime::runtime();
         $settings = $runtime['preferences']->load($context, MemberUnifiedQueryProvider::PAGE_CODE);
         $capability = $runtime['capabilities']->build(
@@ -223,6 +281,30 @@ final class MobileCustomerQueryServices
             'businessStatus' => '',
             'quickFilters' => [],
         ];
+    }
+
+    /**
+     * Customer permissions are deliberately store-based: a personal mobile
+     * appointment may open its current employment store, but never a client
+     * supplied store. "PERSONAL_SELF" therefore must not be interpreted as
+     * an exclusive-service-member list in the customer module.
+     *
+     * @return int[]
+     */
+    private function customerStoreIds(array $merchant): array
+    {
+        $stores = array_values(array_filter(array_map('intval', (array)($merchant['visibleStoreIds'] ?? []))));
+        if ($stores === []) {
+            $activeStoreId = (int)($merchant['storeId'] ?? 0);
+            if ($activeStoreId > 0) {
+                $stores[] = $activeStoreId;
+            }
+        }
+        $stores = array_values(array_unique(array_filter($stores, static function (int $storeId): bool {
+            return $storeId > 0;
+        })));
+        sort($stores, SORT_NUMERIC);
+        return $stores;
     }
 
     /**
@@ -372,57 +454,6 @@ final class MobileCustomerQueryServices
             throw new ValidateException('日期必须使用 YYYY-MM-DD。');
         }
         return $value;
-    }
-
-    private function personalExclusivePage(array $merchant, array $payload, bool $exclusiveOnly): array
-    {
-        if (!$exclusiveOnly) {
-            return $this->emptyPage($payload);
-        }
-        $page = max(1, (int)($payload['page'] ?? 1));
-        $limit = min(100, max(1, (int)($payload['limit'] ?? 20)));
-        $query = Db::name('member_exclusive_service')
-            ->where('staff_id', (int)$merchant['staffId'])
-            ->where('store_id', (int)$merchant['storeId'])
-            ->where('status', 1)
-            ->field('member_id')->order('member_id', 'asc');
-        $memberIds = array_map('intval', $query->column('member_id'));
-        if (!$memberIds) {
-            return $this->emptyPage($payload);
-        }
-        // The provider remains the only member projection. Personal mode only narrows its ids.
-        $keyword = trim((string)($payload['keyword'] ?? ''));
-        $rows = Db::name('user')->whereIn('uid', $memberIds)->where('is_del', 0)
-            ->order('uid', 'asc')->page($page, $limit)->select()->toArray();
-        $records = array_map(static function (array $row): array {
-            return [
-                'id' => (string)$row['uid'], 'memberId' => (int)$row['uid'],
-                'name' => trim((string)($row['real_name'] ?? '')) ?: (string)($row['nickname'] ?? '未命名会员'),
-                'phone' => (string)($row['phone'] ?? ''), 'memberNo' => (string)($row['bar_code'] ?? ''),
-                'birthday' => !empty($row['birthday']) ? date('Y-m-d', (int)$row['birthday']) : '',
-                'status' => (int)($row['status'] ?? 1) === 1 ? '正常' : '已停用',
-                'level' => '', 'tags' => [], 'storeId' => (int)($row['belong_store_id'] ?? 0),
-                'storeName' => '', 'exclusiveServiceStaff' => '', 'accountBalance' => (string)($row['now_money'] ?? '0.00'),
-                'activeCardCount' => 0, 'remainingProjectTimes' => 0, 'remainingProjectAmount' => '0.00',
-                'debtAmount' => '0.00', 'totalConsumptionAmount' => '0.00', 'visitCount' => 0,
-                'latestPurchaseDate' => '', 'lastServiceStaff' => '', 'latestVisitDate' => '',
-                'createdAt' => !empty($row['add_time']) ? date('Y-m-d H:i:s', (int)$row['add_time']) : '',
-                'queryFieldValues' => [], 'queryDisplayValues' => [],
-            ];
-        }, $rows);
-        return array_merge($this->emptyPage($payload), [
-            'records' => $records, 'total' => count($memberIds), 'page' => $page, 'pageSize' => $limit,
-        ]);
-    }
-
-    private function emptyPage(array $payload): array
-    {
-        return ['records' => [], 'total' => 0, 'page' => max(1, (int)($payload['page'] ?? 1)),
-            'pageSize' => min(100, max(1, (int)($payload['limit'] ?? 20))), 'isLoading' => false,
-            'statusOptions' => [], 'querySettings' => [], 'summaries' => [], 'groups' => [],
-            'queryCutoffDate' => date('Y-m-d'), 'dataAsOf' => time(), 'metricVersion' => 'member-list-v1',
-            'aggregationCaughtUp' => true, 'consistencyFingerprint' => '', 'security' => ['dataScope' => 'PERSONAL'],
-        ];
     }
 
     private function isExclusiveToStaff(int $memberId, array $merchant): bool

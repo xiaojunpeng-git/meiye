@@ -1,0 +1,262 @@
+<template>
+	<view class="merchant-home-page" :class="{ 'merchant-home-page--native-mini': platformUsesNativeCanvas }">
+		<scroll-view scroll-y="true" refresher-enabled="true" :refresher-triggered="refreshing" @refresherrefresh="onPullRefresh" class="merchant-home-page__content">
+			<view class="merchant-home-page__content-inner">
+				<view class="merchant-home-page__context"><view class="merchant-home-page__context-copy"><text class="merchant-home-page__context-label">当前范围</text><text class="merchant-home-page__context-value">{{ scopeLabel }}</text></view><view class="merchant-home-page__periods"><view v-for="item in periods" :key="item.key" class="merchant-home-page__period" :class="{ 'merchant-home-page__period--active': selectedPeriod === item.key }" @tap="selectPeriod(item.key)"><text>{{ item.label }}</text></view></view></view>
+				<view v-if="message.length > 0" class="merchant-home-page__error"><text>{{ message }}</text><view class="merchant-home-page__error-retry" @tap="reload"><text>重新加载</text></view></view>
+
+				<view class="merchant-home-page__section-head"><view><text class="merchant-home-page__section-title">经营概览</text><text class="merchant-home-page__section-note">统一业绩事实汇总</text></view><text class="merchant-home-page__section-link" @tap="openWarehouse">查看数仓 ›</text></view>
+				<view class="merchant-home-page__metric-grid"><view v-for="metric in overviewMetrics" :key="metric.key" class="merchant-home-page__metric-card" :class="'merchant-home-page__metric-card--' + metric.tone"><view class="merchant-home-page__metric-icon"><text>{{ metric.icon }}</text></view><text class="merchant-home-page__metric-label">{{ metric.label }}</text><text class="merchant-home-page__metric-value">{{ metric.value }}</text><text class="merchant-home-page__metric-source">{{ metric.source }}</text></view></view>
+
+				<view class="merchant-home-page__trend-card"><view class="merchant-home-page__card-head"><view><text class="merchant-home-page__card-title">经营趋势</text><text class="merchant-home-page__card-note">实际业绩与消耗业绩</text></view><text class="merchant-home-page__card-badge">{{ selectedPeriodLabel }}</text></view><view v-if="loading" class="merchant-home-page__inline-state"><text>正在加载趋势数据</text></view><view v-else-if="trendPoints().length > 0" class="merchant-home-page__trend-ready"><image v-if="platformUsesNativeCanvas && nativeTrendImage.length > 0" :src="nativeTrendImage" mode="scaleToFill" class="merchant-home-page__trend-canvas"></image><canvas v-else canvas-id="merchant-home-trend" id="merchant-home-trend" width="720" height="228" class="merchant-home-page__trend-canvas"></canvas><view class="merchant-home-page__trend-legend"><view><text class="merchant-home-page__trend-dot merchant-home-page__trend-dot--actual"></text><text>实际业绩</text></view><view><text class="merchant-home-page__trend-dot merchant-home-page__trend-dot--consume"></text><text>消耗业绩</text></view></view></view><view v-else class="merchant-home-page__trend-empty"><view class="merchant-home-page__trend-grid"><view v-for="line in 4" :key="line" class="merchant-home-page__trend-line"></view></view><text>暂无趋势数据</text><text>当前日期范围没有已完成事实</text></view></view>
+
+				<view class="merchant-home-page__section-head merchant-home-page__section-head--compact"><view><text class="merchant-home-page__section-title">客户概况</text><text class="merchant-home-page__section-note">按当前权限范围统计</text></view><text class="merchant-home-page__section-link" @tap="openMemberDashboard">查看明细 ›</text></view>
+				<view class="merchant-home-page__summary-card"><view v-for="metric in customerMetrics" :key="metric.key" class="merchant-home-page__summary-item"><view class="merchant-home-page__summary-icon merchant-home-page__summary-icon--customer"><text>{{ metric.icon }}</text></view><view><text class="merchant-home-page__summary-label">{{ metric.label }}</text><text class="merchant-home-page__summary-value">{{ metric.value }}</text><text v-if="metric.source" class="merchant-home-page__summary-source">{{ metric.source }}</text></view></view></view>
+
+
+				<view class="merchant-home-page__section-head merchant-home-page__section-head--compact"><view><text class="merchant-home-page__section-title">{{ rankingName }}</text><text class="merchant-home-page__section-note">{{ rankingNote }}</text></view><text class="merchant-home-page__section-link" @tap="openWarehouse">查看全部 ›</text></view>
+				<view class="merchant-home-page__ranking-card"><view v-if="loading" class="merchant-home-page__inline-state"><text>正在加载排行数据</text></view><view v-else-if="rankingRows.length > 0" class="merchant-home-page__ranking-list"><view v-for="(row, index) in rankingRows" :key="row.entityType + '-' + row.entityId" class="merchant-home-page__ranking-row"><view class="merchant-home-page__ranking-rank" :class="'merchant-home-page__ranking-rank--' + index.toString()"><text>{{ index + 1 }}</text></view><view class="merchant-home-page__ranking-copy"><text class="merchant-home-page__ranking-name">{{ row.entityName || row.name }}</text><text class="merchant-home-page__ranking-meta">{{ row.entityType === 'branch' ? '分公司' : row.entityType === 'manager' ? '经理' : '门店' }}</text></view><text class="merchant-home-page__ranking-value">¥{{ row.displayValue || row.rankingValue || 0 }}</text></view></view><view v-else class="merchant-home-page__ranking-empty"><text class="merchant-home-page__ranking-empty-title">暂无排行数据</text><text class="merchant-home-page__ranking-empty-copy">当前权限范围没有可展示的排行</text></view></view>
+
+				<view class="merchant-home-page__freshness"><text>数据更新时间：{{ freshness }}</text><text>口径版本：{{ metricVersion }}</text></view>
+			</view>
+		</scroll-view>
+
+		<MerchantPrimaryTabBar active-key="home" />
+	</view>
+</template>
+
+<script setup lang="uts">
+	import MerchantPrimaryTabBar from '../../../shared/components/merchant-primary-tab-bar.uvue'
+	import { queryMobileMerchantHome } from '../../../shared/api/mobile-home-client.uts'
+	import { currentMobilePlatform, drawMobileTrendCanvas } from '../../../shared/platform/mobile-platform.uts'
+	import { clearMerchantRoot, currentMerchantRoot, merchantRequestSession } from '../../../shared/platform/mobile-merchant-session.uts'
+	import { openMerchantBootstrap } from '../../../shared/platform/mobile-navigation.uts'
+
+	const periods = [{ key: 'today', label: '今天' }, { key: 'month', label: '本月' }, { key: 'year', label: '本年' }]
+	const selectedPeriod = ref('month')
+	const loading = ref(false)
+	const refreshing = ref(false)
+	const message = ref('')
+	const scopeLabel = ref('授权组织范围')
+	const freshness = ref('—')
+	const metricVersion = ref('—')
+	const rankingName = ref('组织排行')
+	const rankingNote = ref('按现金业绩排序')
+	const trend = ref<any>({ points: [] })
+	const rankingRows = ref<Array<any>>([])
+	const platformUsesNativeCanvas = currentMobilePlatform() === 'MP_WEIXIN'
+	const nativeTrendImage = ref('')
+	const canvasHost : any = getCurrentInstance().proxy
+	const overviewMetrics = ref<Array<any>>([
+		{ key: 'cash', label: '现金业绩', value: '—', source: '销售成功且收款事实统计', icon: '¥', tone: 'cash' },
+		{ key: 'actual', label: '实际业绩', value: '—', source: '统一实际业绩事实统计', icon: '实', tone: 'actual' },
+		{ key: 'consume', label: '消耗业绩', value: '—', source: '项目核销完成后统计', icon: '耗', tone: 'consume' },
+		{ key: 'target', label: '目标完成率', value: '—', source: '门店目标汇总统计', icon: '%', tone: 'target' }
+	])
+	const customerMetrics = ref<Array<any>>([
+		{ key: 'total', label: '客户总数', value: '—', source: '统一客户查询结果总数', icon: '人' },
+		{ key: 'new', label: '新客数', value: '—', source: '首次现金业绩有效下单客户去重统计', icon: '新' },
+		{ key: 'active', label: '服务客户', value: '—', source: '周期内完成核销到店客户去重统计', icon: '活' },
+		{ key: 'sleeping', label: '沉睡客户', value: '—', source: '沉睡客户口径待客户分析接口提供', icon: '沉' }
+	])
+
+	const selectedPeriodLabel = computed(() => {
+		for (let index = 0; index < periods.length; index++) if (periods[index].key === selectedPeriod.value) return periods[index].label
+		return '本月'
+	})
+
+	onShow(() => {
+		if (merchantRequestSession(currentMerchantRoot()) == null) { openMerchantBootstrap(); return }
+		reload()
+	})
+
+	function reload() : void {
+		loading.value = true
+		message.value = ''
+		queryMobileMerchantHome({ periodMode: selectedPeriod.value }, (response : any) => {
+			loading.value = false
+			if (response == null || response.ok !== true || response.body == null) {
+				if (response != null && response.body != null && String(response.body.errorCode || response.body.protocolCode || '') === 'MERCHANT_SESSION_EXPIRED') {
+					clearMerchantRoot()
+					openMerchantBootstrap()
+					return
+				}
+				message.value = String(response == null ? '经营首页暂时不可用。' : (response.message || '经营首页暂时不可用。'))
+				return
+			}
+			applyHomePayload(response.body)
+		})
+	}
+	function onPullRefresh() : void { if (refreshing.value) return; refreshing.value = true; reload(); setTimeout(() => { refreshing.value = false }, 900) }
+
+	function selectPeriod(value : string) : void {
+		selectedPeriod.value = value
+		reload()
+	}
+
+	function openWarehouse() : void { uni.redirectTo({ url: '/src/merchant/pages/warehouse/index' }) }
+	// 首页的明细入口直接进入已经接入真实数据和权限处理的业务页面，
+	// 避免落到仅用于早期占位的 member/product-dashboard 页面。
+	function openMemberDashboard() : void { uni.redirectTo({ url: '/src/merchant/pages/customers/index' }) }
+
+	function applyHomePayload(payload : any) : void {
+		scopeLabel.value = String((payload.scope || {}).label || '授权组织范围')
+		metricVersion.value = String(payload.metric_version || '—')
+		freshness.value = formatDataTime(Number(payload.data_as_of || 0))
+		let trendPayload = payload.trend || {}
+		trend.value = trendPayload.data || trendPayload || { points: [] }
+		rankingRows.value = Array.isArray((payload.ranking || {}).rows) ? (payload.ranking || {}).rows : []
+		rankingName.value = String((payload.ranking || {}).name || '组织排行')
+		const rankingCode = String((payload.ranking || {}).code || '')
+		rankingNote.value = rankingCode === 'branch_cash_performance' ? '按分公司现金业绩排序' : rankingCode === 'manager_cash_performance' ? '按经理现金业绩排序' : '按门店现金业绩排序'
+		const overview = payload.overview || {}
+		const overviewItems = Array.isArray(overview.metrics) ? overview.metrics : []
+		for (let index = 0; index < overviewMetrics.value.length; index++) {
+			const target = overviewMetrics.value[index]
+			const code = target.key === 'cash' ? 'cash_performance' : target.key === 'actual' ? 'actual_performance' : target.key === 'consume' ? 'consume_amount' : 'target_completion_rate'
+			const found = findMetric(overviewItems, code)
+			if (found != null) target.value = formatMetricValue(found)
+		}
+		applySummary(customerMetrics.value, ((payload.customer || {}).metrics || []))
+		queueTrendDraw()
+	}
+
+	function trendPoints() : Array<any> {
+		let points = (trend.value || {}).points
+		return Array.isArray(points) ? points : []
+	}
+
+	function queueTrendDraw() : void {
+		setTimeout(() => { drawHomeTrend() }, 80)
+		setTimeout(() => { drawHomeTrend() }, 260)
+		setTimeout(() => { drawHomeTrend() }, 720)
+	}
+
+	function drawHomeTrend() : void {
+		let points = trendPoints()
+		if (points.length === 0) return
+		drawMobileTrendCanvas('merchant-home-trend', points, canvasHost, (filePath : string) => { nativeTrendImage.value = filePath })
+	}
+
+	function findMetric(items : Array<any>, code : string) : any {
+		for (let index = 0; index < items.length; index++) if (String(items[index].code || '') === code) return items[index]
+		return null
+	}
+
+	function applySummary(targets : Array<any>, itemsValue : any) : void {
+		const items = Array.isArray(itemsValue) ? itemsValue : []
+		for (let index = 0; index < targets.length; index++) {
+			const target = targets[index]
+			const code = target.key === 'total' ? 'customer_total' : target.key === 'new' ? 'new_customer' : target.key === 'active' ? 'visit_customer' : target.key === 'sleeping' ? 'sleeping_customer' : target.key === 'sales' ? 'product_sales' : target.key === 'profit' ? 'product_profit' : target.key === 'stock' ? 'stock_alert' : 'expiry_product'
+			const found = findMetric(items, code)
+			if (found != null) { target.value = formatMetricValue(found); target.source = String(found.source || target.source || '') }
+		}
+	}
+
+	function formatMetricValue(metric : any) : string {
+		if (metric == null || metric.value == null || String(metric.state || '') === 'unavailable' || String(metric.state || '') === 'error') return '—'
+		const unit = String(metric.unit || '')
+		const value = Number(metric.value)
+		if (!isFinite(value)) return '—'
+		if (unit === 'amount') return '¥' + value.toLocaleString()
+		if (unit === 'percent') return value.toString() + '%'
+		return value.toLocaleString()
+	}
+
+	function formatDataTime(timestamp : number) : string {
+		if (timestamp <= 0) return '—'
+		const date = new Date(timestamp * 1000)
+		return date.getFullYear().toString() + '-' + (date.getMonth() + 1).toString().padStart(2, '0') + '-' + date.getDate().toString().padStart(2, '0')
+	}
+</script>
+
+<style>
+	.merchant-home-page { display: flex; height: 100vh; min-height: 0; flex-direction: column; background-color: #f4f7fb; color: #25364a; }
+	/* MP-WEIXIN custom navigation does not reserve the status bar or capsule.
+	 * Keep the first context card below the notch; H5 keeps its original top. */
+	.merchant-home-page--native-mini .merchant-home-page__content-inner { padding-top: 84px; }
+	.merchant-home-page__header { flex: none; padding: 18px 18px 14px 18px; background-color: #ffffff; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #e4ebf2; }
+	.merchant-home-page__eyebrow { display: block; font-size: 12px; font-weight: 700; line-height: 17px; color: #5b7893; }
+	.merchant-home-page__title-row { display: flex; flex-direction: row; align-items: flex-end; justify-content: space-between; margin-top: 3px; }
+	.merchant-home-page__title { display: block; font-size: 25px; font-weight: 800; line-height: 32px; color: #1e3349; }
+	.merchant-home-page__subtitle { display: block; margin-top: 4px; font-size: 12px; line-height: 18px; color: #8291a0; }
+	.merchant-home-page__refresh { display: flex; flex-direction: row; align-items: center; gap: 4px; padding: 7px 10px; border-radius: 8px; background-color: #eef6ff; color: #1d73b8; font-size: 11px; }
+	.merchant-home-page__refresh text:first-child { font-size: 17px; line-height: 16px; }
+	.merchant-home-page__content { min-height: 0; flex: 1; padding-bottom: 78px; }
+	.merchant-home-page__content-inner { padding: 13px 14px 25px 14px; }
+	.merchant-home-page__context { display: flex; flex-direction: row; align-items: center; justify-content: space-between; padding: 12px 13px; border-radius: 14px; background-color: #eaf3fb; }
+	.merchant-home-page__context-label { display: block; font-size: 10px; line-height: 14px; color: #6d8399; }
+	.merchant-home-page__context-value { display: block; margin-top: 2px; font-size: 14px; font-weight: 700; line-height: 19px; color: #284b68; }
+	.merchant-home-page__periods { display: flex; flex-direction: row; border-radius: 8px; background-color: #ffffff; padding: 3px; }
+	.merchant-home-page__period { min-width: 42px; padding: 5px 7px; border-radius: 6px; text-align: center; font-size: 11px; line-height: 15px; color: #7890a4; }
+	.merchant-home-page__period--active { background-color: #2779bd; color: #ffffff; font-weight: 700; }
+	.merchant-home-page__section-head { display: flex; flex-direction: row; align-items: flex-end; justify-content: space-between; margin-top: 17px; margin-bottom: 9px; }
+	.merchant-home-page__section-head--compact { margin-top: 18px; }
+	.merchant-home-page__section-title { display: block; font-size: 16px; font-weight: 800; line-height: 21px; color: #29425a; }
+	.merchant-home-page__section-note { display: block; margin-top: 2px; font-size: 10px; line-height: 14px; color: #95a1ae; }
+	.merchant-home-page__section-link { padding: 3px 0; font-size: 11px; line-height: 16px; color: #2879ba; }
+	.merchant-home-page__section-link--muted { color: #9aa7b3; }
+	.merchant-home-page__metric-grid { display: flex; flex-direction: row; flex-wrap: wrap; gap: 8px; }
+	.merchant-home-page__metric-card { position: relative; display: flex; box-sizing: border-box; width: calc(50% - 4px); min-height: 112px; flex-direction: column; padding: 12px; border-radius: 14px; background-color: #ffffff; box-shadow: 0 5px 16px rgba(45, 74, 101, 0.06); border-top-width: 3px; border-top-style: solid; border-top-color: #4f8fc5; }
+	.merchant-home-page__metric-card--actual { border-top-color: #4c9a8b; }
+	.merchant-home-page__metric-card--consume { border-top-color: #c28a34; }
+	.merchant-home-page__metric-card--target { border-top-color: #8276bd; }
+	.merchant-home-page__metric-icon { display: flex; width: 25px; height: 25px; align-items: center; justify-content: center; border-radius: 8px; background-color: #eaf4fd; font-size: 11px; font-weight: 800; color: #2778ba; }
+	.merchant-home-page__metric-card--actual .merchant-home-page__metric-icon { background-color: #e9f6f2; color: #3d887b; }
+	.merchant-home-page__metric-card--consume .merchant-home-page__metric-icon { background-color: #fff5df; color: #ae751d; }
+	.merchant-home-page__metric-card--target .merchant-home-page__metric-icon { background-color: #f0edff; color: #7164a9; }
+	.merchant-home-page__metric-label { margin-top: 8px; font-size: 11px; line-height: 15px; color: #718397; }
+	.merchant-home-page__metric-value { margin-top: 3px; font-size: 21px; font-weight: 800; line-height: 26px; color: #1f5f8b; }
+	.merchant-home-page__metric-card--actual .merchant-home-page__metric-value { color: #357a72; }
+	.merchant-home-page__metric-card--consume .merchant-home-page__metric-value { color: #a66d13; }
+	.merchant-home-page__metric-card--target .merchant-home-page__metric-value { color: #6659a0; }
+	.merchant-home-page__metric-source { margin-top: auto; overflow: hidden; font-size: 9px; line-height: 13px; color: #a0aab4; text-overflow: ellipsis; white-space: nowrap; }
+	.merchant-home-page__trend-card, .merchant-home-page__summary-card, .merchant-home-page__ranking-card { overflow: hidden; border-radius: 14px; background-color: #ffffff; box-shadow: 0 5px 16px rgba(45, 74, 101, 0.06); }
+	.merchant-home-page__trend-card { padding: 13px; }
+	.merchant-home-page__card-head { display: flex; flex-direction: row; align-items: center; justify-content: space-between; }
+	.merchant-home-page__card-title { display: block; font-size: 14px; font-weight: 800; line-height: 19px; color: #304961; }
+	.merchant-home-page__card-note { display: block; margin-top: 2px; font-size: 10px; line-height: 14px; color: #93a0ad; }
+	.merchant-home-page__card-badge { padding: 4px 7px; border-radius: 7px; background-color: #eef6ff; font-size: 10px; line-height: 14px; color: #2876b3; }
+	.merchant-home-page__trend-empty { position: relative; display: flex; height: 126px; align-items: center; justify-content: center; flex-direction: column; margin-top: 8px; border-radius: 10px; background-color: #f8fbfd; color: #8193a4; }
+	.merchant-home-page__trend-ready { margin-top: 8px; padding: 5px 8px 7px 8px; border-radius: 10px; background-color: #f8fbfd; }
+	.merchant-home-page__trend-canvas { display: block; width: 100%; height: 112px; }
+	.merchant-home-page__trend-legend { display: flex; flex-direction: row; justify-content: center; gap: 16px; font-size: 10px; line-height: 14px; color: #8293a3; }
+	.merchant-home-page__trend-legend > view { display: flex; flex-direction: row; align-items: center; }
+	.merchant-home-page__trend-dot { display: block; width: 7px; height: 7px; margin-right: 4px; border-radius: 50%; }
+	.merchant-home-page__trend-dot--actual { background-color: #1976d2; }
+	.merchant-home-page__trend-dot--consume { background-color: #c28a34; }
+	.merchant-home-page__trend-grid { position: absolute; left: 12px; right: 12px; top: 17px; bottom: 17px; display: flex; flex-direction: column; justify-content: space-between; }
+	.merchant-home-page__trend-line { width: 100%; border-top-width: 1px; border-top-style: dashed; border-top-color: #dbe7ef; }
+	.merchant-home-page__trend-empty > text:first-of-type { z-index: 1; font-size: 12px; font-weight: 700; line-height: 17px; }
+	.merchant-home-page__trend-empty > text:last-of-type { z-index: 1; margin-top: 3px; font-size: 10px; line-height: 14px; color: #a0acb7; }
+	.merchant-home-page__inline-state { display: flex; min-height: 105px; align-items: center; justify-content: center; font-size: 12px; color: #8493a1; }
+	.merchant-home-page__summary-card { display: flex; flex-direction: row; flex-wrap: wrap; padding: 4px 0; }
+	.merchant-home-page__summary-item { display: flex; box-sizing: border-box; width: 50%; min-height: 68px; flex-direction: row; align-items: center; padding: 10px 12px; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #eef2f5; }
+	.merchant-home-page__summary-item:nth-child(odd) { border-right-width: 1px; border-right-style: solid; border-right-color: #eef2f5; }
+	.merchant-home-page__summary-icon { display: flex; width: 28px; height: 28px; flex-shrink: 0; align-items: center; justify-content: center; margin-right: 8px; border-radius: 9px; background-color: #eaf5fb; font-size: 10px; font-weight: 800; color: #2779ba; }
+	.merchant-home-page__summary-icon--product { background-color: #fff5e2; color: #a8731c; }
+	.merchant-home-page__summary-label { display: block; font-size: 10px; line-height: 14px; color: #8795a2; }
+	.merchant-home-page__summary-value { display: block; margin-top: 2px; font-size: 17px; font-weight: 800; line-height: 22px; color: #2a435b; }
+	.merchant-home-page__summary-source { display: block; margin-top: 2px; overflow: hidden; max-width: 135px; font-size: 8px; line-height: 11px; color: #a0aab4; text-overflow: ellipsis; white-space: nowrap; }
+	.merchant-home-page__error { display: flex; flex-direction: row; align-items: center; justify-content: space-between; margin-top: 10px; padding: 10px 12px; border-radius: 10px; background-color: #fff2f0; color: #b94b43; font-size: 11px; }
+	.merchant-home-page__error-retry { padding: 5px 8px; border-radius: 6px; background-color: #c6534c; color: #ffffff; }
+	.merchant-home-page__ranking-card { min-height: 116px; }
+	.merchant-home-page__ranking-list { padding: 2px 12px; }
+	.merchant-home-page__ranking-row { display: flex; min-height: 48px; flex-direction: row; align-items: center; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #eef2f5; }
+	.merchant-home-page__ranking-row:last-child { border-bottom-width: 0; }
+	.merchant-home-page__ranking-rank { display: flex; width: 22px; height: 22px; align-items: center; justify-content: center; border-radius: 50%; background-color: #edf2f7; font-size: 10px; font-weight: 800; color: #60758b; }
+	.merchant-home-page__ranking-rank--0 { background-color: #f2c75c; color: #6e4c00; }
+	.merchant-home-page__ranking-rank--1 { background-color: #d7a078; color: #704123; }
+	.merchant-home-page__ranking-rank--2 { background-color: #f5e19c; color: #755f00; }
+	.merchant-home-page__ranking-copy { min-width: 0; flex: 1; margin-left: 9px; }
+	.merchant-home-page__ranking-name { display: block; overflow: hidden; font-size: 12px; line-height: 17px; color: #304961; text-overflow: ellipsis; white-space: nowrap; }
+	.merchant-home-page__ranking-meta { display: block; margin-top: 1px; font-size: 9px; line-height: 13px; color: #9aa7b3; }
+	.merchant-home-page__ranking-value { margin-left: 8px; font-size: 13px; font-weight: 800; line-height: 18px; color: #1f5f8b; }
+	.merchant-home-page__ranking-empty { display: flex; min-height: 116px; align-items: center; justify-content: center; flex-direction: column; }
+	.merchant-home-page__ranking-empty-title { font-size: 12px; font-weight: 700; line-height: 17px; color: #6f8192; }
+	.merchant-home-page__ranking-empty-copy { margin-top: 3px; font-size: 10px; line-height: 14px; color: #a0aab3; }
+	.merchant-home-page__freshness { display: flex; flex-direction: row; justify-content: space-between; gap: 9px; margin-top: 11px; padding: 0 2px 5px 2px; font-size: 9px; line-height: 13px; color: #9ba6b0; }
+	@media all and (min-width: 700px) {
+		.merchant-home-page__content-inner { max-width: 720px; margin-left: auto; margin-right: auto; padding-left: 22px; padding-right: 22px; }
+	}
+</style>

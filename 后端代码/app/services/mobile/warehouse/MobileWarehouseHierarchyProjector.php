@@ -22,7 +22,7 @@ final class MobileWarehouseHierarchyProjector
         array $allowedStoreIds,
         string $nodeType = '',
         int $nodeId = 0,
-        int $preferredRootOrganizationId = 0
+        ?int $preferredRootOrganizationId = null
     ): array {
         $orgMap = $this->organizationMap($organizations);
         $storeMap = $this->storeMap($stores, $allowedStoreIds);
@@ -39,10 +39,16 @@ final class MobileWarehouseHierarchyProjector
             $paths[$storeId] = $this->pathToRoot($orgId, $orgMap);
         }
         $rootId = $this->commonRootId(array_values($paths));
-        if ($preferredRootOrganizationId > 0
-            && isset($orgMap[$preferredRootOrganizationId])
-            && $this->organizationContainsEveryAllowedStore($preferredRootOrganizationId, $paths)) {
-            $rootId = $preferredRootOrganizationId;
+        if ($preferredRootOrganizationId !== null) {
+            if ($preferredRootOrganizationId === 0) {
+                // An analytics entry policy can intentionally choose a
+                // virtual root for disjoint grants. Do not relabel that
+                // restricted union as an ungranted common parent.
+                $rootId = 0;
+            } elseif (isset($orgMap[$preferredRootOrganizationId])
+                && $this->organizationContainsEveryAllowedStore($preferredRootOrganizationId, $paths)) {
+                $rootId = $preferredRootOrganizationId;
+            }
         }
 
         if ($nodeType === 'store') {
@@ -115,6 +121,9 @@ final class MobileWarehouseHierarchyProjector
             ],
             'breadcrumbs' => $this->organizationBreadcrumbs($rootId, $currentOrgId, $orgMap),
             'rows' => $rows,
+            // This is a permission-trimmed picker projection, not a second
+            // authorization source.  Clients may only select these nodes.
+            'organizationTree' => $this->organizationTree($rootId, $orgMap, $storeMap, $storeOrgMap, $paths),
         ];
     }
 
@@ -280,6 +289,75 @@ final class MobileWarehouseHierarchyProjector
             ],
             'breadcrumbs' => $breadcrumbs,
             'rows' => [],
+            'organizationTree' => $this->organizationTree($rootId, $orgMap, $storeMap, $storeOrgMap, $paths),
         ];
+    }
+
+    /**
+     * @return array<int,array<string,mixed>> flat tree for a full-screen mobile picker
+     */
+    private function organizationTree(int $rootId, array $orgMap, array $storeMap, array $storeOrgMap, array $paths): array
+    {
+        $result = [];
+        $rootName = $rootId > 0 && isset($orgMap[$rootId]) ? (string)$orgMap[$rootId]['name'] : '全部授权门店';
+        $result[] = [
+            'entityType' => $rootId > 0 ? 'organization' : 'virtual',
+            'entityId' => $rootId,
+            'name' => $rootName,
+            'storeCount' => count($this->storeIdsWithinOrganization($rootId, $paths)),
+            'hasChildren' => true,
+            'depth' => 0,
+            'parentEntityType' => '',
+            'parentEntityId' => 0,
+        ];
+        $append = function (int $parentId, int $depth, string $parentEntityType) use (&$append, &$result, $orgMap, $storeMap, $storeOrgMap, $paths): void {
+            $children = [];
+            foreach ($orgMap as $orgId => $org) {
+                if ((int)$org['pid'] !== $parentId || !$this->organizationContainsAllowedStore($orgId, $paths)) {
+                    continue;
+                }
+                $children[] = ['type' => 'organization', 'id' => $orgId, 'name' => (string)$org['name']];
+            }
+            usort($children, static function (array $left, array $right): int {
+                return strcmp($left['name'], $right['name']) ?: ($left['id'] <=> $right['id']);
+            });
+            foreach ($children as $child) {
+                $id = (int)$child['id'];
+                $result[] = [
+                    'entityType' => 'organization',
+                    'entityId' => $id,
+                    'name' => (string)$child['name'],
+                    'storeCount' => count($this->storeIdsWithinOrganization($id, $paths)),
+                    'hasChildren' => true,
+                    'depth' => $depth,
+                    'parentEntityType' => $parentEntityType,
+                    'parentEntityId' => $parentId,
+                ];
+                $append($id, $depth + 1, 'organization');
+            }
+            $stores = [];
+            foreach ($storeOrgMap as $storeId => $orgId) {
+                if ($orgId === $parentId && isset($storeMap[$storeId])) {
+                    $stores[] = ['id' => $storeId, 'name' => (string)$storeMap[$storeId]['name']];
+                }
+            }
+            usort($stores, static function (array $left, array $right): int {
+                return strcmp($left['name'], $right['name']) ?: ($left['id'] <=> $right['id']);
+            });
+            foreach ($stores as $store) {
+                $result[] = [
+                    'entityType' => 'store',
+                    'entityId' => (int)$store['id'],
+                    'name' => (string)$store['name'],
+                    'storeCount' => 1,
+                    'hasChildren' => false,
+                    'depth' => $depth,
+                    'parentEntityType' => $parentEntityType,
+                    'parentEntityId' => $parentId,
+                ];
+            }
+        };
+        $append($rootId, 1, $rootId > 0 ? 'organization' : 'virtual');
+        return $result;
     }
 }

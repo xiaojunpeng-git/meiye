@@ -1,4 +1,4 @@
-import { currentMobilePlatform } from '../../shared/platform/mobile-platform.uts'
+import { currentMobilePlatform } from './mobile-platform.uts'
 
 const ROOT_STORAGE_KEY = 'mobile.merchant.root'
 
@@ -6,7 +6,6 @@ export function currentMerchantRoot() : any {
 	let stored = uni.getStorageSync(ROOT_STORAGE_KEY)
 	return stored != null && typeof stored == 'object' ? stored : null
 }
-
 export function saveMerchantRoot(root : any) : void {
 	if (root != null && typeof root == 'object') uni.setStorageSync(ROOT_STORAGE_KEY, root)
 }

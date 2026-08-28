@@ -6,8 +6,10 @@ namespace app\services\mobile\warehouse;
 
 use app\services\metric\MetricDictionaryServices;
 use app\services\mobile\merchant\MobileMerchantCapabilityCatalog;
+use app\services\mobile\merchant\MobileMerchantAnalyticsEntryPolicy;
+use app\services\mobile\merchant\MobileMerchantAnalyticsEntryScopeServices;
 use app\services\mobile\protocol\MobileApiException;
-use app\services\organization\EmployeeDataScopeServices;
+use app\services\report\StoreUnifiedReportOrganizationDimensionServices;
 use DateTimeImmutable;
 use DateTimeZone;
 use InvalidArgumentException;
@@ -19,37 +21,43 @@ final class MobileWarehouseServices
     public const METRIC_VERSION = 'mobile-warehouse-unified-v1';
 
     private $hierarchy;
-    private $scopes;
+    private $entryScopes;
     private $dictionary;
 
     public function __construct(
         MobileWarehouseHierarchyProjector $hierarchy,
-        EmployeeDataScopeServices $scopes,
+        MobileMerchantAnalyticsEntryScopeServices $entryScopes,
         MetricDictionaryServices $dictionary
     ) {
         $this->hierarchy = $hierarchy;
-        $this->scopes = $scopes;
+        $this->entryScopes = $entryScopes;
         $this->dictionary = $dictionary;
     }
 
     public function overview(array $merchant, array $input): array
     {
         $this->assertWarehouseFeature((int)$merchant['employeeId']);
-        $allowedStoreIds = $this->allowedStoreIds($merchant);
-        if ($allowedStoreIds === []) {
-            throw MobileApiException::business('STORE_NOT_ALLOWED', '当前数据权限范围内没有可查看的门店。');
+        $entry = $this->entryScopes->resolve($merchant);
+        if ((string)$entry['entryType'] === MobileMerchantAnalyticsEntryPolicy::TYPE_PERSONAL) {
+            return ['warehouse' => ['entry' => $this->entryProjection($entry)]];
         }
-
-        $stores = Db::name('system_store')->whereIn('id', $allowedStoreIds)
+        $validStoreIds = array_values(array_map('intval', (array)$entry['authorizedStoreIds']));
+        $stores = Db::name('system_store')->whereIn('id', $validStoreIds)
             ->where('is_del', 0)->field('id,name')->select()->toArray();
-        $validStoreIds = array_values(array_unique(array_map('intval', array_column($stores, 'id'))));
-        if ($validStoreIds === []) {
-            throw MobileApiException::business('STORE_NOT_ALLOWED', '当前数据权限范围内没有有效门店。');
-        }
         $bindings = Db::name('organization_store')->whereIn('store_id', $validStoreIds)
             ->field('org_id,store_id')->select()->toArray();
         $organizations = Db::name('organization')->where('is_del', 0)
             ->field('id,pid,name')->select()->toArray();
+
+        $nodeType = trim((string)($input['nodeType'] ?? ''));
+        $nodeId = (int)($input['nodeId'] ?? 0);
+        if ((string)$entry['entryType'] === MobileMerchantAnalyticsEntryPolicy::TYPE_STORE) {
+            $nodeType = 'store';
+            $nodeId = (int)$entry['entryNodeId'];
+        } elseif ($nodeType === '' && $nodeId === 0) {
+            $nodeType = (string)$entry['entryNodeType'];
+            $nodeId = (int)$entry['entryNodeId'];
+        }
 
         try {
             $hierarchy = $this->hierarchy->project(
@@ -57,18 +65,25 @@ final class MobileWarehouseServices
                 $stores,
                 $bindings,
                 $validStoreIds,
-                trim((string)($input['nodeType'] ?? '')),
-                (int)($input['nodeId'] ?? 0),
-                $this->preferredRootOrganizationId((int)$merchant['employeeId'], $validStoreIds)
+                $nodeType,
+                $nodeId,
+                (string)$entry['entryType'] === MobileMerchantAnalyticsEntryPolicy::TYPE_ORGANIZATION
+                    ? (int)$entry['entryNodeId']
+                    : null
             );
         } catch (InvalidArgumentException $exception) {
             throw MobileApiException::business('STORE_NOT_ALLOWED', $exception->getMessage());
         }
 
-        $period = $this->period((string)($input['month'] ?? ''));
+        $period = $this->period($input);
         $factProjection = $this->factProjection($validStoreIds, $period);
         $scopeStoreIds = array_values(array_map('intval', (array)($hierarchy['currentNode']['_storeIds'] ?? [])));
         $metrics = $this->summaryMetrics($scopeStoreIds, $factProjection);
+        $trend = $this->trendProjection(
+            $scopeStoreIds,
+            $period,
+            $this->trendMetricCode((string)($input['trendMetricCode'] ?? 'cash_performance'))
+        );
         foreach ($hierarchy['rows'] as &$row) {
             $rowStoreIds = array_values(array_map('intval', (array)($row['_storeIds'] ?? [])));
             $row['metrics'] = $this->metricValues($this->summaryMetrics($rowStoreIds, $factProjection));
@@ -77,19 +92,13 @@ final class MobileWarehouseServices
         unset($row);
         unset($hierarchy['currentNode']['_storeIds']);
 
-        $rankingCode = $this->rankingCode((string)($input['rankingCode'] ?? 'organization'));
-        $currentNode = (array)($hierarchy['currentNode'] ?? []);
-        $currentOrganizationId = (string)($currentNode['entityType'] ?? '') === 'organization'
-            ? (int)($currentNode['entityId'] ?? 0) : 0;
-        $permissionRanking = $this->permissionRankingSpec($merchant, (string)$period['endDate'], $currentOrganizationId);
+        $showOrganizationRanking = (bool)$entry['showOrganizationRanking'];
+        $rankingCode = $this->rankingCode((string)($input['rankingCode'] ?? ''), $showOrganizationRanking);
+        $rankingOrder = $this->rankingOrder((string)($input['rankingOrder'] ?? 'desc'));
         $rankingRows = $rankingCode === 'organization'
-            ? $this->dashboardRanking($scopeStoreIds, $input, $permissionRanking['dimension'])
-            : $this->factRanking($rankingCode, $scopeStoreIds, $period);
-        $rankingCatalog = $this->rankingCatalog();
-        if ($rankingCode === 'organization') {
-            $rankingCatalog[0]['name'] = '组织现金业绩';
-            $rankingCatalog[0]['scopeRule'] = $permissionRanking['scopeRule'];
-        }
+            ? $this->organizationRanking($hierarchy['rows'], $rankingOrder)
+            : $this->factRanking($rankingCode, $scopeStoreIds, $period, $rankingOrder);
+        $rankingCatalog = $this->rankingCatalog($showOrganizationRanking);
         $selectedRankingAvailable = true;
         foreach ($rankingCatalog as $rankingDefinition) {
             if ((string)$rankingDefinition['code'] === $rankingCode) {
@@ -102,16 +111,21 @@ final class MobileWarehouseServices
             'warehouse' => [
                 'period' => $period,
                 'scope' => [
-                    'mode' => count($validStoreIds) > 1 ? 'organization' : 'store',
+                    'mode' => (string)$entry['entryType'],
                     'authorizedStoreCount' => count($validStoreIds),
                     'label' => (string)$hierarchy['currentNode']['name'],
                 ],
+                'entry' => $this->entryProjection($entry),
                 'currentNode' => $hierarchy['currentNode'],
                 'breadcrumbs' => $hierarchy['breadcrumbs'],
+                'hierarchyRows' => $hierarchy['rows'],
+                'organizationTree' => $hierarchy['organizationTree'],
                 'summaryMetrics' => $metrics,
+                'trend' => $trend,
                 'rankingRows' => $rankingRows,
                 'rankingCatalog' => $rankingCatalog,
                 'selectedRankingCode' => $rankingCode,
+                'selectedRankingOrder' => $rankingOrder,
                 'selectedRankingAvailable' => $selectedRankingAvailable,
                 'selectedMetricCode' => 'cash_performance',
                 'metric_version' => self::METRIC_VERSION,
@@ -119,93 +133,138 @@ final class MobileWarehouseServices
                 'aggregation_caught_up' => true,
                 'availabilityMessage' => $selectedRankingAvailable
                     ? '当前直接读取收银 V3 不可变事实，日聚合接入后将使用同一口径对账切换。'
-                    : '统一服务事实尚未保存点客标记，员工点客暂不展示旧口径数据。',
+                    : '当前排行暂不可用。',
             ],
         ];
     }
 
-    /** @return array{dimension:string,code:string,name:string,scopeRule:string} */
-    public function permissionRankingSpec(array $merchant, string $asOfDate, int $currentOrganizationId = 0): array
+    /** Read-only V3 performance drill-down for one employee in the current server scope. */
+    public function employeePerformance(array $merchant, array $input): array
     {
-        if ($currentOrganizationId > 0) {
-            $currentDimension = (string)(Db::name('cashier_v3_report_organization_dimension')
-                ->where('tenant_id', '0')->where('organization_id', (string)$currentOrganizationId)
-                ->where('enabled', 1)->where('valid_from', '<=', $asOfDate)
-                ->where(function ($builder) use ($asOfDate): void {
-                    $builder->whereNull('valid_to')->whereOr('valid_to', '>=', $asOfDate);
-                })->order('valid_from', 'desc')->order('id', 'desc')->value('dimension_code') ?: '');
-            if ($currentDimension === '') {
-                $parentId = (int)(Db::name('organization')->where('id', $currentOrganizationId)
-                    ->where('is_del', 0)->value('pid') ?: 0);
-                if ($parentId > 0) {
-                    $parentDimension = (string)(Db::name('cashier_v3_report_organization_dimension')
-                        ->where('tenant_id', '0')->where('organization_id', (string)$parentId)
-                        ->where('enabled', 1)->where('valid_from', '<=', $asOfDate)
-                        ->where(function ($builder) use ($asOfDate): void {
-                            $builder->whereNull('valid_to')->whereOr('valid_to', '>=', $asOfDate);
-                        })->order('valid_from', 'desc')->order('id', 'desc')->value('dimension_code') ?: '');
-                    if ($parentDimension === 'company') $currentDimension = 'city_manager';
-                    if ($parentDimension === 'city_manager') $currentDimension = 'store';
-                }
-            }
-            if ($currentDimension === 'city_manager') {
-                return ['dimension' => 'store', 'code' => 'store_cash_performance', 'name' => '门店现金业绩排行', 'scopeRule' => 'EMPLOYEE_DATA_SCOPE_NEXT_STORE'];
-            }
-            if ($currentDimension === 'company') {
-                return ['dimension' => 'city_manager', 'code' => 'manager_cash_performance', 'name' => '经理现金业绩排行', 'scopeRule' => 'EMPLOYEE_DATA_SCOPE_NEXT_MANAGER'];
+        $this->assertWarehouseFeature((int)$merchant['employeeId']);
+        $entry = $this->entryScopes->resolve($merchant);
+        $storeIds = array_values(array_map('intval', (array)$entry['authorizedStoreIds']));
+        if ($storeIds === []) {
+            throw MobileApiException::business('STORE_NOT_ALLOWED', '当前数据权限范围内没有可查看的门店。');
+        }
+        $employeeId = (int)($input['employeeId'] ?? 0);
+        if ($employeeId <= 0) {
+            throw MobileApiException::protocol('INVALID_REQUEST_FIELD', '请选择有效员工。', 'employeeId');
+        }
+        if ((string)$entry['entryType'] === MobileMerchantAnalyticsEntryPolicy::TYPE_PERSONAL
+            && $employeeId !== (int)$merchant['employeeId']) {
+            throw MobileApiException::business('STORE_NOT_ALLOWED', '个人数据权限只能查看本人员工业绩。');
+        }
+
+        $period = $this->period($input);
+        $performanceRows = Db::name('cashier_v3_performance_fact')
+            ->where('tenant_id', '0')->whereIn('store_id', $storeIds)
+            ->whereBetween('business_date', [$period['startDate'], $period['endDate']])
+            ->where('status', 'effective')->where('employee_id', $employeeId)
+            ->whereIn('performance_type', ['sales_performance_allocated', 'labor_performance_allocated'])
+            ->fieldRaw('performance_type,COALESCE(SUM(amount_cents),0) AS amount_cents')
+            ->group('performance_type')->select()->toArray();
+        $amounts = ['sales_performance_allocated' => 0, 'labor_performance_allocated' => 0];
+        foreach ($performanceRows as $row) {
+            $amounts[(string)($row['performance_type'] ?? '')] = (int)($row['amount_cents'] ?? 0);
+        }
+
+        $identity = Db::name('cashier_v3_performance_fact')
+            ->where('tenant_id', '0')->whereIn('store_id', $storeIds)
+            ->whereBetween('business_date', [$period['startDate'], $period['endDate']])
+            ->where('status', 'effective')->where('employee_id', $employeeId)
+            ->whereIn('performance_type', ['sales_performance_allocated', 'labor_performance_allocated'])
+            ->field('employee_name_snapshot')->order('id', 'desc')->find();
+        $pointCustomer = 0.0;
+        $pointName = '';
+        foreach ($this->designatedCustomerRanking($storeIds, $period, 'desc') as $row) {
+            if ((int)($row['entityId'] ?? 0) === $employeeId) {
+                $pointCustomer = (float)($row['rankingValue'] ?? 0);
+                $pointName = trim((string)($row['name'] ?? ''));
+                break;
             }
         }
-        $scopeRows = Db::name('employee_data_scope')
-            ->where('employee_id', (int)($merchant['employeeId'] ?? 0))
-            ->where('status', 1)->where('is_del', 0)
-            ->field('scope_mode,org_ids')->select()->toArray();
-        $orgIds = [];
-        $hasStoreScope = false;
-        foreach ($scopeRows as $row) {
-            $mode = (string)($row['scope_mode'] ?? 'personal');
-            if ($mode === 'org') {
-                $decoded = json_decode((string)($row['org_ids'] ?? '[]'), true);
-                foreach (is_array($decoded) ? $decoded : [] as $id) {
-                    $id = (int)$id;
-                    if ($id > 0) $orgIds[$id] = $id;
-                }
-            } elseif (in_array($mode, ['store', 'store_self'], true)) {
-                $hasStoreScope = true;
-            }
+        $employeeName = is_array($identity) ? trim((string)($identity['employee_name_snapshot'] ?? '')) : '';
+        if ($employeeName === '') {
+            $employeeName = $pointName;
         }
-        $dimensionByOrg = [];
-        if ($orgIds !== []) {
-            $query = Db::name('cashier_v3_report_organization_dimension')
-                ->where('tenant_id', '0')->whereIn('organization_id', array_values($orgIds))
-                ->where('enabled', 1)->where('valid_from', '<=', $asOfDate)
-                ->where(function ($builder) use ($asOfDate): void {
-                    $builder->whereNull('valid_to')->whereOr('valid_to', '>=', $asOfDate);
-                })->field('organization_id,dimension_code')->order('valid_from', 'desc')->order('id', 'desc');
-            foreach ($query->select()->toArray() as $row) {
-                $id = (int)($row['organization_id'] ?? 0);
-                if ($id > 0 && !isset($dimensionByOrg[$id])) $dimensionByOrg[$id] = (string)$row['dimension_code'];
-            }
+        if ($employeeName === '') {
+            throw MobileApiException::business('STORE_NOT_ALLOWED', '该员工不在当前数据权限范围内。');
         }
-        $dimension = 'company';
-        if ($hasStoreScope && $orgIds === []) {
-            $dimension = 'store';
-        } else {
-            foreach ($dimensionByOrg as $code) {
-                if ($code === 'city_manager') { $dimension = 'store'; break; }
-                if ($code === 'company') $dimension = 'city_manager';
-            }
+
+        $serviceCounts = Db::name('cashier_v3_performance_fact')
+            ->where('tenant_id', '0')->whereIn('store_id', $storeIds)
+            ->whereBetween('business_date', [$period['startDate'], $period['endDate']])
+            ->where('status', 'effective')->where('employee_id', $employeeId)
+            ->where('performance_type', 'labor_performance_allocated')
+            ->fieldRaw('COUNT(DISTINCT CASE WHEN member_id > 0 THEN member_id END) AS member_count,COUNT(DISTINCT source_line_id) AS project_count')
+            ->find();
+        $detailMode = trim((string)($input['detailMode'] ?? 'cash')) === 'labor' ? 'labor' : 'cash';
+        $detailPerformanceType = $detailMode === 'labor' ? 'labor_performance_allocated' : 'sales_performance_allocated';
+        $page = max(1, (int)($input['page'] ?? 1));
+        $pageSize = min(20, max(1, (int)($input['pageSize'] ?? 20)));
+        $detailQuery = Db::name('cashier_v3_performance_fact')
+            ->where('tenant_id', '0')->whereIn('store_id', $storeIds)
+            ->whereBetween('business_date', [$period['startDate'], $period['endDate']])
+            ->where('status', 'effective')->where('employee_id', $employeeId)
+            ->where('performance_type', $detailPerformanceType);
+        $total = (int)$detailQuery->count();
+        $detailRows = Db::name('cashier_v3_performance_fact')
+            ->where('tenant_id', '0')->whereIn('store_id', $storeIds)
+            ->whereBetween('business_date', [$period['startDate'], $period['endDate']])
+            ->where('status', 'effective')->where('employee_id', $employeeId)
+            ->where('performance_type', $detailPerformanceType)
+            ->field('fact_id,business_date,order_no_snapshot,store_name_snapshot,member_name_snapshot,source_line_id,rule_name_snapshot,amount_cents')
+            ->order('business_date', 'desc')->order('id', 'desc')
+            ->limit(($page - 1) * $pageSize, $pageSize)->select()->toArray();
+        $details = [];
+        foreach ($detailRows as $row) {
+            $amount = intdiv((int)($row['amount_cents'] ?? 0), 100);
+            $details[] = [
+                'factId' => (string)($row['fact_id'] ?? ''),
+                'businessDate' => (string)($row['business_date'] ?? ''),
+                'orderNo' => (string)($row['order_no_snapshot'] ?? ''),
+                'storeName' => (string)($row['store_name_snapshot'] ?? ''),
+                'memberName' => (string)($row['member_name_snapshot'] ?? ''),
+                'sourceLineId' => (string)($row['source_line_id'] ?? ''),
+                'ruleName' => (string)($row['rule_name_snapshot'] ?? ''),
+                'value' => $amount,
+                // Keep the mobile warehouse amount format consistent with the
+                // overview and ranking cards: whole yuan with no thousands
+                // separator. The source fact remains cents.
+                'displayValue' => (string)$amount,
+            ];
         }
-        if ($dimension === 'store') return ['dimension' => 'store', 'code' => 'store_cash_performance', 'name' => '门店现金业绩排行', 'scopeRule' => 'EMPLOYEE_DATA_SCOPE_NEXT_STORE'];
-        if ($dimension === 'city_manager') return ['dimension' => 'city_manager', 'code' => 'manager_cash_performance', 'name' => '经理现金业绩排行', 'scopeRule' => 'EMPLOYEE_DATA_SCOPE_NEXT_MANAGER'];
-        return ['dimension' => 'company', 'code' => 'branch_cash_performance', 'name' => '分公司现金业绩排行', 'scopeRule' => 'EMPLOYEE_DATA_SCOPE_NEXT_BRANCH'];
+
+        return [
+            'employeePerformance' => [
+                'employee' => ['id' => $employeeId, 'name' => $employeeName],
+                'period' => $period,
+                'metrics' => [
+                    ['code' => 'cash_performance', 'name' => '现金业绩', 'value' => intdiv($amounts['sales_performance_allocated'], 100), 'unit' => 'amount'],
+                    ['code' => 'labor_performance', 'name' => '劳动业绩', 'value' => intdiv($amounts['labor_performance_allocated'], 100), 'unit' => 'amount'],
+                    ['code' => 'designated_customer', 'name' => '点客', 'value' => $pointCustomer, 'unit' => 'count'],
+                    ['code' => 'service_members', 'name' => '服务会员', 'value' => (int)($serviceCounts['member_count'] ?? 0), 'unit' => 'count'],
+                    ['code' => 'project_count', 'name' => '项目数', 'value' => (int)($serviceCounts['project_count'] ?? 0), 'unit' => 'count'],
+                ],
+                'detailMode' => $detailMode,
+                'details' => $details,
+                'pagination' => ['page' => $page, 'pageSize' => $pageSize, 'total' => $total, 'hasMore' => $page * $pageSize < $total],
+                'metric_version' => self::METRIC_VERSION,
+                'data_as_of' => time(),
+                'aggregation_caught_up' => true,
+            ],
+        ];
     }
 
     /**
      * Shared read-only projection for mobile merchant summary pages.
      *
-     * The homepage uses the same immutable V3 facts, period parser, trend
-     * builder and metric dictionary as the warehouse page. It does not own a
-     * parallel dashboard SQL model.
+     * The homepage must use the exact same immutable V3 facts, period parser,
+     * trend builder and metric dictionary as the warehouse page.  Keeping
+     * these small public adapters here avoids introducing a second set of
+     * dashboard SQL while still allowing the homepage to be available to an
+     * employee who has customer access but not the full warehouse feature.
      *
      * @param int[] $storeIds
      * @return array<string,mixed>
@@ -216,11 +275,17 @@ final class MobileWarehouseServices
         $period = $this->periodForDashboard($input);
         $projection = $this->factProjection($storeIds, $period);
         $summary = $this->summaryMetrics($storeIds, $projection);
-        $trend = $this->trendProjection(
-            $storeIds,
-            $period,
-            $this->trendMetricCode((string)($input['trendMetricCode'] ?? 'cash_performance'))
-        );
+        $trend = [];
+        // The merchant homepage requests the comparison chart through
+        // dashboardTrendComparison. Avoid a third (cash) trend scan while
+        // retaining the original trend for warehouse callers.
+        if (($input['includeTrend'] ?? true) !== false) {
+            $trend = $this->trendProjection(
+                $storeIds,
+                $period,
+                $this->trendMetricCode((string)($input['trendMetricCode'] ?? 'cash_performance'))
+            );
+        }
 
         $ranking = [];
         $storeNames = $storeIds === [] ? [] : Db::name('system_store')
@@ -250,18 +315,30 @@ final class MobileWarehouseServices
             'rankingRows' => array_slice($ranking, 0, 5),
             'metric_version' => self::METRIC_VERSION,
             'data_as_of' => time(),
+            // The current projection reads the immutable facts directly. A
+            // future daily aggregate may replace it only after reconciliation.
             'aggregation_caught_up' => true,
         ];
     }
 
     /**
-     * Build the homepage ranking at the permission-selected hierarchy level.
-     * The caller supplies only the already-resolved authorized stores and a
-     * server-selected dimension; the client cannot widen either scope.
+     * Build the two homepage trend series without recomputing the full
+     * summary projection for each metric.  The homepage summary remains
+     * sourced from dashboardProjection; this adapter only removes duplicate
+     * fact scans from the comparison chart.
      *
-     * @param int[] $storeIds
-     * @return array<int,array<string,mixed>>
+     * @return array{actual:array<string,mixed>,consume:array<string,mixed>}
      */
+    public function dashboardTrendComparison(array $storeIds, array $input = []): array
+    {
+        $period = $this->periodForDashboard($input);
+        return [
+            'actual' => $this->trendProjection($this->positiveIds($storeIds), $period, 'actual_performance'),
+            'consume' => $this->trendProjection($this->positiveIds($storeIds), $period, 'consume_amount'),
+        ];
+    }
+
+    /** Build the homepage ranking using the same scoped V3 fact projection. */
     public function dashboardRanking(array $storeIds, array $input, string $dimension): array
     {
         $storeIds = $this->positiveIds($storeIds);
@@ -269,77 +346,61 @@ final class MobileWarehouseServices
         $period = $this->periodForDashboard($input);
         $projection = $this->factProjection($storeIds, $period);
         if ($dimension === 'store') {
-            $names = Db::name('system_store')->whereIn('id', $storeIds)
-                ->where('is_del', 0)->column('name', 'id');
+            $names = Db::name('system_store')->whereIn('id', $storeIds)->where('is_del', 0)->column('name', 'id');
             $rows = [];
             foreach ($storeIds as $storeId) {
-                $amountCents = (int)($projection['cash_performance'][$storeId] ?? 0);
-                $rows[] = [
-                    'entityType' => 'store', 'entityId' => $storeId,
-                    'entityName' => (string)($names[$storeId] ?? ('门店#' . $storeId)),
-                    'rankingCents' => $amountCents,
-                    'rankingValue' => intdiv($amountCents, 100),
-                    'storeCount' => 1,
-                ];
+                $cents = (int)($projection['cash_performance'][$storeId] ?? 0);
+                $rows[] = ['entityType' => 'store', 'entityId' => $storeId, 'entityName' => (string)($names[$storeId] ?? ('门店#' . $storeId)), 'rankingCents' => $cents, 'rankingValue' => intdiv($cents, 100), 'storeCount' => 1];
             }
             usort($rows, [$this, 'compareDashboardRanking']);
             return $this->formatDashboardRanking(array_slice($rows, 0, 5), 'store');
         }
-
-        $dimensions = $this->organizationDimensions($dimension, $storeIds, (string)$period['endDate']);
+        // Aggregate each authorized store into the configured reporting
+        // dimension. The previous fallback always returned store rows even
+        // when the homepage title said “分公司/经理排行”, which made the
+        // visible scope and the value semantics disagree.
+        $dimensionService = new StoreUnifiedReportOrganizationDimensionServices();
+        $dimensionCode = $dimension === 'company' ? 'company' : 'city_manager';
+        $entityType = $dimension === 'company' ? 'branch' : 'manager';
         $grouped = [];
-        foreach ($dimensions as $row) {
-            $id = (int)($row['dimension_id'] ?? 0);
-            $storeId = (int)($row['store_id'] ?? 0);
-            if ($id <= 0 || $storeId <= 0) continue;
+        foreach ($storeIds as $storeId) {
+            $resolved = $dimensionService->resolve($dimensionCode, '', '', (string)$period['endDate'], (int)$storeId);
+            $id = (int)($resolved['id'] ?? 0);
+            $name = trim((string)($resolved['name'] ?? ''));
+            if ($id <= 0 || $name === '') continue;
             if (!isset($grouped[$id])) {
-                $grouped[$id] = [
-                    'entityType' => $dimension === 'company' ? 'branch' : 'manager',
-                    'entityId' => $id,
-                    'entityName' => (string)($row['dimension_name'] ?? ''),
-                    'rankingCents' => 0,
-                    'rankingValue' => 0,
-                    'storeCount' => 0,
-                ];
+                $grouped[$id] = ['entityType' => $entityType, 'entityId' => $id, 'entityName' => $name, 'rankingCents' => 0, 'rankingValue' => 0, 'storeCount' => 0];
             }
             $grouped[$id]['rankingCents'] += (int)($projection['cash_performance'][$storeId] ?? 0);
             $grouped[$id]['storeCount']++;
         }
-        foreach ($grouped as &$group) {
-            $group['rankingValue'] = intdiv((int)$group['rankingCents'], 100);
+        if ($grouped !== []) {
+            foreach ($grouped as &$group) $group['rankingValue'] = intdiv((int)$group['rankingCents'], 100);
+            unset($group);
+            $rows = array_values($grouped);
+            usort($rows, [$this, 'compareDashboardRanking']);
+            return $this->formatDashboardRanking(array_slice($rows, 0, 5), $entityType);
         }
-        unset($group);
-        $rows = array_values($grouped);
-        usort($rows, [$this, 'compareDashboardRanking']);
-        return $this->formatDashboardRanking(array_slice($rows, 0, 5), $dimension === 'company' ? 'branch' : 'manager');
+
+        // Keep the page usable while a reporting-dimension migration is not
+        // configured yet; this is an explicit store-level fallback.
+        $fallback = (array)($this->dashboardProjection($storeIds, $input)['rankingRows'] ?? []);
+        return $this->formatDashboardRanking(array_slice($fallback, 0, 5), 'store');
     }
 
     private function compareDashboardRanking(array $left, array $right): int
     {
-        if ((int)$left['rankingValue'] === (int)$right['rankingValue']) {
-            return (int)$left['entityId'] <=> (int)$right['entityId'];
-        }
+        if ((int)$left['rankingValue'] === (int)$right['rankingValue']) return (int)$left['entityId'] <=> (int)$right['entityId'];
         return (int)$right['rankingValue'] <=> (int)$left['rankingValue'];
     }
 
     private function formatDashboardRanking(array $rows, string $entityType): array
     {
         foreach ($rows as &$row) {
-            $row['entityType'] = $entityType;
-            $row['name'] = (string)($row['entityName'] ?? '');
-            $row['displayValue'] = number_format((int)$row['rankingValue'], 0, '.', ',');
-            $row['metricCode'] = 'cash_performance';
-            $row['unit'] = 'amount';
-            $row['hasChildren'] = false;
-            $row['metrics'] = [[
-                'code' => 'cash_performance',
-                'value' => (int)$row['rankingValue'],
-                'displayValue' => (string)$row['displayValue'],
-                'available' => true,
-            ]];
+            $row['entityType'] = $entityType; $row['name'] = (string)($row['entityName'] ?? '');
+            $row['displayValue'] = number_format((int)$row['rankingValue'], 0, '.', ','); $row['metricCode'] = 'cash_performance'; $row['unit'] = 'amount'; $row['hasChildren'] = false;
         }
-        unset($row);
-        return $rows;
+        unset($row); return $rows;
     }
 
     /** Normalize homepage period modes while retaining the warehouse contract. */
@@ -351,197 +412,11 @@ final class MobileWarehouseServices
             if (!preg_match('/^\d{4}$/D', $year)) {
                 throw MobileApiException::protocol('INVALID_REQUEST_FIELD', '请选择有效年份。', 'year');
             }
-            return [
-                'month' => $year . '-01',
-                'label' => $year . '年',
-                'startDate' => $year . '-01-01',
-                'endDate' => $year . '-12-31',
-                'timezone' => 'Asia/Shanghai',
-            ];
+            $input['periodMode'] = 'custom';
+            $input['startDate'] = $year . '-01-01';
+            $input['endDate'] = $year . '-12-31';
         }
-        return $this->period((string)($input['month'] ?? ''));
-    }
-
-    private function trendProjection(array $storeIds, array $period, string $metricCode): array
-    {
-        $timezone = new DateTimeZone('Asia/Shanghai');
-        $start = new DateTimeImmutable((string)$period['startDate'], $timezone);
-        $end = new DateTimeImmutable((string)$period['endDate'], $timezone);
-        $monthly = $start->format('Y-m-d') === $start->format('Y-01-01') && $end->format('Y-m-d') === $end->format('Y-12-31');
-        $granularity = $monthly ? 'month' : 'day';
-        $currentStart = $monthly ? $start : $start->modify('first day of this month');
-        $currentEnd = $monthly ? $end : $end->modify('last day of this month');
-        $current = $this->trendAmounts($storeIds, $currentStart->format('Y-m-d'), $currentEnd->format('Y-m-d'), $metricCode, $granularity);
-        $today = new DateTimeImmutable('today', $timezone);
-        $points = [];
-        for ($cursor = $currentStart; $cursor <= $currentEnd; $cursor = $cursor->modify($monthly ? '+1 month' : '+1 day')) {
-            $key = $monthly ? $cursor->format('Y-m') : $cursor->format('Y-m-d');
-            $points[] = [
-                'key' => $key,
-                'label' => $monthly ? $cursor->format('n月') : $cursor->format('j'),
-                'current' => $cursor > $today ? null : (int)($current[$key] ?? 0),
-                'yoy' => 0,
-                'mom' => 0,
-            ];
-        }
-        return [
-            'metricCode' => $metricCode,
-            'metricName' => $this->trendMetricName($metricCode),
-            'granularity' => $granularity,
-            'points' => $points,
-            'periods' => ['current' => ['label' => '本期', 'range' => $currentStart->format('Y年n月')]],
-        ];
-    }
-
-    private function trendMetricCode(string $code): string
-    {
-        return in_array($code, ['cash_performance', 'actual_performance', 'consume_amount', 'refund_performance'], true) ? $code : 'cash_performance';
-    }
-
-    private function trendMetricName(string $code): string
-    {
-        return [
-            'cash_performance' => '现金业绩',
-            'actual_performance' => '实际业绩',
-            'consume_amount' => '消耗业绩',
-            'refund_performance' => '退款金额',
-        ][$code] ?? '现金业绩';
-    }
-
-    /** @return array<string,int> */
-    private function trendAmounts(array $storeIds, string $startDate, string $endDate, string $metricCode, string $granularity = 'day'): array
-    {
-        if ($storeIds === []) return [];
-        if ($metricCode === 'cash_performance') {
-            $rows = Db::name('cashier_v3_payment_fact')->where('tenant_id', '0')->whereIn('store_id', $storeIds)->whereBetween('business_date', [$startDate, $endDate])->where('status', 'effective')->fieldRaw('business_date,COALESCE(SUM(amount_cents),0) AS amount_cents')->group('business_date')->select()->toArray();
-        } elseif ($metricCode === 'refund_performance') {
-            $rows = Db::name('cashier_v3_order_lifecycle_operation')->where('tenant_id', '0')->whereIn('store_id', $storeIds)->whereBetween('business_date', [$startDate, $endDate])->where('operation_type', 'refund')->where('status', 'succeeded')->fieldRaw('business_date,COALESCE(SUM(cash_refund_cents),0) AS amount_cents')->group('business_date')->select()->toArray();
-        } elseif ($metricCode === 'actual_performance') {
-            $cash = $this->trendAmounts($storeIds, $startDate, $endDate, 'cash_performance', $granularity);
-            $refund = $this->trendAmounts($storeIds, $startDate, $endDate, 'refund_performance', $granularity);
-            $result = [];
-            foreach (array_unique(array_merge(array_keys($cash), array_keys($refund))) as $date) $result[$date] = (int)($cash[$date] ?? 0) - (int)($refund[$date] ?? 0);
-            return $result;
-        } else {
-            $rows = Db::name('cashier_v3_performance_fact')->where('tenant_id', '0')->whereIn('store_id', $storeIds)->whereBetween('business_date', [$startDate, $endDate])->where('status', 'effective')->where('performance_type', 'consumption_performance_recorded')->fieldRaw('business_date,COALESCE(SUM(amount_cents),0) AS amount_cents')->group('business_date')->select()->toArray();
-        }
-        $result = [];
-        foreach ($rows as $row) {
-            $date = (string)($row['business_date'] ?? '');
-            $key = $granularity === 'month' ? substr($date, 0, 7) : $date;
-            $result[$key] = (int)($result[$key] ?? 0) + intdiv((int)($row['amount_cents'] ?? 0), 100);
-        }
-        return $result;
-    }
-
-    /** Resolve each store to the nearest configured reporting dimension. */
-    private function organizationDimensions(string $type, array $stores, string $date): array
-    {
-        $configs = Db::name('cashier_v3_report_organization_dimension')
-            ->where('tenant_id', '0')->where('dimension_code', $type)->where('enabled', 1)
-            ->where('valid_from', '<=', $date)
-            ->where(function ($query) use ($date): void {
-                $query->whereNull('valid_to')->whereOr('valid_to', '>=', $date);
-            })->field('organization_id,organization_name_snapshot,display_order')
-            ->order('display_order', 'asc')->order('id', 'asc')->select()->toArray();
-        if ($configs === []) return [];
-        $configured = [];
-        foreach ($configs as $config) {
-            $configured[(int)$config['organization_id']] = [
-                'name' => (string)$config['organization_name_snapshot'],
-                'sort' => (int)$config['display_order'],
-            ];
-        }
-        // Prefer the explicit store-to-dimension binding.  It is the
-        // authoritative assignment for reporting and avoids losing a manager
-        // row when an organization path contains legacy or partial links.
-        $directStoreDimensions = [];
-        $storeIds = $this->positiveIds($stores);
-        if ($storeIds !== []) {
-            $bindings = Db::name('organization_store')->whereIn('store_id', $storeIds)
-                ->whereIn('org_id', array_keys($configured))->field('org_id,store_id')->select()->toArray();
-            foreach ($bindings as $binding) {
-                $storeId = (int)($binding['store_id'] ?? 0);
-                $organizationId = (int)($binding['org_id'] ?? 0);
-                if ($storeId > 0 && isset($configured[$organizationId]) && !isset($directStoreDimensions[$storeId])) {
-                    $directStoreDimensions[$storeId] = $organizationId;
-                }
-            }
-        }
-        $organizationIds = [];
-        $pathsByStore = [];
-        foreach ($stores as $storeId) {
-            $storeId = (int)$storeId;
-            $path = $this->storeOrganizationPath($storeId);
-            $pathsByStore[$storeId] = $path;
-            foreach ($path as $organizationId) {
-                $organizationIds[(int)$organizationId] = (int)$organizationId;
-            }
-        }
-        // A few legacy organizations do not have a snapshot row yet. Keep
-        // them in the same configured company tree using their current name.
-        $companyIds = [];
-        foreach (Db::name('cashier_v3_report_organization_dimension')
-            ->where('tenant_id', '0')->where('dimension_code', 'company')->where('enabled', 1)
-            ->where('valid_from', '<=', $date)->where(function ($query) use ($date): void {
-                $query->whereNull('valid_to')->whereOr('valid_to', '>=', $date);
-            })->column('organization_id') as $companyId) {
-            $companyIds[(int)$companyId] = true;
-        }
-        if ($organizationIds !== []) {
-            foreach (Db::name('organization')->whereIn('id', array_values($organizationIds))
-                ->where('is_del', 0)->field('id,pid,name')->select()->toArray() as $organization) {
-                $organizationId = (int)$organization['id'];
-                if ($type === 'city_manager' && !isset($configured[$organizationId])
-                    && isset($companyIds[(int)$organization['pid']])) {
-                    $configured[$organizationId] = [
-                        'name' => trim((string)$organization['name']) ?: ('组织 ' . $organizationId),
-                        'sort' => $organizationId,
-                    ];
-                }
-            }
-        }
-        $rows = [];
-        foreach ($stores as $storeId) {
-            $storeId = (int)$storeId;
-            $matchId = (int)($directStoreDimensions[$storeId] ?? 0);
-            if ($matchId <= 0) {
-                $path = $pathsByStore[$storeId] ?? [];
-                foreach (array_reverse($path) as $organizationId) {
-                    if (isset($configured[(int)$organizationId])) {
-                        $matchId = (int)$organizationId;
-                        break;
-                    }
-                }
-            }
-            if ($matchId <= 0) continue;
-            $rows[] = [
-                'dimension_id' => $matchId,
-                'dimension_name' => $configured[$matchId]['name'],
-                'sort_order' => $configured[$matchId]['sort'],
-                'store_id' => (int)$storeId,
-            ];
-        }
-        return $rows;
-    }
-
-    /** @return string[] root-to-leaf organization ids */
-    private function storeOrganizationPath(int $storeId): array
-    {
-        $organizationId = (int)Db::name('organization_store')
-            ->where('store_id', $storeId)->value('org_id');
-        $path = [];
-        $seen = [];
-        for ($guard = 0; $organizationId > 0 && $guard < 64; $guard++) {
-            if (isset($seen[$organizationId])) break;
-            $seen[$organizationId] = true;
-            $node = Db::name('organization')->where('id', $organizationId)
-                ->where('is_del', 0)->field('id,pid')->find();
-            if (!is_array($node)) break;
-            array_unshift($path, (string)$node['id']);
-            $organizationId = (int)($node['pid'] ?? 0);
-        }
-        return $path;
+        return $this->period($input);
     }
 
     /** @param mixed[] $values @return int[] */
@@ -570,81 +445,74 @@ final class MobileWarehouseServices
         }
     }
 
-    private function allowedStoreIds(array $merchant): array
-    {
-        $employeeId = (int)$merchant['employeeId'];
-        $currentStoreId = (int)$merchant['storeId'];
-        $dataScopeIds = $this->scopes->resolveEffectiveStoreIds($employeeId, 0);
-        $dataScopeIds = is_array($dataScopeIds) && $dataScopeIds !== [] ? $dataScopeIds : [$currentStoreId];
-
-        $auth = Db::name('employee_mobile_auth')->where('employee_id', $employeeId)
-            ->where('status', 1)->where('is_del', 0)->field('scope_mode,store_ids,org_ids')->find();
-        if (!is_array($auth)) {
-            return [];
-        }
-        $mode = (string)($auth['scope_mode'] ?? '');
-        if ($mode === 'all') {
-            $mobileIds = $dataScopeIds;
-        } elseif ($mode === 'store') {
-            $mobileIds = json_decode((string)($auth['store_ids'] ?? '[]'), true) ?: [];
-        } elseif ($mode === 'org') {
-            $mobileIds = [];
-            foreach ((array)(json_decode((string)($auth['org_ids'] ?? '[]'), true) ?: []) as $orgId) {
-                $mobileIds = array_merge($mobileIds, $this->scopes->expandOrgToStoreIds((int)$orgId));
-            }
-        } else {
-            $mobileIds = [];
-        }
-        $dataScopeIds = array_values(array_unique(array_filter(array_map('intval', $dataScopeIds))));
-        $mobileIds = array_values(array_unique(array_filter(array_map('intval', $mobileIds))));
-        $allowed = array_values(array_intersect($dataScopeIds, $mobileIds));
-        sort($allowed, SORT_NUMERIC);
-        return $allowed;
-    }
-
-    private function period(string $month): array
+    private function period(array $input): array
     {
         $timezone = new DateTimeZone('Asia/Shanghai');
-        $month = trim($month);
-        if ($month === '') {
-            $month = (new DateTimeImmutable('now', $timezone))->format('Y-m');
+        $mode = trim((string)($input['periodMode'] ?? 'month'));
+        if ($mode === '') {
+            $mode = 'month';
         }
-        if (!preg_match('/^\d{4}-(0[1-9]|1[0-2])$/D', $month)) {
-            throw MobileApiException::protocol('INVALID_REQUEST_FIELD', '请选择有效月份。', 'month');
-        }
-        $start = DateTimeImmutable::createFromFormat('!Y-m-d', $month . '-01', $timezone);
-        if (!$start) {
-            throw MobileApiException::protocol('INVALID_REQUEST_FIELD', '请选择有效月份。', 'month');
+        $today = new DateTimeImmutable('today', $timezone);
+        if ($mode === 'today') {
+            $start = $today;
+            $end = $today;
+            $label = '今天';
+            $month = $start->format('Y-m');
+        } elseif ($mode === 'yesterday') {
+            $start = $today->modify('-1 day');
+            $end = $start;
+            $label = '昨天';
+            $month = $start->format('Y-m');
+        } elseif ($mode === 'last_month') {
+            $start = $today->modify('first day of last month');
+            $end = $start->modify('last day of this month');
+            $label = '上月';
+            $month = $start->format('Y-m');
+        } elseif ($mode === 'custom') {
+            $start = $this->dateFromInput((string)($input['startDate'] ?? ''), 'startDate', $timezone);
+            $end = $this->dateFromInput((string)($input['endDate'] ?? ''), 'endDate', $timezone);
+            if ($start > $end) {
+                throw MobileApiException::protocol('INVALID_REQUEST_FIELD', '开始日期不能晚于结束日期。', 'startDate');
+            }
+            $label = $start->format('n月j日') . '-' . $end->format('n月j日');
+            $month = $start->format('Y-m');
+        } else {
+            $month = trim((string)($input['month'] ?? ''));
+            if ($month === '') {
+                $month = $today->format('Y-m');
+            }
+            if (!preg_match('/^\d{4}-(0[1-9]|1[0-2])$/D', $month)) {
+                throw MobileApiException::protocol('INVALID_REQUEST_FIELD', '请选择有效月份。', 'month');
+            }
+            $start = DateTimeImmutable::createFromFormat('!Y-m-d', $month . '-01', $timezone);
+            if (!$start) {
+                throw MobileApiException::protocol('INVALID_REQUEST_FIELD', '请选择有效月份。', 'month');
+            }
+            $end = $start->modify('last day of this month');
+            $label = $start->format('Y年n月');
+            $mode = 'month';
         }
         return [
+            'mode' => $mode,
             'month' => $month,
-            'label' => $start->format('Y年n月'),
+            'label' => $label,
             'startDate' => $start->format('Y-m-d'),
-            'endDate' => $start->modify('last day of this month')->format('Y-m-d'),
+            'endDate' => $end->format('Y-m-d'),
             'timezone' => 'Asia/Shanghai',
         ];
     }
 
-    private function preferredRootOrganizationId(int $employeeId, array $allowedStoreIds): int
+    private function dateFromInput(string $date, string $field, DateTimeZone $timezone): DateTimeImmutable
     {
-        $rows = Db::name('employee_data_scope')->where('employee_id', $employeeId)
-            ->where('scope_mode', EmployeeDataScopeServices::MODE_ORG)
-            ->where('status', 1)->where('is_del', 0)->field('org_ids')->select()->toArray();
-        $candidates = [];
-        foreach ($rows as $row) {
-            foreach ((array)(json_decode((string)($row['org_ids'] ?? '[]'), true) ?: []) as $orgId) {
-                $orgId = (int)$orgId;
-                if ($orgId > 0) {
-                    $candidates[$orgId] = $orgId;
-                }
-            }
+        $date = trim($date);
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/D', $date)) {
+            throw MobileApiException::protocol('INVALID_REQUEST_FIELD', '请选择有效日期。', $field);
         }
-        if (count($candidates) !== 1) {
-            return 0;
+        $value = DateTimeImmutable::createFromFormat('!Y-m-d', $date, $timezone);
+        if (!$value || $value->format('Y-m-d') !== $date) {
+            throw MobileApiException::protocol('INVALID_REQUEST_FIELD', '请选择有效日期。', $field);
         }
-        $candidate = (int)reset($candidates);
-        $subtreeStoreIds = $this->scopes->expandOrgToStoreIds($candidate);
-        return array_diff($allowedStoreIds, $subtreeStoreIds) === [] ? $candidate : 0;
+        return $value;
     }
 
     private function factProjection(array $storeIds, array $period): array
@@ -653,8 +521,8 @@ final class MobileWarehouseServices
             'cash_performance' => [],
             'actual_performance' => [],
             'consume_amount' => [],
-            'refund_performance' => [],
             'visit_members' => [],
+            'refund_performance' => [],
         ];
         if ($storeIds === []) {
             return $projection;
@@ -681,6 +549,10 @@ final class MobileWarehouseServices
                 : 'consume_amount';
             $projection[$code][(int)$row['store_id']] = (int)$row['amount_cents'];
         }
+        // Cash refunds are a lifecycle fact in V3.  Do not use the legacy
+        // store_order_refund projection here: member-account restoration is
+        // represented independently by restored_principal_cents and
+        // restored_bonus_cents and must never be added to this cash amount.
         $refunds = Db::name('cashier_v3_order_lifecycle_operation')
             ->where('tenant_id', '0')->whereIn('store_id', $storeIds)
             ->whereBetween('business_date', [$period['startDate'], $period['endDate']])
@@ -690,6 +562,8 @@ final class MobileWarehouseServices
         foreach ($refunds as $row) {
             $projection['refund_performance'][(int)$row['store_id']] = (int)$row['amount_cents'];
         }
+        // 实际业绩统一按现金业绩扣除现金退款计算，避免与历史 performance
+        // 快照口径不一致。金额保持分，允许退款大于现金时呈现负数。
         foreach ($storeIds as $storeId) {
             $storeId = (int)$storeId;
             $projection['actual_performance'][$storeId] =
@@ -707,9 +581,222 @@ final class MobileWarehouseServices
         return $projection;
     }
 
+    /**
+     * Builds a read-only, permission-scoped comparison series.  The client is
+     * deliberately given finished points only: it must never aggregate facts
+     * or derive same-period comparisons itself.
+     */
+    private function trendProjection(array $storeIds, array $period, string $metricCode): array
+    {
+        $calendar = $this->trendCalendar($period);
+        $current = $this->trendAmounts($storeIds, $calendar['currentStart'], $calendar['currentEnd'], $metricCode, $calendar['granularity']);
+        $yearOnYear = $this->trendAmounts($storeIds, $calendar['yoyStart'], $calendar['yoyEnd'], $metricCode, $calendar['granularity']);
+        $monthOnMonth = $this->trendAmounts($storeIds, $calendar['momStart'], $calendar['momEnd'], $metricCode, $calendar['granularity']);
+        $timezone = new DateTimeZone('Asia/Shanghai');
+        $today = new DateTimeImmutable('today', $timezone);
+        $cursor = new DateTimeImmutable($calendar['currentStart'], $timezone);
+        $end = new DateTimeImmutable($calendar['currentEnd'], $timezone);
+        $points = [];
+        while ($cursor <= $end) {
+            $currentKey = $this->trendKey($cursor, $calendar['granularity']);
+            $yoyCursor = $cursor->modify('-1 year');
+            $momCursor = $calendar['granularity'] === 'day'
+                ? $cursor->modify('-1 month')
+                : $cursor->modify('-1 year');
+            $yoyKey = $this->trendKey($yoyCursor, $calendar['granularity']);
+            $momKey = $this->trendKey($momCursor, $calendar['granularity']);
+            $points[] = [
+                'key' => $currentKey,
+                'label' => $calendar['granularity'] === 'day'
+                    ? $cursor->format('j')
+                    : ($calendar['granularity'] === 'month' ? $cursor->format('n月') : $cursor->format('Y年')),
+                // Future periods are intentionally gaps, not zeroes.
+                'current' => $cursor > $today ? null : (int)($current[$currentKey] ?? 0),
+                'yoy' => (int)($yearOnYear[$yoyKey] ?? 0),
+                'mom' => (int)($monthOnMonth[$momKey] ?? 0),
+            ];
+            $cursor = $calendar['granularity'] === 'day'
+                ? $cursor->modify('+1 day')
+                : ($calendar['granularity'] === 'month' ? $cursor->modify('+1 month') : $cursor->modify('+1 year'));
+        }
+
+        return [
+            'metricCode' => $metricCode,
+            'metricName' => $this->trendMetricName($metricCode),
+            'granularity' => $calendar['granularity'],
+            'points' => $points,
+            'periods' => [
+                'current' => ['label' => '本期', 'range' => $calendar['currentLabel']],
+                'yoy' => ['label' => '同比', 'range' => $calendar['yoyLabel']],
+                'mom' => ['label' => '环比', 'range' => $calendar['momLabel']],
+            ],
+        ];
+    }
+
+    private function trendMetricCode(string $code): string
+    {
+        return in_array($code, ['cash_performance', 'actual_performance', 'consume_amount', 'refund_performance'], true)
+            ? $code
+            : 'cash_performance';
+    }
+
+    private function trendMetricName(string $code): string
+    {
+        $names = [
+            'cash_performance' => '现金业绩',
+            'actual_performance' => '实际业绩',
+            'consume_amount' => '消耗业绩',
+            'refund_performance' => '退款金额',
+        ];
+        return $names[$code] ?? '现金业绩';
+    }
+
+    /** @return array<string,string> */
+    private function trendCalendar(array $period): array
+    {
+        $timezone = new DateTimeZone('Asia/Shanghai');
+        $start = new DateTimeImmutable((string)$period['startDate'], $timezone);
+        $end = new DateTimeImmutable((string)$period['endDate'], $timezone);
+        if ($start->format('Y-m') === $end->format('Y-m')) {
+            $currentStart = $end->modify('first day of this month');
+            $currentEnd = $end->modify('last day of this month');
+            $yoyStart = $currentStart->modify('-1 year');
+            $yoyEnd = $currentEnd->modify('-1 year');
+            $momStart = $currentStart->modify('-1 month');
+            $momEnd = $currentEnd->modify('-1 month');
+            return [
+                'granularity' => 'day',
+                'currentStart' => $currentStart->format('Y-m-d'), 'currentEnd' => $currentEnd->format('Y-m-d'),
+                'yoyStart' => $yoyStart->format('Y-m-d'), 'yoyEnd' => $yoyEnd->format('Y-m-d'),
+                'momStart' => $momStart->format('Y-m-d'), 'momEnd' => $momEnd->format('Y-m-d'),
+                'currentLabel' => $currentStart->format('Y年n月'),
+                'yoyLabel' => $yoyStart->format('Y年n月'),
+                'momLabel' => $momStart->format('Y年n月'),
+            ];
+        }
+
+        if ($start->format('Y') === $end->format('Y')) {
+            $year = $end->format('Y');
+            $currentStart = new DateTimeImmutable($year . '-01-01', $timezone);
+            $currentEnd = new DateTimeImmutable($year . '-12-31', $timezone);
+            $yoyStart = $currentStart->modify('-1 year');
+            $yoyEnd = $currentEnd->modify('-1 year');
+            $momStart = $currentStart->modify('-1 year');
+            $momEnd = $currentEnd->modify('-1 year');
+            return [
+                'granularity' => 'month',
+                'currentStart' => $currentStart->format('Y-m-d'), 'currentEnd' => $currentEnd->format('Y-m-d'),
+                'yoyStart' => $yoyStart->format('Y-m-d'), 'yoyEnd' => $yoyEnd->format('Y-m-d'),
+                'momStart' => $momStart->format('Y-m-d'), 'momEnd' => $momEnd->format('Y-m-d'),
+                'currentLabel' => $year . '年',
+                'yoyLabel' => $yoyStart->format('Y年'),
+                'momLabel' => $momStart->format('Y年'),
+            ];
+        }
+
+        // A range spanning calendar years is intentionally a year chart.
+        // Each point is a full calendar year, never a client-side roll-up.
+        $currentStart = new DateTimeImmutable($start->format('Y') . '-01-01', $timezone);
+        $currentEnd = new DateTimeImmutable($end->format('Y') . '-12-31', $timezone);
+        $yoyStart = $currentStart->modify('-1 year');
+        $yoyEnd = $currentEnd->modify('-1 year');
+        $momStart = $currentStart->modify('-1 year');
+        $momEnd = $currentEnd->modify('-1 year');
+        return [
+            'granularity' => 'year',
+            'currentStart' => $currentStart->format('Y-m-d'), 'currentEnd' => $currentEnd->format('Y-m-d'),
+            'yoyStart' => $yoyStart->format('Y-m-d'), 'yoyEnd' => $yoyEnd->format('Y-m-d'),
+            'momStart' => $momStart->format('Y-m-d'), 'momEnd' => $momEnd->format('Y-m-d'),
+            'currentLabel' => $currentStart->format('Y年') . '-' . $currentEnd->format('Y年'),
+            'yoyLabel' => $yoyStart->format('Y年') . '-' . $yoyEnd->format('Y年'),
+            'momLabel' => $momStart->format('Y年') . '-' . $momEnd->format('Y年'),
+        ];
+    }
+
+    private function trendKey(DateTimeImmutable $date, string $granularity): string
+    {
+        if ($granularity === 'day') {
+            return $date->format('Y-m-d');
+        }
+        return $granularity === 'month' ? $date->format('Y-m') : $date->format('Y');
+    }
+
+    /** @return array<string,int> values are whole-yuan, grouped by chart granularity. */
+    private function trendAmounts(array $storeIds, string $startDate, string $endDate, string $metricCode, string $granularity): array
+    {
+        if ($storeIds === []) {
+            return [];
+        }
+        if ($metricCode === 'cash_performance') {
+            $rows = Db::name('cashier_v3_payment_fact')
+                ->where('tenant_id', '0')->whereIn('store_id', $storeIds)
+                ->whereBetween('business_date', [$startDate, $endDate])->where('status', 'effective')
+                ->fieldRaw('business_date,COALESCE(SUM(amount_cents),0) AS amount_cents')
+                ->group('business_date')->select()->toArray();
+        } elseif ($metricCode === 'refund_performance') {
+            // The dashboard's refund metric is cash actually returned to the
+            // customer.  Account principal/bonus restoration remains out of
+            // this total and is only exposed as separate detail facts.
+            $rows = Db::name('cashier_v3_order_lifecycle_operation')
+                ->where('tenant_id', '0')->whereIn('store_id', $storeIds)
+                ->whereBetween('business_date', [$startDate, $endDate])
+                ->where('operation_type', 'refund')->where('status', 'succeeded')
+                ->fieldRaw('business_date,COALESCE(SUM(cash_refund_cents),0) AS amount_cents')
+                ->group('business_date')->select()->toArray();
+        } elseif ($metricCode === 'actual_performance') {
+            $cashRows = Db::name('cashier_v3_payment_fact')
+                ->where('tenant_id', '0')->whereIn('store_id', $storeIds)
+                ->whereBetween('business_date', [$startDate, $endDate])->where('status', 'effective')
+                ->fieldRaw('business_date,COALESCE(SUM(amount_cents),0) AS amount_cents')
+                ->group('business_date')->select()->toArray();
+            $refundRows = Db::name('cashier_v3_order_lifecycle_operation')
+                ->where('tenant_id', '0')->whereIn('store_id', $storeIds)
+                ->whereBetween('business_date', [$startDate, $endDate])
+                ->where('operation_type', 'refund')->where('status', 'succeeded')
+                ->fieldRaw('business_date,COALESCE(SUM(cash_refund_cents),0) AS amount_cents')
+                ->group('business_date')->select()->toArray();
+            $cashByDate = [];
+            foreach ($cashRows as $row) {
+                $cashByDate[(string)($row['business_date'] ?? '')] = (int)($row['amount_cents'] ?? 0);
+            }
+            $refundByDate = [];
+            foreach ($refundRows as $row) {
+                $refundByDate[(string)($row['business_date'] ?? '')] = (int)($row['amount_cents'] ?? 0);
+            }
+            $result = [];
+            foreach (array_unique(array_merge(array_keys($cashByDate), array_keys($refundByDate))) as $date) {
+                $key = $granularity === 'day'
+                    ? $date
+                    : ($granularity === 'month' ? substr($date, 0, 7) : substr($date, 0, 4));
+                $result[$key] = (int)($result[$key] ?? 0)
+                    + intdiv((int)($cashByDate[$date] ?? 0) - (int)($refundByDate[$date] ?? 0), 100);
+            }
+            return $result;
+        } else {
+            $performanceType = $metricCode === 'consume_amount'
+                ? 'consumption_performance_recorded'
+                : 'labor_performance_allocated';
+            $rows = Db::name('cashier_v3_performance_fact')
+                ->where('tenant_id', '0')->whereIn('store_id', $storeIds)
+                ->whereBetween('business_date', [$startDate, $endDate])->where('status', 'effective')
+                ->where('performance_type', $performanceType)
+                ->fieldRaw('business_date,COALESCE(SUM(amount_cents),0) AS amount_cents')
+                ->group('business_date')->select()->toArray();
+        }
+        $result = [];
+        foreach ($rows as $row) {
+            $date = (string)($row['business_date'] ?? '');
+            $key = $granularity === 'day'
+                ? $date
+                : ($granularity === 'month' ? substr($date, 0, 7) : substr($date, 0, 4));
+            $result[$key] = (int)($result[$key] ?? 0) + intdiv((int)($row['amount_cents'] ?? 0), 100);
+        }
+        return $result;
+    }
+
     private function summaryMetrics(array $storeIds, array $projection): array
     {
-        $amounts = ['cash_performance' => 0, 'refund_performance' => 0, 'actual_performance' => 0, 'consume_amount' => 0];
+        $amounts = ['cash_performance' => 0, 'actual_performance' => 0, 'consume_amount' => 0, 'refund_performance' => 0];
         $visitMembers = [];
         foreach ($storeIds as $storeId) {
             foreach (array_keys($amounts) as $code) {
@@ -722,13 +809,13 @@ final class MobileWarehouseServices
         $values = $amounts;
         $values['visit_customer'] = count($visitMembers);
         $items = [];
-        foreach (['cash_performance', 'refund_performance', 'actual_performance', 'consume_amount', 'visit_customer'] as $code) {
+        foreach (['cash_performance', 'actual_performance', 'consume_amount', 'refund_performance', 'visit_customer'] as $code) {
             $definition = $this->dictionary->getByCode($code);
             $value = (int)$values[$code];
             $isCount = $code === 'visit_customer';
             $items[] = [
                 'code' => $code,
-                'name' => (string)($definition['name'] ?? ($code === 'refund_performance' ? '退款金额' : $code)),
+				'name' => (string)($definition['name'] ?? ($code === 'refund_performance' ? '退款金额' : $code)),
                 'value' => $isCount ? $value : intdiv($value, 100),
                 'displayValue' => $isCount
                     ? number_format($value, 0, '.', ',')
@@ -755,9 +842,9 @@ final class MobileWarehouseServices
         return $values;
     }
 
-    private function rankingCatalog(): array
+    private function rankingCatalog(bool $showOrganizationRanking): array
     {
-        return [
+        $items = [
             [
                 'code' => 'organization',
                 'name' => '组织排行',
@@ -781,7 +868,7 @@ final class MobileWarehouseServices
             [
                 'code' => 'staff_designated_customer',
                 'name' => '员工点客',
-                'available' => false,
+                'available' => true,
                 'metricCode' => 'staff_designated_num',
                 'groupDimension' => 'employee',
             ],
@@ -794,26 +881,81 @@ final class MobileWarehouseServices
                 'groupDimension' => 'project',
             ],
         ];
+        return $showOrganizationRanking ? $items : array_values(array_filter($items, static function (array $item): bool {
+            return (string)$item['code'] !== 'organization';
+        }));
     }
 
-    private function rankingCode(string $code): string
+    private function rankingCode(string $code, bool $showOrganizationRanking): string
     {
         $allowed = ['organization', 'staff_cash_performance', 'staff_labor_performance', 'staff_designated_customer', 'project_count'];
-        return in_array($code, $allowed, true) ? $code : 'organization';
+        if (!$showOrganizationRanking) {
+            $allowed = array_values(array_filter($allowed, static function (string $item): bool { return $item !== 'organization'; }));
+        }
+        return in_array($code, $allowed, true) ? $code : ($showOrganizationRanking ? 'organization' : 'staff_cash_performance');
     }
 
-    private function factRanking(string $rankingCode, array $storeIds, array $period): array
+    /** @return array<string,mixed> */
+    private function entryProjection(array $entry): array
     {
-        if ($storeIds === [] || $rankingCode === 'staff_designated_customer') {
+        $personal = (string)($entry['entryType'] ?? '') === MobileMerchantAnalyticsEntryPolicy::TYPE_PERSONAL;
+        return [
+            'entryType' => (string)($entry['entryType'] ?? ''),
+            'entryNodeType' => (string)($entry['entryNodeType'] ?? ''),
+            'entryNodeId' => (int)($entry['entryNodeId'] ?? 0),
+            'employeeId' => $personal ? (int)($entry['employeeId'] ?? 0) : 0,
+            'destination' => $personal ? 'employee-performance' : 'warehouse',
+            'showOrganizationRanking' => (bool)($entry['showOrganizationRanking'] ?? false),
+            'organizationPickerEnabled' => (bool)($entry['organizationPickerEnabled'] ?? false),
+        ];
+    }
+
+    private function rankingOrder(string $order): string
+    {
+        return strtolower(trim($order)) === 'asc' ? 'asc' : 'desc';
+    }
+
+    private function organizationRanking(array $rows, string $rankingOrder): array
+    {
+        usort($rows, static function (array $left, array $right) use ($rankingOrder): int {
+            $leftValue = self::metricAmount($left, 'cash_performance');
+            $rightValue = self::metricAmount($right, 'cash_performance');
+            if ($leftValue === $rightValue) {
+                return (int)($left['entityId'] ?? 0) <=> (int)($right['entityId'] ?? 0);
+            }
+            return $rankingOrder === 'asc'
+                ? $leftValue <=> $rightValue
+                : $rightValue <=> $leftValue;
+        });
+        return array_slice($rows, 0, 10);
+    }
+
+    private static function metricAmount(array $row, string $code): int
+    {
+        foreach ((array)($row['metrics'] ?? []) as $metric) {
+            if ((string)($metric['code'] ?? '') === $code) {
+                return (int)str_replace(',', '', (string)($metric['displayValue'] ?? $metric['value'] ?? 0));
+            }
+        }
+        return 0;
+    }
+
+    private function factRanking(string $rankingCode, array $storeIds, array $period, string $rankingOrder): array
+    {
+        if ($storeIds === []) {
             return [];
         }
+        if ($rankingCode === 'staff_designated_customer') {
+            return $this->designatedCustomerRanking($storeIds, $period, $rankingOrder);
+        }
+        $orderSql = $rankingOrder === 'asc' ? 'ranking_value ASC,entity_id ASC' : 'ranking_value DESC,entity_id ASC';
         if ($rankingCode === 'project_count') {
             $rows = Db::name('cashier_v3_entitlement_service_fact')
                 ->where('tenant_id', '0')->whereIn('store_id', $storeIds)
                 ->whereBetween('business_date', [$period['startDate'], $period['endDate']])
                 ->where('service_status', 'completed')->where('project_id', '>', 0)
                 ->fieldRaw('project_id AS entity_id,MAX(project_name_snapshot) AS entity_name,COALESCE(SUM(quantity),0) AS ranking_value')
-                ->group('project_id')->orderRaw('ranking_value DESC,entity_id ASC')->limit(50)->select()->toArray();
+                ->group('project_id')->orderRaw($orderSql)->limit(10)->select()->toArray();
             return $this->rankingRows($rows, 'project', false);
         }
         $performanceType = $rankingCode === 'staff_cash_performance'
@@ -825,8 +967,150 @@ final class MobileWarehouseServices
             ->where('status', 'effective')->where('performance_type', $performanceType)
             ->where('employee_id', '>', 0)
             ->fieldRaw('employee_id AS entity_id,MAX(employee_name_snapshot) AS entity_name,COALESCE(SUM(amount_cents),0) AS ranking_value')
-            ->group('employee_id')->orderRaw('ranking_value DESC,entity_id ASC')->limit(50)->select()->toArray();
+            ->group('employee_id')->orderRaw($orderSql)->limit(10)->select()->toArray();
         return $this->rankingRows($rows, 'employee', true);
+    }
+
+    /**
+     * "员工点客" has the same customer-counting rule as the legacy service
+     * report, but reads only the V3 immutable service fact and its frozen
+     * craftsman snapshot.  A member is counted once per day; a friend/guest
+     * service line is counted separately.  All point-customer craftsmen in a
+     * group split one customer in hundredths, with the final remainder given
+     * to the largest staff id for deterministic results.
+     */
+    private function designatedCustomerRanking(array $storeIds, array $period, string $rankingOrder): array
+    {
+        $facts = Db::name('cashier_v3_entitlement_service_fact')
+            ->where('tenant_id', '0')->whereIn('store_id', $storeIds)
+            ->whereBetween('business_date', [$period['startDate'], $period['endDate']])
+            ->where('service_status', 'completed')
+            ->field('service_fact_id,business_date,member_id,service_object,craftsmen_snapshot_json')
+            ->select()->toArray();
+
+        // groupKey => [staff id => immutable employee identity]
+        $groups = [];
+        foreach ($facts as $fact) {
+            $pointCraftsmen = $this->pointCraftsmenFromSnapshot($fact['craftsmen_snapshot_json'] ?? null);
+            if ($pointCraftsmen === []) {
+                continue;
+            }
+
+            $day = (string)($fact['business_date'] ?? '');
+            $memberId = (int)($fact['member_id'] ?? 0);
+            $serviceObject = trim((string)($fact['service_object'] ?? ''));
+            $isFriendOrGuest = $memberId <= 0 || $serviceObject === 'friend' || $serviceObject === '朋友';
+            $groupKey = $isFriendOrGuest
+                ? 'g_' . $day . '_' . (string)($fact['service_fact_id'] ?? '')
+                : 'm_' . $day . '_' . $memberId;
+            if (!isset($groups[$groupKey])) {
+                $groups[$groupKey] = [];
+            }
+            foreach ($pointCraftsmen as $staffId => $identity) {
+                $groups[$groupKey][$staffId] = $identity;
+            }
+        }
+
+        // employee id => immutable display identity plus scaled customer count
+        $employees = [];
+        foreach ($groups as $group) {
+            ksort($group, SORT_NUMERIC);
+            $staffIds = array_keys($group);
+            $count = count($staffIds);
+            if ($count === 0) {
+                continue;
+            }
+            $base = intdiv(100, $count);
+            $remainder = 100 - $base * $count;
+            foreach ($staffIds as $index => $staffId) {
+                $identity = $group[$staffId];
+                $employeeId = (int)$identity['employeeId'];
+                if (!isset($employees[$employeeId])) {
+                    $employees[$employeeId] = ['name' => (string)$identity['name'], 'hundredths' => 0];
+                }
+                $employees[$employeeId]['hundredths'] += $base + ($index === $count - 1 ? $remainder : 0);
+            }
+        }
+
+        $rows = [];
+        foreach ($employees as $employeeId => $employee) {
+            $rows[] = [
+                'entity_id' => (int)$employeeId,
+                'entity_name' => (string)$employee['name'],
+                'ranking_value' => (int)$employee['hundredths'],
+            ];
+        }
+        usort($rows, static function (array $left, array $right) use ($rankingOrder): int {
+            $leftValue = (int)$left['ranking_value'];
+            $rightValue = (int)$right['ranking_value'];
+            if ($leftValue === $rightValue) {
+                return (int)$left['entity_id'] <=> (int)$right['entity_id'];
+            }
+            return $rankingOrder === 'asc' ? $leftValue <=> $rightValue : $rightValue <=> $leftValue;
+        });
+        return $this->fractionalCustomerRankingRows(array_slice($rows, 0, 10));
+    }
+
+    /**
+     * Reads only frozen V3 service-row snapshots.  The entitlement completion
+     * stream has a historical snake_case snapshot shape while the sales stream
+     * uses the canonical camelCase shape; both explicitly carry the point
+     * flag.  A pre-fix snapshot without that flag is intentionally ignored.
+     *
+     * @return array<int,array{employeeId:int,name:string}>
+     */
+    private function pointCraftsmenFromSnapshot($json): array
+    {
+        if (!is_string($json) || trim($json) === '') {
+            return [];
+        }
+        $rows = json_decode($json, true);
+        if (!is_array($rows)) {
+            return [];
+        }
+        $result = [];
+        foreach ($rows as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $hasPointFlag = array_key_exists('isPointCustomer', $row) || array_key_exists('is_point_customer', $row);
+            $isPointCustomer = !empty($row['isPointCustomer']) || !empty($row['is_point_customer']);
+            if (!$hasPointFlag || !$isPointCustomer) {
+                continue;
+            }
+            $staffId = (int)($row['staffId'] ?? $row['staff_id'] ?? 0);
+            $employeeId = (int)($row['employeeId'] ?? $row['employee_id'] ?? 0);
+            if ($staffId <= 0 || $employeeId <= 0) {
+                continue;
+            }
+            $result[$staffId] = [
+                'employeeId' => $employeeId,
+                'name' => trim((string)($row['name'] ?? $row['staff_name_snapshot'] ?? '')),
+            ];
+        }
+        return $result;
+    }
+
+    /** @param array<int,array<string,mixed>> $rows */
+    private function fractionalCustomerRankingRows(array $rows): array
+    {
+        $result = [];
+        foreach ($rows as $row) {
+            $hundredths = (int)($row['ranking_value'] ?? 0);
+            $value = $hundredths / 100;
+            $display = number_format($value, 2, '.', '');
+            $display = rtrim(rtrim($display, '0'), '.');
+            $result[] = [
+                'entityType' => 'employee',
+                'entityId' => (int)($row['entity_id'] ?? 0),
+                'name' => trim((string)($row['entity_name'] ?? '')) ?: '未命名员工',
+                'rankingValue' => $value,
+                'displayValue' => $display === '' ? '0' : $display,
+                'unit' => 'count',
+                'hasChildren' => false,
+            ];
+        }
+        return $result;
     }
 
     private function rankingRows(array $rows, string $entityType, bool $money): array

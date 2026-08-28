@@ -1,5 +1,5 @@
-import { buildMobileRequestPlan, mobileRequestPlanMatchesContract } from '../../shared/api/request-context.uts'
-import { sendMobileRequest } from '../../shared/api/mobile-http.uts'
+import { buildMobileRequestPlan, mobileRequestPlanMatchesContract } from './request-context.uts'
+import { sendMobileRequest } from './mobile-http.uts'
 import { currentMerchantRoot, merchantRequestSession } from '../platform/mobile-merchant-session.uts'
 
 // Runtime mirror only. The frozen JSON contract remains the source checked by tests.
@@ -8,7 +8,9 @@ const customerCareTransportContract : any = {
 	endpoints: {
 		queryWorkbench: { method: 'POST', path: '/mobile/merchant/customer-care/workbench', requestMetadataProfile: 'MERCHANT_SESSION' },
 		createTask: { method: 'POST', path: '/mobile/merchant/customer-care/actions/create-care-task', requestMetadataProfile: 'MERCHANT_SESSION' },
-		completeTask: { method: 'POST', path: '/mobile/merchant/customer-care/actions/complete-care-task', requestMetadataProfile: 'MERCHANT_SESSION' }
+		startTask: { method: 'POST', path: '/mobile/merchant/customer-care/actions/start-care-task', requestMetadataProfile: 'MERCHANT_SESSION' },
+		completeTask: { method: 'POST', path: '/mobile/merchant/customer-care/actions/complete-care-task', requestMetadataProfile: 'MERCHANT_SESSION' },
+		deleteTask: { method: 'POST', path: '/mobile/merchant/customer-care/actions/delete-care-task', requestMetadataProfile: 'MERCHANT_SESSION' }
 	},
 	requestMetadataProfiles: {
 		MERCHANT_SESSION: {
@@ -48,6 +50,14 @@ export function createMobileCustomerCareTask(payload : any, done : (value : any)
 	request('createTask', payload, done)
 }
 
+export function startMobileCustomerCareTask(payload : any, done : (value : any) => void) : void {
+	request('startTask', payload, done)
+}
+
 export function completeMobileCustomerCareTask(payload : any, done : (value : any) => void) : void {
 	request('completeTask', payload, done)
+}
+
+export function deleteMobileCustomerCareTask(payload : any, done : (value : any) => void) : void {
+	request('deleteTask', payload, done)
 }

@@ -243,6 +243,7 @@ class MemberUnifiedQueryProvider implements UnifiedQueryProvider
             $rows = [];
             $total = 0;
         } else {
+            $this->applySqlPageFilters($query, (array)($plan['filters'] ?? []), $context, $visibleStoreIds, $allStores);
             $total = (int)(clone $query)->count('u.uid');
             foreach ((array)$normalizedQuery['sorts'] as $sort) {
                 $fieldKey = (string)($sort['field_key'] ?? '');
@@ -288,7 +289,6 @@ class MemberUnifiedQueryProvider implements UnifiedQueryProvider
     {
         foreach ([
             'custom_definitions',
-            'filters',
             'top_filters',
             'groups',
             'summaries',
@@ -297,6 +297,9 @@ class MemberUnifiedQueryProvider implements UnifiedQueryProvider
             if (!empty($plan[$key])) {
                 return false;
             }
+        }
+        if (!$this->supportsSqlPageFilters((array)($plan['filters'] ?? []))) {
+            return false;
         }
         if (!empty($query['keywordFilters']) && $this->pushdownKeyword($query) === '') {
             return false;
@@ -321,6 +324,125 @@ class MemberUnifiedQueryProvider implements UnifiedQueryProvider
             && in_array((string)($sorts[0]['direction'] ?? ''), ['asc', 'desc'], true)
             && (string)($sorts[1]['field_key'] ?? '') === 'member_id'
             && (string)($sorts[1]['direction'] ?? '') === 'asc';
+    }
+
+    /**
+     * Only standard mobile audience conditions may enter the SQL paging path.
+     * Every other dynamic rule remains on the complete unified-query engine.
+     */
+    protected function supportsSqlPageFilters(array $filters): bool
+    {
+        if ($filters === []) {
+            return true;
+        }
+        if (count($filters) !== 1 || !is_array($filters[0])) {
+            return false;
+        }
+        $field = (string)($filters[0]['field_key'] ?? '');
+        $operator = (string)($filters[0]['operator'] ?? '');
+        $rawValue = $filters[0]['value'] ?? '';
+        // Range filters carry an array value and belong to the unified query
+        // path; never cast that array to a string while deciding fast-path use.
+        if (is_array($rawValue)) {
+            if ($field !== 'latest_visit_date' || $operator !== 'between' || count($rawValue) !== 2) return false;
+            return preg_match('/^\d{4}-\d{2}-\d{2}$/D', (string)$rawValue[0]) === 1
+                && preg_match('/^\d{4}-\d{2}-\d{2}$/D', (string)$rawValue[1]) === 1;
+        }
+        $value = trim((string)$rawValue);
+        return ($field === 'birthday_month_day'
+                && (($operator === 'equal' && preg_match('/^\d{2}-\d{2}$/D', $value))
+                    || ($operator === 'starts_with' && preg_match('/^\d{2}-(?:\d{2})?$/D', $value))))
+            || ($field === 'latest_visit_date'
+                && $operator === 'less_or_equal'
+                && preg_match('/^\d{4}-\d{2}-\d{2}$/D', $value));
+    }
+
+    /**
+     * Applies a predicate already proved equivalent to the in-memory member
+     * projection. Permission scope is injected before this predicate runs.
+     */
+    protected function applySqlPageFilters($query, array $filters, array $context, array $visibleStoreIds, bool $allStores): void
+    {
+        if ($filters === []) {
+            return;
+        }
+        $filter = $filters[0];
+        $field = (string)($filter['field_key'] ?? '');
+        $operator = (string)($filter['operator'] ?? '');
+        $rawValue = $filter['value'] ?? '';
+        if (is_array($rawValue)) {
+            if ($field === 'latest_visit_date' && $operator === 'between' && count($rawValue) === 2) {
+                $tenantId = trim((string)($context['tenant_id'] ?? ''));
+                $prefix = (string)Db::getConfig('connections.mysql.prefix');
+                $table = '`' . str_replace('`', '', $prefix . 'cashier_v3_entitlement_service_fact') . '`';
+                $start = (string)$rawValue[0];
+                $end = (string)$rawValue[1];
+                $scopeSql = '';
+                $scopeParams = [];
+                if (!$allStores) {
+                    $placeholders = implode(',', array_fill(0, count($visibleStoreIds), '?'));
+                    $scopeSql = ' AND sf.store_id IN (' . $placeholders . ')';
+                    foreach ($visibleStoreIds as $storeId) $scopeParams[] = (int)$storeId;
+                }
+                $scopeSql2 = str_replace('sf.', 'sf2.', $scopeSql);
+                $scopeParams2 = $scopeParams;
+                $query->whereRaw(
+                    'EXISTS (SELECT 1 FROM ' . $table . ' sf WHERE sf.member_id = u.uid'
+                    . ' AND sf.tenant_id = ? AND sf.service_status = \'completed\''
+                    . ' AND sf.business_date BETWEEN ? AND ?' . $scopeSql . ')'
+                    . ' AND NOT EXISTS (SELECT 1 FROM ' . $table . ' sf2 WHERE sf2.member_id = u.uid'
+                    . ' AND sf2.tenant_id = ? AND sf2.service_status = \'completed\''
+                    . ' AND sf2.business_date > ?' . $scopeSql2 . ')',
+                    array_merge([$tenantId, $start, $end], $scopeParams, [$tenantId, $end], $scopeParams2)
+                );
+            }
+            return;
+        }
+        $value = trim((string)$rawValue);
+        if ($field === 'birthday_month_day') {
+            $query->whereRaw(
+                "DATE_FORMAT(FROM_UNIXTIME(u.birthday), '%m-%d') " . ($operator === 'equal' ? '= ?' : 'LIKE ?'),
+                [$operator === 'equal' ? $value : $value . '%']
+            );
+            return;
+        }
+
+        $tenantId = trim((string)($context['tenant_id'] ?? ''));
+        if ($tenantId === '') {
+            throw new \RuntimeException('会员到店事实缺少租户范围');
+        }
+        $prefix = (string)Db::getConfig('connections.mysql.prefix');
+        $table = '`' . str_replace('`', '', $prefix . 'cashier_v3_entitlement_service_fact') . '`';
+        $scopeSql = '';
+        $parameters = [$tenantId, $value];
+        if (!$allStores) {
+            $placeholders = implode(',', array_fill(0, count($visibleStoreIds), '?'));
+            $scopeSql = ' AND sf.store_id IN (' . $placeholders . ')';
+            foreach ($visibleStoreIds as $storeId) {
+                $parameters[] = (int)$storeId;
+            }
+            $parameters[] = $tenantId;
+            $parameters[] = $value;
+            foreach ($visibleStoreIds as $storeId) {
+                $parameters[] = (int)$storeId;
+            }
+        } else {
+            $parameters[] = $tenantId;
+            $parameters[] = $value;
+        }
+        // Sleeping requires both a historical valid service and no valid
+        // service after the cutoff. A never-served member is not sleeping.
+        $query->whereRaw(
+            'EXISTS (SELECT 1 FROM ' . $table . ' sf'
+            . ' WHERE sf.member_id = u.uid AND sf.tenant_id = ?'
+            . " AND sf.service_status = 'completed' AND sf.business_date <= ?"
+            . $scopeSql . ')'
+            . ' AND NOT EXISTS (SELECT 1 FROM ' . $table . ' sf2'
+            . ' WHERE sf2.member_id = u.uid AND sf2.tenant_id = ?'
+            . " AND sf2.service_status = 'completed' AND sf2.business_date > ?"
+            . str_replace('sf.', 'sf2.', $scopeSql) . ')',
+            $parameters
+        );
     }
 
     /**

@@ -13,9 +13,13 @@ function result(ok : boolean, statusCode : number, body : any, message : string)
 }
 
 export function sendMobileRequest(plan : any, body : any, done : (value : MobileHttpResult) => void) : void {
+	// H5 热更新期间个别旧页面可能仍以无回调签名触发请求；保证请求完成
+	// 不会因回调缺失抛异常，从而阻断经营页的后续数据加载。
+	let callback : (value : MobileHttpResult) => void = done
+	if (typeof done != 'function') callback = (_value : MobileHttpResult) => {}
 	let origin = mobileApiOrigin()
 	if (origin.length == 0 || plan == null || typeof plan.path != 'string' || typeof plan.method != 'string' || plan.headers == null) {
-		done(result(false, 0, null, '当前设备未配置服务地址。'))
+		callback(result(false, 0, null, '当前设备未配置服务地址。'))
 		return
 	}
 	let headers : any = { 'Content-Type': 'application/json' }
@@ -31,8 +35,8 @@ export function sendMobileRequest(plan : any, body : any, done : (value : Mobile
 			let ok = response.statusCode >= 200 && response.statusCode < 300 && payload != null && payload.protocolCode == null && payload.errorCode == null
 			let errorCode = payload != null ? String(payload.errorCode || payload.protocolCode || '') : ''
 			let message = payload != null ? String(payload.message || '') : ''
-			done(result(ok, response.statusCode, payload, ok ? '' : (errorCode.length > 0 ? errorCode + '：' + message : message || '请求未完成。')))
+			callback(result(ok, response.statusCode, payload, ok ? '' : (errorCode.length > 0 ? errorCode + '：' + message : message || '请求未完成。')))
 		},
-		fail: () => done(result(false, 0, null, '网络请求失败，请检查服务地址和网络。'))
+		fail: () => callback(result(false, 0, null, '网络请求失败，请检查服务地址和网络。'))
 	})
 }

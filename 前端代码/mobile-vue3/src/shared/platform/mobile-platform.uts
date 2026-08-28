@@ -42,6 +42,15 @@ export function showMobileNotice(title : string) : void {
 	uni.showToast({ title: title, icon: 'none' })
 }
 
+export function confirmMobileAction(title : string, content : string, done : (confirmed : boolean) => void) : void {
+	uni.showModal({
+		title: title,
+		content: content,
+		success: (result : any) => done(result != null && result.confirm === true),
+		fail: () => done(false)
+	})
+}
+
 export function chooseMobileImage(done : (filePath : string, message : string) => void) : void {
 	uni.chooseImage({
 		count: 1, sizeType: ['compressed'], sourceType: ['album', 'camera'],
@@ -59,4 +68,215 @@ export function callMobilePhone(phone : string) : void {
 	let value = String(phone || '').trim()
 	if (value.length === 0) { showMobileNotice('会员没有可用手机号。'); return }
 	uni.makePhoneCall({ phoneNumber: value })
+}
+
+// Canvas is a rendering capability only. Business pages pass the server-returned
+// projection through unchanged; this adapter owns the platform drawing API.
+export function drawMobileTrendCanvas(canvasId : string, points : Array<any>, componentHost : any = null, imageReady : any = null) : void {
+	if (points.length === 0) return
+	// #ifdef WEB
+	let webContext : any = webCanvasContext(canvasId)
+	if (webContext != null) { drawWebTrendCanvas(webContext, points); return }
+	// #endif
+	// uvue compiles canvas to WeChat's `type="2d"` node. The old
+	// createCanvasContext API cannot paint that node, so resolve its real canvas
+	// through SelectorQuery and use the 2d context.
+	selectNativeCanvas(canvasId, componentHost, (context : any, canvas : any) => {
+		drawWebTrendCanvas(context, points)
+		exportNativeCanvasImage(canvas, imageReady)
+	})
+}
+
+// Pie rendering is visual-only. The caller supplies the already-authoritative
+// ranking projection; this helper never derives a business amount on device.
+export function drawMobilePieCanvas(canvasId : string, segments : Array<any>, colors : Array<string>, componentHost : any = null, imageReady : any = null) : void {
+	// #ifdef WEB
+	let webContext : any = webCanvasContext(canvasId)
+	if (webContext != null) { drawWebPieCanvas(webContext, segments, colors); return }
+	// #endif
+	selectNativeCanvas(canvasId, componentHost, (context : any, canvas : any) => {
+		drawNativePieCanvas(context, segments, colors)
+		exportNativeCanvasImage(canvas, imageReady)
+	})
+}
+
+function pieCanvasLabel(value : string) : string {
+	return value.length > 7 ? value.slice(0, 7) : value
+}
+
+// uni-app x H5 mounts a uni-canvas host around the native canvas. Resolve both
+// shapes so H5 draws on the actual element while native targets retain uni APIs.
+function webCanvasContext(canvasId : string) : any {
+	let candidate : any = document.getElementById(canvasId)
+	if (candidate == null) return null
+	if (typeof candidate.getContext === 'function') return candidate.getContext('2d')
+	let nested : any = typeof candidate.querySelector === 'function' ? candidate.querySelector('canvas') : null
+	return nested != null && typeof nested.getContext === 'function' ? nested.getContext('2d') : null
+}
+
+function selectNativeCanvas(canvasId : string, componentHost : any, drawn : (context : any, canvas : any) => void) : void {
+	// This renderer is called from a page, not a nested reusable component.
+	// On WeChat, `.in(instance.proxy)` can resolve the Vue proxy instead of the
+	// native page host and yield an empty node result.  A page-level query is the
+	// documented scope for these page canvases; keep the argument for the shared
+	// renderer signature but deliberately do not narrow the query with it.
+	let query : any = uni.createSelectorQuery()
+	query.select('#' + canvasId).fields({ node: true, size: true }, (result : any) => {
+		let canvas : any = result != null ? result.node : null
+		if (canvas == null || typeof canvas.getContext !== 'function') return
+		let context : any = canvas.getContext('2d')
+		if (context == null) return
+		drawn(context, canvas)
+	}).exec()
+}
+
+// A type=2d canvas is composited outside scroll-view by MP-WEIXIN. Exporting
+// the completed chart to a temporary PNG lets the page present it as an image,
+// which participates in the ordinary scrolling layout.
+function exportNativeCanvasImage(canvas : any, imageReady : any) : void {
+	if (imageReady == null) return
+	uni.canvasToTempFilePath({
+		canvas: canvas,
+		fileType: 'png',
+		success: (result : any) => imageReady(String(result != null ? result.tempFilePath || '' : '')),
+		fail: () => imageReady('')
+	})
+}
+
+function drawNativePieCanvas(context : any, segments : Array<any>, colors : Array<string>) : void {
+	let size = 356
+	let canvas : any = context.canvas
+	if (canvas != null) { canvas.width = size; canvas.height = size }
+	let center = size / 2
+	let radius = 176
+	context.clearRect(0, 0, size, size)
+	if (segments.length === 0) {
+		context.beginPath(); context.fillStyle = '#edf3f8'; context.arc(center, center, radius, 0, Math.PI * 2); context.fill()
+		context.fillStyle = '#748398'; context.font = '22px sans-serif'; context.textAlign = 'center'
+		context.fillText('暂无数据', center, center - 4)
+		context.font = '26px sans-serif'; context.fillText('0', center, center + 32)
+		return
+	}
+	let start = -Math.PI / 2
+	for (let index = 0; index < segments.length; index++) {
+		let share = Number(segments[index].share || 0)
+		if (share <= 0) continue
+		let end = start + Math.PI * 2 * share
+		context.beginPath(); context.moveTo(center, center); context.arc(center, center, radius, start, end); context.closePath()
+		context.fillStyle = colors[index % colors.length]; context.fill()
+		context.strokeStyle = '#ffffff'; context.lineWidth = 2; context.stroke()
+		if (share >= 0.12) {
+			let angle = (start + end) / 2
+			let labelRadius = radius * 0.54
+			let labelX = center + Math.cos(angle) * labelRadius
+			let labelY = center + Math.sin(angle) * labelRadius
+			context.textAlign = 'center'; context.fillStyle = '#ffffff'; context.font = '700 21px sans-serif'
+			context.fillText(pieCanvasLabel(String(segments[index].name || '—')), labelX, labelY - 7)
+			context.font = '800 25px sans-serif'; context.fillText(String(segments[index].value || '0'), labelX, labelY + 25)
+		}
+		start = end
+	}
+}
+
+function drawWebTrendCanvas(context : any, points : Array<any>) : void {
+	let canvasWidth = 720
+	let canvasHeight = 228
+	let canvas : any = context.canvas
+	if (canvas != null) { canvas.width = canvasWidth; canvas.height = canvasHeight }
+	let chartLeft = 34
+	let chartRight = 704
+	let chartTop = 14
+	let chartBottom = 182
+	context.clearRect(0, 0, canvasWidth, canvasHeight)
+	let maximum = 1
+	for (let index = 0; index < points.length; index++) {
+		for (let codeIndex = 0; codeIndex < 4; codeIndex++) {
+			let code = codeIndex === 0 ? 'current' : (codeIndex === 1 ? 'yoy' : (codeIndex === 2 ? 'mom' : 'consumeCurrent'))
+			let value = trendCanvasValue(points[index], code)
+			if (value != null && Number(value) > maximum) maximum = Number(value)
+		}
+	}
+	for (let index = 0; index < 4; index++) {
+		let y = chartTop + (chartBottom - chartTop) * index / 3
+		context.beginPath(); context.strokeStyle = '#eaf0f7'; context.lineWidth = 1; context.moveTo(chartLeft, y); context.lineTo(chartRight, y); context.stroke()
+	}
+	drawWebTrendSeries(context, points, 'yoy', '#f39b7b', 3, chartLeft, chartRight, chartTop, chartBottom, maximum)
+	drawWebTrendSeries(context, points, 'mom', '#7768e8', 3, chartLeft, chartRight, chartTop, chartBottom, maximum)
+	drawWebTrendSeries(context, points, 'current', '#1976d2', 4, chartLeft, chartRight, chartTop, chartBottom, maximum)
+	if (points.some((point : any) => trendCanvasValue(point, 'consumeCurrent') != null)) drawWebTrendSeries(context, points, 'consumeCurrent', '#c28a34', 4, chartLeft, chartRight, chartTop, chartBottom, maximum)
+	context.fillStyle = '#8a98a8'; context.font = '18px sans-serif'
+	let labelStep = points.length > 12 ? Math.ceil(points.length / 5) : Math.max(1, Math.ceil(points.length / 6))
+	for (let index = 0; index < points.length; index += labelStep) {
+		let x = chartLeft + (chartRight - chartLeft) * index / Math.max(points.length - 1, 1)
+		context.fillText(String(points[index].label || ''), x - 8, 211)
+	}
+}
+
+function drawWebTrendSeries(context : any, points : Array<any>, key : string, color : string, width : number, chartLeft : number, chartRight : number, chartTop : number, chartBottom : number, maximum : number) : void {
+	let started = false
+	for (let index = 0; index < points.length; index++) {
+		let value = trendCanvasValue(points[index], key)
+		if (value == null) {
+			if (started) { context.strokeStyle = color; context.lineWidth = width; context.stroke() }
+			started = false
+			continue
+		}
+		let x = chartLeft + (chartRight - chartLeft) * index / Math.max(points.length - 1, 1)
+		let y = chartBottom - Number(value) / maximum * (chartBottom - chartTop)
+		if (!started) { context.beginPath(); context.moveTo(x, y); started = true }
+		else context.lineTo(x, y)
+	}
+	if (started) { context.strokeStyle = color; context.lineWidth = width; context.stroke() }
+}
+
+function drawWebPieCanvas(context : any, segments : Array<any>, colors : Array<string>) : void {
+	let size = 356
+	let canvas : any = context.canvas
+	if (canvas != null) { canvas.width = size; canvas.height = size }
+	let center = size / 2
+	let radius = 176
+	context.clearRect(0, 0, size, size)
+	if (segments.length === 0) {
+		context.beginPath(); context.fillStyle = '#edf3f8'; context.arc(center, center, radius, 0, Math.PI * 2); context.fill()
+		return
+	}
+	let start = -Math.PI / 2
+	for (let index = 0; index < segments.length; index++) {
+		let share = Number(segments[index].share || 0)
+		if (share <= 0) continue
+		let end = start + Math.PI * 2 * share
+		context.beginPath(); context.moveTo(center, center); context.arc(center, center, radius, start, end); context.closePath()
+		context.fillStyle = colors[index % colors.length]; context.fill()
+		context.strokeStyle = '#ffffff'; context.lineWidth = 2; context.stroke()
+		start = end
+	}
+}
+
+function trendCanvasValue(point : any, key : string) : number | null {
+	if (point == null) return null
+	let raw : any = null
+	if (key === 'current') raw = point.current
+	else if (key === 'yoy') raw = point.yoy
+	else if (key === 'mom') raw = point.mom
+	else if (key === 'consumeCurrent') raw = point.consumeCurrent
+	if (raw == null) return null
+	let value = Number(raw)
+	return isNaN(value) ? null : value
+}
+
+function drawMobileTrendSeries(context : any, points : Array<any>, key : string, color : string, width : number, chartLeft : number, chartRight : number, chartTop : number, chartBottom : number, maximum : number) : void {
+	let started = false
+	for (let index = 0; index < points.length; index++) {
+		let value = trendCanvasValue(points[index], key)
+		if (value == null) {
+			if (started) { context.setStrokeStyle(color); context.setLineWidth(width); context.stroke() }
+			started = false
+			continue
+		}
+		let x = chartLeft + (chartRight - chartLeft) * index / Math.max(points.length - 1, 1)
+		let y = chartBottom - Number(value) / maximum * (chartBottom - chartTop)
+		if (!started) { context.beginPath(); context.moveTo(x, y); started = true }
+		else context.lineTo(x, y)
+	}
+	if (started) { context.setStrokeStyle(color); context.setLineWidth(width); context.stroke() }
 }

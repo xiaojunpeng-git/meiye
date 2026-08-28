@@ -1,18 +1,14 @@
 <template>
-	<view class="customer-page">
+	<view class="customer-page" :class="{ 'customer-page--native-mini': platformUsesNativeCanvas }">
 		<view class="customer-page__header">
 			<text class="customer-page__eyebrow">商家端</text>
 			<view class="customer-page__title-row">
 				<text class="customer-page__title">客户</text>
-				<view class="customer-page__header-actions">
-					<view class="customer-page__new-group" @tap="openGroupEntry">
-					<text class="customer-page__new-group-symbol">+</text>
-					<text class="customer-page__new-group-label">新建客群</text>
-					</view>
-					<view class="customer-page__new-customer" @tap="openCustomerEntry"><text class="customer-page__new-customer-symbol">+</text><text>新建客户</text></view>
-				</view>
+				<view v-if="customerStoreContexts.length > 1" class="customer-page__store customer-page__store--switchable" @tap="openCustomerStorePicker"><view class="customer-page__store-copy"><text class="customer-page__store-label">当前门店</text><text class="customer-page__store-name">{{ customerActiveStoreLabel }}</text></view><text class="customer-page__store-action">{{ customerSwitchingStore ? '切换中' : '切换' }}</text></view>
+				<view v-else class="customer-page__store"><view class="customer-page__store-copy"><text class="customer-page__store-label">当前门店</text><text class="customer-page__store-name">{{ customerActiveStoreLabel }}</text></view></view>
 			</view>
-		</view>
+			</view>
+		<view v-if="customerStoreSwitchMessage.length > 0" class="customer-page__store-error" role="alert"><text>{{ customerStoreSwitchMessage }}</text></view>
 
 		<view class="customer-page__tabs" role="tablist">
 			<view
@@ -27,8 +23,7 @@
 				<text>{{ tab.label }}</text>
 			</view>
 		</view>
-
-		<view class="customer-page__query-bar">
+		<view v-if="showCustomerSearch()" class="customer-page__query-bar">
 			<view class="customer-page__search">
 				<text class="customer-page__search-symbol">⌕</text>
 				<input
@@ -48,13 +43,21 @@
 			</view>
 		</view>
 
+		<view v-if="activeTab === 'groups' && activeAudience != null && audienceOverviewEnabled" class="customer-page__audience-tabs" role="tablist">
+			<view class="customer-page__audience-tab" :class="{ 'customer-page__audience-tab--active': audienceViewMode === 'overview' }" role="tab" @tap="selectAudienceView('overview')"><text>概况</text></view>
+			<view class="customer-page__audience-tab" :class="{ 'customer-page__audience-tab--active': audienceViewMode === 'details' }" role="tab" @tap="selectAudienceView('details')"><text>明细</text></view>
+		</view>
+		<scroll-view v-if="activeTab === 'groups' && activeAudience != null && audienceOverviewEnabled && audienceViewMode === 'overview'" class="customer-page__audience-breadcrumbs" scroll-x>
+			<view class="customer-page__audience-breadcrumbs-inner"><text v-for="(crumb, index) in audienceOverviewBreadcrumbs" :key="crumb.entityType + '-' + crumb.entityId" class="customer-page__audience-breadcrumb" @tap="selectAudienceBreadcrumb(crumb)">{{ index > 0 ? ' / ' : '' }}{{ crumb.name }}</text></view>
+		</scroll-view>
+
 		<view class="customer-page__scope-row">
 			<text class="customer-page__scope-label">{{ activeTabLabel }}</text>
 			<text v-if="activeAudience != null" class="customer-page__scope-query" @tap="closeAudience">返回客群</text>
 			<text v-else-if="searchApplied" class="customer-page__scope-query">已应用搜索</text>
 		</view>
 
-		<scroll-view class="customer-page__content" scroll-y>
+		<scroll-view class="customer-page__content" scroll-y refresher-enabled="true" :refresher-triggered="refreshing" @refresherrefresh="onPullRefresh" lower-threshold="120" @scrolltolower="loadMoreRecords">
 			<view v-if="loading" class="customer-page__empty">
 				<text class="customer-page__empty-title">正在加载客户数据</text>
 			</view>
@@ -67,10 +70,25 @@
 				<text class="customer-page__empty-copy">客群只保存筛选规则，会员名单始终按当前权限实时查询。</text>
 				<view class="customer-page__empty-command" @tap="openGroupEntry"><text>创建客群</text></view>
 			</view>
+			<view v-else-if="activeTab === 'groups' && activeAudience != null && audienceOverviewEnabled && audienceViewMode === 'overview'" class="customer-page__list customer-page__audience-overview-list">
+				<view v-for="audience in audiences" :key="audience.audienceId" class="customer-page__audience-overview-card" @tap="openAudience(audience)">
+					<view class="customer-page__audience-heading"><text class="customer-page__audience-name">{{ audience.name }}</text><text class="customer-page__audience-total">{{ audience.memberTotal }} 人</text></view>
+					<text class="customer-page__audience-caption">{{ audienceNodeLabel() }}客群人数</text>
+					<view v-if="audience.bars.length > 0" class="customer-page__audience-bars">
+						<view v-for="bar in audience.bars" :key="bar.entityType + '-' + bar.entityId" class="customer-page__audience-bar-row" @tap.stop="drillAudienceNode(audience, bar)">
+							<view class="customer-page__audience-bar-label"><text>{{ bar.name }}</text><text>{{ bar.memberCount }} 人{{ bar.hasChildren ? ' ›' : '' }}</text></view>
+							<view class="customer-page__audience-bar-track"><view class="customer-page__audience-bar-fill" :class="'customer-page__audience-bar-fill--' + bar.colorIndex" :style="{ width: audienceBarWidth(audience, bar) }"></view></view>
+						</view>
+					</view>
+					<view v-else class="customer-page__audience-empty-bars"><text>当前层级没有可继续拆分的组织</text></view>
+				</view>
+			</view>
 			<view v-else-if="activeTab === 'groups' && activeAudience == null" class="customer-page__list">
-				<view v-for="audience in audiences" :key="audience.audienceId" class="customer-page__audience-card" @tap="openAudience(audience)">
-					<text class="customer-page__audience-name">{{ audience.name }}</text>
-					<text class="customer-page__audience-copy">动态客群 · 规则版本 {{ audience.version }}{{ audience.memberCount != null ? ' · ' + audience.memberCount + ' 名成员' : '' }} · 查看成员 ›</text>
+				<view v-for="audience in audiences" :key="audience.audienceId || audience.audienceKey || audience.audienceCode || audience.systemKey || audience.key" class="customer-page__audience-card" :class="['customer-page__audience-card--' + audienceIconKind(audience), audienceIsSystem(audience) ? 'customer-page__audience-card--system' : 'customer-page__audience-card--custom']" @tap="openAudience(audience)">
+					<view class="customer-page__audience-card-stripe"></view>
+					<view class="customer-page__audience-card-icon" :class="'customer-page__audience-card-icon--' + audienceIconKind(audience)"><text>{{ audienceIconText(audience) }}</text></view>
+					<view class="customer-page__audience-card-body"><view class="customer-page__audience-card-title-line"><text class="customer-page__audience-name">{{ audience.name }}</text><text v-if="audienceIsSystem(audience)" class="customer-page__audience-system-label">系统</text></view><text class="customer-page__audience-card-total">{{ audienceCardTotal(audience) }}</text><text class="customer-page__audience-card-rule">{{ audienceRuleDescription(audience) }}</text><text class="customer-page__audience-card-action">点击查看实时成员</text></view>
+					<view class="customer-page__audience-card-summary"><view class="customer-page__audience-card-chevron"><text>›</text></view></view>
 				</view>
 			</view>
 			<view v-else-if="records.length === 0" class="customer-page__empty">
@@ -105,16 +123,15 @@
 						</view>
 					</view>
 				</view>
+				<view v-if="showAudiencePageStatus()" class="customer-page__page-status"><text>{{ audiencePageStatus() }}</text></view>
 			</view>
 		</scroll-view>
 
-		<view class="customer-page__tabs-bottom" role="tablist">
-			<navigator class="customer-page__tab-bottom" url="/src/merchant/pages/warehouse/index" open-type="navigate" role="tab" aria-selected="false"><text>数仓</text></navigator>
-			<view class="customer-page__tab-bottom customer-page__tab-bottom--active" role="tab" aria-selected="true"><text>客户</text></view>
-			<navigator class="customer-page__tab-bottom" url="/src/merchant/pages/workbench/index" open-type="navigate" role="tab" aria-selected="false"><text>工作台</text></navigator>
-			<navigator class="customer-page__tab-bottom" url="/src/merchant/pages/goals/index" open-type="navigate" role="tab" aria-selected="false"><text>目标</text></navigator>
-			<navigator class="customer-page__tab-bottom" url="/src/merchant/pages/profile/index" open-type="navigate" role="tab" aria-selected="false"><text>我的</text></navigator>
-		</view>
+		<MerchantPrimaryTabBar active-key="customers" />
+		<view v-if="activeTab === 'groups'" class="customer-page__floating-action" role="button" aria-label="新建客群" @tap="openGroupEntry"><text>＋</text></view>
+		<view v-else-if="activeTab === 'list'" class="customer-page__floating-action" role="button" aria-label="新建客户" @tap="openCustomerEntry"><text>＋</text></view>
+
+		<view v-if="customerStorePickerVisible" class="customer-page__store-picker-mask" @tap="closeCustomerStorePicker"><view class="customer-page__store-picker" @tap.stop><view class="customer-page__store-picker-head"><text class="customer-page__store-picker-back" @tap="closeCustomerStorePicker">‹</text><view class="customer-page__store-picker-title"><text>选择组织/门店</text><text>仅显示当前数据权限范围内的门店</text></view><text class="customer-page__store-picker-close" @tap="closeCustomerStorePicker">×</text></view><view class="customer-page__store-search-wrap"><input class="customer-page__store-search" type="text" :value="customerStoreKeyword" placeholder="搜索门店" @input="updateCustomerStoreKeyword" /></view><scroll-view scroll-y="true" class="customer-page__store-tree"><view v-for="context in visibleCustomerStoreContexts()" :key="context.contextId" class="customer-page__store-option" :class="{ 'customer-page__store-option--selected': isPendingCustomerStoreContext(context) }" @tap="selectPendingCustomerStoreContext(context)"><view class="customer-page__store-option-type"><text>店</text></view><view class="customer-page__store-option-copy"><text>{{ context.label }}</text><text>门店 · 当前授权范围</text></view><text class="customer-page__store-option-selected">{{ isPendingCustomerStoreContext(context) ? '已选' : '' }}</text></view><view v-if="visibleCustomerStoreContexts().length === 0" class="customer-page__store-empty"><text>没有匹配的门店</text></view></scroll-view><view class="customer-page__store-picker-footer"><text>已选：{{ pendingCustomerStoreLabel() }}</text><view class="customer-page__store-picker-cancel" @tap="closeCustomerStorePicker"><text>取消</text></view><view class="customer-page__store-picker-confirm" @tap="confirmCustomerStoreContext"><text>确定</text></view></view></view></view>
 
 		<view v-if="filterVisible" class="customer-filter">
 			<view class="customer-filter__header">
@@ -176,10 +193,14 @@
 </template>
 
 <script setup lang="uts">
-	import { createMobileCustomerAudience, listMobileCustomerAudiences, queryMobileCustomerAudienceMembers, queryMobileCustomerAudienceOverview, queryMobileCustomers } from '../../api/mobile-customer-client.uts'
+	import { createMobileCustomerAudience, listMobileCustomerAudiences, queryMobileCustomerAudienceMembers, queryMobileCustomerAudienceOverview, queryMobileCustomers } from '../../../shared/api/mobile-customer-client.uts'
+	import MerchantPrimaryTabBar from '../../../shared/components/merchant-primary-tab-bar.uvue'
+	import { ensureMerchantTabAccess } from '../../../shared/platform/merchant-route-guard.uts'
 	import { mobileHttpResultRequiresMerchantLogin } from '../../../shared/api/mobile-http.uts'
-	import { clearMerchantRoot } from '../../platform/mobile-merchant-session.uts'
-	import { openMerchantBootstrapForCustomers, openMerchantCustomerDetail, openMerchantCustomerProfile } from '../../platform/mobile-navigation.uts'
+	import { currentMobilePlatform } from '../../../shared/platform/mobile-platform.uts'
+	import { clearMerchantRoot, currentMerchantRoot } from '../../../shared/platform/mobile-merchant-session.uts'
+	import { switchMobileMerchantContext } from '../../../shared/api/mobile-merchant-session-client.uts'
+	import { openMerchantBootstrapForCustomers, openMerchantCustomerDetail, openMerchantCustomerProfile } from '../../../shared/platform/mobile-navigation.uts'
 	const tabs = [
 		{ key: 'exclusive', label: '专属客户' },
 		{ key: 'groups', label: '我的客群' },
@@ -213,9 +234,10 @@
 	const dateShortcutOptions = [{ value: 'custom', label: '自定义日期' }, { value: 'today', label: '今天' }, { value: 'yesterday', label: '昨天' }, { value: 'this_week', label: '本周' }, { value: 'last_week', label: '上周' }, { value: 'this_month', label: '本月' }, { value: 'last_month', label: '上月' }, { value: 'this_year', label: '本年' }]
 	const birthdayShortcutOptions = [{ value: 'today', label: '今天生日' }, { value: 'this_week', label: '本周生日' }, { value: 'this_month', label: '本月生日' }, { value: 'custom', label: '指定生日' }]
 	const defaultVisibleFieldKeys = ['member_name', 'phone', 'birthday', 'member_level', 'store']
+	const platformUsesNativeCanvas = currentMobilePlatform() === 'MP_WEIXIN'
 
-	const activeTab = ref('exclusive')
-	const activeTabLabel = ref('专属客户')
+	const activeTab = ref('groups')
+	const activeTabLabel = ref('我的客群')
 	const keyword = ref('')
 	const searchApplied = ref(false)
 	const filterVisible = ref(false)
@@ -228,7 +250,17 @@
 	const fieldAliases = ref<any>({})
 	const audiences = ref<Array<any>>([])
 	const activeAudience = ref<any>(null)
+	const audienceOverviewEnabled = ref(false)
+	const audienceViewMode = ref('details')
+	const audienceOverviewNode = ref<any>(null)
+	const audienceOverviewCurrentNode = ref<any>(null)
+	const audienceOverviewBreadcrumbs = ref<Array<any>>([])
+	const recordsPage = ref(1)
+	const recordsTotal = ref(0)
+	const recordsLoadingMore = ref(false)
+	let audienceMemberRequestVersion = 0
 	const loading = ref(false)
+	const refreshing = ref(false)
 	const creatingGroup = ref(false)
 	const loadMessage = ref('')
 	const groupName = ref('')
@@ -243,8 +275,66 @@
 	const listFilterSnapshotOperators = ref<any>({})
 	const listFilterSnapshotDateShortcuts = ref<any>({})
 	const listFilterSnapshotBirthdayShortcuts = ref<any>({})
+	const customerStoreContexts = ref<Array<any>>([])
+	const customerActiveStoreIndex = ref(0)
+	const customerActiveStoreLabel = ref('门店信息加载中')
+	const customerSwitchingStore = ref(false)
+	const customerStoreSwitchMessage = ref('')
+	const customerStorePickerVisible = ref(false)
+	const pendingCustomerStoreContext = ref<any>(null)
+	const customerStoreKeyword = ref('')
+	const systemAudienceOrder = ['system-birthday-this-month', 'system-sleeping-90d', 'system-followup-7d', 'system-invite-30d', 'system-benefit-low-balance', 'birthday_month', 'birthday_today', 'new_month', 'debt', 'sleep']
 
-	onShow(() => loadActiveTab())
+	onShow(() => { if (ensureMerchantTabAccess('customers')) { loadCustomerStoreContext(); loadActiveTab() } })
+
+	function loadCustomerStoreContext() : void {
+		let root = currentMerchantRoot()
+		let contexts = root != null && Array.isArray(root.contexts) ? root.contexts : []
+		let activeId = root != null && root.activeContext != null ? String(root.activeContext.contextId || '') : ''
+		customerStoreContexts.value = contexts
+		let index = 0
+		for (let position = 0; position < contexts.length; position++) if (String(contexts[position].contextId || '') == activeId) { index = position; break }
+		customerActiveStoreIndex.value = index
+		customerActiveStoreLabel.value = contexts.length > 0 ? String(contexts[index].label || '未命名门店') : '暂无可用门店'
+	}
+
+	function openCustomerStorePicker() : void {
+		if (customerSwitchingStore.value || customerStoreContexts.value.length <= 1) return
+		customerStoreKeyword.value = ''
+		pendingCustomerStoreContext.value = customerStoreContexts.value[customerActiveStoreIndex.value] || null
+		customerStorePickerVisible.value = true
+	}
+	function closeCustomerStorePicker() : void { if (!customerSwitchingStore.value) customerStorePickerVisible.value = false }
+	function updateCustomerStoreKeyword(event : any) : void { customerStoreKeyword.value = String(event.detail != null ? event.detail.value || '' : '') }
+	function visibleCustomerStoreContexts() : Array<any> {
+		let keyword = customerStoreKeyword.value.trim()
+		if (keyword.length === 0) return customerStoreContexts.value
+		let result = new Array<any>()
+		for (let index = 0; index < customerStoreContexts.value.length; index++) if (String(customerStoreContexts.value[index].label || '').indexOf(keyword) >= 0) result.push(customerStoreContexts.value[index])
+		return result
+	}
+	function isPendingCustomerStoreContext(context : any) : boolean { return pendingCustomerStoreContext.value != null && String(context.contextId || '') === String(pendingCustomerStoreContext.value.contextId || '') }
+	function selectPendingCustomerStoreContext(context : any) : void { pendingCustomerStoreContext.value = context }
+	function pendingCustomerStoreLabel() : string { return pendingCustomerStoreContext.value == null ? '请选择门店' : String(pendingCustomerStoreContext.value.label || '未命名门店') }
+	function confirmCustomerStoreContext() : void {
+		if (pendingCustomerStoreContext.value == null) return
+		customerStorePickerVisible.value = false
+		switchCustomerStoreContext(pendingCustomerStoreContext.value)
+	}
+	function switchCustomerStoreContext(context : any) : void {
+		if (customerSwitchingStore.value) return
+		let targetContextId = String(context != null ? context.contextId || '' : '')
+		if (targetContextId.length === 0 || targetContextId === String((customerStoreContexts.value[customerActiveStoreIndex.value] || {}).contextId || '')) return
+		customerSwitchingStore.value = true
+		customerStoreSwitchMessage.value = ''
+		switchMobileMerchantContext(targetContextId, (result : any) => {
+			customerSwitchingStore.value = false
+			customerStorePickerVisible.value = false
+			if (!result.ok) { customerStoreSwitchMessage.value = String(result.message || '门店切换失败。'); return }
+			loadCustomerStoreContext()
+			loadActiveTab()
+		})
+	}
 
 	function selectTab(tab : string) {
 		activeAudience.value = null
@@ -340,19 +430,61 @@
 	}
 
 	function openAudience(audience : any) {
+		if (audience == null) return
+		audienceMemberRequestVersion++
+		audienceOverviewNode.value = null
+		audienceOverviewEnabled.value = false
 		activeAudience.value = audience
-		activeTabLabel.value = String(audience != null ? audience.name || '客群成员' : '客群成员')
+		activeTabLabel.value = String(audience.name || '客群成员')
 		records.value = new Array<any>()
-		queryMobileCustomerAudienceOverview(String(audience != null ? audience.audienceId || '' : ''), (result : any) => {
-			if (result.ok && result.body != null && result.body.overview != null) {
-				audience.memberCount = Number(result.body.overview.memberCount || 0)
-			}
-		})
+		audienceOverviewEnabled.value = false
+		audienceViewMode.value = 'details'
 		loadActiveTab()
 	}
 
+	function selectAudienceView(mode : string) {
+		if (!audienceOverviewEnabled.value) return
+		audienceViewMode.value = mode === 'overview' ? 'overview' : 'details'
+		if (audienceViewMode.value == 'details' && activeAudience.value != null) loadActiveTab()
+	}
+
+	function audienceNodeLabel() : string {
+		let name = String(audienceOverviewCurrentNode.value != null ? audienceOverviewCurrentNode.value.name || '' : '')
+		return name.length > 0 ? name + ' · ' : ''
+	}
+
+	function audienceBarWidth(audience : any, bar : any) : string {
+		let max = Number(audience != null ? audience.maxBarValue || 0 : 0)
+		let value = Number(bar != null ? bar.memberCount || 0 : 0)
+		if (max <= 0 || value <= 0) return '0%'
+		return String(Math.max(8, Math.min(100, Math.round(value * 100 / max)))) + '%'
+	}
+
+	function drillAudienceNode(audience : any, bar : any) {
+		if (bar == null) return
+		audienceOverviewNode.value = { nodeType: String(bar.entityType || ''), nodeId: Number(bar.entityId || 0) }
+		if (bar != null && Boolean(bar.hasChildren)) {
+			loadAudienceOverview()
+			return
+		}
+		activeAudience.value = audience
+		audienceViewMode.value = 'details'
+		loadActiveTab()
+	}
+
+	function selectAudienceBreadcrumb(crumb : any) {
+		if (crumb == null) return
+		audienceOverviewNode.value = { nodeType: String(crumb.entityType || ''), nodeId: Number(crumb.entityId || 0) }
+		loadAudienceOverview()
+	}
+
 	function closeAudience() {
+		audienceMemberRequestVersion++
 		activeAudience.value = null
+		audienceOverviewEnabled.value = false
+		audienceOverviewNode.value = null
+		audienceOverviewCurrentNode.value = null
+		audienceOverviewBreadcrumbs.value = []
 		activeTabLabel.value = '我的客群'
 		records.value = new Array<any>()
 		loadActiveTab()
@@ -381,30 +513,20 @@
 		filterVisible.value = true
 	}
 
+	function onPullRefresh() : void { if (refreshing.value) return; refreshing.value = true; loadActiveTab(); setTimeout(() => { refreshing.value = false }, 900) }
+
 	function loadActiveTab() {
 		loading.value = true
 		loadMessage.value = ''
 		if (activeTab.value == 'groups') {
 			if (activeAudience.value != null) {
-				queryMobileCustomerAudienceMembers(String(activeAudience.value.audienceId || ''), {
-					page: 1,
-					limit: 30,
-					keyword: keyword.value.trim()
-				}, (result : any) => {
-					loading.value = false
-					if (!result.ok) { if (handleExpiredMerchantSession(result)) return; loadMessage.value = String(result.message || '客群成员加载失败。'); return }
-					records.value = Array.isArray(result.body.records) ? result.body.records : []
-					let display = result.body.displayConfiguration || {}
-					let savedVisible = Array.isArray(display.visibleFields) ? display.visibleFields : []
-					visibleFieldKeys.value = savedVisible.length > 0 ? savedVisible : defaultVisibleFieldKeys
-					fieldAliases.value = display.fieldAliases || {}
-				})
+				loadAudienceMemberPage(1, false)
 				return
 			}
 			listMobileCustomerAudiences((result : any) => {
 				loading.value = false
 				if (!result.ok) { if (handleExpiredMerchantSession(result)) return; loadMessage.value = String(result.message || '客群加载失败。'); return }
-				audiences.value = Array.isArray(result.body.audiences) ? result.body.audiences : []
+				audiences.value = normalizeAudiences(result.body != null && Array.isArray(result.body.audiences) ? result.body.audiences : [])
 			})
 			return
 		}
@@ -423,6 +545,159 @@
 			visibleFieldKeys.value = savedVisible.length > 0 ? savedVisible : defaultVisibleFieldKeys
 			fieldAliases.value = display.fieldAliases || {}
 		})
+	}
+
+	function loadAudienceMemberPage(page : number, append : boolean) {
+		if (activeAudience.value == null || (append && recordsLoadingMore.value)) return
+		let requestVersion = ++audienceMemberRequestVersion
+		if (append) recordsLoadingMore.value = true
+		else {
+			loading.value = true
+			recordsLoadingMore.value = false
+		}
+		let memberPayload : any = { page: page, limit: 10, keyword: keyword.value.trim() }
+		if (audienceOverviewNode.value != null) {
+			memberPayload.nodeType = String(audienceOverviewNode.value.nodeType || '')
+			memberPayload.nodeId = Number(audienceOverviewNode.value.nodeId || 0)
+		}
+		queryMobileCustomerAudienceMembers(String(activeAudience.value.audienceId || ''), memberPayload, (result : any) => {
+			if (requestVersion != audienceMemberRequestVersion) return
+			loading.value = false
+			recordsLoadingMore.value = false
+			if (!result.ok) { if (handleExpiredMerchantSession(result)) return; loadMessage.value = String(result.message || '客群成员加载失败。'); return }
+			let incoming = Array.isArray(result.body.records) ? result.body.records : []
+			records.value = append ? records.value.concat(incoming) : incoming
+			recordsPage.value = page
+			recordsTotal.value = Math.max(records.value.length, Number(result.body.total || 0))
+			let display = result.body.displayConfiguration || {}
+			let savedVisible = Array.isArray(display.visibleFields) ? display.visibleFields : []
+			visibleFieldKeys.value = savedVisible.length > 0 ? savedVisible : defaultVisibleFieldKeys
+			fieldAliases.value = display.fieldAliases || {}
+		})
+	}
+
+	function loadMoreRecords() {
+		if (activeTab.value != 'groups' || activeAudience.value == null || audienceViewMode.value != 'details') return
+		if (loading.value || recordsLoadingMore.value || records.value.length >= recordsTotal.value) return
+		loadAudienceMemberPage(recordsPage.value + 1, true)
+	}
+
+	function showAudiencePageStatus() : boolean {
+		return activeTab.value == 'groups' && activeAudience.value != null && audienceViewMode.value == 'details' && recordsTotal.value > 0
+	}
+
+	function audiencePageStatus() : string {
+		if (recordsLoadingMore.value) return '正在加载更多客户'
+		if (records.value.length >= recordsTotal.value) return '已显示全部 ' + String(recordsTotal.value) + ' 位客户'
+		return '已显示 ' + String(records.value.length) + ' / ' + String(recordsTotal.value) + ' 位客户，继续下拉加载'
+	}
+
+	function loadAudienceOverview(audience : any = null) {
+		loading.value = true
+		loadMessage.value = ''
+		let payload : any = {}
+		if (audienceOverviewNode.value != null) {
+			payload.nodeType = String(audienceOverviewNode.value.nodeType || '')
+			payload.nodeId = Number(audienceOverviewNode.value.nodeId || 0)
+		}
+		let selectedAudience = audience != null ? audience : activeAudience.value
+		if (selectedAudience != null) payload.audienceId = String(selectedAudience.audienceId || selectedAudience.audienceKey || selectedAudience.audienceCode || '')
+		queryMobileCustomerAudienceOverview(payload, (result : any) => {
+			loading.value = false
+			if (!result.ok) { if (handleExpiredMerchantSession(result)) return; loadMessage.value = String(result.message || '客群概况加载失败。'); return }
+			let overview = result.body != null ? result.body.audienceOverview || {} : {}
+			audienceOverviewEnabled.value = Boolean(overview.entry != null ? overview.entry.overviewEnabled : false)
+			if (audienceOverviewEnabled.value && audienceViewMode.value != 'overview') audienceViewMode.value = 'overview'
+			if (!audienceOverviewEnabled.value) audienceViewMode.value = 'details'
+			audienceOverviewCurrentNode.value = overview.currentNode || null
+			audienceOverviewBreadcrumbs.value = Array.isArray(overview.breadcrumbs) ? overview.breadcrumbs : []
+			audiences.value = Array.isArray(overview.audiences) ? overview.audiences : []
+			if (!audienceOverviewEnabled.value && audience != null) loadActiveTab()
+		})
+	}
+
+	function showCustomerSearch() : boolean {
+		return activeTab.value != 'groups' || activeAudience.value != null || audienceViewMode.value == 'details'
+	}
+
+	function audienceIconKind(audience : any) : string {
+		let audienceKey = audience != null ? String(audience.audienceKey || audience.audienceCode || audience.systemKey || audience.key || '') : ''
+		if (audienceKey == 'system-birthday-this-month' || audienceKey == 'birthday_month' || audienceKey == 'birthday_today') return 'birthday-month'
+		if (audienceKey == 'system-sleeping-90d' || audienceKey == 'sleep') return 'sleep'
+		if (audienceKey == 'system-followup-7d') return 'followup'
+		if (audienceKey == 'system-invite-30d') return 'invite'
+		if (audienceKey == 'system-benefit-low-balance') return 'low-balance'
+		if (audienceKey == 'new_month') return 'new'
+		if (audienceKey == 'debt') return 'debt'
+		let filters = Array.isArray(audience != null && audience.validatedRule != null ? audience.validatedRule.filters : null) ? audience.validatedRule.filters : []
+		let field = String(filters.length > 0 && filters[0] != null ? filters[0].field_key || '' : '')
+		if (field == 'latest_visit_date') return 'sleep'
+		if (field == 'birthday_month_day') return 'birthday'
+		return 'group'
+	}
+
+	function audienceIconText(audience : any) : string {
+		let kind = audienceIconKind(audience)
+		if (kind == 'birthday-month') return '生'
+		if (kind == 'new') return '新'
+		if (kind == 'debt') return '欠'
+		if (kind == 'sleep') return '眠'
+		if (kind == 'followup') return '访'
+		if (kind == 'invite') return '邀'
+		if (kind == 'low-balance') return '卡'
+		if (kind == 'birthday') return '生'
+		return '群'
+	}
+
+	function audienceCardTotal(audience : any) : string {
+		let total = audience != null ? audience.memberTotal : null
+		if (total == null || String(total).length == 0) return '--'
+		return wholeNumber(total) + ' 人'
+	}
+
+	function audienceIsSystem(audience : any) : boolean {
+		let type = String(audience != null ? audience.type || audience.audienceType || '' : '').toUpperCase()
+		return type == 'SYSTEM' || (audience != null && (audience.system === true || String(audience.system || '') == '1' || audience.isSystem === true))
+	}
+
+	function audienceRuleDescription(audience : any) : string {
+		if (audience == null) return '按当前权限范围实时筛选'
+		let description = String(audience.description || audience.ruleDescription || '')
+		if (description.length > 0) return description
+		let key = String(audience.audienceKey || audience.audienceCode || audience.systemKey || audience.key || '')
+		const descriptions : any = {
+			'system-birthday-this-month': '生日在本月的客户',
+			'system-sleeping-90d': '超过90天未消费的客户',
+			'system-followup-7d': '服务完成后超过7天未回访的客户',
+			'system-invite-30d': '近30天到店且近7天未到店的客户',
+			'system-benefit-low-balance': '卡项权益余额低于门店阈值的客户',
+			birthday_today: '生日为今天的客户',
+			birthday_month: '生日在本月的客户',
+			new_month: '本月首次产生有效现金业绩的客户',
+			debt: '存在未结清欠款的客户',
+			sleep: '超过90天未消费的客户'
+		}
+		return String(descriptions[key] || (audienceIsSystem(audience) ? '系统规则实时筛选' : '按已保存规则实时筛选'))
+	}
+
+	function normalizeAudiences(source : Array<any>) : Array<any> {
+		let systems = new Array<any>()
+		let customs = new Array<any>()
+		for (let index = 0; index < source.length; index++) {
+			let audience = source[index]
+			if (audienceIsSystem(audience)) systems.push(audience)
+			else customs.push(audience)
+		}
+		systems.sort((left : any, right : any) => {
+			let leftKey = String(left != null ? left.audienceKey || left.audienceCode || left.systemKey || left.key || '' : '')
+			let rightKey = String(right != null ? right.audienceKey || right.audienceCode || right.systemKey || right.key || '' : '')
+			let leftIndex = systemAudienceOrder.indexOf(leftKey)
+			let rightIndex = systemAudienceOrder.indexOf(rightKey)
+			if (leftIndex < 0) leftIndex = 99
+			if (rightIndex < 0) rightIndex = 99
+			return leftIndex - rightIndex
+		})
+		return systems.concat(customs)
 	}
 
 	function customerName(record : any) : string { let value = String(record != null ? record.name || '' : ''); return value.length > 0 ? value : '未命名客户' }
@@ -760,10 +1035,69 @@
 	.customer-page__search-input {
 		min-width: 0;
 		flex: 1;
+		height: 20px;
+		padding: 0px;
 		margin-left: 8px;
+		border-width: 0;
+		border-style: none;
+		border-color: transparent;
+		outline-style: none;
+		background-color: transparent;
 		font-size: 14px;
 		line-height: 20px;
 		color: #303133;
+	}
+
+	.customer-page__search-input input {
+		padding: 0px;
+		border-width: 0;
+		border-style: none;
+		border-color: transparent;
+		outline-style: none;
+		background-color: transparent;
+		font-size: 14px;
+		line-height: 20px;
+		color: #303133;
+	}
+
+	.customer-page__search .uni-input-input {
+		box-sizing: border-box;
+		width: 100%;
+		height: 22px;
+		padding: 0px;
+		border-width: 0px !important;
+		border-style: none !important;
+		outline: none !important;
+		background: transparent;
+		font-size: 14px;
+		line-height: 22px;
+		color: #303133;
+	}
+
+	.customer-page__search .uni-input-wrapper {
+		display: flex;
+		align-items: center;
+		height: 22px;
+		border-width: 0px;
+		background: transparent;
+	}
+
+	.customer-page__search :deep(.uni-input-input) {
+		box-sizing: border-box;
+		width: 100%;
+		height: 22px;
+		padding: 0px;
+		border-width: 0px !important;
+		border-style: none !important;
+		outline: none !important;
+		background: transparent;
+	}
+
+	:deep(.uni-input-input) {
+		border-width: 0px !important;
+		border-style: none !important;
+		outline: none !important;
+		background: transparent;
 	}
 
 	.customer-page__filter-button {
@@ -1039,9 +1373,29 @@
 		padding: 12px 16px 28px 16px;
 	}
 
-	.customer-page__tabs-bottom { display: flex; min-height: 64px; flex-direction: row; align-items: stretch; border-top-width: 1px; border-top-style: solid; border-top-color: #dde4ed; background-color: #ffffff; }
-	.customer-page__tab-bottom { display: flex; min-width: 0; flex: 1; flex-direction: row; align-items: center; justify-content: center; border-top-width: 2px; border-top-style: solid; border-top-color: #ffffff; font-size: 12px; font-weight: 600; color: #526071; }
-	.customer-page__tab-bottom--active { border-top-color: #1677cc; background-color: #f7fbff; color: #1677cc; }
+	.customer-page__tabs-bottom { position: fixed; z-index: 40; right: 0; bottom: 0; left: 0; display: flex; min-height: 72px; flex-direction: row; padding: 6px 0 10px 0; border-top-width: 1px; border-top-style: solid; border-top-color: rgba(216, 226, 239, 0.92); background-color: rgba(255, 255, 255, 0.97); box-shadow: 0 -10px 26px rgba(35, 70, 110, 0.1); }
+	.customer-page__tab-bottom { position: relative; display: flex; min-width: 0; flex: 1; flex-direction: column; align-items: center; justify-content: center; background-color: transparent; font-size: 11px; font-weight: 600; line-height: 15px; color: #728198; }
+	.customer-page__tab-bottom text { margin-top: 4px; font-size: 11px; line-height: 15px; color: #728198; text-align: center; }
+	.customer-page__tab-bottom--active { background-color: transparent; color: #1677cc; }
+	.customer-page__tab-bottom--active text { font-weight: 700; color: #1677cc; }
+	.customer-page__tab-icon { position: relative; display: flex; width: 24px; height: 24px; align-items: center; justify-content: center; border-radius: 12px; background-color: #edf3f8; box-shadow: inset 0 0 0 1px rgba(214, 225, 238, 0.9); }
+	.customer-page__tab-icon::before, .customer-page__tab-icon::after { position: absolute; display: block; content: ''; box-sizing: border-box; }
+	.customer-page__tab-bottom--active .customer-page__tab-icon { background-color: #1677cc; box-shadow: 0 6px 14px rgba(22, 119, 204, 0.22); }
+	.customer-page__tab-bottom--warehouse .customer-page__tab-icon::before { width: 15px; height: 12px; border-width: 2px; border-style: solid; border-color: #7d91a8; border-radius: 3px; }
+	.customer-page__tab-bottom--warehouse .customer-page__tab-icon::after { width: 9px; height: 2px; background-color: #7d91a8; box-shadow: 0 -4px 0 #7d91a8, 0 4px 0 #7d91a8; }
+	.customer-page__tab-bottom--customers .customer-page__tab-icon::before { width: 8px; height: 8px; margin-top: -6px; border-radius: 4px; background-color: #7d91a8; box-shadow: 7px 3px 0 -1px #7d91a8; }
+	.customer-page__tab-bottom--customers .customer-page__tab-icon::after { width: 17px; height: 8px; margin-top: 8px; border-radius: 8px 8px 3px 3px; background-color: #7d91a8; }
+	.customer-page__tab-bottom--workbench .customer-page__tab-icon::before { width: 15px; height: 15px; border-width: 2px; border-style: solid; border-color: #7d91a8; border-radius: 3px; }
+	.customer-page__tab-bottom--workbench .customer-page__tab-icon::after { width: 2px; height: 15px; background-color: #7d91a8; box-shadow: 6px 0 0 #7d91a8, -6px 0 0 #7d91a8; }
+	.customer-page__tab-bottom--goals .customer-page__tab-icon::before { width: 16px; height: 16px; border-width: 2px; border-style: solid; border-color: #7d91a8; border-radius: 8px; }
+	.customer-page__tab-bottom--goals .customer-page__tab-icon::after { width: 8px; height: 5px; border-left-width: 2px; border-left-style: solid; border-left-color: #7d91a8; border-bottom-width: 2px; border-bottom-style: solid; border-bottom-color: #7d91a8; transform: rotate(-45deg); }
+	.customer-page__tab-bottom--profile .customer-page__tab-icon::before { width: 8px; height: 8px; margin-top: -6px; border-radius: 4px; background-color: #7d91a8; }
+	.customer-page__tab-bottom--profile .customer-page__tab-icon::after { width: 15px; height: 8px; margin-top: 8px; border-radius: 8px 8px 3px 3px; background-color: #7d91a8; }
+	.customer-page__tab-bottom--active .customer-page__tab-icon::before { border-color: #ffffff; background-color: transparent; }
+	.customer-page__tab-bottom--active .customer-page__tab-icon::after { border-color: #ffffff; background-color: #ffffff; box-shadow: 0 -4px 0 #ffffff, 0 4px 0 #ffffff; }
+	.customer-page__tab-bottom--active.customer-page__tab-bottom--customers .customer-page__tab-icon::before, .customer-page__tab-bottom--active.customer-page__tab-bottom--customers .customer-page__tab-icon::after, .customer-page__tab-bottom--active.customer-page__tab-bottom--profile .customer-page__tab-icon::before, .customer-page__tab-bottom--active.customer-page__tab-bottom--profile .customer-page__tab-icon::after { background-color: #ffffff; box-shadow: none; }
+	.customer-page__tab-bottom--active.customer-page__tab-bottom--goals .customer-page__tab-icon::before { background-color: transparent; }
+	.customer-page__tab-bottom--active.customer-page__tab-bottom--goals .customer-page__tab-icon::after { background-color: transparent; box-shadow: none; }
 
 	.customer-page__customer-card,
 	.customer-page__audience-card {
@@ -1159,4 +1513,141 @@
 		background-color: #f2f4f7;
 		color: #98a2b3;
 	}
+
+	/* Merchant visual shell: keep existing customer behavior while sharing the
+	 * warehouse page's mobile spacing, card treatment, and fixed icon tabbar. */
+	.customer-page { background-color: #f6f9fc; }
+	.customer-page__header { padding: 20px 18px 12px 18px; border-bottom-width: 0; background-color: transparent; }
+	.customer-page__eyebrow { display: none; }
+	.customer-page__title-row { margin-top: 0; align-items: flex-end; }
+	.customer-page__title { font-size: 20px; line-height: 28px; color: #173451; }
+	.customer-page__store { display: flex; min-width: 0; max-width: 166px; flex-direction: row; align-items: center; justify-content: flex-end; padding: 6px 9px; border-radius: 8px; background-color: #f2f7fc; }
+	.customer-page__store-copy { display: flex; min-width: 0; flex-direction: column; align-items: flex-end; }
+	.customer-page__store-label { font-size: 10px; font-weight: 600; line-height: 15px; color: #71839a; }
+	.customer-page__store-name { max-width: 116px; overflow: hidden; font-size: 12px; font-weight: 700; line-height: 18px; color: #38516a; text-overflow: ellipsis; white-space: nowrap; }
+	.customer-page__store-action { flex-shrink: 0; margin-left: 7px; font-size: 11px; font-weight: 700; color: #1677cc; }
+	.customer-page__store-error { margin: 8px 18px 0 18px; padding: 8px 10px; border-radius: 8px; background-color: #fff2f0; font-size: 12px; line-height: 18px; color: #b14b44; }
+	.customer-page__header-actions { justify-content: flex-end; margin-top: 10px; }
+	.customer-page__new-group, .customer-page__new-customer { min-height: 32px; border-radius: 8px; }
+	.customer-page__tabs { min-height: 42px; margin: 0 18px; padding: 0; border-bottom-color: #dfe8f2; background-color: transparent; }
+	.customer-page__tab { font-size: 13px; color: #71839a; }
+	.customer-page__tab--active { border-bottom-color: #1677cc; color: #1677cc; }
+	.customer-page__tab-action { display: flex; height: 36px; flex-direction: row; align-items: center; justify-content: center; margin: 10px 18px 0 18px; border-radius: 10px; background-color: #eaf3ff; font-size: 13px; font-weight: 700; line-height: 20px; color: #1677cc; }
+	.customer-page__tab-action-icon { margin-right: 5px; font-size: 20px; font-weight: 600; line-height: 20px; color: #1677cc; }
+	.customer-page__floating-action { position: fixed; z-index: 105; right: 18px; bottom: 84px; display: flex; width: 54px; height: 54px; flex-direction: row; align-items: center; justify-content: center; border-radius: 27px; background-color: #7b4ff0; box-shadow: 0 8px 18px rgba(92, 58, 193, 0.32); }
+	.customer-page__floating-action text { margin-top: -2px; font-size: 34px; font-weight: 300; line-height: 38px; color: #ffffff; }
+	.customer-page__query-bar { padding: 12px 18px 8px 18px; background-color: transparent; }
+	.customer-page__search { height: 40px; border-width: 1px; border-style: solid; border-color: #e3eaf2; border-radius: 12px; background-color: #ffffff; box-shadow: 0 5px 14px rgba(60, 88, 130, 0.06); }
+	.customer-page__search-input { height: 22px; padding: 0px; border-width: 0; border-style: none; border-color: transparent; outline-style: none; background-color: transparent; font-size: 13px; line-height: 22px; color: #26384d; }
+	.customer-page__search-input input { padding: 0px; border-width: 0; border-style: none; border-color: transparent; outline-style: none; background-color: transparent; font-size: 13px; line-height: 22px; color: #26384d; }
+	.customer-page__search .uni-input-input { box-sizing: border-box; width: 100%; height: 22px; padding: 0px; border-width: 0px !important; border-style: none !important; outline: none !important; background: transparent; font-size: 13px; line-height: 22px; color: #26384d; }
+	.customer-page__search .uni-input-wrapper { display: flex; align-items: center; height: 22px; border-width: 0px; background: transparent; }
+	.customer-page__search :deep(.uni-input-input) { box-sizing: border-box; width: 100%; height: 22px; padding: 0px; border-width: 0px !important; border-style: none !important; outline: none !important; background: transparent; }
+	:deep(.uni-input-input) { border-width: 0px !important; border-style: none !important; outline: none !important; background: transparent; }
+	.customer-page__search-input input::placeholder { color: #9aa8b6; }
+	.customer-page__filter-button, .customer-page__field-settings { height: 36px; border-width: 0; border-radius: 8px; background-color: #ffffff; box-shadow: 0 4px 12px rgba(60, 88, 130, 0.07); }
+	.customer-page__scope-row { min-height: 30px; padding: 0 18px; background-color: transparent; }
+	.customer-page__scope-label { font-size: 12px; color: #71839a; }
+	.customer-page__audience-tabs { display: flex; height: 38px; flex-direction: row; align-items: center; margin: 0 18px; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #dfe8f2; background-color: transparent; }
+	.customer-page__audience-tab { display: flex; height: 38px; min-width: 64px; flex-direction: row; align-items: center; justify-content: center; margin-right: 18px; border-bottom-width: 2px; border-bottom-style: solid; border-bottom-color: transparent; font-size: 13px; font-weight: 600; line-height: 20px; color: #71839a; }
+	.customer-page__audience-tab--active { border-bottom-color: #1677cc; color: #1677cc; }
+	.customer-page__audience-breadcrumbs { display: flex; min-height: 28px; margin: 0 18px; white-space: nowrap; }
+	.customer-page__audience-breadcrumbs-inner { display: flex; min-height: 28px; flex-direction: row; align-items: center; }
+	.customer-page__audience-breadcrumb { font-size: 11px; line-height: 18px; color: #5e86a5; }
+	.customer-page__content { padding: 8px 0 104px 0; }
+	.customer-page__list { padding: 8px 18px 24px 18px; }
+	.customer-page__customer-card { margin-bottom: 10px; padding: 14px; border-width: 0; border-radius: 8px; box-shadow: 0 8px 20px rgba(60, 88, 130, 0.08); }
+	.customer-page__audience-card { display: flex; min-height: 76px; flex-direction: row; align-items: center; margin-bottom: 10px; padding: 13px 14px; border-width: 0; border-radius: 8px; background-color: #ffffff; box-shadow: 0 8px 20px rgba(60, 88, 130, 0.08); }
+	.customer-page__audience-card-icon { display: flex; width: 42px; height: 42px; flex-shrink: 0; flex-direction: row; align-items: center; justify-content: center; border-radius: 8px; font-size: 17px; font-weight: 700; line-height: 20px; }
+	.customer-page__audience-card-icon--sleep { background-color: #eaf1ff; color: #4a72c5; }
+	.customer-page__audience-card-icon--birthday { background-color: #fff2df; color: #c57a28; }
+	.customer-page__audience-card-icon--group { background-color: #e7f5ee; color: #22865f; }
+	.customer-page__audience-card-body { display: flex; min-width: 0; flex: 1; flex-direction: column; margin-left: 12px; }
+	.customer-page__audience-card-body .customer-page__audience-name { overflow: hidden; font-size: 15px; font-weight: 700; line-height: 22px; text-overflow: ellipsis; white-space: nowrap; color: #26384d; }
+	.customer-page__audience-card-body .customer-page__audience-copy { margin-top: 3px; font-size: 12px; line-height: 18px; color: #71839a; }
+	.customer-page__audience-card-summary { display: flex; flex-shrink: 0; flex-direction: row; align-items: center; margin-left: 10px; }
+	.customer-page__audience-card-total { font-size: 15px; font-weight: 700; line-height: 22px; color: #1677cc; }
+	.customer-page__audience-card-chevron { margin-left: 7px; font-size: 21px; line-height: 24px; color: #9eacbb; }
+	.customer-page__audience-overview-list { padding-top: 10px; }
+	.customer-page__audience-overview-card { display: flex; flex-direction: column; padding: 15px 14px 14px 14px; margin-bottom: 12px; border-width: 0; border-radius: 8px; background-color: #ffffff; box-shadow: 0 8px 20px rgba(60, 88, 130, 0.08); }
+	.customer-page__audience-heading { display: flex; min-width: 0; flex-direction: row; align-items: center; justify-content: space-between; }
+	.customer-page__audience-total { flex-shrink: 0; margin-left: 12px; font-size: 16px; font-weight: 700; line-height: 22px; color: #1677cc; }
+	.customer-page__audience-caption { margin-top: 3px; font-size: 11px; line-height: 17px; color: #71839a; }
+	.customer-page__audience-bars { display: flex; flex-direction: column; margin-top: 13px; padding-top: 10px; border-top-width: 1px; border-top-style: solid; border-top-color: #edf1f5; }
+	.customer-page__audience-bar-row { display: flex; flex-direction: column; margin-top: 9px; }
+	.customer-page__audience-bar-row:first-child { margin-top: 0; }
+	.customer-page__audience-bar-label { display: flex; min-width: 0; flex-direction: row; align-items: center; justify-content: space-between; margin-bottom: 5px; font-size: 12px; line-height: 18px; color: #526071; }
+	.customer-page__audience-bar-label text:first-child { min-width: 0; flex: 1; padding-right: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.customer-page__audience-bar-label text:last-child { flex-shrink: 0; font-weight: 600; color: #4e637b; }
+	.customer-page__audience-bar-track { display: flex; height: 12px; overflow: hidden; border-radius: 3px; background-color: #edf2f7; }
+	.customer-page__audience-bar-fill { display: flex; height: 12px; min-width: 0; border-radius: 3px; background-color: #1677cc; }
+	.customer-page__audience-bar-fill--0 { background-color: #1677cc; }
+	.customer-page__audience-bar-fill--1 { background-color: #21a179; }
+	.customer-page__audience-bar-fill--2 { background-color: #d6971c; }
+	.customer-page__audience-bar-fill--3 { background-color: #7c63d6; }
+	.customer-page__audience-bar-fill--4 { background-color: #d76b45; }
+	.customer-page__audience-bar-fill--5 { background-color: #2d9bb1; }
+	.customer-page__audience-empty-bars { display: flex; min-height: 44px; flex-direction: row; align-items: center; margin-top: 12px; padding: 0 11px; border-radius: 5px; background-color: #f6f9fc; font-size: 12px; color: #8493a5; }
+	.customer-page__page-status { display: flex; min-height: 38px; flex-direction: row; align-items: center; justify-content: center; padding: 0 8px 8px 8px; font-size: 11px; line-height: 17px; color: #8493a5; }
+	.customer-page__empty { margin: 12px 18px 0 18px; padding: 18px; border-left-width: 0; border-radius: 8px; background-color: #ffffff; box-shadow: 0 8px 20px rgba(60, 88, 130, 0.08); }
+	.customer-page--native-mini .customer-page__header { padding-top: 84px; }
+	.customer-page__store-picker-mask { position: fixed; z-index: 110; top: 0; right: 0; bottom: 0; left: 0; display: flex; background-color: rgba(19, 37, 60, 0.42); }
+	.customer-page__store-picker { display: flex; min-height: 0; flex: 1; flex-direction: column; padding: 18px 16px 24px 16px; background-color: #ffffff; }
+	.customer-page__store-picker-head { display: flex; min-height: 42px; flex-direction: row; align-items: center; justify-content: space-between; }
+	.customer-page__store-picker-back, .customer-page__store-picker-close { display: flex; width: 32px; height: 32px; flex-shrink: 0; flex-direction: row; align-items: center; justify-content: center; font-size: 28px; font-weight: 400; line-height: 28px; color: #40546b; }
+	.customer-page__store-picker-title { display: flex; min-width: 0; flex: 1; flex-direction: column; align-items: center; padding: 0 8px; }
+	.customer-page__store-picker-title > text:first-child { font-size: 17px; font-weight: 800; line-height: 24px; color: #10243b; }
+	.customer-page__store-picker-title > text:last-child { margin-top: 1px; font-size: 11px; line-height: 16px; color: #8493a5; }
+	.customer-page__store-search-wrap { display: flex; height: 42px; flex-direction: row; align-items: center; margin-top: 14px; padding: 0 12px; border-radius: 12px; background-color: #f4f7fb; }
+	.customer-page__store-search { width: 100%; height: 40px; font-size: 14px; color: #26384d; }
+	.customer-page__store-tree { min-height: 0; flex: 1; margin-top: 12px; }
+	.customer-page__store-option { display: flex; min-height: 62px; flex-direction: row; align-items: center; padding: 0 12px; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #edf1f5; }
+	.customer-page__store-option--selected { background-color: #f1f8ff; }
+	.customer-page__store-option-type { display: flex; width: 28px; height: 28px; flex-shrink: 0; flex-direction: row; align-items: center; justify-content: center; border-radius: 8px; background-color: #e7f3ff; font-size: 12px; font-weight: 800; color: #1677cc; }
+	.customer-page__store-option-copy { display: flex; min-width: 0; flex: 1; flex-direction: column; margin-left: 10px; }
+	.customer-page__store-option-copy > text:first-child { overflow: hidden; font-size: 14px; font-weight: 700; line-height: 21px; color: #26384d; text-overflow: ellipsis; white-space: nowrap; }
+	.customer-page__store-option-copy > text:last-child { margin-top: 1px; font-size: 11px; line-height: 16px; color: #8493a5; }
+	.customer-page__store-option-selected { flex-shrink: 0; margin-left: 8px; font-size: 12px; font-weight: 700; color: #1677cc; }
+	.customer-page__store-empty { display: flex; min-height: 88px; flex-direction: row; align-items: center; justify-content: center; font-size: 13px; color: #8493a5; }
+	.customer-page__store-picker-footer { display: flex; min-height: 56px; flex-direction: row; align-items: center; padding-top: 14px; border-top-width: 1px; border-top-style: solid; border-top-color: #edf1f5; }
+	.customer-page__store-picker-footer > text { min-width: 0; flex: 1; overflow: hidden; font-size: 12px; line-height: 18px; color: #5f7185; text-overflow: ellipsis; white-space: nowrap; }
+	.customer-page__store-picker-cancel, .customer-page__store-picker-confirm { display: flex; height: 38px; flex-shrink: 0; flex-direction: row; align-items: center; justify-content: center; margin-left: 8px; padding: 0 14px; border-radius: 10px; font-size: 13px; font-weight: 700; }
+	.customer-page__store-picker-cancel { background-color: #f3f6fa; color: #5f7185; }
+	.customer-page__store-picker-confirm { background-color: #1677cc; color: #ffffff; }
+
+	/* System audience cards: server-defined rules stay read-only while members
+	 * remain a live, permission-scoped query opened by tapping the card. */
+	.customer-page__audience-card { position: relative; display: flex; min-height: 116px; flex-direction: row; align-items: center; overflow: hidden; margin-bottom: 12px; padding: 17px 14px 16px 15px; border-width: 0; border-radius: 14px; background-color: #ffffff; box-shadow: 0 9px 24px rgba(77, 64, 132, 0.10); }
+	.customer-page__audience-card-stripe { position: absolute; top: 0; right: 0; left: 0; height: 5px; background-color: #8a7bd0; }
+	.customer-page__audience-card--custom .customer-page__audience-card-stripe { background-color: #a7b8ca; }
+	.customer-page__audience-card--birthday-month { background-color: #ffffff; }
+	.customer-page__audience-card--birthday-month .customer-page__audience-card-stripe { background-color: #9a64bc; }
+	.customer-page__audience-card--sleep { background-color: #ffffff; }
+	.customer-page__audience-card--sleep .customer-page__audience-card-stripe { background-color: #5678bf; }
+	.customer-page__audience-card--followup { background-color: #ffffff; }
+	.customer-page__audience-card--followup .customer-page__audience-card-stripe { background-color: #ba794d; }
+	.customer-page__audience-card--invite { background-color: #ffffff; }
+	.customer-page__audience-card--invite .customer-page__audience-card-stripe { background-color: #4e87b6; }
+	.customer-page__audience-card--low-balance { background-color: #ffffff; }
+	.customer-page__audience-card--low-balance .customer-page__audience-card-stripe { background-color: #8869ba; }
+	.customer-page__audience-card-icon { display: flex; width: 54px; height: 54px; flex-shrink: 0; flex-direction: row; align-items: center; justify-content: center; border-radius: 27px; font-size: 20px; font-weight: 800; line-height: 24px; }
+	.customer-page__audience-card-icon--birthday-today { background-color: #eee9ff; color: #7668bd; }
+	.customer-page__audience-card-icon--birthday-month { background-color: #f3e8ff; color: #9a64bc; }
+	.customer-page__audience-card-icon--new { background-color: #e5f5ef; color: #2e8a70; }
+	.customer-page__audience-card-icon--debt { background-color: #fff0e7; color: #bd7253; }
+	.customer-page__audience-card-icon--sleep { background-color: #e7efff; color: #5678bf; }
+	.customer-page__audience-card-icon--followup { background-color: #fff2e5; color: #ba794d; }
+	.customer-page__audience-card-icon--invite { background-color: #e9f5ff; color: #4e87b6; }
+	.customer-page__audience-card-icon--low-balance { background-color: #f4edff; color: #8869ba; }
+	.customer-page__audience-card-icon--group { background-color: #edf1f6; color: #63778d; }
+	.customer-page__audience-card-body { display: flex; min-width: 0; flex: 1; flex-direction: column; margin-left: 13px; }
+	.customer-page__audience-card-title-line { display: flex; min-width: 0; flex-direction: row; align-items: center; }
+	.customer-page__audience-card-body .customer-page__audience-name { min-width: 0; overflow: hidden; font-size: 15px; font-weight: 800; line-height: 21px; text-overflow: ellipsis; white-space: nowrap; color: #332b56; }
+	.customer-page__audience-system-label { flex-shrink: 0; margin-left: 6px; padding: 2px 6px; border-radius: 7px; background-color: #f0ecff; font-size: 9px; line-height: 14px; color: #7668bd; }
+	.customer-page__audience-card-total { display: block; margin-top: 3px; font-size: 24px; font-weight: 800; line-height: 29px; color: #433a76; }
+	.customer-page__audience-card-rule { display: block; margin-top: 2px; overflow: hidden; font-size: 10px; line-height: 15px; text-overflow: ellipsis; white-space: nowrap; color: #8d879f; }
+	.customer-page__audience-card-action { display: block; margin-top: 2px; font-size: 9px; line-height: 13px; color: #b0aabd; }
+	.customer-page__audience-card-summary { display: flex; flex-shrink: 0; flex-direction: row; align-items: center; margin-left: 8px; }
+	.customer-page__audience-card-chevron { display: flex; width: 30px; height: 30px; flex-direction: row; align-items: center; justify-content: center; border-radius: 15px; background-color: #f0ecff; }
+	.customer-page__audience-card-chevron text { margin-left: 1px; font-size: 22px; line-height: 24px; color: #7668bd; }
 </style>

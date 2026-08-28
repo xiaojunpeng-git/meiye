@@ -10,56 +10,47 @@
 		<view v-if="storeSwitchMessage.length > 0" class="merchant-workbench__store-error" role="alert"><text>{{ storeSwitchMessage }}</text></view>
 
 		<scroll-view scroll-y class="merchant-workbench__content">
-			<view class="merchant-workbench__section">
-				<view class="merchant-workbench__section-heading">
-					<text class="merchant-workbench__section-title">待办</text>
-					<text class="merchant-workbench__refresh" @tap="loadTodos">刷新</text>
-				</view>
+			<view class="merchant-workbench__content-inner">
+				<view class="merchant-workbench__section-heading"><view><text class="merchant-workbench__section-kicker">今日事务</text><text class="merchant-workbench__section-title">待办</text></view><text class="merchant-workbench__refresh" @tap="loadTodos">刷新</text></view>
 				<view class="merchant-workbench__todo-list">
-					<navigator class="merchant-workbench__todo" url="/src/merchant/pages/customer-care/index?bucket=all&statusGroup=open" open-type="navigate">
+					<view class="merchant-workbench__todo" @tap="openTodo('care')">
 						<view class="merchant-workbench__todo-count"><text>{{ careLoading ? '—' : (careFailed ? '!' : openTaskCount) }}</text></view>
 						<view class="merchant-workbench__todo-copy"><text class="merchant-workbench__todo-title">跟进任务</text><text class="merchant-workbench__todo-note">{{ careFailed ? '数据暂不可用，点击进入后重试' : '未完成的跟进任务' }}</text></view>
 						<text class="merchant-workbench__chevron">›</text>
-					</navigator>
-					<navigator class="merchant-workbench__todo" url="/src/merchant/pages/reservations/index" open-type="navigate">
+					</view>
+					<view class="merchant-workbench__todo" @tap="openTodo('reservations')">
 						<view class="merchant-workbench__todo-count merchant-workbench__todo-count--warm"><text>{{ reservationLoading ? '—' : (reservationFailed ? '!' : dueNotArrivedCount) }}</text></view>
 						<view class="merchant-workbench__todo-copy"><text class="merchant-workbench__todo-title">预约未到店</text><text class="merchant-workbench__todo-note">{{ reservationFailed ? '数据暂不可用，点击进入后重试' : '已到预约时间，尚未开始服务' }}</text></view>
 						<text class="merchant-workbench__chevron">›</text>
-					</navigator>
+					</view>
 				</view>
-			</view>
 
-			<view class="merchant-workbench__section merchant-workbench__section--functions">
-				<text class="merchant-workbench__section-title">常用功能</text>
+				<view class="merchant-workbench__section-heading merchant-workbench__section-heading--functions"><view><text class="merchant-workbench__section-kicker">快捷入口</text><text class="merchant-workbench__section-title">常用功能</text></view></view>
 				<view class="merchant-workbench__grid">
-					<navigator class="merchant-workbench__entry" url="/src/merchant/pages/reservations/index" open-type="navigate"><text class="merchant-workbench__entry-index">01</text><text class="merchant-workbench__entry-label">预约管理</text></navigator>
-					<navigator class="merchant-workbench__entry" url="/src/merchant/pages/customer-care/index" open-type="navigate"><text class="merchant-workbench__entry-index">02</text><text class="merchant-workbench__entry-label">客情管理</text></navigator>
-					<navigator class="merchant-workbench__entry" url="/src/merchant/pages/customers/index" open-type="navigate"><text class="merchant-workbench__entry-index">03</text><text class="merchant-workbench__entry-label">客户管理</text></navigator>
-					<view class="merchant-workbench__entry merchant-workbench__entry--pending" @tap="showPending('服务确认')"><text class="merchant-workbench__entry-index">04</text><text class="merchant-workbench__entry-label">服务确认</text><text class="merchant-workbench__entry-state">待开发</text></view>
-					<view class="merchant-workbench__entry merchant-workbench__entry--pending" @tap="showPending('订单管理')"><text class="merchant-workbench__entry-index">05</text><text class="merchant-workbench__entry-label">订单管理</text><text class="merchant-workbench__entry-state">待开发</text></view>
-					<view class="merchant-workbench__entry merchant-workbench__entry--pending" @tap="showPending('欠款管理')"><text class="merchant-workbench__entry-index">06</text><text class="merchant-workbench__entry-label">欠款管理</text><text class="merchant-workbench__entry-state">待开发</text></view>
-					<view class="merchant-workbench__entry merchant-workbench__entry--pending" @tap="showPending('售后管理')"><text class="merchant-workbench__entry-index">07</text><text class="merchant-workbench__entry-label">售后管理</text><text class="merchant-workbench__entry-state">待开发</text></view>
-					<view class="merchant-workbench__entry merchant-workbench__entry--pending" @tap="showPending('服务留影')"><text class="merchant-workbench__entry-index">08</text><text class="merchant-workbench__entry-label">服务留影</text><text class="merchant-workbench__entry-state">待开发</text></view>
+					<navigator class="merchant-workbench__entry" url="/src/merchant/pages/reservations/index" open-type="navigate"><view class="merchant-workbench__entry-icon merchant-workbench__entry-icon--reservation"><text>约</text></view><text class="merchant-workbench__entry-label">预约管理</text></navigator>
+					<navigator class="merchant-workbench__entry" url="/src/merchant/pages/customer-care/index" open-type="navigate"><view class="merchant-workbench__entry-icon merchant-workbench__entry-icon--care"><text>客</text></view><text class="merchant-workbench__entry-label">客情管理</text></navigator>
+					<navigator class="merchant-workbench__entry" url="/src/merchant/pages/customers/index" open-type="navigate"><view class="merchant-workbench__entry-icon merchant-workbench__entry-icon--customer"><text>户</text></view><text class="merchant-workbench__entry-label">客户管理</text></navigator>
+					<view class="merchant-workbench__entry merchant-workbench__entry--pending" @tap="showPending('服务确认')"><view class="merchant-workbench__entry-icon merchant-workbench__entry-icon--service"><text>服</text></view><text class="merchant-workbench__entry-label">服务确认</text><text class="merchant-workbench__entry-state">待开发</text></view>
+					<view class="merchant-workbench__entry merchant-workbench__entry--pending" @tap="showPending('订单管理')"><view class="merchant-workbench__entry-icon merchant-workbench__entry-icon--order"><text>单</text></view><text class="merchant-workbench__entry-label">订单管理</text><text class="merchant-workbench__entry-state">待开发</text></view>
+					<view class="merchant-workbench__entry merchant-workbench__entry--pending" @tap="showPending('欠款管理')"><view class="merchant-workbench__entry-icon merchant-workbench__entry-icon--debt"><text>欠</text></view><text class="merchant-workbench__entry-label">欠款管理</text><text class="merchant-workbench__entry-state">待开发</text></view>
+					<view class="merchant-workbench__entry merchant-workbench__entry--pending" @tap="showPending('售后管理')"><view class="merchant-workbench__entry-icon merchant-workbench__entry-icon--after"><text>后</text></view><text class="merchant-workbench__entry-label">售后管理</text><text class="merchant-workbench__entry-state">待开发</text></view>
+					<view class="merchant-workbench__entry merchant-workbench__entry--pending" @tap="showPending('服务留影')"><view class="merchant-workbench__entry-icon merchant-workbench__entry-icon--photo"><text>影</text></view><text class="merchant-workbench__entry-label">服务留影</text><text class="merchant-workbench__entry-state">待开发</text></view>
 				</view>
 			</view>
 		</scroll-view>
 
-		<view class="merchant-workbench__tabs" role="tablist">
-			<navigator class="merchant-workbench__tab" url="/src/merchant/pages/warehouse/index" open-type="navigate" role="tab" aria-selected="false"><text class="merchant-workbench__tab-index">01</text><text class="merchant-workbench__tab-label">数仓</text></navigator>
-			<navigator class="merchant-workbench__tab" url="/src/merchant/pages/customers/index" open-type="navigate"><text class="merchant-workbench__tab-index">02</text><text class="merchant-workbench__tab-label">客户</text></navigator>
-			<view class="merchant-workbench__tab merchant-workbench__tab--active" role="tab" aria-selected="true"><text class="merchant-workbench__tab-index">03</text><text class="merchant-workbench__tab-label">工作台</text></view>
-			<navigator class="merchant-workbench__tab" url="/src/merchant/pages/goals/index" open-type="navigate" role="tab" aria-selected="false"><text class="merchant-workbench__tab-index">04</text><text class="merchant-workbench__tab-label">目标</text></navigator>
-			<navigator class="merchant-workbench__tab" url="/src/merchant/pages/profile/index" open-type="navigate"><text class="merchant-workbench__tab-index">05</text><text class="merchant-workbench__tab-label">我的</text></navigator>
-		</view>
+		<MerchantPrimaryTabBar activeKey="workbench" />
 	</view>
 </template>
 
 <script setup lang="uts">
-	import { queryMobileCustomerCare } from '../../api/mobile-customer-care-client.uts'
-	import { queryMobileReservations } from '../../api/mobile-reservation-client.uts'
-	import { switchMobileMerchantContext } from '../../api/mobile-merchant-session-client.uts'
-	import { currentMerchantRoot } from '../../platform/mobile-merchant-session.uts'
+	import MerchantPrimaryTabBar from '../../../shared/components/merchant-primary-tab-bar.uvue'
+	import { queryMobileCustomerCare } from '../../../shared/api/mobile-customer-care-client.uts'
+	import { queryMobileReservations } from '../../../shared/api/mobile-reservation-client.uts'
+	import { switchMobileMerchantContext } from '../../../shared/api/mobile-merchant-session-client.uts'
+	import { currentMerchantRoot } from '../../../shared/platform/mobile-merchant-session.uts'
 	import { showMobileNotice } from '../../../shared/platform/mobile-platform.uts'
+	import { ensureMerchantTabAccess } from '../../../shared/platform/merchant-route-guard.uts'
 
 	const openTaskCount = ref(0)
 	const dueNotArrivedCount = ref(0)
@@ -74,7 +65,7 @@
 	const switchingStore = ref(false)
 	const storeSwitchMessage = ref('')
 
-	onShow(() => { loadStoreContext(); loadTodos() })
+	onShow(() => { if (ensureMerchantTabAccess('workbench')) { loadStoreContext(); loadTodos() } })
 
 	function loadStoreContext() : void {
 		let root = currentMerchantRoot()
@@ -122,13 +113,18 @@
 	function loadDueReservations() : void {
 		reservationLoading.value = true
 		reservationFailed.value = false
-		queryMobileReservations((response : any) => {
+		queryMobileReservations({}, (response : any) => {
 			reservationLoading.value = false
 			let payload = response != null && response.body != null ? response.body.reservation : null
 			let view = payload != null && payload.data != null ? payload.data.reservation : null
 			if (!response.ok || payload == null || payload.result == null || payload.result.status != 'success' || view == null || view.quickCounts == null) { reservationFailed.value = true; return }
 			dueNotArrivedCount.value = Number(view.quickCounts.dueNotArrived || 0)
 		})
+	}
+
+	function openTodo(kind : string) : void {
+		if (kind == 'care') { uni.navigateTo({ url: '/src/merchant/pages/customer-care/index?bucket=all&statusGroup=open' }); return }
+		uni.navigateTo({ url: '/src/merchant/pages/reservations/index' })
 	}
 
 	function showPending(label : string) : void {
@@ -176,4 +172,37 @@
 	.merchant-workbench__tab-index { font-size: 10px; font-weight: 600; line-height: 14px; color: #98a2b3; }
 	.merchant-workbench__tab-label { margin-top: 2px; font-size: 12px; font-weight: 600; line-height: 18px; color: #526071; }
 	.merchant-workbench__tab--active .merchant-workbench__tab-index, .merchant-workbench__tab--active .merchant-workbench__tab-label { color: #1677cc; }
-</style>
+	/* 恢复预约管理闭环时确认过的工作台视觉：保留四个业务入口权限过滤，
+	 * 只恢复信息层级、图标和留白，不改变数据、客户、我的页面。 */
+	.merchant-workbench { background-color: #f4f7fa; }
+	.merchant-workbench__header { padding: 52px 18px 16px 18px; border-bottom-color: #e5edf5; }
+	.merchant-workbench__title { margin-top: 4px; font-size: 25px; line-height: 34px; color: #26384d; }
+	.merchant-workbench__content { padding-bottom: 0; }
+	.merchant-workbench__content-inner { width: 100%; max-width: 1200px; box-sizing: border-box; margin: 0 auto; padding: 18px 18px 112px 18px; }
+	.merchant-workbench__section-heading { margin-bottom: 10px; align-items: flex-end; }
+	.merchant-workbench__section-heading--functions { margin-top: 24px; }
+	.merchant-workbench__section-kicker { font-size: 12px; font-weight: 600; line-height: 18px; color: #71839a; }
+	.merchant-workbench__section-title { display: block; margin-top: 2px; font-size: 17px; line-height: 25px; color: #26384d; }
+	.merchant-workbench__refresh { padding: 5px 0 5px 12px; font-size: 13px; font-weight: 700; line-height: 20px; }
+	.merchant-workbench__todo-list { margin-top: 0; }
+	.merchant-workbench__todo { box-sizing: border-box; min-height: 78px; margin-top: 10px; padding: 12px 14px; border-width: 1px; border-style: solid; border-color: #e7eef5; border-radius: 14px; background-color: #ffffff; box-shadow: 0 6px 16px rgba(60, 88, 130, 0.07); }
+	.merchant-workbench__todo:first-child { margin-top: 0; }
+	.merchant-workbench__todo-count { width: 40px; height: 40px; border-radius: 12px; background-color: #eaf1ff; color: #4a72c5; }
+	.merchant-workbench__todo-copy { margin-left: 11px; padding: 0; }
+	.merchant-workbench__todo-title { font-size: 14px; line-height: 20px; color: #26384d; }
+	.merchant-workbench__todo-note { margin-top: 3px; font-size: 11px; line-height: 17px; color: #71839a; }
+	.merchant-workbench__grid { overflow: hidden; margin-top: 12px; border: 0; border-radius: 8px; background-color: #ffffff; box-shadow: 0 8px 20px rgba(60, 88, 130, 0.08); }
+	.merchant-workbench__entry { min-height: 116px; padding: 12px 4px; border-color: #edf1f5; }
+	.merchant-workbench__entry:nth-child(4n) { border-right-width: 0; }
+	.merchant-workbench__entry:nth-last-child(-n + 4) { border-bottom-width: 0; }
+	.merchant-workbench__entry-icon { display: flex; width: 34px; height: 34px; flex-direction: row; align-items: center; justify-content: center; border-radius: 8px; font-size: 14px; font-weight: 700; }
+	.merchant-workbench__entry-icon--reservation { background-color: #eaf1ff; color: #4a72c5; }
+	.merchant-workbench__entry-icon--care { background-color: #e8f6f0; color: #21845f; }
+	.merchant-workbench__entry-icon--customer { background-color: #fff2df; color: #bf7726; }
+	.merchant-workbench__entry-icon--service { background-color: #f1edff; color: #7963c7; }
+	.merchant-workbench__entry-icon--order { background-color: #e8f6f7; color: #287f90; }
+	.merchant-workbench__entry-icon--debt { background-color: #fff0f0; color: #c5685d; }
+	.merchant-workbench__entry-icon--after { background-color: #f7f1df; color: #9b7a23; }
+	.merchant-workbench__entry-icon--photo { background-color: #edf1f6; color: #61748b; }
+	.merchant-workbench__entry-label { margin-top: 7px; font-size: 12px; line-height: 18px; color: #38516a; }
+	</style>

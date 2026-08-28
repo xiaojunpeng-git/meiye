@@ -1,0 +1,464 @@
+{
+  "contractVersion": "mobile-merchant-v1",
+  "errorContract": "mobile-api-errors-v1",
+  "requestMetadataProfiles": {
+    "EMPLOYEE_PASSWORD": {
+      "required": {
+        "X-Mobile-Contract-Version": "contractVersion",
+        "X-Mobile-Client-Session-Id": "clientSessionId",
+        "X-Mobile-Platform": "platform",
+        "X-Mobile-Request-Id": "requestId"
+      },
+      "forbidden": [
+        "Authorization",
+        "X-Mobile-App-Session",
+        "X-Mobile-Active-Context-Id",
+        "X-Mobile-State-Context-Id",
+        "Cookie",
+        "queryToken",
+        "bodyToken",
+        "headerAlias"
+      ],
+      "emptyContextValuesAllowed": false
+    },
+    "APP_SESSION_EXCHANGE": {
+      "required": {
+        "X-Mobile-Contract-Version": "contractVersion",
+        "X-Mobile-Client-Session-Id": "clientSessionId",
+        "X-Mobile-Platform": "platform",
+        "X-Mobile-Request-Id": "requestId",
+        "X-Mobile-App-Session": "appSession"
+      },
+      "forbidden": [
+        "Authorization",
+        "X-Mobile-Active-Context-Id",
+        "X-Mobile-State-Context-Id",
+        "Cookie",
+        "queryToken",
+        "bodyToken",
+        "headerAlias"
+      ],
+      "emptyContextValuesAllowed": false
+    },
+    "MERCHANT_SESSION": {
+      "required": {
+        "X-Mobile-Contract-Version": "contractVersion",
+        "X-Mobile-Client-Session-Id": "clientSessionId",
+        "X-Mobile-Platform": "platform",
+        "X-Mobile-Request-Id": "requestId",
+        "Authorization": "Bearer <merchantToken>",
+        "X-Mobile-Active-Context-Id": "activeContextId",
+        "X-Mobile-State-Context-Id": "stateContextId"
+      },
+      "forbidden": [
+        "X-Mobile-App-Session",
+        "Cookie",
+        "queryToken",
+        "bodyToken",
+        "headerAlias"
+      ],
+      "emptyContextValuesAllowed": false
+    }
+  },
+  "endpoints": {
+    "passwordLogin": {
+      "method": "POST",
+      "path": "/mobile/merchant/password-login",
+      "requestMetadataProfile": "EMPLOYEE_PASSWORD",
+      "merchantContextRequired": false,
+      "authentication": "EMPLOYEE_ACCOUNT_PASSWORD_AND_CURRENT_MOBILE_AUTHORIZATION",
+      "requestBodyRequired": [
+        "account",
+        "pwd",
+        "installationId",
+        "idempotencyKey"
+      ],
+      "response": "merchantRoot"
+    },
+    "createMerchantSession": {
+      "method": "POST",
+      "path": "/mobile/merchant/session",
+      "requestMetadataProfile": "APP_SESSION_EXCHANGE",
+      "preContextExchange": true,
+      "authentication": "APP_SESSION_AND_PHONE_VERIFICATION",
+      "merchantContextRequired": false,
+      "requestBodyRequired": [
+        "idempotencyKey"
+      ],
+      "response": "merchantRoot"
+    },
+    "bootstrap": {
+      "method": "GET",
+      "path": "/mobile/merchant/bootstrap",
+      "requestMetadataProfile": "MERCHANT_SESSION",
+      "merchantContextRequired": true,
+      "response": "merchantRoot"
+    },
+    "switchContext": {
+      "method": "POST",
+      "path": "/mobile/merchant/context/switch",
+      "requestMetadataProfile": "MERCHANT_SESSION",
+      "merchantContextRequired": true,
+      "requestBodyRequired": [
+        "targetContextId",
+        "expectedAuthVersion",
+        "idempotencyKey"
+      ],
+      "expectedAuthVersionMustBePositive": true,
+      "response": "merchantRoot"
+    },
+    "logout": {
+      "method": "POST",
+      "path": "/mobile/merchant/logout",
+      "requestMetadataProfile": "MERCHANT_SESSION",
+      "requestBodyRequired": [
+        "idempotencyKey"
+      ],
+      "response": "successEnvelope"
+    },
+    "merchantProfileAccount": {
+      "method": "GET",
+      "path": "/mobile/merchant/profile/account",
+      "requestMetadataProfile": "MERCHANT_SESSION",
+      "merchantContextRequired": true,
+      "response": "merchantAccountProfile"
+    },
+    "merchantProfileScope": {
+      "method": "GET",
+      "path": "/mobile/merchant/profile/scope",
+      "requestMetadataProfile": "MERCHANT_SESSION",
+      "merchantContextRequired": true,
+      "response": "merchantOrganizationScope"
+    },
+    "merchantProfileCredentials": {
+      "method": "POST",
+      "path": "/mobile/merchant/profile/credentials",
+      "requestMetadataProfile": "MERCHANT_SESSION",
+      "merchantContextRequired": true,
+      "requestBodyRequired": [
+        "currentPassword",
+        "account",
+        "newPassword"
+      ],
+      "response": "merchantCredentialUpdate"
+    },
+    "currentPersonalMonthlyTarget": {
+      "method": "GET",
+      "path": "/mobile/merchant/personal-monthly-target/current",
+      "requestMetadataProfile": "MERCHANT_SESSION",
+      "merchantContextRequired": true,
+      "response": "personalMonthlyTargetProjection"
+    },
+    "savePersonalMonthlyTarget": {
+      "method": "POST",
+      "path": "/mobile/merchant/personal-monthly-target",
+      "requestMetadataProfile": "MERCHANT_SESSION",
+      "merchantContextRequired": true,
+      "requestBodyRequired": [
+        "monthKey",
+        "metrics",
+        "idempotencyKey"
+      ],
+      "response": "personalMonthlyTargetProjection"
+    },
+    "queryWarehouseOverview": {
+      "method": "POST",
+      "path": "/mobile/merchant/warehouse/overview",
+      "requestMetadataProfile": "MERCHANT_SESSION",
+      "merchantContextRequired": true,
+      "authorization": "WAREHOUSE_FEATURE_AND_SERVER_DATA_SCOPE",
+      "requestBodyOptional": [
+        "month",
+        "periodMode",
+        "startDate",
+        "endDate",
+        "nodeType",
+        "nodeId",
+        "rankingCode",
+        "rankingOrder",
+        "trendMetricCode"
+      ],
+      "response": "warehouseHierarchyProjection",
+      "legacyAgentMetricApisForbidden": true
+    },
+    "queryWarehouseEmployeePerformance": {
+      "method": "POST",
+      "path": "/mobile/merchant/warehouse/employee-performance",
+      "requestMetadataProfile": "MERCHANT_SESSION",
+      "merchantContextRequired": true,
+      "authorization": "WAREHOUSE_FEATURE_AND_SERVER_DATA_SCOPE",
+      "requestBodyRequired": [
+        "employeeId"
+      ],
+      "requestBodyOptional": [
+        "month",
+        "periodMode",
+        "startDate",
+        "endDate",
+        "detailMode",
+        "page",
+        "pageSize"
+      ],
+      "response": "warehouseEmployeePerformanceProjection",
+      "legacyAgentMetricApisForbidden": true
+    },
+    "listReservations": {
+      "method": "GET",
+      "path": "/mobile/merchant/reservations",
+      "requestMetadataProfile": "MERCHANT_SESSION",
+      "merchantContextRequired": true,
+      "authorization": "RESERVATION_VIEW_AND_SERVER_DATA_SCOPE",
+      "response": "cashierV3ReservationProjection",
+      "legacyReservationForbidden": true
+    },
+    "reservationDetail": {
+      "method": "GET",
+      "path": "/mobile/merchant/reservations/:reservationId",
+      "requestMetadataProfile": "MERCHANT_SESSION",
+      "merchantContextRequired": true,
+      "authorization": "RESERVATION_VIEW_AND_SERVER_DATA_SCOPE",
+      "response": "cashierV3ReservationDetail",
+      "legacyReservationForbidden": true
+    },
+    "openReservationEditor": {
+      "method": "POST",
+      "path": "/mobile/merchant/reservations/editor",
+      "requestMetadataProfile": "MERCHANT_SESSION",
+      "merchantContextRequired": true,
+      "authorization": "RESERVATION_CREATE_AND_SERVER_DATA_SCOPE",
+      "response": "cashierV3ReservationEditor",
+      "legacyReservationForbidden": true
+    },
+    "queryReservationProjectCatalog": {
+      "method": "POST",
+      "path": "/mobile/merchant/reservations/project-catalog",
+      "requestMetadataProfile": "MERCHANT_SESSION",
+      "merchantContextRequired": true,
+      "authorization": "RESERVATION_CREATE_AND_SERVER_DATA_SCOPE",
+      "requestBodyRequired": ["memberId"],
+      "response": "cashierV3ReservationProjectCatalog",
+      "legacyReservationForbidden": true
+    },
+    "queryReservationMemberCandidates": {
+      "method": "POST",
+      "path": "/mobile/merchant/reservations/member-candidates",
+      "requestMetadataProfile": "MERCHANT_SESSION",
+      "merchantContextRequired": true,
+      "authorization": "RESERVATION_CREATE_AND_SERVER_DATA_SCOPE",
+      "response": "memberCandidates",
+      "legacyReservationForbidden": true
+    },
+    "recalculateReservation": {
+      "method": "POST",
+      "path": "/mobile/merchant/reservations/recalculate",
+      "requestMetadataProfile": "MERCHANT_SESSION",
+      "merchantContextRequired": true,
+      "authorization": "RESERVATION_CREATE_AND_SERVER_DATA_SCOPE",
+      "requestBodyRequired": [
+        "reservation",
+        "recalculationRequestId"
+      ],
+      "response": "cashierV3ReservationPlan",
+      "legacyReservationForbidden": true
+    },
+    "createReservation": {
+      "method": "POST",
+      "path": "/mobile/merchant/reservations",
+      "requestMetadataProfile": "MERCHANT_SESSION",
+      "merchantContextRequired": true,
+      "authorization": "RESERVATION_CREATE_AND_SERVER_DATA_SCOPE",
+      "requestBodyRequired": [
+        "reservation",
+        "command"
+      ],
+      "response": "cashierV3ReservationReceipt",
+      "legacyReservationForbidden": true
+    },
+    "updateReservation": {
+      "method": "PUT",
+      "path": "/mobile/merchant/reservations/:reservationId",
+      "requestMetadataProfile": "MERCHANT_SESSION",
+      "merchantContextRequired": true,
+      "authorization": "RESERVATION_CREATE_AND_SERVER_DATA_SCOPE",
+      "requestBodyRequired": ["reservation", "command"],
+      "response": "cashierV3ReservationReceipt",
+      "legacyReservationForbidden": true
+    },
+    "cancelReservation": {
+      "method": "POST",
+      "path": "/mobile/merchant/reservations/:reservationId/cancel",
+      "requestMetadataProfile": "MERCHANT_SESSION",
+      "merchantContextRequired": true,
+      "authorization": "RESERVATION_CREATE_AND_SERVER_DATA_SCOPE",
+      "requestBodyRequired": ["command"],
+      "response": "cashierV3ReservationAction",
+      "legacyReservationForbidden": true
+    },
+    "startReservationService": {
+      "method": "POST",
+      "path": "/mobile/merchant/reservations/:reservationId/start-service",
+      "requestMetadataProfile": "MERCHANT_SESSION",
+      "merchantContextRequired": true,
+      "authorization": "RESERVATION_CREATE_AND_SERVER_DATA_SCOPE",
+      "requestBodyRequired": ["command"],
+      "response": "cashierV3ReservationAction",
+      "legacyReservationForbidden": true
+    },
+    "endReservationService": {
+      "method": "POST",
+      "path": "/mobile/merchant/reservations/:reservationId/end-service",
+      "requestMetadataProfile": "MERCHANT_SESSION",
+      "merchantContextRequired": true,
+      "authorization": "RESERVATION_CREATE_AND_SERVER_DATA_SCOPE",
+      "requestBodyRequired": ["command"],
+      "response": "cashierV3ReservationAction",
+      "legacyReservationForbidden": true
+    }
+  },
+  "merchantRoot": {
+    "required": [
+      "contractVersion",
+      "merchantToken",
+      "expiresAt",
+      "employee",
+      "authVersion",
+      "activeContextId",
+      "activeContext",
+      "contexts",
+      "capabilities",
+      "dataScope",
+      "availableActions",
+      "reasonCode",
+      "stateContextId",
+      "stateRevision"
+    ],
+    "employeeRequired": [
+      "id",
+      "name",
+      "avatar",
+      "status"
+    ],
+    "activeContextRequired": [
+      "contextId"
+    ],
+    "activeContextOptional": [
+      "storeId",
+      "organizationId",
+      "staffId"
+    ],
+    "contractVersionMustEqual": "mobile-merchant-v1",
+    "merchantTokenMustBeOpaqueNonEmpty": true,
+    "expiresAtMustBeNonEmpty": true,
+    "employeeIdMustBeNonEmpty": true,
+    "employeeStatusAllowedForMerchantReady": [
+      "ACTIVE"
+    ],
+    "authVersionMustBePositive": true,
+    "activeContextIdMustBeOpaqueNonEmpty": true,
+    "activeBusinessContextIdMustBeOpaqueNonEmpty": true,
+    "stateContextIdMustBeOpaqueNonEmpty": true,
+    "stateRevisionType": "STRING",
+    "stateRevisionPattern": "^[1-9][0-9]*$",
+    "newStateContextInitialRevision": "1",
+    "contextsMustHaveUniqueContextIds": true,
+    "capabilitiesMustBeArray": true,
+    "availableActionsMustBeArray": true,
+    "reasonCodeEnum": [
+      "READY",
+      "BOOTSTRAPPED",
+      "CONTEXT_SWITCHED"
+    ]
+  },
+  "contextSummary": {
+    "required": [
+      "contextId",
+      "label"
+    ],
+    "forbidden": [
+      "capabilities",
+      "dataScope",
+      "availableActions"
+    ],
+    "contextIdsMustBeUnique": true
+  },
+  "dataScope": {
+    "required": [
+      "authorized",
+      "scopeEntryCount",
+      "scopeDigest"
+    ],
+    "authorizedMustBeTrueForMerchantReady": true,
+    "scopeEntryCountMustBePositiveForMerchantReady": true,
+    "scopeDigestMustBeNonEmptyForMerchantReady": true
+  },
+  "authorizationSemantics": {
+    "effectiveScopeIntersection": [
+      "VALID_ASSIGNMENT",
+      "MOBILE_JOB_FUNCTION",
+      "MOBILE_AUTHORIZATION_SCOPE",
+      "EMPLOYEE_DATA_SCOPE",
+      "EMPLOYEE_STORE_ISOLATION",
+      "OPERATING_ORGANIZATION_OR_STORE"
+    ],
+    "emptyCapabilitiesMeansNoCapability": true,
+    "emptyAvailableActionsMeansNoAction": true,
+    "emptyScopeMeansNoAccess": true,
+    "mergeAcrossContexts": false,
+    "deliveryOnlyMerchantAccess": false
+  },
+  "contextSwitchSemantics": {
+    "rotateActiveContextId": true,
+    "rotateStateContextId": true,
+    "activeContextMustMatchTargetContext": true,
+    "oldContextRequestsFailWith": "ACTIVE_CONTEXT_MISMATCH"
+  },
+  "personalMonthlyTarget": {
+    "monthFormat": "YYYY-MM",
+    "metricCodes": [
+      "SALES_PERFORMANCE",
+      "CONSUMPTION_PERFORMANCE",
+      "SERVICE_VISITS"
+    ],
+    "metricUnits": {
+      "SALES_PERFORMANCE": "CNY_FEN",
+      "CONSUMPTION_PERFORMANCE": "CNY_FEN",
+      "SERVICE_VISITS": "COUNT"
+    },
+    "completionState": "METRIC_INTERFACE_PENDING",
+    "legacyStoreTargetForbidden": true
+  },
+  "warehouseHierarchy": {
+    "rankingTypes": [
+      "organization",
+      "staff_cash_performance",
+      "staff_labor_performance",
+      "staff_designated_customer",
+      "project_count"
+    ],
+    "rankingOrderEnum": [
+      "desc",
+      "asc"
+    ],
+    "rankingLimit": 10,
+    "organizationRows": [
+      "IMMEDIATE_CHILD_ORGANIZATIONS_WITH_AUTHORIZED_DESCENDANT_STORES",
+      "AUTHORIZED_STORES_DIRECTLY_ATTACHED_TO_CURRENT_NODE"
+    ],
+    "staffRankingScope": "CURRENT_ORGANIZATION_DESCENDANT_STORES",
+    "projectRankingScope": "CURRENT_ORGANIZATION_DESCENDANT_STORES",
+    "serverScopeMandatory": true,
+    "metadataRequired": [
+      "metric_version",
+      "data_as_of",
+      "aggregation_caught_up"
+    ],
+    "unifiedMetricUnavailableMustBeExplicit": true,
+    "periodModeEnum": [
+      "today",
+      "yesterday",
+      "last_month",
+      "month",
+      "custom"
+    ]
+  }
+}

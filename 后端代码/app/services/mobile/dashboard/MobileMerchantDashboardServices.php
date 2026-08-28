@@ -47,10 +47,9 @@ final class MobileMerchantDashboardServices
             throw MobileApiException::business('STORE_NOT_ALLOWED', '当前数据权限范围内没有可查看的门店。');
         }
 
-        $projection = $this->warehouse->dashboardProjection($storeIds, $input);
-        $actualProjection = $this->warehouse->dashboardProjection($storeIds, array_merge($input, ['trendMetricCode' => 'actual_performance']));
-        $consumeProjection = $this->warehouse->dashboardProjection($storeIds, array_merge($input, ['trendMetricCode' => 'consume_amount']));
-        $trend = $this->mergeTrendSeries($actualProjection['trend'] ?? [], $consumeProjection['trend'] ?? []);
+        $projection = $this->warehouse->dashboardProjection($storeIds, array_merge($input, ['includeTrend' => false]));
+        $trendComparison = $this->warehouse->dashboardTrendComparison($storeIds, $input);
+        $trend = $this->mergeTrendSeries($trendComparison['actual'] ?? [], $trendComparison['consume'] ?? []);
         $period = (array)($projection['period'] ?? []);
         $startTs = strtotime((string)($period['startDate'] ?? '') . ' 00:00:00');
         $endTs = strtotime((string)($period['endDate'] ?? '') . ' 23:59:59');
