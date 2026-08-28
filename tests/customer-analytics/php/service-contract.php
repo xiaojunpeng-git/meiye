@@ -142,9 +142,9 @@ customerAnalyticsAssert(
 );
 customerAnalyticsAssert(
     str_contains($frontendView, 'function defaultPeriodForReport(report)')
-        && str_contains($frontendView, "String(report || '') === 'source-analysis' ? 'month' : 'year'")
+        && str_contains($frontendView, "['source-analysis', 'consumption-tier'].includes(String(report || '')) ? 'month' : 'year'")
         && str_contains($frontendView, 'const period = ref(defaultPeriodForReport(route.params.report))'),
-    'source analysis defaults to the current month while other customer reports retain the yearly default'
+    'source and consumption-tier analyses default to the current month while other customer reports retain the yearly default'
 );
 customerAnalyticsAssert(
     str_contains($frontendView, 'function money(cents)')
