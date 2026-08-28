@@ -61,6 +61,8 @@ assert.doesNotMatch(component, /v-else class="personnel-group-search"/, '导购�
 assert.match(component, /salesManagers\.value\.forEach\(\(record\) => \{ record\.selected = false \}\)/, '销售经理选择第二人时必须替换前一人')
 assert.match(component, /guideSelections: selectedGuidePayload/, '导购选择只提交归属快照，不提交业绩比例')
 assert.match(component, /salesManagerSelections: selectedSalesManagerPayload/, '销售经理选择只提交归属快照，不提交业绩比例')
+assert.match(component, /const attributionRole = String\(item\?\.attributionRole \?\? item\?\.attribution_role \?\? ''\)\.trim\(\)/, '归属资格只能读取后端资格字段')
+assert.doesNotMatch(component, /const attributionRole = item\?\.attributionRole \|\| item\?\.role/, '前端导购和销售经理分组标签不得参与归属资格过滤')
 assert.match(component, /search-personnel/, '集团人员必须通过显式关键词搜索事件加载')
 assert.match(component, /attributionSearchRole.value === 'salesManager'/, '查询弹窗必须按导购和销售经理角色切换')
 assert.match(component, /target: attributionSearchRole.value/, '查询结果必须回填到当前归属角色')

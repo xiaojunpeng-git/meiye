@@ -570,12 +570,14 @@ function selectedAttributionPayload(records) {
 }
 
 function attributionRoleAllows(item = {}, role = '') {
-  const attributionRole = item?.attributionRole || item?.role || ''
+  // `role` is the front-end group key (`guides` / `salesManagers`), not the
+  // employee's back-end attribution capability. Falling back to it silently
+  // discards selected records when the modal is confirmed.
+  const attributionRole = String(item?.attributionRole ?? item?.attribution_role ?? '').trim()
   if (!role) return true
   if (role === 'guide') {
     return attributionRole === ''
       || attributionRole === 'guide'
-      || attributionRole === 'guide_and_sales_manager'
       || attributionRole === 'guide_and_sales_manager'
       || attributionRole === 'guideAndSalesManager'
       || attributionRole === 'guide/salesManager'
