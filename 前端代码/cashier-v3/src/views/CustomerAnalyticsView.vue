@@ -516,9 +516,8 @@ function isError() { return demoState.value === 'error' }
           </section>
 
           <section v-else-if="active === 'appearance'" class="module-stack">
-            <div class="panel-grid panel-grid--wide">
+            <div class="panel-grid">
               <article class="panel"><header class="panel__header"><div><span class="panel__kicker"><Tags :size="15" />品项结构</span><h2>客户品项现金业绩占比</h2></div><span class="panel__hint">前6名 + 其他</span></header><div class="appearance-chart"><div class="appearance-donut" :style="appearanceDonutStyle(data.appearance.items)"><div><strong>{{ money(appearanceTotal) }}</strong><span>品项现金业绩</span></div></div><div class="legend-list legend-list--appearance"><div v-for="(row, index) in data.appearance.items.slice(0, 6)" :key="row[0]"><i :class="`legend-color legend-color--${index + 1}`"></i><span>{{ row[0] }}</span><b>{{ pct(row[5]) }}</b></div></div></div></article>
-              <article class="panel panel--callout"><div class="callout-icon callout-icon--green"><Tags :size="23" /></div><h3>品项经营提示</h3><p>前六名占比和品项金额均以接口返回的当前筛选结果为准。</p></article>
             </div>
 
             <div class="panel">

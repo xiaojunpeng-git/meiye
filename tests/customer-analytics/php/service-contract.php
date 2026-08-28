@@ -145,7 +145,8 @@ customerAnalyticsAssert(
         && str_contains($frontendView, "['source-analysis', 'consumption-tier', 'item-analysis'].includes(String(report || '')) ? 'month' : 'year'")
         && str_contains($frontendView, 'const period = ref(defaultPeriodForReport(route.params.report))')
         && str_contains($frontendView, '分层 · {{ currentPeriodLabel }}')
-        && !str_contains($frontendView, '分层 · 当前自然年'),
+        && !str_contains($frontendView, '分层 · 当前自然年')
+        && !str_contains($frontendView, '品项经营提示'),
     'source, consumption-tier and item analyses default to the current month while other customer reports retain the yearly default'
 );
 customerAnalyticsAssert(
