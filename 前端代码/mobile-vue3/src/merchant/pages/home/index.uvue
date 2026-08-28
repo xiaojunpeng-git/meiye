@@ -175,7 +175,6 @@
 	/* Keep the first context card below the mini-program status/capsule area.
 	 * The H5 preview uses the same mobile viewport, so it reserves the same
 	 * safe top instead of rendering the content against the device notch. */
-	.merchant-home-page__content-inner { padding-top: 84px; }
 	.merchant-home-page__header { flex: none; padding: 18px 18px 14px 18px; background-color: #ffffff; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #e4ebf2; }
 	.merchant-home-page__eyebrow { display: block; font-size: 12px; font-weight: 700; line-height: 17px; color: #5b7893; }
 	.merchant-home-page__title-row { display: flex; flex-direction: row; align-items: flex-end; justify-content: space-between; margin-top: 3px; }
@@ -183,8 +182,8 @@
 	.merchant-home-page__subtitle { display: block; margin-top: 4px; font-size: 12px; line-height: 18px; color: #8291a0; }
 	.merchant-home-page__refresh { display: flex; flex-direction: row; align-items: center; gap: 4px; padding: 7px 10px; border-radius: 8px; background-color: #eef6ff; color: #1d73b8; font-size: 11px; }
 	.merchant-home-page__refresh text:first-child { font-size: 17px; line-height: 16px; }
-	.merchant-home-page__content { min-height: 0; flex: 1; padding-bottom: 78px; }
-	.merchant-home-page__content-inner { padding: 13px 14px 25px 14px; }
+	.merchant-home-page__content { min-height: 0; height: 0; flex: 1; }
+	.merchant-home-page__content-inner { padding: 84px 14px 88px 14px; }
 	.merchant-home-page__context { display: flex; flex-direction: row; align-items: center; justify-content: space-between; padding: 12px 13px; border-radius: 14px; background-color: #eaf3fb; }
 	.merchant-home-page__context-label { display: block; font-size: 10px; line-height: 14px; color: #6d8399; }
 	.merchant-home-page__context-value { display: block; margin-top: 2px; font-size: 14px; font-weight: 700; line-height: 19px; color: #284b68; }

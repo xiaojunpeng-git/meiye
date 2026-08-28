@@ -87,7 +87,10 @@
 </script>
 
 <style>
-	.merchant-primary-tab-bar { display: flex; min-height: 64px; flex-direction: row; align-items: stretch; border-top-width: 1px; border-top-style: solid; border-top-color: #dde4ed; background-color: #ffffff; }
+	/* The primary merchant navigation belongs to the viewport, not the page
+	 * scroll flow. Keeping it fixed also makes H5 behave like the mini program
+	 * shell and prevents a long page from pushing the navigation away. */
+	.merchant-primary-tab-bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 100; display: flex; box-sizing: border-box; min-height: 64px; flex-direction: row; align-items: stretch; padding-bottom: env(safe-area-inset-bottom); border-top-width: 1px; border-top-style: solid; border-top-color: #dde4ed; background-color: #ffffff; box-shadow: 0 -6px 18px rgba(35, 70, 110, 0.08); }
 	.merchant-primary-tab-bar__tab { display: flex; min-width: 0; flex: 1; flex-direction: row; align-items: center; justify-content: center; border-top-width: 2px; border-top-style: solid; border-top-color: #ffffff; font-size: 13px; font-weight: 600; color: #526071; }
 	.merchant-primary-tab-bar__tab--active { border-top-color: #1677cc; background-color: #f7fbff; color: #1677cc; }
 	.merchant-primary-tab-bar__label { line-height: 20px; }
