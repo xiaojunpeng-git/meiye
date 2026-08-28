@@ -46,8 +46,15 @@ watch(() => route.params.report, (value) => {
   if (next && next !== active.value) active.value = next
 })
 const period = ref('year')
-const customStart = ref('2026-01-01')
-const customEnd = ref('2026-08-21')
+function localDateString(date = new Date()) {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+const today = localDateString()
+const customStart = ref(`${today.slice(0, 4)}-01-01`)
+const customEnd = ref(today)
 const region = ref('全部区域')
 const store = ref('全部门店')
 const demoState = ref('normal')

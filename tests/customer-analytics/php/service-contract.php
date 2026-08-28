@@ -135,6 +135,12 @@ customerAnalyticsAssert(
     'customer analysis requests have a bounded timeout and actionable failure message'
 );
 customerAnalyticsAssert(
+    str_contains($frontendView, 'function localDateString')
+        && str_contains($frontendView, 'const customEnd = ref(today)')
+        && !str_contains($frontendView, "const customEnd = ref('2026-08-21')"),
+    'customer analysis date range follows the current local date instead of a stale hard-coded end date'
+);
+customerAnalyticsAssert(
     str_contains($frontendView, 'function money(cents)')
         && str_contains($frontendView, "Math.round(Number(cents) / 100)")
         && !str_contains($frontendView, 'maximumFractionDigits: 2'),
