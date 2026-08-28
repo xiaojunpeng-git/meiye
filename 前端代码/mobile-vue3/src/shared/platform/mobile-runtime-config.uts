@@ -37,12 +37,14 @@ export function mobileApiOrigin() : string {
 	// #endif
 	// The source preview must never be silently overridden by an old saved 8080
 	// address. Customer installations and other local previews keep their
-	// provisioned address unchanged.
+	// provisioned address unchanged. H5 18104 may be pointed at a customer
+	// instance from the login form, so honor that stored value before falling
+	// back to the local development gateway.
 	// #ifdef WEB
 	if (String(location.port || '') == '18100') return localWebDevelopmentOrigin()
 	if (String(location.port || '') == '18104') {
-		// HBuilderX's current direct H5 preview also uses the canonical local
-		// backend gateway; 20704 is no longer a running service.
+		let configuredH5 = normalizedOrigin(uni.getStorageSync(API_ORIGIN_KEY))
+		if (configuredH5.length > 0) return configuredH5
 		return normalizedOrigin('http://' + String(location.hostname || '127.0.0.1') + ':18093')
 	}
 	// #endif
