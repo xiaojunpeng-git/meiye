@@ -56,9 +56,19 @@
             </label>
           </div>
 
+          <div class="jp-field jp-field-switch">
+            <span>业绩独立核算</span>
+            <label class="jp-switch" :class="{ 'is-on': Number(form.performance_independent) === 1, 'is-disabled': submitting }">
+              <input class="jp-switch-input" type="checkbox" :checked="Number(form.performance_independent) === 1" :disabled="submitting" @change="form.performance_independent = $event.target.checked ? 1 : 0" />
+              <span class="jp-switch-track" aria-hidden="true"><span class="jp-switch-thumb" /></span>
+              <span class="jp-switch-text">{{ Number(form.performance_independent) === 1 ? '独立' : '不独立' }}</span>
+            </label>
+          </div>
+
           <div class="jp-tip-card">
             <p>岗位决定员工可以操作哪些功能；入口关闭则该端不可用。</p>
             <p class="jp-tip-sub">门店可用仅控制门店选岗；人员数据权限决定员工可以看到哪些数据。</p>
+            <p class="jp-tip-sub">业绩独立核算用于收银人员分配：独立岗位单独按 100% 核算，不参与普通岗位均分。</p>
           </div>
 
           <div class="jp-summary">
@@ -73,7 +83,7 @@
                 <b>{{ Number(form.use_store) === 1 ? ((ruleIds.store_v3 || []).length + ' 项') : '入口关' }}</b>
               </li>
               <li>
-                <span>手机端</span>
+                <span>商家端</span>
                 <b>{{ Number(form.use_mobile) === 1 ? ((ruleIds.mobile || []).length + ' 项') : '入口关' }}</b>
               </li>
             </ul>
@@ -128,6 +138,7 @@ export default {
         remark: '',
         status: 1,
         allow_store_select: 0,
+        performance_independent: 0,
         is_store_manager: 0,
         use_platform: 0,
         use_store: 0,
@@ -164,6 +175,7 @@ export default {
         remark: '',
         status: 1,
         allow_store_select: 0,
+        performance_independent: 0,
         is_store_manager: 0,
         use_platform: 0,
         use_store: 0,
@@ -192,6 +204,7 @@ export default {
           remark: p.remark || '',
           status: Number(p.status) === 1 ? 1 : 0,
           allow_store_select: Number(p.allow_store_select) === 1 ? 1 : 0,
+          performance_independent: Number(p.performance_independent) === 1 ? 1 : 0,
           is_store_manager: Number(p.is_store_manager) === 1 ? 1 : 0,
           use_platform: Number(p.use_platform) === 1 ? 1 : 0,
           use_store: Number(p.use_store) === 1 ? 1 : 0,
@@ -239,6 +252,7 @@ export default {
         remark: this.form.remark || '',
         status: Number(this.form.status) === 1 ? 1 : 0,
         allow_store_select: Number(this.form.allow_store_select) === 1 ? 1 : 0,
+        performance_independent: Number(this.form.performance_independent) === 1 ? 1 : 0,
         is_store_manager: Number(this.form.is_store_manager) === 1 ? 1 : 0,
         use_platform: Number(entries.use_platform) === 1 ? 1 : 0,
         use_store: Number(entries.use_store) === 1 ? 1 : 0,

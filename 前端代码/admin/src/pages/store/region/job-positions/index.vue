@@ -128,6 +128,7 @@ export default {
       const payload = {
         id: Number(form.id || 0), name: String(form.name || '').trim(), status: Number(form.status) === 1 ? 1 : 0,
         remark: form.remark || '', allow_store_select: Number(form.allow_store_select) === 1 ? 1 : 0,
+        performance_independent: Number(form.performance_independent) === 1 ? 1 : 0,
         is_store_manager: Number(form.is_store_manager) === 1 ? 1 : 0,
         use_platform: Number(form.use_platform) === 1 ? 1 : 0, use_store: Number(form.use_store) === 1 ? 1 : 0,
         use_mobile: Number(form.use_mobile) === 1 ? 1 : 0,
