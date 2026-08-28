@@ -587,7 +587,7 @@
               <div class="form-section-title">门店停用 / 恢复</div>
               <div class="permission-note">
                 <strong>做什么</strong>
-                <span>停用后本店门店后台、收银台、手机端业务入口立即不可用，禁止新增业务；恢复后按原任职与授权继续生效。</span>
+                <span>停用后本店门店后台、收银台、商家端业务入口立即不可用，禁止新增业务；恢复后按原任职与授权继续生效。</span>
               </div>
               <div class="permission-note">
                 <strong>不影响什么</strong>
@@ -694,7 +694,7 @@
                 <div v-for="row in ((personAuth.function_preview && personAuth.function_preview.by_staff) || [])" :key="`fp-${row.staff_id}`" class="auth-write-box">
                   <div class="permission-note"><strong>{{ storeNameByStaffId(row.staff_id) }}</strong><span>按有效岗位计算</span></div>
                   <div class="permission-note"><strong>Vue 3 门店端</strong><span>{{ previewCoverText(row.preview && row.preview.channels && row.preview.channels.store_v3) }} · {{ entryStatusText(row.staff_id, 'store_v3') }}</span></div>
-                  <div class="permission-note"><strong>手机端</strong><span>{{ previewCoverText(row.preview && row.preview.channels && row.preview.channels.mobile) }} · {{ entryStatusText(row.staff_id, 'mobile') }}</span></div>
+                  <div class="permission-note"><strong>商家端</strong><span>{{ previewCoverText(row.preview && row.preview.channels && row.preview.channels.mobile) }} · {{ entryStatusText(row.staff_id, 'mobile') }}</span></div>
                 </div>
                 <div v-if="!((personAuth.function_preview && personAuth.function_preview.by_staff) || []).length" class="empty-inline">暂无 Vue 3 门店端入口预览</div>
               </div>
@@ -897,7 +897,7 @@
           </table>
           <div v-if="!rolePublishModal.templates.length" class="empty-inline role-empty-box">
             <p>暂无总部门店角色模板。</p>
-            <p class="muted">历史模板不再用于门店端授权；请到「岗位策略」配置门店端和手机端权限。</p>
+            <p class="muted">历史模板不再用于门店端授权；请到「岗位策略」配置门店端和商家端权限。</p>
             <div style="margin-top:12px;display:flex;gap:8px;justify-content:center;">
               <button class="button primary compact-button" type="button" :disabled="!canWrite" @click="openRoleTemplateCreate">新建总部门店角色模板</button>
               <button class="button secondary compact-button" type="button" @click="loadRoleTemplates">刷新列表</button>
@@ -1800,7 +1800,7 @@ export default {
       if (m.target === 'store') {
         return Number(m.status) === 1
           ? `确认恢复门店「${name}」？恢复后，原任职与授权按各自有效状态继续生效；若所属组织仍停用，业务仍不可用。历史数据不受影响。`
-          : `确认停用门店「${name}」？停用后门店端、手机端业务入口立即不可用，禁止新增业务写入；历史数据保留，总部仍可查询并恢复。`;
+          : `确认停用门店「${name}」？停用后门店端、商家端业务入口立即不可用，禁止新增业务写入；历史数据保留，总部仍可查询并恢复。`;
       }
       return Number(m.status) === 1
         ? `确认恢复组织「${name}」？恢复上级后，原本单独停用的下级组织和门店仍保持停用，不会一并自动恢复。`

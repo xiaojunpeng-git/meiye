@@ -272,7 +272,7 @@ export default {
       const tabs = [
         { key: 'platform', label: '平台后台', locked: this.platformLocked || !this.includePlatform },
         { key: 'store_v3', label: '门店端', locked: false },
-        { key: 'mobile', label: '手机端', locked: false },
+        { key: 'mobile', label: '商家端', locked: false },
       ];
       if (!this.includePlatform && this.platformLocked) return tabs;
       if (!this.includePlatform) return tabs.filter((t) => t.key !== 'platform');

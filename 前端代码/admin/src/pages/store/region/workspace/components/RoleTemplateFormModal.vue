@@ -177,7 +177,7 @@ export default {
       const cashierRules = rules.cashier || [];
       const mallRules = rules.mobile || [];
       if (!storeRules.length && !cashierRules.length && !mallRules.length) {
-        this.$Message.error('请至少配置门店后台、收银台或手机端其中一端功能权限');
+        this.$Message.error('请至少配置门店后台、收银台或商家端其中一端功能权限');
         return;
       }
       const payload = {

@@ -363,7 +363,7 @@ class JobPositionPolicyServices extends BaseServices
                     throw new AdminException('请填写岗位名称');
                 }
                 if ($usePlatform === 0 && $useStore === 0 && $useMobile === 0) {
-                    throw new AdminException('请至少开启平台后台、门店端或手机端其中一端入口');
+                    throw new AdminException('请至少开启平台后台、门店端或商家端其中一端入口');
                 }
                 // 门店可用与平台权限可并存：门店选用时只下发门店端/手机端规则，不下发平台入口。
                 $now = time();
@@ -755,7 +755,10 @@ class JobPositionPolicyServices extends BaseServices
             if ($ch === self::CHANNEL_MOBILE && $rules !== '') {
                 $rules = implode(',', $this->normalizeMobileRuleIds($this->rulesToIds($rules)));
             }
-            if ((int)($useFlags[$ch] ?? 0) === 1 && $rules === '') {
+            // 商家端入口开关与四个底部 Tab 权限分开保存。允许先开启商家端
+            // 入口、暂不勾选具体 Tab；此时服务端只返回基础会话能力，不会
+            // 越权开放任何业务接口，后续可继续编辑补充入口权限。
+            if ((int)($useFlags[$ch] ?? 0) === 1 && $rules === '' && $ch !== self::CHANNEL_MOBILE) {
                 throw new AdminException($this->channelLabel($ch) . '已启用，请配置功能权限');
             }
             if ((int)($useFlags[$ch] ?? 0) === 0) {
@@ -894,7 +897,7 @@ class JobPositionPolicyServices extends BaseServices
         try {
             return $catalog->normalizeRuleIds($ruleIds);
         } catch (\InvalidArgumentException $e) {
-            throw new AdminException('手机端功能权限无效，请重新加载当前商家端功能后再保存');
+            throw new AdminException('商家端功能权限无效，请重新加载当前商家端功能后再保存');
         }
     }
 
@@ -938,7 +941,7 @@ class JobPositionPolicyServices extends BaseServices
             self::CHANNEL_STORE_V3 => '门店端',
             self::CHANNEL_STORE_BACKEND => '旧门店后台',
             self::CHANNEL_CASHIER => '旧收银台',
-            self::CHANNEL_MOBILE => '手机端',
+            self::CHANNEL_MOBILE => '商家端',
         ];
         return $map[$channel] ?? $channel;
     }
