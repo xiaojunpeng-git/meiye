@@ -122,7 +122,19 @@ function performanceIndependent(item = {}) {
     || Number(item.performanceIndependent ?? item.performance_independent ?? 0) === 1
 }
 
+function hasPerformanceIndependentMetadata(item = {}) {
+  return Object.prototype.hasOwnProperty.call(item, 'performanceIndependent')
+    || Object.prototype.hasOwnProperty.call(item, 'performance_independent')
+}
+
 function allocationGroupKey(item = {}) {
+  // Keep an explicit independent group key when a local draft/snapshot carries
+  // the group metadata but an older projection omitted the boolean flag. The
+  // key is emitted by the authoritative candidate query and is also persisted
+  // in the personnel snapshot, so dropping it here would silently merge an
+  // independent position back into the normal 100% pool.
+  const explicitKey = String(item.allocationGroupKey || '').trim()
+  if (explicitKey.startsWith('independent:')) return explicitKey
   if (!performanceIndependent(item)) return 'normal'
   const positionId = Number(item.positionId ?? item.position_id ?? 0)
   return `independent:${positionId > 0 ? positionId : recordId(item)}`
@@ -161,7 +173,38 @@ function recordName(record = {}) {
   return String(record.name || record.staffName || record.employeeName || record.realName || '')
 }
 
+function refreshCraftsmanAllocationMetadata(records) {
+  if (!Array.isArray(records)) return
+  const candidatesById = new Map(
+    [...(Array.isArray(props.craftsmenCandidates) ? props.craftsmenCandidates : []),
+      ...(Array.isArray(otherCraftsmanCandidates.value) ? otherCraftsmanCandidates.value : [])]
+      .map((candidate) => [recordId(candidate), candidate])
+      .filter(([id]) => id)
+  )
+  records.forEach((record) => {
+    const candidate = candidatesById.get(recordId(record))
+    if (!candidate) return
+    // Re-apply the authoritative selector metadata immediately before a
+    // default split. This covers a local selected snapshot that was created by
+    // an older response and therefore lost the independent-position fields.
+    if (Object.prototype.hasOwnProperty.call(candidate, 'positionId')
+      || Object.prototype.hasOwnProperty.call(candidate, 'position_id')) {
+      record.positionId = Number(candidate.positionId ?? candidate.position_id ?? 0)
+    }
+    if (hasPerformanceIndependentMetadata(candidate)) {
+      record.performanceIndependent = performanceIndependent(candidate)
+    }
+    if (Object.prototype.hasOwnProperty.call(candidate, 'allocationGroupKey')) {
+      record.allocationGroupKey = String(candidate.allocationGroupKey || '').trim()
+    }
+    if (candidate.positionName || candidate.position || candidate.jobTitle) {
+      record.position = candidate.positionName || candidate.position || candidate.jobTitle || record.position
+    }
+  })
+}
+
 function equalWeights(records) {
+  refreshCraftsmanAllocationMetadata(records)
   selectedByAllocationGroup(records, (record) => craftsmanType(record) !== PERFORMANCE_TYPES.LABOR)
     .forEach((group) => {
       const base = Math.floor(100 / group.length)
@@ -218,9 +261,16 @@ function mergeCandidates(candidates, selected, role) {
       staffId: id,
       name: recordName(candidate),
       position: candidate.positionName || candidate.position || candidate.jobTitle || '在职员工',
-      positionId: Number(candidate.positionId ?? candidate.position_id ?? 0),
-      performanceIndependent: performanceIndependent(candidate),
-      allocationGroupKey: String(candidate.allocationGroupKey || '').trim() || allocationGroupKey(candidate),
+      // Candidate metadata is authoritative, but retain the selected snapshot
+      // metadata when an older selector response omitted the position fields.
+      // Without this fallback, switching simple -> full after adding a normal
+      // employee can recalculate an independent manager into 34/33/33.
+      positionId: Number(candidate.positionId ?? candidate.position_id ?? saved?.positionId ?? saved?.position_id ?? 0),
+      performanceIndependent: hasPerformanceIndependentMetadata(candidate)
+        ? performanceIndependent(candidate)
+        : performanceIndependent(saved || {}),
+      allocationGroupKey: String(candidate.allocationGroupKey || saved?.allocationGroupKey || '').trim()
+        || allocationGroupKey({ ...saved, ...candidate }),
       level: candidate.levelName || candidate.positionLevelName || candidate.level || '—',
       selected: Boolean(saved),
       marked: Boolean(saved?.marked ?? saved?.isPreSale ?? saved?.isPointCustomer),

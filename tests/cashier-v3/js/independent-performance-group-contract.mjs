@@ -34,6 +34,11 @@ const saleFacts = fs.readFileSync(
 )
 
 assert.match(overlay, /function allocationGroupKey\(item = \{\}\)/)
+assert.match(overlay, /function refreshCraftsmanAllocationMetadata\(records\)/)
+assert.match(overlay, /refreshCraftsmanAllocationMetadata\(records\)/)
+assert.match(overlay, /explicitKey\.startsWith\('independent:'\)/)
+assert.match(overlay, /hasPerformanceIndependentMetadata\(candidate\)[\s\S]{0,120}performanceIndependent\(saved \|\| \{\}\)/)
+assert.match(overlay, /candidate\.allocationGroupKey \|\| saved\?\.allocationGroupKey/)
 assert.match(overlay, /selectedByAllocationGroup\(records, \(record\) => craftsmanType\(record\) !== PERFORMANCE_TYPES\.LABOR\)/)
 assert.match(overlay, /selectedByAllocationGroup\(selected\)\.forEach\(\(group\) =>/)
 assert.match(overlay, /allocationGroupKey: allocationGroupKey\(item\)/)
