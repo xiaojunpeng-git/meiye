@@ -1756,6 +1756,24 @@ function reportPersonnelAssignmentFailure(result, fallback) {
   }))
 }
 
+const guestAttributionBlockedMessage = '游客订单不能记录导购或销售经理，请先选择会员。'
+
+function reportGuestAttributionBlocked() {
+  window.dispatchEvent(new CustomEvent('cashier-v3:ui-result', {
+    detail: {
+      status: 'failed',
+      message: guestAttributionBlockedMessage
+    }
+  }))
+}
+
+function lineHasCustomerAttribution(line = {}) {
+  const guides = line.guideSelections ?? line.guide_selections
+  const managers = line.salesManagerSelections ?? line.sales_manager_selections
+  return (Array.isArray(guides) && guides.length > 0)
+    || (Array.isArray(managers) && managers.length > 0)
+}
+
 function reportCartQuantityFailure(result, fallback) {
   const status = resultStatus(result)
   const message = resultMessage(result, fallback)
@@ -3453,6 +3471,10 @@ async function openCartLineSalespeople(line) {
 
 async function openCartLineAttributions(line) {
   if (isEntitlementLine(line)) return
+  if (currentCustomerMode.value === 'guest') {
+    reportGuestAttributionBlocked()
+    return
+  }
   activeCartLineId.value = line.id
   await loadPersonnelOverlay(line, 'guides', 'attribution')
 }
@@ -4709,6 +4731,13 @@ async function openCheckout() {
   }
   if (!hasCartLines.value) {
     return { result: { status: 'failed', code: 'CASHIER_CART_EMPTY', message: '请先添加需要结算或服务的项目。' } }
+  }
+  // Guide and sales-manager facts are member-bound (the round history is
+  // keyed by member_id). Reject a guest checkout before opening payment so a
+  // server-side transaction cannot roll back after the operator has paid.
+  if (currentCustomerMode.value === 'guest' && cartLines.value.some(lineHasCustomerAttribution)) {
+    reportGuestAttributionBlocked()
+    return { result: { status: 'failed', code: 'GUEST_ATTRIBUTION_NOT_ALLOWED', message: guestAttributionBlockedMessage } }
   }
   // The checkout wizard is a browser-only projection. The first write for this
   // order is the final submit-checkout carrying the complete snapshot.
