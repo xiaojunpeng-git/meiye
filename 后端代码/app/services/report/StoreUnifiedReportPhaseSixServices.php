@@ -285,13 +285,12 @@ final class StoreUnifiedReportPhaseSixServices
             ->field('pf.id,pf.fact_id,pf.reversal_of,pf.fact_id row_key,pf.store_id,pf.employee_id,pf.employee_name_snapshot employee_name,pf.business_date,pf.checkout_request_id,pf.source_line_id,pf.amount_cents,pf.labor_fee_amount_cents,pf.project_count_half_units,pf.rule_code_snapshot,pf.fact_direction,sv.member_id,sv.member_name_snapshot member_name,sv.store_name_snapshot store_name,sv.organization_name_snapshot company_name,sv.quantity,sv.project_count,sv.project_name_snapshot item_name,sv.project_category_name_snapshot category_path,sv.source_document_type source_type')
             ->order('pf.id','asc')
             ->select()->toArray();
-        if($rows===[])return[];
         $reversed=[];
         foreach($rows as $row){if((string)$row['fact_direction']==='reversal'&&trim((string)$row['reversal_of'])!=='')$reversed[(string)$row['reversal_of']]=true;}
         $grouped=[];
         foreach($rows as $row){
             if((string)$row['fact_direction']!=='forward'||isset($reversed[(string)$row['fact_id']]))continue;
-            $key=(string)$row['checkout_request_id'].'|'.(string)$row['source_line_id'].'|'.(int)$row['employee_id'];
+            $key=(int)$row['store_id'].'|'.(int)$row['employee_id'].'|'.(string)$row['checkout_request_id'].'|'.(string)$row['source_line_id'];
             if(!isset($grouped[$key])){
                 $grouped[$key]=$row;
                 $grouped[$key]['amount_cents']=0;
@@ -308,7 +307,7 @@ final class StoreUnifiedReportPhaseSixServices
             foreach(['row_key','employee_name','member_id','member_name','store_name','company_name','item_name','category_path','source_type'] as $field)$grouped[$key][$field]=$row[$field]??$grouped[$key][$field]??'';
         }
         $lineGroups=[];
-        foreach($grouped as $key=>$row){$lineKey=(string)$row['checkout_request_id'].'|'.(string)$row['source_line_id'];$lineGroups[$lineKey][]=$key;}
+        foreach($grouped as $key=>$row){$lineKey=(int)$row['store_id'].'|'.(string)$row['checkout_request_id'].'|'.(string)$row['source_line_id'];$lineGroups[$lineKey][]=$key;}
         foreach($lineGroups as $keys){
             $hasExplicitProjectCount=false;
             foreach($keys as $key)$hasExplicitProjectCount=$hasExplicitProjectCount||!empty($grouped[$key]['has_explicit_project_count']);
@@ -320,22 +319,49 @@ final class StoreUnifiedReportPhaseSixServices
             $base=intdiv($totalHalfUnits,count($keys));$remainder=$totalHalfUnits-$base*count($keys);
             foreach($keys as $index=>$key)$grouped[$key]['project_count_half_units']=$base+($index>=count($keys)-$remainder?1:0);
         }
-        $salesRows=Db::name('cashier_v3_performance_fact')->where('tenant_id',CashierV3ScopeResolver::TENANT_SCOPE_ID)
-            ->whereIn('store_id',$stores)->whereBetween('business_date',[$range['start'],$range['end']])
-            ->where('performance_type','sales_performance_allocated')->where('status','effective')
-            ->field('store_id,employee_id,checkout_request_id,source_line_id,amount_cents')->select()->toArray();
-        $salesByEmployeeLine=[];
-        foreach($salesRows as $sale){$salesKey=(int)$sale['store_id'].'|'.(int)$sale['employee_id'].'|'.(string)$sale['checkout_request_id'].'|'.(string)$sale['source_line_id'];$salesByEmployeeLine[$salesKey]=($salesByEmployeeLine[$salesKey]??0)+(int)$sale['amount_cents'];}
+        // 现金业绩与服务/手工事实分开记账：纯销售订单没有 labor 行，不能因此从薪资明细中消失。
+        // 先按同一业务行、同一员工合并销售事实；若该员工同时参与服务，则与已有 labor 行合并，避免重复展示。
+        $salesRows=Db::name('cashier_v3_performance_fact')->alias('pf')
+            ->leftJoin('cashier_v3_sale_fact s','s.tenant_id=pf.tenant_id AND s.checkout_request_id=pf.checkout_request_id AND s.source_line_id=pf.source_line_id AND s.fact_direction=\'forward\' AND s.status=\'effective\'')
+            ->leftJoin('cashier_v3_report_sale_dimension_fact d','d.tenant_id=pf.tenant_id AND d.sale_fact_id=s.fact_id')
+            ->where('pf.tenant_id',CashierV3ScopeResolver::TENANT_SCOPE_ID)
+            ->whereIn('pf.store_id',$stores)->whereBetween('pf.business_date',[$range['start'],$range['end']])
+            ->where('pf.performance_type','sales_performance_allocated')->where('pf.status','effective')
+            ->where('pf.employee_id','>',0)
+            ->field('pf.id,pf.fact_id,pf.reversal_of,pf.fact_direction,pf.store_id,pf.employee_id,pf.employee_name_snapshot employee_name,pf.business_date,pf.checkout_request_id,pf.source_line_id,pf.amount_cents,s.member_id,s.member_name_snapshot member_name,s.store_name_snapshot store_name,s.organization_name_snapshot company_name,s.source_type,d.item_name_snapshot item_name,d.category_path_snapshot category_path')
+            ->order('pf.id','asc')->select()->toArray();
+        $salesReversed=[];
+        foreach($salesRows as $sale){if((string)$sale['fact_direction']==='reversal'&&trim((string)$sale['reversal_of'])!=='')$salesReversed[(string)$sale['reversal_of']]=true;}
+        $salesGrouped=[];
+        foreach($salesRows as $sale){
+            if((string)$sale['fact_direction']!=='forward'||isset($salesReversed[(string)$sale['fact_id']]))continue;
+            $salesKey=(int)$sale['store_id'].'|'.(int)$sale['employee_id'].'|'.(string)$sale['checkout_request_id'].'|'.(string)$sale['source_line_id'];
+            if(!isset($salesGrouped[$salesKey])){$salesGrouped[$salesKey]=$sale;$salesGrouped[$salesKey]['amount_cents']=0;}
+            $salesGrouped[$salesKey]['amount_cents']+=(int)$sale['amount_cents'];
+        }
+        foreach($salesGrouped as $salesKey=>$sale){
+            if(isset($grouped[$salesKey])){$grouped[$salesKey]['cash_cents']=($grouped[$salesKey]['cash_cents']??0)+(int)$sale['amount_cents'];continue;}
+            $sale['row_key']=(string)($sale['fact_id']??'');
+            $sale['labor_fee_amount_cents']=0;$sale['project_count_half_units']=0;$sale['has_explicit_project_count']=true;
+            // 销售事实只产生现金业绩，不产生服务消耗；不能把销售金额复用为消耗金额。
+            $sale['consumption_cents']=0;
+            $sale['cash_cents']=(int)$sale['amount_cents'];$sale['member_id']=(int)($sale['member_id']??0);
+            $sale['member_name']=(string)($sale['member_name']??'');$sale['store_name']=(string)($sale['store_name']??'');
+            $sale['company_name']=(string)($sale['company_name']??'');$sale['item_name']=(string)($sale['item_name']??'');
+            $sale['category_path']=(string)($sale['category_path']??'');$sale['source_type']=(string)($sale['source_type']??'');
+            $grouped[$salesKey]=$sale;
+        }
         $out=[];
         foreach($grouped as $row){
             $halfUnits=(int)$row['project_count_half_units'];
             $row['project_count']=$halfUnits/2;
-            $row['consumption_cents']=(int)$row['amount_cents'];
+            $row['consumption_cents']=array_key_exists('consumption_cents',$row)
+                ? (int)$row['consumption_cents']
+                : (int)$row['amount_cents'];
             $row['labor_fee_cents']=(int)$row['labor_fee_amount_cents'];
-            $salesKey=(int)$row['store_id'].'|'.(int)$row['employee_id'].'|'.(string)$row['checkout_request_id'].'|'.(string)$row['source_line_id'];
-            $row['cash_cents']=(int)($salesByEmployeeLine[$salesKey]??0);
+            $row['cash_cents']=(int)($row['cash_cents']??0);
             $row['card_type']='';$row['item_name']=(string)($row['item_name']??'');$row['category_path']=(string)($row['category_path']??'');
-            if((int)$row['consumption_cents']===0&&(int)$row['labor_fee_cents']===0&&(float)$row['project_count']===0.0)continue;
+            if((int)$row['consumption_cents']===0&&(int)$row['labor_fee_cents']===0&&(float)$row['project_count']===0.0&&(int)$row['cash_cents']===0)continue;
             $out[]=$row;
         }
         return $out;
