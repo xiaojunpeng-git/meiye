@@ -3,6 +3,7 @@
 $root = dirname(__DIR__, 3);
 $service = (string)file_get_contents($root . '/后端代码/app/services/report/CustomerLifecycleFactServices.php');
 $migration = (string)file_get_contents($root . '/后端代码/database/upgrades/2026-08-10-顾客生命周期与首次疗程归因/02-正式升级.sql');
+$backfill = (string)file_get_contents($root . '/后端代码/database/upgrades/2026-08-28-客户来源生命周期事实回填/01-正式升级.sql');
 $repository = (string)file_get_contents($root . '/后端代码/app/services/cashier/v3/fact/ThinkPhpCashierV3CheckoutFactRepository.php');
 $completion = (string)file_get_contents($root . '/后端代码/app/services/cashier/v3/checkout/persistence/ThinkPhpCashierV3EntitlementCompletionWriter.php');
 $debt = (string)file_get_contents($root . '/后端代码/app/services/cashier/v3/settlement/CashierV3DebtRepaymentServices.php');
@@ -13,7 +14,10 @@ $checks = [
     'immutable lifecycle fact has tenant natural-key idempotency' => strpos($migration, 'UNIQUE KEY `uk_tenant_natural`') !== false,
     'projection has one row per tenant member' => strpos($migration, 'UNIQUE KEY `uk_tenant_member`') !== false,
     'checkout records settled and debt-pending course paths' => strpos($service, "'first_course_completed'") !== false && strpos($service, "'course_pending_settlement'") !== false,
-    'cashier workspace settlement is accepted by lifecycle checkout writer' => strpos($service, "'cashier_workspace'") !== false,
+    'cashier snapshot and workspace settlements are accepted by lifecycle checkout writer' => strpos($service, "'cashier_snapshot', 'cashier_workspace'") !== false,
+    'historical backfill is limited to immutable V3 card sale facts and rerunnable' => strpos($backfill, "source_type = 'card'") !== false
+        && strpos($backfill, 'INSERT IGNORE INTO eb_cashier_v3_customer_lifecycle_fact') !== false
+        && strpos($backfill, 'Legacy eb_store_order') !== false,
     'upgrade card is excluded from first-course attribution using immutable settlement authority' => strpos($service, "Db::name('cashier_v3_card_operation_settlement')") !== false
         && strpos($service, "'card_upgrade', 'project_upgrade'") !== false
         && strpos($service, 'customer_lifecycle_upgrade_settlement_invalid') !== false,

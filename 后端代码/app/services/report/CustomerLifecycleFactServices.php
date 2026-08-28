@@ -21,7 +21,12 @@ final class CustomerLifecycleFactServices
     {
         CashierV3TransactionGuard::assertInTransaction('customerLifecycle.recordCheckoutInTx');
         $context = $plan->context();
-        if ((int)$context['member_id'] <= 0 || !in_array((string)$context['source_document_type'], ['cashier_workspace', 'sales_order', 'checkout'], true)) return;
+        // Direct cashier snapshot checkouts are settled sales as well. They
+        // carry the same immutable source snapshots as workspace/sales-order
+        // checkouts and must enter the first-course lifecycle projection;
+        // excluding them leaves the source-analysis report empty even though
+        // the sale/payment facts were written successfully.
+        if ((int)$context['member_id'] <= 0 || !in_array((string)$context['source_document_type'], ['cashier_snapshot', 'cashier_workspace', 'sales_order', 'checkout'], true)) return;
 
         $cards = [];
         $nonCards = [];
