@@ -780,6 +780,15 @@ final class CustomerAnalyticsServices
      */
     private function unconsumedAnalysis(array $stores, array $range, array $input): array
     {
+        // The current-state entitlement snapshot must reconcile legacy holder
+        // rows with their project details in one response.  Large all-store
+        // scopes can exceed the PHP default memory budget before the result is
+        // assembled; raise only this report's bounded worker budget instead of
+        // changing the process-wide PHP configuration for every endpoint.
+        $memoryLimit = (string)ini_get('memory_limit');
+        if ($memoryLimit !== '' && preg_match('/^(\d+)M$/i', $memoryLimit, $match) && (int)$match[1] < 512) {
+            @ini_set('memory_limit', '512M');
+        }
         $columns = [
             ['key' => 'company_name', 'label' => '分公司', 'source_explanation' => '按当前门店所属组织架构匹配分公司；没有配置分公司时显示“-”。'],
             ['key' => 'store_name', 'label' => '门店', 'source_explanation' => '取当前有效卡项权益所属门店名称。'],

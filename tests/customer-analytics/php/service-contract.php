@@ -105,6 +105,7 @@ customerAnalyticsAssert(
 customerAnalyticsAssert(
     str_contains($service, "customer_unconsumed_analysis")
         && str_contains($service, 'private function unconsumedAnalysis')
+        && str_contains($service, "@ini_set('memory_limit', '512M')")
         && str_contains($service, 'user_card_holder')
         && str_contains($service, 'current_card_entitlement')
         && str_contains($service, "'top_items_top10'")
