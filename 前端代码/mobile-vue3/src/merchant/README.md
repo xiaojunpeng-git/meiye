@@ -1,14 +1,16 @@
-# Merchant boundary
+# 商家端唯一源码边界
 
-这里是手机商家端的唯一业务边界：
+商家端只从本工程 `mobile-vue3` 读取。底部五个入口的页面正本固定在
+`src/merchant/pages`，H5 与微信小程序都从同一套 Vue 3 / uni-app x 源码构建，
+不从 `unpackage`、`dist` 或旧 `uniapp` 产物启动。
 
-- `pages/`：商家端页面和页面交互
-- `api/`：商家端接口客户端与请求契约镜像
-- `contracts/`：商家端接口和数据权限协议
-- `platform/`：商家端会话、导航等业务编排
+| 底部入口 | 页面正本 | 路由 |
+| --- | --- | --- |
+| 经营 | `pages/home/index.uvue` | `/src/merchant/pages/home/index` |
+| 数据 | `pages/warehouse/index.uvue` | `/src/merchant/pages/warehouse/index` |
+| 客户 | `pages/customers/index.uvue` | `/src/merchant/pages/customers/index` |
+| 工作台 | `pages/workbench/index.uvue` | `/src/merchant/pages/workbench/index` |
+| 我的 | `pages/profile/index.uvue` | `/src/merchant/pages/profile/index` |
 
-商家端直接使用服务端员工身份和商家会话，不依赖会员端页面。网络请求、
-本地运行时配置和原生平台适配等纯技术能力才从 `../shared/` 引入。
-
-新增商家业务必须落在本目录，不得再放回 `src/shared/api` 或
-`src/shared/platform`。
+底部入口统一由 `src/shared/components/merchant-primary-tab-bar.uvue` 渲染，
+显隐由 `src/shared/platform/merchant-tab-permissions.uts` 与服务端权限共同决定。
