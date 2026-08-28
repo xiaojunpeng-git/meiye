@@ -305,6 +305,25 @@ namespace {
         count($laborRows) === 3
         && array_sum(array_column($laborRows, 'amount_cents')) === 3000
         && array_column($laborRows, 'employee_id') === [1011, 1012, 1012]);
+    $independentPrimary = ecpAllocation(11, 1, 1000, 100);
+    $independentPrimary['allocationGroupKey'] = 'independent:67';
+    $independentPrimary['performanceIndependent'] = true;
+    $normalCraftsman = ecpAllocation(12, 2, 1000, 100);
+    $groupedKernel = $kernel;
+    $groupedKernel['linePlans'][0] = ecpLine(
+        'entitlement-line-001', 1, 3333, 1000, 'self', false,
+        [$independentPrimary, $normalCraftsman]
+    );
+    $groupedKernel['totals']['laborPerformanceCents'] = 3000;
+    $groupedPlan = CashierV3EntitlementCompletionPlanV1::fromKernelPlan($groupedKernel, $context);
+    $groupedLaborRows = array_values(array_filter($groupedPlan->performanceRows(), static function (array $row): bool {
+        return $row['performance_type'] === 'labor_performance_allocated'
+            && $row['source_line_id'] === 'entitlement-line-001';
+    }));
+    ecpAssert('ECP-06A independent and normal groups each persist a 100% denominator',
+        count($groupedLaborRows) === 2
+        && array_column($groupedLaborRows, 'allocation_weight_denominator') === [100, 100]
+        && strpos($groupedPlan->serviceRows()[0]['craftsmen_snapshot_json'], 'allocation_group_key') !== false);
     ecpAssert('ECP-07 craftsmen name type and authority versions are frozen',
         $laborRows[0]['employee_name_snapshot'] === '手艺人甲'
         && $laborRows[0]['employee_type_snapshot'] === 'internal'

@@ -986,6 +986,8 @@ final class CashierV3OrderCenterRecordQueryServices
                 'key' => $key, 'employeeId' => $employeeId, 'employeeName' => '', 'employeeType' => '',
                 'roleSnapshot' => '', 'amountCents' => 0, 'laborFeeCents' => 0,
                 'projectCountHalfUnits' => 0, 'hasExplicitProjectCount' => false,
+                'allocationWeightNumerator' => 0, 'allocationWeightDenominator' => 0,
+                'hasExplicitAllocationWeight' => false,
                 'ruleCodeSnapshot' => '', 'ruleNameSnapshot' => '',
                 'ruleVersionSnapshot' => '',
             ];
@@ -999,6 +1001,18 @@ final class CashierV3OrderCenterRecordQueryServices
                 $grouped[$groupKey]['ruleCodeSnapshot'] = (string)($fact['rule_code_snapshot'] ?? '');
                 $grouped[$groupKey]['ruleNameSnapshot'] = (string)($fact['rule_name_snapshot'] ?? '');
                 $grouped[$groupKey]['ruleVersionSnapshot'] = (string)($fact['rule_version_snapshot'] ?? '');
+                // The allocation denominator is part of the immutable fact.
+                // An independent position is deliberately stored as 100/100,
+                // while a normal split is stored as e.g. 50/100. Do not
+                // recalculate this against the line-wide amount: that would
+                // collapse independent and normal groups into 50/50.
+                $weightDenominator = (int)($fact['allocation_weight_denominator'] ?? 0);
+                $weightNumerator = (int)($fact['allocation_weight_numerator'] ?? 0);
+                if ($weightDenominator > 0 && $weightNumerator >= 0) {
+                    $grouped[$groupKey]['allocationWeightNumerator'] = $weightNumerator;
+                    $grouped[$groupKey]['allocationWeightDenominator'] = $weightDenominator;
+                    $grouped[$groupKey]['hasExplicitAllocationWeight'] = true;
+                }
                 $grouped[$groupKey]['hasExplicitProjectCount'] =
                     (string)($fact['rule_code_snapshot'] ?? '') === 'SERVICE-RECORD-CRAFTSMAN-ADJUST-V1'
                     || (int)($fact['project_count_half_units'] ?? 0) !== 0;
@@ -1027,9 +1041,13 @@ final class CashierV3OrderCenterRecordQueryServices
                 'employeeName' => $name,
                 'employeeType' => (string)$allocation['employeeType'],
                 'roleSnapshot' => (string)$allocation['roleSnapshot'],
-                'allocationWeightNumerator' => (int)$allocation['amountCents'],
-                'allocationWeightDenominator' => max(1, $baseAmount),
-                'allocationRatio' => (int)$allocation['amountCents'] . '/' . max(1, $baseAmount),
+                'allocationWeightNumerator' => !empty($allocation['hasExplicitAllocationWeight'])
+                    ? (int)$allocation['allocationWeightNumerator']
+                    : (int)$allocation['amountCents'],
+                'allocationWeightDenominator' => !empty($allocation['hasExplicitAllocationWeight'])
+                    ? max(1, (int)$allocation['allocationWeightDenominator'])
+                    : max(1, $baseAmount),
+                'allocationRatio' => '',
                 'allocationRatioPercent' => 0,
                 'amount' => $this->centsToMoney((int)$allocation['amountCents']),
                 'laborFeeAmount' => $this->centsToMoney((int)$allocation['laborFeeCents']),
@@ -1041,11 +1059,11 @@ final class CashierV3OrderCenterRecordQueryServices
             ];
         }
         foreach ($result as &$line) {
-            $total = max(0, (int)$line['amountCents']);
             foreach ($line['allocations'] as &$allocation) {
-                $allocation['allocationWeightDenominator'] = max(1, $total);
-                $allocation['allocationRatio'] = (int)$allocation['allocationWeightNumerator'] . '/' . max(1, $total);
-                $allocation['allocationRatioPercent'] = $total > 0 ? round((int)$allocation['allocationWeightNumerator'] * 100 / $total, 2) : 0;
+                $denominator = max(1, (int)($allocation['allocationWeightDenominator'] ?? 0));
+                $numerator = max(0, (int)($allocation['allocationWeightNumerator'] ?? 0));
+                $allocation['allocationRatio'] = $numerator . '/' . $denominator;
+                $allocation['allocationRatioPercent'] = round($numerator * 100 / $denominator, 2);
             }
             unset($allocation);
         }

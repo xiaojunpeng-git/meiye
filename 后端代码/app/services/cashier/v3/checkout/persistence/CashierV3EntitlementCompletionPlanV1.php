@@ -578,6 +578,12 @@ final class CashierV3EntitlementCompletionPlanV1
             if ($performanceType === 'labor' && $amount !== 0) {
                 throw self::failure('labor_allocation_amount_invalid', ['lineId' => $lineId, 'staffId' => $staffId]);
             }
+            $allocationGroupKey = trim((string)($row['allocationGroupKey']
+                ?? $craftsman['allocationGroupKey']
+                ?? 'normal'));
+            if ($allocationGroupKey === '') $allocationGroupKey = 'normal';
+            $performanceIndependent = !empty($row['performanceIndependent'])
+                || !empty($craftsman['performanceIndependent']);
             $normalized = [
                 'staff_id' => $staffId,
                 'employee_id' => $authority['employee_id'],
@@ -595,16 +601,19 @@ final class CashierV3EntitlementCompletionPlanV1
                     'labor_fee_invalid'
                 ),
                 'amount_cents' => $amount,
+                // Freeze the group identity alongside the labor allocation.
+                // The normal group and each independent position have their
+                // own 100% denominator; they must never share one global sum.
+                'allocation_group_key' => $allocationGroupKey,
+                'performance_independent' => $performanceIndependent ? 1 : 0,
             ];
             if ($normalized['sequence'] !== $index + 1 || $normalized['is_primary'] !== ($index === 0 ? 1 : 0)) {
                 throw self::failure('labor_allocation_order_invalid', ['lineId' => $lineId]);
             }
             $sum += $amount;
             if ($performanceType !== 'labor') {
-                $groupKey = (string)($row['allocationGroupKey']
-                    ?? $craftsman['allocationGroupKey']
-                    ?? 'normal');
-                $sumByPerformanceGroup[$groupKey] = ($sumByPerformanceGroup[$groupKey] ?? 0) + $amount;
+                $sumByPerformanceGroup[$allocationGroupKey] =
+                    ($sumByPerformanceGroup[$allocationGroupKey] ?? 0) + $amount;
             }
             $result[] = $normalized;
         }
@@ -725,7 +734,13 @@ final class CashierV3EntitlementCompletionPlanV1
             $context['checkout_request_id'],
             $line['line_id'] . ':' . $allocation['staff_id']
         );
-        $weightTotal = array_sum(array_column($line['labor_allocations'], 'labor_weight'));
+        $allocationGroupKey = (string)($allocation['allocation_group_key'] ?? 'normal');
+        $weightTotal = 0;
+        foreach ($line['labor_allocations'] as $candidate) {
+            if ((string)($candidate['allocation_group_key'] ?? 'normal') === $allocationGroupKey) {
+                $weightTotal += (int)($candidate['labor_weight'] ?? 0);
+            }
+        }
         $allocationWeightDenominator = $weightTotal > 0 ? $weightTotal : 1;
         $row = array_merge(self::performanceCommon($context, $line, $naturalKey), [
             'fact_id' => self::factId('ELP', $naturalKey),
