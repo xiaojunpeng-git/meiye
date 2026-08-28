@@ -141,6 +141,12 @@ customerAnalyticsAssert(
     'customer analysis date range follows the current local date instead of a stale hard-coded end date'
 );
 customerAnalyticsAssert(
+    str_contains($frontendView, 'function defaultPeriodForReport(report)')
+        && str_contains($frontendView, "String(report || '') === 'source-analysis' ? 'month' : 'year'")
+        && str_contains($frontendView, 'const period = ref(defaultPeriodForReport(route.params.report))'),
+    'source analysis defaults to the current month while other customer reports retain the yearly default'
+);
+customerAnalyticsAssert(
     str_contains($frontendView, 'function money(cents)')
         && str_contains($frontendView, "Math.round(Number(cents) / 100)")
         && !str_contains($frontendView, 'maximumFractionDigits: 2'),

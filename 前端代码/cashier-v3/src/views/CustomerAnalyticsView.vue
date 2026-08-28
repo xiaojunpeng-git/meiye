@@ -41,11 +41,17 @@ const isEmbedded = typeof window !== 'undefined' && (window.self !== window.top 
 const reportToKey = Object.freeze({ overview: 'overview', 'source-analysis': 'source', 'visit-analysis': 'visits', 'store-health': 'health', 'consumption-tier': 'tiers', 'cash-performance': 'cash', 'refund-performance': 'returns', 'item-analysis': 'appearance', 'unconsumed-analysis': 'unconsumed' })
 const keyToReport = Object.freeze(Object.fromEntries(Object.entries(reportToKey).map(([report, key]) => [key, report])))
 const active = ref(reportToKey[String(route.params.report || 'overview')] || 'overview')
+function defaultPeriodForReport(report) {
+  return String(report || '') === 'source-analysis' ? 'month' : 'year'
+}
 watch(() => route.params.report, (value) => {
   const next = reportToKey[String(value || 'overview')]
-  if (next && next !== active.value) active.value = next
+  if (next && next !== active.value) {
+    active.value = next
+    period.value = defaultPeriodForReport(value)
+  }
 })
-const period = ref('year')
+const period = ref(defaultPeriodForReport(route.params.report))
 function localDateString(date = new Date()) {
   const year = date.getFullYear()
   const month = String(date.getMonth() + 1).padStart(2, '0')
@@ -342,7 +348,7 @@ async function loadReport(action = '查询') {
     trendSeed.value += 1
   }
 }
-function setModule(key) { active.value = key; const report = keyToReport[key]; if (report && String(route.params.report || '') !== report) router.replace({ path: `/platform/customer-analytics/${report}`, query: route.query }).catch(() => {}); loadReport('切换') }
+function setModule(key) { active.value = key; period.value = defaultPeriodForReport(keyToReport[key]); const report = keyToReport[key]; if (report && String(route.params.report || '') !== report) router.replace({ path: `/platform/customer-analytics/${report}`, query: route.query }).catch(() => {}); loadReport('切换') }
 function chooseStore(value) { store.value = value; selectedStores.value = value === '全部门店' ? [] : [value]; scopeOpen.value = false }
 function runQuery(action = '查询') { loadReport(action) }
 function changeAppearancePage(type, page) {
