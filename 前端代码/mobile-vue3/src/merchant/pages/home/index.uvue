@@ -172,9 +172,10 @@
 
 <style>
 	.merchant-home-page { display: flex; height: 100vh; min-height: 0; flex-direction: column; background-color: #f4f7fb; color: #25364a; }
-	/* MP-WEIXIN custom navigation does not reserve the status bar or capsule.
-	 * Keep the first context card below the notch; H5 keeps its original top. */
-	.merchant-home-page--native-mini .merchant-home-page__content-inner { padding-top: 84px; }
+	/* Keep the first context card below the mini-program status/capsule area.
+	 * The H5 preview uses the same mobile viewport, so it reserves the same
+	 * safe top instead of rendering the content against the device notch. */
+	.merchant-home-page__content-inner { padding-top: 84px; }
 	.merchant-home-page__header { flex: none; padding: 18px 18px 14px 18px; background-color: #ffffff; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #e4ebf2; }
 	.merchant-home-page__eyebrow { display: block; font-size: 12px; font-weight: 700; line-height: 17px; color: #5b7893; }
 	.merchant-home-page__title-row { display: flex; flex-direction: row; align-items: flex-end; justify-content: space-between; margin-top: 3px; }
