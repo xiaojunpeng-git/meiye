@@ -42,7 +42,7 @@ const reportToKey = Object.freeze({ overview: 'overview', 'source-analysis': 'so
 const keyToReport = Object.freeze(Object.fromEntries(Object.entries(reportToKey).map(([report, key]) => [key, report])))
 const active = ref(reportToKey[String(route.params.report || 'overview')] || 'overview')
 function defaultPeriodForReport(report) {
-  return ['source-analysis', 'consumption-tier'].includes(String(report || '')) ? 'month' : 'year'
+  return ['source-analysis', 'consumption-tier', 'item-analysis'].includes(String(report || '')) ? 'month' : 'year'
 }
 watch(() => route.params.report, (value) => {
   const next = reportToKey[String(value || 'overview')]
