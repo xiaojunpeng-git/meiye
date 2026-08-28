@@ -1087,7 +1087,10 @@ final class CashierV3EntitlementCompletionKernel
                 'isPrimary',
                 'laborWeight',
             ];
-            $optionalKeys = ['craftsmanPerformanceType', 'laborFeeCents', 'personnelSource'];
+            $optionalKeys = [
+                'craftsmanPerformanceType', 'laborFeeCents', 'personnelSource',
+                'positionId', 'positionName', 'performanceIndependent', 'allocationGroupKey',
+            ];
             $expectedKeys = array_merge($baseKeys, array_values(array_intersect($optionalKeys, array_keys($row))));
             self::assertExactKeys($row, $expectedKeys, 'craftsman');
             self::assertPositiveInt($row['staffId'], 'craftsman.staffId');
@@ -1119,6 +1122,14 @@ final class CashierV3EntitlementCompletionKernel
             $seen[$row['staffId']] = true;
             $row['craftsmanPerformanceType'] = $performanceType;
             $row['laborFeeCents'] = $laborFeeCents;
+            if (array_key_exists('positionId', $row)) {
+                self::assertNonnegativeInt($row['positionId'], 'craftsman.positionId', self::MAX_WEIGHT * self::MAX_WEIGHT);
+                $row['positionName'] = (string)($row['positionName'] ?? '');
+            }
+            if (!empty($row['performanceIndependent'])) {
+                $row['performanceIndependent'] = true;
+                $row['allocationGroupKey'] = (string)($row['allocationGroupKey'] ?? 'normal');
+            }
             $result[] = $row;
         }
         usort($result, static function (array $left, array $right): int {
@@ -1629,6 +1640,7 @@ final class CashierV3EntitlementCompletionKernel
         }
         $weights = [];
         $performanceStaffIds = [];
+        $performanceGroups = [];
         foreach ($authorityIds as $staffId) {
             $row = $byId[$staffId] ?? null;
             if (!$row || $row['active'] !== true || $row['storeId'] !== $storeId) {
@@ -1637,12 +1649,20 @@ final class CashierV3EntitlementCompletionKernel
             if (($row['craftsmanPerformanceType'] ?? 'commission_labor') !== 'labor') {
                 $performanceStaffIds[] = $staffId;
                 $weights[$staffId] = $row['laborWeight'];
+                $groupKey = (string)($row['allocationGroupKey'] ?? 'normal');
+                $performanceGroups[$groupKey][] = $staffId;
             }
         }
         $amountByStaffId = [];
         if ($performanceStaffIds !== []) {
-            foreach (self::allocateLaborAmount($amountCents, $performanceStaffIds, $weights) as $allocation) {
-                $amountByStaffId[(int)$allocation['staffId']] = (int)$allocation['amountCents'];
+            foreach ($performanceGroups as $groupStaffIds) {
+                $groupWeights = [];
+                foreach ($groupStaffIds as $groupStaffId) {
+                    $groupWeights[$groupStaffId] = $weights[$groupStaffId];
+                }
+                foreach (self::allocateLaborAmount($amountCents, $groupStaffIds, $groupWeights) as $allocation) {
+                    $amountByStaffId[(int)$allocation['staffId']] = (int)$allocation['amountCents'];
+                }
             }
         }
         $allocations = [];
@@ -1660,6 +1680,14 @@ final class CashierV3EntitlementCompletionKernel
             $allocation['laborWeight'] = $row['laborWeight'];
             $allocation['craftsmanPerformanceType'] = $row['craftsmanPerformanceType'] ?? 'commission_labor';
             $allocation['laborFeeCents'] = (int)($row['laborFeeCents'] ?? 0);
+            if (isset($row['positionId'])) {
+                $allocation['positionId'] = (int)$row['positionId'];
+                $allocation['positionName'] = (string)($row['positionName'] ?? '');
+            }
+            if (!empty($row['performanceIndependent'])) {
+                $allocation['performanceIndependent'] = true;
+                $allocation['allocationGroupKey'] = (string)($row['allocationGroupKey'] ?? 'normal');
+            }
             if (isset($row['personnelSource'])) {
                 $allocation['personnelSource'] = $row['personnelSource'];
             }

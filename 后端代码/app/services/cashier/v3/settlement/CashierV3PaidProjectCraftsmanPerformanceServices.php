@@ -62,17 +62,24 @@ final class CashierV3PaidProjectCraftsmanPerformanceServices
         $fees = [];
         $hasExplicitProjectCount = array_key_exists('projectCountHalfUnits', $craftsmen[0] ?? []);
         $projectCounts = [];
+        $groupMembers = [];
+        foreach ($craftsmen as $index => $craftsman) {
+            $groupKey = (string)($craftsman['allocationGroupKey'] ?? 'normal');
+            $groupMembers[$groupKey][] = $index;
+        }
         if ($hasExplicitProjectCount) {
             foreach ($craftsmen as $craftsman) {
                 $projectCounts[(int)$craftsman['staffId']] = max(0, (int)($craftsman['projectCountHalfUnits'] ?? 0));
             }
         } else {
             $totalHalfUnits = $quantity * 2;
-            $base = intdiv($totalHalfUnits, count($craftsmen));
-            $remainder = $totalHalfUnits - ($base * count($craftsmen));
-            foreach ($craftsmen as $index => $craftsman) {
-                $projectCounts[(int)$craftsman['staffId']] = $base
-                    + ($index >= count($craftsmen) - $remainder ? 1 : 0);
+            foreach ($groupMembers as $members) {
+                $base = intdiv($totalHalfUnits, count($members));
+                $remainder = $totalHalfUnits - ($base * count($members));
+                foreach ($members as $offset => $index) {
+                    $staffId = (int)$craftsmen[$index]['staffId'];
+                    $projectCounts[$staffId] = $base + ($offset >= count($members) - $remainder ? 1 : 0);
+                }
             }
         }
         foreach ($craftsmen as $craftsman) {
@@ -94,12 +101,24 @@ final class CashierV3PaidProjectCraftsmanPerformanceServices
         }
         $performanceByStaff = [];
         if ($performanceCraftsmen !== []) {
-            foreach (CashierV3EntitlementCompletionKernel::allocateLaborAmount(
-                $laborAmountCents,
-                $performanceCraftsmen,
-                $weights
-            ) as $allocation) {
-                $performanceByStaff[(int)$allocation['staffId']] = (int)$allocation['amountCents'];
+            foreach ($groupMembers as $groupKey => $members) {
+                $groupIds = [];
+                $groupWeights = [];
+                foreach ($members as $index) {
+                    $staffId = (int)$craftsmen[$index]['staffId'];
+                    if (isset($weights[$staffId])) {
+                        $groupIds[] = $staffId;
+                        $groupWeights[$staffId] = $weights[$staffId];
+                    }
+                }
+                if ($groupIds === []) continue;
+                foreach (CashierV3EntitlementCompletionKernel::allocateLaborAmount(
+                    $laborAmountCents,
+                    $groupIds,
+                    $groupWeights
+                ) as $allocation) {
+                    $performanceByStaff[(int)$allocation['staffId']] = (int)$allocation['amountCents'];
+                }
             }
         }
 
@@ -109,12 +128,24 @@ final class CashierV3PaidProjectCraftsmanPerformanceServices
         if (array_sum($fees) === 0 && (int)($line['manual_labor_fee_cents'] ?? 0) > 0) {
             $lineFeeCents = max(0, (int)$line['manual_labor_fee_cents']) * $quantity;
             if ($performanceCraftsmen !== []) {
-                foreach (CashierV3EntitlementCompletionKernel::allocateLaborAmount(
-                    $lineFeeCents,
-                    $performanceCraftsmen,
-                    $weights
-                ) as $allocation) {
-                    $fees[(int)$allocation['staffId']] = (int)$allocation['amountCents'];
+                foreach ($groupMembers as $members) {
+                    $groupIds = [];
+                    $groupWeights = [];
+                    foreach ($members as $index) {
+                        $staffId = (int)$craftsmen[$index]['staffId'];
+                        if (isset($weights[$staffId])) {
+                            $groupIds[] = $staffId;
+                            $groupWeights[$staffId] = $weights[$staffId];
+                        }
+                    }
+                    if ($groupIds === []) continue;
+                    foreach (CashierV3EntitlementCompletionKernel::allocateLaborAmount(
+                        $lineFeeCents,
+                        $groupIds,
+                        $groupWeights
+                    ) as $allocation) {
+                        $fees[(int)$allocation['staffId']] = (int)$allocation['amountCents'];
+                    }
                 }
             } else {
                 $fees[(int)$craftsmen[0]['staffId']] = $lineFeeCents;
@@ -134,6 +165,14 @@ final class CashierV3PaidProjectCraftsmanPerformanceServices
                 'laborFeeCents' => (int)($fees[$staffId] ?? 0),
                 'projectCountHalfUnits' => (int)($projectCounts[$staffId] ?? 0),
             ];
+            if (isset($craftsman['positionId'])) {
+                $allocations[count($allocations) - 1]['positionId'] = (int)$craftsman['positionId'];
+                $allocations[count($allocations) - 1]['positionName'] = (string)($craftsman['positionName'] ?? '');
+            }
+            if (!empty($craftsman['performanceIndependent'])) {
+                $allocations[count($allocations) - 1]['performanceIndependent'] = true;
+                $allocations[count($allocations) - 1]['allocationGroupKey'] = (string)($craftsman['allocationGroupKey'] ?? 'normal');
+            }
         }
 
         return [

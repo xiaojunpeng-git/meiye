@@ -890,7 +890,7 @@ final class CashierV3CheckoutSettlementKernel
                     throw self::failure('sale_line_salespeople_snapshot_invalid', ['authorityKey' => $authorityKey]);
                 }
                 $salespeople = [];
-                $weight = 0;
+                $weightByGroup = [];
                 foreach ($line['salespeople'] as $person) {
                     if (!is_array($person)) {
                         throw self::failure('sale_line_salespeople_snapshot_invalid', ['authorityKey' => $authorityKey]);
@@ -900,10 +900,23 @@ final class CashierV3CheckoutSettlementKernel
                     if ($allocation > 100) {
                         throw self::failure('sale_line_salespeople_snapshot_invalid', ['authorityKey' => $authorityKey]);
                     }
-                    $salespeople[] = ['staffId' => $staffId, 'allocationWeight' => $allocation];
-                    $weight += $allocation;
+                    $positionId = max(0, (int)($person['positionId'] ?? $person['position_id'] ?? 0));
+                    $performanceIndependent = !empty($person['performanceIndependent'])
+                        || !empty($person['performance_independent']);
+                    $groupKey = $performanceIndependent && $positionId > 0 ? 'independent:' . $positionId : 'normal';
+                    $normalizedPerson = ['staffId' => $staffId, 'allocationWeight' => $allocation];
+                    if ($positionId > 0) {
+                        $normalizedPerson['positionId'] = $positionId;
+                        $normalizedPerson['positionName'] = trim((string)($person['positionName'] ?? $person['position_name'] ?? ''));
+                    }
+                    if ($performanceIndependent && $positionId > 0) {
+                        $normalizedPerson['performanceIndependent'] = true;
+                        $normalizedPerson['allocationGroupKey'] = $groupKey;
+                    }
+                    $salespeople[] = $normalizedPerson;
+                    $weightByGroup[$groupKey] = ($weightByGroup[$groupKey] ?? 0) + $allocation;
                 }
-                if ($salespeople !== [] && $weight !== 100) {
+                if ($salespeople !== [] && array_filter($weightByGroup, static fn (int $sum): bool => $sum !== 100)) {
                     throw self::failure('sale_line_salespeople_weight_invalid', ['authorityKey' => $authorityKey]);
                 }
                 $normalized['salespeople'] = $salespeople;

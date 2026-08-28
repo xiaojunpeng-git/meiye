@@ -272,14 +272,21 @@ final class CashierV3OrderLifecycleServices
             ->where('order_id', $source['sourceId'])->where('line_direction', 'forward')->where('line_status', 'settled')
             ->field('order_line_id,item_type,item_name_snapshot')->order('line_no asc')->select()->toArray();
         $eligible = Db::name('system_store_staff')->alias('s')->join('employee e', 'e.id=s.employee_id')
+            ->leftJoin('staff_job_position sjp', 'sjp.staff_id = s.id AND sjp.status = 1 AND sjp.is_del = 0 AND sjp.end_time = 0')
+            ->leftJoin('position p', 'p.id = sjp.position_id AND p.status = 1')
             ->where('s.store_id', $operator->storeId())->where('s.status', 1)->where('s.is_del', 0)
             ->where('e.status', 1)->where('e.is_del', 0)
-            ->field('s.id,s.employee_id,s.staff_name,s.cashier_salesperson_enabled,s.cashier_craftsman_enabled,e.name,e.employment_type_code')->order('s.id asc')->select()->toArray();
+            ->field('s.id,s.employee_id,s.staff_name,s.cashier_salesperson_enabled,s.cashier_craftsman_enabled,sjp.position_id,p.name as position_name,p.performance_independent,e.name,e.employment_type_code,e.employment_type_version')->order('s.id asc')->select()->toArray();
         // Personnel adjustments are append-only: the latest effective
         // allocation is represented by forward facts whose originals have
         // not been reversed. Reading every forward row here would resurrect
         // the pre-adjustment salesperson and, because the old rows do not
         // carry the current role, make a presale appear as “否”.
+        $eligibleByStaffId = [];
+        foreach ($eligible as $eligibleRow) {
+            $eligibleByStaffId[(int)($eligibleRow['id'] ?? 0)] = $eligibleRow;
+            $eligibleByStaffId[(int)($eligibleRow['employee_id'] ?? 0)] = $eligibleRow;
+        }
         $salespeople = [];
         foreach ($lines as $line) {
             $lineId = (string)$line['order_line_id'];
@@ -302,6 +309,10 @@ final class CashierV3OrderLifecycleServices
                     ? max(0, 100 - $allocatedWeight)
                     : ($totalAmount > 0 ? intdiv($amount * 100, $totalAmount) : 0);
                 $allocatedWeight += $allocationWeight;
+                $staffId = (int)($fact['employee_id'] ?? 0);
+                $staffRow = $eligibleByStaffId[$staffId] ?? [];
+                $positionId = (int)($staffRow['position_id'] ?? 0);
+                $independent = (int)($staffRow['performance_independent'] ?? 0) === 1;
                 $salespeople[$lineId][] = [
                     'factId' => (string)($fact['fact_id'] ?? ''),
                     'employeeId' => (int)$fact['employee_id'],
@@ -311,6 +322,10 @@ final class CashierV3OrderLifecycleServices
                     'allocationWeight' => $allocationWeight,
                     'allocationWeightDenominator' => 100,
                     'salesPerformanceAmount' => (int)($fact['amount_cents'] ?? 0),
+                    'positionId' => $positionId,
+                    'positionName' => trim((string)($staffRow['position_name'] ?? '')),
+                    'performanceIndependent' => $independent,
+                    'allocationGroupKey' => $independent && $positionId > 0 ? 'independent:' . $positionId : 'normal',
                 ];
             }
         }
@@ -353,8 +368,28 @@ final class CashierV3OrderLifecycleServices
                     'currentSalespeople' => $salespeople[$lineId] ?? [], 'currentGuides' => $guides[$lineId] ?? [],
                     'currentSalesManagers' => $salesManagers[$lineId] ?? [], 'canAdjustCraftsman' => (string)$line['item_type'] === 'project'];
             }, $lines),
-            'salespeople' => array_values(array_map(static function (array $row): array { return ['staffId' => (int)$row['id'], 'employeeId' => (int)$row['employee_id'], 'name' => trim((string)$row['name']) ?: (string)$row['staff_name']]; }, array_filter($eligible, static function (array $row): bool { return (int)$row['cashier_salesperson_enabled'] === 1; }))),
-            'craftsmen' => array_values(array_map(static function (array $row): array { return ['staffId' => (int)$row['id'], 'employeeId' => (int)$row['employee_id'], 'name' => trim((string)$row['name']) ?: (string)$row['staff_name']]; }, array_filter($eligible, static function (array $row): bool { return (int)$row['cashier_craftsman_enabled'] === 1; }))),
+            'salespeople' => array_values(array_map(static function (array $row): array {
+                $positionId = (int)($row['position_id'] ?? 0);
+                $independent = (int)($row['performance_independent'] ?? 0) === 1;
+                return [
+                    'staffId' => (int)$row['id'], 'employeeId' => (int)$row['employee_id'],
+                    'name' => trim((string)$row['name']) ?: (string)$row['staff_name'],
+                    'positionId' => $positionId, 'positionName' => trim((string)($row['position_name'] ?? '')),
+                    'performanceIndependent' => $independent,
+                    'allocationGroupKey' => $independent && $positionId > 0 ? 'independent:' . $positionId : 'normal',
+                ];
+            }, array_filter($eligible, static function (array $row): bool { return (int)$row['cashier_salesperson_enabled'] === 1; }))),
+            'craftsmen' => array_values(array_map(static function (array $row): array {
+                $positionId = (int)($row['position_id'] ?? 0);
+                $independent = (int)($row['performance_independent'] ?? 0) === 1;
+                return [
+                    'staffId' => (int)$row['id'], 'employeeId' => (int)$row['employee_id'],
+                    'name' => trim((string)$row['name']) ?: (string)$row['staff_name'],
+                    'positionId' => $positionId, 'positionName' => trim((string)($row['position_name'] ?? '')),
+                    'performanceIndependent' => $independent,
+                    'allocationGroupKey' => $independent && $positionId > 0 ? 'independent:' . $positionId : 'normal',
+                ];
+            }, array_filter($eligible, static function (array $row): bool { return (int)$row['cashier_craftsman_enabled'] === 1; }))),
             'guides' => $attributionCandidates, 'salesManagers' => $attributionCandidates];
     }
 
@@ -724,16 +759,43 @@ final class CashierV3OrderLifecycleServices
             $seenStaffIds[$staffId] = true;
         }
         if ($targetRole === 'salesperson') {
-            $weightTotal = 0;
+            // 岗位独立标记必须以当前门店任职记录为准，不能信任订单中心
+            // 传入的显示字段。先锁定并补齐每一行的权威岗位，再按分组校验。
+            $authoritativePersonnel = [];
+            $weightByGroup = [];
             foreach ($input['personnel'] as $item) {
                 $rawWeight = $item['allocationWeight'] ?? $item['performance'] ?? null;
                 $weight = (int)$rawWeight;
                 if (!is_numeric((string)$rawWeight) || (float)$rawWeight !== (float)$weight || $weight < 1 || $weight > 100) {
                     throw self::failure('personnel_adjustment_salesperson_weight_invalid');
                 }
-                $weightTotal += $weight;
+                $staffId = (int)($item['staffId'] ?? 0);
+                $staff = (array)Db::name('system_store_staff')->alias('s')
+                    ->join('employee e', 'e.id=s.employee_id')
+                    ->leftJoin('staff_job_position sjp', 'sjp.staff_id = s.id AND sjp.status = 1 AND sjp.is_del = 0 AND sjp.end_time = 0')
+                    ->leftJoin('position p', 'p.id = sjp.position_id AND p.status = 1')
+                    ->where('s.id', $staffId)->where('s.store_id', $operator->storeId())
+                    ->where('s.status', 1)->where('s.is_del', 0)->where('e.status', 1)->where('e.is_del', 0)
+                    ->where('s.cashier_salesperson_enabled', 1)
+                    ->field('s.id,s.employee_id,s.staff_name,e.name,e.employment_type_code,e.employment_type_version,sjp.position_id,p.name as position_name,p.performance_independent')
+                    ->lock(true)->find();
+                if (!$staff || !in_array((string)($staff['employment_type_code'] ?? ''), ['internal', 'partner', 'outsourced'], true)
+                    || (int)($staff['employment_type_version'] ?? 0) <= 0) {
+                    throw self::failure('personnel_adjustment_staff_ineligible');
+                }
+                $positionId = max(0, (int)($staff['position_id'] ?? 0));
+                $independent = (int)($staff['performance_independent'] ?? 0) === 1;
+                $groupKey = $independent && $positionId > 0 ? 'independent:' . $positionId : 'normal';
+                $weightByGroup[$groupKey] = ($weightByGroup[$groupKey] ?? 0) + $weight;
+                $authoritativePersonnel[] = array_merge($item, [
+                    'positionId' => $positionId,
+                    'positionName' => trim((string)($staff['position_name'] ?? '')),
+                    'performanceIndependent' => $independent,
+                    'allocationGroupKey' => $groupKey,
+                ]);
             }
-            if ($weightTotal !== 100) throw self::failure('personnel_adjustment_salesperson_weight_total_invalid');
+            if (array_filter($weightByGroup, static fn (int $sum): bool => $sum !== 100)) throw self::failure('personnel_adjustment_salesperson_weight_total_invalid');
+            $input['personnel'] = $authoritativePersonnel;
         }
         $reversedAttributions = [];
         $salespersonState = null;
@@ -777,7 +839,7 @@ final class CashierV3OrderLifecycleServices
         }
         if ($targetRole === 'salesperson') {
             if (!is_array($salespersonState)) throw self::failure('personnel_adjustment_line_ineligible');
-            $amounts = $this->allocateWeightedCents((int)$salespersonState['total'], $input['personnel']);
+            $amounts = $this->allocateWeightedCentsByGroups((int)$salespersonState['total'], $input['personnel']);
             foreach ($input['personnel'] as $index => $item) {
                 $staffId = (int)($item['staffId'] ?? 0);
                 $staff = (array)Db::name('system_store_staff')->alias('s')->join('employee e', 'e.id=s.employee_id')->where('s.id', $staffId)->where('s.store_id', $operator->storeId())->where('s.status', 1)->where('s.is_del', 0)->where('e.status', 1)->where('e.is_del', 0)->lock(true)->field('s.id,s.employee_id,s.staff_name,s.cashier_salesperson_enabled,s.cashier_craftsman_enabled,e.name,e.employment_type_code,e.employment_type_version')->find();
@@ -802,6 +864,25 @@ final class CashierV3OrderLifecycleServices
             $allocated += $amounts[$index];
         }
         return $amounts;
+    }
+
+    /** Allocate the full amount independently for each normal/independent group. */
+    private function allocateWeightedCentsByGroups(int $total, array $personnel): array
+    {
+        $indicesByGroup = [];
+        foreach ($personnel as $index => $item) {
+            $positionId = max(0, (int)($item['positionId'] ?? $item['position_id'] ?? 0));
+            $independent = !empty($item['performanceIndependent']) || !empty($item['performance_independent']);
+            $groupKey = $independent && $positionId > 0 ? 'independent:' . $positionId : 'normal';
+            $indicesByGroup[$groupKey][] = $index;
+        }
+        $result = array_fill(0, count($personnel), 0);
+        foreach ($indicesByGroup as $indices) {
+            $groupPeople = array_map(static fn (int $index): array => $personnel[$index], $indices);
+            $groupAmounts = $this->allocateWeightedCents($total, $groupPeople);
+            foreach ($indices as $offset => $index) $result[$index] = (int)($groupAmounts[$offset] ?? 0);
+        }
+        return $result;
     }
 
     private function updateSalesOrderNote(array $source, string $note, int $now, CashierV3DataScopeContext $scope): void

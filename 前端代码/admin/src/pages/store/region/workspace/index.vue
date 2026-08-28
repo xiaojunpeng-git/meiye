@@ -3971,6 +3971,7 @@ export default {
         status: Number(formPayload.status) === 1 ? 1 : 0,
         remark: formPayload.remark || '',
         allow_store_select: Number(formPayload.allow_store_select) === 1 ? 1 : 0,
+        performance_independent: Number(formPayload.performance_independent) === 1 ? 1 : 0,
         is_store_manager: Number(formPayload.is_store_manager) === 1 ? 1 : 0,
         use_platform: Number(formPayload.use_platform) === 1 ? 1 : 0,
         use_store: Number(formPayload.use_store) === 1 ? 1 : 0,
@@ -4064,6 +4065,7 @@ export default {
         status: Number(src.status) === 1 ? 1 : 0,
         remark: src.remark || '',
         allow_store_select: Number(src.allow_store_select) === 1 ? 1 : 0,
+        performance_independent: Number(src.performance_independent) === 1 ? 1 : 0,
         is_store_manager: Number(src.is_store_manager) === 1 ? 1 : 0,
         use_platform: Number(src.use_platform) === 1 ? 1 : 0,
         use_store: Number(src.use_store) === 1 ? 1 : 0,
@@ -4153,6 +4155,8 @@ export default {
           remark: p.remark == null ? (row.remark || '') : p.remark,
           allow_store_select: p.allow_store_select == null
             ? Number(row.allow_store_select) : Number(p.allow_store_select),
+          performance_independent: p.performance_independent == null
+            ? Number(row.performance_independent) : Number(p.performance_independent),
           is_store_manager: p.is_store_manager == null
             ? Number(row.is_store_manager) : Number(p.is_store_manager),
           use_platform: p.use_platform == null ? Number(row.use_platform) : Number(p.use_platform),
@@ -4194,6 +4198,7 @@ export default {
             status: Number(p.status) === 1 ? 1 : 0,
             remark: p.remark || '',
             allow_store_select: Number(p.allow_store_select) === 1 ? 1 : 0,
+            performance_independent: Number(p.performance_independent) === 1 ? 1 : 0,
             use_platform: Number(p.use_platform) === 1 ? 1 : 0,
             use_store: Number(p.use_store) === 1 ? 1 : 0,
             use_mobile: Number(p.use_mobile) === 1 ? 1 : 0,

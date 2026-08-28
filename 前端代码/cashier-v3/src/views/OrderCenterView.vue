@@ -696,7 +696,11 @@ function salesPersonnelPayload() {
       role: target.role,
       staffId: Number(item.staffId || item.id || 0),
       allocationWeight: Number(item.allocationWeight || item.performance || 0),
-      isPreSale: Boolean(item.isPreSale || item.marked)
+      isPreSale: Boolean(item.isPreSale || item.marked),
+      positionId: Number(item.positionId || item.position_id || 0),
+      positionName: item.positionName || item.position_name || item.position || '',
+      performanceIndependent: Boolean(item.performanceIndependent || item.performance_independent),
+      allocationGroupKey: item.allocationGroupKey || ''
     }))
   }
   if (target.role === 'guide') {
@@ -863,7 +867,11 @@ async function submitRecordPersonnelAdjustment() {
   const personnel = (assignment.salespeople || []).map((item) => ({
     staffId: Number(item.staffId || item.id || 0),
     allocationWeight: Number(item.allocationWeight || item.performance || 0),
-    isPreSale: Boolean(item.isPreSale || item.marked)
+    isPreSale: Boolean(item.isPreSale || item.marked),
+    positionId: Number(item.positionId || item.position_id || 0),
+    positionName: item.positionName || item.position_name || item.position || '',
+    performanceIndependent: Boolean(item.performanceIndependent || item.performance_independent),
+    allocationGroupKey: item.allocationGroupKey || ''
   }))
   if (!personnel.length) { recordPersonnelError.value = '请至少选择一名销售人。'; return }
   const actions = recordPersonnelActionNames(target.type)

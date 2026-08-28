@@ -118,6 +118,13 @@ final class CashierV3QueryEntitySelectorServices
 
         $query = Db::name('system_store_staff')->alias('ss')
             ->join('employee e', 'e.id = ss.employee_id')
+            // 岗位是收银分组核算的权威来源。只读取当前有效任职，不能
+            // 让客户端传入的岗位名称或历史岗位影响分组。
+            ->leftJoin(
+                'staff_job_position sjp',
+                'sjp.staff_id = ss.id AND sjp.status = 1 AND sjp.is_del = 0 AND sjp.end_time = 0'
+            )
+            ->leftJoin('position p', 'p.id = sjp.position_id AND p.status = 1')
             ->where('ss.status', 1)
             ->where('ss.is_del', 0)
             ->where('ss.employee_id', '>', 0)
@@ -167,7 +174,7 @@ final class CashierV3QueryEntitySelectorServices
         $rows = $query
             ->field($isGroupAttribution
                 ? 'e.id as employee_id,MIN(ss.id) as staff_id,MIN(ss.store_id) as store_id,e.name as employee_name,MAX(ss.account) as account,MAX(ss.staff_name) as staff_name,e.employment_type_code,e.employment_type_version'
-                : 'ss.id as staff_id,ss.employee_id,ss.store_id,ss.account,ss.staff_name,ss.cashier_salesperson_enabled,ss.cashier_craftsman_enabled,ss.craftsman_performance_type,e.name as employee_name,e.employment_type_code,e.employment_type_version')
+                : 'ss.id as staff_id,ss.employee_id,ss.store_id,ss.account,ss.staff_name,ss.cashier_salesperson_enabled,ss.cashier_craftsman_enabled,ss.craftsman_performance_type,sjp.position_id,p.name as position_name,p.performance_independent,e.name as employee_name,e.employment_type_code,e.employment_type_version')
             ->order($isGroupAttribution ? 'e.id asc' : 'ss.id asc')
             ->page($page, $pageSize)
             ->select()
@@ -194,6 +201,14 @@ final class CashierV3QueryEntitySelectorServices
                 'staffName' => (string)($row['staff_name'] ?? ''),
                 'staffNo' => (string)($row['account'] ?? ''),
                 'storeName' => $storeName,
+                'positionId' => $isGroupAttribution ? 0 : (int)($row['position_id'] ?? 0),
+                'positionName' => $isGroupAttribution
+                    ? '在职员工'
+                    : (trim((string)($row['position_name'] ?? '')) ?: '在职员工'),
+                'performanceIndependent' => !$isGroupAttribution && (int)($row['performance_independent'] ?? 0) === 1,
+                'allocationGroupKey' => !$isGroupAttribution && (int)($row['performance_independent'] ?? 0) === 1
+                    ? 'independent:' . ((int)($row['position_id'] ?? 0) > 0 ? (int)$row['position_id'] : (int)$row['staff_id'])
+                    : 'normal',
                 'employeeTypeCode' => (string)($row['employment_type_code'] ?? ''),
                 'employeeTypeAuthorityVersion' => (int)($row['employment_type_version'] ?? 0),
                 'partnerDefaultRatio' => $partnerDefaultRatio,

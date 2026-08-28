@@ -231,14 +231,16 @@ final class CashierV3SaleOnlyFactAssembler
             $checkoutLineId = (string)$orderLine['checkout_line_id'];
             $salespeople = array_values((array)($salespeopleByCheckoutLine[$checkoutLineId] ?? []));
             if ($salespeople) {
-              $weightTotal = array_sum(array_map(static function (array $person): int {
-                return (int)($person['allocationWeight'] ?? 0);
-              }, $salespeople));
-              if ($weightTotal !== 100) {
+              $weightByGroup = [];
+              foreach ($salespeople as $person) {
+                $groupKey = (string)($person['allocationGroupKey'] ?? 'normal');
+                $weightByGroup[$groupKey] = ($weightByGroup[$groupKey] ?? 0) + (int)($person['allocationWeight'] ?? 0);
+              }
+              if (array_filter($weightByGroup, static fn (int $sum): bool => $sum !== 100)) {
                 throw self::failure('sale_only_fact_salesperson_weight_total_invalid');
               }
               $lineCash = (int)($cashByOrderLine[(string)$orderLine['order_line_id']] ?? 0);
-              $employeeAmounts = self::allocateByWeights($lineCash, $salespeople);
+              $employeeAmounts = self::allocateByWeightGroups($lineCash, $salespeople);
               foreach ($salespeople as $index => $person) {
                 $employeeId = (int)($person['employeeId'] ?? 0);
                 $employeeType = (string)($person['employeeTypeCodeSnapshot'] ?? '');
@@ -974,6 +976,28 @@ final class CashierV3SaleOnlyFactAssembler
             $result[$remainders[$index]['index']]++;
         }
         ksort($result, SORT_NUMERIC);
+        return $result;
+    }
+
+    /** @return array<int,int> Allocate the full base independently for each performance group. */
+    private static function allocateByWeightGroups(int $amount, array $people): array
+    {
+        $indicesByGroup = [];
+        foreach ($people as $index => $person) {
+            $groupKey = (string)($person['allocationGroupKey'] ?? 'normal');
+            $indicesByGroup[$groupKey][] = $index;
+        }
+        $result = array_fill(0, count($people), 0);
+        foreach ($indicesByGroup as $indices) {
+            $groupPeople = [];
+            foreach ($indices as $index) {
+                $groupPeople[] = $people[$index];
+            }
+            $groupAmounts = self::allocateByWeights($amount, $groupPeople);
+            foreach ($indices as $offset => $index) {
+                $result[$index] = (int)($groupAmounts[$offset] ?? 0);
+            }
+        }
         return $result;
     }
 

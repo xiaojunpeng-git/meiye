@@ -128,6 +128,7 @@ class JobPositionPolicyServices extends BaseServices
             $row['channel_rules'] = $ruleMap[$pid] ?? [];
             $row['publish_count'] = $pubCount[$pid] ?? 0;
             $row['allow_store_select'] = (int)($row['allow_store_select'] ?? 0);
+            $row['performance_independent'] = (int)($row['performance_independent'] ?? 0);
             $row['is_store_manager'] = (int)($row['is_store_manager'] ?? 0);
             $row['use_platform'] = (int)($row['use_platform'] ?? 0);
             $row['use_store'] = (int)($row['use_store'] ?? 0);
@@ -233,6 +234,7 @@ class JobPositionPolicyServices extends BaseServices
                 'name' => (string)$row['name'],
                 'status' => (int)($row['status'] ?? 0),
                 'allow_store_select' => (int)($row['allow_store_select'] ?? 0),
+                'performance_independent' => (int)($row['performance_independent'] ?? 0),
                 'is_store_manager' => (int)($row['is_store_manager'] ?? 0),
                 'use_platform' => (int)($row['use_platform'] ?? 0),
                 'use_store' => (int)($row['use_store'] ?? 0) === 1 && $storeV3Rules !== '' ? 1 : 0,
@@ -253,6 +255,7 @@ class JobPositionPolicyServices extends BaseServices
                 'summary' => '岗位决定员工可以操作哪些功能，人员数据权限决定员工可以看到哪些数据。',
                 'platform_hq_only' => '平台后台权限只在总部平台生效，门店员工不能看到或使用。',
                 'allow_store_select' => '开启后，门店在新建或编辑本店员工时可以选择这个岗位；关闭后，只有总部可以配置，已经绑定的人员不会自动失去权限。',
+                'performance_independent' => '用于收银人员分配。开启后，该岗位与普通岗位分开按 100% 核算；不影响权限。',
                 'is_store_manager' => '开启后，人员绑定该岗位时自动成为店长/副店长身份；关闭则不因该岗位获得店长身份。',
                 'disable' => '停用岗位不会自动清除已绑定人员的历史权限，但门店不能再新增选择。',
             ],
@@ -287,6 +290,7 @@ class JobPositionPolicyServices extends BaseServices
         $status = (int)($data['status'] ?? 1) === 1 ? 1 : 0;
         $remark = mb_substr(trim((string)($data['remark'] ?? '')), 0, 500);
         $allowStoreSelect = (int)($data['allow_store_select'] ?? 0) === 1 ? 1 : 0;
+        $performanceIndependent = (int)($data['performance_independent'] ?? 0) === 1 ? 1 : 0;
         $isStoreManager = (int)($data['is_store_manager'] ?? 0) === 1 ? 1 : 0;
 
         $channelRules = $this->resolveChannelRulesPayload($data);
@@ -323,6 +327,7 @@ class JobPositionPolicyServices extends BaseServices
             'status' => $status,
             'remark' => $remark,
             'allow_store_select' => $allowStoreSelect,
+            'performance_independent' => $performanceIndependent,
             'is_store_manager' => $isStoreManager,
             'use_platform' => $usePlatform,
             'use_store' => $useStore,
@@ -347,6 +352,7 @@ class JobPositionPolicyServices extends BaseServices
                 $status,
                 $remark,
                 $allowStoreSelect,
+                $performanceIndependent,
                 $isStoreManager,
                 $usePlatform,
                 $useStore,
@@ -376,6 +382,7 @@ class JobPositionPolicyServices extends BaseServices
                         'status' => $status,
                         'remark' => $remark,
                         'allow_store_select' => $allowStoreSelect,
+                        'performance_independent' => $performanceIndependent,
                         'is_store_manager' => $isStoreManager,
                         'use_platform' => $usePlatform,
                         'use_store' => $useStore,
@@ -393,6 +400,7 @@ class JobPositionPolicyServices extends BaseServices
                         'name' => $name,
                         'status' => $status,
                         'allow_store_select' => $allowStoreSelect,
+                        'performance_independent' => $performanceIndependent,
                         'is_store_manager' => $isStoreManager,
                         'use_platform' => $usePlatform,
                         'use_store' => $useStore,
@@ -415,6 +423,7 @@ class JobPositionPolicyServices extends BaseServices
                         'id' => $id,
                         'version' => $ver,
                         'allow_store_select' => $allowStoreSelect,
+                        'performance_independent' => $performanceIndependent,
                         'is_store_manager' => $isStoreManager,
                         'use_platform' => $usePlatform,
                     ],

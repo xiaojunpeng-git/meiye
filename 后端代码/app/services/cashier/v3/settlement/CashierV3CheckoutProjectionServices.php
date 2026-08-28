@@ -1525,7 +1525,7 @@ final class CashierV3CheckoutProjectionServices
             throw self::failure('checkout_projection_salespeople_snapshot_invalid');
         }
         $result = [];
-        $weight = 0;
+        $weightByGroup = [];
         foreach ($decoded as $row) {
             if (!is_array($row)) {
                 throw self::failure('checkout_projection_salespeople_snapshot_invalid');
@@ -1541,13 +1541,26 @@ final class CashierV3CheckoutProjectionServices
             if ($allocation > 100) {
                 throw self::failure('checkout_projection_salespeople_snapshot_invalid');
             }
-            $result[] = [
+            $positionId = max(0, (int)($row['positionId'] ?? $row['position_id'] ?? 0));
+            $performanceIndependent = !empty($row['performanceIndependent'])
+                || !empty($row['performance_independent']);
+            $groupKey = $performanceIndependent && $positionId > 0 ? 'independent:' . $positionId : 'normal';
+            $resultRow = [
                 'staffId' => $staffId,
                 'allocationWeight' => $allocation,
             ];
-            $weight += $allocation;
+            if ($positionId > 0) {
+                $resultRow['positionId'] = $positionId;
+                $resultRow['positionName'] = trim((string)($row['positionName'] ?? $row['position_name'] ?? ''));
+            }
+            if ($performanceIndependent && $positionId > 0) {
+                $resultRow['performanceIndependent'] = true;
+                $resultRow['allocationGroupKey'] = $groupKey;
+            }
+            $result[] = $resultRow;
+            $weightByGroup[$groupKey] = ($weightByGroup[$groupKey] ?? 0) + $allocation;
         }
-        if ($result !== [] && $weight !== 100) {
+        if ($result !== [] && array_filter($weightByGroup, static fn (int $sum): bool => $sum !== 100)) {
             throw self::failure('checkout_projection_salespeople_weight_invalid');
         }
         return $result;

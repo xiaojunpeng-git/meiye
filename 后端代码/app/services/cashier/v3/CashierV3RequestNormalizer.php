@@ -771,7 +771,7 @@ class CashierV3RequestNormalizer
             }
             $seen = [];
             $normalized = [];
-            $weightSum = 0;
+            $weightByGroup = [];
             foreach ($rows as $row) {
                 if (!is_array($row)) {
                     throw self::invalidCartLineSetting('salespeople', 'salesperson_not_object');
@@ -799,16 +799,31 @@ class CashierV3RequestNormalizer
                     );
                 }
                 $seen[$staffId] = true;
-                $weightSum += $weight;
-                $normalized[] = [
+                $positionId = max(0, (int)($row['positionId'] ?? $row['position_id'] ?? 0));
+                $performanceIndependent = !empty($row['performanceIndependent'])
+                    || !empty($row['performance_independent']);
+                $groupKey = $performanceIndependent && $positionId > 0
+                    ? 'independent:' . $positionId
+                    : 'normal';
+                $weightByGroup[$groupKey] = ($weightByGroup[$groupKey] ?? 0) + $weight;
+                $normalizedRow = [
                     'staffId' => $staffId,
                     'allocationWeight' => $weight,
                     'isPreSale' => !empty($row['isPreSale'])
                         || !empty($row['is_presale'])
                         || !empty($row['marked']),
                 ];
+                if ($positionId > 0) {
+                    $normalizedRow['positionId'] = $positionId;
+                    $normalizedRow['positionName'] = trim((string)($row['positionName'] ?? $row['position_name'] ?? ''));
+                }
+                if ($performanceIndependent && $positionId > 0) {
+                    $normalizedRow['performanceIndependent'] = true;
+                    $normalizedRow['allocationGroupKey'] = $groupKey;
+                }
+                $normalized[] = $normalizedRow;
             }
-            if ($normalized && $weightSum !== 100) {
+            if ($normalized && array_filter($weightByGroup, static fn (int $sum): bool => $sum !== 100)) {
                 throw self::invalidCartLineSetting('salespeople', 'salesperson_weight_sum_invalid');
             }
             $candidates[] = $normalized;
@@ -861,7 +876,7 @@ class CashierV3RequestNormalizer
         $assignments = [];
         $seen = [];
         $hasExplicitWeight = null;
-        $weightSum = 0;
+        $weightByGroup = [];
         foreach ($rows as $row) {
             if (!is_array($row)) {
                 throw self::invalidCartLineSetting('craftsmen', 'craftsman_not_object');
@@ -915,7 +930,13 @@ class CashierV3RequestNormalizer
                     ['isPointCustomer', 'is_point_customer', 'marked']
                 );
             }
-            $weightSum += $weight;
+            $positionId = max(0, (int)($row['positionId'] ?? $row['position_id'] ?? 0));
+            $performanceIndependent = !empty($row['performanceIndependent'])
+                || !empty($row['performance_independent']);
+            $groupKey = $performanceIndependent && $positionId > 0
+                ? 'independent:' . $positionId
+                : 'normal';
+            $weightByGroup[$groupKey] = ($weightByGroup[$groupKey] ?? 0) + $weight;
             $assignment = [
                 'staffId' => $id,
                 'laborWeight' => $weight,
@@ -926,6 +947,14 @@ class CashierV3RequestNormalizer
                     'craftsmanLaborFeeCents'
                 ),
             ];
+            if ($positionId > 0) {
+                $assignment['positionId'] = $positionId;
+                $assignment['positionName'] = trim((string)($row['positionName'] ?? $row['position_name'] ?? ''));
+            }
+            if ($performanceIndependent && $positionId > 0) {
+                $assignment['performanceIndependent'] = true;
+                $assignment['allocationGroupKey'] = $groupKey;
+            }
             if (array_key_exists('personnelSource', $row) || array_key_exists('personnel_source', $row)) {
                 $personnelSource = trim((string)($row['personnelSource'] ?? $row['personnel_source'] ?? ''));
                 if (!in_array($personnelSource, ['store', 'other'], true)) {
@@ -944,13 +973,7 @@ class CashierV3RequestNormalizer
         if (!$assignments) {
             return [];
         }
-        $commissionWeight = 0;
-        foreach ($assignments as $assignment) {
-            if (($assignment['craftsmanPerformanceType'] ?? '') !== EmployeeCraftsmanPerformanceTypeServices::LABOR) {
-                $commissionWeight += (int)$assignment['laborWeight'];
-            }
-        }
-        if ($hasExplicitWeight && (($commissionWeight > 0 && $commissionWeight !== 100) || ($commissionWeight === 0 && $weightSum !== 0))) {
+        if ($hasExplicitWeight && array_filter($weightByGroup, static fn (int $sum): bool => $sum !== 100 && $sum !== 0)) {
             throw self::invalidCartLineSetting('craftsmen', 'craftsman_weight_sum_invalid');
         }
         if (!$hasExplicitWeight) {
@@ -993,21 +1016,23 @@ class CashierV3RequestNormalizer
         if (!$assignments) {
             return;
         }
-        $commissionIndexes = [];
+        $commissionIndexesByGroup = [];
         foreach ($assignments as $index => $assignment) {
             if (($assignment['craftsmanPerformanceType'] ?? EmployeeCraftsmanPerformanceTypeServices::COMMISSION_LABOR)
                 !== EmployeeCraftsmanPerformanceTypeServices::LABOR) {
-                $commissionIndexes[] = $index;
+                $groupKey = (string)($assignment['allocationGroupKey'] ?? 'normal');
+                $commissionIndexesByGroup[$groupKey][] = $index;
             } else {
                 $assignments[$index]['laborWeight'] = 0;
             }
         }
-        if (!$commissionIndexes) return;
-        $base = intdiv(100, count($commissionIndexes));
-        $remaining = 100 - ($base * count($commissionIndexes));
-        foreach ($commissionIndexes as $index) {
-            $assignments[$index]['laborWeight'] = $base + ($remaining > 0 ? 1 : 0);
-            $remaining = max(0, $remaining - 1);
+        foreach ($commissionIndexesByGroup as $commissionIndexes) {
+            $base = intdiv(100, count($commissionIndexes));
+            $remaining = 100 - ($base * count($commissionIndexes));
+            foreach ($commissionIndexes as $index) {
+                $assignments[$index]['laborWeight'] = $base + ($remaining > 0 ? 1 : 0);
+                $remaining = max(0, $remaining - 1);
+            }
         }
     }
 

@@ -346,7 +346,7 @@ final class CashierV3CheckoutDraftAuthorityRebuilder
         $decoded = is_array($raw) ? $raw : json_decode((string)$raw, true);
         if (!is_array($decoded)) throw self::failure('checkout_draft_salespeople_snapshot_invalid');
         $result = [];
-        $weight = 0;
+        $weightByGroup = [];
         foreach ($decoded as $row) {
             if (!is_array($row)) throw self::failure('checkout_draft_salespeople_snapshot_invalid');
             $staffId = (int)($row['staffId'] ?? $row['id'] ?? 0);
@@ -354,7 +354,11 @@ final class CashierV3CheckoutDraftAuthorityRebuilder
             if ($staffId <= 0 || $allocation <= 0 || $allocation > 100) {
                 throw self::failure('checkout_draft_salespeople_snapshot_invalid');
             }
-            $result[] = [
+            $positionId = max(0, (int)($row['positionId'] ?? $row['position_id'] ?? 0));
+            $performanceIndependent = !empty($row['performanceIndependent'])
+                || !empty($row['performance_independent']);
+            $groupKey = $performanceIndependent && $positionId > 0 ? 'independent:' . $positionId : 'normal';
+            $resultRow = [
                 'staffId' => $staffId,
                 'allocationWeight' => $allocation,
                 // Do not rely on a chained null-coalescing expression here:
@@ -364,9 +368,18 @@ final class CashierV3CheckoutDraftAuthorityRebuilder
                     || !empty($row['is_presale'])
                     || !empty($row['marked']),
             ];
-            $weight += $allocation;
+            if ($positionId > 0) {
+                $resultRow['positionId'] = $positionId;
+                $resultRow['positionName'] = trim((string)($row['positionName'] ?? $row['position_name'] ?? ''));
+            }
+            if ($performanceIndependent && $positionId > 0) {
+                $resultRow['performanceIndependent'] = true;
+                $resultRow['allocationGroupKey'] = $groupKey;
+            }
+            $result[] = $resultRow;
+            $weightByGroup[$groupKey] = ($weightByGroup[$groupKey] ?? 0) + $allocation;
         }
-        if ($result !== [] && $weight !== 100) throw self::failure('checkout_draft_salespeople_weight_invalid');
+        if ($result !== [] && array_filter($weightByGroup, static fn (int $sum): bool => $sum !== 100)) throw self::failure('checkout_draft_salespeople_weight_invalid');
         return $result;
     }
 
@@ -482,7 +495,7 @@ final class CashierV3CheckoutDraftAuthorityRebuilder
         }
         $result = [];
         $seen = [];
-        $weight = 0;
+        $weightByGroup = [];
         foreach ($decoded as $row) {
             if (!is_array($row)) {
                 throw self::failure('checkout_draft_entitlement_craftsmen_snapshot_invalid');
@@ -496,6 +509,7 @@ final class CashierV3CheckoutDraftAuthorityRebuilder
                 'craftsmanPerformanceType', 'laborFeeCents', 'personnelSource',
                 'id', 'employeeId', 'storeId', 'name', 'staffName', 'employeeName',
                 'isPrimary', 'sequence', 'projectCountHalfUnits',
+                'positionId', 'positionName', 'performanceIndependent', 'allocationGroupKey',
             ];
             $actual = array_keys($row);
             sort($actual, SORT_STRING);
@@ -534,7 +548,10 @@ final class CashierV3CheckoutDraftAuthorityRebuilder
             if (!in_array($personnelSource, ['store', 'other'], true)) {
                 throw self::failure('checkout_draft_entitlement_craftsmen_snapshot_invalid');
             }
-            $weight += $laborWeight;
+            $positionId = max(0, (int)($row['positionId'] ?? $row['position_id'] ?? 0));
+            $performanceIndependent = !empty($row['performanceIndependent'])
+                || !empty($row['performance_independent']);
+            $groupKey = $performanceIndependent && $positionId > 0 ? 'independent:' . $positionId : 'normal';
             $assignment = [
                 'staffId' => $staffId,
                 'laborWeight' => $laborWeight,
@@ -545,15 +562,20 @@ final class CashierV3CheckoutDraftAuthorityRebuilder
             if ($personnelSource === 'other') {
                 $assignment['personnelSource'] = 'other';
             }
+            if ($positionId > 0) {
+                $assignment['positionId'] = $positionId;
+                $assignment['positionName'] = trim((string)($row['positionName'] ?? $row['position_name'] ?? ''));
+            }
+            if ($performanceIndependent && $positionId > 0) {
+                $assignment['performanceIndependent'] = true;
+                $assignment['allocationGroupKey'] = $groupKey;
+            }
+            if ($performanceType !== 'labor') {
+                $weightByGroup[$groupKey] = ($weightByGroup[$groupKey] ?? 0) + $laborWeight;
+            }
             $result[] = $assignment;
         }
-        $commissionWeight = 0;
-        foreach ($result as $row) {
-            if ($row['craftsmanPerformanceType'] !== 'labor') {
-                $commissionWeight += (int)$row['laborWeight'];
-            }
-        }
-        if ($result !== [] && $commissionWeight !== 0 && $commissionWeight !== 100) {
+        if ($result !== [] && array_filter($weightByGroup, static fn (int $sum): bool => $sum !== 100 && $sum !== 0)) {
             throw self::failure('checkout_draft_entitlement_craftsmen_weight_invalid');
         }
         return $result;

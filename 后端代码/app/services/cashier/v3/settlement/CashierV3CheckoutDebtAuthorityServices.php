@@ -285,7 +285,7 @@ final class CashierV3CheckoutDebtAuthorityServices
     private static function salespeopleSnapshot(array $rows): array
     {
         $out = [];
-        $sum = 0;
+        $weightByGroup = [];
         foreach (array_values($rows) as $index => $row) {
             $normalized = [
                 'employeeId' => (int)($row['employeeId'] ?? 0),
@@ -295,16 +295,27 @@ final class CashierV3CheckoutDebtAuthorityServices
                 'allocationWeight' => (int)($row['allocationWeight'] ?? 0),
                 'sequence' => (int)($row['sequence'] ?? ($index + 1)),
             ];
+            $positionId = max(0, (int)($row['positionId'] ?? $row['position_id'] ?? 0));
+            $performanceIndependent = !empty($row['performanceIndependent']) || !empty($row['performance_independent']);
+            $groupKey = $performanceIndependent && $positionId > 0 ? 'independent:' . $positionId : 'normal';
             if ($normalized['employeeId'] <= 0 || $normalized['name'] === ''
                 || !in_array($normalized['employeeTypeCodeSnapshot'], ['internal', 'partner', 'outsourced'], true)
                 || $normalized['employeeTypeAuthorityVersion'] <= 0 || $normalized['allocationWeight'] <= 0
                 || $normalized['sequence'] <= 0) {
                 throw self::failure('checkout_debt_personnel_snapshot_invalid');
             }
-            $sum += $normalized['allocationWeight'];
+            if ($positionId > 0) {
+                $normalized['positionId'] = $positionId;
+                $normalized['positionName'] = trim((string)($row['positionName'] ?? $row['position_name'] ?? ''));
+            }
+            if ($performanceIndependent && $positionId > 0) {
+                $normalized['performanceIndependent'] = true;
+                $normalized['allocationGroupKey'] = $groupKey;
+            }
+            $weightByGroup[$groupKey] = ($weightByGroup[$groupKey] ?? 0) + $normalized['allocationWeight'];
             $out[] = $normalized;
         }
-        if ($out && $sum !== 100) {
+        if ($out && array_filter($weightByGroup, static fn (int $sum): bool => $sum !== 100)) {
             throw self::failure('checkout_debt_personnel_weight_invalid');
         }
         return $out;

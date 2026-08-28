@@ -117,16 +117,39 @@ function projectCountHalfUnitsFor(item = {}) {
   return Number.isFinite(projectCount) && projectCount >= 0 ? Math.round(projectCount * 2) : 0
 }
 
+function performanceIndependent(item = {}) {
+  return item.performanceIndependent === true
+    || Number(item.performanceIndependent ?? item.performance_independent ?? 0) === 1
+}
+
+function allocationGroupKey(item = {}) {
+  if (!performanceIndependent(item)) return 'normal'
+  const positionId = Number(item.positionId ?? item.position_id ?? 0)
+  return `independent:${positionId > 0 ? positionId : recordId(item)}`
+}
+
+function selectedByAllocationGroup(records, predicate = () => true) {
+  const groups = new Map()
+  records.filter((record) => record.selected && predicate(record)).forEach((record) => {
+    const key = allocationGroupKey(record)
+    if (!groups.has(key)) groups.set(key, [])
+    groups.get(key).push(record)
+  })
+  return groups
+}
+
 function distributeProjectCounts(records) {
   if (props.historyAdjustment || !Array.isArray(records)) return
   const selected = records.filter((record) => record.selected && record.role === 'craftsmen')
   if (!selected.length || selected.some((record) => record.projectCountTouched)) return
   const totalHalfUnits = Math.max(0, Math.trunc(Number(props.projectCountTotal || 0) * 2))
-  const base = Math.floor(totalHalfUnits / selected.length)
-  const remainder = totalHalfUnits - base * selected.length
-  selected.forEach((record, index) => {
-    record.projectCountHalfUnits = base + (index >= selected.length - remainder ? 1 : 0)
-    record.projectCountText = (record.projectCountHalfUnits / 2).toFixed(1)
+  selectedByAllocationGroup(selected).forEach((group) => {
+    const base = Math.floor(totalHalfUnits / group.length)
+    const remainder = totalHalfUnits - base * group.length
+    group.forEach((record, index) => {
+      record.projectCountHalfUnits = base + (index >= group.length - remainder ? 1 : 0)
+      record.projectCountText = (record.projectCountHalfUnits / 2).toFixed(1)
+    })
   })
 }
 
@@ -139,14 +162,15 @@ function recordName(record = {}) {
 }
 
 function equalWeights(records) {
-  const selected = records.filter((record) => record.selected && craftsmanType(record) !== PERFORMANCE_TYPES.LABOR)
-  if (!selected.length) return
-  const base = Math.floor(100 / selected.length)
-  let remainder = 100 - base * selected.length
-  selected.forEach((record) => {
-    record.performance = base + (remainder > 0 ? 1 : 0)
-    remainder = Math.max(0, remainder - 1)
-  })
+  selectedByAllocationGroup(records, (record) => craftsmanType(record) !== PERFORMANCE_TYPES.LABOR)
+    .forEach((group) => {
+      const base = Math.floor(100 / group.length)
+      let remainder = 100 - base * group.length
+      group.forEach((record) => {
+        record.performance = base + (remainder > 0 ? 1 : 0)
+        remainder = Math.max(0, remainder - 1)
+      })
+    })
 }
 
 function splitWeight(total, records) {
@@ -161,18 +185,18 @@ function splitWeight(total, records) {
 }
 
 function salespersonDefaultWeights(records) {
-  const selected = records.filter((record) => record.selected)
-  if (!selected.length) return
-  const ratio = Math.max(0, Math.min(100, Math.trunc(Number(selected[0].partnerDefaultRatio || 0))))
-  const partners = selected.filter((record) => String(record.employeeTypeCode || '').toLowerCase() === 'partner')
-  const others = selected.filter((record) => String(record.employeeTypeCode || '').toLowerCase() !== 'partner')
-  if (ratio <= 0 || !partners.length || !others.length) {
-    splitWeight(100, selected)
-  } else {
-    splitWeight(ratio, partners)
-    splitWeight(100 - ratio, others)
-  }
-  selected.forEach((record) => { record.performanceTouched = false })
+  selectedByAllocationGroup(records).forEach((selected) => {
+    const ratio = Math.max(0, Math.min(100, Math.trunc(Number(selected[0].partnerDefaultRatio || 0))))
+    const partners = selected.filter((record) => String(record.employeeTypeCode || '').toLowerCase() === 'partner')
+    const others = selected.filter((record) => String(record.employeeTypeCode || '').toLowerCase() !== 'partner')
+    if (ratio <= 0 || !partners.length || !others.length) {
+      splitWeight(100, selected)
+    } else {
+      splitWeight(ratio, partners)
+      splitWeight(100 - ratio, others)
+    }
+    selected.forEach((record) => { record.performanceTouched = false })
+  })
 }
 
 function mergeCandidates(candidates, selected, role) {
@@ -194,6 +218,9 @@ function mergeCandidates(candidates, selected, role) {
       staffId: id,
       name: recordName(candidate),
       position: candidate.positionName || candidate.position || candidate.jobTitle || '在职员工',
+      positionId: Number(candidate.positionId ?? candidate.position_id ?? 0),
+      performanceIndependent: performanceIndependent(candidate),
+      allocationGroupKey: String(candidate.allocationGroupKey || '').trim() || allocationGroupKey(candidate),
       level: candidate.levelName || candidate.positionLevelName || candidate.level || '—',
       selected: Boolean(saved),
       marked: Boolean(saved?.marked ?? saved?.isPreSale ?? saved?.isPointCustomer),
@@ -222,6 +249,9 @@ function mergeCandidates(candidates, selected, role) {
       staffId: id,
       name: recordName(saved),
       position: saved.positionName || saved.position || saved.jobTitle || '在职员工',
+      positionId: Number(saved.positionId ?? saved.position_id ?? 0),
+      performanceIndependent: performanceIndependent(saved),
+      allocationGroupKey: String(saved.allocationGroupKey || '').trim() || allocationGroupKey(saved),
       level: saved.levelName || saved.positionLevelName || saved.level || '—',
       selected: true,
       marked: Boolean(saved.marked ?? saved.isPreSale ?? saved.isPointCustomer),
@@ -505,8 +535,10 @@ function allocationIsValid(records) {
   const commissionSelected = selected.filter((record) => craftsmanType(record) !== PERFORMANCE_TYPES.LABOR)
   return !selected.length || (
     selected.every((record) => Number.isInteger(Number(record.performance)) && Number(record.performance) >= 0)
-    && commissionSelected.every((record) => Number(record.performance) > 0)
-    && commissionSelected.reduce((total, record) => total + Number(record.performance), 0) === (commissionSelected.length ? 100 : 0)
+    && Array.from(selectedByAllocationGroup(commissionSelected).values()).every((group) => (
+      group.every((record) => Number(record.performance) > 0)
+      && group.reduce((total, record) => total + Number(record.performance), 0) === 100
+    ))
     && selected.every((record) => craftsmanType(record) !== PERFORMANCE_TYPES.LABOR || Number(record.performance) === 0)
   )
 }
@@ -538,7 +570,11 @@ function selectedSalespersonPayload() {
     name: item.name,
     marked: Boolean(item.marked),
     isPreSale: Boolean(item.marked),
-    allocationWeight: Number(item.performance)
+    allocationWeight: Number(item.performance),
+    positionId: Number(item.positionId || 0),
+    positionName: item.position || '在职员工',
+    performanceIndependent: performanceIndependent(item),
+    allocationGroupKey: allocationGroupKey(item)
   }))
 }
 
@@ -554,6 +590,10 @@ function selectedCraftsmenPayload() {
     laborWeight: Number(item.performance),
     craftsmanPerformanceType: craftsmanType(item),
     laborFeeCents: craftsmanType(item) === PERFORMANCE_TYPES.COMMISSION ? 0 : Math.max(0, Number(item.laborFeeYuan || 0) * 100),
+    positionId: Number(item.positionId || 0),
+    positionName: item.position || '在职员工',
+    performanceIndependent: performanceIndependent(item),
+    allocationGroupKey: allocationGroupKey(item),
     ...(item.personnelSource === 'other' ? { personnelSource: 'other' } : {}),
     isPrimary: index === 0,
     sequence: index + 1
@@ -690,6 +730,10 @@ function confirm() {
       laborWeight: Number(item.performance),
       craftsmanPerformanceType: craftsmanType(item),
       laborFeeCents: craftsmanType(item) === PERFORMANCE_TYPES.COMMISSION ? 0 : Math.max(0, Number(item.laborFeeYuan || 0) * 100),
+      positionId: Number(item.positionId || 0),
+      positionName: item.position || '在职员工',
+      performanceIndependent: performanceIndependent(item),
+      allocationGroupKey: allocationGroupKey(item),
       ...(item.personnelSource === 'other' ? { personnelSource: 'other' } : {}),
       allocationAmountCents: allocationAmountCentsFor(item),
       projectCountHalfUnits: Math.round(Number(item.projectCountText || 0) * 2),

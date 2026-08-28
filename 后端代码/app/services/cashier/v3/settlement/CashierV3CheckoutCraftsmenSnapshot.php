@@ -36,9 +36,17 @@ final class CashierV3CheckoutCraftsmenSnapshot
                 || array_key_exists('laborFeeCents', $row);
             $hasProjectCount = array_key_exists('projectCountHalfUnits', $row);
             $hasPersonnelSource = array_key_exists('personnelSource', $row);
-            self::assertExactKeys($row, $hasPerformanceFields
-                ? array_merge($baseKeys, ['craftsmanPerformanceType', 'laborFeeCents'], $hasProjectCount ? ['projectCountHalfUnits'] : [], $hasPersonnelSource ? ['personnelSource'] : [])
-                : array_merge($baseKeys, $hasProjectCount ? ['projectCountHalfUnits'] : [], $hasPersonnelSource ? ['personnelSource'] : []));
+            $hasPosition = array_key_exists('positionId', $row)
+                || array_key_exists('positionName', $row)
+                || array_key_exists('performanceIndependent', $row)
+                || array_key_exists('allocationGroupKey', $row);
+            $optionalKeys = $hasPerformanceFields ? ['craftsmanPerformanceType', 'laborFeeCents'] : [];
+            if ($hasProjectCount) $optionalKeys[] = 'projectCountHalfUnits';
+            if ($hasPersonnelSource) $optionalKeys[] = 'personnelSource';
+            foreach (['positionId', 'positionName', 'performanceIndependent', 'allocationGroupKey'] as $positionKey) {
+                if (array_key_exists($positionKey, $row)) $optionalKeys[] = $positionKey;
+            }
+            self::assertExactKeys($row, array_merge($baseKeys, $optionalKeys));
             $staffId = self::positiveInt($row['staffId']);
             if (self::positiveInt($row['id']) !== $staffId || isset($staffIds[$staffId])) {
                 throw new \InvalidArgumentException('craftsmen_snapshot_staff_invalid');
@@ -108,14 +116,30 @@ final class CashierV3CheckoutCraftsmenSnapshot
             if ($hasPersonnelSource || $source === 'other') {
                 $normalized[count($normalized) - 1]['personnelSource'] = $source;
             }
-        }
-        $commissionWeight = 0;
-        foreach ($normalized as $row) {
-            if (($row['craftsmanPerformanceType'] ?? 'commission_labor') !== 'labor') {
-                $commissionWeight += (int)$row['laborWeight'];
+            if ($hasPosition) {
+                $positionId = self::nonNegativeInt($row['positionId'] ?? 0, 'craftsmen_snapshot_position_invalid');
+                $performanceIndependent = !empty($row['performanceIndependent']);
+                $groupKey = $performanceIndependent && $positionId > 0
+                    ? 'independent:' . $positionId
+                    : 'normal';
+                if ($positionId > 0) {
+                    $normalized[count($normalized) - 1]['positionId'] = $positionId;
+                    $normalized[count($normalized) - 1]['positionName'] = trim((string)($row['positionName'] ?? ''));
+                }
+                if ($performanceIndependent && $positionId > 0) {
+                    $normalized[count($normalized) - 1]['performanceIndependent'] = true;
+                    $normalized[count($normalized) - 1]['allocationGroupKey'] = $groupKey;
+                }
             }
         }
-        if ($normalized !== [] && $commissionWeight !== 100 && $commissionWeight !== 0) {
+        $weightByGroup = [];
+        foreach ($normalized as $row) {
+            if (($row['craftsmanPerformanceType'] ?? 'commission_labor') !== 'labor') {
+                $groupKey = (string)($row['allocationGroupKey'] ?? 'normal');
+                $weightByGroup[$groupKey] = ($weightByGroup[$groupKey] ?? 0) + (int)$row['laborWeight'];
+            }
+        }
+        if ($normalized !== [] && array_filter($weightByGroup, static fn (int $sum): bool => $sum !== 100 && $sum !== 0)) {
             throw new \InvalidArgumentException('craftsmen_snapshot_weight_sum_invalid');
         }
         return $normalized;

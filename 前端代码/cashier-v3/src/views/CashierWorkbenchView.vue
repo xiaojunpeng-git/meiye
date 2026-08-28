@@ -687,6 +687,19 @@ function canonicalCheckoutCraftsmen(records = []) {
       ? performanceType
       : 'commission_labor'
     row.laborFeeCents = Math.max(0, Math.trunc(Number(record?.laborFeeCents ?? record?.labor_fee_cents ?? 0)))
+    const positionId = Number(record?.positionId ?? record?.position_id ?? 0)
+    if (positionId > 0) {
+      row.positionId = positionId
+      row.positionName = String(record?.positionName ?? record?.position_name ?? record?.position ?? '').trim()
+      if (record?.performanceIndependent === true || Number(record?.performanceIndependent ?? record?.performance_independent ?? 0) === 1) {
+        row.performanceIndependent = true
+        row.allocationGroupKey = String(record?.allocationGroupKey || '').trim() || `independent:${positionId}`
+      }
+    }
+    if (Object.prototype.hasOwnProperty.call(record || {}, 'projectCountHalfUnits')
+      || Object.prototype.hasOwnProperty.call(record || {}, 'project_count_half_units')) {
+      row.projectCountHalfUnits = Math.max(0, Math.trunc(Number(record?.projectCountHalfUnits ?? record?.project_count_half_units ?? 0)))
+    }
     return row
   })
   // Older projected rows only retained the selected staff identity. At the
@@ -695,11 +708,21 @@ function canonicalCheckoutCraftsmen(records = []) {
   const commissionRows = rows.filter((row) => row.craftsmanPerformanceType !== 'labor')
   const hasExplicitWeight = commissionRows.some((row) => row.laborWeight > 0)
   if (!hasExplicitWeight && commissionRows.length > 0) {
-    const base = Math.floor(100 / commissionRows.length)
-    let remainder = 100 - base * commissionRows.length
+    const groups = new Map()
     commissionRows.forEach((row) => {
-      row.laborWeight = base + (remainder > 0 ? 1 : 0)
-      remainder = Math.max(0, remainder - 1)
+      const groupKey = row.performanceIndependent && row.positionId > 0
+        ? (row.allocationGroupKey || `independent:${row.positionId}`)
+        : 'normal'
+      if (!groups.has(groupKey)) groups.set(groupKey, [])
+      groups.get(groupKey).push(row)
+    })
+    groups.forEach((group) => {
+      const base = Math.floor(100 / group.length)
+      let remainder = 100 - base * group.length
+      group.forEach((row) => {
+        row.laborWeight = base + (remainder > 0 ? 1 : 0)
+        remainder = Math.max(0, remainder - 1)
+      })
     })
   }
   return rows
@@ -716,6 +739,18 @@ function canonicalCheckoutEntitlementCraftsmen(records = []) {
     isPointCustomer: row.isPointCustomer,
     craftsmanPerformanceType: row.craftsmanPerformanceType,
     laborFeeCents: row.laborFeeCents,
+    ...(row.positionId > 0
+      ? {
+          positionId: row.positionId,
+          positionName: row.positionName,
+          ...(row.performanceIndependent
+            ? { performanceIndependent: true, allocationGroupKey: row.allocationGroupKey }
+            : {})
+        }
+      : {}),
+    ...(Object.prototype.hasOwnProperty.call(row, 'projectCountHalfUnits')
+      ? { projectCountHalfUnits: row.projectCountHalfUnits }
+      : {}),
     ...(row.personnelSource === 'other' ? { personnelSource: 'other' } : {})
   }))
 }
@@ -726,7 +761,19 @@ function canonicalCheckoutSalespeople(records = []) {
     allocationWeight: Math.max(0, Math.trunc(Number(record?.allocationWeight ?? record?.allocation_weight ?? record?.performance ?? 0))),
     // 售前标记属于销售人快照的一部分；否则多选售前虽然能保存分配比例，
     // 最终销售订单和业绩事实会把它们误记成普通售后销售人。
-    isPreSale: Boolean(record?.isPreSale ?? record?.is_presale ?? record?.marked)
+    isPreSale: Boolean(record?.isPreSale ?? record?.is_presale ?? record?.marked),
+    ...(Number(record?.positionId ?? record?.position_id ?? 0) > 0
+      ? {
+          positionId: Number(record.positionId ?? record.position_id),
+          positionName: String(record?.positionName ?? record?.position_name ?? record?.position ?? '').trim(),
+          ...(record?.performanceIndependent === true || Number(record?.performanceIndependent ?? record?.performance_independent ?? 0) === 1
+            ? {
+                performanceIndependent: true,
+                allocationGroupKey: String(record?.allocationGroupKey || '').trim() || `independent:${Number(record.positionId ?? record.position_id)}`
+              }
+            : {})
+        }
+      : {})
   }))
 }
 
@@ -3594,12 +3641,20 @@ async function confirmPersonnelAssignment(result = {}) {
       craftsmanPerformanceType: record.craftsmanPerformanceType || record.craftsman_performance_type,
       laborFeeCents: Number(record.laborFeeCents ?? record.labor_fee_cents ?? 0),
       projectCountHalfUnits: Math.max(0, Number(record.projectCountHalfUnits ?? record.project_count_half_units ?? 0)),
+      positionId: Number(record.positionId ?? record.position_id ?? 0),
+      positionName: record.positionName || record.position_name || record.position || '',
+      performanceIndependent: Boolean(record.performanceIndependent ?? record.performance_independent),
+      allocationGroupKey: record.allocationGroupKey || '',
       ...(record.personnelSource === 'other' ? { personnelSource: 'other' } : {})
     }))
     const salespeople = (result.salespeople || []).map((record) => ({
       staffId: canonicalCheckoutPositiveId(record.staffId, record.id, record.employeeId, record.employee_id),
       allocationWeight: Number(record.allocationWeight),
-      isPreSale: Boolean(record.isPreSale ?? record.is_presale ?? record.marked)
+      isPreSale: Boolean(record.isPreSale ?? record.is_presale ?? record.marked),
+      positionId: Number(record.positionId ?? record.position_id ?? 0),
+      positionName: record.positionName || record.position_name || record.position || '',
+      performanceIndependent: Boolean(record.performanceIndependent ?? record.performance_independent),
+      allocationGroupKey: record.allocationGroupKey || ''
     }))
     const guideSelections = (result.guideSelections || []).map((record) => ({
       staffId: canonicalCheckoutPositiveId(record.staffId, record.id, record.employeeId, record.employee_id),
@@ -3672,12 +3727,21 @@ async function applyPersonnelAssignmentToAll(result = {}) {
     isPointCustomer: Boolean(record.isPointCustomer ?? record.marked),
     craftsmanPerformanceType: record.craftsmanPerformanceType || record.craftsman_performance_type,
     laborFeeCents: Number(record.laborFeeCents ?? record.labor_fee_cents ?? 0),
+    projectCountHalfUnits: Math.max(0, Number(record.projectCountHalfUnits ?? record.project_count_half_units ?? 0)),
+    positionId: Number(record.positionId ?? record.position_id ?? 0),
+    positionName: record.positionName || record.position_name || record.position || '',
+    performanceIndependent: Boolean(record.performanceIndependent ?? record.performance_independent),
+    allocationGroupKey: record.allocationGroupKey || '',
     ...(record.personnelSource === 'other' ? { personnelSource: 'other' } : {})
   }))
   const salespeople = (hasPurchaseLines ? (result.salespeople || []) : []).map((record) => ({
     staffId: canonicalCheckoutPositiveId(record.staffId, record.id, record.employeeId, record.employee_id),
     allocationWeight: Number(record.allocationWeight),
-    isPreSale: Boolean(record.isPreSale ?? record.is_presale ?? record.marked)
+    isPreSale: Boolean(record.isPreSale ?? record.is_presale ?? record.marked),
+    positionId: Number(record.positionId ?? record.position_id ?? 0),
+    positionName: record.positionName || record.position_name || record.position || '',
+    performanceIndependent: Boolean(record.performanceIndependent ?? record.performance_independent),
+    allocationGroupKey: record.allocationGroupKey || ''
   }))
   const guideSelections = (result.guideSelections || []).map((record) => ({
     staffId: canonicalCheckoutPositiveId(record.staffId, record.id, record.employeeId, record.employee_id),

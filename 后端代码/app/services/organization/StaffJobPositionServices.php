@@ -87,6 +87,9 @@ class StaffJobPositionServices extends BaseServices
         bool $runAuthProjection = true
     ): array {
         $positionIds = $this->normalizeIntIds($positionIds);
+        if (count($positionIds) > 1) {
+            throw new AdminException('每位员工只能设置一个有效岗位');
+        }
         $this->assertEmployee($employeeId);
 
         $noStoreBind = ($staffId <= 0 && $storeId <= 0);
@@ -125,6 +128,27 @@ class StaffJobPositionServices extends BaseServices
         $existingIds = [];
         foreach ($existing as $ex) {
             $existingIds[(int)$ex['position_id']] = (int)$ex['id'];
+        }
+
+        // 岗位是员工的唯一有效身份，不允许借由多门店任职或总部任职
+        // 同时挂出多个有效岗位。历史岗位保留结束时间，不能被覆盖删除。
+        if ($positionIds) {
+            $otherActiveJobQuery = Db::name('staff_job_position')
+                ->where('employee_id', $employeeId)
+                ->where('is_del', 0)
+                ->where('status', 1)
+                ->where('end_time', 0)
+                ->where('position_id', '<>', (int)$positionIds[0]);
+            // 当前任职记录允许被本次保存替换；除此之外的门店/总部任职
+            // 若仍挂着另一岗位，必须拒绝，避免员工通过多任职绕过单岗位规则。
+            if ($existingIds !== []) {
+                $otherActiveJobQuery->whereNotIn('id', array_values($existingIds));
+            }
+            $otherActiveJob = $otherActiveJobQuery->order('id', 'desc')->lock(true)->find();
+            if (is_array($otherActiveJob)
+                && (int)($otherActiveJob['position_id'] ?? 0) !== (int)$positionIds[0]) {
+                throw new AdminException('该员工已有其他有效岗位，请先结束原岗位后再设置');
+            }
         }
 
         /** @var JobPositionPolicyServices $policy */
@@ -236,7 +260,7 @@ class StaffJobPositionServices extends BaseServices
             ->where('j.is_del', 0)
             ->where('j.status', 1)
             ->where('j.end_time', 0)
-            ->field('j.id,j.employee_id,j.store_id,j.staff_id,j.position_id,j.start_time,j.end_time,j.status,p.name AS position_name,p.allow_store_select,p.use_platform,p.use_store,p.use_cashier,p.use_mobile,p.status AS position_status')
+            ->field('j.id,j.employee_id,j.store_id,j.staff_id,j.position_id,j.start_time,j.end_time,j.status,p.name AS position_name,p.allow_store_select,p.performance_independent,p.use_platform,p.use_store,p.use_cashier,p.use_mobile,p.status AS position_status')
             ->order('j.id', 'asc');
         if ($staffId > 0) {
             $q->where('j.staff_id', $staffId);
@@ -250,6 +274,7 @@ class StaffJobPositionServices extends BaseServices
             $r['id'] = (int)$r['id'];
             $r['position_id'] = (int)$r['position_id'];
             $r['allow_store_select'] = (int)($r['allow_store_select'] ?? 0);
+            $r['performance_independent'] = (int)($r['performance_independent'] ?? 0);
             $r['use_platform'] = (int)($r['use_platform'] ?? 0);
             $r['use_store'] = (int)($r['use_store'] ?? 0);
             $r['use_cashier'] = (int)($r['use_cashier'] ?? 0);

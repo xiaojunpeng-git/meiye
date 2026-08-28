@@ -978,17 +978,28 @@ final class CashierV3DirectSnapshotEntitlementSettlementServices
                     'laborFeeCents' => $laborFeeCents,
                     'personnelSource' => (string)($craftsman['personnelSource'] ?? 'store'),
                 ];
+                $positionId = is_array($craftsman) ? max(0, (int)($craftsman['positionId'] ?? $craftsman['position_id'] ?? 0)) : 0;
+                $performanceIndependent = is_array($craftsman) && !empty($craftsman['performanceIndependent']);
+                if ($positionId > 0) {
+                    $settingsById[$staffId]['positionId'] = $positionId;
+                    $settingsById[$staffId]['positionName'] = trim((string)($craftsman['positionName'] ?? $craftsman['position_name'] ?? ''));
+                }
+                if ($performanceIndependent && $positionId > 0) {
+                    $settingsById[$staffId]['performanceIndependent'] = true;
+                    $settingsById[$staffId]['allocationGroupKey'] = 'independent:' . $positionId;
+                }
             }
             if (!$staffIds) {
                 throw self::failure('authority_service_intent_craftsman_required', ['lineId' => $lineId]);
             }
-            $commissionWeight = 0;
+            $weightByGroup = [];
             foreach ($settingsById as $settings) {
                 if (($settings['craftsmanPerformanceType'] ?? 'commission_labor') !== 'labor') {
-                    $commissionWeight += (int)$settings['laborWeight'];
+                    $groupKey = (string)($settings['allocationGroupKey'] ?? 'normal');
+                    $weightByGroup[$groupKey] = ($weightByGroup[$groupKey] ?? 0) + (int)$settings['laborWeight'];
                 }
             }
-            if ($commissionWeight > 0 && $commissionWeight !== 100) {
+            if (array_filter($weightByGroup, static fn (int $sum): bool => $sum !== 100 && $sum !== 0)) {
                 throw self::failure('authority_service_intent_craftsman_weight_invalid', ['lineId' => $lineId]);
             }
             $result[$lineId] = [

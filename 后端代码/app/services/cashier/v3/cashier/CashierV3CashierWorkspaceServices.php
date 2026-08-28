@@ -2064,23 +2064,6 @@ final class CashierV3CashierWorkspaceServices
             }
             $pointFlags[$staffId] = is_array($selection) && !empty($selection['isPointCustomer']);
         }
-        // Labor-only craftsmen do not participate in the commission ratio.
-        // For mixed selections, only commission-capable rows must total 100.
-        $commissionWeight = 0;
-        foreach ($weights as $staffId => $weight) {
-            if ($types[$staffId] !== EmployeeCraftsmanPerformanceTypeServices::LABOR) {
-                $commissionWeight += $weight;
-            }
-        }
-        if ($commissionWeight > 0 && $commissionWeight !== 100) {
-            throw new CashierV3CommandException(
-                CashierV3ResultCode::ENTITLEMENT_LINE_INVALID,
-                '手艺人分配比例合计必须为 100%。',
-                CashierV3ResultCode::STATUS_FAILED,
-                ['reason' => 'craftsman_weight_sum_invalid']
-            );
-        }
-
         $lockIds = array_keys($seen);
         sort($lockIds, SORT_NUMERIC);
         $otherStaffIds = array_keys(array_filter($personnelSources, static function (string $source): bool {
@@ -2088,6 +2071,11 @@ final class CashierV3CashierWorkspaceServices
         }));
         $staffQuery = Db::name('system_store_staff')->alias('ss')
             ->join('employee e', 'e.id = ss.employee_id')
+            ->leftJoin(
+                'staff_job_position sjp',
+                'sjp.staff_id = ss.id AND sjp.status = 1 AND sjp.is_del = 0 AND sjp.end_time = 0'
+            )
+            ->leftJoin('position p', 'p.id = sjp.position_id AND p.status = 1')
             ->whereIn('ss.id', $lockIds)
             ->where('ss.store_id', $operatorScope->storeId())
             ->where('ss.status', 1)
@@ -2096,7 +2084,7 @@ final class CashierV3CashierWorkspaceServices
             ->where('ss.cashier_craftsman_enabled', 1)
             ->where('e.status', 1)
             ->where('e.is_del', 0)
-            ->field('ss.id,ss.employee_id,ss.store_id,ss.staff_name,ss.cashier_craftsman_enabled,ss.craftsman_performance_type,e.name as employee_name')
+            ->field('ss.id,ss.employee_id,ss.store_id,ss.staff_name,ss.cashier_craftsman_enabled,ss.craftsman_performance_type,sjp.position_id,p.name as position_name,p.performance_independent,e.name as employee_name')
             ->order('ss.id asc');
         $rows = $staffQuery->lock(true)->select();
         if (is_object($rows) && method_exists($rows, 'toArray')) $rows = $rows->toArray();
@@ -2142,6 +2130,9 @@ final class CashierV3CashierWorkspaceServices
                     'staff_name' => (string)($row['employee_name'] ?? ''),
                     'cashier_craftsman_enabled' => 1,
                     'craftsman_performance_type' => EmployeeCraftsmanPerformanceTypeServices::COMMISSION_LABOR,
+                    'position_id' => 0,
+                    'position_name' => '',
+                    'performance_independent' => 0,
                     'employee_name' => (string)($row['employee_name'] ?? ''),
                     'personnel_source' => 'other',
                 ];
@@ -2162,7 +2153,7 @@ final class CashierV3CashierWorkspaceServices
 
         $craftsmen = [];
         $defaultLaborFeeCents = $projectId > 0 ? $this->projectLaborDefaultCents($projectId) : 0;
-        $authoritativeCommissionWeight = 0;
+        $groupWeights = [];
         foreach ($selections as $index => $selection) {
             $staffId = (int)$selection['staffId'];
             $row = $byId[$staffId] ?? null;
@@ -2200,7 +2191,15 @@ final class CashierV3CashierWorkspaceServices
                     ['reason' => 'craftsman_weight_invalid']
                 );
             }
-            $authoritativeCommissionWeight += $effectiveWeight;
+            $positionId = (int)($row['position_id'] ?? 0);
+            $positionName = trim((string)($row['position_name'] ?? '')) ?: '在职员工';
+            $performanceIndependent = (int)($row['performance_independent'] ?? 0) === 1;
+            $allocationGroupKey = $performanceIndependent
+                ? 'independent:' . ($positionId > 0 ? $positionId : $staffId)
+                : 'normal';
+            if ($effectiveWeight > 0) {
+                $groupWeights[$allocationGroupKey] = ($groupWeights[$allocationGroupKey] ?? 0) + $effectiveWeight;
+            }
             $laborFeeCents = $type === EmployeeCraftsmanPerformanceTypeServices::COMMISSION
                 ? 0
                 : ($requestedFees[$staffId] > 0 ? $requestedFees[$staffId] : $defaultLaborFeeCents);
@@ -2230,6 +2229,10 @@ final class CashierV3CashierWorkspaceServices
                 'laborWeight' => $effectiveWeight,
                 'craftsmanPerformanceType' => $type,
                 'laborFeeCents' => $laborFeeCents,
+                'positionId' => $positionId,
+                'positionName' => $positionName,
+                'performanceIndependent' => $performanceIndependent,
+                'allocationGroupKey' => $allocationGroupKey,
                 'isPointCustomer' => $pointFlags[$staffId],
                 'personnelSource' => $personnelSource,
             ];
@@ -2238,12 +2241,15 @@ final class CashierV3CashierWorkspaceServices
             }
             $craftsmen[] = $craftsman;
         }
-        if ($authoritativeCommissionWeight > 0 && $authoritativeCommissionWeight !== 100) {
+        foreach ($groupWeights as $groupKey => $groupWeight) {
+            if ($groupWeight <= 0 || $groupWeight === 100) {
+                continue;
+            }
             throw new CashierV3CommandException(
                 CashierV3ResultCode::ENTITLEMENT_LINE_INVALID,
                 '手艺人业绩比例合计必须为 100%。',
                 CashierV3ResultCode::STATUS_FAILED,
-                ['reason' => 'craftsman_weight_sum_invalid']
+                ['reason' => 'craftsman_weight_sum_invalid', 'allocation_group' => $groupKey]
             );
         }
         return $craftsmen;
@@ -2268,7 +2274,6 @@ final class CashierV3CashierWorkspaceServices
             throw $this->incompleteLineSettings('', 'salespeople_too_many');
         }
         $weights = [];
-        $sum = 0;
         foreach ($selections as $selection) {
             $staffId = is_array($selection) ? (int)($selection['staffId'] ?? 0) : 0;
             $weight = is_array($selection) ? (int)($selection['allocationWeight'] ?? 0) : 0;
@@ -2276,15 +2281,16 @@ final class CashierV3CashierWorkspaceServices
                 throw $this->incompleteLineSettings('', 'salesperson_selection_invalid');
             }
             $weights[$staffId] = $weight;
-            $sum += $weight;
-        }
-        if ($sum !== 100) {
-            throw $this->incompleteLineSettings('', 'salesperson_weight_sum_invalid');
         }
         $staffIds = array_keys($weights);
         sort($staffIds, SORT_NUMERIC);
         $rows = Db::name('system_store_staff')->alias('ss')
             ->join('employee e', 'e.id = ss.employee_id')
+            ->leftJoin(
+                'staff_job_position sjp',
+                'sjp.staff_id = ss.id AND sjp.status = 1 AND sjp.is_del = 0 AND sjp.end_time = 0'
+            )
+            ->leftJoin('position p', 'p.id = sjp.position_id AND p.status = 1')
             ->whereIn('ss.id', $staffIds)
             ->where('ss.store_id', $operatorScope->storeId())
             ->where('ss.status', 1)
@@ -2293,7 +2299,7 @@ final class CashierV3CashierWorkspaceServices
             ->where('ss.cashier_salesperson_enabled', 1)
             ->where('e.status', 1)
             ->where('e.is_del', 0)
-            ->field('ss.id,ss.employee_id,ss.store_id,ss.staff_name,ss.cashier_salesperson_enabled,e.name as employee_name,e.employment_type_code,e.employment_type_version')
+            ->field('ss.id,ss.employee_id,ss.store_id,ss.staff_name,ss.cashier_salesperson_enabled,sjp.position_id,p.name as position_name,p.performance_independent,e.name as employee_name,e.employment_type_code,e.employment_type_version')
             ->order('ss.id asc')
             ->lock(true)
             ->select();
@@ -2308,6 +2314,7 @@ final class CashierV3CashierWorkspaceServices
             throw $this->incompleteLineSettings('', 'salesperson_not_active_in_store');
         }
         $result = [];
+        $groupWeights = [];
         foreach ($selections as $index => $selection) {
             $staffId = (int)$selection['staffId'];
             $row = $byId[$staffId] ?? null;
@@ -2317,6 +2324,13 @@ final class CashierV3CashierWorkspaceServices
             if (!$row || $name === '' || !in_array($type, ['internal', 'partner', 'outsourced'], true) || $typeVersion <= 0) {
                 throw $this->incompleteLineSettings('', 'salesperson_profile_incomplete');
             }
+            $positionId = (int)($row['position_id'] ?? 0);
+            $positionName = trim((string)($row['position_name'] ?? '')) ?: '在职员工';
+            $performanceIndependent = (int)($row['performance_independent'] ?? 0) === 1;
+            $allocationGroupKey = $performanceIndependent
+                ? 'independent:' . ($positionId > 0 ? $positionId : $staffId)
+                : 'normal';
+            $groupWeights[$allocationGroupKey] = ($groupWeights[$allocationGroupKey] ?? 0) + (int)$selection['allocationWeight'];
             $result[] = [
                 'id' => $staffId,
                 'staffId' => $staffId,
@@ -2327,7 +2341,16 @@ final class CashierV3CashierWorkspaceServices
                 'sequence' => $index + 1,
                 'employeeTypeCodeSnapshot' => $type,
                 'employeeTypeAuthorityVersion' => $typeVersion,
+                'positionId' => $positionId,
+                'positionName' => $positionName,
+                'performanceIndependent' => $performanceIndependent,
+                'allocationGroupKey' => $allocationGroupKey,
             ];
+        }
+        foreach ($groupWeights as $groupKey => $groupWeight) {
+            if ($groupWeight !== 100) {
+                throw $this->incompleteLineSettings('', 'salesperson_weight_sum_invalid');
+            }
         }
         return $result;
     }
@@ -2358,6 +2381,7 @@ final class CashierV3CashierWorkspaceServices
         $selections = [];
         $seen = [];
         $needsLegacyEqualWeights = false;
+        $weightByGroup = [];
         foreach ($craftsmen as $craftsman) {
             if (!is_array($craftsman)) {
                 throw $this->incompleteLineSettings($lineKey, 'stored_craftsman_not_object');
@@ -2390,6 +2414,23 @@ final class CashierV3CashierWorkspaceServices
                 'craftsmanPerformanceType' => $type,
                 'laborFeeCents' => max(0, (int)($craftsman['laborFeeCents'] ?? $craftsman['labor_fee_cents'] ?? 0)),
             ];
+            $positionId = max(0, (int)($craftsman['positionId'] ?? $craftsman['position_id'] ?? 0));
+            $performanceIndependent = !empty($craftsman['performanceIndependent'])
+                || !empty($craftsman['performance_independent']);
+            $groupKey = $performanceIndependent && $positionId > 0
+                ? 'independent:' . $positionId
+                : 'normal';
+            if ($positionId > 0) {
+                $selection['positionId'] = $positionId;
+                $selection['positionName'] = trim((string)($craftsman['positionName'] ?? $craftsman['position_name'] ?? ''));
+            }
+            if ($performanceIndependent && $positionId > 0) {
+                $selection['performanceIndependent'] = true;
+                $selection['allocationGroupKey'] = $groupKey;
+            }
+            if ($type !== EmployeeCraftsmanPerformanceTypeServices::LABOR) {
+                $weightByGroup[$groupKey] = ($weightByGroup[$groupKey] ?? 0) + $weight;
+            }
             if (array_key_exists('projectCountHalfUnits', $craftsman)
                 || array_key_exists('project_count_half_units', $craftsman)) {
                 $selection['projectCountHalfUnits'] = max(0, (int)($craftsman['projectCountHalfUnits'] ?? $craftsman['project_count_half_units'] ?? 0));
@@ -2410,14 +2451,7 @@ final class CashierV3CashierWorkspaceServices
             }
             unset($selection);
         }
-        $commissionWeight = 0;
-        foreach ($selections as $selection) {
-            if (($selection['craftsmanPerformanceType'] ?? EmployeeCraftsmanPerformanceTypeServices::COMMISSION_LABOR)
-                !== EmployeeCraftsmanPerformanceTypeServices::LABOR) {
-                $commissionWeight += (int)$selection['laborWeight'];
-            }
-        }
-        if ($selections && $commissionWeight !== 100 && $commissionWeight !== 0) {
+        if ($selections && array_filter($weightByGroup, static fn (int $sum): bool => $sum !== 100 && $sum !== 0)) {
             throw $this->incompleteLineSettings($lineKey, 'stored_craftsman_weight_sum_invalid');
         }
         return $selections;

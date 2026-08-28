@@ -1165,6 +1165,7 @@ class Organization extends AuthController
             [['status', 'd'], 1],
             [['remark', 's'], ''],
             [['allow_store_select', 'd'], 0],
+            [['performance_independent', 'd'], 0],
             [['is_store_manager', 'd'], 0],
             [['status_only', 'd'], 0],
             [['use_platform', 'd'], 0],
