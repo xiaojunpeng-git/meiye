@@ -118,15 +118,19 @@ final class CashierV3CheckoutCraftsmenSnapshot
             }
             if ($hasPosition) {
                 $positionId = self::nonNegativeInt($row['positionId'] ?? 0, 'craftsmen_snapshot_position_invalid');
-                $performanceIndependent = !empty($row['performanceIndependent']);
-                $groupKey = $performanceIndependent && $positionId > 0
-                    ? 'independent:' . $positionId
+                $explicitGroupKey = trim((string)($row['allocationGroupKey'] ?? ''));
+                $performanceIndependent = !empty($row['performanceIndependent'])
+                    || strncmp($explicitGroupKey, 'independent:', 12) === 0;
+                $groupKey = $performanceIndependent
+                    ? ($explicitGroupKey !== '' && strncmp($explicitGroupKey, 'independent:', 12) === 0
+                        ? $explicitGroupKey
+                        : 'independent:' . ($positionId > 0 ? $positionId : (int)($row['staffId'] ?? $row['id'] ?? 0)))
                     : 'normal';
                 if ($positionId > 0) {
                     $normalized[count($normalized) - 1]['positionId'] = $positionId;
                     $normalized[count($normalized) - 1]['positionName'] = trim((string)($row['positionName'] ?? ''));
                 }
-                if ($performanceIndependent && $positionId > 0) {
+                if ($performanceIndependent) {
                     $normalized[count($normalized) - 1]['performanceIndependent'] = true;
                     $normalized[count($normalized) - 1]['allocationGroupKey'] = $groupKey;
                 }

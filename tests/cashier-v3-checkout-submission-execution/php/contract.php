@@ -344,6 +344,15 @@ submissionExecutionAssert(
     }]) === null
         && (new ReflectionMethod($port, 'domainCall'))->getReturnType()->allowsNull()
 );
+submissionExecutionAssert(
+    'C2-EXEC-15 mixed checkout persists all locked personnel attributions',
+    strpos($portSource, 'salespeopleFromCheckoutRequestLinesInTx') !== false
+        && strpos($portSource, 'CashierV3GuideRoundFactServices') !== false
+        && strpos($portSource, 'CashierV3SalesManagerFactServices') !== false
+        && strpos($portSource, '$salespeopleByCheckoutLine') !== false
+        && strpos($portSource, '$guideSelectionsByLine') !== false
+        && strpos($portSource, '$salesManagerSelectionsByLine') !== false
+);
 
 echo "C2 checkout submission execution: {$passed} passed, {$failed} failed\n";
 exit($failed === 0 ? 0 : 1);

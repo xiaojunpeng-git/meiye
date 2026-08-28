@@ -325,6 +325,26 @@ function mergeCandidates(candidates, selected, role) {
     if (role === 'salespeople' && !selectedRecords.some((record) => record.performanceTouched)) salespersonDefaultWeights(merged)
     if (role !== 'salespeople') equalWeights(merged)
   }
+  // Drafts created before independent-position metadata was available can
+  // retain a single 34/33/33 split. Once the authoritative candidates are
+  // merged, preserve valid manual allocations but repair only groups whose
+  // totals are no longer 100%. This restores the invariant that each
+  // independent position and the normal pool are each allocated separately.
+  if (!props.historyAdjustment && role === 'craftsmen' && selectedRecords.length) {
+    const commissionSelected = selectedRecords.filter((record) => craftsmanType(record) !== PERFORMANCE_TYPES.LABOR)
+    const hasInvalidGroup = Array.from(selectedByAllocationGroup(commissionSelected).values()).some((group) => (
+      group.some((record) => !Number.isInteger(Number(record.performance)) || Number(record.performance) <= 0)
+      || group.reduce((total, record) => total + Number(record.performance || 0), 0) !== 100
+    ))
+    if (hasInvalidGroup) equalWeights(merged)
+  }
+  if (!props.historyAdjustment && role === 'salespeople' && selectedRecords.length) {
+    const hasInvalidGroup = Array.from(selectedByAllocationGroup(selectedRecords).values()).some((group) => (
+      group.some((record) => !Number.isInteger(Number(record.performance)) || Number(record.performance) <= 0)
+      || group.reduce((total, record) => total + Number(record.performance || 0), 0) !== 100
+    ))
+    if (hasInvalidGroup) salespersonDefaultWeights(merged)
+  }
   if (role === 'craftsmen') distributeProjectCounts(merged)
   return merged
 }

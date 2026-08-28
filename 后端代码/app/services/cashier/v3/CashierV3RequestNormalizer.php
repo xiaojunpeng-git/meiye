@@ -802,8 +802,11 @@ class CashierV3RequestNormalizer
                 $positionId = max(0, (int)($row['positionId'] ?? $row['position_id'] ?? 0));
                 $performanceIndependent = !empty($row['performanceIndependent'])
                     || !empty($row['performance_independent']);
-                $groupKey = $performanceIndependent && $positionId > 0
-                    ? 'independent:' . $positionId
+                $explicitGroupKey = trim((string)($row['allocationGroupKey'] ?? ''));
+                $groupKey = $performanceIndependent
+                    ? ($explicitGroupKey !== '' && strncmp($explicitGroupKey, 'independent:', 12) === 0
+                        ? $explicitGroupKey
+                        : 'independent:' . ($positionId > 0 ? $positionId : $staffId))
                     : 'normal';
                 $weightByGroup[$groupKey] = ($weightByGroup[$groupKey] ?? 0) + $weight;
                 $normalizedRow = [
@@ -817,7 +820,7 @@ class CashierV3RequestNormalizer
                     $normalizedRow['positionId'] = $positionId;
                     $normalizedRow['positionName'] = trim((string)($row['positionName'] ?? $row['position_name'] ?? ''));
                 }
-                if ($performanceIndependent && $positionId > 0) {
+                if ($performanceIndependent) {
                     $normalizedRow['performanceIndependent'] = true;
                     $normalizedRow['allocationGroupKey'] = $groupKey;
                 }
@@ -933,8 +936,11 @@ class CashierV3RequestNormalizer
             $positionId = max(0, (int)($row['positionId'] ?? $row['position_id'] ?? 0));
             $performanceIndependent = !empty($row['performanceIndependent'])
                 || !empty($row['performance_independent']);
-            $groupKey = $performanceIndependent && $positionId > 0
-                ? 'independent:' . $positionId
+            $explicitGroupKey = trim((string)($row['allocationGroupKey'] ?? ''));
+            $groupKey = $performanceIndependent
+                ? ($explicitGroupKey !== '' && strncmp($explicitGroupKey, 'independent:', 12) === 0
+                    ? $explicitGroupKey
+                    : 'independent:' . ($positionId > 0 ? $positionId : $id))
                 : 'normal';
             $weightByGroup[$groupKey] = ($weightByGroup[$groupKey] ?? 0) + $weight;
             $assignment = [
@@ -951,7 +957,7 @@ class CashierV3RequestNormalizer
                 $assignment['positionId'] = $positionId;
                 $assignment['positionName'] = trim((string)($row['positionName'] ?? $row['position_name'] ?? ''));
             }
-            if ($performanceIndependent && $positionId > 0) {
+            if ($performanceIndependent) {
                 $assignment['performanceIndependent'] = true;
                 $assignment['allocationGroupKey'] = $groupKey;
             }

@@ -1178,6 +1178,29 @@ final class CashierV3CheckoutSettlementKernel
                 'laborFeeCents' => $laborFeeCents,
                 'personnelSource' => $personnelSource,
             ];
+            // The selection is persisted before the final entitlement
+            // authority locks staff profiles.  Keep the allocation-group
+            // identity here: without it an independent-position 100% and a
+            // normal-position 100% are flattened into one normal 200% group
+            // when the checkout draft is rebuilt.
+            $positionId = max(0, (int)($row['positionId'] ?? $row['position_id'] ?? 0));
+            $explicitGroupKey = trim((string)($row['allocationGroupKey'] ?? ''));
+            $performanceIndependent = !empty($row['performanceIndependent'])
+                || !empty($row['performance_independent'])
+                || strncmp($explicitGroupKey, 'independent:', 12) === 0;
+            if ($positionId > 0) {
+                $result[count($result) - 1]['positionId'] = $positionId;
+                $result[count($result) - 1]['positionName'] = trim((string)(
+                    $row['positionName'] ?? $row['position_name'] ?? ''
+                ));
+            }
+            if ($performanceIndependent) {
+                $result[count($result) - 1]['performanceIndependent'] = true;
+                $result[count($result) - 1]['allocationGroupKey'] = $explicitGroupKey !== ''
+                    && strncmp($explicitGroupKey, 'independent:', 12) === 0
+                    ? $explicitGroupKey
+                    : 'independent:' . ($positionId > 0 ? $positionId : $staffId);
+            }
         }
         return $result;
     }

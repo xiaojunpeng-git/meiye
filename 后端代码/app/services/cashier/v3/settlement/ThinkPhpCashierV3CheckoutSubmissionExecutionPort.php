@@ -25,6 +25,8 @@ use app\services\cashier\v3\event\CashierV3BusinessEventRecorder;
 use app\services\cashier\v3\fact\CashierV3CheckoutFactContractException;
 use app\services\cashier\v3\fact\CashierV3SaleOnlyFactAssembler;
 use app\services\cashier\v3\fact\ThinkPhpCashierV3CheckoutFactRepository;
+use app\services\cashier\v3\report\CashierV3GuideRoundFactServices;
+use app\services\cashier\v3\report\CashierV3SalesManagerFactServices;
 use app\services\cashier\v3\order\settlement\CashierV3SalesOrderAuthorityException;
 use app\services\cashier\v3\order\settlement\CashierV3SalesOrderPlanV1;
 use app\services\cashier\v3\order\settlement\ThinkPhpCashierV3SalesOrderAuthorityWriter;
@@ -633,8 +635,23 @@ final class ThinkPhpCashierV3CheckoutSubmissionExecutionPort
             $event = is_array($businessEvents['checkoutCompleted'] ?? null)
                 ? $businessEvents['checkoutCompleted']
                 : [];
+            $aggregate = $context->aggregate();
+            $salespeopleByCheckoutLine = $this->workspace->salespeopleFromCheckoutRequestLinesInTx(
+                (array)($aggregate['lines'] ?? []),
+                $context->operatorScope()
+            );
+            if ($salespeopleByCheckoutLine === null) {
+                if ((string)($aggregate['request']['source_document_type'] ?? '') === 'cashier_snapshot') {
+                    throw self::failure('checkout_salespeople_snapshot_missing');
+                }
+                $salespeopleByCheckoutLine = $this->workspace->lockedSalespeopleByCheckoutLineInTx(
+                    (string)($aggregate['request']['workspace_id'] ?? $authority['workspaceId']),
+                    (array)($aggregate['lines'] ?? []),
+                    $context->operatorScope()
+                );
+            }
             $plan = CashierV3SaleOnlyFactAssembler::assemble(
-                $context->aggregate(),
+                $aggregate,
                 $salesPlan,
                 $salesOrder,
                 $paymentPlan,
@@ -642,14 +659,87 @@ final class ThinkPhpCashierV3CheckoutSubmissionExecutionPort
                 $event,
                 $authority['commandIdempotencyKey'],
                 $this->serverNamespaceSecret(),
-                $balancePayment
+                $balancePayment,
+                $salespeopleByCheckoutLine
             );
+            $request = (array)($aggregate['request'] ?? []);
+            $factAuthority = [
+                'tenant_id' => (string)($request['tenant_id'] ?? $authority['tenantId']),
+                'organization_id' => $context->operatorScope()->organizationId(),
+                'store_id' => (int)($request['store_id'] ?? $authority['storeId']),
+                'member_id' => (int)($request['member_id'] ?? 0),
+                'order_id' => (string)$salesOrder['orderId'],
+                'order_no_snapshot' => (string)$salesOrder['orderNo'],
+                'checkout_request_id' => (string)$authority['checkoutRequestId'],
+                'business_date' => (string)($request['business_date'] ?? ''),
+                'operator_id' => $context->operatorScope()->operatorId(),
+                'business_event_no' => (string)($event['event_no'] ?? ''),
+                'command_idempotency_key' => (string)$authority['commandIdempotencyKey'],
+                'occurred_at' => (int)$authority['settledAt'],
+                'recorded_at' => (int)$authority['settledAt'],
+            ];
+            $guideSelectionsByLine = self::lockedGuideSelectionsByCheckoutLine((array)($aggregate['lines'] ?? []));
+            if ($guideSelectionsByLine !== []) {
+                (new CashierV3GuideRoundFactServices())->persistInTx(
+                    $factAuthority,
+                    $guideSelectionsByLine,
+                    $context->operatorScope(),
+                    $context->dataScope()
+                );
+            }
+            $salesManagerSelectionsByLine = self::lockedSalesManagerSelectionsByCheckoutLine((array)($aggregate['lines'] ?? []));
+            if ($salesManagerSelectionsByLine !== []) {
+                (new CashierV3SalesManagerFactServices())->persistInTx(
+                    $factAuthority,
+                    $salesManagerSelectionsByLine,
+                    $context->operatorScope(),
+                    $context->dataScope()
+                );
+            }
             return $this->facts->persistInTx(
                 $plan,
                 $context->operatorScope(),
                 $context->dataScope()
             );
         });
+    }
+
+    private static function lockedGuideSelectionsByCheckoutLine(array $lines): array
+    {
+        $result = [];
+        foreach ($lines as $line) {
+            if (!is_array($line)) continue;
+            $lineId = trim((string)($line['line_id'] ?? $line['line_key'] ?? $line['checkout_line_id'] ?? $line['id'] ?? ''));
+            if ($lineId === '') continue;
+            $raw = $line['guide_selections_json'] ?? $line['guideSelections'] ?? $line['guide_selections'] ?? [];
+            if (is_string($raw)) {
+                $raw = json_decode($raw, true);
+                if (!is_array($raw)) throw self::failure('guide_selection_invalid');
+            }
+            if ($raw === null || $raw === []) continue;
+            if (!is_array($raw)) throw self::failure('guide_selection_invalid');
+            $result[$lineId] = array_values($raw);
+        }
+        return $result;
+    }
+
+    private static function lockedSalesManagerSelectionsByCheckoutLine(array $lines): array
+    {
+        $result = [];
+        foreach ($lines as $line) {
+            if (!is_array($line)) continue;
+            $lineId = trim((string)($line['line_id'] ?? $line['line_key'] ?? $line['checkout_line_id'] ?? $line['id'] ?? ''));
+            if ($lineId === '') continue;
+            $raw = $line['sales_manager_selections_json'] ?? $line['salesManagerSelections'] ?? $line['sales_manager_selections'] ?? [];
+            if (is_string($raw)) {
+                $raw = json_decode($raw, true);
+                if (!is_array($raw)) throw self::failure('sales_manager_selection_invalid');
+            }
+            if ($raw === null || $raw === []) continue;
+            if (!is_array($raw)) throw self::failure('sales_manager_selection_invalid');
+            $result[$lineId] = array_values($raw);
+        }
+        return $result;
     }
 
     public function markSucceededInTx(

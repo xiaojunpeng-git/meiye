@@ -564,6 +564,10 @@ final class CashierV3DirectSnapshotEntitlementSettlementServices
                     'craftsmanPerformanceType' => (string)($settings['craftsmanPerformanceType'] ?? 'commission_labor'),
                     'laborFeeCents' => max(0, (int)($settings['laborFeeCents'] ?? 0)),
                     'personnelSource' => (string)($settings['personnelSource'] ?? 'store'),
+                    'positionId' => max(0, (int)($settings['positionId'] ?? 0)),
+                    'positionName' => trim((string)($settings['positionName'] ?? '')),
+                    'performanceIndependent' => !empty($settings['performanceIndependent']),
+                    'allocationGroupKey' => trim((string)($settings['allocationGroupKey'] ?? '')),
                 ];
             }
             $inventory = $inventorySnapshot['lineInventoryByLineId'][$lineId] ?? null;

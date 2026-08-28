@@ -688,13 +688,19 @@ function canonicalCheckoutCraftsmen(records = []) {
       : 'commission_labor'
     row.laborFeeCents = Math.max(0, Math.trunc(Number(record?.laborFeeCents ?? record?.labor_fee_cents ?? 0)))
     const positionId = Number(record?.positionId ?? record?.position_id ?? 0)
+    const explicitGroupKey = String(record?.allocationGroupKey || '').trim()
+    const isIndependent = (record?.performanceIndependent === true
+      || Number(record?.performanceIndependent ?? record?.performance_independent ?? 0) === 1
+      || explicitGroupKey.startsWith('independent:'))
     if (positionId > 0) {
       row.positionId = positionId
       row.positionName = String(record?.positionName ?? record?.position_name ?? record?.position ?? '').trim()
-      if (record?.performanceIndependent === true || Number(record?.performanceIndependent ?? record?.performance_independent ?? 0) === 1) {
-        row.performanceIndependent = true
-        row.allocationGroupKey = String(record?.allocationGroupKey || '').trim() || `independent:${positionId}`
-      }
+    }
+    if (isIndependent) {
+      row.performanceIndependent = true
+      row.allocationGroupKey = explicitGroupKey.startsWith('independent:')
+        ? explicitGroupKey
+        : `independent:${positionId > 0 ? positionId : staffId}`
     }
     if (Object.prototype.hasOwnProperty.call(record || {}, 'projectCountHalfUnits')
       || Object.prototype.hasOwnProperty.call(record || {}, 'project_count_half_units')) {
@@ -702,21 +708,26 @@ function canonicalCheckoutCraftsmen(records = []) {
     }
     return row
   })
-  // Older projected rows only retained the selected staff identity. At the
-  // final browser-snapshot boundary, fill the missing commission allocation
-  // deterministically instead of emitting an invalid zero-weight snapshot.
+  // Older projected rows, and rows restored from a pre-independent-position
+  // draft, can carry stale commission weights. Repair only groups whose own
+  // total is not 100%; an independent position is deliberately a separate
+  // group, so manager 100% plus normal-group 100% remains valid (200% in the
+  // cross-group display is expected).
   const commissionRows = rows.filter((row) => row.craftsmanPerformanceType !== 'labor')
-  const hasExplicitWeight = commissionRows.some((row) => row.laborWeight > 0)
-  if (!hasExplicitWeight && commissionRows.length > 0) {
+  if (commissionRows.length > 0) {
     const groups = new Map()
     commissionRows.forEach((row) => {
-      const groupKey = row.performanceIndependent && row.positionId > 0
-        ? (row.allocationGroupKey || `independent:${row.positionId}`)
+      const groupKey = row.performanceIndependent
+        ? (row.allocationGroupKey || `independent:${row.positionId || row.staffId}`)
         : 'normal'
       if (!groups.has(groupKey)) groups.set(groupKey, [])
       groups.get(groupKey).push(row)
     })
-    groups.forEach((group) => {
+    const hasInvalidGroup = Array.from(groups.values()).some((group) => (
+      group.some((row) => !Number.isInteger(row.laborWeight) || row.laborWeight <= 0)
+      || group.reduce((total, row) => total + row.laborWeight, 0) !== 100
+    ))
+    if (hasInvalidGroup) groups.forEach((group) => {
       const base = Math.floor(100 / group.length)
       let remainder = 100 - base * group.length
       group.forEach((row) => {
@@ -739,9 +750,9 @@ function canonicalCheckoutEntitlementCraftsmen(records = []) {
     isPointCustomer: row.isPointCustomer,
     craftsmanPerformanceType: row.craftsmanPerformanceType,
     laborFeeCents: row.laborFeeCents,
-    ...(row.positionId > 0
+    ...(row.positionId > 0 || row.performanceIndependent
       ? {
-          positionId: row.positionId,
+          ...(row.positionId > 0 ? { positionId: row.positionId } : {}),
           positionName: row.positionName,
           ...(row.performanceIndependent
             ? { performanceIndependent: true, allocationGroupKey: row.allocationGroupKey }
@@ -3648,6 +3659,37 @@ function checkoutDebtSummary(line) {
     : ''
 }
 
+// Personnel assignment is kept in the browser-owned draft until checkout.
+// Therefore the assignment confirmation itself must enforce the same group
+// invariant as the checkout authority; otherwise an ordinary 100% + 100%
+// selection can look saved and only fail several steps later.
+function personnelAllocationGroupsAreValid(records = [], weightKey = 'laborWeight') {
+  if (!Array.isArray(records) || !records.length) return true
+  const groups = new Map()
+  for (const record of records) {
+    const performanceType = String(record?.craftsmanPerformanceType ?? record?.craftsman_performance_type ?? '')
+    const isLabor = performanceType === 'labor'
+    const weight = Number(record?.[weightKey])
+    if (!Number.isInteger(weight) || weight < 0 || weight > 100 || (!isLabor && weight <= 0)) return false
+    if (isLabor) {
+      if (weight !== 0) return false
+      continue
+    }
+    const explicitGroupKey = String(record?.allocationGroupKey || '').trim()
+    const independent = record?.performanceIndependent === true
+      || Number(record?.performanceIndependent ?? record?.performance_independent ?? 0) === 1
+      || explicitGroupKey.startsWith('independent:')
+    const positionId = Number(record?.positionId ?? record?.position_id ?? 0)
+    const groupKey = independent
+      ? (explicitGroupKey.startsWith('independent:')
+          ? explicitGroupKey
+          : `independent:${positionId > 0 ? positionId : record?.staffId || record?.id || ''}`)
+      : 'normal'
+    groups.set(groupKey, (groups.get(groupKey) || 0) + weight)
+  }
+  return Array.from(groups.values()).every((total) => total === 100)
+}
+
 async function confirmPersonnelAssignment(result = {}) {
   if (isSavingPersonnelAssignment.value) return
   const line = personnelOverlay.value?.line
@@ -3658,14 +3700,18 @@ async function confirmPersonnelAssignment(result = {}) {
     const craftsmen = (result.craftsmen || []).map((record) => ({
       staffId: canonicalCheckoutPositiveId(record.staffId, record.id, record.employeeId, record.employee_id),
       employeeId: canonicalCheckoutPositiveId(record.employeeId, record.employee_id, record.staffId, record.id),
+      name: String(record.name || record.staffName || record.employeeName || '').trim(),
       laborWeight: Number(record.laborWeight),
+      marked: Boolean(record.marked ?? record.isPointCustomer),
       isPointCustomer: Boolean(record.isPointCustomer ?? record.marked),
       craftsmanPerformanceType: record.craftsmanPerformanceType || record.craftsman_performance_type,
       laborFeeCents: Number(record.laborFeeCents ?? record.labor_fee_cents ?? 0),
       projectCountHalfUnits: Math.max(0, Number(record.projectCountHalfUnits ?? record.project_count_half_units ?? 0)),
       positionId: Number(record.positionId ?? record.position_id ?? 0),
       positionName: record.positionName || record.position_name || record.position || '',
-      performanceIndependent: Boolean(record.performanceIndependent ?? record.performance_independent),
+      performanceIndependent: record.performanceIndependent === true
+        || Number(record.performanceIndependent ?? record.performance_independent ?? 0) === 1
+        || String(record.allocationGroupKey || '').trim().startsWith('independent:'),
       allocationGroupKey: record.allocationGroupKey || '',
       ...(record.personnelSource === 'other' ? { personnelSource: 'other' } : {})
     }))
@@ -3675,7 +3721,9 @@ async function confirmPersonnelAssignment(result = {}) {
       isPreSale: Boolean(record.isPreSale ?? record.is_presale ?? record.marked),
       positionId: Number(record.positionId ?? record.position_id ?? 0),
       positionName: record.positionName || record.position_name || record.position || '',
-      performanceIndependent: Boolean(record.performanceIndependent ?? record.performance_independent),
+      performanceIndependent: record.performanceIndependent === true
+        || Number(record.performanceIndependent ?? record.performance_independent ?? 0) === 1
+        || String(record.allocationGroupKey || '').trim().startsWith('independent:'),
       allocationGroupKey: record.allocationGroupKey || ''
     }))
     const guideSelections = (result.guideSelections || []).map((record) => ({
@@ -3701,6 +3749,22 @@ async function confirmPersonnelAssignment(result = {}) {
       payload.guideSelections = guideSelections
       payload.salesManagerSelections = salesManagerSelections
     }
+    if (roleScope === 'personnel' && payload.craftsmen?.length
+      && !personnelAllocationGroupsAreValid(payload.craftsmen, 'laborWeight')) {
+      reportPersonnelAssignmentFailure(
+        null,
+        '手艺人分配比例无效：普通组及每个独立组都必须分别合计 100%。'
+      )
+      return
+    }
+    if (roleScope === 'personnel' && payload.salespeople?.length
+      && !personnelAllocationGroupsAreValid(payload.salespeople, 'allocationWeight')) {
+      reportPersonnelAssignmentFailure(
+        null,
+        '销售人分配比例无效：普通组及每个独立组都必须分别合计 100%。'
+      )
+      return
+    }
     if (Object.prototype.hasOwnProperty.call(result, 'laborManualFee')) {
       payload.laborManualFee = Number(result.laborManualFee)
     }
@@ -3722,7 +3786,7 @@ async function confirmPersonnelAssignment(result = {}) {
       [line.id]: {
         ...(localPersonnelAssignments.value[line.id] || {}),
         ...(roleScope === 'personnel'
-          ? (isEntitlementLine(line) ? { craftsmen: clonePlain(result.craftsmen || []) } : clonePlain(result))
+          ? (isEntitlementLine(line) ? { craftsmen: clonePlain(craftsmen) } : clonePlain(result))
           : roleScope === 'guide'
             ? { guideSelections: clonePlain(result.guideSelections || []) }
             : roleScope === 'salesManager'
@@ -3745,14 +3809,18 @@ async function applyPersonnelAssignmentToAll(result = {}) {
   const craftsmen = (result.craftsmen || []).map((record) => ({
     staffId: canonicalCheckoutPositiveId(record.staffId, record.id, record.employeeId, record.employee_id),
     employeeId: canonicalCheckoutPositiveId(record.employeeId, record.employee_id, record.staffId, record.id),
+    name: String(record.name || record.staffName || record.employeeName || '').trim(),
     laborWeight: Number(record.laborWeight),
+    marked: Boolean(record.marked ?? record.isPointCustomer),
     isPointCustomer: Boolean(record.isPointCustomer ?? record.marked),
     craftsmanPerformanceType: record.craftsmanPerformanceType || record.craftsman_performance_type,
     laborFeeCents: Number(record.laborFeeCents ?? record.labor_fee_cents ?? 0),
     projectCountHalfUnits: Math.max(0, Number(record.projectCountHalfUnits ?? record.project_count_half_units ?? 0)),
     positionId: Number(record.positionId ?? record.position_id ?? 0),
     positionName: record.positionName || record.position_name || record.position || '',
-    performanceIndependent: Boolean(record.performanceIndependent ?? record.performance_independent),
+    performanceIndependent: record.performanceIndependent === true
+      || Number(record.performanceIndependent ?? record.performance_independent ?? 0) === 1
+      || String(record.allocationGroupKey || '').trim().startsWith('independent:'),
     allocationGroupKey: record.allocationGroupKey || '',
     ...(record.personnelSource === 'other' ? { personnelSource: 'other' } : {})
   }))
@@ -3762,7 +3830,9 @@ async function applyPersonnelAssignmentToAll(result = {}) {
     isPreSale: Boolean(record.isPreSale ?? record.is_presale ?? record.marked),
     positionId: Number(record.positionId ?? record.position_id ?? 0),
     positionName: record.positionName || record.position_name || record.position || '',
-    performanceIndependent: Boolean(record.performanceIndependent ?? record.performance_independent),
+    performanceIndependent: record.performanceIndependent === true
+      || Number(record.performanceIndependent ?? record.performance_independent ?? 0) === 1
+      || String(record.allocationGroupKey || '').trim().startsWith('independent:'),
     allocationGroupKey: record.allocationGroupKey || ''
   }))
   const guideSelections = (result.guideSelections || []).map((record) => ({
@@ -3776,6 +3846,20 @@ async function applyPersonnelAssignmentToAll(result = {}) {
     employeeId: canonicalCheckoutPositiveId(record.employeeId, record.staffId, record.id, record.employee_id),
     name: record.name
   }))
+  if (craftsmen.length && !personnelAllocationGroupsAreValid(craftsmen, 'laborWeight')) {
+    reportPersonnelAssignmentFailure(
+      null,
+      '手艺人分配比例无效：普通组及每个独立组都必须分别合计 100%。'
+    )
+    return
+  }
+  if (salespeople.length && !personnelAllocationGroupsAreValid(salespeople, 'allocationWeight')) {
+    reportPersonnelAssignmentFailure(
+      null,
+      '销售人分配比例无效：普通组及每个独立组都必须分别合计 100%。'
+    )
+    return
+  }
   if (!craftsmen.length && !salespeople.length && !guideSelections.length && !salesManagerSelections.length) return
   isSavingPersonnelAssignment.value = true
   try {
@@ -3787,7 +3871,7 @@ async function applyPersonnelAssignmentToAll(result = {}) {
     }
     appendLocalCashierDraftOperation({ action: 'apply-cashier-personnel-to-all-lines', payload }, (draft) => {
       for (const line of draft.lines || []) {
-        if (craftsmen.length && isProjectLine(line) && !isCustomCardPurchase(line)) line.craftsmen = clonePlain(result.craftsmen || [])
+        if (craftsmen.length && isProjectLine(line) && !isCustomCardPurchase(line)) line.craftsmen = clonePlain(craftsmen)
         if (salespeople.length && !isEntitlementLine(line)) line.salespeople = clonePlain(result.salespeople || [])
         if (!isEntitlementLine(line)) {
           line.guideSelections = clonePlain(result.guideSelections || [])
@@ -3799,7 +3883,7 @@ async function applyPersonnelAssignmentToAll(result = {}) {
     for (const line of cartLines.value) {
       const current = { ...(assignments[line.id] || {}) }
       if (craftsmen.length && isProjectLine(line) && !isCustomCardPurchase(line)) {
-        current.craftsmen = clonePlain(result.craftsmen || [])
+        current.craftsmen = clonePlain(craftsmen)
       }
       if (salespeople.length && !isEntitlementLine(line)) {
         current.salespeople = clonePlain(result.salespeople || [])

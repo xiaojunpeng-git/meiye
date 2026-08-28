@@ -355,9 +355,15 @@ final class CashierV3CheckoutDraftAuthorityRebuilder
                 throw self::failure('checkout_draft_salespeople_snapshot_invalid');
             }
             $positionId = max(0, (int)($row['positionId'] ?? $row['position_id'] ?? 0));
+            $explicitGroupKey = trim((string)($row['allocationGroupKey'] ?? ''));
             $performanceIndependent = !empty($row['performanceIndependent'])
-                || !empty($row['performance_independent']);
-            $groupKey = $performanceIndependent && $positionId > 0 ? 'independent:' . $positionId : 'normal';
+                || !empty($row['performance_independent'])
+                || strncmp($explicitGroupKey, 'independent:', 12) === 0;
+            $groupKey = $performanceIndependent
+                ? ($explicitGroupKey !== '' && strncmp($explicitGroupKey, 'independent:', 12) === 0
+                    ? $explicitGroupKey
+                    : 'independent:' . ($positionId > 0 ? $positionId : $staffId))
+                : 'normal';
             $resultRow = [
                 'staffId' => $staffId,
                 'allocationWeight' => $allocation,
@@ -372,7 +378,7 @@ final class CashierV3CheckoutDraftAuthorityRebuilder
                 $resultRow['positionId'] = $positionId;
                 $resultRow['positionName'] = trim((string)($row['positionName'] ?? $row['position_name'] ?? ''));
             }
-            if ($performanceIndependent && $positionId > 0) {
+            if ($performanceIndependent) {
                 $resultRow['performanceIndependent'] = true;
                 $resultRow['allocationGroupKey'] = $groupKey;
             }
@@ -549,9 +555,15 @@ final class CashierV3CheckoutDraftAuthorityRebuilder
                 throw self::failure('checkout_draft_entitlement_craftsmen_snapshot_invalid');
             }
             $positionId = max(0, (int)($row['positionId'] ?? $row['position_id'] ?? 0));
+            $explicitGroupKey = trim((string)($row['allocationGroupKey'] ?? ''));
             $performanceIndependent = !empty($row['performanceIndependent'])
-                || !empty($row['performance_independent']);
-            $groupKey = $performanceIndependent && $positionId > 0 ? 'independent:' . $positionId : 'normal';
+                || !empty($row['performance_independent'])
+                || strncmp($explicitGroupKey, 'independent:', 12) === 0;
+            $groupKey = $performanceIndependent
+                ? ($explicitGroupKey !== '' && strncmp($explicitGroupKey, 'independent:', 12) === 0
+                    ? $explicitGroupKey
+                    : 'independent:' . ($positionId > 0 ? $positionId : $staffId))
+                : 'normal';
             $assignment = [
                 'staffId' => $staffId,
                 'laborWeight' => $laborWeight,
@@ -566,7 +578,7 @@ final class CashierV3CheckoutDraftAuthorityRebuilder
                 $assignment['positionId'] = $positionId;
                 $assignment['positionName'] = trim((string)($row['positionName'] ?? $row['position_name'] ?? ''));
             }
-            if ($performanceIndependent && $positionId > 0) {
+            if ($performanceIndependent) {
                 $assignment['performanceIndependent'] = true;
                 $assignment['allocationGroupKey'] = $groupKey;
             }
@@ -576,7 +588,10 @@ final class CashierV3CheckoutDraftAuthorityRebuilder
             $result[] = $assignment;
         }
         if ($result !== [] && array_filter($weightByGroup, static fn (int $sum): bool => $sum !== 100 && $sum !== 0)) {
-            throw self::failure('checkout_draft_entitlement_craftsmen_weight_invalid');
+            throw self::failure('checkout_draft_entitlement_craftsmen_weight_invalid', [
+                'weightByGroup' => $weightByGroup,
+                'rows' => $result,
+            ]);
         }
         return $result;
     }

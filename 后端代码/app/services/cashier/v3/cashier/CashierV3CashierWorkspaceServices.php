@@ -1633,10 +1633,25 @@ final class CashierV3CashierWorkspaceServices
                 'craftsmanSettingsById' => array_reduce(
                     $craftsmanSelections,
                     static function (array $settings, array $selection): array {
-                        $settings[(int)$selection['staffId']] = [
+                        $staffId = (int)$selection['staffId'];
+                        $setting = [
                             'laborWeight' => (int)$selection['laborWeight'],
                             'isPointCustomer' => (bool)$selection['isPointCustomer'],
+                            'craftsmanPerformanceType' => (string)($selection['craftsmanPerformanceType'] ?? 'commission_labor'),
+                            'laborFeeCents' => max(0, (int)($selection['laborFeeCents'] ?? 0)),
+                            'personnelSource' => (string)($selection['personnelSource'] ?? 'store'),
                         ];
+                        $positionId = max(0, (int)($selection['positionId'] ?? 0));
+                        if ($positionId > 0) {
+                            $setting['positionId'] = $positionId;
+                            $setting['positionName'] = trim((string)($selection['positionName'] ?? ''));
+                        }
+                        if (!empty($selection['performanceIndependent'])) {
+                            $setting['performanceIndependent'] = true;
+                            $setting['allocationGroupKey'] = trim((string)($selection['allocationGroupKey'] ?? ''))
+                                ?: 'independent:' . ($positionId > 0 ? $positionId : $staffId);
+                        }
+                        $settings[$staffId] = $setting;
                         return $settings;
                     },
                     []

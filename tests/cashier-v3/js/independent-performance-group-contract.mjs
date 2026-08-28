@@ -32,6 +32,10 @@ const saleFacts = fs.readFileSync(
   path.join(root, '后端代码/app/services/cashier/v3/fact/CashierV3SaleOnlyFactAssembler.php'),
   'utf8'
 )
+const requestNormalizer = fs.readFileSync(
+  path.join(root, '后端代码/app/services/cashier/v3/CashierV3RequestNormalizer.php'),
+  'utf8'
+)
 
 assert.match(overlay, /function allocationGroupKey\(item = \{\}\)/)
 assert.match(overlay, /function refreshCraftsmanAllocationMetadata\(records\)/)
@@ -43,6 +47,18 @@ assert.match(overlay, /selectedByAllocationGroup\(records, \(record\) => craftsm
 assert.match(overlay, /selectedByAllocationGroup\(selected\)\.forEach\(\(group\) =>/)
 assert.match(overlay, /allocationGroupKey: allocationGroupKey\(item\)/)
 assert.match(cashierView, /function canonicalCheckoutSalespeople\(records = \[\]\)/)
+assert.match(cashierView, /function canonicalCheckoutCraftsmen\(records = \[\]\)/)
+assert.match(cashierView, /manager 100% plus normal-group 100% remains valid/)
+assert.match(cashierView, /const hasInvalidGroup = Array\.from\(groups\.values\(\)\)/)
+assert.match(cashierView, /if \(hasInvalidGroup\) groups\.forEach\(\(group\) =>/)
+assert.match(cashierView, /explicitGroupKey\.startsWith\('independent:'\)/)
+assert.match(cashierView, /groupKey = row\.performanceIndependent\s*\n\s*\? \(row\.allocationGroupKey \|\| `independent:\$\{row\.positionId \|\| row\.staffId\}`\)/)
+assert.match(cashierView, /function personnelAllocationGroupsAreValid\(records = \[\], weightKey = 'laborWeight'\)/)
+assert.match(cashierView, /普通组及每个独立组都必须分别合计 100%/)
+assert.match(cashierView, /personnelAllocationGroupsAreValid\(payload\.craftsmen, 'laborWeight'\)/)
+assert.match(cashierView, /personnelAllocationGroupsAreValid\(payload\.salespeople, 'allocationWeight'\)/)
+assert.match(cashierView, /isEntitlementLine\(line\) \? \{ craftsmen: clonePlain\(craftsmen\) \}/)
+assert.match(cashierView, /line\.craftsmen = clonePlain\(craftsmen\)/)
 assert.match(cashierView, /performanceIndependent: true,\s*allocationGroupKey:/)
 assert.match(cashierView, /positionId: Number\(record\.positionId \?\? record\.position_id \?\? 0\)/)
 assert.match(cashierView, /projectCountHalfUnits: Math\.max\(0, Number\(record\.projectCountHalfUnits/)
@@ -55,6 +71,12 @@ assert.match(orderLifecycle, /岗位独立标记必须以当前门店任职记�
 assert.match(paidProject, /\$groupMembers\[\$groupKey\]/)
 assert.match(paidProject, /allocateLaborAmount\(\s*\$laborAmountCents/)
 assert.match(saleFacts, /allocateByWeightGroups\(\$lineCash, \$salespeople\)/)
+// The browser-owned draft normalizer must retain independent-group metadata
+// even when a position id is absent; otherwise the final entitlement snapshot
+// silently merges the row into the normal 100% pool and rejects 100% + 100%.
+assert.match(requestNormalizer, /\$explicitGroupKey = trim\(\(string\)\(\$row\['allocationGroupKey'\] \?\? ''\)\)/)
+assert.match(requestNormalizer, /\$groupKey = \$performanceIndependent\s*\n\s*\? \(\$explicitGroupKey !== '' && strncmp\(\$explicitGroupKey, 'independent:', 12\) === 0/)
+assert.match(requestNormalizer, /if \(\$performanceIndependent\) \{\s*\$normalizedRow\['performanceIndependent'\] = true/s)
 
 // Two independent groups each receive the complete 100% base.
 const people = [
