@@ -30,11 +30,7 @@
 					<navigator class="merchant-workbench__entry" url="/src/merchant/pages/reservations/index" open-type="navigate"><view class="merchant-workbench__entry-icon merchant-workbench__entry-icon--reservation"><text>约</text></view><text class="merchant-workbench__entry-label">预约管理</text></navigator>
 					<navigator class="merchant-workbench__entry" url="/src/merchant/pages/customer-care/index" open-type="navigate"><view class="merchant-workbench__entry-icon merchant-workbench__entry-icon--care"><text>客</text></view><text class="merchant-workbench__entry-label">客情管理</text></navigator>
 					<navigator class="merchant-workbench__entry" url="/src/merchant/pages/customers/index" open-type="navigate"><view class="merchant-workbench__entry-icon merchant-workbench__entry-icon--customer"><text>户</text></view><text class="merchant-workbench__entry-label">客户管理</text></navigator>
-					<view class="merchant-workbench__entry merchant-workbench__entry--pending" @tap="showPending('服务确认')"><view class="merchant-workbench__entry-icon merchant-workbench__entry-icon--service"><text>服</text></view><text class="merchant-workbench__entry-label">服务确认</text><text class="merchant-workbench__entry-state">待开发</text></view>
 					<view class="merchant-workbench__entry merchant-workbench__entry--pending" @tap="showPending('订单管理')"><view class="merchant-workbench__entry-icon merchant-workbench__entry-icon--order"><text>单</text></view><text class="merchant-workbench__entry-label">订单管理</text><text class="merchant-workbench__entry-state">待开发</text></view>
-					<view class="merchant-workbench__entry merchant-workbench__entry--pending" @tap="showPending('欠款管理')"><view class="merchant-workbench__entry-icon merchant-workbench__entry-icon--debt"><text>欠</text></view><text class="merchant-workbench__entry-label">欠款管理</text><text class="merchant-workbench__entry-state">待开发</text></view>
-					<view class="merchant-workbench__entry merchant-workbench__entry--pending" @tap="showPending('售后管理')"><view class="merchant-workbench__entry-icon merchant-workbench__entry-icon--after"><text>后</text></view><text class="merchant-workbench__entry-label">售后管理</text><text class="merchant-workbench__entry-state">待开发</text></view>
-					<view class="merchant-workbench__entry merchant-workbench__entry--pending" @tap="showPending('服务留影')"><view class="merchant-workbench__entry-icon merchant-workbench__entry-icon--photo"><text>影</text></view><text class="merchant-workbench__entry-label">服务留影</text><text class="merchant-workbench__entry-state">待开发</text></view>
 				</view>
 			</view>
 		</scroll-view>
@@ -130,6 +126,7 @@
 	function showPending(label : string) : void {
 		showMobileNotice(label + '待开发')
 	}
+
 </script>
 
 <style>
@@ -199,10 +196,6 @@
 	.merchant-workbench__entry-icon--reservation { background-color: #eaf1ff; color: #4a72c5; }
 	.merchant-workbench__entry-icon--care { background-color: #e8f6f0; color: #21845f; }
 	.merchant-workbench__entry-icon--customer { background-color: #fff2df; color: #bf7726; }
-	.merchant-workbench__entry-icon--service { background-color: #f1edff; color: #7963c7; }
 	.merchant-workbench__entry-icon--order { background-color: #e8f6f7; color: #287f90; }
-	.merchant-workbench__entry-icon--debt { background-color: #fff0f0; color: #c5685d; }
-	.merchant-workbench__entry-icon--after { background-color: #f7f1df; color: #9b7a23; }
-	.merchant-workbench__entry-icon--photo { background-color: #edf1f6; color: #61748b; }
 	.merchant-workbench__entry-label { margin-top: 7px; font-size: 12px; line-height: 18px; color: #38516a; }
 	</style>
