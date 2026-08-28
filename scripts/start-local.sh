@@ -14,6 +14,26 @@ CASHIER_NGINX_CONF="$ROOT/docker/nginx/local-cashier.conf"
 PLATFORM_API_PORT="${PLATFORM_API_PORT:-18093}"
 CASHIER_API_PORT="${CASHIER_API_PORT:-18092}"
 
+# 18081 / 18091 只能从“美容源码”主工作目录启动。链接 worktree 的
+# .git 是文件而不是目录；在这里直接拒绝，避免调试端口再次挂到临时
+# 分支或已废弃工作树。平台与门店前端各用独立目录，后端统一复用一套
+# PHP 源码正本。
+if [ ! -d "$ROOT/.git" ]; then
+  echo "拒绝启动：当前不是美容源码主工作目录（可能是 Git worktree）：$ROOT"
+  exit 1
+fi
+SOURCE_TOPLEVEL="$(git -C "$ROOT" rev-parse --show-toplevel 2>/dev/null || true)"
+if [ "$SOURCE_TOPLEVEL" != "$ROOT" ]; then
+  echo "拒绝启动：Git 源码根目录不一致，期望 $ROOT，实际 $SOURCE_TOPLEVEL"
+  exit 1
+fi
+SOURCE_BRANCH="$(git -C "$ROOT" branch --show-current 2>/dev/null || true)"
+SOURCE_COMMIT="$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || true)"
+echo "唯一源码：${ROOT}（branch=${SOURCE_BRANCH:-detached}, commit=${SOURCE_COMMIT:-unknown}）"
+echo "平台端：${ROOT}/前端代码/admin -> 18081"
+echo "门店端：${ROOT}/前端代码/cashier-v3 -> 18091"
+echo "统一后端：${ROOT}/后端代码 -> 18093 / 18092"
+
 # 本地数据库名以当前正本环境文件为准，禁止沿用旧的 lin8 固定值。
 DB_NAME="$(awk -F= '/^[[:space:]]*DATABASE[[:space:]]*=/{gsub(/[[:space:]]/, "", $2); print $2; exit}' "$PROJECT/.env.docker")"
 DB_NAME="${DB_NAME:-ruihao_rh_20260812}"
