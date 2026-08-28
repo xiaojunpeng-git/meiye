@@ -131,6 +131,7 @@ customerAnalyticsAssert(
 );
 customerAnalyticsAssert(
     str_contains($frontendApi, 'CUSTOMER_ANALYTICS_TIMEOUT_MS')
+        && str_contains($frontendApi, '120000')
         && str_contains($frontendApi, "客户分析请求超时")
         && str_contains($frontendApi, "{ timeoutMs: CUSTOMER_ANALYTICS_TIMEOUT_MS }"),
     'customer analysis requests have a bounded timeout and actionable failure message'

@@ -5,7 +5,9 @@ function readPlatformAdminToken() {
   } catch (_) { return '' }
 }
 
-const CUSTOMER_ANALYTICS_TIMEOUT_MS = 25000
+// All-store unconsumed snapshots reconcile a large legacy entitlement set;
+// allow the authorized backend query to finish instead of failing at 25s.
+const CUSTOMER_ANALYTICS_TIMEOUT_MS = 120000
 
 async function request(path, query = {}, options = {}) {
   const url = new URL(path, window.location.origin)
