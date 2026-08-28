@@ -105,7 +105,7 @@ function defaultEditorValues() {
 
 const editorValues = reactive(defaultEditorValues())
 const selectedPositionOptions = computed(() => {
-  const selected = new Set((Array.isArray(editorValues.positionIds) ? editorValues.positionIds : []).map(Number))
+  const selected = new Set((Array.isArray(editorValues.positionIds) ? editorValues.positionIds : []).slice(0, 1).map(Number))
   return positionOptions.value.filter((option) => selected.has(Number(option.value)))
 })
 const filteredPositionOptions = computed(() => {
@@ -118,6 +118,11 @@ const filteredPositionOptions = computed(() => {
 function removePosition(value) {
   const id = Number(value)
   editorValues.positionIds = editorValues.positionIds.filter((item) => Number(item) !== id)
+}
+
+function selectPosition(value) {
+  const id = Number(value)
+  editorValues.positionIds = Number.isInteger(id) && id > 0 ? [id] : []
 }
 
 function replaceEditorValues(values = {}) {
@@ -260,7 +265,7 @@ function mapDetail(detail) {
   const scopeMode = detail?.scope?.scope_mode === 'store_self' || detail?.scope?.scope_mode === 'store' ? 'store_self' : 'personal'
   return {
     staffName: String(detail?.staff_name || ''), phone: String(detail?.phone || ''), avatar: String(detail?.avatar || '/static/images/staff/avatar_male.png'),
-    account: String(detail?.account || ''), positionIds: Array.isArray(detail?.position_ids) ? detail.position_ids.map(Number).filter(Boolean) : [],
+    account: String(detail?.account || ''), positionIds: Array.isArray(detail?.position_ids) ? detail.position_ids.map(Number).filter(Boolean).slice(0, 1) : [],
     scopeMode, workMemberId: Number(detail?.work_member_id || 0), notify: Number(detail?.notify || 0) === 1,
     status: Number(detail?.status ?? 1) === 1, salespersonEnabled: Number(detail?.cashier_salesperson_enabled ?? 1) === 1,
     craftsmanEnabled: Number(detail?.cashier_craftsman_enabled ?? 1) === 1,
@@ -309,7 +314,7 @@ function validateEditor() {
   if (!editorValues.staffName.trim()) return '请填写员工姓名。'
   if (!/^1[3-9]\d{9}$/.test(editorValues.phone.trim())) return '手机号码格式不正确。'
   if (!editorValues.avatar.trim()) return '请设置员工头像。'
-  if (!editorValues.positionIds.length) return '请选择岗位。'
+  if (editorValues.positionIds.length !== 1) return '请选择一个岗位。'
   if (!['internal', 'partner'].includes(editorValues.employmentTypeCode)) return '请选择人员类型。'
   if (!Number.isInteger(editorValues.employmentTypeVersion) || editorValues.employmentTypeVersion < 0) return '人员类型版本无效，请刷新后重试。'
   if (!editorStaffId.value && !editorValues.account.trim()) return '请填写登录账号。'
@@ -324,6 +329,7 @@ async function saveEditor() {
   if (editorStaffId.value ? !canEditStaff.value : !canCreateStaff.value) return
   const invalid = validateEditor()
   if (invalid) {
+    if (invalid.includes('登录账号') || invalid.includes('登录密码')) editorTab.value = 'login'
     editorError.value = invalid
     return
   }
@@ -441,7 +447,7 @@ async function onAvatarFileChange(event) {
     <TablePagination :total="total" :page="page" :page-size="pageSize" @change="changePage" />
 
     <div v-if="editorOpen" class="staff-editor-backdrop" @click.self="!editorSaving && (editorOpen = false)">
-      <form class="staff-editor" aria-label="员工资料" @submit.prevent="saveEditor">
+      <form class="staff-editor" aria-label="员工资料" novalidate @submit.prevent="saveEditor">
         <header><div><h2>{{ editorStaffId ? '编辑员工' : '新增员工' }}</h2></div><button type="button" class="staff-editor__close" aria-label="关闭" :disabled="editorSaving" @click="editorOpen = false">×</button></header>
         <div v-if="editorLoading" class="staff-editor__loading">正在加载员工资料…</div>
         <template v-else>
@@ -451,7 +457,7 @@ async function onAvatarFileChange(event) {
               <label>员工姓名<input v-model.trim="editorValues.staffName" maxlength="64" required></label>
               <label>手机号码<input v-model.trim="editorValues.phone" inputmode="numeric" maxlength="11" required></label>
               <div class="staff-editor__avatar-field"><span>员工头像</span><div><img :src="avatarSource(editorValues.avatar)" alt="员工头像"><label class="button button--secondary">{{ avatarUploading ? '上传中…' : '上传头像' }}<input type="file" accept="image/*" :disabled="avatarUploading || editorSaving" @change="onAvatarFileChange"></label></div></div>
-              <div class="staff-editor__field"><span>岗位</span><details class="staff-editor__select-dropdown"><summary><span v-for="option in selectedPositionOptions" :key="option.value" class="staff-editor__select-tag"><span>{{ option.label }}</span><button type="button" aria-label="移除岗位" @click.stop.prevent="removePosition(option.value)">×</button></span><input v-model="positionKeyword" class="staff-editor__select-search" type="search" placeholder="请选择岗位" @click.stop></summary><div class="staff-editor__select-options"><label v-for="option in filteredPositionOptions" :key="option.value" :class="{ selected: editorValues.positionIds.includes(option.value) }"><input v-model="editorValues.positionIds" type="checkbox" :value="option.value"><span>{{ option.label }}</span><b v-if="editorValues.positionIds.includes(option.value)">✓</b></label><p v-if="!filteredPositionOptions.length">暂无可选岗位</p></div></details></div>
+              <div class="staff-editor__field"><span>岗位</span><details class="staff-editor__select-dropdown"><summary><span v-for="option in selectedPositionOptions" :key="option.value" class="staff-editor__select-tag"><span>{{ option.label }}</span><button type="button" aria-label="清空岗位" @click.stop.prevent="removePosition(option.value)">×</button></span><input v-model="positionKeyword" class="staff-editor__select-search" type="search" placeholder="请选择一个岗位" @click.stop></summary><div class="staff-editor__select-options"><label v-for="option in filteredPositionOptions" :key="option.value" :class="{ selected: editorValues.positionIds.includes(option.value) }"><input :checked="editorValues.positionIds.includes(option.value)" type="radio" name="staff-position" :value="option.value" @change="selectPosition(option.value)"><span>{{ option.label }}</span><b v-if="editorValues.positionIds.includes(option.value)">✓</b></label><p v-if="!filteredPositionOptions.length">暂无可选岗位</p></div></details><small>每位员工只能设置一个有效岗位。</small></div>
               <label class="staff-editor__toggle"><input v-model="editorValues.salespersonEnabled" type="checkbox"><span>可作为销售人：</span></label>
               <label class="staff-editor__toggle"><input v-model="editorValues.craftsmanEnabled" type="checkbox"><span>可作为手艺人：</span></label>
               <fieldset v-if="editorValues.salespersonEnabled" class="staff-editor__choice-field"><legend>人员类型</legend><label><input v-model="editorValues.employmentTypeCode" type="radio" value="internal"><span>内部员工</span></label><label><input v-model="editorValues.employmentTypeCode" type="radio" value="partner"><span>合作方</span></label></fieldset>
