@@ -512,15 +512,17 @@ final class CashierV3CheckoutDraftAuthorityRebuilder
                 $row['laborWeight'],
                 'entitlement.craftsman.labor_weight'
             );
-            if ($laborWeight <= 0 || $laborWeight > 100 || !is_bool($row['isPointCustomer'])) {
-                throw self::failure('checkout_draft_entitlement_craftsmen_snapshot_invalid');
-            }
-            $performanceType = (string)$row['craftsmanPerformanceType'];
+            $performanceType = (string)($row['craftsmanPerformanceType'] ?? 'commission_labor');
             if (!in_array($performanceType, ['commission', 'labor', 'commission_labor'], true)) {
                 throw self::failure('checkout_draft_entitlement_craftsmen_snapshot_invalid');
             }
+            if ($laborWeight > 100
+                || ($performanceType !== 'labor' && $laborWeight <= 0)
+                || !is_bool($row['isPointCustomer'])) {
+                throw self::failure('checkout_draft_entitlement_craftsmen_snapshot_invalid');
+            }
             $laborFeeCents = self::nonNegativeInt(
-                $row['laborFeeCents'],
+                $row['laborFeeCents'] ?? 0,
                 'entitlement.craftsman.labor_fee_cents'
             );
             if ($performanceType === 'commission' && $laborFeeCents !== 0) {
@@ -545,7 +547,13 @@ final class CashierV3CheckoutDraftAuthorityRebuilder
             }
             $result[] = $assignment;
         }
-        if ($result !== [] && $weight !== 100) {
+        $commissionWeight = 0;
+        foreach ($result as $row) {
+            if ($row['craftsmanPerformanceType'] !== 'labor') {
+                $commissionWeight += (int)$row['laborWeight'];
+            }
+        }
+        if ($result !== [] && $commissionWeight !== 0 && $commissionWeight !== 100) {
             throw self::failure('checkout_draft_entitlement_craftsmen_weight_invalid');
         }
         return $result;

@@ -140,6 +140,18 @@ final class CashierV3EntitlementCompletionKernel
             $quantity = $intentLine['quantity'];
             $actualAmount = $lineAmounts[$lineId];
             $performance = self::performancePlan($authority['performance'], $actualAmount, $quantity);
+            // “仅手工费”手艺人不参与劳动业绩分摊。保留服务和手工费
+            // 快照，但不能把项目劳动业绩强行分配给这类人员。
+            $hasPerformanceCraftsman = false;
+            foreach ($authority['craftsmen'] as $craftsman) {
+                if (($craftsman['craftsmanPerformanceType'] ?? 'commission_labor') !== 'labor') {
+                    $hasPerformanceCraftsman = true;
+                    break;
+                }
+            }
+            if (!$hasPerformanceCraftsman) {
+                $performance['laborAmountCents'] = 0;
+            }
             $craftsmen = self::craftsmanPlan(
                 $intentLine['craftsmanIds'],
                 $authority['craftsmen'],
@@ -1064,7 +1076,7 @@ final class CashierV3EntitlementCompletionKernel
             if (!is_array($row)) {
                 throw self::failure('authority_craftsman_shape_invalid', ['lineId' => $lineId]);
             }
-            self::assertExactKeys($row, [
+            $baseKeys = [
                 'staffId',
                 'staffVersion',
                 'staffName',
@@ -1074,13 +1086,30 @@ final class CashierV3EntitlementCompletionKernel
                 'sequence',
                 'isPrimary',
                 'laborWeight',
-            ], 'craftsman');
+            ];
+            $optionalKeys = ['craftsmanPerformanceType', 'laborFeeCents', 'personnelSource'];
+            $expectedKeys = array_merge($baseKeys, array_values(array_intersect($optionalKeys, array_keys($row))));
+            self::assertExactKeys($row, $expectedKeys, 'craftsman');
             self::assertPositiveInt($row['staffId'], 'craftsman.staffId');
             self::assertPositiveInt($row['staffVersion'], 'craftsman.staffVersion');
             self::assertNonemptyString($row['staffName'], 'craftsman.staffName', 100);
             self::assertPositiveInt($row['storeId'], 'craftsman.storeId');
             self::assertPositiveInt($row['sequence'], 'craftsman.sequence', 20);
-            self::assertPositiveInt($row['laborWeight'], 'craftsman.laborWeight', self::MAX_WEIGHT);
+            self::assertNonnegativeInt($row['laborWeight'], 'craftsman.laborWeight', self::MAX_WEIGHT);
+            $performanceType = (string)($row['craftsmanPerformanceType'] ?? 'commission_labor');
+            if (!in_array($performanceType, ['commission', 'labor', 'commission_labor'], true)
+                || ($performanceType !== 'labor' && $row['laborWeight'] <= 0)) {
+                throw self::failure('authority_craftsman_performance_invalid', ['staffId' => $row['staffId']]);
+            }
+            self::assertNonnegativeInt(
+                $row['laborFeeCents'] ?? 0,
+                'craftsman.laborFeeCents',
+                self::MAX_MONEY_CENTS
+            );
+            $laborFeeCents = (int)($row['laborFeeCents'] ?? 0);
+            if ($performanceType === 'commission' && $laborFeeCents !== 0) {
+                throw self::failure('authority_craftsman_labor_fee_invalid', ['staffId' => $row['staffId']]);
+            }
             if (!is_bool($row['active']) || !is_bool($row['craftsmanEligible']) || !is_bool($row['isPrimary'])) {
                 throw self::failure('authority_craftsman_flags_invalid', ['staffId' => $row['staffId']]);
             }
@@ -1088,6 +1117,8 @@ final class CashierV3EntitlementCompletionKernel
                 throw self::failure('authority_craftsman_duplicate', ['staffId' => $row['staffId']]);
             }
             $seen[$row['staffId']] = true;
+            $row['craftsmanPerformanceType'] = $performanceType;
+            $row['laborFeeCents'] = $laborFeeCents;
             $result[] = $row;
         }
         usort($result, static function (array $left, array $right): int {
@@ -1597,22 +1628,43 @@ final class CashierV3EntitlementCompletionKernel
             throw self::failure('authority_craftsman_scope_mismatch');
         }
         $weights = [];
+        $performanceStaffIds = [];
         foreach ($authorityIds as $staffId) {
             $row = $byId[$staffId] ?? null;
             if (!$row || $row['active'] !== true || $row['storeId'] !== $storeId) {
                 throw self::failure('craftsman_not_active_eligible_in_store', ['staffId' => $staffId]);
             }
-            $weights[$staffId] = $row['laborWeight'];
+            if (($row['craftsmanPerformanceType'] ?? 'commission_labor') !== 'labor') {
+                $performanceStaffIds[] = $staffId;
+                $weights[$staffId] = $row['laborWeight'];
+            }
         }
-        $allocations = self::allocateLaborAmount($amountCents, $authorityIds, $weights);
-        foreach ($allocations as &$allocation) {
-            $row = $byId[$allocation['staffId']];
+        $amountByStaffId = [];
+        if ($performanceStaffIds !== []) {
+            foreach (self::allocateLaborAmount($amountCents, $performanceStaffIds, $weights) as $allocation) {
+                $amountByStaffId[(int)$allocation['staffId']] = (int)$allocation['amountCents'];
+            }
+        }
+        $allocations = [];
+        foreach ($authorityRows as $index => $row) {
+            $staffId = (int)$row['staffId'];
+            $allocation = [
+                'staffId' => $staffId,
+                'isPrimary' => $index === 0,
+                'sequence' => $index + 1,
+                'amountCents' => (int)($amountByStaffId[$staffId] ?? 0),
+            ];
             $allocation['staffVersion'] = $row['staffVersion'];
             $allocation['staffName'] = $row['staffName'];
             $allocation['storeId'] = $row['storeId'];
             $allocation['laborWeight'] = $row['laborWeight'];
+            $allocation['craftsmanPerformanceType'] = $row['craftsmanPerformanceType'] ?? 'commission_labor';
+            $allocation['laborFeeCents'] = (int)($row['laborFeeCents'] ?? 0);
+            if (isset($row['personnelSource'])) {
+                $allocation['personnelSource'] = $row['personnelSource'];
+            }
+            $allocations[] = $allocation;
         }
-        unset($allocation);
         return $allocations;
     }
 

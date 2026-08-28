@@ -561,6 +561,9 @@ final class CashierV3DirectSnapshotEntitlementSettlementServices
                     'sequence' => $sequence + 1,
                     'isPrimary' => $sequence === 0,
                     'laborWeight' => (int)($settings['laborWeight'] ?? 0),
+                    'craftsmanPerformanceType' => (string)($settings['craftsmanPerformanceType'] ?? 'commission_labor'),
+                    'laborFeeCents' => max(0, (int)($settings['laborFeeCents'] ?? 0)),
+                    'personnelSource' => (string)($settings['personnelSource'] ?? 'store'),
                 ];
             }
             $inventory = $inventorySnapshot['lineInventoryByLineId'][$lineId] ?? null;
@@ -955,20 +958,37 @@ final class CashierV3DirectSnapshotEntitlementSettlementServices
             foreach (is_array($craftsmen) ? $craftsmen : [] as $craftsman) {
                 $staffId = is_array($craftsman) ? (int)($craftsman['staffId'] ?? $craftsman['id'] ?? 0) : 0;
                 $laborWeight = is_array($craftsman) ? (int)($craftsman['laborWeight'] ?? 0) : 0;
-                if ($staffId <= 0 || $laborWeight <= 0 || $laborWeight > 100 || isset($staffIds[$staffId])) {
+                $performanceType = is_array($craftsman)
+                    ? (string)($craftsman['craftsmanPerformanceType'] ?? 'commission_labor')
+                    : 'commission_labor';
+                if (!in_array($performanceType, ['commission', 'labor', 'commission_labor'], true)
+                    || $staffId <= 0 || $laborWeight < 0 || $laborWeight > 100
+                    || ($performanceType !== 'labor' && $laborWeight <= 0)
+                    || isset($staffIds[$staffId])) {
                     throw self::failure('authority_service_intent_craftsman_invalid', ['lineId' => $lineId]);
                 }
+                $laborFeeCents = is_array($craftsman)
+                    ? max(0, (int)($craftsman['laborFeeCents'] ?? $craftsman['labor_fee_cents'] ?? 0))
+                    : 0;
                 $staffIds[$staffId] = $staffId;
                 $settingsById[$staffId] = [
                     'laborWeight' => $laborWeight,
                     'isPointCustomer' => !empty($craftsman['isPointCustomer']),
+                    'craftsmanPerformanceType' => $performanceType,
+                    'laborFeeCents' => $laborFeeCents,
                     'personnelSource' => (string)($craftsman['personnelSource'] ?? 'store'),
                 ];
             }
             if (!$staffIds) {
                 throw self::failure('authority_service_intent_craftsman_required', ['lineId' => $lineId]);
             }
-            if (array_sum(array_column($settingsById, 'laborWeight')) !== 100) {
+            $commissionWeight = 0;
+            foreach ($settingsById as $settings) {
+                if (($settings['craftsmanPerformanceType'] ?? 'commission_labor') !== 'labor') {
+                    $commissionWeight += (int)$settings['laborWeight'];
+                }
+            }
+            if ($commissionWeight > 0 && $commissionWeight !== 100) {
                 throw self::failure('authority_service_intent_craftsman_weight_invalid', ['lineId' => $lineId]);
             }
             $result[$lineId] = [

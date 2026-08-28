@@ -89,6 +89,13 @@ final class CashierV3EntitlementCompletionPlanV1
             $services[] = $service;
             $performance[] = self::consumptionPerformanceRow($context, $normalized);
             foreach ($normalized['labor_allocations'] as $allocation) {
+                // Labor-only craftsmen remain in the immutable service
+                // snapshot. They do not create labor-performance amount, but
+                // a separately entered labor fee is still an auditable fact.
+                if ((int)$allocation['amount_cents'] === 0
+                    && (int)$allocation['labor_fee_cents'] === 0) {
+                    continue;
+                }
                 $performance[] = self::laborPerformanceRow($context, $normalized, $allocation);
             }
 
@@ -558,6 +565,15 @@ final class CashierV3EntitlementCompletionPlanV1
                 throw self::failure('labor_staff_snapshot_mismatch', ['lineId' => $lineId, 'staffId' => $staffId]);
             }
             $amount = self::nonNegativeInt($row['amountCents'], 'labor_allocation_amount_invalid');
+            $performanceType = (string)($row['craftsmanPerformanceType']
+                ?? $craftsman['craftsmanPerformanceType'] ?? 'commission_labor');
+            if (!in_array($performanceType, ['commission', 'labor', 'commission_labor'], true)) {
+                throw self::failure('labor_performance_type_invalid', ['lineId' => $lineId, 'staffId' => $staffId]);
+            }
+            $laborWeight = self::nonNegativeInt($row['laborWeight'], 'labor_weight_invalid');
+            if (($performanceType !== 'labor' && $laborWeight <= 0) || $laborWeight > 100) {
+                throw self::failure('labor_weight_invalid', ['lineId' => $lineId, 'staffId' => $staffId]);
+            }
             $normalized = [
                 'staff_id' => $staffId,
                 'employee_id' => $authority['employee_id'],
@@ -568,7 +584,12 @@ final class CashierV3EntitlementCompletionPlanV1
                 'store_id' => $storeId,
                 'sequence' => self::positiveInt($row['sequence'], 'labor_sequence_invalid'),
                 'is_primary' => self::booleanInt($row['isPrimary'], 'labor_primary_flag_invalid'),
-                'labor_weight' => self::positiveInt($row['laborWeight'], 'labor_weight_invalid'),
+                'labor_weight' => $laborWeight,
+                'craftsman_performance_type' => $performanceType,
+                'labor_fee_cents' => self::nonNegativeInt(
+                    $row['laborFeeCents'] ?? $craftsman['laborFeeCents'] ?? 0,
+                    'labor_fee_invalid'
+                ),
                 'amount_cents' => $amount,
             ];
             if ($normalized['sequence'] !== $index + 1 || $normalized['is_primary'] !== ($index === 0 ? 1 : 0)) {
@@ -637,6 +658,13 @@ final class CashierV3EntitlementCompletionPlanV1
             'quantity' => $line['quantity'],
             'service_object' => $line['service_object'],
             'is_experience' => $line['is_experience'],
+            'labor_amount_cents' => $line['labor_amount_cents'],
+            'labor_fee_amount_cents' => array_sum(array_map(
+                static function (array $allocation): int {
+                    return (int)$allocation['labor_fee_cents'];
+                },
+                $line['labor_allocations']
+            )) * $line['quantity'],
             'primary_craftsman_staff_id' => $line['primary_craftsman_staff_id'],
             'craftsmen_snapshot_json' => self::encode($line['craftsmen_snapshot']),
             'service_status' => 'completed',
@@ -677,6 +705,7 @@ final class CashierV3EntitlementCompletionPlanV1
             $line['line_id'] . ':' . $allocation['staff_id']
         );
         $weightTotal = array_sum(array_column($line['labor_allocations'], 'labor_weight'));
+        $allocationWeightDenominator = $weightTotal > 0 ? $weightTotal : 1;
         $row = array_merge(self::performanceCommon($context, $line, $naturalKey), [
             'fact_id' => self::factId('ELP', $naturalKey),
             'fact_type' => 'labor_performance_allocated',
@@ -687,9 +716,10 @@ final class CashierV3EntitlementCompletionPlanV1
             'employee_type_authority_version' => $allocation['employee_type_authority_version'],
             'role_snapshot' => $allocation['is_primary'] ? 'primary_craftsman' : 'craftsman',
             'allocation_weight_numerator' => $allocation['labor_weight'],
-            'allocation_weight_denominator' => $weightTotal,
+            'allocation_weight_denominator' => $allocationWeightDenominator,
             'allocation_base_amount_cents' => $line['labor_amount_cents'],
             'amount_cents' => $allocation['amount_cents'],
+            'labor_fee_amount_cents' => $allocation['labor_fee_cents'] * $line['quantity'],
             'rule_code_snapshot' => 'entitlement_labor_' . $line['labor_mode'],
             'rule_name_snapshot' => '项目劳动业绩',
             'rule_version_snapshot' => 'entitlement-rule:' . $line['performance_rule_version'],
