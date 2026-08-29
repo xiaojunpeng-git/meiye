@@ -3,6 +3,7 @@
 namespace app\services\cashier\v3\cashier;
 
 use app\services\cashier\v3\card\CashierV3CardRuleEntitlementAuthorityServices;
+use app\services\cashier\v3\card\CashierV3CardSaleActualAmountServices;
 use app\services\cashier\v3\CashierV3CommandException;
 use app\services\cashier\v3\CashierV3CrossStoreEntitlementPolicy;
 use app\services\cashier\v3\CashierV3DataScopeContext;
@@ -314,7 +315,7 @@ final class CashierV3EntitlementProjectionServices
     /**
      * @param int[]|null $holderFilter
      * @param int[]|null $detailFilter
-     * @return array{member:array,holders:array,orders:array,carts:array,reservations:array,debts:array}
+     * @return array{member:array,holders:array,orders:array,carts:array,reservations:array,debts:array,actualSaleAmounts:array}
      */
     private function loadRows(
         int $memberId,
@@ -465,7 +466,18 @@ final class CashierV3EntitlementProjectionServices
                 );
             }
         }
-        return compact('member', 'holders', 'orders', 'carts', 'reservations', 'debts');
+        return [
+            'member' => $member,
+            'holders' => $holders,
+            'orders' => $orders,
+            'carts' => $carts,
+            'reservations' => $reservations,
+            'debts' => $debts,
+            'actualSaleAmounts' => (new CashierV3CardSaleActualAmountServices())->forOrders(
+                $validOrderIds,
+                $carts
+            ),
+        ];
     }
 
     /**
@@ -632,11 +644,16 @@ final class CashierV3EntitlementProjectionServices
             // Operation-created benefits carry their authoritative cents in
             // cart_info. Do not replace that snapshot with the card-rule
             // whole-yuan projection for this one explicit source type.
-            $amounts = CashierV3EntitlementActualAmountAllocator::isCentCapableSnapshot($decoded)
-                ? $this->projectAmounts($cart, $rawSurplus)
-                : (is_array($ruleAuthority)
-                    ? $this->ruleProjectAmounts($ruleAuthority)
-                    : $this->projectAmounts($cart, $rawSurplus));
+            $actualSaleAmountCents = (int)($snapshot['actualSaleAmounts'][$detailId] ?? -1);
+            if ($actualSaleAmountCents >= 0) {
+                $amounts = $this->projectActualSaleAmount($cart, $rawSurplus, $actualSaleAmountCents, $decoded);
+            } else {
+                $amounts = CashierV3EntitlementActualAmountAllocator::isCentCapableSnapshot($decoded)
+                    ? $this->projectAmounts($cart, $rawSurplus)
+                    : (is_array($ruleAuthority)
+                        ? $this->ruleProjectAmounts($ruleAuthority)
+                        : $this->projectAmounts($cart, $rawSurplus));
+            }
             $invalidAmount = $amounts['purchaseAmount'] === null
                 || $amounts['remainingAmount'] === null
                 || $amounts['totalPurchaseTimes'] <= 0;
@@ -912,6 +929,50 @@ final class CashierV3EntitlementProjectionServices
                 $purchaseTimes,
                 $consumedTimes,
                 $snapshot
+            ),
+            'totalPurchaseTimes' => $purchaseTimes,
+            'consumedTimesAtSelection' => $consumedTimes,
+            'calculationVersion' => $version,
+        ];
+    }
+
+    /**
+     * Project the immutable actual sale allocation for a card component.
+     * Configured project value remains a reporting weight only; it must not
+     * replace the amount actually paid after a manual card-price change.
+     *
+     * @return array{purchaseAmount:?string,remainingAmount:?string,totalPurchaseTimes:int,consumedTimesAtSelection:int,calculationVersion:string}
+     */
+    private function projectActualSaleAmount(
+        array $cart,
+        int $remainingTimes,
+        int $amountCents,
+        array $snapshot
+    ): array {
+        $purchaseTimes = max(0, (int)($cart['write_times'] ?? 0));
+        $version = 'card-sale-actual-amount-' . CashierV3EntitlementActualAmountAllocator::CALCULATION_VERSION;
+        if ($amountCents < 0 || $purchaseTimes <= 0 || $remainingTimes > $purchaseTimes) {
+            return [
+                'purchaseAmount' => null,
+                'remainingAmount' => null,
+                'totalPurchaseTimes' => $purchaseTimes,
+                'consumedTimesAtSelection' => 0,
+                'calculationVersion' => $version,
+            ];
+        }
+        $purchaseAmount = $this->centsToMoney($amountCents);
+        $consumedTimes = $purchaseTimes - $remainingTimes;
+        $allocationSnapshot = $snapshot;
+        if ($amountCents % 100 !== 0) {
+            $allocationSnapshot['amountCalculationVersion'] = 'operation-cent-' . $version;
+        }
+        return [
+            'purchaseAmount' => $purchaseAmount,
+            'remainingAmount' => CashierV3EntitlementActualAmountAllocator::remainingForSnapshot(
+                $purchaseAmount,
+                $purchaseTimes,
+                $consumedTimes,
+                $allocationSnapshot
             ),
             'totalPurchaseTimes' => $purchaseTimes,
             'consumedTimesAtSelection' => $consumedTimes,

@@ -2,6 +2,7 @@
 
 namespace app\services\cashier\v3\cashier;
 
+use app\services\cashier\v3\card\CashierV3CardSaleActualAmountServices;
 use app\services\cashier\v3\CashierV3CommandException;
 use app\services\cashier\v3\CashierV3ResultCode;
 use think\facade\Db;
@@ -122,9 +123,13 @@ final class CashierV3CashierMemberSummaryServices
             ->where('product_type', 6)
             ->where('is_writeoff', 0)
             ->where('write_surplus_times', '>', 0)
-            ->field('oid,write_times,write_surplus_times,write_start,write_end,pay_price,cart_info')
+            ->field('id,oid,product_id,write_times,write_surplus_times,write_start,write_end,pay_price,cart_info')
             ->order('oid asc,id asc')
             ->select());
+        $actualSaleAmounts = (new CashierV3CardSaleActualAmountServices())->forOrders(
+            array_keys($holderOrderIds),
+            $carts
+        );
         foreach ($carts as $cart) {
             $start = max(0, (int)($cart['write_start'] ?? 0));
             $end = max(0, (int)($cart['write_end'] ?? 0));
@@ -142,17 +147,17 @@ final class CashierV3CashierMemberSummaryServices
                 ? json_decode((string)$cart['cart_info'], true)
                 : ($cart['cart_info'] ?? []);
             $snapshot = is_array($snapshot) ? $snapshot : [];
+            $actualSaleAmountCents = (int)($actualSaleAmounts[(int)($cart['id'] ?? 0)] ?? -1);
             try {
-                $remainingAmount = bcadd(
-                    $remainingAmount,
-                    CashierV3EntitlementActualAmountAllocator::remainingForSnapshot(
+                $amount = $actualSaleAmountCents >= 0
+                    ? $this->remainingActualSaleAmount($actualSaleAmountCents, $total, $consumed, $snapshot)
+                    : CashierV3EntitlementActualAmountAllocator::remainingForSnapshot(
                         $this->money($cart['pay_price'] ?? 0),
                         $total,
                         $consumed,
                         $snapshot
-                    ),
-                    2
-                );
+                    );
+                $remainingAmount = bcadd($remainingAmount, $amount, 2);
             } catch (\InvalidArgumentException $exception) {
                 throw new CashierV3CommandException(
                     CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
@@ -168,6 +173,24 @@ final class CashierV3CashierMemberSummaryServices
             'remainingTimes' => $remainingTimes,
             'remainingAmount' => $remainingAmount,
         ];
+    }
+
+    private function remainingActualSaleAmount(
+        int $amountCents,
+        int $totalTimes,
+        int $consumedTimes,
+        array $snapshot
+    ): string {
+        $amount = bcdiv((string)$amountCents, '100', 2);
+        if ($amountCents % 100 !== 0) {
+            $snapshot['amountCalculationVersion'] = 'operation-cent-card-sale-actual-amount';
+        }
+        return CashierV3EntitlementActualAmountAllocator::remainingForSnapshot(
+            $amount,
+            $totalTimes,
+            $consumedTimes,
+            $snapshot
+        );
     }
 
     /** @param array<int,int> $holderIds @return array<int,bool> */
