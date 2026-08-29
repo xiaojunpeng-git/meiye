@@ -27,8 +27,8 @@ import {
 } from '@/services/storeBusinessReportApi'
 
 const LEGACY_COVERAGE_START = '2026-08-10'
-const MARKET_MONTH_DEFAULT_REPORT_CODES = new Set(['market_performance', 'market_detail', 'new_customer_analysis_summary', 'new_customer_analysis'])
-const TODAY_DEFAULT_REPORT_CODES = new Set(['store_item_analysis'])
+// All 22 store-operation reports use one date-range default: current month
+// from day 1 through today. Explicit route dates still override this default.
 const DEFAULT_LIMIT = 20
 // 门店运营报表目录。经营看板是数据入口，不属于本目录；
 // 报表结果、金额和筛选能力全部由统一查询服务返回，浏览器不参与计算。
@@ -89,8 +89,8 @@ const result = ref({})
 const loading = ref(false)
 const exporting = ref(false)
 const errorMessage = ref('')
-const startDate = ref(LEGACY_COVERAGE_START)
-const endDate = ref(today() < LEGACY_COVERAGE_START ? LEGACY_COVERAGE_START : today())
+const startDate = ref(`${today().slice(0, 7)}-01`)
+const endDate = ref(today())
 const selectedMonth = ref(today().slice(0, 7))
 const selectedYear = ref(today().slice(0, 4))
 const categoryId = ref('')
@@ -915,15 +915,9 @@ function syncActiveReportFromRoute() {
   activeReport.value = allowedReportTabs.value.some((item) => item.code === requested)
     ? requested
     : String(allowedReportTabs.value[0]?.code || '')
-  if (TODAY_DEFAULT_REPORT_CODES.has(activeReport.value) && !route.query?.start_date && !route.query?.end_date) {
-    startDate.value = today()
-    endDate.value = today()
-  } else if (MARKET_MONTH_DEFAULT_REPORT_CODES.has(activeReport.value) && !route.query?.start_date) {
+  if (!route.query?.start_date && !route.query?.end_date) {
     startDate.value = `${today().slice(0, 7)}-01`
-  } else {
-    if (isFirstPhaseReport.value && startDate.value < LEGACY_COVERAGE_START) startDate.value = LEGACY_COVERAGE_START
-    if (!isFirstPhaseReport.value && !isSixDimensionReport.value && startDate.value === LEGACY_COVERAGE_START) startDate.value = `${today().slice(0, 4)}-01-01`
-    if (isSixDimensionReport.value && startDate.value === LEGACY_COVERAGE_START) startDate.value = `${today().slice(0, 4)}-01-01`
+    endDate.value = today()
   }
   if (usesAnnualYearFilter.value && !/^\d{4}$/.test(selectedYear.value)) selectedYear.value = today().slice(0, 4)
 }
