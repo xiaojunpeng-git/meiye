@@ -98,9 +98,13 @@ check(
   'personnel selection payload carries employee and store identity into the browser snapshot boundary'
 )
 check(
-  /localCheckoutPreview\.value = localCheckoutPreviewSnapshot\(\)/.test(checkoutEntry)
-    && !/firstCartLineMissingCraftsmen|CASHIER_CRAFTSMAN_REQUIRED|persistDeferredLineServiceSettings|synchronizeLocalCashierDraft/.test(checkoutEntry),
-  '立即结账只生成浏览器快照，不提前校验手艺人或写服务端草稿'
+  /const preview = localCheckoutPreviewSnapshot\(\)/.test(checkoutEntry)
+    && /localCheckoutPreview\.value = preview/.test(checkoutEntry)
+    && /firstCartLineMissingCraftsmen/.test(checkoutEntry)
+    && /CASHIER_CRAFTSMAN_REQUIRED/.test(checkoutEntry)
+    && /请先选择手艺人/.test(checkoutEntry)
+    && !/persistDeferredLineServiceSettings|synchronizeLocalCashierDraft/.test(checkoutEntry),
+  '立即结账先提示未选择手艺人，不提前写服务端草稿'
 )
 check(
   /localLineServiceSettings\.value\s*=\s*\{\}/.test(resetContext),

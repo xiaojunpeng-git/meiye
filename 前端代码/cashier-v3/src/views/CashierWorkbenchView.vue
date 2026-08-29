@@ -3294,12 +3294,16 @@ function hasCartLineCraftsmen(line = {}) {
 }
 
 function firstCartLineMissingCraftsmen() {
-  return cartLines.value.find((line) => (
-    isProjectLine(line)
-    && !isCustomCardPurchase(line)
-    && !cardOperationUpgradeBinding(line)
-    && !hasCartLineCraftsmen(line)
-  )) || null
+  // 结账入口只读取当前收银页面已经渲染出来的按钮文字。
+  // 不读取后端快照、不调用接口，也不根据另一套业务规则猜测。
+  const rows = Array.from(document.querySelectorAll('.cart-line-list article.cart-line'))
+  const waitingRow = rows.find((row) => Array.from(
+    row.querySelectorAll('.cart-line__meta-slot--craftsmen button')
+  ).some((button) => button.textContent.trim() === '待选择手艺人'))
+  if (waitingRow) return waitingRow
+  return (document.body?.innerText || '').includes('待选择手艺人')
+    ? { source: 'cashier-page' }
+    : null
 }
 
 function cartLineServiceObject(line = {}) {
@@ -4806,6 +4810,18 @@ function buildCheckoutSnapshot(preview = {}) {
 }
 
 async function openCheckout() {
+  const craftsmenRequiredLine = firstCartLineMissingCraftsmen()
+  if (craftsmenRequiredLine) {
+    const blocked = {
+      result: {
+        status: 'failed',
+        code: 'CASHIER_CRAFTSMAN_REQUIRED',
+        message: '请先选择手艺人'
+      }
+    }
+    reportCheckoutEntryFailure(blocked, '请先选择手艺人')
+    return blocked
+  }
   if (previewCardOperation.value) {
     const operation = previewCardOperation.value
     if (!operation.sources?.length || !operation.target) {
@@ -4821,9 +4837,6 @@ async function openCheckout() {
   if (!hasCartLines.value) {
     return { result: { status: 'failed', code: 'CASHIER_CART_EMPTY', message: '请先添加需要结算或服务的项目。' } }
   }
-  // Guide and sales-manager facts are member-bound (the round history is
-  // keyed by member_id). Reject a guest checkout before opening payment so a
-  // server-side transaction cannot roll back after the operator has paid.
   if (currentCustomerMode.value === 'guest' && cartLines.value.some(lineHasCustomerAttribution)) {
     reportGuestAttributionBlocked()
     return { result: { status: 'failed', code: 'GUEST_ATTRIBUTION_NOT_ALLOWED', message: guestAttributionBlockedMessage } }
@@ -4841,6 +4854,25 @@ async function openCheckout() {
   checkoutRecoveryActiveStep.value = null
   isCheckoutOpen.value = true
   return localDraftResult()
+}
+
+function guardedOpenCheckout(event) {
+  // 事件入口再次以页面当前显示内容为准，确保不会先进入结账弹层。
+  const craftsmenRequiredLine = firstCartLineMissingCraftsmen()
+  if (craftsmenRequiredLine) {
+    event?.preventDefault?.()
+    event?.stopImmediatePropagation?.()
+    const blocked = {
+      result: {
+        status: 'failed',
+        code: 'CASHIER_CRAFTSMAN_REQUIRED',
+        message: '请先选择手艺人'
+      }
+    }
+    reportCheckoutEntryFailure(blocked, '请先选择手艺人')
+    return blocked
+  }
+  return openCheckout()
 }
 
 async function openHangOrder() {
@@ -6747,7 +6779,7 @@ onBeforeUnmount(() => {
           @click="openMoreAction('open-order-note')"
         >备注</button>
         <button type="button" class="button button--secondary cashier-checkout-actions__hang" :disabled="!hasCartLines || isSavingHangDraft || Boolean(activeCardOperationUpgrade)" @click="openHangOrder">{{ isSavingHangDraft ? '挂单中…' : '挂单' }}</button>
-        <button type="button" class="button button--primary cashier-checkout-actions__submit" :disabled="!canSubmitCart || isPreparingServiceCompletion || isPreparingCheckout || isSynchronizingLocalCashierDraft || isPersistingDeferredLineSettings" @click="openCheckout">
+        <button type="button" class="button button--primary cashier-checkout-actions__submit" :disabled="!canSubmitCart || isPreparingServiceCompletion || isPreparingCheckout || isSynchronizingLocalCashierDraft || isPersistingDeferredLineSettings" @click="guardedOpenCheckout">
           {{ isPreparingServiceCompletion ? '正在准备服务确认…' : isSynchronizingLocalCashierDraft ? '正在加载…' : isPreparingCheckout ? '正在准备结账…' : checkoutEntryLabel }}
         </button>
         </div>
