@@ -65,7 +65,8 @@ $checks = [
     'order_center_publishes_lifecycle_sales_order_versions' => strpos($orderPartition, "'public_versions' => \$this->recordPublicVersions(\$payload, \$dataScope)") !== false
         && strpos($orderPartition, 'CashierV3OrderLifecycleServices::OPERATION_TABLE') !== false
         && strpos($orderPartition, "'source_type', 'sales'") !== false
-        && strpos($orderPartition, "'version' => 1 + (int)(\$operationCounts[\$id] ?? 0)") !== false,
+        && (strpos($orderPartition, "'version' => 1 + (int)(\$operationCounts[\$id] ?? 0)") !== false
+            || strpos($orderPartition, "'version' => \$knownVersions[\$id] ??") !== false),
     'legacy_display_ids_do_not_replace_sales_order_resource_ids' => strpos($salesQuery, "'lifecycleOrderId' => \$v3Ready ? (string)\$v3Header['order_id'] : ''") !== false
         && strpos($orderPartition, "\$order['lifecycleOrderId'] ?? \$order['lifecycle_order_id']") !== false
         && strpos($frontend, 'function salesOrderLifecycleId(record)') !== false
@@ -121,9 +122,21 @@ $checks = [
         && strpos($service, 'voidOrderAttributionFactsInTx') !== false
         && strpos($service, 'sales_void_attribution_reversal_race') !== false
         && strpos($service, ':service:') !== false
+        && strpos($service, "newExecution(\n                'void-service-record'") !== false
         && strpos($service, "'consumption_performance_recorded', 'labor_performance_allocated'") !== false
         && strpos($service, "Db::name(self::OPERATION_TABLE)->where('tenant_id', \$scope->tenantId())") !== false
         && strpos($service, "Db::name('cashier_v3_sales_order_line')->where('tenant_id', \$scope->tenantId())") !== false,
+    'void_cascade_follows_checkout_event_set' => strpos($service, 'occurredCheckoutEvents') !== false
+        && strpos($service, "\$action === 'void-sales-order' && \$occurredEvents['inventory']") !== false
+        && strpos($service, "\$action === 'void-sales-order' && \$occurredEvents['service']") !== false
+        && strpos($service, "\$nested->where('source_id', \$requestId)") !== false
+        && strpos($service, "'checkout' => isset(\$types['checkout.completed'])") !== false
+        && strpos($service, "'attribution' => isset(\$types['service.completed'])") !== false,
+    'detail_reads_optional_domains_from_event_set' => strpos($salesQuery, 'eventTypesByOrder') !== false
+        && strpos($salesQuery, "checkout.completed") !== false
+        && strpos($salesQuery, "if (\$refundOrderIds !== [])") !== false
+        && strpos($salesQuery, "isset(\$eventTypesByOrder[\$orderId]['debt.recorded'])") !== false
+        && strpos($salesQuery, "'eventTypes' => array_keys") !== false,
 ];
 $failed = 0;
 foreach ($checks as $name => $ok) {

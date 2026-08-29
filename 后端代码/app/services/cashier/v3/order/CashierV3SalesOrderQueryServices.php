@@ -4,6 +4,7 @@ namespace app\services\cashier\v3\order;
 
 use app\services\cashier\v3\CashierV3DataScopeContext;
 use app\services\cashier\v3\CashierV3OperatorScope;
+use app\services\cashier\v3\event\CashierV3BusinessEventRecorder;
 use app\services\cashier\v3\settlement\CashierV3CheckoutCraftsmenSnapshot;
 use think\facade\Db;
 
@@ -1149,6 +1150,51 @@ final class CashierV3SalesOrderQueryServices
             $headersByOrder[$orderId] = $header;
         }
         $orderIds = array_keys($headersByOrder);
+        $tenantIds = array_values(array_unique(array_map(static function (array $header): string {
+            return trim((string)($header['tenant_id'] ?? ''));
+        }, $headers)));
+        if (count($tenantIds) !== 1 || $tenantIds[0] === '') {
+            throw new \RuntimeException('sales_order_authority_tenant_scope_invalid');
+        }
+        // Checkout events are the authoritative composition index.  Read it
+        // once so optional domains (debt and refund details) are not queried
+        // for a plain product sale.  Empty event history keeps the legacy
+        // fallback conservative and lets the domain query its own facts.
+        $eventTypesByOrder = [];
+        $requestToOrder = [];
+        foreach ($headersByOrder as $headerOrderId => $header) {
+            $headerRequestId = trim((string)($header['checkout_request_id'] ?? ''));
+            if ($headerRequestId !== '') $requestToOrder[$headerRequestId] = $headerOrderId;
+        }
+        $requestIds = array_values(array_unique(array_filter(array_map(function (array $header): string {
+            return trim((string)($header['checkout_request_id'] ?? ''));
+        }, $headers))));
+        $eventQuery = Db::name(CashierV3BusinessEventRecorder::EVENT_TABLE)
+            ->where('tenant_id', $tenantIds[0] ?? '')
+            ->where(function ($nested) use ($orderIds, $requestIds): void {
+                if ($requestIds !== []) $nested->whereIn('source_id', $requestIds);
+                if ($orderIds !== []) {
+                    if ($requestIds !== []) $nested->whereOr(function ($aggregate) use ($orderIds): void {
+                        $aggregate->whereIn('aggregate_id', $orderIds);
+                    });
+                    else $nested->whereIn('aggregate_id', $orderIds);
+                }
+            })
+            ->field('aggregate_id,source_id,event_type')
+            ->select()
+            ->toArray();
+        foreach ($eventQuery as $eventRow) {
+            $eventType = trim((string)($eventRow['event_type'] ?? ''));
+            $aggregateId = trim((string)($eventRow['aggregate_id'] ?? ''));
+            $sourceId = trim((string)($eventRow['source_id'] ?? ''));
+            $sourceOrderId = $sourceId !== '' ? ($requestToOrder[$sourceId] ?? '') : '';
+            if ($sourceOrderId !== '' && isset($headersByOrder[$sourceOrderId])) {
+                $eventTypesByOrder[$sourceOrderId][$eventType] = true;
+            }
+            if ($aggregateId !== '' && isset($headersByOrder[$aggregateId])) {
+                $eventTypesByOrder[$aggregateId][$eventType] = true;
+            }
+        }
         $linesByOrder = [];
         foreach (Db::name('cashier_v3_sales_order_line')
             ->whereIn('order_id', $orderIds)
@@ -1181,20 +1227,11 @@ final class CashierV3SalesOrderQueryServices
             $collectionsByOrder[(string)$collection['sales_order_id']][] = $collection;
         }
         $requestsById = [];
-        $requestIds = array_values(array_unique(array_filter(array_map(function (array $header): string {
-            return trim((string)($header['checkout_request_id'] ?? ''));
-        }, $headers))));
         if ($requestIds !== []) {
             foreach (Db::name('cashier_v3_checkout_request')->whereIn('request_id', $requestIds)
                 ->field('request_id,debt_amount_cents,balance_deduction_amount_cents')->select()->toArray() as $request) {
                 $requestsById[(string)$request['request_id']] = $request;
             }
-        }
-        $tenantIds = array_values(array_unique(array_map(static function (array $header): string {
-            return trim((string)($header['tenant_id'] ?? ''));
-        }, $headers)));
-        if (count($tenantIds) !== 1 || $tenantIds[0] === '') {
-            throw new \RuntimeException('sales_order_authority_tenant_scope_invalid');
         }
         // A card/project upgrade is a formal sale of the target item.  Its
         // old entitlement value is neither a discount nor cash collection;
@@ -1251,11 +1288,22 @@ final class CashierV3SalesOrderQueryServices
             $operationsByOrder[(string)$operation['source_order_id']][] = $operation;
         }
         $refundLinesByOperation = [];
-        foreach (Db::name(CashierV3OrderLifecycleServices::REFUND_LINE_TABLE)
-            ->where('tenant_id', $tenantIds[0])->whereIn('source_order_id', $orderIds)->where('status', 'succeeded')
-            ->field('operation_id,refund_line_id,sales_order_line_id,line_no,item_type_snapshot,item_name_snapshot,original_quantity,selected_sale_amount_cents,cash_refund_cents,restored_principal_cents,restored_bonus_cents,total_refund_cents,occurred_at')
-            ->order('id', 'asc')->select()->toArray() as $refundLine) {
-            $refundLinesByOperation[(string)$refundLine['operation_id']][] = $refundLine;
+        $refundOrderIds = [];
+        foreach ($operationsByOrder as $orderId => $operations) {
+            foreach ($operations as $operation) {
+                if ((string)($operation['operation_type'] ?? '') === 'refund') {
+                    $refundOrderIds[] = $orderId;
+                    break;
+                }
+            }
+        }
+        if ($refundOrderIds !== []) {
+            foreach (Db::name(CashierV3OrderLifecycleServices::REFUND_LINE_TABLE)
+                ->where('tenant_id', $tenantIds[0])->whereIn('source_order_id', array_values(array_unique($refundOrderIds)))->where('status', 'succeeded')
+                ->field('operation_id,refund_line_id,sales_order_line_id,line_no,item_type_snapshot,item_name_snapshot,original_quantity,selected_sale_amount_cents,cash_refund_cents,restored_principal_cents,restored_bonus_cents,total_refund_cents,occurred_at')
+                ->order('id', 'asc')->select()->toArray() as $refundLine) {
+                $refundLinesByOperation[(string)$refundLine['operation_id']][] = $refundLine;
+            }
         }
         foreach ($operationsByOrder as $orderId => $operations) {
             foreach ($operations as $index => $operation) {
@@ -1264,11 +1312,22 @@ final class CashierV3SalesOrderQueryServices
             $operationsByOrder[$orderId] = $operations;
         }
         $debtAuthoritiesByOrder = [];
-        foreach (Db::name('cashier_v3_debt_authority')
-            ->whereIn('sales_order_id', $orderIds)
-            ->field('debt_id,debt_no,sales_order_id,sales_order_no_snapshot,member_id,created_at,updated_at')
-            ->order('id', 'asc')->select()->toArray() as $debtAuthority) {
-            $debtAuthoritiesByOrder[(string)$debtAuthority['sales_order_id']][] = $debtAuthority;
+        $debtOrderIds = [];
+        foreach ($orderIds as $orderId) {
+            $eventSetComplete = isset($eventTypesByOrder[$orderId]['checkout.completed']);
+            if (!$eventSetComplete
+                || isset($eventTypesByOrder[$orderId]['debt.recorded'])
+                || isset($eventTypesByOrder[$orderId]['debt.repaid'])) {
+                $debtOrderIds[] = $orderId;
+            }
+        }
+        if ($debtOrderIds !== []) {
+            foreach (Db::name('cashier_v3_debt_authority')
+                ->whereIn('sales_order_id', $debtOrderIds)
+                ->field('debt_id,debt_no,sales_order_id,sales_order_no_snapshot,member_id,created_at,updated_at')
+                ->order('id', 'asc')->select()->toArray() as $debtAuthority) {
+                $debtAuthoritiesByOrder[(string)$debtAuthority['sales_order_id']][] = $debtAuthority;
+            }
         }
         $snapshots = [];
         foreach ($headersByOrder as $orderId => $header) {
@@ -1292,6 +1351,7 @@ final class CashierV3SalesOrderQueryServices
                 'lifecycleOperations' => $operationsByOrder[$orderId] ?? [],
                 'upgradeSettlement' => $upgradeSettlementsByOrder[$orderId] ?? [],
                 'debtAuthorities' => $debtAuthoritiesByOrder[$orderId] ?? [],
+                'eventTypes' => array_keys($eventTypesByOrder[$orderId] ?? []),
             ];
         }
         return $snapshots;

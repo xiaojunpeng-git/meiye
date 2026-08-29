@@ -105,6 +105,14 @@ final class CashierV3OrderLifecycleServices
             throw self::failure('order_lifecycle_scope_incomplete');
         }
         $source = $this->source((array)($scope['payload'] ?? []), $operator, $dataScope, true);
+        // The checkout request is the event-set boundary.  Build the set once
+        // inside the same transaction and let the void cascade invoke only
+        // domains that actually emitted a checkout event.  Financial
+        // reversal services still lock their authoritative facts as the
+        // final guard; this plan only prevents unrelated domain work.
+        $occurredEvents = $action === 'void-sales-order'
+            ? $this->occurredCheckoutEvents($source, $dataScope)
+            : ['checkout' => true, 'inventory' => true, 'service' => true, 'card' => true, 'attribution' => true, 'presale' => true];
         $commandKey = trim((string)($scope['idempotency_key'] ?? ''));
         if ($commandKey === '') throw self::failure('order_lifecycle_idempotency_missing');
         $input = $this->input($action, (array)($scope['payload'] ?? []), $source);
@@ -151,22 +159,24 @@ final class CashierV3OrderLifecycleServices
             // overwrite.  Unsupported current-right domains are deliberately
             // rejected before a single accounting row is written. Product
             // inventory is restored only for a full void, never a refund.
-            $cardOperationReversal = (new CashierV3CardOperationReversalServices())->prepare(
-                $source, $action, $dataScope
-            );
+            $cardOperationReversal = $occurredEvents['card']
+                ? (new CashierV3CardOperationReversalServices())->prepare($source, $action, $dataScope)
+                : ['isUpgrade' => false, 'entitlementCreditCents' => 0];
             $financial = $this->assertFinancialReversalEligible(
                 $source, $action, $input, $dataScope, (int)$cardOperationReversal['entitlementCreditCents']
             );
             // A financial reversal never pulls back a completed presale
             // delivery. It only closes all remaining claim opportunities for
             // this source order, inside the same transaction as the reversal.
-            (new CashierV3PresaleClaimServices())->closeForSalesOrderReversalInTx(
-                $dataScope->tenantId(), (string)$source['sourceId'], $operationId, $now
-            );
+            if ($occurredEvents['presale']) {
+                (new CashierV3PresaleClaimServices())->closeForSalesOrderReversalInTx(
+                    $dataScope->tenantId(), (string)$source['sourceId'], $operationId, $now
+                );
+            }
             $input['cashRefundCents'] = (int)$financial['cashRefundCents'];
             $input['restorePrincipalCents'] = (int)$financial['restorePrincipalCents'];
             $input['restoreBonusCents'] = (int)$financial['restoreBonusCents'];
-            if ($action === 'void-sales-order') {
+            if ($action === 'void-sales-order' && $occurredEvents['inventory']) {
                 (new CashierV3SalesOrderInventoryReversalServices())->reverseForVoidInTx(
                     $source, $operationId, $operator, $dataScope, $now
                 );
@@ -177,15 +187,18 @@ final class CashierV3OrderLifecycleServices
             (new CashierV3CardOperationReversalServices())->apply(
                 $cardOperationReversal, $action, $operationId, $operator, $dataScope, $now
             );
-            if ($action === 'void-sales-order') {
+            if ($action === 'void-sales-order' && $occurredEvents['service']) {
                 // A sale can already have produced completed service facts.
                 // Full-order void is an atomic cascade: reverse those service
                 // facts (and their entitlement occupation/performance) when
                 // present, while orders without service facts simply skip it.
                 $this->voidCompletedServiceFactsInTx(
                     $source, $commandKey, $operator, $dataScope,
-                    $recorder, $execution, (array)($scope['event_contract'] ?? [])
+                    $recorder,
+                    (string)($scope['state_context_id'] ?? '')
                 );
+            }
+            if ($action === 'void-sales-order' && $occurredEvents['attribution']) {
                 $this->voidOrderAttributionFactsInTx($source, $dataScope);
             }
             if ($action === 'refund-sales-order') {
@@ -544,8 +557,7 @@ final class CashierV3OrderLifecycleServices
         CashierV3OperatorScope $operator,
         CashierV3DataScopeContext $scope,
         CashierV3BusinessEventRecorder $recorder,
-        CashierV3BusinessEventExecution $execution,
-        array $eventContract
+        string $stateContextId
     ): void {
         $rows = Db::name('cashier_v3_entitlement_service_fact')
             ->where('tenant_id', $scope->tenantId())
@@ -560,22 +572,73 @@ final class CashierV3OrderLifecycleServices
         if ($rows === []) return;
 
         $serviceVoid = new CashierV3ServiceRecordVoidServices();
+        $serviceContract = [
+            'required_event_types' => ['service_record.voided'],
+            'allowed_event_types' => ['service_record.voided'],
+            'event_rules' => ['service_record.voided' => [
+                'min_count' => 1, 'max_count' => 1,
+                'aggregate_type' => 'service_record', 'source_type' => 'void-service-record',
+            ]],
+            'eventless_reason' => '',
+            'activation_blocked_until_event_contract' => false,
+            'consumers' => ['service_record.voided' => []],
+        ];
         foreach ($rows as $row) {
             $serviceFactId = (int)($row['id'] ?? 0);
             if ($serviceFactId <= 0) throw self::failure('sales_void_service_fact_invalid');
+            $serviceCommandKey = $commandKey . ':service:' . $serviceFactId;
+            $serviceExecution = $recorder->newExecution(
+                'void-service-record', $serviceCommandKey, $operator, $scope, $stateContextId
+            );
             $serviceVoid->executeInTx('void-service-record', [
                 'operator_scope' => $operator,
                 'data_scope' => $scope,
                 'event_recorder' => $recorder,
-                'event_execution' => $execution,
-                'event_contract' => $eventContract,
-                'idempotency_key' => $commandKey . ':service:' . $serviceFactId,
+                'event_execution' => $serviceExecution,
+                'event_contract' => $serviceContract,
+                'idempotency_key' => $serviceCommandKey,
                 'payload' => [
                     'serviceFactId' => (string)$serviceFactId,
                     'reason' => '销售订单作废：' . (string)$source['sourceNo'],
                 ],
             ]);
         }
+    }
+
+    /** Read the immutable checkout event set once; absent events mean no work. */
+    private function occurredCheckoutEvents(array $source, CashierV3DataScopeContext $scope): array
+    {
+        $requestId = trim((string)($source['checkoutRequestId'] ?? ''));
+        $orderId = trim((string)($source['sourceId'] ?? ''));
+        $query = Db::name(CashierV3BusinessEventRecorder::EVENT_TABLE)
+            ->where('tenant_id', $scope->tenantId())
+            ->where(function ($nested) use ($requestId, $orderId): void {
+                if ($requestId !== '') $nested->where('source_id', $requestId);
+                if ($orderId !== '') {
+                    if ($requestId !== '') $nested->whereOr('aggregate_id', $orderId);
+                    else $nested->where('aggregate_id', $orderId);
+                }
+            })
+            ->field('event_type')
+            ->select()
+            ->toArray();
+        $types = [];
+        foreach ($query as $row) $types[(string)($row['event_type'] ?? '')] = true;
+        return [
+            'checkout' => isset($types['checkout.completed']),
+            'inventory' => isset($types['inventory.sale.deducted'])
+                || isset($types['inventory.batch.consumed']),
+            'service' => isset($types['service.completed'])
+                || isset($types['entitlement.writeoff.completed'])
+                || isset($types['performance.labor.allocated'])
+                || isset($types['performance.consumption.recorded']),
+            'card' => isset($types['card.operation.settled']) || isset($types['card.operation.recorded']),
+            'attribution' => isset($types['service.completed'])
+                || isset($types['performance.consumption.recorded'])
+                || isset($types['performance.labor.allocated']),
+            'presale' => isset($types['gift.consumed'])
+                || isset($types['entitlement.writeoff.completed']),
+        ];
     }
 
     /**
