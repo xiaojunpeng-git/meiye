@@ -289,6 +289,7 @@ const salesPageCursors = ref({})
 const isSalesDetailOpen = ref(false)
 const salesDetailOrder = ref({})
 const isSalesDetailLoading = ref(false)
+const SALES_DETAIL_REQUEST_TIMEOUT_MS = 15000
 const genericDetailRecord = ref(null)
 const salesOrderActionIds = ref({})
 const rechargeOrderActionIds = ref({})
@@ -1127,10 +1128,17 @@ function salesDetailBelongsToOrder(detail, orderId) {
 function showSalesOrderDetail(payload = {}) {
   salesDetailSequence++
   const detail = payload?.detail || payload
-  const record = detail.orderId
-    ? records.value.find((item) => String(item.id) === String(detail.orderId))
-    : detail
-  const orderId = detail.orderId || record?.id
+  const candidateOrderId = detail.orderId
+    || detail.salesOrderId
+    || detail.record?.orderId
+    || detail.record?.salesOrderId
+    || detail.record?.id
+    || detail.id
+  const record = candidateOrderId
+    ? records.value.find((item) => [item.id, item.orderId, item.salesOrderId, item.lifecycleOrderId]
+      .some((value) => value != null && String(value) === String(candidateOrderId)))
+    : detail.record || detail
+  const orderId = candidateOrderId || record?.id || record?.orderId || record?.salesOrderId
   if (!orderId) return null
   salesDetailFocus.value = {
     lifecycleAction: String(payload.initialLifecycleAction || ''),
@@ -1141,7 +1149,13 @@ function showSalesOrderDetail(payload = {}) {
   const backendDetail = salesDetailBelongsToOrder(orderCenter.value.salesOrderDetail, orderId)
     ? orderCenter.value.salesOrderDetail
     : null
-  salesDetailOrder.value = backendDetail || record || {}
+  // Keep the requested identity even when a concurrent list refresh has
+  // replaced the row before this click handler finishes. Without this
+  // placeholder the overlay enters its blank loading state with no order id
+  // and can spin forever while the authoritative detail request is pending.
+  salesDetailOrder.value = backendDetail || record || {
+    id: String(orderId), orderId: String(orderId), salesOrderId: String(orderId)
+  }
   isSalesDetailOpen.value = true
   return { record, orderId }
 }
@@ -1152,11 +1166,22 @@ async function openSalesOrderDetail(payload = {}) {
   const requestSequence = ++salesDetailSequence
   const requestedOrderId = current.orderId
   isSalesDetailLoading.value = true
+  let timeoutHandle = null
   try {
-    const result = await requestAction('open-sales-order-detail', {
+    const detailRequest = requestAction('open-sales-order-detail', {
       orderId: current.orderId,
       recordVersion: current.record?.revision ?? current.record?.recordVersion
     })
+    const timeout = new Promise((resolve) => {
+      timeoutHandle = setTimeout(() => resolve({
+        result: {
+          status: 'failed',
+          code: 'SALES_ORDER_DETAIL_TIMEOUT',
+          message: '销售订单详情读取超过15秒，已停止等待；请刷新订单列表后重试。'
+        }
+      }), SALES_DETAIL_REQUEST_TIMEOUT_MS)
+    })
+    const result = await Promise.race([detailRequest, timeout])
     const projection = salesOrderProjectionFromResult(result)
     const activeOrderId = salesDetailOrder.value.id
       || salesDetailOrder.value.orderId
@@ -1178,6 +1203,7 @@ async function openSalesOrderDetail(payload = {}) {
     }
     return result
   } finally {
+    if (timeoutHandle) clearTimeout(timeoutHandle)
     const activeOrderId = salesDetailOrder.value.id
       || salesDetailOrder.value.orderId
       || salesDetailOrder.value.salesOrderId
@@ -1203,7 +1229,9 @@ function closeSalesDetail() {
 }
 
 function openRecordDetail(record) {
-  if (activeTabKey.value === 'sales') return openSalesOrderDetail({ orderId: record.id })
+  if (activeTabKey.value === 'sales') {
+    return openSalesOrderDetail({ orderId: record?.id || record?.orderId || record?.salesOrderId })
+  }
   if (activeTabKey.value === 'service' && !canUseCashierV3Operation('cashier.v3.order.service_detail')) return
   genericDetailRecord.value = record
   return null
@@ -1443,6 +1471,64 @@ async function handleRechargeLifecycleAction(payload = {}) {
   return result
 }
 
+/**
+ * 作废成功后只在当前投影内落地终态。
+ * 作废接口已经在一个事务里完成所有实际业务事件的反向事实；
+ * 这里不能再触发整页订单查询、退款列表查询或重复详情读取。
+ */
+function applySalesOrderVoidLocally(orderId, result) {
+  const normalizedId = String(orderId || '')
+  if (!normalizedId) return
+  const currentProjection = orderCenter.value || {}
+  const statusPatch = {
+    orderStatus: '已作废',
+    order_status: '已作废',
+    status: 'voided',
+    statusLabel: '已作废',
+    availableActions: []
+  }
+  const patchRows = (rows, removeNormal) => {
+    if (!Array.isArray(rows)) return rows
+    return rows.reduce((next, row) => {
+      const rowId = salesOrderDisplayId(row)
+      if (rowId !== normalizedId) {
+        next.push(row)
+        return next
+      }
+      if (!removeNormal) next.push({ ...row, ...statusPatch })
+      return next
+    }, [])
+  }
+  const salesQuery = queryModelByType.value.sales || {}
+  const normalScope = String(salesQuery.status || '') === 'normal'
+  const existingRows = Array.isArray(currentProjection.recordsByType?.sales)
+    ? currentProjection.recordsByType.sales
+    : (Array.isArray(currentProjection.salesOrders) ? currentProjection.salesOrders : [])
+  const nextRows = patchRows(existingRows, normalScope)
+  const nextPages = currentProjection.pagesByType?.sales
+    ? {
+        ...currentProjection.pagesByType,
+        sales: {
+          ...currentProjection.pagesByType.sales,
+          total: normalScope ? Math.max(0, Number(currentProjection.pagesByType.sales.total || 0) - 1) : currentProjection.pagesByType.sales.total
+        }
+      }
+    : currentProjection.pagesByType
+  state.orderCenter = {
+    ...currentProjection,
+    recordsByType: { ...(currentProjection.recordsByType || {}), sales: nextRows },
+    salesOrders: nextRows,
+    pagesByType: nextPages,
+    total: normalScope ? Math.max(0, Number(currentProjection.total || 0) - 1) : currentProjection.total,
+    salesOrderDetail: salesDetailBelongsToOrder(salesDetailOrder.value, normalizedId)
+      ? { ...salesDetailOrder.value, ...statusPatch }
+      : currentProjection.salesOrderDetail
+  }
+  if (salesDetailBelongsToOrder(salesDetailOrder.value, normalizedId)) {
+    salesDetailOrder.value = { ...salesDetailOrder.value, ...statusPatch }
+  }
+}
+
 async function handleSalesOrderDetailAction(payload = {}) {
   const action = String(payload.action || '')
   if (!allowedSalesOrderDetailActions.has(action)) {
@@ -1504,9 +1590,16 @@ async function handleSalesOrderDetailAction(payload = {}) {
   }
   if (['refund-sales-order', 'void-sales-order'].includes(action)
     && ['success', 'succeeded'].includes(actionStatus(result))) {
-    await queryRecords({}, false)
-    await refreshRefundRecords()
-    await openSalesOrderDetail({ orderId: currentOrderId })
+    if (action === 'void-sales-order') {
+      applySalesOrderVoidLocally(currentOrderId, result)
+    } else {
+      // Partial refund still needs the refund tab's authoritative projection;
+      // a void is already represented by the returned lifecycle result and
+      // must not perform an unrelated full order-center reload.
+      await queryRecords({}, false)
+      await refreshRefundRecords()
+      await openSalesOrderDetail({ orderId: currentOrderId })
+    }
   }
   if (action === 'reopen-sales-order'
     && !['failed', 'conflict'].includes(actionStatus(result))

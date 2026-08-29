@@ -624,12 +624,17 @@ async function runAction(action, payload = {}) {
     </div>
 
     <main class="sales-order-detail-overlay__body">
-      <div v-if="isLoading" class="sales-order-detail-loading" role="status">
+      <div v-if="isLoading && !orderId" class="sales-order-detail-loading" role="status">
         <span class="sales-order-detail-loading__spinner" />
         正在加载销售订单详情…
       </div>
 
-      <template v-else>
+      <div v-else-if="isLoading" class="sales-order-detail-loading sales-order-detail-loading--inline" role="status">
+        <span class="sales-order-detail-loading__spinner" />
+        正在读取最新订单详情…
+      </div>
+
+      <template v-if="!isLoading || orderId">
         <template v-if="!actionOnly">
         <section v-if="basicInfoRows.length" class="sales-order-detail-section">
           <header class="sales-order-detail-section__header">
@@ -1424,6 +1429,13 @@ async function runAction(action, payload = {}) {
   min-height: 260px;
   color: #64748b;
   font-size: 14px;
+}
+
+.sales-order-detail-loading--inline {
+  min-height: 0;
+  justify-content: flex-start;
+  max-width: 1180px;
+  margin: 0 auto 12px;
 }
 
 .sales-order-detail-loading__spinner {
