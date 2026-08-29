@@ -104,10 +104,6 @@ function serviceSource() {
   return '权益'
 }
 
-function serviceCraftsman(service) {
-  return pickValue(service, ['craftsmenSummary', 'craftsmen', 'craftsman', 'operatorName'])
-}
-
 function summaryValue(order, keys) {
   const summary = order.amountSummary || order.summary || order.orderSummary || {}
   return pickValue(summary, keys) ?? pickValue(order, keys)
@@ -229,8 +225,8 @@ export function buildSalesOrderReceiptHtml(order = {}, options = {}) {
     ? items.map((item) => `<tr><td>${escapeHtml(itemName(item))}</td><td class="right">x${escapeHtml(itemQuantity(item))}</td><td class="right">${escapeHtml(displayAmount(itemAmount(item)))}</td></tr>`).join('')
     : '<tr><td colspan="3" class="empty">暂无商品明细</td></tr>'
   const serviceRows = services.length
-    ? services.map((service) => `<tr><td>${escapeHtml(serviceName(service))}</td><td class="right">x${escapeHtml(serviceQuantity(service))}</td><td>${escapeHtml(displayText(serviceSource(service)))}</td><td>${escapeHtml(displayText(serviceCraftsman(service)))}</td></tr>`).join('')
-    : '<tr><td colspan="4" class="empty">暂无服务明细</td></tr>'
+    ? services.map((service) => `<tr><td>${escapeHtml(serviceName(service))}</td><td class="right">x${escapeHtml(serviceQuantity(service))}</td><td>${escapeHtml(displayText(serviceSource(service)))}</td></tr>`).join('')
+    : '<tr><td colspan="3" class="empty">暂无服务明细</td></tr>'
   const paymentRows = payments.length
     ? payments.map((line) => `<tr><td>${escapeHtml(paymentName(line))}</td><td class="right">${escapeHtml(displayAmount(paymentAmount(line)))}</td></tr>`).join('')
     : '<tr><td colspan="2" class="empty">暂无收款明细</td></tr>'
@@ -269,10 +265,9 @@ export function buildSalesOrderReceiptHtml(order = {}, options = {}) {
   .items-table th:nth-child(1), .items-table td:nth-child(1) { width: 57%; }
   .items-table th:nth-child(2), .items-table td:nth-child(2) { width: 15%; }
   .items-table th:nth-child(3), .items-table td:nth-child(3) { width: 28%; }
-  .services-table th:nth-child(1), .services-table td:nth-child(1) { width: 31%; }
-  .services-table th:nth-child(2), .services-table td:nth-child(2) { width: 14%; }
-  .services-table th:nth-child(3), .services-table td:nth-child(3) { width: 27%; }
-  .services-table th:nth-child(4), .services-table td:nth-child(4) { width: 28%; }
+  .services-table th:nth-child(1), .services-table td:nth-child(1) { width: 45%; }
+  .services-table th:nth-child(2), .services-table td:nth-child(2) { width: 20%; }
+  .services-table th:nth-child(3), .services-table td:nth-child(3) { width: 35%; }
   .payments-table th:nth-child(1), .payments-table td:nth-child(1) { width: 68%; }
   .payments-table th:nth-child(2), .payments-table td:nth-child(2) { width: 32%; }
   .empty { color: #6b7280; text-align: center; }
@@ -308,7 +303,7 @@ export function buildSalesOrderReceiptHtml(order = {}, options = {}) {
   ${hasSalesSection ? `<h2>销售明细</h2>
   <table class="items-table"><thead><tr><th>名称</th><th class="right">数量</th><th class="right">金额</th></tr></thead><tbody>${itemRows}</tbody></table>` : ''}
   ${hasServiceSection ? `<h2>服务明细</h2>
-  <table class="services-table"><thead><tr><th>项目</th><th class="right">次数</th><th>来源</th><th>手艺人</th></tr></thead><tbody>${serviceRows}</tbody></table>` : ''}
+  <table class="services-table"><thead><tr><th>项目</th><th class="right">次数</th><th>来源</th></tr></thead><tbody>${serviceRows}</tbody></table>` : ''}
   ${payments.length || hasSalesSection ? `<h2>收款明细</h2>
   <table class="payments-table"><thead><tr><th>收款方式</th><th class="right">金额</th></tr></thead><tbody>${paymentRows}</tbody></table>` : ''}
   ${summaryRows || hasSalesSection ? `<div class="summary">${summaryRows || '<div class="empty">暂无金额汇总</div>'}</div>` : ''}
@@ -366,7 +361,6 @@ export function salesOrderReceiptFromCheckout(checkout = {}) {
       serviceProject: pickValue(line, ['serviceProject', 'projectName', 'name', 'itemName']),
       usedTimes: pickValue(line, ['quantity', 'usedTimes', 'count', 'num']),
       entitlementSource: pickValue(line, ['sourceNameSnapshot', 'sourceName', 'entitlementSource', 'sourceCardName']),
-      craftsmenSummary: pickValue(line, ['craftsmenSummary', 'craftsmen', 'craftsman']),
       serviceAmount: pickValue(line, ['actualAmount', 'payableAmount', 'amountDue', 'amount'])
     }))
   const amountSummary = [source.amountSummary, source.summary, source.orderSummary, snapshot.summary, snapshot.amountSummary]
