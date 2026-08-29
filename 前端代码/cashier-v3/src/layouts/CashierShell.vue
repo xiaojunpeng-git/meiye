@@ -2689,7 +2689,7 @@ onBeforeUnmount(() => {
           <button type="button" class="cashier-account__trigger" :aria-expanded="isAccountMenuOpen" :title="operatorLabel" @click="isAccountMenuOpen = !isAccountMenuOpen">
           <CircleUserRound class="cashier-account__icon" :size="20" :stroke-width="1.9" aria-hidden="true" />
           <div v-if="!isSidebarCollapsed" class="cashier-account__copy">
-            <span class="cashier-account__label">V26082901</span>
+            <span class="cashier-account__label">V26083001</span>
             <strong>{{ operatorLabel }}</strong>
           </div>
           </button>
