@@ -842,7 +842,7 @@ async function runAction(action, payload = {}) {
           </section>
 
           <section v-if="activeLifecycleForm === 'void'" class="sales-order-detail-section sales-order-detail-section--actions">
-          <header class="sales-order-detail-section__header"><div><h3>作废订单</h3><span>作废会保留原单和操作记录，自动退回原单本金、赠金和未使用卡权益，并取消完全未还欠款。已使用权益或已还欠款时不允许作废。</span></div></header>
+          <header class="sales-order-detail-section__header"><div><h3>作废订单</h3><span>作废会保留原单和操作记录，在同一事务内冲销本单已发生的余额、优惠券、欠款、出库、服务及人员业绩；未发生的业务自动跳过。</span></div></header>
           <div class="sales-order-detail-lifecycle-form">
             <label>作废原因<textarea v-model.trim="voidReason" maxlength="255" rows="3" placeholder="填写作废原因" /></label>
             <div class="sales-order-detail-quick-actions"><button type="button" class="sales-order-detail-button sales-order-detail-button--text" :disabled="Boolean(pendingAction)" @click="activeLifecycleForm = ''">取消</button><button type="button" class="sales-order-detail-button sales-order-detail-button--secondary" :disabled="Boolean(pendingAction)" @click="submitVoid">确认作废</button></div>

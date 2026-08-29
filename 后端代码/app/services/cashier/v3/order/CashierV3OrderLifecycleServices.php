@@ -177,6 +177,17 @@ final class CashierV3OrderLifecycleServices
             (new CashierV3CardOperationReversalServices())->apply(
                 $cardOperationReversal, $action, $operationId, $operator, $dataScope, $now
             );
+            if ($action === 'void-sales-order') {
+                // A sale can already have produced completed service facts.
+                // Full-order void is an atomic cascade: reverse those service
+                // facts (and their entitlement occupation/performance) when
+                // present, while orders without service facts simply skip it.
+                $this->voidCompletedServiceFactsInTx(
+                    $source, $commandKey, $operator, $dataScope,
+                    $recorder, $execution, (array)($scope['event_contract'] ?? [])
+                );
+                $this->voidOrderAttributionFactsInTx($source, $dataScope);
+            }
             if ($action === 'refund-sales-order') {
                 $input['refundLines'] = $this->allocateRefundLines($input['refundLines'], $input, $financial);
             }
@@ -513,15 +524,85 @@ final class CashierV3OrderLifecycleServices
             }
             return $prepared;
         }
-        $hasEntitlement = Db::name('cashier_v3_entitlement_completion_receipt')
-            ->where('tenant_id', $scope->tenantId())
-            ->where('checkout_request_id', $source['checkoutRequestId'])->count() > 0;
-        // 卡项由专用权益撤销服务逐张验证，仅完全未使用时放行。商品
-        // 的原批次库存回补在同一事务内由专用库存冲销服务完成。
-        if ($hasEntitlement) throw self::failure('order_reversal_entitlement_already_consumed');
+        // 卡项、余额、欠款及现金事实由专用服务在同一事务内冲销；
+        // 未发生的业务事实自然为空并跳过。
         return (new CashierV3SalesOrderReversalServices())->prepare(
             $source, $action, $input, $scope, $entitlementCreditCents
         );
+    }
+
+    /**
+     * Reverse every completed service fact produced by this sale, if any.
+     * Service records are a separate domain and therefore use their own
+     * append-only void operation/facts, but execute inside the parent order
+     * transaction so the sale cannot become voided while service state stays
+     * consumed. A plain product sale has no rows and is intentionally a no-op.
+     */
+    private function voidCompletedServiceFactsInTx(
+        array $source,
+        string $commandKey,
+        CashierV3OperatorScope $operator,
+        CashierV3DataScopeContext $scope,
+        CashierV3BusinessEventRecorder $recorder,
+        CashierV3BusinessEventExecution $execution,
+        array $eventContract
+    ): void {
+        $rows = Db::name('cashier_v3_entitlement_service_fact')
+            ->where('tenant_id', $scope->tenantId())
+            ->where('store_id', (int)$source['storeId'])
+            ->where('checkout_request_id', (string)$source['checkoutRequestId'])
+            ->where('service_status', 'completed')
+            ->field('id')
+            ->order('id', 'asc')
+            ->lock(true)
+            ->select()
+            ->toArray();
+        if ($rows === []) return;
+
+        $serviceVoid = new CashierV3ServiceRecordVoidServices();
+        foreach ($rows as $row) {
+            $serviceFactId = (int)($row['id'] ?? 0);
+            if ($serviceFactId <= 0) throw self::failure('sales_void_service_fact_invalid');
+            $serviceVoid->executeInTx('void-service-record', [
+                'operator_scope' => $operator,
+                'data_scope' => $scope,
+                'event_recorder' => $recorder,
+                'event_execution' => $execution,
+                'event_contract' => $eventContract,
+                'idempotency_key' => $commandKey . ':service:' . $serviceFactId,
+                'payload' => [
+                    'serviceFactId' => (string)$serviceFactId,
+                    'reason' => '销售订单作废：' . (string)$source['sourceNo'],
+                ],
+            ]);
+        }
+    }
+
+    /**
+     * 导购和销售经理归属事实没有独立的 reversal 行，沿用人员调整域
+     * 的 status=effective/reversed 约定：作废时只关闭本单当前有效归属，
+     * 原始快照仍保留用于审计，报表因此不再统计该单业绩。
+     */
+    private function voidOrderAttributionFactsInTx(array $source, CashierV3DataScopeContext $scope): void
+    {
+        foreach (['cashier_v3_customer_guide_round_fact', 'cashier_v3_sales_manager_fact'] as $table) {
+            $rows = Db::name($table)
+                ->where('tenant_id', $scope->tenantId())
+                ->where('order_id', (string)$source['sourceId'])
+                ->where('status', 'effective')
+                ->field('id')
+                ->order('id', 'asc')
+                ->lock(true)
+                ->select()
+                ->toArray();
+            foreach ($rows as $row) {
+                $updated = Db::name($table)
+                    ->where('id', (int)$row['id'])
+                    ->where('status', 'effective')
+                    ->update(['status' => 'reversed']);
+                if ((int)$updated !== 1) throw self::failure('sales_void_attribution_reversal_race');
+            }
+        }
     }
 
     /** @return array<int,array<string,mixed>> */
@@ -534,6 +615,10 @@ final class CashierV3OrderLifecycleServices
                 ->where('fact_direction', 'forward')->where('status', 'effective')->lock(true)->order('id', 'asc')->select()->toArray();
             if ($action === 'void-sales-order') {
                 foreach ($rows as $row) {
+                    if ($table === 'cashier_v3_performance_fact'
+                        && in_array((string)($row['performance_type'] ?? ''), ['consumption_performance_recorded', 'labor_performance_allocated'], true)) {
+                        continue;
+                    }
                     $reversal = $this->insertReversal($table, $row, $operationId, $commandKey, $event, $operator, $now);
                     if ($table === 'cashier_v3_payment_fact') $paymentReversals[] = $reversal;
                 }
@@ -1126,7 +1211,7 @@ final class CashierV3OrderLifecycleServices
     private function operationType(string $action): string { return $action === 'update-sales-order-note' ? 'note_update' : (strpos($action, 'adjust-') === 0 ? 'personnel_adjustment' : (strpos($action, 'refund-') === 0 ? 'refund' : (strpos($action, 'void-') === 0 ? 'void' : 'reopen'))); }
     private function eventType(string $action): string { return str_replace(['adjust-sales-order-personnel','update-sales-order-note','refund-sales-order','void-sales-order','reopen-sales-order'], ['sales_order.personnel_adjusted','sales_order.note_updated','sales_order.refunded','sales_order.voided','sales_order.reopened'], $action); }
     private function operationNo(string $action, string $id, int $time, string $tenant): string { $prefix = $action === 'update-sales-order-note' ? 'BZ' : (strpos($action, 'refund-') === 0 ? 'TK' : (strpos($action, 'void-') === 0 ? 'ZF' : (strpos($action, 'reopen-') === 0 ? 'CK' : 'RY'))); return $prefix . date('ymd', $time) . strtoupper(substr(hash('sha256', $tenant . '|' . $id), 0, 5)); }
-    private function result(array $row, bool $replayed): array { $touched = ['sales_order']; if ((int)($row['restored_principal_cents'] ?? 0) + (int)($row['restored_bonus_cents'] ?? 0) > 0) $touched[] = 'member_balance'; return ['contractVersion' => self::CONTRACT_VERSION, 'operationId' => (string)$row['operation_id'], 'operationNo' => (string)$row['operation_no'], 'operationType' => (string)$row['operation_type'], 'sourceOrderNo' => (string)$row['source_order_no_snapshot'], 'status' => (string)$row['status'], 'replayed' => $replayed, 'touchedRoles' => $touched, 'message' => '订单操作已完成。']; }
+    private function result(array $row, bool $replayed): array { $touched = ['sales_order']; if ((int)($row['restored_principal_cents'] ?? 0) + (int)($row['restored_bonus_cents'] ?? 0) > 0) $touched[] = 'member_balance'; $message = (string)$row['operation_type'] === 'void' ? '订单已作废。' : '订单操作已完成。'; return ['contractVersion' => self::CONTRACT_VERSION, 'operationId' => (string)$row['operation_id'], 'operationNo' => (string)$row['operation_no'], 'operationType' => (string)$row['operation_type'], 'sourceOrderNo' => (string)$row['source_order_no_snapshot'], 'status' => (string)$row['status'], 'replayed' => $replayed, 'touchedRoles' => $touched, 'message' => $message]; }
     private function secret(): string { $secret = trim((string)config('cashier_v3.checkout_namespace_secret')); if (strlen($secret) < 32) throw self::failure('order_lifecycle_secret_missing'); return $secret; }
     private function moneyCents($value): int { $raw = trim((string)$value); if (preg_match('/^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,2})?$/D', $raw) !== 1) throw self::failure('order_lifecycle_money_invalid'); [$a,$b] = array_pad(explode('.', $raw, 2), 2, ''); return (int)$a * 100 + (int)str_pad($b, 2, '0'); }
     private function optionalMoneyCents($value): int { return $this->moneyCents($value); }

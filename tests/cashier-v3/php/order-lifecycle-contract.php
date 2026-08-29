@@ -117,7 +117,11 @@ $checks = [
         && strpos($cardOperationReversal, 'UserBalanceAtomicServices') === false
         && strpos($reversalService, 'entitlementCreditCents') !== false
         && strpos($service, 'card_operation_upgrade_refund_must_reverse_full_order') !== false,
-    'lifecycle_eligibility_and_reopen_queries_are_tenant_scoped' => strpos($service, "Db::name('cashier_v3_entitlement_completion_receipt')\n            ->where('tenant_id', \$scope->tenantId())") !== false
+    'lifecycle_eligibility_and_reopen_queries_are_tenant_scoped' => strpos($service, "Db::name('cashier_v3_entitlement_service_fact')\n            ->where('tenant_id', \$scope->tenantId())") !== false
+        && strpos($service, 'voidOrderAttributionFactsInTx') !== false
+        && strpos($service, 'sales_void_attribution_reversal_race') !== false
+        && strpos($service, ':service:') !== false
+        && strpos($service, "'consumption_performance_recorded', 'labor_performance_allocated'") !== false
         && strpos($service, "Db::name(self::OPERATION_TABLE)->where('tenant_id', \$scope->tenantId())") !== false
         && strpos($service, "Db::name('cashier_v3_sales_order_line')->where('tenant_id', \$scope->tenantId())") !== false,
 ];
