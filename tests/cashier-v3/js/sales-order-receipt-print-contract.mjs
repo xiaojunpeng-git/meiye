@@ -157,15 +157,22 @@ ok('混合结账小票同时展示销售和服务区块', () => {
     salesOrderId: 'S-1001',
     lines: [
       { lineRole: 'sale', name: '买卡', quantity: 1, payableAmount: 200 },
-      { lineRole: 'entitlement_service', name: '东方熏蒸', quantity: 1, sourceName: '次卡权益' }
+      { lineRole: 'entitlement_service', name: '东方熏蒸', quantity: 1, sourceName: '次卡权益' },
+      { lineRole: 'payment', name: '微信', quantity: 1, amount: 200 }
     ],
-    payment: { selectedLines: [{ methodName: '现金', amount: 200 }] }
+    payment: { selectedLines: [] },
+    summary: [],
+    amountSummary: { originalAmount: 200, discountAmount: 0, receivableAmount: 200 }
   })
   const html = buildSalesOrderReceiptHtml(receipt)
   assert.match(html, /销售明细/)
   assert.match(html, /服务明细/)
   assert.match(html, /买卡/)
   assert.match(html, /东方熏蒸/)
+  assert.equal(receipt.items.length, 1)
+  assert.equal(receipt.paymentDetails.length, 1)
+  assert.equal(receipt.paymentDetails[0].name, '微信')
+  assert.match(html, /应付金额/)
 })
 
 ok('用户点击后在当前页面显示小票预览且不自动打印', () => {
@@ -238,6 +245,46 @@ ok('用户点击后在当前页面显示小票预览且不自动打印', () => {
   assert.equal(listeners.has('message'), true)
 })
 
+ok('系统打印未被浏览器接管时给出可见提示并恢复按钮', () => {
+  const bodyChildren = []
+  const listeners = new Map()
+  const createElement = (tagName) => ({
+    tagName,
+    style: {},
+    children: [],
+    handlers: {},
+    contentWindow: {},
+    contentDocument: tagName === 'iframe'
+      ? { querySelector() { return { scrollHeight: 320, getBoundingClientRect() { return { height: 318 } } } } }
+      : undefined,
+    scrollHeight: 680,
+    getBoundingClientRect() { return { height: 680 } },
+    setAttribute() {},
+    appendChild(child) { this.children.push(child) },
+    addEventListener(type, listener) { this.handlers[type] = listener },
+    remove() {}
+  })
+  const hostWindow = {
+    localStorage: { getItem() { return null } },
+    DOMParser: class { parseFromString() { return { querySelector() { return { innerHTML: '<h1>SO-1006</h1>' } } } } },
+    print() {},
+    setTimeout(callback) { callback(); return 1 },
+    clearTimeout() {},
+    document: {
+      body: { appendChild(child) { bodyChildren.push(child) } },
+      head: { appendChild() {} },
+      createElement,
+      querySelector() { return null }
+    },
+    addEventListener(type, listener) { listeners.set(type, listener) },
+    removeEventListener(type) { listeners.delete(type) }
+  }
+  const result = openSalesOrderReceiptPrint({ salesOrderNo: 'SO-1006' }, hostWindow)
+  result.preview.printButton.handlers.click()
+  assert.equal(result.preview.printButton.disabled, false)
+  assert.match(result.preview.status.textContent, /未打开系统打印|Chrome 或 Edge/)
+})
+
 ok('浏览器不能承载当前页预览时返回中文提示', () => {
   const result = openSalesOrderReceiptPrint({ salesOrderNo: 'SO-1004' }, { document: null })
   assert.equal(result.ok, false)
@@ -268,19 +315,24 @@ ok('订单中心提供系统驱动纸宽设置与测试小票入口', () => {
   assert.doesNotMatch(printerSetup, /ESC\/POS|USB|Printer_Impact_Printer/)
 })
 
-ok('结账成功页按业务类型读取快照后再打开本地小票预览', () => {
+ok('结账成功页直接使用成功快照打开本地小票预览', () => {
   assert.match(checkoutOverlay, /v-if="canPrintReceipt"/)
   assert.match(checkoutOverlay, /hasEntitlementLines\.value[\s\S]*props\.isServiceOrder === true/)
   assert.match(checkoutOverlay, /'打印小票'/)
-  assert.match(checkoutOverlay, /await request\('print-sales-order-receipt'\)/)
-  assert.match(checkoutOverlay, /const detail = response\?\.receiptOrder/)
-  assert.match(checkoutOverlay, /openSalesOrderReceiptPrint\((?:detail|receiptDetail)\)/)
+  assert.match(checkoutOverlay, /const checkoutReceipt = props\.receipt[\s\S]*salesOrderReceiptFromCheckout\(props\.checkout\)/)
+  assert.match(checkoutOverlay, /openSalesOrderReceiptPrint\(checkoutReceipt\)/)
+  assert.doesNotMatch(checkoutOverlay, /request\('print-sales-order-receipt'/)
   assert.match(checkoutOverlay, /打印服务小票/)
   assert.match(receiptPrint, /serviceRecordReceiptFromRecord/)
   assert.match(orderCenter, /打印销售小票/)
   assert.match(orderCenter, /打印服务小票/)
   assert.match(checkoutOverlay, /正在加载小票/)
   assert.match(cashierWorkbench, /requestAction\('open-sales-order-detail', \{ orderId: salesOrderId \}\)/)
+  assert.match(cashierWorkbench, /checkoutReceiptSnapshot/)
+  assert.match(cashierWorkbench, /:receipt="checkoutReceiptSnapshot"/)
+  assert.doesNotMatch(cashierWorkbench, /\.\.\.\(checkoutReceiptSnapshot\.value \|\| \{\}\)/)
+  assert.match(cashierWorkbench, /checkoutReceiptSnapshot\.value = clonePlain\(\{[\s\S]*salesOrderReceiptFromCheckout\(receiptPreview\)/)
+  assert.match(cashierWorkbench, /payload\?\.salesOrderId/)
   assert.match(cashierWorkbench, /return \{ \.\.\.result, receiptOrder: detail \}/)
   assert.doesNotMatch(cashierWorkbench, /requestAction\(action, \{\s*salesOrderId/)
 })

@@ -39,6 +39,14 @@ function firstList(source, keys) {
   return []
 }
 
+function firstNonEmptyList(source, keys) {
+  if (!source || typeof source !== 'object') return []
+  for (const key of keys) {
+    if (Array.isArray(source[key]) && source[key].length) return source[key]
+  }
+  return firstList(source, keys)
+}
+
 function escapeHtml(value) {
   return String(value ?? '')
     .replace(/&/g, '&amp;')
@@ -342,12 +350,18 @@ export function salesOrderReceiptFromCheckout(checkout = {}) {
       ? source.snapshot
       : {}
   const payment = source.payment && typeof source.payment === 'object' ? source.payment : {}
-  const lines = firstList(snapshot, ['items', 'orderItems', 'lines', 'details']).length
-    ? firstList(snapshot, ['items', 'orderItems', 'lines', 'details'])
-    : firstList(source, ['orderLines', 'lines'])
-  const salesLines = lines.filter((line) => !['entitlement_service', 'service', 'service_line'].includes(String(line?.lineRole || line?.kind || '').toLowerCase()))
-  const serviceRecords = lines
-    .filter((line) => ['entitlement_service', 'service', 'service_line'].includes(String(line?.lineRole || line?.kind || '').toLowerCase()))
+  const lines = firstNonEmptyList(snapshot, ['items', 'orderItems', 'lines', 'details']).length
+    ? firstNonEmptyList(snapshot, ['items', 'orderItems', 'lines', 'details'])
+    : firstNonEmptyList(source, ['orderLines', 'lines'])
+  const serviceRoles = new Set(['entitlement_service', 'service', 'service_line'])
+  const paymentRoles = new Set(['payment', 'balance_payment'])
+  const serviceLines = lines.filter((line) => serviceRoles.has(String(line?.lineRole || line?.kind || '').toLowerCase()))
+  const paymentLines = lines.filter((line) => paymentRoles.has(String(line?.lineRole || line?.kind || '').toLowerCase()))
+  const salesLines = lines.filter((line) => {
+    const role = String(line?.lineRole || line?.kind || '').toLowerCase()
+    return !serviceRoles.has(role) && !paymentRoles.has(role)
+  })
+  const serviceRecords = serviceLines
     .map((line) => ({
       serviceProject: pickValue(line, ['serviceProject', 'projectName', 'name', 'itemName']),
       usedTimes: pickValue(line, ['quantity', 'usedTimes', 'count', 'num']),
@@ -355,6 +369,8 @@ export function salesOrderReceiptFromCheckout(checkout = {}) {
       craftsmenSummary: pickValue(line, ['craftsmenSummary', 'craftsmen', 'craftsman']),
       serviceAmount: pickValue(line, ['actualAmount', 'payableAmount', 'amountDue', 'amount'])
     }))
+  const amountSummary = [source.amountSummary, source.summary, source.orderSummary, snapshot.summary, snapshot.amountSummary]
+    .find((value) => value && typeof value === 'object' && !Array.isArray(value)) || {}
   return {
     ...snapshot,
     salesOrderNo: pickValue(source, ['salesOrderNo', 'orderNo']) || pickValue(snapshot, ['salesOrderNo', 'orderNo']),
@@ -368,10 +384,12 @@ export function salesOrderReceiptFromCheckout(checkout = {}) {
     items: salesLines,
     serviceRecords,
     receiptMode: serviceRecords.length && !salesLines.length ? 'service' : serviceRecords.length ? 'mixed' : 'sales',
-    paymentDetails: firstList(payment, ['resultLines', 'selectedLines']).length
-      ? firstList(payment, ['resultLines', 'selectedLines'])
-      : firstList(snapshot, ['paymentDetails', 'paymentLines', 'receipts', 'payments']),
-    amountSummary: source.summary || source.orderSummary || snapshot.summary || snapshot.amountSummary || {}
+    paymentDetails: firstNonEmptyList(payment, ['resultLines', 'selectedLines']).length
+      ? firstNonEmptyList(payment, ['resultLines', 'selectedLines'])
+      : firstNonEmptyList(snapshot, ['paymentDetails', 'paymentLines', 'receipts', 'payments']).length
+        ? firstNonEmptyList(snapshot, ['paymentDetails', 'paymentLines', 'receipts', 'payments'])
+        : paymentLines,
+    amountSummary
   }
 }
 
@@ -432,14 +450,14 @@ export function mountSalesOrderReceiptPreview(order, hostWindow = window, option
   let printHost = null
   let printStyle = null
   let printCapabilityTimer = null
-  let printLifecycleStarted = false
+  let printLifecycleCompleted = false
 
   const handleBeforePrint = () => {
-    printLifecycleStarted = true
     status.textContent = ''
   }
 
   const handleAfterPrint = () => {
+    printLifecycleCompleted = true
     status.textContent = ''
     printButton.disabled = false
   }
@@ -527,15 +545,21 @@ export function mountSalesOrderReceiptPreview(order, hostWindow = window, option
       status.textContent = '当前浏览器无法打开系统打印窗口。'
       return
     }
-    printLifecycleStarted = false
+    printLifecycleCompleted = false
     printButton.disabled = true
     hostWindow.addEventListener?.('beforeprint', handleBeforePrint, { once: true })
     hostWindow.addEventListener?.('afterprint', handleAfterPrint, { once: true })
-    hostWindow.print()
+    try {
+      hostWindow.print()
+    } catch {
+      printButton.disabled = false
+      status.textContent = '当前浏览器无法打开系统打印窗口，请使用 Chrome 或 Edge。'
+      return
+    }
     printCapabilityTimer = hostWindow.setTimeout?.(() => {
       printCapabilityTimer = null
       printButton.disabled = false
-      if (!printLifecycleStarted) status.textContent = '当前内置浏览器不支持系统打印，请使用 Chrome 或 Edge。'
+      if (!printLifecycleCompleted) status.textContent = '当前内置浏览器未打开系统打印，请使用 Chrome 或 Edge。'
     }, 800) ?? null
   })
   closeButton.addEventListener?.('click', disposePreview)
@@ -544,7 +568,7 @@ export function mountSalesOrderReceiptPreview(order, hostWindow = window, option
     disposePreview()
   })
   documentRef.body.appendChild(overlay)
-  return { overlay, panel, frame, printButton, closeButton }
+  return { overlay, panel, frame, printButton, closeButton, status }
 }
 
 export function openSalesOrderReceiptPrint(order, hostWindow = window, options = {}) {

@@ -29,6 +29,7 @@ import {
   mergeSalesOrderCenterProjection,
   salesOrderProjectionFromResult
 } from '@/services/cashierV3OrderProjectionContract'
+import { salesOrderReceiptFromCheckout } from '@/services/salesOrderReceiptPrint'
 import CashierCheckoutOverlay from '@/components/cashier/CashierCheckoutOverlay.vue'
 import CheckoutBusinessSourceOverlay from '@/components/cashier/CheckoutBusinessSourceOverlay.vue'
 import CashierGuidedBusinessPanel from '@/components/cashier/CashierGuidedBusinessPanel.vue'
@@ -381,6 +382,10 @@ const isRechargeDebtRepaymentCheckout = computed(() => (
   && checkout.value.orderLines.some((line) => String(line?.name || '') === '充值欠款补交')
 ))
 const checkoutLocalOutcome = ref({})
+// Keep the immutable browser snapshot only while the success overlay is open.
+// The workbench is cleared after settlement, but receipt printing still needs
+// the exact sale/service rows that were submitted in that transaction.
+const checkoutReceiptSnapshot = ref(null)
 // 编辑阶段的结账预览不创建 checkout_request。第三步确认时才把本地购物车
 // 与收款选择一次性写入既有结账流程，由服务端读取最新余额与权益后完成校验。
 const localCheckoutPreview = ref(null)
@@ -4825,7 +4830,12 @@ async function openCheckout() {
   }
   // The checkout wizard is a browser-only projection. The first write for this
   // order is the final submit-checkout carrying the complete snapshot.
-  localCheckoutPreview.value = localCheckoutPreviewSnapshot()
+  const preview = localCheckoutPreviewSnapshot()
+  localCheckoutPreview.value = preview
+  // Keep the exact page rows before any checkout-step mutation can replace or
+  // clear the workbench projection. The result-page receipt is a pure render
+  // of this browser snapshot; it must never depend on a follow-up order query.
+  checkoutReceiptSnapshot.value = clonePlain(salesOrderReceiptFromCheckout(preview))
   localCheckoutPaymentOperations.value = []
   checkoutLocalOutcome.value = {}
   checkoutRecoveryActiveStep.value = null
@@ -5099,6 +5109,16 @@ async function finalizeLocalCheckoutPreview(event = {}) {
   localCheckoutPreview.value = null
   try {
     const checkoutSnapshot = buildCheckoutSnapshot(preview || {})
+    // Freeze the printable projection before the single settlement request.
+    // This also covers successful responses whose envelope does not expose a
+    // printable line list; the lines are already the values shown in step 2.
+    checkoutReceiptSnapshot.value = clonePlain(
+      salesOrderReceiptFromCheckout({
+        ...checkoutSnapshot,
+        lines: Array.isArray(preview?.lines) ? preview.lines : checkoutSnapshot.lines,
+        payment: preview?.payment || checkoutSnapshot.payment
+      })
+    )
     const receivableCents = moneyToCents(checkoutSnapshotReceivableAmount(checkoutSnapshot.lines))
     const selectedCents = checkoutSnapshotPaymentLines(checkoutSnapshot.lines).reduce(
       (total, line) => total + moneyToCents(line?.amount),
@@ -5130,6 +5150,28 @@ async function finalizeLocalCheckoutPreview(event = {}) {
         checkoutSnapshot
       }
     })
+    if (['success', 'succeeded'].includes(resultStatus(submitted))) {
+      // Keep a presentation projection beside the exact command snapshot.
+      // buildCheckoutSnapshot intentionally strips UI/projection metadata for
+      // the server, but the result page still needs the submitted sale,
+      // service and payment rows immediately for printing.
+      const previewLines = Array.isArray(preview?.lines) ? preview.lines : []
+      const fallbackLines = Array.isArray(checkout.value?.orderLines)
+        ? checkout.value.orderLines
+        : (Array.isArray(cartLines.value) ? cartLines.value : [])
+      const receiptPreview = {
+        ...preview,
+        // A hot-reloaded or legacy projection can omit `lines` from the local
+        // preview while the visible cashier cart still has the same rows.
+        // Use that already-rendered page value only as a print projection;
+        // never substitute it into the submitted business snapshot.
+        lines: previewLines.length ? previewLines : fallbackLines
+      }
+      checkoutReceiptSnapshot.value = clonePlain({
+        ...checkoutSnapshot,
+        ...salesOrderReceiptFromCheckout(receiptPreview)
+      })
+    }
     event?.resolve?.(submitted)
     return submitted
   } finally {
@@ -5386,7 +5428,12 @@ async function requestCheckoutAction({ action, payload }) {
   }
 
   if (action === 'view-sales-order' || action === 'print-sales-order-receipt') {
-    const salesOrderId = checkout.value.salesOrderId
+    const salesOrderId = String(
+      payload?.salesOrderId
+      || checkoutOverlayState.value.salesOrderId
+      || checkout.value.salesOrderId
+      || ''
+    ).trim()
     if (!salesOrderId) {
       return { result: { status: 'failed', code: 'SALES_ORDER_ID_MISSING', message: '销售订单标识尚未加载，不能执行该操作。' } }
     }
@@ -5914,6 +5961,7 @@ function resetCashierLocalContext() {
   couponSelector.value = null
   isSavingLineCoupon.value = false
   checkoutLocalOutcome.value = {}
+  checkoutReceiptSnapshot.value = null
   localCheckoutBusinessDate.value = cashierToday
   localCheckoutBusinessDateReason.value = ''
   localCheckoutBusinessSource.value = {
@@ -5967,6 +6015,7 @@ async function closeSucceededCheckoutAndRefreshWorkbench(submissionResponse = {}
   }
   checkoutRequiresRootReload.value = false
   await closeCheckoutOverlay()
+  checkoutReceiptSnapshot.value = null
   // Settlement has already completed. Re-read the same workbench so the
   // cashier never returns to a stale cart that could be submitted again.
   // The draft snapshot is only an optimistic local projection. Once the
@@ -6711,6 +6760,7 @@ onBeforeUnmount(() => {
       <CashierCheckoutOverlay
         v-if="isCheckoutOpen"
         :checkout="checkoutOverlayState"
+        :receipt="checkoutReceiptSnapshot"
         :is-service-order="isServiceOrder && !isDebtRepaymentCheckout"
         :business-sources="checkoutInlineBusinessSources"
         :business-sources-loading="isLoadingCheckoutBusinessSources"

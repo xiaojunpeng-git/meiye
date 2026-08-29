@@ -11,6 +11,10 @@ const props = defineProps({
     type: Object,
     default: () => ({})
   },
+  receipt: {
+    type: Object,
+    default: null
+  },
   isServiceOrder: {
     type: Boolean,
     default: false
@@ -448,7 +452,9 @@ const canPrintReceipt = computed(() => (
   )
 ))
 const receiptPrintLabel = computed(() => (
-  hasEntitlementLines.value && !hasSaleLines.value ? '打印服务小票' : '打印小票'
+  hasEntitlementLines.value && !hasSaleLines.value && !String(props.checkout.salesOrderId || '').trim()
+    ? '打印服务小票'
+    : '打印小票'
 ))
 const hasResultLockedPaymentLine = computed(() => selectedPaymentLines.value.some((line) => paymentLineIsLocked(line)))
 const canReturnToPaymentEdit = computed(() => (
@@ -1008,27 +1014,15 @@ async function printReceipt() {
   receiptPrintError.value = ''
   receiptPrintLoading.value = true
   try {
-    const checkoutReceipt = salesOrderReceiptFromCheckout(props.checkout)
-    let receiptDetail = checkoutReceipt
-    // 销售部分继续读取已结算销售订单快照；服务单独结账不再为了打印
-    // 查询销售订单，也不会重新进入任何结账或业务写入流程。
-    if (hasSaleLines.value && String(props.checkout.salesOrderId || '').trim()) {
-      const response = await request('print-sales-order-receipt')
-      const detail = response?.receiptOrder
-      if (!detail || typeof detail !== 'object') {
-        receiptPrintError.value = String(response?.result?.message || response?.message || '订单明细尚未完整返回，暂时不能打印小票。')
-        return
-      }
-      receiptDetail = {
-        ...detail,
-        serviceRecords: checkoutReceipt.serviceRecords,
-        receiptMode: checkoutReceipt.serviceRecords.length ? 'mixed' : 'sales'
-      }
-    }
-    const result = openSalesOrderReceiptPrint(receiptDetail)
+    const checkoutReceipt = props.receipt && typeof props.receipt === 'object'
+      ? props.receipt
+      : salesOrderReceiptFromCheckout(props.checkout)
+    // 结账成功页只使用本次成功结账时保留的页面快照。打印是读操作，
+    // 不再额外查询订单详情，也不重新进入结账内核，避免预览被无关请求阻塞。
+    const result = openSalesOrderReceiptPrint(checkoutReceipt)
     if (!result.ok) receiptPrintError.value = result.message
   } catch (error) {
-    receiptPrintError.value = String(error?.message || '读取订单明细失败，暂时不能打印小票。')
+    receiptPrintError.value = String(error?.message || '小票预览打开失败，请重试。')
   } finally {
     receiptPrintLoading.value = false
   }
