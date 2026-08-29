@@ -440,8 +440,9 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             $line=(string)$row['source_line_id'];$order=(string)$row['order_id'];$salesFact=(string)$row['fact_id'];
             $guideRows=$guides[$order]??[];$salespersonRows=$salespeople[$line]??[];$managerRows=$managers[$line]??[];
             $anchorOnly=!empty($row['_anchor_only']);
-            if(!$anchorOnly&&!$this->newCustomerPersonnelMatches($guideRows,$salespersonRows,$managerRows,$input)){ $row['_exclude_personnel']=true; continue; }
-            if(!$anchorOnly&&!$guideRows&&!$salespersonRows&&!$managerRows){$row['_exclude_personnel']=true;continue;}
+            $hasRepayment=!empty($repaymentRows[$salesFact]);
+            if(!$anchorOnly&&!$hasRepayment&&!$this->newCustomerPersonnelMatches($guideRows,$salespersonRows,$managerRows,$input)){ $row['_exclude_personnel']=true; continue; }
+            if(!$anchorOnly&&!$hasRepayment&&!$guideRows&&!$salespersonRows&&!$managerRows){$row['_exclude_personnel']=true;continue;}
             $craftNames=[];$fee=0;foreach($personnel['performance'][$line]??[] as $f){if((string)$f['performance_type']==='labor_performance_allocated'){$craftNames[]=(string)$f['employee_name_snapshot'];$fee+=(int)$f['labor_fee_amount_cents'];}}
             $row['division_name']=(string)$row['organization_name_snapshot'];$row['customer']=(string)$row['member_name_snapshot'];
             $row['guide']=$this->newCustomerNames($guideRows,'guide_employee_id','guide_employee_name_snapshot');
