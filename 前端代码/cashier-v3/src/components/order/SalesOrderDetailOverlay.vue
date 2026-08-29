@@ -45,6 +45,10 @@ const props = defineProps({
     type: Boolean,
     default: false
   },
+  loadError: {
+    type: String,
+    default: ''
+  },
   onAction: {
     type: Function,
     default: null
@@ -92,6 +96,10 @@ const orderRevision = computed(() => pickValue(sourceOrder.value, ['revision', '
 const isGuestOrder = computed(() => sourceOrder.value.isGuest === true
   || Number(sourceOrder.value.memberId || sourceOrder.value.member_id || 0) <= 0)
 const itemLines = computed(() => firstList(sourceOrder.value, ['items', 'orderItems', 'lines', 'details']))
+const hasDetailContent = computed(() => Boolean(orderNo.value) && (
+  itemLines.value.length > 0
+  || basicInfoRows.value.length > 1
+))
 const paymentLines = computed(() => firstList(sourceOrder.value, ['paymentDetails', 'paymentLines', 'receipts', 'payments']))
 const refundLineDetails = computed(() => firstList(sourceOrder.value, ['refundLineDetails', 'refundLines']))
 const relatedSource = computed(() => {
@@ -624,17 +632,20 @@ async function runAction(action, payload = {}) {
     </div>
 
     <main class="sales-order-detail-overlay__body">
-      <div v-if="isLoading && !orderId" class="sales-order-detail-loading" role="status">
+      <div v-if="isLoading" class="sales-order-detail-loading" role="status">
         <span class="sales-order-detail-loading__spinner" />
-        正在加载销售订单详情…
+        正在读取销售订单详情…
       </div>
 
-      <div v-else-if="isLoading" class="sales-order-detail-loading sales-order-detail-loading--inline" role="status">
-        <span class="sales-order-detail-loading__spinner" />
-        正在读取最新订单详情…
+      <div v-else-if="loadError" class="sales-order-detail-loading" role="alert">
+        {{ loadError }}
       </div>
 
-      <template v-if="!isLoading || orderId">
+      <div v-else-if="!hasDetailContent" class="sales-order-detail-loading" role="alert">
+        订单详情未返回有效数据，请关闭后重新打开。
+      </div>
+
+      <template v-else>
         <template v-if="!actionOnly">
         <section v-if="basicInfoRows.length" class="sales-order-detail-section">
           <header class="sales-order-detail-section__header">
