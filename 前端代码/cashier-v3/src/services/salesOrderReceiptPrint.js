@@ -92,8 +92,8 @@ function serviceQuantity(service) {
   return pickValue(service, ['usedTimes', 'quantity', 'count', 'num']) || 1
 }
 
-function serviceSource(service) {
-  return pickValue(service, ['entitlementSource', 'sourceCardName', 'sourceName', 'source'])
+function serviceSource() {
+  return '权益'
 }
 
 function serviceCraftsman(service) {
@@ -300,7 +300,7 @@ export function buildSalesOrderReceiptHtml(order = {}, options = {}) {
   ${hasSalesSection ? `<h2>销售明细</h2>
   <table class="items-table"><thead><tr><th>名称</th><th class="right">数量</th><th class="right">金额</th></tr></thead><tbody>${itemRows}</tbody></table>` : ''}
   ${hasServiceSection ? `<h2>服务明细</h2>
-  <table class="services-table"><thead><tr><th>项目</th><th class="right">次数</th><th>权益来源</th><th>手艺人</th></tr></thead><tbody>${serviceRows}</tbody></table>` : ''}
+  <table class="services-table"><thead><tr><th>项目</th><th class="right">次数</th><th>来源</th><th>手艺人</th></tr></thead><tbody>${serviceRows}</tbody></table>` : ''}
   ${payments.length || hasSalesSection ? `<h2>收款明细</h2>
   <table class="payments-table"><thead><tr><th>收款方式</th><th class="right">金额</th></tr></thead><tbody>${paymentRows}</tbody></table>` : ''}
   ${summaryRows || hasSalesSection ? `<div class="summary">${summaryRows || '<div class="empty">暂无金额汇总</div>'}</div>` : ''}

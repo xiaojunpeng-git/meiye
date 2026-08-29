@@ -140,12 +140,15 @@ ok('服务记录小票只展示服务区块', () => {
     storeName: '测试门店',
     memberName: '测试会员',
     serviceProject: '东方熏蒸',
-    entitlementSource: '次卡权益',
+    entitlementSource: '6980随心挑',
     craftsmenSummary: '冯燕',
     usedTimes: 1
   }))
   assert.match(html, /服务明细/)
   assert.match(html, /东方熏蒸/)
+  assert.match(html, /<th>来源<\/th>/)
+  assert.match(html, />权益<\/td>/)
+  assert.doesNotMatch(html, /6980随心挑/)
   assert.doesNotMatch(html, /销售明细/)
 })
 
