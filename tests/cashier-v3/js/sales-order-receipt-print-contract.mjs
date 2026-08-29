@@ -11,6 +11,7 @@ import {
   openSalesOrderReceiptPrint,
   saveSalesOrderReceiptPrintSettings,
   salesOrderReceiptFromCheckout,
+  serviceRecordReceiptFromRecord,
   setSalesOrderReceiptPageSize
 } from '../../../前端代码/cashier-v3/src/services/salesOrderReceiptPrint.js'
 
@@ -18,6 +19,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../.
 const orderOverlay = readFileSync(path.join(root, '前端代码/cashier-v3/src/components/order/SalesOrderDetailOverlay.vue'), 'utf8')
 const checkoutOverlay = readFileSync(path.join(root, '前端代码/cashier-v3/src/components/cashier/CashierCheckoutOverlay.vue'), 'utf8')
 const printButton = readFileSync(path.join(root, '前端代码/cashier-v3/src/components/order/SalesOrderReceiptPrintButton.vue'), 'utf8')
+const receiptPrint = readFileSync(path.join(root, '前端代码/cashier-v3/src/services/salesOrderReceiptPrint.js'), 'utf8')
 const printerSetup = readFileSync(path.join(root, '前端代码/cashier-v3/src/components/order/ReceiptPrinterSetupOverlay.vue'), 'utf8')
 const orderCenter = readFileSync(path.join(root, '前端代码/cashier-v3/src/views/OrderCenterView.vue'), 'utf8')
 const cashierWorkbench = readFileSync(path.join(root, '前端代码/cashier-v3/src/views/CashierWorkbenchView.vue'), 'utf8')
@@ -132,6 +134,37 @@ ok('旧结账快照适配器兼容完整快照', () => {
   assert.equal(receipt.paymentDetails[0].name, '微信')
 })
 
+ok('服务记录小票只展示服务区块', () => {
+  const html = buildSalesOrderReceiptHtml(serviceRecordReceiptFromRecord({
+    serviceRecordNo: 'FW-1001',
+    storeName: '测试门店',
+    memberName: '测试会员',
+    serviceProject: '东方熏蒸',
+    entitlementSource: '次卡权益',
+    craftsmenSummary: '冯燕',
+    usedTimes: 1
+  }))
+  assert.match(html, /服务明细/)
+  assert.match(html, /东方熏蒸/)
+  assert.doesNotMatch(html, /销售明细/)
+})
+
+ok('混合结账小票同时展示销售和服务区块', () => {
+  const receipt = salesOrderReceiptFromCheckout({
+    salesOrderId: 'S-1001',
+    lines: [
+      { lineRole: 'sale', name: '买卡', quantity: 1, payableAmount: 200 },
+      { lineRole: 'entitlement_service', name: '东方熏蒸', quantity: 1, sourceName: '次卡权益' }
+    ],
+    payment: { selectedLines: [{ methodName: '现金', amount: 200 }] }
+  })
+  const html = buildSalesOrderReceiptHtml(receipt)
+  assert.match(html, /销售明细/)
+  assert.match(html, /服务明细/)
+  assert.match(html, /买卡/)
+  assert.match(html, /东方熏蒸/)
+})
+
 ok('用户点击后在当前页面显示小票预览且不自动打印', () => {
   const bodyChildren = []
   const headChildren = []
@@ -232,12 +265,17 @@ ok('订单中心提供系统驱动纸宽设置与测试小票入口', () => {
   assert.doesNotMatch(printerSetup, /ESC\/POS|USB|Printer_Impact_Printer/)
 })
 
-ok('结账成功页按订单号读取权威详情后再打开本地小票预览', () => {
+ok('结账成功页按业务类型读取快照后再打开本地小票预览', () => {
   assert.match(checkoutOverlay, /v-if="canPrintReceipt"/)
+  assert.match(checkoutOverlay, /hasEntitlementLines\.value[\s\S]*props\.isServiceOrder === true/)
   assert.match(checkoutOverlay, /'打印小票'/)
   assert.match(checkoutOverlay, /await request\('print-sales-order-receipt'\)/)
   assert.match(checkoutOverlay, /const detail = response\?\.receiptOrder/)
-  assert.match(checkoutOverlay, /openSalesOrderReceiptPrint\(detail\)/)
+  assert.match(checkoutOverlay, /openSalesOrderReceiptPrint\((?:detail|receiptDetail)\)/)
+  assert.match(checkoutOverlay, /打印服务小票/)
+  assert.match(receiptPrint, /serviceRecordReceiptFromRecord/)
+  assert.match(orderCenter, /打印销售小票/)
+  assert.match(orderCenter, /打印服务小票/)
   assert.match(checkoutOverlay, /正在加载小票/)
   assert.match(cashierWorkbench, /requestAction\('open-sales-order-detail', \{ orderId: salesOrderId \}\)/)
   assert.match(cashierWorkbench, /return \{ \.\.\.result, receiptOrder: detail \}/)

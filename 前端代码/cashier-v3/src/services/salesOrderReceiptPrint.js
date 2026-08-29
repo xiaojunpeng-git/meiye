@@ -84,6 +84,22 @@ function paymentAmount(line) {
   return pickValue(line, ['amount', 'receivedAmount', 'paidAmount', 'actualReceivedAmount'])
 }
 
+function serviceName(service) {
+  return pickValue(service, ['serviceProject', 'projectName', 'name', 'itemName', 'title']) || '未命名服务'
+}
+
+function serviceQuantity(service) {
+  return pickValue(service, ['usedTimes', 'quantity', 'count', 'num']) || 1
+}
+
+function serviceSource(service) {
+  return pickValue(service, ['entitlementSource', 'sourceCardName', 'sourceName', 'source'])
+}
+
+function serviceCraftsman(service) {
+  return pickValue(service, ['craftsmenSummary', 'craftsmen', 'craftsman', 'operatorName'])
+}
+
 function summaryValue(order, keys) {
   const summary = order.amountSummary || order.summary || order.orderSummary || {}
   return pickValue(summary, keys) ?? pickValue(order, keys)
@@ -193,13 +209,20 @@ export function buildSalesOrderReceiptHtml(order = {}, options = {}) {
   const paperSideMarginMm = Math.max(0, (paperProfile.paperWidthMm - paperProfile.contentWidthMm) / 2)
   const member = source.member && typeof source.member === 'object' ? source.member : {}
   const items = firstList(source, ['items', 'orderItems', 'lines', 'details'])
+  const services = firstList(source, ['serviceRecords', 'services', 'serviceItems', 'serviceLines'])
   const payments = firstList(source, ['paymentDetails', 'paymentLines', 'receipts', 'payments'])
+  const receiptMode = String(source.receiptMode || (services.length && !items.length ? 'service' : 'sales'))
+  const hasSalesSection = receiptMode !== 'service'
+  const hasServiceSection = receiptMode !== 'sales' && services.length > 0
   const orderNo = pickValue(source, ['salesOrderNo', 'orderNo', 'no'])
   const memberName = pickValue(source, ['memberName']) || pickValue(member, ['name', 'memberName']) || (source.isGuest ? '游客' : '游客')
   const note = pickValue(source, ['orderNote', 'remark', 'note'])
   const itemRows = items.length
     ? items.map((item) => `<tr><td>${escapeHtml(itemName(item))}</td><td class="right">x${escapeHtml(itemQuantity(item))}</td><td class="right">${escapeHtml(displayAmount(itemAmount(item)))}</td></tr>`).join('')
     : '<tr><td colspan="3" class="empty">暂无商品明细</td></tr>'
+  const serviceRows = services.length
+    ? services.map((service) => `<tr><td>${escapeHtml(serviceName(service))}</td><td class="right">x${escapeHtml(serviceQuantity(service))}</td><td>${escapeHtml(displayText(serviceSource(service)))}</td><td>${escapeHtml(displayText(serviceCraftsman(service)))}</td></tr>`).join('')
+    : '<tr><td colspan="4" class="empty">暂无服务明细</td></tr>'
   const paymentRows = payments.length
     ? payments.map((line) => `<tr><td>${escapeHtml(paymentName(line))}</td><td class="right">${escapeHtml(displayAmount(paymentAmount(line)))}</td></tr>`).join('')
     : '<tr><td colspan="2" class="empty">暂无收款明细</td></tr>'
@@ -215,7 +238,7 @@ export function buildSalesOrderReceiptHtml(order = {}, options = {}) {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${source.isPrintTest ? '打印测试小票' : '销售订单小票'}</title>
+<title>${source.isPrintTest ? '打印测试小票' : receiptMode === 'service' ? '服务小票' : receiptMode === 'mixed' ? '结账小票' : '销售订单小票'}</title>
 <style>
   * { box-sizing: border-box; }
   body { margin: 0; padding: 16px; color: #000; font: ${paperProfile.fontSizePx}px/1.5 "PingFang SC", "Microsoft YaHei", Arial, sans-serif; font-weight: 500; background: #f8fafc; }
@@ -238,6 +261,10 @@ export function buildSalesOrderReceiptHtml(order = {}, options = {}) {
   .items-table th:nth-child(1), .items-table td:nth-child(1) { width: 57%; }
   .items-table th:nth-child(2), .items-table td:nth-child(2) { width: 15%; }
   .items-table th:nth-child(3), .items-table td:nth-child(3) { width: 28%; }
+  .services-table th:nth-child(1), .services-table td:nth-child(1) { width: 31%; }
+  .services-table th:nth-child(2), .services-table td:nth-child(2) { width: 14%; }
+  .services-table th:nth-child(3), .services-table td:nth-child(3) { width: 27%; }
+  .services-table th:nth-child(4), .services-table td:nth-child(4) { width: 28%; }
   .payments-table th:nth-child(1), .payments-table td:nth-child(1) { width: 68%; }
   .payments-table th:nth-child(2), .payments-table td:nth-child(2) { width: 32%; }
   .empty { color: #6b7280; text-align: center; }
@@ -270,11 +297,13 @@ export function buildSalesOrderReceiptHtml(order = {}, options = {}) {
     <div><span>业务日期</span><span>${escapeHtml(displayText(pickValue(source, ['businessDate', 'settledAt', 'paymentCompletedAt', 'occurredAt'])))}</span></div>
     <div><span>收银员</span><span>${escapeHtml(displayText(pickValue(source, ['cashierName', 'operatorName', 'operatedBy'])))}</span></div>
   </div>
-  <h2>商品明细</h2>
-  <table class="items-table"><thead><tr><th>名称</th><th class="right">数量</th><th class="right">金额</th></tr></thead><tbody>${itemRows}</tbody></table>
-  <h2>收款明细</h2>
-  <table class="payments-table"><thead><tr><th>收款方式</th><th class="right">金额</th></tr></thead><tbody>${paymentRows}</tbody></table>
-  <div class="summary">${summaryRows || '<div class="empty">暂无金额汇总</div>'}</div>
+  ${hasSalesSection ? `<h2>销售明细</h2>
+  <table class="items-table"><thead><tr><th>名称</th><th class="right">数量</th><th class="right">金额</th></tr></thead><tbody>${itemRows}</tbody></table>` : ''}
+  ${hasServiceSection ? `<h2>服务明细</h2>
+  <table class="services-table"><thead><tr><th>项目</th><th class="right">次数</th><th>权益来源</th><th>手艺人</th></tr></thead><tbody>${serviceRows}</tbody></table>` : ''}
+  ${payments.length || hasSalesSection ? `<h2>收款明细</h2>
+  <table class="payments-table"><thead><tr><th>收款方式</th><th class="right">金额</th></tr></thead><tbody>${paymentRows}</tbody></table>` : ''}
+  ${summaryRows || hasSalesSection ? `<div class="summary">${summaryRows || '<div class="empty">暂无金额汇总</div>'}</div>` : ''}
   ${hasValue(note) ? `<div class="note"><strong>订单备注</strong><br>${escapeHtml(note)}</div>` : ''}
   <div class="footer">本小票仅展示已结账订单快照</div>
   <div class="tear-guide">撕纸处</div>
@@ -313,6 +342,19 @@ export function salesOrderReceiptFromCheckout(checkout = {}) {
       ? source.snapshot
       : {}
   const payment = source.payment && typeof source.payment === 'object' ? source.payment : {}
+  const lines = firstList(snapshot, ['items', 'orderItems', 'lines', 'details']).length
+    ? firstList(snapshot, ['items', 'orderItems', 'lines', 'details'])
+    : firstList(source, ['orderLines', 'lines'])
+  const salesLines = lines.filter((line) => !['entitlement_service', 'service', 'service_line'].includes(String(line?.lineRole || line?.kind || '').toLowerCase()))
+  const serviceRecords = lines
+    .filter((line) => ['entitlement_service', 'service', 'service_line'].includes(String(line?.lineRole || line?.kind || '').toLowerCase()))
+    .map((line) => ({
+      serviceProject: pickValue(line, ['serviceProject', 'projectName', 'name', 'itemName']),
+      usedTimes: pickValue(line, ['quantity', 'usedTimes', 'count', 'num']),
+      entitlementSource: pickValue(line, ['sourceNameSnapshot', 'sourceName', 'entitlementSource', 'sourceCardName']),
+      craftsmenSummary: pickValue(line, ['craftsmenSummary', 'craftsmen', 'craftsman']),
+      serviceAmount: pickValue(line, ['actualAmount', 'payableAmount', 'amountDue', 'amount'])
+    }))
   return {
     ...snapshot,
     salesOrderNo: pickValue(source, ['salesOrderNo', 'orderNo']) || pickValue(snapshot, ['salesOrderNo', 'orderNo']),
@@ -323,13 +365,29 @@ export function salesOrderReceiptFromCheckout(checkout = {}) {
     businessDate: pickValue(source, ['businessDate', 'settledAt', 'paymentCompletedAt']) || pickValue(snapshot, ['businessDate', 'settledAt', 'paymentCompletedAt']),
     cashierName: pickValue(source, ['cashierName', 'operatorName']) || pickValue(snapshot, ['cashierName', 'operatorName']),
     orderNote: pickValue(source, ['orderNote']) || pickValue(snapshot, ['orderNote', 'remark', 'note']),
-    items: firstList(snapshot, ['items', 'orderItems', 'lines', 'details']).length
-      ? firstList(snapshot, ['items', 'orderItems', 'lines', 'details'])
-      : firstList(source, ['orderLines', 'lines']),
+    items: salesLines,
+    serviceRecords,
+    receiptMode: serviceRecords.length && !salesLines.length ? 'service' : serviceRecords.length ? 'mixed' : 'sales',
     paymentDetails: firstList(payment, ['resultLines', 'selectedLines']).length
       ? firstList(payment, ['resultLines', 'selectedLines'])
       : firstList(snapshot, ['paymentDetails', 'paymentLines', 'receipts', 'payments']),
     amountSummary: source.summary || source.orderSummary || snapshot.summary || snapshot.amountSummary || {}
+  }
+}
+
+export function serviceRecordReceiptFromRecord(record = {}) {
+  const source = record && typeof record === 'object' ? record : {}
+  return {
+    ...source,
+    receiptMode: 'service',
+    serviceRecordNo: pickValue(source, ['serviceRecordNo', 'serviceFactId']),
+    orderNo: pickValue(source, ['serviceRecordNo', 'serviceFactId']),
+    memberName: pickValue(source, ['memberName']),
+    storeName: pickValue(source, ['storeName']),
+    businessDate: pickValue(source, ['businessDate', 'serviceCompletedAt']),
+    cashierName: pickValue(source, ['operatorName']),
+    serviceRecords: [source],
+    paymentDetails: []
   }
 }
 

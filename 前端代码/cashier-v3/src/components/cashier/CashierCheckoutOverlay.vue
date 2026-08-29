@@ -1,7 +1,10 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { createCashierV3CommandId, formatMoney } from '@/services/cashierV3Bridge'
-import { openSalesOrderReceiptPrint } from '@/services/salesOrderReceiptPrint'
+import {
+  openSalesOrderReceiptPrint,
+  salesOrderReceiptFromCheckout
+} from '@/services/salesOrderReceiptPrint'
 
 const props = defineProps({
   checkout: {
@@ -437,7 +440,15 @@ const safeServiceStartOptions = computed(() => serviceStartOptions.value.filter(
 const canPrintReceipt = computed(() => (
   isSucceeded.value
   && !isDebtRepayment.value
-  && Boolean(String(props.checkout.salesOrderId || '').trim())
+  && (
+    Boolean(String(props.checkout.salesOrderId || '').trim())
+    || hasSaleLines.value
+    || hasEntitlementLines.value
+    || props.isServiceOrder === true
+  )
+))
+const receiptPrintLabel = computed(() => (
+  hasEntitlementLines.value && !hasSaleLines.value ? '打印服务小票' : '打印小票'
 ))
 const hasResultLockedPaymentLine = computed(() => selectedPaymentLines.value.some((line) => paymentLineIsLocked(line)))
 const canReturnToPaymentEdit = computed(() => (
@@ -997,16 +1008,24 @@ async function printReceipt() {
   receiptPrintError.value = ''
   receiptPrintLoading.value = true
   try {
-    // The success projection is intentionally lightweight and may only carry
-    // the order id.  Load the already-settled order snapshot before printing;
-    // never turn a partial checkout projection into an empty receipt.
-    const response = await request('print-sales-order-receipt')
-    const detail = response?.receiptOrder
-    if (!detail || typeof detail !== 'object') {
-      receiptPrintError.value = String(response?.result?.message || response?.message || '订单明细尚未完整返回，暂时不能打印小票。')
-      return
+    const checkoutReceipt = salesOrderReceiptFromCheckout(props.checkout)
+    let receiptDetail = checkoutReceipt
+    // 销售部分继续读取已结算销售订单快照；服务单独结账不再为了打印
+    // 查询销售订单，也不会重新进入任何结账或业务写入流程。
+    if (hasSaleLines.value && String(props.checkout.salesOrderId || '').trim()) {
+      const response = await request('print-sales-order-receipt')
+      const detail = response?.receiptOrder
+      if (!detail || typeof detail !== 'object') {
+        receiptPrintError.value = String(response?.result?.message || response?.message || '订单明细尚未完整返回，暂时不能打印小票。')
+        return
+      }
+      receiptDetail = {
+        ...detail,
+        serviceRecords: checkoutReceipt.serviceRecords,
+        receiptMode: checkoutReceipt.serviceRecords.length ? 'mixed' : 'sales'
+      }
     }
-    const result = openSalesOrderReceiptPrint(detail)
+    const result = openSalesOrderReceiptPrint(receiptDetail)
     if (!result.ok) receiptPrintError.value = result.message
   } catch (error) {
     receiptPrintError.value = String(error?.message || '读取订单明细失败，暂时不能打印小票。')
@@ -1718,7 +1737,7 @@ onBeforeUnmount(() => {
       <template v-if="isSucceeded">
         <button v-if="!isDebtRepayment && checkout.salesOrderId" type="button" class="button button--secondary" @click="request('view-sales-order')">查看销售订单</button>
         <button v-if="canPrintReceipt" type="button" class="button button--secondary" :disabled="receiptPrintLoading" @click="printReceipt">
-          {{ receiptPrintLoading ? '正在加载小票…' : '打印小票' }}
+          {{ receiptPrintLoading ? '正在加载小票…' : receiptPrintLabel }}
         </button>
         <button type="button" class="button button--primary" @click="finishCheckoutAndReturn">
           {{ isServiceOrder || hasEntitlementLines ? '完成并返回收银台' : '返回收银台' }}
