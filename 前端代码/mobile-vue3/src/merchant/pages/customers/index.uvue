@@ -1,13 +1,10 @@
 <template>
 	<view class="customer-page" :class="{ 'customer-page--native-mini': platformUsesNativeCanvas }">
 		<view class="customer-page__header">
-			<text class="customer-page__eyebrow">商家端</text>
 			<view class="customer-page__title-row">
-				<text class="customer-page__title">客户</text>
-				<view v-if="customerStoreContexts.length > 1" class="customer-page__store customer-page__store--switchable" @tap="openCustomerStorePicker"><view class="customer-page__store-copy"><text class="customer-page__store-label">当前门店</text><text class="customer-page__store-name">{{ customerActiveStoreLabel }}</text></view><text class="customer-page__store-action">{{ customerSwitchingStore ? '切换中' : '切换' }}</text></view>
-				<view v-else class="customer-page__store"><view class="customer-page__store-copy"><text class="customer-page__store-label">当前门店</text><text class="customer-page__store-name">{{ customerActiveStoreLabel }}</text></view></view>
+				<view class="customer-page__org-filter" @tap="openCustomerStorePicker"><text>{{ customerActiveStoreLabel }}›</text></view>
 			</view>
-			</view>
+		</view>
 		<view v-if="customerStoreSwitchMessage.length > 0" class="customer-page__store-error" role="alert"><text>{{ customerStoreSwitchMessage }}</text></view>
 
 		<view class="customer-page__tabs" role="tablist">
@@ -1519,8 +1516,10 @@
 	.customer-page { background-color: #f6f9fc; }
 	.customer-page__header { padding: 20px 18px 12px 18px; border-bottom-width: 0; background-color: transparent; }
 	.customer-page__eyebrow { display: none; }
-	.customer-page__title-row { margin-top: 0; align-items: flex-end; }
+	.customer-page__title-row { margin-top: 0; align-items: center; justify-content: flex-start; }
 	.customer-page__title { font-size: 20px; line-height: 28px; color: #173451; }
+	.customer-page__org-filter { display: flex; box-sizing: border-box; width: 160px; min-width: 100px; height: 36px; align-items: center; justify-content: center; padding: 0 10px; border-width: 1px; border-style: solid; border-color: rgba(215, 226, 241, 0.9); border-radius: 18px; background-color: rgba(255, 255, 255, 0.88); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.7), 0 8px 20px rgba(63, 93, 137, 0.08); }
+	.customer-page__org-filter text { overflow: hidden; width: 100%; font-size: 13px; font-weight: 700; line-height: 34px; color: #71839a; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
 	.customer-page__store { display: flex; min-width: 0; max-width: 166px; flex-direction: row; align-items: center; justify-content: flex-end; padding: 6px 9px; border-radius: 8px; background-color: #f2f7fc; }
 	.customer-page__store-copy { display: flex; min-width: 0; flex-direction: column; align-items: flex-end; }
 	.customer-page__store-label { font-size: 10px; font-weight: 600; line-height: 15px; color: #71839a; }
