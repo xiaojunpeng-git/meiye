@@ -1,5 +1,10 @@
 <template>
 	<view class="page">
+		<view class="beauty-orb beauty-orb--rose"></view>
+		<view class="beauty-orb beauty-orb--peach"></view>
+		<view class="beauty-orb beauty-orb--lavender"></view>
+		<view class="beauty-spark beauty-spark--one">✦</view>
+		<view class="beauty-spark beauty-spark--two">✦</view>
 		<view class="hero">
 			<text class="title">商家端登录</text>
 			<text class="subtitle">使用员工档案中的登录账号进入工作台</text>
@@ -83,32 +88,49 @@
 
 <style>
 	.page {
+		position: relative;
 		display: flex;
 		flex: 1;
 		flex-direction: column;
 		justify-content: space-between;
 		padding: 72px 28px 44px 28px;
-		background-color: #f4f7f5;
+		overflow: hidden;
+		background-color: #fff7f5;
 	}
+	.beauty-orb { position:absolute; border-radius:999px; opacity:.68; }
+	.beauty-orb--rose { top:44px; right:-76px; width:218px; height:218px; background:#f6d8df; }
+	.beauty-orb--peach { top:384px; left:-104px; width:216px; height:216px; background:#f9e0cc; }
+	.beauty-orb--lavender { right:34px; bottom:110px; width:82px; height:82px; background:#e7dcf2; }
+	.beauty-spark { position:absolute; z-index:0; color:#c78796; font-size:18px; }
+	.beauty-spark--one { top:110px; right:54px; }
+	.beauty-spark--two { top:344px; left:38px; color:#d3a66e; font-size:13px; }
 
 	.hero {
+		position: relative;
+		z-index: 1;
 		display: flex;
 		flex-direction: column;
 		margin-top: 64px;
 	}
 
 	.login-card {
+		position: relative;
+		z-index: 1;
 		display: flex;
 		flex-direction: column;
 		padding: 20px;
-		border-radius: 18px;
+		border-width: 1px;
+		border-style: solid;
+		border-color: #f2e2e3;
+		border-radius: 20px;
 		background-color: #ffffff;
+		box-shadow: 0 14px 34px rgba(126, 82, 96, .10);
 	}
 
-	.field-label { margin-top: 12px; font-size: 12px; color: #668073; }
+	.field-label { margin-top: 12px; font-size: 12px; color: #9a7580; }
 	.field-label:first-child { margin-top: 0; }
-	.field-input { margin-top: 7px; height: 42px; padding: 0 12px; border-radius: 10px; background-color: #f1f5f2; color: #173326; font-size: 15px; }
-	.login-command { margin-top: 20px; display: flex; justify-content: center; align-items: center; height: 46px; border-radius: 12px; background-color: #173326; color: #ffffff; font-size: 15px; font-weight: 600; }
+	.field-input { margin-top: 7px; height: 42px; padding: 0 12px; border-radius: 11px; background-color: #fff5f3; color: #563b48; font-size: 15px; }
+	.login-command { margin-top: 20px; display: flex; justify-content: center; align-items: center; height: 46px; border-radius: 23px; background-color: #b76875; box-shadow: 0 8px 16px rgba(183,104,117,.24); color: #ffffff; font-size: 15px; font-weight: 600; }
 	.message { margin-top: 13px; color: #a44848; font-size: 13px; line-height: 19px; }
 
 	.platform {
@@ -122,36 +144,38 @@
 		margin-top: 18px;
 		font-size: 42px;
 		font-weight: 700;
-		color: #173326;
+		color: #563545;
 	}
 
 	.subtitle {
 		margin-top: 14px;
 		font-size: 18px;
-		color: #53675d;
+		color: #886775;
 	}
 
 	.status-row {
+		position: relative;
+		z-index: 1;
 		display: flex;
 		flex-direction: row;
 		align-items: center;
 		padding-top: 20px;
 		border-top-width: 1px;
 		border-top-style: solid;
-		border-top-color: #d8e1dc;
+		border-top-color: #efdfe0;
 	}
 
 	.status-dot {
 		width: 8px;
 		height: 8px;
 		border-radius: 4px;
-		background-color: #2f7d58;
+		background-color: #bb7583;
 	}
 	.status-dot--error { background-color: #a44848; }
 
 	.status-text {
 		margin-left: 10px;
 		font-size: 14px;
-		color: #53675d;
+		color: #896b76;
 	}
 </style>
