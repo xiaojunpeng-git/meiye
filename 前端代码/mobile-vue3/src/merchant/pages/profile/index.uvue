@@ -1,7 +1,5 @@
 <template>
-	<view class="merchant-profile">
-		<view class="merchant-profile__header"><text class="merchant-profile__eyebrow">商家端</text><text class="merchant-profile__title">我的</text></view>
-
+	<view class="merchant-profile" :class="{ 'merchant-profile--native-mini': platformUsesNativeCanvas }">
 		<scroll-view scroll-y refresher-enabled="true" :refresher-triggered="refreshing" @refresherrefresh="onPullRefresh" class="merchant-profile__content">
 			<view class="merchant-profile__content-inner">
 				<view class="merchant-profile__account-card"><view class="merchant-profile__avatar" :aria-label="accountName"><text class="merchant-profile__avatar-label">{{ accountInitial }}</text></view><view class="merchant-profile__account-copy"><text class="merchant-profile__account-title">{{ accountName }}</text><text class="merchant-profile__account-detail">{{ accountDetail }}</text></view></view>
@@ -20,6 +18,7 @@
 <script setup lang="uts">
 	import MerchantPrimaryTabBar from '../../../shared/components/merchant-primary-tab-bar.uvue'
 	import { currentMerchantRoot } from '../../../shared/platform/mobile-merchant-session.uts'
+	import { currentMobilePlatform } from '../../../shared/platform/mobile-platform.uts'
 	import { logoutMobileMerchant } from '../../../shared/api/mobile-merchant-session-client.uts'
 	import { openMerchantAccount, openMerchantBootstrap, openMerchantScope } from '../../../shared/platform/mobile-navigation.uts'
 
@@ -32,6 +31,7 @@
 	const accountInitial = ref('账号')
 	const loggingOut = ref(false)
 	const refreshing = ref(false)
+	const platformUsesNativeCanvas = currentMobilePlatform() === 'MP_WEIXIN'
 
 	onShow(() => loadAccount())
 	function onPullRefresh() : void { if (refreshing.value) return; refreshing.value = true; loadAccount(); setTimeout(() => { refreshing.value = false }, 900) }
@@ -60,11 +60,10 @@
 
 <style>
 	.merchant-profile { display: flex; min-height: 100%; flex: 1; flex-direction: column; background-color: #f4f7fa; }
-	.merchant-profile__header { display: flex; flex-direction: column; padding: 52px 18px 16px 18px; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #e5edf5; background-color: #ffffff; }
-	.merchant-profile__eyebrow, .merchant-profile__section-kicker { font-size: 12px; font-weight: 600; line-height: 18px; color: #71839a; }
-	.merchant-profile__title { margin-top: 4px; font-size: 25px; font-weight: 700; line-height: 34px; color: #26384d; }
+	.merchant-profile__section-kicker { font-size: 12px; font-weight: 600; line-height: 18px; color: #71839a; }
 	.merchant-profile__content { min-height: 0; flex: 1; }
 	.merchant-profile__content-inner { width: 100%; max-width: 1200px; box-sizing: border-box; margin: 0 auto; padding: 18px 18px 112px 18px; }
+	.merchant-profile--native-mini .merchant-profile__content-inner { padding-top: 84px; }
 	.merchant-profile__account-card { display: flex; flex-direction: row; align-items: center; padding: 17px 15px; border-radius: 8px; background-color: #ffffff; box-shadow: 0 8px 20px rgba(60, 88, 130, 0.08); }
 	.merchant-profile__avatar { display: flex; width: 50px; height: 50px; flex-shrink: 0; flex-direction: row; align-items: center; justify-content: center; border-radius: 8px; background-color: #eaf1ff; }
 	.merchant-profile__avatar-label { font-size: 18px; font-weight: 700; line-height: 24px; color: #4a72c5; }
