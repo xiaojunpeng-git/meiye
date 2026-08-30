@@ -29,7 +29,7 @@
 					<navigator class="merchant-workbench__entry" url="/src/merchant/pages/reservations/index" open-type="navigate"><view class="merchant-workbench__entry-icon merchant-workbench__entry-icon--reservation"><text>约</text></view><text class="merchant-workbench__entry-label">预约管理</text></navigator>
 					<navigator class="merchant-workbench__entry" url="/src/merchant/pages/customer-care/index" open-type="navigate"><view class="merchant-workbench__entry-icon merchant-workbench__entry-icon--care"><text>客</text></view><text class="merchant-workbench__entry-label">客情管理</text></navigator>
 					<navigator class="merchant-workbench__entry" url="/src/merchant/pages/customers/index" open-type="navigate"><view class="merchant-workbench__entry-icon merchant-workbench__entry-icon--customer"><text>户</text></view><text class="merchant-workbench__entry-label">客户管理</text></navigator>
-					<view class="merchant-workbench__entry merchant-workbench__entry--pending" @tap="showPending('订单管理')"><view class="merchant-workbench__entry-icon merchant-workbench__entry-icon--order"><text>单</text></view><text class="merchant-workbench__entry-label">订单管理</text><text class="merchant-workbench__entry-state">待开发</text></view>
+					<navigator class="merchant-workbench__entry" url="/src/merchant/pages/engineering/index" open-type="navigate"><view class="merchant-workbench__entry-icon merchant-workbench__entry-icon--engineering"><text>工</text></view><text class="merchant-workbench__entry-label">工程管理</text></navigator>
 				</view>
 			</view>
 		</scroll-view>
@@ -44,7 +44,7 @@
 	import { queryMobileReservations } from '../../../shared/api/mobile-reservation-client.uts'
 	import { switchMobileMerchantContext } from '../../../shared/api/mobile-merchant-session-client.uts'
 	import { currentMerchantRoot } from '../../../shared/platform/mobile-merchant-session.uts'
-	import { currentMobilePlatform, showMobileNotice } from '../../../shared/platform/mobile-platform.uts'
+	import { currentMobilePlatform } from '../../../shared/platform/mobile-platform.uts'
 	import { ensureMerchantTabAccess } from '../../../shared/platform/merchant-route-guard.uts'
 
 	const openTaskCount = ref(0)
@@ -123,10 +123,6 @@
 		uni.navigateTo({ url: '/src/merchant/pages/reservations/index' })
 	}
 
-	function showPending(label : string) : void {
-		showMobileNotice(label + '待开发')
-	}
-
 </script>
 
 <style>
@@ -199,6 +195,7 @@
 	.merchant-workbench__entry-icon--care { background-color: #e8f6f0; color: #21845f; }
 	.merchant-workbench__entry-icon--customer { background-color: #fff2df; color: #bf7726; }
 	.merchant-workbench__entry-icon--order { background-color: #e8f6f7; color: #287f90; }
+	.merchant-workbench__entry-icon--engineering { background-color: #f2eaff; color: #7652c5; }
 	.merchant-workbench__entry-label { margin-top: 7px; font-size: 12px; line-height: 18px; color: #38516a; }
 	.merchant-workbench--native-mini .merchant-workbench__header { padding-top: 124px; }
 </style>

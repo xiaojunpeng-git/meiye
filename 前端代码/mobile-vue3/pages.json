@@ -31,6 +31,12 @@
 			}
 		},
 		{
+			"path": "src/merchant/pages/engineering/index",
+			"style": {
+				"navigationStyle": "custom"
+			}
+		},
+		{
 			"path": "src/merchant/pages/warehouse/index",
 			"style": {
 				"navigationStyle": "custom"

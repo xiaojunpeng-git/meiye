@@ -68,6 +68,9 @@ Route::group('api/mobile/merchant', function () {
             ->pattern(['action' => '[A-Za-z0-9-]+'])
             ->option(['real_name' => '手机商家端客情操作']);
         Route::post('warehouse/overview', 'Warehouse/overview')->option(['real_name' => '手机商家端组织业绩数仓']);
+		Route::get('engineering-ledger/catalog', 'EngineeringLedger/catalog')->option(['real_name' => '手机商家端工程管理台账目录']);
+		Route::get('engineering-ledger/list', 'EngineeringLedger/list')->option(['real_name' => '手机商家端工程管理台账列表']);
+		Route::post('engineering-ledger/save', 'EngineeringLedger/save')->option(['real_name' => '手机商家端工程管理台账保存']);
 		Route::get('dashboard/home', 'Dashboard/home')->option(['real_name' => '手机商家端经营首页聚合']);
 		Route::post('dashboard/home', 'Dashboard/home')->option(['real_name' => '手机商家端经营首页聚合']);
         Route::get('reservations', 'Reservation/listing')->option(['real_name' => '手机商家端预约列表']);

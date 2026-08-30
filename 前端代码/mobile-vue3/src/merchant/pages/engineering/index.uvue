@@ -1,0 +1,103 @@
+<template>
+	<view class="engineering-page" :class="{ 'engineering-page--native-mini': platformUsesNativeCanvas }">
+		<view class="engineering-page__header"><view><text class="engineering-page__kicker">业务台账</text><text class="engineering-page__title">工程管理</text></view><text class="engineering-page__store">{{ activeStoreLabel }}</text></view>
+		<scroll-view class="engineering-page__tabs" scroll-x><view v-for="tab in tabs" :key="tab.key" class="engineering-page__tab" :class="{ 'engineering-page__tab--active': activeType === tab.key }" @tap="switchType(tab.key)"><text>{{ tab.label }}</text></view></scroll-view>
+		<view class="engineering-page__toolbar"><input class="engineering-page__keyword" type="text" v-model="keyword" confirm-type="search" placeholder="搜索门店、提报人或合同" @confirm="reload" /><view class="engineering-page__refresh" @tap="reload"><text>刷新</text></view><view class="engineering-page__add" @tap="beginCreate"><text>＋ 新增</text></view></view>
+		<view v-if="message.length > 0" class="engineering-page__state"><text>{{ message }}</text><view class="engineering-page__retry" @tap="reload"><text>重新加载</text></view></view>
+		<scroll-view v-else class="engineering-page__content" scroll-y refresher-enabled="true" :refresher-triggered="refreshing" @refresherrefresh="onPullRefresh">
+			<view v-if="loading" class="engineering-page__state"><text>正在读取台账…</text></view>
+			<view v-else-if="records.length === 0" class="engineering-page__state"><text>当前门店暂无{{ activeTypeLabel() }}记录。</text></view>
+			<view v-else class="engineering-page__list"><view v-for="row in records" :key="String(row.id || row.record_id)" class="engineering-page__card" @tap="beginEdit(row)"><view class="engineering-page__card-head"><text class="engineering-page__card-title">{{ recordTitle(row) }}</text><text class="engineering-page__card-version">v{{ row.version || 1 }}</text></view><view class="engineering-page__card-fields"><view v-for="field in previewFields()" :key="field.key" class="engineering-page__field"><text class="engineering-page__field-label">{{ field.label }}</text><text class="engineering-page__field-value">{{ displayValue(row, field.key) }}</text></view></view><text class="engineering-page__edit-hint">点击编辑</text></view></view>
+		</scroll-view>
+		<MerchantPrimaryTabBar active-key="workbench" />
+		<view v-if="editing != null" class="engineering-page__mask" @tap="closeEditor"><view class="engineering-page__editor" @tap.stop><view class="engineering-page__editor-head"><text>{{ editing.id ? '编辑' : '新增' }}{{ activeTypeLabel() }}</text><text class="engineering-page__close" @tap="closeEditor">×</text></view><scroll-view class="engineering-page__form" scroll-y><view v-for="field in formFields()" :key="field.key" class="engineering-page__form-field"><text>{{ field.label }}<text v-if="field.required" class="engineering-page__required"> *</text></text><input type="text" :value="formValue(field.key)" :placeholder="field.label + '（人工填写）'" @input="updateForm(field.key, $event)" /></view><text class="engineering-page__form-note">数据按当前门店权限保存；系统组织字段由服务端自动生成。</text></scroll-view><view class="engineering-page__editor-footer"><view class="engineering-page__cancel" @tap="closeEditor"><text>取消</text></view><view class="engineering-page__save" @tap="save"><text>{{ saving ? '保存中…' : '保存' }}</text></view></view></view></view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	import MerchantPrimaryTabBar from '../../../shared/components/merchant-primary-tab-bar.uvue'
+	import { queryMobileEngineeringLedger, saveMobileEngineeringLedger } from '../../../shared/api/mobile-engineering-ledger-client.uts'
+	import { currentMerchantRoot } from '../../../shared/platform/mobile-merchant-session.uts'
+	import { currentMobilePlatform } from '../../../shared/platform/mobile-platform.uts'
+	import { ensureMerchantTabAccess } from '../../../shared/platform/merchant-route-guard.uts'
+
+	const tabs = [{ key: 'store_building', label: '建店明细' }, { key: 'engineering_quality', label: '工程质量' }, { key: 'engineering_repair', label: '工程维修' }, { key: 'rent_renewal', label: '降租续签' }]
+	const activeType = ref('store_building')
+	const records = ref<Array<any>>([])
+	const keyword = ref('')
+	const loading = ref(false)
+	const refreshing = ref(false)
+	const saving = ref(false)
+	const message = ref('')
+	const editing = ref<any>(null)
+	const platformUsesNativeCanvas = currentMobilePlatform() === 'MP_WEIXIN'
+	const activeStoreLabel = ref('当前门店')
+
+	const fieldSets : any = {
+		store_building: [{ key: 'province', label: '省' }, { key: 'branch_name', label: '分公司' }, { key: 'store_name', label: '门店' }, { key: 'building_type', label: '建店类型' }, { key: 'contract_date', label: '签约日期', kind: 'date' }, { key: 'license_date', label: '营业执照办结日期', kind: 'date' }, { key: 'design_start_date', label: '图纸设计开始日期', kind: 'date' }, { key: 'design_end_date', label: '图纸设计结束日期', kind: 'date' }, { key: 'bid_start_date', label: '工程比价开始日期', kind: 'date' }, { key: 'bid_end_date', label: '工程比价结束日期', kind: 'date' }, { key: 'construction_start_date', label: '工程施工开始日期', kind: 'date' }, { key: 'construction_end_date', label: '工程施工结束日期', kind: 'date' }, { key: 'acceptance_date', label: '验收日期', kind: 'date' }, { key: 'acquisition_note', label: '拓客' }, { key: 'recruitment_note', label: '招聘' }, { key: 'opening_date', label: '开业日期', kind: 'date' }, { key: 'building_duration', label: '建店时长' }, { key: 'first_month_performance', label: '首月业绩', kind: 'number' }, { key: 'second_month_performance', label: '次月业绩', kind: 'number' }, { key: 'third_month_performance', label: '第三个月业绩', kind: 'number' }],
+		engineering_quality: [{ key: 'branch_name', label: '分公司' }, { key: 'store_name', label: '门店' }, { key: 'area', label: '面积', kind: 'number' }, { key: 'construction_start_date', label: '施工开始时间', kind: 'date' }, { key: 'construction_end_date', label: '施工结束时间', kind: 'date' }, { key: 'construction_duration', label: '施工时长' }, { key: 'opening_date', label: '开业日期', kind: 'date' }, { key: 'building_duration', label: '建店时长' }, { key: 'hard_decoration_cost', label: '硬装造价', kind: 'number' }, { key: 'soft_decoration_cost', label: '软装造价', kind: 'number' }, { key: 'unit_cost', label: '平米工程造价', kind: 'number' }, { key: 'total_investment', label: '总投资金额', kind: 'number' }],
+		engineering_repair: [{ key: 'report_date', label: '提报日期', kind: 'date' }, { key: 'reporter', label: '提报人' }, { key: 'repair_requirement', label: '维修需求' }, { key: 'repair_start_date', label: '维修开始日期', kind: 'date' }, { key: 'repair_end_date', label: '维修完成日期', kind: 'date' }, { key: 'actual_duration', label: '实际完成时长' }, { key: 'repair_cost', label: '维修费用', kind: 'number' }],
+		rent_renewal: [{ key: 'contract_start_date', label: '最新合同起始时间', kind: 'date' }, { key: 'contract_end_date', label: '最新合同到期时间', kind: 'date' }, { key: 'original_monthly_rent', label: '原月租管费', kind: 'number' }, { key: 'original_annual_rent', label: '原年租管费', kind: 'number' }, { key: 'rent_reduction_date', label: '降租完成时间', kind: 'date' }, { key: 'reduced_monthly_rent', label: '降租后月租管费', kind: 'number' }, { key: 'reduced_annual_rent', label: '降租后年租管费', kind: 'number' }, { key: 'monthly_reduction', label: '月降租金额', kind: 'number' }, { key: 'annual_reduction', label: '年降租金额', kind: 'number' }]
+	}
+
+	onShow(() => { if (ensureMerchantTabAccess('workbench')) { loadStore(); reload() } })
+	function loadStore() : void { let root = currentMerchantRoot(); if (root != null && root.activeContext != null) activeStoreLabel.value = String(root.activeContext.label || '当前门店') }
+	function activeTypeLabel() : string { for (let index = 0; index < tabs.length; index++) if (tabs[index].key === activeType.value) return tabs[index].label; return '工程管理' }
+	function fieldsForType() : Array<any> { let fields = fieldSets[activeType.value]; return Array.isArray(fields) ? fields : [] }
+	function formFields() : Array<any> { return fieldsForType().filter((field : any) => !(activeType.value === 'engineering_repair' || activeType.value === 'rent_renewal') || (field.key !== 'branch_name' && field.key !== 'store_name')) }
+	function previewFields() : Array<any> { let fields = formFields(); return fields.slice(0, 3) }
+	function displayValue(row : any, key : string) : string { let value = row != null ? row[key] : ''; return value == null || String(value).length === 0 ? '—' : String(value) }
+	function recordTitle(row : any) : string { let name = displayValue(row, 'store_name'); return name === '—' ? activeTypeLabel() : name }
+	function reload() : void { loading.value = true; message.value = ''; queryMobileEngineeringLedger(activeType.value, { page: 1, limit: 20, keyword: keyword.value }, (response : any) => { loading.value = false; let envelope : any = response != null && response.body != null ? (response.body.data || response.body) : null; let payload : any = envelope != null && envelope.engineeringLedger != null ? envelope.engineeringLedger : envelope; if (!response.ok || payload == null) { records.value = []; message.value = String(response.message || '工程管理暂时不可用。'); return }; records.value = Array.isArray(payload.records) ? payload.records : [] }) }
+	function onPullRefresh() : void { if (refreshing.value) return; refreshing.value = true; reload(); setTimeout(() => { refreshing.value = false }, 800) }
+	function switchType(type : string) : void { if (activeType.value === type) return; activeType.value = type; editing.value = null; reload() }
+	function beginCreate() : void { let values : any = {}; editing.value = { id: '', version: null, values: values }; message.value = '' }
+	function beginEdit(row : any) : void { let values : any = {}; let fields = fieldsForType(); for (let index = 0; index < fields.length; index++) values[fields[index].key] = row[fields[index].key] == null ? '' : row[fields[index].key]; editing.value = { id: row.id || row.record_id, version: Number(row.version || 0), values: values }; message.value = '' }
+	function closeEditor() : void { if (!saving.value) editing.value = null }
+	function formValue(key : string) : string { return editing.value == null || editing.value.values == null ? '' : String(editing.value.values[key] == null ? '' : editing.value.values[key]) }
+	function updateForm(key : string, event : any) : void { if (editing.value != null) { let detail : any = event == null ? null : event.detail; editing.value.values[key] = detail == null ? '' : String(detail.value || '') } }
+	function save() : void { if (editing.value == null || saving.value) return; saving.value = true; saveMobileEngineeringLedger(activeType.value, editing.value.values, editing.value.version, (response : any) => { saving.value = false; if (!response.ok) { message.value = String(response.message || '保存失败，请刷新后重试。'); return }; editing.value = null; reload() }) }
+</script>
+
+<style>
+	.engineering-page { display:flex; min-height:100%; flex:1; flex-direction:column; background:#f4f7fa; color:#26384d; }
+	.engineering-page__header { display:flex; align-items:flex-end; justify-content:space-between; padding:20px 18px 14px; background:transparent; }
+	.engineering-page--native-mini .engineering-page__header { padding-top:124px; }
+	.engineering-page__kicker { display:block; font-size:12px; line-height:18px; color:#71839a; }
+	.engineering-page__title { display:block; margin-top:3px; font-size:23px; font-weight:700; line-height:31px; }
+	.engineering-page__store { max-width:190px; overflow:hidden; padding:9px 12px; border:1px solid #d8e4f1; border-radius:18px; background:#fff; color:#607891; font-size:12px; font-weight:700; text-overflow:ellipsis; white-space:nowrap; }
+	.engineering-page__tabs { display:flex; flex-shrink:0; height:46px; padding:0 18px; white-space:nowrap; background:#fff; border-top:1px solid #e6edf4; border-bottom:1px solid #e6edf4; }
+	.engineering-page__tab { display:inline-flex; height:46px; align-items:center; margin-right:24px; border-bottom:2px solid transparent; color:#7589a0; font-size:13px; }
+	.engineering-page__tab--active { border-bottom-color:#1677cc; color:#1677cc; font-weight:700; }
+	.engineering-page__toolbar { display:flex; align-items:center; gap:8px; padding:12px 18px; background:#fff; }
+	.engineering-page__keyword { min-width:0; flex:1; height:36px; padding:0 12px; border:1px solid #dce6ef; border-radius:18px; background:#f7fafd; font-size:12px; }
+	.engineering-page__refresh,.engineering-page__add { padding:8px 10px; border-radius:16px; font-size:12px; font-weight:700; }
+	.engineering-page__refresh { color:#1677cc; }
+	.engineering-page__add { background:#1677cc; color:#fff; }
+	.engineering-page__content { min-height:0; flex:1; padding:0 18px 94px; }
+	.engineering-page__list { padding:4px 0 18px; }
+	.engineering-page__card { margin-top:10px; padding:15px; border:1px solid #e6edf4; border-radius:14px; background:#fff; box-shadow:0 6px 16px rgba(60,88,130,.07); }
+	.engineering-page__card-head { display:flex; justify-content:space-between; align-items:center; }
+	.engineering-page__card-title { font-size:15px; font-weight:700; }
+	.engineering-page__card-version { color:#9aa8b8; font-size:10px; }
+	.engineering-page__card-fields { display:flex; flex-wrap:wrap; margin-top:11px; }
+	.engineering-page__field { width:50%; margin-top:7px; }
+	.engineering-page__field-label { display:block; color:#8796a8; font-size:10px; }
+	.engineering-page__field-value { display:block; margin-top:2px; color:#4b647b; font-size:12px; }
+	.engineering-page__edit-hint { display:block; margin-top:11px; color:#1677cc; font-size:11px; text-align:right; }
+	.engineering-page__state { padding:70px 20px; color:#8998a8; font-size:13px; text-align:center; }
+	.engineering-page__retry { display:inline-flex; margin-top:14px; padding:7px 14px; border-radius:16px; background:#eaf3fb; color:#1677cc; }
+	.engineering-page__mask { position:fixed; z-index:110; inset:0; display:flex; align-items:flex-end; background:rgba(28,47,70,.35); }
+	.engineering-page__editor { width:100%; max-height:88%; border-radius:18px 18px 0 0; background:#fff; }
+	.engineering-page__editor-head,.engineering-page__editor-footer { display:flex; align-items:center; justify-content:space-between; padding:16px 18px; border-bottom:1px solid #edf1f5; font-size:16px; font-weight:700; }
+	.engineering-page__close { color:#8796a8; font-size:24px; font-weight:400; }
+	.engineering-page__form { max-height:60vh; padding:15px 18px; }
+	.engineering-page__form-field { margin-bottom:13px; color:#607891; font-size:11px; }
+	.engineering-page__form-field input { height:38px; margin-top:5px; padding:0 11px; border:1px solid #dce6ef; border-radius:9px; background:#f8fafc; font-size:13px; }
+	.engineering-page__required { color:#d05c50; }
+	.engineering-page__form-note { display:block; margin:4px 0 12px; color:#9aa8b8; font-size:10px; line-height:16px; }
+	.engineering-page__editor-footer { justify-content:flex-end; gap:10px; border-top:1px solid #edf1f5; border-bottom:0; font-size:13px; }
+	.engineering-page__cancel,.engineering-page__save { padding:9px 19px; border-radius:18px; }
+	.engineering-page__cancel { color:#607891; background:#f1f4f7; }
+	.engineering-page__save { background:#1677cc; color:#fff; }
+</style>

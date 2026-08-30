@@ -1,0 +1,57 @@
+import { buildMobileRequestPlan, mobileRequestPlanMatchesContract } from './request-context.uts'
+import { sendMobileRequest } from './mobile-http.uts'
+import { currentMerchantRoot, merchantRequestSession } from '../platform/mobile-merchant-session.uts'
+
+const engineeringLedgerTransportContract : any = {
+	contractVersion: 'mobile-merchant-v1',
+	endpoints: {
+		catalog: { method: 'GET', path: '/mobile/merchant/engineering-ledger/catalog', requestMetadataProfile: 'MERCHANT_SESSION' },
+		list: { method: 'GET', path: '/mobile/merchant/engineering-ledger/list', requestMetadataProfile: 'MERCHANT_SESSION' },
+		save: { method: 'POST', path: '/mobile/merchant/engineering-ledger/save', requestMetadataProfile: 'MERCHANT_SESSION' }
+	},
+	requestMetadataProfiles: {
+		MERCHANT_SESSION: {
+			required: { 'X-Mobile-Contract-Version': 'contractVersion', 'X-Mobile-Client-Session-Id': 'clientSessionId', 'X-Mobile-Platform': 'platform', 'X-Mobile-Request-Id': 'requestId', Authorization: 'Bearer <merchantToken>', 'X-Mobile-Active-Context-Id': 'activeContextId', 'X-Mobile-State-Context-Id': 'stateContextId' },
+			forbidden: ['X-Mobile-App-Session', 'Cookie', 'queryToken', 'bodyToken', 'headerAlias']
+		}
+	}
+}
+
+function request(endpoint : string, payload : any, done : (value : any) => void) : void {
+	let root = currentMerchantRoot()
+	let session = merchantRequestSession(root)
+	if (session == null) { done({ ok: false, message: '请先完成商家端登录。', body: null }); return }
+	let plan = buildMobileRequestPlan(engineeringLedgerTransportContract, endpoint, session)
+	if (!mobileRequestPlanMatchesContract(engineeringLedgerTransportContract, endpoint, session, plan)) { done({ ok: false, message: '工程管理请求上下文无效，请重新进入商家端。', body: null }); return }
+	let requestPlan : any = plan
+	let requestBody : any = payload
+	if (plan.method == 'GET' && payload != null && typeof payload == 'object') {
+		let names = Object.keys(payload)
+		let query : Array<string> = []
+		for (let index = 0; index < names.length; index++) {
+			let value = payload[names[index]]
+			if (value == null || String(value).length == 0) continue
+			query.push(encodeURIComponent(names[index]) + '=' + encodeURIComponent(String(value)))
+		}
+		if (query.length > 0) requestPlan = { method: plan.method, path: plan.path + '?' + query.join('&'), headers: plan.headers }
+		requestBody = null
+	}
+	sendMobileRequest(requestPlan, requestBody, done)
+}
+
+export function queryMobileEngineeringLedger(type : string, filters : any, done : (value : any) => void) : void {
+	let source : any = filters == null ? {} : filters
+	request('list', { type: type, page: Number(source.page || 1), limit: Number(source.limit || 20), keyword: String(source.keyword || ''), start_date: String(source.start_date || ''), end_date: String(source.end_date || '') }, done)
+}
+
+export function saveMobileEngineeringLedger(type : string, record : any, expectedVersion : number | null, done : (value : any) => void) : void {
+	let payload : any = {}
+	if (record != null && typeof record == 'object') {
+		let names = Object.keys(record)
+		for (let index = 0; index < names.length; index++) payload[names[index]] = record[names[index]]
+	}
+	payload.type = type
+	payload.version = expectedVersion == null ? 0 : expectedVersion
+	payload.request_token = 'mobile-engineering-' + type + '-' + Date.now().toString() + '-' + Math.floor(Math.random() * 100000000).toString()
+	request('save', payload, done)
+}
