@@ -9,6 +9,7 @@
 			:aria-selected="props.activeKey === tab.key"
 			@tap="openTab(tab.key)"
 		>
+			<view class="merchant-primary-tab-bar__icon" :class="'merchant-primary-tab-bar__icon--' + tab.key" aria-hidden="true"></view>
 			<text class="merchant-primary-tab-bar__label">{{ tab.label }}</text>
 		</view>
 	</view>
@@ -90,8 +91,27 @@
 	/* The primary merchant navigation belongs to the viewport, not the page
 	 * scroll flow. Keeping it fixed also makes H5 behave like the mini program
 	 * shell and prevents a long page from pushing the navigation away. */
-	.merchant-primary-tab-bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 100; display: flex; box-sizing: border-box; min-height: 64px; flex-direction: row; align-items: stretch; padding-bottom: env(safe-area-inset-bottom); border-top-width: 1px; border-top-style: solid; border-top-color: #dde4ed; background-color: #ffffff; box-shadow: 0 -6px 18px rgba(35, 70, 110, 0.08); }
-	.merchant-primary-tab-bar__tab { display: flex; min-width: 0; flex: 1; flex-direction: row; align-items: center; justify-content: center; border-top-width: 2px; border-top-style: solid; border-top-color: #ffffff; font-size: 13px; font-weight: 600; color: #526071; }
-	.merchant-primary-tab-bar__tab--active { border-top-color: #1677cc; background-color: #f7fbff; color: #1677cc; }
-	.merchant-primary-tab-bar__label { line-height: 20px; }
+	.merchant-primary-tab-bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 100; display: flex; box-sizing: border-box; min-height: 72px; flex-direction: row; align-items: stretch; padding-top: 6px; padding-bottom: env(safe-area-inset-bottom); border-top-width: 1px; border-top-style: solid; border-top-color: #dde4ed; background-color: rgba(255, 255, 255, 0.98); box-shadow: 0 -6px 18px rgba(35, 70, 110, 0.08); }
+	.merchant-primary-tab-bar__tab { position: relative; display: flex; min-width: 0; flex: 1; flex-direction: column; align-items: center; justify-content: center; border-top-width: 0; background-color: transparent; font-size: 11px; font-weight: 600; line-height: 15px; color: #728198; }
+	.merchant-primary-tab-bar__tab--active { background-color: transparent; color: #1677cc; }
+	.merchant-primary-tab-bar__icon { position: relative; display: flex; width: 24px; height: 24px; align-items: center; justify-content: center; color: #728198; }
+	.merchant-primary-tab-bar__icon::before, .merchant-primary-tab-bar__icon::after { position: absolute; display: block; box-sizing: border-box; border-color: currentColor; content: ''; }
+	.merchant-primary-tab-bar__tab--active .merchant-primary-tab-bar__icon { color: #1677cc; }
+	/* 经营：简洁的房屋/经营入口线稿。 */
+	.merchant-primary-tab-bar__icon--home::before { width: 15px; height: 13px; margin-top: 4px; border-width: 2px; border-style: solid; border-radius: 2px; }
+	.merchant-primary-tab-bar__icon--home::after { width: 13px; height: 13px; margin-top: -5px; border-top-width: 2px; border-top-style: solid; border-left-width: 2px; border-left-style: solid; transform: rotate(45deg); }
+	/* 数据：带分隔线的数仓/报表线稿。 */
+	.merchant-primary-tab-bar__icon--warehouse::before { width: 17px; height: 15px; border-width: 2px; border-style: solid; border-radius: 3px; }
+	.merchant-primary-tab-bar__icon--warehouse::after { width: 9px; height: 2px; background-color: currentColor; box-shadow: 0 -4px 0 currentColor, 0 4px 0 currentColor; }
+	/* 客户：头像与肩部轮廓线稿。 */
+	.merchant-primary-tab-bar__icon--customers::before { width: 9px; height: 9px; margin-top: -7px; border-width: 2px; border-style: solid; border-radius: 50%; }
+	.merchant-primary-tab-bar__icon--customers::after { width: 18px; height: 9px; margin-top: 9px; border-width: 2px; border-style: solid; border-bottom: 0; border-radius: 10px 10px 0 0; }
+	/* 工作台：四格功能入口线稿。 */
+	.merchant-primary-tab-bar__icon--workbench::before { width: 17px; height: 17px; border-width: 2px; border-style: solid; border-radius: 3px; }
+	.merchant-primary-tab-bar__icon--workbench::after { width: 2px; height: 17px; background-color: currentColor; box-shadow: 6px 0 0 currentColor, -6px 0 0 currentColor; }
+	/* 我的：个人头像线稿。 */
+	.merchant-primary-tab-bar__icon--profile::before { width: 9px; height: 9px; margin-top: -7px; border-width: 2px; border-style: solid; border-radius: 50%; }
+	.merchant-primary-tab-bar__icon--profile::after { width: 17px; height: 9px; margin-top: 9px; border-width: 2px; border-style: solid; border-bottom: 0; border-radius: 10px 10px 0 0; }
+	.merchant-primary-tab-bar__label { margin-top: 3px; line-height: 15px; text-align: center; }
+	.merchant-primary-tab-bar__tab--active .merchant-primary-tab-bar__label { font-weight: 700; }
 </style>
