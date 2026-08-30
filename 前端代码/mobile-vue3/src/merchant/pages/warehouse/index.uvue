@@ -29,7 +29,7 @@
 
 		<MerchantPrimaryTabBar active-key="warehouse" />
 		<view v-if="showCustomRange" class="warehouse-page__sheet-mask warehouse-page__sheet-mask--range" @tap="closeCustomRange"><view class="warehouse-page__sheet" @tap.stop><view class="warehouse-page__sheet-head"><text>选择日期区间</text><text class="warehouse-page__sheet-close" @tap="closeCustomRange">×</text></view><view class="warehouse-page__range-row"><text>开始日期</text><picker mode="date" :value="customStartDate" @change="changeCustomStart"><view class="warehouse-page__range-value"><text>{{ customStartDate }}</text></view></picker></view><view class="warehouse-page__range-row"><text>结束日期</text><picker mode="date" :value="customEndDate" @change="changeCustomEnd"><view class="warehouse-page__range-value"><text>{{ customEndDate }}</text></view></picker></view><view class="warehouse-page__sheet-primary" @tap="applyCustomRange"><text>查看区间数据</text></view></view></view>
-		<view v-if="showOrgPicker" class="warehouse-page__sheet-mask warehouse-page__sheet-mask--full" @tap="closeOrgPicker"><view class="warehouse-page__sheet warehouse-page__sheet--org" @tap.stop><view class="warehouse-page__sheet-head warehouse-page__sheet-head--picker"><text class="warehouse-page__sheet-back" @tap="closeOrgPicker">‹</text><view class="warehouse-page__sheet-title"><text>选择组织/门店</text><text class="warehouse-page__sheet-tip">仅显示当前数据权限范围内的节点</text></view><text class="warehouse-page__sheet-close" @tap="closeOrgPicker">×</text></view><view class="warehouse-page__org-search-wrap"><input class="warehouse-page__org-search" :value="orgKeyword" placeholder="搜索区域或门店" @input="orgKeyword = $event.detail.value" /></view><scroll-view scroll-y="true" class="warehouse-page__org-tree"><view v-for="item in visibleOrganizationTree()" :key="'tree-' + item.entityType + '-' + item.entityId" class="warehouse-page__org-option warehouse-page__org-option--tree" :class="{ 'warehouse-page__org-option--selected': isPendingOrgNode(item) }" :style="orgTreeIndent(item)" @tap="selectPendingOrgNode(item)"><view v-if="item.hasChildren === true" class="warehouse-page__org-expand" @tap.stop="toggleOrgNode(item)"><text>{{ isOrgNodeCollapsed(item) ? '›' : '⌄' }}</text></view><view v-else class="warehouse-page__org-expand warehouse-page__org-expand--blank"></view><view class="warehouse-page__org-type" :class="{ 'warehouse-page__org-type--store': item.entityType === 'store' }"><text>{{ rowTypeLabel(item) === '组织' ? '区' : '店' }}</text></view><view class="warehouse-page__org-copy"><text class="warehouse-page__org-name">{{ item.name }}</text><text class="warehouse-page__org-meta">{{ orgOptionMeta(item) }}</text></view><text class="warehouse-page__org-select">{{ isPendingOrgNode(item) ? '已选' : '' }}</text></view></scroll-view><view class="warehouse-page__org-footer"><text>已选：{{ pendingOrgLabel() }}</text><view class="warehouse-page__org-clear" @tap="clearOrgSelection"><text>清空</text></view><view class="warehouse-page__org-confirm" @tap="confirmOrgNode"><text>确定</text></view></view></view></view>
+		<view v-if="showOrgPicker" class="warehouse-page__sheet-mask warehouse-page__sheet-mask--full" @tap="closeOrgPicker"><view class="warehouse-page__sheet warehouse-page__sheet--org" @tap.stop><view class="warehouse-page__sheet-head warehouse-page__sheet-head--picker"><text class="warehouse-page__sheet-back" @tap="closeOrgPicker">‹</text><view class="warehouse-page__sheet-title"><text>选择组织/门店</text><text class="warehouse-page__sheet-tip">仅显示当前数据权限范围内的节点</text></view><text class="warehouse-page__sheet-close" @tap="closeOrgPicker">×</text></view><view class="warehouse-page__org-search-wrap"><input class="warehouse-page__org-search" :value="orgKeyword" placeholder="搜索区域或门店" @input="orgKeyword = $event.detail.value" /></view><scroll-view scroll-y="true" class="warehouse-page__org-tree"><view v-for="item in visibleOrganizationTree()" :key="'tree-' + item.entityType + '-' + item.entityId" class="warehouse-page__org-option warehouse-page__org-option--tree" :class="{ 'warehouse-page__org-option--selected': isPendingOrgNode(item) }" :style="orgTreeIndent(item)" @tap="selectPendingOrgNode(item)"><view v-if="item.hasChildren === true" class="warehouse-page__org-expand" @tap.stop="toggleOrgNode(item)"><text>{{ isOrgNodeCollapsed(item) ? '›' : '⌄' }}</text></view><view v-else class="warehouse-page__org-expand warehouse-page__org-expand--blank"></view><view class="warehouse-page__org-type" :class="{ 'warehouse-page__org-type--store': item.entityType === 'store' }"><text>{{ rowTypeLabel(item) === '组织' ? '区' : '店' }}</text></view><view class="warehouse-page__org-copy"><text class="warehouse-page__org-name">{{ item.name }}</text><text class="warehouse-page__org-meta">{{ orgOptionMeta(item) }}</text></view><text class="warehouse-page__org-select">{{ isPendingOrgNode(item) ? '已选' : '' }}</text></view></scroll-view><view class="warehouse-page__org-footer"><text>已选：{{ pendingOrgLabel() }}</text><view class="warehouse-page__org-cancel" @tap="closeOrgPicker"><text>取消</text></view><view class="warehouse-page__org-confirm" @tap="confirmOrgNode"><text>确认</text></view></view></view></view>
 	</view>
 </template>
 
@@ -38,7 +38,8 @@
 	import MerchantPrimaryTabBar from '../../../shared/components/merchant-primary-tab-bar.uvue'
 	import { currentMobilePlatform, drawMobilePieCanvas, drawMobileTrendCanvas } from '../../../shared/platform/mobile-platform.uts'
 	import { openMerchantBootstrap, openMerchantEmployeePerformance, replaceMerchantEmployeePerformance } from '../../../shared/platform/mobile-navigation.uts'
-	import { currentMerchantRoot, merchantRequestSession } from '../../../shared/platform/mobile-merchant-session.uts'
+	import { clearMerchantRoot, currentMerchantRoot, merchantRequestSession } from '../../../shared/platform/mobile-merchant-session.uts'
+	import { mobileHttpResultRequiresMerchantLogin } from '../../../shared/api/mobile-http.uts'
 	const now = new Date()
 	const initialMonth = now.getFullYear().toString() + '-' + twoDigits(now.getMonth() + 1)
 	const loading = ref(false)
@@ -98,7 +99,10 @@
 		queryMobileWarehouse(periodPayload(nodeType, nodeId), (response : any) => {
 			if (!keepPage) loading.value = false
 			let payload = response != null && response.body != null ? response.body.warehouse : null
-			if (!response.ok || payload == null) { message.value = String(response.message || '数仓暂时不可用。'); return }
+			if (!response.ok || payload == null) {
+				if (mobileHttpResultRequiresMerchantLogin(response)) { clearMerchantRoot(); openMerchantBootstrap(); return }
+				message.value = String(response.message || '数仓暂时不可用。'); return
+			}
 			let entry = payload.entry || null
 			if (entry != null && String(entry.destination || '') === 'employee-performance') {
 				replaceMerchantEmployeePerformance(Number(entry.employeeId || 0), periodMode.value, month.value, customStartDate.value, customEndDate.value, 'cash')
@@ -746,7 +750,7 @@
 	.warehouse-page__sheet-mask--range { z-index: 120; }
 	.warehouse-page__sheet { display: flex; flex-direction: column; padding: 16px 16px 22px 16px; border-radius: 22px 22px 0 0; background-color: #ffffff; box-shadow: 0 -12px 32px rgba(25, 49, 78, 0.16); }
 	.warehouse-page__sheet-mask--range .warehouse-page__sheet { padding-bottom: 94px; }
-	.warehouse-page__sheet-mask--full { z-index: 90; justify-content: stretch; }
+	.warehouse-page__sheet-mask--full { z-index: 130; justify-content: stretch; }
 	.warehouse-page__sheet--org { position: absolute; left: 0; right: 0; top: 0; bottom: 0; padding: 18px 16px 24px 16px; border-radius: 0; }
 	.warehouse-page__sheet-head { display: flex; min-height: 32px; flex-direction: row; align-items: center; justify-content: space-between; }
 	.warehouse-page__sheet-head--picker { min-height: 42px; }
@@ -782,10 +786,10 @@
 	.warehouse-page__org-copy { display: flex; min-width: 0; flex: 1; flex-direction: column; }
 	.warehouse-page__org-select { display: flex; min-width: 42px; height: 28px; align-items: center; justify-content: center; border-radius: 14px; background-color: transparent; font-size: 12px; font-weight: 700; color: #8a99aa; }
 	.warehouse-page__org-option--selected .warehouse-page__org-select { background-color: #e7f1ff; color: #1677cc; }
-	.warehouse-page__org-footer { display: flex; min-height: 64px; flex-direction: row; align-items: center; justify-content: space-between; margin: 14px -16px -24px -16px; padding: 0 16px; border-top-width: 1px; border-top-style: solid; border-top-color: #e8eef5; background-color: #ffffff; }
+	.warehouse-page__org-footer { position: fixed; left: 0; right: 0; bottom: 0; z-index: 200; display: flex; min-height: 64px; flex-direction: row; align-items: center; justify-content: space-between; margin: 0; padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); border-top-width: 1px; border-top-style: solid; border-top-color: #e8eef5; background-color: #ffffff; box-sizing: border-box; }
 	.warehouse-page__org-footer > text { overflow: hidden; max-width: 56%; font-size: 14px; font-weight: 700; color: #40546b; text-overflow: ellipsis; white-space: nowrap; }
-	.warehouse-page__org-clear { display: flex; width: 62px; height: 42px; align-items: center; justify-content: center; margin-left: auto; margin-right: 10px; border-radius: 13px; background-color: #edf4fb; }
-	.warehouse-page__org-clear text { font-size: 14px; font-weight: 700; color: #497092; }
+	.warehouse-page__org-cancel { display: flex; width: 74px; height: 42px; align-items: center; justify-content: center; margin-left: auto; margin-right: 10px; border-radius: 13px; background-color: #edf4fb; }
+	.warehouse-page__org-cancel text { font-size: 14px; font-weight: 700; color: #497092; }
 	.warehouse-page__org-confirm { display: flex; width: 100px; height: 42px; align-items: center; justify-content: center; border-radius: 13px; background-color: #1677cc; box-shadow: 0 7px 15px rgba(22, 119, 204, 0.2); }
 	.warehouse-page__org-confirm text { font-size: 15px; font-weight: 800; color: #ffffff; }
 	.warehouse-page__org-name { display: block; font-size: 15px; font-weight: 800; line-height: 21px; color: #142a42; }
