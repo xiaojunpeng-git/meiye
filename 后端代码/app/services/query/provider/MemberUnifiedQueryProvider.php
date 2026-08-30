@@ -243,7 +243,14 @@ class MemberUnifiedQueryProvider implements UnifiedQueryProvider
             $rows = [];
             $total = 0;
         } else {
-            $this->applySqlPageFilters($query, (array)($plan['filters'] ?? []), $context, $visibleStoreIds, $allStores);
+            $this->applySqlPageFilters(
+                $query,
+                (array)($plan['filters'] ?? []),
+                (string)($normalizedQuery['filterRelation'] ?? 'all'),
+                $context,
+                $visibleStoreIds,
+                $allStores
+            );
             $total = (int)(clone $query)->count('u.uid');
             foreach ((array)$normalizedQuery['sorts'] as $sort) {
                 $fieldKey = (string)($sort['field_key'] ?? '');
@@ -335,114 +342,142 @@ class MemberUnifiedQueryProvider implements UnifiedQueryProvider
         if ($filters === []) {
             return true;
         }
-        if (count($filters) !== 1 || !is_array($filters[0])) {
+        foreach ($filters as $filter) {
+            if (!is_array($filter)) return false;
+            $field = (string)($filter['field_key'] ?? '');
+            $operator = (string)($filter['operator'] ?? '');
+            $rawValue = $filter['value'] ?? '';
+            if (is_array($rawValue)) {
+                if ($field !== 'latest_visit_date' || $operator !== 'between' || count($rawValue) !== 2) return false;
+                if (preg_match('/^\d{4}-\d{2}-\d{2}$/D', (string)$rawValue[0]) !== 1
+                    || preg_match('/^\d{4}-\d{2}-\d{2}$/D', (string)$rawValue[1]) !== 1) return false;
+                continue;
+            }
+            $value = trim((string)$rawValue);
+            if ($field === 'birthday_month_day'
+                && (($operator === 'equal' && preg_match('/^\d{2}-\d{2}$/D', $value))
+                    || ($operator === 'starts_with' && preg_match('/^\d{2}-(?:\d{2})?$/D', $value)))) continue;
+            if ($field === 'latest_visit_date'
+                && in_array($operator, ['greater_or_equal', 'less_or_equal'], true)
+                && preg_match('/^\d{4}-\d{2}-\d{2}$/D', $value) === 1) continue;
+            if ($field === 'latest_purchase_date'
+                && $operator === 'greater_or_equal'
+                && preg_match('/^\d{4}-\d{2}-\d{2}$/D', $value) === 1) continue;
+            if ($field === 'remaining_project_amount'
+                && in_array($operator, ['greater_than', 'less_than'], true)
+                && is_numeric($value)) continue;
             return false;
         }
-        $field = (string)($filters[0]['field_key'] ?? '');
-        $operator = (string)($filters[0]['operator'] ?? '');
-        $rawValue = $filters[0]['value'] ?? '';
-        // Range filters carry an array value and belong to the unified query
-        // path; never cast that array to a string while deciding fast-path use.
-        if (is_array($rawValue)) {
-            if ($field !== 'latest_visit_date' || $operator !== 'between' || count($rawValue) !== 2) return false;
-            return preg_match('/^\d{4}-\d{2}-\d{2}$/D', (string)$rawValue[0]) === 1
-                && preg_match('/^\d{4}-\d{2}-\d{2}$/D', (string)$rawValue[1]) === 1;
-        }
-        $value = trim((string)$rawValue);
-        return ($field === 'birthday_month_day'
-                && (($operator === 'equal' && preg_match('/^\d{2}-\d{2}$/D', $value))
-                    || ($operator === 'starts_with' && preg_match('/^\d{2}-(?:\d{2})?$/D', $value))))
-            || ($field === 'latest_visit_date'
-                && $operator === 'less_or_equal'
-                && preg_match('/^\d{4}-\d{2}-\d{2}$/D', $value));
+        return true;
     }
 
     /**
      * Applies a predicate already proved equivalent to the in-memory member
      * projection. Permission scope is injected before this predicate runs.
      */
-    protected function applySqlPageFilters($query, array $filters, array $context, array $visibleStoreIds, bool $allStores): void
+    protected function applySqlPageFilters($query, array $filters, string $filterRelation, array $context, array $visibleStoreIds, bool $allStores): void
     {
         if ($filters === []) {
             return;
         }
-        $filter = $filters[0];
+        $predicates = [];
+        foreach ($filters as $filter) {
+            $predicate = $this->sqlPageFilterPredicate($filter, $context, $visibleStoreIds, $allStores);
+            if ($predicate === null) return;
+            $predicates[] = $predicate;
+        }
+        $join = strtolower($filterRelation) === 'any' ? ' OR ' : ' AND ';
+        $sql = '(' . implode($join, array_column($predicates, 'sql')) . ')';
+        $parameters = [];
+        foreach ($predicates as $predicate) {
+            $parameters = array_merge($parameters, $predicate['params']);
+        }
+        $query->whereRaw($sql, $parameters);
+    }
+
+    /** @return array{sql:string,params:array}|null */
+    protected function sqlPageFilterPredicate(array $filter, array $context, array $visibleStoreIds, bool $allStores): ?array
+    {
         $field = (string)($filter['field_key'] ?? '');
         $operator = (string)($filter['operator'] ?? '');
         $rawValue = $filter['value'] ?? '';
-        if (is_array($rawValue)) {
-            if ($field === 'latest_visit_date' && $operator === 'between' && count($rawValue) === 2) {
-                $tenantId = trim((string)($context['tenant_id'] ?? ''));
-                $prefix = (string)Db::getConfig('connections.mysql.prefix');
-                $table = '`' . str_replace('`', '', $prefix . 'cashier_v3_entitlement_service_fact') . '`';
-                $start = (string)$rawValue[0];
-                $end = (string)$rawValue[1];
-                $scopeSql = '';
-                $scopeParams = [];
-                if (!$allStores) {
-                    $placeholders = implode(',', array_fill(0, count($visibleStoreIds), '?'));
-                    $scopeSql = ' AND sf.store_id IN (' . $placeholders . ')';
-                    foreach ($visibleStoreIds as $storeId) $scopeParams[] = (int)$storeId;
-                }
-                $scopeSql2 = str_replace('sf.', 'sf2.', $scopeSql);
-                $scopeParams2 = $scopeParams;
-                $query->whereRaw(
-                    'EXISTS (SELECT 1 FROM ' . $table . ' sf WHERE sf.member_id = u.uid'
-                    . ' AND sf.tenant_id = ? AND sf.service_status = \'completed\''
-                    . ' AND sf.business_date BETWEEN ? AND ?' . $scopeSql . ')'
-                    . ' AND NOT EXISTS (SELECT 1 FROM ' . $table . ' sf2 WHERE sf2.member_id = u.uid'
-                    . ' AND sf2.tenant_id = ? AND sf2.service_status = \'completed\''
-                    . ' AND sf2.business_date > ?' . $scopeSql2 . ')',
-                    array_merge([$tenantId, $start, $end], $scopeParams, [$tenantId, $end], $scopeParams2)
-                );
-            }
-            return;
-        }
-        $value = trim((string)$rawValue);
-        if ($field === 'birthday_month_day') {
-            $query->whereRaw(
-                "DATE_FORMAT(FROM_UNIXTIME(u.birthday), '%m-%d') " . ($operator === 'equal' ? '= ?' : 'LIKE ?'),
-                [$operator === 'equal' ? $value : $value . '%']
-            );
-            return;
-        }
-
-        $tenantId = trim((string)($context['tenant_id'] ?? ''));
-        if ($tenantId === '') {
-            throw new \RuntimeException('会员到店事实缺少租户范围');
-        }
         $prefix = (string)Db::getConfig('connections.mysql.prefix');
-        $table = '`' . str_replace('`', '', $prefix . 'cashier_v3_entitlement_service_fact') . '`';
-        $scopeSql = '';
-        $parameters = [$tenantId, $value];
-        if (!$allStores) {
-            $placeholders = implode(',', array_fill(0, count($visibleStoreIds), '?'));
-            $scopeSql = ' AND sf.store_id IN (' . $placeholders . ')';
-            foreach ($visibleStoreIds as $storeId) {
-                $parameters[] = (int)$storeId;
-            }
-            $parameters[] = $tenantId;
-            $parameters[] = $value;
-            foreach ($visibleStoreIds as $storeId) {
-                $parameters[] = (int)$storeId;
-            }
-        } else {
-            $parameters[] = $tenantId;
-            $parameters[] = $value;
+        $quoteTable = static function (string $name) use ($prefix): string {
+            return '`' . str_replace('`', '', $prefix . $name) . '`';
+        };
+        $storeScope = static function (string $alias, array $storeIds, bool $all): array {
+            if ($all) return ['', []];
+            $placeholders = implode(',', array_fill(0, count($storeIds), '?'));
+            return [' AND ' . $alias . '.store_id IN (' . $placeholders . ')', array_values(array_map('intval', $storeIds))];
+        };
+        if ($field === 'birthday_month_day' && !is_array($rawValue)) {
+            $value = trim((string)$rawValue);
+            return [
+                'sql' => "DATE_FORMAT(FROM_UNIXTIME(u.birthday), '%m-%d') " . ($operator === 'equal' ? '= ?' : 'LIKE ?'),
+                'params' => [$operator === 'equal' ? $value : $value . '%'],
+            ];
         }
-        // Sleeping requires both a historical valid service and no valid
-        // service after the cutoff. A never-served member is not sleeping.
-        $query->whereRaw(
-            'EXISTS (SELECT 1 FROM ' . $table . ' sf'
-            . ' WHERE sf.member_id = u.uid AND sf.tenant_id = ?'
-            . " AND sf.service_status = 'completed' AND sf.business_date <= ?"
-            . $scopeSql . ')'
-            . ' AND NOT EXISTS (SELECT 1 FROM ' . $table . ' sf2'
-            . ' WHERE sf2.member_id = u.uid AND sf2.tenant_id = ?'
-            . " AND sf2.service_status = 'completed' AND sf2.business_date > ?"
-            . str_replace('sf.', 'sf2.', $scopeSql) . ')',
-            $parameters
-        );
+        $tenantId = trim((string)($context['tenant_id'] ?? ''));
+        if ($field === 'latest_visit_date') {
+            $table = $quoteTable('cashier_v3_entitlement_service_fact');
+            [$scopeSql, $scopeParams] = $storeScope('sf', $visibleStoreIds, $allStores);
+            if (is_array($rawValue) && $operator === 'between' && count($rawValue) === 2) {
+                $start = (string)$rawValue[0]; $end = (string)$rawValue[1];
+                $scope2 = str_replace('sf.', 'sf2.', $scopeSql);
+                return [
+                    'sql' => 'EXISTS (SELECT 1 FROM ' . $table . ' sf WHERE sf.member_id = u.uid AND sf.tenant_id = ? AND sf.service_status = \'completed\' AND sf.business_date BETWEEN ? AND ?' . $scopeSql . ')'
+                        . ' AND NOT EXISTS (SELECT 1 FROM ' . $table . ' sf2 WHERE sf2.member_id = u.uid AND sf2.tenant_id = ? AND sf2.service_status = \'completed\' AND sf2.business_date > ?' . $scope2 . ')',
+                    'params' => array_merge([$tenantId, $start, $end], $scopeParams, [$tenantId, $end], $scopeParams),
+                ];
+            }
+            if ($tenantId === '' || !in_array($operator, ['greater_or_equal', 'less_or_equal'], true)) return null;
+            $value = trim((string)$rawValue);
+            return [
+                'sql' => 'EXISTS (SELECT 1 FROM ' . $table . ' sf WHERE sf.member_id = u.uid AND sf.tenant_id = ? AND sf.service_status = \'completed\' AND sf.business_date ' . ($operator === 'greater_or_equal' ? '>= ' : '<= ') . '?' . $scopeSql . ')',
+                'params' => array_merge([$tenantId, $value], $scopeParams),
+            ];
+        }
+        if ($field === 'latest_purchase_date' && !is_array($rawValue) && $tenantId !== '' && $operator === 'greater_or_equal') {
+            $table = $quoteTable('store_order');
+            [$scopeSql, $scopeParams] = $storeScope('o', $visibleStoreIds, $allStores);
+            $optional = $this->tableColumns('store_order');
+            $extra = '';
+            if (isset($optional['is_debt_repay'])) $extra .= ' AND o.is_debt_repay = 0';
+            if (isset($optional['terminal_action'])) $extra .= ' AND o.terminal_action = 0';
+            if (isset($optional['card_upgrade_use_oid'])) $extra .= ' AND o.card_upgrade_use_oid = 0';
+            return [
+                'sql' => 'EXISTS (SELECT 1 FROM ' . $table . ' o WHERE o.uid = u.uid AND o.paid = 1 AND o.refund_status IN (0,3) AND o.is_del = 0 AND o.is_system_del = 0 AND o.pid = 0 AND o.order_type = 0' . $extra . ' AND DATE(FROM_UNIXTIME(CASE WHEN o.pay_time > 0 THEN o.pay_time ELSE o.add_time END)) >= ?' . $scopeSql . ')',
+                'params' => array_merge([trim((string)$rawValue)], $scopeParams),
+            ];
+        }
+        if ($field === 'remaining_project_amount' && !is_array($rawValue)
+            && in_array($operator, ['greater_than', 'less_than'], true)) {
+            $holder = $quoteTable('user_card_holder');
+            $orders = $quoteTable('store_order');
+            $cart = $quoteTable('store_order_cart_info');
+            [$scopeSql, $scopeParams] = $storeScope('o', $visibleStoreIds, $allStores);
+            $orderColumns = $this->tableColumns('store_order');
+            $cartColumns = $this->tableColumns('store_order_cart_info');
+            foreach (['id', 'paid', 'is_del', 'is_system_del', 'refund_status', 'store_id'] as $required) {
+                if (!isset($orderColumns[$required])) return null;
+            }
+            foreach (['oid', 'pay_price', 'write_times', 'write_surplus_times'] as $required) {
+                if (!isset($cartColumns[$required])) return null;
+            }
+            $orderExtra = '';
+            if (isset($orderColumns['terminal_action'])) $orderExtra .= ' AND o.terminal_action = 0';
+            if (isset($orderColumns['card_upgrade_use_oid'])) $orderExtra .= ' AND o.card_upgrade_use_oid = 0';
+            $cartExtra = '';
+            if (isset($cartColumns['cart_type'])) $cartExtra .= ' AND c.cart_type = 2';
+            if (isset($cartColumns['product_type'])) $cartExtra .= ' AND c.product_type = 6';
+            if (isset($cartColumns['is_writeoff'])) $cartExtra .= ' AND c.is_writeoff = 0';
+            $sum = 'SUM((c.pay_price * c.write_surplus_times) / NULLIF(c.write_times, 0))';
+            return [
+                'sql' => 'u.uid IN (SELECT h.uid FROM ' . $holder . ' h JOIN ' . $orders . ' o ON o.id = h.oid JOIN ' . $cart . ' c ON c.oid = h.oid WHERE h.is_del = 0 AND h.write_surplus_times > 0 AND o.paid = 1 AND o.is_del = 0 AND o.is_system_del = 0 AND o.refund_status = 0' . $orderExtra . $scopeSql . ' AND c.write_surplus_times > 0' . $cartExtra . ' GROUP BY h.uid HAVING ' . $sum . ' ' . ($operator === 'greater_than' ? '> ' : '< ') . '?)',
+                'params' => array_merge($scopeParams, [(string)$rawValue]),
+            ];
+        }
+        return null;
     }
 
     /**
