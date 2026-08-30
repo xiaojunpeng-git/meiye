@@ -880,7 +880,7 @@
 	/* The custom navigation layout on MP-WEIXIN does not reserve the status-bar
 	 * area for this page. Keep the first filter row below the system capsule.
 	 * The class is applied only on the WeChat mini-program target. */
-	.warehouse-page--native-mini .warehouse-page__content-inner { padding-top: 124px; }
+	.warehouse-page--native-mini .warehouse-page__content-inner { padding-top: 84px; }
 	/* Keep organization and date controls as separate capsules on one safe row
 	 * below the WeChat capsule. */
 	.warehouse-page--native-mini .warehouse-page__scope { min-height: 0; padding: 0; border-width: 0; border-radius: 0; background-color: transparent; box-shadow: none; overflow: visible; }

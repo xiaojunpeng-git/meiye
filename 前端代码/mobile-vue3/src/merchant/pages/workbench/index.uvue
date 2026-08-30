@@ -217,5 +217,5 @@
 	.merchant-workbench__entry-icon--order { background-color: #e8f6f7; color: #287f90; }
 	.merchant-workbench__entry-icon--engineering { background-color: #f2eaff; color: #7652c5; }
 	.merchant-workbench__entry-label { margin-top: 7px; font-size: 12px; line-height: 18px; color: #38516a; }
-	.merchant-workbench--native-mini .merchant-workbench__header { padding-top: 124px; }
+	.merchant-workbench--native-mini .merchant-workbench__header { padding-top: 84px; }
 </style>

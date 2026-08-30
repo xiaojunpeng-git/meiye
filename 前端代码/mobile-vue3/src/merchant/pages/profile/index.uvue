@@ -63,7 +63,7 @@
 	.merchant-profile__section-kicker { font-size: 12px; font-weight: 600; line-height: 18px; color: #71839a; }
 	.merchant-profile__content { min-height: 0; flex: 1; }
 	.merchant-profile__content-inner { width: 100%; max-width: 1200px; box-sizing: border-box; margin: 0 auto; padding: 20px 18px 112px 18px; }
-	.merchant-profile--native-mini .merchant-profile__content-inner { padding-top: 124px; }
+	.merchant-profile--native-mini .merchant-profile__content-inner { padding-top: 84px; }
 	.merchant-profile__account-card { display: flex; flex-direction: row; align-items: center; padding: 17px 15px; border-radius: 8px; background-color: #ffffff; box-shadow: 0 8px 20px rgba(60, 88, 130, 0.08); }
 	.merchant-profile__avatar { display: flex; width: 50px; height: 50px; flex-shrink: 0; flex-direction: row; align-items: center; justify-content: center; border-radius: 8px; background-color: #eaf1ff; }
 	.merchant-profile__avatar-label { font-size: 18px; font-weight: 700; line-height: 24px; color: #4a72c5; }
