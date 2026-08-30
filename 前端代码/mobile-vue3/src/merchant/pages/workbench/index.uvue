@@ -28,7 +28,6 @@
 				<view class="merchant-workbench__grid">
 					<navigator class="merchant-workbench__entry" url="/src/merchant/pages/reservations/index" open-type="navigate"><view class="merchant-workbench__entry-icon merchant-workbench__entry-icon--reservation"><text>约</text></view><text class="merchant-workbench__entry-label">预约管理</text></navigator>
 					<navigator class="merchant-workbench__entry" url="/src/merchant/pages/customer-care/index" open-type="navigate"><view class="merchant-workbench__entry-icon merchant-workbench__entry-icon--care"><text>客</text></view><text class="merchant-workbench__entry-label">客情管理</text></navigator>
-					<navigator class="merchant-workbench__entry" url="/src/merchant/pages/customers/index" open-type="navigate"><view class="merchant-workbench__entry-icon merchant-workbench__entry-icon--customer"><text>户</text></view><text class="merchant-workbench__entry-label">客户管理</text></navigator>
 					<navigator class="merchant-workbench__entry" url="/src/merchant/pages/engineering/index" open-type="navigate"><view class="merchant-workbench__entry-icon merchant-workbench__entry-icon--engineering"><text>工</text></view><text class="merchant-workbench__entry-label">工程管理</text></navigator>
 				</view>
 			</view>
@@ -187,9 +186,9 @@
 	.merchant-workbench__todo-title { font-size: 14px; line-height: 20px; color: #26384d; }
 	.merchant-workbench__todo-note { margin-top: 3px; font-size: 11px; line-height: 17px; color: #71839a; }
 	.merchant-workbench__grid { overflow: hidden; margin-top: 12px; border: 0; border-radius: 8px; background-color: #ffffff; box-shadow: 0 8px 20px rgba(60, 88, 130, 0.08); }
-	.merchant-workbench__entry { min-height: 116px; padding: 12px 4px; border-color: #edf1f5; }
-	.merchant-workbench__entry:nth-child(4n) { border-right-width: 0; }
-	.merchant-workbench__entry:nth-last-child(-n + 4) { border-bottom-width: 0; }
+	.merchant-workbench__entry { width: 33.3333%; min-height: 116px; padding: 12px 4px; border-color: #edf1f5; }
+	.merchant-workbench__entry:nth-child(3n) { border-right-width: 0; }
+	.merchant-workbench__entry:nth-last-child(-n + 3) { border-bottom-width: 0; }
 	.merchant-workbench__entry-icon { display: flex; width: 34px; height: 34px; flex-direction: row; align-items: center; justify-content: center; border-radius: 8px; font-size: 14px; font-weight: 700; }
 	.merchant-workbench__entry-icon--reservation { background-color: #eaf1ff; color: #4a72c5; }
 	.merchant-workbench__entry-icon--care { background-color: #e8f6f0; color: #21845f; }
