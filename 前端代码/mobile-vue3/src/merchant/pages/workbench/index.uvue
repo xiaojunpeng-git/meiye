@@ -12,12 +12,12 @@
 			<view class="merchant-workbench__content-inner">
 				<view class="merchant-workbench__section-heading"><view><text class="merchant-workbench__section-kicker">今日事务</text><text class="merchant-workbench__section-title">待办</text></view><text class="merchant-workbench__refresh" @tap="loadTodos">刷新</text></view>
 				<view class="merchant-workbench__todo-list">
-					<view class="merchant-workbench__todo" @tap="openTodo('care')">
+					<view v-if="canOpenWorkbenchEntry('mobile.merchant.customer_care')" class="merchant-workbench__todo" @tap="openTodo('care')">
 						<view class="merchant-workbench__todo-count"><text>{{ careLoading ? '—' : (careFailed ? '!' : openTaskCount) }}</text></view>
 						<view class="merchant-workbench__todo-copy"><text class="merchant-workbench__todo-title">跟进任务</text><text class="merchant-workbench__todo-note">{{ careFailed ? '数据暂不可用，点击进入后重试' : '未完成的跟进任务' }}</text></view>
 						<text class="merchant-workbench__chevron">›</text>
 					</view>
-					<view class="merchant-workbench__todo" @tap="openTodo('reservations')">
+					<view v-if="canOpenWorkbenchEntry('mobile.merchant.reservations')" class="merchant-workbench__todo" @tap="openTodo('reservations')">
 						<view class="merchant-workbench__todo-count merchant-workbench__todo-count--warm"><text>{{ reservationLoading ? '—' : (reservationFailed ? '!' : dueNotArrivedCount) }}</text></view>
 						<view class="merchant-workbench__todo-copy"><text class="merchant-workbench__todo-title">预约未到店</text><text class="merchant-workbench__todo-note">{{ reservationFailed ? '数据暂不可用，点击进入后重试' : '已到预约时间，尚未开始服务' }}</text></view>
 						<text class="merchant-workbench__chevron">›</text>
@@ -91,8 +91,12 @@
 	}
 
 	function loadTodos() : void {
-		loadOpenTasks()
-		loadDueReservations()
+		let careAllowed = canOpenWorkbenchEntry('mobile.merchant.customer_care')
+		let reservationsAllowed = canOpenWorkbenchEntry('mobile.merchant.reservations')
+		if (careAllowed) loadOpenTasks()
+		else { careLoading.value = false; careFailed.value = false; openTaskCount.value = 0 }
+		if (reservationsAllowed) loadDueReservations()
+		else { reservationLoading.value = false; reservationFailed.value = false; dueNotArrivedCount.value = 0 }
 	}
 
 	function canOpenWorkbenchEntry(action : string) : boolean {
@@ -130,7 +134,12 @@
 	}
 
 	function openTodo(kind : string) : void {
-		if (kind == 'care') { uni.navigateTo({ url: '/src/merchant/pages/customer-care/index?bucket=all&statusGroup=open' }); return }
+		if (kind == 'care') {
+			if (!canOpenWorkbenchEntry('mobile.merchant.customer_care')) return
+			uni.navigateTo({ url: '/src/merchant/pages/customer-care/index?bucket=all&statusGroup=open' })
+			return
+		}
+		if (!canOpenWorkbenchEntry('mobile.merchant.reservations')) return
 		uni.navigateTo({ url: '/src/merchant/pages/reservations/index' })
 	}
 
