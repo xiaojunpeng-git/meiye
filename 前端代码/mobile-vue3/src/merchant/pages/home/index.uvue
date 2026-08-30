@@ -2,7 +2,7 @@
 	<view class="merchant-home-page" :class="{ 'merchant-home-page--native-mini': platformUsesNativeCanvas }">
 		<scroll-view scroll-y="true" refresher-enabled="true" :refresher-triggered="refreshing" @refresherrefresh="onPullRefresh" class="merchant-home-page__content">
 			<view class="merchant-home-page__content-inner">
-				<view class="merchant-home-page__context"><view class="merchant-home-page__context-copy"><text class="merchant-home-page__context-label">当前范围：</text><text class="merchant-home-page__context-value">{{ scopeLabel }}</text></view><view class="merchant-home-page__periods"><view v-for="item in periods" :key="item.key" class="merchant-home-page__period" :class="{ 'merchant-home-page__period--active': selectedPeriod === item.key }" @tap="selectPeriod(item.key)"><text>{{ item.label }}</text></view></view></view>
+				<view class="merchant-home-page__context"><view class="merchant-home-page__org-filter" @tap="openWarehouse"><text>{{ scopeLabel }}›</text></view><view class="merchant-home-page__periods"><view v-for="item in periods" :key="item.key" class="merchant-home-page__period" :class="{ 'merchant-home-page__period--active': selectedPeriod === item.key }" @tap="selectPeriod(item.key)"><text>{{ item.label }}</text></view></view></view>
 				<view v-if="message.length > 0" class="merchant-home-page__error"><text>{{ message }}</text><view class="merchant-home-page__error-retry" @tap="reload"><text>重新加载</text></view></view>
 
 				<view class="merchant-home-page__section-head"><view><text class="merchant-home-page__section-title">经营概览</text><text class="merchant-home-page__section-note">统一业绩事实汇总</text></view><text class="merchant-home-page__section-link" @tap="openWarehouse">查看数仓 ›</text></view>
@@ -32,7 +32,7 @@
 	import { clearMerchantRoot, currentMerchantRoot, merchantRequestSession } from '../../../shared/platform/mobile-merchant-session.uts'
 	import { openMerchantBootstrap } from '../../../shared/platform/mobile-navigation.uts'
 
-	const periods = [{ key: 'today', label: '今天' }, { key: 'yesterday', label: '昨天' }, { key: 'month', label: '本月' }, { key: 'year', label: '本年' }]
+	const periods = [{ key: 'today', label: '今天' }, { key: 'yesterday', label: '昨天' }, { key: 'last_month', label: '上月' }, { key: 'month', label: '本月' }, { key: 'custom', label: '自定义' }]
 	const selectedPeriod = ref('month')
 	const loading = ref(false)
 	const refreshing = ref(false)
@@ -90,6 +90,7 @@
 	function onPullRefresh() : void { if (refreshing.value) return; refreshing.value = true; reload(); setTimeout(() => { refreshing.value = false }, 900) }
 
 	function selectPeriod(value : string) : void {
+		if (value === 'custom') { openWarehouse(); return }
 		selectedPeriod.value = value
 		reload()
 	}
@@ -185,11 +186,10 @@
 	.merchant-home-page__content { min-height: 0; height: 0; flex: 1; }
 	.merchant-home-page__content-inner { padding: 84px 14px 88px 14px; }
 	.merchant-home-page__context { display: flex; flex-direction: row; align-items: center; justify-content: flex-start; padding: 8px 0 12px 0; border-radius: 0; background-color: transparent; }
-	.merchant-home-page__context-copy { display: flex; flex-shrink: 0; flex-direction: row; align-items: center; }
-	.merchant-home-page__context-label { white-space: nowrap; font-size: 11px; line-height: 18px; color: #6d8399; }
-	.merchant-home-page__context-value { margin-left: 1px; white-space: nowrap; font-size: 14px; font-weight: 700; line-height: 19px; color: #284b68; }
-	.merchant-home-page__periods { display: flex; flex-shrink: 1; flex-direction: row; margin-left: 12px; border-radius: 18px; background-color: #edf3f8; padding: 3px; }
-	.merchant-home-page__period { min-width: 38px; padding: 4px 4px; border-radius: 14px; text-align: center; white-space: nowrap; font-size: 10px; line-height: 15px; color: #7890a4; }
+	.merchant-home-page__org-filter { display: flex; box-sizing: border-box; width: 100px; min-width: 100px; height: 36px; align-items: center; justify-content: center; padding: 0 10px; border-width: 1px; border-style: solid; border-color: rgba(215, 226, 241, 0.9); border-radius: 18px; background-color: rgba(255, 255, 255, 0.88); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.7), 0 8px 20px rgba(63, 93, 137, 0.08); }
+	.merchant-home-page__org-filter text { overflow: hidden; width: 100%; font-size: 13px; font-weight: 700; line-height: 34px; color: #71839a; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
+	.merchant-home-page__periods { display: flex; flex-shrink: 0; flex-direction: row; margin-left: 8px; border-width: 1px; border-style: solid; border-color: rgba(215, 226, 241, 0.9); border-radius: 18px; background-color: rgba(255, 255, 255, 0.88); padding: 3px; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.7), 0 8px 20px rgba(63, 93, 137, 0.08); }
+	.merchant-home-page__period { min-width: 44px; height: 34px; padding: 0 6px; border-radius: 14px; text-align: center; white-space: nowrap; font-size: 12px; line-height: 34px; color: #7890a4; }
 	.merchant-home-page__period--active { background-color: #2779bd; color: #ffffff; font-weight: 700; }
 	.merchant-home-page__section-head { display: flex; flex-direction: row; align-items: flex-end; justify-content: space-between; margin-top: 17px; margin-bottom: 9px; }
 	.merchant-home-page__section-head--compact { margin-top: 18px; }
@@ -257,6 +257,9 @@
 	.merchant-home-page__ranking-empty-title { font-size: 12px; font-weight: 700; line-height: 17px; color: #6f8192; }
 	.merchant-home-page__ranking-empty-copy { margin-top: 3px; font-size: 10px; line-height: 14px; color: #a0aab3; }
 	.merchant-home-page__freshness { display: flex; flex-direction: row; justify-content: space-between; gap: 9px; margin-top: 11px; padding: 0 2px 5px 2px; font-size: 9px; line-height: 13px; color: #9ba6b0; }
+	/* Match the data page on WeChat: keep the shared selector row below the
+	 * status-bar and capsule safe area. */
+	.merchant-home-page--native-mini .merchant-home-page__content-inner { padding-top: 124px; }
 	@media all and (min-width: 700px) {
 		.merchant-home-page__content-inner { max-width: 720px; margin-left: auto; margin-right: auto; padding-left: 22px; padding-right: 22px; }
 	}
