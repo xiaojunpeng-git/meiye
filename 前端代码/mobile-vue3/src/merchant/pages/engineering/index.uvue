@@ -59,7 +59,7 @@
 	function closeEditor() : void { if (!saving.value) editing.value = null }
 	function formValue(key : string) : string { return editing.value == null || editing.value.values == null ? '' : String(editing.value.values[key] == null ? '' : editing.value.values[key]) }
 	function updateForm(key : string, event : any) : void { if (editing.value != null) { let detail : any = event == null ? null : event.detail; editing.value.values[key] = detail == null ? '' : String(detail.value || '') } }
-	function save() : void { if (editing.value == null || saving.value) return; saving.value = true; saveMobileEngineeringLedger(activeType.value, editing.value.values, editing.value.version, (response : any) => { saving.value = false; if (!response.ok) { message.value = String(response.message || '保存失败，请刷新后重试。'); return }; editing.value = null; reload() }) }
+	function save() : void { if (editing.value == null || saving.value) return; saving.value = true; let record : any = {}; let names = Object.keys(editing.value.values || {}); for (let index = 0; index < names.length; index++) record[names[index]] = editing.value.values[names[index]]; if (editing.value.id) record.id = editing.value.id; saveMobileEngineeringLedger(activeType.value, record, editing.value.version, (response : any) => { saving.value = false; if (!response.ok) { message.value = String(response.message || '保存失败，请刷新后重试。'); return }; editing.value = null; reload() }) }
 </script>
 
 <style>
