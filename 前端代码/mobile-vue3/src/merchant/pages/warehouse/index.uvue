@@ -864,7 +864,7 @@
 	/* Keep every business card on one visual left/right baseline. The native
 	 * scroll bar stays outside this wrapper, so it cannot consume the right gutter. */
 	.warehouse-page__content { box-sizing: border-box; padding: 0; }
-	.warehouse-page__content-inner { display: block; box-sizing: border-box; width: 100%; max-width: 1200px; margin-left: auto; margin-right: auto; padding: 12px 18px 118px 18px; }
+	.warehouse-page__content-inner { display: block; box-sizing: border-box; width: 100%; max-width: 1200px; margin-left: auto; margin-right: auto; padding: 20px 18px 118px 18px; }
 	.warehouse-page__content-inner > .warehouse-page__section-kicker,
 	.warehouse-page__content-inner > .warehouse-page__overview-card,
 	.warehouse-page__content-inner > .warehouse-page__availability,
@@ -880,7 +880,7 @@
 	/* The custom navigation layout on MP-WEIXIN does not reserve the status-bar
 	 * area for this page. Keep the first filter row below the system capsule.
 	 * The class is applied only on the WeChat mini-program target. */
-	.warehouse-page--native-mini .warehouse-page__content-inner { padding-top: 108px; }
+	.warehouse-page--native-mini .warehouse-page__content-inner { padding-top: 124px; }
 	/* Keep organization and date controls as separate capsules on one safe row
 	 * below the WeChat capsule. */
 	.warehouse-page--native-mini .warehouse-page__scope { min-height: 0; padding: 0; border-width: 0; border-radius: 0; background-color: transparent; box-shadow: none; overflow: visible; }
