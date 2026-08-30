@@ -12,8 +12,7 @@
 			<view v-else class="warehouse-page__content-inner">
 				<view class="warehouse-page__section-kicker"><text>经营概览</text><text class="warehouse-page__section-kicker-note">数据按当前可见范围汇总</text></view>
 					<view class="warehouse-page__overview-card">
-							<view v-if="organizationPickerEnabled" class="warehouse-page__org-filter-row"><view class="warehouse-page__filter-pill warehouse-page__filter-pill--org" @tap="openOrgPicker"><text>{{ organizationSelectorLabel() }}›</text></view></view>
-							<view class="warehouse-page__scope"><view class="warehouse-page__filter-pill" :class="{ 'warehouse-page__filter-pill--active': periodMode === 'today' }" @tap="selectQuickPeriod('today')"><text>今天</text></view><view class="warehouse-page__filter-pill" :class="{ 'warehouse-page__filter-pill--active': periodMode === 'yesterday' }" @tap="selectQuickPeriod('yesterday')"><text>昨天</text></view><view class="warehouse-page__filter-pill" :class="{ 'warehouse-page__filter-pill--active': periodMode === 'last_month' }" @tap="selectQuickPeriod('last_month')"><text>上月</text></view><view class="warehouse-page__filter-pill" :class="{ 'warehouse-page__filter-pill--active': periodMode === 'month' }" @tap="selectQuickPeriod('month')"><text>本月</text></view><view class="warehouse-page__filter-pill" :class="{ 'warehouse-page__filter-pill--active': periodMode === 'custom' }" @tap="openCustomRange"><text>自定义</text></view></view>
+							<view class="warehouse-page__scope"><view v-if="organizationPickerEnabled" class="warehouse-page__org-filter-row"><view class="warehouse-page__filter-pill warehouse-page__filter-pill--org" @tap="openOrgPicker"><text>{{ organizationSelectorLabel() }}›</text></view></view><view class="warehouse-page__date-filter"><view class="warehouse-page__filter-pill" :class="{ 'warehouse-page__filter-pill--active': periodMode === 'today' }" @tap="selectQuickPeriod('today')"><text>今天</text></view><view class="warehouse-page__filter-pill" :class="{ 'warehouse-page__filter-pill--active': periodMode === 'yesterday' }" @tap="selectQuickPeriod('yesterday')"><text>昨天</text></view><view class="warehouse-page__filter-pill" :class="{ 'warehouse-page__filter-pill--active': periodMode === 'last_month' }" @tap="selectQuickPeriod('last_month')"><text>上月</text></view><view class="warehouse-page__filter-pill" :class="{ 'warehouse-page__filter-pill--active': periodMode === 'month' }" @tap="selectQuickPeriod('month')"><text>本月</text></view><view class="warehouse-page__filter-pill" :class="{ 'warehouse-page__filter-pill--active': periodMode === 'custom' }" @tap="openCustomRange"><text>自定义</text></view></view><text v-if="periodMode === 'custom'" class="warehouse-page__custom-range">{{ customRangeLabel() }}</text></view>
 					<view class="warehouse-page__metrics"><view v-for="(metric, index) in summaryMetrics" :key="metric.code" class="warehouse-page__metric" :class="{ 'warehouse-page__metric--active': selectedMetricCode === metric.code, 'warehouse-page__metric--tone-1': index === 0, 'warehouse-page__metric--tone-2': index === 1, 'warehouse-page__metric--tone-3': index === 2, 'warehouse-page__metric--tone-4': index === 3, 'warehouse-page__metric--unavailable': !metric.available }" @tap="selectMetric(metric)"><view class="warehouse-page__metric-badge"><text>{{ metricBadge(metric) }}</text></view><text class="warehouse-page__metric-name">{{ metric.name }}</text><text class="warehouse-page__metric-value">{{ metric.displayValue }}</text><text v-if="!metric.available" class="warehouse-page__metric-state">待接入</text></view></view>
 				</view>
 				<view v-if="!aggregationCaughtUp" class="warehouse-page__availability"><text>{{ availabilityMessage }}</text></view>
@@ -29,7 +28,7 @@
 		</scroll-view>
 
 		<MerchantPrimaryTabBar active-key="warehouse" />
-		<view v-if="showCustomRange" class="warehouse-page__sheet-mask" @tap="closeCustomRange"><view class="warehouse-page__sheet" @tap.stop><view class="warehouse-page__sheet-head"><text>选择日期区间</text><text class="warehouse-page__sheet-close" @tap="closeCustomRange">×</text></view><view class="warehouse-page__range-row"><text>开始日期</text><picker mode="date" :value="customStartDate" @change="changeCustomStart"><view class="warehouse-page__range-value"><text>{{ customStartDate }}</text></view></picker></view><view class="warehouse-page__range-row"><text>结束日期</text><picker mode="date" :value="customEndDate" @change="changeCustomEnd"><view class="warehouse-page__range-value"><text>{{ customEndDate }}</text></view></picker></view><view class="warehouse-page__sheet-primary" @tap="applyCustomRange"><text>查看区间数据</text></view></view></view>
+		<view v-if="showCustomRange" class="warehouse-page__sheet-mask warehouse-page__sheet-mask--range" @tap="closeCustomRange"><view class="warehouse-page__sheet" @tap.stop><view class="warehouse-page__sheet-head"><text>选择日期区间</text><text class="warehouse-page__sheet-close" @tap="closeCustomRange">×</text></view><view class="warehouse-page__range-row"><text>开始日期</text><picker mode="date" :value="customStartDate" @change="changeCustomStart"><view class="warehouse-page__range-value"><text>{{ customStartDate }}</text></view></picker></view><view class="warehouse-page__range-row"><text>结束日期</text><picker mode="date" :value="customEndDate" @change="changeCustomEnd"><view class="warehouse-page__range-value"><text>{{ customEndDate }}</text></view></picker></view><view class="warehouse-page__sheet-primary" @tap="applyCustomRange"><text>查看区间数据</text></view></view></view>
 		<view v-if="showOrgPicker" class="warehouse-page__sheet-mask warehouse-page__sheet-mask--full" @tap="closeOrgPicker"><view class="warehouse-page__sheet warehouse-page__sheet--org" @tap.stop><view class="warehouse-page__sheet-head warehouse-page__sheet-head--picker"><text class="warehouse-page__sheet-back" @tap="closeOrgPicker">‹</text><view class="warehouse-page__sheet-title"><text>选择组织/门店</text><text class="warehouse-page__sheet-tip">仅显示当前数据权限范围内的节点</text></view><text class="warehouse-page__sheet-close" @tap="closeOrgPicker">×</text></view><view class="warehouse-page__org-search-wrap"><input class="warehouse-page__org-search" :value="orgKeyword" placeholder="搜索区域或门店" @input="orgKeyword = $event.detail.value" /></view><scroll-view scroll-y="true" class="warehouse-page__org-tree"><view v-for="item in visibleOrganizationTree()" :key="'tree-' + item.entityType + '-' + item.entityId" class="warehouse-page__org-option warehouse-page__org-option--tree" :class="{ 'warehouse-page__org-option--selected': isPendingOrgNode(item) }" :style="orgTreeIndent(item)" @tap="selectPendingOrgNode(item)"><view v-if="item.hasChildren === true" class="warehouse-page__org-expand" @tap.stop="toggleOrgNode(item)"><text>{{ isOrgNodeCollapsed(item) ? '›' : '⌄' }}</text></view><view v-else class="warehouse-page__org-expand warehouse-page__org-expand--blank"></view><view class="warehouse-page__org-type" :class="{ 'warehouse-page__org-type--store': item.entityType === 'store' }"><text>{{ rowTypeLabel(item) === '组织' ? '区' : '店' }}</text></view><view class="warehouse-page__org-copy"><text class="warehouse-page__org-name">{{ item.name }}</text><text class="warehouse-page__org-meta">{{ orgOptionMeta(item) }}</text></view><text class="warehouse-page__org-select">{{ isPendingOrgNode(item) ? '已选' : '' }}</text></view></scroll-view><view class="warehouse-page__org-footer"><text>已选：{{ pendingOrgLabel() }}</text><view class="warehouse-page__org-clear" @tap="clearOrgSelection"><text>清空</text></view><view class="warehouse-page__org-confirm" @tap="confirmOrgNode"><text>确定</text></view></view></view></view>
 	</view>
 </template>
@@ -148,6 +147,7 @@
 	function changeCustomStart(event : any) : void { customStartDate.value = String(event.detail.value || customStartDate.value).slice(0, 10) }
 	function changeCustomEnd(event : any) : void { customEndDate.value = String(event.detail.value || customEndDate.value).slice(0, 10) }
 	function applyCustomRange() : void { periodMode.value = 'custom'; showCustomRange.value = false; loadNode(activeNodeType, activeNodeId) }
+	function customRangeLabel() : string { return String(customStartDate.value).split('-').join('/') + '-' + String(customEndDate.value).split('-').join('/') }
 	const showOrgPicker = ref(false)
 	function openOrgPicker() : void {
 		orgKeyword.value = ''
@@ -743,7 +743,9 @@
 	.warehouse-page__column-name { display: block; width: 100%; margin-top: 9px; overflow: hidden; font-size: 10px; font-weight: 700; line-height: 14px; color: #1f3146; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
 	.warehouse-page__column-value { display: block; width: 100%; margin-top: 2px; overflow: hidden; font-size: 9px; line-height: 12px; color: #314257; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
 	.warehouse-page__sheet-mask { position: fixed; left: 0; right: 0; top: 0; bottom: 0; z-index: 80; display: flex; flex-direction: column; justify-content: flex-end; background-color: rgba(8, 22, 38, 0.28); }
+	.warehouse-page__sheet-mask--range { z-index: 120; }
 	.warehouse-page__sheet { display: flex; flex-direction: column; padding: 16px 16px 22px 16px; border-radius: 22px 22px 0 0; background-color: #ffffff; box-shadow: 0 -12px 32px rgba(25, 49, 78, 0.16); }
+	.warehouse-page__sheet-mask--range .warehouse-page__sheet { padding-bottom: 94px; }
 	.warehouse-page__sheet-mask--full { z-index: 90; justify-content: stretch; }
 	.warehouse-page__sheet--org { position: absolute; left: 0; right: 0; top: 0; bottom: 0; padding: 18px 16px 24px 16px; border-radius: 0; }
 	.warehouse-page__sheet-head { display: flex; min-height: 32px; flex-direction: row; align-items: center; justify-content: space-between; }
@@ -832,6 +834,7 @@
 
 	/* Compact, aligned overview controls for the source H5 preview. */
 	.warehouse-page__org-filter-row { display: flex; padding: 0 0 6px 4px; }
+	.warehouse-page__date-filter { display: flex; flex-direction: row; }
 	.warehouse-page__org-filter-row .warehouse-page__filter-pill--org { box-sizing: border-box; width: 174px; min-width: 174px; margin-left: 0; padding: 0 12px; border-width: 1px; border-style: solid; border-color: rgba(215, 226, 241, 0.9); border-radius: 16px; background-color: rgba(255, 255, 255, 0.76); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.7), 0 8px 20px rgba(63, 93, 137, 0.08); }
 	.warehouse-page__org-filter-row .warehouse-page__filter-pill--org text, .warehouse-page__org-filter-row .warehouse-page__filter-pill--org span { display: flex; width: 100%; height: 34px; overflow: hidden; align-items: center; justify-content: center; font-weight: 600; line-height: 34px; color: #71839a; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
 	.warehouse-page__metric, .warehouse-page__metric:nth-child(n), .warehouse-page__metric:nth-child(odd) { height: 94px; min-height: 94px; max-height: 94px; padding: 9px 4px 7px 4px; }
@@ -877,10 +880,24 @@
 	/* The custom navigation layout on MP-WEIXIN does not reserve the status-bar
 	 * area for this page. Keep the first filter row below the system capsule.
 	 * The class is applied only on the WeChat mini-program target. */
-	.warehouse-page--native-mini .warehouse-page__content-inner { padding-top: 84px; }
-	/* The organization chooser uses the available space left of the WeChat
-	 * capsule. The quick-date row remains directly beneath it. */
-	.warehouse-page--native-mini .warehouse-page__org-filter-row { margin-top: -32px; }
+	.warehouse-page--native-mini .warehouse-page__content-inner { padding-top: 108px; }
+	/* Keep organization and date controls as separate capsules on one safe row
+	 * below the WeChat capsule. */
+	.warehouse-page--native-mini .warehouse-page__scope { min-height: 0; padding: 0; border-width: 0; border-radius: 0; background-color: transparent; box-shadow: none; overflow: visible; }
+	.warehouse-page--native-mini .warehouse-page__scope .warehouse-page__org-filter-row { flex: none; margin-right: 8px; padding: 0; }
+	.warehouse-page--native-mini .warehouse-page__scope .warehouse-page__org-filter-row .warehouse-page__filter-pill--org { box-sizing: border-box; width: 100px; min-width: 100px; margin-left: 0; }
+	.warehouse-page--native-mini .warehouse-page__scope .warehouse-page__date-filter { flex: none; border-width: 1px; border-style: solid; border-color: rgba(215, 226, 241, 0.9); border-radius: 16px; background-color: rgba(255, 255, 255, 0.88); padding: 3px; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.7), 0 8px 20px rgba(63, 93, 137, 0.08); }
+	.warehouse-page--native-mini .warehouse-page__scope .warehouse-page__date-filter .warehouse-page__filter-pill { min-width: 44px; padding: 0 6px; border-radius: 13px; }
+	.warehouse-page--native-mini .warehouse-page__scope .warehouse-page__date-filter .warehouse-page__filter-pill text { font-size: 13px; }
+	/* The organization and date controls are separate capsules on every
+	 * target; the surrounding scope row itself stays transparent. */
+	.warehouse-page__scope { min-height: 0; padding: 0; border-width: 0; border-radius: 0; background-color: transparent; box-shadow: none; overflow: visible; }
+	.warehouse-page__scope .warehouse-page__org-filter-row { display: flex; flex: none; margin-right: 8px; padding: 0; }
+	.warehouse-page__scope .warehouse-page__org-filter-row .warehouse-page__filter-pill--org { box-sizing: border-box; width: 100px; min-width: 100px; margin-left: 0; }
+	.warehouse-page__scope .warehouse-page__date-filter { display: flex; flex: none; flex-direction: row; border-width: 1px; border-style: solid; border-color: rgba(215, 226, 241, 0.9); border-radius: 16px; background-color: rgba(255, 255, 255, 0.88); padding: 3px; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.7), 0 8px 20px rgba(63, 93, 137, 0.08); }
+	.warehouse-page__scope .warehouse-page__date-filter .warehouse-page__filter-pill { min-width: 44px; padding: 0 6px; border-radius: 13px; }
+	.warehouse-page__scope .warehouse-page__date-filter .warehouse-page__filter-pill text { font-size: 13px; }
+	.warehouse-page__custom-range { flex: none; margin-left: 8px; font-size: 12px; line-height: 34px; color: #58718b; white-space: nowrap; }
 	@media (max-width: 1236px) {
 		.warehouse-page__content-inner { max-width: none; }
 	}
