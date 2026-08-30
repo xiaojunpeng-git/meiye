@@ -256,9 +256,9 @@
 	.merchant-home-page__ranking-empty-title { font-size: 12px; font-weight: 700; line-height: 17px; color: #6f8192; }
 	.merchant-home-page__ranking-empty-copy { margin-top: 3px; font-size: 10px; line-height: 14px; color: #a0aab3; }
 	.merchant-home-page__freshness { display: flex; flex-direction: row; justify-content: space-between; gap: 9px; margin-top: 11px; padding: 0 2px 5px 2px; font-size: 9px; line-height: 13px; color: #9ba6b0; }
-	/* Match the data page on WeChat: keep the shared selector row below the
-	 * status-bar and capsule safe area. */
-	.merchant-home-page--native-mini .merchant-home-page__content-inner { padding-top: 124px; }
+	/* Keep the selector below the status bar and capsule, without reserving a
+	 * second empty header area on the home page. */
+	.merchant-home-page--native-mini .merchant-home-page__content-inner { padding-top: 84px; }
 	@media all and (min-width: 700px) {
 		.merchant-home-page__content-inner { max-width: 720px; margin-left: auto; margin-right: auto; padding-left: 22px; padding-right: 22px; }
 	}
