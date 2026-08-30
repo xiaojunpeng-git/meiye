@@ -97,8 +97,8 @@ test('employee password sign-in creates only a new merchant session', () => {
 test('merchant session chooses an effective mobile appointment instead of the newest appointment', () => {
 	const source = fs.readFileSync(path.join(repoRoot, '后端代码', 'app', 'services', 'mobile', 'merchant', 'MobileMerchantSessionServices.php'), 'utf8')
 	assert.match(source, /defaultEligibleMobileStaff\(\$employeeId, \$auth\)/)
-	assert.match(source, /isStoreWithinMobileScope\(\$auth, \$storeId\)/)
 	assert.match(source, /isStoreWithinEmployeeDataScope\(\$employeeId, \$storeId\)/)
+	assert.equal(source.includes('isStoreWithinMobileScope'), false)
 	assert.equal(source.includes('resolveCurrentStaff($employeeId)'), false)
 })
 

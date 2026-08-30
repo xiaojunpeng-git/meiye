@@ -98,7 +98,9 @@ $assert('MA-MANAGER-CONTEXT-01',
     && str_contains($sessions, "['staff_id', '=', 0]")
     && str_contains($sessions, 'managerVisibleStoreIds')
     && str_contains($sessions, 'employeeDataScopeStoreIds')
-    && str_contains($sessions, 'mobileScopeStoreIds')
+    && !str_contains($sessions, 'mobileScopeStoreIds')
+    && !str_contains($sessions, 'isStoreWithinMobileScope')
+    && !str_contains($sessions, 'array_intersect($dataScopeIds')
     && str_contains($sessions, 'assertContextStillAllowed')
     && str_contains($sessions, "'updated_at' => \$now")
 );

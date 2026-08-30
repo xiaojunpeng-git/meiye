@@ -13,16 +13,13 @@ use think\facade\Db;
 final class MobileMerchantAnalyticsEntryScopeServices
 {
     private $dataScopes;
-    private $organizationStores;
     private $policy;
 
     public function __construct(
         EmployeeDataScopeServices $dataScopes,
-        MobileMerchantOrganizationStoreScopeServices $organizationStores,
         MobileMerchantAnalyticsEntryPolicy $policy
     ) {
         $this->dataScopes = $dataScopes;
-        $this->organizationStores = $organizationStores;
         $this->policy = $policy;
     }
 
@@ -32,7 +29,7 @@ final class MobileMerchantAnalyticsEntryScopeServices
         $employeeId = (int)($merchant['employeeId'] ?? 0);
         $activeStoreId = (int)($merchant['storeId'] ?? 0);
         $auth = Db::name('employee_mobile_auth')->where('employee_id', $employeeId)
-            ->where('status', 1)->where('is_del', 0)->field('scope_mode,store_ids,org_ids')->find();
+            ->where('status', 1)->where('is_del', 0)->field('employee_id')->find();
         if (!is_array($auth)) {
             throw MobileApiException::business('MOBILE_JOB_FUNCTION_MISSING', '当前员工没有有效手机端授权。');
         }
@@ -41,9 +38,9 @@ final class MobileMerchantAnalyticsEntryScopeServices
         $dataScopeStoreIds = is_array($dataScopeStoreIds) && $dataScopeStoreIds !== []
             ? $this->positiveIds($dataScopeStoreIds)
             : $this->positiveIds([$activeStoreId]);
-        $mobileScopeStoreIds = $this->mobileScopeStoreIds($auth, $dataScopeStoreIds);
-        $storeIds = array_values(array_intersect($dataScopeStoreIds, $mobileScopeStoreIds));
-        $storeIds = $this->positiveIds($storeIds);
+        // The mobile grant gates entry; employee data scope is the sole
+        // authority for the stores visible to merchant analytics.
+        $storeIds = $this->positiveIds($dataScopeStoreIds);
         $stores = $storeIds === [] ? [] : Db::name('system_store')->whereIn('id', $storeIds)
             ->where('is_del', 0)->field('id')->select()->toArray();
         $storeIds = $this->positiveIds(array_column($stores, 'id'));
@@ -60,31 +57,6 @@ final class MobileMerchantAnalyticsEntryScopeServices
         } catch (InvalidArgumentException $exception) {
             throw MobileApiException::business('STORE_NOT_ALLOWED', $exception->getMessage());
         }
-    }
-
-    /** @return int[] */
-    private function mobileScopeStoreIds(array $auth, array $dataScopeStoreIds): array
-    {
-        $mode = trim((string)($auth['scope_mode'] ?? ''));
-        if ($mode === 'all') {
-            return $dataScopeStoreIds;
-        }
-        if ($mode === 'store') {
-            return $this->jsonIds($auth['store_ids'] ?? '[]');
-        }
-        if ($mode === 'org') {
-            return $this->organizationStores->resolve($this->jsonIds($auth['org_ids'] ?? '[]'));
-        }
-        return [];
-    }
-
-    /** @return int[] */
-    private function jsonIds($value): array
-    {
-        if (is_string($value)) {
-            $value = json_decode($value, true);
-        }
-        return $this->positiveIds(is_array($value) ? $value : []);
     }
 
     /** @return int[] */

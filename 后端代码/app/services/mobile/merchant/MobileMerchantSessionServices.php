@@ -271,7 +271,6 @@ final class MobileMerchantSessionServices
         /** @var OrganizationOpsStatusServices $operations */
         $operations = app()->make(OrganizationOpsStatusServices::class);
         if (!$operations->isStoreBusinessEnabled($storeId)) throw MobileApiException::business('STORE_DISABLED', '当前门店或所属组织已停用。');
-        $this->assertMobileScope($auth, $employeeId, $storeId);
         $this->assertEmployeeDataScope($employeeId, $storeId);
         $organizationId = (int)Db::name('organization_store')->where('store_id', $storeId)->order('id', 'asc')->value('org_id');
         $existing = Db::name('mobile_merchant_business_context')->where([
@@ -302,7 +301,7 @@ final class MobileMerchantSessionServices
         foreach ($staffRows as $staff) {
             $staffId = (int)$staff['id'];
             $storeId = (int)$staff['store_id'];
-            if (!$this->isStoreWithinMobileScope($auth, $storeId) || !$this->isStoreWithinEmployeeDataScope($employeeId, $storeId) || $this->isEmployeeStoreIsolated($employeeId, $storeId)) continue;
+            if (!$this->isStoreWithinEmployeeDataScope($employeeId, $storeId) || $this->isEmployeeStoreIsolated($employeeId, $storeId)) continue;
             $requiredRules = $this->positiveIds($jobs->computeChannelRulesUnion($staffId, JobPositionPolicyServices::CHANNEL_MOBILE));
             if ($requiredRules === [] || array_values(array_diff($requiredRules, $grantedRules)) !== []) continue;
             /** @var OrganizationOpsStatusServices $operations */
@@ -323,7 +322,7 @@ final class MobileMerchantSessionServices
         if ($this->positiveIds(explode(',', (string)($auth['rules'] ?? ''))) === []) {
             throw MobileApiException::business('MOBILE_JOB_FUNCTION_MISSING', '当前员工没有有效手机端岗位功能。');
         }
-        $visibleStoreIds = $this->managerVisibleStoreIds($employeeId, $auth);
+        $visibleStoreIds = $this->managerVisibleStoreIds($employeeId);
         if ($visibleStoreIds === []) {
             throw MobileApiException::business('STORE_NOT_ALLOWED', '当前数据权限范围内没有可操作的门店。');
         }
@@ -342,16 +341,17 @@ final class MobileMerchantSessionServices
     }
 
     /** @return int[] */
-    private function managerVisibleStoreIds(int $employeeId, array $auth): array
+    private function managerVisibleStoreIds(int $employeeId): array
     {
-        // Scope is not an entry grant. This method is only reached after the
-        // active employee_mobile_auth check in currentContext/switchContext.
+        // The mobile entry grant only gates entry and actions. The employee's
+        // data scope is the sole source of visible stores for an organization-
+        // direct manager; organization scopes are expanded to their stores by
+        // employeeDataScopeStoreIds().
         $dataScopeIds = $this->employeeDataScopeStoreIds($employeeId);
         if ($dataScopeIds === []) return [];
-        $storeIds = array_values(array_intersect($dataScopeIds, $this->mobileScopeStoreIds($auth)));
         /** @var OrganizationOpsStatusServices $operations */
         $operations = app()->make(OrganizationOpsStatusServices::class);
-        $storeIds = array_values(array_filter($storeIds, static fn(int $storeId): bool => $operations->isStoreBusinessEnabled($storeId)));
+        $storeIds = array_values(array_filter($dataScopeIds, static fn(int $storeId): bool => $operations->isStoreBusinessEnabled($storeId)));
         sort($storeIds, SORT_NUMERIC);
         return $storeIds;
     }
@@ -395,7 +395,7 @@ final class MobileMerchantSessionServices
         $contexts = Db::name('mobile_merchant_business_context')->where('employee_id', (int)$session['employee_id'])->where('state', 'ACTIVE')
             ->field('context_id,label,staff_id,store_id')->order('created_at', 'asc')->select()->toArray();
         $auth = Db::name('employee_mobile_auth')->where('employee_id', (int)$session['employee_id'])->where('status', 1)->where('is_del', 0)->find() ?: [];
-        $managerStoreIds = $this->managerVisibleStoreIds((int)$session['employee_id'], $auth);
+        $managerStoreIds = $this->managerVisibleStoreIds((int)$session['employee_id']);
         $contexts = array_values(array_filter($contexts, static function (array $row) use ($managerStoreIds): bool {
             return (int)($row['staff_id'] ?? 0) > 0 || in_array((int)($row['store_id'] ?? 0), $managerStoreIds, true);
         }));
@@ -431,7 +431,7 @@ final class MobileMerchantSessionServices
         $auth = Db::name('employee_mobile_auth')->where('employee_id', $employeeId)->where('status', 1)->where('is_del', 0)->find();
         if (!is_array($auth)) throw MobileApiException::business('MOBILE_ENTRY_DISABLED', '当前员工未开通手机端。');
         if ((int)($context['staff_id'] ?? 0) === 0) {
-            if (!in_array($storeId, $this->managerVisibleStoreIds($employeeId, $auth), true)) {
+            if (!in_array($storeId, $this->managerVisibleStoreIds($employeeId), true)) {
                 throw MobileApiException::business('STORE_NOT_ALLOWED', '目标门店不在当前数据权限范围内。');
             }
             return;
@@ -442,42 +442,10 @@ final class MobileMerchantSessionServices
         }
     }
 
-    private function assertMobileScope(array $auth, int $employeeId, int $storeId): void
-    {
-        if (!$this->isStoreWithinMobileScope($auth, $storeId)) throw MobileApiException::business('STORE_NOT_ALLOWED', '当前门店不在手机端授权范围内。');
-        if ($this->isEmployeeStoreIsolated($employeeId, $storeId)) throw MobileApiException::business('STORE_NOT_ALLOWED', '当前门店不在员工数据权限范围内。');
-    }
-
-    private function isStoreWithinMobileScope(array $auth, int $storeId): bool
-    {
-        $mode = (string)($auth['scope_mode'] ?? '');
-        if ($mode === 'all') return true;
-        $allowed = [];
-        if ($mode === 'store') $allowed = json_decode((string)($auth['store_ids'] ?? '[]'), true) ?: [];
-        if ($mode === 'org') {
-            $orgIds = json_decode((string)($auth['org_ids'] ?? '[]'), true) ?: [];
-            if ($orgIds) $allowed = $this->organizationStoreIds($orgIds);
-        }
-        return in_array($storeId, $this->positiveIds($allowed), true);
-    }
-
     private function isEmployeeStoreIsolated(int $employeeId, int $storeId): bool
     {
         return (int)Db::name('employee_store_isolation')->where('employee_id', $employeeId)
             ->where('status', 1)->where('is_del', 0)->where('store_id', $storeId)->count() > 0;
-    }
-
-    /** @return int[] */
-    private function mobileScopeStoreIds(array $auth): array
-    {
-        $mode = (string)($auth['scope_mode'] ?? '');
-        if ($mode === 'all') return $this->positiveIds(Db::name('system_store')->where('is_del', 0)->column('id'));
-        if ($mode === 'store') return $this->positiveIds(json_decode((string)($auth['store_ids'] ?? '[]'), true) ?: []);
-        if ($mode === 'org') {
-            $orgIds = $this->positiveIds(json_decode((string)($auth['org_ids'] ?? '[]'), true) ?: []);
-            return $orgIds ? $this->organizationStoreIds($orgIds) : [];
-        }
-        return [];
     }
 
     /** @return int[] */

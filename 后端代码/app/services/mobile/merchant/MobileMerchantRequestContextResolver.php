@@ -39,7 +39,6 @@ final class MobileMerchantRequestContextResolver
         if ($staffId > 0) {
             $staff = $this->currentStaff($employeeId, $staffId, $storeId);
             $this->assertCurrentMobileJob($staffId, $mobileAuth);
-            $this->assertMobileAuthorizationScope($mobileAuth, $storeId);
             $this->assertBusinessEnabled($storeId);
             $dataScope = $this->employeeDataScope($employeeId, $storeId);
             $staffName = $this->staffName($staff);
@@ -239,25 +238,6 @@ final class MobileMerchantRequestContextResolver
         }
     }
 
-    private function assertMobileAuthorizationScope(array $mobileAuth, int $storeId): void
-    {
-        $mode = (string)($mobileAuth['scope_mode'] ?? '');
-        if ($mode === 'all') {
-            return;
-        }
-        if ($mode === 'store') {
-            $allowed = $this->positiveIds(json_decode((string)($mobileAuth['store_ids'] ?? '[]'), true) ?: []);
-        } elseif ($mode === 'org') {
-            $orgIds = $this->positiveIds(json_decode((string)($mobileAuth['org_ids'] ?? '[]'), true) ?: []);
-            $allowed = $orgIds ? $this->organizationStoreIds($orgIds) : [];
-        } else {
-            $allowed = [];
-        }
-        if (!in_array($storeId, $allowed, true)) {
-            throw MobileApiException::business('STORE_NOT_ALLOWED', '当前门店不在手机端授权范围内。');
-        }
-    }
-
     private function assertBusinessEnabled(int $storeId): void
     {
         /** @var OrganizationOpsStatusServices $ops */
@@ -312,8 +292,7 @@ final class MobileMerchantRequestContextResolver
             throw MobileApiException::business('MOBILE_JOB_FUNCTION_MISSING', '当前员工没有有效手机端岗位功能。');
         }
         $dataScopeStoreIds = $this->explicitDataScopeStoreIds($employeeId);
-        $mobileScopeStoreIds = $this->mobileScopeStoreIds($mobileAuth);
-        $visibleStoreIds = array_values(array_intersect($dataScopeStoreIds, $mobileScopeStoreIds));
+        $visibleStoreIds = $dataScopeStoreIds;
         /** @var OrganizationOpsStatusServices $ops */
         $ops = app()->make(OrganizationOpsStatusServices::class);
         $visibleStoreIds = array_values(array_filter($visibleStoreIds, static fn(int $storeId): bool => $ops->isStoreBusinessEnabled($storeId)));
@@ -345,19 +324,6 @@ final class MobileMerchantRequestContextResolver
         $isolated = $this->positiveIds(Db::name('employee_store_isolation')->where('employee_id', $employeeId)
             ->where('status', 1)->where('is_del', 0)->column('store_id'));
         return array_values(array_diff($this->positiveIds($storeIds), $isolated));
-    }
-
-    /** @return int[] */
-    private function mobileScopeStoreIds(array $mobileAuth): array
-    {
-        $mode = (string)($mobileAuth['scope_mode'] ?? '');
-        if ($mode === 'all') return $this->positiveIds(Db::name('system_store')->where('is_del', 0)->column('id'));
-        if ($mode === 'store') return $this->positiveIds(json_decode((string)($mobileAuth['store_ids'] ?? '[]'), true) ?: []);
-        if ($mode === 'org') {
-            $orgIds = $this->positiveIds(json_decode((string)($mobileAuth['org_ids'] ?? '[]'), true) ?: []);
-            return $orgIds ? $this->organizationStoreIds($orgIds) : [];
-        }
-        return [];
     }
 
     private function employeeName(int $employeeId): string
