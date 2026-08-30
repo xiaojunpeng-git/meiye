@@ -13,9 +13,13 @@ const repoRoot = path.resolve(mobileRoot, '..', '..')
 const services = fs.readFileSync(path.join(repoRoot, '后端代码', 'app', 'services', 'mobile', 'reservation', 'MobileReservationServices.php'), 'utf8')
 const controller = fs.readFileSync(path.join(repoRoot, '后端代码', 'app', 'controller', 'mobile', 'merchant', 'Reservation.php'), 'utf8')
 
-test('reservation page exposes the unified lifecycle and current-store context', () => {
+test('reservation page exposes the unified lifecycle and uses the workbench store context', () => {
   for (const name of ['queryMobileReservations', 'queryMobileReservationDetail', 'openMobileReservationEditor', 'queryMobileReservationProjectCatalog', 'createMobileReservation', 'updateMobileReservation', 'cancelMobileReservation', 'startMobileReservationService', 'endMobileReservationService']) assert.equal(page.includes(name), true, name)
-  for (const token of ['storeContexts', 'activeStoreLabel', 'switchMobileMerchantContext', '当前门店', '预约数据与门店端实时同步', '重新加载']) assert.equal(page.includes(token), true, token)
+  for (const token of ['重新加载']) assert.equal(page.includes(token), true, token)
+  assert.equal(page.includes('当前门店'), false)
+  assert.equal(page.includes('switchMobileMerchantContext'), false)
+  assert.equal(page.includes('仅展示收银 V3 预约单'), false)
+  assert.equal(page.includes('预约数据与门店端实时同步'), false)
   assert.equal(page.includes("if (merchantLoginIsRequired()) { openMerchantLogin(); return }"), true)
 })
 

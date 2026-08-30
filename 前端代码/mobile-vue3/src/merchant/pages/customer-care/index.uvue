@@ -22,7 +22,6 @@
 					<input class="care-page__member-search-input" type="text" :value="recordKeyword" placeholder="搜索会员姓名、手机号或会员编号" @input="updateRecordKeyword" @confirm="loadWorkbench" />
 					<view class="care-page__member-search-submit" @tap="loadWorkbench"><text>搜索</text></view>
 				</view>
-				<view class="care-page__record-create" @tap="openCreateRecord"><text>新增</text></view>
 			</view>
 			<view v-if="loading" class="care-page__empty"><text class="care-page__empty-title">正在读取客情数据</text></view>
 			<view v-else-if="message.length > 0" class="care-page__empty"><text class="care-page__empty-title">{{ message }}</text><view class="care-page__reload" @tap="loadWorkbench"><text>重新加载</text></view></view>
@@ -40,12 +39,13 @@
 			<view v-else-if="activeTab === 'customers'" class="care-page__list">
 				<view v-for="customer in customers" :key="customer.memberId" class="care-page__card"><text class="care-page__card-title">{{ customer.name }} · {{ customer.phone }}</text><text class="care-page__card-copy">{{ customer.storeName }} · {{ customer.nextTaskLabel }}</text><text class="care-page__card-copy">最近客情：{{ customer.latestCareLabel }}</text><view class="care-page__complete-entry" @tap="openCreateTask(customer)"><text>新增客情任务</text></view></view>
 			</view>
-			<view v-else-if="activeTab === 'records' && records.length === 0" class="care-page__empty"><text class="care-page__empty-title">暂无客情记录</text><text class="care-page__empty-copy">点击右侧“新增”，可为授权范围内的会员补录正式客情记录。</text></view>
+			<view v-else-if="activeTab === 'records' && records.length === 0" class="care-page__empty"><text class="care-page__empty-title">暂无客情记录</text><text class="care-page__empty-copy">点击右下角“＋”，可为授权范围内的会员补录正式客情记录。</text></view>
 			<view v-else-if="activeTab === 'records'" class="care-page__list">
 				<view v-for="record in records" :key="record.recordId" class="care-page__card"><view class="care-page__card-row"><text class="care-page__card-title">{{ record.memberName }} · {{ record.typeLabel }}</text><text class="care-page__status">{{ record.resultLabel }}</text></view><text class="care-page__card-copy">{{ record.followedAt }} · {{ record.methodLabel }}</text><text class="care-page__card-copy">{{ record.summary }}</text><view v-if="record.serviceBeforePhotos != null && record.serviceBeforePhotos.length > 0" class="care-page__record-photos"><text class="care-page__record-photos-label">服务前</text><image v-for="(photo, index) in record.serviceBeforePhotos" :key="'record-before-' + index" class="care-page__record-photo" :src="photo" mode="aspectFill" /></view><view v-if="record.serviceAfterPhotos != null && record.serviceAfterPhotos.length > 0" class="care-page__record-photos"><text class="care-page__record-photos-label">服务后</text><image v-for="(photo, index) in record.serviceAfterPhotos" :key="'record-after-' + index" class="care-page__record-photo" :src="photo" mode="aspectFill" /></view></view>
 			</view>
 			<view v-else-if="activeTab === 'statistics'" class="care-page__list"><view v-for="metric in metrics" :key="metric.code" class="care-page__card"><text class="care-page__card-title">{{ metric.label }}</text><text class="care-page__metric">{{ metric.value }}{{ metric.unit }}</text><text class="care-page__card-copy">{{ metric.userReady ? metric.description : '统计口径待确认' }}</text></view></view>
 		</scroll-view>
+		<view v-if="activeTab === 'tasks' || activeTab === 'records'" class="care-page__floating-create" role="button" :aria-label="activeTab === 'tasks' ? '新增跟进任务' : '新增客情记录'" @tap="openFloatingCreate"><text>＋</text></view>
 		<view v-if="selectedTask != null" class="care-page__task-detail">
 			<view class="care-page__detail-header"><text class="care-page__detail-cancel" @tap="closeTaskDetail">关闭</text><text class="care-page__detail-title">任务详情</text><text class="care-page__detail-placeholder"></text></view>
 			<scroll-view scroll-y class="care-page__detail-body">
@@ -62,10 +62,16 @@
 			<view class="care-page__complete-header"><text class="care-page__complete-cancel" @tap="closeComplete">取消</text><text class="care-page__complete-title">完成客情</text><text class="care-page__complete-placeholder"></text></view>
 			<scroll-view scroll-y class="care-page__complete-body"><text class="care-page__complete-member">{{ completingTask.member.name }} · {{ completingTask.typeLabel }}</text><text class="care-page__complete-label">联系方式</text><view class="care-page__choice-row"><view v-for="method in methods" :key="method.value" class="care-page__choice" :class="{ 'care-page__choice--active': methodCode === method.value }" @tap="methodCode = method.value"><text>{{ method.label }}</text></view></view><text class="care-page__complete-label">跟进结果</text><view class="care-page__choice-row"><view v-for="result in results" :key="result.value" class="care-page__choice" :class="{ 'care-page__choice--active': resultCode === result.value }" @tap="resultCode = result.value"><text>{{ result.label }}</text></view></view><text class="care-page__complete-label">本次内容</text><textarea class="care-page__complete-textarea" :value="completeContent" placeholder="如实记录沟通内容和后续约定" @input="completeContent = $event.detail.value" /><view class="care-page__next-toggle" @tap="createNextTask = !createNextTask"><text>{{ createNextTask ? '已创建下一次跟进' : '创建下一次跟进' }}</text></view><view v-if="createNextTask"><text class="care-page__complete-label">下次跟进时间</text><input class="care-page__datetime-input" :value="nextPlannedAt" placeholder="例如 2026-07-31 10:00" @input="nextPlannedAt = $event.detail.value" /><text class="care-page__complete-label">下次负责人</text><view class="care-page__choice-row"><view v-for="assignee in assignees" :key="'next-' + assignee.value" class="care-page__choice" :class="{ 'care-page__choice--active': nextOwnerId === assignee.value }" @tap="nextOwnerId = assignee.value"><text>{{ assignee.label }}</text></view></view></view><view class="care-page__complete-submit" @tap="submitComplete"><text>{{ submitting ? '正在提交…' : '完成并保存记录' }}</text></view></scroll-view>
 		</view>
-		<view v-if="creatingForCustomer != null" class="care-page__complete-panel">
+		<view v-if="creatingTaskPanel" class="care-page__complete-panel">
 			<view class="care-page__complete-header"><text class="care-page__complete-cancel" @tap="closeCreateTask">取消</text><text class="care-page__complete-title">新增客情任务</text><text class="care-page__complete-placeholder"></text></view>
 			<scroll-view scroll-y class="care-page__complete-body">
-				<text class="care-page__complete-member">{{ creatingForCustomer.name }}</text>
+				<text class="care-page__complete-label care-page__complete-label--first">会员</text>
+				<view v-if="creatingForCustomer == null" class="care-page__record-member-picker">
+					<view class="care-page__member-search care-page__member-search--picker"><text class="care-page__member-search-symbol">⌕</text><input class="care-page__member-search-input" type="text" :value="taskMemberKeyword" placeholder="搜索要跟进的会员" @input="updateTaskMemberKeyword" @confirm="searchTaskMembers" /><view class="care-page__member-search-submit" @tap="searchTaskMembers"><text>{{ taskMemberLoading ? '查询中' : '查找' }}</text></view></view>
+					<text v-if="taskMemberSearched && !taskMemberLoading && taskMemberCandidates.length === 0" class="care-page__record-member-empty">没有找到当前授权范围内的会员。</text>
+					<view v-for="member in taskMemberCandidates" :key="'task-member-' + String(member.memberId)" class="care-page__record-member-option" @tap="selectTaskMember(member)"><text class="care-page__record-member-name">{{ member.name }}</text><text class="care-page__record-member-copy">{{ member.phone || '未登记手机号' }}</text></view>
+				</view>
+				<view v-else class="care-page__record-member-selected"><view><text class="care-page__record-member-name">{{ creatingForCustomer.name }}</text><text class="care-page__record-member-copy">{{ creatingForCustomer.phone || '未登记手机号' }}</text></view><text class="care-page__record-member-change" @tap="clearTaskMember">重新选择</text></view>
 				<text class="care-page__complete-label">任务类型</text>
 				<view class="care-page__choice-row" role="radiogroup">
 					<view v-for="type in taskTypes" :key="type.value" class="care-page__choice" :class="{ 'care-page__choice--active': taskTypeCode === type.value }" role="radio" :aria-checked="taskTypeCode === type.value" @tap.stop="selectTaskType(type.value)"><text>{{ type.label }}</text></view>
@@ -165,6 +171,11 @@
 	const methods = ref<Array<any>>([])
 	const results = ref<Array<any>>([])
 	const creatingForCustomer = ref<any>(null)
+	const creatingTaskPanel = ref(false)
+	const taskMemberKeyword = ref('')
+	const taskMemberCandidates = ref<Array<any>>([])
+	const taskMemberSearched = ref(false)
+	const taskMemberLoading = ref(false)
 	const taskContent = ref('')
 	const plannedAt = ref('')
 	const plannedDate = ref('')
@@ -225,6 +236,7 @@
 	function selectOwner(value : string) { ownerId.value = value; createFormMessage.value = '' }
 	function updateCustomerKeyword(event : any) { customerKeyword.value = String(event.detail != null ? event.detail.value || '' : '') }
 	function updateRecordKeyword(event : any) { recordKeyword.value = String(event.detail != null ? event.detail.value || '' : '') }
+	function updateTaskMemberKeyword(event : any) { taskMemberKeyword.value = String(event.detail != null ? event.detail.value || '' : '') }
 	function updateRecordMemberKeyword(event : any) { recordMemberKeyword.value = String(event.detail != null ? event.detail.value || '' : '') }
 	function updateRecordContent(event : any) { recordContent.value = String(event.detail != null ? event.detail.value || '' : '') }
 	function changeCreatePlannedDate(event : any) { plannedDate.value = String(event.detail != null ? event.detail.value || '' : ''); syncCreatePlannedAt() }
@@ -259,8 +271,25 @@
 	function confirmDeleteTask() { if (deletingTask.value == null || taskActionSubmitting.value || !canDelete(deletingTask.value)) return; taskActionSubmitting.value = true; taskDetailMessage.value = ''; deleteMobileCustomerCareTask({ taskId: Number(deletingTask.value.taskId), expectedVersion: Number(deletingTask.value.taskVersion), reason: '用户确认删除未开始任务', idempotencyKey: 'care-delete-' + Date.now().toString() + '-' + Math.floor(Math.random() * 100000).toString() }, (response : any) => { taskActionSubmitting.value = false; if (!response.ok) { deletingTask.value = null; taskDetailMessage.value = String(response.message || '删除任务失败。'); return }; deletingTask.value = null; selectedTask.value = null; loadWorkbench() }) }
 	function openComplete(task : any) { completingTask.value = task; completeContent.value = ''; methodCode.value = 'PHONE'; resultCode.value = 'FOLLOW_UP'; createNextTask.value = false; nextPlannedAt.value = ''; nextOwnerId.value = assignees.value.length > 0 ? String(assignees.value[0].value) : ''; message.value = '' }
 	function closeComplete() { if (!submitting.value) completingTask.value = null }
-	function openCreateTask(customer : any) { creatingForCustomer.value = customer; taskContent.value = ''; plannedAt.value = ''; plannedDate.value = ''; plannedTime.value = ''; showCreateTimePicker.value = false; taskTypeCode.value = 'FOLLOWUP'; ownerId.value = assignees.value.length > 0 ? String(assignees.value[0].value) : ''; createFormMessage.value = ''; message.value = '' }
-	function closeCreateTask() { if (!creatingTask.value) { creatingForCustomer.value = null; showCreateTimePicker.value = false; createFormMessage.value = '' } }
+	function openFloatingCreate() { if (activeTab.value == 'records') openCreateRecord(); else openCreateTask(null) }
+	function openCreateTask(customer : any) { creatingTaskPanel.value = true; creatingForCustomer.value = customer; taskMemberKeyword.value = ''; taskMemberCandidates.value = []; taskMemberSearched.value = false; taskMemberLoading.value = false; taskContent.value = ''; plannedAt.value = ''; plannedDate.value = ''; plannedTime.value = ''; showCreateTimePicker.value = false; taskTypeCode.value = 'FOLLOWUP'; ownerId.value = assignees.value.length > 0 ? String(assignees.value[0].value) : ''; createFormMessage.value = ''; message.value = '' }
+	function closeCreateTask() { if (!creatingTask.value) { creatingTaskPanel.value = false; creatingForCustomer.value = null; taskMemberCandidates.value = []; showCreateTimePicker.value = false; createFormMessage.value = '' } }
+	function clearTaskMember() { if (!creatingTask.value) { creatingForCustomer.value = null; taskMemberCandidates.value = []; taskMemberSearched.value = false } }
+	function searchTaskMembers() {
+		if (taskMemberLoading.value) return
+		let keyword = taskMemberKeyword.value.trim()
+		if (keyword.length == 0) { createFormMessage.value = '请输入会员姓名、手机号或会员编号。'; return }
+		taskMemberLoading.value = true
+		taskMemberSearched.value = true
+		createFormMessage.value = ''
+		queryMobileCustomerCare({ view: 'customers', query: { keyword: keyword } }, (response : any) => {
+			taskMemberLoading.value = false
+			let projection = response != null && response.body != null && response.body.projection != null ? response.body.projection.customerCare : null
+			if (!response.ok || projection == null || projection.customerView == null) { createFormMessage.value = String(response.message || '会员查询暂时不可用。'); return }
+			taskMemberCandidates.value = Array.isArray(projection.customerView.records) ? projection.customerView.records : []
+		})
+	}
+	function selectTaskMember(member : any) { if (member == null || String(member.memberId || '').length == 0) return; creatingForCustomer.value = member; taskMemberCandidates.value = []; taskMemberSearched.value = false; createFormMessage.value = '' }
 	function submitComplete() {
 		if (completingTask.value == null || submitting.value) return
 		let content = completeContent.value.trim()
@@ -275,7 +304,8 @@
 		})
 	}
 	function submitCreateTask() {
-		if (creatingForCustomer.value == null || creatingTask.value) return
+		if (creatingTask.value) return
+		if (creatingForCustomer.value == null) { createFormMessage.value = '请选择会员。'; return }
 		if (ownerId.value.length == 0) { createFormMessage.value = '请选择负责人。'; return }
 		if (plannedAt.value.trim().length == 0) { createFormMessage.value = '请选择计划跟进时间。'; return }
 		createFormMessage.value = ''
@@ -284,6 +314,7 @@
 			creatingTask.value = false
 			if (!response.ok) { createFormMessage.value = String(response.message || '客情任务创建失败。'); return }
 			createdTaskMemberId.value = String(creatingForCustomer.value.memberId)
+			creatingTaskPanel.value = false
 			creatingForCustomer.value = null
 			createFormMessage.value = ''
 			activeTab.value = 'tasks'
@@ -494,7 +525,7 @@
 	.care-page { background-color: #eef6ff; }
 	.care-page__topbar { display: flex; height: 38px; flex-shrink: 0; flex-direction: row; align-items: center; padding: 30px 18px 8px 18px; background-color: #eef6ff; }
 	.care-page__back { display: flex; width: 36px; height: 36px; flex-direction: row; align-items: center; justify-content: center; border-radius: 10px; background-color: rgba(255, 255, 255, 0.76); box-shadow: 0 5px 13px rgba(68, 101, 150, 0.1); font-size: 31px; font-weight: 400; line-height: 31px; color: #163252; }
-	.care-page__tabs { min-height: 46px; margin: 0 18px; padding: 4px; border-width: 1px; border-style: solid; border-color: rgba(215, 226, 241, 0.9); border-radius: 14px; background-color: rgba(255, 255, 255, 0.72); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.7); }
+	.care-page__tabs { min-height: 46px; margin: 12px 18px 0; padding: 4px; border-width: 1px; border-style: solid; border-color: rgba(215, 226, 241, 0.9); border-radius: 14px; background-color: rgba(255, 255, 255, 0.72); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.7); }
 	.care-page__tab { height: 38px; border-bottom-width: 0; border-radius: 11px; color: #75869f; }
 	.care-page__tab--active { background-color: #ffffff; box-shadow: 0 5px 13px rgba(68, 101, 150, 0.12); color: #163252; }
 	.care-page__filters { padding: 12px 18px 0 18px; background-color: transparent; }
@@ -616,4 +647,6 @@
 	.care-page--native-mini .care-page__topbar { padding-top: 84px; }
 	.care-page--native-mini .care-page__complete-header { padding-top: 84px; }
 	.care-page--native-mini .care-page__detail-header { padding-top: 84px; }
+	.care-page__complete-label--first { margin-top: 0; }
+	.care-page__floating-create { position: fixed; z-index: 10; right: 18px; bottom: calc(22px + env(safe-area-inset-bottom)); display: flex; width: 56px; height: 56px; flex-direction: row; align-items: center; justify-content: center; border-radius: 28px; background-color: #1677cc; box-shadow: 0 10px 24px rgba(22, 119, 204, 0.28); font-size: 34px; font-weight: 300; line-height: 52px; color: #ffffff; }
 </style>
