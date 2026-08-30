@@ -1,6 +1,5 @@
 <template>
 	<view class="engineering-page" :class="{ 'engineering-page--native-mini': platformUsesNativeCanvas }">
-		<view class="engineering-page__header"><view><text class="engineering-page__kicker">业务台账</text><text class="engineering-page__title">工程管理</text></view><text class="engineering-page__store">{{ activeStoreLabel }}</text></view>
 		<view class="engineering-page__tabs" role="tablist"><view v-for="tab in tabs" :key="tab.key" class="engineering-page__tab" :class="{ 'engineering-page__tab--active': activeType === tab.key }" role="tab" :aria-selected="activeType === tab.key" @tap="switchType(tab.key)"><text>{{ tab.label }}</text></view></view>
 		<view class="engineering-page__toolbar"><input class="engineering-page__keyword" type="text" v-model="keyword" confirm-type="search" placeholder="搜索门店、提报人或合同" @confirm="reload" /><view class="engineering-page__refresh" @tap="reload"><text>刷新</text></view><view class="engineering-page__add" @tap="beginCreate"><text>＋ 新增</text></view></view>
 		<view v-if="message.length > 0" class="engineering-page__state"><text>{{ message }}</text><view class="engineering-page__retry" @tap="reload"><text>重新加载</text></view></view>
@@ -17,7 +16,6 @@
 <script setup lang="uts">
 	import MerchantPrimaryTabBar from '../../../shared/components/merchant-primary-tab-bar.uvue'
 	import { queryMobileEngineeringLedger, saveMobileEngineeringLedger } from '../../../shared/api/mobile-engineering-ledger-client.uts'
-	import { currentMerchantRoot } from '../../../shared/platform/mobile-merchant-session.uts'
 	import { currentMobilePlatform } from '../../../shared/platform/mobile-platform.uts'
 	import { ensureMerchantTabAccess } from '../../../shared/platform/merchant-route-guard.uts'
 
@@ -31,7 +29,6 @@
 	const message = ref('')
 	const editing = ref<any>(null)
 	const platformUsesNativeCanvas = currentMobilePlatform() === 'MP_WEIXIN'
-	const activeStoreLabel = ref('当前门店')
 
 	const fieldSets : any = {
 		store_building: [{ key: 'province', label: '省' }, { key: 'branch_name', label: '分公司' }, { key: 'store_name', label: '门店' }, { key: 'building_type', label: '建店类型' }, { key: 'contract_date', label: '签约日期', kind: 'date' }, { key: 'license_date', label: '营业执照办结日期', kind: 'date' }, { key: 'design_start_date', label: '图纸设计开始日期', kind: 'date' }, { key: 'design_end_date', label: '图纸设计结束日期', kind: 'date' }, { key: 'bid_start_date', label: '工程比价开始日期', kind: 'date' }, { key: 'bid_end_date', label: '工程比价结束日期', kind: 'date' }, { key: 'construction_start_date', label: '工程施工开始日期', kind: 'date' }, { key: 'construction_end_date', label: '工程施工结束日期', kind: 'date' }, { key: 'acceptance_date', label: '验收日期', kind: 'date' }, { key: 'acquisition_note', label: '拓客' }, { key: 'recruitment_note', label: '招聘' }, { key: 'opening_date', label: '开业日期', kind: 'date' }, { key: 'building_duration', label: '建店时长' }, { key: 'first_month_performance', label: '首月业绩', kind: 'number' }, { key: 'second_month_performance', label: '次月业绩', kind: 'number' }, { key: 'third_month_performance', label: '第三个月业绩', kind: 'number' }],
@@ -40,8 +37,7 @@
 		rent_renewal: [{ key: 'contract_start_date', label: '最新合同起始时间', kind: 'date' }, { key: 'contract_end_date', label: '最新合同到期时间', kind: 'date' }, { key: 'original_monthly_rent', label: '原月租管费', kind: 'number' }, { key: 'original_annual_rent', label: '原年租管费', kind: 'number' }, { key: 'rent_reduction_date', label: '降租完成时间', kind: 'date' }, { key: 'reduced_monthly_rent', label: '降租后月租管费', kind: 'number' }, { key: 'reduced_annual_rent', label: '降租后年租管费', kind: 'number' }, { key: 'monthly_reduction', label: '月降租金额', kind: 'number' }, { key: 'annual_reduction', label: '年降租金额', kind: 'number' }]
 	}
 
-	onShow(() => { if (ensureMerchantTabAccess('workbench')) { loadStore(); reload() } })
-	function loadStore() : void { let root = currentMerchantRoot(); if (root != null && root.activeContext != null) activeStoreLabel.value = String(root.activeContext.label || '当前门店') }
+	onShow(() => { if (ensureMerchantTabAccess('workbench')) reload() })
 	function activeTypeLabel() : string { for (let index = 0; index < tabs.length; index++) if (tabs[index].key === activeType.value) return tabs[index].label; return '工程管理' }
 	function fieldsForType() : Array<any> { let fields = fieldSets[activeType.value]; return Array.isArray(fields) ? fields : [] }
 	function formFields() : Array<any> { return fieldsForType().filter((field : any) => !(activeType.value === 'engineering_repair' || activeType.value === 'rent_renewal') || (field.key !== 'branch_name' && field.key !== 'store_name')) }
@@ -61,12 +57,8 @@
 
 <style>
 	.engineering-page { display:flex; min-height:100%; flex:1; flex-direction:column; background:#f4f7fa; color:#26384d; }
-	.engineering-page__header { display:flex; align-items:flex-end; justify-content:space-between; padding:20px 18px 14px; background:transparent; }
-	.engineering-page--native-mini .engineering-page__header { padding-top:124px; }
-	.engineering-page__kicker { display:block; font-size:12px; line-height:18px; color:#71839a; }
-	.engineering-page__title { display:block; margin-top:3px; font-size:23px; font-weight:700; line-height:31px; }
-	.engineering-page__store { max-width:190px; overflow:hidden; padding:9px 12px; border:1px solid #d8e4f1; border-radius:18px; background:#fff; color:#607891; font-size:12px; font-weight:700; text-overflow:ellipsis; white-space:nowrap; }
-	.engineering-page__tabs { display:flex; flex-shrink:0; height:46px; flex-direction:row; margin:0 18px; border:1px solid #d8e4f1; border-radius:14px; background:#fff; overflow:hidden; }
+	.engineering-page__tabs { display:flex; flex-shrink:0; height:46px; flex-direction:row; margin:20px 18px 0; border:1px solid #d8e4f1; border-radius:14px; background:#fff; overflow:hidden; }
+	.engineering-page--native-mini .engineering-page__tabs { margin-top:124px; }
 	.engineering-page__tab { display:flex; min-width:0; flex:1; height:46px; flex-direction:row; align-items:center; justify-content:center; border-bottom:2px solid transparent; color:#7589a0; font-size:12px; white-space:nowrap; }
 	.engineering-page__tab--active { border-bottom-color:#1677cc; background:#f2f8fe; color:#1677cc; font-weight:700; }
 	.engineering-page__toolbar { display:flex; align-items:center; gap:8px; padding:12px 18px; background:#fff; }
