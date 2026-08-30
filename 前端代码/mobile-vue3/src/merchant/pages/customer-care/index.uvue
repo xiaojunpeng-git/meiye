@@ -1,5 +1,5 @@
 <template>
-	<view class="care-page">
+	<view class="care-page" :class="{ 'care-page--native-mini': platformUsesNativeCanvas }">
 		<view class="care-page__topbar">
 			<view class="care-page__back" role="button" aria-label="返回工作台" @tap="returnToWorkbench"><text>‹</text></view>
 		</view>
@@ -128,8 +128,9 @@
 
 <script setup lang="uts">
 	import { completeMobileCustomerCareTask, createMobileCustomerCareRecord, createMobileCustomerCareTask, deleteMobileCustomerCareTask, queryMobileCustomerCare, startMobileCustomerCareTask, uploadMobileCustomerCarePhoto } from '../../../shared/api/mobile-customer-care-client.uts'
-	import { callMobilePhone } from '../../../shared/platform/mobile-platform.uts'
+	import { callMobilePhone, currentMobilePlatform } from '../../../shared/platform/mobile-platform.uts'
 	import { openMerchantWorkbench } from '../../../shared/platform/mobile-navigation.uts'
+	const platformUsesNativeCanvas = currentMobilePlatform() === 'MP_WEIXIN'
 	const tabs = [
 		{ key: 'tasks', label: '跟进任务' },
 		{ key: 'customers', label: '客户视图' },
@@ -612,4 +613,7 @@
 	.care-page__detail-actions { display: flex; align-items: center; justify-content: flex-end; min-height: 72px; padding: 0 22px calc(10px + env(safe-area-inset-bottom)); background-color: #eef6ff; }
 	.care-page__detail-actions .care-page__call-entry, .care-page__detail-actions .care-page__complete-entry { margin-top: 0; margin-left: 9px; }
 	.care-page__detail-empty { margin-right: auto; font-size: 12px; color: #8997a7; }
+	.care-page--native-mini .care-page__topbar { padding-top: 84px; }
+	.care-page--native-mini .care-page__complete-header { padding-top: 84px; }
+	.care-page--native-mini .care-page__detail-header { padding-top: 84px; }
 </style>
