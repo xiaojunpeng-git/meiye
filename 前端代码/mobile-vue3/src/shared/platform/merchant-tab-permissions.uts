@@ -15,6 +15,22 @@ export function merchantTabAction(tabKey : string) : string {
 	return actions != null && Array.isArray(actions) && actions.length > 0 ? String(actions[0]) : ''
 }
 
+export function merchantActionIsAllowed(action : string, root : any = null) : boolean {
+	let state = root
+	if (state == null) state = currentMerchantRoot()
+	if (state == null || typeof state != 'object') return false
+	let source : any = Array.isArray(state.availableActions) ? state.availableActions : state.capabilities
+	if (!Array.isArray(source)) return false
+	for (let index = 0; index < source.length; index++) {
+		let value = source[index]
+		let code = value != null && typeof value == 'object'
+			? String(value.action || value.code || value.feature_code || value.featureCode || value.id || '')
+			: String(value || '')
+		if (code === action) return true
+	}
+	return false
+}
+
 export function merchantTabIsAllowed(tabKey : string, root : any = null) : boolean {
 	let state = root
 	if (state == null) state = currentMerchantRoot()

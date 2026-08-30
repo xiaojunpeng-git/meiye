@@ -26,9 +26,9 @@
 
 				<view class="merchant-workbench__section-heading merchant-workbench__section-heading--functions"><view><text class="merchant-workbench__section-kicker">快捷入口</text><text class="merchant-workbench__section-title">常用功能</text></view></view>
 				<view class="merchant-workbench__grid">
-					<navigator class="merchant-workbench__entry" url="/src/merchant/pages/reservations/index" open-type="navigate"><view class="merchant-workbench__entry-icon merchant-workbench__entry-icon--reservation"><text>约</text></view><text class="merchant-workbench__entry-label">预约管理</text></navigator>
-					<navigator class="merchant-workbench__entry" url="/src/merchant/pages/customer-care/index" open-type="navigate"><view class="merchant-workbench__entry-icon merchant-workbench__entry-icon--care"><text>客</text></view><text class="merchant-workbench__entry-label">客情管理</text></navigator>
-					<navigator class="merchant-workbench__entry" url="/src/merchant/pages/engineering/index" open-type="navigate"><view class="merchant-workbench__entry-icon merchant-workbench__entry-icon--engineering"><text>工</text></view><text class="merchant-workbench__entry-label">工程管理</text></navigator>
+					<navigator v-if="canOpenWorkbenchEntry('mobile.merchant.reservations')" class="merchant-workbench__entry" url="/src/merchant/pages/reservations/index" open-type="navigate"><view class="merchant-workbench__entry-icon merchant-workbench__entry-icon--reservation"><text>约</text></view><text class="merchant-workbench__entry-label">预约管理</text></navigator>
+					<navigator v-if="canOpenWorkbenchEntry('mobile.merchant.customer_care')" class="merchant-workbench__entry" url="/src/merchant/pages/customer-care/index" open-type="navigate"><view class="merchant-workbench__entry-icon merchant-workbench__entry-icon--care"><text>客</text></view><text class="merchant-workbench__entry-label">客情管理</text></navigator>
+					<navigator v-if="canOpenWorkbenchEntry('mobile.merchant.engineering')" class="merchant-workbench__entry" url="/src/merchant/pages/engineering/index" open-type="navigate"><view class="merchant-workbench__entry-icon merchant-workbench__entry-icon--engineering"><text>工</text></view><text class="merchant-workbench__entry-label">工程管理</text></navigator>
 				</view>
 			</view>
 		</scroll-view>
@@ -45,6 +45,7 @@
 	import { currentMerchantRoot } from '../../../shared/platform/mobile-merchant-session.uts'
 	import { currentMobilePlatform } from '../../../shared/platform/mobile-platform.uts'
 	import { ensureMerchantTabAccess } from '../../../shared/platform/merchant-route-guard.uts'
+	import { merchantActionIsAllowed } from '../../../shared/platform/merchant-tab-permissions.uts'
 
 	const openTaskCount = ref(0)
 	const dueNotArrivedCount = ref(0)
@@ -92,6 +93,10 @@
 	function loadTodos() : void {
 		loadOpenTasks()
 		loadDueReservations()
+	}
+
+	function canOpenWorkbenchEntry(action : string) : boolean {
+		return merchantActionIsAllowed(action)
 	}
 
 	function loadOpenTasks() : void {
@@ -164,7 +169,7 @@
 	.merchant-workbench__tab-index { font-size: 10px; font-weight: 600; line-height: 14px; color: #98a2b3; }
 	.merchant-workbench__tab-label { margin-top: 2px; font-size: 12px; font-weight: 600; line-height: 18px; color: #526071; }
 	.merchant-workbench__tab--active .merchant-workbench__tab-index, .merchant-workbench__tab--active .merchant-workbench__tab-label { color: #1677cc; }
-	/* 恢复预约管理闭环时确认过的工作台视觉：保留四个业务入口权限过滤，
+	/* 工作台常用功能按服务端返回的二级入口权限过滤，
 	 * 只恢复信息层级、图标和留白，不改变数据、客户、我的页面。 */
 	.merchant-workbench { background-color: #f4f7fa; }
 	.merchant-workbench__header { align-items: center; justify-content: flex-start; padding: 20px 18px 12px 18px; border-bottom-width: 0; border-bottom-color: transparent; background-color: transparent; }
