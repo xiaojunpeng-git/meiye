@@ -109,6 +109,7 @@ final class BusinessLedgerServices extends BaseServices
         $id = (int)($payload['id'] ?? 0); $expected = (int)($payload['version'] ?? 0); $storeId = (int)($payload['store_id'] ?? ($scope['active_store_id'] ?? 0));
         if (!$stores || $storeId <= 0 || !in_array($storeId, $stores, true)) throw new \InvalidArgumentException('门店不在当前权限范围');
         $data = []; foreach (self::FIELD_MAP[$type] as $field) if (array_key_exists($field, $payload)) $data[$field] = $payload[$field];
+        $data = $this->normalizeDateFields($type, $data);
         $data = $this->normalizeMoneyFields($type, $data);
         $this->validate($type, $data);
         $snapshot = $storeId > 0 ? $this->storeSnapshot($storeId) : ['org_id' => 0, 'branch_name' => '', 'store_name' => ''];
@@ -150,6 +151,15 @@ final class BusinessLedgerServices extends BaseServices
             if (!array_key_exists($field, $data) || $data[$field] === '' || $data[$field] === null) { $data[$field] = null; continue; }
             if (!is_numeric($data[$field]) || preg_match('/^-/', (string)$data[$field])) throw new \InvalidArgumentException($field . '金额格式错误');
             $data[$field] = (int)round(((float)$data[$field]) * 100);
+        }
+        return $data;
+    }
+
+    private function normalizeDateFields(string $type, array $data): array
+    {
+        foreach (self::FIELD_MAP[$type] ?? [] as $field) {
+            if (!str_ends_with($field, '_date')) continue;
+            if (array_key_exists($field, $data) && trim((string)$data[$field]) === '') $data[$field] = null;
         }
         return $data;
     }
