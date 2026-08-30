@@ -245,6 +245,8 @@ final class CustomerCareActionInputMapper
             'resultCode' => $this->availableResultCode($payload['resultCode'] ?? null),
             'summary' => $this->truncate($content, 255),
             'detail' => $content,
+            'serviceBeforePhotos' => $this->photoUrls($payload['beforePhotos'] ?? []),
+            'serviceAfterPhotos' => $this->photoUrls($payload['afterPhotos'] ?? []),
             'relatedBusinessType' => '',
             'relatedBusinessId' => '',
             'relatedBusinessLabel' => '',
@@ -288,6 +290,25 @@ final class CustomerCareActionInputMapper
             );
         }
         return $command;
+    }
+
+    /** @return string[] */
+    private function photoUrls($value): array
+    {
+        if ($value === null || $value === '') return [];
+        if (!is_array($value)) {
+            throw $this->invalid('photos', '服务照片地址无效。');
+        }
+        $urls = [];
+        foreach ($value as $url) {
+            if (!is_string($url)) throw $this->invalid('photos', '服务照片地址无效。');
+            $url = trim($url);
+            if ($url === '' || strlen($url) > 1024 || !preg_match('/^https?:\/\/[^\s]+$/D', $url)) {
+                throw $this->invalid('photos', '服务照片地址无效。');
+            }
+            $urls[$url] = $url;
+        }
+        return array_values($urls);
     }
 
     private function existingTask(array $payload, string $idempotencyKey): array

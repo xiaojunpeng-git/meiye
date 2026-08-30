@@ -64,6 +64,7 @@ Route::group('api/mobile/merchant', function () {
         Route::patch('customer-audiences/:audienceId', 'Customer/updateAudience')->option(['real_name' => '手机商家端更新客群']);
         Route::delete('customer-audiences/:audienceId', 'Customer/archiveAudience')->option(['real_name' => '手机商家端归档客群']);
         Route::post('customer-care/workbench', 'CustomerCare/workbench')->option(['real_name' => '手机商家端客情工作台']);
+        Route::post('customer-care/service-photo', 'CustomerCare/photoUpload')->option(['real_name' => '手机商家端客情服务照片上传']);
         Route::post('customer-care/actions/:action', 'CustomerCare/action')
             ->pattern(['action' => '[A-Za-z0-9-]+'])
             ->option(['real_name' => '手机商家端客情操作']);

@@ -483,6 +483,8 @@ final class CustomerCareWorkbenchQueryService
             'memberName' => (string)$row['member_name_snapshot'],
             'content' => (string)($row['detail'] !== '' ? $row['detail'] : $row['summary']),
             'summary' => (string)$row['summary'],
+            'serviceBeforePhotos' => $this->decodePhotos($row['service_before_photos'] ?? ''),
+            'serviceAfterPhotos' => $this->decodePhotos($row['service_after_photos'] ?? ''),
             'resultCode' => (string)$row['result_code'],
             'resultLabel' => CustomerCareProjectionContract::resultLabel((string)$row['result_code']),
             'actualFollowerName' => (string)$row['follower_name_snapshot'],
@@ -541,6 +543,18 @@ final class CustomerCareWorkbenchQueryService
             'content' => (string)($row['detail'] !== '' ? $row['detail'] : $row['summary']),
             'status' => (string)$row['status'],
         ];
+    }
+
+    /** @return string[] */
+    private function decodePhotos($value): array
+    {
+        $decoded = json_decode((string)$value, true);
+        if (!is_array($decoded)) return [];
+        return array_values(array_filter(array_map(static function ($url): string {
+            return is_string($url) ? trim($url) : '';
+        }, $decoded), static function (string $url): bool {
+            return $url !== '';
+        }));
     }
 
     private function taskActions(array $row, CustomerCareQueryScope $scope): array

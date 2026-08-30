@@ -16,10 +16,13 @@
 				<input class="care-page__member-search-input" type="text" :value="customerKeyword" placeholder="搜索会员姓名、手机号或会员编号" @input="updateCustomerKeyword" @confirm="loadWorkbench" />
 				<view class="care-page__member-search-submit" @tap="loadWorkbench"><text>搜索</text></view>
 			</view>
-			<view v-if="activeTab === 'records'" class="care-page__member-search">
-				<text class="care-page__member-search-symbol">⌕</text>
-				<input class="care-page__member-search-input" type="text" :value="recordKeyword" placeholder="搜索会员姓名、手机号或会员编号" @input="updateRecordKeyword" @confirm="loadWorkbench" />
-				<view class="care-page__member-search-submit" @tap="loadWorkbench"><text>搜索</text></view>
+			<view v-if="activeTab === 'records'" class="care-page__record-toolbar">
+				<view class="care-page__member-search care-page__member-search--record">
+					<text class="care-page__member-search-symbol">⌕</text>
+					<input class="care-page__member-search-input" type="text" :value="recordKeyword" placeholder="搜索会员姓名、手机号或会员编号" @input="updateRecordKeyword" @confirm="loadWorkbench" />
+					<view class="care-page__member-search-submit" @tap="loadWorkbench"><text>搜索</text></view>
+				</view>
+				<view class="care-page__record-create" @tap="openCreateRecord"><text>新增</text></view>
 			</view>
 			<view v-if="loading" class="care-page__empty"><text class="care-page__empty-title">正在读取客情数据</text></view>
 			<view v-else-if="message.length > 0" class="care-page__empty"><text class="care-page__empty-title">{{ message }}</text><view class="care-page__reload" @tap="loadWorkbench"><text>重新加载</text></view></view>
@@ -37,9 +40,9 @@
 			<view v-else-if="activeTab === 'customers'" class="care-page__list">
 				<view v-for="customer in customers" :key="customer.memberId" class="care-page__card"><text class="care-page__card-title">{{ customer.name }} · {{ customer.phone }}</text><text class="care-page__card-copy">{{ customer.storeName }} · {{ customer.nextTaskLabel }}</text><text class="care-page__card-copy">最近客情：{{ customer.latestCareLabel }}</text><view class="care-page__complete-entry" @tap="openCreateTask(customer)"><text>新增客情任务</text></view></view>
 			</view>
-			<view v-else-if="activeTab === 'records' && records.length === 0" class="care-page__empty"><text class="care-page__empty-title">暂无客情记录</text><text class="care-page__empty-copy">正式记录由服务端生成，不能在手机端直接编辑。</text></view>
+			<view v-else-if="activeTab === 'records' && records.length === 0" class="care-page__empty"><text class="care-page__empty-title">暂无客情记录</text><text class="care-page__empty-copy">点击右侧“新增”，可为授权范围内的会员补录正式客情记录。</text></view>
 			<view v-else-if="activeTab === 'records'" class="care-page__list">
-				<view v-for="record in records" :key="record.recordId" class="care-page__card"><view class="care-page__card-row"><text class="care-page__card-title">{{ record.memberName }} · {{ record.typeLabel }}</text><text class="care-page__status">{{ record.resultLabel }}</text></view><text class="care-page__card-copy">{{ record.followedAt }} · {{ record.methodLabel }}</text><text class="care-page__card-copy">{{ record.summary }}</text></view>
+				<view v-for="record in records" :key="record.recordId" class="care-page__card"><view class="care-page__card-row"><text class="care-page__card-title">{{ record.memberName }} · {{ record.typeLabel }}</text><text class="care-page__status">{{ record.resultLabel }}</text></view><text class="care-page__card-copy">{{ record.followedAt }} · {{ record.methodLabel }}</text><text class="care-page__card-copy">{{ record.summary }}</text><view v-if="record.serviceBeforePhotos != null && record.serviceBeforePhotos.length > 0" class="care-page__record-photos"><text class="care-page__record-photos-label">服务前</text><image v-for="(photo, index) in record.serviceBeforePhotos" :key="'record-before-' + index" class="care-page__record-photo" :src="photo" mode="aspectFill" /></view><view v-if="record.serviceAfterPhotos != null && record.serviceAfterPhotos.length > 0" class="care-page__record-photos"><text class="care-page__record-photos-label">服务后</text><image v-for="(photo, index) in record.serviceAfterPhotos" :key="'record-after-' + index" class="care-page__record-photo" :src="photo" mode="aspectFill" /></view></view>
 			</view>
 			<view v-else-if="activeTab === 'statistics'" class="care-page__list"><view v-for="metric in metrics" :key="metric.code" class="care-page__card"><text class="care-page__card-title">{{ metric.label }}</text><text class="care-page__metric">{{ metric.value }}{{ metric.unit }}</text><text class="care-page__card-copy">{{ metric.userReady ? metric.description : '统计口径待确认' }}</text></view></view>
 		</scroll-view>
@@ -82,6 +85,35 @@
 				<view class="care-page__complete-submit" :class="{ 'care-page__complete-submit--loading': creatingTask }" @tap.stop="submitCreateTask"><text>{{ creatingTask ? '正在提交…' : '创建客情任务' }}</text></view>
 			</scroll-view>
 		</view>
+		<view v-if="creatingRecord" class="care-page__complete-panel">
+			<view class="care-page__complete-header"><text class="care-page__complete-cancel" @tap="closeCreateRecord">取消</text><text class="care-page__complete-title">新增客情记录</text><text class="care-page__complete-placeholder"></text></view>
+			<scroll-view scroll-y class="care-page__complete-body">
+				<text class="care-page__complete-label">会员</text>
+				<view v-if="recordSelectedMember == null" class="care-page__record-member-picker">
+					<view class="care-page__member-search care-page__member-search--picker"><text class="care-page__member-search-symbol">⌕</text><input class="care-page__member-search-input" type="text" :value="recordMemberKeyword" placeholder="搜索要记录客情的会员" @input="updateRecordMemberKeyword" @confirm="searchRecordMembers" /><view class="care-page__member-search-submit" @tap="searchRecordMembers"><text>{{ recordMemberLoading ? '查询中' : '查找' }}</text></view></view>
+					<text v-if="recordMemberSearched && !recordMemberLoading && recordMemberCandidates.length === 0" class="care-page__record-member-empty">没有找到当前授权范围内的会员。</text>
+					<view v-for="member in recordMemberCandidates" :key="member.memberId" class="care-page__record-member-option" @tap="selectRecordMember(member)"><text class="care-page__record-member-name">{{ member.name }}</text><text class="care-page__record-member-copy">{{ member.phone || '未登记手机号' }}</text></view>
+				</view>
+				<view v-else class="care-page__record-member-selected"><view><text class="care-page__record-member-name">{{ recordSelectedMember.name }}</text><text class="care-page__record-member-copy">{{ recordSelectedMember.phone || '未登记手机号' }}</text></view><text class="care-page__record-member-change" @tap="clearRecordMember">重新选择</text></view>
+				<text class="care-page__complete-label">客情类型</text>
+				<view class="care-page__choice-row"><view v-for="type in taskTypes" :key="'record-' + type.value" class="care-page__choice" :class="{ 'care-page__choice--active': recordTypeCode === type.value }" @tap="recordTypeCode = type.value"><text>{{ type.label }}</text></view></view>
+				<text class="care-page__complete-label">联系方式</text>
+				<view class="care-page__choice-row"><view v-for="method in methods" :key="'record-method-' + method.value" class="care-page__choice" :class="{ 'care-page__choice--active': recordMethodCode === method.value }" @tap="recordMethodCode = method.value"><text>{{ method.label }}</text></view></view>
+				<text class="care-page__complete-label">跟进结果</text>
+				<view class="care-page__choice-row"><view v-for="result in results" :key="'record-result-' + result.value" class="care-page__choice" :class="{ 'care-page__choice--active': recordResultCode === result.value }" @tap="recordResultCode = result.value"><text>{{ result.label }}</text></view></view>
+				<text class="care-page__complete-label">实际跟进时间</text>
+				<view class="care-page__schedule-row"><picker class="care-page__schedule-picker" mode="date" :value="recordDate" @change="changeRecordDate"><view class="care-page__schedule-value"><text>{{ recordDate }}</text><text class="care-page__schedule-arrow">›</text></view></picker><picker class="care-page__schedule-picker" mode="time" :value="recordTime" @change="changeRecordTime"><view class="care-page__schedule-value"><text>{{ recordTime }}</text><text class="care-page__schedule-arrow">›</text></view></picker></view>
+				<text class="care-page__complete-label">本次内容</text>
+				<textarea class="care-page__complete-textarea" :value="recordContent" placeholder="如实记录沟通内容和后续约定" @input="updateRecordContent" />
+				<text class="care-page__complete-label">服务前照片</text>
+				<view class="care-page__photo-row"><view v-for="(photo, index) in recordBeforePhotos" :key="'before-' + index" class="care-page__photo-item"><image class="care-page__photo-image" :src="photo" mode="aspectFill" /><text class="care-page__photo-remove" @tap="removeRecordPhoto('before', index)">×</text></view><view v-if="recordBeforePhotos.length < 9" class="care-page__photo-add" @tap="chooseRecordPhotos('before')"><text>＋</text><text>拍照/选图</text></view></view>
+				<text class="care-page__complete-label">服务后照片</text>
+				<view class="care-page__photo-row"><view v-for="(photo, index) in recordAfterPhotos" :key="'after-' + index" class="care-page__photo-item"><image class="care-page__photo-image" :src="photo" mode="aspectFill" /><text class="care-page__photo-remove" @tap="removeRecordPhoto('after', index)">×</text></view><view v-if="recordAfterPhotos.length < 9" class="care-page__photo-add" @tap="chooseRecordPhotos('after')"><text>＋</text><text>拍照/选图</text></view></view>
+				<text v-if="recordPhotoUploading" class="care-page__photo-uploading">正在上传照片…</text>
+				<text v-if="recordFormMessage.length > 0" class="care-page__form-message">{{ recordFormMessage }}</text>
+				<view class="care-page__complete-submit" :class="{ 'care-page__complete-submit--loading': recordSubmitting || recordPhotoUploading }" @tap="submitCreateRecord"><text>{{ recordSubmitting ? '正在保存…' : '保存客情记录' }}</text></view>
+			</scroll-view>
+		</view>
 		<view v-if="showCreateTimePicker" class="care-page__time-sheet-mask" @tap="closeCreateTimePicker">
 			<view class="care-page__time-sheet" @tap.stop>
 				<view class="care-page__time-sheet-head"><text class="care-page__time-sheet-cancel" @tap="closeCreateTimePicker">取消</text><text class="care-page__time-sheet-title">选择计划时间</text><text class="care-page__time-sheet-confirm" @tap="confirmCreateTimePicker">确定</text></view>
@@ -95,7 +127,7 @@
 </template>
 
 <script setup lang="uts">
-	import { completeMobileCustomerCareTask, createMobileCustomerCareTask, deleteMobileCustomerCareTask, queryMobileCustomerCare, startMobileCustomerCareTask } from '../../../shared/api/mobile-customer-care-client.uts'
+	import { completeMobileCustomerCareTask, createMobileCustomerCareRecord, createMobileCustomerCareTask, deleteMobileCustomerCareTask, queryMobileCustomerCare, startMobileCustomerCareTask, uploadMobileCustomerCarePhoto } from '../../../shared/api/mobile-customer-care-client.uts'
 	import { callMobilePhone } from '../../../shared/platform/mobile-platform.uts'
 	import { openMerchantWorkbench } from '../../../shared/platform/mobile-navigation.uts'
 	const tabs = [
@@ -154,6 +186,23 @@
 	const memberFilterId = ref('')
 	const customerKeyword = ref('')
 	const recordKeyword = ref('')
+	const creatingRecord = ref(false)
+	const recordMemberKeyword = ref('')
+	const recordMemberCandidates = ref<Array<any>>([])
+	const recordMemberSearched = ref(false)
+	const recordMemberLoading = ref(false)
+	const recordSelectedMember = ref<any>(null)
+	const recordTypeCode = ref('FOLLOWUP')
+	const recordMethodCode = ref('PHONE')
+	const recordResultCode = ref('FOLLOW_UP')
+	const recordDate = ref('')
+	const recordTime = ref('')
+	const recordContent = ref('')
+	const recordBeforePhotos = ref<Array<string>>([])
+	const recordAfterPhotos = ref<Array<string>>([])
+	const recordPhotoUploading = ref(false)
+	const recordSubmitting = ref(false)
+	const recordFormMessage = ref('')
 
 	onLoad((options : any) => {
 		memberFilterId.value = String(options != null ? options.memberId || '' : '')
@@ -175,7 +224,11 @@
 	function selectOwner(value : string) { ownerId.value = value; createFormMessage.value = '' }
 	function updateCustomerKeyword(event : any) { customerKeyword.value = String(event.detail != null ? event.detail.value || '' : '') }
 	function updateRecordKeyword(event : any) { recordKeyword.value = String(event.detail != null ? event.detail.value || '' : '') }
+	function updateRecordMemberKeyword(event : any) { recordMemberKeyword.value = String(event.detail != null ? event.detail.value || '' : '') }
+	function updateRecordContent(event : any) { recordContent.value = String(event.detail != null ? event.detail.value || '' : '') }
 	function changeCreatePlannedDate(event : any) { plannedDate.value = String(event.detail != null ? event.detail.value || '' : ''); syncCreatePlannedAt() }
+	function changeRecordDate(event : any) { recordDate.value = String(event.detail != null ? event.detail.value || '' : '') }
+	function changeRecordTime(event : any) { recordTime.value = String(event.detail != null ? event.detail.value || '' : '') }
 	function createTimeOptions(limit : number) : Array<string> { let result = new Array<string>(); for (let index = 0; index < limit; index++) result.push(index < 10 ? '0' + index.toString() : index.toString()); return result }
 	function openCreateTimePicker() { let parts = plannedTime.value.split(':'); draftCreateHour.value = parts.length == 2 && parts[0].length == 2 ? parts[0] : '09'; draftCreateMinute.value = parts.length == 2 && parts[1].length == 2 ? parts[1] : '00'; showCreateTimePicker.value = true }
 	function closeCreateTimePicker() { showCreateTimePicker.value = false }
@@ -236,6 +289,109 @@
 			activeTabLabel.value = '跟进任务'
 			activeBucket.value = 'all'
 			taskStatusGroup.value = 'open'
+			loadWorkbench()
+		})
+	}
+
+	function openCreateRecord() {
+		creatingRecord.value = true
+		recordMemberKeyword.value = ''
+		recordMemberCandidates.value = []
+		recordMemberSearched.value = false
+		recordMemberLoading.value = false
+		recordSelectedMember.value = null
+		recordTypeCode.value = 'FOLLOWUP'
+		recordMethodCode.value = methods.value.length > 0 ? String(methods.value[0].value) : 'PHONE'
+		recordResultCode.value = results.value.length > 0 ? String(results.value[0].value) : 'FOLLOW_UP'
+		let now = new Date(Date.now() - 60000)
+		recordDate.value = now.getFullYear().toString() + '-' + twoDigits(now.getMonth() + 1) + '-' + twoDigits(now.getDate())
+		recordTime.value = twoDigits(now.getHours()) + ':' + twoDigits(now.getMinutes())
+		recordContent.value = ''
+		recordBeforePhotos.value = []
+		recordAfterPhotos.value = []
+		recordPhotoUploading.value = false
+		recordFormMessage.value = ''
+	}
+
+	function closeCreateRecord() { if (!recordSubmitting.value) creatingRecord.value = false }
+	function clearRecordMember() { if (!recordSubmitting.value) { recordSelectedMember.value = null; recordMemberCandidates.value = []; recordMemberSearched.value = false } }
+	function twoDigits(value : number) : string { return value < 10 ? '0' + value.toString() : value.toString() }
+	function chooseRecordPhotos(kind : string) {
+		if (recordPhotoUploading.value || recordSubmitting.value) return
+		let current = kind == 'before' ? recordBeforePhotos.value : recordAfterPhotos.value
+		let remaining = 9 - current.length
+		if (remaining <= 0) return
+		uni.chooseImage({ count: remaining, sizeType: ['compressed'], sourceType: ['album', 'camera'], success: (result : any) => {
+			let paths = result != null && Array.isArray(result.tempFilePaths) ? result.tempFilePaths : []
+			uploadRecordPhotos(kind, paths, 0)
+		}, fail: () => { recordFormMessage.value = '未选择服务照片。' } })
+	}
+	function uploadRecordPhotos(kind : string, paths : Array<any>, index : number) {
+		if (index >= paths.length) { recordPhotoUploading.value = false; return }
+		recordPhotoUploading.value = true
+		let key = 'CARE_PHOTO-' + Date.now().toString() + '-' + Math.floor(Math.random() * 100000).toString()
+		uploadMobileCustomerCarePhoto(String(paths[index]), key, (response : any) => {
+			if (!response.ok || response.body == null || String(response.body.photoUrl || '').length == 0) {
+				recordPhotoUploading.value = false
+				recordFormMessage.value = String(response.message || '服务照片上传失败，请重试。')
+				return
+			}
+			if (kind == 'before') recordBeforePhotos.value.push(String(response.body.photoUrl))
+			else recordAfterPhotos.value.push(String(response.body.photoUrl))
+			uploadRecordPhotos(kind, paths, index + 1)
+		})
+	}
+	function removeRecordPhoto(kind : string, index : number) {
+		if (recordPhotoUploading.value || recordSubmitting.value) return
+		if (kind == 'before') recordBeforePhotos.value.splice(index, 1)
+		else recordAfterPhotos.value.splice(index, 1)
+	}
+
+	function searchRecordMembers() {
+		if (recordMemberLoading.value) return
+		let keyword = recordMemberKeyword.value.trim()
+		if (keyword.length == 0) { recordFormMessage.value = '请输入会员姓名、手机号或会员编号。'; return }
+		recordMemberLoading.value = true
+		recordMemberSearched.value = true
+		recordFormMessage.value = ''
+		queryMobileCustomerCare({ view: 'customers', query: { keyword: keyword } }, (response : any) => {
+			recordMemberLoading.value = false
+			let projection = response != null && response.body != null && response.body.projection != null ? response.body.projection.customerCare : null
+			if (!response.ok || projection == null || projection.customerView == null) { recordFormMessage.value = String(response.message || '会员查询暂时不可用。'); return }
+			recordMemberCandidates.value = Array.isArray(projection.customerView.records) ? projection.customerView.records : []
+		})
+	}
+
+	function selectRecordMember(member : any) {
+		if (member == null || String(member.memberId || '').length == 0) return
+		recordSelectedMember.value = member
+		recordMemberCandidates.value = []
+		recordMemberSearched.value = false
+		recordFormMessage.value = ''
+	}
+
+	function submitCreateRecord() {
+		if (recordSubmitting.value || recordPhotoUploading.value) return
+		if (recordSelectedMember.value == null) { recordFormMessage.value = '请选择会员。'; return }
+		let content = recordContent.value.trim()
+		if (content.length == 0) { recordFormMessage.value = '请如实填写本次客情内容。'; return }
+		if (recordDate.value.length == 0 || recordTime.value.length == 0) { recordFormMessage.value = '请选择实际跟进时间。'; return }
+		recordSubmitting.value = true
+		recordFormMessage.value = ''
+		createMobileCustomerCareRecord({
+			memberId: Number(recordSelectedMember.value.memberId),
+			recordTypeCode: recordTypeCode.value,
+			followedAt: recordDate.value + ' ' + recordTime.value,
+			methodCode: recordMethodCode.value,
+			resultCode: recordResultCode.value,
+			content: content,
+			beforePhotos: recordBeforePhotos.value,
+			afterPhotos: recordAfterPhotos.value,
+			idempotencyKey: 'care-record-' + Date.now().toString() + '-' + Math.floor(Math.random() * 100000).toString()
+		}, (response : any) => {
+			recordSubmitting.value = false
+			if (!response.ok) { recordFormMessage.value = String(response.message || '客情记录保存失败。'); return }
+			creatingRecord.value = false
 			loadWorkbench()
 		})
 	}
@@ -354,6 +510,17 @@
 	.care-page__member-search-symbol { margin-right: 8px; font-size: 21px; line-height: 26px; color: #71839a; }
 	.care-page__member-search-input { min-width: 0; flex: 1; height: 42px; font-size: 13px; color: #20344b; }
 	.care-page__member-search-submit { display: flex; height: 34px; flex-direction: row; align-items: center; justify-content: center; padding: 0 13px; border-radius: 10px; background-color: #1677cc; font-size: 12px; font-weight: 700; color: #ffffff; }
+	.care-page__record-toolbar { display: flex; flex-direction: row; align-items: center; margin-bottom: 12px; }
+	.care-page__member-search--record { min-width: 0; flex: 1; margin-bottom: 0; }
+	.care-page__record-create { display: flex; height: 44px; flex-shrink: 0; flex-direction: row; align-items: center; justify-content: center; margin-left: 10px; padding: 0 14px; border-radius: 12px; background-color: #1677cc; box-shadow: 0 6px 14px rgba(22, 119, 204, 0.18); font-size: 13px; font-weight: 700; color: #ffffff; }
+	.care-page__member-search--picker { margin-top: 8px; margin-bottom: 0; }
+	.care-page__record-member-picker { display: flex; flex-direction: column; }
+	.care-page__record-member-empty { display: block; margin-top: 10px; font-size: 13px; line-height: 20px; color: #8997a7; }
+	.care-page__record-member-option, .care-page__record-member-selected { display: flex; min-height: 56px; flex-direction: row; align-items: center; justify-content: space-between; margin-top: 8px; padding: 0 12px; border-width: 1px; border-style: solid; border-color: #dce7f2; border-radius: 12px; background-color: #f8fbff; }
+	.care-page__record-member-option { flex-direction: column; align-items: flex-start; justify-content: center; }
+	.care-page__record-member-name { display: block; font-size: 14px; font-weight: 700; line-height: 21px; color: #20344b; }
+	.care-page__record-member-copy { display: block; margin-top: 2px; font-size: 12px; line-height: 18px; color: #8997a7; }
+	.care-page__record-member-change { padding: 5px 0 5px 12px; font-size: 13px; font-weight: 700; color: #1677cc; }
 	.care-page__empty { padding: 18px; border-radius: 17px; background-color: #ffffff; box-shadow: 0 8px 22px rgba(74, 102, 148, 0.08); }
 	.care-page__empty-title { font-size: 17px; line-height: 24px; color: #20344b; }
 	.care-page__empty-copy { margin-top: 6px; font-size: 13px; line-height: 20px; color: #8997a7; }
@@ -362,6 +529,9 @@
 	.care-page__card-title { color: #20344b; }
 	.care-page__status { padding: 3px 8px; border-radius: 9px; background-color: #edf6ff; font-size: 11px; font-weight: 700; line-height: 16px; }
 	.care-page__card-copy { color: #8997a7; }
+	.care-page__record-photos { display: flex; flex-direction: row; align-items: center; flex-wrap: wrap; margin-top: 10px; }
+	.care-page__record-photos-label { margin-right: 7px; font-size: 12px; font-weight: 700; color: #50677d; }
+	.care-page__record-photo { width: 44px; height: 44px; margin-right: 6px; border-radius: 7px; background-color: #edf3f9; }
 	.care-page__metric { font-size: 28px; line-height: 34px; color: #163b5e; }
 	.care-page__complete-entry { margin-top: 14px; padding: 8px 13px; border-radius: 10px; box-shadow: 0 6px 14px rgba(22, 119, 204, 0.18); font-weight: 700; }
 	.care-page__call-entry { margin-top: 14px; border-color: #cde4f6; border-radius: 10px; font-weight: 700; }
@@ -375,6 +545,14 @@
 	.care-page__choice { min-height: 34px; padding: 0 11px; border-color: #dce7f2; border-radius: 10px; background-color: #f8fbff; color: #50677d; }
 	.care-page__choice--active { border-color: #1677cc; background-color: #1677cc; box-shadow: 0 6px 14px rgba(22, 119, 204, 0.18); color: #ffffff; }
 	.care-page__complete-textarea { padding: 11px; border-color: #dce7f2; border-radius: 12px; background-color: #f8fbff; color: #20344b; }
+	.care-page__photo-row { display: flex; flex-direction: row; flex-wrap: wrap; margin-top: 8px; }
+	.care-page__photo-item, .care-page__photo-add { position: relative; width: 74px; height: 74px; margin: 0 8px 8px 0; border-radius: 10px; }
+	.care-page__photo-item { overflow: hidden; background-color: #edf3f9; }
+	.care-page__photo-image { width: 74px; height: 74px; }
+	.care-page__photo-remove { position: absolute; top: 2px; right: 4px; width: 20px; height: 20px; border-radius: 10px; background-color: rgba(14, 32, 57, 0.7); font-size: 16px; line-height: 18px; color: #ffffff; text-align: center; }
+	.care-page__photo-add { display: flex; flex-direction: column; align-items: center; justify-content: center; border-width: 1px; border-style: dashed; border-color: #b9cde0; background-color: #f8fbff; font-size: 11px; line-height: 16px; color: #71839a; }
+	.care-page__photo-add text:first-child { font-size: 24px; line-height: 26px; color: #1677cc; }
+	.care-page__photo-uploading { display: block; margin-top: 8px; font-size: 12px; color: #1677cc; }
 	.care-page__next-toggle { min-height: 40px; border-color: #cde4f6; border-radius: 12px; font-weight: 700; }
 	.care-page__datetime-input { height: 44px; padding: 0 11px; border-color: #dce7f2; border-radius: 12px; background-color: #f8fbff; color: #20344b; }
 	.care-page__schedule-row { display: flex; flex-direction: row; margin-top: 8px; }

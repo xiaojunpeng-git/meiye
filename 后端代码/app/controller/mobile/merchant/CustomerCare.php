@@ -5,6 +5,7 @@ namespace app\controller\mobile\merchant;
 use app\services\customer\care\integration\CustomerCareWorkbenchActionAdapter;
 use app\services\customer\care\integration\CustomerCareActionInputMapper;
 use app\services\mobile\merchant\MobileMerchantRequestContextResolver;
+use app\services\mobile\merchant\MobileMerchantCustomerCarePhotoUploadServices;
 use app\services\mobile\protocol\MobileApiException;
 use app\services\mobile\protocol\MobileApiResponse;
 use mohe\basic\BaseController;
@@ -17,20 +18,34 @@ class CustomerCare extends BaseController
     private $merchantContext;
     /** @var CustomerCareWorkbenchActionAdapter */
     private $care;
+    /** @var MobileMerchantCustomerCarePhotoUploadServices */
+    private $photoUploads;
 
     public function __construct(
         App $app,
         MobileMerchantRequestContextResolver $merchantContext,
-        CustomerCareWorkbenchActionAdapter $care
+        CustomerCareWorkbenchActionAdapter $care,
+        MobileMerchantCustomerCarePhotoUploadServices $photoUploads
     ) {
         parent::__construct($app);
         $this->merchantContext = $merchantContext;
         $this->care = $care;
+        $this->photoUploads = $photoUploads;
     }
 
     public function workbench()
     {
         return $this->dispatch(CustomerCareActionInputMapper::QUERY, 'CUSTOMER_CARE_VIEW');
+    }
+
+    public function photoUpload()
+    {
+        $merchant = $this->merchantContext->resolve($this->request);
+        $this->merchantContext->assertAction($merchant, 'CUSTOMER_CARE_VIEW');
+        return MobileApiResponse::success(
+            $this->photoUploads->upload($merchant, $this->request),
+            MobileApiResponse::MERCHANT_CONTRACT
+        );
     }
 
     public function action(string $action)
@@ -48,7 +63,12 @@ class CustomerCare extends BaseController
         if (!in_array($action, $supported, true)) {
             throw MobileApiException::protocol('INVALID_REQUEST_FIELD', '未支持的客情操作。', 'action');
         }
-        return $this->dispatch($action, 'CUSTOMER_CARE_WRITE');
+        // A customer-care view grant also authorizes direct formal record
+        // capture. Task lifecycle actions remain write-scoped.
+        $requiredAction = $action === CustomerCareActionInputMapper::CREATE_RECORD
+            ? 'CUSTOMER_CARE_VIEW'
+            : 'CUSTOMER_CARE_WRITE';
+        return $this->dispatch($action, $requiredAction);
     }
 
     private function dispatch(string $action, string $requiredAction)

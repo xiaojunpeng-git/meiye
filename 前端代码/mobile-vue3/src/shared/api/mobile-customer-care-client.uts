@@ -7,7 +7,9 @@ const customerCareTransportContract : any = {
 	contractVersion: 'mobile-merchant-v1',
 	endpoints: {
 		queryWorkbench: { method: 'POST', path: '/mobile/merchant/customer-care/workbench', requestMetadataProfile: 'MERCHANT_SESSION' },
+		servicePhotoUpload: { method: 'POST', path: '/mobile/merchant/customer-care/service-photo', requestMetadataProfile: 'MERCHANT_SESSION' },
 		createTask: { method: 'POST', path: '/mobile/merchant/customer-care/actions/create-care-task', requestMetadataProfile: 'MERCHANT_SESSION' },
+		createRecord: { method: 'POST', path: '/mobile/merchant/customer-care/actions/create-care-record', requestMetadataProfile: 'MERCHANT_SESSION' },
 		startTask: { method: 'POST', path: '/mobile/merchant/customer-care/actions/start-care-task', requestMetadataProfile: 'MERCHANT_SESSION' },
 		completeTask: { method: 'POST', path: '/mobile/merchant/customer-care/actions/complete-care-task', requestMetadataProfile: 'MERCHANT_SESSION' },
 		deleteTask: { method: 'POST', path: '/mobile/merchant/customer-care/actions/delete-care-task', requestMetadataProfile: 'MERCHANT_SESSION' }
@@ -46,8 +48,30 @@ export function queryMobileCustomerCare(payload : any, done : (value : any) => v
 	request('queryWorkbench', payload, done)
 }
 
+export function uploadMobileCustomerCarePhoto(filePath : string, idempotencyKey : string, done : (value : any) => void) : void {
+	let plan = merchantPlan('servicePhotoUpload')
+	let origin = mobileApiOrigin()
+	if (plan == null) { done({ ok: false, message: '请先完成商家端登录。', body: null }); return }
+	if (origin.length == 0 || filePath.length == 0) { done({ ok: false, message: '未选择服务照片。', body: null }); return }
+	uni.uploadFile({
+		url: origin + '/api' + plan.path, filePath: filePath, name: 'file', header: plan.headers,
+		formData: { idempotencyKey: idempotencyKey },
+		success: (response : any) => {
+			let payload : any = null
+			try { payload = typeof response.data === 'string' ? JSON.parse(response.data) : response.data } catch (error) { payload = null }
+			let ok = response.statusCode >= 200 && response.statusCode < 300 && payload != null && payload.protocolCode == null && payload.errorCode == null
+			done({ ok: ok, statusCode: response.statusCode, body: payload, message: ok ? '' : String(payload != null ? payload.message || '服务照片上传未完成。' : '服务照片上传未完成。') })
+		},
+		fail: () => done({ ok: false, statusCode: 0, body: null, message: '服务照片上传失败，请检查网络后重试。' })
+	})
+}
+
 export function createMobileCustomerCareTask(payload : any, done : (value : any) => void) : void {
 	request('createTask', payload, done)
+}
+
+export function createMobileCustomerCareRecord(payload : any, done : (value : any) => void) : void {
+	request('createRecord', payload, done)
 }
 
 export function startMobileCustomerCareTask(payload : any, done : (value : any) => void) : void {

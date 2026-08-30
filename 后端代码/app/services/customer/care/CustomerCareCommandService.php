@@ -239,6 +239,8 @@ final class CustomerCareCommandService
                 'result_code' => $command['resultCode'],
                 'summary' => $command['summary'],
                 'detail' => $command['detail'],
+                'service_before_photos' => $this->encodePhotos($command['serviceBeforePhotos']),
+                'service_after_photos' => $this->encodePhotos($command['serviceAfterPhotos']),
                 'followed_at' => $command['followedAt'],
                 'follower_staff_id' => $actor['staffId'],
                 'follower_employee_id' => $actor['employeeId'],
@@ -445,6 +447,8 @@ final class CustomerCareCommandService
                 'result_code' => $command['resultCode'],
                 'summary' => $command['summary'],
                 'detail' => $command['detail'],
+                'service_before_photos' => $this->encodePhotos($command['serviceBeforePhotos']),
+                'service_after_photos' => $this->encodePhotos($command['serviceAfterPhotos']),
                 'followed_at' => $command['followedAt'],
                 'follower_staff_id' => $actor['staffId'],
                 'follower_employee_id' => $actor['employeeId'],
@@ -912,6 +916,11 @@ final class CustomerCareCommandService
             'employee_id' => (int)$assignment['employee_id'],
             'staff_name' => trim((string)$assignment['staff_name']),
         ];
+    }
+
+    private function encodePhotos(array $photos): string
+    {
+        return json_encode(array_values($photos), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     }
 
     private function assertBusinessStoreAllowed(array $actor, int $businessStoreId): void

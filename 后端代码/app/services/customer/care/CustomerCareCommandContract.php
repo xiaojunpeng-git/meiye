@@ -325,6 +325,8 @@ final class CustomerCareCommandContract
             'resultCode' => self::registeredCode($command['resultCode'] ?? null, 'resultCode'),
             'summary' => self::text($command['summary'] ?? null, 'summary', 255, true),
             'detail' => self::text($command['detail'] ?? '', 'detail', 4000, false),
+            'serviceBeforePhotos' => self::photoUrls($command['serviceBeforePhotos'] ?? [], 'serviceBeforePhotos'),
+            'serviceAfterPhotos' => self::photoUrls($command['serviceAfterPhotos'] ?? [], 'serviceAfterPhotos'),
             'relatedBusinessType' => $relatedEmpty
                 ? ''
                 : self::registeredCode($relatedTypeRaw, 'relatedBusinessType'),
@@ -335,6 +337,25 @@ final class CustomerCareCommandContract
                 ? ''
                 : self::text($relatedLabelRaw, 'relatedBusinessLabel', 128, true),
         ];
+    }
+
+    /** @return string[] */
+    private static function photoUrls($value, string $field): array
+    {
+        if ($value === null || $value === '') return [];
+        if (!is_array($value) || count($value) > 9) {
+            throw self::invalid($field, '服务照片最多保存 9 张。');
+        }
+        $urls = [];
+        foreach ($value as $url) {
+            if (!is_string($url)) throw self::invalid($field, '服务照片地址无效。');
+            $url = trim($url);
+            if ($url === '' || strlen($url) > 1024 || !preg_match('/^https?:\/\/[^\s]+$/D', $url)) {
+                throw self::invalid($field, '服务照片地址无效。');
+            }
+            $urls[$url] = $url;
+        }
+        return array_values($urls);
     }
 
     private static function idempotencyKey(string $operationType, $value): string

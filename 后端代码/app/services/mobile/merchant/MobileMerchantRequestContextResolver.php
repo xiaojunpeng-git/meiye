@@ -97,10 +97,12 @@ final class MobileMerchantRequestContextResolver
             throw MobileApiException::business('STORE_DISABLED', '当前门店或组织已失效，请重新进入商家端。');
         }
         $actions = (array)$context['availableActions'];
-        // Managers without a concrete store-staff assignment can read their
-        // server-authorized store scope, but cannot create an unattributable record.
+        // A customer-care view grant covers direct formal record capture. Task
+        // lifecycle writes remain limited to an attributable store staff member.
+        $canView = in_array('CUSTOMER_CARE_VIEW', $actions, true);
         $canWrite = (int)$context['staffId'] > 0
             && in_array('CUSTOMER_CARE_WRITE', $actions, true);
+        $canCreateRecord = $canView;
         return [
             'tenantId' => '0', 'staffId' => (int)$context['staffId'],
             'employeeId' => (int)$context['employeeId'], 'staffName' => (string)$context['staffName'],
@@ -112,7 +114,7 @@ final class MobileMerchantRequestContextResolver
             'businessTimezone' => 'Asia/Shanghai',
             'canViewAllTasks' => $context['dataScopeMode'] === 'STORES'
                 && in_array('CUSTOMER_CARE_VIEW', $actions, true),
-            'canCreateTask' => $canWrite, 'canCreateRecord' => $canWrite,
+            'canCreateTask' => $canWrite, 'canCreateRecord' => $canCreateRecord,
             'canReassign' => false,
             // The projection always applies visibleStoreIds on the server.  A
             // data-scope label must not hide those scoped metrics from an
