@@ -2,7 +2,7 @@
 	<view class="merchant-home-page" :class="{ 'merchant-home-page--native-mini': platformUsesNativeCanvas }">
 		<scroll-view scroll-y="true" refresher-enabled="true" :refresher-triggered="refreshing" @refresherrefresh="onPullRefresh" class="merchant-home-page__content">
 			<view class="merchant-home-page__content-inner">
-				<view class="merchant-home-page__context"><view class="merchant-home-page__context-copy"><text class="merchant-home-page__context-label">当前范围</text><text class="merchant-home-page__context-value">{{ scopeLabel }}</text></view><view class="merchant-home-page__periods"><view v-for="item in periods" :key="item.key" class="merchant-home-page__period" :class="{ 'merchant-home-page__period--active': selectedPeriod === item.key }" @tap="selectPeriod(item.key)"><text>{{ item.label }}</text></view></view></view>
+				<view class="merchant-home-page__context"><view class="merchant-home-page__context-copy"><text class="merchant-home-page__context-label">当前范围：</text><text class="merchant-home-page__context-value">{{ scopeLabel }}</text></view><view class="merchant-home-page__periods"><view v-for="item in periods" :key="item.key" class="merchant-home-page__period" :class="{ 'merchant-home-page__period--active': selectedPeriod === item.key }" @tap="selectPeriod(item.key)"><text>{{ item.label }}</text></view></view></view>
 				<view v-if="message.length > 0" class="merchant-home-page__error"><text>{{ message }}</text><view class="merchant-home-page__error-retry" @tap="reload"><text>重新加载</text></view></view>
 
 				<view class="merchant-home-page__section-head"><view><text class="merchant-home-page__section-title">经营概览</text><text class="merchant-home-page__section-note">统一业绩事实汇总</text></view><text class="merchant-home-page__section-link" @tap="openWarehouse">查看数仓 ›</text></view>
@@ -32,7 +32,7 @@
 	import { clearMerchantRoot, currentMerchantRoot, merchantRequestSession } from '../../../shared/platform/mobile-merchant-session.uts'
 	import { openMerchantBootstrap } from '../../../shared/platform/mobile-navigation.uts'
 
-	const periods = [{ key: 'today', label: '今天' }, { key: 'month', label: '本月' }, { key: 'year', label: '本年' }]
+	const periods = [{ key: 'today', label: '今天' }, { key: 'yesterday', label: '昨天' }, { key: 'month', label: '本月' }, { key: 'year', label: '本年' }]
 	const selectedPeriod = ref('month')
 	const loading = ref(false)
 	const refreshing = ref(false)
@@ -184,11 +184,12 @@
 	.merchant-home-page__refresh text:first-child { font-size: 17px; line-height: 16px; }
 	.merchant-home-page__content { min-height: 0; height: 0; flex: 1; }
 	.merchant-home-page__content-inner { padding: 84px 14px 88px 14px; }
-	.merchant-home-page__context { display: flex; flex-direction: row; align-items: center; justify-content: space-between; padding: 12px 13px; border-radius: 14px; background-color: #eaf3fb; }
-	.merchant-home-page__context-label { display: block; font-size: 10px; line-height: 14px; color: #6d8399; }
-	.merchant-home-page__context-value { display: block; margin-top: 2px; font-size: 14px; font-weight: 700; line-height: 19px; color: #284b68; }
-	.merchant-home-page__periods { display: flex; flex-direction: row; border-radius: 8px; background-color: #ffffff; padding: 3px; }
-	.merchant-home-page__period { min-width: 42px; padding: 5px 7px; border-radius: 6px; text-align: center; font-size: 11px; line-height: 15px; color: #7890a4; }
+	.merchant-home-page__context { display: flex; flex-direction: row; align-items: center; justify-content: flex-start; padding: 8px 0 12px 0; border-radius: 0; background-color: transparent; }
+	.merchant-home-page__context-copy { display: flex; flex-shrink: 0; flex-direction: row; align-items: center; }
+	.merchant-home-page__context-label { white-space: nowrap; font-size: 11px; line-height: 18px; color: #6d8399; }
+	.merchant-home-page__context-value { margin-left: 1px; white-space: nowrap; font-size: 14px; font-weight: 700; line-height: 19px; color: #284b68; }
+	.merchant-home-page__periods { display: flex; flex-shrink: 1; flex-direction: row; margin-left: 12px; border-radius: 18px; background-color: #edf3f8; padding: 3px; }
+	.merchant-home-page__period { min-width: 38px; padding: 4px 4px; border-radius: 14px; text-align: center; white-space: nowrap; font-size: 10px; line-height: 15px; color: #7890a4; }
 	.merchant-home-page__period--active { background-color: #2779bd; color: #ffffff; font-weight: 700; }
 	.merchant-home-page__section-head { display: flex; flex-direction: row; align-items: flex-end; justify-content: space-between; margin-top: 17px; margin-bottom: 9px; }
 	.merchant-home-page__section-head--compact { margin-top: 18px; }
