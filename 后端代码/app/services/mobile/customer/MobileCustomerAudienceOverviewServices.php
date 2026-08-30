@@ -43,13 +43,11 @@ final class MobileCustomerAudienceOverviewServices
             $audiences = $this->audiences->list($identity);
             foreach ($audiences as &$audience) {
                 if (!empty($audience['system'])) {
-                    // Card totals are a summary query, not a member-list page.
-                    // Do not run the full projection here: group-wide stores can
-                    // exceed the unified provider's bounded page-scan guard.
-                    // The member-list provider remains the source of truth when
-                    // a card is opened. Overview totals use the lightweight
-                    // system projection endpoint below; keep the five cards
-                    // renderable even when legacy fact tables are unavailable.
+                    // Card totals and the member page must share one authority,
+                    // one permission scope and one filter contract. The unified
+                    // provider uses SQL count + bounded one-row projection for
+                    // these built-in rules, so the overview never maintains a
+                    // second set of totals or placeholder values.
                     $audience['memberTotal'] = $this->systemAudienceCount(
                         $merchant,
                         (string)$audience['audienceKey'],
@@ -343,58 +341,17 @@ final class MobileCustomerAudienceOverviewServices
             : strpos($monthDay, (string)$filter['value']) === 0;
     }
 
-    /**
-     * Count built-in audiences directly from their authoritative facts. This
-     * keeps the overview bounded and leaves the unified provider responsible
-     * for the paged member records shown after a card is opened.
-     */
+    /** Count through the exact same server-side query used by the opened card. */
     private function systemAudienceCount(array $merchant, string $systemKey, array $storeIds): int
     {
         if ($storeIds === []) return 0;
-        // These two legacy-derived metrics are calculated from large, unindexed
-        // tables in the member projection. Their paged detail query remains
-        // authoritative; overview cards use the locally materialized values.
-        if ($systemKey === MobileCustomerAudienceServices::SYSTEM_FOLLOWUP_7D) return 222;
-        if ($systemKey === MobileCustomerAudienceServices::SYSTEM_BENEFIT_LOW_BALANCE) return 3;
-        $base = Db::name('store_user')->alias('su')
-            ->join('user u', 'u.uid = su.uid')
-            ->where('su.status', 1)->whereIn('su.store_id', $storeIds)
-            ->where('u.status', 1)
-            ->whereRaw("(COALESCE(u.is_del, 0) <> 1 AND BINARY COALESCE(CAST(u.delete_time AS CHAR), '') IN (_binary'', _binary'0'))");
-        $today = new \DateTimeImmutable('today', new \DateTimeZone('Asia/Shanghai'));
-        if ($systemKey === MobileCustomerAudienceServices::SYSTEM_BIRTHDAY_THIS_MONTH) {
-            $month = $today->format('m');
-            $row = $base->whereRaw("u.birthday > 0 AND DATE_FORMAT(FROM_UNIXTIME(u.birthday), '%m') = ?", [$month])
-                ->field('COUNT(DISTINCT su.uid) AS total')->find();
-            return (int)($row['total'] ?? 0);
-        }
-
-        $tenantId = (string)($merchant['tenantId'] ?? '0');
-        if ($systemKey === MobileCustomerAudienceServices::SYSTEM_SLEEPING_90D
-            || $systemKey === MobileCustomerAudienceServices::SYSTEM_INVITE_30D) {
-            $from = $systemKey === MobileCustomerAudienceServices::SYSTEM_SLEEPING_90D
-                ? '1900-01-01' : $today->modify('-30 days')->format('Y-m-d');
-            $to = $systemKey === MobileCustomerAudienceServices::SYSTEM_SLEEPING_90D
-                ? $today->modify('-90 days')->format('Y-m-d') : $today->modify('-8 days')->format('Y-m-d');
-            $row = $base->join('cashier_v3_entitlement_service_fact f', 'f.member_id = su.uid')
-                ->where('f.tenant_id', $tenantId)->where('f.service_status', 'completed')
-                ->whereIn('f.store_id', $storeIds)->whereBetween('f.business_date', [$from, $to])
-                ->field('COUNT(DISTINCT su.uid) AS total')->find();
-            return (int)($row['total'] ?? 0);
-        }
-        if ($systemKey === MobileCustomerAudienceServices::SYSTEM_FOLLOWUP_7D) {
-            $cutoff = $today->modify('-6 days')->format('Y-m-d');
-            $marks = implode(',', array_fill(0, count($storeIds), '?'));
-            $sql = "SELECT COUNT(DISTINCT su.uid) AS total FROM eb_store_user su INNER JOIN eb_user u ON u.uid = su.uid
-                WHERE su.status = 1 AND su.store_id IN ($marks) AND u.status = 1
-                AND (COALESCE(u.is_del,0) <> 1 AND BINARY COALESCE(CAST(u.delete_time AS CHAR),'') IN (_binary'',_binary'0'))
-                AND (EXISTS (SELECT 1 FROM eb_store_order o WHERE o.uid=su.uid AND o.store_id IN ($marks) AND o.paid=1 AND o.refund_status IN (0,3) AND o.is_del=0 AND o.is_system_del=0 AND o.pid=0 AND o.order_type=0 AND DATE_FORMAT(FROM_UNIXTIME(CASE WHEN o.pay_time>0 THEN o.pay_time ELSE o.add_time END),'%Y-%m-%d')>=?)
-                  OR EXISTS (SELECT 1 FROM eb_cashier_v3_entitlement_service_fact f WHERE f.member_id=su.uid AND f.tenant_id=? AND f.store_id IN ($marks) AND f.service_status='completed' AND f.business_date>=?))";
-            $bindings = array_merge($storeIds, $storeIds, [$cutoff, $tenantId], $storeIds, [$cutoff]);
-            $row = Db::query($sql, $bindings)[0] ?? [];
-            return (int)($row['total'] ?? 0);
-        }
-        return 0;
+        $page = $this->customers->querySystemAudienceForStoreIds(
+            $merchant,
+            $systemKey,
+            ['page' => 1, 'limit' => 1],
+            $storeIds
+        );
+        return (int)($page['total'] ?? 0);
     }
 
     /** @return array<int,array<int,string>> */

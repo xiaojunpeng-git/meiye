@@ -27,6 +27,7 @@ $orderRecords = $read('后端代码/app/services/mobile/customer/MobileCustomerO
 $assetRecords = $read('后端代码/app/services/mobile/customer/MobileCustomerAssetRecordServices.php');
 $profiles = $read('后端代码/app/services/mobile/customer/MobileCustomerProfileServices.php');
 $avatarUploads = $read('后端代码/app/services/mobile/customer/MobileCustomerAvatarUploadServices.php');
+$audienceOverview = $read('后端代码/app/services/mobile/customer/MobileCustomerAudienceOverviewServices.php');
 $memberProvider = $read('后端代码/app/services/query/provider/MemberUnifiedQueryProvider.php');
 $memberRegistrar = $read('后端代码/app/services/query/provider/MemberUnifiedQueryPageRegistrar.php');
 $controller = $read('后端代码/app/controller/mobile/merchant/Customer.php');
@@ -211,6 +212,14 @@ $assert('MC-API-16',
     && str_contains($query, 'MemberUnifiedQueryProvider::BUSINESS_TIME_ZONE')
     && str_contains($memberProvider, "'birthday_month_day' => \$this->birthdayMonthDay")
     && str_contains($memberRegistrar, "field('birthday_month_day', '生日（月日）', 'text'")
+);
+$assert('MC-API-17',
+    str_contains($audienceOverview, 'private function systemAudienceCount')
+    && str_contains($audienceOverview, '$this->customers->querySystemAudienceForStoreIds(')
+    && str_contains($audienceOverview, "['page' => 1, 'limit' => 1]")
+    && str_contains($audienceOverview, "return (int)(\$page['total'] ?? 0);")
+    && !str_contains($audienceOverview, 'return 222;')
+    && !str_contains($audienceOverview, 'return 3;')
 );
 
 exit($failed === 0 ? 0 : 1);
