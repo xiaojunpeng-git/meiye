@@ -71,6 +71,7 @@ Route::group('api/mobile/merchant', function () {
 		Route::get('engineering-ledger/catalog', 'EngineeringLedger/catalog')->option(['real_name' => '手机商家端工程管理台账目录']);
 		Route::get('engineering-ledger/list', 'EngineeringLedger/list')->option(['real_name' => '手机商家端工程管理台账列表']);
 		Route::post('engineering-ledger/save', 'EngineeringLedger/save')->option(['real_name' => '手机商家端工程管理台账保存']);
+		Route::post('engineering-ledger/void', 'EngineeringLedger/void')->option(['real_name' => '手机商家端工程管理台账删除']);
 		Route::get('dashboard/home', 'Dashboard/home')->option(['real_name' => '手机商家端经营首页聚合']);
 		Route::post('dashboard/home', 'Dashboard/home')->option(['real_name' => '手机商家端经营首页聚合']);
         Route::get('reservations', 'Reservation/listing')->option(['real_name' => '手机商家端预约列表']);

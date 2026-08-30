@@ -44,6 +44,14 @@ final class EngineeringLedger extends BaseController
         return MobileApiResponse::success(['engineeringLedger' => $this->ledger->save((string)($payload['type'] ?? ''), $this->scope($merchant), $payload, ['id' => (int)$merchant['operatorId'], 'name' => (string)$merchant['staffName']])], MobileApiResponse::MERCHANT_CONTRACT);
     }
 
+    public function void()
+    {
+        $merchant = $this->merchant();
+        $payload = $this->request->post();
+        $payload = is_array($payload) ? $payload : [];
+        return MobileApiResponse::success(['engineeringLedger' => $this->ledger->void((string)($payload['type'] ?? ''), (int)($payload['id'] ?? 0), (int)($payload['version'] ?? 0), $this->scope($merchant), ['id' => (int)$merchant['operatorId'], 'name' => (string)$merchant['staffName']])], MobileApiResponse::MERCHANT_CONTRACT);
+    }
+
     private function merchant(): array
     {
         $merchant = $this->merchantContext->resolve($this->request);

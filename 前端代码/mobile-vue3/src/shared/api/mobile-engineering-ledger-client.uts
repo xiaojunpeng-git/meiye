@@ -7,7 +7,8 @@ const engineeringLedgerTransportContract : any = {
 	endpoints: {
 		catalog: { method: 'GET', path: '/mobile/merchant/engineering-ledger/catalog', requestMetadataProfile: 'MERCHANT_SESSION' },
 		list: { method: 'GET', path: '/mobile/merchant/engineering-ledger/list', requestMetadataProfile: 'MERCHANT_SESSION' },
-		save: { method: 'POST', path: '/mobile/merchant/engineering-ledger/save', requestMetadataProfile: 'MERCHANT_SESSION' }
+		save: { method: 'POST', path: '/mobile/merchant/engineering-ledger/save', requestMetadataProfile: 'MERCHANT_SESSION' },
+		void: { method: 'POST', path: '/mobile/merchant/engineering-ledger/void', requestMetadataProfile: 'MERCHANT_SESSION' }
 	},
 	requestMetadataProfiles: {
 		MERCHANT_SESSION: {
@@ -54,4 +55,8 @@ export function saveMobileEngineeringLedger(type : string, record : any, expecte
 	payload.version = expectedVersion == null ? 0 : expectedVersion
 	payload.request_token = 'mobile-engineering-' + type + '-' + Date.now().toString() + '-' + Math.floor(Math.random() * 100000000).toString()
 	request('save', payload, done)
+}
+
+export function voidMobileEngineeringLedger(type : string, recordId : number, expectedVersion : number, done : (value : any) => void) : void {
+	request('void', { type: type, id: recordId, version: expectedVersion, request_token: 'mobile-engineering-void-' + type + '-' + recordId.toString() + '-' + expectedVersion.toString() }, done)
 }
