@@ -70,29 +70,40 @@ final class CashierV3OrderCenterPartitionProvider implements CashierV3RootPartit
         $orders = is_array($payload['salesOrders'] ?? null) ? $payload['salesOrders'] : [];
         if (is_array($payload['salesOrderDetail'] ?? null)) $orders[] = $payload['salesOrderDetail'];
         $ids = [];
+        $knownVersions = [];
         foreach ($orders as $order) {
             if (!is_array($order)) continue;
             // 列表可能以旧订单行 ID 展示；版本仓必须始终以生命周期命令
             // 所需的 V3 销售订单 ID 为键，不能把展示 ID 当作资源 ID。
             $id = trim((string)($order['lifecycleOrderId'] ?? $order['lifecycle_order_id']
                 ?? $order['salesOrderId'] ?? $order['id'] ?? $order['orderId'] ?? ''));
-            if ($id !== '') $ids[$id] = true;
+            if ($id === '') continue;
+            $ids[$id] = true;
+            // Authority order projections already derive revision from the
+            // same lifecycle-operation snapshot used by this provider. Reuse
+            // it for the detail response instead of issuing a second count
+            // query for the exact same order.
+            $revision = filter_var($order['revision'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+            if ($revision !== false && $revision !== null) $knownVersions[$id] = (int)$revision;
         }
         if ($ids === []) return [];
 
         // 销售单头保持不可变。销售单 command version 由追加的生命周期操作数
         // 派生，必须与 CashierV3OrderLifecycleVersionProvider 完全一致。
+        $missingIds = array_values(array_diff(array_keys($ids), array_keys($knownVersions)));
         $operationCounts = [];
-        $countRows = Db::name(CashierV3OrderLifecycleServices::OPERATION_TABLE)
-            ->where('tenant_id', $dataScope->tenantId())
-            ->where('source_type', 'sales')
-            ->whereIn('source_order_id', array_keys($ids))
-            ->field('source_order_id, COUNT(*) AS operation_count')
-            ->group('source_order_id')
-            ->select()
-            ->toArray();
-        foreach ($countRows as $row) {
-            $operationCounts[(string)($row['source_order_id'] ?? '')] = (int)($row['operation_count'] ?? 0);
+        if ($missingIds !== []) {
+            $countRows = Db::name(CashierV3OrderLifecycleServices::OPERATION_TABLE)
+                ->where('tenant_id', $dataScope->tenantId())
+                ->where('source_type', 'sales')
+                ->whereIn('source_order_id', $missingIds)
+                ->field('source_order_id, COUNT(*) AS operation_count')
+                ->group('source_order_id')
+                ->select()
+                ->toArray();
+            foreach ($countRows as $row) {
+                $operationCounts[(string)($row['source_order_id'] ?? '')] = (int)($row['operation_count'] ?? 0);
+            }
         }
 
         $versions = [];
@@ -100,7 +111,7 @@ final class CashierV3OrderCenterPartitionProvider implements CashierV3RootPartit
             $versions[$id] = [
                 'kind' => 'sales_order',
                 'id' => $id,
-                'version' => 1 + (int)($operationCounts[$id] ?? 0),
+                'version' => $knownVersions[$id] ?? (1 + (int)($operationCounts[$id] ?? 0)),
             ];
         }
         return array_values($versions);
