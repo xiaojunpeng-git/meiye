@@ -95,7 +95,12 @@ final class CashierV3EntitlementCompletionKernel
      * @param array $lockedSnapshot Authoritative snapshot built under the final lock set.
      * @param array $lockedResourcePlan Shared-layer plan that was already locked.
      */
-    public static function plan(array $command, array $lockedSnapshot, array $lockedResourcePlan): array
+    public static function plan(
+        array $command,
+        array $lockedSnapshot,
+        array $lockedResourcePlan,
+        array $checkoutActualAmountsByLine = []
+    ): array
     {
         $intent = self::normalizeCommand($command);
         $snapshot = self::normalizeSnapshot($lockedSnapshot);
@@ -126,7 +131,7 @@ final class CashierV3EntitlementCompletionKernel
         }
 
         $sourceGroups = self::sourceGroups($intent['lines'], $snapshotByLine);
-        $lineAmounts = self::actualAmountsByLine($sourceGroups);
+        $lineAmounts = self::actualAmountsByLine($sourceGroups, $checkoutActualAmountsByLine);
         $inventory = self::inventoryPlan($intent['lines'], $snapshotByLine, $snapshot['inventoryStocks']);
 
         $linePlans = [];
@@ -1541,21 +1546,39 @@ final class CashierV3EntitlementCompletionKernel
         }
     }
 
-    private static function actualAmountsByLine(array $groups): array
+    private static function actualAmountsByLine(array $groups, array $checkoutActualAmountsByLine = []): array
     {
         $amounts = [];
+        $seen = [];
         foreach ($groups as $group) {
             $consumedCursor = $group['consumedTimesAtLock'];
             foreach ($group['lines'] as $line) {
-                $amounts[$line['lineId']] = self::allocateActualAmountCents(
-                    $group['purchaseAmountCents'],
-                    $group['totalPurchaseTimes'],
-                    $consumedCursor,
-                    $line['quantity'],
-                    $group['amountCalculationVersion']
-                );
+                $lineId = $line['lineId'];
+                $seen[$lineId] = true;
+                if ($checkoutActualAmountsByLine !== []) {
+                    if (!array_key_exists($lineId, $checkoutActualAmountsByLine)) {
+                        throw self::failure('checkout_actual_amount_line_missing', ['lineId' => $lineId]);
+                    }
+                    self::assertNonnegativeInt(
+                        $checkoutActualAmountsByLine[$lineId],
+                        'checkoutActualAmountCents',
+                        self::MAX_MONEY_CENTS
+                    );
+                    $amounts[$lineId] = (int)$checkoutActualAmountsByLine[$lineId];
+                } else {
+                    $amounts[$lineId] = self::allocateActualAmountCents(
+                        $group['purchaseAmountCents'],
+                        $group['totalPurchaseTimes'],
+                        $consumedCursor,
+                        $line['quantity'],
+                        $group['amountCalculationVersion']
+                    );
+                }
                 $consumedCursor += $line['quantity'];
             }
+        }
+        if ($checkoutActualAmountsByLine !== [] && count($seen) !== count($checkoutActualAmountsByLine)) {
+            throw self::failure('checkout_actual_amount_line_extra');
         }
         return $amounts;
     }

@@ -442,14 +442,20 @@ function b1LockedPlan(array $snapshot): array
     return $plan;
 }
 
-function b1Plan(?array $command = null, ?array $snapshot = null, ?array $lockedPlan = null): array
+function b1Plan(
+    ?array $command = null,
+    ?array $snapshot = null,
+    ?array $lockedPlan = null,
+    array $checkoutActualAmountsByLine = []
+): array
 {
     $command = $command ?? b1Command();
     $snapshot = $snapshot ?? b1Snapshot();
     return CashierV3EntitlementCompletionKernel::plan(
         $command,
         $snapshot,
-        $lockedPlan ?? b1LockedPlan($snapshot)
+        $lockedPlan ?? b1LockedPlan($snapshot),
+        $checkoutActualAmountsByLine
     );
 }
 
@@ -582,6 +588,21 @@ b1Assert(
     $lineOne['actualEntitlementAmountCents'] === 3300
         && $lineTwo['actualEntitlementAmountCents'] === 6000
         && $plan['totals']['actualEntitlementAmountCents'] === 9300
+);
+$checkoutSnapshotPlan = b1Plan(
+    null,
+    null,
+    null,
+    [
+        'entitlement-line-001' => 22200,
+        'entitlement-line-002' => 77700,
+    ]
+);
+b1Assert(
+    'checkout snapshot actual amounts are executed without a second configured-price allocation',
+    $checkoutSnapshotPlan['linePlans'][0]['actualEntitlementAmountCents'] === 22200
+        && $checkoutSnapshotPlan['linePlans'][1]['actualEntitlementAmountCents'] === 77700
+        && $checkoutSnapshotPlan['totals']['actualEntitlementAmountCents'] === 99900
 );
 $staleAmountVersionSnapshot = b1Snapshot();
 $staleAmountVersionSnapshot['lines'][0]['amountCalculationVersion'] = 'cumulative-half-up-cent-v2';

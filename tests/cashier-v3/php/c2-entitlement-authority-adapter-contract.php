@@ -155,9 +155,10 @@ authorityContractAssert(
         && strpos($kernelSubset, "'reservation'") !== false
 );
 authorityContractAssert(
-    'locked build validates the Kernel hand-off but does not invent an event number',
+    'locked build passes persisted checkout actual amounts to the Kernel without a duplicate mismatch gate',
     strpos($adapter, 'CashierV3EntitlementCompletionKernel::plan(') !== false
-        && strpos($adapter, 'assertKernelAmountsMatchCheckout(') !== false
+        && strpos($adapter, "'entitlement_actual_amount_cents'") !== false
+        && strpos($adapter, 'assertKernelAmountsMatchCheckout(') === false
         && strpos($adapter, "'persistencePlan' =>") === false
         && strpos($adapter, "'inventoryProviderSnapshot' => \$inventorySnapshot") !== false
 );

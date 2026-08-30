@@ -657,9 +657,13 @@ final class CashierV3DirectSnapshotEntitlementSettlementServices
         $kernelPlan = CashierV3EntitlementCompletionKernel::plan(
             $command,
             $snapshot,
-            $kernelPlanResources
+            $kernelPlanResources,
+            array_column(
+                $entitlementLines,
+                'entitlement_actual_amount_cents',
+                'line_id'
+            )
         );
-        $this->assertKernelAmountsMatchCheckout($kernelPlan, $entitlementLines);
 
         return [
             'contractVersion' => self::CONTRACT_VERSION,
@@ -942,6 +946,10 @@ final class CashierV3DirectSnapshotEntitlementSettlementServices
             ] as $field) {
                 self::positiveInt($row[$field] ?? null, 'authority_checkout_' . $field . '_invalid');
             }
+            $row['entitlement_actual_amount_cents'] = self::nonNegativeInt(
+                $row['entitlement_actual_amount_cents'] ?? null,
+                'authority_checkout_actual_amount_invalid'
+            );
             $row['line_id'] = $lineId;
             $result[$lineId] = $row;
         }
@@ -1652,29 +1660,6 @@ final class CashierV3DirectSnapshotEntitlementSettlementServices
                     throw self::failure('authority_inventory_resource_role_missing', ['role' => $role]);
                 }
             }
-        }
-    }
-
-    private function assertKernelAmountsMatchCheckout(array $kernelPlan, array $checkoutLines): void
-    {
-        $expected = [];
-        foreach ($checkoutLines as $line) {
-            $expected[(string)$line['line_id']] = (int)$line['entitlement_actual_amount_cents'];
-        }
-        foreach ((array)$kernelPlan['linePlans'] as $line) {
-            $lineId = (string)$line['lineId'];
-            $actual = (int)$line['actualEntitlementAmountCents'];
-            if (!isset($expected[$lineId]) || $expected[$lineId] !== $actual) {
-                throw self::failure('authority_checkout_actual_amount_mismatch', [
-                    'lineId' => $lineId,
-                    'checkoutAmountCents' => $expected[$lineId] ?? null,
-                    'kernelAmountCents' => $actual,
-                ]);
-            }
-            unset($expected[$lineId]);
-        }
-        if ($expected !== []) {
-            throw self::failure('authority_checkout_actual_amount_line_missing');
         }
     }
 
