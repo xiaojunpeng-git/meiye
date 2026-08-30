@@ -96,7 +96,14 @@
 	}
 
 	function canOpenWorkbenchEntry(action : string) : boolean {
-		return merchantActionIsAllowed(action)
+		// New sessions expose the child-entry marker; once present it is the
+		// authoritative gate and prevents unrelated legacy actions from leaking
+		// into the workbench. Older sessions only expose business action codes.
+		if (merchantActionIsAllowed('mobile.merchant.workbench')) return merchantActionIsAllowed(action)
+		let legacyAction = action === 'mobile.merchant.reservations'
+			? 'RESERVATION_VIEW'
+			: (action === 'mobile.merchant.customer_care' ? 'CUSTOMER_CARE_VIEW' : 'ENGINEERING_LEDGER_VIEW')
+		return merchantActionIsAllowed(legacyAction)
 	}
 
 	function loadOpenTasks() : void {
