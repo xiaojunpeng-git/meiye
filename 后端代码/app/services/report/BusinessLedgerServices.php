@@ -78,7 +78,7 @@ final class BusinessLedgerServices extends BaseServices
 
     public function list(string $type, array $scope, array $input): array
     {
-        $stores = $this->normalizeStores($scope['store_ids'] ?? []); if (!$stores) return $this->emptyResult($type, $input);
+        $stores = $this->normalizeStores($scope['store_ids'] ?? []); if (!$stores) return $this->emptyResult($type, $input, $scope);
         $query = Db::name($this->table($type))->where('is_deleted', 0)->whereIn('store_id', $stores);
         $dateField = self::FILTER_DATE_FIELDS[$type];
         $startDate = trim((string)($input['start_date'] ?? ''));
@@ -97,11 +97,33 @@ final class BusinessLedgerServices extends BaseServices
             $row['reminder_month'] = $status['reminder_month'] ?? '';
             $row['todo_status'] = $status['status'] ?? (!empty($row['rent_reduction_date']) ? '已完成' : '未到提醒期');
         }
-        return ['type' => $type, 'label' => self::LABELS[$type], 'columns' => self::columns($type), 'records' => $rows, 'total' => $total, 'page' => $page, 'limit' => $limit, 'summary' => ['total' => $total], 'data_as_of' => date('c'), 'metric_version' => 'ledger-v1'];
+        return ['type' => $type, 'label' => self::LABELS[$type], 'columns' => self::columns($type), 'records' => $rows, 'total' => $total, 'page' => $page, 'limit' => $limit, 'summary' => ['total' => $total], 'store_options' => $this->storeOptions($scope), 'data_as_of' => date('c'), 'metric_version' => 'ledger-v1'];
     }
 
-    private function emptyResult(string $type, array $input): array
-    { return ['type' => $type, 'label' => self::LABELS[$type], 'columns' => self::columns($type), 'records' => [], 'total' => 0, 'page' => max(1, (int)($input['page'] ?? 1)), 'limit' => min(100, max(1, (int)($input['limit'] ?? 20))), 'summary' => ['total' => 0], 'data_as_of' => date('c'), 'metric_version' => 'ledger-v1']; }
+    private function emptyResult(string $type, array $input, array $scope = []): array
+    { return ['type' => $type, 'label' => self::LABELS[$type], 'columns' => self::columns($type), 'records' => [], 'total' => 0, 'page' => max(1, (int)($input['page'] ?? 1)), 'limit' => min(100, max(1, (int)($input['limit'] ?? 20))), 'summary' => ['total' => 0], 'store_options' => $this->storeOptions($scope), 'data_as_of' => date('c'), 'metric_version' => 'ledger-v1']; }
+
+    /** Store choices are always derived from the server-authorized scope. */
+    private function storeOptions(array $scope): array
+    {
+        $stores = $this->normalizeStores($scope['store_ids'] ?? []);
+        if ($stores === []) return [];
+        $rows = Db::name('system_store')->alias('s')
+            ->leftJoin('organization_store os', 'os.store_id=s.id')
+            ->leftJoin('organization o', 'o.id=os.org_id')
+            ->where('s.is_del', 0)->whereIn('s.id', $stores)
+            ->field('s.id as store_id,s.name as store_name,o.name as branch_name')
+            ->order('s.id', 'asc')->select()->toArray();
+        $result = [];
+        $seen = [];
+        foreach ($rows as $row) {
+            $storeId = (int)($row['store_id'] ?? 0);
+            if ($storeId <= 0 || isset($seen[$storeId])) continue;
+            $seen[$storeId] = true;
+            $result[] = ['store_id' => $storeId, 'store_name' => (string)($row['store_name'] ?? ''), 'branch_name' => (string)($row['branch_name'] ?? '')];
+        }
+        return $result;
+    }
 
     public function save(string $type, array $scope, array $payload, array $actor): array
     {

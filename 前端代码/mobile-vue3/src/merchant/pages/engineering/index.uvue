@@ -11,7 +11,8 @@
 		<view class="engineering-page__floating-add" role="button" aria-label="新增工程台账" @tap="beginCreate"><text>＋</text></view>
 		<MerchantPrimaryTabBar active-key="workbench" />
 		<view v-if="deleting != null" class="engineering-page__delete-mask" @tap="cancelDelete"><view class="engineering-page__delete-dialog" @tap.stop><text class="engineering-page__delete-title">删除这条记录？</text><text class="engineering-page__delete-copy">删除后记录不再显示，审计记录会保留。</text><view class="engineering-page__delete-actions"><view class="engineering-page__delete-cancel" @tap="cancelDelete"><text>取消</text></view><view class="engineering-page__delete-confirm" @tap="confirmDelete"><text>{{ deleteSaving ? '删除中…' : '确认删除' }}</text></view></view></view></view>
-		<view v-if="editing != null" class="engineering-page__mask" @tap="closeEditor"><view class="engineering-page__editor" @tap.stop><view class="engineering-page__editor-head"><text>{{ editing.id ? '编辑' : '新增' }}{{ activeTypeLabel() }}</text><text class="engineering-page__close" @tap="closeEditor">×</text></view><scroll-view class="engineering-page__form" scroll-y><view v-for="field in formFields()" :key="field.key" class="engineering-page__form-field"><text>{{ field.label }}<text v-if="field.required" class="engineering-page__required"> *</text></text><input type="text" :value="formValue(field.key)" :placeholder="field.label + '（人工填写）'" @input="updateForm(field.key, $event)" /></view><text class="engineering-page__form-note">数据按当前门店权限保存；系统组织字段由服务端自动生成。</text></scroll-view><view class="engineering-page__editor-footer"><view class="engineering-page__cancel" @tap="closeEditor"><text>取消</text></view><view class="engineering-page__save" @tap="save"><text>{{ saving ? '保存中…' : '保存' }}</text></view></view></view></view>
+		<view v-if="editing != null" class="engineering-page__mask" @tap="closeEditor"><view class="engineering-page__editor" @tap.stop><view class="engineering-page__editor-head"><text>{{ editing.id ? '编辑' : '新增' }}{{ activeTypeLabel() }}</text><text class="engineering-page__close" @tap="closeEditor">×</text></view><scroll-view class="engineering-page__form" scroll-y><view v-if="requiresStoreSelection()" class="engineering-page__form-field"><text>门店</text><view class="engineering-page__store-selector" @tap="openStorePicker"><text>{{ selectedStoreLabel() }}</text><text class="engineering-page__store-selector-arrow">›</text></view></view><view v-for="field in formFields()" :key="field.key" class="engineering-page__form-field"><text>{{ field.label }}<text v-if="field.required" class="engineering-page__required"> *</text></text><input type="text" :value="formValue(field.key)" :placeholder="field.label + '（人工填写）'" @input="updateForm(field.key, $event)" /></view><text class="engineering-page__form-note">数据按当前门店权限保存；系统组织字段由服务端自动生成。</text></scroll-view><view class="engineering-page__editor-footer"><view class="engineering-page__cancel" @tap="closeEditor"><text>取消</text></view><view class="engineering-page__save" @tap="save"><text>{{ saving ? '保存中…' : '保存' }}</text></view></view></view></view>
+		<view v-if="storePickerVisible" class="engineering-page__store-mask" @tap="closeStorePicker"><view class="engineering-page__store-picker" @tap.stop><view class="engineering-page__store-picker-head"><text>选择组织/门店</text><text class="engineering-page__close" @tap="closeStorePicker">×</text></view><input class="engineering-page__store-search" type="text" :value="storeKeyword" placeholder="搜索门店" @input="updateStoreKeyword" /><scroll-view class="engineering-page__store-list" scroll-y><view v-for="store in visibleStoreOptions()" :key="'engineering-store-' + String(store.store_id)" class="engineering-page__store-option" :class="{ 'engineering-page__store-option--selected': isPendingStore(store) }" @tap="selectPendingStore(store)"><view class="engineering-page__store-option-type"><text>店</text></view><view class="engineering-page__store-option-copy"><text>{{ store.store_name }}</text><text>{{ store.branch_name || '当前授权范围' }}</text></view><text class="engineering-page__store-option-selected">{{ isPendingStore(store) ? '已选' : '' }}</text></view><view v-if="visibleStoreOptions().length === 0" class="engineering-page__store-empty"><text>没有匹配的门店</text></view></scroll-view><view class="engineering-page__store-picker-footer"><text>已选：{{ pendingStoreLabel() }}</text><view class="engineering-page__store-picker-cancel" @tap="closeStorePicker"><text>取消</text></view><view class="engineering-page__store-picker-confirm" @tap="confirmStore"><text>确定</text></view></view></view></view>
 	</view>
 </template>
 
@@ -19,6 +20,7 @@
 	import MerchantPrimaryTabBar from '../../../shared/components/merchant-primary-tab-bar.uvue'
 	import { queryMobileEngineeringLedger, saveMobileEngineeringLedger, voidMobileEngineeringLedger } from '../../../shared/api/mobile-engineering-ledger-client.uts'
 	import { currentMobilePlatform } from '../../../shared/platform/mobile-platform.uts'
+	import { currentMerchantRoot } from '../../../shared/platform/mobile-merchant-session.uts'
 	import { ensureMerchantTabAccess } from '../../../shared/platform/merchant-route-guard.uts'
 
 	const tabs = [{ key: 'store_building', label: '建店明细' }, { key: 'engineering_quality', label: '工程质量' }, { key: 'engineering_repair', label: '工程维修' }, { key: 'rent_renewal', label: '降租续签' }]
@@ -32,6 +34,10 @@
 	const editing = ref<any>(null)
 	const deleting = ref<any>(null)
 	const deleteSaving = ref(false)
+	const storeOptions = ref<Array<any>>([])
+	const storePickerVisible = ref(false)
+	const pendingStore = ref<any>(null)
+	const storeKeyword = ref('')
 	const platformUsesNativeCanvas = currentMobilePlatform() === 'MP_WEIXIN'
 
 	const fieldSets : any = {
@@ -48,15 +54,28 @@
 	function previewFields() : Array<any> { let fields = formFields(); return fields.slice(0, 3) }
 	function displayValue(row : any, key : string) : string { let value = row != null ? row[key] : ''; return value == null || String(value).length === 0 ? '—' : String(value) }
 	function recordTitle(row : any) : string { let name = displayValue(row, 'store_name'); return name === '—' ? activeTypeLabel() : name }
-	function reload() : void { loading.value = true; message.value = ''; queryMobileEngineeringLedger(activeType.value, { page: 1, limit: 20, keyword: keyword.value }, (response : any) => { loading.value = false; let envelope : any = response != null && response.body != null ? (response.body.data || response.body) : null; let payload : any = envelope != null && envelope.engineeringLedger != null ? envelope.engineeringLedger : envelope; if (!response.ok || payload == null) { records.value = []; message.value = String(response.message || '工程管理暂时不可用。'); return }; records.value = Array.isArray(payload.records) ? payload.records : [] }) }
+	function reload() : void { loading.value = true; message.value = ''; queryMobileEngineeringLedger(activeType.value, { page: 1, limit: 20, keyword: keyword.value }, (response : any) => { loading.value = false; let envelope : any = response != null && response.body != null ? (response.body.data || response.body) : null; let payload : any = envelope != null && envelope.engineeringLedger != null ? envelope.engineeringLedger : envelope; if (!response.ok || payload == null) { records.value = []; message.value = String(response.message || '工程管理暂时不可用。'); return }; records.value = Array.isArray(payload.records) ? payload.records : []; let options = Array.isArray(payload.store_options) ? payload.store_options : []; let fallback = activeStoreOption(); if (fallback != null && String(fallback.store_name || '').length === 0 && records.value.length > 0) fallback.store_name = String(records.value[0].store_name || ''); storeOptions.value = options.length > 0 ? options : (fallback == null ? [] : [fallback]) }) }
 	function onPullRefresh() : void { if (refreshing.value) return; refreshing.value = true; reload(); setTimeout(() => { refreshing.value = false }, 800) }
 	function switchType(type : string) : void { if (activeType.value === type) return; activeType.value = type; editing.value = null; reload() }
-	function beginCreate() : void { let values : any = {}; editing.value = { id: '', version: null, values: values }; message.value = '' }
-	function beginEdit(row : any) : void { let values : any = {}; let fields = fieldsForType(); for (let index = 0; index < fields.length; index++) values[fields[index].key] = row[fields[index].key] == null ? '' : row[fields[index].key]; editing.value = { id: row.id || row.record_id, version: Number(row.version || 0), values: values }; message.value = '' }
+	function beginCreate() : void { let values : any = {}; if (requiresStoreSelection()) values.store_id = activeStoreId(); editing.value = { id: '', version: null, values: values }; message.value = '' }
+	function beginEdit(row : any) : void { let values : any = {}; let fields = fieldsForType(); for (let index = 0; index < fields.length; index++) values[fields[index].key] = row[fields[index].key] == null ? '' : row[fields[index].key]; if (requiresStoreSelection()) values.store_id = Number(row.store_id || activeStoreId()); editing.value = { id: row.id || row.record_id, version: Number(row.version || 0), values: values }; message.value = '' }
 	function requestDelete(row : any) : void { if (deleteSaving.value) return; deleting.value = row; message.value = '' }
 	function cancelDelete() : void { if (!deleteSaving.value) deleting.value = null }
 	function confirmDelete() : void { if (deleting.value == null || deleteSaving.value) return; let id = Number(deleting.value.id || deleting.value.record_id || 0); let version = Number(deleting.value.version || 0); if (id <= 0 || version <= 0) { message.value = '记录版本无效，请刷新后重试。'; deleting.value = null; return }; deleteSaving.value = true; voidMobileEngineeringLedger(activeType.value, id, version, (response : any) => { deleteSaving.value = false; if (!response.ok) { message.value = String(response.message || '删除失败，请刷新后重试。'); deleting.value = null; return }; deleting.value = null; reload() }) }
-	function closeEditor() : void { if (!saving.value) editing.value = null }
+	function closeEditor() : void { if (!saving.value) { storePickerVisible.value = false; editing.value = null } }
+	function requiresStoreSelection() : boolean { return activeType.value === 'engineering_repair' || activeType.value === 'rent_renewal' }
+	function activeStoreId() : number { let root = currentMerchantRoot(); return Number(root != null && root.activeContext != null ? root.activeContext.storeId || 0 : 0) }
+	function activeStoreOption() : any { let root = currentMerchantRoot(); let id = activeStoreId(); if (id <= 0) return null; let label = ''; let contexts = root != null && Array.isArray(root.contexts) ? root.contexts : []; let activeContextId = String(root != null ? root.activeContextId || '' : ''); for (let index = 0; index < contexts.length; index++) if (String(contexts[index].contextId || '') === activeContextId) { label = String(contexts[index].label || ''); break }; if (label.length === 0 && contexts.length === 1) label = String(contexts[0].label || ''); return { store_id: id, store_name: label, branch_name: '' } }
+	function selectedStoreLabel() : string { let id = Number(editing.value != null && editing.value.values != null ? editing.value.values.store_id || 0 : 0); for (let index = 0; index < storeOptions.value.length; index++) if (Number(storeOptions.value[index].store_id || 0) === id) return String(storeOptions.value[index].store_name || '未命名门店'); return id > 0 ? '门店 ' + id.toString() : '请选择门店' }
+	function openStorePicker() : void { if (!requiresStoreSelection() || saving.value) return; storeKeyword.value = ''; pendingStore.value = findStoreOption(Number(editing.value != null && editing.value.values != null ? editing.value.values.store_id || 0 : 0)); storePickerVisible.value = true }
+	function closeStorePicker() : void { storePickerVisible.value = false; pendingStore.value = null }
+	function updateStoreKeyword(event : any) : void { storeKeyword.value = String(event != null && event.detail != null ? event.detail.value || '' : '') }
+	function findStoreOption(storeId : number) : any { for (let index = 0; index < storeOptions.value.length; index++) if (Number(storeOptions.value[index].store_id || 0) === storeId) return storeOptions.value[index]; return null }
+	function visibleStoreOptions() : Array<any> { let keywordValue = storeKeyword.value.trim(); if (keywordValue.length === 0) return storeOptions.value; let result = new Array<any>(); for (let index = 0; index < storeOptions.value.length; index++) { let store = storeOptions.value[index]; if (String(store.store_name || '').indexOf(keywordValue) >= 0 || String(store.branch_name || '').indexOf(keywordValue) >= 0) result.push(store) }; return result }
+	function isPendingStore(store : any) : boolean { return pendingStore.value != null && Number(pendingStore.value.store_id || 0) === Number(store.store_id || 0) }
+	function selectPendingStore(store : any) : void { pendingStore.value = store }
+	function pendingStoreLabel() : string { return pendingStore.value == null ? '请选择门店' : String(pendingStore.value.store_name || '未命名门店') }
+	function confirmStore() : void { if (pendingStore.value == null || editing.value == null) return; editing.value.values.store_id = Number(pendingStore.value.store_id || 0); closeStorePicker() }
 	function formValue(key : string) : string { return editing.value == null || editing.value.values == null ? '' : String(editing.value.values[key] == null ? '' : editing.value.values[key]) }
 	function updateForm(key : string, event : any) : void { if (editing.value != null) { let detail : any = event == null ? null : event.detail; editing.value.values[key] = detail == null ? '' : String(detail.value || '') } }
 	function save() : void { if (editing.value == null || saving.value) return; saving.value = true; let record : any = {}; let names = Object.keys(editing.value.values || {}); for (let index = 0; index < names.length; index++) record[names[index]] = editing.value.values[names[index]]; if (editing.value.id) record.id = editing.value.id; saveMobileEngineeringLedger(activeType.value, record, editing.value.version, (response : any) => { saving.value = false; if (!response.ok) { message.value = String(response.message || '保存失败，请刷新后重试。'); return }; editing.value = null; reload() }) }
@@ -107,6 +126,26 @@
 	.engineering-page__form-field input { height:38px; margin-top:5px; padding:0 11px; border:1px solid #dce6ef; border-radius:9px; background:#f8fafc; font-size:13px; }
 	.engineering-page__required { color:#d05c50; }
 	.engineering-page__form-note { display:block; margin:4px 0 12px; color:#9aa8b8; font-size:10px; line-height:16px; }
+	.engineering-page__store-selector { display:flex; height:38px; align-items:center; justify-content:space-between; margin-top:5px; padding:0 11px; border:1px solid #dce6ef; border-radius:9px; background:#f8fafc; color:#334e69; font-size:13px; }
+	.engineering-page__store-selector-arrow { color:#8c9daf; font-size:20px; }
+	.engineering-page__store-mask { position:fixed; z-index:130; inset:0; display:flex; align-items:flex-end; background:rgba(28,47,70,.35); }
+	.engineering-page__store-picker { display:flex; width:100%; max-height:82%; flex-direction:column; border-radius:18px 18px 0 0; background:#fff; }
+	.engineering-page__store-picker-head { display:flex; align-items:center; justify-content:space-between; padding:16px 18px; border-bottom:1px solid #edf1f5; color:#26384d; font-size:16px; font-weight:700; }
+	.engineering-page__store-search { height:38px; margin:12px 18px 8px; padding:0 11px; border:1px solid #dce6ef; border-radius:19px; background:#f8fafc; font-size:13px; }
+	.engineering-page__store-list { min-height:0; flex:1; padding:0 18px; }
+	.engineering-page__store-option { display:flex; min-height:56px; flex-direction:row; align-items:center; border-bottom:1px solid #edf1f5; }
+	.engineering-page__store-option-type { display:flex; width:30px; height:30px; align-items:center; justify-content:center; border-radius:9px; background:#fff1dc; color:#b67727; font-size:12px; font-weight:700; }
+	.engineering-page__store-option-copy { display:flex; min-width:0; flex:1; flex-direction:column; margin-left:10px; }
+	.engineering-page__store-option-copy text:first-child { overflow:hidden; color:#314a64; font-size:14px; font-weight:700; text-overflow:ellipsis; white-space:nowrap; }
+	.engineering-page__store-option-copy text:last-child { margin-top:3px; color:#8798aa; font-size:11px; }
+	.engineering-page__store-option-selected { color:#1677cc; font-size:11px; }
+	.engineering-page__store-option--selected .engineering-page__store-option-type { background:#e7f1ff; color:#1677cc; }
+	.engineering-page__store-empty { padding:30px 0; color:#8998a8; font-size:13px; text-align:center; }
+	.engineering-page__store-picker-footer { display:flex; min-height:58px; flex-direction:row; align-items:center; gap:8px; padding:10px 18px; border-top:1px solid #edf1f5; color:#607891; font-size:12px; }
+	.engineering-page__store-picker-footer > text { min-width:0; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+	.engineering-page__store-picker-cancel,.engineering-page__store-picker-confirm { padding:8px 15px; border-radius:17px; }
+	.engineering-page__store-picker-cancel { background:#f1f4f7; color:#607891; }
+	.engineering-page__store-picker-confirm { background:#1677cc; color:#fff; }
 	.engineering-page__editor-footer { justify-content:flex-end; gap:10px; border-top:1px solid #edf1f5; border-bottom:0; font-size:13px; }
 	.engineering-page__cancel,.engineering-page__save { padding:9px 19px; border-radius:18px; }
 	.engineering-page__cancel { color:#607891; background:#f1f4f7; }
