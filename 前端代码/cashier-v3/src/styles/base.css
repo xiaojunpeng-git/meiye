@@ -645,9 +645,11 @@ button:disabled {
 .cashier-workflow-toolbar--cashier {
   /* 与下方“商品区／购物车”共用同一列轨道，会员卡不再比商品区更宽。 */
   grid-template-columns: minmax(430px, 4fr) minmax(560px, 6fr);
-  gap: 12px;
-  margin-right: 12px;
-  margin-left: 10px;
+  /* 工作台 body 的内容区由 padding: 8px 10px 6px 6px 定义，顶部
+     工具栏使用相同的左右边界和列间距，确保会员信息卡与商品区严格对齐。 */
+  gap: 10px;
+  margin-right: 10px;
+  margin-left: 6px;
   padding: 0;
   border: 0;
   border-radius: 0;
@@ -1743,7 +1745,8 @@ button:disabled {
   grid-column: 2;
   grid-row: 1;
   grid-template-rows: minmax(0, 1fr) auto;
-  margin-top: -8px;
+  /* 选购区与购物车共用工作台 body 的同一行，顶部必须落在同一条基线上。 */
+  margin-top: 0;
 }
 
 .member-card {
