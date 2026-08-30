@@ -221,5 +221,12 @@ $assert('MC-API-17',
     && !str_contains($audienceOverview, 'return 222;')
     && !str_contains($audienceOverview, 'return 3;')
 );
+$assert('MC-API-18',
+    str_contains($query, 'The top-left store context is the customer page')
+    && str_contains($query, 'in_array($activeStoreId, $authorized, true)')
+    && str_contains($audienceOverview, 'currentStoreScope($merchant')
+    && str_contains($audienceOverview, 'private function hasNodeSelection')
+    && str_contains($audienceOverview, 'if (!$this->hasNodeSelection($input))')
+);
 
 exit($failed === 0 ? 0 : 1);

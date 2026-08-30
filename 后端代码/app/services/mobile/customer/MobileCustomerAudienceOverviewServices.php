@@ -39,7 +39,7 @@ final class MobileCustomerAudienceOverviewServices
     {
         if (!empty($input['listOnly'])) {
             $entry = $this->entryScopes->resolve($merchant);
-            $storeIds = array_values(array_filter(array_map('intval', (array)($entry['authorizedStoreIds'] ?? []))));
+            $storeIds = $this->currentStoreScope($merchant, (array)($entry['authorizedStoreIds'] ?? []));
             $audiences = $this->audiences->list($identity);
             foreach ($audiences as &$audience) {
                 if (!empty($audience['system'])) {
@@ -80,6 +80,12 @@ final class MobileCustomerAudienceOverviewServices
         $isOrganization = (string)($entry['entryType'] ?? '') === MobileMerchantAnalyticsEntryPolicy::TYPE_ORGANIZATION;
         $hierarchy = $this->hierarchyProjection($merchant, $entry, $storeIds, $input, $isOrganization);
         $scopeStoreIds = array_values(array_map('intval', (array)($hierarchy['currentNode']['_storeIds'] ?? $storeIds)));
+        // Opening a card without an explicit organization node follows the
+        // store selected in the top-left context. Organization drill-down is
+        // still honored when nodeType/nodeId are supplied by the client.
+        if (!$this->hasNodeSelection($input)) {
+            $scopeStoreIds = $this->currentStoreScope($merchant, $scopeStoreIds);
+        }
         $requestedAudienceId = trim((string)($input['audienceId'] ?? ''));
         $sourceAudiences = $requestedAudienceId !== ''
             ? [$this->audiences->find($identity, $requestedAudienceId)]
@@ -124,6 +130,9 @@ final class MobileCustomerAudienceOverviewServices
         $isOrganization = (string)($entry['entryType'] ?? '') === MobileMerchantAnalyticsEntryPolicy::TYPE_ORGANIZATION;
         $hierarchy = $this->hierarchyProjection($merchant, $entry, $storeIds, $input, $isOrganization);
         $scopeStoreIds = array_values(array_map('intval', (array)($hierarchy['currentNode']['_storeIds'] ?? $storeIds)));
+        if (!$this->hasNodeSelection($input)) {
+            $scopeStoreIds = $this->currentStoreScope($merchant, $scopeStoreIds);
+        }
         if (!empty($audience['system'])) {
             $page = $this->customers->querySystemAudienceForStoreIds($merchant, (string)$audienceId, $input, $scopeStoreIds);
         } else {
@@ -352,6 +361,23 @@ final class MobileCustomerAudienceOverviewServices
             $storeIds
         );
         return (int)($page['total'] ?? 0);
+    }
+
+    /** @return int[] */
+    private function currentStoreScope(array $merchant, array $authorizedStoreIds): array
+    {
+        $activeStoreId = (int)($merchant['storeId'] ?? 0);
+        $authorized = array_values(array_unique(array_filter(array_map('intval', $authorizedStoreIds))));
+        if ($activeStoreId > 0 && ($authorized === [] || in_array($activeStoreId, $authorized, true))) {
+            return [$activeStoreId];
+        }
+        sort($authorized, SORT_NUMERIC);
+        return $authorized;
+    }
+
+    private function hasNodeSelection(array $input): bool
+    {
+        return trim((string)($input['nodeType'] ?? '')) !== '' || (int)($input['nodeId'] ?? 0) > 0;
     }
 
     /** @return array<int,array<int,string>> */

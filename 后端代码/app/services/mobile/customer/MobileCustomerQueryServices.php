@@ -293,18 +293,22 @@ final class MobileCustomerQueryServices
      */
     private function customerStoreIds(array $merchant): array
     {
-        $stores = array_values(array_filter(array_map('intval', (array)($merchant['visibleStoreIds'] ?? []))));
-        if ($stores === []) {
-            $activeStoreId = (int)($merchant['storeId'] ?? 0);
-            if ($activeStoreId > 0) {
-                $stores[] = $activeStoreId;
-            }
-        }
-        $stores = array_values(array_unique(array_filter($stores, static function (int $storeId): bool {
+        $activeStoreId = (int)($merchant['storeId'] ?? 0);
+        $authorized = array_values(array_unique(array_filter(array_map(
+            'intval',
+            (array)($merchant['visibleStoreIds'] ?? [])
+        ), static function (int $storeId): bool {
             return $storeId > 0;
         })));
-        sort($stores, SORT_NUMERIC);
-        return $stores;
+        // The top-left store context is the customer page's default scope.
+        // The resolver has already proved this store is authorized; retaining
+        // the intersection here prevents a manager's organization grant from
+        // silently turning one-store browsing into a cross-store list.
+        if ($activeStoreId > 0 && ($authorized === [] || in_array($activeStoreId, $authorized, true))) {
+            return [$activeStoreId];
+        }
+        sort($authorized, SORT_NUMERIC);
+        return $authorized;
     }
 
     /**
