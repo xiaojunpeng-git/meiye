@@ -353,6 +353,29 @@ ok(
     'C2-A1-BE-05'
 );
 
+// An old import can leave a non-deleted holder pointing at a removed order.
+// It must not make the whole selector fail when other valid sources exist.
+Db::name('user_card_holder')->insert([
+    'id' => 1999, 'uid' => 101, 'oid' => 999999, 'card_name' => '孤立历史卡',
+    'card_no' => 'ORPHAN-1999', 'store_id' => 8, 'product_type' => 4,
+    'write_times' => 1, 'write_surplus_times' => 1,
+    'write_start' => $now - 3600, 'write_end' => $now + 86400, 'is_del' => 0,
+]);
+$orphanProjection = $dispatcher->dispatch(c2SessionBody($session, 'open-add-card-service-project', [
+    'memberId' => 101,
+    'selectorRequestId' => 'ENTITLEMENT_SELECTOR-' . MemberIntegrationFixture::uuid(),
+]), $session);
+$orphanSelector = (array)($orphanProjection['data']['entitlementSelector'] ?? []);
+ok(
+    '孤立卡实例不阻断有效权益投影',
+    ($orphanProjection['result']['status'] ?? '') === 'success'
+        && count((array)($orphanSelector['sources'] ?? [])) === 2
+        && !in_array(1999, array_map('intval', array_column((array)($orphanSelector['sources'] ?? []), 'id')), true),
+    json_encode($orphanProjection, JSON_UNESCAPED_UNICODE),
+    'C2-A1-BE-24'
+);
+Db::name('user_card_holder')->where('id', 1999)->delete();
+
 c2Section('unsafe legacy display values are not substituted by the frontend or another payment field');
 $unsafeSnapshot = json_encode([
     'productInfo' => ['store_name' => '深层护理'],
@@ -1406,4 +1429,5 @@ echo "GATE_PASS=C2-A1-BE-20\n";
 echo "GATE_PASS=C2-A1-BE-21\n";
 echo "GATE_PASS=C2-A1-BE-22\n";
 echo "GATE_PASS=C2-A1-BE-23\n";
+echo "GATE_PASS=C2-A1-BE-24\n";
 finish('C2-entitlement-integration');

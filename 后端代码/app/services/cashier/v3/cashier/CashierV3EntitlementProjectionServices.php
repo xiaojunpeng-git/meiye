@@ -86,13 +86,38 @@ final class CashierV3EntitlementProjectionServices
             $includeUnavailableCards,
             false
         );
-        $holderVersions = Db::transaction(function () use ($snapshot, $operatorScope, $dataScope): array {
+        // Only card holders that actually contribute a projected cart line
+        // can be selected from this read model. Legacy data may contain an
+        // orphan holder whose oid no longer exists in store_order; trying to
+        // synchronize that holder would fail the entire selector with a
+        // generic RESOURCE_NOT_FOUND error and hide valid cards for the same
+        // member. Keep the read model fail-closed for the orphan while
+        // allowing valid sources to load normally.
+        $ordersById = [];
+        foreach ((array)($snapshot['orders'] ?? []) as $order) {
+            $orderId = (int)($order['id'] ?? 0);
+            if ($orderId > 0) {
+                $ordersById[$orderId] = true;
+            }
+        }
+        $holdersByOrder = [];
+        foreach ((array)($snapshot['holders'] ?? []) as $holder) {
+            $orderId = (int)($holder['oid'] ?? 0);
+            if ($orderId > 0) {
+                $holdersByOrder[$orderId] = (int)($holder['id'] ?? 0);
+            }
+        }
+        $holderIdsForProjection = [];
+        foreach ((array)($snapshot['carts'] ?? []) as $cart) {
+            $orderId = (int)($cart['oid'] ?? 0);
+            $holderId = (int)($holdersByOrder[$orderId] ?? 0);
+            if ($holderId > 0 && isset($ordersById[$orderId])) {
+                $holderIdsForProjection[$holderId] = true;
+            }
+        }
+        $holderVersions = Db::transaction(function () use ($holderIdsForProjection, $operatorScope, $dataScope): array {
             $versions = [];
-            foreach ((array)($snapshot['holders'] ?? []) as $holder) {
-                $holderId = (int)($holder['id'] ?? 0);
-                if ($holderId <= 0 || isset($versions[$holderId])) {
-                    continue;
-                }
+            foreach (array_keys($holderIdsForProjection) as $holderId) {
                 $versions[$holderId] = $this->provider->synchronizeProjectionVersion(
                     'card_holder',
                     (string)$holderId,
