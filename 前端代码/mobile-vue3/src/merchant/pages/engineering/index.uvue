@@ -1,7 +1,8 @@
 <template>
 	<view class="engineering-page" :class="{ 'engineering-page--native-mini': platformUsesNativeCanvas }">
 		<view class="engineering-page__header"><view><text class="engineering-page__kicker">业务台账</text><text class="engineering-page__title">工程管理</text></view><text class="engineering-page__store">{{ activeStoreLabel }}</text></view>
-		<scroll-view class="engineering-page__tabs" scroll-x><view v-for="tab in tabs" :key="tab.key" class="engineering-page__tab" :class="{ 'engineering-page__tab--active': activeType === tab.key }" @tap="switchType(tab.key)"><text>{{ tab.label }}</text></view></scroll-view>
+		<view class="engineering-page__page-switch" @tap="openTypePicker"><text class="engineering-page__page-switch-label">{{ activeTypeLabel() }}</text><text class="engineering-page__page-switch-chevron">⌄</text></view>
+		<view v-if="typePickerOpen" class="engineering-page__type-mask" @tap="closeTypePicker"><view class="engineering-page__type-sheet" @tap.stop><view class="engineering-page__type-sheet-head"><text>选择工程页面</text><text class="engineering-page__close" @tap="closeTypePicker">×</text></view><view v-for="tab in tabs" :key="tab.key" class="engineering-page__type-option" :class="{ 'engineering-page__type-option--active': activeType === tab.key }" @tap="switchType(tab.key)"><text>{{ tab.label }}</text><text v-if="activeType === tab.key" class="engineering-page__type-option-check">✓</text></view></view></view>
 		<view class="engineering-page__toolbar"><input class="engineering-page__keyword" type="text" v-model="keyword" confirm-type="search" placeholder="搜索门店、提报人或合同" @confirm="reload" /><view class="engineering-page__refresh" @tap="reload"><text>刷新</text></view><view class="engineering-page__add" @tap="beginCreate"><text>＋ 新增</text></view></view>
 		<view v-if="message.length > 0" class="engineering-page__state"><text>{{ message }}</text><view class="engineering-page__retry" @tap="reload"><text>重新加载</text></view></view>
 		<scroll-view v-else class="engineering-page__content" scroll-y refresher-enabled="true" :refresher-triggered="refreshing" @refresherrefresh="onPullRefresh">
@@ -30,6 +31,7 @@
 	const saving = ref(false)
 	const message = ref('')
 	const editing = ref<any>(null)
+	const typePickerOpen = ref(false)
 	const platformUsesNativeCanvas = currentMobilePlatform() === 'MP_WEIXIN'
 	const activeStoreLabel = ref('当前门店')
 
@@ -50,7 +52,9 @@
 	function recordTitle(row : any) : string { let name = displayValue(row, 'store_name'); return name === '—' ? activeTypeLabel() : name }
 	function reload() : void { loading.value = true; message.value = ''; queryMobileEngineeringLedger(activeType.value, { page: 1, limit: 20, keyword: keyword.value }, (response : any) => { loading.value = false; let envelope : any = response != null && response.body != null ? (response.body.data || response.body) : null; let payload : any = envelope != null && envelope.engineeringLedger != null ? envelope.engineeringLedger : envelope; if (!response.ok || payload == null) { records.value = []; message.value = String(response.message || '工程管理暂时不可用。'); return }; records.value = Array.isArray(payload.records) ? payload.records : [] }) }
 	function onPullRefresh() : void { if (refreshing.value) return; refreshing.value = true; reload(); setTimeout(() => { refreshing.value = false }, 800) }
-	function switchType(type : string) : void { if (activeType.value === type) return; activeType.value = type; editing.value = null; reload() }
+	function openTypePicker() : void { typePickerOpen.value = true }
+	function closeTypePicker() : void { typePickerOpen.value = false }
+	function switchType(type : string) : void { typePickerOpen.value = false; if (activeType.value === type) return; activeType.value = type; editing.value = null; reload() }
 	function beginCreate() : void { let values : any = {}; editing.value = { id: '', version: null, values: values }; message.value = '' }
 	function beginEdit(row : any) : void { let values : any = {}; let fields = fieldsForType(); for (let index = 0; index < fields.length; index++) values[fields[index].key] = row[fields[index].key] == null ? '' : row[fields[index].key]; editing.value = { id: row.id || row.record_id, version: Number(row.version || 0), values: values }; message.value = '' }
 	function closeEditor() : void { if (!saving.value) editing.value = null }
@@ -66,9 +70,15 @@
 	.engineering-page__kicker { display:block; font-size:12px; line-height:18px; color:#71839a; }
 	.engineering-page__title { display:block; margin-top:3px; font-size:23px; font-weight:700; line-height:31px; }
 	.engineering-page__store { max-width:190px; overflow:hidden; padding:9px 12px; border:1px solid #d8e4f1; border-radius:18px; background:#fff; color:#607891; font-size:12px; font-weight:700; text-overflow:ellipsis; white-space:nowrap; }
-	.engineering-page__tabs { display:flex; flex-shrink:0; height:46px; padding:0 18px; white-space:nowrap; background:#fff; border-top:1px solid #e6edf4; border-bottom:1px solid #e6edf4; }
-	.engineering-page__tab { display:inline-flex; height:46px; align-items:center; margin-right:24px; border-bottom:2px solid transparent; color:#7589a0; font-size:13px; }
-	.engineering-page__tab--active { border-bottom-color:#1677cc; color:#1677cc; font-weight:700; }
+	.engineering-page__page-switch { display:flex; flex-shrink:0; height:46px; align-items:center; justify-content:center; margin:0 18px; border:1px solid #d8e4f1; border-radius:14px; background:#fff; color:#1677cc; }
+	.engineering-page__page-switch-label { font-size:15px; font-weight:700; }
+	.engineering-page__page-switch-chevron { margin-left:7px; color:#8da0b3; font-size:16px; line-height:16px; }
+	.engineering-page__type-mask { position:fixed; z-index:105; inset:0; display:flex; align-items:flex-end; background:rgba(28,47,70,.35); }
+	.engineering-page__type-sheet { width:100%; padding:0 18px 20px; border-radius:18px 18px 0 0; background:#fff; }
+	.engineering-page__type-sheet-head { display:flex; align-items:center; justify-content:space-between; padding:17px 0 12px; border-bottom:1px solid #edf1f5; color:#26384d; font-size:16px; font-weight:700; }
+	.engineering-page__type-option { display:flex; min-height:48px; align-items:center; justify-content:space-between; border-bottom:1px solid #f0f3f6; color:#607891; font-size:14px; }
+	.engineering-page__type-option--active { color:#1677cc; font-weight:700; }
+	.engineering-page__type-option-check { color:#1677cc; font-size:18px; }
 	.engineering-page__toolbar { display:flex; align-items:center; gap:8px; padding:12px 18px; background:#fff; }
 	.engineering-page__keyword { min-width:0; flex:1; height:36px; padding:0 12px; border:1px solid #dce6ef; border-radius:18px; background:#f7fafd; font-size:12px; }
 	.engineering-page__refresh,.engineering-page__add { padding:8px 10px; border-radius:16px; font-size:12px; font-weight:700; }
