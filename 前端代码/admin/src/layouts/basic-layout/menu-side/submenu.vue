@@ -4,9 +4,7 @@
             <i-menu-side-title :menu="menuData" />
         </template>
         <template v-for="(item, index) in menuData.children.filter(j => !j.auth)">
-            <i-menu-side-item :menu="item" :key="index" v-if="item.children === undefined || !item.children.length" />
-			<!-- <i-menu-side-item :menu="item.children[0]" :key="index" v-else /> -->
-            <i-menu-side-submenu v-else :menu="item" :key="index" />
+            <i-menu-side-item :menu="toSidebarEntry(item)" :key="index" />
         </template>
     </Submenu>
 </template>
@@ -27,8 +25,23 @@ export default {
   },
   computed: {
     menuData() {
-      // 保留完整菜单树，支持“会员 → 看板 → 九张客户分析表”的三级入口。
+      // 保留接口配置的原始菜单树；侧栏只展示当前分组及其直接子项。
       return JSON.parse(JSON.stringify(this.menu));
+    }
+  },
+  methods: {
+    toSidebarEntry(item) {
+      if (!item.children || !item.children.length) return item;
+
+      // 仍展示配置分组名称，但导航到第一个可访问子项，避免为了显示
+      // 入口而在侧栏继续渲染第三级菜单。
+      const firstChild = item.children.find(child => !child.auth && child.path);
+      return firstChild ? {
+        ...item,
+        path: firstChild.path,
+        replace: firstChild.replace,
+        target: firstChild.target
+      } : item;
     }
   }
 };

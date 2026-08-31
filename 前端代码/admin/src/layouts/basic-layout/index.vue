@@ -476,7 +476,10 @@ export default {
 			transition: all 0s;
 			//height: max-content;
 		}
-		.menu-item{
+		// 菜单由接口配置。二级节点既可能是普通菜单项，也可能是 Submenu；
+		// 两种配置节点均占半行，统一按两列左对齐渲染。
+		.menu-item,
+		.ivu-menu > .ivu-menu-submenu{
 			// display: inline-block;
 			width: calc(100% / 2);
 			color: #606266;
@@ -485,6 +488,16 @@ export default {
 			.ivu-menu-item{
 				height: 38px;
 				margin-top: 0;
+				&:hover{
+					background-color: #fff !important;
+				}
+			}
+			// Submenu 标题使用组件默认的 43px 缩进；在二级栅格中与
+			// 普通菜单项统一为 13px，避免同一份配置因节点类型不同而错位。
+			.ivu-menu-submenu-title{
+				height: 38px;
+				margin-top: 0;
+				padding-left: 13px !important;
 				&:hover{
 					background-color: #fff !important;
 				}

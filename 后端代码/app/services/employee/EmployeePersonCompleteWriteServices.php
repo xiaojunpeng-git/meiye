@@ -508,7 +508,11 @@ class EmployeePersonCompleteWriteServices extends BaseServices
 
         // 1) employee
         $this->maybeFail('employee', $input);
-        $employeeId = $this->upsertEmployee($employeeIdHint, $phone, $staffName, $avatar, $opCtx, $source);
+        $employeeUpsert = $this->upsertEmployee($employeeIdHint, $phone, $staffName, $avatar, $opCtx, $source);
+        $employeeId = (int)$employeeUpsert['employee_id'];
+        // 新建任职时若按手机号命中既有员工主档，人员类型属于该主档，不能拿
+        // “新员工”表单默认的版本 0 覆盖或触发其乐观锁冲突。
+        $reusedExistingEmployee = $employeeIdHint <= 0 && !empty($employeeUpsert['reused_existing']);
 
         // 2) organization_employee
         $this->maybeFail('org_employee', $input);
@@ -613,16 +617,22 @@ class EmployeePersonCompleteWriteServices extends BaseServices
             $this->maybeFail('employment_type', $input);
             /** @var EmployeeTypeAuthorityServices $typeAuthority */
             $typeAuthority = app()->make(EmployeeTypeAuthorityServices::class);
-            $employmentTypeOut = $typeAuthority->saveTypeInTx(
-                $employeeId,
-                (string)$employmentTypeCode,
-                (int)$employmentTypeVersion,
-                $adminInfo,
-                $auditMeta,
-                $source,
-                $staffId,
-                $storeId
-            );
+            if ($reusedExistingEmployee) {
+                // 本次只是为既有员工新增组织/门店任职；人员类型以员工主档
+                // 的当前快照为准，并回传给调用端，避免沿用表单默认值。
+                $employmentTypeOut = $typeAuthority->readSnapshot($employeeId, 'hq');
+            } else {
+                $employmentTypeOut = $typeAuthority->saveTypeInTx(
+                    $employeeId,
+                    (string)$employmentTypeCode,
+                    (int)$employmentTypeVersion,
+                    $adminInfo,
+                    $auditMeta,
+                    $source,
+                    $staffId,
+                    $storeId
+                );
+            }
         }
 
         // 4) 统一内部账号
@@ -820,7 +830,7 @@ class EmployeePersonCompleteWriteServices extends BaseServices
         string $avatar,
         array $opCtx,
         string $source
-    ): int {
+    ): array {
         $now = time();
         $avatarType = strpos($avatar, 'http') === 0 ? 2 : 1;
         if ($employeeId > 0) {
@@ -839,7 +849,10 @@ class EmployeePersonCompleteWriteServices extends BaseServices
                 'avatar_type' => $avatarType,
                 'update_time' => $now,
             ]);
-            return $employeeId;
+            return [
+                'employee_id' => $employeeId,
+                'reused_existing' => false,
+            ];
         }
 
         $exist = Db::name('employee')->where('phone', $phone)->lock(true)->find();
@@ -851,7 +864,10 @@ class EmployeePersonCompleteWriteServices extends BaseServices
                 if (!$restored) {
                     throw new AdminException('员工主档状态已变化，请重试');
                 }
-                return (int)$restored['employee_id'];
+                return [
+                    'employee_id' => (int)$restored['employee_id'],
+                    'reused_existing' => true,
+                ];
             }
             $employeeId = (int)$exist['id'];
             Db::name('employee')->where('id', $employeeId)->update([
@@ -861,7 +877,10 @@ class EmployeePersonCompleteWriteServices extends BaseServices
                 'avatar_type' => $avatarType,
                 'update_time' => $now,
             ]);
-            return $employeeId;
+            return [
+                'employee_id' => $employeeId,
+                'reused_existing' => true,
+            ];
         }
 
         $employeeData = [
@@ -898,7 +917,10 @@ class EmployeePersonCompleteWriteServices extends BaseServices
                 'add_time' => $now,
             ]);
         }
-        return $employeeId;
+        return [
+            'employee_id' => $employeeId,
+            'reused_existing' => false,
+        ];
     }
 
     protected function assertNoLegacyFields(array $input): void
