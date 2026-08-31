@@ -90,6 +90,13 @@
 					// #endif
 				}
 			}
+		},
+		{
+			"path": "pages/app_pay/index",
+			"style": {
+				"navigationBarTitleText": "微信支付",
+				"navigationBarTextStyle": "black"
+			}
 		}
 	],
 	// "plugins": {

@@ -24,6 +24,8 @@ $rechargeController = $read('后端代码/app/controller/api/v1/user/UserRecharg
 $adminForm = $read('后端代码/app/services/system/config/SystemConfigServices.php');
 $adminSave = $read('后端代码/app/controller/admin/v1/system/config/SystemConfig.php');
 $cashier = $read('前端代码/uniapp/pages/goods/cashier/index.vue');
+$appPayPage = $read('前端代码/uniapp/pages/app_pay/index.vue');
+$pages = $read('前端代码/uniapp/pages.json');
 $cashierInfo = $read('后端代码/app/services/order/StoreOrderCreateServices.php');
 $debt = $read('后端代码/app/services/order/StoreDebtServices.php');
 $orders = $read('后端代码/app/services/order/StoreOrderServices.php');
@@ -68,6 +70,10 @@ $assert(str_contains($cashier, 'if (that.paying) return;'), '确认付款仍可�
 $assert(str_contains($rechargeController, "\$from === 'weixinh5'") && str_contains($rechargeController, "? 'weixinh5'"), '普通浏览器充值微信支付仍可能错误索取公众号 OpenID');
 $assert(str_contains($cashier, 'encodeURIComponent(urlLink)'), 'APP 富友付款链接未做 URL 编码');
 $assert(str_contains($cashier, 'wx.openEmbeddedMiniProgram'), '小程序没有打开富友承载小程序');
+$assert(str_contains($pages, 'pages/app_pay/index'), '普通浏览器微信支付缺少小程序 URL Link 承接页路由');
+$assert(str_contains($appPayPage, 'wx.openEmbeddedMiniProgram'), '小程序 URL Link 承接页没有打开富友支付小程序');
+$assert(str_contains($appPayPage, 'encodeURIComponent(this.qrcode)'), '小程序 URL Link 承接页没有安全传递富友付款码');
+$assert(str_contains($fuyou, "'appid' => \$this->config['sub_appid']"), '微信 URL Link 没有把富友支付小程序 AppID 传给承接页');
 $assert(str_contains($cashierInfo, 'PayServices::fuyouPayReady()'), '会员收银台仍读取原生支付开关');
 $assert(str_contains($debt, "'pay_weixin_open' => (int)PayServices::fuyouPayReady()"), '欠款收银台仍读取原生微信支付开关');
 $assert(str_contains($debt, "if (\$from !== 'weixinh5')"), '普通浏览器欠款微信支付仍可能错误索取公众号 OpenID');

@@ -96,7 +96,11 @@ class HwcPayService
         $url = 'https://api.weixin.qq.com/wxa/generate_urllink?access_token=' . rawurlencode($token);
         $response = $this->postJson($url, [
             'path' => '/pages/app_pay/index',
-            'query' => http_build_query(['qrcode' => $qrCode, 'price' => $price]),
+            'query' => http_build_query([
+                'qrcode' => $qrCode,
+                'price' => $price,
+                'appid' => $this->config['sub_appid'],
+            ]),
             'env_version' => 'release',
         ]);
         $link = (string)($response['url_link'] ?? '');
