@@ -393,8 +393,9 @@ class StoreOrderCreateServices extends BaseServices
 		$data = [];
 		$data['offline_pay_status'] = 2;
 		$data['yue_pay_status'] = 2;
-		$data['ali_pay_status'] = (int)sys_config('ali_pay_status');//支付宝支付 1 开启 0 关闭
-		$data['pay_weixin_open'] = (int)sys_config('pay_weixin_open') ?? 0;//微信支付 1 开启 0 关闭
+		$fuyouReady = PayServices::fuyouPayReady();
+		$data['ali_pay_status'] = (int)$fuyouReady;//会员端支付宝入口，实际由富友收单
+		$data['pay_weixin_open'] = (int)$fuyouReady;//会员端微信入口，实际由富友收单
 
 		$data['order_id'] = $orderId;
 		$data['pay_price'] = '0';
@@ -453,7 +454,6 @@ class StoreOrderCreateServices extends BaseServices
 					throw new PayException('您支付的订单不存在');
 				}
 				$data['pay_price'] = $info['price'];
-				$data['ali_pay_status'] = 0;
 				break;
 			default:
 				throw new PayException('暂不支持其他类型订单支付');

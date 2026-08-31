@@ -2916,7 +2916,7 @@ HTML;
         $res = false;
         switch ($payType) {
             case PayServices::WEIXIN_PAY:
-                $res = (bool)sys_config('pay_weixin_open');
+                $res = PayServices::fuyouPayReady();
                 break;
             case PayServices::YUE_PAY:
                 $res = sys_config('balance_func_status') && sys_config('yue_pay_status') == 1;
@@ -2925,7 +2925,7 @@ HTML;
                 $res = sys_config('offline_pay_status') == 1;
                 break;
             case PayServices::ALIAPY_PAY:
-                $res = sys_config('ali_pay_status') == 1;
+                $res = PayServices::fuyouPayReady();
                 break;
         }
         return $res;

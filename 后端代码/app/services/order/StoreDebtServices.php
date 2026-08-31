@@ -1697,8 +1697,8 @@ class StoreDebtServices extends BaseServices
             'repay_amount' => $pending,
             'now_money' => (float)($userInfo['now_money'] ?? 0),
             'yue_pay_status' => (int)sys_config('balance_func_status') && (int)sys_config('yue_pay_status') == 1 ? 1 : 2,
-            'pay_weixin_open' => (int)sys_config('pay_weixin_open') ?? 0,
-            'ali_pay_status' => (bool)sys_config('ali_pay_status'),
+            'pay_weixin_open' => (int)PayServices::fuyouPayReady(),
+            'ali_pay_status' => PayServices::fuyouPayReady(),
             'offline_pay_status' => 0,
             'invalid_time' => time() + 1800,
         ];

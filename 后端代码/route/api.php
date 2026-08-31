@@ -22,7 +22,8 @@ Route::group('api', function () {
 	Route::any('wechat/miniServe', 'v1.wechat.Wechat/miniServe');//小程序服务
 	Route::any('work/serve', 'v1.wechat.Wechat/work');//企业微信服务
 	Route::any('pay/notify/:type', 'v1.Pay/notify');//支付回调
-    Route::any('pay/fynotify/:type', 'v1.Pay/fyNotify');//支付回调
+	Route::any('pay/fynotify/:channel/:type', 'v1.Pay/fyNotify');//富友支付回调
+	Route::any('pay/fynotify/:type', 'v1.Pay/fyNotifyLegacy');//兼容修复前已生成的回调地址
 	Route::any('pay/mchNotify/:type', 'v1.Pay/mchNotify');//商户转账回调
 	Route::any('city_delivery/notify', 'v1.CityDelivery/notify');//UU、达达回调
 	Route::get('get_script', 'v1.PublicController/getScript');//统计代码

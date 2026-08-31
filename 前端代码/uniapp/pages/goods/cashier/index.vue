@@ -313,28 +313,31 @@
           let qr_code=jsConfig.qr_code || '';
           let urlLink=jsConfig.url_link || '';
           if(qr_code != ''){
-            //富友支付
             // #ifdef MP
-            //调用富友支付插件
-            if(that.is_bak == 1) {
-              uni.setStorageSync('fy_pay_type', 'isBack');
-            }else {
-              uni.setStorageSync('fy_pay_type', 'recharge');
-            }
+            uni.hideLoading();
+            uni.setStorageSync('fy_pay_type', that.is_bak == 1 ? 'isBack' : that.fromType);
             wx.openEmbeddedMiniProgram({
               appId: jsConfig.app_id,
-              path: `/pages/qrPay/qrPay?t=`+qr_code, // token从接口获取
-              envVersion: 'release', // 打开环境
+              path: `/pages/qrPay/qrPay?t=${encodeURIComponent(qr_code)}`,
+              envVersion: 'release',
+              fail: (error) => {
+                that.$util.Tips({
+                  title: (error && error.errMsg) || '未能打开富友支付'
+                });
+              }
             })
             // #endif
             return false;
           }
           if(urlLink != ''){
+            uni.hideLoading();
             // #ifdef APP-PLUS
-            //跳转小程序进行支付
             uni.navigateTo({
-              url: `/pages/annex/web_view/index?url=`+urlLink
+              url: `/pages/annex/web_view/index?url=${encodeURIComponent(urlLink)}`
             });
+            // #endif
+            // #ifdef H5
+            window.location.href = urlLink;
             // #endif
             return false;
           }

@@ -286,7 +286,9 @@ class OtherOrder
      */
     public function pay_type(Request $request)
     {
-        $payType = SystemConfigService::more(['ali_pay_status', 'pay_weixin_open', 'site_name', 'balance_func_status', 'yue_pay_status']);
+        $payType = SystemConfigService::more(['site_name', 'balance_func_status', 'yue_pay_status']);
+        $payType['ali_pay_status'] = PayServices::fuyouPayReady();
+        $payType['pay_weixin_open'] = (int)PayServices::fuyouPayReady();
         $payType['now_money'] = $request->user('now_money');
         $payType['offline_pay_status'] = sys_config('offline_pay_status', 0) == 1;
         $payType['yue_pay_status'] = (int)($payType['balance_func_status'] ?? 0) && (int)($payType['yue_pay_status'] ?? 0) == 1 ? 1 : 0;//余额支付 1 开启 2 关闭

@@ -12,7 +12,6 @@ declare (strict_types=1);
 
 namespace app\services\pay;
 
-use mohe\services\AliPayService;
 use mohe\services\wechat\HwcPayService;
 use mohe\services\wechat\Payment;
 use think\exception\ValidateException;
@@ -78,6 +77,25 @@ class PayServices
     protected $authCode;
 
     /**
+     * 会员端在线支付统一由富友收单。
+     *
+     * 前端仍沿用 pay_weixin_open / ali_pay_status 两个兼容字段展示“微信支付、支付宝支付”，
+     * 因此这里提供唯一的就绪口径，避免各业务页面继续读取已经停用的原生支付配置。
+     */
+    public static function fuyouPayReady(): bool
+    {
+        if ((int)sys_config('fuyou_pay_status', 0) !== 1) {
+            return false;
+        }
+        foreach (['fuyou_id', 'fuyou_key', 'fuyou_name', 'fuyou_sub_appid'] as $key) {
+            if (trim((string)sys_config($key, '')) === '') {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
      * 设置二维码条码值
      * @param string $authCode
      * @return $this
@@ -104,72 +122,25 @@ class PayServices
 			$body = filter_emoji($body);
             switch ($payType) {
                 case 'routine':
-                    if (sys_config('fuyou_pay_status', 0)) {
-                        if (request()->isApp()) {
-                            return HwcPayService::instance()->payWxApp($orderId, $price, $openid,$successAction, "app");
-                        } else {
-                            //判断有没有打开小程序支付
-                            return HwcPayService::instance()->payWxApp($orderId, $price, $openid,$successAction);
-                        }
-                    }else{
-                    //微信支付，从APP端请求过来
                     if (request()->isApp()) {
-                        return Payment::appPay($openid, $orderId, $price, $successAction, $body);
-                    } else {
-                        //判断有没有打开小程序支付
-                        if (sys_config('pay_routine_open', 0)) {
-                            return Payment::miniPay($openid, $orderId, $price, $successAction, $body);
-                        } else {
-                            //开启了v3支付
-                            if (Payment::instance()->isV3PAy) {
-                                return Payment::instance()->application()->v3pay->miniprogPay($openid, $orderId, $price, $body, $successAction);
-                            }
-                            return Payment::jsPay($openid, $orderId, $price, $successAction, $body);
-                        }
-                      }
+                        return HwcPayService::instance()->payWxApp($orderId, $price, $openid, $successAction, 'app');
                     }
+                    return HwcPayService::instance()->payWxApp($orderId, $price, $openid, $successAction, 'mini');
                 case 'weixinh5':
-                    if (sys_config('fuyou_pay_status', 0)) {
-                        return HwcPayService::instance()->payWxApp($orderId, $price,$openid,$successAction,'wechat');
-                    }else {
-                        ////开启了v3支付
-                        if (Payment::instance()->isV3PAy) {
-                            return Payment::instance()->application()->v3pay->h5Pay($orderId, $price, $body, $successAction);
-                        }
-                        //旧版v2支付
-                        return Payment::paymentOrder(null, $orderId, $price, $successAction, $body, '', 'MWEB');
-                    }
+                    // 普通浏览器没有公众号 OpenID，使用富友付款码并跳转承载小程序。
+                    return HwcPayService::instance()->payWxApp($orderId, $price, $openid, $successAction, 'app');
                 case self::WEIXIN_PAY:
-                    if (sys_config('fuyou_pay_status', 0)) {
-                        return HwcPayService::instance()->payWxApp($orderId, $price,$openid,$successAction,'wechat');
-                    }else {
-                        //微信支付，付款码支付，付款码支付使用v2支付接口
-                        if ($this->authCode) {
-                            return Payment::microPay($this->authCode, $orderId, $price, $successAction, $body);
-                        } else {
-                            //微信支付，从APP端请求过来
-                            if (request()->isApp()) {
-                                return Payment::appPay($openid, $orderId, $price, $successAction, $body);
-                            } else {
-                                //开启了v3支付
-                                if (Payment::instance()->isV3PAy) {
-                                    return Payment::instance()->application()->v3pay->jsapiPay($openid, $orderId, $price, $body, $successAction);
-                                }
-                                //使用v2旧版支付接口
-                                return Payment::jsPay($openid, $orderId, $price, $successAction, $body);
-                            }
-                        }
+                    // 门店付款码属于另一套收银场景，保留既有扫码能力；会员在线支付禁止回退原生接口。
+                    if ($this->authCode) {
+                        return Payment::microPay($this->authCode, $orderId, $price, $successAction, $body);
                     }
+                    $type = request()->isApp() ? 'app' : 'wechat';
+                    return HwcPayService::instance()->payWxApp($orderId, $price, $openid, $successAction, $type);
                 case self::ALIAPY_PAY:
-                    if (sys_config('fuyou_pay_status', 0)) {
-                        return HwcPayService::instance()->payAlipay($orderId, $price,$successAction);
-                    }else {
-                        if ($this->authCode) {
-                            return AliPayService::instance()->microPay($this->authCode, $body, $orderId, $price, $successAction);
-                        } else {
-                            return AliPayService::instance()->create($body, $orderId, $price, $successAction, $openid, $openid, $isCode);
-                        }
+                    if ($this->authCode) {
+                        throw new ValidateException('富友支付宝付款码收款暂未配置');
                     }
+                    return HwcPayService::instance()->payAlipay($orderId, $price, $successAction);
                 case 'pc':
                 case 'store':
                     //方法内部已经做了区分v2和v3
@@ -178,8 +149,6 @@ class PayServices
                     throw new ValidateException('支付方式不存在');
             }
         } catch (\Throwable $e) {
-            var_dump($e);
-            die();
             throw new ValidateException($e->getMessage());
         }
     }

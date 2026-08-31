@@ -41,9 +41,6 @@ class PayNotifyListener
 				$orderService->update(['order_id' => $outTradeNo], ['notify_data' => json_encode($notify)]);
 			}
             if (($count = strpos($notify['out_trade_no'], '_')) !== false) {
-				if ($type == 'aliyun') {
-					$notify['trade_no'] = $notify->out_trade_no;
-				}
                 $notify['out_trade_no'] = substr($notify['out_trade_no'], $count + 1);
             }
 			$tradeNo = $type == 'wechat' ? $notify['transaction_id'] : $notify['trade_no'];

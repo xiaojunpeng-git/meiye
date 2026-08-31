@@ -16,6 +16,7 @@ use app\Request;
 use mohe\services\AliPayService;
 use mohe\services\wechat\HwcPayService;
 use mohe\services\wechat\Payment;
+use think\facade\Log;
 use think\Response;
 
 /**
@@ -29,11 +30,29 @@ class Pay
     /**
      *   富友支付回调
      */
-    public function fyNotify(string $type,Request $request)
+    public function fyNotify(string $channel, string $type, Request $request): Response
     {
-        $data = $request->param();
-        HwcPayService::instance()->notify($data,$type);
-        echo 1;
+        try {
+            $success = HwcPayService::instance()->notify($request->param(), $channel, $type);
+        } catch (\Throwable $exception) {
+            Log::error('富友支付回调处理失败：' . $exception->getMessage());
+            $success = false;
+        }
+        return Response::create($success ? '1' : 'fail', 'html', $success ? 200 : 500);
+    }
+
+    /**
+     * 兼容修复前已生成的富友回调 URL。
+     */
+    public function fyNotifyLegacy(string $type, Request $request): Response
+    {
+        try {
+            $success = HwcPayService::instance()->notifyLegacy($request->param(), $type);
+        } catch (\Throwable $exception) {
+            Log::error('富友支付旧版回调处理失败：' . $exception->getMessage());
+            $success = false;
+        }
+        return Response::create($success ? '1' : 'fail', 'html', $success ? 200 : 500);
     }
     /**
      * 支付回调

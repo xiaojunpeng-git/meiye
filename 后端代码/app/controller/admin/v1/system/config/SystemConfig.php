@@ -391,6 +391,23 @@ class SystemConfig extends AuthController
 			@copy($from, $toPublic);
 		}
 
+        if (isset($post['fuyou_pay_status']) && (int)$post['fuyou_pay_status'] === 1) {
+            $required = [
+                'fuyou_id' => '富友商家ID',
+                'fuyou_key' => '富友支付Key',
+                'fuyou_sub_appid' => '富友sub_appid',
+                'fuyou_name' => '支付名称',
+            ];
+            foreach ($required as $key => $label) {
+                $value = array_key_exists($key, $post) && trim((string)$post[$key]) !== ''
+                    ? trim((string)$post[$key])
+                    : trim((string)sys_config($key, ''));
+                if ($value === '') {
+                    return $this->fail($label . '不能为空');
+                }
+            }
+        }
+
         // 富友支付 Key 留空表示不修改，避免密钥回显与误覆盖
         if (array_key_exists('fuyou_key', $post) && trim((string)$post['fuyou_key']) === '') {
             unset($post['fuyou_key']);

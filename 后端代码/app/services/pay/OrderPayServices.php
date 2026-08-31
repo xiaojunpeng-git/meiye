@@ -159,7 +159,7 @@ class OrderPayServices
                 throw new ValidateException('获取用户openid失败,无法支付');
             }
         }
-		$successAction = "member_recharge";
+		$successAction = "member";
         $site_name = sys_config('site_name');
 		$body = substrUTf8($site_name . '--购买会员：' . ($orderInfo['member_type'] ?? ''), 30);
         return $this->payServices->setAuthCode($authCode)->pay($payType, $openid, $orderInfo['order_id'], $orderInfo['pay_price'], $successAction, $body);

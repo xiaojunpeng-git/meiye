@@ -2104,11 +2104,8 @@ WSS;
         $build->url('setting/config/save_basics');
 
         $data = $this->getConfigAllField([
-            'pay_weixin_open', 'pay_weixin_mchid', 'pay_weixin_key', 'paydir',
             'balance_func_status', 'yue_pay_status', 'is_cashier_yue_pay_verify', 'offline_pay_status', 'offline_pay_type',
-            'offline_pay_status', 'ali_pay_status', 'ali_pay_appid', 'alipay_public_key', 'alipay_merchant_private_key',
-            'pay_weixin_client_cert', 'pay_wechat_type', 'pay_weixin_serial_no', 'v3_pay_weixin_key', 'pay_weixin_client_key', 'pay_routine_open', 'pay_routine_mchid',
-            'v3_pay_public_key', 'v3_pay_public_pem', 'pay_weixin_scene_id','fuyou_id','fuyou_key','fuyou_pay_status','fuyou_name',
+            'fuyou_id', 'fuyou_key', 'fuyou_pay_status', 'fuyou_name',
             'fuyou_sub_appid'
         ]);
         if (!empty($data['fuyou_key']['value'])) {
@@ -2120,34 +2117,15 @@ WSS;
         } elseif ($fuyouKeyDesc === '') {
             $data['fuyou_key']['desc'] = '留空表示不修改已配置的密钥';
         }
-        $site_url = sys_config('site_url', '');
         $build->rule([
-            Build::tabs()->option('微信支付', [
-                Build::alert('登录微信商户(地址：https://pay.weixin.qq.com，支付授权目录、回调链接：' . $site_url . '； http,https最好都配置)，帮助文档地址：https://doc.mohe.com/web/pro/moheprov2/1203', Alert::WARNING)->showIcon(true),
-                Build::switch('pay_weixin_open', $data['pay_weixin_open']['info'], (int)$data['pay_weixin_open']['value'])->control(1, [
-                    Build::input('pay_weixin_mchid', $data['pay_weixin_mchid']['info'], $data['pay_weixin_mchid']['value'])->info($data['pay_weixin_mchid']['desc']),
-                    Build::radio('pay_wechat_type', $data['pay_wechat_type']['info'], (int)$data['pay_wechat_type']['value'])->control(1, [
-                        Build::input('pay_weixin_serial_no', $data['pay_weixin_serial_no']['info'], $data['pay_weixin_serial_no']['value'])->info($data['pay_weixin_serial_no']['desc']),
-                        Build::input('v3_pay_weixin_key', $data['v3_pay_weixin_key']['info'], $data['v3_pay_weixin_key']['value'])->info($data['v3_pay_weixin_key']['desc']),
-                        Build::input('v3_pay_public_key', $data['v3_pay_public_key']['info'], $data['v3_pay_public_key']['value'])->info($data['v3_pay_public_key']['desc']),
-                        Build::input('pay_weixin_scene_id', $data['pay_weixin_scene_id']['info'], $data['pay_weixin_scene_id']['value'])->info($data['pay_weixin_scene_id']['desc']),
-                        Build::uploadImage('v3_pay_public_pem', $data['v3_pay_public_pem']['info'], $data['v3_pay_public_pem']['value'])
-                            ->url('/file/upload/1?type=1')->format(config('upload.fileExt'))->headers(['Authori-zation' => app()->request->header('Authori-zation')])
-                            ->type('file')->icon('md-add')->info($data['v3_pay_public_pem']['desc']),
-                    ])->control(0, [
-                        Build::input('pay_weixin_key', $data['pay_weixin_key']['info'], $data['pay_weixin_key']['value'])->info($data['pay_weixin_key']['desc']),
-                    ])->options($this->getOptions($data['pay_wechat_type']['parameter']))->info($data['pay_wechat_type']['desc']),
-                    Build::uploadImage('pay_weixin_client_cert', $data['pay_weixin_client_cert']['info'], $data['pay_weixin_client_cert']['value'])
-                        ->url('/file/upload/1?type=1')->format(config('upload.fileExt'))->headers(['Authori-zation' => app()->request->header('Authori-zation')])
-                        ->type('file')->icon('md-add')->info($data['pay_weixin_client_cert']['desc']),
-                    Build::uploadImage('pay_weixin_client_key', $data['pay_weixin_client_key']['info'], $data['pay_weixin_client_key']['value'])
-                        ->url('/file/upload/1?type=1')->format(config('upload.fileExt'))->headers(['Authori-zation' => app()->request->header('Authori-zation')])
-                        ->type('file')->icon('md-add')->info($data['pay_weixin_client_key']['desc']),
-                    Build::switch('pay_routine_open', $data['pay_routine_open']['info'], (int)$data['pay_routine_open']['value'])->control(1, [
-                        Build::input('pay_routine_mchid', $data['pay_routine_mchid']['info'], $data['pay_routine_mchid']['value'])->info($data['pay_routine_mchid']['desc'])
-                    ])->trueValue('开启', 1)->falseValue('关闭', 0)->info($data['pay_routine_open']['desc'])
-
-                ])->trueValue('开启', 1)->falseValue('关闭', 0)->info($data['pay_weixin_open']['desc']),
+            Build::tabs()->option('在线支付（富友）', [
+                Build::alert('会员端仍显示“微信支付”和“支付宝支付”，两种方式实际都由富友统一收单；系统不使用原生微信支付、支付宝支付商户接口。', Alert::WARNING)->showIcon(true),
+                Build::switch('fuyou_pay_status', $data['fuyou_pay_status']['info'], (int)$data['fuyou_pay_status']['value'])->control(1, [
+                    Build::input('fuyou_id', $data['fuyou_id']['info'], $data['fuyou_id']['value'])->info($data['fuyou_id']['desc']),
+                    Build::input('fuyou_key', $data['fuyou_key']['info'], $data['fuyou_key']['value'])->type('password')->info($data['fuyou_key']['desc']),
+                    Build::input('fuyou_sub_appid', $data['fuyou_sub_appid']['info'], $data['fuyou_sub_appid']['value'])->info($data['fuyou_sub_appid']['desc']),
+                    Build::input('fuyou_name', $data['fuyou_name']['info'], $data['fuyou_name']['value'])->info($data['fuyou_name']['desc']),
+                ])->trueValue('开启', 1)->falseValue('关闭', 0)->info($data['fuyou_pay_status']['desc'])
             ])->option('余额支付', [
                 Build::switch('balance_func_status', $data['balance_func_status']['info'], (int)$data['balance_func_status']['value'])->falseValue('关闭', 0)->trueValue('开启', 1)->control(1, [
                     Build::switch('yue_pay_status', $data['yue_pay_status']['info'], (int)$data['yue_pay_status']['value'])->trueValue('开启', 1)->falseValue('关闭', 2)->info($data['yue_pay_status']['desc']),
@@ -2157,20 +2135,6 @@ WSS;
                 Build::switch('offline_pay_status', $data['offline_pay_status']['info'], (int)$data['offline_pay_status']['value'])->trueValue('开启', 1)->falseValue('关闭', 2)->control(1, [
                     Build::switch('offline_pay_type', $data['offline_pay_type']['info'], (int)$data['offline_pay_type']['value'])->trueValue('开启', 1)->falseValue('关闭', 0)->info($data['offline_pay_type']['desc']),
                 ])->info($data['offline_pay_status']['desc'])
-            ])->option('支付宝支付', [
-                Build::alert('登录支付宝商家(地址：https://b.alipay.com，需要配置ip白名单以及回调地址回调地址：' . $site_url . ')，帮助文档地址：https://doc.mohe.com/web/pro/moheprov2/1204', Alert::WARNING)->showIcon(true),
-                Build::switch('ali_pay_status', $data['ali_pay_status']['info'], (int)$data['ali_pay_status']['value'])->control(1, [
-                    Build::input('ali_pay_appid', $data['ali_pay_appid']['info'], $data['ali_pay_appid']['value'])->info($data['ali_pay_appid']['desc']),
-                    Build::input('alipay_public_key', $data['alipay_public_key']['info'], $data['alipay_public_key']['value'])->rows(5)->type('textarea')->info($data['alipay_public_key']['desc']),
-                    Build::input('alipay_merchant_private_key', $data['alipay_merchant_private_key']['info'], $data['alipay_merchant_private_key']['value'])->rows(5)->type('textarea')->info($data['alipay_merchant_private_key']['desc']),
-                ])->trueValue('开启', 1)->falseValue('关闭', 0)->info($data['ali_pay_status']['desc']),
-            ])->option('富友支付配置', [
-                Build::switch('fuyou_pay_status', $data['fuyou_pay_status']['info'], (int)$data['fuyou_pay_status']['value'])->control(1, [
-                    Build::input('fuyou_id', $data['fuyou_id']['info'], $data['fuyou_id']['value'])->info($data['fuyou_id']['desc']),
-                    Build::input('fuyou_key', $data['fuyou_key']['info'], $data['fuyou_key']['value'])->info($data['fuyou_key']['desc']),
-                    Build::input('fuyou_sub_appid', $data['fuyou_sub_appid']['info'], $data['fuyou_sub_appid']['value'])->info($data['fuyou_sub_appid']['desc']),
-                    Build::input('fuyou_name', $data['fuyou_name']['info'], $data['fuyou_name']['value'])->info($data['fuyou_name']['desc']),
-                ])->trueValue('开启', 1)->falseValue('关闭', 0)->info($data['fuyou_pay_status']['desc'])
             ]),
         ]);
 
