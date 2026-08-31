@@ -9,6 +9,7 @@ php "$test_dir/php/static-contract.php"
 php_files=(
   "后端代码/app/controller/admin/v1/system/config/SystemConfig.php"
   "后端代码/app/controller/api/v1/Pay.php"
+  "后端代码/app/controller/api/v1/user/UserRecharge.php"
   "后端代码/app/controller/api/v1/order/OtherOrder.php"
   "后端代码/app/listener/pay/PayNotifyListener.php"
   "后端代码/app/services/order/StoreDebtServices.php"

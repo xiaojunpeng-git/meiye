@@ -36,7 +36,7 @@
 			</view>
 		</view>
 		<view class="w-full h-128 fixed-lb pb-safe flex-center">
-			<view class="w-710 h-80 flex-center rd-40rpx text--w111-fff bg-color fs-28" @click="goPay()">确认付款</view>
+			<view class="w-710 h-80 flex-center rd-40rpx text--w111-fff bg-color fs-28" @click="goPay()">{{ paying ? '正在发起支付' : '确认付款' }}</view>
 		</view>
 		<view v-show="false" v-html="formContent"></view>
 	</view>
@@ -101,6 +101,7 @@
 					}
 				],
 				paytype:'',
+				paying: false,
 				payTypeList:[]
 			}
 		},
@@ -221,6 +222,7 @@
 			},
 			goPay(){
 				let that = this;
+				if (that.paying) return;
 				if(that.active == -1) return that.$util.Tips({
 					title: '请选择付款方式'
 				});
@@ -234,6 +236,7 @@
 				uni.showLoading({
 					title: '支付中'
 				});
+				that.paying = true;
 
 				let funApi = '';
 				if(this.fromType == 'order'){
@@ -321,16 +324,18 @@
               path: `/pages/qrPay/qrPay?t=${encodeURIComponent(qr_code)}`,
               envVersion: 'release',
               fail: (error) => {
-                that.$util.Tips({
+				that.$util.Tips({
                   title: (error && error.errMsg) || '未能打开富友支付'
-                });
+				});
+				that.paying = false;
               }
             })
             // #endif
             return false;
           }
           if(urlLink != ''){
-            uni.hideLoading();
+			uni.hideLoading();
+			that.paying = false;
             // #ifdef APP-PLUS
             uni.navigateTo({
               url: `/pages/annex/web_view/index?url=${encodeURIComponent(urlLink)}`
@@ -399,8 +404,9 @@
 					}
 				}).catch(err=>{
 					uni.hideLoading();
+					that.paying = false;
 					return that.$util.Tips({
-						title: err
+						title: (err && err.msg) || String(err || '支付发起失败')
 					});
 				})
 			},
@@ -450,6 +456,7 @@
 			},
 			pageReject(msg,backUrl){
 				uni.hideLoading();
+				this.paying = false;
 				return this.$util.Tips({
 					title: msg
 				}, {

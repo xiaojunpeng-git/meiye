@@ -1737,12 +1737,16 @@ class StoreDebtServices extends BaseServices
 
         if (in_array($payType, [PayServices::WEIXIN_PAY, 'weixin', 'routine'])) {
             $payTypeKey = $from === 'routine' ? 'routine' : ($from === 'weixinh5' ? 'weixinh5' : 'weixin');
-            /** @var WechatUserServices $wechatUser */
-            $wechatUser = app()->make(WechatUserServices::class);
-            $userType = in_array($from, ['routine', 'weixin', 'weixinh5']) ? ($from === 'routine' ? 'routine' : 'wechat') : 'routine';
-            $openid = $wechatUser->uidToOpenid($uid, $userType);
-            if (!$openid) {
-                throw new ValidateException('获取用户openid失败,无法支付');
+            $openid = '';
+            // 普通浏览器由富友生成付款码并跳转承载小程序，不依赖公众号 OpenID。
+            if ($from !== 'weixinh5') {
+                /** @var WechatUserServices $wechatUser */
+                $wechatUser = app()->make(WechatUserServices::class);
+                $userType = $from === 'routine' ? 'routine' : 'wechat';
+                $openid = $wechatUser->uidToOpenid($uid, $userType);
+                if (!$openid) {
+                    throw new ValidateException('获取用户openid失败,无法支付');
+                }
             }
             $repayNo = $this->generateRepayNo();
             $body = '欠款补交-' . ($debt['order_sn'] ?: $repayNo);

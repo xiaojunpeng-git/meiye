@@ -20,12 +20,14 @@ $pay = $read('后端代码/app/services/pay/PayServices.php');
 $fuyou = $read('后端代码/mohe/services/wechat/HwcPayService.php');
 $route = $read('后端代码/route/api.php');
 $controller = $read('后端代码/app/controller/api/v1/Pay.php');
+$rechargeController = $read('后端代码/app/controller/api/v1/user/UserRecharge.php');
 $adminForm = $read('后端代码/app/services/system/config/SystemConfigServices.php');
 $adminSave = $read('后端代码/app/controller/admin/v1/system/config/SystemConfig.php');
 $cashier = $read('前端代码/uniapp/pages/goods/cashier/index.vue');
 $cashierInfo = $read('后端代码/app/services/order/StoreOrderCreateServices.php');
 $debt = $read('后端代码/app/services/order/StoreDebtServices.php');
 $orders = $read('后端代码/app/services/order/StoreOrderServices.php');
+$upgrade = $read('后端代码/database/upgrades/2026-09-01-富友渠道订单映射/02-正式升级.sql');
 
 $assert(str_contains($pay, 'public static function fuyouPayReady()'), '缺少富友支付统一就绪口径');
 $assert(!str_contains($pay, 'AliPayService::instance()->create('), '会员支付宝仍可能回退原生支付宝接口');
@@ -41,7 +43,11 @@ $assert(str_contains($fuyou, "\$successAction === 'member_recharge'") && str_con
 $assert(str_contains($fuyou, 'hash_equals('), '富友回调没有使用常量时间签名比较');
 $assert(str_contains($fuyou, 'CURLOPT_SSL_VERIFYPEER => true'), '富友请求没有开启 TLS 证书校验');
 $assert(!str_contains($fuyou, 'CURLOPT_SSL_VERIFYPEER, false'), '富友请求仍关闭 TLS 证书校验');
-$assert(str_contains($fuyou, "return (bool)Event::until('pay.notify'"), '本地入账失败时富友回调仍可能返回成功');
+$assert(str_contains($fuyou, "\$settled = (bool)Event::until('pay.notify'") && str_contains($fuyou, 'return $settled;'), '本地入账失败时富友回调仍可能返回成功');
+$assert(str_contains($fuyou, 'reserveChannelOrderNo('), '发起支付前没有生成富友合规渠道单号');
+$assert(str_contains($fuyou, "Db::name('fuyou_payment_attempt')->insert"), '富友渠道单号与业务单号没有持久映射');
+$assert(str_contains($fuyou, 'resolveOrderId('), '富友回调没有通过渠道映射还原业务单号');
+$assert(str_contains($fuyou, "private const CHANNEL_ORDER_LENGTH = 20"), '富友渠道单号长度未固定为已实测通过的20位');
 $notifyBlock = preg_match('/public function notify\(.*?\n    \}/s', $fuyou, $match) ? $match[0] : '';
 $assert(str_contains($notifyBlock, 'assertCredentials(false)') && !str_contains($notifyBlock, 'assertReady(false)'), '关闭新支付后会拒绝已发起订单的合法回调');
 
@@ -57,10 +63,16 @@ $assert(str_contains($adminSave, "'fuyou_sub_appid' => '富友sub_appid'"), '开
 $assert(str_contains($adminSave, "unset(\$post['fuyou_key'])"), '富友密钥空值可能覆盖已保存密钥');
 
 $assert(str_contains($cashier, 'window.location.href = urlLink'), 'H5 没有处理富友付款链接');
+$assert(str_contains($cashier, "(err && err.msg) || String(err || '支付发起失败')"), '支付失败原因仍可能在会员端静默丢失');
+$assert(str_contains($cashier, 'if (that.paying) return;'), '确认付款仍可被连续重复提交');
+$assert(str_contains($rechargeController, "\$from === 'weixinh5'") && str_contains($rechargeController, "? 'weixinh5'"), '普通浏览器充值微信支付仍可能错误索取公众号 OpenID');
 $assert(str_contains($cashier, 'encodeURIComponent(urlLink)'), 'APP 富友付款链接未做 URL 编码');
 $assert(str_contains($cashier, 'wx.openEmbeddedMiniProgram'), '小程序没有打开富友承载小程序');
 $assert(str_contains($cashierInfo, 'PayServices::fuyouPayReady()'), '会员收银台仍读取原生支付开关');
 $assert(str_contains($debt, "'pay_weixin_open' => (int)PayServices::fuyouPayReady()"), '欠款收银台仍读取原生微信支付开关');
+$assert(str_contains($debt, "if (\$from !== 'weixinh5')"), '普通浏览器欠款微信支付仍可能错误索取公众号 OpenID');
 $assert(substr_count($orders, 'PayServices::fuyouPayReady()') >= 2, '订单支付方式校验未统一到富友配置');
+$assert(str_contains($upgrade, 'eb_fuyou_payment_attempt') && str_contains($upgrade, 'UNIQUE KEY `uk_channel_order_no`'), '缺少富友渠道订单映射表或唯一约束');
+$assert(str_contains($upgrade, 'eb_wechat_accesstoken'), '普通浏览器微信支付缺少 URL Link 访问令牌缓存表');
 
 echo "member fuyou payment static contract: PASS\n";

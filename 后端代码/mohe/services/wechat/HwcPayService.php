@@ -23,6 +23,7 @@ class HwcPayService
     private const CALLBACK_CHANNEL_ALIPAY = 'alipay';
     private const CALLBACK_EVENT_ALIPAY = 'aliyun';
     private const LEGACY_ORDER_PREFIX = '13883';
+    private const CHANNEL_ORDER_LENGTH = 20;
 
     /** @var array<string, string> */
     protected $config = [
@@ -121,6 +122,7 @@ class HwcPayService
         ]));
 
         $result = $this->postJson(self::API_PRECREATE, $post);
+        $this->recordAttemptResponse($post['mchnt_order_no'], $result);
         $this->assertSuccessResponse($result, '支付宝支付');
         $url = (string)($result['qr_code'] ?? '');
         if ($url === '') {
@@ -168,6 +170,7 @@ class HwcPayService
         }
 
         $result = $this->postJson($url, $post);
+        $this->recordAttemptResponse($post['mchnt_order_no'], $result);
         $this->assertSuccessResponse($result, '微信支付');
 
         if ($type === 'mini') {
@@ -247,7 +250,8 @@ class HwcPayService
             return false;
         }
 
-        $orderId = $this->normalizeOrderId((string)$data['mchnt_order_no']);
+        $channelOrderNo = (string)$data['mchnt_order_no'];
+        $orderId = $this->resolveOrderId($channelOrderNo, $successAction, (string)$data['order_amt']);
         if (!$this->amountMatchesOrder($successAction, $orderId, (string)$data['order_amt'])) {
             Log::error('富友支付回调金额与本地订单不一致，订单号：' . $this->maskOrderId($orderId));
             return false;
@@ -264,7 +268,17 @@ class HwcPayService
             ? self::CALLBACK_EVENT_ALIPAY
             : self::CALLBACK_CHANNEL_WECHAT;
 
-        return (bool)Event::until('pay.notify', [$notify, $eventChannel]);
+        $settled = (bool)Event::until('pay.notify', [$notify, $eventChannel]);
+        if ($settled) {
+            Db::name('fuyou_payment_attempt')
+                ->where('channel_order_no', $channelOrderNo)
+                ->update([
+                    'status' => 'paid',
+                    'transaction_id' => $tradeNo,
+                    'update_time' => time(),
+                ]);
+        }
+        return $settled;
     }
 
     /**
@@ -290,13 +304,14 @@ class HwcPayService
         if (bccomp($amount, '0', 0) <= 0) {
             throw new PayException('富友支付金额必须大于0');
         }
+        $channelOrderNo = $this->reserveChannelOrderNo($orderId, $successAction, $channel, $amount);
 
         return [
             'version' => '1.10',
             'mchnt_cd' => $this->config['mchntCd'],
             'random_str' => $this->getRandom(32),
             'order_amt' => $amount,
-            'mchnt_order_no' => $orderId,
+            'mchnt_order_no' => $channelOrderNo,
             'txn_begin_ts' => date('YmdHis'),
             'goods_des' => $this->config['fuyou_name'],
             'term_id' => $this->getRandom(8),
@@ -336,6 +351,77 @@ class HwcPayService
             return substr($orderId, strlen(self::LEGACY_ORDER_PREFIX));
         }
         return $orderId;
+    }
+
+    /**
+     * 富友当前商户要求商户订单号为“13883 + 15位数字”。业务单号含 cz/wx/hy/HK 等前缀，
+     * 不能靠截断或去字母转换，否则回调无法可靠定位本地订单，因此单独持久化渠道尝试映射。
+     */
+    private function reserveChannelOrderNo(
+        string $orderId,
+        string $successAction,
+        string $channel,
+        string $amountInCents
+    ): string {
+        $now = time();
+        for ($attempt = 0; $attempt < 20; $attempt++) {
+            $channelOrderNo = self::LEGACY_ORDER_PREFIX
+                . date('ymdHis', $now)
+                . str_pad((string)random_int(0, 999), 3, '0', STR_PAD_LEFT);
+            if (strlen($channelOrderNo) !== self::CHANNEL_ORDER_LENGTH || !ctype_digit($channelOrderNo)) {
+                continue;
+            }
+            try {
+                Db::name('fuyou_payment_attempt')->insert([
+                    'channel_order_no' => $channelOrderNo,
+                    'business_order_no' => $orderId,
+                    'business_type' => $this->normalizeAction($successAction),
+                    'channel' => $channel,
+                    'amount_cents' => (int)$amountInCents,
+                    'status' => 'created',
+                    'transaction_id' => '',
+                    'response_code' => '',
+                    'add_time' => $now,
+                    'update_time' => $now,
+                ]);
+                return $channelOrderNo;
+            } catch (\Throwable $e) {
+                // 唯一键碰撞可重试；表未升级或数据库异常最终统一失败，绝不退回不合规业务单号。
+                if ($attempt === 19) {
+                    Log::error('富友支付渠道单号映射创建失败：' . $e->getMessage());
+                }
+            }
+        }
+        throw new PayException('富友支付渠道单号生成失败');
+    }
+
+    private function resolveOrderId(string $channelOrderNo, string $successAction, string $amountInCents): string
+    {
+        $attempt = Db::name('fuyou_payment_attempt')
+            ->where('channel_order_no', $channelOrderNo)
+            ->find();
+        if (!$attempt) {
+            // 兼容本次映射上线前已由旧实现发出的渠道单号。
+            return $this->normalizeOrderId($channelOrderNo);
+        }
+        if ((string)$attempt['business_type'] !== $this->normalizeAction($successAction)
+            || (string)$attempt['amount_cents'] !== $amountInCents) {
+            Log::error('富友支付回调与渠道单号映射不一致：' . $this->maskOrderId($channelOrderNo));
+            throw new PayException('富友支付回调订单映射不一致');
+        }
+        return (string)$attempt['business_order_no'];
+    }
+
+    private function recordAttemptResponse(string $channelOrderNo, array $result): void
+    {
+        $success = (string)($result['result_code'] ?? '') === '000000';
+        Db::name('fuyou_payment_attempt')
+            ->where('channel_order_no', $channelOrderNo)
+            ->update([
+                'status' => $success ? 'pending' : 'failed',
+                'response_code' => substr((string)($result['result_code'] ?? ''), 0, 32),
+                'update_time' => time(),
+            ]);
     }
 
     private function assertReady(bool $requireSubAppId): void

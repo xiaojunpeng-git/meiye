@@ -11,6 +11,7 @@
 namespace app\controller\api\v1\user;
 
 use app\Request;
+use app\services\pay\PayServices;
 use app\services\pay\RechargeServices;
 use app\services\user\UserBrokerageServices;
 use app\services\user\UserRechargeServices;
@@ -109,9 +110,12 @@ class UserRecharge
 			['quitUrl', '']
 		], true);
 		$info['order_id'] = $uni;
+		$gatewayPayType = $payType === PayServices::WEIXIN_PAY && $from === 'weixinh5'
+			? 'weixinh5'
+			: $payType;
 		/** @var RechargeServices $recharge */
 		$recharge = app()->make(RechargeServices::class);
-		$info['jsConfig'] = $recharge->recharge($uni, '', $payType);
+		$info['jsConfig'] = $recharge->recharge($uni, '', $gatewayPayType);
 		if ($from == 'weixinh5') {
 			return app('json')->status('wechat_h5_pay', '前往支付', $info);
 		} else {
