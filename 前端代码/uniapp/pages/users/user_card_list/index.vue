@@ -43,11 +43,6 @@
 				:class="[project.cardClass, { disabled: project.disabled }]"
 				@click="goProject(project)"
 			>
-				<view class="card-icon">
-					<image :src="project.image" mode="aspectFill" class="card-icon-img"></image>
-					<view v-if="project.is_card_upgraded" class="card-badge">卡升级</view>
-					<view v-else-if="project.status == 2" class="card-badge">已过期</view>
-				</view>
 				<view class="card-info">
 					<view class="card-name">{{ project.name }}</view>
 					<view class="card-desc">{{ project.desc }}</view>
@@ -91,11 +86,6 @@
 						:class="[project.cardClass, { disabled: project.disabled }]"
 						@click="goProject(project)"
 					>
-						<view class="card-icon">
-							<image :src="project.image" mode="aspectFill" class="card-icon-img"></image>
-							<view v-if="project.is_card_upgraded" class="card-badge">卡升级</view>
-							<view v-else-if="project.status == 2" class="card-badge">已过期</view>
-						</view>
 						<view class="card-info">
 							<view class="card-name">{{ project.name }}</view>
 							<view class="card-desc">{{ project.desc }}</view>
@@ -111,6 +101,9 @@
 			</template>
 			<view class="pb-safe"></view>
 		</scroll-view>
+		<view :style="{ height: pdHeight * 2 + 96 + 'rpx' }" v-if="showBar"></view>
+		<view class="safe-area-inset-bottom" v-if="showBar"></view>
+		<pageFooter @newDataStatus="newDataStatus"></pageFooter>
 	</view>
 </template>
 
@@ -120,10 +113,14 @@
 	} from '@/api/user.js';
 	import { userInfo as staffUserInfo } from '@/api/admin.js';
 	import { mapGetters } from 'vuex';
+	import pageFooter from '@/components/pageFooter/index.vue';
 
 	const CARD_CLASSES = ['card-gold', 'card-rose', 'card-sage', 'card-lavender'];
 
 	export default {
+		components: {
+			pageFooter,
+		},
 		data() {
 			return {
 				pageUid: '',
@@ -137,6 +134,8 @@
 				expandedCategories: {},
 				statusBarHeight: 0,
 				colorIndex: 0,
+				showBar: false,
+				pdHeight: 0,
 			};
 		},
 		computed: {
@@ -204,6 +203,10 @@
 			this.initPage();
 		},
 		methods: {
+			newDataStatus(val, num) {
+				this.showBar = !!val;
+				this.pdHeight = num || 0;
+			},
 			initPage() {
 				this.viewUid = this.pageUid || this.uid || '';
 				if (this.isViewingOther) {
