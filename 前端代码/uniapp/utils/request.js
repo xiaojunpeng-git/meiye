@@ -30,6 +30,16 @@ function toLoginMp(){
 	});
 }
 
+function getRequestUrl() {
+	let url = HTTP_REQUEST_URL;
+	// #ifdef H5
+	if (/^(127\.0\.0\.1|localhost)$/.test(window.location.hostname) && window.location.port === '18093') {
+		url = window.location.origin;
+	}
+	// #endif
+	return url;
+}
+
 function decompress(str) {
       return pako.inflateRaw(base64ToUint8Array(str), {
         to: 'string'
@@ -57,7 +67,7 @@ function baseRequest(url, method, data, {
 	noVerify = false,
 	merchantAuth = false,
 }) {
-	let Url = HTTP_REQUEST_URL,
+	let Url = getRequestUrl(),
 		header = Object.assign({}, HEADER);
 
 	const merchantToken = merchantAuth ? Cache.get(MERCHANT_STAFF_TOKEN) : '';

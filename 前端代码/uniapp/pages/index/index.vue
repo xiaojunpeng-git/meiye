@@ -128,6 +128,7 @@
 
 <script>
 	const app = getApp();
+	const DIY_CACHE_REVISION = '2';
 	import colors from "@/mixins/color";
 	import couponWindow from '@/components/couponWindow/index';
 	import permision from "@/js_sdk/wa-permission/permission.js";
@@ -872,10 +873,13 @@
 				this.storeIndex = storeIndex;
 				this.entryStore();
 			},
-			getDiyData() {
+			getDiyData(diyVersion = '') {
 				getDiy(0).then(res => {
-					uni.setStorageSync('diyData', JSON.stringify(res.data));
 					this.setDiyData(res.data);
+					uni.setStorageSync('diyData', JSON.stringify(res.data));
+					if (diyVersion) {
+						uni.setStorageSync('diyVersion', diyVersion);
+					}
 				}).catch(error => {
 					// #ifdef APP-PLUS
 					if (error.status) {
@@ -894,19 +898,31 @@
 			},
 			diyData() {
 				let diyData = uni.getStorageSync('diyData');
-				if (diyData) {
-					getDiyVersion(0).then(res => {
-						let diyVersion = uni.getStorageSync('diyVersion');
-						if ((res.data.version + '0') === diyVersion) {
+				getDiyVersion(0).then(res => {
+					let diyVersion = uni.getStorageSync('diyVersion');
+					let latestVersion = `${res.data.version}0:${DIY_CACHE_REVISION}`;
+					if (diyData && latestVersion === diyVersion) {
+						try {
 							this.setDiyData(JSON.parse(diyData));
-						} else {
-							uni.setStorageSync('diyVersion', (res.data.version + '0'));
-							this.getDiyData();
+							return;
+						} catch (error) {
+							uni.removeStorageSync('diyData');
+							uni.removeStorageSync('diyVersion');
 						}
-					});
-				} else {
+					}
+					this.getDiyData(latestVersion);
+				}).catch(() => {
+					if (diyData) {
+						try {
+							this.setDiyData(JSON.parse(diyData));
+							return;
+						} catch (error) {
+							uni.removeStorageSync('diyData');
+							uni.removeStorageSync('diyVersion');
+						}
+					}
 					this.getDiyData();
-				}
+				});
 			},
 		    entryStore(num){
 				// num 更新门店或是位置时需要重新获取门店商品数据（针对得是单店模式）
