@@ -9,9 +9,9 @@
 					<!-- #ifdef APP-PLUS || H5 -->
 					<view class="h-80 pl-20 pr-20 flex-between-center relative">
 					<!-- #endif -->
-						<view class="abs-lt flex-center w-100 h-80">
-							<navigator class="" url="/pages/index/index" open-type="switchTab" hover-class="none">
-								<text class="iconfont icon-ic_home fs-40"></text>
+						<view class="abs-lt flex-center w-140 h-80">
+							<navigator class="fs-24" :class="tabActive == 2 ? 'text--w111-fff' : 'text--w111-333'" url="/pages/index/index" open-type="switchTab" hover-class="none">
+								<text>返回商城</text>
 							</navigator>
 							<!-- <view class="flex-center opac w-154 h-58 rd-29rpx">
 							<view class="iconfont icon-ic_left fs-34 text--w111-333" @tap="backTap"></view>
