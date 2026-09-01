@@ -80,6 +80,10 @@ const props = defineProps({
   onRecalculate: {
     type: Function,
     default: null
+  },
+  confirmationMode: {
+    type: Boolean,
+    default: false
   }
 })
 
@@ -179,8 +183,8 @@ const canSubmitReservation = computed(() => (
   )
 ))
 const submissionTitle = computed(() => {
-  if (isProcessing.value) return '正在保存预约'
-  if (isFailed.value) return '预约保存未完成'
+  if (isProcessing.value) return props.confirmationMode ? '正在保存并确认预约' : '正在保存预约'
+  if (isFailed.value) return props.confirmationMode ? '预约确认未完成' : '预约保存未完成'
   return ''
 })
 const submissionDescription = computed(() => {
@@ -655,8 +659,8 @@ useModalFocusTrap({
     <header class="reservation-editor-overlay__header">
       <div>
         <p>预约</p>
-        <h2 id="reservation-editor-title">{{ draft.id ? '编辑预约' : '新增预约' }}</h2>
-        <span>按顺序填写即可；确认后直接保存预约单据。</span>
+        <h2 id="reservation-editor-title">{{ confirmationMode ? '修改并确认预约' : (draft.id ? '编辑预约' : '新增预约') }}</h2>
+        <span>{{ confirmationMode ? '客户姓名不可修改；核对其余信息后保存并确认。' : '按顺序填写即可；确认后直接保存预约单据。' }}</span>
       </div>
       <button type="button" class="reservation-editor-button reservation-editor-button--secondary" :disabled="!canClose" @click="closeEditor">关闭</button>
     </header>
@@ -791,7 +795,7 @@ useModalFocusTrap({
       <section class="reservation-editor-step reservation-editor-step--summary">
         <header class="reservation-editor-step__header">
           <span class="reservation-editor-step__number">7</span>
-          <div><h3>确认预约内容</h3><p>确认后保存预约单据。</p></div>
+          <div><h3>确认预约内容</h3><p>{{ confirmationMode ? '提交后保存修改，并将预约同步为待服务。' : '确认后保存预约单据。' }}</p></div>
         </header>
         <dl class="reservation-editor-summary">
           <div v-for="row in summaryRows" :key="row.label"><dt>{{ row.label }}</dt><dd>{{ row.value }}</dd></div>
@@ -809,7 +813,7 @@ useModalFocusTrap({
         <template v-else>
           <button type="button" class="reservation-editor-button reservation-editor-button--secondary" :disabled="!canClose" @click="closeEditor">取消</button>
           <button type="submit" class="reservation-editor-button reservation-editor-button--primary" :disabled="!canSubmitReservation || isSelecting">
-            {{ isSubmitting ? '正在保存…' : '确认预约' }}
+            {{ isSubmitting ? (confirmationMode ? '正在确认…' : '正在保存…') : (confirmationMode ? '保存并确认' : '确认预约') }}
           </button>
         </template>
       </footer>

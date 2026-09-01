@@ -42,11 +42,13 @@ export default{
 			hotLimit: 10,
 			hostProduct:[],
 			orderId:0,
+			reservationId: 0,
 			bookUid: 0
 		}
 	},
 	onLoad(options){
 		this.orderId = options.orderId || 0;
+		this.reservationId = Number(options.reservationId || 0) || 0;
 		this.bookUid = Number(options.book_uid || 0) || 0;
 		this.getHostProduct();
 	},
@@ -72,6 +74,9 @@ export default{
 		  });
 		},
 		goReservation(){
+			if (this.reservationId > 0) {
+				return goWithYuyueSubscribe(`/pages/goods/reservation_details/index?id=${this.reservationId}`);
+			}
 			let url = `/pages/goods/reservation_list/index?orderId=${this.orderId}`;
 			if (this.bookUid > 0) {
 				url += `&book_uid=${this.bookUid}`;

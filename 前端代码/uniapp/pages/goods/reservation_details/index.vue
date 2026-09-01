@@ -58,7 +58,7 @@
 				</view>
 			</view>
 			<view class="mt-20 bg--w111-fff rd-16rpx pt-32 pr-24 pl-24 pb-32 text-center"
-				v-if="[-1,2].indexOf(info.status) ==-1">
+				v-if="showVerifyCode">
 				<view class="fs-28 text--w111-333">请提醒商家核销预约单</view>
 				<view class="w-320 h-320 m-auto mt-40">
 					<image :src="codeSrc" class="w-full h-full"></image>
@@ -157,7 +157,7 @@
 					<text class="fs-28">{{info.service_end_time}}</text>
 				</view>
 			</view>
-			<view v-if="info.service_describe || info.service_images.length" class="mt-20 bg--w111-fff rd-16rpx pt-32 pr-24 pl-24 pb-32 text--w111-333 fs-28">
+			<view v-if="info.service_describe || (info.service_images && info.service_images.length)" class="mt-20 bg--w111-fff rd-16rpx pt-32 pr-24 pl-24 pb-32 text--w111-333 fs-28">
 				<view>服务凭证</view>
 				<view class="mt-24 mb-8">{{info.service_describe}}</view>
 				<view class="acea-row row-middle">
@@ -167,10 +167,10 @@
 				</view>
 			</view>
 			<view class="heights"></view>
-			<view class="footer acea-row row-middle row-right" v-if="info.status == 3 || info.status == -1">
-				<view v-if="info.status == 3" class="border-CCCCCC w-144 h-56 rd-30rpx flex-center fs-24"
+			<view class="footer acea-row row-middle row-right" v-if="canCancel || canDelete">
+				<view v-if="canCancel" class="border-CCCCCC w-144 h-56 rd-30rpx flex-center fs-24"
 					@click="showModalChange(0)">取消预约</view>
-				<view v-else-if="info.status == -1" class="acea-row row-middle">
+				<view v-else-if="canDelete" class="acea-row row-middle">
 					<view class="border-CCCCCC w-168 h-56 rd-30rpx flex-center fs-24" @click="showModalChange(1)">删除预约单
 					</view>
 					<navigator v-if="info.is_reservation && mobileReservationOpen" hover-class='none'
@@ -253,6 +253,20 @@
 			addonProjectList() {
 				return this.projectList.length > 1 ? this.projectList.slice(1) : [];
 			},
+			statusCode() {
+				return this.info.status === undefined || this.info.status === null ? '' : String(this.info.status);
+			},
+			canCancel() {
+				return this.statusCode === 'PENDING_CONFIRMATION' || Number(this.info.status) === 3;
+			},
+			canDelete() {
+				return ['CANCELLED', 'REJECTED'].indexOf(this.statusCode) !== -1 || Number(this.info.status) === -1;
+			},
+			showVerifyCode() {
+				if (!this.info.verify_code) return false;
+				return ['UNSTARTED', 'IN_SERVICE'].indexOf(this.statusCode) !== -1
+					|| [0, 1].indexOf(Number(this.info.status)) !== -1;
+			},
 		},
 		onLoad(options) {
 			this.id = options.id
@@ -316,10 +330,10 @@
 				getReservationOrderDetail(this.id).then(res => {
 					let data = res.data;
 					this.info = data;
-					this.cartInfo = data.cart_info;
-					this.productInfo = data.cart_info.productInfo;
-					this.attrInfo = data.cart_info.productInfo.attrInfo;
-					this.storeInfo = data.storeInfo;
+					this.cartInfo = data.cart_info || {};
+					this.productInfo = this.cartInfo.productInfo || {};
+					this.attrInfo = this.productInfo.attrInfo || {};
+					this.storeInfo = data.storeInfo || {};
 				}).catch(err => {
 					this.$util.Tips({
 						title: err

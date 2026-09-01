@@ -475,7 +475,15 @@ class CashierV3ActionManifest
             'save-service-room-assignment' => $deferred($inactiveService),
 
             // C3 | reservation
-            'confirm-reservation' => $deferred($inactiveReservation),
+            'confirm-reservation' => [
+                'required_event_types' => ['reservation.confirmed'],
+                'allowed_event_types' => ['reservation.confirmed'],
+                'event_rules' => [
+                    'reservation.confirmed' => ['min_count'=>1,'max_count'=>1,'aggregate_type'=>'reservation','source_type'=>'confirm-reservation','aggregate_version'=>null],
+                ],
+                'eventless_reason' => '', 'activation_blocked_until_event_contract' => false,
+                'consumers' => ['reservation.confirmed' => []],
+            ],
             'start-reservation-service' => [
                 'required_event_types' => ['reservation.service_started'],
                 'allowed_event_types' => ['reservation.service_started', 'room.occupied'],
@@ -531,7 +539,15 @@ class CashierV3ActionManifest
                 'activation_blocked_until_event_contract' => false,
                 'consumers' => ['reservation.cancelled' => []],
             ],
-            'reject-reservation' => $deferred($inactiveReservation),
+            'reject-reservation' => [
+                'required_event_types' => ['reservation.rejected'],
+                'allowed_event_types' => ['reservation.rejected'],
+                'event_rules' => [
+                    'reservation.rejected' => ['min_count'=>1,'max_count'=>1,'aggregate_type'=>'reservation','source_type'=>'reject-reservation','aggregate_version'=>null],
+                ],
+                'eventless_reason' => '', 'activation_blocked_until_event_contract' => false,
+                'consumers' => ['reservation.rejected' => []],
+            ],
             'mark-reservation-no-show' => $deferred($inactiveReservation),
             'create-reservation' => [
                 'required_event_types' => ['reservation.created'],

@@ -435,7 +435,7 @@ export function getReservationOrderInfo(id, data) {
  * @param object data
  */
 export function postReservationOrderCreate(id,data) {
-	return request.post(`reservation/order/create/${id}`,data);
+	return request.post(`reservation/v3/order/create/${id}`,data);
 }
 
 /**
@@ -443,7 +443,7 @@ export function postReservationOrderCreate(id,data) {
  * @param object data
  */
 export function getReservationOrderList(data) {
-	return request.get(`reservation/order/list`,data);
+	return request.get(`reservation/v3/order/list`,data);
 }
 
 /**
@@ -451,7 +451,7 @@ export function getReservationOrderList(data) {
  * @param object data
  */
 export function getReservationOrderDetail(id) {
-	return request.get(`reservation/order/detail/${id}`);
+	return request.get(`reservation/v3/order/detail/${id}`);
 }
 
 /**
@@ -459,7 +459,7 @@ export function getReservationOrderDetail(id) {
  * @param object data
  */
 export function postReservationOrderCancel(id) {
-	return request.post(`reservation/order/cancel/${id}`);
+	return request.post(`reservation/v3/order/cancel/${id}`);
 }
 
 /**
@@ -467,7 +467,7 @@ export function postReservationOrderCancel(id) {
  * @param object data
  */
 export function delReservationOrder(id) {
-	return request.delete(`reservation/order/del/${id}`);
+	return request.delete(`reservation/v3/order/del/${id}`);
 }
 
 /**

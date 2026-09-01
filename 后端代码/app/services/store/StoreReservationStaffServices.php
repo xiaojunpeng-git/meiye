@@ -3,7 +3,9 @@ namespace app\services\store;
 
 use app\dao\order\StoreReservationOrderDao;
 use app\services\BaseServices;
+use app\services\cashier\v3\reservation\CashierV3ReservationLifecycleServices;
 use think\exception\ValidateException;
+use think\facade\Db;
 
 /**
  * 预约选人 / 可用时段（按门店员工，无距离筛选）
@@ -529,20 +531,48 @@ class StoreReservationStaffServices extends BaseServices
         return $slots;
     }
 
-    /**
-     * 有效预约单（待确认/待服务/服务中）
-     */
+    /** New-generation V3 is the only availability authority after cutover. */
     protected function getActiveStaffReservations(int $storeId, int $staffId = 0, string $fromDate = '', int $excludeReservationId = 0): array
     {
-        $where = [
-            'store_id' => $storeId,
-            'status' => [0, 1, 3],
-            'is_del' => 0,
-            'is_system_del' => 0,
-        ];
-        $list = $this->dao->getList($where, 'id,service_staff_id,staff_choose,reservation_time,reservation_start,reservation_end,service_duration_minutes,status', 0, 0);
-        if (!$list) {
-            return [];
+        $query = Db::name('cashier_v3_reservation')
+            ->where('tenant_id', \app\services\cashier\v3\CashierV3ScopeResolver::TENANT_SCOPE_ID)
+            ->where('lifecycle_generation', CashierV3ReservationLifecycleServices::GENERATION)
+            ->where('store_id', $storeId)
+            ->whereIn('status', ['PENDING_CONFIRMATION', 'UNSTARTED', 'IN_SERVICE']);
+        if ($excludeReservationId > 0) $query->where('id', '<>', $excludeReservationId);
+        $fromTs = $fromDate ? strtotime($fromDate) : 0;
+        if ($fromTs > 0) $query->where('appointment_end_at', '>=', $fromTs);
+        $headers = $query->field('id,appointment_start_at,appointment_end_at,status')->order('appointment_start_at asc,id asc')->select();
+        $headers = is_object($headers) && method_exists($headers, 'toArray') ? $headers->toArray() : (array)$headers;
+        if (!$headers) return [];
+        $reservationIds = array_values(array_unique(array_map('intval', array_column($headers, 'id'))));
+        $lines = Db::name('cashier_v3_reservation_line')->whereIn('reservation_id', $reservationIds)
+            ->field('reservation_id,artisan_staff_ids_json')->order('reservation_id asc,id asc')->select();
+        $lines = is_object($lines) && method_exists($lines, 'toArray') ? $lines->toArray() : (array)$lines;
+        $staffByReservation = [];
+        foreach ($lines as $line) {
+            $ids = json_decode((string)($line['artisan_staff_ids_json'] ?? '[]'), true);
+            foreach (is_array($ids) ? $ids : [] as $id) {
+                $id = (int)$id;
+                if ($id > 0) $staffByReservation[(int)$line['reservation_id']][$id] = $id;
+            }
+        }
+        $list = [];
+        foreach ($headers as $header) {
+            $ids = array_values($staffByReservation[(int)$header['id']] ?? []);
+            if (!$ids || ($staffId > 0 && !in_array($staffId, $ids, true))) continue;
+            $start = (int)$header['appointment_start_at'];
+            $end = max($start + 60, (int)$header['appointment_end_at']);
+            $list[] = [
+                'id' => (int)$header['id'],
+                'service_staff_id' => (int)($ids[0] ?? 0),
+                'staff_choose' => array_map(static function (int $id): array { return ['staff_id' => $id]; }, $ids),
+                'reservation_time' => $start,
+                'reservation_start' => date('H:i', $start),
+                'reservation_end' => date('H:i', $end),
+                'service_duration_minutes' => max(1, (int)ceil(($end - $start) / 60)),
+                'status' => (string)$header['status'],
+            ];
         }
         if ($staffId) {
             $list = array_values(array_filter($list, function ($item) use ($staffId) {
@@ -553,7 +583,6 @@ class StoreReservationStaffServices extends BaseServices
                 return !empty($this->extractReservationStaffIds($item));
             }));
         }
-        $fromTs = $fromDate ? strtotime($fromDate) : 0;
         $result = [];
         foreach ($list as $item) {
             if ($excludeReservationId && (int)$item['id'] === $excludeReservationId) {

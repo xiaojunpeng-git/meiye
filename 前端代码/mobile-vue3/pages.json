@@ -109,6 +109,12 @@
 			}
 		},
 		{
+			"path": "src/merchant/pages/reservation-confirmations/index",
+			"style": {
+				"navigationStyle": "custom"
+			}
+		},
+		{
 			"path": "src/merchant/pages/reservations/index",
 			"style": {
 				"navigationStyle": "custom"

@@ -26,7 +26,9 @@ class Reservation extends BaseController
 
     public function listing()
     {
-        return $this->read('RESERVATION_VIEW', function (array $merchant): array { return $this->reservations->list($merchant); });
+        return $this->read('RESERVATION_VIEW', function (array $merchant): array {
+            return $this->reservations->list($merchant, $this->readPayload());
+        });
     }
 
     public function detail(int $reservationId)
@@ -45,7 +47,7 @@ class Reservation extends BaseController
 
     public function editor()
     {
-        return $this->read('RESERVATION_CREATE', function (array $merchant): array { return $this->reservations->openEditor($merchant); });
+        return $this->read('RESERVATION_CREATE', function (array $merchant): array { return $this->reservations->openEditor($merchant, $this->payload()); });
     }
 
     public function memberCandidates()
@@ -94,6 +96,20 @@ class Reservation extends BaseController
         });
     }
 
+    public function confirm(int $reservationId)
+    {
+        return $this->read('RESERVATION_MANAGE', function (array $merchant) use ($reservationId): array {
+            return $this->reservations->confirm($merchant, $reservationId, $this->payload());
+        });
+    }
+
+    public function reject(int $reservationId)
+    {
+        return $this->read('RESERVATION_MANAGE', function (array $merchant) use ($reservationId): array {
+            return $this->reservations->reject($merchant, $reservationId, $this->payload());
+        });
+    }
+
     public function endService(int $reservationId)
     {
         return $this->read('RESERVATION_MANAGE', function (array $merchant) use ($reservationId): array {
@@ -112,5 +128,13 @@ class Reservation extends BaseController
     {
         $payload = $this->request->post();
         return is_array($payload) ? $payload : [];
+    }
+
+    /** Listing accepts query-string parameters; writes remain POST-only. */
+    private function readPayload(): array
+    {
+        $query = $this->request->get();
+        $post = $this->request->post();
+        return array_merge(is_array($query) ? $query : [], is_array($post) ? $post : []);
     }
 }

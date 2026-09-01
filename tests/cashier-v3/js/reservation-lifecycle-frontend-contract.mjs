@@ -53,5 +53,10 @@ assert.match(list, /@resume-editing="resumeReservationEditing"/, '用户修改�
 assert.match(list, /isReservationSave \? \{ \.\.\.payload, silent: true \} : payload/, '预约保存不得触发通用写回执弹窗')
 assert.doesNotMatch(manifest, /'create-reservation': 'query-reservation-result'|'update-reservation': 'query-reservation-result'/, '预约保存不得进入原请求查询恢复流程')
 assert.match(editor, /已购项目来源/, '仅已购项目需要检查权益明细标识')
+assert.match(list, /action === 'confirm-reservation'[^]*?confirmationMode: true/, '门店确认必须先进入同一预约编辑器')
+assert.match(list, /editorConfirmationMode\.value \? 'confirm-reservation'/, '确认编辑器必须提交保存并确认命令，而不是先更新后确认')
+assert.match(list, /:confirmation-mode="editorConfirmationMode"/, '门店预约编辑器必须明确进入确认模式')
+assert.match(editor, /客户姓名不可修改；核对其余信息后保存并确认。/, '门店确认编辑器必须提示客户不可修改')
+assert.match(editor, /confirmationMode \? '保存并确认'/, '门店确认编辑器必须提供保存并确认按钮')
 
 console.log('RESERVATION_LIFECYCLE_FRONTEND_CONTRACT=PASS')

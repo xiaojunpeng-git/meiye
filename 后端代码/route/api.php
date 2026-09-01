@@ -439,6 +439,13 @@ Route::group('api', function () {
 		Route::post('reservation/order/cancel/:id', 'v1.order.StoreReservationOrder/cancelReservationOrder')->name('cancelReservationOrder'); //预约单取消
 		Route::delete('reservation/order/del/:id', 'v1.order.StoreReservationOrder/delReservationOrder')->name('delReservationOrder'); //已取消预约单删除
 		Route::get('reservation/order/purchased_items', 'v1.order.StoreReservationOrder/getUserPurchasedRemainItems')->name('reservationPurchasedItems'); //用户可预约已购项目
+		// 新生命周期会员预约：只读写 V3 权威表，不读取或迁移历史预约。
+		Route::get('reservation/v3/order/list', 'v1.order.V3ReservationOrder/listing')->name('memberV3ReservationList');
+		Route::get('reservation/v3/order/detail/:id', 'v1.order.V3ReservationOrder/detail')->name('memberV3ReservationDetail');
+		Route::post('reservation/v3/order/create/:orderId', 'v1.order.V3ReservationOrder/create')->name('memberV3ReservationCreate');
+		Route::post('reservation/v3/order/cancel/:id', 'v1.order.V3ReservationOrder/cancel')->name('memberV3ReservationCancel');
+		Route::delete('reservation/v3/order/del/:id', 'v1.order.V3ReservationOrder/delete')->name('memberV3ReservationDelete');
+		Route::post('reservation/v3/order/del/:id', 'v1.order.V3ReservationOrder/delete')->name('memberV3ReservationDeletePost');
 		Route::get('reservation/staff/list', 'v1.reservation.ReservationStaff/list')->name('reservationStaffListAuth'); //预约服务人员列表（按门店）
 		Route::get('reservation/staff/available_time', 'v1.reservation.ReservationStaff/availableTime')->name('reservationStaffAvailableTimeAuth'); //员工已被占用时段
 		Route::get('reservation/staff/service_time_slots', 'v1.reservation.ReservationStaff/serviceTimeSlots')->name('reservationStaffServiceTimeSlotsAuth'); //门店可预约时段

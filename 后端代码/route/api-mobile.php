@@ -84,6 +84,8 @@ Route::group('api/mobile/merchant', function () {
         Route::post('reservations', 'Reservation/create')->option(['real_name' => '手机商家端创建预约']);
         Route::put('reservations/:reservationId', 'Reservation/update')->pattern(['reservationId' => '\\d+'])->option(['real_name' => '手机商家端编辑预约']);
         Route::delete('reservations/:reservationId', 'Reservation/delete')->pattern(['reservationId' => '\\d+'])->option(['real_name' => '手机商家端删除预约']);
+        Route::post('reservations/:reservationId/confirm', 'Reservation/confirm')->pattern(['reservationId' => '\\d+'])->option(['real_name' => '手机商家端确认预约']);
+        Route::post('reservations/:reservationId/reject', 'Reservation/reject')->pattern(['reservationId' => '\\d+'])->option(['real_name' => '手机商家端拒绝预约']);
         Route::post('reservations/:reservationId/start-service', 'Reservation/startService')->pattern(['reservationId' => '\\d+'])->option(['real_name' => '手机商家端开始服务']);
         Route::post('reservations/:reservationId/end-service', 'Reservation/endService')->pattern(['reservationId' => '\\d+'])->option(['real_name' => '手机商家端结束服务']);
     })->middleware([MobileMerchantSessionMiddleware::class]);

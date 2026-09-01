@@ -17,16 +17,22 @@
 						<view class="merchant-workbench__todo-copy"><text class="merchant-workbench__todo-title">跟进任务</text><text class="merchant-workbench__todo-note">{{ careFailed ? '数据暂不可用，点击进入后重试' : '未完成的跟进任务' }}</text></view>
 						<text class="merchant-workbench__chevron">›</text>
 					</view>
-					<view v-if="canOpenWorkbenchEntry('mobile.merchant.reservations')" class="merchant-workbench__todo" @tap="openTodo('reservations')">
+					<view v-if="canOpenReservationEntry('service')" class="merchant-workbench__todo" @tap="openTodo('reservations')">
 						<view class="merchant-workbench__todo-count merchant-workbench__todo-count--warm"><text>{{ reservationLoading ? '—' : (reservationFailed ? '!' : dueNotArrivedCount) }}</text></view>
 						<view class="merchant-workbench__todo-copy"><text class="merchant-workbench__todo-title">预约未到店</text><text class="merchant-workbench__todo-note">{{ reservationFailed ? '数据暂不可用，点击进入后重试' : '已到预约时间，尚未开始服务' }}</text></view>
+						<text class="merchant-workbench__chevron">›</text>
+					</view>
+					<view v-if="canOpenReservationEntry('confirmation')" class="merchant-workbench__todo" @tap="openTodo('reservation-confirmation')">
+						<view class="merchant-workbench__todo-count merchant-workbench__todo-count--confirm"><text>{{ confirmationLoading ? '—' : (confirmationFailed ? '!' : pendingConfirmationCount) }}</text></view>
+						<view class="merchant-workbench__todo-copy"><text class="merchant-workbench__todo-title">预约待确认</text><text class="merchant-workbench__todo-note">{{ confirmationFailed ? '数据暂不可用，点击进入后重试' : '处理会员提交的新预约' }}</text></view>
 						<text class="merchant-workbench__chevron">›</text>
 					</view>
 				</view>
 
 				<view class="merchant-workbench__section-heading merchant-workbench__section-heading--functions"><view><text class="merchant-workbench__section-kicker">快捷入口</text><text class="merchant-workbench__section-title">常用功能</text></view></view>
 				<view class="merchant-workbench__grid">
-					<navigator v-if="canOpenWorkbenchEntry('mobile.merchant.reservations')" class="merchant-workbench__entry" url="/src/merchant/pages/reservations/index" open-type="navigate"><view class="merchant-workbench__entry-icon merchant-workbench__entry-icon--reservation"><text>约</text></view><text class="merchant-workbench__entry-label">预约管理</text></navigator>
+					<navigator v-if="canOpenReservationEntry('confirmation')" class="merchant-workbench__entry" url="/src/merchant/pages/reservation-confirmations/index" open-type="navigate"><view class="merchant-workbench__entry-icon merchant-workbench__entry-icon--confirmation"><text>确</text></view><text class="merchant-workbench__entry-label">预约确认</text></navigator>
+					<navigator v-if="canOpenReservationEntry('service')" class="merchant-workbench__entry" url="/src/merchant/pages/reservations/index" open-type="navigate"><view class="merchant-workbench__entry-icon merchant-workbench__entry-icon--reservation"><text>服</text></view><text class="merchant-workbench__entry-label">预约服务</text></navigator>
 					<navigator v-if="canOpenWorkbenchEntry('mobile.merchant.customer_care')" class="merchant-workbench__entry" url="/src/merchant/pages/customer-care/index" open-type="navigate"><view class="merchant-workbench__entry-icon merchant-workbench__entry-icon--care"><text>客</text></view><text class="merchant-workbench__entry-label">客情管理</text></navigator>
 					<navigator v-if="canOpenWorkbenchEntry('mobile.merchant.engineering')" class="merchant-workbench__entry" url="/src/merchant/pages/engineering/index" open-type="navigate"><view class="merchant-workbench__entry-icon merchant-workbench__entry-icon--engineering"><text>工</text></view><text class="merchant-workbench__entry-label">工程管理</text></navigator>
 				</view>
@@ -49,10 +55,13 @@
 
 	const openTaskCount = ref(0)
 	const dueNotArrivedCount = ref(0)
+	const pendingConfirmationCount = ref(0)
 	const careLoading = ref(false)
 	const reservationLoading = ref(false)
+	const confirmationLoading = ref(false)
 	const careFailed = ref(false)
 	const reservationFailed = ref(false)
+	const confirmationFailed = ref(false)
 	const storeContexts = ref<Array<any>>([])
 	const storeLabels = ref<Array<string>>([])
 	const activeStoreIndex = ref(0)
@@ -92,11 +101,19 @@
 
 	function loadTodos() : void {
 		let careAllowed = canOpenWorkbenchEntry('mobile.merchant.customer_care')
-		let reservationsAllowed = canOpenWorkbenchEntry('mobile.merchant.reservations')
+		let reservationsAllowed = canOpenReservationEntry('service')
 		if (careAllowed) loadOpenTasks()
 		else { careLoading.value = false; careFailed.value = false; openTaskCount.value = 0 }
 		if (reservationsAllowed) loadDueReservations()
 		else { reservationLoading.value = false; reservationFailed.value = false; dueNotArrivedCount.value = 0 }
+		if (canOpenReservationEntry('confirmation')) loadPendingConfirmations()
+		else { confirmationLoading.value = false; confirmationFailed.value = false; pendingConfirmationCount.value = 0 }
+	}
+
+	function canOpenReservationEntry(kind : string) : boolean {
+		let action = kind == 'confirmation' ? 'mobile.merchant.reservation_confirmation' : 'mobile.merchant.reservation_service'
+		if (merchantActionIsAllowed(action)) return true
+		return canOpenWorkbenchEntry('mobile.merchant.reservations')
 	}
 
 	function canOpenWorkbenchEntry(action : string) : boolean {
@@ -133,13 +150,30 @@
 		})
 	}
 
+	function loadPendingConfirmations() : void {
+		confirmationLoading.value = true
+		confirmationFailed.value = false
+		queryMobileReservations({ workflow: 'confirmation', quickFilter: 'pending_confirmation', page: 1, pageSize: 1 }, (response : any) => {
+			confirmationLoading.value = false
+			let payload = response != null && response.body != null ? response.body.reservation : null
+			let view = payload != null && payload.data != null ? payload.data.reservation : null
+			if (!response.ok || payload == null || payload.result == null || payload.result.status != 'success' || view == null) { confirmationFailed.value = true; return }
+			pendingConfirmationCount.value = Number(view.total || (view.quickCounts != null ? view.quickCounts.pendingConfirmation : 0) || 0)
+		})
+	}
+
 	function openTodo(kind : string) : void {
 		if (kind == 'care') {
 			if (!canOpenWorkbenchEntry('mobile.merchant.customer_care')) return
 			uni.navigateTo({ url: '/src/merchant/pages/customer-care/index?bucket=all&statusGroup=open' })
 			return
 		}
-		if (!canOpenWorkbenchEntry('mobile.merchant.reservations')) return
+		if (kind == 'reservation-confirmation') {
+			if (!canOpenReservationEntry('confirmation')) return
+			uni.navigateTo({ url: '/src/merchant/pages/reservation-confirmations/index' })
+			return
+		}
+		if (!canOpenReservationEntry('service')) return
 		uni.navigateTo({ url: '/src/merchant/pages/reservations/index' })
 	}
 
@@ -169,6 +203,7 @@
 	.merchant-workbench__todo:last-child { border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #edf0f3; }
 	.merchant-workbench__todo-count { display: flex; width: 42px; height: 42px; flex-shrink: 0; align-items: center; justify-content: center; border-radius: 8px; background-color: #e8f3fb; font-size: 18px; font-weight: 700; color: #1268a8; }
 	.merchant-workbench__todo-count--warm { background-color: #fff2df; color: #9a5a00; }
+	.merchant-workbench__todo-count--confirm { background-color: #f6ebff; color: #7b49a5; }
 	.merchant-workbench__todo-copy { display: flex; min-width: 0; flex: 1; flex-direction: column; padding: 0px 12px; }
 	.merchant-workbench__todo-title { font-size: 15px; font-weight: 700; line-height: 22px; color: #252a31; }
 	.merchant-workbench__todo-note { margin-top: 2px; font-size: 12px; line-height: 18px; color: #737e8c; }
@@ -212,6 +247,7 @@
 	.merchant-workbench__entry:nth-last-child(-n + 3) { border-bottom-width: 0; }
 	.merchant-workbench__entry-icon { display: flex; width: 34px; height: 34px; flex-direction: row; align-items: center; justify-content: center; border-radius: 8px; font-size: 14px; font-weight: 700; }
 	.merchant-workbench__entry-icon--reservation { background-color: #eaf1ff; color: #4a72c5; }
+	.merchant-workbench__entry-icon--confirmation { background-color: #f6ebff; color: #7b49a5; }
 	.merchant-workbench__entry-icon--care { background-color: #e8f6f0; color: #21845f; }
 	.merchant-workbench__entry-icon--customer { background-color: #fff2df; color: #bf7726; }
 	.merchant-workbench__entry-icon--order { background-color: #e8f6f7; color: #287f90; }

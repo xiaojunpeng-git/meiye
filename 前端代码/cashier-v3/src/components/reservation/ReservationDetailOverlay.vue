@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useModalFocusTrap } from '@/composables/useModalFocusTrap'
 
 /**
@@ -61,7 +61,12 @@ const emit = defineEmits(['close'])
 const activeActionKey = ref('')
 const actionError = ref('')
 const actionErrorCode = ref('')
+const rejectReason = ref('')
+const isRejectReasonOpen = ref(false)
+const rejectReasonError = ref('')
+const clockNow = ref(Date.now())
 const detailDialogRef = ref(null)
+let clockTimer = null
 
 const reservation = computed(() => (props.detail && typeof props.detail === 'object' ? props.detail : {}))
 const summary = computed(() => (props.summary && typeof props.summary === 'object' ? props.summary : {}))
@@ -134,8 +139,63 @@ const relatedGroups = computed(() => {
   ]
 })
 
+const RESERVATION_ACTION_ALIASES = {
+  'start-service': 'start-reservation-service',
+  'end-service': 'end-reservation-service',
+  'delete-reservation': 'cancel-reservation'
+}
+
+const RESERVATION_DETAIL_ACTIONS = new Set([
+  'edit-reservation',
+  'confirm-reservation',
+  'reject-reservation',
+  'start-reservation-service',
+  'end-reservation-service',
+  'cancel-reservation',
+  'go-to-cashier'
+])
+
+function normalizeActionDefinition(action) {
+  if (!action || typeof action !== 'object') return null
+  const rawCode = firstValue(action, ['code', 'action', 'key'])
+  const key = RESERVATION_ACTION_ALIASES[rawCode] || rawCode
+  if (!RESERVATION_DETAIL_ACTIONS.has(key)) return null
+  return {
+    key,
+    label: firstValue(action, ['label', 'name', 'title']) || actionLabel(key),
+    raw: { ...action, code: key },
+    disabled: action.disabled === true || action.enabled === false,
+    disabledReason: firstValue(action, ['disabledReason', 'reason']),
+    primary: action.primary === true || ['confirm-reservation', 'start-reservation-service', 'end-reservation-service'].includes(key),
+    danger: action.danger === true || ['reject-reservation', 'cancel-reservation'].includes(key)
+  }
+}
+
+function actionLabel(key) {
+  return {
+    'edit-reservation': '编辑',
+    'confirm-reservation': '确认预约',
+    'reject-reservation': '拒绝',
+    'start-reservation-service': '开始服务',
+    'end-reservation-service': '结束服务',
+    'cancel-reservation': '取消预约',
+    'go-to-cashier': '去开单'
+  }[key] || '操作'
+}
+
 const availableActions = computed(() => {
+  const supplied = readList(reservation.value, ['actions', 'availableActions'])
+    .map(normalizeActionDefinition)
+    .filter(Boolean)
+  if (supplied.length) return supplied
+
   const phase = reservationPhase.value.phase
+  if (phase === 'pending') {
+    return [
+      { key: 'reject-reservation', label: '拒绝', raw: { code: 'reject-reservation' }, disabled: false, disabledReason: '', danger: true },
+      { key: 'confirm-reservation', label: '确认预约', raw: { code: 'confirm-reservation' }, disabled: false, disabledReason: '', primary: true }
+    ]
+  }
   if (phase === 'unstarted') {
     return [
       { key: 'edit-reservation', label: '编辑', raw: { code: 'edit-reservation' }, disabled: false, disabledReason: '' },
@@ -165,6 +225,13 @@ const availableActions = computed(() => {
 
 const reservationPhase = computed(() => normalizeReservationStatus(firstValue(reservation.value, ['status', 'statusLabel', 'statusName'])))
 const reservationStatus = computed(() => (isDetailReady.value ? reservationPhase.value.label : ''))
+const reservationStatusHint = computed(() => ({
+  pending: '会员提交的预约正在等待门店确认；确认或拒绝会同步到商家端。',
+  unstarted: '预约已确认，可由门店端或商家端开始服务。',
+  serving: '正在服务，倒计时以实际开始时间和项目总时长为准。',
+  rejected: '预约已拒绝，卡项次数占用应已释放。',
+  ended: '该预约已结束，不再提供服务操作。'
+}[reservationPhase.value.phase] || ''))
 const reservationNo = computed(() => (
   firstValue(reservation.value, ['reservationNo', 'appointmentNo', 'no', 'code'])
   || firstValue(summary.value, ['reservationNo', 'appointmentNo', 'no', 'code'])
@@ -172,6 +239,62 @@ const reservationNo = computed(() => (
 ))
 const roomName = computed(() => firstValue(room.value, ['name', 'roomName', 'label']) || firstValue(reservation.value, ['roomName']) || '待分配房间')
 const roomStatus = computed(() => firstValue(room.value, ['statusLabel', 'statusName', 'status']) || firstValue(reservation.value, ['roomStatusLabel', 'roomStatus']))
+const reservationSourceLabel = computed(() => {
+  const source = String(firstValue(reservation.value, ['source', 'sourceType', 'reservationSource']) || '').toUpperCase()
+  if (source === 'MEMBER') return '会员端'
+  if (source === 'STORE') return '门店端'
+  return firstValue(reservation.value, ['sourceLabel']) || '—'
+})
+const entitlementOccupation = computed(() => firstObject(reservation.value, ['entitlementOccupation', 'benefitOccupation', 'cardOccupation']))
+const entitlementOccupationLabel = computed(() => {
+  const occupation = entitlementOccupation.value
+  const label = firstValue(occupation, ['statusLabel', 'label'])
+  if (label) return label
+  const status = String(firstValue(occupation, ['status', 'state']) || '').toUpperCase()
+  if (['OCCUPIED', 'HELD', 'ACTIVE'].includes(status)) return '已占用'
+  if (['CONSUMED', 'WRITTEN_OFF', 'COMPLETED'].includes(status)) return '已转消费'
+  if (['RELEASED', 'CANCELLED', 'REJECTED'].includes(status)) return '已释放'
+  return '无卡项占用'
+})
+
+function parseServerTimestamp(value) {
+  if (!value) return null
+  const normalized = typeof value === 'string' && /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(value)
+    ? value.replace(' ', 'T')
+    : value
+  const timestamp = new Date(normalized).getTime()
+  return Number.isFinite(timestamp) ? timestamp : null
+}
+
+const serviceExpectedEndTimestamp = computed(() => {
+  const explicit = firstValue(reservation.value, ['serviceExpectedEndAt', 'countdownEndsAt', 'expectedServiceEndAt'])
+    || firstValue(firstObject(reservation.value, ['serviceCountdown', 'countdown']), ['endsAt', 'expectedEndAt'])
+  const explicitTimestamp = parseServerTimestamp(explicit)
+  if (explicitTimestamp !== null) return explicitTimestamp
+
+  const actualStartTimestamp = parseServerTimestamp(firstValue(reservation.value, ['actualStartAt', 'serviceStartedAt']))
+  const durationMinutes = Number(firstValue(reservation.value, ['totalServiceDurationMinutes', 'serviceDurationMinutes', 'plannedDurationMinutes']))
+  if (actualStartTimestamp === null || !Number.isFinite(durationMinutes) || durationMinutes <= 0) return null
+  return actualStartTimestamp + durationMinutes * 60 * 1000
+})
+
+function formatClockDuration(totalSeconds) {
+  const safeSeconds = Math.max(0, Math.floor(Math.abs(totalSeconds)))
+  const hours = Math.floor(safeSeconds / 3600)
+  const minutes = Math.floor((safeSeconds % 3600) / 60)
+  const seconds = safeSeconds % 60
+  return [hours, minutes, seconds].map((value) => String(value).padStart(2, '0')).join(':')
+}
+
+const serviceClock = computed(() => {
+  if (reservationPhase.value.phase !== 'serving' || serviceExpectedEndTimestamp.value === null) return null
+  const remainingSeconds = Math.floor((serviceExpectedEndTimestamp.value - clockNow.value) / 1000)
+  const overtime = remainingSeconds < 0
+  return {
+    overtime,
+    label: overtime ? `已超时 ${formatClockDuration(remainingSeconds)}` : `剩余 ${formatClockDuration(remainingSeconds)}`
+  }
+})
 
 function firstValue(source, keys) {
   if (!source || typeof source !== 'object') return ''
@@ -332,14 +455,19 @@ function timelineMeta(item) {
 function normalizeReservationStatus(rawStatus) {
   const raw = String(rawStatus || '').trim()
   const normalized = raw.toUpperCase().replace(/[\s-]/g, '_')
+  if (raw === '待确认' || normalized === 'PENDING_CONFIRMATION') {
+    return { label: '待确认', phase: 'pending' }
+  }
   if (
-    ['未开始'].includes(raw)
-    || ['UNSTARTED', 'SCHEDULED'].includes(normalized)
-  ) return { label: '未开始', phase: 'unstarted' }
+    ['未开始', '待服务', '已预约'].includes(raw)
+    || ['UNSTARTED', 'SCHEDULED', 'CONFIRMED'].includes(normalized)
+  ) return { label: '待服务', phase: 'unstarted' }
   if (
     ['服务中', '进行中'].includes(raw)
     || ['SERVING', 'IN_SERVICE', 'SERVICE_IN_PROGRESS'].includes(normalized)
   ) return { label: '服务中', phase: 'serving' }
+  if (raw === '已拒绝' || normalized === 'REJECTED') return { label: '已拒绝', phase: 'rejected' }
+  if (raw === '已取消' || ['CANCELLED', 'CANCELED'].includes(normalized)) return { label: '已取消', phase: 'ended' }
   return { label: '已结束', phase: 'ended' }
 }
 
@@ -389,7 +517,7 @@ function operatorActionError(result) {
   return actionResultMessage(result) || '操作未完成，请重新加载预约详情后再试。'
 }
 
-async function executeAction(action) {
+async function executeAction(action, extraPayload = {}) {
   if (!props.onAction || action.disabled || activeActionKey.value) return
 
   activeActionKey.value = action.key
@@ -400,16 +528,19 @@ async function executeAction(action) {
       action: action.raw,
       actionCode: action.key,
       reservation: reservation.value,
-      reservationId: firstValue(reservation.value, ['id', 'reservationId', 'appointmentId'])
+      reservationId: firstValue(reservation.value, ['id', 'reservationId', 'appointmentId']),
+      ...extraPayload
     })
 
     if (isActionResultError(result)) {
       actionError.value = operatorActionError(result)
       actionErrorCode.value = actionResultCode(result)
     }
+    return result
   } catch (error) {
     actionError.value = '操作请求中断，当前结果无法确认。请勿重复提交，先返回列表查看最新状态。'
     actionErrorCode.value = 'RESERVATION_ACTION_INTERRUPTED'
+    return { result: { status: 'failed', code: 'RESERVATION_ACTION_INTERRUPTED', message: error?.message || '操作请求中断。' } }
   } finally {
     activeActionKey.value = ''
   }
@@ -430,13 +561,57 @@ async function requestReload() {
 }
 
 async function triggerAction(action) {
+  if (action.key === 'reject-reservation') {
+    rejectReason.value = ''
+    rejectReasonError.value = ''
+    isRejectReasonOpen.value = true
+    return
+  }
   await executeAction(action)
+}
+
+async function submitRejection() {
+  const reason = rejectReason.value.trim()
+  if (!reason) {
+    rejectReasonError.value = '请填写拒绝原因。'
+    return
+  }
+  const action = availableActions.value.find((item) => item.key === 'reject-reservation')
+  if (!action) return
+  rejectReasonError.value = ''
+  const result = await executeAction(action, { reason })
+  if (!isActionResultError(result)) {
+    isRejectReasonOpen.value = false
+    rejectReason.value = ''
+  }
+}
+
+function closeRejection() {
+  if (activeActionKey.value) return
+  isRejectReasonOpen.value = false
+  rejectReason.value = ''
+  rejectReasonError.value = ''
 }
 
 function requestClose() {
   if (activeActionKey.value) return
+  if (isRejectReasonOpen.value) {
+    closeRejection()
+    return
+  }
   emit('close')
 }
+
+onMounted(() => {
+  clockTimer = window.setInterval(() => {
+    clockNow.value = Date.now()
+  }, 1000)
+})
+
+onBeforeUnmount(() => {
+  if (clockTimer !== null) window.clearInterval(clockTimer)
+  clockTimer = null
+})
 
 useModalFocusTrap({
   containerRef: detailDialogRef,
@@ -455,7 +630,7 @@ useModalFocusTrap({
           <h2 id="reservation-detail-title">{{ reservationNo }}</h2>
           <div v-if="isDetailReady" class="reservation-detail__status-row">
             <span class="reservation-detail__status">{{ reservationStatus }}</span>
-            <span>预约仅安排房间；开始服务后才实际占用房间。</span>
+            <span>{{ reservationStatusHint }}</span>
           </div>
           <div v-else class="reservation-detail__status-row">
             <span>{{ isDetailLoading ? '正在加载完整预约详情' : isDetailError ? '完整预约详情未加载' : '预约详情尚未就绪' }}</span>
@@ -503,6 +678,8 @@ useModalFocusTrap({
                 <div><dt>完整手机号</dt><dd>{{ member.phone || '—' }}</dd></div>
                 <div><dt>会员编号</dt><dd>{{ member.memberNo || '—' }}</dd></div>
                 <div><dt>会员状态</dt><dd>{{ member.status || '—' }}</dd></div>
+                <div><dt>预约来源</dt><dd>{{ reservationSourceLabel }}</dd></div>
+                <div><dt>卡项次数</dt><dd>{{ entitlementOccupationLabel }}</dd></div>
               </dl>
             </div>
           </section>
@@ -536,6 +713,17 @@ useModalFocusTrap({
               <dl class="reservation-detail__info-list">
                 <div v-for="row in timeRows" :key="row.label"><dt>{{ row.label }}</dt><dd>{{ row.value }}</dd></div>
               </dl>
+              <div
+                v-if="serviceClock"
+                class="reservation-detail__service-clock"
+                :class="{ 'reservation-detail__service-clock--overtime': serviceClock.overtime }"
+                role="timer"
+                aria-live="off"
+              >
+                <span>{{ serviceClock.overtime ? '服务超时' : '服务倒计时' }}</span>
+                <strong>{{ serviceClock.label }}</strong>
+                <small>归零后只显示超时，不会自动结束服务。</small>
+              </div>
             </div>
             <div>
               <header class="reservation-detail__section-header">
@@ -633,6 +821,27 @@ useModalFocusTrap({
 
       <footer class="reservation-detail__footer">
         <template v-if="isDetailReady">
+        <div v-if="isRejectReasonOpen" class="reservation-detail__reason-panel">
+          <div><strong>拒绝会员预约</strong><span>提交后将释放本单占用的卡项次数。</span></div>
+          <label for="reservation-reject-reason"><span>拒绝原因</span>
+          <textarea
+            id="reservation-reject-reason"
+            v-model="rejectReason"
+            rows="3"
+            maxlength="200"
+            placeholder="请填写告知会员的拒绝原因"
+            :disabled="activeActionKey !== ''"
+            @input="rejectReasonError = ''"
+          />
+          </label>
+          <div class="reservation-detail__reason-actions">
+            <button type="button" class="reservation-detail__button reservation-detail__button--secondary" :disabled="activeActionKey !== ''" @click="closeRejection">取消</button>
+            <button type="button" class="reservation-detail__button reservation-detail__button--danger" :disabled="activeActionKey !== ''" @click="submitRejection">
+              {{ activeActionKey === 'reject-reservation' ? '正在提交…' : '确认拒绝' }}
+            </button>
+          </div>
+          <p v-if="rejectReasonError" role="alert">{{ rejectReasonError }}</p>
+        </div>
         <div
           v-if="actionError"
           class="reservation-detail__action-error"
@@ -641,7 +850,7 @@ useModalFocusTrap({
           <span>{{ actionError }}</span>
           <small v-if="actionErrorCode">错误编号：{{ actionErrorCode }}</small>
         </div>
-        <div class="reservation-detail__actions">
+        <div v-if="!isRejectReasonOpen" class="reservation-detail__actions">
           <button type="button" class="reservation-detail__button reservation-detail__button--secondary" :disabled="activeActionKey !== ''" @click="requestClose">关闭</button>
           <template v-for="action in availableActions" :key="action.key">
             <button
@@ -896,6 +1105,35 @@ useModalFocusTrap({
   color: #344054;
   font-size: 13px;
   line-height: 20px;
+}
+
+.reservation-detail__service-clock {
+  display: grid;
+  gap: 4px;
+  margin-top: 14px;
+  padding: 13px 14px;
+  border: 1px solid #abefc6;
+  border-radius: 10px;
+  background: #ecfdf3;
+  color: #067647;
+}
+
+.reservation-detail__service-clock > span,
+.reservation-detail__service-clock > small {
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.reservation-detail__service-clock > strong {
+  font-variant-numeric: tabular-nums;
+  font-size: 22px;
+  line-height: 28px;
+}
+
+.reservation-detail__service-clock--overtime {
+  border-color: #fecdca;
+  background: #fef3f2;
+  color: #b42318;
 }
 
 .reservation-detail__project-list {
@@ -1218,6 +1456,7 @@ useModalFocusTrap({
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 16px;
   min-height: 74px;
   padding: 14px 28px;

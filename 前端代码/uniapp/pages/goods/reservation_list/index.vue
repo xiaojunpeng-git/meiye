@@ -115,20 +115,24 @@
 						type:''
 					},
 					{
+						name:'待确认',
+						type:'PENDING_CONFIRMATION'
+					},
+					{
 						name:'待服务',
-						type:0
+						type:'UNSTARTED'
 					},
 					{
 						name:'进行中',
-						type:1
+						type:'IN_SERVICE'
 					},
 					{
 						name:'已完成',
-						type:2
+						type:'COMPLETED'
 					},
 					{
 						name:'已取消',
-						type:-1
+						type:'CANCELLED'
 					}
 				],
 				sysHeight:sysHeight,
@@ -206,6 +210,12 @@
 			},
 			getStatusText(status) {
 				const map = {
+					PENDING_CONFIRMATION: '待确认',
+					UNSTARTED: '待服务',
+					IN_SERVICE: '进行中',
+					COMPLETED: '已完成',
+					REJECTED: '已退回',
+					CANCELLED: '已取消',
 					3: '待确认',
 					0: '待服务',
 					1: '进行中',
@@ -254,7 +264,7 @@
 				uni.makePhoneCall({ phoneNumber: String(phone) });
 			},
 			canCancelReservation(item) {
-				return Number(item.status) === 3;
+				return String(item.status) === 'PENDING_CONFIRMATION' || Number(item.status) === 3;
 			},
 			doCancel(id, index) {
 				const that = this;
@@ -315,7 +325,7 @@
 						limit: that.limit
 					})
 					.then(res => {
-						let list = res.data || [];
+						let list = Array.isArray(res.data) ? res.data : ((res.data && res.data.list) || []);
 						let loadend = list.length < that.limit;
 						that.orderList = that.$util.SplitArray(list, that.orderList);
 						that.$set(that, 'orderList', that.orderList);

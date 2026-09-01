@@ -7291,6 +7291,11 @@ button:disabled {
   color: #208a52 !important;
 }
 
+.reservation-status--pending {
+  background: #fff4e5;
+  color: #b54708 !important;
+}
+
 .reservation-status--serving {
   background: #fff7e6;
   color: #d46b08 !important;
@@ -7299,6 +7304,11 @@ button:disabled {
 .reservation-status--ended {
   background: #eaf4ff;
   color: #1677cc !important;
+}
+
+.reservation-status--rejected {
+  background: #fef3f2;
+  color: #b42318 !important;
 }
 
 .reservation-status--checkout {
@@ -7461,6 +7471,17 @@ button:disabled {
   color: #208a52;
 }
 
+.reservation-calendar-block--pending {
+  border-color: #fedf89;
+  background: #fffaeb;
+  color: #b54708;
+}
+
+.reservation-calendar-block--pending:hover {
+  border-color: #fdb022;
+  background: #fef0c7;
+}
+
 .reservation-calendar-block--unstarted:hover {
   border-color: #6eb983;
   background: #def2e5;
@@ -7486,6 +7507,12 @@ button:disabled {
 .reservation-calendar-block--ended:hover {
   border-color: #1890ff;
   background: #dceeff;
+}
+
+.reservation-calendar-block--rejected {
+  border-color: #fecdca;
+  background: #fef3f2;
+  color: #b42318;
 }
 
 .reservation-calendar-block strong,

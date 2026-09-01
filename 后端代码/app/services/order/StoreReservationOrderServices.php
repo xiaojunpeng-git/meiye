@@ -1697,7 +1697,8 @@ class StoreReservationOrderServices extends BaseServices
             $reservationDate,
             0,
             [],
-            $isCheckReservationTime
+            $isCheckReservationTime,
+            $start
         );
 
         $start = $this->normalizeReservationClock($start);

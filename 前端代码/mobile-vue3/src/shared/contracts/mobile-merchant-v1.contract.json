@@ -294,6 +294,26 @@
       "response": "cashierV3ReservationAction",
       "legacyReservationForbidden": true
     },
+    "confirmReservation": {
+      "method": "POST",
+      "path": "/mobile/merchant/reservations/:reservationId/confirm",
+      "requestMetadataProfile": "MERCHANT_SESSION",
+      "merchantContextRequired": true,
+      "authorization": "RESERVATION_MANAGE_AND_SERVER_DATA_SCOPE",
+      "requestBodyRequired": ["command"],
+      "response": "cashierV3ReservationAction",
+      "legacyReservationForbidden": true
+    },
+    "rejectReservation": {
+      "method": "POST",
+      "path": "/mobile/merchant/reservations/:reservationId/reject",
+      "requestMetadataProfile": "MERCHANT_SESSION",
+      "merchantContextRequired": true,
+      "authorization": "RESERVATION_MANAGE_AND_SERVER_DATA_SCOPE",
+      "requestBodyRequired": ["command", "reason"],
+      "response": "cashierV3ReservationAction",
+      "legacyReservationForbidden": true
+    },
     "startReservationService": {
       "method": "POST",
       "path": "/mobile/merchant/reservations/:reservationId/start-service",

@@ -20,9 +20,19 @@ use think\facade\Db;
  */
 final class MobileReservationServices
 {
-    public function list(array $merchant): array
+    public function list(array $merchant, array $payload = []): array
     {
-        return $this->dispatch($merchant, 'query-reservations', []);
+        $workflow = strtolower(trim((string)($payload['workflow'] ?? '')));
+        $quickFilter = strtolower(trim((string)($payload['quickFilter'] ?? $payload['quick_filter'] ?? '')));
+        if ($workflow === 'confirmation') $quickFilter = 'pending_confirmation';
+        if ($workflow === 'service' && $quickFilter === '') $quickFilter = 'service';
+        return $this->dispatch($merchant, 'query-reservations', [
+            'workflow' => $workflow,
+            'quickFilter' => $quickFilter,
+            'calendarDate' => trim((string)($payload['calendarDate'] ?? $payload['calendar_date'] ?? '')),
+            'page' => max(1, (int)($payload['page'] ?? 1)),
+            'pageSize' => max(1, min(100, (int)($payload['pageSize'] ?? $payload['page_size'] ?? $payload['limit'] ?? 20))),
+        ]);
     }
 
     public function detail(array $merchant, array $payload): array
@@ -39,7 +49,7 @@ final class MobileReservationServices
         ]);
     }
 
-    public function openEditor(array $merchant): array
+    public function openEditor(array $merchant, array $payload = []): array
     {
         // Resolve the V3 state context first, then register its session-local
         // workspace resource. The workspace is a V3 technical version guard,
@@ -50,9 +60,12 @@ final class MobileReservationServices
             return $this->failed('COMMAND_RESULT_INCOMPLETE', '预约工作台初始化失败，请刷新后重试。');
         }
         $this->ensureWorkspace($merchant, $stateContextId);
+        $mode = trim((string)($payload['mode'] ?? 'create'));
+        $reservationId = (int)($payload['reservationId'] ?? 0);
         return $this->dispatch($merchant, 'open-reservation-editor', [
-            'mode' => 'create',
-            'preparationRequestId' => 'mobile-reservation-editor',
+            'mode' => $mode,
+            'reservationId' => $reservationId,
+            'preparationRequestId' => trim((string)($payload['preparationRequestId'] ?? 'mobile-reservation-editor')),
         ]);
     }
 
@@ -93,6 +106,20 @@ final class MobileReservationServices
     public function startService(array $merchant, int $reservationId, array $payload): array
     {
         return $this->dispatch($merchant, 'start-reservation-service', $this->actionPayload('start-reservation-service', $reservationId, $payload));
+    }
+
+    public function confirm(array $merchant, int $reservationId, array $payload): array
+    {
+        $actionPayload = $this->actionPayload('confirm-reservation', $reservationId, $payload);
+        if (is_array($payload['reservation'] ?? null)) $actionPayload['reservation'] = $payload['reservation'];
+        return $this->dispatch($merchant, 'confirm-reservation', $actionPayload);
+    }
+
+    public function reject(array $merchant, int $reservationId, array $payload): array
+    {
+        $actionPayload = $this->actionPayload('reject-reservation', $reservationId, $payload);
+        $actionPayload['reason'] = trim((string)($payload['reason'] ?? $payload['rejectReason'] ?? ''));
+        return $this->dispatch($merchant, 'reject-reservation', $actionPayload);
     }
 
     public function endService(array $merchant, int $reservationId, array $payload): array

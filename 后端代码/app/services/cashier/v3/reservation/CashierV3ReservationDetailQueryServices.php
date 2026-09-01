@@ -26,10 +26,10 @@ final class CashierV3ReservationDetailQueryServices
             ->where('id', $reservationId)
             ->where('tenant_id', $tenantId)
             ->where('store_id', $storeId)
+            ->where('lifecycle_generation', CashierV3ReservationLifecycleServices::GENERATION)
             ->find();
         if (!$reservation) return null;
-        // 旧预约数据保持原状。本期只开放新生命周期状态的预约详情和操作。
-        if (!in_array((string)($reservation['status'] ?? ''), ['UNSTARTED', 'IN_SERVICE', 'COMPLETED'], true)) return null;
+        if (!in_array((string)($reservation['status'] ?? ''), ['PENDING_CONFIRMATION', 'UNSTARTED', 'IN_SERVICE', 'COMPLETED', 'CANCELLED', 'REJECTED'], true)) return null;
 
         $lines = $this->rows(Db::name('cashier_v3_reservation_line')
             ->where('tenant_id', $tenantId)
@@ -77,8 +77,9 @@ final class CashierV3ReservationDetailQueryServices
 
         $startAt = (int)($reservation['appointment_start_at'] ?? 0);
         $endAt = (int)($reservation['appointment_end_at'] ?? 0);
-        $actualStartAt = (int)($serviceOrder['service_started_at'] ?? 0);
-        $actualEndAt = (int)($serviceOrder['completed_at'] ?? 0);
+        $actualStartAt = (int)($reservation['actual_service_started_at'] ?? $serviceOrder['service_started_at'] ?? 0);
+        $actualEndAt = (int)($reservation['actual_service_ended_at'] ?? $serviceOrder['completed_at'] ?? 0);
+        $plannedDurationSeconds = max(60, $endAt - $startAt);
         $version = (int)($reservation['version'] ?? 0);
 
         $status = (string)($reservation['status'] ?? '');
@@ -117,6 +118,17 @@ final class CashierV3ReservationDetailQueryServices
             'estimatedEndAt' => self::formatTime($endAt),
             'actualStartAt' => self::formatTime($actualStartAt),
             'actualEndAt' => self::formatTime($actualEndAt),
+            // Keep the existing formatted fields above for cashier V3 while
+            // exposing epoch aliases consumed by the merchant/mobile timer.
+            'actualStartedAt' => $actualStartAt,
+            'actualServiceStartedAt' => $actualStartAt,
+            'actualServiceEndedAt' => $actualEndAt,
+            'actualStartTimestamp' => $actualStartAt,
+            'actualEndTimestamp' => $actualEndAt,
+            'serviceCountdownEndsAt' => $actualStartAt > 0 ? $actualStartAt + $plannedDurationSeconds : 0,
+            'expectedEndAt' => $actualStartAt > 0 ? $actualStartAt + $plannedDurationSeconds : 0,
+            'totalDurationSeconds' => $plannedDurationSeconds,
+            'isOvertime' => $actualStartAt > 0 && $actualEndAt <= 0 && time() > $actualStartAt + $plannedDurationSeconds,
             'plannedCraftsmen' => array_map(static function (array $staff): array {
                 return [
                     'staffId' => (int)($staff['id'] ?? 0),
@@ -132,6 +144,8 @@ final class CashierV3ReservationDetailQueryServices
             ] : null,
             'roomChanges' => [],
             'remark' => (string)($reservation['remark_snapshot'] ?? ''),
+            'sourceType' => (string)($reservation['source_type'] ?? ''),
+            'rejectReason' => (string)($reservation['reject_reason'] ?? ''),
             'relatedRecords' => [
                 'hangOrders' => [],
                 'serviceOrders' => $serviceOrder ? [[
@@ -193,17 +207,24 @@ final class CashierV3ReservationDetailQueryServices
     private static function statusLabel(string $status): string
     {
         return [
-            'UNSTARTED' => '未开始',
+            'PENDING_CONFIRMATION' => '待确认',
+            'UNSTARTED' => '待服务',
             'IN_SERVICE' => '服务中',
             'COMPLETED' => '已结束',
             'CANCELLED' => '已取消',
-            'REJECTED' => '已取消',
+            'REJECTED' => '已拒绝',
             'NO_SHOW' => '已取消',
         ][$status] ?? '状态未知';
     }
 
     private static function actions(string $status): array
     {
+        if ($status === 'PENDING_CONFIRMATION') {
+            return [
+                ['action' => 'confirm-reservation', 'label' => '确认', 'enabled' => true],
+                ['action' => 'reject-reservation', 'label' => '拒绝', 'enabled' => true],
+            ];
+        }
         if ($status === 'UNSTARTED') {
             return [
                 ['action' => 'edit-reservation', 'label' => '编辑', 'enabled' => true],

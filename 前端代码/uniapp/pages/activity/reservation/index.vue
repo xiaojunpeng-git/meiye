@@ -683,6 +683,10 @@ export default {
 			// #endif
 			postReservationOrderCreate(this.orderId,data).then(res=>{
 				let url = `/pages/goods/reservation_status/index?orderId=${this.orderId}`;
+				const reservationId = Number(res.data && (res.data.reservationId || res.data.id) || 0);
+				if (reservationId > 0) {
+					url += `&reservationId=${reservationId}`;
+				}
 				if (this.bookUid > 0) {
 					url += `&book_uid=${this.bookUid}`;
 				}
