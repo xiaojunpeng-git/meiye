@@ -230,7 +230,12 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         if (($method = trim((string)($input['payment_method_code'] ?? ''))) !== '') $query->where('p.payment_method', $method);
         $rows = $query->leftJoin('user market_detail_member', 'market_detail_member.uid = p.member_id')
             ->fieldRaw('p.store_id,p.order_id,p.checkout_request_id,p.order_no_snapshot,p.store_name_snapshot,MAX(p.organization_id) organization_id,MAX(p.organization_path_snapshot) organization_path_snapshot,MAX(p.member_id) member_id,MAX(p.member_name_snapshot) member_name_snapshot,MAX(market_detail_member.phone) member_phone,p.business_source_primary_id,p.business_source_primary_name_snapshot,p.business_source_label_snapshot,p.business_date,MAX(p.operator_name_snapshot) creator_name,SUM(p.amount_cents) amount_cents,MAX(p.recorded_at) recorded_at')
-            ->group('p.store_id,p.order_id,p.business_source_primary_id,p.business_date')->order('p.business_date','desc')->order('p.order_id','desc')->select()->toArray();
+            ->group('p.store_id,p.order_id,p.business_source_primary_id,p.business_date')
+            // An order void writes a paired negative payment fact. Keep both
+            // facts for audit and aggregates, but do not render a zero-net
+            // document as an active market-detail row.
+            ->having('SUM(p.amount_cents) <> 0')
+            ->order('p.business_date','desc')->order('p.order_id','desc')->select()->toArray();
         // The detail query already contains every matching payment record before
         // pagination, so derive effective members here instead of running another
         // aggregate query solely for the summary row or drilldown filter.
@@ -966,7 +971,10 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         $this->scope($query,$stores,$alias);
         $this->applyOrganizationFilters($query, $alias, $this->activeInput, $this->activeRange);
         $column=$alias.'.';
-        $query->whereRaw("({$column}fact_direction='forward' OR ({$column}fact_direction='reversal' AND EXISTS (SELECT 1 FROM eb_cashier_v3_order_lifecycle_operation refund_operation WHERE refund_operation.tenant_id={$column}tenant_id AND refund_operation.command_idempotency_key={$column}command_idempotency_key AND refund_operation.operation_type='refund' AND refund_operation.status='succeeded')))" );
+        // Refunds and order voids both create an effective negative payment
+        // fact. A report must use the net payment amount in either case;
+        // limiting reversals to refunds leaves a voided sale as false revenue.
+        $query->whereRaw("({$column}fact_direction='forward' OR ({$column}fact_direction='reversal' AND EXISTS (SELECT 1 FROM eb_cashier_v3_order_lifecycle_operation reversal_operation WHERE reversal_operation.tenant_id={$column}tenant_id AND reversal_operation.command_idempotency_key={$column}command_idempotency_key AND reversal_operation.operation_type IN ('refund','void') AND reversal_operation.status='succeeded')))" );
         return $this->participantOrder($query,$column.'order_id');
     }
     private function guideFilterOptions(array $stores,array $range):array
