@@ -15,6 +15,9 @@ $checks = [
     'service facts remain deduplicated at service_fact_id grain' => strpos($service, 'sv.store_id,sv.service_fact_id,sv.checkout_request_id') !== false,
     'market detail matches visits by source as well as order identity' => strpos($service, ". '|' . \$sourceKey") !== false,
     'successful order void payment reversals are included in report net cash' => strpos($service, "reversal_operation.operation_type IN ('refund','void')") !== false,
+    'market performance keeps order void reversals in their original source channel' => strpos($service, 'is_refund_reversal') !== false
+        && strpos($service, "refund_operation.operation_type='refund'") !== false
+        && strpos($service, "(int)(\$fact['is_refund_reversal'] ?? 0) === 1") !== false,
     'market detail hides documents whose forward and reversal payment facts net to zero' => strpos($service, "->having('SUM(p.amount_cents) <> 0')") !== false,
     'member visit reports exclude succeeded service void reversals through the shared fact scope' => strpos($service, 'private function completedUnvoidedServiceFacts') !== false
         && strpos($service, "cashier_v3_service_record_void_operation ' . \$voidAlias") !== false

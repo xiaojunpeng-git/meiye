@@ -114,14 +114,17 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
                 'store_name' => (string)$fact['store_name'],
             ];
         }
-        $cash = $this->cashFacts($stores)
-            ->whereBetween('business_date', [$range['start'], $range['end']])->where('status', 'effective')
-            ->fieldRaw('store_id,business_source_primary_id,fact_direction,payment_method,SUM(amount_cents) amount_cents')
-            ->group('store_id,business_source_primary_id,fact_direction,payment_method')->select()->toArray();
+        $cash = $this->cashFacts($stores, 'market_payment')
+            ->whereBetween('market_payment.business_date', [$range['start'], $range['end']])->where('market_payment.status', 'effective')
+            ->fieldRaw("market_payment.store_id,market_payment.business_source_primary_id,market_payment.fact_direction,market_payment.payment_method,CASE WHEN market_payment.fact_direction='reversal' AND EXISTS (SELECT 1 FROM eb_cashier_v3_order_lifecycle_operation refund_operation WHERE refund_operation.tenant_id=market_payment.tenant_id AND refund_operation.command_idempotency_key=market_payment.command_idempotency_key AND refund_operation.operation_type='refund' AND refund_operation.status='succeeded') THEN 1 ELSE 0 END is_refund_reversal,SUM(market_payment.amount_cents) amount_cents")
+            ->group('market_payment.store_id,market_payment.business_source_primary_id,market_payment.fact_direction,market_payment.payment_method,is_refund_reversal')->select()->toArray();
         foreach ($cash as $fact) {
             $storeId = (int)$fact['store_id'];
             if (!isset($rows[$storeId])) continue;
-            $sourceId = (string)$fact['fact_direction'] === 'reversal' && $refundSourceId > 0
+            // A refund is reported in the refund channel. A void is an
+            // accounting cancellation of its original sale, so its negative
+            // fact must remain in the original channel and net that sale out.
+            $sourceId = (int)($fact['is_refund_reversal'] ?? 0) === 1 && $refundSourceId > 0
                 ? $refundSourceId : (int)$fact['business_source_primary_id'];
             if (!isset($sourceById[$sourceId])) continue;
             $key = 'channel_' . $sourceId . '_amount_cents';
