@@ -63,16 +63,24 @@ adjustmentCheck(
     && str_contains($personnelOverlay, '!props.historyAdjustment && ![\'guides\', \'salesManagers\'].includes(role)')
 );
 adjustmentCheck(
-    'amount and ratio are linked, use whole yuan, and the amount total is validated',
+    'amount and ratio are linked and commission allocations keep the full project total',
     str_contains($personnelOverlay, 'syncHistoryAmountFromRatio(item)')
     && str_contains($personnelOverlay, 'syncHistoryRatioFromAmount(item)')
-    && str_contains($adjustment, 'if ($amountSum !== $totalCents)')
+    && str_contains($adjustment, 'allocationTotalMatches($amountSum, $totalCents, $commissionAllocationCount)')
     && str_contains($adjustment, '各手艺人的消耗业绩合计必须等于项目核销金额')
     && str_contains($personnelOverlay, 'step="1" inputmode="numeric" aria-label="分配消耗业绩"')
     && str_contains($adjustment, 'service_adjust_amount_not_whole_yuan')
     && str_contains($adjustment, 'service_adjust_total_not_whole_yuan')
     && str_contains($personnelOverlay, '尾差固定归最后一人')
     && str_contains($personnelOverlay, 'Math.floor(historyTotalCents.value * ratio / 10000) * 100')
+);
+adjustmentCheck(
+    'labor-only history adjustment skips consumption allocation and explains it in the UI',
+    str_contains($personnelOverlay, 'const historyOnlyLaborFee = computed')
+    && str_contains($personnelOverlay, "if (!commissionSelected.length) return true")
+    && str_contains($personnelOverlay, '仅手工费，不分配消耗业绩')
+    && str_contains($adjustment, '$commissionAllocationCount === 0 ? $amountSum === 0 : $amountSum === $totalCents')
+    && !str_contains($adjustment, 'if ($amountSum !== $totalCents)')
 );
 adjustmentCheck(
     'legacy service records fall back to the effective labor-performance net amount',
@@ -143,6 +151,17 @@ adjustmentCheck(
 );
 
 require_once $reportFile;
+require_once $adjustmentFile;
+$allocationTotalMatches = new ReflectionMethod(
+    \app\services\cashier\v3\order\CashierV3ServiceRecordCraftsmanAdjustmentServices::class,
+    'allocationTotalMatches'
+);
+adjustmentCheck(
+    'labor-only allocation accepts zero while retaining a nonzero project consumption total',
+    $allocationTotalMatches->invoke(null, 0, 11100, 0) === true
+    && $allocationTotalMatches->invoke(null, 11100, 11100, 1) === true
+    && $allocationTotalMatches->invoke(null, 0, 11100, 1) === false
+);
 $reportService = new \app\services\report\StoreUnifiedReportPhaseSixServices();
 $resultMethod = new ReflectionMethod($reportService, 'result');
 $summary = $resultMethod->invoke($reportService, '半项汇总', [[

@@ -292,11 +292,6 @@ final class CashierV3ServiceRecordCraftsmanAdjustmentServices
     /** @return array<int,array<string,mixed>> */
     private function normalizeAllocations($input, int $storeId, int $totalCents): array
     {
-        if ($totalCents % 100 !== 0) {
-            throw CashierV3CommandException::invalidContext('项目核销金额不是整元，不能按整元分配消耗业绩。', [
-                'reason' => 'service_adjust_total_not_whole_yuan', 'totalCents' => $totalCents,
-            ]);
-        }
         if (!is_array($input) || array_keys($input) !== ($input === [] ? [] : range(0, count($input) - 1)) || $input === [] || count($input) > 20) {
             throw CashierV3CommandException::invalidContext('请至少选择一名有效手艺人。', ['reason' => 'service_adjust_allocations_invalid']);
         }
@@ -314,7 +309,7 @@ final class CashierV3ServiceRecordCraftsmanAdjustmentServices
             ->lock(true)->select()->toArray();
         $byId = []; foreach ($staffRows as $row) $byId[(int)$row['id']] = $row;
         if (count($byId) !== count($staffIds)) throw CashierV3CommandException::invalidContext('所选手艺人已停用或不属于当前门店。');
-        $rows = []; $amountSum = 0;
+        $rows = []; $amountSum = 0; $commissionAllocationCount = 0;
         foreach ($input as $raw) {
             $staffId = (int)($raw['staffId'] ?? $raw['id']); $staff = $byId[$staffId];
             $amount = $this->nonnegativeInteger($raw['allocationAmountCents'] ?? null, '消耗业绩');
@@ -329,6 +324,7 @@ final class CashierV3ServiceRecordCraftsmanAdjustmentServices
             if (!in_array($type, ['commission', 'labor', 'commission_labor'], true)) $type = 'commission_labor';
             if ($type === 'labor' && $amount !== 0) throw CashierV3CommandException::invalidContext('只拿手工费的手艺人不能分配消耗业绩。');
             if ($type === 'commission' && $fee !== 0) throw CashierV3CommandException::invalidContext('只拿消耗业绩的手艺人不能填写手工费。');
+            if ($type !== 'labor') $commissionAllocationCount++;
             $amountSum += $amount;
             $rows[] = [
                 'staffId' => $staffId, 'employeeId' => (int)$staff['employee_id'],
@@ -342,12 +338,24 @@ final class CashierV3ServiceRecordCraftsmanAdjustmentServices
                 'projectCount' => number_format($halfUnits / 2, 1, '.', ''),
             ];
         }
-        if ($amountSum !== $totalCents) {
+        if ($commissionAllocationCount > 0 && $totalCents % 100 !== 0) {
+            throw CashierV3CommandException::invalidContext('项目核销金额不是整元，不能按整元分配消耗业绩。', [
+                'reason' => 'service_adjust_total_not_whole_yuan', 'totalCents' => $totalCents,
+            ]);
+        }
+        if (!self::allocationTotalMatches($amountSum, $totalCents, $commissionAllocationCount)) {
             throw CashierV3CommandException::invalidContext('各手艺人的消耗业绩合计必须等于项目核销金额。', [
                 'reason' => 'service_adjust_amount_total_mismatch', 'expectedCents' => $totalCents, 'actualCents' => $amountSum,
             ]);
         }
         return $rows;
+    }
+
+    private static function allocationTotalMatches(int $amountSum, int $totalCents, int $commissionAllocationCount): bool
+    {
+        // 全部人员均为“只拿手工费”时，劳动业绩金额固定为 0；项目级消耗业绩
+        // 仍保留在原 consumption_performance_recorded 事实中，不强塞给手艺人。
+        return $commissionAllocationCount === 0 ? $amountSum === 0 : $amountSum === $totalCents;
     }
 
     private function halfUnits(array $raw): int

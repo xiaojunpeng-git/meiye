@@ -441,6 +441,14 @@ const historyTotalCents = computed(() => Math.max(0, Math.trunc(Number(props.all
 const historyAllocatedCents = computed(() => craftsmen.value
   .filter((item) => item.selected)
   .reduce((total, item) => total + allocationAmountCentsFor(item), 0))
+const historyOnlyLaborFee = computed(() => {
+  const selected = craftsmen.value.filter((item) => item.selected)
+  return selected.length > 0
+    && selected.every((item) => craftsmanType(item) === PERFORMANCE_TYPES.LABOR)
+})
+const historyAllocationSummary = computed(() => historyOnlyLaborFee.value
+  ? '仅手工费，不分配消耗业绩'
+  : `已分配 ¥${(historyAllocatedCents.value / 100).toFixed(2)} / ¥${(historyTotalCents.value / 100).toFixed(2)}`)
 function selectRecord(item) {
   if (item.role === 'salesManagers' && !item.selected) {
     salesManagers.value.forEach((record) => { record.selected = false })
@@ -616,7 +624,8 @@ function allocationIsValid(records) {
 function historyAllocationIsValid(records) {
   const selected = records.filter((record) => record.selected)
   if (!selected.length) return false
-  if (historyTotalCents.value % 100 !== 0) return false
+  const commissionSelected = selected.filter((record) => craftsmanType(record) !== PERFORMANCE_TYPES.LABOR)
+  if (commissionSelected.length && historyTotalCents.value % 100 !== 0) return false
   if (selected.some((record) => {
     const value = Number(record.projectCountText)
     return !Number.isFinite(value) || value < 0 || !Number.isInteger(value * 2)
@@ -624,7 +633,8 @@ function historyAllocationIsValid(records) {
   if (selected.some((record) => craftsmanType(record) === PERFORMANCE_TYPES.LABOR && allocationAmountCentsFor(record) !== 0)) return false
   if (selected.some((record) => craftsmanType(record) === PERFORMANCE_TYPES.COMMISSION && Number(record.laborFeeYuan || 0) !== 0)) return false
   if (selected.some((record) => allocationAmountCentsFor(record) % 100 !== 0)) return false
-  return selected.reduce((total, record) => total + allocationAmountCentsFor(record), 0) === historyTotalCents.value
+  if (!commissionSelected.length) return true
+  return commissionSelected.reduce((total, record) => total + allocationAmountCentsFor(record), 0) === historyTotalCents.value
 }
 
 function activateInvalidTab(tab, message) {
@@ -908,7 +918,7 @@ function searchGroupPersonnel(scope) {
         <div class="personnel-full-summary">
           <button v-if="allowOtherCraftsmen && activeTab === 'craftsmen'" type="button" class="button button--secondary" @click="openOtherCraftsmanSearch">添加其他手艺人</button>
           <button type="button" class="button button--primary" @click="mode = 'simple'">添加人员</button>
-          <strong>已选择 {{ selectedRecords.length }} 人<span v-if="historyAdjustment">，已分配 ¥{{ (historyAllocatedCents / 100).toFixed(2) }} / ¥{{ (historyTotalCents / 100).toFixed(2) }}</span><span v-else-if="!activeIsNonPerformance">，分配合计 {{ activeTotal }}%</span><span v-else>（仅记录归属，不分配比例）</span></strong>
+          <strong>已选择 {{ selectedRecords.length }} 人<span v-if="historyAdjustment">，{{ historyAllocationSummary }}</span><span v-else-if="!activeIsNonPerformance">，分配合计 {{ activeTotal }}%</span><span v-else>（仅记录归属，不分配比例）</span></strong>
         </div>
         <fieldset v-if="activeTab === 'guides' && selectedGuides.length" class="personnel-guide-round" aria-label="本次导购轮次">
           <legend>导购第几轮<strong>*</strong></legend>
