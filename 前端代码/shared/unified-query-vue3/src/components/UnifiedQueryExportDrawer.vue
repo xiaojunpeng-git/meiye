@@ -24,7 +24,11 @@ const props = defineProps({
   exportCapability: { type: Object, default: () => ({}) },
   initialTask: { type: Object, default: null },
   onCreate: { type: Function, default: null },
-  onQueryTask: { type: Function, default: null }
+  onQueryTask: { type: Function, default: null },
+  // Export download often needs an application token held outside cookies.
+  // Let the host fetch the binary with its authenticated transport while the
+  // shared drawer remains reusable by cookie-authenticated hosts.
+  onDownload: { type: Function, default: null }
 })
 
 const emit = defineEmits(['close', 'export', 'task-change'])
@@ -35,6 +39,7 @@ const fileName = ref('')
 const error = ref('')
 const isCreating = ref(false)
 const isPolling = ref(false)
+const isDownloading = ref(false)
 const task = ref(props.initialTask ? { ...props.initialTask } : null)
 let pollTimer = null
 let pollAttempts = 0
@@ -246,6 +251,37 @@ function returnToForm() {
   error.value = ''
 }
 
+function fallbackDownload(url, fileName) {
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = fileName || '查询结果.xlsx'
+  anchor.rel = 'noopener'
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+}
+
+async function downloadFile() {
+  if (!taskReady.value || !safeDownloadUrl.value || isDownloading.value) return
+  isDownloading.value = true
+  error.value = ''
+  try {
+    if (props.onDownload) {
+      await props.onDownload({
+        url: safeDownloadUrl.value,
+        fileName: String(task.value?.fileName || generatedFileName.value),
+        task: task.value ? { ...task.value } : null
+      })
+    } else {
+      fallbackDownload(safeDownloadUrl.value, String(task.value?.fileName || generatedFileName.value))
+    }
+  } catch (downloadError) {
+    error.value = downloadError?.message || '导出文件下载失败，请稍后重试。'
+  } finally {
+    isDownloading.value = false
+  }
+}
+
 onMounted(() => {
   if (task.value && !taskReady.value && !taskFailed.value) schedulePoll()
 })
@@ -303,7 +339,7 @@ onBeforeUnmount(clearPollTimer)
           <div v-if="frozenTaskFields.length" class="query-export-result__headers"><span>Excel 表头</span><strong v-for="field in frozenTaskFields" :key="field.key">{{ field.label }}</strong></div>
           <p v-else class="query-export-result__frozen-warning">该导出任务未返回冻结表头，无法确认文件列，请刷新任务状态或重新创建导出。</p>
           <span v-if="error" class="query-export-error">{{ error }}</span>
-          <div class="query-export-result__actions"><button type="button" class="button button--secondary" @click="returnToForm">返回修改</button><button v-if="!taskReady && !taskFailed" type="button" class="button button--primary" :disabled="isPolling" @click="refreshTask(false)">{{ isPolling ? '正在刷新…' : '刷新状态' }}</button><a v-else-if="taskReady && safeDownloadUrl" class="button button--primary" :href="safeDownloadUrl" download><Download :size="16" />下载文件</a><button v-else type="button" class="button button--primary" disabled><Download :size="16" />下载文件</button></div>
+          <div class="query-export-result__actions"><button type="button" class="button button--secondary" @click="returnToForm">返回修改</button><button v-if="!taskReady && !taskFailed" type="button" class="button button--primary" :disabled="isPolling" @click="refreshTask(false)">{{ isPolling ? '正在刷新…' : '刷新状态' }}</button><button v-else-if="taskReady && safeDownloadUrl" type="button" class="button button--primary" :disabled="isDownloading" @click="downloadFile"><Download :size="16" />{{ isDownloading ? '正在下载…' : '下载文件' }}</button><button v-else type="button" class="button button--primary" disabled><Download :size="16" />下载文件</button></div>
         </main>
       </section>
     </div>

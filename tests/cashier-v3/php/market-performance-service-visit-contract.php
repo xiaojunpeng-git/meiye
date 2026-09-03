@@ -14,6 +14,11 @@ $checks = [
     'voided service facts are excluded as reversals' => strpos($service, "cashier_v3_service_record_void_operation vo") !== false && strpos($service, '->whereNull(\'vo.id\')') !== false,
     'service facts remain deduplicated at service_fact_id grain' => strpos($service, 'sv.store_id,sv.service_fact_id,sv.checkout_request_id') !== false,
     'market detail matches visits by source as well as order identity' => strpos($service, ". '|' . \$sourceKey") !== false,
+    'member visit reports exclude succeeded service void reversals through the shared fact scope' => strpos($service, 'private function completedUnvoidedServiceFacts') !== false
+        && strpos($service, "cashier_v3_service_record_void_operation ' . \$voidAlias") !== false
+        && strpos($service, "->whereNull(\$voidAlias . '.id')") !== false
+        && strpos($service, "'member_visit_service',\n            'member_visit_void'") !== false
+        && strpos($service, "'annual_visit_service','annual_visit_void'") !== false,
 ];
 
 $passed = 0;

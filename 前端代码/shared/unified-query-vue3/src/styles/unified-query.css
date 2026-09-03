@@ -217,6 +217,19 @@
   padding-top: 0;
 }
 
+/* 订单中心将日期范围放在第一行时，两个日期输入与综合查询都必须保留
+ * 各自的占位宽度；默认 flex shrink 会把搜索框压到日期区间下方。 */
+.order-center-query-toolbar.unified-query-toolbar--quick-controls-inline .unified-query-toolbar__top-fields {
+  flex: 0 0 365px;
+  min-width: 365px;
+}
+
+.order-center-query-toolbar .unified-query-toolbar__primary .search-field {
+  flex: 0 0 180px;
+  min-width: 180px;
+  width: 180px;
+}
+
 .unified-query-toolbar__primary {
   flex: 1 1 auto;
   min-width: 0;
@@ -248,6 +261,12 @@
 .unified-query-toolbar__primary .search-field {
   display: block;
   width: min(360px, 38vw);
+}
+
+.unified-query-toolbar--compact-keyword-search .unified-query-toolbar__primary .search-field {
+  flex: 0 0 180px;
+  min-width: 180px;
+  width: min(180px, 19vw);
 }
 
 .unified-query-toolbar__primary .search-field input {
@@ -403,11 +422,24 @@
   font-size: 13px;
 }
 
+.unified-query-top-field--label-hidden {
+  grid-template-columns: minmax(0, 1fr);
+  flex: 0 0 365px;
+  width: 365px;
+  min-width: 365px;
+  max-width: 365px;
+}
+
 .unified-query-top-field__range {
   display: grid;
   grid-template-columns: minmax(92px, 1fr) auto minmax(92px, 1fr);
   align-items: center;
   gap: 6px;
+}
+
+.unified-query-top-field__range--date {
+  grid-template-columns: auto minmax(126px, 1fr) auto minmax(126px, 1fr);
+  min-width: 350px;
 }
 
 .unified-query-top-field__range > span {

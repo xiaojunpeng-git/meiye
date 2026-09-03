@@ -28,6 +28,11 @@ $exportWorker = (string)file_get_contents($backend . '/app/services/query/Unifie
 $workerResolver = (string)file_get_contents($backend . '/app/services/cashier/v3/order/CashierV3OrderCenterUnifiedQueryWorkerContextResolver.php');
 $config = (string)file_get_contents($backend . '/config/unified_query.php');
 $view = (string)file_get_contents($frontend);
+$toolbar = (string)file_get_contents($root . '/前端代码/shared/unified-query-vue3/src/components/UnifiedQueryToolbar.vue');
+$exportDrawer = (string)file_get_contents($root . '/前端代码/shared/unified-query-vue3/src/components/UnifiedQueryExportDrawer.vue');
+$module = (string)file_get_contents($backend . '/app/services/cashier/v3/query/UnifiedQueryModule.php');
+$commandController = (string)file_get_contents($backend . '/app/controller/cashier/v3/Command.php');
+$recordQuery = (string)file_get_contents($backend . '/app/services/cashier/v3/order/CashierV3OrderCenterRecordQueryServices.php');
 
 $pages = [
     'sales' => 'order_center_sales',
@@ -44,6 +49,23 @@ foreach ($pages as $type => $pageCode) {
     exportOk("{$type} 页签登记统一查询导出页码", strpos($contract, "'{$type}' => '{$pageCode}'") !== false);
     exportOk("{$type} 页签前端绑定同一导出页码", strpos($view, "pageCode: '{$pageCode}'") !== false);
 }
+
+exportOk('八个订单页签的业务日期均为当天默认的起止日期范围', substr_count($view, "field('business_date', '业务日期', 'date', { defaultQuick: true, quickDateRange: true, quickLabelHidden: true })") === 8
+    && strpos($contract, "['debt_no', '欠款编号', 'text', true, true], ['business_date', '业务日期', 'date', true, true]") !== false
+    && strpos($toolbar, 'function isQuickDateRange(field)') !== false
+    && strpos($toolbar, 'function ensureQuickDateRangeDefaults()') !== false
+    && strpos($toolbar, '<span>从</span>') !== false
+    && strpos($toolbar, 'aria-label="结束日期"') !== false
+    && strpos($view, 'inline-quick-controls') !== false
+    && strpos($view, 'compact-keyword-search') !== false
+    && strpos($toolbar, 'compactKeywordSearch') !== false);
+exportOk('订单中心日期范围会传给销售与其余七类记录的真实查询', strpos($view, 'function normalizeOrderCenterDateQuery(query = {})') !== false
+    && strpos($view, 'queryRecords(defaultOrderCenterDateQuery(), true)') !== false
+    && strpos($recordQuery, 'private function businessDateRange(array $payload): array') !== false
+    && strpos($recordQuery, 'private function applyBusinessDateRange($query, string $field, array $criteria): void') !== false
+    && strpos($recordQuery, 'private function applyTimestampBusinessDateRange($query, string $field, array $criteria): void') !== false
+    && substr_count($recordQuery, 'applyBusinessDateRange($query') >= 6
+    && substr_count($recordQuery, 'applyTimestampBusinessDateRange($query') >= 7);
 
 exportOk('订单中心统一查询 registrar 已登记', strpos($config, 'CashierV3OrderCenterUnifiedQueryRegistrar::class') !== false);
 exportOk('八类订单记录 provider 已登记', substr_count($config, 'CashierV3') >= 10
@@ -62,6 +84,26 @@ exportOk('导出冻结最近一次成功查询，而不是浏览器当前行', s
     && strpos($view, ':executed-query="executedQuery"') !== false
     && strpos($view, ':on-create-export="createActiveExport"') !== false);
 exportOk('导出切换账号或门店时清除旧快照', strpos($view, 'executedQueryByType.value = {}') !== false);
+exportOk('订单中心导出快照不会携带旧列表 status 参数', strpos($view, 'status: ignoredStatus') !== false);
+exportOk('服务记录前后端字段合同一致，能力不会因工资项目数字段降级', strpos($contract, "['project_count', '工资项目数', 'integer']") !== false
+    && strpos($view, "field('project_count', '工资项目数', 'number')") !== false);
+exportOk('工作台上下文就绪后会重试当前页签统一查询能力', strpos($view, "activeUnifiedQuery.value?.load({ silent: true })") !== false);
+exportOk('订单中心导出位于设置右侧且固定导出当前查询结果', strpos($view, 'export-button-after-settings') !== false
+    && strpos($view, 'direct-query-export') !== false
+    && strpos($toolbar, 'exportButtonAfterSettings') !== false
+    && strpos($toolbar, "scope: 'query'") !== false
+    && strpos($toolbar, 'includeSummary: false') !== false);
+exportOk('订单中心下载导出文件会携带门店会话并校验 xlsx 二进制', strpos($view, 'on-download-export="downloadActiveExport"') !== false
+    && strpos($view, 'readStoreV3SessionToken') !== false
+    && strpos($view, "Authorization: `Bearer \${token}`") !== false
+    && strpos($view, 'header[0] !== 0x50') !== false
+    && strpos($toolbar, 'onDownloadExport') !== false
+    && strpos($exportDrawer, 'onDownload') !== false
+    && strpos($exportDrawer, '@click="downloadFile"') !== false);
+exportOk('导出下载按任务冻结页签重建上下文并二次校验', strpos($module, "/download?pageCode=") !== false
+    && strpos($module, "rawurlencode((string)(\$task['pageCode'] ?? \$payload['pageCode']))") !== false
+    && strpos($commandController, "'pageCode' => trim((string)\$this->request->get('pageCode', ''))") !== false
+    && strpos($view, "endpoint.searchParams.set('pageCode', pageCode)") !== false);
 exportOk('销售订单只显示结账时选择的最终客户来源', strpos($contract, "['source', '客户来源']") !== false
     && strpos($view, "field('source', '客户来源')") !== false
     && strpos($salesQuery, "'source' => \$this->businessSourceLabel(") !== false

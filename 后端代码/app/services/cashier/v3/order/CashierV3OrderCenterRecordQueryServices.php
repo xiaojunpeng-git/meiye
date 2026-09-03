@@ -220,6 +220,7 @@ final class CashierV3OrderCenterRecordQueryServices
             }
         }
         $requestedStores = $this->requestedStoreIds($payload);
+        $businessDateRange = $this->businessDateRange($payload);
         return [
             'type' => $type,
             'page' => max(1, (int)($payload['page'] ?? 1)),
@@ -228,11 +229,39 @@ final class CashierV3OrderCenterRecordQueryServices
             'status' => $status,
             'dataScope' => $scopeMode,
             'operationType' => $operationType,
+            'businessDateFrom' => $businessDateRange['from'],
+            'businessDateTo' => $businessDateRange['to'],
             'topFilters' => $type === 'service' ? $this->serviceTopFilters($payload) : [],
             'sorts' => $type === 'service' ? $this->serviceSorts($payload) : [],
             'allowedStoreIds' => $this->canonicalStoreIds($dataScope->narrowVisibleStores($requestedStores)),
             'tenantId' => $dataScope->tenantId(),
         ];
+    }
+
+    /** @return array{from:string,to:string} */
+    private function businessDateRange(array $payload): array
+    {
+        $from = $this->validBusinessDate($payload['businessDateFrom'] ?? $payload['business_date_from'] ?? $payload['dateFrom'] ?? $payload['date_from'] ?? '');
+        $to = $this->validBusinessDate($payload['businessDateTo'] ?? $payload['business_date_to'] ?? $payload['dateTo'] ?? $payload['date_to'] ?? '');
+        foreach ((array)($payload['topFilters'] ?? $payload['top_filters'] ?? []) as $filter) {
+            if (!is_array($filter) || $this->scalar($filter['field'] ?? '') !== 'business_date') continue;
+            $value = $this->validBusinessDate($filter['value'] ?? '');
+            if ($value === '') continue;
+            $operator = strtolower($this->scalar($filter['operator'] ?? 'eq'));
+            if ($operator === 'gte') $from = $value;
+            elseif ($operator === 'lte') $to = $value;
+            elseif ($operator === 'eq') {
+                $from = $value;
+                $to = $value;
+            }
+        }
+        return ['from' => $from, 'to' => $to];
+    }
+
+    private function validBusinessDate($value): string
+    {
+        $date = $this->scalar($value);
+        return preg_match('/^\\d{4}-\\d{2}-\\d{2}$/D', $date) === 1 ? $date : '';
     }
 
     private function readType(array $criteria, CashierV3OperatorScope $scope, bool $countOnly = false): array
@@ -265,6 +294,7 @@ final class CashierV3OrderCenterRecordQueryServices
             ->leftJoin('system_store s', 's.id = r.store_id')
             ->leftJoin('system_store_staff st', 'st.id = r.staff_id');
         $this->applyStoreScope($query, 'r.store_id', $criteria['allowedStoreIds']);
+        $this->applyTimestampBusinessDateRange($query, 'COALESCE(NULLIF(r.pay_time, 0), r.add_time)', $criteria);
         $this->applyKeyword($query, $criteria['keyword'], [
             'r.order_id', 'u.real_name', 'u.nickname', 'u.phone', 's.name', 'st.staff_name',
         ]);
@@ -535,6 +565,7 @@ final class CashierV3OrderCenterRecordQueryServices
                 else $q->where('r.status', 'succeeded');
             });
         $this->applyStoreScope($query, 'r.store_id', $criteria['allowedStoreIds']);
+        $this->applyBusinessDateRange($query, 'r.business_date', $criteria);
         $this->applyKeyword($query, $criteria['keyword'], [
             'r.repayment_no', 'r.debt_no', 'r.sales_order_no_snapshot',
             'u.real_name', 'u.nickname', 'u.phone',
@@ -607,6 +638,7 @@ final class CashierV3OrderCenterRecordQueryServices
                 else $q->where('r.status', 'succeeded');
             });
         $this->applyStoreScope($query, 'r.store_id', $criteria['allowedStoreIds']);
+        $this->applyBusinessDateRange($query, 'r.business_date', $criteria);
         $this->applyKeyword($query, $criteria['keyword'], [
             'r.repayment_no', 'd.debt_no', 'd.order_sn', 'u.real_name', 'u.nickname', 'u.phone',
         ]);
@@ -669,6 +701,7 @@ final class CashierV3OrderCenterRecordQueryServices
             ->leftJoin('system_store s', 's.id = r.pay_store_id')
             ->leftJoin('system_store_staff st', 'st.id = r.staff_id');
         $this->applyStoreScope($query, 'r.pay_store_id', $criteria['allowedStoreIds']);
+        $this->applyTimestampBusinessDateRange($query, 'r.add_time', $criteria);
         $this->applyKeyword($query, $criteria['keyword'], [
             'r.repay_no', 'bd.document_no', 'd.debt_no', 'r.order_sn', 'u.real_name', 'u.nickname', 'u.phone',
         ]);
@@ -739,6 +772,7 @@ final class CashierV3OrderCenterRecordQueryServices
             ->leftJoin('cashier_v3_debt_authority a', 'a.debt_id = d.id')
             ->leftJoin('cashier_v3_recharge_debt_authority ra', 'ra.debt_id = d.id');
         $this->applyStoreScope($query, 'd.store_id', $criteria['allowedStoreIds']);
+        $this->applyTimestampBusinessDateRange($query, 'd.add_time', $criteria);
         $this->applyKeyword($query, $criteria['keyword'], [
             'd.debt_no', 'd.order_sn', 'a.sales_order_no_snapshot',
             'ra.recharge_order_no_snapshot', 'u.real_name', 'u.nickname', 'u.phone',
@@ -783,6 +817,9 @@ final class CashierV3OrderCenterRecordQueryServices
                 'remainingAmount' => $remaining,
                 'debtStatus' => (int)$row['status'] === 1 ? '已结清' : '待补交',
                 'storeName' => (string)($row['store_name'] ?? ''),
+                // 欠款主表没有独立的业务日字段；其入账时间就是该条欠款
+                // 事实的发生时间，筛选与列表展示必须使用同一来源。
+                'businessDate' => $this->date((int)($row['add_time'] ?? 0)),
                 'createdAt' => $this->dateTime((int)($row['add_time'] ?? 0)),
                 'updatedAt' => $this->dateTime((int)($row['update_time'] ?? 0)),
                 'remark' => (string)($row['remark'] ?? ''),
@@ -804,6 +841,7 @@ final class CashierV3OrderCenterRecordQueryServices
             ->where('rlo.operation_type', 'refund')
             ->where('rlo.status', 'succeeded');
         $this->applyStoreScope($query, 'rlo.store_id', $criteria['allowedStoreIds']);
+        $this->applyBusinessDateRange($query, 'rlo.business_date', $criteria);
         $this->applyKeyword($query, $criteria['keyword'], [
             'rlo.operation_no', 'rlo.source_order_no_snapshot', 'u.real_name', 'u.nickname', 'u.phone',
             'rlo.reason_snapshot',
@@ -858,6 +896,7 @@ final class CashierV3OrderCenterRecordQueryServices
             ->where('sf.tenant_id', $scope->tenantId())
             ->where('sf.service_status', 'completed');
         $this->applyStoreScope($query, 'sf.store_id', $criteria['allowedStoreIds']);
+        $this->applyBusinessDateRange($query, 'sf.business_date', $criteria);
         $this->applyKeyword($query, $criteria['keyword'], [
             'sf.service_record_no', 'sf.member_name_snapshot', 'sf.project_name_snapshot',
             'sf.store_name_snapshot', 'sf.operator_name_snapshot', 'sf.craftsmen_snapshot_json',
@@ -1149,7 +1188,7 @@ final class CashierV3OrderCenterRecordQueryServices
     private function serviceTopFilters(array $payload): array
     {
         $allowed = [
-            'service_record_no', 'business_date', 'member_name', 'service_project',
+            'service_record_no', 'member_name', 'service_project',
             'entitlement_source', 'source_card', 'source_card_no', 'craftsman',
             'service_status',
         ];
@@ -1159,7 +1198,6 @@ final class CashierV3OrderCenterRecordQueryServices
             $field = $this->scalar($filter['field'] ?? '');
             $value = $this->scalar($filter['value'] ?? '');
             if ($value === '' || !in_array($field, $allowed, true) || isset($filters[$field])) continue;
-            if ($field === 'business_date' && preg_match('/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/D', $value) !== 1) continue;
             if ($field === 'service_status' && !in_array($value, ['completed', 'voided', '已完成', '已作废'], true)) continue;
             $filters[$field] = $value;
         }
@@ -1198,9 +1236,7 @@ final class CashierV3OrderCenterRecordQueryServices
             'craftsman' => 'sf.craftsmen_snapshot_json',
         ];
         foreach ($filters as $field => $value) {
-            if ($field === 'business_date') {
-                $query->where('sf.business_date', $value);
-            } elseif ($field === 'service_status') {
+            if ($field === 'service_status') {
                 if (in_array($value, ['voided', '已作废'], true)) {
                     $query->whereNotNull('vo.id');
                 } else {
@@ -1279,6 +1315,7 @@ final class CashierV3OrderCenterRecordQueryServices
                 else $q->where('ga.status', 'issued');
             });
         $this->applyStoreScope($query, 'gf.store_id', $criteria['allowedStoreIds']);
+        $this->applyTimestampBusinessDateRange($query, 'gf.settled_at', $criteria);
         $this->applyKeyword($query, $criteria['keyword'], [
             'gf.gift_fact_id', 'ga.gift_no', 'ga.recharge_order_no_snapshot', 'gf.content_name_snapshot',
             'u.real_name', 'u.nickname', 'u.phone',
@@ -1351,6 +1388,7 @@ final class CashierV3OrderCenterRecordQueryServices
                 }
             });
         $this->applyStoreScope($query, 'gf.store_id', $criteria['allowedStoreIds']);
+        $this->applyTimestampBusinessDateRange($query, 'gf.settled_at', $criteria);
         $this->applyKeyword($query, $criteria['keyword'], [
             'gf.gift_fact_id', 'ga.gift_no', 'ga.reason_snapshot', 'gf.content_name_snapshot',
             'u.real_name', 'u.nickname', 'u.phone',
@@ -1420,6 +1458,7 @@ final class CashierV3OrderCenterRecordQueryServices
             ->where('ci.cart_info', 'not like', '%cashier_v3_recharge_gift%')
             ->where('ci.cart_info', 'not like', '%cashier_v3_direct_gift%');
         $this->applyStoreScope($query, 'o.store_id', $criteria['allowedStoreIds']);
+        $this->applyTimestampBusinessDateRange($query, 'COALESCE(NULLIF(o.pay_time, 0), o.add_time)', $criteria);
         $this->applyKeyword($query, $criteria['keyword'], [
             'o.order_id', 'u.real_name', 'u.nickname', 'u.phone', 'ci.cart_info',
         ]);
@@ -1506,6 +1545,7 @@ final class CashierV3OrderCenterRecordQueryServices
             $query->where('c.operation_type', $criteria['operationType']);
         }
         $this->applyStoreScope($query, 'c.store_id', $criteria['allowedStoreIds']);
+        $this->applyBusinessDateRange($query, 'c.business_date', $criteria);
         $this->applyKeyword($query, $criteria['keyword'], [
             'c.operation_no', 'c.member_name_after_snapshot', 'c.card_name_snapshot',
             'c.card_no_snapshot', 'c.target_catalog_name_snapshot', 'c.operator_name_snapshot',
@@ -1557,6 +1597,7 @@ final class CashierV3OrderCenterRecordQueryServices
             ->leftJoin('system_store s', 's.id = r.store_id')
             ->leftJoin('system_store_staff st', 'st.id = r.staff_id');
         $this->applyStoreScope($query, 'r.store_id', $criteria['allowedStoreIds']);
+        $this->applyTimestampBusinessDateRange($query, 'r.business_time', $criteria);
         $this->applyKeyword($query, $criteria['keyword'], [
             'r.replacement_no', 'u.real_name', 'u.nickname', 'u.phone', 'r.snapshot_json',
         ]);
@@ -1616,6 +1657,7 @@ final class CashierV3OrderCenterRecordQueryServices
             ->where('o.paid', 1)
             ->where('o.is_system_del', 0);
         $this->applyStoreScope($query, 'o.store_id', $criteria['allowedStoreIds']);
+        $this->applyTimestampBusinessDateRange($query, 'COALESCE(NULLIF(o.pay_time, 0), o.add_time)', $criteria);
         $this->applyKeyword($query, $criteria['keyword'], [
             'o.order_id', 'target.order_id', 'u.real_name', 'u.nickname', 'u.phone',
         ]);
@@ -1696,6 +1738,38 @@ final class CashierV3OrderCenterRecordQueryServices
         if ($allowedStoreIds !== null) {
             $query->whereIn($field, $allowedStoreIds);
         }
+    }
+
+    private function applyBusinessDateRange($query, string $field, array $criteria): void
+    {
+        $from = (string)($criteria['businessDateFrom'] ?? '');
+        $to = (string)($criteria['businessDateTo'] ?? '');
+        if ($from !== '') $query->where($field, '>=', $from);
+        if ($to !== '') $query->where($field, '<=', $to);
+    }
+
+    private function applyTimestampBusinessDateRange($query, string $field, array $criteria): void
+    {
+        $from = (string)($criteria['businessDateFrom'] ?? '');
+        $to = (string)($criteria['businessDateTo'] ?? '');
+        $zone = new \DateTimeZone(self::BUSINESS_TIMEZONE);
+        if ($from !== '') {
+            $start = new \DateTimeImmutable($from . ' 00:00:00', $zone);
+            $this->whereTimestampBoundary($query, $field, '>=', $start->getTimestamp());
+        }
+        if ($to !== '') {
+            $end = new \DateTimeImmutable($to . ' 23:59:59', $zone);
+            $this->whereTimestampBoundary($query, $field, '<=', $end->getTimestamp());
+        }
+    }
+
+    private function whereTimestampBoundary($query, string $field, string $operator, int $value): void
+    {
+        if (str_contains($field, '(')) {
+            $query->whereRaw($field . ' ' . $operator . ' ?', [$value]);
+            return;
+        }
+        $query->where($field, $operator, $value);
     }
 
     private function applyKeyword($query, string $keyword, array $fields): void

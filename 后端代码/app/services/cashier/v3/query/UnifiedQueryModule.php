@@ -201,7 +201,8 @@ final class UnifiedQueryModule
                     $task = $runtime['exports']->findForAccount($context, $taskNo);
                     if (!empty($task['downloadAvailable'])) {
                         $task['downloadUrl'] = '/cashierapi/v3/unified-query/exports/'
-                            . rawurlencode($taskNo) . '/download';
+                            . rawurlencode($taskNo) . '/download?pageCode='
+                            . rawurlencode((string)($task['pageCode'] ?? $payload['pageCode']));
                     }
                     return ['data' => ['exportTask' => $task]];
                 });

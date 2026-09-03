@@ -24,9 +24,25 @@ const props = defineProps({
     type: Boolean,
     default: true
   },
+  // 订单中心的导出属于查询结果操作，放在“设置”之后；其他已接入页面保持原位置，
+  // 避免一次调整影响无关页面。
+  exportButtonAfterSettings: {
+    type: Boolean,
+    default: false
+  },
+  // 订单中心只需要导出当前查询结果，不展示范围、字段或文件名配置表单。
+  // 仍复用同一异步任务和下载结果面板，保证权限、查询快照和 Excel 生成口径不分叉。
+  directQueryExport: {
+    type: Boolean,
+    default: false
+  },
   showKeywordSearch: {
     type: Boolean,
     default: true
+  },
+  compactKeywordSearch: {
+    type: Boolean,
+    default: false
   },
   // Some dense operational pages need their status shortcuts and their
   // configured quick fields beside the primary query controls. Keep the
@@ -147,6 +163,10 @@ const props = defineProps({
   onQueryExportTask: {
     type: Function,
     default: null
+  },
+  onDownloadExport: {
+    type: Function,
+    default: null
   }
 })
 
@@ -167,6 +187,8 @@ const isCustomFieldOpen = ref(false)
 const isFieldRenameOpen = ref(false)
 const isExportOpen = ref(false)
 const exportTaskReference = ref(null)
+const isDirectExporting = ref(false)
+const exportError = ref('')
 const quickFieldValues = reactive({})
 const quickFieldRanges = reactive({})
 
@@ -187,7 +209,8 @@ function normalizeSettings(settings = {}) {
 const activeSettings = ref(normalizeSettings(props.settings))
 const fieldMap = computed(() => new Map(props.fields.filter((field) => !field.hidden && field.key !== 'id').map((field) => [field.key, field])))
 const quickFieldMap = computed(() => new Map([...fieldMap.value].filter(([, field]) => (
-  !capabilityMatchesPage.value || field.capabilities?.quickFilter === true
+  field.quickFilterHidden !== true
+  && (!capabilityMatchesPage.value || field.capabilities?.quickFilter === true)
 ))))
 const defaultQuickFieldKeys = computed(() => props.fields
   .filter((field) => !field.hidden
@@ -362,6 +385,26 @@ function quickRangeValue(field, bound) {
   return quickFieldRanges[field.key]?.[bound] ?? ''
 }
 
+function isQuickDateRange(field) {
+  return field?.quickDateRange === true && topFieldType(field) === 'date'
+}
+
+function localToday() {
+  const now = new Date()
+  const offset = now.getTimezoneOffset() * 60000
+  return new Date(now.getTime() - offset).toISOString().slice(0, 10)
+}
+
+function ensureQuickDateRangeDefaults() {
+  activeQuickFields.value.forEach((field) => {
+    if (!isQuickDateRange(field)) return
+    if (!quickFieldRanges[field.key]) quickFieldRanges[field.key] = { min: '', max: '' }
+    const today = localToday()
+    if (!quickFieldRanges[field.key].min) quickFieldRanges[field.key].min = today
+    if (!quickFieldRanges[field.key].max) quickFieldRanges[field.key].max = today
+  })
+}
+
 function setQuickRangeValue(field, bound, value) {
   if (!quickFieldRanges[field.key]) quickFieldRanges[field.key] = { min: '', max: '' }
   quickFieldRanges[field.key][bound] = value
@@ -370,12 +413,15 @@ function setQuickRangeValue(field, bound, value) {
 
 function validateQuickRanges() {
   for (const field of activeQuickFields.value) {
-    if (field.quickRange !== true) continue
+    if (field.quickRange !== true && !isQuickDateRange(field)) continue
     const range = quickFieldRanges[field.key] || {}
     if (range.min === '' || range.min === undefined || range.min === null
       || range.max === '' || range.max === undefined || range.max === null) continue
-    if (Number(range.min) > Number(range.max)) {
-      quickRangeError.value = `${field.label}的最小值不能大于最大值。`
+    if ((isQuickDateRange(field) && String(range.min) > String(range.max))
+      || (field.quickRange === true && Number(range.min) > Number(range.max))) {
+      quickRangeError.value = isQuickDateRange(field)
+        ? `${field.label}的开始日期不能晚于结束日期。`
+        : `${field.label}的最小值不能大于最大值。`
       return false
     }
   }
@@ -386,7 +432,7 @@ function validateQuickRanges() {
 function exportTopFilters() {
   return activeQuickFields.value
     .flatMap((field) => {
-      if (field.quickRange === true) {
+      if (field.quickRange === true || isQuickDateRange(field)) {
         const range = quickFieldRanges[field.key] || {}
         return [
           range.min === undefined || range.min === null || range.min === '' ? null : {
@@ -499,8 +545,10 @@ async function selectTopEntity(field) {
 
 function clearTopField(field) {
   if (isFixedStoreField(field)) return
-  if (field.quickRange === true) {
-    quickFieldRanges[field.key] = { min: '', max: '' }
+  if (field.quickRange === true || isQuickDateRange(field)) {
+    quickFieldRanges[field.key] = isQuickDateRange(field)
+      ? { min: localToday(), max: localToday() }
+      : { min: '', max: '' }
     quickRangeError.value = ''
     return
   }
@@ -510,14 +558,17 @@ function clearTopField(field) {
 function applySettings(settings) {
   activeSettings.value = normalizeSettings(settings)
   activeQuickFields.value.forEach((field) => {
-    if (field.quickRange === true && !(field.key in quickFieldRanges)) {
+    if ((field.quickRange === true || isQuickDateRange(field)) && !(field.key in quickFieldRanges)) {
       quickFieldRanges[field.key] = { min: '', max: '' }
     }
     if (!(field.key in quickFieldValues)) quickFieldValues[field.key] = ''
   })
+  ensureQuickDateRangeDefaults()
   emit('settings-applied', { ...activeSettings.value })
   submitQuery()
 }
+
+watch(activeQuickFields, () => ensureQuickDateRangeDefaults(), { immediate: true })
 
 async function saveAliases(aliases, options = {}) {
   if (!canRenameFields.value || !props.onSaveFieldAliases) {
@@ -586,12 +637,67 @@ function createExport(configuration) {
     configuration
   })
 }
+
+const directExportFieldKeys = computed(() => {
+  const exportable = new Set(exportFields.value.map((field) => field.key))
+  const configured = Array.isArray(activeSettings.value.visibleFields)
+    ? activeSettings.value.visibleFields.filter((key) => exportable.has(key))
+    : []
+  return configured.length ? configured : exportFields.value.map((field) => field.key)
+})
+
+function directExportFileName() {
+  const now = new Date()
+  const date = [now.getFullYear(), String(now.getMonth() + 1).padStart(2, '0'), String(now.getDate()).padStart(2, '0')].join('')
+  return `${props.pageName}_${date}.xlsx`
+}
+
+async function startDirectQueryExport() {
+  if (isDirectExporting.value || !canExport.value) return
+  isDirectExporting.value = true
+  exportError.value = ''
+  try {
+    const result = await createExport({
+      scope: 'query',
+      fields: directExportFieldKeys.value,
+      includeSummary: false,
+      fileName: directExportFileName()
+    })
+    if (result?.status === 'result_unknown' && result?.idempotencyKey) {
+      // 创建请求超时不能重复创建第二个文件任务。沿用已有抽屉的幂等回查逻辑，
+      // 以原请求键恢复同一个任务。
+      exportTaskReference.value = {
+        id: null,
+        status: 'result_unknown',
+        fileName: directExportFileName(),
+        rowCount: props.resultCount,
+        originalIdempotencyKey: result.idempotencyKey
+      }
+      isExportOpen.value = true
+      return
+    }
+    const succeeded = result?.status === 'success' || unifiedQueryActionSucceeded(result?.raw || result)
+    if (!succeeded || !result?.task?.id) {
+      exportError.value = result?.message || '导出任务创建失败，请重试。'
+      return
+    }
+    exportTaskReference.value = result.task
+    isExportOpen.value = true
+  } catch (error) {
+    exportError.value = error?.message || '导出任务创建失败，请重试。'
+  } finally {
+    isDirectExporting.value = false
+  }
+}
 </script>
 
 <template>
   <section
     class="unified-query-toolbar"
-    :class="{ 'unified-query-toolbar--quick-controls-inline': inlineQuickControls }"
+    :class="{
+      'unified-query-toolbar--quick-controls-inline': inlineQuickControls,
+      'unified-query-toolbar--compact-keyword-search': compactKeywordSearch
+    }"
     aria-label="查询条件"
   >
     <div class="unified-query-toolbar__topline">
@@ -610,10 +716,28 @@ function createExport(configuration) {
           </button>
         </div>
         <div v-if="inlineQuickControls && activeQuickFields.length" class="unified-query-toolbar__top-fields" aria-label="常用查询字段">
-          <label v-for="field in activeQuickFields" :key="field.key" class="unified-query-top-field">
-            <span>{{ field.label }}</span>
+          <label v-for="field in activeQuickFields" :key="field.key" class="unified-query-top-field" :class="{ 'unified-query-top-field--label-hidden': field.quickLabelHidden === true }">
+            <span v-if="field.quickLabelHidden !== true">{{ field.label }}</span>
             <div class="unified-query-top-field__control">
-              <div v-if="field.quickRange === true" class="unified-query-top-field__range">
+              <div v-if="isQuickDateRange(field)" class="unified-query-top-field__range unified-query-top-field__range--date">
+                <span>从</span>
+                <input
+                  :value="quickRangeValue(field, 'min')"
+                  type="date"
+                  aria-label="开始日期"
+                  @input="setQuickRangeValue(field, 'min', $event.target.value)"
+                  @change="submitQuery"
+                >
+                <span>至</span>
+                <input
+                  :value="quickRangeValue(field, 'max')"
+                  type="date"
+                  aria-label="结束日期"
+                  @input="setQuickRangeValue(field, 'max', $event.target.value)"
+                  @change="submitQuery"
+                >
+              </div>
+              <div v-else-if="field.quickRange === true" class="unified-query-top-field__range">
                 <input
                   :value="quickRangeValue(field, 'min')"
                   type="number"
@@ -654,7 +778,7 @@ function createExport(configuration) {
                 :placeholder="topFieldPlaceholder(field)"
                 @keyup.enter="submitQuery"
               >
-              <button v-if="(field.quickRange === true ? (quickFieldRanges[field.key]?.min || quickFieldRanges[field.key]?.max) : quickFieldValues[field.key]) && !isFixedStoreField(field)" type="button" class="unified-query-top-field__clear" :aria-label="`清空${field.label}`" @click="clearTopField(field)">×</button>
+              <button v-if="!isQuickDateRange(field) && (field.quickRange === true ? (quickFieldRanges[field.key]?.min || quickFieldRanges[field.key]?.max) : quickFieldValues[field.key]) && !isFixedStoreField(field)" type="button" class="unified-query-top-field__clear" :aria-label="`清空${field.label}`" @click="clearTopField(field)">×</button>
             </div>
           </label>
         </div>
@@ -672,8 +796,15 @@ function createExport(configuration) {
           <option value="">其他状态</option>
           <option v-for="option in availableStatusOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
         </select>
-        <button v-if="canExport" type="button" class="button button--secondary unified-query-export-button" @click="isExportOpen = true"><Download :size="16" />导出</button>
+        <button v-if="canExport && !exportButtonAfterSettings" type="button" class="button button--secondary unified-query-export-button" @click="isExportOpen = true"><Download :size="16" />导出</button>
         <button v-if="showSettingsButton" type="button" class="button button--secondary" @click="openSettings">{{ settingsButtonLabel }}</button>
+        <button
+          v-if="canExport && exportButtonAfterSettings"
+          type="button"
+          class="button button--secondary unified-query-export-button"
+          :disabled="isDirectExporting"
+          @click="directQueryExport ? startDirectQueryExport() : (isExportOpen = true)"
+        ><Download :size="16" />{{ isDirectExporting ? '正在创建…' : '导出' }}</button>
         <slot name="primary-actions" />
       </div>
       <div v-if="$slots['context-actions']" class="unified-query-toolbar__context-actions">
@@ -697,10 +828,28 @@ function createExport(configuration) {
       </div>
 
       <div v-if="activeQuickFields.length" class="unified-query-toolbar__top-fields" aria-label="常用查询字段">
-        <label v-for="field in activeQuickFields" :key="field.key" class="unified-query-top-field">
-          <span>{{ field.label }}</span>
+        <label v-for="field in activeQuickFields" :key="field.key" class="unified-query-top-field" :class="{ 'unified-query-top-field--label-hidden': field.quickLabelHidden === true }">
+          <span v-if="field.quickLabelHidden !== true">{{ field.label }}</span>
           <div class="unified-query-top-field__control">
-            <div v-if="field.quickRange === true" class="unified-query-top-field__range">
+            <div v-if="isQuickDateRange(field)" class="unified-query-top-field__range unified-query-top-field__range--date">
+              <span>从</span>
+              <input
+                :value="quickRangeValue(field, 'min')"
+                type="date"
+                aria-label="开始日期"
+                @input="setQuickRangeValue(field, 'min', $event.target.value)"
+                @change="submitQuery"
+              >
+              <span>至</span>
+              <input
+                :value="quickRangeValue(field, 'max')"
+                type="date"
+                aria-label="结束日期"
+                @input="setQuickRangeValue(field, 'max', $event.target.value)"
+                @change="submitQuery"
+              >
+            </div>
+            <div v-else-if="field.quickRange === true" class="unified-query-top-field__range">
               <input
                 :value="quickRangeValue(field, 'min')"
                 type="number"
@@ -741,12 +890,13 @@ function createExport(configuration) {
               :placeholder="topFieldPlaceholder(field)"
               @keyup.enter="submitQuery"
             >
-            <button v-if="(field.quickRange === true ? (quickFieldRanges[field.key]?.min || quickFieldRanges[field.key]?.max) : quickFieldValues[field.key]) && !isFixedStoreField(field)" type="button" class="unified-query-top-field__clear" :aria-label="`清空${field.label}`" @click="clearTopField(field)">×</button>
+            <button v-if="!isQuickDateRange(field) && (field.quickRange === true ? (quickFieldRanges[field.key]?.min || quickFieldRanges[field.key]?.max) : quickFieldValues[field.key]) && !isFixedStoreField(field)" type="button" class="unified-query-top-field__clear" :aria-label="`清空${field.label}`" @click="clearTopField(field)">×</button>
           </div>
         </label>
       </div>
     </div>
     <p v-if="quickRangeError" class="unified-query-toolbar__error" role="alert">{{ quickRangeError }}</p>
+    <p v-if="exportError" class="unified-query-toolbar__error" role="alert">{{ exportError }}</p>
 
     <UnifiedQuerySettingsDrawer
       v-if="isSettingsOpen"
@@ -804,6 +954,7 @@ function createExport(configuration) {
       :export-capability="queryCapability.exportCapability"
       :on-create="createExport"
       :on-query-task="onQueryExportTask"
+      :on-download="onDownloadExport"
       :initial-task="exportTaskReference"
       @close="isExportOpen = false"
       @task-change="exportTaskReference = $event"

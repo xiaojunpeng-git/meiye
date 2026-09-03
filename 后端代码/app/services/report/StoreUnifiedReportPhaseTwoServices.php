@@ -284,10 +284,23 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
     private function memberVisitAnalysis(array $stores, array $range, array $input): array
     {
         $year = (int)substr($range['end'], 0, 4);
-        $services = $this->participantCheckout($this->applyOrganizationFilters($this->scope(Db::name('cashier_v3_entitlement_service_fact')->alias('member_visit_service'), $stores,'member_visit_service'), 'member_visit_service', $input, $range),'member_visit_service.checkout_request_id')
-            ->whereBetween('business_date', [$range['start'], $range['end']])->where('service_status','completed')->where('member_id','>',0)
-            ->fieldRaw("member_id,MAX(member_name_snapshot) member_name,COUNT(*) total_visits,MONTH(business_date) month_no,COUNT(*) month_visits")
-            ->group('member_id,MONTH(business_date)')->select()->toArray();
+        $services = $this->completedUnvoidedServiceFacts(
+            $this->participantCheckout(
+                $this->applyOrganizationFilters(
+                    $this->scope(Db::name('cashier_v3_entitlement_service_fact')->alias('member_visit_service'), $stores, 'member_visit_service'),
+                    'member_visit_service',
+                    $input,
+                    $range
+                ),
+                'member_visit_service.checkout_request_id'
+            ),
+            'member_visit_service',
+            'member_visit_void'
+        )
+            ->whereBetween('member_visit_service.business_date', [$range['start'], $range['end']])
+            ->where('member_visit_service.member_id', '>', 0)
+            ->fieldRaw("member_visit_service.member_id,MAX(member_visit_service.member_name_snapshot) member_name,COUNT(*) total_visits,MONTH(member_visit_service.business_date) month_no,COUNT(*) month_visits")
+            ->group('member_visit_service.member_id,MONTH(member_visit_service.business_date)')->select()->toArray();
         $payments = $this->cashFacts($stores)
             ->whereBetween('business_date', [$range['start'], $range['end']])->where('status','effective')->where('member_id','>',0)
             ->fieldRaw('member_id,MONTH(business_date) month_no,SUM(amount_cents) amount_cents')->group('member_id,MONTH(business_date)')->select()->toArray();
@@ -326,9 +339,9 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
     {
         $year=(int)substr($range['end'],0,4);$mode=(string)($input['mode']??'count');
         if(!in_array($mode,['count','people','project'],true)) throw new \InvalidArgumentException('年度进店统计方式无效');
-        $query=$this->participantCheckout($this->applyOrganizationFilters($this->scope(Db::name('cashier_v3_entitlement_service_fact')->alias('annual_visit_service'),$stores,'annual_visit_service'), 'annual_visit_service', $input, $range),'annual_visit_service.checkout_request_id')->whereBetween('annual_visit_service.business_date',[$range['start'],$range['end']])->where('annual_visit_service.service_status','completed');
+        $query=$this->completedUnvoidedServiceFacts($this->participantCheckout($this->applyOrganizationFilters($this->scope(Db::name('cashier_v3_entitlement_service_fact')->alias('annual_visit_service'),$stores,'annual_visit_service'), 'annual_visit_service', $input, $range),'annual_visit_service.checkout_request_id'),'annual_visit_service','annual_visit_void')->whereBetween('annual_visit_service.business_date',[$range['start'],$range['end']]);
         $expression=$mode==='people'?'COUNT(DISTINCT member_id)':($mode==='project'?'SUM(quantity)':'COUNT(*)');
-        $facts=$query->fieldRaw('store_id,MAX(store_name_snapshot) store_name,MONTH(business_date) month_no,'.$expression.' amount')->group('store_id,MONTH(business_date)')->select()->toArray();
+        $facts=$query->fieldRaw('annual_visit_service.store_id,MAX(annual_visit_service.store_name_snapshot) store_name,MONTH(annual_visit_service.business_date) month_no,'.$expression.' amount')->group('annual_visit_service.store_id,MONTH(annual_visit_service.business_date)')->select()->toArray();
         $storeNames=[];$records=[];foreach(range(1,12) as $month)$records[$month]=['row_label'=>$month.'月','year'=>$year.'年','total'=>0];
         foreach($facts as $fact){$sid=(int)$fact['store_id'];$storeNames[$sid]=(string)$fact['store_name'];$records[(int)$fact['month_no']]['store_'.$sid]=(int)$fact['amount'];$records[(int)$fact['month_no']]['total']+=(int)$fact['amount'];}
         $columns=$this->columns(['row_label'=>'列明','year'=>'年份','total'=>'合计']);foreach($storeNames as $id=>$name)$columns[]=['key'=>'store_'.$id,'label'=>$name,'store_id'=>$id];
@@ -383,7 +396,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         $sourceIds=$this->sourceIds('G');$memberId=(int)($input['member_id']??0);$includeFollowupCash=(int)($input['include_followup_cash']??0)===1&&$memberId>0;$payments=$this->cashFacts($stores)->whereBetween('business_date',[$range['start'],$range['end']])->where('status','effective');if(!$includeFollowupCash)$payments->whereIn('business_source_primary_id',$sourceIds?:[-1]);if($memberId>0)$payments->where('member_id',$memberId);$payments=$payments->fieldRaw('store_id,order_id,checkout_request_id,member_id,MAX(member_name_snapshot) member_name,MAX(store_name_snapshot) store_name,MAX(business_source_label_snapshot) source,SUM(amount_cents) amount_cents')->group('store_id,order_id,checkout_request_id,member_id')->select()->toArray();
         $keys=array_values(array_unique(array_column($payments,'order_id')));$orders=[];if($keys){$fields=$this->hasColumn('cashier_v3_sales_order','reward_amount_cents')?'order_id,order_note,reward_amount_cents':'order_id,order_note';foreach(Db::name('cashier_v3_sales_order')->whereIn('order_id',$keys)->field($fields)->select()->toArray()as$r)$orders[(string)$r['order_id']]=$r;}
         $memberIds=array_values(array_unique(array_filter(array_column($payments,'member_id'))));$careDates=[];
-        if($memberIds){foreach($this->participantCheckout($this->scope(Db::name('cashier_v3_entitlement_service_fact')->alias('cross_care_service'),$stores,'cross_care_service'),'cross_care_service.checkout_request_id')->whereIn('cross_care_service.member_id',$memberIds)->where('cross_care_service.service_status','completed')->fieldRaw('cross_care_service.store_id,cross_care_service.member_id,MIN(cross_care_service.business_date) care_date')->group('cross_care_service.store_id,cross_care_service.member_id')->select()->toArray()as$r)$careDates[(int)$r['store_id'].'|'.(int)$r['member_id']]=(string)$r['care_date'];}
+        if($memberIds){foreach($this->completedUnvoidedServiceFacts($this->participantCheckout($this->scope(Db::name('cashier_v3_entitlement_service_fact')->alias('cross_care_service'),$stores,'cross_care_service'),'cross_care_service.checkout_request_id'),'cross_care_service','cross_care_void')->whereIn('cross_care_service.member_id',$memberIds)->fieldRaw('cross_care_service.store_id,cross_care_service.member_id,MIN(cross_care_service.business_date) care_date')->group('cross_care_service.store_id,cross_care_service.member_id')->select()->toArray()as$r)$careDates[(int)$r['store_id'].'|'.(int)$r['member_id']]=(string)$r['care_date'];}
         foreach($payments as &$row){$key=(string)$row['order_id'];$row['care_date']=$careDates[(int)$row['store_id'].'|'.(int)$row['member_id']]??'';$row['full_payment']=$this->money((int)$row['amount_cents']);$row['reward']=$this->money((int)($orders[$key]['reward_amount_cents']??0));$row['remark']=(string)($orders[$key]['order_note']??'');$row['annotation_subject_key']=$key;$row['annotation_subject_type']='sales_order';$row['source_order_id']=$key;}unset($row);
         return $this->result('异业收客明细表',$this->columns(['source'=>'来源','care_date'=>'护理日期','store_name'=>'门店','member_name'=>'会员','full_payment'=>'收客全款业绩','reward'=>'奖励','remark'=>'备注']),$payments,$input);
     }
@@ -697,6 +710,23 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
     private function paymentMethods():array{$rows=Db::name('cashier_v3_payment_method_config')->where('status',1)->where('code','<>','old_card_entry')->order('sort','asc')->order('id','asc')->select()->toArray();$out=[];foreach($rows as$r){$code=trim((string)$r['code']);if($code==='')continue;$out[]=['code'=>$code,'label'=>trim((string)$r['display_name'])?:trim((string)$r['default_name'])?:$code];}return$out;}
     private function storeIds($ids):array{return array_values(array_unique(array_filter(array_map('intval',is_array($ids)?$ids:[$ids]))));}
     private function scope($query,array $stores,string $alias=''){return $query->whereIn(($alias!==''?$alias.'.':'').'store_id',$stores);}
+    /**
+     * A successful service void is a reversal fact, not a destructive update of
+     * the original completed service. Operational audit lists can retain the
+     * original row, while every business-report aggregation must exclude it.
+     */
+    private function completedUnvoidedServiceFacts($query, string $serviceAlias, string $voidAlias)
+    {
+        return $query
+            ->leftJoin(
+                'cashier_v3_service_record_void_operation ' . $voidAlias,
+                $voidAlias . '.tenant_id=' . $serviceAlias . '.tenant_id AND '
+                . $voidAlias . '.service_fact_id=' . $serviceAlias . '.id AND '
+                . $voidAlias . ".status='succeeded'"
+            )
+            ->where($serviceAlias . '.service_status', 'completed')
+            ->whereNull($voidAlias . '.id');
+    }
     private function participantOrder($query,string $orderField){return $this->participantEmployeeId>0?(new StoreReportParticipantScopeServices())->applyOrder($query,$orderField,$this->participantEmployeeId):$query;}
     private function participantCheckout($query,string $checkoutField){return $this->participantEmployeeId>0?(new StoreReportParticipantScopeServices())->applyCheckout($query,$checkoutField,$this->participantEmployeeId):$query;}
     private function participantEmployeeFact($query,string $employeeField){return $this->participantEmployeeId>0?(new StoreReportParticipantScopeServices())->applyEmployeeFact($query,$employeeField,$this->participantEmployeeId):$query;}
@@ -806,7 +836,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         return$out;
     }
     private function phones(array $ids):array{if(!$ids)return[];$out=[];foreach(Db::name('user')->whereIn('uid',$ids)->field('uid,phone')->select()->toArray()as$r)$out[(int)$r['uid']]=(string)$r['phone'];return$out;}
-    private function servicesByMember(array $stores,array $members):array{if(!$members)return[];$rows=$this->participantCheckout($this->scope(Db::name('cashier_v3_entitlement_service_fact')->alias('member_service'),$stores,'member_service'),'member_service.checkout_request_id')->whereIn('member_service.member_id',$members)->where('member_service.service_status','completed')->field('member_service.member_id,member_service.business_date,member_service.project_name_snapshot,member_service.labor_fee_amount_cents,member_service.craftsmen_snapshot_json,member_service.occurred_at')->order('member_service.business_date','asc')->order('member_service.occurred_at','asc')->select()->toArray();$out=[];foreach($rows as$r){$craft=[];foreach((array)json_decode((string)$r['craftsmen_snapshot_json'],true)as$c)$craft[]=(string)($c['employeeName']??$c['employee_name']??$c['name']??'');$r['craftsman']=implode('、',array_unique(array_filter($craft)));$out[(int)$r['member_id']][]=$r;}return$out;}
+    private function servicesByMember(array $stores,array $members):array{if(!$members)return[];$rows=$this->completedUnvoidedServiceFacts($this->participantCheckout($this->scope(Db::name('cashier_v3_entitlement_service_fact')->alias('member_service'),$stores,'member_service'),'member_service.checkout_request_id'),'member_service','member_service_void')->whereIn('member_service.member_id',$members)->field('member_service.member_id,member_service.business_date,member_service.project_name_snapshot,member_service.labor_fee_amount_cents,member_service.craftsmen_snapshot_json,member_service.occurred_at')->order('member_service.business_date','asc')->order('member_service.occurred_at','asc')->select()->toArray();$out=[];foreach($rows as$r){$craft=[];foreach((array)json_decode((string)$r['craftsmen_snapshot_json'],true)as$c)$craft[]=(string)($c['employeeName']??$c['employee_name']??$c['name']??'');$r['craftsman']=implode('、',array_unique(array_filter($craft)));$out[(int)$r['member_id']][]=$r;}return$out;}
     private function newCustomerPersonnel(array $stores,array $orderIds,array $lineIds):array
     {
         $guides=[];$salespeople=[];$managers=[];$performance=[];

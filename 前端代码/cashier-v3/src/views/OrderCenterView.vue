@@ -29,6 +29,7 @@ import {
   openSalesOrderReceiptPrint,
   serviceRecordReceiptFromRecord
 } from '@/services/salesOrderReceiptPrint'
+import { readStoreV3SessionToken } from '@/services/storeV3SessionToken'
 
 const field = (key, label, type = 'text', extra = {}) => ({ key, label, type, defaultVisible: true, ...extra })
 const isPrinterSetupOpen = ref(false)
@@ -85,8 +86,8 @@ const ORDER_TABS = [
     searchPlaceholder: '搜索销售订单号、会员姓名、手机号或商品',
     emptyText: '暂无正式销售订单。完成结账后可在这里查询订单详情。',
     fields: [
-      field('sales_order_no', '销售订单号', 'text', { defaultQuick: true }),
-      field('business_date', '业务日期', 'date', { defaultQuick: true }),
+      field('sales_order_no', '销售订单号', 'text', { quickFilterHidden: true }),
+      field('business_date', '业务日期', 'date', { defaultQuick: true, quickDateRange: true, quickLabelHidden: true }),
       field('member_name', '会员姓名／游客'), field('phone', '手机号'),
       field('store', '销售门店', 'store'), field('item_summary', '商品摘要'),
       field('item_count', '商品数量', 'number'), field('receivable_amount', '应收金额', 'money'),
@@ -107,8 +108,8 @@ const ORDER_TABS = [
     searchPlaceholder: '搜索充值订单号、会员姓名或手机号',
     emptyText: '暂无充值订单。',
     fields: [
-      field('recharge_order_no', '充值订单号', 'text', { defaultQuick: true }),
-      field('business_date', '业务日期', 'date', { defaultQuick: true }),
+      field('recharge_order_no', '充值订单号', 'text', { quickFilterHidden: true }),
+      field('business_date', '业务日期', 'date', { defaultQuick: true, quickDateRange: true, quickLabelHidden: true }),
       field('member_name', '会员姓名'), field('phone', '手机号'), field('store', '办理门店', 'store'),
       field('recharge_plan', '充值方案'), field('salesperson', '销售人', 'person'),
       field('recharge_amount', '充值金额', 'money'), field('gift_amount', '赠送金额', 'money'),
@@ -126,8 +127,8 @@ const ORDER_TABS = [
     searchPlaceholder: '搜索退款单号、来源订单、会员姓名或手机号',
     emptyText: '暂无退款记录。',
     fields: [
-      field('refund_order_no', '退款单号', 'text', { defaultQuick: true }),
-      field('business_date', '业务日期', 'date', { defaultQuick: true }),
+      field('refund_order_no', '退款单号', 'text', { quickFilterHidden: true }),
+      field('business_date', '业务日期', 'date', { defaultQuick: true, quickDateRange: true, quickLabelHidden: true }),
       field('source_order_no', '来源订单号'), field('member_name', '会员姓名／游客'),
       field('phone', '手机号'), field('refund_summary', '退款内容'), field('refund_amount', '退款金额', 'money'),
       field('refund_method', '退款方式'), field('store', '办理门店', 'store'),
@@ -144,7 +145,8 @@ const ORDER_TABS = [
     searchPlaceholder: '搜索欠款编号、来源订单、会员姓名或手机号',
     emptyText: '暂无欠款记录。欠款以权威欠款事实为准。',
     fields: [
-      field('debt_no', '欠款编号', 'text', { defaultQuick: true }),
+      field('debt_no', '欠款编号', 'text', { quickFilterHidden: true }),
+      field('business_date', '业务日期', 'date', { defaultQuick: true, quickDateRange: true, quickLabelHidden: true }),
       field('member_name', '客户'), field('phone', '手机号'),
       field('source_type', '欠款来源'), field('source_order_no', '来源订单'),
       field('original_debt_amount', '原欠款', 'money'), field('repaid_amount', '已还', 'money'),
@@ -161,8 +163,8 @@ const ORDER_TABS = [
     searchPlaceholder: '搜索服务记录号、会员、项目、权益来源、卡号或手艺人',
     emptyText: '暂无服务记录。',
     fields: [
-      field('service_record_no', '服务记录号', 'text', { defaultQuick: true }),
-      field('business_date', '业务日期', 'date', { defaultQuick: true }),
+      field('service_record_no', '服务记录号', 'text', { quickFilterHidden: true }),
+      field('business_date', '业务日期', 'date', { defaultQuick: true, quickDateRange: true, quickLabelHidden: true }),
       field('member_name', '会员姓名'), field('service_project', '服务项目'),
       field('entitlement_source', '权益来源'), field('source_card', '来源卡名称'),
       field('source_card_no', '完整卡号'), field('used_times', '本次使用次数', 'number'),
@@ -184,8 +186,8 @@ const ORDER_TABS = [
     searchPlaceholder: '搜索补交单号、欠款编号、来源订单或会员',
     emptyText: '暂无已完成的补交记录。会员未补交的欠款请从总欠款入口查看。',
     fields: [
-      field('supplement_order_no', '补交单号', 'text', { defaultQuick: true }),
-      field('business_date', '业务日期', 'date', { defaultQuick: true }),
+      field('supplement_order_no', '补交单号', 'text', { quickFilterHidden: true }),
+      field('business_date', '业务日期', 'date', { defaultQuick: true, quickDateRange: true, quickLabelHidden: true }),
       field('debt_no', '欠款编号'), field('source_order_no', '来源订单号'),
       field('member_name', '会员姓名'), field('phone', '手机号'), field('debt_summary', '欠款摘要'),
       field('salesperson', '销售人', 'person'), field('supplement_amount', '补交金额', 'money'), field('payment_method', '收款方式'),
@@ -202,8 +204,8 @@ const ORDER_TABS = [
     searchPlaceholder: '搜索赠送记录号、来源、会员或赠送内容',
     emptyText: '暂无赠送记录。',
     fields: [
-      field('gift_record_no', '赠送记录号', 'text', { defaultQuick: true }),
-      field('business_date', '业务日期', 'date', { defaultQuick: true }),
+      field('gift_record_no', '赠送记录号', 'text', { quickFilterHidden: true }),
+      field('business_date', '业务日期', 'date', { defaultQuick: true, quickDateRange: true, quickLabelHidden: true }),
       field('member_name', '会员姓名'), field('gift_source', '赠送来源'),
       field('gift_type', '赠送类型'), field('gift_content', '赠送内容'), field('gift_quantity', '赠送数量', 'number'),
       field('effective_at', '生效时间', 'date'), field('expires_at', '到期时间', 'date'),
@@ -220,9 +222,9 @@ const ORDER_TABS = [
     searchPlaceholder: '搜索操作单号、会员、卡项、项目或操作人',
     emptyText: '暂无卡升级、停用、启用、延期、项目替换或项目升级记录。',
     fields: [
-      field('card_operation_no', '操作单号', 'text', { defaultQuick: true }),
-      field('business_date', '业务日期', 'date', { defaultQuick: true }),
-      field('member_name', '会员姓名'), field('operation_type', '操作类型', 'status', { defaultQuick: true }),
+      field('card_operation_no', '操作单号', 'text', { quickFilterHidden: true }),
+      field('business_date', '业务日期', 'date', { defaultQuick: true, quickDateRange: true, quickLabelHidden: true }),
+      field('member_name', '会员姓名'), field('operation_type', '操作类型', 'status', { quickFilterHidden: true }),
       field('source_card', '原卡项／原项目'), field('target_content', '目标卡项／目标项目'),
       field('operation_amount', '补差／操作金额', 'money'), field('sales_order_no', '关联销售订单号'),
       field('store', '办理门店', 'store'), field('operator', '操作人', 'person'),
@@ -427,7 +429,11 @@ const activeQueryFields = computed(() => activeUnifiedQuery.value?.fields?.value
 const executedQuery = computed(() => executedQueryByType.value[activeTabKey.value] || null)
 
 function exportQuerySnapshot(recordType, query = {}) {
-  const { recordType: ignoredRecordType, queryCursor, pageSize, ...rest } = query || {}
+  // `status` belongs to the legacy normal-list request. The unified-query
+  // contract represents the same choice through `dataScope`/`businessStatus`,
+  // so forwarding it makes the shared export validator reject an otherwise
+  // valid frozen query.
+  const { recordType: ignoredRecordType, queryCursor, pageSize, status: ignoredStatus, ...rest } = query || {}
   const tab = ORDER_TABS.find((item) => item.key === recordType)
   return {
     ...rest,
@@ -450,6 +456,46 @@ function createActiveExport(payload) {
 
 function queryActiveExportTask(payload) {
   return activeUnifiedQuery.value?.queryExportTask(payload)
+}
+
+function exportDownloadFileName(value) {
+  const normalized = String(value || '查询结果.xlsx').replace(/[\\\\/:*?"<>|]+/g, '_').trim() || '查询结果.xlsx'
+  return /\.xlsx$/i.test(normalized) ? normalized : `${normalized}.xlsx`
+}
+
+async function downloadActiveExport({ url, fileName, task } = {}) {
+  const endpoint = new URL(String(url || ''), window.location.origin)
+  if (endpoint.origin !== window.location.origin) throw new Error('导出文件地址无效，请刷新后重试。')
+  const pageCode = String(task?.pageCode || activeTab.value?.pageCode || '').trim()
+  if (!pageCode) throw new Error('导出任务页面信息缺失，请刷新后重试。')
+  endpoint.searchParams.set('pageCode', pageCode)
+  const token = readStoreV3SessionToken()
+  const response = await fetch(endpoint.href, {
+    credentials: 'same-origin',
+    cache: 'no-store',
+    headers: {
+      Accept: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      ...(token ? { Authorization: `Bearer ${token}`, 'Authori-zation': `Bearer ${token}` } : {})
+    }
+  })
+  const blob = await response.blob()
+  const type = String(response.headers.get('content-type') || '').toLowerCase()
+  if (!response.ok || type.includes('json')) {
+    const message = await blob.text().then((text) => JSON.parse(text)?.msg || JSON.parse(text)?.message || '').catch(() => '')
+    throw new Error(message || '导出文件下载失败，请稍后重试。')
+  }
+  const header = new Uint8Array(await blob.slice(0, 4).arrayBuffer())
+  if (blob.size < 4 || header[0] !== 0x50 || header[1] !== 0x4b || header[2] !== 0x03 || header[3] !== 0x04) {
+    throw new Error('导出文件格式无效，请重新创建导出任务。')
+  }
+  const objectUrl = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = objectUrl
+  anchor.download = exportDownloadFileName(fileName)
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000)
 }
 
 function firstValue(record, keys) {
@@ -984,7 +1030,55 @@ function switchTab(tab) {
   activeTabKey.value = tab.key
   genericDetailRecord.value = null
   closeSalesDetail()
-  if (tab.key !== 'sales') queryRecords({}, true)
+  queryRecords(defaultOrderCenterDateQuery(), true)
+}
+
+function orderCenterToday() {
+  const now = new Date()
+  const offset = now.getTimezoneOffset() * 60000
+  return new Date(now.getTime() - offset).toISOString().slice(0, 10)
+}
+
+function businessDateRangeFromQuery(query = {}) {
+  let from = String(query.businessDateFrom ?? query.business_date_from ?? query.dateFrom ?? query.date_from ?? '').trim()
+  let to = String(query.businessDateTo ?? query.business_date_to ?? query.dateTo ?? query.date_to ?? '').trim()
+  for (const filter of Array.isArray(query.topFilters) ? query.topFilters : []) {
+    if (String(filter?.field || '') !== 'business_date') continue
+    const value = String(filter?.value ?? '').trim()
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) continue
+    if (filter?.operator === 'gte') from = value
+    if (filter?.operator === 'lte') to = value
+    if (filter?.operator === 'eq') {
+      from = value
+      to = value
+    }
+  }
+  return { from, to }
+}
+
+function normalizeOrderCenterDateQuery(query = {}) {
+  const { from, to } = businessDateRangeFromQuery(query)
+  return {
+    ...query,
+    ...(from ? { dateFrom: from, businessDateFrom: from } : {}),
+    ...(to ? { dateTo: to, businessDateTo: to } : {})
+  }
+}
+
+function defaultOrderCenterDateQuery() {
+  const date = orderCenterToday()
+  return {
+    dataScope: 'normal',
+    businessStatus: '',
+    dateFrom: date,
+    dateTo: date,
+    businessDateFrom: date,
+    businessDateTo: date,
+    topFilters: [
+      { field: 'business_date', operator: 'gte', value: date },
+      { field: 'business_date', operator: 'lte', value: date }
+    ]
+  }
 }
 
 // 销售订单的范围由统一工具栏驱动：正常数据必须落到后端 normal
@@ -999,7 +1093,7 @@ function normalizeSalesOrderQuery(query = {}) {
   } else if (!status) {
     status = String(query.businessStatus ?? query.business_status ?? '').trim() || 'normal'
   }
-  return { ...query, status }
+  return { ...normalizeOrderCenterDateQuery(query), status }
 }
 
 async function queryRecords(query = {}, resetPage = true) {
@@ -1009,13 +1103,13 @@ async function queryRecords(query = {}, resetPage = true) {
     const requestedPageSize = Math.max(1, Number(query.pageSize ?? query.limit) || pageSize.value)
     const pageSizeChanged = Number(currentQuery.pageSize || pageSize.value) !== requestedPageSize
     const targetPage = resetPage || pageSizeChanged ? 1 : Math.max(1, Number(query.page) || page.value)
-    const nextQuery = {
+    const nextQuery = normalizeOrderCenterDateQuery({
       ...currentQuery,
       ...query,
       recordType,
       page: targetPage,
       pageSize: requestedPageSize
-    }
+    })
     queryModelByType.value = { ...queryModelByType.value, [recordType]: nextQuery }
     const sequence = ++recordQuerySequence
     isOrderQueryLoading.value = true
@@ -1765,7 +1859,10 @@ watch(
   () => state.stateContextId,
   (stateContextId) => {
     if (!stateContextId) return
-    queryRecords({ dataScope: 'normal', businessStatus: '' }, true)
+    // 首屏的页面能力请求可能发生在工作台上下文建立之前。上下文就绪后重试当前
+    // 页签，避免安全降级状态把“导出”一直隐藏到手工刷新为止。
+    activeUnifiedQuery.value?.load({ silent: true })
+    queryRecords(defaultOrderCenterDateQuery(), true)
   },
   { immediate: true }
 )
@@ -1805,6 +1902,7 @@ onBeforeUnmount(() => {
     <p v-if="servicePrintError" class="order-center-page__inline-error" role="alert">{{ servicePrintError }}</p>
 
     <UnifiedQueryToolbar
+      class="order-center-query-toolbar"
       :key="activeTabKey"
       :search-placeholder="activeTab.searchPlaceholder"
       :status-options="statusOptions"
@@ -1828,6 +1926,11 @@ onBeforeUnmount(() => {
       :on-save-settings="saveQuerySettings"
       :on-create-export="createActiveExport"
       :on-query-export-task="queryActiveExportTask"
+      :on-download-export="downloadActiveExport"
+      compact-keyword-search
+      inline-quick-controls
+      export-button-after-settings
+      direct-query-export
       @settings-applied="applyQuerySettings"
     />
 

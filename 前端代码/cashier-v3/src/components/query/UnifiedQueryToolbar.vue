@@ -10,6 +10,10 @@ const props = defineProps({
     type: Boolean,
     default: false
   },
+  compactKeywordSearch: {
+    type: Boolean,
+    default: false
+  },
   onSelectEntity: {
     type: Function,
     default: null
@@ -30,6 +34,7 @@ function selectEntity(payload) {
   <SharedUnifiedQueryToolbar
     v-bind="$attrs"
     :inline-quick-controls="inlineQuickControls"
+    :compact-keyword-search="compactKeywordSearch"
     :on-select-entity="selectEntity"
   >
     <template #primary-actions>

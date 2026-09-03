@@ -64,7 +64,11 @@ class Command extends AuthController
                 $operatorScope->tenantId(),
                 $operatorScope->organizationId()
             );
-            $context = $runtime['contextFactory']->make($operatorScope, $dataScope);
+            // 下载必须按任务所属统一查询页签重建权限上下文。页面码只用于定位
+            // 页面策略，随后 resolveDownloadDescriptor 会再次与任务冻结页签比对。
+            $context = $runtime['contextFactory']->make($operatorScope, $dataScope, [
+                'pageCode' => trim((string)$this->request->get('pageCode', '')),
+            ]);
             $descriptor = $runtime['exports']->resolveDownloadDescriptor($context, $taskNo);
             $path = $runtime['exportStorage']->absolutePath(
                 (string)$descriptor['storageKey']
