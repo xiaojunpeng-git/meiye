@@ -23,59 +23,6 @@ final class CashierV3ServiceRecordVoidServices
     public const ENTITLEMENT_REVERSAL_TABLE = 'cashier_v3_entitlement_reversal_fact';
     public const CONTRACT_VERSION = 'cashier-v3-service-record-void-v1';
 
-    /** @var object|null */
-    private $entitlementProvider;
-
-    public function __construct($entitlementProvider = null)
-    {
-        $this->entitlementProvider = $entitlementProvider;
-    }
-
-    /** @return array{resources:array} */
-    public function discover(array $scope): array
-    {
-        $operator = $scope['operator_scope'] ?? null;
-        $dataScope = $scope['data_scope'] ?? null;
-        if (!$operator instanceof CashierV3OperatorScope || !$dataScope instanceof CashierV3DataScopeContext) {
-            throw self::failure('service_void_scope_incomplete');
-        }
-        $source = $this->source((array)($scope['payload'] ?? []), $operator, $dataScope, false);
-        $resources = [];
-        foreach ($this->benefitResources($source) as $resource) {
-            $kind = $resource['kind'];
-            $id = (string)$resource['id'];
-            if (!$this->entitlementProvider
-                || !method_exists($this->entitlementProvider, 'resolveScopeWithDataScope')) {
-                throw self::failure('service_void_entitlement_provider_missing');
-            }
-            $resolvedScope = $this->entitlementProvider->resolveScopeWithDataScope(
-                $kind, $id, $operator, $dataScope
-            );
-            if ($resolvedScope === null) {
-                throw CashierV3CommandException::invalidContext(
-                    '该服务记录对应的权益已不存在或不可操作，请刷新后重试。',
-                    ['reason' => 'service_void_entitlement_not_visible', 'kind' => $kind, 'id' => $id]
-                );
-            }
-            $version = (int)Db::name('cashier_v3_entitlement_resource_version')
-                ->where('resource_kind', $kind)->where('resource_id', $id)
-                ->value('current_version');
-            if ($version <= 0) {
-                throw self::failure('service_void_entitlement_version_missing', ['kind' => $kind, 'id' => $id]);
-            }
-            $resources[] = [
-                'kind' => $kind,
-                'id' => $id,
-                'expectedVersion' => $version,
-                'roles' => [$kind],
-                'accessMode' => 'mutate',
-                'providerContractVersion' => self::CONTRACT_VERSION,
-                'authorityFingerprint' => hash('sha256', $kind . '|' . $id . '|' . $version),
-            ];
-        }
-        return ['resources' => $resources];
-    }
-
     /** @return array<string,mixed> */
     public function executeInTx(string $action, array $scope): array
     {
@@ -185,19 +132,6 @@ final class CashierV3ServiceRecordVoidServices
         return (array)$row;
     }
 
-    /** @return array<int,array{kind:string,id:string}> */
-    private function benefitResources(array $source): array
-    {
-        $resources = [];
-        if ((int)($source['source_detail_id'] ?? 0) > 0) {
-            $resources[] = ['kind' => 'member_benefit_pool', 'id' => (string)$source['source_detail_id']];
-        }
-        if ((int)($source['holder_id'] ?? 0) > 0) {
-            $resources[] = ['kind' => 'card_holder', 'id' => (string)$source['holder_id']];
-        }
-        return $resources;
-    }
-
     private function restoreEntitlement(array $source, string $operationId, string $commandKey, array $event, CashierV3OperatorScope $operator, CashierV3DataScopeContext $scope, int $now): int
     {
         $quantity = max(0, (int)($source['quantity'] ?? 0));
@@ -271,7 +205,7 @@ final class CashierV3ServiceRecordVoidServices
 
     private function result(array $row, bool $replayed): array
     {
-        $touchedRoles = ['cashier_workspace'];
+        $touchedRoles = [];
         $reversal = Db::name(self::ENTITLEMENT_REVERSAL_TABLE)
             ->where('operation_id', (string)$row['operation_id'])->find();
         if ((int)($reversal['source_detail_id'] ?? 0) > 0) $touchedRoles[] = 'member_benefit_pool';

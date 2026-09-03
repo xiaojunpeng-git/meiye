@@ -15,6 +15,8 @@ $orderPartition = file_get_contents($root . '/后端代码/app/services/cashier/
 $queryModule = file_get_contents($root . '/后端代码/app/services/cashier/v3/order/CashierV3OrderQueryModule.php');
 $dashboard = file_get_contents($root . '/后端代码/app/services/cashier/v3/dashboard/CashierV3BusinessDashboardReadModel.php');
 $salesQuery = file_get_contents($root . '/后端代码/app/services/cashier/v3/order/CashierV3SalesOrderQueryServices.php');
+$serviceVoid = file_get_contents($root . '/后端代码/app/services/cashier/v3/order/CashierV3ServiceRecordVoidServices.php');
+$entitlementVersionProvider = file_get_contents($root . '/后端代码/app/services/cashier/v3/cashier/CashierV3EntitlementResourceVersionProvider.php');
 
 $checks = [
     'append_only_operation_table' => strpos($migration, 'cashier_v3_order_lifecycle_operation') !== false && strpos($migration, 'UNIQUE KEY `uk_tenant_command`') !== false,
@@ -59,6 +61,17 @@ $checks = [
     'frontend_surfaces_failed_lifecycle_action' => strpos($detailFrontend, "['failed', 'conflict', 'result_unknown'].includes(status)") !== false
         && strpos($detailFrontend, 'envelope?.result?.message') !== false,
     'frontend_releases_terminal_lifecycle_idempotency' => strpos($frontend, 'isTerminalActionStatus(actionStatus(result))') !== false,
+    'service_void_uses_recorded_current_data_without_versions' => strpos($serviceVoid, "Db::name('cashier_v3_entitlement_resource_version')") === false
+        && strpos($serviceVoid, 'service_void_entitlement_version_missing') === false
+        && strpos($serviceVoid, "Db::name('store_order_cart_info')->where('id', \$detailId)->lock(true)") !== false
+        && strpos($serviceVoid, "Db::name('user_card_holder')->where('id', \$holderId)->lock(true)") !== false
+        && strpos($serviceVoid, "'write_surplus_times' => \$remaining") !== false
+        && strpos($serviceVoid, "\$touchedRoles = [];") !== false
+        && strpos($module, "'void-service-record',\n            [],\n            [],") !== false
+        && strpos($module, "\$serviceVoidPolicy->configureServerResourceDiscovery") === false
+        && strpos($entitlementVersionProvider, "\$serviceVoidMutation") === false,
+    'service_void_frontend_sends_no_version_context' => strpos($bridgeFrontend, "if (action === 'void-service-record')") !== false
+        && strpos($bridgeFrontend, "['void-order-center-supplement', 'void-service-record'].includes(canonicalAction)") !== false,
     'lifecycle_commands_send_sales_order_version' => strpos($bridgeFrontend, "'adjust-sales-order-personnel', 'refund-sales-order', 'void-sales-order', 'reopen-sales-order'") !== false
         && strpos($bridgeFrontend, "buildCommandContext('sales_order', payload.orderId)") !== false
         && strpos($bridgeFrontend, "'reopen-sales-order',") !== false,

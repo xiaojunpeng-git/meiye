@@ -14,10 +14,7 @@ final class CashierV3OrderLifecycleModule
     public static function install(CashierV3ActionDispatcher $dispatcher, CashierV3CashierWorkspaceServices $workspace): void
     {
         $service = new CashierV3OrderLifecycleServices($workspace, new CashierV3SaleCatalogServices());
-        $entitlementProvider = $dispatcher->versionServices()
-            ? $dispatcher->versionServices()->providerFor('member_benefit_pool')
-            : null;
-        $serviceVoid = new CashierV3ServiceRecordVoidServices($entitlementProvider);
+        $serviceVoid = new CashierV3ServiceRecordVoidServices();
         $orderCenterVoid = new CashierV3OrderCenterVoidServices();
         $serviceCraftsmanAdjustment = new CashierV3ServiceRecordCraftsmanAdjustmentServices();
         $supplementPersonnelAdjustment = new CashierV3SupplementSalespersonAdjustmentServices();
@@ -219,33 +216,23 @@ final class CashierV3OrderLifecycleModule
         });
         $serviceVoidPolicy = new CashierV3ContextPolicy(
             'void-service-record',
-            ['cashier_workspace'],
             [],
-            static function (array $payload, array $base): array {
+            [],
+            static function (array $payload): array {
                 $serviceFactId = trim((string)($payload['serviceFactId'] ?? $payload['service_fact_id'] ?? ''));
                 if (preg_match('/^[1-9][0-9]*$/D', $serviceFactId) !== 1) {
                     throw CashierV3CommandException::invalidContext('未找到需要作废的服务记录，请重新打开记录。', ['reason' => 'service_void_identity_missing']);
                 }
-                $workspaceId = trim((string)($base['session']['workspace_id'] ?? ''));
-                if ($workspaceId === '') {
-                    throw CashierV3CommandException::invalidContext('当前收银工作台会话无效，请刷新页面后再试。', ['reason' => 'service_void_workspace_missing']);
-                }
                 return [
-                    'identities' => [[
-                        'role' => 'cashier_workspace', 'kind' => 'cashier_workspace', 'id' => $workspaceId, 'required' => true,
-                    ]],
-                    'required_read_roles' => ['cashier_workspace'],
-                    'required_touched_roles' => ['cashier_workspace'],
+                    'required' => [], 'allowed' => [], 'identities' => [],
+                    'required_read_roles' => [], 'required_touched_roles' => [],
+                    'allows_empty_contexts' => true,
                 ];
             },
-            ['cashier_workspace'],
             [],
-            ['member_benefit_pool', 'card_holder']
-        );
-        $serviceVoidPolicy->configureServerResourceDiscovery(
-            [$serviceVoid, 'discover'],
-            ['member_benefit_pool', 'card_holder'],
-            ['member_benefit_pool', 'card_holder']
+            [],
+            [],
+            true
         );
         $dispatcher->policies()->register($serviceVoidPolicy);
 

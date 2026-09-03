@@ -2730,7 +2730,6 @@ function isCashierWorkspaceAction(action) {
     'continue-partial-payment-recovery',
     'go-to-writeoff-after-checkout',
     'view-sales-order',
-    'void-service-record',
     'void-order-center-gift',
     'finish-checkout-and-return'
   ]
@@ -2757,6 +2756,11 @@ function isCashierWorkspaceAction(action) {
  * 也不再接受单个 command.context——少传一个对象就是少校验一个版本。
  */
 function resolveCommandContexts(action, payload) {
+  // 服务记录作废以服务事实中已经保存的权益明细、持卡记录和次数为准，
+  // 由领域事务锁定当前数据并原路退回，不携带任何页面或影子版本。
+  if (action === 'void-service-record') {
+    return { invalid: false, contexts: [] }
+  }
   // Project replacement is a live entitlement mutation. Its handler locks
   // the current card and benefit rows inside the transaction, so no browser
   // projection/version context is accepted or required for this branch.
@@ -3678,8 +3682,8 @@ export async function requestCashierV3Action(action, payload = {}) {
     if (!silent) emitCashierV3UiResult(invalidPreparationRequest)
     return invalidPreparationRequest
   }
-  const serverDiscoverableContextAction = canonicalAction === 'void-order-center-supplement'
-    || action === 'void-order-center-supplement'
+  const serverDiscoverableContextAction = ['void-order-center-supplement', 'void-service-record'].includes(canonicalAction)
+    || ['void-order-center-supplement', 'void-service-record'].includes(action)
   if (!readOnly && !reservationDataWrite && !directCheckoutSnapshot && !liveProjectReplacement && !serverDiscoverableContextAction
     && (resolvedContexts.invalid || hasInvalidWriteContexts(contexts))) {
     // No command has been sent yet, so a single automatic root recovery is

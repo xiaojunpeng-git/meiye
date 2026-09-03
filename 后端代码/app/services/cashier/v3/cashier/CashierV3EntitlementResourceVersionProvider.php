@@ -120,10 +120,8 @@ final class CashierV3EntitlementResourceVersionProvider implements CashierV3Data
             && in_array($action, ['update-member', 'deactivate-member'], true);
         $cardMutation = $action === 'submit-card-operation'
             && in_array($kind, ['card_holder', 'member_benefit_pool'], true);
-        $serviceVoidMutation = $action === 'void-service-record'
-            && in_array($kind, ['card_holder', 'member_benefit_pool'], true);
         $debtMutation = $action === 'submit-debt-repayment' && $kind === 'debt_record';
-        if (!$memberMutation && !$cardMutation && !$serviceVoidMutation && !$debtMutation) {
+        if (!$memberMutation && !$cardMutation && !$debtMutation) {
             throw new CashierV3CommandException(
                 CashierV3ResultCode::ACTION_DEPENDENCY_NOT_READY,
                 '会员权益写入尚未接入统一版本推进，本次操作已停止。',
