@@ -48,7 +48,10 @@ final class CashierV3MemberDebtProjectionServices
                 );
             }
 
-            $rows = $this->debtRowsForMemberStore($memberId, $operator->storeId());
+            // 欠款属于会员账务，不按当前收银门店或来源门店切分。收银已允许
+            // 跨店使用权益时，顶部总欠款、欠款明细与卡级欠款必须是同一会员
+            // 全量未结清口径，不能出现“总欠款 0、卡项被欠款限制”的矛盾。
+            $rows = $this->debtRowsForMember($memberId);
 
             $debtIds = array_values(array_filter(array_map('intval', array_column($rows, 'id'))));
             $itemsByDebt = $this->itemsByDebt($debtIds);
@@ -56,7 +59,7 @@ final class CashierV3MemberDebtProjectionServices
             $total = '0.00';
             foreach ($rows as $row) {
                 $debtId = (int)($row['id'] ?? 0);
-                $debtKind = $this->debtKind($row, $memberId, $operator->storeId());
+                $debtKind = $this->debtKind($row, $memberId);
                 $isRecharge = $debtKind === 'recharge';
                 $isV3Sale = $debtKind === 'v3_sale';
                 // A debt row must be tied either to a recharge authority record
@@ -117,21 +120,21 @@ final class CashierV3MemberDebtProjectionServices
         });
     }
 
-    public function amountForMember(int $memberId, int $storeId): string
+    public function amountForMember(int $memberId): string
     {
-        if ($memberId <= 0 || $storeId <= 0) {
+        if ($memberId <= 0) {
             return '0.00';
         }
         $recognized = [];
-        foreach ($this->debtRowsForMemberStore($memberId, $storeId) as $row) {
-            if ($this->debtKind($row, $memberId, $storeId) !== '') {
+        foreach ($this->debtRowsForMember($memberId) as $row) {
+            if ($this->debtKind($row, $memberId) !== '') {
                 $recognized[] = $row;
             }
         }
         return $this->pendingTotal($recognized);
     }
 
-    private function debtRowsForMemberStore(int $memberId, int $storeId): array
+    private function debtRowsForMember(int $memberId): array
     {
         return $this->rows(Db::name('store_debt')->alias('d')
             ->leftJoin('cashier_v3_recharge_debt_authority r', 'r.debt_id=d.id')
@@ -139,26 +142,22 @@ final class CashierV3MemberDebtProjectionServices
             ->leftJoin('cashier_v3_sales_order s', 's.order_id=a.sales_order_id')
             ->leftJoin('store_order o', 'o.id=d.order_id')
             ->where('d.uid', $memberId)
-            ->where('d.store_id', $storeId)
             ->where('d.status', 0)
             ->field('d.id,d.debt_no,d.order_id,d.order_sn,d.total_debt,d.repaid_debt,d.status,d.add_time,d.update_time,d.remark,'
-                . 'r.tenant_id,r.store_id AS authority_store_id,r.recharge_id,r.recharge_order_no_snapshot,'
-                . 'a.store_id AS sale_authority_store_id,a.sales_order_id,a.sales_order_no_snapshot,'
-                . 's.member_id AS v3_order_member_id,s.store_id AS v3_order_store_id,o.uid AS order_member_id')
+                . 'r.member_id AS recharge_member_id,r.recharge_id,r.recharge_order_no_snapshot,'
+                . 'a.sales_order_id,a.sales_order_no_snapshot,s.member_id AS v3_order_member_id,o.uid AS order_member_id')
             ->order('d.add_time desc,d.id desc')
             ->select());
     }
 
-    private function debtKind(array $row, int $memberId, int $storeId): string
+    private function debtKind(array $row, int $memberId): string
     {
         if ((int)($row['order_id'] ?? -1) === 0
-            && (int)($row['authority_store_id'] ?? 0) === $storeId
+            && (int)($row['recharge_member_id'] ?? 0) === $memberId
             && (int)($row['recharge_id'] ?? 0) > 0) {
             return 'recharge';
         }
         if (trim((string)($row['sales_order_id'] ?? '')) !== ''
-            && (int)($row['sale_authority_store_id'] ?? 0) === $storeId
-            && (int)($row['v3_order_store_id'] ?? 0) === $storeId
             && (int)($row['v3_order_member_id'] ?? 0) === $memberId) {
             return 'v3_sale';
         }

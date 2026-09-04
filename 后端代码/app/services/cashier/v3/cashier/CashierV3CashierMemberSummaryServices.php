@@ -35,7 +35,7 @@ final class CashierV3CashierMemberSummaryServices
         }
         $accountBalance = $this->money($member['now_money'] ?? 0);
         $cards = $this->cardSummary($memberId);
-        $debtAmount = $this->debtAmount($memberId, $currentStoreId);
+        $debtAmount = $this->debtAmount($memberId);
         $exclusive = $this->exclusiveServiceName($memberId);
         return [
             'id' => (string)$memberId,
@@ -217,9 +217,9 @@ final class CashierV3CashierMemberSummaryServices
         return array_fill_keys(array_map('intval', $ids), true);
     }
 
-    private function debtAmount(int $memberId, int $storeId): string
+    private function debtAmount(int $memberId): string
     {
-        return (new CashierV3MemberDebtProjectionServices())->amountForMember($memberId, $storeId);
+        return (new CashierV3MemberDebtProjectionServices())->amountForMember($memberId);
     }
 
     private function exclusiveServiceName(int $memberId): string

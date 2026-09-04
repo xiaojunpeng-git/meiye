@@ -25,9 +25,10 @@ foreach (['cashier_v3_recharge_debt_authority', 'cashier_v3_debt_authority', 'ca
     }
 }
 if (strpos($summarySource, 'CashierV3MemberDebtProjectionServices') === false
-    || strpos($summarySource, 'amountForMember($memberId, $storeId)') === false
-    || strpos($readerSource, 'amountForMember(int $memberId, int $storeId)') === false
-    || strpos($readerSource, "->where('d.store_id', \$storeId)") === false
+    || strpos($summarySource, 'amountForMember($memberId)') === false
+    || strpos($readerSource, 'amountForMember(int $memberId)') === false
+    || strpos($readerSource, "->where('d.store_id', \$storeId)") !== false
+    || strpos($readerSource, "'recharge_member_id'") === false
     || strpos($readerSource, "return 'v3_sale';") === false
     || strpos($readerSource, "return 'legacy_sale';") === false
     || strpos($readerSource, "return 'recharge';") === false

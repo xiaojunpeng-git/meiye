@@ -37,12 +37,10 @@ $check = static function (string $name, bool $condition) use (&$failed): void {
 };
 
 $memberId = 913087;
-$storeId = 118;
 $projection = new CashierV3MemberDebtProjectionServices();
-$check('V3 authority-aware amount is 310.00', $projection->amountForMember($memberId, $storeId) === '310.00');
-$check('current store boundary excludes another store', $projection->amountForMember($memberId, 1) === '0.00');
+$check('V3 authority-aware amount is 310.00 without a store boundary', $projection->amountForMember($memberId) === '310.00');
 
-$summary = (new CashierV3CashierMemberSummaryServices())->read($memberId, $storeId);
+$summary = (new CashierV3CashierMemberSummaryServices())->read($memberId, 118);
 $check('cashier member summary uses the same 310.00 amount', (string)($summary['outstandingDebtAmount'] ?? '') === '310.00');
 
 $expected = (string)Db::query(
@@ -50,9 +48,9 @@ $expected = (string)Db::query(
     . 'FROM eb_store_debt d '
     . 'JOIN eb_cashier_v3_debt_authority a ON a.debt_id=d.id '
     . 'JOIN eb_cashier_v3_sales_order s ON s.order_id=a.sales_order_id '
-    . 'WHERE d.uid=? AND d.store_id=? AND d.status=0 AND d.total_debt>d.repaid_debt '
-    . 'AND a.store_id=? AND s.store_id=? AND s.member_id=?',
-    [$memberId, $storeId, $storeId, $storeId, $memberId]
+    . 'WHERE d.uid=? AND d.status=0 AND d.total_debt>d.repaid_debt '
+    . 'AND s.member_id=?',
+    [$memberId, $memberId]
 )[0]['amount'];
 $check('summary matches V3 sales debt authority total', bccomp((string)$summary['outstandingDebtAmount'], $expected, 2) === 0);
 
