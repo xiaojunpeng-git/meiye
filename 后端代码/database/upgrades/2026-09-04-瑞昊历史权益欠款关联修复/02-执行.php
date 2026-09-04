@@ -2,14 +2,18 @@
 declare(strict_types=1);
 
 /**
- * Run only against the xinruihao import-verification database.
+ * Run against xinruihao by default. Running against production ruihao requires
+ * the explicit --allow-ruihao argument.
  * It intentionally keeps RH-DEBT-MIG technical orders: no delete occurs here.
  */
 
 $env = parse_ini_file('/var/www/html/.env', true);
 $db = $env['DATABASE'] ?? [];
-if (($db['DATABASE'] ?? '') !== 'xinruihao') {
-    throw new RuntimeException('refuse: this repair is restricted to xinruihao');
+$database = (string)($db['DATABASE'] ?? '');
+$allowRuihao = in_array('--allow-ruihao', $argv ?? [], true);
+$skipBackup = in_array('--skip-backup', $argv ?? [], true);
+if ($database !== 'xinruihao' && !($database === 'ruihao' && $allowRuihao)) {
+    throw new RuntimeException('refuse: this repair is restricted to xinruihao; ruihao requires --allow-ruihao');
 }
 
 $pdo = new PDO(
@@ -19,12 +23,14 @@ $pdo = new PDO(
     [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]
 );
 
-if ((int)$pdo->query("SELECT GET_LOCK('rh_card_debt_link_repair_xinruihao', 30)")->fetchColumn() !== 1) {
+$lockName = 'rh_card_debt_link_repair_' . $database;
+if ((int)$pdo->query("SELECT GET_LOCK(" . $pdo->quote($lockName) . ", 30)")->fetchColumn() !== 1) {
     throw new RuntimeException('could not obtain migration lock');
 }
 
 try {
-    $pdo->exec(<<<'SQL'
+    if (!$skipBackup) {
+        $pdo->exec(<<<'SQL'
 CREATE TABLE IF NOT EXISTS eb_mig_rh_card_debt_link_backup (
   debt_id INT UNSIGNED NOT NULL,
   old_debt_order_id INT UNSIGNED NOT NULL,
@@ -43,8 +49,8 @@ CREATE TABLE IF NOT EXISTS eb_mig_rh_card_debt_link_backup (
   KEY idx_target_order (target_order_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
 SQL
-    );
-    $pdo->exec(<<<'SQL'
+        );
+        $pdo->exec(<<<'SQL'
 CREATE TABLE IF NOT EXISTS eb_mig_rh_card_debt_link_repay_backup (
   repay_id INT UNSIGNED NOT NULL,
   debt_id INT UNSIGNED NOT NULL,
@@ -55,8 +61,8 @@ CREATE TABLE IF NOT EXISTS eb_mig_rh_card_debt_link_repay_backup (
   KEY idx_debt_id (debt_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
 SQL
-    );
-    $pdo->exec(<<<'SQL'
+        );
+        $pdo->exec(<<<'SQL'
 CREATE TABLE IF NOT EXISTS eb_mig_rh_card_debt_link_authority_backup (
   authority_id BIGINT UNSIGNED NOT NULL,
   debt_id INT UNSIGNED NOT NULL,
@@ -67,7 +73,8 @@ CREATE TABLE IF NOT EXISTS eb_mig_rh_card_debt_link_authority_backup (
   KEY idx_debt_id (debt_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
 SQL
-    );
+        );
+    }
 
     $pdo->exec('DROP TEMPORARY TABLE IF EXISTS tmp_rh_card_debt_link_repair');
     $pdo->exec(<<<'SQL'
@@ -122,7 +129,8 @@ SQL
     }
 
     $pdo->beginTransaction();
-    $pdo->exec(<<<'SQL'
+    if (!$skipBackup) {
+        $pdo->exec(<<<'SQL'
 INSERT IGNORE INTO eb_mig_rh_card_debt_link_backup
   (debt_id,old_debt_order_id,old_debt_order_sn,debt_item_id,old_item_order_id,old_item_cart_info_id,
    target_order_id,target_card_cart_info_id,old_target_order_debt,old_target_order_repaid,
@@ -136,23 +144,24 @@ JOIN eb_store_debt_item i ON i.id=c.debt_item_id
 JOIN eb_store_order o ON o.id=c.target_order_id
 JOIN eb_store_order_cart_info ci ON ci.id=c.target_card_cart_info_id
 SQL
-    );
-    $pdo->exec(<<<'SQL'
+        );
+        $pdo->exec(<<<'SQL'
 INSERT IGNORE INTO eb_mig_rh_card_debt_link_repay_backup
   (repay_id,debt_id,old_order_id,old_order_sn,backed_up_at)
 SELECT r.id,r.debt_id,r.order_id,r.order_sn,UNIX_TIMESTAMP()
 FROM eb_store_debt_repay r
 JOIN tmp_rh_card_debt_link_repair c ON c.debt_id=r.debt_id
 SQL
-    );
-    $pdo->exec(<<<'SQL'
+        );
+        $pdo->exec(<<<'SQL'
 INSERT IGNORE INTO eb_mig_rh_card_debt_link_authority_backup
   (authority_id,debt_id,old_sales_order_id,old_sales_order_no_snapshot,backed_up_at)
 SELECT a.id,a.debt_id,a.sales_order_id,a.sales_order_no_snapshot,UNIX_TIMESTAMP()
 FROM eb_cashier_v3_debt_authority a
 JOIN tmp_rh_card_debt_link_repair c ON c.debt_id=a.debt_id
 SQL
-    );
+        );
+    }
 
     $pdo->exec(<<<'SQL'
 UPDATE eb_store_debt d
@@ -212,5 +221,5 @@ SQL
     }
     throw $e;
 } finally {
-    $pdo->query("SELECT RELEASE_LOCK('rh_card_debt_link_repair_xinruihao')");
+    $pdo->query('SELECT RELEASE_LOCK(' . $pdo->quote($lockName) . ')');
 }
