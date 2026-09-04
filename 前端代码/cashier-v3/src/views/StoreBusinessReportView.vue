@@ -133,11 +133,19 @@ const editingRow = ref(null)
 const editDraft = ref({})
 const savingEdit = ref(false)
 const PARTNER_MANUAL_FIELDS = Object.freeze([
-  { key: 'medical_elevation', label: '私美复诊' },
-  { key: 'medical_followup', label: '私美类型' },
+  { key: 'medical_elevation', label: '复诊' },
+  { key: 'medical_followup', label: '类型' },
   { key: 'expert_name', label: '专家姓名' }
 ])
 const isFieldGuideOpen = ref(false)
+const craftsmanDrilldown = ref({
+  open: false,
+  loading: false,
+  error: '',
+  title: '手艺人消耗明细',
+  request: null,
+  result: {}
+})
 
 const FIELD_LOGIC = Object.freeze({
   month: '按成交日期归入的自然月份。',
@@ -156,8 +164,8 @@ const FIELD_LOGIC = Object.freeze({
   member_phone: '该笔业务对应会员的手机号码。',
   business_date: '本笔业务归属的经营日期。',
   experience_project: '该成交项目是否被标记为体验项目。',
-  medical_elevation: '由运营人员手动填写并保存的私美复诊信息。',
-  medical_followup: '由运营人员手动填写并保存的私美类型。',
+  medical_elevation: '由运营人员手动填写并保存的复诊信息。',
+  medical_followup: '由运营人员手动填写并保存的类型。',
   deal_headcount: '当前成交明细是否关联会员：关联会员记为 1，未关联会员记为 0。',
   deal_project: '本条成交明细的项目或商品名称。',
   consumption: '本条成交明细完成服务后形成的消耗业绩；与“消耗金额”显示同一金额。',
@@ -731,6 +739,13 @@ const pageSize = computed(() => Number(result.value.page_size || DEFAULT_LIMIT))
 const pageCount = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)))
 const canPageBack = computed(() => page.value > 1 && !loading.value)
 const canPageForward = computed(() => page.value < pageCount.value && !loading.value)
+const craftsmanDrilldownColumns = computed(() => Array.isArray(craftsmanDrilldown.value.result?.columns) ? craftsmanDrilldown.value.result.columns : [])
+const craftsmanDrilldownRecords = computed(() => Array.isArray(craftsmanDrilldown.value.result?.records) ? craftsmanDrilldown.value.result.records : [])
+const craftsmanDrilldownSummary = computed(() => craftsmanDrilldown.value.result?.summary_row || craftsmanDrilldown.value.result?.summaryRow || null)
+const craftsmanDrilldownTotal = computed(() => Number(craftsmanDrilldown.value.result?.total || 0))
+const craftsmanDrilldownPage = computed(() => Number(craftsmanDrilldown.value.result?.page || 1))
+const craftsmanDrilldownPageSize = computed(() => Number(craftsmanDrilldown.value.result?.page_size || DEFAULT_LIMIT))
+const craftsmanDrilldownPageCount = computed(() => Math.max(1, Math.ceil(craftsmanDrilldownTotal.value / craftsmanDrilldownPageSize.value)))
 const currentReportDefinition = computed(() => allowedReportTabs.value.find((item) => item.code === activeReport.value))
 const currentReportName = computed(() => currentReportDefinition.value?.name || '门店运营报表')
 const currentReportDescription = computed(() => currentReportDefinition.value?.description || '')
@@ -1240,22 +1255,79 @@ function canDrilldown(row, column) {
   return Boolean(drilldownConfig(row, column)?.report || drilldownConfig(row, column)?.report_code)
 }
 
-function openDrilldown(row, column) {
+function drilldownRequest(row, column) {
   const config = drilldownConfig(row, column)
   const report = String(config?.report || config?.report_code || '')
-  if (!report || !allowedReportTabs.value.some((tab) => tab.code === report)) return
+  if (!report || !allowedReportTabs.value.some((tab) => tab.code === report)) return null
   const params = { ...(config.params || config.query || {}) }
   const mapping = config.param_map || config.paramMap || {}
   Object.entries(mapping).forEach(([target, source]) => { params[target] = row?.[source] ?? '' })
+  return { report, params }
+}
+
+async function loadCraftsmanDrilldown(pageNumber = 1) {
+  const request = craftsmanDrilldown.value.request
+  if (!request) return
+  craftsmanDrilldown.value = { ...craftsmanDrilldown.value, loading: true, error: '' }
+  try {
+    const response = await queryStoreBusinessReport(reportParams({
+      report: request.report,
+      ...request.params,
+      page: pageNumber,
+      limit: DEFAULT_LIMIT
+    }), reportRuntime.value)
+    craftsmanDrilldown.value = {
+      ...craftsmanDrilldown.value,
+      loading: false,
+      result: response || {}
+    }
+  } catch (error) {
+    craftsmanDrilldown.value = {
+      ...craftsmanDrilldown.value,
+      loading: false,
+      error: error?.message || '手艺人消耗明细读取失败，请稍后重试。'
+    }
+  }
+}
+
+async function openCraftsmanDrilldown(request) {
+  craftsmanDrilldown.value = {
+    open: true,
+    loading: false,
+    error: '',
+    title: '手艺人消耗明细',
+    request,
+    result: {}
+  }
+  await loadCraftsmanDrilldown(1)
+}
+
+function closeCraftsmanDrilldown() {
+  craftsmanDrilldown.value = {
+    ...craftsmanDrilldown.value,
+    open: false,
+    request: null,
+    result: {},
+    error: ''
+  }
+}
+
+function openDrilldown(row, column) {
+  const request = drilldownRequest(row, column)
+  if (!request) return
+  if (request.report === 'store_craftsman_consumption_detail') {
+    openCraftsmanDrilldown(request)
+    return
+  }
   router.push({
     name: reportRouteName.value,
-    params: { report },
+    params: { report: request.report },
     query: {
       start_date: startDate.value,
       end_date: endDate.value,
       ...(scopePicker.value.selectedStoreIds.length ? { store_ids: scopePicker.value.selectedStoreIds.join(','), scope_label: scopePicker.value.label } : {}),
       ...dynamicFilters.value,
-      ...params
+      ...request.params
     }
   })
 }
@@ -1512,6 +1584,40 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateTabsLayout))
         <p v-else class="store-business-report__empty">请先完成查询后查看列名取值来源。</p>
       </section>
     </div>
+    <div v-if="craftsmanDrilldown.open" class="store-business-report__modal" role="dialog" aria-modal="true" aria-label="手艺人消耗明细">
+      <section class="store-business-report__modal-card store-business-report__craftsman-drilldown">
+        <header>
+          <div>
+            <strong>{{ craftsmanDrilldown.title }}</strong>
+            <p>明细与所点击金额使用相同的日期、门店、手艺人及数据权限条件。</p>
+          </div>
+          <button type="button" class="store-business-report__modal-close" aria-label="关闭" @click="closeCraftsmanDrilldown">×</button>
+        </header>
+        <p v-if="craftsmanDrilldown.error" class="store-business-report__error" role="alert">{{ craftsmanDrilldown.error }}</p>
+        <div v-else class="store-business-report__craftsman-drilldown-table">
+          <p v-if="craftsmanDrilldown.loading" class="store-business-report__empty">正在读取明细。</p>
+          <template v-else-if="craftsmanDrilldownColumns.length">
+            <table>
+              <thead><tr><th v-for="column in craftsmanDrilldownColumns" :key="column.key">{{ column.label }}</th></tr></thead>
+              <tbody>
+                <tr v-if="craftsmanDrilldownSummary" class="store-business-report__summary-row">
+                  <td v-for="column in craftsmanDrilldownColumns" :key="column.key">{{ formatCell(craftsmanDrilldownSummary[column.key]) }}</td>
+                </tr>
+                <tr v-for="(detailRow, detailIndex) in craftsmanDrilldownRecords" :key="detailRow.fact_id || `${detailRow.order_no_snapshot}-${detailIndex}`">
+                  <td v-for="column in craftsmanDrilldownColumns" :key="column.key">{{ formatCell(detailRow[column.key]) }}</td>
+                </tr>
+                <tr v-if="!craftsmanDrilldownRecords.length"><td :colspan="craftsmanDrilldownColumns.length" class="store-business-report__empty-cell">当前条件下暂无明细。</td></tr>
+              </tbody>
+            </table>
+            <footer v-if="craftsmanDrilldownTotal > craftsmanDrilldownPageSize" class="store-business-report__pagination">
+              <span>共 {{ craftsmanDrilldownTotal }} 条，第 {{ craftsmanDrilldownPage }} / {{ craftsmanDrilldownPageCount }} 页</span>
+              <button type="button" :disabled="craftsmanDrilldownPage <= 1 || craftsmanDrilldown.loading" @click="loadCraftsmanDrilldown(craftsmanDrilldownPage - 1)">上一页</button>
+              <button type="button" :disabled="craftsmanDrilldownPage >= craftsmanDrilldownPageCount || craftsmanDrilldown.loading" @click="loadCraftsmanDrilldown(craftsmanDrilldownPage + 1)">下一页</button>
+            </footer>
+          </template>
+        </div>
+      </section>
+    </div>
     <div v-if="personnelPicker.open" class="store-business-report__modal" role="dialog" aria-modal="true" :aria-label="personnelPicker.label">
       <section class="store-business-report__modal-card">
         <header>
@@ -1581,6 +1687,13 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateTabsLayout))
 .store-business-report__modal { position: fixed; z-index: 100; inset: 0; display: grid; place-items: center; padding: 20px; background: rgba(24, 39, 58, .38); }
 .store-business-report__modal-card { width: min(520px, 100%); max-height: min(620px, 90vh); overflow: auto; border-radius: 10px; padding: 18px; background: #fff; box-shadow: 0 16px 50px rgba(24, 39, 58, .2); }
 .store-business-report__modal-card header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.store-business-report__craftsman-drilldown { width: min(1180px, 100%); max-height: min(760px, 90vh); }
+.store-business-report__craftsman-drilldown header { align-items: flex-start; }
+.store-business-report__craftsman-drilldown header p { margin: 4px 0 0; color: #7a8699; font-size: 12px; font-weight: 400; }
+.store-business-report__craftsman-drilldown-table { max-height: min(570px, calc(90vh - 150px)); overflow: auto; border: 1px solid #e1e7ef; border-radius: 6px; }
+.store-business-report__craftsman-drilldown-table table { min-width: 100%; width: max-content; border-collapse: collapse; }
+.store-business-report__craftsman-drilldown-table th, .store-business-report__craftsman-drilldown-table td { white-space: nowrap; }
+.store-business-report__craftsman-drilldown-table thead th { position: sticky; top: 0; z-index: 2; background: #f3f7fc; }
 .store-business-report__modal-close { border: 0; background: transparent; color: #657386; font-size: 24px; cursor: pointer; }
 .store-business-report__person-search { display: flex; gap: 8px; }
 .store-business-report__person-search input { flex: 1; min-height: 34px; box-sizing: border-box; border: 1px solid #d8e0ea; border-radius: 6px; padding: 6px 8px; font: inherit; }

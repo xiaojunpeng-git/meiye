@@ -320,6 +320,7 @@ final class ProductManagementDashboardServices
             ->whereBetween('p.business_date', [$range['start'], $range['end']])
             ->where('p.status', 'effective')->where('s.source_type', '<>', 'card')
             ->whereIn('d.product_type_snapshot', ['product', 'goods']);
+        (new StoreReportNormalDataScopeServices())->excludeVoidedSalesOrderFacts($query, 's.tenant_id', 's.order_id');
         if ($categoryIds !== []) $query->whereIn('d.category_id_snapshot', $categoryIds);
         return $query->fieldRaw('p.id,p.source_line_id item_line_id,p.amount_cents,d.item_id,d.item_name_snapshot item_name,d.category_id_snapshot category_id')
             ->group('p.id')->select()->toArray();
@@ -333,6 +334,7 @@ final class ProductManagementDashboardServices
             ->where('p.tenant_id', $scope['tenant_id'])->whereIn('p.store_id', $scope['store_ids'])
             ->whereBetween('p.business_date', [$range['start'], $range['end']])
             ->where('p.status', 'effective')->where('p.performance_type', 'consumption_performance_recorded');
+        (new StoreReportNormalDataScopeServices())->excludeVoidedSalesOrderServices($query, 'sv');
         if ($categoryIds !== []) $query->whereIn('sv.project_category_id_snapshot', $categoryIds);
         return $query->fieldRaw("p.fact_id,p.source_line_id item_line_id,p.amount_cents,sv.project_id item_id,sv.project_name_snapshot item_name,sv.project_category_id_snapshot category_id,'project' product_type")
             ->group('p.fact_id')->select()->toArray();

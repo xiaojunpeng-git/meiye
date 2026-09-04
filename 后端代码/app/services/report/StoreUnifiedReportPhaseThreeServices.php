@@ -870,8 +870,9 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
             ->where('p.tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
             ->whereIn('p.store_id', $stores)->whereBetween('p.business_date', [$range['start'], $range['end']])
             ->where('p.status', 'effective');
-        // Refunds and voids are append-only signed allocations. Keeping both
-        // rows preserves the original month and records the adjustment date.
+        $this->excludeVoidedSalesOrders($query, 'p.tenant_id', 'p.order_id');
+        // Refunds remain normal operating data. A successfully voided sales
+        // order is excluded as a whole, with its audit facts kept separately.
         if ($memberIds !== []) $query->whereIn('p.member_id', $memberIds);
         if ($applyParticipantScope && $this->participantEmployeeId > 0) {
             (new StoreReportParticipantScopeServices())->applyOrder($query, 'p.order_id', $this->participantEmployeeId);
@@ -891,12 +892,20 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
         });
     }
 
+    private function normalDataScope(): StoreReportNormalDataScopeServices
+    {
+        static $service;
+        if (!$service) $service = new StoreReportNormalDataScopeServices();
+        return $service;
+    }
+
     private function completedServices(array $stores, array $range, array $categoryIds): array
     {
         $query = Db::name('cashier_v3_entitlement_service_fact')->alias('sv')
             ->where('sv.tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
             ->whereIn('sv.store_id', $stores)->whereBetween('sv.business_date', [$range['start'], $range['end']])
             ->where('sv.service_status', 'completed');
+        $this->normalDataScope()->excludeVoidedSalesOrderServices($query, 'sv');
         if ($categoryIds !== []) $query->whereIn('sv.project_category_id_snapshot', $categoryIds);
         if ($this->participantEmployeeId > 0) {
             (new StoreReportParticipantScopeServices())->applyCheckout($query, 'sv.checkout_request_id', $this->participantEmployeeId);
@@ -924,6 +933,7 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
             ->whereIn('sv.store_id', $stores)->whereBetween('sv.business_date', [$range['start'], $range['end']])
             ->where('sv.service_status', 'completed')
             ->where('pf.performance_type', 'consumption_performance_recorded')->where('pf.status', 'effective');
+        $this->normalDataScope()->excludeVoidedSalesOrderServices($query, 'sv');
         if ($categoryIds !== []) $query->whereIn('sv.project_category_id_snapshot', $categoryIds);
         $rows = $query->fieldRaw("sv.member_id, SUM(CASE WHEN pf.fact_direction='reversal' THEN -ABS(pf.amount_cents) ELSE ABS(pf.amount_cents) END) amount_cents")
             ->where('sv.member_id', '>', 0)->group('sv.member_id')->select()->toArray();
@@ -952,6 +962,7 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
             ->where('sv.tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
             ->whereIn('sv.store_id', $stores)->whereBetween('sv.business_date', [$range['start'], $range['end']])
             ->where('sv.service_status', 'completed');
+        $this->normalDataScope()->excludeVoidedSalesOrderServices($query, 'sv');
         if ($this->participantEmployeeId > 0) {
             (new StoreReportParticipantScopeServices())->applyCheckout($query, 'sv.checkout_request_id', $this->participantEmployeeId);
         }

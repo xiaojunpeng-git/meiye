@@ -292,6 +292,7 @@ final class GroupManagementDashboardServices
             ->join('cashier_v3_sale_fact s', 's.tenant_id=p.tenant_id AND s.fact_id=COALESCE(original.sale_fact_id,p.sale_fact_id)')
             ->where('p.tenant_id', $tenantId)->whereIn('p.store_id', $stores)
             ->whereBetween('p.business_date', [$range['start'], $range['end']])->where('p.status', 'effective');
+        (new StoreReportNormalDataScopeServices())->excludeVoidedSalesOrderFacts($base, 's.tenant_id', 's.order_id');
         $direct = clone $base;
         $direct->join('cashier_v3_report_sale_dimension_fact d', 'd.tenant_id=s.tenant_id AND d.sale_fact_id=s.fact_id')->where('s.source_type', '<>', 'card');
         if ($categoryIds !== []) $direct->whereIn('d.category_id_snapshot', $categoryIds);
@@ -330,6 +331,7 @@ final class GroupManagementDashboardServices
     private function serviceRows(string $tenantId, array $stores, array $range, array $categoryIds): array
     {
         $query = Db::name('cashier_v3_entitlement_service_fact')->alias('s')->where('s.tenant_id', $tenantId)->whereIn('s.store_id', $stores)->whereBetween('s.business_date', [$range['start'], $range['end']])->where('s.service_status', 'completed');
+        (new StoreReportNormalDataScopeServices())->excludeVoidedSalesOrderServices($query, 's');
         if ($categoryIds !== []) $query->whereIn('s.project_category_id_snapshot', $categoryIds);
         return $query->fieldRaw("s.service_fact_id,s.store_id,s.member_id,s.business_date,s.organization_id,s.organization_path_snapshot,s.store_name_snapshot,s.project_id,s.project_name_snapshot,s.project_category_id_snapshot,s.project_category_path_snapshot,s.source_line_id,s.quantity,(SELECT MAX(sf.business_source_primary_id) FROM eb_cashier_v3_sale_fact sf WHERE sf.tenant_id=s.tenant_id AND sf.checkout_request_id=s.checkout_request_id AND sf.source_line_id=s.source_line_id AND sf.fact_direction='forward' AND sf.status='effective') business_source_primary_id")->select()->toArray();
     }
@@ -346,6 +348,7 @@ final class GroupManagementDashboardServices
             ->where('p.tenant_id', $tenantId)->whereIn('p.store_id', $stores)
             ->whereBetween('p.business_date', [$range['start'], $range['end']])
             ->where('p.status', 'effective')->where('p.performance_type', $type);
+        (new StoreReportNormalDataScopeServices())->excludeVoidedSalesOrderFacts($query, 'p.tenant_id', 'p.order_id');
         if ($type === 'consumption_performance_recorded') {
             $query->whereExists(function ($service) {
                 $service->name('cashier_v3_entitlement_service_fact')->whereRaw(
@@ -365,6 +368,7 @@ final class GroupManagementDashboardServices
             ->join('cashier_v3_sale_fact s', 's.tenant_id=p.tenant_id AND s.fact_id=COALESCE(original.sale_fact_id,p.sale_fact_id)')
             ->where('p.tenant_id', $tenantId)->whereIn('p.store_id', $stores)
             ->whereBetween('p.business_date', [$range['start'], $range['end']])->where('p.status', 'effective');
+        (new StoreReportNormalDataScopeServices())->excludeVoidedSalesOrderFacts($query, 'p.tenant_id', 'p.order_id');
         $row = $query->fieldRaw(
             'COALESCE(SUM(CASE WHEN p.amount_cents > 0 THEN p.amount_cents ELSE 0 END),0) gross_cents,'
             . 'COALESCE(SUM(CASE WHEN p.amount_cents < 0 THEN p.amount_cents ELSE 0 END),0) refund_cents'
@@ -513,6 +517,7 @@ final class GroupManagementDashboardServices
                 ->where('p.tenant_id', $tenantId)->whereIn('p.store_id', $stores)
                 ->whereBetween('p.business_date', [$range['start'], $range['end']])
                 ->where('p.status', 'effective')->where('p.performance_type', $type);
+            (new StoreReportNormalDataScopeServices())->excludeVoidedSalesOrderServices($query, 'sv');
             if ($categoryIds !== []) $query->whereIn('sv.project_category_id_snapshot', $categoryIds);
             return $query->fieldRaw('p.fact_id,p.store_id,p.member_id,p.order_id,p.source_line_id,p.business_date,p.amount_cents,sv.project_category_id_snapshot category_id')->group('p.fact_id')->select()->toArray();
         }
@@ -522,6 +527,7 @@ final class GroupManagementDashboardServices
             ->where('p.tenant_id', $tenantId)->whereIn('p.store_id', $stores)
             ->whereBetween('p.business_date', [$range['start'], $range['end']])
             ->where('p.status', 'effective')->where('p.performance_type', $type);
+        (new StoreReportNormalDataScopeServices())->excludeVoidedSalesOrderFacts($base, 'p.tenant_id', 'p.order_id');
 
         $direct = clone $base;
         $direct->join('cashier_v3_report_sale_dimension_fact d', 'd.tenant_id=s.tenant_id AND d.sale_fact_id=s.fact_id')

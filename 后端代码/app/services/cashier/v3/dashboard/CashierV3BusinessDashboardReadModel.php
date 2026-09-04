@@ -7,6 +7,7 @@ use app\services\cashier\v3\CashierV3DataScopeContext;
 use app\services\cashier\v3\CashierV3OperatorScope;
 use app\services\cashier\v3\CashierV3ResultCode;
 use app\services\metric\MetricDictionaryServices;
+use app\services\report\StoreReportNormalDataScopeServices;
 use think\facade\Db;
 
 /**
@@ -192,6 +193,11 @@ final class CashierV3BusinessDashboardReadModel
         $query = Db::name($table)->where('tenant_id', $tenantId)->where('store_id', $storeId)->whereBetween('business_date', [$range['start'], $range['end']]);
         if ($metric === 'service_count') $query->where('service_status', 'completed');
         else $query->where('status', 'effective');
+        if ($metric === 'service_count') {
+            (new StoreReportNormalDataScopeServices())->excludeVoidedSalesOrderServices($query, $table);
+        } elseif ($metric !== 'debt_amount') {
+            (new StoreReportNormalDataScopeServices())->excludeVoidedSalesOrderFacts($query, $table . '.tenant_id', $table . '.order_id');
+        }
         if ($metric === 'actual_performance') $query->where('performance_type', 'actual_performance_recorded');
         if ($metric === 'balance_deduction') $query->where('balance_change_type', 'order_payment');
         if ($metric === 'recharge_amount') $query->where('balance_change_type', 'recharge_credit');

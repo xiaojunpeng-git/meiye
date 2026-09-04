@@ -9,6 +9,7 @@ use app\services\cashier\v3\CashierV3DataScopeContext;
 use app\services\cashier\v3\CashierV3OperatorScope;
 use app\services\cashier\v3\CashierV3ResultCode;
 use app\services\report\GroupManagementDashboardTargetServices;
+use app\services\report\StoreReportNormalDataScopeServices;
 use think\facade\Db;
 
 /**
@@ -65,22 +66,26 @@ final class CashierV3StoreTargetDashboardReadModel
 
     private function cashTotal(string $tenantId, int $storeId, string $start, string $end): int
     {
-        $row = Db::name('cashier_v3_payment_fact')->where('tenant_id', $tenantId)->where('store_id', $storeId)
+        $query = Db::name('cashier_v3_payment_fact')->where('tenant_id', $tenantId)->where('store_id', $storeId)
             ->whereBetween('business_date', [$start, $end])->where('status', 'effective')
             // Reversal facts carry their signed negative amount and must remain
             // in the same sum so partial refunds produce the correct net value.
-            ->fieldRaw('COALESCE(SUM(amount_cents),0) AS amount_cents')->find();
+            ;
+        (new StoreReportNormalDataScopeServices())->excludeVoidedSalesOrderFacts($query, 'cashier_v3_payment_fact.tenant_id', 'cashier_v3_payment_fact.order_id');
+        $row = $query->fieldRaw('COALESCE(SUM(amount_cents),0) AS amount_cents')->find();
         return (int)($row['amount_cents'] ?? 0);
     }
 
     /** @return array<string,mixed> */
     private function cashRanking(string $tenantId, int $storeId, array $range): array
     {
-        $rows = Db::name('cashier_v3_performance_fact')->alias('p')
+        $query = Db::name('cashier_v3_performance_fact')->alias('p')
             ->leftJoin('cashier_v3_sale_fact s', 's.tenant_id=p.tenant_id AND s.source_line_id=p.source_line_id AND s.fact_direction=\'forward\' AND s.status=\'effective\'')
             ->where('p.tenant_id', $tenantId)->where('p.store_id', $storeId)
             ->whereBetween('p.business_date', [$range['start'], $range['end']])->where('p.status', 'effective')
-            ->where('p.performance_type', 'sales_performance_allocated')->where('p.employee_id', '>', 0)
+            ->where('p.performance_type', 'sales_performance_allocated')->where('p.employee_id', '>', 0);
+        (new StoreReportNormalDataScopeServices())->excludeVoidedSalesOrderFacts($query, 'p.tenant_id', 'p.order_id');
+        $rows = $query
             ->fieldRaw("p.employee_id,MAX(p.employee_name_snapshot) AS employee_name,SUM(p.amount_cents) AS cash_performance_cents,SUM((CASE WHEN p.fact_direction='reversal' THEN -1 ELSE 1 END) * COALESCE(s.quantity,0) * COALESCE(p.allocation_weight_numerator,1) / NULLIF(COALESCE(p.allocation_weight_denominator,1),0)) AS sales_quantity,COUNT(DISTINCT NULLIF(p.member_id,0)) AS customer_count")
             ->group('p.employee_id')->orderRaw('cash_performance_cents DESC, p.employee_id ASC')->limit(100)->select()->toArray();
         $records = [];
@@ -101,12 +106,14 @@ final class CashierV3StoreTargetDashboardReadModel
     /** @return array<string,mixed> */
     private function consumptionRanking(string $tenantId, int $storeId, array $range): array
     {
-        $rows = Db::name('cashier_v3_performance_fact')->alias('p')
+        $query = Db::name('cashier_v3_performance_fact')->alias('p')
             ->leftJoin('cashier_v3_entitlement_service_fact sv', 'sv.tenant_id=p.tenant_id AND sv.checkout_request_id=p.checkout_request_id AND sv.source_line_id=p.source_line_id AND sv.service_status=\'completed\'')
             ->leftJoin('cashier_v3_entitlement_reversal_fact er', 'er.tenant_id=sv.tenant_id AND er.reversal_of=sv.service_fact_id')
             ->where('p.tenant_id', $tenantId)->where('p.store_id', $storeId)->whereBetween('p.business_date', [$range['start'], $range['end']])
             ->where('p.status', 'effective')->whereNull('er.id')
-            ->where('p.performance_type', 'labor_performance_allocated')->where('p.employee_id', '>', 0)
+            ->where('p.performance_type', 'labor_performance_allocated')->where('p.employee_id', '>', 0);
+        (new StoreReportNormalDataScopeServices())->excludeVoidedSalesOrderServices($query, 'sv');
+        $rows = $query
             // project_count_half_units is the employee-level allocation
             // snapshot (it supports 0.5); service_fact.project_count is the
             // source line total and would duplicate a split project for each

@@ -6,6 +6,8 @@ use app\services\cashier\v3\CashierV3CommandException;
 use app\services\cashier\v3\CashierV3DataScopeContext;
 use app\services\cashier\v3\CashierV3OperatorScope;
 use app\services\cashier\v3\CashierV3ResultCode;
+use app\services\cashier\v3\card\CashierV3CardRuleEntitlementAuthorityServices;
+use app\services\cashier\v3\card\CashierV3CardSaleActualAmountServices;
 use app\services\cashier\v3\cashier\CashierV3EntitlementActualAmountAllocator;
 use app\services\cashier\v3\checkout\provider\CashierV3MemberBalanceProvider;
 use mohe\services\SystemConfigService;
@@ -675,6 +677,15 @@ final class CashierV3MemberDetailQueryServices
             ->where('member_id', $memberId)
             ->whereIn('card_holder_id', $holderIds)
             ->column('rule_type', 'card_holder_id');
+        $ruleAuthoritiesByHolder = [];
+        $cardRules = new CashierV3CardRuleEntitlementAuthorityServices();
+        foreach ($holderIds as $holderId) {
+            $ruleAuthoritiesByHolder[$holderId] = $cardRules->authoritiesForHolder(
+                $tenantId,
+                $holderId,
+                false
+            );
+        }
 
         $projectsByOrder = [];
         $rows = Db::name('store_order_cart_info')
@@ -682,10 +693,21 @@ final class CashierV3MemberDetailQueryServices
             ->where('cart_type', 2)
             ->where('product_type', 6)
             ->where('is_writeoff', 0)
-            ->field('id,oid,cart_info,write_times,write_surplus_times,write_start,write_end,pay_price')
+            // product_id is required to join the immutable card-sale component
+            // allocation back to this legacy cart detail.
+            ->field('id,oid,product_id,cart_info,write_times,write_surplus_times,write_start,write_end,pay_price')
             ->order('oid asc,id asc')
             ->select()
             ->toArray();
+        // A component cart keeps its configured value for legacy compatibility.
+        // Its completed card-sale allocation is the immutable actual-sale source
+        // whenever the original card order was manually repriced. Reuse the same
+        // authority as the cashier summary and entitlement selector so the same
+        // card can never show two remaining amounts in different read models.
+        $actualSaleAmounts = (new CashierV3CardSaleActualAmountServices())->forOrders(
+            array_keys($holderByOrder),
+            $rows
+        );
         foreach ($rows as $row) {
             $start = max(0, (int)($row['write_start'] ?? 0));
             $end = max(0, (int)($row['write_end'] ?? 0));
@@ -700,11 +722,17 @@ final class CashierV3MemberDetailQueryServices
                     ? json_decode((string)$row['cart_info'], true)
                     : ($row['cart_info'] ?? []);
                 $snapshot = is_array($snapshot) ? $snapshot : [];
+                $amountAuthority = $this->cardComponentPurchaseAmountAuthority(
+                    $row,
+                    $snapshot,
+                    $actualSaleAmounts,
+                    $ruleAuthoritiesByHolder[(int)($holderByOrder[(int)($row['oid'] ?? 0)]['id'] ?? 0)][(int)($row['id'] ?? 0)] ?? null
+                );
                 $amount = CashierV3EntitlementActualAmountAllocator::remainingForSnapshot(
-                    $this->money($row['pay_price'] ?? 0),
+                    $amountAuthority['purchaseAmount'],
                     $total,
                     $total - $remaining,
-                    $snapshot
+                    $amountAuthority['allocationSnapshot']
                 );
             } catch (\InvalidArgumentException $exception) {
                 throw new CashierV3CommandException(
@@ -766,6 +794,67 @@ final class CashierV3MemberDetailQueryServices
             ];
         }
         return $cards;
+    }
+
+    /**
+     * Resolves one card component's immutable purchase amount. The component
+     * cart price is only a legacy fallback: a completed V3 allocation, current
+     * issued-card rule snapshot, or recorded RH source-line payment wins.
+     *
+     * @param array<int,int> $actualSaleAmounts
+     * @return array{purchaseAmount:string,allocationSnapshot:array}
+     */
+    private function cardComponentPurchaseAmountAuthority(
+        array $row,
+        array $snapshot,
+        array $actualSaleAmounts,
+        ?array $ruleAuthority
+    ): array {
+        $actualSaleAmountCents = (int)($actualSaleAmounts[(int)($row['id'] ?? 0)] ?? -1);
+        if ($actualSaleAmountCents >= 0) {
+            $allocationSnapshot = $snapshot;
+            // Cent-level allocation facts must preserve their exact cents,
+            // rather than being rounded through the legacy whole-yuan path.
+            if ($actualSaleAmountCents % 100 !== 0) {
+                $allocationSnapshot['amountCalculationVersion'] = 'operation-cent-card-sale-actual-amount';
+            }
+            return [
+                'purchaseAmount' => $this->moneyFromCents($actualSaleAmountCents),
+                'allocationSnapshot' => $allocationSnapshot,
+            ];
+        }
+
+        // Match the entitlement selector's priority: an ordinary formally
+        // issued card reads its immutable rule component amount, not the
+        // legacy cart's configured value. Cent-capable operation snapshots
+        // remain on their own explicit source path.
+        if (!CashierV3EntitlementActualAmountAllocator::isCentCapableSnapshot($snapshot)
+            && is_array($ruleAuthority)) {
+            $rulePurchaseAmountCents = (int)($ruleAuthority['purchaseAmountCents'] ?? -1);
+            if ($rulePurchaseAmountCents >= 0 && $rulePurchaseAmountCents % 100 === 0) {
+                return [
+                    'purchaseAmount' => $this->moneyFromCents($rulePurchaseAmountCents),
+                    'allocationSnapshot' => $ruleAuthority,
+                ];
+            }
+        }
+
+        $legacySource = is_array($snapshot['rh_source'] ?? null) ? $snapshot['rh_source'] : [];
+        if (array_key_exists('source_line_paid_amount', $legacySource)) {
+            $paidAmount = $this->nonnegativeMoney($legacySource['source_line_paid_amount']);
+            if ($paidAmount === null) {
+                throw new \InvalidArgumentException('rh source-line payment amount is invalid');
+            }
+            return [
+                'purchaseAmount' => $paidAmount,
+                'allocationSnapshot' => $snapshot,
+            ];
+        }
+
+        return [
+            'purchaseAmount' => $this->money($row['pay_price'] ?? 0),
+            'allocationSnapshot' => $snapshot,
+        ];
     }
 
     private function applyStoreScope($query, string $column, CashierV3DataScopeContext $dataScope): void
@@ -979,6 +1068,18 @@ final class CashierV3MemberDetailQueryServices
         $raw = trim((string)$value);
         if (!preg_match('/^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,8})?$/', $raw)) {
             return '0.00';
+        }
+        return bcadd($raw, '0', 2);
+    }
+
+    private function nonnegativeMoney($value): ?string
+    {
+        if (is_bool($value) || is_array($value) || is_object($value) || $value === null) {
+            return null;
+        }
+        $raw = trim((string)$value);
+        if (preg_match('/^(?:0|[1-9][0-9]*)(?:\.0{1,2})?$/D', $raw) !== 1) {
+            return null;
         }
         return bcadd($raw, '0', 2);
     }

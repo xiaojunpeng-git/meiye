@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 $root = dirname(__DIR__, 3);
 $service = file_get_contents($root . '/后端代码/app/services/report/StoreUnifiedReportServices.php');
+$phaseTwo = file_get_contents($root . '/后端代码/app/services/report/StoreUnifiedReportPhaseTwoServices.php');
+$normalDataScope = file_get_contents($root . '/后端代码/app/services/report/StoreReportNormalDataScopeServices.php');
 $dimension = file_get_contents($root . '/后端代码/app/services/report/StoreOperationsReportDimensionServices.php');
 $annotation = file_get_contents($root . '/后端代码/app/services/report/StoreOperationsReportAnnotationServices.php');
 $controller = file_get_contents($root . '/后端代码/app/controller/cashier/v3/Report.php');
@@ -25,6 +27,33 @@ foreach ($codes as $code) {
     if (strpos($service, "case '{$code}'") === false) {
         throw new RuntimeException("query dispatch missing {$code}");
     }
+}
+
+foreach ([
+    'void_operation_lookup' => "normal_void_operation.source_order_id = ",
+    'sales_scope' => "->where('normal_void_operation.source_type', 'sales')",
+    'succeeded_only' => "->where('normal_void_operation.status', 'succeeded')",
+    'service_sale_line_bridge' => 'normal_service_sale.source_line_id=',
+] as $name => $needle) {
+    if (strpos($normalDataScope, $needle) === false) {
+        throw new RuntimeException("normal report data scope missing {$name}");
+    }
+}
+if (strpos($service, 'excludeVoidedSalesOrderFacts') === false
+    || strpos($phaseTwo, 'excludeVoidedSalesOrderServices') === false) {
+    throw new RuntimeException('normal report queries must apply the successful-void visibility scope');
+}
+
+if (strpos($phaseTwo, 'COUNT(DISTINCT member_visit_service.business_date) total_visits') === false
+    || strpos($phaseTwo, 'COUNT(DISTINCT member_visit_service.business_date) month_visits') === false
+    || strpos($phaseTwo, "COUNT(DISTINCT CONCAT(annual_visit_service.member_id, '|', annual_visit_service.business_date))") === false
+    || strpos($phaseTwo, "->where('annual_visit_service.member_id', '>', 0)") === false) {
+    throw new RuntimeException('member visit reports must deduplicate the same member on the same business date');
+}
+
+if (strpos($phaseTwo, "\$this->projectOrganization(\$rows[\$id], '', '', \$range['end']);") === false
+    || strpos($phaseTwo, "'store_id' => \$id, 'division_name' => ''") === false) {
+    throw new RuntimeException('market performance must resolve the company from its reporting-store organization dimension');
 }
 
 if (strpos($dimension, "->where('is_show', 1)") === false) {
@@ -91,8 +120,8 @@ foreach ([
     'member_phone_source' => "leftJoin('user u', 'u.uid = s.member_id')",
     'member_label' => "'member_name_snapshot','label'=>'会员'",
     'phone_label' => "'member_phone','label'=>'手机'",
-    'private_beauty_followup_label' => "'medical_elevation','label'=>'私美复诊'",
-    'private_beauty_type_label' => "'medical_followup','label'=>'私美类型'",
+    'private_beauty_followup_label' => "'medical_elevation','label'=>'复诊'",
+    'private_beauty_type_label' => "'medical_followup','label'=>'类型'",
     'partner_manual_fields' => "'medical_elevation', 'medical_followup', 'expert_name'",
 ] as $name => $needle) {
     $source = $name === 'partner_manual_fields' ? $annotation : $service;

@@ -46,10 +46,20 @@ wholeYuanOk('selector allocation and completion facts share one calculation vers
 
 $summary = (string)file_get_contents($root . '/后端代码/app/services/cashier/v3/cashier/CashierV3CashierMemberSummaryServices.php');
 $detail = (string)file_get_contents($root . '/后端代码/app/services/cashier/v3/member/CashierV3MemberDetailQueryServices.php');
+wholeYuanOk('member detail reads the same completed actual-sale allocation as the cashier selector',
+    strpos($detail, 'CashierV3CardSaleActualAmountServices') !== false
+    && strpos($detail, 'CashierV3CardRuleEntitlementAuthorityServices') !== false
+    && strpos($detail, '->forOrders(') !== false
+    && strpos($detail, "'id,oid,product_id,cart_info,write_times") !== false
+    && strpos($detail, '->authoritiesForHolder(') !== false
+    && strpos($detail, 'cardComponentPurchaseAmountAuthority') !== false
+    && strpos($detail, '$actualSaleAmountCents >= 0') !== false
+    && strpos($detail, '$this->moneyFromCents($actualSaleAmountCents)') !== false
+    && strpos($detail, "['source_line_paid_amount']") !== false);
 wholeYuanOk('disabled card state is authoritative for summary and detail',
     strpos($summary, "Db::name('cashier_v3_card_state')") !== false
     && strpos($summary, "->where('card_status', 'disabled')") !== false
-    && strpos($detail, "'statusLabel' => \$statusCode === 'disabled' ? '已停用' : '有效'") !== false
+    && strpos($detail, "'statusLabel' => \$statusCode === 'disabled' ? '已停用'") !== false
     && strpos($detail, "if ((\$card['statusCode'] ?? '') !== 'enabled') continue;") !== false);
 wholeYuanOk('time-card count exclusion uses the persisted rule type',
     strpos($summary, "Db::name('cashier_v3_card_rule_state')") !== false

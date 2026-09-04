@@ -119,6 +119,7 @@ class StoreUnifiedReportServices extends BaseServices
             ->leftJoin('cashier_v3_report_sale_dimension_fact d', 'd.sale_fact_id=s.fact_id')
             ->whereBetween('s.business_date', [$range['start'], $range['end']])
             ->where('s.status', 'effective');
+        $this->normalDataScope()->excludeVoidedSalesOrderFacts($query, 's.tenant_id', 's.order_id');
         // Summary/detail projections expand a card by its contained project
         // category. The member-consumption table intentionally keeps one row
         // per sold card, then aggregates its component shares in PHP.
@@ -142,6 +143,13 @@ class StoreUnifiedReportServices extends BaseServices
     {
         static $service;
         if (!$service) $service = new StoreUnifiedReportOrganizationDimensionServices();
+        return $service;
+    }
+
+    private function normalDataScope(): StoreReportNormalDataScopeServices
+    {
+        static $service;
+        if (!$service) $service = new StoreReportNormalDataScopeServices();
         return $service;
     }
 
@@ -319,7 +327,7 @@ class StoreUnifiedReportServices extends BaseServices
         foreach ($rows as &$row) { $this->applyOrganizationDimensions($row); $row['member_phone'] = (string)($row['member_phone'] ?? ''); $row['performance_type'] = strtok((string)$row['category_path_snapshot'], '/'); $row['experience_project'] = $row['experience']; $row['deal_headcount'] = (int)($row['member_id'] ?? 0) > 0 ? 1 : 0; $row['deal_project'] = $row['item_name_snapshot']; $row['consumption'] = $row['consumption_amount'] ?? '0'; $row['consumption_amount'] = $row['consumption_amount'] ?? '0'; $row['labor_fee'] = $row['labor_amount'] ?? '0'; $row['deal_amount'] = $row['sale_amount']; $row['partner_label'] = $row['partner_name_snapshot']; }
         unset($row);
         $columns = $this->fixedColumns(array_merge($this->organizationDimensionColumns(), [
-            ['key'=>'store_name_snapshot','label'=>'门店'],['key'=>'member_name_snapshot','label'=>'会员'],['key'=>'member_phone','label'=>'手机'],['key'=>'performance_type','label'=>'业绩类型'],['key'=>'business_date','label'=>'日期'],['key'=>'experience_project','label'=>'体验项目'],['key'=>'medical_elevation','label'=>'私美复诊'],['key'=>'medical_followup','label'=>'私美类型'],['key'=>'deal_headcount','label'=>'成交人头'],['key'=>'deal_project','label'=>'成交项目'],['key'=>'consumption','label'=>'消耗'],['key'=>'consumption_amount','label'=>'消耗金额'],['key'=>'labor_fee','label'=>'手工费'],['key'=>'quantity','label'=>'数量'],['key'=>'deal_amount','label'=>'成交金额'],['key'=>'expert_name','label'=>'专家姓名'],['key'=>'partner_label','label'=>'合作方'],['key'=>'remark','label'=>'备注'],
+            ['key'=>'store_name_snapshot','label'=>'门店'],['key'=>'member_name_snapshot','label'=>'会员'],['key'=>'member_phone','label'=>'手机'],['key'=>'performance_type','label'=>'业绩类型'],['key'=>'business_date','label'=>'日期'],['key'=>'experience_project','label'=>'体验项目'],['key'=>'medical_elevation','label'=>'复诊'],['key'=>'medical_followup','label'=>'类型'],['key'=>'deal_headcount','label'=>'成交人头'],['key'=>'deal_project','label'=>'成交项目'],['key'=>'consumption','label'=>'消耗'],['key'=>'consumption_amount','label'=>'消耗金额'],['key'=>'labor_fee','label'=>'手工费'],['key'=>'quantity','label'=>'数量'],['key'=>'deal_amount','label'=>'成交金额'],['key'=>'expert_name','label'=>'专家姓名'],['key'=>'partner_label','label'=>'合作方'],['key'=>'remark','label'=>'备注'],
         ]), ['division_name'=>130, 'city_manager'=>130, 'store_name_snapshot'=>126, 'member_name_snapshot'=>88, 'member_phone'=>116, 'performance_type'=>96, 'business_date'=>104]);
         return [
             'title'=>'合作方品项明细','columns'=>$columns, 'records'=>$rows,'total'=>$total,'page'=>$this->page($input),'page_size'=>$this->limit($input),
@@ -538,6 +546,7 @@ class StoreUnifiedReportServices extends BaseServices
             ->leftJoin('cashier_v3_entitlement_service_fact es', 'es.tenant_id=p.tenant_id AND es.checkout_request_id=p.checkout_request_id AND es.source_line_id=p.source_line_id')
             ->whereBetween('p.business_date', [$range['start'], $range['end']])
             ->where('p.status', 'effective')->where('p.performance_type', 'consumption_performance_recorded');
+        $this->normalDataScope()->excludeVoidedSalesOrderFacts($consume, 'p.tenant_id', 'p.order_id');
         if (is_array($storeId)) {
             $consume->whereIn('p.store_id', array_values(array_unique(array_map('intval', $storeId))));
         } else {
@@ -714,6 +723,7 @@ class StoreUnifiedReportServices extends BaseServices
     private function craftsmanConsumption($storeId, array $range, array $input): array
     {
         $query = $this->withStoreScope(Db::name('cashier_v3_performance_fact')->alias('p'), $storeId)->whereBetween('p.business_date',[$range['start'],$range['end']])->where('p.status','effective')->where('p.performance_type','labor_performance_allocated')->where('p.employee_id','>',0);
+        $this->normalDataScope()->excludeVoidedSalesOrderFacts($query, 'p.tenant_id', 'p.order_id');
         if ($this->participantEmployeeId > 0) $query->where('p.employee_id', $this->participantEmployeeId);
         if ((int)($input['craftsman_id'] ?? 0) > 0) $query->where('p.employee_id',(int)$input['craftsman_id']);
         $this->organizationDimensions()->applyFilters($query, 'p', $input, $range);
@@ -795,6 +805,7 @@ class StoreUnifiedReportServices extends BaseServices
             ->where('p.status', 'effective')
             ->where('p.performance_type', 'labor_performance_allocated')
             ->where('p.employee_id', '>', 0);
+        $this->normalDataScope()->excludeVoidedSalesOrderFacts($query, 'p.tenant_id', 'p.order_id');
         if (is_array($storeId)) $query->whereIn('p.store_id', array_values(array_unique(array_map('intval', $storeId))));
         else $query->where('p.store_id', (int)$storeId);
         if ($this->participantEmployeeId > 0) $query->where('p.employee_id', $this->participantEmployeeId);
@@ -845,6 +856,7 @@ class StoreUnifiedReportServices extends BaseServices
     private function salespersonPerformance($storeId, array $range, array $input): array
     {
         $query = $this->withStoreScope(Db::name('cashier_v3_performance_fact')->alias('p'), $storeId)->whereBetween('p.business_date',[$range['start'],$range['end']])->where('p.status','effective')->where('p.performance_type','sales_performance_allocated')->where('p.employee_id','>',0);
+        $this->normalDataScope()->excludeVoidedSalesOrderFacts($query, 'p.tenant_id', 'p.order_id');
         if ($this->participantEmployeeId > 0) $query->where('p.employee_id', $this->participantEmployeeId);
         if ((int)($input['salesperson_id'] ?? 0) > 0) $query->where('p.employee_id',(int)$input['salesperson_id']);
         $this->organizationDimensions()->applyFilters($query, 'p', $input, $range);
@@ -884,7 +896,9 @@ class StoreUnifiedReportServices extends BaseServices
         $trendCode = in_array(($input['metric'] ?? ''), array_keys($metrics), true) ? $input['metric'] : 'cash_performance';
         $trend = $this->trend($metrics[$trendCode], $storeId, $range, $trendCode === 'service_count');
         $ranking = $this->withStoreScope(Db::name('cashier_v3_performance_fact'), $storeId)->whereBetween('business_date', [$range['start'], $range['end']])
-            ->where('status', 'effective')->where('performance_type', 'labor_performance_allocated')->where('employee_id', '>', 0)
+            ->where('status', 'effective')->where('performance_type', 'labor_performance_allocated')->where('employee_id', '>', 0);
+        $this->normalDataScope()->excludeVoidedSalesOrderFacts($ranking, 'tenant_id', 'order_id');
+        $ranking
             ->fieldRaw('employee_id, MAX(employee_name_snapshot) AS employee_name, SUM(amount_cents) AS amount_cents')
             ->group('employee_id')->orderRaw('amount_cents DESC')->limit(20)->select()->toArray();
         foreach ($ranking as &$row) $row['amount'] = $this->money((int)$row['amount_cents']);
@@ -897,6 +911,7 @@ class StoreUnifiedReportServices extends BaseServices
         $dataset = ($input['dataset'] ?? 'sale') === 'payment' ? 'payment' : 'sale';
         $table = $dataset === 'payment' ? 'cashier_v3_payment_fact' : 'cashier_v3_sale_fact';
         $query = $this->withStoreScope(Db::name($table), $storeId)->whereBetween('business_date', [$range['start'], $range['end']])->where('status', 'effective');
+        $this->normalDataScope()->excludeVoidedSalesOrderFacts($query, 'tenant_id', 'order_id');
         $this->commonFilters($query, $input, $dataset);
         $total = (int)(clone $query)->count();
         $records = (clone $query)->order('business_date', 'desc')->order('id', 'desc')->page($this->page($input), $this->limit($input))->select()->toArray();
@@ -908,9 +923,12 @@ class StoreUnifiedReportServices extends BaseServices
     private function service($storeId, array $range, array $input)
     {
         $serviceQuery = $this->withStoreScope(Db::name('cashier_v3_entitlement_service_fact'), $storeId)->whereBetween('business_date', [$range['start'], $range['end']])->where('service_status', 'completed');
+        $this->normalDataScope()->excludeVoidedSalesOrderServices($serviceQuery, 'cashier_v3_entitlement_service_fact');
         $total = (int)(clone $serviceQuery)->count();
         $records = (clone $serviceQuery)->order('business_date', 'desc')->order('id', 'desc')->page($this->page($input), $this->limit($input))->select()->toArray();
-        $performance = $this->withStoreScope(Db::name('cashier_v3_performance_fact'), $storeId)->whereBetween('business_date', [$range['start'], $range['end']])->where('status', 'effective')->whereIn('performance_type', ['consumption_performance_recorded', 'labor_performance_allocated'])
+        $performance = $this->withStoreScope(Db::name('cashier_v3_performance_fact'), $storeId)->whereBetween('business_date', [$range['start'], $range['end']])->where('status', 'effective')->whereIn('performance_type', ['consumption_performance_recorded', 'labor_performance_allocated']);
+        $this->normalDataScope()->excludeVoidedSalesOrderFacts($performance, 'tenant_id', 'order_id');
+        $performance
             ->fieldRaw("performance_type, SUM(amount_cents) AS amount_cents")->group('performance_type')->select()->toArray();
         return ['title' => '服务消耗明细', 'columns' => $this->serviceColumns(), 'records' => $records, 'total' => $total, 'page' => $this->page($input), 'page_size' => $this->limit($input), 'performance_summary' => $performance];
     }
@@ -928,7 +946,9 @@ class StoreUnifiedReportServices extends BaseServices
 
         $memberIds = array_keys($members);
         $sales = $this->withStoreScope(Db::name('cashier_v3_sale_fact'), $storeId)->whereIn('member_id', $memberIds)
-            ->whereBetween('business_date', [$range['start'], $range['end']])->where('status', 'effective')
+            ->whereBetween('business_date', [$range['start'], $range['end']])->where('status', 'effective');
+        $this->normalDataScope()->excludeVoidedSalesOrderFacts($sales, 'tenant_id', 'order_id');
+        $sales
             ->fieldRaw('member_id, MAX(member_name_snapshot) member_name, COUNT(DISTINCT order_id) order_count, SUM(quantity) item_quantity, SUM(sale_amount_cents) sale_amount_cents')->group('member_id')->select()->toArray();
         $salesByMember = []; foreach ($sales as $row) $salesByMember[(int)$row['member_id']] = $row;
         $cashByMember = $this->memberAmounts('cashier_v3_payment_fact', 'amount_cents', $storeId, $memberIds, self::COVERAGE_START, $range['end'], []);
@@ -971,6 +991,7 @@ class StoreUnifiedReportServices extends BaseServices
     private function items($storeId, array $range, array $input)
     {
         $query = $this->withStoreScope(Db::name('cashier_v3_sale_fact'), $storeId)->whereBetween('business_date', [$range['start'], $range['end']])->where('status', 'effective');
+        $this->normalDataScope()->excludeVoidedSalesOrderFacts($query, 'tenant_id', 'order_id');
         $this->commonFilters($query, $input, 'sale');
         $total = (int)(clone $query)->count('DISTINCT item_id');
         $records = (clone $query)->fieldRaw('item_id, MAX(item_name_snapshot) AS item_name, MAX(category_name_snapshot) AS category_name, SUM(quantity) AS quantity, COUNT(DISTINCT NULLIF(member_id,0)) AS member_count, SUM(sale_amount_cents) AS sale_amount_cents')
@@ -993,8 +1014,12 @@ class StoreUnifiedReportServices extends BaseServices
         }
         foreach ($groups as &$group) {
             $orders = array_keys($group['order_ids']);
-            $sales = $orders ? $this->withStoreScope(Db::name('cashier_v3_sale_fact'), $storeId)->whereIn('order_id', $orders)->where('status','effective')->where('source_type','card')->sum('sale_amount_cents') : 0;
-            $receipts = $orders ? $this->withStoreScope(Db::name('cashier_v3_payment_fact'), $storeId)->whereIn('order_id', $orders)->where('status','effective')->sum('amount_cents') : 0;
+            $salesQuery = $orders ? $this->withStoreScope(Db::name('cashier_v3_sale_fact'), $storeId)->whereIn('order_id', $orders)->where('status','effective')->where('source_type','card') : null;
+            if ($salesQuery) $this->normalDataScope()->excludeVoidedSalesOrderFacts($salesQuery, 'tenant_id', 'order_id');
+            $sales = $salesQuery ? $salesQuery->sum('sale_amount_cents') : 0;
+            $receiptsQuery = $orders ? $this->withStoreScope(Db::name('cashier_v3_payment_fact'), $storeId)->whereIn('order_id', $orders)->where('status','effective') : null;
+            if ($receiptsQuery) $this->normalDataScope()->excludeVoidedSalesOrderFacts($receiptsQuery, 'tenant_id', 'order_id');
+            $receipts = $receiptsQuery ? $receiptsQuery->sum('amount_cents') : 0;
             $group['order_count'] = count($orders); $group['sale_amount'] = $this->money((int)$sales); $group['receipt_amount'] = $this->money((int)$receipts);
             $group['average_order_amount'] = $group['order_count'] ? $this->money((int)$sales / $group['order_count']) : '0'; unset($group['order_ids']);
         }
@@ -1007,6 +1032,8 @@ class StoreUnifiedReportServices extends BaseServices
         $query = $this->withStoreScope(Db::name($table), $storeId)->whereBetween('business_date', [$range['start'], $range['end']]);
         foreach ($conditions as $key => $value) $query->where($key, $value);
         if ($table === 'cashier_v3_entitlement_service_fact') $query->where('service_status', 'completed'); else $query->where('status', 'effective');
+        if ($table === 'cashier_v3_entitlement_service_fact') $this->normalDataScope()->excludeVoidedSalesOrderServices($query, $table);
+        else $this->normalDataScope()->excludeVoidedSalesOrderFacts($query, 'tenant_id', 'order_id');
         $row = $query->fieldRaw('COALESCE(SUM(' . $amount . '),0) AS amount')->find();
         return (int)($row['amount'] ?? 0);
     }
@@ -1017,6 +1044,8 @@ class StoreUnifiedReportServices extends BaseServices
         $query = $this->withStoreScope(Db::name($table), $storeId)->whereBetween('business_date', [$range['start'], $range['end']]);
         foreach ($conditions as $key => $value) $query->where($key, $value);
         if ($table === 'cashier_v3_entitlement_service_fact') $query->where('service_status', 'completed'); else $query->where('status', 'effective');
+        if ($table === 'cashier_v3_entitlement_service_fact') $this->normalDataScope()->excludeVoidedSalesOrderServices($query, $table);
+        else $this->normalDataScope()->excludeVoidedSalesOrderFacts($query, 'tenant_id', 'order_id');
         $rows = $query->fieldRaw('business_date, SUM(' . $amount . ') AS amount')->group('business_date')->order('business_date', 'asc')->select()->toArray();
         foreach ($rows as &$row) $row['value'] = $count ? (int)$row['amount'] : $this->money((int)$row['amount']);
         unset($row);
@@ -1046,6 +1075,7 @@ class StoreUnifiedReportServices extends BaseServices
     {
         if (!$memberIds) return [];
         $query = $this->withStoreScope(Db::name($table), $storeId)->whereIn('member_id', $memberIds)->whereBetween('business_date', [$start, $end])->where('status', 'effective');
+        $this->normalDataScope()->excludeVoidedSalesOrderFacts($query, 'tenant_id', 'order_id');
         foreach ($conditions as $key => $value) $query->where($key, $value);
         $rows = $query->fieldRaw('member_id, SUM(' . $amount . ') amount')->group('member_id')->select()->toArray();
         $result = []; foreach ($rows as $row) $result[(int)$row['member_id']] = (int)$row['amount'];
@@ -1054,8 +1084,10 @@ class StoreUnifiedReportServices extends BaseServices
 
     private function activeMembers($storeId, array $range, array $memberIds): array
     {
-        $rows = $this->withStoreScope(Db::name('cashier_v3_entitlement_service_fact'), $storeId)->whereIn('member_id', $memberIds)
-            ->whereBetween('business_date', [$range['start'], $range['end']])->where('service_status', 'completed')->field('member_id')->group('member_id')->select()->toArray();
+        $query = $this->withStoreScope(Db::name('cashier_v3_entitlement_service_fact'), $storeId)->whereIn('member_id', $memberIds)
+            ->whereBetween('business_date', [$range['start'], $range['end']])->where('service_status', 'completed');
+        $this->normalDataScope()->excludeVoidedSalesOrderServices($query, 'cashier_v3_entitlement_service_fact');
+        $rows = $query->field('member_id')->group('member_id')->select()->toArray();
         $result = []; foreach ($rows as $row) $result[(int)$row['member_id']] = true;
         return $result;
     }

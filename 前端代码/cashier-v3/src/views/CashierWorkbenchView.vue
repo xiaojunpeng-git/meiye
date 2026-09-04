@@ -4452,6 +4452,49 @@ function entitlementLineMaximum(line = {}) {
   return Math.max(0, availableTimes - selectedByOtherLines)
 }
 
+function localCheckoutEntitlementAvailabilityFailure(snapshot = {}) {
+  // “立即结账”只可使用已经展示在本页的权益快照。按卡、权益明细和项目
+  // 汇总数量，避免同一权益被拆成多行后绕过当前页面的可用次数。
+  // 这里绝不重新读取权益，也不向服务端发起校验请求；最终确认收款仍由同一
+  // 快照随唯一的 submit-checkout 命令进入结算事务。
+  const usageBySource = new Map()
+  const lines = Array.isArray(snapshot?.lines) ? snapshot.lines : []
+  for (const line of lines) {
+    if (!isEntitlementLine(line)) continue
+    const holderId = String(line.entitlementInstanceId || line.cardHolderId || '').trim()
+    const detailId = String(line.entitlementSourceDetailId || line.memberBenefitPoolId || '').trim()
+    const projectId = String(line.projectId || '').trim()
+    const availableTimes = Math.floor(Number(line.availableTimes))
+    const quantity = Math.floor(Number(line.quantity || 0))
+    if (!holderId || !detailId || !projectId || !Number.isInteger(availableTimes) || availableTimes < 0 || quantity < 1) {
+      return {
+        code: 'CHECKOUT_ENTITLEMENT_SNAPSHOT_INCOMPLETE',
+        message: '当前页面的权益快照不完整，请返回购物车重新选择权益。'
+      }
+    }
+    const key = `${holderId}:${detailId}:${projectId}`
+    const current = usageBySource.get(key) || { availableTimes, quantity: 0 }
+    // 同一权益在本次快照中的可用次数必须一致；不接受混合不同投影的数据。
+    if (current.availableTimes !== availableTimes) {
+      return {
+        code: 'CHECKOUT_ENTITLEMENT_SNAPSHOT_INCONSISTENT',
+        message: '当前页面的权益快照不一致，请返回购物车重新选择权益。'
+      }
+    }
+    current.quantity += quantity
+    usageBySource.set(key, current)
+  }
+  for (const source of usageBySource.values()) {
+    if (source.quantity > source.availableTimes) {
+      return {
+        code: 'CHECKOUT_ENTITLEMENT_TIMES_EXCEEDED',
+        message: `当前页面权益快照可用 ${source.availableTimes} 次，本次已选择 ${source.quantity} 次，请调整后再结账。`
+      }
+    }
+  }
+  return null
+}
+
 async function setLineQuantity(line, event) {
   activeCartLineId.value = line.id
   const currentQuantity = Math.max(1, Number(line.quantity || 1))
@@ -4856,6 +4899,12 @@ async function openCheckout() {
   // The checkout wizard is a browser-only projection. The first write for this
   // order is the final submit-checkout carrying the complete snapshot.
   const preview = localCheckoutPreviewSnapshot()
+  const entitlementFailure = localCheckoutEntitlementAvailabilityFailure(preview)
+  if (entitlementFailure) {
+    const blocked = { result: { status: 'failed', ...entitlementFailure } }
+    reportCheckoutEntryFailure(blocked, entitlementFailure.message)
+    return blocked
+  }
   localCheckoutPreview.value = preview
   // Keep the exact page rows before any checkout-step mutation can replace or
   // clear the workbench projection. The result-page receipt is a pure render

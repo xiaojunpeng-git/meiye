@@ -110,9 +110,14 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         foreach ($storeFacts as $fact) {
             $id = (int)$fact['store_id'];
             $rows[$id] = [
-                'store_id' => $id, 'division_name' => (string)$fact['organization_name'],
+                // organization_name_snapshot is the business node name (which
+                // can be a manager), not necessarily the configured company.
+                // Resolve the report dimension from the reporting store's
+                // organization path after the per-store aggregation instead.
+                'store_id' => $id, 'division_name' => '',
                 'store_name' => (string)$fact['store_name'],
             ];
+            $this->projectOrganization($rows[$id], '', '', $range['end']);
         }
         $cash = $this->cashFacts($stores, 'market_payment')
             ->whereBetween('market_payment.business_date', [$range['start'], $range['end']])->where('market_payment.status', 'effective')
@@ -307,7 +312,9 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         )
             ->whereBetween('member_visit_service.business_date', [$range['start'], $range['end']])
             ->where('member_visit_service.member_id', '>', 0)
-            ->fieldRaw("member_visit_service.member_id,MAX(member_visit_service.member_name_snapshot) member_name,COUNT(*) total_visits,MONTH(member_visit_service.business_date) month_no,COUNT(*) month_visits")
+            // 到店的事实粒度是“会员 + 业务日”。同日同会员可完成多个项目、
+            // 也可发生多张单，但只能算一次到店；不能按服务项目事实行累加。
+            ->fieldRaw("member_visit_service.member_id,MAX(member_visit_service.member_name_snapshot) member_name,COUNT(DISTINCT member_visit_service.business_date) total_visits,MONTH(member_visit_service.business_date) month_no,COUNT(DISTINCT member_visit_service.business_date) month_visits")
             ->group('member_visit_service.member_id,MONTH(member_visit_service.business_date)')->select()->toArray();
         $payments = $this->cashFacts($stores)
             ->whereBetween('business_date', [$range['start'], $range['end']])->where('status','effective')->where('member_id','>',0)
@@ -347,8 +354,18 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
     {
         $year=(int)substr($range['end'],0,4);$mode=(string)($input['mode']??'count');
         if(!in_array($mode,['count','people','project'],true)) throw new \InvalidArgumentException('年度进店统计方式无效');
-        $query=$this->completedUnvoidedServiceFacts($this->participantCheckout($this->applyOrganizationFilters($this->scope(Db::name('cashier_v3_entitlement_service_fact')->alias('annual_visit_service'),$stores,'annual_visit_service'), 'annual_visit_service', $input, $range),'annual_visit_service.checkout_request_id'),'annual_visit_service','annual_visit_void')->whereBetween('annual_visit_service.business_date',[$range['start'],$range['end']]);
-        $expression=$mode==='people'?'COUNT(DISTINCT member_id)':($mode==='project'?'SUM(quantity)':'COUNT(*)');
+        $query=$this->completedUnvoidedServiceFacts($this->participantCheckout($this->applyOrganizationFilters($this->scope(Db::name('cashier_v3_entitlement_service_fact')->alias('annual_visit_service'),$stores,'annual_visit_service'), 'annual_visit_service', $input, $range),'annual_visit_service.checkout_request_id'),'annual_visit_service','annual_visit_void')
+            ->whereBetween('annual_visit_service.business_date',[$range['start'],$range['end']])
+            // 本表统计会员进店；游客服务不应混入会员年度口径。
+            ->where('annual_visit_service.member_id', '>', 0);
+        // 年度汇总的“进店次数”与会员进店分析使用同一口径：同一门店内，
+        // 同一会员同一业务日仅计一次。项目模式仍统计项目数量，人数模式
+        // 仍统计月度去重会员，三者不混用。
+        $expression=$mode==='people'
+            ? 'COUNT(DISTINCT annual_visit_service.member_id)'
+            : ($mode==='project'
+                ? 'SUM(annual_visit_service.quantity)'
+                : "COUNT(DISTINCT CONCAT(annual_visit_service.member_id, '|', annual_visit_service.business_date))");
         $facts=$query->fieldRaw('annual_visit_service.store_id,MAX(annual_visit_service.store_name_snapshot) store_name,MONTH(annual_visit_service.business_date) month_no,'.$expression.' amount')->group('annual_visit_service.store_id,MONTH(annual_visit_service.business_date)')->select()->toArray();
         $storeNames=[];$records=[];foreach(range(1,12) as $month)$records[$month]=['row_label'=>$month.'月','year'=>$year.'年','total'=>0];
         foreach($facts as $fact){$sid=(int)$fact['store_id'];$storeNames[$sid]=(string)$fact['store_name'];$records[(int)$fact['month_no']]['store_'.$sid]=(int)$fact['amount'];$records[(int)$fact['month_no']]['total']+=(int)$fact['amount'];}
@@ -362,6 +379,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         $sourceIds=$this->sourceIds('E');$memberId=(int)($input['member_id']??0);
         $base=$this->participantOrder($this->applyOrganizationFilters($this->scope(Db::name('cashier_v3_sale_fact')->alias('s'),$stores,'s'), 's', $input, $range),'s.order_id')->leftJoin('cashier_v3_sales_order o','o.order_id=s.order_id')
             ->whereBetween('s.business_date',[$range['start'],$range['end']])->where('s.status','effective')->whereIn('s.business_source_primary_id',$sourceIds?:[-1]);
+        $this->normalDataScope()->excludeVoidedSalesOrderFacts($base,'s.tenant_id','s.order_id');
         if($memberId>0)$base->where('s.member_id',$memberId);
         $base=$base->fieldRaw('s.fact_id,s.store_id,s.organization_id,s.organization_path_snapshot,s.organization_name_snapshot,s.store_name_snapshot,s.member_id,s.member_name_snapshot,s.business_source_secondary_name_snapshot,s.order_id,s.source_line_id,s.business_date,s.occurred_at,MAX(o.order_note) remark')
             ->group('s.store_id,s.member_id,s.order_id,s.source_line_id')->order('s.business_date','desc')->select()->toArray();
@@ -411,7 +429,9 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
 
     private function crossIndustrySummary(array $stores,array $range,array $input):array
     {
-        $sourceIds=$this->sourceIds('G');$year=(int)substr($range['end'],0,4);$sales=$this->participantOrder($this->applyOrganizationFilters($this->scope(Db::name('cashier_v3_sale_fact')->alias('cross_sale'),$stores,'cross_sale'),'cross_sale',$input,['start'=>$year.'-01-01','end'=>$year.'-12-31']),'cross_sale.order_id')->whereBetween('cross_sale.business_date',[$year.'-01-01',$year.'-12-31'])->where('cross_sale.status','effective')->whereIn('cross_sale.business_source_primary_id',$sourceIds?:[-1])->fieldRaw('cross_sale.store_id,cross_sale.member_id,MAX(cross_sale.member_name_snapshot) member_name,MIN(cross_sale.source_line_id) source_line_id,MAX(cross_sale.item_name_snapshot) card_name,MIN(cross_sale.business_date) first_sale_date')->group('cross_sale.store_id,cross_sale.member_id')->select()->toArray();
+        $sourceIds=$this->sourceIds('G');$year=(int)substr($range['end'],0,4);$sales=$this->participantOrder($this->applyOrganizationFilters($this->scope(Db::name('cashier_v3_sale_fact')->alias('cross_sale'),$stores,'cross_sale'),'cross_sale',$input,['start'=>$year.'-01-01','end'=>$year.'-12-31']),'cross_sale.order_id')->whereBetween('cross_sale.business_date',[$year.'-01-01',$year.'-12-31'])->where('cross_sale.status','effective')->whereIn('cross_sale.business_source_primary_id',$sourceIds?:[-1]);
+        $this->normalDataScope()->excludeVoidedSalesOrderFacts($sales,'cross_sale.tenant_id','cross_sale.order_id');
+        $sales=$sales->fieldRaw('cross_sale.store_id,cross_sale.member_id,MAX(cross_sale.member_name_snapshot) member_name,MIN(cross_sale.source_line_id) source_line_id,MAX(cross_sale.item_name_snapshot) card_name,MIN(cross_sale.business_date) first_sale_date')->group('cross_sale.store_id,cross_sale.member_id')->select()->toArray();
         $memberIds=array_values(array_unique(array_filter(array_column($sales,'member_id'))));$phones=$this->phones($memberIds);$cash=$this->cashMonthlyTotals($stores,$memberIds,$year.'-01-01',$year.'-12-31');$dailyCash=$this->cashByMemberAndMonth($stores,$memberIds,$year.'-01-01',$year.'-12-31');$services=$this->servicesByMember($stores,$memberIds);$entitlements=$this->activeCardEntitlements($stores,$memberIds);$keys=array_values(array_unique(array_column($sales,'source_line_id')));$manual=$this->annotations('cross_industry_customer_summary',$stores,$keys);$total500=0;$total2400=0;
         foreach($sales as &$row){
             $id=(int)$row['member_id'];$key=(string)$row['source_line_id'];$row['customer_acquired_at']=$manual[$key]['customer_acquired_at']['value']??'';$row['customer_acquired_at_version']=(int)($manual[$key]['customer_acquired_at']['version']??0);$row['partner_store_name']=$manual[$key]['partner_store_name']['value']??'';$row['partner_store_name_version']=(int)($manual[$key]['partner_store_name']['version']??0);$row['phone']=$phones[$id]??'';$row['remaining_service_count']=(int)($entitlements[$id]['remaining_count']??0);$row['remaining_service_amount']=$this->money((int)($entitlements[$id]['remaining_amount_cents']??0));$row['first_visit_at']=(string)($services[$id][0]['business_date']??'');
@@ -437,6 +457,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         if($sourceId>0)$sales->where('s.business_source_primary_id',$sourceId);
         elseif($sourceLabel!=='')$sales->where('s.business_source_label_snapshot',$sourceLabel);
         $this->applyOrganizationFilters($sales,'s',$input,$range);
+        $this->normalDataScope()->excludeVoidedSalesOrderFacts($sales,'s.tenant_id','s.order_id');
         $rows=$sales->fieldRaw('s.fact_id,s.store_id,s.organization_id,s.organization_path_snapshot,s.organization_name_snapshot,s.store_name_snapshot,s.business_date,s.order_id,s.source_line_id,s.member_id,s.member_name_snapshot,s.business_source_label_snapshot,s.item_name_snapshot,s.sale_amount_cents,s.debt_amount_cents,u.phone,MAX(o.order_note) remark')
             ->group('s.source_line_id')->order('s.business_date','desc')->select()->toArray();
         $orderIds=array_values(array_unique(array_filter(array_column($rows,'order_id'))));
@@ -466,7 +487,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             ->group('repayment_allocation.sale_fact_id,repayment_payment_all.fact_id,repayment_payment_all.order_id,repayment_payment_all.business_date')->select()->toArray();
         foreach($allRepaymentRows as $item){$saleKey=(string)$item['sale_fact_id'];$duplicate=false;foreach($repaymentRows[$saleKey]??[] as $existing)if((string)($existing['payment_fact_id']??'')===(string)$item['payment_fact_id']){$duplicate=true;break;}if(!$duplicate)$repaymentRows[$saleKey][]=$item;}
         $missingAnchorIds=array_values(array_diff(array_keys($repaymentRows),$saleFactIds));
-        if($missingAnchorIds){$anchorQuery=$this->scope(Db::name('cashier_v3_sale_fact')->alias('s'),$stores,'s');$anchorRows=$anchorQuery->leftJoin('cashier_v3_sales_order o','o.order_id=s.order_id')->leftJoin('user u','u.uid=s.member_id')->whereIn('s.fact_id',$missingAnchorIds)->where('s.status','effective')->where('s.fact_direction','forward')->fieldRaw('s.fact_id,s.store_id,s.organization_id,s.organization_path_snapshot,s.organization_name_snapshot,s.store_name_snapshot,s.business_date,s.order_id,s.source_line_id,s.member_id,s.member_name_snapshot,s.business_source_label_snapshot,s.item_name_snapshot,s.sale_amount_cents,s.debt_amount_cents,u.phone,MAX(o.order_note) remark')->group('s.fact_id')->select()->toArray();foreach($anchorRows as&$anchor)$anchor['_anchor_only']=true;unset($anchor);$rows=array_merge($rows,$anchorRows);$orderIds=array_values(array_unique(array_filter(array_column($rows,'order_id'))));$saleFactIds=array_values(array_unique(array_filter(array_column($rows,'fact_id'))));$lineIds=array_values(array_unique(array_filter(array_column($rows,'source_line_id'))));$personnel=$this->newCustomerPersonnel($stores,$orderIds,$lineIds);$guides=$personnel['guides'];$salespeople=$personnel['salespeople'];$managers=$personnel['managers'];$manual=$this->annotations('new_customer_analysis',$stores,$lineIds);}
+        if($missingAnchorIds){$anchorQuery=$this->scope(Db::name('cashier_v3_sale_fact')->alias('s'),$stores,'s');$this->normalDataScope()->excludeVoidedSalesOrderFacts($anchorQuery,'s.tenant_id','s.order_id');$anchorRows=$anchorQuery->leftJoin('cashier_v3_sales_order o','o.order_id=s.order_id')->leftJoin('user u','u.uid=s.member_id')->whereIn('s.fact_id',$missingAnchorIds)->where('s.status','effective')->where('s.fact_direction','forward')->fieldRaw('s.fact_id,s.store_id,s.organization_id,s.organization_path_snapshot,s.organization_name_snapshot,s.store_name_snapshot,s.business_date,s.order_id,s.source_line_id,s.member_id,s.member_name_snapshot,s.business_source_label_snapshot,s.item_name_snapshot,s.sale_amount_cents,s.debt_amount_cents,u.phone,MAX(o.order_note) remark')->group('s.fact_id')->select()->toArray();foreach($anchorRows as&$anchor)$anchor['_anchor_only']=true;unset($anchor);$rows=array_merge($rows,$anchorRows);$orderIds=array_values(array_unique(array_filter(array_column($rows,'order_id'))));$saleFactIds=array_values(array_unique(array_filter(array_column($rows,'fact_id'))));$lineIds=array_values(array_unique(array_filter(array_column($rows,'source_line_id'))));$personnel=$this->newCustomerPersonnel($stores,$orderIds,$lineIds);$guides=$personnel['guides'];$salespeople=$personnel['salespeople'];$managers=$personnel['managers'];$manual=$this->annotations('new_customer_analysis',$stores,$lineIds);}
         $repaymentOrderIds=[];foreach($repaymentRows as $items)foreach($items as $item)$repaymentOrderIds[]=(string)$item['repayment_order_id'];
         $repaymentSalespeople=$this->newCustomerRepaymentSalespeople($stores,array_values(array_unique($repaymentOrderIds)));
         $manual=$this->annotations('new_customer_analysis',$stores,$lineIds);$baseRowsByFact=[];
@@ -525,7 +546,9 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         $facts=$this->participantEmployeeFact($this->applyOrganizationFilters($this->scope(Db::name('cashier_v3_performance_fact')->alias('p'),$stores,'p'),'p',$input,$range),'p.employee_id')
             ->join('cashier_v3_sale_fact s','s.tenant_id=p.tenant_id AND s.store_id=p.store_id AND s.source_line_id=p.source_line_id AND s.status=\'effective\'')
             ->leftJoin([$cardCategorySql=>'cc'],'cc.tenant_id=s.tenant_id AND cc.sale_fact_id=s.fact_id')
-            ->whereBetween('p.business_date',[$range['start'],$range['end']])->where('p.status','effective')->where('p.performance_type','sales_performance_allocated')
+            ->whereBetween('p.business_date',[$range['start'],$range['end']])->where('p.status','effective')->where('p.performance_type','sales_performance_allocated');
+        $this->normalDataScope()->excludeVoidedSalesOrderFacts($facts,'p.tenant_id','p.order_id');
+        $facts=$facts
             ->whereRaw("((cc.sale_fact_id IS NOT NULL AND cc.allocated_sale_total_cents=s.sale_amount_cents AND cc.beauty_cash_amount_cents>0) OR (cc.sale_fact_id IS NULL AND s.category_name_snapshot LIKE '%生美%'))")
             ->fieldRaw("p.tenant_id,p.store_id,p.organization_id,p.organization_path_snapshot,MAX(p.organization_name_snapshot) division_name,MAX(p.store_name_snapshot) store_name,p.business_date,p.employee_id,p.order_id,p.source_line_id,MAX(p.employee_name_snapshot) salesperson,p.member_id,SUM(CASE WHEN cc.sale_fact_id IS NULL THEN p.amount_cents WHEN cc.allocated_cash_total_cents>0 THEN ROUND(p.amount_cents*cc.beauty_cash_amount_cents/cc.allocated_cash_total_cents) ELSE 0 END) amount_cents")
             ->group('p.tenant_id,p.store_id,p.organization_id,p.organization_path_snapshot,p.business_date,p.employee_id,p.order_id,p.source_line_id,p.member_id')->order('p.business_date','desc')->select()->toArray();
@@ -556,7 +579,9 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             ->join('cashier_v3_sale_fact s','s.tenant_id=sol.tenant_id AND s.store_id=sol.store_id AND s.source_line_id=sol.order_line_id AND s.status=\'effective\'')
             ->leftJoin([$managerPaymentSql=>'smp'],'smp.tenant_id=sm.tenant_id AND smp.sales_order_id=sm.order_id')
             ->leftJoin([$cardCategorySql=>'cc'],'cc.tenant_id=s.tenant_id AND cc.sale_fact_id=s.fact_id')
-            ->whereBetween('sm.business_date',[$range['start'],$range['end']])->where('sm.status','effective')
+            ->whereBetween('sm.business_date',[$range['start'],$range['end']])->where('sm.status','effective');
+        $this->normalDataScope()->excludeVoidedSalesOrderFacts($managerFacts,'sm.tenant_id','sm.order_id');
+        $managerFacts = $managerFacts
             ->whereRaw("((cc.sale_fact_id IS NOT NULL AND cc.allocated_sale_total_cents=s.sale_amount_cents AND cc.beauty_cash_amount_cents>0) OR (cc.sale_fact_id IS NULL AND s.category_name_snapshot LIKE '%生美%'))")
             ->fieldRaw("sm.tenant_id,sm.store_id,sm.organization_id,sm.sales_manager_employee_id employee_id,MAX(sm.sales_manager_name_snapshot) salesperson,sm.order_id,sol.order_line_id source_line_id,sm.member_id,sm.business_date,MAX(s.organization_path_snapshot) organization_path_snapshot,MAX(s.organization_name_snapshot) division_name,MAX(s.store_name_snapshot) store_name,SUM(CASE WHEN cc.sale_fact_id IS NULL THEN {$managerAmountSql} WHEN cc.allocated_cash_total_cents>0 THEN ROUND(({$managerAmountSql})*cc.beauty_cash_amount_cents/cc.allocated_cash_total_cents) ELSE 0 END) amount_cents")
             ->group('sm.tenant_id,sm.store_id,sm.organization_id,sm.sales_manager_employee_id,sm.order_id,sol.order_line_id,sm.member_id,sm.business_date')->select()->toArray();
@@ -656,7 +681,9 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             )
             ->whereBetween('sv.business_date', [$range['start'], $range['end']])
             ->where('sv.service_status', 'completed')
-            ->whereNull('vo.id')
+            ->whereNull('vo.id');
+        $this->normalDataScope()->excludeVoidedSalesOrderServices($query, 'sv');
+        $query
             ->fieldRaw(
                 'sv.store_id,sv.service_fact_id,sv.checkout_request_id,'
                 . 'COALESCE(NULLIF(wf.origin_order_id,0),0) origin_order_id,'
@@ -725,7 +752,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
      */
     private function completedUnvoidedServiceFacts($query, string $serviceAlias, string $voidAlias)
     {
-        return $query
+        $query = $query
             ->leftJoin(
                 'cashier_v3_service_record_void_operation ' . $voidAlias,
                 $voidAlias . '.tenant_id=' . $serviceAlias . '.tenant_id AND '
@@ -734,6 +761,8 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             )
             ->where($serviceAlias . '.service_status', 'completed')
             ->whereNull($voidAlias . '.id');
+        $this->normalDataScope()->excludeVoidedSalesOrderServices($query, $serviceAlias);
+        return $query;
     }
     private function participantOrder($query,string $orderField){return $this->participantEmployeeId>0?(new StoreReportParticipantScopeServices())->applyOrder($query,$orderField,$this->participantEmployeeId):$query;}
     private function participantCheckout($query,string $checkoutField){return $this->participantEmployeeId>0?(new StoreReportParticipantScopeServices())->applyCheckout($query,$checkoutField,$this->participantEmployeeId):$query;}
@@ -829,7 +858,9 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
     private function annualFirstCardSources(array $stores,array $members,int $year):array
     {
         if(!$members)return[];
-        $rows=$this->scope(Db::name('cashier_v3_sale_fact')->alias('annual_card_sale'),$stores,'annual_card_sale')->whereIn('annual_card_sale.member_id',$members)->where('annual_card_sale.source_type','card')->where('annual_card_sale.fact_direction','forward')->where('annual_card_sale.status','effective')->whereBetween('annual_card_sale.business_date',[$year.'-01-01',$year.'-12-31'])->field('annual_card_sale.member_id,annual_card_sale.business_date,annual_card_sale.occurred_at,annual_card_sale.business_source_label_snapshot')->order('annual_card_sale.business_date','asc')->order('annual_card_sale.occurred_at','asc')->order('annual_card_sale.id','asc')->select()->toArray();
+        $rows=$this->scope(Db::name('cashier_v3_sale_fact')->alias('annual_card_sale'),$stores,'annual_card_sale')->whereIn('annual_card_sale.member_id',$members)->where('annual_card_sale.source_type','card')->where('annual_card_sale.fact_direction','forward')->where('annual_card_sale.status','effective')->whereBetween('annual_card_sale.business_date',[$year.'-01-01',$year.'-12-31']);
+        $this->normalDataScope()->excludeVoidedSalesOrderFacts($rows,'annual_card_sale.tenant_id','annual_card_sale.order_id');
+        $rows=$rows->field('annual_card_sale.member_id,annual_card_sale.business_date,annual_card_sale.occurred_at,annual_card_sale.business_source_label_snapshot')->order('annual_card_sale.business_date','asc')->order('annual_card_sale.occurred_at','asc')->order('annual_card_sale.id','asc')->select()->toArray();
         $out=[];foreach($rows as $row){$id=(int)$row['member_id'];if(!isset($out[$id]))$out[$id]=(string)$row['business_source_label_snapshot'];}return$out;
     }
     private function activeCardEntitlements(array $stores,array $members):array
@@ -895,6 +926,12 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
     {
         if(!$this->organizationDimensionServices)$this->organizationDimensionServices=new StoreUnifiedReportOrganizationDimensionServices();
         return$this->organizationDimensionServices;
+    }
+    private function normalDataScope():StoreReportNormalDataScopeServices
+    {
+        static $service;
+        if(!$service)$service=new StoreReportNormalDataScopeServices();
+        return $service;
     }
     private function applyOrganizationFilters($query,string $alias,array $input,array $range)
     {
@@ -974,10 +1011,11 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         $this->scope($query,$stores,$alias);
         $this->applyOrganizationFilters($query, $alias, $this->activeInput, $this->activeRange);
         $column=$alias.'.';
-        // Refunds and order voids both create an effective negative payment
-        // fact. A report must use the net payment amount in either case;
-        // limiting reversals to refunds leaves a voided sale as false revenue.
+        // Refund facts remain normal operating data. A succeeded order void is
+        // hidden as a whole in normal statistics, including its signed
+        // reversal facts; audit records remain append-only elsewhere.
         $query->whereRaw("({$column}fact_direction='forward' OR ({$column}fact_direction='reversal' AND EXISTS (SELECT 1 FROM eb_cashier_v3_order_lifecycle_operation reversal_operation WHERE reversal_operation.tenant_id={$column}tenant_id AND reversal_operation.command_idempotency_key={$column}command_idempotency_key AND reversal_operation.operation_type IN ('refund','void') AND reversal_operation.status='succeeded')))" );
+        $this->normalDataScope()->excludeVoidedSalesOrderFacts($query, $column . 'tenant_id', $column . 'order_id');
         return $this->participantOrder($query,$column.'order_id');
     }
     private function guideFilterOptions(array $stores,array $range):array

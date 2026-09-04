@@ -967,6 +967,7 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
             ->join('cashier_v3_sale_fact s', 's.tenant_id=p.tenant_id AND s.fact_id=COALESCE(original.sale_fact_id,p.sale_fact_id)')
             ->where('p.tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)->whereIn('p.store_id', $stores)
             ->where('p.status', 'effective');
+        (new StoreReportNormalDataScopeServices())->excludeVoidedSalesOrderFacts($base, 's.tenant_id', 's.order_id');
         if (isset($range['start']) && (string)$range['start'] !== '') $base->whereBetween('p.business_date', [$range['start'], $range['end']]);
         else $base->where('p.business_date', '<=', (string)$range['end']);
         if ($this->participantEmployeeId > 0) (new StoreReportParticipantScopeServices())->applyOrder($base, 'p.order_id', $this->participantEmployeeId);
@@ -1016,6 +1017,7 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
     private function serviceRows(array $stores, array $range, array $categoryIds): array
     {
         $query = Db::name('cashier_v3_entitlement_service_fact')->alias('sv')->where('sv.tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)->whereIn('sv.store_id', $stores)->where('sv.service_status', 'completed');
+        (new StoreReportNormalDataScopeServices())->excludeVoidedSalesOrderServices($query, 'sv');
         if (isset($range['start']) && (string)$range['start'] !== '') $query->whereBetween('sv.business_date', [$range['start'], $range['end']]);
         else $query->where('sv.business_date', '<=', (string)$range['end']);
         if ($categoryIds !== []) $query->whereIn('sv.project_category_id_snapshot', $categoryIds);
@@ -1040,6 +1042,7 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
             ->whereIn('a.store_id', $stores)->where('d.status', 0)
             ->where('s.fact_direction', 'forward')->where('s.status', 'effective')
             ->where('s.debt_amount_cents', '>', 0);
+        (new StoreReportNormalDataScopeServices())->excludeVoidedSalesOrderFacts($salesQuery, 's.tenant_id', 's.order_id');
         if ($this->participantEmployeeId > 0) {
             (new StoreReportParticipantScopeServices())->applyOrder($salesQuery, 's.order_id', $this->participantEmployeeId);
         }
