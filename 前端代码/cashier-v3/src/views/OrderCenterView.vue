@@ -714,6 +714,12 @@ function salesPersonnelInitialSelection(role, line) {
       id: candidate?.staffId || employeeId,
       staffId: candidate?.staffId || employeeId,
       employeeId,
+      performanceAmountCents: Math.max(0, Math.trunc(Number(
+        selected.performanceAmountCents ?? selected.performance_amount_cents ?? 0
+      ))),
+      performanceAmountManual: Boolean(
+        selected.performanceAmountManual ?? selected.performance_amount_manual
+      ),
       selected: true
     }
   })
@@ -2159,6 +2165,7 @@ onBeforeUnmount(() => {
       :selected-salespeople="salesPersonnelTarget.role === 'salesperson' ? salesPersonnelInitialSelection('salesperson', salesPersonnelEntry.lines?.[0]) : []"
       :selected-guides="salesPersonnelTarget.role === 'guide' ? salesPersonnelInitialSelection('guide', salesPersonnelEntry.lines?.[0]) : []"
       :selected-sales-managers="salesPersonnelTarget.role === 'sales_manager' ? salesPersonnelInitialSelection('sales_manager', salesPersonnelEntry.lines?.[0]) : []"
+      :performance-base-amount-cents="salesPersonnelEntry.lines?.[0]?.totalAmountCents || 0"
       :saving="salesPersonnelSubmitting"
       :load-error="salesPersonnelError"
       @close="closeSalesPersonnelEditor"

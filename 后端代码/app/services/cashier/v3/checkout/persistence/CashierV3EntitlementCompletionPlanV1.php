@@ -543,8 +543,6 @@ final class CashierV3EntitlementCompletionPlanV1
             $craftsmenById[(int)$craftsman['staffId']] = $craftsman;
         }
         $result = [];
-        $sum = 0;
-        $sumByPerformanceGroup = [];
         foreach ($input as $index => $row) {
             if (!is_array($row)) {
                 throw self::failure('labor_allocation_shape_invalid', ['lineId' => $lineId]);
@@ -572,7 +570,7 @@ final class CashierV3EntitlementCompletionPlanV1
                 throw self::failure('labor_performance_type_invalid', ['lineId' => $lineId, 'staffId' => $staffId]);
             }
             $laborWeight = self::nonNegativeInt($row['laborWeight'], 'labor_weight_invalid');
-            if (($performanceType !== 'labor' && $laborWeight <= 0) || $laborWeight > 100) {
+            if ($laborWeight > 100) {
                 throw self::failure('labor_weight_invalid', ['lineId' => $lineId, 'staffId' => $staffId]);
             }
             if ($performanceType === 'labor' && $amount !== 0) {
@@ -610,25 +608,9 @@ final class CashierV3EntitlementCompletionPlanV1
             if ($normalized['sequence'] !== $index + 1 || $normalized['is_primary'] !== ($index === 0 ? 1 : 0)) {
                 throw self::failure('labor_allocation_order_invalid', ['lineId' => $lineId]);
             }
-            $sum += $amount;
-            if ($performanceType !== 'labor') {
-                $sumByPerformanceGroup[$allocationGroupKey] =
-                    ($sumByPerformanceGroup[$allocationGroupKey] ?? 0) + $amount;
-            }
             $result[] = $normalized;
         }
-        // A normal group and every independently-accounted position each
-        // allocate the line's labor amount within their own 100% group.  The
-        // aggregate may therefore exceed one line amount; validating it as a
-        // single global total rejects a valid independent-position checkout.
-        foreach ($sumByPerformanceGroup as $groupAmount) {
-            if ($groupAmount !== $expectedTotal) {
-                throw self::failure('labor_allocation_total_invalid', ['lineId' => $lineId]);
-            }
-        }
-        if (($expectedTotal > 0 && $sumByPerformanceGroup === [])
-            || $sum !== $expectedTotal * count($sumByPerformanceGroup)
-            || count($result) !== count($craftsmenById)) {
+        if (count($result) !== count($craftsmenById)) {
             throw self::failure('labor_allocation_total_invalid', ['lineId' => $lineId]);
         }
         return $result;

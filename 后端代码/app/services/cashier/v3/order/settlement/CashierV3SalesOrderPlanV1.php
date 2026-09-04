@@ -1561,7 +1561,6 @@ final class CashierV3SalesOrderPlanV1
         $decoded = is_array($json) ? $json : json_decode((string)$json, true);
         if (!is_array($decoded)) throw self::failure('sales_order_salespeople_snapshot_invalid');
         $result = [];
-        $weightByGroup = [];
         $seen = [];
         foreach ($decoded as $row) {
             if (!is_array($row)) throw self::failure('sales_order_salespeople_snapshot_invalid');
@@ -1571,7 +1570,7 @@ final class CashierV3SalesOrderPlanV1
             );
             if (isset($seen[$staffId])) throw self::failure('sales_order_salespeople_snapshot_invalid');
             $seen[$staffId] = true;
-            $allocation = self::positiveInt(
+            $allocation = self::nonNegativeInt(
                 $row['allocationWeight'] ?? $row['allocation_weight'] ?? $row['performance'] ?? null,
                 'sales_order_salesperson_allocation_invalid'
             );
@@ -1584,6 +1583,15 @@ final class CashierV3SalesOrderPlanV1
                 'staffId' => $staffId,
                 'allocationWeight' => $allocation,
             ];
+            if (array_key_exists('performanceAmountCents', $row)
+                || array_key_exists('performance_amount_cents', $row)) {
+                $resultRow['performanceAmountCents'] = self::nonNegativeInt(
+                    $row['performanceAmountCents'] ?? $row['performance_amount_cents'],
+                    'sales_order_salesperson_performance_amount_invalid'
+                );
+                $resultRow['performanceAmountManual'] = !empty($row['performanceAmountManual'])
+                    || !empty($row['performance_amount_manual']);
+            }
             if ($positionId > 0) {
                 $resultRow['positionId'] = $positionId;
                 $resultRow['positionName'] = trim((string)($row['positionName'] ?? $row['position_name'] ?? ''));
@@ -1593,10 +1601,6 @@ final class CashierV3SalesOrderPlanV1
                 $resultRow['allocationGroupKey'] = $groupKey;
             }
             $result[] = $resultRow;
-            $weightByGroup[$groupKey] = ($weightByGroup[$groupKey] ?? 0) + $allocation;
-        }
-        if ($result !== [] && array_filter($weightByGroup, static fn (int $sum): bool => $sum !== 100)) {
-            throw self::failure('sales_order_salespeople_weight_invalid');
         }
         return $result;
     }

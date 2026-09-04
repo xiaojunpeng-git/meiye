@@ -38,6 +38,8 @@ const REPORT_TABS = Object.freeze([
   { code: 'member_consumption_detail', name: '会员消费明细' },
   { code: 'store_item_analysis', name: '门店品项分析' },
   { code: 'store_craftsman_consumption', name: '门店手艺人消耗' },
+  // 仅由汇总单元格的服务端下钻声明进入，不能作为独立导航页签。
+  { code: 'store_craftsman_consumption_detail', name: '手艺人消耗明细', hidden: true },
   { code: 'store_salesperson_performance', name: '门店销售人业绩' },
   { code: 'market_performance', name: '市场业绩表' },
   { code: 'market_detail', name: '市场明细表' },
@@ -347,12 +349,16 @@ const allowedReportTabs = computed(() => {
   const authorized = tabs.filter((tab) => serverCatalogByCode.value.has(tab.code))
   return authorized.length ? authorized : tabs
 })
-const reportTabs = computed(() => allowedReportTabs.value.map((tab) => ({
+const reportTabs = computed(() => allowedReportTabs.value.filter((tab) => !tab.hidden).map((tab) => ({
   // 历史目录名称可能仍保留在服务器配置中，门店端以已确认的标准名称为准。
   ...(serverCatalogByCode.value.get(tab.code) || {}),
   ...tab
 })))
-const isFirstPhaseReport = computed(() => REPORT_TABS.slice(0, 6).some((item) => item.code === activeReport.value))
+const isFirstPhaseReport = computed(() => [
+  'partner_item_summary', 'partner_item_detail', 'member_consumption_detail',
+  'store_item_analysis', 'store_craftsman_consumption',
+  'store_craftsman_consumption_detail', 'store_salesperson_performance'
+].includes(activeReport.value))
 const isSixDimensionReport = computed(() => SIX_DIMENSION_REPORT_TABS.some((item) => item.code === activeReport.value))
 const isPhaseFourReport = computed(() => PHASE_FOUR_REPORT_TABS.some((item) => item.code === activeReport.value))
 const isPhaseSixReport = computed(() => PHASE_SIX_REPORT_CODES.includes(activeReport.value))
@@ -725,8 +731,9 @@ const pageSize = computed(() => Number(result.value.page_size || DEFAULT_LIMIT))
 const pageCount = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)))
 const canPageBack = computed(() => page.value > 1 && !loading.value)
 const canPageForward = computed(() => page.value < pageCount.value && !loading.value)
-const currentReportName = computed(() => reportTabs.value.find((item) => item.code === activeReport.value)?.name || '门店运营报表')
-const currentReportDescription = computed(() => reportTabs.value.find((item) => item.code === activeReport.value)?.description || '')
+const currentReportDefinition = computed(() => allowedReportTabs.value.find((item) => item.code === activeReport.value))
+const currentReportName = computed(() => currentReportDefinition.value?.name || '门店运营报表')
+const currentReportDescription = computed(() => currentReportDefinition.value?.description || '')
 const isPlatformReport = computed(isPlatformRuntimeRoute)
 const reportRuntime = computed(() => isPlatformReport.value ? STORE_BUSINESS_REPORT_RUNTIME.PLATFORM : STORE_BUSINESS_REPORT_RUNTIME.STORE)
 const reportRouteName = computed(() => isPlatformReport.value ? 'cashier-v3-platform-store-business-reports' : 'cashier-v3-store-business-reports')

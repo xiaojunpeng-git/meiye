@@ -27,6 +27,8 @@ class StoreUnifiedReportServices extends BaseServices
             ['folder' => '门店运营', 'code' => 'member_consumption_detail', 'name' => '会员消费明细'],
             ['folder' => '门店运营', 'code' => 'store_item_analysis', 'name' => '门店品项分析'],
             ['folder' => '门店运营', 'code' => 'store_craftsman_consumption', 'name' => '门店手艺人消耗'],
+            // 明细只通过“门店手艺人消耗”中的受控下钻进入，不能单独作为导航入口。
+            ['folder' => '门店运营', 'code' => 'store_craftsman_consumption_detail', 'name' => '手艺人消耗明细', 'hidden' => true],
             ['folder' => '门店运营', 'code' => 'store_salesperson_performance', 'name' => '门店销售人业绩'],
         ], StoreUnifiedReportPhaseTwoServices::catalogEntries());
     }
@@ -61,7 +63,7 @@ class StoreUnifiedReportServices extends BaseServices
         }
         if (in_array($report, [
             'partner_item_summary', 'partner_item_detail', 'member_consumption_detail',
-            'store_item_analysis', 'store_craftsman_consumption',
+            'store_item_analysis', 'store_craftsman_consumption', 'store_craftsman_consumption_detail',
             'store_salesperson_performance',
         ], true)) {
             return array_merge($meta, $this->operationsReport($report, $storeId, $range, $input));
@@ -105,6 +107,7 @@ class StoreUnifiedReportServices extends BaseServices
             case 'member_consumption_detail': return $this->memberConsumptionDetail($storeId, $range, $input);
             case 'store_item_analysis': return $this->storeItemAnalysis($storeId, $range, $input);
             case 'store_craftsman_consumption': return $this->craftsmanConsumption($storeId, $range, $input);
+            case 'store_craftsman_consumption_detail': return $this->craftsmanConsumptionDetail($storeId, $range, $input);
             case 'store_salesperson_performance': return $this->salespersonPerformance($storeId, $range, $input);
             default: throw new \InvalidArgumentException('不支持的门店运营报表类型');
         }
@@ -722,7 +725,7 @@ class StoreUnifiedReportServices extends BaseServices
         foreach ($raw as $row) {
             $this->applyOrganizationDimensions($row);
             $key = implode('|', [(string)$row['store_id'], (string)$row['employee_id'], (string)$row['company_dimension_id'], (string)$row['city_manager_dimension_id']]);
-            if (!isset($by[$key])) $by[$key] = ['store_name'=>(string)$row['store_name'],'employee_name'=>(string)$row['employee_name'],'employee_id'=>(int)$row['employee_id'],'division_name'=>(string)$row['division_name'],'company_dimension_id'=>(string)$row['company_dimension_id'],'city_manager'=>(string)$row['city_manager'],'city_manager_dimension_id'=>(string)$row['city_manager_dimension_id']];
+            if (!isset($by[$key])) $by[$key] = ['store_id'=>(int)$row['store_id'],'store_name'=>(string)$row['store_name'],'employee_name'=>(string)$row['employee_name'],'employee_id'=>(int)$row['employee_id'],'division_name'=>(string)$row['division_name'],'company_dimension_id'=>(string)$row['company_dimension_id'],'city_manager'=>(string)$row['city_manager'],'city_manager_dimension_id'=>(string)$row['city_manager_dimension_id']];
             $day = (int)$row['day_no'];
             $by[$key]['day_'.$day.'_consume_cents'] = (int)($by[$key]['day_'.$day.'_consume_cents'] ?? 0) + (int)$row['consumption_amount_cents'];
             $by[$key]['day_'.$day.'_labor_cents'] = (int)($by[$key]['day_'.$day.'_labor_cents'] ?? 0) + (int)$row['labor_amount_cents'];
@@ -735,6 +738,14 @@ class StoreUnifiedReportServices extends BaseServices
             foreach (range(1, 31) as $day) {
                 $row['day_'.$day.'_consume'] = $this->money((int)($row['day_'.$day.'_consume_cents'] ?? 0));
                 $row['day_'.$day.'_labor'] = $this->money((int)($row['day_'.$day.'_labor_cents'] ?? 0));
+                if ((int)($row['day_'.$day.'_consume_cents'] ?? 0) !== 0 || (int)($row['day_'.$day.'_labor_cents'] ?? 0) !== 0) {
+                    $row['_drilldown']['day_'.$day.'_consume'] = $this->craftsmanConsumptionDrilldown($day);
+                    $row['_drilldown']['day_'.$day.'_labor'] = $this->craftsmanConsumptionDrilldown($day);
+                }
+            }
+            if ((int)($row['total_consume_cents'] ?? 0) !== 0 || (int)($row['total_labor_cents'] ?? 0) !== 0) {
+                $row['_drilldown']['total_consume'] = $this->craftsmanConsumptionDrilldown();
+                $row['_drilldown']['total_labor'] = $this->craftsmanConsumptionDrilldown();
             }
         }
         unset($row);
@@ -755,6 +766,79 @@ class StoreUnifiedReportServices extends BaseServices
             'title'=>'门店手艺人消耗','columns'=>$columns,'column_groups'=>$this->columnGroups($columns),'records'=>array_values($by),'total'=>count($by),'page'=>1,'page_size'=>count($by),
             'filter_schema' => $this->organizationDimensionFilterSchema($range),
             'table_layout'=>['fixed'=>true], 'summary_row'=>$this->summaryRow($columns, $summaryValues),
+        ];
+    }
+
+    /**
+     * 手艺人消耗汇总的每一个可点金额都显式声明其明细条件。日列按“所选范围
+     * 内业务日期的日号”下钻，因而跨月范围也不会被前端误解为某一个自然日期。
+     */
+    private function craftsmanConsumptionDrilldown(int $dayOfMonth = 0): array
+    {
+        $params = $dayOfMonth >= 1 && $dayOfMonth <= 31 ? ['day_of_month' => $dayOfMonth] : [];
+        return [
+            'report' => 'store_craftsman_consumption_detail',
+            'params' => $params,
+            'param_map' => ['craftsman_id' => 'employee_id', 'store_ids' => 'store_id'],
+        ];
+    }
+
+    /**
+     * 手艺人消耗明细和上层汇总读取同一 performance_fact：只统计有效的劳动
+     * 业绩分配事实，保留正向与冲销事实的带符号金额，故明细合计可精确解释汇总。
+     */
+    private function craftsmanConsumptionDetail($storeId, array $range, array $input): array
+    {
+        $query = Db::name('cashier_v3_performance_fact')->alias('p')
+            ->leftJoin('cashier_v3_sales_order_line sol', 'sol.tenant_id=p.tenant_id AND sol.order_id=p.order_id AND sol.order_line_id=p.source_line_id')
+            ->whereBetween('p.business_date', [$range['start'], $range['end']])
+            ->where('p.status', 'effective')
+            ->where('p.performance_type', 'labor_performance_allocated')
+            ->where('p.employee_id', '>', 0);
+        if (is_array($storeId)) $query->whereIn('p.store_id', array_values(array_unique(array_map('intval', $storeId))));
+        else $query->where('p.store_id', (int)$storeId);
+        if ($this->participantEmployeeId > 0) $query->where('p.employee_id', $this->participantEmployeeId);
+        if ((int)($input['craftsman_id'] ?? 0) > 0) $query->where('p.employee_id', (int)$input['craftsman_id']);
+        $dayOfMonth = (int)($input['day_of_month'] ?? 0);
+        if ($dayOfMonth >= 1 && $dayOfMonth <= 31) $query->whereRaw('DAY(p.business_date)=?', [$dayOfMonth]);
+        $this->organizationDimensions()->applyFilters($query, 'p', $input, $range);
+
+        $allRows = $query->fieldRaw("p.fact_id,p.store_id,p.store_name_snapshot AS store_name,p.organization_id,p.organization_path_snapshot,p.business_date,p.order_no_snapshot,p.member_name_snapshot,p.source_line_id,p.employee_id,p.employee_name_snapshot AS employee_name,p.fact_direction,p.amount_cents,p.labor_fee_amount_cents,p.project_count_half_units,p.rule_name_snapshot,sol.item_name_snapshot")
+            ->order('p.business_date', 'asc')->order('p.id', 'asc')->select()->toArray();
+        $summaryConsumption = 0;
+        $summaryLabor = 0;
+        foreach ($allRows as &$row) {
+            $this->applyOrganizationDimensions($row);
+            $summaryConsumption += (int)($row['amount_cents'] ?? 0);
+            $summaryLabor += (int)($row['labor_fee_amount_cents'] ?? 0);
+            $itemName = trim((string)($row['item_name_snapshot'] ?? ''));
+            $row['item_name_snapshot'] = $itemName !== '' ? $itemName : '来源行 ' . (string)($row['source_line_id'] ?? '-');
+            $row['consumption_amount'] = $this->money((int)($row['amount_cents'] ?? 0));
+            $row['labor_amount'] = $this->money((int)($row['labor_fee_amount_cents'] ?? 0));
+            $row['project_count'] = ((int)($row['project_count_half_units'] ?? 0)) / 2;
+            $row['business_status'] = (string)($row['fact_direction'] ?? '') === 'reversal' ? '冲销' : '正常';
+        }
+        unset($row);
+        $total = count($allRows);
+        $records = !empty($input['_internal_all'])
+            ? $allRows
+            : array_slice($allRows, ($this->page($input) - 1) * $this->limit($input), $this->limit($input));
+        $columns = $this->fixedColumns(array_merge($this->organizationDimensionColumns(), [
+            ['key'=>'store_name','label'=>'门店'], ['key'=>'business_date','label'=>'业务日期'],
+            ['key'=>'order_no_snapshot','label'=>'订单号'], ['key'=>'member_name_snapshot','label'=>'会员'],
+            ['key'=>'item_name_snapshot','label'=>'项目'], ['key'=>'employee_name','label'=>'手艺人'],
+            ['key'=>'consumption_amount','label'=>'消耗'], ['key'=>'labor_amount','label'=>'手工费'],
+            ['key'=>'project_count','label'=>'项目数'], ['key'=>'business_status','label'=>'状态'],
+        ]), ['division_name'=>130, 'city_manager'=>130, 'store_name'=>140, 'business_date'=>112, 'order_no_snapshot'=>165, 'member_name_snapshot'=>110, 'item_name_snapshot'=>160, 'employee_name'=>110]);
+        return [
+            'title' => '手艺人消耗明细', 'columns' => $columns, 'records' => $records,
+            'total' => $total, 'page' => $this->page($input), 'page_size' => $this->limit($input),
+            'filter_schema' => $this->organizationDimensionFilterSchema($range),
+            'table_layout' => ['fixed'=>true],
+            'summary_row' => $this->summaryRow($columns, [
+                'employee_name' => '合计', 'consumption_amount' => $this->money($summaryConsumption),
+                'labor_amount' => $this->money($summaryLabor),
+            ]),
         ];
     }
 

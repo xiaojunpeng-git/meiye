@@ -285,7 +285,6 @@ final class CashierV3CheckoutDebtAuthorityServices
     private static function salespeopleSnapshot(array $rows): array
     {
         $out = [];
-        $weightByGroup = [];
         foreach (array_values($rows) as $index => $row) {
             $normalized = [
                 'employeeId' => (int)($row['employeeId'] ?? 0),
@@ -300,7 +299,7 @@ final class CashierV3CheckoutDebtAuthorityServices
             $groupKey = $performanceIndependent && $positionId > 0 ? 'independent:' . $positionId : 'normal';
             if ($normalized['employeeId'] <= 0 || $normalized['name'] === ''
                 || !in_array($normalized['employeeTypeCodeSnapshot'], ['internal', 'partner', 'outsourced'], true)
-                || $normalized['employeeTypeAuthorityVersion'] <= 0 || $normalized['allocationWeight'] <= 0
+                || $normalized['employeeTypeAuthorityVersion'] <= 0 || $normalized['allocationWeight'] < 0
                 || $normalized['sequence'] <= 0) {
                 throw self::failure('checkout_debt_personnel_snapshot_invalid');
             }
@@ -312,11 +311,7 @@ final class CashierV3CheckoutDebtAuthorityServices
                 $normalized['performanceIndependent'] = true;
                 $normalized['allocationGroupKey'] = $groupKey;
             }
-            $weightByGroup[$groupKey] = ($weightByGroup[$groupKey] ?? 0) + $normalized['allocationWeight'];
             $out[] = $normalized;
-        }
-        if ($out && array_filter($weightByGroup, static fn (int $sum): bool => $sum !== 100)) {
-            throw self::failure('checkout_debt_personnel_weight_invalid');
         }
         return $out;
     }

@@ -1063,7 +1063,7 @@ final class CashierV3SalesOrderQueryServices
             ->field(
                 'fact_id,order_id,source_line_id,employee_id,employee_name_snapshot,'
                 . 'employee_type_snapshot,allocation_weight_numerator,allocation_weight_denominator,'
-                . 'allocation_base_amount_cents,amount_cents,role_snapshot'
+                . 'allocation_base_amount_cents,amount_cents,role_snapshot,rule_code_snapshot'
             )
             ->order('id', 'asc')
             ->select()
@@ -1670,7 +1670,11 @@ final class CashierV3SalesOrderQueryServices
             'salespeople' => array_map(function (array $person): array {
                 return ['id' => (string)$person['fact_id'], 'employeeId' => (int)$person['employee_id'], 'name' => (string)$person['employee_name_snapshot'],
                     'employeeType' => (string)$person['employee_type_snapshot'], 'roleSnapshot' => (string)($person['role_snapshot'] ?? ''), 'allocationWeight' => (int)$person['allocation_weight_numerator'],
-                    'allocationWeightDenominator' => (int)$person['allocation_weight_denominator'], 'salesPerformanceAmount' => $this->moneyFromCents((int)$person['amount_cents'])];
+                    'allocationWeightDenominator' => (int)$person['allocation_weight_denominator'],
+                    'salesPerformanceAmount' => $this->moneyFromCents((int)$person['amount_cents']),
+                    'performanceAmountCents' => max(0, (int)$person['amount_cents']),
+                    'performanceAmountManual' => strpos((string)($person['rule_code_snapshot'] ?? ''), 'MANUAL-AMOUNT') !== false,
+                ];
             }, $salespeople), 'craftsmen' => $craftsmen !== []
                 ? array_map(function (array $person): array {
                     return [
@@ -1709,7 +1713,7 @@ final class CashierV3SalesOrderQueryServices
             ->whereIn('performance_type', ['sales_performance_allocated', 'labor_performance_allocated'])
             ->where('status', 'effective')
             ->whereIn('fact_direction', ['forward', 'reversal'])
-            ->field('id,fact_id,order_id,source_line_id,performance_type,employee_id,employee_name_snapshot,employee_type_snapshot,role_snapshot,allocation_weight_numerator,allocation_weight_denominator,amount_cents,labor_fee_amount_cents,fact_direction,reversal_of,command_idempotency_key')
+            ->field('id,fact_id,order_id,source_line_id,performance_type,employee_id,employee_name_snapshot,employee_type_snapshot,role_snapshot,allocation_weight_numerator,allocation_weight_denominator,amount_cents,labor_fee_amount_cents,rule_code_snapshot,fact_direction,reversal_of,command_idempotency_key')
             ->order('id', 'asc')->select()->toArray();
         return $this->displayedPersonnelFacts($rows, $adjustmentCommandKeys);
     }
@@ -2042,6 +2046,8 @@ final class CashierV3SalesOrderQueryServices
                 'allocationWeight' => (int)$person['allocation_weight_numerator'],
                 'allocationWeightDenominator' => (int)$person['allocation_weight_denominator'],
                 'salesPerformanceAmount' => $this->moneyFromCents((int)$person['amount_cents']),
+                'performanceAmountCents' => max(0, (int)$person['amount_cents']),
+                'performanceAmountManual' => strpos((string)($person['rule_code_snapshot'] ?? ''), 'MANUAL-AMOUNT') !== false,
             ];
         }
 

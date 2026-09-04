@@ -1531,7 +1531,6 @@ final class CashierV3CheckoutProjectionServices
             throw self::failure('checkout_projection_salespeople_snapshot_invalid');
         }
         $result = [];
-        $weightByGroup = [];
         foreach ($decoded as $row) {
             if (!is_array($row)) {
                 throw self::failure('checkout_projection_salespeople_snapshot_invalid');
@@ -1540,7 +1539,7 @@ final class CashierV3CheckoutProjectionServices
                 $row['staffId'] ?? $row['id'] ?? null,
                 'line.salesperson.staff_id'
             );
-            $allocation = self::positiveInt(
+            $allocation = self::nonNegativeInt(
                 $row['allocationWeight'] ?? null,
                 'line.salesperson.allocation_weight'
             );
@@ -1555,6 +1554,21 @@ final class CashierV3CheckoutProjectionServices
                 'staffId' => $staffId,
                 'allocationWeight' => $allocation,
             ];
+            $hasPerformanceAmount = array_key_exists('performanceAmountCents', $row)
+                || array_key_exists('performance_amount_cents', $row);
+            $hasPerformanceAmountManual = array_key_exists('performanceAmountManual', $row)
+                || array_key_exists('performance_amount_manual', $row);
+            if ($hasPerformanceAmountManual && !$hasPerformanceAmount) {
+                throw self::failure('checkout_projection_salespeople_snapshot_invalid');
+            }
+            if ($hasPerformanceAmount) {
+                $resultRow['performanceAmountCents'] = self::nonNegativeInt(
+                    $row['performanceAmountCents'] ?? $row['performance_amount_cents'],
+                    'line.salesperson.performance_amount_cents'
+                );
+                $resultRow['performanceAmountManual'] = !empty($row['performanceAmountManual'])
+                    || !empty($row['performance_amount_manual']);
+            }
             if ($positionId > 0) {
                 $resultRow['positionId'] = $positionId;
                 $resultRow['positionName'] = trim((string)($row['positionName'] ?? $row['position_name'] ?? ''));
@@ -1564,10 +1578,6 @@ final class CashierV3CheckoutProjectionServices
                 $resultRow['allocationGroupKey'] = $groupKey;
             }
             $result[] = $resultRow;
-            $weightByGroup[$groupKey] = ($weightByGroup[$groupKey] ?? 0) + $allocation;
-        }
-        if ($result !== [] && array_filter($weightByGroup, static fn (int $sum): bool => $sum !== 100)) {
-            throw self::failure('checkout_projection_salespeople_weight_invalid');
         }
         return $result;
     }

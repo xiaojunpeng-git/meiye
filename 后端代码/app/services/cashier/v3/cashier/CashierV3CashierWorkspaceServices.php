@@ -1226,10 +1226,15 @@ final class CashierV3CashierWorkspaceServices
             }
             $stored = $this->decodeStoredSalespeople($row, $workspaceLineKey);
             $selections = array_map(static function (array $person): array {
-                return [
+                $selection = [
                     'staffId' => (int)($person['staffId'] ?? $person['id'] ?? 0),
                     'allocationWeight' => (int)($person['allocationWeight'] ?? 0),
                 ];
+                if (array_key_exists('performanceAmountCents', $person)) {
+                    $selection['performanceAmountCents'] = (int)$person['performanceAmountCents'];
+                    $selection['performanceAmountManual'] = !empty($person['performanceAmountManual']);
+                }
+                return $selection;
             }, $stored);
             $result[$checkoutLineId] = $selections
                 ? $this->authoritativeSalespeopleInTx($selections, $operatorScope)
@@ -1278,10 +1283,15 @@ final class CashierV3CashierWorkspaceServices
                 if (!is_array($person)) {
                     throw $this->incompleteLineSettings($checkoutLineId, 'checkout_salespeople_snapshot_invalid');
                 }
-                $selections[] = [
+                $selection = [
                     'staffId' => (int)($person['staffId'] ?? $person['id'] ?? 0),
                     'allocationWeight' => (int)($person['allocationWeight'] ?? 0),
                 ];
+                if (array_key_exists('performanceAmountCents', $person)) {
+                    $selection['performanceAmountCents'] = (int)$person['performanceAmountCents'];
+                    $selection['performanceAmountManual'] = !empty($person['performanceAmountManual']);
+                }
+                $selections[] = $selection;
             }
             $result[$checkoutLineId] = $selections
                 ? $this->authoritativeSalespeopleInTx($selections, $operatorScope)
@@ -1641,6 +1651,10 @@ final class CashierV3CashierWorkspaceServices
                             'laborFeeCents' => max(0, (int)($selection['laborFeeCents'] ?? 0)),
                             'personnelSource' => (string)($selection['personnelSource'] ?? 'store'),
                         ];
+                        if (array_key_exists('performanceAmountCents', $selection)) {
+                            $setting['performanceAmountCents'] = max(0, (int)$selection['performanceAmountCents']);
+                            $setting['performanceAmountManual'] = !empty($selection['performanceAmountManual']);
+                        }
                         $positionId = max(0, (int)($selection['positionId'] ?? 0));
                         if ($positionId > 0) {
                             $setting['positionId'] = $positionId;
@@ -2043,6 +2057,8 @@ final class CashierV3CashierWorkspaceServices
 
         $seen = [];
         $weights = [];
+        $requestedPerformanceAmounts = [];
+        $requestedPerformanceAmountManual = [];
         $types = [];
         $requestedFees = [];
         $requestedProjectCounts = [];
@@ -2072,6 +2088,12 @@ final class CashierV3CashierWorkspaceServices
             $weights[$staffId] = $weight;
             $types[$staffId] = $normalizedType;
             $requestedFees[$staffId] = max(0, (int)($selection['laborFeeCents'] ?? $selection['labor_fee_cents'] ?? 0));
+            if (array_key_exists('performanceAmountCents', $selection)
+                || array_key_exists('performance_amount_cents', $selection)) {
+                $requestedPerformanceAmounts[$staffId] = max(0, (int)($selection['performanceAmountCents'] ?? $selection['performance_amount_cents'] ?? 0));
+                $requestedPerformanceAmountManual[$staffId] = !empty($selection['performanceAmountManual'])
+                    || !empty($selection['performance_amount_manual']);
+            }
             if (array_key_exists('projectCountHalfUnits', $selection)
                 || array_key_exists('project_count_half_units', $selection)) {
                 $requestedProjectCounts[$staffId] = max(0, (int)($selection['projectCountHalfUnits'] ?? $selection['project_count_half_units'] ?? 0));
@@ -2168,7 +2190,6 @@ final class CashierV3CashierWorkspaceServices
 
         $craftsmen = [];
         $defaultLaborFeeCents = $projectId > 0 ? $this->projectLaborDefaultCents($projectId) : 0;
-        $groupWeights = [];
         foreach ($selections as $index => $selection) {
             $staffId = (int)$selection['staffId'];
             $row = $byId[$staffId] ?? null;
@@ -2198,23 +2219,12 @@ final class CashierV3CashierWorkspaceServices
                 $type = $types[$staffId] ?? EmployeeCraftsmanPerformanceTypeServices::COMMISSION_LABOR;
             }
             $effectiveWeight = $type === EmployeeCraftsmanPerformanceTypeServices::LABOR ? 0 : $weights[$staffId];
-            if ($effectiveWeight <= 0 && $type !== EmployeeCraftsmanPerformanceTypeServices::LABOR) {
-                throw new CashierV3CommandException(
-                    CashierV3ResultCode::ENTITLEMENT_LINE_INVALID,
-                    '业绩提成类型的手艺人比例必须为正整数。',
-                    CashierV3ResultCode::STATUS_FAILED,
-                    ['reason' => 'craftsman_weight_invalid']
-                );
-            }
             $positionId = (int)($row['position_id'] ?? 0);
             $positionName = trim((string)($row['position_name'] ?? '')) ?: '在职员工';
             $performanceIndependent = (int)($row['performance_independent'] ?? 0) === 1;
             $allocationGroupKey = $performanceIndependent
                 ? 'independent:' . ($positionId > 0 ? $positionId : $staffId)
                 : 'normal';
-            if ($effectiveWeight > 0) {
-                $groupWeights[$allocationGroupKey] = ($groupWeights[$allocationGroupKey] ?? 0) + $effectiveWeight;
-            }
             $laborFeeCents = $type === EmployeeCraftsmanPerformanceTypeServices::COMMISSION
                 ? 0
                 : ($requestedFees[$staffId] > 0 ? $requestedFees[$staffId] : $defaultLaborFeeCents);
@@ -2251,21 +2261,25 @@ final class CashierV3CashierWorkspaceServices
                 'isPointCustomer' => $pointFlags[$staffId],
                 'personnelSource' => $personnelSource,
             ];
+            if (array_key_exists($staffId, $requestedPerformanceAmounts)) {
+                $performanceAmountCents = $requestedPerformanceAmounts[$staffId];
+                $performanceAmountManual = !empty($requestedPerformanceAmountManual[$staffId]);
+                if ($type === EmployeeCraftsmanPerformanceTypeServices::LABOR
+                    && ($performanceAmountCents !== 0 || $performanceAmountManual)) {
+                    throw new CashierV3CommandException(
+                        CashierV3ResultCode::ENTITLEMENT_LINE_INVALID,
+                        '手工费类型不支持填写业绩金额。',
+                        CashierV3ResultCode::STATUS_FAILED,
+                        ['reason' => 'labor_performance_amount_invalid']
+                    );
+                }
+                $craftsman['performanceAmountCents'] = $performanceAmountCents;
+                $craftsman['performanceAmountManual'] = $performanceAmountManual;
+            }
             if ($hasProjectCount) {
                 $craftsman['projectCountHalfUnits'] = (int)($requestedProjectCounts[$staffId] ?? 0);
             }
             $craftsmen[] = $craftsman;
-        }
-        foreach ($groupWeights as $groupKey => $groupWeight) {
-            if ($groupWeight <= 0 || $groupWeight === 100) {
-                continue;
-            }
-            throw new CashierV3CommandException(
-                CashierV3ResultCode::ENTITLEMENT_LINE_INVALID,
-                '手艺人业绩比例合计必须为 100%。',
-                CashierV3ResultCode::STATUS_FAILED,
-                ['reason' => 'craftsman_weight_sum_invalid', 'allocation_group' => $groupKey]
-            );
         }
         return $craftsmen;
     }
@@ -2289,13 +2303,21 @@ final class CashierV3CashierWorkspaceServices
             throw $this->incompleteLineSettings('', 'salespeople_too_many');
         }
         $weights = [];
+        $requestedPerformanceAmounts = [];
+        $requestedPerformanceAmountManual = [];
         foreach ($selections as $selection) {
             $staffId = is_array($selection) ? (int)($selection['staffId'] ?? 0) : 0;
             $weight = is_array($selection) ? (int)($selection['allocationWeight'] ?? 0) : 0;
-            if ($staffId <= 0 || $weight <= 0 || $weight > 100 || isset($weights[$staffId])) {
+            if ($staffId <= 0 || $weight < 0 || $weight > 100 || isset($weights[$staffId])) {
                 throw $this->incompleteLineSettings('', 'salesperson_selection_invalid');
             }
             $weights[$staffId] = $weight;
+            if (array_key_exists('performanceAmountCents', (array)$selection)
+                || array_key_exists('performance_amount_cents', (array)$selection)) {
+                $requestedPerformanceAmounts[$staffId] = max(0, (int)($selection['performanceAmountCents'] ?? $selection['performance_amount_cents'] ?? 0));
+                $requestedPerformanceAmountManual[$staffId] = !empty($selection['performanceAmountManual'])
+                    || !empty($selection['performance_amount_manual']);
+            }
         }
         $staffIds = array_keys($weights);
         sort($staffIds, SORT_NUMERIC);
@@ -2329,7 +2351,6 @@ final class CashierV3CashierWorkspaceServices
             throw $this->incompleteLineSettings('', 'salesperson_not_active_in_store');
         }
         $result = [];
-        $groupWeights = [];
         foreach ($selections as $index => $selection) {
             $staffId = (int)$selection['staffId'];
             $row = $byId[$staffId] ?? null;
@@ -2345,8 +2366,7 @@ final class CashierV3CashierWorkspaceServices
             $allocationGroupKey = $performanceIndependent
                 ? 'independent:' . ($positionId > 0 ? $positionId : $staffId)
                 : 'normal';
-            $groupWeights[$allocationGroupKey] = ($groupWeights[$allocationGroupKey] ?? 0) + (int)$selection['allocationWeight'];
-            $result[] = [
+            $salesperson = [
                 'id' => $staffId,
                 'staffId' => $staffId,
                 'employeeId' => (int)$row['employee_id'],
@@ -2361,11 +2381,11 @@ final class CashierV3CashierWorkspaceServices
                 'performanceIndependent' => $performanceIndependent,
                 'allocationGroupKey' => $allocationGroupKey,
             ];
-        }
-        foreach ($groupWeights as $groupKey => $groupWeight) {
-            if ($groupWeight !== 100) {
-                throw $this->incompleteLineSettings('', 'salesperson_weight_sum_invalid');
+            if (array_key_exists($staffId, $requestedPerformanceAmounts)) {
+                $salesperson['performanceAmountCents'] = $requestedPerformanceAmounts[$staffId];
+                $salesperson['performanceAmountManual'] = !empty($requestedPerformanceAmountManual[$staffId]);
             }
+            $result[] = $salesperson;
         }
         return $result;
     }
@@ -2396,7 +2416,6 @@ final class CashierV3CashierWorkspaceServices
         $selections = [];
         $seen = [];
         $needsLegacyEqualWeights = false;
-        $weightByGroup = [];
         foreach ($craftsmen as $craftsman) {
             if (!is_array($craftsman)) {
                 throw $this->incompleteLineSettings($lineKey, 'stored_craftsman_not_object');
@@ -2418,7 +2437,7 @@ final class CashierV3CashierWorkspaceServices
             if (!in_array($type, EmployeeCraftsmanPerformanceTypeServices::TYPES, true)) {
                 $type = EmployeeCraftsmanPerformanceTypeServices::COMMISSION_LABOR;
             }
-            if ($hasWeight && (($type !== EmployeeCraftsmanPerformanceTypeServices::LABOR && $weight <= 0) || $weight > 100 || $weight < 0)) {
+            if ($hasWeight && ($weight > 100 || $weight < 0)) {
                 throw $this->incompleteLineSettings($lineKey, 'stored_craftsman_weight_invalid');
             }
             $needsLegacyEqualWeights = $needsLegacyEqualWeights || !$hasWeight;
@@ -2429,6 +2448,10 @@ final class CashierV3CashierWorkspaceServices
                 'craftsmanPerformanceType' => $type,
                 'laborFeeCents' => max(0, (int)($craftsman['laborFeeCents'] ?? $craftsman['labor_fee_cents'] ?? 0)),
             ];
+            if (array_key_exists('performanceAmountCents', $craftsman)) {
+                $selection['performanceAmountCents'] = max(0, (int)$craftsman['performanceAmountCents']);
+                $selection['performanceAmountManual'] = !empty($craftsman['performanceAmountManual']);
+            }
             $positionId = max(0, (int)($craftsman['positionId'] ?? $craftsman['position_id'] ?? 0));
             $performanceIndependent = !empty($craftsman['performanceIndependent'])
                 || !empty($craftsman['performance_independent']);
@@ -2442,9 +2465,6 @@ final class CashierV3CashierWorkspaceServices
             if ($performanceIndependent && $positionId > 0) {
                 $selection['performanceIndependent'] = true;
                 $selection['allocationGroupKey'] = $groupKey;
-            }
-            if ($type !== EmployeeCraftsmanPerformanceTypeServices::LABOR) {
-                $weightByGroup[$groupKey] = ($weightByGroup[$groupKey] ?? 0) + $weight;
             }
             if (array_key_exists('projectCountHalfUnits', $craftsman)
                 || array_key_exists('project_count_half_units', $craftsman)) {
@@ -2465,9 +2485,6 @@ final class CashierV3CashierWorkspaceServices
                 $remaining = max(0, $remaining - 1);
             }
             unset($selection);
-        }
-        if ($selections && array_filter($weightByGroup, static fn (int $sum): bool => $sum !== 100 && $sum !== 0)) {
-            throw $this->incompleteLineSettings($lineKey, 'stored_craftsman_weight_sum_invalid');
         }
         return $selections;
     }

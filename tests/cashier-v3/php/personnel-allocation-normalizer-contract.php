@@ -38,19 +38,19 @@ personnelAllocationAssert(
     '旧客户端只传人员 ID 时必须稳定平均并把余数给第一人'
 );
 
-$rejected = false;
-try {
-    CashierV3RequestNormalizer::normalize('update-cart-line-service-settings', [
-        'lineId' => 'sale:invalid-project',
-        'craftsmen' => [
-            ['staffId' => 11, 'laborWeight' => 80],
-            ['staffId' => 12, 'laborWeight' => 30],
-        ],
-    ]);
-} catch (CashierV3CommandException $exception) {
-    $rejected = ($exception->getDetail()['reason'] ?? '') === 'craftsman_weight_sum_invalid';
-}
-personnelAllocationAssert($rejected, '手艺人比例合计不是 100% 必须拒绝');
+$independent = CashierV3RequestNormalizer::normalize('update-cart-line-service-settings', [
+    'lineId' => 'sale:independent-performance-amount',
+    'craftsmen' => [
+        ['staffId' => 11, 'laborWeight' => 80, 'performanceAmountCents' => 12000, 'performanceAmountManual' => true],
+        ['staffId' => 12, 'laborWeight' => 30, 'performanceAmountCents' => 4500, 'performanceAmountManual' => false],
+    ],
+])['normalized'];
+personnelAllocationAssert(
+    array_column($independent['craftsmen'], 'laborWeight') === [80, 30]
+        && ($independent['craftsmen'][0]['performanceAmountCents'] ?? -1) === 12000
+        && ($independent['craftsmen'][0]['performanceAmountManual'] ?? false) === true,
+    '业绩比例和业绩金额必须独立保存，比例合计不再作为结账拦截条件'
+);
 
 $manual = CashierV3RequestNormalizer::normalize('update-cart-line-service-settings', [
     'lineId' => 'sale:manual-fee',
@@ -83,21 +83,15 @@ try {
 }
 personnelAllocationAssert($decimalRejected, '小数临时手工费必须拒绝');
 
-$ordinarySettingError = false;
-try {
-    CashierV3RequestNormalizer::normalize('update-cart-line-service-settings', [
-        'lineId' => 'sale:ordinary-project',
-        'craftsmen' => [
-            ['staffId' => 11, 'laborWeight' => 0],
-        ],
-    ]);
-} catch (CashierV3CommandException $exception) {
-    $ordinarySettingError = $exception->getMessage() === '购物车服务设置无效，请重新选择。'
-        && ($exception->getDetail()['reason'] ?? '') === 'craftsman_weight_invalid';
-}
+$zeroRatio = CashierV3RequestNormalizer::normalize('update-cart-line-service-settings', [
+    'lineId' => 'sale:zero-ratio-project',
+    'craftsmen' => [
+        ['staffId' => 11, 'laborWeight' => 0, 'performanceAmountCents' => 0, 'performanceAmountManual' => false],
+    ],
+])['normalized'];
 personnelAllocationAssert(
-    $ordinarySettingError,
-    '普通项目人员分配校验失败不得误报为卡内项目明细无效'
+    ($zeroRatio['craftsmen'][0]['laborWeight'] ?? -1) === 0,
+    '比例为 0 的人员分配必须允许保存，不得误报购物车设置无效'
 );
 
 echo "PASS personnel-allocation-normalizer-contract\n";

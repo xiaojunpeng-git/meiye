@@ -1525,25 +1525,32 @@ button:disabled {
 }
 
 .filter-chip {
-  min-height: 28px;
-  height: 28px;
-  padding: 0 11px;
-  border: 1px solid #d7e0ea;
-  border-radius: 999px;
+  min-height: 34px;
+  height: 34px;
+  padding: 0 15px;
+  border: 1px solid #bdd3ed;
+  border-radius: 9px;
   background: #f7f9fc;
-  color: #606266;
-  font-size: 13px;
+  color: #4d5b6b;
+  font-size: 14px;
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(22, 66, 112, 0.05);
+  transition: border-color .16s ease, background .16s ease, color .16s ease, box-shadow .16s ease, transform .16s ease;
 }
 
 .filter-chip:hover,
 .filter-chip--active {
-  border-color: #b9d4ff;
-  background: #eaf4ff;
-  color: #1890ff;
+  border-color: #1677dd;
+  background: #e5f1ff;
+  color: #146fc9;
+  box-shadow: 0 2px 6px rgba(22, 119, 221, 0.14);
 }
 
 .filter-chip--active {
-  font-weight: 600;
+  border-color: #1677dd;
+  background: #1677dd;
+  color: #fff;
+  box-shadow: 0 3px 8px rgba(22, 119, 221, 0.26);
 }
 
 .catalog-categories {
@@ -4817,16 +4824,16 @@ button:disabled {
 .personnel-full-table__head,
 .personnel-full-table__row {
   display: grid;
-  grid-template-columns: 1.2fr 1fr 1fr 1.1fr .9fr .9fr .65fr;
+  grid-template-columns: 1.15fr .95fr .8fr .95fr .75fr .8fr .85fr .6fr;
 }
 
 .personnel-full-table--craftsmen {
-  min-width: 900px;
+  min-width: 1020px;
 }
 
 .personnel-full-table--craftsmen .personnel-full-table__head,
 .personnel-full-table--craftsmen .personnel-full-table__row {
-  grid-template-columns: 1.2fr .95fr .75fr 1.1fr .9fr .9fr .9fr .75fr .65fr;
+  grid-template-columns: 1.1fr .85fr .65fr 1fr .7fr .75fr .85fr .8fr .7fr .6fr;
 }
 
 .personnel-full-table--history {

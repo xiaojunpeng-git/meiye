@@ -890,13 +890,12 @@ final class CashierV3CheckoutSettlementKernel
                     throw self::failure('sale_line_salespeople_snapshot_invalid', ['authorityKey' => $authorityKey]);
                 }
                 $salespeople = [];
-                $weightByGroup = [];
                 foreach ($line['salespeople'] as $person) {
                     if (!is_array($person)) {
                         throw self::failure('sale_line_salespeople_snapshot_invalid', ['authorityKey' => $authorityKey]);
                     }
                     $staffId = self::positiveInt($person['staffId'] ?? $person['id'] ?? 0, 'saleLine.salesperson.staffId');
-                    $allocation = self::positiveInt($person['allocationWeight'] ?? 0, 'saleLine.salesperson.allocationWeight');
+                    $allocation = self::nonNegativeInt($person['allocationWeight'] ?? 0, 'saleLine.salesperson.allocationWeight');
                     if ($allocation > 100) {
                         throw self::failure('sale_line_salespeople_snapshot_invalid', ['authorityKey' => $authorityKey]);
                     }
@@ -905,6 +904,21 @@ final class CashierV3CheckoutSettlementKernel
                         || !empty($person['performance_independent']);
                     $groupKey = $performanceIndependent && $positionId > 0 ? 'independent:' . $positionId : 'normal';
                     $normalizedPerson = ['staffId' => $staffId, 'allocationWeight' => $allocation];
+                    $hasPerformanceAmount = array_key_exists('performanceAmountCents', $person)
+                        || array_key_exists('performance_amount_cents', $person);
+                    $hasPerformanceAmountManual = array_key_exists('performanceAmountManual', $person)
+                        || array_key_exists('performance_amount_manual', $person);
+                    if ($hasPerformanceAmountManual && !$hasPerformanceAmount) {
+                        throw self::failure('sale_line_salespeople_snapshot_invalid', ['authorityKey' => $authorityKey]);
+                    }
+                    if ($hasPerformanceAmount) {
+                        $normalizedPerson['performanceAmountCents'] = self::nonNegativeInt(
+                            $person['performanceAmountCents'] ?? $person['performance_amount_cents'],
+                            'saleLine.salesperson.performanceAmountCents'
+                        );
+                        $normalizedPerson['performanceAmountManual'] = !empty($person['performanceAmountManual'])
+                            || !empty($person['performance_amount_manual']);
+                    }
                     if ($positionId > 0) {
                         $normalizedPerson['positionId'] = $positionId;
                         $normalizedPerson['positionName'] = trim((string)($person['positionName'] ?? $person['position_name'] ?? ''));
@@ -914,10 +928,6 @@ final class CashierV3CheckoutSettlementKernel
                         $normalizedPerson['allocationGroupKey'] = $groupKey;
                     }
                     $salespeople[] = $normalizedPerson;
-                    $weightByGroup[$groupKey] = ($weightByGroup[$groupKey] ?? 0) + $allocation;
-                }
-                if ($salespeople !== [] && array_filter($weightByGroup, static fn (int $sum): bool => $sum !== 100)) {
-                    throw self::failure('sale_line_salespeople_weight_invalid', ['authorityKey' => $authorityKey]);
                 }
                 $normalized['salespeople'] = $salespeople;
             }

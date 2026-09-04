@@ -30,7 +30,7 @@ class UnifiedReport extends AuthController
 {
     private const STORE_OPERATION_REPORTS = [
         'partner_item_summary', 'partner_item_detail', 'member_consumption_detail',
-        'store_item_analysis', 'store_craftsman_consumption', 'store_salesperson_performance',
+        'store_item_analysis', 'store_craftsman_consumption', 'store_craftsman_consumption_detail', 'store_salesperson_performance',
         'market_performance', 'market_detail', 'member_visit_analysis', 'member_visit_annual_summary',
         'field_acquisition_detail', 'field_acquisition_summary', 'cross_industry_customer_detail',
         'cross_industry_customer_summary', 'new_customer_analysis', 'new_customer_analysis_summary',
@@ -641,7 +641,12 @@ class UnifiedReport extends AuthController
         $roles = is_string($roles) ? array_filter(explode(',', $roles)) : (array)$roles;
         if (!$roles) return false;
 
-        $expected = 'admin-report-store-operations-' . $report;
+        // A detail page is only reachable from its parent summary.  It must
+        // inherit that exact menu permission rather than introducing a hidden
+        // second permission that could be omitted from existing roles.
+        $permissionReport = $report === 'store_craftsman_consumption_detail'
+            ? 'store_craftsman_consumption' : $report;
+        $expected = 'admin-report-store-operations-' . $permissionReport;
         $menus = app()->make(SystemRoleServices::class)->getRolesByAuth($roles, 1);
         foreach ($menus as $menu) {
             if ((string)($menu['unique_auth'] ?? '') === $expected) return true;
@@ -774,7 +779,7 @@ class UnifiedReport extends AuthController
     {
         return [
             ['report', 'overview'], ['start_date', ''], ['end_date', ''], ['dataset', 'sale'], ['metric', 'cash_performance'],
-            ['item_id', ''], ['payment_method', ''], ['operator_id', 0], ['channel_id', 0], ['customer_segment', 'all'], ['consumption_metric', 'cash'], ['sleep_months', 3], ['year', 0], ['category_id', 0], ['category_path', ''], ['product_type', ''], ['partner_name', ''], ['salesperson_id', 0], ['sales_manager_id', 0], ['guide_id', 0], ['craftsman_id', 0], ['page', 1], ['limit', 20],
+            ['item_id', ''], ['payment_method', ''], ['operator_id', 0], ['channel_id', 0], ['customer_segment', 'all'], ['consumption_metric', 'cash'], ['sleep_months', 3], ['year', 0], ['category_id', 0], ['category_path', ''], ['product_type', ''], ['partner_name', ''], ['salesperson_id', 0], ['sales_manager_id', 0], ['guide_id', 0], ['craftsman_id', 0], ['day_of_month', 0], ['page', 1], ['limit', 20],
             ['org_id', 0], ['store_id', 0], ['store_ids', ''],
             ['dimension_code', ''], ['payment_method_code', ''], ['metric_code', ''],
             ['company_dimension_id', ''], ['city_manager_dimension_id', ''],

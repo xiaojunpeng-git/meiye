@@ -1094,6 +1094,7 @@ final class CashierV3EntitlementCompletionKernel
             ];
             $optionalKeys = [
                 'craftsmanPerformanceType', 'laborFeeCents', 'personnelSource',
+                'performanceAmountCents', 'performanceAmountManual',
                 'positionId', 'positionName', 'performanceIndependent', 'allocationGroupKey',
             ];
             $expectedKeys = array_merge($baseKeys, array_values(array_intersect($optionalKeys, array_keys($row))));
@@ -1105,8 +1106,7 @@ final class CashierV3EntitlementCompletionKernel
             self::assertPositiveInt($row['sequence'], 'craftsman.sequence', 20);
             self::assertNonnegativeInt($row['laborWeight'], 'craftsman.laborWeight', self::MAX_WEIGHT);
             $performanceType = (string)($row['craftsmanPerformanceType'] ?? 'commission_labor');
-            if (!in_array($performanceType, ['commission', 'labor', 'commission_labor'], true)
-                || ($performanceType !== 'labor' && $row['laborWeight'] <= 0)) {
+            if (!in_array($performanceType, ['commission', 'labor', 'commission_labor'], true)) {
                 throw self::failure('authority_craftsman_performance_invalid', ['staffId' => $row['staffId']]);
             }
             self::assertNonnegativeInt(
@@ -1127,6 +1127,19 @@ final class CashierV3EntitlementCompletionKernel
             $seen[$row['staffId']] = true;
             $row['craftsmanPerformanceType'] = $performanceType;
             $row['laborFeeCents'] = $laborFeeCents;
+            if (array_key_exists('performanceAmountCents', $row)
+                || array_key_exists('performanceAmountManual', $row)) {
+                if (!array_key_exists('performanceAmountCents', $row)
+                    || !array_key_exists('performanceAmountManual', $row)
+                    || !is_bool($row['performanceAmountManual'])) {
+                    throw self::failure('authority_craftsman_performance_amount_invalid', ['staffId' => $row['staffId']]);
+                }
+                self::assertNonnegativeInt($row['performanceAmountCents'], 'craftsman.performanceAmountCents', self::MAX_MONEY_CENTS);
+                if ($performanceType === 'labor'
+                    && ((int)$row['performanceAmountCents'] !== 0 || $row['performanceAmountManual'])) {
+                    throw self::failure('authority_labor_performance_amount_invalid', ['staffId' => $row['staffId']]);
+                }
+            }
             if (array_key_exists('positionId', $row)) {
                 self::assertNonnegativeInt($row['positionId'], 'craftsman.positionId', self::MAX_WEIGHT * self::MAX_WEIGHT);
                 $row['positionName'] = (string)($row['positionName'] ?? '');
@@ -1661,32 +1674,19 @@ final class CashierV3EntitlementCompletionKernel
         if ($requestedSet !== $authoritySet) {
             throw self::failure('authority_craftsman_scope_mismatch');
         }
-        $weights = [];
-        $performanceStaffIds = [];
-        $performanceGroups = [];
         foreach ($authorityIds as $staffId) {
             $row = $byId[$staffId] ?? null;
             if (!$row || $row['active'] !== true || $row['storeId'] !== $storeId) {
                 throw self::failure('craftsman_not_active_eligible_in_store', ['staffId' => $staffId]);
             }
-            if (($row['craftsmanPerformanceType'] ?? 'commission_labor') !== 'labor') {
-                $performanceStaffIds[] = $staffId;
-                $weights[$staffId] = $row['laborWeight'];
-                $groupKey = (string)($row['allocationGroupKey'] ?? 'normal');
-                $performanceGroups[$groupKey][] = $staffId;
-            }
         }
         $amountByStaffId = [];
-        if ($performanceStaffIds !== []) {
-            foreach ($performanceGroups as $groupStaffIds) {
-                $groupWeights = [];
-                foreach ($groupStaffIds as $groupStaffId) {
-                    $groupWeights[$groupStaffId] = $weights[$groupStaffId];
-                }
-                foreach (self::allocateLaborAmount($amountCents, $groupStaffIds, $groupWeights) as $allocation) {
-                    $amountByStaffId[(int)$allocation['staffId']] = (int)$allocation['amountCents'];
-                }
-            }
+        foreach ($authorityIds as $staffId) {
+            $row = $byId[$staffId];
+            if (($row['craftsmanPerformanceType'] ?? 'commission_labor') === 'labor') continue;
+            $amountByStaffId[$staffId] = !empty($row['performanceAmountManual'])
+                ? max(0, (int)($row['performanceAmountCents'] ?? 0))
+                : intdiv($amountCents * max(0, (int)($row['laborWeight'] ?? 0)), 100);
         }
         $allocations = [];
         foreach ($authorityRows as $index => $row) {
@@ -1703,6 +1703,10 @@ final class CashierV3EntitlementCompletionKernel
             $allocation['laborWeight'] = $row['laborWeight'];
             $allocation['craftsmanPerformanceType'] = $row['craftsmanPerformanceType'] ?? 'commission_labor';
             $allocation['laborFeeCents'] = (int)($row['laborFeeCents'] ?? 0);
+            if (array_key_exists('performanceAmountCents', $row)) {
+                $allocation['performanceAmountCents'] = (int)$row['performanceAmountCents'];
+                $allocation['performanceAmountManual'] = !empty($row['performanceAmountManual']);
+            }
             if (isset($row['positionId'])) {
                 $allocation['positionId'] = (int)$row['positionId'];
                 $allocation['positionName'] = (string)($row['positionName'] ?? '');

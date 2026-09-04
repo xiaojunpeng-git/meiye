@@ -49,6 +49,7 @@ const reportCodes = [
   'store_refund_ledger'
 ]
 check('report functions are upper-page tabs', reportCodes.every((code) => view.includes(`code: '${code}'`)) && view.includes('const REPORT_TABS') && view.includes('store-business-report__tabs') && view.includes('v-for="item in reportTabs"') && !view.includes("activeReport === 'overview'"))
+check('craftsman consumption uses a hidden, server-declared fact-detail drilldown', view.includes("code: 'store_craftsman_consumption_detail', name: '手艺人消耗明细', hidden: true") && view.includes('allowedReportTabs.value.filter((tab) => !tab.hidden)') && view.includes('function drilldownConfig') && view.includes('function openDrilldown'))
 check('phase-two reports are dispatched by the unified report service', reportService.includes('StoreUnifiedReportPhaseTwoServices') && reportCodes.slice(6).every((code) => phaseTwoReportService.includes(`'${code}'`)))
 check('report tabs preserve the active runtime in stable deep links', router.includes("path: 'data/reports/:report?'") && router.includes("path: '/platform/reports/:report?'") && view.includes("router.push({ name: reportRouteName.value, params: { report: code } })"))
 check('all 22 store-operation reports default to the first day of the current month', view.includes('All 22 store-operation reports use one date-range default') && view.includes('!route.query?.start_date && !route.query?.end_date') && view.includes("startDate.value = `${today().slice(0, 7)}-01`") && view.includes('endDate.value = today()'))

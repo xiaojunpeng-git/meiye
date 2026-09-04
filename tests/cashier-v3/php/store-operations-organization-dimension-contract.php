@@ -106,11 +106,11 @@ organizationDimensionAssert(
 );
 
 organizationDimensionAssert(
-    substr_count($service, "'filter_schema' => \$this->organizationDimensionFilterSchema(\$range)") === 6,
-    'all six first-phase reports expose the same dimension filter metadata'
+    substr_count($service, "'filter_schema' => \$this->organizationDimensionFilterSchema(\$range)") === 7,
+    'all six first-phase reports and the craftsman detail expose the same dimension filter metadata'
 );
 organizationDimensionAssert(
-    substr_count($service, '$this->organizationDimensionColumns()') >= 6
+    substr_count($service, '$this->organizationDimensionColumns()') >= 7
         && str_contains($service, "'source_explanation' => \$this->organizationDimensions()->sourceExplanation('company')")
         && !str_contains(organizationDimensionSection($service, 'private function organizationDimensionColumns', 'private function organizationDimensionFilterSchema'), "'key' => 'city_manager'"),
     'all six first-phase reports export the company column and hide the city-manager column'

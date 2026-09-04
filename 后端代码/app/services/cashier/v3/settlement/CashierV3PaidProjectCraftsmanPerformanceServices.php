@@ -100,26 +100,15 @@ final class CashierV3PaidProjectCraftsmanPerformanceServices
             $laborAmountCents = 0;
         }
         $performanceByStaff = [];
-        if ($performanceCraftsmen !== []) {
-            foreach ($groupMembers as $groupKey => $members) {
-                $groupIds = [];
-                $groupWeights = [];
-                foreach ($members as $index) {
-                    $staffId = (int)$craftsmen[$index]['staffId'];
-                    if (isset($weights[$staffId])) {
-                        $groupIds[] = $staffId;
-                        $groupWeights[$staffId] = $weights[$staffId];
-                    }
-                }
-                if ($groupIds === []) continue;
-                foreach (CashierV3EntitlementCompletionKernel::allocateLaborAmount(
-                    $laborAmountCents,
-                    $groupIds,
-                    $groupWeights
-                ) as $allocation) {
-                    $performanceByStaff[(int)$allocation['staffId']] = (int)$allocation['amountCents'];
-                }
-            }
+        $manualPerformanceByStaff = [];
+        foreach ($craftsmen as $craftsman) {
+            $staffId = (int)$craftsman['staffId'];
+            if (!isset($weights[$staffId])) continue;
+            $manual = !empty($craftsman['performanceAmountManual']);
+            $performanceByStaff[$staffId] = $manual
+                ? max(0, (int)($craftsman['performanceAmountCents'] ?? 0))
+                : intdiv($laborAmountCents * max(0, (int)$weights[$staffId]), 100);
+            $manualPerformanceByStaff[$staffId] = $manual;
         }
 
         // The older line-wide override has no per-person amounts. Preserve its
@@ -162,6 +151,7 @@ final class CashierV3PaidProjectCraftsmanPerformanceServices
                 'isPrimary' => !empty($craftsman['isPrimary']),
                 'laborWeight' => (int)($craftsman['laborWeight'] ?? 0),
                 'laborPerformanceCents' => (int)($performanceByStaff[$staffId] ?? 0),
+                'laborPerformanceAmountManual' => !empty($manualPerformanceByStaff[$staffId]),
                 'laborFeeCents' => (int)($fees[$staffId] ?? 0),
                 'projectCountHalfUnits' => (int)($projectCounts[$staffId] ?? 0),
             ];

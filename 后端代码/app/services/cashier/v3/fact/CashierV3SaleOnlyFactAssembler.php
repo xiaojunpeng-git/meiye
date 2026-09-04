@@ -231,16 +231,8 @@ final class CashierV3SaleOnlyFactAssembler
             $checkoutLineId = (string)$orderLine['checkout_line_id'];
             $salespeople = array_values((array)($salespeopleByCheckoutLine[$checkoutLineId] ?? []));
             if ($salespeople) {
-              $weightByGroup = [];
-              foreach ($salespeople as $person) {
-                $groupKey = (string)($person['allocationGroupKey'] ?? 'normal');
-                $weightByGroup[$groupKey] = ($weightByGroup[$groupKey] ?? 0) + (int)($person['allocationWeight'] ?? 0);
-              }
-              if (array_filter($weightByGroup, static fn (int $sum): bool => $sum !== 100)) {
-                throw self::failure('sale_only_fact_salesperson_weight_total_invalid');
-              }
               $lineCash = (int)($cashByOrderLine[(string)$orderLine['order_line_id']] ?? 0);
-              $employeeAmounts = self::allocateByWeightGroups($lineCash, $salespeople);
+              $employeeAmounts = self::personnelPerformanceAmounts($lineCash, $salespeople);
               foreach ($salespeople as $index => $person) {
                 $employeeId = (int)($person['employeeId'] ?? 0);
                 $employeeType = (string)($person['employeeTypeCodeSnapshot'] ?? '');
@@ -253,7 +245,7 @@ final class CashierV3SaleOnlyFactAssembler
                     || $employeeName === ''
                     || !in_array($employeeType, ['internal', 'partner', 'outsourced'], true)
                     || $employeeTypeVersion <= 0
-                    || $weight <= 0
+                    || $weight < 0 || $weight > 100
                     || $sequence <= 0) {
                     throw self::failure('sale_only_fact_salesperson_snapshot_invalid');
                 }
@@ -284,8 +276,12 @@ final class CashierV3SaleOnlyFactAssembler
                     'allocationWeightDenominator' => 100,
                     'allocationBaseAmountCents' => $lineCash,
                     'amountCents' => $personAmount,
-                    'ruleCodeSnapshot' => 'SALES-CASH-COLLECTED-V1',
-                    'ruleNameSnapshot' => '按本次实收现金和销售分配比例计算',
+                    'ruleCodeSnapshot' => !empty($person['performanceAmountManual'])
+                        ? 'SALES-CASH-MANUAL-AMOUNT-V1'
+                        : 'SALES-CASH-COLLECTED-V1',
+                    'ruleNameSnapshot' => !empty($person['performanceAmountManual'])
+                        ? '销售人员手工填写业绩金额'
+                        : '按本次实收现金和销售分配比例计算',
                     'ruleVersionSnapshot' => 'v1',
                 ];
               }
@@ -330,8 +326,12 @@ final class CashierV3SaleOnlyFactAssembler
                         'amountCents' => (int)$allocation['laborPerformanceCents'],
                         'laborFeeAmountCents' => (int)$allocation['laborFeeCents'],
                         'projectCountHalfUnits' => (int)($allocation['projectCountHalfUnits'] ?? 0),
-                        'ruleCodeSnapshot' => 'SALE-PROJECT-LABOR-V1',
-                        'ruleNameSnapshot' => '项目劳动业绩',
+                        'ruleCodeSnapshot' => !empty($allocation['laborPerformanceAmountManual'])
+                            ? 'SALE-PROJECT-LABOR-MANUAL-AMOUNT-V1'
+                            : 'SALE-PROJECT-LABOR-V1',
+                        'ruleNameSnapshot' => !empty($allocation['laborPerformanceAmountManual'])
+                            ? '手艺人手工填写业绩金额'
+                            : '项目劳动业绩',
                         'ruleVersionSnapshot' => 'project-rule:' . (int)$craftsmanPlan['ruleVersion'],
                     ];
                 }
@@ -997,6 +997,25 @@ final class CashierV3SaleOnlyFactAssembler
             foreach ($indices as $offset => $index) {
                 $result[$index] = (int)($groupAmounts[$offset] ?? 0);
             }
+        }
+        return $result;
+    }
+
+    /**
+     * The personnel snapshot is authoritative: a manual amount is preserved
+     * exactly, while a ratio change recomputes that person's amount from the
+     * line's cash-performance base.  No cross-person total is inferred here.
+     *
+     * @return array<int,int>
+     */
+    private static function personnelPerformanceAmounts(int $amount, array $people): array
+    {
+        $result = [];
+        foreach ($people as $index => $person) {
+            $weight = max(0, min(100, (int)($person['allocationWeight'] ?? 0)));
+            $result[$index] = !empty($person['performanceAmountManual'])
+                ? max(0, (int)($person['performanceAmountCents'] ?? 0))
+                : intdiv($amount * $weight, 100);
         }
         return $result;
     }

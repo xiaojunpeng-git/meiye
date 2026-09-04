@@ -34,6 +34,8 @@ final class CashierV3CheckoutCraftsmenSnapshot
             ];
             $hasPerformanceFields = array_key_exists('craftsmanPerformanceType', $row)
                 || array_key_exists('laborFeeCents', $row);
+            $hasPerformanceAmount = array_key_exists('performanceAmountCents', $row)
+                || array_key_exists('performanceAmountManual', $row);
             $hasProjectCount = array_key_exists('projectCountHalfUnits', $row);
             $hasPersonnelSource = array_key_exists('personnelSource', $row);
             $hasPosition = array_key_exists('positionId', $row)
@@ -41,6 +43,7 @@ final class CashierV3CheckoutCraftsmenSnapshot
                 || array_key_exists('performanceIndependent', $row)
                 || array_key_exists('allocationGroupKey', $row);
             $optionalKeys = $hasPerformanceFields ? ['craftsmanPerformanceType', 'laborFeeCents'] : [];
+            if ($hasPerformanceAmount) $optionalKeys = array_merge($optionalKeys, ['performanceAmountCents', 'performanceAmountManual']);
             if ($hasProjectCount) $optionalKeys[] = 'projectCountHalfUnits';
             if ($hasPersonnelSource) $optionalKeys[] = 'personnelSource';
             foreach (['positionId', 'positionName', 'performanceIndependent', 'allocationGroupKey'] as $positionKey) {
@@ -85,9 +88,6 @@ final class CashierV3CheckoutCraftsmenSnapshot
             if (!in_array($performanceType, ['commission', 'labor', 'commission_labor'], true)) {
                 throw new \InvalidArgumentException('craftsmen_snapshot_performance_type_invalid');
             }
-            if ($performanceType !== 'labor' && $laborWeight <= 0) {
-                throw new \InvalidArgumentException('craftsmen_snapshot_weight_invalid');
-            }
             $laborFeeCents = $hasPerformanceFields ? self::nonNegativeInt($row['laborFeeCents']) : 0;
             if ($performanceType === 'commission' && $laborFeeCents !== 0) {
                 throw new \InvalidArgumentException('craftsmen_snapshot_labor_fee_invalid');
@@ -106,6 +106,20 @@ final class CashierV3CheckoutCraftsmenSnapshot
             if ($hasPerformanceFields) {
                 $normalized[count($normalized) - 1]['craftsmanPerformanceType'] = $performanceType;
                 $normalized[count($normalized) - 1]['laborFeeCents'] = $laborFeeCents;
+            }
+            if ($hasPerformanceAmount) {
+                if (!array_key_exists('performanceAmountCents', $row)
+                    || !array_key_exists('performanceAmountManual', $row)
+                    || !is_bool($row['performanceAmountManual'])) {
+                    throw new \InvalidArgumentException('craftsmen_snapshot_performance_amount_invalid');
+                }
+                $performanceAmountCents = self::nonNegativeInt($row['performanceAmountCents']);
+                $performanceAmountManual = $row['performanceAmountManual'];
+                if ($performanceType === 'labor' && ($performanceAmountCents !== 0 || $performanceAmountManual)) {
+                    throw new \InvalidArgumentException('craftsmen_snapshot_labor_performance_amount_invalid');
+                }
+                $normalized[count($normalized) - 1]['performanceAmountCents'] = $performanceAmountCents;
+                $normalized[count($normalized) - 1]['performanceAmountManual'] = $performanceAmountManual;
             }
             if ($hasProjectCount) {
                 $normalized[count($normalized) - 1]['projectCountHalfUnits'] = self::nonNegativeInt(
@@ -135,16 +149,6 @@ final class CashierV3CheckoutCraftsmenSnapshot
                     $normalized[count($normalized) - 1]['allocationGroupKey'] = $groupKey;
                 }
             }
-        }
-        $weightByGroup = [];
-        foreach ($normalized as $row) {
-            if (($row['craftsmanPerformanceType'] ?? 'commission_labor') !== 'labor') {
-                $groupKey = (string)($row['allocationGroupKey'] ?? 'normal');
-                $weightByGroup[$groupKey] = ($weightByGroup[$groupKey] ?? 0) + (int)$row['laborWeight'];
-            }
-        }
-        if ($normalized !== [] && array_filter($weightByGroup, static fn (int $sum): bool => $sum !== 100 && $sum !== 0)) {
-            throw new \InvalidArgumentException('craftsmen_snapshot_weight_sum_invalid');
         }
         return $normalized;
     }

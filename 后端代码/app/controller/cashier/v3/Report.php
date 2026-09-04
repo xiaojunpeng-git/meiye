@@ -156,7 +156,7 @@ class Report extends AuthController
             ['channel_id', 0], ['customer_segment', 'all'],
             ['consumption_metric', 'cash'], ['sleep_months', 3], ['year', 0],
             ['category_id', 0], ['category_path', ''], ['product_type', ''], ['partner_name', ''],
-            ['salesperson_id', 0], ['sales_manager_id', 0], ['guide_id', 0], ['craftsman_id', 0],
+            ['salesperson_id', 0], ['sales_manager_id', 0], ['guide_id', 0], ['craftsman_id', 0], ['day_of_month', 0],
             ['store_ids', ''],
             ['dimension_code', ''], ['payment_method_code', ''], ['metric_code', ''],
             ['unit_price_min', ''], ['unit_price_max', ''],

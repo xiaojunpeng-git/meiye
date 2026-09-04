@@ -391,7 +391,14 @@ final class CashierV3CheckoutFactPlanV1
             'allocation_weight_numerator' => $numerator,
             'allocation_weight_denominator' => $denominator,
             'allocation_base_amount_cents' => self::signedMoney($fact['allocationBaseAmountCents'], $direction, 'performance_base_amount_invalid', true),
-            'amount_cents' => self::signedMoney($fact['amountCents'], $direction, 'performance_amount_invalid', true),
+            // A manually entered external personnel amount can legitimately
+            // exceed this settlement's cash base. The aggregate actual
+            // performance is the signed balancing fact (cash - external), so
+            // it must support either sign in both the forward and reversal
+            // directions instead of reintroducing a hidden total constraint.
+            'amount_cents' => $type === self::ACTUAL_PERFORMANCE
+                ? self::signedInteger($fact['amountCents'], 'performance_amount_invalid')
+                : self::signedMoney($fact['amountCents'], $direction, 'performance_amount_invalid', true),
             'labor_fee_amount_cents' => self::signedMoney($fact['laborFeeAmountCents'] ?? 0, $direction, 'performance_labor_fee_amount_invalid', true),
             'project_count_half_units' => self::nonNegativeInt($fact['projectCountHalfUnits'] ?? 0, 'performance_project_count_invalid'),
             'rule_code_snapshot' => self::requiredToken($fact['ruleCodeSnapshot'], 64, 'performance_rule_code_invalid'),

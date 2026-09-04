@@ -294,7 +294,7 @@ final class CashierV3OrderLifecycleServices
         $source = $this->source(array_merge($payload, ['sourceType' => 'sales']), $operator, $scope, false);
         $lines = Db::name('cashier_v3_sales_order_line')->where('tenant_id', $scope->tenantId())
             ->where('order_id', $source['sourceId'])->where('line_direction', 'forward')->where('line_status', 'settled')
-            ->field('order_line_id,item_type,item_name_snapshot')->order('line_no asc')->select()->toArray();
+            ->field('order_line_id,item_type,item_name_snapshot,sale_amount_cents')->order('line_no asc')->select()->toArray();
         $eligible = Db::name('system_store_staff')->alias('s')->join('employee e', 'e.id=s.employee_id')
             ->leftJoin('staff_job_position sjp', 'sjp.staff_id = s.id AND sjp.status = 1 AND sjp.is_del = 0 AND sjp.end_time = 0')
             ->leftJoin('position p', 'p.id = sjp.position_id AND p.status = 1')
@@ -346,6 +346,8 @@ final class CashierV3OrderLifecycleServices
                     'allocationWeight' => $allocationWeight,
                     'allocationWeightDenominator' => 100,
                     'salesPerformanceAmount' => (int)($fact['amount_cents'] ?? 0),
+                    'performanceAmountCents' => $amount,
+                    'performanceAmountManual' => strpos((string)($fact['rule_code_snapshot'] ?? ''), 'MANUAL-AMOUNT') !== false,
                     'positionId' => $positionId,
                     'positionName' => trim((string)($staffRow['position_name'] ?? '')),
                     'performanceIndependent' => $independent,
@@ -389,6 +391,7 @@ final class CashierV3OrderLifecycleServices
             'lines' => array_map(static function (array $line) use ($salespeople, $guides, $salesManagers): array {
                 $lineId = (string)$line['order_line_id'];
                 return ['orderLineId' => $lineId, 'itemType' => (string)$line['item_type'], 'itemName' => (string)$line['item_name_snapshot'],
+                    'totalAmountCents' => max(0, (int)($line['sale_amount_cents'] ?? 0)),
                     'currentSalespeople' => $salespeople[$lineId] ?? [], 'currentGuides' => $guides[$lineId] ?? [],
                     'currentSalesManagers' => $salesManagers[$lineId] ?? [], 'canAdjustCraftsman' => (string)$line['item_type'] === 'project'];
             }, $lines),

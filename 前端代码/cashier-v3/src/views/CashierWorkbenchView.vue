@@ -47,9 +47,10 @@ const router = useRouter()
 const cashierToday = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(new Date())
 
 const keyword = ref('')
-// 产品确认：收银开单从卡项开始；实际目录仍由后端按当前门店权限返回。
+// 游客开单优先展示项目；选中会员后切回卡项，便于先办理会员卡。
+// 实际目录仍由后端按当前门店权限返回。
 const preferredCatalogTypeOrder = ['卡项', '定制卡', '产品', '项目']
-const selectedType = ref('卡项')
+const selectedType = ref('项目')
 const selectedCategory = ref('')
 const areCategoriesExpanded = ref(false)
 const activeCartLineId = ref(null)
@@ -154,6 +155,18 @@ const currentMemberId = computed(() => member.value?.id || member.value?.memberI
 const currentCustomerMode = computed(() => (
   Number(currentMemberId.value) > 0 ? 'member' : 'guest'
 ))
+
+watch(
+  currentCustomerMode,
+  (mode) => {
+    // 切换客户身份时回到该身份的明确默认目录，避免游客仍停在卡项，
+    // 或会员延续游客的项目页。卡操作期间则由其目标选择流程自行锁定类型。
+    if (previewCardOperation.value?.awaitingTarget) return
+    selectedType.value = mode === 'member' ? '卡项' : '项目'
+    selectedCategory.value = ''
+  },
+  { immediate: true }
+)
 const {
   rechargeCheckout,
   acceptPreparedCheckout,
@@ -317,6 +330,16 @@ const categories = computed(() => [
 
 function selectCategory(category) {
   selectedCategory.value = category === '全部' ? '' : category
+}
+
+function selectCatalogType(type) {
+  if (type === '卡项' && currentCustomerMode.value === 'guest') {
+    window.dispatchEvent(new CustomEvent('cashier-v3:ui-result', {
+      detail: { status: 'error', message: '游客无法选择卡项，请选择会员。' }
+    }))
+    return
+  }
+  selectedType.value = type
 }
 
 const filteredCatalogItems = computed(() => {
@@ -688,6 +711,8 @@ function canonicalCheckoutCraftsmen(records = []) {
       isPrimary: index === 0,
       sequence: index + 1,
       laborWeight: Math.max(0, Math.trunc(Number(record?.laborWeight ?? record?.performance ?? 0))),
+      performanceAmountCents: Math.max(0, Math.trunc(Number(record?.performanceAmountCents ?? record?.performance_amount_cents ?? 0))),
+      performanceAmountManual: Boolean(record?.performanceAmountManual ?? record?.performance_amount_manual),
       isPointCustomer: Boolean(record?.isPointCustomer ?? record?.marked)
     }
     if (personnelSource === 'other') row.personnelSource = 'other'
@@ -716,34 +741,6 @@ function canonicalCheckoutCraftsmen(records = []) {
     }
     return row
   })
-  // Older projected rows, and rows restored from a pre-independent-position
-  // draft, can carry stale commission weights. Repair only groups whose own
-  // total is not 100%; an independent position is deliberately a separate
-  // group, so manager 100% plus normal-group 100% remains valid (200% in the
-  // cross-group display is expected).
-  const commissionRows = rows.filter((row) => row.craftsmanPerformanceType !== 'labor')
-  if (commissionRows.length > 0) {
-    const groups = new Map()
-    commissionRows.forEach((row) => {
-      const groupKey = row.performanceIndependent
-        ? (row.allocationGroupKey || `independent:${row.positionId || row.staffId}`)
-        : 'normal'
-      if (!groups.has(groupKey)) groups.set(groupKey, [])
-      groups.get(groupKey).push(row)
-    })
-    const hasInvalidGroup = Array.from(groups.values()).some((group) => (
-      group.some((row) => !Number.isInteger(row.laborWeight) || row.laborWeight <= 0)
-      || group.reduce((total, row) => total + row.laborWeight, 0) !== 100
-    ))
-    if (hasInvalidGroup) groups.forEach((group) => {
-      const base = Math.floor(100 / group.length)
-      let remainder = 100 - base * group.length
-      group.forEach((row) => {
-        row.laborWeight = base + (remainder > 0 ? 1 : 0)
-        remainder = Math.max(0, remainder - 1)
-      })
-    })
-  }
   return rows
 }
 
@@ -755,6 +752,8 @@ function canonicalCheckoutEntitlementCraftsmen(records = []) {
   return canonicalCheckoutCraftsmen(records).map((row) => ({
     staffId: row.staffId,
     laborWeight: row.laborWeight,
+    performanceAmountCents: row.performanceAmountCents,
+    performanceAmountManual: row.performanceAmountManual,
     isPointCustomer: row.isPointCustomer,
     craftsmanPerformanceType: row.craftsmanPerformanceType,
     laborFeeCents: row.laborFeeCents,
@@ -778,6 +777,8 @@ function canonicalCheckoutSalespeople(records = []) {
   return (Array.isArray(records) ? records : []).map((record) => ({
     staffId: canonicalCheckoutPositiveId(record?.staffId, record?.staff_id, record?.systemStoreStaffId, record?.id, record?.employeeId, record?.employee_id),
     allocationWeight: Math.max(0, Math.trunc(Number(record?.allocationWeight ?? record?.allocation_weight ?? record?.performance ?? 0))),
+    performanceAmountCents: Math.max(0, Math.trunc(Number(record?.performanceAmountCents ?? record?.performance_amount_cents ?? 0))),
+    performanceAmountManual: Boolean(record?.performanceAmountManual ?? record?.performance_amount_manual),
     // 售前标记属于销售人快照的一部分；否则多选售前虽然能保存分配比例，
     // 最终销售订单和业绩事实会把它们误记成普通售后销售人。
     isPreSale: Boolean(record?.isPreSale ?? record?.is_presale ?? record?.marked),
@@ -3413,6 +3414,7 @@ async function loadPersonnelOverlay(line, initialTab, roleScope = 'personnel') {
     laborManualFee: line.laborManualFee === null || line.laborManualFee === undefined
       ? null
       : Number(line.laborManualFee),
+    performanceBaseAmountCents: personnelPerformanceBaseAmountCents(line),
     projectCountTotal: Math.max(1, Number(line.quantity || 1)),
     requireCraftsmen: showCraftsmen,
     craftsmenCandidates: [],
@@ -3625,6 +3627,17 @@ function lineSaleAmountCents(line = {}) {
   return Number.isSafeInteger(amount) && amount >= 0 ? amount : 0
 }
 
+function personnelPerformanceBaseAmountCents(line = {}) {
+  if (!isEntitlementLine(line)) return lineSaleAmountCents(line)
+  const amount = Number(
+    line.entitlementActualAmountCents
+      ?? line.actualEntitlementAmountCents
+      ?? line.amountCents
+      ?? 0
+  )
+  return Number.isSafeInteger(amount) && amount >= 0 ? amount : 0
+}
+
 function checkoutSaleAmountCents() {
   return cartLines.value
     .filter((line) => !isEntitlementLine(line))
@@ -3671,35 +3684,23 @@ function checkoutDebtSummary(line) {
     : ''
 }
 
-// Personnel assignment is kept in the browser-owned draft until checkout.
-// Therefore the assignment confirmation itself must enforce the same group
-// invariant as the checkout authority; otherwise an ordinary 100% + 100%
-// selection can look saved and only fail several steps later.
+// 人员比例与手工金额都是本次结账快照的一部分。比例不再要求各组凑满
+// 100%，但仍必须是可解释的 0-100 整数；最终金额由后端保存为事实快照。
 function personnelAllocationGroupsAreValid(records = [], weightKey = 'laborWeight') {
   if (!Array.isArray(records) || !records.length) return true
-  const groups = new Map()
   for (const record of records) {
     const performanceType = String(record?.craftsmanPerformanceType ?? record?.craftsman_performance_type ?? '')
     const isLabor = performanceType === 'labor'
     const weight = Number(record?.[weightKey])
-    if (!Number.isInteger(weight) || weight < 0 || weight > 100 || (!isLabor && weight <= 0)) return false
+    if (!Number.isInteger(weight) || weight < 0 || weight > 100) return false
     if (isLabor) {
       if (weight !== 0) return false
       continue
     }
-    const explicitGroupKey = String(record?.allocationGroupKey || '').trim()
-    const independent = record?.performanceIndependent === true
-      || Number(record?.performanceIndependent ?? record?.performance_independent ?? 0) === 1
-      || explicitGroupKey.startsWith('independent:')
-    const positionId = Number(record?.positionId ?? record?.position_id ?? 0)
-    const groupKey = independent
-      ? (explicitGroupKey.startsWith('independent:')
-          ? explicitGroupKey
-          : `independent:${positionId > 0 ? positionId : record?.staffId || record?.id || ''}`)
-      : 'normal'
-    groups.set(groupKey, (groups.get(groupKey) || 0) + weight)
+    const amount = Number(record?.performanceAmountCents ?? record?.performance_amount_cents ?? 0)
+    if (!Number.isSafeInteger(amount) || amount < 0) return false
   }
-  return Array.from(groups.values()).every((total) => total === 100)
+  return true
 }
 
 async function confirmPersonnelAssignment(result = {}) {
@@ -3714,6 +3715,8 @@ async function confirmPersonnelAssignment(result = {}) {
       employeeId: canonicalCheckoutPositiveId(record.employeeId, record.employee_id, record.staffId, record.id),
       name: String(record.name || record.staffName || record.employeeName || '').trim(),
       laborWeight: Number(record.laborWeight),
+      performanceAmountCents: Math.max(0, Math.trunc(Number(record.performanceAmountCents ?? record.performance_amount_cents ?? 0))),
+      performanceAmountManual: Boolean(record.performanceAmountManual ?? record.performance_amount_manual),
       marked: Boolean(record.marked ?? record.isPointCustomer),
       isPointCustomer: Boolean(record.isPointCustomer ?? record.marked),
       craftsmanPerformanceType: record.craftsmanPerformanceType || record.craftsman_performance_type,
@@ -3730,6 +3733,8 @@ async function confirmPersonnelAssignment(result = {}) {
     const salespeople = (result.salespeople || []).map((record) => ({
       staffId: canonicalCheckoutPositiveId(record.staffId, record.id, record.employeeId, record.employee_id),
       allocationWeight: Number(record.allocationWeight),
+      performanceAmountCents: Math.max(0, Math.trunc(Number(record.performanceAmountCents ?? record.performance_amount_cents ?? 0))),
+      performanceAmountManual: Boolean(record.performanceAmountManual ?? record.performance_amount_manual),
       isPreSale: Boolean(record.isPreSale ?? record.is_presale ?? record.marked),
       positionId: Number(record.positionId ?? record.position_id ?? 0),
       positionName: record.positionName || record.position_name || record.position || '',
@@ -3765,7 +3770,7 @@ async function confirmPersonnelAssignment(result = {}) {
       && !personnelAllocationGroupsAreValid(payload.craftsmen, 'laborWeight')) {
       reportPersonnelAssignmentFailure(
         null,
-        '手艺人分配比例无效：普通组及每个独立组都必须分别合计 100%。'
+        '手艺人业绩比例仅可填写 0 至 100 的整数，业绩金额不能为负数。'
       )
       return
     }
@@ -3773,7 +3778,7 @@ async function confirmPersonnelAssignment(result = {}) {
       && !personnelAllocationGroupsAreValid(payload.salespeople, 'allocationWeight')) {
       reportPersonnelAssignmentFailure(
         null,
-        '销售人分配比例无效：普通组及每个独立组都必须分别合计 100%。'
+        '销售人业绩比例仅可填写 0 至 100 的整数，业绩金额不能为负数。'
       )
       return
     }
@@ -3823,6 +3828,8 @@ async function applyPersonnelAssignmentToAll(result = {}) {
     employeeId: canonicalCheckoutPositiveId(record.employeeId, record.employee_id, record.staffId, record.id),
     name: String(record.name || record.staffName || record.employeeName || '').trim(),
     laborWeight: Number(record.laborWeight),
+    performanceAmountCents: Math.max(0, Math.trunc(Number(record.performanceAmountCents ?? record.performance_amount_cents ?? 0))),
+    performanceAmountManual: Boolean(record.performanceAmountManual ?? record.performance_amount_manual),
     marked: Boolean(record.marked ?? record.isPointCustomer),
     isPointCustomer: Boolean(record.isPointCustomer ?? record.marked),
     craftsmanPerformanceType: record.craftsmanPerformanceType || record.craftsman_performance_type,
@@ -3839,6 +3846,8 @@ async function applyPersonnelAssignmentToAll(result = {}) {
   const salespeople = (hasPurchaseLines ? (result.salespeople || []) : []).map((record) => ({
     staffId: canonicalCheckoutPositiveId(record.staffId, record.id, record.employeeId, record.employee_id),
     allocationWeight: Number(record.allocationWeight),
+    performanceAmountCents: Math.max(0, Math.trunc(Number(record.performanceAmountCents ?? record.performance_amount_cents ?? 0))),
+    performanceAmountManual: Boolean(record.performanceAmountManual ?? record.performance_amount_manual),
     isPreSale: Boolean(record.isPreSale ?? record.is_presale ?? record.marked),
     positionId: Number(record.positionId ?? record.position_id ?? 0),
     positionName: record.positionName || record.position_name || record.position || '',
@@ -3861,14 +3870,14 @@ async function applyPersonnelAssignmentToAll(result = {}) {
   if (craftsmen.length && !personnelAllocationGroupsAreValid(craftsmen, 'laborWeight')) {
     reportPersonnelAssignmentFailure(
       null,
-      '手艺人分配比例无效：普通组及每个独立组都必须分别合计 100%。'
+      '手艺人业绩比例仅可填写 0 至 100 的整数，业绩金额不能为负数。'
     )
     return
   }
   if (salespeople.length && !personnelAllocationGroupsAreValid(salespeople, 'allocationWeight')) {
     reportPersonnelAssignmentFailure(
       null,
-      '销售人分配比例无效：普通组及每个独立组都必须分别合计 100%。'
+      '销售人业绩比例仅可填写 0 至 100 的整数，业绩金额不能为负数。'
     )
     return
   }
@@ -4137,7 +4146,7 @@ function abandonCardOperation() {
   previewCardOperation.value = null
   // 目录只在卡操作期间被限制为项目或卡项；取消后回到常规收银默认，
   // 避免下一次普通选购误继承上一次替换/升级的目标上下文。
-  selectedType.value = '项目'
+  selectedType.value = currentCustomerMode.value === 'member' ? '卡项' : '项目'
   selectedCategory.value = ''
   keyword.value = ''
   finalizeEntitlementSelector()
@@ -6311,7 +6320,7 @@ onBeforeUnmount(() => {
               type="button"
               class="filter-chip"
               :class="{ 'filter-chip--active': selectedType === type }"
-              @click="selectedType = type"
+              @click="selectCatalogType(type)"
             >
               {{ type }}
             </button>
@@ -6871,6 +6880,7 @@ onBeforeUnmount(() => {
         :labor-manual-fee="personnelOverlay.laborManualFee"
         :allow-labor-override="personnelOverlay.allowLaborOverride"
         :project-count-total="personnelOverlay.projectCountTotal"
+        :performance-base-amount-cents="personnelOverlay.performanceBaseAmountCents"
         :loading="personnelOverlay.loading"
         :saving="isSavingPersonnelAssignment"
         :load-error="personnelOverlay.loadError"

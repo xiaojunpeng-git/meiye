@@ -569,6 +569,10 @@ final class CashierV3DirectSnapshotEntitlementSettlementServices
                     'performanceIndependent' => !empty($settings['performanceIndependent']),
                     'allocationGroupKey' => trim((string)($settings['allocationGroupKey'] ?? '')),
                 ];
+                if (array_key_exists('performanceAmountCents', $settings)) {
+                    $craftsmen[count($craftsmen) - 1]['performanceAmountCents'] = max(0, (int)$settings['performanceAmountCents']);
+                    $craftsmen[count($craftsmen) - 1]['performanceAmountManual'] = !empty($settings['performanceAmountManual']);
+                }
             }
             $inventory = $inventorySnapshot['lineInventoryByLineId'][$lineId] ?? null;
             if (!is_array($inventory)) {
@@ -975,7 +979,6 @@ final class CashierV3DirectSnapshotEntitlementSettlementServices
                     : 'commission_labor';
                 if (!in_array($performanceType, ['commission', 'labor', 'commission_labor'], true)
                     || $staffId <= 0 || $laborWeight < 0 || $laborWeight > 100
-                    || ($performanceType !== 'labor' && $laborWeight <= 0)
                     || isset($staffIds[$staffId])) {
                     throw self::failure('authority_service_intent_craftsman_invalid', ['lineId' => $lineId]);
                 }
@@ -990,6 +993,10 @@ final class CashierV3DirectSnapshotEntitlementSettlementServices
                     'laborFeeCents' => $laborFeeCents,
                     'personnelSource' => (string)($craftsman['personnelSource'] ?? 'store'),
                 ];
+                if (array_key_exists('performanceAmountCents', (array)$craftsman)) {
+                    $settingsById[$staffId]['performanceAmountCents'] = max(0, (int)$craftsman['performanceAmountCents']);
+                    $settingsById[$staffId]['performanceAmountManual'] = !empty($craftsman['performanceAmountManual']);
+                }
                 $positionId = is_array($craftsman) ? max(0, (int)($craftsman['positionId'] ?? $craftsman['position_id'] ?? 0)) : 0;
                 $performanceIndependent = is_array($craftsman) && !empty($craftsman['performanceIndependent']);
                 if ($positionId > 0) {
@@ -1003,16 +1010,6 @@ final class CashierV3DirectSnapshotEntitlementSettlementServices
             }
             if (!$staffIds) {
                 throw self::failure('authority_service_intent_craftsman_required', ['lineId' => $lineId]);
-            }
-            $weightByGroup = [];
-            foreach ($settingsById as $settings) {
-                if (($settings['craftsmanPerformanceType'] ?? 'commission_labor') !== 'labor') {
-                    $groupKey = (string)($settings['allocationGroupKey'] ?? 'normal');
-                    $weightByGroup[$groupKey] = ($weightByGroup[$groupKey] ?? 0) + (int)$settings['laborWeight'];
-                }
-            }
-            if (array_filter($weightByGroup, static fn (int $sum): bool => $sum !== 100 && $sum !== 0)) {
-                throw self::failure('authority_service_intent_craftsman_weight_invalid', ['lineId' => $lineId]);
             }
             $result[$lineId] = [
                 // The checkout line quantity is the immutable service intent
