@@ -5306,11 +5306,12 @@ button:disabled {
 .cashier-entitlement-selector-panel .cashier-entitlement-table__head,
 .cashier-entitlement-selector-panel .cashier-entitlement-table__row {
   grid-template-columns:
-    minmax(160px, 1.75fr)
-    minmax(56px, .52fr)
-    minmax(76px, .72fr)
-    minmax(96px, 1fr)
-    56px;
+    minmax(150px, 1.55fr)
+    minmax(50px, .47fr)
+    minmax(65px, .58fr)
+    minmax(65px, .58fr)
+    minmax(90px, .85fr)
+    52px;
   min-width: 0;
 }
 

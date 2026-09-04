@@ -121,6 +121,33 @@ function isSourceAvailable(source = {}) {
     && (!status || ['可用', 'available', 'valid', 'enabled'].includes(status))
 }
 
+// “有效卡”是会员资产视图：有剩余次数就必须让门店看见。
+// 能否本次使用仍由 isSourceAvailable/project.disabled 决定，欠款、
+// 到期或停用不能因此把卡从默认视图藏起来。
+function sourceHasRemainingTimes(source = {}) {
+  const sourceTimes = Number(source.remainingTimes)
+  if (Number.isFinite(sourceTimes) && sourceTimes > 0) return true
+  return (source.projects || []).some((project) => {
+    const projectTimes = Number(project?.remainingTimes)
+    return Number.isFinite(projectTimes) && projectTimes > 0
+  })
+}
+
+function sourceIsExpired(source = {}) {
+  const expiryDate = String(source.expiryDate || '').trim()
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(expiryDate)) return false
+  const endOfExpiryDay = Date.parse(`${expiryDate}T23:59:59`)
+  return Number.isFinite(endOfExpiryDay) && endOfExpiryDay < Date.now()
+}
+
+function sourceMatchesValidCardFilter(source = {}) {
+  const status = String(source.statusCode || source.status || '').trim().toLocaleLowerCase()
+  return sourceHasRemainingTimes(source)
+    && source.disabled !== true
+    && status !== 'disabled'
+    && !sourceIsExpired(source)
+}
+
 function sourceMatchesKeyword(source = {}, normalizedKeyword = '') {
   if (!normalizedKeyword) return true
   const searchable = [
@@ -161,7 +188,7 @@ const visibleSources = computed(() => {
       && String(source.statusCode || '').trim().toLocaleLowerCase() !== 'disabled') {
       return false
     }
-    const filterMatched = sourceFilter.value === 'all' || isSourceAvailable(source)
+    const filterMatched = sourceFilter.value === 'all' || sourceMatchesValidCardFilter(source)
     return filterMatched && sourceMatchesKeyword(source, normalizedKeyword)
   })
 })
@@ -395,6 +422,7 @@ function operationProjectSelected(source = {}, project = {}) {
             <span>卡项名称</span>
             <span>余次</span>
             <span>余额</span>
+            <span>欠款</span>
             <span>有效期</span>
             <span aria-label="操作" />
           </div>
@@ -414,6 +442,7 @@ function operationProjectSelected(source = {}, project = {}) {
               </div>
               <span>{{ displaySourceRemainingTimes(source) }}</span>
               <span>{{ displayNumber(source.remainingAmount) }}</span>
+              <span>{{ displayNumber(source.outstandingDebtAmount) }}</span>
               <span>{{ sourceExpiryDate(source) }}</span>
               <button
                 v-if="sourceOperationLabel()"
@@ -441,6 +470,7 @@ function operationProjectSelected(source = {}, project = {}) {
               </div>
               <span>{{ displayProjectRemainingTimes(source, project) }}</span>
               <span>{{ displayProjectRemainingAmount(source, project) }}</span>
+              <span aria-hidden="true" />
               <span aria-hidden="true" />
               <button
                 v-if="!sourceOperationLabel()"

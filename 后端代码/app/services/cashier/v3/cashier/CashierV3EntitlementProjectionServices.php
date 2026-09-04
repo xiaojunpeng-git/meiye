@@ -788,6 +788,12 @@ final class CashierV3EntitlementProjectionServices
                 $purchaseTimes = (int)$holderRuleAuthority['totalTimes'];
             }
             $order = $orders[(int)$holder['oid']] ?? [];
+            // 欠款权威归属为该卡来源销售订单。它是卡级余额，不能复制到
+            // 每个项目明细，否则一个卡含多个项目时会造成重复展示。
+            $outstandingDebtAmount = $this->pendingDebt(
+                $order,
+                $debts[(int)($order['id'] ?? 0)] ?? null
+            );
             $sourceAmounts = $kind['code'] === 'time_card'
                 ? $this->timeCardSourceAmounts($order)
                 : $this->sourceAmounts($projects);
@@ -806,6 +812,7 @@ final class CashierV3EntitlementProjectionServices
                 'purchaseTimes' => $purchaseTimes,
                 'purchaseAmount' => $sourceAmounts['purchaseAmount'],
                 'remainingAmount' => $sourceAmounts['remainingAmount'],
+                'outstandingDebtAmount' => $outstandingDebtAmount,
                 'amountCalculationVersion' => $sourceAmounts['calculationVersion'],
                 'cardRuleType' => is_array($holderRuleAuthority)
                     ? (string)$holderRuleAuthority['ruleType']

@@ -334,6 +334,7 @@ ok(
         && (int)($pair['source']['purchaseTimes'] ?? -1) === 10
         && (string)($pair['source']['purchaseAmount'] ?? '') === '100.00'
         && (string)($pair['source']['remainingAmount'] ?? '') === '80.00'
+        && (string)($pair['source']['outstandingDebtAmount'] ?? '') === '20.00'
         && ($pair['source']['orderRemark'] ?? '') === 'C2 购买备注 A'
         && (int)($pair['project']['purchaseTimes'] ?? -1) === 10
         && (string)($pair['project']['purchaseAmount'] ?? '') === '100.00'
