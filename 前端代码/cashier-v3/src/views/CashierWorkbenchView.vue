@@ -372,15 +372,6 @@ const supplement = computed(() => {
   return cashier.value.supplement || null
 })
 const checkout = computed(() => cashier.value.checkout || {})
-const isDebtRepaymentCheckout = computed(() => checkout.value.businessType === 'debt_repayment')
-// 充值欠款与销售欠款共用统一结账界面，但最终领域命令不同：充值欠款
-// 必须写入充值欠款补交事实并记录 recharge_debt_repayment 事件，不能落到
-// 销售欠款的 debt_repayment 事件契约。准备快照的权威行名用于区分两者。
-const isRechargeDebtRepaymentCheckout = computed(() => (
-  isDebtRepaymentCheckout.value
-  && Array.isArray(checkout.value.orderLines)
-  && checkout.value.orderLines.some((line) => String(line?.name || '') === '充值欠款补交')
-))
 const checkoutLocalOutcome = ref({})
 // Keep the immutable browser snapshot only while the success overlay is open.
 // The workbench is cleared after settlement, but receipt printing still needs
@@ -390,6 +381,18 @@ const checkoutReceiptSnapshot = ref(null)
 // 与收款选择一次性写入既有结账流程，由服务端读取最新余额与权益后完成校验。
 const localCheckoutPreview = ref(null)
 const localCheckoutPaymentOperations = ref([])
+// 欠款补交只消费 prepare 命令交接的持久化快照。根工作台没有也不应拥有
+// 这笔浏览器会话，因此所有后续动作从该唯一快照判断业务类型。
+const currentCheckoutSnapshot = computed(() => localCheckoutPreview.value || checkout.value)
+const isDebtRepaymentCheckout = computed(() => currentCheckoutSnapshot.value.businessType === 'debt_repayment')
+// 充值欠款与销售欠款共用统一结账界面，但最终领域命令不同：充值欠款
+// 必须写入充值欠款补交事实并记录 recharge_debt_repayment 事件，不能落到
+// 销售欠款的 debt_repayment 事件契约。准备快照的权威行名用于区分两者。
+const isRechargeDebtRepaymentCheckout = computed(() => (
+  isDebtRepaymentCheckout.value
+  && Array.isArray(currentCheckoutSnapshot.value.orderLines)
+  && currentCheckoutSnapshot.value.orderLines.some((line) => String(line?.name || '') === '充值欠款补交')
+))
 // A recovered draft can safely reopen on the final confirmation step only
 // when the authoritative payment snapshot is already fully balanced.  This
 // is a display position, never a settlement instruction.
@@ -5138,7 +5141,8 @@ async function queryHangOrderResult(command = {}) {
 
 async function finalizeLocalCheckoutPreview(event = {}) {
   const preview = localCheckoutPreview.value
-  localCheckoutPreview.value = null
+  // 欠款补交仍需保留这份服务端交接快照直到提交返回，以便最终动作被
+  // 正确路由到 submit-debt-repayment；不能在发送前清空并误走普通销售。
   try {
     const checkoutSnapshot = buildCheckoutSnapshot(preview || {})
     // Freeze the printable projection before the single settlement request.
@@ -5866,8 +5870,8 @@ async function openCheckoutFromService(event = {}) {
 
 async function openPreparedCheckout(event = {}) {
   const detail = event.detail || {}
-  let snapshot = clonePlain(checkout.value)
-  if (!isCompleteCheckoutPreparation(snapshot, detail.preparationRequestId)) {
+  let snapshot = clonePlain(detail.checkoutSnapshot)
+  if (detail.businessType !== 'debt_repayment' && !isCompleteCheckoutPreparation(snapshot, detail.preparationRequestId)) {
     await requestAction('open-cashier-workbench', { silent: true })
     snapshot = clonePlain(checkout.value)
   }
@@ -5921,6 +5925,8 @@ async function openPreparedCheckout(event = {}) {
             id: String(snapshot.sourceDocumentId || ''),
             no: String(snapshot.sourceDocumentNo || '')
           },
+      // 收款金额仅在本次会话内编辑；最终提交仍使用上方服务端 request_id
+      // 对应的唯一快照，不会创建普通销售草稿或读取根工作台。
       localDraftPreview: true
     }
     localCheckoutPaymentOperations.value = []

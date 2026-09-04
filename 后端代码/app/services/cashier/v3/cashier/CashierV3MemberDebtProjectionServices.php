@@ -139,13 +139,14 @@ final class CashierV3MemberDebtProjectionServices
         return $this->rows(Db::name('store_debt')->alias('d')
             ->leftJoin('cashier_v3_recharge_debt_authority r', 'r.debt_id=d.id')
             ->leftJoin('cashier_v3_debt_authority a', 'a.debt_id=d.id')
-            ->leftJoin('cashier_v3_sales_order s', 's.order_id=a.sales_order_id')
+            ->leftJoin('cashier_v3_sales_order s', 's.id=a.sales_order_record_id AND s.order_id=a.sales_order_id')
             ->leftJoin('store_order o', 'o.id=d.order_id')
             ->where('d.uid', $memberId)
             ->where('d.status', 0)
-            ->field('d.id,d.debt_no,d.order_id,d.order_sn,d.total_debt,d.repaid_debt,d.status,d.add_time,d.update_time,d.remark,'
+            ->field('d.id,d.store_id AS debt_store_id,d.debt_no,d.order_id,d.order_sn,d.total_debt,d.repaid_debt,d.status,d.add_time,d.update_time,d.remark,'
                 . 'r.member_id AS recharge_member_id,r.recharge_id,r.recharge_order_no_snapshot,'
-                . 'a.sales_order_id,a.sales_order_no_snapshot,s.member_id AS v3_order_member_id,o.uid AS order_member_id')
+                . 'a.store_id AS authority_store_id,a.member_id AS authority_member_id,a.sales_order_record_id,a.sales_order_id,a.sales_order_no_snapshot,'
+                . 's.member_id AS v3_order_member_id,o.uid AS order_member_id')
             ->order('d.add_time desc,d.id desc')
             ->select());
     }
@@ -157,8 +158,25 @@ final class CashierV3MemberDebtProjectionServices
             && (int)($row['recharge_id'] ?? 0) > 0) {
             return 'recharge';
         }
+        // The debt authority is the immutable V3 sales-debt mapping. Some
+        // historical migrations have the authority row but no longer retain a
+        // cashier_v3_sales_order projection. A missing projection must not
+        // hide a real outstanding debt. If that projection does exist, keep it
+        // as an additional member consistency check.
+        $salesOrderRecordId = (int)($row['sales_order_record_id'] ?? 0);
+        $debtOrderId = (int)($row['order_id'] ?? 0);
         if (trim((string)($row['sales_order_id'] ?? '')) !== ''
-            && (int)($row['v3_order_member_id'] ?? 0) === $memberId) {
+            && trim((string)($row['sales_order_no_snapshot'] ?? '')) !== ''
+            && (int)($row['authority_member_id'] ?? 0) === $memberId
+            && (int)($row['authority_store_id'] ?? 0) > 0
+            && (int)($row['authority_store_id'] ?? 0) === (int)($row['debt_store_id'] ?? 0)
+            // New V3 debts keep the sales-order record ID. Migration debt
+            // authorities intentionally use 0 and retain the immutable order
+            // number snapshot instead, while store_debt keeps its legacy row.
+            && (($salesOrderRecordId > 0 && $debtOrderId === $salesOrderRecordId)
+                || ($salesOrderRecordId === 0 && $debtOrderId > 0))
+            && ((int)($row['v3_order_member_id'] ?? 0) === 0
+                || (int)($row['v3_order_member_id'] ?? 0) === $memberId)) {
             return 'v3_sale';
         }
         if ((int)($row['order_id'] ?? 0) > 0

@@ -2761,6 +2761,13 @@ function resolveCommandContexts(action, payload) {
   if (action === 'void-service-record') {
     return { invalid: false, contexts: [] }
   }
+  // 欠款补交从当前欠款明细进入。选客和明细都是浏览器局部投影，不能把
+  // 工作台或欠款的展示版本当成准入条件；服务端会在同一事务中锁定欠款、
+  // 按最新未还金额生成唯一收款草稿。否则跨店或刷新后的正常欠款会被前端
+  // 自动重载工作台并错误清成游客。
+  if (action === 'prepare-debt-repayment' || action === 'submit-debt-repayment') {
+    return { invalid: false, contexts: [] }
+  }
   // Project replacement is a live entitlement mutation. Its handler locks
   // the current card and benefit rows inside the transaction, so no browser
   // projection/version context is accepted or required for this branch.
@@ -3221,6 +3228,7 @@ function applyCashierV3EnvelopeState(rawResult, requestMeta = {}, options = {}) 
   // backend-generated state envelope for diagnostics, but applying it here
   // can replace the selected member with a guest root. Keep the command
   // result and ignore only that root state for this explicitly scoped flow.
+  //
   if (requestMeta.preserveRootState === true) {
     return {
       accepted: true,
@@ -3607,6 +3615,14 @@ export async function requestCashierV3Action(action, payload = {}) {
     && String(requestBody.operationType || '') === 'project_replacement'
   const directCheckoutSnapshot = canonicalAction === 'submit-checkout'
     && isRecord(requestBody.checkoutSnapshot)
+  // 欠款补交的可还金额、来源归属和并发锁全部由服务端在同一事务内读取。
+  // 它不接受浏览器工作台版本，因此空 contexts 是这个命令的正常合同，
+  // 不能误判为“缺少版本”后刷新整个工作台并把当前会员覆盖为游客。
+  const serverLockedDebtRepaymentPreparation = [
+    'prepare-debt-repayment',
+    'prepare-recharge-debt-repayment',
+    'submit-debt-repayment'
+  ].includes(canonicalAction)
   // 预约只是单据资料保存。它不依赖收银工作台或预约资源版本，直接按
   // 服务端单据写入结果处理，也不应因工作台投影未同步而拒绝提交。
   const reservationDataWrite = ['create-reservation', 'update-reservation'].includes(canonicalAction)
@@ -3684,7 +3700,7 @@ export async function requestCashierV3Action(action, payload = {}) {
   }
   const serverDiscoverableContextAction = ['void-order-center-supplement', 'void-service-record'].includes(canonicalAction)
     || ['void-order-center-supplement', 'void-service-record'].includes(action)
-  if (!readOnly && !reservationDataWrite && !directCheckoutSnapshot && !liveProjectReplacement && !serverDiscoverableContextAction
+  if (!readOnly && !reservationDataWrite && !directCheckoutSnapshot && !liveProjectReplacement && !serverDiscoverableContextAction && !serverLockedDebtRepaymentPreparation
     && (resolvedContexts.invalid || hasInvalidWriteContexts(contexts))) {
     // No command has been sent yet, so a single automatic root recovery is
     // safe. This covers the narrow interval after entering the cashier where

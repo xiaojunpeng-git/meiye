@@ -4,6 +4,7 @@ namespace app\services\cashier\v3\cashier;
 
 use app\services\cashier\v3\CashierV3ActionDispatcher;
 use app\services\cashier\v3\CashierV3CommandException;
+use app\services\cashier\v3\CashierV3CheckoutWorkspaceIdentity;
 use app\services\cashier\v3\CashierV3OperatorScope;
 use app\services\cashier\v3\CashierV3ResultCode;
 use app\services\cashier\v3\card\CashierV3CardOperationAuthorityServices;
@@ -32,7 +33,6 @@ use app\services\cashier\v3\settlement\CashierV3CheckoutBalanceAuthorityDiscover
 use app\services\cashier\v3\settlement\CashierV3CheckoutProjectionServices;
 use app\services\cashier\v3\settlement\CashierV3CheckoutResultQueryServices;
 use app\services\cashier\v3\settlement\CashierV3DebtRepaymentServices;
-use app\services\cashier\v3\settlement\CashierV3DebtRepaymentResourceDiscovery;
 use app\services\cashier\v3\settlement\CashierV3RechargeDebtRepaymentServices;
 use app\services\cashier\v3\settlement\CashierV3CheckoutSubmissionOrchestrator;
 use app\services\cashier\v3\settlement\CashierV3CheckoutSubmissionPreparationServices;
@@ -205,13 +205,33 @@ final class CashierV3CashierModule
         if ($handlers->hasCommand('prepare-debt-repayment') || $handlers->hasCommand('submit-debt-repayment')) {
             throw new \LogicException('C2 cashier module: debt repayment command handler duplicate');
         }
-        $handlers->registerCommand('prepare-debt-repayment', function (array $scope) use ($debtRepayments): array {
+        $handlers->registerCommand('prepare-debt-repayment', function (array $scope) use ($debtRepayments, $checkoutRootProjection): array {
             $prepared = $debtRepayments->prepareInTx($scope);
+            $operator = $scope['operator_scope'];
+            $dataScope = $scope['data_scope'];
+            $stateContextId = trim((string)($scope['state_context_id'] ?? ''));
+            $workspaceId = CashierV3CheckoutWorkspaceIdentity::id($operator->storeId(), $stateContextId);
+            // 此处按刚刚锁定并持久化的 request_id 读取同一笔结账快照。
+            // 不读取浏览器工作台根状态，也不从其他历史草稿/投影补数据。
+            $checkoutSnapshot = $checkoutRootProjection->readEditingRequest(
+                (string)$prepared['checkoutRequestId'],
+                $workspaceId,
+                $stateContextId,
+                $operator,
+                $dataScope
+            );
+            if ($checkoutSnapshot === null) {
+                throw new CashierV3CommandException(
+                    CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
+                    '欠款收款快照未能按当前记录读取，请重新发起还款。'
+                );
+            }
             return [
-                'data' => ['debtRepaymentPreparation' => $prepared],
+                'data' => [
+                    'debtRepaymentPreparation' => $prepared,
+                    'checkoutSnapshot' => $checkoutSnapshot,
+                ],
                 'business_no' => (string)$prepared['checkoutRequestId'],
-                'touched' => ['cashier_workspace'],
-                'return_root_state' => true,
                 'message' => '欠款补交收款已准备完成。',
             ];
         });
@@ -1128,12 +1148,27 @@ final class CashierV3CashierModule
 
         $dispatcher->policies()->register(new CashierV3ContextPolicy(
             'prepare-debt-repayment',
-            ['cashier_workspace', 'debt_record'],
             [],
-            [$dispatcher->policies(), 'resolveCheckoutSourceBranch'],
-            ['cashier_workspace'],
-            ['debt_record'],
-            ['debt_record']
+            [],
+            static function (array $payload, array $base): array {
+                // 欠款补交不采信浏览器的工作台/欠款版本。服务层会锁定当前
+                // 欠款、权威来源和人员快照后再创建草稿；这里仅保留空的
+                // context 契约，禁止自动把浏览器投影版本补回请求。
+                return [
+                    'required' => [],
+                    'allowed' => [],
+                    'identities' => [],
+                    'required_read_roles' => [],
+                    'required_touched_roles' => [],
+                    // 欠款补交只以事务中锁定的当前欠款为准；浏览器不提交
+                    // 工作台或欠款展示版本，因此空 contexts 是正常合同。
+                    'allows_empty_contexts' => true,
+                    'allows_empty_touched_result' => true,
+                ];
+            },
+            [],
+            [],
+            []
         ));
 
         $dispatcher->policies()->register(new CashierV3ContextPolicy(
@@ -1162,21 +1197,28 @@ final class CashierV3CashierModule
             ['cashier_workspace', 'member', 'member_balance']
         ));
 
-        $submitDebtRepaymentPolicy = new CashierV3ContextPolicy(
+        $dispatcher->policies()->register(new CashierV3ContextPolicy(
             'submit-debt-repayment',
-            ['cashier_workspace', 'checkout_request'],
-            ['debt_record'],
-            [$dispatcher->policies(), 'resolveCheckoutFollowUpBranch'],
-            ['cashier_workspace', 'checkout_request', 'debt_record'],
-            ['debt_record'],
-            ['debt_record']
-        );
-        $submitDebtRepaymentPolicy->configureServerResourceDiscovery(
-            [new CashierV3DebtRepaymentResourceDiscovery(), 'discover'],
-            ['debt_record'],
-            ['debt_record']
-        );
-        $dispatcher->policies()->register($submitDebtRepaymentPolicy);
+            [],
+            [],
+            static function (array $payload, array $base): array {
+                // 最终提交和准备一样，只接受 checkout_request 的稳定标识。
+                // 服务层在同一事务中锁定该请求、当前欠款及收款金额；不得
+                // 用浏览器工作台、欠款或任何历史版本作为写入前置条件。
+                return [
+                    'required' => [],
+                    'allowed' => [],
+                    'identities' => [],
+                    'required_read_roles' => [],
+                    'required_touched_roles' => [],
+                    'allows_empty_contexts' => true,
+                    'allows_empty_touched_result' => true,
+                ];
+            },
+            [],
+            [],
+            []
+        ));
 
         $dispatcher->policies()->register(new CashierV3ContextPolicy(
             'submit-recharge-debt-repayment',

@@ -886,6 +886,9 @@ async function selectMemberFromSelector(record) {
     if (memberId) {
       const summaryResult = await requestCashierV3Action('query-cashier-member-summary', {
         memberId,
+        // 选客后的摘要只补齐余额/欠款；不能以查询回包的默认游客根状态
+        // 覆盖浏览器正在编辑的收银客户。
+        preserveRootState: true,
         silent: true
       })
       if (isSucceededResult(summaryResult)) {
@@ -1308,6 +1311,9 @@ async function openMemberDebt(memberId = null) {
     const result = await requestCashierV3Action('open-member-debt-repayment', {
       memberId: memberDetailId(selectedMember),
       selectorEntry: 'cashier',
+      // 欠款明细是局部只读快照。后端回包携带的根状态并不代表当前收银
+      // 会员，若整包替换会把已选会员误还原成游客；只采用下方 debtSnapshot。
+      preserveRootState: true,
       silent: true
     })
     // HTTP responses use the common { status, data: <V3 envelope> } wrapper,
@@ -1353,11 +1359,13 @@ function closeMemberDebt() {
   initialDebtRecordId.value = ''
 }
 
-async function openDebtRepaymentCheckout(preparationRequestId, debtRecordId) {
+async function openDebtRepaymentCheckout(preparationRequestId, debtRecordId, checkoutSnapshot) {
   const handoff = {
     businessType: 'debt_repayment',
     preparationRequestId,
-    debtRecordId
+    debtRecordId,
+    // 唯一来源：本次 prepare 命令返回的服务端持久化结账快照。
+    checkoutSnapshot
   }
   isMemberDebtOpen.value = false
   activeDebtMember.value = null
@@ -1377,37 +1385,16 @@ async function openDebtRepaymentCheckout(preparationRequestId, debtRecordId) {
 async function prepareDebtRepayment(payload = {}) {
   if (isDebtRepaymentPreparing.value) return { success: false, message: '正在准备收款，请勿重复操作。' }
   const preparationRequestId = createCashierV3CommandId('CHECKOUT_PREPARE')
-  const requestedAmount = Number(payload.amount)
-  const checkoutAmount = (checkout) => Number(
-    checkout?.summary?.receivableAmount
-      ?? checkout?.payment?.summary?.receivableAmount
-      ?? checkout?.receivableAmount
-      ?? NaN
-  )
-  const checkoutMatchesRequestedAmount = (checkout) => (
-    Number.isFinite(requestedAmount)
-      && requestedAmount > 0
-      && Math.abs(checkoutAmount(checkout) - requestedAmount) < 0.000001
-  )
   isDebtRepaymentPreparing.value = true
   try {
-    const currentCheckout = state.cashier?.checkout
-    if (currentCheckout
-      && currentCheckout.businessType === 'debt_repayment'
-      && String(currentCheckout.sourceDocumentId || '') === String(payload.debtRecordId || '')
-      && String(currentCheckout.requestStatus || '') === 'editing'
-      && checkoutMatchesRequestedAmount(currentCheckout)
-      && currentCheckout.preparationRequestId) {
-      await openDebtRepaymentCheckout(currentCheckout.preparationRequestId, payload.debtRecordId)
-      return { result: { status: 'success', code: 'DEBT_REPAYMENT_DRAFT_RESUMED' } }
-    }
     const prepareAction = payload.rechargeDebt === true
       ? 'prepare-recharge-debt-repayment'
       : 'prepare-debt-repayment'
     const result = await requestCashierV3Action(prepareAction, {
       ...payload,
       preparationRequestId,
-      idempotencyKey: preparationRequestId
+      idempotencyKey: preparationRequestId,
+      silent: true
     })
     // 准备命令已经在服务端原子落下统一结账草稿；响应中的准备标识就是
     // 本次交接凭证。不要再用一次根状态刷新决定是否能跳转，否则会员欠款
@@ -1416,19 +1403,20 @@ async function prepareDebtRepayment(payload = {}) {
     const prepared = responseEnvelope?.data?.debtRepaymentPreparation
       || result?.data?.debtRepaymentPreparation
       || result?.result?.data?.debtRepaymentPreparation
-    // 欠款准备命令的业务草稿已经在服务端原子落库。即使完整根投影因
-    // 工作台并发版本被标记为 stateIgnored，也不能把已成功的准备凭证
-    // 当成失败；凭证本身足以安全交接到收款页，收款页随后会重新读取
-    // 权威结账草稿。否则会出现“后台已生成草稿、前台只提示操作失败”。
+    const checkoutSnapshot = responseEnvelope?.data?.checkoutSnapshot
+      || result?.data?.checkoutSnapshot
+      || result?.result?.data?.checkoutSnapshot
     const preparedBusinessSucceeded = ['succeeded', 'success'].includes(resultStatus(result))
-    if (preparedBusinessSucceeded && prepared?.preparationRequestId) {
-      await openDebtRepaymentCheckout(String(prepared.preparationRequestId), payload.debtRecordId)
+    if (preparedBusinessSucceeded && prepared?.preparationRequestId && checkoutSnapshot) {
+      await openDebtRepaymentCheckout(
+        String(prepared.preparationRequestId),
+        payload.debtRecordId,
+        checkoutSnapshot
+      )
       return result
     }
-    // 欠款明细打开时已经取得 debt_record 和 workspace 的同一工作台版本。
-    // 这里额外重读工作台会推进 workspace 版本，却不会同步公开版本仓；下一条
-    // prepare 命令随即携带旧版本并被服务端拒绝。准备响应缺少交接凭证时保留
-    // 原始业务结果，由调用方展示服务端原因，不能猜测草稿已存在而跳转。
+    // 服务端无法给出同一笔锁定快照时禁止进入收款页；不回读根状态、不猜测
+    // 历史草稿，也不以任何浏览器版本作为兜底。
     return result
   } finally {
     isDebtRepaymentPreparing.value = false

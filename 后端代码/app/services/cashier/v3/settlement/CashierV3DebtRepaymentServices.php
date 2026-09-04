@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace app\services\cashier\v3\settlement;
 
 use app\services\cashier\v3\CashierV3CommandException;
+use app\services\cashier\v3\CashierV3CrossStoreEntitlementPolicy;
 use app\services\cashier\v3\CashierV3DataScopeContext;
 use app\services\cashier\v3\CashierV3OperatorScope;
 use app\services\cashier\v3\CashierV3ResultCode;
@@ -96,7 +97,9 @@ final class CashierV3DebtRepaymentServices
             $stateContextId = (string)$editingDraft['stateContextId'];
             $workspaceVersion = (int)$editingDraft['requestVersion'];
         } else {
-            $workspaceVersion = self::contextVersion((array)($scope['contexts'] ?? []), 'cashier_workspace', $workspaceId);
+            // 欠款补交只认可事务内刚锁定的当前欠款。这里的草稿快照版本
+            // 仅标识这次服务端锁定的事实，不再读取浏览器工作台版本。
+            $workspaceVersion = self::latestSnapshotVersion($debt);
         }
         $preparationRequestId = $idempotencyKey;
         $current = null;
@@ -198,7 +201,7 @@ final class CashierV3DebtRepaymentServices
                 'storeId' => $operator->storeId(),
                 'kind' => 'debt_record',
                 'id' => (string)$debtId,
-                'sourceVersion' => self::contextVersion((array)($scope['contexts'] ?? []), 'debt_record', (string)$debtId),
+                'sourceVersion' => self::latestSnapshotVersion($debt),
                 'role' => 'debt_record',
             ]]
         );
@@ -668,15 +671,33 @@ final class CashierV3DebtRepaymentServices
     {
         $debt = (array)Db::name('store_debt')->where('id', $debtId)->lock(true)->find();
         $authority = (array)Db::name('cashier_v3_debt_authority')->where('debt_id', $debtId)->lock(true)->find();
+        $sourceStoreId = (int)($authority['store_id'] ?? 0);
+        $salesOrderRecordId = (int)($authority['sales_order_record_id'] ?? 0);
+        $isMigrationAuthority = $salesOrderRecordId === 0;
         if (!$authority || !$debt || (string)$authority['tenant_id'] !== $scope->tenantId()
-            || (int)$authority['store_id'] !== $operator->storeId() || (int)$debt['store_id'] !== $operator->storeId()
-            || (int)$authority['member_id'] !== (int)$debt['uid'] || (int)$debt['order_id'] !== (int)$authority['sales_order_record_id']) {
+            || $sourceStoreId <= 0 || (int)$debt['store_id'] !== $sourceStoreId
+            || (!CashierV3CrossStoreEntitlementPolicy::enabled() && $sourceStoreId !== $operator->storeId())
+            || (int)$authority['member_id'] !== (int)$debt['uid']
+            || trim((string)($authority['sales_order_id'] ?? '')) === ''
+            || trim((string)($authority['sales_order_no_snapshot'] ?? '')) === ''
+            || (!$isMigrationAuthority && (int)$debt['order_id'] !== $salesOrderRecordId)
+            || ($isMigrationAuthority && (int)$debt['order_id'] <= 0)) {
             throw self::failure('debt_repayment_v3_authority_missing');
         }
-        $order = (array)Db::name('cashier_v3_sales_order')->where('id', (int)$authority['sales_order_record_id'])
-            ->where('order_id', (string)$authority['sales_order_id'])->where('tenant_id', $scope->tenantId())->lock(true)->find();
+        $order = $salesOrderRecordId > 0
+            ? (array)Db::name('cashier_v3_sales_order')->where('id', $salesOrderRecordId)
+                ->where('order_id', (string)$authority['sales_order_id'])->where('tenant_id', $scope->tenantId())->lock(true)->find()
+            : [];
         $items = Db::name('store_debt_item')->where('debt_id', $debtId)->order('id asc')->lock(true)->select()->toArray();
-        if (!$order || !$items || (int)$order['member_id'] !== (int)$authority['member_id'] || (int)$order['store_id'] !== $operator->storeId()) {
+        // cashier_v3_debt_authority is the immutable mapping created with the
+        // debt. Historical migration rows can legitimately have a zero order
+        // record ID and no cashier_v3_sales_order read projection. In that
+        // case the locked debt header, authority map and item totals are the
+        // sole latest snapshot.
+        // When the projection remains available, it is still an extra
+        // consistency check and any disagreement blocks the repayment.
+        if (!$items || ($order && ((int)$order['member_id'] !== (int)$authority['member_id']
+            || (int)$order['store_id'] !== $sourceStoreId))) {
             throw self::failure('debt_repayment_sales_order_mismatch');
         }
         $itemTotal = 0;
@@ -728,7 +749,7 @@ final class CashierV3DebtRepaymentServices
             if (!$item || $itemId <= 0 || isset($personnel[$itemId])
                 || (int)$row['debt_id'] !== $debtId
                 || (string)$row['tenant_id'] !== $scope->tenantId()
-                || (int)$row['store_id'] !== $operator->storeId()
+                || (int)$row['store_id'] !== $sourceStoreId
                 || (int)$row['member_id'] !== (int)$authority['member_id']
                 || (int)$row['line_debt_amount_cents'] !== self::storedMoneyCents($item['debt_amount'], 'item_debt')
                 || !hash_equals((string)($row['snapshot_fingerprint'] ?? ''), hash('sha256', json_encode($fingerprintInput, JSON_UNESCAPED_SLASHES)))) {
@@ -766,6 +787,34 @@ final class CashierV3DebtRepaymentServices
             ->order('source_line_id asc,id asc')->lock(true)->select()->toArray();
         $factsByLine = [];
         foreach ($facts as $fact) $factsByLine[(string)$fact['source_line_id']][] = $fact;
+
+        // 迁移欠款的权威业务数据是 store_debt + debt_authority + debt_item。
+        // 早期迁移不会补造 V3 销售行或销售业绩事实，因此不能把“没有
+        // 投影行”误判为“没有欠款”。保留空的原销售行标识，后续只写本次
+        // 补交的收款事实，不虚构一条原销售行收款分摊。
+        if ((int)($authority['sales_order_record_id'] ?? 0) === 0 && !$lines) {
+            $personnel = [];
+            foreach ($items as $item) {
+                $itemId = (int)($item['id'] ?? 0);
+                if ($itemId <= 0) {
+                    throw self::failure('debt_repayment_item_authority_invalid');
+                }
+                $personnel[$itemId] = [
+                    'authority' => [
+                        'order_line_id' => '',
+                        'checkout_line_id' => '',
+                        'snapshot_fingerprint' => hash('sha256', json_encode([
+                            'migrationDebtWithoutV3SaleLine',
+                            $itemId,
+                            (int)($item['debt_id'] ?? 0),
+                            (string)($item['debt_amount'] ?? ''),
+                        ], JSON_UNESCAPED_SLASHES)),
+                    ],
+                    'salespeople' => [],
+                ];
+            }
+            return $personnel;
+        }
 
         $personnel = [];
         $usedLines = [];
@@ -909,6 +958,22 @@ final class CashierV3DebtRepaymentServices
      */
     private function persistOriginalSalePaymentAllocationsInTx(array $paymentFacts, array $authority, array $items, array $itemTargets, array $personnel, string $commandKey, array $event, string $checkoutRequestId, array $dimensions, CashierV3OperatorScope $operator, CashierV3DataScopeContext $scope, int $now): void
     {
+        // 历史迁移没有对应的 V3 原销售行时，只能记录本次已经实际成功的
+        // 收款事实；禁止凭空创建原销售行／销售分摊事实。若迁移行已有
+        // 冻结销售行，仍继续走下方同一分摊校验。
+        if ((int)($authority['sales_order_record_id'] ?? 0) === 0) {
+            $hasOriginalLine = false;
+            foreach ($items as $item) {
+                $itemId = (int)($item['id'] ?? 0);
+                if (trim((string)($personnel[$itemId]['authority']['order_line_id'] ?? '')) !== '') {
+                    $hasOriginalLine = true;
+                    break;
+                }
+            }
+            if (!$hasOriginalLine) {
+                return;
+            }
+        }
         $lineBases = [];
         foreach ($items as $item) {
             $itemId = (int)($item['id'] ?? 0);
@@ -1075,7 +1140,7 @@ final class CashierV3DebtRepaymentServices
     private function successResult(string $id,string $no,string $requestId,int $version,int $amount,bool $replayed):array{return ['data'=>['debtRepayment'=>['contractVersion'=>self::SUBMIT_CONTRACT_VERSION,'repaymentId'=>$id,'repaymentNo'=>$no,'checkoutRequestId'=>$requestId,'checkoutRequestVersion'=>$version,'amount'=>self::money($amount),'status'=>'succeeded','replayed'=>$replayed]],'business_no'=>$no,'touched'=>['cashier_workspace','checkout_request','debt_record'],'return_root_state'=>true,'message'=>'欠款补交成功。'];}
     private static function debtFingerprint(array $authority,array $debt,array $items,array $personnel):string{$snapshot=[$authority['authority_fingerprint']??'',(int)($debt['id']??0),(string)($debt['total_debt']??''),(string)($debt['repaid_debt']??''),(int)($debt['status']??-1),(int)($debt['update_time']??0)];foreach($items as $item){$itemId=(int)$item['id'];$snapshot[]=[(int)$item['id'],(string)$item['debt_amount'],(string)$item['repaid_debt'],(int)$item['update_time'],(string)($personnel[$itemId]['authority']['snapshot_fingerprint']??'')];}return hash('sha256',json_encode($snapshot,JSON_UNESCAPED_SLASHES));}
     private static function workspaceId(CashierV3OperatorScope $operator,string $state):string{if($state===''||strlen($state)>64)throw self::failure('debt_repayment_state_context_invalid');return \app\services\cashier\v3\CashierV3CheckoutWorkspaceIdentity::id($operator->storeId(),$state);}
-    private static function contextVersion(array $contexts,string $kind,string $id):int{foreach($contexts as $context){if((string)($context['kind']??'')===$kind&&(string)($context['id']??'')===$id){$v=(int)($context['expected_version']??$context['expectedVersion']??0);if($v>0)return $v;}}throw self::failure('debt_repayment_context_version_missing',['kind'=>$kind,'id'=>$id]);}
+    private static function latestSnapshotVersion(array $debt):int{return max(1,(int)($debt['update_time']??0));}
     private static function positiveInt($value,string $field):int{if(is_bool($value)||!is_numeric($value)||(int)$value<=0)throw self::failure('debt_repayment_positive_int_invalid',['field'=>$field]);return (int)$value;}
     private static function inputMoneyCents($value,string $field):int{$raw=trim((string)$value);if(preg_match('/^[1-9][0-9]*$/D',$raw)!==1||strlen($raw)>10)throw self::failure('debt_repayment_money_invalid',['field'=>$field]);return (int)$raw*100;}
     private static function storedMoneyCents($value,string $field):int{$raw=trim((string)$value);if(preg_match('/^(?:0|[1-9][0-9]*)(?:\.([0-9]{1,2}))?$/D',$raw,$m)!==1)throw self::failure('debt_repayment_stored_money_invalid',['field'=>$field]);[$whole,$fraction]=array_pad(explode('.',$raw,2),2,'');return (int)$whole*100+(int)str_pad($fraction,2,'0');}

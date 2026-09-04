@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace app\services\cashier\v3\order;
 
 use app\services\cashier\v3\CashierV3CommandException;
+use app\services\cashier\v3\CashierV3CrossStoreEntitlementPolicy;
 use app\services\cashier\v3\CashierV3DataScopeContext;
 use app\services\cashier\v3\CashierV3OperatorScope;
 use app\services\cashier\v3\CashierV3ResultCode;
@@ -55,11 +56,11 @@ final class CashierV3OrderCenterVoidServices
         $existing = Db::name(self::OPERATION_TABLE)->where('tenant_id', $dataScope->tenantId())
             ->where('command_idempotency_key', $key)->lock(true)->find();
         if ($existing) return ['data' => ['void' => ['operationNo' => (string)$existing['operation_no'], 'replayed' => true]],
-            'business_no' => (string)$existing['operation_no'], 'touched' => ['supplement_record'], 'message' => '该取消欠款操作已完成。'];
+            'business_no' => (string)$existing['operation_no'], 'touched' => ['supplement_record'], 'message' => '该补交记录已作废。'];
         $recordOperation = Db::name(self::OPERATION_TABLE)->where('tenant_id', $dataScope->tenantId())
             ->where('record_id', $recordId)->where('status', 'succeeded')->lock(true)->find();
         if ($recordOperation) return ['data' => ['void' => ['operationNo' => (string)$recordOperation['operation_no'], 'replayed' => true]],
-            'business_no' => (string)$recordOperation['operation_no'], 'touched' => ['supplement_record'], 'message' => '该取消欠款操作已完成。'];
+            'business_no' => (string)$recordOperation['operation_no'], 'touched' => ['supplement_record'], 'message' => '该补交记录已作废。'];
 
         if ($action === 'void-order-center-supplement') {
             return $this->voidSupplement($recordId, $reason, $key, $operator, $dataScope, $recorder, $execution, (array)($scope['event_contract'] ?? []));
@@ -85,8 +86,13 @@ final class CashierV3OrderCenterVoidServices
         $amountCents = (int)($row['repayment_amount_cents'] ?? $row['amount_cents'] ?? 0);
         if ($amountCents <= 0) throw self::failure('补交金额资料异常，无法作废。', 'supplement_amount_invalid');
 
-        $debt = (array)Db::name('store_debt')->where('id', (int)$row['debt_id'])->where('store_id', $operator->storeId())->lock(true)->find();
-        if (!$debt || (int)($debt['uid'] ?? 0) !== (int)$row['member_id']) throw self::failure('原欠款资料已变化，无法作废。', 'supplement_debt_missing');
+        $debt = (array)Db::name('store_debt')->where('id', (int)$row['debt_id'])->lock(true)->find();
+        $sourceStoreId = (int)($debt['store_id'] ?? 0);
+        if (!$debt || $sourceStoreId <= 0
+            || (!CashierV3CrossStoreEntitlementPolicy::enabled() && $sourceStoreId !== $operator->storeId())
+            || (int)($debt['uid'] ?? 0) !== (int)$row['member_id']) {
+            throw self::failure('原欠款资料已变化，无法作废。', 'supplement_debt_missing');
+        }
         $repaid = $this->moneyCents($debt['repaid_debt'] ?? '0');
         if ($repaid < $amountCents) throw self::failure('当前欠款金额不足以冲销该补交记录。', 'supplement_debt_projection_mismatch');
 

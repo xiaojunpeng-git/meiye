@@ -2114,7 +2114,7 @@ onBeforeUnmount(() => {
                 type="button"
                 class="button button--text button--danger"
                 @click="openRecordDetail(record)"
-              >{{ activeTabKey === 'supplement' ? '取消欠款' : '作废' }}</button>
+              >作废</button>
             </td>
           </tr>
         </tbody>

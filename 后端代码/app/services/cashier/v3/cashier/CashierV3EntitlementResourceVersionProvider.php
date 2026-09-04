@@ -340,15 +340,16 @@ final class CashierV3EntitlementResourceVersionProvider implements CashierV3Data
                 ->join('store_debt d', 'd.id=a.debt_id')
                 ->where('a.debt_id', $id)
                 ->where('a.tenant_id', $operatorScope->tenantId())
-                ->where('a.store_id', $operatorScope->storeId())
-                ->field('a.debt_id,a.member_id,a.sales_order_id,a.authority_fingerprint,d.uid,d.store_id,d.total_debt,d.repaid_debt,d.status,d.update_time');
+                ->field('a.debt_id,a.member_id,a.sales_order_id,a.authority_fingerprint,a.store_id AS authority_store_id,d.uid,d.store_id AS debt_store_id,d.total_debt,d.repaid_debt,d.status,d.update_time');
             if ($lock) {
                 $query->lock(true);
             }
             $debt = $query->find();
             if (!$debt
                 || (int)$debt['member_id'] !== (int)$debt['uid']
-                || !$this->allowsSourceStore((int)$debt['store_id'], $operatorScope)) {
+                || (int)($debt['authority_store_id'] ?? 0) <= 0
+                || (int)$debt['authority_store_id'] !== (int)$debt['debt_store_id']
+                || !$this->allowsSourceStore((int)$debt['authority_store_id'], $operatorScope)) {
                 // 充值欠款使用 order_id=0，并由独立的充值欠款权威表维护。
                 // 版本发现必须和会员欠款投影使用同一权威分支，否则有效充值欠款
                 // 在打开“补交”时会被误判为不存在，无法进入收款流程。
@@ -356,8 +357,7 @@ final class CashierV3EntitlementResourceVersionProvider implements CashierV3Data
                     ->join('store_debt d', 'd.id=a.debt_id')
                     ->where('a.debt_id', $id)
                     ->where('a.tenant_id', $operatorScope->tenantId())
-                    ->where('a.store_id', $operatorScope->storeId())
-                    ->field('a.debt_id,a.member_id,a.recharge_id,a.recharge_order_no_snapshot,a.authority_fingerprint,d.uid,d.store_id,d.order_id,d.total_debt,d.repaid_debt,d.status,d.update_time');
+                    ->field('a.debt_id,a.member_id,a.recharge_id,a.recharge_order_no_snapshot,a.authority_fingerprint,a.store_id AS authority_store_id,d.uid,d.store_id AS debt_store_id,d.order_id,d.total_debt,d.repaid_debt,d.status,d.update_time');
                 if ($lock) {
                     $rechargeQuery->lock(true);
                 }
@@ -365,7 +365,9 @@ final class CashierV3EntitlementResourceVersionProvider implements CashierV3Data
                 if (!$rechargeDebt
                     || (int)$rechargeDebt['member_id'] !== (int)$rechargeDebt['uid']
                     || (int)($rechargeDebt['order_id'] ?? 0) !== 0
-                    || !$this->allowsSourceStore((int)$rechargeDebt['store_id'], $operatorScope)) {
+                    || (int)($rechargeDebt['authority_store_id'] ?? 0) <= 0
+                    || (int)$rechargeDebt['authority_store_id'] !== (int)$rechargeDebt['debt_store_id']
+                    || !$this->allowsSourceStore((int)$rechargeDebt['authority_store_id'], $operatorScope)) {
                     return null;
                 }
                 return [

@@ -426,12 +426,18 @@ final class CashierV3CheckoutProjectionServices
             'workspaceCurrentVersion'
         );
         $exactRequestProjection = ($aggregate['exactRequestProjection'] ?? false) === true;
-        $workspaceVersionInvalid = $exactRequestProjection
+        // 欠款补交的 authority_snapshot_version 是事务内锁住的当前欠款
+        // 快照标识，不是浏览器 cashier_workspace 的版本号。按 request_id
+        // 读取时只允许这一个已持久化快照，禁止再拿工作台版本比较或兜底。
+        $isServerLockedDebtSnapshot = (string)($request['source_document_type'] ?? '') === 'debt_repayment';
+        $workspaceVersionInvalid = $isServerLockedDebtSnapshot
+            ? false
+            : ($exactRequestProjection
             ? $workspaceCurrentVersion < $workspaceVersion
-            : $workspaceCurrentVersion <= $workspaceVersion;
+            : $workspaceCurrentVersion <= $workspaceVersion);
         if ($workspaceVersion >= PHP_INT_MAX
             || $workspaceVersionInvalid
-            || (!$exactRequestProjection
+            || (!$isServerLockedDebtSnapshot && !$exactRequestProjection
                 && $workspaceCurrentVersion !== $workspaceVersion + 1)) {
             throw self::failure('checkout_projection_workspace_version_drift');
         }

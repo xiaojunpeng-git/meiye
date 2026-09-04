@@ -88,12 +88,20 @@ class CashierV3ContextPolicyRegistry
     {
         $this->register(new CashierV3ContextPolicy(
             'prepare-debt-repayment',
-            ['cashier_workspace', 'debt_record'],
             [],
-            [$this, 'resolveCheckoutSourceBranch'],
-            ['cashier_workspace'],
-            ['debt_record'],
-            ['debt_record']
+            [],
+            static function (array $payload, array $base): array {
+                return [
+                    'required' => [],
+                    'allowed' => [],
+                    'identities' => [],
+                    'required_read_roles' => [],
+                    'required_touched_roles' => [],
+                ];
+            },
+            [],
+            [],
+            []
         ));
 
         foreach (CashierV3C3ServiceModule::CHECKOUT_ALIASES as $pageAction => $canonical) {

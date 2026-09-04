@@ -710,7 +710,13 @@ final class ThinkPhpCashierV3CheckoutRequestRepository implements CashierV3Check
             return null;
         }
 
-        $isSnapshot = (string)($request['source_document_type'] ?? '') === 'cashier_snapshot';
+        // 按 request_id 读取时，这笔已持久化请求本身就是唯一事实快照。
+        // 欠款补交没有浏览器工作台版本，不能因为 workspace 刚创建就回退为空。
+        $isSnapshot = in_array(
+            (string)($request['source_document_type'] ?? ''),
+            ['cashier_snapshot', 'debt_repayment'],
+            true
+        );
         if (!$isSnapshot && $workspaceVersion <= 1) {
             return null;
         }
