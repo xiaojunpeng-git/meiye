@@ -33,12 +33,6 @@ if (strpos($summarySource, 'CashierV3MemberDebtProjectionServices') === false
     || strpos($readerSource, "return 'legacy_sale';") === false
     || strpos($readerSource, "return 'recharge';") === false
     || strpos($moduleSource, "registerProjection('open-member-debt-repayment'") === false
-    || strpos($moduleSource, 'CashierV3CheckoutWorkspaceIdentity::id') === false
-    || strpos($moduleSource, "'kind' => 'cashier_workspace'") === false
-    || strpos($moduleSource, "'kind' => 'member'") === false
-    || strpos($moduleSource, 'synchronizeProjectionVersion') === false
-    || strpos($moduleSource, "'kind' => 'debt_record'") === false
-    || strpos($moduleSource, "'recordVersion'") === false
     || strpos($frontendSource, 'result?.data?.result') === false
     || strpos($frontendSource, 'envelope?.data?.debtSnapshot') === false
     || strpos($frontendSource, 'rechargeSession.value = null') === false
@@ -46,6 +40,20 @@ if (strpos($summarySource, 'CashierV3MemberDebtProjectionServices') === false
     || strpos($frontendSource, 'applyAuthoritativeDebtSnapshot(snapshot)') === false
     || strpos($frontendSource, "selectorEntry: 'cashier',\n      silent: true") === false) {
     fwrite(STDERR, "member debt projection wiring missing\n");
+    exit(1);
+}
+$projectionStart = strpos($moduleSource, "registerProjection('open-member-debt-repayment'");
+$projectionEnd = strpos($moduleSource, "if (\$handlers->hasCommand('prepare-debt-repayment')", $projectionStart);
+$debtProjection = $projectionStart === false || $projectionEnd === false
+    ? ''
+    : substr($moduleSource, $projectionStart, $projectionEnd - $projectionStart);
+if ($debtProjection === ''
+    || strpos($debtProjection, '$memberDebtProjection->read(') === false
+    || strpos($debtProjection, "'data' => ['debtSnapshot' => \$snapshot]") === false
+    || strpos($debtProjection, 'synchronizeProjectionVersion') !== false
+    || strpos($debtProjection, "'versions' =>") !== false
+    || strpos($debtProjection, 'CashierV3CheckoutWorkspaceIdentity::id') !== false) {
+    fwrite(STDERR, "member debt projection must read the latest debt snapshot without version synchronization\n");
     exit(1);
 }
 if (strpos($memberModuleSource, 'CashierV3CashierMemberSummaryServices') === false

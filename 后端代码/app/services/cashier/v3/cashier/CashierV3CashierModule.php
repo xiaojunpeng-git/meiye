@@ -186,88 +186,21 @@ final class CashierV3CashierModule
         if ($handlers->hasProjection('open-member-debt-repayment')) {
             throw new \LogicException('C2 cashier module: member debt projection duplicate handler');
         }
-        $handlers->registerProjection('open-member-debt-repayment', function (array $scope) use ($memberDebtProjection, $provider, $versionServices): array {
+        $handlers->registerProjection('open-member-debt-repayment', function (array $scope) use ($memberDebtProjection): array {
             $payload = is_array($scope['payload'] ?? null) ? $scope['payload'] : [];
             $memberId = (int)($payload['memberId'] ?? $payload['member_id'] ?? 0);
-            return Db::transaction(function () use ($memberDebtProjection, $provider, $versionServices, $scope, $memberId): array {
-                $snapshot = $memberDebtProjection->read(
-                    $memberId,
-                    $scope['operator_scope'],
-                    $scope['data_scope']
-                );
-                // 补交命令同时依赖工作台、会员和欠款记录。欠款页必须公开同一
-                // 时点的全部版本，不能让用户打开明细后仍携带旧 workspace 版本。
-                $workspaceId = \app\services\cashier\v3\CashierV3CheckoutWorkspaceIdentity::id(
-                    $scope['operator_scope']->storeId(),
-                    (string)$scope['state_context_id']
-                );
-                $workspaceVersion = $versionServices->ensureRegistered(
-                    \app\services\cashier\v3\CashierV3ResourceScope::of(
-                        \app\services\cashier\v3\CashierV3ResourceScope::TYPE_STORE,
-                        (string)$scope['operator_scope']->storeId()
-                    ),
-                    'cashier_workspace',
-                    $workspaceId,
-                    $scope['data_scope']
-                );
-                $memberVersion = $provider->synchronizeProjectionVersion(
-                    'member',
-                    (string)$memberId,
-                    $scope['operator_scope'],
-                    $scope['data_scope']
-                );
-                $versions = [
-                    [
-                        'kind' => 'cashier_workspace',
-                        'id' => $workspaceId,
-                        'version' => $workspaceVersion,
-                    ],
-                    [
-                        'kind' => 'member',
-                        'id' => (string)$memberId,
-                        'version' => $memberVersion,
-                    ],
-                    [
-                        'kind' => 'member_balance',
-                        'id' => (string)$memberId,
-                        'version' => (int)$snapshot['balanceVersion'],
-                    ],
-                ];
-                foreach ((array)($snapshot['records'] ?? []) as $record) {
-                    $debtId = (string)($record['debtId'] ?? $record['id'] ?? '');
-                    $revision = $debtId !== ''
-                        ? $provider->synchronizeProjectionVersion(
-                            'debt_record',
-                            $debtId,
-                            $scope['operator_scope'],
-                            $scope['data_scope']
-                        )
-                        : 0;
-                    if ($debtId !== '' && $revision > 0) {
-                        $versions[] = [
-                            'kind' => 'debt_record',
-                            'id' => $debtId,
-                            'version' => $revision,
-                        ];
-                    }
-                }
-                foreach ((array)($snapshot['records'] ?? []) as $index => $record) {
-                    $debtId = (string)($record['debtId'] ?? $record['id'] ?? '');
-                    foreach ($versions as $version) {
-                        if ((string)($version['kind'] ?? '') === 'debt_record'
-                            && (string)($version['id'] ?? '') === $debtId) {
-                            $snapshot['records'][$index]['recordVersion'] = (int)$version['version'];
-                            $snapshot['records'][$index]['revision'] = (int)$version['version'];
-                            break;
-                        }
-                    }
-                }
-                return [
-                    'data' => ['debtSnapshot' => $snapshot],
-                    'versions' => $versions,
-                    'message' => '会员欠款已重新读取。',
-                ];
-            });
+            // 欠款明细是只读投影，始终以当前服务端账务记录为准。历史或跨店
+            // 欠款没有 V3 资源版本时，不能因此把可见明细误判为“不存在”。
+            // 版本与事务保护只在实际还款写入命令中处理，读取不参与版本同步。
+            $snapshot = $memberDebtProjection->read(
+                $memberId,
+                $scope['operator_scope'],
+                $scope['data_scope']
+            );
+            return [
+                'data' => ['debtSnapshot' => $snapshot],
+                'message' => '会员欠款已按最新数据读取。',
+            ];
         });
         if ($handlers->hasCommand('prepare-debt-repayment') || $handlers->hasCommand('submit-debt-repayment')) {
             throw new \LogicException('C2 cashier module: debt repayment command handler duplicate');
