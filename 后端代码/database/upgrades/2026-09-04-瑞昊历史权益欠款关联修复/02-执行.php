@@ -7,7 +7,11 @@ declare(strict_types=1);
  * It intentionally keeps RH-DEBT-MIG technical orders: no delete occurs here.
  */
 
-$env = parse_ini_file('/var/www/html/.env', true);
+$envPath = getenv('MOHE_REPAIR_ENV_PATH') ?: '/var/www/html/.env';
+$env = parse_ini_file($envPath, true);
+if (!is_array($env)) {
+    throw new RuntimeException('unable to read database environment: ' . $envPath);
+}
 $db = $env['DATABASE'] ?? [];
 $database = (string)($db['DATABASE'] ?? '');
 $allowRuihao = in_array('--allow-ruihao', $argv ?? [], true);
