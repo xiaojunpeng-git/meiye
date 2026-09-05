@@ -299,6 +299,15 @@ const hasBalancePayment = computed(() => (
   selectedPaymentLines.value.some((line) => String(line?.lineRole || '') === 'balance_payment')
 ))
 const hasNonBalancePayment = computed(() => selectedPaymentLines.value.some((line) => String(line?.lineRole || '') === 'payment'))
+// A pure entitlement completion has no collection and must not fabricate a
+// payment row. Every sale-bearing or repayment checkout, including an exactly
+// zero receivable, still needs the cashier to select one settlement route.
+const requiresPaymentMethodSelection = computed(() => (
+  hasSaleLines.value
+  || isRechargeCheckout.value
+  || isDebtRepayment.value
+  || isCardOperationUpgrade.value
+))
 const paymentMethods = computed(() => Array.isArray(payment.value.methods) ? payment.value.methods : [])
 const paymentSummary = computed(() => {
   const receivableAmount = Number(checkoutSummary.value.receivableAmount || 0)
@@ -368,6 +377,9 @@ const paymentAmountValidation = computed(() => {
   const selected = Number(summary.selectedAmount)
   if (!Number.isFinite(receivable) || !Number.isFinite(selected)) {
     return { state: 'unavailable', message: '' }
+  }
+  if (requiresPaymentMethodSelection.value && selectedPaymentLines.value.length === 0) {
+    return { state: 'invalid', message: '请至少选择一种收款方式。' }
   }
   const delta = receivable - selected
   if (delta > 0) return { state: 'underpaid', message: `还差 ${formatMoney(delta)}` }
@@ -1591,7 +1603,7 @@ onBeforeUnmount(() => {
             <div v-if="displayedPaymentSummary.receivableAmount !== undefined"><dt>{{ isCardOperationUpgrade ? '补差应收' : '应收' }}</dt><dd>{{ formatMoney(displayedPaymentSummary.receivableAmount) }}</dd></div>
             <div v-if="displayedPaymentSummary.selectedAmount !== undefined"><dt>已选收款</dt><dd>{{ formatMoney(displayedPaymentSummary.selectedAmount) }}</dd></div>
             <div v-if="displayedPaymentSummary.remainingAmount !== undefined"><dt>待收</dt><dd>{{ formatMoney(displayedPaymentSummary.remainingAmount) }}</dd></div>
-            <div v-if="paymentAmountValidation.message && paymentAmountValidation.state !== 'invalid'" :class="`checkout-payment-summary__validation checkout-payment-summary__validation--${paymentAmountValidation.state}`"><dt>校验提示</dt><dd>{{ paymentAmountValidation.message }}</dd></div>
+            <div v-if="paymentAmountValidation.message" :class="`checkout-payment-summary__validation checkout-payment-summary__validation--${paymentAmountValidation.state}`"><dt>校验提示</dt><dd>{{ paymentAmountValidation.message }}</dd></div>
           </dl>
         </section>
       </section>
