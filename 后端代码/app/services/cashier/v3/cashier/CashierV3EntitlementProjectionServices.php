@@ -670,7 +670,6 @@ final class CashierV3EntitlementProjectionServices
             if ($name === '') {
                 $name = '项目';
             }
-            $debtBlocked = max(0, $rawSurplus - $effective);
             // Operation-created benefits carry their authoritative cents in
             // cart_info. Do not replace that snapshot with the card-rule
             // whole-yuan projection for this one explicit source type.
@@ -694,6 +693,7 @@ final class CashierV3EntitlementProjectionServices
             if (is_array($ruleAuthority)) {
                 $effective = min($rawSurplus, max(0, (int)$effective));
             }
+            $debtBlocked = max(0, $rawSurplus - $effective);
             $reservationOccupied = (int)($occupied[$detailId] ?? 0);
             $available = max(0, $effective - $reservationOccupied);
             $validity = is_array($ruleAuthority)
