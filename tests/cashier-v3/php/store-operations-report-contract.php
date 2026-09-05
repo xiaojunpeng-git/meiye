@@ -33,11 +33,14 @@ foreach ([
     'void_operation_lookup' => "normal_void_operation.source_order_id = ",
     'sales_scope' => "->where('normal_void_operation.source_type', 'sales')",
     'succeeded_only' => "->where('normal_void_operation.status', 'succeeded')",
-    'service_sale_line_bridge' => 'normal_service_sale.source_line_id=',
+    'service_sale_line_bridge' => "->whereRaw('normal_service_sale.source_line_id = ' . \$serviceAlias . '.source_line_id')",
 ] as $name => $needle) {
     if (strpos($normalDataScope, $needle) === false) {
         throw new RuntimeException("normal report data scope missing {$name}");
     }
+}
+if (strpos($normalDataScope, "' AND normal_service_sale.source_line_id=' . \$serviceAlias") !== false) {
+    throw new RuntimeException('outer service alias must not be referenced from the nested JOIN ON clause on MySQL 5.7');
 }
 if (strpos($service, 'excludeVoidedSalesOrderFacts') === false
     || strpos($phaseTwo, 'excludeVoidedSalesOrderServices') === false) {

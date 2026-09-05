@@ -38,9 +38,9 @@ final class StoreReportNormalDataScopeServices
                     'cashier_v3_sale_fact normal_service_sale',
                     'normal_service_sale.tenant_id=normal_service_void_operation.tenant_id'
                     . ' AND normal_service_sale.order_id=normal_service_void_operation.source_order_id'
-                    . ' AND normal_service_sale.source_line_id=' . $serviceAlias . '.source_line_id'
                 )
                 ->whereRaw('normal_service_void_operation.tenant_id = ' . $serviceAlias . '.tenant_id')
+                ->whereRaw('normal_service_sale.source_line_id = ' . $serviceAlias . '.source_line_id')
                 ->where('normal_service_void_operation.source_type', 'sales')
                 ->where('normal_service_void_operation.operation_type', 'void')
                 ->where('normal_service_void_operation.status', 'succeeded');
