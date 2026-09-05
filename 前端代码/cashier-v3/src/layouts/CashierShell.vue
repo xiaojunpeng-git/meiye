@@ -1064,6 +1064,12 @@ async function completeMemberSelection(detail) {
   window.dispatchEvent(new CustomEvent('cashier-v3:member-selector-selected', {
     detail: { context: detail.context, record: detail.record }
   }))
+  // 欠款提醒必须先于销售来源选择：欠款补交不使用销售来源；若先打开来源
+  // 弹层，用户关闭该弹层会按销售流程撤销刚选择的会员，导致无法进入还款。
+  if (detail.context === 'cashier' && pendingDebtReminderAfterSource.value?.member) {
+    handleCheckoutBusinessSourceSettled()
+    return true
+  }
   // A normal cashier member selection starts the customer-source interaction
   // immediately. Source is a browser-side checkout field and is confirmed by
   // the existing source overlay; recharge/debt/top-action flows keep their
@@ -1311,6 +1317,12 @@ async function openMemberDebt(memberId = null) {
     return { result: { status: 'failed', code: 'MEMBER_DEBT_CONTEXT_MISSING', message: '未找到需要查看欠款的会员。' } }
   }
 
+  // 欠款明细只是一个只读投影；部分适配器仍会在响应到达时广播游客根状态。
+  // 预先保留当前收银草稿，确保读取欠款不会改变正在办理的会员或购物车。
+  const cashierDraftBeforeDebtRead = state.cashier && typeof state.cashier === 'object'
+    ? { ...state.cashier }
+    : null
+
   const deferred = deferredMemberSelection.value
   // “去还款”优先于充值／赠送等后续意图，不能在偿还欠款浮层上叠加第二个业务入口。
   pendingMemberTopAction.value = null
@@ -1333,6 +1345,10 @@ async function openMemberDebt(memberId = null) {
       preserveRootState: true,
       silent: true
     })
+    if (cashierDraftBeforeDebtRead?.customerMode === 'member'
+      && memberDetailId(cashierDraftBeforeDebtRead.member)) {
+      state.cashier = cashierDraftBeforeDebtRead
+    }
     // HTTP responses use the common { status, data: <V3 envelope> } wrapper,
     // while the preview adapter returns the envelope directly.  Keep this
     // projection read compatible with both so a valid debt is not rendered as
@@ -1409,6 +1425,9 @@ async function prepareDebtRepayment(payload = {}) {
       : 'prepare-debt-repayment'
     const result = await requestCashierV3Action(prepareAction, {
       ...payload,
+      // 欠款补交的日期由补交弹层单独选择，并在准备草稿时冻结；不能用
+      // 收银工具栏的当前日期覆盖，否则历史补交会被错误落在当天。
+      businessDate: String(payload.businessDate || toolbarBusinessDate.value || ''),
       preparationRequestId,
       idempotencyKey: preparationRequestId,
       silent: true
@@ -3065,6 +3084,7 @@ onBeforeUnmount(() => {
     :member="activeDebtMember"
     :snapshot="memberDebtSnapshot"
     :initial-debt-id="initialDebtRecordId"
+    :business-date="toolbarBusinessDate"
     :is-loading="isMemberDebtLoading"
     :is-preparing="isDebtRepaymentPreparing"
     @close="closeMemberDebt"

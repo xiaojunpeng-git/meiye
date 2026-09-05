@@ -50,6 +50,8 @@ final class CashierV3DebtRepaymentServices
         CashierV3TransactionGuard::assertInTransaction('debtRepayment.prepareInTx');
         [$operator, $dataScope] = $this->scopes($scope);
         $payload = (array)($scope['payload'] ?? []);
+        $now = time();
+        $businessDate = self::businessDate($payload['businessDate'] ?? null, $now);
         $debtId = self::positiveInt($payload['debtRecordId'] ?? $payload['debtId'] ?? null, 'debt_id');
         $amountCents = self::inputMoneyCents($payload['amount'] ?? null, 'repayment_amount');
         $stateContextId = trim((string)($scope['state_context_id'] ?? ''));
@@ -103,7 +105,6 @@ final class CashierV3DebtRepaymentServices
         }
         $preparationRequestId = $idempotencyKey;
         $current = null;
-        $now = time();
         $snapshot = [
             'contractVersion' => CashierV3CheckoutSettlementKernel::AUTHORITY_CONTRACT_VERSION,
             'authorityOrigin' => 'server_final_lock_snapshot',
@@ -122,7 +123,7 @@ final class CashierV3DebtRepaymentServices
             'memberName' => $dimensions['memberName'],
             'operatorId' => $operator->operatorId(),
             'operatorName' => $dimensions['operatorName'],
-            'businessDate' => date('Y-m-d', $now),
+            'businessDate' => $businessDate,
             'businessTimezone' => 'Asia/Shanghai',
             'occurredAt' => $now,
             'recordedAt' => $now,
@@ -251,6 +252,7 @@ final class CashierV3DebtRepaymentServices
             $dataScope
         );
         $request = (array)$aggregate['request'];
+        $businessDate = self::businessDate($request['business_date'] ?? null, time());
         if ((string)($request['source_document_type'] ?? '') === 'debt_repayment') {
             $rechargeDebt = (array)Db::name('cashier_v3_recharge_debt_authority')
                 ->where('tenant_id', $dataScope->tenantId())
@@ -312,7 +314,7 @@ final class CashierV3DebtRepaymentServices
             \app\services\cashier\v3\CashierV3BusinessDocumentNumberServices::DEBT_REPAYMENT,
             'debt_repayment',
             $repaymentId,
-            date('Y-m-d'),
+            $businessDate,
             time()
         );
         $now = time();
@@ -334,7 +336,7 @@ final class CashierV3DebtRepaymentServices
             'salespeople_snapshot_json' => json_encode($selectedSalespeople, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
             'repayment_amount_cents' => $amount, 'debt_repaid_before_cents' => $repaidBefore,
             'debt_repaid_after_cents' => $repaidAfter, 'debt_status_after' => $repaidAfter === $total ? 'settled' : 'partial',
-            'business_date' => date('Y-m-d', $now), 'business_timezone' => 'Asia/Shanghai',
+            'business_date' => $businessDate, 'business_timezone' => 'Asia/Shanghai',
             'occurred_at' => $now, 'settled_at' => $now, 'recorded_at' => $now,
             'status' => 'processing', 'version' => 1, 'add_time' => $now, 'update_time' => $now,
         ]);
@@ -377,11 +379,11 @@ final class CashierV3DebtRepaymentServices
             'event_type' => 'debt.repaid', 'aggregate_type' => 'debt_repayment', 'aggregate_id' => $repaymentId,
             'aggregate_version' => 1, 'event_version' => 1, 'source_type' => 'submit-debt-repayment',
             'source_id' => $requestId, 'member_id' => (int)$authority['member_id'],
-            'business_date' => date('Y-m-d', $now), 'occurred_at' => $now, 'settled_at' => $now, 'recorded_at' => $now,
+            'business_date' => $businessDate, 'occurred_at' => $now, 'settled_at' => $now, 'recorded_at' => $now,
             'aggregate_name_snapshot' => $repaymentNo, 'store_name_snapshot' => $dimensions['storeName'],
             'payload' => ['contractVersion' => self::SUBMIT_CONTRACT_VERSION, 'debtId' => $debtId, 'amountCents' => $amount, 'salesOrderId' => (string)$authority['sales_order_id'], 'salespeopleSnapshotFingerprint' => hash('sha256', json_encode($selectedSalespeople, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES))],
         ]);
-        $this->persistFactsInTx($payments, $authority, $items, $itemTargets, $personnel, $selectedSalespeople, $repaymentId, $repaymentNo, $requestId, $amount, $commandKey, $event, $dimensions, $operator, $dataScope, $now, $businessSource);
+        $this->persistFactsInTx($payments, $authority, $items, $itemTargets, $personnel, $selectedSalespeople, $repaymentId, $repaymentNo, $requestId, $amount, $commandKey, $event, $dimensions, $operator, $dataScope, $now, $businessDate, $businessSource);
         if ($repaidAfter === $total) {
             (new CustomerLifecycleFactServices())->recordDebtCompletionInTx(
                 $dataScope->tenantId(), (string)$authority['sales_order_id'], $now
@@ -465,6 +467,7 @@ final class CashierV3DebtRepaymentServices
             'memberId' => (int)$request['member_id'],
             'debtId' => (int)$request['source_document_id'],
             'amount' => (string)intdiv($amountCents, 100),
+            'businessDate' => (string)($request['business_date'] ?? ''),
             'balanceVersion' => (int)$balance['accountVersion'],
             'paymentLines' => array_map(static function (array $line): array {
                 return [
@@ -922,7 +925,7 @@ final class CashierV3DebtRepaymentServices
         return $rows;
     }
 
-    private function persistFactsInTx(array $payments, array $authority, array $items, array $itemTargets, array $personnel, array $selectedSalespeople, string $repaymentId, string $repaymentNo, string $requestId, int $amount, string $commandKey, array $event, array $dimensions, CashierV3OperatorScope $operator, CashierV3DataScopeContext $scope, int $now, array $businessSource = []): void
+    private function persistFactsInTx(array $payments, array $authority, array $items, array $itemTargets, array $personnel, array $selectedSalespeople, string $repaymentId, string $repaymentNo, string $requestId, int $amount, string $commandKey, array $event, array $dimensions, CashierV3OperatorScope $operator, CashierV3DataScopeContext $scope, int $now, string $businessDate, array $businessSource = []): void
     {
         $ids = new CashierV3DebtRepaymentIdFactory($this->secret()); $paymentFacts = [];
         foreach ($payments as $index => $payment) {
@@ -932,7 +935,7 @@ final class CashierV3DebtRepaymentServices
         $performanceFacts = $this->performanceFacts($selectedSalespeople, $repaymentId, $amount, $ids);
         $plan = CashierV3CheckoutFactPlanV1::fromInternalAuthority([
             'contractVersion'=>CashierV3CheckoutFactPlanV1::CONTRACT_VERSION,'commandIdempotencyKey'=>$commandKey,
-            'context'=>['tenantId'=>$scope->tenantId(),'tenantNameSnapshot'=>'','organizationId'=>$operator->organizationId(),'organizationNameSnapshot'=>$dimensions['organizationName'],'organizationPathSnapshot'=>$dimensions['organizationPath'],'storeId'=>$operator->storeId(),'storeNameSnapshot'=>$dimensions['storeName'],'memberId'=>(int)$authority['member_id'],'memberNameSnapshot'=>$dimensions['memberName'],'operatorId'=>$operator->operatorId(),'operatorNameSnapshot'=>$dimensions['operatorName'],'businessDate'=>date('Y-m-d',$now),'businessTimezone'=>'Asia/Shanghai','occurredAt'=>$now,'settledAt'=>$now,'recordedAt'=>$now,'checkoutRequestId'=>$requestId,'orderId'=>$repaymentId,'orderNoSnapshot'=>$repaymentNo,'sourceDocumentType'=>'debt_repayment','businessEventNo'=>(string)$event['event_no'],'businessSourcePrimaryId'=>(int)($businessSource['primarySourceId'] ?? 0),'businessSourcePrimaryNameSnapshot'=>(string)($businessSource['primarySourceNameSnapshot'] ?? ''),'businessSourceSecondaryId'=>(int)($businessSource['secondarySourceId'] ?? 0),'businessSourceSecondaryNameSnapshot'=>(string)($businessSource['secondarySourceNameSnapshot'] ?? ''),'businessSourceLabelSnapshot'=>(string)($businessSource['displayNameSnapshot'] ?? '')],
+            'context'=>['tenantId'=>$scope->tenantId(),'tenantNameSnapshot'=>'','organizationId'=>$operator->organizationId(),'organizationNameSnapshot'=>$dimensions['organizationName'],'organizationPathSnapshot'=>$dimensions['organizationPath'],'storeId'=>$operator->storeId(),'storeNameSnapshot'=>$dimensions['storeName'],'memberId'=>(int)$authority['member_id'],'memberNameSnapshot'=>$dimensions['memberName'],'operatorId'=>$operator->operatorId(),'operatorNameSnapshot'=>$dimensions['operatorName'],'businessDate'=>$businessDate,'businessTimezone'=>'Asia/Shanghai','occurredAt'=>$now,'settledAt'=>$now,'recordedAt'=>$now,'checkoutRequestId'=>$requestId,'orderId'=>$repaymentId,'orderNoSnapshot'=>$repaymentNo,'sourceDocumentType'=>'debt_repayment','businessEventNo'=>(string)$event['event_no'],'businessSourcePrimaryId'=>(int)($businessSource['primarySourceId'] ?? 0),'businessSourcePrimaryNameSnapshot'=>(string)($businessSource['primarySourceNameSnapshot'] ?? ''),'businessSourceSecondaryId'=>(int)($businessSource['secondarySourceId'] ?? 0),'businessSourceSecondaryNameSnapshot'=>(string)($businessSource['secondarySourceNameSnapshot'] ?? ''),'businessSourceLabelSnapshot'=>(string)($businessSource['displayNameSnapshot'] ?? '')],
             'saleFacts'=>[],'paymentFacts'=>$paymentFacts,'balanceFacts'=>[],'performanceFacts'=>$performanceFacts,
         ]);
         try { (new ThinkPhpCashierV3CheckoutFactRepository())->persistInTx($plan,$operator,$scope); }
@@ -940,7 +943,7 @@ final class CashierV3DebtRepaymentServices
         try {
             $this->persistOriginalSalePaymentAllocationsInTx(
                 $paymentFacts, $authority, $items, $itemTargets, $personnel,
-                $commandKey, $event, $requestId, $dimensions, $operator, $scope, $now
+                $commandKey, $event, $requestId, $dimensions, $operator, $scope, $now, $businessDate
             );
         } catch (\Throwable $e) {
             \think\facade\Log::error('[cashier_v3_debt_repayment_payment_allocation_failed] ' . json_encode([
@@ -956,7 +959,7 @@ final class CashierV3DebtRepaymentServices
      * repayment document line.  Preserve that relationship in the same
      * immutable allocation fact used by every item-level cash report.
      */
-    private function persistOriginalSalePaymentAllocationsInTx(array $paymentFacts, array $authority, array $items, array $itemTargets, array $personnel, string $commandKey, array $event, string $checkoutRequestId, array $dimensions, CashierV3OperatorScope $operator, CashierV3DataScopeContext $scope, int $now): void
+    private function persistOriginalSalePaymentAllocationsInTx(array $paymentFacts, array $authority, array $items, array $itemTargets, array $personnel, string $commandKey, array $event, string $checkoutRequestId, array $dimensions, CashierV3OperatorScope $operator, CashierV3DataScopeContext $scope, int $now, string $businessDate): void
     {
         // 历史迁移没有对应的 V3 原销售行时，只能记录本次已经实际成功的
         // 收款事实；禁止凭空创建原销售行／销售分摊事实。若迁移行已有
@@ -1019,7 +1022,7 @@ final class CashierV3DebtRepaymentServices
             'tenant_id' => $scope->tenantId(), 'organization_id' => $operator->organizationId(),
             'store_id' => $operator->storeId(), 'member_id' => (int)$authority['member_id'],
             'order_id' => (string)$authority['sales_order_id'], 'order_no_snapshot' => (string)$authority['sales_order_no_snapshot'],
-            'business_date' => date('Y-m-d', $now), 'occurred_at' => $now, 'settled_at' => $now, 'recorded_at' => $now,
+            'business_date' => $businessDate, 'occurred_at' => $now, 'settled_at' => $now, 'recorded_at' => $now,
             'business_event_no' => (string)$event['event_no'], 'checkout_request_id' => $checkoutRequestId,
         ], $normalizedPayments, $sales);
     }
@@ -1045,35 +1048,65 @@ final class CashierV3DebtRepaymentServices
         if ($amountCents <= 0 || $amountCents % 100 !== 0 || count($allocations) > 20) {
             throw self::failure('debt_repayment_salespeople_invalid');
         }
-        $requested=[];$weightTotal=0;
+        $requested=[];
         foreach($allocations as $index=>$row){
             if(!is_array($row))throw self::failure('debt_repayment_salespeople_invalid');
             $staffId=(int)($row['staffId']??0);$weight=(int)($row['allocationWeight']??0);
-            if($staffId<=0||$weight<=0||isset($requested[$staffId]))throw self::failure('debt_repayment_salespeople_invalid');
-            $requested[$staffId]=['allocationWeight'=>$weight,'isPreSale'=>!empty($row['isPreSale'])||!empty($row['marked']),'sequence'=>$index+1];
-            $weightTotal+=$weight;
+            if($staffId<=0||$weight<=0||$weight>100||isset($requested[$staffId]))throw self::failure('debt_repayment_salespeople_invalid');
+            [$performanceAmountManual,$performanceAmountCents]=self::manualPerformanceAmount($row);
+            $requested[$staffId]=['allocationWeight'=>$weight,'isPreSale'=>!empty($row['isPreSale'])||!empty($row['marked']),'performanceAmountManual'=>$performanceAmountManual,'performanceAmountCents'=>$performanceAmountCents,'sequence'=>$index+1];
         }
-        if($weightTotal!==100)throw self::failure('debt_repayment_salespeople_weight_invalid');
         $staffIds=array_keys($requested);sort($staffIds,SORT_NUMERIC);
         $rows=Db::name('system_store_staff')->alias('ss')->join('employee e','e.id=ss.employee_id')
+            ->leftJoin('staff_job_position sjp','sjp.staff_id=ss.id AND sjp.status=1 AND sjp.is_del=0 AND sjp.end_time=0')
+            ->leftJoin('position p','p.id=sjp.position_id AND p.status=1')
             ->whereIn('ss.id',$staffIds)->where('ss.store_id',$operator->storeId())->where('ss.status',1)->where('ss.is_del',0)
             ->where('ss.cashier_salesperson_enabled',1)->where('e.status',1)->where('e.is_del',0)
-            ->field('ss.id,ss.staff_name,ss.employee_id,e.name,e.employment_type_code,e.employment_type_version')->lock(true)->select()->toArray();
+            ->field('ss.id,ss.staff_name,ss.employee_id,e.name,e.employment_type_code,e.employment_type_version,sjp.position_id,p.name as position_name,p.performance_independent')->lock(true)->select()->toArray();
         if(count($rows)!==count($requested))throw self::failure('debt_repayment_salesperson_ineligible');
         $by=[];foreach($rows as $row)$by[(int)$row['id']]=$row;
-        $result=[];$allocated=0;$count=count($requested);$amountYuan=intdiv($amountCents,100);
+        $result=[];$groups=[];$amountYuan=intdiv($amountCents,100);
         foreach($requested as $staffId=>$selection){
             $row=$by[$staffId]??null;if(!$row)throw self::failure('debt_repayment_salesperson_ineligible');
             $type=(string)($row['employment_type_code']??'');$typeVersion=(int)($row['employment_type_version']??0);
             $name=trim((string)($row['name']??''))?:trim((string)($row['staff_name']??''));
             if($name===''||!in_array($type,['internal','partner','outsourced'],true)||$typeVersion<=0)throw self::failure('debt_repayment_salesperson_profile_invalid');
             $sequence=(int)$selection['sequence'];
-            $share=$sequence===$count?$amountCents-$allocated:intdiv($amountYuan*(int)$selection['allocationWeight'],100)*100;
-            if($share<=0||$share%100!==0)throw self::failure('debt_repayment_salespeople_amount_invalid');
-            $allocated+=$share;
-            $result[]=['staffId'=>(int)$staffId,'employeeId'=>(int)$row['employee_id'],'name'=>$name,'employeeTypeCodeSnapshot'=>$type,'employeeTypeAuthorityVersion'=>$typeVersion,'allocationWeight'=>(int)$selection['allocationWeight'],'amountCents'=>$share,'isPreSale'=>(bool)$selection['isPreSale'],'sequence'=>$sequence];
+            $positionId=(int)($row['position_id']??0);
+            // 职位“独立核算”是服务端权限资料，不能相信浏览器提交的同名字段。
+            $performanceIndependent=(int)($row['performance_independent']??0)===1;
+            $groupKey=$performanceIndependent?'independent:'.($positionId>0?$positionId:$staffId):'normal';
+            $result[]=['staffId'=>(int)$staffId,'employeeId'=>(int)$row['employee_id'],'name'=>$name,'employeeTypeCodeSnapshot'=>$type,'employeeTypeAuthorityVersion'=>$typeVersion,'allocationWeight'=>(int)$selection['allocationWeight'],'amountCents'=>0,'performanceAmountManual'=>(bool)$selection['performanceAmountManual'],'performanceAmountCents'=>(int)$selection['performanceAmountCents'],'isPreSale'=>(bool)$selection['isPreSale'],'sequence'=>$sequence,'positionId'=>$positionId,'positionName'=>(string)($row['position_name']??''),'performanceIndependent'=>$performanceIndependent,'allocationGroupKey'=>$groupKey];
+            $groups[$groupKey][] = count($result)-1;
         }
-        if($allocated!==$amountCents)throw self::failure('debt_repayment_salespeople_amount_invalid');
+        foreach($groups as $groupKey=>$indexes){
+            $weightTotal=0;foreach($indexes as $index)$weightTotal+=(int)$result[$index]['allocationWeight'];
+            // 普通组和每个独立职位组各自按 100% 分配；禁止把独立核算职位
+            // 与普通销售人的比例合并校验，否则两个 100% 会被错误拒绝。
+            if($weightTotal!==100)throw self::failure('debt_repayment_salespeople_group_weight_invalid',['allocationGroupKey'=>$groupKey]);
+            $manualIndexes=array_values(array_filter($indexes,static fn(int $index):bool => !empty($result[$index]['performanceAmountManual'])));
+            if($manualIndexes){
+                // 手填金额是最终人员业绩，独立于比例和补交金额；未手填的人
+                // 仍按原比例自动计算，绝不拿手填值去平衡或覆盖其他人员。
+                $autoIndexes=array_values(array_filter($indexes,static fn(int $index):bool => empty($result[$index]['performanceAmountManual'])));
+                $autoWeight=0;foreach($autoIndexes as $index)$autoWeight+=(int)$result[$index]['allocationWeight'];
+                $autoBase=intdiv($amountYuan*$autoWeight,100)*100;$allocated=0;$lastAuto=$autoIndexes[count($autoIndexes)-1]??null;
+                foreach($autoIndexes as $index){
+                    $share=$index===$lastAuto?$autoBase-$allocated:intdiv($amountYuan*(int)$result[$index]['allocationWeight'],100)*100;
+                    if($share<=0||$share%100!==0)throw self::failure('debt_repayment_salespeople_amount_invalid');
+                    $allocated+=$share;$result[$index]['amountCents']=$share;
+                }
+                foreach($manualIndexes as $index)$result[$index]['amountCents']=(int)$result[$index]['performanceAmountCents'];
+                continue;
+            }
+            $allocated=0;$last=$indexes[count($indexes)-1];
+            foreach($indexes as $index){
+                $share=$index===$last?$amountCents-$allocated:intdiv($amountYuan*(int)$result[$index]['allocationWeight'],100)*100;
+                if($share<=0||$share%100!==0)throw self::failure('debt_repayment_salespeople_amount_invalid');
+                $allocated+=$share;$result[$index]['amountCents']=$share;
+            }
+            if($allocated!==$amountCents)throw self::failure('debt_repayment_salespeople_amount_invalid');
+        }
         return $result;
     }
 
@@ -1084,7 +1117,7 @@ final class CashierV3DebtRepaymentServices
         $allocations=[];
         foreach($stored as $person){
             if(!is_array($person))throw self::failure('debt_repayment_salespeople_snapshot_invalid');
-            $allocations[]=['staffId'=>(int)($person['staffId']??0),'allocationWeight'=>(int)($person['allocationWeight']??0),'isPreSale'=>!empty($person['isPreSale'])];
+            $allocations[]=['staffId'=>(int)($person['staffId']??0),'allocationWeight'=>(int)($person['allocationWeight']??0),'isPreSale'=>!empty($person['isPreSale']),'performanceAmountManual'=>!empty($person['performanceAmountManual']),'performanceAmountCents'=>(int)($person['performanceAmountCents']??0)];
         }
         $current=$this->resolveRepaymentSalespeople($allocations,$amountCents,$operator);
         if(!hash_equals(hash('sha256',json_encode($stored,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES)),hash('sha256',json_encode($current,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES)))){
@@ -1095,15 +1128,31 @@ final class CashierV3DebtRepaymentServices
 
     private static function normalizedSalespeople(array $rows):array
     {
-        $out=[];$weight=0;$sequences=[];
+        $out=[];$weightsByGroup=[];$sequences=[];
         foreach(array_values($rows) as $index=>$row){
             $person=['employeeId'=>(int)($row['employeeId']??0),'name'=>trim((string)($row['name']??'')),'employeeTypeCodeSnapshot'=>trim((string)($row['employeeTypeCodeSnapshot']??'')),'employeeTypeAuthorityVersion'=>(int)($row['employeeTypeAuthorityVersion']??0),'allocationWeight'=>(int)($row['allocationWeight']??0),'sequence'=>(int)($row['sequence']??($index+1))];
             if($person['employeeId']<=0||$person['name']===''||!in_array($person['employeeTypeCodeSnapshot'],['internal','partner','outsourced'],true)||$person['employeeTypeAuthorityVersion']<=0||$person['allocationWeight']<=0||$person['sequence']<=0||isset($sequences[$person['sequence']]))throw self::failure('debt_repayment_personnel_snapshot_invalid');
-            $sequences[$person['sequence']]=true;$weight+=$person['allocationWeight'];$out[]=$person;
+            $positionId=max(0,(int)($row['positionId']??$row['position_id']??0));
+            $independent=!empty($row['performanceIndependent'])||!empty($row['performance_independent']);
+            $groupKey=$independent?'independent:'.($positionId>0?$positionId:$person['employeeId']):'normal';
+            if($positionId>0){$person['positionId']=$positionId;$person['positionName']=trim((string)($row['positionName']??$row['position_name']??''));}
+            if($independent){$person['performanceIndependent']=true;$person['allocationGroupKey']=$groupKey;}
+            $sequences[$person['sequence']]=true;$weightsByGroup[$groupKey]=($weightsByGroup[$groupKey]??0)+$person['allocationWeight'];$out[]=$person;
         }
-        if($out&&$weight!==100)throw self::failure('debt_repayment_personnel_weight_invalid');
+        foreach($weightsByGroup as $weight){if($weight!==100)throw self::failure('debt_repayment_personnel_group_weight_invalid');}
         usort($out,static function(array $a,array $b):int{return $a['sequence']<=>$b['sequence'];});
         return $out;
+    }
+
+    private static function manualPerformanceAmount(array $row): array
+    {
+        $manual=!empty($row['performanceAmountManual'])||!empty($row['performance_amount_manual']);
+        if(!$manual)return [false,0];
+        $raw=$row['performanceAmountCents']??$row['performance_amount_cents']??null;
+        if((!is_int($raw)&&!is_string($raw))||preg_match('/^(?:0|[1-9][0-9]*)$/D',trim((string)$raw))!==1)throw self::failure('debt_repayment_salespeople_manual_amount_invalid');
+        $cents=(int)$raw;
+        if($cents<0||$cents%100!==0)throw self::failure('debt_repayment_salespeople_manual_amount_invalid');
+        return [true,$cents];
     }
 
     private function dimensions(CashierV3OperatorScope $operator, CashierV3DataScopeContext $scope, int $memberId): array
@@ -1141,6 +1190,17 @@ final class CashierV3DebtRepaymentServices
     private static function debtFingerprint(array $authority,array $debt,array $items,array $personnel):string{$snapshot=[$authority['authority_fingerprint']??'',(int)($debt['id']??0),(string)($debt['total_debt']??''),(string)($debt['repaid_debt']??''),(int)($debt['status']??-1),(int)($debt['update_time']??0)];foreach($items as $item){$itemId=(int)$item['id'];$snapshot[]=[(int)$item['id'],(string)$item['debt_amount'],(string)$item['repaid_debt'],(int)$item['update_time'],(string)($personnel[$itemId]['authority']['snapshot_fingerprint']??'')];}return hash('sha256',json_encode($snapshot,JSON_UNESCAPED_SLASHES));}
     private static function workspaceId(CashierV3OperatorScope $operator,string $state):string{if($state===''||strlen($state)>64)throw self::failure('debt_repayment_state_context_invalid');return \app\services\cashier\v3\CashierV3CheckoutWorkspaceIdentity::id($operator->storeId(),$state);}
     private static function latestSnapshotVersion(array $debt):int{return max(1,(int)($debt['update_time']??0));}
+    private static function businessDate($value, int $now): string
+    {
+        $date = trim((string)$value);
+        if (preg_match('/^\d{4}-\d{2}-\d{2}$/D', $date) !== 1) throw self::failure('debt_repayment_business_date_invalid');
+        $parsed = \DateTimeImmutable::createFromFormat('!Y-m-d', $date, new \DateTimeZone('Asia/Shanghai'));
+        $errors = \DateTimeImmutable::getLastErrors();
+        if (!$parsed || ($errors !== false && ($errors['warning_count'] > 0 || $errors['error_count'] > 0)) || $parsed->format('Y-m-d') !== $date) throw self::failure('debt_repayment_business_date_invalid');
+        $today = (new \DateTimeImmutable('@' . $now))->setTimezone(new \DateTimeZone('Asia/Shanghai'))->format('Y-m-d');
+        if ($date > $today) throw self::failure('debt_repayment_business_date_future');
+        return $date;
+    }
     private static function positiveInt($value,string $field):int{if(is_bool($value)||!is_numeric($value)||(int)$value<=0)throw self::failure('debt_repayment_positive_int_invalid',['field'=>$field]);return (int)$value;}
     private static function inputMoneyCents($value,string $field):int{$raw=trim((string)$value);if(preg_match('/^[1-9][0-9]*$/D',$raw)!==1||strlen($raw)>10)throw self::failure('debt_repayment_money_invalid',['field'=>$field]);return (int)$raw*100;}
     private static function storedMoneyCents($value,string $field):int{$raw=trim((string)$value);if(preg_match('/^(?:0|[1-9][0-9]*)(?:\.([0-9]{1,2}))?$/D',$raw,$m)!==1)throw self::failure('debt_repayment_stored_money_invalid',['field'=>$field]);[$whole,$fraction]=array_pad(explode('.',$raw,2),2,'');return (int)$whole*100+(int)str_pad($fraction,2,'0');}

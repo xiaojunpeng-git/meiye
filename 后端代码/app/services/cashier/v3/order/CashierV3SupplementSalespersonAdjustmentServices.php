@@ -26,25 +26,49 @@ final class CashierV3SupplementSalespersonAdjustmentServices
     {
         $source = $this->source($payload, $operator, $scope, false);
         $rows = array_values(array_filter($this->effectivePerformanceFacts($scope->tenantId(), $source['repaymentId'], $source['sourceDocumentType']), static fn(array $row): bool => (string)($row['performance_type'] ?? '') === 'sales_performance_allocated'));
+        // 当前职位的独立核算配置是销售人调整的权限权威。补交事实本身保留
+        // 历史金额，但不保存职位配置，因此打开编辑器时必须重新读取在职岗位。
+        $candidates = Db::name('system_store_staff')->alias('s')->join('employee e', 'e.id=s.employee_id')
+            ->leftJoin('staff_job_position sjp', 'sjp.staff_id = s.id AND sjp.status = 1 AND sjp.is_del = 0 AND sjp.end_time = 0')
+            ->leftJoin('position p', 'p.id = sjp.position_id AND p.status = 1')
+            ->where('s.store_id', $operator->storeId())->where('s.status', 1)->where('s.is_del', 0)
+            ->where('s.cashier_salesperson_enabled', 1)->where('e.status', 1)->where('e.is_del', 0)
+            ->field('s.id,s.employee_id,s.staff_name,e.name,e.employment_type_code,e.employment_type_version,sjp.position_id,p.name as position_name,p.performance_independent')
+            ->order('s.id asc')->select()->toArray();
+        $candidateByEmployee = [];
+        foreach ($candidates as $candidate) $candidateByEmployee[(int)($candidate['employee_id'] ?? 0)] = $candidate;
         $selected = [];
         foreach ($rows as $row) {
             $employeeId = (int)($row['employee_id'] ?? 0);
             if ($employeeId <= 0) continue;
-            $selected[$employeeId] = ['employeeId' => $employeeId, 'name' => (string)($row['employee_name_snapshot'] ?? ''), 'allocationWeight' => (int)($row['allocation_weight_numerator'] ?? 0), 'isPreSale' => str_ends_with((string)($row['role_snapshot'] ?? ''), ':presale')];
+            $candidate = (array)($candidateByEmployee[$employeeId] ?? []);
+            $positionId = (int)($candidate['position_id'] ?? 0);
+            $independent = (int)($candidate['performance_independent'] ?? 0) === 1;
+            $selected[$employeeId] = [
+                'employeeId' => $employeeId,
+                'name' => (string)($row['employee_name_snapshot'] ?? ''),
+                'allocationWeight' => (int)($row['allocation_weight_numerator'] ?? 0),
+                'isPreSale' => str_ends_with((string)($row['role_snapshot'] ?? ''), ':presale'),
+                // 已落账事实金额用于订单中心回显，绝不能因前端缺少实时
+                // 收银基数而重新计算为 0。
+                'performanceAmountCents' => abs((int)($row['amount_cents'] ?? 0)),
+                'performanceAmountLocked' => true,
+                'positionId' => $positionId,
+                'positionName' => (string)($candidate['position_name'] ?? ''),
+                'performanceIndependent' => $independent,
+                'allocationGroupKey' => $independent ? 'independent:' . ($positionId > 0 ? $positionId : $employeeId) : 'normal',
+            ];
         }
-        $candidates = Db::name('system_store_staff')->alias('s')->join('employee e', 'e.id=s.employee_id')
-            ->where('s.store_id', $operator->storeId())->where('s.status', 1)->where('s.is_del', 0)
-            ->where('s.cashier_salesperson_enabled', 1)->where('e.status', 1)->where('e.is_del', 0)
-            ->field('s.id,s.employee_id,s.staff_name,e.name,e.employment_type_code,e.employment_type_version')
-            ->order('s.id asc')->select()->toArray();
         $salesRows = array_values(array_filter($rows, static fn(array $row): bool => (string)($row['performance_type'] ?? '') === 'sales_performance_allocated'));
         $total = array_sum(array_map(static fn(array $row): int => abs((int)($row['amount_cents'] ?? 0)), $salesRows));
         $recordVersion = $this->version($scope->tenantId(), $source['repaymentId']);
         return [
             'contractVersion' => self::CONTRACT_VERSION, 'recordId' => $source['repaymentId'], 'recordVersion' => $recordVersion,
-            'totalAmountCents' => $total, 'repaymentId' => $source['repaymentId'], 'supplementOrderNo' => $source['repaymentNo'], 'memberId' => $source['memberId'],
+            'totalAmountCents' => $total, 'performanceBaseAmountCents' => (int)$source['repaymentAmountCents'], 'repaymentId' => $source['repaymentId'], 'supplementOrderNo' => $source['repaymentNo'], 'memberId' => $source['memberId'],
             'salespeople' => array_values(array_map(static function (array $row): array {
-                return ['staffId' => (int)$row['id'], 'employeeId' => (int)$row['employee_id'], 'name' => trim((string)$row['name']) ?: (string)$row['staff_name'], 'employeeTypeCode' => (string)$row['employment_type_code'], 'employeeTypeAuthorityVersion' => (int)$row['employment_type_version']];
+                $positionId = (int)($row['position_id'] ?? 0);
+                $independent = (int)($row['performance_independent'] ?? 0) === 1;
+                return ['staffId' => (int)$row['id'], 'employeeId' => (int)$row['employee_id'], 'name' => trim((string)$row['name']) ?: (string)$row['staff_name'], 'employeeTypeCode' => (string)$row['employment_type_code'], 'employeeTypeAuthorityVersion' => (int)$row['employment_type_version'], 'positionId' => $positionId, 'positionName' => (string)($row['position_name'] ?? ''), 'performanceIndependent' => $independent, 'allocationGroupKey' => $independent ? 'independent:' . ($positionId > 0 ? $positionId : (int)$row['id']) : 'normal'];
             }, $candidates)),
             'currentSalespeople' => array_values($selected),
             'lines' => [['orderLineId' => $source['repaymentId'] . ':performance', 'itemName' => $source['repaymentNo'], 'currentSalespeople' => array_values($selected)]],
@@ -89,7 +113,11 @@ final class CashierV3SupplementSalespersonAdjustmentServices
         $old = $this->effectivePerformanceFacts($data->tenantId(), $source['repaymentId'], $source['sourceDocumentType']);
         if ($old === []) throw self::failure('supplement_personnel_sales_fact_missing');
         $salesFacts = array_values(array_filter($old, static fn(array $row): bool => (string)($row['performance_type'] ?? '') === 'sales_performance_allocated'));
-        $amount = 0; foreach ($salesFacts as $row) $amount += abs((int)($row['amount_cents'] ?? 0));
+        // 每个独立核算组各自以本次补交金额为业绩基数；不能把所有已分配
+        // 事实金额相加后再按全局比例重分，否则“店长 100% + 普通组 100%”
+        // 会让普通组被放大、独立组被吞掉。
+        $baseAmount = (int)($source['repaymentAmountCents'] ?? 0);
+        if ($baseAmount <= 0) throw self::failure('supplement_personnel_base_invalid');
         $template = $salesFacts[0]; $operationId = 'SPA-' . strtoupper(substr(hash('sha256', $data->tenantId() . '|' . $source['repaymentId'] . '|' . $key), 0, 40));
         $operationNo = 'RY' . date('ymd') . strtoupper(substr(hash('sha256', $operationId), 0, 5)); $now = time();
         $event = $recorder->recordInTx($execution, (array)($scope['event_contract'] ?? []), [
@@ -99,14 +127,47 @@ final class CashierV3SupplementSalespersonAdjustmentServices
             'aggregate_name_snapshot' => $source['repaymentNo'], 'store_name_snapshot' => $source['storeName'], 'payload' => ['contractVersion' => self::CONTRACT_VERSION, 'personnel' => $personnel],
         ]);
         foreach ($old as $row) $this->insertReversal($row, $operationId, $key, (array)$event, $operator, $now);
-        $external = 0; $allocated = 0; $last = count($personnel) - 1;
+        $groups = [];
+        foreach ($personnel as $index => $person) $groups[(string)$person['allocationGroupKey']][] = $index;
+        $shares = array_fill(0, count($personnel), 0);
+        foreach ($groups as $indexes) {
+            $manualIndexes = array_values(array_filter($indexes, static fn(int $index): bool => !empty($personnel[$index]['performanceAmountManual'])));
+            if ($manualIndexes) {
+                // 手动填写的是该人员的最终业绩，不应被本次补交金额重新折算。
+                // 未手填人员仍按原比例自动分配，避免编辑一人意外改写其他人。
+                $autoIndexes = array_values(array_filter($indexes, static fn(int $index): bool => empty($personnel[$index]['performanceAmountManual'])));
+                $autoWeight = 0; foreach ($autoIndexes as $index) $autoWeight += (int)$personnel[$index]['allocationWeight'];
+                $autoBase = intdiv($baseAmount * $autoWeight, 100);
+                $allocated = 0; $lastAuto = $autoIndexes[count($autoIndexes) - 1] ?? null;
+                foreach ($autoIndexes as $index) {
+                    $weight = (int)$personnel[$index]['allocationWeight'];
+                    $share = $index === $lastAuto ? $autoBase - $allocated : intdiv($baseAmount * $weight, 100);
+                    if ($share <= 0) throw self::failure('supplement_personnel_amount_invalid');
+                    $allocated += $share;
+                    $shares[$index] = $share;
+                }
+                foreach ($manualIndexes as $index) $shares[$index] = (int)$personnel[$index]['performanceAmountCents'];
+                continue;
+            }
+            $allocated = 0;
+            $last = $indexes[count($indexes) - 1];
+            foreach ($indexes as $index) {
+                $weight = (int)$personnel[$index]['allocationWeight'];
+                $share = $index === $last ? $baseAmount - $allocated : intdiv($baseAmount * $weight, 100);
+                if ($share <= 0) throw self::failure('supplement_personnel_amount_invalid');
+                $allocated += $share;
+                $shares[$index] = $share;
+            }
+            if ($allocated !== $baseAmount) throw self::failure('supplement_personnel_amount_invalid');
+        }
+        $external = 0;
         foreach ($personnel as $index => $person) {
-            $share = $index === $last ? $amount - $allocated : (int)floor($amount * $person['allocationWeight'] / 100); $allocated += $share;
+            $share = $shares[$index];
             if (in_array($person['employeeTypeCodeSnapshot'], ['partner', 'outsourced'], true)) $external += $share;
             $this->insertForward($template, $source, $person, $share, $operationId, $key, (array)$event, $operator, $now, 'sales_performance_allocated', $index + 1);
         }
         $actual = array_values(array_filter($old, static fn(array $row): bool => (string)($row['performance_type'] ?? '') === 'actual_performance_recorded'));
-        if ($actual !== []) $this->insertForward($actual[0], $source, ['employeeId' => 0, 'name' => '', 'employeeTypeCodeSnapshot' => '', 'employeeTypeAuthorityVersion' => 0, 'allocationWeight' => 0], $amount - $external, $operationId, $key, (array)$event, $operator, $now, 'actual_performance_recorded', 0);
+        if ($actual !== []) $this->insertForward($actual[0], $source, ['employeeId' => 0, 'name' => '', 'employeeTypeCodeSnapshot' => '', 'employeeTypeAuthorityVersion' => 0, 'allocationWeight' => 0], $baseAmount - $external, $operationId, $key, (array)$event, $operator, $now, 'actual_performance_recorded', 0);
         Db::name(self::OPERATION_TABLE)->insert(['operation_id' => $operationId, 'operation_no' => $operationNo, 'tenant_id' => $data->tenantId(), 'store_id' => $operator->storeId(), 'member_id' => $source['memberId'], 'operator_id' => $operator->operatorId(), 'source_type' => 'debt_repayment', 'source_order_id' => $source['repaymentId'], 'source_order_no_snapshot' => $source['repaymentNo'], 'operation_type' => 'personnel_adjustment', 'command_idempotency_key' => $key, 'immutable_fingerprint' => $fingerprint, 'reason_snapshot' => trim((string)($payload['reason'] ?? '销售人调整')), 'request_json' => json_encode(['personnel' => $personnel], JSON_UNESCAPED_UNICODE), 'business_event_no' => (string)$event['event_no'], 'status' => 'succeeded', 'version' => 1, 'business_date' => date('Y-m-d', $now), 'occurred_at' => $now, 'settled_at' => $now, 'recorded_at' => $now, 'created_at' => $now, 'updated_at' => $now]);
         return ['operationNo' => $operationNo, 'replayed' => false, 'personnelCount' => count($personnel), 'message' => '补交销售人已更新。'];
     }
@@ -126,7 +187,7 @@ final class CashierV3SupplementSalespersonAdjustmentServices
                 $repaymentNo = trim((string)($row['repayment_no'] ?? ''));
                 if ($repaymentNo === '') $repaymentNo = trim((string)($row[$definition[4]] ?? ''));
                 if ($repaymentNo === '') $repaymentNo = $id;
-                return ['repaymentId' => $id, 'repaymentNo' => $repaymentNo, 'memberId' => (int)$row['member_id'], 'storeName' => (string)Db::name('system_store')->where('id', $operator->storeId())->value('name'), 'sourceDocumentType' => $definition[5]];
+                return ['repaymentId' => $id, 'repaymentNo' => $repaymentNo, 'repaymentAmountCents' => max(0, (int)($row[$definition[1]] ?? 0)), 'memberId' => (int)$row['member_id'], 'storeName' => (string)Db::name('system_store')->where('id', $operator->storeId())->value('name'), 'sourceDocumentType' => $definition[5]];
             }
         }
         throw self::failure('supplement_personnel_record_invalid');
@@ -134,9 +195,41 @@ final class CashierV3SupplementSalespersonAdjustmentServices
 
     private function normalizePersonnel($rows, CashierV3OperatorScope $operator): array
     {
-        if (!is_array($rows) || $rows === [] || count($rows) > 20) throw self::failure('supplement_personnel_empty'); $out = []; $weight = 0; $seen = [];
-        foreach (array_values($rows) as $row) { $staffId = (int)($row['staffId'] ?? $row['employeeId'] ?? 0); $w = (int)($row['allocationWeight'] ?? $row['performance'] ?? 0); if ($staffId <= 0 || $w <= 0 || $w > 100 || isset($seen[$staffId])) throw self::failure('supplement_personnel_invalid'); $seen[$staffId] = true; $staff = (array)Db::name('system_store_staff')->alias('s')->join('employee e', 'e.id=s.employee_id')->where(function ($q) use ($staffId) { $q->where('s.id', $staffId)->whereOr('s.employee_id', $staffId); })->where('s.store_id', $operator->storeId())->where('s.status', 1)->where('s.is_del', 0)->where('s.cashier_salesperson_enabled', 1)->where('e.status', 1)->where('e.is_del', 0)->field('s.id,s.employee_id,s.staff_name,e.name,e.employment_type_code,e.employment_type_version')->find(); if (!$staff || !in_array((string)$staff['employment_type_code'], ['internal', 'partner', 'outsourced'], true) || (int)$staff['employment_type_version'] <= 0) throw self::failure('supplement_personnel_staff_ineligible'); $out[] = ['employeeId' => (int)$staff['employee_id'], 'name' => trim((string)$staff['name']) ?: (string)$staff['staff_name'], 'employeeTypeCodeSnapshot' => (string)$staff['employment_type_code'], 'employeeTypeAuthorityVersion' => (int)$staff['employment_type_version'], 'allocationWeight' => $w, 'isPreSale' => !empty($row['isPreSale']) || !empty($row['marked'])]; $weight += $w; }
-        if ($weight !== 100) throw self::failure('supplement_personnel_weight_invalid'); return $out;
+        if (!is_array($rows) || $rows === [] || count($rows) > 20) throw self::failure('supplement_personnel_empty');
+        $out = []; $seen = []; $weightsByGroup = [];
+        foreach (array_values($rows) as $row) {
+            $staffId = (int)($row['staffId'] ?? $row['employeeId'] ?? 0);
+            $weight = (int)($row['allocationWeight'] ?? $row['performance'] ?? 0);
+            if ($staffId <= 0 || $weight <= 0 || $weight > 100 || isset($seen[$staffId])) throw self::failure('supplement_personnel_invalid');
+            [$performanceAmountManual, $performanceAmountCents] = self::manualPerformanceAmount($row);
+            $seen[$staffId] = true;
+            $staff = (array)Db::name('system_store_staff')->alias('s')->join('employee e', 'e.id=s.employee_id')
+                ->leftJoin('staff_job_position sjp', 'sjp.staff_id = s.id AND sjp.status = 1 AND sjp.is_del = 0 AND sjp.end_time = 0')
+                ->leftJoin('position p', 'p.id = sjp.position_id AND p.status = 1')
+                ->where(function ($q) use ($staffId) { $q->where('s.id', $staffId)->whereOr('s.employee_id', $staffId); })
+                ->where('s.store_id', $operator->storeId())->where('s.status', 1)->where('s.is_del', 0)
+                ->where('s.cashier_salesperson_enabled', 1)->where('e.status', 1)->where('e.is_del', 0)
+                ->field('s.id,s.employee_id,s.staff_name,e.name,e.employment_type_code,e.employment_type_version,sjp.position_id,p.name as position_name,p.performance_independent')->find();
+            if (!$staff || !in_array((string)$staff['employment_type_code'], ['internal', 'partner', 'outsourced'], true) || (int)$staff['employment_type_version'] <= 0) throw self::failure('supplement_personnel_staff_ineligible');
+            $positionId = (int)($staff['position_id'] ?? 0);
+            $independent = (int)($staff['performance_independent'] ?? 0) === 1;
+            $groupKey = $independent ? 'independent:' . ($positionId > 0 ? $positionId : (int)$staff['id']) : 'normal';
+            $out[] = ['employeeId' => (int)$staff['employee_id'], 'name' => trim((string)$staff['name']) ?: (string)$staff['staff_name'], 'employeeTypeCodeSnapshot' => (string)$staff['employment_type_code'], 'employeeTypeAuthorityVersion' => (int)$staff['employment_type_version'], 'allocationWeight' => $weight, 'performanceAmountManual' => $performanceAmountManual, 'performanceAmountCents' => $performanceAmountCents, 'isPreSale' => !empty($row['isPreSale']) || !empty($row['marked']), 'positionId' => $positionId, 'positionName' => (string)($staff['position_name'] ?? ''), 'performanceIndependent' => $independent, 'allocationGroupKey' => $groupKey];
+            $weightsByGroup[$groupKey] = ($weightsByGroup[$groupKey] ?? 0) + $weight;
+        }
+        foreach ($weightsByGroup as $weight) if ($weight !== 100) throw self::failure('supplement_personnel_group_weight_invalid');
+        return $out;
+    }
+
+    private static function manualPerformanceAmount(array $row): array
+    {
+        $manual = !empty($row['performanceAmountManual']) || !empty($row['performance_amount_manual']);
+        if (!$manual) return [false, 0];
+        $raw = $row['performanceAmountCents'] ?? $row['performance_amount_cents'] ?? null;
+        if ((!is_int($raw) && !is_string($raw)) || preg_match('/^(?:0|[1-9][0-9]*)$/D', trim((string)$raw)) !== 1) throw self::failure('supplement_personnel_manual_amount_invalid');
+        $cents = (int)$raw;
+        if ($cents < 0 || $cents % 100 !== 0) throw self::failure('supplement_personnel_manual_amount_invalid');
+        return [true, $cents];
     }
 
     private function effectivePerformanceFacts(string $tenant, string $repaymentId, string $sourceType): array

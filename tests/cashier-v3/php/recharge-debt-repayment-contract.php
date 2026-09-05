@@ -47,6 +47,25 @@ foreach (["'allocationWeight'", "'allocationWeightDenominator' => 100", "'salesp
         exit(1);
     }
 }
+foreach ([
+    "'staff_job_position sjp'",
+    'p.performance_independent',
+    "'allocationGroupKey'",
+    "'recharge_repayment_salespeople_group_weight_invalid'",
+    'foreach ($groups as $groupKey => $indexes)',
+    "'performanceAmountManual'",
+    "'performanceAmountCents'",
+    'manualPerformanceAmount',
+] as $needle) {
+    if (strpos($source, $needle) === false) {
+        fwrite(STDERR, "missing independent salesperson group contract: {$needle}\\n");
+        exit(1);
+    }
+}
+if (strpos($source, 'recharge_repayment_salespeople_weight_invalid') !== false) {
+    fwrite(STDERR, "recharge repayment must not restore one global salesperson 100% gate\\n");
+    exit(1);
+}
 foreach (["'couponUserId' => 0", "'couponNameSnapshot' => ''", "'couponDiscountCents' => 0"] as $needle) {
     if (strpos($source, $needle) === false) {
         fwrite(STDERR, "recharge repayment kernel sale-line coupon snapshot missing: {$needle}\n");

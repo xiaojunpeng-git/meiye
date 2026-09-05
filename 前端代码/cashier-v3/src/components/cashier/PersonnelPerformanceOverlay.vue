@@ -139,6 +139,7 @@ function syncPerformanceAmountFromRatio(item) {
   item.performanceAmountCents = calculatedPerformanceAmountCents(ratio)
   item.performanceAmountYuan = performanceAmountYuanText(item)
   item.performanceAmountManual = false
+  item.performanceAmountLocked = false
 }
 
 function syncManualPerformanceAmount(item) {
@@ -149,6 +150,7 @@ function syncManualPerformanceAmount(item) {
   item.performanceAmountYuan = performanceAmountYuanText(item)
   // 手改金额是独立的最终分配值，绝不反向改比例或平衡其他人员。
   item.performanceAmountManual = true
+  item.performanceAmountLocked = false
   validationMessage.value = ''
 }
 
@@ -156,7 +158,11 @@ function syncComputedPerformanceAmounts(records) {
   if (props.historyAdjustment || !Array.isArray(records)) return
   records.filter((record) => record.selected
     && craftsmanType(record) !== PERFORMANCE_TYPES.LABOR
-    && !record.performanceAmountManual)
+    // 订单中心打开历史记录时，业绩事实中已保存的金额才是展示权威。
+    // 不能因为当前页面未传入新的收银基数而重算成 0；操作员修改比例或
+    // 金额后会解除锁定，改按当前编辑值计算。
+    && !record.performanceAmountManual
+    && !record.performanceAmountLocked)
     .forEach((record) => syncPerformanceAmountFromRatio(record))
 }
 
@@ -343,6 +349,7 @@ function mergeCandidates(candidates, selected, role) {
       performanceAmountCents: performanceAmountCentsFor(saved || {}),
       performanceAmountYuan: performanceAmountYuanText(saved || {}),
       performanceAmountManual: Boolean(saved?.performanceAmountManual ?? saved?.performance_amount_manual),
+      performanceAmountLocked: Boolean(saved?.performanceAmountLocked ?? saved?.performance_amount_locked),
       projectCountHalfUnits: projectCountHalfUnitsFor(saved || {}),
       projectCountText: (projectCountHalfUnitsFor(saved || {}) / 2).toFixed(1),
       projectCountTouched: Object.prototype.hasOwnProperty.call(saved || {}, 'projectCountHalfUnits')
@@ -377,6 +384,7 @@ function mergeCandidates(candidates, selected, role) {
       performanceAmountCents: performanceAmountCentsFor(saved),
       performanceAmountYuan: performanceAmountYuanText(saved),
       performanceAmountManual: Boolean(saved?.performanceAmountManual ?? saved?.performance_amount_manual),
+      performanceAmountLocked: Boolean(saved?.performanceAmountLocked ?? saved?.performance_amount_locked),
       projectCountHalfUnits: projectCountHalfUnitsFor(saved),
       projectCountText: (projectCountHalfUnitsFor(saved) / 2).toFixed(1),
       projectCountTouched: Object.prototype.hasOwnProperty.call(saved || {}, 'projectCountHalfUnits')

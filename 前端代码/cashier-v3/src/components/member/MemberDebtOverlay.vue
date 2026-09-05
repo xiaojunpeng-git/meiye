@@ -23,6 +23,10 @@ const props = defineProps({
   initialDebtId: {
     type: [String, Number],
     default: ''
+  },
+  businessDate: {
+    type: String,
+    default: ''
   }
 })
 
@@ -30,6 +34,9 @@ const emit = defineEmits(['close', 'repay'])
 
 const selectedDebtId = ref('')
 const repayAmount = ref('')
+// 补交日期可以独立于收银工具栏临时调整；真正落账时仍由该值写入
+// 服务端准备快照，不能在最后一步改回服务器当天。
+const repaymentBusinessDate = ref('')
 const validationMessage = ref('')
 const paymentLines = ref([])
 const salespersonAllocations = ref([])
@@ -74,6 +81,9 @@ const selectedDebtIsRecharge = computed(() => String(value(selectedDebt.value, [
 const paymentTotal = computed(() => paymentLines.value.reduce((sum, item) => sum + moneyToCents(item.amount), 0))
 const selectedPaymentMethods = computed(() => new Set(paymentLines.value.map((item) => String(item.paymentMethod || ''))))
 const paymentMethodLabel = (code) => paymentMethods.find((method) => method.code === String(code))?.label || '未命名收款方式'
+const salespersonSummary = computed(() => salespersonAllocations.value.length
+  ? salespersonAllocations.value.map(salespersonLabel).join('、')
+  : '暂未选择')
 
 watch(records, (nextRecords) => {
   if (selectedDebtId.value && nextRecords.some((record) => String(recordId(record)) === String(selectedDebtId.value))) return
@@ -82,6 +92,11 @@ watch(records, (nextRecords) => {
   paymentLines.value = []
   salespersonAllocations.value = []
   validationMessage.value = ''
+}, { immediate: true })
+
+watch(() => props.businessDate, (value) => {
+  // 工具栏日期变化时同步默认值；已打开的补交单可再由操作员单独选择。
+  repaymentBusinessDate.value = String(value || '')
 }, { immediate: true })
 
 // 从订单中心“去还款”进入时，只预选对应欠款；实际准备收款必须由用户
@@ -113,6 +128,7 @@ function selectRepayment(record) {
   if (Number(remainingAmount(record)) <= 0 || props.isPreparing) return
   selectedDebtId.value = String(recordId(record))
   repayAmount.value = wholeYuanString(remainingAmount(record))
+  repaymentBusinessDate.value = String(props.businessDate || '')
   paymentLines.value = [{ id: nextPaymentLineId(), paymentMethod: 'unionpay', amount: wholeYuanString(remainingAmount(record)), collectionReference: '', remark: '' }]
   salespersonAllocations.value = []
   validationMessage.value = ''
@@ -134,8 +150,8 @@ function submitRepayment() {
     validationMessage.value = '还款金额不能超过当前剩余欠款。'
     return
   }
-  if (salespersonAllocations.value.length && salespersonAllocations.value.reduce((sum, item) => sum + Number(item.allocationWeight || 0), 0) !== 100) {
-    validationMessage.value = '销售人分配比例合计必须为 100%。'
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(repaymentBusinessDate.value)) {
+    validationMessage.value = '请选择补交业务日期。'
     return
   }
   validationMessage.value = ''
@@ -145,6 +161,7 @@ function submitRepayment() {
     debtItemId: value(record, ['debtItemId', 'debt_item_id', 'id'], ''),
     recordVersion: value(record, ['revision', 'recordVersion', 'version'], null),
     amount: String(amount),
+    businessDate: repaymentBusinessDate.value,
     record,
     rechargeDebt: selectedDebtIsRecharge.value,
     balanceVersion: Number(props.snapshot.balanceVersion || props.snapshot.accountVersion || props.member.balanceVersion || props.member.accountVersion || 0),
@@ -152,9 +169,22 @@ function submitRepayment() {
     salespersonAllocations: salespersonAllocations.value.map((item) => ({
       staffId: item.staffId || item.id,
       allocationWeight: Number(item.allocationWeight),
-      isPreSale: Boolean(item.isPreSale ?? item.marked)
+      isPreSale: Boolean(item.isPreSale ?? item.marked),
+      // 手填业绩金额是本次补交的业务输入，必须随提交快照进入服务端；
+      // 不能只保留在人员选择弹窗里再由比例覆盖。
+      performanceAmountCents: Math.max(0, Math.trunc(Number(item.performanceAmountCents || 0))),
+      performanceAmountManual: Boolean(item.performanceAmountManual),
+      // 独立核算由服务端按员工当前职位权威判定；保留前端元数据只用于
+      // 同一选择器在本次会话中的展示，不能用浏览器标志突破职位配置。
+      performanceIndependent: Boolean(item.performanceIndependent),
+      allocationGroupKey: String(item.allocationGroupKey || '')
     }))
   })
+}
+
+function salespersonLabel(item = {}) {
+  const role = item.isPreSale || item.marked ? '售前' : '售后'
+  return `${item.name || '未命名'}（${role}${item.performanceIndependent ? '，独立核算' : ''}）`
 }
 
 function moneyToCents(value) { const raw = String(value ?? '').trim(); return /^(0|[1-9]\d*)$/.test(raw) ? Number(raw) * 100 : 0 }
@@ -319,9 +349,15 @@ function confirmSalespeople(result = {}) {
             <div><dt>待收</dt><dd>{{ formatMoney(Math.max(0, Number(repayAmount || 0) - paymentTotal / 100)) }}</dd></div>
           </dl>
         </section>
-        <section v-if="selectedDebt" class="member-debt-overlay__recharge-salespeople" aria-label="销售人分配">
-          <header><strong>销售人分配</strong><span>{{ salespersonAllocations.length ? salespersonAllocations.map((item) => `${item.name} ${item.allocationWeight}%`).join('、') : '暂未选择' }}</span><button type="button" class="button button--secondary" @click="openSalespersonSelector">选择销售人</button></header>
-          <span v-for="person in salespersonAllocations" :key="person.staffId || person.id">{{ person.name }}（{{ person.isPreSale || person.marked ? '售前' : '售后' }}，{{ person.allocationWeight }}%）</span>
+        <section v-if="selectedDebt" class="member-debt-overlay__repayment-context" aria-label="补交业务信息">
+          <div class="member-debt-overlay__business-date">
+            <label for="member-debt-repayment-business-date">业务日期</label>
+            <input id="member-debt-repayment-business-date" v-model="repaymentBusinessDate" type="date" :disabled="isPreparing" aria-label="补交业务日期">
+          </div>
+          <div class="member-debt-overlay__recharge-salespeople" aria-label="销售人分配">
+            <header><strong>销售人分配</strong><span>{{ salespersonSummary }}</span><button type="button" class="button button--secondary" @click="openSalespersonSelector">选择销售人</button></header>
+            <span v-for="person in salespersonAllocations" :key="person.staffId || person.id">{{ salespersonLabel(person) }}</span>
+          </div>
         </section>
       </main>
 
@@ -339,6 +375,7 @@ function confirmSalespeople(result = {}) {
       :salesperson-candidates="salespersonCandidates"
       :selected-craftsmen="[]"
       :selected-salespeople="salespersonAllocations"
+      :performance-base-amount-cents="Number(repayAmount || 0) * 100"
       :loading="isSalespersonLoading"
       :load-error="salespersonLoadError"
       @close="isSalespersonSelectorOpen = false"
@@ -552,6 +589,11 @@ function confirmSalespeople(result = {}) {
 
 .member-debt-overlay__recharge-payment,
 .member-debt-overlay__recharge-salespeople { display: grid; gap: 10px; padding: 16px 18px; border: 1px solid #dde4ec; border-radius: 6px; background: #fff; }
+.member-debt-overlay__repayment-context { display: grid; grid-template-columns: minmax(180px, .42fr) minmax(0, 1fr); gap: 14px; }
+.member-debt-overlay__business-date { display: grid; align-content: center; gap: 7px; padding: 16px 18px; border: 1px solid #dde4ec; border-radius: 6px; background: #fff; }
+.member-debt-overlay__business-date label { color: #6b7787; font-size: 12px; }
+.member-debt-overlay__business-date input { width: 100%; box-sizing: border-box; min-height: 34px; padding: 6px 8px; border: 1px solid #cfd7e3; border-radius: 5px; color: #303640; font: inherit; font-size: 16px; font-variant-numeric: tabular-nums; }
+.member-debt-overlay__business-date input:disabled { background: #f4f6f8; color: #98a2b3; }
 .member-debt-overlay__recharge-payment header,
 .member-debt-overlay__recharge-salespeople header { display: flex; align-items: center; gap: 10px; color: #6b7787; font-size: 12px; }
 .member-debt-overlay__recharge-payment header strong,
@@ -630,6 +672,10 @@ function confirmSalespeople(result = {}) {
   }
 
   .member-debt-overlay__repayment {
+    grid-template-columns: 1fr;
+  }
+
+  .member-debt-overlay__repayment-context {
     grid-template-columns: 1fr;
   }
 

@@ -188,11 +188,11 @@ const ORDER_TABS = [
     fields: [
       field('supplement_order_no', '补交单号', 'text', { quickFilterHidden: true }),
       field('business_date', '业务日期', 'date', { defaultQuick: true, quickDateRange: true, quickLabelHidden: true }),
-      field('debt_no', '欠款编号'), field('source_order_no', '来源订单号'),
       field('member_name', '会员姓名'), field('phone', '手机号'), field('debt_summary', '欠款摘要'),
       field('salesperson', '销售人', 'person'), field('supplement_amount', '补交金额', 'money'), field('payment_method', '收款方式'),
       field('store', '补交门店', 'store'), field('operator', '操作人', 'person'),
-      field('payment_status', '支付状态', 'status'), field('payment_completed_at', '支付完成时间', 'date')
+      field('payment_status', '支付状态', 'status'), field('payment_completed_at', '支付完成时间', 'date'),
+      field('debt_no', '欠款编号'), field('source_order_no', '来源订单号')
     ]
   },
   {
@@ -929,6 +929,8 @@ async function submitRecordPersonnelAdjustment() {
     staffId: Number(item.staffId || item.id || 0),
     allocationWeight: Number(item.allocationWeight || item.performance || 0),
     isPreSale: Boolean(item.isPreSale || item.marked),
+    performanceAmountCents: Math.max(0, Math.trunc(Number(item.performanceAmountCents || 0))),
+    performanceAmountManual: Boolean(item.performanceAmountManual),
     positionId: Number(item.positionId || item.position_id || 0),
     positionName: item.positionName || item.position_name || item.position || '',
     performanceIndependent: Boolean(item.performanceIndependent || item.performance_independent),
@@ -2181,6 +2183,7 @@ onBeforeUnmount(() => {
       :salesperson-candidates="recordPersonnelCandidates(recordPersonnelEntry)"
       :selected-salespeople="recordPersonnelInitialSelection(recordPersonnelEntry.lines?.[0])"
       :allocation-total-amount-cents="recordPersonnelEntry.totalAmountCents || 0"
+      :performance-base-amount-cents="recordPersonnelEntry.performanceBaseAmountCents || 0"
       :saving="recordPersonnelSubmitting"
       :load-error="recordPersonnelError"
       @close="closeRecordPersonnelEditor"
