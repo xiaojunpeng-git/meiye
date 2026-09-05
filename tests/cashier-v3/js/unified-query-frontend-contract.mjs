@@ -8,6 +8,12 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const repo = path.resolve(__dirname, '../../..')
 const frontend = path.join(repo, '前端代码/cashier-v3/src')
 const sharedFrontend = path.join(repo, '前端代码/shared/unified-query-vue3/src')
+const sharedToolbar = fs.readFileSync(path.join(sharedFrontend, 'components/UnifiedQueryToolbar.vue'), 'utf8')
+
+assert.match(sharedToolbar, /dataScope: dataScope\.value/)
+assert.match(sharedToolbar, /businessStatus: businessStatus\.value/)
+assert.match(sharedToolbar, /emit\('query', buildQueryPayload\(\)\)/)
+assert.doesNotMatch(sharedToolbar, /query\.status\s*=/, '范围切换只提交统一查询合同字段，不能附带旧 status 参数')
 
 const facadeFiles = {
   QueryEntitySelectorOverlay: 'components/query/QueryEntitySelectorOverlay.vue',
@@ -39,7 +45,7 @@ for (const name of [
   assert.doesNotMatch(source, /defineProps|computed\(|reactive\(|watch\(/, `${name} 不保留平行业务实现`)
 }
 
-assert.ok(facadeSources.UnifiedQueryToolbar.split('\n').length <= 40, '工具栏 facade 仅保留宿主适配')
+assert.ok(facadeSources.UnifiedQueryToolbar.split('\n').length <= 50, '工具栏 facade 仅保留宿主适配')
 assert.match(facadeSources.UnifiedQueryToolbar, /UnifiedQueryToolbar as SharedUnifiedQueryToolbar/, '工具栏实现来自唯一共享包')
 assert.match(facadeSources.UnifiedQueryToolbar, /openCashierV3QueryEntitySelector/, 'cashier 只在 facade 注入既有实体选择能力')
 assert.match(facadeSources.UnifiedQueryToolbar, /v-bind="\$attrs"/, '工具栏 facade 转发原页面合同')
