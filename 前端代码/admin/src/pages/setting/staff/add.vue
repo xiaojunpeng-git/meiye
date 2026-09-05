@@ -265,13 +265,13 @@
 
           <TabPane label="登录设置" name="login">
             <Alert show-icon>
-              统一内部账号用于平台后台、门店端和手机端登录，也可以使用员工手机号登录。手机号仅作为登录输入，不作为内部账号保存；内部账号禁止使用纯 11 位手机号格式。
+              登录账号可不填写：留空只创建员工档案，不开通平台后台、门店端或手机端登录权限；后续可在编辑员工时再开通。填写后，统一内部账号可用于平台后台、门店端和手机端登录；手机号仅作为登录输入，不作为内部账号保存。
             </Alert>
             <Row :gutter="24">
               <Col :span="12">
-                <FormItem label="登录账号：">
-                  <Input v-model="formInline.account" placeholder="请输入统一内部账号" autocomplete="off" />
-                  <div class="tips">禁止纯 11 位手机号格式</div>
+                <FormItem label="登录账号（可选）：">
+                  <Input v-model="formInline.account" placeholder="不填写则不创建登录权限" autocomplete="off" />
+                  <div class="tips">如需开通登录，请填写未被使用的账号；禁止纯 11 位手机号格式</div>
                 </FormItem>
               </Col>
               <Col :span="12">
@@ -281,7 +281,8 @@
                     type="password"
                     password
                     autocomplete="new-password"
-                    :placeholder="editId > 0 ? '不修改请留空' : '请输入登录密码'"
+                    :disabled="!String(formInline.account || '').trim()"
+                    :placeholder="String(formInline.account || '').trim() ? (editId > 0 ? '不修改请留空' : '请输入登录密码') : '填写登录账号后可设置密码'"
                   />
                 </FormItem>
               </Col>
@@ -1315,6 +1316,11 @@ export default {
         this.$Message.required('请选择可看组织');
         return;
       }
+      if (!String(this.formInline.account || '').trim() && String(this.formInline.pwd || '').trim()) {
+        this.activeTab = 'login';
+        this.$Message.required('请先填写登录账号，或清空登录密码');
+        return;
+      }
 
       const payload = this.buildSubmitPayload();
       if (this.isDefaultAvatar(payload.avatar) || !payload.avatar) {
@@ -1349,6 +1355,9 @@ export default {
         })
         .catch((err) => {
           const msg = (err && err.msg) || '保存失败';
+          if (/登录账号.*已被其他员工使用/.test(msg)) {
+            this.activeTab = 'login';
+          }
           if (/未填写|未选择|未设置|未上传|请选择|请填写|请输入|必填/.test(msg)) {
             this.$Message.required(msg);
           } else {

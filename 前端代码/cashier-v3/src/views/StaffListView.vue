@@ -317,8 +317,10 @@ function validateEditor() {
   if (editorValues.positionIds.length !== 1) return '请选择一个岗位。'
   if (!['internal', 'partner'].includes(editorValues.employmentTypeCode)) return '请选择人员类型。'
   if (!Number.isInteger(editorValues.employmentTypeVersion) || editorValues.employmentTypeVersion < 0) return '人员类型版本无效，请刷新后重试。'
-  if (!editorStaffId.value && !editorValues.account.trim()) return '请填写登录账号。'
-  if (!editorStaffId.value && !editorValues.password) return '请设置登录密码。'
+  const account = editorValues.account.trim()
+  const password = String(editorValues.password || '')
+  if (!account && password) return '请先填写登录账号，或清空登录密码。'
+  if (!editorStaffId.value && account && !password) return '请设置登录密码。'
   if (editorValues.isCustomer && !editorValues.customerUrl.trim()) return '请上传客服二维码。'
   if (editorValues.age !== '' && (!Number.isInteger(Number(editorValues.age)) || Number(editorValues.age) < 0 || Number(editorValues.age) > 150)) return '年龄必须是 0 到 150 的整数。'
   return ''
@@ -470,8 +472,8 @@ async function onAvatarFileChange(event) {
               <label class="staff-editor__toggle"><input v-model="editorValues.mobileEnabled" type="checkbox"><span>手机端：</span></label>
             </div>
             <div v-show="editorTab === 'login'" class="staff-editor__grid">
-              <label>登录账号<input v-model.trim="editorValues.account" maxlength="35" autocomplete="username" :required="!editorStaffId"></label>
-              <label>登录密码<input v-model="editorValues.password" type="password" autocomplete="new-password" :required="!editorStaffId" :placeholder="editorStaffId ? '不修改请留空' : '请输入登录密码'"></label>
+              <label>登录账号（可选）<input v-model.trim="editorValues.account" maxlength="35" autocomplete="username" placeholder="不填写则不创建登录权限"><small>留空仅创建员工档案；如需登录，请填写未被使用的账号。</small></label>
+              <label>登录密码<input v-model="editorValues.password" type="password" autocomplete="new-password" :disabled="!editorValues.account.trim()" :placeholder="editorValues.account.trim() ? (editorStaffId ? '不修改请留空' : '请输入登录密码') : '填写登录账号后可设置密码'"></label>
             </div>
             <div v-show="editorTab === 'other'" class="staff-editor__grid">
               <label>关联企微<select v-model="editorValues.workMemberId"><option :value="0">请选择</option><option v-for="option in workMemberOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label>

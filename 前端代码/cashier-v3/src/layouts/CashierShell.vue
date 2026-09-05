@@ -184,6 +184,8 @@ watch(
 const sidebarPreferenceKey = 'cashier-v3-sidebar-collapsed'
 const isSidebarCollapsed = ref(readSidebarPreference())
 const isInventoryMenuExpanded = ref(false)
+const managementRouteNames = ['cashier-v3-management-center', 'cashier-v3-staff-list', 'cashier-v3-room-settings']
+const isManagementMenuExpanded = ref(managementRouteNames.includes(route.name))
 // 库存工作区与收银台共用当前 V3 会话；初始化时就读取，避免 HMR/路由重载
 // 期间库存组件先于点击事件挂载而拿到空 token。
 const inventorySessionToken = ref(readStoreV3SessionToken())
@@ -202,6 +204,10 @@ const inventoryFeatureItems = [
   { key: 'presale-claim', label: '客户领用', featureCode: 'cashier.v3.inventory.outbound', to: { name: 'cashier-v3-presale-claim' } }
 ]
 const visibleInventoryFeatureItems = computed(() => inventoryFeatureItems.filter((entry) => canUseFeature(entry.featureCode)))
+const managementFeatureItems = [
+  { key: 'staff', label: '人员管理', to: { name: 'cashier-v3-staff-list' } },
+  { key: 'room-settings', label: '房间设置', to: { name: 'cashier-v3-room-settings' } }
+]
 const isInventoryWorkspaceOpen = ref(false)
 const activeInventoryFeatureKey = ref('overview')
 const menuItems = [
@@ -225,7 +231,7 @@ const menuItems = [
     label: '管理',
     icon: Settings,
     featureCode: 'cashier.v3.management_center',
-    to: { name: 'cashier-v3-management-center' },
+    to: { name: 'cashier-v3-staff-list' },
     activeRouteNames: ['cashier-v3-management-center', 'cashier-v3-staff-list', 'cashier-v3-room-settings']
   },
   {
@@ -338,6 +344,10 @@ function toggleInventoryMenu() {
   isInventoryMenuExpanded.value = !isInventoryMenuExpanded.value
 }
 
+function toggleManagementMenu() {
+  isManagementMenuExpanded.value = !isManagementMenuExpanded.value
+}
+
 function openInventoryWorkspace(entry = visibleInventoryFeatureItems.value[0]) {
   if (!entry || !canUseFeature(entry.featureCode)) return
   activeInventoryFeatureKey.value = entry.key
@@ -353,6 +363,10 @@ function closeInventoryWorkspace() {
 function isInventoryFeatureActive(entry) {
   if (entry?.to?.name) return route.name === entry.to.name
   return activeInventoryFeatureKey.value === entry?.key && isInventoryWorkspaceOpen.value
+}
+
+function isManagementFeatureActive(entry) {
+  return route.name === entry?.to?.name
 }
 
 function isMenuItemActive(item) {
@@ -506,6 +520,9 @@ watch(
   () => route.name,
   (routeName) => {
     isCardOperationMenuOpen.value = false
+    if (managementRouteNames.includes(routeName)) {
+      isManagementMenuExpanded.value = true
+    }
     // 收银台 V3 的充值由 CashierWorkbenchView 统一接管，离开旧页面时
     // 清掉 Shell 兼容充值状态，避免旧弹层在路由切换后重新覆盖新 Checkout。
     if (routeName === 'cashier-v3-cashier') rechargeSession.value = null
@@ -2599,7 +2616,42 @@ onBeforeUnmount(() => {
       <nav id="cashier-primary-nav" class="cashier-nav" aria-label="日常业务">
         <span v-if="!isSidebarCollapsed" class="cashier-nav__section">日常业务</span>
         <template v-for="item in menuItems" :key="item.key">
-          <div v-if="item.key === 'inventory' && canUseFeature(item.featureCode) && item.submenu && visibleInventoryFeatureItems.length" class="cashier-inventory-group">
+          <div v-if="item.key === 'management' && canUseFeature(item.featureCode)" class="cashier-management-group">
+            <div class="cashier-management-entry" :class="{ 'cashier-management-entry--open': isManagementMenuExpanded }">
+              <RouterLink
+                :to="item.to"
+                class="cashier-nav__item cashier-nav__item--management"
+                :class="{ 'cashier-nav__item--active': isMenuItemActive(item) }"
+                :aria-label="item.label"
+                :title="isSidebarCollapsed ? item.label : undefined"
+                @click="closeInventoryWorkspace"
+              >
+                <component :is="item.icon" class="cashier-nav__icon" :size="20" :stroke-width="1.9" aria-hidden="true" />
+                <span v-if="!isSidebarCollapsed" class="cashier-nav__label">{{ item.label }}</span>
+              </RouterLink>
+              <button
+                v-if="!isSidebarCollapsed"
+                type="button"
+                class="cashier-management-toggle"
+                :aria-label="isManagementMenuExpanded ? '收起管理功能' : '展开管理功能'"
+                :aria-expanded="isManagementMenuExpanded"
+                @click="toggleManagementMenu"
+              >
+                <ChevronDown class="cashier-nav__management-chevron" :class="{ 'cashier-nav__management-chevron--open': isManagementMenuExpanded }" :size="16" aria-hidden="true" />
+              </button>
+            </div>
+            <div v-if="isManagementMenuExpanded && !isSidebarCollapsed" class="cashier-management-grid" aria-label="管理功能">
+              <RouterLink
+                v-for="entry in managementFeatureItems"
+                :key="entry.key"
+                class="cashier-management-grid__item"
+                :class="{ 'cashier-management-grid__item--active': isManagementFeatureActive(entry) }"
+                :to="entry.to"
+                @click="closeInventoryWorkspace"
+              >{{ entry.label }}</RouterLink>
+            </div>
+          </div>
+          <div v-else-if="item.key === 'inventory' && canUseFeature(item.featureCode) && item.submenu && visibleInventoryFeatureItems.length" class="cashier-inventory-group">
             <div class="cashier-inventory-entry" :class="{ 'cashier-inventory-entry--open': isInventoryMenuExpanded }">
               <a
                 href="#/cashier"
@@ -3100,6 +3152,87 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.cashier-nav__item--management {
+  width: 100%;
+  background: transparent;
+}
+
+.cashier-management-group {
+  display: grid;
+  gap: 4px;
+}
+
+.cashier-management-entry {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 34px;
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: 10px;
+}
+
+.cashier-management-entry--open {
+  border-color: rgba(185, 212, 255, .26);
+  background: rgba(234, 244, 255, .1);
+}
+
+.cashier-management-entry--open .cashier-nav__item--management {
+  color: #fff;
+}
+
+.cashier-management-toggle {
+  display: inline-grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: rgba(255, 255, 255, .76);
+}
+
+.cashier-management-toggle:hover {
+  background: rgba(234, 244, 255, .12);
+  color: #fff;
+}
+
+.cashier-nav__management-chevron {
+  flex: none;
+  transition: transform .16s ease;
+}
+
+.cashier-nav__management-chevron--open {
+  transform: rotate(180deg);
+}
+
+.cashier-management-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px 8px;
+  padding: 1px 4px 8px;
+}
+
+.cashier-management-grid__item {
+  min-width: 0;
+  padding: 5px 7px;
+  border-radius: 6px;
+  color: rgba(255, 255, 255, .72);
+  font-size: 13px;
+  line-height: 20px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.cashier-management-grid__item:hover {
+  background: rgba(234, 244, 255, .1);
+  color: #fff;
+}
+
+.cashier-management-grid__item--active {
+  background: rgba(143, 199, 255, .2);
+  color: #fff;
+}
+
 .cashier-nav__item--inventory {
   width: 100%;
   background: transparent;
