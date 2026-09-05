@@ -285,7 +285,21 @@ final class CashierV3EntitlementProjectionServices
         // canonical order. Re-locking those rows here after cashier_workspace
         // would invert the global order; this pass is exact post-lock
         // revalidation only.
-        $snapshot = $this->loadRows($memberId, $operatorScope, $operatorScope->tenantId(), false, [$holderId], [$detailId]);
+        // Revalidate the selected row against the complete source-card
+        // snapshot.  Debt is allocated among every project of the source
+        // order, so loading only the clicked detail would make an order-level
+        // debt look as though it belonged wholly to that one project.
+        $snapshot = $this->loadRows(
+            $memberId,
+            $operatorScope,
+            $operatorScope->tenantId(),
+            false,
+            [$holderId],
+            null,
+            false,
+            true,
+            true
+        );
         $sources = $this->buildSources(
             $snapshot,
             [$holderId => $sourceVersion],
@@ -618,6 +632,10 @@ final class CashierV3EntitlementProjectionServices
             $debts[(int)$debt['order_id']] = $debt;
         }
         $writeoff = $this->writeoffServices();
+        $cartsByOrder = [];
+        foreach ($snapshot['carts'] as $cart) {
+            $cartsByOrder[(int)($cart['oid'] ?? 0)][] = $cart;
+        }
         $ruleAuthoritiesByHolder = [];
         foreach ($snapshot['holders'] as $holder) {
             $holderId = (int)($holder['id'] ?? 0);
@@ -641,22 +659,9 @@ final class CashierV3EntitlementProjectionServices
             }
             $ruleAuthority = $ruleAuthoritiesByHolder[(int)$holder['id']][$detailId] ?? null;
             $pendingDebt = $this->pendingDebt($order, $debts[(int)$order['id']] ?? null);
-            $effective = $writeoff->calcEffectiveWriteSurplusTimes($cart, (float)$pendingDebt, $order);
             $rawSurplus = is_array($ruleAuthority)
                 ? max(0, (int)$ruleAuthority['remainingTimes'])
                 : max(0, (int)$cart['write_surplus_times']);
-            if (is_array($ruleAuthority)) {
-                $effective = min($rawSurplus, max(0, (int)$effective));
-            }
-            $reservationOccupied = (int)($occupied[$detailId] ?? 0);
-            $available = max(0, $effective - $reservationOccupied);
-            $validity = is_array($ruleAuthority)
-                ? $this->ruleValidity($ruleAuthority)
-                : $this->effectiveValidity($holder, $cart);
-            $start = (int)$validity['start'];
-            $end = (int)$validity['end'];
-            $invalidValidity = $end > 0 && $start > $end;
-            $expired = $invalidValidity || ($start > 0 && $now < $start) || ($end > 0 && $now > $end);
             $decoded = is_string($cart['cart_info'] ?? null)
                 ? json_decode((string)$cart['cart_info'], true)
                 : ($cart['cart_info'] ?? []);
@@ -679,6 +684,25 @@ final class CashierV3EntitlementProjectionServices
                         ? $this->ruleProjectAmounts($ruleAuthority)
                         : $this->projectAmounts($cart, $rawSurplus));
             }
+            $effective = $writeoff->calcEffectiveWriteSurplusTimes(
+                $cart,
+                (float)$pendingDebt,
+                $order,
+                $amounts['remainingAmount'],
+                $cartsByOrder[(int)$order['id']] ?? []
+            );
+            if (is_array($ruleAuthority)) {
+                $effective = min($rawSurplus, max(0, (int)$effective));
+            }
+            $reservationOccupied = (int)($occupied[$detailId] ?? 0);
+            $available = max(0, $effective - $reservationOccupied);
+            $validity = is_array($ruleAuthority)
+                ? $this->ruleValidity($ruleAuthority)
+                : $this->effectiveValidity($holder, $cart);
+            $start = (int)$validity['start'];
+            $end = (int)$validity['end'];
+            $invalidValidity = $end > 0 && $start > $end;
+            $expired = $invalidValidity || ($start > 0 && $now < $start) || ($end > 0 && $now > $end);
             $invalidAmount = $amounts['purchaseAmount'] === null
                 || $amounts['remainingAmount'] === null
                 || $amounts['totalPurchaseTimes'] <= 0;

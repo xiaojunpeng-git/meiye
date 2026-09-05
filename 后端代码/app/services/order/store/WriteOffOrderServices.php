@@ -1332,29 +1332,124 @@ class WriteOffOrderServices extends BaseServices
     /**
      * 核销时解析购物车行待还欠款（含订单级欠款分摊）
      */
-    protected function resolveCartPendingDebtForWriteoff(array $cartRow, float $orderPendingDebt = 0, array $orderInfo = []): float
+    protected function resolveCartPendingDebtForWriteoff(
+        array $cartRow,
+        float $orderPendingDebt = 0,
+        array $orderInfo = [],
+        array $orderCartRows = []
+    ): float
     {
         $linePending = (float)$this->calcCartPendingDebt($cartRow);
         if ($linePending > 0 || $orderPendingDebt <= 0 || (int)($cartRow['is_gift'] ?? 0) === 1) {
             return $linePending;
         }
-        if ($this->isOrderFullyDebtPending($orderInfo, $orderPendingDebt)) {
-            return (float)($cartRow['pay_price'] ?? 0);
-        }
-        return $this->calcAllocatedCartPendingDebt($cartRow, $orderInfo, $orderPendingDebt);
+        return $this->calcAllocatedCartPendingDebt(
+            $cartRow,
+            $orderInfo,
+            $orderPendingDebt,
+            $orderCartRows
+        );
     }
 
     /**
-     * 按行实付占比分摊订单待还欠款
+     * 按权益项目的实际成交金额分摊订单待还欠款。
+     *
+     * 欠款是来源订单的单笔权威事实，不能因为整单未收款就把每一个项目
+     * 的待还额扩大为整行成交价；多项目订单按稳定的项目行顺序分摊，最后
+     * 一行承接分的余数，保证各项目分摊合计等于订单待还金额。
      */
-    protected function calcAllocatedCartPendingDebt(array $cartRow, array $orderInfo, float $orderPendingDebt): float
+    protected function calcAllocatedCartPendingDebt(
+        array $cartRow,
+        array $orderInfo,
+        float $orderPendingDebt,
+        array $orderCartRows = []
+    ): float
     {
-        $orderPay = (string)($orderInfo['pay_price'] ?? 0);
-        $linePay = (string)($cartRow['pay_price'] ?? 0);
-        if (bccomp($orderPay, '0', 2) <= 0 || bccomp($linePay, '0', 2) <= 0) {
+        $rows = $this->debtAllocationRows($cartRow, $orderInfo, $orderCartRows);
+        $explicitDebt = '0.00';
+        $candidates = [];
+        foreach ($rows as $row) {
+            if ((int)($row['is_gift'] ?? 0) === 1) {
+                continue;
+            }
+            $lineDebt = $this->calcCartPendingDebt($row);
+            if (bccomp($lineDebt, '0', 2) > 0) {
+                $explicitDebt = bcadd($explicitDebt, $lineDebt, 2);
+                continue;
+            }
+            $amount = $this->debtAllocationAmount($row);
+            if (bccomp($amount, '0', 2) > 0) {
+                $candidates[] = ['row' => $row, 'amount' => $amount];
+            }
+        }
+        $remainingDebt = bcsub((string)$orderPendingDebt, $explicitDebt, 2);
+        if (bccomp($remainingDebt, '0', 2) <= 0 || !$candidates) {
             return 0.0;
         }
-        return (float)bcmul((string)$orderPendingDebt, bcdiv($linePay, $orderPay, 4), 2);
+        usort($candidates, static function (array $left, array $right): int {
+            return ((int)($left['row']['id'] ?? 0)) <=> ((int)($right['row']['id'] ?? 0));
+        });
+        $total = '0.00';
+        foreach ($candidates as $candidate) {
+            $total = bcadd($total, $candidate['amount'], 2);
+        }
+        if (bccomp($total, '0', 2) <= 0) {
+            return 0.0;
+        }
+        $targetId = (int)($cartRow['id'] ?? 0);
+        $allocated = '0.00';
+        $lastIndex = count($candidates) - 1;
+        foreach ($candidates as $index => $candidate) {
+            $share = $index === $lastIndex
+                ? bcsub($remainingDebt, $allocated, 2)
+                : bcmul($remainingDebt, bcdiv($candidate['amount'], $total, 8), 2);
+            $allocated = bcadd($allocated, $share, 2);
+            if ((int)($candidate['row']['id'] ?? 0) === $targetId) {
+                return (float)$share;
+            }
+        }
+        return 0.0;
+    }
+
+    /** @return array<int,array> */
+    private function debtAllocationRows(array $cartRow, array $orderInfo, array $orderCartRows): array
+    {
+        if ($orderCartRows) {
+            return $orderCartRows;
+        }
+        $orderId = (int)($orderInfo['id'] ?? 0);
+        if ($orderId <= 0) {
+            return [$cartRow];
+        }
+        $rows = Db::name('store_order_cart_info')
+            ->field('id,oid,cart_info,cart_type,product_type,write_times,write_surplus_times,pay_price,debt_amount,repaid_debt_amount,is_gift')
+            ->where('oid', $orderId)
+            ->where('cart_type', 2)
+            ->where('product_type', 6)
+            ->order('id asc')
+            ->select()
+            ->toArray();
+        return $rows ?: [$cartRow];
+    }
+
+    private function debtAllocationAmount(array $cartRow): string
+    {
+        $snapshot = is_string($cartRow['cart_info'] ?? null)
+            ? json_decode((string)$cartRow['cart_info'], true)
+            : ($cartRow['cart_info'] ?? []);
+        $snapshot = is_array($snapshot) ? $snapshot : [];
+        $source = is_array($snapshot['rh_source'] ?? null) ? $snapshot['rh_source'] : [];
+        $amount = array_key_exists('source_line_paid_amount', $source)
+            ? $source['source_line_paid_amount']
+            : ($cartRow['pay_price'] ?? 0);
+        if (is_bool($amount) || is_array($amount) || is_object($amount)) {
+            return '0.00';
+        }
+        $money = trim((string)$amount);
+        return preg_match('/^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,2})?$/D', $money) === 1
+            && bccomp($money, '0', 2) > 0
+            ? bcadd($money, '0', 2)
+            : '0.00';
     }
 
     /**
@@ -1368,33 +1463,68 @@ class WriteOffOrderServices extends BaseServices
         if (bccomp($pending, '0', 2) <= 0) {
             return 0;
         }
-        $writeTimes = (int)($cartRow['write_times'] ?? 0);
-        if ($writeTimes <= 0) {
-            return 0;
-        }
-        $payPrice = (string)($cartRow['pay_price'] ?? 0);
-        if (bccomp($payPrice, '0', 2) <= 0) {
-            return $writeTimes;
-        }
-        if (bccomp($pending, $payPrice, 2) >= 0) {
-            return $writeTimes;
-        }
-        $unitPrice = bcdiv($payPrice, (string)$writeTimes, 4);
-        if (bccomp($unitPrice, '0', 4) <= 0) {
-            return $writeTimes;
-        }
-        return (int)ceil((float)bcdiv($pending, $unitPrice, 4));
+        $surplus = max(0, (int)($cartRow['write_surplus_times'] ?? 0));
+        return max(0, $surplus - $this->calcDebtLimitedTimesByRemainingAmount($cartRow, $pending));
     }
 
     /**
      * 扣除欠款占用后的可核销次数
      */
-    public function calcEffectiveWriteSurplusTimes(array $cartRow, float $orderPendingDebt = 0, array $orderInfo = []): int
+    public function calcEffectiveWriteSurplusTimes(
+        array $cartRow,
+        float $orderPendingDebt = 0,
+        array $orderInfo = [],
+        ?string $remainingAmount = null,
+        array $orderCartRows = []
+    ): int
     {
-        $surplus = (int)($cartRow['write_surplus_times'] ?? 0);
-        $pending = $this->resolveCartPendingDebtForWriteoff($cartRow, $orderPendingDebt, $orderInfo);
-        $blocked = $this->calcDebtBlockedWriteTimes($cartRow, $pending);
-        return max(0, $surplus - $blocked);
+        $pending = $this->resolveCartPendingDebtForWriteoff(
+            $cartRow,
+            $orderPendingDebt,
+            $orderInfo,
+            $orderCartRows
+        );
+        return $this->calcDebtLimitedTimesByRemainingAmount($cartRow, $pending, $remainingAmount);
+    }
+
+    /**
+     * 以项目实际剩余金额减去该项目分摊欠款折算可服务次数。
+     * 欠款不占用整卡，也不使用整单成交金额作为项目剩余金额。
+     */
+    private function calcDebtLimitedTimesByRemainingAmount(
+        array $cartRow,
+        $pendingDebt,
+        ?string $remainingAmount = null
+    ): int {
+        $surplus = max(0, (int)($cartRow['write_surplus_times'] ?? 0));
+        if ($surplus <= 0) {
+            return 0;
+        }
+        $pending = bcadd((string)$pendingDebt, '0', 2);
+        if (bccomp($pending, '0', 2) <= 0) {
+            return $surplus;
+        }
+        if ($remainingAmount === null) {
+            $amount = $this->debtAllocationAmount($cartRow);
+            $totalTimes = (int)($cartRow['write_times'] ?? 0);
+            if ($totalTimes <= 0 || bccomp($amount, '0', 2) <= 0) {
+                return 0;
+            }
+            $remainingAmount = bcmul($amount, bcdiv((string)$surplus, (string)$totalTimes, 8), 2);
+        }
+        if (preg_match('/^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,2})?$/D', $remainingAmount) !== 1
+            || bccomp($remainingAmount, '0', 2) <= 0) {
+            return 0;
+        }
+        $availableAmount = bcsub($remainingAmount, $pending, 2);
+        if (bccomp($availableAmount, '0', 2) <= 0) {
+            return 0;
+        }
+        $unitAmount = bcdiv($remainingAmount, (string)$surplus, 8);
+        if (bccomp($unitAmount, '0', 8) <= 0) {
+            return 0;
+        }
+        return min($surplus, max(0, (int)floor((float)bcdiv($availableAmount, $unitAmount, 8))));
     }
 
     /**
@@ -1402,10 +1532,10 @@ class WriteOffOrderServices extends BaseServices
      */
     public function enrichCartDebtWriteoff(array &$item, float $orderPendingDebt = 0.0, array $orderInfo = []): void
     {
-        $pending = $this->resolveCartPendingDebtForWriteoff($item, $orderPendingDebt, $orderInfo);
-        $blocked = $this->calcDebtBlockedWriteTimes($item, $pending);
         $surplus = (int)($item['write_surplus_times'] ?? 0);
-        $effective = max(0, $surplus - $blocked);
+        $effective = $this->calcEffectiveWriteSurplusTimes($item, $orderPendingDebt, $orderInfo);
+        $blocked = max(0, $surplus - $effective);
+        $pending = $this->resolveCartPendingDebtForWriteoff($item, $orderPendingDebt, $orderInfo);
         $item['pending_debt'] = $pending;
         $item['debt_blocked_times'] = $blocked;
         $item['effective_write_surplus_times'] = $effective;

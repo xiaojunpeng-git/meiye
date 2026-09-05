@@ -354,6 +354,34 @@ ok(
     'C2-A1-BE-05'
 );
 
+c2Section('debt-limited entitlement availability uses the project remainder');
+$debtAvailability = app()->make(\app\services\order\store\WriteOffOrderServices::class);
+$debtLimitedCart = [
+    'id' => 9911,
+    'cart_type' => 2,
+    'product_type' => 6,
+    'is_gift' => 0,
+    'write_times' => 40,
+    'write_surplus_times' => 27,
+    'pay_price' => '3000.00',
+    'debt_amount' => '0.00',
+    'repaid_debt_amount' => '0.00',
+    'cart_info' => '{}',
+];
+$debtLimitedTimes = $debtAvailability->calcEffectiveWriteSurplusTimes(
+    $debtLimitedCart,
+    1500.00,
+    ['id' => 991, 'pay_price' => '0.00', 'debt_amount' => '1500.00'],
+    '2025.00',
+    [$debtLimitedCart]
+);
+ok(
+    '整单欠款按项目实际剩余金额折算可用次数，不整卡禁用',
+    $debtLimitedTimes === 7,
+    'available=' . $debtLimitedTimes,
+    'C2-A1-BE-04'
+);
+
 // An old import can leave a non-deleted holder pointing at a removed order.
 // It must not make the whole selector fail when other valid sources exist.
 Db::name('user_card_holder')->insert([

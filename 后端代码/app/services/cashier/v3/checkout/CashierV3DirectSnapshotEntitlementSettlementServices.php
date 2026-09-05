@@ -1060,6 +1060,7 @@ final class CashierV3DirectSnapshotEntitlementSettlementServices
         CashierV3DataScopeContext $dataScope
     ): array {
         $result = [];
+        $orderCartRowsByOrder = [];
         foreach ($lines as $line) {
             $lineId = (string)$line['line_id'];
             $holderId = (int)$line['source_id'];
@@ -1131,11 +1132,34 @@ final class CashierV3DirectSnapshotEntitlementSettlementServices
             if ($amount === null || $totalTimes <= 0 || $remaining > $totalTimes) {
                 throw self::failure('authority_entitlement_amount_invalid', ['lineId' => $lineId]);
             }
+            // Final checkout uses the single locked entitlement snapshot.  The
+            // source-order debt is distributed across all of its project rows
+            // before it is compared with this project's actual remainder.
+            $originOrderId = (int)$order['id'];
+            if (!isset($orderCartRowsByOrder[$originOrderId])) {
+                $orderCartRowsByOrder[$originOrderId] = $this->rows(Db::name('store_order_cart_info')
+                    ->field('id,oid,cart_info,cart_type,product_type,write_times,write_surplus_times,pay_price,debt_amount,repaid_debt_amount,is_gift')
+                    ->where('oid', $originOrderId)
+                    ->where('cart_type', 2)
+                    ->where('product_type', 6)
+                    ->order('id asc')
+                    ->lock(true)
+                    ->select());
+            }
+            $orderCartRows = $orderCartRowsByOrder[$originOrderId];
+            $remainingAmount = CashierV3EntitlementActualAmountAllocator::remainingForSnapshot(
+                $amount,
+                $totalTimes,
+                $totalTimes - $remaining,
+                $decoded
+            );
             $pendingDebt = $this->pendingDebt($order);
             $debtLimited = $this->writeoffServices()->calcEffectiveWriteSurplusTimes(
                 $detail,
                 (float)$pendingDebt,
-                $order
+                $order,
+                $remainingAmount,
+                $orderCartRows
             );
             $projectUnique = self::token(
                 $detail['cart_id'] ?? null,
