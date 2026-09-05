@@ -4805,12 +4805,20 @@ function buildCheckoutSnapshot(preview = {}) {
   // rows that already live in this one browser snapshot; no payment summary
   // or selected-lines side channel may influence final submission.
   const hasSaleLines = lines.some((line) => cartLineRole(line) === 'sale')
+  const zeroReceivableSale = hasSaleLines
+    && moneyToCents(checkoutSnapshotReceivableAmount(lines)) === 0
   const paymentLines = hasSaleLines
     ? checkoutSnapshotPaymentLines(snapshotLines)
-      // A newly added payment method is an editable zero-value placeholder.
-      // It is UI state, not a collection line, so never put it into the final
-      // snapshot where the server correctly rejects non-positive payments.
-      .filter((line) => Number(line?.amount || 0) > 0)
+      // For a normal receivable, a newly added zero-value method is only an
+      // editable placeholder.  For an exactly-zero sale, however, the method
+      // selected by the cashier is required bookkeeping evidence: retain it
+      // in the final snapshot so the server can validate the route without
+      // creating a zero-value collection or payment fact.
+      .filter((line) => Number(line?.amount || 0) > 0 || (
+        zeroReceivableSale
+        && checkoutLineRole(line) === 'payment'
+        && String(line?.method || '').trim() !== ''
+      ))
       .map((line) => ({
         ...clonePlain(line),
         lineRole: checkoutLineRole(line),

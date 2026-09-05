@@ -305,12 +305,14 @@ final class CashierV3CheckoutFactPlanV1
                 ),
                 'is_presale' => self::nonNegativeInt($fact['isPresale'] ?? 0, 'sale_is_presale_invalid'),
                 'inventory_outbound_required' => self::nonNegativeInt($fact['inventoryOutboundRequired'] ?? 1, 'sale_inventory_outbound_required_invalid'),
-                'original_amount_cents' => self::signedMoney($fact['originalAmountCents'], $direction, 'sale_original_amount_invalid'),
+                // A zero-priced sale is still a completed sale fact.  It carries no
+                // payment fact, but must remain traceable (and reversible) as a sale.
+                'original_amount_cents' => self::signedMoney($fact['originalAmountCents'], $direction, 'sale_original_amount_invalid', true),
                 'discount_amount_cents' => self::signedMoney($fact['discountAmountCents'], $direction, 'sale_discount_amount_invalid', true),
                 'coupon_user_id' => self::nonNegativeInt($fact['couponUserId'], 'sale_coupon_user_invalid'),
                 'coupon_name_snapshot' => self::text($fact['couponNameSnapshot'], 128, 'sale_coupon_name_invalid'),
                 'coupon_discount_cents' => self::signedMoney($fact['couponDiscountCents'], $direction, 'sale_coupon_discount_invalid', true),
-                'sale_amount_cents' => self::signedMoney($fact['saleAmountCents'], $direction, 'sale_amount_invalid'),
+                'sale_amount_cents' => self::signedMoney($fact['saleAmountCents'], $direction, 'sale_amount_invalid', true),
                 'debt_amount_cents' => self::signedMoney($fact['debtAmountCents'], $direction, 'sale_debt_amount_invalid', true),
             ];
             if ($row['friend_counts_as_customer'] > 1 || $row['is_presale'] > 1 || $row['inventory_outbound_required'] > 1 || ($row['is_presale'] === 1 && $row['inventory_outbound_required'] === 1)
